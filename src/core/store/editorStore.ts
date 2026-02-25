@@ -25,6 +25,11 @@ export interface Tab {
 }
 
 interface EditorState {
+  // Active project directory (empty = no project open)
+  activeProjectDir: string;
+  activeProjectName: string;
+  setActiveProject: (dir: string, name: string) => void;
+
   // Selected entity in hierarchy
   selectedEntityId: string | null;
   setSelectedEntityId: (id: string | null) => void;
@@ -50,6 +55,10 @@ interface EditorState {
 let _entryCounter = 0;
 
 export const useEditorStore = create<EditorState>((set) => ({
+  activeProjectDir: "",
+  activeProjectName: "",
+  setActiveProject: (dir, name) => set({ activeProjectDir: dir, activeProjectName: name }),
+
   selectedEntityId: null,
   setSelectedEntityId: (id) => set({ selectedEntityId: id }),
 
@@ -60,7 +69,7 @@ export const useEditorStore = create<EditorState>((set) => ({
     {
       id: 0,
       level: "info",
-      message: "RetroDev Studio iniciado. Fase 1 — Sprint 1.1 UI Base.",
+      message: "RetroDev Studio iniciado. Roadmap MVP completo. Use Arquivo → Abrir/Novo Projeto.",
       timestamp: new Date().toLocaleTimeString(),
     },
   ],

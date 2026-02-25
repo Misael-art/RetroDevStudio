@@ -18,6 +18,7 @@ use emulator::libretro_ffi::{EmulatorCore, JoypadState};
 use hardware::md_profile;
 use hardware::snes_profile;
 use tauri::{AppHandle, Emitter, State};
+use tauri_plugin_dialog::DialogExt;
 
 // HwStatus canônico definido em hardware::mod
 use hardware::HwStatus;
@@ -268,12 +269,83 @@ fn assets_extract(rom_path: String, output_dir: String, max_tiles: u32, palette_
     extract_assets(Path::new(&rom_path), Path::new(&output_dir), max_tiles, palette_slot)
 }
 
+// ── Projeto: diálogos de FS ───────────────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+pub struct OpenProjectResult {
+    pub selected: bool,
+    pub path: String,
+    pub name: String,
+}
+
+/// Abre o diálogo nativo "Selecionar pasta do projeto" e retorna o caminho.
+#[tauri::command]
+fn open_project_dialog(app: AppHandle) -> OpenProjectResult {
+    let result = app.dialog().file().blocking_pick_folder();
+    match result {
+        Some(path) => {
+            let path_str = path.to_string();
+            let name = std::path::Path::new(&path_str)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "Projeto".to_string());
+            // Tenta carregar project.rds para obter nome real do projeto
+            let project_name = {
+                let dir = PathBuf::from(&path_str);
+                load_project(&dir).map(|p| p.name).unwrap_or(name)
+            };
+            OpenProjectResult { selected: true, path: path_str, name: project_name }
+        }
+        None => OpenProjectResult { selected: false, path: String::new(), name: String::new() },
+    }
+}
+
+/// Cria um projeto novo minimal em uma pasta selecionada.
+#[tauri::command]
+fn new_project_dialog(app: AppHandle, project_name: String) -> OpenProjectResult {
+    let result = app.dialog().file().blocking_pick_folder();
+    match result {
+        Some(base) => {
+            let base_str = base.to_string();
+            let safe_name: String = project_name.chars()
+                .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+                .collect();
+            let proj_dir = PathBuf::from(&base_str).join(&safe_name);
+            let _ = std::fs::create_dir_all(&proj_dir);
+
+            // Escreve project.rds mínimo
+            let rds = serde_json::json!({
+                "name": project_name,
+                "version": "1.0.0",
+                "target": "megadrive",
+                "fps": 60,
+                "entry_scene": "scenes/main.json"
+            });
+            let scenes_dir = proj_dir.join("scenes");
+            let _ = std::fs::create_dir_all(&scenes_dir);
+            let _ = std::fs::write(proj_dir.join("project.rds"), rds.to_string());
+
+            // Escreve cena vazia
+            let scene = serde_json::json!({
+                "name": "main",
+                "entities": []
+            });
+            let _ = std::fs::write(scenes_dir.join("main.json"), scene.to_string());
+
+            let path_str = proj_dir.to_string_lossy().to_string();
+            OpenProjectResult { selected: true, path: path_str, name: project_name }
+        }
+        None => OpenProjectResult { selected: false, path: String::new(), name: String::new() },
+    }
+}
+
 // ── App Builder ───────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(EmulatorCoreState(Mutex::new(EmulatorCore::new(None))))
         .invoke_handler(tauri::generate_handler![
             // Build pipeline
@@ -287,6 +359,9 @@ pub fn run() {
             emulator_run_frame,
             emulator_send_input,
             emulator_stop,
+            // Projeto
+            open_project_dialog,
+            new_project_dialog,
             // Fase 4: Tools
             patch_create_ips,
             patch_apply_ips,

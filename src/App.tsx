@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import HierarchyPanel  from "./components/hierarchy/HierarchyPanel";
 import InspectorPanel  from "./components/inspector/InspectorPanel";
 import ViewportPanel   from "./components/viewport/ViewportPanel";
@@ -7,17 +7,58 @@ import ToolsPanel      from "./components/tools/ToolsPanel";
 import { useEditorStore } from "./core/store/editorStore";
 import { buildProject } from "./core/ipc/buildService";
 import { getHwStatus } from "./core/ipc/hwService";
-
-// Placeholder: caminho do projeto ativo (Sprint 1.2+ usará diálogo de abertura)
-const DEV_PROJECT_DIR = "";
+import { openProjectDialog, newProjectDialog } from "./core/ipc/projectService";
 
 export default function App() {
-  const { logMessage, setHwStatus } = useEditorStore();
-  const [building,   setBuilding]   = useState(false);
-  const [toolsOpen,  setToolsOpen]  = useState(false);
+  const { logMessage, setHwStatus, activeProjectDir, activeProjectName, setActiveProject } = useEditorStore();
+  const [building,       setBuilding]       = useState(false);
+  const [toolsOpen,      setToolsOpen]      = useState(false);
+  const [menuOpen,       setMenuOpen]       = useState<string | null>(null);
+  const [newProjName,    setNewProjName]    = useState("");
+  const [showNewDialog,  setShowNewDialog]  = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Fecha menu ao clicar fora
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(null);
+      }
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  async function handleOpenProject() {
+    setMenuOpen(null);
+    const result = await openProjectDialog();
+    if (result.selected) {
+      setActiveProject(result.path, result.name);
+      logMessage("success", `Projeto aberto: ${result.name} (${result.path})`);
+      // Atualiza HW status com o projeto carregado
+      const hw = await getHwStatus(result.path);
+      setHwStatus(hw);
+    }
+  }
+
+  async function handleNewProject() {
+    setMenuOpen(null);
+    setNewProjName("MeuProjeto");
+    setShowNewDialog(true);
+  }
+
+  async function confirmNewProject() {
+    setShowNewDialog(false);
+    if (!newProjName.trim()) return;
+    const result = await newProjectDialog(newProjName.trim());
+    if (result.selected) {
+      setActiveProject(result.path, result.name);
+      logMessage("success", `Novo projeto criado: ${result.name} em ${result.path}`);
+    }
+  }
 
   async function handleBuildAndRun() {
-    if (!DEV_PROJECT_DIR) {
+    if (!activeProjectDir) {
       logMessage("warn", "Nenhum projeto aberto. Use Arquivo > Abrir Projeto.");
       return;
     }
@@ -26,8 +67,7 @@ export default function App() {
     logMessage("info", "Iniciando build...");
 
     try {
-      // Atualiza painel Hardware Limits antes de compilar
-      const hwStatus = await getHwStatus(DEV_PROJECT_DIR);
+      const hwStatus = await getHwStatus(activeProjectDir);
       setHwStatus(hwStatus);
       if (hwStatus.errors.length > 0) {
         hwStatus.errors.forEach((e) => logMessage("error", `[HW] ${e}`));
@@ -36,7 +76,7 @@ export default function App() {
       }
       hwStatus.warnings.forEach((w) => logMessage("warn", `[HW] ${w}`));
 
-      const result = await buildProject(DEV_PROJECT_DIR, (line) => {
+      const result = await buildProject(activeProjectDir, (line) => {
         logMessage(line.level, line.message);
       });
 
@@ -55,11 +95,75 @@ export default function App() {
   return (
     <div className="flex flex-col w-screen h-screen bg-[#11111b] text-[#cdd6f4] overflow-hidden">
 
+      {/* ── Modal: Novo Projeto ── */}
+      {showNewDialog && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-[#181825] border border-[#313244] rounded-lg p-5 w-72 flex flex-col gap-3 shadow-2xl">
+            <h2 className="text-sm font-bold text-[#cba6f7]">Novo Projeto</h2>
+            <div className="flex flex-col gap-1">
+              <label className="text-[10px] text-[#7f849c]">Nome do projeto</label>
+              <input
+                autoFocus
+                type="text"
+                value={newProjName}
+                onChange={(e) => setNewProjName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && confirmNewProject()}
+                className="bg-[#1e1e2e] border border-[#313244] rounded px-2 py-1.5 text-sm text-[#cdd6f4] focus:outline-none focus:border-[#cba6f7]"
+              />
+            </div>
+            <p className="text-[10px] text-[#45475a]">
+              Você selecionará a pasta pai. A subpasta <code className="text-[#cba6f7]">{newProjName || "..."}</code> será criada automaticamente.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setShowNewDialog(false)}
+                className="px-3 py-1 text-xs rounded bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]">
+                Cancelar
+              </button>
+              <button onClick={confirmNewProject}
+                className="px-3 py-1 text-xs rounded bg-[#cba6f7] text-[#1e1e2e] font-semibold hover:bg-[#b4a0e0]">
+                Criar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Top Menu Bar ── */}
       <header className="flex items-center gap-4 px-4 h-9 bg-[#181825] border-b border-[#313244] shrink-0 select-none">
         <span className="text-sm font-bold text-[#cba6f7]">RetroDev Studio</span>
-        <nav className="flex items-center gap-1 text-xs text-[#a6adc8]">
-          {["Arquivo", "Editar", "Projeto", "Build", "Emulador", "Ajuda"].map((item) => (
+
+        {/* Menu com dropdown para Arquivo */}
+        <nav className="flex items-center gap-1 text-xs text-[#a6adc8]" ref={menuRef}>
+          {/* Arquivo — dropdown funcional */}
+          <div className="relative">
+            <button
+              onClick={() => setMenuOpen(menuOpen === "Arquivo" ? null : "Arquivo")}
+              className={`px-2 py-1 rounded transition-colors ${menuOpen === "Arquivo" ? "bg-[#313244] text-[#cdd6f4]" : "hover:bg-[#313244] hover:text-[#cdd6f4]"}`}
+            >
+              Arquivo
+            </button>
+            {menuOpen === "Arquivo" && (
+              <div className="absolute left-0 top-full mt-0.5 w-48 bg-[#1e1e2e] border border-[#313244] rounded shadow-xl z-40 py-1">
+                <button onClick={handleNewProject}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2">
+                  <span className="text-[#a6e3a1]">+</span> Novo Projeto...
+                </button>
+                <button onClick={handleOpenProject}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2">
+                  <span className="text-[#89b4fa]">◉</span> Abrir Projeto...
+                </button>
+                <div className="border-t border-[#313244] my-1" />
+                <div className="px-3 py-1 text-[10px] text-[#45475a] truncate max-w-full">
+                  {activeProjectName
+                    ? <>Aberto: <span className="text-[#cba6f7]">{activeProjectName}</span></>
+                    : "Nenhum projeto aberto"}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Menus estáticos por enquanto */}
+          {["Editar", "Projeto", "Build", "Emulador", "Ajuda"].map((item) => (
             <button
               key={item}
               className="px-2 py-1 hover:bg-[#313244] hover:text-[#cdd6f4] rounded transition-colors"
@@ -70,6 +174,12 @@ export default function App() {
         </nav>
 
         <div className="ml-auto flex items-center gap-2">
+          {/* Indicador do projeto ativo */}
+          {activeProjectName && (
+            <span className="text-[10px] text-[#45475a] max-w-32 truncate" title={activeProjectDir}>
+              📁 {activeProjectName}
+            </span>
+          )}
           <span className="text-[10px] text-[#45475a]">Fase 4 — Camada Pro</span>
           <button
             onClick={() => setToolsOpen((o) => !o)}
@@ -80,14 +190,20 @@ export default function App() {
           </button>
           <button
             onClick={handleBuildAndRun}
-            disabled={building}
+            disabled={building || !activeProjectDir}
             className={[
               "px-3 py-1 text-xs font-semibold rounded transition-colors",
               building
                 ? "bg-[#45475a] text-[#6c7086] cursor-not-allowed"
-                : "bg-[#a6e3a1] text-[#1e1e2e] hover:bg-[#94e2a0] cursor-pointer",
+                : !activeProjectDir
+                  ? "bg-[#313244] text-[#45475a] cursor-not-allowed"
+                  : "bg-[#a6e3a1] text-[#1e1e2e] hover:bg-[#94e2a0] cursor-pointer",
             ].join(" ")}
-            title={building ? "Build em andamento..." : "Build & Run (requer SGDK em toolchains/sgdk/)"}
+            title={
+              building ? "Build em andamento..." :
+              !activeProjectDir ? "Abra um projeto primeiro (Arquivo > Abrir Projeto)" :
+              "Build & Run (requer SGDK em toolchains/sgdk/)"
+            }
           >
             {building ? "⏳ Building..." : "▶ Build & Run"}
           </button>
