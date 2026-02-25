@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Ultima Atualizacao:** 2026-02-25
-**Ultima sessao:** 2026-02-25 (Claude Code — Fase 4 concluida: Camada Pro completa)
-**Fase Atual:** Fase 4 CONCLUIDA — Todas as fases do Roadmap MVP concluidas.
+**Ultima sessao:** 2026-02-25 (Claude Code — Sessao 10: Sprints P1/P2/P3 concluidas)
+**Fase Atual:** Pos-MVP — Polish/QA (P1-P3 concluidas).
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
 > Este e o seu bloco de memoria primario. Voce **DEVE** ler este arquivo integralmente antes de iniciar qualquer nova tarefa.
@@ -11,6 +11,34 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-02-25 — sessao 10):**
+  - **SPRINT P1 CONCLUIDA. File System Integration (diálogos nativos de projeto).**
+  - Commit inicial no GitHub: `https://github.com/Misael-art/RetroDevStudio.git` (146 arquivos, Fases 0-4 completas).
+  - `tauri-plugin-dialog = "2"` adicionado ao Cargo.toml; permissão `"dialog:default"` em capabilities/default.json.
+  - `lib.rs`: `open_project_dialog` (seleciona pasta, lê project.rds para nome real) e `new_project_dialog(name)` (cria project.rds + scenes/main.json mínimos na pasta escolhida). Plugin registrado em `run()`.
+  - `src/core/ipc/projectService.ts`: wrappers IPC tipados `openProjectDialog()` e `newProjectDialog(name)`.
+  - `editorStore.ts`: `activeProjectDir`, `activeProjectName`, `setActiveProject()` adicionados ao estado global.
+  - `src/App.tsx`: menu "Arquivo" com dropdown funcional (Novo Projeto + Abrir Projeto), modal para digitar nome do projeto, indicador do projeto ativo no header, botão ▶ Build & Run desabilitado visualmente quando sem projeto, `handleBuildAndRun` usa `activeProjectDir` do store.
+  - Git: repo standalone inicializado em `F:\Projects\RetroDevStudio`, push `main` OK.
+  - **Validacoes passadas:** `cargo clippy -- -D warnings` OK (10.08s), `npm run build` OK (51 modulos, 2.17s).
+
+* **O que estamos fazendo AGORA:** Sprint P1 completa. Ciclo de polish/QA em andamento.
+
+* **O que acabou de acontecer (2026-02-25 — continuação sessao 10):**
+  - **SPRINTS P2 + P3 + P3b CONCLUIDAS.**
+  - Rust: `get_scene_data(project_dir)` — lê entry_scene do projeto e retorna JSON + metadata. `save_scene_data(project_dir, scene_json)` — valida JSON e persiste.
+  - `src/core/ipc/sceneService.ts`: tipos UGDM (Entity, Scene, Transform, SpriteComponent, CollisionComponent) + wrappers `getSceneData`, `saveSceneData`, `parseScene`.
+  - `editorStore.ts`: `activeScene`, `setActiveScene`, `updateEntity(entityId, patch)` — patch imutável com spread.
+  - `HierarchyPanel.tsx`: carrega cena real via `useEffect` ao trocar `activeProjectDir`, lista BackgroundLayers + Entities, estado vazio guiado ("Abra um projeto...").
+  - `InspectorPanel.tsx`: `PropRow` click-to-edit (int/string/bool), `entityProps()` extrai Transform + Sprite + Collision, botão "Salvar Cena" (IPC save), read-only para layers.
+  - `ToolsPanel.tsx`: `PathField` (campo + botão "…" seletor nativo), todos os 5 campos de caminho migrados. `@tauri-apps/plugin-dialog` instalado no npm.
+  - **Validacoes passadas:** `cargo clippy -- -D warnings` OK (0.69s), `npm run build` OK (53 modulos, 1.77s).
+
+* **Proximo passo imediato:**
+  1. **Sprint P4 — Viewport Scene View**: renderizar entidades reais no canvas central (retângulos coloridos com posição/tamanho UGDM, seleção clicável no canvas que sincroniza com Hierarchy/Inspector).
+  2. **Sprint P5 — Adicionar/Remover entidade**: botão "+" na Hierarchy cria nova entidade com dialog de nome/tipo, botão Delete remove a selecionada, ambos persistem via save_scene_data.
+  3. **Sprint P6 — Ícones reais**: substituir placeholders PNG em `src-tauri/icons/` por ícone real do RetroDev Studio.
 
 * **O que acabou de acontecer (2026-02-25 — sessao 9):**
   - **FASE 4 CONCLUIDA. ROADMAP MVP INTEIRAMENTE CONCLUIDO.**
