@@ -6,6 +6,48 @@ import {
   profilerAnalyzeRom, assetsExtract,
   ProfileReport, ProfileIssue,
 } from "../../core/ipc/toolsService";
+import { open } from "@tauri-apps/plugin-dialog";
+
+// ── Browse helper ─────────────────────────────────────────────────────────────
+
+async function browseFile(setter: (v: string) => void, opts?: { directory?: boolean; filters?: { name: string; extensions: string[] }[] }) {
+  const result = await open({ multiple: false, directory: opts?.directory ?? false, filters: opts?.filters });
+  if (typeof result === "string") setter(result);
+}
+
+interface PathFieldProps {
+  label: string;
+  value: string;
+  set: (v: string) => void;
+  placeholder?: string;
+  directory?: boolean;
+  extensions?: string[];
+  accentColor?: string;
+}
+
+function PathField({ label, value, set, placeholder = "/caminho/para/arquivo", directory = false, extensions, accentColor = "cba6f7" }: PathFieldProps) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-[10px] text-[#7f849c]">{label}</label>
+      <div className="flex gap-1">
+        <input
+          type="text"
+          value={value}
+          placeholder={placeholder}
+          className={`flex-1 bg-[#1e1e2e] border border-[#313244] rounded px-2 py-1 text-xs text-[#cdd6f4] font-mono focus:outline-none focus:border-[#${accentColor}]`}
+          onChange={(e) => set(e.target.value)}
+        />
+        <button
+          onClick={() => browseFile(set, { directory, filters: extensions ? [{ name: "File", extensions }] : undefined })}
+          className={`shrink-0 px-2 py-1 text-xs rounded bg-[#313244] text-[#a6adc8] hover:bg-[#45475a] transition-colors`}
+          title={directory ? "Selecionar pasta" : "Selecionar arquivo"}
+        >
+          …
+        </button>
+      </div>
+    </div>
+  );
+}
 
 // ── Sub-tab: ROM Patch Studio ─────────────────────────────────────────────────
 
@@ -68,22 +110,9 @@ function PatchStudio() {
       </div>
 
       {/* Path fields */}
-      {[
-        { label: labelA, value: pathA, set: setPathA },
-        { label: labelB, value: pathB, set: setPathB },
-        { label: labelOut, value: pathOut, set: setPathOut },
-      ].map(({ label, value, set }) => (
-        <div key={label} className="flex flex-col gap-1">
-          <label className="text-[10px] text-[#7f849c]">{label}</label>
-          <input
-            type="text"
-            value={value}
-            placeholder="/caminho/para/arquivo"
-            className="bg-[#1e1e2e] border border-[#313244] rounded px-2 py-1 text-xs text-[#cdd6f4] font-mono focus:outline-none focus:border-[#cba6f7]"
-            onChange={(e) => set(e.target.value)}
-          />
-        </div>
-      ))}
+      <PathField label={labelA}   value={pathA}   set={setPathA}   extensions={["md","bin","smc","sfc"]} />
+      <PathField label={labelB}   value={pathB}   set={setPathB}   extensions={["md","bin","ips","bps"]} />
+      <PathField label={labelOut} value={pathOut} set={setPathOut} extensions={["md","bin","ips","bps"]} />
 
       <button
         disabled={busy}
@@ -155,15 +184,11 @@ function DeepProfiler() {
 
   return (
     <div className="flex flex-col gap-3 p-3">
-      <div className="flex gap-2 items-end">
-        <div className="flex flex-col gap-1 flex-1">
-          <label className="text-[10px] text-[#7f849c]">Caminho da ROM (.md / .bin)</label>
-          <input type="text" value={romPath} placeholder="/jogos/meu_jogo.md"
-            className="bg-[#1e1e2e] border border-[#313244] rounded px-2 py-1 text-xs text-[#cdd6f4] font-mono focus:outline-none focus:border-[#89b4fa]"
-            onChange={(e) => setRomPath(e.target.value)} />
-        </div>
+      <div className="flex flex-col gap-2">
+        <PathField label="Caminho da ROM (.md / .bin)" value={romPath} set={setRomPath}
+          placeholder="/jogos/meu_jogo.md" extensions={["md","bin","gen"]} accentColor="89b4fa" />
         <button disabled={busy} onClick={analyze}
-          className={`shrink-0 px-3 py-1.5 text-xs font-semibold rounded transition-colors ${busy ? "bg-[#45475a] text-[#6c7086] cursor-not-allowed" : "bg-[#89b4fa] text-[#1e1e2e] hover:bg-[#74a8f0]"}`}>
+          className={`py-1.5 text-xs font-semibold rounded transition-colors ${busy ? "bg-[#45475a] text-[#6c7086] cursor-not-allowed" : "bg-[#89b4fa] text-[#1e1e2e] hover:bg-[#74a8f0]"}`}>
           {busy ? "Analisando..." : "Analisar"}
         </button>
       </div>
@@ -240,17 +265,10 @@ function AssetExtractor() {
 
   return (
     <div className="flex flex-col gap-3 p-3">
-      {[
-        { label: "ROM (.md / .bin)", value: romPath,   set: setRomPath,   ph: "/jogos/meu_jogo.md" },
-        { label: "Pasta de Saída",   value: outputDir, set: setOutputDir, ph: "/projetos/assets/" },
-      ].map(({ label, value, set, ph }) => (
-        <div key={label} className="flex flex-col gap-1">
-          <label className="text-[10px] text-[#7f849c]">{label}</label>
-          <input type="text" value={value} placeholder={ph}
-            className="bg-[#1e1e2e] border border-[#313244] rounded px-2 py-1 text-xs text-[#cdd6f4] font-mono focus:outline-none focus:border-[#a6e3a1]"
-            onChange={(e) => set(e.target.value)} />
-        </div>
-      ))}
+      <PathField label="ROM (.md / .bin)" value={romPath}   set={setRomPath}
+        placeholder="/jogos/meu_jogo.md" extensions={["md","bin","gen"]} accentColor="a6e3a1" />
+      <PathField label="Pasta de Saída"   value={outputDir} set={setOutputDir}
+        placeholder="/projetos/assets/" directory accentColor="a6e3a1" />
 
       <div className="flex gap-4">
         <div className="flex flex-col gap-1">

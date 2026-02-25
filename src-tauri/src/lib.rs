@@ -269,6 +269,62 @@ fn assets_extract(rom_path: String, output_dir: String, max_tiles: u32, palette_
     extract_assets(Path::new(&rom_path), Path::new(&output_dir), max_tiles, palette_slot)
 }
 
+// ── Cena: leitura e escrita ───────────────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+pub struct SceneDataResult {
+    pub ok: bool,
+    pub error: String,
+    pub scene_json: String,   // JSON da cena serializado
+    pub project_name: String,
+    pub target: String,
+}
+
+/// Retorna o JSON completo da cena de entrada do projeto (entry_scene).
+#[tauri::command]
+fn get_scene_data(project_dir: String) -> SceneDataResult {
+    if project_dir.is_empty() {
+        return SceneDataResult { ok: false, error: "Nenhum projeto aberto.".into(),
+            scene_json: String::new(), project_name: String::new(), target: String::new() };
+    }
+    let dir = PathBuf::from(&project_dir);
+    let project = match load_project(&dir) {
+        Ok(p) => p,
+        Err(e) => return SceneDataResult { ok: false, error: e.to_string(),
+            scene_json: String::new(), project_name: String::new(), target: String::new() },
+    };
+    let scene = match load_scene(&dir, &project.entry_scene) {
+        Ok(s) => s,
+        Err(e) => return SceneDataResult { ok: false, error: e.to_string(),
+            scene_json: String::new(), project_name: project.name, target: project.target },
+    };
+    let scene_json = serde_json::to_string_pretty(&scene).unwrap_or_default();
+    SceneDataResult { ok: true, error: String::new(), scene_json,
+        project_name: project.name, target: project.target }
+}
+
+/// Salva o JSON de cena de volta para o arquivo entry_scene do projeto.
+#[tauri::command]
+fn save_scene_data(project_dir: String, scene_json: String) -> EmulatorCommandResult {
+    if project_dir.is_empty() {
+        return EmulatorCommandResult { ok: false, message: "Nenhum projeto aberto.".into() };
+    }
+    let dir = PathBuf::from(&project_dir);
+    let project = match load_project(&dir) {
+        Ok(p) => p,
+        Err(e) => return EmulatorCommandResult { ok: false, message: e.to_string() },
+    };
+    // Valida que é JSON válido antes de salvar
+    if serde_json::from_str::<serde_json::Value>(&scene_json).is_err() {
+        return EmulatorCommandResult { ok: false, message: "JSON de cena inválido.".into() };
+    }
+    let scene_path = dir.join(&project.entry_scene);
+    match std::fs::write(&scene_path, &scene_json) {
+        Ok(()) => EmulatorCommandResult { ok: true, message: "Cena salva.".into() },
+        Err(e) => EmulatorCommandResult { ok: false, message: e.to_string() },
+    }
+}
+
 // ── Projeto: diálogos de FS ───────────────────────────────────────────────────
 
 #[derive(serde::Serialize)]
@@ -359,6 +415,9 @@ pub fn run() {
             emulator_run_frame,
             emulator_send_input,
             emulator_stop,
+            // Cena
+            get_scene_data,
+            save_scene_data,
             // Projeto
             open_project_dialog,
             new_project_dialog,

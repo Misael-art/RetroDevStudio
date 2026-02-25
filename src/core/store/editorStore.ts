@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { Scene, Entity } from "../ipc/sceneService";
 
 export interface HwStatus {
   vram_used: number;
@@ -50,6 +51,11 @@ interface EditorState {
   // Hardware status (Sprint 1.5)
   hwStatus: HwStatus | null;
   setHwStatus: (status: HwStatus | null) => void;
+
+  // Active scene data (Sprint P2)
+  activeScene: Scene | null;
+  setActiveScene: (scene: Scene | null) => void;
+  updateEntity: (entityId: string, patch: Partial<Entity>) => void;
 }
 
 let _entryCounter = 0;
@@ -92,4 +98,19 @@ export const useEditorStore = create<EditorState>((set) => ({
 
   hwStatus: null,
   setHwStatus: (status) => set({ hwStatus: status }),
+
+  activeScene: null,
+  setActiveScene: (scene) => set({ activeScene: scene }),
+  updateEntity: (entityId, patch) =>
+    set((state) => {
+      if (!state.activeScene) return {};
+      return {
+        activeScene: {
+          ...state.activeScene,
+          entities: state.activeScene.entities.map((e) =>
+            e.entity_id === entityId ? { ...e, ...patch } : e
+          ),
+        },
+      };
+    }),
 }));
