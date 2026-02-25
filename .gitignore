@@ -1,0 +1,57 @@
+# ==============================================================================
+# RetroDev Studio - .gitignore
+# ==============================================================================
+
+# --- Node / Frontend ---
+node_modules/
+dist/
+*.local
+
+# --- Rust / Backend ---
+target/
+Cargo.lock
+
+# --- Tauri ---
+WixTools/
+*.msi
+*.nsis
+*.deb
+*.rpm
+*.AppImage
+
+# --- Toolchains (binarios pesados, baixar separadamente) ---
+toolchains/sgdk/
+toolchains/pvsneslib/
+!toolchains/sgdk/.gitkeep
+!toolchains/pvsneslib/.gitkeep
+
+# --- Build artifacts ---
+build/
+*.rom
+*.md.bin
+*.sfc
+*.smc
+
+# --- IDE ---
+.vscode/
+.cursor/
+.idea/
+*.swp
+*.swo
+
+# --- OS ---
+Thumbs.db
+.DS_Store
+Desktop.ini
+
+# --- Logs ---
+*.log
+bootstrap.log
+
+# --- Environment ---
+.env
+.env.local
+
+# --- Temp scripts ---
+scripts/setup-rust.ps1
+scripts/run-bootstrap.ps1

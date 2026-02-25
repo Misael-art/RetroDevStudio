@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git:*)",
+      "WebSearch",
+      "WebFetch(domain:v2.tauri.app)",
+      "Bash(echo NOT FOUND:*)",
+      "Bash(powershell -ExecutionPolicy Bypass -File scriptsbootstrap.ps1)",
+      "Bash(powershell -ExecutionPolicy Bypass -File \"F:\\\\Projects\\\\RetroDevStudio\\\\scripts\\\\bootstrap.ps1\")",
+      "Bash(powershell:*)",
+      "Bash(winget install:*)",
+      "WebFetch(domain:crates.io)",
+      "WebFetch(domain:www.npmjs.com)",
+      "Bash(npm install)",
+      "Bash(npm install:*)",
+      "Bash(node scripts/check-tree.js:*)",
+      "Bash(node scripts/check-tree.cjs:*)",
+      "Bash(npx tsc -b)",
+      "Bash(echo:*)",
+      "Bash(npx vite build)",
+      "Bash(npx @tauri-apps/cli icon:*)",
+      "Bash(node scripts/create-icon.mjs:*)",
+      "Bash(npm run build:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cmd /c \"cd /d F:\\\\Projects\\\\RetroDevStudio\\\\src-tauri && cargo clippy -- -D warnings 2>&1\")",
+      "Bash(del \"F:\\\\Projects\\\\RetroDevStudio\\\\run-clippy.ps1\")",
+      "Bash(test:*)",
+      "Bash(cmd.exe /c \"cd /d F:\\\\Projects\\\\RetroDevStudio\\\\src-tauri && cargo clippy -- -D warnings\")",
+      "Bash(cmd.exe /c \"cd /d F:\\\\Projects\\\\RetroDevStudio\\\\src-tauri && set CARGO_BUILD_JOBS=2 && set RUST_MIN_STACK=16777216 && cargo clippy -- -D warnings 2>&1\")",
+      "Bash(powershell.exe -NoProfile -Command \"Set-Location ''F:\\\\Projects\\\\RetroDevStudio\\\\src-tauri''; $env:CARGO_BUILD_JOBS=''2''; $env:RUST_MIN_STACK=''16777216''; cargo clippy -- -D warnings 2>&1 | Out-String\")",
+      "Bash(powershell.exe -NoProfile -Command \"Set-Location ''F:\\\\Projects\\\\RetroDevStudio''; npm run build 2>&1 | Out-String\")",
+      "Bash(powershell.exe -NoProfile -Command \"Set-Location ''F:\\\\Projects\\\\RetroDevStudio\\\\src-tauri''; cargo clippy -- -D warnings 2>&1 | Out-String\")",
+      "Bash(powershell.exe -NoProfile -Command \"Select-String -Path ''F:\\\\Projects\\\\RetroDevStudio\\\\src-tauri\\\\Cargo.toml'' -Pattern ''serde_json''\")"
+    ]
+  }
+}

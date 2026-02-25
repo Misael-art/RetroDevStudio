@@ -1,0 +1,8 @@
+# Tauri build configuration
+# Reduces parallelism and increases stack size to prevent compilation
+# stack overflows on Windows with large crates (windows crate, regex-automata)
+[build]
+jobs = 2
+
+[env]
+RUST_MIN_STACK = "16777216"
