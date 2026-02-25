@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Ultima Atualizacao:** 2026-02-25
-**Ultima sessao:** 2026-02-25 (Claude Code — Sessao 10: Sprints P1/P2/P3 concluidas)
-**Fase Atual:** Pos-MVP — Polish/QA (P1-P3 concluidas).
+**Ultima sessao:** 2026-02-25 (Claude Code — Sessao 10: Sprints P1-P6 concluidas)
+**Fase Atual:** Pos-MVP — Polish/QA (P1-P6 concluidas).
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
 > Este e o seu bloco de memoria primario. Voce **DEVE** ler este arquivo integralmente antes de iniciar qualquer nova tarefa.
@@ -35,10 +35,18 @@
   - `ToolsPanel.tsx`: `PathField` (campo + botão "…" seletor nativo), todos os 5 campos de caminho migrados. `@tauri-apps/plugin-dialog` instalado no npm.
   - **Validacoes passadas:** `cargo clippy -- -D warnings` OK (0.69s), `npm run build` OK (53 modulos, 1.77s).
 
+* **O que acabou de acontecer (2026-02-25 — continuação sessao 10, parte 2):**
+  - **SPRINTS P4 + P5 + P6 CONCLUIDAS.**
+  - `ViewportPanel.tsx`: `sceneCanvasRef` para aba "Cena"; `useEffect` renderiza fundo gradiente + grade + BG layers + entidades (retângulos coloridos, label, pivot, borda destacada na seleção); `handleSceneCanvasClick` hit-test LIFO seleciona entidade sincronizando com Hierarchy/Inspector. Status bar com Sprites N/80, BG Layers N/4, nome da entidade ativa.
+  - `editorStore.ts`: `addEntity()` e `removeEntity()` (imutáveis, removeEntity limpa selectedEntityId).
+  - `HierarchyPanel.tsx`: botão "+" abre modal "Nova Entidade" (nome → id único com timestamp), botão "−" remove entidade selecionada. Ambos auto-salvam via `saveSceneData` IPC.
+  - `scripts/create-icon-v2.mjs`: ícone pixel art "R" em fundo Catppuccin Mocha, PNG sem dependências. Gerados 32/64/128/256px + app-icon.png.
+  - **Validacoes passadas:** `cargo clippy -- -D warnings` OK (1.45s), `npm run build` OK (53 modulos, 4.53s).
+
 * **Proximo passo imediato:**
-  1. **Sprint P4 — Viewport Scene View**: renderizar entidades reais no canvas central (retângulos coloridos com posição/tamanho UGDM, seleção clicável no canvas que sincroniza com Hierarchy/Inspector).
-  2. **Sprint P5 — Adicionar/Remover entidade**: botão "+" na Hierarchy cria nova entidade com dialog de nome/tipo, botão Delete remove a selecionada, ambos persistem via save_scene_data.
-  3. **Sprint P6 — Ícones reais**: substituir placeholders PNG em `src-tauri/icons/` por ícone real do RetroDev Studio.
+  1. **Sprint P7 — Drag de entidades no canvas**: arrastar entidades na Scene View atualizando transform.x/y em tempo real (mousedown → mousemove → mouseup com delta).
+  2. **Sprint P8 — Target switcher na UI**: botão/toggle para alternar entre `megadrive` e `snes` no projeto ativo, atualizando hardware limits e status bar (320×224/60fps vs 256×224/60fps).
+  3. **Sprint P9 — Testes de integração básicos**: Vitest com testes para `nodeCompiler.ts` e `editorStore` (add/remove/update entity).
 
 * **O que acabou de acontecer (2026-02-25 — sessao 9):**
   - **FASE 4 CONCLUIDA. ROADMAP MVP INTEIRAMENTE CONCLUIDO.**
