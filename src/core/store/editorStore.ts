@@ -56,6 +56,8 @@ interface EditorState {
   activeScene: Scene | null;
   setActiveScene: (scene: Scene | null) => void;
   updateEntity: (entityId: string, patch: Partial<Entity>) => void;
+  addEntity: (entity: Entity) => void;
+  removeEntity: (entityId: string) => void;
 }
 
 let _entryCounter = 0;
@@ -111,6 +113,27 @@ export const useEditorStore = create<EditorState>((set) => ({
             e.entity_id === entityId ? { ...e, ...patch } : e
           ),
         },
+      };
+    }),
+  addEntity: (entity) =>
+    set((state) => {
+      if (!state.activeScene) return {};
+      return {
+        activeScene: {
+          ...state.activeScene,
+          entities: [...state.activeScene.entities, entity],
+        },
+      };
+    }),
+  removeEntity: (entityId) =>
+    set((state) => {
+      if (!state.activeScene) return {};
+      return {
+        activeScene: {
+          ...state.activeScene,
+          entities: state.activeScene.entities.filter((e) => e.entity_id !== entityId),
+        },
+        selectedEntityId: state.selectedEntityId === entityId ? null : state.selectedEntityId,
       };
     }),
 }));

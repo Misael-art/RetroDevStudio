@@ -12,6 +12,7 @@ import {
 } from "../../core/ipc/emulatorService";
 import NodeGraphEditor from "../nodegraph/NodeGraphEditor";
 import RetroFXDesigner from "../retrofx/RetroFXDesigner";
+import type { Entity } from "../../core/ipc/sceneService";
 
 const VIEWPORT_TABS = [
   { id: "scene",   label: "Cena",    icon: "◈" },
@@ -25,10 +26,14 @@ const MD_WIDTH  = 320;
 const MD_HEIGHT = 224;
 
 export default function ViewportPanel() {
-  const { activeViewportTab, setActiveViewportTab, logMessage } = useEditorStore();
-  const canvasRef  = useRef<HTMLCanvasElement>(null);
-  const stopLoopRef = useRef<(() => void) | null>(null);
-  const joypadRef  = useRef<JoypadState>(JOYPAD_DEFAULT);
+  const {
+    activeViewportTab, setActiveViewportTab, logMessage,
+    activeScene, selectedEntityId, setSelectedEntityId,
+  } = useEditorStore();
+  const canvasRef     = useRef<HTMLCanvasElement>(null);
+  const sceneCanvasRef = useRef<HTMLCanvasElement>(null);
+  const stopLoopRef   = useRef<(() => void) | null>(null);
+  const joypadRef     = useRef<JoypadState>(JOYPAD_DEFAULT);
   const [emulatorActive, setEmulatorActive] = useState(false);
 
   // ── Render frame on canvas ────────────────────────────────────────────────
@@ -109,6 +114,109 @@ export default function ViewportPanel() {
     };
   }, [activeViewportTab]);
 
+  // ── Scene canvas render ───────────────────────────────────────────────────
+  useEffect(() => {
+    if (activeViewportTab !== "scene") return;
+    const canvas = sceneCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    // Fundo preto
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, MD_WIDTH, MD_HEIGHT);
+
+    // Grade sutil
+    ctx.strokeStyle = "rgba(205,214,244,0.06)";
+    ctx.lineWidth = 1;
+    for (let x = 0; x <= MD_WIDTH; x += 16) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, MD_HEIGHT); ctx.stroke();
+    }
+    for (let y = 0; y <= MD_HEIGHT; y += 16) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(MD_WIDTH, y); ctx.stroke();
+    }
+
+    if (!activeScene) {
+      ctx.fillStyle = "#45475a";
+      ctx.font = "11px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("320 × 224 — Mega Drive Safe Area", MD_WIDTH / 2, MD_HEIGHT / 2);
+      ctx.fillText("Abra um projeto para ver a cena", MD_WIDTH / 2, MD_HEIGHT / 2 + 16);
+      return;
+    }
+
+    // Paleta de cores por índice de entidade
+    const COLORS = [
+      "#cba6f7", "#89b4fa", "#a6e3a1", "#fab387",
+      "#f38ba8", "#94e2d5", "#f9e2af", "#b4befe",
+    ];
+
+    // Renderiza background layers como faixas horizontais
+    activeScene.background_layers.forEach((layer, i) => {
+      ctx.fillStyle = `rgba(137,180,250,${0.05 + i * 0.03})`;
+      ctx.fillRect(0, 0, MD_WIDTH, MD_HEIGHT);
+      ctx.fillStyle = "#45475a";
+      ctx.font = "9px monospace";
+      ctx.textAlign = "left";
+      ctx.fillText(`BG: ${layer.layer_id}`, 4, 10 + i * 12);
+    });
+
+    // Renderiza entidades
+    activeScene.entities.forEach((entity: Entity, i: number) => {
+      const x = entity.transform.x;
+      const y = entity.transform.y;
+      const w = entity.components?.sprite?.frame_width  ?? 32;
+      const h = entity.components?.sprite?.frame_height ?? 32;
+      const isSelected = entity.entity_id === selectedEntityId;
+      const color = COLORS[i % COLORS.length];
+
+      // Caixa da entidade
+      ctx.fillStyle = color + "33"; // 20% alpha
+      ctx.fillRect(x, y, w, h);
+
+      ctx.strokeStyle = isSelected ? "#ffffff" : color;
+      ctx.lineWidth = isSelected ? 2 : 1;
+      ctx.strokeRect(x, y, w, h);
+
+      // Label
+      ctx.fillStyle = isSelected ? "#ffffff" : color;
+      ctx.font = "9px monospace";
+      ctx.textAlign = "left";
+      const label = entity.prefab ?? entity.entity_id;
+      ctx.fillText(label.slice(0, 14), x + 2, y + 10);
+
+      // Ponto de pivot
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(x + w / 2, y + h / 2, 2, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }, [activeViewportTab, activeScene, selectedEntityId]);
+
+  // ── Scene canvas click — seleciona entidade ───────────────────────────────
+  function handleSceneCanvasClick(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (!activeScene) return;
+    const rect = (e.target as HTMLCanvasElement).getBoundingClientRect();
+    const scaleX = MD_WIDTH  / rect.width;
+    const scaleY = MD_HEIGHT / rect.height;
+    const mx = (e.clientX - rect.left) * scaleX;
+    const my = (e.clientY - rect.top)  * scaleY;
+
+    // Hit test inverso (último renderizado tem prioridade)
+    for (let i = activeScene.entities.length - 1; i >= 0; i--) {
+      const entity = activeScene.entities[i];
+      const x = entity.transform.x;
+      const y = entity.transform.y;
+      const w = entity.components?.sprite?.frame_width  ?? 32;
+      const h = entity.components?.sprite?.frame_height ?? 32;
+      if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
+        setSelectedEntityId(entity.entity_id);
+        return;
+      }
+    }
+    setSelectedEntityId(null);
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full bg-[#1e1e2e]">
@@ -124,30 +232,22 @@ export default function ViewportPanel() {
           : "flex items-center justify-center"
       }`}>
 
-        {/* ── Cena tab ── */}
+        {/* ── Cena tab — Scene View ── */}
         {activeViewportTab === "scene" && (
-          <div className="flex flex-col items-center gap-3">
-            <div
-              className="relative border border-[#45475a] bg-black"
-              style={{ width: MD_WIDTH, height: MD_HEIGHT }}
-            >
-              <div
-                className="absolute inset-0 opacity-10"
-                style={{
-                  backgroundImage:
-                    "repeating-linear-gradient(#cdd6f4 0 1px,transparent 1px 100%)," +
-                    "repeating-linear-gradient(90deg,#cdd6f4 0 1px,transparent 1px 100%)",
-                  backgroundSize: "16px 16px",
-                }}
-              />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-[#45475a] text-xs select-none">
-                  320 × 224 — Mega Drive Safe Area
-                </span>
-              </div>
-            </div>
-            <span className="text-[#6c7086] text-xs select-none">
-              Clique em "Jogo" para iniciar o emulador
+          <div className="flex flex-col items-center gap-2">
+            <canvas
+              ref={sceneCanvasRef}
+              width={MD_WIDTH}
+              height={MD_HEIGHT}
+              onClick={handleSceneCanvasClick}
+              className="border border-[#45475a] cursor-crosshair"
+              style={{ imageRendering: "pixelated", width: MD_WIDTH, height: MD_HEIGHT }}
+              title="Clique em uma entidade para selecioná-la"
+            />
+            <span className="text-[#6c7086] text-[10px] select-none">
+              {activeScene
+                ? `${activeScene.entities.length} entidade(s) · ${activeScene.background_layers.length} layer(s) — clique para selecionar`
+                : "Abra um projeto para visualizar a cena"}
             </span>
           </div>
         )}
@@ -193,8 +293,17 @@ export default function ViewportPanel() {
       <div className="flex items-center gap-4 px-3 h-6 bg-[#181825] border-t border-[#313244] shrink-0">
         <span className="text-[10px] text-[#45475a] select-none">Mega Drive</span>
         <span className="text-[10px] text-[#45475a] select-none">320×224 / 60fps</span>
-        <span className="text-[10px] text-[#45475a] select-none">VRAM: 0 / 64 KB</span>
-        <span className="text-[10px] text-[#45475a] select-none">Sprites: 0 / 80</span>
+        <span className="text-[10px] text-[#45475a] select-none">
+          Sprites: {activeScene?.entities.length ?? 0} / 80
+        </span>
+        <span className="text-[10px] text-[#45475a] select-none">
+          BG Layers: {activeScene?.background_layers.length ?? 0} / 4
+        </span>
+        {selectedEntityId && !selectedEntityId.startsWith("layer::") && (
+          <span className="text-[10px] text-[#cba6f7] select-none ml-auto">
+            ◈ {activeScene?.entities.find(e => e.entity_id === selectedEntityId)?.prefab ?? selectedEntityId}
+          </span>
+        )}
       </div>
     </div>
   );
