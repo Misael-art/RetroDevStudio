@@ -54,10 +54,10 @@ describe("addEntity", () => {
 
   it("acumula múltiplas entidades mantendo imutabilidade", () => {
     useEditorStore.setState({ activeScene: { ...EMPTY_SCENE } });
-    const { addEntity } = useEditorStore.getState();
-    addEntity(makeEntity("a"));
-    addEntity(makeEntity("b"));
-    addEntity(makeEntity("c"));
+    // Chama getState() a cada vez para evitar stale closure após cada set()
+    useEditorStore.getState().addEntity(makeEntity("a"));
+    useEditorStore.getState().addEntity(makeEntity("b"));
+    useEditorStore.getState().addEntity(makeEntity("c"));
     expect(useEditorStore.getState().activeScene!.entities).toHaveLength(3);
   });
 });

@@ -8,35 +8,45 @@ import { describe, it, expect } from "vitest";
 import { compileGraphToC, parseCToNodes } from "./nodeCompiler";
 import type { NodeGraph } from "../../components/nodegraph/NodeGraphEditor";
 
+// ── Helpers de fixture ────────────────────────────────────────────────────────
+
+function node(
+  id: string,
+  type: NodeGraph["nodes"][number]["type"],
+  params: Record<string, string | number> = {}
+): NodeGraph["nodes"][number] {
+  return { id, type, label: type, x: 0, y: 0, inputs: [], outputs: [], params };
+}
+
+function edge(id: string, fromNode: string, toNode: string): NodeGraph["edges"][number] {
+  return { id, fromNode, fromPort: "exec", toNode, toPort: "exec" };
+}
+
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
 const EMPTY_GRAPH: NodeGraph = { nodes: [], edges: [] };
 
 const GRAPH_START_ONLY: NodeGraph = {
-  nodes: [{ id: "n1", type: "event_start", x: 0, y: 0, params: {}, ports: { exec: true } }],
+  nodes: [node("n1", "event_start")],
   edges: [],
 };
 
 const GRAPH_MOVE_MD: NodeGraph = {
   nodes: [
-    { id: "n1", type: "event_start", x: 0, y: 0, params: {}, ports: { exec: true } },
-    { id: "n2", type: "sprite_move", x: 100, y: 0, params: { target: "player", dx: 2, dy: 0 }, ports: { exec: true } },
+    node("n1", "event_start"),
+    node("n2", "sprite_move", { target: "player", dx: 2, dy: 0 }),
   ],
-  edges: [
-    { id: "e1", fromNode: "n1", fromPort: "exec", toNode: "n2", toPort: "exec" },
-  ],
+  edges: [edge("e1", "n1", "n2")],
 };
 
 const GRAPH_MOVE_SNES: NodeGraph = GRAPH_MOVE_MD;
 
 const GRAPH_SOUND_MD: NodeGraph = {
   nodes: [
-    { id: "n1", type: "event_start", x: 0, y: 0, params: {}, ports: { exec: true } },
-    { id: "n2", type: "action_sound", x: 100, y: 0, params: { sfx: "jump" }, ports: { exec: true } },
+    node("n1", "event_start"),
+    node("n2", "action_sound", { sfx: "jump" }),
   ],
-  edges: [
-    { id: "e1", fromNode: "n1", fromPort: "exec", toNode: "n2", toPort: "exec" },
-  ],
+  edges: [edge("e1", "n1", "n2")],
 };
 
 // ── compileGraphToC ───────────────────────────────────────────────────────────
@@ -108,6 +118,18 @@ describe("compileGraphToC — SNES", () => {
   });
 });
 
+describe("compileGraphToC — valores negativos (regressão bug regex)", () => {
+  it("emite dx negativo corretamente para Mega Drive", () => {
+    const graph: NodeGraph = {
+      nodes: [node("n1", "event_start"), node("n2", "sprite_move", { target: "enemy", dx: -3, dy: -5 })],
+      edges: [edge("e1", "n1", "n2")],
+    };
+    const code = compileGraphToC(graph, "Test", "megadrive");
+    expect(code).toContain("+ -3");
+    expect(code).toContain("+ -5");
+  });
+});
+
 // ── parseCToNodes ─────────────────────────────────────────────────────────────
 // parseCToNodes retorna ParsedNode[] (array direto, não { nodes, edges })
 
@@ -118,9 +140,18 @@ describe("parseCToNodes", () => {
     expect(nodes.some((n) => n.type === "event_start")).toBe(true);
   });
 
-  it("detecta chamadas SPR_setPosition e cria nó sprite_move", () => {
-    const code = "    SPR_setPosition(spr_player, SPR_getX(spr_player) + 2 + 0, SPR_getY(spr_player) + 0 + 0);";
+  it("detecta chamadas SPR_setPosition e cria nó sprite_move (dx positivo)", () => {
+    const code = "    SPR_setPosition(spr_player, SPR_getX(spr_player) + 2, SPR_getY(spr_player) + 0);";
     const nodes = parseCToNodes(code);
     expect(nodes.some((n) => n.type === "sprite_move")).toBe(true);
+  });
+
+  it("detecta SPR_setPosition com dx negativo (regressão bug regex)", () => {
+    const code = "    SPR_setPosition(spr_enemy, SPR_getX(spr_enemy) + -3, SPR_getY(spr_enemy) + -5);";
+    const nodes = parseCToNodes(code);
+    const moveNode = nodes.find((n) => n.type === "sprite_move");
+    expect(moveNode).toBeDefined();
+    expect(moveNode?.params.dx).toBe(-3);
+    expect(moveNode?.params.dy).toBe(-5);
   });
 });

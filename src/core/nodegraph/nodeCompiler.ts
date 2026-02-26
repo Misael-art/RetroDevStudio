@@ -56,7 +56,8 @@ function emitNodeC(node: GraphNode, target: "megadrive" | "snes"): string {
 
     case "effect_parallax":
       if (target === "snes") {
-        return `    BG_setHScroll(${p.layer}, bg_scroll_${p.layer} += ${p.speed_x});\n`;
+        // PVSnesLib: bgSetScroll(u8 bgIndex, u16 x, u16 y)
+        return `    bg_scroll_${p.layer} += ${p.speed_x}; bgSetScroll(${p.layer}, bg_scroll_${p.layer}, 0);\n`;
       }
       return `    VDP_setHorizontalScroll(BG_${p.layer}, bg_scroll_${p.layer} += ${p.speed_x});\n`;
 
@@ -64,7 +65,8 @@ function emitNodeC(node: GraphNode, target: "megadrive" | "snes"): string {
       const scanline = Number(p.scanline);
       const offset   = Number(p.offset_x);
       if (target === "snes") {
-        return `    if (GET_VCOUNTER() == ${scanline}) BG_setHScroll(BG1, ${offset});\n`;
+        // PVSnesLib: bgSetScroll com verificação de scanline via irq/hdma (simplificado)
+        return `    if (snes_vblank_count == ${scanline}) { bgSetScroll(0, ${offset}, 0); }\n`;
       }
       return `    VDP_setHorizontalScrollLine(BG_A, ${scanline}, ${offset});\n`;
     }
@@ -159,7 +161,8 @@ export function parseCToNodes(source: string): ParsedNode[] {
     const trimmed = line.trim();
 
     // SPR_setPosition → sprite_move
-    const moveMatch = trimmed.match(/SPR_setPosition\(spr_(\w+).*\+\s*(-?\d+).*\+\s*(-?\d+)/);
+    // Regex não-guloso para capturar corretamente dx e dy, incluindo valores negativos
+    const moveMatch = trimmed.match(/SPR_setPosition\(spr_(\w+),\s*\S+\s*\+\s*(-?\d+),\s*\S+\s*\+\s*(-?\d+)/);
     if (moveMatch) {
       nodes.push({ type: "sprite_move", params: { target: moveMatch[1], dx: Number(moveMatch[2]), dy: Number(moveMatch[3]) } });
       continue;

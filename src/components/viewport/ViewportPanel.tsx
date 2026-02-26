@@ -29,13 +29,15 @@ export default function ViewportPanel() {
   const {
     activeViewportTab, setActiveViewportTab, logMessage,
     activeScene, selectedEntityId, setSelectedEntityId, updateEntity,
-    activeProjectDir,
+    activeProjectDir, activeTarget,
   } = useEditorStore();
   const canvasRef      = useRef<HTMLCanvasElement>(null);
   const sceneCanvasRef = useRef<HTMLCanvasElement>(null);
   const stopLoopRef    = useRef<(() => void) | null>(null);
   const joypadRef      = useRef<JoypadState>(JOYPAD_DEFAULT);
   const [emulatorActive, setEmulatorActive] = useState(false);
+  // Estado reativo para cursor durante drag (ref sozinha não dispara re-render)
+  const [isDragging, setIsDragging] = useState(false);
 
   // Drag state
   const dragRef = useRef<{
@@ -235,6 +237,7 @@ export default function ViewportPanel() {
         origX: entity.transform.x,
         origY: entity.transform.y,
       };
+      setIsDragging(true);
     } else {
       setSelectedEntityId(null);
     }
@@ -255,11 +258,15 @@ export default function ViewportPanel() {
   // ── Drag: mouseup persiste ────────────────────────────────────────────────
   async function handleMouseUp() {
     if (!dragRef.current) return;
+    // Captura referência antes de zerar, para garantir que o save usa o estado atual
+    const wasProjectDir = activeProjectDir;
+    const wasScene = activeScene;
     dragRef.current = null;
+    setIsDragging(false);
     // Auto-save após drag
-    if (activeProjectDir && activeScene) {
+    if (wasProjectDir && wasScene) {
       const { saveSceneData } = await import("../../core/ipc/sceneService");
-      await saveSceneData(activeProjectDir, JSON.stringify(activeScene, null, 2));
+      await saveSceneData(wasProjectDir, JSON.stringify(wasScene, null, 2));
     }
   }
 
@@ -293,7 +300,7 @@ export default function ViewportPanel() {
               style={{
                 imageRendering: "pixelated",
                 width: MD_WIDTH, height: MD_HEIGHT,
-                cursor: dragRef.current ? "grabbing" : "crosshair",
+                cursor: isDragging ? "grabbing" : "crosshair",
               }}
               title="Clique para selecionar · Arraste para mover"
             />
@@ -342,22 +349,31 @@ export default function ViewportPanel() {
         )}
       </div>
 
-      {/* Status bar */}
-      <div className="flex items-center gap-4 px-3 h-6 bg-[#181825] border-t border-[#313244] shrink-0">
-        <span className="text-[10px] text-[#45475a] select-none">Mega Drive</span>
-        <span className="text-[10px] text-[#45475a] select-none">320×224 / 60fps</span>
-        <span className="text-[10px] text-[#45475a] select-none">
-          Sprites: {activeScene?.entities.length ?? 0} / 80
-        </span>
-        <span className="text-[10px] text-[#45475a] select-none">
-          BG Layers: {activeScene?.background_layers.length ?? 0} / 4
-        </span>
-        {selectedEntityId && !selectedEntityId.startsWith("layer::") && (
-          <span className="text-[10px] text-[#cba6f7] select-none ml-auto">
-            ◈ {activeScene?.entities.find(e => e.entity_id === selectedEntityId)?.prefab ?? selectedEntityId}
-          </span>
-        )}
-      </div>
+      {/* Status bar — adaptativa por target */}
+      {(() => {
+        const isSnes = activeTarget === "snes";
+        const targetLabel  = isSnes ? "SNES"       : "Mega Drive";
+        const resolution   = isSnes ? "256×224"    : "320×224";
+        const spriteLimit  = isSnes ? 128          : 80;
+        const bgLayerLimit = isSnes ? 4            : 4;
+        return (
+          <div className="flex items-center gap-4 px-3 h-6 bg-[#181825] border-t border-[#313244] shrink-0">
+            <span className="text-[10px] text-[#45475a] select-none">{targetLabel}</span>
+            <span className="text-[10px] text-[#45475a] select-none">{resolution} / 60fps</span>
+            <span className="text-[10px] text-[#45475a] select-none">
+              Sprites: {activeScene?.entities.length ?? 0} / {spriteLimit}
+            </span>
+            <span className="text-[10px] text-[#45475a] select-none">
+              BG Layers: {activeScene?.background_layers.length ?? 0} / {bgLayerLimit}
+            </span>
+            {selectedEntityId && !selectedEntityId.startsWith("layer::") && (
+              <span className="text-[10px] text-[#cba6f7] select-none ml-auto">
+                ◈ {activeScene?.entities.find(e => e.entity_id === selectedEntityId)?.prefab ?? selectedEntityId}
+              </span>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
