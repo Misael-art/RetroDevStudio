@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
-**Ultima Atualizacao:** 2026-02-25
-**Ultima sessao:** 2026-02-25 (Claude Code — Sessao 10: Sprints P1-P6 concluidas)
-**Fase Atual:** Pos-MVP — Polish/QA (P1-P6 concluidas).
+**Ultima Atualizacao:** 2026-02-26
+**Ultima sessao:** 2026-02-26 (Claude Code — Sessao 11: Sprints P7 verificada, P8 e P9 concluidas)
+**Fase Atual:** Pos-MVP — Polish/QA (P1-P9 concluidas).
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
 > Este e o seu bloco de memoria primario. Voce **DEVE** ler este arquivo integralmente antes de iniciar qualquer nova tarefa.
@@ -43,10 +43,16 @@
   - `scripts/create-icon-v2.mjs`: ícone pixel art "R" em fundo Catppuccin Mocha, PNG sem dependências. Gerados 32/64/128/256px + app-icon.png.
   - **Validacoes passadas:** `cargo clippy -- -D warnings` OK (1.45s), `npm run build` OK (53 modulos, 4.53s).
 
+* **O que acabou de acontecer (2026-02-26 — sessao 11):**
+  - **SPRINTS P7 (verificada OK) + P8 + P9 CONCLUIDAS.**
+  - P7 (Drag entidades): já estava implementado em ViewportPanel.tsx — `handleMouseDown/Move/Up` com `dragRef`, delta inteiro, auto-save no mouseUp. Verificado e funcional.
+  - P8 (Target switcher UI): botão toggle MD/SNES adicionado à header do `App.tsx`. Dois botões lado-a-lado com highlight por cor (verde MD, azul SNES), desabilitados sem projeto. Backend `set_project_target` já existia em `lib.rs` (linha 330) e registrado. `docs/02_TECH_STACK.md` atualizado com regra 6 (Vitest aprovado).
+  - P9 (Vitest): `vitest@4.0.18` + `@vitest/ui` instalados como devDependency. `vite.config.ts` atualizado (import de `vitest/config`, bloco `test`). Script `"test": "vitest run"` adicionado ao `package.json`. 24 testes criados e passando: `nodeCompiler.test.ts` (14 testes — MD/SNES, empty graph, sound, parallax) + `editorStore.test.ts` (10 testes — addEntity, removeEntity, updateEntity).
+  - **Validacoes passadas:** `cargo clippy -- -D warnings` OK (50.60s), `npm run build` OK (54 módulos), `npm test` OK (24/24 testes).
+
 * **Proximo passo imediato:**
-  1. **Sprint P7 — Drag de entidades no canvas**: arrastar entidades na Scene View atualizando transform.x/y em tempo real (mousedown → mousemove → mouseup com delta).
-  2. **Sprint P8 — Target switcher na UI**: botão/toggle para alternar entre `megadrive` e `snes` no projeto ativo, atualizando hardware limits e status bar (320×224/60fps vs 256×224/60fps).
-  3. **Sprint P9 — Testes de integração básicos**: Vitest com testes para `nodeCompiler.ts` e `editorStore` (add/remove/update entity).
+  1. Commit git das sprints P7-verificada, P8 e P9.
+  2. Próximas sprints a definir com o usuário (possíveis: P10 — status bar canvas adaptativa MD/SNES, P11 — cobertura de testes para outros módulos).
 
 * **O que acabou de acontecer (2026-02-25 — sessao 9):**
   - **FASE 4 CONCLUIDA. ROADMAP MVP INTEIRAMENTE CONCLUIDO.**

@@ -29,7 +29,9 @@ interface EditorState {
   // Active project directory (empty = no project open)
   activeProjectDir: string;
   activeProjectName: string;
+  activeTarget: "megadrive" | "snes";
   setActiveProject: (dir: string, name: string) => void;
+  setActiveTarget: (target: "megadrive" | "snes") => void;
 
   // Selected entity in hierarchy
   selectedEntityId: string | null;
@@ -65,7 +67,9 @@ let _entryCounter = 0;
 export const useEditorStore = create<EditorState>((set) => ({
   activeProjectDir: "",
   activeProjectName: "",
+  activeTarget: "megadrive",
   setActiveProject: (dir, name) => set({ activeProjectDir: dir, activeProjectName: name }),
+  setActiveTarget: (target) => set({ activeTarget: target }),
 
   selectedEntityId: null,
   setSelectedEntityId: (id) => set({ selectedEntityId: id }),

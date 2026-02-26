@@ -28,13 +28,21 @@ const MD_HEIGHT = 224;
 export default function ViewportPanel() {
   const {
     activeViewportTab, setActiveViewportTab, logMessage,
-    activeScene, selectedEntityId, setSelectedEntityId,
+    activeScene, selectedEntityId, setSelectedEntityId, updateEntity,
+    activeProjectDir,
   } = useEditorStore();
-  const canvasRef     = useRef<HTMLCanvasElement>(null);
+  const canvasRef      = useRef<HTMLCanvasElement>(null);
   const sceneCanvasRef = useRef<HTMLCanvasElement>(null);
-  const stopLoopRef   = useRef<(() => void) | null>(null);
-  const joypadRef     = useRef<JoypadState>(JOYPAD_DEFAULT);
+  const stopLoopRef    = useRef<(() => void) | null>(null);
+  const joypadRef      = useRef<JoypadState>(JOYPAD_DEFAULT);
   const [emulatorActive, setEmulatorActive] = useState(false);
+
+  // Drag state
+  const dragRef = useRef<{
+    entityId: string;
+    startMx: number; startMy: number;
+    origX: number;   origY: number;
+  } | null>(null);
 
   // ── Render frame on canvas ────────────────────────────────────────────────
   const renderFrame = useCallback((payload: FramePayload) => {
@@ -193,28 +201,66 @@ export default function ViewportPanel() {
     });
   }, [activeViewportTab, activeScene, selectedEntityId]);
 
-  // ── Scene canvas click — seleciona entidade ───────────────────────────────
-  function handleSceneCanvasClick(e: React.MouseEvent<HTMLCanvasElement>) {
-    if (!activeScene) return;
+  // ── Scene canvas helpers ──────────────────────────────────────────────────
+  function canvasCoords(e: React.MouseEvent<HTMLCanvasElement>) {
     const rect = (e.target as HTMLCanvasElement).getBoundingClientRect();
-    const scaleX = MD_WIDTH  / rect.width;
-    const scaleY = MD_HEIGHT / rect.height;
-    const mx = (e.clientX - rect.left) * scaleX;
-    const my = (e.clientY - rect.top)  * scaleY;
+    return {
+      mx: (e.clientX - rect.left) * (MD_WIDTH  / rect.width),
+      my: (e.clientY - rect.top)  * (MD_HEIGHT / rect.height),
+    };
+  }
 
-    // Hit test inverso (último renderizado tem prioridade)
+  function hitTest(mx: number, my: number) {
+    if (!activeScene) return null;
     for (let i = activeScene.entities.length - 1; i >= 0; i--) {
-      const entity = activeScene.entities[i];
-      const x = entity.transform.x;
-      const y = entity.transform.y;
-      const w = entity.components?.sprite?.frame_width  ?? 32;
-      const h = entity.components?.sprite?.frame_height ?? 32;
-      if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
-        setSelectedEntityId(entity.entity_id);
-        return;
-      }
+      const e = activeScene.entities[i];
+      const x = e.transform.x, y = e.transform.y;
+      const w = e.components?.sprite?.frame_width  ?? 32;
+      const h = e.components?.sprite?.frame_height ?? 32;
+      if (mx >= x && mx <= x + w && my >= y && my <= y + h) return e;
     }
-    setSelectedEntityId(null);
+    return null;
+  }
+
+  // ── Drag: mousedown inicia drag ou seleciona ───────────────────────────────
+  function handleMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (!activeScene) return;
+    const { mx, my } = canvasCoords(e);
+    const entity = hitTest(mx, my);
+    if (entity) {
+      setSelectedEntityId(entity.entity_id);
+      dragRef.current = {
+        entityId: entity.entity_id,
+        startMx: mx, startMy: my,
+        origX: entity.transform.x,
+        origY: entity.transform.y,
+      };
+    } else {
+      setSelectedEntityId(null);
+    }
+  }
+
+  // ── Drag: mousemove atualiza posição ──────────────────────────────────────
+  function handleMouseMove(e: React.MouseEvent<HTMLCanvasElement>) {
+    const drag = dragRef.current;
+    if (!drag || e.buttons !== 1) return;
+    const { mx, my } = canvasCoords(e);
+    const dx = Math.round(mx - drag.startMx);
+    const dy = Math.round(my - drag.startMy);
+    updateEntity(drag.entityId, {
+      transform: { x: drag.origX + dx, y: drag.origY + dy },
+    });
+  }
+
+  // ── Drag: mouseup persiste ────────────────────────────────────────────────
+  async function handleMouseUp() {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    // Auto-save após drag
+    if (activeProjectDir && activeScene) {
+      const { saveSceneData } = await import("../../core/ipc/sceneService");
+      await saveSceneData(activeProjectDir, JSON.stringify(activeScene, null, 2));
+    }
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -239,14 +285,21 @@ export default function ViewportPanel() {
               ref={sceneCanvasRef}
               width={MD_WIDTH}
               height={MD_HEIGHT}
-              onClick={handleSceneCanvasClick}
-              className="border border-[#45475a] cursor-crosshair"
-              style={{ imageRendering: "pixelated", width: MD_WIDTH, height: MD_HEIGHT }}
-              title="Clique em uma entidade para selecioná-la"
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+              className="border border-[#45475a]"
+              style={{
+                imageRendering: "pixelated",
+                width: MD_WIDTH, height: MD_HEIGHT,
+                cursor: dragRef.current ? "grabbing" : "crosshair",
+              }}
+              title="Clique para selecionar · Arraste para mover"
             />
             <span className="text-[#6c7086] text-[10px] select-none">
               {activeScene
-                ? `${activeScene.entities.length} entidade(s) · ${activeScene.background_layers.length} layer(s) — clique para selecionar`
+                ? `${activeScene.entities.length} entidade(s) · ${activeScene.background_layers.length} layer(s) — clique para selecionar · arraste para mover`
                 : "Abra um projeto para visualizar a cena"}
             </span>
           </div>

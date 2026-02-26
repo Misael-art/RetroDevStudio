@@ -61,6 +61,7 @@ Como os projetos são salvos no disco:
 3. **Gerenciamento de Estado no React:** Use Zustand ou Context API. Não use Redux (overkill para o nosso caso de uso, que delega a maior parte do estado "real" para o backend Rust).
 4. **Alocação na Simulação de Hardware:** Ao escrever código em Rust que analisa o frame do emulador (para a *Hardware Constraint Engine*), use buffers estáticos (`[u8; 65536]`). **NÃO use `Vec::new()` dentro de loops de 60Hz.**
 5. **NodeGraph Logic:** A conversão de Blueprint/Nodes para código nativo (C) deve ser feita gerando uma AST (Abstract Syntax Tree) forte em Rust, que então faz o "pretty print" para código C válido do SGDK/PVSnesLib. Não faça concatenação de strings espaguete para gerar código C.
+6. **Testes Frontend:** [Vitest](https://vitest.dev/) é o framework de testes aprovado para o frontend TypeScript/React. Deve ser instalado apenas como `devDependency` e nunca impactar o bundle de produção.
 
 ---
 

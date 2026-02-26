@@ -7,10 +7,14 @@ import ToolsPanel      from "./components/tools/ToolsPanel";
 import { useEditorStore } from "./core/store/editorStore";
 import { buildProject } from "./core/ipc/buildService";
 import { getHwStatus } from "./core/ipc/hwService";
-import { openProjectDialog, newProjectDialog } from "./core/ipc/projectService";
+import { openProjectDialog, newProjectDialog, setProjectTarget } from "./core/ipc/projectService";
 
 export default function App() {
-  const { logMessage, setHwStatus, activeProjectDir, activeProjectName, setActiveProject } = useEditorStore();
+  const {
+    logMessage, setHwStatus,
+    activeProjectDir, activeProjectName, setActiveProject,
+    activeTarget, setActiveTarget,
+  } = useEditorStore();
   const [building,       setBuilding]       = useState(false);
   const [toolsOpen,      setToolsOpen]      = useState(false);
   const [menuOpen,       setMenuOpen]       = useState<string | null>(null);
@@ -35,9 +39,27 @@ export default function App() {
     if (result.selected) {
       setActiveProject(result.path, result.name);
       logMessage("success", `Projeto aberto: ${result.name} (${result.path})`);
-      // Atualiza HW status com o projeto carregado
       const hw = await getHwStatus(result.path);
       setHwStatus(hw);
+      // Sincroniza target com o project.rds
+      const { getSceneData } = await import("./core/ipc/sceneService");
+      const sd = await getSceneData(result.path);
+      if (sd.ok && (sd.target === "megadrive" || sd.target === "snes")) {
+        setActiveTarget(sd.target);
+      }
+    }
+  }
+
+  async function handleSwitchTarget(t: "megadrive" | "snes") {
+    if (!activeProjectDir || t === activeTarget) return;
+    const r = await setProjectTarget(activeProjectDir, t);
+    if (r.ok) {
+      setActiveTarget(t);
+      const hw = await getHwStatus(activeProjectDir);
+      setHwStatus(hw);
+      logMessage("info", `Target alterado para ${t === "megadrive" ? "Mega Drive" : "SNES"}.`);
+    } else {
+      logMessage("error", `[Target] ${r.message}`);
     }
   }
 
@@ -180,6 +202,31 @@ export default function App() {
               📁 {activeProjectName}
             </span>
           )}
+          {/* Target switcher MD / SNES */}
+          <div className="flex items-center gap-0.5 bg-[#181825] border border-[#313244] rounded overflow-hidden">
+            {(["megadrive", "snes"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => handleSwitchTarget(t)}
+                disabled={!activeProjectDir}
+                title={
+                  !activeProjectDir ? "Abra um projeto primeiro" :
+                  t === "megadrive" ? "Mega Drive — 320×224, 80 sprites" :
+                  "SNES — 256×224, 128 sprites"
+                }
+                className={[
+                  "px-2 py-0.5 text-[10px] font-bold transition-colors",
+                  activeTarget === t
+                    ? t === "megadrive"
+                      ? "bg-[#a6e3a1] text-[#1e1e2e]"
+                      : "bg-[#89b4fa] text-[#1e1e2e]"
+                    : "text-[#45475a] hover:text-[#a6adc8] disabled:cursor-not-allowed",
+                ].join(" ")}
+              >
+                {t === "megadrive" ? "MD" : "SNES"}
+              </button>
+            ))}
+          </div>
           <span className="text-[10px] text-[#45475a]">Fase 4 — Camada Pro</span>
           <button
             onClick={() => setToolsOpen((o) => !o)}

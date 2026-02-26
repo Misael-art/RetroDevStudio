@@ -325,6 +325,36 @@ fn save_scene_data(project_dir: String, scene_json: String) -> EmulatorCommandRe
     }
 }
 
+/// Altera o campo `target` do project.rds e retorna o novo target.
+#[tauri::command]
+fn set_project_target(project_dir: String, target: String) -> EmulatorCommandResult {
+    match target.as_str() {
+        "megadrive" | "snes" => {}
+        other => return EmulatorCommandResult {
+            ok: false,
+            message: format!("Target '{}' não suportado. Use 'megadrive' ou 'snes'.", other),
+        },
+    }
+    if project_dir.is_empty() {
+        return EmulatorCommandResult { ok: false, message: "Nenhum projeto aberto.".into() };
+    }
+    let dir = PathBuf::from(&project_dir);
+    let rds_path = dir.join("project.rds");
+    let content = match std::fs::read_to_string(&rds_path) {
+        Ok(c) => c,
+        Err(e) => return EmulatorCommandResult { ok: false, message: e.to_string() },
+    };
+    let mut json: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(e) => return EmulatorCommandResult { ok: false, message: e.to_string() },
+    };
+    json["target"] = serde_json::Value::String(target.clone());
+    match std::fs::write(&rds_path, serde_json::to_string_pretty(&json).unwrap_or_default()) {
+        Ok(()) => EmulatorCommandResult { ok: true, message: target },
+        Err(e) => EmulatorCommandResult { ok: false, message: e.to_string() },
+    }
+}
+
 // ── Projeto: diálogos de FS ───────────────────────────────────────────────────
 
 #[derive(serde::Serialize)]
@@ -418,6 +448,7 @@ pub fn run() {
             // Cena
             get_scene_data,
             save_scene_data,
+            set_project_target,
             // Projeto
             open_project_dialog,
             new_project_dialog,

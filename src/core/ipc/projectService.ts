@@ -13,3 +13,10 @@ export function openProjectDialog(): Promise<OpenProjectResult> {
 export function newProjectDialog(projectName: string): Promise<OpenProjectResult> {
   return invoke("new_project_dialog", { projectName });
 }
+
+export function setProjectTarget(
+  projectDir: string,
+  target: "megadrive" | "snes"
+): Promise<{ ok: boolean; message: string }> {
+  return invoke("set_project_target", { projectDir, target });
+}
