@@ -154,4 +154,37 @@ describe("parseCToNodes", () => {
     expect(moveNode?.params.dx).toBe(-3);
     expect(moveNode?.params.dy).toBe(-5);
   });
+
+  it("round-trip SNES: compila effect_parallax e re-parse bgSetScroll → effect_parallax", () => {
+    const graph: NodeGraph = {
+      nodes: [
+        node("n1", "event_start"),
+        node("n2", "effect_parallax", { layer: "A", speed_x: 2, speed_y: 0 }),
+      ],
+      edges: [edge("e1", "n1", "n2")],
+    };
+    const code = compileGraphToC(graph, "Test", "snes");
+    expect(code).toContain("bgSetScroll");
+    const parsed = parseCToNodes(code);
+    const parallaxNode = parsed.find((n) => n.type === "effect_parallax");
+    expect(parallaxNode).toBeDefined();
+    expect(parallaxNode?.params.layer).toBe("A");
+    expect(parallaxNode?.params.speed_x).toBe(2);
+  });
+
+  it("round-trip SNES: compila action_sound e re-parse SPC_playSFX → action_sound", () => {
+    const graph: NodeGraph = {
+      nodes: [
+        node("n1", "event_start"),
+        node("n2", "action_sound", { sfx: "jump" }),
+      ],
+      edges: [edge("e1", "n1", "n2")],
+    };
+    const code = compileGraphToC(graph, "Test", "snes");
+    expect(code).toContain("SPC_playSFX(SFX_JUMP");
+    const parsed = parseCToNodes(code);
+    const soundNode = parsed.find((n) => n.type === "action_sound");
+    expect(soundNode).toBeDefined();
+    expect(soundNode?.params.sfx).toBe("jump");
+  });
 });

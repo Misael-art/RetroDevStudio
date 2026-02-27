@@ -29,7 +29,7 @@ export default function ViewportPanel() {
   const {
     activeViewportTab, setActiveViewportTab, logMessage,
     activeScene, selectedEntityId, setSelectedEntityId, updateEntity,
-    activeProjectDir, activeTarget,
+    activeTarget,
   } = useEditorStore();
   const canvasRef      = useRef<HTMLCanvasElement>(null);
   const sceneCanvasRef = useRef<HTMLCanvasElement>(null);

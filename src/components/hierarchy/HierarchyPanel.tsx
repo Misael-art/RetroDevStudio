@@ -10,8 +10,10 @@ const TYPE_ICON: Record<string, string> = {
   layer:   "▬",
 };
 
-function entityType(entity: { components?: { sprite?: unknown; collision?: unknown } }): string {
-  if (entity.components?.sprite) return "sprite";
+function entityType(entity: { components?: { sprite?: unknown; collision?: unknown; tilemap?: unknown; camera?: unknown } }): string {
+  if (entity.components?.camera)  return "camera";
+  if (entity.components?.tilemap) return "tilemap";
+  if (entity.components?.sprite)  return "sprite";
   return "object";
 }
 

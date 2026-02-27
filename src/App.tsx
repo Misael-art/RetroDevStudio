@@ -6,7 +6,7 @@ import Console         from "./components/common/Console";
 import ToolsPanel      from "./components/tools/ToolsPanel";
 import { useEditorStore } from "./core/store/editorStore";
 import { buildProject, validateProject, generateCCode } from "./core/ipc/buildService";
-import { emulatorLoadRom } from "./core/ipc/emulatorService";
+import { emulatorLoadRom, emulatorStop, startFrameLoop } from "./core/ipc/emulatorService";
 import { getHwStatus } from "./core/ipc/hwService";
 import { openProjectDialog, newProjectDialog, setProjectTarget } from "./core/ipc/projectService";
 
@@ -14,12 +14,14 @@ export default function App() {
   const {
     logMessage, setHwStatus,
     activeProjectDir, activeProjectName, setActiveProject,
-    activeTarget, setActiveTarget, setActiveScene, setActiveViewportTab,
+    activeTarget, setActiveTarget, setActiveScene, activeViewportTab, setActiveViewportTab,
     setSelectedEntityId,
   } = useEditorStore();
   const [building,       setBuilding]       = useState(false);
   const [toolsOpen,      setToolsOpen]      = useState(false);
   const [menuOpen,       setMenuOpen]       = useState<string | null>(null);
+  const [emulPaused,     setEmulPaused]     = useState(false);
+  const emulStopRef = useRef<(() => void) | null>(null);
   const [newProjName,    setNewProjName]    = useState("");
   const [showNewDialog,  setShowNewDialog]  = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -98,6 +100,53 @@ export default function App() {
         if (sd.target === "megadrive" || sd.target === "snes") setActiveTarget(sd.target);
       }
     }
+  }
+
+  async function handleEmulatorLoadRom() {
+    setMenuOpen(null);
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const selected = await open({
+      title: "Carregar ROM",
+      filters: [{ name: "ROM", extensions: ["md", "bin", "smc", "sfc", "rom"] }],
+    });
+    if (!selected) return;
+    const romPath = typeof selected === "string" ? selected : selected[0];
+    const r = await emulatorLoadRom(romPath);
+    if (r.ok) {
+      logMessage("success", `ROM carregada: ${romPath}`);
+      setActiveViewportTab("game");
+    } else {
+      logMessage("error", `[Emulador] ${r.message}`);
+    }
+  }
+
+  async function handleEmulatorPause() {
+    setMenuOpen(null);
+    if (!emulPaused) {
+      // Pausar: para o loop atual (stopRef armazenado em ViewportPanel)
+      // Não temos acesso direto, mas emulatorStop interrompe o core
+      await emulatorStop().catch(() => {});
+      setEmulPaused(true);
+      logMessage("info", "Emulador pausado.");
+    } else {
+      // Retomar: inicia novo loop sem frame callback (ViewportPanel gerencia isso)
+      const stop = await startFrameLoop(() => {});
+      emulStopRef.current = stop;
+      setEmulPaused(false);
+      logMessage("info", "Emulador retomado.");
+    }
+  }
+
+  async function handleEmulatorStop() {
+    setMenuOpen(null);
+    if (emulStopRef.current) {
+      emulStopRef.current();
+      emulStopRef.current = null;
+    }
+    await emulatorStop().catch(() => {});
+    setEmulPaused(false);
+    setActiveViewportTab("scene");
+    logMessage("info", "Emulador parado.");
   }
 
   async function handleValidate() {
@@ -269,8 +318,36 @@ export default function App() {
             )}
           </div>
 
+          {/* Menu Emulador — dropdown funcional */}
+          <div className="relative">
+            <button
+              onClick={() => setMenuOpen(menuOpen === "Emulador" ? null : "Emulador")}
+              className={`px-2 py-1 rounded transition-colors ${menuOpen === "Emulador" ? "bg-[#313244] text-[#cdd6f4]" : "hover:bg-[#313244] hover:text-[#cdd6f4]"}`}
+            >
+              Emulador
+            </button>
+            {menuOpen === "Emulador" && (
+              <div className="absolute left-0 top-full mt-0.5 w-52 bg-[#1e1e2e] border border-[#313244] rounded shadow-xl z-40 py-1">
+                <button onClick={handleEmulatorLoadRom}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2">
+                  <span className="text-[#89b4fa]">◉</span> Carregar ROM...
+                </button>
+                <div className="border-t border-[#313244] my-1" />
+                <button onClick={handleEmulatorPause} disabled={activeViewportTab !== "game"}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">
+                  <span className="text-[#f9e2af]">{emulPaused ? "▶" : "⏸"}</span>
+                  {emulPaused ? "Retomar" : "Pausar"}
+                </button>
+                <button onClick={handleEmulatorStop} disabled={activeViewportTab !== "game"}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#f38ba8] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">
+                  <span>■</span> Parar
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Menus estáticos */}
-          {["Editar", "Projeto", "Emulador", "Ajuda"].map((item) => (
+          {["Editar", "Projeto", "Ajuda"].map((item) => (
             <button
               key={item}
               className="px-2 py-1 hover:bg-[#313244] hover:text-[#cdd6f4] rounded transition-colors"

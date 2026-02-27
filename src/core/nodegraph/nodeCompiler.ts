@@ -175,24 +175,38 @@ export function parseCToNodes(source: string): ParsedNode[] {
       continue;
     }
 
-    // VDP_setHorizontalScroll → effect_parallax
+    // VDP_setHorizontalScroll → effect_parallax (Mega Drive)
     const parallaxMatch = trimmed.match(/VDP_setHorizontalScroll\(BG_(\w+),.*\+= (-?\d+)\)/);
     if (parallaxMatch) {
       nodes.push({ type: "effect_parallax", params: { layer: parallaxMatch[1], speed_x: Number(parallaxMatch[2]), speed_y: 0 } });
       continue;
     }
 
-    // VDP_setHorizontalScrollLine → effect_raster
+    // bgSetScroll → effect_parallax (SNES / PVSnesLib)
+    const snesParallaxMatch = trimmed.match(/bg_scroll_(\w+) \+= (-?\d+); bgSetScroll\(/);
+    if (snesParallaxMatch) {
+      nodes.push({ type: "effect_parallax", params: { layer: snesParallaxMatch[1], speed_x: Number(snesParallaxMatch[2]), speed_y: 0 } });
+      continue;
+    }
+
+    // VDP_setHorizontalScrollLine → effect_raster (Mega Drive)
     const rasterMatch = trimmed.match(/VDP_setHorizontalScrollLine\(BG_\w+,\s*(\d+),\s*(-?\d+)\)/);
     if (rasterMatch) {
       nodes.push({ type: "effect_raster", params: { scanline: Number(rasterMatch[1]), offset_x: Number(rasterMatch[2]) } });
       continue;
     }
 
-    // SND_startPlayPCM → action_sound
+    // SND_startPlayPCM → action_sound (Mega Drive)
     const soundMatch = trimmed.match(/SND_startPlayPCM\(SFX_(\w+)/);
     if (soundMatch) {
       nodes.push({ type: "action_sound", params: { sfx: soundMatch[1].toLowerCase() } });
+      continue;
+    }
+
+    // SPC_playSFX → action_sound (SNES / PVSnesLib)
+    const snesSoundMatch = trimmed.match(/SPC_playSFX\(SFX_(\w+)/);
+    if (snesSoundMatch) {
+      nodes.push({ type: "action_sound", params: { sfx: snesSoundMatch[1].toLowerCase() } });
       continue;
     }
   }

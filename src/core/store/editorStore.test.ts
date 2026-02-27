@@ -6,9 +6,13 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { useEditorStore } from "./editorStore";
-import type { Scene, Entity } from "../ipc/sceneService";
+import type { Scene, Entity, BackgroundLayer } from "../ipc/sceneService";
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
+
+function makeLayer(id: string, depth = 0): BackgroundLayer {
+  return { layer_id: id, depth, tileset: `${id}.png` };
+}
 
 function makeEntity(id: string, x = 0, y = 0): Entity {
   return {
@@ -120,6 +124,42 @@ describe("updateEntity", () => {
 
   it("não faz nada se não há cena ativa", () => {
     useEditorStore.getState().updateEntity("noop", { transform: { x: 1, y: 1 } });
+    expect(useEditorStore.getState().activeScene).toBeNull();
+  });
+});
+
+// ── updateBackgroundLayer ──────────────────────────────────────────────────────
+
+describe("updateBackgroundLayer", () => {
+  it("atualiza depth de um layer pelo id", () => {
+    const scene: Scene = { ...EMPTY_SCENE, background_layers: [makeLayer("bg0", 0)] };
+    useEditorStore.setState({ activeScene: scene });
+    useEditorStore.getState().updateBackgroundLayer("bg0", { depth: 5 });
+    const layer = useEditorStore.getState().activeScene!.background_layers[0];
+    expect(layer.depth).toBe(5);
+  });
+
+  it("atualiza tileset de um layer pelo id", () => {
+    const scene: Scene = { ...EMPTY_SCENE, background_layers: [makeLayer("sky", 1)] };
+    useEditorStore.setState({ activeScene: scene });
+    useEditorStore.getState().updateBackgroundLayer("sky", { tileset: "sky_new.png" });
+    const layer = useEditorStore.getState().activeScene!.background_layers[0];
+    expect(layer.tileset).toBe("sky_new.png");
+  });
+
+  it("não altera outros layers ao atualizar um", () => {
+    const scene: Scene = {
+      ...EMPTY_SCENE,
+      background_layers: [makeLayer("bg0", 0), makeLayer("bg1", 2)],
+    };
+    useEditorStore.setState({ activeScene: scene });
+    useEditorStore.getState().updateBackgroundLayer("bg0", { depth: 9 });
+    const layers = useEditorStore.getState().activeScene!.background_layers;
+    expect(layers[1].depth).toBe(2);
+  });
+
+  it("não faz nada se não há cena ativa", () => {
+    useEditorStore.getState().updateBackgroundLayer("ghost", { depth: 1 });
     expect(useEditorStore.getState().activeScene).toBeNull();
   });
 });
