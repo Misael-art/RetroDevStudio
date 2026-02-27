@@ -258,15 +258,13 @@ export default function ViewportPanel() {
   // ── Drag: mouseup persiste ────────────────────────────────────────────────
   async function handleMouseUp() {
     if (!dragRef.current) return;
-    // Captura referência antes de zerar, para garantir que o save usa o estado atual
-    const wasProjectDir = activeProjectDir;
-    const wasScene = activeScene;
     dragRef.current = null;
     setIsDragging(false);
-    // Auto-save após drag
-    if (wasProjectDir && wasScene) {
+    // Lê estado fresco do store — evita closure stale que perderia a posição final do drag
+    const { activeScene: scene, activeProjectDir: dir } = useEditorStore.getState();
+    if (dir && scene) {
       const { saveSceneData } = await import("../../core/ipc/sceneService");
-      await saveSceneData(wasProjectDir, JSON.stringify(wasScene, null, 2));
+      await saveSceneData(dir, JSON.stringify(scene, null, 2));
     }
   }
 

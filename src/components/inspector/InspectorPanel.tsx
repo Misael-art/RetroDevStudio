@@ -133,6 +133,11 @@ export default function InspectorPanel() {
   // Debounce timer para auto-save (600ms após última edição)
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Limpa o timer pendente ao desmontar — evita setSaving em componente morto
+  useEffect(() => () => {
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+  }, []);
+
   // Entidade ou layer selecionada
   const isLayer = selectedEntityId?.startsWith("layer::");
   const entity = isLayer
