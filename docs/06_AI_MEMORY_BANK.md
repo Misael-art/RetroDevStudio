@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Ultima Atualizacao:** 2026-02-26
-**Ultima sessao:** 2026-02-26 (Claude Code — Sessao 11: Sprints P7 verificada, P8 e P9 concluidas)
-**Fase Atual:** Pos-MVP — Polish/QA (P1-P9 concluidas).
+**Ultima sessao:** 2026-02-26 (Claude Code — Sessao 12: Sprints P10-P14 concluidas + 8 bugs corrigidos)
+**Fase Atual:** Pos-MVP — Polish/QA (P1-P14 concluidas).
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
 > Este e o seu bloco de memoria primario. Voce **DEVE** ler este arquivo integralmente antes de iniciar qualquer nova tarefa.
@@ -50,9 +50,20 @@
   - P9 (Vitest): `vitest@4.0.18` + `@vitest/ui` instalados como devDependency. `vite.config.ts` atualizado (import de `vitest/config`, bloco `test`). Script `"test": "vitest run"` adicionado ao `package.json`. 24 testes criados e passando: `nodeCompiler.test.ts` (14 testes — MD/SNES, empty graph, sound, parallax) + `editorStore.test.ts` (10 testes — addEntity, removeEntity, updateEntity).
   - **Validacoes passadas:** `cargo clippy -- -D warnings` OK (50.60s), `npm run build` OK (54 módulos), `npm test` OK (24/24 testes).
 
+* **O que acabou de acontecer (2026-02-26 — sessao 12):**
+  - **REVISÃO DE CÓDIGO: 8 bugs corrigidos** (cursor não reativo, status bar hardcoded MD/SNES, race condition mouseLeave, regex dx negativo, API PVSnesLib errada, stale closure nos testes, environment jsdom, fixtures GraphNode incorretos).
+  - **SPRINTS P10-P14 CONCLUIDAS.**
+  - P10: `confirmNewProject` corrigido — agora chama getHwStatus + getSceneData + setActiveScene + setActiveTarget (equivalente ao handleOpenProject). Corrige Hierarchy vazia ao criar projeto novo.
+  - P11: `handleBuildAndRun` agora chama `emulatorLoadRom(rom_path)` após build OK e navega para aba "Jogo". Loop Build→Play fechado.
+  - P12: Menu "Build" transformado em dropdown funcional: Validar Projeto, Gerar Código C, Build & Run. `validateProject` e `generateCCode` expostos na UI.
+  - P13: `InspectorPanel` — BackgroundLayer.depth/.tileset editáveis via PropRow; auto-save com debounce 600ms após edições de entidades e layers; `saveScene()` usa `getState()` para evitar stale closure. `editorStore` + `updateBackgroundLayer()`.
+  - P14: Menu Arquivo → "Fechar Projeto" — limpa todo o estado (projeto, cena, hw, seleção).
+  - **Validações:** `tsc --noEmit` OK · `cargo clippy` OK · `npm test` OK (26/26).
+
 * **Proximo passo imediato:**
-  1. Commit git das sprints P7-verificada, P8 e P9.
-  2. Próximas sprints a definir com o usuário (possíveis: P10 — status bar canvas adaptativa MD/SNES, P11 — cobertura de testes para outros módulos).
+  1. Menu "Emulador" com dropdown (Carregar ROM, Pausar/Retomar, Parar).
+  2. HierarchyPanel: `entityType()` detecta apenas `sprite` — expandir para `tilemap`, `camera`.
+  3. Testes adicionais: `updateBackgroundLayer`, `handleLayerChange`, round-trip SNES parseCToNodes.
 
 * **O que acabou de acontecer (2026-02-25 — sessao 9):**
   - **FASE 4 CONCLUIDA. ROADMAP MVP INTEIRAMENTE CONCLUIDO.**
