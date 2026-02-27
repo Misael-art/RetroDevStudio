@@ -1,9 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Panel from "../common/Panel";
 import { useEditorStore } from "../../core/store/editorStore";
 import HardwareLimitsPanel from "./HardwareLimitsPanel";
 import { saveSceneData } from "../../core/ipc/sceneService";
-import type { Entity } from "../../core/ipc/sceneService";
+import type { Entity, BackgroundLayer } from "../../core/ipc/sceneService";
 
 // ── Prop row: exibe e edita um par chave/valor ─────────────────────────────────
 
@@ -77,7 +77,7 @@ function PropRow({ label, value, type, onChange }: PropRowProps) {
 
 interface PropDef {
   key: string;
-  path: string[];       // caminho no objeto Entity para leitura
+  path: string[];
   type: "string" | "int" | "bool";
 }
 
@@ -124,12 +124,14 @@ export default function InspectorPanel() {
   const {
     selectedEntityId,
     activeScene,
-    activeProjectDir,
     updateEntity,
+    updateBackgroundLayer,
     logMessage,
   } = useEditorStore();
 
   const [saving, setSaving] = useState(false);
+  // Debounce timer para auto-save (600ms após última edição)
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Entidade ou layer selecionada
   const isLayer = selectedEntityId?.startsWith("layer::");
@@ -140,19 +142,26 @@ export default function InspectorPanel() {
     ? activeScene?.background_layers.find((l) => `layer::${l.layer_id}` === selectedEntityId) ?? null
     : null;
 
-  async function handleSave() {
-    if (!activeProjectDir || !activeScene) return;
+  // Salva a cena — usado pelo auto-save e pelo botão manual
+  async function saveScene() {
+    const { activeScene: scene, activeProjectDir: dir } = useEditorStore.getState();
+    if (!dir || !scene) return;
     setSaving(true);
     try {
-      const result = await saveSceneData(activeProjectDir, JSON.stringify(activeScene, null, 2));
-      logMessage(result.ok ? "success" : "error", `[Inspector] ${result.message}`);
+      const result = await saveSceneData(dir, JSON.stringify(scene, null, 2));
+      if (!result.ok) logMessage("error", `[Inspector] ${result.message}`);
     } finally {
       setSaving(false);
     }
   }
 
+  // Dispara auto-save com debounce de 600ms após cada edição
+  function scheduleAutoSave() {
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(saveScene, 600);
+  }
+
   function handleChange(entity: Entity, def: PropDef, val: string | number | boolean) {
-    // Aplica patch no caminho correto
     if (def.path.length === 1) {
       updateEntity(entity.entity_id, { [def.path[0]]: val } as Partial<Entity>);
     } else if (def.path[0] === "transform" && def.path.length === 2) {
@@ -166,6 +175,12 @@ export default function InspectorPanel() {
         components: { ...entity.components, collision: { ...entity.components.collision!, [def.path[2]]: val } },
       });
     }
+    scheduleAutoSave();
+  }
+
+  function handleLayerChange(layer: BackgroundLayer, field: keyof BackgroundLayer, val: string | number) {
+    updateBackgroundLayer(layer.layer_id, { [field]: val } as Partial<BackgroundLayer>);
+    scheduleAutoSave();
   }
 
   return (
@@ -191,10 +206,10 @@ export default function InspectorPanel() {
                 ))}
               </tbody>
             </table>
-            {/* Save button */}
+            {/* Save button — auto-save ocorre 600ms após edição; botão manual disponível */}
             <div className="px-3 py-2">
               <button
-                onClick={handleSave}
+                onClick={saveScene}
                 disabled={saving}
                 className={`w-full py-1 text-xs font-semibold rounded transition-colors ${
                   saving
@@ -207,22 +222,41 @@ export default function InspectorPanel() {
             </div>
           </>
         ) : layer ? (
-          <table className="w-full text-xs">
-            <tbody>
-              <tr className="border-b border-[#313244]">
-                <td className="px-3 py-1.5 text-[#7f849c] w-1/2">ID</td>
-                <td className="px-3 py-1.5 text-[#cdd6f4] font-mono">{layer.layer_id}</td>
-              </tr>
-              <tr className="border-b border-[#313244]">
-                <td className="px-3 py-1.5 text-[#7f849c] w-1/2">Depth</td>
-                <td className="px-3 py-1.5 text-[#cdd6f4] font-mono">{layer.depth}</td>
-              </tr>
-              <tr className="border-b border-[#313244] last:border-0">
-                <td className="px-3 py-1.5 text-[#7f849c] w-1/2">Tileset</td>
-                <td className="px-3 py-1.5 text-[#cdd6f4] font-mono truncate max-w-0">{layer.tileset}</td>
-              </tr>
-            </tbody>
-          </table>
+          <>
+            <table className="w-full text-xs">
+              <tbody>
+                <tr className="border-b border-[#313244]">
+                  <td className="px-3 py-1.5 text-[#7f849c] w-1/2 select-none text-xs">ID</td>
+                  <td className="px-3 py-1.5 text-[#cdd6f4] font-mono text-xs">{layer.layer_id}</td>
+                </tr>
+                <PropRow
+                  label="Depth"
+                  value={layer.depth}
+                  type="int"
+                  onChange={(val) => handleLayerChange(layer, "depth", val as number)}
+                />
+                <PropRow
+                  label="Tileset"
+                  value={layer.tileset}
+                  type="string"
+                  onChange={(val) => handleLayerChange(layer, "tileset", val as string)}
+                />
+              </tbody>
+            </table>
+            <div className="px-3 py-2">
+              <button
+                onClick={saveScene}
+                disabled={saving}
+                className={`w-full py-1 text-xs font-semibold rounded transition-colors ${
+                  saving
+                    ? "bg-[#45475a] text-[#6c7086] cursor-not-allowed"
+                    : "bg-[#313244] text-[#cba6f7] hover:bg-[#45475a]"
+                }`}
+              >
+                {saving ? "Salvando..." : "💾 Salvar Cena"}
+              </button>
+            </div>
+          </>
         ) : null}
       </div>
 

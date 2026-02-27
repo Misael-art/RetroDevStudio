@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Scene, Entity } from "../ipc/sceneService";
+import type { Scene, Entity, BackgroundLayer } from "../ipc/sceneService";
 
 export interface HwStatus {
   vram_used: number;
@@ -60,6 +60,7 @@ interface EditorState {
   updateEntity: (entityId: string, patch: Partial<Entity>) => void;
   addEntity: (entity: Entity) => void;
   removeEntity: (entityId: string) => void;
+  updateBackgroundLayer: (layerId: string, patch: Partial<BackgroundLayer>) => void;
 }
 
 let _entryCounter = 0;
@@ -138,6 +139,18 @@ export const useEditorStore = create<EditorState>((set) => ({
           entities: state.activeScene.entities.filter((e) => e.entity_id !== entityId),
         },
         selectedEntityId: state.selectedEntityId === entityId ? null : state.selectedEntityId,
+      };
+    }),
+  updateBackgroundLayer: (layerId, patch) =>
+    set((state) => {
+      if (!state.activeScene) return {};
+      return {
+        activeScene: {
+          ...state.activeScene,
+          background_layers: state.activeScene.background_layers.map((l) =>
+            l.layer_id === layerId ? { ...l, ...patch } : l
+          ),
+        },
       };
     }),
 }));

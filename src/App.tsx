@@ -15,6 +15,7 @@ export default function App() {
     logMessage, setHwStatus,
     activeProjectDir, activeProjectName, setActiveProject,
     activeTarget, setActiveTarget, setActiveScene, setActiveViewportTab,
+    setSelectedEntityId,
   } = useEditorStore();
   const [building,       setBuilding]       = useState(false);
   const [toolsOpen,      setToolsOpen]      = useState(false);
@@ -62,6 +63,15 @@ export default function App() {
     } else {
       logMessage("error", `[Target] ${r.message}`);
     }
+  }
+
+  function handleCloseProject() {
+    setMenuOpen(null);
+    setActiveProject("", "");
+    setActiveScene(null);
+    setHwStatus(null);
+    setSelectedEntityId(null);
+    logMessage("info", "Projeto fechado.");
   }
 
   async function handleNewProject() {
@@ -214,6 +224,13 @@ export default function App() {
                 <button onClick={handleOpenProject}
                   className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2">
                   <span className="text-[#89b4fa]">◉</span> Abrir Projeto...
+                </button>
+                <button
+                  onClick={handleCloseProject}
+                  disabled={!activeProjectDir}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#f38ba8] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <span>✕</span> Fechar Projeto
                 </button>
                 <div className="border-t border-[#313244] my-1" />
                 <div className="px-3 py-1 text-[10px] text-[#45475a] truncate max-w-full">
