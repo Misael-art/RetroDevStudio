@@ -67,10 +67,17 @@
   - P17: Testes adicionais — 4 testes `updateBackgroundLayer` (depth, tileset, imutabilidade, sem cena), 2 testes round-trip SNES (`bgSetScroll↔effect_parallax`, `SPC_playSFX↔action_sound`). Parser `parseCToNodes` agora reconhece APIs SNES (`bgSetScroll`, `SPC_playSFX`).
   - **Validações:** `tsc --noEmit` OK · `npm test` OK (32/32). Commit: `cd391df`.
 
+* **O que acabou de acontecer (2026-02-27 — sessao 14):**
+  - **SPRINTS P18 + P19 CONCLUIDAS.**
+  - P18: `handleChange` em `InspectorPanel.tsx` corrigido — adicionados dois `else if` para `components.camera` e `components.tilemap`. Antes, edições nesses campos eram ignoradas silenciosamente. Agora o padrão é consistente com `sprite`/`collision`.
+  - P19: 2 novos testes em `editorStore.test.ts` — `updateEntity` com `components.camera` (verifica `offset_x`/`offset_y` + imutabilidade) e `components.tilemap` (verifica `scroll_x`/`scroll_y` + imutabilidade).
+  - Import desnecessário `CameraComponent`/`TilemapComponent` removido do InspectorPanel.
+  - **Validações:** `tsc --noEmit` OK · `npm test` OK (34/34).
+
 * **Proximo passo imediato:**
-  1. Emulador Pause/Resume real via controle externo do loop do `ViewportPanel` (atualmente P15 para o loop de uma instância global separada, não o loop do painel).
-  2. Inspector: adicionar suporte a `components.tilemap` e `components.camera` no `entityProps()`.
-  3. `handleLayerChange` tests (InspectorPanel integration).
+  1. Emulador Pause/Resume: `ViewportPanel` já reage a `emulPaused` via `useEffect` (P18 já implementado). Verificar se funciona na prática com `npm run tauri dev`.
+  2. P20: Inspector tilemap/camera — adicionar suporte a `scroll_x`/`scroll_y` como campos editáveis no modo de visualização de tilemap no Viewport (highlight na cena).
+  3. P21: Menus "Editar", "Projeto" e "Ajuda" — transformar em dropdowns funcionais.
 
 * **O que acabou de acontecer (2026-02-25 — sessao 9):**
   - **FASE 4 CONCLUIDA. ROADMAP MVP INTEIRAMENTE CONCLUIDO.**

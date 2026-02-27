@@ -105,6 +105,22 @@ function entityProps(entity: Entity): PropDef[] {
       { key: "Solid",       path: ["components", "collision", "solid"],  type: "bool"   },
     );
   }
+  if (entity.components?.camera) {
+    defs.push(
+      { key: "Follow",    path: ["components", "camera", "follow_entity"], type: "string" },
+      { key: "Offset X",  path: ["components", "camera", "offset_x"],      type: "int"    },
+      { key: "Offset Y",  path: ["components", "camera", "offset_y"],      type: "int"    },
+    );
+  }
+  if (entity.components?.tilemap) {
+    defs.push(
+      { key: "TM Tileset",  path: ["components", "tilemap", "tileset"],   type: "string" },
+      { key: "TM Width",    path: ["components", "tilemap", "map_width"],  type: "int"    },
+      { key: "TM Height",   path: ["components", "tilemap", "map_height"], type: "int"    },
+      { key: "Scroll X",    path: ["components", "tilemap", "scroll_x"],   type: "int"    },
+      { key: "Scroll Y",    path: ["components", "tilemap", "scroll_y"],   type: "int"    },
+    );
+  }
   return defs;
 }
 
@@ -178,6 +194,14 @@ export default function InspectorPanel() {
     } else if (def.path[0] === "components" && def.path[1] === "collision" && def.path.length === 3) {
       updateEntity(entity.entity_id, {
         components: { ...entity.components, collision: { ...entity.components.collision!, [def.path[2]]: val } },
+      });
+    } else if (def.path[0] === "components" && def.path[1] === "camera" && def.path.length === 3) {
+      updateEntity(entity.entity_id, {
+        components: { ...entity.components, camera: { ...entity.components.camera!, [def.path[2]]: val } },
+      });
+    } else if (def.path[0] === "components" && def.path[1] === "tilemap" && def.path.length === 3) {
+      updateEntity(entity.entity_id, {
+        components: { ...entity.components, tilemap: { ...entity.components.tilemap!, [def.path[2]]: val } },
       });
     }
     scheduleAutoSave();

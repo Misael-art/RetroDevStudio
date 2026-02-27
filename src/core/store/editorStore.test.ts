@@ -126,6 +126,42 @@ describe("updateEntity", () => {
     useEditorStore.getState().updateEntity("noop", { transform: { x: 1, y: 1 } });
     expect(useEditorStore.getState().activeScene).toBeNull();
   });
+
+  it("atualiza components.camera mantendo imutabilidade", () => {
+    const entity: Entity = {
+      entity_id: "cam",
+      prefab: "camera",
+      transform: { x: 0, y: 0 },
+      components: { camera: { follow_entity: "hero", offset_x: 0, offset_y: 0 } },
+    };
+    useEditorStore.setState({ activeScene: { ...EMPTY_SCENE, entities: [entity] } });
+    useEditorStore.getState().updateEntity("cam", {
+      components: { camera: { follow_entity: "hero", offset_x: 16, offset_y: 8 } },
+    });
+    const updated = useEditorStore.getState().activeScene!.entities[0];
+    expect(updated.components.camera!.offset_x).toBe(16);
+    expect(updated.components.camera!.offset_y).toBe(8);
+    // Imutabilidade: objeto original não foi mutado
+    expect(entity.components.camera!.offset_x).toBe(0);
+  });
+
+  it("atualiza components.tilemap mantendo imutabilidade", () => {
+    const entity: Entity = {
+      entity_id: "tm",
+      prefab: "tilemap",
+      transform: { x: 0, y: 0 },
+      components: { tilemap: { tileset: "world.png", map_width: 32, map_height: 28, scroll_x: 0, scroll_y: 0 } },
+    };
+    useEditorStore.setState({ activeScene: { ...EMPTY_SCENE, entities: [entity] } });
+    useEditorStore.getState().updateEntity("tm", {
+      components: { tilemap: { tileset: "world.png", map_width: 32, map_height: 28, scroll_x: 64, scroll_y: 32 } },
+    });
+    const updated = useEditorStore.getState().activeScene!.entities[0];
+    expect(updated.components.tilemap!.scroll_x).toBe(64);
+    expect(updated.components.tilemap!.scroll_y).toBe(32);
+    // Imutabilidade: objeto original não foi mutado
+    expect(entity.components.tilemap!.scroll_x).toBe(0);
+  });
 });
 
 // ── updateBackgroundLayer ──────────────────────────────────────────────────────
