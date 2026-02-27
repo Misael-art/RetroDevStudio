@@ -5,7 +5,8 @@ import ViewportPanel   from "./components/viewport/ViewportPanel";
 import Console         from "./components/common/Console";
 import ToolsPanel      from "./components/tools/ToolsPanel";
 import { useEditorStore } from "./core/store/editorStore";
-import { buildProject } from "./core/ipc/buildService";
+import { buildProject, validateProject, generateCCode } from "./core/ipc/buildService";
+import { emulatorLoadRom } from "./core/ipc/emulatorService";
 import { getHwStatus } from "./core/ipc/hwService";
 import { openProjectDialog, newProjectDialog, setProjectTarget } from "./core/ipc/projectService";
 
@@ -13,7 +14,7 @@ export default function App() {
   const {
     logMessage, setHwStatus,
     activeProjectDir, activeProjectName, setActiveProject,
-    activeTarget, setActiveTarget,
+    activeTarget, setActiveTarget, setActiveScene, setActiveViewportTab,
   } = useEditorStore();
   const [building,       setBuilding]       = useState(false);
   const [toolsOpen,      setToolsOpen]      = useState(false);
@@ -76,6 +77,38 @@ export default function App() {
     if (result.selected) {
       setActiveProject(result.path, result.name);
       logMessage("success", `Novo projeto criado: ${result.name} em ${result.path}`);
+      // Mesmas inicializações do handleOpenProject — sem isso a Hierarchy fica vazia
+      const hw = await getHwStatus(result.path);
+      setHwStatus(hw);
+      const { getSceneData, parseScene } = await import("./core/ipc/sceneService");
+      const sd = await getSceneData(result.path);
+      if (sd.ok) {
+        const scene = parseScene(sd);
+        if (scene) setActiveScene(scene);
+        if (sd.target === "megadrive" || sd.target === "snes") setActiveTarget(sd.target);
+      }
+    }
+  }
+
+  async function handleValidate() {
+    setMenuOpen(null);
+    if (!activeProjectDir) { logMessage("warn", "Nenhum projeto aberto."); return; }
+    logMessage("info", "Validando projeto...");
+    const r = await validateProject(activeProjectDir);
+    r.errors.forEach((e) => logMessage("error", `[Validate] ${e}`));
+    r.warnings.forEach((w) => logMessage("warn", `[Validate] ${w}`));
+    if (r.ok) logMessage("success", "Validação OK — nenhum erro de hardware.");
+  }
+
+  async function handleGenerateC() {
+    setMenuOpen(null);
+    if (!activeProjectDir) { logMessage("warn", "Nenhum projeto aberto."); return; }
+    logMessage("info", "Gerando código C...");
+    const r = await generateCCode(activeProjectDir);
+    r.errors.forEach((e) => logMessage("error", `[CodeGen] ${e}`));
+    if (r.ok) {
+      logMessage("success", "Código C gerado com sucesso.");
+      logMessage("info", `--- main.c ---\n${r.main_c.slice(0, 800)}${r.main_c.length > 800 ? "\n[truncado]" : ""}`);
     }
   }
 
@@ -104,6 +137,14 @@ export default function App() {
 
       if (result.ok) {
         logMessage("success", `Build concluído! ROM: ${result.rom_path}`);
+        // Carrega a ROM no emulador e navega para aba Jogo
+        const loadResult = await emulatorLoadRom(result.rom_path);
+        if (loadResult.ok) {
+          logMessage("info", "ROM carregada no emulador. Iniciando...");
+          setActiveViewportTab("game");
+        } else {
+          logMessage("warn", `Emulador: ${loadResult.message}`);
+        }
       } else {
         logMessage("error", "Build falhou. Verifique o Console para detalhes.");
       }
@@ -184,8 +225,35 @@ export default function App() {
             )}
           </div>
 
-          {/* Menus estáticos por enquanto */}
-          {["Editar", "Projeto", "Build", "Emulador", "Ajuda"].map((item) => (
+          {/* Menu Build — dropdown funcional */}
+          <div className="relative">
+            <button
+              onClick={() => setMenuOpen(menuOpen === "Build" ? null : "Build")}
+              className={`px-2 py-1 rounded transition-colors ${menuOpen === "Build" ? "bg-[#313244] text-[#cdd6f4]" : "hover:bg-[#313244] hover:text-[#cdd6f4]"}`}
+            >
+              Build
+            </button>
+            {menuOpen === "Build" && (
+              <div className="absolute left-0 top-full mt-0.5 w-52 bg-[#1e1e2e] border border-[#313244] rounded shadow-xl z-40 py-1">
+                <button onClick={handleValidate} disabled={!activeProjectDir}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">
+                  <span className="text-[#89b4fa]">✓</span> Validar Projeto
+                </button>
+                <button onClick={handleGenerateC} disabled={!activeProjectDir}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">
+                  <span className="text-[#f9e2af]">⟨/⟩</span> Gerar Código C
+                </button>
+                <div className="border-t border-[#313244] my-1" />
+                <button onClick={() => { setMenuOpen(null); handleBuildAndRun(); }} disabled={!activeProjectDir || building}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#a6e3a1] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">
+                  <span>▶</span> Build & Run
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Menus estáticos */}
+          {["Editar", "Projeto", "Emulador", "Ajuda"].map((item) => (
             <button
               key={item}
               className="px-2 py-1 hover:bg-[#313244] hover:text-[#cdd6f4] rounded transition-colors"
