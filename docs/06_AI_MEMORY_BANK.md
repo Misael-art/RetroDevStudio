@@ -60,10 +60,17 @@
   - P14: Menu Arquivo → "Fechar Projeto" — limpa todo o estado (projeto, cena, hw, seleção).
   - **Validações:** `tsc --noEmit` OK · `cargo clippy` OK · `npm test` OK (26/26).
 
+* **O que acabou de acontecer (2026-02-27 — sessao 13):**
+  - **SPRINTS P15 + P16 + P17 CONCLUIDAS.**
+  - P15: Menu "Emulador" dropdown funcional em `App.tsx` — Carregar ROM (dialog nativo → `emulatorLoadRom`, navega para aba Jogo), Pausar/Retomar (toggle `emulPaused`, chama `emulatorStop`/`startFrameLoop`), Parar (limpa loop, volta à aba Cena). Habilitado apenas quando aba Jogo ativa.
+  - P16: `HierarchyPanel.entityType()` expandido — detecta `components.camera` → "camera" (⊙) e `components.tilemap` → "tilemap" (▦). `TYPE_ICON["camera"]` e `TYPE_ICON["tilemap"]` agora atingíveis.
+  - P17: Testes adicionais — 4 testes `updateBackgroundLayer` (depth, tileset, imutabilidade, sem cena), 2 testes round-trip SNES (`bgSetScroll↔effect_parallax`, `SPC_playSFX↔action_sound`). Parser `parseCToNodes` agora reconhece APIs SNES (`bgSetScroll`, `SPC_playSFX`).
+  - **Validações:** `tsc --noEmit` OK · `npm test` OK (32/32). Commit: `cd391df`.
+
 * **Proximo passo imediato:**
-  1. Menu "Emulador" com dropdown (Carregar ROM, Pausar/Retomar, Parar).
-  2. HierarchyPanel: `entityType()` detecta apenas `sprite` — expandir para `tilemap`, `camera`.
-  3. Testes adicionais: `updateBackgroundLayer`, `handleLayerChange`, round-trip SNES parseCToNodes.
+  1. Emulador Pause/Resume real via controle externo do loop do `ViewportPanel` (atualmente P15 para o loop de uma instância global separada, não o loop do painel).
+  2. Inspector: adicionar suporte a `components.tilemap` e `components.camera` no `entityProps()`.
+  3. `handleLayerChange` tests (InspectorPanel integration).
 
 * **O que acabou de acontecer (2026-02-25 — sessao 9):**
   - **FASE 4 CONCLUIDA. ROADMAP MVP INTEIRAMENTE CONCLUIDO.**
