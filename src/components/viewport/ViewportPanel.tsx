@@ -29,7 +29,7 @@ export default function ViewportPanel() {
   const {
     activeViewportTab, setActiveViewportTab, logMessage,
     activeScene, selectedEntityId, setSelectedEntityId, updateEntity,
-    activeTarget,
+    activeTarget, emulPaused,
   } = useEditorStore();
   const canvasRef      = useRef<HTMLCanvasElement>(null);
   const sceneCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -96,6 +96,27 @@ export default function ViewportPanel() {
       }
     };
   }, [activeViewportTab, renderFrame, logMessage]);
+
+  // ── Pause / Resume control (P18) ─────────────────────────────────────────
+  useEffect(() => {
+    if (activeViewportTab !== "game") return;
+    if (emulPaused) {
+      // Para o loop e o core
+      if (stopLoopRef.current) {
+        stopLoopRef.current();
+        stopLoopRef.current = null;
+      }
+      emulatorStop().catch(() => {});
+      setEmulatorActive(false);
+    } else {
+      // Retoma apenas se não há loop ativo
+      if (stopLoopRef.current) return;
+      startFrameLoop(renderFrame).then((stopFn) => {
+        stopLoopRef.current = stopFn;
+        setEmulatorActive(true);
+      }).catch(() => {});
+    }
+  }, [emulPaused, activeViewportTab, renderFrame]);
 
   // ── Keyboard input handling ───────────────────────────────────────────────
   useEffect(() => {
@@ -180,6 +201,65 @@ export default function ViewportPanel() {
       const isSelected = entity.entity_id === selectedEntityId;
       const color = COLORS[i % COLORS.length];
 
+      // ── Tilemap: grade de tiles sobre a área do mapa ──
+      if (entity.components?.tilemap) {
+        const tm = entity.components.tilemap;
+        const mapW = tm.map_width  * 8; // 8px por tile (visualização)
+        const mapH = tm.map_height * 8;
+        ctx.fillStyle = "rgba(148,226,213,0.08)";
+        ctx.fillRect(x, y, mapW, mapH);
+        ctx.strokeStyle = "rgba(148,226,213,0.30)";
+        ctx.lineWidth = 0.5;
+        for (let tx = 0; tx <= mapW; tx += 8) {
+          ctx.beginPath(); ctx.moveTo(x + tx, y); ctx.lineTo(x + tx, y + mapH); ctx.stroke();
+        }
+        for (let ty = 0; ty <= mapH; ty += 8) {
+          ctx.beginPath(); ctx.moveTo(x, y + ty); ctx.lineTo(x + mapW, y + ty); ctx.stroke();
+        }
+        // Borda do tilemap
+        ctx.strokeStyle = isSelected ? "#94e2d5" : "rgba(148,226,213,0.5)";
+        ctx.lineWidth = isSelected ? 2 : 1;
+        ctx.strokeRect(x, y, mapW, mapH);
+        ctx.fillStyle = "#94e2d5";
+        ctx.font = "9px monospace";
+        ctx.textAlign = "left";
+        ctx.fillText(`▦ ${entity.prefab ?? entity.entity_id}`.slice(0, 16), x + 2, y + 10);
+        if (isSelected) {
+          ctx.fillStyle = "rgba(148,226,213,0.15)";
+          ctx.fillRect(x, y, mapW, mapH);
+        }
+        return;
+      }
+
+      // ── Camera: retângulo tracejado representando o frustum ──
+      if (entity.components?.camera) {
+        const cam = entity.components.camera;
+        const vw = activeTarget === "snes" ? 256 : 320;
+        const vh = 224;
+        const ox = cam.offset_x;
+        const oy = cam.offset_y;
+        ctx.save();
+        ctx.setLineDash([4, 3]);
+        ctx.strokeStyle = isSelected ? "#f9e2af" : "rgba(249,226,175,0.55)";
+        ctx.lineWidth = isSelected ? 2 : 1;
+        ctx.strokeRect(x + ox, y + oy, vw, vh);
+        ctx.setLineDash([]);
+        ctx.restore();
+        // Ícone + label
+        ctx.fillStyle = isSelected ? "#f9e2af" : "rgba(249,226,175,0.7)";
+        ctx.font = "9px monospace";
+        ctx.textAlign = "left";
+        ctx.fillText(`⊙ ${entity.prefab ?? entity.entity_id}`.slice(0, 16), x + ox + 2, y + oy + 10);
+        // Cruz central
+        ctx.strokeStyle = isSelected ? "#f9e2af" : "rgba(249,226,175,0.4)";
+        ctx.lineWidth = 1;
+        const cx = x + ox + vw / 2, cy = y + oy + vh / 2;
+        ctx.beginPath(); ctx.moveTo(cx - 6, cy); ctx.lineTo(cx + 6, cy); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx, cy - 6); ctx.lineTo(cx, cy + 6); ctx.stroke();
+        return;
+      }
+
+      // ── Sprite / entidade genérica ──
       // Caixa da entidade
       ctx.fillStyle = color + "33"; // 20% alpha
       ctx.fillRect(x, y, w, h);
@@ -201,7 +281,7 @@ export default function ViewportPanel() {
       ctx.arc(x + w / 2, y + h / 2, 2, 0, Math.PI * 2);
       ctx.fill();
     });
-  }, [activeViewportTab, activeScene, selectedEntityId]);
+  }, [activeViewportTab, activeScene, selectedEntityId, activeTarget]);
 
   // ── Scene canvas helpers ──────────────────────────────────────────────────
   function canvasCoords(e: React.MouseEvent<HTMLCanvasElement>) {

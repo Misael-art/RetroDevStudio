@@ -80,6 +80,22 @@ function emitNodeC(node: GraphNode, target: "megadrive" | "snes"): string {
       }
       return `    SND_startPlayPCM(SFX_${String(p.sfx).toUpperCase()}, 1, SOUND_PCM_CH_AUTO);\n`;
 
+    case "scroll_tilemap":
+      if (target === "snes") {
+        // PVSnesLib: bgSetScroll(u8 bgIndex, u16 x, u16 y) — acumula scroll em variável global
+        return `    tm_scroll_x_${p.layer} += ${p.dx}; tm_scroll_y_${p.layer} += ${p.dy}; bgSetScroll(${p.layer}, tm_scroll_x_${p.layer}, tm_scroll_y_${p.layer});\n`;
+      }
+      // SGDK: VDP_setHorizontalScroll / VDP_setVerticalScroll — layer como enum BG_A/BG_B
+      return `    tm_scroll_x_${p.layer} += ${p.dx}; VDP_setHorizontalScroll(${p.layer}, tm_scroll_x_${p.layer});\n    tm_scroll_y_${p.layer} += ${p.dy}; VDP_setVerticalScroll(${p.layer}, tm_scroll_y_${p.layer});\n`;
+
+    case "move_camera":
+      if (target === "snes") {
+        // PVSnesLib: sem API de câmera nativa — ajusta scroll dos layers diretamente
+        return `    bgSetScroll(0, ${p.x}, ${p.y}); // camera: ${p.target}\n`;
+      }
+      // SGDK: câmera via scroll horizontal + vertical do BG_A
+      return `    VDP_setHorizontalScroll(BG_A, ${p.x}); VDP_setVerticalScroll(BG_A, ${p.y}); // camera: ${p.target}\n`;
+
     default:
       return `    // [unknown node: ${node.type}]\n`;
   }
@@ -207,6 +223,38 @@ export function parseCToNodes(source: string): ParsedNode[] {
     const snesSoundMatch = trimmed.match(/SPC_playSFX\(SFX_(\w+)/);
     if (snesSoundMatch) {
       nodes.push({ type: "action_sound", params: { sfx: snesSoundMatch[1].toLowerCase() } });
+      continue;
+    }
+
+    // VDP_setHorizontalScroll + VDP_setVerticalScroll → scroll_tilemap (Mega Drive)
+    // Padrão: tm_scroll_x_LAYER += DX; VDP_setHorizontalScroll(LAYER, ...)
+    const tmScrollMdMatch = trimmed.match(/tm_scroll_x_(\w+) \+= (-?\d+); VDP_setHorizontalScroll/);
+    if (tmScrollMdMatch) {
+      // Extrai dy da linha seguinte — aqui aproximamos com 0 se não encontrado
+      const dyMatch = trimmed.match(/tm_scroll_y_\w+ \+= (-?\d+)/);
+      nodes.push({ type: "scroll_tilemap", params: { layer: tmScrollMdMatch[1], dx: Number(tmScrollMdMatch[2]), dy: dyMatch ? Number(dyMatch[1]) : 0 } });
+      continue;
+    }
+
+    // bgSetScroll com prefixo tm_scroll → scroll_tilemap (SNES)
+    const tmScrollSnesMatch = trimmed.match(/tm_scroll_x_(\w+) \+= (-?\d+); tm_scroll_y_\w+ \+= (-?\d+); bgSetScroll/);
+    if (tmScrollSnesMatch) {
+      nodes.push({ type: "scroll_tilemap", params: { layer: tmScrollSnesMatch[1], dx: Number(tmScrollSnesMatch[2]), dy: Number(tmScrollSnesMatch[3]) } });
+      continue;
+    }
+
+    // VDP_setHorizontalScroll(BG_A, X) com comentário "camera" → move_camera (Mega Drive)
+    const moveCamMdMatch = trimmed.match(/VDP_setHorizontalScroll\(BG_A,\s*(-?\d+)\).*camera:\s*(\w+)/);
+    if (moveCamMdMatch) {
+      const yMatch = trimmed.match(/VDP_setVerticalScroll\(BG_A,\s*(-?\d+)\)/);
+      nodes.push({ type: "move_camera", params: { target: moveCamMdMatch[2], x: Number(moveCamMdMatch[1]), y: yMatch ? Number(yMatch[1]) : 0 } });
+      continue;
+    }
+
+    // bgSetScroll(0, X, Y) com comentário "camera" → move_camera (SNES)
+    const moveCamSnesMatch = trimmed.match(/bgSetScroll\(0,\s*(-?\d+),\s*(-?\d+)\).*camera:\s*(\w+)/);
+    if (moveCamSnesMatch) {
+      nodes.push({ type: "move_camera", params: { target: moveCamSnesMatch[3], x: Number(moveCamSnesMatch[1]), y: Number(moveCamSnesMatch[2]) } });
       continue;
     }
   }

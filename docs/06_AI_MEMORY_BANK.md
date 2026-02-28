@@ -69,15 +69,21 @@
 
 * **O que acabou de acontecer (2026-02-27 — sessao 14):**
   - **SPRINTS P18 + P19 CONCLUIDAS.**
-  - P18: `handleChange` em `InspectorPanel.tsx` corrigido — adicionados dois `else if` para `components.camera` e `components.tilemap`. Antes, edições nesses campos eram ignoradas silenciosamente. Agora o padrão é consistente com `sprite`/`collision`.
-  - P19: 2 novos testes em `editorStore.test.ts` — `updateEntity` com `components.camera` (verifica `offset_x`/`offset_y` + imutabilidade) e `components.tilemap` (verifica `scroll_x`/`scroll_y` + imutabilidade).
-  - Import desnecessário `CameraComponent`/`TilemapComponent` removido do InspectorPanel.
+  - P18: `handleChange` em `InspectorPanel.tsx` corrigido — adicionados dois `else if` para `components.camera` e `components.tilemap`. Antes, edições nesses campos eram ignoradas silenciosamente.
+  - P19: 2 novos testes em `editorStore.test.ts` — `updateEntity` com `components.camera` e `components.tilemap`, verificando imutabilidade.
   - **Validações:** `tsc --noEmit` OK · `npm test` OK (34/34).
 
+* **O que acabou de acontecer (2026-02-27 — sessao 15):**
+  - **SPRINTS P20 + P21 + P22 CONCLUIDAS.**
+  - P20: Menus "Editar", "Projeto" e "Ajuda" transformados em dropdowns funcionais em `App.tsx`. Editar: Copiar/Colar entidade (com auto-save IPC), Desfazer/Refazer (placeholder informativo). Projeto: info do projeto ativo, switch MD/SNES, Info no Console. Ajuda: modais "Sobre" (versão, stack, fase) e "Atalhos de Teclado" (tabela completa). Estados `copiedEntity`, `showAbout`, `showShortcuts` adicionados.
+  - P21: `ViewportPanel.tsx` — renderização especial para entidades com `components.tilemap` (grade de 8px sobre área do mapa, borda teal) e `components.camera` (retângulo tracejado do frustum com tamanho real MD/SNES, cruz central amarela). `activeTarget` adicionado às deps do `useEffect` da cena.
+  - P22: 2 novos `NodeType` (`scroll_tilemap`, `move_camera`) no `NodeGraphEditor.tsx` com `NODE_DEFS` e `NODE_COLORS`. `nodeCompiler.ts`: emitters MD + SNES para ambos os nós. `parseCToNodes` agora reconhece os 4 novos patterns (MD + SNES para cada nó). 4 novos testes round-trip em `nodeCompiler.test.ts`.
+  - **Validações:** `tsc --noEmit` OK · `npm test` OK (38/38 testes, ↑ de 34).
+
 * **Proximo passo imediato:**
-  1. Emulador Pause/Resume: `ViewportPanel` já reage a `emulPaused` via `useEffect` (P18 já implementado). Verificar se funciona na prática com `npm run tauri dev`.
-  2. P20: Inspector tilemap/camera — adicionar suporte a `scroll_x`/`scroll_y` como campos editáveis no modo de visualização de tilemap no Viewport (highlight na cena).
-  3. P21: Menus "Editar", "Projeto" e "Ajuda" — transformar em dropdowns funcionais.
+  1. Verificar na prática com `npm run tauri dev` — Pause/Resume emulador, highlight tilemap/camera, menus novos.
+  2. P23: Inspector `handleChange` — persistir `scroll_x`/`scroll_y` do tilemap via drag no Viewport (atualizar posição de scroll diretamente no canvas ao arrastar entidade tilemap).
+  3. P24: Paleta NodeGraph — adicionar os 2 novos nós (`scroll_tilemap`, `move_camera`) à paleta lateral do NodeGraphEditor.
 
 * **O que acabou de acontecer (2026-02-25 — sessao 9):**
   - **FASE 4 CONCLUIDA. ROADMAP MVP INTEIRAMENTE CONCLUIDO.**

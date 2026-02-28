@@ -6,24 +6,26 @@ import Console         from "./components/common/Console";
 import ToolsPanel      from "./components/tools/ToolsPanel";
 import { useEditorStore } from "./core/store/editorStore";
 import { buildProject, validateProject, generateCCode } from "./core/ipc/buildService";
-import { emulatorLoadRom, emulatorStop, startFrameLoop } from "./core/ipc/emulatorService";
+import { emulatorLoadRom, emulatorStop } from "./core/ipc/emulatorService";
 import { getHwStatus } from "./core/ipc/hwService";
 import { openProjectDialog, newProjectDialog, setProjectTarget } from "./core/ipc/projectService";
+import type { Entity } from "./core/ipc/sceneService";
 
 export default function App() {
   const {
     logMessage, setHwStatus,
     activeProjectDir, activeProjectName, setActiveProject,
     activeTarget, setActiveTarget, setActiveScene, activeViewportTab, setActiveViewportTab,
-    setSelectedEntityId,
+    setSelectedEntityId, selectedEntityId, emulPaused, setEmulPaused,
   } = useEditorStore();
   const [building,       setBuilding]       = useState(false);
   const [toolsOpen,      setToolsOpen]      = useState(false);
   const [menuOpen,       setMenuOpen]       = useState<string | null>(null);
-  const [emulPaused,     setEmulPaused]     = useState(false);
-  const emulStopRef = useRef<(() => void) | null>(null);
   const [newProjName,    setNewProjName]    = useState("");
   const [showNewDialog,  setShowNewDialog]  = useState(false);
+  const [showAbout,      setShowAbout]      = useState(false);
+  const [showShortcuts,  setShowShortcuts]  = useState(false);
+  const [copiedEntity,   setCopiedEntity]   = useState<Entity | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   // Fecha menu ao clicar fora
@@ -120,29 +122,15 @@ export default function App() {
     }
   }
 
-  async function handleEmulatorPause() {
+  function handleEmulatorPause() {
     setMenuOpen(null);
-    if (!emulPaused) {
-      // Pausar: para o loop atual (stopRef armazenado em ViewportPanel)
-      // Não temos acesso direto, mas emulatorStop interrompe o core
-      await emulatorStop().catch(() => {});
-      setEmulPaused(true);
-      logMessage("info", "Emulador pausado.");
-    } else {
-      // Retomar: inicia novo loop sem frame callback (ViewportPanel gerencia isso)
-      const stop = await startFrameLoop(() => {});
-      emulStopRef.current = stop;
-      setEmulPaused(false);
-      logMessage("info", "Emulador retomado.");
-    }
+    // ViewportPanel reage ao emulPaused via useEffect (P18)
+    setEmulPaused(!emulPaused);
+    logMessage("info", emulPaused ? "Emulador retomado." : "Emulador pausado.");
   }
 
   async function handleEmulatorStop() {
     setMenuOpen(null);
-    if (emulStopRef.current) {
-      emulStopRef.current();
-      emulStopRef.current = null;
-    }
     await emulatorStop().catch(() => {});
     setEmulPaused(false);
     setActiveViewportTab("scene");
@@ -169,6 +157,34 @@ export default function App() {
       logMessage("success", "Código C gerado com sucesso.");
       logMessage("info", `--- main.c ---\n${r.main_c.slice(0, 800)}${r.main_c.length > 800 ? "\n[truncado]" : ""}`);
     }
+  }
+
+  function handleCopyEntity() {
+    setMenuOpen(null);
+    const { activeScene, selectedEntityId } = useEditorStore.getState();
+    if (!selectedEntityId || selectedEntityId.startsWith("layer::") || !activeScene) return;
+    const entity = activeScene.entities.find((e) => e.entity_id === selectedEntityId);
+    if (!entity) return;
+    setCopiedEntity(entity);
+    logMessage("info", `[Editar] Entidade copiada: ${entity.prefab ?? entity.entity_id}`);
+  }
+
+  async function handlePasteEntity() {
+    setMenuOpen(null);
+    if (!copiedEntity || !activeProjectDir) return;
+    const { addEntity, activeScene } = useEditorStore.getState();
+    const newId = `${copiedEntity.entity_id}_copy_${Date.now()}`;
+    const pasted: Entity = {
+      ...copiedEntity,
+      entity_id: newId,
+      transform: { x: copiedEntity.transform.x + 16, y: copiedEntity.transform.y + 16 },
+    };
+    addEntity(pasted);
+    logMessage("success", `[Editar] Entidade colada: ${pasted.prefab ?? pasted.entity_id}`);
+    // Auto-save
+    const { saveSceneData } = await import("./core/ipc/sceneService");
+    const fresh = useEditorStore.getState().activeScene ?? activeScene;
+    if (fresh) await saveSceneData(activeProjectDir, JSON.stringify(fresh, null, 2));
   }
 
   async function handleBuildAndRun() {
@@ -246,6 +262,58 @@ export default function App() {
                 Criar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Sobre ── */}
+      {showAbout && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-[#181825] border border-[#313244] rounded-lg p-5 w-80 flex flex-col gap-3 shadow-2xl">
+            <h2 className="text-sm font-bold text-[#cba6f7]">◈ RetroDev Studio</h2>
+            <div className="flex flex-col gap-1 text-xs text-[#a6adc8]">
+              <p>Versão: <span className="text-[#cdd6f4] font-mono">0.1.0</span></p>
+              <p>Stack: <span className="text-[#cdd6f4] font-mono">Tauri 2 · React 19 · Rust</span></p>
+              <p>Fase: <span className="text-[#cdd6f4]">Pós-MVP — Polish/QA</span></p>
+            </div>
+            <p className="text-[10px] text-[#45475a]">
+              Plataforma desktop para desenvolvimento de jogos 16-bit (Mega Drive, SNES).
+            </p>
+            <button onClick={() => setShowAbout(false)}
+              className="self-end px-4 py-1 text-xs rounded bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]">
+              Fechar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Atalhos de Teclado ── */}
+      {showShortcuts && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
+          <div className="bg-[#181825] border border-[#313244] rounded-lg p-5 w-80 flex flex-col gap-3 shadow-2xl">
+            <h2 className="text-sm font-bold text-[#cba6f7]">⌨ Atalhos de Teclado</h2>
+            <table className="text-xs w-full">
+              <tbody className="divide-y divide-[#313244]">
+                {[
+                  ["Ctrl+C", "Copiar entidade selecionada"],
+                  ["Ctrl+V", "Colar entidade copiada"],
+                  ["Delete", "Remover nó (NodeGraph)"],
+                  ["Z", "Joypad A (emulador)"],
+                  ["X", "Joypad B (emulador)"],
+                  ["Enter", "Start (emulador)"],
+                  ["Setas", "D-Pad (emulador)"],
+                ].map(([key, desc]) => (
+                  <tr key={key}>
+                    <td className="py-1.5 pr-4 font-mono text-[#f9e2af] whitespace-nowrap">{key}</td>
+                    <td className="py-1.5 text-[#a6adc8]">{desc}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <button onClick={() => setShowShortcuts(false)}
+              className="self-end px-4 py-1 text-xs rounded bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]">
+              Fechar
+            </button>
           </div>
         </div>
       )}
@@ -346,15 +414,121 @@ export default function App() {
             )}
           </div>
 
-          {/* Menus estáticos */}
-          {["Editar", "Projeto", "Ajuda"].map((item) => (
+          {/* Menu Editar — dropdown funcional */}
+          <div className="relative">
             <button
-              key={item}
-              className="px-2 py-1 hover:bg-[#313244] hover:text-[#cdd6f4] rounded transition-colors"
+              onClick={() => setMenuOpen(menuOpen === "Editar" ? null : "Editar")}
+              className={`px-2 py-1 rounded transition-colors ${menuOpen === "Editar" ? "bg-[#313244] text-[#cdd6f4]" : "hover:bg-[#313244] hover:text-[#cdd6f4]"}`}
             >
-              {item}
+              Editar
             </button>
-          ))}
+            {menuOpen === "Editar" && (
+              <div className="absolute left-0 top-full mt-0.5 w-52 bg-[#1e1e2e] border border-[#313244] rounded shadow-xl z-40 py-1">
+                <button
+                  onClick={() => { setMenuOpen(null); logMessage("info", "[Editar] Desfazer — não implementado nesta versão."); }}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#585b70] flex items-center gap-2 cursor-not-allowed"
+                >
+                  <span>↩</span> Desfazer <span className="ml-auto text-[#45475a]">Ctrl+Z</span>
+                </button>
+                <button
+                  onClick={() => { setMenuOpen(null); logMessage("info", "[Editar] Refazer — não implementado nesta versão."); }}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#585b70] flex items-center gap-2 cursor-not-allowed"
+                >
+                  <span>↪</span> Refazer <span className="ml-auto text-[#45475a]">Ctrl+Y</span>
+                </button>
+                <div className="border-t border-[#313244] my-1" />
+                <button
+                  onClick={handleCopyEntity}
+                  disabled={!selectedEntityId || selectedEntityId.startsWith("layer::")}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <span className="text-[#89b4fa]">⎘</span> Copiar Entidade <span className="ml-auto text-[#45475a]">Ctrl+C</span>
+                </button>
+                <button
+                  onClick={handlePasteEntity}
+                  disabled={!copiedEntity || !activeProjectDir}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <span className="text-[#a6e3a1]">⎗</span> Colar Entidade <span className="ml-auto text-[#45475a]">Ctrl+V</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Menu Projeto — dropdown funcional */}
+          <div className="relative">
+            <button
+              onClick={() => setMenuOpen(menuOpen === "Projeto" ? null : "Projeto")}
+              className={`px-2 py-1 rounded transition-colors ${menuOpen === "Projeto" ? "bg-[#313244] text-[#cdd6f4]" : "hover:bg-[#313244] hover:text-[#cdd6f4]"}`}
+            >
+              Projeto
+            </button>
+            {menuOpen === "Projeto" && (
+              <div className="absolute left-0 top-full mt-0.5 w-52 bg-[#1e1e2e] border border-[#313244] rounded shadow-xl z-40 py-1">
+                <div className="px-3 py-1.5 text-[10px] text-[#45475a]">
+                  {activeProjectName
+                    ? <><span className="text-[#cba6f7]">{activeProjectName}</span> — {activeTarget === "megadrive" ? "Mega Drive" : "SNES"}</>
+                    : "Nenhum projeto aberto"}
+                </div>
+                <div className="border-t border-[#313244] my-1" />
+                <button
+                  onClick={() => { setMenuOpen(null); handleSwitchTarget("megadrive"); }}
+                  disabled={!activeProjectDir || activeTarget === "megadrive"}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <span className="text-[#a6e3a1]">MD</span> Mudar para Mega Drive
+                </button>
+                <button
+                  onClick={() => { setMenuOpen(null); handleSwitchTarget("snes"); }}
+                  disabled={!activeProjectDir || activeTarget === "snes"}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <span className="text-[#89b4fa]">SN</span> Mudar para SNES
+                </button>
+                <div className="border-t border-[#313244] my-1" />
+                <button
+                  onClick={() => { setMenuOpen(null); if (activeProjectDir) logMessage("info", `[Projeto] Dir: ${activeProjectDir}`); }}
+                  disabled={!activeProjectDir}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <span className="text-[#f9e2af]">ℹ</span> Info no Console
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Menu Ajuda — dropdown funcional */}
+          <div className="relative">
+            <button
+              onClick={() => setMenuOpen(menuOpen === "Ajuda" ? null : "Ajuda")}
+              className={`px-2 py-1 rounded transition-colors ${menuOpen === "Ajuda" ? "bg-[#313244] text-[#cdd6f4]" : "hover:bg-[#313244] hover:text-[#cdd6f4]"}`}
+            >
+              Ajuda
+            </button>
+            {menuOpen === "Ajuda" && (
+              <div className="absolute left-0 top-full mt-0.5 w-56 bg-[#1e1e2e] border border-[#313244] rounded shadow-xl z-40 py-1">
+                <button
+                  onClick={() => { setMenuOpen(null); setShowAbout(true); }}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2"
+                >
+                  <span className="text-[#cba6f7]">◈</span> Sobre o RetroDev Studio
+                </button>
+                <button
+                  onClick={() => { setMenuOpen(null); setShowShortcuts(true); }}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2"
+                >
+                  <span className="text-[#f9e2af]">⌨</span> Atalhos de Teclado
+                </button>
+                <div className="border-t border-[#313244] my-1" />
+                <button
+                  onClick={() => { setMenuOpen(null); logMessage("info", "RetroDev Studio v0.1.0 — Tauri 2 + React 19 + Rust 1.86"); }}
+                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#585b70] flex items-center gap-2"
+                >
+                  <span>⚙</span> Versão no Console
+                </button>
+              </div>
+            )}
+          </div>
         </nav>
 
         <div className="ml-auto flex items-center gap-2">

@@ -187,4 +187,76 @@ describe("parseCToNodes", () => {
     expect(soundNode).toBeDefined();
     expect(soundNode?.params.sfx).toBe("jump");
   });
+
+  it("round-trip MD: compila scroll_tilemap e re-parse VDP_setHorizontalScroll → scroll_tilemap", () => {
+    const graph: NodeGraph = {
+      nodes: [
+        node("n1", "event_start"),
+        node("n2", "scroll_tilemap", { layer: "BG_A", dx: 2, dy: 0 }),
+      ],
+      edges: [edge("e1", "n1", "n2")],
+    };
+    const code = compileGraphToC(graph, "Test", "megadrive");
+    expect(code).toContain("VDP_setHorizontalScroll");
+    expect(code).toContain("tm_scroll_x_BG_A += 2");
+    const parsed = parseCToNodes(code);
+    const tmNode = parsed.find((n) => n.type === "scroll_tilemap");
+    expect(tmNode).toBeDefined();
+    expect(tmNode?.params.layer).toBe("BG_A");
+    expect(tmNode?.params.dx).toBe(2);
+  });
+
+  it("round-trip SNES: compila scroll_tilemap e re-parse bgSetScroll → scroll_tilemap", () => {
+    const graph: NodeGraph = {
+      nodes: [
+        node("n1", "event_start"),
+        node("n2", "scroll_tilemap", { layer: "1", dx: 3, dy: 1 }),
+      ],
+      edges: [edge("e1", "n1", "n2")],
+    };
+    const code = compileGraphToC(graph, "Test", "snes");
+    expect(code).toContain("bgSetScroll");
+    expect(code).toContain("tm_scroll_x_1 += 3");
+    const parsed = parseCToNodes(code);
+    const tmNode = parsed.find((n) => n.type === "scroll_tilemap");
+    expect(tmNode).toBeDefined();
+    expect(tmNode?.params.dx).toBe(3);
+    expect(tmNode?.params.dy).toBe(1);
+  });
+
+  it("round-trip MD: compila move_camera e re-parse VDP_setHorizontalScroll/VDP_setVerticalScroll → move_camera", () => {
+    const graph: NodeGraph = {
+      nodes: [
+        node("n1", "event_start"),
+        node("n2", "move_camera", { target: "cam", x: 64, y: 32 }),
+      ],
+      edges: [edge("e1", "n1", "n2")],
+    };
+    const code = compileGraphToC(graph, "Test", "megadrive");
+    expect(code).toContain("VDP_setHorizontalScroll(BG_A, 64)");
+    expect(code).toContain("VDP_setVerticalScroll(BG_A, 32)");
+    const parsed = parseCToNodes(code);
+    const camNode = parsed.find((n) => n.type === "move_camera");
+    expect(camNode).toBeDefined();
+    expect(camNode?.params.x).toBe(64);
+    expect(camNode?.params.y).toBe(32);
+    expect(camNode?.params.target).toBe("cam");
+  });
+
+  it("round-trip SNES: compila move_camera e re-parse bgSetScroll(0,...) → move_camera", () => {
+    const graph: NodeGraph = {
+      nodes: [
+        node("n1", "event_start"),
+        node("n2", "move_camera", { target: "cam", x: 128, y: 0 }),
+      ],
+      edges: [edge("e1", "n1", "n2")],
+    };
+    const code = compileGraphToC(graph, "Test", "snes");
+    expect(code).toContain("bgSetScroll(0, 128, 0)");
+    const parsed = parseCToNodes(code);
+    const camNode = parsed.find((n) => n.type === "move_camera");
+    expect(camNode).toBeDefined();
+    expect(camNode?.params.x).toBe(128);
+    expect(camNode?.params.target).toBe("cam");
+  });
 });
