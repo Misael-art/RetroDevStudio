@@ -97,7 +97,8 @@ jobs:
         run: npm run tauri build -- --debug --no-bundle
 
       - name: Report resolved target
-        run: Write-Host "Desktop E2E target: $env:RDS_E2E_TARGET"
+        run: |
+          Write-Host "Desktop E2E target: $env:RDS_E2E_TARGET"
 
       - name: Run Mega Drive desktop smoke
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
