@@ -202,7 +202,12 @@ fn emulator_run_frame(
     };
 
     let payload = framebuffer_to_rgba(&fb, size, pixel_format);
-    let _ = app.emit("emulator://frame", &payload);
+    if let Err(error) = app.emit("emulator://frame", &payload) {
+        return EmulatorCommandResult {
+            ok: false,
+            message: format!("Falha ao emitir frame do emulador: {}", error),
+        };
+    }
 
     EmulatorCommandResult { ok: true, message: String::new() }
 }

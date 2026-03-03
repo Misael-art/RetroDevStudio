@@ -97,7 +97,13 @@ export default function ViewportPanel() {
       loopTokenRef.current = token;
       loopStartingRef.current = true;
 
-      startFrameLoop(renderFrame)
+      startFrameLoop(renderFrame, (message) => {
+        if (loopTokenRef.current !== token) {
+          return;
+        }
+        stopFrameLoop();
+        logMessage("error", `Falha durante loop do emulador: ${message}`);
+      })
         .then((stopFn) => {
           loopStartingRef.current = false;
 
@@ -122,7 +128,7 @@ export default function ViewportPanel() {
           logMessage("error", `Falha ao iniciar emulador: ${error}`);
         });
     },
-    [logMessage, renderFrame]
+    [logMessage, renderFrame, stopFrameLoop]
   );
 
   useEffect(() => {

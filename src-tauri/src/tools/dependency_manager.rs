@@ -376,13 +376,32 @@ where
     };
 
     match install_result {
-        Ok(message) => DependencyInstallResult {
-            ok: true,
-            dependency_id: dependency.id().to_string(),
-            message,
-            status: dependency.status(),
-            log: logger.log,
-        },
+        Ok(message) => {
+            let status = dependency.status();
+            if !status.installed {
+                let error = format!(
+                    "{} reportada como instalada, mas os arquivos esperados nao foram encontrados em '{}'.",
+                    dependency.label(),
+                    status.install_dir
+                );
+                logger.emit("error", error.clone());
+                return DependencyInstallResult {
+                    ok: false,
+                    dependency_id: dependency.id().to_string(),
+                    message: error,
+                    status,
+                    log: logger.log,
+                };
+            }
+
+            DependencyInstallResult {
+                ok: true,
+                dependency_id: dependency.id().to_string(),
+                message,
+                status,
+                log: logger.log,
+            }
+        }
         Err(error) => {
             logger.emit("error", error.clone());
             DependencyInstallResult {
