@@ -17,6 +17,11 @@ function fail(message) {
   throw new Error(message);
 }
 
+function parsePositiveInteger(rawValue, fallback) {
+  const parsed = Number.parseInt(String(rawValue ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 async function readProjectMetadata(projectDir) {
   const projectFile = path.join(projectDir, "project.rds");
   const raw = await readFile(projectFile, "utf8");
@@ -259,6 +264,48 @@ function summarizeDriverLogs(logs) {
   return logs.slice(-20).join("\n");
 }
 
+async function collectAppDiagnostics(sessionId) {
+  try {
+    return await executeScript(
+      sessionId,
+      `
+        const status = document.querySelector('[data-testid="viewport-game-status"]')?.textContent?.trim() ?? '';
+        const state = window.__RDS_E2E__?.getState?.() ?? null;
+        const consoleTail = Array.isArray(state?.consoleEntries)
+          ? state.consoleEntries.slice(-10).map((entry) => entry.message)
+          : [];
+        return {
+          status,
+          activeTarget: state?.activeTarget ?? null,
+          activeViewportTab: state?.activeViewportTab ?? null,
+          consoleTail,
+        };
+      `
+    );
+  } catch {
+    return null;
+  }
+}
+
+function formatAppDiagnostics(diagnostics) {
+  if (!diagnostics) {
+    return "";
+  }
+
+  const consoleTail =
+    diagnostics.consoleTail && diagnostics.consoleTail.length > 0
+      ? diagnostics.consoleTail.join(" | ")
+      : "(sem console tail)";
+
+  return [
+    "Diagnostico do app:",
+    `status="${diagnostics.status ?? ""}"`,
+    `activeTarget="${diagnostics.activeTarget ?? ""}"`,
+    `activeViewportTab="${diagnostics.activeViewportTab ?? ""}"`,
+    `consoleTail=${consoleTail}`,
+  ].join("\n");
+}
+
 async function main() {
   if (process.platform !== "win32") {
     fail("Este runner E2E desktop/Tauri e suportado apenas em Windows.");
@@ -269,6 +316,7 @@ async function main() {
   }
 
   const options = parseArgs(process.argv.slice(2));
+  const emulatorActivationTimeoutMs = parsePositiveInteger(process.env.RDS_E2E_RUN_TIMEOUT_MS, 180000);
   await assertPathExists(
     options.project,
     `Projeto de fixture nao encontrado: ${options.project}`
@@ -406,18 +454,24 @@ async function main() {
     const buildRunButton = await findElement(sessionId, "[data-testid='toolbar-build-run']");
     await clickElement(sessionId, buildRunButton);
 
-    await waitFor(
-      async () => {
-        const status = await executeScript(
-          sessionId,
-          "return document.querySelector('[data-testid=\"viewport-game-status\"]')?.textContent?.trim() ?? '';"
-        );
-        return status === "Emulador ativo";
-      },
-      180000,
-      "Emulador nao ficou ativo apos Build & Run",
-      1000
-    );
+    try {
+      await waitFor(
+        async () => {
+          const status = await executeScript(
+            sessionId,
+            "return document.querySelector('[data-testid=\"viewport-game-status\"]')?.textContent?.trim() ?? '';"
+          );
+          return status === "Emulador ativo";
+        },
+        emulatorActivationTimeoutMs,
+        "Emulador nao ficou ativo apos Build & Run",
+        1000
+      );
+    } catch (error) {
+      const diagnostics = formatAppDiagnostics(await collectAppDiagnostics(sessionId));
+      const details = error instanceof Error ? error.message : String(error);
+      fail(diagnostics ? `${details}\n${diagnostics}` : details);
+    }
 
     const state = await executeScript(
       sessionId,
