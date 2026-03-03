@@ -164,7 +164,7 @@ export default function InspectorPanel() {
     updateEntity,
   } = useEditorStore();
 
-  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "error">("idle");
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(
@@ -190,11 +190,14 @@ export default function InspectorPanel() {
       return;
     }
 
-    setSaving(true);
+    setSaveStatus("saving");
     try {
-      await persistActiveScene(activeProjectDir, "Inspector");
+      const saved = await persistActiveScene(activeProjectDir, "Inspector");
+      setSaveStatus(saved ? "idle" : "error");
     } finally {
-      setSaving(false);
+      if (useEditorStore.getState().activeProjectDir !== activeProjectDir) {
+        setSaveStatus("idle");
+      }
     }
   }
 
@@ -208,6 +211,10 @@ export default function InspectorPanel() {
   }
 
   function handleChange(entityToUpdate: Entity, def: PropDef, value: string | number | boolean) {
+    if (saveStatus === "error") {
+      setSaveStatus("idle");
+    }
+
     if (def.path.length === 1) {
       updateEntity(entityToUpdate.entity_id, { [def.path[0]]: value } as Partial<Entity>);
     } else if (def.path[0] === "transform" && def.path.length === 2) {
@@ -275,6 +282,10 @@ export default function InspectorPanel() {
     field: keyof BackgroundLayer,
     value: string | number
   ) {
+    if (saveStatus === "error") {
+      setSaveStatus("idle");
+    }
+
     updateBackgroundLayer(layerToUpdate.layer_id, {
       [field]: value,
     } as Partial<BackgroundLayer>);
@@ -306,14 +317,20 @@ export default function InspectorPanel() {
             <div className="px-3 py-2">
               <button
                 onClick={() => void saveScene()}
-                disabled={saving}
+                disabled={saveStatus === "saving"}
                 className={`w-full rounded py-1 text-xs font-semibold transition-colors ${
-                  saving
+                  saveStatus === "saving"
                     ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
+                    : saveStatus === "error"
+                      ? "bg-[#f38ba8] text-[#1e1e2e] hover:bg-[#eba0ac]"
                     : "bg-[#313244] text-[#cba6f7] hover:bg-[#45475a]"
                 }`}
               >
-                {saving ? "Salvando..." : "Salvar Cena"}
+                {saveStatus === "saving"
+                  ? "Salvando..."
+                  : saveStatus === "error"
+                    ? "Falha ao salvar"
+                    : "Salvar Cena"}
               </button>
             </div>
           </>
@@ -344,14 +361,20 @@ export default function InspectorPanel() {
             <div className="px-3 py-2">
               <button
                 onClick={() => void saveScene()}
-                disabled={saving}
+                disabled={saveStatus === "saving"}
                 className={`w-full rounded py-1 text-xs font-semibold transition-colors ${
-                  saving
+                  saveStatus === "saving"
                     ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
+                    : saveStatus === "error"
+                      ? "bg-[#f38ba8] text-[#1e1e2e] hover:bg-[#eba0ac]"
                     : "bg-[#313244] text-[#cba6f7] hover:bg-[#45475a]"
                 }`}
               >
-                {saving ? "Salvando..." : "Salvar Cena"}
+                {saveStatus === "saving"
+                  ? "Salvando..."
+                  : saveStatus === "error"
+                    ? "Falha ao salvar"
+                    : "Salvar Cena"}
               </button>
             </div>
           </>

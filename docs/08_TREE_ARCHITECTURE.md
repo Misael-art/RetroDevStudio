@@ -120,6 +120,7 @@ RetroDevStudio/
 - `src-tauri/src/compiler/build_orch.rs` e a fonte canonica do pipeline `UGDM -> workspace -> ROM`.
 - O caminho SNES real usa staging de asset no workspace e gera `hdr.asm`, `data.asm` e regras `gfx4snes`.
 - `scripts/e2e-tauri-build-run.mjs` e o runner canonico de regressao desktop/Tauri para `Build -> Load ROM -> Run frames`.
+- `.github/workflows/desktop-e2e.yml` e o workflow canonico de regressao desktop em Windows e ja foi validado em runner GitHub real.
 - `toolchains/libretro/cores/` e o local canonico dos DLLs de core baixados do upstream oficial.
 - `docs/09_AGENT_DEV_MODE.md` consolida a hierarquia de verdade, os gates e as regras anti-poluicao para agentes.
 - `.github/workflows/ci.yml` e o baseline canonico de validacao automatizada do projeto e deve ser mantido verde em mudancas relevantes.

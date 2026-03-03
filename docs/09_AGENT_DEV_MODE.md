@@ -89,7 +89,7 @@ Uma tarefa nao esta concluida enquanto o repositorio continuar anunciando um est
 
 ---
 
-## 6. MATRIZ DE MATURIDADE ATUAL (2026-03-02)
+## 6. MATRIZ DE MATURIDADE ATUAL (2026-03-03)
 
 Escala:
 - `0` inexistente
@@ -101,18 +101,18 @@ Escala:
 
 | Area | Nota | Leitura objetiva | Gargalo atual |
 |------|------|------------------|---------------|
-| Infra | 4.3/5 | Base de app, IPC, persistencia, CI e workflow desktop dedicado agora podem ser exercitados antes do merge | Ainda falta confirmar estabilidade repetida do smoke desktop em runner GitHub real |
+| Infra | 4.5/5 | Base de app, IPC, persistencia, CI e workflow desktop dedicado agora estao validados localmente e em runner GitHub/Windows real | Falta decidir a governanca final do workflow sem perder agilidade |
 | Editor | 3.0/5 | Editor funcional para uso interno com persistencia e viewport | Nem toda superficie esta integrada ao pipeline real |
 | Build | 4.0/5 | Pipeline real por target com workspace, staging e ROM validado com upstream oficial em Windows | Export ainda simples e SNES continua sensivel a mudancas no workspace |
-| Emulacao | 4.0/5 | Libretro FFI real, carga de ROM, input e framebuffer validados com runner desktop e smoke upstream | Ainda falta transformar o desktop E2E em rotina institucional/CI |
+| Emulacao | 4.2/5 | Libretro FFI real, carga de ROM, input e framebuffer validados com smoke upstream, runner local e workflow GitHub/Windows | Falta apenas preservar esse baseline ao endurecer o processo |
 | Toolchains | 4.0/5 | Setup sob demanda real e validado em Windows com SGDK, PVSnesLib e cores Libretro oficiais | Continua dependente de ambiente externo e compliance de licenca |
 | UX | 2.5/5 | UI mais honesta e com superficies experimentais rotuladas | Ainda ha polimento e previsibilidade a fechar |
-| Testes | 4.7/5 | Baseline forte de testes, smoke upstream oficial, desktop E2E multi-target e workflow dedicado reutilizavel e path-filtered | Desktop E2E ainda depende de confirmar estabilidade no runner GitHub real |
+| Testes | 4.9/5 | Baseline forte de testes, smoke upstream oficial, desktop E2E multi-target e workflow dedicado reutilizavel agora validados em runner GitHub/Windows real | Falta apenas calibrar custo/processo do gate remoto sem afrouxar cobertura |
 
 Leitura sintetica:
 - O projeto esta acima de simples scaffold ou demo.
 - O estado correto e `alpha interna em hardening`, nao `Fase 0`.
-- O bloqueio principal nao e mais ausencia de validacao oficial; agora e transformar essa validacao em rotina repetivel e ampliar a cobertura sem poluir o projeto.
+- O bloqueio principal nao e mais ausencia de validacao oficial nem de runner remoto; agora e endurecer UX/processo sem diluir o gate conquistado.
 
 ---
 

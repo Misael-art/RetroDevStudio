@@ -208,8 +208,12 @@ export default function App() {
     try {
       const result = await openProjectDialog();
       if (!result.selected) return;
-      await hydrateProjectState(result.path, result.name, "Projeto");
-      logMessage("success", `Projeto aberto: ${result.name} (${result.path})`);
+      const hydrated = await hydrateProjectState(result.path, result.name, "Projeto");
+      if (hydrated) {
+        logMessage("success", `Projeto aberto: ${result.name} (${result.path})`);
+      } else {
+        logMessage("warn", `[Projeto] Projeto aberto sem cena valida: ${result.name} (${result.path})`);
+      }
     } catch (error) {
       logMessage("error", `[Projeto] Falha ao abrir projeto: ${describeError(error)}`);
     }
@@ -250,8 +254,12 @@ export default function App() {
     try {
       const result = await newProjectDialog(newProjName.trim());
       if (!result.selected) return;
-      await hydrateProjectState(result.path, result.name, "Projeto");
-      logMessage("success", `Novo projeto criado: ${result.name} em ${result.path}`);
+      const hydrated = await hydrateProjectState(result.path, result.name, "Projeto");
+      if (hydrated) {
+        logMessage("success", `Novo projeto criado: ${result.name} em ${result.path}`);
+      } else {
+        logMessage("warn", `[Projeto] Projeto criado, mas a cena inicial nao foi hidratada: ${result.name}`);
+      }
     } catch (error) {
       logMessage("error", `[Projeto] Falha ao criar projeto: ${describeError(error)}`);
     }

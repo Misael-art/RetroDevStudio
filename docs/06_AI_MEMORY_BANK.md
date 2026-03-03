@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Ultima Atualizacao:** 2026-03-03
-**Ultima sessao:** 2026-03-03 (Codex - Sessao 24: endurecimento do workflow desktop para execucao remota antes do merge)
-**Fase Atual:** Hardening/QA do MVP (Build -> ROM -> Emulacao validado em Windows com upstream real; desktop E2E multi-target pronto para repeticao remota por workflow dedicado)
+**Ultima sessao:** 2026-03-03 (Codex - Sessao 25: validacao do desktop E2E no GitHub Windows runner, correcao final do caminho SNES e hardening de UX async)
+**Fase Atual:** Hardening/QA do MVP (Build -> ROM -> Emulacao validado em Windows com upstream real; desktop E2E multi-target validado localmente e em runner GitHub/Windows real)
 **Branch sugerida:** `feat/<tema>` para trabalho paralelo; usar `main` apenas quando o usuario pedir edicao direta no workspace atual
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
@@ -16,6 +16,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-03 - sessao 25):**
+  - O workflow `.github/workflows/desktop-e2e.yml` passou por completo no GitHub Windows runner real (`Desktop E2E`, SHA `4986440`), com `Build debug desktop app`, smoke Mega Drive e smoke SNES concluindo com sucesso.
+  - O `CI` comum tambem passou no mesmo commit, confirmando que o baseline rapido e o smoke desktop dedicado ficaram verdes no ambiente remoto institucional.
+  - O runner `scripts/e2e-tauri-build-run.mjs` ganhou timeout configuravel e diagnostico do estado do app quando o emulador nao ativa, evitando falha cega em ambiente limpo.
+  - A falha remota do SNES foi rastreada ate `build_orch.rs`: o caminho `PVSNESLIB_LIBDIR_WIN` estava sendo serializado de forma incompativel com `wlalink` no runner Windows. O path foi corrigido para formato com `/`, e os testes Rust/clippy voltaram a passar antes do rerun remoto.
+  - `App.tsx` deixou de registrar abertura/criacao de projeto como sucesso quando a hidratacao da cena falha, e `InspectorPanel.tsx` agora expõe `Falha ao salvar` no proprio botao quando a persistencia falha, reduzindo falso positivo de UX.
+  - O endurecimento de UX foi validado localmente com `npm run check:tree`, `npm run lint`, `npx tsc --noEmit` e `npm test`.
 
 * **O que acabou de acontecer (2026-03-03 - sessao 24):**
   - Foi confirmado via GitHub API que o branch `feat/desktop-e2e-workflow` ja aciona o `CI` remoto em `push`, provando que a autenticacao e a observacao de Actions no repositorio estao funcionais.
@@ -75,7 +83,7 @@
 * **O que estamos fazendo AGORA:**
   - Mantendo o fluxo canonico `Build -> ROM -> Emulacao` sob hardening depois da validacao oficial de Windows e do fechamento do desktop E2E para Mega Drive e SNES.
   - O baseline de CI inclui estrutura, lint, typecheck, `cargo clippy`, testes frontend e testes Rust, e agora existe workflow desktop dedicado com gatilhos remotos controlados para regressao multi-target.
-  - Nenhuma feature nova fora desse eixo deve ser iniciada ate que a execucao desse workflow em runner GitHub real fique observada e estavel.
+  - Nenhuma feature nova fora desse eixo deve ser iniciada ate que a governanca final do workflow desktop e a auditoria residual de handlers async fiquem endurecidas.
 
 * **Estado real resumido:**
   - Frontend/editor: funcional e agora com fluxo amigavel para instalar dependencias externas sem sair do app.
@@ -84,11 +92,11 @@
   - Suite Rust backend: passando localmente (`cargo test --lib` 28 aprovados, 1 ignorado), cobrindo parser/schema, hardware validation, build orchestration, dependency manager, emulacao Libretro mock, ponto canonico `open_project_path` e um E2E headless `Build -> Load -> Run`.
   - Toolchains continuam fora do Git, mas agora existe jornada automatica para baixar os pacotes oficiais no Windows mediante consentimento do usuario.
   - O app agora possui um E2E de nivel desktop/Tauri repetivel em `scripts/e2e-tauri-build-run.mjs`, usando `tauri-driver` oficial e fixtures canonicas de Mega Drive e SNES.
-  - O workflow dedicado `.github/workflows/desktop-e2e.yml` institucionaliza a regressao desktop em Windows, com `workflow_dispatch`, `workflow_call` e gatilhos `push`/`pull_request` filtrados por caminho, sem contaminar o `ci.yml` comum.
+  - O workflow dedicado `.github/workflows/desktop-e2e.yml` institucionaliza a regressao desktop em Windows, com `workflow_dispatch`, `workflow_call` e gatilhos `push`/`pull_request` filtrados por caminho, e agora ja foi validado em runner GitHub/Windows real.
   - O modo de trabalho dos agentes agora esta consolidado em documento canonico proprio para reduzir divergencia de onboarding, claims falsos de entrega e poluicao estrutural.
   - Dados em `data/`: `rom_teste.bin` e `sonic_test.gen` continuam uteis para validacao manual de Mega Drive, mas o uso dessas ROMs deve respeitar compliance/licenciamento.
 
-* **Validacoes verificadas em 2026-03-02:**
+* **Validacoes verificadas em 2026-03-03:**
   - `npm run check:tree` -> OK.
   - `npm run lint` -> OK.
   - `npx tsc --noEmit` -> OK.
@@ -98,11 +106,13 @@
   - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests` -> OK, com SGDK, PVSnesLib e cores Libretro oficiais.
   - `npm run test:e2e:desktop:md -- --skip-build --native-driver <msedgedriver>` -> OK, validando Mega Drive na janela real do app Tauri.
   - `npm run test:e2e:desktop:snes -- --skip-build --native-driver <msedgedriver>` -> OK, validando SNES na janela real do app Tauri.
+  - GitHub Actions `CI` (`22606646061`) -> OK em `windows-latest`.
+  - GitHub Actions `Desktop E2E` (`22606643935`) -> OK em `windows-latest`, com `Run Mega Drive desktop smoke` e `Run SNES desktop smoke` ambos verdes.
 
 * **Proximo passo imediato:**
-  1. Empurrar o endurecimento do `desktop-e2e.yml` e observar a primeira execucao remota acionada por `push` no runner GitHub/Windows real.
-  2. Se a execucao remota passar, decidir se o workflow dedicado deve permanecer em `push`/`pull_request` path-filtered ou migrar para um gate protegido por ambiente.
-  3. Endurecer handlers async residuais do frontend (`App.tsx`, `InspectorPanel`) para que falhas de save/build nunca parecam sucesso.
+  1. Decidir se o workflow dedicado deve permanecer em `push`/`pull_request` path-filtered ou migrar para um gate protegido por ambiente.
+  2. Auditar handlers async residuais fora de `App.tsx` e `InspectorPanel`.
+  3. Reexecutar o smoke upstream oficial sempre que mudancas tocarem o caminho SNES/Windows, agora que o baseline remoto ja esta comprovado.
   4. So depois disso retomar evolucao de superficies ainda `Experimental`.
 
 ---
@@ -129,7 +139,7 @@ As seguintes decisoes ja foram debatidas e sao finais:
 * **[2026-03-02]** Ja existe teste de interface Tauri/React validando `Build -> Load ROM -> Run frames` no nivel de aplicacao desktop, mas ele ainda depende de `tauri-driver` e `msedgedriver` provisionados localmente.
 * **[2026-03-02]** O fluxo oficial com SGDK/PVSnesLib/cores Libretro reais foi validado em Windows, mas deve ser reexecutado sempre que mudancas tocarem build, emulacao ou toolchains.
 * **[2026-03-02]** O caminho SNES oficial foi validado com `snes_rules` real, mas qualquer mudanca no workspace/Makefile deve ser tratada como area sensivel e voltar a passar pelo smoke upstream.
-* **[2026-03-03]** O workflow desktop `desktop-e2e.yml` ganhou `push`/`pull_request` filtrados por caminho e `workflow_call` para destravar a observacao remota antes do merge; ele ainda precisa ser observado em runner GitHub real para confirmar estabilidade.
+* **[2026-03-03]** O workflow desktop `desktop-e2e.yml` ja foi validado em runner GitHub/Windows real. Qualquer mudanca no caminho SNES/Windows ou no runner E2E deve preservar esse baseline remoto.
 * **[2026-02-28]** `Deep Profiler`, `Asset Extractor` e `RetroFX` permanecem visiveis por contexto de produto, mas agora devem continuar explicitamente marcados como experimentais ate deixarem de ser stub/parcial.
 * **[2026-02-28]** No Windows, a deteccao de `bash` deve ignorar o shim do WSL (`C:\\Windows\\System32\\bash.exe`) e privilegiar Git Bash/MSYS2. Essa regra ja foi aplicada no codigo e nao deve ser removida sem substituto equivalente.
 * **[2026-02-28]** `data/sonic_test.gen` e a documentacao associada sao um ponto de atencao de compliance/licenciamento. O software pode operar com ROMs fornecidas pelo usuario para fins educacionais, pesquisa e preservacao, mas nao deve redistribuir ROM comercial como parte do produto.
@@ -222,6 +232,7 @@ Rebaseline tecnico do MVP para alinhar implementacao, documentacao e compliance 
 | 2026-03-02 | Codex | Alinhamento documental completo, ESLint baseline real, `cargo clippy` corrigido, CI endurecido com estrutura/lint/clippy e criacao do documento canonico `09_AGENT_DEV_MODE.md` |
 | 2026-03-02 | Codex | Validacao upstream oficial em Windows com SGDK/PVSnesLib/cores Libretro reais, correcoes de workspace SNES e fechamento do E2E desktop/Tauri real |
 | 2026-03-02 | Codex | Expansao do desktop E2E para SNES, aliases npm por target e workflow Windows manual `desktop-e2e.yml` |
+| 2026-03-03 | Codex | Validacao do `desktop-e2e.yml` em runner GitHub/Windows real, endurecimento diagnostico do runner desktop e correcao final do path SNES para `wlalink` no Windows |
 
 ---
 

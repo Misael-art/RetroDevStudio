@@ -1,7 +1,7 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-03-02
-**Fase ativa real:** Hardening do fluxo `Build -> ROM -> Emulacao` ja validado em Windows com upstream real
+**Ultima revisao canonica:** 2026-03-03
+**Fase ativa real:** Hardening do fluxo `Build -> ROM -> Emulacao` ja validado em Windows com upstream real e em runner GitHub/Windows real
 
 > **DIRETRIZ PARA AGENTES DE IA**
 > Este roadmap precisa refletir estado real do codigo, nao claims historicas.
@@ -9,7 +9,7 @@
 
 ---
 
-## Estado Real em 2026-03-02
+## Estado Real em 2026-03-03
 
 ### Ja implementado em codigo
 - Editor Tauri + React + TypeScript funcional.
@@ -21,13 +21,14 @@
 - Baseline de CI com GitHub Actions para `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `cargo clippy -- -D warnings`, `cargo test --lib` e `npm test`.
 - Validacao oficial upstream em Windows com SGDK, PVSnesLib e cores Libretro reais via `scripts/validate-upstream-windows.ps1`.
 - E2E de aplicacao desktop/Tauri via `scripts/e2e-tauri-build-run.mjs` para `Build -> Load ROM -> Run frames`.
+- Workflow dedicado `.github/workflows/desktop-e2e.yml` validado em runner GitHub/Windows real para Mega Drive e SNES.
 - Pause/resume do viewport preservando o core Libretro, autosave fresco no hierarchy e persistencia atomica de projeto/cena.
 - Features ainda parciais agora ficam explicitamente marcadas como `Experimental` na UI para nao mentir sobre prontidao.
 
 ### Ainda em hardening
 - Repeticao institucional do fluxo oficial em Windows quando build/emulacao/toolchains forem alterados.
-- Confirmacao do workflow desktop em runner GitHub/Windows real.
-- Possivel evolucao do workflow desktop para `workflow_call`, gate protegido ou encaixe adicional em processo institucional.
+- Decisao final de governanca do workflow desktop dedicado (`push`/`pull_request` path-filtered, `workflow_dispatch`, `workflow_call` ou gate protegido).
+- Auditoria residual de UX para handlers async fora do endurecimento ja aplicado em abertura de projeto e salvamento no inspector.
 
 ---
 
@@ -99,9 +100,9 @@
 
 1. Manter o CI baseline verde antes e depois de qualquer fix relevante.
 2. Tornar a validacao oficial upstream repetivel e institucional para mudancas sensiveis.
-3. Confirmar o workflow desktop manual em runner GitHub/Windows real.
-4. Avaliar encaixe do desktop E2E em CI, `workflow_call` ou gate manual protegido.
-5. Endurecer handlers async residuais de save/build para eliminar falso positivo de UX.
+3. Decidir se o workflow desktop dedicado permanece em `push`/`pull_request` path-filtered ou migra para gate manual/ambiente protegido.
+4. Auditar handlers async residuais fora de `App.tsx` e `InspectorPanel`.
+5. So depois disso avaliar novas expansoes do desktop E2E sem contaminar o `ci.yml` comum.
 6. So depois disso destravar novas iteracoes de editor, ferramentas e targets futuros.
 
 ---

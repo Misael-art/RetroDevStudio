@@ -48,7 +48,7 @@
 - Projetos dummy canonicos ficam em `src-tauri/tests/fixtures/projects/`.
 - O backend deve conseguir `Build -> Load ROM -> Run frame` em modo headless.
 - O app desktop deve conseguir `Build -> Load ROM -> Run frames` via Tauri/WebDriver no runner canonico `scripts/e2e-tauri-build-run.mjs`.
-- O workflow dedicado `.github/workflows/desktop-e2e.yml` e o entrypoint institucional para repetir esse smoke em Windows, com `workflow_dispatch`, `workflow_call` e gatilhos `push`/`pull_request` filtrados por caminho.
+- O workflow dedicado `.github/workflows/desktop-e2e.yml` e o entrypoint institucional para repetir esse smoke em Windows, com `workflow_dispatch`, `workflow_call` e gatilhos `push`/`pull_request` filtrados por caminho, ja validado em runner GitHub/Windows real.
 - Mudancas no pipeline que alterem esse comportamento precisam atualizar teste, fixture e memoria do projeto.
 
 ---
@@ -74,6 +74,6 @@ Nenhum agente deve chamar uma feature de `pronta`, `completa` ou `entregue` se e
 - O setup automatico de terceiros ja existe e a validacao oficial em Windows foi comprovada, mas ela continua obrigatoria em mudancas relevantes de build/emulacao/toolchain.
 - No Windows, o caminho SNES precisa de Git Bash/MSYS2 real; o shim do WSL nao deve ser tratado como shell suportado.
 - O runner desktop/Tauri depende de `tauri-driver` e `msedgedriver` provisionados localmente; sem isso o teste de aplicacao nao deve ser marcado como executado.
-- O workflow `desktop-e2e.yml` foi separado do `ci.yml`, ganhou `concurrency`, `timeout` e gatilhos dedicados por caminho para evitar falso negativo lento/fragil no baseline comum; nao migrar esse smoke para o CI principal sem evidencias de estabilidade.
+- O workflow `desktop-e2e.yml` foi separado do `ci.yml`, ganhou `concurrency`, `timeout` e gatilhos dedicados por caminho, e ja passou em runner GitHub/Windows real; nao migrar esse smoke para o job unico do `ci.yml` sem justificativa forte de custo/tempo.
 - A existencia de toolchain/core instalado localmente nao substitui compliance de licenca.
 - Superficies experimentais devem continuar claramente marcadas ate deixarem de ser parciais ou stub.

@@ -6,7 +6,7 @@ function describeError(error: unknown): string {
 }
 
 export async function reloadSceneFromDisk(projectDir: string, scope: string): Promise<boolean> {
-  const { logMessage, setActiveScene } = useEditorStore.getState();
+  const { logMessage, selectedEntityId, setActiveScene, setSelectedEntityId } = useEditorStore.getState();
 
   try {
     const sceneData = await getSceneData(projectDir);
@@ -22,6 +22,16 @@ export async function reloadSceneFromDisk(projectDir: string, scope: string): Pr
     }
 
     setActiveScene(scene);
+    if (selectedEntityId) {
+      const isLayerSelection = selectedEntityId.startsWith("layer::");
+      const selectionStillExists = isLayerSelection
+        ? scene.background_layers.some((layer) => `layer::${layer.layer_id}` === selectedEntityId)
+        : scene.entities.some((entity) => entity.entity_id === selectedEntityId);
+
+      if (!selectionStillExists) {
+        setSelectedEntityId(null);
+      }
+    }
     return true;
   } catch (error) {
     logMessage("error", `[${scope}] ${describeError(error)}`);

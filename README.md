@@ -11,8 +11,8 @@
 
 ## Estado Real
 
-- Data de referencia: 2026-03-02.
-- Fase ativa real: hardening do fluxo `Build -> ROM -> Emulacao`, ja validado em Windows com upstream real e E2E desktop.
+- Data de referencia: 2026-03-03.
+- Fase ativa real: hardening do fluxo `Build -> ROM -> Emulacao`, ja validado em Windows com upstream real, E2E desktop local e workflow GitHub/Windows multi-target.
 - `Fase 0` esta concluida e verificada.
 - `Fases 1 e 2` ja foram validadas em Windows com toolchains e cores upstream reais e agora estao em hardening.
 - `Fases 3 e 4` existem no editor, porem parte das superficies continuam `Experimental` ou congeladas ate o core ser fechado.
@@ -30,8 +30,8 @@
 ## O Que Ainda Falta Para Fechar O MVP
 
 - Tornar repetivel o baseline de validacao oficial em Windows para mudancas sensiveis de build/emulacao/toolchain.
-- Confirmar o workflow manual desktop em runner GitHub/Windows real e decidir se ele evolui para `workflow_call` ou gate protegido.
-- Avaliar encaixe do desktop E2E em rotina institucional/CI sem introduzir fragilidade.
+- Decidir se o workflow desktop dedicado permanece em `push`/`pull_request` path-filtered ou migra para gate protegido por ambiente.
+- Auditar handlers async residuais fora do endurecimento ja aplicado em abertura de projeto e salvamento de cena.
 - Retomar apenas depois disso as superficies hoje marcadas como `Experimental`.
 
 ## Arquitetura De Alto Nivel
@@ -63,7 +63,8 @@ RetroDevStudio/
 |
 |-- .github/
 |   `-- workflows/
-|       `-- ci.yml
+|       |-- ci.yml
+|       `-- desktop-e2e.yml
 |
 |-- README.md
 |-- CLAUDE.md
@@ -89,7 +90,8 @@ RetroDevStudio/
 |-- scripts/
 |   |-- bootstrap.ps1
 |   |-- check-tree.cjs
-|   `-- check-tree.ps1
+|   |-- check-tree.ps1
+|   `-- e2e-tauri-build-run.mjs
 |
 |-- src/
 |   `-- ...
