@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import Panel from "../common/Panel";
 import { useEditorStore } from "../../core/store/editorStore";
-import { getSceneData, parseScene, saveSceneData } from "../../core/ipc/sceneService";
+import { getSceneData, parseScene } from "../../core/ipc/sceneService";
+import { persistActiveScene } from "../../core/scenePersistence";
 
 const TYPE_ICON: Record<string, string> = {
   sprite:  "◈",
@@ -30,18 +31,33 @@ export default function HierarchyPanel() {
 
   // Recarrega cena sempre que o projeto ativo mudar
   useEffect(() => {
+    let cancelled = false;
+
     if (!activeProjectDir) {
       setActiveScene(null);
       return;
     }
-    getSceneData(activeProjectDir).then((result) => {
-      const scene = parseScene(result);
-      setActiveScene(scene);
-      if (!result.ok) {
-        logMessage("warn", `[Hierarchy] ${result.error}`);
-      }
-    });
-  }, [activeProjectDir]);
+
+    getSceneData(activeProjectDir)
+      .then((result) => {
+        if (cancelled) return;
+
+        const scene = parseScene(result);
+        setActiveScene(scene);
+        if (!result.ok) {
+          logMessage("warn", `[Hierarchy] ${result.error}`);
+        }
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        logMessage("error", `[Hierarchy] Falha ao carregar cena: ${String(error)}`);
+        setActiveScene(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProjectDir, logMessage, setActiveScene]);
 
   const entities = activeScene?.entities ?? [];
   const bgLayers = activeScene?.background_layers ?? [];
@@ -59,19 +75,14 @@ export default function HierarchyPanel() {
     setSelectedEntityId(id);
     setShowAddDialog(false);
     setNewName("Entity");
-    // Auto-save
-    const updated = { ...activeScene, entities: [...activeScene.entities, newEntity] };
-    const r = await saveSceneData(activeProjectDir, JSON.stringify(updated, null, 2));
-    logMessage(r.ok ? "success" : "error", `[Hierarchy] ${r.ok ? `Entidade '${newEntity.prefab}' adicionada.` : r.message}`);
+    await persistActiveScene(activeProjectDir, "Hierarchy", `Entidade '${newEntity.prefab}' adicionada.`);
   }
 
   async function handleDeleteEntity() {
     if (!activeProjectDir || !activeScene || !selectedEntityId || selectedEntityId.startsWith("layer::")) return;
     const name = activeScene.entities.find(e => e.entity_id === selectedEntityId)?.prefab ?? selectedEntityId;
     removeEntity(selectedEntityId);
-    const updated = { ...activeScene, entities: activeScene.entities.filter(e => e.entity_id !== selectedEntityId) };
-    const r = await saveSceneData(activeProjectDir, JSON.stringify(updated, null, 2));
-    logMessage(r.ok ? "success" : "error", `[Hierarchy] ${r.ok ? `Entidade '${name}' removida.` : r.message}`);
+    await persistActiveScene(activeProjectDir, "Hierarchy", `Entidade '${name}' removida.`);
   }
 
   return (

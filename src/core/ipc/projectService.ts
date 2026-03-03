@@ -10,6 +10,10 @@ export function openProjectDialog(): Promise<OpenProjectResult> {
   return invoke("open_project_dialog");
 }
 
+export function openProjectPath(projectDir: string): Promise<OpenProjectResult> {
+  return invoke("open_project_path", { projectDir });
+}
+
 export function newProjectDialog(projectName: string): Promise<OpenProjectResult> {
   return invoke("new_project_dialog", { projectName });
 }

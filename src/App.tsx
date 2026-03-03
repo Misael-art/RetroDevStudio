@@ -1,621 +1,619 @@
-import { useState, useRef, useEffect } from "react";
-import HierarchyPanel  from "./components/hierarchy/HierarchyPanel";
-import InspectorPanel  from "./components/inspector/InspectorPanel";
-import ViewportPanel   from "./components/viewport/ViewportPanel";
-import Console         from "./components/common/Console";
-import ToolsPanel      from "./components/tools/ToolsPanel";
-import { useEditorStore } from "./core/store/editorStore";
-import { buildProject, validateProject, generateCCode } from "./core/ipc/buildService";
+import { useEffect, useRef, useState } from "react";
+import Console from "./components/common/Console";
+import HierarchyPanel from "./components/hierarchy/HierarchyPanel";
+import InspectorPanel from "./components/inspector/InspectorPanel";
+import ToolsPanel from "./components/tools/ToolsPanel";
+import ViewportPanel from "./components/viewport/ViewportPanel";
+import { buildProject, generateCCode, validateProject } from "./core/ipc/buildService";
 import { emulatorLoadRom, emulatorStop } from "./core/ipc/emulatorService";
 import { getHwStatus } from "./core/ipc/hwService";
-import { openProjectDialog, newProjectDialog, setProjectTarget } from "./core/ipc/projectService";
-import type { Entity } from "./core/ipc/sceneService";
+import {
+  newProjectDialog,
+  openProjectDialog,
+  openProjectPath,
+  setProjectTarget,
+} from "./core/ipc/projectService";
+import {
+  getSceneData,
+  parseScene,
+  type Entity,
+} from "./core/ipc/sceneService";
+import { useEditorStore } from "./core/store/editorStore";
+import { persistActiveScene, reloadSceneFromDisk } from "./core/scenePersistence";
+import {
+  detectRomDependency,
+  getThirdPartyStatus,
+  installThirdPartyDependency,
+  type ThirdPartyDependencyId,
+} from "./core/ipc/toolsService";
+
+function ToolbarButton({
+  label,
+  onClick,
+  disabled = false,
+  accent = "default",
+  testId,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  accent?: "default" | "primary" | "success" | "danger";
+  testId?: string;
+}) {
+  const palette =
+    accent === "primary"
+      ? "bg-[#cba6f7] text-[#1e1e2e] hover:bg-[#b4a0e0]"
+      : accent === "success"
+        ? "bg-[#a6e3a1] text-[#1e1e2e] hover:bg-[#94e2a0]"
+        : accent === "danger"
+          ? "bg-[#f38ba8] text-[#1e1e2e] hover:bg-[#eba0ac]"
+          : "bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]";
+
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      data-testid={testId}
+      className={`rounded px-2 py-1 text-xs font-semibold transition-colors ${palette} disabled:cursor-not-allowed disabled:opacity-40`}
+    >
+      {label}
+    </button>
+  );
+}
+
+type AutomationState = {
+  activeProjectDir: string;
+  activeProjectName: string;
+  activeTarget: "megadrive" | "snes";
+  activeViewportTab: string;
+  consoleEntries: Array<{
+    level: "info" | "warn" | "error" | "success";
+    message: string;
+  }>;
+};
+
+type AutomationApi = {
+  openProject: (projectDir: string) => Promise<boolean>;
+  getState: () => AutomationState;
+};
+
+declare global {
+  interface Window {
+    __RDS_E2E__?: AutomationApi;
+  }
+}
 
 export default function App() {
   const {
-    logMessage, setHwStatus,
-    activeProjectDir, activeProjectName, setActiveProject,
-    activeTarget, setActiveTarget, setActiveScene, activeViewportTab, setActiveViewportTab,
-    setSelectedEntityId, selectedEntityId, emulPaused, setEmulPaused,
+    logMessage,
+    setHwStatus,
+    activeProjectDir,
+    activeProjectName,
+    setActiveProject,
+    activeTarget,
+    setActiveTarget,
+    setActiveScene,
+    activeViewportTab,
+    setActiveViewportTab,
+    setSelectedEntityId,
+    selectedEntityId,
+    emulPaused,
+    setEmulPaused,
   } = useEditorStore();
-  const [building,       setBuilding]       = useState(false);
-  const [toolsOpen,      setToolsOpen]      = useState(false);
-  const [menuOpen,       setMenuOpen]       = useState<string | null>(null);
-  const [newProjName,    setNewProjName]    = useState("");
-  const [showNewDialog,  setShowNewDialog]  = useState(false);
-  const [showAbout,      setShowAbout]      = useState(false);
-  const [showShortcuts,  setShowShortcuts]  = useState(false);
-  const [copiedEntity,   setCopiedEntity]   = useState<Entity | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
 
-  // Fecha menu ao clicar fora
+  const [building, setBuilding] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [newProjName, setNewProjName] = useState("");
+  const [showNewDialog, setShowNewDialog] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [copiedEntity, setCopiedEntity] = useState<Entity | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const tauriInternals =
+    (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  const automationEnabled =
+    typeof tauriInternals !== "undefined" ||
+    import.meta.env.DEV ||
+    String(import.meta.env.TAURI_ENV_DEBUG ?? "").toLowerCase() === "true" ||
+    String(import.meta.env.TAURI_ENV_DEBUG ?? "") === "1" ||
+    new URLSearchParams(window.location.search).has("e2e");
+
   useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(null);
-      }
+    if (showNewDialog && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
     }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
+  }, [showNewDialog]);
+
+  function describeError(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
+  async function hydrateProjectState(projectDir: string, projectName: string, scope: string) {
+    const hw = await getHwStatus(projectDir);
+    const sceneData = await getSceneData(projectDir);
+    if (!sceneData.ok) {
+      setActiveProject(projectDir, projectName);
+      setSelectedEntityId(null);
+      setHwStatus(hw);
+      logMessage("warn", `[${scope}] ${sceneData.error}`);
+      setActiveScene(null);
+      return false;
+    }
+
+    const scene = parseScene(sceneData);
+    if (!scene) {
+      setActiveProject(projectDir, projectName);
+      setSelectedEntityId(null);
+      setHwStatus(hw);
+      logMessage("error", `[${scope}] Falha ao reconstruir a cena do projeto.`);
+      setActiveScene(null);
+      return false;
+    }
+
+    setActiveProject(projectDir, projectName);
+    setSelectedEntityId(null);
+    setHwStatus(hw);
+    setActiveScene(scene);
+    if (sceneData.target === "megadrive" || sceneData.target === "snes") {
+      setActiveTarget(sceneData.target);
+    }
+
+    return true;
+  }
+
+  async function ensureDependencies(
+    dependencyIds: (ThirdPartyDependencyId | string)[],
+    reason: string
+  ) {
+    try {
+      const report = await getThirdPartyStatus();
+      const missing = report.items.filter(
+        (item) => dependencyIds.includes(item.id) && !item.installed
+      );
+      if (missing.length === 0) return true;
+
+      setToolsOpen(true);
+      const summary = missing
+        .map((item) => `- ${item.label}: ${item.issues[0] ?? item.install_dir}`)
+        .join("\n");
+
+      const confirmed = window.confirm(
+        `${reason}\n\nDependencias ausentes:\n${summary}\n\nInstalar automaticamente agora?`
+      );
+      if (!confirmed) {
+        logMessage("warn", "[Setup] Operacao cancelada: dependencias externas pendentes.");
+        return false;
+      }
+
+      for (const item of missing) {
+        logMessage("info", `[Setup] Instalando ${item.label}...`);
+        const result = await installThirdPartyDependency(item.id, (line) => {
+          logMessage(line.level, `[Setup] ${line.message}`);
+        });
+        if (!result.ok) {
+          logMessage("error", `[Setup] ${result.message}`);
+          return false;
+        }
+      }
+
+      return true;
+    } catch (error) {
+      logMessage("error", `[Setup] ${describeError(error)}`);
+      return false;
+    }
+  }
 
   async function handleOpenProject() {
-    setMenuOpen(null);
-    const result = await openProjectDialog();
-    if (result.selected) {
-      setActiveProject(result.path, result.name);
+    try {
+      const result = await openProjectDialog();
+      if (!result.selected) return;
+      await hydrateProjectState(result.path, result.name, "Projeto");
       logMessage("success", `Projeto aberto: ${result.name} (${result.path})`);
-      const hw = await getHwStatus(result.path);
-      setHwStatus(hw);
-      // Sincroniza target com o project.rds
-      const { getSceneData } = await import("./core/ipc/sceneService");
-      const sd = await getSceneData(result.path);
-      if (sd.ok && (sd.target === "megadrive" || sd.target === "snes")) {
-        setActiveTarget(sd.target);
+    } catch (error) {
+      logMessage("error", `[Projeto] Falha ao abrir projeto: ${describeError(error)}`);
+    }
+  }
+
+  async function openProjectAtPath(projectDir: string, scope: string) {
+    const result = await openProjectPath(projectDir);
+    if (!result.selected) {
+      throw new Error(`Projeto invalido ou incompleto: ${projectDir}`);
+    }
+    const hydrated = await hydrateProjectState(result.path, result.name, scope);
+    if (!hydrated) {
+      throw new Error(`Falha ao hidratar o projeto: ${result.path}`);
+    }
+    logMessage("success", `Projeto aberto: ${result.name} (${result.path})`);
+    return true;
+  }
+
+  async function handleSwitchTarget(target: "megadrive" | "snes") {
+    if (!activeProjectDir || target === activeTarget) return;
+    try {
+      const result = await setProjectTarget(activeProjectDir, target);
+      if (!result.ok) {
+        logMessage("error", `[Target] ${result.message}`);
+        return;
       }
+      setActiveTarget(target);
+      setHwStatus(await getHwStatus(activeProjectDir));
+      logMessage("info", `Target alterado para ${target === "megadrive" ? "Mega Drive" : "SNES"}.`);
+    } catch (error) {
+      logMessage("error", `[Target] Falha ao alterar target: ${describeError(error)}`);
     }
-  }
-
-  async function handleSwitchTarget(t: "megadrive" | "snes") {
-    if (!activeProjectDir || t === activeTarget) return;
-    const r = await setProjectTarget(activeProjectDir, t);
-    if (r.ok) {
-      setActiveTarget(t);
-      const hw = await getHwStatus(activeProjectDir);
-      setHwStatus(hw);
-      logMessage("info", `Target alterado para ${t === "megadrive" ? "Mega Drive" : "SNES"}.`);
-    } else {
-      logMessage("error", `[Target] ${r.message}`);
-    }
-  }
-
-  function handleCloseProject() {
-    setMenuOpen(null);
-    setActiveProject("", "");
-    setActiveScene(null);
-    setHwStatus(null);
-    setSelectedEntityId(null);
-    logMessage("info", "Projeto fechado.");
-  }
-
-  async function handleNewProject() {
-    setMenuOpen(null);
-    setNewProjName("MeuProjeto");
-    setShowNewDialog(true);
   }
 
   async function confirmNewProject() {
     setShowNewDialog(false);
     if (!newProjName.trim()) return;
-    const result = await newProjectDialog(newProjName.trim());
-    if (result.selected) {
-      setActiveProject(result.path, result.name);
+    try {
+      const result = await newProjectDialog(newProjName.trim());
+      if (!result.selected) return;
+      await hydrateProjectState(result.path, result.name, "Projeto");
       logMessage("success", `Novo projeto criado: ${result.name} em ${result.path}`);
-      // Mesmas inicializações do handleOpenProject — sem isso a Hierarchy fica vazia
-      const hw = await getHwStatus(result.path);
-      setHwStatus(hw);
-      const { getSceneData, parseScene } = await import("./core/ipc/sceneService");
-      const sd = await getSceneData(result.path);
-      if (sd.ok) {
-        const scene = parseScene(sd);
-        if (scene) setActiveScene(scene);
-        if (sd.target === "megadrive" || sd.target === "snes") setActiveTarget(sd.target);
-      }
+    } catch (error) {
+      logMessage("error", `[Projeto] Falha ao criar projeto: ${describeError(error)}`);
     }
   }
 
   async function handleEmulatorLoadRom() {
-    setMenuOpen(null);
-    const { open } = await import("@tauri-apps/plugin-dialog");
-    const selected = await open({
-      title: "Carregar ROM",
-      filters: [{ name: "ROM", extensions: ["md", "bin", "smc", "sfc", "rom"] }],
-    });
-    if (!selected) return;
-    const romPath = typeof selected === "string" ? selected : selected[0];
-    const r = await emulatorLoadRom(romPath);
-    if (r.ok) {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({
+        title: "Carregar ROM",
+        filters: [{ name: "ROM", extensions: ["md", "bin", "gen", "smc", "sfc", "rom"] }],
+      });
+      if (!selected) return;
+
+      const romPath = typeof selected === "string" ? selected : selected[0];
+      const romDependency = await detectRomDependency(romPath);
+      if (romDependency.dependency_id) {
+        const ready = await ensureDependencies(
+          [romDependency.dependency_id],
+          "Carregar esta ROM requer o core Libretro correspondente."
+        );
+        if (!ready) return;
+      }
+
+      const result = await emulatorLoadRom(romPath);
+      if (!result.ok) {
+        if (result.message.includes("Nenhum core Libretro")) setToolsOpen(true);
+        logMessage("error", `[Emulador] ${result.message}`);
+        return;
+      }
+
       logMessage("success", `ROM carregada: ${romPath}`);
       setActiveViewportTab("game");
-    } else {
-      logMessage("error", `[Emulador] ${r.message}`);
+      setEmulPaused(false);
+    } catch (error) {
+      logMessage("error", `[Emulador] Falha ao carregar ROM: ${describeError(error)}`);
     }
   }
 
   function handleEmulatorPause() {
-    setMenuOpen(null);
-    // ViewportPanel reage ao emulPaused via useEffect (P18)
     setEmulPaused(!emulPaused);
     logMessage("info", emulPaused ? "Emulador retomado." : "Emulador pausado.");
   }
 
   async function handleEmulatorStop() {
-    setMenuOpen(null);
-    await emulatorStop().catch(() => {});
-    setEmulPaused(false);
-    setActiveViewportTab("scene");
-    logMessage("info", "Emulador parado.");
+    try {
+      await emulatorStop();
+      setEmulPaused(false);
+      setActiveViewportTab("scene");
+      logMessage("info", "Emulador parado.");
+    } catch (error) {
+      logMessage("error", `[Emulador] Falha ao parar: ${describeError(error)}`);
+    }
   }
 
   async function handleValidate() {
-    setMenuOpen(null);
-    if (!activeProjectDir) { logMessage("warn", "Nenhum projeto aberto."); return; }
+    if (!activeProjectDir) {
+      logMessage("warn", "Nenhum projeto aberto.");
+      return;
+    }
     logMessage("info", "Validando projeto...");
-    const r = await validateProject(activeProjectDir);
-    r.errors.forEach((e) => logMessage("error", `[Validate] ${e}`));
-    r.warnings.forEach((w) => logMessage("warn", `[Validate] ${w}`));
-    if (r.ok) logMessage("success", "Validação OK — nenhum erro de hardware.");
+    try {
+      if (!(await persistActiveScene(activeProjectDir, "Validate"))) {
+        return;
+      }
+      const result = await validateProject(activeProjectDir);
+      result.errors.forEach((error) => logMessage("error", `[Validate] ${error}`));
+      result.warnings.forEach((warning) => logMessage("warn", `[Validate] ${warning}`));
+      if (result.ok) {
+        logMessage("success", "Validacao OK - nenhum erro de hardware.");
+      } else if (result.errors.length === 0) {
+        logMessage("error", "[Validate] Validacao falhou sem detalhar erros.");
+      }
+    } catch (error) {
+      logMessage("error", `[Validate] Falha inesperada: ${describeError(error)}`);
+    }
   }
 
   async function handleGenerateC() {
-    setMenuOpen(null);
-    if (!activeProjectDir) { logMessage("warn", "Nenhum projeto aberto."); return; }
-    logMessage("info", "Gerando código C...");
-    const r = await generateCCode(activeProjectDir);
-    r.errors.forEach((e) => logMessage("error", `[CodeGen] ${e}`));
-    if (r.ok) {
-      logMessage("success", "Código C gerado com sucesso.");
-      logMessage("info", `--- main.c ---\n${r.main_c.slice(0, 800)}${r.main_c.length > 800 ? "\n[truncado]" : ""}`);
+    if (!activeProjectDir) {
+      logMessage("warn", "Nenhum projeto aberto.");
+      return;
+    }
+    logMessage("info", "Gerando codigo C...");
+    try {
+      if (!(await persistActiveScene(activeProjectDir, "CodeGen"))) {
+        return;
+      }
+      const result = await generateCCode(activeProjectDir);
+      result.errors.forEach((error) => logMessage("error", `[CodeGen] ${error}`));
+      result.warnings.forEach((warning) => logMessage("warn", `[CodeGen] ${warning}`));
+      if (!result.ok) {
+        if (result.errors.length === 0) {
+          logMessage("error", "[CodeGen] Falha sem diagnostico detalhado.");
+        }
+        return;
+      }
+      logMessage("success", "Codigo C gerado com sucesso.");
+      logMessage(
+        "info",
+        `--- main.c ---\n${result.main_c.slice(0, 800)}${result.main_c.length > 800 ? "\n[truncado]" : ""}`
+      );
+    } catch (error) {
+      logMessage("error", `[CodeGen] Falha inesperada: ${describeError(error)}`);
     }
   }
 
   function handleCopyEntity() {
-    setMenuOpen(null);
-    const { activeScene, selectedEntityId } = useEditorStore.getState();
-    if (!selectedEntityId || selectedEntityId.startsWith("layer::") || !activeScene) return;
-    const entity = activeScene.entities.find((e) => e.entity_id === selectedEntityId);
+    const { activeScene, selectedEntityId: currentSelected } = useEditorStore.getState();
+    if (!currentSelected || currentSelected.startsWith("layer::") || !activeScene) return;
+    const entity = activeScene.entities.find((item) => item.entity_id === currentSelected);
     if (!entity) return;
     setCopiedEntity(entity);
     logMessage("info", `[Editar] Entidade copiada: ${entity.prefab ?? entity.entity_id}`);
   }
 
   async function handlePasteEntity() {
-    setMenuOpen(null);
     if (!copiedEntity || !activeProjectDir) return;
-    const { addEntity, activeScene } = useEditorStore.getState();
-    const newId = `${copiedEntity.entity_id}_copy_${Date.now()}`;
-    const pasted: Entity = {
-      ...copiedEntity,
-      entity_id: newId,
-      transform: { x: copiedEntity.transform.x + 16, y: copiedEntity.transform.y + 16 },
-    };
-    addEntity(pasted);
-    logMessage("success", `[Editar] Entidade colada: ${pasted.prefab ?? pasted.entity_id}`);
-    // Auto-save
-    const { saveSceneData } = await import("./core/ipc/sceneService");
-    const fresh = useEditorStore.getState().activeScene ?? activeScene;
-    if (fresh) await saveSceneData(activeProjectDir, JSON.stringify(fresh, null, 2));
+    try {
+      const { addEntity } = useEditorStore.getState();
+      const pasted: Entity = {
+        ...copiedEntity,
+        entity_id: `${copiedEntity.entity_id}_copy_${Date.now()}`,
+        transform: {
+          x: copiedEntity.transform.x + 16,
+          y: copiedEntity.transform.y + 16,
+        },
+      };
+      addEntity(pasted);
+      if (await persistActiveScene(activeProjectDir, "Editar")) {
+        logMessage("success", `[Editar] Entidade colada: ${pasted.prefab ?? pasted.entity_id}`);
+      }
+    } catch (error) {
+      logMessage("error", `[Editar] Falha ao colar entidade: ${describeError(error)}`);
+      await reloadSceneFromDisk(activeProjectDir, "Editar");
+    }
   }
 
   async function handleBuildAndRun() {
     if (!activeProjectDir) {
-      logMessage("warn", "Nenhum projeto aberto. Use Arquivo > Abrir Projeto.");
+      logMessage("warn", "Nenhum projeto aberto. Use Abrir Projeto.");
       return;
     }
+    if (building) {
+      return;
+    }
+
+    const requiredDependencies =
+      activeTarget === "megadrive"
+        ? (["sgdk", "libretro_megadrive"] as const)
+        : (["pvsneslib", "sgdk", "libretro_snes"] as const);
+
+    const dependenciesReady = await ensureDependencies(
+      [...requiredDependencies],
+      `Build & Run para ${activeTarget === "megadrive" ? "Mega Drive" : "SNES"} requer componentes de terceiros.`
+    );
+    if (!dependenciesReady) return;
 
     setBuilding(true);
     logMessage("info", "Iniciando build...");
 
     try {
+      if (!(await persistActiveScene(activeProjectDir, "Build"))) {
+        return;
+      }
+
       const hwStatus = await getHwStatus(activeProjectDir);
       setHwStatus(hwStatus);
       if (hwStatus.errors.length > 0) {
-        hwStatus.errors.forEach((e) => logMessage("error", `[HW] ${e}`));
-        logMessage("error", "Build bloqueado: violações de hardware. Corrija os erros acima.");
+        hwStatus.errors.forEach((error) => logMessage("error", `[HW] ${error}`));
+        logMessage("error", "Build bloqueado: violacoes de hardware.");
         return;
       }
-      hwStatus.warnings.forEach((w) => logMessage("warn", `[HW] ${w}`));
+      hwStatus.warnings.forEach((warning) => logMessage("warn", `[HW] ${warning}`));
 
       const result = await buildProject(activeProjectDir, (line) => {
         logMessage(line.level, line.message);
       });
-
-      if (result.ok) {
-        logMessage("success", `Build concluído! ROM: ${result.rom_path}`);
-        // Carrega a ROM no emulador e navega para aba Jogo
-        const loadResult = await emulatorLoadRom(result.rom_path);
-        if (loadResult.ok) {
-          logMessage("info", "ROM carregada no emulador. Iniciando...");
-          setActiveViewportTab("game");
-        } else {
-          logMessage("warn", `Emulador: ${loadResult.message}`);
-        }
-      } else {
+      if (!result.ok) {
         logMessage("error", "Build falhou. Verifique o Console para detalhes.");
+        return;
       }
-    } catch (err) {
-      logMessage("error", `Erro inesperado no build: ${err}`);
+
+      logMessage("success", `Build concluido. ROM: ${result.rom_path}`);
+      const loadResult = await emulatorLoadRom(result.rom_path);
+      if (!loadResult.ok) {
+        if (loadResult.message.includes("Nenhum core Libretro")) setToolsOpen(true);
+        logMessage("error", `[Emulador] ${loadResult.message}`);
+        return;
+      }
+
+      logMessage("success", "ROM carregada no emulador.");
+      setEmulPaused(false);
+      setActiveViewportTab("game");
+    } catch (error) {
+      logMessage("error", `[Build] Falha inesperada: ${describeError(error)}`);
     } finally {
       setBuilding(false);
     }
   }
 
+  async function handleCloseProject() {
+    try {
+      await emulatorStop();
+    } catch {
+      // Closing the project should still clear the UI even if the core is already stopped.
+    }
+
+    setActiveProject("", "");
+    setActiveScene(null);
+    setHwStatus(null);
+    setSelectedEntityId(null);
+    setEmulPaused(false);
+    setActiveViewportTab("scene");
+    logMessage("info", "Projeto fechado.");
+  }
+
+  useEffect(() => {
+    if (!automationEnabled) {
+      delete window.__RDS_E2E__;
+      return;
+    }
+
+    window.__RDS_E2E__ = {
+      openProject: (projectDir: string) => openProjectAtPath(projectDir, "E2E"),
+      getState: () => {
+        const state = useEditorStore.getState();
+        return {
+          activeProjectDir: state.activeProjectDir,
+          activeProjectName: state.activeProjectName,
+          activeTarget: state.activeTarget,
+          activeViewportTab: state.activeViewportTab,
+          consoleEntries: state.consoleEntries.map(({ level, message }) => ({ level, message })),
+        };
+      },
+    };
+
+    return () => {
+      delete window.__RDS_E2E__;
+    };
+  }, [automationEnabled]);
+
   return (
-    <div className="flex flex-col w-screen h-screen bg-[#11111b] text-[#cdd6f4] overflow-hidden">
-
-      {/* ── Modal: Novo Projeto ── */}
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#11111b] text-[#cdd6f4]">
       {showNewDialog && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-[#181825] border border-[#313244] rounded-lg p-5 w-72 flex flex-col gap-3 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="flex w-72 flex-col gap-3 rounded-lg border border-[#313244] bg-[#181825] p-5 shadow-2xl">
             <h2 className="text-sm font-bold text-[#cba6f7]">Novo Projeto</h2>
-            <div className="flex flex-col gap-1">
-              <label className="text-[10px] text-[#7f849c]">Nome do projeto</label>
-              <input
-                autoFocus
-                type="text"
-                value={newProjName}
-                onChange={(e) => setNewProjName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && confirmNewProject()}
-                className="bg-[#1e1e2e] border border-[#313244] rounded px-2 py-1.5 text-sm text-[#cdd6f4] focus:outline-none focus:border-[#cba6f7]"
-              />
-            </div>
-            <p className="text-[10px] text-[#45475a]">
-              Você selecionará a pasta pai. A subpasta <code className="text-[#cba6f7]">{newProjName || "..."}</code> será criada automaticamente.
-            </p>
-            <div className="flex gap-2 justify-end">
-              <button onClick={() => setShowNewDialog(false)}
-                className="px-3 py-1 text-xs rounded bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]">
-                Cancelar
-              </button>
-              <button onClick={confirmNewProject}
-                className="px-3 py-1 text-xs rounded bg-[#cba6f7] text-[#1e1e2e] font-semibold hover:bg-[#b4a0e0]">
-                Criar
-              </button>
+            <input
+              ref={inputRef}
+              type="text"
+              value={newProjName}
+              onChange={(event) => setNewProjName(event.target.value)}
+              onKeyDown={(event) => event.key === "Enter" && void confirmNewProject()}
+              className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1.5 text-sm text-[#cdd6f4] focus:border-[#cba6f7] focus:outline-none"
+            />
+            <div className="flex justify-end gap-2">
+              <ToolbarButton label="Cancelar" onClick={() => setShowNewDialog(false)} />
+              <ToolbarButton label="Criar" onClick={() => void confirmNewProject()} accent="primary" />
             </div>
           </div>
         </div>
       )}
 
-      {/* ── Modal: Sobre ── */}
       {showAbout && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-[#181825] border border-[#313244] rounded-lg p-5 w-80 flex flex-col gap-3 shadow-2xl">
-            <h2 className="text-sm font-bold text-[#cba6f7]">◈ RetroDev Studio</h2>
-            <div className="flex flex-col gap-1 text-xs text-[#a6adc8]">
-              <p>Versão: <span className="text-[#cdd6f4] font-mono">0.1.0</span></p>
-              <p>Stack: <span className="text-[#cdd6f4] font-mono">Tauri 2 · React 19 · Rust</span></p>
-              <p>Fase: <span className="text-[#cdd6f4]">Pós-MVP — Polish/QA</span></p>
-            </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="flex w-80 flex-col gap-3 rounded-lg border border-[#313244] bg-[#181825] p-5 shadow-2xl">
+            <h2 className="text-sm font-bold text-[#cba6f7]">RetroDev Studio</h2>
+            <p className="text-xs text-[#a6adc8]">Tauri 2 · React 19 · Rust</p>
             <p className="text-[10px] text-[#45475a]">
-              Plataforma desktop para desenvolvimento de jogos 16-bit (Mega Drive, SNES).
+              Plataforma desktop para desenvolvimento de jogos 16-bit.
             </p>
-            <button onClick={() => setShowAbout(false)}
-              className="self-end px-4 py-1 text-xs rounded bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]">
-              Fechar
-            </button>
+            <ToolbarButton label="Fechar" onClick={() => setShowAbout(false)} />
           </div>
         </div>
       )}
 
-      {/* ── Modal: Atalhos de Teclado ── */}
       {showShortcuts && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-          <div className="bg-[#181825] border border-[#313244] rounded-lg p-5 w-80 flex flex-col gap-3 shadow-2xl">
-            <h2 className="text-sm font-bold text-[#cba6f7]">⌨ Atalhos de Teclado</h2>
-            <table className="text-xs w-full">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="flex w-80 flex-col gap-3 rounded-lg border border-[#313244] bg-[#181825] p-5 shadow-2xl">
+            <h2 className="text-sm font-bold text-[#cba6f7]">Atalhos</h2>
+            <table className="w-full text-xs">
               <tbody className="divide-y divide-[#313244]">
                 {[
-                  ["Ctrl+C", "Copiar entidade selecionada"],
-                  ["Ctrl+V", "Colar entidade copiada"],
-                  ["Delete", "Remover nó (NodeGraph)"],
-                  ["Z", "Joypad A (emulador)"],
-                  ["X", "Joypad B (emulador)"],
-                  ["Enter", "Start (emulador)"],
-                  ["Setas", "D-Pad (emulador)"],
-                ].map(([key, desc]) => (
+                  ["Ctrl+C", "Copiar entidade"],
+                  ["Ctrl+V", "Colar entidade"],
+                  ["Delete", "Remover no no NodeGraph"],
+                  ["Z / X / Enter / Setas", "Controles do emulador"],
+                ].map(([key, value]) => (
                   <tr key={key}>
-                    <td className="py-1.5 pr-4 font-mono text-[#f9e2af] whitespace-nowrap">{key}</td>
-                    <td className="py-1.5 text-[#a6adc8]">{desc}</td>
+                    <td className="py-1.5 pr-4 font-mono text-[#f9e2af]">{key}</td>
+                    <td className="py-1.5 text-[#a6adc8]">{value}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            <button onClick={() => setShowShortcuts(false)}
-              className="self-end px-4 py-1 text-xs rounded bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]">
-              Fechar
-            </button>
+            <ToolbarButton label="Fechar" onClick={() => setShowShortcuts(false)} />
           </div>
         </div>
       )}
 
-      {/* ── Top Menu Bar ── */}
-      <header className="flex items-center gap-4 px-4 h-9 bg-[#181825] border-b border-[#313244] shrink-0 select-none">
-        <span className="text-sm font-bold text-[#cba6f7]">RetroDev Studio</span>
-
-        {/* Menu com dropdown para Arquivo */}
-        <nav className="flex items-center gap-1 text-xs text-[#a6adc8]" ref={menuRef}>
-          {/* Arquivo — dropdown funcional */}
-          <div className="relative">
-            <button
-              onClick={() => setMenuOpen(menuOpen === "Arquivo" ? null : "Arquivo")}
-              className={`px-2 py-1 rounded transition-colors ${menuOpen === "Arquivo" ? "bg-[#313244] text-[#cdd6f4]" : "hover:bg-[#313244] hover:text-[#cdd6f4]"}`}
-            >
-              Arquivo
-            </button>
-            {menuOpen === "Arquivo" && (
-              <div className="absolute left-0 top-full mt-0.5 w-48 bg-[#1e1e2e] border border-[#313244] rounded shadow-xl z-40 py-1">
-                <button onClick={handleNewProject}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2">
-                  <span className="text-[#a6e3a1]">+</span> Novo Projeto...
-                </button>
-                <button onClick={handleOpenProject}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2">
-                  <span className="text-[#89b4fa]">◉</span> Abrir Projeto...
-                </button>
-                <button
-                  onClick={handleCloseProject}
-                  disabled={!activeProjectDir}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#f38ba8] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <span>✕</span> Fechar Projeto
-                </button>
-                <div className="border-t border-[#313244] my-1" />
-                <div className="px-3 py-1 text-[10px] text-[#45475a] truncate max-w-full">
-                  {activeProjectName
-                    ? <>Aberto: <span className="text-[#cba6f7]">{activeProjectName}</span></>
-                    : "Nenhum projeto aberto"}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Menu Build — dropdown funcional */}
-          <div className="relative">
-            <button
-              onClick={() => setMenuOpen(menuOpen === "Build" ? null : "Build")}
-              className={`px-2 py-1 rounded transition-colors ${menuOpen === "Build" ? "bg-[#313244] text-[#cdd6f4]" : "hover:bg-[#313244] hover:text-[#cdd6f4]"}`}
-            >
-              Build
-            </button>
-            {menuOpen === "Build" && (
-              <div className="absolute left-0 top-full mt-0.5 w-52 bg-[#1e1e2e] border border-[#313244] rounded shadow-xl z-40 py-1">
-                <button onClick={handleValidate} disabled={!activeProjectDir}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">
-                  <span className="text-[#89b4fa]">✓</span> Validar Projeto
-                </button>
-                <button onClick={handleGenerateC} disabled={!activeProjectDir}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">
-                  <span className="text-[#f9e2af]">⟨/⟩</span> Gerar Código C
-                </button>
-                <div className="border-t border-[#313244] my-1" />
-                <button onClick={() => { setMenuOpen(null); handleBuildAndRun(); }} disabled={!activeProjectDir || building}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#a6e3a1] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">
-                  <span>▶</span> Build & Run
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Menu Emulador — dropdown funcional */}
-          <div className="relative">
-            <button
-              onClick={() => setMenuOpen(menuOpen === "Emulador" ? null : "Emulador")}
-              className={`px-2 py-1 rounded transition-colors ${menuOpen === "Emulador" ? "bg-[#313244] text-[#cdd6f4]" : "hover:bg-[#313244] hover:text-[#cdd6f4]"}`}
-            >
-              Emulador
-            </button>
-            {menuOpen === "Emulador" && (
-              <div className="absolute left-0 top-full mt-0.5 w-52 bg-[#1e1e2e] border border-[#313244] rounded shadow-xl z-40 py-1">
-                <button onClick={handleEmulatorLoadRom}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2">
-                  <span className="text-[#89b4fa]">◉</span> Carregar ROM...
-                </button>
-                <div className="border-t border-[#313244] my-1" />
-                <button onClick={handleEmulatorPause} disabled={activeViewportTab !== "game"}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">
-                  <span className="text-[#f9e2af]">{emulPaused ? "▶" : "⏸"}</span>
-                  {emulPaused ? "Retomar" : "Pausar"}
-                </button>
-                <button onClick={handleEmulatorStop} disabled={activeViewportTab !== "game"}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#f38ba8] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">
-                  <span>■</span> Parar
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Menu Editar — dropdown funcional */}
-          <div className="relative">
-            <button
-              onClick={() => setMenuOpen(menuOpen === "Editar" ? null : "Editar")}
-              className={`px-2 py-1 rounded transition-colors ${menuOpen === "Editar" ? "bg-[#313244] text-[#cdd6f4]" : "hover:bg-[#313244] hover:text-[#cdd6f4]"}`}
-            >
-              Editar
-            </button>
-            {menuOpen === "Editar" && (
-              <div className="absolute left-0 top-full mt-0.5 w-52 bg-[#1e1e2e] border border-[#313244] rounded shadow-xl z-40 py-1">
-                <button
-                  onClick={() => { setMenuOpen(null); logMessage("info", "[Editar] Desfazer — não implementado nesta versão."); }}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#585b70] flex items-center gap-2 cursor-not-allowed"
-                >
-                  <span>↩</span> Desfazer <span className="ml-auto text-[#45475a]">Ctrl+Z</span>
-                </button>
-                <button
-                  onClick={() => { setMenuOpen(null); logMessage("info", "[Editar] Refazer — não implementado nesta versão."); }}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#585b70] flex items-center gap-2 cursor-not-allowed"
-                >
-                  <span>↪</span> Refazer <span className="ml-auto text-[#45475a]">Ctrl+Y</span>
-                </button>
-                <div className="border-t border-[#313244] my-1" />
-                <button
-                  onClick={handleCopyEntity}
-                  disabled={!selectedEntityId || selectedEntityId.startsWith("layer::")}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <span className="text-[#89b4fa]">⎘</span> Copiar Entidade <span className="ml-auto text-[#45475a]">Ctrl+C</span>
-                </button>
-                <button
-                  onClick={handlePasteEntity}
-                  disabled={!copiedEntity || !activeProjectDir}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <span className="text-[#a6e3a1]">⎗</span> Colar Entidade <span className="ml-auto text-[#45475a]">Ctrl+V</span>
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Menu Projeto — dropdown funcional */}
-          <div className="relative">
-            <button
-              onClick={() => setMenuOpen(menuOpen === "Projeto" ? null : "Projeto")}
-              className={`px-2 py-1 rounded transition-colors ${menuOpen === "Projeto" ? "bg-[#313244] text-[#cdd6f4]" : "hover:bg-[#313244] hover:text-[#cdd6f4]"}`}
-            >
-              Projeto
-            </button>
-            {menuOpen === "Projeto" && (
-              <div className="absolute left-0 top-full mt-0.5 w-52 bg-[#1e1e2e] border border-[#313244] rounded shadow-xl z-40 py-1">
-                <div className="px-3 py-1.5 text-[10px] text-[#45475a]">
-                  {activeProjectName
-                    ? <><span className="text-[#cba6f7]">{activeProjectName}</span> — {activeTarget === "megadrive" ? "Mega Drive" : "SNES"}</>
-                    : "Nenhum projeto aberto"}
-                </div>
-                <div className="border-t border-[#313244] my-1" />
-                <button
-                  onClick={() => { setMenuOpen(null); handleSwitchTarget("megadrive"); }}
-                  disabled={!activeProjectDir || activeTarget === "megadrive"}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <span className="text-[#a6e3a1]">MD</span> Mudar para Mega Drive
-                </button>
-                <button
-                  onClick={() => { setMenuOpen(null); handleSwitchTarget("snes"); }}
-                  disabled={!activeProjectDir || activeTarget === "snes"}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <span className="text-[#89b4fa]">SN</span> Mudar para SNES
-                </button>
-                <div className="border-t border-[#313244] my-1" />
-                <button
-                  onClick={() => { setMenuOpen(null); if (activeProjectDir) logMessage("info", `[Projeto] Dir: ${activeProjectDir}`); }}
-                  disabled={!activeProjectDir}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
-                >
-                  <span className="text-[#f9e2af]">ℹ</span> Info no Console
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* Menu Ajuda — dropdown funcional */}
-          <div className="relative">
-            <button
-              onClick={() => setMenuOpen(menuOpen === "Ajuda" ? null : "Ajuda")}
-              className={`px-2 py-1 rounded transition-colors ${menuOpen === "Ajuda" ? "bg-[#313244] text-[#cdd6f4]" : "hover:bg-[#313244] hover:text-[#cdd6f4]"}`}
-            >
-              Ajuda
-            </button>
-            {menuOpen === "Ajuda" && (
-              <div className="absolute left-0 top-full mt-0.5 w-56 bg-[#1e1e2e] border border-[#313244] rounded shadow-xl z-40 py-1">
-                <button
-                  onClick={() => { setMenuOpen(null); setShowAbout(true); }}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2"
-                >
-                  <span className="text-[#cba6f7]">◈</span> Sobre o RetroDev Studio
-                </button>
-                <button
-                  onClick={() => { setMenuOpen(null); setShowShortcuts(true); }}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#cdd6f4] flex items-center gap-2"
-                >
-                  <span className="text-[#f9e2af]">⌨</span> Atalhos de Teclado
-                </button>
-                <div className="border-t border-[#313244] my-1" />
-                <button
-                  onClick={() => { setMenuOpen(null); logMessage("info", "RetroDev Studio v0.1.0 — Tauri 2 + React 19 + Rust 1.86"); }}
-                  className="w-full text-left px-3 py-1.5 text-xs hover:bg-[#313244] text-[#585b70] flex items-center gap-2"
-                >
-                  <span>⚙</span> Versão no Console
-                </button>
-              </div>
-            )}
-          </div>
-        </nav>
+      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[#313244] bg-[#181825] px-4 py-2">
+        <span className="mr-2 text-sm font-bold text-[#cba6f7]">RetroDev Studio</span>
+        <ToolbarButton label="Novo" onClick={() => setShowNewDialog(true)} />
+        <ToolbarButton label="Abrir" onClick={() => void handleOpenProject()} />
+        <ToolbarButton label="Fechar" onClick={() => void handleCloseProject()} disabled={!activeProjectDir} />
+        <ToolbarButton label="Validar" onClick={() => void handleValidate()} disabled={!activeProjectDir} />
+        <ToolbarButton label="Gerar C" onClick={() => void handleGenerateC()} disabled={!activeProjectDir} />
+        <ToolbarButton
+          label="Build & Run"
+          onClick={() => void handleBuildAndRun()}
+          disabled={building || !activeProjectDir}
+          accent="success"
+          testId="toolbar-build-run"
+        />
+        <ToolbarButton label="Carregar ROM" onClick={() => void handleEmulatorLoadRom()} />
+        <ToolbarButton label={emulPaused ? "Retomar" : "Pausar"} onClick={handleEmulatorPause} disabled={activeViewportTab !== "game"} />
+        <ToolbarButton label="Parar" onClick={() => void handleEmulatorStop()} disabled={activeViewportTab !== "game"} accent="danger" />
+        <ToolbarButton label="Copiar" onClick={handleCopyEntity} disabled={!selectedEntityId || selectedEntityId.startsWith("layer::")} />
+        <ToolbarButton label="Colar" onClick={() => void handlePasteEntity()} disabled={!copiedEntity || !activeProjectDir} />
+        <ToolbarButton label={toolsOpen ? "Inspector" : "Tools"} onClick={() => setToolsOpen((open) => !open)} accent="primary" />
+        <ToolbarButton label="Sobre" onClick={() => setShowAbout(true)} />
+        <ToolbarButton label="Atalhos" onClick={() => setShowShortcuts(true)} />
 
         <div className="ml-auto flex items-center gap-2">
-          {/* Indicador do projeto ativo */}
-          {activeProjectName && (
-            <span className="text-[10px] text-[#45475a] max-w-32 truncate" title={activeProjectDir}>
-              📁 {activeProjectName}
-            </span>
-          )}
-          {/* Target switcher MD / SNES */}
-          <div className="flex items-center gap-0.5 bg-[#181825] border border-[#313244] rounded overflow-hidden">
-            {(["megadrive", "snes"] as const).map((t) => (
+          <span data-testid="active-project-name" className="max-w-36 truncate text-[10px] text-[#45475a]">
+            {activeProjectName || "Sem projeto"}
+          </span>
+          <div className="flex overflow-hidden rounded border border-[#313244] bg-[#11111b]">
+            {(["megadrive", "snes"] as const).map((target) => (
               <button
-                key={t}
-                onClick={() => handleSwitchTarget(t)}
-                disabled={!activeProjectDir}
-                title={
-                  !activeProjectDir ? "Abra um projeto primeiro" :
-                  t === "megadrive" ? "Mega Drive — 320×224, 80 sprites" :
-                  "SNES — 256×224, 128 sprites"
-                }
-                className={[
-                  "px-2 py-0.5 text-[10px] font-bold transition-colors",
-                  activeTarget === t
-                    ? t === "megadrive"
+                key={target}
+                onClick={() => void handleSwitchTarget(target)}
+                disabled={!activeProjectDir || activeTarget === target}
+                className={`px-2 py-0.5 text-[10px] font-bold ${
+                  activeTarget === target
+                    ? target === "megadrive"
                       ? "bg-[#a6e3a1] text-[#1e1e2e]"
                       : "bg-[#89b4fa] text-[#1e1e2e]"
-                    : "text-[#45475a] hover:text-[#a6adc8] disabled:cursor-not-allowed",
-                ].join(" ")}
+                    : "text-[#45475a] disabled:cursor-not-allowed"
+                }`}
               >
-                {t === "megadrive" ? "MD" : "SNES"}
+                {target === "megadrive" ? "MD" : "SNES"}
               </button>
             ))}
           </div>
-          <span className="text-[10px] text-[#45475a]">Fase 4 — Camada Pro</span>
-          <button
-            onClick={() => setToolsOpen((o) => !o)}
-            className={`px-2 py-1 text-xs font-semibold rounded transition-colors ${toolsOpen ? "bg-[#cba6f7] text-[#1e1e2e]" : "bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]"}`}
-            title="Ferramentas Pro: Patch Studio, Deep Profiler, Asset Extractor"
-          >
-            ⧉ Tools
-          </button>
-          <button
-            onClick={handleBuildAndRun}
-            disabled={building || !activeProjectDir}
-            className={[
-              "px-3 py-1 text-xs font-semibold rounded transition-colors",
-              building
-                ? "bg-[#45475a] text-[#6c7086] cursor-not-allowed"
-                : !activeProjectDir
-                  ? "bg-[#313244] text-[#45475a] cursor-not-allowed"
-                  : "bg-[#a6e3a1] text-[#1e1e2e] hover:bg-[#94e2a0] cursor-pointer",
-            ].join(" ")}
-            title={
-              building ? "Build em andamento..." :
-              !activeProjectDir ? "Abra um projeto primeiro (Arquivo > Abrir Projeto)" :
-              "Build & Run (requer SGDK em toolchains/sgdk/)"
-            }
-          >
-            {building ? "⏳ Building..." : "▶ Build & Run"}
-          </button>
         </div>
       </header>
 
-      {/* ── Main workspace (3 painéis) ── */}
       <div className="flex flex-1 overflow-hidden">
-
-        {/* Left: Hierarchy */}
-        <aside className="w-56 shrink-0 border-r border-[#313244] overflow-hidden">
+        <aside className="w-56 shrink-0 overflow-hidden border-r border-[#313244]">
           <HierarchyPanel />
         </aside>
-
-        {/* Center: Viewport */}
         <main className="flex-1 overflow-hidden">
           <ViewportPanel />
         </main>
-
-        {/* Right: Inspector ou Tools (alternável) */}
-        <aside className="w-64 shrink-0 border-l border-[#313244] overflow-hidden">
+        <aside className="w-64 shrink-0 overflow-hidden border-l border-[#313244]">
           {toolsOpen ? <ToolsPanel /> : <InspectorPanel />}
         </aside>
-
       </div>
 
-      {/* ── Bottom: Console ── */}
       <Console />
-
     </div>
   );
 }

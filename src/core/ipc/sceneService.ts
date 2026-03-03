@@ -22,9 +22,25 @@ export interface CollisionComponent {
   solid: boolean;
 }
 
+export interface CameraComponent {
+  follow_entity?: string;
+  offset_x: number;
+  offset_y: number;
+}
+
+export interface TilemapComponent {
+  tileset: string;
+  map_width: number;
+  map_height: number;
+  scroll_x: number;
+  scroll_y: number;
+}
+
 export interface Components {
   sprite?: SpriteComponent;
   collision?: CollisionComponent;
+  camera?: CameraComponent;
+  tilemap?: TilemapComponent;
 }
 
 export interface Entity {

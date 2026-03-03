@@ -183,3 +183,86 @@ pub fn hw_status(scene: &Scene) -> HwStatus {
         warnings,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ugdm::components::{Components, SpriteComponent};
+    use crate::ugdm::entities::{Entity, PaletteEntry, Scene, Transform};
+
+    fn sprite_entity(id: &str, frame_width: u32, frame_height: u32, palette_slot: u8) -> Entity {
+        Entity {
+            entity_id: id.to_string(),
+            prefab: None,
+            transform: Transform { x: 0, y: 0 },
+            components: Components {
+                sprite: Some(SpriteComponent {
+                    asset: "assets/sprites/test.png".to_string(),
+                    frame_width,
+                    frame_height,
+                    pivot: None,
+                    palette_slot,
+                    animations: Default::default(),
+                    priority: "foreground".to_string(),
+                }),
+                ..Default::default()
+            },
+        }
+    }
+
+    fn empty_scene() -> Scene {
+        Scene {
+            scene_id: "main".to_string(),
+            display_name: Some("Main Scene".to_string()),
+            background_layers: Vec::new(),
+            entities: Vec::new(),
+            palettes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn rejects_sprite_overflow() {
+        let mut scene = empty_scene();
+        scene.entities = (0..=MD_SPRITES_PER_SCREEN)
+            .map(|index| sprite_entity(&format!("entity_{index}"), 8, 8, 0))
+            .collect();
+
+        let errors = validate_scene(&scene);
+
+        assert!(errors.iter().any(|error| {
+            error.is_fatal && error.message.contains("Sprite overflow")
+        }));
+    }
+
+    #[test]
+    fn rejects_invalid_palette_slots() {
+        let mut scene = empty_scene();
+        scene.entities.push(sprite_entity("bad_palette", 8, 8, MD_PALETTE_SLOTS));
+        scene.palettes.push(PaletteEntry {
+            slot: MD_PALETTE_SLOTS,
+            colors: vec!["#000000".to_string(); MD_PALETTE_COLORS as usize],
+        });
+
+        let errors = validate_scene(&scene);
+
+        assert!(errors.iter().any(|error| {
+            error.is_fatal && error.message.contains("palette_slot")
+        }));
+        assert!(errors.iter().any(|error| {
+            error.is_fatal && error.message.contains("Palette slot")
+        }));
+    }
+
+    #[test]
+    fn reports_hw_status_for_valid_scene() {
+        let mut scene = empty_scene();
+        scene.entities.push(sprite_entity("player", 16, 16, 0));
+
+        let status = hw_status(&scene);
+
+        assert_eq!(status.sprite_count, 1);
+        assert_eq!(status.sprite_limit, MD_SPRITES_PER_SCREEN);
+        assert_eq!(status.bg_layers_limit, 3);
+        assert!(status.errors.is_empty());
+    }
+}

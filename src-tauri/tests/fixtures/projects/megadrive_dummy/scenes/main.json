@@ -1,0 +1,30 @@
+{
+  "scene_id": "main",
+  "display_name": "Main Scene",
+  "background_layers": [],
+  "entities": [
+    {
+      "entity_id": "camera_root",
+      "prefab": null,
+      "transform": {
+        "x": 0,
+        "y": 0
+      },
+      "components": {
+        "sprite": null,
+        "collision": null,
+        "input": null,
+        "physics": null,
+        "audio": null,
+        "logic": null,
+        "camera": {
+          "follow_entity": null,
+          "offset_x": 0,
+          "offset_y": 0
+        },
+        "tilemap": null
+      }
+    }
+  ],
+  "palettes": []
+}

@@ -1,150 +1,113 @@
 # 03 - ROADMAP MACRO & MVP TATICO
-**Status:** Documento Vivo (Atualizado a cada final de Sprint)
-**Fase Atual Ativa:** Fase 0 (Fundacao) — INCOMPLETA
+**Status:** Documento vivo
+**Ultima revisao canonica:** 2026-03-02
+**Fase ativa real:** Hardening do fluxo `Build -> ROM -> Emulacao` ja validado em Windows com upstream real
 
-> **ATENCAO AGENTES DE IA (DIRETRIZ DE FOCO OBRIGATORIA):**
-> O seu escopo de trabalho esta restrito **APENAS a Fase e Sprint marcados como "EM ANDAMENTO"**.
-> E estritamente proibido escrever codigo, propor arquiteturas ou importar bibliotecas para recursos de Fases futuras.
-> Se o usuario pedir algo fora do escopo atual, alerte-o gentilmente sobre o Roadmap.
->
-> **REGRA DE PROGRESSAO:** Uma Fase so pode ser iniciada quando TODOS os checkboxes da Fase anterior estiverem marcados `[x]`. Nao existe "pular para a Fase 1" com a Fase 0 incompleta.
+> **DIRETRIZ PARA AGENTES DE IA**
+> Este roadmap precisa refletir estado real do codigo, nao claims historicas.
+> Se uma feature existe no repositorio, mas ainda depende de repeticao institucional/CI ou de cobertura complementar por target, ela deve ser tratada como `validada, em hardening`.
 
 ---
 
-## A ESTRATEGIA DO MVP (Minimum Viable Product)
+## Estado Real em 2026-03-02
 
-Para provar que o **RetroDev Studio** e viavel, nao vamos construir tudo de uma vez. O MVP deve provar **uma unica jornada de ponta a ponta**:
+### Ja implementado em codigo
+- Editor Tauri + React + TypeScript funcional.
+- Schema canonico de projeto/cena, fixtures dummy e testes Rust.
+- Build orchestration real por target (`megadrive` e `snes`) com erro explicito sem toolchain.
+- Emulacao integrada por Libretro real via FFI no Rust.
+- Instalacao sob demanda de SGDK, PVSnesLib e cores Libretro oficiais no Windows.
+- Caminho SNES com staging de asset real e workspace compativel com `snes_rules`.
+- Baseline de CI com GitHub Actions para `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `cargo clippy -- -D warnings`, `cargo test --lib` e `npm test`.
+- Validacao oficial upstream em Windows com SGDK, PVSnesLib e cores Libretro reais via `scripts/validate-upstream-windows.ps1`.
+- E2E de aplicacao desktop/Tauri via `scripts/e2e-tauri-build-run.mjs` para `Build -> Load ROM -> Run frames`.
+- Pause/resume do viewport preservando o core Libretro, autosave fresco no hierarchy e persistencia atomica de projeto/cena.
+- Features ainda parciais agora ficam explicitamente marcadas como `Experimental` na UI para nao mentir sobre prontidao.
 
-1. Criar um projeto simples via UI (React).
-2. O Backend (Rust) ler essa cena (UGDM) e traduzir para codigo C (SGDK).
-3. Compilar uma ROM do Mega Drive (`.md`).
-4. Rodar a ROM no emulador embutido na mesma janela.
-
-**Tudo que nao contribui para esta jornada NAO pertence ao MVP.**
-
----
-
-## FASE 0: FUNDACAO (Setup Arquitetural) — CONCLUIDA
-
-**Objetivo:** Ter o repositorio base pronto para iniciar a programacao.
-**Pre-requisito:** Nenhum (e a primeira fase).
-**Definition of Done:** Rodar `npm run dev` e ver a janela Tauri abrir com o React em branco.
-
-- [x] Criacao do PRD Master e Documentacao Base (Arquitetura de Conhecimento).
-- [x] Especificacao do UGDM (docs/05_ARCHITECTURE_UGDM.md).
-- [x] Inicializacao do projeto **Tauri + React + TypeScript + Vite**.
-- [x] Configuracao do TailwindCSS para o Design System do Editor.
-- [x] Estruturacao das pastas do backend em Rust (`/src-tauri`).
-- [x] Setup do CI/CD basico ou linter (Cargo clippy, ESLint).
-- [x] `.gitignore` configurado para Rust/Node/build artifacts.
-
-### Criterios de Saida da Fase 0:
-1. `npm run dev` abre a janela Tauri com React
-2. `cargo clippy` roda sem erros no backend Rust
-3. A estrutura de pastas corresponde ao `08_TREE_ARCHITECTURE.md`
-4. O script `check-tree` passa sem erros
-
-> **PARE AQUI.** Nao inicie a Fase 1 ate que TODOS os itens acima estejam marcados `[x]`.
+### Ainda em hardening
+- Repeticao institucional do fluxo oficial em Windows quando build/emulacao/toolchains forem alterados.
+- Confirmacao do workflow desktop em runner GitHub/Windows real.
+- Possivel evolucao do workflow desktop para `workflow_call`, gate protegido ou encaixe adicional em processo institucional.
 
 ---
 
-## FASE 1: O "CORE" MEGA DRIVE (MVP)
+## FASE 0 - FUNDACAO
+**Status:** CONCLUIDA E VERIFICADA
 
-**Objetivo:** Gerar um binario jogavel de Mega Drive a partir do Editor.
-**Pre-requisito:** Fase 0 100% completa.
-**Definition of Done:** Clicar "Build & Run" no editor e ver uma ROM rodando no emulador integrado.
-
-> **STATUS: BLOQUEADA** — Fase 0 ainda incompleta.
-
-### Sprint 1.1: UI Base e Workspace — CONCLUIDA
-**DoD:** O layout principal renderiza com os 3 paineis visiveis.
-- [x] Layout principal do Editor (Docking system: Viewport no centro, Hierarchy na esquerda, Inspector na direita).
-- [x] Sistema de abas generico.
-- [x] Logger/Console integrado no rodape (para ver a saida do compilador C).
-
-### Sprint 1.2: UGDM to C (A Magica da Compilacao) — CONCLUIDA
-**DoD:** Dado um `.rds` com uma entidade simples, o backend gera `main.c` valido para SGDK.
-- [x] Backend Rust: Parser que le o `project.rds` e valida contra o schema UGDM (`05_ARCHITECTURE_UGDM.md`).
-- [x] Backend Rust: AST generator que converte UGDM validado em `main.c` usando funcoes SGDK (`SPR_init()`, `VDP_drawText()`, etc).
-- [x] Gerar arquivo de resources do SGDK (`resources.res`) a partir dos assets listados no JSON.
-
-### Sprint 1.3: Toolchain Orchestrator — CONCLUIDA
-**DoD:** O backend invoca GCC m68k e produz um arquivo `out.md` (ROM) a partir do codigo C gerado.
-- [x] Backend Rust: Funcao para invocar o compilador (GCC via SGDK pre-built ou via Docker container).
-- [x] Capturar stdout/stderr do compilador e enviar via IPC para o Console do React.
-- [x] Gerar o arquivo `out.md` (a ROM compilada) em uma pasta temporaria `/build`.
-
-### Sprint 1.4: Emulador Embutido (Live Viewport) — CONCLUIDA
-**DoD:** A ROM compilada roda dentro da janela do editor a 60fps.
-- [x] Integrar a biblioteca C do Libretro (Genesis Plus GX core) ao backend Rust via FFI.
-- [x] Enviar o Framebuffer do Rust para o Frontend (React) a 60 FPS usando um `<canvas>` (WebGPU/WebGL).
-- [x] Enviar inputs do teclado (React) para o backend (Rust) atualizar o estado do emulador.
-
-### Sprint 1.5: Hardware Constraint Engine (V1) — CONCLUIDA
-**DoD:** O build falha se a cena exceder limites de hardware.
-- [x] Rust: Validar VRAM usage antes da compilacao (limite de 64KB).
-- [x] Rust: Validar contagem de sprites (limite de 80 por tela, 20 por scanline).
-- [x] UI: Painel de "Hardware Limits" que fica vermelho ao exceder limites.
+- [x] Scaffold Tauri + React + TypeScript + Vite.
+- [x] Estrutura de pastas alinhada com `08_TREE_ARCHITECTURE.md`.
+- [x] Backend Rust organizado em modulos.
+- [x] Frontend com store, IPC e layout base.
 
 ---
 
-## FASE 2: A ABSTRACAO (Adicionando o SNES) — CONCLUIDA
+## FASE 1 - CORE MEGA DRIVE
+**Status:** VALIDADA EM WINDOWS, EM HARDENING
 
-> **STATUS: CONCLUIDA** (2026-02-24)
+### Entregas implementadas
+- [x] Parser/manager canonico para `project.rds` e `scenes/*.json`.
+- [x] AST UGDM -> C para SGDK.
+- [x] Build workspace real com `main.c`, `resources.res`, `Makefile` e deteccao de ROM.
+- [x] Hardware validation para Mega Drive.
+- [x] Emulacao Libretro real para ROM externa e ROM gerada.
+- [x] Instalacao automatica sob demanda de SGDK e core Libretro de Mega Drive.
 
-**Objetivo:** Provar que a engine e agnostica.
-**Pre-requisito:** Fase 1 100% completa. ✅
-
-- [x] Integrar PVSnesLib (SDK do SNES) — emitter gerador de main.c + resources.res PVSnesLib.
-- [x] Modificar o conversor UGDM para gerar codigo C do SNES a partir do *mesmo* arquivo JSON.
-- [x] Emulador Libretro core do Snes9x — target "snes" reconhecido; pipeline completo (modo simulado).
-- [x] Hardware Profiles adaptativos (o painel de limites muda de 80 para 128 sprites ao usar target "snes").
-
----
-
-## FASE 3: VISUAL LOGIC & RETROFX — CONCLUIDA
-
-> **STATUS: CONCLUIDA** (2026-02-24)
-
-**Objetivo:** Transformar a ferramenta em uma Engine "No-Code / Low-Code".
-
-- [x] NodeGraph UI (Sistema de Blueprints arrastaveis) — aba "Logic" no Viewport, paleta de 8 tipos de nó, drag, conexão de portas, Delete para remover.
-- [x] RetroFX Designer (Editor visual de Parallax e Raster effects) — aba "RetroFX", sliders int, preview de scanlines, apply → Console.
-- [x] Conversor bidirecional (Node <-> C) — nodeCompiler.ts: compileGraphToC() + parseCToNodes(), suporte MD e SNES.
+### Gate obrigatorio para considerar a fase realmente fechada
+- [x] Validar em Windows o fluxo `instalar SGDK -> Build & Run -> ROM abrindo em core Libretro oficial`.
+- [x] Registrar evidencias dessa validacao no `06_AI_MEMORY_BANK.md`.
 
 ---
 
-## FASE 4: CAMADA PRO (Engenharia Reversa) — CONCLUIDA
+## FASE 2 - ABSTRACAO SNES
+**Status:** VALIDADA EM WINDOWS, EM HARDENING
 
-> **STATUS: CONCLUIDA** (2026-02-25)
+### Entregas implementadas
+- [x] Target `snes` no schema/projeto.
+- [x] Hardware profile SNES com regras alinhadas ao exporter atual.
+- [x] Emitter SNES e workspace PVSnesLib com `main.c`, `hdr.asm`, `data.asm` e regras de conversao de assets.
+- [x] Staging de asset real para `.bmp` no caminho SNES.
+- [x] Instalacao automatica sob demanda de PVSnesLib e core Libretro de SNES.
 
-**Objetivo:** Ferramentas para ROM Hacking e Preservacao.
-
-- [x] ROM Patch Studio (BPS/IPS workflow) — create_ips, apply_ips, create_bps, apply_bps; CRC32 validation; UI com modo criar/aplicar e seletor de formato.
-- [x] Deep Profiler (Scanline, DMA heatmap) — análise estática de ROM MD: heatmaps de DMA e sprites por scanline, detecção de overflow, issues list; UI com barras visuais.
-- [x] Asset Extraction Pipeline — extração de tiles 4bpp + paletas 0BGR→RGB888; escrita PNG sem dependência externa (deflate store); UI com controles de max_tiles e palette_slot.
-
----
-
-## COMO ATUALIZAR ESTE DOCUMENTO (Para a IA)
-
-1. Ao final de uma sessao de trabalho, se uma tarefa foi concluida com sucesso e testada, a IA deve sugerir a atualizacao deste arquivo marcando o checkbox de `[ ]` para `[x]`.
-2. Nunca avance para a proxima tarefa sem ter garantido que a anterior funciona e esta documentada no `06_AI_MEMORY_BANK.md`.
-3. **Nunca desmarque um checkbox** `[x]` para `[ ]` sem aprovacao do usuario.
-4. **Nunca marque um checkbox** `[x]` sem que o codigo correspondente esteja commitado e funcional.
+### Gate obrigatorio para considerar a fase realmente fechada
+- [x] Validar em Windows o fluxo `instalar PVSnesLib -> Build & Run -> ROM abrindo em core Libretro oficial`.
+- [x] Confirmar o caminho com shell Unix-like suportado e registrar prerequisitos oficiais.
 
 ---
 
-## DETECTOR DE SCOPE CREEP (Para a IA)
+## FASE 3 - VISUAL LOGIC & RETROFX
+**Status:** IMPLEMENTADA NO EDITOR, CONGELADA ATE FECHAR VALIDACAO DO CORE
 
-Se voce se pegar fazendo qualquer coisa da lista abaixo enquanto uma Fase anterior nao estiver completa, **PARE**:
+- [x] NodeGraph UI e compilador frontend existente.
+- [x] RetroFX UI existente.
+- [x] RetroFX rotulado como `Experimental` enquanto nao persistir/exportar efeito real.
+- [x] Testes frontend existentes e passando.
+- [ ] Retomar evolucao apenas depois que o hardening do core e a cobertura desktop multi-target estiverem estabilizados.
 
-- Escrevendo codigo de NodeGraph (Fase 3)
-- Implementando engenharia reversa ou ROM patching (Fase 4)
-- Integrando SNES/PVSnesLib (Fase 2)
-- Adicionando RetroFX ou raster effects (Fase 3)
-- Criando plugin marketplace ou sistema de plugins (Fase 4+)
-- Implementando features de "Team Collaboration" (Fase 4+)
-- Escrevendo qualquer codigo antes da Fase 0 estar completa
+---
 
-**Em caso de duvida:** se a tarefa nao aparece como `[ ]` na Fase atual, ela nao deve ser feita agora.
+## FASE 4 - CAMADA PRO
+**Status:** IMPLEMENTADA NO EDITOR, CONGELADA ATE FECHAR VALIDACAO DO CORE
+
+- [x] Patch Studio.
+- [x] Deep Profiler visivel, mas travado como `Experimental` ate gerar relatorio real.
+- [x] Asset Extractor visivel, mas travado como `Experimental` ate extrair assets reais de forma confiavel.
+- [ ] Retomar expansao apenas depois que o pipeline oficial validado estiver institucionalizado em workflow repetivel.
+
+---
+
+## Ordem Executiva Atual
+
+1. Manter o CI baseline verde antes e depois de qualquer fix relevante.
+2. Tornar a validacao oficial upstream repetivel e institucional para mudancas sensiveis.
+3. Confirmar o workflow desktop manual em runner GitHub/Windows real.
+4. Avaliar encaixe do desktop E2E em CI, `workflow_call` ou gate manual protegido.
+5. Endurecer handlers async residuais de save/build para eliminar falso positivo de UX.
+6. So depois disso destravar novas iteracoes de editor, ferramentas e targets futuros.
+
+---
+
+## Regra de Atualizacao
+
+- Marque `[x]` apenas quando houver codigo funcional e validacao correspondente.
+- Se a validacao ja ocorreu, mas ainda depender de repeticao institucional ou cobertura adicional, marque como hardening e nao como totalmente encerrada.
+- Sempre atualize este arquivo junto de `06_AI_MEMORY_BANK.md` quando o status do produto mudar.

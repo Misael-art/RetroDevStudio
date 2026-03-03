@@ -61,6 +61,10 @@ interface EditorState {
   addEntity: (entity: Entity) => void;
   removeEntity: (entityId: string) => void;
   updateBackgroundLayer: (layerId: string, patch: Partial<BackgroundLayer>) => void;
+
+  // Emulator pause state (P18)
+  emulPaused: boolean;
+  setEmulPaused: (paused: boolean) => void;
 }
 
 let _entryCounter = 0;
@@ -153,4 +157,7 @@ export const useEditorStore = create<EditorState>((set) => ({
         },
       };
     }),
+
+  emulPaused: false,
+  setEmulPaused: (paused) => set({ emulPaused: paused }),
 }));
