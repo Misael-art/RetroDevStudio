@@ -925,8 +925,7 @@ fn snes_library_dir_windows(root: &Path) -> String {
         .join("lib")
         .join("LoROM_SlowROM")
         .to_string_lossy()
-        .replace('/', "\\")
-        .replace('\\', "\\\\")
+        .replace('\\', "/")
 }
 
 fn platform_make_name() -> &'static str {
@@ -1155,7 +1154,7 @@ mod tests {
             );
             assert_eq!(
                 snes_library_dir_windows(Path::new(r"C:\Retro\toolchains\pvsneslib")),
-                r"C:\\Retro\\toolchains\\pvsneslib\\pvsneslib\\lib\\LoROM_SlowROM"
+                "C:/Retro/toolchains/pvsneslib/pvsneslib/lib/LoROM_SlowROM"
             );
         }
     }
