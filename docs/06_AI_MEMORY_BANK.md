@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
-**Ultima Atualizacao:** 2026-03-02
-**Ultima sessao:** 2026-03-02 (Codex - Sessao 23: expansao do desktop E2E para SNES e workflow Windows controlado)
-**Fase Atual:** Hardening/QA do MVP (Build -> ROM -> Emulacao validado em Windows com upstream real; desktop E2E multi-target e workflow controlado estabelecidos)
+**Ultima Atualizacao:** 2026-03-03
+**Ultima sessao:** 2026-03-03 (Codex - Sessao 24: endurecimento do workflow desktop para execucao remota antes do merge)
+**Fase Atual:** Hardening/QA do MVP (Build -> ROM -> Emulacao validado em Windows com upstream real; desktop E2E multi-target pronto para repeticao remota por workflow dedicado)
 **Branch sugerida:** `feat/<tema>` para trabalho paralelo; usar `main` apenas quando o usuario pedir edicao direta no workspace atual
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
@@ -16,6 +16,12 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-03 - sessao 24):**
+  - Foi confirmado via GitHub API que o branch `feat/desktop-e2e-workflow` ja aciona o `CI` remoto em `push`, provando que a autenticacao e a observacao de Actions no repositorio estao funcionais.
+  - O workflow `.github/workflows/desktop-e2e.yml` foi endurecido com `push`/`pull_request` filtrados por caminho, suporte a `workflow_call`, `concurrency`, `timeout` e resolucao canonica de `target`.
+  - A estrategia elimina o bloqueio operacional de depender da `default branch` para usar apenas `workflow_dispatch`, sem reabsorver o smoke desktop no `ci.yml` comum.
+  - `docs/07_TEST_AND_COMPLIANCE.md` e `docs/09_AGENT_DEV_MODE.md` foram atualizados para refletir que o smoke desktop institucional agora e dedicado, reutilizavel e acionavel remotamente antes do merge.
 
 * **O que acabou de acontecer (2026-03-02 - sessao 23):**
   - O runner desktop `scripts/e2e-tauri-build-run.mjs` foi endurecido para ler `project.rds` e validar que o `target` hidratado pela UI corresponde ao fixture aberto.
@@ -68,8 +74,8 @@
 
 * **O que estamos fazendo AGORA:**
   - Mantendo o fluxo canonico `Build -> ROM -> Emulacao` sob hardening depois da validacao oficial de Windows e do fechamento do desktop E2E para Mega Drive e SNES.
-  - O baseline de CI inclui estrutura, lint, typecheck, `cargo clippy`, testes frontend e testes Rust, e agora existe workflow manual especifico para regressao desktop multi-target.
-  - Nenhuma feature nova fora desse eixo deve ser iniciada ate que o uso institucional desse workflow e os hardenings remanescentes estejam estabilizados.
+  - O baseline de CI inclui estrutura, lint, typecheck, `cargo clippy`, testes frontend e testes Rust, e agora existe workflow desktop dedicado com gatilhos remotos controlados para regressao multi-target.
+  - Nenhuma feature nova fora desse eixo deve ser iniciada ate que a execucao desse workflow em runner GitHub real fique observada e estavel.
 
 * **Estado real resumido:**
   - Frontend/editor: funcional e agora com fluxo amigavel para instalar dependencias externas sem sair do app.
@@ -78,7 +84,7 @@
   - Suite Rust backend: passando localmente (`cargo test --lib` 28 aprovados, 1 ignorado), cobrindo parser/schema, hardware validation, build orchestration, dependency manager, emulacao Libretro mock, ponto canonico `open_project_path` e um E2E headless `Build -> Load -> Run`.
   - Toolchains continuam fora do Git, mas agora existe jornada automatica para baixar os pacotes oficiais no Windows mediante consentimento do usuario.
   - O app agora possui um E2E de nivel desktop/Tauri repetivel em `scripts/e2e-tauri-build-run.mjs`, usando `tauri-driver` oficial e fixtures canonicas de Mega Drive e SNES.
-  - O workflow manual `.github/workflows/desktop-e2e.yml` institucionaliza a regressao desktop em Windows sem contaminar o CI comum.
+  - O workflow dedicado `.github/workflows/desktop-e2e.yml` institucionaliza a regressao desktop em Windows, com `workflow_dispatch`, `workflow_call` e gatilhos `push`/`pull_request` filtrados por caminho, sem contaminar o `ci.yml` comum.
   - O modo de trabalho dos agentes agora esta consolidado em documento canonico proprio para reduzir divergencia de onboarding, claims falsos de entrega e poluicao estrutural.
   - Dados em `data/`: `rom_teste.bin` e `sonic_test.gen` continuam uteis para validacao manual de Mega Drive, mas o uso dessas ROMs deve respeitar compliance/licenciamento.
 
@@ -94,8 +100,8 @@
   - `npm run test:e2e:desktop:snes -- --skip-build --native-driver <msedgedriver>` -> OK, validando SNES na janela real do app Tauri.
 
 * **Proximo passo imediato:**
-  1. Executar o workflow `desktop-e2e.yml` em runner GitHub/Windows real para confirmar o provisionamento fora do ambiente local.
-  2. Avaliar se o workflow desktop deve virar `workflow_call` reutilizavel ou gate manual protegido por ambiente.
+  1. Empurrar o endurecimento do `desktop-e2e.yml` e observar a primeira execucao remota acionada por `push` no runner GitHub/Windows real.
+  2. Se a execucao remota passar, decidir se o workflow dedicado deve permanecer em `push`/`pull_request` path-filtered ou migrar para um gate protegido por ambiente.
   3. Endurecer handlers async residuais do frontend (`App.tsx`, `InspectorPanel`) para que falhas de save/build nunca parecam sucesso.
   4. So depois disso retomar evolucao de superficies ainda `Experimental`.
 
@@ -123,7 +129,7 @@ As seguintes decisoes ja foram debatidas e sao finais:
 * **[2026-03-02]** Ja existe teste de interface Tauri/React validando `Build -> Load ROM -> Run frames` no nivel de aplicacao desktop, mas ele ainda depende de `tauri-driver` e `msedgedriver` provisionados localmente.
 * **[2026-03-02]** O fluxo oficial com SGDK/PVSnesLib/cores Libretro reais foi validado em Windows, mas deve ser reexecutado sempre que mudancas tocarem build, emulacao ou toolchains.
 * **[2026-03-02]** O caminho SNES oficial foi validado com `snes_rules` real, mas qualquer mudanca no workspace/Makefile deve ser tratada como area sensivel e voltar a passar pelo smoke upstream.
-* **[2026-03-02]** O workflow desktop `desktop-e2e.yml` foi desenhado como `workflow_dispatch` para reduzir fragilidade operacional; ele ainda precisa ser observado em runner GitHub real antes de qualquer endurecimento adicional.
+* **[2026-03-03]** O workflow desktop `desktop-e2e.yml` ganhou `push`/`pull_request` filtrados por caminho e `workflow_call` para destravar a observacao remota antes do merge; ele ainda precisa ser observado em runner GitHub real para confirmar estabilidade.
 * **[2026-02-28]** `Deep Profiler`, `Asset Extractor` e `RetroFX` permanecem visiveis por contexto de produto, mas agora devem continuar explicitamente marcados como experimentais ate deixarem de ser stub/parcial.
 * **[2026-02-28]** No Windows, a deteccao de `bash` deve ignorar o shim do WSL (`C:\\Windows\\System32\\bash.exe`) e privilegiar Git Bash/MSYS2. Essa regra ja foi aplicada no codigo e nao deve ser removida sem substituto equivalente.
 * **[2026-02-28]** `data/sonic_test.gen` e a documentacao associada sao um ponto de atencao de compliance/licenciamento. O software pode operar com ROMs fornecidas pelo usuario para fins educacionais, pesquisa e preservacao, mas nao deve redistribuir ROM comercial como parte do produto.

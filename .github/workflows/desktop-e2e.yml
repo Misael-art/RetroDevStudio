@@ -12,19 +12,52 @@ on:
           - all
           - megadrive
           - snes
+  workflow_call:
+    inputs:
+      target:
+        description: "Fixture canonica para o smoke desktop"
+        required: false
+        default: "all"
+        type: string
+  push:
+    paths:
+      - ".github/workflows/desktop-e2e.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "scripts/e2e-tauri-build-run.mjs"
+      - "src/**"
+      - "src-tauri/**"
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+    paths:
+      - ".github/workflows/desktop-e2e.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "scripts/e2e-tauri-build-run.mjs"
+      - "src/**"
+      - "src-tauri/**"
 
 permissions:
   contents: read
 
+concurrency:
+  group: desktop-e2e-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || github.event_name == 'workflow_call' && inputs.target || 'all' }}
+  cancel-in-progress: true
+
 jobs:
   desktop-smoke:
     runs-on: windows-latest
+    timeout-minutes: 45
     defaults:
       run:
         shell: pwsh
     env:
       CARGO_BUILD_JOBS: 2
       RUST_MIN_STACK: 16777216
+      RDS_E2E_TARGET: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || github.event_name == 'workflow_call' && inputs.target || 'all' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -63,10 +96,13 @@ jobs:
       - name: Build debug desktop app
         run: npm run tauri build -- --debug --no-bundle
 
+      - name: Report resolved target
+        run: Write-Host "Desktop E2E target: $env:RDS_E2E_TARGET"
+
       - name: Run Mega Drive desktop smoke
-        if: ${{ github.event.inputs.target == 'all' || github.event.inputs.target == 'megadrive' }}
+        if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
         run: npm run test:e2e:desktop:md -- --skip-build
 
       - name: Run SNES desktop smoke
-        if: ${{ github.event.inputs.target == 'all' || github.event.inputs.target == 'snes' }}
+        if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
         run: npm run test:e2e:desktop:snes -- --skip-build

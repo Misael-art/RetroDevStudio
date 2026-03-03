@@ -57,7 +57,7 @@ Uma tarefa nao esta concluida enquanto o repositorio continuar anunciando um est
 - Confirmar shell Unix-like suportado quando a mudanca tocar o caminho SNES de Windows.
 - Revalidar com cores Libretro oficiais quando a mudanca tocar carga de ROM ou selecao de core.
 - Reexecutar o runner desktop `scripts/e2e-tauri-build-run.mjs` quando a mudanca tocar o fluxo `Build -> Load ROM -> Run frames` do app como um todo.
-- Preferir o workflow manual `.github/workflows/desktop-e2e.yml` para repeticao institucional em Windows, preservando o `ci.yml` comum como baseline rapido e robusto.
+- Preferir o workflow dedicado `.github/workflows/desktop-e2e.yml` para repeticao institucional em Windows, seja via `workflow_dispatch`, `workflow_call` ou gatilhos `push`/`pull_request` filtrados por caminho, preservando o `ci.yml` comum como baseline rapido e robusto.
 
 ### 3.3 Regra de entrega
 - Nao usar termos como `pronto`, `completo`, `fechado`, `MVP concluido` ou `pipeline validado` sem satisfazer os gates correspondentes.
@@ -101,13 +101,13 @@ Escala:
 
 | Area | Nota | Leitura objetiva | Gargalo atual |
 |------|------|------------------|---------------|
-| Infra | 4.2/5 | Base de app, IPC, persistencia, CI e workflow desktop controlado ja sao solidos | Ainda falta observar o workflow desktop em runner GitHub real |
+| Infra | 4.3/5 | Base de app, IPC, persistencia, CI e workflow desktop dedicado agora podem ser exercitados antes do merge | Ainda falta confirmar estabilidade repetida do smoke desktop em runner GitHub real |
 | Editor | 3.0/5 | Editor funcional para uso interno com persistencia e viewport | Nem toda superficie esta integrada ao pipeline real |
 | Build | 4.0/5 | Pipeline real por target com workspace, staging e ROM validado com upstream oficial em Windows | Export ainda simples e SNES continua sensivel a mudancas no workspace |
 | Emulacao | 4.0/5 | Libretro FFI real, carga de ROM, input e framebuffer validados com runner desktop e smoke upstream | Ainda falta transformar o desktop E2E em rotina institucional/CI |
 | Toolchains | 4.0/5 | Setup sob demanda real e validado em Windows com SGDK, PVSnesLib e cores Libretro oficiais | Continua dependente de ambiente externo e compliance de licenca |
 | UX | 2.5/5 | UI mais honesta e com superficies experimentais rotuladas | Ainda ha polimento e previsibilidade a fechar |
-| Testes | 4.6/5 | Baseline forte de testes, smoke upstream oficial, desktop E2E multi-target e workflow manual dedicado | Desktop E2E ainda depende de confirmar estabilidade no runner GitHub real |
+| Testes | 4.7/5 | Baseline forte de testes, smoke upstream oficial, desktop E2E multi-target e workflow dedicado reutilizavel e path-filtered | Desktop E2E ainda depende de confirmar estabilidade no runner GitHub real |
 
 Leitura sintetica:
 - O projeto esta acima de simples scaffold ou demo.
