@@ -292,8 +292,8 @@ export default function ViewportPanel() {
         const camera = entity.components.camera;
         const viewportWidth = activeTarget === "snes" ? 256 : 320;
         const viewportHeight = 224;
-        const offsetX = camera.offset_x;
-        const offsetY = camera.offset_y;
+        const offsetX = camera.offset_x ?? 0;
+        const offsetY = camera.offset_y ?? 0;
 
         context.save();
         context.setLineDash([4, 3]);

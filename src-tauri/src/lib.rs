@@ -12,11 +12,14 @@ use compiler::ast_generator::generate_ast;
 use compiler::build_orch::{run_build, BuildLogLine, BuildResult};
 use compiler::sgdk_emitter::emit_sgdk;
 use compiler::snes_emitter::emit_snes;
+use core::editor_validation::{
+    validate_scene_draft as validate_scene_draft_impl,
+    DraftValidationResult,
+};
 use core::project_mgr::{create_project_skeleton, load_project, load_scene, save_scene, update_project_target};
 use emulator::frame_buffer::framebuffer_to_rgba;
 use emulator::libretro_ffi::{EmulatorCore, JoypadState};
-use hardware::md_profile;
-use hardware::snes_profile;
+use hardware::constraint_engine;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -66,21 +69,22 @@ fn validate_project(project_dir: String) -> ValidationResult {
         Ok(s) => s,
         Err(e) => return ValidationResult { ok: false, errors: vec![e.to_string()], warnings: vec![] },
     };
-    let hw_errors: Vec<(String, bool)> = match project.target.as_str() {
-        "megadrive" => md_profile::validate_scene(&scene)
-            .into_iter().map(|e| (e.message, e.is_fatal)).collect(),
-        "snes" => snes_profile::validate_scene(&scene)
-            .into_iter().map(|e| (e.message, e.is_fatal)).collect(),
-        other => return ValidationResult {
-            ok: false,
-            errors: vec![format!("Target '{}' não suportado. Use 'megadrive' ou 'snes'.", other)],
-            warnings: vec![],
-        },
+    let hw_status = match constraint_engine::hw_status_for_target(&project.target, &scene) {
+        Ok(status) => status,
+        Err(error) => {
+            return ValidationResult {
+                ok: false,
+                errors: vec![error],
+                warnings: vec![],
+            }
+        }
     };
 
-    let errors: Vec<String> = hw_errors.iter().filter(|(_, f)| *f).map(|(m, _)| m.clone()).collect();
-    let warnings: Vec<String> = hw_errors.iter().filter(|(_, f)| !*f).map(|(m, _)| m.clone()).collect();
-    ValidationResult { ok: errors.is_empty(), errors, warnings }
+    ValidationResult {
+        ok: hw_status.errors.is_empty(),
+        errors: hw_status.errors,
+        warnings: hw_status.warnings,
+    }
 }
 
 #[tauri::command]
@@ -95,20 +99,21 @@ fn generate_c_code(project_dir: String) -> GenerateResult {
         Ok(s) => s,
         Err(e) => return GenerateResult { ok: false, main_c: String::new(), resources_res: String::new(), errors: vec![e.to_string()], warnings: vec![] },
     };
-    let hw_errors: Vec<(String, bool)> = match project.target.as_str() {
-        "megadrive" => md_profile::validate_scene(&scene)
-            .into_iter().map(|e| (e.message, e.is_fatal)).collect(),
-        "snes" => snes_profile::validate_scene(&scene)
-            .into_iter().map(|e| (e.message, e.is_fatal)).collect(),
-        other => return GenerateResult {
-            ok: false, main_c: String::new(), resources_res: String::new(),
-            errors: vec![format!("Target '{}' não suportado. Use 'megadrive' ou 'snes'.", other)],
-            warnings: vec![],
-        },
+    let hw_status = match constraint_engine::hw_status_for_target(&project.target, &scene) {
+        Ok(status) => status,
+        Err(error) => {
+            return GenerateResult {
+                ok: false,
+                main_c: String::new(),
+                resources_res: String::new(),
+                errors: vec![error],
+                warnings: vec![],
+            }
+        }
     };
 
-    let errors: Vec<String> = hw_errors.iter().filter(|(_, f)| *f).map(|(m, _)| m.clone()).collect();
-    let warnings: Vec<String> = hw_errors.iter().filter(|(_, f)| !*f).map(|(m, _)| m.clone()).collect();
+    let errors = hw_status.errors;
+    let warnings = hw_status.warnings;
     if !errors.is_empty() {
         return GenerateResult { ok: false, main_c: String::new(), resources_res: String::new(), errors, warnings };
     }
@@ -119,6 +124,15 @@ fn generate_c_code(project_dir: String) -> GenerateResult {
         _ => { let o = emit_sgdk(&ast, &project.name); (o.main_c, o.resources_res) }
     };
     GenerateResult { ok: true, main_c, resources_res, errors: vec![], warnings }
+}
+
+#[tauri::command]
+fn validate_scene_draft(project_dir: String, scene_json: String) -> DraftValidationResult {
+    if project_dir.trim().is_empty() {
+        return DraftValidationResult::failure("Nenhum projeto aberto.");
+    }
+
+    validate_scene_draft_impl(Path::new(&project_dir), &scene_json)
 }
 
 #[tauri::command]
@@ -147,10 +161,7 @@ fn get_hw_status(project_dir: String) -> HwStatus {
         Ok(s) => s,
         Err(_) => return HwStatus::default(),
     };
-    match project.target.as_str() {
-        "snes" => snes_profile::hw_status(&scene),
-        _ => md_profile::hw_status(&scene),
-    }
+    constraint_engine::hw_status_for_target(&project.target, &scene).unwrap_or_default()
 }
 
 // ── Emulator commands ─────────────────────────────────────────────────────────
@@ -475,6 +486,7 @@ pub fn run() {
             validate_project,
             generate_c_code,
             build_project,
+            validate_scene_draft,
             // Hardware status
             get_hw_status,
             // Emulator

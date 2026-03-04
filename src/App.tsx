@@ -26,6 +26,10 @@ import {
   installThirdPartyDependency,
   type ThirdPartyDependencyId,
 } from "./core/ipc/toolsService";
+import {
+  getLiveBuildBlockReason,
+  useLiveValidationController,
+} from "./core/validation/liveValidationController";
 
 function ToolbarButton({
   label,
@@ -33,12 +37,14 @@ function ToolbarButton({
   disabled = false,
   accent = "default",
   testId,
+  title,
 }: {
   label: string;
   onClick: () => void;
   disabled?: boolean;
   accent?: "default" | "primary" | "success" | "danger";
   testId?: string;
+  title?: string;
 }) {
   const palette =
     accent === "primary"
@@ -54,6 +60,7 @@ function ToolbarButton({
       onClick={onClick}
       disabled={disabled}
       data-testid={testId}
+      title={title}
       className={`rounded px-2 py-1 text-xs font-semibold transition-colors ${palette} disabled:cursor-not-allowed disabled:opacity-40`}
     >
       {label}
@@ -87,6 +94,8 @@ export default function App() {
   const {
     logMessage,
     setHwStatus,
+    hwStatus,
+    hwValidationState,
     activeProjectDir,
     activeProjectName,
     setActiveProject,
@@ -99,6 +108,7 @@ export default function App() {
     selectedEntityId,
     emulPaused,
     setEmulPaused,
+    resetHwValidation,
   } = useEditorStore();
 
   const [building, setBuilding] = useState(false);
@@ -118,6 +128,8 @@ export default function App() {
     String(import.meta.env.TAURI_ENV_DEBUG ?? "") === "1" ||
     new URLSearchParams(window.location.search).has("e2e");
 
+  useLiveValidationController();
+
   useEffect(() => {
     if (showNewDialog && inputRef.current) {
       inputRef.current.focus();
@@ -128,6 +140,15 @@ export default function App() {
   function describeError(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
   }
+
+  const buildDisabledReason = getLiveBuildBlockReason({
+    activeProjectDir,
+    building,
+    hwStatus,
+    hwValidationState,
+  });
+  const liveBuildBlocked =
+    hwValidationState === "fresh" && Boolean(hwStatus && hwStatus.errors.length > 0);
 
   async function hydrateProjectState(projectDir: string, projectName: string, scope: string) {
     const hw = await getHwStatus(projectDir);
@@ -407,6 +428,17 @@ export default function App() {
       return;
     }
 
+    const state = useEditorStore.getState();
+    if (
+      state.hwValidationState === "fresh" &&
+      state.hwStatus &&
+      state.hwStatus.errors.length > 0
+    ) {
+      state.hwStatus.errors.forEach((error) => logMessage("error", `[HW] ${error}`));
+      logMessage("warn", buildDisabledReason ?? "Build bloqueado pelo preview de hardware.");
+      return;
+    }
+
     const requiredDependencies =
       activeTarget === "megadrive"
         ? (["sgdk", "libretro_megadrive"] as const)
@@ -471,6 +503,7 @@ export default function App() {
     setActiveProject("", "");
     setActiveScene(null);
     setHwStatus(null);
+    resetHwValidation();
     setSelectedEntityId(null);
     setEmulPaused(false);
     setActiveViewportTab("scene");
@@ -568,13 +601,28 @@ export default function App() {
         <ToolbarButton label="Fechar" onClick={() => void handleCloseProject()} disabled={!activeProjectDir} />
         <ToolbarButton label="Validar" onClick={() => void handleValidate()} disabled={!activeProjectDir} />
         <ToolbarButton label="Gerar C" onClick={() => void handleGenerateC()} disabled={!activeProjectDir} />
-        <ToolbarButton
-          label="Build & Run"
-          onClick={() => void handleBuildAndRun()}
-          disabled={building || !activeProjectDir}
-          accent="success"
-          testId="toolbar-build-run"
-        />
+        <div
+          className="flex items-center gap-2"
+          title={liveBuildBlocked ? buildDisabledReason ?? undefined : undefined}
+        >
+          <ToolbarButton
+            label="Build & Run"
+            onClick={() => void handleBuildAndRun()}
+            disabled={building || !activeProjectDir || liveBuildBlocked}
+            accent="success"
+            testId="toolbar-build-run"
+            title={buildDisabledReason ?? undefined}
+          />
+          {liveBuildBlocked && buildDisabledReason && (
+            <span
+              data-testid="build-disabled-reason"
+              className="max-w-52 truncate text-[10px] text-[#f38ba8]"
+              title={buildDisabledReason}
+            >
+              {buildDisabledReason}
+            </span>
+          )}
+        </div>
         <ToolbarButton label="Carregar ROM" onClick={() => void handleEmulatorLoadRom()} />
         <ToolbarButton label={emulPaused ? "Retomar" : "Pausar"} onClick={handleEmulatorPause} disabled={activeViewportTab !== "game"} />
         <ToolbarButton label="Parar" onClick={() => void handleEmulatorStop()} disabled={activeViewportTab !== "game"} accent="danger" />

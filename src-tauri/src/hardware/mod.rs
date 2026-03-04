@@ -1,10 +1,11 @@
+pub mod constraint_engine;
 pub mod md_profile;
 pub mod snes_profile;
 
 use serde::Serialize;
 
 /// Snapshot de uso de hardware de uma cena — tipo canônico compartilhado por todos os targets.
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Serialize, Clone, PartialEq, Eq)]
 pub struct HwStatus {
     pub vram_used: u32,
     pub vram_limit: u32,

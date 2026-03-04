@@ -27,6 +27,7 @@ const EMPTY_SCENE: Scene = {
   scene_id: "scene_test",
   background_layers: [],
   entities: [],
+  palettes: [],
 };
 
 // Reseta o store antes de cada teste (Zustand compartilha instância global)
@@ -34,6 +35,10 @@ beforeEach(() => {
   useEditorStore.setState({
     activeScene: null,
     selectedEntityId: null,
+    sceneRevision: 0,
+    hwValidationState: "idle",
+    hwValidatedRevision: 0,
+    hwValidationError: null,
   });
 });
 
@@ -63,6 +68,12 @@ describe("addEntity", () => {
     useEditorStore.getState().addEntity(makeEntity("b"));
     useEditorStore.getState().addEntity(makeEntity("c"));
     expect(useEditorStore.getState().activeScene!.entities).toHaveLength(3);
+  });
+
+  it("incrementa sceneRevision ao adicionar entidade", () => {
+    useEditorStore.setState({ activeScene: { ...EMPTY_SCENE }, sceneRevision: 3 });
+    useEditorStore.getState().addEntity(makeEntity("hero"));
+    expect(useEditorStore.getState().sceneRevision).toBe(4);
   });
 });
 
@@ -95,6 +106,13 @@ describe("removeEntity", () => {
   it("não faz nada se não há cena ativa", () => {
     useEditorStore.getState().removeEntity("ghost");
     expect(useEditorStore.getState().activeScene).toBeNull();
+  });
+
+  it("incrementa sceneRevision ao remover entidade", () => {
+    const scene: Scene = { ...EMPTY_SCENE, entities: [makeEntity("a")] };
+    useEditorStore.setState({ activeScene: scene, sceneRevision: 2 });
+    useEditorStore.getState().removeEntity("a");
+    expect(useEditorStore.getState().sceneRevision).toBe(3);
   });
 });
 
@@ -162,6 +180,13 @@ describe("updateEntity", () => {
     // Imutabilidade: objeto original não foi mutado
     expect(entity.components.tilemap!.scroll_x).toBe(0);
   });
+
+  it("incrementa sceneRevision ao atualizar entidade", () => {
+    const scene: Scene = { ...EMPTY_SCENE, entities: [makeEntity("hero", 0, 0)] };
+    useEditorStore.setState({ activeScene: scene, sceneRevision: 5 });
+    useEditorStore.getState().updateEntity("hero", { transform: { x: 2, y: 4 } });
+    expect(useEditorStore.getState().sceneRevision).toBe(6);
+  });
 });
 
 // ── updateBackgroundLayer ──────────────────────────────────────────────────────
@@ -197,5 +222,35 @@ describe("updateBackgroundLayer", () => {
   it("não faz nada se não há cena ativa", () => {
     useEditorStore.getState().updateBackgroundLayer("ghost", { depth: 1 });
     expect(useEditorStore.getState().activeScene).toBeNull();
+  });
+
+  it("incrementa sceneRevision ao atualizar layer", () => {
+    const scene: Scene = { ...EMPTY_SCENE, background_layers: [makeLayer("bg0", 0)] };
+    useEditorStore.setState({ activeScene: scene, sceneRevision: 1 });
+    useEditorStore.getState().updateBackgroundLayer("bg0", { depth: 2 });
+    expect(useEditorStore.getState().sceneRevision).toBe(2);
+  });
+});
+
+describe("setActiveScene", () => {
+  it("incrementa sceneRevision ao carregar cena", () => {
+    useEditorStore.setState({ sceneRevision: 7 });
+    useEditorStore.getState().setActiveScene({ ...EMPTY_SCENE });
+    expect(useEditorStore.getState().sceneRevision).toBe(8);
+  });
+
+  it("reseta o estado de validacao ao limpar a cena", () => {
+    useEditorStore.setState({
+      activeScene: { ...EMPTY_SCENE },
+      sceneRevision: 4,
+      hwValidationState: "fresh",
+      hwValidatedRevision: 4,
+      hwValidationError: "erro antigo",
+    });
+    useEditorStore.getState().setActiveScene(null);
+    expect(useEditorStore.getState().sceneRevision).toBe(0);
+    expect(useEditorStore.getState().hwValidationState).toBe("idle");
+    expect(useEditorStore.getState().hwValidatedRevision).toBe(0);
+    expect(useEditorStore.getState().hwValidationError).toBeNull();
   });
 });

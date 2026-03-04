@@ -7,60 +7,133 @@ export interface Transform {
   y: number;
 }
 
+export interface AnimationDef {
+  frames: number[];
+  fps: number;
+  loop: boolean;
+}
+
+export interface Pivot {
+  x: number;
+  y: number;
+}
+
 export interface SpriteComponent {
   asset: string;
   frame_width: number;
   frame_height: number;
-  palette_slot: number;
-  priority: string;
+  pivot?: Pivot;
+  palette_slot?: number;
+  animations?: Record<string, AnimationDef>;
+  priority?: string;
+}
+
+export interface CollisionOffset {
+  x: number;
+  y: number;
 }
 
 export interface CollisionComponent {
   shape: string;
   width: number;
   height: number;
-  solid: boolean;
+  offset?: CollisionOffset;
+  solid?: boolean;
+  layer?: string;
+  collides_with?: string[];
+}
+
+export interface InputComponent {
+  device: string;
+  mapping: Record<string, string>;
+}
+
+export interface Velocity {
+  x: number;
+  y: number;
+}
+
+export interface PhysicsComponent {
+  gravity?: boolean;
+  gravity_strength?: number;
+  max_velocity?: Velocity;
+  friction?: number;
+  bounce?: number;
+}
+
+export interface AudioComponent {
+  sfx?: Record<string, string>;
+  bgm?: string;
+}
+
+export interface LogicVariable {
+  type: string;
+  default: unknown;
+  min?: number;
+  max?: number;
+}
+
+export interface LogicComponent {
+  graph?: string;
+  variables?: Record<string, LogicVariable>;
 }
 
 export interface CameraComponent {
   follow_entity?: string;
-  offset_x: number;
-  offset_y: number;
+  offset_x?: number;
+  offset_y?: number;
 }
 
 export interface TilemapComponent {
   tileset: string;
   map_width: number;
   map_height: number;
-  scroll_x: number;
-  scroll_y: number;
+  scroll_x?: number;
+  scroll_y?: number;
 }
 
 export interface Components {
   sprite?: SpriteComponent;
   collision?: CollisionComponent;
+  input?: InputComponent;
+  physics?: PhysicsComponent;
+  audio?: AudioComponent;
+  logic?: LogicComponent;
   camera?: CameraComponent;
   tilemap?: TilemapComponent;
 }
 
 export interface Entity {
   entity_id: string;
-  prefab?: string;
+  prefab?: string | null;
   transform: Transform;
   components: Components;
+}
+
+export interface ScrollSpeed {
+  x: number;
+  y: number;
 }
 
 export interface BackgroundLayer {
   layer_id: string;
   depth: number;
   tileset: string;
+  scroll_speed?: ScrollSpeed;
+  tilemap?: string;
+}
+
+export interface PaletteEntry {
+  slot: number;
+  colors: string[];
 }
 
 export interface Scene {
   scene_id: string;
-  display_name?: string;
+  display_name?: string | null;
   entities: Entity[];
   background_layers: BackgroundLayer[];
+  palettes?: PaletteEntry[];
 }
 
 export interface SceneDataResult {

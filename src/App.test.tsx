@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   emulatorSendInput: vi.fn(),
   startFrameLoop: vi.fn(),
   getHwStatus: vi.fn(),
+  validateSceneDraft: vi.fn(),
   openProjectDialog: vi.fn(),
   newProjectDialog: vi.fn(),
   setProjectTarget: vi.fn(),
@@ -77,6 +78,7 @@ vi.mock("./core/ipc/emulatorService", () => ({
 
 vi.mock("./core/ipc/hwService", () => ({
   getHwStatus: mocks.getHwStatus,
+  validateSceneDraft: mocks.validateSceneDraft,
 }));
 
 vi.mock("./core/ipc/projectService", () => ({
@@ -146,6 +148,10 @@ describe("App build flow", () => {
       selectedEntityId: null,
       activeViewportTab: "scene",
       hwStatus: null,
+      sceneRevision: 1,
+      hwValidationState: "idle",
+      hwValidatedRevision: 0,
+      hwValidationError: null,
       activeScene: {
         scene_id: "main_scene",
         display_name: "Main Scene",
@@ -168,6 +174,20 @@ describe("App build flow", () => {
       bg_layers_limit: 4,
       errors: [],
       warnings: [],
+    });
+    mocks.validateSceneDraft.mockResolvedValue({
+      ok: true,
+      error: "",
+      hw_status: {
+        vram_used: 0,
+        vram_limit: 65536,
+        sprite_count: 0,
+        sprite_limit: 80,
+        bg_layers: 0,
+        bg_layers_limit: 4,
+        errors: [],
+        warnings: [],
+      },
     });
     mocks.getThirdPartyStatus.mockResolvedValue({
       items: [
