@@ -7,6 +7,7 @@ use crate::hardware::HwStatus;
 #[allow(dead_code)]
 pub const MD_VRAM_BYTES: u32 = 65_536; // 64 KB
 pub const MD_SPRITES_PER_SCREEN: u32 = 80;
+pub const MD_SPRITE_WARNING_THRESHOLD: u32 = MD_SPRITES_PER_SCREEN * 80 / 100;
 #[allow(dead_code)]
 pub const MD_SPRITES_PER_SCANLINE: u32 = 20;
 pub const MD_PALETTE_SLOTS: u8 = 4;
@@ -50,6 +51,13 @@ pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
         errors.push(ValidationError::fatal(format!(
             "Sprite overflow: a cena tem {} sprites. Limite do Mega Drive (H40): {}.",
             sprite_count, MD_SPRITES_PER_SCREEN
+        )));
+    } else if sprite_count > MD_SPRITE_WARNING_THRESHOLD {
+        errors.push(ValidationError::warning(format!(
+            "Sprite Warning: a cena tem {} sprites ({}% do limite do Mega Drive (H40): {}). Pouca folga para efeitos e HUD.",
+            sprite_count,
+            sprite_count * 100 / MD_SPRITES_PER_SCREEN,
+            MD_SPRITES_PER_SCREEN
         )));
     }
 
@@ -181,5 +189,103 @@ pub fn hw_status(scene: &Scene) -> HwStatus {
         bg_layers_limit: 3,
         errors,
         warnings,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ugdm::components::{Components, SpriteComponent};
+    use crate::ugdm::entities::{Entity, PaletteEntry, Scene, Transform};
+
+    fn sprite_entity(id: &str, frame_width: u32, frame_height: u32, palette_slot: u8) -> Entity {
+        Entity {
+            entity_id: id.to_string(),
+            prefab: None,
+            transform: Transform { x: 0, y: 0 },
+            components: Components {
+                sprite: Some(SpriteComponent {
+                    asset: "assets/sprites/test.png".to_string(),
+                    frame_width,
+                    frame_height,
+                    pivot: None,
+                    palette_slot,
+                    animations: Default::default(),
+                    priority: "foreground".to_string(),
+                }),
+                ..Default::default()
+            },
+        }
+    }
+
+    fn empty_scene() -> Scene {
+        Scene {
+            scene_id: "main".to_string(),
+            display_name: Some("Main Scene".to_string()),
+            background_layers: Vec::new(),
+            entities: Vec::new(),
+            palettes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn rejects_sprite_overflow() {
+        let mut scene = empty_scene();
+        scene.entities = (0..=MD_SPRITES_PER_SCREEN)
+            .map(|index| sprite_entity(&format!("entity_{index}"), 8, 8, 0))
+            .collect();
+
+        let errors = validate_scene(&scene);
+
+        assert!(errors.iter().any(|error| {
+            error.is_fatal && error.message.contains("Sprite overflow")
+        }));
+    }
+
+    #[test]
+    fn warns_when_sprite_pressure_is_high() {
+        let mut scene = empty_scene();
+        scene.entities = (0..=MD_SPRITE_WARNING_THRESHOLD)
+            .map(|index| sprite_entity(&format!("entity_{index}"), 8, 8, 0))
+            .collect();
+
+        let errors = validate_scene(&scene);
+
+        assert!(errors.iter().any(|error| {
+            !error.is_fatal && error.message.contains("Sprite Warning")
+        }));
+        assert!(!errors.iter().any(|error| error.is_fatal));
+    }
+
+    #[test]
+    fn rejects_invalid_palette_slots() {
+        let mut scene = empty_scene();
+        scene.entities.push(sprite_entity("bad_palette", 8, 8, MD_PALETTE_SLOTS));
+        scene.palettes.push(PaletteEntry {
+            slot: MD_PALETTE_SLOTS,
+            colors: vec!["#000000".to_string(); MD_PALETTE_COLORS as usize],
+        });
+
+        let errors = validate_scene(&scene);
+
+        assert!(errors.iter().any(|error| {
+            error.is_fatal && error.message.contains("palette_slot")
+        }));
+        assert!(errors.iter().any(|error| {
+            error.is_fatal && error.message.contains("Palette slot")
+        }));
+    }
+
+    #[test]
+    fn reports_hw_status_for_valid_scene() {
+        let mut scene = empty_scene();
+        scene.entities.push(sprite_entity("player", 16, 16, 0));
+
+        let status = hw_status(&scene);
+
+        assert_eq!(status.sprite_count, 1);
+        assert_eq!(status.sprite_limit, MD_SPRITES_PER_SCREEN);
+        assert_eq!(status.bg_layers_limit, 3);
+        assert!(status.errors.is_empty());
     }
 }

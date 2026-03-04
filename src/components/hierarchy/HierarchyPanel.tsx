@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import Panel from "../common/Panel";
 import { useEditorStore } from "../../core/store/editorStore";
-import { getSceneData, parseScene, saveSceneData } from "../../core/ipc/sceneService";
+import { getSceneData, parseScene } from "../../core/ipc/sceneService";
+import { persistActiveScene } from "../../core/scenePersistence";
 
 const TYPE_ICON: Record<string, string> = {
   sprite:  "◈",
@@ -10,8 +11,10 @@ const TYPE_ICON: Record<string, string> = {
   layer:   "▬",
 };
 
-function entityType(entity: { components?: { sprite?: unknown; collision?: unknown } }): string {
-  if (entity.components?.sprite) return "sprite";
+function entityType(entity: { components?: { sprite?: unknown; collision?: unknown; tilemap?: unknown; camera?: unknown } }): string {
+  if (entity.components?.camera)  return "camera";
+  if (entity.components?.tilemap) return "tilemap";
+  if (entity.components?.sprite)  return "sprite";
   return "object";
 }
 
@@ -25,51 +28,96 @@ export default function HierarchyPanel() {
   } = useEditorStore();
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newName, setNewName] = useState("Entity");
+  const [isAdding, setIsAdding] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Recarrega cena sempre que o projeto ativo mudar
   useEffect(() => {
+    let cancelled = false;
+
     if (!activeProjectDir) {
       setActiveScene(null);
       return;
     }
-    getSceneData(activeProjectDir).then((result) => {
-      const scene = parseScene(result);
-      setActiveScene(scene);
-      if (!result.ok) {
-        logMessage("warn", `[Hierarchy] ${result.error}`);
-      }
-    });
-  }, [activeProjectDir]);
+
+    getSceneData(activeProjectDir)
+      .then((result) => {
+        if (cancelled) return;
+
+        const scene = parseScene(result);
+        setActiveScene(scene);
+        if (!result.ok) {
+          logMessage("warn", `[Hierarchy] ${result.error}`);
+        }
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        logMessage("error", `[Hierarchy] Falha ao carregar cena: ${String(error)}`);
+        setActiveScene(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProjectDir, logMessage, setActiveScene]);
 
   const entities = activeScene?.entities ?? [];
   const bgLayers = activeScene?.background_layers ?? [];
 
   async function handleAddEntity() {
-    if (!activeProjectDir || !activeScene || !newName.trim()) return;
-    const id = `${newName.trim().toLowerCase().replace(/\s+/g, "_")}_${Date.now()}`;
+    const prefab = newName.trim();
+    if (!activeProjectDir || !activeScene || !prefab || isAdding) return;
+
+    const id = `${prefab.toLowerCase().replace(/\s+/g, "_")}_${Date.now()}`;
     const newEntity = {
       entity_id: id,
-      prefab: newName.trim(),
+      prefab,
       transform: { x: 16, y: 16 },
       components: {},
     };
+
     addEntity(newEntity);
     setSelectedEntityId(id);
-    setShowAddDialog(false);
-    setNewName("Entity");
-    // Auto-save
-    const updated = { ...activeScene, entities: [...activeScene.entities, newEntity] };
-    const r = await saveSceneData(activeProjectDir, JSON.stringify(updated, null, 2));
-    logMessage(r.ok ? "success" : "error", `[Hierarchy] ${r.ok ? `Entidade '${newEntity.prefab}' adicionada.` : r.message}`);
+    setIsAdding(true);
+
+    const saved = await persistActiveScene(activeProjectDir, "Hierarchy", `Entidade '${newEntity.prefab}' adicionada.`);
+    setIsAdding(false);
+
+    if (saved) {
+      setShowAddDialog(false);
+      setNewName("Entity");
+      return;
+    }
+
+    const { activeScene: reloadedScene } = useEditorStore.getState();
+    const entityStillExists = reloadedScene?.entities.some((entity) => entity.entity_id === id) ?? false;
+    if (!entityStillExists) {
+      setSelectedEntityId(null);
+    }
   }
 
   async function handleDeleteEntity() {
-    if (!activeProjectDir || !activeScene || !selectedEntityId || selectedEntityId.startsWith("layer::")) return;
-    const name = activeScene.entities.find(e => e.entity_id === selectedEntityId)?.prefab ?? selectedEntityId;
-    removeEntity(selectedEntityId);
-    const updated = { ...activeScene, entities: activeScene.entities.filter(e => e.entity_id !== selectedEntityId) };
-    const r = await saveSceneData(activeProjectDir, JSON.stringify(updated, null, 2));
-    logMessage(r.ok ? "success" : "error", `[Hierarchy] ${r.ok ? `Entidade '${name}' removida.` : r.message}`);
+    if (!activeProjectDir || !activeScene || !selectedEntityId || selectedEntityId.startsWith("layer::") || isDeleting) {
+      return;
+    }
+
+    const entityId = selectedEntityId;
+    const name = activeScene.entities.find((entity) => entity.entity_id === entityId)?.prefab ?? entityId;
+    removeEntity(entityId);
+    setIsDeleting(true);
+
+    const saved = await persistActiveScene(activeProjectDir, "Hierarchy", `Entidade '${name}' removida.`);
+    setIsDeleting(false);
+
+    if (saved) {
+      return;
+    }
+
+    const { activeScene: reloadedScene } = useEditorStore.getState();
+    const entityStillExists = reloadedScene?.entities.some((entity) => entity.entity_id === entityId) ?? false;
+    if (entityStillExists) {
+      setSelectedEntityId(entityId);
+    }
   }
 
   return (
@@ -87,15 +135,22 @@ export default function HierarchyPanel() {
             onKeyDown={(e) => e.key === "Enter" && handleAddEntity()}
             className="bg-[#1e1e2e] border border-[#313244] rounded px-2 py-1.5 text-xs text-[#cdd6f4] focus:outline-none focus:border-[#cba6f7]"
             placeholder="Nome da entidade"
+            disabled={isAdding}
           />
           <div className="flex gap-2 justify-end">
-            <button onClick={() => setShowAddDialog(false)}
-              className="px-2 py-1 text-xs rounded bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]">
+            <button
+              onClick={() => setShowAddDialog(false)}
+              disabled={isAdding}
+              className="px-2 py-1 text-xs rounded bg-[#313244] text-[#a6adc8] hover:bg-[#45475a] disabled:cursor-not-allowed disabled:opacity-40"
+            >
               Cancelar
             </button>
-            <button onClick={handleAddEntity}
-              className="px-2 py-1 text-xs rounded bg-[#cba6f7] text-[#1e1e2e] font-semibold hover:bg-[#b4a0e0]">
-              Criar
+            <button
+              onClick={handleAddEntity}
+              disabled={isAdding}
+              className="px-2 py-1 text-xs rounded bg-[#cba6f7] text-[#1e1e2e] font-semibold hover:bg-[#b4a0e0] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {isAdding ? "Salvando..." : "Criar"}
             </button>
           </div>
         </div>
@@ -109,7 +164,7 @@ export default function HierarchyPanel() {
         <div className="flex gap-1">
           <button
             onClick={() => { setNewName("Entity"); setShowAddDialog(true); }}
-            disabled={!activeProjectDir}
+            disabled={!activeProjectDir || isAdding || isDeleting}
             className="text-xs text-[#6c7086] hover:text-[#a6e3a1] transition-colors px-1 disabled:opacity-30"
             title="Adicionar entidade"
           >
@@ -117,7 +172,7 @@ export default function HierarchyPanel() {
           </button>
           <button
             onClick={handleDeleteEntity}
-            disabled={!selectedEntityId || !!selectedEntityId?.startsWith("layer::")}
+            disabled={!selectedEntityId || !!selectedEntityId?.startsWith("layer::") || isAdding || isDeleting}
             className="text-xs text-[#6c7086] hover:text-[#f38ba8] transition-colors px-1 disabled:opacity-30"
             title="Remover entidade selecionada"
           >

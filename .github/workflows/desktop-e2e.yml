@@ -1,0 +1,145 @@
+name: Desktop E2E
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Fixture canonica para o smoke desktop"
+        required: true
+        default: "all"
+        type: choice
+        options:
+          - all
+          - megadrive
+          - snes
+  workflow_call:
+    inputs:
+      target:
+        description: "Fixture canonica para o smoke desktop"
+        required: false
+        default: "all"
+        type: string
+  push:
+    paths:
+      - ".github/workflows/desktop-e2e.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "scripts/e2e-tauri-build-run.mjs"
+      - "src/**"
+      - "src-tauri/**"
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+    paths:
+      - ".github/workflows/desktop-e2e.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "scripts/e2e-tauri-build-run.mjs"
+      - "src/**"
+      - "src-tauri/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-e2e-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || github.event_name == 'workflow_call' && inputs.target || 'all' }}
+  cancel-in-progress: true
+
+jobs:
+  desktop-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CARGO_BUILD_JOBS: 2
+      RUST_MIN_STACK: 16777216
+      RDS_E2E_DRIVER_TIMEOUT_MS: 60000
+      RDS_E2E_RUN_TIMEOUT_MS: 300000
+      RDS_E2E_TARGET: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || github.event_name == 'workflow_call' && inputs.target || 'all' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked
+
+      - name: Install Edge WebDriver helper
+        run: cargo install --git https://github.com/chippers/msedgedriver-tool
+
+      - name: Provision native Edge WebDriver
+        run: |
+          $driverDir = Join-Path $env:RUNNER_TEMP 'retrodev-e2e-driver'
+          New-Item -ItemType Directory -Force -Path $driverDir | Out-Null
+          Push-Location $driverDir
+          & "$HOME/.cargo/bin/msedgedriver-tool.exe"
+          Pop-Location
+          $driverPath = Join-Path $driverDir 'msedgedriver.exe'
+          if (!(Test-Path $driverPath)) {
+            throw "msedgedriver.exe nao foi provisionado em $driverDir"
+          }
+          "RDS_EDGE_DRIVER_PATH=$driverPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build debug desktop app
+        run: npm run tauri build -- --debug --no-bundle
+
+      - name: Report resolved target
+        run: |
+          Write-Host "Desktop E2E target: $env:RDS_E2E_TARGET"
+          Write-Host "Desktop E2E driver startup timeout: $env:RDS_E2E_DRIVER_TIMEOUT_MS ms"
+          Write-Host "Desktop E2E timeout: $env:RDS_E2E_RUN_TIMEOUT_MS ms"
+
+      - name: Run Mega Drive desktop smoke
+        if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
+        run: npm run test:e2e:desktop:md -- --skip-build
+
+      - name: Run SNES desktop smoke
+        if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
+        run: npm run test:e2e:desktop:snes -- --skip-build
+
+      - name: Run Mega Drive live overflow desktop E2E
+        if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
+        run: npm run test:e2e:desktop:live-overflow:md -- --skip-build
+
+      - name: Run SNES live overflow desktop E2E
+        if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
+        run: npm run test:e2e:desktop:live-overflow:snes -- --skip-build
+
+      - name: Run Mega Drive live VRAM overflow desktop E2E
+        if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
+        run: npm run test:e2e:desktop:live-overflow-vram:md -- --skip-build
+
+      - name: Run SNES live VRAM overflow desktop E2E
+        if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
+        run: npm run test:e2e:desktop:live-overflow-vram:snes -- --skip-build
+
+      - name: Run Mega Drive live VRAM warning desktop E2E
+        if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
+        run: npm run test:e2e:desktop:live-warning-vram:md -- --skip-build
+
+      - name: Run SNES live VRAM warning desktop E2E
+        if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
+        run: npm run test:e2e:desktop:live-warning-vram:snes -- --skip-build
+
+      - name: Run Mega Drive live sprite warning desktop E2E
+        if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
+        run: npm run test:e2e:desktop:live-warning-sprites:md -- --skip-build
+
+      - name: Run SNES live sprite warning desktop E2E
+        if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
+        run: npm run test:e2e:desktop:live-warning-sprites:snes -- --skip-build

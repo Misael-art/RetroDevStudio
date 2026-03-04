@@ -1,0 +1,16 @@
+{
+  "rds_version": "1.0.0",
+  "name": "Canonical Mega Drive Dummy",
+  "target": "megadrive",
+  "resolution": {
+    "width": 320,
+    "height": 224
+  },
+  "fps": 60,
+  "palette_mode": "4x16",
+  "entry_scene": "scenes/main.json",
+  "build": {
+    "output_dir": "build/",
+    "optimization": "size"
+  }
+}

@@ -6,7 +6,23 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "lint": "eslint src vite.config.ts --max-warnings=0",
     "preview": "vite preview",
+    "check:tree": "node scripts/check-tree.cjs",
+    "test": "vitest run",
+    "test:e2e:desktop": "node scripts/e2e-tauri-build-run.mjs",
+    "test:e2e:desktop:md": "node scripts/e2e-tauri-build-run.mjs --project src-tauri/tests/fixtures/projects/megadrive_dummy",
+    "test:e2e:desktop:snes": "node scripts/e2e-tauri-build-run.mjs --project src-tauri/tests/fixtures/projects/snes_dummy",
+    "test:e2e:desktop:live-overflow": "node scripts/e2e-tauri-build-run.mjs --scenario live-overflow --project src-tauri/tests/fixtures/projects/megadrive_dummy",
+    "test:e2e:desktop:live-overflow:md": "node scripts/e2e-tauri-build-run.mjs --scenario live-overflow --project src-tauri/tests/fixtures/projects/megadrive_dummy",
+    "test:e2e:desktop:live-overflow:snes": "node scripts/e2e-tauri-build-run.mjs --scenario live-overflow --project src-tauri/tests/fixtures/projects/snes_dummy",
+    "test:e2e:desktop:live-overflow-vram:md": "node scripts/e2e-tauri-build-run.mjs --scenario live-overflow-vram --project src-tauri/tests/fixtures/projects/megadrive_dummy",
+    "test:e2e:desktop:live-overflow-vram:snes": "node scripts/e2e-tauri-build-run.mjs --scenario live-overflow-vram --project src-tauri/tests/fixtures/projects/snes_dummy",
+    "test:e2e:desktop:live-warning-vram:md": "node scripts/e2e-tauri-build-run.mjs --scenario live-warning-vram --project src-tauri/tests/fixtures/projects/megadrive_dummy",
+    "test:e2e:desktop:live-warning-vram:snes": "node scripts/e2e-tauri-build-run.mjs --scenario live-warning-vram --project src-tauri/tests/fixtures/projects/snes_dummy",
+    "test:e2e:desktop:live-warning-sprites:md": "node scripts/e2e-tauri-build-run.mjs --scenario live-warning-sprites --project src-tauri/tests/fixtures/projects/megadrive_dummy",
+    "test:e2e:desktop:live-warning-sprites:snes": "node scripts/e2e-tauri-build-run.mjs --scenario live-warning-sprites --project src-tauri/tests/fixtures/projects/snes_dummy",
+    "test:watch": "vitest",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -19,11 +35,19 @@
     "zustand": "^5.0.11"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@tauri-apps/cli": "^2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4",
+    "@vitest/browser": "^4.0.18",
+    "@vitest/ui": "^4.0.18",
+    "eslint": "^10.0.2",
+    "globals": "^17.4.0",
+    "jsdom": "^28.1.0",
     "typescript": "~5.6",
-    "vite": "^6"
+    "typescript-eslint": "^8.56.1",
+    "vite": "^6",
+    "vitest": "^4.0.18"
   }
 }

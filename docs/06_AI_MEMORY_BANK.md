@@ -1,178 +1,192 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
-**Ultima Atualizacao:** 2026-02-25
-**Ultima sessao:** 2026-02-25 (Claude Code — Sessao 10: Sprints P1-P6 concluidas)
-**Fase Atual:** Pos-MVP — Polish/QA (P1-P6 concluidas).
+**Ultima Atualizacao:** 2026-03-04
+**Ultima sessao:** 2026-03-04 (Codex - Sessao 29: badge de estado live na toolbar, cobertura de stale/warn/bloqueado e validacao desktop real apos rebuild)
+**Fase Atual:** Hardening/QA do MVP (Build -> ROM -> Emulacao validado em Windows com upstream real; desktop E2E multi-target validado localmente e em runner GitHub/Windows real; validacao live do editor agora coberta para bloqueios fatais e warnings nao-fatais)
+**Branch sugerida:** `feat/<tema>` para trabalho paralelo; usar `main` apenas quando o usuario pedir edicao direta no workspace atual
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
-> Este e o seu bloco de memoria primario. Voce **DEVE** ler este arquivo integralmente antes de iniciar qualquer nova tarefa.
-> **Handoff obrigatorio:** Ao encerrar uma sessao em que algo relevante foi feito, proponha atualizacao em "O que acabou de acontecer" e "Proximo passo imediato". Atualize tambem "Ultima sessao" acima.
-> **Nunca** altere o historico de "Decisoes Arquiteturais Consolidadas" sem ordem expressa.
+> Este e o bloco de memoria primario do projeto. Leia este arquivo integralmente antes de qualquer codigo ou decisao.
+> Atualize "O que acabou de acontecer", "Proximo passo imediato" e o cabecalho ao encerrar sessoes relevantes.
+> Nao altere a secao "Decisoes Arquiteturais Consolidadas" sem ordem expressa do usuario.
+>
+> **CANONICO DESDE 2026-02-28:**
+> Entradas antigas que afirmam "MVP completo", "pipeline completo" ou "produto funcional" devem ser tratadas como historico de claim de entrega, nao como prova funcional.
+> Para decisoes atuais, a auditoria e o plano deste documento sao a referencia operacional.
 
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
 
-* **O que acabou de acontecer (2026-02-25 — sessao 10):**
-  - **SPRINT P1 CONCLUIDA. File System Integration (diálogos nativos de projeto).**
-  - Commit inicial no GitHub: `https://github.com/Misael-art/RetroDevStudio.git` (146 arquivos, Fases 0-4 completas).
-  - `tauri-plugin-dialog = "2"` adicionado ao Cargo.toml; permissão `"dialog:default"` em capabilities/default.json.
-  - `lib.rs`: `open_project_dialog` (seleciona pasta, lê project.rds para nome real) e `new_project_dialog(name)` (cria project.rds + scenes/main.json mínimos na pasta escolhida). Plugin registrado em `run()`.
-  - `src/core/ipc/projectService.ts`: wrappers IPC tipados `openProjectDialog()` e `newProjectDialog(name)`.
-  - `editorStore.ts`: `activeProjectDir`, `activeProjectName`, `setActiveProject()` adicionados ao estado global.
-  - `src/App.tsx`: menu "Arquivo" com dropdown funcional (Novo Projeto + Abrir Projeto), modal para digitar nome do projeto, indicador do projeto ativo no header, botão ▶ Build & Run desabilitado visualmente quando sem projeto, `handleBuildAndRun` usa `activeProjectDir` do store.
-  - Git: repo standalone inicializado em `F:\Projects\RetroDevStudio`, push `main` OK.
-  - **Validacoes passadas:** `cargo clippy -- -D warnings` OK (10.08s), `npm run build` OK (51 modulos, 2.17s).
+* **O que acabou de acontecer (2026-03-04 - sessao 29):**
+  - O editor ganhou badge de estado live na toolbar (`LIVE`, `WARN`, `DESATUAL.`, `ERRO LIVE`, `BLOQUEADO`) no ponto de decisao de `Build & Run`, sem abrir fluxo paralelo ao painel de hardware.
+  - O resumo de warning na toolbar foi mantido e agora convive com sinalizacao explicita de frescor/estado do preview, reduzindo risco de interpretar diagnostico stale como certificado.
+  - A logica da badge foi centralizada em `liveValidationController` para evitar duplicacao de regras de estado entre `App.tsx` e outros consumidores.
+  - A cobertura local foi expandida para stale/warn/bloqueado tanto em unit tests do controller quanto em testes de integracao do App.
+  - O runner desktop/Tauri foi atualizado para exigir tambem o estado da badge (`WARN`/`BLOQUEADO`) nos cenarios live, tornando o E2E aderente ao novo contrato de UX.
+  - O app debug Tauri foi rebuildado e os cenarios de warning live (VRAM em Mega Drive e sprites em SNES) passaram no app real com `RDS_E2E_DRIVER_TIMEOUT_MS=60000`.
 
-* **O que estamos fazendo AGORA:** Sprint P1 completa. Ciclo de polish/QA em andamento.
+* **O que acabou de acontecer (2026-03-04 - sessao 28):**
+  - A UX live do editor foi endurecida no ponto de decisao: warnings nao-fatais agora aparecem tambem na toolbar, ao lado de `Build & Run`, sem bloquear o build.
+  - O frontend passou a resumir o primeiro warning live fresco como `Build com alerta: ...`, deixando claro o risco mesmo quando o build continua habilitado.
+  - O runner `scripts/e2e-tauri-build-run.mjs` foi endurecido com `RDS_E2E_DRIVER_TIMEOUT_MS`, porque o `tauri-driver` local estava ficando pronto mais lentamente do que o timeout fixo anterior e gerando falso negativo de infraestrutura.
+  - `.github/workflows/desktop-e2e.yml` foi ajustado para usar esse timeout configuravel no runner Windows remoto, reduzindo flakiness por startup lento do WebDriver.
+  - A nova UX foi validada no app Tauri real com `VRAM warning` em Mega Drive e `Sprite Warning` em SNES, confirmando que a toolbar exibe o alerta correto sem desabilitar `Build & Run`.
+  - O patch de blindagem textual dos canonicos permaneceu local durante esta iteracao e sera consolidado no mesmo ciclo de commit/push desta sessao, em vez de ficar como diff solto.
 
-* **O que acabou de acontecer (2026-02-25 — continuação sessao 10):**
-  - **SPRINTS P2 + P3 + P3b CONCLUIDAS.**
-  - Rust: `get_scene_data(project_dir)` — lê entry_scene do projeto e retorna JSON + metadata. `save_scene_data(project_dir, scene_json)` — valida JSON e persiste.
-  - `src/core/ipc/sceneService.ts`: tipos UGDM (Entity, Scene, Transform, SpriteComponent, CollisionComponent) + wrappers `getSceneData`, `saveSceneData`, `parseScene`.
-  - `editorStore.ts`: `activeScene`, `setActiveScene`, `updateEntity(entityId, patch)` — patch imutável com spread.
-  - `HierarchyPanel.tsx`: carrega cena real via `useEffect` ao trocar `activeProjectDir`, lista BackgroundLayers + Entities, estado vazio guiado ("Abra um projeto...").
-  - `InspectorPanel.tsx`: `PropRow` click-to-edit (int/string/bool), `entityProps()` extrai Transform + Sprite + Collision, botão "Salvar Cena" (IPC save), read-only para layers.
-  - `ToolsPanel.tsx`: `PathField` (campo + botão "…" seletor nativo), todos os 5 campos de caminho migrados. `@tauri-apps/plugin-dialog` instalado no npm.
-  - **Validacoes passadas:** `cargo clippy -- -D warnings` OK (0.69s), `npm run build` OK (53 modulos, 1.77s).
+* **O que acabou de acontecer (2026-03-04 - sessao 27):**
+  - Foi aplicada blindagem textual adicional nos canonicos (`README.md`, `docs/03_ROADMAP_MVP.md`, `docs/07_TEST_AND_COMPLIANCE.md` e `docs/09_AGENT_DEV_MODE.md`) para deixar explicito que nenhuma etapa pode ser considerada concluida sem certificacao real.
+  - A definicao operacional agora esta repetida em multiplos pontos: `concluido/validado` exige caminho canonico real, gates aplicaveis verdes, prova funcional correspondente e ausencia de erro bloqueante no escopo certificado.
+  - Foi reforcado que mock, stub, CI verde afrouxado, log cosmetico, fixture artificial fora do caminho canonico ou documento otimista nao contam como prova de entrega.
+  - Warnings so podem coexistir com claim de entrega quando forem comprovadamente nao-fatais, explicitamente sinalizados e incapazes de mascarar problema real; caso contrario, o status correto permanece `em hardening`.
 
-* **O que acabou de acontecer (2026-02-25 — continuação sessao 10, parte 2):**
-  - **SPRINTS P4 + P5 + P6 CONCLUIDAS.**
-  - `ViewportPanel.tsx`: `sceneCanvasRef` para aba "Cena"; `useEffect` renderiza fundo gradiente + grade + BG layers + entidades (retângulos coloridos, label, pivot, borda destacada na seleção); `handleSceneCanvasClick` hit-test LIFO seleciona entidade sincronizando com Hierarchy/Inspector. Status bar com Sprites N/80, BG Layers N/4, nome da entidade ativa.
-  - `editorStore.ts`: `addEntity()` e `removeEntity()` (imutáveis, removeEntity limpa selectedEntityId).
-  - `HierarchyPanel.tsx`: botão "+" abre modal "Nova Entidade" (nome → id único com timestamp), botão "−" remove entidade selecionada. Ambos auto-salvam via `saveSceneData` IPC.
-  - `scripts/create-icon-v2.mjs`: ícone pixel art "R" em fundo Catppuccin Mocha, PNG sem dependências. Gerados 32/64/128/256px + app-icon.png.
-  - **Validacoes passadas:** `cargo clippy -- -D warnings` OK (1.45s), `npm run build` OK (53 modulos, 4.53s).
+* **O que acabou de acontecer (2026-03-04 - sessao 26):**
+  - A validacao live do editor foi consolidada como trilha canonica de UX: `validate_scene_draft` no backend Rust, `sceneRevision` + estados `pending/fresh/stale/error` no store e bloqueio explicado de `Build & Run` no frontend.
+  - A paridade entre preview live e validacao autoritativa foi endurecida em Rust, reduzindo risco de preview "mentir" sobre o resultado real do build.
+  - O desktop E2E passou a cobrir, alem de `build-run`, `sprite overflow` e `VRAM overflow`, tambem `VRAM warning` nao-fatal em Mega Drive e SNES, verificando que o build continua habilitado enquanto o painel e a UX exibem o warning correto.
+  - Nesta sessao foi adicionada uma nova classe de warning live de hardware: `Sprite Warning` quando a contagem de sprites fica alta, mas ainda abaixo do limite fatal. O backend Mega Drive e SNES agora emitem esse warning canonicamente.
+  - O runner `scripts/e2e-tauri-build-run.mjs`, os aliases npm e o workflow `.github/workflows/desktop-e2e.yml` foram expandidos para `live-warning-sprites` em Mega Drive e SNES, e os dois cenarios passaram localmente no app Tauri real.
+  - Foi identificada uma lacuna processual: o `06_AI_MEMORY_BANK.md` nao estava sendo atualizado a cada sessao relevante. A partir desta sessao, o handoff de memoria volta a ser tratado como obrigatorio ao fechar cada iteracao material.
+  - Nesta maquina local o `gh` CLI nao esta disponivel. Quando a alteracao tocar arquivos monitorados pelo workflow desktop, o caminho operacional canonico para disparo remoto passa a ser o proprio `push`, que aciona `.github/workflows/desktop-e2e.yml` por filtro de caminho.
+
+* **O que acabou de acontecer (2026-03-03 - sessao 25):**
+  - O workflow `.github/workflows/desktop-e2e.yml` passou por completo no GitHub Windows runner real (`Desktop E2E`, SHA `4986440`), com `Build debug desktop app`, smoke Mega Drive e smoke SNES concluindo com sucesso.
+  - O `CI` comum tambem passou no mesmo commit, confirmando que o baseline rapido e o smoke desktop dedicado ficaram verdes no ambiente remoto institucional.
+  - O runner `scripts/e2e-tauri-build-run.mjs` ganhou timeout configuravel e diagnostico do estado do app quando o emulador nao ativa, evitando falha cega em ambiente limpo.
+  - A falha remota do SNES foi rastreada ate `build_orch.rs`: o caminho `PVSNESLIB_LIBDIR_WIN` estava sendo serializado de forma incompativel com `wlalink` no runner Windows. O path foi corrigido para formato com `/`, e os testes Rust/clippy voltaram a passar antes do rerun remoto.
+  - `App.tsx` deixou de registrar abertura/criacao de projeto como sucesso quando a hidratacao da cena falha, e `InspectorPanel.tsx` agora expõe `Falha ao salvar` no proprio botao quando a persistencia falha, reduzindo falso positivo de UX.
+  - O endurecimento de UX foi validado localmente com `npm run check:tree`, `npm run lint`, `npx tsc --noEmit` e `npm test`.
+
+* **O que acabou de acontecer (2026-03-03 - sessao 24):**
+  - Foi confirmado via GitHub API que o branch `feat/desktop-e2e-workflow` ja aciona o `CI` remoto em `push`, provando que a autenticacao e a observacao de Actions no repositorio estao funcionais.
+  - O workflow `.github/workflows/desktop-e2e.yml` foi endurecido com `push`/`pull_request` filtrados por caminho, suporte a `workflow_call`, `concurrency`, `timeout` e resolucao canonica de `target`.
+  - A estrategia elimina o bloqueio operacional de depender da `default branch` para usar apenas `workflow_dispatch`, sem reabsorver o smoke desktop no `ci.yml` comum.
+  - `docs/07_TEST_AND_COMPLIANCE.md` e `docs/09_AGENT_DEV_MODE.md` foram atualizados para refletir que o smoke desktop institucional agora e dedicado, reutilizavel e acionavel remotamente antes do merge.
+
+* **O que acabou de acontecer (2026-03-02 - sessao 23):**
+  - O runner desktop `scripts/e2e-tauri-build-run.mjs` foi endurecido para ler `project.rds` e validar que o `target` hidratado pela UI corresponde ao fixture aberto.
+  - Foram adicionados aliases npm por target: `test:e2e:desktop:md` e `test:e2e:desktop:snes`, eliminando ambiguidade na execucao local do smoke desktop.
+  - O fixture canonico `snes_dummy` passou no mesmo runner desktop/Tauri, validando `Build -> Load ROM -> Run frames` tambem para SNES na janela real do app.
+  - Foi criado `.github/workflows/desktop-e2e.yml` como workflow Windows separado, com `workflow_dispatch`, provisionamento de `tauri-driver` + `msedgedriver` e execucao controlada de Mega Drive, SNES ou ambos.
+  - A estrategia adotada evita transformar o `ci.yml` comum em gargalo lento/frágil, mas institucionaliza uma regressao desktop repetivel e documentada.
+
+* **O que acabou de acontecer (2026-03-02 - sessao 22):**
+  - O fluxo oficial de Windows foi validado com os componentes reais: `scripts/validate-upstream-windows.ps1 -SkipRustTests` passou baixando/instalando SGDK, PVSnesLib e cores Libretro oficiais e executando o smoke test ignorado `official_windows_upstream_validation_smoke_test`.
+  - O orchestrator SNES em `build_orch.rs` foi corrigido para usar layout canonico de workspace (`hdr.asm`/`data.asm` apenas na raiz do workspace), compatibilizar o caminho da PVSnesLib com `snes_rules` no Windows e impedir regressao com testes novos.
+  - Foi criado um ponto canonico de abertura de projeto por caminho (`open_project_path`) no backend/frontend para permitir automacao desktop sem depender de dialogo nativo.
+  - Foi criado o runner `scripts/e2e-tauri-build-run.mjs`, usando `tauri-driver` oficial, `msedgedriver` nativo e a janela real do app para validar `Build -> Load ROM -> Run frames`.
+  - O E2E desktop/Tauri real passou em Windows com o fixture canonico `megadrive_dummy`, buildando o app Tauri debug, clicando `Build & Run`, entrando na aba `game` e confirmando framebuffer nao vazio no canvas.
+  - `docs/03_ROADMAP_MVP.md`, `docs/07_TEST_AND_COMPLIANCE.md`, `docs/08_TREE_ARCHITECTURE.md`, `docs/09_AGENT_DEV_MODE.md` e `README.md` foram atualizados para refletir esse novo baseline verificado.
+
+* **O que acabou de acontecer (2026-03-02 - sessao 21):**
+  - `README.md`, `CLAUDE.md` e `docs/00_AI_DIRECTIVES.md` foram realinhados ao estado real do projeto, eliminando claims antigas de `Fase 0` e referencias obsoletas como `check-tree.js`.
+  - Foi criado `docs/09_AGENT_DEV_MODE.md` como documento canonico para hierarquia de verdade, gates de entrega, matriz de maturidade e regras anti-poluicao para agentes.
+  - O baseline de CI em `.github/workflows/ci.yml` foi endurecido com `npm run check:tree`, `npm run lint` e `cargo clippy -- -D warnings`, alem dos gates ja existentes.
+  - Foi introduzido um baseline real de ESLint no frontend, com configuracao explicita em `eslint.config.mjs` e scripts npm dedicados para estrutura e lint.
+  - O gate de `cargo clippy` expôs problemas reais no backend e eles foram corrigidos em `build_orch.rs`, `libretro_ffi.rs` e `dependency_manager.rs` em vez de serem suprimidos.
+  - O validador estrutural `scripts/check-tree.cjs` foi corrigido para refletir a raiz real do repositorio, incluindo `.github/` e `data/`.
+  - `docs/02_TECH_STACK.md`, `docs/03_ROADMAP_MVP.md`, `docs/07_TEST_AND_COMPLIANCE.md` e `docs/08_TREE_ARCHITECTURE.md` foram atualizados para manter coerencia com o novo baseline.
+
+* **O que acabou de acontecer (2026-02-28 - sessao 19):**
+  - Foi criado o baseline inicial de CI em `.github/workflows/ci.yml`, executando `cargo test --lib`, `npm test` e `npx tsc --noEmit` em Windows para proteger os proximos fixes.
+  - `Deep Profiler`, `Asset Extractor` e `RetroFX` passaram a se declarar explicitamente como `Experimental` na UI, com botoes principais desabilitados para evitar falsa impressao de feature pronta.
+  - A ordem executiva foi ajustada: CI primeiro, honestidade imediata de UX depois, e so entao os fixes P0 do fluxo canonico.
+  - O arquivo acidental `nul` na raiz do repositorio foi removido para limpar o workspace e o `git status`.
+  - A documentacao estrutural e o roadmap foram alinhados com essa nova ordem operacional.
+
+* **O que acabou de acontecer (2026-02-28 - sessao 20):**
+  - O `Pause/Resume` do viewport foi corrigido para interromper apenas o loop de frames sem chamar `emulator_stop()`, preservando o estado do core Libretro carregado.
+  - O `ViewportPanel` ganhou protecao contra start duplo do loop enquanto `startFrameLoop()` ainda esta inicializando, evitando corrida entre efeitos do React.
+  - O autosave do `HierarchyPanel` para adicionar/remover entidades passou a persistir sempre a cena fresca do store, removendo o snapshot stale de `activeScene`.
+  - `project.rds` e `scenes/*.json` agora sao gravados com arquivo temporario + substituicao atomica em `project_mgr.rs`, com caminho especifico de replace no Windows.
+  - O IPC `save_scene_data` deixou de escrever JSON bruto direto no disco e passou a salvar via `project_mgr::save_scene()`, reaproveitando validacao semantica e persistencia atomica.
+  - A suite Rust backend subiu para **25/25** e os testes de `build_orch` foram serializados localmente para evitar lock intermitente de fixture no Windows.
+
+* **O que acabou de acontecer (2026-02-28 - sessao 18):**
+  - Foi implementado um gerenciador de dependencias de terceiros em `src-tauri/src/tools/dependency_manager.rs`, com detecao de status, instalacao sob demanda e log streaming para SGDK, PVSnesLib e cores Libretro oficiais.
+  - O frontend agora faz preflight amigavel de dependencias antes de `Build & Run` e no carregamento manual de ROM, com consentimento explicito do usuario e abertura do `Runtime Setup` quando necessario.
+  - A aba `Runtime Setup` foi adicionada ao `ToolsPanel`, tornando visivel o estado de instalacao local e a origem oficial de cada componente externo.
+  - O caminho SNES deixou de ser apenas pseudo-workspace: `build_orch.rs` agora gera `hdr.asm`, `data.asm`, regras `gfx4snes`, staging de asset real convertido para `.bmp` e copia a ROM final para `build/snes/out/`.
+  - A fixture canonica `snes_dummy` passou a usar um asset real (`assets/sprites/hero.ppm`) para exercitar o caminho oficial de staging de imagem.
+  - O hardware profile do SNES foi endurecido para refletir o exporter atual: sprites simples quadrados de um unico tamanho por cena, evitando promessas que o emitter ainda nao suporta.
+  - O roadmap foi reconciliado em `docs/03_ROADMAP_MVP.md`: Fases 1 e 2 agora aparecem como `implementadas em codigo, validacao externa pendente`, em vez de `concluidas`.
+  - A suite Rust backend foi expandida e passou a **24/24** testes, incluindo o workspace SNES com asset real. `npm test` segue em **38/38** e `npx tsc --noEmit` segue OK.
+
+* **O que estamos fazendo AGORA:**
+  - Mantendo o fluxo canonico `Build -> ROM -> Emulacao` sob hardening depois da validacao oficial de Windows e do fechamento do desktop E2E para Mega Drive e SNES.
+  - Expandindo a cobertura da validacao live do editor para warnings intermediarios e paridade entre preview, UX de bloqueio e validacao autoritativa no backend.
+  - O baseline de CI inclui estrutura, lint, typecheck, `cargo clippy`, testes frontend e testes Rust, e existe workflow desktop dedicado com gatilhos remotos controlados para regressao multi-target.
+  - O protocolo operacional desta fase passa a ser ciclico: proxima iteracao tecnica, disparo remoto do workflow desktop, proxima iteracao tecnica e registro no Memory Bank, sem deixar lacunas de handoff entre sessoes materiais.
+
+* **Estado real resumido:**
+  - Frontend/editor: funcional e agora com fluxo amigavel para instalar dependencias externas sem sair do app.
+  - Build pipeline: real por target, com staging de assets e workspace SNES agora validado no Windows com PVSnesLib oficial e `snes_rules` real.
+  - Emulacao integrada: backend usa Libretro real via FFI e o fluxo oficial com cores upstream reais foi verificado em Windows.
+  - Suite Rust backend: passando localmente (`cargo test --lib` 28 aprovados, 1 ignorado), cobrindo parser/schema, hardware validation, build orchestration, dependency manager, emulacao Libretro mock, ponto canonico `open_project_path` e um E2E headless `Build -> Load -> Run`.
+  - Toolchains continuam fora do Git, mas agora existe jornada automatica para baixar os pacotes oficiais no Windows mediante consentimento do usuario.
+  - O app agora possui um E2E de nivel desktop/Tauri repetivel em `scripts/e2e-tauri-build-run.mjs`, usando `tauri-driver` oficial e fixtures canonicas de Mega Drive e SNES.
+  - O workflow dedicado `.github/workflows/desktop-e2e.yml` institucionaliza a regressao desktop em Windows, com `workflow_dispatch`, `workflow_call` e gatilhos `push`/`pull_request` filtrados por caminho, e agora ja foi validado em runner GitHub/Windows real.
+  - A UX live do editor ja cobre estados fatais e nao-fatais: overflow de sprites, overflow de VRAM, warning de VRAM alta e warning de alta contagem de sprites em ambos os targets.
+  - A toolbar do editor agora tambem expÃµe warning live nao-fatal perto de `Build & Run`, para que o usuario nao dependa exclusivamente do painel lateral para entender o risco atual.
+  - O modo de trabalho dos agentes agora esta consolidado em documento canonico proprio para reduzir divergencia de onboarding, claims falsos de entrega e poluicao estrutural.
+  - Dados em `data/`: `rom_teste.bin` e `sonic_test.gen` continuam uteis para validacao manual de Mega Drive, mas o uso dessas ROMs deve respeitar compliance/licenciamento.
+
+* **Validacoes verificadas em 2026-03-04:**
+  - `npm run check:tree` -> OK.
+  - `npm run lint` -> OK.
+  - `npx tsc --noEmit` -> OK.
+  - `npx vitest run --no-file-parallelism --maxWorkers=1` -> OK, 55/55 (fallback deterministico para ambiente com timeout de worker em modo `forks`).
+  - `cargo test --lib -- --nocapture` -> OK, 39 aprovados / 1 ignorado.
+  - `cargo clippy -- -D warnings` -> OK.
+  - `npm run tauri build -- --debug --no-bundle` -> OK (rebuild do app desktop para validar a UX nova no binario real).
+  - `node scripts\e2e-tauri-build-run.mjs --scenario live-warning-vram --project src-tauri/tests/fixtures/projects/megadrive_dummy --skip-build --native-driver <msedgedriver>` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> OK, warning + badge `WARN` em Mega Drive.
+  - `node scripts\e2e-tauri-build-run.mjs --scenario live-warning-sprites --project src-tauri/tests/fixtures/projects/snes_dummy --skip-build --native-driver <msedgedriver>` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> OK, warning + badge `WARN` em SNES.
+
+* **Validacoes verificadas em 2026-03-04 (sessao 28):**
+  - `npm run check:tree` -> OK.
+  - `npm run lint` -> OK.
+  - `npx tsc --noEmit` -> OK.
+  - `npm test` -> OK, 53/53.
+  - `node scripts\e2e-tauri-build-run.mjs --scenario live-warning-vram --project src-tauri/tests/fixtures/projects/megadrive_dummy --skip-build --native-driver <msedgedriver>` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> OK, toolbar exibindo `Build com alerta: VRAM Warning...` em Mega Drive.
+  - `node scripts\e2e-tauri-build-run.mjs --scenario live-warning-sprites --project src-tauri/tests/fixtures/projects/snes_dummy --skip-build --native-driver <msedgedriver>` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> OK, toolbar exibindo `Build com alerta: Sprite Warning...` em SNES.
+
+* **Validacoes verificadas em 2026-03-04 (sessao 26/27):**
+  - `npm run check:tree` -> OK.
+  - `npm run lint` -> OK.
+  - `npx tsc --noEmit` -> OK.
+  - `npm test` -> OK, 51/51.
+  - `cargo clippy -- -D warnings` -> OK.
+  - `cargo test --lib -- --nocapture` -> OK, 39 aprovados / 1 ignorado (`official_windows_upstream_validation_smoke_test`).
+  - `npm run test:e2e:desktop:live-warning-vram:md -- --native-driver <msedgedriver>` -> OK, warning live nao-fatal de VRAM em Mega Drive no app Tauri real.
+  - `npm run test:e2e:desktop:live-warning-vram:snes -- --skip-build --native-driver <msedgedriver>` -> OK, warning live nao-fatal de VRAM em SNES no app Tauri real.
+  - `node scripts\e2e-tauri-build-run.mjs --scenario live-warning-sprites --project src-tauri/tests/fixtures/projects/megadrive_dummy --skip-build --native-driver <msedgedriver>` -> OK, warning live nao-fatal de sprites em Mega Drive no app Tauri real.
+  - `node scripts\e2e-tauri-build-run.mjs --scenario live-warning-sprites --project src-tauri/tests/fixtures/projects/snes_dummy --skip-build --native-driver <msedgedriver>` -> OK, warning live nao-fatal de sprites em SNES no app Tauri real.
+
+* **Validacoes verificadas em 2026-03-03:**
+  - `npm run check:tree` -> OK.
+  - `npm run lint` -> OK.
+  - `npx tsc --noEmit` -> OK.
+  - `npm test` -> OK, 39/39.
+  - `cargo clippy -- -D warnings` -> OK.
+  - `cargo test --lib -- --nocapture` -> OK, 28 aprovados / 1 ignorado (`official_windows_upstream_validation_smoke_test`).
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests` -> OK, com SGDK, PVSnesLib e cores Libretro oficiais.
+  - `npm run test:e2e:desktop:md -- --skip-build --native-driver <msedgedriver>` -> OK, validando Mega Drive na janela real do app Tauri.
+  - `npm run test:e2e:desktop:snes -- --skip-build --native-driver <msedgedriver>` -> OK, validando SNES na janela real do app Tauri.
+  - GitHub Actions `CI` (`22606646061`) -> OK em `windows-latest`.
+  - GitHub Actions `Desktop E2E` (`22606643935`) -> OK em `windows-latest`, com `Run Mega Drive desktop smoke` e `Run SNES desktop smoke` ambos verdes.
 
 * **Proximo passo imediato:**
-  1. **Sprint P7 — Drag de entidades no canvas**: arrastar entidades na Scene View atualizando transform.x/y em tempo real (mousedown → mousemove → mouseup com delta).
-  2. **Sprint P8 — Target switcher na UI**: botão/toggle para alternar entre `megadrive` e `snes` no projeto ativo, atualizando hardware limits e status bar (320×224/60fps vs 256×224/60fps).
-  3. **Sprint P9 — Testes de integração básicos**: Vitest com testes para `nodeCompiler.ts` e `editorStore` (add/remove/update entity).
-
-* **O que acabou de acontecer (2026-02-25 — sessao 9):**
-  - **FASE 4 CONCLUIDA. ROADMAP MVP INTEIRAMENTE CONCLUIDO.**
-  - `src-tauri/src/tools/mod.rs`: modulo tools com 3 submodulos.
-  - `tools/patch_studio.rs`: IPS (create/apply com RLE) e BPS (create/apply com SourceRead/TargetRead/SourceCopy/TargetCopy + CRC32 validation). Funções file-level para IPC.
-  - `tools/deep_profiler.rs`: análise estática de ROM MD — heatmaps DMA e sprites por scanline, detecção de SAT candidata, violações de hardware. `profile_rom()` e `profile_bytes()`.
-  - `tools/asset_extractor.rs`: extração de tiles 4bpp + paletas 0BGR→RGB888, escrita PNG RGBA sem libs externas (deflate store + Adler-32 + CRC32), `build_spritesheet()`.
-  - `lib.rs`: 6 novos comandos IPC: patch_create_ips, patch_apply_ips, patch_create_bps, patch_apply_bps, profiler_analyze_rom, assets_extract.
-  - `src/core/ipc/toolsService.ts`: wrappers TypeScript para os 6 comandos.
-  - `src/components/tools/ToolsPanel.tsx`: UI com 3 sub-abas — Patch Studio (criar/aplicar IPS/BPS), Deep Profiler (heatbars + issues), Asset Extractor (tiles+paletas+arquivos gerados).
-  - `src/App.tsx`: botão "⧉ Tools" no header alterna o painel direito entre Inspector e ToolsPanel.
-  - **Validacoes passadas:** `cargo clippy -- -D warnings` OK (30.54s), `npm run build` OK (50 modulos, 1.57s).
-
-* **O que estamos fazendo AGORA:** Roadmap MVP completo (Fases 0-4). Produto em estado de demo funcional.
-
-* **Proximo passo imediato:**
-  1. Commit git de todo o trabalho das sessões 6-9
-  2. Ou iniciar ciclo de polish/QA: testes de integração, ícones reais, diálogos de abertura de arquivo
-
-* **O que acabou de acontecer (2026-02-24 — sessao 8):**
-  - **FASE 3 CONCLUIDA.** Visual Logic & RetroFX.
-  - Refatoracao arquitetural: `HwStatus` movido para `hardware/mod.rs` (tipo canônico unico). Ambos os profiles importam de lá — elimina struct duplicada e mapeamento manual.
-  - `src/components/nodegraph/NodeGraphEditor.tsx`: NodeGraph completo — 8 tipos de nó (event_start, sprite_move, sprite_anim, condition_overlap, effect_parallax, effect_raster, logic_and, action_sound), drag-and-drop, conexão de portas exec/data com SVG bezier, paleta lateral, Delete para remover nó, grafo demo pré-carregado.
-  - `src/components/retrofx/RetroFXDesigner.tsx`: Editor de Parallax (layers, speed X/Y int) e Raster effects (scanline + offset_x int). Preview de scanlines em tempo real. Botão "Aplicar RetroFX" loga no Console.
-  - `src/core/nodegraph/nodeCompiler.ts`: `compileGraphToC(graph, name, target)` — percorre chain exec e emite C SGDK ou PVSnesLib. `parseCToNodes(source)` — reconstrói nós a partir de main.c gerado (round-trip).
-  - `src/components/viewport/ViewportPanel.tsx`: abas "Logic" (NodeGraph) e "RetroFX" (RetroFXDesigner) integradas. Layout adaptativo (sem justify-center nas novas abas).
-  - **Validacoes passadas:** `cargo clippy -- -D warnings` OK (10.61s — Rust nao mudou), `npm run build` OK (48 modulos, 1.85s).
-
-* **O que estamos fazendo AGORA:** Fase 3 completa.
-
-* **Proximo passo imediato:**
-  1. Iniciar **Fase 4** — Camada Pro (ROM Patch Studio, Deep Profiler, Asset Extraction Pipeline)
-
-* **O que acabou de acontecer (2026-02-24 — sessao 7):**
-  - **FASE 2 CONCLUIDA.** Engine agnóstica Mega Drive + SNES.
-  - `hardware/snes_profile.rs`: perfil completo do SNES — constantes (128 sprites, 4 BG layers, 8 paletas, 64KB VRAM), `validate_scene()`, `hw_status()`. Struct `HwStatus` com `#[derive(Serialize)]`.
-  - `compiler/snes_emitter.rs`: `emit_snes()` traduz o mesmo AST agnóstico para código C PVSnesLib (oamInit, dmaCopyVram, dmaCopyCGram, oamSet, oamUpdate, WaitForVBlank). `resources.res` com flags grit.
-  - `compiler/mod.rs`: `pub mod snes_emitter` adicionado.
-  - `compiler/build_orch.rs`: hardware validation e C generation despachados por `project.target` ("megadrive" → SGDK, "snes" → PVSnesLib).
-  - `lib.rs`: `validate_project`, `generate_c_code`, `get_hw_status` — todos despachados por target. SNES retorna `snes_profile::HwStatus` mapeado para `md_profile::HwStatus` (mesma forma, tipo canônico).
-  - Painel `HardwareLimitsPanel` já agnóstico — exibe os limites corretos conforme `HwStatus` retornado pelo backend.
-  - **Validacoes passadas:** `cargo clippy -- -D warnings` OK (9.44s), `npm run build` OK (46 modulos, 1.62s).
-
-* **O que estamos fazendo AGORA:** Fase 2 completa.
-
-* **Proximo passo imediato:**
-  1. Iniciar **Fase 3** — Visual Logic & RetroFX (NodeGraph UI, RetroFX Designer)
-
-* **O que acabou de acontecer (2026-02-24 — sessao 6):**
-  - **SPRINT 1.5 CONCLUIDA. FASE 1 COMPLETA.**
-  - `hardware/md_profile.rs`: adicionadas struct `HwStatus` (Serialize) + funcao `hw_status(&scene)` que retorna vram_used, vram_limit, sprite_count, sprite_limit, bg_layers, erros e avisos.
-  - `lib.rs`: novo comando IPC `get_hw_status(project_dir)` — retorna `HwStatus` serializado para o frontend. Retorna zeros se project_dir vazio ou projeto nao encontrado.
-  - `src/core/ipc/hwService.ts`: `getHwStatus(projectDir)` — wrapper IPC.
-  - `src/core/store/editorStore.ts`: adicionados `HwStatus` interface, `hwStatus: HwStatus | null`, `setHwStatus()`.
-  - `src/components/inspector/HardwareLimitsPanel.tsx`: painel com 3 gauges (VRAM, Sprites, BG Layers), header vermelho em overflow, laranja em warning (>80%), verde em OK. Mensagens de erro/aviso listadas abaixo dos gauges.
-  - `src/components/inspector/InspectorPanel.tsx`: `HardwareLimitsPanel` fixado no rodape do painel Inspector (sempre visivel).
-  - `src/App.tsx`: `handleBuildAndRun` chama `getHwStatus` antes do build; bloqueia o build se houver erros de hardware; emite warnings no Console.
-  - **Validacoes passadas:** `cargo clippy -- -D warnings` OK (1m36s), `npm run build` OK (46 modulos, 1.80s).
-
-* **O que estamos fazendo AGORA:** Sprint 1.5 completa. **Fase 1 inteiramente concluida.**
-
-* **Proximo passo imediato:**
-  1. Iniciar **Fase 2** — Adicionar suporte a SNES (PVSnesLib + Snes9x Libretro core)
-  2. Hardware Profile adaptativo: painel muda de 80→128 sprites ao trocar target
-
-* **O que acabou de acontecer (2026-02-23 — sessao 5):**
-  - **SPRINT 1.4 CONCLUIDA.** Emulador Embutido pipeline completo.
-  - `emulator/libretro_ffi.rs`: EmulatorCore com modo simulado (gradiente animado 320x224 XRGB8888 a 60fps). load_rom, run_frame, get_framebuffer, set_joypad, stop. PixelFormat + JoypadState com mapeamento RETRO_DEVICE_ID_JOYPAD_*.
-  - `emulator/frame_buffer.rs`: `xrgb8888_to_rgba()` — converte framebuffer Libretro para Canvas ImageData (RGBA).
-  - `lib.rs`: 4 novos comandos IPC Tauri: emulator_load_rom, emulator_run_frame, emulator_send_input, emulator_stop. Estado global gerenciado via tauri::State<EmulatorCoreState>.
-  - `src/core/ipc/emulatorService.ts`: startFrameLoop (60fps via setTimeout+listen), emulatorSendInput, keyToJoypad (mapeamento teclado→joypad MD).
-  - `src/components/viewport/ViewportPanel.tsx`: canvas 320x224 com ImageData, loop de renderização, captura de teclado com keydown/keyup listeners, tab Jogo ativa o emulador automaticamente.
-  - Sem Genesis Plus GX instalado: modo simulado exibe gradiente animado para validar pipeline Rust→IPC→Canvas.
-  - **Validacoes passadas:** `cargo clippy -- -D warnings` OK (30.41s), `npm run build` OK (44 modulos, 3.48s).
-
-* **O que estamos fazendo AGORA:** Sprint 1.4 completa. Pronto para Sprint 1.5 (Hardware Constraint Engine V1).
-
-* **Proximo passo imediato (sessao 5):**
-  _(ja executado na sessao 6 acima — Sprint 1.5 concluida)_
-
-* **O que acabou de acontecer (2026-02-23 — sessao 4):**
-  - **SPRINT 1.3 CONCLUIDA.** Toolchain Orchestrator completo.
-  - `compiler/build_orch.rs`: `run_build()` com callback streaming — load+validate+generate C+invocar GCC m68k+objcopy.
-  - Toolchain discovery em 3 camadas: `toolchains/sgdk/` local (doc 08), `SGDK_ROOT` env var, PATH do sistema.
-  - Graceful degradation: se SGDK nao instalado, entrega `main.c` gerado com warnings no Console (nao erro fatal).
-  - `lib.rs`: novo comando IPC `build_project(app, project_dir)` com `app.emit("build://log", line)` para streaming em tempo real.
-  - `src/core/ipc/buildService.ts`: `buildProject()` com `listen("build://log")` + unlisten automatico apos build.
-  - `src/App.tsx`: botao Build & Run funcional — estado `building`, alimenta Console via `logMessage()`.
-  - **Validacoes passadas:** `cargo clippy -- -D warnings` OK (17.15s), `npm run build` OK (43 modulos, 2.43s).
-
-* **O que estamos fazendo AGORA:** Sprint 1.3 completa. Pronto para Sprint 1.4 (Emulador Embutido).
-
-* **Proximo passo imediato:**
-  1. Sprint 1.4: Integrar Libretro API via FFI no Rust (Genesis Plus GX core)
-  2. Enviar framebuffer do Rust para canvas React a 60fps
-  3. Capturar inputs do teclado no React e enviar para o backend
-
-* **O que acabou de acontecer (2026-02-23 — sessao 3):**
-  - **SPRINT 1.2 CONCLUIDA.** Backend Rust completo: parser UGDM + hardware validation + AST + SGDK emitter.
-  - Criados: `src-tauri/src/ugdm/entities.rs` + `components.rs` — structs Serde para Project, Scene, Entity, todos os Components.
-  - Criado: `src-tauri/src/core/project_mgr.rs` — `load_project()` + `load_scene()` com validacao semantica.
-  - Criado: `src-tauri/src/hardware/md_profile.rs` — `validate_scene()` com 6 checks: sprites, dimensoes, VRAM, paletas, bg layers, palette slot.
-  - Criado: `src-tauri/src/compiler/ast_generator.rs` — `generate_ast()` produz Vec<AstNode> agnóstico de SDK.
-  - Criado: `src-tauri/src/compiler/sgdk_emitter.rs` — `emit_sgdk()` traduz AST para `main.c` + `resources.res` validos para SGDK.
-  - Stubs criados: `core/memory_pool.rs`, `hardware/snes_profile.rs`, `compiler/build_orch.rs`, `emulator/libretro_ffi.rs`, `emulator/frame_buffer.rs`.
-  - `lib.rs` atualizado: 2 comandos IPC Tauri registrados: `validate_project` e `generate_c_code`.
-  - Todos os `mod.rs` criados para: core, ugdm, hardware, compiler, emulator.
-  - **Validacoes passadas:** `cargo clippy -- -D warnings` OK (22.42s), `npm run build` OK (39 modulos, 3.08s).
-
-* **O que estamos fazendo AGORA:** Sprint 1.2 completa. Pronto para Sprint 1.3 (Toolchain Orchestrator).
-
-* **Proximo passo imediato:**
-  1. Sprint 1.3: `compiler/build_orch.rs` — invocar GCC m68k via subprocesso
-  2. Salvar `main.c` + `resources.res` em pasta `/build` temporaria
-  3. Capturar stdout/stderr do compilador e enviar via IPC para o Console React
-  4. Gerar `out.md` (a ROM compilada)
-
-* **Proximo Bloqueio:** Nenhum bloqueador tecnico. SGDK toolchain sera necessaria apenas na Sprint 1.3.
+  1. Consolidar em commit unico desta sessao o badge de estado live na toolbar e o endurecimento correspondente do runner desktop.
+  2. Confirmar no GitHub Actions o run remoto acionado pelo novo `push` desta sessao (`CI` + `Desktop E2E`).
+  3. Expandir a UX live para orientar a acao do usuario em estado `DESATUAL.` (ex.: hint para revalidacao manual) sem bloquear indevidamente o build.
+  4. Reexecutar o smoke upstream oficial sempre que mudancas tocarem o caminho SNES/Windows, agora que o baseline remoto ja esta comprovado.
 
 ---
 
 ## 2. DECISOES ARQUITETURAIS CONSOLIDADAS (NAO SUGIRA MUDANCAS)
 
-As seguintes decisoes ja foram debatidas e sao **finais**:
+As seguintes decisoes ja foram debatidas e sao finais:
 
-1. **Framework Desktop:** Tauri (Rust + WebView). NAO Electron. Todo acesso ao sistema de arquivos passa pelo backend Rust via IPC (`invoke`).
+1. **Framework Desktop:** Tauri (Rust + WebView). Nao Electron. Todo acesso ao sistema de arquivos passa pelo backend Rust via IPC (`invoke`).
 2. **Linguagem Frontend:** React com TypeScript + TailwindCSS + Vite.
 3. **Gerencia de Estado (UI):** Zustand ou Context API. Proibido Redux.
 4. **Alocacao de Memoria no C (Engine de Exportacao):** Alocacao estatica apenas (arrays fixos). Proibido `malloc()`/`free()` para entidades do jogo.
@@ -184,54 +198,117 @@ As seguintes decisoes ja foram debatidas e sao **finais**:
 
 ## 3. PROBLEMAS CONHECIDOS & ALERTAS
 
-* **[2026-02-22]** O repositorio Git esta compartilhado com outros projetos (clawdbot-launcher, Sprite Flow, etc.) no diretorio pai. Ideal: isolar RetroDevStudio em repositorio proprio no futuro.
+* **[2026-02-28]** `README.md`, `docs/03_ROADMAP_MVP.md` e o historico antigo do Memory Bank divergiam sobre o status real. Ate uma reconciliacao completa, este arquivo e a referencia operacional canonica.
+* **[2026-03-02]** `README.md`, `CLAUDE.md` e `docs/00_AI_DIRECTIVES.md` foram realinhados, mas novas mudancas de estado devem continuar atualizando esses arquivos na mesma sessao para evitar regressao documental.
+* **[2026-02-28]** O backend agora executa Libretro real e o build nao reporta sucesso sem ROM, mas isso ainda depende de core/toolchain externos configurados. Sem essas dependencias, o comportamento correto agora e erro explicito.
+* **[2026-03-02]** Ja existe teste de interface Tauri/React validando `Build -> Load ROM -> Run frames` no nivel de aplicacao desktop, mas ele ainda depende de `tauri-driver` e `msedgedriver` provisionados localmente.
+* **[2026-03-02]** O fluxo oficial com SGDK/PVSnesLib/cores Libretro reais foi validado em Windows, mas deve ser reexecutado sempre que mudancas tocarem build, emulacao ou toolchains.
+* **[2026-03-02]** O caminho SNES oficial foi validado com `snes_rules` real, mas qualquer mudanca no workspace/Makefile deve ser tratada como area sensivel e voltar a passar pelo smoke upstream.
+* **[2026-03-03]** O workflow desktop `desktop-e2e.yml` ja foi validado em runner GitHub/Windows real. Qualquer mudanca no caminho SNES/Windows ou no runner E2E deve preservar esse baseline remoto.
+* **[2026-03-04]** Nesta maquina local o `gh` CLI nao esta instalado. O disparo remoto do workflow desktop deve ocorrer por `push` path-filtered ou por API/web quando houver autenticacao disponivel, mas o agente nao deve assumir `gh workflow run` como baseline universal.
+* **[2026-03-04]** Atualizacao do `06_AI_MEMORY_BANK.md` ao fim de cada sessao material volta a ser exigencia operacional. Ausencia de handoff aqui deve ser tratada como bug de processo.
+* **[2026-03-04]** `Concluido`, `validado`, `fechado` e termos equivalentes agora devem ser lidos como claims reservadas a certificacao real: caminho canonico funcional, gates aplicaveis verdes, prova correspondente e ausencia de erro bloqueante no escopo. Qualquer excecao deve rebaixar o status para `hardening` ou `experimental`.
+* **[2026-03-04]** `tauri-driver` local pode levar mais do que 15s para responder em certas maquinas. O runner desktop agora deve usar `RDS_E2E_DRIVER_TIMEOUT_MS` em vez de depender de timeout fixo curto.
+* **[2026-02-28]** `Deep Profiler`, `Asset Extractor` e `RetroFX` permanecem visiveis por contexto de produto, mas agora devem continuar explicitamente marcados como experimentais ate deixarem de ser stub/parcial.
+* **[2026-02-28]** No Windows, a deteccao de `bash` deve ignorar o shim do WSL (`C:\\Windows\\System32\\bash.exe`) e privilegiar Git Bash/MSYS2. Essa regra ja foi aplicada no codigo e nao deve ser removida sem substituto equivalente.
+* **[2026-02-28]** `data/sonic_test.gen` e a documentacao associada sao um ponto de atencao de compliance/licenciamento. O software pode operar com ROMs fornecidas pelo usuario para fins educacionais, pesquisa e preservacao, mas nao deve redistribuir ROM comercial como parte do produto.
+* **[2026-02-28]** Integrar cores oficiais de Libretro/RetroArch exige atencao a licencas. Antes de automatizar bundle/download, verificar compatibilidade de distribuicao com o carater proprietario do projeto.
 * **[2026-02-23]** `cargo clippy` e `cargo build` requerem `CARGO_BUILD_JOBS=2` e `RUST_MIN_STACK=16777216` para evitar stack overflow na compilacao do crate `windows` e `regex-automata` no Windows. Configurado em `src-tauri/.cargo/config.toml`.
-* **[2026-02-23]** `check-tree.js` renomeado para `check-tree.cjs` — necessario porque `package.json` usa `"type": "module"` e o script usa `require()` (CommonJS).
-* **[2026-02-23]** Icones em `src-tauri/icons/` sao placeholders gerados por script. Para producao, criar icones reais com design do produto.
-* **[2026-02-23]** `bootstrap.ps1` e `bootstrap.ps1` original tem bugs de encoding (em-dashes `—` dentro de strings PowerShell quebram o parser). Substituido por `run-bootstrap.ps1` (agora ignorado no `.gitignore`).
+* **[2026-02-23]** `check-tree.js` foi renomeado para `check-tree.cjs` porque `package.json` usa `"type": "module"` e o script usa `require()`. Qualquer referencia residual ao nome antigo deve ser tratada como bug documental/processual.
+* **[2026-02-23]** Os icones em `src-tauri/icons/` ainda sao placeholders gerados por script.
+* **[2026-02-23]** `bootstrap.ps1` tem bugs de encoding e nao deve ser usado como fonte canonica de setup sem revisao.
 
 ---
 
-## 4. PROXIMO PASSO IMEDIATO (Para a IA executar quando solicitada)
+## 4. PROXIMO PASSO IMEDIATO (PARA A IA EXECUTAR QUANDO SOLICITADA)
 
-**Tarefa:** Roadmap MVP concluido. Próximos passos: commit git, testes de integração, diálogos de abertura de arquivo (file picker Tauri), ícones reais, ou início de novo ciclo de features.
+**Tarefa:**
+Rebaseline tecnico do MVP para alinhar implementacao, documentacao e compliance antes de qualquer nova feature.
 
-Pre-requisito verificado: Fase 0 100% completa (todos os checkboxes marcados).
+**Pre-requisitos operacionais:**
+* Nao iniciar features novas de editor/UX/NodeGraph/Tools enquanto `Build -> ROM -> Emulacao` nao estiver funcional de verdade.
+* Se alterar emulacao, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e fontes oficiais de Libretro/RetroArch.
+* Se for adicionar nova crate ou dependencia de suporte para download/extracao de cores, registrar a mudanca em `docs/02_TECH_STACK.md` e justificar no PR/handoff.
 
-Sequencia de acoes:
-1. Criar o layout principal do Editor em `src/App.tsx` (substituir boilerplate atual):
-   - Painel esquerdo: Hierarchy (lista de entidades da cena)
-   - Centro: Viewport (canvas do emulador)
-   - Painel direito: Inspector (propriedades da entidade selecionada)
-2. Criar componentes em `src/components/`:
-   - `common/Panel.tsx` — painel generico com titulo e conteudo
-   - `hierarchy/HierarchyPanel.tsx` — lista de entidades
-   - `inspector/InspectorPanel.tsx` — painel de propriedades
-   - `viewport/ViewportPanel.tsx` — area central
-3. Criar sistema de abas generico em `src/components/common/Tabs.tsx`
-4. Criar Logger/Console em `src/components/common/Console.tsx` (rodape)
-5. Criar store Zustand em `src/core/store/editorStore.ts` para estado da UI
-6. Definition of Done Sprint 1.1: Layout renderiza com 3 paineis visiveis
+**Sequencia de acoes recomendada:**
+1. Manter o CI baseline verde em toda alteracao relevante (`npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `cargo clippy -- -D warnings`, `cargo test --lib -- --nocapture`, `npm test`).
+2. Corrigir P0 do fluxo canonico (pause/resume, autosave stale residual, escrita atomica, handlers criticos).
+3. Validar com SGDK real um projeto dummy gerado pelo app e confirmar que a ROM de saida abre em core Libretro real.
+4. Validar com PVSnesLib real o mesmo fluxo para SNES e ajustar o `Makefile`/resources se houver divergencia com `snes_rules`.
+5. Cobrir casos com assets de sprite reais em ambos os alvos, garantindo que `resources.res`/recursos sejam aceitos pelas toolchains oficiais.
+6. Expandir ou parametrizar o E2E de nivel aplicacao desktop para cobrir tambem o target SNES.
+7. So depois disso retomar polish de editor, NodeGraph, RetroFX e Tools.
 
-**Para rodar o projeto:**
-- npm: `npm run tauri dev` (abre janela Tauri com React a 60fps)
-- Somente frontend: `npm run dev` (http://localhost:1420)
+**Validacao minima obrigatoria antes de marcar qualquer item como concluido:**
+* `npm run check:tree`
+* `npm run lint`
+* `npx tsc --noEmit`
+* `npm test`
+* `cargo clippy -- -D warnings`
+* `cargo test --lib -- --nocapture`
+* teste manual ou automatizado de `Build -> Run` com ROM real no target afetado
+* atualizacao do README e deste Memory Bank se o status do produto tiver mudado
 
 ---
 
-## 5. HISTORICO DE SESSOES
+## 5. MARCOS VERIFICADOS
+
+* **2026-02-23 - Base do projeto:**
+  - Scaffold Tauri + React + TypeScript + Vite.
+  - Estrutura de pastas backend/frontend criada.
+  - `cargo clippy` e `npm run build` ja foram validados historicamente.
+
+* **2026-02-23 a 2026-02-27 - Editor e UX de demo:**
+  - Layout principal do editor, hierarchy, inspector, viewport e console.
+  - Estado global com Zustand.
+  - Menus, dialogs de arquivo e ferramentas de editor.
+  - Viewport de cena, drag de entidades, inspectors para componentes principais.
+
+* **2026-02-24 a 2026-02-27 - Features de demonstracao:**
+  - NodeGraph, RetroFX, Tools panel, Patch Studio, Deep Profiler e Asset Extractor.
+  - Suporte de UI para MD/SNES e parte do codegen de demonstracao.
+
+* **2026-02-26 a 2026-02-28 - Testes verificados:**
+  - Testes frontend de `nodeCompiler` e `editorStore` existentes e passando.
+  - Suite Rust backend criada e validada localmente, cobrindo parser/schema, hardware profiles, build orchestration e emulacao Libretro mock.
+
+* **2026-02-28 - Auditoria e hardening tecnico:**
+  - Status real recalibrado.
+  - Schema de novo projeto corrigido.
+  - Fixtures canonicas adicionadas.
+  - Build orchestration revisado.
+  - Libretro real integrado no backend.
+  - Prioridade redirecionada para validacao externa com toolchains/cores reais e E2E de aplicacao.
+
+---
+
+## 6. HISTORICO RESUMIDO DE SESSOES
 
 | Data | Ferramenta | Resumo |
 |------|-----------|--------|
-| 2025-10-14 | — | Criacao inicial do projeto: documentacao base (docs 00-08), scripts de validacao |
-| 2026-02-22 | Claude Code | Revisao completa da documentacao: correcao do UGDM (05), blindagem anti-alucinacao (00), guardrails de escopo (03), correcao do README, criacao do CLAUDE.md, atualizacao do Memory Bank |
-| 2026-02-23 | Claude Code | **FASE 0 CONCLUIDA:** Scaffold completo Tauri v2 + React 19 + TypeScript + Vite 6 + TailwindCSS v4 + Zustand v5. Instalacao Rust 1.93.1, icones, .gitignore, estrutura de pastas. cargo clippy + npm build passando. |
-| 2026-02-23 | Claude Code | **SPRINT 1.1 CONCLUIDA:** Layout principal do Editor (3 paineis: Hierarchy, Viewport, Inspector), sistema de abas, Console no rodape, store Zustand. npm build OK (39 modulos). |
-| 2026-02-23 | Claude Code | **SPRINT 1.2 CONCLUIDA:** Backend Rust — structs UGDM (entities+components), project_mgr, md_profile validator, ast_generator, sgdk_emitter. 2 IPC commands: validate_project + generate_c_code. cargo clippy OK + npm build OK. |
-| 2026-02-23 | Claude Code | **SPRINT 1.3 CONCLUIDA:** build_orch.rs (toolchain discovery 3 camadas, GCC m68k invoke, objcopy ELF→ROM, graceful degradation sem SGDK). IPC build_project com streaming build://log. Frontend buildService.ts + botao Build & Run ativo. cargo clippy OK + npm build OK (43 modulos). |
-| 2026-02-23 | Claude Code | **SPRINT 1.4 CONCLUIDA:** EmulatorCore (modo simulado + FFI scaffold), frame_buffer xrgb8888_to_rgba, 4 IPC commands (load_rom/run_frame/send_input/stop), emulatorService.ts startFrameLoop 60fps, ViewportPanel canvas ImageData + keyboard input. cargo clippy OK + npm build OK (44 modulos). |
+| 2025-10-14 | - | Criacao inicial da base documental (`docs/00` a `docs/08`) e scripts de validacao |
+| 2026-02-22 | Claude Code | Revisao ampla da documentacao, blindagem anti-alucinacao e atualizacao inicial do Memory Bank |
+| 2026-02-23 | Claude Code | Fase 0 concluida: scaffold Tauri/React/Rust, organizacao de pastas, build basico |
+| 2026-02-23 | Claude Code | Sprints 1.1 a 1.5: layout do editor, parser UGDM, codegen SGDK, orchestrator parcial e emulador simulado |
+| 2026-02-24 | Claude Code | Fases 2 e 3 declaradas como concluidas: SNES, NodeGraph e RetroFX em nivel de demo |
+| 2026-02-25 | Claude Code | Fase 4 declarada como concluida: Patch Studio, Deep Profiler e Asset Extractor |
+| 2026-02-25 a 2026-02-27 | Claude Code | Polish/QA do editor, dialogs, menus, testes frontend e correcoes de UI/store |
+| 2026-02-28 | Codex | Auditoria tecnica do status real, atualizacao canonica do Memory Bank e alinhamento documental inicial |
+| 2026-02-28 | Codex | Hardening do MVP: schema canonico, fixtures backend, testes Rust, Libretro real via FFI, build orchestration revisado e UI alinhada |
+| 2026-02-28 | Codex | Setup automatico sob demanda para SGDK/PVSnesLib/cores Libretro, caminho SNES com asset real, deteccao robusta de bash no Windows e roadmap reconciliado |
+| 2026-02-28 | Codex | CI baseline com GitHub Actions, bloqueio imediato de superfices experimentais e reordenacao do plano por impacto |
+| 2026-02-28 | Codex | Fixes P0 do fluxo canonico: pause/resume sem reset, autosave fresco no hierarchy, persistencia atomica e suite Rust 25/25 |
+| 2026-03-02 | Codex | Alinhamento documental completo, ESLint baseline real, `cargo clippy` corrigido, CI endurecido com estrutura/lint/clippy e criacao do documento canonico `09_AGENT_DEV_MODE.md` |
+| 2026-03-02 | Codex | Validacao upstream oficial em Windows com SGDK/PVSnesLib/cores Libretro reais, correcoes de workspace SNES e fechamento do E2E desktop/Tauri real |
+| 2026-03-02 | Codex | Expansao do desktop E2E para SNES, aliases npm por target e workflow Windows manual `desktop-e2e.yml` |
+| 2026-03-03 | Codex | Validacao do `desktop-e2e.yml` em runner GitHub/Windows real, endurecimento diagnostico do runner desktop e correcao final do path SNES para `wlalink` no Windows |
+| 2026-03-04 | Codex | Validacao live consolidada no editor, bloqueio explicado de `Build & Run`, paridade preview/autoritativo endurecida e cobertura desktop E2E expandida para warnings de VRAM |
+| 2026-03-04 | Codex | Warning live de alta contagem de sprites adicionado em Mega Drive e SNES, runner/workflow desktop expandidos para `live-warning-sprites` e Memory Bank retomado como handoff obrigatorio |
+| 2026-03-04 | Codex | Blindagem textual dos canonicos para exigir certificacao real antes de qualquer claim de fase, etapa ou feature concluida |
+| 2026-03-04 | Codex | Warning live resumido na toolbar do editor, runner desktop endurecido para startup lento do `tauri-driver` e nova validacao real de warnings no app Tauri |
+| 2026-03-04 | Codex | Badge de estado live na toolbar (`LIVE/WARN/DESATUAL./ERRO/BLOQUEADO`), cobertura de testes ampliada e validacao desktop real apos rebuild |
 
 ---
 
 **[Sinalizador de Fim de Leitura]**
-*Se voce e uma IA e acabou de ler este documento no inicio de uma sessao, responda com: **"[Contexto Carregado] Fase 0 CONCLUIDA. Fase 1 desbloqueada. Proximo: Sprint 1.1 — UI Base do Editor (layout 3 paineis)."***
+*Se voce e uma IA e acabou de ler este documento no inicio de uma sessao, responda com: **"[Contexto Carregado] Hardening do MVP. Prioridade: preservar o fluxo canonico validado, manter o desktop E2E repetivel e expandir cobertura sem poluir a arquitetura."***

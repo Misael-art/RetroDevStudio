@@ -58,9 +58,7 @@ export async function buildProject(
   onLog: (line: BuildLogLine) => void
 ): Promise<BuildResult> {
   // Escuta eventos de streaming antes de invocar o comando
-  let unlisten: UnlistenFn | null = null;
-
-  unlisten = await listen<BuildLogLine>("build://log", (event) => {
+  const unlisten: UnlistenFn = await listen<BuildLogLine>("build://log", (event) => {
     onLog(event.payload);
   });
 
@@ -68,6 +66,6 @@ export async function buildProject(
     const result = await invoke<BuildResult>("build_project", { projectDir });
     return result;
   } finally {
-    if (unlisten) unlisten();
+    unlisten();
   }
 }

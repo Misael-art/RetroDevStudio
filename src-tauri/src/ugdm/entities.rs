@@ -4,7 +4,7 @@ use super::components::Components;
 // ── Transform ─────────────────────────────────────────────────────────────────
 
 /// Posição em pixels inteiros (hardware 16-bit não usa float).
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct Transform {
     pub x: i32,
     pub y: i32,
@@ -12,7 +12,7 @@ pub struct Transform {
 
 // ── Entity ────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Entity {
     pub entity_id: String,
     pub prefab: Option<String>,
@@ -23,13 +23,13 @@ pub struct Entity {
 
 // ── Background Layer ──────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ScrollSpeed {
     pub x: i32,
     pub y: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BackgroundLayer {
     pub layer_id: String,
     pub depth: u32,
@@ -40,7 +40,7 @@ pub struct BackgroundLayer {
 
 // ── Palette ───────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PaletteEntry {
     pub slot: u8,
     pub colors: Vec<String>, // Hex strings "#RRGGBB"
@@ -48,7 +48,7 @@ pub struct PaletteEntry {
 
 // ── Scene ─────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Scene {
     pub scene_id: String,
     pub display_name: Option<String>,
@@ -62,7 +62,7 @@ pub struct Scene {
 
 // ── Build Config ──────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BuildConfig {
     #[serde(default = "default_output_dir")]
     pub output_dir: String,
@@ -80,13 +80,13 @@ fn default_optimization() -> String {
 
 // ── Project ───────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Resolution {
     pub width: u32,
     pub height: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Project {
     pub rds_version: String,
     pub name: String,

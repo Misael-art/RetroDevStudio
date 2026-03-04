@@ -1,0 +1,49 @@
+{
+  "scene_id": "main",
+  "display_name": "Main Scene",
+  "background_layers": [],
+  "entities": [
+    {
+      "entity_id": "controller_root",
+      "prefab": null,
+      "transform": {
+        "x": 8,
+        "y": 8
+      },
+      "components": {
+        "sprite": {
+          "asset": "assets/sprites/hero.ppm",
+          "frame_width": 16,
+          "frame_height": 16,
+          "pivot": null,
+          "palette_slot": 0,
+          "animations": {},
+          "priority": "foreground"
+        },
+        "collision": null,
+        "input": {
+          "device": "joypad_1",
+          "mapping": {
+            "start": "START"
+          }
+        },
+        "physics": null,
+        "audio": null,
+        "logic": {
+          "graph": null,
+          "variables": {
+            "lives": {
+              "type": "int",
+              "default": 3,
+              "min": 0,
+              "max": 9
+            }
+          }
+        },
+        "camera": null,
+        "tilemap": null
+      }
+    }
+  ],
+  "palettes": []
+}

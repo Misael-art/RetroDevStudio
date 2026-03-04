@@ -12,11 +12,15 @@ use compiler::ast_generator::generate_ast;
 use compiler::build_orch::{run_build, BuildLogLine, BuildResult};
 use compiler::sgdk_emitter::emit_sgdk;
 use compiler::snes_emitter::emit_snes;
-use core::project_mgr::{load_project, load_scene};
-use emulator::frame_buffer::xrgb8888_to_rgba;
+use core::editor_validation::{
+    authoritative_hw_status,
+    validate_scene_draft as validate_scene_draft_impl,
+    DraftValidationResult,
+};
+use core::project_mgr::{create_project_skeleton, load_project, load_scene, save_scene, update_project_target};
+use emulator::frame_buffer::framebuffer_to_rgba;
 use emulator::libretro_ffi::{EmulatorCore, JoypadState};
-use hardware::md_profile;
-use hardware::snes_profile;
+use hardware::constraint_engine;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 
@@ -57,30 +61,16 @@ pub struct EmulatorCommandResult {
 #[tauri::command]
 fn validate_project(project_dir: String) -> ValidationResult {
     let dir = PathBuf::from(&project_dir);
-
-    let project = match load_project(&dir) {
-        Ok(p) => p,
-        Err(e) => return ValidationResult { ok: false, errors: vec![e.to_string()], warnings: vec![] },
-    };
-    let scene = match load_scene(&dir, &project.entry_scene) {
-        Ok(s) => s,
-        Err(e) => return ValidationResult { ok: false, errors: vec![e.to_string()], warnings: vec![] },
-    };
-    let hw_errors: Vec<(String, bool)> = match project.target.as_str() {
-        "megadrive" => md_profile::validate_scene(&scene)
-            .into_iter().map(|e| (e.message, e.is_fatal)).collect(),
-        "snes" => snes_profile::validate_scene(&scene)
-            .into_iter().map(|e| (e.message, e.is_fatal)).collect(),
-        other => return ValidationResult {
-            ok: false,
-            errors: vec![format!("Target '{}' não suportado. Use 'megadrive' ou 'snes'.", other)],
-            warnings: vec![],
-        },
+    let hw_status = match authoritative_hw_status(&dir) {
+        Ok(status) => status,
+        Err(error) => return ValidationResult { ok: false, errors: vec![error], warnings: vec![] },
     };
 
-    let errors: Vec<String> = hw_errors.iter().filter(|(_, f)| *f).map(|(m, _)| m.clone()).collect();
-    let warnings: Vec<String> = hw_errors.iter().filter(|(_, f)| !*f).map(|(m, _)| m.clone()).collect();
-    ValidationResult { ok: errors.is_empty(), errors, warnings }
+    ValidationResult {
+        ok: hw_status.errors.is_empty(),
+        errors: hw_status.errors,
+        warnings: hw_status.warnings,
+    }
 }
 
 #[tauri::command]
@@ -95,20 +85,21 @@ fn generate_c_code(project_dir: String) -> GenerateResult {
         Ok(s) => s,
         Err(e) => return GenerateResult { ok: false, main_c: String::new(), resources_res: String::new(), errors: vec![e.to_string()], warnings: vec![] },
     };
-    let hw_errors: Vec<(String, bool)> = match project.target.as_str() {
-        "megadrive" => md_profile::validate_scene(&scene)
-            .into_iter().map(|e| (e.message, e.is_fatal)).collect(),
-        "snes" => snes_profile::validate_scene(&scene)
-            .into_iter().map(|e| (e.message, e.is_fatal)).collect(),
-        other => return GenerateResult {
-            ok: false, main_c: String::new(), resources_res: String::new(),
-            errors: vec![format!("Target '{}' não suportado. Use 'megadrive' ou 'snes'.", other)],
-            warnings: vec![],
-        },
+    let hw_status = match constraint_engine::hw_status_for_target(&project.target, &scene) {
+        Ok(status) => status,
+        Err(error) => {
+            return GenerateResult {
+                ok: false,
+                main_c: String::new(),
+                resources_res: String::new(),
+                errors: vec![error],
+                warnings: vec![],
+            }
+        }
     };
 
-    let errors: Vec<String> = hw_errors.iter().filter(|(_, f)| *f).map(|(m, _)| m.clone()).collect();
-    let warnings: Vec<String> = hw_errors.iter().filter(|(_, f)| !*f).map(|(m, _)| m.clone()).collect();
+    let errors = hw_status.errors;
+    let warnings = hw_status.warnings;
     if !errors.is_empty() {
         return GenerateResult { ok: false, main_c: String::new(), resources_res: String::new(), errors, warnings };
     }
@@ -119,6 +110,15 @@ fn generate_c_code(project_dir: String) -> GenerateResult {
         _ => { let o = emit_sgdk(&ast, &project.name); (o.main_c, o.resources_res) }
     };
     GenerateResult { ok: true, main_c, resources_res, errors: vec![], warnings }
+}
+
+#[tauri::command]
+fn validate_scene_draft(project_dir: String, scene_json: String) -> DraftValidationResult {
+    if project_dir.trim().is_empty() {
+        return DraftValidationResult::failure("Nenhum projeto aberto.");
+    }
+
+    validate_scene_draft_impl(Path::new(&project_dir), &scene_json)
 }
 
 #[tauri::command]
@@ -139,18 +139,7 @@ fn get_hw_status(project_dir: String) -> HwStatus {
         return HwStatus::default();
     }
     let dir = PathBuf::from(&project_dir);
-    let project = match load_project(&dir) {
-        Ok(p) => p,
-        Err(_) => return HwStatus::default(),
-    };
-    let scene = match load_scene(&dir, &project.entry_scene) {
-        Ok(s) => s,
-        Err(_) => return HwStatus::default(),
-    };
-    match project.target.as_str() {
-        "snes" => snes_profile::hw_status(&scene),
-        _ => md_profile::hw_status(&scene),
-    }
+    authoritative_hw_status(&dir).unwrap_or_default()
 }
 
 // ── Emulator commands ─────────────────────────────────────────────────────────
@@ -169,7 +158,12 @@ fn emulator_load_rom(
     match core.load_rom(Path::new(&rom_path)) {
         Ok(()) => EmulatorCommandResult {
             ok: true,
-            message: format!("ROM carregada: {}", rom_path),
+            message: match core.loaded_core_label() {
+                Some(label) if !label.is_empty() => {
+                    format!("ROM carregada: {} ({})", rom_path, label)
+                }
+                _ => format!("ROM carregada: {}", rom_path),
+            },
         },
         Err(e) => EmulatorCommandResult { ok: false, message: e },
     }
@@ -191,13 +185,18 @@ fn emulator_run_frame(
         return EmulatorCommandResult { ok: false, message: e };
     }
 
-    let (fb, size) = match core.get_framebuffer() {
+    let (fb, size, pixel_format) = match core.get_framebuffer() {
         Ok(r) => r,
         Err(e) => return EmulatorCommandResult { ok: false, message: e },
     };
 
-    let payload = xrgb8888_to_rgba(&fb, size);
-    let _ = app.emit("emulator://frame", &payload);
+    let payload = framebuffer_to_rgba(&fb, size, pixel_format);
+    if let Err(error) = app.emit("emulator://frame", &payload) {
+        return EmulatorCommandResult {
+            ok: false,
+            message: format!("Falha ao emitir frame do emulador: {}", error),
+        };
+    }
 
     EmulatorCommandResult { ok: true, message: String::new() }
 }
@@ -238,6 +237,15 @@ fn emulator_stop(emu: State<EmulatorCoreState>) -> EmulatorCommandResult {
 use tools::patch_studio::{PatchResult, create_ips_file, apply_ips_file, create_bps_file, apply_bps_file};
 use tools::deep_profiler::{ProfileReport, profile_rom};
 use tools::asset_extractor::{ExtractionResult, extract_assets};
+use tools::dependency_manager::{
+    DependencyInstallResult,
+    DependencyLogLine,
+    DependencyStatusReport,
+    RomDependencyResult,
+    dependency_for_rom_path,
+    dependency_status_report,
+    install_dependency,
+};
 
 #[tauri::command]
 fn patch_create_ips(original_path: String, modified_path: String, patch_path: String) -> PatchResult {
@@ -267,6 +275,27 @@ fn profiler_analyze_rom(rom_path: String) -> ProfileReport {
 #[tauri::command]
 fn assets_extract(rom_path: String, output_dir: String, max_tiles: u32, palette_slot: u8) -> ExtractionResult {
     extract_assets(Path::new(&rom_path), Path::new(&output_dir), max_tiles, palette_slot)
+}
+
+#[tauri::command]
+fn third_party_get_status() -> DependencyStatusReport {
+    dependency_status_report()
+}
+
+#[tauri::command]
+fn third_party_install(app: AppHandle, dependency_id: String) -> DependencyInstallResult {
+    install_dependency(&dependency_id, move |line: DependencyLogLine| {
+        let _ = app.emit("deps://log", &line);
+    })
+}
+
+#[tauri::command]
+fn third_party_detect_rom_dependency(rom_path: String) -> RomDependencyResult {
+    RomDependencyResult {
+        dependency_id: dependency_for_rom_path(Path::new(&rom_path))
+            .unwrap_or_default()
+            .to_string(),
+    }
 }
 
 // ── Cena: leitura e escrita ───────────────────────────────────────────────────
@@ -318,9 +347,28 @@ fn save_scene_data(project_dir: String, scene_json: String) -> EmulatorCommandRe
     if serde_json::from_str::<serde_json::Value>(&scene_json).is_err() {
         return EmulatorCommandResult { ok: false, message: "JSON de cena inválido.".into() };
     }
-    let scene_path = dir.join(&project.entry_scene);
-    match std::fs::write(&scene_path, &scene_json) {
+    let scene = match serde_json::from_str::<ugdm::entities::Scene>(&scene_json) {
+        Ok(scene) => scene,
+        Err(e) => return EmulatorCommandResult {
+            ok: false,
+            message: format!("JSON de cena invalido: {}", e),
+        },
+    };
+    match save_scene(&dir, &project.entry_scene, &scene) {
         Ok(()) => EmulatorCommandResult { ok: true, message: "Cena salva.".into() },
+        Err(e) => EmulatorCommandResult { ok: false, message: e.to_string() },
+    }
+}
+
+/// Altera o campo `target` do project.rds e retorna o novo target.
+#[tauri::command]
+fn set_project_target(project_dir: String, target: String) -> EmulatorCommandResult {
+    if project_dir.is_empty() {
+        return EmulatorCommandResult { ok: false, message: "Nenhum projeto aberto.".into() };
+    }
+    let dir = PathBuf::from(&project_dir);
+    match update_project_target(&dir, &target) {
+        Ok(project) => EmulatorCommandResult { ok: true, message: project.target },
         Err(e) => EmulatorCommandResult { ok: false, message: e.to_string() },
     }
 }
@@ -367,31 +415,39 @@ fn new_project_dialog(app: AppHandle, project_name: String) -> OpenProjectResult
                 .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
                 .collect();
             let proj_dir = PathBuf::from(&base_str).join(&safe_name);
-            let _ = std::fs::create_dir_all(&proj_dir);
 
-            // Escreve project.rds mínimo
-            let rds = serde_json::json!({
-                "name": project_name,
-                "version": "1.0.0",
-                "target": "megadrive",
-                "fps": 60,
-                "entry_scene": "scenes/main.json"
-            });
-            let scenes_dir = proj_dir.join("scenes");
-            let _ = std::fs::create_dir_all(&scenes_dir);
-            let _ = std::fs::write(proj_dir.join("project.rds"), rds.to_string());
-
-            // Escreve cena vazia
-            let scene = serde_json::json!({
-                "name": "main",
-                "entities": []
-            });
-            let _ = std::fs::write(scenes_dir.join("main.json"), scene.to_string());
-
-            let path_str = proj_dir.to_string_lossy().to_string();
-            OpenProjectResult { selected: true, path: path_str, name: project_name }
+            match create_project_skeleton(&proj_dir, &project_name, "megadrive") {
+                Ok(project) => {
+                    let path_str = proj_dir.to_string_lossy().to_string();
+                    OpenProjectResult { selected: true, path: path_str, name: project.name }
+                }
+                Err(_) => OpenProjectResult { selected: false, path: String::new(), name: String::new() },
+            }
         }
         None => OpenProjectResult { selected: false, path: String::new(), name: String::new() },
+    }
+}
+
+/// Resolve um diretório de projeto sem depender de diálogo nativo.
+#[tauri::command]
+fn open_project_path(project_dir: String) -> OpenProjectResult {
+    let trimmed = project_dir.trim();
+    if trimmed.is_empty() {
+        return OpenProjectResult { selected: false, path: String::new(), name: String::new() };
+    }
+
+    let dir = PathBuf::from(trimmed);
+    let project = match load_project(&dir) {
+        Ok(project) => project,
+        Err(_) => {
+            return OpenProjectResult { selected: false, path: String::new(), name: String::new() };
+        }
+    };
+
+    OpenProjectResult {
+        selected: true,
+        path: dir.to_string_lossy().to_string(),
+        name: project.name,
     }
 }
 
@@ -408,6 +464,7 @@ pub fn run() {
             validate_project,
             generate_c_code,
             build_project,
+            validate_scene_draft,
             // Hardware status
             get_hw_status,
             // Emulator
@@ -418,8 +475,10 @@ pub fn run() {
             // Cena
             get_scene_data,
             save_scene_data,
+            set_project_target,
             // Projeto
             open_project_dialog,
+            open_project_path,
             new_project_dialog,
             // Fase 4: Tools
             patch_create_ips,
@@ -428,7 +487,453 @@ pub fn run() {
             patch_apply_bps,
             profiler_analyze_rom,
             assets_extract,
+            third_party_get_status,
+            third_party_install,
+            third_party_detect_rom_dependency,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use compiler::build_orch::{run_build_with_environment, BuildEnvironment};
+    use emulator::libretro_ffi::test_serial_guard;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use tools::dependency_manager::{dependency_status_report, install_dependency};
+
+    fn temp_dir(prefix: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "retro-dev-studio-e2e-{}-{}-{}",
+            prefix,
+            std::process::id(),
+            nonce
+        ));
+        fs::create_dir_all(&path).expect("failed to create temp dir");
+        path
+    }
+
+    fn fixture_dir(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("projects")
+            .join(name)
+    }
+
+    fn copy_dir_all(src: &Path, dst: &Path) {
+        fs::create_dir_all(dst).expect("create fixture dst");
+        for entry in fs::read_dir(src).expect("read fixture dir") {
+            let entry = entry.expect("read fixture entry");
+            let src_path = entry.path();
+            let dst_path = dst.join(entry.file_name());
+            if src_path.is_dir() {
+                copy_dir_all(&src_path, &dst_path);
+            } else {
+                fs::copy(&src_path, &dst_path).expect("copy fixture file");
+            }
+        }
+    }
+
+    fn compile_mock_core(dir: &Path) -> PathBuf {
+        let source_path = dir.join("mock_core.rs");
+        let output_path = dir.join(if cfg!(target_os = "windows") {
+            "mock_core.dll"
+        } else if cfg!(target_os = "macos") {
+            "mock_core.dylib"
+        } else {
+            "mock_core.so"
+        });
+
+        fs::write(&source_path, mock_core_source()).expect("write mock core source");
+        let output = std::process::Command::new("rustc")
+            .arg("--crate-type")
+            .arg("cdylib")
+            .arg("--edition")
+            .arg("2021")
+            .arg(&source_path)
+            .arg("-O")
+            .arg("-o")
+            .arg(&output_path)
+            .output()
+            .expect("spawn rustc for mock core");
+
+        if !output.status.success() {
+            panic!(
+                "mock core compilation failed\nstdout:\n{}\nstderr:\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        output_path
+    }
+
+    fn fake_make_script(dir: &Path) -> PathBuf {
+        let path = if cfg!(target_os = "windows") {
+            dir.join("fake-make.cmd")
+        } else {
+            dir.join("fake-make.sh")
+        };
+
+        let content = if cfg!(target_os = "windows") {
+            "@echo off\r\n\
+             if not exist out mkdir out\r\n\
+             powershell -NoProfile -Command \"$bytes = New-Object byte[] 512; [System.Text.Encoding]::ASCII.GetBytes('SEGA MEGA DRIVE').CopyTo($bytes, 256); [IO.File]::WriteAllBytes('out\\\\artifact.md', $bytes)\"\r\n\
+             echo fake build completed\r\n\
+             exit /b 0\r\n"
+                .to_string()
+        } else {
+            "#!/bin/sh\n\
+             mkdir -p out\n\
+             python - <<'PY'\n\
+import pathlib\n\
+rom = bytearray(512)\n\
+rom[0x100:0x10F] = b'SEGA MEGA DRIVE'\n\
+pathlib.Path('out/artifact.md').write_bytes(rom)\n\
+PY\n\
+             echo fake build completed\n"
+                .to_string()
+        };
+
+        fs::write(&path, content).expect("write fake make script");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&path).expect("stat fake make").permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&path, permissions).expect("chmod fake make");
+        }
+
+        path
+    }
+
+    fn mock_core_source() -> String {
+        r#"
+use std::ffi::{c_char, c_void, CStr};
+use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+type RetroEnvironmentCallback = extern "C" fn(cmd: u32, data: *mut c_void) -> bool;
+type RetroVideoRefreshCallback = extern "C" fn(data: *const c_void, width: u32, height: u32, pitch: usize);
+type RetroAudioSampleCallback = extern "C" fn(left: i16, right: i16);
+type RetroAudioSampleBatchCallback = extern "C" fn(data: *const i16, frames: usize) -> usize;
+type RetroInputPollCallback = extern "C" fn();
+type RetroInputStateCallback = extern "C" fn(port: u32, device: u32, index: u32, id: u32) -> i16;
+
+#[repr(C)]
+struct RetroGameInfo {
+    path: *const c_char,
+    data: *const c_void,
+    size: usize,
+    meta: *const c_char,
+}
+
+#[repr(C)]
+struct RetroSystemInfo {
+    library_name: *const c_char,
+    library_version: *const c_char,
+    valid_extensions: *const c_char,
+    need_fullpath: bool,
+    block_extract: bool,
+}
+
+#[repr(C)]
+struct RetroGameGeometry {
+    base_width: u32,
+    base_height: u32,
+    max_width: u32,
+    max_height: u32,
+    aspect_ratio: f32,
+}
+
+#[repr(C)]
+struct RetroSystemTiming {
+    fps: f64,
+    sample_rate: f64,
+}
+
+#[repr(C)]
+struct RetroSystemAvInfo {
+    geometry: RetroGameGeometry,
+    timing: RetroSystemTiming,
+}
+
+static LIB_NAME: &[u8] = b"MockLibretroCore\0";
+static LIB_VERSION: &[u8] = b"1.0.0\0";
+static VALID_EXTENSIONS: &[u8] = b"md|bin|gen\0";
+static FRAME_COUNTER: AtomicUsize = AtomicUsize::new(0);
+static mut ENV: Option<RetroEnvironmentCallback> = None;
+static mut VIDEO: Option<RetroVideoRefreshCallback> = None;
+static mut AUDIO: Option<RetroAudioSampleCallback> = None;
+static mut AUDIO_BATCH: Option<RetroAudioSampleBatchCallback> = None;
+static mut INPUT_POLL: Option<RetroInputPollCallback> = None;
+static mut INPUT_STATE: Option<RetroInputStateCallback> = None;
+static mut FRAMEBUFFER: [u8; 256 * 224 * 4] = [0; 256 * 224 * 4];
+
+#[no_mangle]
+pub extern "C" fn retro_set_environment(callback: Option<RetroEnvironmentCallback>) {
+    unsafe {
+        ENV = callback;
+        if let Some(env) = ENV {
+            let mut pixel_format = 1u32;
+            env(10, &mut pixel_format as *mut _ as *mut c_void);
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn retro_set_video_refresh(callback: Option<RetroVideoRefreshCallback>) {
+    unsafe { VIDEO = callback; }
+}
+
+#[no_mangle]
+pub extern "C" fn retro_set_audio_sample(callback: Option<RetroAudioSampleCallback>) {
+    unsafe { AUDIO = callback; }
+}
+
+#[no_mangle]
+pub extern "C" fn retro_set_audio_sample_batch(callback: Option<RetroAudioSampleBatchCallback>) {
+    unsafe { AUDIO_BATCH = callback; }
+}
+
+#[no_mangle]
+pub extern "C" fn retro_set_input_poll(callback: Option<RetroInputPollCallback>) {
+    unsafe { INPUT_POLL = callback; }
+}
+
+#[no_mangle]
+pub extern "C" fn retro_set_input_state(callback: Option<RetroInputStateCallback>) {
+    unsafe { INPUT_STATE = callback; }
+}
+
+#[no_mangle]
+pub extern "C" fn retro_init() {}
+
+#[no_mangle]
+pub extern "C" fn retro_deinit() {}
+
+#[no_mangle]
+pub extern "C" fn retro_api_version() -> u32 { 1 }
+
+#[no_mangle]
+pub extern "C" fn retro_get_system_info(info: *mut RetroSystemInfo) {
+    unsafe {
+        (*info).library_name = LIB_NAME.as_ptr().cast::<c_char>();
+        (*info).library_version = LIB_VERSION.as_ptr().cast::<c_char>();
+        (*info).valid_extensions = VALID_EXTENSIONS.as_ptr().cast::<c_char>();
+        (*info).need_fullpath = true;
+        (*info).block_extract = false;
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn retro_get_system_av_info(info: *mut RetroSystemAvInfo) {
+    unsafe {
+        (*info).geometry.base_width = 256;
+        (*info).geometry.base_height = 224;
+        (*info).geometry.max_width = 256;
+        (*info).geometry.max_height = 224;
+        (*info).geometry.aspect_ratio = 256.0 / 224.0;
+        (*info).timing.fps = 60.0;
+        (*info).timing.sample_rate = 44100.0;
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn retro_load_game(info: *const RetroGameInfo) -> bool {
+    unsafe {
+        if info.is_null() || (*info).path.is_null() {
+            return false;
+        }
+        let path = CStr::from_ptr((*info).path).to_string_lossy().into_owned();
+        Path::new(&path).exists()
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn retro_unload_game() {}
+
+#[no_mangle]
+pub extern "C" fn retro_run() {
+    let frame = FRAME_COUNTER.fetch_add(1, Ordering::SeqCst) as u8;
+    unsafe {
+        if let Some(input_poll) = INPUT_POLL {
+            input_poll();
+        }
+        let blue = INPUT_STATE
+            .map(|input| if input(0, 1, 0, 8) != 0 { 0xFF } else { frame.wrapping_mul(3) })
+            .unwrap_or(frame.wrapping_mul(3));
+        for index in 0..(256 * 224) {
+            let offset = index * 4;
+            let pixel = u32::from(0x00220000u32 | ((frame as u32) << 8) | blue as u32);
+            FRAMEBUFFER[offset..offset + 4].copy_from_slice(&pixel.to_le_bytes());
+        }
+        if let Some(video) = VIDEO {
+            video(FRAMEBUFFER.as_ptr().cast::<c_void>(), 256, 224, 256 * 4);
+        }
+    }
+}
+"#
+        .to_string()
+    }
+
+    #[test]
+    fn e2e_build_load_and_run_frame() {
+        let _serial = test_serial_guard();
+        let project_dir = temp_dir("megadrive-e2e");
+        copy_dir_all(&fixture_dir("megadrive_dummy"), &project_dir);
+
+        let toolchain_root = temp_dir("fake-sgdk");
+        let bin_dir = toolchain_root.join("bin");
+        fs::create_dir_all(&bin_dir).expect("create fake bin");
+        let make_program = fake_make_script(&bin_dir);
+        let environment = BuildEnvironment {
+            sgdk_root: Some(toolchain_root),
+            sgdk_make_program: Some(make_program),
+            ..BuildEnvironment::default()
+        };
+
+        let build_result = run_build_with_environment(&project_dir, &environment, |_| {});
+        assert!(build_result.ok, "build failed: {:?}", build_result.log);
+
+        let core_dir = temp_dir("mock-core");
+        let core_path = compile_mock_core(&core_dir);
+        let mut emulator = EmulatorCore::new(Some(&core_path));
+        emulator
+            .load_rom(Path::new(&build_result.rom_path))
+            .expect("load built rom");
+        emulator
+            .set_joypad(JoypadState {
+                a: true,
+                ..JoypadState::default()
+            })
+            .expect("set joypad");
+        emulator.run_frame().expect("run frame");
+
+        let (framebuffer, size, pixel_format) =
+            emulator.get_framebuffer().expect("read framebuffer");
+
+        assert_eq!(size.width, 256);
+        assert_eq!(size.height, 224);
+        assert_eq!(pixel_format, emulator::libretro_ffi::PixelFormat::Xrgb8888);
+        assert!(framebuffer.iter().any(|byte| *byte != 0));
+
+        emulator.stop().expect("stop emulator");
+        let _ = fs::remove_dir_all(project_dir);
+        let _ = fs::remove_dir_all(core_dir);
+    }
+
+    #[test]
+    #[ignore = "Downloads official upstream dependencies and requires Windows with network access"]
+    fn official_windows_upstream_validation_smoke_test() {
+        if !cfg!(target_os = "windows") {
+            panic!("official_windows_upstream_validation_smoke_test requires Windows");
+        }
+
+        let _serial = test_serial_guard();
+
+        for dependency_id in [
+            "sgdk",
+            "pvsneslib",
+            "libretro_megadrive",
+            "libretro_snes",
+        ] {
+            let result = install_dependency(dependency_id, |_| {});
+            assert!(
+                result.ok,
+                "failed to install {}: {}",
+                dependency_id,
+                result.message
+            );
+        }
+
+        let status_report = dependency_status_report();
+        for dependency_id in [
+            "sgdk",
+            "pvsneslib",
+            "libretro_megadrive",
+            "libretro_snes",
+        ] {
+            let item = status_report
+                .items
+                .iter()
+                .find(|item| item.id == dependency_id)
+                .unwrap_or_else(|| panic!("missing dependency status for {}", dependency_id));
+            assert!(
+                item.installed,
+                "dependency {} still not installed: {:?}",
+                dependency_id,
+                item.issues
+            );
+        }
+
+        for (target, fixture_name) in [("megadrive", "megadrive_dummy"), ("snes", "snes_dummy")] {
+            let project_dir = temp_dir(&format!("official-{}", target));
+            copy_dir_all(&fixture_dir(fixture_name), &project_dir);
+
+            let build_result = run_build(&project_dir, |_| {});
+            assert!(
+                build_result.ok,
+                "{} build failed: {:?}",
+                target,
+                build_result.log
+            );
+
+            let mut emulator = EmulatorCore::new(None);
+            emulator
+                .load_rom(Path::new(&build_result.rom_path))
+                .unwrap_or_else(|error| panic!("failed to load {} rom: {}", target, error));
+            for _ in 0..5 {
+                emulator
+                    .run_frame()
+                    .unwrap_or_else(|error| panic!("failed to run {} frame: {}", target, error));
+            }
+
+            let (framebuffer, size, _) = emulator
+                .get_framebuffer()
+                .unwrap_or_else(|error| panic!("failed to read {} framebuffer: {}", target, error));
+
+            assert!(size.width > 0, "{} framebuffer width should be non-zero", target);
+            assert!(size.height > 0, "{} framebuffer height should be non-zero", target);
+            assert!(
+                !framebuffer.is_empty(),
+                "{} framebuffer should not be empty after running frames",
+                target
+            );
+
+            emulator
+                .stop()
+                .unwrap_or_else(|error| panic!("failed to stop {} emulator: {}", target, error));
+            let _ = fs::remove_dir_all(project_dir);
+        }
+    }
+
+    #[test]
+    fn open_project_path_accepts_canonical_fixture() {
+        let project_dir = fixture_dir("megadrive_dummy");
+        let result = open_project_path(project_dir.to_string_lossy().to_string());
+
+        assert!(result.selected);
+        assert_eq!(result.path, project_dir.to_string_lossy());
+        assert!(!result.name.trim().is_empty());
+    }
+
+    #[test]
+    fn open_project_path_rejects_invalid_directory() {
+        let project_dir = temp_dir("invalid-project-path");
+        let result = open_project_path(project_dir.to_string_lossy().to_string());
+
+        assert!(!result.selected);
+        assert!(result.path.is_empty());
+        assert!(result.name.is_empty());
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
 }

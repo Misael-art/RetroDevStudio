@@ -1,33 +1,60 @@
 # CLAUDE.md - RetroDev Studio
 
 ## Projeto
-RetroDev Studio: plataforma desktop para desenvolvimento de jogos 16-bit (Mega Drive, SNES).
-Stack: Tauri (Rust) + React (TypeScript) + SGDK/PVSnesLib.
+RetroDev Studio: plataforma desktop para desenvolvimento de jogos 16-bit (Mega Drive, SNES), preservacao e engenharia reversa orientada a patches.
+Stack base: Tauri + React + TypeScript + Rust + SGDK/PVSnesLib + Libretro.
 
-## Fase Atual
-**Fase 0 (Fundacao)** — nenhum codigo fonte existe ainda. O proximo passo e inicializar o scaffold Tauri + React + Rust.
+## Estado Atual
+**Hardening/QA do MVP**.
+O foco real nao e criar feature nova; e fechar o fluxo canonico `Build -> ROM -> Emulacao` com dependencias oficiais e manter o baseline de validacao verde.
 
-## Leitura Obrigatoria (ANTES de qualquer acao)
-1. `docs/06_AI_MEMORY_BANK.md` — estado atual do projeto
-2. `docs/03_ROADMAP_MVP.md` — fase e sprint atual (NAO antecipe fases futuras)
-3. `docs/08_TREE_ARCHITECTURE.md` — onde colocar cada arquivo
-4. `docs/00_AI_DIRECTIVES.md` — regras completas, acoes proibidas, checklist
+## Hierarquia De Verdade
+Se houver conflito entre documentos, siga esta ordem:
+1. `docs/06_AI_MEMORY_BANK.md`
+2. `docs/03_ROADMAP_MVP.md`
+3. `docs/09_AGENT_DEV_MODE.md`
+4. `docs/08_TREE_ARCHITECTURE.md`
+5. `docs/02_TECH_STACK.md`
+6. `docs/07_TEST_AND_COMPLIANCE.md`
+7. `README.md` e `CLAUDE.md`
 
-Responda com "[Contexto Carregado]" antes de propor qualquer acao.
+`README.md` e este arquivo servem para onboarding. Eles nao podem sobrepor o estado operacional canonicamente registrado.
+
+## Leitura Obrigatoria Antes De Qualquer Acao
+1. `docs/06_AI_MEMORY_BANK.md`
+2. `docs/03_ROADMAP_MVP.md`
+3. `docs/08_TREE_ARCHITECTURE.md`
+4. `docs/00_AI_DIRECTIVES.md`
+5. `docs/09_AGENT_DEV_MODE.md` quando a tarefa tocar processo, CI, documentacao de estado, multi-agente ou conflito entre documentos
+
+Responda com `[Contexto Carregado]` antes de propor qualquer acao relevante.
 
 ## Regras Criticas
-- Escopo restrito a Fase/Sprint marcada como "EM ANDAMENTO" no Roadmap
-- Tecnologias permitidas: APENAS as listadas em `docs/02_TECH_STACK.md`
-- Proibido: Electron, Redux, Python no runtime, malloc/free em codigo C gerado
-- UGDM e agnostico: sem referencias a VDP/PPU/OAM/CRAM no modelo de dados
-- Coordenadas e variaveis de jogo: inteiros apenas (sem float)
-- Hardware specs em `docs/04_HARDWARE_SPECS.md` sao imutaveis
-- Compliance legal: nunca distribuir ROMs, apenas patches IPS/BPS
+- Nao antecipe fases futuras do roadmap.
+- Nao declare feature parcial como pronta.
+- Mantenha superficies parciais claramente marcadas como `Experimental`.
+- Nao introduza dependencia nova sem aprovacao do usuario e reflexo em `docs/02_TECH_STACK.md`.
+- Nao crie arquivos fora da arvore definida em `docs/08_TREE_ARCHITECTURE.md`.
+- Nao use Electron, Redux ou Python no runtime do app.
+- Nao distribua ROM comercial; use BYOR e patches IPS/BPS.
+- Nao altere "Decisoes Arquiteturais Consolidadas" do Memory Bank sem ordem expressa.
+
+## Barra Minima Antes De Declarar Entrega
+- `npm run check:tree`
+- `npm run lint`
+- `npx tsc --noEmit`
+- `npm test`
+- `cargo clippy -- -D warnings`
+- `cargo test --lib -- --nocapture`
+- Validacao manual com dependencias oficiais quando a mudanca tocar build, emulacao ou toolchains reais
 
 ## Ao Encerrar Sessao
-Se algo relevante foi feito, proponha atualizacao do `docs/06_AI_MEMORY_BANK.md`.
+Se algo relevante foi feito, atualize ou proponha atualizacao de `docs/06_AI_MEMORY_BANK.md`.
 
 ## Comandos Uteis
-- Validar estrutura: `node scripts/check-tree.js`
-- Linter Rust: `cargo clippy -- -D warnings`
-- Linter Frontend: `npx eslint .`
+- Validar estrutura: `npm run check:tree`
+- Lint frontend: `npm run lint`
+- TypeScript: `npx tsc --noEmit`
+- Testes frontend: `npm test`
+- Lint Rust: `cargo clippy -- -D warnings`
+- Testes Rust: `cargo test --lib -- --nocapture`

@@ -53,6 +53,13 @@ pub struct ExtractionResult {
     pub files: Vec<String>,
 }
 
+fn record_extraction_error(result: &mut ExtractionResult, message: impl Into<String>) {
+    if result.error.is_empty() {
+        result.error = message.into();
+    }
+    result.ok = false;
+}
+
 // ── Color conversion ──────────────────────────────────────────────────────────
 
 /// Converte cor MD (0BGR 9-bit: 0000BBB0GGG0RRR0) para RGB888.
@@ -275,21 +282,21 @@ pub fn extract_assets(
         .map(|p| p.colors.clone())
         .unwrap_or_else(|| vec![RgbColor { r: 0, g: 0, b: 0 }; 16]);
 
-    let mut result = ExtractionResult { ok: true, ..Default::default() };
+    let mut result = ExtractionResult::default();
 
     // ── Salva paleta como JSON ─────────────────────────────────────────────
     let pal_path = output_dir.join("palettes.json");
     match serde_json::to_string_pretty(&palettes) {
         Ok(json) => {
             if let Err(e) = fs::write(&pal_path, json) {
-                result.error = format!("Erro ao salvar paletas: {e}");
+                record_extraction_error(&mut result, format!("Erro ao salvar paletas: {e}"));
             } else {
                 result.palettes_extracted = palettes.len() as u32;
                 result.files.push(pal_path.to_string_lossy().to_string());
             }
         }
         Err(e) => {
-            result.error = format!("Erro ao serializar paletas: {e}");
+            record_extraction_error(&mut result, format!("Erro ao serializar paletas: {e}"));
         }
     }
 
@@ -306,15 +313,30 @@ pub fn extract_assets(
             let tile_name = format!("tile_{:05}.png", tile_index);
             let tile_path = output_dir.join(&tile_name);
 
-            if write_png_minimal(&tile_path, &pixels, TILE_SIZE as u32, TILE_SIZE as u32, &palette_colors).is_ok() {
-                result.files.push(tile_path.to_string_lossy().to_string());
-                result.tiles_extracted += 1;
+            match write_png_minimal(
+                &tile_path,
+                &pixels,
+                TILE_SIZE as u32,
+                TILE_SIZE as u32,
+                &palette_colors,
+            ) {
+                Ok(()) => {
+                    result.files.push(tile_path.to_string_lossy().to_string());
+                    result.tiles_extracted += 1;
+                }
+                Err(error) => {
+                    record_extraction_error(
+                        &mut result,
+                        format!("Erro ao salvar tile '{}': {}", tile_path.display(), error),
+                    );
+                }
             }
             tile_index += 1;
         }
         offset += TILE_BYTES;
     }
 
+    result.ok = result.error.is_empty();
     result
 }
 
@@ -371,4 +393,61 @@ pub fn build_spritesheet(
         }
     }
     res
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(prefix: &str) -> std::path::PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "retro-dev-studio-asset-extractor-{}-{}-{}",
+            prefix,
+            std::process::id(),
+            nonce
+        ));
+        fs::create_dir_all(&path).expect("create temp test dir");
+        path
+    }
+
+    fn sample_rom_with_tile() -> Vec<u8> {
+        let mut rom = vec![0u8; 0x200 + TILE_BYTES];
+        for (index, byte) in rom[0x200..0x200 + TILE_BYTES].iter_mut().enumerate() {
+            *byte = if index % 2 == 0 { 0x12 } else { 0x34 };
+        }
+        rom
+    }
+
+    #[test]
+    fn record_extraction_error_marks_result_failed_once() {
+        let mut result = ExtractionResult::default();
+        record_extraction_error(&mut result, "primeira falha");
+        record_extraction_error(&mut result, "segunda falha");
+
+        assert!(!result.ok);
+        assert_eq!(result.error, "primeira falha");
+    }
+
+    #[test]
+    fn extract_assets_writes_expected_outputs_for_simple_rom() {
+        let workspace = temp_dir("public-success");
+        let rom_path = workspace.join("sample.md");
+        let output_dir = workspace.join("out");
+        fs::write(&rom_path, sample_rom_with_tile()).expect("write sample rom");
+
+        let result = extract_assets(&rom_path, &output_dir, 1, 0);
+
+        assert!(result.ok, "unexpected extractor error: {}", result.error);
+        assert_eq!(result.palettes_extracted, 4);
+        assert_eq!(result.tiles_extracted, 1);
+        assert!(output_dir.join("palettes.json").exists());
+        assert!(output_dir.join("tile_00000.png").exists());
+
+        let _ = fs::remove_dir_all(workspace);
+    }
 }

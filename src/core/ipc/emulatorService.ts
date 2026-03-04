@@ -62,7 +62,8 @@ export function emulatorStop(): Promise<EmulatorCommandResult> {
  * @returns função para parar o loop (chame ao desmontar o componente)
  */
 export async function startFrameLoop(
-  onFrame: (payload: FramePayload) => void
+  onFrame: (payload: FramePayload) => void,
+  onError?: (message: string) => void
 ): Promise<() => void> {
   let running = true;
   let unlisten: UnlistenFn | null = null;
@@ -71,19 +72,40 @@ export async function startFrameLoop(
     onFrame(event.payload);
   });
 
+  function stop() {
+    running = false;
+    if (unlisten) {
+      unlisten();
+      unlisten = null;
+    }
+  }
+
+  function fail(error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    stop();
+    onError?.(message);
+  }
+
   // Loop a ~60fps usando requestAnimationFrame via setTimeout
   async function tick() {
     if (!running) return;
-    await emulatorRunFrame();
+    try {
+      const result = await emulatorRunFrame();
+      if (!running) return;
+      if (!result.ok) {
+        fail(result.message || "Falha ao executar frame do emulador.");
+        return;
+      }
+    } catch (error) {
+      fail(error);
+      return;
+    }
     setTimeout(tick, 16); // ~60fps
   }
 
   tick();
 
-  return () => {
-    running = false;
-    if (unlisten) unlisten();
-  };
+  return stop;
 }
 
 // ── Keyboard → JoypadState mapping ───────────────────────────────────────────

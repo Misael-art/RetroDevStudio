@@ -1,5 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
-import { HwStatus } from "../store/editorStore";
+import type { HwStatus } from "../store/editorStore";
+
+export interface DraftValidationResult {
+  ok: boolean;
+  error: string;
+  hw_status: HwStatus;
+}
 
 /**
  * Solicita ao backend o status de hardware atual para um projeto.
@@ -7,4 +13,11 @@ import { HwStatus } from "../store/editorStore";
  */
 export function getHwStatus(projectDir: string): Promise<HwStatus> {
   return invoke<HwStatus>("get_hw_status", { projectDir });
+}
+
+export function validateSceneDraft(
+  projectDir: string,
+  sceneJson: string
+): Promise<DraftValidationResult> {
+  return invoke<DraftValidationResult>("validate_scene_draft", { projectDir, sceneJson });
 }

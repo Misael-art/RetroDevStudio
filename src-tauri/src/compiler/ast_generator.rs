@@ -83,6 +83,7 @@ pub struct SpriteAsset {
 pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
     let mut nodes: Vec<AstNode> = Vec::new();
     let mut sprite_assets: Vec<SpriteAsset> = Vec::new();
+    let mut asset_resource_names: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
     // Inicializa sistemas
     nodes.push(AstNode::SpriteSystemInit);
@@ -101,7 +102,10 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
             continue;
         };
 
-        let resource_name = sanitize_identifier(&entity.entity_id);
+        let resource_name = asset_resource_names
+            .get(&spr.asset)
+            .cloned()
+            .unwrap_or_else(|| sanitize_identifier(&entity.entity_id));
         let var_name = format!("spr_{}", resource_name);
 
         // Registra asset se ainda não foi adicionado
@@ -115,6 +119,7 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
                 palette_slot: spr.palette_slot,
                 animation_count: anim_count,
             });
+            asset_resource_names.insert(spr.asset.clone(), resource_name.clone());
 
             nodes.push(AstNode::LoadSpritesheet {
                 resource_name: resource_name.clone(),

@@ -1,28 +1,47 @@
 # RetroDev Studio
 
-> **A plataforma definitiva para desenvolvimento, preservacao e engenharia reversa de jogos 16-bits.**
+> Plataforma desktop para desenvolvimento, preservacao e engenharia reversa de jogos 16-bits.
 
 ![Versao](https://img.shields.io/badge/Versao-4.0_Blueprint-blue.svg)
-![Status](https://img.shields.io/badge/Status-Fase_0_(Fundacao)-orange.svg)
+![Status](https://img.shields.io/badge/Status-Alpha_Interna_Hardening-orange.svg)
 ![Licenca](https://img.shields.io/badge/Licenca-Proprietaria-red.svg)
 ![AI Ready](https://img.shields.io/badge/AI_Agents-Supported-brightgreen.svg)
 
 ---
 
-## Sobre o Projeto
+## Estado Real
 
-O **RetroDev Studio** e uma infraestrutura completa para desenvolvimento retro moderno. A missao e democratizar a criacao de jogos para consoles de 16-bits (Mega Drive, SNES), trazendo a produtividade de engines modernas (Unity, Godot) para as restricoes do hardware original.
+- Data de referencia: 2026-03-04.
+- Fase ativa real: hardening do fluxo `Build -> ROM -> Emulacao`, ja validado em Windows com upstream real, E2E desktop local e workflow GitHub/Windows multi-target.
+- `Fase 0` esta concluida e verificada.
+- `Fases 1 e 2` ja foram validadas em Windows com toolchains e cores upstream reais e agora estao em hardening.
+- `Fases 3 e 4` existem no editor, porem parte das superficies continuam `Experimental` ou congeladas ate o core ser fechado.
+- Se este README divergir do estado operacional, prevalecem `docs/06_AI_MEMORY_BANK.md`, `docs/03_ROADMAP_MVP.md` e `docs/09_AGENT_DEV_MODE.md`.
 
-**Os 4 Pilares:**
+### Regra de certificacao real
 
-1. **Criacao Moderna:** Editor visual, Nodes logicos e Hot-Reload.
-2. **Precisao de Hardware:** Constraint Engine que impede voce de quebrar os limites reais do console.
-3. **Engenharia Reversa:** Ferramentas limpas para estudo e modificacao de jogos classicos.
-4. **Compliance Legal:** Workflow baseado em patches (sem distribuicao de ROMs comerciais).
+- Nenhuma etapa, fase, feature ou fluxo pode ser tratado como `concluido`, `fechado`, `pronto` ou `validado` apenas porque existe no codigo.
+- Neste repositorio, esses termos so valem quando houver caminho canonico real, gates aplicaveis verdes, prova funcional correspondente e ausencia de erro bloqueante no escopo certificado.
+- Mock, stub, texto de UI, CI afrouxado, teste que nao exercita o caminho canonico ou documento otimista nao contam como certificacao.
+- Se restar duvida relevante, warning estrutural ou dependencia de nova comprovacao institucional, o status correto e `em hardening`, nao `concluido`.
 
----
+## O Que Ja Existe No Codigo
 
-## Arquitetura de Alto Nivel
+- Editor desktop com Tauri + React + TypeScript funcional.
+- Persistencia canonica de `project.rds` e `scenes/*.json`, com escrita atomica no backend Rust.
+- Build orchestration real por target para `megadrive` e `snes`, com workspace, staging e deteccao de ROM.
+- Emulacao integrada via Libretro FFI no Rust.
+- Instalacao sob demanda de SGDK, PVSnesLib e cores Libretro oficiais no Windows.
+- CI com validacao estrutural, lint, typecheck, `cargo clippy`, testes frontend e testes Rust.
+
+## O Que Ainda Falta Para Fechar O MVP
+
+- Tornar repetivel o baseline de validacao oficial em Windows para mudancas sensiveis de build/emulacao/toolchain.
+- Decidir se o workflow desktop dedicado permanece em `push`/`pull_request` path-filtered ou migra para gate protegido por ambiente.
+- Auditar handlers async residuais fora do endurecimento ja aplicado em abertura de projeto e salvamento de cena.
+- Retomar apenas depois disso as superficies hoje marcadas como `Experimental`.
+
+## Arquitetura De Alto Nivel
 
 ```mermaid
 graph TD
@@ -44,94 +63,112 @@ graph TD
     HC -.->|Valida limites de VRAM, DMA, CPU| E
 ```
 
-**Componentes Chave:**
-
-- **UGDM (Universal Game Data Model):** Representacao agnostica do jogo em JSON. Nao pertence a nenhum console — pertence a matematica do RetroDev.
-- **Hardware Constraint Engine:** Se voce colocar 81 sprites na tela do Mega Drive (que so suporta 80), o editor avisa em tempo real.
-- **Hardware Profile Engine:** Traduz o UGDM agnostico para o codigo nativo de cada console.
-
----
-
-## Estrutura do Projeto
+## Estrutura Do Projeto
 
 ```text
-RetroDev_Studio/
-├── .cursorrules               # Regras comportamentais para IA (Cursor)
-├── CLAUDE.md                  # Regras comportamentais para IA (Claude Code)
-├── README.md                  # Este arquivo
-├── docs/                      # Base de Conhecimento (LEITURA OBRIGATORIA)
-│   ├── 00_AI_DIRECTIVES.md    # Ponto de entrada para QUALQUER IA
-│   ├── 01_PRD_MASTER.md       # Visao Definitiva do Produto
-│   ├── 02_TECH_STACK.md       # Tecnologias escolhidas e restricoes
-│   ├── 03_ROADMAP_MVP.md      # Fases de desenvolvimento e Sprint atual
-│   ├── 04_HARDWARE_SPECS.md   # Limites matematicos dos consoles (imutavel)
-│   ├── 05_ARCHITECTURE_UGDM.md# Especificacao do formato de dados universal
-│   ├── 06_AI_MEMORY_BANK.md   # Diario de bordo — estado atual do projeto
-│   ├── 07_TEST_AND_COMPLIANCE.md # Regras legais e de testes
-│   └── 08_TREE_ARCHITECTURE.md   # Mapa de diretorios (onde colocar cada arquivo)
-├── scripts/                   # Scripts de validacao
-│   ├── check-tree.ps1         # Valida arvore (PowerShell)
-│   └── check-tree.js          # Valida arvore (Node.js)
-├── src/                       # Frontend (React/TypeScript) — a ser criado
-└── src-tauri/                 # Backend (Rust/Tauri) — a ser criado
+RetroDevStudio/
+|
+|-- .github/
+|   `-- workflows/
+|       |-- ci.yml
+|       `-- desktop-e2e.yml
+|
+|-- README.md
+|-- CLAUDE.md
+|-- eslint.config.mjs
+|-- package.json
+|-- vite.config.ts
+|-- data/
+|   |-- rom_teste.bin
+|   `-- sonic_test.gen
+|
+|-- docs/
+|   |-- 00_AI_DIRECTIVES.md
+|   |-- 01_PRD_MASTER.md
+|   |-- 02_TECH_STACK.md
+|   |-- 03_ROADMAP_MVP.md
+|   |-- 04_HARDWARE_SPECS.md
+|   |-- 05_ARCHITECTURE_UGDM.md
+|   |-- 06_AI_MEMORY_BANK.md
+|   |-- 07_TEST_AND_COMPLIANCE.md
+|   |-- 08_TREE_ARCHITECTURE.md
+|   `-- 09_AGENT_DEV_MODE.md
+|
+|-- scripts/
+|   |-- bootstrap.ps1
+|   |-- check-tree.cjs
+|   |-- check-tree.ps1
+|   `-- e2e-tauri-build-run.mjs
+|
+|-- src/
+|   `-- ...
+|
+|-- src-tauri/
+|   `-- ...
+|
+`-- toolchains/
+    `-- ...
 ```
 
----
+## Orientacao Para Agentes De IA
 
-## Orientacao para Agentes de IA
+- Ponto de entrada unico: `docs/00_AI_DIRECTIVES.md`.
+- Hierarquia de verdade para conflito documental:
+  `docs/06_AI_MEMORY_BANK.md` -> `docs/03_ROADMAP_MVP.md` -> `docs/09_AGENT_DEV_MODE.md` -> `docs/08_TREE_ARCHITECTURE.md` -> `docs/02_TECH_STACK.md` -> `docs/07_TEST_AND_COMPLIANCE.md` -> `README.md` / `CLAUDE.md`.
+- Nenhum agente deve declarar feature como pronta se ela estiver parcial, experimental, sem gate ou sem validacao oficial quando exigida.
 
-> **Cursor, Codex, Claude, Trae, Bonsai, e qualquer outro agente:**
-> Este repositorio e editado por multiplas IAs e por humanos.
-> O ponto de entrada unico e `docs/00_AI_DIRECTIVES.md`. Leia-o antes de qualquer acao.
+**Prompt de inicializacao recomendado**
 
-**Prompt de Inicializacao (copie e cole ao iniciar uma sessao):**
-
-```
-Iniciando nova sessao no RetroDev Studio. Leia primeiro docs/00_AI_DIRECTIVES.md.
-Depois: docs/06_AI_MEMORY_BANK.md, docs/03_ROADMAP_MVP.md, docs/08_TREE_ARCHITECTURE.md.
+```text
+Iniciando nova sessao no RetroDev Studio.
+Leia primeiro docs/00_AI_DIRECTIVES.md.
+Depois: docs/06_AI_MEMORY_BANK.md, docs/03_ROADMAP_MVP.md e docs/08_TREE_ARCHITECTURE.md.
+Se a tarefa tocar processo, CI, estado documental ou conflito entre documentos, leia tambem docs/09_AGENT_DEV_MODE.md.
 Responda com "[Contexto Carregado]" e proponha o plano de acao.
 ```
 
----
+## Gates Minimos De Validacao
 
-## Roadmap de Desenvolvimento
+- `npm run check:tree`
+- `npm run lint`
+- `npx tsc --noEmit`
+- `npm test`
+- `cargo clippy -- -D warnings`
+- `cargo test --lib -- --nocapture`
+- Validacao manual com dependencias oficiais quando a mudanca tocar build, emulacao ou toolchains reais.
 
-| Fase | Objetivo | Status |
-|------|---------|--------|
-| **Fase 0: Fundacao** | Setup Tauri + React + Rust | EM ANDAMENTO |
-| **Fase 1: Core Mega Drive** | Gerar ROM jogavel a partir do editor | Bloqueada |
-| **Fase 2: Abstracao (SNES)** | Provar engine agnostica | Bloqueada |
-| **Fase 3: Visual Logic** | NodeGraph e RetroFX | Bloqueada |
-| **Fase 4: Camada Pro** | Engenharia Reversa e Profiler | Bloqueada |
+Sem isso, a entrega nao pode ser anunciada como real nem livre de erro bloqueante.
 
-Para detalhes de cada Sprint, consulte `docs/03_ROADMAP_MVP.md`.
+## Roadmap De Desenvolvimento
 
----
+| Fase | Objetivo | Status real |
+|------|---------|-------------|
+| **Fase 0: Fundacao** | Setup Tauri + React + Rust | Concluida e verificada sob os gates canonicos |
+| **Fase 1: Core Mega Drive** | Gerar ROM jogavel a partir do editor | Validada em Windows com fluxo real, em hardening |
+| **Fase 2: Abstracao (SNES)** | Provar engine agnostica | Validada em Windows com fluxo real, em hardening |
+| **Fase 3: Visual Logic** | NodeGraph e RetroFX | Implementada no editor, congelada ate fechar o core |
+| **Fase 4: Camada Pro** | Engenharia Reversa e Profiler | Implementada no editor, com superficies experimentais/parciais |
+
+Para detalhes e sprint atual, consulte `docs/03_ROADMAP_MVP.md`.
 
 ## Tech Stack
 
 | Camada | Tecnologia |
 |--------|-----------|
-| Desktop Framework | Tauri (Rust + WebView nativo) |
-| Frontend | React + TypeScript + Vite + TailwindCSS |
+| Desktop Framework | Tauri 2 |
+| Frontend | React + TypeScript + Vite + TailwindCSS + Zustand |
 | Backend / Core | Rust |
-| Emulacao | Libretro API (Genesis Plus GX, Snes9x) via FFI |
-| Mega Drive SDK | SGDK (GCC m68k-elf) |
-| SNES SDK | PVSnesLib (WLA-DX) |
-| Formato de Dados | JSON (.rds) — UGDM |
-
-Para detalhes e restricoes, consulte `docs/02_TECH_STACK.md`.
-
----
+| Emulacao | Libretro API via FFI |
+| Mega Drive SDK | SGDK |
+| SNES SDK | PVSnesLib |
+| Formato de Dados | JSON `.rds` (UGDM) |
+| Validacao de Processo | `check-tree.cjs`, ESLint, TypeScript `--noEmit`, `cargo clippy`, suites de teste |
 
 ## Aviso Legal & Compliance
 
-- Nenhum asset ou ROM com direitos autorais esta incluido neste software.
-- A Camada de Engenharia Reversa opera estritamente atraves de patches binarios (IPS/BPS).
-- Esta e uma ferramenta educacional, de preservacao historica e para criacao de jogos independentes (Homebrews).
+- O software nao distribui ROMs comerciais.
+- O usuario traz a propria ROM quando usar superfices de engenharia reversa.
+- A camada de modificacao em ROM comercial deve privilegiar patches diferenciais, como IPS e BPS.
+- SDKs e cores de terceiros devem ser baixados do upstream oficial, sob demanda e com consentimento do usuario.
 
 Para detalhes completos, consulte `docs/07_TEST_AND_COMPLIANCE.md`.
-
----
-
-Feito com cafe e paixao pela era dos 16-bits.

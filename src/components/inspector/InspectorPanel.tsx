@@ -1,48 +1,55 @@
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import Panel from "../common/Panel";
-import { useEditorStore } from "../../core/store/editorStore";
 import HardwareLimitsPanel from "./HardwareLimitsPanel";
-import { saveSceneData } from "../../core/ipc/sceneService";
-import type { Entity } from "../../core/ipc/sceneService";
-
-// ── Prop row: exibe e edita um par chave/valor ─────────────────────────────────
+import { useEditorStore } from "../../core/store/editorStore";
+import type { BackgroundLayer, Entity } from "../../core/ipc/sceneService";
+import { persistActiveScene } from "../../core/scenePersistence";
 
 interface PropRowProps {
   label: string;
   value: string | number | boolean;
   type: "string" | "int" | "bool";
-  onChange: (val: string | number | boolean) => void;
+  onChange: (value: string | number | boolean) => void;
 }
 
 function PropRow({ label, value, type, onChange }: PropRowProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value));
 
-  useEffect(() => { setDraft(String(value)); }, [value]);
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
 
   function commit() {
     setEditing(false);
+
     if (type === "int") {
-      const n = parseInt(draft, 10);
-      if (!isNaN(n)) onChange(n);
-    } else if (type === "bool") {
-      onChange(draft === "true");
-    } else {
-      onChange(draft);
+      const parsed = Number.parseInt(draft, 10);
+      if (!Number.isNaN(parsed)) {
+        onChange(parsed);
+      }
+      return;
     }
+
+    if (type === "bool") {
+      onChange(draft === "true");
+      return;
+    }
+
+    onChange(draft);
   }
 
   return (
-    <tr className="border-b border-[#313244] last:border-0 group">
-      <td className="px-3 py-1.5 text-[#7f849c] w-1/2 select-none text-xs">{label}</td>
+    <tr className="group border-b border-[#313244] last:border-0">
+      <td className="w-1/2 select-none px-3 py-1.5 text-xs text-[#7f849c]">{label}</td>
       <td className="px-3 py-1.5 text-xs">
         {editing ? (
           type === "bool" ? (
             <select
               autoFocus
               value={draft}
-              className="bg-[#1e1e2e] border border-[#cba6f7] rounded px-1 py-0.5 text-xs text-[#cdd6f4] w-full focus:outline-none"
-              onChange={(e) => setDraft(e.target.value)}
+              className="w-full rounded border border-[#cba6f7] bg-[#1e1e2e] px-1 py-0.5 text-xs text-[#cdd6f4] focus:outline-none"
+              onChange={(event) => setDraft(event.target.value)}
               onBlur={commit}
             >
               <option value="true">true</option>
@@ -53,15 +60,15 @@ function PropRow({ label, value, type, onChange }: PropRowProps) {
               autoFocus
               type={type === "int" ? "number" : "text"}
               value={draft}
-              className="bg-[#1e1e2e] border border-[#cba6f7] rounded px-1 py-0.5 text-xs text-[#cdd6f4] w-full font-mono focus:outline-none"
-              onChange={(e) => setDraft(e.target.value)}
+              className="w-full rounded border border-[#cba6f7] bg-[#1e1e2e] px-1 py-0.5 font-mono text-xs text-[#cdd6f4] focus:outline-none"
+              onChange={(event) => setDraft(event.target.value)}
               onBlur={commit}
-              onKeyDown={(e) => e.key === "Enter" && commit()}
+              onKeyDown={(event) => event.key === "Enter" && commit()}
             />
           )
         ) : (
           <span
-            className="text-[#cdd6f4] font-mono cursor-pointer hover:text-[#cba6f7] transition-colors"
+            className="cursor-pointer font-mono text-[#cdd6f4] transition-colors hover:text-[#cba6f7]"
             onClick={() => setEditing(true)}
             title="Clique para editar"
           >
@@ -73,107 +80,223 @@ function PropRow({ label, value, type, onChange }: PropRowProps) {
   );
 }
 
-// ── Extrai props de uma Entity para exibir no Inspector ────────────────────────
-
 interface PropDef {
   key: string;
-  path: string[];       // caminho no objeto Entity para leitura
+  path: string[];
   type: "string" | "int" | "bool";
 }
 
 function entityProps(entity: Entity): PropDef[] {
   const defs: PropDef[] = [
-    { key: "ID",    path: ["entity_id"],      type: "string" },
-    { key: "Prefab",path: ["prefab"],          type: "string" },
-    { key: "Pos X", path: ["transform", "x"], type: "int"    },
-    { key: "Pos Y", path: ["transform", "y"], type: "int"    },
+    { key: "ID", path: ["entity_id"], type: "string" },
+    { key: "Prefab", path: ["prefab"], type: "string" },
+    { key: "Pos X", path: ["transform", "x"], type: "int" },
+    { key: "Pos Y", path: ["transform", "y"], type: "int" },
   ];
+
   if (entity.components?.sprite) {
     defs.push(
-      { key: "Asset",       path: ["components", "sprite", "asset"],        type: "string" },
-      { key: "Frame W",     path: ["components", "sprite", "frame_width"],  type: "int"    },
-      { key: "Frame H",     path: ["components", "sprite", "frame_height"], type: "int"    },
-      { key: "Palette Slot",path: ["components", "sprite", "palette_slot"], type: "int"    },
-      { key: "Priority",    path: ["components", "sprite", "priority"],     type: "string" },
+      { key: "Asset", path: ["components", "sprite", "asset"], type: "string" },
+      { key: "Frame W", path: ["components", "sprite", "frame_width"], type: "int" },
+      { key: "Frame H", path: ["components", "sprite", "frame_height"], type: "int" },
+      { key: "Palette Slot", path: ["components", "sprite", "palette_slot"], type: "int" },
+      { key: "Priority", path: ["components", "sprite", "priority"], type: "string" }
     );
   }
+
   if (entity.components?.collision) {
     defs.push(
-      { key: "Col. Shape",  path: ["components", "collision", "shape"],  type: "string" },
-      { key: "Col. Width",  path: ["components", "collision", "width"],  type: "int"    },
-      { key: "Col. Height", path: ["components", "collision", "height"], type: "int"    },
-      { key: "Solid",       path: ["components", "collision", "solid"],  type: "bool"   },
+      { key: "Col. Shape", path: ["components", "collision", "shape"], type: "string" },
+      { key: "Col. Width", path: ["components", "collision", "width"], type: "int" },
+      { key: "Col. Height", path: ["components", "collision", "height"], type: "int" },
+      { key: "Solid", path: ["components", "collision", "solid"], type: "bool" }
     );
   }
+
+  if (entity.components?.camera) {
+    defs.push(
+      { key: "Follow", path: ["components", "camera", "follow_entity"], type: "string" },
+      { key: "Offset X", path: ["components", "camera", "offset_x"], type: "int" },
+      { key: "Offset Y", path: ["components", "camera", "offset_y"], type: "int" }
+    );
+  }
+
+  if (entity.components?.tilemap) {
+    defs.push(
+      { key: "TM Tileset", path: ["components", "tilemap", "tileset"], type: "string" },
+      { key: "TM Width", path: ["components", "tilemap", "map_width"], type: "int" },
+      { key: "TM Height", path: ["components", "tilemap", "map_height"], type: "int" },
+      { key: "Scroll X", path: ["components", "tilemap", "scroll_x"], type: "int" },
+      { key: "Scroll Y", path: ["components", "tilemap", "scroll_y"], type: "int" }
+    );
+  }
+
   return defs;
 }
 
 function getPath(obj: unknown, path: string[]): string | number | boolean {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let cur: any = obj;
-  for (const key of path) {
-    if (cur == null) return "";
-    cur = cur[key];
-  }
-  return cur ?? "";
-}
+  let current: Record<string, unknown> | unknown = obj;
 
-// ── Main InspectorPanel ────────────────────────────────────────────────────────
+  for (const key of path) {
+    if (current == null || typeof current !== "object") {
+      return "";
+    }
+    current = (current as Record<string, unknown>)[key];
+  }
+
+  if (
+    typeof current === "string" ||
+    typeof current === "number" ||
+    typeof current === "boolean"
+  ) {
+    return current;
+  }
+
+  return "";
+}
 
 export default function InspectorPanel() {
   const {
-    selectedEntityId,
     activeScene,
-    activeProjectDir,
-    updateEntity,
     logMessage,
+    selectedEntityId,
+    updateBackgroundLayer,
+    updateEntity,
   } = useEditorStore();
 
-  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "error">("idle");
+  const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Entidade ou layer selecionada
+  useEffect(
+    () => () => {
+      if (autoSaveTimer.current) {
+        clearTimeout(autoSaveTimer.current);
+      }
+    },
+    []
+  );
+
   const isLayer = selectedEntityId?.startsWith("layer::");
   const entity = isLayer
     ? null
-    : activeScene?.entities.find((e) => e.entity_id === selectedEntityId) ?? null;
+    : activeScene?.entities.find((item) => item.entity_id === selectedEntityId) ?? null;
   const layer = isLayer
-    ? activeScene?.background_layers.find((l) => `layer::${l.layer_id}` === selectedEntityId) ?? null
+    ? activeScene?.background_layers.find((item) => `layer::${item.layer_id}` === selectedEntityId) ?? null
     : null;
 
-  async function handleSave() {
-    if (!activeProjectDir || !activeScene) return;
-    setSaving(true);
+  async function saveScene() {
+    const { activeProjectDir } = useEditorStore.getState();
+    if (!activeProjectDir) {
+      return;
+    }
+
+    setSaveStatus("saving");
     try {
-      const result = await saveSceneData(activeProjectDir, JSON.stringify(activeScene, null, 2));
-      logMessage(result.ok ? "success" : "error", `[Inspector] ${result.message}`);
+      const saved = await persistActiveScene(activeProjectDir, "Inspector");
+      setSaveStatus(saved ? "idle" : "error");
     } finally {
-      setSaving(false);
+      if (useEditorStore.getState().activeProjectDir !== activeProjectDir) {
+        setSaveStatus("idle");
+      }
     }
   }
 
-  function handleChange(entity: Entity, def: PropDef, val: string | number | boolean) {
-    // Aplica patch no caminho correto
-    if (def.path.length === 1) {
-      updateEntity(entity.entity_id, { [def.path[0]]: val } as Partial<Entity>);
-    } else if (def.path[0] === "transform" && def.path.length === 2) {
-      updateEntity(entity.entity_id, { transform: { ...entity.transform, [def.path[1]]: val } });
-    } else if (def.path[0] === "components" && def.path[1] === "sprite" && def.path.length === 3) {
-      updateEntity(entity.entity_id, {
-        components: { ...entity.components, sprite: { ...entity.components.sprite!, [def.path[2]]: val } },
-      });
-    } else if (def.path[0] === "components" && def.path[1] === "collision" && def.path.length === 3) {
-      updateEntity(entity.entity_id, {
-        components: { ...entity.components, collision: { ...entity.components.collision!, [def.path[2]]: val } },
-      });
+  function scheduleAutoSave() {
+    if (autoSaveTimer.current) {
+      clearTimeout(autoSaveTimer.current);
     }
+    autoSaveTimer.current = setTimeout(() => {
+      void saveScene();
+    }, 600);
+  }
+
+  function handleChange(entityToUpdate: Entity, def: PropDef, value: string | number | boolean) {
+    if (saveStatus === "error") {
+      setSaveStatus("idle");
+    }
+
+    if (def.path.length === 1) {
+      updateEntity(entityToUpdate.entity_id, { [def.path[0]]: value } as Partial<Entity>);
+    } else if (def.path[0] === "transform" && def.path.length === 2) {
+      updateEntity(entityToUpdate.entity_id, {
+        transform: { ...entityToUpdate.transform, [def.path[1]]: value },
+      });
+    } else if (
+      def.path[0] === "components" &&
+      def.path[1] === "sprite" &&
+      def.path.length === 3 &&
+      entityToUpdate.components.sprite
+    ) {
+      updateEntity(entityToUpdate.entity_id, {
+        components: {
+          ...entityToUpdate.components,
+          sprite: { ...entityToUpdate.components.sprite, [def.path[2]]: value },
+        },
+      });
+    } else if (
+      def.path[0] === "components" &&
+      def.path[1] === "collision" &&
+      def.path.length === 3 &&
+      entityToUpdate.components.collision
+    ) {
+      updateEntity(entityToUpdate.entity_id, {
+        components: {
+          ...entityToUpdate.components,
+          collision: { ...entityToUpdate.components.collision, [def.path[2]]: value },
+        },
+      });
+    } else if (
+      def.path[0] === "components" &&
+      def.path[1] === "camera" &&
+      def.path.length === 3 &&
+      entityToUpdate.components.camera
+    ) {
+      updateEntity(entityToUpdate.entity_id, {
+        components: {
+          ...entityToUpdate.components,
+          camera: { ...entityToUpdate.components.camera, [def.path[2]]: value },
+        },
+      });
+    } else if (
+      def.path[0] === "components" &&
+      def.path[1] === "tilemap" &&
+      def.path.length === 3 &&
+      entityToUpdate.components.tilemap
+    ) {
+      updateEntity(entityToUpdate.entity_id, {
+        components: {
+          ...entityToUpdate.components,
+          tilemap: { ...entityToUpdate.components.tilemap, [def.path[2]]: value },
+        },
+      });
+    } else {
+      logMessage("warn", `[Inspector] Campo nao suportado: ${def.key}`);
+      return;
+    }
+
+    scheduleAutoSave();
+  }
+
+  function handleLayerChange(
+    layerToUpdate: BackgroundLayer,
+    field: keyof BackgroundLayer,
+    value: string | number
+  ) {
+    if (saveStatus === "error") {
+      setSaveStatus("idle");
+    }
+
+    updateBackgroundLayer(layerToUpdate.layer_id, {
+      [field]: value,
+    } as Partial<BackgroundLayer>);
+    scheduleAutoSave();
   }
 
   return (
-    <Panel title="Inspector" className="h-full flex flex-col">
-      {/* Entity / Layer properties */}
+    <Panel title="Inspector" className="flex h-full flex-col">
       <div className="flex-1 overflow-auto">
         {!selectedEntityId ? (
-          <p className="px-3 py-4 text-xs text-[#45475a] italic">
+          <p className="px-3 py-4 text-xs italic text-[#45475a]">
             Selecione uma entidade na Hierarchy.
           </p>
         ) : entity ? (
@@ -186,48 +309,79 @@ export default function InspectorPanel() {
                     label={def.key}
                     value={getPath(entity, def.path)}
                     type={def.type}
-                    onChange={(val) => handleChange(entity, def, val)}
+                    onChange={(value) => handleChange(entity, def, value)}
                   />
                 ))}
               </tbody>
             </table>
-            {/* Save button */}
             <div className="px-3 py-2">
               <button
-                onClick={handleSave}
-                disabled={saving}
-                className={`w-full py-1 text-xs font-semibold rounded transition-colors ${
-                  saving
-                    ? "bg-[#45475a] text-[#6c7086] cursor-not-allowed"
+                onClick={() => void saveScene()}
+                disabled={saveStatus === "saving"}
+                className={`w-full rounded py-1 text-xs font-semibold transition-colors ${
+                  saveStatus === "saving"
+                    ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
+                    : saveStatus === "error"
+                      ? "bg-[#f38ba8] text-[#1e1e2e] hover:bg-[#eba0ac]"
                     : "bg-[#313244] text-[#cba6f7] hover:bg-[#45475a]"
                 }`}
               >
-                {saving ? "Salvando..." : "💾 Salvar Cena"}
+                {saveStatus === "saving"
+                  ? "Salvando..."
+                  : saveStatus === "error"
+                    ? "Falha ao salvar"
+                    : "Salvar Cena"}
               </button>
             </div>
           </>
         ) : layer ? (
-          <table className="w-full text-xs">
-            <tbody>
-              <tr className="border-b border-[#313244]">
-                <td className="px-3 py-1.5 text-[#7f849c] w-1/2">ID</td>
-                <td className="px-3 py-1.5 text-[#cdd6f4] font-mono">{layer.layer_id}</td>
-              </tr>
-              <tr className="border-b border-[#313244]">
-                <td className="px-3 py-1.5 text-[#7f849c] w-1/2">Depth</td>
-                <td className="px-3 py-1.5 text-[#cdd6f4] font-mono">{layer.depth}</td>
-              </tr>
-              <tr className="border-b border-[#313244] last:border-0">
-                <td className="px-3 py-1.5 text-[#7f849c] w-1/2">Tileset</td>
-                <td className="px-3 py-1.5 text-[#cdd6f4] font-mono truncate max-w-0">{layer.tileset}</td>
-              </tr>
-            </tbody>
-          </table>
+          <>
+            <table className="w-full text-xs">
+              <tbody>
+                <tr className="border-b border-[#313244]">
+                  <td className="w-1/2 select-none px-3 py-1.5 text-xs text-[#7f849c]">ID</td>
+                  <td className="px-3 py-1.5 font-mono text-xs text-[#cdd6f4]">
+                    {layer.layer_id}
+                  </td>
+                </tr>
+                <PropRow
+                  label="Depth"
+                  value={layer.depth}
+                  type="int"
+                  onChange={(value) => handleLayerChange(layer, "depth", value as number)}
+                />
+                <PropRow
+                  label="Tileset"
+                  value={layer.tileset}
+                  type="string"
+                  onChange={(value) => handleLayerChange(layer, "tileset", value as string)}
+                />
+              </tbody>
+            </table>
+            <div className="px-3 py-2">
+              <button
+                onClick={() => void saveScene()}
+                disabled={saveStatus === "saving"}
+                className={`w-full rounded py-1 text-xs font-semibold transition-colors ${
+                  saveStatus === "saving"
+                    ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
+                    : saveStatus === "error"
+                      ? "bg-[#f38ba8] text-[#1e1e2e] hover:bg-[#eba0ac]"
+                    : "bg-[#313244] text-[#cba6f7] hover:bg-[#45475a]"
+                }`}
+              >
+                {saveStatus === "saving"
+                  ? "Salvando..."
+                  : saveStatus === "error"
+                    ? "Falha ao salvar"
+                    : "Salvar Cena"}
+              </button>
+            </div>
+          </>
         ) : null}
       </div>
 
-      {/* Hardware Limits panel — always visible at the bottom */}
-      <div className="border-t border-[#313244] shrink-0">
+      <div className="shrink-0 border-t border-[#313244]">
         <HardwareLimitsPanel />
       </div>
     </Panel>

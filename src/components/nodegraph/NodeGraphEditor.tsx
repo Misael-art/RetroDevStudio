@@ -11,7 +11,9 @@ export type NodeType =
   | "effect_parallax"
   | "effect_raster"
   | "logic_and"
-  | "action_sound";
+  | "action_sound"
+  | "scroll_tilemap"
+  | "move_camera";
 
 export interface NodePort {
   id: string;
@@ -105,6 +107,26 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     outputs: [{ id: "exec", label: "▶", kind: "exec" }],
     params: { sfx: "jump" },
   },
+  scroll_tilemap: {
+    type: "scroll_tilemap", label: "Scroll Tilemap",
+    inputs: [
+      { id: "exec", label: "▶", kind: "exec" },
+      { id: "dx",   label: "dx", kind: "data", dataType: "int" },
+      { id: "dy",   label: "dy", kind: "data", dataType: "int" },
+    ],
+    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
+    params: { layer: "BG_A", dx: 1, dy: 0 },
+  },
+  move_camera: {
+    type: "move_camera", label: "Move Camera",
+    inputs: [
+      { id: "exec", label: "▶", kind: "exec" },
+      { id: "x",    label: "x",  kind: "data", dataType: "int" },
+      { id: "y",    label: "y",  kind: "data", dataType: "int" },
+    ],
+    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
+    params: { target: "cam", x: 0, y: 0 },
+  },
 };
 
 const NODE_COLORS: Record<NodeType, string> = {
@@ -116,6 +138,8 @@ const NODE_COLORS: Record<NodeType, string> = {
   effect_raster:     "border-[#cba6f7] bg-[#cba6f7]/10",
   logic_and:         "border-[#f38ba8] bg-[#f38ba8]/10",
   action_sound:      "border-[#f9e2af] bg-[#f9e2af]/10",
+  scroll_tilemap:    "border-[#94e2d5] bg-[#94e2d5]/10",
+  move_camera:       "border-[#f9e2af] bg-[#f9e2af]/10",
 };
 
 // ── Counter for unique IDs ────────────────────────────────────────────────────

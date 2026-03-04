@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 // ── Sprite ────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AnimationDef {
     pub frames: Vec<u32>,
     pub fps: u32,
@@ -11,13 +11,13 @@ pub struct AnimationDef {
     pub looping: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Pivot {
     pub x: i32,
     pub y: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SpriteComponent {
     pub asset: String,
     pub frame_width: u32,
@@ -37,13 +37,13 @@ fn default_priority() -> String {
 
 // ── Collision ─────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CollisionOffset {
     pub x: i32,
     pub y: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CollisionComponent {
     pub shape: String,
     pub width: u32,
@@ -62,7 +62,7 @@ fn default_true() -> bool {
 
 // ── Input ─────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InputComponent {
     pub device: String,
     pub mapping: HashMap<String, String>,
@@ -70,13 +70,13 @@ pub struct InputComponent {
 
 // ── Physics ───────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Velocity {
     pub x: i32,
     pub y: i32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PhysicsComponent {
     #[serde(default = "default_true")]
     pub gravity: bool,
@@ -95,7 +95,7 @@ fn default_gravity() -> i32 {
 
 // ── Audio ─────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AudioComponent {
     #[serde(default)]
     pub sfx: HashMap<String, String>,
@@ -104,7 +104,7 @@ pub struct AudioComponent {
 
 // ── Logic ─────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LogicVariable {
     #[serde(rename = "type")]
     pub var_type: String,
@@ -113,16 +113,40 @@ pub struct LogicVariable {
     pub max: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LogicComponent {
     pub graph: Option<String>,
     #[serde(default)]
     pub variables: HashMap<String, LogicVariable>,
 }
 
+// ── Camera ────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CameraComponent {
+    pub follow_entity: Option<String>,
+    #[serde(default)]
+    pub offset_x: i32,
+    #[serde(default)]
+    pub offset_y: i32,
+}
+
+// ── Tilemap ───────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TilemapComponent {
+    pub tileset: String,
+    pub map_width: u32,
+    pub map_height: u32,
+    #[serde(default)]
+    pub scroll_x: i32,
+    #[serde(default)]
+    pub scroll_y: i32,
+}
+
 // ── Components container ──────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct Components {
     pub sprite: Option<SpriteComponent>,
     pub collision: Option<CollisionComponent>,
@@ -130,4 +154,6 @@ pub struct Components {
     pub physics: Option<PhysicsComponent>,
     pub audio: Option<AudioComponent>,
     pub logic: Option<LogicComponent>,
+    pub camera: Option<CameraComponent>,
+    pub tilemap: Option<TilemapComponent>,
 }
