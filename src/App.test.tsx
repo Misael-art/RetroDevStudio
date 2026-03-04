@@ -350,4 +350,38 @@ describe("App build flow", () => {
 
     expect(mocks.buildProject).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps Build & Run enabled when the live validation snapshot only has warnings", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        hwStatus: {
+          vram_used: 57344,
+          vram_limit: 65536,
+          sprite_count: 1,
+          sprite_limit: 80,
+          bg_layers: 0,
+          bg_layers_limit: 4,
+          errors: [],
+          warnings: ["VRAM Warning: uso alto de VRAM."],
+        },
+        hwValidationState: "fresh",
+        hwValidatedRevision: 1,
+      });
+      await flush();
+    });
+
+    const buildButton = findButton(container, "Build & Run");
+
+    expect(buildButton.disabled).toBe(false);
+    expect(buildButton.getAttribute("aria-describedby")).toBeNull();
+    expect(container.querySelector("[data-testid='build-disabled-reason']")).toBeNull();
+
+    await act(async () => {
+      buildButton.click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.buildProject).toHaveBeenCalledTimes(1);
+  });
 });

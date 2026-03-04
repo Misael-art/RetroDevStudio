@@ -138,22 +138,32 @@ export default function HardwareLimitsPanel() {
       >
         <span>Hardware Limits</span>
         {hasErrors && (
-          <span className="rounded bg-[#f38ba8] px-1.5 py-0.5 text-[10px] font-bold text-[#1e1e2e]">
+          <span
+            data-testid="hardware-limits-severity"
+            className="rounded bg-[#f38ba8] px-1.5 py-0.5 text-[10px] font-bold text-[#1e1e2e]"
+          >
             OVERFLOW
           </span>
         )}
         {!hasErrors && hasWarnings && (
-          <span className="rounded bg-[#fab387] px-1.5 py-0.5 text-[10px] font-bold text-[#1e1e2e]">
+          <span
+            data-testid="hardware-limits-severity"
+            className="rounded bg-[#fab387] px-1.5 py-0.5 text-[10px] font-bold text-[#1e1e2e]"
+          >
             WARN
           </span>
         )}
         {!hasErrors && !hasWarnings && (
-          <span className="text-[10px] text-[#45475a]">OK</span>
+          <span data-testid="hardware-limits-severity" className="text-[10px] text-[#45475a]">
+            OK
+          </span>
         )}
       </div>
 
       <div className="flex items-center justify-between border-b border-[#313244] px-3 py-1 text-[10px]">
-        <span className={liveBadge.className}>{liveBadge.label}</span>
+        <span data-testid="hardware-validation-state" className={liveBadge.className}>
+          {liveBadge.label}
+        </span>
         <span className="max-w-[11rem] truncate text-right text-[#7f849c]" title={liveMessage}>
           {liveMessage}
         </span>
@@ -179,12 +189,20 @@ export default function HardwareLimitsPanel() {
       {(hasErrors || hasWarnings) && (
         <div className="flex flex-col gap-1 px-3 pb-2 pt-1">
           {status.errors.map((message, index) => (
-            <p key={`e${index}`} className="text-[10px] leading-tight text-[#f38ba8]">
+            <p
+              key={`e${index}`}
+              data-testid={`hardware-error-${index}`}
+              className="text-[10px] leading-tight text-[#f38ba8]"
+            >
               x {message}
             </p>
           ))}
           {status.warnings.map((message, index) => (
-            <p key={`w${index}`} className="text-[10px] leading-tight text-[#fab387]">
+            <p
+              key={`w${index}`}
+              data-testid={`hardware-warning-${index}`}
+              className="text-[10px] leading-tight text-[#fab387]"
+            >
               ! {message}
             </p>
           ))}

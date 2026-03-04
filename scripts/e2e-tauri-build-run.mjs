@@ -57,7 +57,11 @@ function parseArgs(argv) {
     if (argument === "--project") {
       options.project = path.resolve(repoRoot, value);
     } else if (argument === "--scenario") {
-      if (!["build-run", "live-overflow", "live-overflow-vram"].includes(value)) {
+      if (
+        !["build-run", "live-overflow", "live-overflow-vram", "live-warning-vram"].includes(
+          value
+        )
+      ) {
         fail(`Cenario E2E desconhecido: ${value}`);
       }
       options.scenario = value;
@@ -144,17 +148,66 @@ function buildVramOverflowScene(target) {
   };
 }
 
+function buildVramWarningScene(target) {
+  const frameWidth = target === "snes" ? 64 : 32;
+  const frameHeight = frameWidth;
+  const frameCount = target === "snes" ? 30 : 112;
+
+  return {
+    scene_id: "live_vram_warning",
+    display_name: "Live VRAM Warning",
+    background_layers: [],
+    palettes: [],
+    entities: [
+      {
+        entity_id: "warning_vram_entity",
+        prefab: "warning_vram",
+        transform: { x: 16, y: 16 },
+        components: {
+          sprite: {
+            asset: target === "snes" ? "assets/sprites/hero.ppm" : "assets/sprites/hero.png",
+            frame_width: frameWidth,
+            frame_height: frameHeight,
+            palette_slot: 0,
+            animations: {
+              warning: {
+                frames: Array.from({ length: frameCount }, (_, index) => index),
+                fps: 12,
+                loop: true,
+              },
+            },
+            priority: "foreground",
+          },
+        },
+      },
+    ],
+  };
+}
+
 function buildLiveOverflowScenario(target, scenario) {
   if (scenario === "live-overflow-vram") {
     return {
       draft: buildVramOverflowScene(target),
       expectedReasonFragment: "VRAM Overflow",
+      expectedSeverity: "OVERFLOW",
+      expectBuildDisabled: true,
+    };
+  }
+
+  if (scenario === "live-warning-vram") {
+    return {
+      draft: buildVramWarningScene(target),
+      expectedReasonFragment: "VRAM Warning",
+      expectedSeverity: "WARN",
+      expectBuildDisabled: false,
     };
   }
 
   return {
     draft: buildSpriteOverflowScene(target),
     expectedReasonFragment: "Sprite overflow",
+    expectedSeverity: "OVERFLOW",
+    expectBuildDisabled: true,
   };
 }
 
@@ -539,7 +592,11 @@ async function main() {
       "Projeto nao apareceu na UI"
     );
 
-    if (options.scenario === "live-overflow" || options.scenario === "live-overflow-vram") {
+    if (
+      options.scenario === "live-overflow" ||
+      options.scenario === "live-overflow-vram" ||
+      options.scenario === "live-warning-vram"
+    ) {
       const overflowScenario = buildLiveOverflowScenario(projectMetadata.target, options.scenario);
       const draftResult = await executeAsyncScript(
         sessionId,
@@ -562,33 +619,61 @@ async function main() {
         fail(`Falha ao injetar draft overflow: ${draftResult?.error ?? "sem diagnostico"}`);
       }
 
-      const buildReason = await waitFor(
+      const liveStatus = await waitFor(
         async () => {
           const result = await executeScript(
             sessionId,
             `
               const button = document.querySelector('[data-testid="toolbar-build-run"]');
               const reason = document.querySelector('[data-testid="build-disabled-reason"]');
+              const severity = document.querySelector('[data-testid="hardware-limits-severity"]');
+              const warning = document.querySelector('[data-testid="hardware-warning-0"]');
+              const error = document.querySelector('[data-testid="hardware-error-0"]');
               return {
                 disabled: Boolean(button?.disabled),
                 describedBy: button?.getAttribute('aria-describedby') ?? '',
                 reason: reason?.textContent?.trim() ?? '',
+                severity: severity?.textContent?.trim() ?? '',
+                warning: warning?.textContent?.trim() ?? '',
+                error: error?.textContent?.trim() ?? '',
               };
             `
           );
-          return result?.disabled && result?.reason.includes("Build bloqueado:") ? result : false;
+          if (result?.severity !== overflowScenario.expectedSeverity) {
+            return false;
+          }
+          if (overflowScenario.expectBuildDisabled) {
+            return result?.disabled && result?.reason.includes("Build bloqueado:") ? result : false;
+          }
+          return !result?.disabled && result?.warning.includes(overflowScenario.expectedReasonFragment)
+            ? result
+            : false;
         },
         30000,
-        "Build nao foi bloqueado pelo overflow live",
+        "UI live nao refletiu o estado esperado para o draft injetado",
         500
       );
 
-      if (buildReason.describedBy !== "build-disabled-reason") {
-        fail(`Botao Build nao expôs aria-describedby esperado. Atual: ${buildReason.describedBy}`);
-      }
+      if (overflowScenario.expectBuildDisabled) {
+        if (liveStatus.describedBy !== "build-disabled-reason") {
+          fail(`Botao Build nao expôs aria-describedby esperado. Atual: ${liveStatus.describedBy}`);
+        }
 
-      if (!buildReason.reason.includes(overflowScenario.expectedReasonFragment)) {
-        fail(`Motivo visual inesperado para overflow live: ${buildReason.reason}`);
+        if (!liveStatus.reason.includes(overflowScenario.expectedReasonFragment)) {
+          fail(`Motivo visual inesperado para overflow live: ${liveStatus.reason}`);
+        }
+      } else {
+        if (liveStatus.describedBy) {
+          fail(`Build ficou associado a um motivo de bloqueio mesmo com warning: ${liveStatus.describedBy}`);
+        }
+
+        if (liveStatus.reason) {
+          fail(`Build exibiu motivo de bloqueio indevido: ${liveStatus.reason}`);
+        }
+
+        if (!liveStatus.warning.includes(overflowScenario.expectedReasonFragment)) {
+          fail(`Painel de hardware nao exibiu o warning esperado: ${liveStatus.warning}`);
+        }
       }
 
       const state = await executeScript(
@@ -609,10 +694,14 @@ async function main() {
         fail("Console indicou inicio de build mesmo com bloqueio live.");
       }
 
-      console.log("OK: Desktop Tauri live overflow E2E passou.");
+      console.log("OK: Desktop Tauri live hardware state E2E passou.");
       console.log(`Projeto: ${options.project}`);
       console.log(`Target: ${projectMetadata.target}`);
-      console.log(`Motivo visual: ${buildReason.reason}`);
+      console.log(
+        overflowScenario.expectBuildDisabled
+          ? `Motivo visual: ${liveStatus.reason}`
+          : `Warning visual: ${liveStatus.warning}`
+      );
       return;
     }
 

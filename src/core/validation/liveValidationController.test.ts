@@ -68,4 +68,24 @@ describe("liveValidationController", () => {
       })
     ).toBe("Build bloqueado: Estouro de VRAM");
   });
+
+  it("does not block the build when the live snapshot only has warnings", () => {
+    expect(
+      getLiveBuildBlockReason({
+        activeProjectDir: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+        building: false,
+        hwValidationState: "fresh",
+        hwStatus: {
+          vram_used: 57344,
+          vram_limit: 65536,
+          sprite_count: 1,
+          sprite_limit: 80,
+          bg_layers: 0,
+          bg_layers_limit: 3,
+          errors: [],
+          warnings: ["VRAM Warning"],
+        },
+      })
+    ).toBeNull();
+  });
 });
