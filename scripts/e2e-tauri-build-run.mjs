@@ -35,6 +35,7 @@ async function readProjectMetadata(projectDir) {
 function parseArgs(argv) {
   const options = {
     skipBuild: false,
+    scenario: "build-run",
     project: path.join(repoRoot, "src-tauri", "tests", "fixtures", "projects", "megadrive_dummy"),
     app: path.join(repoRoot, "src-tauri", "target", "debug", "retro-dev-studio.exe"),
     tauriDriver: process.env.TAURI_DRIVER_PATH ?? "",
@@ -55,6 +56,11 @@ function parseArgs(argv) {
 
     if (argument === "--project") {
       options.project = path.resolve(repoRoot, value);
+    } else if (argument === "--scenario") {
+      if (!["build-run", "live-overflow"].includes(value)) {
+        fail(`Cenario E2E desconhecido: ${value}`);
+      }
+      options.scenario = value;
     } else if (argument === "--app") {
       options.app = path.resolve(repoRoot, value);
     } else if (argument === "--tauri-driver") {
@@ -68,6 +74,38 @@ function parseArgs(argv) {
   }
 
   return options;
+}
+
+function overflowSpriteLimit(target) {
+  return target === "snes" ? 129 : 81;
+}
+
+function buildOverflowScene(target) {
+  const spriteCount = overflowSpriteLimit(target);
+  return {
+    scene_id: "live_overflow",
+    display_name: "Live Overflow",
+    background_layers: [],
+    palettes: [],
+    entities: Array.from({ length: spriteCount }, (_, index) => ({
+      entity_id: `overflow_${index}`,
+      prefab: "overflow_sprite",
+      transform: {
+        x: (index % 16) * 8,
+        y: Math.floor(index / 16) * 8,
+      },
+      components: {
+        sprite: {
+          asset: target === "snes" ? "assets/sprites/hero.ppm" : "assets/sprites/hero.png",
+          frame_width: 8,
+          frame_height: 8,
+          palette_slot: 0,
+          animations: {},
+          priority: "foreground",
+        },
+      },
+    })),
+  };
 }
 
 async function pathExists(candidate) {
@@ -450,6 +488,83 @@ async function main() {
       15000,
       "Projeto nao apareceu na UI"
     );
+
+    if (options.scenario === "live-overflow") {
+      const overflowDraft = buildOverflowScene(projectMetadata.target);
+      const draftResult = await executeAsyncScript(
+        sessionId,
+        `
+          const done = arguments[arguments.length - 1];
+          const api = window.__RDS_E2E__;
+          if (!api) {
+            done({ ok: false, error: "window.__RDS_E2E__ indisponivel" });
+            return;
+          }
+          api
+            .setSceneDraft(arguments[0])
+            .then(() => done({ ok: true }))
+            .catch((error) => done({ ok: false, error: String(error) }));
+        `,
+        [overflowDraft]
+      );
+
+      if (!draftResult?.ok) {
+        fail(`Falha ao injetar draft overflow: ${draftResult?.error ?? "sem diagnostico"}`);
+      }
+
+      const buildReason = await waitFor(
+        async () => {
+          const result = await executeScript(
+            sessionId,
+            `
+              const button = document.querySelector('[data-testid="toolbar-build-run"]');
+              const reason = document.querySelector('[data-testid="build-disabled-reason"]');
+              return {
+                disabled: Boolean(button?.disabled),
+                describedBy: button?.getAttribute('aria-describedby') ?? '',
+                reason: reason?.textContent?.trim() ?? '',
+              };
+            `
+          );
+          return result?.disabled && result?.reason.includes("Build bloqueado:") ? result : false;
+        },
+        30000,
+        "Build nao foi bloqueado pelo overflow live",
+        500
+      );
+
+      if (buildReason.describedBy !== "build-disabled-reason") {
+        fail(`Botao Build nao expôs aria-describedby esperado. Atual: ${buildReason.describedBy}`);
+      }
+
+      if (!buildReason.reason.includes("Sprite overflow")) {
+        fail(`Motivo visual inesperado para overflow live: ${buildReason.reason}`);
+      }
+
+      const state = await executeScript(
+        sessionId,
+        "return window.__RDS_E2E__?.getState() ?? null;"
+      );
+      if (!state) {
+        fail("Estado de automacao do app nao esta disponivel.");
+      }
+
+      if (state.activeTarget !== projectMetadata.target) {
+        fail(
+          `Target hidratado incorretamente. Esperado: ${projectMetadata.target}. Atual: ${state.activeTarget}`
+        );
+      }
+
+      if (state.consoleEntries.some((entry) => entry.message.includes("Iniciando build..."))) {
+        fail("Console indicou inicio de build mesmo com bloqueio live.");
+      }
+
+      console.log("OK: Desktop Tauri live overflow E2E passou.");
+      console.log(`Projeto: ${options.project}`);
+      console.log(`Target: ${projectMetadata.target}`);
+      console.log(`Motivo visual: ${buildReason.reason}`);
+      return;
+    }
 
     const buildRunButton = await findElement(sessionId, "[data-testid='toolbar-build-run']");
     await clickElement(sessionId, buildRunButton);

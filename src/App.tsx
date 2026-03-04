@@ -17,6 +17,7 @@ import {
   getSceneData,
   parseScene,
   type Entity,
+  type Scene,
 } from "./core/ipc/sceneService";
 import { useEditorStore } from "./core/store/editorStore";
 import { persistActiveScene, reloadSceneFromDisk } from "./core/scenePersistence";
@@ -84,6 +85,7 @@ type AutomationState = {
 
 type AutomationApi = {
   openProject: (projectDir: string) => Promise<boolean>;
+  setSceneDraft: (scene: Scene) => Promise<boolean>;
   getState: () => AutomationState;
 };
 
@@ -521,6 +523,16 @@ export default function App() {
 
     window.__RDS_E2E__ = {
       openProject: (projectDir: string) => openProjectAtPath(projectDir, "E2E"),
+      setSceneDraft: async (scene: Scene) => {
+        const state = useEditorStore.getState();
+        if (!state.activeProjectDir) {
+          throw new Error("Nenhum projeto aberto para injetar draft.");
+        }
+
+        state.setSelectedEntityId(null);
+        state.setActiveScene(scene);
+        return true;
+      },
       getState: () => {
         const state = useEditorStore.getState();
         return {
