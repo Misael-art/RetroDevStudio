@@ -3,6 +3,7 @@ use crate::ugdm::entities::Scene;
 
 pub const SNES_VRAM_BYTES: u32 = 65_536;
 pub const SNES_SPRITES_PER_SCREEN: u32 = 128;
+pub const SNES_SPRITE_WARNING_THRESHOLD: u32 = SNES_SPRITES_PER_SCREEN * 80 / 100;
 #[allow(dead_code)]
 pub const SNES_SPRITES_PER_SCANLINE: u32 = 32;
 pub const SNES_PALETTE_SLOTS: u8 = 8;
@@ -54,6 +55,13 @@ pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
         errors.push(ValidationError::fatal(format!(
             "Sprite overflow: a cena tem {} sprites. Limite do SNES: {}.",
             sprite_count, SNES_SPRITES_PER_SCREEN
+        )));
+    } else if sprite_count > SNES_SPRITE_WARNING_THRESHOLD {
+        errors.push(ValidationError::warning(format!(
+            "Sprite Warning: a cena tem {} sprites ({}% do limite do SNES: {}). Pouca folga para objetos dinamicos.",
+            sprite_count,
+            sprite_count * 100 / SNES_SPRITES_PER_SCREEN,
+            SNES_SPRITES_PER_SCREEN
         )));
     }
 
@@ -279,6 +287,21 @@ mod tests {
         assert!(errors.iter().any(|error| {
             error.is_fatal && error.message.contains("64x64")
         }));
+    }
+
+    #[test]
+    fn warns_when_sprite_pressure_is_high() {
+        let mut scene = empty_scene();
+        scene.entities = (0..=SNES_SPRITE_WARNING_THRESHOLD)
+            .map(|index| sprite_entity(&format!("entity_{index}"), 8, 8, 0))
+            .collect();
+
+        let errors = validate_scene(&scene);
+
+        assert!(errors.iter().any(|error| {
+            !error.is_fatal && error.message.contains("Sprite Warning")
+        }));
+        assert!(!errors.iter().any(|error| error.is_fatal));
     }
 
     #[test]

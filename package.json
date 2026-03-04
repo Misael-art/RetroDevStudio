@@ -20,6 +20,8 @@
     "test:e2e:desktop:live-overflow-vram:snes": "node scripts/e2e-tauri-build-run.mjs --scenario live-overflow-vram --project src-tauri/tests/fixtures/projects/snes_dummy",
     "test:e2e:desktop:live-warning-vram:md": "node scripts/e2e-tauri-build-run.mjs --scenario live-warning-vram --project src-tauri/tests/fixtures/projects/megadrive_dummy",
     "test:e2e:desktop:live-warning-vram:snes": "node scripts/e2e-tauri-build-run.mjs --scenario live-warning-vram --project src-tauri/tests/fixtures/projects/snes_dummy",
+    "test:e2e:desktop:live-warning-sprites:md": "node scripts/e2e-tauri-build-run.mjs --scenario live-warning-sprites --project src-tauri/tests/fixtures/projects/megadrive_dummy",
+    "test:e2e:desktop:live-warning-sprites:snes": "node scripts/e2e-tauri-build-run.mjs --scenario live-warning-sprites --project src-tauri/tests/fixtures/projects/snes_dummy",
     "test:watch": "vitest",
     "tauri": "tauri"
   },

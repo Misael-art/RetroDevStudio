@@ -133,3 +133,11 @@ jobs:
       - name: Run SNES live VRAM warning desktop E2E
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
         run: npm run test:e2e:desktop:live-warning-vram:snes -- --skip-build
+
+      - name: Run Mega Drive live sprite warning desktop E2E
+        if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
+        run: npm run test:e2e:desktop:live-warning-sprites:md -- --skip-build
+
+      - name: Run SNES live sprite warning desktop E2E
+        if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
+        run: npm run test:e2e:desktop:live-warning-sprites:snes -- --skip-build

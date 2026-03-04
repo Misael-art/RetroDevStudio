@@ -7,6 +7,7 @@ use crate::hardware::HwStatus;
 #[allow(dead_code)]
 pub const MD_VRAM_BYTES: u32 = 65_536; // 64 KB
 pub const MD_SPRITES_PER_SCREEN: u32 = 80;
+pub const MD_SPRITE_WARNING_THRESHOLD: u32 = MD_SPRITES_PER_SCREEN * 80 / 100;
 #[allow(dead_code)]
 pub const MD_SPRITES_PER_SCANLINE: u32 = 20;
 pub const MD_PALETTE_SLOTS: u8 = 4;
@@ -50,6 +51,13 @@ pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
         errors.push(ValidationError::fatal(format!(
             "Sprite overflow: a cena tem {} sprites. Limite do Mega Drive (H40): {}.",
             sprite_count, MD_SPRITES_PER_SCREEN
+        )));
+    } else if sprite_count > MD_SPRITE_WARNING_THRESHOLD {
+        errors.push(ValidationError::warning(format!(
+            "Sprite Warning: a cena tem {} sprites ({}% do limite do Mega Drive (H40): {}). Pouca folga para efeitos e HUD.",
+            sprite_count,
+            sprite_count * 100 / MD_SPRITES_PER_SCREEN,
+            MD_SPRITES_PER_SCREEN
         )));
     }
 
@@ -232,6 +240,21 @@ mod tests {
         assert!(errors.iter().any(|error| {
             error.is_fatal && error.message.contains("Sprite overflow")
         }));
+    }
+
+    #[test]
+    fn warns_when_sprite_pressure_is_high() {
+        let mut scene = empty_scene();
+        scene.entities = (0..=MD_SPRITE_WARNING_THRESHOLD)
+            .map(|index| sprite_entity(&format!("entity_{index}"), 8, 8, 0))
+            .collect();
+
+        let errors = validate_scene(&scene);
+
+        assert!(errors.iter().any(|error| {
+            !error.is_fatal && error.message.contains("Sprite Warning")
+        }));
+        assert!(!errors.iter().any(|error| error.is_fatal));
     }
 
     #[test]

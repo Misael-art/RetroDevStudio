@@ -58,7 +58,13 @@ function parseArgs(argv) {
       options.project = path.resolve(repoRoot, value);
     } else if (argument === "--scenario") {
       if (
-        !["build-run", "live-overflow", "live-overflow-vram", "live-warning-vram"].includes(
+        ![
+          "build-run",
+          "live-overflow",
+          "live-overflow-vram",
+          "live-warning-vram",
+          "live-warning-sprites",
+        ].includes(
           value
         )
       ) {
@@ -184,6 +190,34 @@ function buildVramWarningScene(target) {
   };
 }
 
+function buildSpriteWarningScene(target) {
+  const spriteCount = target === "snes" ? 103 : 65;
+  return {
+    scene_id: "live_sprite_warning",
+    display_name: "Live Sprite Warning",
+    background_layers: [],
+    palettes: [],
+    entities: Array.from({ length: spriteCount }, (_, index) => ({
+      entity_id: `warning_sprite_${index}`,
+      prefab: "warning_sprite",
+      transform: {
+        x: (index % 16) * 8,
+        y: Math.floor(index / 16) * 8,
+      },
+      components: {
+        sprite: {
+          asset: target === "snes" ? "assets/sprites/hero.ppm" : "assets/sprites/hero.png",
+          frame_width: 8,
+          frame_height: 8,
+          palette_slot: 0,
+          animations: {},
+          priority: "foreground",
+        },
+      },
+    })),
+  };
+}
+
 function buildLiveOverflowScenario(target, scenario) {
   if (scenario === "live-overflow-vram") {
     return {
@@ -198,6 +232,15 @@ function buildLiveOverflowScenario(target, scenario) {
     return {
       draft: buildVramWarningScene(target),
       expectedReasonFragment: "VRAM Warning",
+      expectedSeverity: "WARN",
+      expectBuildDisabled: false,
+    };
+  }
+
+  if (scenario === "live-warning-sprites") {
+    return {
+      draft: buildSpriteWarningScene(target),
+      expectedReasonFragment: "Sprite Warning",
       expectedSeverity: "WARN",
       expectBuildDisabled: false,
     };
@@ -595,7 +638,8 @@ async function main() {
     if (
       options.scenario === "live-overflow" ||
       options.scenario === "live-overflow-vram" ||
-      options.scenario === "live-warning-vram"
+      options.scenario === "live-warning-vram" ||
+      options.scenario === "live-warning-sprites"
     ) {
       const overflowScenario = buildLiveOverflowScenario(projectMetadata.target, options.scenario);
       const draftResult = await executeAsyncScript(
