@@ -5,7 +5,7 @@ use serde::Serialize;
 use crate::hardware::{constraint_engine, HwStatus};
 use crate::ugdm::entities::Scene;
 
-use super::project_mgr::{load_project, validate_scene};
+use super::project_mgr::{load_project, load_scene, validate_scene};
 
 #[derive(Debug, Default, Serialize, Clone, PartialEq, Eq)]
 pub struct DraftValidationResult {
@@ -56,6 +56,13 @@ pub fn validate_scene_draft(project_dir: &Path, scene_json: &str) -> DraftValida
         Ok(hw_status) => DraftValidationResult::success(hw_status),
         Err(error) => DraftValidationResult::failure(error),
     }
+}
+
+pub fn authoritative_hw_status(project_dir: &Path) -> Result<HwStatus, String> {
+    let project = load_project(project_dir).map_err(|error| error.to_string())?;
+    let scene = load_scene(project_dir, &project.entry_scene).map_err(|error| error.to_string())?;
+
+    constraint_engine::hw_status_for_target(&project.target, &scene)
 }
 
 #[cfg(test)]
@@ -110,5 +117,31 @@ mod tests {
 
         assert!(!result.ok);
         assert!(result.error.contains("duplicado"));
+    }
+
+    #[test]
+    fn live_preview_matches_authoritative_megadrive_hw_status() {
+        let project_dir = fixture_dir("megadrive_dummy");
+        let scene_json = fs::read_to_string(project_dir.join("scenes").join("main.json"))
+            .expect("read fixture scene");
+
+        let preview = validate_scene_draft(&project_dir, &scene_json);
+        let authoritative = authoritative_hw_status(&project_dir).expect("authoritative status");
+
+        assert!(preview.ok, "unexpected preview error: {}", preview.error);
+        assert_eq!(preview.hw_status, authoritative);
+    }
+
+    #[test]
+    fn live_preview_matches_authoritative_snes_hw_status() {
+        let project_dir = fixture_dir("snes_dummy");
+        let scene_json = fs::read_to_string(project_dir.join("scenes").join("main.json"))
+            .expect("read fixture scene");
+
+        let preview = validate_scene_draft(&project_dir, &scene_json);
+        let authoritative = authoritative_hw_status(&project_dir).expect("authoritative status");
+
+        assert!(preview.ok, "unexpected preview error: {}", preview.error);
+        assert_eq!(preview.hw_status, authoritative);
     }
 }

@@ -13,6 +13,7 @@ use compiler::build_orch::{run_build, BuildLogLine, BuildResult};
 use compiler::sgdk_emitter::emit_sgdk;
 use compiler::snes_emitter::emit_snes;
 use core::editor_validation::{
+    authoritative_hw_status,
     validate_scene_draft as validate_scene_draft_impl,
     DraftValidationResult,
 };
@@ -60,24 +61,9 @@ pub struct EmulatorCommandResult {
 #[tauri::command]
 fn validate_project(project_dir: String) -> ValidationResult {
     let dir = PathBuf::from(&project_dir);
-
-    let project = match load_project(&dir) {
-        Ok(p) => p,
-        Err(e) => return ValidationResult { ok: false, errors: vec![e.to_string()], warnings: vec![] },
-    };
-    let scene = match load_scene(&dir, &project.entry_scene) {
-        Ok(s) => s,
-        Err(e) => return ValidationResult { ok: false, errors: vec![e.to_string()], warnings: vec![] },
-    };
-    let hw_status = match constraint_engine::hw_status_for_target(&project.target, &scene) {
+    let hw_status = match authoritative_hw_status(&dir) {
         Ok(status) => status,
-        Err(error) => {
-            return ValidationResult {
-                ok: false,
-                errors: vec![error],
-                warnings: vec![],
-            }
-        }
+        Err(error) => return ValidationResult { ok: false, errors: vec![error], warnings: vec![] },
     };
 
     ValidationResult {
@@ -153,15 +139,7 @@ fn get_hw_status(project_dir: String) -> HwStatus {
         return HwStatus::default();
     }
     let dir = PathBuf::from(&project_dir);
-    let project = match load_project(&dir) {
-        Ok(p) => p,
-        Err(_) => return HwStatus::default(),
-    };
-    let scene = match load_scene(&dir, &project.entry_scene) {
-        Ok(s) => s,
-        Err(_) => return HwStatus::default(),
-    };
-    constraint_engine::hw_status_for_target(&project.target, &scene).unwrap_or_default()
+    authoritative_hw_status(&dir).unwrap_or_default()
 }
 
 // ── Emulator commands ─────────────────────────────────────────────────────────
