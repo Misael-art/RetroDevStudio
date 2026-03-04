@@ -57,7 +57,7 @@ function parseArgs(argv) {
     if (argument === "--project") {
       options.project = path.resolve(repoRoot, value);
     } else if (argument === "--scenario") {
-      if (!["build-run", "live-overflow"].includes(value)) {
+      if (!["build-run", "live-overflow", "live-overflow-vram"].includes(value)) {
         fail(`Cenario E2E desconhecido: ${value}`);
       }
       options.scenario = value;
@@ -80,7 +80,7 @@ function overflowSpriteLimit(target) {
   return target === "snes" ? 129 : 81;
 }
 
-function buildOverflowScene(target) {
+function buildSpriteOverflowScene(target) {
   const spriteCount = overflowSpriteLimit(target);
   return {
     scene_id: "live_overflow",
@@ -105,6 +105,56 @@ function buildOverflowScene(target) {
         },
       },
     })),
+  };
+}
+
+function buildVramOverflowScene(target) {
+  const frameWidth = target === "snes" ? 64 : 32;
+  const frameHeight = frameWidth;
+  const frameCount = target === "snes" ? 33 : 129;
+
+  return {
+    scene_id: "live_vram_overflow",
+    display_name: "Live VRAM Overflow",
+    background_layers: [],
+    palettes: [],
+    entities: [
+      {
+        entity_id: "overflow_vram_entity",
+        prefab: "overflow_vram",
+        transform: { x: 16, y: 16 },
+        components: {
+          sprite: {
+            asset: target === "snes" ? "assets/sprites/hero.ppm" : "assets/sprites/hero.png",
+            frame_width: frameWidth,
+            frame_height: frameHeight,
+            palette_slot: 0,
+            animations: {
+              stress: {
+                frames: Array.from({ length: frameCount }, (_, index) => index),
+                fps: 12,
+                loop: true,
+              },
+            },
+            priority: "foreground",
+          },
+        },
+      },
+    ],
+  };
+}
+
+function buildLiveOverflowScenario(target, scenario) {
+  if (scenario === "live-overflow-vram") {
+    return {
+      draft: buildVramOverflowScene(target),
+      expectedReasonFragment: "VRAM Overflow",
+    };
+  }
+
+  return {
+    draft: buildSpriteOverflowScene(target),
+    expectedReasonFragment: "Sprite overflow",
   };
 }
 
@@ -489,8 +539,8 @@ async function main() {
       "Projeto nao apareceu na UI"
     );
 
-    if (options.scenario === "live-overflow") {
-      const overflowDraft = buildOverflowScene(projectMetadata.target);
+    if (options.scenario === "live-overflow" || options.scenario === "live-overflow-vram") {
+      const overflowScenario = buildLiveOverflowScenario(projectMetadata.target, options.scenario);
       const draftResult = await executeAsyncScript(
         sessionId,
         `
@@ -505,7 +555,7 @@ async function main() {
             .then(() => done({ ok: true }))
             .catch((error) => done({ ok: false, error: String(error) }));
         `,
-        [overflowDraft]
+        [overflowScenario.draft]
       );
 
       if (!draftResult?.ok) {
@@ -537,7 +587,7 @@ async function main() {
         fail(`Botao Build nao expôs aria-describedby esperado. Atual: ${buildReason.describedBy}`);
       }
 
-      if (!buildReason.reason.includes("Sprite overflow")) {
+      if (!buildReason.reason.includes(overflowScenario.expectedReasonFragment)) {
         fail(`Motivo visual inesperado para overflow live: ${buildReason.reason}`);
       }
 

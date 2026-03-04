@@ -117,3 +117,11 @@ jobs:
       - name: Run SNES live overflow desktop E2E
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
         run: npm run test:e2e:desktop:live-overflow:snes -- --skip-build
+
+      - name: Run Mega Drive live VRAM overflow desktop E2E
+        if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
+        run: npm run test:e2e:desktop:live-overflow-vram:md -- --skip-build
+
+      - name: Run SNES live VRAM overflow desktop E2E
+        if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
+        run: npm run test:e2e:desktop:live-overflow-vram:snes -- --skip-build
