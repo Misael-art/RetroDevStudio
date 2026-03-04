@@ -68,6 +68,73 @@ export function getLiveBuildWarningSummary({
   return null;
 }
 
+export type LiveToolbarIndicatorTone = "ok" | "info" | "warn" | "error";
+
+export interface LiveToolbarIndicator {
+  label: string;
+  tone: LiveToolbarIndicatorTone;
+  detail: string;
+}
+
+export function getLiveToolbarIndicator({
+  activeProjectDir,
+  hwStatus,
+  hwValidationError,
+  hwValidationState,
+}: {
+  activeProjectDir: string;
+  hwStatus: HwStatus | null;
+  hwValidationError: string | null;
+  hwValidationState: HwValidationState;
+}): LiveToolbarIndicator | null {
+  if (!activeProjectDir) {
+    return null;
+  }
+
+  switch (hwValidationState) {
+    case "pending":
+      return {
+        label: "ANALISANDO",
+        tone: "info",
+        detail: "Preview live em analise.",
+      };
+    case "stale":
+      return {
+        label: "DESATUAL.",
+        tone: "warn",
+        detail: "O draft mudou depois da ultima analise live.",
+      };
+    case "error":
+      return {
+        label: "ERRO LIVE",
+        tone: "error",
+        detail: hwValidationError ?? "Falha ao atualizar o preview live.",
+      };
+    case "fresh":
+      if (hwStatus?.errors.length) {
+        return {
+          label: "BLOQUEADO",
+          tone: "error",
+          detail: hwStatus.errors[0],
+        };
+      }
+      if (hwStatus?.warnings.length) {
+        return {
+          label: "WARN",
+          tone: "warn",
+          detail: hwStatus.warnings[0],
+        };
+      }
+      return {
+        label: "LIVE",
+        tone: "ok",
+        detail: "Preview live sincronizado.",
+      };
+    default:
+      return null;
+  }
+}
+
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

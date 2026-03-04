@@ -305,10 +305,12 @@ describe("App build flow", () => {
 
     const buildButton = findButton(container, "Build & Run");
     const reason = container.querySelector("[data-testid='build-disabled-reason']");
+    const liveState = container.querySelector("[data-testid='build-live-state']");
 
     expect(buildButton.disabled).toBe(true);
     expect(buildButton.getAttribute("aria-describedby")).toBe("build-disabled-reason");
     expect(reason?.textContent).toContain("Build bloqueado: Estouro de VRAM");
+    expect(liveState?.textContent).toContain("BLOQUEADO");
 
     await act(async () => {
       buildButton.click();
@@ -341,6 +343,9 @@ describe("App build flow", () => {
 
     expect(buildButton.disabled).toBe(false);
     expect(container.querySelector("[data-testid='build-disabled-reason']")).toBeNull();
+    expect(container.querySelector("[data-testid='build-live-state']")?.textContent).toContain(
+      "DESATUAL."
+    );
     expect(container.querySelector("[data-testid='build-warning-summary']")).toBeNull();
 
     await act(async () => {
@@ -373,10 +378,12 @@ describe("App build flow", () => {
 
     const buildButton = findButton(container, "Build & Run");
     const warning = container.querySelector("[data-testid='build-warning-summary']");
+    const liveState = container.querySelector("[data-testid='build-live-state']");
 
     expect(buildButton.disabled).toBe(false);
     expect(buildButton.getAttribute("aria-describedby")).toBeNull();
     expect(container.querySelector("[data-testid='build-disabled-reason']")).toBeNull();
+    expect(liveState?.textContent).toContain("WARN");
     expect(warning?.textContent).toContain("Build com alerta: VRAM Warning: uso alto de VRAM.");
 
     await act(async () => {

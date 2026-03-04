@@ -29,6 +29,7 @@ import {
 } from "./core/ipc/toolsService";
 import {
   getLiveBuildBlockReason,
+  getLiveToolbarIndicator,
   getLiveBuildWarningSummary,
   useLiveValidationController,
 } from "./core/validation/liveValidationController";
@@ -101,6 +102,7 @@ export default function App() {
     logMessage,
     setHwStatus,
     hwStatus,
+    hwValidationError,
     hwValidationState,
     activeProjectDir,
     activeProjectName,
@@ -157,6 +159,12 @@ export default function App() {
     activeProjectDir,
     building,
     hwStatus,
+    hwValidationState,
+  });
+  const buildLiveIndicator = getLiveToolbarIndicator({
+    activeProjectDir,
+    hwStatus,
+    hwValidationError,
     hwValidationState,
   });
   const liveBuildBlocked =
@@ -631,6 +639,23 @@ export default function App() {
               : buildWarningSummary ?? undefined
           }
         >
+          {buildLiveIndicator && (
+            <span
+              data-testid="build-live-state"
+              className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+                buildLiveIndicator.tone === "error"
+                  ? "bg-[#f38ba8]/15 text-[#f38ba8]"
+                  : buildLiveIndicator.tone === "warn"
+                    ? "bg-[#fab387]/15 text-[#fab387]"
+                    : buildLiveIndicator.tone === "info"
+                      ? "bg-[#89b4fa]/15 text-[#89b4fa]"
+                      : "bg-[#a6e3a1]/15 text-[#a6e3a1]"
+              }`}
+              title={buildLiveIndicator.detail}
+            >
+              {buildLiveIndicator.label}
+            </span>
+          )}
           <ToolbarButton
             label="Build & Run"
             onClick={() => void handleBuildAndRun()}

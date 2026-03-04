@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   getLiveBuildBlockReason,
   getLiveBuildWarningSummary,
+  getLiveToolbarIndicator,
   serializeSceneDraft,
 } from "./liveValidationController";
 import type { Scene } from "../ipc/sceneService";
@@ -128,5 +129,44 @@ describe("liveValidationController", () => {
         },
       })
     ).toBeNull();
+  });
+
+  it("returns a stale toolbar indicator when the draft changed after the last analysis", () => {
+    expect(
+      getLiveToolbarIndicator({
+        activeProjectDir: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+        hwStatus: null,
+        hwValidationError: null,
+        hwValidationState: "stale",
+      })
+    ).toEqual({
+      label: "DESATUAL.",
+      tone: "warn",
+      detail: "O draft mudou depois da ultima analise live.",
+    });
+  });
+
+  it("returns a warn toolbar indicator for fresh non-fatal diagnostics", () => {
+    expect(
+      getLiveToolbarIndicator({
+        activeProjectDir: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+        hwStatus: {
+          vram_used: 57344,
+          vram_limit: 65536,
+          sprite_count: 1,
+          sprite_limit: 80,
+          bg_layers: 0,
+          bg_layers_limit: 3,
+          errors: [],
+          warnings: ["VRAM Warning"],
+        },
+        hwValidationError: null,
+        hwValidationState: "fresh",
+      })
+    ).toEqual({
+      label: "WARN",
+      tone: "warn",
+      detail: "VRAM Warning",
+    });
   });
 });

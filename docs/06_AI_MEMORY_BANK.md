@@ -1,6 +1,6 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Ultima Atualizacao:** 2026-03-04
-**Ultima sessao:** 2026-03-04 (Codex - Sessao 28: warning live resumido na toolbar, runner desktop endurecido para startup lento do tauri-driver e nova rodada de validacao real)
+**Ultima sessao:** 2026-03-04 (Codex - Sessao 29: badge de estado live na toolbar, cobertura de stale/warn/bloqueado e validacao desktop real apos rebuild)
 **Fase Atual:** Hardening/QA do MVP (Build -> ROM -> Emulacao validado em Windows com upstream real; desktop E2E multi-target validado localmente e em runner GitHub/Windows real; validacao live do editor agora coberta para bloqueios fatais e warnings nao-fatais)
 **Branch sugerida:** `feat/<tema>` para trabalho paralelo; usar `main` apenas quando o usuario pedir edicao direta no workspace atual
 
@@ -16,6 +16,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-04 - sessao 29):**
+  - O editor ganhou badge de estado live na toolbar (`LIVE`, `WARN`, `DESATUAL.`, `ERRO LIVE`, `BLOQUEADO`) no ponto de decisao de `Build & Run`, sem abrir fluxo paralelo ao painel de hardware.
+  - O resumo de warning na toolbar foi mantido e agora convive com sinalizacao explicita de frescor/estado do preview, reduzindo risco de interpretar diagnostico stale como certificado.
+  - A logica da badge foi centralizada em `liveValidationController` para evitar duplicacao de regras de estado entre `App.tsx` e outros consumidores.
+  - A cobertura local foi expandida para stale/warn/bloqueado tanto em unit tests do controller quanto em testes de integracao do App.
+  - O runner desktop/Tauri foi atualizado para exigir tambem o estado da badge (`WARN`/`BLOQUEADO`) nos cenarios live, tornando o E2E aderente ao novo contrato de UX.
+  - O app debug Tauri foi rebuildado e os cenarios de warning live (VRAM em Mega Drive e sprites em SNES) passaram no app real com `RDS_E2E_DRIVER_TIMEOUT_MS=60000`.
 
 * **O que acabou de acontecer (2026-03-04 - sessao 28):**
   - A UX live do editor foi endurecida no ponto de decisao: warnings nao-fatais agora aparecem tambem na toolbar, ao lado de `Build & Run`, sem bloquear o build.
@@ -126,6 +134,17 @@
   - `npm run check:tree` -> OK.
   - `npm run lint` -> OK.
   - `npx tsc --noEmit` -> OK.
+  - `npx vitest run --no-file-parallelism --maxWorkers=1` -> OK, 55/55 (fallback deterministico para ambiente com timeout de worker em modo `forks`).
+  - `cargo test --lib -- --nocapture` -> OK, 39 aprovados / 1 ignorado.
+  - `cargo clippy -- -D warnings` -> OK.
+  - `npm run tauri build -- --debug --no-bundle` -> OK (rebuild do app desktop para validar a UX nova no binario real).
+  - `node scripts\e2e-tauri-build-run.mjs --scenario live-warning-vram --project src-tauri/tests/fixtures/projects/megadrive_dummy --skip-build --native-driver <msedgedriver>` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> OK, warning + badge `WARN` em Mega Drive.
+  - `node scripts\e2e-tauri-build-run.mjs --scenario live-warning-sprites --project src-tauri/tests/fixtures/projects/snes_dummy --skip-build --native-driver <msedgedriver>` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> OK, warning + badge `WARN` em SNES.
+
+* **Validacoes verificadas em 2026-03-04 (sessao 28):**
+  - `npm run check:tree` -> OK.
+  - `npm run lint` -> OK.
+  - `npx tsc --noEmit` -> OK.
   - `npm test` -> OK, 53/53.
   - `node scripts\e2e-tauri-build-run.mjs --scenario live-warning-vram --project src-tauri/tests/fixtures/projects/megadrive_dummy --skip-build --native-driver <msedgedriver>` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> OK, toolbar exibindo `Build com alerta: VRAM Warning...` em Mega Drive.
   - `node scripts\e2e-tauri-build-run.mjs --scenario live-warning-sprites --project src-tauri/tests/fixtures/projects/snes_dummy --skip-build --native-driver <msedgedriver>` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> OK, toolbar exibindo `Build com alerta: Sprite Warning...` em SNES.
@@ -156,9 +175,9 @@
   - GitHub Actions `Desktop E2E` (`22606643935`) -> OK em `windows-latest`, com `Run Mega Drive desktop smoke` e `Run SNES desktop smoke` ambos verdes.
 
 * **Proximo passo imediato:**
-  1. Consolidar em commit unico desta sessao o patch de blindagem textual + warning summary da toolbar + hardening do timeout do runner desktop.
-  2. Confirmar no GitHub Actions o run remoto acionado pelo novo `push` que tocar `README.md`, `docs/`, `src/`, `scripts/` e `.github/workflows/desktop-e2e.yml`.
-  3. Continuar expandindo warnings live uteis do editor sem diluir a definicao de certificacao real nem permitir reclassificacao otimista de status.
+  1. Consolidar em commit unico desta sessao o badge de estado live na toolbar e o endurecimento correspondente do runner desktop.
+  2. Confirmar no GitHub Actions o run remoto acionado pelo novo `push` desta sessao (`CI` + `Desktop E2E`).
+  3. Expandir a UX live para orientar a acao do usuario em estado `DESATUAL.` (ex.: hint para revalidacao manual) sem bloquear indevidamente o build.
   4. Reexecutar o smoke upstream oficial sempre que mudancas tocarem o caminho SNES/Windows, agora que o baseline remoto ja esta comprovado.
 
 ---
@@ -287,6 +306,7 @@ Rebaseline tecnico do MVP para alinhar implementacao, documentacao e compliance 
 | 2026-03-04 | Codex | Warning live de alta contagem de sprites adicionado em Mega Drive e SNES, runner/workflow desktop expandidos para `live-warning-sprites` e Memory Bank retomado como handoff obrigatorio |
 | 2026-03-04 | Codex | Blindagem textual dos canonicos para exigir certificacao real antes de qualquer claim de fase, etapa ou feature concluida |
 | 2026-03-04 | Codex | Warning live resumido na toolbar do editor, runner desktop endurecido para startup lento do `tauri-driver` e nova validacao real de warnings no app Tauri |
+| 2026-03-04 | Codex | Badge de estado live na toolbar (`LIVE/WARN/DESATUAL./ERRO/BLOQUEADO`), cobertura de testes ampliada e validacao desktop real apos rebuild |
 
 ---
 

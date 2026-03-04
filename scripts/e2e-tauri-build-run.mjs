@@ -224,6 +224,7 @@ function buildLiveOverflowScenario(target, scenario) {
       draft: buildVramOverflowScene(target),
       expectedReasonFragment: "VRAM Overflow",
       expectedSeverity: "OVERFLOW",
+      expectedToolbarState: "BLOQUEADO",
       expectBuildDisabled: true,
     };
   }
@@ -233,6 +234,7 @@ function buildLiveOverflowScenario(target, scenario) {
       draft: buildVramWarningScene(target),
       expectedReasonFragment: "VRAM Warning",
       expectedSeverity: "WARN",
+      expectedToolbarState: "WARN",
       expectBuildDisabled: false,
     };
   }
@@ -242,6 +244,7 @@ function buildLiveOverflowScenario(target, scenario) {
       draft: buildSpriteWarningScene(target),
       expectedReasonFragment: "Sprite Warning",
       expectedSeverity: "WARN",
+      expectedToolbarState: "WARN",
       expectBuildDisabled: false,
     };
   }
@@ -250,6 +253,7 @@ function buildLiveOverflowScenario(target, scenario) {
     draft: buildSpriteOverflowScene(target),
     expectedReasonFragment: "Sprite overflow",
     expectedSeverity: "OVERFLOW",
+    expectedToolbarState: "BLOQUEADO",
     expectBuildDisabled: true,
   };
 }
@@ -675,6 +679,7 @@ async function main() {
               const button = document.querySelector('[data-testid="toolbar-build-run"]');
               const reason = document.querySelector('[data-testid="build-disabled-reason"]');
               const summary = document.querySelector('[data-testid="build-warning-summary"]');
+              const liveState = document.querySelector('[data-testid="build-live-state"]');
               const severity = document.querySelector('[data-testid="hardware-limits-severity"]');
               const warning = document.querySelector('[data-testid="hardware-warning-0"]');
               const error = document.querySelector('[data-testid="hardware-error-0"]');
@@ -683,13 +688,17 @@ async function main() {
                 describedBy: button?.getAttribute('aria-describedby') ?? '',
                 reason: reason?.textContent?.trim() ?? '',
                 summary: summary?.textContent?.trim() ?? '',
+                liveState: liveState?.textContent?.trim() ?? '',
                 severity: severity?.textContent?.trim() ?? '',
                 warning: warning?.textContent?.trim() ?? '',
                 error: error?.textContent?.trim() ?? '',
               };
             `
           );
-          if (result?.severity !== overflowScenario.expectedSeverity) {
+          if (
+            result?.severity !== overflowScenario.expectedSeverity ||
+            result?.liveState !== overflowScenario.expectedToolbarState
+          ) {
             return false;
           }
           if (overflowScenario.expectBuildDisabled) {
