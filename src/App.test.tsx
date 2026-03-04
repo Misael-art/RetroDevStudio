@@ -283,4 +283,71 @@ describe("App build flow", () => {
     expect(container.textContent).toContain("Emulador ativo");
     expect(putImageDataSpy).toHaveBeenCalled();
   });
+
+  it("disables Build & Run and explains why when live validation reports a fresh fatal error", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        hwStatus: {
+          vram_used: 70000,
+          vram_limit: 65536,
+          sprite_count: 12,
+          sprite_limit: 80,
+          bg_layers: 2,
+          bg_layers_limit: 4,
+          errors: ["Estouro de VRAM"],
+          warnings: [],
+        },
+        hwValidationState: "fresh",
+        hwValidatedRevision: 1,
+      });
+      await flush();
+    });
+
+    const buildButton = findButton(container, "Build & Run");
+    const reason = container.querySelector("[data-testid='build-disabled-reason']");
+
+    expect(buildButton.disabled).toBe(true);
+    expect(buildButton.getAttribute("aria-describedby")).toBe("build-disabled-reason");
+    expect(reason?.textContent).toContain("Build bloqueado: Estouro de VRAM");
+
+    await act(async () => {
+      buildButton.click();
+      await flush();
+    });
+
+    expect(mocks.buildProject).not.toHaveBeenCalled();
+  });
+
+  it("keeps Build & Run enabled when the live validation snapshot is stale", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        hwStatus: {
+          vram_used: 70000,
+          vram_limit: 65536,
+          sprite_count: 12,
+          sprite_limit: 80,
+          bg_layers: 2,
+          bg_layers_limit: 4,
+          errors: ["Estouro de VRAM"],
+          warnings: [],
+        },
+        hwValidationState: "stale",
+        hwValidatedRevision: 0,
+      });
+      await flush();
+    });
+
+    const buildButton = findButton(container, "Build & Run");
+
+    expect(buildButton.disabled).toBe(false);
+    expect(container.querySelector("[data-testid='build-disabled-reason']")).toBeNull();
+
+    await act(async () => {
+      buildButton.click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.buildProject).toHaveBeenCalledTimes(1);
+  });
 });

@@ -38,6 +38,7 @@ function ToolbarButton({
   accent = "default",
   testId,
   title,
+  describedBy,
 }: {
   label: string;
   onClick: () => void;
@@ -45,6 +46,7 @@ function ToolbarButton({
   accent?: "default" | "primary" | "success" | "danger";
   testId?: string;
   title?: string;
+  describedBy?: string;
 }) {
   const palette =
     accent === "primary"
@@ -61,6 +63,7 @@ function ToolbarButton({
       disabled={disabled}
       data-testid={testId}
       title={title}
+      aria-describedby={describedBy}
       className={`rounded px-2 py-1 text-xs font-semibold transition-colors ${palette} disabled:cursor-not-allowed disabled:opacity-40`}
     >
       {label}
@@ -612,10 +615,13 @@ export default function App() {
             accent="success"
             testId="toolbar-build-run"
             title={buildDisabledReason ?? undefined}
+            describedBy={liveBuildBlocked ? "build-disabled-reason" : undefined}
           />
           {liveBuildBlocked && buildDisabledReason && (
             <span
+              id="build-disabled-reason"
               data-testid="build-disabled-reason"
+              aria-live="polite"
               className="max-w-52 truncate text-[10px] text-[#f38ba8]"
               title={buildDisabledReason}
             >
