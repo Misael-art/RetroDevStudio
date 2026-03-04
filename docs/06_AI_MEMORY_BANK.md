@@ -1,6 +1,6 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Ultima Atualizacao:** 2026-03-04
-**Ultima sessao:** 2026-03-04 (Codex - Sessao 26: warnings live de hardware endurecidos no editor, cobertura desktop E2E expandida e Memory Bank retomado como handoff obrigatorio)
+**Ultima sessao:** 2026-03-04 (Codex - Sessao 28: warning live resumido na toolbar, runner desktop endurecido para startup lento do tauri-driver e nova rodada de validacao real)
 **Fase Atual:** Hardening/QA do MVP (Build -> ROM -> Emulacao validado em Windows com upstream real; desktop E2E multi-target validado localmente e em runner GitHub/Windows real; validacao live do editor agora coberta para bloqueios fatais e warnings nao-fatais)
 **Branch sugerida:** `feat/<tema>` para trabalho paralelo; usar `main` apenas quando o usuario pedir edicao direta no workspace atual
 
@@ -16,6 +16,20 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-04 - sessao 28):**
+  - A UX live do editor foi endurecida no ponto de decisao: warnings nao-fatais agora aparecem tambem na toolbar, ao lado de `Build & Run`, sem bloquear o build.
+  - O frontend passou a resumir o primeiro warning live fresco como `Build com alerta: ...`, deixando claro o risco mesmo quando o build continua habilitado.
+  - O runner `scripts/e2e-tauri-build-run.mjs` foi endurecido com `RDS_E2E_DRIVER_TIMEOUT_MS`, porque o `tauri-driver` local estava ficando pronto mais lentamente do que o timeout fixo anterior e gerando falso negativo de infraestrutura.
+  - `.github/workflows/desktop-e2e.yml` foi ajustado para usar esse timeout configuravel no runner Windows remoto, reduzindo flakiness por startup lento do WebDriver.
+  - A nova UX foi validada no app Tauri real com `VRAM warning` em Mega Drive e `Sprite Warning` em SNES, confirmando que a toolbar exibe o alerta correto sem desabilitar `Build & Run`.
+  - O patch de blindagem textual dos canonicos permaneceu local durante esta iteracao e sera consolidado no mesmo ciclo de commit/push desta sessao, em vez de ficar como diff solto.
+
+* **O que acabou de acontecer (2026-03-04 - sessao 27):**
+  - Foi aplicada blindagem textual adicional nos canonicos (`README.md`, `docs/03_ROADMAP_MVP.md`, `docs/07_TEST_AND_COMPLIANCE.md` e `docs/09_AGENT_DEV_MODE.md`) para deixar explicito que nenhuma etapa pode ser considerada concluida sem certificacao real.
+  - A definicao operacional agora esta repetida em multiplos pontos: `concluido/validado` exige caminho canonico real, gates aplicaveis verdes, prova funcional correspondente e ausencia de erro bloqueante no escopo certificado.
+  - Foi reforcado que mock, stub, CI verde afrouxado, log cosmetico, fixture artificial fora do caminho canonico ou documento otimista nao contam como prova de entrega.
+  - Warnings so podem coexistir com claim de entrega quando forem comprovadamente nao-fatais, explicitamente sinalizados e incapazes de mascarar problema real; caso contrario, o status correto permanece `em hardening`.
 
 * **O que acabou de acontecer (2026-03-04 - sessao 26):**
   - A validacao live do editor foi consolidada como trilha canonica de UX: `validate_scene_draft` no backend Rust, `sceneRevision` + estados `pending/fresh/stale/error` no store e bloqueio explicado de `Build & Run` no frontend.
@@ -104,10 +118,19 @@
   - O app agora possui um E2E de nivel desktop/Tauri repetivel em `scripts/e2e-tauri-build-run.mjs`, usando `tauri-driver` oficial e fixtures canonicas de Mega Drive e SNES.
   - O workflow dedicado `.github/workflows/desktop-e2e.yml` institucionaliza a regressao desktop em Windows, com `workflow_dispatch`, `workflow_call` e gatilhos `push`/`pull_request` filtrados por caminho, e agora ja foi validado em runner GitHub/Windows real.
   - A UX live do editor ja cobre estados fatais e nao-fatais: overflow de sprites, overflow de VRAM, warning de VRAM alta e warning de alta contagem de sprites em ambos os targets.
+  - A toolbar do editor agora tambem expÃµe warning live nao-fatal perto de `Build & Run`, para que o usuario nao dependa exclusivamente do painel lateral para entender o risco atual.
   - O modo de trabalho dos agentes agora esta consolidado em documento canonico proprio para reduzir divergencia de onboarding, claims falsos de entrega e poluicao estrutural.
   - Dados em `data/`: `rom_teste.bin` e `sonic_test.gen` continuam uteis para validacao manual de Mega Drive, mas o uso dessas ROMs deve respeitar compliance/licenciamento.
 
 * **Validacoes verificadas em 2026-03-04:**
+  - `npm run check:tree` -> OK.
+  - `npm run lint` -> OK.
+  - `npx tsc --noEmit` -> OK.
+  - `npm test` -> OK, 53/53.
+  - `node scripts\e2e-tauri-build-run.mjs --scenario live-warning-vram --project src-tauri/tests/fixtures/projects/megadrive_dummy --skip-build --native-driver <msedgedriver>` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> OK, toolbar exibindo `Build com alerta: VRAM Warning...` em Mega Drive.
+  - `node scripts\e2e-tauri-build-run.mjs --scenario live-warning-sprites --project src-tauri/tests/fixtures/projects/snes_dummy --skip-build --native-driver <msedgedriver>` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> OK, toolbar exibindo `Build com alerta: Sprite Warning...` em SNES.
+
+* **Validacoes verificadas em 2026-03-04 (sessao 26/27):**
   - `npm run check:tree` -> OK.
   - `npm run lint` -> OK.
   - `npx tsc --noEmit` -> OK.
@@ -133,10 +156,10 @@
   - GitHub Actions `Desktop E2E` (`22606643935`) -> OK em `windows-latest`, com `Run Mega Drive desktop smoke` e `Run SNES desktop smoke` ambos verdes.
 
 * **Proximo passo imediato:**
-  1. Confirmar no GitHub Actions o run remoto acionado pelo proximo `push` que tocar `src/`, `src-tauri/`, `package.json`, `scripts/` ou `.github/workflows/desktop-e2e.yml`.
-  2. Expandir o modelo de warning live para outro limite util do editor sem poluir o backend com heuristicas duplicadas.
-  3. Reexecutar o smoke upstream oficial sempre que mudancas tocarem o caminho SNES/Windows, agora que o baseline remoto ja esta comprovado.
-  4. Continuar o ciclo obrigatorio de handoff: iteracao tecnica, validacao remota e atualizacao do Memory Bank na mesma sessao.
+  1. Consolidar em commit unico desta sessao o patch de blindagem textual + warning summary da toolbar + hardening do timeout do runner desktop.
+  2. Confirmar no GitHub Actions o run remoto acionado pelo novo `push` que tocar `README.md`, `docs/`, `src/`, `scripts/` e `.github/workflows/desktop-e2e.yml`.
+  3. Continuar expandindo warnings live uteis do editor sem diluir a definicao de certificacao real nem permitir reclassificacao otimista de status.
+  4. Reexecutar o smoke upstream oficial sempre que mudancas tocarem o caminho SNES/Windows, agora que o baseline remoto ja esta comprovado.
 
 ---
 
@@ -165,6 +188,8 @@ As seguintes decisoes ja foram debatidas e sao finais:
 * **[2026-03-03]** O workflow desktop `desktop-e2e.yml` ja foi validado em runner GitHub/Windows real. Qualquer mudanca no caminho SNES/Windows ou no runner E2E deve preservar esse baseline remoto.
 * **[2026-03-04]** Nesta maquina local o `gh` CLI nao esta instalado. O disparo remoto do workflow desktop deve ocorrer por `push` path-filtered ou por API/web quando houver autenticacao disponivel, mas o agente nao deve assumir `gh workflow run` como baseline universal.
 * **[2026-03-04]** Atualizacao do `06_AI_MEMORY_BANK.md` ao fim de cada sessao material volta a ser exigencia operacional. Ausencia de handoff aqui deve ser tratada como bug de processo.
+* **[2026-03-04]** `Concluido`, `validado`, `fechado` e termos equivalentes agora devem ser lidos como claims reservadas a certificacao real: caminho canonico funcional, gates aplicaveis verdes, prova correspondente e ausencia de erro bloqueante no escopo. Qualquer excecao deve rebaixar o status para `hardening` ou `experimental`.
+* **[2026-03-04]** `tauri-driver` local pode levar mais do que 15s para responder em certas maquinas. O runner desktop agora deve usar `RDS_E2E_DRIVER_TIMEOUT_MS` em vez de depender de timeout fixo curto.
 * **[2026-02-28]** `Deep Profiler`, `Asset Extractor` e `RetroFX` permanecem visiveis por contexto de produto, mas agora devem continuar explicitamente marcados como experimentais ate deixarem de ser stub/parcial.
 * **[2026-02-28]** No Windows, a deteccao de `bash` deve ignorar o shim do WSL (`C:\\Windows\\System32\\bash.exe`) e privilegiar Git Bash/MSYS2. Essa regra ja foi aplicada no codigo e nao deve ser removida sem substituto equivalente.
 * **[2026-02-28]** `data/sonic_test.gen` e a documentacao associada sao um ponto de atencao de compliance/licenciamento. O software pode operar com ROMs fornecidas pelo usuario para fins educacionais, pesquisa e preservacao, mas nao deve redistribuir ROM comercial como parte do produto.
@@ -260,6 +285,8 @@ Rebaseline tecnico do MVP para alinhar implementacao, documentacao e compliance 
 | 2026-03-03 | Codex | Validacao do `desktop-e2e.yml` em runner GitHub/Windows real, endurecimento diagnostico do runner desktop e correcao final do path SNES para `wlalink` no Windows |
 | 2026-03-04 | Codex | Validacao live consolidada no editor, bloqueio explicado de `Build & Run`, paridade preview/autoritativo endurecida e cobertura desktop E2E expandida para warnings de VRAM |
 | 2026-03-04 | Codex | Warning live de alta contagem de sprites adicionado em Mega Drive e SNES, runner/workflow desktop expandidos para `live-warning-sprites` e Memory Bank retomado como handoff obrigatorio |
+| 2026-03-04 | Codex | Blindagem textual dos canonicos para exigir certificacao real antes de qualquer claim de fase, etapa ou feature concluida |
+| 2026-03-04 | Codex | Warning live resumido na toolbar do editor, runner desktop endurecido para startup lento do `tauri-driver` e nova validacao real de warnings no app Tauri |
 
 ---
 

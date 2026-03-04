@@ -1,11 +1,20 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-03-03
+**Ultima revisao canonica:** 2026-03-04
 **Fase ativa real:** Hardening do fluxo `Build -> ROM -> Emulacao` ja validado em Windows com upstream real e em runner GitHub/Windows real
 
 > **DIRETRIZ PARA AGENTES DE IA**
 > Este roadmap precisa refletir estado real do codigo, nao claims historicas.
 > Se uma feature existe no repositorio, mas ainda depende de repeticao institucional/CI ou de cobertura complementar por target, ela deve ser tratada como `validada, em hardening`.
+> Nenhuma fase ou etapa pode ser considerada `realmente fechada` sem certificacao real: caminho canonico funcional, gates aplicaveis verdes, prova correspondente no fluxo afetado e ausencia de erro bloqueante no escopo certificado.
+
+## Semantica de status
+
+- `Implementada em codigo`: existe no repositorio, mas ainda nao possui certificacao real suficiente.
+- `Validada`: existe prova funcional real no escopo afetado, mas ainda pode depender de repeticao institucional, cobertura complementar ou endurecimento adicional.
+- `Em hardening`: ja passou por validacao real, mas ainda nao deve ser tratada como definitivamente fechada.
+- `Concluida e verificada`: so usar quando o caminho estiver certificado de forma real, sem erro bloqueante no escopo, sem gate vermelho e sem divergencia entre docs/UI e backend.
+- `Experimental`: superficie visivel, parcial, congelada ou ainda incapaz de sustentar claim de entrega real.
 
 ---
 
@@ -110,5 +119,7 @@
 ## Regra de Atualizacao
 
 - Marque `[x]` apenas quando houver codigo funcional e validacao correspondente.
+- Nao use `[x]` para simular progresso quando a prova ainda for mock, stub, output parcial ou fluxo paralelo ao canonico.
 - Se a validacao ja ocorreu, mas ainda depender de repeticao institucional ou cobertura adicional, marque como hardening e nao como totalmente encerrada.
+- Se houver erro bloqueante conhecido, regressao aberta ou evidencia insuficiente, rebaixe o status em vez de manter claim otimista.
 - Sempre atualize este arquivo junto de `06_AI_MEMORY_BANK.md` quando o status do produto mudar.

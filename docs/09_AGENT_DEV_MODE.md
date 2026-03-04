@@ -39,6 +39,7 @@
 9. Atualizar docs canonicos se o estado real mudou.
 
 Uma tarefa nao esta concluida enquanto o repositorio continuar anunciando um estado mais maduro do que o codigo e os gates sustentam.
+Uma tarefa tambem nao esta concluida enquanto faltar certificacao real no escopo alterado: prova funcional correspondente, gates verdes e ausencia de erro bloqueante ou regressao conhecida naquele fluxo.
 
 ---
 
@@ -61,6 +62,13 @@ Uma tarefa nao esta concluida enquanto o repositorio continuar anunciando um est
 
 ### 3.3 Regra de entrega
 - Nao usar termos como `pronto`, `completo`, `fechado`, `MVP concluido` ou `pipeline validado` sem satisfazer os gates correspondentes.
+- `Validado` e `concluido` exigem certificacao real, nao so implementacao em codigo ou CI verde.
+- Certificacao real, neste projeto, significa ao mesmo tempo:
+  - caminho canonico exercitado de verdade
+  - gates aplicaveis verdes
+  - ausencia de erro bloqueante no escopo certificado
+  - nenhuma divergencia entre UI, docs e backend sobre o estado entregue
+- Warning so pode coexistir com claim de entrega quando estiver comprovadamente nao-fatal, explicitamente sinalizado e sem mascarar problema real. Se houver duvida, o status correto e `hardening`.
 - Superficie parcial deve permanecer marcada como `Experimental` ou equivalente ate o backend e os gates sustentarem o fluxo.
 
 ---
@@ -73,6 +81,7 @@ Uma tarefa nao esta concluida enquanto o repositorio continuar anunciando um est
 - Nao adicionar dependencia nova sem aprovacao do usuario e atualizacao de `docs/02_TECH_STACK.md`.
 - Nao adicionar gate de CI que nao foi reproduzido localmente.
 - Nao esconder falha real atras de `TODO`, `stub`, mock permanente ou texto de marketing.
+- Nao tratar mock, stub, fixture artificial ou log de console como prova suficiente de fluxo real.
 - Nao deixar UI anunciar sucesso se o backend falhou ou se a persistencia nao ocorreu.
 - Nao commitar toolchains de terceiros no repositorio.
 - Nao inventar fixtures ou testes que nao exercitam o caminho canonico.
@@ -121,6 +130,7 @@ Leitura sintetica:
 - [ ] O estado real anunciado pelo repositorio continua honesto?
 - [ ] Os documentos de onboarding continuam coerentes com o Memory Bank?
 - [ ] Os gates aplicaveis foram rodados e passaram?
+- [ ] Existe certificacao real suficiente para qualquer claim de `validado`, `concluido` ou `fechado` feita nesta sessao?
 - [ ] Se algo continua parcial, a UI e a documentacao deixam isso claro?
 - [ ] Nao foi criado modulo, script, doc ou fluxo paralelo ao canonico?
 - [ ] O Memory Bank precisa ser atualizado?
@@ -135,6 +145,7 @@ Leitura sintetica:
 4. Duplicacao de store, service, pipeline, schema ou documentacao de estado.
 5. Dependencia nova adicionada sem justificativa e sem reflexo nos docs canonicos.
 6. Mudanca de fluxo publico sem teste, fixture ou prova funcional correspondente.
+7. Claim de `concluido` ou `validado` sustentada apenas por mock, stub, output cosmetico ou teste que nao passa pelo caminho canonico.
 
 ---
 

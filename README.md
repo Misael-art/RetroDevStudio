@@ -11,12 +11,19 @@
 
 ## Estado Real
 
-- Data de referencia: 2026-03-03.
+- Data de referencia: 2026-03-04.
 - Fase ativa real: hardening do fluxo `Build -> ROM -> Emulacao`, ja validado em Windows com upstream real, E2E desktop local e workflow GitHub/Windows multi-target.
 - `Fase 0` esta concluida e verificada.
 - `Fases 1 e 2` ja foram validadas em Windows com toolchains e cores upstream reais e agora estao em hardening.
 - `Fases 3 e 4` existem no editor, porem parte das superficies continuam `Experimental` ou congeladas ate o core ser fechado.
 - Se este README divergir do estado operacional, prevalecem `docs/06_AI_MEMORY_BANK.md`, `docs/03_ROADMAP_MVP.md` e `docs/09_AGENT_DEV_MODE.md`.
+
+### Regra de certificacao real
+
+- Nenhuma etapa, fase, feature ou fluxo pode ser tratado como `concluido`, `fechado`, `pronto` ou `validado` apenas porque existe no codigo.
+- Neste repositorio, esses termos so valem quando houver caminho canonico real, gates aplicaveis verdes, prova funcional correspondente e ausencia de erro bloqueante no escopo certificado.
+- Mock, stub, texto de UI, CI afrouxado, teste que nao exercita o caminho canonico ou documento otimista nao contam como certificacao.
+- Se restar duvida relevante, warning estrutural ou dependencia de nova comprovacao institucional, o status correto e `em hardening`, nao `concluido`.
 
 ## O Que Ja Existe No Codigo
 
@@ -130,13 +137,15 @@ Responda com "[Contexto Carregado]" e proponha o plano de acao.
 - `cargo test --lib -- --nocapture`
 - Validacao manual com dependencias oficiais quando a mudanca tocar build, emulacao ou toolchains reais.
 
+Sem isso, a entrega nao pode ser anunciada como real nem livre de erro bloqueante.
+
 ## Roadmap De Desenvolvimento
 
 | Fase | Objetivo | Status real |
 |------|---------|-------------|
-| **Fase 0: Fundacao** | Setup Tauri + React + Rust | Concluida e verificada |
-| **Fase 1: Core Mega Drive** | Gerar ROM jogavel a partir do editor | Validada em Windows, em hardening |
-| **Fase 2: Abstracao (SNES)** | Provar engine agnostica | Validada em Windows, em hardening |
+| **Fase 0: Fundacao** | Setup Tauri + React + Rust | Concluida e verificada sob os gates canonicos |
+| **Fase 1: Core Mega Drive** | Gerar ROM jogavel a partir do editor | Validada em Windows com fluxo real, em hardening |
+| **Fase 2: Abstracao (SNES)** | Provar engine agnostica | Validada em Windows com fluxo real, em hardening |
 | **Fase 3: Visual Logic** | NodeGraph e RetroFX | Implementada no editor, congelada ate fechar o core |
 | **Fase 4: Camada Pro** | Engenharia Reversa e Profiler | Implementada no editor, com superficies experimentais/parciais |
 

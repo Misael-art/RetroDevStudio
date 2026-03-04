@@ -57,6 +57,7 @@ jobs:
     env:
       CARGO_BUILD_JOBS: 2
       RUST_MIN_STACK: 16777216
+      RDS_E2E_DRIVER_TIMEOUT_MS: 60000
       RDS_E2E_RUN_TIMEOUT_MS: 300000
       RDS_E2E_TARGET: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || github.event_name == 'workflow_call' && inputs.target || 'all' }}
     steps:
@@ -100,6 +101,7 @@ jobs:
       - name: Report resolved target
         run: |
           Write-Host "Desktop E2E target: $env:RDS_E2E_TARGET"
+          Write-Host "Desktop E2E driver startup timeout: $env:RDS_E2E_DRIVER_TIMEOUT_MS ms"
           Write-Host "Desktop E2E timeout: $env:RDS_E2E_RUN_TIMEOUT_MS ms"
 
       - name: Run Mega Drive desktop smoke

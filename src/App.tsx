@@ -29,6 +29,7 @@ import {
 } from "./core/ipc/toolsService";
 import {
   getLiveBuildBlockReason,
+  getLiveBuildWarningSummary,
   useLiveValidationController,
 } from "./core/validation/liveValidationController";
 
@@ -147,6 +148,12 @@ export default function App() {
   }
 
   const buildDisabledReason = getLiveBuildBlockReason({
+    activeProjectDir,
+    building,
+    hwStatus,
+    hwValidationState,
+  });
+  const buildWarningSummary = getLiveBuildWarningSummary({
     activeProjectDir,
     building,
     hwStatus,
@@ -618,7 +625,11 @@ export default function App() {
         <ToolbarButton label="Gerar C" onClick={() => void handleGenerateC()} disabled={!activeProjectDir} />
         <div
           className="flex items-center gap-2"
-          title={liveBuildBlocked ? buildDisabledReason ?? undefined : undefined}
+          title={
+            liveBuildBlocked
+              ? buildDisabledReason ?? undefined
+              : buildWarningSummary ?? undefined
+          }
         >
           <ToolbarButton
             label="Build & Run"
@@ -626,7 +637,7 @@ export default function App() {
             disabled={building || !activeProjectDir || liveBuildBlocked}
             accent="success"
             testId="toolbar-build-run"
-            title={buildDisabledReason ?? undefined}
+            title={liveBuildBlocked ? buildDisabledReason ?? undefined : buildWarningSummary ?? undefined}
             describedBy={liveBuildBlocked ? "build-disabled-reason" : undefined}
           />
           {liveBuildBlocked && buildDisabledReason && (
@@ -638,6 +649,16 @@ export default function App() {
               title={buildDisabledReason}
             >
               {buildDisabledReason}
+            </span>
+          )}
+          {!liveBuildBlocked && buildWarningSummary && (
+            <span
+              data-testid="build-warning-summary"
+              aria-live="polite"
+              className="max-w-52 truncate text-[10px] text-[#fab387]"
+              title={buildWarningSummary}
+            >
+              {buildWarningSummary}
             </span>
           )}
         </div>

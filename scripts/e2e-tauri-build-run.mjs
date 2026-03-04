@@ -500,6 +500,10 @@ async function main() {
   }
 
   const options = parseArgs(process.argv.slice(2));
+  const driverStartupTimeoutMs = parsePositiveInteger(
+    process.env.RDS_E2E_DRIVER_TIMEOUT_MS,
+    30000
+  );
   const emulatorActivationTimeoutMs = parsePositiveInteger(process.env.RDS_E2E_RUN_TIMEOUT_MS, 180000);
   await assertPathExists(
     options.project,
@@ -574,7 +578,7 @@ async function main() {
         const response = await fetch(`${driverServerUrl}/status`);
         return response.ok;
       },
-      15000,
+      driverStartupTimeoutMs,
       "tauri-driver nao ficou pronto a tempo"
     );
 
@@ -670,6 +674,7 @@ async function main() {
             `
               const button = document.querySelector('[data-testid="toolbar-build-run"]');
               const reason = document.querySelector('[data-testid="build-disabled-reason"]');
+              const summary = document.querySelector('[data-testid="build-warning-summary"]');
               const severity = document.querySelector('[data-testid="hardware-limits-severity"]');
               const warning = document.querySelector('[data-testid="hardware-warning-0"]');
               const error = document.querySelector('[data-testid="hardware-error-0"]');
@@ -677,6 +682,7 @@ async function main() {
                 disabled: Boolean(button?.disabled),
                 describedBy: button?.getAttribute('aria-describedby') ?? '',
                 reason: reason?.textContent?.trim() ?? '',
+                summary: summary?.textContent?.trim() ?? '',
                 severity: severity?.textContent?.trim() ?? '',
                 warning: warning?.textContent?.trim() ?? '',
                 error: error?.textContent?.trim() ?? '',
@@ -689,7 +695,9 @@ async function main() {
           if (overflowScenario.expectBuildDisabled) {
             return result?.disabled && result?.reason.includes("Build bloqueado:") ? result : false;
           }
-          return !result?.disabled && result?.warning.includes(overflowScenario.expectedReasonFragment)
+          return !result?.disabled &&
+            result?.warning.includes(overflowScenario.expectedReasonFragment) &&
+            result?.summary.includes(overflowScenario.expectedReasonFragment)
             ? result
             : false;
         },
@@ -713,6 +721,10 @@ async function main() {
 
         if (liveStatus.reason) {
           fail(`Build exibiu motivo de bloqueio indevido: ${liveStatus.reason}`);
+        }
+
+        if (!liveStatus.summary.includes(overflowScenario.expectedReasonFragment)) {
+          fail(`Toolbar nao exibiu o warning esperado: ${liveStatus.summary}`);
         }
 
         if (!liveStatus.warning.includes(overflowScenario.expectedReasonFragment)) {
@@ -744,7 +756,7 @@ async function main() {
       console.log(
         overflowScenario.expectBuildDisabled
           ? `Motivo visual: ${liveStatus.reason}`
-          : `Warning visual: ${liveStatus.warning}`
+          : `Warning visual: ${liveStatus.summary}`
       );
       return;
     }

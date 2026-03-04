@@ -41,6 +41,33 @@ export function getLiveBuildBlockReason({
   return null;
 }
 
+export function getLiveBuildWarningSummary({
+  activeProjectDir,
+  building,
+  hwStatus,
+  hwValidationState,
+}: {
+  activeProjectDir: string;
+  building: boolean;
+  hwStatus: HwStatus | null;
+  hwValidationState: HwValidationState;
+}): string | null {
+  if (!activeProjectDir || building) {
+    return null;
+  }
+
+  if (
+    hwValidationState === "fresh" &&
+    hwStatus &&
+    hwStatus.errors.length === 0 &&
+    hwStatus.warnings.length > 0
+  ) {
+    return `Build com alerta: ${hwStatus.warnings[0]}`;
+  }
+
+  return null;
+}
+
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

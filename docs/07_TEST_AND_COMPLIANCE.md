@@ -66,6 +66,7 @@
 9. Atualizacao de `docs/03_ROADMAP_MVP.md` e `docs/06_AI_MEMORY_BANK.md` quando o estado do produto mudar
 
 Nenhum agente deve chamar uma feature de `pronta`, `completa` ou `entregue` se esse gate nao foi satisfeito ou se a feature continua parcial/experimental.
+Nenhuma etapa deve ser tratada como `concluida` sem certificacao real do fluxo afetado, sem erro bloqueante conhecido e sem evidencia fake ou paralela ao caminho canonico.
 
 ---
 

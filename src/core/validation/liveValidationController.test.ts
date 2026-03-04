@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   getLiveBuildBlockReason,
+  getLiveBuildWarningSummary,
   serializeSceneDraft,
 } from "./liveValidationController";
 import type { Scene } from "../ipc/sceneService";
@@ -75,6 +76,46 @@ describe("liveValidationController", () => {
         activeProjectDir: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
         building: false,
         hwValidationState: "fresh",
+        hwStatus: {
+          vram_used: 57344,
+          vram_limit: 65536,
+          sprite_count: 1,
+          sprite_limit: 80,
+          bg_layers: 0,
+          bg_layers_limit: 3,
+          errors: [],
+          warnings: ["VRAM Warning"],
+        },
+      })
+    ).toBeNull();
+  });
+
+  it("returns the first live warning summary without blocking the build", () => {
+    expect(
+      getLiveBuildWarningSummary({
+        activeProjectDir: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+        building: false,
+        hwValidationState: "fresh",
+        hwStatus: {
+          vram_used: 57344,
+          vram_limit: 65536,
+          sprite_count: 1,
+          sprite_limit: 80,
+          bg_layers: 0,
+          bg_layers_limit: 3,
+          errors: [],
+          warnings: ["VRAM Warning"],
+        },
+      })
+    ).toBe("Build com alerta: VRAM Warning");
+  });
+
+  it("does not expose a warning summary for stale snapshots", () => {
+    expect(
+      getLiveBuildWarningSummary({
+        activeProjectDir: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+        building: false,
+        hwValidationState: "stale",
         hwStatus: {
           vram_used: 57344,
           vram_limit: 65536,
