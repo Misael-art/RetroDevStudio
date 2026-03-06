@@ -18,6 +18,10 @@ import {
   type ThirdPartyDependencyId,
 } from "../../core/ipc/toolsService";
 
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 async function browseFile(
   setter: (value: string) => void,
   opts?: {
@@ -65,7 +69,7 @@ function PathField({
         />
         <button
           onClick={() =>
-            browseFile(set, {
+            void browseFile(set, {
               directory,
               filters: extensions ? [{ name: "File", extensions }] : undefined,
             })
@@ -124,7 +128,7 @@ function PatchStudio() {
       }
       logMessage(result.ok ? "success" : "error", `[Patch] ${result.message}`);
     } catch (error) {
-      logMessage("error", `[Patch] Erro inesperado: ${error}`);
+      logMessage("error", `[Patch] Erro inesperado: ${describeError(error)}`);
     } finally {
       setBusy(false);
     }
@@ -173,7 +177,7 @@ function PatchStudio() {
 
       <button
         disabled={busy}
-        onClick={run}
+        onClick={() => void run()}
         className={`rounded py-1.5 text-xs font-semibold transition-colors ${
           busy
             ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
@@ -217,7 +221,6 @@ function DeepProfiler() {
   const [romPath, setRomPath] = useState("");
   const [report, setReport] = useState<ProfileReport | null>(null);
   const [busy, setBusy] = useState(false);
-  const disabled = true;
 
   async function analyze() {
     if (!romPath) {
@@ -239,7 +242,7 @@ function DeepProfiler() {
         );
       }
     } catch (error) {
-      logMessage("error", `[Profiler] Erro: ${error}`);
+      logMessage("error", `[Profiler] Erro: ${describeError(error)}`);
     } finally {
       setBusy(false);
     }
@@ -250,7 +253,7 @@ function DeepProfiler() {
 
   return (
     <div className="flex flex-col gap-3 p-3">
-      <ExperimentalNotice summary="UI visivel, mas o profiler ainda nao gera relatorio confiavel. Analise desabilitada ate o backend sair do estado parcial." />
+      <ExperimentalNotice summary="Fluxo conectado ao backend real. Manter badge Experimental ate validar o relatorio com ROM real ponta a ponta." />
 
       <div className="flex flex-col gap-2">
         <PathField
@@ -262,15 +265,15 @@ function DeepProfiler() {
           accentColor="89b4fa"
         />
         <button
-          disabled={busy || disabled}
-          onClick={analyze}
+          disabled={busy}
+          onClick={() => void analyze()}
           className={`rounded py-1.5 text-xs font-semibold transition-colors ${
-            busy || disabled
+            busy
               ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
               : "bg-[#89b4fa] text-[#1e1e2e] hover:bg-[#74a8f0]"
           }`}
         >
-          {disabled ? "Experimental - indisponivel" : busy ? "Analisando..." : "Analisar"}
+          {busy ? "Analisando..." : "Analisar"}
         </button>
       </div>
 
@@ -348,7 +351,7 @@ function AssetExtractor() {
         logMessage("error", `[Extractor] ${result.error}`);
       }
     } catch (error) {
-      logMessage("error", `[Extractor] Erro: ${error}`);
+      logMessage("error", `[Extractor] Erro: ${describeError(error)}`);
     } finally {
       setBusy(false);
     }
@@ -406,7 +409,7 @@ function AssetExtractor() {
 
       <button
         disabled={busy || disabled}
-        onClick={extract}
+        onClick={() => void extract()}
         className={`rounded py-1.5 text-xs font-semibold transition-colors ${
           busy || disabled
             ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
@@ -449,14 +452,14 @@ function RuntimeSetup() {
       const report = await getThirdPartyStatus();
       setItems(report.items);
     } catch (error) {
-      logMessage("error", `[Setup] Falha ao consultar dependencias: ${error}`);
+      logMessage("error", `[Setup] Falha ao consultar dependencias: ${describeError(error)}`);
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    refreshStatus();
+    void refreshStatus();
   }, []);
 
   async function install(dependencyId: ThirdPartyDependencyId | string, label: string) {
@@ -473,7 +476,7 @@ function RuntimeSetup() {
       logMessage(result.ok ? "success" : "error", `[Setup] ${result.message}`);
       await refreshStatus();
     } catch (error) {
-      logMessage("error", `[Setup] Falha inesperada ao instalar ${label}: ${error}`);
+      logMessage("error", `[Setup] Falha inesperada ao instalar ${label}: ${describeError(error)}`);
     } finally {
       setBusyId(null);
     }
@@ -489,7 +492,7 @@ function RuntimeSetup() {
           </p>
         </div>
         <button
-          onClick={refreshStatus}
+          onClick={() => void refreshStatus()}
           disabled={loading || busyId !== null}
           className="rounded bg-[#313244] px-2 py-1 text-[10px] text-[#a6adc8] hover:bg-[#45475a] disabled:cursor-not-allowed disabled:opacity-40"
         >
