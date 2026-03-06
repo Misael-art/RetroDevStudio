@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   validateProject: vi.fn(),
   generateCCode: vi.fn(),
   emulatorLoadRom: vi.fn(),
+  emulatorSaveState: vi.fn(),
+  emulatorLoadState: vi.fn(),
   emulatorStop: vi.fn(),
   emulatorSendInput: vi.fn(),
   startFrameLoop: vi.fn(),
@@ -70,6 +72,8 @@ vi.mock("./core/ipc/emulatorService", () => ({
     r: false,
   },
   emulatorLoadRom: mocks.emulatorLoadRom,
+  emulatorSaveState: mocks.emulatorSaveState,
+  emulatorLoadState: mocks.emulatorLoadState,
   emulatorStop: mocks.emulatorStop,
   emulatorSendInput: mocks.emulatorSendInput,
   startFrameLoop: mocks.startFrameLoop,
@@ -152,6 +156,7 @@ describe("App build flow", () => {
       hwValidationState: "idle",
       hwValidatedRevision: 0,
       hwValidationError: null,
+      hwValidationRefreshTick: 0,
       activeScene: {
         scene_id: "main_scene",
         display_name: "Main Scene",
@@ -212,6 +217,14 @@ describe("App build flow", () => {
     mocks.emulatorStop.mockResolvedValue({
       ok: true,
       message: "Emulador parado",
+    });
+    mocks.emulatorSaveState.mockResolvedValue({
+      ok: true,
+      message: "Save state salvo (8 bytes).",
+    });
+    mocks.emulatorLoadState.mockResolvedValue({
+      ok: true,
+      message: "Save state restaurado.",
     });
     mocks.emulatorSendInput.mockResolvedValue({
       ok: true,
@@ -340,13 +353,33 @@ describe("App build flow", () => {
     });
 
     const buildButton = findButton(container, "Build & Run");
+    const revalidateButton = container.querySelector(
+      "[data-testid='build-stale-revalidate']"
+    ) as HTMLButtonElement | null;
+    const refreshTickBefore = useEditorStore.getState().hwValidationRefreshTick;
 
     expect(buildButton.disabled).toBe(false);
     expect(container.querySelector("[data-testid='build-disabled-reason']")).toBeNull();
     expect(container.querySelector("[data-testid='build-live-state']")?.textContent).toContain(
       "DESATUAL."
     );
+    expect(container.querySelector("[data-testid='build-stale-hint']")?.textContent).toContain(
+      "Edite a cena para revalidar"
+    );
+    expect(revalidateButton?.textContent).toContain("Revalidar agora");
     expect(container.querySelector("[data-testid='build-warning-summary']")).toBeNull();
+
+    await act(async () => {
+      revalidateButton?.click();
+      await flush();
+    });
+
+    expect(useEditorStore.getState().hwValidationRefreshTick).toBe(refreshTickBefore + 1);
+    expect(
+      useEditorStore
+        .getState()
+        .consoleEntries.some((entry) => entry.message === "[Live] Revalidacao manual solicitada.")
+    ).toBe(true);
 
     await act(async () => {
       buildButton.click();
@@ -393,5 +426,137 @@ describe("App build flow", () => {
     });
 
     expect(mocks.buildProject).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows LIVE state with no extra summaries when diagnostics are fresh and clean", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        hwStatus: {
+          vram_used: 8192,
+          vram_limit: 65536,
+          sprite_count: 4,
+          sprite_limit: 80,
+          bg_layers: 1,
+          bg_layers_limit: 4,
+          errors: [],
+          warnings: [],
+        },
+        hwValidationState: "fresh",
+        hwValidatedRevision: 1,
+        hwValidationError: null,
+      });
+      await flush();
+    });
+
+    const buildButton = findButton(container, "Build & Run");
+    const liveState = container.querySelector("[data-testid='build-live-state']");
+
+    expect(buildButton.disabled).toBe(false);
+    expect(liveState?.textContent).toContain("LIVE");
+    expect(liveState?.getAttribute("title")).toContain("Preview live sincronizado.");
+    expect(container.querySelector("[data-testid='build-disabled-reason']")).toBeNull();
+    expect(container.querySelector("[data-testid='build-warning-summary']")).toBeNull();
+    expect(container.querySelector("[data-testid='build-live-error-summary']")).toBeNull();
+    expect(container.querySelector("[data-testid='build-live-pending-summary']")).toBeNull();
+    expect(container.querySelector("[data-testid='build-stale-hint']")).toBeNull();
+    expect(container.querySelector("[data-testid='build-stale-revalidate']")).toBeNull();
+
+    await act(async () => {
+      buildButton.click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.buildProject).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows explicit live error detail without blocking Build & Run", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        hwValidationState: "error",
+        hwValidationError: "Falha de comunicacao com validate_scene_draft",
+      });
+      await flush();
+    });
+
+    const buildButton = findButton(container, "Build & Run");
+    const liveState = container.querySelector("[data-testid='build-live-state']");
+    const errorSummary = container.querySelector("[data-testid='build-live-error-summary']");
+
+    expect(buildButton.disabled).toBe(false);
+    expect(liveState?.textContent).toContain("ERRO LIVE");
+    expect(errorSummary?.textContent).toContain(
+      "Live com falha: Falha de comunicacao com validate_scene_draft"
+    );
+    expect(container.querySelector("[data-testid='build-warning-summary']")).toBeNull();
+    expect(container.querySelector("[data-testid='build-disabled-reason']")).toBeNull();
+
+    await act(async () => {
+      buildButton.click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.buildProject).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows an explicit pending live analysis summary while keeping Build & Run enabled", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        hwValidationState: "pending",
+        hwValidationError: null,
+      });
+      await flush();
+    });
+
+    const buildButton = findButton(container, "Build & Run");
+    const liveState = container.querySelector("[data-testid='build-live-state']");
+    const pendingSummary = container.querySelector("[data-testid='build-live-pending-summary']");
+
+    expect(buildButton.disabled).toBe(false);
+    expect(liveState?.textContent).toContain("ANALISANDO");
+    expect(pendingSummary?.textContent).toContain("Live em analise...");
+    expect(container.querySelector("[data-testid='build-warning-summary']")).toBeNull();
+    expect(container.querySelector("[data-testid='build-live-error-summary']")).toBeNull();
+    expect(container.querySelector("[data-testid='build-disabled-reason']")).toBeNull();
+
+    await act(async () => {
+      buildButton.click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.buildProject).toHaveBeenCalledTimes(1);
+  });
+
+  it("triggers emulator save and load state actions from the game viewport", async () => {
+    await act(async () => {
+      useEditorStore.setState({ activeViewportTab: "game" });
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, "Salvar state").click();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, "Carregar state").click();
+      await flush();
+    });
+
+    expect(mocks.emulatorSaveState).toHaveBeenCalledTimes(1);
+    expect(mocks.emulatorLoadState).toHaveBeenCalledTimes(1);
+    expect(
+      useEditorStore
+        .getState()
+        .consoleEntries.some((entry) => entry.message === "[Emulador] Save state salvo (8 bytes).")
+    ).toBe(true);
+    expect(
+      useEditorStore
+        .getState()
+        .consoleEntries.some((entry) => entry.message === "[Emulador] Save state restaurado.")
+    ).toBe(true);
   });
 });

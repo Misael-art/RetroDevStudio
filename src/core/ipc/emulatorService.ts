@@ -46,6 +46,14 @@ export function emulatorRunFrame(): Promise<EmulatorCommandResult> {
   return invoke<EmulatorCommandResult>("emulator_run_frame");
 }
 
+export function emulatorSaveState(): Promise<EmulatorCommandResult> {
+  return invoke<EmulatorCommandResult>("emulator_save_state");
+}
+
+export function emulatorLoadState(): Promise<EmulatorCommandResult> {
+  return invoke<EmulatorCommandResult>("emulator_load_state");
+}
+
 export function emulatorSendInput(joypad: JoypadState): Promise<EmulatorCommandResult> {
   return invoke<EmulatorCommandResult>("emulator_send_input", { joypad });
 }

@@ -204,6 +204,9 @@ type RetroGetSystemAvInfo = unsafe extern "C" fn(info: *mut RetroSystemAvInfo);
 type RetroLoadGame = unsafe extern "C" fn(game: *const RetroGameInfo) -> bool;
 type RetroUnloadGame = unsafe extern "C" fn();
 type RetroRun = unsafe extern "C" fn();
+type RetroSerializeSize = unsafe extern "C" fn() -> usize;
+type RetroSerialize = unsafe extern "C" fn(data: *mut c_void, size: usize) -> bool;
+type RetroUnserialize = unsafe extern "C" fn(data: *const c_void, size: usize) -> bool;
 
 #[repr(C)]
 struct RetroGameInfo {
@@ -258,6 +261,9 @@ struct CoreApi {
     load_game: RetroLoadGame,
     unload_game: RetroUnloadGame,
     run: RetroRun,
+    serialize_size: RetroSerializeSize,
+    serialize: RetroSerialize,
+    unserialize: RetroUnserialize,
 }
 
 impl CoreApi {
@@ -277,6 +283,9 @@ impl CoreApi {
             load_game: *get_symbol(library, b"retro_load_game\0")?,
             unload_game: *get_symbol(library, b"retro_unload_game\0")?,
             run: *get_symbol(library, b"retro_run\0")?,
+            serialize_size: *get_symbol(library, b"retro_serialize_size\0")?,
+            serialize: *get_symbol(library, b"retro_serialize\0")?,
+            unserialize: *get_symbol(library, b"retro_unserialize\0")?,
         })
     }
 }
@@ -441,6 +450,7 @@ pub struct EmulatorCore {
     pub handle: EmulatorHandle,
     preferred_core_path: Option<PathBuf>,
     runtime: Option<LoadedCore>,
+    saved_state: Option<Vec<u8>>,
 }
 
 impl EmulatorCore {
@@ -449,6 +459,7 @@ impl EmulatorCore {
             handle: new_emulator_handle(),
             preferred_core_path: core_path.map(|path| path.to_path_buf()),
             runtime: None,
+            saved_state: None,
         }
     }
 
@@ -514,6 +525,61 @@ impl EmulatorCore {
         Ok((state.framebuffer.clone(), state.frame_size, state.pixel_format))
     }
 
+    pub fn save_state(&mut self) -> Result<usize, String> {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string())?;
+        let size = unsafe { (runtime.api.serialize_size)() };
+
+        if size == 0 {
+            return Err("O core Libretro atual nao suporta save states.".to_string());
+        }
+
+        let mut buffer = vec![0u8; size];
+        let serialized = unsafe {
+            (runtime.api.serialize)(buffer.as_mut_ptr().cast::<c_void>(), buffer.len())
+        };
+        if !serialized {
+            return Err("Falha ao serializar o estado do core Libretro.".to_string());
+        }
+
+        self.saved_state = Some(buffer);
+        Ok(size)
+    }
+
+    pub fn load_state(&mut self) -> Result<(), String> {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string())?;
+        let saved_state = self
+            .saved_state
+            .as_ref()
+            .ok_or_else(|| "Nenhum save state foi salvo nesta sessao.".to_string())?;
+        let expected_size = unsafe { (runtime.api.serialize_size)() };
+
+        if expected_size == 0 {
+            return Err("O core Libretro atual nao suporta save states.".to_string());
+        }
+        if saved_state.len() != expected_size {
+            return Err(format!(
+                "Save state salvo possui {} bytes, mas o core atual espera {} bytes.",
+                saved_state.len(),
+                expected_size
+            ));
+        }
+
+        let restored = unsafe {
+            (runtime.api.unserialize)(saved_state.as_ptr().cast::<c_void>(), saved_state.len())
+        };
+        if !restored {
+            return Err("Falha ao restaurar o save state no core Libretro.".to_string());
+        }
+
+        Ok(())
+    }
+
     pub fn set_joypad(&self, joypad: JoypadState) -> Result<(), String> {
         let mut state = self.handle.lock().map_err(|e| e.to_string())?;
         state.joypad = joypad;
@@ -539,6 +605,7 @@ impl EmulatorCore {
         state.audio_buffer.clear();
         state.last_audio_frames = 0;
         state.rom_path.clear();
+        self.saved_state = None;
         Ok(())
     }
 
@@ -962,6 +1029,38 @@ pub extern "C" fn retro_load_game(info: *const RetroGameInfo) -> bool {
 pub extern "C" fn retro_unload_game() {}
 
 #[no_mangle]
+pub extern "C" fn retro_serialize_size() -> usize {
+    8
+}
+
+#[no_mangle]
+pub extern "C" fn retro_serialize(data: *mut c_void, size: usize) -> bool {
+    if data.is_null() || size < 8 {
+        return false;
+    }
+
+    let bytes = (FRAME_COUNTER.load(Ordering::SeqCst) as u64).to_le_bytes();
+    unsafe {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), data.cast::<u8>(), bytes.len());
+    }
+    true
+}
+
+#[no_mangle]
+pub extern "C" fn retro_unserialize(data: *const c_void, size: usize) -> bool {
+    if data.is_null() || size < 8 {
+        return false;
+    }
+
+    let mut bytes = [0u8; 8];
+    unsafe {
+        std::ptr::copy_nonoverlapping(data.cast::<u8>(), bytes.as_mut_ptr(), bytes.len());
+    }
+    FRAME_COUNTER.store(u64::from_le_bytes(bytes) as usize, Ordering::SeqCst);
+    true
+}
+
+#[no_mangle]
 pub extern "C" fn retro_reset() {
     FRAME_COUNTER.store(0, Ordering::SeqCst);
 }
@@ -1108,5 +1207,41 @@ pub extern "C" fn retro_run() {
         }
 
         clear_active_emulator();
+    }
+
+    #[test]
+    fn save_state_restores_mock_core_progress() {
+        let _serial = test_serial_guard();
+        let dir = temp_dir("save-state");
+        let core_path = compile_mock_core(&dir);
+        let rom_path = write_test_rom(&dir, "save_test", "gen");
+
+        let mut emulator = EmulatorCore::new(Some(&core_path));
+        emulator.load_rom(&rom_path).expect("load rom into mock core");
+
+        emulator.run_frame().expect("run first frame");
+        let (_, size_before, format_before) =
+            emulator.get_framebuffer().expect("read framebuffer after first frame");
+
+        let saved_size = emulator.save_state().expect("save emulator state");
+        assert_eq!(saved_size, 8);
+
+        emulator.run_frame().expect("run second frame");
+        let (advanced_framebuffer, advanced_size, advanced_format) =
+            emulator.get_framebuffer().expect("read framebuffer after second frame");
+
+        emulator.load_state().expect("restore emulator state");
+        emulator.run_frame().expect("run restored frame");
+        let (restored_framebuffer, restored_size, restored_format) =
+            emulator.get_framebuffer().expect("read framebuffer after restore");
+
+        assert_eq!(size_before, advanced_size);
+        assert_eq!(format_before, advanced_format);
+        assert_eq!(advanced_size, restored_size);
+        assert_eq!(advanced_format, restored_format);
+        assert_eq!(advanced_framebuffer, restored_framebuffer);
+
+        emulator.stop().expect("stop emulator");
+        let _ = fs::remove_dir_all(dir);
     }
 }

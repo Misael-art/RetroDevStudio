@@ -27,6 +27,7 @@
   - C3 foi concluida no editor: `retrofx` agora faz parte do schema canonico de cena em Rust + TypeScript, o `RetroFX Designer` voltou a salvar configuracoes reais de parallax/raster no JSON da cena e a superficie segue marcada como `Experimental` porque ainda nao ha emissao no build.
   - D1 foi concluida no editor visual: `NodeGraphEditor` agora carrega/salva o grafo da entidade em `LogicComponent.graph`, com serializacao JSON validada, autosave no scene JSON e testes de roundtrip no frontend.
   - D2 foi concluida no pipeline canonico: o compilador agora traduz o `NodeGraph` persistido para operacoes reais no game loop SGDK/SNES, cobrindo `event_start`, `sprite_move`, `condition_overlap` com AABB runtime e `action_sound`, com testes dedicados no AST generator e nos dois emitters.
+  - E1 foi concluida no emulador: save states agora usam `retro_serialize_size`/`retro_serialize`/`retro_unserialize` reais no FFI, com slot em memoria no `EmulatorCore`, IPC `emulator_save_state`/`emulator_load_state`, botões no `Game View` e cobertura Rust/React para salvar e restaurar estado.
   - O runner de testes frontend foi endurecido em `vite.config.ts` para usar um unico worker em `threads`, eliminando os timeouts de `vitest-pool` que impediam o gate canonico `npm test` neste host.
   - O baseline local desta rodada permaneceu verde apos cada tarefa com os gates exigidos (`npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo clippy -- -D warnings`, `cargo test --lib -- --nocapture`).
 
@@ -443,7 +444,7 @@
   - GitHub Actions `Desktop E2E` (`22606643935`) -> OK em `windows-latest`, com `Run Mega Drive desktop smoke` e `Run SNES desktop smoke` ambos verdes.
 
 * **Proximo passo imediato:**
-  1. Executar E1 da fila MVP: adicionar save states reais do Libretro (`retro_serialize_size`, `retro_serialize`, `retro_unserialize`) com IPC `emulator_save_state`/`emulator_load_state` e UI correspondente no `Game View`.
+  1. Executar E2 da fila MVP: adicionar frame stepping com UI de `step`, `pause` e `resume` no `Game View`, reaproveitando o caminho canonico de `run_frame` manual sem criar loop paralelo.
   2. Manter o baseline verde apos a tarefa (`check:tree`, `lint`, `tsc`, `npm test`, `cargo clippy`, `cargo test --lib`) antes de seguir para o Bloco E.
   3. Preservar o grafo salvo em `LogicComponent.graph` como fonte canonicamente carregada para compilacao, sem bypass paralelo no build.
 

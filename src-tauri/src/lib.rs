@@ -220,6 +220,38 @@ fn emulator_run_frame(
     EmulatorCommandResult { ok: true, message: String::new() }
 }
 
+#[tauri::command]
+fn emulator_save_state(emu: State<EmulatorCoreState>) -> EmulatorCommandResult {
+    let mut core = match emu.0.lock() {
+        Ok(c) => c,
+        Err(e) => return EmulatorCommandResult { ok: false, message: e.to_string() },
+    };
+
+    match core.save_state() {
+        Ok(size) => EmulatorCommandResult {
+            ok: true,
+            message: format!("Save state salvo ({} bytes).", size),
+        },
+        Err(error) => EmulatorCommandResult { ok: false, message: error },
+    }
+}
+
+#[tauri::command]
+fn emulator_load_state(emu: State<EmulatorCoreState>) -> EmulatorCommandResult {
+    let mut core = match emu.0.lock() {
+        Ok(c) => c,
+        Err(e) => return EmulatorCommandResult { ok: false, message: e.to_string() },
+    };
+
+    match core.load_state() {
+        Ok(()) => EmulatorCommandResult {
+            ok: true,
+            message: "Save state restaurado.".to_string(),
+        },
+        Err(error) => EmulatorCommandResult { ok: false, message: error },
+    }
+}
+
 /// Envia o estado dos botões do joypad 1 para o emulador.
 #[tauri::command]
 fn emulator_send_input(
@@ -489,6 +521,8 @@ pub fn run() {
             // Emulator
             emulator_load_rom,
             emulator_run_frame,
+            emulator_save_state,
+            emulator_load_state,
             emulator_send_input,
             emulator_stop,
             // Cena
@@ -778,6 +812,36 @@ pub extern "C" fn retro_load_game(info: *const RetroGameInfo) -> bool {
 
 #[no_mangle]
 pub extern "C" fn retro_unload_game() {}
+
+#[no_mangle]
+pub extern "C" fn retro_serialize_size() -> usize { 8 }
+
+#[no_mangle]
+pub extern "C" fn retro_serialize(data: *mut c_void, size: usize) -> bool {
+    if data.is_null() || size < 8 {
+        return false;
+    }
+
+    let bytes = (FRAME_COUNTER.load(Ordering::SeqCst) as u64).to_le_bytes();
+    unsafe {
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), data.cast::<u8>(), bytes.len());
+    }
+    true
+}
+
+#[no_mangle]
+pub extern "C" fn retro_unserialize(data: *const c_void, size: usize) -> bool {
+    if data.is_null() || size < 8 {
+        return false;
+    }
+
+    let mut bytes = [0u8; 8];
+    unsafe {
+        std::ptr::copy_nonoverlapping(data.cast::<u8>(), bytes.as_mut_ptr(), bytes.len());
+    }
+    FRAME_COUNTER.store(u64::from_le_bytes(bytes) as usize, Ordering::SeqCst);
+    true
+}
 
 #[no_mangle]
 pub extern "C" fn retro_run() {

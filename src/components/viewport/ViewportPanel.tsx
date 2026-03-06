@@ -3,6 +3,8 @@ import Tabs from "../common/Tabs";
 import { useEditorStore } from "../../core/store/editorStore";
 import {
   JOYPAD_DEFAULT,
+  emulatorLoadState,
+  emulatorSaveState,
   emulatorSendInput,
   emulatorStop,
   keyToJoypad,
@@ -26,6 +28,10 @@ const MD_WIDTH = 320;
 const MD_HEIGHT = 224;
 const GRID_SNAP_SIZE = 8;
 
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -43,6 +49,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 function snapToGrid(value: number, step: number): number {
   return Math.round(value / step) * step;
 }
+
 export default function ViewportPanel() {
   const {
     activeViewportTab,
@@ -81,6 +88,8 @@ export default function ViewportPanel() {
   const [emulatorActive, setEmulatorActive] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [gridSnap, setGridSnap] = useState(true);
+  const [saveStateBusy, setSaveStateBusy] = useState(false);
+  const [loadStateBusy, setLoadStateBusy] = useState(false);
 
   activeTabRef.current = activeViewportTab;
   pausedRef.current = emulPaused;
@@ -150,11 +159,43 @@ export default function ViewportPanel() {
         .catch((error: unknown) => {
           loopStartingRef.current = false;
           if (loopTokenRef.current !== token) return;
-          logMessage("error", `Falha ao iniciar emulador: ${error}`);
+          logMessage("error", `Falha ao iniciar emulador: ${describeError(error)}`);
         });
     },
     [logMessage, renderFrame, stopFrameLoop]
   );
+
+  const handleSaveState = useCallback(async () => {
+    setSaveStateBusy(true);
+    try {
+      const result = await emulatorSaveState();
+      if (!result.ok) {
+        logMessage("error", `[Emulador] ${result.message}`);
+        return;
+      }
+      logMessage("success", `[Emulador] ${result.message}`);
+    } catch (error: unknown) {
+      logMessage("error", `[Emulador] Falha ao salvar state: ${describeError(error)}`);
+    } finally {
+      setSaveStateBusy(false);
+    }
+  }, [logMessage]);
+
+  const handleLoadState = useCallback(async () => {
+    setLoadStateBusy(true);
+    try {
+      const result = await emulatorLoadState();
+      if (!result.ok) {
+        logMessage("error", `[Emulador] ${result.message}`);
+        return;
+      }
+      logMessage("success", `[Emulador] ${result.message}`);
+    } catch (error: unknown) {
+      logMessage("error", `[Emulador] Falha ao carregar state: ${describeError(error)}`);
+    } finally {
+      setLoadStateBusy(false);
+    }
+  }, [logMessage]);
 
   useEffect(() => {
     if (activeViewportTab !== "game") {
@@ -483,7 +524,11 @@ export default function ViewportPanel() {
 
     const { activeProjectDir: projectDir } = useEditorStore.getState();
     if (projectDir) {
-      await persistActiveScene(projectDir, "Viewport");
+      try {
+        await persistActiveScene(projectDir, "Viewport");
+      } catch (error: unknown) {
+        logMessage("error", `[Viewport] Falha ao salvar apos mover: ${describeError(error)}`);
+      }
     }
   }
 
@@ -569,6 +614,26 @@ export default function ViewportPanel() {
               style={{ imageRendering: "pixelated", width: MD_WIDTH, height: MD_HEIGHT }}
               tabIndex={0}
             />
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void handleSaveState()}
+                disabled={saveStateBusy}
+                data-testid="viewport-save-state"
+                className="rounded border border-[#a6e3a1]/40 bg-[#a6e3a1]/10 px-2 py-1 text-[10px] font-semibold text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {saveStateBusy ? "Salvando..." : "Salvar state"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleLoadState()}
+                disabled={loadStateBusy}
+                data-testid="viewport-load-state"
+                className="rounded border border-[#89b4fa]/40 bg-[#89b4fa]/10 px-2 py-1 text-[10px] font-semibold text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {loadStateBusy ? "Carregando..." : "Carregar state"}
+              </button>
+            </div>
             <div className="flex items-center gap-4 select-none text-[10px] text-[#6c7086]">
               <span
                 data-testid="viewport-game-status"
