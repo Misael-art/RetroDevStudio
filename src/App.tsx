@@ -74,6 +74,20 @@ function ToolbarButton({
   );
 }
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  const tagName = target.tagName;
+  return (
+    tagName === "INPUT" ||
+    tagName === "TEXTAREA" ||
+    tagName === "SELECT" ||
+    target.isContentEditable
+  );
+}
+
 type AutomationState = {
   activeProjectDir: string;
   activeProjectName: string;
@@ -117,6 +131,8 @@ export default function App() {
     emulPaused,
     setEmulPaused,
     resetHwValidation,
+    undo,
+    redo,
   } = useEditorStore();
 
   const [building, setBuilding] = useState(false);
@@ -144,6 +160,34 @@ export default function App() {
       inputRef.current.select();
     }
   }, [showNewDialog]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (!(event.ctrlKey || event.metaKey) || event.altKey || isEditableTarget(event.target)) {
+        return;
+      }
+
+      if (event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) {
+          redo();
+        } else {
+          undo();
+        }
+        return;
+      }
+
+      if (event.key.toLowerCase() === "y" && !event.shiftKey) {
+        event.preventDefault();
+        redo();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [redo, undo]);
 
   function describeError(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -609,6 +653,8 @@ export default function App() {
                 {[
                   ["Ctrl+C", "Copiar entidade"],
                   ["Ctrl+V", "Colar entidade"],
+                  ["Ctrl+Z", "Desfazer"],
+                  ["Ctrl+Shift+Z / Ctrl+Y", "Refazer"],
                   ["Delete", "Remover no no NodeGraph"],
                   ["Z / X / Enter / Setas", "Controles do emulador"],
                 ].map(([key, value]) => (

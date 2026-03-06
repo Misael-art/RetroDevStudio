@@ -39,6 +39,9 @@ beforeEach(() => {
     hwValidationState: "idle",
     hwValidatedRevision: 0,
     hwValidationError: null,
+    undoStack: [],
+    redoStack: [],
+    pendingHistorySnapshot: null,
   });
 });
 
@@ -252,5 +255,105 @@ describe("setActiveScene", () => {
     expect(useEditorStore.getState().hwValidationState).toBe("idle");
     expect(useEditorStore.getState().hwValidatedRevision).toBe(0);
     expect(useEditorStore.getState().hwValidationError).toBeNull();
+  });
+});
+
+describe("undo/redo", () => {
+  it("undo reverte addEntity", () => {
+    useEditorStore.setState({ activeScene: { ...EMPTY_SCENE } });
+    useEditorStore.getState().addEntity(makeEntity("hero", 10, 20));
+
+    useEditorStore.getState().undo();
+
+    const state = useEditorStore.getState();
+    expect(state.activeScene!.entities).toHaveLength(0);
+    expect(state.redoStack).toHaveLength(1);
+  });
+
+  it("undo reverte removeEntity e restaura a selecao", () => {
+    useEditorStore.setState({
+      activeScene: { ...EMPTY_SCENE, entities: [makeEntity("hero")] },
+      selectedEntityId: "hero",
+    });
+
+    useEditorStore.getState().removeEntity("hero");
+    useEditorStore.getState().undo();
+
+    const state = useEditorStore.getState();
+    expect(state.activeScene!.entities).toHaveLength(1);
+    expect(state.activeScene!.entities[0].entity_id).toBe("hero");
+    expect(state.selectedEntityId).toBe("hero");
+  });
+
+  it("undo reverte updateEntity", () => {
+    useEditorStore.setState({
+      activeScene: { ...EMPTY_SCENE, entities: [makeEntity("hero", 0, 0)] },
+    });
+
+    useEditorStore.getState().updateEntity("hero", { transform: { x: 24, y: 32 } });
+    useEditorStore.getState().undo();
+
+    const hero = useEditorStore.getState().activeScene!.entities[0];
+    expect(hero.transform.x).toBe(0);
+    expect(hero.transform.y).toBe(0);
+  });
+
+  it("redo reaplica a mutacao apos undo", () => {
+    useEditorStore.setState({ activeScene: { ...EMPTY_SCENE } });
+
+    useEditorStore.getState().addEntity(makeEntity("hero", 10, 20));
+    useEditorStore.getState().undo();
+    useEditorStore.getState().redo();
+
+    const state = useEditorStore.getState();
+    expect(state.activeScene!.entities).toHaveLength(1);
+    expect(state.activeScene!.entities[0].transform).toEqual({ x: 10, y: 20 });
+    expect(state.undoStack).toHaveLength(1);
+  });
+
+  it("limita a pilha de undo a 50 entradas", () => {
+    useEditorStore.setState({ activeScene: { ...EMPTY_SCENE } });
+
+    for (let index = 0; index < 51; index += 1) {
+      useEditorStore.getState().addEntity(makeEntity(`entity_${index}`));
+    }
+
+    const state = useEditorStore.getState();
+    expect(state.undoStack).toHaveLength(50);
+    expect(state.undoStack[0]?.activeScene?.entities).toHaveLength(1);
+    expect(state.undoStack[state.undoStack.length - 1]?.activeScene?.entities).toHaveLength(50);
+  });
+
+  it("undo sem pilha e no-op", () => {
+    useEditorStore.setState({
+      activeScene: { ...EMPTY_SCENE, entities: [makeEntity("hero")] },
+      sceneRevision: 4,
+    });
+
+    useEditorStore.getState().undo();
+
+    const state = useEditorStore.getState();
+    expect(state.activeScene!.entities).toHaveLength(1);
+    expect(state.sceneRevision).toBe(4);
+    expect(state.redoStack).toHaveLength(0);
+  });
+
+  it("agrupa drag do viewport em uma unica entrada de undo", () => {
+    useEditorStore.setState({
+      activeScene: { ...EMPTY_SCENE, entities: [makeEntity("hero", 0, 0)] },
+    });
+
+    const state = useEditorStore.getState();
+    state.beginHistoryCapture();
+    state.commitHistoryCapture();
+    state.updateEntity("hero", { transform: { x: 8, y: 8 } }, { recordHistory: false });
+    state.updateEntity("hero", { transform: { x: 24, y: 16 } }, { recordHistory: false });
+
+    expect(useEditorStore.getState().undoStack).toHaveLength(1);
+
+    useEditorStore.getState().undo();
+
+    const hero = useEditorStore.getState().activeScene!.entities[0];
+    expect(hero.transform).toEqual({ x: 0, y: 0 });
   });
 });

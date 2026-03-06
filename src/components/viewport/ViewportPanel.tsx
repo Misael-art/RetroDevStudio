@@ -34,6 +34,9 @@ export default function ViewportPanel() {
     selectedEntityId,
     setSelectedEntityId,
     updateEntity,
+    beginHistoryCapture,
+    commitHistoryCapture,
+    cancelHistoryCapture,
     activeTarget,
     emulPaused,
   } = useEditorStore();
@@ -52,6 +55,7 @@ export default function ViewportPanel() {
     startMy: number;
     origX: number;
     origY: number;
+    historyCommitted: boolean;
   } | null>(null);
 
   const [emulatorActive, setEmulatorActive] = useState(false);
@@ -384,7 +388,9 @@ export default function ViewportPanel() {
       startMy: my,
       origX: entity.transform.x,
       origY: entity.transform.y,
+      historyCommitted: false,
     };
+    beginHistoryCapture();
     setIsDragging(true);
   }
 
@@ -395,16 +401,30 @@ export default function ViewportPanel() {
     const { mx, my } = canvasCoords(event);
     const dx = Math.round(mx - drag.startMx);
     const dy = Math.round(my - drag.startMy);
+    if (dx === 0 && dy === 0) {
+      return;
+    }
+
+    if (!drag.historyCommitted) {
+      commitHistoryCapture();
+      drag.historyCommitted = true;
+    }
+
     updateEntity(drag.entityId, {
       transform: { x: drag.origX + dx, y: drag.origY + dy },
-    });
+    }, { recordHistory: false });
   }
 
   async function handleMouseUp() {
-    if (!dragRef.current) return;
+    const drag = dragRef.current;
+    if (!drag) return;
 
     dragRef.current = null;
     setIsDragging(false);
+    if (!drag.historyCommitted) {
+      cancelHistoryCapture();
+      return;
+    }
 
     const { activeProjectDir: projectDir } = useEditorStore.getState();
     if (projectDir) {

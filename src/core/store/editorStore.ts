@@ -2,6 +2,8 @@ import { create } from "zustand";
 
 import type { BackgroundLayer, Entity, Scene } from "../ipc/sceneService";
 
+const UNDO_STACK_LIMIT = 50;
+
 export interface HwStatus {
   vram_used: number;
   vram_limit: number;
@@ -28,6 +30,11 @@ export interface Tab {
   panel: "hierarchy" | "inspector" | "viewport" | "console";
 }
 
+export interface UndoEntry {
+  activeScene: Scene | null;
+  selectedEntityId: string | null;
+}
+
 export interface StoreState {
   activeProjectDir: string;
   activeProjectName: string;
@@ -41,6 +48,9 @@ export interface StoreState {
   hwValidationState: HwValidationState;
   hwValidatedRevision: number;
   hwValidationError: string | null;
+  undoStack: UndoEntry[];
+  redoStack: UndoEntry[];
+  pendingHistorySnapshot: UndoEntry | null;
   activeScene: Scene | null;
   emulPaused: boolean;
 }
@@ -59,10 +69,19 @@ export interface StoreActions {
   setHwValidationError: (revision: number, error: string) => void;
   resetHwValidation: () => void;
   setActiveScene: (scene: Scene | null) => void;
-  updateEntity: (entityId: string, patch: Partial<Entity>) => void;
+  beginHistoryCapture: () => void;
+  commitHistoryCapture: () => void;
+  cancelHistoryCapture: () => void;
+  updateEntity: (
+    entityId: string,
+    patch: Partial<Entity>,
+    options?: { recordHistory?: boolean }
+  ) => void;
   addEntity: (entity: Entity) => void;
   removeEntity: (entityId: string) => void;
   updateBackgroundLayer: (layerId: string, patch: Partial<BackgroundLayer>) => void;
+  undo: () => void;
+  redo: () => void;
   setEmulPaused: (paused: boolean) => void;
 }
 
@@ -75,6 +94,28 @@ const INITIAL_VALIDATION_STATE = {
 };
 
 let _entryCounter = 0;
+
+function cloneSceneSnapshot(scene: Scene | null): Scene | null {
+  return scene ? structuredClone(scene) : null;
+}
+
+function cloneUndoEntry(entry: UndoEntry): UndoEntry {
+  return {
+    activeScene: cloneSceneSnapshot(entry.activeScene),
+    selectedEntityId: entry.selectedEntityId,
+  };
+}
+
+function createUndoEntry(state: Pick<StoreState, "activeScene" | "selectedEntityId">): UndoEntry {
+  return {
+    activeScene: cloneSceneSnapshot(state.activeScene),
+    selectedEntityId: state.selectedEntityId,
+  };
+}
+
+function pushHistoryEntry(stack: UndoEntry[], entry: UndoEntry): UndoEntry[] {
+  return [...stack, cloneUndoEntry(entry)].slice(-UNDO_STACK_LIMIT);
+}
 
 export const useEditorStore = create<EditorState>((set) => ({
   activeProjectDir: "",
@@ -118,6 +159,9 @@ export const useEditorStore = create<EditorState>((set) => ({
   setHwStatus: (status) => set({ hwStatus: status }),
   sceneRevision: 0,
   ...INITIAL_VALIDATION_STATE,
+  undoStack: [],
+  redoStack: [],
+  pendingHistorySnapshot: null,
   setHwValidationPending: (revision) =>
     set((state) => ({
       hwValidationState:
@@ -139,6 +183,7 @@ export const useEditorStore = create<EditorState>((set) => ({
       hwValidatedRevision: revision,
       hwValidationError: error,
     }),
+
   resetHwValidation: () => set({ ...INITIAL_VALIDATION_STATE }),
 
   activeScene: null,
@@ -146,12 +191,46 @@ export const useEditorStore = create<EditorState>((set) => ({
     set((state) => ({
       activeScene: scene,
       sceneRevision: scene ? state.sceneRevision + 1 : 0,
+      undoStack: [],
+      redoStack: [],
+      pendingHistorySnapshot: null,
       ...(scene ? {} : INITIAL_VALIDATION_STATE),
     })),
-  updateEntity: (entityId, patch) =>
+  beginHistoryCapture: () =>
+    set((state) => {
+      if (!state.activeScene || state.pendingHistorySnapshot) {
+        return {};
+      }
+
+      return {
+        pendingHistorySnapshot: createUndoEntry(state),
+      };
+    }),
+  commitHistoryCapture: () =>
+    set((state) => {
+      if (!state.pendingHistorySnapshot) {
+        return {};
+      }
+
+      return {
+        undoStack: pushHistoryEntry(state.undoStack, state.pendingHistorySnapshot),
+        redoStack: [],
+        pendingHistorySnapshot: null,
+      };
+    }),
+  cancelHistoryCapture: () => set({ pendingHistorySnapshot: null }),
+  updateEntity: (entityId, patch, options) =>
     set((state) => {
       if (!state.activeScene) return {};
+      const recordHistory = options?.recordHistory ?? true;
       return {
+        ...(recordHistory
+          ? {
+              undoStack: pushHistoryEntry(state.undoStack, createUndoEntry(state)),
+              redoStack: [],
+              pendingHistorySnapshot: null,
+            }
+          : {}),
         activeScene: {
           ...state.activeScene,
           entities: state.activeScene.entities.map((entity) =>
@@ -165,6 +244,9 @@ export const useEditorStore = create<EditorState>((set) => ({
     set((state) => {
       if (!state.activeScene) return {};
       return {
+        undoStack: pushHistoryEntry(state.undoStack, createUndoEntry(state)),
+        redoStack: [],
+        pendingHistorySnapshot: null,
         activeScene: {
           ...state.activeScene,
           entities: [...state.activeScene.entities, entity],
@@ -176,6 +258,9 @@ export const useEditorStore = create<EditorState>((set) => ({
     set((state) => {
       if (!state.activeScene) return {};
       return {
+        undoStack: pushHistoryEntry(state.undoStack, createUndoEntry(state)),
+        redoStack: [],
+        pendingHistorySnapshot: null,
         activeScene: {
           ...state.activeScene,
           entities: state.activeScene.entities.filter((entity) => entity.entity_id !== entityId),
@@ -188,12 +273,51 @@ export const useEditorStore = create<EditorState>((set) => ({
     set((state) => {
       if (!state.activeScene) return {};
       return {
+        undoStack: pushHistoryEntry(state.undoStack, createUndoEntry(state)),
+        redoStack: [],
+        pendingHistorySnapshot: null,
         activeScene: {
           ...state.activeScene,
           background_layers: state.activeScene.background_layers.map((layer) =>
             layer.layer_id === layerId ? { ...layer, ...patch } : layer
           ),
         },
+        sceneRevision: state.sceneRevision + 1,
+      };
+    }),
+  undo: () =>
+    set((state) => {
+      const previous = state.undoStack[state.undoStack.length - 1];
+      if (!previous) {
+        return {
+          pendingHistorySnapshot: null,
+        };
+      }
+
+      return {
+        activeScene: cloneSceneSnapshot(previous.activeScene),
+        selectedEntityId: previous.selectedEntityId,
+        undoStack: state.undoStack.slice(0, -1),
+        redoStack: pushHistoryEntry(state.redoStack, createUndoEntry(state)),
+        pendingHistorySnapshot: null,
+        sceneRevision: state.sceneRevision + 1,
+      };
+    }),
+  redo: () =>
+    set((state) => {
+      const next = state.redoStack[state.redoStack.length - 1];
+      if (!next) {
+        return {
+          pendingHistorySnapshot: null,
+        };
+      }
+
+      return {
+        activeScene: cloneSceneSnapshot(next.activeScene),
+        selectedEntityId: next.selectedEntityId,
+        undoStack: pushHistoryEntry(state.undoStack, createUndoEntry(state)),
+        redoStack: state.redoStack.slice(0, -1),
+        pendingHistorySnapshot: null,
         sceneRevision: state.sceneRevision + 1,
       };
     }),
