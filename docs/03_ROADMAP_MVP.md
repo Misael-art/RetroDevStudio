@@ -57,6 +57,7 @@
 ### Entregas implementadas
 - [x] Parser/manager canonico para `project.rds` e `scenes/*.json`.
 - [x] AST UGDM -> C para SGDK.
+- [x] Timing de animacao parametrizavel no codegen SGDK e SNES a partir de `AnimationDef.fps`.
 - [x] Build workspace real com `main.c`, `resources.res`, `Makefile` e deteccao de ROM.
 - [x] Hardware validation para Mega Drive.
 - [x] Emulacao Libretro real para ROM externa e ROM gerada.
