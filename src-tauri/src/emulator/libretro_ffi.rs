@@ -6,6 +6,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use libloading::Library;
 
 const RETRO_ENVIRONMENT_SET_PIXEL_FORMAT: u32 = 10;
+const RETRO_MEMORY_SAVE_RAM: u32 = 0;
+const RETRO_MEMORY_SYSTEM_RAM: u32 = 2;
+const RETRO_MEMORY_VIDEO_RAM: u32 = 3;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -207,6 +210,8 @@ type RetroRun = unsafe extern "C" fn();
 type RetroSerializeSize = unsafe extern "C" fn() -> usize;
 type RetroSerialize = unsafe extern "C" fn(data: *mut c_void, size: usize) -> bool;
 type RetroUnserialize = unsafe extern "C" fn(data: *const c_void, size: usize) -> bool;
+type RetroGetMemoryData = unsafe extern "C" fn(id: u32) -> *mut c_void;
+type RetroGetMemorySize = unsafe extern "C" fn(id: u32) -> usize;
 
 #[repr(C)]
 struct RetroGameInfo {
@@ -264,6 +269,8 @@ struct CoreApi {
     serialize_size: RetroSerializeSize,
     serialize: RetroSerialize,
     unserialize: RetroUnserialize,
+    get_memory_data: RetroGetMemoryData,
+    get_memory_size: RetroGetMemorySize,
 }
 
 impl CoreApi {
@@ -286,6 +293,8 @@ impl CoreApi {
             serialize_size: *get_symbol(library, b"retro_serialize_size\0")?,
             serialize: *get_symbol(library, b"retro_serialize\0")?,
             unserialize: *get_symbol(library, b"retro_unserialize\0")?,
+            get_memory_data: *get_symbol(library, b"retro_get_memory_data\0")?,
+            get_memory_size: *get_symbol(library, b"retro_get_memory_size\0")?,
         })
     }
 }
@@ -303,6 +312,15 @@ fn symbol_name(name: &[u8]) -> String {
     String::from_utf8_lossy(name)
         .trim_end_matches(char::from(0))
         .to_string()
+}
+
+fn memory_region_label(region: u32) -> &'static str {
+    match region {
+        RETRO_MEMORY_SAVE_RAM => "SRAM",
+        RETRO_MEMORY_SYSTEM_RAM => "WRAM",
+        RETRO_MEMORY_VIDEO_RAM => "VRAM",
+        _ => "desconhecida",
+    }
 }
 
 struct LoadedGame {
@@ -578,6 +596,35 @@ impl EmulatorCore {
         }
 
         Ok(())
+    }
+
+    pub fn read_memory(
+        &self,
+        region: u32,
+        offset: usize,
+        length: usize,
+    ) -> Result<(Vec<u8>, usize), String> {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string())?;
+        let total_size = unsafe { (runtime.api.get_memory_size)(region) };
+
+        if total_size == 0 || length == 0 || offset >= total_size {
+            return Ok((Vec::new(), total_size));
+        }
+
+        let memory_ptr = unsafe { (runtime.api.get_memory_data)(region) };
+        if memory_ptr.is_null() {
+            return Err(format!(
+                "A regiao de memoria {} nao esta disponivel no core Libretro atual.",
+                memory_region_label(region)
+            ));
+        }
+
+        let end = total_size.min(offset.saturating_add(length));
+        let source = unsafe { std::slice::from_raw_parts(memory_ptr.cast::<u8>(), total_size) };
+        Ok((source[offset..end].to_vec(), total_size))
     }
 
     pub fn set_joypad(&self, joypad: JoypadState) -> Result<(), String> {
@@ -932,6 +979,9 @@ static mut AUDIO_BATCH: Option<RetroAudioSampleBatchCallback> = None;
 static mut INPUT_POLL: Option<RetroInputPollCallback> = None;
 static mut INPUT_STATE: Option<RetroInputStateCallback> = None;
 static mut FRAMEBUFFER: [u8; 256 * 224 * 4] = [0; 256 * 224 * 4];
+static mut SAVE_RAM: [u8; 32] = [0; 32];
+static mut SYSTEM_RAM: [u8; 64] = [0; 64];
+static mut VIDEO_RAM: [u8; 128] = [0; 128];
 
 #[no_mangle]
 pub extern "C" fn retro_set_environment(callback: Option<RetroEnvironmentCallback>) {
@@ -1021,7 +1071,19 @@ pub extern "C" fn retro_load_game(info: *const RetroGameInfo) -> bool {
             return false;
         }
         let path = CStr::from_ptr((*info).path).to_string_lossy().into_owned();
-        Path::new(&path).exists()
+        let exists = Path::new(&path).exists();
+        if exists {
+            for index in 0..32 {
+                SAVE_RAM[index] = 0xA0u8.wrapping_add(index as u8);
+            }
+            for index in 0..64 {
+                SYSTEM_RAM[index] = index as u8;
+            }
+            for index in 0..128 {
+                VIDEO_RAM[index] = 0xF0u8.wrapping_sub(index as u8);
+            }
+        }
+        exists
     }
 }
 
@@ -1058,6 +1120,28 @@ pub extern "C" fn retro_unserialize(data: *const c_void, size: usize) -> bool {
     }
     FRAME_COUNTER.store(u64::from_le_bytes(bytes) as usize, Ordering::SeqCst);
     true
+}
+
+#[no_mangle]
+pub extern "C" fn retro_get_memory_data(id: u32) -> *mut c_void {
+    unsafe {
+        match id {
+            0 => SAVE_RAM.as_mut_ptr().cast::<c_void>(),
+            2 => SYSTEM_RAM.as_mut_ptr().cast::<c_void>(),
+            3 => VIDEO_RAM.as_mut_ptr().cast::<c_void>(),
+            _ => std::ptr::null_mut(),
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn retro_get_memory_size(id: u32) -> usize {
+    match id {
+        0 => 32,
+        2 => 64,
+        3 => 128,
+        _ => 0,
+    }
 }
 
 #[no_mangle]
@@ -1240,6 +1324,39 @@ pub extern "C" fn retro_run() {
         assert_eq!(advanced_size, restored_size);
         assert_eq!(advanced_format, restored_format);
         assert_eq!(advanced_framebuffer, restored_framebuffer);
+
+        emulator.stop().expect("stop emulator");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn read_memory_requires_a_loaded_core() {
+        let _serial = test_serial_guard();
+        let emulator = EmulatorCore::new(None);
+
+        let error = emulator
+            .read_memory(RETRO_MEMORY_SYSTEM_RAM, 0, 16)
+            .expect_err("memory read should fail without a loaded core");
+
+        assert!(error.contains("Nenhum core Libretro carregado"));
+    }
+
+    #[test]
+    fn read_memory_returns_predictable_mock_core_bytes() {
+        let _serial = test_serial_guard();
+        let dir = temp_dir("memory-read");
+        let core_path = compile_mock_core(&dir);
+        let rom_path = write_test_rom(&dir, "memory_test", "gen");
+
+        let mut emulator = EmulatorCore::new(Some(&core_path));
+        emulator.load_rom(&rom_path).expect("load rom into mock core");
+
+        let (bytes, total_size) = emulator
+            .read_memory(RETRO_MEMORY_SYSTEM_RAM, 0x10, 0x10)
+            .expect("read system ram");
+
+        assert_eq!(total_size, 64);
+        assert_eq!(bytes, (0x10u8..0x20u8).collect::<Vec<_>>());
 
         emulator.stop().expect("stop emulator");
         let _ = fs::remove_dir_all(dir);

@@ -63,6 +63,13 @@ pub struct EmulatorCommandResult {
     pub message: String,
 }
 
+#[derive(serde::Serialize)]
+pub struct EmulatorMemoryResult {
+    pub ok: bool,
+    pub data: Vec<u8>,
+    pub total_size: usize,
+}
+
 // ── Build commands ────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -250,6 +257,23 @@ fn emulator_load_state(emu: State<EmulatorCoreState>) -> EmulatorCommandResult {
         },
         Err(error) => EmulatorCommandResult { ok: false, message: error },
     }
+}
+
+/// Le uma faixa da memoria exposta pelo core Libretro ativo.
+#[tauri::command]
+fn emulator_read_memory(
+    region: u32,
+    offset: usize,
+    length: usize,
+    emu: State<EmulatorCoreState>,
+) -> Result<EmulatorMemoryResult, String> {
+    let core = emu.0.lock().map_err(|e| e.to_string())?;
+    let (data, total_size) = core.read_memory(region, offset, length)?;
+    Ok(EmulatorMemoryResult {
+        ok: true,
+        data,
+        total_size,
+    })
 }
 
 /// Envia o estado dos botões do joypad 1 para o emulador.
@@ -523,6 +547,7 @@ pub fn run() {
             emulator_run_frame,
             emulator_save_state,
             emulator_load_state,
+            emulator_read_memory,
             emulator_send_input,
             emulator_stop,
             // Cena
@@ -729,6 +754,9 @@ static mut AUDIO_BATCH: Option<RetroAudioSampleBatchCallback> = None;
 static mut INPUT_POLL: Option<RetroInputPollCallback> = None;
 static mut INPUT_STATE: Option<RetroInputStateCallback> = None;
 static mut FRAMEBUFFER: [u8; 256 * 224 * 4] = [0; 256 * 224 * 4];
+static mut SAVE_RAM: [u8; 32] = [0; 32];
+static mut SYSTEM_RAM: [u8; 64] = [0; 64];
+static mut VIDEO_RAM: [u8; 128] = [0; 128];
 
 #[no_mangle]
 pub extern "C" fn retro_set_environment(callback: Option<RetroEnvironmentCallback>) {
@@ -806,7 +834,19 @@ pub extern "C" fn retro_load_game(info: *const RetroGameInfo) -> bool {
             return false;
         }
         let path = CStr::from_ptr((*info).path).to_string_lossy().into_owned();
-        Path::new(&path).exists()
+        let exists = Path::new(&path).exists();
+        if exists {
+            for index in 0..32 {
+                SAVE_RAM[index] = 0xA0u8.wrapping_add(index as u8);
+            }
+            for index in 0..64 {
+                SYSTEM_RAM[index] = index as u8;
+            }
+            for index in 0..128 {
+                VIDEO_RAM[index] = 0xF0u8.wrapping_sub(index as u8);
+            }
+        }
+        exists
     }
 }
 
@@ -841,6 +881,28 @@ pub extern "C" fn retro_unserialize(data: *const c_void, size: usize) -> bool {
     }
     FRAME_COUNTER.store(u64::from_le_bytes(bytes) as usize, Ordering::SeqCst);
     true
+}
+
+#[no_mangle]
+pub extern "C" fn retro_get_memory_data(id: u32) -> *mut c_void {
+    unsafe {
+        match id {
+            0 => SAVE_RAM.as_mut_ptr().cast::<c_void>(),
+            2 => SYSTEM_RAM.as_mut_ptr().cast::<c_void>(),
+            3 => VIDEO_RAM.as_mut_ptr().cast::<c_void>(),
+            _ => std::ptr::null_mut(),
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn retro_get_memory_size(id: u32) -> usize {
+    match id {
+        0 => 32,
+        2 => 64,
+        3 => 128,
+        _ => 0,
+    }
 }
 
 #[no_mangle]

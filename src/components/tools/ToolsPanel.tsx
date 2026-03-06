@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import Panel from "../common/Panel";
 import { useEditorStore } from "../../core/store/editorStore";
+import { emulatorReadMemory } from "../../core/ipc/emulatorService";
 import {
   patchCreateIps,
   patchApplyIps,
@@ -558,13 +559,220 @@ function RuntimeSetup() {
   );
 }
 
-type ToolTab = "patch" | "profiler" | "extractor" | "setup";
+const MEMORY_REGIONS = [
+  { value: 2, label: "WRAM" },
+  { value: 3, label: "VRAM" },
+  { value: 0, label: "SRAM" },
+] as const;
+
+function parseHexInput(value: string): number | null {
+  const normalized = value.trim().replace(/^0x/i, "");
+  if (normalized.length === 0) return 0;
+  if (!/^[0-9a-f]+$/i.test(normalized)) return null;
+  return Number.parseInt(normalized, 16);
+}
+
+function formatHex(value: number, width = 2): string {
+  return value.toString(16).toUpperCase().padStart(width, "0");
+}
+
+function formatAscii(value: number): string {
+  return value >= 32 && value <= 126 ? String.fromCharCode(value) : ".";
+}
+
+function MemoryViewer() {
+  const { logMessage } = useEditorStore();
+  const [region, setRegion] = useState<number>(2);
+  const [offsetHex, setOffsetHex] = useState("0000");
+  const [lengthHex, setLengthHex] = useState("0100");
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState<number[]>([]);
+  const [totalSize, setTotalSize] = useState(0);
+  const [lastOffset, setLastOffset] = useState(0);
+  const inFlightRef = useRef(false);
+
+  async function readMemory(silent = false) {
+    if (inFlightRef.current) return;
+
+    const offset = parseHexInput(offsetHex);
+    const length = parseHexInput(lengthHex);
+    if (offset === null || length === null) {
+      const message = "Use valores hexadecimais validos para offset e length.";
+      setError(message);
+      if (!silent) {
+        logMessage("warn", `[Memory] ${message}`);
+      }
+      return;
+    }
+
+    inFlightRef.current = true;
+    setBusy(true);
+    try {
+      const result = await emulatorReadMemory(region, offset, length);
+      const regionLabel =
+        MEMORY_REGIONS.find((candidate) => candidate.value === region)?.label ?? `REGIAO ${region}`;
+      setData(result.data);
+      setTotalSize(result.total_size);
+      setLastOffset(offset);
+      setError(null);
+      if (!silent) {
+        logMessage(
+          "info",
+          `[Memory] ${result.data.length} byte(s) lidos de ${regionLabel} @ 0x${formatHex(offset, 4)}.`
+        );
+      }
+    } catch (readError) {
+      const message = describeError(readError);
+      setError(message);
+      if (!silent) {
+        logMessage("error", `[Memory] ${message}`);
+      }
+    } finally {
+      setBusy(false);
+      inFlightRef.current = false;
+    }
+  }
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+
+    void readMemory(true);
+    const intervalId = window.setInterval(() => {
+      void readMemory(true);
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [autoRefresh, region, offsetHex, lengthHex]);
+
+  const rows: { address: string; bytes: string; ascii: string }[] = [];
+  for (let index = 0; index < data.length; index += 16) {
+    const slice = data.slice(index, index + 16);
+    const bytes = slice.map((value) => formatHex(value)).join(" ");
+    const paddedBytes = bytes.padEnd(16 * 3 - 1, " ");
+    const ascii = slice.map((value) => formatAscii(value)).join("");
+    rows.push({
+      address: formatHex(lastOffset + index, 8),
+      bytes: paddedBytes,
+      ascii,
+    });
+  }
+
+  return (
+    <div className="flex flex-col gap-3 p-3">
+      <ExperimentalNotice summary="Leitura basica de memoria conectada ao core Libretro ativo. Manter badge Experimental ate validar a inspecao com ROM real ponta a ponta." />
+
+      <div className="flex flex-wrap gap-3">
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] text-[#7f849c]">Regiao</label>
+          <select
+            value={region}
+            onChange={(event) => setRegion(Number(event.target.value))}
+            className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-xs text-[#cdd6f4] focus:border-[#f9e2af] focus:outline-none"
+          >
+            {MEMORY_REGIONS.map((entry) => (
+              <option key={entry.value} value={entry.value}>
+                {entry.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] text-[#7f849c]">Offset (hex)</label>
+          <input
+            type="text"
+            value={offsetHex}
+            onChange={(event) => setOffsetHex(event.target.value)}
+            className="w-24 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-xs font-mono text-[#cdd6f4] focus:border-[#f9e2af] focus:outline-none"
+            placeholder="0000"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] text-[#7f849c]">Length (hex)</label>
+          <input
+            type="text"
+            value={lengthHex}
+            onChange={(event) => setLengthHex(event.target.value)}
+            className="w-24 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-xs font-mono text-[#cdd6f4] focus:border-[#f9e2af] focus:outline-none"
+            placeholder="0100"
+          />
+        </div>
+
+        <label className="mt-5 flex items-center gap-2 text-[10px] text-[#7f849c]">
+          <input
+            type="checkbox"
+            checked={autoRefresh}
+            onChange={(event) => setAutoRefresh(event.target.checked)}
+            className="rounded border border-[#313244] bg-[#1e1e2e]"
+          />
+          Auto-refresh (1s)
+        </label>
+
+        <button
+          disabled={busy}
+          onClick={() => void readMemory()}
+          className={`mt-4 rounded px-3 py-1.5 text-xs font-semibold transition-colors ${
+            busy
+              ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
+              : "bg-[#f9e2af] text-[#1e1e2e] hover:bg-[#e7cf96]"
+          }`}
+        >
+          {busy ? "Lendo..." : "Ler"}
+        </button>
+      </div>
+
+      <div className="flex items-center justify-between rounded bg-[#1e1e2e] px-3 py-2">
+        <span className="text-[10px] text-[#7f849c]">
+          Total: <span className="font-mono text-[#cdd6f4]">0x{formatHex(totalSize, 4)}</span> ({totalSize} bytes)
+        </span>
+        <span className="text-[10px] text-[#7f849c]">
+          Ultimo offset: <span className="font-mono text-[#cdd6f4]">0x{formatHex(lastOffset, 4)}</span>
+        </span>
+      </div>
+
+      {error && (
+        <div className="rounded border border-[#f38ba8] bg-[#1e1e2e] px-3 py-2 text-[10px] text-[#f38ba8]">
+          {error}
+        </div>
+      )}
+
+      <div className="rounded border border-[#313244] bg-[#11111b]">
+        <div className="flex items-center gap-4 border-b border-[#313244] px-3 py-2 text-[10px] uppercase tracking-wide text-[#45475a]">
+          <span className="w-20 shrink-0">Address</span>
+          <span className="flex-1">Hex</span>
+          <span className="w-20 shrink-0">ASCII</span>
+        </div>
+        <div className="max-h-72 overflow-y-auto px-3 py-2">
+          {rows.length === 0 ? (
+            <p className="text-[10px] text-[#45475a]">Nenhum byte carregado.</p>
+          ) : (
+            <div className="flex flex-col gap-1 font-mono text-[11px] text-[#cdd6f4]">
+              {rows.map((row) => (
+                <div key={row.address} className="flex items-start gap-4 whitespace-pre">
+                  <span className="w-20 shrink-0 text-[#f9e2af]">{row.address}</span>
+                  <span className="flex-1 text-[#a6e3a1]">{row.bytes}</span>
+                  <span className="w-20 shrink-0 text-[#89b4fa]">{row.ascii}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type ToolTab = "patch" | "profiler" | "extractor" | "setup" | "memory";
 
 const TOOL_TABS: { id: ToolTab; label: string; icon: string; experimental?: boolean }[] = [
   { id: "setup", label: "Runtime Setup", icon: "RD" },
   { id: "patch", label: "Patch Studio", icon: "PT" },
   { id: "profiler", label: "Deep Profiler", icon: "DP", experimental: true },
   { id: "extractor", label: "Asset Extractor", icon: "AE", experimental: true },
+  { id: "memory", label: "Memory Viewer", icon: "MV", experimental: true },
 ];
 
 export default function ToolsPanel() {
@@ -598,6 +806,7 @@ export default function ToolsPanel() {
         {active === "patch" && <PatchStudio />}
         {active === "profiler" && <DeepProfiler />}
         {active === "extractor" && <AssetExtractor />}
+        {active === "memory" && <MemoryViewer />}
       </div>
     </Panel>
   );

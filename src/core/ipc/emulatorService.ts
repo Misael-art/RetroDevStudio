@@ -8,6 +8,12 @@ export interface EmulatorCommandResult {
   message: string;
 }
 
+export interface EmulatorMemoryResult {
+  ok: boolean;
+  data: number[];
+  total_size: number;
+}
+
 /** Payload do evento `emulator://frame` — pixels RGBA prontos para ImageData */
 export interface FramePayload {
   width: number;
@@ -52,6 +58,14 @@ export function emulatorSaveState(): Promise<EmulatorCommandResult> {
 
 export function emulatorLoadState(): Promise<EmulatorCommandResult> {
   return invoke<EmulatorCommandResult>("emulator_load_state");
+}
+
+export function emulatorReadMemory(
+  region: number,
+  offset: number,
+  length: number
+): Promise<EmulatorMemoryResult> {
+  return invoke<EmulatorMemoryResult>("emulator_read_memory", { region, offset, length });
 }
 
 export function emulatorSendInput(joypad: JoypadState): Promise<EmulatorCommandResult> {
