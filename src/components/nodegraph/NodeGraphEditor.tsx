@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
+import { persistActiveScene } from "../../core/scenePersistence";
 import { useEditorStore } from "../../core/store/editorStore";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -44,6 +45,109 @@ export interface NodeEdge {
 export interface NodeGraph {
   nodes: GraphNode[];
   edges: NodeEdge[];
+}
+
+export const EMPTY_GRAPH: NodeGraph = {
+  nodes: [],
+  edges: [],
+};
+
+function cloneGraph(graph: NodeGraph): NodeGraph {
+  return structuredClone(graph);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isNodePort(value: unknown): value is NodePort {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.label === "string" &&
+    (value.kind === "exec" || value.kind === "data") &&
+    (value.dataType === undefined ||
+      value.dataType === "int" ||
+      value.dataType === "bool" ||
+      value.dataType === "string")
+  );
+}
+
+function isNodeType(value: unknown): value is NodeType {
+  return (
+    value === "event_start" ||
+    value === "sprite_move" ||
+    value === "sprite_anim" ||
+    value === "condition_overlap" ||
+    value === "effect_parallax" ||
+    value === "effect_raster" ||
+    value === "logic_and" ||
+    value === "action_sound" ||
+    value === "scroll_tilemap" ||
+    value === "move_camera"
+  );
+}
+
+function isGraphNode(value: unknown): value is GraphNode {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    isNodeType(value.type) &&
+    typeof value.label === "string" &&
+    typeof value.x === "number" &&
+    typeof value.y === "number" &&
+    Array.isArray(value.inputs) &&
+    value.inputs.every(isNodePort) &&
+    Array.isArray(value.outputs) &&
+    value.outputs.every(isNodePort) &&
+    isRecord(value.params)
+  );
+}
+
+function isNodeEdge(value: unknown): value is NodeEdge {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.fromNode === "string" &&
+    typeof value.fromPort === "string" &&
+    typeof value.toNode === "string" &&
+    typeof value.toPort === "string"
+  );
+}
+
+export function serializeNodeGraph(graph: NodeGraph): string {
+  return JSON.stringify({
+    version: 1,
+    nodes: structuredClone(graph.nodes),
+    edges: structuredClone(graph.edges),
+  });
+}
+
+export function deserializeNodeGraph(serialized?: string | null): NodeGraph {
+  if (!serialized) {
+    return cloneGraph(EMPTY_GRAPH);
+  }
+
+  try {
+    const parsed = JSON.parse(serialized) as unknown;
+    if (!isRecord(parsed)) {
+      return cloneGraph(EMPTY_GRAPH);
+    }
+
+    const { nodes, edges } = parsed;
+    if (
+      !Array.isArray(nodes) ||
+      !nodes.every(isGraphNode) ||
+      !Array.isArray(edges) ||
+      !edges.every(isNodeEdge)
+    ) {
+      return cloneGraph(EMPTY_GRAPH);
+    }
+
+    return cloneGraph({ nodes, edges });
+  } catch {
+    return cloneGraph(EMPTY_GRAPH);
+  }
 }
 
 // ── Node definitions (palette) ────────────────────────────────────────────────
@@ -259,13 +363,83 @@ const PALETTE_TYPES: NodeType[] = [
 ];
 
 export default function NodeGraphEditor() {
-  const { logMessage } = useEditorStore();
-  const [graph, setGraph] = useState<NodeGraph>(INITIAL_GRAPH);
+  const activeProjectDir = useEditorStore((state) => state.activeProjectDir);
+  const activeScene = useEditorStore((state) => state.activeScene);
+  const selectedEntityId = useEditorStore((state) => state.selectedEntityId);
+  const updateEntity = useEditorStore((state) => state.updateEntity);
+  const logMessage = useEditorStore((state) => state.logMessage);
+  const selectedEntity =
+    selectedEntityId && !selectedEntityId.startsWith("layer::")
+      ? activeScene?.entities.find((entity) => entity.entity_id === selectedEntityId) ?? null
+      : null;
+  const [graph, setGraph] = useState<NodeGraph>(() => cloneGraph(EMPTY_GRAPH));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dragging, setDragging] = useState<{ nodeId: string; offsetX: number; offsetY: number } | null>(null);
   const [pendingEdge, setPendingEdge] = useState<{ fromNode: string; fromPort: string; x: number; y: number } | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const saveTimerRef = useRef<number | null>(null);
+  const hydratingGraphRef = useRef(true);
+  const lastPersistedGraphRef = useRef(serializeNodeGraph(INITIAL_GRAPH));
+
+  useEffect(() => {
+    const nextGraph = deserializeNodeGraph(selectedEntity?.components.logic?.graph);
+    hydratingGraphRef.current = true;
+    setGraph(nextGraph);
+    setSelectedId(null);
+    setDragging(null);
+    setPendingEdge(null);
+    lastPersistedGraphRef.current = serializeNodeGraph(nextGraph);
+  }, [selectedEntity]);
+
+  useEffect(() => {
+    if (!selectedEntity || !activeProjectDir) {
+      return;
+    }
+
+    if (hydratingGraphRef.current) {
+      hydratingGraphRef.current = false;
+      return;
+    }
+
+    const serializedGraph = serializeNodeGraph(graph);
+    if (serializedGraph === lastPersistedGraphRef.current) {
+      return;
+    }
+
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+    }
+
+    saveTimerRef.current = window.setTimeout(() => {
+      const latestState = useEditorStore.getState();
+      const entity = latestState.activeScene?.entities.find(
+        (item) => item.entity_id === selectedEntity.entity_id
+      );
+      if (!entity) {
+        return;
+      }
+
+      updateEntity(selectedEntity.entity_id, {
+        components: {
+          ...entity.components,
+          logic: {
+            ...(entity.components.logic ?? {}),
+            graph: serializedGraph,
+          },
+        },
+      });
+      lastPersistedGraphRef.current = serializedGraph;
+      void persistActiveScene(activeProjectDir, "Logic");
+    }, 600);
+
+    return () => {
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+    };
+  }, [activeProjectDir, graph, selectedEntity, updateEntity]);
 
   // ── Drag node ──────────────────────────────────────────────────────────────
   const onNodeMouseDown = useCallback((e: React.MouseEvent, nodeId: string) => {
@@ -363,13 +537,17 @@ export default function NodeGraphEditor() {
         {PALETTE_TYPES.map((type) => (
           <button
             key={type}
-            className="text-left text-[11px] px-2 py-1 rounded text-[#a6adc8] hover:bg-[#313244] hover:text-[#cdd6f4] transition-colors"
+            className="text-left text-[11px] px-2 py-1 rounded text-[#a6adc8] hover:bg-[#313244] hover:text-[#cdd6f4] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
             onMouseDown={() => addNode(type)}
+            disabled={!selectedEntity}
           >
             {NODE_DEFS[type].label}
           </button>
         ))}
         <div className="mt-auto border-t border-[#313244] pt-2">
+          <p className="text-[10px] text-[#45475a] px-1 select-none">
+            {selectedEntity ? "Autosave 600ms no LogicComponent.graph" : "Selecione uma entidade para editar"}
+          </p>
           <p className="text-[10px] text-[#45475a] px-1 select-none">Del = remover nó</p>
         </div>
       </div>
@@ -388,6 +566,14 @@ export default function NodeGraphEditor() {
         onMouseLeave={onMouseUp}
         onMouseDown={() => setSelectedId(null)}
       >
+        {!selectedEntity && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#11111b]/80">
+            <p className="max-w-xs text-center text-xs text-[#6c7086]">
+              Selecione uma entidade na hierarquia para carregar ou criar o `LogicComponent.graph`.
+            </p>
+          </div>
+        )}
+
         {/* SVG edges */}
         <svg
           ref={svgRef}

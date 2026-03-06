@@ -39,6 +39,7 @@
 - Deep Profiler destravado na UI e conectado ao backend real, permanecendo `Experimental` ate validacao com ROM real.
 - Asset Extractor destravado na UI e conectado ao backend real, permanecendo `Experimental` ate validar extracao ponta a ponta com ROM real.
 - RetroFX agora persiste configuracao de parallax/raster no scene JSON e o designer foi reabilitado, permanecendo `Experimental` ate emissao real no build.
+- NodeGraph agora persiste nos componentes de logica via `LogicComponent.graph`, com roundtrip de serializacao no frontend e autosave no JSON da cena.
 - Features ainda parciais agora ficam explicitamente marcadas como `Experimental` na UI para nao mentir sobre prontidao.
 
 ### Ainda em hardening
@@ -101,7 +102,7 @@
 ## FASE 3 - VISUAL LOGIC & RETROFX
 **Status:** IMPLEMENTADA NO EDITOR, CONGELADA ATE FECHAR VALIDACAO DO CORE
 
-- [x] NodeGraph UI e compilador frontend existente.
+- [x] NodeGraph UI agora persiste o grafo em `LogicComponent.graph` com roundtrip de serializacao.
 - [x] RetroFX UI existente.
 - [x] RetroFX persiste configuracao no scene JSON e permanece `Experimental` enquanto nao exportar efeito real no pipeline.
 - [x] Testes frontend existentes e passando.

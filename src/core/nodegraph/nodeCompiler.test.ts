@@ -6,7 +6,12 @@
 
 import { describe, it, expect } from "vitest";
 import { compileGraphToC, parseCToNodes } from "./nodeCompiler";
-import type { NodeGraph } from "../../components/nodegraph/NodeGraphEditor";
+import {
+  EMPTY_GRAPH as SERIALIZED_EMPTY_GRAPH,
+  deserializeNodeGraph,
+  serializeNodeGraph,
+  type NodeGraph,
+} from "../../components/nodegraph/NodeGraphEditor";
 
 // ── Helpers de fixture ────────────────────────────────────────────────────────
 
@@ -50,6 +55,30 @@ const GRAPH_SOUND_MD: NodeGraph = {
 };
 
 // ── compileGraphToC ───────────────────────────────────────────────────────────
+
+describe("NodeGraph serialization", () => {
+  it("round-trips nodes and edges through LogicComponent.graph JSON", () => {
+    const graph: NodeGraph = {
+      nodes: [
+        node("n1", "event_start"),
+        node("n2", "sprite_move", { target: "player", dx: 2, dy: -1 }),
+        node("n3", "action_sound", { sfx: "jump" }),
+      ],
+      edges: [edge("e1", "n1", "n2"), edge("e2", "n2", "n3")],
+    };
+
+    const serialized = serializeNodeGraph(graph);
+
+    expect(deserializeNodeGraph(serialized)).toEqual(graph);
+  });
+
+  it("falls back to empty graph for invalid payloads", () => {
+    expect(deserializeNodeGraph("not-json")).toEqual(SERIALIZED_EMPTY_GRAPH);
+    expect(deserializeNodeGraph(JSON.stringify({ nodes: [{ id: "n1" }], edges: [] }))).toEqual(
+      SERIALIZED_EMPTY_GRAPH
+    );
+  });
+});
 
 describe("compileGraphToC — Mega Drive", () => {
   it("grafo vazio: emite comentário de aviso sem event_start", () => {
