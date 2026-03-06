@@ -37,6 +37,7 @@
 - Grid snap de 8px no Scene View com toggle visual e atalho `G`.
 - Resolucao de prefab no pipeline canonico com merge de entidades antes de validacao/build/codegen.
 - Deep Profiler destravado na UI e conectado ao backend real, permanecendo `Experimental` ate validacao com ROM real.
+- Asset Extractor destravado na UI e conectado ao backend real, permanecendo `Experimental` ate validar extracao ponta a ponta com ROM real.
 - Features ainda parciais agora ficam explicitamente marcadas como `Experimental` na UI para nao mentir sobre prontidao.
 
 ### Ainda em hardening
@@ -112,7 +113,7 @@
 
 - [x] Patch Studio.
 - [x] Deep Profiler visivel, mas travado como `Experimental` ate gerar relatorio real.
-- [x] Asset Extractor visivel, mas travado como `Experimental` ate extrair assets reais de forma confiavel.
+- [x] Asset Extractor visivel, conectado ao backend real e mantido como `Experimental` ate validar extracao ponta a ponta com ROM real.
 - [ ] Retomar expansao apenas depois que o pipeline oficial validado estiver institucionalizado em workflow repetivel.
 
 ---

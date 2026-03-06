@@ -330,7 +330,6 @@ function AssetExtractor() {
   const [palSlot, setPalSlot] = useState(0);
   const [busy, setBusy] = useState(false);
   const [lastFiles, setLastFiles] = useState<string[]>([]);
-  const disabled = true;
 
   async function extract() {
     if (!romPath || !outputDir) {
@@ -359,7 +358,7 @@ function AssetExtractor() {
 
   return (
     <div className="flex flex-col gap-3 p-3">
-      <ExperimentalNotice summary="UI visivel, mas a extracao ainda e parcial. Botao desabilitado ate o fluxo produzir assets reais de forma confiavel." />
+      <ExperimentalNotice summary="Fluxo conectado ao backend real. Manter badge Experimental ate validar a extracao ponta a ponta com ROM e assets reais." />
 
       <PathField
         label="ROM (.md / .bin)"
@@ -408,15 +407,15 @@ function AssetExtractor() {
       </div>
 
       <button
-        disabled={busy || disabled}
+        disabled={busy}
         onClick={() => void extract()}
         className={`rounded py-1.5 text-xs font-semibold transition-colors ${
-          busy || disabled
+          busy
             ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
             : "bg-[#a6e3a1] text-[#1e1e2e] hover:bg-[#94e2a0]"
         }`}
       >
-        {disabled ? "Experimental - indisponivel" : busy ? "Extraindo..." : "Extrair Assets"}
+        {busy ? "Extraindo..." : "Extrair Assets"}
       </button>
 
       {lastFiles.length > 0 && (
