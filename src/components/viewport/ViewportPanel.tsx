@@ -24,7 +24,25 @@ const VIEWPORT_TABS = [
 
 const MD_WIDTH = 320;
 const MD_HEIGHT = 224;
+const GRID_SNAP_SIZE = 8;
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  const tagName = target.tagName;
+  return (
+    tagName === "INPUT" ||
+    tagName === "TEXTAREA" ||
+    tagName === "SELECT" ||
+    target.isContentEditable
+  );
+}
+
+function snapToGrid(value: number, step: number): number {
+  return Math.round(value / step) * step;
+}
 export default function ViewportPanel() {
   const {
     activeViewportTab,
@@ -55,11 +73,14 @@ export default function ViewportPanel() {
     startMy: number;
     origX: number;
     origY: number;
+    lastX: number;
+    lastY: number;
     historyCommitted: boolean;
   } | null>(null);
 
   const [emulatorActive, setEmulatorActive] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [gridSnap, setGridSnap] = useState(true);
 
   activeTabRef.current = activeViewportTab;
   pausedRef.current = emulPaused;
@@ -195,6 +216,32 @@ export default function ViewportPanel() {
   useEffect(() => {
     if (activeViewportTab !== "scene") return;
 
+    function onKeyDown(event: KeyboardEvent) {
+      if (
+        event.repeat ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        event.shiftKey ||
+        isEditableTarget(event.target) ||
+        event.key.toLowerCase() !== "g"
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      setGridSnap((current) => !current);
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [activeViewportTab]);
+
+  useEffect(() => {
+    if (activeViewportTab !== "scene") return;
+
     const canvas = sceneCanvasRef.current;
     if (!canvas) return;
 
@@ -204,19 +251,21 @@ export default function ViewportPanel() {
     context.fillStyle = "#000000";
     context.fillRect(0, 0, MD_WIDTH, MD_HEIGHT);
 
-    context.strokeStyle = "rgba(205,214,244,0.06)";
-    context.lineWidth = 1;
-    for (let x = 0; x <= MD_WIDTH; x += 16) {
-      context.beginPath();
-      context.moveTo(x, 0);
-      context.lineTo(x, MD_HEIGHT);
-      context.stroke();
-    }
-    for (let y = 0; y <= MD_HEIGHT; y += 16) {
-      context.beginPath();
-      context.moveTo(0, y);
-      context.lineTo(MD_WIDTH, y);
-      context.stroke();
+    if (gridSnap) {
+      context.strokeStyle = "rgba(205,214,244,0.08)";
+      context.lineWidth = 1;
+      for (let x = 0; x <= MD_WIDTH; x += GRID_SNAP_SIZE) {
+        context.beginPath();
+        context.moveTo(x, 0);
+        context.lineTo(x, MD_HEIGHT);
+        context.stroke();
+      }
+      for (let y = 0; y <= MD_HEIGHT; y += GRID_SNAP_SIZE) {
+        context.beginPath();
+        context.moveTo(0, y);
+        context.lineTo(MD_WIDTH, y);
+        context.stroke();
+      }
     }
 
     if (!activeScene) {
@@ -344,7 +393,7 @@ export default function ViewportPanel() {
       context.arc(x + width / 2, y + height / 2, 2, 0, Math.PI * 2);
       context.fill();
     });
-  }, [activeScene, activeTarget, activeViewportTab, selectedEntityId]);
+  }, [activeScene, activeTarget, activeViewportTab, gridSnap, selectedEntityId]);
 
   function canvasCoords(event: React.MouseEvent<HTMLCanvasElement>) {
     const rect = (event.target as HTMLCanvasElement).getBoundingClientRect();
@@ -388,6 +437,8 @@ export default function ViewportPanel() {
       startMy: my,
       origX: entity.transform.x,
       origY: entity.transform.y,
+      lastX: entity.transform.x,
+      lastY: entity.transform.y,
       historyCommitted: false,
     };
     beginHistoryCapture();
@@ -401,7 +452,9 @@ export default function ViewportPanel() {
     const { mx, my } = canvasCoords(event);
     const dx = Math.round(mx - drag.startMx);
     const dy = Math.round(my - drag.startMy);
-    if (dx === 0 && dy === 0) {
+    const nextX = gridSnap ? snapToGrid(drag.origX + dx, GRID_SNAP_SIZE) : drag.origX + dx;
+    const nextY = gridSnap ? snapToGrid(drag.origY + dy, GRID_SNAP_SIZE) : drag.origY + dy;
+    if (nextX === drag.lastX && nextY === drag.lastY) {
       return;
     }
 
@@ -410,8 +463,10 @@ export default function ViewportPanel() {
       drag.historyCommitted = true;
     }
 
+    drag.lastX = nextX;
+    drag.lastY = nextY;
     updateEntity(drag.entityId, {
-      transform: { x: drag.origX + dx, y: drag.origY + dy },
+      transform: { x: nextX, y: nextY },
     }, { recordHistory: false });
   }
 
@@ -446,7 +501,28 @@ export default function ViewportPanel() {
 
   return (
     <div className="flex h-full flex-col bg-[#1e1e2e]">
-      <Tabs tabs={VIEWPORT_TABS} activeTab={activeViewportTab} onTabChange={setActiveViewportTab} />
+      <div className="flex items-center justify-between border-b border-[#313244] bg-[#181825] pr-3">
+        <Tabs
+          tabs={VIEWPORT_TABS}
+          activeTab={activeViewportTab}
+          onTabChange={setActiveViewportTab}
+          className="flex-1 border-b-0"
+        />
+        {activeViewportTab === "scene" && (
+          <button
+            type="button"
+            onClick={() => setGridSnap((current) => !current)}
+            className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
+              gridSnap
+                ? "border-[#94e2d5] bg-[#94e2d5]/15 text-[#94e2d5]"
+                : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
+            }`}
+            title="Alternar snap-to-grid de 8px (atalho: G)"
+          >
+            Snap 8px {gridSnap ? "ON" : "OFF"}
+          </button>
+        )}
+      </div>
 
       <div
         className={`flex-1 overflow-hidden bg-[#11111b] ${
@@ -476,7 +552,7 @@ export default function ViewportPanel() {
             />
             <span className="select-none text-[10px] text-[#6c7086]">
               {activeScene
-                ? `${activeScene.entities.length} entidade(s) | ${activeScene.background_layers.length} layer(s) | clique para selecionar | arraste para mover`
+                ? `${activeScene.entities.length} entidade(s) | ${activeScene.background_layers.length} layer(s) | ${gridSnap ? "snap 8px ativo" : "snap livre"} | arraste para mover`
                 : "Abra um projeto para visualizar a cena"}
             </span>
           </div>
