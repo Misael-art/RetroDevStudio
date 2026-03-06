@@ -1,4 +1,6 @@
-use crate::compiler::ast_generator::{AstNode, AstOutput, SpriteAsset};
+use crate::compiler::ast_generator::{
+    collect_tilemap_assets, AstNode, AstOutput, SpriteAsset, TilemapAsset,
+};
 
 #[derive(Debug)]
 pub struct EmitOutput {
@@ -36,10 +38,19 @@ struct AnimationState {
     looping: bool,
 }
 
+#[derive(Debug, Clone)]
+struct TilemapDraw {
+    resource_name: String,
+    bg_number: u8,
+    scroll_x: i32,
+    scroll_y: i32,
+}
+
 #[derive(Debug, Default)]
 struct SnesContext {
     spawns: Vec<SpawnedSprite>,
     animations: Vec<AnimationState>,
+    tilemaps: Vec<TilemapDraw>,
 }
 
 pub fn emit_snes(ast: &AstOutput, project_name: &str) -> EmitOutput {
@@ -51,6 +62,7 @@ pub fn emit_snes(ast: &AstOutput, project_name: &str) -> EmitOutput {
 
 fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     let mut out = String::new();
+    let tilemap_assets = collect_tilemap_assets(ast);
     let size_config = ast
         .sprite_assets
         .first()
@@ -66,6 +78,9 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     out.push_str(&format!("// Project: {}\n", project_name));
     out.push_str("// Target: SNES (PVSnesLib)\n\n");
     out.push_str("#include <snes.h>\n");
+    for asset in &tilemap_assets {
+        out.push_str(&format!("#include \"{}.inc\"\n", asset.resource_name));
+    }
     for asset in &ast.sprite_assets {
         out.push_str(&format!("#include \"{}.inc\"\n", asset.resource_name));
     }
@@ -92,6 +107,34 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     out.push_str("int main(void)\n{\n");
     out.push_str("    consoleInit();\n");
     out.push_str("    oamInit();\n");
+
+    for tilemap in &context.tilemaps {
+        let Some(asset) = tilemap_assets
+            .iter()
+            .find(|asset| asset.resource_name == tilemap.resource_name)
+        else {
+            continue;
+        };
+        out.push_str(&format!(
+            "    bgInitTileSet({bg}, &{name}_til, &{name}_pal, 0, (&{name}_tilend - &{name}_til), (&{name}_palend - &{name}_pal), BG_16COLORS, 0x{tile_addr:04X});\n",
+            bg = tilemap.bg_number,
+            name = tilemap.resource_name,
+            tile_addr = tilemap_tile_address(tilemap.bg_number)
+        ));
+        out.push_str(&format!(
+            "    bgInitMapSet({bg}, (u8*)&{name}_map, (&{name}_mapend - &{name}_map), {size_mode}, 0x{map_addr:04X});\n",
+            bg = tilemap.bg_number,
+            name = tilemap.resource_name,
+            size_mode = snes_map_size_mode(asset),
+            map_addr = tilemap_map_address(tilemap.bg_number)
+        ));
+        if tilemap.scroll_x != 0 || tilemap.scroll_y != 0 {
+            out.push_str(&format!(
+                "    bgSetScroll({}, {}, {});\n",
+                tilemap.bg_number, tilemap.scroll_x, tilemap.scroll_y
+            ));
+        }
+    }
 
     let mut tile_base = 0u16;
     for asset in &ast.sprite_assets {
@@ -125,7 +168,9 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     for node in &ast.nodes {
         match node {
             AstNode::SpriteSystemInit
+            | AstNode::LoadTilemap { .. }
             | AstNode::LoadSpritesheet { .. }
+            | AstNode::DrawTilemap { .. }
             | AstNode::SpawnSprite { .. }
             | AstNode::SetAnimation { .. } => {}
             AstNode::DrawText { x, y, text, .. } => {
@@ -137,9 +182,17 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
             }
             AstNode::GameLoopBegin => {
                 out.push_str("    setMode(BG_MODE1, 0);\n");
-                out.push_str("    bgSetDisable(0);\n");
-                out.push_str("    bgSetDisable(1);\n");
-                out.push_str("    bgSetDisable(2);\n");
+                if context.tilemaps.is_empty() {
+                    out.push_str("    bgSetDisable(0);\n");
+                    out.push_str("    bgSetDisable(1);\n");
+                    out.push_str("    bgSetDisable(2);\n");
+                } else {
+                    for bg_number in 0..=2 {
+                        if !context.tilemaps.iter().any(|tilemap| tilemap.bg_number == bg_number) {
+                            out.push_str(&format!("    bgSetDisable({});\n", bg_number));
+                        }
+                    }
+                }
                 out.push_str("    setScreenOn();\n\n");
                 out.push_str("    while (1)\n    {\n");
             }
@@ -169,9 +222,25 @@ fn build_context(
     let mut context = SnesContext::default();
     let mut spawn_lookup: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     let mut next_sprite_index = 0u16;
+    let mut next_bg_number = 0u8;
 
     for node in &ast.nodes {
         match node {
+            AstNode::DrawTilemap {
+                resource_name,
+                x,
+                y,
+                scroll_x,
+                scroll_y,
+            } => {
+                context.tilemaps.push(TilemapDraw {
+                    resource_name: resource_name.clone(),
+                    bg_number: next_bg_number.min(2),
+                    scroll_x: x.saturating_add(*scroll_x),
+                    scroll_y: y.saturating_add(*scroll_y),
+                });
+                next_bg_number = next_bg_number.saturating_add(1);
+            }
             AstNode::SpawnSprite {
                 var_name,
                 resource_name,
@@ -220,18 +289,12 @@ fn build_context(
                     continue;
                 };
                 let spawn = &context.spawns[spawn_index];
-                let tiles_per_frame = tiles_per_frame(asset);
-                let normalized_frames = if frames.is_empty() {
-                    vec![0]
-                } else {
-                    frames.clone()
-                };
-                let frame_tiles = normalized_frames
+                let frame_tiles = normalized_animation_frames(frames)
                     .into_iter()
                     .map(|frame| {
                         spawn
                             .tile_base
-                            .saturating_add((frame as u16).saturating_mul(tiles_per_frame))
+                            .saturating_add(frame.saturating_mul(tiles_per_frame(asset)))
                     })
                     .collect::<Vec<_>>();
 
@@ -322,12 +385,20 @@ fn tile_base_lookup(ast: &AstOutput) -> std::collections::HashMap<String, u16> {
 
 fn build_resource_manifest(ast: &AstOutput) -> String {
     let mut out = String::new();
+    let tilemap_assets = collect_tilemap_assets(ast);
     out.push_str("// Generated by RetroDev Studio - DO NOT EDIT\n");
     out.push_str("// Workspace SNES asset manifest\n\n");
 
-    if ast.sprite_assets.is_empty() {
-        out.push_str("# no sprite assets staged for this target\n");
+    if ast.sprite_assets.is_empty() && tilemap_assets.is_empty() {
+        out.push_str("# no visual assets staged for this target\n");
         return out;
+    }
+
+    for asset in &tilemap_assets {
+        out.push_str(&format!(
+            "BMP {} <- {} ({}x{} tiles)\n",
+            asset.resource_name, asset.asset_path, asset.map_width, asset.map_height
+        ));
     }
 
     for asset in &ast.sprite_assets {
@@ -370,6 +441,17 @@ fn sprite_size_config(frame_width: u32, frame_height: u32) -> Option<SpriteSizeC
     }
 }
 
+fn normalized_animation_frames(frames: &[u32]) -> Vec<u16> {
+    if frames.is_empty() {
+        vec![0]
+    } else {
+        frames
+            .iter()
+            .map(|frame| (*frame).min(u16::MAX as u32) as u16)
+            .collect()
+    }
+}
+
 fn tiles_per_frame(asset: &SpriteAsset) -> u16 {
     let width_tiles = (asset.frame_width / 8).max(1);
     let height_tiles = (asset.frame_height / 8).max(1);
@@ -379,6 +461,23 @@ fn tiles_per_frame(asset: &SpriteAsset) -> u16 {
 fn tile_count(asset: &SpriteAsset) -> u16 {
     let frame_count = asset.animation_count.max(1);
     (u32::from(tiles_per_frame(asset)) * frame_count).min(u16::MAX as u32) as u16
+}
+
+fn snes_map_size_mode(asset: &TilemapAsset) -> &'static str {
+    match (asset.map_width > 32, asset.map_height > 32) {
+        (false, false) => "SC_32x32",
+        (true, false) => "SC_64x32",
+        (false, true) => "SC_32x64",
+        (true, true) => "SC_64x64",
+    }
+}
+
+fn tilemap_tile_address(bg_number: u8) -> u16 {
+    0x2000 + (u16::from(bg_number) * 0x1000)
+}
+
+fn tilemap_map_address(bg_number: u8) -> u16 {
+    u16::from(bg_number) * 0x1000
 }
 
 #[cfg(test)]
@@ -447,5 +546,42 @@ mod tests {
         assert!(output
             .main_c
             .contains("oamSet(0, 32, 48, 3, 0, 0, spr_hero_anim_tiles[spr_hero_anim_cursor], 0);"));
+    }
+
+    #[test]
+    fn snes_emitter_initializes_tilemap_backgrounds() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::LoadTilemap {
+                    resource_name: "background_tilemap".to_string(),
+                    asset_path: "assets/tilesets/level.ppm".to_string(),
+                    map_width: 64,
+                    map_height: 32,
+                },
+                AstNode::DrawTilemap {
+                    resource_name: "background_tilemap".to_string(),
+                    x: 16,
+                    y: 24,
+                    scroll_x: 8,
+                    scroll_y: 4,
+                },
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+        };
+
+        let output = emit_snes(&ast, "Tilemap Demo");
+
+        assert!(output.main_c.contains("#include \"background_tilemap.inc\""));
+        assert!(output.main_c.contains(
+            "bgInitTileSet(0, &background_tilemap_til, &background_tilemap_pal, 0, (&background_tilemap_tilend - &background_tilemap_til), (&background_tilemap_palend - &background_tilemap_pal), BG_16COLORS, 0x2000);"
+        ));
+        assert!(output.main_c.contains(
+            "bgInitMapSet(0, (u8*)&background_tilemap_map, (&background_tilemap_mapend - &background_tilemap_map), SC_64x32, 0x0000);"
+        ));
+        assert!(output.main_c.contains("bgSetScroll(0, 24, 28);"));
     }
 }

@@ -2,7 +2,7 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-use crate::compiler::ast_generator::{generate_ast, AstOutput};
+use crate::compiler::ast_generator::{collect_tilemap_assets, generate_ast, AstOutput};
 use crate::compiler::sgdk_emitter::emit_sgdk;
 use crate::compiler::snes_emitter::emit_snes;
 use crate::core::project_mgr::{load_project, load_scene, target_spec, TargetSpec};
@@ -375,6 +375,27 @@ fn stage_project_assets(
         })?;
     }
 
+    for asset in collect_tilemap_assets(ast) {
+        let source_rel = sanitize_relative_asset_path(&asset.asset_path)?;
+        let source = project_dir.join(&source_rel);
+        if !source.exists() {
+            return Err(format!(
+                "Asset referenciado nao encontrado: '{}'.",
+                source.display()
+            ));
+        }
+
+        let destination_rel = sgdk_tilemap_staging_path(&source_rel);
+        let destination = workspace_root.join(&destination_rel);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                format!("Falha ao preparar pasta de asset '{}': {}", parent.display(), e)
+            })?;
+        }
+
+        stage_bitmap_asset(&source, &destination, "SGDK")?;
+    }
+
     Ok(())
 }
 
@@ -390,19 +411,68 @@ fn stage_snes_assets(project_dir: &Path, src_dir: &Path, ast: &AstOutput) -> Res
         }
 
         let destination = src_dir.join(format!("{}.bmp", asset.resource_name));
-        let image = image::open(&source)
-            .map_err(|e| format!("Falha ao ler asset SNES '{}': {}", source.display(), e))?;
-        write_indexed_bmp_8bit(&image, &destination).map_err(|e| {
+        stage_bitmap_asset(&source, &destination, "SNES")?;
+    }
+
+    for asset in collect_tilemap_assets(ast) {
+        let source_rel = sanitize_relative_asset_path(&asset.asset_path)?;
+        let source = project_dir.join(source_rel);
+        if !source.exists() {
+            return Err(format!(
+                "Asset referenciado nao encontrado: '{}'.",
+                source.display()
+            ));
+        }
+
+        let destination = src_dir.join(format!("{}.bmp", asset.resource_name));
+        stage_bitmap_asset(&source, &destination, "SNES")?;
+    }
+
+    Ok(())
+}
+
+fn stage_bitmap_asset(source: &Path, destination: &Path, target_label: &str) -> Result<(), String> {
+    let extension = source
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase());
+
+    match extension.as_deref() {
+        Some("bmp") => fs::copy(source, destination).map(|_| ()).map_err(|e| {
             format!(
-                "Falha ao converter asset SNES '{}' para '{}': {}",
+                "Falha ao copiar asset {} '{}' para '{}': {}",
+                target_label,
                 source.display(),
                 destination.display(),
                 e
             )
-        })?;
+        }),
+        _ => {
+            let image = image::open(source).map_err(|e| {
+                format!(
+                    "Falha ao ler asset {} '{}': {}",
+                    target_label,
+                    source.display(),
+                    e
+                )
+            })?;
+            write_indexed_bmp_8bit(&image, destination).map_err(|e| {
+                format!(
+                    "Falha ao converter asset {} '{}' para '{}': {}",
+                    target_label,
+                    source.display(),
+                    destination.display(),
+                    e
+                )
+            })
+        }
     }
+}
 
-    Ok(())
+fn sgdk_tilemap_staging_path(asset_path: &Path) -> PathBuf {
+    let mut staged = asset_path.to_path_buf();
+    staged.set_extension("bmp");
+    staged
 }
 
 fn write_indexed_bmp_8bit(image: &image::DynamicImage, destination: &Path) -> Result<(), String> {
@@ -488,6 +558,7 @@ fn render_sgdk_makefile(project_slug: &str) -> String {
 }
 
 fn render_pvsneslib_makefile(project_slug: &str, ast: &AstOutput) -> String {
+    let tilemap_assets = collect_tilemap_assets(ast);
     let mut out = String::new();
     out.push_str("ifeq ($(strip $(PVSNESLIB_HOME)),)\n");
     out.push_str("$(error \"Please create an environment variable PVSNESLIB_HOME by following this guide: https://github.com/alekmaul/pvsneslib/wiki/Installation\")\n");
@@ -509,6 +580,15 @@ fn render_pvsneslib_makefile(project_slug: &str, ast: &AstOutput) -> String {
     out.push_str("clean: cleanBuildRes cleanRom cleanGfx\n\n");
 
     let mut pic_targets = Vec::new();
+    for asset in &tilemap_assets {
+        let pic_target = format!("src/{}.pic", asset.resource_name);
+        let bmp_target = format!("src/{}.bmp", asset.resource_name);
+        pic_targets.push(pic_target.clone());
+        out.push_str(&format!("{}: {}\n", pic_target, bmp_target));
+        out.push_str("\t@echo convert bitmap ... $(notdir $<)\n");
+        out.push_str("\t$(GFXCONV) -s 8 -o 16 -u 16 -e 0 -p -m -t bmp -i $<\n\n");
+    }
+
     for asset in &ast.sprite_assets {
         let pic_target = format!("src/{}.pic", asset.resource_name);
         let bmp_target = format!("src/{}.bmp", asset.resource_name);
@@ -533,7 +613,25 @@ fn render_pvsneslib_makefile(project_slug: &str, ast: &AstOutput) -> String {
 
 fn render_snes_data_asm(ast: &AstOutput) -> String {
     let mut out = String::new();
+    let tilemap_assets = collect_tilemap_assets(ast);
     out.push_str(".include \"hdr.asm\"\n\n");
+
+    if !tilemap_assets.is_empty() {
+        out.push_str(".section \".rodata_bg\" superfree\n\n");
+        for asset in &tilemap_assets {
+            out.push_str(&format!("{}_til:\n", asset.resource_name));
+            out.push_str(&format!(".incbin \"src/{}.pic\"\n", asset.resource_name));
+            out.push_str(&format!("{}_tilend:\n\n", asset.resource_name));
+            out.push_str(&format!("{}_map:\n", asset.resource_name));
+            out.push_str(&format!(".incbin \"src/{}.map\"\n", asset.resource_name));
+            out.push_str(&format!("{}_mapend:\n\n", asset.resource_name));
+            out.push_str(&format!("{}_pal:\n", asset.resource_name));
+            out.push_str(&format!(".incbin \"src/{}.pal\"\n", asset.resource_name));
+            out.push_str(&format!("{}_palend:\n\n", asset.resource_name));
+        }
+        out.push_str(".ends\n\n");
+    }
+
     out.push_str(".section \".rosprite\" superfree\n\n");
     for asset in &ast.sprite_assets {
         out.push_str(&format!(".include \"src/{}_data.as\"\n", asset.resource_name));
@@ -1061,6 +1159,62 @@ mod tests {
         (root, make_program)
     }
 
+    fn install_tilemap_fixture(project_dir: &Path) {
+        let tilemap_asset = project_dir
+            .join("assets")
+            .join("tilesets")
+            .join("level.ppm");
+        fs::create_dir_all(
+            tilemap_asset
+                .parent()
+                .expect("tilemap asset should have parent directory"),
+        )
+        .expect("create tilemap asset dir");
+        fs::copy(
+            fixture_dir("snes_dummy")
+                .join("assets")
+                .join("sprites")
+                .join("hero.ppm"),
+            &tilemap_asset,
+        )
+        .expect("copy tilemap fixture");
+
+        let scene_json = r#"{
+  "scene_id": "main",
+  "display_name": "Main Scene",
+  "background_layers": [],
+  "entities": [
+    {
+      "entity_id": "background",
+      "prefab": null,
+      "transform": {
+        "x": 16,
+        "y": 24
+      },
+      "components": {
+        "sprite": null,
+        "collision": null,
+        "input": null,
+        "physics": null,
+        "audio": null,
+        "logic": null,
+        "camera": null,
+        "tilemap": {
+          "tileset": "assets/tilesets/level.ppm",
+          "map_width": 64,
+          "map_height": 32,
+          "scroll_x": 8,
+          "scroll_y": 4
+        }
+      }
+    }
+  ],
+  "palettes": []
+}"#;
+        fs::write(project_dir.join("scenes").join("main.json"), scene_json)
+            .expect("write tilemap scene fixture");
+    }
+
     #[test]
     fn build_fails_when_toolchain_is_missing() {
         let _serial = test_serial_guard();
@@ -1140,6 +1294,99 @@ mod tests {
         let data_asm = fs::read_to_string(&data_path).expect("read snes data asm");
         assert!(data_asm.contains(".include \"hdr.asm\""));
         assert!(data_asm.contains(".include \"src/controller_root_data.as\""));
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn build_generates_megadrive_workspace_with_tilemap_assets() {
+        let _serial = test_serial_guard();
+        let project_dir = workspace_copy("megadrive_dummy");
+        install_tilemap_fixture(&project_dir);
+        let (sgdk_root, make_program) = fake_toolchain("sgdk-tilemap", "md");
+        let environment = BuildEnvironment {
+            sgdk_root: Some(sgdk_root),
+            sgdk_make_program: Some(make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_with_environment(&project_dir, &environment, |_| {});
+
+        assert!(result.ok, "build log: {:?}", result.log);
+        let staged_tilemap = project_dir
+            .join("build")
+            .join("megadrive")
+            .join("assets")
+            .join("tilesets")
+            .join("level.bmp");
+        assert!(staged_tilemap.exists());
+        let resources_res = fs::read_to_string(
+            project_dir
+                .join("build")
+                .join("megadrive")
+                .join("res")
+                .join("resources.res"),
+        )
+        .expect("read SGDK resources");
+        assert!(resources_res.contains("IMAGE background_tilemap \"assets/tilesets/level.bmp\" NONE"));
+        let main_c = fs::read_to_string(
+            project_dir
+                .join("build")
+                .join("megadrive")
+                .join("src")
+                .join("main.c"),
+        )
+        .expect("read SGDK main.c");
+        assert!(main_c.contains("VDP_drawImageEx(BG_B, &background_tilemap"));
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn build_generates_snes_workspace_with_tilemap_data_files() {
+        let _serial = test_serial_guard();
+        let project_dir = workspace_copy("snes_dummy");
+        install_tilemap_fixture(&project_dir);
+        let (pvsneslib_root, make_program) = fake_toolchain("pvsneslib-tilemap", "sfc");
+        fs::create_dir_all(pvsneslib_root.join("devkitsnes")).expect("create fake devkitsnes");
+        fs::write(
+            pvsneslib_root.join("devkitsnes").join("snes_rules"),
+            "dummy rules",
+        )
+        .expect("write fake snes_rules");
+        let environment = BuildEnvironment {
+            pvsneslib_root: Some(pvsneslib_root),
+            pvsneslib_make_program: Some(make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_with_environment(&project_dir, &environment, |_| {});
+
+        assert!(result.ok, "build log: {:?}", result.log);
+        let staged_bmp = project_dir
+            .join("build")
+            .join("snes")
+            .join("src")
+            .join("background_tilemap.bmp");
+        assert!(staged_bmp.exists());
+        let data_asm = fs::read_to_string(
+            project_dir.join("build").join("snes").join("data.asm"),
+        )
+        .expect("read SNES data asm");
+        assert!(data_asm.contains("background_tilemap_map:"));
+        assert!(data_asm.contains(".incbin \"src/background_tilemap.map\""));
+        let makefile = fs::read_to_string(
+            project_dir.join("build").join("snes").join("Makefile"),
+        )
+        .expect("read SNES makefile");
+        assert!(makefile.contains("$(GFXCONV) -s 8 -o 16 -u 16 -e 0 -p -m -t bmp -i $<"));
+        let main_c = fs::read_to_string(
+            project_dir.join("build").join("snes").join("src").join("main.c"),
+        )
+        .expect("read SNES main.c");
+        assert!(main_c.contains("bgInitMapSet(0, (u8*)&background_tilemap_map"));
 
         let _ = fs::remove_dir_all(project_dir);
     }

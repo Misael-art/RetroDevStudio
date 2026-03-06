@@ -5,6 +5,12 @@ use crate::ugdm::entities::{Project, Scene};
 #[allow(dead_code)]
 pub enum AstNode {
     SpriteSystemInit,
+    LoadTilemap {
+        resource_name: String,
+        asset_path: String,
+        map_width: u32,
+        map_height: u32,
+    },
     LoadSpritesheet {
         resource_name: String,
         asset_path: String,
@@ -18,6 +24,13 @@ pub enum AstNode {
         x: i32,
         y: i32,
         priority_high: bool,
+    },
+    DrawTilemap {
+        resource_name: String,
+        x: i32,
+        y: i32,
+        scroll_x: i32,
+        scroll_y: i32,
     },
     SetAnimation {
         var_name: String,
@@ -65,10 +78,21 @@ pub struct SpriteAnimation {
     pub looping: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TilemapAsset {
+    pub resource_name: String,
+    pub asset_path: String,
+    pub map_width: u32,
+    pub map_height: u32,
+}
+
 pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
     let mut nodes: Vec<AstNode> = Vec::new();
     let mut sprite_assets: Vec<SpriteAsset> = Vec::new();
+    let mut tilemap_assets: Vec<TilemapAsset> = Vec::new();
     let mut asset_resource_names: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    let mut tilemap_resource_names: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
 
     nodes.push(AstNode::SpriteSystemInit);
@@ -80,6 +104,41 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
     });
 
     for entity in &scene.entities {
+        if let Some(tilemap) = &entity.components.tilemap {
+            let resource_name = tilemap_resource_names
+                .get(&tilemap.tileset)
+                .cloned()
+                .unwrap_or_else(|| sanitize_identifier(&format!("{}_tilemap", entity.entity_id)));
+
+            if !tilemap_assets
+                .iter()
+                .any(|asset| asset.asset_path == tilemap.tileset)
+            {
+                tilemap_assets.push(TilemapAsset {
+                    resource_name: resource_name.clone(),
+                    asset_path: tilemap.tileset.clone(),
+                    map_width: tilemap.map_width,
+                    map_height: tilemap.map_height,
+                });
+                tilemap_resource_names.insert(tilemap.tileset.clone(), resource_name.clone());
+
+                nodes.push(AstNode::LoadTilemap {
+                    resource_name: resource_name.clone(),
+                    asset_path: tilemap.tileset.clone(),
+                    map_width: tilemap.map_width,
+                    map_height: tilemap.map_height,
+                });
+            }
+
+            nodes.push(AstNode::DrawTilemap {
+                resource_name,
+                x: entity.transform.x,
+                y: entity.transform.y,
+                scroll_x: tilemap.scroll_x,
+                scroll_y: tilemap.scroll_y,
+            });
+        }
+
         let Some(sprite) = &entity.components.sprite else {
             continue;
         };
@@ -197,6 +256,26 @@ fn animation_frame_time(project_fps: u32, animation_fps: u32) -> u32 {
     ((project_fps + (animation_fps / 2)) / animation_fps).max(1)
 }
 
+pub fn collect_tilemap_assets(ast: &AstOutput) -> Vec<TilemapAsset> {
+    ast.nodes
+        .iter()
+        .filter_map(|node| match node {
+            AstNode::LoadTilemap {
+                resource_name,
+                asset_path,
+                map_width,
+                map_height,
+            } => Some(TilemapAsset {
+                resource_name: resource_name.clone(),
+                asset_path: asset_path.clone(),
+                map_width: *map_width,
+                map_height: *map_height,
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -291,5 +370,65 @@ mod tests {
     #[test]
     fn animation_frame_time_disables_auto_animation_when_fps_is_zero() {
         assert_eq!(animation_frame_time(60, 0), 0);
+    }
+
+    #[test]
+    fn generate_ast_emits_tilemap_nodes_for_tilemap_component() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            name: "Tilemap Demo".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+        };
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "background".to_string(),
+                prefab: None,
+                transform: Transform { x: 16, y: 24 },
+                components: Components {
+                    tilemap: Some(crate::ugdm::components::TilemapComponent {
+                        tileset: "assets/tilesets/level.ppm".to_string(),
+                        map_width: 32,
+                        map_height: 32,
+                        scroll_x: 4,
+                        scroll_y: 8,
+                    }),
+                    ..Components::default()
+                },
+            }],
+            palettes: Vec::new(),
+        };
+
+        let ast = generate_ast(&project, &scene);
+        let tilemap_assets = collect_tilemap_assets(&ast);
+
+        assert_eq!(tilemap_assets.len(), 1);
+        assert_eq!(tilemap_assets[0].resource_name, "background_tilemap");
+        assert_eq!(tilemap_assets[0].asset_path, "assets/tilesets/level.ppm");
+
+        assert!(ast.nodes.iter().any(|node| matches!(
+            node,
+            AstNode::DrawTilemap {
+                resource_name,
+                x,
+                y,
+                scroll_x,
+                scroll_y
+            } if resource_name == "background_tilemap"
+                && *x == 16
+                && *y == 24
+                && *scroll_x == 4
+                && *scroll_y == 8
+        )));
     }
 }
