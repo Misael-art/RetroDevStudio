@@ -1,4 +1,7 @@
-use crate::compiler::ast_generator::{collect_tilemap_assets, AstNode, AstOutput, SpriteAsset, TilemapAsset};
+use crate::compiler::ast_generator::{
+    collect_collision_checks, collect_tilemap_assets, AabbCollisionCheck, AstNode, AstOutput,
+    SpriteAsset, TilemapAsset,
+};
 
 #[derive(Debug)]
 pub struct EmitOutput {
@@ -15,6 +18,7 @@ pub fn emit_sgdk(ast: &AstOutput, project_name: &str) -> EmitOutput {
 
 fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     let mut out = String::new();
+    let collision_checks = collect_collision_checks(ast);
     let tilemap_assets = collect_tilemap_assets(ast);
     let include_resources = !ast.sprite_assets.is_empty() || !tilemap_assets.is_empty();
 
@@ -33,6 +37,10 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
         out.push_str(&format!("static Sprite* spr_{};\n", asset.resource_name));
     }
     if !ast.sprite_assets.is_empty() {
+        out.push('\n');
+    }
+    if !collision_checks.is_empty() {
+        out.push_str(render_aabb_helper());
         out.push('\n');
     }
 
@@ -124,6 +132,20 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
                 }
                 tilemap_draw_index += 1;
             }
+            AstNode::CheckCollisionAabb {
+                result_name,
+                left,
+                right,
+            } => {
+                render_collision_check(
+                    &mut out,
+                    &AabbCollisionCheck {
+                        result_name: result_name.clone(),
+                        left: left.clone(),
+                        right: right.clone(),
+                    },
+                );
+            }
             AstNode::SetAnimation {
                 var_name,
                 anim_index,
@@ -201,6 +223,35 @@ fn resource_animation_time(asset: &SpriteAsset) -> u32 {
         .as_ref()
         .map(|animation| animation.frame_time)
         .unwrap_or(4)
+}
+
+fn render_aabb_helper() -> &'static str {
+    "static u8 retro_aabb_intersects(s16 left_x, s16 left_y, u16 left_w, u16 left_h, s16 right_x, s16 right_y, u16 right_w, u16 right_h)\n\
+{\n\
+    return left_x < (right_x + (s16)right_w)\n\
+        && (left_x + (s16)left_w) > right_x\n\
+        && left_y < (right_y + (s16)right_h)\n\
+        && (left_y + (s16)left_h) > right_y;\n\
+}\n"
+}
+
+fn render_collision_check(out: &mut String, check: &AabbCollisionCheck) {
+    out.push_str(&format!(
+        "        u8 {result_name} = retro_aabb_intersects({left_x}, {left_y}, {left_width}, {left_height}, {right_x}, {right_y}, {right_width}, {right_height});\n",
+        result_name = check.result_name,
+        left_x = check.left.x,
+        left_y = check.left.y,
+        left_width = check.left.width,
+        left_height = check.left.height,
+        right_x = check.right.x,
+        right_y = check.right.y,
+        right_width = check.right.width,
+        right_height = check.right.height
+    ));
+    out.push_str(&format!(
+        "        if ({}) {{\n            // Collision: {} <-> {}\n        }}\n",
+        check.result_name, check.left.entity_id, check.right.entity_id
+    ));
 }
 
 fn plane_size_for_tilemaps(tilemap_assets: &[TilemapAsset]) -> Option<(u16, u16)> {
@@ -384,5 +435,45 @@ mod tests {
         ));
         assert!(output.main_c.contains("VDP_setHorizontalScroll(BG_B, 8);"));
         assert!(output.main_c.contains("VDP_setVerticalScroll(BG_B, 4);"));
+    }
+
+    #[test]
+    fn main_c_emits_manual_aabb_collision_checks() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::CheckCollisionAabb {
+                    result_name: "collision_player_badnik".to_string(),
+                    left: crate::compiler::ast_generator::CollisionBox {
+                        entity_id: "player".to_string(),
+                        x: 18,
+                        y: 28,
+                        width: 16,
+                        height: 24,
+                    },
+                    right: crate::compiler::ast_generator::CollisionBox {
+                        entity_id: "badnik".to_string(),
+                        x: 40,
+                        y: 28,
+                        width: 24,
+                        height: 24,
+                    },
+                },
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+        };
+
+        let output = emit_sgdk(&ast, "Collision Demo");
+
+        assert!(output.main_c.contains("static u8 retro_aabb_intersects("));
+        assert!(output.main_c.contains(
+            "u8 collision_player_badnik = retro_aabb_intersects(18, 28, 16, 24, 40, 28, 24, 24);"
+        ));
+        assert!(output
+            .main_c
+            .contains("// Collision: player <-> badnik"));
     }
 }

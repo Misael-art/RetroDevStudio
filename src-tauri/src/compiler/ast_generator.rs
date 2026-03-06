@@ -1,4 +1,4 @@
-use crate::ugdm::components::{AnimationDef, SpriteComponent};
+use crate::ugdm::components::{AnimationDef, CollisionComponent, SpriteComponent};
 use crate::ugdm::entities::{Project, Scene};
 
 #[derive(Debug, Clone)]
@@ -31,6 +31,11 @@ pub enum AstNode {
         y: i32,
         scroll_x: i32,
         scroll_y: i32,
+    },
+    CheckCollisionAabb {
+        result_name: String,
+        left: CollisionBox,
+        right: CollisionBox,
     },
     SetAnimation {
         var_name: String,
@@ -86,10 +91,34 @@ pub struct TilemapAsset {
     pub map_height: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CollisionBox {
+    pub entity_id: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CollisionSource {
+    box_def: CollisionBox,
+    layer: Option<String>,
+    collides_with: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AabbCollisionCheck {
+    pub result_name: String,
+    pub left: CollisionBox,
+    pub right: CollisionBox,
+}
+
 pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
     let mut nodes: Vec<AstNode> = Vec::new();
     let mut sprite_assets: Vec<SpriteAsset> = Vec::new();
     let mut tilemap_assets: Vec<TilemapAsset> = Vec::new();
+    let mut collision_sources: Vec<CollisionSource> = Vec::new();
     let mut asset_resource_names: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
     let mut tilemap_resource_names: std::collections::HashMap<String, String> =
@@ -104,6 +133,12 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
     });
 
     for entity in &scene.entities {
+        if let Some(collision) = &entity.components.collision {
+            if let Some(source) = collision_source(entity.entity_id.as_str(), entity.transform.x, entity.transform.y, collision) {
+                collision_sources.push(source);
+            }
+        }
+
         if let Some(tilemap) = &entity.components.tilemap {
             let resource_name = tilemap_resource_names
                 .get(&tilemap.tileset)
@@ -192,6 +227,7 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
     }
 
     nodes.push(AstNode::GameLoopBegin);
+    nodes.extend(collision_nodes(&collision_sources));
     nodes.push(AstNode::SpriteUpdate);
     nodes.push(AstNode::VSync);
     nodes.push(AstNode::GameLoopEnd);
@@ -256,6 +292,73 @@ fn animation_frame_time(project_fps: u32, animation_fps: u32) -> u32 {
     ((project_fps + (animation_fps / 2)) / animation_fps).max(1)
 }
 
+fn collision_source(
+    entity_id: &str,
+    entity_x: i32,
+    entity_y: i32,
+    collision: &CollisionComponent,
+) -> Option<CollisionSource> {
+    if collision.shape != "aabb" {
+        return None;
+    }
+
+    let offset_x = collision.offset.as_ref().map(|offset| offset.x).unwrap_or(0);
+    let offset_y = collision.offset.as_ref().map(|offset| offset.y).unwrap_or(0);
+
+    Some(CollisionSource {
+        box_def: CollisionBox {
+            entity_id: entity_id.to_string(),
+            x: entity_x.saturating_add(offset_x),
+            y: entity_y.saturating_add(offset_y),
+            width: collision.width,
+            height: collision.height,
+        },
+        layer: collision.layer.clone(),
+        collides_with: collision.collides_with.clone(),
+    })
+}
+
+fn collision_nodes(collision_sources: &[CollisionSource]) -> Vec<AstNode> {
+    let mut nodes = Vec::new();
+
+    for (index, left) in collision_sources.iter().enumerate() {
+        for right in collision_sources.iter().skip(index + 1) {
+            if !should_emit_collision_check(left, right) {
+                continue;
+            }
+
+            nodes.push(AstNode::CheckCollisionAabb {
+                result_name: sanitize_identifier(&format!(
+                    "collision_{}_{}",
+                    left.box_def.entity_id, right.box_def.entity_id
+                )),
+                left: left.box_def.clone(),
+                right: right.box_def.clone(),
+            });
+        }
+    }
+
+    nodes
+}
+
+fn should_emit_collision_check(left: &CollisionSource, right: &CollisionSource) -> bool {
+    collision_targets_allow(left, right.layer.as_deref())
+        && collision_targets_allow(right, left.layer.as_deref())
+}
+
+fn collision_targets_allow(source: &CollisionSource, target_layer: Option<&str>) -> bool {
+    if source.collides_with.is_empty() {
+        return true;
+    }
+
+    target_layer.is_some_and(|layer| {
+        source
+            .collides_with
+            .iter()
+            .any(|candidate| candidate == layer)
+    })
+}
+
 pub fn collect_tilemap_assets(ast: &AstOutput) -> Vec<TilemapAsset> {
     ast.nodes
         .iter()
@@ -270,6 +373,24 @@ pub fn collect_tilemap_assets(ast: &AstOutput) -> Vec<TilemapAsset> {
                 asset_path: asset_path.clone(),
                 map_width: *map_width,
                 map_height: *map_height,
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+pub fn collect_collision_checks(ast: &AstOutput) -> Vec<AabbCollisionCheck> {
+    ast.nodes
+        .iter()
+        .filter_map(|node| match node {
+            AstNode::CheckCollisionAabb {
+                result_name,
+                left,
+                right,
+            } => Some(AabbCollisionCheck {
+                result_name: result_name.clone(),
+                left: left.clone(),
+                right: right.clone(),
             }),
             _ => None,
         })
@@ -430,5 +551,153 @@ mod tests {
                 && *scroll_x == 4
                 && *scroll_y == 8
         )));
+    }
+
+    #[test]
+    fn generate_ast_emits_aabb_collision_checks_for_compatible_layers() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            name: "Collision Demo".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+        };
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![
+                Entity {
+                    entity_id: "player".to_string(),
+                    prefab: None,
+                    transform: Transform { x: 16, y: 24 },
+                    components: Components {
+                        collision: Some(crate::ugdm::components::CollisionComponent {
+                            shape: "aabb".to_string(),
+                            width: 16,
+                            height: 24,
+                            offset: Some(crate::ugdm::components::CollisionOffset { x: 2, y: 4 }),
+                            solid: true,
+                            layer: Some("player".to_string()),
+                            collides_with: vec!["enemy".to_string()],
+                        }),
+                        ..Components::default()
+                    },
+                },
+                Entity {
+                    entity_id: "badnik".to_string(),
+                    prefab: None,
+                    transform: Transform { x: 40, y: 28 },
+                    components: Components {
+                        collision: Some(crate::ugdm::components::CollisionComponent {
+                            shape: "aabb".to_string(),
+                            width: 24,
+                            height: 24,
+                            offset: None,
+                            solid: true,
+                            layer: Some("enemy".to_string()),
+                            collides_with: vec!["player".to_string()],
+                        }),
+                        ..Components::default()
+                    },
+                },
+            ],
+            palettes: Vec::new(),
+        };
+
+        let ast = generate_ast(&project, &scene);
+        let collision_checks = collect_collision_checks(&ast);
+
+        assert_eq!(collision_checks.len(), 1);
+        assert_eq!(collision_checks[0].result_name, "collision_player_badnik");
+        assert_eq!(
+            collision_checks[0].left,
+            CollisionBox {
+                entity_id: "player".to_string(),
+                x: 18,
+                y: 28,
+                width: 16,
+                height: 24,
+            }
+        );
+        assert_eq!(
+            collision_checks[0].right,
+            CollisionBox {
+                entity_id: "badnik".to_string(),
+                x: 40,
+                y: 28,
+                width: 24,
+                height: 24,
+            }
+        );
+    }
+
+    #[test]
+    fn generate_ast_skips_aabb_collision_checks_for_non_matching_layers() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            name: "Collision Demo".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+        };
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![
+                Entity {
+                    entity_id: "player".to_string(),
+                    prefab: None,
+                    transform: Transform { x: 16, y: 24 },
+                    components: Components {
+                        collision: Some(crate::ugdm::components::CollisionComponent {
+                            shape: "aabb".to_string(),
+                            width: 16,
+                            height: 24,
+                            offset: None,
+                            solid: true,
+                            layer: Some("player".to_string()),
+                            collides_with: vec!["enemy".to_string()],
+                        }),
+                        ..Components::default()
+                    },
+                },
+                Entity {
+                    entity_id: "ring".to_string(),
+                    prefab: None,
+                    transform: Transform { x: 40, y: 28 },
+                    components: Components {
+                        collision: Some(crate::ugdm::components::CollisionComponent {
+                            shape: "aabb".to_string(),
+                            width: 8,
+                            height: 8,
+                            offset: None,
+                            solid: false,
+                            layer: Some("collectible".to_string()),
+                            collides_with: vec!["terrain".to_string()],
+                        }),
+                        ..Components::default()
+                    },
+                },
+            ],
+            palettes: Vec::new(),
+        };
+
+        let ast = generate_ast(&project, &scene);
+
+        assert!(collect_collision_checks(&ast).is_empty());
     }
 }

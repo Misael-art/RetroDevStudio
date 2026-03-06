@@ -1,5 +1,6 @@
 use crate::compiler::ast_generator::{
-    collect_tilemap_assets, AstNode, AstOutput, SpriteAsset, TilemapAsset,
+    collect_collision_checks, collect_tilemap_assets, AabbCollisionCheck, AstNode, AstOutput,
+    SpriteAsset, TilemapAsset,
 };
 
 #[derive(Debug)]
@@ -62,6 +63,7 @@ pub fn emit_snes(ast: &AstOutput, project_name: &str) -> EmitOutput {
 
 fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     let mut out = String::new();
+    let collision_checks = collect_collision_checks(ast);
     let tilemap_assets = collect_tilemap_assets(ast);
     let size_config = ast
         .sprite_assets
@@ -101,6 +103,10 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
         out.push_str(&format!("static u16 {}_timer = 0;\n", animation.state_name));
     }
     if !context.animations.is_empty() {
+        out.push('\n');
+    }
+    if !collision_checks.is_empty() {
+        out.push_str(render_aabb_helper());
         out.push('\n');
     }
 
@@ -173,6 +179,20 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
             | AstNode::DrawTilemap { .. }
             | AstNode::SpawnSprite { .. }
             | AstNode::SetAnimation { .. } => {}
+            AstNode::CheckCollisionAabb {
+                result_name,
+                left,
+                right,
+            } => {
+                render_collision_check(
+                    &mut out,
+                    &AabbCollisionCheck {
+                        result_name: result_name.clone(),
+                        left: left.clone(),
+                        right: right.clone(),
+                    },
+                );
+            }
             AstNode::DrawText { x, y, text, .. } => {
                 let escaped = text.replace('"', "\\\"");
                 out.push_str(&format!(
@@ -361,6 +381,35 @@ fn render_animation_update(out: &mut String, animation: &AnimationState) {
         out.push('\n');
     }
     out.push_str("        }\n");
+}
+
+fn render_aabb_helper() -> &'static str {
+    "static u8 retro_aabb_intersects(s16 left_x, s16 left_y, u16 left_w, u16 left_h, s16 right_x, s16 right_y, u16 right_w, u16 right_h)\n\
+{\n\
+    return left_x < (right_x + (s16)right_w)\n\
+        && (left_x + (s16)left_w) > right_x\n\
+        && left_y < (right_y + (s16)right_h)\n\
+        && (left_y + (s16)left_h) > right_y;\n\
+}\n"
+}
+
+fn render_collision_check(out: &mut String, check: &AabbCollisionCheck) {
+    out.push_str(&format!(
+        "        u8 {result_name} = retro_aabb_intersects({left_x}, {left_y}, {left_width}, {left_height}, {right_x}, {right_y}, {right_width}, {right_height});\n",
+        result_name = check.result_name,
+        left_x = check.left.x,
+        left_y = check.left.y,
+        left_width = check.left.width,
+        left_height = check.left.height,
+        right_x = check.right.x,
+        right_y = check.right.y,
+        right_width = check.right.width,
+        right_height = check.right.height
+    ));
+    out.push_str(&format!(
+        "        if ({}) {{\n            // Collision: {} <-> {}\n        }}\n",
+        check.result_name, check.left.entity_id, check.right.entity_id
+    ));
 }
 
 fn initial_tile_for_spawn(context: &SnesContext, var_name: &str) -> Option<u16> {
@@ -583,5 +632,45 @@ mod tests {
             "bgInitMapSet(0, (u8*)&background_tilemap_map, (&background_tilemap_mapend - &background_tilemap_map), SC_64x32, 0x0000);"
         ));
         assert!(output.main_c.contains("bgSetScroll(0, 24, 28);"));
+    }
+
+    #[test]
+    fn snes_emitter_emits_manual_aabb_collision_checks() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::CheckCollisionAabb {
+                    result_name: "collision_player_badnik".to_string(),
+                    left: crate::compiler::ast_generator::CollisionBox {
+                        entity_id: "player".to_string(),
+                        x: 18,
+                        y: 28,
+                        width: 16,
+                        height: 24,
+                    },
+                    right: crate::compiler::ast_generator::CollisionBox {
+                        entity_id: "badnik".to_string(),
+                        x: 40,
+                        y: 28,
+                        width: 24,
+                        height: 24,
+                    },
+                },
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+        };
+
+        let output = emit_snes(&ast, "Collision Demo");
+
+        assert!(output.main_c.contains("static u8 retro_aabb_intersects("));
+        assert!(output.main_c.contains(
+            "u8 collision_player_badnik = retro_aabb_intersects(18, 28, 16, 24, 40, 28, 24, 24);"
+        ));
+        assert!(output
+            .main_c
+            .contains("// Collision: player <-> badnik"));
     }
 }
