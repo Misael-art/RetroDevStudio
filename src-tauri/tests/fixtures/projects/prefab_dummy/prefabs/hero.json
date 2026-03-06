@@ -1,0 +1,35 @@
+{
+  "entity_id": "hero_prefab",
+  "prefab": null,
+  "transform": {
+    "x": 0,
+    "y": 0
+  },
+  "components": {
+    "sprite": {
+      "asset": "assets/sprites/hero.png",
+      "frame_width": 16,
+      "frame_height": 16,
+      "pivot": null,
+      "palette_slot": 1,
+      "animations": {
+        "idle": {
+          "frames": [0, 1],
+          "fps": 12,
+          "loop": true
+        }
+      },
+      "priority": "foreground"
+    },
+    "physics": {
+      "gravity": false,
+      "gravity_strength": 3,
+      "max_velocity": {
+        "x": 64,
+        "y": 32
+      },
+      "friction": 1,
+      "bounce": 0
+    }
+  }
+}

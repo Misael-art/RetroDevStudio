@@ -5,7 +5,7 @@ use serde::Serialize;
 use crate::hardware::{constraint_engine, HwStatus};
 use crate::ugdm::entities::Scene;
 
-use super::project_mgr::{load_project, load_scene, validate_scene};
+use super::project_mgr::{load_project, load_scene, resolve_prefabs, validate_scene};
 
 #[derive(Debug, Default, Serialize, Clone, PartialEq, Eq)]
 pub struct DraftValidationResult {
@@ -52,7 +52,12 @@ pub fn validate_scene_draft(project_dir: &Path, scene_json: &str) -> DraftValida
         return DraftValidationResult::failure(error.to_string());
     }
 
-    match constraint_engine::hw_status_for_target(&project.target, &scene) {
+    let resolved_scene = match resolve_prefabs(project_dir, &scene) {
+        Ok(scene) => scene,
+        Err(error) => return DraftValidationResult::failure(error.to_string()),
+    };
+
+    match constraint_engine::hw_status_for_target(&project.target, &resolved_scene) {
         Ok(hw_status) => DraftValidationResult::success(hw_status),
         Err(error) => DraftValidationResult::failure(error),
     }
@@ -61,8 +66,9 @@ pub fn validate_scene_draft(project_dir: &Path, scene_json: &str) -> DraftValida
 pub fn authoritative_hw_status(project_dir: &Path) -> Result<HwStatus, String> {
     let project = load_project(project_dir).map_err(|error| error.to_string())?;
     let scene = load_scene(project_dir, &project.entry_scene).map_err(|error| error.to_string())?;
+    let resolved_scene = resolve_prefabs(project_dir, &scene).map_err(|error| error.to_string())?;
 
-    constraint_engine::hw_status_for_target(&project.target, &scene)
+    constraint_engine::hw_status_for_target(&project.target, &resolved_scene)
 }
 
 #[cfg(test)]

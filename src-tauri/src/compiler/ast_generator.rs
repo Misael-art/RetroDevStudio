@@ -1,3 +1,6 @@
+use std::path::Path;
+
+use crate::core::project_mgr::{resolve_prefabs, LoadError};
 use crate::ugdm::components::{
     AnimationDef, CollisionComponent, InputComponent, SpriteComponent,
 };
@@ -140,6 +143,15 @@ pub struct InputActionBinding {
     pub action_name: String,
     pub state_var: String,
     pub button: String,
+}
+
+pub fn generate_ast_with_prefabs(
+    project_dir: &Path,
+    project: &Project,
+    scene: &Scene,
+) -> Result<AstOutput, LoadError> {
+    let resolved_scene = resolve_prefabs(project_dir, scene)?;
+    Ok(generate_ast(project, &resolved_scene))
 }
 
 pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
@@ -532,9 +544,19 @@ pub fn collect_input_actions(ast: &AstOutput) -> Vec<InputActionBinding> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::project_mgr::{load_project, load_scene};
     use crate::ugdm::components::Components;
     use crate::ugdm::entities::{Entity, Resolution, Transform};
     use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+
+    fn fixture_dir(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("projects")
+            .join(name)
+    }
 
     #[test]
     fn generate_ast_uses_default_animation_timing_from_sprite_component() {
@@ -909,6 +931,25 @@ mod tests {
             node,
             AstNode::ReadInputDevice { device, state_var }
                 if device == "joypad_1" && state_var == "joypad_1_state"
+        )));
+    }
+
+    #[test]
+    fn generate_ast_with_prefabs_uses_inherited_prefab_components() {
+        let project_dir = fixture_dir("prefab_dummy");
+        let project = load_project(&project_dir).expect("load prefab fixture");
+        let scene = load_scene(&project_dir, &project.entry_scene).expect("load prefab scene");
+
+        let ast = generate_ast_with_prefabs(&project_dir, &project, &scene)
+            .expect("generate ast with prefabs");
+
+        assert!(ast.sprite_assets.iter().any(|asset| {
+            asset.resource_name == "hero_instance" && asset.asset_path == "assets/sprites/hero.png"
+        }));
+        assert!(ast.nodes.iter().any(|node| matches!(
+            node,
+            AstNode::SpawnSprite { resource_name, x, y, .. }
+                if resource_name == "hero_instance" && *x == 48 && *y == 80
         )));
     }
 }

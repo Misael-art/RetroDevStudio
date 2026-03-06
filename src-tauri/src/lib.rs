@@ -17,7 +17,14 @@ use core::editor_validation::{
     validate_scene_draft as validate_scene_draft_impl,
     DraftValidationResult,
 };
-use core::project_mgr::{create_project_skeleton, load_project, load_scene, save_scene, update_project_target};
+use core::project_mgr::{
+    create_project_skeleton,
+    load_project,
+    load_scene,
+    resolve_prefabs,
+    save_scene,
+    update_project_target,
+};
 use emulator::frame_buffer::framebuffer_to_rgba;
 use emulator::libretro_ffi::{EmulatorCore, JoypadState};
 use hardware::constraint_engine;
@@ -85,7 +92,19 @@ fn generate_c_code(project_dir: String) -> GenerateResult {
         Ok(s) => s,
         Err(e) => return GenerateResult { ok: false, main_c: String::new(), resources_res: String::new(), errors: vec![e.to_string()], warnings: vec![] },
     };
-    let hw_status = match constraint_engine::hw_status_for_target(&project.target, &scene) {
+    let resolved_scene = match resolve_prefabs(&dir, &scene) {
+        Ok(scene) => scene,
+        Err(error) => {
+            return GenerateResult {
+                ok: false,
+                main_c: String::new(),
+                resources_res: String::new(),
+                errors: vec![error.to_string()],
+                warnings: vec![],
+            }
+        }
+    };
+    let hw_status = match constraint_engine::hw_status_for_target(&project.target, &resolved_scene) {
         Ok(status) => status,
         Err(error) => {
             return GenerateResult {
@@ -104,7 +123,7 @@ fn generate_c_code(project_dir: String) -> GenerateResult {
         return GenerateResult { ok: false, main_c: String::new(), resources_res: String::new(), errors, warnings };
     }
 
-    let ast = generate_ast(&project, &scene);
+    let ast = generate_ast(&project, &resolved_scene);
     let (main_c, resources_res) = match project.target.as_str() {
         "snes" => { let o = emit_snes(&ast, &project.name); (o.main_c, o.resources_res) }
         _ => { let o = emit_sgdk(&ast, &project.name); (o.main_c, o.resources_res) }

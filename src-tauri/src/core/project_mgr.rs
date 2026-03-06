@@ -4,7 +4,7 @@ use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::ugdm::entities::{BuildConfig, PaletteEntry, Project, Resolution, Scene};
+use crate::ugdm::entities::{BuildConfig, Entity, PaletteEntry, Project, Resolution, Scene};
 
 pub const UGDM_VERSION: &str = "1.0.0";
 pub const DEFAULT_ENTRY_SCENE: &str = "scenes/main.json";
@@ -199,6 +199,22 @@ pub fn load_scene(project_dir: &Path, scene_path: &str) -> Result<Scene, LoadErr
     Ok(scene)
 }
 
+pub fn resolve_prefabs(project_dir: &Path, scene: &Scene) -> Result<Scene, LoadError> {
+    let entities = scene
+        .entities
+        .iter()
+        .map(|entity| {
+            let mut stack = Vec::new();
+            resolve_entity_prefab(project_dir, entity, &mut stack)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(Scene {
+        entities,
+        ..scene.clone()
+    })
+}
+
 /// Validacoes semanticas do Project (alem do parsing JSON).
 pub fn validate_project(project: &Project) -> Result<(), LoadError> {
     if project.rds_version != UGDM_VERSION {
@@ -365,6 +381,153 @@ fn ensure_unique_ids<'a>(
     }
 
     Ok(())
+}
+
+fn resolve_entity_prefab(
+    project_dir: &Path,
+    entity: &Entity,
+    stack: &mut Vec<String>,
+) -> Result<Entity, LoadError> {
+    let Some(prefab_ref) = entity.prefab.as_deref().map(str::trim).filter(|value| !value.is_empty())
+    else {
+        return Ok(entity.clone());
+    };
+
+    if stack.iter().any(|entry| entry == prefab_ref) {
+        return Err(LoadError(format!(
+            "Prefab '{}' referencia um ciclo: {} -> {}.",
+            prefab_ref,
+            stack.join(" -> "),
+            prefab_ref
+        )));
+    }
+
+    stack.push(prefab_ref.to_string());
+    let prefab_path = prefab_path(project_dir, prefab_ref)?;
+    let prefab_entity = load_prefab_entity(&prefab_path)?;
+    let resolved_prefab = resolve_entity_prefab(project_dir, &prefab_entity, stack)?;
+    stack.pop();
+
+    merge_entities(&resolved_prefab, entity)
+}
+
+fn prefab_path(project_dir: &Path, prefab_ref: &str) -> Result<PathBuf, LoadError> {
+    let relative = normalize_prefab_ref(prefab_ref)?;
+    let full_path = project_dir.join("prefabs").join(&relative);
+
+    if !full_path.exists() {
+        return Err(LoadError(format!(
+            "Prefab '{}' nao encontrado em '{}'.",
+            prefab_ref,
+            full_path.display()
+        )));
+    }
+
+    Ok(full_path)
+}
+
+fn normalize_prefab_ref(prefab_ref: &str) -> Result<PathBuf, LoadError> {
+    let trimmed = prefab_ref.trim();
+    if trimmed.is_empty() {
+        return Err(LoadError("scene: campo 'prefab' nao pode ser vazio.".into()));
+    }
+
+    let mut relative = PathBuf::from(trimmed);
+    if relative.extension().is_none() {
+        relative.set_extension("json");
+    }
+
+    if relative.is_absolute()
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(LoadError(format!(
+            "Prefab '{}' deve usar caminho relativo dentro de 'prefabs/'.",
+            prefab_ref
+        )));
+    }
+
+    Ok(relative)
+}
+
+fn load_prefab_entity(prefab_path: &Path) -> Result<Entity, LoadError> {
+    let content = fs::read_to_string(prefab_path).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel ler prefab '{}': {}",
+            prefab_path.display(),
+            error
+        ))
+    })?;
+
+    serde_json::from_str::<Entity>(&content).map_err(|error| {
+        LoadError(format!(
+            "Prefab '{}' invalido (erro de parsing JSON): {}",
+            prefab_path.display(),
+            error
+        ))
+    })
+}
+
+fn merge_entities(base: &Entity, overrides: &Entity) -> Result<Entity, LoadError> {
+    let mut merged = serde_json::to_value(base).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel serializar prefab '{}' para merge: {}",
+            base.entity_id, error
+        ))
+    })?;
+    let mut override_value = serde_json::to_value(overrides).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel serializar entidade '{}' para merge: {}",
+            overrides.entity_id, error
+        ))
+    })?;
+
+    prune_null_fields(&mut override_value);
+    deep_merge_json(&mut merged, override_value);
+    serde_json::from_value(merged).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel reconstruir entidade '{}' apos merge de prefab: {}",
+            overrides.entity_id, error
+        ))
+    })
+}
+
+fn deep_merge_json(base: &mut serde_json::Value, overrides: serde_json::Value) {
+    match (base, overrides) {
+        (serde_json::Value::Object(base_map), serde_json::Value::Object(override_map)) => {
+            for (key, value) in override_map {
+                if let Some(existing) = base_map.get_mut(&key) {
+                    deep_merge_json(existing, value);
+                } else {
+                    base_map.insert(key, value);
+                }
+            }
+        }
+        (base_slot, override_value) => {
+            *base_slot = override_value;
+        }
+    }
+}
+
+fn prune_null_fields(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            map.retain(|_, child| {
+                prune_null_fields(child);
+                !child.is_null()
+            });
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                prune_null_fields(item);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn write_json<T: serde::Serialize>(path: impl AsRef<Path>, value: &T) -> Result<(), LoadError> {
@@ -598,6 +761,40 @@ mod tests {
         assert_eq!(project.resolution, Resolution { width: 256, height: 224 });
         assert_eq!(project.palette_mode, "8x16");
         assert_eq!(scene.scene_id, DEFAULT_SCENE_ID);
+    }
+
+    #[test]
+    fn resolve_prefabs_merges_template_with_scene_overrides() {
+        let project_dir = fixture_dir("prefab_dummy");
+        let project = load_project(&project_dir).expect("load prefab fixture");
+        let scene = load_scene(&project_dir, &project.entry_scene).expect("load prefab scene");
+
+        let resolved = resolve_prefabs(&project_dir, &scene).expect("resolve prefabs");
+        let entity = resolved.entities.first().expect("resolved entity");
+        let sprite = entity
+            .components
+            .sprite
+            .as_ref()
+            .expect("sprite inherited from prefab");
+        let physics = entity
+            .components
+            .physics
+            .as_ref()
+            .expect("physics merged from prefab");
+
+        assert_eq!(entity.entity_id, "hero_instance");
+        assert_eq!(entity.prefab.as_deref(), Some("hero.json"));
+        assert_eq!(entity.transform.x, 48);
+        assert_eq!(entity.transform.y, 80);
+        assert_eq!(sprite.asset, "assets/sprites/hero.png");
+        assert_eq!(sprite.frame_width, 16);
+        assert_eq!(physics.gravity, false);
+        assert_eq!(physics.gravity_strength, 3);
+        assert_eq!(physics.friction, 4);
+        assert_eq!(
+            physics.max_velocity.as_ref().map(|velocity| (velocity.x, velocity.y)),
+            Some((64, 32))
+        );
     }
 
     #[test]

@@ -35,6 +35,7 @@
 - Pause/resume do viewport preservando o core Libretro, autosave fresco no hierarchy e persistencia atomica de projeto/cena.
 - Undo/redo do editor com atalhos globais, pilha limitada e agrupamento de drag no viewport.
 - Grid snap de 8px no Scene View com toggle visual e atalho `G`.
+- Resolucao de prefab no pipeline canonico com merge de entidades antes de validacao/build/codegen.
 - Features ainda parciais agora ficam explicitamente marcadas como `Experimental` na UI para nao mentir sobre prontidao.
 
 ### Ainda em hardening

@@ -2,10 +2,10 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-use crate::compiler::ast_generator::{collect_tilemap_assets, generate_ast, AstOutput};
+use crate::compiler::ast_generator::{collect_tilemap_assets, generate_ast_with_prefabs, AstOutput};
 use crate::compiler::sgdk_emitter::emit_sgdk;
 use crate::compiler::snes_emitter::emit_snes;
-use crate::core::project_mgr::{load_project, load_scene, target_spec, TargetSpec};
+use crate::core::project_mgr::{load_project, load_scene, resolve_prefabs, target_spec, TargetSpec};
 use crate::hardware::md_profile;
 use crate::hardware::snes_profile;
 use crate::ugdm::entities::Project;
@@ -151,12 +151,24 @@ where
         )
     );
 
+    let resolved_scene = match resolve_prefabs(project_dir, &scene) {
+        Ok(scene) => scene,
+        Err(error) => {
+            emit!("error", format!("Falha ao resolver prefabs: {}", error));
+            return BuildResult {
+                ok: false,
+                rom_path: String::new(),
+                log,
+            };
+        }
+    };
+
     let hw_errors = match target.target {
-        "megadrive" => md_profile::validate_scene(&scene)
+        "megadrive" => md_profile::validate_scene(&resolved_scene)
             .into_iter()
             .map(|error| (error.message, error.is_fatal))
             .collect::<Vec<_>>(),
-        "snes" => snes_profile::validate_scene(&scene)
+        "snes" => snes_profile::validate_scene(&resolved_scene)
             .into_iter()
             .map(|error| (error.message, error.is_fatal))
             .collect::<Vec<_>>(),
@@ -177,7 +189,17 @@ where
     }
 
     emit!("info", "Gerando codigo C e manifestos...");
-    let ast = generate_ast(&project, &scene);
+    let ast = match generate_ast_with_prefabs(project_dir, &project, &scene) {
+        Ok(ast) => ast,
+        Err(error) => {
+            emit!("error", format!("Falha ao gerar AST com prefabs: {}", error));
+            return BuildResult {
+                ok: false,
+                rom_path: String::new(),
+                log,
+            };
+        }
+    };
     let artifacts = match target.target {
         "snes" => {
             let output = emit_snes(&ast, &project.name);
