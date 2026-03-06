@@ -171,6 +171,7 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
         ));
     }
 
+    let mut pads_scanned = false;
     for node in &ast.nodes {
         match node {
             AstNode::SpriteSystemInit
@@ -179,6 +180,33 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
             | AstNode::DrawTilemap { .. }
             | AstNode::SpawnSprite { .. }
             | AstNode::SetAnimation { .. } => {}
+            AstNode::ReadInputDevice { device, state_var } => {
+                if !pads_scanned {
+                    out.push_str("        scanPads();\n");
+                    pads_scanned = true;
+                }
+                out.push_str(&format!(
+                    "        u16 {} = padsCurrent({});\n",
+                    state_var,
+                    snes_joypad_port(device)
+                ));
+            }
+            AstNode::MapInputAction {
+                result_name,
+                entity_id,
+                action_name,
+                state_var,
+                button,
+            } => {
+                render_input_binding(
+                    &mut out,
+                    result_name,
+                    entity_id,
+                    action_name,
+                    state_var,
+                    button,
+                );
+            }
             AstNode::CheckCollisionAabb {
                 result_name,
                 left,
@@ -410,6 +438,57 @@ fn render_collision_check(out: &mut String, check: &AabbCollisionCheck) {
         "        if ({}) {{\n            // Collision: {} <-> {}\n        }}\n",
         check.result_name, check.left.entity_id, check.right.entity_id
     ));
+}
+
+fn render_input_binding(
+    out: &mut String,
+    result_name: &str,
+    entity_id: &str,
+    action_name: &str,
+    state_var: &str,
+    button: &str,
+) {
+    let Some(button_mask) = snes_button_mask(button) else {
+        out.push_str(&format!(
+            "        // Unsupported input mapping on SNES: {}.{} -> {}\n",
+            entity_id, action_name, button
+        ));
+        return;
+    };
+
+    out.push_str(&format!(
+        "        u16 {result_name} = {state_var} & {button_mask};\n",
+        result_name = result_name,
+        state_var = state_var,
+        button_mask = button_mask
+    ));
+    out.push_str(&format!(
+        "        if ({}) {{\n            // Input: {}.{}\n        }}\n",
+        result_name, entity_id, action_name
+    ));
+}
+
+fn snes_joypad_port(device: &str) -> u8 {
+    match device {
+        "joypad_2" => 1,
+        _ => 0,
+    }
+}
+
+fn snes_button_mask(button: &str) -> Option<&'static str> {
+    match button {
+        "DPAD_UP" => Some("KEY_UP"),
+        "DPAD_DOWN" => Some("KEY_DOWN"),
+        "DPAD_LEFT" => Some("KEY_LEFT"),
+        "DPAD_RIGHT" => Some("KEY_RIGHT"),
+        "BUTTON_A" => Some("KEY_A"),
+        "BUTTON_B" => Some("KEY_B"),
+        "BUTTON_X" => Some("KEY_X"),
+        "BUTTON_Y" => Some("KEY_Y"),
+        "START" => Some("KEY_START"),
+        "SELECT" => Some("KEY_SELECT"),
+        _ => None,
+    }
 }
 
 fn initial_tile_for_spawn(context: &SnesContext, var_name: &str) -> Option<u16> {
@@ -672,5 +751,51 @@ mod tests {
         assert!(output
             .main_c
             .contains("// Collision: player <-> badnik"));
+    }
+
+    #[test]
+    fn snes_emitter_reads_input_mappings() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::ReadInputDevice {
+                    device: "joypad_1".to_string(),
+                    state_var: "joypad_1_state".to_string(),
+                },
+                AstNode::MapInputAction {
+                    result_name: "input_player_move_left".to_string(),
+                    entity_id: "player".to_string(),
+                    action_name: "move_left".to_string(),
+                    state_var: "joypad_1_state".to_string(),
+                    button: "DPAD_LEFT".to_string(),
+                },
+                AstNode::MapInputAction {
+                    result_name: "input_player_jump".to_string(),
+                    entity_id: "player".to_string(),
+                    action_name: "jump".to_string(),
+                    state_var: "joypad_1_state".to_string(),
+                    button: "BUTTON_A".to_string(),
+                },
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+        };
+
+        let output = emit_snes(&ast, "Input Demo");
+
+        assert!(output.main_c.contains("scanPads();"));
+        assert!(output
+            .main_c
+            .contains("u16 joypad_1_state = padsCurrent(0);"));
+        assert!(output
+            .main_c
+            .contains("u16 input_player_move_left = joypad_1_state & KEY_LEFT;"));
+        assert!(output
+            .main_c
+            .contains("u16 input_player_jump = joypad_1_state & KEY_A;"));
+        assert!(output.main_c.contains("// Input: player.move_left"));
+        assert!(output.main_c.contains("// Input: player.jump"));
     }
 }

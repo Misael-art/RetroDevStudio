@@ -1,4 +1,6 @@
-use crate::ugdm::components::{AnimationDef, CollisionComponent, SpriteComponent};
+use crate::ugdm::components::{
+    AnimationDef, CollisionComponent, InputComponent, SpriteComponent,
+};
 use crate::ugdm::entities::{Project, Scene};
 
 #[derive(Debug, Clone)]
@@ -31,6 +33,17 @@ pub enum AstNode {
         y: i32,
         scroll_x: i32,
         scroll_y: i32,
+    },
+    ReadInputDevice {
+        device: String,
+        state_var: String,
+    },
+    MapInputAction {
+        result_name: String,
+        entity_id: String,
+        action_name: String,
+        state_var: String,
+        button: String,
     },
     CheckCollisionAabb {
         result_name: String,
@@ -114,14 +127,33 @@ pub struct AabbCollisionCheck {
     pub right: CollisionBox,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InputRead {
+    pub device: String,
+    pub state_var: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InputActionBinding {
+    pub result_name: String,
+    pub entity_id: String,
+    pub action_name: String,
+    pub state_var: String,
+    pub button: String,
+}
+
 pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
     let mut nodes: Vec<AstNode> = Vec::new();
     let mut sprite_assets: Vec<SpriteAsset> = Vec::new();
     let mut tilemap_assets: Vec<TilemapAsset> = Vec::new();
     let mut collision_sources: Vec<CollisionSource> = Vec::new();
+    let mut input_reads: Vec<InputRead> = Vec::new();
+    let mut input_actions: Vec<InputActionBinding> = Vec::new();
     let mut asset_resource_names: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
     let mut tilemap_resource_names: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    let mut input_state_vars: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
 
     nodes.push(AstNode::SpriteSystemInit);
@@ -137,6 +169,15 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
             if let Some(source) = collision_source(entity.entity_id.as_str(), entity.transform.x, entity.transform.y, collision) {
                 collision_sources.push(source);
             }
+        }
+        if let Some(input) = &entity.components.input {
+            register_input_nodes(
+                entity.entity_id.as_str(),
+                input,
+                &mut input_reads,
+                &mut input_actions,
+                &mut input_state_vars,
+            );
         }
 
         if let Some(tilemap) = &entity.components.tilemap {
@@ -227,6 +268,22 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
     }
 
     nodes.push(AstNode::GameLoopBegin);
+    nodes.extend(input_reads.iter().cloned().map(|read| AstNode::ReadInputDevice {
+        device: read.device,
+        state_var: read.state_var,
+    }));
+    nodes.extend(
+        input_actions
+            .iter()
+            .cloned()
+            .map(|binding| AstNode::MapInputAction {
+                result_name: binding.result_name,
+                entity_id: binding.entity_id,
+                action_name: binding.action_name,
+                state_var: binding.state_var,
+                button: binding.button,
+            }),
+    );
     nodes.extend(collision_nodes(&collision_sources));
     nodes.push(AstNode::SpriteUpdate);
     nodes.push(AstNode::VSync);
@@ -290,6 +347,44 @@ fn animation_frame_time(project_fps: u32, animation_fps: u32) -> u32 {
     }
 
     ((project_fps + (animation_fps / 2)) / animation_fps).max(1)
+}
+
+fn register_input_nodes(
+    entity_id: &str,
+    input: &InputComponent,
+    input_reads: &mut Vec<InputRead>,
+    input_actions: &mut Vec<InputActionBinding>,
+    input_state_vars: &mut std::collections::HashMap<String, String>,
+) {
+    if input.mapping.is_empty() {
+        return;
+    }
+
+    let state_var = input_state_vars
+        .get(&input.device)
+        .cloned()
+        .unwrap_or_else(|| {
+            let state_var = sanitize_identifier(&format!("{}_state", input.device));
+            input_reads.push(InputRead {
+                device: input.device.clone(),
+                state_var: state_var.clone(),
+            });
+            input_state_vars.insert(input.device.clone(), state_var.clone());
+            state_var
+        });
+
+    let mut mappings = input.mapping.iter().collect::<Vec<_>>();
+    mappings.sort_by(|(left_action, _), (right_action, _)| left_action.cmp(right_action));
+
+    for (action_name, button) in mappings {
+        input_actions.push(InputActionBinding {
+            result_name: sanitize_identifier(&format!("input_{}_{}", entity_id, action_name)),
+            entity_id: entity_id.to_string(),
+            action_name: action_name.clone(),
+            state_var: state_var.clone(),
+            button: button.clone(),
+        });
+    }
 }
 
 fn collision_source(
@@ -391,6 +486,43 @@ pub fn collect_collision_checks(ast: &AstOutput) -> Vec<AabbCollisionCheck> {
                 result_name: result_name.clone(),
                 left: left.clone(),
                 right: right.clone(),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+#[cfg(test)]
+pub fn collect_input_reads(ast: &AstOutput) -> Vec<InputRead> {
+    ast.nodes
+        .iter()
+        .filter_map(|node| match node {
+            AstNode::ReadInputDevice { device, state_var } => Some(InputRead {
+                device: device.clone(),
+                state_var: state_var.clone(),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+#[cfg(test)]
+pub fn collect_input_actions(ast: &AstOutput) -> Vec<InputActionBinding> {
+    ast.nodes
+        .iter()
+        .filter_map(|node| match node {
+            AstNode::MapInputAction {
+                result_name,
+                entity_id,
+                action_name,
+                state_var,
+                button,
+            } => Some(InputActionBinding {
+                result_name: result_name.clone(),
+                entity_id: entity_id.clone(),
+                action_name: action_name.clone(),
+                state_var: state_var.clone(),
+                button: button.clone(),
             }),
             _ => None,
         })
@@ -699,5 +831,84 @@ mod tests {
         let ast = generate_ast(&project, &scene);
 
         assert!(collect_collision_checks(&ast).is_empty());
+    }
+
+    #[test]
+    fn generate_ast_emits_input_reads_and_action_bindings() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            name: "Input Demo".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+        };
+        let mut player_mapping = HashMap::new();
+        player_mapping.insert("move_left".to_string(), "DPAD_LEFT".to_string());
+        player_mapping.insert("jump".to_string(), "BUTTON_A".to_string());
+        let mut support_mapping = HashMap::new();
+        support_mapping.insert("move_right".to_string(), "DPAD_RIGHT".to_string());
+
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![
+                Entity {
+                    entity_id: "player".to_string(),
+                    prefab: None,
+                    transform: Transform { x: 16, y: 24 },
+                    components: Components {
+                        input: Some(crate::ugdm::components::InputComponent {
+                            device: "joypad_1".to_string(),
+                            mapping: player_mapping,
+                        }),
+                        ..Components::default()
+                    },
+                },
+                Entity {
+                    entity_id: "support".to_string(),
+                    prefab: None,
+                    transform: Transform { x: 40, y: 24 },
+                    components: Components {
+                        input: Some(crate::ugdm::components::InputComponent {
+                            device: "joypad_1".to_string(),
+                            mapping: support_mapping,
+                        }),
+                        ..Components::default()
+                    },
+                },
+            ],
+            palettes: Vec::new(),
+        };
+
+        let ast = generate_ast(&project, &scene);
+        let input_reads = collect_input_reads(&ast);
+        let input_actions = collect_input_actions(&ast);
+
+        assert_eq!(
+            input_reads,
+            vec![InputRead {
+                device: "joypad_1".to_string(),
+                state_var: "joypad_1_state".to_string(),
+            }]
+        );
+        assert_eq!(input_actions.len(), 3);
+        assert_eq!(input_actions[0].result_name, "input_player_jump");
+        assert_eq!(input_actions[0].button, "BUTTON_A");
+        assert_eq!(input_actions[1].result_name, "input_player_move_left");
+        assert_eq!(input_actions[1].button, "DPAD_LEFT");
+        assert_eq!(input_actions[2].result_name, "input_support_move_right");
+        assert_eq!(input_actions[2].button, "DPAD_RIGHT");
+        assert!(ast.nodes.iter().any(|node| matches!(
+            node,
+            AstNode::ReadInputDevice { device, state_var }
+                if device == "joypad_1" && state_var == "joypad_1_state"
+        )));
     }
 }

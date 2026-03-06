@@ -132,6 +132,29 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
                 }
                 tilemap_draw_index += 1;
             }
+            AstNode::ReadInputDevice { device, state_var } => {
+                out.push_str(&format!(
+                    "        u16 {} = JOY_readJoypad({});\n",
+                    state_var,
+                    sgdk_joypad_port(device)
+                ));
+            }
+            AstNode::MapInputAction {
+                result_name,
+                entity_id,
+                action_name,
+                state_var,
+                button,
+            } => {
+                render_input_binding(
+                    &mut out,
+                    result_name,
+                    entity_id,
+                    action_name,
+                    state_var,
+                    button,
+                );
+            }
             AstNode::CheckCollisionAabb {
                 result_name,
                 left,
@@ -252,6 +275,60 @@ fn render_collision_check(out: &mut String, check: &AabbCollisionCheck) {
         "        if ({}) {{\n            // Collision: {} <-> {}\n        }}\n",
         check.result_name, check.left.entity_id, check.right.entity_id
     ));
+}
+
+fn render_input_binding(
+    out: &mut String,
+    result_name: &str,
+    entity_id: &str,
+    action_name: &str,
+    state_var: &str,
+    button: &str,
+) {
+    let Some(button_mask) = sgdk_button_mask(button) else {
+        out.push_str(&format!(
+            "        // Unsupported input mapping on SGDK: {}.{} -> {}\n",
+            entity_id, action_name, button
+        ));
+        return;
+    };
+
+    out.push_str(&format!(
+        "        u16 {result_name} = {state_var} & {button_mask};\n",
+        result_name = result_name,
+        state_var = state_var,
+        button_mask = button_mask
+    ));
+    out.push_str(&format!(
+        "        if ({}) {{\n            // Input: {}.{}\n        }}\n",
+        result_name, entity_id, action_name
+    ));
+}
+
+fn sgdk_joypad_port(device: &str) -> &'static str {
+    match device {
+        "joypad_2" => "JOY_2",
+        "joypad_3" => "JOY_3",
+        "joypad_4" => "JOY_4",
+        _ => "JOY_1",
+    }
+}
+
+fn sgdk_button_mask(button: &str) -> Option<&'static str> {
+    match button {
+        "DPAD_UP" => Some("BUTTON_UP"),
+        "DPAD_DOWN" => Some("BUTTON_DOWN"),
+        "DPAD_LEFT" => Some("BUTTON_LEFT"),
+        "DPAD_RIGHT" => Some("BUTTON_RIGHT"),
+        "BUTTON_A" => Some("BUTTON_A"),
+        "BUTTON_B" => Some("BUTTON_B"),
+        "BUTTON_C" => Some("BUTTON_C"),
+        "BUTTON_X" => Some("BUTTON_X"),
+        "BUTTON_Y" => Some("BUTTON_Y"),
+        "BUTTON_Z" => Some("BUTTON_Z"),
+        "START" => Some("BUTTON_START"),
+        _ => None,
+    }
 }
 
 fn plane_size_for_tilemaps(tilemap_assets: &[TilemapAsset]) -> Option<(u16, u16)> {
@@ -475,5 +552,50 @@ mod tests {
         assert!(output
             .main_c
             .contains("// Collision: player <-> badnik"));
+    }
+
+    #[test]
+    fn main_c_reads_sgdk_input_mappings() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::ReadInputDevice {
+                    device: "joypad_1".to_string(),
+                    state_var: "joypad_1_state".to_string(),
+                },
+                AstNode::MapInputAction {
+                    result_name: "input_player_move_left".to_string(),
+                    entity_id: "player".to_string(),
+                    action_name: "move_left".to_string(),
+                    state_var: "joypad_1_state".to_string(),
+                    button: "DPAD_LEFT".to_string(),
+                },
+                AstNode::MapInputAction {
+                    result_name: "input_player_jump".to_string(),
+                    entity_id: "player".to_string(),
+                    action_name: "jump".to_string(),
+                    state_var: "joypad_1_state".to_string(),
+                    button: "BUTTON_A".to_string(),
+                },
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+        };
+
+        let output = emit_sgdk(&ast, "Input Demo");
+
+        assert!(output
+            .main_c
+            .contains("u16 joypad_1_state = JOY_readJoypad(JOY_1);"));
+        assert!(output
+            .main_c
+            .contains("u16 input_player_move_left = joypad_1_state & BUTTON_LEFT;"));
+        assert!(output
+            .main_c
+            .contains("u16 input_player_jump = joypad_1_state & BUTTON_A;"));
+        assert!(output.main_c.contains("// Input: player.move_left"));
+        assert!(output.main_c.contains("// Input: player.jump"));
     }
 }
