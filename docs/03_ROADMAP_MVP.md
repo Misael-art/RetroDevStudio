@@ -38,6 +38,7 @@
 - Resolucao de prefab no pipeline canonico com merge de entidades antes de validacao/build/codegen.
 - Deep Profiler destravado na UI e conectado ao backend real, permanecendo `Experimental` ate validacao com ROM real.
 - Asset Extractor destravado na UI e conectado ao backend real, permanecendo `Experimental` ate validar extracao ponta a ponta com ROM real.
+- RetroFX agora persiste configuracao de parallax/raster no scene JSON e o designer foi reabilitado, permanecendo `Experimental` ate emissao real no build.
 - Features ainda parciais agora ficam explicitamente marcadas como `Experimental` na UI para nao mentir sobre prontidao.
 
 ### Ainda em hardening
@@ -102,7 +103,7 @@
 
 - [x] NodeGraph UI e compilador frontend existente.
 - [x] RetroFX UI existente.
-- [x] RetroFX rotulado como `Experimental` enquanto nao persistir/exportar efeito real.
+- [x] RetroFX persiste configuracao no scene JSON e permanece `Experimental` enquanto nao exportar efeito real no pipeline.
 - [x] Testes frontend existentes e passando.
 - [ ] Retomar evolucao apenas depois que o hardening do core e a cobertura desktop multi-target estiverem estabilizados.
 

@@ -605,6 +605,7 @@ mod tests {
                 },
             }],
             palettes: Vec::new(),
+            retrofx: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -682,6 +683,7 @@ mod tests {
                 },
             }],
             palettes: Vec::new(),
+            retrofx: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -763,6 +765,7 @@ mod tests {
                 },
             ],
             palettes: Vec::new(),
+            retrofx: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -848,6 +851,7 @@ mod tests {
                 },
             ],
             palettes: Vec::new(),
+            retrofx: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -907,6 +911,7 @@ mod tests {
                 },
             ],
             palettes: Vec::new(),
+            retrofx: None,
         };
 
         let ast = generate_ast(&project, &scene);

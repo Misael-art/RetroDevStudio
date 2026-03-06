@@ -46,6 +46,31 @@ pub struct PaletteEntry {
     pub colors: Vec<String>, // Hex strings "#RRGGBB"
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RetroFXParallaxLayer {
+    pub id: String,
+    pub name: String,
+    pub speed_x: i32,
+    pub speed_y: i32,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RetroFXRasterLine {
+    pub id: String,
+    pub scanline: u32,
+    pub offset_x: i32,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct RetroFXConfig {
+    #[serde(default)]
+    pub parallax_layers: Vec<RetroFXParallaxLayer>,
+    #[serde(default)]
+    pub raster_lines: Vec<RetroFXRasterLine>,
+}
+
 // ── Scene ─────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -58,6 +83,8 @@ pub struct Scene {
     pub entities: Vec<Entity>,
     #[serde(default)]
     pub palettes: Vec<PaletteEntry>,
+    #[serde(default)]
+    pub retrofx: Option<RetroFXConfig>,
 }
 
 // ── Build Config ──────────────────────────────────────────────────────────────

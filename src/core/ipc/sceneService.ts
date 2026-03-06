@@ -128,12 +128,33 @@ export interface PaletteEntry {
   colors: string[];
 }
 
+export interface RetroFXParallaxLayer {
+  id: string;
+  name: string;
+  speed_x: number;
+  speed_y: number;
+  enabled: boolean;
+}
+
+export interface RetroFXRasterLine {
+  id: string;
+  scanline: number;
+  offset_x: number;
+  enabled: boolean;
+}
+
+export interface RetroFXConfig {
+  parallax_layers: RetroFXParallaxLayer[];
+  raster_lines: RetroFXRasterLine[];
+}
+
 export interface Scene {
   scene_id: string;
   display_name?: string | null;
   entities: Entity[];
   background_layers: BackgroundLayer[];
   palettes?: PaletteEntry[];
+  retrofx?: RetroFXConfig | null;
 }
 
 export interface SceneDataResult {

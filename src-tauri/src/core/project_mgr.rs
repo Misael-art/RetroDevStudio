@@ -5,6 +5,8 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::ugdm::entities::{BuildConfig, Entity, PaletteEntry, Project, Resolution, Scene};
+#[cfg(test)]
+use crate::ugdm::entities::{RetroFXConfig, RetroFXParallaxLayer, RetroFXRasterLine};
 
 pub const UGDM_VERSION: &str = "1.0.0";
 pub const DEFAULT_ENTRY_SCENE: &str = "scenes/main.json";
@@ -96,6 +98,7 @@ pub fn canonical_scene(scene_id: &str, display_name: Option<String>) -> Scene {
         background_layers: Vec::new(),
         entities: Vec::new(),
         palettes: Vec::new(),
+        retrofx: None,
     }
 }
 
@@ -837,6 +840,36 @@ mod tests {
         assert!(project_dir.join("assets").join("audio").exists());
         assert!(project_dir.join("prefabs").exists());
         assert!(project_dir.join("graphs").exists());
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn save_and_load_scene_preserves_retrofx_config() {
+        let project_dir = temp_dir("retrofx-scene");
+        let project = create_project_skeleton(&project_dir, "RetroFX Save", "megadrive")
+            .expect("create canonical project");
+        let mut scene = canonical_scene(DEFAULT_SCENE_ID, Some("Main Scene".to_string()));
+        scene.retrofx = Some(RetroFXConfig {
+            parallax_layers: vec![RetroFXParallaxLayer {
+                id: "p0".to_string(),
+                name: "BG1".to_string(),
+                speed_x: 2,
+                speed_y: 0,
+                enabled: true,
+            }],
+            raster_lines: vec![RetroFXRasterLine {
+                id: "r0".to_string(),
+                scanline: 96,
+                offset_x: 6,
+                enabled: true,
+            }],
+        });
+
+        save_scene(&project_dir, &project.entry_scene, &scene).expect("save retrofx scene");
+        let reloaded = load_scene(&project_dir, &project.entry_scene).expect("reload retrofx scene");
+
+        assert_eq!(reloaded.retrofx, scene.retrofx);
 
         let _ = fs::remove_dir_all(project_dir);
     }

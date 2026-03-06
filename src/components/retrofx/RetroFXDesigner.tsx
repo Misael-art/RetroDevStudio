@@ -1,39 +1,38 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { persistActiveScene } from "../../core/scenePersistence";
 import { useEditorStore } from "../../core/store/editorStore";
-
-interface ParallaxLayer {
-  id: string;
-  name: string;
-  speedX: number;
-  speedY: number;
-  enabled: boolean;
-}
-
-interface RasterLine {
-  id: string;
-  scanline: number;
-  offsetX: number;
-  enabled: boolean;
-}
+import type {
+  RetroFXConfig,
+  RetroFXParallaxLayer,
+  RetroFXRasterLine,
+} from "../../core/ipc/sceneService";
 
 let fxCounter = 0;
-function newId() {
-  fxCounter += 1;
+function newId(existingIds: string[]) {
+  do {
+    fxCounter += 1;
+  } while (existingIds.includes(`fx_${fxCounter}`));
+
   return `fx_${fxCounter}`;
 }
 
-const DEFAULT_PARALLAX: ParallaxLayer[] = [
-  { id: "p0", name: "BG1 (Far)", speedX: 1, speedY: 0, enabled: true },
-  { id: "p1", name: "BG2 (Mid)", speedX: 2, speedY: 0, enabled: true },
-  { id: "p2", name: "BG3 (Near)", speedX: 4, speedY: 0, enabled: false },
+const DEFAULT_PARALLAX: RetroFXParallaxLayer[] = [
+  { id: "p0", name: "BG1 (Far)", speed_x: 1, speed_y: 0, enabled: true },
+  { id: "p1", name: "BG2 (Mid)", speed_x: 2, speed_y: 0, enabled: true },
+  { id: "p2", name: "BG3 (Near)", speed_x: 4, speed_y: 0, enabled: false },
 ];
 
-const DEFAULT_RASTER: RasterLine[] = [
-  { id: "r0", scanline: 128, offsetX: 4, enabled: true },
-  { id: "r1", scanline: 160, offsetX: -4, enabled: false },
+const DEFAULT_RASTER: RetroFXRasterLine[] = [
+  { id: "r0", scanline: 128, offset_x: 4, enabled: true },
+  { id: "r1", scanline: 160, offset_x: -4, enabled: false },
 ];
 
-const RETROFX_DISABLED = true;
+function cloneRetroFXConfig(config?: RetroFXConfig | null): RetroFXConfig {
+  return structuredClone({
+    parallax_layers: config?.parallax_layers ?? DEFAULT_PARALLAX,
+    raster_lines: config?.raster_lines ?? DEFAULT_RASTER,
+  });
+}
 
 interface IntFieldProps {
   label: string;
@@ -60,7 +59,7 @@ function IntField({ label, value, min = -999, max = 999, onChange }: IntFieldPro
   );
 }
 
-function RasterPreview({ lines }: { lines: RasterLine[] }) {
+function RasterPreview({ lines }: { lines: RetroFXRasterLine[] }) {
   const height = 112;
   const width = 160;
   const activeLines = lines.filter((line) => line.enabled);
@@ -73,7 +72,7 @@ function RasterPreview({ lines }: { lines: RasterLine[] }) {
       {Array.from({ length: height }, (_, index) => {
         const scanline = Math.round((index / height) * 224);
         const hit = activeLines.find((line) => Math.abs(line.scanline - scanline) < 3);
-        const offset = hit ? (hit.offsetX / 320) * width : 0;
+        const offset = hit ? (hit.offset_x / 320) * width : 0;
         return (
           <div
             key={index}
@@ -88,12 +87,25 @@ function RasterPreview({ lines }: { lines: RasterLine[] }) {
 }
 
 export default function RetroFXDesigner() {
-  const { logMessage } = useEditorStore();
-  const [parallax, setParallax] = useState<ParallaxLayer[]>(DEFAULT_PARALLAX);
-  const [raster, setRaster] = useState<RasterLine[]>(DEFAULT_RASTER);
+  const activeProjectDir = useEditorStore((state) => state.activeProjectDir);
+  const activeScene = useEditorStore((state) => state.activeScene);
+  const logMessage = useEditorStore((state) => state.logMessage);
+  const [parallax, setParallax] = useState<RetroFXParallaxLayer[]>(() =>
+    cloneRetroFXConfig(useEditorStore.getState().activeScene?.retrofx).parallax_layers
+  );
+  const [raster, setRaster] = useState<RetroFXRasterLine[]>(() =>
+    cloneRetroFXConfig(useEditorStore.getState().activeScene?.retrofx).raster_lines
+  );
   const [tab, setTab] = useState<"parallax" | "raster">("parallax");
+  const [saving, setSaving] = useState(false);
 
-  function updateParallax(id: string, patch: Partial<ParallaxLayer>) {
+  useEffect(() => {
+    const retrofx = cloneRetroFXConfig(activeScene?.retrofx);
+    setParallax(retrofx.parallax_layers);
+    setRaster(retrofx.raster_lines);
+  }, [activeScene]);
+
+  function updateParallax(id: string, patch: Partial<RetroFXParallaxLayer>) {
     setParallax((items) => items.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   }
 
@@ -101,7 +113,7 @@ export default function RetroFXDesigner() {
     const nextIndex = parallax.length + 1;
     setParallax((items) => [
       ...items,
-      { id: newId(), name: `BG${nextIndex}`, speedX: 1, speedY: 0, enabled: true },
+      { id: newId(items.map((item) => item.id)), name: `BG${nextIndex}`, speed_x: 1, speed_y: 0, enabled: true },
     ]);
   }
 
@@ -109,14 +121,14 @@ export default function RetroFXDesigner() {
     setParallax((items) => items.filter((item) => item.id !== id));
   }
 
-  function updateRaster(id: string, patch: Partial<RasterLine>) {
+  function updateRaster(id: string, patch: Partial<RetroFXRasterLine>) {
     setRaster((items) => items.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   }
 
   function addRaster() {
     setRaster((items) => [
       ...items,
-      { id: newId(), scanline: 100, offsetX: 2, enabled: true },
+      { id: newId(items.map((item) => item.id)), scanline: 100, offset_x: 2, enabled: true },
     ]);
   }
 
@@ -124,8 +136,36 @@ export default function RetroFXDesigner() {
     setRaster((items) => items.filter((item) => item.id !== id));
   }
 
-  function applyFX() {
-    logMessage("warn", "[RetroFX] Experimental: configuracao ainda nao e persistida nem integrada ao pipeline.");
+  async function applyFX() {
+    if (!activeScene || !activeProjectDir) {
+      logMessage("warn", "[RetroFX] Abra um projeto antes de salvar a configuracao.");
+      return;
+    }
+
+    setSaving(true);
+    useEditorStore.setState((state) => {
+      if (!state.activeScene) {
+        return state;
+      }
+
+      return {
+        activeScene: {
+          ...state.activeScene,
+          retrofx: {
+            parallax_layers: structuredClone(parallax),
+            raster_lines: structuredClone(raster),
+          },
+        },
+        sceneRevision: state.sceneRevision + 1,
+      };
+    });
+
+    await persistActiveScene(
+      activeProjectDir,
+      "RetroFX",
+      "Configuracao salva no scene JSON. Emissao para build continua experimental."
+    );
+    setSaving(false);
   }
 
   return (
@@ -137,7 +177,7 @@ export default function RetroFXDesigner() {
               Experimental
             </span>
             <span className="text-[10px] leading-tight text-[#7f849c]">
-              UI de estudo. Ainda nao persiste efeitos nem exporta codigo real.
+              Configuracao persistida no scene JSON. Emissao para build ainda nao foi integrada.
             </span>
           </div>
         </div>
@@ -191,8 +231,8 @@ export default function RetroFXDesigner() {
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-3">
-                  <IntField label="speed X" value={layer.speedX} onChange={(value) => updateParallax(layer.id, { speedX: value })} />
-                  <IntField label="speed Y" value={layer.speedY} onChange={(value) => updateParallax(layer.id, { speedY: value })} />
+                  <IntField label="speed X" value={layer.speed_x} onChange={(value) => updateParallax(layer.id, { speed_x: value })} />
+                  <IntField label="speed Y" value={layer.speed_y} onChange={(value) => updateParallax(layer.id, { speed_y: value })} />
                 </div>
               </div>
             ))}
@@ -239,7 +279,7 @@ export default function RetroFXDesigner() {
                 </div>
                 <div className="flex flex-wrap gap-3">
                   <IntField label="scanline" value={line.scanline} min={0} max={223} onChange={(value) => updateRaster(line.id, { scanline: value })} />
-                  <IntField label="offset X" value={line.offsetX} min={-319} max={319} onChange={(value) => updateRaster(line.id, { offsetX: value })} />
+                  <IntField label="offset X" value={line.offset_x} min={-319} max={319} onChange={(value) => updateRaster(line.id, { offset_x: value })} />
                 </div>
               </div>
             ))}
@@ -255,14 +295,14 @@ export default function RetroFXDesigner() {
         <div className="mt-auto shrink-0 border-t border-[#313244] p-2">
           <button
             className={`w-full rounded py-1 text-xs font-semibold transition-colors ${
-              RETROFX_DISABLED
+              saving
                 ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
                 : "bg-[#cba6f7] text-[#1e1e2e] hover:bg-[#b4a0e0]"
             }`}
-            disabled={RETROFX_DISABLED}
-            onClick={applyFX}
+            disabled={saving}
+            onClick={() => void applyFX()}
           >
-            {RETROFX_DISABLED ? "Experimental - indisponivel" : "Aplicar RetroFX"}
+            {saving ? "Salvando..." : "Salvar RetroFX"}
           </button>
         </div>
       </div>
@@ -275,7 +315,7 @@ export default function RetroFXDesigner() {
             <div key={layer.id} className="flex items-center gap-1.5">
               <div
                 className="h-2 rounded-sm bg-[#cba6f7]/60"
-                style={{ width: `${Math.min(Math.abs(layer.speedX) * 12, 100)}%` }}
+                style={{ width: `${Math.min(Math.abs(layer.speed_x) * 12, 100)}%` }}
               />
               <span className="shrink-0 text-[9px] text-[#45475a]">{layer.name}</span>
             </div>

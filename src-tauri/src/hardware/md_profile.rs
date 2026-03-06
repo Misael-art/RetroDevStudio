@@ -225,6 +225,7 @@ mod tests {
             background_layers: Vec::new(),
             entities: Vec::new(),
             palettes: Vec::new(),
+            retrofx: None,
         }
     }
 
