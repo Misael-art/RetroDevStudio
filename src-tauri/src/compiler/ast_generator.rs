@@ -1,3 +1,6 @@
+use serde::Deserialize;
+use serde_json::Value;
+use std::collections::HashMap;
 use std::path::Path;
 
 use crate::core::project_mgr::{resolve_prefabs, LoadError};
@@ -77,6 +80,7 @@ pub enum AstNode {
 pub struct AstOutput {
     pub nodes: Vec<AstNode>,
     pub sprite_assets: Vec<SpriteAsset>,
+    pub logic_scripts: Vec<LogicScript>,
 }
 
 #[derive(Debug, Clone)]
@@ -145,6 +149,75 @@ pub struct InputActionBinding {
     pub button: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogicScript {
+    pub ops: Vec<LogicOp>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LogicOp {
+    MoveSprite {
+        target_var: String,
+        dx: i32,
+        dy: i32,
+    },
+    ConditionOverlap {
+        left: LogicCollisionTarget,
+        right: LogicCollisionTarget,
+        if_true: Vec<LogicOp>,
+        if_false: Vec<LogicOp>,
+    },
+    PlaySound {
+        sfx: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogicCollisionTarget {
+    pub entity_id: String,
+    pub position: LogicPositionSource,
+    pub offset_x: i32,
+    pub offset_y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LogicPositionSource {
+    SpriteVar { var_name: String },
+    Static { x: i32, y: i32 },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LogicRuntimeEntity {
+    collision_target: LogicCollisionTarget,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct StoredNodeGraph {
+    #[serde(default)]
+    nodes: Vec<StoredNodeGraphNode>,
+    #[serde(default)]
+    edges: Vec<StoredNodeGraphEdge>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct StoredNodeGraphNode {
+    id: String,
+    #[serde(rename = "type")]
+    node_type: String,
+    #[serde(default)]
+    params: HashMap<String, Value>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredNodeGraphEdge {
+    from_node: String,
+    from_port: String,
+    to_node: String,
+}
+
 pub fn generate_ast_with_prefabs(
     project_dir: &Path,
     project: &Project,
@@ -161,6 +234,7 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
     let mut collision_sources: Vec<CollisionSource> = Vec::new();
     let mut input_reads: Vec<InputRead> = Vec::new();
     let mut input_actions: Vec<InputActionBinding> = Vec::new();
+    let mut sprite_var_names: HashMap<String, String> = HashMap::new();
     let mut asset_resource_names: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
     let mut tilemap_resource_names: std::collections::HashMap<String, String> =
@@ -236,6 +310,7 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
             .cloned()
             .unwrap_or_else(|| sanitize_identifier(&entity.entity_id));
         let var_name = format!("spr_{}", resource_name);
+        sprite_var_names.insert(entity.entity_id.clone(), var_name.clone());
         let default_animation = default_animation(project.fps, sprite);
 
         if !sprite_assets.iter().any(|asset| asset.asset_path == sprite.asset) {
@@ -301,9 +376,13 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
     nodes.push(AstNode::VSync);
     nodes.push(AstNode::GameLoopEnd);
 
+    let logic_runtime_entities = collect_logic_runtime_entities(scene, &sprite_var_names);
+    let logic_scripts = collect_logic_scripts(scene, &logic_runtime_entities);
+
     AstOutput {
         nodes,
         sprite_assets,
+        logic_scripts,
     }
 }
 
@@ -466,6 +545,233 @@ fn collision_targets_allow(source: &CollisionSource, target_layer: Option<&str>)
     })
 }
 
+fn collect_logic_runtime_entities(
+    scene: &Scene,
+    sprite_var_names: &HashMap<String, String>,
+) -> HashMap<String, LogicRuntimeEntity> {
+    scene
+        .entities
+        .iter()
+        .filter_map(|entity| {
+            logic_runtime_entity(entity, sprite_var_names.get(&entity.entity_id))
+                .map(|runtime| (entity.entity_id.clone(), runtime))
+        })
+        .collect()
+}
+
+fn logic_runtime_entity(
+    entity: &crate::ugdm::entities::Entity,
+    sprite_var_name: Option<&String>,
+) -> Option<LogicRuntimeEntity> {
+    let (width, height, offset_x, offset_y) = match (&entity.components.collision, &entity.components.sprite) {
+        (Some(collision), _) if collision.shape == "aabb" => (
+            collision.width,
+            collision.height,
+            collision.offset.as_ref().map(|offset| offset.x).unwrap_or(0),
+            collision.offset.as_ref().map(|offset| offset.y).unwrap_or(0),
+        ),
+        (_, Some(sprite)) => (sprite.frame_width, sprite.frame_height, 0, 0),
+        _ => return None,
+    };
+
+    let position = sprite_var_name
+        .cloned()
+        .map(|var_name| LogicPositionSource::SpriteVar { var_name })
+        .unwrap_or(LogicPositionSource::Static {
+            x: entity.transform.x,
+            y: entity.transform.y,
+        });
+
+    Some(LogicRuntimeEntity {
+        collision_target: LogicCollisionTarget {
+            entity_id: entity.entity_id.clone(),
+            position,
+            offset_x,
+            offset_y,
+            width,
+            height,
+        },
+    })
+}
+
+fn collect_logic_scripts(
+    scene: &Scene,
+    runtime_entities: &HashMap<String, LogicRuntimeEntity>,
+) -> Vec<LogicScript> {
+    let mut scripts = Vec::new();
+
+    for entity in &scene.entities {
+        let Some(logic) = &entity.components.logic else {
+            continue;
+        };
+        let Some(serialized_graph) = logic.graph.as_deref() else {
+            continue;
+        };
+        let Ok(graph) = serde_json::from_str::<StoredNodeGraph>(serialized_graph) else {
+            continue;
+        };
+
+        scripts.extend(compile_logic_graph(&graph, runtime_entities));
+    }
+
+    scripts
+}
+
+fn compile_logic_graph(
+    graph: &StoredNodeGraph,
+    runtime_entities: &HashMap<String, LogicRuntimeEntity>,
+) -> Vec<LogicScript> {
+    graph
+        .nodes
+        .iter()
+        .filter(|node| node.node_type == "event_start")
+        .filter_map(|start_node| {
+            let mut visited = std::collections::HashSet::new();
+            let ops = compile_logic_chain(
+                graph,
+                &start_node.id,
+                "exec",
+                runtime_entities,
+                &mut visited,
+            );
+            (!ops.is_empty()).then_some(LogicScript { ops })
+        })
+        .collect()
+}
+
+fn compile_logic_chain(
+    graph: &StoredNodeGraph,
+    source_node_id: &str,
+    source_port: &str,
+    runtime_entities: &HashMap<String, LogicRuntimeEntity>,
+    visited: &mut std::collections::HashSet<String>,
+) -> Vec<LogicOp> {
+    let mut ops = Vec::new();
+    let mut next_node_id = next_exec_target(graph, source_node_id, source_port);
+
+    while let Some(node_id) = next_node_id {
+        if !visited.insert(node_id.clone()) {
+            break;
+        }
+
+        let Some(node) = graph.nodes.iter().find(|node| node.id == node_id) else {
+            visited.remove(&node_id);
+            break;
+        };
+
+        match compile_logic_node(node, graph, runtime_entities, visited) {
+            Some(CompiledLogicNode::Linear(op)) => {
+                ops.push(op);
+                next_node_id = next_exec_target(graph, &node.id, "exec");
+            }
+            Some(CompiledLogicNode::Terminal(op)) => {
+                ops.push(op);
+                next_node_id = None;
+            }
+            None => {
+                next_node_id = next_exec_target(graph, &node.id, "exec");
+            }
+        }
+
+        visited.remove(&node_id);
+    }
+
+    ops
+}
+
+enum CompiledLogicNode {
+    Linear(LogicOp),
+    Terminal(LogicOp),
+}
+
+fn compile_logic_node(
+    node: &StoredNodeGraphNode,
+    graph: &StoredNodeGraph,
+    runtime_entities: &HashMap<String, LogicRuntimeEntity>,
+    visited: &mut std::collections::HashSet<String>,
+) -> Option<CompiledLogicNode> {
+    match node.node_type.as_str() {
+        "sprite_move" => {
+            let target = param_string(node, "target")?;
+            let runtime = runtime_entities.get(&target)?;
+            let LogicPositionSource::SpriteVar { var_name } = &runtime.collision_target.position else {
+                return None;
+            };
+
+            Some(CompiledLogicNode::Linear(LogicOp::MoveSprite {
+                target_var: var_name.clone(),
+                dx: param_i32(node, "dx", 0),
+                dy: param_i32(node, "dy", 0),
+            }))
+        }
+        "condition_overlap" => {
+            let left = runtime_entities
+                .get(&param_string(node, "a")?)?
+                .collision_target
+                .clone();
+            let right = runtime_entities
+                .get(&param_string(node, "b")?)?
+                .collision_target
+                .clone();
+            let mut true_visited = visited.clone();
+            let mut false_visited = visited.clone();
+            let if_true =
+                compile_logic_chain(graph, &node.id, "true", runtime_entities, &mut true_visited);
+            let if_false = compile_logic_chain(
+                graph,
+                &node.id,
+                "false",
+                runtime_entities,
+                &mut false_visited,
+            );
+
+            Some(CompiledLogicNode::Terminal(LogicOp::ConditionOverlap {
+                left,
+                right,
+                if_true,
+                if_false,
+            }))
+        }
+        "action_sound" => Some(CompiledLogicNode::Linear(LogicOp::PlaySound {
+            sfx: sanitize_identifier(
+                &param_string(node, "sfx").unwrap_or_else(|| "sfx".to_string()),
+            ),
+        })),
+        _ => None,
+    }
+}
+
+fn next_exec_target(
+    graph: &StoredNodeGraph,
+    source_node_id: &str,
+    source_port: &str,
+) -> Option<String> {
+    graph
+        .edges
+        .iter()
+        .find(|edge| edge.from_node == source_node_id && edge.from_port == source_port)
+        .map(|edge| edge.to_node.clone())
+}
+
+fn param_string(node: &StoredNodeGraphNode, key: &str) -> Option<String> {
+    node.params.get(key).and_then(|value| match value {
+        Value::String(text) => Some(text.clone()),
+        Value::Number(number) => Some(number.to_string()),
+        _ => None,
+    })
+}
+
+fn param_i32(node: &StoredNodeGraphNode, key: &str, default: i32) -> i32 {
+    node.params
+        .get(key)
+        .and_then(|value| match value {
+            Value::Number(number) => number.as_i64().and_then(|value| i32::try_from(value).ok()),
+            Value::String(text) => text.parse::<i32>().ok(),
+            _ => None,
+        })
+        .unwrap_or(default)
+}
+
 pub fn collect_tilemap_assets(ast: &AstOutput) -> Vec<TilemapAsset> {
     ast.nodes
         .iter()
@@ -547,6 +853,7 @@ mod tests {
     use crate::core::project_mgr::{load_project, load_scene};
     use crate::ugdm::components::Components;
     use crate::ugdm::entities::{Entity, Resolution, Transform};
+    use serde_json::json;
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
 
@@ -937,6 +1244,186 @@ mod tests {
             AstNode::ReadInputDevice { device, state_var }
                 if device == "joypad_1" && state_var == "joypad_1_state"
         )));
+    }
+
+    #[test]
+    fn generate_ast_compiles_logic_graph_into_runtime_scripts() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            name: "Logic Demo".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+        };
+
+        let logic_graph = json!({
+            "version": 1,
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "event_start",
+                    "label": "On Start",
+                    "x": 0,
+                    "y": 0,
+                    "inputs": [],
+                    "outputs": [{ "id": "exec", "label": "▶", "kind": "exec" }],
+                    "params": {}
+                },
+                {
+                    "id": "move",
+                    "type": "sprite_move",
+                    "label": "Move Sprite",
+                    "x": 120,
+                    "y": 0,
+                    "inputs": [{ "id": "exec", "label": "▶", "kind": "exec" }],
+                    "outputs": [{ "id": "exec", "label": "▶", "kind": "exec" }],
+                    "params": { "target": "player", "dx": 2, "dy": -1 }
+                },
+                {
+                    "id": "overlap",
+                    "type": "condition_overlap",
+                    "label": "On Overlap",
+                    "x": 240,
+                    "y": 0,
+                    "inputs": [],
+                    "outputs": [
+                        { "id": "true", "label": "True ▶", "kind": "exec" },
+                        { "id": "false", "label": "False ▶", "kind": "exec" }
+                    ],
+                    "params": { "a": "player", "b": "enemy" }
+                },
+                {
+                    "id": "sound",
+                    "type": "action_sound",
+                    "label": "Play Sound",
+                    "x": 360,
+                    "y": 0,
+                    "inputs": [{ "id": "exec", "label": "▶", "kind": "exec" }],
+                    "outputs": [{ "id": "exec", "label": "▶", "kind": "exec" }],
+                    "params": { "sfx": "jump" }
+                }
+            ],
+            "edges": [
+                { "id": "edge_1", "fromNode": "start", "fromPort": "exec", "toNode": "move", "toPort": "exec" },
+                { "id": "edge_2", "fromNode": "move", "fromPort": "exec", "toNode": "overlap", "toPort": "exec" },
+                { "id": "edge_3", "fromNode": "overlap", "fromPort": "true", "toNode": "sound", "toPort": "exec" }
+            ]
+        })
+        .to_string();
+
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![
+                Entity {
+                    entity_id: "player".to_string(),
+                    prefab: None,
+                    transform: Transform { x: 16, y: 24 },
+                    components: Components {
+                        sprite: Some(SpriteComponent {
+                            asset: "assets/sprites/player.png".to_string(),
+                            frame_width: 16,
+                            frame_height: 16,
+                            pivot: None,
+                            palette_slot: 0,
+                            animations: HashMap::new(),
+                            priority: "foreground".to_string(),
+                        }),
+                        collision: Some(crate::ugdm::components::CollisionComponent {
+                            shape: "aabb".to_string(),
+                            width: 16,
+                            height: 16,
+                            offset: None,
+                            solid: true,
+                            layer: Some("player".to_string()),
+                            collides_with: vec!["enemy".to_string()],
+                        }),
+                        logic: Some(crate::ugdm::components::LogicComponent {
+                            graph: Some(logic_graph),
+                            variables: HashMap::new(),
+                        }),
+                        ..Components::default()
+                    },
+                },
+                Entity {
+                    entity_id: "enemy".to_string(),
+                    prefab: None,
+                    transform: Transform { x: 48, y: 24 },
+                    components: Components {
+                        sprite: Some(SpriteComponent {
+                            asset: "assets/sprites/enemy.png".to_string(),
+                            frame_width: 16,
+                            frame_height: 16,
+                            pivot: None,
+                            palette_slot: 0,
+                            animations: HashMap::new(),
+                            priority: "foreground".to_string(),
+                        }),
+                        collision: Some(crate::ugdm::components::CollisionComponent {
+                            shape: "aabb".to_string(),
+                            width: 16,
+                            height: 16,
+                            offset: Some(crate::ugdm::components::CollisionOffset { x: 1, y: 2 }),
+                            solid: true,
+                            layer: Some("enemy".to_string()),
+                            collides_with: vec!["player".to_string()],
+                        }),
+                        ..Components::default()
+                    },
+                },
+            ],
+            palettes: Vec::new(),
+            retrofx: None,
+        };
+
+        let ast = generate_ast(&project, &scene);
+
+        assert_eq!(ast.logic_scripts.len(), 1);
+        assert_eq!(
+            ast.logic_scripts[0].ops[0],
+            LogicOp::MoveSprite {
+                target_var: "spr_player".to_string(),
+                dx: 2,
+                dy: -1,
+            }
+        );
+
+        let LogicOp::ConditionOverlap {
+            left,
+            right,
+            if_true,
+            if_false,
+        } = &ast.logic_scripts[0].ops[1]
+        else {
+            panic!("expected overlap condition");
+        };
+
+        assert_eq!(left.entity_id, "player");
+        assert_eq!(right.entity_id, "enemy");
+        assert_eq!(right.offset_x, 1);
+        assert_eq!(right.offset_y, 2);
+        assert!(matches!(
+            left.position,
+            LogicPositionSource::SpriteVar { ref var_name } if var_name == "spr_player"
+        ));
+        assert!(matches!(
+            right.position,
+            LogicPositionSource::SpriteVar { ref var_name } if var_name == "spr_enemy"
+        ));
+        assert_eq!(
+            if_true,
+            &vec![LogicOp::PlaySound {
+                sfx: "jump".to_string(),
+            }]
+        );
+        assert!(if_false.is_empty());
     }
 
     #[test]

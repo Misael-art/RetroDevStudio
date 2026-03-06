@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
-**Ultima Atualizacao:** 2026-03-04
-**Ultima sessao:** 2026-03-04 (Codex - Sessao 29: badge de estado live na toolbar, cobertura de stale/warn/bloqueado e validacao desktop real apos rebuild)
-**Fase Atual:** Hardening/QA do MVP (Build -> ROM -> Emulacao validado em Windows com upstream real; desktop E2E multi-target validado localmente e em runner GitHub/Windows real; validacao live do editor agora coberta para bloqueios fatais e warnings nao-fatais)
+**Ultima Atualizacao:** 2026-03-06
+**Ultima sessao:** 2026-03-06 (Codex - Sessao 43: fechamento autonomo do Bloco B de UX critica do editor)
+**Fase Atual:** Hardening/QA do MVP (Build -> ROM -> Emulacao validado em Windows com upstream real; desktop E2E multi-target validado localmente e em runner GitHub/Windows real; validacao live do editor coberta para bloqueios fatais e estados intermediarios com motivo visual explicito)
 **Branch sugerida:** `feat/<tema>` para trabalho paralelo; usar `main` apenas quando o usuario pedir edicao direta no workspace atual
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
@@ -16,6 +16,123 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-06 - sessao 43):**
+  - B1 foi concluida no caminho canonico do editor: `editorStore` agora mantem `undoStack/redoStack` limitadas, `undo/redo` reais e agrupamento transacional para drag no viewport, com atalhos globais `Ctrl+Z`, `Ctrl+Shift+Z` e `Ctrl+Y`.
+  - B2 foi concluida no Scene View: `ViewportPanel` agora aplica `snap-to-grid` de 8px no drag, exibe toggle visual no cabecalho e aceita atalho `G` quando a aba `Cena` esta ativa e nenhum campo editavel esta em foco.
+  - B3 foi concluida no pipeline canonico: prefabs em `prefabs/*.json` agora sao resolvidos com merge de entidade antes de `validation/build/codegen`, preservando coerencia entre preview autoritativo, AST e ROM gerada.
+  - O backend ganhou fixture canonica `prefab_dummy` e cobertura Rust para merge/resolucao de prefab no `project_mgr` e para consumo desses componentes herdados no `ast_generator`.
+  - C1 foi concluida no painel Tools: `Deep Profiler` foi destravado, ligado ao IPC `profiler_analyze_rom` e agora renderiza heatmaps/metricas reais mantendo badge `Experimental` ate validacao ponta a ponta com ROM real.
+  - C2 foi concluida no painel Tools: `Asset Extractor` foi destravado, ligado ao IPC `assets_extract` e agora exibe os arquivos gerados mantendo badge `Experimental` ate validar extracao ponta a ponta com ROM real.
+  - C3 foi concluida no editor: `retrofx` agora faz parte do schema canonico de cena em Rust + TypeScript, o `RetroFX Designer` voltou a salvar configuracoes reais de parallax/raster no JSON da cena e a superficie segue marcada como `Experimental` porque ainda nao ha emissao no build.
+  - D1 foi concluida no editor visual: `NodeGraphEditor` agora carrega/salva o grafo da entidade em `LogicComponent.graph`, com serializacao JSON validada, autosave no scene JSON e testes de roundtrip no frontend.
+  - D2 foi concluida no pipeline canonico: o compilador agora traduz o `NodeGraph` persistido para operacoes reais no game loop SGDK/SNES, cobrindo `event_start`, `sprite_move`, `condition_overlap` com AABB runtime e `action_sound`, com testes dedicados no AST generator e nos dois emitters.
+  - O runner de testes frontend foi endurecido em `vite.config.ts` para usar um unico worker em `threads`, eliminando os timeouts de `vitest-pool` que impediam o gate canonico `npm test` neste host.
+  - O baseline local desta rodada permaneceu verde apos cada tarefa com os gates exigidos (`npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo clippy -- -D warnings`, `cargo test --lib -- --nocapture`).
+
+* **O que acabou de acontecer (2026-03-06 - sessao 42):**
+  - A1 foi concluida no pipeline canonico: `AnimationDef.fps` agora alimenta o AST e o timing de animacao emitido em SGDK e SNES, removendo o valor hardcoded no codegen.
+  - A2 foi concluida no pipeline canonico: entidades com `TilemapComponent` agora geram AST dedicado, emissao real de tilemap/scroll em SGDK e SNES e staging de assets `.bmp`/`.pic`/`.map`/`.pal` no orchestrator.
+  - A3 foi concluida no pipeline canonico: `CollisionComponent` com `shape = aabb` agora gera checks AABB no AST com filtro por `layer/collides_with`, e os emitters SGDK/SNES passaram a injetar os checks manuais no game loop.
+  - A4 foi concluida no pipeline canonico: `InputComponent` agora gera leitura de input no AST e bindings por acao, com emissao real via `JOY_readJoypad` no SGDK e `scanPads`/`padsCurrent` no SNES.
+  - A5 foi concluida no pipeline canonico: `retro_audio_sample_batch` agora consome batches reais no FFI, preserva o ultimo buffer descartavel de audio e o mock core passou a exercitar esse callback sem crash no loop do emulador.
+  - A cobertura Rust do compilador/build foi expandida para os cinco pontos (timing de animacao, tilemap, collision, input e audio), preservando o caminho canonico existente sem criar pipeline paralelo.
+  - O baseline local desta rodada autonoma ficou verde com os gates exigidos (`npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo clippy -- -D warnings`, `cargo test --lib -- --nocapture`).
+
+* **O que acabou de acontecer (2026-03-06 - sessao 41):**
+  - O runner canonico `scripts/e2e-tauri-build-run.mjs` passou a classificar falhas de bootstrap de sessao WebDriver (`DevToolsActivePort`, `chrome not reachable`, `session not created`) com hint operacional direto no erro final.
+  - O hint agora inclui caminho do app alvo, endpoint do driver e a trilha recomendada de recuperacao (`diagnose-desktop-e2e.ps1 -SessionProbe` + fallback para runner GitHub/Windows).
+  - O script `scripts/diagnose-desktop-e2e.ps1` foi expandido com modo opcional `-SessionProbe`, que executa probe real de `InitSession` contra `msedgedriver` com log verbose e registra evidencias fora da arvore do repo (`%TEMP%`), evitando poluicao estrutural.
+  - A reproducao local confirmou de forma deterministica que o bloqueio atual continua em `session not created: DevToolsActivePort file doesn't exist` (driver sobe, app inicia, handshake nao conecta em 60s).
+  - Foi identificada nova restricao de infraestrutura no host: `npm run tauri build -- --debug --no-bundle` pode falhar por `spawn EPERM` no `beforeBuildCommand` (esbuild/vite), reforcando que a certificacao institucional deve permanecer no runner GitHub/Windows enquanto a policy local nao for ajustada.
+  - O baseline local de qualidade permaneceu verde nesta iteracao (`check:tree`, `lint`, `tsc`, `npm test`, `cargo clippy`, `cargo test --lib`), mantendo o bloqueio restrito ao bootstrap desktop/WebDriver e build desktop local.
+
+* **O que acabou de acontecer (2026-03-05 - sessao 40):**
+  - O runner canonico `scripts/e2e-tauri-build-run.mjs` foi endurecido para modo fallback `--external-driver`, permitindo conectar em um `tauri-driver` iniciado fora do processo Node quando o host bloquear bootstrap interno.
+  - Foi aplicado ajuste de compatibilidade no bootstrap interno do runner: `tauri-driver` agora sobe com `stdio: inherit` (em vez de `pipe`) para evitar `spawn EPERM` em hosts com policy restritiva de pipes em `child_process`.
+  - O runner ganhou guard-rail para falha operacional clara quando `127.0.0.1:4444` ja esta ocupado e para encerramento precoce do processo de driver durante handshake.
+  - `docs/07_TEST_AND_COMPLIANCE.md` foi atualizado para documentar o fallback `--external-driver` e o criterio operacional quando o host local falhar em `DevToolsActivePort/chrome not reachable`.
+  - Foi criado `scripts/diagnose-desktop-e2e.ps1` para diagnostico operacional padronizado (versions, binarios, snapshot de processos, probe de spawn e porta 4444) e a arvore canonica (`docs/08_TREE_ARCHITECTURE.md`) foi atualizada com o novo script.
+  - O baseline local do ciclo permaneceu verde (`check:tree`, `lint`, `tsc`, `npm test`, `cargo clippy`, `cargo test --lib`).
+  - **BLOQUEADO POR INFRA:** apos destravar o bootstrap (`spawn EPERM`), a validacao desktop local avancou para novo bloqueio em criacao de sessao WebDriver (`DevToolsActivePort file doesn't exist` / `chrome not reachable`) para cenarios desktop reais.
+
+* **O que acabou de acontecer (2026-03-05 - sessao 39):**
+  - Foi concluida nova rodada de auditoria de handlers async residuais no frontend, com endurecimento de disparo em `src/components/tools/ToolsPanel.tsx` (`void` explicito em `onClick`/`useEffect`) para evitar promessas sem tratamento implícito.
+  - O runner canonico `scripts/e2e-tauri-build-run.mjs` recebeu diagnostico de infraestrutura mais explicito para bootstrap do desktop: erro de spawn agora reporta `code`, `syscall` e caminhos de `tauri-driver`/`native-driver`.
+  - O evento de desvio estrutural local foi resolvido na mesma iteracao: pasta inesperada `Microsoft/` na raiz foi removida e `check:tree` voltou a ficar verde.
+  - O baseline local desta iteracao ficou verde (`check:tree`, `lint`, `tsc`, `npm test`, `cargo clippy`, `cargo test --lib`).
+  - `tauri-driver.exe --help` permanece funcional neste host.
+  - **BLOQUEADO POR INFRA:** os cenarios desktop `live-ok` (Mega Drive/SNES) continuam falhando localmente no bootstrap com `spawn EPERM`, agora com diagnostico completo de caminho no runner.
+
+* **O que acabou de acontecer (2026-03-05 - sessao 38):**
+  - O runner canonico `scripts/e2e-tauri-build-run.mjs` ganhou o cenario `live-ok`, validando explicitamente o estado `LIVE` (sem bloqueio, sem warning, sem erro e sem estado pendente/stale) a partir de um draft saudavel.
+  - O cenario novo garante no app desktop/Tauri que a toolbar mostra `LIVE: Preview live sincronizado.` com `Build & Run` habilitado e sem `aria-describedby` de bloqueio.
+  - `package.json` ganhou aliases por target para o novo cenario (`test:e2e:desktop:live-ok:md` e `...:snes`).
+  - `.github/workflows/desktop-e2e.yml` foi atualizado para executar `live-ok` em Mega Drive e SNES e incluir ambos no gate final de outcomes.
+  - `src/App.test.tsx` ganhou cobertura de integracao para o estado `LIVE` limpo, garantindo ausencia de summaries residuais.
+  - `src/core/validation/liveValidationController.test.ts` ganhou cobertura unit para os indicadores `ANALISANDO` e `LIVE`.
+  - O baseline local da iteracao ficou verde (`node --check`, `check:tree`, `lint`, `tsc`, `npm test`, `cargo clippy`, `cargo test --lib`).
+  - `tauri-driver.exe --help` voltou a responder neste host, removendo o bloqueio anterior no binario em si.
+  - **BLOQUEADO POR INFRA:** validacao desktop local de `live-ok` ainda falha no bootstrap do driver com `spawn EPERM`, mesmo com `npm.cmd` e `msedgedriver` local.
+
+* **O que acabou de acontecer (2026-03-05 - sessao 37):**
+  - O runner canonico `scripts/e2e-tauri-build-run.mjs` foi expandido com o cenario `live-stale`, cobrindo o estado intermediario `DESATUAL.` e a transicao `DESATUAL.` -> `ANALISANDO` apos clicar `Revalidar agora`.
+  - O cenario novo valida no app desktop/Tauri que `Build & Run` permanece habilitado, sem `aria-describedby` de bloqueio, com hint visual explicito de stale e resumo visual de pending (`Live em analise...`) apos revalidacao manual.
+  - `package.json` ganhou aliases por target para o novo cenario (`test:e2e:desktop:live-stale:md` e `...:snes`).
+  - `.github/workflows/desktop-e2e.yml` foi atualizado para executar `live-stale` em Mega Drive e SNES e incluir ambos no gate final de outcomes.
+  - O baseline local da iteracao ficou verde (`node --check`, `check:tree`, `lint`, `tsc`, `npm test`, `cargo clippy`, `cargo test --lib`).
+  - **BLOQUEADO POR INFRA:** execucao desktop local de `live-stale` em MD/SNES falhou com `spawn UNKNOWN`; `tauri-driver.exe --help` segue bloqueado por policy de Application Control no Windows local.
+  - **BLOQUEADO POR INFRA:** disparo remoto imediato do workflow desktop nao ocorreu nesta sessao porque `gh` nao esta instalado nesta maquina (`gh --version` falhou).
+
+* **O que acabou de acontecer (2026-03-05 - sessao 36):**
+  - O estado `ANALISANDO` no ponto de decisao `Build & Run` agora tem resumo visual explicito na toolbar (`Live em analise...`), mantendo paridade de UX com `WARN`, `ERRO LIVE`, `DESATUAL.` e `BLOQUEADO`.
+  - `src/App.test.tsx` ganhou cobertura para validar que `ANALISANDO` nao bloqueia o build e expoe o resumo visual correto.
+  - O baseline local estatico permaneceu verde (`check:tree`, `lint`, `tsc`, `clippy`, `cargo test --lib`).
+  - Nesta execucao, `npm test` em modo default voltou a falhar por timeout de worker (`vitest-pool`); o fallback deterministico `npx vitest run --no-file-parallelism --maxWorkers=1` passou com 59/59.
+  - **BLOQUEADO POR INFRA:** validacao desktop local continua bloqueada por policy de Application Control no `tauri-driver.exe`, mantendo erro `spawn UNKNOWN` no runner.
+
+* **O que acabou de acontecer (2026-03-05 - sessao 35):**
+  - O runner canonico `scripts/e2e-tauri-build-run.mjs` foi expandido com o cenario `live-error`, cobrindo `ERRO LIVE` no ponto de decisao sem bloquear indevidamente `Build & Run`.
+  - O cenario novo injeta draft invalido semanticamente seguro para UI e valida que a toolbar exibe `ERRO LIVE` + resumo `Live com falha: ...`, mantendo `Build & Run` habilitado e sem motivo de bloqueio.
+  - `package.json` ganhou aliases por target para o novo cenario (`test:e2e:desktop:live-error:md` e `...:snes`).
+  - `.github/workflows/desktop-e2e.yml` foi atualizado para executar os dois cenarios `live-error` (Mega Drive e SNES) e inclui-los no gate final de verificacao de outcomes.
+  - O baseline local permaneceu verde (`node --check` no runner, `check:tree`, `lint`, `tsc`, `npm test`, `clippy`, `cargo test --lib`).
+  - **BLOQUEADO POR INFRA:** execucao desktop local do novo cenario falhou pelo mesmo motivo estrutural (`spawn UNKNOWN`), com confirmacao de bloqueio do `tauri-driver.exe` por policy de Application Control.
+
+* **O que acabou de acontecer (2026-03-05 - sessao 34):**
+  - Foi aplicado hardening em handlers async residuais da UI (`ToolsPanel`, `ViewportPanel`, `HierarchyPanel`) para normalizar erros desconhecidos com `Error.message`/`String(error)`, evitando logs opacos como `[object Object]`.
+  - A mudanca melhora a paridade entre falha real e motivo visual no console sem alterar fluxo canonico de IPC/store.
+  - O baseline local permaneceu verde apos os ajustes (`check:tree`, `lint`, `tsc`, `npm test`, `clippy`, `cargo test --lib`).
+  - **BLOQUEADO POR INFRA:** tentativa de `desktop-e2e` local segue falhando em `spawn UNKNOWN`; o `tauri-driver.exe` continua bloqueado por policy de Application Control no Windows local.
+
+* **O que acabou de acontecer (2026-03-05 - sessao 33):**
+  - A descricao de estado `DESATUAL.` no controller live foi alinhada ao comportamento real da UI: agora orienta `edite a cena` **ou** `use Revalidar agora`.
+  - O hint visual da toolbar no `App.tsx` tambem foi atualizado para refletir o mesmo contrato, evitando divergencia textual entre badge/detail e acao disponivel.
+  - `liveValidationController.test.ts` foi ajustado para travar essa mensagem canonicamente e impedir regressao documental/UX.
+  - O baseline local foi reexecutado por completo e permaneceu verde (`check:tree`, `lint`, `tsc`, `npm test`, `clippy`, `cargo test --lib`).
+  - **BLOQUEADO POR INFRA:** o teste desktop real continua impossivel neste host porque `tauri-driver` segue bloqueado por policy de Application Control, mantendo o mesmo `spawn UNKNOWN` no runner E2E.
+
+* **O que acabou de acontecer (2026-03-05 - sessao 32):**
+  - A UX do ponto de decisao `Build & Run` passou a exibir motivo textual explicito tambem para `ERRO LIVE` (`Live com falha: ...`), eliminando dependencia de tooltip para entender o estado.
+  - O ajuste foi feito no caminho canonico existente (badge/summary da toolbar), sem criar painel paralelo nem bypass da validacao autoritativa.
+  - `src/App.test.tsx` ganhou cobertura para `ERRO LIVE` verificando: botao de build permanece habilitado, motivo visual aparece ao lado do build e o fluxo canonico continua executavel.
+  - `src/core/validation/liveValidationController.test.ts` ganhou caso explicito para indicador `ERRO LIVE` com `detail` do erro de validacao.
+  - O baseline local foi reexecutado e ficou verde: `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo clippy -- -D warnings`, `cargo test --lib -- --nocapture`.
+  - **BLOQUEADO POR INFRA:** tentativa de `desktop-e2e` local continua falhando em `spawn UNKNOWN`; diagnostico permanece apontando bloqueio do `tauri-driver.exe` por policy de Application Control no Windows local.
+
+* **O que acabou de acontecer (2026-03-05 - sessao 31):**
+  - O estado `DESATUAL.` da toolbar ganhou acao explicita `Revalidar agora`, sem criar fluxo paralelo: a acao apenas dispara novo ciclo do controller live canonico (`validate_scene_draft`).
+  - O store ganhou um gatilho dedicado (`requestHwValidationRefresh` / `hwValidationRefreshTick`) para permitir revalidacao manual sem mutar a cena e sem bypass da validacao autoritativa Rust.
+  - A cobertura de integracao em `src/App.test.tsx` foi expandida para validar o botao `Revalidar agora`, o incremento do tick de revalidacao e o log correspondente.
+  - O baseline local passou em `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo clippy -- -D warnings` e `cargo test --lib -- --nocapture`.
+  - **BLOQUEADO POR INFRA:** tentativa de validacao desktop real (`npm run test:e2e:desktop:md -- --skip-build --native-driver .\\msedgedriver.exe`) falhou com `spawn UNKNOWN`; diagnostico confirmou que o `tauri-driver.exe` esta bloqueado por policy de Application Control no Windows local.
+
+* **O que acabou de acontecer (2026-03-04 - sessao 30):**
+  - A mensagem inicial do console no store deixou de afirmar `Roadmap MVP completo` e agora declara explicitamente `Status: hardening do MVP canonico`.
+  - Foi adicionada cobertura em `src/core/store/editorStore.test.ts` para impedir regressao de claim otimista no bootstrap da UI.
+  - O baseline local foi reexecutado com sucesso em `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `cargo clippy -- -D warnings` e `cargo test --lib -- --nocapture`.
+  - `npm test` em modo default voltou a falhar neste ambiente por timeout de worker (`vitest-pool`); o fallback deterministico `npx vitest run --no-file-parallelism --maxWorkers=1` passou com 56/56.
+  - **BLOQUEADO POR INFRA:** a validacao remota `desktop-e2e` nao foi disparada nesta sessao; comando tentado `gh --version` falhou porque `gh` nao esta instalado nesta maquina.
 
 * **O que acabou de acontecer (2026-03-04 - sessao 29):**
   - O editor ganhou badge de estado live na toolbar (`LIVE`, `WARN`, `DESATUAL.`, `ERRO LIVE`, `BLOQUEADO`) no ponto de decisao de `Build & Run`, sem abrir fluxo paralelo ao painel de hardware.
@@ -126,11 +243,162 @@
   - O app agora possui um E2E de nivel desktop/Tauri repetivel em `scripts/e2e-tauri-build-run.mjs`, usando `tauri-driver` oficial e fixtures canonicas de Mega Drive e SNES.
   - O workflow dedicado `.github/workflows/desktop-e2e.yml` institucionaliza a regressao desktop em Windows, com `workflow_dispatch`, `workflow_call` e gatilhos `push`/`pull_request` filtrados por caminho, e agora ja foi validado em runner GitHub/Windows real.
   - A UX live do editor ja cobre estados fatais e nao-fatais: overflow de sprites, overflow de VRAM, warning de VRAM alta e warning de alta contagem de sprites em ambos os targets.
-  - A toolbar do editor agora tambem expÃµe warning live nao-fatal perto de `Build & Run`, para que o usuario nao dependa exclusivamente do painel lateral para entender o risco atual.
+  - A toolbar do editor agora tambem expoe warning live nao-fatal perto de `Build & Run`, para que o usuario nao dependa exclusivamente do painel lateral para entender o risco atual.
   - O modo de trabalho dos agentes agora esta consolidado em documento canonico proprio para reduzir divergencia de onboarding, claims falsos de entrega e poluicao estrutural.
   - Dados em `data/`: `rom_teste.bin` e `sonic_test.gen` continuam uteis para validacao manual de Mega Drive, mas o uso dessas ROMs deve respeitar compliance/licenciamento.
 
-* **Validacoes verificadas em 2026-03-04:**
+* **Validacoes verificadas em 2026-03-06 (sessao 41):**
+  - `node --check scripts/e2e-tauri-build-run.mjs` -> OK.
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-desktop-e2e.ps1` -> OK.
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-desktop-e2e.ps1 -SessionProbe` -> FALHOU no probe de sessao (`500 Internal Server Error` com `DevToolsActivePort file doesn't exist` no log verbose do `msedgedriver`).
+  - `npm.cmd run test:e2e:desktop:live-ok:md -- --skip-build --native-driver .\\msedgedriver.exe` -> FALHOU (`session not created: DevToolsActivePort file doesn't exist`), agora com hint operacional no runner.
+  - `npm.cmd run tauri build -- --debug --no-bundle` -> FALHOU no host local por `spawn EPERM` durante `beforeBuildCommand` (vite/esbuild).
+  - `npm run check:tree` -> OK.
+  - `npm run lint` -> OK.
+  - `npx tsc --noEmit` -> OK.
+  - `npm test` -> OK, 62/62.
+  - `cargo clippy -- -D warnings` (em `src-tauri/`) -> OK.
+  - `cargo test --lib -- --nocapture` (em `src-tauri/`) -> OK, 39 aprovados / 1 ignorado.
+
+* **Validacoes verificadas em 2026-03-06 (sessao 42):**
+  - `npm run check:tree` -> OK.
+  - `npm run lint` -> OK.
+  - `npx tsc --noEmit` -> OK.
+  - `npm test` -> OK, 62/62.
+  - `cargo clippy -- -D warnings` (em `src-tauri/`) -> OK.
+  - `cargo test --lib -- --nocapture` (em `src-tauri/`) -> OK, 58 aprovados / 1 ignorado.
+
+* **Validacoes verificadas em 2026-03-05 (sessao 40):**
+  - `node --check scripts/e2e-tauri-build-run.mjs` -> OK.
+  - `npm run check:tree` -> OK.
+  - `npm run lint` -> OK.
+  - `npx tsc --noEmit` -> OK.
+  - `npm test` -> OK, 62/62.
+  - `cargo clippy -- -D warnings` (em `src-tauri/`) -> OK.
+  - `cargo test --lib -- --nocapture` (em `src-tauri/`) -> OK, 39 aprovados / 1 ignorado.
+  - `npm.cmd run test:e2e:desktop:live-ok:md -- --skip-build --native-driver .\\msedgedriver.exe` -> FALHOU (`session not created: DevToolsActivePort file doesn't exist`).
+  - `npm.cmd run test:e2e:desktop:live-ok:snes -- --skip-build --native-driver .\\msedgedriver.exe` -> FALHOU (`session not created: DevToolsActivePort file doesn't exist`).
+  - `npm.cmd run test:e2e:desktop:md -- --skip-build --native-driver .\\msedgedriver.exe` -> FALHOU (`session not created: chrome not reachable`).
+  - `npm.cmd run test:e2e:desktop:live-ok:md -- --skip-build --native-driver .\\msedgedriver.exe --app F:\\Projects\\RetroDevStudio\\src-tauri\\target\\debug\\retro-dev-studio.exe` -> FALHOU (`DevToolsActivePort`), descartando path virtual como causa primaria.
+  - `npm.cmd run test:e2e:desktop:live-ok:md -- --skip-build --native-driver .\\msedgedriver.exe --external-driver` -> FALHOU (`DevToolsActivePort`), confirmando que o fallback externo remove o bloqueio de spawn, mas nao o bloqueio de sessao.
+  - `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=0' npm.cmd run test:e2e:desktop:live-ok:md -- --skip-build --native-driver .\\msedgedriver.exe` -> FALHOU (`chrome not reachable`).
+  - `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=0 --remote-allow-origins=*' npm.cmd run test:e2e:desktop:live-ok:md -- --skip-build --native-driver .\\msedgedriver.exe` -> FALHOU (`DevToolsActivePort`).
+  - `tauri-driver --port 4444 --native-port 9517 --native-driver <msedgedriver> + --external-driver` -> FALHOU (`DevToolsActivePort`), descartando conflito simples de porta nativa.
+  - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-desktop-e2e.ps1` -> OK (diagnostico consolidado: `cmd-ignore` passa, `cmd-pipe` falha com `EPERM`, sem listener em `:4444` fora de execucao do runner).
+  - `C:\\Users\\misae\\.cargo\\bin\\tauri-driver.exe --help` -> OK.
+  - `gh --version` -> FALHOU (`gh` nao reconhecido nesta maquina).
+
+* **Validacoes verificadas em 2026-03-05 (sessao 39):**
+  - `node --check scripts/e2e-tauri-build-run.mjs` -> OK.
+  - `npm run check:tree` -> OK.
+  - `npm run lint` -> OK.
+  - `npx tsc --noEmit` -> OK.
+  - `npm test` -> OK, 62/62.
+  - `cargo clippy -- -D warnings` (em `src-tauri/`) -> OK.
+  - `cargo test --lib -- --nocapture` (em `src-tauri/`) -> OK, 39 aprovados / 1 ignorado.
+  - `npm.cmd run test:e2e:desktop:live-ok:md -- --skip-build --native-driver .\\msedgedriver.exe` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> FALHOU (`spawn EPERM`, com diagnostico de driver path no runner).
+  - `npm.cmd run test:e2e:desktop:live-ok:snes -- --skip-build --native-driver .\\msedgedriver.exe` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> FALHOU (`spawn EPERM`, com diagnostico de driver path no runner).
+  - `C:\\Users\\misae\\.cargo\\bin\\tauri-driver.exe --help` -> OK.
+  - `gh --version` -> FALHOU (`gh` nao reconhecido nesta maquina), mantendo bloqueio para disparo remoto via CLI.
+
+* **Validacoes verificadas em 2026-03-05 (sessao 38):**
+  - `node --check scripts/e2e-tauri-build-run.mjs` -> OK.
+  - `npm run check:tree` -> OK.
+  - `npm run lint` -> OK.
+  - `npx tsc --noEmit` -> OK.
+  - `npm test` -> OK, 62/62.
+  - `cargo clippy -- -D warnings` (em `src-tauri/`) -> OK.
+  - `cargo test --lib -- --nocapture` (em `src-tauri/`) -> OK, 39 aprovados / 1 ignorado.
+  - `npm.cmd run test:e2e:desktop:live-ok:md -- --skip-build --native-driver .\\msedgedriver.exe` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> FALHOU (`spawn EPERM`).
+  - `npm.cmd run test:e2e:desktop:live-ok:snes -- --skip-build --native-driver .\\msedgedriver.exe` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> FALHOU (`spawn EPERM`).
+  - `C:\\Users\\misae\\.cargo\\bin\\tauri-driver.exe --help` -> OK.
+
+* **Validacoes verificadas em 2026-03-05 (sessao 37):**
+  - `node --check scripts/e2e-tauri-build-run.mjs` -> OK.
+  - `npm run check:tree` -> OK.
+  - `npm run lint` -> OK.
+  - `npx tsc --noEmit` -> OK.
+  - `npm test` -> OK, 59/59.
+  - `cargo clippy -- -D warnings` (em `src-tauri/`) -> OK.
+  - `cargo test --lib -- --nocapture` (em `src-tauri/`) -> OK, 39 aprovados / 1 ignorado.
+  - `npm run test:e2e:desktop:live-stale:md -- --skip-build --native-driver .\\msedgedriver.exe` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> FALHOU (`spawn UNKNOWN`).
+  - `npm run test:e2e:desktop:live-stale:snes -- --skip-build --native-driver .\\msedgedriver.exe` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> FALHOU (`spawn UNKNOWN`).
+  - `C:\\Users\\misae\\.cargo\\bin\\tauri-driver.exe --help` -> FALHOU (arquivo bloqueado por policy de Application Control do Windows).
+  - `gh --version` -> FALHOU (`gh` nao reconhecido nesta maquina), bloqueando disparo remoto imediato via CLI.
+
+* **Validacoes verificadas em 2026-03-05 (sessao 36):**
+  - `npm run check:tree` -> OK.
+  - `npm run lint` -> OK.
+  - `npx tsc --noEmit` -> OK.
+  - `npm test` -> FALHOU neste ambiente com timeout de worker em `vitest-pool` (sem execucao real dos testes).
+  - `npx vitest run --no-file-parallelism --maxWorkers=1` -> OK, 59/59 (fallback deterministico para timeout de worker em modo `forks`).
+  - `cargo clippy -- -D warnings` -> OK.
+  - `cargo test --lib -- --nocapture` -> OK, 39 aprovados / 1 ignorado.
+  - `npm run test:e2e:desktop:live-error:md -- --skip-build --native-driver .\\msedgedriver.exe` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> FALHOU (`spawn UNKNOWN`).
+  - `C:\\Users\\misae\\.cargo\\bin\\tauri-driver.exe --help` -> FALHOU (arquivo bloqueado por policy de Application Control do Windows).
+
+* **Validacoes verificadas em 2026-03-05 (sessao 35):**
+  - `node --check scripts/e2e-tauri-build-run.mjs` -> OK.
+  - `npm run check:tree` -> OK.
+  - `npm run lint` -> OK.
+  - `npx tsc --noEmit` -> OK.
+  - `npm test` -> OK, 58/58.
+  - `cargo clippy -- -D warnings` -> OK.
+  - `cargo test --lib -- --nocapture` -> OK, 39 aprovados / 1 ignorado.
+  - `npm run test:e2e:desktop:live-error:md -- --skip-build --native-driver .\\msedgedriver.exe` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> FALHOU (`spawn UNKNOWN`).
+  - `C:\\Users\\misae\\.cargo\\bin\\tauri-driver.exe --help` -> FALHOU (arquivo bloqueado por policy de Application Control do Windows).
+
+* **Validacoes verificadas em 2026-03-05 (sessao 34):**
+  - `npm run check:tree` -> OK.
+  - `npm run lint` -> OK.
+  - `npx tsc --noEmit` -> OK.
+  - `npm test` -> OK, 58/58.
+  - `cargo clippy -- -D warnings` -> OK.
+  - `cargo test --lib -- --nocapture` -> OK, 39 aprovados / 1 ignorado.
+  - `npm run test:e2e:desktop:md -- --skip-build --native-driver .\\msedgedriver.exe` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> FALHOU (`spawn UNKNOWN`).
+  - `C:\\Users\\misae\\.cargo\\bin\\tauri-driver.exe --help` -> FALHOU (arquivo bloqueado por policy de Application Control do Windows).
+
+* **Validacoes verificadas em 2026-03-05 (sessao 33):**
+  - `npm run check:tree` -> OK.
+  - `npm run lint` -> OK.
+  - `npx tsc --noEmit` -> OK.
+  - `npm test` -> OK, 58/58.
+  - `cargo clippy -- -D warnings` -> OK.
+  - `cargo test --lib -- --nocapture` -> OK, 39 aprovados / 1 ignorado.
+  - `npm run test:e2e:desktop:md -- --skip-build --native-driver .\\msedgedriver.exe` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> FALHOU (`spawn UNKNOWN`).
+  - `C:\\Users\\misae\\.cargo\\bin\\tauri-driver.exe --help` -> FALHOU (arquivo bloqueado por policy de Application Control do Windows).
+
+* **Validacoes verificadas em 2026-03-05 (sessao 32):**
+  - `npm run check:tree` -> OK.
+  - `npm run lint` -> OK.
+  - `npx tsc --noEmit` -> OK.
+  - `npm test` -> OK, 58/58.
+  - `cargo clippy -- -D warnings` -> OK.
+  - `cargo test --lib -- --nocapture` -> OK, 39 aprovados / 1 ignorado.
+  - `npm run test:e2e:desktop:md -- --skip-build --native-driver .\\msedgedriver.exe` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> FALHOU (`spawn UNKNOWN`).
+  - `C:\\Users\\misae\\.cargo\\bin\\tauri-driver.exe --help` -> FALHOU (arquivo bloqueado por policy de Application Control do Windows).
+
+* **Validacoes verificadas em 2026-03-05 (sessao 31):**
+  - `npm run check:tree` -> OK.
+  - `npm run lint` -> OK.
+  - `npx tsc --noEmit` -> OK.
+  - `npm test` -> OK, 56/56.
+  - `cargo clippy -- -D warnings` -> OK.
+  - `cargo test --lib -- --nocapture` -> OK, 39 aprovados / 1 ignorado.
+  - `npm run test:e2e:desktop:md -- --skip-build --native-driver .\\msedgedriver.exe` com `RDS_E2E_DRIVER_TIMEOUT_MS=60000` -> FALHOU (`spawn UNKNOWN`).
+  - `C:\\Users\\misae\\.cargo\\bin\\tauri-driver.exe --help` -> FALHOU (arquivo bloqueado por policy de Application Control do Windows).
+
+* **Validacoes verificadas em 2026-03-04 (sessao 30):**
+  - `npm run check:tree` -> OK.
+  - `npm run lint` -> OK.
+  - `npx tsc --noEmit` -> OK.
+  - `npm test` -> FALHOU neste ambiente com timeout de worker em `vitest-pool` (sem execucao real dos testes).
+  - `npx vitest run --no-file-parallelism --maxWorkers=1` -> OK, 56/56 (fallback deterministico para o timeout de worker em modo `forks`).
+  - `cargo clippy -- -D warnings` -> OK.
+  - `cargo test --lib -- --nocapture` -> OK, 39 aprovados / 1 ignorado.
+  - `gh --version` -> FALHOU (`gh` nao reconhecido); bloqueio de infraestrutura para disparo remoto imediato do `desktop-e2e`.
+
+* **Validacoes verificadas em 2026-03-04 (sessao 29):**
   - `npm run check:tree` -> OK.
   - `npm run lint` -> OK.
   - `npx tsc --noEmit` -> OK.
@@ -175,10 +443,9 @@
   - GitHub Actions `Desktop E2E` (`22606643935`) -> OK em `windows-latest`, com `Run Mega Drive desktop smoke` e `Run SNES desktop smoke` ambos verdes.
 
 * **Proximo passo imediato:**
-  1. Consolidar em commit unico desta sessao o badge de estado live na toolbar e o endurecimento correspondente do runner desktop.
-  2. Confirmar no GitHub Actions o run remoto acionado pelo novo `push` desta sessao (`CI` + `Desktop E2E`).
-  3. Expandir a UX live para orientar a acao do usuario em estado `DESATUAL.` (ex.: hint para revalidacao manual) sem bloquear indevidamente o build.
-  4. Reexecutar o smoke upstream oficial sempre que mudancas tocarem o caminho SNES/Windows, agora que o baseline remoto ja esta comprovado.
+  1. Executar E1 da fila MVP: adicionar save states reais do Libretro (`retro_serialize_size`, `retro_serialize`, `retro_unserialize`) com IPC `emulator_save_state`/`emulator_load_state` e UI correspondente no `Game View`.
+  2. Manter o baseline verde apos a tarefa (`check:tree`, `lint`, `tsc`, `npm test`, `cargo clippy`, `cargo test --lib`) antes de seguir para o Bloco E.
+  3. Preservar o grafo salvo em `LogicComponent.graph` como fonte canonicamente carregada para compilacao, sem bypass paralelo no build.
 
 ---
 
@@ -209,6 +476,9 @@ As seguintes decisoes ja foram debatidas e sao finais:
 * **[2026-03-04]** Atualizacao do `06_AI_MEMORY_BANK.md` ao fim de cada sessao material volta a ser exigencia operacional. Ausencia de handoff aqui deve ser tratada como bug de processo.
 * **[2026-03-04]** `Concluido`, `validado`, `fechado` e termos equivalentes agora devem ser lidos como claims reservadas a certificacao real: caminho canonico funcional, gates aplicaveis verdes, prova correspondente e ausencia de erro bloqueante no escopo. Qualquer excecao deve rebaixar o status para `hardening` ou `experimental`.
 * **[2026-03-04]** `tauri-driver` local pode levar mais do que 15s para responder em certas maquinas. O runner desktop agora deve usar `RDS_E2E_DRIVER_TIMEOUT_MS` em vez de depender de timeout fixo curto.
+* **[2026-03-05]** Neste host, `child_process.spawn` com `stdio` contendo `pipe` pode falhar com `EPERM`. O runner desktop foi ajustado para bootstrap interno do `tauri-driver` com `stdio: inherit`, mas a criacao de sessao WebDriver ainda pode falhar localmente com `DevToolsActivePort/chrome not reachable`.
+* **[2026-03-06]** O script `scripts/diagnose-desktop-e2e.ps1` ganhou `-SessionProbe` para reproduzir localmente o `InitSession` com log verbose do `msedgedriver`; usar esse modo sempre que o runner acusar `DevToolsActivePort/chrome not reachable`.
+* **[2026-03-06]** Neste host, `npm run tauri build -- --debug --no-bundle` pode falhar por `spawn EPERM` no `beforeBuildCommand` (vite/esbuild), portanto build desktop local nao deve ser tratado como gate confiavel ate ajuste de policy/ambiente.
 * **[2026-02-28]** `Deep Profiler`, `Asset Extractor` e `RetroFX` permanecem visiveis por contexto de produto, mas agora devem continuar explicitamente marcados como experimentais ate deixarem de ser stub/parcial.
 * **[2026-02-28]** No Windows, a deteccao de `bash` deve ignorar o shim do WSL (`C:\\Windows\\System32\\bash.exe`) e privilegiar Git Bash/MSYS2. Essa regra ja foi aplicada no codigo e nao deve ser removida sem substituto equivalente.
 * **[2026-02-28]** `data/sonic_test.gen` e a documentacao associada sao um ponto de atencao de compliance/licenciamento. O software pode operar com ROMs fornecidas pelo usuario para fins educacionais, pesquisa e preservacao, mas nao deve redistribuir ROM comercial como parte do produto.
@@ -307,6 +577,9 @@ Rebaseline tecnico do MVP para alinhar implementacao, documentacao e compliance 
 | 2026-03-04 | Codex | Blindagem textual dos canonicos para exigir certificacao real antes de qualquer claim de fase, etapa ou feature concluida |
 | 2026-03-04 | Codex | Warning live resumido na toolbar do editor, runner desktop endurecido para startup lento do `tauri-driver` e nova validacao real de warnings no app Tauri |
 | 2026-03-04 | Codex | Badge de estado live na toolbar (`LIVE/WARN/DESATUAL./ERRO/BLOQUEADO`), cobertura de testes ampliada e validacao desktop real apos rebuild |
+| 2026-03-05 | Codex | Cenario desktop `live-ok` adicionado para estado `LIVE` por target, workflow desktop expandido e cobertura local App/controller fechando indicadores live |
+| 2026-03-05 | Codex | Hardening async residual em `ToolsPanel`, limpeza do desvio estrutural local (pasta `Microsoft`) e diagnostico `spawn EPERM` enriquecido no runner desktop |
+| 2026-03-05 | Codex | Runner desktop com fallback `--external-driver`, ajuste de compatibilidade de spawn (`stdio: inherit`) e isolamento do novo bloqueio local em `DevToolsActivePort` |
 
 ---
 

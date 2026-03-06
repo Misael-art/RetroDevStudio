@@ -1,6 +1,6 @@
 use crate::compiler::ast_generator::{
     collect_collision_checks, collect_tilemap_assets, AabbCollisionCheck, AstNode, AstOutput,
-    SpriteAsset, TilemapAsset,
+    LogicCollisionTarget, LogicOp, LogicPositionSource, LogicScript, SpriteAsset, TilemapAsset,
 };
 
 #[derive(Debug)]
@@ -19,8 +19,8 @@ struct SpriteSizeConfig {
 struct SpawnedSprite {
     var_name: String,
     sprite_index: u16,
-    x: i32,
-    y: i32,
+    initial_x: i32,
+    initial_y: i32,
     priority: u8,
     tile_base: u16,
     palette_slot: u8,
@@ -28,10 +28,11 @@ struct SpawnedSprite {
 
 #[derive(Debug, Clone)]
 struct AnimationState {
+    var_name: String,
     state_name: String,
     sprite_index: u16,
-    x: i32,
-    y: i32,
+    x_var: String,
+    y_var: String,
     priority: u8,
     palette_slot: u8,
     frame_tiles: Vec<u16>,
@@ -65,6 +66,7 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     let mut out = String::new();
     let collision_checks = collect_collision_checks(ast);
     let tilemap_assets = collect_tilemap_assets(ast);
+    let has_logic_overlap = ast.logic_scripts.iter().any(script_uses_overlap);
     let size_config = ast
         .sprite_assets
         .first()
@@ -105,7 +107,20 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     if !context.animations.is_empty() {
         out.push('\n');
     }
-    if !collision_checks.is_empty() {
+    for spawn in &context.spawns {
+        out.push_str(&format!(
+            "static s16 {}_x = {};\n",
+            spawn.var_name, spawn.initial_x
+        ));
+        out.push_str(&format!(
+            "static s16 {}_y = {};\n",
+            spawn.var_name, spawn.initial_y
+        ));
+    }
+    if !context.spawns.is_empty() {
+        out.push('\n');
+    }
+    if !collision_checks.is_empty() || has_logic_overlap {
         out.push_str(render_aabb_helper());
         out.push('\n');
     }
@@ -156,11 +171,13 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     }
 
     for spawn in &context.spawns {
+        let x_var = format!("{}_x", spawn.var_name);
+        let y_var = format!("{}_y", spawn.var_name);
         out.push_str(&format!(
             "    oamSet({index}, {x}, {y}, {priority}, 0, 0, {tile}, {palette});\n",
             index = spawn.sprite_index,
-            x = spawn.x.max(0),
-            y = spawn.y.max(0),
+            x = x_var,
+            y = y_var,
             priority = spawn.priority,
             tile = initial_tile_for_spawn(&context, &spawn.var_name).unwrap_or(spawn.tile_base),
             palette = spawn.palette_slot
@@ -245,6 +262,7 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
                 out.push_str("    while (1)\n    {\n");
             }
             AstNode::SpriteUpdate => {
+                render_logic_scripts(&mut out, &ast.logic_scripts, &context, 8);
                 for animation in &context.animations {
                     render_animation_update(&mut out, animation);
                 }
@@ -305,8 +323,8 @@ fn build_context(
                 let spawn = SpawnedSprite {
                     var_name: var_name.clone(),
                     sprite_index: next_sprite_index,
-                    x: *x,
-                    y: *y,
+                    initial_x: *x,
+                    initial_y: *y,
                     priority: if *priority_high { 3 } else { 0 },
                     tile_base: tile_base_lookup
                         .get(resource_name)
@@ -347,10 +365,11 @@ fn build_context(
                     .collect::<Vec<_>>();
 
                 context.animations.push(AnimationState {
+                    var_name: var_name.clone(),
                     state_name: format!("{}_anim", var_name),
                     sprite_index: spawn.sprite_index,
-                    x: spawn.x,
-                    y: spawn.y,
+                    x_var: format!("{}_x", spawn.var_name),
+                    y_var: format!("{}_y", spawn.var_name),
                     priority: spawn.priority,
                     palette_slot: spawn.palette_slot,
                     frame_tiles,
@@ -385,8 +404,8 @@ fn render_animation_update(out: &mut String, animation: &AnimationState) {
     out.push_str(&format!(
         "                oamSet({index}, {x}, {y}, {priority}, 0, 0, {name}_tiles[{name}_cursor], {palette});\n",
         index = animation.sprite_index,
-        x = animation.x.max(0),
-        y = animation.y.max(0),
+        x = animation.x_var,
+        y = animation.y_var,
         priority = animation.priority,
         name = animation.state_name,
         palette = animation.palette_slot
@@ -398,8 +417,8 @@ fn render_animation_update(out: &mut String, animation: &AnimationState) {
         out.push_str(&format!(
             "                oamSet({index}, {x}, {y}, {priority}, 0, 0, {name}_tiles[{name}_cursor], {palette});\n",
             index = animation.sprite_index,
-            x = animation.x.max(0),
-            y = animation.y.max(0),
+            x = animation.x_var,
+            y = animation.y_var,
             priority = animation.priority,
             name = animation.state_name,
             palette = animation.palette_slot
@@ -419,6 +438,126 @@ fn render_aabb_helper() -> &'static str {
         && left_y < (right_y + (s16)right_h)\n\
         && (left_y + (s16)left_h) > right_y;\n\
 }\n"
+}
+
+fn render_logic_scripts(out: &mut String, scripts: &[LogicScript], context: &SnesContext, indent: usize) {
+    for script in scripts {
+        render_logic_ops(out, &script.ops, context, indent);
+    }
+}
+
+fn render_logic_ops(out: &mut String, ops: &[LogicOp], context: &SnesContext, indent: usize) {
+    let indent_str = " ".repeat(indent);
+    let nested_indent = indent + 4;
+
+    for op in ops {
+        match op {
+            LogicOp::MoveSprite { target_var, dx, dy } => {
+                let Some(spawn) = context.spawns.iter().find(|spawn| spawn.var_name == *target_var) else {
+                    continue;
+                };
+
+                out.push_str(&format!(
+                    "{indent}{target}_x += {dx};\n",
+                    indent = indent_str,
+                    target = target_var,
+                    dx = dx
+                ));
+                out.push_str(&format!(
+                    "{indent}{target}_y += {dy};\n",
+                    indent = indent_str,
+                    target = target_var,
+                    dy = dy
+                ));
+                out.push_str(&format!(
+                    "{indent}oamSet({index}, {target}_x, {target}_y, {priority}, 0, 0, {tile}, {palette});\n",
+                    indent = indent_str,
+                    index = spawn.sprite_index,
+                    target = target_var,
+                    priority = spawn.priority,
+                    tile = current_tile_expression(context, target_var),
+                    palette = spawn.palette_slot
+                ));
+            }
+            LogicOp::ConditionOverlap {
+                left,
+                right,
+                if_true,
+                if_false,
+            } => {
+                out.push_str(&format!(
+                    "{indent}if (retro_aabb_intersects({left_x}, {left_y}, {left_w}, {left_h}, {right_x}, {right_y}, {right_w}, {right_h})) {{\n",
+                    indent = indent_str,
+                    left_x = logic_x_expr(left),
+                    left_y = logic_y_expr(left),
+                    left_w = left.width,
+                    left_h = left.height,
+                    right_x = logic_x_expr(right),
+                    right_y = logic_y_expr(right),
+                    right_w = right.width,
+                    right_h = right.height
+                ));
+                render_logic_ops(out, if_true, context, nested_indent);
+                if if_false.is_empty() {
+                    out.push_str(&format!("{}}}\n", indent_str));
+                } else {
+                    out.push_str(&format!("{}}} else {{\n", indent_str));
+                    render_logic_ops(out, if_false, context, nested_indent);
+                    out.push_str(&format!("{}}}\n", indent_str));
+                }
+            }
+            LogicOp::PlaySound { sfx } => {
+                out.push_str(&format!(
+                    "{indent}SPC_playSFX(SFX_{sfx});\n",
+                    indent = indent_str,
+                    sfx = sfx.to_uppercase()
+                ));
+            }
+        }
+    }
+}
+
+fn current_tile_expression(context: &SnesContext, var_name: &str) -> String {
+    context
+        .animations
+        .iter()
+        .find(|animation| animation.var_name == var_name)
+        .map(|animation| {
+            format!(
+                "{}_tiles[{}_cursor]",
+                animation.state_name, animation.state_name
+            )
+        })
+        .or_else(|| {
+            context
+                .spawns
+                .iter()
+                .find(|spawn| spawn.var_name == var_name)
+                .map(|spawn| spawn.tile_base.to_string())
+        })
+        .unwrap_or_else(|| "0".to_string())
+}
+
+fn logic_x_expr(target: &LogicCollisionTarget) -> String {
+    match &target.position {
+        LogicPositionSource::SpriteVar { var_name } => format!("{}_x + {}", var_name, target.offset_x),
+        LogicPositionSource::Static { x, .. } => (x + target.offset_x).to_string(),
+    }
+}
+
+fn logic_y_expr(target: &LogicCollisionTarget) -> String {
+    match &target.position {
+        LogicPositionSource::SpriteVar { var_name } => format!("{}_y + {}", var_name, target.offset_y),
+        LogicPositionSource::Static { y, .. } => (y + target.offset_y).to_string(),
+    }
+}
+
+fn script_uses_overlap(script: &LogicScript) -> bool {
+    script.ops.iter().any(op_uses_overlap)
+}
+
+fn op_uses_overlap(op: &LogicOp) -> bool {
+    matches!(op, LogicOp::ConditionOverlap { .. })
 }
 
 fn render_collision_check(out: &mut String, check: &AabbCollisionCheck) {
@@ -611,7 +750,9 @@ fn tilemap_map_address(bg_number: u8) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::ast_generator::SpriteAnimation;
+    use crate::compiler::ast_generator::{
+        LogicCollisionTarget, LogicOp, LogicPositionSource, LogicScript, SpriteAnimation,
+    };
 
     fn sprite_asset() -> SpriteAsset {
         SpriteAsset {
@@ -627,6 +768,44 @@ mod tests {
                 frame_time: 6,
                 looping: true,
             }),
+        }
+    }
+
+    fn logic_script() -> LogicScript {
+        LogicScript {
+            ops: vec![
+                LogicOp::MoveSprite {
+                    target_var: "spr_hero".to_string(),
+                    dx: 2,
+                    dy: -1,
+                },
+                LogicOp::ConditionOverlap {
+                    left: LogicCollisionTarget {
+                        entity_id: "hero".to_string(),
+                        position: LogicPositionSource::SpriteVar {
+                            var_name: "spr_hero".to_string(),
+                        },
+                        offset_x: 0,
+                        offset_y: 0,
+                        width: 16,
+                        height: 16,
+                    },
+                    right: LogicCollisionTarget {
+                        entity_id: "enemy".to_string(),
+                        position: LogicPositionSource::SpriteVar {
+                            var_name: "spr_enemy".to_string(),
+                        },
+                        offset_x: 1,
+                        offset_y: 2,
+                        width: 16,
+                        height: 16,
+                    },
+                    if_true: vec![LogicOp::PlaySound {
+                        sfx: "jump".to_string(),
+                    }],
+                    if_false: Vec::new(),
+                },
+            ],
         }
     }
 
@@ -663,6 +842,7 @@ mod tests {
                 AstNode::GameLoopEnd,
             ],
             sprite_assets: vec![sprite_asset()],
+            logic_scripts: Vec::new(),
         };
 
         let output = emit_snes(&ast, "Timing Demo");
@@ -670,10 +850,12 @@ mod tests {
         assert!(output
             .main_c
             .contains("static const u16 spr_hero_anim_tiles[] = {0, 4, 8};"));
+        assert!(output.main_c.contains("static s16 spr_hero_x = 32;"));
+        assert!(output.main_c.contains("static s16 spr_hero_y = 48;"));
         assert!(output.main_c.contains("if (++spr_hero_anim_timer >= 6)"));
         assert!(output
             .main_c
-            .contains("oamSet(0, 32, 48, 3, 0, 0, spr_hero_anim_tiles[spr_hero_anim_cursor], 0);"));
+            .contains("oamSet(0, spr_hero_x, spr_hero_y, 3, 0, 0, spr_hero_anim_tiles[spr_hero_anim_cursor], 0);"));
     }
 
     #[test]
@@ -699,6 +881,7 @@ mod tests {
                 AstNode::GameLoopEnd,
             ],
             sprite_assets: Vec::new(),
+            logic_scripts: Vec::new(),
         };
 
         let output = emit_snes(&ast, "Tilemap Demo");
@@ -740,6 +923,7 @@ mod tests {
                 AstNode::GameLoopEnd,
             ],
             sprite_assets: Vec::new(),
+            logic_scripts: Vec::new(),
         };
 
         let output = emit_snes(&ast, "Collision Demo");
@@ -781,6 +965,7 @@ mod tests {
                 AstNode::GameLoopEnd,
             ],
             sprite_assets: Vec::new(),
+            logic_scripts: Vec::new(),
         };
 
         let output = emit_snes(&ast, "Input Demo");
@@ -797,5 +982,54 @@ mod tests {
             .contains("u16 input_player_jump = joypad_1_state & KEY_A;"));
         assert!(output.main_c.contains("// Input: player.move_left"));
         assert!(output.main_c.contains("// Input: player.jump"));
+    }
+
+    #[test]
+    fn snes_emitter_emits_nodegraph_logic_inside_game_loop() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::SpawnSprite {
+                    var_name: "spr_hero".to_string(),
+                    resource_name: "hero".to_string(),
+                    x: 32,
+                    y: 48,
+                    priority_high: true,
+                },
+                AstNode::SpawnSprite {
+                    var_name: "spr_enemy".to_string(),
+                    resource_name: "hero".to_string(),
+                    x: 96,
+                    y: 48,
+                    priority_high: false,
+                },
+                AstNode::SetAnimation {
+                    var_name: "spr_hero".to_string(),
+                    resource_name: "hero".to_string(),
+                    anim_index: 0,
+                    frame_time: 6,
+                    frames: vec![0, 1, 2],
+                    looping: true,
+                },
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: vec![sprite_asset()],
+            logic_scripts: vec![logic_script()],
+        };
+
+        let output = emit_snes(&ast, "Logic Demo");
+
+        assert!(output.main_c.contains("static u8 retro_aabb_intersects("));
+        assert!(output.main_c.contains("spr_hero_x += 2;"));
+        assert!(output.main_c.contains("spr_hero_y += -1;"));
+        assert!(output.main_c.contains(
+            "oamSet(0, spr_hero_x, spr_hero_y, 3, 0, 0, spr_hero_anim_tiles[spr_hero_anim_cursor], 0);"
+        ));
+        assert!(output.main_c.contains(
+            "if (retro_aabb_intersects(spr_hero_x + 0, spr_hero_y + 0, 16, 16, spr_enemy_x + 1, spr_enemy_y + 2, 16, 16)) {"
+        ));
+        assert!(output.main_c.contains("SPC_playSFX(SFX_JUMP);"));
     }
 }

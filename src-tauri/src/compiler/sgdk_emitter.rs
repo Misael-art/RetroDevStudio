@@ -1,6 +1,6 @@
 use crate::compiler::ast_generator::{
     collect_collision_checks, collect_tilemap_assets, AabbCollisionCheck, AstNode, AstOutput,
-    SpriteAsset, TilemapAsset,
+    LogicCollisionTarget, LogicOp, LogicPositionSource, LogicScript, SpriteAsset, TilemapAsset,
 };
 
 #[derive(Debug)]
@@ -20,6 +20,7 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     let mut out = String::new();
     let collision_checks = collect_collision_checks(ast);
     let tilemap_assets = collect_tilemap_assets(ast);
+    let has_logic_overlap = ast.logic_scripts.iter().any(script_uses_overlap);
     let include_resources = !ast.sprite_assets.is_empty() || !tilemap_assets.is_empty();
 
     out.push_str(&format!(
@@ -39,7 +40,7 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     if !ast.sprite_assets.is_empty() {
         out.push('\n');
     }
-    if !collision_checks.is_empty() {
+    if !collision_checks.is_empty() || has_logic_overlap {
         out.push_str(render_aabb_helper());
         out.push('\n');
     }
@@ -199,6 +200,7 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
                 out.push_str("\n    while (TRUE) {\n");
             }
             AstNode::SpriteUpdate => {
+                render_logic_scripts(&mut out, &ast.logic_scripts, 8);
                 out.push_str("        SPR_update();\n");
             }
             AstNode::VSync => {
@@ -256,6 +258,91 @@ fn render_aabb_helper() -> &'static str {
         && left_y < (right_y + (s16)right_h)\n\
         && (left_y + (s16)left_h) > right_y;\n\
 }\n"
+}
+
+fn render_logic_scripts(out: &mut String, scripts: &[LogicScript], indent: usize) {
+    for script in scripts {
+        render_logic_ops(out, &script.ops, indent);
+    }
+}
+
+fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
+    let indent_str = " ".repeat(indent);
+    let nested_indent = indent + 4;
+
+    for op in ops {
+        match op {
+            LogicOp::MoveSprite { target_var, dx, dy } => {
+                out.push_str(&format!(
+                    "{indent}SPR_setPosition({target}, SPR_getX({target}) + {dx}, SPR_getY({target}) + {dy});\n",
+                    indent = indent_str,
+                    target = target_var,
+                    dx = dx,
+                    dy = dy
+                ));
+            }
+            LogicOp::ConditionOverlap {
+                left,
+                right,
+                if_true,
+                if_false,
+            } => {
+                out.push_str(&format!(
+                    "{indent}if (retro_aabb_intersects({left_x}, {left_y}, {left_w}, {left_h}, {right_x}, {right_y}, {right_w}, {right_h})) {{\n",
+                    indent = indent_str,
+                    left_x = logic_x_expr(left),
+                    left_y = logic_y_expr(left),
+                    left_w = left.width,
+                    left_h = left.height,
+                    right_x = logic_x_expr(right),
+                    right_y = logic_y_expr(right),
+                    right_w = right.width,
+                    right_h = right.height
+                ));
+                render_logic_ops(out, if_true, nested_indent);
+                if if_false.is_empty() {
+                    out.push_str(&format!("{}}}\n", indent_str));
+                } else {
+                    out.push_str(&format!("{}}} else {{\n", indent_str));
+                    render_logic_ops(out, if_false, nested_indent);
+                    out.push_str(&format!("{}}}\n", indent_str));
+                }
+            }
+            LogicOp::PlaySound { sfx } => {
+                out.push_str(&format!(
+                    "{indent}SND_startPlayPCM(SFX_{sfx}, 1, SOUND_PCM_CH_AUTO);\n",
+                    indent = indent_str,
+                    sfx = sfx.to_uppercase()
+                ));
+            }
+        }
+    }
+}
+
+fn logic_x_expr(target: &LogicCollisionTarget) -> String {
+    match &target.position {
+        LogicPositionSource::SpriteVar { var_name } => {
+            format!("SPR_getX({}) + {}", var_name, target.offset_x)
+        }
+        LogicPositionSource::Static { x, .. } => (x + target.offset_x).to_string(),
+    }
+}
+
+fn logic_y_expr(target: &LogicCollisionTarget) -> String {
+    match &target.position {
+        LogicPositionSource::SpriteVar { var_name } => {
+            format!("SPR_getY({}) + {}", var_name, target.offset_y)
+        }
+        LogicPositionSource::Static { y, .. } => (y + target.offset_y).to_string(),
+    }
+}
+
+fn script_uses_overlap(script: &LogicScript) -> bool {
+    script.ops.iter().any(op_uses_overlap)
+}
+
+fn op_uses_overlap(op: &LogicOp) -> bool {
+    matches!(op, LogicOp::ConditionOverlap { .. })
 }
 
 fn render_collision_check(out: &mut String, check: &AabbCollisionCheck) {
@@ -391,7 +478,9 @@ fn palette_const(slot: u8) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::compiler::ast_generator::SpriteAnimation;
+    use crate::compiler::ast_generator::{
+        LogicCollisionTarget, LogicOp, LogicPositionSource, LogicScript, SpriteAnimation,
+    };
 
     fn sprite_asset_with_animation(frame_time: u32, looping: bool) -> SpriteAsset {
         SpriteAsset {
@@ -410,11 +499,50 @@ mod tests {
         }
     }
 
+    fn logic_script() -> LogicScript {
+        LogicScript {
+            ops: vec![
+                LogicOp::MoveSprite {
+                    target_var: "spr_player".to_string(),
+                    dx: 2,
+                    dy: -1,
+                },
+                LogicOp::ConditionOverlap {
+                    left: LogicCollisionTarget {
+                        entity_id: "player".to_string(),
+                        position: LogicPositionSource::SpriteVar {
+                            var_name: "spr_player".to_string(),
+                        },
+                        offset_x: 0,
+                        offset_y: 0,
+                        width: 16,
+                        height: 16,
+                    },
+                    right: LogicCollisionTarget {
+                        entity_id: "enemy".to_string(),
+                        position: LogicPositionSource::SpriteVar {
+                            var_name: "spr_enemy".to_string(),
+                        },
+                        offset_x: 1,
+                        offset_y: 2,
+                        width: 16,
+                        height: 16,
+                    },
+                    if_true: vec![LogicOp::PlaySound {
+                        sfx: "jump".to_string(),
+                    }],
+                    if_false: Vec::new(),
+                },
+            ],
+        }
+    }
+
     #[test]
     fn resources_res_uses_animation_timing_from_ast() {
         let ast = AstOutput {
             nodes: Vec::new(),
             sprite_assets: vec![sprite_asset_with_animation(6, true)],
+            logic_scripts: Vec::new(),
         };
 
         let output = emit_sgdk(&ast, "Timing Demo");
@@ -450,6 +578,7 @@ mod tests {
                 AstNode::GameLoopEnd,
             ],
             sprite_assets: vec![sprite_asset_with_animation(6, false)],
+            logic_scripts: Vec::new(),
         };
 
         let output = emit_sgdk(&ast, "Timing Demo");
@@ -470,6 +599,7 @@ mod tests {
                 map_height: 32,
             }],
             sprite_assets: Vec::new(),
+            logic_scripts: Vec::new(),
         };
 
         let output = emit_sgdk(&ast, "Tilemap Demo");
@@ -502,6 +632,7 @@ mod tests {
                 AstNode::GameLoopEnd,
             ],
             sprite_assets: Vec::new(),
+            logic_scripts: Vec::new(),
         };
 
         let output = emit_sgdk(&ast, "Tilemap Demo");
@@ -541,6 +672,7 @@ mod tests {
                 AstNode::GameLoopEnd,
             ],
             sprite_assets: Vec::new(),
+            logic_scripts: Vec::new(),
         };
 
         let output = emit_sgdk(&ast, "Collision Demo");
@@ -582,6 +714,7 @@ mod tests {
                 AstNode::GameLoopEnd,
             ],
             sprite_assets: Vec::new(),
+            logic_scripts: Vec::new(),
         };
 
         let output = emit_sgdk(&ast, "Input Demo");
@@ -597,5 +730,32 @@ mod tests {
             .contains("u16 input_player_jump = joypad_1_state & BUTTON_A;"));
         assert!(output.main_c.contains("// Input: player.move_left"));
         assert!(output.main_c.contains("// Input: player.jump"));
+    }
+
+    #[test]
+    fn main_c_emits_nodegraph_logic_inside_game_loop() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: vec![logic_script()],
+        };
+
+        let output = emit_sgdk(&ast, "Logic Demo");
+
+        assert!(output.main_c.contains("static u8 retro_aabb_intersects("));
+        assert!(output.main_c.contains(
+            "SPR_setPosition(spr_player, SPR_getX(spr_player) + 2, SPR_getY(spr_player) + -1);"
+        ));
+        assert!(output.main_c.contains(
+            "if (retro_aabb_intersects(SPR_getX(spr_player) + 0, SPR_getY(spr_player) + 0, 16, 16, SPR_getX(spr_enemy) + 1, SPR_getY(spr_enemy) + 2, 16, 16)) {"
+        ));
+        assert!(output
+            .main_c
+            .contains("SND_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH_AUTO);"));
     }
 }

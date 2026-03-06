@@ -1,6 +1,6 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-03-04
+**Ultima revisao canonica:** 2026-03-06
 **Fase ativa real:** Hardening do fluxo `Build -> ROM -> Emulacao` ja validado em Windows com upstream real e em runner GitHub/Windows real
 
 > **DIRETRIZ PARA AGENTES DE IA**
@@ -18,7 +18,7 @@
 
 ---
 
-## Estado Real em 2026-03-03
+## Estado Real em 2026-03-06
 
 ### Ja implementado em codigo
 - Editor Tauri + React + TypeScript funcional.
@@ -32,6 +32,9 @@
 - Validacao oficial upstream em Windows com SGDK, PVSnesLib e cores Libretro reais via `scripts/validate-upstream-windows.ps1`.
 - E2E de aplicacao desktop/Tauri via `scripts/e2e-tauri-build-run.mjs` para `Build -> Load ROM -> Run frames`.
 - Workflow dedicado `.github/workflows/desktop-e2e.yml` validado em runner GitHub/Windows real para Mega Drive e SNES.
+- Cobertura desktop E2E dos estados live `LIVE`, `WARN`, `BLOQUEADO`, `ERRO LIVE`, `DESATUAL.` e `ANALISANDO` por target no runner canonico/workflow dedicado.
+- Runner desktop com diagnostico explicito de bootstrap do driver (`code/syscall/path`) para falhas locais de permissao (`spawn EPERM`).
+- Runner desktop com hint operacional para falhas de sessao (`DevToolsActivePort/chrome not reachable`) e script de diagnostico com `-SessionProbe` para evidencia local reproduzivel.
 - Pause/resume do viewport preservando o core Libretro, autosave fresco no hierarchy e persistencia atomica de projeto/cena.
 - Undo/redo do editor com atalhos globais, pilha limitada e agrupamento de drag no viewport.
 - Grid snap de 8px no Scene View com toggle visual e atalho `G`.
@@ -40,9 +43,12 @@
 - Asset Extractor destravado na UI e conectado ao backend real, permanecendo `Experimental` ate validar extracao ponta a ponta com ROM real.
 - RetroFX agora persiste configuracao de parallax/raster no scene JSON e o designer foi reabilitado, permanecendo `Experimental` ate emissao real no build.
 - NodeGraph agora persiste nos componentes de logica via `LogicComponent.graph`, com roundtrip de serializacao no frontend e autosave no JSON da cena.
+- NodeGraph agora compila os nos basicos persistidos para C no pipeline canonico, com emissao integrada no game loop SGDK/SNES para `event_start`, `sprite_move`, `condition_overlap` e `action_sound`.
 - Features ainda parciais agora ficam explicitamente marcadas como `Experimental` na UI para nao mentir sobre prontidao.
 
 ### Ainda em hardening
+- Confirmacao remota em runner GitHub/Windows dos cenarios mais recentes (`live-error`, `live-stale`, `live-ok`) enquanto este host local segue bloqueado em criacao de sessao WebDriver (`DevToolsActivePort` / `chrome not reachable`).
+- Desbloqueio do build desktop local neste host quando `npm run tauri build -- --debug --no-bundle` falha com `spawn EPERM` em `beforeBuildCommand` (vite/esbuild).
 - Repeticao institucional do fluxo oficial em Windows quando build/emulacao/toolchains forem alterados.
 - Decisao final de governanca do workflow desktop dedicado (`push`/`pull_request` path-filtered, `workflow_dispatch`, `workflow_call` ou gate protegido).
 - Auditoria residual de UX para handlers async fora do endurecimento ja aplicado em abertura de projeto e salvamento no inspector.
@@ -103,6 +109,7 @@
 **Status:** IMPLEMENTADA NO EDITOR, CONGELADA ATE FECHAR VALIDACAO DO CORE
 
 - [x] NodeGraph UI agora persiste o grafo em `LogicComponent.graph` com roundtrip de serializacao.
+- [x] NodeGraph compilado para fragmentos C no pipeline SGDK/SNES para os nos MVP (`event_start`, `sprite_move`, `condition_overlap`, `action_sound`).
 - [x] RetroFX UI existente.
 - [x] RetroFX persiste configuracao no scene JSON e permanece `Experimental` enquanto nao exportar efeito real no pipeline.
 - [x] Testes frontend existentes e passando.
@@ -125,7 +132,7 @@
 1. Manter o CI baseline verde antes e depois de qualquer fix relevante.
 2. Tornar a validacao oficial upstream repetivel e institucional para mudancas sensiveis.
 3. Decidir se o workflow desktop dedicado permanece em `push`/`pull_request` path-filtered ou migra para gate manual/ambiente protegido.
-4. Auditar handlers async residuais fora de `App.tsx` e `InspectorPanel`.
+4. Consolidar diagnostico local (`diagnose-desktop-e2e.ps1 -SessionProbe`) sempre que houver falha de sessao WebDriver antes de classificar erro como regressao de codigo.
 5. So depois disso avaliar novas expansoes do desktop E2E sem contaminar o `ci.yml` comum.
 6. So depois disso destravar novas iteracoes de editor, ferramentas e targets futuros.
 
