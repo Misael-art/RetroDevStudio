@@ -25,6 +25,7 @@
 - Schema canonico de projeto/cena, fixtures dummy e testes Rust.
 - Build orchestration real por target (`megadrive` e `snes`) com erro explicito sem toolchain.
 - Emulacao integrada por Libretro real via FFI no Rust.
+- Callback de audio em batch no Libretro agora aceita batches reais sem crash e preserva o ultimo buffer descartavel do core.
 - Instalacao sob demanda de SGDK, PVSnesLib e cores Libretro oficiais no Windows.
 - Caminho SNES com staging de asset real e workspace compativel com `snes_rules`.
 - Baseline de CI com GitHub Actions para `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `cargo clippy -- -D warnings`, `cargo test --lib` e `npm test`.

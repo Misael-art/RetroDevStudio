@@ -82,6 +82,8 @@ pub struct EmulatorState {
     pub frame_size: FrameSize,
     pub pixel_format: PixelFormat,
     pub framebuffer: Vec<u8>,
+    pub audio_buffer: Vec<i16>,
+    pub last_audio_frames: usize,
     pub joypad: JoypadState,
     pub rom_path: String,
 }
@@ -97,6 +99,8 @@ impl Default for EmulatorState {
             },
             pixel_format: PixelFormat::Xrgb8888,
             framebuffer: vec![0u8; 320 * 224 * 4],
+            audio_buffer: Vec::new(),
+            last_audio_frames: 0,
             joypad: JoypadState::default(),
             rom_path: String::new(),
         }
@@ -532,6 +536,8 @@ impl EmulatorCore {
             pitch: 320 * 4,
         };
         state.framebuffer = vec![0u8; 320 * 224 * 4];
+        state.audio_buffer.clear();
+        state.last_audio_frames = 0;
         state.rom_path.clear();
         Ok(())
     }
@@ -562,6 +568,8 @@ fn reset_emulator_state(handle: &EmulatorHandle, rom_path: &Path) -> Result<(), 
         pitch: 320 * 4,
     };
     state.framebuffer = vec![0u8; 320 * 224 * 4];
+    state.audio_buffer.clear();
+    state.last_audio_frames = 0;
     state.rom_path = rom_path.to_string_lossy().to_string();
     Ok(())
 }
@@ -733,9 +741,30 @@ unsafe extern "C" fn retro_video_refresh_callback(
     });
 }
 
-unsafe extern "C" fn retro_audio_sample_callback(_left: i16, _right: i16) {}
+fn buffer_audio_samples(samples: &[i16], frames: usize) {
+    const MAX_AUDIO_SAMPLES: usize = 8192;
 
-unsafe extern "C" fn retro_audio_sample_batch_callback(_data: *const i16, frames: usize) -> usize {
+    let retained = samples.len().min(MAX_AUDIO_SAMPLES);
+    let retained_slice = &samples[samples.len().saturating_sub(retained)..];
+    let _ = with_active_emulator(|state| {
+        state.audio_buffer.clear();
+        state.audio_buffer.extend_from_slice(retained_slice);
+        state.last_audio_frames = frames;
+    });
+}
+
+unsafe extern "C" fn retro_audio_sample_callback(left: i16, right: i16) {
+    buffer_audio_samples(&[left, right], 1);
+}
+
+unsafe extern "C" fn retro_audio_sample_batch_callback(data: *const i16, frames: usize) -> usize {
+    if data.is_null() || frames == 0 {
+        return 0;
+    }
+
+    let sample_count = frames.saturating_mul(2);
+    let samples = unsafe { std::slice::from_raw_parts(data, sample_count) };
+    buffer_audio_samples(samples, frames);
     frames
 }
 
@@ -940,6 +969,12 @@ pub extern "C" fn retro_reset() {
 #[no_mangle]
 pub extern "C" fn retro_run() {
     let frame = FRAME_COUNTER.fetch_add(1, Ordering::SeqCst) as u8;
+    let audio_samples = [
+        frame as i16,
+        -(frame as i16),
+        frame.wrapping_add(1) as i16,
+        -((frame.wrapping_add(1)) as i16),
+    ];
 
     unsafe {
         if let Some(input_poll) = INPUT_POLL {
@@ -956,6 +991,12 @@ pub extern "C" fn retro_run() {
         }
         if let Some(video) = VIDEO {
             video(FRAMEBUFFER.as_ptr().cast::<c_void>(), 256, 224, 256 * 4);
+        }
+        if let Some(audio_batch) = AUDIO_BATCH {
+            audio_batch(audio_samples.as_ptr(), 2);
+        } else if let Some(audio) = AUDIO {
+            audio(audio_samples[0], audio_samples[1]);
+            audio(audio_samples[2], audio_samples[3]);
         }
     }
 }
@@ -1039,8 +1080,33 @@ pub extern "C" fn retro_run() {
         assert_eq!(size.height, 224);
         assert_eq!(pixel_format, PixelFormat::Xrgb8888);
         assert!(framebuffer.iter().any(|byte| *byte != 0));
+        {
+            let state = emulator.handle.lock().expect("lock emulator state");
+            assert_eq!(state.last_audio_frames, 2);
+            assert_eq!(state.audio_buffer, vec![0, 0, 1, -1]);
+        }
 
         emulator.stop().expect("stop emulator");
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn audio_sample_batch_callback_buffers_latest_audio_batch() {
+        let _serial = test_serial_guard();
+        let handle = new_emulator_handle();
+        install_active_emulator(&handle).expect("install active emulator");
+        let samples = [10i16, -10, 20, -20];
+
+        let accepted =
+            unsafe { retro_audio_sample_batch_callback(samples.as_ptr(), 2) };
+
+        assert_eq!(accepted, 2);
+        {
+            let state = handle.lock().expect("lock emulator state");
+            assert_eq!(state.last_audio_frames, 2);
+            assert_eq!(state.audio_buffer, samples);
+        }
+
+        clear_active_emulator();
     }
 }
