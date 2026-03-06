@@ -64,6 +64,7 @@ export default function ViewportPanel() {
     cancelHistoryCapture,
     activeTarget,
     emulPaused,
+    setEmulPaused,
   } = useEditorStore();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -90,6 +91,7 @@ export default function ViewportPanel() {
   const [gridSnap, setGridSnap] = useState(true);
   const [saveStateBusy, setSaveStateBusy] = useState(false);
   const [loadStateBusy, setLoadStateBusy] = useState(false);
+  const [stepBusy, setStepBusy] = useState(false);
 
   activeTabRef.current = activeViewportTab;
   pausedRef.current = emulPaused;
@@ -196,6 +198,63 @@ export default function ViewportPanel() {
       setLoadStateBusy(false);
     }
   }, [logMessage]);
+
+  const handlePause = useCallback(() => {
+    if (emulPaused) {
+      return;
+    }
+
+    setEmulPaused(true);
+    logMessage("info", "Emulador pausado.");
+  }, [emulPaused, logMessage, setEmulPaused]);
+
+  const handleResume = useCallback(() => {
+    if (!emulPaused) {
+      return;
+    }
+
+    setEmulPaused(false);
+    logMessage("info", "Emulador retomado.");
+  }, [emulPaused, logMessage, setEmulPaused]);
+
+  const handleStepFrame = useCallback(async () => {
+    if (!emulPaused || stepBusy) {
+      return;
+    }
+
+    setStepBusy(true);
+    let stopStepLoop: (() => void) | null = null;
+    let resolved = false;
+
+    try {
+      stopStepLoop = await startFrameLoop(
+        (payload) => {
+          renderFrame(payload);
+          if (resolved) {
+            return;
+          }
+          resolved = true;
+          stopStepLoop?.();
+          stopStepLoop = null;
+          setStepBusy(false);
+          logMessage("info", "Frame unico executado.");
+        },
+        (message) => {
+          if (resolved) {
+            return;
+          }
+          resolved = true;
+          setStepBusy(false);
+          logMessage("error", `Falha ao executar frame unico: ${message}`);
+        }
+      );
+    } catch (error: unknown) {
+      if (!resolved) {
+        setStepBusy(false);
+        logMessage("error", `Falha ao iniciar frame unico: ${describeError(error)}`);
+      }
+    }
+  }, [emulPaused, logMessage, renderFrame, startFrameLoop, stepBusy]);
 
   useEffect(() => {
     if (activeViewportTab !== "game") {
@@ -615,6 +674,33 @@ export default function ViewportPanel() {
               tabIndex={0}
             />
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handlePause()}
+                disabled={emulPaused}
+                data-testid="viewport-pause"
+                className="rounded border border-[#fab387]/40 bg-[#fab387]/10 px-2 py-1 text-[10px] font-semibold text-[#fab387] transition-colors hover:bg-[#fab387]/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Pausar
+              </button>
+              <button
+                type="button"
+                onClick={() => handleResume()}
+                disabled={!emulPaused}
+                data-testid="viewport-resume"
+                className="rounded border border-[#a6e3a1]/40 bg-[#a6e3a1]/10 px-2 py-1 text-[10px] font-semibold text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Retomar
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleStepFrame()}
+                disabled={!emulPaused || stepBusy}
+                data-testid="viewport-step-frame"
+                className="rounded border border-[#f9e2af]/40 bg-[#f9e2af]/10 px-2 py-1 text-[10px] font-semibold text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {stepBusy ? "Step..." : "Step 1 frame"}
+              </button>
               <button
                 type="button"
                 onClick={() => void handleSaveState()}

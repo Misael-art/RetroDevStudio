@@ -559,4 +559,49 @@ describe("App build flow", () => {
         .consoleEntries.some((entry) => entry.message === "[Emulador] Save state restaurado.")
     ).toBe(true);
   });
+
+  it("supports pause, single-frame step, and resume from the game viewport", async () => {
+    await act(async () => {
+      useEditorStore.setState({ activeViewportTab: "game" });
+      await flush();
+      await flush();
+    });
+
+    const pauseButton = container.querySelector("[data-testid='viewport-pause']");
+    const resumeButton = container.querySelector("[data-testid='viewport-resume']");
+    const stepButton = container.querySelector("[data-testid='viewport-step-frame']");
+
+    expect(pauseButton).toBeInstanceOf(HTMLButtonElement);
+    expect(resumeButton).toBeInstanceOf(HTMLButtonElement);
+    expect(stepButton).toBeInstanceOf(HTMLButtonElement);
+    expect((stepButton as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      (pauseButton as HTMLButtonElement).click();
+      await flush();
+    });
+
+    expect(useEditorStore.getState().emulPaused).toBe(true);
+    expect((stepButton as HTMLButtonElement).disabled).toBe(false);
+
+    await act(async () => {
+      (stepButton as HTMLButtonElement).click();
+      await flush();
+    });
+
+    expect(
+      useEditorStore
+        .getState()
+        .consoleEntries.some((entry) => entry.message === "Frame unico executado.")
+    ).toBe(true);
+
+    await act(async () => {
+      (resumeButton as HTMLButtonElement).click();
+      await flush();
+      await flush();
+    });
+
+    expect(useEditorStore.getState().emulPaused).toBe(false);
+    expect(mocks.startFrameLoop).toHaveBeenCalledTimes(3);
+  });
 });

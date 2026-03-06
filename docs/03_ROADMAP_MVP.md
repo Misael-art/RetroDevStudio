@@ -45,6 +45,7 @@
 - NodeGraph agora persiste nos componentes de logica via `LogicComponent.graph`, com roundtrip de serializacao no frontend e autosave no JSON da cena.
 - NodeGraph agora compila os nos basicos persistidos para C no pipeline canonico, com emissao integrada no game loop SGDK/SNES para `event_start`, `sprite_move`, `condition_overlap` e `action_sound`.
 - Save states basicos do emulador agora usam serializacao real do Libretro com slot em memoria, IPC dedicado e controles de salvar/carregar no `Game View`.
+- `Game View` agora expoe `pause`, `resume` e `step 1 frame` no proprio painel, reaproveitando `emulator_run_frame` e o loop canonico existente sem pipeline paralelo.
 - Features ainda parciais agora ficam explicitamente marcadas como `Experimental` na UI para nao mentir sobre prontidao.
 
 ### Ainda em hardening
