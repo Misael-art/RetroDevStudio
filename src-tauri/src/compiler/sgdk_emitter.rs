@@ -1,8 +1,9 @@
 use crate::compiler::ast_generator::{
     collect_bgm_tracks, collect_collision_checks, collect_logic_sound_names,
-    collect_physics_applications, collect_sfx_resources, collect_tilemap_assets,
-    AabbCollisionCheck, AstNode, AstOutput, LogicCollisionTarget, LogicOp, LogicPositionSource,
-    LogicScript, PhysicsApplication, SpriteAsset, TilemapAsset,
+    collect_parallax_layers, collect_physics_applications, collect_raster_lines,
+    collect_sfx_resources, collect_tilemap_assets, AabbCollisionCheck, AstNode, AstOutput,
+    LogicCollisionTarget, LogicOp, LogicPositionSource, LogicScript, ParallaxLayerConfig,
+    PhysicsApplication, RasterLineConfig, SpriteAsset, TilemapAsset,
 };
 
 #[derive(Debug)]
@@ -23,6 +24,8 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     let collision_checks = collect_collision_checks(ast);
     let physics_applications = collect_physics_applications(ast);
     let tilemap_assets = collect_tilemap_assets(ast);
+    let parallax_layers = collect_parallax_layers(ast);
+    let raster_lines = collect_raster_lines(ast);
     let has_logic_overlap = ast.logic_scripts.iter().any(script_uses_overlap);
     let sfx_resources = collect_sfx_resources(ast);
     let bgm_tracks = collect_bgm_tracks(ast);
@@ -56,6 +59,14 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     if !physics_applications.is_empty() {
         out.push('\n');
     }
+    if !parallax_layers.is_empty() || !raster_lines.is_empty() {
+        out.push_str("static s16 retro_hscroll_table[224];\n");
+        for (index, _) in parallax_layers.iter().enumerate() {
+            out.push_str(&format!("static s16 retro_parallax_offset_{}_x = 0;\n", index));
+            out.push_str(&format!("static s16 retro_parallax_offset_{}_y = 0;\n", index));
+        }
+        out.push('\n');
+    }
     if !collision_checks.is_empty() || has_logic_overlap {
         out.push_str(render_aabb_helper());
         out.push('\n');
@@ -70,6 +81,7 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     }
 
     let mut tilemap_draw_index = 0usize;
+    let mut retrofx_initialized = false;
     for node in &ast.nodes {
         match node {
             AstNode::SpriteSystemInit => {
@@ -148,6 +160,26 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
                     ));
                 }
                 tilemap_draw_index += 1;
+            }
+            AstNode::SetupParallax { layers } => {
+                if !retrofx_initialized {
+                    out.push_str("    VDP_setScrollingMode(HSCROLL_LINE, VSCROLL_PLANE);\n");
+                    retrofx_initialized = true;
+                }
+                out.push_str(&format!(
+                    "    // RetroFX parallax configured for {} layer(s)\n",
+                    layers.len()
+                ));
+            }
+            AstNode::SetupRasterEffect { lines } => {
+                if !retrofx_initialized {
+                    out.push_str("    VDP_setScrollingMode(HSCROLL_LINE, VSCROLL_PLANE);\n");
+                    retrofx_initialized = true;
+                }
+                out.push_str(&format!(
+                    "    // RetroFX raster configured for {} line(s)\n",
+                    lines.len()
+                ));
             }
             AstNode::InitAudio { sfx_resources } => {
                 for (resource_name, _) in sfx_resources {
@@ -249,6 +281,7 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
             }
             AstNode::SpriteUpdate => {
                 render_logic_scripts(&mut out, &ast.logic_scripts, 8);
+                render_retrofx_frame(&mut out, &parallax_layers, &raster_lines, 8);
                 out.push_str("        SPR_update();\n");
             }
             AstNode::VSync => {
@@ -457,6 +490,74 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                 ));
             }
         }
+    }
+}
+
+fn render_retrofx_frame(
+    out: &mut String,
+    parallax_layers: &[ParallaxLayerConfig],
+    raster_lines: &[RasterLineConfig],
+    indent: usize,
+) {
+    if parallax_layers.is_empty() && raster_lines.is_empty() {
+        return;
+    }
+
+    let indent_str = " ".repeat(indent);
+    for (index, layer) in parallax_layers.iter().enumerate() {
+        out.push_str(&format!(
+            "{indent}retro_parallax_offset_{index}_x += {speed_x};\n",
+            indent = indent_str,
+            index = index,
+            speed_x = layer.speed_x
+        ));
+        out.push_str(&format!(
+            "{indent}retro_parallax_offset_{index}_y += {speed_y};\n",
+            indent = indent_str,
+            index = index,
+            speed_y = layer.speed_y
+        ));
+    }
+
+    out.push_str(&format!(
+        "{indent}for (u16 retro_line = 0; retro_line < 224; retro_line++) {{\n",
+        indent = indent_str
+    ));
+    out.push_str(&format!(
+        "{indent}    retro_hscroll_table[retro_line] = 0;\n",
+        indent = indent_str
+    ));
+    for (index, _) in parallax_layers.iter().enumerate() {
+        let start = (index * 224) / parallax_layers.len();
+        let end = ((index + 1) * 224) / parallax_layers.len();
+        out.push_str(&format!(
+            "{indent}    if (retro_line >= {start} && retro_line < {end}) retro_hscroll_table[retro_line] = -retro_parallax_offset_{index}_x;\n",
+            indent = indent_str,
+            start = start,
+            end = end,
+            index = index
+        ));
+    }
+    out.push_str(&format!("{indent}}}\n", indent = indent_str));
+
+    for line in raster_lines {
+        out.push_str(&format!(
+            "{indent}retro_hscroll_table[{scanline}] += {offset_x};\n",
+            indent = indent_str,
+            scanline = line.scanline,
+            offset_x = line.offset_x
+        ));
+    }
+
+    out.push_str(&format!(
+        "{indent}VDP_setHorizontalScrollLine(BG_A, 0, retro_hscroll_table, 224, DMA);\n",
+        indent = indent_str
+    ));
+    if parallax_layers.first().is_some_and(|layer| layer.speed_y != 0) {
+        out.push_str(&format!(
+            "{indent}VDP_setVerticalScroll(BG_A, retro_parallax_offset_0_y);\n",
+            indent = indent_str
+        ));
     }
 }
 
@@ -811,6 +912,51 @@ mod tests {
         assert!(output
             .resources_res
             .contains("XGM stage_theme \"assets/audio/stage_theme.xgm\""));
+    }
+
+    #[test]
+    fn main_c_emits_retrofx_scroll_setup_and_frame_updates() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::SetupParallax {
+                    layers: vec![ParallaxLayerConfig {
+                        layer_name: "BG_A".to_string(),
+                        speed_x: 2,
+                        speed_y: 1,
+                    }],
+                },
+                AstNode::SetupRasterEffect {
+                    lines: vec![RasterLineConfig {
+                        scanline: 128,
+                        offset_x: 6,
+                    }],
+                },
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: Vec::new(),
+        };
+
+        let output = emit_sgdk(&ast, "RetroFX Demo");
+
+        assert!(output.main_c.contains("static s16 retro_hscroll_table[224];"));
+        assert!(output
+            .main_c
+            .contains("VDP_setScrollingMode(HSCROLL_LINE, VSCROLL_PLANE);"));
+        assert!(output.main_c.contains("retro_parallax_offset_0_x += 2;"));
+        assert!(output.main_c.contains("retro_parallax_offset_0_y += 1;"));
+        assert!(output
+            .main_c
+            .contains("retro_hscroll_table[128] += 6;"));
+        assert!(output.main_c.contains(
+            "VDP_setHorizontalScrollLine(BG_A, 0, retro_hscroll_table, 224, DMA);"
+        ));
+        assert!(output
+            .main_c
+            .contains("VDP_setVerticalScroll(BG_A, retro_parallax_offset_0_y);"));
     }
 
     #[test]

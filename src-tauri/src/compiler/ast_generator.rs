@@ -41,6 +41,12 @@ pub enum AstNode {
         scroll_x: i32,
         scroll_y: i32,
     },
+    SetupParallax {
+        layers: Vec<ParallaxLayerConfig>,
+    },
+    SetupRasterEffect {
+        lines: Vec<RasterLineConfig>,
+    },
     InitAudio {
         sfx_resources: Vec<(String, String)>,
     },
@@ -175,6 +181,19 @@ pub struct PhysicsApplication {
     pub max_velocity_y: i32,
     pub friction: i32,
     pub bounce: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParallaxLayerConfig {
+    pub layer_name: String,
+    pub speed_x: i32,
+    pub speed_y: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RasterLineConfig {
+    pub scanline: u32,
+    pub offset_x: i32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -396,6 +415,16 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
         }
     }
 
+    let parallax_layers = enabled_parallax_layers(scene);
+    let raster_lines = enabled_raster_lines(scene);
+    if !parallax_layers.is_empty() {
+        nodes.push(AstNode::SetupParallax {
+            layers: parallax_layers,
+        });
+    }
+    if !raster_lines.is_empty() {
+        nodes.push(AstNode::SetupRasterEffect { lines: raster_lines });
+    }
     if !audio_sfx_resources.is_empty() {
         nodes.push(AstNode::InitAudio {
             sfx_resources: audio_sfx_resources.into_iter().collect(),
@@ -562,6 +591,43 @@ fn register_audio_nodes(
     };
 
     *bgm_track = Some((resource_name, asset_path.to_string()));
+}
+
+fn enabled_parallax_layers(scene: &Scene) -> Vec<ParallaxLayerConfig> {
+    scene
+        .retrofx
+        .as_ref()
+        .map(|retrofx| {
+            retrofx
+                .parallax_layers
+                .iter()
+                .filter(|layer| layer.enabled)
+                .map(|layer| ParallaxLayerConfig {
+                    layer_name: layer.name.clone(),
+                    speed_x: layer.speed_x,
+                    speed_y: layer.speed_y,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn enabled_raster_lines(scene: &Scene) -> Vec<RasterLineConfig> {
+    scene
+        .retrofx
+        .as_ref()
+        .map(|retrofx| {
+            retrofx
+                .raster_lines
+                .iter()
+                .filter(|line| line.enabled)
+                .map(|line| RasterLineConfig {
+                    scanline: line.scanline.min(223),
+                    offset_x: line.offset_x,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn register_input_nodes(
@@ -921,6 +987,28 @@ pub fn collect_sfx_resources(ast: &AstOutput) -> Vec<(String, String)> {
         .iter()
         .filter_map(|node| match node {
             AstNode::InitAudio { sfx_resources } => Some(sfx_resources.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+pub fn collect_parallax_layers(ast: &AstOutput) -> Vec<ParallaxLayerConfig> {
+    ast.nodes
+        .iter()
+        .filter_map(|node| match node {
+            AstNode::SetupParallax { layers } => Some(layers.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+pub fn collect_raster_lines(ast: &AstOutput) -> Vec<RasterLineConfig> {
+    ast.nodes
+        .iter()
+        .filter_map(|node| match node {
+            AstNode::SetupRasterEffect { lines } => Some(lines.clone()),
             _ => None,
         })
         .flatten()
@@ -1629,6 +1717,103 @@ mod tests {
                 asset_path,
             } if resource_name == "stage_theme"
                 && asset_path == "assets/audio/stage_theme.xgm"
+        )));
+    }
+
+    #[test]
+    fn generate_ast_emits_retrofx_nodes_for_enabled_layers_and_lines() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
+            name: "RetroFX Demo".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+        };
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: Vec::new(),
+            palettes: Vec::new(),
+            retrofx: Some(crate::ugdm::entities::RetroFXConfig {
+                parallax_layers: vec![
+                    crate::ugdm::entities::RetroFXParallaxLayer {
+                        id: "p1".to_string(),
+                        name: "BG_A".to_string(),
+                        speed_x: 2,
+                        speed_y: 1,
+                        enabled: true,
+                    },
+                    crate::ugdm::entities::RetroFXParallaxLayer {
+                        id: "p2".to_string(),
+                        name: "BG_B".to_string(),
+                        speed_x: 4,
+                        speed_y: 0,
+                        enabled: false,
+                    },
+                ],
+                raster_lines: vec![
+                    crate::ugdm::entities::RetroFXRasterLine {
+                        id: "r1".to_string(),
+                        scanline: 128,
+                        offset_x: 6,
+                        enabled: true,
+                    },
+                    crate::ugdm::entities::RetroFXRasterLine {
+                        id: "r2".to_string(),
+                        scanline: 260,
+                        offset_x: 12,
+                        enabled: true,
+                    },
+                ],
+            }),
+        };
+
+        let ast = generate_ast(&project, &scene);
+
+        assert_eq!(
+            collect_parallax_layers(&ast),
+            vec![ParallaxLayerConfig {
+                layer_name: "BG_A".to_string(),
+                speed_x: 2,
+                speed_y: 1,
+            }]
+        );
+        assert_eq!(
+            collect_raster_lines(&ast),
+            vec![
+                RasterLineConfig {
+                    scanline: 128,
+                    offset_x: 6,
+                },
+                RasterLineConfig {
+                    scanline: 223,
+                    offset_x: 12,
+                },
+            ]
+        );
+        assert!(ast.nodes.iter().any(|node| matches!(
+            node,
+            AstNode::SetupParallax { layers }
+                if layers.len() == 1
+                    && layers[0].layer_name == "BG_A"
+                    && layers[0].speed_x == 2
+                    && layers[0].speed_y == 1
+        )));
+        assert!(ast.nodes.iter().any(|node| matches!(
+            node,
+            AstNode::SetupRasterEffect { lines }
+                if lines.len() == 2
+                    && lines[0].scanline == 128
+                    && lines[1].scanline == 223
         )));
     }
 

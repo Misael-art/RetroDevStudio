@@ -41,7 +41,7 @@
 - Resolucao de prefab no pipeline canonico com merge de entidades antes de validacao/build/codegen.
 - Deep Profiler destravado na UI e conectado ao backend real, permanecendo `Experimental` ate validacao com ROM real.
 - Asset Extractor destravado na UI e conectado ao backend real, permanecendo `Experimental` ate validar extracao ponta a ponta com ROM real.
-- RetroFX agora persiste configuracao de parallax/raster no scene JSON e o designer foi reabilitado, permanecendo `Experimental` ate emissao real no build.
+- RetroFX agora persiste configuracao de parallax/raster no scene JSON, o designer foi reabilitado e o pipeline SGDK/SNES passou a emitir scroll/parallax real, permanecendo `Experimental` ate validacao com ROM real.
 - NodeGraph agora persiste nos componentes de logica via `LogicComponent.graph`, com roundtrip de serializacao no frontend e autosave no JSON da cena.
 - NodeGraph agora compila os nos basicos persistidos para C no pipeline canonico, com emissao integrada no game loop SGDK/SNES para `event_start`, `sprite_move`, `condition_overlap` e `action_sound`.
 - Save states basicos do emulador agora usam serializacao real do Libretro com slot em memoria, IPC dedicado e controles de salvar/carregar no `Game View`.
@@ -120,7 +120,7 @@
 - [x] NodeGraph UI agora persiste o grafo em `LogicComponent.graph` com roundtrip de serializacao.
 - [x] NodeGraph compilado para fragmentos C no pipeline SGDK/SNES para os nos MVP (`event_start`, `sprite_move`, `condition_overlap`, `action_sound`).
 - [x] RetroFX UI existente.
-- [x] RetroFX persiste configuracao no scene JSON e permanece `Experimental` enquanto nao exportar efeito real no pipeline.
+- [x] RetroFX persiste configuracao no scene JSON, exporta parallax/raster real no pipeline SGDK/SNES e permanece `Experimental` ate validar com ROM real.
 - [x] Testes frontend existentes e passando.
 - [ ] Retomar evolucao apenas depois que o hardening do core e a cobertura desktop multi-target estiverem estabilizados.
 
