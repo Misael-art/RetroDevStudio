@@ -99,6 +99,14 @@ function ExperimentalNotice({ summary }: { summary: string }) {
   );
 }
 
+function HeuristicNotice({ summary }: { summary: string }) {
+  return (
+    <div className="rounded border border-[#89b4fa] bg-[#181825] p-2 text-[10px] leading-tight text-[#89b4fa]">
+      {summary}
+    </div>
+  );
+}
+
 function PatchStudio() {
   const { logMessage } = useEditorStore();
   const [mode, setMode] = useState<"create" | "apply">("create");
@@ -255,7 +263,7 @@ function DeepProfiler() {
 
   return (
     <div className="flex flex-col gap-3 p-3">
-      <ExperimentalNotice summary="Fluxo conectado ao backend real. Manter badge Experimental ate validar o relatorio com ROM real ponta a ponta." />
+      <HeuristicNotice summary="Analise heuristica - resultados podem variar por ROM." />
 
       <div className="flex flex-col gap-2">
         <PathField
@@ -784,7 +792,7 @@ type ToolTab = "patch" | "profiler" | "extractor" | "setup" | "memory";
 const TOOL_TABS: { id: ToolTab; label: string; icon: string; experimental?: boolean }[] = [
   { id: "setup", label: "Runtime Setup", icon: "RD" },
   { id: "patch", label: "Patch Studio", icon: "PT" },
-  { id: "profiler", label: "Deep Profiler", icon: "DP", experimental: true },
+  { id: "profiler", label: "Deep Profiler", icon: "DP" },
   { id: "extractor", label: "Asset Extractor", icon: "AE", experimental: true },
   { id: "memory", label: "Memory Viewer", icon: "MV", experimental: true },
 ];

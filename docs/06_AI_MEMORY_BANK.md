@@ -1,6 +1,6 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
-**Ultima Atualizacao:** 2026-03-06
-**Ultima sessao:** 2026-03-06 (Codex - Sessao 47: bloco H/I concluido com NodeGraph expandido e audio real no Game View)
+**Ultima Atualizacao:** 2026-03-07
+**Ultima sessao:** 2026-03-07 (Codex - Sessao 48: onda J concluida com hardening de inspector/ferramentas e badge Experimental revisado)
 **Fase Atual:** Expansao do pipeline canonico apos hardening do MVP (Build -> ROM -> Emulacao validado em Windows com upstream real; desktop E2E multi-target validado localmente e em runner GitHub/Windows real; build/codegen e runtime agora cobrem Physics, Audio, RetroFX e NodeGraph expandido, com audio frontend real sem abrir pipeline paralelo)
 **Branch sugerida:** `feat/<tema>` para trabalho paralelo; usar `main` apenas quando o usuario pedir edicao direta no workspace atual
 
@@ -16,6 +16,16 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-07 - sessao 48):**
+  - Onda J concluida: J1-J5.
+  - J1 fechou as lacunas do Inspector: Physics, Audio e Input agora sao editaveis no painel canonico, `LogicComponent` ganhou resumo read-only do grafo e os patches do editor passaram a suportar caminhos aninhados como `physics.max_velocity.x` sem pipeline paralelo.
+  - J2 endureceu o `Deep Profiler`: a deteccao de SAT deixou de depender de offsets fixos e passou a escolher candidatos por scoring adaptativo, reaproveitando parsing plausivel de sprites e cobrindo o novo fluxo com fixtures Rust dedicadas.
+  - J3 expandiu o `Asset Extractor`: o backend/IPC/UI agora aceitam `bpp_mode` (`auto`, `2bpp`, `4bpp`), com autodeteccao heuristica de tiles 2bpp e decode canonico dedicado para esse formato.
+  - J4 otimizou o `Patch Studio`: `create_bps` passou a emitir `SourceCopy` quando encontra runs reaproveitaveis na ROM original, reduzindo o tamanho de patches sem alterar o caminho canonico de apply.
+  - J5 concluiu o hardening experimental da onda: o `Deep Profiler` perdeu o badge `Experimental`, ficou com aviso heuristico funcional na UI e os testes Rust do mock core foram endurecidos para aguardar a DLL ficar carregavel antes de executar a bateria canonica.
+  - Os commits desta onda foram `ed14bdd` (`fix: harden mock core library loading`), `1384848` (`feat: expand inspector component editing`), `15df9dd` (`feat: improve deep profiler sat detection`), `352f454` (`feat: add auto bpp asset extraction`) e `6ea3f07` (`feat: optimize bps patch creation`), seguidos do fechamento documental/badge desta sessao.
+  - O baseline permaneceu verde ao final do checkpoint da onda com `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo clippy -- -D warnings` e `cargo test --lib -- --nocapture`.
 
 * **O que acabou de acontecer (2026-03-06 - sessao 47):**
   - H1 foi concluida no compilador do NodeGraph: o no `sprite_anim` agora resolve `target`/`anim` contra as `AnimationDef` do sprite canonico e reaproveita `AstNode::SetAnimation` para chegar aos emitters SGDK/SNES sem nova trilha de animacao.
@@ -469,9 +479,9 @@
   - GitHub Actions `Desktop E2E` (`22606643935`) -> OK em `windows-latest`, com `Run Mega Drive desktop smoke` e `Run SNES desktop smoke` ambos verdes.
 
 * **Proximo passo imediato:**
-  1. Revalidar institucionalmente o fluxo expandido `Build -> ROM -> Emulacao` cobrindo NodeGraph runtime (`sprite_anim`, `scroll_tilemap`, `move_camera`, `logic_and`) e audio do `Game View` com ROM real, sem criar harness paralelo fora dos gates canonicos.
-  2. Consolidar cobertura de regressao para sincronismo A/V do `emulator://audio`, scroll/camera em ambos os emitters e follow de `CameraComponent`, reaproveitando os testes e fixtures ja canonicos do projeto.
-  3. Preservar `entry_scene`, `scene_path` ativo, `retrofx` persistido, `LogicComponent.graph` e o fluxo `emulator_run_frame` como fontes autoritativas de runtime/build, sempre reexecutando os gates canonicos e os fluxos reais aplicaveis quando build/emulacao forem alterados.
+  1. Executar K1 na onda K: adicionar verificacao de distribuicao de sprites por scanline em `md_profile.rs` e `snes_profile.rs`, expondo `scanline_sprite_peak`/`scanline_sprite_limit` no `HwStatus` com warnings/fatais por target.
+  2. Na sequencia, fechar K2 e K3 no mesmo trilho canonico de hardware, adicionando estimativa de DMA por frame e rastreamento basico de canais de audio sem duplicar calculos fora dos profiles existentes.
+  3. Preservar o baseline institucional verde e continuar atualizando `docs/03_ROADMAP_MVP.md` e este Memory Bank a cada onda concluida ou checkpoint de contexto.
 
 ---
 

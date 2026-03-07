@@ -762,6 +762,13 @@ mod tests {
             );
         }
 
+        for _ in 0..20 {
+            if unsafe { libloading::Library::new(&output_path) }.is_ok() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
         output_path
     }
 

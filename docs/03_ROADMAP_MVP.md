@@ -39,7 +39,7 @@
 - Undo/redo do editor com atalhos globais, pilha limitada e agrupamento de drag no viewport.
 - Grid snap de 8px no Scene View com toggle visual e atalho `G`.
 - Resolucao de prefab no pipeline canonico com merge de entidades antes de validacao/build/codegen.
-- Deep Profiler destravado na UI e conectado ao backend real, agora com deteccao adaptativa de SAT por scoring de candidatos em vez de offsets fixos, permanecendo `Experimental` ate validacao com ROM real.
+- Deep Profiler destravado na UI e conectado ao backend real, agora com deteccao adaptativa de SAT por scoring de candidatos em vez de offsets fixos e aviso heuristico funcional sem badge `Experimental`.
 - Asset Extractor destravado na UI e conectado ao backend real, agora com modos `auto`/`2bpp`/`4bpp` e autodeteccao heuristica para tiles 2bpp, permanecendo `Experimental` ate validar extracao ponta a ponta com ROM real.
 - RetroFX agora persiste configuracao de parallax/raster no scene JSON, o designer foi reabilitado e o pipeline SGDK/SNES passou a emitir scroll/parallax real, permanecendo `Experimental` ate validacao com ROM real.
 - NodeGraph agora persiste nos componentes de logica via `LogicComponent.graph`, com roundtrip de serializacao no frontend e autosave no JSON da cena.
@@ -134,7 +134,7 @@
 **Status:** IMPLEMENTADA NO EDITOR, CONGELADA ATE FECHAR VALIDACAO DO CORE
 
 - [x] Patch Studio.
-- [x] Deep Profiler visivel, mas travado como `Experimental` ate gerar relatorio real.
+- [x] Deep Profiler visivel, conectado ao backend real, com deteccao adaptativa de SAT e aviso heuristico sem badge `Experimental`.
 - [x] Asset Extractor visivel, conectado ao backend real e mantido como `Experimental` ate validar extracao ponta a ponta com ROM real.
 - [ ] Retomar expansao apenas depois que o pipeline oficial validado estiver institucionalizado em workflow repetivel.
 
