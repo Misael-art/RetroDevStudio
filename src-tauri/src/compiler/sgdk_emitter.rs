@@ -1,5 +1,6 @@
 use crate::compiler::ast_generator::{
-    collect_collision_checks, collect_tilemap_assets, AabbCollisionCheck, AstNode, AstOutput,
+    collect_collision_checks, collect_physics_applications, collect_tilemap_assets,
+    AabbCollisionCheck, AstNode, AstOutput, PhysicsApplication,
     LogicCollisionTarget, LogicOp, LogicPositionSource, LogicScript, SpriteAsset, TilemapAsset,
 };
 
@@ -19,6 +20,7 @@ pub fn emit_sgdk(ast: &AstOutput, project_name: &str) -> EmitOutput {
 fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     let mut out = String::new();
     let collision_checks = collect_collision_checks(ast);
+    let physics_applications = collect_physics_applications(ast);
     let tilemap_assets = collect_tilemap_assets(ast);
     let has_logic_overlap = ast.logic_scripts.iter().any(script_uses_overlap);
     let include_resources = !ast.sprite_assets.is_empty() || !tilemap_assets.is_empty();
@@ -38,6 +40,13 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
         out.push_str(&format!("static Sprite* spr_{};\n", asset.resource_name));
     }
     if !ast.sprite_assets.is_empty() {
+        out.push('\n');
+    }
+    for physics in &physics_applications {
+        out.push_str(&format!("static s32 {}_vel_x = 0;\n", physics.var_name));
+        out.push_str(&format!("static s32 {}_vel_y = 0;\n", physics.var_name));
+    }
+    if !physics_applications.is_empty() {
         out.push('\n');
     }
     if !collision_checks.is_empty() || has_logic_overlap {
@@ -170,6 +179,26 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
                     },
                 );
             }
+            AstNode::ApplyPhysics {
+                var_name,
+                gravity,
+                gravity_strength,
+                max_velocity_x,
+                max_velocity_y,
+                friction,
+                bounce,
+            } => render_apply_physics(
+                &mut out,
+                &PhysicsApplication {
+                    var_name: var_name.clone(),
+                    gravity: *gravity,
+                    gravity_strength: *gravity_strength,
+                    max_velocity_x: *max_velocity_x,
+                    max_velocity_y: *max_velocity_y,
+                    friction: *friction,
+                    bounce: *bounce,
+                },
+            ),
             AstNode::SetAnimation {
                 var_name,
                 anim_index,
@@ -258,6 +287,85 @@ fn render_aabb_helper() -> &'static str {
         && left_y < (right_y + (s16)right_h)\n\
         && (left_y + (s16)left_h) > right_y;\n\
 }\n"
+}
+
+fn render_apply_physics(out: &mut String, physics: &PhysicsApplication) {
+    let next_x_var = format!("{}_next_x", physics.var_name);
+    let next_y_var = format!("{}_next_y", physics.var_name);
+
+    if physics.gravity {
+        out.push_str(&format!(
+            "        {var_name}_vel_y += {gravity_strength};\n",
+            var_name = physics.var_name,
+            gravity_strength = physics.gravity_strength
+        ));
+    }
+    out.push_str(&format!(
+        "        if ({var_name}_vel_x > {max_velocity_x}) {var_name}_vel_x = {max_velocity_x};\n",
+        var_name = physics.var_name,
+        max_velocity_x = physics.max_velocity_x
+    ));
+    out.push_str(&format!(
+        "        if ({var_name}_vel_x < -{max_velocity_x}) {var_name}_vel_x = -{max_velocity_x};\n",
+        var_name = physics.var_name,
+        max_velocity_x = physics.max_velocity_x
+    ));
+    out.push_str(&format!(
+        "        if ({var_name}_vel_y > {max_velocity_y}) {var_name}_vel_y = {max_velocity_y};\n",
+        var_name = physics.var_name,
+        max_velocity_y = physics.max_velocity_y
+    ));
+    out.push_str(&format!(
+        "        if ({var_name}_vel_y < -{max_velocity_y}) {var_name}_vel_y = -{max_velocity_y};\n",
+        var_name = physics.var_name,
+        max_velocity_y = physics.max_velocity_y
+    ));
+
+    if physics.friction > 0 {
+        out.push_str(&format!(
+            "        if ({var_name}_vel_x > 0) {{ {var_name}_vel_x -= {friction}; if ({var_name}_vel_x < 0) {var_name}_vel_x = 0; }}\n",
+            var_name = physics.var_name,
+            friction = physics.friction
+        ));
+        out.push_str(&format!(
+            "        if ({var_name}_vel_x < 0) {{ {var_name}_vel_x += {friction}; if ({var_name}_vel_x > 0) {var_name}_vel_x = 0; }}\n",
+            var_name = physics.var_name,
+            friction = physics.friction
+        ));
+    }
+
+    out.push_str(&format!(
+        "        s16 {next_x_var} = SPR_getX({var_name}) + ({var_name}_vel_x / 16);\n",
+        next_x_var = next_x_var,
+        var_name = physics.var_name
+    ));
+    out.push_str(&format!(
+        "        s16 {next_y_var} = SPR_getY({var_name}) + ({var_name}_vel_y / 16);\n",
+        next_y_var = next_y_var,
+        var_name = physics.var_name
+    ));
+
+    if physics.bounce > 0 {
+        out.push_str(&format!(
+            "        if ({next_x_var} < 0) {{ {next_x_var} = 0; {var_name}_vel_x = -(({var_name}_vel_x * {bounce}) / 100); }}\n",
+            next_x_var = next_x_var,
+            var_name = physics.var_name,
+            bounce = physics.bounce
+        ));
+        out.push_str(&format!(
+            "        if ({next_y_var} < 0) {{ {next_y_var} = 0; {var_name}_vel_y = -(({var_name}_vel_y * {bounce}) / 100); }}\n",
+            next_y_var = next_y_var,
+            var_name = physics.var_name,
+            bounce = physics.bounce
+        ));
+    }
+
+    out.push_str(&format!(
+        "        SPR_setPosition({var_name}, {next_x_var}, {next_y_var});\n",
+        var_name = physics.var_name,
+        next_x_var = next_x_var,
+        next_y_var = next_y_var
+    ));
 }
 
 fn render_logic_scripts(out: &mut String, scripts: &[LogicScript], indent: usize) {
@@ -730,6 +838,50 @@ mod tests {
             .contains("u16 input_player_jump = joypad_1_state & BUTTON_A;"));
         assert!(output.main_c.contains("// Input: player.move_left"));
         assert!(output.main_c.contains("// Input: player.jump"));
+    }
+
+    #[test]
+    fn main_c_emits_apply_physics_with_velocity_state() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::SpawnSprite {
+                    var_name: "spr_hero".to_string(),
+                    resource_name: "hero".to_string(),
+                    x: 16,
+                    y: 24,
+                    priority_high: true,
+                },
+                AstNode::GameLoopBegin,
+                AstNode::ApplyPhysics {
+                    var_name: "spr_hero".to_string(),
+                    gravity: true,
+                    gravity_strength: 6,
+                    max_velocity_x: 48,
+                    max_velocity_y: 96,
+                    friction: 2,
+                    bounce: 35,
+                },
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: vec![sprite_asset_with_animation(6, true)],
+            logic_scripts: Vec::new(),
+        };
+
+        let output = emit_sgdk(&ast, "Physics Demo");
+
+        assert!(output.main_c.contains("static s32 spr_hero_vel_x = 0;"));
+        assert!(output.main_c.contains("static s32 spr_hero_vel_y = 0;"));
+        assert!(output.main_c.contains("spr_hero_vel_y += 6;"));
+        assert!(output.main_c.contains("if (spr_hero_vel_x > 48) spr_hero_vel_x = 48;"));
+        assert!(output.main_c.contains("if (spr_hero_vel_y > 96) spr_hero_vel_y = 96;"));
+        assert!(output.main_c.contains(
+            "s16 spr_hero_next_x = SPR_getX(spr_hero) + (spr_hero_vel_x / 16);"
+        ));
+        assert!(output.main_c.contains(
+            "SPR_setPosition(spr_hero, spr_hero_next_x, spr_hero_next_y);"
+        ));
     }
 
     #[test]

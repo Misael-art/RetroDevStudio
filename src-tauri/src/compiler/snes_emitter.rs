@@ -1,5 +1,6 @@
 use crate::compiler::ast_generator::{
-    collect_collision_checks, collect_tilemap_assets, AabbCollisionCheck, AstNode, AstOutput,
+    collect_collision_checks, collect_physics_applications, collect_tilemap_assets,
+    AabbCollisionCheck, AstNode, AstOutput, PhysicsApplication,
     LogicCollisionTarget, LogicOp, LogicPositionSource, LogicScript, SpriteAsset, TilemapAsset,
 };
 
@@ -65,6 +66,7 @@ pub fn emit_snes(ast: &AstOutput, project_name: &str) -> EmitOutput {
 fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     let mut out = String::new();
     let collision_checks = collect_collision_checks(ast);
+    let physics_applications = collect_physics_applications(ast);
     let tilemap_assets = collect_tilemap_assets(ast);
     let has_logic_overlap = ast.logic_scripts.iter().any(script_uses_overlap);
     let size_config = ast
@@ -118,6 +120,13 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
         ));
     }
     if !context.spawns.is_empty() {
+        out.push('\n');
+    }
+    for physics in &physics_applications {
+        out.push_str(&format!("static s32 {}_vel_x = 0;\n", physics.var_name));
+        out.push_str(&format!("static s32 {}_vel_y = 0;\n", physics.var_name));
+    }
+    if !physics_applications.is_empty() {
         out.push('\n');
     }
     if !collision_checks.is_empty() || has_logic_overlap {
@@ -238,6 +247,27 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
                     },
                 );
             }
+            AstNode::ApplyPhysics {
+                var_name,
+                gravity,
+                gravity_strength,
+                max_velocity_x,
+                max_velocity_y,
+                friction,
+                bounce,
+            } => render_apply_physics(
+                &mut out,
+                &context,
+                &PhysicsApplication {
+                    var_name: var_name.clone(),
+                    gravity: *gravity,
+                    gravity_strength: *gravity_strength,
+                    max_velocity_x: *max_velocity_x,
+                    max_velocity_y: *max_velocity_y,
+                    friction: *friction,
+                    bounce: *bounce,
+                },
+            ),
             AstNode::DrawText { x, y, text, .. } => {
                 let escaped = text.replace('"', "\\\"");
                 out.push_str(&format!(
@@ -438,6 +468,96 @@ fn render_aabb_helper() -> &'static str {
         && left_y < (right_y + (s16)right_h)\n\
         && (left_y + (s16)left_h) > right_y;\n\
 }\n"
+}
+
+fn render_apply_physics(out: &mut String, context: &SnesContext, physics: &PhysicsApplication) {
+    let Some(spawn) = context
+        .spawns
+        .iter()
+        .find(|spawn| spawn.var_name == physics.var_name)
+    else {
+        return;
+    };
+
+    let x_var = format!("{}_x", physics.var_name);
+    let y_var = format!("{}_y", physics.var_name);
+
+    if physics.gravity {
+        out.push_str(&format!(
+            "        {var_name}_vel_y += {gravity_strength};\n",
+            var_name = physics.var_name,
+            gravity_strength = physics.gravity_strength
+        ));
+    }
+    out.push_str(&format!(
+        "        if ({var_name}_vel_x > {max_velocity_x}) {var_name}_vel_x = {max_velocity_x};\n",
+        var_name = physics.var_name,
+        max_velocity_x = physics.max_velocity_x
+    ));
+    out.push_str(&format!(
+        "        if ({var_name}_vel_x < -{max_velocity_x}) {var_name}_vel_x = -{max_velocity_x};\n",
+        var_name = physics.var_name,
+        max_velocity_x = physics.max_velocity_x
+    ));
+    out.push_str(&format!(
+        "        if ({var_name}_vel_y > {max_velocity_y}) {var_name}_vel_y = {max_velocity_y};\n",
+        var_name = physics.var_name,
+        max_velocity_y = physics.max_velocity_y
+    ));
+    out.push_str(&format!(
+        "        if ({var_name}_vel_y < -{max_velocity_y}) {var_name}_vel_y = -{max_velocity_y};\n",
+        var_name = physics.var_name,
+        max_velocity_y = physics.max_velocity_y
+    ));
+
+    if physics.friction > 0 {
+        out.push_str(&format!(
+            "        if ({var_name}_vel_x > 0) {{ {var_name}_vel_x -= {friction}; if ({var_name}_vel_x < 0) {var_name}_vel_x = 0; }}\n",
+            var_name = physics.var_name,
+            friction = physics.friction
+        ));
+        out.push_str(&format!(
+            "        if ({var_name}_vel_x < 0) {{ {var_name}_vel_x += {friction}; if ({var_name}_vel_x > 0) {var_name}_vel_x = 0; }}\n",
+            var_name = physics.var_name,
+            friction = physics.friction
+        ));
+    }
+
+    out.push_str(&format!(
+        "        {x_var} += ({var_name}_vel_x / 16);\n",
+        x_var = x_var,
+        var_name = physics.var_name
+    ));
+    out.push_str(&format!(
+        "        {y_var} += ({var_name}_vel_y / 16);\n",
+        y_var = y_var,
+        var_name = physics.var_name
+    ));
+
+    if physics.bounce > 0 {
+        out.push_str(&format!(
+            "        if ({x_var} < 0) {{ {x_var} = 0; {var_name}_vel_x = -(({var_name}_vel_x * {bounce}) / 100); }}\n",
+            x_var = x_var,
+            var_name = physics.var_name,
+            bounce = physics.bounce
+        ));
+        out.push_str(&format!(
+            "        if ({y_var} < 0) {{ {y_var} = 0; {var_name}_vel_y = -(({var_name}_vel_y * {bounce}) / 100); }}\n",
+            y_var = y_var,
+            var_name = physics.var_name,
+            bounce = physics.bounce
+        ));
+    }
+
+    out.push_str(&format!(
+        "        oamSet({index}, {x_var}, {y_var}, {priority}, 0, 0, {tile}, {palette});\n",
+        index = spawn.sprite_index,
+        x_var = x_var,
+        y_var = y_var,
+        priority = spawn.priority,
+        tile = current_tile_expression(context, &physics.var_name),
+        palette = spawn.palette_slot
+    ));
 }
 
 fn render_logic_scripts(out: &mut String, scripts: &[LogicScript], context: &SnesContext, indent: usize) {
@@ -982,6 +1102,56 @@ mod tests {
             .contains("u16 input_player_jump = joypad_1_state & KEY_A;"));
         assert!(output.main_c.contains("// Input: player.move_left"));
         assert!(output.main_c.contains("// Input: player.jump"));
+    }
+
+    #[test]
+    fn snes_emitter_emits_apply_physics_with_velocity_state() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::SpawnSprite {
+                    var_name: "spr_hero".to_string(),
+                    resource_name: "hero".to_string(),
+                    x: 32,
+                    y: 48,
+                    priority_high: true,
+                },
+                AstNode::SetAnimation {
+                    var_name: "spr_hero".to_string(),
+                    resource_name: "hero".to_string(),
+                    anim_index: 0,
+                    frame_time: 6,
+                    frames: vec![0, 1, 2],
+                    looping: true,
+                },
+                AstNode::GameLoopBegin,
+                AstNode::ApplyPhysics {
+                    var_name: "spr_hero".to_string(),
+                    gravity: true,
+                    gravity_strength: 6,
+                    max_velocity_x: 48,
+                    max_velocity_y: 96,
+                    friction: 2,
+                    bounce: 35,
+                },
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: vec![sprite_asset()],
+            logic_scripts: Vec::new(),
+        };
+
+        let output = emit_snes(&ast, "Physics Demo");
+
+        assert!(output.main_c.contains("static s32 spr_hero_vel_x = 0;"));
+        assert!(output.main_c.contains("static s32 spr_hero_vel_y = 0;"));
+        assert!(output.main_c.contains("spr_hero_vel_y += 6;"));
+        assert!(output.main_c.contains("if (spr_hero_vel_x > 48) spr_hero_vel_x = 48;"));
+        assert!(output.main_c.contains("spr_hero_x += (spr_hero_vel_x / 16);"));
+        assert!(output.main_c.contains("spr_hero_y += (spr_hero_vel_y / 16);"));
+        assert!(output.main_c.contains(
+            "oamSet(0, spr_hero_x, spr_hero_y, 3, 0, 0, spr_hero_anim_tiles[spr_hero_anim_cursor], 0);"
+        ));
     }
 
     #[test]

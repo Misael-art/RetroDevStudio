@@ -80,6 +80,7 @@
 - [x] Pipeline basico de tilemap para SGDK com AST dedicado, emissao de plano/scroll e staging de asset `.bmp`.
 - [x] Collision AABB basica no game loop SGDK com filtros por `layer/collides_with` a partir de `CollisionComponent`.
 - [x] Input mapping basico no game loop SGDK via `JOY_readJoypad` por `InputComponent`.
+- [x] Physics basica no game loop SGDK com gravidade/subpixels, clamp de velocidade, friccao e bounce simples a partir de `PhysicsComponent`.
 - [x] Build workspace real com `main.c`, `resources.res`, `Makefile` e deteccao de ROM.
 - [x] Hardware validation para Mega Drive.
 - [x] Emulacao Libretro real para ROM externa e ROM gerada.
@@ -102,6 +103,7 @@
 - [x] Pipeline basico de tilemap para SNES com `bgInitTileSet`, `bgInitMapSet` e staging de dados `.pic/.map/.pal`.
 - [x] Collision AABB basica no game loop SNES com filtros por `layer/collides_with` a partir de `CollisionComponent`.
 - [x] Input mapping basico no game loop SNES via `scanPads`/`padsCurrent` por `InputComponent`.
+- [x] Physics basica no game loop SNES com gravidade/subpixels, clamp de velocidade, friccao e bounce simples a partir de `PhysicsComponent`.
 - [x] Instalacao automatica sob demanda de PVSnesLib e core Libretro de SNES.
 
 ### Gate obrigatorio para considerar a fase realmente fechada

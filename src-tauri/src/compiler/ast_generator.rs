@@ -5,7 +5,7 @@ use std::path::Path;
 
 use crate::core::project_mgr::{resolve_prefabs, LoadError};
 use crate::ugdm::components::{
-    AnimationDef, CollisionComponent, InputComponent, SpriteComponent,
+    AnimationDef, CollisionComponent, InputComponent, PhysicsComponent, SpriteComponent,
 };
 use crate::ugdm::entities::{Project, Scene};
 
@@ -55,6 +55,15 @@ pub enum AstNode {
         result_name: String,
         left: CollisionBox,
         right: CollisionBox,
+    },
+    ApplyPhysics {
+        var_name: String,
+        gravity: bool,
+        gravity_strength: i32,
+        max_velocity_x: i32,
+        max_velocity_y: i32,
+        friction: i32,
+        bounce: i32,
     },
     SetAnimation {
         var_name: String,
@@ -150,6 +159,17 @@ pub struct InputActionBinding {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhysicsApplication {
+    pub var_name: String,
+    pub gravity: bool,
+    pub gravity_strength: i32,
+    pub max_velocity_x: i32,
+    pub max_velocity_y: i32,
+    pub friction: i32,
+    pub bounce: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogicScript {
     pub ops: Vec<LogicOp>,
 }
@@ -234,6 +254,7 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
     let mut collision_sources: Vec<CollisionSource> = Vec::new();
     let mut input_reads: Vec<InputRead> = Vec::new();
     let mut input_actions: Vec<InputActionBinding> = Vec::new();
+    let mut physics_applications: Vec<PhysicsApplication> = Vec::new();
     let mut sprite_var_names: HashMap<String, String> = HashMap::new();
     let mut asset_resource_names: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
@@ -344,13 +365,20 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
 
         if let Some(animation) = default_animation {
             nodes.push(AstNode::SetAnimation {
-                var_name,
-                resource_name,
+                var_name: var_name.clone(),
+                resource_name: resource_name.clone(),
                 anim_index: 0,
                 frame_time: animation.frame_time,
                 frames: animation.frames,
                 looping: animation.looping,
             });
+        }
+
+        if let Some(physics) = &entity.components.physics {
+            physics_applications.push(physics_application(
+                &var_name,
+                physics,
+            ));
         }
     }
 
@@ -372,6 +400,17 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
             }),
     );
     nodes.extend(collision_nodes(&collision_sources));
+    nodes.extend(physics_applications.iter().cloned().map(|application| {
+        AstNode::ApplyPhysics {
+            var_name: application.var_name,
+            gravity: application.gravity,
+            gravity_strength: application.gravity_strength,
+            max_velocity_x: application.max_velocity_x,
+            max_velocity_y: application.max_velocity_y,
+            friction: application.friction,
+            bounce: application.bounce,
+        }
+    }));
     nodes.push(AstNode::SpriteUpdate);
     nodes.push(AstNode::VSync);
     nodes.push(AstNode::GameLoopEnd);
@@ -438,6 +477,24 @@ fn animation_frame_time(project_fps: u32, animation_fps: u32) -> u32 {
     }
 
     ((project_fps + (animation_fps / 2)) / animation_fps).max(1)
+}
+
+fn physics_application(var_name: &str, physics: &PhysicsComponent) -> PhysicsApplication {
+    let (max_velocity_x, max_velocity_y) = physics
+        .max_velocity
+        .as_ref()
+        .map(|velocity| (velocity.x, velocity.y))
+        .unwrap_or((i16::MAX as i32, i16::MAX as i32));
+
+    PhysicsApplication {
+        var_name: var_name.to_string(),
+        gravity: physics.gravity,
+        gravity_strength: physics.gravity_strength,
+        max_velocity_x,
+        max_velocity_y,
+        friction: physics.friction,
+        bounce: physics.bounce,
+    }
 }
 
 fn register_input_nodes(
@@ -804,6 +861,32 @@ pub fn collect_collision_checks(ast: &AstOutput) -> Vec<AabbCollisionCheck> {
                 result_name: result_name.clone(),
                 left: left.clone(),
                 right: right.clone(),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+pub fn collect_physics_applications(ast: &AstOutput) -> Vec<PhysicsApplication> {
+    ast.nodes
+        .iter()
+        .filter_map(|node| match node {
+            AstNode::ApplyPhysics {
+                var_name,
+                gravity,
+                gravity_strength,
+                max_velocity_x,
+                max_velocity_y,
+                friction,
+                bounce,
+            } => Some(PhysicsApplication {
+                var_name: var_name.clone(),
+                gravity: *gravity,
+                gravity_strength: *gravity_strength,
+                max_velocity_x: *max_velocity_x,
+                max_velocity_y: *max_velocity_y,
+                friction: *friction,
+                bounce: *bounce,
             }),
             _ => None,
         })
@@ -1253,6 +1336,90 @@ mod tests {
             node,
             AstNode::ReadInputDevice { device, state_var }
                 if device == "joypad_1" && state_var == "joypad_1_state"
+        )));
+    }
+
+    #[test]
+    fn generate_ast_emits_apply_physics_for_sprite_entities() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
+            name: "Physics Demo".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+        };
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "hero".to_string(),
+                prefab: None,
+                transform: Transform { x: 32, y: 48 },
+                components: Components {
+                    sprite: Some(SpriteComponent {
+                        asset: "assets/sprites/hero.png".to_string(),
+                        frame_width: 16,
+                        frame_height: 16,
+                        pivot: None,
+                        palette_slot: 0,
+                        animations: HashMap::new(),
+                        priority: "foreground".to_string(),
+                    }),
+                    physics: Some(crate::ugdm::components::PhysicsComponent {
+                        gravity: true,
+                        gravity_strength: 6,
+                        max_velocity: Some(crate::ugdm::components::Velocity { x: 48, y: 96 }),
+                        friction: 2,
+                        bounce: 35,
+                    }),
+                    ..Components::default()
+                },
+            }],
+            palettes: Vec::new(),
+            retrofx: None,
+        };
+
+        let ast = generate_ast(&project, &scene);
+        let applications = collect_physics_applications(&ast);
+
+        assert_eq!(
+            applications,
+            vec![PhysicsApplication {
+                var_name: "spr_hero".to_string(),
+                gravity: true,
+                gravity_strength: 6,
+                max_velocity_x: 48,
+                max_velocity_y: 96,
+                friction: 2,
+                bounce: 35,
+            }]
+        );
+        assert!(ast.nodes.iter().any(|node| matches!(
+            node,
+            AstNode::ApplyPhysics {
+                var_name,
+                gravity,
+                gravity_strength,
+                max_velocity_x,
+                max_velocity_y,
+                friction,
+                bounce,
+            } if var_name == "spr_hero"
+                && *gravity
+                && *gravity_strength == 6
+                && *max_velocity_x == 48
+                && *max_velocity_y == 96
+                && *friction == 2
+                && *bounce == 35
         )));
     }
 
