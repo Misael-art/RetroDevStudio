@@ -33,6 +33,8 @@ export interface ExtractionResult {
   files: string[];
 }
 
+export type AssetExtractorBppMode = "auto" | "2bpp" | "4bpp";
+
 export type ThirdPartyDependencyId =
   | "sgdk"
   | "pvsneslib"
@@ -102,9 +104,10 @@ export function assetsExtract(
   romPath: string,
   outputDir: string,
   maxTiles: number,
-  paletteSlot: number
+  paletteSlot: number,
+  bppMode: AssetExtractorBppMode
 ): Promise<ExtractionResult> {
-  return invoke("assets_extract", { romPath, outputDir, maxTiles, paletteSlot });
+  return invoke("assets_extract", { romPath, outputDir, maxTiles, paletteSlot, bppMode });
 }
 
 export function getThirdPartyStatus(): Promise<DependencyStatusReport> {

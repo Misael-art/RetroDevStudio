@@ -353,7 +353,7 @@ fn emulator_stop(emu: State<EmulatorCoreState>) -> EmulatorCommandResult {
 
 use tools::patch_studio::{PatchResult, create_ips_file, apply_ips_file, create_bps_file, apply_bps_file};
 use tools::deep_profiler::{ProfileReport, profile_rom};
-use tools::asset_extractor::{ExtractionResult, extract_assets};
+use tools::asset_extractor::{BppMode, ExtractionResult, extract_assets};
 use tools::dependency_manager::{
     DependencyInstallResult,
     DependencyLogLine,
@@ -390,8 +390,20 @@ fn profiler_analyze_rom(rom_path: String) -> ProfileReport {
 }
 
 #[tauri::command]
-fn assets_extract(rom_path: String, output_dir: String, max_tiles: u32, palette_slot: u8) -> ExtractionResult {
-    extract_assets(Path::new(&rom_path), Path::new(&output_dir), max_tiles, palette_slot)
+fn assets_extract(
+    rom_path: String,
+    output_dir: String,
+    max_tiles: u32,
+    palette_slot: u8,
+    bpp_mode: String,
+) -> ExtractionResult {
+    extract_assets(
+        Path::new(&rom_path),
+        Path::new(&output_dir),
+        max_tiles,
+        palette_slot,
+        BppMode::from_str(&bpp_mode),
+    )
 }
 
 #[tauri::command]

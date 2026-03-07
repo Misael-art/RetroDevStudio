@@ -17,6 +17,7 @@ import {
   type DependencyStatus,
   type DependencyLogLine,
   type ThirdPartyDependencyId,
+  type AssetExtractorBppMode,
 } from "../../core/ipc/toolsService";
 
 function describeError(error: unknown): string {
@@ -329,6 +330,7 @@ function AssetExtractor() {
   const [outputDir, setOutputDir] = useState("");
   const [maxTiles, setMaxTiles] = useState(256);
   const [palSlot, setPalSlot] = useState(0);
+  const [bppMode, setBppMode] = useState<AssetExtractorBppMode>("auto");
   const [busy, setBusy] = useState(false);
   const [lastFiles, setLastFiles] = useState<string[]>([]);
 
@@ -340,12 +342,12 @@ function AssetExtractor() {
 
     setBusy(true);
     try {
-      const result = await assetsExtract(romPath, outputDir, maxTiles, palSlot);
+      const result = await assetsExtract(romPath, outputDir, maxTiles, palSlot, bppMode);
       if (result.ok) {
         setLastFiles(result.files);
         logMessage(
           "success",
-          `[Extractor] ${result.tiles_extracted} tile(s) + ${result.palettes_extracted} paleta(s) extraidas -> ${outputDir}`
+          `[Extractor] ${result.tiles_extracted} tile(s) + ${result.palettes_extracted} paleta(s) extraidas (${bppMode}) -> ${outputDir}`
         );
       } else {
         logMessage("error", `[Extractor] ${result.error}`);
@@ -403,6 +405,18 @@ function AssetExtractor() {
                 PAL{slot}
               </option>
             ))}
+          </select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] text-[#7f849c]">BPP mode</label>
+          <select
+            value={bppMode}
+            onChange={(event) => setBppMode(event.target.value as AssetExtractorBppMode)}
+            className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-xs text-[#cdd6f4] focus:outline-none focus:border-[#a6e3a1]"
+          >
+            <option value="auto">Auto</option>
+            <option value="2bpp">2bpp</option>
+            <option value="4bpp">4bpp</option>
           </select>
         </div>
       </div>
