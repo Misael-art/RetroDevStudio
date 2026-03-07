@@ -359,7 +359,7 @@ function NodeCard({ node, selected, onMouseDown, onPortMouseDown, onPortMouseUp 
 const PALETTE_TYPES: NodeType[] = [
   "event_start", "sprite_move", "sprite_anim",
   "condition_overlap", "effect_parallax", "effect_raster",
-  "logic_and", "action_sound",
+  "logic_and", "action_sound", "scroll_tilemap", "move_camera",
 ];
 
 export default function NodeGraphEditor() {

@@ -2,8 +2,8 @@ use crate::compiler::ast_generator::{
     collect_bgm_tracks, collect_collision_checks, collect_logic_sound_names,
     collect_parallax_layers, collect_physics_applications, collect_raster_lines,
     collect_sfx_resources, collect_tilemap_assets, AabbCollisionCheck, AstNode, AstOutput,
-    LogicCollisionTarget, LogicOp, LogicPositionSource, LogicScript, ParallaxLayerConfig,
-    PhysicsApplication, RasterLineConfig, SpriteAsset, TilemapAsset,
+    LogicBoolExpr, LogicCollisionTarget, LogicOp, LogicPositionSource, LogicScript,
+    ParallaxLayerConfig, PhysicsApplication, RasterLineConfig, SpriteAsset, TilemapAsset,
 };
 
 #[derive(Debug)]
@@ -72,6 +72,7 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     let tilemap_assets = collect_tilemap_assets(ast);
     let parallax_layers = collect_parallax_layers(ast);
     let raster_lines = collect_raster_lines(ast);
+    let scroll_tilemap_layers = collect_scroll_tilemap_layers(ast);
     let sfx_resources = collect_sfx_resources(ast);
     let bgm_tracks = collect_bgm_tracks(ast);
     let has_logic_overlap = ast.logic_scripts.iter().any(script_uses_overlap);
@@ -135,6 +136,14 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
         out.push_str(&format!("static s32 {}_vel_y = 0;\n", physics.var_name));
     }
     if !physics_applications.is_empty() {
+        out.push('\n');
+    }
+    for layer in &scroll_tilemap_layers {
+        let layer_id = scroll_layer_id(layer);
+        out.push_str(&format!("static s16 tm_scroll_x_{} = 0;\n", layer_id));
+        out.push_str(&format!("static s16 tm_scroll_y_{} = 0;\n", layer_id));
+    }
+    if !scroll_tilemap_layers.is_empty() {
         out.push('\n');
     }
     if !parallax_layers.is_empty() || !raster_lines.is_empty() {
@@ -223,6 +232,12 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
             | AstNode::DrawTilemap { .. }
             | AstNode::SpawnSprite { .. }
             | AstNode::SetAnimation { .. } => {}
+            AstNode::ScrollTilemap { layer, dx, dy } => {
+                render_scroll_tilemap(&mut out, layer, *dx, *dy);
+            }
+            AstNode::MoveCamera { target, x, y } => {
+                render_move_camera(&mut out, target, *x, *y);
+            }
             AstNode::SetupParallax { layers } => {
                 if !retrofx_initialized {
                     out.push_str("    setHDMATable(0, retro_hdma_table);\n");
@@ -514,6 +529,39 @@ fn render_animation_update(out: &mut String, animation: &AnimationState) {
     out.push_str("        }\n");
 }
 
+fn render_scroll_tilemap(out: &mut String, layer: &str, dx: i32, dy: i32) {
+    let layer_id = scroll_layer_id(layer);
+    let bg = snes_bg_number(layer);
+    out.push_str(&format!(
+        "        tm_scroll_x_{layer_id} += {dx};\n",
+        layer_id = layer_id,
+        dx = dx
+    ));
+    out.push_str(&format!(
+        "        tm_scroll_y_{layer_id} += {dy};\n",
+        layer_id = layer_id,
+        dy = dy
+    ));
+    out.push_str(&format!(
+        "        bgSetScroll({bg}, tm_scroll_x_{layer_id}, tm_scroll_y_{layer_id});\n",
+        bg = bg,
+        layer_id = layer_id
+    ));
+}
+
+fn render_move_camera(out: &mut String, target: &str, x: i32, y: i32) {
+    let (x_expr, y_expr) = if target.starts_with("spr_") {
+        (
+            format!("{}_x + {}", target, x),
+            format!("{}_y + {}", target, y),
+        )
+    } else {
+        (x.to_string(), y.to_string())
+    };
+
+    out.push_str(&format!("        bgSetScroll(0, {}, {});\n", x_expr, y_expr));
+}
+
 fn render_aabb_helper() -> &'static str {
     "static u8 retro_aabb_intersects(s16 left_x, s16 left_y, u16 left_w, u16 left_h, s16 right_x, s16 right_y, u16 right_w, u16 right_h)\n\
 {\n\
@@ -680,6 +728,26 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], context: &SnesContext, in
                     out.push_str(&format!("{}}}\n", indent_str));
                 }
             }
+            LogicOp::ConditionBool {
+                condition,
+                if_true,
+                if_false,
+            } => {
+                let condition_expr = render_bool_expr(out, condition, indent);
+                out.push_str(&format!(
+                    "{indent}if ({condition}) {{\n",
+                    indent = indent_str,
+                    condition = condition_expr
+                ));
+                render_logic_ops(out, if_true, context, nested_indent);
+                if if_false.is_empty() {
+                    out.push_str(&format!("{}}}\n", indent_str));
+                } else {
+                    out.push_str(&format!("{}}} else {{\n", indent_str));
+                    render_logic_ops(out, if_false, context, nested_indent);
+                    out.push_str(&format!("{}}}\n", indent_str));
+                }
+            }
             LogicOp::PlaySound { sfx } => {
                 out.push_str(&format!(
                     "{indent}spcPlaySound(SFX_{sfx});\n",
@@ -687,6 +755,43 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], context: &SnesContext, in
                     sfx = sfx.to_uppercase()
                 ));
             }
+        }
+    }
+}
+
+fn render_bool_expr(out: &mut String, expr: &LogicBoolExpr, indent: usize) -> String {
+    match expr {
+        LogicBoolExpr::Literal(value) => {
+            if *value { "1".to_string() } else { "0".to_string() }
+        }
+        LogicBoolExpr::Overlap { left, right } => format!(
+            "retro_aabb_intersects({left_x}, {left_y}, {left_w}, {left_h}, {right_x}, {right_y}, {right_w}, {right_h})",
+            left_x = logic_x_expr(left),
+            left_y = logic_y_expr(left),
+            left_w = left.width,
+            left_h = left.height,
+            right_x = logic_x_expr(right),
+            right_y = logic_y_expr(right),
+            right_w = right.width,
+            right_h = right.height
+        ),
+        LogicBoolExpr::Not(value) => format!("!({})", render_bool_expr(out, value, indent)),
+        LogicBoolExpr::And {
+            result_name,
+            left,
+            right,
+        } => {
+            let left_expr = render_bool_expr(out, left, indent);
+            let right_expr = render_bool_expr(out, right, indent);
+            let indent_str = " ".repeat(indent);
+            out.push_str(&format!(
+                "{indent}u8 {result_name} = ({left} && {right});\n",
+                indent = indent_str,
+                result_name = result_name,
+                left = left_expr,
+                right = right_expr
+            ));
+            result_name.clone()
         }
     }
 }
@@ -862,7 +967,30 @@ fn script_uses_overlap(script: &LogicScript) -> bool {
 }
 
 fn op_uses_overlap(op: &LogicOp) -> bool {
-    matches!(op, LogicOp::ConditionOverlap { .. })
+    match op {
+        LogicOp::ConditionOverlap { .. } => true,
+        LogicOp::ConditionBool {
+            condition,
+            if_true,
+            if_false,
+        } => {
+            bool_expr_uses_overlap(condition)
+                || if_true.iter().any(op_uses_overlap)
+                || if_false.iter().any(op_uses_overlap)
+        }
+        _ => false,
+    }
+}
+
+fn bool_expr_uses_overlap(expr: &LogicBoolExpr) -> bool {
+    match expr {
+        LogicBoolExpr::Literal(_) => false,
+        LogicBoolExpr::Overlap { .. } => true,
+        LogicBoolExpr::Not(value) => bool_expr_uses_overlap(value),
+        LogicBoolExpr::And { left, right, .. } => {
+            bool_expr_uses_overlap(left) || bool_expr_uses_overlap(right)
+        }
+    }
 }
 
 fn render_collision_check(out: &mut String, check: &AabbCollisionCheck) {
@@ -1047,6 +1175,39 @@ fn tile_count(asset: &SpriteAsset) -> u16 {
     (u32::from(tiles_per_frame(asset)) * frame_count).min(u16::MAX as u32) as u16
 }
 
+fn collect_scroll_tilemap_layers(ast: &AstOutput) -> Vec<String> {
+    let mut layers = Vec::new();
+    for node in &ast.nodes {
+        if let AstNode::ScrollTilemap { layer, .. } = node {
+            if !layers.iter().any(|existing| existing == layer) {
+                layers.push(layer.clone());
+            }
+        }
+    }
+    layers
+}
+
+fn snes_bg_number(layer: &str) -> u8 {
+    match layer {
+        "BG_B" | "BG2" => 1,
+        "WINDOW" | "BG3" => 2,
+        _ => 0,
+    }
+}
+
+fn scroll_layer_id(layer: &str) -> String {
+    layer
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '_' {
+                character.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 fn snes_map_size_mode(asset: &TilemapAsset) -> &'static str {
     match (asset.map_width > 32, asset.map_height > 32) {
         (false, false) => "SC_32x32",
@@ -1072,6 +1233,12 @@ mod tests {
     };
 
     fn sprite_asset() -> SpriteAsset {
+        let animation = SpriteAnimation {
+            name: "walk".to_string(),
+            frames: vec![0, 1, 2],
+            frame_time: 6,
+            looping: true,
+        };
         SpriteAsset {
             resource_name: "hero".to_string(),
             asset_path: "assets/sprites/hero.png".to_string(),
@@ -1079,12 +1246,8 @@ mod tests {
             frame_height: 16,
             palette_slot: 0,
             animation_count: 3,
-            default_animation: Some(SpriteAnimation {
-                name: "walk".to_string(),
-                frames: vec![0, 1, 2],
-                frame_time: 6,
-                looping: true,
-            }),
+            animations: vec![animation.clone()],
+            default_animation: Some(animation),
         }
     }
 
@@ -1429,6 +1592,43 @@ mod tests {
         assert!(output.main_c.contains(
             "oamSet(0, spr_hero_x, spr_hero_y, 3, 0, 0, spr_hero_anim_tiles[spr_hero_anim_cursor], 0);"
         ));
+    }
+
+    #[test]
+    fn snes_emitter_emits_runtime_tilemap_scroll_and_camera_commands() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::ScrollTilemap {
+                    layer: "BG_B".to_string(),
+                    dx: 3,
+                    dy: -2,
+                },
+                AstNode::MoveCamera {
+                    target: "spr_hero".to_string(),
+                    x: 12,
+                    y: -4,
+                },
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: Vec::new(),
+        };
+
+        let output = emit_snes(&ast, "Scroll Demo");
+
+        assert!(output.main_c.contains("static s16 tm_scroll_x_bg_b = 0;"));
+        assert!(output.main_c.contains("static s16 tm_scroll_y_bg_b = 0;"));
+        assert!(output.main_c.contains("tm_scroll_x_bg_b += 3;"));
+        assert!(output.main_c.contains("tm_scroll_y_bg_b += -2;"));
+        assert!(output
+            .main_c
+            .contains("bgSetScroll(1, tm_scroll_x_bg_b, tm_scroll_y_bg_b);"));
+        assert!(output
+            .main_c
+            .contains("bgSetScroll(0, spr_hero_x + 12, spr_hero_y + -4);"));
     }
 
     #[test]

@@ -2,8 +2,8 @@ use crate::compiler::ast_generator::{
     collect_bgm_tracks, collect_collision_checks, collect_logic_sound_names,
     collect_parallax_layers, collect_physics_applications, collect_raster_lines,
     collect_sfx_resources, collect_tilemap_assets, AabbCollisionCheck, AstNode, AstOutput,
-    LogicCollisionTarget, LogicOp, LogicPositionSource, LogicScript, ParallaxLayerConfig,
-    PhysicsApplication, RasterLineConfig, SpriteAsset, TilemapAsset,
+    LogicBoolExpr, LogicCollisionTarget, LogicOp, LogicPositionSource, LogicScript,
+    ParallaxLayerConfig, PhysicsApplication, RasterLineConfig, SpriteAsset, TilemapAsset,
 };
 
 #[derive(Debug)]
@@ -26,6 +26,7 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     let tilemap_assets = collect_tilemap_assets(ast);
     let parallax_layers = collect_parallax_layers(ast);
     let raster_lines = collect_raster_lines(ast);
+    let scroll_tilemap_layers = collect_scroll_tilemap_layers(ast);
     let has_logic_overlap = ast.logic_scripts.iter().any(script_uses_overlap);
     let sfx_resources = collect_sfx_resources(ast);
     let bgm_tracks = collect_bgm_tracks(ast);
@@ -57,6 +58,14 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
         out.push_str(&format!("static s32 {}_vel_y = 0;\n", physics.var_name));
     }
     if !physics_applications.is_empty() {
+        out.push('\n');
+    }
+    for layer in &scroll_tilemap_layers {
+        let layer_id = scroll_layer_id(layer);
+        out.push_str(&format!("static s16 tm_scroll_x_{} = 0;\n", layer_id));
+        out.push_str(&format!("static s16 tm_scroll_y_{} = 0;\n", layer_id));
+    }
+    if !scroll_tilemap_layers.is_empty() {
         out.push('\n');
     }
     if !parallax_layers.is_empty() || !raster_lines.is_empty() {
@@ -261,6 +270,12 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
                     out.push_str(&format!("    SPR_setAnimationLoop({}, FALSE);\n", var_name));
                 }
             }
+            AstNode::ScrollTilemap { layer, dx, dy } => {
+                render_scroll_tilemap(&mut out, layer, *dx, *dy);
+            }
+            AstNode::MoveCamera { target, x, y } => {
+                render_move_camera(&mut out, target, *x, *y);
+            }
             AstNode::DrawText {
                 x,
                 y,
@@ -434,6 +449,51 @@ fn render_apply_physics(out: &mut String, physics: &PhysicsApplication) {
     ));
 }
 
+fn render_scroll_tilemap(out: &mut String, layer: &str, dx: i32, dy: i32) {
+    let layer_id = scroll_layer_id(layer);
+    let plane = sgdk_scroll_plane(layer);
+    out.push_str(&format!(
+        "        tm_scroll_x_{layer_id} += {dx};\n",
+        layer_id = layer_id,
+        dx = dx
+    ));
+    out.push_str(&format!(
+        "        tm_scroll_y_{layer_id} += {dy};\n",
+        layer_id = layer_id,
+        dy = dy
+    ));
+    out.push_str(&format!(
+        "        VDP_setHorizontalScroll({plane}, tm_scroll_x_{layer_id});\n",
+        plane = plane,
+        layer_id = layer_id
+    ));
+    out.push_str(&format!(
+        "        VDP_setVerticalScroll({plane}, tm_scroll_y_{layer_id});\n",
+        plane = plane,
+        layer_id = layer_id
+    ));
+}
+
+fn render_move_camera(out: &mut String, target: &str, x: i32, y: i32) {
+    let (x_expr, y_expr) = if target.starts_with("spr_") {
+        (
+            format!("SPR_getX({}) + {}", target, x),
+            format!("SPR_getY({}) + {}", target, y),
+        )
+    } else {
+        (x.to_string(), y.to_string())
+    };
+
+    out.push_str(&format!(
+        "        VDP_setHorizontalScroll(BG_A, {});\n",
+        x_expr
+    ));
+    out.push_str(&format!(
+        "        VDP_setVerticalScroll(BG_A, {});\n",
+        y_expr
+    ));
+}
+
 fn render_logic_scripts(out: &mut String, scripts: &[LogicScript], indent: usize) {
     for script in scripts {
         render_logic_ops(out, &script.ops, indent);
@@ -482,6 +542,26 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                     out.push_str(&format!("{}}}\n", indent_str));
                 }
             }
+            LogicOp::ConditionBool {
+                condition,
+                if_true,
+                if_false,
+            } => {
+                let condition_expr = render_bool_expr(out, condition, indent);
+                out.push_str(&format!(
+                    "{indent}if ({condition}) {{\n",
+                    indent = indent_str,
+                    condition = condition_expr
+                ));
+                render_logic_ops(out, if_true, nested_indent);
+                if if_false.is_empty() {
+                    out.push_str(&format!("{}}}\n", indent_str));
+                } else {
+                    out.push_str(&format!("{}}} else {{\n", indent_str));
+                    render_logic_ops(out, if_false, nested_indent);
+                    out.push_str(&format!("{}}}\n", indent_str));
+                }
+            }
             LogicOp::PlaySound { sfx } => {
                 out.push_str(&format!(
                     "{indent}SND_startPlayPCM_XGM(SFX_{sfx}, 1, SOUND_PCM_CH_AUTO);\n",
@@ -489,6 +569,43 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                     sfx = sfx.to_uppercase()
                 ));
             }
+        }
+    }
+}
+
+fn render_bool_expr(out: &mut String, expr: &LogicBoolExpr, indent: usize) -> String {
+    match expr {
+        LogicBoolExpr::Literal(value) => {
+            if *value { "TRUE".to_string() } else { "FALSE".to_string() }
+        }
+        LogicBoolExpr::Overlap { left, right } => format!(
+            "retro_aabb_intersects({left_x}, {left_y}, {left_w}, {left_h}, {right_x}, {right_y}, {right_w}, {right_h})",
+            left_x = logic_x_expr(left),
+            left_y = logic_y_expr(left),
+            left_w = left.width,
+            left_h = left.height,
+            right_x = logic_x_expr(right),
+            right_y = logic_y_expr(right),
+            right_w = right.width,
+            right_h = right.height
+        ),
+        LogicBoolExpr::Not(value) => format!("!({})", render_bool_expr(out, value, indent)),
+        LogicBoolExpr::And {
+            result_name,
+            left,
+            right,
+        } => {
+            let left_expr = render_bool_expr(out, left, indent);
+            let right_expr = render_bool_expr(out, right, indent);
+            let indent_str = " ".repeat(indent);
+            out.push_str(&format!(
+                "{indent}u8 {result_name} = ({left} && {right});\n",
+                indent = indent_str,
+                result_name = result_name,
+                left = left_expr,
+                right = right_expr
+            ));
+            result_name.clone()
         }
     }
 }
@@ -611,7 +728,30 @@ fn script_uses_overlap(script: &LogicScript) -> bool {
 }
 
 fn op_uses_overlap(op: &LogicOp) -> bool {
-    matches!(op, LogicOp::ConditionOverlap { .. })
+    match op {
+        LogicOp::ConditionOverlap { .. } => true,
+        LogicOp::ConditionBool {
+            condition,
+            if_true,
+            if_false,
+        } => {
+            bool_expr_uses_overlap(condition)
+                || if_true.iter().any(op_uses_overlap)
+                || if_false.iter().any(op_uses_overlap)
+        }
+        _ => false,
+    }
+}
+
+fn bool_expr_uses_overlap(expr: &LogicBoolExpr) -> bool {
+    match expr {
+        LogicBoolExpr::Literal(_) => false,
+        LogicBoolExpr::Overlap { .. } => true,
+        LogicBoolExpr::Not(value) => bool_expr_uses_overlap(value),
+        LogicBoolExpr::And { left, right, .. } => {
+            bool_expr_uses_overlap(left) || bool_expr_uses_overlap(right)
+        }
+    }
 }
 
 fn render_collision_check(out: &mut String, check: &AabbCollisionCheck) {
@@ -706,12 +846,45 @@ fn plane_size_for_tilemaps(tilemap_assets: &[TilemapAsset]) -> Option<(u16, u16)
     Some((max_width, max_height))
 }
 
+fn collect_scroll_tilemap_layers(ast: &AstOutput) -> Vec<String> {
+    let mut layers = Vec::new();
+    for node in &ast.nodes {
+        if let AstNode::ScrollTilemap { layer, .. } = node {
+            if !layers.iter().any(|existing| existing == layer) {
+                layers.push(layer.clone());
+            }
+        }
+    }
+    layers
+}
+
 fn tilemap_plane(index: usize) -> &'static str {
     match index {
         0 => "BG_B",
         1 => "BG_A",
         _ => "WINDOW",
     }
+}
+
+fn sgdk_scroll_plane(layer: &str) -> &'static str {
+    match layer {
+        "BG_B" => "BG_B",
+        "WINDOW" => "WINDOW",
+        _ => "BG_A",
+    }
+}
+
+fn scroll_layer_id(layer: &str) -> String {
+    layer
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '_' {
+                character.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 fn tilemap_base_expression(resource_name: &str, tilemap_assets: &[TilemapAsset]) -> String {
@@ -752,6 +925,12 @@ mod tests {
     };
 
     fn sprite_asset_with_animation(frame_time: u32, looping: bool) -> SpriteAsset {
+        let animation = SpriteAnimation {
+            name: "walk".to_string(),
+            frames: vec![0, 1, 2, 3],
+            frame_time,
+            looping,
+        };
         SpriteAsset {
             resource_name: "hero".to_string(),
             asset_path: "assets/sprites/hero.png".to_string(),
@@ -759,12 +938,8 @@ mod tests {
             frame_height: 16,
             palette_slot: 1,
             animation_count: 4,
-            default_animation: Some(SpriteAnimation {
-                name: "walk".to_string(),
-                frames: vec![0, 1, 2, 3],
-                frame_time,
-                looping,
-            }),
+            animations: vec![animation.clone()],
+            default_animation: Some(animation),
         }
     }
 
@@ -1124,6 +1299,49 @@ mod tests {
         assert!(output.main_c.contains(
             "SPR_setPosition(spr_hero, spr_hero_next_x, spr_hero_next_y);"
         ));
+    }
+
+    #[test]
+    fn main_c_emits_runtime_tilemap_scroll_and_camera_commands() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::ScrollTilemap {
+                    layer: "BG_B".to_string(),
+                    dx: 3,
+                    dy: -2,
+                },
+                AstNode::MoveCamera {
+                    target: "spr_hero".to_string(),
+                    x: 12,
+                    y: -4,
+                },
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: Vec::new(),
+        };
+
+        let output = emit_sgdk(&ast, "Scroll Demo");
+
+        assert!(output.main_c.contains("static s16 tm_scroll_x_bg_b = 0;"));
+        assert!(output.main_c.contains("static s16 tm_scroll_y_bg_b = 0;"));
+        assert!(output.main_c.contains("tm_scroll_x_bg_b += 3;"));
+        assert!(output.main_c.contains("tm_scroll_y_bg_b += -2;"));
+        assert!(output
+            .main_c
+            .contains("VDP_setHorizontalScroll(BG_B, tm_scroll_x_bg_b);"));
+        assert!(output
+            .main_c
+            .contains("VDP_setVerticalScroll(BG_B, tm_scroll_y_bg_b);"));
+        assert!(output
+            .main_c
+            .contains("VDP_setHorizontalScroll(BG_A, SPR_getX(spr_hero) + 12);"));
+        assert!(output
+            .main_c
+            .contains("VDP_setVerticalScroll(BG_A, SPR_getY(spr_hero) + -4);"));
     }
 
     #[test]

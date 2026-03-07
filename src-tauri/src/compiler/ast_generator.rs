@@ -87,6 +87,16 @@ pub enum AstNode {
         frames: Vec<u32>,
         looping: bool,
     },
+    ScrollTilemap {
+        layer: String,
+        dx: i32,
+        dy: i32,
+    },
+    MoveCamera {
+        target: String,
+        x: i32,
+        y: i32,
+    },
     DrawText {
         x: u32,
         y: u32,
@@ -115,6 +125,7 @@ pub struct SpriteAsset {
     pub frame_height: u32,
     pub palette_slot: u8,
     pub animation_count: u32,
+    pub animations: Vec<SpriteAnimation>,
     pub default_animation: Option<SpriteAnimation>,
 }
 
@@ -214,8 +225,28 @@ pub enum LogicOp {
         if_true: Vec<LogicOp>,
         if_false: Vec<LogicOp>,
     },
+    ConditionBool {
+        condition: LogicBoolExpr,
+        if_true: Vec<LogicOp>,
+        if_false: Vec<LogicOp>,
+    },
     PlaySound {
         sfx: String,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LogicBoolExpr {
+    Literal(bool),
+    Overlap {
+        left: LogicCollisionTarget,
+        right: LogicCollisionTarget,
+    },
+    Not(Box<LogicBoolExpr>),
+    And {
+        result_name: String,
+        left: Box<LogicBoolExpr>,
+        right: Box<LogicBoolExpr>,
     },
 }
 
@@ -238,10 +269,28 @@ pub enum LogicPositionSource {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LogicRuntimeEntity {
     collision_target: LogicCollisionTarget,
+    sprite: Option<LogicRuntimeSprite>,
+    camera: Option<LogicRuntimeCamera>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LogicRuntimeSprite {
+    var_name: String,
+    resource_name: String,
+    animations: Vec<SpriteAnimation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LogicRuntimeCamera {
+    follow_sprite_var: Option<String>,
+    offset_x: i32,
+    offset_y: i32,
 }
 
 #[derive(Debug, Default)]
 struct CompiledLogicOutput {
+    setup_nodes: Vec<AstNode>,
+    runtime_nodes: Vec<AstNode>,
     scripts: Vec<LogicScript>,
     parallax_layers: Vec<ParallaxLayerConfig>,
     raster_lines: Vec<RasterLineConfig>,
@@ -270,6 +319,12 @@ struct StoredNodeGraphEdge {
     from_node: String,
     from_port: String,
     to_node: String,
+    #[serde(default = "default_exec_port")]
+    to_port: String,
+}
+
+fn default_exec_port() -> String {
+    "exec".to_string()
 }
 
 pub fn generate_ast_with_prefabs(
@@ -293,6 +348,7 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
         std::collections::BTreeMap::new();
     let mut bgm_track: Option<(String, String)> = None;
     let mut sprite_var_names: HashMap<String, String> = HashMap::new();
+    let mut sprite_resource_names: HashMap<String, String> = HashMap::new();
     let mut asset_resource_names: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
     let mut tilemap_resource_names: std::collections::HashMap<String, String> =
@@ -372,6 +428,8 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
             .unwrap_or_else(|| sanitize_identifier(&entity.entity_id));
         let var_name = format!("spr_{}", resource_name);
         sprite_var_names.insert(entity.entity_id.clone(), var_name.clone());
+        sprite_resource_names.insert(entity.entity_id.clone(), resource_name.clone());
+        let animations = sprite_animations(project.fps, sprite);
         let default_animation = default_animation(project.fps, sprite);
 
         if !sprite_assets.iter().any(|asset| asset.asset_path == sprite.asset) {
@@ -382,6 +440,7 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
                 frame_height: sprite.frame_height,
                 palette_slot: sprite.palette_slot,
                 animation_count: count_unique_frames(sprite),
+                animations: animations.clone(),
                 default_animation: default_animation.clone(),
             });
             asset_resource_names.insert(sprite.asset.clone(), resource_name.clone());
@@ -422,8 +481,14 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
         }
     }
 
-    let logic_runtime_entities = collect_logic_runtime_entities(scene, &sprite_var_names);
+    let logic_runtime_entities = collect_logic_runtime_entities(
+        scene,
+        &sprite_var_names,
+        &sprite_resource_names,
+        project.fps,
+    );
     let logic_output = collect_logic_output(scene, &logic_runtime_entities);
+    nodes.extend(logic_output.setup_nodes.iter().cloned());
     let mut parallax_layers = enabled_parallax_layers(scene);
     for layer in logic_output.parallax_layers.iter().cloned() {
         push_unique_parallax_layer(&mut parallax_layers, layer);
@@ -480,6 +545,7 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
             bounce: application.bounce,
         }
     }));
+    nodes.extend(logic_output.runtime_nodes.iter().cloned());
     nodes.push(AstNode::SpriteUpdate);
     nodes.push(AstNode::VSync);
     nodes.push(AstNode::GameLoopEnd);
@@ -515,18 +581,23 @@ fn count_unique_frames(sprite: &SpriteComponent) -> u32 {
     unique.len().max(1) as u32
 }
 
-fn default_animation(project_fps: u32, sprite: &SpriteComponent) -> Option<SpriteAnimation> {
-    let (name, animation) = sprite
+fn sprite_animations(project_fps: u32, sprite: &SpriteComponent) -> Vec<SpriteAnimation> {
+    let mut animations = sprite
         .animations
         .iter()
-        .min_by(|(left_name, _), (right_name, _)| left_name.cmp(right_name))?;
+        .map(|(name, animation)| SpriteAnimation {
+            name: name.clone(),
+            frames: normalized_frames(animation),
+            frame_time: animation_frame_time(project_fps, animation.fps),
+            looping: animation.looping,
+        })
+        .collect::<Vec<_>>();
+    animations.sort_by(|left, right| left.name.cmp(&right.name));
+    animations
+}
 
-    Some(SpriteAnimation {
-        name: name.clone(),
-        frames: normalized_frames(animation),
-        frame_time: animation_frame_time(project_fps, animation.fps),
-        looping: animation.looping,
-    })
+fn default_animation(project_fps: u32, sprite: &SpriteComponent) -> Option<SpriteAnimation> {
+    sprite_animations(project_fps, sprite).into_iter().next()
 }
 
 fn normalized_frames(animation: &AnimationDef) -> Vec<u32> {
@@ -750,20 +821,31 @@ fn collision_targets_allow(source: &CollisionSource, target_layer: Option<&str>)
 fn collect_logic_runtime_entities(
     scene: &Scene,
     sprite_var_names: &HashMap<String, String>,
+    sprite_resource_names: &HashMap<String, String>,
+    project_fps: u32,
 ) -> HashMap<String, LogicRuntimeEntity> {
     scene
         .entities
         .iter()
         .filter_map(|entity| {
-            logic_runtime_entity(entity, sprite_var_names.get(&entity.entity_id))
-                .map(|runtime| (entity.entity_id.clone(), runtime))
+            logic_runtime_entity(
+                entity,
+                sprite_var_names,
+                sprite_var_names.get(&entity.entity_id),
+                sprite_resource_names.get(&entity.entity_id),
+                project_fps,
+            )
+            .map(|runtime| (entity.entity_id.clone(), runtime))
         })
         .collect()
 }
 
 fn logic_runtime_entity(
     entity: &crate::ugdm::entities::Entity,
+    sprite_var_names: &HashMap<String, String>,
     sprite_var_name: Option<&String>,
+    sprite_resource_name: Option<&String>,
+    project_fps: u32,
 ) -> Option<LogicRuntimeEntity> {
     let (width, height, offset_x, offset_y) = match (&entity.components.collision, &entity.components.sprite) {
         (Some(collision), _) if collision.shape == "aabb" => (
@@ -773,6 +855,7 @@ fn logic_runtime_entity(
             collision.offset.as_ref().map(|offset| offset.y).unwrap_or(0),
         ),
         (_, Some(sprite)) => (sprite.frame_width, sprite.frame_height, 0, 0),
+        _ if entity.components.camera.is_some() => (0, 0, 0, 0),
         _ => return None,
     };
 
@@ -783,6 +866,27 @@ fn logic_runtime_entity(
             x: entity.transform.x,
             y: entity.transform.y,
         });
+    let sprite = match (
+        sprite_var_name.cloned(),
+        sprite_resource_name.cloned(),
+        entity.components.sprite.as_ref(),
+    ) {
+        (Some(var_name), Some(resource_name), Some(sprite)) => Some(LogicRuntimeSprite {
+            var_name,
+            resource_name,
+            animations: sprite_animations(project_fps, sprite),
+        }),
+        _ => None,
+    };
+    let camera = entity.components.camera.as_ref().map(|camera| LogicRuntimeCamera {
+        follow_sprite_var: camera
+            .follow_entity
+            .as_ref()
+            .and_then(|entity_id| sprite_var_names.get(entity_id))
+            .cloned(),
+        offset_x: camera.offset_x,
+        offset_y: camera.offset_y,
+    });
 
     Some(LogicRuntimeEntity {
         collision_target: LogicCollisionTarget {
@@ -793,6 +897,8 @@ fn logic_runtime_entity(
             width,
             height,
         },
+        sprite,
+        camera,
     })
 }
 
@@ -829,6 +935,8 @@ fn collect_logic_output(
         };
 
         let compiled = compile_logic_graph(&graph, runtime_entities);
+        output.setup_nodes.extend(compiled.setup_nodes);
+        output.runtime_nodes.extend(compiled.runtime_nodes);
         output.scripts.extend(compiled.scripts);
         output.parallax_layers.extend(compiled.parallax_layers);
         output.raster_lines.extend(compiled.raster_lines);
@@ -851,6 +959,8 @@ fn compile_logic_graph(
                 "exec",
                 runtime_entities,
                 &mut visited,
+                &mut output.setup_nodes,
+                &mut output.runtime_nodes,
                 &mut output.parallax_layers,
                 &mut output.raster_lines,
             );
@@ -860,12 +970,15 @@ fn compile_logic_graph(
     output
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compile_logic_chain(
     graph: &StoredNodeGraph,
     source_node_id: &str,
     source_port: &str,
     runtime_entities: &HashMap<String, LogicRuntimeEntity>,
     visited: &mut std::collections::HashSet<String>,
+    setup_nodes: &mut Vec<AstNode>,
+    runtime_nodes: &mut Vec<AstNode>,
     parallax_layers: &mut Vec<ParallaxLayerConfig>,
     raster_lines: &mut Vec<RasterLineConfig>,
 ) -> Vec<LogicOp> {
@@ -887,6 +1000,8 @@ fn compile_logic_chain(
             graph,
             runtime_entities,
             visited,
+            setup_nodes,
+            runtime_nodes,
             parallax_layers,
             raster_lines,
         ) {
@@ -899,6 +1014,14 @@ fn compile_logic_chain(
                 next_node_id = None;
             }
             Some(CompiledLogicNode::NoOp) => {
+                next_node_id = next_exec_target(graph, &node.id, "exec");
+            }
+            Some(CompiledLogicNode::SetupNode(ast_node)) => {
+                setup_nodes.push(ast_node);
+                next_node_id = next_exec_target(graph, &node.id, "exec");
+            }
+            Some(CompiledLogicNode::RuntimeNode(ast_node)) => {
+                runtime_nodes.push(ast_node);
                 next_node_id = next_exec_target(graph, &node.id, "exec");
             }
             None => {
@@ -916,13 +1039,18 @@ enum CompiledLogicNode {
     Linear(LogicOp),
     Terminal(LogicOp),
     NoOp,
+    SetupNode(AstNode),
+    RuntimeNode(AstNode),
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compile_logic_node(
     node: &StoredNodeGraphNode,
     graph: &StoredNodeGraph,
     runtime_entities: &HashMap<String, LogicRuntimeEntity>,
     visited: &mut std::collections::HashSet<String>,
+    setup_nodes: &mut Vec<AstNode>,
+    runtime_nodes: &mut Vec<AstNode>,
     parallax_layers: &mut Vec<ParallaxLayerConfig>,
     raster_lines: &mut Vec<RasterLineConfig>,
 ) -> Option<CompiledLogicNode> {
@@ -957,6 +1085,8 @@ fn compile_logic_node(
                 "true",
                 runtime_entities,
                 &mut true_visited,
+                setup_nodes,
+                runtime_nodes,
                 parallax_layers,
                 raster_lines,
             );
@@ -966,22 +1096,119 @@ fn compile_logic_node(
                 "false",
                 runtime_entities,
                 &mut false_visited,
+                setup_nodes,
+                runtime_nodes,
                 parallax_layers,
                 raster_lines,
             );
+            let overlap_expr = LogicBoolExpr::Overlap {
+                left: left.clone(),
+                right: right.clone(),
+            };
+            let guard_expr = resolve_bool_expr_from_ports(
+                graph,
+                node,
+                &["guard", "condition"],
+                runtime_entities,
+                &mut std::collections::HashSet::new(),
+            );
 
-            Some(CompiledLogicNode::Terminal(LogicOp::ConditionOverlap {
-                left,
-                right,
-                if_true,
-                if_false,
-            }))
+            match guard_expr {
+                Some(guard) => Some(CompiledLogicNode::Terminal(LogicOp::ConditionBool {
+                    condition: LogicBoolExpr::And {
+                        result_name: format!("_and_{}", sanitize_identifier(&node.id)),
+                        left: Box::new(guard),
+                        right: Box::new(overlap_expr),
+                    },
+                    if_true,
+                    if_false,
+                })),
+                None => Some(CompiledLogicNode::Terminal(LogicOp::ConditionOverlap {
+                    left,
+                    right,
+                    if_true,
+                    if_false,
+                })),
+            }
         }
         "action_sound" => Some(CompiledLogicNode::Linear(LogicOp::PlaySound {
             sfx: sanitize_identifier(
                 &param_string(node, "sfx").unwrap_or_else(|| "sfx".to_string()),
             ),
         })),
+        "sprite_anim" => {
+            let target = param_string(node, "target")?;
+            let anim_name = param_string(node, "anim").unwrap_or_else(|| "idle".to_string());
+            let runtime = runtime_entities.get(&target)?;
+            let Some(sprite) = &runtime.sprite else {
+                eprintln!(
+                    "[NodeGraph] sprite_anim ignorado para '{}': entidade sem sprite runtime.",
+                    target
+                );
+                return Some(CompiledLogicNode::NoOp);
+            };
+            let Some((anim_index, animation)) = sprite
+                .animations
+                .iter()
+                .enumerate()
+                .find(|(_, animation)| {
+                    animation.name == anim_name
+                        || sanitize_identifier(&animation.name) == sanitize_identifier(&anim_name)
+                })
+            else {
+                eprintln!(
+                    "[NodeGraph] sprite_anim ignorado para '{}': animacao '{}' nao encontrada.",
+                    target, anim_name
+                );
+                return Some(CompiledLogicNode::NoOp);
+            };
+
+            Some(CompiledLogicNode::SetupNode(AstNode::SetAnimation {
+                var_name: sprite.var_name.clone(),
+                resource_name: sprite.resource_name.clone(),
+                anim_index: anim_index as u32,
+                frame_time: animation.frame_time,
+                frames: animation.frames.clone(),
+                looping: animation.looping,
+            }))
+        }
+        "scroll_tilemap" => Some(CompiledLogicNode::RuntimeNode(AstNode::ScrollTilemap {
+            layer: normalize_scroll_layer(
+                &param_string(node, "layer").unwrap_or_else(|| "BG_A".to_string()),
+            ),
+            dx: param_i32(node, "dx", 0),
+            dy: param_i32(node, "dy", 0),
+        })),
+        "move_camera" => {
+            let target = param_string(node, "target").unwrap_or_else(|| "camera".to_string());
+            let offset_x = param_i32(node, "x", 0);
+            let offset_y = param_i32(node, "y", 0);
+
+            if let Some(runtime) = runtime_entities.get(&target) {
+                if let Some(camera) = &runtime.camera {
+                    if let Some(follow_sprite_var) = &camera.follow_sprite_var {
+                        return Some(CompiledLogicNode::RuntimeNode(AstNode::MoveCamera {
+                            target: follow_sprite_var.clone(),
+                            x: camera.offset_x + offset_x,
+                            y: camera.offset_y + offset_y,
+                        }));
+                    }
+                }
+                if let Some(sprite) = &runtime.sprite {
+                    return Some(CompiledLogicNode::RuntimeNode(AstNode::MoveCamera {
+                        target: sprite.var_name.clone(),
+                        x: offset_x,
+                        y: offset_y,
+                    }));
+                }
+            }
+
+            Some(CompiledLogicNode::RuntimeNode(AstNode::MoveCamera {
+                target,
+                x: offset_x,
+                y: offset_y,
+            }))
+        }
         "effect_parallax" => {
             push_unique_parallax_layer(
                 parallax_layers,
@@ -1017,6 +1244,99 @@ fn next_exec_target(
         .iter()
         .find(|edge| edge.from_node == source_node_id && edge.from_port == source_port)
         .map(|edge| edge.to_node.clone())
+}
+
+fn resolve_bool_expr_from_ports(
+    graph: &StoredNodeGraph,
+    node: &StoredNodeGraphNode,
+    ports: &[&str],
+    runtime_entities: &HashMap<String, LogicRuntimeEntity>,
+    visited: &mut std::collections::HashSet<String>,
+) -> Option<LogicBoolExpr> {
+    ports.iter().find_map(|port| {
+        resolve_bool_expr_from_input(graph, &node.id, port, runtime_entities, visited)
+    })
+}
+
+fn resolve_bool_expr_from_input(
+    graph: &StoredNodeGraph,
+    to_node_id: &str,
+    to_port: &str,
+    runtime_entities: &HashMap<String, LogicRuntimeEntity>,
+    visited: &mut std::collections::HashSet<String>,
+) -> Option<LogicBoolExpr> {
+    let edge = graph
+        .edges
+        .iter()
+        .find(|edge| edge.to_node == to_node_id && edge.to_port == to_port)?;
+    let source_node = graph
+        .nodes
+        .iter()
+        .find(|node| node.id == edge.from_node)?;
+    build_bool_expr_from_node(
+        source_node,
+        &edge.from_port,
+        graph,
+        runtime_entities,
+        visited,
+    )
+}
+
+fn build_bool_expr_from_node(
+    node: &StoredNodeGraphNode,
+    from_port: &str,
+    graph: &StoredNodeGraph,
+    runtime_entities: &HashMap<String, LogicRuntimeEntity>,
+    visited: &mut std::collections::HashSet<String>,
+) -> Option<LogicBoolExpr> {
+    if !visited.insert(node.id.clone()) {
+        return None;
+    }
+
+    let expression = match node.node_type.as_str() {
+        "condition_overlap" => {
+            let left = runtime_entities
+                .get(&param_string(node, "a")?)?
+                .collision_target
+                .clone();
+            let right = runtime_entities
+                .get(&param_string(node, "b")?)?
+                .collision_target
+                .clone();
+            let overlap = LogicBoolExpr::Overlap { left, right };
+            if from_port == "false" {
+                Some(LogicBoolExpr::Not(Box::new(overlap)))
+            } else {
+                Some(overlap)
+            }
+        }
+        "logic_and" => {
+            let left = resolve_bool_expr_from_input(graph, &node.id, "a", runtime_entities, visited)
+                .unwrap_or(LogicBoolExpr::Literal(false));
+            let right =
+                resolve_bool_expr_from_input(graph, &node.id, "b", runtime_entities, visited)
+                    .unwrap_or(LogicBoolExpr::Literal(false));
+            Some(LogicBoolExpr::And {
+                result_name: format!("_and_{}", sanitize_identifier(&node.id)),
+                left: Box::new(left),
+                right: Box::new(right),
+            })
+        }
+        _ => None,
+    };
+
+    visited.remove(&node.id);
+    expression
+}
+
+fn normalize_scroll_layer(layer: &str) -> String {
+    match sanitize_identifier(layer).as_str() {
+        "bg1" | "bg_a" | "bga" => "BG_A".to_string(),
+        "bg2" | "bg_b" | "bgb" => "BG_B".to_string(),
+        "bg3" | "window" => "WINDOW".to_string(),
+        other if !other.is_empty() => other.to_uppercase(),
+        _ => "BG_A".to_string(),
+    }
 }
 
 fn param_string(node: &StoredNodeGraphNode, key: &str) -> Option<String> {
@@ -1122,6 +1442,12 @@ fn collect_logic_sound_names_from_ops(
                 sound_names.insert(sfx.clone());
             }
             LogicOp::ConditionOverlap {
+                if_true, if_false, ..
+            } => {
+                collect_logic_sound_names_from_ops(if_true, sound_names);
+                collect_logic_sound_names_from_ops(if_false, sound_names);
+            }
+            LogicOp::ConditionBool {
                 if_true, if_false, ..
             } => {
                 collect_logic_sound_names_from_ops(if_true, sound_names);
@@ -1991,6 +2317,524 @@ mod tests {
             .main_c
             .contains("VDP_setHorizontalScrollLine(BG_A, 0, retro_hscroll_table, 224, DMA);"));
         assert!(sgdk.main_c.contains("retro_hscroll_table[96] += 4;"));
+    }
+
+    #[test]
+    fn generate_ast_compiles_sprite_anim_nodes_into_setup_set_animation() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
+            name: "Logic Animation".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+        };
+        let mut animations = HashMap::new();
+        animations.insert(
+            "idle".to_string(),
+            AnimationDef {
+                frames: vec![0],
+                fps: 6,
+                looping: true,
+            },
+        );
+        animations.insert(
+            "run".to_string(),
+            AnimationDef {
+                frames: vec![1, 2, 3],
+                fps: 12,
+                looping: true,
+            },
+        );
+        let logic_graph = json!({
+            "version": 1,
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "event_start",
+                    "label": "On Start",
+                    "x": 0,
+                    "y": 0,
+                    "inputs": [],
+                    "outputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "params": {}
+                },
+                {
+                    "id": "anim",
+                    "type": "sprite_anim",
+                    "label": "Set Animation",
+                    "x": 120,
+                    "y": 0,
+                    "inputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "outputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "params": { "target": "hero", "anim": "run" }
+                }
+            ],
+            "edges": [
+                { "id": "edge_1", "fromNode": "start", "fromPort": "exec", "toNode": "anim", "toPort": "exec" }
+            ]
+        });
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "hero".to_string(),
+                prefab: None,
+                transform: Transform { x: 16, y: 24 },
+                components: Components {
+                    sprite: Some(SpriteComponent {
+                        asset: "assets/sprites/hero.png".to_string(),
+                        frame_width: 16,
+                        frame_height: 16,
+                        pivot: None,
+                        palette_slot: 0,
+                        animations,
+                        priority: "foreground".to_string(),
+                    }),
+                    logic: Some(crate::ugdm::components::LogicComponent {
+                        graph: Some(logic_graph.to_string()),
+                        variables: HashMap::new(),
+                    }),
+                    ..Components::default()
+                },
+            }],
+            palettes: Vec::new(),
+            retrofx: None,
+        };
+
+        let ast = generate_ast(&project, &scene);
+        let game_loop_index = ast
+            .nodes
+            .iter()
+            .position(|node| matches!(node, AstNode::GameLoopBegin))
+            .expect("game loop should exist");
+        let runtime_anim_index = ast
+            .nodes
+            .iter()
+            .enumerate()
+            .find_map(|(index, node)| match node {
+                AstNode::SetAnimation {
+                    var_name,
+                    resource_name,
+                    anim_index,
+                    frame_time,
+                    frames,
+                    looping,
+                } if *anim_index == 1 => Some((
+                    index,
+                    var_name.clone(),
+                    resource_name.clone(),
+                    *frame_time,
+                    frames.clone(),
+                    *looping,
+                )),
+                _ => None,
+            })
+            .expect("sprite_anim should emit a SetAnimation node");
+
+        assert!(runtime_anim_index.0 < game_loop_index);
+        assert_eq!(runtime_anim_index.1, "spr_hero");
+        assert_eq!(runtime_anim_index.2, "hero");
+        assert_eq!(runtime_anim_index.3, 5);
+        assert_eq!(runtime_anim_index.4, vec![1, 2, 3]);
+        assert!(runtime_anim_index.5);
+    }
+
+    #[test]
+    fn generate_ast_compiles_scroll_tilemap_nodes_into_runtime_scroll_commands() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
+            name: "Logic Scroll".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+        };
+        let logic_graph = json!({
+            "version": 1,
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "event_start",
+                    "label": "On Start",
+                    "x": 0,
+                    "y": 0,
+                    "inputs": [],
+                    "outputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "params": {}
+                },
+                {
+                    "id": "scroll",
+                    "type": "scroll_tilemap",
+                    "label": "Scroll Tilemap",
+                    "x": 120,
+                    "y": 0,
+                    "inputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "outputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "params": { "layer": "BG_B", "dx": 3, "dy": -2 }
+                }
+            ],
+            "edges": [
+                { "id": "edge_1", "fromNode": "start", "fromPort": "exec", "toNode": "scroll", "toPort": "exec" }
+            ]
+        });
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "controller".to_string(),
+                prefab: None,
+                transform: Transform { x: 0, y: 0 },
+                components: Components {
+                    logic: Some(crate::ugdm::components::LogicComponent {
+                        graph: Some(logic_graph.to_string()),
+                        variables: HashMap::new(),
+                    }),
+                    ..Components::default()
+                },
+            }],
+            palettes: Vec::new(),
+            retrofx: None,
+        };
+
+        let ast = generate_ast(&project, &scene);
+
+        assert!(ast.nodes.iter().any(|node| matches!(
+            node,
+            AstNode::ScrollTilemap { layer, dx, dy }
+                if layer == "BG_B" && *dx == 3 && *dy == -2
+        )));
+    }
+
+    #[test]
+    fn generate_ast_compiles_move_camera_nodes_with_follow_sprite_offsets() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
+            name: "Logic Camera".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+        };
+        let logic_graph = json!({
+            "version": 1,
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "event_start",
+                    "label": "On Start",
+                    "x": 0,
+                    "y": 0,
+                    "inputs": [],
+                    "outputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "params": {}
+                },
+                {
+                    "id": "camera",
+                    "type": "move_camera",
+                    "label": "Move Camera",
+                    "x": 120,
+                    "y": 0,
+                    "inputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "outputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "params": { "target": "camera_rig", "x": 4, "y": -6 }
+                }
+            ],
+            "edges": [
+                { "id": "edge_1", "fromNode": "start", "fromPort": "exec", "toNode": "camera", "toPort": "exec" }
+            ]
+        });
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![
+                Entity {
+                    entity_id: "hero".to_string(),
+                    prefab: None,
+                    transform: Transform { x: 16, y: 24 },
+                    components: Components {
+                        sprite: Some(SpriteComponent {
+                            asset: "assets/sprites/hero.png".to_string(),
+                            frame_width: 16,
+                            frame_height: 16,
+                            pivot: None,
+                            palette_slot: 0,
+                            animations: HashMap::new(),
+                            priority: "foreground".to_string(),
+                        }),
+                        ..Components::default()
+                    },
+                },
+                Entity {
+                    entity_id: "camera_rig".to_string(),
+                    prefab: None,
+                    transform: Transform { x: 0, y: 0 },
+                    components: Components {
+                        camera: Some(crate::ugdm::components::CameraComponent {
+                            follow_entity: Some("hero".to_string()),
+                            offset_x: 12,
+                            offset_y: 8,
+                        }),
+                        logic: Some(crate::ugdm::components::LogicComponent {
+                            graph: Some(logic_graph.to_string()),
+                            variables: HashMap::new(),
+                        }),
+                        ..Components::default()
+                    },
+                },
+            ],
+            palettes: Vec::new(),
+            retrofx: None,
+        };
+
+        let ast = generate_ast(&project, &scene);
+
+        assert!(ast.nodes.iter().any(|node| matches!(
+            node,
+            AstNode::MoveCamera { target, x, y }
+                if target == "spr_hero" && *x == 16 && *y == 2
+        )));
+    }
+
+    #[test]
+    fn generate_ast_compiles_logic_and_between_overlap_nodes_into_bool_guard() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
+            name: "Logic And".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+        };
+        let logic_graph = json!({
+            "version": 1,
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "event_start",
+                    "label": "On Start",
+                    "x": 0,
+                    "y": 0,
+                    "inputs": [],
+                    "outputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "params": {}
+                },
+                {
+                    "id": "overlap_a",
+                    "type": "condition_overlap",
+                    "label": "Overlap A",
+                    "x": 120,
+                    "y": 0,
+                    "inputs": [],
+                    "outputs": [
+                        { "id": "true", "label": "True", "kind": "exec" },
+                        { "id": "false", "label": "False", "kind": "exec" }
+                    ],
+                    "params": { "a": "player", "b": "enemy" }
+                },
+                {
+                    "id": "overlap_b",
+                    "type": "condition_overlap",
+                    "label": "Overlap B",
+                    "x": 120,
+                    "y": 120,
+                    "inputs": [],
+                    "outputs": [
+                        { "id": "true", "label": "True", "kind": "exec" },
+                        { "id": "false", "label": "False", "kind": "exec" }
+                    ],
+                    "params": { "a": "player", "b": "pickup" }
+                },
+                {
+                    "id": "logic_gate",
+                    "type": "logic_and",
+                    "label": "AND",
+                    "x": 260,
+                    "y": 60,
+                    "inputs": [
+                        { "id": "a", "label": "A", "kind": "data", "dataType": "bool" },
+                        { "id": "b", "label": "B", "kind": "data", "dataType": "bool" }
+                    ],
+                    "outputs": [{ "id": "out", "label": "Out", "kind": "data", "dataType": "bool" }],
+                    "params": {}
+                },
+                {
+                    "id": "guarded_overlap",
+                    "type": "condition_overlap",
+                    "label": "Guarded",
+                    "x": 420,
+                    "y": 0,
+                    "inputs": [{ "id": "guard", "label": "guard", "kind": "data", "dataType": "bool" }],
+                    "outputs": [
+                        { "id": "true", "label": "True", "kind": "exec" },
+                        { "id": "false", "label": "False", "kind": "exec" }
+                    ],
+                    "params": { "a": "player", "b": "enemy" }
+                },
+                {
+                    "id": "sound",
+                    "type": "action_sound",
+                    "label": "Play Sound",
+                    "x": 580,
+                    "y": 0,
+                    "inputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "outputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "params": { "sfx": "jump" }
+                }
+            ],
+            "edges": [
+                { "id": "edge_exec_1", "fromNode": "start", "fromPort": "exec", "toNode": "guarded_overlap", "toPort": "exec" },
+                { "id": "edge_exec_2", "fromNode": "guarded_overlap", "fromPort": "true", "toNode": "sound", "toPort": "exec" },
+                { "id": "edge_data_1", "fromNode": "overlap_a", "fromPort": "true", "toNode": "logic_gate", "toPort": "a" },
+                { "id": "edge_data_2", "fromNode": "overlap_b", "fromPort": "true", "toNode": "logic_gate", "toPort": "b" },
+                { "id": "edge_data_3", "fromNode": "logic_gate", "fromPort": "out", "toNode": "guarded_overlap", "toPort": "guard" }
+            ]
+        });
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![
+                Entity {
+                    entity_id: "player".to_string(),
+                    prefab: None,
+                    transform: Transform { x: 16, y: 24 },
+                    components: Components {
+                        sprite: Some(SpriteComponent {
+                            asset: "assets/sprites/player.png".to_string(),
+                            frame_width: 16,
+                            frame_height: 16,
+                            pivot: None,
+                            palette_slot: 0,
+                            animations: HashMap::new(),
+                            priority: "foreground".to_string(),
+                        }),
+                        collision: Some(crate::ugdm::components::CollisionComponent {
+                            shape: "aabb".to_string(),
+                            width: 16,
+                            height: 16,
+                            offset: None,
+                            solid: true,
+                            layer: Some("player".to_string()),
+                            collides_with: vec!["enemy".to_string(), "pickup".to_string()],
+                        }),
+                        logic: Some(crate::ugdm::components::LogicComponent {
+                            graph: Some(logic_graph.to_string()),
+                            variables: HashMap::new(),
+                        }),
+                        ..Components::default()
+                    },
+                },
+                Entity {
+                    entity_id: "enemy".to_string(),
+                    prefab: None,
+                    transform: Transform { x: 32, y: 24 },
+                    components: Components {
+                        sprite: Some(SpriteComponent {
+                            asset: "assets/sprites/enemy.png".to_string(),
+                            frame_width: 16,
+                            frame_height: 16,
+                            pivot: None,
+                            palette_slot: 0,
+                            animations: HashMap::new(),
+                            priority: "foreground".to_string(),
+                        }),
+                        collision: Some(crate::ugdm::components::CollisionComponent {
+                            shape: "aabb".to_string(),
+                            width: 16,
+                            height: 16,
+                            offset: None,
+                            solid: true,
+                            layer: Some("enemy".to_string()),
+                            collides_with: vec!["player".to_string()],
+                        }),
+                        ..Components::default()
+                    },
+                },
+                Entity {
+                    entity_id: "pickup".to_string(),
+                    prefab: None,
+                    transform: Transform { x: 24, y: 24 },
+                    components: Components {
+                        sprite: Some(SpriteComponent {
+                            asset: "assets/sprites/pickup.png".to_string(),
+                            frame_width: 16,
+                            frame_height: 16,
+                            pivot: None,
+                            palette_slot: 0,
+                            animations: HashMap::new(),
+                            priority: "foreground".to_string(),
+                        }),
+                        collision: Some(crate::ugdm::components::CollisionComponent {
+                            shape: "aabb".to_string(),
+                            width: 16,
+                            height: 16,
+                            offset: None,
+                            solid: false,
+                            layer: Some("pickup".to_string()),
+                            collides_with: vec!["player".to_string()],
+                        }),
+                        ..Components::default()
+                    },
+                },
+            ],
+            palettes: Vec::new(),
+            retrofx: None,
+        };
+
+        let ast = generate_ast(&project, &scene);
+
+        let guarded = ast
+            .logic_scripts
+            .iter()
+            .flat_map(|script| script.ops.iter())
+            .find_map(|op| match op {
+                LogicOp::ConditionBool { condition, if_true, .. } => Some((condition, if_true)),
+                _ => None,
+            })
+            .expect("logic_and should compile into a guarded condition");
+
+        assert!(matches!(
+            guarded.0,
+            LogicBoolExpr::And { result_name, .. } if result_name == "_and_guarded_overlap"
+        ));
+        assert_eq!(
+            guarded.1,
+            &vec![LogicOp::PlaySound {
+                sfx: "jump".to_string(),
+            }]
+        );
     }
 
     #[test]
