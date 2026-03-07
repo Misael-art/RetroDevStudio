@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Ultima Atualizacao:** 2026-03-06
-**Ultima sessao:** 2026-03-06 (Codex - Sessao 45: fechamento autonomo de E3, F1 e F2)
-**Fase Atual:** Hardening/QA do MVP (Build -> ROM -> Emulacao validado em Windows com upstream real; desktop E2E multi-target validado localmente e em runner GitHub/Windows real; validacao live do editor coberta para bloqueios fatais e estados intermediarios com motivo visual explicito)
+**Ultima sessao:** 2026-03-06 (Codex - Sessao 46: bloco G do pipeline canonico concluido)
+**Fase Atual:** Expansao do pipeline canonico apos hardening do MVP (Build -> ROM -> Emulacao validado em Windows com upstream real; desktop E2E multi-target validado localmente e em runner GitHub/Windows real; build/codegen agora avancando sobre Physics, Audio, RetroFX e NodeGraph expandido sem abrir pipeline paralelo)
 **Branch sugerida:** `feat/<tema>` para trabalho paralelo; usar `main` apenas quando o usuario pedir edicao direta no workspace atual
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
@@ -16,6 +16,13 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-06 - sessao 46):**
+  - G2 foi concluida no pipeline canonico: `AudioComponent` agora entra no AST, os emitters SGDK/SNES geram init/playback real de audio (`XGM_setPCM`/`XGM_startPlay` e `spcLoad`/`spcPlaySound`) e o `build_orch` passou a fazer staging de assets de audio para os dois targets, com cobertura Rust dedicada.
+  - G3 foi concluida no pipeline canonico: `scene.retrofx` agora gera `SetupParallax`/`SetupRasterEffect` no AST, e os emitters SGDK/SNES passaram a injetar setup e atualizacao frame-a-frame de scroll/raster no game loop sem criar uma trilha paralela ao renderer existente.
+  - G4 foi concluida no compilador do NodeGraph: os nos `effect_parallax` e `effect_raster`, que ja existiam na paleta do frontend, agora sobem do grafo persistido para os AST nodes canonicos de `RetroFX`, chegando ao codegen SGDK/SNES com testes de AST e de emissao.
+  - Os commits desta rodada foram `5c58eda` (`feat: add audio build pipeline`), `f5c0c16` (`feat: emit retrofx build effects`) e `1b12b1f` (`feat: compile retrofx nodegraph effects`).
+  - O baseline local permaneceu verde ao final de cada tarefa, com `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo clippy -- -D warnings` e `cargo test --lib -- --nocapture`.
 
 * **O que acabou de acontecer (2026-03-06 - sessao 45):**
   - E3 foi concluida no caminho canonico do emulador: `libretro_ffi.rs` agora resolve `retro_get_memory_data`/`retro_get_memory_size`, expoe leitura segura por regiao e o backend passou a servir `emulator_read_memory(region, offset, length)` com tamanho total reportado.
@@ -454,9 +461,9 @@
   - GitHub Actions `Desktop E2E` (`22606643935`) -> OK em `windows-latest`, com `Run Mega Drive desktop smoke` e `Run SNES desktop smoke` ambos verdes.
 
 * **Proximo passo imediato:**
-  1. A fila MVP remanescente (`E3`, `F1`, `F2`) foi encerrada; o proximo ciclo deve focar em hardening/revalidacao institucional do fluxo canonico completo, sem reabrir superficies paralelas.
-  2. Repetir os gates canonicos e os fluxos reais de Windows/Tauri sempre que houver mudanca em schema, troca de cena, build ou emulacao (`check:tree`, `lint`, `tsc`, `npm test`, `cargo clippy`, `cargo test --lib` e validacoes desktop/upstream aplicaveis).
-  3. Preservar `entry_scene`, `scene_path` ativo e `LogicComponent.graph` como fontes autoritativas do carregamento/build, evitando bypass no frontend ou pipelines duplicados.
+  1. Executar `H1. Compilar sprite_anim no NodeGraph`, expandindo a malha canonica de animacao runtime para suportar troca de animacao por grafo nos emitters SGDK/SNES sem quebrar o fluxo atual de `SetAnimation`.
+  2. Na sequencia, avancar para `H2`/`H3`/`H4` reaproveitando o compilador de NodeGraph ja existente e evitando criar um segundo pipeline de logica fora de `ast_generator.rs`.
+  3. Preservar `entry_scene`, `scene_path` ativo, `retrofx` persistido e `LogicComponent.graph` como fontes autoritativas do carregamento/build, sempre reexecutando os gates canonicos e os fluxos reais aplicaveis quando build/emulacao forem alterados.
 
 ---
 
