@@ -47,6 +47,7 @@
 - Save states basicos do emulador agora usam serializacao real do Libretro com slot em memoria, IPC dedicado e controles de salvar/carregar no `Game View`.
 - `Game View` agora expoe `pause`, `resume` e `step 1 frame` no proprio painel, reaproveitando `emulator_run_frame` e o loop canonico existente sem pipeline paralelo.
 - `ToolsPanel` agora expoe um `Memory Viewer` basico ligado ao Libretro real, com leitura de SRAM/WRAM/VRAM, grid hexadecimal e auto-refresh, mantido como `Experimental`.
+- `project.rds` e `scenes/*.json` agora carregam `schema_version`, aplicam migracao pass-through de `1.0.0` e preservam compatibilidade com fixtures legadas sem o campo.
 - Features ainda parciais agora ficam explicitamente marcadas como `Experimental` na UI para nao mentir sobre prontidao.
 
 ### Ainda em hardening

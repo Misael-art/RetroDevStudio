@@ -1,6 +1,12 @@
 use serde::{Deserialize, Serialize};
 use super::components::Components;
 
+pub const CURRENT_SCHEMA_VERSION: &str = "1.0.0";
+
+fn default_schema_version() -> String {
+    CURRENT_SCHEMA_VERSION.to_string()
+}
+
 // ── Transform ─────────────────────────────────────────────────────────────────
 
 /// Posição em pixels inteiros (hardware 16-bit não usa float).
@@ -76,6 +82,8 @@ pub struct RetroFXConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Scene {
     pub scene_id: String,
+    #[serde(default)]
+    pub schema_version: Option<String>,
     pub display_name: Option<String>,
     #[serde(default)]
     pub background_layers: Vec<BackgroundLayer>,
@@ -116,6 +124,8 @@ pub struct Resolution {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Project {
     pub rds_version: String,
+    #[serde(default = "default_schema_version")]
+    pub schema_version: String,
     pub name: String,
     pub target: String, // "megadrive" | "snes"
     pub resolution: Resolution,

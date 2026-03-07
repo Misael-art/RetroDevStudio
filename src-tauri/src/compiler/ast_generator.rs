@@ -879,6 +879,7 @@ mod tests {
 
         let project = Project {
             rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
             name: "Timing Demo".to_string(),
             target: "megadrive".to_string(),
             resolution: Resolution {
@@ -892,6 +893,7 @@ mod tests {
         };
         let scene = Scene {
             scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
             display_name: Some("Main".to_string()),
             background_layers: Vec::new(),
             entities: vec![Entity {
@@ -959,6 +961,7 @@ mod tests {
     fn generate_ast_emits_tilemap_nodes_for_tilemap_component() {
         let project = Project {
             rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
             name: "Tilemap Demo".to_string(),
             target: "megadrive".to_string(),
             resolution: Resolution {
@@ -972,6 +975,7 @@ mod tests {
         };
         let scene = Scene {
             scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
             display_name: Some("Main".to_string()),
             background_layers: Vec::new(),
             entities: vec![Entity {
@@ -1020,6 +1024,7 @@ mod tests {
     fn generate_ast_emits_aabb_collision_checks_for_compatible_layers() {
         let project = Project {
             rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
             name: "Collision Demo".to_string(),
             target: "megadrive".to_string(),
             resolution: Resolution {
@@ -1033,6 +1038,7 @@ mod tests {
         };
         let scene = Scene {
             scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
             display_name: Some("Main".to_string()),
             background_layers: Vec::new(),
             entities: vec![
@@ -1106,6 +1112,7 @@ mod tests {
     fn generate_ast_skips_aabb_collision_checks_for_non_matching_layers() {
         let project = Project {
             rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
             name: "Collision Demo".to_string(),
             target: "megadrive".to_string(),
             resolution: Resolution {
@@ -1119,6 +1126,7 @@ mod tests {
         };
         let scene = Scene {
             scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
             display_name: Some("Main".to_string()),
             background_layers: Vec::new(),
             entities: vec![
@@ -1170,6 +1178,7 @@ mod tests {
     fn generate_ast_emits_input_reads_and_action_bindings() {
         let project = Project {
             rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
             name: "Input Demo".to_string(),
             target: "megadrive".to_string(),
             resolution: Resolution {
@@ -1189,6 +1198,7 @@ mod tests {
 
         let scene = Scene {
             scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
             display_name: Some("Main".to_string()),
             background_layers: Vec::new(),
             entities: vec![
@@ -1250,6 +1260,7 @@ mod tests {
     fn generate_ast_compiles_logic_graph_into_runtime_scripts() {
         let project = Project {
             rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
             name: "Logic Demo".to_string(),
             target: "megadrive".to_string(),
             resolution: Resolution {
@@ -1319,6 +1330,7 @@ mod tests {
 
         let scene = Scene {
             scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
             display_name: Some("Main".to_string()),
             background_layers: Vec::new(),
             entities: vec![

@@ -1,5 +1,6 @@
 {
   "scene_id": "main",
+  "schema_version": "1.0.0",
   "display_name": "Main Scene",
   "background_layers": [],
   "entities": [

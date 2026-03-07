@@ -4,7 +4,15 @@ use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::ugdm::entities::{BuildConfig, Entity, PaletteEntry, Project, Resolution, Scene};
+use crate::ugdm::entities::{
+    BuildConfig,
+    Entity,
+    PaletteEntry,
+    Project,
+    Resolution,
+    Scene,
+    CURRENT_SCHEMA_VERSION,
+};
 #[cfg(test)]
 use crate::ugdm::entities::{RetroFXConfig, RetroFXParallaxLayer, RetroFXRasterLine};
 
@@ -81,6 +89,7 @@ pub fn canonical_project(project_name: &str, target: &str) -> Result<Project, Lo
 
     Ok(Project {
         rds_version: UGDM_VERSION.to_string(),
+        schema_version: CURRENT_SCHEMA_VERSION.to_string(),
         name: trimmed_name.to_string(),
         target: spec.target.to_string(),
         resolution: spec.resolution(),
@@ -94,6 +103,7 @@ pub fn canonical_project(project_name: &str, target: &str) -> Result<Project, Lo
 pub fn canonical_scene(scene_id: &str, display_name: Option<String>) -> Scene {
     Scene {
         scene_id: scene_id.trim().to_string(),
+        schema_version: Some(CURRENT_SCHEMA_VERSION.to_string()),
         display_name,
         background_layers: Vec::new(),
         entities: Vec::new(),
@@ -132,14 +142,16 @@ pub fn create_project_skeleton(
 }
 
 pub fn save_project(project_dir: &Path, project: &Project) -> Result<(), LoadError> {
-    validate_project(project)?;
-    write_json(project_dir.join("project.rds"), project)
+    let project = migrate_project(project.clone());
+    validate_project(&project)?;
+    write_json(project_dir.join("project.rds"), &project)
 }
 
 pub fn save_scene(project_dir: &Path, scene_path: &str, scene: &Scene) -> Result<(), LoadError> {
     validate_scene_path(scene_path)?;
-    validate_scene(scene)?;
-    write_json(project_dir.join(scene_path), scene)
+    let scene = migrate_scene(scene.clone());
+    validate_scene(&scene)?;
+    write_json(project_dir.join(scene_path), &scene)
 }
 
 pub fn update_project_target(project_dir: &Path, target: &str) -> Result<Project, LoadError> {
@@ -172,6 +184,7 @@ pub fn load_project(project_dir: &Path) -> Result<Project, LoadError> {
             e
         ))
     })?;
+    let project = migrate_project(project);
 
     validate_project(&project)?;
     Ok(project)
@@ -197,6 +210,7 @@ pub fn load_scene(project_dir: &Path, scene_path: &str) -> Result<Scene, LoadErr
             scene_path, e
         ))
     })?;
+    let scene = migrate_scene(scene);
 
     validate_scene(&scene)?;
     Ok(scene)
@@ -216,6 +230,34 @@ pub fn resolve_prefabs(project_dir: &Path, scene: &Scene) -> Result<Scene, LoadE
         entities,
         ..scene.clone()
     })
+}
+
+pub fn migrate_project(mut project: Project) -> Project {
+    let schema_version = normalized_project_schema_version(&project).to_string();
+    if project.schema_version.trim().is_empty() {
+        project.schema_version = schema_version.clone();
+    }
+    if let Some(warning) = schema_warning_message("project.rds", &schema_version) {
+        eprintln!("{warning}");
+    }
+    project
+}
+
+pub fn migrate_scene(mut scene: Scene) -> Scene {
+    let schema_version = normalized_scene_schema_version(&scene).to_string();
+    if scene
+        .schema_version
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or_default()
+        .is_empty()
+    {
+        scene.schema_version = Some(schema_version.clone());
+    }
+    if let Some(warning) = schema_warning_message("scene", &schema_version) {
+        eprintln!("{warning}");
+    }
+    scene
 }
 
 /// Validacoes semanticas do Project (alem do parsing JSON).
@@ -267,6 +309,33 @@ pub fn validate_project(project: &Project) -> Result<(), LoadError> {
     }
 
     Ok(())
+}
+
+fn normalized_project_schema_version(project: &Project) -> &str {
+    let version = project.schema_version.trim();
+    if version.is_empty() {
+        CURRENT_SCHEMA_VERSION
+    } else {
+        version
+    }
+}
+
+fn normalized_scene_schema_version(scene: &Scene) -> &str {
+    scene
+        .schema_version
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(CURRENT_SCHEMA_VERSION)
+}
+
+fn schema_warning_message(scope: &str, version: &str) -> Option<String> {
+    (version != CURRENT_SCHEMA_VERSION).then(|| {
+        format!(
+            "{}: schema_version '{}' desconhecida. Aplicando migracao pass-through.",
+            scope, version
+        )
+    })
 }
 
 pub fn validate_scene(scene: &Scene) -> Result<(), LoadError> {
@@ -735,6 +804,7 @@ mod tests {
         let project = canonical_project("Dummy", "megadrive").expect("canonical project");
 
         assert_eq!(project.rds_version, UGDM_VERSION);
+        assert_eq!(project.schema_version, CURRENT_SCHEMA_VERSION);
         assert_eq!(project.target, "megadrive");
         assert_eq!(project.resolution, Resolution { width: 320, height: 224 });
         assert_eq!(project.palette_mode, "4x16");
@@ -748,10 +818,15 @@ mod tests {
         let scene = load_scene(&fixture_dir("megadrive_dummy"), &project.entry_scene)
             .expect("load scene");
 
+        assert_eq!(project.schema_version, CURRENT_SCHEMA_VERSION);
         assert_eq!(project.target, "megadrive");
         assert_eq!(project.resolution, Resolution { width: 320, height: 224 });
         assert_eq!(project.palette_mode, "4x16");
         assert_eq!(scene.scene_id, DEFAULT_SCENE_ID);
+        assert_eq!(
+            scene.schema_version.as_deref(),
+            Some(CURRENT_SCHEMA_VERSION)
+        );
     }
 
     #[test]
@@ -760,10 +835,105 @@ mod tests {
         let scene = load_scene(&fixture_dir("snes_dummy"), &project.entry_scene)
             .expect("load scene");
 
+        assert_eq!(project.schema_version, CURRENT_SCHEMA_VERSION);
         assert_eq!(project.target, "snes");
         assert_eq!(project.resolution, Resolution { width: 256, height: 224 });
         assert_eq!(project.palette_mode, "8x16");
         assert_eq!(scene.scene_id, DEFAULT_SCENE_ID);
+        assert_eq!(
+            scene.schema_version.as_deref(),
+            Some(CURRENT_SCHEMA_VERSION)
+        );
+    }
+
+    #[test]
+    fn load_legacy_fixture_without_schema_version_is_backward_compatible() {
+        let project_dir = temp_dir("legacy-schema-version");
+        fs::create_dir_all(project_dir.join("scenes")).expect("create scenes dir");
+
+        let legacy_project = serde_json::json!({
+            "rds_version": UGDM_VERSION,
+            "name": "Legacy Schema Project",
+            "target": "megadrive",
+            "resolution": {
+                "width": 320,
+                "height": 224
+            },
+            "fps": 60,
+            "palette_mode": "4x16",
+            "entry_scene": "scenes/main.json",
+            "build": {
+                "output_dir": "build/",
+                "optimization": "size"
+            }
+        });
+        let legacy_scene = serde_json::json!({
+            "scene_id": DEFAULT_SCENE_ID,
+            "display_name": "Main Scene",
+            "background_layers": [],
+            "entities": [],
+            "palettes": []
+        });
+
+        fs::write(project_dir.join("project.rds"), legacy_project.to_string())
+            .expect("write legacy project");
+        fs::write(
+            project_dir.join("scenes").join("main.json"),
+            legacy_scene.to_string(),
+        )
+        .expect("write legacy scene");
+
+        let project = load_project(&project_dir).expect("load legacy project");
+        let scene = load_scene(&project_dir, "scenes/main.json").expect("load legacy scene");
+
+        assert_eq!(project.schema_version, CURRENT_SCHEMA_VERSION);
+        assert_eq!(
+            scene.schema_version.as_deref(),
+            Some(CURRENT_SCHEMA_VERSION)
+        );
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn unknown_schema_version_produces_warning_message() {
+        let project = Project {
+            rds_version: UGDM_VERSION.to_string(),
+            schema_version: "9.9.9".to_string(),
+            name: "Unknown Schema".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: DEFAULT_ENTRY_SCENE.to_string(),
+            build: Some(default_build_config()),
+        };
+        let scene = Scene {
+            scene_id: DEFAULT_SCENE_ID.to_string(),
+            schema_version: Some("9.9.9".to_string()),
+            display_name: Some("Main Scene".to_string()),
+            background_layers: Vec::new(),
+            entities: Vec::new(),
+            palettes: Vec::new(),
+            retrofx: None,
+        };
+
+        let project_warning = schema_warning_message(
+            "project.rds",
+            normalized_project_schema_version(&project),
+        )
+        .expect("project warning");
+        let scene_warning = schema_warning_message(
+            "scene",
+            normalized_scene_schema_version(&scene),
+        )
+        .expect("scene warning");
+
+        assert!(project_warning.contains("schema_version '9.9.9' desconhecida"));
+        assert!(scene_warning.contains("schema_version '9.9.9' desconhecida"));
     }
 
     #[test]

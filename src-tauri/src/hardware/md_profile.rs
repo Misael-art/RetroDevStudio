@@ -221,6 +221,7 @@ mod tests {
     fn empty_scene() -> Scene {
         Scene {
             scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
             display_name: Some("Main Scene".to_string()),
             background_layers: Vec::new(),
             entities: Vec::new(),
