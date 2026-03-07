@@ -170,7 +170,43 @@ fn crc32_simple(data: &[u8]) -> u32 {
     !crc
 }
 
-/// Cria um patch BPS (subset SourceRead/TargetRead) entre `original` e `modified`.
+fn encode_signed_offset(delta: i64, out: &mut Vec<u8>) {
+    let encoded = if delta < 0 {
+        ((-delta) as u64) << 1 | 1
+    } else {
+        (delta as u64) << 1
+    };
+    encode_varint(encoded, out);
+}
+
+fn source_copy_candidate(original: &[u8], modified: &[u8], target_pos: usize) -> Option<(usize, usize)> {
+    if target_pos >= modified.len() {
+        return None;
+    }
+
+    let mut best: Option<(usize, usize)> = None;
+    for source_start in 0..original.len() {
+        if source_start == target_pos || original[source_start] != modified[target_pos] {
+            continue;
+        }
+
+        let mut run_len = 0usize;
+        while target_pos + run_len < modified.len()
+            && source_start + run_len < original.len()
+            && modified[target_pos + run_len] == original[source_start + run_len]
+        {
+            run_len += 1;
+        }
+
+        if run_len >= 4 && best.is_none_or(|(_, best_len)| run_len > best_len) {
+            best = Some((source_start, run_len));
+        }
+    }
+
+    best
+}
+
+/// Cria um patch BPS (subset SourceRead/TargetRead/SourceCopy) entre `original` e `modified`.
 pub fn create_bps(original: &[u8], modified: &[u8]) -> Result<Vec<u8>, String> {
     let mut patch = BPS_HEADER.to_vec();
 
@@ -178,37 +214,61 @@ pub fn create_bps(original: &[u8], modified: &[u8]) -> Result<Vec<u8>, String> {
     encode_varint(modified.len() as u64, &mut patch);
     encode_varint(0, &mut patch); // metadata size = 0
 
-    // Build actions: compare byte-by-byte, emit TargetRead for changed runs,
-    // SourceRead for unchanged runs.
-    let len = original.len().min(modified.len());
     let mut i = 0usize;
+    let mut source_copy_pos = 0i64;
 
-    while i < len {
-        if original[i] == modified[i] {
-            // SourceRead run
+    while i < modified.len() {
+        if i < original.len() && original[i] == modified[i] {
             let start = i;
-            while i < len && original[i] == modified[i] { i += 1; }
+            while i < modified.len() && i < original.len() && original[i] == modified[i] {
+                i += 1;
+            }
             let run = (i - start) as u64;
-            // action = (length - 1) << 2 | 0 (SourceRead)
             encode_varint((run - 1) << 2, &mut patch);
-        } else {
-            // TargetRead run
+            continue;
+        }
+
+        if let Some((source_start, run_len)) = source_copy_candidate(original, modified, i) {
+            encode_varint((((run_len as u64) - 1) << 2) | 2, &mut patch);
+            encode_signed_offset(source_start as i64 - source_copy_pos, &mut patch);
+            source_copy_pos = source_start as i64 + run_len as i64;
+            i += run_len;
+            continue;
+        }
+
+        let start = i;
+        i += 1;
+        while i < modified.len() {
+            let same_position = i < original.len() && original[i] == modified[i];
+            let reusable_source = source_copy_candidate(original, modified, i).is_some();
+            if same_position || reusable_source {
+                break;
+            }
+            i += 1;
+        }
+
+        let data = &modified[start..i];
+        let run = data.len() as u64;
+        encode_varint(((run - 1) << 2) | 1, &mut patch);
+        patch.extend_from_slice(data);
+    }
+
+    if modified.len() > i {
+        while i < modified.len() {
             let start = i;
-            while i < len && original[i] != modified[i] { i += 1; }
+            while i < modified.len() {
+                let same_position = i < original.len() && original[i] == modified[i];
+                let reusable_source = source_copy_candidate(original, modified, i).is_some();
+                if same_position || reusable_source {
+                    break;
+                }
+                i += 1;
+            }
             let data = &modified[start..i];
             let run = data.len() as u64;
-            // action = (length - 1) << 2 | 1 (TargetRead)
             encode_varint(((run - 1) << 2) | 1, &mut patch);
             patch.extend_from_slice(data);
         }
-    }
-
-    // Append extra bytes if modified is longer
-    if modified.len() > len {
-        let extra = &modified[len..];
-        let run = extra.len() as u64;
-        encode_varint(((run - 1) << 2) | 1, &mut patch);
-        patch.extend_from_slice(extra);
     }
 
     // Checksums (CRC32 LE)
@@ -392,4 +452,62 @@ pub fn apply_bps_file(rom_path: &Path, patch_path: &Path, output_path: &Path) ->
         return PatchResult::err(format!("Erro ao salvar ROM patcheada: {e}"));
     }
     PatchResult::ok(format!("Patch BPS aplicado: {} bytes alterados.", changed), changed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{apply_bps, create_bps, crc32_simple, encode_varint, BPS_HEADER};
+
+    fn create_bps_target_read_only(original: &[u8], modified: &[u8]) -> Vec<u8> {
+        let mut patch = BPS_HEADER.to_vec();
+        encode_varint(original.len() as u64, &mut patch);
+        encode_varint(modified.len() as u64, &mut patch);
+        encode_varint(0, &mut patch);
+
+        let len = original.len().min(modified.len());
+        let mut index = 0usize;
+        while index < len {
+            if original[index] == modified[index] {
+                let start = index;
+                while index < len && original[index] == modified[index] {
+                    index += 1;
+                }
+                encode_varint((((index - start) as u64) - 1) << 2, &mut patch);
+            } else {
+                let start = index;
+                while index < len && original[index] != modified[index] {
+                    index += 1;
+                }
+                let data = &modified[start..index];
+                encode_varint((((data.len() as u64) - 1) << 2) | 1, &mut patch);
+                patch.extend_from_slice(data);
+            }
+        }
+
+        if modified.len() > len {
+            let extra = &modified[len..];
+            encode_varint((((extra.len() as u64) - 1) << 2) | 1, &mut patch);
+            patch.extend_from_slice(extra);
+        }
+
+        patch.extend_from_slice(&crc32_simple(original).to_le_bytes());
+        patch.extend_from_slice(&crc32_simple(modified).to_le_bytes());
+        let patch_crc = crc32_simple(&patch).to_le_bytes();
+        patch.extend_from_slice(&patch_crc);
+        patch
+    }
+
+    #[test]
+    fn create_bps_emits_smaller_patch_when_source_copy_is_available() {
+        let original = b"AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHH".to_vec();
+        let modified = b"AAAABBBBCCCCAAAABBBBFFFFGGGGHHHH".to_vec();
+
+        let optimized = create_bps(&original, &modified).expect("optimized bps");
+        let baseline = create_bps_target_read_only(&original, &modified);
+
+        assert!(optimized.len() < baseline.len());
+
+        let restored = apply_bps(&original, &optimized).expect("apply optimized bps");
+        assert_eq!(restored, modified);
+    }
 }

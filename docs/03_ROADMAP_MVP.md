@@ -44,6 +44,7 @@
 - RetroFX agora persiste configuracao de parallax/raster no scene JSON, o designer foi reabilitado e o pipeline SGDK/SNES passou a emitir scroll/parallax real, permanecendo `Experimental` ate validacao com ROM real.
 - NodeGraph agora persiste nos componentes de logica via `LogicComponent.graph`, com roundtrip de serializacao no frontend e autosave no JSON da cena.
 - NodeGraph agora compila os nos persistidos para C no pipeline canonico, com emissao integrada no game loop SGDK/SNES para `event_start`, `sprite_move`, `condition_overlap`, `action_sound`, `effect_parallax`, `effect_raster`, `sprite_anim`, `scroll_tilemap`, `move_camera` e guards booleanos via `logic_and`.
+- Patch Studio agora gera BPS com `SourceCopy` quando encontra runs reaproveitaveis da ROM original, reduzindo tamanho de patch sem alterar o apply canonico ja validado.
 - Save states basicos do emulador agora usam serializacao real do Libretro com slot em memoria, IPC dedicado e controles de salvar/carregar no `Game View`.
 - `Game View` agora expoe `pause`, `resume` e `step 1 frame` no proprio painel, reaproveitando `emulator_run_frame` e o loop canonico existente sem pipeline paralelo.
 - `Game View` agora recebe audio real do Libretro por evento `emulator://audio`, reproduz via Web Audio API com fila curta sincronizada ao frame loop e expoe toggle de mute no painel.
