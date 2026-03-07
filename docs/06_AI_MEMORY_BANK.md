@@ -1,6 +1,6 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Ultima Atualizacao:** 2026-03-06
-**Ultima sessao:** 2026-03-06 (Codex - Sessao 43: fechamento autonomo do Bloco B de UX critica do editor)
+**Ultima sessao:** 2026-03-06 (Codex - Sessao 45: fechamento autonomo de E3, F1 e F2)
 **Fase Atual:** Hardening/QA do MVP (Build -> ROM -> Emulacao validado em Windows com upstream real; desktop E2E multi-target validado localmente e em runner GitHub/Windows real; validacao live do editor coberta para bloqueios fatais e estados intermediarios com motivo visual explicito)
 **Branch sugerida:** `feat/<tema>` para trabalho paralelo; usar `main` apenas quando o usuario pedir edicao direta no workspace atual
 
@@ -16,6 +16,15 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-06 - sessao 45):**
+  - E3 foi concluida no caminho canonico do emulador: `libretro_ffi.rs` agora resolve `retro_get_memory_data`/`retro_get_memory_size`, expoe leitura segura por regiao e o backend passou a servir `emulator_read_memory(region, offset, length)` com tamanho total reportado.
+  - O `ToolsPanel` ganhou a aba `Memory Viewer`, ligada ao IPC real do emulador, com seletor de SRAM/WRAM/VRAM, offset/length em hexadecimal, grid de 16 bytes por linha, coluna ASCII e auto-refresh opcional de 1s, mantida como `Experimental`.
+  - F1 foi concluida no schema canonico: `project.rds` agora persiste `schema_version = 1.0.0`, cenas aceitam `schema_version` opcional com compatibilidade retroativa e `project_mgr` passou a aplicar migracao pass-through + warning em versoes desconhecidas.
+  - Fixtures dummy canonicas foram atualizadas para incluir `schema_version`, preservando a leitura de fixtures legadas sem o campo e cobrindo essa compatibilidade com testes Rust dedicados.
+  - F2 foi concluida no editor/projeto: o backend agora lista/cria/troca cenas canonicamente, a `Hierarchy` ganhou catalogo e seletor de cena ativa com criacao de nova cena, e o frontend passou a persistir `scene_path` ativo sem abrir um pipeline paralelo de carregamento.
+  - A troca de cena agora atualiza `project.entry_scene` de forma autoritativa no backend, garantindo que `Build -> ROM -> Emulacao` siga a cena ativa selecionada no editor.
+  - O baseline local permaneceu verde ao final do fechamento da fila remanescente com os gates exigidos (`npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo clippy -- -D warnings`, `cargo test --lib -- --nocapture`).
 
 * **O que acabou de acontecer (2026-03-06 - sessao 43):**
   - B1 foi concluida no caminho canonico do editor: `editorStore` agora mantem `undoStack/redoStack` limitadas, `undo/redo` reais e agrupamento transacional para drag no viewport, com atalhos globais `Ctrl+Z`, `Ctrl+Shift+Z` e `Ctrl+Y`.
@@ -445,9 +454,9 @@
   - GitHub Actions `Desktop E2E` (`22606643935`) -> OK em `windows-latest`, com `Run Mega Drive desktop smoke` e `Run SNES desktop smoke` ambos verdes.
 
 * **Proximo passo imediato:**
-  1. Executar E3 da fila MVP: expor `retro_get_memory_data`/`retro_get_memory_size` para WRAM, criar IPC `emulator_read_memory(region, offset, length)` e renderizar um hex viewer basico no editor.
-  2. Manter o baseline verde apos a tarefa (`check:tree`, `lint`, `tsc`, `npm test`, `cargo clippy`, `cargo test --lib`) antes de seguir para o Bloco E.
-  3. Preservar o grafo salvo em `LogicComponent.graph` como fonte canonicamente carregada para compilacao, sem bypass paralelo no build.
+  1. A fila MVP remanescente (`E3`, `F1`, `F2`) foi encerrada; o proximo ciclo deve focar em hardening/revalidacao institucional do fluxo canonico completo, sem reabrir superficies paralelas.
+  2. Repetir os gates canonicos e os fluxos reais de Windows/Tauri sempre que houver mudanca em schema, troca de cena, build ou emulacao (`check:tree`, `lint`, `tsc`, `npm test`, `cargo clippy`, `cargo test --lib` e validacoes desktop/upstream aplicaveis).
+  3. Preservar `entry_scene`, `scene_path` ativo e `LogicComponent.graph` como fontes autoritativas do carregamento/build, evitando bypass no frontend ou pipelines duplicados.
 
 ---
 

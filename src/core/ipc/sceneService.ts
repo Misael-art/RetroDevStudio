@@ -150,11 +150,18 @@ export interface RetroFXConfig {
 
 export interface Scene {
   scene_id: string;
+  schema_version?: string | null;
   display_name?: string | null;
   entities: Entity[];
   background_layers: BackgroundLayer[];
   palettes?: PaletteEntry[];
   retrofx?: RetroFXConfig | null;
+}
+
+export interface SceneInfo {
+  path: string;
+  scene_id: string;
+  display_name: string;
 }
 
 export interface SceneDataResult {
@@ -163,16 +170,33 @@ export interface SceneDataResult {
   scene_json: string;
   project_name: string;
   target: string;
+  scene_path: string;
 }
 
 // ── IPC wrappers ──────────────────────────────────────────────────────────────
 
-export function getSceneData(projectDir: string): Promise<SceneDataResult> {
-  return invoke("get_scene_data", { projectDir });
+export function getSceneData(projectDir: string, scenePath?: string): Promise<SceneDataResult> {
+  return invoke("get_scene_data", { projectDir, scenePath });
 }
 
-export function saveSceneData(projectDir: string, sceneJson: string): Promise<{ ok: boolean; message: string }> {
-  return invoke("save_scene_data", { projectDir, sceneJson });
+export function saveSceneData(
+  projectDir: string,
+  sceneJson: string,
+  scenePath?: string
+): Promise<{ ok: boolean; message: string }> {
+  return invoke("save_scene_data", { projectDir, sceneJson, scenePath });
+}
+
+export function listScenes(projectDir: string): Promise<SceneInfo[]> {
+  return invoke("list_scenes", { projectDir });
+}
+
+export function switchScene(projectDir: string, scenePath: string): Promise<SceneDataResult> {
+  return invoke("switch_scene", { projectDir, scenePath });
+}
+
+export function createScene(projectDir: string, displayName?: string): Promise<SceneInfo> {
+  return invoke("create_scene", { projectDir, displayName });
 }
 
 /** Parseia scene_json da SceneDataResult em um objeto Scene tipado. */

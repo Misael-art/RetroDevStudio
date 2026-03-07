@@ -39,6 +39,7 @@ export interface StoreState {
   activeProjectDir: string;
   activeProjectName: string;
   activeTarget: "megadrive" | "snes";
+  activeScenePath: string;
   selectedEntityId: string | null;
   activeViewportTab: string;
   consoleEntries: ConsoleEntry[];
@@ -58,6 +59,7 @@ export interface StoreState {
 export interface StoreActions {
   setActiveProject: (dir: string, name: string) => void;
   setActiveTarget: (target: "megadrive" | "snes") => void;
+  setActiveScenePath: (path: string) => void;
   setSelectedEntityId: (id: string | null) => void;
   setActiveViewportTab: (id: string) => void;
   logMessage: (level: ConsoleEntry["level"], message: string) => void;
@@ -123,6 +125,8 @@ export const useEditorStore = create<EditorState>((set) => ({
   activeTarget: "megadrive",
   setActiveProject: (dir, name) => set({ activeProjectDir: dir, activeProjectName: name }),
   setActiveTarget: (target) => set({ activeTarget: target }),
+  activeScenePath: "",
+  setActiveScenePath: (path) => set({ activeScenePath: path }),
 
   selectedEntityId: null,
   setSelectedEntityId: (id) => set({ selectedEntityId: id }),

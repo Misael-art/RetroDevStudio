@@ -124,6 +124,7 @@ export default function App() {
     activeTarget,
     setActiveTarget,
     setActiveScene,
+    setActiveScenePath,
     activeViewportTab,
     setActiveViewportTab,
     setSelectedEntityId,
@@ -222,6 +223,7 @@ export default function App() {
       setSelectedEntityId(null);
       setHwStatus(hw);
       logMessage("warn", `[${scope}] ${sceneData.error}`);
+      setActiveScenePath("");
       setActiveScene(null);
       return false;
     }
@@ -232,6 +234,7 @@ export default function App() {
       setSelectedEntityId(null);
       setHwStatus(hw);
       logMessage("error", `[${scope}] Falha ao reconstruir a cena do projeto.`);
+      setActiveScenePath("");
       setActiveScene(null);
       return false;
     }
@@ -239,6 +242,7 @@ export default function App() {
     setActiveProject(projectDir, projectName);
     setSelectedEntityId(null);
     setHwStatus(hw);
+    setActiveScenePath(sceneData.scene_path);
     setActiveScene(scene);
     if (sceneData.target === "megadrive" || sceneData.target === "snes") {
       setActiveTarget(sceneData.target);
@@ -565,6 +569,7 @@ export default function App() {
     }
 
     setActiveProject("", "");
+    setActiveScenePath("");
     setActiveScene(null);
     setHwStatus(null);
     resetHwValidation();

@@ -6,10 +6,17 @@ function describeError(error: unknown): string {
 }
 
 export async function reloadSceneFromDisk(projectDir: string, scope: string): Promise<boolean> {
-  const { logMessage, selectedEntityId, setActiveScene, setSelectedEntityId } = useEditorStore.getState();
+  const {
+    activeScenePath,
+    logMessage,
+    selectedEntityId,
+    setActiveScene,
+    setActiveScenePath,
+    setSelectedEntityId,
+  } = useEditorStore.getState();
 
   try {
-    const sceneData = await getSceneData(projectDir);
+    const sceneData = await getSceneData(projectDir, activeScenePath || undefined);
     if (!sceneData.ok) {
       logMessage("error", `[${scope}] Falha ao recarregar cena: ${sceneData.error}`);
       return false;
@@ -21,6 +28,7 @@ export async function reloadSceneFromDisk(projectDir: string, scope: string): Pr
       return false;
     }
 
+    setActiveScenePath(sceneData.scene_path);
     setActiveScene(scene);
     if (selectedEntityId) {
       const isLayerSelection = selectedEntityId.startsWith("layer::");
@@ -44,13 +52,17 @@ export async function persistActiveScene(
   scope: string,
   successMessage?: string
 ): Promise<boolean> {
-  const { activeScene, logMessage } = useEditorStore.getState();
+  const { activeScene, activeScenePath, logMessage } = useEditorStore.getState();
   if (!activeScene) {
     return true;
   }
 
   try {
-    const result = await saveSceneData(projectDir, JSON.stringify(activeScene, null, 2));
+    const result = await saveSceneData(
+      projectDir,
+      JSON.stringify(activeScene, null, 2),
+      activeScenePath || undefined
+    );
     if (result.ok) {
       if (successMessage) {
         logMessage("success", `[${scope}] ${successMessage}`);

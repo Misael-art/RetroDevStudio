@@ -20,6 +20,13 @@ pub const UGDM_VERSION: &str = "1.0.0";
 pub const DEFAULT_ENTRY_SCENE: &str = "scenes/main.json";
 pub const DEFAULT_SCENE_ID: &str = "main";
 
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct SceneInfo {
+    pub path: String,
+    pub scene_id: String,
+    pub display_name: String,
+}
+
 #[derive(Debug)]
 pub struct LoadError(pub String);
 
@@ -141,6 +148,56 @@ pub fn create_project_skeleton(
     Ok(project)
 }
 
+pub fn list_scenes(project_dir: &Path) -> Result<Vec<SceneInfo>, LoadError> {
+    let scenes_dir = project_dir.join("scenes");
+    if !scenes_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut scenes = Vec::new();
+    for entry in fs::read_dir(&scenes_dir).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel listar cenas em '{}': {}",
+            scenes_dir.display(),
+            error
+        ))
+    })? {
+        let entry = entry.map_err(|error| {
+            LoadError(format!(
+                "Nao foi possivel iterar diretorio de cenas '{}': {}",
+                scenes_dir.display(),
+                error
+            ))
+        })?;
+        let path = entry.path();
+        if !path.is_file() || path.extension().and_then(|extension| extension.to_str()) != Some("json")
+        {
+            continue;
+        }
+
+        let file_name = entry.file_name().to_string_lossy().to_string();
+        let relative_path = format!("scenes/{}", file_name);
+        let scene = load_scene(project_dir, &relative_path)?;
+        scenes.push(scene_info(&relative_path, &scene));
+    }
+
+    scenes.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(scenes)
+}
+
+pub fn create_scene(project_dir: &Path, display_name: Option<&str>) -> Result<SceneInfo, LoadError> {
+    let _project = load_project(project_dir)?;
+    let label = display_name
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("New Scene");
+    let scene_id = next_scene_id(project_dir, label);
+    let scene_path = format!("scenes/{}.json", scene_id);
+    let scene = canonical_scene(&scene_id, Some(label.to_string()));
+    save_scene(project_dir, &scene_path, &scene)?;
+    Ok(scene_info(&scene_path, &scene))
+}
+
 pub fn save_project(project_dir: &Path, project: &Project) -> Result<(), LoadError> {
     let project = migrate_project(project.clone());
     validate_project(&project)?;
@@ -162,6 +219,15 @@ pub fn update_project_target(project_dir: &Path, target: &str) -> Result<Project
     project.resolution = spec.resolution();
     project.palette_mode = spec.palette_mode.to_string();
 
+    save_project(project_dir, &project)?;
+    Ok(project)
+}
+
+pub fn set_entry_scene(project_dir: &Path, scene_path: &str) -> Result<Project, LoadError> {
+    validate_scene_path(scene_path)?;
+    let _scene = load_scene(project_dir, scene_path)?;
+    let mut project = load_project(project_dir)?;
+    project.entry_scene = scene_path.to_string();
     save_project(project_dir, &project)?;
     Ok(project)
 }
@@ -336,6 +402,58 @@ fn schema_warning_message(scope: &str, version: &str) -> Option<String> {
             scope, version
         )
     })
+}
+
+fn scene_info(scene_path: &str, scene: &Scene) -> SceneInfo {
+    SceneInfo {
+        path: scene_path.to_string(),
+        scene_id: scene.scene_id.clone(),
+        display_name: scene
+            .display_name
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| scene.scene_id.clone()),
+    }
+}
+
+fn next_scene_id(project_dir: &Path, seed: &str) -> String {
+    let base = slugify_scene_id(seed);
+    let mut candidate = base.clone();
+    let mut suffix = 2usize;
+
+    while project_dir
+        .join("scenes")
+        .join(format!("{}.json", candidate))
+        .exists()
+    {
+        candidate = format!("{}_{}", base, suffix);
+        suffix += 1;
+    }
+
+    candidate
+}
+
+fn slugify_scene_id(value: &str) -> String {
+    let mut slug = String::new();
+    let mut previous_was_separator = false;
+
+    for ch in value.trim().chars() {
+        let normalized = ch.to_ascii_lowercase();
+        if normalized.is_ascii_alphanumeric() {
+            slug.push(normalized);
+            previous_was_separator = false;
+        } else if !previous_was_separator {
+            slug.push('_');
+            previous_was_separator = true;
+        }
+    }
+
+    let trimmed = slug.trim_matches('_');
+    if trimmed.is_empty() {
+        "scene".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 pub fn validate_scene(scene: &Scene) -> Result<(), LoadError> {
@@ -844,6 +962,54 @@ mod tests {
             scene.schema_version.as_deref(),
             Some(CURRENT_SCHEMA_VERSION)
         );
+    }
+
+    #[test]
+    fn list_scenes_returns_canonical_scene_catalog() {
+        let project_dir = temp_dir("list-scenes");
+        create_project_skeleton(&project_dir, "Scene Catalog", "megadrive")
+            .expect("create canonical project");
+        let bonus_scene = canonical_scene("bonus_stage", Some("Bonus Stage".to_string()));
+        save_scene(&project_dir, "scenes/bonus_stage.json", &bonus_scene)
+            .expect("save bonus scene");
+
+        let scenes = list_scenes(&project_dir).expect("list project scenes");
+        let paths = scenes.iter().map(|scene| scene.path.as_str()).collect::<Vec<_>>();
+
+        assert_eq!(paths, vec!["scenes/bonus_stage.json", "scenes/main.json"]);
+        assert_eq!(scenes[0].scene_id, "bonus_stage");
+        assert_eq!(scenes[0].display_name, "Bonus Stage");
+        assert_eq!(scenes[1].scene_id, DEFAULT_SCENE_ID);
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn list_scenes_returns_empty_when_directory_is_missing() {
+        let project_dir = temp_dir("list-scenes-empty");
+
+        assert!(list_scenes(&project_dir).expect("list empty scenes").is_empty());
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn set_entry_scene_repoints_project_to_selected_scene() {
+        let project_dir = temp_dir("entry-scene");
+        create_project_skeleton(&project_dir, "Entry Scene", "megadrive")
+            .expect("create canonical project");
+        let bonus_scene = canonical_scene("bonus_stage", Some("Bonus Stage".to_string()));
+        save_scene(&project_dir, "scenes/bonus_stage.json", &bonus_scene)
+            .expect("save bonus scene");
+
+        let updated = set_entry_scene(&project_dir, "scenes/bonus_stage.json")
+            .expect("update entry scene");
+        let reloaded = load_project(&project_dir).expect("reload project");
+
+        assert_eq!(updated.entry_scene, "scenes/bonus_stage.json");
+        assert_eq!(reloaded.entry_scene, "scenes/bonus_stage.json");
+
+        let _ = fs::remove_dir_all(project_dir);
     }
 
     #[test]

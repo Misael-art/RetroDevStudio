@@ -18,12 +18,16 @@ use core::editor_validation::{
     DraftValidationResult,
 };
 use core::project_mgr::{
+    create_scene as create_project_scene,
     create_project_skeleton,
+    list_scenes as list_project_scenes,
     load_project,
     load_scene,
     resolve_prefabs,
     save_scene,
+    set_entry_scene,
     update_project_target,
+    SceneInfo,
 };
 use emulator::frame_buffer::framebuffer_to_rgba;
 use emulator::libretro_ffi::{EmulatorCore, JoypadState};
@@ -382,34 +386,84 @@ pub struct SceneDataResult {
     pub scene_json: String,   // JSON da cena serializado
     pub project_name: String,
     pub target: String,
+    pub scene_path: String,
 }
 
 /// Retorna o JSON completo da cena de entrada do projeto (entry_scene).
 #[tauri::command]
-fn get_scene_data(project_dir: String) -> SceneDataResult {
-    if project_dir.is_empty() {
-        return SceneDataResult { ok: false, error: "Nenhum projeto aberto.".into(),
-            scene_json: String::new(), project_name: String::new(), target: String::new() };
+fn get_scene_data(project_dir: String, scene_path: Option<String>) -> SceneDataResult {
+    load_scene_result(Path::new(&project_dir), scene_path.as_deref())
+}
+
+#[tauri::command]
+fn switch_scene(project_dir: String, scene_path: String) -> SceneDataResult {
+    if let Err(error) = set_entry_scene(Path::new(&project_dir), &scene_path) {
+        return SceneDataResult {
+            ok: false,
+            error: error.to_string(),
+            scene_json: String::new(),
+            project_name: String::new(),
+            target: String::new(),
+            scene_path,
+        };
     }
-    let dir = PathBuf::from(&project_dir);
+    load_scene_result(Path::new(&project_dir), Some(scene_path.as_str()))
+}
+
+fn load_scene_result(project_dir: &Path, scene_path: Option<&str>) -> SceneDataResult {
+    let project_dir_str = project_dir.to_string_lossy();
+    if project_dir_str.trim().is_empty() {
+        return SceneDataResult {
+            ok: false,
+            error: "Nenhum projeto aberto.".into(),
+            scene_json: String::new(),
+            project_name: String::new(),
+            target: String::new(),
+            scene_path: String::new(),
+        };
+    }
+
+    let dir = PathBuf::from(project_dir);
     let project = match load_project(&dir) {
         Ok(p) => p,
         Err(e) => return SceneDataResult { ok: false, error: e.to_string(),
-            scene_json: String::new(), project_name: String::new(), target: String::new() },
+            scene_json: String::new(), project_name: String::new(), target: String::new(), scene_path: String::new() },
     };
-    let scene = match load_scene(&dir, &project.entry_scene) {
+    let resolved_scene_path = scene_path
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .unwrap_or(project.entry_scene.as_str())
+        .to_string();
+    let scene = match load_scene(&dir, &resolved_scene_path) {
         Ok(s) => s,
         Err(e) => return SceneDataResult { ok: false, error: e.to_string(),
-            scene_json: String::new(), project_name: project.name, target: project.target },
+            scene_json: String::new(), project_name: project.name, target: project.target, scene_path: resolved_scene_path },
     };
     let scene_json = serde_json::to_string_pretty(&scene).unwrap_or_default();
     SceneDataResult { ok: true, error: String::new(), scene_json,
-        project_name: project.name, target: project.target }
+        project_name: project.name, target: project.target, scene_path: resolved_scene_path }
+}
+
+#[tauri::command]
+fn list_scenes(project_dir: String) -> Result<Vec<SceneInfo>, String> {
+    if project_dir.is_empty() {
+        return Ok(Vec::new());
+    }
+    list_project_scenes(Path::new(&project_dir)).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn create_scene(project_dir: String, display_name: Option<String>) -> Result<SceneInfo, String> {
+    if project_dir.trim().is_empty() {
+        return Err("Nenhum projeto aberto.".into());
+    }
+    create_project_scene(Path::new(&project_dir), display_name.as_deref())
+        .map_err(|error| error.to_string())
 }
 
 /// Salva o JSON de cena de volta para o arquivo entry_scene do projeto.
 #[tauri::command]
-fn save_scene_data(project_dir: String, scene_json: String) -> EmulatorCommandResult {
+fn save_scene_data(project_dir: String, scene_json: String, scene_path: Option<String>) -> EmulatorCommandResult {
     if project_dir.is_empty() {
         return EmulatorCommandResult { ok: false, message: "Nenhum projeto aberto.".into() };
     }
@@ -429,7 +483,12 @@ fn save_scene_data(project_dir: String, scene_json: String) -> EmulatorCommandRe
             message: format!("JSON de cena invalido: {}", e),
         },
     };
-    match save_scene(&dir, &project.entry_scene, &scene) {
+    let target_scene_path = scene_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .unwrap_or(project.entry_scene.as_str());
+    match save_scene(&dir, target_scene_path, &scene) {
         Ok(()) => EmulatorCommandResult { ok: true, message: "Cena salva.".into() },
         Err(e) => EmulatorCommandResult { ok: false, message: e.to_string() },
     }
@@ -552,6 +611,9 @@ pub fn run() {
             emulator_stop,
             // Cena
             get_scene_data,
+            switch_scene,
+            list_scenes,
+            create_scene,
             save_scene_data,
             set_project_target,
             // Projeto
