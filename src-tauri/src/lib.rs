@@ -74,6 +74,12 @@ pub struct EmulatorMemoryResult {
     pub total_size: usize,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct AudioPayload {
+    pub sample_rate: u32,
+    pub samples: Vec<i16>,
+}
+
 // ── Build commands ────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -215,20 +221,52 @@ fn emulator_run_frame(
         return EmulatorCommandResult { ok: false, message: e };
     }
 
-    let (fb, size, pixel_format) = match core.get_framebuffer() {
-        Ok(r) => r,
-        Err(e) => return EmulatorCommandResult { ok: false, message: e },
-    };
-
-    let payload = framebuffer_to_rgba(&fb, size, pixel_format);
-    if let Err(error) = app.emit("emulator://frame", &payload) {
+    if let Err(error) = emit_emulator_frame_events(&app, &mut core) {
         return EmulatorCommandResult {
             ok: false,
-            message: format!("Falha ao emitir frame do emulador: {}", error),
+            message: error,
         };
     }
 
     EmulatorCommandResult { ok: true, message: String::new() }
+}
+
+trait EmulatorEventSink {
+    fn emit_frame(&self, payload: &emulator::frame_buffer::FramePayload) -> Result<(), String>;
+    fn emit_audio(&self, payload: &AudioPayload) -> Result<(), String>;
+}
+
+impl<R: tauri::Runtime> EmulatorEventSink for AppHandle<R> {
+    fn emit_frame(&self, payload: &emulator::frame_buffer::FramePayload) -> Result<(), String> {
+        self.emit("emulator://frame", payload)
+            .map_err(|error| format!("Falha ao emitir frame do emulador: {}", error))
+    }
+
+    fn emit_audio(&self, payload: &AudioPayload) -> Result<(), String> {
+        self.emit("emulator://audio", payload)
+            .map_err(|error| format!("Falha ao emitir audio do emulador: {}", error))
+    }
+}
+
+fn emit_emulator_frame_events<S: EmulatorEventSink>(
+    sink: &S,
+    core: &mut EmulatorCore,
+) -> Result<(), String> {
+    let (fb, size, pixel_format) = core.get_framebuffer()?;
+
+    let payload = framebuffer_to_rgba(&fb, size, pixel_format);
+    sink.emit_frame(&payload)?;
+
+    let (sample_rate, samples) = core.take_audio_samples()?;
+    if !samples.is_empty() {
+        let audio_payload = AudioPayload {
+            sample_rate,
+            samples,
+        };
+        sink.emit_audio(&audio_payload)?;
+    }
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -715,6 +753,14 @@ mod tests {
         output_path
     }
 
+    fn write_test_rom(dir: &Path, name: &str, extension: &str) -> PathBuf {
+        let path = dir.join(format!("{}.{}", name, extension));
+        let mut bytes = vec![0u8; 0x200];
+        bytes[0x100..0x10F].copy_from_slice(b"SEGA MEGA DRIVE");
+        fs::write(&path, bytes).expect("write test rom");
+        path
+    }
+
     fn fake_make_script(dir: &Path) -> PathBuf {
         let path = if cfg!(target_os = "windows") {
             dir.join("fake-make.cmd")
@@ -970,6 +1016,12 @@ pub extern "C" fn retro_get_memory_size(id: u32) -> usize {
 #[no_mangle]
 pub extern "C" fn retro_run() {
     let frame = FRAME_COUNTER.fetch_add(1, Ordering::SeqCst) as u8;
+    let audio_samples = [
+        frame as i16,
+        -(frame as i16),
+        frame.wrapping_add(1) as i16,
+        -((frame.wrapping_add(1)) as i16),
+    ];
     unsafe {
         if let Some(input_poll) = INPUT_POLL {
             input_poll();
@@ -984,6 +1036,12 @@ pub extern "C" fn retro_run() {
         }
         if let Some(video) = VIDEO {
             video(FRAMEBUFFER.as_ptr().cast::<c_void>(), 256, 224, 256 * 4);
+        }
+        if let Some(audio_batch) = AUDIO_BATCH {
+            audio_batch(audio_samples.as_ptr(), 2);
+        } else if let Some(audio) = AUDIO {
+            audio(audio_samples[0], audio_samples[1]);
+            audio(audio_samples[2], audio_samples[3]);
         }
     }
 }
@@ -1035,6 +1093,80 @@ pub extern "C" fn retro_run() {
         emulator.stop().expect("stop emulator");
         let _ = fs::remove_dir_all(project_dir);
         let _ = fs::remove_dir_all(core_dir);
+    }
+
+    #[test]
+    fn emit_emulator_frame_events_emits_audio_payload_from_mock_core() {
+        let _serial = test_serial_guard();
+        let dir = temp_dir("mock-audio-event");
+        let core_path = compile_mock_core(&dir);
+        let rom_path = write_test_rom(&dir, "audio_event", "gen");
+
+        let mut emulator = EmulatorCore::new(Some(&core_path));
+        emulator.load_rom(&rom_path).expect("load rom into mock core");
+        emulator.run_frame().expect("run frame");
+
+        #[derive(Default)]
+        struct MockEventSink {
+            frames: std::sync::Mutex<Vec<emulator::frame_buffer::FramePayload>>,
+            audios: std::sync::Mutex<Vec<AudioPayload>>,
+        }
+
+        impl EmulatorEventSink for MockEventSink {
+            fn emit_frame(
+                &self,
+                payload: &emulator::frame_buffer::FramePayload,
+            ) -> Result<(), String> {
+                self.frames
+                    .lock()
+                    .expect("lock frame events")
+                    .push(payload.clone());
+                Ok(())
+            }
+
+            fn emit_audio(&self, payload: &AudioPayload) -> Result<(), String> {
+                self.audios
+                    .lock()
+                    .expect("lock audio events")
+                    .push(payload.clone());
+                Ok(())
+            }
+        }
+
+        let sink = MockEventSink::default();
+        emit_emulator_frame_events(&sink, &mut emulator).expect("emit emulator events");
+
+        let payload = sink
+            .audios
+            .lock()
+            .expect("lock audio events")
+            .first()
+            .cloned()
+            .expect("receive audio payload");
+        assert_eq!(
+            payload,
+            AudioPayload {
+                sample_rate: 44_100,
+                samples: vec![0, 0, 1, -1],
+            }
+        );
+        assert_eq!(
+            sink.frames
+                .lock()
+                .expect("lock frame events")
+                .len(),
+            1
+        );
+        assert!(
+            emulator
+                .take_audio_samples()
+                .expect("audio buffer should be drained")
+                .1
+                .is_empty()
+        );
+
+        emulator.stop().expect("stop emulator");
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

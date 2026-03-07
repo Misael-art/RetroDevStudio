@@ -21,6 +21,12 @@ export interface FramePayload {
   rgba: number[]; // Uint8Array serializado como array JSON
 }
 
+/** Payload do evento `emulator://audio` — amostras PCM i16 stereo */
+export interface AudioPayload {
+  sample_rate: number;
+  samples: number[];
+}
+
 export interface JoypadState {
   b: boolean;
   y: boolean;
@@ -128,6 +134,14 @@ export async function startFrameLoop(
   tick();
 
   return stop;
+}
+
+export async function listenToAudioStream(
+  onAudio: (payload: AudioPayload) => void
+): Promise<UnlistenFn> {
+  return listen<AudioPayload>("emulator://audio", (event) => {
+    onAudio(event.payload);
+  });
 }
 
 // ── Keyboard → JoypadState mapping ───────────────────────────────────────────

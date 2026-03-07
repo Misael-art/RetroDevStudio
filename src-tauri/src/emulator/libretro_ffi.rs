@@ -85,6 +85,7 @@ pub struct EmulatorState {
     pub frame_size: FrameSize,
     pub pixel_format: PixelFormat,
     pub framebuffer: Vec<u8>,
+    pub sample_rate: u32,
     pub audio_buffer: Vec<i16>,
     pub last_audio_frames: usize,
     pub joypad: JoypadState,
@@ -102,6 +103,7 @@ impl Default for EmulatorState {
             },
             pixel_format: PixelFormat::Xrgb8888,
             framebuffer: vec![0u8; 320 * 224 * 4],
+            sample_rate: 44_100,
             audio_buffer: Vec::new(),
             last_audio_frames: 0,
             joypad: JoypadState::default(),
@@ -129,7 +131,7 @@ pub(crate) fn test_serial_guard() -> std::sync::MutexGuard<'static, ()> {
     TEST_SERIAL
         .get_or_init(|| Mutex::new(()))
         .lock()
-        .expect("failed to lock libretro test mutex")
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn install_active_emulator(handle: &EmulatorHandle) -> Result<(), String> {
@@ -333,14 +335,14 @@ struct LoadedCore {
     api: CoreApi,
     _game: LoadedGame,
     frame_size: FrameSize,
+    sample_rate: u32,
     label: String,
     _target: CoreTarget,
 }
 
 impl LoadedCore {
     fn new(core_path: &Path, rom_path: &Path, target: CoreTarget) -> Result<Self, String> {
-        let library = unsafe { Library::new(core_path) }
-            .map_err(|e| format!("Nao foi possivel carregar core '{}': {}", core_path.display(), e))?;
+        let library = load_core_library(core_path)?;
         let api = unsafe { CoreApi::load(&library) }?;
 
         unsafe {
@@ -444,6 +446,7 @@ impl LoadedCore {
             api,
             _game: game,
             frame_size,
+            sample_rate: av_info.timing.sample_rate.round().max(1.0) as u32,
             label: format!(
                 "{} {}",
                 c_string_or_default(system_info.library_name, target.label()),
@@ -462,6 +465,25 @@ impl LoadedCore {
             (api.deinit)();
         }
     }
+}
+
+fn load_core_library(core_path: &Path) -> Result<Library, String> {
+    let mut last_error = None;
+    for _ in 0..5 {
+        match unsafe { Library::new(core_path) } {
+            Ok(library) => return Ok(library),
+            Err(error) => {
+                last_error = Some(error.to_string());
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+        }
+    }
+
+    Err(format!(
+        "Nao foi possivel carregar core '{}': {}",
+        core_path.display(),
+        last_error.unwrap_or_else(|| "erro desconhecido".to_string())
+    ))
 }
 
 pub struct EmulatorCore {
@@ -507,6 +529,7 @@ impl EmulatorCore {
             state.running = true;
             state.rom_path = rom_path.to_string_lossy().to_string();
             state.frame_size = runtime.frame_size;
+            state.sample_rate = runtime.sample_rate;
             state.framebuffer.resize(
                 runtime.frame_size.height as usize * runtime.frame_size.pitch as usize,
                 0,
@@ -541,6 +564,14 @@ impl EmulatorCore {
     pub fn get_framebuffer(&self) -> Result<(Vec<u8>, FrameSize, PixelFormat), String> {
         let state = self.handle.lock().map_err(|e| e.to_string())?;
         Ok((state.framebuffer.clone(), state.frame_size, state.pixel_format))
+    }
+
+    pub fn take_audio_samples(&self) -> Result<(u32, Vec<i16>), String> {
+        let mut state = self.handle.lock().map_err(|e| e.to_string())?;
+        let sample_rate = state.sample_rate;
+        let samples = std::mem::take(&mut state.audio_buffer);
+        state.last_audio_frames = 0;
+        Ok((sample_rate, samples))
     }
 
     pub fn save_state(&mut self) -> Result<usize, String> {
@@ -649,6 +680,7 @@ impl EmulatorCore {
             pitch: 320 * 4,
         };
         state.framebuffer = vec![0u8; 320 * 224 * 4];
+        state.sample_rate = 44_100;
         state.audio_buffer.clear();
         state.last_audio_frames = 0;
         state.rom_path.clear();
@@ -682,6 +714,7 @@ fn reset_emulator_state(handle: &EmulatorHandle, rom_path: &Path) -> Result<(), 
         pitch: 320 * 4,
     };
     state.framebuffer = vec![0u8; 320 * 224 * 4];
+    state.sample_rate = 44_100;
     state.audio_buffer.clear();
     state.last_audio_frames = 0;
     state.rom_path = rom_path.to_string_lossy().to_string();
@@ -1357,6 +1390,33 @@ pub extern "C" fn retro_run() {
 
         assert_eq!(total_size, 64);
         assert_eq!(bytes, (0x10u8..0x20u8).collect::<Vec<_>>());
+
+        emulator.stop().expect("stop emulator");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn take_audio_samples_drains_mock_core_audio_with_sample_rate() {
+        let _serial = test_serial_guard();
+        let dir = temp_dir("audio-drain");
+        let core_path = compile_mock_core(&dir);
+        let rom_path = write_test_rom(&dir, "audio_test", "gen");
+
+        let mut emulator = EmulatorCore::new(Some(&core_path));
+        emulator.load_rom(&rom_path).expect("load rom into mock core");
+        emulator.run_frame().expect("run frame");
+
+        let (sample_rate, samples) = emulator
+            .take_audio_samples()
+            .expect("drain audio samples");
+
+        assert_eq!(sample_rate, 44_100);
+        assert_eq!(samples, vec![0, 0, 1, -1]);
+        {
+            let state = emulator.handle.lock().expect("lock emulator state");
+            assert!(state.audio_buffer.is_empty());
+            assert_eq!(state.last_audio_frames, 0);
+        }
 
         emulator.stop().expect("stop emulator");
         let _ = fs::remove_dir_all(dir);

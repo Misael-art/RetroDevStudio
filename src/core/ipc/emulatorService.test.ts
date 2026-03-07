@@ -13,7 +13,7 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: mocks.listen,
 }));
 
-import { emulatorReadMemory } from "./emulatorService";
+import { emulatorReadMemory, listenToAudioStream } from "./emulatorService";
 
 describe("emulatorReadMemory", () => {
   beforeEach(() => {
@@ -32,5 +32,27 @@ describe("emulatorReadMemory", () => {
       offset: 0x10,
       length: 0x20,
     });
+  });
+});
+
+describe("listenToAudioStream", () => {
+  beforeEach(() => {
+    mocks.listen.mockReset();
+  });
+
+  it("subscribes to the canonical emulator audio event", async () => {
+    const unlisten = vi.fn();
+    const payload = { sample_rate: 44100, samples: [1, -1, 2, -2] };
+    mocks.listen.mockResolvedValue(unlisten);
+
+    const received = vi.fn();
+    const stop = await listenToAudioStream(received);
+    const handler = mocks.listen.mock.calls[0]?.[1] as ((event: { payload: typeof payload }) => void);
+
+    expect(mocks.listen).toHaveBeenCalledWith("emulator://audio", expect.any(Function));
+    handler({ payload });
+    expect(received).toHaveBeenCalledWith(payload);
+    stop();
+    expect(unlisten).toHaveBeenCalledTimes(1);
   });
 });

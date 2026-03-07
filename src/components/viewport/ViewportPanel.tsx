@@ -8,7 +8,9 @@ import {
   emulatorSendInput,
   emulatorStop,
   keyToJoypad,
+  listenToAudioStream,
   startFrameLoop,
+  type AudioPayload,
   type FramePayload,
   type JoypadState,
 } from "../../core/ipc/emulatorService";
@@ -27,6 +29,13 @@ const VIEWPORT_TABS = [
 const MD_WIDTH = 320;
 const MD_HEIGHT = 224;
 const GRID_SNAP_SIZE = 8;
+const AUDIO_QUEUE_TARGET_FRAMES = 3;
+
+type QueuedAudioChunk = {
+  left: Float32Array;
+  right: Float32Array;
+  offset: number;
+};
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -75,6 +84,11 @@ export default function ViewportPanel() {
   const activeTabRef = useRef(activeViewportTab);
   const pausedRef = useRef(emulPaused);
   const joypadRef = useRef<JoypadState>(JOYPAD_DEFAULT);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const audioGainRef = useRef<GainNode | null>(null);
+  const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const audioUnlistenRef = useRef<(() => void) | null>(null);
+  const audioQueueRef = useRef<QueuedAudioChunk[]>([]);
   const dragRef = useRef<{
     entityId: string;
     startMx: number;
@@ -92,6 +106,7 @@ export default function ViewportPanel() {
   const [saveStateBusy, setSaveStateBusy] = useState(false);
   const [loadStateBusy, setLoadStateBusy] = useState(false);
   const [stepBusy, setStepBusy] = useState(false);
+  const [audioMuted, setAudioMuted] = useState(false);
 
   activeTabRef.current = activeViewportTab;
   pausedRef.current = emulPaused;
@@ -108,6 +123,124 @@ export default function ViewportPanel() {
     context.putImageData(imageData, 0, 0);
   }, []);
 
+  const clearAudioQueue = useCallback(() => {
+    audioQueueRef.current = [];
+  }, []);
+
+  const fillAudioOutput = useCallback((left: Float32Array, right: Float32Array) => {
+    for (let index = 0; index < left.length; index += 1) {
+      let chunk = audioQueueRef.current[0];
+      while (chunk && chunk.offset >= chunk.left.length) {
+        audioQueueRef.current.shift();
+        chunk = audioQueueRef.current[0];
+      }
+
+      if (!chunk) {
+        left[index] = 0;
+        right[index] = 0;
+        continue;
+      }
+
+      left[index] = chunk.left[chunk.offset] ?? 0;
+      right[index] = chunk.right[chunk.offset] ?? 0;
+      chunk.offset += 1;
+    }
+  }, []);
+
+  const disposeAudioPlayback = useCallback(() => {
+    clearAudioQueue();
+    audioUnlistenRef.current?.();
+    audioUnlistenRef.current = null;
+
+    if (audioProcessorRef.current) {
+      audioProcessorRef.current.disconnect();
+      audioProcessorRef.current.onaudioprocess = null;
+      audioProcessorRef.current = null;
+    }
+    if (audioGainRef.current) {
+      audioGainRef.current.disconnect();
+      audioGainRef.current = null;
+    }
+
+    const context = audioContextRef.current;
+    audioContextRef.current = null;
+    if (context) {
+      void context.close().catch(() => {});
+    }
+  }, [clearAudioQueue]);
+
+  const ensureAudioPlayback = useCallback(
+    async (sampleRate: number) => {
+      if (audioContextRef.current) {
+        return audioContextRef.current;
+      }
+
+      const AudioContextCtor = window.AudioContext
+        ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextCtor) {
+        return null;
+      }
+
+      const context = new AudioContextCtor({
+        sampleRate,
+      });
+      const gainNode = context.createGain();
+      gainNode.gain.value = audioMuted ? 0 : 1;
+
+      const processor = context.createScriptProcessor(1024, 0, 2);
+      processor.onaudioprocess = (event) => {
+        fillAudioOutput(
+          event.outputBuffer.getChannelData(0),
+          event.outputBuffer.getChannelData(1)
+        );
+      };
+
+      processor.connect(gainNode);
+      gainNode.connect(context.destination);
+
+      audioContextRef.current = context;
+      audioGainRef.current = gainNode;
+      audioProcessorRef.current = processor;
+
+      if (pausedRef.current) {
+        await context.suspend();
+      } else {
+        await context.resume();
+      }
+
+      return context;
+    },
+    [audioMuted, fillAudioOutput]
+  );
+
+  const enqueueAudio = useCallback((payload: AudioPayload) => {
+    const frameCount = Math.floor(payload.samples.length / 2);
+    if (frameCount === 0) {
+      return;
+    }
+
+    const left = new Float32Array(frameCount);
+    const right = new Float32Array(frameCount);
+    for (let index = 0; index < frameCount; index += 1) {
+      left[index] = (payload.samples[index * 2] ?? 0) / 32768;
+      right[index] = (payload.samples[(index * 2) + 1] ?? 0) / 32768;
+    }
+
+    audioQueueRef.current.push({ left, right, offset: 0 });
+    const maxQueuedFrames = Math.max(
+      Math.floor((payload.sample_rate / 60) * AUDIO_QUEUE_TARGET_FRAMES),
+      1
+    );
+    let queuedFrames = audioQueueRef.current.reduce(
+      (total, chunk) => total + (chunk.left.length - chunk.offset),
+      0
+    );
+    while (queuedFrames > maxQueuedFrames && audioQueueRef.current.length > 0) {
+      const dropped = audioQueueRef.current.shift();
+      queuedFrames -= dropped ? dropped.left.length - dropped.offset : 0;
+    }
+  }, []);
+
   const stopFrameLoop = useCallback(() => {
     loopTokenRef.current += 1;
     loopStartingRef.current = false;
@@ -122,8 +255,9 @@ export default function ViewportPanel() {
 
   const shutdownEmulator = useCallback(() => {
     stopFrameLoop();
+    disposeAudioPlayback();
     emulatorStop().catch(() => {});
-  }, [stopFrameLoop]);
+  }, [disposeAudioPlayback, stopFrameLoop]);
 
   const startEmulatorLoop = useCallback(
     (logStartup: boolean) => {
@@ -314,6 +448,47 @@ export default function ViewportPanel() {
   }, [activeViewportTab]);
 
   useEffect(() => {
+    if (activeViewportTab !== "game") {
+      disposeAudioPlayback();
+      return;
+    }
+
+    let cancelled = false;
+
+    void listenToAudioStream(async (payload) => {
+      if (cancelled || activeTabRef.current !== "game" || pausedRef.current) {
+        return;
+      }
+
+      try {
+        const context = await ensureAudioPlayback(payload.sample_rate);
+        if (!context || cancelled || pausedRef.current) {
+          return;
+        }
+        enqueueAudio(payload);
+        if (context.state === "suspended") {
+          await context.resume();
+        }
+      } catch (error: unknown) {
+        logMessage("error", `Falha ao reproduzir audio do emulador: ${describeError(error)}`);
+      }
+    }).then((unlisten) => {
+      if (cancelled) {
+        unlisten();
+        return;
+      }
+      audioUnlistenRef.current = unlisten;
+    }).catch((error: unknown) => {
+      logMessage("error", `Falha ao assinar audio do emulador: ${describeError(error)}`);
+    });
+
+    return () => {
+      cancelled = true;
+      disposeAudioPlayback();
+    };
+  }, [activeViewportTab, disposeAudioPlayback, enqueueAudio, ensureAudioPlayback, logMessage]);
+
+  useEffect(() => {
     if (activeViewportTab !== "scene") return;
 
     function onKeyDown(event: KeyboardEvent) {
@@ -494,6 +669,32 @@ export default function ViewportPanel() {
       context.fill();
     });
   }, [activeScene, activeTarget, activeViewportTab, gridSnap, selectedEntityId]);
+
+  useEffect(() => {
+    const gainNode = audioGainRef.current;
+    if (gainNode) {
+      gainNode.gain.value = audioMuted ? 0 : 1;
+    }
+  }, [audioMuted]);
+
+  useEffect(() => {
+    if (activeViewportTab !== "game") {
+      return;
+    }
+
+    const context = audioContextRef.current;
+    if (!context) {
+      return;
+    }
+
+    if (emulPaused) {
+      clearAudioQueue();
+      void context.suspend().catch(() => {});
+      return;
+    }
+
+    void context.resume().catch(() => {});
+  }, [activeViewportTab, clearAudioQueue, emulPaused]);
 
   function canvasCoords(event: React.MouseEvent<HTMLCanvasElement>) {
     const rect = (event.target as HTMLCanvasElement).getBoundingClientRect();
@@ -718,6 +919,14 @@ export default function ViewportPanel() {
                 className="rounded border border-[#89b4fa]/40 bg-[#89b4fa]/10 px-2 py-1 text-[10px] font-semibold text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {loadStateBusy ? "Carregando..." : "Carregar state"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setAudioMuted((current) => !current)}
+                data-testid="viewport-audio-mute"
+                className="rounded border border-[#cba6f7]/40 bg-[#cba6f7]/10 px-2 py-1 text-[10px] font-semibold text-[#cba6f7] transition-colors hover:bg-[#cba6f7]/20"
+              >
+                {audioMuted ? "Ativar audio" : "Mutar audio"}
               </button>
             </div>
             <div className="flex items-center gap-4 select-none text-[10px] text-[#6c7086]">

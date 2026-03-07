@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   emulatorStop: vi.fn(),
   emulatorSendInput: vi.fn(),
   startFrameLoop: vi.fn(),
+  listenToAudioStream: vi.fn(),
   getHwStatus: vi.fn(),
   validateSceneDraft: vi.fn(),
   openProjectDialog: vi.fn(),
@@ -77,6 +78,7 @@ vi.mock("./core/ipc/emulatorService", () => ({
   emulatorStop: mocks.emulatorStop,
   emulatorSendInput: mocks.emulatorSendInput,
   startFrameLoop: mocks.startFrameLoop,
+  listenToAudioStream: mocks.listenToAudioStream,
   keyToJoypad: vi.fn(() => null),
 }));
 
@@ -230,6 +232,7 @@ describe("App build flow", () => {
       ok: true,
       message: "",
     });
+    mocks.listenToAudioStream.mockResolvedValue(vi.fn());
     mocks.startFrameLoop.mockImplementation(async (onFrame: (payload: { width: number; height: number; rgba: number[] }) => void) => {
       onFrame({ width: 1, height: 1, rgba: [255, 0, 0, 255] });
       return vi.fn();
@@ -603,5 +606,84 @@ describe("App build flow", () => {
 
     expect(useEditorStore.getState().emulPaused).toBe(false);
     expect(mocks.startFrameLoop).toHaveBeenCalledTimes(3);
+  });
+
+  it("creates and disposes the game audio context with the audio stream lifecycle", async () => {
+    const audioContextCtor = vi.fn();
+    const gainConnect = vi.fn();
+    const gainDisconnect = vi.fn();
+    const processorConnect = vi.fn();
+    const processorDisconnect = vi.fn();
+    const close = vi.fn().mockResolvedValue(undefined);
+    const suspend = vi.fn().mockResolvedValue(undefined);
+    const resume = vi.fn().mockResolvedValue(undefined);
+    const createGain = vi.fn(() => ({
+      gain: { value: 1 },
+      connect: gainConnect,
+      disconnect: gainDisconnect,
+    }));
+    const createScriptProcessor = vi.fn(() => ({
+      onaudioprocess: null,
+      connect: processorConnect,
+      disconnect: processorDisconnect,
+    }));
+    class FakeAudioContext {
+      public state = "running";
+      public destination = {};
+
+      constructor() {
+        audioContextCtor();
+      }
+
+      createGain() {
+        return createGain();
+      }
+
+      createScriptProcessor() {
+        return createScriptProcessor();
+      }
+
+      close() {
+        return close();
+      }
+
+      suspend() {
+        return suspend();
+      }
+
+      resume() {
+        return resume();
+      }
+    }
+
+    Object.defineProperty(window, "AudioContext", {
+      configurable: true,
+      value: FakeAudioContext,
+    });
+    mocks.listenToAudioStream.mockImplementation(async (onAudio: (payload: { sample_rate: number; samples: number[] }) => void) => {
+      onAudio({ sample_rate: 44100, samples: [0, 0, 1, -1] });
+      return vi.fn();
+    });
+
+    await act(async () => {
+      useEditorStore.setState({ activeViewportTab: "game" });
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.listenToAudioStream).toHaveBeenCalledTimes(1);
+    expect(audioContextCtor).toHaveBeenCalledTimes(1);
+    expect(createGain).toHaveBeenCalledTimes(1);
+    expect(createScriptProcessor).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      useEditorStore.setState({ activeViewportTab: "scene" });
+      await flush();
+      await flush();
+    });
+
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(processorDisconnect).toHaveBeenCalledTimes(1);
+    expect(gainDisconnect).toHaveBeenCalledTimes(1);
   });
 });
