@@ -469,12 +469,12 @@ impl LoadedCore {
 
 fn load_core_library(core_path: &Path) -> Result<Library, String> {
     let mut last_error = None;
-    for _ in 0..5 {
+    for _ in 0..20 {
         match unsafe { Library::new(core_path) } {
             Ok(library) => return Ok(library),
             Err(error) => {
                 last_error = Some(error.to_string());
-                std::thread::sleep(std::time::Duration::from_millis(50));
+                std::thread::sleep(std::time::Duration::from_millis(100));
             }
         }
     }
