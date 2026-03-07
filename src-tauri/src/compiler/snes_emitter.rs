@@ -1,7 +1,8 @@
 use crate::compiler::ast_generator::{
-    collect_collision_checks, collect_physics_applications, collect_tilemap_assets,
-    AabbCollisionCheck, AstNode, AstOutput, PhysicsApplication,
-    LogicCollisionTarget, LogicOp, LogicPositionSource, LogicScript, SpriteAsset, TilemapAsset,
+    collect_bgm_tracks, collect_collision_checks, collect_logic_sound_names,
+    collect_physics_applications, collect_sfx_resources, collect_tilemap_assets,
+    AabbCollisionCheck, AstNode, AstOutput, LogicCollisionTarget, LogicOp, LogicPositionSource,
+    LogicScript, PhysicsApplication, SpriteAsset, TilemapAsset,
 };
 
 #[derive(Debug)]
@@ -68,6 +69,8 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     let collision_checks = collect_collision_checks(ast);
     let physics_applications = collect_physics_applications(ast);
     let tilemap_assets = collect_tilemap_assets(ast);
+    let sfx_resources = collect_sfx_resources(ast);
+    let bgm_tracks = collect_bgm_tracks(ast);
     let has_logic_overlap = ast.logic_scripts.iter().any(script_uses_overlap);
     let size_config = ast
         .sprite_assets
@@ -91,6 +94,8 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
         out.push_str(&format!("#include \"{}.inc\"\n", asset.resource_name));
     }
     out.push('\n');
+    render_sound_id_macros(&mut out, ast);
+    render_audio_externs(&mut out, &sfx_resources, &bgm_tracks);
 
     for animation in &context.animations {
         let frame_tiles = animation
@@ -206,6 +211,22 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
             | AstNode::DrawTilemap { .. }
             | AstNode::SpawnSprite { .. }
             | AstNode::SetAnimation { .. } => {}
+            AstNode::InitAudio { sfx_resources } => {
+                out.push_str("    spcBoot();\n");
+                for (resource_name, _) in sfx_resources {
+                    out.push_str(&format!(
+                        "    spcSetSoundEntry(SFX_{sound_id}, 8, 0, (u8*)&{symbol});\n",
+                        sound_id = resource_name.to_uppercase(),
+                        symbol = snes_sfx_symbol(resource_name)
+                    ));
+                }
+            }
+            AstNode::PlayBgm { resource_name, .. } => {
+                out.push_str(&format!(
+                    "    spcLoad((u8*)&{});\n",
+                    snes_bgm_symbol(resource_name)
+                ));
+            }
             AstNode::ReadInputDevice { device, state_var } => {
                 if !pads_scanned {
                     out.push_str("        scanPads();\n");
@@ -628,13 +649,72 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], context: &SnesContext, in
             }
             LogicOp::PlaySound { sfx } => {
                 out.push_str(&format!(
-                    "{indent}SPC_playSFX(SFX_{sfx});\n",
+                    "{indent}spcPlaySound(SFX_{sfx});\n",
                     indent = indent_str,
                     sfx = sfx.to_uppercase()
                 ));
             }
         }
     }
+}
+
+fn render_sound_id_macros(out: &mut String, ast: &AstOutput) {
+    let sound_names = collect_sound_names(ast);
+    if sound_names.is_empty() {
+        return;
+    }
+
+    for (index, sound_name) in sound_names.iter().enumerate() {
+        out.push_str(&format!(
+            "#define SFX_{} {}\n",
+            sound_name.to_uppercase(),
+            index
+        ));
+    }
+    out.push('\n');
+}
+
+fn render_audio_externs(
+    out: &mut String,
+    sfx_resources: &[(String, String)],
+    bgm_tracks: &[(String, String)],
+) {
+    if sfx_resources.is_empty() && bgm_tracks.is_empty() {
+        return;
+    }
+
+    for (resource_name, _) in sfx_resources {
+        out.push_str(&format!(
+            "extern char {};\n",
+            snes_sfx_symbol(resource_name)
+        ));
+    }
+    for (resource_name, _) in bgm_tracks {
+        out.push_str(&format!(
+            "extern char {};\n",
+            snes_bgm_symbol(resource_name)
+        ));
+    }
+    out.push('\n');
+}
+
+fn collect_sound_names(ast: &AstOutput) -> Vec<String> {
+    let mut sound_names = std::collections::BTreeSet::new();
+    for (resource_name, _) in collect_sfx_resources(ast) {
+        sound_names.insert(resource_name);
+    }
+    for sound_name in collect_logic_sound_names(ast) {
+        sound_names.insert(sound_name);
+    }
+    sound_names.into_iter().collect()
+}
+
+fn snes_sfx_symbol(resource_name: &str) -> String {
+    format!("{}_sfx", resource_name)
+}
+
+fn snes_bgm_symbol(resource_name: &str) -> String {
+    format!("{}_bgm", resource_name)
 }
 
 fn current_tile_expression(context: &SnesContext, var_name: &str) -> String {
@@ -773,10 +853,16 @@ fn tile_base_lookup(ast: &AstOutput) -> std::collections::HashMap<String, u16> {
 fn build_resource_manifest(ast: &AstOutput) -> String {
     let mut out = String::new();
     let tilemap_assets = collect_tilemap_assets(ast);
+    let sfx_resources = collect_sfx_resources(ast);
+    let bgm_tracks = collect_bgm_tracks(ast);
     out.push_str("// Generated by RetroDev Studio - DO NOT EDIT\n");
     out.push_str("// Workspace SNES asset manifest\n\n");
 
-    if ast.sprite_assets.is_empty() && tilemap_assets.is_empty() {
+    if ast.sprite_assets.is_empty()
+        && tilemap_assets.is_empty()
+        && sfx_resources.is_empty()
+        && bgm_tracks.is_empty()
+    {
         out.push_str("# no visual assets staged for this target\n");
         return out;
     }
@@ -797,6 +883,12 @@ fn build_resource_manifest(ast: &AstOutput) -> String {
             asset.frame_height,
             asset.palette_slot
         ));
+    }
+    for (resource_name, asset_path) in sfx_resources {
+        out.push_str(&format!("SFX {} <- {}\n", resource_name, asset_path));
+    }
+    for (resource_name, asset_path) in bgm_tracks {
+        out.push_str(&format!("BGM {} <- {}\n", resource_name, asset_path));
     }
 
     out
@@ -1105,6 +1197,46 @@ mod tests {
     }
 
     #[test]
+    fn snes_emitter_emits_audio_boot_and_manifest_entries() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::InitAudio {
+                    sfx_resources: vec![("jump".to_string(), "assets/audio/jump.brr".to_string())],
+                },
+                AstNode::PlayBgm {
+                    resource_name: "stage_theme".to_string(),
+                    asset_path: "assets/audio/stage_theme.spc".to_string(),
+                },
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: vec![logic_script()],
+        };
+
+        let output = emit_snes(&ast, "Audio Demo");
+
+        assert!(output.main_c.contains("#define SFX_JUMP 0"));
+        assert!(output.main_c.contains("extern char jump_sfx;"));
+        assert!(output.main_c.contains("extern char stage_theme_bgm;"));
+        assert!(output.main_c.contains("spcBoot();"));
+        assert!(output
+            .main_c
+            .contains("spcSetSoundEntry(SFX_JUMP, 8, 0, (u8*)&jump_sfx);"));
+        assert!(output
+            .main_c
+            .contains("spcLoad((u8*)&stage_theme_bgm);"));
+        assert!(output
+            .resources_res
+            .contains("SFX jump <- assets/audio/jump.brr"));
+        assert!(output
+            .resources_res
+            .contains("BGM stage_theme <- assets/audio/stage_theme.spc"));
+    }
+
+    #[test]
     fn snes_emitter_emits_apply_physics_with_velocity_state() {
         let ast = AstOutput {
             nodes: vec![
@@ -1200,6 +1332,6 @@ mod tests {
         assert!(output.main_c.contains(
             "if (retro_aabb_intersects(spr_hero_x + 0, spr_hero_y + 0, 16, 16, spr_enemy_x + 1, spr_enemy_y + 2, 16, 16)) {"
         ));
-        assert!(output.main_c.contains("SPC_playSFX(SFX_JUMP);"));
+        assert!(output.main_c.contains("spcPlaySound(SFX_JUMP);"));
     }
 }

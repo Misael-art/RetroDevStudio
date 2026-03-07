@@ -2,7 +2,10 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-use crate::compiler::ast_generator::{collect_tilemap_assets, generate_ast_with_prefabs, AstOutput};
+use crate::compiler::ast_generator::{
+    collect_bgm_tracks, collect_sfx_resources, collect_tilemap_assets, generate_ast_with_prefabs,
+    AstOutput,
+};
 use crate::compiler::sgdk_emitter::emit_sgdk;
 use crate::compiler::snes_emitter::emit_snes;
 use crate::core::project_mgr::{load_project, load_scene, resolve_prefabs, target_spec, TargetSpec};
@@ -418,6 +421,13 @@ fn stage_project_assets(
         stage_bitmap_asset(&source, &destination, "SGDK")?;
     }
 
+    for (_, asset_path) in collect_sfx_resources(ast) {
+        stage_project_raw_asset(project_dir, workspace_root, &asset_path, "SGDK audio")?;
+    }
+    for (_, asset_path) in collect_bgm_tracks(ast) {
+        stage_project_raw_asset(project_dir, workspace_root, &asset_path, "SGDK audio")?;
+    }
+
     Ok(())
 }
 
@@ -449,6 +459,76 @@ fn stage_snes_assets(project_dir: &Path, src_dir: &Path, ast: &AstOutput) -> Res
         let destination = src_dir.join(format!("{}.bmp", asset.resource_name));
         stage_bitmap_asset(&source, &destination, "SNES")?;
     }
+
+    for (resource_name, asset_path) in collect_sfx_resources(ast) {
+        stage_snes_audio_asset(project_dir, src_dir, &resource_name, &asset_path, "sfx")?;
+    }
+    for (resource_name, asset_path) in collect_bgm_tracks(ast) {
+        stage_snes_audio_asset(project_dir, src_dir, &resource_name, &asset_path, "bgm")?;
+    }
+
+    Ok(())
+}
+
+fn stage_project_raw_asset(
+    project_dir: &Path,
+    workspace_root: &Path,
+    asset_path: &str,
+    target_label: &str,
+) -> Result<(), String> {
+    let source_rel = sanitize_relative_asset_path(asset_path)?;
+    let source = project_dir.join(&source_rel);
+    if !source.exists() {
+        return Err(format!(
+            "Asset referenciado nao encontrado: '{}'.",
+            source.display()
+        ));
+    }
+
+    let destination = workspace_root.join(&source_rel);
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            format!("Falha ao preparar pasta de asset '{}': {}", parent.display(), e)
+        })?;
+    }
+    fs::copy(&source, &destination).map_err(|e| {
+        format!(
+            "Falha ao copiar asset {} '{}' para '{}': {}",
+            target_label,
+            source.display(),
+            destination.display(),
+            e
+        )
+    })?;
+
+    Ok(())
+}
+
+fn stage_snes_audio_asset(
+    project_dir: &Path,
+    src_dir: &Path,
+    resource_name: &str,
+    asset_path: &str,
+    suffix: &str,
+) -> Result<(), String> {
+    let source_rel = sanitize_relative_asset_path(asset_path)?;
+    let source = project_dir.join(&source_rel);
+    if !source.exists() {
+        return Err(format!(
+            "Asset referenciado nao encontrado: '{}'.",
+            source.display()
+        ));
+    }
+
+    let destination = src_dir.join(snes_audio_staging_filename(resource_name, asset_path, suffix));
+    fs::copy(&source, &destination).map_err(|e| {
+        format!(
+            "Falha ao copiar asset SNES audio '{}' para '{}': {}",
+            source.display(),
+            destination.display(),
+            e
+        )
+    })?;
 
     Ok(())
 }
@@ -495,6 +575,15 @@ fn sgdk_tilemap_staging_path(asset_path: &Path) -> PathBuf {
     let mut staged = asset_path.to_path_buf();
     staged.set_extension("bmp");
     staged
+}
+
+fn snes_audio_staging_filename(resource_name: &str, asset_path: &str, suffix: &str) -> String {
+    let extension = Path::new(asset_path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("bin");
+    format!("{}_{}.{}", resource_name, suffix, extension)
 }
 
 fn write_indexed_bmp_8bit(image: &image::DynamicImage, destination: &Path) -> Result<(), String> {
@@ -636,6 +725,8 @@ fn render_pvsneslib_makefile(project_slug: &str, ast: &AstOutput) -> String {
 fn render_snes_data_asm(ast: &AstOutput) -> String {
     let mut out = String::new();
     let tilemap_assets = collect_tilemap_assets(ast);
+    let sfx_resources = collect_sfx_resources(ast);
+    let bgm_tracks = collect_bgm_tracks(ast);
     out.push_str(".include \"hdr.asm\"\n\n");
 
     if !tilemap_assets.is_empty() {
@@ -659,6 +750,28 @@ fn render_snes_data_asm(ast: &AstOutput) -> String {
         out.push_str(&format!(".include \"src/{}_data.as\"\n", asset.resource_name));
     }
     out.push_str("\n.ends\n");
+
+    if !sfx_resources.is_empty() || !bgm_tracks.is_empty() {
+        out.push_str("\n\n.section \".roaudio\" superfree\n\n");
+        for (resource_name, asset_path) in sfx_resources {
+            out.push_str(&format!("{}_sfx:\n", resource_name));
+            out.push_str(&format!(
+                ".incbin \"src/{}\"\n",
+                snes_audio_staging_filename(&resource_name, &asset_path, "sfx")
+            ));
+            out.push_str(&format!("{}_sfxend:\n\n", resource_name));
+        }
+        for (resource_name, asset_path) in bgm_tracks {
+            out.push_str(&format!("{}_bgm:\n", resource_name));
+            out.push_str(&format!(
+                ".incbin \"src/{}\"\n",
+                snes_audio_staging_filename(&resource_name, &asset_path, "bgm")
+            ));
+            out.push_str(&format!("{}_bgmend:\n\n", resource_name));
+        }
+        out.push_str(".ends\n");
+    }
+
     out
 }
 
@@ -1237,6 +1350,88 @@ mod tests {
             .expect("write tilemap scene fixture");
     }
 
+    fn install_megadrive_audio_fixture(project_dir: &Path) {
+        let audio_dir = project_dir.join("assets").join("audio");
+        fs::create_dir_all(&audio_dir).expect("create megadrive audio dir");
+        fs::write(audio_dir.join("jump.wav"), b"RIFFretro").expect("write jump wav");
+        fs::write(audio_dir.join("stage_theme.xgm"), b"XGMretro").expect("write stage theme xgm");
+
+        let scene_json = r#"{
+  "scene_id": "main",
+  "display_name": "Main Scene",
+  "background_layers": [],
+  "entities": [
+    {
+      "entity_id": "audio_driver",
+      "prefab": null,
+      "transform": {
+        "x": 0,
+        "y": 0
+      },
+      "components": {
+        "sprite": null,
+        "collision": null,
+        "input": null,
+        "physics": null,
+        "audio": {
+          "sfx": {
+            "jump": "assets/audio/jump.wav"
+          },
+          "bgm": "assets/audio/stage_theme.xgm"
+        },
+        "logic": null,
+        "camera": null,
+        "tilemap": null
+      }
+    }
+  ],
+  "palettes": []
+}"#;
+        fs::write(project_dir.join("scenes").join("main.json"), scene_json)
+            .expect("write megadrive audio scene fixture");
+    }
+
+    fn install_snes_audio_fixture(project_dir: &Path) {
+        let audio_dir = project_dir.join("assets").join("audio");
+        fs::create_dir_all(&audio_dir).expect("create snes audio dir");
+        fs::write(audio_dir.join("jump.brr"), b"BRRretro").expect("write jump brr");
+        fs::write(audio_dir.join("stage_theme.spc"), b"SPCretro").expect("write stage theme spc");
+
+        let scene_json = r#"{
+  "scene_id": "main",
+  "display_name": "Main Scene",
+  "background_layers": [],
+  "entities": [
+    {
+      "entity_id": "audio_driver",
+      "prefab": null,
+      "transform": {
+        "x": 0,
+        "y": 0
+      },
+      "components": {
+        "sprite": null,
+        "collision": null,
+        "input": null,
+        "physics": null,
+        "audio": {
+          "sfx": {
+            "jump": "assets/audio/jump.brr"
+          },
+          "bgm": "assets/audio/stage_theme.spc"
+        },
+        "logic": null,
+        "camera": null,
+        "tilemap": null
+      }
+    }
+  ],
+  "palettes": []
+}"#;
+        fs::write(project_dir.join("scenes").join("main.json"), scene_json)
+            .expect("write snes audio scene fixture");
+    }
+
     #[test]
     fn build_fails_when_toolchain_is_missing() {
         let _serial = test_serial_guard();
@@ -1409,6 +1604,102 @@ mod tests {
         )
         .expect("read SNES main.c");
         assert!(main_c.contains("bgInitMapSet(0, (u8*)&background_tilemap_map"));
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn build_generates_megadrive_workspace_with_audio_assets() {
+        let _serial = test_serial_guard();
+        let project_dir = workspace_copy("megadrive_dummy");
+        install_megadrive_audio_fixture(&project_dir);
+        let (sgdk_root, make_program) = fake_toolchain("sgdk-audio", "md");
+        let environment = BuildEnvironment {
+            sgdk_root: Some(sgdk_root),
+            sgdk_make_program: Some(make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_with_environment(&project_dir, &environment, |_| {});
+
+        assert!(result.ok, "build log: {:?}", result.log);
+        assert!(project_dir
+            .join("build")
+            .join("megadrive")
+            .join("assets")
+            .join("audio")
+            .join("jump.wav")
+            .exists());
+        assert!(project_dir
+            .join("build")
+            .join("megadrive")
+            .join("assets")
+            .join("audio")
+            .join("stage_theme.xgm")
+            .exists());
+        let resources_res = fs::read_to_string(
+            project_dir
+                .join("build")
+                .join("megadrive")
+                .join("res")
+                .join("resources.res"),
+        )
+        .expect("read SGDK audio resources");
+        assert!(resources_res.contains("WAV jump \"assets/audio/jump.wav\" 2ADPCM"));
+        assert!(resources_res.contains("XGM stage_theme \"assets/audio/stage_theme.xgm\""));
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn build_generates_snes_workspace_with_audio_data_files() {
+        let _serial = test_serial_guard();
+        let project_dir = workspace_copy("snes_dummy");
+        install_snes_audio_fixture(&project_dir);
+        let (pvsneslib_root, make_program) = fake_toolchain("pvsneslib-audio", "sfc");
+        fs::create_dir_all(pvsneslib_root.join("devkitsnes")).expect("create fake devkitsnes");
+        fs::write(
+            pvsneslib_root.join("devkitsnes").join("snes_rules"),
+            "dummy rules",
+        )
+        .expect("write fake snes_rules");
+        let environment = BuildEnvironment {
+            pvsneslib_root: Some(pvsneslib_root),
+            pvsneslib_make_program: Some(make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_with_environment(&project_dir, &environment, |_| {});
+
+        assert!(result.ok, "build log: {:?}", result.log);
+        assert!(project_dir
+            .join("build")
+            .join("snes")
+            .join("src")
+            .join("jump_sfx.brr")
+            .exists());
+        assert!(project_dir
+            .join("build")
+            .join("snes")
+            .join("src")
+            .join("stage_theme_bgm.spc")
+            .exists());
+        let data_asm = fs::read_to_string(
+            project_dir.join("build").join("snes").join("data.asm"),
+        )
+        .expect("read SNES audio data asm");
+        assert!(data_asm.contains("jump_sfx:"));
+        assert!(data_asm.contains(".incbin \"src/jump_sfx.brr\""));
+        assert!(data_asm.contains("stage_theme_bgm:"));
+        assert!(data_asm.contains(".incbin \"src/stage_theme_bgm.spc\""));
+        let main_c = fs::read_to_string(
+            project_dir.join("build").join("snes").join("src").join("main.c"),
+        )
+        .expect("read SNES audio main.c");
+        assert!(main_c.contains("spcSetSoundEntry(SFX_JUMP, 8, 0, (u8*)&jump_sfx);"));
+        assert!(main_c.contains("spcLoad((u8*)&stage_theme_bgm);"));
 
         let _ = fs::remove_dir_all(project_dir);
     }

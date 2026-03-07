@@ -5,7 +5,8 @@ use std::path::Path;
 
 use crate::core::project_mgr::{resolve_prefabs, LoadError};
 use crate::ugdm::components::{
-    AnimationDef, CollisionComponent, InputComponent, PhysicsComponent, SpriteComponent,
+    AnimationDef, AudioComponent, CollisionComponent, InputComponent, PhysicsComponent,
+    SpriteComponent,
 };
 use crate::ugdm::entities::{Project, Scene};
 
@@ -39,6 +40,13 @@ pub enum AstNode {
         y: i32,
         scroll_x: i32,
         scroll_y: i32,
+    },
+    InitAudio {
+        sfx_resources: Vec<(String, String)>,
+    },
+    PlayBgm {
+        resource_name: String,
+        asset_path: String,
     },
     ReadInputDevice {
         device: String,
@@ -255,6 +263,9 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
     let mut input_reads: Vec<InputRead> = Vec::new();
     let mut input_actions: Vec<InputActionBinding> = Vec::new();
     let mut physics_applications: Vec<PhysicsApplication> = Vec::new();
+    let mut audio_sfx_resources: std::collections::BTreeMap<String, String> =
+        std::collections::BTreeMap::new();
+    let mut bgm_track: Option<(String, String)> = None;
     let mut sprite_var_names: HashMap<String, String> = HashMap::new();
     let mut asset_resource_names: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
@@ -285,6 +296,9 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
                 &mut input_actions,
                 &mut input_state_vars,
             );
+        }
+        if let Some(audio) = &entity.components.audio {
+            register_audio_nodes(audio, &mut audio_sfx_resources, &mut bgm_track);
         }
 
         if let Some(tilemap) = &entity.components.tilemap {
@@ -382,6 +396,17 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
         }
     }
 
+    if !audio_sfx_resources.is_empty() {
+        nodes.push(AstNode::InitAudio {
+            sfx_resources: audio_sfx_resources.into_iter().collect(),
+        });
+    }
+    if let Some((resource_name, asset_path)) = bgm_track {
+        nodes.push(AstNode::PlayBgm {
+            resource_name,
+            asset_path,
+        });
+    }
     nodes.push(AstNode::GameLoopBegin);
     nodes.extend(input_reads.iter().cloned().map(|read| AstNode::ReadInputDevice {
         device: read.device,
@@ -495,6 +520,48 @@ fn physics_application(var_name: &str, physics: &PhysicsComponent) -> PhysicsApp
         friction: physics.friction,
         bounce: physics.bounce,
     }
+}
+
+fn register_audio_nodes(
+    audio: &AudioComponent,
+    sfx_resources: &mut std::collections::BTreeMap<String, String>,
+    bgm_track: &mut Option<(String, String)>,
+) {
+    for (action, asset_path) in &audio.sfx {
+        let action = sanitize_identifier(action);
+        let asset_path = asset_path.trim();
+        if action.is_empty() || asset_path.is_empty() {
+            continue;
+        }
+        sfx_resources
+            .entry(action)
+            .or_insert_with(|| asset_path.to_string());
+    }
+
+    if bgm_track.is_some() {
+        return;
+    }
+
+    let Some(asset_path) = audio.bgm.as_deref().map(str::trim) else {
+        return;
+    };
+    if asset_path.is_empty() {
+        return;
+    }
+
+    let file_stem = Path::new(asset_path)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("bgm");
+    let resource_name = sanitize_identifier(file_stem);
+    let resource_name = if resource_name.is_empty() {
+        "bgm".to_string()
+    } else {
+        resource_name
+    };
+
+    *bgm_track = Some((resource_name, asset_path.to_string()));
 }
 
 fn register_input_nodes(
@@ -847,6 +914,58 @@ pub fn collect_tilemap_assets(ast: &AstOutput) -> Vec<TilemapAsset> {
             _ => None,
         })
         .collect()
+}
+
+pub fn collect_sfx_resources(ast: &AstOutput) -> Vec<(String, String)> {
+    ast.nodes
+        .iter()
+        .filter_map(|node| match node {
+            AstNode::InitAudio { sfx_resources } => Some(sfx_resources.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+pub fn collect_bgm_tracks(ast: &AstOutput) -> Vec<(String, String)> {
+    ast.nodes
+        .iter()
+        .filter_map(|node| match node {
+            AstNode::PlayBgm {
+                resource_name,
+                asset_path,
+            } => Some((resource_name.clone(), asset_path.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+pub fn collect_logic_sound_names(ast: &AstOutput) -> Vec<String> {
+    let mut sound_names = std::collections::BTreeSet::new();
+    for script in &ast.logic_scripts {
+        collect_logic_sound_names_from_ops(&script.ops, &mut sound_names);
+    }
+    sound_names.into_iter().collect()
+}
+
+fn collect_logic_sound_names_from_ops(
+    ops: &[LogicOp],
+    sound_names: &mut std::collections::BTreeSet<String>,
+) {
+    for op in ops {
+        match op {
+            LogicOp::PlaySound { sfx } => {
+                sound_names.insert(sfx.clone());
+            }
+            LogicOp::ConditionOverlap {
+                if_true, if_false, ..
+            } => {
+                collect_logic_sound_names_from_ops(if_true, sound_names);
+                collect_logic_sound_names_from_ops(if_false, sound_names);
+            }
+            LogicOp::MoveSprite { .. } => {}
+        }
+    }
 }
 
 pub fn collect_collision_checks(ast: &AstOutput) -> Vec<AabbCollisionCheck> {
@@ -1420,6 +1539,96 @@ mod tests {
                 && *max_velocity_y == 96
                 && *friction == 2
                 && *bounce == 35
+        )));
+    }
+
+    #[test]
+    fn generate_ast_emits_audio_nodes_from_audio_components() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
+            name: "Audio Demo".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+        };
+        let mut player_sfx = HashMap::new();
+        player_sfx.insert("jump".to_string(), "assets/audio/jump.wav".to_string());
+        player_sfx.insert("dash".to_string(), "assets/audio/dash.wav".to_string());
+        let mut support_sfx = HashMap::new();
+        support_sfx.insert("jump".to_string(), "assets/audio/duplicate.wav".to_string());
+
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![
+                Entity {
+                    entity_id: "player".to_string(),
+                    prefab: None,
+                    transform: Transform { x: 16, y: 24 },
+                    components: Components {
+                        audio: Some(crate::ugdm::components::AudioComponent {
+                            sfx: player_sfx,
+                            bgm: Some("assets/audio/stage_theme.xgm".to_string()),
+                        }),
+                        ..Components::default()
+                    },
+                },
+                Entity {
+                    entity_id: "support".to_string(),
+                    prefab: None,
+                    transform: Transform { x: 40, y: 24 },
+                    components: Components {
+                        audio: Some(crate::ugdm::components::AudioComponent {
+                            sfx: support_sfx,
+                            bgm: Some("assets/audio/ignored_theme.xgm".to_string()),
+                        }),
+                        ..Components::default()
+                    },
+                },
+            ],
+            palettes: Vec::new(),
+            retrofx: None,
+        };
+
+        let ast = generate_ast(&project, &scene);
+
+        assert_eq!(
+            collect_sfx_resources(&ast),
+            vec![
+                ("dash".to_string(), "assets/audio/dash.wav".to_string()),
+                ("jump".to_string(), "assets/audio/jump.wav".to_string()),
+            ]
+        );
+        assert_eq!(
+            collect_bgm_tracks(&ast),
+            vec![(
+                "stage_theme".to_string(),
+                "assets/audio/stage_theme.xgm".to_string()
+            )]
+        );
+        assert!(ast.nodes.iter().any(|node| matches!(
+            node,
+            AstNode::InitAudio { sfx_resources }
+                if sfx_resources.len() == 2
+                    && sfx_resources[0].0 == "dash"
+                    && sfx_resources[1].0 == "jump"
+        )));
+        assert!(ast.nodes.iter().any(|node| matches!(
+            node,
+            AstNode::PlayBgm {
+                resource_name,
+                asset_path,
+            } if resource_name == "stage_theme"
+                && asset_path == "assets/audio/stage_theme.xgm"
         )));
     }
 

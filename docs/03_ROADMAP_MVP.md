@@ -81,6 +81,7 @@
 - [x] Collision AABB basica no game loop SGDK com filtros por `layer/collides_with` a partir de `CollisionComponent`.
 - [x] Input mapping basico no game loop SGDK via `JOY_readJoypad` por `InputComponent`.
 - [x] Physics basica no game loop SGDK com gravidade/subpixels, clamp de velocidade, friccao e bounce simples a partir de `PhysicsComponent`.
+- [x] Pipeline de audio SGDK com coleta de `AudioComponent`, staging de assets, `WAV`/`XGM` no `resources.res`, `XGM_setPCM` para SFX e `XGM_startPlay` para BGM.
 - [x] Build workspace real com `main.c`, `resources.res`, `Makefile` e deteccao de ROM.
 - [x] Hardware validation para Mega Drive.
 - [x] Emulacao Libretro real para ROM externa e ROM gerada.
@@ -104,6 +105,7 @@
 - [x] Collision AABB basica no game loop SNES com filtros por `layer/collides_with` a partir de `CollisionComponent`.
 - [x] Input mapping basico no game loop SNES via `scanPads`/`padsCurrent` por `InputComponent`.
 - [x] Physics basica no game loop SNES com gravidade/subpixels, clamp de velocidade, friccao e bounce simples a partir de `PhysicsComponent`.
+- [x] Pipeline de audio SNES com coleta de `AudioComponent`, staging raw no workspace, rotulos em `data.asm`, `spcLoad` para BGM e `spcPlaySound` para SFX.
 - [x] Instalacao automatica sob demanda de PVSnesLib e core Libretro de SNES.
 
 ### Gate obrigatorio para considerar a fase realmente fechada
