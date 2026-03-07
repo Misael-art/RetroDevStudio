@@ -1,6 +1,6 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-03-06
+**Ultima revisao canonica:** 2026-03-07
 **Fase ativa real:** Hardening do fluxo `Build -> ROM -> Emulacao` ja validado em Windows com upstream real e em runner GitHub/Windows real
 
 > **DIRETRIZ PARA AGENTES DE IA**
@@ -57,6 +57,7 @@
 ### Ainda em hardening
 - Confirmacao remota em runner GitHub/Windows dos cenarios mais recentes (`live-error`, `live-stale`, `live-ok`) enquanto este host local segue bloqueado em criacao de sessao WebDriver (`DevToolsActivePort` / `chrome not reachable`).
 - Desbloqueio do build desktop local neste host quando `npm run tauri build -- --debug --no-bundle` falha com `spawn EPERM` em `beforeBuildCommand` (vite/esbuild).
+- Desbloqueio do rebuild Rust/Tauri neste host apos a policy de Application Control passar a bloquear `src-tauri\target\debug\build\tauri-plugin-dialog-*\build-script-build` (`os error 4551`) durante `cargo clippy`/`cargo check`, impedindo a retomada da onda K.
 - Repeticao institucional do fluxo oficial em Windows quando build/emulacao/toolchains forem alterados.
 - Decisao final de governanca do workflow desktop dedicado (`push`/`pull_request` path-filtered, `workflow_dispatch`, `workflow_call` ou gate protegido).
 - Auditoria residual de UX para handlers async fora do endurecimento ja aplicado em abertura de projeto e salvamento no inspector.

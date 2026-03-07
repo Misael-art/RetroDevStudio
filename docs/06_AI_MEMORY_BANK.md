@@ -1,6 +1,6 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Ultima Atualizacao:** 2026-03-07
-**Ultima sessao:** 2026-03-07 (Codex - Sessao 48: onda J concluida com hardening de inspector/ferramentas e badge Experimental revisado)
+**Ultima sessao:** 2026-03-07 (Codex - Sessao 49: bloqueio ambiental no gate Rust durante tentativa de K1)
 **Fase Atual:** Expansao do pipeline canonico apos hardening do MVP (Build -> ROM -> Emulacao validado em Windows com upstream real; desktop E2E multi-target validado localmente e em runner GitHub/Windows real; build/codegen e runtime agora cobrem Physics, Audio, RetroFX e NodeGraph expandido, com audio frontend real sem abrir pipeline paralelo)
 **Branch sugerida:** `feat/<tema>` para trabalho paralelo; usar `main` apenas quando o usuario pedir edicao direta no workspace atual
 
@@ -16,6 +16,13 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-07 - sessao 49):**
+  - A retomada da onda K foi iniciada em `K1` (distribuicao de sprites por scanline nos hardware profiles), mas a tarefa foi revertida antes de commit para parar limpo quando o gate Rust voltou a falhar por ambiente, nao por logica do feature.
+  - `npm run check:tree`, `npm run lint`, `npx tsc --noEmit` e `npm test` permaneceram verdes nesta sessao.
+  - O bloqueio esta concentrado no rebuild do crate Tauri: `cargo clippy -- -D warnings` e `cargo check` falharam repetidamente porque a policy local de Application Control bloqueia a execucao de `target\\debug\\build\\tauri-plugin-dialog-*\\build-script-build` (`os error 4551`), inclusive fora do sandbox.
+  - Depois de tres tentativas de correcao (execucao normal, limpeza seletiva de artefatos e execucao fora do sandbox), o bloqueio foi classificado como ambiental/infra e nenhuma nova tarefa da fila foi concluida nesta sessao.
+  - O ultimo commit funcional e validado permanece `65920ac` (`feat: remove profiler experimental badge`).
 
 * **O que acabou de acontecer (2026-03-07 - sessao 48):**
   - Onda J concluida: J1-J5.
@@ -479,9 +486,9 @@
   - GitHub Actions `Desktop E2E` (`22606643935`) -> OK em `windows-latest`, com `Run Mega Drive desktop smoke` e `Run SNES desktop smoke` ambos verdes.
 
 * **Proximo passo imediato:**
-  1. Executar K1 na onda K: adicionar verificacao de distribuicao de sprites por scanline em `md_profile.rs` e `snes_profile.rs`, expondo `scanline_sprite_peak`/`scanline_sprite_limit` no `HwStatus` com warnings/fatais por target.
-  2. Na sequencia, fechar K2 e K3 no mesmo trilho canonico de hardware, adicionando estimativa de DMA por frame e rastreamento basico de canais de audio sem duplicar calculos fora dos profiles existentes.
-  3. Preservar o baseline institucional verde e continuar atualizando `docs/03_ROADMAP_MVP.md` e este Memory Bank a cada onda concluida ou checkpoint de contexto.
+  1. Desbloquear no host a execucao dos build scripts Tauri em `src-tauri\\target\\debug\\build\\*` (ou fornecer ambiente/workspace whitelist equivalente) para que `cargo clippy` e `cargo test --lib` voltem a executar localmente.
+  2. Reexecutar os gates Rust canonicos a partir do estado atual limpo e, somente com eles verdes, retomar exatamente `K1. Per-scanline sprite distribution check` em `md_profile.rs` e `snes_profile.rs`.
+  3. Apos destravar o gate, continuar a onda K na ordem (`K1 -> K2 -> K3`) e seguir o restante da fila sem abrir pipeline paralelo fora do fluxo canonico.
 
 ---
 
