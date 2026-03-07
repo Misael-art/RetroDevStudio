@@ -17,6 +17,41 @@ const MD_SPRITES_MAX_SCREEN: u32 = 80;
 const MD_SPRITES_MAX_SCANLINE: u32 = 20;
 const MD_DMA_VBLANK_BYTES: u32 = 7_372; // ~7.2 KB/frame em H40 NTSC (doc 04)
 const SAT_SIZE: usize = 80 * 8; // Sprite Attribute Table: 80 sprites × 8 bytes
+const SAT_Y_MIN: u16 = 128;
+const SAT_Y_MAX: u16 = 352;
+
+#[derive(Debug, Clone, Copy)]
+struct SatEntry {
+    y: u16,
+    size_byte: u8,
+    link: u8,
+    x: u16,
+}
+
+impl SatEntry {
+    fn width_code(self) -> u8 {
+        self.size_byte & 0x3
+    }
+
+    fn height_code(self) -> u8 {
+        (self.size_byte >> 2) & 0x3
+    }
+
+    fn height_pixels(self) -> usize {
+        (self.height_code() as usize + 1) * 8
+    }
+
+    fn has_plausible_position(self) -> bool {
+        (SAT_Y_MIN..=SAT_Y_MAX).contains(&self.y) && self.x > 0 && self.x <= 511
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SatCandidate {
+    offset: usize,
+    score: u32,
+    plausible_entries: u32,
+}
 
 // ── Output types ──────────────────────────────────────────────────────────────
 
@@ -117,17 +152,14 @@ pub fn profile_bytes(rom: &[u8]) -> ProfileReport {
         for sprite_idx in 0..80usize {
             let base = sprite_idx * 8;
             if base + 8 > sat_data.len() { break; }
-            let y = u16::from_be_bytes([sat_data[base], sat_data[base + 1]]) & 0x1FF;
-            let height_code = (sat_data[base + 2] >> 2) & 0x3;
-            let height_tiles = (height_code as u16 + 1) * 8; // pixels
-            let x = u16::from_be_bytes([sat_data[base + 6], sat_data[base + 7]]) & 0x1FF;
+            let entry = sat_entry(&sat_data[base..base + 8]);
 
             // Filtra entradas inválidas/não usadas
-            if y == 0 || y > 240 || x == 0 || x > 320 { continue; }
+            if !entry.has_plausible_position() { continue; }
             sprites_parsed += 1;
 
-            let y_start = (y as usize).saturating_sub(128);
-            let y_end   = (y_start + height_tiles as usize).min(MD_SCANLINES);
+            let y_start = (entry.y as usize).saturating_sub(SAT_Y_MIN as usize);
+            let y_end   = (y_start + entry.height_pixels()).min(MD_SCANLINES);
             for sl in y_start..y_end {
                 report.sprite_heatmap[sl] = report.sprite_heatmap[sl].saturating_add(1);
             }
@@ -204,30 +236,162 @@ pub fn profile_bytes(rom: &[u8]) -> ProfileReport {
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
-/// Busca um candidato a SAT na ROM (heurística: sequência de 640 bytes com
-/// muitas entradas com Y entre 128 e 240 e X entre 128 e 320).
-fn find_sat_candidate(rom: &[u8]) -> Option<usize> {
-    // A SAT nunca está na ROM — mas ROMs de debug ou dumps de save state podem tê-la.
-    // Para ROMs normais, tentamos o offset fixo 0xFF0000 % rom.len() como fallback.
-    let probe = 0xFF0000_usize % rom.len();
-    let candidates = [0x8000, 0x10000, probe];
-    for &off in &candidates {
-        if off + SAT_SIZE <= rom.len() {
-            let mut valid = 0u32;
-            for i in 0..40usize {
-                let base = off + i * 8;
-                let y = u16::from_be_bytes([rom[base], rom[base + 1]]) & 0x1FF;
-                let x = u16::from_be_bytes([rom[base + 6], rom[base + 7]]) & 0x1FF;
-                if y > 128 && y < 240 && x > 128 && x < 320 { valid += 1; }
+fn sat_entry(bytes: &[u8]) -> SatEntry {
+    SatEntry {
+        y: u16::from_be_bytes([bytes[0], bytes[1]]) & 0x1FF,
+        size_byte: bytes[2],
+        link: bytes[3],
+        x: u16::from_be_bytes([bytes[6], bytes[7]]) & 0x1FF,
+    }
+}
+
+fn score_sat_candidate(window: &[u8]) -> u32 {
+    if window.len() < SAT_SIZE {
+        return 0;
+    }
+
+    let mut score = 0u32;
+    let mut plausible_entries = 0u32;
+    let mut chain_score = 0u32;
+
+    for sprite_idx in 0..80usize {
+        let base = sprite_idx * 8;
+        let entry = sat_entry(&window[base..base + 8]);
+
+        if entry.has_plausible_position() {
+            plausible_entries += 1;
+            score += 5;
+        }
+
+        if entry.width_code() <= 3 && entry.height_code() <= 3 {
+            score += 1;
+        }
+
+        if entry.link < 80 {
+            score += 1;
+            if sprite_idx == 79 {
+                if entry.link == 0 {
+                    chain_score += 2;
+                }
+            } else if entry.link == (sprite_idx + 1) as u8 || entry.link == 0 {
+                chain_score += 2;
             }
-            if valid >= 5 { return Some(off); }
         }
     }
-    None
+
+    if plausible_entries < 5 {
+        return 0;
+    }
+
+    score + chain_score
+}
+
+/// Busca um candidato a SAT na ROM (heurística: sequência de 640 bytes com
+/// coordenadas plausíveis, tamanhos coerentes e chain de links consistente).
+fn find_sat_candidate(rom: &[u8]) -> Option<usize> {
+    if rom.len() < SAT_SIZE {
+        return None;
+    }
+
+    let mut best_candidate: Option<SatCandidate> = None;
+    for off in (0..=rom.len() - SAT_SIZE).step_by(8) {
+        let score = score_sat_candidate(&rom[off..off + SAT_SIZE]);
+        if score == 0 {
+            continue;
+        }
+
+        let candidate = SatCandidate {
+            offset: off,
+            score,
+            plausible_entries: score_sat_candidate_plausible_entries(&rom[off..off + SAT_SIZE]),
+        };
+
+        let replace = match best_candidate {
+            Some(current) => {
+                candidate.score > current.score
+                    || (candidate.score == current.score
+                        && candidate.plausible_entries > current.plausible_entries)
+            }
+            None => true,
+        };
+
+        if replace {
+            best_candidate = Some(candidate);
+        }
+    }
+
+    best_candidate.map(|candidate| candidate.offset)
+}
+
+fn score_sat_candidate_plausible_entries(window: &[u8]) -> u32 {
+    (0..80usize)
+        .filter(|sprite_idx| {
+            let base = sprite_idx * 8;
+            sat_entry(&window[base..base + 8]).has_plausible_position()
+        })
+        .count() as u32
 }
 
 /// Estima o tamanho da seção de tiles varrendo a ROM por padrões de tile 4bpp (32 bytes).
 fn estimate_tile_section_size(rom: &[u8]) -> usize {
     // Heurística rápida: assume que ~25% da ROM são tiles gráficos
     (rom.len() / 4).min(64 * 1024)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{find_sat_candidate, profile_bytes, SAT_SIZE};
+
+    fn write_sat_entry(buffer: &mut [u8], index: usize, y: u16, size_byte: u8, link: u8, x: u16) {
+        let base = index * 8;
+        buffer[base..base + 2].copy_from_slice(&(y & 0x01FF).to_be_bytes());
+        buffer[base + 2] = size_byte;
+        buffer[base + 3] = link;
+        buffer[base + 6..base + 8].copy_from_slice(&(x & 0x01FF).to_be_bytes());
+    }
+
+    #[test]
+    fn find_sat_candidate_prefers_high_score_manual_fixture() {
+        let mut rom = vec![0u8; 0x4000];
+        let target_offset = 0x1200;
+        let sat_window = &mut rom[target_offset..target_offset + SAT_SIZE];
+
+        for sprite_idx in 0..10usize {
+            write_sat_entry(
+                sat_window,
+                sprite_idx,
+                128 + sprite_idx as u16 * 8,
+                0b0000_0101,
+                if sprite_idx == 9 { 0 } else { (sprite_idx + 1) as u8 },
+                160 + sprite_idx as u16 * 8,
+            );
+        }
+
+        assert_eq!(find_sat_candidate(&rom), Some(target_offset));
+    }
+
+    #[test]
+    fn profile_bytes_uses_detected_sat_candidate_for_sprite_heatmap() {
+        let mut rom = vec![0u8; 0x4000];
+        rom[0x100..0x10F].copy_from_slice(b"SEGA MEGA DRIVE");
+        let target_offset = 0x1800;
+        let sat_window = &mut rom[target_offset..target_offset + SAT_SIZE];
+
+        for sprite_idx in 0..6usize {
+            write_sat_entry(
+                sat_window,
+                sprite_idx,
+                128 + sprite_idx as u16 * 4,
+                0b0000_0101,
+                if sprite_idx == 5 { 0 } else { (sprite_idx + 1) as u8 },
+                192,
+            );
+        }
+
+        let report = profile_bytes(&rom);
+
+        assert!(report.ok);
+        assert_eq!(report.sprite_count, 6);
+        assert!(report.sprite_peak >= 1);
+    }
 }
