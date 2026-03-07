@@ -240,6 +240,13 @@ struct LogicRuntimeEntity {
     collision_target: LogicCollisionTarget,
 }
 
+#[derive(Debug, Default)]
+struct CompiledLogicOutput {
+    scripts: Vec<LogicScript>,
+    parallax_layers: Vec<ParallaxLayerConfig>,
+    raster_lines: Vec<RasterLineConfig>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 struct StoredNodeGraph {
     #[serde(default)]
@@ -415,8 +422,16 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
         }
     }
 
-    let parallax_layers = enabled_parallax_layers(scene);
-    let raster_lines = enabled_raster_lines(scene);
+    let logic_runtime_entities = collect_logic_runtime_entities(scene, &sprite_var_names);
+    let logic_output = collect_logic_output(scene, &logic_runtime_entities);
+    let mut parallax_layers = enabled_parallax_layers(scene);
+    for layer in logic_output.parallax_layers.iter().cloned() {
+        push_unique_parallax_layer(&mut parallax_layers, layer);
+    }
+    let mut raster_lines = enabled_raster_lines(scene);
+    for line in logic_output.raster_lines.iter().cloned() {
+        push_unique_raster_line(&mut raster_lines, line);
+    }
     if !parallax_layers.is_empty() {
         nodes.push(AstNode::SetupParallax {
             layers: parallax_layers,
@@ -469,13 +484,10 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
     nodes.push(AstNode::VSync);
     nodes.push(AstNode::GameLoopEnd);
 
-    let logic_runtime_entities = collect_logic_runtime_entities(scene, &sprite_var_names);
-    let logic_scripts = collect_logic_scripts(scene, &logic_runtime_entities);
-
     AstOutput {
         nodes,
         sprite_assets,
-        logic_scripts,
+        logic_scripts: logic_output.scripts,
     }
 }
 
@@ -784,11 +796,26 @@ fn logic_runtime_entity(
     })
 }
 
-fn collect_logic_scripts(
+fn push_unique_parallax_layer(
+    parallax_layers: &mut Vec<ParallaxLayerConfig>,
+    layer: ParallaxLayerConfig,
+) {
+    if !parallax_layers.iter().any(|existing| existing == &layer) {
+        parallax_layers.push(layer);
+    }
+}
+
+fn push_unique_raster_line(raster_lines: &mut Vec<RasterLineConfig>, line: RasterLineConfig) {
+    if !raster_lines.iter().any(|existing| existing == &line) {
+        raster_lines.push(line);
+    }
+}
+
+fn collect_logic_output(
     scene: &Scene,
     runtime_entities: &HashMap<String, LogicRuntimeEntity>,
-) -> Vec<LogicScript> {
-    let mut scripts = Vec::new();
+) -> CompiledLogicOutput {
+    let mut output = CompiledLogicOutput::default();
 
     for entity in &scene.entities {
         let Some(logic) = &entity.components.logic else {
@@ -801,21 +828,22 @@ fn collect_logic_scripts(
             continue;
         };
 
-        scripts.extend(compile_logic_graph(&graph, runtime_entities));
+        let compiled = compile_logic_graph(&graph, runtime_entities);
+        output.scripts.extend(compiled.scripts);
+        output.parallax_layers.extend(compiled.parallax_layers);
+        output.raster_lines.extend(compiled.raster_lines);
     }
 
-    scripts
+    output
 }
 
 fn compile_logic_graph(
     graph: &StoredNodeGraph,
     runtime_entities: &HashMap<String, LogicRuntimeEntity>,
-) -> Vec<LogicScript> {
-    graph
-        .nodes
-        .iter()
-        .filter(|node| node.node_type == "event_start")
-        .filter_map(|start_node| {
+) -> CompiledLogicOutput {
+    let mut output = CompiledLogicOutput::default();
+
+    output.scripts.extend(graph.nodes.iter().filter(|node| node.node_type == "event_start").filter_map(|start_node| {
             let mut visited = std::collections::HashSet::new();
             let ops = compile_logic_chain(
                 graph,
@@ -823,10 +851,13 @@ fn compile_logic_graph(
                 "exec",
                 runtime_entities,
                 &mut visited,
+                &mut output.parallax_layers,
+                &mut output.raster_lines,
             );
             (!ops.is_empty()).then_some(LogicScript { ops })
-        })
-        .collect()
+        }));
+
+    output
 }
 
 fn compile_logic_chain(
@@ -835,6 +866,8 @@ fn compile_logic_chain(
     source_port: &str,
     runtime_entities: &HashMap<String, LogicRuntimeEntity>,
     visited: &mut std::collections::HashSet<String>,
+    parallax_layers: &mut Vec<ParallaxLayerConfig>,
+    raster_lines: &mut Vec<RasterLineConfig>,
 ) -> Vec<LogicOp> {
     let mut ops = Vec::new();
     let mut next_node_id = next_exec_target(graph, source_node_id, source_port);
@@ -849,7 +882,14 @@ fn compile_logic_chain(
             break;
         };
 
-        match compile_logic_node(node, graph, runtime_entities, visited) {
+        match compile_logic_node(
+            node,
+            graph,
+            runtime_entities,
+            visited,
+            parallax_layers,
+            raster_lines,
+        ) {
             Some(CompiledLogicNode::Linear(op)) => {
                 ops.push(op);
                 next_node_id = next_exec_target(graph, &node.id, "exec");
@@ -857,6 +897,9 @@ fn compile_logic_chain(
             Some(CompiledLogicNode::Terminal(op)) => {
                 ops.push(op);
                 next_node_id = None;
+            }
+            Some(CompiledLogicNode::NoOp) => {
+                next_node_id = next_exec_target(graph, &node.id, "exec");
             }
             None => {
                 next_node_id = next_exec_target(graph, &node.id, "exec");
@@ -872,6 +915,7 @@ fn compile_logic_chain(
 enum CompiledLogicNode {
     Linear(LogicOp),
     Terminal(LogicOp),
+    NoOp,
 }
 
 fn compile_logic_node(
@@ -879,6 +923,8 @@ fn compile_logic_node(
     graph: &StoredNodeGraph,
     runtime_entities: &HashMap<String, LogicRuntimeEntity>,
     visited: &mut std::collections::HashSet<String>,
+    parallax_layers: &mut Vec<ParallaxLayerConfig>,
+    raster_lines: &mut Vec<RasterLineConfig>,
 ) -> Option<CompiledLogicNode> {
     match node.node_type.as_str() {
         "sprite_move" => {
@@ -905,14 +951,23 @@ fn compile_logic_node(
                 .clone();
             let mut true_visited = visited.clone();
             let mut false_visited = visited.clone();
-            let if_true =
-                compile_logic_chain(graph, &node.id, "true", runtime_entities, &mut true_visited);
+            let if_true = compile_logic_chain(
+                graph,
+                &node.id,
+                "true",
+                runtime_entities,
+                &mut true_visited,
+                parallax_layers,
+                raster_lines,
+            );
             let if_false = compile_logic_chain(
                 graph,
                 &node.id,
                 "false",
                 runtime_entities,
                 &mut false_visited,
+                parallax_layers,
+                raster_lines,
             );
 
             Some(CompiledLogicNode::Terminal(LogicOp::ConditionOverlap {
@@ -927,6 +982,27 @@ fn compile_logic_node(
                 &param_string(node, "sfx").unwrap_or_else(|| "sfx".to_string()),
             ),
         })),
+        "effect_parallax" => {
+            push_unique_parallax_layer(
+                parallax_layers,
+                ParallaxLayerConfig {
+                    layer_name: param_string(node, "layer").unwrap_or_else(|| "BG_A".to_string()),
+                    speed_x: param_i32(node, "speed_x", 0),
+                    speed_y: param_i32(node, "speed_y", 0),
+                },
+            );
+            Some(CompiledLogicNode::NoOp)
+        }
+        "effect_raster" => {
+            push_unique_raster_line(
+                raster_lines,
+                RasterLineConfig {
+                    scanline: param_i32(node, "scanline", 0).clamp(0, 223) as u32,
+                    offset_x: param_i32(node, "offset_x", 0),
+                },
+            );
+            Some(CompiledLogicNode::NoOp)
+        }
         _ => None,
     }
 }
@@ -1815,6 +1891,106 @@ mod tests {
                     && lines[0].scanline == 128
                     && lines[1].scanline == 223
         )));
+    }
+
+    #[test]
+    fn generate_ast_compiles_effect_parallax_nodes_into_retrofx_setup() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
+            name: "Logic RetroFX".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+        };
+        let logic_graph = json!({
+            "version": 1,
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "event_start",
+                    "label": "On Start",
+                    "x": 0,
+                    "y": 0,
+                    "inputs": [],
+                    "outputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "params": {}
+                },
+                {
+                    "id": "parallax",
+                    "type": "effect_parallax",
+                    "label": "Parallax",
+                    "x": 120,
+                    "y": 0,
+                    "inputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "outputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "params": { "layer": "BG_A", "speed_x": 3, "speed_y": 1 }
+                },
+                {
+                    "id": "raster",
+                    "type": "effect_raster",
+                    "label": "Raster",
+                    "x": 240,
+                    "y": 0,
+                    "inputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "outputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "params": { "scanline": 96, "offset_x": 4 }
+                }
+            ],
+            "edges": [
+                { "id": "edge_1", "fromNode": "start", "fromPort": "exec", "toNode": "parallax", "toPort": "exec" },
+                { "id": "edge_2", "fromNode": "parallax", "fromPort": "exec", "toNode": "raster", "toPort": "exec" }
+            ]
+        });
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "controller".to_string(),
+                prefab: None,
+                transform: Transform { x: 0, y: 0 },
+                components: Components {
+                    logic: Some(crate::ugdm::components::LogicComponent {
+                        graph: Some(logic_graph.to_string()),
+                        variables: HashMap::new(),
+                    }),
+                    ..Components::default()
+                },
+            }],
+            palettes: Vec::new(),
+            retrofx: None,
+        };
+
+        let ast = generate_ast(&project, &scene);
+        let sgdk = crate::compiler::sgdk_emitter::emit_sgdk(&ast, "Logic RetroFX");
+
+        assert_eq!(
+            collect_parallax_layers(&ast),
+            vec![ParallaxLayerConfig {
+                layer_name: "BG_A".to_string(),
+                speed_x: 3,
+                speed_y: 1,
+            }]
+        );
+        assert_eq!(
+            collect_raster_lines(&ast),
+            vec![RasterLineConfig {
+                scanline: 96,
+                offset_x: 4,
+            }]
+        );
+        assert!(sgdk
+            .main_c
+            .contains("VDP_setHorizontalScrollLine(BG_A, 0, retro_hscroll_table, 224, DMA);"));
+        assert!(sgdk.main_c.contains("retro_hscroll_table[96] += 4;"));
     }
 
     #[test]
