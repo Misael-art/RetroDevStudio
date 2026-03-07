@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Ultima Atualizacao:** 2026-03-06
-**Ultima sessao:** 2026-03-06 (Codex - Sessao 46: bloco G do pipeline canonico concluido)
-**Fase Atual:** Expansao do pipeline canonico apos hardening do MVP (Build -> ROM -> Emulacao validado em Windows com upstream real; desktop E2E multi-target validado localmente e em runner GitHub/Windows real; build/codegen agora avancando sobre Physics, Audio, RetroFX e NodeGraph expandido sem abrir pipeline paralelo)
+**Ultima sessao:** 2026-03-06 (Codex - Sessao 47: bloco H/I concluido com NodeGraph expandido e audio real no Game View)
+**Fase Atual:** Expansao do pipeline canonico apos hardening do MVP (Build -> ROM -> Emulacao validado em Windows com upstream real; desktop E2E multi-target validado localmente e em runner GitHub/Windows real; build/codegen e runtime agora cobrem Physics, Audio, RetroFX e NodeGraph expandido, com audio frontend real sem abrir pipeline paralelo)
 **Branch sugerida:** `feat/<tema>` para trabalho paralelo; usar `main` apenas quando o usuario pedir edicao direta no workspace atual
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
@@ -16,6 +16,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-06 - sessao 47):**
+  - H1 foi concluida no compilador do NodeGraph: o no `sprite_anim` agora resolve `target`/`anim` contra as `AnimationDef` do sprite canonico e reaproveita `AstNode::SetAnimation` para chegar aos emitters SGDK/SNES sem nova trilha de animacao.
+  - H2 e H3 foram concluidas no pipeline de logica: `scroll_tilemap` e `move_camera` agora geram AST dedicado e scroll runtime real nos emitters SGDK/SNES, incluindo follow de `CameraComponent` quando o alvo aponta para uma camera com `follow_entity`.
+  - H4 foi concluida no data-flow do NodeGraph: `logic_and` agora compila guards booleanos inline reutilizaveis por `condition_overlap`, com resolucao de portas e emissao C dedicada nos dois emitters sem duplicar um segundo compilador.
+  - I1 e I2 foram concluidas no runtime do emulador: o backend passou a drenar `audio_buffer` para o evento `emulator://audio` com `sample_rate` real do core, e o `Game View` agora reproduz o audio no frontend via Web Audio API com fila curta, mute e cleanup completo no ciclo de vida da aba.
+  - Os commits de codigo desta rodada foram `1d1dd3d` (`feat: compile remaining nodegraph nodes`) e `b3de050` (`feat: add emulator audio playback`); a documentacao canonica foi sincronizada na sequencia desta mesma sessao.
+  - O baseline local permaneceu verde ao final do fechamento do bloco, com `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo clippy -- -D warnings` e `cargo test --lib -- --nocapture`.
 
 * **O que acabou de acontecer (2026-03-06 - sessao 46):**
   - G2 foi concluida no pipeline canonico: `AudioComponent` agora entra no AST, os emitters SGDK/SNES geram init/playback real de audio (`XGM_setPCM`/`XGM_startPlay` e `spcLoad`/`spcPlaySound`) e o `build_orch` passou a fazer staging de assets de audio para os dois targets, com cobertura Rust dedicada.
@@ -461,9 +469,9 @@
   - GitHub Actions `Desktop E2E` (`22606643935`) -> OK em `windows-latest`, com `Run Mega Drive desktop smoke` e `Run SNES desktop smoke` ambos verdes.
 
 * **Proximo passo imediato:**
-  1. Executar `H1. Compilar sprite_anim no NodeGraph`, expandindo a malha canonica de animacao runtime para suportar troca de animacao por grafo nos emitters SGDK/SNES sem quebrar o fluxo atual de `SetAnimation`.
-  2. Na sequencia, avancar para `H2`/`H3`/`H4` reaproveitando o compilador de NodeGraph ja existente e evitando criar um segundo pipeline de logica fora de `ast_generator.rs`.
-  3. Preservar `entry_scene`, `scene_path` ativo, `retrofx` persistido e `LogicComponent.graph` como fontes autoritativas do carregamento/build, sempre reexecutando os gates canonicos e os fluxos reais aplicaveis quando build/emulacao forem alterados.
+  1. Revalidar institucionalmente o fluxo expandido `Build -> ROM -> Emulacao` cobrindo NodeGraph runtime (`sprite_anim`, `scroll_tilemap`, `move_camera`, `logic_and`) e audio do `Game View` com ROM real, sem criar harness paralelo fora dos gates canonicos.
+  2. Consolidar cobertura de regressao para sincronismo A/V do `emulator://audio`, scroll/camera em ambos os emitters e follow de `CameraComponent`, reaproveitando os testes e fixtures ja canonicos do projeto.
+  3. Preservar `entry_scene`, `scene_path` ativo, `retrofx` persistido, `LogicComponent.graph` e o fluxo `emulator_run_frame` como fontes autoritativas de runtime/build, sempre reexecutando os gates canonicos e os fluxos reais aplicaveis quando build/emulacao forem alterados.
 
 ---
 
