@@ -54,6 +54,48 @@ const GRAPH_SOUND_MD: NodeGraph = {
   edges: [edge("e1", "n1", "n2")],
 };
 
+const GRAPH_LOGIC_VARS: NodeGraph = {
+  nodes: [
+    node("n1", "event_start"),
+    node("get_score", "var_get", { var_name: "score" }),
+    node("math_add", "logic_math", { operator: "+" }),
+    node("set_score", "var_set", { var_name: "score", value: 0 }),
+    node("compare", "condition_compare", { operator: ">=", b: 10 }),
+  ],
+  edges: [
+    { id: "e1", fromNode: "n1", fromPort: "exec", toNode: "set_score", toPort: "exec" },
+    { id: "e2", fromNode: "set_score", fromPort: "exec", toNode: "compare", toPort: "exec" },
+    { id: "e3", fromNode: "get_score", fromPort: "value", toNode: "math_add", toPort: "a" },
+    { id: "e4", fromNode: "math_add", fromPort: "value", toNode: "set_score", toPort: "value" },
+    { id: "e5", fromNode: "get_score", fromPort: "value", toNode: "compare", toPort: "a" },
+  ],
+};
+
+const GRAPH_LOGIC_BRANCHING: NodeGraph = {
+  nodes: [
+    node("start", "event_start"),
+    node("score_get", "var_get", { var_name: "score" }),
+    node("lives_get", "var_get", { var_name: "lives" }),
+    node("score_ready", "condition_compare", { operator: ">", b: 0 }),
+    node("score_check", "condition_compare", { operator: ">=", b: 10 }),
+    node("lives_check", "condition_compare", { operator: ">", b: 0 }),
+    node("guard", "logic_and"),
+    node("win_sound", "action_sound", { sfx: "win" }),
+    node("lose_sound", "action_sound", { sfx: "lose" }),
+  ],
+  edges: [
+    { id: "e1", fromNode: "start", fromPort: "exec", toNode: "score_check", toPort: "exec" },
+    { id: "e2", fromNode: "score_get", fromPort: "value", toNode: "score_ready", toPort: "a" },
+    { id: "e3", fromNode: "score_get", fromPort: "value", toNode: "score_check", toPort: "a" },
+    { id: "e4", fromNode: "lives_get", fromPort: "value", toNode: "lives_check", toPort: "a" },
+    { id: "e5", fromNode: "score_ready", fromPort: "true", toNode: "guard", toPort: "a" },
+    { id: "e6", fromNode: "lives_check", fromPort: "true", toNode: "guard", toPort: "b" },
+    { id: "e7", fromNode: "guard", fromPort: "out", toNode: "score_check", toPort: "guard" },
+    { id: "e8", fromNode: "score_check", fromPort: "true", toNode: "win_sound", toPort: "exec" },
+    { id: "e9", fromNode: "score_check", fromPort: "false", toNode: "lose_sound", toPort: "exec" },
+  ],
+};
+
 // ── compileGraphToC ───────────────────────────────────────────────────────────
 
 describe("NodeGraph serialization", () => {
@@ -120,6 +162,30 @@ describe("compileGraphToC — Mega Drive", () => {
 });
 
 describe("compileGraphToC — SNES", () => {
+  it("declara e usa variaveis logicas com var_set e logic_math", () => {
+    const code = compileGraphToC(GRAPH_LOGIC_VARS, "LogicVars", "megadrive");
+    expect(code).toContain("static int logic_var_score;");
+    expect(code).toContain("logic_var_score = (logic_var_score + 0);");
+  });
+
+  it("emite comparacao usando entradas conectadas", () => {
+    const code = compileGraphToC(GRAPH_LOGIC_VARS, "LogicVars", "megadrive");
+    expect(code).toContain("if ((logic_var_score >= 10))");
+  });
+
+  it("emite logic_and como guarda booleana inline", () => {
+    const code = compileGraphToC(GRAPH_LOGIC_BRANCHING, "LogicBranching", "megadrive");
+    expect(code).toContain("((logic_var_score > 0) && (logic_var_lives > 0))");
+  });
+
+  it("emite branching real com portas true e false para condition_compare", () => {
+    const code = compileGraphToC(GRAPH_LOGIC_BRANCHING, "LogicBranching", "megadrive");
+    expect(code).toContain("if ((((logic_var_score > 0) && (logic_var_lives > 0)) && (logic_var_score >= 10))) {");
+    expect(code).toContain("SND_startPlayPCM(SFX_WIN, 1, SOUND_PCM_CH_AUTO);");
+    expect(code).toContain("} else {");
+    expect(code).toContain("SND_startPlayPCM(SFX_LOSE, 1, SOUND_PCM_CH_AUTO);");
+  });
+
   it("inclui snes.h para target snes", () => {
     const code = compileGraphToC(GRAPH_START_ONLY, "Test", "snes");
     expect(code).toContain("#include <snes.h>");
@@ -287,5 +353,13 @@ describe("parseCToNodes", () => {
     expect(camNode).toBeDefined();
     expect(camNode?.params.x).toBe(128);
     expect(camNode?.params.target).toBe("cam");
+  });
+
+  it("parseia atribuicao de var_set emitida pelo compilador", () => {
+    const code = compileGraphToC(GRAPH_LOGIC_VARS, "LogicVars", "megadrive");
+    const parsed = parseCToNodes(code);
+    const setNode = parsed.find((current) => current.type === "var_set");
+    expect(setNode).toBeDefined();
+    expect(setNode?.params.var_name).toBe("score");
   });
 });

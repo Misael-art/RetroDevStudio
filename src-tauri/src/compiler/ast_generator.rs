@@ -233,6 +233,20 @@ pub enum LogicOp {
     PlaySound {
         sfx: String,
     },
+    SetVar {
+        var_name: String,
+        value: LogicMathExpr,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LogicMathExpr {
+    Literal(i32),
+    Var(String),
+    Add(Box<LogicMathExpr>, Box<LogicMathExpr>),
+    Sub(Box<LogicMathExpr>, Box<LogicMathExpr>),
+    Mul(Box<LogicMathExpr>, Box<LogicMathExpr>),
+    Div(Box<LogicMathExpr>, Box<LogicMathExpr>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -248,6 +262,21 @@ pub enum LogicBoolExpr {
         left: Box<LogicBoolExpr>,
         right: Box<LogicBoolExpr>,
     },
+    Compare {
+        op: CompareOp,
+        left: Box<LogicMathExpr>,
+        right: Box<LogicMathExpr>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CompareOp {
+    Eq,
+    Neq,
+    Gt,
+    Gte,
+    Lt,
+    Lte,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1230,6 +1259,75 @@ fn compile_logic_node(
             );
             Some(CompiledLogicNode::NoOp)
         }
+        "var_set" => {
+            let var_name = sanitize_identifier(&param_string(node, "var_name").unwrap_or_else(|| "temp_var".to_string()));
+            let value_expr = resolve_math_expr_from_input(graph, &node.id, "value")?;
+            Some(CompiledLogicNode::Linear(LogicOp::SetVar {
+                var_name,
+                value: value_expr,
+            }))
+        }
+        "condition_compare" => {
+            let op_str = param_string(node, "operator").unwrap_or_else(|| "==".to_string());
+            let op = parse_compare_op(&op_str);
+            let left = resolve_math_expr_from_input(graph, &node.id, "a")?;
+            let right = resolve_math_expr_from_input(graph, &node.id, "b")?;
+            let mut true_visited = visited.clone();
+            let mut false_visited = visited.clone();
+            let if_true = compile_logic_chain(
+                graph,
+                &node.id,
+                "true",
+                runtime_entities,
+                &mut true_visited,
+                setup_nodes,
+                runtime_nodes,
+                parallax_layers,
+                raster_lines,
+            );
+            let if_false = compile_logic_chain(
+                graph,
+                &node.id,
+                "false",
+                runtime_entities,
+                &mut false_visited,
+                setup_nodes,
+                runtime_nodes,
+                parallax_layers,
+                raster_lines,
+            );
+            
+            let compare_expr = LogicBoolExpr::Compare {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+
+            let guard_expr = resolve_bool_expr_from_ports(
+                graph,
+                node,
+                &["guard", "condition"],
+                runtime_entities,
+                &mut std::collections::HashSet::new(),
+            );
+
+            match guard_expr {
+                Some(guard) => Some(CompiledLogicNode::Terminal(LogicOp::ConditionBool {
+                    condition: LogicBoolExpr::And {
+                        result_name: format!("_and_{}", sanitize_identifier(&node.id)),
+                        left: Box::new(guard),
+                        right: Box::new(compare_expr),
+                    },
+                    if_true,
+                    if_false,
+                })),
+                None => Some(CompiledLogicNode::Terminal(LogicOp::ConditionBool {
+                    condition: compare_expr,
+                    if_true,
+                    if_false,
+                })),
+            }
+        }
         _ => None,
     }
 }
@@ -1322,11 +1420,88 @@ fn build_bool_expr_from_node(
                 right: Box::new(right),
             })
         }
+        "condition_compare" => {
+            let op_str = param_string(node, "operator").unwrap_or_else(|| "==".to_string());
+            let op = parse_compare_op(&op_str);
+            let left = resolve_math_expr_from_input(graph, &node.id, "a")?;
+            let right = resolve_math_expr_from_input(graph, &node.id, "b")?;
+            let compare = LogicBoolExpr::Compare {
+                op,
+                left: Box::new(left),
+                right: Box::new(right),
+            };
+            if from_port == "false" {
+                Some(LogicBoolExpr::Not(Box::new(compare)))
+            } else {
+                Some(compare)
+            }
+        }
         _ => None,
     };
 
     visited.remove(&node.id);
     expression
+}
+
+fn parse_compare_op(op_str: &str) -> CompareOp {
+    match op_str {
+        "!=" => CompareOp::Neq,
+        ">" => CompareOp::Gt,
+        ">=" => CompareOp::Gte,
+        "<" => CompareOp::Lt,
+        "<=" => CompareOp::Lte,
+        _ => CompareOp::Eq,
+    }
+}
+
+fn resolve_math_expr_from_input(
+    graph: &StoredNodeGraph,
+    to_node_id: &str,
+    to_port: &str,
+) -> Option<LogicMathExpr> {
+    if let Some(edge) = graph.edges.iter().find(|edge| edge.to_node == to_node_id && edge.to_port == to_port) {
+        if let Some(source_node) = graph.nodes.iter().find(|node| node.id == edge.from_node) {
+            return build_math_expr_from_node(source_node, graph);
+        }
+    }
+    
+    let to_node = graph.nodes.iter().find(|node| node.id == to_node_id)?;
+    if let Some(Value::Number(num)) = to_node.params.get(to_port) {
+        if let Some(val) = num.as_i64() {
+            return Some(LogicMathExpr::Literal(val as i32));
+        }
+    }
+    if let Some(Value::String(s)) = to_node.params.get(to_port) {
+        if let Ok(val) = s.parse::<i32>() {
+            return Some(LogicMathExpr::Literal(val));
+        }
+    }
+    
+    Some(LogicMathExpr::Literal(0))
+}
+
+fn build_math_expr_from_node(
+    node: &StoredNodeGraphNode,
+    graph: &StoredNodeGraph,
+) -> Option<LogicMathExpr> {
+    match node.node_type.as_str() {
+        "logic_math" => {
+            let op_str = param_string(node, "operator").unwrap_or_else(|| "+".to_string());
+            let a = resolve_math_expr_from_input(graph, &node.id, "a").unwrap_or(LogicMathExpr::Literal(0));
+            let b = resolve_math_expr_from_input(graph, &node.id, "b").unwrap_or(LogicMathExpr::Literal(0));
+            match op_str.as_str() {
+                "-" => Some(LogicMathExpr::Sub(Box::new(a), Box::new(b))),
+                "*" => Some(LogicMathExpr::Mul(Box::new(a), Box::new(b))),
+                "/" => Some(LogicMathExpr::Div(Box::new(a), Box::new(b))),
+                _ => Some(LogicMathExpr::Add(Box::new(a), Box::new(b))),
+            }
+        }
+        "var_get" => {
+            let var_name = sanitize_identifier(&param_string(node, "var_name").unwrap_or_else(|| "temp_var".to_string()));
+            Some(LogicMathExpr::Var(var_name))
+        }
+        _ => Some(LogicMathExpr::Literal(param_i32(node, "value", 0))),
+    }
 }
 
 fn normalize_scroll_layer(layer: &str) -> String {
@@ -1441,6 +1616,7 @@ fn collect_logic_sound_names_from_ops(
             LogicOp::PlaySound { sfx } => {
                 sound_names.insert(sfx.clone());
             }
+            LogicOp::SetVar { .. } => {}
             LogicOp::ConditionOverlap {
                 if_true, if_false, ..
             } => {
@@ -2835,6 +3011,263 @@ mod tests {
                 sfx: "jump".to_string(),
             }]
         );
+    }
+
+    #[test]
+    fn generate_ast_compiles_var_math_compare_and_true_false_branching() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
+            name: "Logic Vars".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution { width: 320, height: 224 },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+        };
+        let logic_graph = json!({
+            "version": 1,
+            "nodes": [
+                {
+                    "id": "start",
+                    "type": "event_start",
+                    "label": "On Start",
+                    "x": 0,
+                    "y": 0,
+                    "inputs": [],
+                    "outputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "params": {}
+                },
+                {
+                    "id": "score_get",
+                    "type": "var_get",
+                    "label": "Get Score",
+                    "x": 120,
+                    "y": 0,
+                    "inputs": [],
+                    "outputs": [{ "id": "value", "label": "value", "kind": "data", "dataType": "number" }],
+                    "params": { "var_name": "score" }
+                },
+                {
+                    "id": "math_add",
+                    "type": "logic_math",
+                    "label": "Add",
+                    "x": 240,
+                    "y": 0,
+                    "inputs": [],
+                    "outputs": [{ "id": "value", "label": "value", "kind": "data", "dataType": "number" }],
+                    "params": { "operator": "+", "b": 2 }
+                },
+                {
+                    "id": "math_mul",
+                    "type": "logic_math",
+                    "label": "Mul",
+                    "x": 360,
+                    "y": 0,
+                    "inputs": [],
+                    "outputs": [{ "id": "value", "label": "value", "kind": "data", "dataType": "number" }],
+                    "params": { "operator": "*", "b": 3 }
+                },
+                {
+                    "id": "set_score",
+                    "type": "var_set",
+                    "label": "Set Score",
+                    "x": 480,
+                    "y": 0,
+                    "inputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "outputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "params": { "var_name": "score" }
+                },
+                {
+                    "id": "compare",
+                    "type": "condition_compare",
+                    "label": "Compare",
+                    "x": 600,
+                    "y": 0,
+                    "inputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "outputs": [
+                        { "id": "true", "label": "True", "kind": "exec" },
+                        { "id": "false", "label": "False", "kind": "exec" }
+                    ],
+                    "params": { "operator": ">=", "b": 10 }
+                },
+                {
+                    "id": "true_sound",
+                    "type": "action_sound",
+                    "label": "True Sound",
+                    "x": 720,
+                    "y": -40,
+                    "inputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "outputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "params": { "sfx": "win" }
+                },
+                {
+                    "id": "false_sound",
+                    "type": "action_sound",
+                    "label": "False Sound",
+                    "x": 720,
+                    "y": 40,
+                    "inputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "outputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                    "params": { "sfx": "lose" }
+                }
+            ],
+            "edges": [
+                { "id": "exec_1", "fromNode": "start", "fromPort": "exec", "toNode": "set_score", "toPort": "exec" },
+                { "id": "exec_2", "fromNode": "set_score", "fromPort": "exec", "toNode": "compare", "toPort": "exec" },
+                { "id": "data_1", "fromNode": "score_get", "fromPort": "value", "toNode": "math_add", "toPort": "a" },
+                { "id": "data_2", "fromNode": "math_add", "fromPort": "value", "toNode": "math_mul", "toPort": "a" },
+                { "id": "data_3", "fromNode": "math_mul", "fromPort": "value", "toNode": "set_score", "toPort": "value" },
+                { "id": "data_4", "fromNode": "score_get", "fromPort": "value", "toNode": "compare", "toPort": "a" },
+                { "id": "exec_3", "fromNode": "compare", "fromPort": "true", "toNode": "true_sound", "toPort": "exec" },
+                { "id": "exec_4", "fromNode": "compare", "fromPort": "false", "toNode": "false_sound", "toPort": "exec" }
+            ]
+        });
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "logic_host".to_string(),
+                prefab: None,
+                transform: Transform { x: 0, y: 0 },
+                components: Components {
+                    logic: Some(crate::ugdm::components::LogicComponent {
+                        graph: Some(logic_graph.to_string()),
+                        variables: HashMap::new(),
+                    }),
+                    ..Components::default()
+                },
+            }],
+            palettes: Vec::new(),
+            retrofx: None,
+        };
+
+        let ast = generate_ast(&project, &scene);
+        let script = ast.logic_scripts.first().expect("logic script should exist");
+
+        assert!(script.ops.iter().any(|op| matches!(
+            op,
+            LogicOp::SetVar {
+                var_name,
+                value: LogicMathExpr::Mul(left, right)
+            }
+            if var_name == "score"
+                && matches!(left.as_ref(), LogicMathExpr::Add(add_left, add_right)
+                    if matches!(add_left.as_ref(), LogicMathExpr::Var(name) if name == "score")
+                    && matches!(add_right.as_ref(), LogicMathExpr::Literal(2)))
+                && matches!(right.as_ref(), LogicMathExpr::Literal(3))
+        )));
+
+        assert!(script.ops.iter().any(|op| matches!(
+            op,
+            LogicOp::ConditionBool {
+                condition: LogicBoolExpr::Compare { op: CompareOp::Gte, left, right },
+                if_true,
+                if_false,
+            }
+            if matches!(left.as_ref(), LogicMathExpr::Var(name) if name == "score")
+                && matches!(right.as_ref(), LogicMathExpr::Literal(10))
+                && if_true == &vec![LogicOp::PlaySound { sfx: "win".to_string() }]
+                && if_false == &vec![LogicOp::PlaySound { sfx: "lose".to_string() }]
+        )));
+    }
+
+    #[test]
+    fn generate_ast_maps_all_compare_operators_from_nodegraph() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
+            name: "Logic Compare Ops".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution { width: 320, height: 224 },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+        };
+        let operators = [
+            ("==", CompareOp::Eq),
+            ("!=", CompareOp::Neq),
+            (">", CompareOp::Gt),
+            (">=", CompareOp::Gte),
+            ("<", CompareOp::Lt),
+            ("<=", CompareOp::Lte),
+        ];
+
+        for (index, (operator, expected_op)) in operators.into_iter().enumerate() {
+            let graph = json!({
+                "version": 1,
+                "nodes": [
+                    {
+                        "id": "start",
+                        "type": "event_start",
+                        "label": "On Start",
+                        "x": 0,
+                        "y": 0,
+                        "inputs": [],
+                        "outputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                        "params": {}
+                    },
+                    {
+                        "id": "lhs",
+                        "type": "var_get",
+                        "label": "LHS",
+                        "x": 120,
+                        "y": 0,
+                        "inputs": [],
+                        "outputs": [{ "id": "value", "label": "value", "kind": "data", "dataType": "number" }],
+                        "params": { "var_name": "score" }
+                    },
+                    {
+                        "id": "compare",
+                        "type": "condition_compare",
+                        "label": "Compare",
+                        "x": 240,
+                        "y": 0,
+                        "inputs": [{ "id": "exec", "label": "exec", "kind": "exec" }],
+                        "outputs": [{ "id": "true", "label": "True", "kind": "exec" }],
+                        "params": { "operator": operator, "b": 7 }
+                    }
+                ],
+                "edges": [
+                    { "id": "exec_1", "fromNode": "start", "fromPort": "exec", "toNode": "compare", "toPort": "exec" },
+                    { "id": "data_1", "fromNode": "lhs", "fromPort": "value", "toNode": "compare", "toPort": "a" }
+                ]
+            });
+            let scene = Scene {
+                scene_id: "main".to_string(),
+                schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
+                display_name: Some("Main".to_string()),
+                background_layers: Vec::new(),
+                entities: vec![Entity {
+                    entity_id: format!("logic_host_{}", index),
+                    prefab: None,
+                    transform: Transform { x: 0, y: 0 },
+                    components: Components {
+                        logic: Some(crate::ugdm::components::LogicComponent {
+                            graph: Some(graph.to_string()),
+                            variables: HashMap::new(),
+                        }),
+                        ..Components::default()
+                    },
+                }],
+                palettes: Vec::new(),
+                retrofx: None,
+            };
+
+            let ast = generate_ast(&project, &scene);
+            let script = ast.logic_scripts.first().expect("logic script should exist");
+            assert!(script.ops.iter().any(|op| matches!(
+                op,
+                LogicOp::ConditionBool {
+                    condition: LogicBoolExpr::Compare { op, .. },
+                    ..
+                } if *op == expected_op
+            )), "operator {} should map to {:?}", operator, expected_op);
+        }
     }
 
     #[test]

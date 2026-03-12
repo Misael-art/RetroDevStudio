@@ -12,27 +12,149 @@ import type { NodeGraph, GraphNode, NodeEdge } from "../../components/nodegraph/
 
 // ── Node → C ─────────────────────────────────────────────────────────────────
 
-function resolveExecChain(startNode: GraphNode, graph: NodeGraph): GraphNode[] {
-  const chain: GraphNode[] = [startNode];
-  const visited = new Set<string>([startNode.id]);
-  let current = startNode;
-
-  while (true) {
-    const outEdge = graph.edges.find(
-      (e: NodeEdge) => e.fromNode === current.id && e.fromPort === "exec"
-    );
-    if (!outEdge) break;
-    const next = graph.nodes.find((n: GraphNode) => n.id === outEdge.toNode);
-    if (!next || visited.has(next.id)) break;
-    visited.add(next.id);
-    chain.push(next);
-    current = next;
-  }
-
-  return chain;
+function findIncomingEdge(
+  graph: NodeGraph,
+  toNodeId: string,
+  toPort: string
+): NodeEdge | undefined {
+  return graph.edges.find((edge) => edge.toNode === toNodeId && edge.toPort === toPort);
 }
 
-function emitNodeC(node: GraphNode, target: "megadrive" | "snes"): string {
+function findNode(graph: NodeGraph, nodeId: string): GraphNode | undefined {
+  return graph.nodes.find((node) => node.id === nodeId);
+}
+
+function findOutgoingExecEdge(
+  graph: NodeGraph,
+  fromNodeId: string,
+  fromPort: string
+): NodeEdge | undefined {
+  return graph.edges.find((edge) => edge.fromNode === fromNodeId && edge.fromPort === fromPort);
+}
+
+function buildMathExpression(
+  graph: NodeGraph,
+  node: GraphNode,
+  visited = new Set<string>()
+): string {
+  if (visited.has(node.id)) {
+    return "0";
+  }
+  visited.add(node.id);
+
+  switch (node.type) {
+    case "var_get":
+      return `logic_var_${String(node.params.var_name ?? "temp_var")}`;
+
+    case "logic_math": {
+      const left = resolveMathInput(graph, node.id, "a", visited);
+      const right = resolveMathInput(graph, node.id, "b", visited);
+      const operator = String(node.params.operator ?? "+");
+      return `(${left} ${operator} ${right})`;
+    }
+
+    case "var_set":
+      return resolveMathInput(graph, node.id, "value", visited);
+
+    default:
+      return String(node.params.value ?? 0);
+  }
+}
+
+function resolveMathInput(
+  graph: NodeGraph,
+  toNodeId: string,
+  toPort: string,
+  visited = new Set<string>()
+): string {
+  const incoming = findIncomingEdge(graph, toNodeId, toPort);
+  if (incoming) {
+    const sourceNode = findNode(graph, incoming.fromNode);
+    if (sourceNode) {
+      return buildMathExpression(graph, sourceNode, visited);
+    }
+  }
+
+  const targetNode = findNode(graph, toNodeId);
+  return String(targetNode?.params[toPort] ?? targetNode?.params.value ?? 0);
+}
+
+function buildBooleanExpression(
+  graph: NodeGraph,
+  node: GraphNode,
+  target: "megadrive" | "snes",
+  visited = new Set<string>()
+): string {
+  if (visited.has(node.id)) {
+    return "0";
+  }
+  visited.add(node.id);
+
+  switch (node.type) {
+    case "logic_and": {
+      const left = resolveBooleanInput(graph, node.id, "a", target, visited);
+      const right = resolveBooleanInput(graph, node.id, "b", target, visited);
+      return `(${left} && ${right})`;
+    }
+
+    case "condition_compare": {
+      const left = resolveMathInput(graph, node.id, "a");
+      const right = resolveMathInput(graph, node.id, "b");
+      const operator = String(node.params.operator ?? "==");
+      return `(${left} ${operator} ${right})`;
+    }
+
+    case "condition_overlap":
+      if (target === "snes") {
+        return `retro_aabb_intersects(${String(node.params.a)}_x, ${String(node.params.a)}_y, 16, 16, ${String(node.params.b)}_x, ${String(node.params.b)}_y, 16, 16)`;
+      }
+      return `SPR_overlaps(spr_${node.params.a}, spr_${node.params.b})`;
+
+    default:
+      return "0";
+  }
+}
+
+function resolveBooleanInput(
+  graph: NodeGraph,
+  toNodeId: string,
+  toPort: string,
+  target: "megadrive" | "snes",
+  visited = new Set<string>()
+): string {
+  const incoming = findIncomingEdge(graph, toNodeId, toPort);
+  if (!incoming) {
+    return "0";
+  }
+
+  const sourceNode = findNode(graph, incoming.fromNode);
+  if (!sourceNode) {
+    return "0";
+  }
+
+  let expression = buildBooleanExpression(graph, sourceNode, target, visited);
+  if (incoming.fromPort === "false") {
+    expression = `!(${expression})`;
+  }
+  return expression;
+}
+
+function collectLogicVariables(graph: NodeGraph): string[] {
+  const vars = new Set<string>();
+
+  for (const node of graph.nodes) {
+    if (node.type === "var_set" || node.type === "var_get") {
+      const name = String(node.params.var_name ?? "").trim();
+      if (name) {
+        vars.add(name);
+      }
+    }
+  }
+
+  return [...vars];
+}
+
+function emitLinearNodeC(node: GraphNode, graph: NodeGraph, target: "megadrive" | "snes"): string {
   const p = node.params;
 
   switch (node.type) {
@@ -96,9 +218,75 @@ function emitNodeC(node: GraphNode, target: "megadrive" | "snes"): string {
       // SGDK: câmera via scroll horizontal + vertical do BG_A
       return `    VDP_setHorizontalScroll(BG_A, ${p.x}); VDP_setVerticalScroll(BG_A, ${p.y}); // camera: ${p.target}\n`;
 
+    case "var_set":
+      return `    logic_var_${p.var_name} = ${resolveMathInput(graph, node.id, "value")};\n`;
+
+    case "var_get":
+      return `    // logic_var_${p.var_name}\n`;
+
+    case "logic_math":
+      return `    // Math: ${buildMathExpression(graph, node)}\n`;
+
+    case "condition_compare":
+      return `    if (${resolveMathInput(graph, node.id, "a")} ${p.operator} ${resolveMathInput(graph, node.id, "b")}) {\n        // [true branch]\n    } else {\n        // [false branch]\n    }\n`;
+
     default:
       return `    // [unknown node: ${node.type}]\n`;
   }
+}
+
+function emitExecChainFromNode(
+  graph: NodeGraph,
+  node: GraphNode,
+  target: "megadrive" | "snes",
+  visited = new Set<string>(),
+  indent = 4
+): string {
+  if (visited.has(node.id)) {
+    return "";
+  }
+  visited.add(node.id);
+
+  const indentStr = " ".repeat(indent);
+
+  if (node.type === "logic_and") {
+    const nextEdge = findOutgoingExecEdge(graph, node.id, "exec");
+    const nextNode = nextEdge ? findNode(graph, nextEdge.toNode) : undefined;
+    return nextNode ? emitExecChainFromNode(graph, nextNode, target, visited, indent) : "";
+  }
+
+  if (node.type === "condition_compare") {
+    const compareExpr = buildBooleanExpression(graph, node, target);
+    const guardExpr = resolveBooleanInput(graph, node.id, "guard", target);
+    const conditionExpr = guardExpr !== "0" ? `(${guardExpr} && ${compareExpr})` : compareExpr;
+    const trueEdge = findOutgoingExecEdge(graph, node.id, "true");
+    const falseEdge = findOutgoingExecEdge(graph, node.id, "false");
+    const trueNode = trueEdge ? findNode(graph, trueEdge.toNode) : undefined;
+    const falseNode = falseEdge ? findNode(graph, falseEdge.toNode) : undefined;
+
+    let out = `${indentStr}if (${conditionExpr}) {\n`;
+    out += trueNode
+      ? emitExecChainFromNode(graph, trueNode, target, new Set(visited), indent + 4)
+      : `${" ".repeat(indent + 4)}// [true branch]\n`;
+
+    if (falseNode) {
+      out += `${indentStr}} else {\n`;
+      out += emitExecChainFromNode(graph, falseNode, target, new Set(visited), indent + 4);
+      out += `${indentStr}}\n`;
+    } else {
+      out += `${indentStr}}\n`;
+    }
+
+    return out;
+  }
+
+  let out = emitLinearNodeC(node, graph, target);
+  const nextEdge = findOutgoingExecEdge(graph, node.id, "exec");
+  const nextNode = nextEdge ? findNode(graph, nextEdge.toNode) : undefined;
+  if (nextNode) {
+    out += emitExecChainFromNode(graph, nextNode, target, visited, indent);
+  }
+  return out;
 }
 
 /**
@@ -133,13 +321,14 @@ export function compileGraphToC(
     spriteVars.forEach((v) => { out += `static u16 oam_${v};\n`; });
   }
 
+  collectLogicVariables(graph).forEach((v) => {
+    out += `static int logic_var_${v};\n`;
+  });
+
   out += "\nint main() {\n";
 
   for (const startNode of startNodes) {
-    const chain = resolveExecChain(startNode, graph);
-    for (const node of chain) {
-      out += emitNodeC(node, target);
-    }
+    out += emitExecChainFromNode(graph, startNode, target);
   }
 
   if (target === "snes") {
@@ -255,6 +444,26 @@ export function parseCToNodes(source: string): ParsedNode[] {
     const moveCamSnesMatch = trimmed.match(/bgSetScroll\(0,\s*(-?\d+),\s*(-?\d+)\).*camera:\s*(\w+)/);
     if (moveCamSnesMatch) {
       nodes.push({ type: "move_camera", params: { target: moveCamSnesMatch[3], x: Number(moveCamSnesMatch[1]), y: Number(moveCamSnesMatch[2]) } });
+      continue;
+    }
+
+    // var_set
+    const setVarMatch = trimmed.match(/logic_var_(\w+)\s*=\s*(.*);/);
+    if (setVarMatch) {
+      nodes.push({ type: "var_set", params: { var_name: setVarMatch[1], value: setVarMatch[2] } });
+      continue;
+    }
+
+    const legacySetVarMatch = trimmed.match(/\/\/ Set logic_var_(\w+) = (.*)/);
+    if (legacySetVarMatch) {
+      nodes.push({ type: "var_set", params: { var_name: legacySetVarMatch[1], value: legacySetVarMatch[2] } });
+      continue;
+    }
+
+    // condition_compare
+    const compareMatch = trimmed.match(/if \((.*) (==|!=|>|>=|<|<=) (.*)\) \{/);
+    if (compareMatch) {
+      nodes.push({ type: "condition_compare", params: { a: compareMatch[1], operator: compareMatch[2], b: compareMatch[3] } });
       continue;
     }
   }

@@ -2,7 +2,7 @@ use crate::compiler::ast_generator::{
     collect_bgm_tracks, collect_collision_checks, collect_logic_sound_names,
     collect_parallax_layers, collect_physics_applications, collect_raster_lines,
     collect_sfx_resources, collect_tilemap_assets, AabbCollisionCheck, AstNode, AstOutput,
-    LogicBoolExpr, LogicCollisionTarget, LogicOp, LogicPositionSource, LogicScript,
+    LogicBoolExpr, LogicCollisionTarget, LogicOp, LogicMathExpr, CompareOp, LogicPositionSource, LogicScript,
     ParallaxLayerConfig, PhysicsApplication, RasterLineConfig, SpriteAsset, TilemapAsset,
 };
 
@@ -73,6 +73,7 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     let parallax_layers = collect_parallax_layers(ast);
     let raster_lines = collect_raster_lines(ast);
     let scroll_tilemap_layers = collect_scroll_tilemap_layers(ast);
+    let logic_vars = collect_logic_var_names(ast);
     let sfx_resources = collect_sfx_resources(ast);
     let bgm_tracks = collect_bgm_tracks(ast);
     let has_logic_overlap = ast.logic_scripts.iter().any(script_uses_overlap);
@@ -144,6 +145,12 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
         out.push_str(&format!("static s16 tm_scroll_y_{} = 0;\n", layer_id));
     }
     if !scroll_tilemap_layers.is_empty() {
+        out.push('\n');
+    }
+    for var_name in &logic_vars {
+        out.push_str(&format!("static s32 logic_var_{} = 0;\n", var_name));
+    }
+    if !logic_vars.is_empty() {
         out.push('\n');
     }
     if !parallax_layers.is_empty() || !raster_lines.is_empty() {
@@ -755,6 +762,15 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], context: &SnesContext, in
                     sfx = sfx.to_uppercase()
                 ));
             }
+            LogicOp::SetVar { var_name, value } => {
+                let value_expr = render_math_expr(value);
+                out.push_str(&format!(
+                    "{indent}logic_var_{var_name} = {value_expr};\n",
+                    indent = indent_str,
+                    var_name = var_name,
+                    value_expr = value_expr
+                ));
+            }
         }
     }
 }
@@ -793,6 +809,30 @@ fn render_bool_expr(out: &mut String, expr: &LogicBoolExpr, indent: usize) -> St
             ));
             result_name.clone()
         }
+        LogicBoolExpr::Compare { op, left, right } => {
+            let left_expr = render_math_expr(left);
+            let right_expr = render_math_expr(right);
+            let op_str = match op {
+                CompareOp::Eq => "==",
+                CompareOp::Neq => "!=",
+                CompareOp::Gt => ">",
+                CompareOp::Gte => ">=",
+                CompareOp::Lt => "<",
+                CompareOp::Lte => "<=",
+            };
+            format!("({left_expr} {op_str} {right_expr})")
+        }
+    }
+}
+
+fn render_math_expr(expr: &LogicMathExpr) -> String {
+    match expr {
+        LogicMathExpr::Literal(val) => val.to_string(),
+        LogicMathExpr::Var(name) => format!("logic_var_{}", name),
+        LogicMathExpr::Add(left, right) => format!("({} + {})", render_math_expr(left), render_math_expr(right)),
+        LogicMathExpr::Sub(left, right) => format!("({} - {})", render_math_expr(left), render_math_expr(right)),
+        LogicMathExpr::Mul(left, right) => format!("({} * {})", render_math_expr(left), render_math_expr(right)),
+        LogicMathExpr::Div(left, right) => format!("({} / {})", render_math_expr(left), render_math_expr(right)),
     }
 }
 
@@ -919,6 +959,62 @@ fn collect_sound_names(ast: &AstOutput) -> Vec<String> {
     sound_names.into_iter().collect()
 }
 
+fn collect_logic_var_names(ast: &AstOutput) -> std::collections::BTreeSet<String> {
+    let mut vars = std::collections::BTreeSet::new();
+    for script in &ast.logic_scripts {
+        for op in &script.ops {
+            extract_vars_from_op(op, &mut vars);
+        }
+    }
+    vars
+}
+
+fn extract_vars_from_op(op: &LogicOp, vars: &mut std::collections::BTreeSet<String>) {
+    match op {
+        LogicOp::SetVar { var_name, value } => {
+            vars.insert(var_name.clone());
+            extract_vars_from_math(value, vars);
+        }
+        LogicOp::ConditionOverlap { if_true, if_false, .. } => {
+            for sub_op in if_true { extract_vars_from_op(sub_op, vars); }
+            for sub_op in if_false { extract_vars_from_op(sub_op, vars); }
+        }
+        LogicOp::ConditionBool { condition, if_true, if_false } => {
+            extract_vars_from_bool(condition, vars);
+            for sub_op in if_true { extract_vars_from_op(sub_op, vars); }
+            for sub_op in if_false { extract_vars_from_op(sub_op, vars); }
+        }
+        _ => {}
+    }
+}
+
+fn extract_vars_from_bool(expr: &LogicBoolExpr, vars: &mut std::collections::BTreeSet<String>) {
+    match expr {
+        LogicBoolExpr::Compare { left, right, .. } => {
+            extract_vars_from_math(left, vars);
+            extract_vars_from_math(right, vars);
+        }
+        LogicBoolExpr::Not(inner) => extract_vars_from_bool(inner, vars),
+        LogicBoolExpr::And { left, right, .. } => {
+            extract_vars_from_bool(left, vars);
+            extract_vars_from_bool(right, vars);
+        }
+        _ => {}
+    }
+}
+
+fn extract_vars_from_math(expr: &LogicMathExpr, vars: &mut std::collections::BTreeSet<String>) {
+    match expr {
+        LogicMathExpr::Var(name) => { vars.insert(name.clone()); }
+        LogicMathExpr::Add(left, right) | LogicMathExpr::Sub(left, right) | 
+        LogicMathExpr::Mul(left, right) | LogicMathExpr::Div(left, right) => {
+            extract_vars_from_math(left, vars);
+            extract_vars_from_math(right, vars);
+        }
+        _ => {}
+    }
+}
+
 fn snes_sfx_symbol(resource_name: &str) -> String {
     format!("{}_sfx", resource_name)
 }
@@ -986,6 +1082,7 @@ fn bool_expr_uses_overlap(expr: &LogicBoolExpr) -> bool {
     match expr {
         LogicBoolExpr::Literal(_) => false,
         LogicBoolExpr::Overlap { .. } => true,
+        LogicBoolExpr::Compare { .. } => false,
         LogicBoolExpr::Not(value) => bool_expr_uses_overlap(value),
         LogicBoolExpr::And { left, right, .. } => {
             bool_expr_uses_overlap(left) || bool_expr_uses_overlap(right)
@@ -1678,5 +1775,60 @@ mod tests {
             "if (retro_aabb_intersects(spr_hero_x + 0, spr_hero_y + 0, 16, 16, spr_enemy_x + 1, spr_enemy_y + 2, 16, 16)) {"
         ));
         assert!(output.main_c.contains("spcPlaySound(SFX_JUMP);"));
+    }
+
+    #[test]
+    fn snes_emitter_emits_logic_var_math_and_compare_branching() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: vec![LogicScript {
+                ops: vec![
+                    LogicOp::SetVar {
+                        var_name: "score".to_string(),
+                        value: LogicMathExpr::Div(
+                            Box::new(LogicMathExpr::Mul(
+                                Box::new(LogicMathExpr::Add(
+                                    Box::new(LogicMathExpr::Var("score".to_string())),
+                                    Box::new(LogicMathExpr::Literal(2)),
+                                )),
+                                Box::new(LogicMathExpr::Sub(
+                                    Box::new(LogicMathExpr::Literal(6)),
+                                    Box::new(LogicMathExpr::Literal(1)),
+                                )),
+                            )),
+                            Box::new(LogicMathExpr::Literal(5)),
+                        ),
+                    },
+                    LogicOp::ConditionBool {
+                        condition: LogicBoolExpr::Compare {
+                            op: CompareOp::Gte,
+                            left: Box::new(LogicMathExpr::Var("score".to_string())),
+                            right: Box::new(LogicMathExpr::Literal(10)),
+                        },
+                        if_true: vec![LogicOp::PlaySound {
+                            sfx: "win".to_string(),
+                        }],
+                        if_false: vec![LogicOp::PlaySound {
+                            sfx: "lose".to_string(),
+                        }],
+                    },
+                ],
+            }],
+        };
+
+        let output = emit_snes(&ast, "Logic Vars Demo");
+
+        assert!(output.main_c.contains("static s32 logic_var_score = 0;"));
+        assert!(output.main_c.contains("logic_var_score = (((logic_var_score + 2) * (6 - 1)) / 5);"));
+        assert!(output.main_c.contains("if ((logic_var_score >= 10)) {"));
+        assert!(output.main_c.contains("spcPlaySound(SFX_WIN);"));
+        assert!(output.main_c.contains("} else {"));
+        assert!(output.main_c.contains("spcPlaySound(SFX_LOSE);"));
     }
 }
