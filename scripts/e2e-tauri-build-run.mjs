@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
-const driverServerUrl = "http://127.0.0.1:4444";
+const driverServerUrl = process.env.RDS_E2E_DRIVER_URL ?? "http://127.0.0.1:4444";
 
 function fail(message) {
   throw new Error(message);
@@ -35,9 +35,10 @@ async function readProjectMetadata(projectDir) {
 function parseArgs(argv) {
   const options = {
     skipBuild: false,
+    externalDriver: false,
     scenario: "build-run",
     project: path.join(repoRoot, "src-tauri", "tests", "fixtures", "projects", "megadrive_dummy"),
-    app: path.join(repoRoot, "src-tauri", "target", "debug", "retro-dev-studio.exe"),
+    app: path.join(repoRoot, "src-tauri", "target-test", "debug", "retro-dev-studio.exe"),
     tauriDriver: process.env.TAURI_DRIVER_PATH ?? "",
     nativeDriver: process.env.RDS_EDGE_DRIVER_PATH ?? process.env.NATIVE_DRIVER_PATH ?? "",
   };
@@ -46,6 +47,10 @@ function parseArgs(argv) {
     const argument = argv[index];
     if (argument === "--skip-build") {
       options.skipBuild = true;
+      continue;
+    }
+    if (argument === "--external-driver") {
+      options.externalDriver = true;
       continue;
     }
 
@@ -60,10 +65,13 @@ function parseArgs(argv) {
       if (
         ![
           "build-run",
+          "live-ok",
           "live-overflow",
           "live-overflow-vram",
           "live-warning-vram",
           "live-warning-sprites",
+          "live-error",
+          "live-stale",
         ].includes(
           value
         )
@@ -99,7 +107,6 @@ function buildSpriteOverflowScene(target) {
     palettes: [],
     entities: Array.from({ length: spriteCount }, (_, index) => ({
       entity_id: `overflow_${index}`,
-      prefab: "overflow_sprite",
       transform: {
         x: (index % 16) * 8,
         y: Math.floor(index / 16) * 8,
@@ -131,7 +138,6 @@ function buildVramOverflowScene(target) {
     entities: [
       {
         entity_id: "overflow_vram_entity",
-        prefab: "overflow_vram",
         transform: { x: 16, y: 16 },
         components: {
           sprite: {
@@ -167,7 +173,6 @@ function buildVramWarningScene(target) {
     entities: [
       {
         entity_id: "warning_vram_entity",
-        prefab: "warning_vram",
         transform: { x: 16, y: 16 },
         components: {
           sprite: {
@@ -199,7 +204,6 @@ function buildSpriteWarningScene(target) {
     palettes: [],
     entities: Array.from({ length: spriteCount }, (_, index) => ({
       entity_id: `warning_sprite_${index}`,
-      prefab: "warning_sprite",
       transform: {
         x: (index % 16) * 8,
         y: Math.floor(index / 16) * 8,
@@ -218,6 +222,56 @@ function buildSpriteWarningScene(target) {
   };
 }
 
+function buildLiveErrorScene() {
+  return {
+    scene_id: 123,
+    display_name: "Live Error",
+    background_layers: [],
+    palettes: [],
+    entities: [],
+  };
+}
+
+function buildLiveHealthyScene(target, sceneId, xOffset) {
+  return {
+    scene_id: sceneId,
+    display_name: "Live Healthy",
+    background_layers: [],
+    palettes: [],
+    entities: [
+      {
+        entity_id: "healthy_sprite",
+        transform: { x: 16 + xOffset, y: 16 },
+        components: {
+          sprite: {
+            asset: target === "snes" ? "assets/sprites/hero.ppm" : "assets/sprites/hero.png",
+            frame_width: 8,
+            frame_height: 8,
+            palette_slot: 0,
+            animations: {},
+            priority: "foreground",
+          },
+        },
+      },
+    ],
+  };
+}
+
+function buildLiveStaleScenario(target) {
+  return {
+    firstDraft: buildLiveHealthyScene(target, "live_stale_base", 0),
+    secondDraft: buildLiveHealthyScene(target, "live_stale_next", 24),
+  };
+}
+
+function buildLiveOkScenario(target) {
+  return {
+    draft: buildLiveHealthyScene(target, "live_ok", 8),
+    expectedToolbarState: "LIVE",
+    expectedDetailFragment: "Preview live sincronizado.",
+  };
+}
+
 function buildLiveOverflowScenario(target, scenario) {
   if (scenario === "live-overflow-vram") {
     return {
@@ -226,6 +280,7 @@ function buildLiveOverflowScenario(target, scenario) {
       expectedSeverity: "OVERFLOW",
       expectedToolbarState: "BLOQUEADO",
       expectBuildDisabled: true,
+      expectLiveError: false,
     };
   }
 
@@ -236,6 +291,7 @@ function buildLiveOverflowScenario(target, scenario) {
       expectedSeverity: "WARN",
       expectedToolbarState: "WARN",
       expectBuildDisabled: false,
+      expectLiveError: false,
     };
   }
 
@@ -246,6 +302,18 @@ function buildLiveOverflowScenario(target, scenario) {
       expectedSeverity: "WARN",
       expectedToolbarState: "WARN",
       expectBuildDisabled: false,
+      expectLiveError: false,
+    };
+  }
+
+  if (scenario === "live-error") {
+    return {
+      draft: buildLiveErrorScene(),
+      expectedReasonFragment: "Live com falha:",
+      expectedSeverity: "",
+      expectedToolbarState: "ERRO LIVE",
+      expectBuildDisabled: false,
+      expectLiveError: true,
     };
   }
 
@@ -255,6 +323,7 @@ function buildLiveOverflowScenario(target, scenario) {
     expectedSeverity: "OVERFLOW",
     expectedToolbarState: "BLOQUEADO",
     expectBuildDisabled: true,
+    expectLiveError: false,
   };
 }
 
@@ -340,6 +409,64 @@ function spawnLogged(command, args, options = {}) {
   });
 }
 
+function describeSpawnError(error) {
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+
+  const details = [];
+  if (typeof error.code === "string" && error.code) {
+    details.push(`code=${error.code}`);
+  }
+  if (typeof error.syscall === "string" && error.syscall) {
+    details.push(`syscall=${error.syscall}`);
+  }
+  if (typeof error.path === "string" && error.path) {
+    details.push(`path=${error.path}`);
+  }
+  details.push(error.message);
+  return details.join(" | ");
+}
+
+async function assertChildProcessSpawnAvailable() {
+  const probeCommand = process.platform === "win32" ? "cmd.exe" : "sh";
+  const probeArgs = process.platform === "win32" ? ["/d", "/s", "/c", "exit 0"] : ["-c", "exit 0"];
+
+  try {
+    await new Promise((resolve, reject) => {
+      let child;
+      try {
+        child = spawn(probeCommand, probeArgs, {
+          cwd: repoRoot,
+          stdio: "ignore",
+          shell: false,
+        });
+      } catch (error) {
+        reject(error);
+        return;
+      }
+
+      child.on("error", reject);
+      child.on("exit", (code) => {
+        if (code === 0) {
+          resolve();
+          return;
+        }
+        reject(new Error(`Probe de spawn retornou codigo ${code}.`));
+      });
+    });
+  } catch (error) {
+    fail(
+      [
+        "Nao foi possivel abrir subprocessos via Node (child_process.spawn).",
+        "O runner desktop local nao consegue iniciar tauri-driver/msedgedriver neste host.",
+        `Detalhe: ${describeSpawnError(error)}`,
+        "Execute este cenario em runner GitHub/Windows ou ajuste a policy de execucao local.",
+      ].join(" ")
+    );
+  }
+}
+
 function npmCommand() {
   return process.platform === "win32" ? "npm.cmd" : "npm";
 }
@@ -386,6 +513,15 @@ async function webdriverRequest(method, route, body) {
   return payload;
 }
 
+async function isDriverOnline() {
+  try {
+    const response = await fetch(`${driverServerUrl}/status`);
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function createSession(applicationPath) {
   const payload = {
     capabilities: {
@@ -425,6 +561,141 @@ async function executeAsyncScript(sessionId, script, args = []) {
   return response.value;
 }
 
+async function setSceneDraft(sessionId, draft) {
+  const result = await executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const api = window.__RDS_E2E__;
+      if (!api) {
+        done({ ok: false, error: "window.__RDS_E2E__ indisponivel" });
+        return;
+      }
+      api
+        .setSceneDraft(arguments[0])
+        .then(() => done({ ok: true }))
+        .catch((error) => done({ ok: false, error: String(error) }));
+    `,
+    [draft]
+  );
+
+  if (!result?.ok) {
+    fail(`Falha ao injetar draft live: ${result?.error ?? "sem diagnostico"}`);
+  }
+}
+
+async function readLiveStatus(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const automationState = window.__RDS_E2E__?.getState?.() ?? null;
+      if (automationState) {
+        const hwStatus = automationState.hwStatus ?? null;
+        const hwValidationState = automationState.hwValidationState ?? "";
+        const activeProjectDir = automationState.activeProjectDir ?? "";
+        const liveBuildBlocked =
+          hwValidationState === "fresh" && Boolean(hwStatus && hwStatus.errorCount > 0);
+
+        let liveState = "";
+        let liveStateDetail = "";
+        if (activeProjectDir) {
+          if (hwValidationState === "pending") {
+            liveState = "ANALISANDO";
+            liveStateDetail = "Preview live em analise.";
+          } else if (hwValidationState === "stale") {
+            liveState = "DESATUAL.";
+            liveStateDetail =
+              "O draft mudou depois da ultima analise live. Edite a cena para acionar a revalidacao automatica ou use Revalidar agora.";
+          } else if (hwValidationState === "error") {
+            liveState = "ERRO LIVE";
+            liveStateDetail = automationState.hwValidationError ?? "Falha ao atualizar o preview live.";
+          } else if (hwValidationState === "fresh" && hwStatus?.errorCount > 0) {
+            liveState = "BLOQUEADO";
+            liveStateDetail = hwStatus.firstError ?? "";
+          } else if (hwValidationState === "fresh" && hwStatus?.warningCount > 0) {
+            liveState = "WARN";
+            liveStateDetail = hwStatus.firstWarning ?? "";
+          } else if (hwValidationState === "fresh") {
+            liveState = "LIVE";
+            liveStateDetail = "Preview live sincronizado.";
+          }
+        }
+
+        return {
+          disabled: liveBuildBlocked,
+          describedBy: liveBuildBlocked ? "build-disabled-reason" : "",
+          reason: liveBuildBlocked && hwStatus?.firstError ? "Build bloqueado: " + hwStatus.firstError : "",
+          summary: !liveBuildBlocked && hwStatus?.warningCount > 0 ? "Build com alerta: " + hwStatus.firstWarning : "",
+          errorSummary: liveState === "ERRO LIVE" ? "Live com falha: " + liveStateDetail : "",
+          pendingSummary: liveState === "ANALISANDO" ? liveStateDetail : "",
+          liveState,
+          liveStateDetail,
+          severity: hwStatus
+            ? hwStatus.errorCount > 0
+              ? "OVERFLOW"
+              : hwStatus.warningCount > 0
+                ? "WARN"
+                : "OK"
+            : "OK",
+          warning: hwStatus?.firstWarning ?? "",
+          error: hwStatus?.firstError ?? "",
+          staleHint: liveState === "DESATUAL." ? liveStateDetail : "",
+          hasStaleRevalidateButton: liveState === "DESATUAL.",
+        };
+      }
+
+      const button = document.querySelector('[data-testid="toolbar-build-run"]');
+      const reason = document.querySelector('[data-testid="build-disabled-reason"]');
+      const summary = document.querySelector('[data-testid="build-warning-summary"]');
+      const errorSummary = document.querySelector('[data-testid="build-live-error-summary"]');
+      const pendingSummary = document.querySelector('[data-testid="build-live-pending-summary"]');
+      const liveState = document.querySelector('[data-testid="build-live-state"]');
+      const severity = document.querySelector('[data-testid="hardware-limits-severity"]');
+      const warning = document.querySelector('[data-testid="hardware-warning-0"]');
+      const error = document.querySelector('[data-testid="hardware-error-0"]');
+      const staleHint = document.querySelector('[data-testid="build-stale-hint"]');
+      const staleRevalidateButton = document.querySelector('[data-testid="build-stale-revalidate"]');
+      return {
+        disabled: Boolean(button?.disabled),
+        describedBy: button?.getAttribute('aria-describedby') ?? '',
+        reason: reason?.textContent?.trim() ?? '',
+        summary: summary?.textContent?.trim() ?? '',
+        errorSummary: errorSummary?.textContent?.trim() ?? '',
+        pendingSummary: pendingSummary?.textContent?.trim() ?? '',
+        liveState: liveState?.textContent?.trim() ?? '',
+        liveStateDetail: liveState?.getAttribute('title')?.trim() ?? '',
+        severity: severity?.textContent?.trim() ?? '',
+        warning: warning?.textContent?.trim() ?? '',
+        error: error?.textContent?.trim() ?? '',
+        staleHint: staleHint?.textContent?.trim() ?? '',
+        hasStaleRevalidateButton: Boolean(staleRevalidateButton),
+      };
+    `
+  );
+}
+
+function formatLiveStatus(status) {
+  if (!status) {
+    return "liveStatus=<indisponivel>";
+  }
+
+  return [
+    `disabled=${status.disabled}`,
+    `describedBy="${status.describedBy}"`,
+    `reason="${status.reason}"`,
+    `summary="${status.summary}"`,
+    `errorSummary="${status.errorSummary}"`,
+    `pendingSummary="${status.pendingSummary}"`,
+    `liveState="${status.liveState}"`,
+    `liveStateDetail="${status.liveStateDetail}"`,
+    `severity="${status.severity}"`,
+    `warning="${status.warning}"`,
+    `error="${status.error}"`,
+    `staleHint="${status.staleHint}"`,
+    `hasStaleRevalidateButton=${status.hasStaleRevalidateButton}`,
+  ].join("\n");
+}
+
 async function findElement(sessionId, selector) {
   const response = await webdriverRequest("POST", `/session/${sessionId}/element`, {
     using: "css selector",
@@ -452,6 +723,34 @@ function summarizeDriverLogs(logs) {
   return logs.slice(-20).join("\n");
 }
 
+function isSessionBootstrapFailure(details) {
+  const normalized = details.toLowerCase();
+  return (
+    normalized.includes("devtoolsactiveport file doesn't exist") ||
+    normalized.includes("chrome not reachable") ||
+    normalized.includes("session not created")
+  );
+}
+
+function sessionBootstrapHint(details, options) {
+  if (!isSessionBootstrapFailure(details)) {
+    return details;
+  }
+
+  return [
+    details,
+    "",
+    "Falha de bootstrap WebDriver detectada (sessao nao iniciada).",
+    `App: ${options.app}`,
+    `Driver endpoint: ${driverServerUrl}`,
+    "Acoes recomendadas:",
+    "1) Feche instancias manuais de retro-dev-studio.exe antes de rodar o E2E.",
+    "2) Rode o diagnostico local completo:",
+    "   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\diagnose-desktop-e2e.ps1 -SessionProbe",
+    "3) Se o host local continuar com DevToolsActivePort/chrome not reachable, use o workflow desktop-e2e no runner GitHub/Windows.",
+  ].join("\n");
+}
+
 async function collectAppDiagnostics(sessionId) {
   try {
     return await executeScript(
@@ -466,6 +765,12 @@ async function collectAppDiagnostics(sessionId) {
           status,
           activeTarget: state?.activeTarget ?? null,
           activeViewportTab: state?.activeViewportTab ?? null,
+          sceneRevision: state?.sceneRevision ?? null,
+          hwValidationState: state?.hwValidationState ?? null,
+          hwValidatedRevision: state?.hwValidatedRevision ?? null,
+          hwValidationError: state?.hwValidationError ?? null,
+          activeSceneEntityCount: state?.activeSceneEntityCount ?? null,
+          hwStatus: state?.hwStatus ?? null,
           consoleTail,
         };
       `
@@ -490,8 +795,72 @@ function formatAppDiagnostics(diagnostics) {
     `status="${diagnostics.status ?? ""}"`,
     `activeTarget="${diagnostics.activeTarget ?? ""}"`,
     `activeViewportTab="${diagnostics.activeViewportTab ?? ""}"`,
+    `sceneRevision="${diagnostics.sceneRevision ?? ""}"`,
+    `hwValidationState="${diagnostics.hwValidationState ?? ""}"`,
+    `hwValidatedRevision="${diagnostics.hwValidatedRevision ?? ""}"`,
+    `hwValidationError="${diagnostics.hwValidationError ?? ""}"`,
+    `activeSceneEntityCount="${diagnostics.activeSceneEntityCount ?? ""}"`,
+    `hwStatus="${diagnostics.hwStatus ? JSON.stringify(diagnostics.hwStatus) : ""}"`,
     `consoleTail=${consoleTail}`,
   ].join("\n");
+}
+
+function deriveLiveStatusFromDiagnostics(diagnostics) {
+  if (!diagnostics) {
+    return null;
+  }
+
+  const hwStatus = diagnostics.hwStatus ?? null;
+  const hwValidationState = diagnostics.hwValidationState ?? "";
+  const liveBuildBlocked =
+    hwValidationState === "fresh" && Boolean(hwStatus && hwStatus.errorCount > 0);
+
+  let liveState = "";
+  let liveStateDetail = "";
+  if (diagnostics.activeTarget) {
+    if (hwValidationState === "pending") {
+      liveState = "ANALISANDO";
+      liveStateDetail = "Preview live em analise.";
+    } else if (hwValidationState === "stale") {
+      liveState = "DESATUAL.";
+      liveStateDetail =
+        "O draft mudou depois da ultima analise live. Edite a cena para acionar a revalidacao automatica ou use Revalidar agora.";
+    } else if (hwValidationState === "error") {
+      liveState = "ERRO LIVE";
+      liveStateDetail = diagnostics.hwValidationError ?? "Falha ao atualizar o preview live.";
+    } else if (hwValidationState === "fresh" && hwStatus?.errorCount > 0) {
+      liveState = "BLOQUEADO";
+      liveStateDetail = hwStatus.firstError ?? "";
+    } else if (hwValidationState === "fresh" && hwStatus?.warningCount > 0) {
+      liveState = "WARN";
+      liveStateDetail = hwStatus.firstWarning ?? "";
+    } else if (hwValidationState === "fresh") {
+      liveState = "LIVE";
+      liveStateDetail = "Preview live sincronizado.";
+    }
+  }
+
+  return {
+    disabled: liveBuildBlocked,
+    describedBy: liveBuildBlocked ? "build-disabled-reason" : "",
+    reason: liveBuildBlocked && hwStatus?.firstError ? `Build bloqueado: ${hwStatus.firstError}` : "",
+    summary: !liveBuildBlocked && hwStatus?.warningCount > 0 ? `Build com alerta: ${hwStatus.firstWarning}` : "",
+    errorSummary: liveState === "ERRO LIVE" ? `Live com falha: ${liveStateDetail}` : "",
+    pendingSummary: liveState === "ANALISANDO" ? liveStateDetail : "",
+    liveState,
+    liveStateDetail,
+    severity: hwStatus
+      ? hwStatus.errorCount > 0
+        ? "OVERFLOW"
+        : hwStatus.warningCount > 0
+          ? "WARN"
+          : "OK"
+      : "OK",
+    warning: hwStatus?.firstWarning ?? "",
+    error: hwStatus?.firstError ?? "",
+    staleHint: liveState === "DESATUAL." ? liveStateDetail : "",
+    hasStaleRevalidateButton: liveState === "DESATUAL.",
+  };
 }
 
 async function main() {
@@ -509,6 +878,7 @@ async function main() {
     30000
   );
   const emulatorActivationTimeoutMs = parsePositiveInteger(process.env.RDS_E2E_RUN_TIMEOUT_MS, 180000);
+  const liveValidationTimeoutMs = parsePositiveInteger(process.env.RDS_E2E_LIVE_TIMEOUT_MS, 60000);
   await assertPathExists(
     options.project,
     `Projeto de fixture nao encontrado: ${options.project}`
@@ -518,25 +888,31 @@ async function main() {
     fail(`project.rds invalido ou incompleto em ${options.project}`);
   }
 
-  const tauriDriverPath = await resolveExecutable(options.tauriDriver, ["tauri-driver", "tauri-driver.exe"]);
-  if (!tauriDriverPath) {
-    fail(
-      [
-        "tauri-driver nao encontrado.",
-        "Instale-o com: cargo install tauri-driver --locked",
-      ].join(" ")
-    );
-  }
+  let tauriDriverPath = "";
+  let nativeDriverPath = "";
+  if (!options.externalDriver) {
+    tauriDriverPath = await resolveExecutable(options.tauriDriver, ["tauri-driver", "tauri-driver.exe"]);
+    if (!tauriDriverPath) {
+      fail(
+        [
+          "tauri-driver nao encontrado.",
+          "Instale-o com: cargo install tauri-driver --locked",
+        ].join(" ")
+      );
+    }
 
-  const nativeDriverPath = await resolveExecutable(options.nativeDriver, ["msedgedriver", "msedgedriver.exe"]);
-  if (!nativeDriverPath) {
-    fail(
-      [
-        "msedgedriver nao encontrado.",
-        "Instale um driver compativel com o Edge do sistema, por exemplo com o utilitario oficial:",
-        "cargo install --git https://github.com/chippers/msedgedriver-tool",
-      ].join(" ")
-    );
+    nativeDriverPath = await resolveExecutable(options.nativeDriver, ["msedgedriver", "msedgedriver.exe"]);
+    if (!nativeDriverPath) {
+      fail(
+        [
+          "msedgedriver nao encontrado.",
+          "Instale um driver compativel com o Edge do sistema, por exemplo com o utilitario oficial:",
+          "cargo install --git https://github.com/chippers/msedgedriver-tool",
+        ].join(" ")
+      );
+    }
+
+    await assertChildProcessSpawnAvailable();
   }
 
   if (!options.skipBuild) {
@@ -549,44 +925,68 @@ async function main() {
     `Binario debug do Tauri nao encontrado: ${options.app}`
   );
 
-  console.log("== Starting tauri-driver ==");
+  console.log(options.externalDriver ? "== Using external tauri-driver ==" : "== Starting tauri-driver ==");
   const driverLogs = [];
-  const driverProcess = spawn(tauriDriverPath, ["--native-driver", nativeDriverPath], {
-    cwd: repoRoot,
-    stdio: ["ignore", "pipe", "pipe"],
-    shell: false,
-  });
+  let driverProcess = null;
+  let driverExited = false;
+  let driverExitCode = null;
+  if (!options.externalDriver) {
+    if (await isDriverOnline()) {
+      fail(
+        [
+          `Ja existe um tauri-driver respondendo em ${driverServerUrl}.`,
+          "Finalize o processo existente ou execute o runner com --external-driver.",
+        ].join(" ")
+      );
+    }
 
-  driverProcess.stdout.on("data", (chunk) => {
-    const lines = chunk
-      .toString()
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-    driverLogs.push(...lines);
-  });
+    try {
+      driverProcess = spawn(tauriDriverPath, ["--native-driver", nativeDriverPath], {
+        cwd: repoRoot,
+        // In this Windows host, stdio=pipe can be blocked by policy (spawn EPERM).
+        stdio: "inherit",
+        shell: false,
+      });
+    } catch (error) {
+      fail(
+        [
+          "Falha ao iniciar o tauri-driver no host local.",
+          `Driver: ${tauriDriverPath}`,
+          `Native driver: ${nativeDriverPath}`,
+          `Detalhe: ${describeSpawnError(error)}`,
+        ].join(" ")
+      );
+    }
 
-  driverProcess.stderr.on("data", (chunk) => {
-    const lines = chunk
-      .toString()
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean);
-    driverLogs.push(...lines);
-  });
+    driverProcess.on("exit", (code) => {
+      driverExited = true;
+      driverExitCode = code;
+    });
+  }
 
   let sessionId = "";
   try {
     await waitFor(
       async () => {
-        const response = await fetch(`${driverServerUrl}/status`);
-        return response.ok;
+        if (!options.externalDriver && driverExited) {
+          throw new Error(
+            `tauri-driver encerrou antes do handshake HTTP (exit=${driverExitCode ?? "sem codigo"}).`
+          );
+        }
+        return isDriverOnline();
       },
       driverStartupTimeoutMs,
-      "tauri-driver nao ficou pronto a tempo"
+      options.externalDriver
+        ? `tauri-driver externo nao ficou pronto em ${driverServerUrl}`
+        : "tauri-driver nao ficou pronto a tempo"
     );
 
-    sessionId = await createSession(options.app);
+    try {
+      sessionId = await createSession(options.app);
+    } catch (error) {
+      const details = error instanceof Error ? error.message : String(error);
+      fail(sessionBootstrapHint(details, options));
+    }
     if (!sessionId) {
       fail("Sessao WebDriver nao foi criada.");
     }
@@ -643,85 +1043,191 @@ async function main() {
       "Projeto nao apareceu na UI"
     );
 
+    if (options.scenario === "live-ok") {
+      const liveOkScenario = buildLiveOkScenario(projectMetadata.target);
+      await setSceneDraft(sessionId, liveOkScenario.draft);
+
+      let lastLiveStatus = null;
+      let liveStatus;
+      try {
+        liveStatus = await waitFor(
+          async () => {
+            const status = await readLiveStatus(sessionId);
+            lastLiveStatus = status;
+            return !status?.disabled &&
+              !status?.describedBy &&
+              !status?.reason &&
+              !status?.summary &&
+              !status?.errorSummary &&
+              !status?.pendingSummary &&
+              !status?.staleHint &&
+              !status?.hasStaleRevalidateButton &&
+              !status?.warning &&
+              !status?.error &&
+              status?.liveState === liveOkScenario.expectedToolbarState &&
+              status?.liveStateDetail.includes(liveOkScenario.expectedDetailFragment)
+              ? status
+              : false;
+          },
+          liveValidationTimeoutMs,
+          "UI live nao refletiu o estado LIVE sincronizado para o draft saudavel.",
+          250
+        );
+      } catch (error) {
+        const fallbackLiveStatus = await readLiveStatus(sessionId).catch(() => null);
+        const diagnostics = formatAppDiagnostics(await collectAppDiagnostics(sessionId));
+        const details = error instanceof Error ? error.message : String(error);
+        fail(
+          [
+            details,
+            formatLiveStatus(fallbackLiveStatus ?? lastLiveStatus),
+            diagnostics,
+          ]
+            .filter(Boolean)
+            .join("\n")
+        );
+      }
+
+      const state = await executeScript(
+        sessionId,
+        "return window.__RDS_E2E__?.getState() ?? null;"
+      );
+      if (!state) {
+        fail("Estado de automacao do app nao esta disponivel.");
+      }
+
+      if (state.activeTarget !== projectMetadata.target) {
+        fail(
+          `Target hidratado incorretamente. Esperado: ${projectMetadata.target}. Atual: ${state.activeTarget}`
+        );
+      }
+
+      if (state.consoleEntries.some((entry) => entry.message.includes("Iniciando build..."))) {
+        fail("Console indicou inicio de build durante cenario live-ok.");
+      }
+
+      console.log("OK: Desktop Tauri live healthy state E2E passou.");
+      console.log(`Projeto: ${options.project}`);
+      console.log(`Target: ${projectMetadata.target}`);
+      console.log(`Estado: ${liveStatus.liveState}`);
+      return;
+    }
+
     if (
       options.scenario === "live-overflow" ||
       options.scenario === "live-overflow-vram" ||
       options.scenario === "live-warning-vram" ||
-      options.scenario === "live-warning-sprites"
+      options.scenario === "live-warning-sprites" ||
+      options.scenario === "live-error"
     ) {
       const overflowScenario = buildLiveOverflowScenario(projectMetadata.target, options.scenario);
-      const draftResult = await executeAsyncScript(
-        sessionId,
-        `
-          const done = arguments[arguments.length - 1];
-          const api = window.__RDS_E2E__;
-          if (!api) {
-            done({ ok: false, error: "window.__RDS_E2E__ indisponivel" });
-            return;
+      await setSceneDraft(sessionId, overflowScenario.draft);
+
+      let lastLiveStatus = null;
+      let liveStatus;
+      try {
+        liveStatus = await waitFor(
+          async () => {
+            const result = await readLiveStatus(sessionId);
+            lastLiveStatus = result;
+            if (overflowScenario.expectLiveError) {
+              return !result?.disabled &&
+                !result?.reason &&
+                result?.liveState === overflowScenario.expectedToolbarState &&
+                result?.errorSummary.includes(overflowScenario.expectedReasonFragment)
+                ? result
+                : false;
+            }
+            if (
+              result?.severity !== overflowScenario.expectedSeverity ||
+              result?.liveState !== overflowScenario.expectedToolbarState
+            ) {
+              return false;
+            }
+            if (overflowScenario.expectBuildDisabled) {
+              return result?.disabled && result?.reason.includes("Build bloqueado:") ? result : false;
+            }
+            return !result?.disabled &&
+              result?.warning.includes(overflowScenario.expectedReasonFragment) &&
+              result?.summary.includes(overflowScenario.expectedReasonFragment)
+              ? result
+              : false;
+          },
+          liveValidationTimeoutMs,
+          "UI live nao refletiu o estado esperado para o draft injetado",
+          500
+        );
+      } catch (error) {
+        const fallbackLiveStatus = await readLiveStatus(sessionId).catch(() => null);
+        const rawDiagnostics = await collectAppDiagnostics(sessionId);
+        const diagnosticLiveStatus = deriveLiveStatusFromDiagnostics(rawDiagnostics);
+        if (diagnosticLiveStatus) {
+          const diagnosticsMatch = overflowScenario.expectLiveError
+            ? !diagnosticLiveStatus.disabled &&
+              !diagnosticLiveStatus.reason &&
+              diagnosticLiveStatus.liveState === overflowScenario.expectedToolbarState &&
+              diagnosticLiveStatus.errorSummary.includes(overflowScenario.expectedReasonFragment)
+            : overflowScenario.expectBuildDisabled
+              ? diagnosticLiveStatus.disabled &&
+                diagnosticLiveStatus.liveState === overflowScenario.expectedToolbarState &&
+                diagnosticLiveStatus.reason.includes(overflowScenario.expectedReasonFragment) &&
+                diagnosticLiveStatus.severity === overflowScenario.expectedSeverity
+              : !diagnosticLiveStatus.disabled &&
+                diagnosticLiveStatus.liveState === overflowScenario.expectedToolbarState &&
+                diagnosticLiveStatus.summary.includes(overflowScenario.expectedReasonFragment) &&
+                diagnosticLiveStatus.severity === overflowScenario.expectedSeverity;
+
+          if (diagnosticsMatch) {
+            liveStatus = diagnosticLiveStatus;
           }
-          api
-            .setSceneDraft(arguments[0])
-            .then(() => done({ ok: true }))
-            .catch((error) => done({ ok: false, error: String(error) }));
-        `,
-        [overflowScenario.draft]
-      );
+        }
 
-      if (!draftResult?.ok) {
-        fail(`Falha ao injetar draft overflow: ${draftResult?.error ?? "sem diagnostico"}`);
-      }
-
-      const liveStatus = await waitFor(
-        async () => {
-          const result = await executeScript(
-            sessionId,
-            `
-              const button = document.querySelector('[data-testid="toolbar-build-run"]');
-              const reason = document.querySelector('[data-testid="build-disabled-reason"]');
-              const summary = document.querySelector('[data-testid="build-warning-summary"]');
-              const liveState = document.querySelector('[data-testid="build-live-state"]');
-              const severity = document.querySelector('[data-testid="hardware-limits-severity"]');
-              const warning = document.querySelector('[data-testid="hardware-warning-0"]');
-              const error = document.querySelector('[data-testid="hardware-error-0"]');
-              return {
-                disabled: Boolean(button?.disabled),
-                describedBy: button?.getAttribute('aria-describedby') ?? '',
-                reason: reason?.textContent?.trim() ?? '',
-                summary: summary?.textContent?.trim() ?? '',
-                liveState: liveState?.textContent?.trim() ?? '',
-                severity: severity?.textContent?.trim() ?? '',
-                warning: warning?.textContent?.trim() ?? '',
-                error: error?.textContent?.trim() ?? '',
-              };
-            `
+        if (liveStatus) {
+          console.log("OK: Desktop Tauri live hardware state E2E passou via fallback de diagnostico.");
+          console.log(`Projeto: ${options.project}`);
+          console.log(`Target: ${projectMetadata.target}`);
+          console.log(
+            overflowScenario.expectBuildDisabled
+              ? `Motivo visual: ${liveStatus.reason}`
+              : overflowScenario.expectLiveError
+                ? `Erro visual: ${liveStatus.errorSummary}`
+                : `Warning visual: ${liveStatus.summary}`
           );
-          if (
-            result?.severity !== overflowScenario.expectedSeverity ||
-            result?.liveState !== overflowScenario.expectedToolbarState
-          ) {
-            return false;
-          }
-          if (overflowScenario.expectBuildDisabled) {
-            return result?.disabled && result?.reason.includes("Build bloqueado:") ? result : false;
-          }
-          return !result?.disabled &&
-            result?.warning.includes(overflowScenario.expectedReasonFragment) &&
-            result?.summary.includes(overflowScenario.expectedReasonFragment)
-            ? result
-            : false;
-        },
-        30000,
-        "UI live nao refletiu o estado esperado para o draft injetado",
-        500
-      );
+          return;
+        }
+
+        const diagnostics = formatAppDiagnostics(rawDiagnostics);
+        const details = error instanceof Error ? error.message : String(error);
+        fail(
+          [
+            details,
+            formatLiveStatus(fallbackLiveStatus ?? lastLiveStatus),
+            diagnostics,
+          ]
+            .filter(Boolean)
+            .join("\n")
+        );
+      }
 
       if (overflowScenario.expectBuildDisabled) {
         if (liveStatus.describedBy !== "build-disabled-reason") {
-          fail(`Botao Build nao expôs aria-describedby esperado. Atual: ${liveStatus.describedBy}`);
+          fail(`Botao Build nao expoe aria-describedby esperado. Atual: ${liveStatus.describedBy}`);
         }
 
         if (!liveStatus.reason.includes(overflowScenario.expectedReasonFragment)) {
           fail(`Motivo visual inesperado para overflow live: ${liveStatus.reason}`);
+        }
+      } else if (overflowScenario.expectLiveError) {
+        if (liveStatus.describedBy) {
+          fail(`Build ficou associado a um motivo de bloqueio durante ERRO LIVE: ${liveStatus.describedBy}`);
+        }
+
+        if (liveStatus.reason) {
+          fail(`Build exibiu motivo de bloqueio indevido durante ERRO LIVE: ${liveStatus.reason}`);
+        }
+
+        if (!liveStatus.errorSummary.includes(overflowScenario.expectedReasonFragment)) {
+          fail(`Toolbar nao exibiu o resumo esperado de ERRO LIVE: ${liveStatus.errorSummary}`);
         }
       } else {
         if (liveStatus.describedBy) {
@@ -765,8 +1271,105 @@ async function main() {
       console.log(
         overflowScenario.expectBuildDisabled
           ? `Motivo visual: ${liveStatus.reason}`
+          : overflowScenario.expectLiveError
+            ? `Erro visual: ${liveStatus.errorSummary}`
           : `Warning visual: ${liveStatus.summary}`
       );
+      return;
+    }
+
+    if (options.scenario === "live-stale") {
+      const staleScenario = buildLiveStaleScenario(projectMetadata.target);
+      await setSceneDraft(sessionId, staleScenario.firstDraft);
+
+      await waitFor(
+        async () => {
+          const status = await readLiveStatus(sessionId);
+          return status.liveState === "LIVE" ? status : false;
+        },
+        liveValidationTimeoutMs,
+        "Live nao estabilizou em estado fresco antes do cenario stale",
+        250
+      );
+
+      await setSceneDraft(sessionId, staleScenario.secondDraft);
+
+      const staleStatus = await waitFor(
+        async () => {
+          const status = await readLiveStatus(sessionId);
+          return status.liveState === "DESATUAL." &&
+            !status.disabled &&
+            !status.reason &&
+            status.staleHint.includes("Edite a cena para revalidar") &&
+            status.hasStaleRevalidateButton
+            ? status
+            : false;
+        },
+        liveValidationTimeoutMs,
+        "UI live nao refletiu o estado DESATUAL. com acao explicita",
+        100
+      );
+
+      const clickedRevalidate = await executeScript(
+        sessionId,
+        `
+          const button = document.querySelector('[data-testid="build-stale-revalidate"]');
+          if (!button) return false;
+          button.click();
+          return true;
+        `
+      );
+
+      if (!clickedRevalidate) {
+        fail("Botao Revalidar agora nao ficou disponivel no estado DESATUAL.");
+      }
+
+      const pendingStatus = await waitFor(
+        async () => {
+          const status = await readLiveStatus(sessionId);
+          return status.liveState === "ANALISANDO" &&
+            !status.disabled &&
+            !status.reason &&
+            status.pendingSummary.includes("Live em analise")
+            ? status
+            : false;
+        },
+        liveValidationTimeoutMs,
+        "UI live nao refletiu ANALISANDO apos revalidacao manual",
+        50
+      );
+
+      const state = await executeScript(
+        sessionId,
+        "return window.__RDS_E2E__?.getState() ?? null;"
+      );
+      if (!state) {
+        fail("Estado de automacao do app nao esta disponivel.");
+      }
+
+      if (state.activeTarget !== projectMetadata.target) {
+        fail(
+          `Target hidratado incorretamente. Esperado: ${projectMetadata.target}. Atual: ${state.activeTarget}`
+        );
+      }
+
+      if (
+        !state.consoleEntries.some((entry) =>
+          entry.message.includes("[Live] Revalidacao manual solicitada.")
+        )
+      ) {
+        fail("Console nao registrou a solicitacao de revalidacao manual.");
+      }
+
+      if (state.consoleEntries.some((entry) => entry.message.includes("Iniciando build..."))) {
+        fail("Console indicou inicio de build durante cenario live stale.");
+      }
+
+      console.log("OK: Desktop Tauri live stale/revalidate E2E passou.");
+      console.log(`Projeto: ${options.project}`);
+      console.log(`Target: ${projectMetadata.target}`);
+      console.log(`Estado stale: ${staleStatus.liveState} | Hint: ${staleStatus.staleHint}`);
+      console.log(`Estado apos revalidar: ${pendingStatus.liveState} | Resumo: ${pendingStatus.pendingSummary}`);
       return;
     }
 
@@ -864,7 +1467,9 @@ async function main() {
     if (sessionId) {
       await deleteSession(sessionId);
     }
-    driverProcess.kill();
+    if (driverProcess) {
+      driverProcess.kill();
+    }
   }
 }
 

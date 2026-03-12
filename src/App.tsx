@@ -93,6 +93,34 @@ type AutomationState = {
   activeProjectName: string;
   activeTarget: "megadrive" | "snes";
   activeViewportTab: string;
+  sceneRevision: number;
+  hwValidationState: string;
+  hwValidatedRevision: number;
+  hwValidationError: string | null;
+  activeSceneEntityCount: number;
+  hwStatus: {
+    spriteCount: number;
+    spriteLimit: number;
+    errorCount: number;
+    warningCount: number;
+    firstError: string | null;
+    firstWarning: string | null;
+  } | null;
+  liveSnapshot: {
+    disabled: boolean;
+    describedBy: string;
+    reason: string;
+    summary: string;
+    errorSummary: string;
+    pendingSummary: string;
+    liveState: string;
+    liveStateDetail: string;
+    severity: string;
+    warning: string;
+    error: string;
+    staleHint: string;
+    hasStaleRevalidateButton: boolean;
+  };
   consoleEntries: Array<{
     level: "info" | "warn" | "error" | "success";
     message: string;
@@ -131,6 +159,7 @@ export default function App() {
     selectedEntityId,
     emulPaused,
     setEmulPaused,
+    requestHwValidationRefresh,
     resetHwValidation,
     undo,
     redo,
@@ -212,6 +241,10 @@ export default function App() {
     hwValidationError,
     hwValidationState,
   });
+  const liveBuildPendingSummary =
+    buildLiveIndicator?.label === "ANALISANDO" ? buildLiveIndicator.detail : null;
+  const liveBuildErrorSummary =
+    buildLiveIndicator?.label === "ERRO LIVE" ? buildLiveIndicator.detail : null;
   const liveBuildBlocked =
     hwValidationState === "fresh" && Boolean(hwStatus && hwStatus.errors.length > 0);
 
@@ -561,6 +594,14 @@ export default function App() {
     }
   }
 
+  function handleRevalidateLiveSnapshot() {
+    if (!activeProjectDir) {
+      return;
+    }
+    requestHwValidationRefresh();
+    logMessage("info", "[Live] Revalidacao manual solicitada.");
+  }
+
   async function handleCloseProject() {
     try {
       await emulatorStop();
@@ -599,11 +640,96 @@ export default function App() {
       },
       getState: () => {
         const state = useEditorStore.getState();
+        const currentLiveBuildBlocked =
+          state.hwValidationState === "fresh" &&
+          Boolean(state.hwStatus && state.hwStatus.errors.length > 0);
+        const currentBuildDisabledReason =
+          currentLiveBuildBlocked && state.hwStatus
+            ? `Build bloqueado: ${state.hwStatus.errors[0]}`
+            : null;
+        const currentBuildWarningSummary =
+          state.activeProjectDir &&
+          !building &&
+          state.hwValidationState === "fresh" &&
+          state.hwStatus &&
+          state.hwStatus.errors.length === 0 &&
+          state.hwStatus.warnings.length > 0
+            ? `Build com alerta: ${state.hwStatus.warnings[0]}`
+            : null;
+
+        let currentLiveState = "";
+        let currentLiveStateDetail = "";
+        if (state.activeProjectDir) {
+          if (state.hwValidationState === "pending") {
+            currentLiveState = "ANALISANDO";
+            currentLiveStateDetail = "Preview live em analise.";
+          } else if (state.hwValidationState === "stale") {
+            currentLiveState = "DESATUAL.";
+            currentLiveStateDetail =
+              "O draft mudou depois da ultima analise live. Edite a cena para acionar a revalidacao automatica ou use Revalidar agora.";
+          } else if (state.hwValidationState === "error") {
+            currentLiveState = "ERRO LIVE";
+            currentLiveStateDetail = state.hwValidationError ?? "Falha ao atualizar o preview live.";
+          } else if (state.hwValidationState === "fresh" && state.hwStatus?.errors.length) {
+            currentLiveState = "BLOQUEADO";
+            currentLiveStateDetail = state.hwStatus.errors[0];
+          } else if (state.hwValidationState === "fresh" && state.hwStatus?.warnings.length) {
+            currentLiveState = "WARN";
+            currentLiveStateDetail = state.hwStatus.warnings[0];
+          } else if (state.hwValidationState === "fresh") {
+            currentLiveState = "LIVE";
+            currentLiveStateDetail = "Preview live sincronizado.";
+          }
+        }
+
         return {
           activeProjectDir: state.activeProjectDir,
           activeProjectName: state.activeProjectName,
           activeTarget: state.activeTarget,
           activeViewportTab: state.activeViewportTab,
+          sceneRevision: state.sceneRevision,
+          hwValidationState: state.hwValidationState,
+          hwValidatedRevision: state.hwValidatedRevision,
+          hwValidationError: state.hwValidationError,
+          activeSceneEntityCount: state.activeScene?.entities.length ?? 0,
+          hwStatus: state.hwStatus
+            ? {
+                spriteCount: state.hwStatus.sprite_count,
+                spriteLimit: state.hwStatus.sprite_limit,
+                errorCount: state.hwStatus.errors.length,
+                warningCount: state.hwStatus.warnings.length,
+                firstError: state.hwStatus.errors[0] ?? null,
+                firstWarning: state.hwStatus.warnings[0] ?? null,
+              }
+            : null,
+          liveSnapshot: {
+            disabled: Boolean(building || !state.activeProjectDir || currentLiveBuildBlocked),
+            describedBy: currentLiveBuildBlocked ? "build-disabled-reason" : "",
+            reason: currentLiveBuildBlocked ? currentBuildDisabledReason ?? "" : "",
+            summary: !currentLiveBuildBlocked ? currentBuildWarningSummary ?? "" : "",
+            errorSummary: !currentLiveBuildBlocked && currentLiveState === "ERRO LIVE"
+              ? `Live com falha: ${currentLiveStateDetail}`
+              : "",
+            pendingSummary:
+              !currentLiveBuildBlocked &&
+              !currentBuildWarningSummary &&
+              currentLiveState === "ANALISANDO"
+                ? currentLiveStateDetail
+              : "",
+            liveState: currentLiveState,
+            liveStateDetail: currentLiveStateDetail,
+            severity: state.hwStatus
+              ? state.hwStatus.errors.length > 0
+                ? "OVERFLOW"
+                : state.hwStatus.warnings.length > 0
+                  ? "WARN"
+                  : "OK"
+              : "OK",
+            warning: state.hwStatus?.warnings[0] ?? "",
+            error: state.hwStatus?.errors[0] ?? "",
+            staleHint: currentLiveState === "DESATUAL." ? currentLiveStateDetail : "",
+            hasStaleRevalidateButton: currentLiveState === "DESATUAL.",
+          },
           consoleEntries: state.consoleEntries.map(({ level, message }) => ({ level, message })),
         };
       },
@@ -736,6 +862,45 @@ export default function App() {
             >
               {buildWarningSummary}
             </span>
+          )}
+          {!liveBuildBlocked && liveBuildErrorSummary && (
+            <span
+              data-testid="build-live-error-summary"
+              aria-live="polite"
+              className="max-w-52 truncate text-[10px] text-[#f38ba8]"
+              title={liveBuildErrorSummary}
+            >
+              Live com falha: {liveBuildErrorSummary}
+            </span>
+          )}
+          {!liveBuildBlocked &&
+            !buildWarningSummary &&
+            !liveBuildErrorSummary &&
+            liveBuildPendingSummary && (
+              <span
+                data-testid="build-live-pending-summary"
+                aria-live="polite"
+                className="max-w-52 truncate text-[10px] text-[#89b4fa]"
+                title={liveBuildPendingSummary}
+              >
+                Live em analise...
+              </span>
+            )}
+          {buildLiveIndicator?.label === "DESATUAL." && (
+            <>
+              <span
+                data-testid="build-stale-hint"
+                className="max-w-52 truncate text-[10px] text-[#89b4fa]"
+                title="Edite a cena para acionar a revalidacao automatica ou use Revalidar agora."
+              >
+                Edite a cena para revalidar
+              </span>
+              <ToolbarButton
+                label="Revalidar agora"
+                onClick={handleRevalidateLiveSnapshot}
+                testId="build-stale-revalidate"
+              />
+            </>
           )}
         </div>
         <ToolbarButton label="Carregar ROM" onClick={() => void handleEmulatorLoadRom()} />
