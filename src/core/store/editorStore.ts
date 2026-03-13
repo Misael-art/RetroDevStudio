@@ -9,6 +9,8 @@ export interface HwStatus {
   vram_limit: number;
   sprite_count: number;
   sprite_limit: number;
+  scanline_sprite_peak: number;
+  scanline_sprite_limit: number;
   bg_layers: number;
   bg_layers_limit: number;
   errors: string[];
@@ -49,6 +51,7 @@ export interface StoreState {
   hwValidationState: HwValidationState;
   hwValidatedRevision: number;
   hwValidationError: string | null;
+  hwValidationRefreshTick: number;
   undoStack: UndoEntry[];
   redoStack: UndoEntry[];
   pendingHistorySnapshot: UndoEntry | null;
@@ -69,6 +72,7 @@ export interface StoreActions {
   setHwValidationPending: (revision: number) => void;
   setHwValidationResult: (revision: number, status: HwStatus) => void;
   setHwValidationError: (revision: number, error: string) => void;
+  requestHwValidationRefresh: () => void;
   resetHwValidation: () => void;
   setActiveScene: (scene: Scene | null) => void;
   beginHistoryCapture: () => void;
@@ -138,7 +142,8 @@ export const useEditorStore = create<EditorState>((set) => ({
     {
       id: 0,
       level: "info",
-      message: "RetroDev Studio iniciado. Roadmap MVP completo. Use Arquivo -> Abrir/Novo Projeto.",
+      message:
+        "RetroDev Studio iniciado. Status: hardening do MVP canonico. Use Arquivo -> Abrir/Novo Projeto.",
       timestamp: new Date().toLocaleTimeString(),
     },
   ],
@@ -163,6 +168,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   setHwStatus: (status) => set({ hwStatus: status }),
   sceneRevision: 0,
   ...INITIAL_VALIDATION_STATE,
+  hwValidationRefreshTick: 0,
   undoStack: [],
   redoStack: [],
   pendingHistorySnapshot: null,
@@ -187,7 +193,10 @@ export const useEditorStore = create<EditorState>((set) => ({
       hwValidatedRevision: revision,
       hwValidationError: error,
     }),
-
+  requestHwValidationRefresh: () =>
+    set((state) => ({
+      hwValidationRefreshTick: state.hwValidationRefreshTick + 1,
+    })),
   resetHwValidation: () => set({ ...INITIAL_VALIDATION_STATE }),
 
   activeScene: null,

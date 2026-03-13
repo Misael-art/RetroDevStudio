@@ -11,6 +11,8 @@ pub struct HwStatus {
     pub vram_limit: u32,
     pub sprite_count: u32,
     pub sprite_limit: u32,
+    pub scanline_sprite_peak: u32,
+    pub scanline_sprite_limit: u32,
     pub bg_layers: u32,
     pub bg_layers_limit: u32,
     pub errors: Vec<String>,

@@ -116,6 +116,44 @@ function ToolbarVramBudget({
   );
 }
 
+function ToolbarScanlineBudget({
+  peak,
+  limit,
+}: {
+  peak: number;
+  limit: number;
+}) {
+  const percent = Math.min(100, Math.round((peak / Math.max(limit, 1)) * 100));
+  const toneClass =
+    peak > limit
+      ? "bg-[#f38ba8]"
+      : percent >= 80
+        ? "bg-[#fab387]"
+        : "bg-[#89b4fa]";
+
+  return (
+    <div
+      data-testid="toolbar-scanline-budget"
+      className="flex min-w-[8rem] flex-col gap-1 rounded border border-[#313244] bg-[#11111b] px-2 py-1"
+      title={`Sprites por scanline ${peak} / ${limit} (${percent}%)`}
+    >
+      <div className="flex items-center justify-between text-[10px]">
+        <span className="text-[#7f849c]">Scanline</span>
+        <span data-testid="toolbar-scanline-budget-label" className="font-mono text-[#cdd6f4]">
+          {peak} / {limit}
+        </span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded bg-[#313244]">
+        <div
+          data-testid="toolbar-scanline-budget-bar"
+          className={`h-full ${toneClass}`}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -1000,6 +1038,12 @@ export default function App() {
               limit={hwStatus.vram_limit}
               hasErrors={hwStatus.errors.length > 0}
               hasWarnings={hwStatus.warnings.length > 0}
+            />
+          )}
+          {hwStatus && hwStatus.scanline_sprite_limit > 0 && (
+            <ToolbarScanlineBudget
+              peak={hwStatus.scanline_sprite_peak}
+              limit={hwStatus.scanline_sprite_limit}
             />
           )}
           <span data-testid="active-project-name" className="max-w-36 truncate text-[10px] text-[#45475a]">

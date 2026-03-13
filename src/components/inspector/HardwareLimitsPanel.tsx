@@ -109,6 +109,8 @@ export default function HardwareLimitsPanel() {
     vram_limit: 65536,
     sprite_count: 0,
     sprite_limit: 80,
+    scanline_sprite_peak: 0,
+    scanline_sprite_limit: 20,
     bg_layers: 0,
     bg_layers_limit: 3,
     errors: [],
@@ -179,6 +181,11 @@ export default function HardwareLimitsPanel() {
         label="Sprites / tela"
         used={status.sprite_count}
         limit={status.sprite_limit}
+      />
+      <GaugeRow
+        label="Sprites / scanline"
+        used={status.scanline_sprite_peak}
+        limit={status.scanline_sprite_limit}
       />
       <GaugeRow
         label="BG Layers"

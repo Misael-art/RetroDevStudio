@@ -62,6 +62,8 @@ describe("liveValidationController", () => {
           vram_limit: 65536,
           sprite_count: 0,
           sprite_limit: 80,
+          scanline_sprite_peak: 0,
+          scanline_sprite_limit: 20,
           bg_layers: 0,
           bg_layers_limit: 3,
           errors: ["Estouro de VRAM"],
@@ -82,6 +84,8 @@ describe("liveValidationController", () => {
           vram_limit: 65536,
           sprite_count: 1,
           sprite_limit: 80,
+          scanline_sprite_peak: 1,
+          scanline_sprite_limit: 20,
           bg_layers: 0,
           bg_layers_limit: 3,
           errors: [],
@@ -102,6 +106,8 @@ describe("liveValidationController", () => {
           vram_limit: 65536,
           sprite_count: 1,
           sprite_limit: 80,
+          scanline_sprite_peak: 1,
+          scanline_sprite_limit: 20,
           bg_layers: 0,
           bg_layers_limit: 3,
           errors: [],
@@ -122,6 +128,8 @@ describe("liveValidationController", () => {
           vram_limit: 65536,
           sprite_count: 1,
           sprite_limit: 80,
+          scanline_sprite_peak: 1,
+          scanline_sprite_limit: 20,
           bg_layers: 0,
           bg_layers_limit: 3,
           errors: [],
@@ -142,7 +150,23 @@ describe("liveValidationController", () => {
     ).toEqual({
       label: "DESATUAL.",
       tone: "warn",
-      detail: "O draft mudou depois da ultima analise live.",
+      detail:
+        "O draft mudou depois da ultima analise live. Edite a cena para acionar a revalidacao automatica ou use Revalidar agora.",
+    });
+  });
+
+  it("returns a pending toolbar indicator while live validation is running", () => {
+    expect(
+      getLiveToolbarIndicator({
+        activeProjectDir: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+        hwStatus: null,
+        hwValidationError: null,
+        hwValidationState: "pending",
+      })
+    ).toEqual({
+      label: "ANALISANDO",
+      tone: "info",
+      detail: "Preview live em analise.",
     });
   });
 
@@ -155,6 +179,8 @@ describe("liveValidationController", () => {
           vram_limit: 65536,
           sprite_count: 1,
           sprite_limit: 80,
+          scanline_sprite_peak: 1,
+          scanline_sprite_limit: 20,
           bg_layers: 0,
           bg_layers_limit: 3,
           errors: [],
@@ -167,6 +193,47 @@ describe("liveValidationController", () => {
       label: "WARN",
       tone: "warn",
       detail: "VRAM Warning",
+    });
+  });
+
+  it("returns a live toolbar indicator when diagnostics are fresh and clean", () => {
+    expect(
+      getLiveToolbarIndicator({
+        activeProjectDir: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+        hwStatus: {
+          vram_used: 8192,
+          vram_limit: 65536,
+          sprite_count: 2,
+          sprite_limit: 80,
+          scanline_sprite_peak: 2,
+          scanline_sprite_limit: 20,
+          bg_layers: 1,
+          bg_layers_limit: 3,
+          errors: [],
+          warnings: [],
+        },
+        hwValidationError: null,
+        hwValidationState: "fresh",
+      })
+    ).toEqual({
+      label: "LIVE",
+      tone: "ok",
+      detail: "Preview live sincronizado.",
+    });
+  });
+
+  it("returns an error toolbar indicator with explicit live validation failure", () => {
+    expect(
+      getLiveToolbarIndicator({
+        activeProjectDir: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+        hwStatus: null,
+        hwValidationError: "Falha de comunicacao com validate_scene_draft",
+        hwValidationState: "error",
+      })
+    ).toEqual({
+      label: "ERRO LIVE",
+      tone: "error",
+      detail: "Falha de comunicacao com validate_scene_draft",
     });
   });
 });

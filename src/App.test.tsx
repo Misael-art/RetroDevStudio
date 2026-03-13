@@ -186,6 +186,8 @@ describe("App build flow", () => {
       vram_limit: 65536,
       sprite_count: 0,
       sprite_limit: 80,
+      scanline_sprite_peak: 0,
+      scanline_sprite_limit: 20,
       bg_layers: 0,
       bg_layers_limit: 4,
       errors: [],
@@ -199,6 +201,8 @@ describe("App build flow", () => {
         vram_limit: 65536,
         sprite_count: 0,
         sprite_limit: 80,
+        scanline_sprite_peak: 0,
+        scanline_sprite_limit: 20,
         bg_layers: 0,
         bg_layers_limit: 4,
         errors: [],
@@ -326,6 +330,8 @@ describe("App build flow", () => {
           vram_limit: 65536,
           sprite_count: 12,
           sprite_limit: 80,
+          scanline_sprite_peak: 6,
+          scanline_sprite_limit: 20,
           bg_layers: 2,
           bg_layers_limit: 4,
           errors: ["Estouro de VRAM"],
@@ -362,6 +368,8 @@ describe("App build flow", () => {
           vram_limit: 65536,
           sprite_count: 12,
           sprite_limit: 80,
+          scanline_sprite_peak: 6,
+          scanline_sprite_limit: 20,
           bg_layers: 2,
           bg_layers_limit: 4,
           errors: ["Estouro de VRAM"],
@@ -419,6 +427,8 @@ describe("App build flow", () => {
           vram_limit: 65536,
           sprite_count: 1,
           sprite_limit: 80,
+          scanline_sprite_peak: 1,
+          scanline_sprite_limit: 20,
           bg_layers: 0,
           bg_layers_limit: 4,
           errors: [],
@@ -457,6 +467,8 @@ describe("App build flow", () => {
           vram_limit: 65536,
           sprite_count: 4,
           sprite_limit: 80,
+          scanline_sprite_peak: 2,
+          scanline_sprite_limit: 20,
           bg_layers: 1,
           bg_layers_limit: 4,
           errors: [],
@@ -823,6 +835,8 @@ describe("App build flow", () => {
           vram_limit: 65536,
           sprite_count: 6,
           sprite_limit: 80,
+          scanline_sprite_peak: 4,
+          scanline_sprite_limit: 20,
           bg_layers: 1,
           bg_layers_limit: 4,
           errors: [],
@@ -857,6 +871,8 @@ describe("App build flow", () => {
           vram_limit: 65536,
           sprite_count: 12,
           sprite_limit: 80,
+          scanline_sprite_peak: 18,
+          scanline_sprite_limit: 20,
           bg_layers: 2,
           bg_layers_limit: 4,
           errors: [],
@@ -869,10 +885,12 @@ describe("App build flow", () => {
     const budget = container.querySelector("[data-testid='toolbar-vram-budget']");
     const label = container.querySelector("[data-testid='toolbar-vram-budget-label']");
     const bar = container.querySelector("[data-testid='toolbar-vram-budget-bar']") as HTMLElement | null;
+    const scanlineLabel = container.querySelector("[data-testid='toolbar-scanline-budget-label']");
 
     expect(budget).not.toBeNull();
     expect(label?.textContent).toContain("48 / 64 KB");
     expect(bar?.style.width).toBe("75%");
+    expect(scanlineLabel?.textContent).toContain("18 / 20");
   });
 
   it("creates and disposes the game audio context with the audio stream lifecycle", async () => {

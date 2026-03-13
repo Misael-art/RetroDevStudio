@@ -1,9 +1,9 @@
-use crate::ugdm::entities::Scene;
 use crate::hardware::HwStatus;
+use crate::ugdm::entities::Scene;
 
-// ── Mega Drive Hardware Constraints (doc 04 — imutável) ───────────────────────
-// Constantes marcadas como allow(dead_code) são specs de hardware documentais;
-// serão referenciadas pelo Hardware Constraint Engine na Sprint 1.5.
+// Mega Drive Hardware Constraints (doc 04 — imutavel)
+// Constantes marcadas como allow(dead_code) sao specs de hardware documentais;
+// serao referenciadas pelo Hardware Constraint Engine na Sprint 1.5.
 #[allow(dead_code)]
 pub const MD_VRAM_BYTES: u32 = 65_536; // 64 KB
 pub const MD_SPRITES_PER_SCREEN: u32 = 80;
@@ -28,11 +28,43 @@ pub struct ValidationError {
 
 impl ValidationError {
     fn fatal(msg: impl Into<String>) -> Self {
-        Self { message: msg.into(), is_fatal: true }
+        Self {
+            message: msg.into(),
+            is_fatal: true,
+        }
     }
+
     fn warning(msg: impl Into<String>) -> Self {
-        Self { message: msg.into(), is_fatal: false }
+        Self {
+            message: msg.into(),
+            is_fatal: false,
+        }
     }
+}
+
+fn estimate_max_scanline_sprites(scene: &Scene) -> u32 {
+    let mut y_events = Vec::new();
+    for entity in &scene.entities {
+        if let Some(sprite) = &entity.components.sprite {
+            let start_y = entity.transform.y;
+            let end_y = start_y + sprite.frame_height as i32;
+            y_events.push((start_y, 1i32));
+            y_events.push((end_y, -1i32));
+        }
+    }
+
+    y_events.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+
+    let mut max_scanline_sprites = 0i32;
+    let mut current_scanline_sprites = 0i32;
+    for (_, diff) in y_events {
+        current_scanline_sprites += diff;
+        if current_scanline_sprites > max_scanline_sprites {
+            max_scanline_sprites = current_scanline_sprites;
+        }
+    }
+
+    max_scanline_sprites.max(0) as u32
 }
 
 /// Valida uma Scene contra as hardware constraints do Mega Drive.
@@ -40,11 +72,10 @@ impl ValidationError {
 pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
     let mut errors: Vec<ValidationError> = Vec::new();
 
-    // ── Contagem de sprites ───────────────────────────────────────────────────
     let sprite_count = scene
         .entities
         .iter()
-        .filter(|e| e.components.sprite.is_some())
+        .filter(|entity| entity.components.sprite.is_some())
         .count() as u32;
 
     if sprite_count > MD_SPRITES_PER_SCREEN {
@@ -61,54 +92,55 @@ pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
         )));
     }
 
-    // ── Validação de dimensões de sprites (múltiplos de 8) ────────────────────
     for entity in &scene.entities {
-        if let Some(spr) = &entity.components.sprite {
-            if spr.frame_width % 8 != 0 || spr.frame_height % 8 != 0 {
+        if let Some(sprite) = &entity.components.sprite {
+            if sprite.frame_width % 8 != 0 || sprite.frame_height % 8 != 0 {
                 errors.push(ValidationError::fatal(format!(
-                    "Entidade '{}': dimensões de sprite ({} x {}) não são múltiplas de 8 (tile-aligned).",
-                    entity.entity_id, spr.frame_width, spr.frame_height
+                    "Entidade '{}': dimensoes de sprite ({} x {}) nao sao multiplas de 8 (tile-aligned).",
+                    entity.entity_id, sprite.frame_width, sprite.frame_height
                 )));
             }
 
-            // Sprite size máximo: 32x32 px (4x4 tiles)
-            if spr.frame_width > 32 || spr.frame_height > 32 {
+            if sprite.frame_width > 32 || sprite.frame_height > 32 {
                 errors.push(ValidationError::fatal(format!(
-                    "Entidade '{}': sprite {}x{} excede o tamanho máximo nativo do Mega Drive (32x32). \
-                     Use meta-sprites compostos.",
-                    entity.entity_id, spr.frame_width, spr.frame_height
+                    "Entidade '{}': sprite {}x{} excede o tamanho maximo nativo do Mega Drive (32x32). Use meta-sprites compostos.",
+                    entity.entity_id, sprite.frame_width, sprite.frame_height
                 )));
             }
 
-            // Palette slot inválido
-            if spr.palette_slot >= MD_PALETTE_SLOTS {
+            if sprite.palette_slot >= MD_PALETTE_SLOTS {
                 errors.push(ValidationError::fatal(format!(
-                    "Entidade '{}': palette_slot {} inválido. O Mega Drive suporta slots 0-3.",
-                    entity.entity_id, spr.palette_slot
+                    "Entidade '{}': palette_slot {} invalido. O Mega Drive suporta slots 0-3.",
+                    entity.entity_id, sprite.palette_slot
                 )));
             }
         }
     }
 
-    // ── Validação de background layers ────────────────────────────────────────
-    // MD suporta 2 scroll planes (A e B) + 1 Window plane
+    let max_scanline_sprites = estimate_max_scanline_sprites(scene);
+    if max_scanline_sprites > MD_SPRITES_PER_SCANLINE {
+        errors.push(ValidationError::warning(format!(
+            "Sprite Scanline Warning: ha ate {} sprites alinhados horizontalmente. O Mega Drive exibe no maximo {} sprites por linha. Sprites extras piscarao (flicker).",
+            max_scanline_sprites, MD_SPRITES_PER_SCANLINE
+        )));
+    }
+
     if scene.background_layers.len() > 3 {
         errors.push(ValidationError::fatal(format!(
-            "A cena tem {} background layers. O Mega Drive suporta no máximo 3 (Scroll A, Scroll B, Window).",
+            "A cena tem {} background layers. O Mega Drive suporta no maximo 3 (Scroll A, Scroll B, Window).",
             scene.background_layers.len()
         )));
     }
 
-    // ── Estimativa de VRAM ────────────────────────────────────────────────────
-    // Heurística: cada sprite frame ocupa (frame_w/8 * frame_h/8) tiles
     let mut vram_used: u32 = 0;
     for entity in &scene.entities {
-        if let Some(spr) = &entity.components.sprite {
-            let tiles_w = spr.frame_width / 8;
-            let tiles_h = spr.frame_height / 8;
-            let total_frames: u32 = spr.animations
+        if let Some(sprite) = &entity.components.sprite {
+            let tiles_w = sprite.frame_width / 8;
+            let tiles_h = sprite.frame_height / 8;
+            let total_frames = sprite
+                .animations
                 .values()
-                .flat_map(|a| a.frames.iter())
+                .flat_map(|animation| animation.frames.iter())
                 .count() as u32;
             let unique_frames = total_frames.max(1);
             vram_used += tiles_w * tiles_h * unique_frames * MD_TILE_BYTES;
@@ -122,31 +154,27 @@ pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
         )));
     } else if vram_used > (MD_VRAM_BYTES * 80 / 100) {
         errors.push(ValidationError::warning(format!(
-            "VRAM Warning: uso de VRAM estimado em {}KB ({}% do limite de 64KB). Pouco espaço para tiles de background.",
+            "VRAM Warning: uso de VRAM estimado em {}KB ({}% do limite de 64KB). Pouco espaco para tiles de background.",
             vram_used / 1024,
             vram_used * 100 / MD_VRAM_BYTES
         )));
     }
 
-    // ── Validação de paletas ──────────────────────────────────────────────────
     for palette in &scene.palettes {
         if palette.slot >= MD_PALETTE_SLOTS {
             errors.push(ValidationError::fatal(format!(
-                "Palette slot {} inválido. O Mega Drive tem apenas slots 0-3.",
+                "Palette slot {} invalido. O Mega Drive tem apenas slots 0-3.",
                 palette.slot
             )));
         }
         if palette.colors.len() > MD_PALETTE_COLORS as usize {
             errors.push(ValidationError::fatal(format!(
-                "Paleta no slot {}: {} cores definidas. O Mega Drive suporta no máximo 16 cores por paleta.",
+                "Paleta no slot {}: {} cores definidas. O Mega Drive suporta no maximo 16 cores por paleta.",
                 palette.slot,
                 palette.colors.len()
             )));
         }
     }
-
-    // ── Coordenadas inteiras (sem float — verificação semântica) ──────────────
-    // Rust garante isso pelo tipo i32 em Transform — sem verificação em runtime.
 
     errors
 }
@@ -157,35 +185,44 @@ pub fn hw_status(scene: &Scene) -> HwStatus {
     let sprite_count = scene
         .entities
         .iter()
-        .filter(|e| e.components.sprite.is_some())
+        .filter(|entity| entity.components.sprite.is_some())
         .count() as u32;
 
     let mut vram_used: u32 = 0;
     for entity in &scene.entities {
-        if let Some(spr) = &entity.components.sprite {
-            let tiles_w = (spr.frame_width / 8).max(1);
-            let tiles_h = (spr.frame_height / 8).max(1);
-            let total_frames: u32 = spr.animations
+        if let Some(sprite) = &entity.components.sprite {
+            let tiles_w = (sprite.frame_width / 8).max(1);
+            let tiles_h = (sprite.frame_height / 8).max(1);
+            let total_frames = sprite
+                .animations
                 .values()
-                .flat_map(|a| a.frames.iter())
+                .flat_map(|animation| animation.frames.iter())
                 .count() as u32;
             let unique_frames = total_frames.max(1);
             vram_used += tiles_w * tiles_h * unique_frames * MD_TILE_BYTES;
         }
     }
 
-    let bg_layers = scene.background_layers.len() as u32;
-
     let validation = validate_scene(scene);
-    let errors: Vec<String> = validation.iter().filter(|e| e.is_fatal).map(|e| e.message.clone()).collect();
-    let warnings: Vec<String> = validation.iter().filter(|e| !e.is_fatal).map(|e| e.message.clone()).collect();
+    let errors: Vec<String> = validation
+        .iter()
+        .filter(|error| error.is_fatal)
+        .map(|error| error.message.clone())
+        .collect();
+    let warnings: Vec<String> = validation
+        .iter()
+        .filter(|error| !error.is_fatal)
+        .map(|error| error.message.clone())
+        .collect();
 
     HwStatus {
         vram_used,
         vram_limit: MD_VRAM_BYTES,
         sprite_count,
         sprite_limit: MD_SPRITES_PER_SCREEN,
-        bg_layers,
+        scanline_sprite_peak: estimate_max_scanline_sprites(scene),
+        scanline_sprite_limit: MD_SPRITES_PER_SCANLINE,
+        bg_layers: scene.background_layers.len() as u32,
         bg_layers_limit: 3,
         errors,
         warnings,
@@ -239,9 +276,11 @@ mod tests {
 
         let errors = validate_scene(&scene);
 
-        assert!(errors.iter().any(|error| {
-            error.is_fatal && error.message.contains("Sprite overflow")
-        }));
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.is_fatal && error.message.contains("Sprite overflow"))
+        );
     }
 
     #[test]
@@ -253,16 +292,40 @@ mod tests {
 
         let errors = validate_scene(&scene);
 
-        assert!(errors.iter().any(|error| {
-            !error.is_fatal && error.message.contains("Sprite Warning")
-        }));
+        assert!(
+            errors
+                .iter()
+                .any(|error| !error.is_fatal && error.message.contains("Sprite Warning"))
+        );
         assert!(!errors.iter().any(|error| error.is_fatal));
+    }
+
+    #[test]
+    fn warns_when_sprite_scanline_limit_exceeded() {
+        let mut scene = empty_scene();
+        scene.entities = (0..=(MD_SPRITES_PER_SCANLINE + 1))
+            .map(|index| {
+                let mut entity = sprite_entity(&format!("entity_{index}"), 8, 8, 0);
+                entity.transform.y = 10;
+                entity
+            })
+            .collect();
+
+        let errors = validate_scene(&scene);
+
+        assert!(
+            errors.iter().any(|error| {
+                !error.is_fatal && error.message.contains("Sprite Scanline Warning")
+            })
+        );
     }
 
     #[test]
     fn rejects_invalid_palette_slots() {
         let mut scene = empty_scene();
-        scene.entities.push(sprite_entity("bad_palette", 8, 8, MD_PALETTE_SLOTS));
+        scene
+            .entities
+            .push(sprite_entity("bad_palette", 8, 8, MD_PALETTE_SLOTS));
         scene.palettes.push(PaletteEntry {
             slot: MD_PALETTE_SLOTS,
             colors: vec!["#000000".to_string(); MD_PALETTE_COLORS as usize],
@@ -270,12 +333,16 @@ mod tests {
 
         let errors = validate_scene(&scene);
 
-        assert!(errors.iter().any(|error| {
-            error.is_fatal && error.message.contains("palette_slot")
-        }));
-        assert!(errors.iter().any(|error| {
-            error.is_fatal && error.message.contains("Palette slot")
-        }));
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.is_fatal && error.message.contains("palette_slot"))
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.is_fatal && error.message.contains("Palette slot"))
+        );
     }
 
     #[test]
@@ -287,6 +354,8 @@ mod tests {
 
         assert_eq!(status.sprite_count, 1);
         assert_eq!(status.sprite_limit, MD_SPRITES_PER_SCREEN);
+        assert_eq!(status.scanline_sprite_peak, 1);
+        assert_eq!(status.scanline_sprite_limit, MD_SPRITES_PER_SCANLINE);
         assert_eq!(status.bg_layers_limit, 3);
         assert!(status.errors.is_empty());
     }

@@ -41,6 +41,31 @@ fn supported_simple_sprite_size(size: u32) -> bool {
     matches!(size, 8 | 16 | 32 | 64)
 }
 
+fn estimate_max_scanline_sprites(scene: &Scene) -> u32 {
+    let mut y_events = Vec::new();
+    for entity in &scene.entities {
+        if let Some(sprite) = &entity.components.sprite {
+            let start_y = entity.transform.y;
+            let end_y = start_y + sprite.frame_height as i32;
+            y_events.push((start_y, 1i32));
+            y_events.push((end_y, -1i32));
+        }
+    }
+
+    y_events.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+
+    let mut max_scanline_sprites = 0i32;
+    let mut current_scanline_sprites = 0i32;
+    for (_, diff) in y_events {
+        current_scanline_sprites += diff;
+        if current_scanline_sprites > max_scanline_sprites {
+            max_scanline_sprites = current_scanline_sprites;
+        }
+    }
+
+    max_scanline_sprites.max(0) as u32
+}
+
 pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
     let mut errors: Vec<ValidationError> = Vec::new();
     let mut canonical_sprite_size: Option<(u32, u32)> = None;
@@ -117,6 +142,14 @@ pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
                 )));
             }
         }
+    }
+
+    let max_scanline_sprites = estimate_max_scanline_sprites(scene);
+    if max_scanline_sprites > SNES_SPRITES_PER_SCANLINE {
+        errors.push(ValidationError::warning(format!(
+            "Sprite Scanline Warning: ha ate {} sprites alinhados horizontalmente. O SNES exibe no maximo {} sprites por linha. Sprites extras piscarao (flicker).",
+            max_scanline_sprites, SNES_SPRITES_PER_SCANLINE
+        )));
     }
 
     if scene.background_layers.len() as u32 > SNES_BG_LAYERS_MAX {
@@ -196,7 +229,6 @@ pub fn hw_status(scene: &Scene) -> HwStatus {
         }
     }
 
-    let bg_layers = scene.background_layers.len() as u32;
     let validation = validate_scene(scene);
     let errors = validation
         .iter()
@@ -214,7 +246,9 @@ pub fn hw_status(scene: &Scene) -> HwStatus {
         vram_limit: SNES_VRAM_BYTES,
         sprite_count,
         sprite_limit: SNES_SPRITES_PER_SCREEN,
-        bg_layers,
+        scanline_sprite_peak: estimate_max_scanline_sprites(scene),
+        scanline_sprite_limit: SNES_SPRITES_PER_SCANLINE,
+        bg_layers: scene.background_layers.len() as u32,
         bg_layers_limit: SNES_BG_LAYERS_MAX,
         errors,
         warnings,
@@ -274,9 +308,11 @@ mod tests {
 
         let errors = validate_scene(&scene);
 
-        assert!(errors.iter().any(|error| {
-            error.is_fatal && error.message.contains("background layers")
-        }));
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.is_fatal && error.message.contains("background layers"))
+        );
     }
 
     #[test]
@@ -286,9 +322,7 @@ mod tests {
 
         let errors = validate_scene(&scene);
 
-        assert!(errors.iter().any(|error| {
-            error.is_fatal && error.message.contains("64x64")
-        }));
+        assert!(errors.iter().any(|error| error.is_fatal && error.message.contains("64x64")));
     }
 
     #[test]
@@ -300,9 +334,11 @@ mod tests {
 
         let errors = validate_scene(&scene);
 
-        assert!(errors.iter().any(|error| {
-            !error.is_fatal && error.message.contains("Sprite Warning")
-        }));
+        assert!(
+            errors
+                .iter()
+                .any(|error| !error.is_fatal && error.message.contains("Sprite Warning"))
+        );
         assert!(!errors.iter().any(|error| error.is_fatal));
     }
 
@@ -313,9 +349,31 @@ mod tests {
 
         let errors = validate_scene(&scene);
 
-        assert!(errors.iter().any(|error| {
-            error.is_fatal && error.message.contains("sprites simples quadrados")
-        }));
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.is_fatal && error.message.contains("sprites simples quadrados"))
+        );
+    }
+
+    #[test]
+    fn warns_when_sprite_scanline_limit_exceeded() {
+        let mut scene = empty_scene();
+        scene.entities = (0..=(SNES_SPRITES_PER_SCANLINE + 1))
+            .map(|index| {
+                let mut entity = sprite_entity(&format!("entity_{index}"), 8, 8, 0);
+                entity.transform.y = 10;
+                entity
+            })
+            .collect();
+
+        let errors = validate_scene(&scene);
+
+        assert!(
+            errors.iter().any(|error| {
+                !error.is_fatal && error.message.contains("Sprite Scanline Warning")
+            })
+        );
     }
 
     #[test]
@@ -327,6 +385,8 @@ mod tests {
 
         assert_eq!(status.sprite_count, 1);
         assert_eq!(status.sprite_limit, SNES_SPRITES_PER_SCREEN);
+        assert_eq!(status.scanline_sprite_peak, 1);
+        assert_eq!(status.scanline_sprite_limit, SNES_SPRITES_PER_SCANLINE);
         assert_eq!(status.bg_layers_limit, SNES_BG_LAYERS_MAX);
         assert!(status.errors.is_empty());
     }
