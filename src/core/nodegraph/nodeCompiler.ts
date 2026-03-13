@@ -32,6 +32,21 @@ function findOutgoingExecEdge(
   return graph.edges.find((edge) => edge.fromNode === fromNodeId && edge.fromPort === fromPort);
 }
 
+function sanitizeIdentifier(value: string): string {
+  return value
+    .trim()
+    .replace(/[^a-zA-Z0-9_]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase() || "state";
+}
+
+function isTruthyParam(value: string | number | undefined): boolean {
+  if (typeof value === "number") {
+    return value !== 0;
+  }
+  return value === "1" || value === "true";
+}
+
 function buildMathExpression(
   graph: NodeGraph,
   node: GraphNode,
@@ -104,6 +119,14 @@ function buildBooleanExpression(
       return `(${left} ${operator} ${right})`;
     }
 
+    case "var_get":
+    case "logic_math":
+    case "var_set":
+      return `(${buildMathExpression(graph, node)} != 0)`;
+
+    case "fsm_transition":
+      return resolveBooleanInput(graph, node.id, "condition", target, visited) || "0";
+
     case "condition_overlap":
       if (target === "snes") {
         return `retro_aabb_intersects(${String(node.params.a)}_x, ${String(node.params.a)}_y, 16, 16, ${String(node.params.b)}_x, ${String(node.params.b)}_y, 16, 16)`;
@@ -148,6 +171,9 @@ function collectLogicVariables(graph: NodeGraph): string[] {
       if (name) {
         vars.add(name);
       }
+    }
+    if (node.type === "fsm_state") {
+      vars.add("fsm_state");
     }
   }
 
@@ -230,9 +256,77 @@ function emitLinearNodeC(node: GraphNode, graph: NodeGraph, target: "megadrive" 
     case "condition_compare":
       return `    if (${resolveMathInput(graph, node.id, "a")} ${p.operator} ${resolveMathInput(graph, node.id, "b")}) {\n        // [true branch]\n    } else {\n        // [false branch]\n    }\n`;
 
+    case "fsm_state":
+    case "fsm_transition":
+      return "";
+
     default:
       return `    // [unknown node: ${node.type}]\n`;
   }
+}
+
+type FsmStateDef = {
+  node: GraphNode;
+  enumName: string;
+  index: number;
+};
+
+function collectFsmStates(graph: NodeGraph): FsmStateDef[] {
+  const states = graph.nodes
+    .filter((node) => node.type === "fsm_state")
+    .sort((left, right) => {
+      const leftInitial = isTruthyParam(left.params.initial);
+      const rightInitial = isTruthyParam(right.params.initial);
+      if (leftInitial !== rightInitial) {
+        return leftInitial ? -1 : 1;
+      }
+      return left.id.localeCompare(right.id);
+    });
+
+  return states.map((node, index) => ({
+    node,
+    enumName: `FSM_STATE_${sanitizeIdentifier(String(node.params.state_name ?? node.id)).toUpperCase()}`,
+    index,
+  }));
+}
+
+function emitFsmTransitionChain(
+  graph: NodeGraph,
+  node: GraphNode,
+  states: FsmStateDef[],
+  target: "megadrive" | "snes",
+  indent: number,
+  visited = new Set<string>()
+): string {
+  if (visited.has(node.id)) {
+    return "";
+  }
+  visited.add(node.id);
+
+  const indentStr = " ".repeat(indent);
+  const conditionExpr = resolveBooleanInput(graph, node.id, "condition", target) || "0";
+  const targetStateName = sanitizeIdentifier(String(node.params.target_state ?? ""));
+  const targetState = states.find((state) =>
+    sanitizeIdentifier(String(state.node.params.state_name ?? state.node.id)) === targetStateName
+  ) ?? states[0];
+  const matchedEdge = findOutgoingExecEdge(graph, node.id, "matched");
+  const matchedNode = matchedEdge ? findNode(graph, matchedEdge.toNode) : undefined;
+  const nextEdge = findOutgoingExecEdge(graph, node.id, "next");
+  const nextNode = nextEdge ? findNode(graph, nextEdge.toNode) : undefined;
+
+  let out = `${indentStr}if (${conditionExpr}) {\n`;
+  out += `${" ".repeat(indent + 4)}logic_var_fsm_state = ${targetState.enumName};\n`;
+  if (matchedNode) {
+    out += emitExecChainFromNode(graph, matchedNode, target, new Set(visited), indent + 4);
+  }
+  if (nextNode?.type === "fsm_transition") {
+    out += `${indentStr}} else {\n`;
+    out += emitFsmTransitionChain(graph, nextNode, states, target, indent + 4, new Set(visited));
+    out += `${indentStr}}\n`;
+  } else {
+    out += `${indentStr}}\n`;
+  }
+  return out;
 }
 
 function emitExecChainFromNode(
@@ -280,6 +374,36 @@ function emitExecChainFromNode(
     return out;
   }
 
+  if (node.type === "fsm_state") {
+    const states = collectFsmStates(graph);
+    const currentState = states.find((state) => state.node.id === node.id);
+    if (!currentState) {
+      return "";
+    }
+
+    const bodyEdge = findOutgoingExecEdge(graph, node.id, "exec");
+    const bodyNode = bodyEdge ? findNode(graph, bodyEdge.toNode) : undefined;
+    const transitionEdge = findOutgoingExecEdge(graph, node.id, "transitions");
+    const transitionNode = transitionEdge ? findNode(graph, transitionEdge.toNode) : undefined;
+
+    let out = `${indentStr}if (logic_var_fsm_state == ${currentState.enumName}) {\n`;
+    if (bodyNode) {
+      out += emitExecChainFromNode(graph, bodyNode, target, new Set(visited), indent + 4);
+    }
+    if (transitionNode?.type === "fsm_transition") {
+      out += emitFsmTransitionChain(
+        graph,
+        transitionNode,
+        states,
+        target,
+        indent + 4,
+        new Set(visited)
+      );
+    }
+    out += `${indentStr}}\n`;
+    return out;
+  }
+
   let out = emitLinearNodeC(node, graph, target);
   const nextEdge = findOutgoingExecEdge(graph, node.id, "exec");
   const nextNode = nextEdge ? findNode(graph, nextEdge.toNode) : undefined;
@@ -302,6 +426,7 @@ export function compileGraphToC(
   let out = `// Generated by RetroDev Studio NodeGraph — DO NOT EDIT\n// Project: ${projectName}\n\n${include}\n#include "resources.h"\n\n`;
 
   const startNodes = graph.nodes.filter((n: GraphNode) => n.type === "event_start");
+  const fsmStates = collectFsmStates(graph);
 
   if (startNodes.length === 0) {
     return out + "// No event_start node found in graph.\n";
@@ -322,13 +447,27 @@ export function compileGraphToC(
   }
 
   collectLogicVariables(graph).forEach((v) => {
+    if (v === "fsm_state" && fsmStates.length > 0) {
+      return;
+    }
     out += `static int logic_var_${v};\n`;
   });
+  if (fsmStates.length > 0) {
+    out += "enum {\n";
+    fsmStates.forEach((state) => {
+      out += `    ${state.enumName} = ${state.index},\n`;
+    });
+    out += "};\n";
+    out += `static int logic_var_fsm_state = ${fsmStates[0].enumName};\n`;
+  }
 
   out += "\nint main() {\n";
 
   for (const startNode of startNodes) {
     out += emitExecChainFromNode(graph, startNode, target);
+  }
+  for (const state of fsmStates) {
+    out += emitExecChainFromNode(graph, state.node, target);
   }
 
   if (target === "snes") {

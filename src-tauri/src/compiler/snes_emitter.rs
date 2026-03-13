@@ -2,7 +2,7 @@ use crate::compiler::ast_generator::{
     collect_bgm_tracks, collect_collision_checks, collect_logic_sound_names,
     collect_parallax_layers, collect_physics_applications, collect_raster_lines,
     collect_sfx_resources, collect_tilemap_assets, AabbCollisionCheck, AstNode, AstOutput,
-    LogicBoolExpr, LogicCollisionTarget, LogicOp, LogicMathExpr, CompareOp, LogicPositionSource, LogicScript,
+    LogicBoolExpr, LogicCollisionTarget, LogicFsmState, LogicFsmTransition, LogicOp, LogicMathExpr, CompareOp, LogicPositionSource, LogicScript,
     ParallaxLayerConfig, PhysicsApplication, RasterLineConfig, SpriteAsset, TilemapAsset,
 };
 
@@ -771,7 +771,67 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], context: &SnesContext, in
                     value_expr = value_expr
                 ));
             }
+            LogicOp::StateMachine { machine_var, states } => {
+                render_fsm_states(out, context, machine_var, states, indent);
+            }
         }
+    }
+}
+
+fn render_fsm_states(
+    out: &mut String,
+    context: &SnesContext,
+    machine_var: &str,
+    states: &[LogicFsmState],
+    indent: usize,
+) {
+    let indent_str = " ".repeat(indent);
+
+    for (index, state) in states.iter().enumerate() {
+        let keyword = if index == 0 { "if" } else { "else if" };
+        out.push_str(&format!(
+            "{indent}{keyword} (logic_var_{machine_var} == {state_index}) {{\n",
+            indent = indent_str,
+            keyword = keyword,
+            machine_var = machine_var,
+            state_index = state.state_index
+        ));
+        render_logic_ops(out, &state.body, context, indent + 4);
+        render_fsm_transitions(out, context, machine_var, &state.transitions, indent + 4);
+        out.push_str(&format!("{indent}}}\n", indent = indent_str));
+    }
+}
+
+fn render_fsm_transitions(
+    out: &mut String,
+    context: &SnesContext,
+    machine_var: &str,
+    transitions: &[LogicFsmTransition],
+    indent: usize,
+) {
+    let indent_str = " ".repeat(indent);
+
+    for (index, transition) in transitions.iter().enumerate() {
+        let keyword = if index == 0 { "if" } else { "else if" };
+        let condition_expr = render_bool_expr(out, &transition.condition, indent);
+        out.push_str(&format!(
+            "{indent}{keyword} ({condition}) {{\n",
+            indent = indent_str,
+            keyword = keyword,
+            condition = condition_expr
+        ));
+        out.push_str(&format!(
+            "{inner}logic_var_{machine_var} = {target};\n",
+            inner = " ".repeat(indent + 4),
+            machine_var = machine_var,
+            target = transition.target_index
+        ));
+        render_logic_ops(out, &transition.if_matched, context, indent + 4);
+        if !transition.if_unmatched.is_empty() {
+            out.push_str(&format!("{indent}}} else {{\n", indent = indent_str));
+            render_logic_ops(out, &transition.if_unmatched, context, indent + 4);
+        }
+        out.push_str(&format!("{indent}}}\n", indent = indent_str));
     }
 }
 
@@ -983,6 +1043,17 @@ fn extract_vars_from_op(op: &LogicOp, vars: &mut std::collections::BTreeSet<Stri
             extract_vars_from_bool(condition, vars);
             for sub_op in if_true { extract_vars_from_op(sub_op, vars); }
             for sub_op in if_false { extract_vars_from_op(sub_op, vars); }
+        }
+        LogicOp::StateMachine { machine_var, states } => {
+            vars.insert(machine_var.clone());
+            for state in states {
+                for sub_op in &state.body { extract_vars_from_op(sub_op, vars); }
+                for transition in &state.transitions {
+                    extract_vars_from_bool(&transition.condition, vars);
+                    for sub_op in &transition.if_matched { extract_vars_from_op(sub_op, vars); }
+                    for sub_op in &transition.if_unmatched { extract_vars_from_op(sub_op, vars); }
+                }
+            }
         }
         _ => {}
     }
@@ -1830,5 +1901,54 @@ mod tests {
         assert!(output.main_c.contains("spcPlaySound(SFX_WIN);"));
         assert!(output.main_c.contains("} else {"));
         assert!(output.main_c.contains("spcPlaySound(SFX_LOSE);"));
+    }
+
+    #[test]
+    fn snes_emitter_emits_fsm_builder_if_chain() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: vec![LogicScript {
+                ops: vec![LogicOp::StateMachine {
+                    machine_var: "fsm_state".to_string(),
+                    states: vec![
+                        crate::compiler::ast_generator::LogicFsmState {
+                            state_name: "idle".to_string(),
+                            state_index: 0,
+                            body: Vec::new(),
+                            transitions: vec![crate::compiler::ast_generator::LogicFsmTransition {
+                                condition: LogicBoolExpr::Compare {
+                                    op: CompareOp::Gt,
+                                    left: Box::new(LogicMathExpr::Var("speed".to_string())),
+                                    right: Box::new(LogicMathExpr::Literal(0)),
+                                },
+                                target_state: "run".to_string(),
+                                target_index: 1,
+                                if_matched: Vec::new(),
+                                if_unmatched: Vec::new(),
+                            }],
+                        },
+                        crate::compiler::ast_generator::LogicFsmState {
+                            state_name: "run".to_string(),
+                            state_index: 1,
+                            body: Vec::new(),
+                            transitions: Vec::new(),
+                        },
+                    ],
+                }],
+            }],
+        };
+
+        let output = emit_snes(&ast, "FSM Demo");
+
+        assert!(output.main_c.contains("static s32 logic_var_fsm_state = 0;"));
+        assert!(output.main_c.contains("if (logic_var_fsm_state == 0) {"));
+        assert!(output.main_c.contains("logic_var_fsm_state = 1;"));
+        assert!(output.main_c.contains("else if (logic_var_fsm_state == 1) {"));
     }
 }

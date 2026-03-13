@@ -237,6 +237,27 @@ pub enum LogicOp {
         var_name: String,
         value: LogicMathExpr,
     },
+    StateMachine {
+        machine_var: String,
+        states: Vec<LogicFsmState>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogicFsmState {
+    pub state_name: String,
+    pub state_index: usize,
+    pub body: Vec<LogicOp>,
+    pub transitions: Vec<LogicFsmTransition>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogicFsmTransition {
+    pub condition: LogicBoolExpr,
+    pub target_state: String,
+    pub target_index: usize,
+    pub if_matched: Vec<LogicOp>,
+    pub if_unmatched: Vec<LogicOp>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -996,7 +1017,170 @@ fn compile_logic_graph(
             (!ops.is_empty()).then_some(LogicScript { ops })
         }));
 
+    if let Some(fsm_script) = compile_fsm_script(graph, runtime_entities, &mut output) {
+        output.scripts.push(fsm_script);
+    }
+
     output
+}
+
+fn compile_fsm_script(
+    graph: &StoredNodeGraph,
+    runtime_entities: &HashMap<String, LogicRuntimeEntity>,
+    output: &mut CompiledLogicOutput,
+) -> Option<LogicScript> {
+    let mut state_nodes = graph
+        .nodes
+        .iter()
+        .filter(|node| node.node_type == "fsm_state")
+        .collect::<Vec<_>>();
+    if state_nodes.is_empty() {
+        return None;
+    }
+
+    state_nodes.sort_by(|left, right| {
+        let left_initial = param_bool(left, "initial", false);
+        let right_initial = param_bool(right, "initial", false);
+        right_initial
+            .cmp(&left_initial)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    let states = state_nodes
+        .iter()
+        .enumerate()
+        .map(|(index, node)| compile_fsm_state(graph, node, index, &state_nodes, runtime_entities, output))
+        .collect::<Vec<_>>();
+
+    Some(LogicScript {
+        ops: vec![LogicOp::StateMachine {
+            machine_var: "fsm_state".to_string(),
+            states,
+        }],
+    })
+}
+
+fn compile_fsm_state(
+    graph: &StoredNodeGraph,
+    node: &StoredNodeGraphNode,
+    state_index: usize,
+    ordered_states: &[&StoredNodeGraphNode],
+    runtime_entities: &HashMap<String, LogicRuntimeEntity>,
+    output: &mut CompiledLogicOutput,
+) -> LogicFsmState {
+    let mut body_visited = std::collections::HashSet::new();
+    let body = compile_logic_chain(
+        graph,
+        &node.id,
+        "exec",
+        runtime_entities,
+        &mut body_visited,
+        &mut output.setup_nodes,
+        &mut output.runtime_nodes,
+        &mut output.parallax_layers,
+        &mut output.raster_lines,
+    );
+
+    let transitions = compile_fsm_transitions(
+        graph,
+        &node.id,
+        ordered_states,
+        runtime_entities,
+        output,
+    );
+
+    LogicFsmState {
+        state_name: sanitize_identifier(
+            &param_string(node, "state_name").unwrap_or_else(|| node.id.clone()),
+        ),
+        state_index,
+        body,
+        transitions,
+    }
+}
+
+fn compile_fsm_transitions(
+    graph: &StoredNodeGraph,
+    state_node_id: &str,
+    ordered_states: &[&StoredNodeGraphNode],
+    runtime_entities: &HashMap<String, LogicRuntimeEntity>,
+    output: &mut CompiledLogicOutput,
+) -> Vec<LogicFsmTransition> {
+    let mut transitions = Vec::new();
+    let mut next_transition_id = next_exec_target(graph, state_node_id, "transitions");
+    let mut visited = std::collections::HashSet::new();
+
+    while let Some(node_id) = next_transition_id {
+        if !visited.insert(node_id.clone()) {
+            break;
+        }
+
+        let Some(node) = graph.nodes.iter().find(|candidate| candidate.id == node_id) else {
+            break;
+        };
+        if node.node_type != "fsm_transition" {
+            break;
+        }
+
+        let condition = resolve_bool_expr_from_ports(
+            graph,
+            node,
+            &["condition", "guard"],
+            runtime_entities,
+            &mut std::collections::HashSet::new(),
+        )
+        .unwrap_or(LogicBoolExpr::Literal(false));
+
+        let target_state_name = sanitize_identifier(
+            &param_string(node, "target_state").unwrap_or_else(|| "state".to_string()),
+        );
+        let target_index = ordered_states
+            .iter()
+            .position(|candidate| {
+                sanitize_identifier(
+                    &param_string(candidate, "state_name").unwrap_or_else(|| candidate.id.clone()),
+                ) == target_state_name
+            })
+            .unwrap_or(0);
+
+        let mut matched_visited = std::collections::HashSet::new();
+        let if_matched = compile_logic_chain(
+            graph,
+            &node.id,
+            "matched",
+            runtime_entities,
+            &mut matched_visited,
+            &mut output.setup_nodes,
+            &mut output.runtime_nodes,
+            &mut output.parallax_layers,
+            &mut output.raster_lines,
+        );
+
+        let mut unmatched_visited = std::collections::HashSet::new();
+        let if_unmatched = compile_logic_chain(
+            graph,
+            &node.id,
+            "next",
+            runtime_entities,
+            &mut unmatched_visited,
+            &mut output.setup_nodes,
+            &mut output.runtime_nodes,
+            &mut output.parallax_layers,
+            &mut output.raster_lines,
+        );
+
+        transitions.push(LogicFsmTransition {
+            condition,
+            target_state: target_state_name,
+            target_index,
+            if_matched,
+            if_unmatched,
+        });
+
+        next_transition_id = next_exec_target(graph, &node.id, "next");
+    }
+
+    transitions
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1533,6 +1717,22 @@ fn param_i32(node: &StoredNodeGraphNode, key: &str, default: i32) -> i32 {
         .unwrap_or(default)
 }
 
+fn param_bool(node: &StoredNodeGraphNode, key: &str, default: bool) -> bool {
+    node.params
+        .get(key)
+        .and_then(|value| match value {
+            Value::Bool(flag) => Some(*flag),
+            Value::Number(number) => number.as_i64().map(|value| value != 0),
+            Value::String(text) => match text.as_str() {
+                "1" | "true" | "TRUE" => Some(true),
+                "0" | "false" | "FALSE" => Some(false),
+                _ => None,
+            },
+            _ => None,
+        })
+        .unwrap_or(default)
+}
+
 pub fn collect_tilemap_assets(ast: &AstOutput) -> Vec<TilemapAsset> {
     ast.nodes
         .iter()
@@ -1628,6 +1828,15 @@ fn collect_logic_sound_names_from_ops(
             } => {
                 collect_logic_sound_names_from_ops(if_true, sound_names);
                 collect_logic_sound_names_from_ops(if_false, sound_names);
+            }
+            LogicOp::StateMachine { states, .. } => {
+                for state in states {
+                    collect_logic_sound_names_from_ops(&state.body, sound_names);
+                    for transition in &state.transitions {
+                        collect_logic_sound_names_from_ops(&transition.if_matched, sound_names);
+                        collect_logic_sound_names_from_ops(&transition.if_unmatched, sound_names);
+                    }
+                }
             }
             LogicOp::MoveSprite { .. } => {}
         }
@@ -3469,5 +3678,93 @@ mod tests {
             AstNode::SpawnSprite { resource_name, x, y, .. }
                 if resource_name == "hero_instance" && *x == 48 && *y == 80
         )));
+    }
+
+    #[test]
+    fn generate_ast_compiles_fsm_builder_into_state_machine_logic() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
+            name: "FSM Demo".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution { width: 320, height: 224 },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+        };
+        let logic_graph = json!({
+            "version": 1,
+            "nodes": [
+                { "id": "idle", "type": "fsm_state", "label": "Idle", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": { "state_name": "idle", "initial": 1 } },
+                { "id": "run", "type": "fsm_state", "label": "Run", "x": 200, "y": 0, "inputs": [], "outputs": [], "params": { "state_name": "run", "initial": 0 } },
+                { "id": "speed", "type": "var_get", "label": "Speed", "x": 100, "y": 120, "inputs": [], "outputs": [], "params": { "var_name": "speed" } },
+                { "id": "idle_to_run", "type": "fsm_transition", "label": "Go Run", "x": 80, "y": 0, "inputs": [], "outputs": [], "params": { "target_state": "run" } },
+                { "id": "run_to_idle", "type": "fsm_transition", "label": "Go Idle", "x": 280, "y": 0, "inputs": [], "outputs": [], "params": { "target_state": "idle" } },
+                { "id": "move", "type": "sprite_move", "label": "Move", "x": 360, "y": 0, "inputs": [], "outputs": [], "params": { "target": "player", "dx": 2, "dy": 0 } }
+            ],
+            "edges": [
+                { "id": "e1", "fromNode": "idle", "fromPort": "transitions", "toNode": "idle_to_run", "toPort": "exec" },
+                { "id": "e2", "fromNode": "speed", "fromPort": "value", "toNode": "idle_to_run", "toPort": "condition" },
+                { "id": "e3", "fromNode": "run", "fromPort": "exec", "toNode": "move", "toPort": "exec" },
+                { "id": "e4", "fromNode": "run", "fromPort": "transitions", "toNode": "run_to_idle", "toPort": "exec" },
+                { "id": "e5", "fromNode": "speed", "fromPort": "value", "toNode": "run_to_idle", "toPort": "condition" }
+            ]
+        });
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "player".to_string(),
+                prefab: None,
+                transform: Transform { x: 16, y: 24 },
+                components: Components {
+                    sprite: Some(SpriteComponent {
+                        asset: "assets/sprites/player.png".to_string(),
+                        frame_width: 16,
+                        frame_height: 16,
+                        pivot: None,
+                        palette_slot: 0,
+                        animations: HashMap::new(),
+                        priority: "foreground".to_string(),
+                    }),
+                    logic: Some(crate::ugdm::components::LogicComponent {
+                        graph: Some(logic_graph.to_string()),
+                        variables: HashMap::new(),
+                    }),
+                    ..Components::default()
+                },
+            }],
+            palettes: Vec::new(),
+            retrofx: None,
+        };
+
+        let ast = generate_ast(&project, &scene);
+        let state_machine = ast
+            .logic_scripts
+            .iter()
+            .flat_map(|script| script.ops.iter())
+            .find_map(|op| match op {
+                LogicOp::StateMachine { machine_var, states } => Some((machine_var, states)),
+                _ => None,
+            })
+            .expect("fsm graph should compile into a state machine");
+
+        assert_eq!(state_machine.0, "fsm_state");
+        assert_eq!(state_machine.1.len(), 2);
+        assert_eq!(state_machine.1[0].state_name, "idle");
+        assert_eq!(state_machine.1[1].state_name, "run");
+        assert_eq!(state_machine.1[0].transitions[0].target_state, "run");
+        assert_eq!(state_machine.1[1].transitions[0].target_state, "idle");
+        assert_eq!(
+            state_machine.1[1].body,
+            vec![LogicOp::MoveSprite {
+                target_var: "spr_player".to_string(),
+                dx: 2,
+                dy: 0,
+            }]
+        );
     }
 }

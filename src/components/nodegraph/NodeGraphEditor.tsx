@@ -14,7 +14,13 @@ export type NodeType =
   | "logic_and"
   | "action_sound"
   | "scroll_tilemap"
-  | "move_camera";
+  | "move_camera"
+  | "var_set"
+  | "var_get"
+  | "logic_math"
+  | "condition_compare"
+  | "fsm_state"
+  | "fsm_transition";
 
 export interface NodePort {
   id: string;
@@ -84,7 +90,13 @@ function isNodeType(value: unknown): value is NodeType {
     value === "logic_and" ||
     value === "action_sound" ||
     value === "scroll_tilemap" ||
-    value === "move_camera"
+    value === "move_camera" ||
+    value === "var_set" ||
+    value === "var_get" ||
+    value === "logic_math" ||
+    value === "condition_compare" ||
+    value === "fsm_state" ||
+    value === "fsm_transition"
   );
 }
 
@@ -231,6 +243,64 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     outputs: [{ id: "exec", label: "▶", kind: "exec" }],
     params: { target: "cam", x: 0, y: 0 },
   },
+  var_set: {
+    type: "var_set", label: "Set Variable",
+    inputs: [
+      { id: "exec", label: "▶", kind: "exec" },
+      { id: "value", label: "Value", kind: "data", dataType: "int" }
+    ],
+    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
+    params: { var_name: "temp_var", value: 0 },
+  },
+  var_get: {
+    type: "var_get", label: "Get Variable",
+    inputs: [],
+    outputs: [{ id: "value", label: "Value", kind: "data", dataType: "int" }],
+    params: { var_name: "temp_var" },
+  },
+  logic_math: {
+    type: "logic_math", label: "Math Exp",
+    inputs: [
+      { id: "a", label: "A", kind: "data", dataType: "int" },
+      { id: "b", label: "B", kind: "data", dataType: "int" }
+    ],
+    outputs: [{ id: "value", label: "Value", kind: "data", dataType: "int" }],
+    params: { operator: "+" },
+  },
+  condition_compare: {
+    type: "condition_compare", label: "Compare",
+    inputs: [
+      { id: "exec", label: "▶", kind: "exec" },
+      { id: "a", label: "A", kind: "data", dataType: "int" },
+      { id: "b", label: "B", kind: "data", dataType: "int" }
+    ],
+    outputs: [
+      { id: "true", label: "True ▶", kind: "exec" },
+      { id: "false", label: "False ▶", kind: "exec" }
+    ],
+    params: { operator: "==" },
+  },
+  fsm_state: {
+    type: "fsm_state", label: "FSM State",
+    inputs: [{ id: "exec", label: "Enter", kind: "exec" }],
+    outputs: [
+      { id: "exec", label: "Body ▶", kind: "exec" },
+      { id: "transitions", label: "Transitions ▶", kind: "exec" },
+    ],
+    params: { state_name: "idle", initial: 0 },
+  },
+  fsm_transition: {
+    type: "fsm_transition", label: "FSM Transition",
+    inputs: [
+      { id: "exec", label: "▶", kind: "exec" },
+      { id: "condition", label: "Condition", kind: "data", dataType: "bool" },
+    ],
+    outputs: [
+      { id: "matched", label: "Matched ▶", kind: "exec" },
+      { id: "next", label: "Next ▶", kind: "exec" },
+    ],
+    params: { target_state: "idle" },
+  },
 };
 
 const NODE_COLORS: Record<NodeType, string> = {
@@ -244,6 +314,12 @@ const NODE_COLORS: Record<NodeType, string> = {
   action_sound:      "border-[#f9e2af] bg-[#f9e2af]/10",
   scroll_tilemap:    "border-[#94e2d5] bg-[#94e2d5]/10",
   move_camera:       "border-[#f9e2af] bg-[#f9e2af]/10",
+  var_set:           "border-[#cba6f7] bg-[#cba6f7]/10",
+  var_get:           "border-[#cba6f7] bg-[#cba6f7]/10",
+  logic_math:        "border-[#f38ba8] bg-[#f38ba8]/10",
+  condition_compare: "border-[#fab387] bg-[#fab387]/10",
+  fsm_state:         "border-[#74c7ec] bg-[#74c7ec]/10",
+  fsm_transition:    "border-[#94e2d5] bg-[#94e2d5]/10",
 };
 
 // ── Counter for unique IDs ────────────────────────────────────────────────────
@@ -358,8 +434,10 @@ function NodeCard({ node, selected, onMouseDown, onPortMouseDown, onPortMouseUp 
 
 const PALETTE_TYPES: NodeType[] = [
   "event_start", "sprite_move", "sprite_anim",
-  "condition_overlap", "effect_parallax", "effect_raster",
-  "logic_and", "action_sound", "scroll_tilemap", "move_camera",
+  "var_set", "var_get", "logic_math", "condition_compare",
+  "fsm_state", "fsm_transition",
+  "condition_overlap", "logic_and", "action_sound", 
+  "scroll_tilemap", "move_camera", "effect_parallax", "effect_raster",
 ];
 
 export default function NodeGraphEditor() {

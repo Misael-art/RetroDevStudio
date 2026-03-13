@@ -96,6 +96,26 @@ const GRAPH_LOGIC_BRANCHING: NodeGraph = {
   ],
 };
 
+const GRAPH_FSM: NodeGraph = {
+  nodes: [
+    node("start", "event_start"),
+    node("idle", "fsm_state", { state_name: "idle", initial: 1 }),
+    node("run", "fsm_state", { state_name: "run", initial: 0 }),
+    node("speed", "var_get", { var_name: "speed" }),
+    node("idle_to_run", "fsm_transition", { target_state: "run" }),
+    node("run_to_idle", "fsm_transition", { target_state: "idle" }),
+    node("step", "sprite_move", { target: "player", dx: 2, dy: 0 }),
+  ],
+  edges: [
+    { id: "e1", fromNode: "start", fromPort: "exec", toNode: "idle", toPort: "exec" },
+    { id: "e2", fromNode: "idle", fromPort: "transitions", toNode: "idle_to_run", toPort: "exec" },
+    { id: "e3", fromNode: "speed", fromPort: "value", toNode: "idle_to_run", toPort: "condition" },
+    { id: "e4", fromNode: "run", fromPort: "exec", toNode: "step", toPort: "exec" },
+    { id: "e5", fromNode: "run", fromPort: "transitions", toNode: "run_to_idle", toPort: "exec" },
+    { id: "e6", fromNode: "speed", fromPort: "value", toNode: "run_to_idle", toPort: "condition" },
+  ],
+};
+
 // ── compileGraphToC ───────────────────────────────────────────────────────────
 
 describe("NodeGraph serialization", () => {
@@ -210,6 +230,18 @@ describe("compileGraphToC — SNES", () => {
     const code = compileGraphToC(GRAPH_START_ONLY, "Test", "snes");
     expect(code).toContain("oamUpdate()");
     expect(code).toContain("WaitForVBlank()");
+  });
+
+  it("emite if-chain de FSM com estados nomeados e transicoes", () => {
+    const code = compileGraphToC(GRAPH_FSM, "FsmDemo", "megadrive");
+
+    expect(code).toContain("FSM_STATE_IDLE = 0");
+    expect(code).toContain("FSM_STATE_RUN = 1");
+    expect(code).toContain("static int logic_var_fsm_state = FSM_STATE_IDLE;");
+    expect(code).toContain("if (logic_var_fsm_state == FSM_STATE_IDLE) {");
+    expect(code).toContain("logic_var_fsm_state = FSM_STATE_RUN;");
+    expect(code).toContain("if (logic_var_fsm_state == FSM_STATE_RUN) {");
+    expect(code).toContain("SPR_setPosition(spr_player");
   });
 });
 
