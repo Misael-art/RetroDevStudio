@@ -33,6 +33,12 @@ export interface ExtractionResult {
   files: string[];
 }
 
+export interface ProjectAssetEntry {
+  relative_path: string;
+  absolute_path: string;
+  kind: "image" | "audio" | "other";
+}
+
 export type AssetExtractorBppMode = "auto" | "2bpp" | "4bpp";
 
 export type ThirdPartyDependencyId =
@@ -108,6 +114,10 @@ export function assetsExtract(
   bppMode: AssetExtractorBppMode
 ): Promise<ExtractionResult> {
   return invoke("assets_extract", { romPath, outputDir, maxTiles, paletteSlot, bppMode });
+}
+
+export function listProjectAssets(projectDir: string): Promise<ProjectAssetEntry[]> {
+  return invoke<ProjectAssetEntry[]>("list_project_assets", { projectDir });
 }
 
 export function getThirdPartyStatus(): Promise<DependencyStatusReport> {

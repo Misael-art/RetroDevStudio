@@ -945,7 +945,7 @@ export default function App() {
           <ViewportPanel />
         </main>
         <aside className="w-64 shrink-0 overflow-hidden border-l border-[#313244]">
-          {toolsOpen ? <ToolsPanel /> : <InspectorPanel />}
+          {toolsOpen ? <ToolsPanel onRequestInspector={() => setToolsOpen(false)} /> : <InspectorPanel />}
         </aside>
       </div>
 

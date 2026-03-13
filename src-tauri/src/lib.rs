@@ -5,6 +5,7 @@ mod hardware;
 mod tools;
 mod ugdm;
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -72,6 +73,13 @@ pub struct EmulatorMemoryResult {
     pub ok: bool,
     pub data: Vec<u8>,
     pub total_size: usize,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProjectAssetEntry {
+    pub relative_path: String,
+    pub absolute_path: String,
+    pub kind: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -407,6 +415,78 @@ fn assets_extract(
 }
 
 #[tauri::command]
+fn list_project_assets(project_dir: String) -> Result<Vec<ProjectAssetEntry>, String> {
+    let trimmed = project_dir.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let assets_dir = Path::new(trimmed).join("assets");
+    if !assets_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut entries = Vec::new();
+    collect_project_assets(&assets_dir, &assets_dir, &mut entries)?;
+    entries.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    Ok(entries)
+}
+
+fn collect_project_assets(
+    root: &Path,
+    current: &Path,
+    entries: &mut Vec<ProjectAssetEntry>,
+) -> Result<(), String> {
+    for dir_entry in fs::read_dir(current)
+        .map_err(|error| format!("Falha ao listar '{}': {}", current.display(), error))?
+    {
+        let dir_entry = dir_entry
+            .map_err(|error| format!("Falha ao ler entrada de '{}': {}", current.display(), error))?;
+        let path = dir_entry.path();
+        let file_type = dir_entry
+            .file_type()
+            .map_err(|error| format!("Falha ao ler tipo de '{}': {}", path.display(), error))?;
+
+        if file_type.is_dir() {
+            collect_project_assets(root, &path, entries)?;
+            continue;
+        }
+
+        if !file_type.is_file() {
+            continue;
+        }
+
+        let relative = path
+            .strip_prefix(root.parent().unwrap_or(root))
+            .map_err(|error| format!("Falha ao relativizar asset '{}': {}", path.display(), error))?
+            .to_string_lossy()
+            .replace('\\', "/");
+
+        entries.push(ProjectAssetEntry {
+            relative_path: relative,
+            absolute_path: path.to_string_lossy().to_string(),
+            kind: project_asset_kind(&path),
+        });
+    }
+
+    Ok(())
+}
+
+fn project_asset_kind(path: &Path) -> String {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    match extension.as_str() {
+        "png" | "bmp" | "ppm" | "pal" | "pic" | "map" | "json" => "image".to_string(),
+        "wav" | "xgm" | "brr" | "spc" | "vgm" => "audio".to_string(),
+        _ => "other".to_string(),
+    }
+}
+
+#[tauri::command]
 fn third_party_get_status() -> DependencyStatusReport {
     dependency_status_report()
 }
@@ -677,6 +757,7 @@ pub fn run() {
             patch_apply_bps,
             profiler_analyze_rom,
             assets_extract,
+            list_project_assets,
             third_party_get_status,
             third_party_install,
             third_party_detect_rom_dependency,
@@ -691,6 +772,7 @@ mod tests {
     use compiler::build_orch::{run_build_with_environment, BuildEnvironment};
     use emulator::libretro_ffi::test_serial_guard;
     use std::fs;
+    use std::hash::{Hash, Hasher};
     use std::time::{SystemTime, UNIX_EPOCH};
     use tools::dependency_manager::{dependency_status_report, install_dependency};
 
@@ -778,6 +860,12 @@ mod tests {
         bytes[0x100..0x10F].copy_from_slice(b"SEGA MEGA DRIVE");
         fs::write(&path, bytes).expect("write test rom");
         path
+    }
+
+    fn stable_hash(bytes: &[u8]) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        bytes.hash(&mut hasher);
+        hasher.finish()
     }
 
     fn fake_make_script(dir: &Path) -> PathBuf {
@@ -1271,6 +1359,80 @@ pub extern "C" fn retro_run() {
                 .unwrap_or_else(|error| panic!("failed to stop {} emulator: {}", target, error));
             let _ = fs::remove_dir_all(project_dir);
         }
+    }
+
+    #[test]
+    fn patch_studio_bps_roundtrip_preserves_modified_project_rom_hash() {
+        let dir = temp_dir("patch-project");
+        let original = fixture_dir("snes_dummy")
+            .join("build")
+            .join("snes")
+            .join("canonical_snes_dummy.sfc");
+        let modified = dir.join("canonical_snes_dummy_modified.sfc");
+        let patch = dir.join("project_assets.bps");
+        let restored = dir.join("canonical_snes_dummy_restored.sfc");
+
+        let mut modified_bytes = fs::read(&original).expect("read canonical snes rom");
+        let replacement_asset = fs::read(
+            fixture_dir("snes_dummy")
+                .join("assets")
+                .join("sprites")
+                .join("hero.ppm"),
+        )
+        .expect("read replacement asset");
+        let replacement_start = 0x2000usize;
+        let replacement_end = replacement_start + replacement_asset.len().min(512);
+        modified_bytes[replacement_start..replacement_end]
+            .copy_from_slice(&replacement_asset[..replacement_end - replacement_start]);
+        fs::write(&modified, &modified_bytes).expect("write modified rom");
+
+        let create = patch_create_bps(
+            original.to_string_lossy().to_string(),
+            modified.to_string_lossy().to_string(),
+            patch.to_string_lossy().to_string(),
+        );
+        assert!(create.ok, "create patch failed: {}", create.message);
+
+        let apply = patch_apply_bps(
+            original.to_string_lossy().to_string(),
+            patch.to_string_lossy().to_string(),
+            restored.to_string_lossy().to_string(),
+        );
+        assert!(apply.ok, "apply patch failed: {}", apply.message);
+
+        let restored_bytes = fs::read(&restored).expect("read restored rom");
+        assert_eq!(restored_bytes, modified_bytes);
+        assert_eq!(stable_hash(&restored_bytes), stable_hash(&modified_bytes));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn profiler_command_reports_detected_sat_activity() {
+        let dir = temp_dir("profiler-command");
+        let rom_path = dir.join("profile_test.md");
+        let mut rom = vec![0u8; 0x4000];
+        rom[0x100..0x10F].copy_from_slice(b"SEGA MEGA DRIVE");
+        let sat_offset = 0x1800usize;
+
+        for sprite_idx in 0..6usize {
+            let base = sat_offset + (sprite_idx * 8);
+            let y = (128 + sprite_idx as u16 * 4) & 0x01FF;
+            let x = 192u16 & 0x01FF;
+            rom[base..base + 2].copy_from_slice(&y.to_be_bytes());
+            rom[base + 2] = 0b0000_0101;
+            rom[base + 3] = if sprite_idx == 5 { 0 } else { (sprite_idx + 1) as u8 };
+            rom[base + 6..base + 8].copy_from_slice(&x.to_be_bytes());
+        }
+        fs::write(&rom_path, rom).expect("write profiler rom");
+
+        let report = profiler_analyze_rom(rom_path.to_string_lossy().to_string());
+        assert!(report.ok, "profiler failed: {}", report.error);
+        assert_eq!(report.sprite_count, 6);
+        assert!(report.sprite_peak >= 1);
+        assert!(!report.issues.is_empty());
+
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

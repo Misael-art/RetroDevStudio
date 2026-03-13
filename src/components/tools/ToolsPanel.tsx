@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import Panel from "../common/Panel";
 import { useEditorStore } from "../../core/store/editorStore";
+import type { Scene } from "../../core/ipc/sceneService";
 import { emulatorReadMemory } from "../../core/ipc/emulatorService";
 import {
   patchCreateIps,
@@ -12,12 +14,14 @@ import {
   assetsExtract,
   getThirdPartyStatus,
   installThirdPartyDependency,
+  listProjectAssets,
   type ProfileReport,
   type ProfileIssue,
   type DependencyStatus,
   type DependencyLogLine,
   type ThirdPartyDependencyId,
   type AssetExtractorBppMode,
+  type ProjectAssetEntry,
 } from "../../core/ipc/toolsService";
 
 function describeError(error: unknown): string {
@@ -86,7 +90,7 @@ function PathField({
   );
 }
 
-function ExperimentalNotice({ summary }: { summary: string }) {
+export function ExperimentalNotice({ summary }: { summary: string }) {
   return (
     <div className="rounded border border-[#fab387] bg-[#181825] p-2">
       <div className="flex items-center gap-2">
@@ -155,11 +159,10 @@ function PatchStudio() {
           <button
             key={currentMode}
             onClick={() => setMode(currentMode)}
-            className={`rounded px-2 py-1 text-xs transition-colors ${
-              mode === currentMode
-                ? "bg-[#cba6f7] font-semibold text-[#1e1e2e]"
-                : "bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]"
-            }`}
+            className={`rounded px-2 py-1 text-xs transition-colors ${mode === currentMode
+              ? "bg-[#cba6f7] font-semibold text-[#1e1e2e]"
+              : "bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]"
+              }`}
           >
             {currentMode === "create" ? "Criar Patch" : "Aplicar Patch"}
           </button>
@@ -169,11 +172,10 @@ function PatchStudio() {
             <button
               key={currentFormat}
               onClick={() => setFormat(currentFormat)}
-              className={`rounded px-2 py-1 text-xs uppercase transition-colors ${
-                format === currentFormat
-                  ? "bg-[#89b4fa] font-semibold text-[#1e1e2e]"
-                  : "bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]"
-              }`}
+              className={`rounded px-2 py-1 text-xs uppercase transition-colors ${format === currentFormat
+                ? "bg-[#89b4fa] font-semibold text-[#1e1e2e]"
+                : "bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]"
+                }`}
             >
               {currentFormat}
             </button>
@@ -188,11 +190,10 @@ function PatchStudio() {
       <button
         disabled={busy}
         onClick={() => void run()}
-        className={`rounded py-1.5 text-xs font-semibold transition-colors ${
-          busy
-            ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
-            : "bg-[#cba6f7] text-[#1e1e2e] hover:bg-[#b4a0e0]"
-        }`}
+        className={`rounded py-1.5 text-xs font-semibold transition-colors ${busy
+          ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
+          : "bg-[#cba6f7] text-[#1e1e2e] hover:bg-[#b4a0e0]"
+          }`}
       >
         {busy ? "Processando..." : `${mode === "create" ? "Criar" : "Aplicar"} Patch ${format.toUpperCase()}`}
       </button>
@@ -277,11 +278,10 @@ function DeepProfiler() {
         <button
           disabled={busy}
           onClick={() => void analyze()}
-          className={`rounded py-1.5 text-xs font-semibold transition-colors ${
-            busy
-              ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
-              : "bg-[#89b4fa] text-[#1e1e2e] hover:bg-[#74a8f0]"
-          }`}
+          className={`rounded py-1.5 text-xs font-semibold transition-colors ${busy
+            ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
+            : "bg-[#89b4fa] text-[#1e1e2e] hover:bg-[#74a8f0]"
+            }`}
         >
           {busy ? "Analisando..." : "Analisar"}
         </button>
@@ -369,8 +369,6 @@ function AssetExtractor() {
 
   return (
     <div className="flex flex-col gap-3 p-3">
-      <ExperimentalNotice summary="Fluxo conectado ao backend real. Manter badge Experimental ate validar a extracao ponta a ponta com ROM e assets reais." />
-
       <PathField
         label="ROM (.md / .bin)"
         value={romPath}
@@ -432,11 +430,10 @@ function AssetExtractor() {
       <button
         disabled={busy}
         onClick={() => void extract()}
-        className={`rounded py-1.5 text-xs font-semibold transition-colors ${
-          busy
-            ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
-            : "bg-[#a6e3a1] text-[#1e1e2e] hover:bg-[#94e2a0]"
-        }`}
+        className={`rounded py-1.5 text-xs font-semibold transition-colors ${busy
+          ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
+          : "bg-[#a6e3a1] text-[#1e1e2e] hover:bg-[#94e2a0]"
+          }`}
       >
         {busy ? "Extraindo..." : "Extrair Assets"}
       </button>
@@ -458,6 +455,190 @@ function AssetExtractor() {
       <p className="text-[9px] leading-tight text-[#45475a]">
         Extrai apenas da ROM fornecida. Assets de terceiros pertencem aos seus donos.
       </p>
+    </div>
+  );
+}
+
+interface AssetBrowserProps {
+  onRequestInspector?: () => void;
+}
+
+interface AssetReference {
+  entityId: string;
+  label: string;
+}
+
+function collectAssetReferences(scene: Scene | null): Map<string, AssetReference[]> {
+  const references = new Map<string, AssetReference[]>();
+  if (!scene) {
+    return references;
+  }
+
+  const pushReference = (assetPath: string | undefined, entityId: string, label: string) => {
+    const normalized = String(assetPath ?? "").trim();
+    if (!normalized) {
+      return;
+    }
+    const bucket = references.get(normalized) ?? [];
+    bucket.push({ entityId, label });
+    references.set(normalized, bucket);
+  };
+
+  for (const entity of scene.entities) {
+    pushReference(
+      entity.components.sprite?.asset,
+      entity.entity_id,
+      `Sprite · ${entity.prefab ?? entity.entity_id}`
+    );
+    pushReference(
+      entity.components.tilemap?.tileset,
+      entity.entity_id,
+      `Tilemap · ${entity.prefab ?? entity.entity_id}`
+    );
+
+    const audio = entity.components.audio;
+    if (audio?.bgm) {
+      pushReference(audio.bgm, entity.entity_id, `BGM · ${entity.prefab ?? entity.entity_id}`);
+    }
+    for (const [action, assetPath] of Object.entries(audio?.sfx ?? {})) {
+      pushReference(assetPath, entity.entity_id, `SFX ${action} · ${entity.prefab ?? entity.entity_id}`);
+    }
+  }
+
+  for (const layer of scene.background_layers) {
+    pushReference(layer.tileset, `layer::${layer.layer_id}`, `Tileset · ${layer.layer_id}`);
+    pushReference(layer.tilemap, `layer::${layer.layer_id}`, `Layer map · ${layer.layer_id}`);
+  }
+
+  return references;
+}
+
+function assetPreviewUrl(asset: ProjectAssetEntry): string | null {
+  if (asset.kind !== "image") {
+    return null;
+  }
+  return convertFileSrc(asset.absolute_path);
+}
+
+function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
+  const {
+    activeProjectDir,
+    activeScene,
+    setSelectedEntityId,
+    logMessage,
+  } = useEditorStore();
+  const [assets, setAssets] = useState<ProjectAssetEntry[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const references = useMemo(() => collectAssetReferences(activeScene), [activeScene]);
+
+  useEffect(() => {
+    if (!activeProjectDir) {
+      setAssets([]);
+      setError(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadAssets() {
+      setBusy(true);
+      try {
+        const result = await listProjectAssets(activeProjectDir);
+        if (!cancelled) {
+          setAssets(result);
+          setError(null);
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(describeError(loadError));
+        }
+      } finally {
+        if (!cancelled) {
+          setBusy(false);
+        }
+      }
+    }
+
+    void loadAssets();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProjectDir]);
+
+  function handleAssetDoubleClick(asset: ProjectAssetEntry) {
+    const matches = references.get(asset.relative_path) ?? [];
+    if (matches.length === 0) {
+      logMessage("info", `[Assets] '${asset.relative_path}' nao esta referenciado pela cena ativa.`);
+      return;
+    }
+
+    setSelectedEntityId(matches[0].entityId);
+    onRequestInspector?.();
+    logMessage("info", `[Assets] Selecionado no Inspector: ${matches[0].label}`);
+  }
+
+  return (
+    <div className="flex flex-col gap-3 p-3">
+      <ExperimentalNotice summary="Catalogo visual inicial dos assets do projeto ativo. Preview e foco no Inspector ainda estao em validacao com projeto real." />
+
+      <div className="flex items-center justify-between rounded bg-[#1e1e2e] px-3 py-2">
+        <span className="text-[10px] text-[#7f849c]">
+          Projeto: <span className="font-mono text-[#cdd6f4]">{activeProjectDir || "(nenhum)"}</span>
+        </span>
+        <span className="text-[10px] text-[#7f849c]">
+          Assets: <span className="font-mono text-[#cdd6f4]">{assets.length}</span>
+        </span>
+      </div>
+
+      {busy && <p className="text-[10px] text-[#89b4fa]">Carregando catalogo de assets...</p>}
+      {error && (
+        <div className="rounded border border-[#f38ba8] bg-[#1e1e2e] px-3 py-2 text-[10px] text-[#f38ba8]">
+          {error}
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2">
+        {assets.map((asset) => {
+          const preview = assetPreviewUrl(asset);
+          const matches = references.get(asset.relative_path) ?? [];
+          return (
+            <button
+              key={asset.relative_path}
+              type="button"
+              onDoubleClick={() => handleAssetDoubleClick(asset)}
+              className="flex min-h-28 flex-col gap-2 rounded border border-[#313244] bg-[#1e1e2e] p-2 text-left transition-colors hover:border-[#cba6f7]"
+              title={`${asset.relative_path}${matches.length > 0 ? `\nReferencias: ${matches.map((match) => match.label).join(", ")}` : ""}`}
+            >
+              <div className="flex h-16 items-center justify-center overflow-hidden rounded bg-[#11111b]">
+                {preview ? (
+                  <img src={preview} alt={asset.relative_path} className="h-full w-full object-contain" />
+                ) : (
+                  <span className="text-lg font-bold text-[#89b4fa]">
+                    {asset.kind === "audio" ? "AUD" : "FILE"}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[9px] uppercase text-[#a6adc8]">
+                  {asset.kind}
+                </span>
+                {matches.length > 0 && (
+                  <span className="text-[9px] text-[#a6e3a1]">{matches.length} ref.</span>
+                )}
+              </div>
+              <p className="line-clamp-2 break-all font-mono text-[10px] text-[#cdd6f4]">
+                {asset.relative_path}
+              </p>
+            </button>
+          );
+        })}
+      </div>
+
+      {!busy && assets.length === 0 && (
+        <p className="text-[10px] text-[#45475a]">Nenhum asset encontrado em `assets/`.</p>
+      )}
     </div>
   );
 }
@@ -559,13 +740,12 @@ function RuntimeSetup() {
               <button
                 onClick={() => install(item.id, item.label)}
                 disabled={!item.auto_install_supported || busyId !== null}
-                className={`rounded px-2 py-1 text-[10px] font-semibold transition-colors ${
-                  busyId === item.id
-                    ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
-                    : item.auto_install_supported
-                      ? "bg-[#a6e3a1] text-[#1e1e2e] hover:bg-[#94e2a0]"
-                      : "cursor-not-allowed bg-[#313244] text-[#6c7086]"
-                }`}
+                className={`rounded px-2 py-1 text-[10px] font-semibold transition-colors ${busyId === item.id
+                  ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
+                  : item.auto_install_supported
+                    ? "bg-[#a6e3a1] text-[#1e1e2e] hover:bg-[#94e2a0]"
+                    : "cursor-not-allowed bg-[#313244] text-[#6c7086]"
+                  }`}
               >
                 {busyId === item.id ? "Instalando..." : "Instalar / Reinstalar"}
               </button>
@@ -683,8 +863,6 @@ function MemoryViewer() {
 
   return (
     <div className="flex flex-col gap-3 p-3">
-      <ExperimentalNotice summary="Leitura basica de memoria conectada ao core Libretro ativo. Manter badge Experimental ate validar a inspecao com ROM real ponta a ponta." />
-
       <div className="flex flex-wrap gap-3">
         <div className="flex flex-col gap-1">
           <label className="text-[10px] text-[#7f849c]">Regiao</label>
@@ -736,11 +914,10 @@ function MemoryViewer() {
         <button
           disabled={busy}
           onClick={() => void readMemory()}
-          className={`mt-4 rounded px-3 py-1.5 text-xs font-semibold transition-colors ${
-            busy
-              ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
-              : "bg-[#f9e2af] text-[#1e1e2e] hover:bg-[#e7cf96]"
-          }`}
+          className={`mt-4 rounded px-3 py-1.5 text-xs font-semibold transition-colors ${busy
+            ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
+            : "bg-[#f9e2af] text-[#1e1e2e] hover:bg-[#e7cf96]"
+            }`}
         >
           {busy ? "Lendo..." : "Ler"}
         </button>
@@ -787,17 +964,18 @@ function MemoryViewer() {
   );
 }
 
-type ToolTab = "patch" | "profiler" | "extractor" | "setup" | "memory";
+type ToolTab = "patch" | "profiler" | "extractor" | "setup" | "memory" | "assets";
 
 const TOOL_TABS: { id: ToolTab; label: string; icon: string; experimental?: boolean }[] = [
   { id: "setup", label: "Runtime Setup", icon: "RD" },
+  { id: "assets", label: "Asset Browser", icon: "AB", experimental: true },
   { id: "patch", label: "Patch Studio", icon: "PT" },
   { id: "profiler", label: "Deep Profiler", icon: "DP" },
-  { id: "extractor", label: "Asset Extractor", icon: "AE", experimental: true },
-  { id: "memory", label: "Memory Viewer", icon: "MV", experimental: true },
+  { id: "extractor", label: "Asset Extractor", icon: "AE" },
+  { id: "memory", label: "Memory Viewer", icon: "MV" },
 ];
 
-export default function ToolsPanel() {
+export default function ToolsPanel({ onRequestInspector }: { onRequestInspector?: () => void }) {
   const [active, setActive] = useState<ToolTab>("setup");
 
   return (
@@ -807,9 +985,8 @@ export default function ToolsPanel() {
           <button
             key={tab.id}
             onClick={() => setActive(tab.id)}
-            className={`px-3 py-1.5 text-xs transition-colors ${
-              active === tab.id ? "border-b-2 border-[#cba6f7] text-[#cdd6f4]" : "text-[#6c7086] hover:text-[#a6adc8]"
-            }`}
+            className={`px-3 py-1.5 text-xs transition-colors ${active === tab.id ? "border-b-2 border-[#cba6f7] text-[#cdd6f4]" : "text-[#6c7086] hover:text-[#a6adc8]"
+              }`}
           >
             <span>
               {tab.icon} {tab.label}
@@ -825,6 +1002,7 @@ export default function ToolsPanel() {
 
       <div className="flex-1 overflow-y-auto">
         {active === "setup" && <RuntimeSetup />}
+        {active === "assets" && <AssetBrowser onRequestInspector={onRequestInspector} />}
         {active === "patch" && <PatchStudio />}
         {active === "profiler" && <DeepProfiler />}
         {active === "extractor" && <AssetExtractor />}
