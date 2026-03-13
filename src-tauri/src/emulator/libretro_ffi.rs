@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -491,6 +492,40 @@ pub struct EmulatorCore {
     preferred_core_path: Option<PathBuf>,
     runtime: Option<LoadedCore>,
     saved_state: Option<Vec<u8>>,
+    rewind: RewindState,
+}
+
+#[derive(Debug, Clone)]
+struct RewindSnapshot {
+    frame_index: u64,
+    bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RewindConfig {
+    snapshot_interval_frames: u64,
+    capacity: usize,
+}
+
+#[derive(Debug, Default)]
+struct RewindState {
+    config: Option<RewindConfig>,
+    snapshots: VecDeque<RewindSnapshot>,
+    frame_index: u64,
+}
+
+impl RewindState {
+    fn reset(&mut self) {
+        self.config = None;
+        self.snapshots.clear();
+        self.frame_index = 0;
+    }
+
+    fn apply_config(&mut self, serialize_size: usize) {
+        self.config = compute_rewind_config(serialize_size);
+        self.snapshots.clear();
+        self.frame_index = 0;
+    }
 }
 
 impl EmulatorCore {
@@ -500,6 +535,7 @@ impl EmulatorCore {
             preferred_core_path: core_path.map(|path| path.to_path_buf()),
             runtime: None,
             saved_state: None,
+            rewind: RewindState::default(),
         }
     }
 
@@ -537,6 +573,7 @@ impl EmulatorCore {
         }
 
         self.runtime = Some(runtime);
+        self.configure_rewind();
         Ok(())
     }
 
@@ -552,12 +589,15 @@ impl EmulatorCore {
             }
         }
 
+        self.capture_rewind_snapshot_if_due()?;
+
         if let Some(runtime) = &self.runtime {
             unsafe {
                 (runtime.api.run)();
             }
         }
 
+        self.rewind.frame_index = self.rewind.frame_index.saturating_add(1);
         Ok(())
     }
 
@@ -629,6 +669,35 @@ impl EmulatorCore {
         Ok(())
     }
 
+    pub fn rewind_step(&mut self) -> Result<(u64, usize, u64), String> {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string())?;
+        let config = self
+            .rewind
+            .config
+            .ok_or_else(|| "O core Libretro atual nao suporta rewind automatico.".to_string())?;
+        let snapshot = self
+            .rewind
+            .snapshots
+            .pop_back()
+            .ok_or_else(|| "Ainda nao ha snapshots suficientes para rewind.".to_string())?;
+        let restored = unsafe {
+            (runtime.api.unserialize)(snapshot.bytes.as_ptr().cast::<c_void>(), snapshot.bytes.len())
+        };
+        if !restored {
+            return Err("Falha ao restaurar snapshot do rewind no core Libretro.".to_string());
+        }
+
+        self.rewind.frame_index = snapshot.frame_index;
+        Ok((
+            snapshot.frame_index,
+            self.rewind.snapshots.len(),
+            config.snapshot_interval_frames,
+        ))
+    }
+
     pub fn read_memory(
         &self,
         region: u32,
@@ -685,6 +754,7 @@ impl EmulatorCore {
         state.last_audio_frames = 0;
         state.rom_path.clear();
         self.saved_state = None;
+        self.rewind.reset();
         Ok(())
     }
 
@@ -696,6 +766,90 @@ impl EmulatorCore {
     pub fn loaded_core_label(&self) -> Option<&str> {
         self.runtime.as_ref().map(|runtime| runtime.label.as_str())
     }
+
+    fn configure_rewind(&mut self) {
+        let serialize_size = self
+            .runtime
+            .as_ref()
+            .map(|runtime| unsafe { (runtime.api.serialize_size)() })
+            .unwrap_or(0);
+        self.rewind.apply_config(serialize_size);
+    }
+
+    fn capture_rewind_snapshot_if_due(&mut self) -> Result<(), String> {
+        let Some(config) = self.rewind.config else {
+            return Ok(());
+        };
+
+        if config.snapshot_interval_frames == 0 {
+            return Ok(());
+        }
+        if !self
+            .rewind
+            .frame_index
+            .is_multiple_of(config.snapshot_interval_frames)
+        {
+            return Ok(());
+        }
+
+        let bytes = self.serialize_runtime_state()?;
+        if self.rewind.snapshots.len() == config.capacity {
+            self.rewind.snapshots.pop_front();
+        }
+        self.rewind.snapshots.push_back(RewindSnapshot {
+            frame_index: self.rewind.frame_index,
+            bytes,
+        });
+        Ok(())
+    }
+
+    fn serialize_runtime_state(&self) -> Result<Vec<u8>, String> {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string())?;
+        let size = unsafe { (runtime.api.serialize_size)() };
+        if size == 0 {
+            return Err("O core Libretro atual nao suporta save states.".to_string());
+        }
+
+        let mut buffer = vec![0u8; size];
+        let serialized = unsafe {
+            (runtime.api.serialize)(buffer.as_mut_ptr().cast::<c_void>(), buffer.len())
+        };
+        if !serialized {
+            return Err("Falha ao serializar o estado do core Libretro.".to_string());
+        }
+
+        Ok(buffer)
+    }
+}
+
+fn compute_rewind_config(serialize_size: usize) -> Option<RewindConfig> {
+    if serialize_size == 0 {
+        return None;
+    }
+
+    const MAX_REWIND_BYTES: usize = 32 * 1024 * 1024;
+    const MAX_SNAPSHOTS: usize = 24;
+    const MIN_SNAPSHOTS: usize = 4;
+
+    let mut capacity = (MAX_REWIND_BYTES / serialize_size).clamp(MIN_SNAPSHOTS, MAX_SNAPSHOTS);
+    let mut snapshot_interval_frames = 1u64;
+
+    while capacity.saturating_mul(serialize_size) > MAX_REWIND_BYTES {
+        if capacity > MIN_SNAPSHOTS {
+            capacity -= 1;
+        } else {
+            snapshot_interval_frames = snapshot_interval_frames.saturating_mul(2);
+            break;
+        }
+    }
+
+    Some(RewindConfig {
+        snapshot_interval_frames,
+        capacity,
+    })
 }
 
 impl Drop for EmulatorCore {
@@ -1367,6 +1521,42 @@ pub extern "C" fn retro_run() {
 
         emulator.stop().expect("stop emulator");
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn rewind_restores_previous_mock_core_snapshot() {
+        let _serial = test_serial_guard();
+        let dir = temp_dir("rewind");
+        let core_path = compile_mock_core(&dir);
+        let rom_path = write_test_rom(&dir, "rewind_test", "gen");
+
+        let mut emulator = EmulatorCore::new(Some(&core_path));
+        emulator.load_rom(&rom_path).expect("load rom into mock core");
+
+        emulator.run_frame().expect("run frame 1");
+        emulator.run_frame().expect("run frame 2");
+        let (framebuffer_after_two, _, _) =
+            emulator.get_framebuffer().expect("read framebuffer after frame 2");
+
+        let rewind_result = emulator.rewind_step().expect("rewind one snapshot");
+        assert_eq!(rewind_result.0, 1);
+
+        emulator.run_frame().expect("run restored frame");
+        let (framebuffer_after_rewind, _, _) =
+            emulator.get_framebuffer().expect("read framebuffer after rewind");
+
+        assert_eq!(framebuffer_after_two, framebuffer_after_rewind);
+
+        emulator.stop().expect("stop emulator");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn rewind_config_stays_within_memory_budget_for_large_states() {
+        let config = compute_rewind_config(10 * 1024 * 1024).expect("rewind config");
+
+        assert_eq!(config.capacity, 4);
+        assert_eq!(config.snapshot_interval_frames, 2);
     }
 
     #[test]

@@ -4,6 +4,7 @@ import { useEditorStore } from "../../core/store/editorStore";
 import {
   JOYPAD_DEFAULT,
   emulatorLoadState,
+  emulatorRewindStep,
   emulatorSaveState,
   emulatorSendInput,
   emulatorStop,
@@ -170,6 +171,7 @@ export default function ViewportPanel() {
   const [gridSnap, setGridSnap] = useState(true);
   const [saveStateBusy, setSaveStateBusy] = useState(false);
   const [loadStateBusy, setLoadStateBusy] = useState(false);
+  const [rewindBusy, setRewindBusy] = useState(false);
   const [stepBusy, setStepBusy] = useState(false);
   const [audioMuted, setAudioMuted] = useState(false);
   const [assetHotReloadNotice, setAssetHotReloadNotice] = useState<string | null>(null);
@@ -426,6 +428,26 @@ export default function ViewportPanel() {
     }
   }, [logMessage]);
 
+  const handleRewind = useCallback(async () => {
+    if (!emulPaused || rewindBusy) {
+      return;
+    }
+
+    setRewindBusy(true);
+    try {
+      const result = await emulatorRewindStep();
+      if (!result.ok) {
+        logMessage("warn", `[Rewind] ${result.message}`);
+        return;
+      }
+      logMessage("success", `[Rewind] ${result.message}`);
+    } catch (error: unknown) {
+      logMessage("error", `[Rewind] Falha ao restaurar snapshot: ${describeError(error)}`);
+    } finally {
+      setRewindBusy(false);
+    }
+  }, [emulPaused, logMessage, rewindBusy]);
+
   const handlePause = useCallback(() => {
     if (emulPaused) {
       return;
@@ -516,6 +538,20 @@ export default function ViewportPanel() {
     if (activeViewportTab !== "game") return;
 
     function onKeyDown(event: KeyboardEvent) {
+      if (
+        !event.repeat &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        !event.shiftKey &&
+        !isEditableTarget(event.target) &&
+        event.code === "KeyR"
+      ) {
+        event.preventDefault();
+        void handleRewind();
+        return;
+      }
+
       const updated = keyToJoypad(joypadRef.current, event.code, true);
       if (!updated) return;
 
@@ -538,7 +574,7 @@ export default function ViewportPanel() {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
     };
-  }, [activeViewportTab]);
+  }, [activeViewportTab, handleRewind]);
 
   useEffect(() => {
     if (activeViewportTab !== "game") {
@@ -1242,6 +1278,16 @@ export default function ViewportPanel() {
               </button>
               <button
                 type="button"
+                onClick={() => void handleRewind()}
+                disabled={!emulPaused || rewindBusy}
+                data-testid="viewport-rewind"
+                className="rounded border border-[#f38ba8]/40 bg-[#f38ba8]/10 px-2 py-1 text-[10px] font-semibold text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/20 disabled:cursor-not-allowed disabled:opacity-40"
+                title="Recuar snapshots automáticos do emulador (atalho: R)"
+              >
+                {rewindBusy ? "Rewind..." : "Rewind"}
+              </button>
+              <button
+                type="button"
                 onClick={() => setAudioMuted((current) => !current)}
                 data-testid="viewport-audio-mute"
                 className="rounded border border-[#cba6f7]/40 bg-[#cba6f7]/10 px-2 py-1 text-[10px] font-semibold text-[#cba6f7] transition-colors hover:bg-[#cba6f7]/20"
@@ -1256,7 +1302,7 @@ export default function ViewportPanel() {
               >
                 {gameStatus}
               </span>
-              <span>Z=A | X=B | C=C | Enter=Start | Setas=D-Pad</span>
+              <span>Z=A | X=B | C=C | Enter=Start | Setas=D-Pad | R=Rewind (pausado)</span>
             </div>
           </div>
         )}

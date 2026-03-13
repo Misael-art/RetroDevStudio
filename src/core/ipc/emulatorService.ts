@@ -66,6 +66,10 @@ export function emulatorLoadState(): Promise<EmulatorCommandResult> {
   return invoke<EmulatorCommandResult>("emulator_load_state");
 }
 
+export function emulatorRewindStep(): Promise<EmulatorCommandResult> {
+  return invoke<EmulatorCommandResult>("emulator_rewind_step");
+}
+
 export function emulatorReadMemory(
   region: number,
   offset: number,

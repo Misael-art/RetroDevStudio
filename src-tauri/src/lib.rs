@@ -331,6 +331,25 @@ fn emulator_load_state(emu: State<EmulatorCoreState>) -> EmulatorCommandResult {
     }
 }
 
+#[tauri::command]
+fn emulator_rewind_step(emu: State<EmulatorCoreState>) -> EmulatorCommandResult {
+    let mut core = match emu.0.lock() {
+        Ok(c) => c,
+        Err(e) => return EmulatorCommandResult { ok: false, message: e.to_string() },
+    };
+
+    match core.rewind_step() {
+        Ok((frame_index, remaining, interval)) => EmulatorCommandResult {
+            ok: true,
+            message: format!(
+                "Rewind restaurado para o frame {} ({} snapshot(s) restantes, intervalo {} frame(s)).",
+                frame_index, remaining, interval
+            ),
+        },
+        Err(error) => EmulatorCommandResult { ok: false, message: error },
+    }
+}
+
 /// Le uma faixa da memoria exposta pelo core Libretro ativo.
 #[tauri::command]
 fn emulator_read_memory(
@@ -882,6 +901,7 @@ pub fn run() {
             emulator_run_frame,
             emulator_save_state,
             emulator_load_state,
+            emulator_rewind_step,
             emulator_read_memory,
             emulator_send_input,
             emulator_stop,

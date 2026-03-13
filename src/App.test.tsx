@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   emulatorLoadRom: vi.fn(),
   emulatorSaveState: vi.fn(),
   emulatorLoadState: vi.fn(),
+  emulatorRewindStep: vi.fn(),
   emulatorStop: vi.fn(),
   emulatorSendInput: vi.fn(),
   startFrameLoop: vi.fn(),
@@ -77,6 +78,7 @@ vi.mock("./core/ipc/emulatorService", () => ({
   emulatorLoadRom: mocks.emulatorLoadRom,
   emulatorSaveState: mocks.emulatorSaveState,
   emulatorLoadState: mocks.emulatorLoadState,
+  emulatorRewindStep: mocks.emulatorRewindStep,
   emulatorStop: mocks.emulatorStop,
   emulatorSendInput: mocks.emulatorSendInput,
   startFrameLoop: mocks.startFrameLoop,
@@ -234,6 +236,10 @@ describe("App build flow", () => {
     mocks.emulatorLoadState.mockResolvedValue({
       ok: true,
       message: "Save state restaurado.",
+    });
+    mocks.emulatorRewindStep.mockResolvedValue({
+      ok: true,
+      message: "Rewind restaurado para o frame 0 (0 snapshot(s) restantes, intervalo 1 frame(s)).",
     });
     mocks.emulatorSendInput.mockResolvedValue({
       ok: true,
@@ -648,6 +654,45 @@ describe("App build flow", () => {
 
     expect(useEditorStore.getState().emulPaused).toBe(false);
     expect(mocks.startFrameLoop).toHaveBeenCalledTimes(3);
+  });
+
+  it("triggers rewind from the game viewport controls and keyboard shortcut while paused", async () => {
+    await act(async () => {
+      useEditorStore.setState({ activeViewportTab: "game" });
+      await flush();
+      await flush();
+    });
+
+    const pauseButton = container.querySelector("[data-testid='viewport-pause']");
+    const rewindButton = container.querySelector("[data-testid='viewport-rewind']");
+
+    expect(pauseButton).toBeInstanceOf(HTMLButtonElement);
+    expect(rewindButton).toBeInstanceOf(HTMLButtonElement);
+    expect((rewindButton as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      (pauseButton as HTMLButtonElement).click();
+      await flush();
+    });
+
+    expect((rewindButton as HTMLButtonElement).disabled).toBe(false);
+
+    await act(async () => {
+      (rewindButton as HTMLButtonElement).click();
+      await flush();
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyR", bubbles: true }));
+      await flush();
+    });
+
+    expect(mocks.emulatorRewindStep).toHaveBeenCalledTimes(2);
+    expect(
+      useEditorStore
+        .getState()
+        .consoleEntries.some((entry) => entry.message.includes("[Rewind] Rewind restaurado para o frame 0"))
+    ).toBe(true);
   });
 
   it("shows a hot reload notice in the game viewport when backend asset change events arrive", async () => {
