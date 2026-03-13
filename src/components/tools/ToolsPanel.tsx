@@ -6,6 +6,7 @@ import { useEditorStore } from "../../core/store/editorStore";
 import { listenToProjectAssetChanges } from "../../core/ipc/projectWatcherService";
 import type { Scene } from "../../core/ipc/sceneService";
 import { emulatorReadMemory } from "../../core/ipc/emulatorService";
+import { decodeTilesToImageData, getActivePalette } from "./vramViewer";
 import {
   patchCreateIps,
   patchApplyIps,
@@ -1008,7 +1009,236 @@ function MemoryViewer() {
   );
 }
 
-type ToolTab = "patch" | "profiler" | "extractor" | "setup" | "memory" | "assets";
+function VramViewer() {
+  const { logMessage, activeScene, activeTarget } = useEditorStore();
+  const [offsetHex, setOffsetHex] = useState("0000");
+  const [lengthHex, setLengthHex] = useState("1000");
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [tileScale, setTileScale] = useState<8 | 16>(16);
+  const [paletteSlot, setPaletteSlot] = useState<number>(0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState<number[]>([]);
+  const [totalSize, setTotalSize] = useState(0);
+  const [lastOffset, setLastOffset] = useState(0);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const inFlightRef = useRef(false);
+
+  const scenePaletteSlots = useMemo(
+    () => [...(activeScene?.palettes ?? [])].map((entry) => entry.slot).sort((left, right) => left - right),
+    [activeScene]
+  );
+  const activePalette = useMemo(
+    () => getActivePalette(activeScene, activeTarget, paletteSlot),
+    [activeScene, activeTarget, paletteSlot]
+  );
+  const tileCount = Math.floor(data.length / 32);
+  const tilesPerRow = 16;
+  const rowCount = Math.max(Math.ceil(Math.max(tileCount, 1) / tilesPerRow), 1);
+
+  async function readVram(silent = false) {
+    if (inFlightRef.current) return;
+
+    const offset = parseHexInput(offsetHex);
+    const length = parseHexInput(lengthHex);
+    if (offset === null || length === null) {
+      const message = "Use valores hexadecimais validos para offset e length.";
+      setError(message);
+      if (!silent) {
+        logMessage("warn", `[VRAM] ${message}`);
+      }
+      return;
+    }
+
+    inFlightRef.current = true;
+    setBusy(true);
+    try {
+      const result = await emulatorReadMemory(3, offset, length);
+      setData(result.data);
+      setTotalSize(result.total_size);
+      setLastOffset(offset);
+      setError(null);
+      if (!silent) {
+        logMessage(
+          "info",
+          `[VRAM] ${result.data.length} byte(s) lidos de VRAM @ 0x${formatHex(offset, 4)}.`
+        );
+      }
+    } catch (readError) {
+      const message = describeError(readError);
+      setError(message);
+      if (!silent) {
+        logMessage("error", `[VRAM] ${message}`);
+      }
+    } finally {
+      setBusy(false);
+      inFlightRef.current = false;
+    }
+  }
+
+  useEffect(() => {
+    if (!autoRefresh) return;
+
+    void readVram(true);
+    const intervalId = window.setInterval(() => {
+      void readVram(true);
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [autoRefresh, offsetHex, lengthHex]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || data.length === 0) {
+      return;
+    }
+
+    const imageData = decodeTilesToImageData(data, activePalette, tilesPerRow);
+    canvas.width = imageData.width;
+    canvas.height = imageData.height;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return;
+    }
+
+    const frame = context.createImageData(imageData.width, imageData.height);
+    frame.data.set(imageData.data);
+    context.putImageData(frame, 0, 0);
+  }, [activePalette, data]);
+
+  return (
+    <div className="flex flex-col gap-3 p-3">
+      <ExperimentalNotice summary="Visualizador de tiles brutos da VRAM do core ativo. Usa leitura real via Libretro e decodificacao 4bpp para inspecao rapida." />
+
+      <div className="flex flex-wrap gap-3">
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] text-[#7f849c]">Offset (hex)</label>
+          <input
+            type="text"
+            value={offsetHex}
+            onChange={(event) => setOffsetHex(event.target.value)}
+            className="w-24 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-xs font-mono text-[#cdd6f4] focus:border-[#89b4fa] focus:outline-none"
+            placeholder="0000"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] text-[#7f849c]">Length (hex)</label>
+          <input
+            type="text"
+            value={lengthHex}
+            onChange={(event) => setLengthHex(event.target.value)}
+            className="w-24 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-xs font-mono text-[#cdd6f4] focus:border-[#89b4fa] focus:outline-none"
+            placeholder="1000"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] text-[#7f849c]">Zoom</label>
+          <select
+            value={tileScale}
+            onChange={(event) => setTileScale(Number(event.target.value) as 8 | 16)}
+            className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-xs text-[#cdd6f4] focus:border-[#89b4fa] focus:outline-none"
+          >
+            <option value={8}>8x</option>
+            <option value={16}>16x</option>
+          </select>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] text-[#7f849c]">Paleta</label>
+          <select
+            value={paletteSlot}
+            onChange={(event) => setPaletteSlot(Number(event.target.value))}
+            className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-xs text-[#cdd6f4] focus:border-[#89b4fa] focus:outline-none"
+          >
+            {(scenePaletteSlots.length > 0 ? scenePaletteSlots : [0]).map((slot) => (
+              <option key={slot} value={slot}>
+                PAL{slot}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <label className="mt-5 flex items-center gap-2 text-[10px] text-[#7f849c]">
+          <input
+            type="checkbox"
+            checked={autoRefresh}
+            onChange={(event) => setAutoRefresh(event.target.checked)}
+            className="rounded border border-[#313244] bg-[#1e1e2e]"
+          />
+          Auto-refresh (1s)
+        </label>
+
+        <button
+          disabled={busy}
+          onClick={() => void readVram()}
+          className={`mt-4 rounded px-3 py-1.5 text-xs font-semibold transition-colors ${busy
+            ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
+            : "bg-[#89b4fa] text-[#1e1e2e] hover:bg-[#74a8f0]"
+            }`}
+        >
+          {busy ? "Lendo..." : "Ler VRAM"}
+        </button>
+      </div>
+
+      <div className="flex items-center justify-between rounded bg-[#1e1e2e] px-3 py-2">
+        <span className="text-[10px] text-[#7f849c]">
+          Total: <span className="font-mono text-[#cdd6f4]">0x{formatHex(totalSize, 4)}</span> ({totalSize} bytes)
+        </span>
+        <span className="text-[10px] text-[#7f849c]">
+          Tiles: <span className="font-mono text-[#cdd6f4]">{tileCount}</span>
+        </span>
+        <span className="text-[10px] text-[#7f849c]">
+          Ultimo offset: <span className="font-mono text-[#cdd6f4]">0x{formatHex(lastOffset, 4)}</span>
+        </span>
+      </div>
+
+      {error && (
+        <div className="rounded border border-[#f38ba8] bg-[#1e1e2e] px-3 py-2 text-[10px] text-[#f38ba8]">
+          {error}
+        </div>
+      )}
+
+      <div className="rounded border border-[#313244] bg-[#11111b] p-3">
+        <div className="mb-3 flex items-center justify-between">
+          <span className="text-[10px] uppercase tracking-wide text-[#45475a]">
+            Grid {tilesPerRow}x{rowCount} · 8x8 · 4bpp
+          </span>
+          <div className="flex items-center gap-1">
+            {activePalette.slice(0, 8).map((color) => (
+              <span
+                key={color}
+                className="h-3 w-3 rounded border border-[#313244]"
+                style={{ backgroundColor: color }}
+                title={color}
+              />
+            ))}
+          </div>
+        </div>
+
+        {data.length === 0 ? (
+          <p className="text-[10px] text-[#45475a]">Nenhum tile carregado.</p>
+        ) : (
+          <div className="overflow-auto">
+            <canvas
+              ref={canvasRef}
+              data-testid="tools-vram-canvas"
+              className="border border-[#313244] bg-black"
+              style={{
+                imageRendering: "pixelated",
+                width: tilesPerRow * tileScale,
+                height: rowCount * tileScale,
+              }}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+type ToolTab = "patch" | "profiler" | "extractor" | "setup" | "memory" | "assets" | "vram";
 
 const TOOL_TABS: { id: ToolTab; label: string; icon: string; experimental?: boolean }[] = [
   { id: "setup", label: "Runtime Setup", icon: "RD" },
@@ -1017,6 +1247,7 @@ const TOOL_TABS: { id: ToolTab; label: string; icon: string; experimental?: bool
   { id: "profiler", label: "Deep Profiler", icon: "DP" },
   { id: "extractor", label: "Asset Extractor", icon: "AE" },
   { id: "memory", label: "Memory Viewer", icon: "MV" },
+  { id: "vram", label: "VRAM Viewer", icon: "VV", experimental: true },
 ];
 
 export default function ToolsPanel({ onRequestInspector }: { onRequestInspector?: () => void }) {
@@ -1051,6 +1282,7 @@ export default function ToolsPanel({ onRequestInspector }: { onRequestInspector?
         {active === "profiler" && <DeepProfiler />}
         {active === "extractor" && <AssetExtractor />}
         {active === "memory" && <MemoryViewer />}
+        {active === "vram" && <VramViewer />}
       </div>
     </Panel>
   );
