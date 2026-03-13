@@ -160,6 +160,16 @@ pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
         )));
     }
 
+    let dma_used = vram_used;
+    if dma_used > (MD_DMA_VBLANK_BYTES * 80 / 100) {
+        errors.push(ValidationError::warning(format!(
+            "DMA Warning: upload estimado em {}KB por frame ({}% do budget de {}KB no VBlank).",
+            dma_used / 1024,
+            dma_used * 100 / MD_DMA_VBLANK_BYTES,
+            MD_DMA_VBLANK_BYTES / 1024
+        )));
+    }
+
     for palette in &scene.palettes {
         if palette.slot >= MD_PALETTE_SLOTS {
             errors.push(ValidationError::fatal(format!(
@@ -222,6 +232,8 @@ pub fn hw_status(scene: &Scene) -> HwStatus {
         sprite_limit: MD_SPRITES_PER_SCREEN,
         scanline_sprite_peak: estimate_max_scanline_sprites(scene),
         scanline_sprite_limit: MD_SPRITES_PER_SCANLINE,
+        dma_used: vram_used,
+        dma_limit: MD_DMA_VBLANK_BYTES,
         bg_layers: scene.background_layers.len() as u32,
         bg_layers_limit: 3,
         errors,
@@ -356,6 +368,7 @@ mod tests {
         assert_eq!(status.sprite_limit, MD_SPRITES_PER_SCREEN);
         assert_eq!(status.scanline_sprite_peak, 1);
         assert_eq!(status.scanline_sprite_limit, MD_SPRITES_PER_SCANLINE);
+        assert_eq!(status.dma_limit, MD_DMA_VBLANK_BYTES);
         assert_eq!(status.bg_layers_limit, 3);
         assert!(status.errors.is_empty());
     }

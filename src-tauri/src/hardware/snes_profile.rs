@@ -9,6 +9,7 @@ pub const SNES_SPRITES_PER_SCANLINE: u32 = 32;
 pub const SNES_PALETTE_SLOTS: u8 = 8;
 pub const SNES_PALETTE_COLORS: u8 = 16;
 pub const SNES_TILE_BYTES: u32 = 32;
+pub const SNES_DMA_VBLANK_BYTES: u32 = 8_192;
 #[allow(dead_code)]
 pub const SNES_RESOLUTION_W: u32 = 256;
 #[allow(dead_code)]
@@ -188,6 +189,16 @@ pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
         )));
     }
 
+    let dma_used = vram_used;
+    if dma_used > (SNES_DMA_VBLANK_BYTES * 80 / 100) {
+        errors.push(ValidationError::warning(format!(
+            "DMA Warning: upload estimado em {}KB por frame ({}% do budget de {}KB no VBlank).",
+            dma_used / 1024,
+            dma_used * 100 / SNES_DMA_VBLANK_BYTES,
+            SNES_DMA_VBLANK_BYTES / 1024
+        )));
+    }
+
     for palette in &scene.palettes {
         if palette.slot >= SNES_PALETTE_SLOTS {
             errors.push(ValidationError::fatal(format!(
@@ -248,6 +259,8 @@ pub fn hw_status(scene: &Scene) -> HwStatus {
         sprite_limit: SNES_SPRITES_PER_SCREEN,
         scanline_sprite_peak: estimate_max_scanline_sprites(scene),
         scanline_sprite_limit: SNES_SPRITES_PER_SCANLINE,
+        dma_used: vram_used,
+        dma_limit: SNES_DMA_VBLANK_BYTES,
         bg_layers: scene.background_layers.len() as u32,
         bg_layers_limit: SNES_BG_LAYERS_MAX,
         errors,
@@ -387,6 +400,7 @@ mod tests {
         assert_eq!(status.sprite_limit, SNES_SPRITES_PER_SCREEN);
         assert_eq!(status.scanline_sprite_peak, 1);
         assert_eq!(status.scanline_sprite_limit, SNES_SPRITES_PER_SCANLINE);
+        assert_eq!(status.dma_limit, SNES_DMA_VBLANK_BYTES);
         assert_eq!(status.bg_layers_limit, SNES_BG_LAYERS_MAX);
         assert!(status.errors.is_empty());
     }

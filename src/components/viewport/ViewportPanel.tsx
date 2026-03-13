@@ -1111,8 +1111,8 @@ export default function ViewportPanel() {
     : emulatorActive
       ? "Emulador ativo"
       : "Aguardando emulador...";
-  const dmaBudgetBytes = activeTarget === "snes" ? 8192 : 7372;
-  const dmaUsageBytes = Math.min(hwStatus?.vram_used ?? 0, dmaBudgetBytes);
+  const dmaBudgetBytes = hwStatus?.dma_limit ?? (activeTarget === "snes" ? 8192 : 7372);
+  const dmaUsageBytes = Math.min(hwStatus?.dma_used ?? hwStatus?.vram_used ?? 0, dmaBudgetBytes);
   const dmaUsagePercent = Math.min(
     100,
     Math.round((dmaUsageBytes / Math.max(dmaBudgetBytes, 1)) * 100)

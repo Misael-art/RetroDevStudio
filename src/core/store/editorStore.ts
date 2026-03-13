@@ -11,6 +11,8 @@ export interface HwStatus {
   sprite_limit: number;
   scanline_sprite_peak: number;
   scanline_sprite_limit: number;
+  dma_used: number;
+  dma_limit: number;
   bg_layers: number;
   bg_layers_limit: number;
   errors: string[];

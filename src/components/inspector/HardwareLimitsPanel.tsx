@@ -111,6 +111,8 @@ export default function HardwareLimitsPanel() {
     sprite_limit: 80,
     scanline_sprite_peak: 0,
     scanline_sprite_limit: 20,
+    dma_used: 0,
+    dma_limit: 7372,
     bg_layers: 0,
     bg_layers_limit: 3,
     errors: [],
@@ -186,6 +188,12 @@ export default function HardwareLimitsPanel() {
         label="Sprites / scanline"
         used={status.scanline_sprite_peak}
         limit={status.scanline_sprite_limit}
+      />
+      <GaugeRow
+        label="DMA / frame"
+        used={status.dma_used}
+        limit={status.dma_limit}
+        unit="KB"
       />
       <GaugeRow
         label="BG Layers"
