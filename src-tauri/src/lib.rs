@@ -5,6 +5,7 @@ mod hardware;
 mod tools;
 mod ugdm;
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -43,6 +44,15 @@ use hardware::HwStatus;
 
 /// Estado global do emulador, gerenciado pelo Tauri via `manage()`.
 struct EmulatorCoreState(Mutex<EmulatorCore>);
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct AssetFingerprint {
+    modified_ms: u128,
+    size: u64,
+}
+
+#[derive(Default)]
+struct ProjectAssetWatchState(Mutex<HashMap<String, HashMap<String, AssetFingerprint>>>);
 
 // ── IPC Response types ────────────────────────────────────────────────────────
 
@@ -86,6 +96,18 @@ pub struct ProjectAssetEntry {
 pub struct AudioPayload {
     pub sample_rate: u32,
     pub samples: Vec<i16>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct ProjectAssetWatchResult {
+    pub changed: bool,
+    pub changed_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct ProjectAssetsChangedEvent {
+    pub project_dir: String,
+    pub changed_paths: Vec<String>,
 }
 
 // ── Build commands ────────────────────────────────────────────────────────────
@@ -472,6 +494,128 @@ fn collect_project_assets(
     Ok(())
 }
 
+fn collect_asset_fingerprints(
+    project_root: &Path,
+    current: &Path,
+    entries: &mut HashMap<String, AssetFingerprint>,
+) -> Result<(), String> {
+    for dir_entry in fs::read_dir(current)
+        .map_err(|error| format!("Falha ao listar '{}': {}", current.display(), error))?
+    {
+        let dir_entry = dir_entry
+            .map_err(|error| format!("Falha ao ler entrada de '{}': {}", current.display(), error))?;
+        let path = dir_entry.path();
+        let file_type = dir_entry
+            .file_type()
+            .map_err(|error| format!("Falha ao ler tipo de '{}': {}", path.display(), error))?;
+
+        if file_type.is_dir() {
+            collect_asset_fingerprints(project_root, &path, entries)?;
+            continue;
+        }
+
+        if !file_type.is_file() {
+            continue;
+        }
+
+        let metadata = dir_entry
+            .metadata()
+            .map_err(|error| format!("Falha ao ler metadados de '{}': {}", path.display(), error))?;
+        let modified_ms = metadata
+            .modified()
+            .ok()
+            .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|value| value.as_millis())
+            .unwrap_or_default();
+        let relative = path
+            .strip_prefix(project_root)
+            .map_err(|error| format!("Falha ao relativizar asset '{}': {}", path.display(), error))?
+            .to_string_lossy()
+            .replace('\\', "/");
+
+        entries.insert(
+            relative,
+            AssetFingerprint {
+                modified_ms,
+                size: metadata.len(),
+            },
+        );
+    }
+
+    Ok(())
+}
+
+fn snapshot_project_assets(project_dir: &Path) -> Result<HashMap<String, AssetFingerprint>, String> {
+    let assets_dir = project_dir.join("assets");
+    let mut entries = HashMap::new();
+    if !assets_dir.exists() {
+        return Ok(entries);
+    }
+
+    collect_asset_fingerprints(project_dir, &assets_dir, &mut entries)?;
+    Ok(entries)
+}
+
+fn diff_asset_fingerprints(
+    previous: &HashMap<String, AssetFingerprint>,
+    current: &HashMap<String, AssetFingerprint>,
+) -> Vec<String> {
+    let mut changed_paths = Vec::new();
+
+    for (path, fingerprint) in current {
+        match previous.get(path) {
+            Some(previous_fingerprint) if previous_fingerprint == fingerprint => {}
+            _ => changed_paths.push(path.clone()),
+        }
+    }
+
+    for path in previous.keys() {
+        if !current.contains_key(path) {
+            changed_paths.push(path.clone());
+        }
+    }
+
+    changed_paths.sort();
+    changed_paths.dedup();
+    changed_paths
+}
+
+#[tauri::command]
+fn poll_project_asset_changes(
+    app: AppHandle,
+    project_dir: String,
+    watch_state: State<ProjectAssetWatchState>,
+) -> Result<ProjectAssetWatchResult, String> {
+    let trimmed = project_dir.trim();
+    if trimmed.is_empty() {
+        return Ok(ProjectAssetWatchResult {
+            changed: false,
+            changed_paths: Vec::new(),
+        });
+    }
+
+    let current = snapshot_project_assets(Path::new(trimmed))?;
+    let mut snapshots = watch_state.0.lock().map_err(|error| error.to_string())?;
+    let changed_paths = match snapshots.get(trimmed) {
+        Some(previous) => diff_asset_fingerprints(previous, &current),
+        None => Vec::new(),
+    };
+    snapshots.insert(trimmed.to_string(), current);
+
+    if !changed_paths.is_empty() {
+        let payload = ProjectAssetsChangedEvent {
+            project_dir: trimmed.to_string(),
+            changed_paths: changed_paths.clone(),
+        };
+        let _ = app.emit("project://assets-changed", &payload);
+    }
+
+    Ok(ProjectAssetWatchResult {
+        changed: !changed_paths.is_empty(),
+        changed_paths,
+    })
+}
+
 fn project_asset_kind(path: &Path) -> String {
     let extension = path
         .extension()
@@ -723,12 +867,14 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(EmulatorCoreState(Mutex::new(EmulatorCore::new(None))))
+        .manage(ProjectAssetWatchState::default())
         .invoke_handler(tauri::generate_handler![
             // Build pipeline
             validate_project,
             generate_c_code,
             build_project,
             validate_scene_draft,
+            poll_project_asset_changes,
             // Hardware status
             get_hw_status,
             // Emulator
@@ -1455,5 +1601,62 @@ pub extern "C" fn retro_run() {
         assert!(result.name.is_empty());
 
         let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn diff_asset_fingerprints_detects_added_changed_and_removed_assets() {
+        let previous = HashMap::from([
+            (
+                "assets/sprites/hero.ppm".to_string(),
+                AssetFingerprint {
+                    modified_ms: 10,
+                    size: 128,
+                },
+            ),
+            (
+                "assets/audio/theme.wav".to_string(),
+                AssetFingerprint {
+                    modified_ms: 20,
+                    size: 256,
+                },
+            ),
+        ]);
+        let current = HashMap::from([
+            (
+                "assets/sprites/hero.ppm".to_string(),
+                AssetFingerprint {
+                    modified_ms: 11,
+                    size: 128,
+                },
+            ),
+            (
+                "assets/backgrounds/intro.ppm".to_string(),
+                AssetFingerprint {
+                    modified_ms: 30,
+                    size: 512,
+                },
+            ),
+        ]);
+
+        let changed = diff_asset_fingerprints(&previous, &current);
+
+        assert_eq!(
+            changed,
+            vec![
+                "assets/audio/theme.wav".to_string(),
+                "assets/backgrounds/intro.ppm".to_string(),
+                "assets/sprites/hero.ppm".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn snapshot_project_assets_returns_empty_when_project_has_no_assets_directory() {
+        let dir = temp_dir("snapshot-project-assets-empty");
+
+        let snapshot = snapshot_project_assets(&dir).expect("snapshot assets without directory");
+
+        assert!(snapshot.is_empty());
+        let _ = fs::remove_dir_all(dir);
     }
 }

@@ -13,6 +13,7 @@ import {
   openProjectPath,
   setProjectTarget,
 } from "./core/ipc/projectService";
+import { pollProjectAssetChanges } from "./core/ipc/projectWatcherService";
 import {
   getSceneData,
   parseScene,
@@ -190,6 +191,45 @@ export default function App() {
       inputRef.current.select();
     }
   }, [showNewDialog]);
+
+  useEffect(() => {
+    if (!activeProjectDir) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function pollAssetChanges() {
+      try {
+        const result = await pollProjectAssetChanges(activeProjectDir);
+        if (cancelled || !result.changed) {
+          return;
+        }
+
+        requestHwValidationRefresh();
+        const preview = result.changed_paths.slice(0, 2).join(", ");
+        const suffix = result.changed_paths.length > 2 ? "..." : "";
+        logMessage(
+          "info",
+          `[Hot Reload] ${result.changed_paths.length} asset(s) alterado(s) no disco: ${preview}${suffix}. Revalidando preview live.`
+        );
+      } catch (error) {
+        if (!cancelled) {
+          logMessage("warn", `[Hot Reload] Falha ao verificar assets do projeto: ${describeError(error)}`);
+        }
+      }
+    }
+
+    void pollAssetChanges();
+    const intervalId = window.setInterval(() => {
+      void pollAssetChanges();
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeProjectDir, logMessage, requestHwValidationRefresh]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {

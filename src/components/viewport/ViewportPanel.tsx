@@ -14,6 +14,7 @@ import {
   type FramePayload,
   type JoypadState,
 } from "../../core/ipc/emulatorService";
+import { listenToProjectAssetChanges } from "../../core/ipc/projectWatcherService";
 import NodeGraphEditor from "../nodegraph/NodeGraphEditor";
 import RetroFXDesigner from "../retrofx/RetroFXDesigner";
 import type { Entity } from "../../core/ipc/sceneService";
@@ -65,6 +66,7 @@ export default function ViewportPanel() {
     setActiveViewportTab,
     logMessage,
     activeScene,
+    activeProjectDir,
     selectedEntityId,
     setSelectedEntityId,
     updateEntity,
@@ -107,6 +109,8 @@ export default function ViewportPanel() {
   const [loadStateBusy, setLoadStateBusy] = useState(false);
   const [stepBusy, setStepBusy] = useState(false);
   const [audioMuted, setAudioMuted] = useState(false);
+  const [assetHotReloadNotice, setAssetHotReloadNotice] = useState<string | null>(null);
+  const hotReloadNoticeTimerRef = useRef<number | null>(null);
 
   activeTabRef.current = activeViewportTab;
   pausedRef.current = emulPaused;
@@ -258,6 +262,17 @@ export default function ViewportPanel() {
     disposeAudioPlayback();
     emulatorStop().catch(() => {});
   }, [disposeAudioPlayback, stopFrameLoop]);
+
+  const showHotReloadNotice = useCallback((message: string) => {
+    setAssetHotReloadNotice(message);
+    if (hotReloadNoticeTimerRef.current !== null) {
+      window.clearTimeout(hotReloadNoticeTimerRef.current);
+    }
+    hotReloadNoticeTimerRef.current = window.setTimeout(() => {
+      setAssetHotReloadNotice(null);
+      hotReloadNoticeTimerRef.current = null;
+    }, 4000);
+  }, []);
 
   const startEmulatorLoop = useCallback(
     (logStartup: boolean) => {
@@ -487,6 +502,44 @@ export default function ViewportPanel() {
       disposeAudioPlayback();
     };
   }, [activeViewportTab, disposeAudioPlayback, enqueueAudio, ensureAudioPlayback, logMessage]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+
+    void listenToProjectAssetChanges((payload) => {
+      if (
+        cancelled ||
+        payload.project_dir !== activeProjectDir ||
+        activeTabRef.current !== "game"
+      ) {
+        return;
+      }
+
+      const preview = payload.changed_paths.slice(0, 2).join(", ");
+      const suffix = payload.changed_paths.length > 2 ? "..." : "";
+      showHotReloadNotice(
+        `${payload.changed_paths.length} asset(s) alterado(s): ${preview}${suffix}`
+      );
+    }).then((stop) => {
+      if (cancelled) {
+        stop();
+        return;
+      }
+      unlisten = stop;
+    }).catch((error: unknown) => {
+      logMessage("warn", `[Hot Reload] Falha ao assinar eventos de assets: ${describeError(error)}`);
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+      if (hotReloadNoticeTimerRef.current !== null) {
+        window.clearTimeout(hotReloadNoticeTimerRef.current);
+        hotReloadNoticeTimerRef.current = null;
+      }
+    };
+  }, [activeProjectDir, logMessage, showHotReloadNotice]);
 
   useEffect(() => {
     if (activeViewportTab !== "scene") return;
@@ -865,6 +918,14 @@ export default function ViewportPanel() {
 
         {activeViewportTab === "game" && (
           <div className="flex flex-col items-center gap-2">
+            {assetHotReloadNotice && (
+              <div
+                data-testid="viewport-asset-hot-reload"
+                className="rounded border border-[#f9e2af]/40 bg-[#f9e2af]/10 px-3 py-1 text-[10px] font-semibold text-[#f9e2af]"
+              >
+                Assets alterados no disco. {assetHotReloadNotice}
+              </div>
+            )}
             <canvas
               ref={canvasRef}
               width={MD_WIDTH}

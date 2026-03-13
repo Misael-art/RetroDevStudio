@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import Panel from "../common/Panel";
 import { useEditorStore } from "../../core/store/editorStore";
+import { listenToProjectAssetChanges } from "../../core/ipc/projectWatcherService";
 import type { Scene } from "../../core/ipc/sceneService";
 import { emulatorReadMemory } from "../../core/ipc/emulatorService";
 import {
@@ -562,8 +563,51 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
     }
 
     void loadAssets();
+
     return () => {
       cancelled = true;
+    };
+  }, [activeProjectDir]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+
+    void listenToProjectAssetChanges((payload) => {
+      if (cancelled || payload.project_dir !== activeProjectDir) {
+        return;
+      }
+
+      setBusy(true);
+      void listProjectAssets(activeProjectDir)
+        .then((result) => {
+          if (cancelled) {
+            return;
+          }
+          setAssets(result);
+          setError(null);
+        })
+        .catch((loadError) => {
+          if (!cancelled) {
+            setError(describeError(loadError));
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setBusy(false);
+          }
+        });
+    }).then((stop) => {
+      if (cancelled) {
+        stop();
+        return;
+      }
+      unlisten = stop;
+    }).catch(() => {});
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
     };
   }, [activeProjectDir]);
 

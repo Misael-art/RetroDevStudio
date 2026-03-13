@@ -25,6 +25,8 @@ const mocks = vi.hoisted(() => ({
   getThirdPartyStatus: vi.fn(),
   installThirdPartyDependency: vi.fn(),
   detectRomDependency: vi.fn(),
+  pollProjectAssetChanges: vi.fn(),
+  listenToProjectAssetChanges: vi.fn(),
 }));
 
 vi.mock("./components/common/Console", () => ({
@@ -102,6 +104,11 @@ vi.mock("./core/ipc/toolsService", () => ({
   getThirdPartyStatus: mocks.getThirdPartyStatus,
   installThirdPartyDependency: mocks.installThirdPartyDependency,
   detectRomDependency: mocks.detectRomDependency,
+}));
+
+vi.mock("./core/ipc/projectWatcherService", () => ({
+  pollProjectAssetChanges: mocks.pollProjectAssetChanges,
+  listenToProjectAssetChanges: mocks.listenToProjectAssetChanges,
 }));
 
 function flush() {
@@ -233,6 +240,11 @@ describe("App build flow", () => {
       message: "",
     });
     mocks.listenToAudioStream.mockResolvedValue(vi.fn());
+    mocks.pollProjectAssetChanges.mockResolvedValue({
+      changed: false,
+      changed_paths: [],
+    });
+    mocks.listenToProjectAssetChanges.mockResolvedValue(vi.fn());
     mocks.startFrameLoop.mockImplementation(async (onFrame: (payload: { width: number; height: number; rgba: number[] }) => void) => {
       onFrame({ width: 1, height: 1, rgba: [255, 0, 0, 255] });
       return vi.fn();
@@ -503,6 +515,36 @@ describe("App build flow", () => {
     expect(mocks.buildProject).toHaveBeenCalledTimes(1);
   });
 
+  it("requests live revalidation when project assets change on disk", async () => {
+    mocks.pollProjectAssetChanges.mockResolvedValueOnce({
+      changed: true,
+      changed_paths: ["assets/sprites/hero.ppm"],
+    });
+
+    const refreshTickBefore = useEditorStore.getState().hwValidationRefreshTick;
+
+    await act(async () => {
+      root.unmount();
+      await flush();
+      root = createRoot(container);
+      root.render(<App />);
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.pollProjectAssetChanges).toHaveBeenCalledWith(
+      "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy"
+    );
+    expect(useEditorStore.getState().hwValidationRefreshTick).toBe(refreshTickBefore + 1);
+    expect(
+      useEditorStore
+        .getState()
+        .consoleEntries.some((entry) =>
+          entry.message.includes("[Hot Reload] 1 asset(s) alterado(s) no disco: assets/sprites/hero.ppm")
+        )
+    ).toBe(true);
+  });
+
   it("shows an explicit pending live analysis summary while keeping Build & Run enabled", async () => {
     await act(async () => {
       useEditorStore.setState({
@@ -606,6 +648,41 @@ describe("App build flow", () => {
 
     expect(useEditorStore.getState().emulPaused).toBe(false);
     expect(mocks.startFrameLoop).toHaveBeenCalledTimes(3);
+  });
+
+  it("shows a hot reload notice in the game viewport when backend asset change events arrive", async () => {
+    let onAssetChange: ((payload: { project_dir: string; changed_paths: string[] }) => void) | null = null;
+    mocks.listenToProjectAssetChanges.mockImplementation(async (callback) => {
+      onAssetChange = callback;
+      return vi.fn();
+    });
+
+    await act(async () => {
+      root.unmount();
+      await flush();
+      root = createRoot(container);
+      root.render(<App />);
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      useEditorStore.setState({ activeViewportTab: "game" });
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      onAssetChange?.({
+        project_dir: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+        changed_paths: ["assets/sprites/hero.ppm"],
+      });
+      await flush();
+    });
+
+    const banner = container.querySelector("[data-testid='viewport-asset-hot-reload']");
+    expect(banner?.textContent).toContain("Assets alterados no disco.");
+    expect(banner?.textContent).toContain("assets/sprites/hero.ppm");
   });
 
   it("creates and disposes the game audio context with the audio stream lifecycle", async () => {
