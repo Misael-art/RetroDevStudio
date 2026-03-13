@@ -113,6 +113,8 @@ export default function HardwareLimitsPanel() {
     scanline_sprite_limit: 20,
     dma_used: 0,
     dma_limit: 7372,
+    palette_banks_used: 0,
+    palette_banks_limit: 4,
     bg_layers: 0,
     bg_layers_limit: 3,
     errors: [],
@@ -194,6 +196,11 @@ export default function HardwareLimitsPanel() {
         used={status.dma_used}
         limit={status.dma_limit}
         unit="KB"
+      />
+      <GaugeRow
+        label="Palette Banks"
+        used={status.palette_banks_used}
+        limit={status.palette_banks_limit}
       />
       <GaugeRow
         label="BG Layers"

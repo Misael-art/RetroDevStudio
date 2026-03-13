@@ -42,6 +42,19 @@ impl ValidationError {
     }
 }
 
+fn count_palette_banks_used(scene: &Scene) -> u32 {
+    let mut used_slots = std::collections::BTreeSet::new();
+    for palette in &scene.palettes {
+        used_slots.insert(palette.slot);
+    }
+    for entity in &scene.entities {
+        if let Some(sprite) = &entity.components.sprite {
+            used_slots.insert(sprite.palette_slot);
+        }
+    }
+    used_slots.len() as u32
+}
+
 fn estimate_max_scanline_sprites(scene: &Scene) -> u32 {
     let mut y_events = Vec::new();
     for entity in &scene.entities {
@@ -186,6 +199,14 @@ pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
         }
     }
 
+    let palette_banks_used = count_palette_banks_used(scene);
+    if palette_banks_used > MD_PALETTE_SLOTS as u32 {
+        errors.push(ValidationError::warning(format!(
+            "Palette Warning: {} bancos de paleta em uso. Limite do Mega Drive: {}.",
+            palette_banks_used, MD_PALETTE_SLOTS
+        )));
+    }
+
     errors
 }
 
@@ -234,6 +255,8 @@ pub fn hw_status(scene: &Scene) -> HwStatus {
         scanline_sprite_limit: MD_SPRITES_PER_SCANLINE,
         dma_used: vram_used,
         dma_limit: MD_DMA_VBLANK_BYTES,
+        palette_banks_used: count_palette_banks_used(scene),
+        palette_banks_limit: MD_PALETTE_SLOTS as u32,
         bg_layers: scene.background_layers.len() as u32,
         bg_layers_limit: 3,
         errors,
@@ -369,6 +392,8 @@ mod tests {
         assert_eq!(status.scanline_sprite_peak, 1);
         assert_eq!(status.scanline_sprite_limit, MD_SPRITES_PER_SCANLINE);
         assert_eq!(status.dma_limit, MD_DMA_VBLANK_BYTES);
+        assert_eq!(status.palette_banks_used, 1);
+        assert_eq!(status.palette_banks_limit, MD_PALETTE_SLOTS as u32);
         assert_eq!(status.bg_layers_limit, 3);
         assert!(status.errors.is_empty());
     }

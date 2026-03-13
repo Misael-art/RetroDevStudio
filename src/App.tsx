@@ -154,6 +154,44 @@ function ToolbarScanlineBudget({
   );
 }
 
+function ToolbarPaletteBudget({
+  used,
+  limit,
+}: {
+  used: number;
+  limit: number;
+}) {
+  const percent = Math.min(100, Math.round((used / Math.max(limit, 1)) * 100));
+  const toneClass =
+    used > limit
+      ? "bg-[#f38ba8]"
+      : percent >= 80
+        ? "bg-[#fab387]"
+        : "bg-[#f9e2af]";
+
+  return (
+    <div
+      data-testid="toolbar-palette-budget"
+      className="flex min-w-[7rem] flex-col gap-1 rounded border border-[#313244] bg-[#11111b] px-2 py-1"
+      title={`Bancos de paleta ${used} / ${limit} (${percent}%)`}
+    >
+      <div className="flex items-center justify-between text-[10px]">
+        <span className="text-[#7f849c]">Paleta</span>
+        <span data-testid="toolbar-palette-budget-label" className="font-mono text-[#cdd6f4]">
+          {used} / {limit}
+        </span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded bg-[#313244]">
+        <div
+          data-testid="toolbar-palette-budget-bar"
+          className={`h-full ${toneClass}`}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -1044,6 +1082,12 @@ export default function App() {
             <ToolbarScanlineBudget
               peak={hwStatus.scanline_sprite_peak}
               limit={hwStatus.scanline_sprite_limit}
+            />
+          )}
+          {hwStatus && hwStatus.palette_banks_limit > 0 && (
+            <ToolbarPaletteBudget
+              used={hwStatus.palette_banks_used}
+              limit={hwStatus.palette_banks_limit}
             />
           )}
           <span data-testid="active-project-name" className="max-w-36 truncate text-[10px] text-[#45475a]">

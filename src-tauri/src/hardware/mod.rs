@@ -15,6 +15,8 @@ pub struct HwStatus {
     pub scanline_sprite_limit: u32,
     pub dma_used: u32,
     pub dma_limit: u32,
+    pub palette_banks_used: u32,
+    pub palette_banks_limit: u32,
     pub bg_layers: u32,
     pub bg_layers_limit: u32,
     pub errors: Vec<String>,
