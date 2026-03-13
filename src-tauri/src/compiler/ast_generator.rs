@@ -252,6 +252,10 @@ pub enum LogicOp {
         counter_var: String,
         slots: Vec<LogicTimelineSlot>,
     },
+    HardwareEvent {
+        event: HardwareEventKind,
+        ops: Vec<LogicOp>,
+    },
     StateMachine {
         machine_var: String,
         states: Vec<LogicFsmState>,
@@ -262,6 +266,13 @@ pub enum LogicOp {
 pub struct LogicTimelineSlot {
     pub delay_frames: i32,
     pub actions: Vec<LogicOp>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HardwareEventKind {
+    VBlank,
+    HBlank,
+    DmaDone,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1041,8 +1052,47 @@ fn compile_logic_graph(
     if let Some(fsm_script) = compile_fsm_script(graph, runtime_entities, &mut output) {
         output.scripts.push(fsm_script);
     }
+    let hardware_event_scripts =
+        compile_hardware_event_scripts(graph, runtime_entities, &mut output);
+    output.scripts.extend(hardware_event_scripts);
 
     output
+}
+
+fn compile_hardware_event_scripts(
+    graph: &StoredNodeGraph,
+    runtime_entities: &HashMap<String, LogicRuntimeEntity>,
+    output: &mut CompiledLogicOutput,
+) -> Vec<LogicScript> {
+    graph
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            let event = match node.node_type.as_str() {
+                "event_vblank" => HardwareEventKind::VBlank,
+                "event_hblank" => HardwareEventKind::HBlank,
+                "event_dma_done" => HardwareEventKind::DmaDone,
+                _ => return None,
+            };
+
+            let mut visited = std::collections::HashSet::new();
+            let ops = compile_logic_chain(
+                graph,
+                &node.id,
+                "exec",
+                runtime_entities,
+                &mut visited,
+                &mut output.setup_nodes,
+                &mut output.runtime_nodes,
+                &mut output.parallax_layers,
+                &mut output.raster_lines,
+            );
+
+            Some(LogicScript {
+                ops: vec![LogicOp::HardwareEvent { event, ops }],
+            })
+        })
+        .collect()
 }
 
 fn compile_fsm_script(
@@ -2024,6 +2074,9 @@ fn collect_logic_sound_names_from_ops(
                 for slot in slots {
                     collect_logic_sound_names_from_ops(&slot.actions, sound_names);
                 }
+            }
+            LogicOp::HardwareEvent { ops, .. } => {
+                collect_logic_sound_names_from_ops(ops, sound_names);
             }
             LogicOp::StateMachine { states, .. } => {
                 for state in states {
@@ -4114,5 +4167,78 @@ mod tests {
         assert!(matches!(timeline.1[0].actions[0], LogicOp::MoveSprite { .. }));
         assert_eq!(timeline.1[1].delay_frames, 30);
         assert!(matches!(timeline.1[1].actions[0], LogicOp::PlaySound { .. }));
+    }
+
+    #[test]
+    fn generate_ast_compiles_hardware_event_nodes_into_event_scripts() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
+            name: "Event Demo".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution { width: 320, height: 224 },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+        };
+        let logic_graph = json!({
+            "version": 1,
+            "nodes": [
+                { "id": "vblank", "type": "event_vblank", "label": "VBlank", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": {} },
+                { "id": "hblank", "type": "event_hblank", "label": "HBlank", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": {} },
+                { "id": "dma_done", "type": "event_dma_done", "label": "DMA", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": {} },
+                { "id": "move", "type": "sprite_move", "label": "Move", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": { "target": "player", "dx": 1, "dy": 0 } },
+                { "id": "sound", "type": "action_sound", "label": "Sound", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": { "sfx": "jump" } }
+            ],
+            "edges": [
+                { "id": "e1", "fromNode": "vblank", "fromPort": "exec", "toNode": "move", "toPort": "exec" },
+                { "id": "e2", "fromNode": "hblank", "fromPort": "exec", "toNode": "sound", "toPort": "exec" }
+            ]
+        });
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "player".to_string(),
+                prefab: None,
+                transform: Transform { x: 16, y: 24 },
+                components: Components {
+                    sprite: Some(SpriteComponent {
+                        asset: "assets/sprites/player.png".to_string(),
+                        frame_width: 16,
+                        frame_height: 16,
+                        pivot: None,
+                        palette_slot: 0,
+                        animations: HashMap::new(),
+                        priority: "foreground".to_string(),
+                    }),
+                    logic: Some(crate::ugdm::components::LogicComponent {
+                        graph: Some(logic_graph.to_string()),
+                        variables: HashMap::new(),
+                    }),
+                    ..Components::default()
+                },
+            }],
+            palettes: Vec::new(),
+            retrofx: None,
+        };
+
+        let ast = generate_ast(&project, &scene);
+        let events = ast
+            .logic_scripts
+            .iter()
+            .filter_map(|script| match script.ops.first() {
+                Some(LogicOp::HardwareEvent { event, ops }) => Some((event, ops)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(events.len(), 3);
+        assert!(matches!(events[0].0, HardwareEventKind::VBlank | HardwareEventKind::HBlank | HardwareEventKind::DmaDone));
+        assert!(events.iter().any(|(event, ops)| matches!(event, HardwareEventKind::VBlank) && matches!(ops[0], LogicOp::MoveSprite { .. })));
+        assert!(events.iter().any(|(event, ops)| matches!(event, HardwareEventKind::HBlank) && matches!(ops[0], LogicOp::PlaySound { .. })));
     }
 }

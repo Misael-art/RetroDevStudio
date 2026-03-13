@@ -2,7 +2,7 @@ use crate::compiler::ast_generator::{
     collect_bgm_tracks, collect_collision_checks, collect_logic_sound_names,
     collect_parallax_layers, collect_physics_applications, collect_raster_lines,
     collect_sfx_resources, collect_tilemap_assets, AabbCollisionCheck, AstNode, AstOutput,
-    LogicBoolExpr, LogicCollisionTarget, LogicFsmState, LogicFsmTransition, LogicOp, LogicMathExpr, LogicPositionSource, LogicScript, LogicTimelineSlot, CompareOp,
+    HardwareEventKind, LogicBoolExpr, LogicCollisionTarget, LogicFsmState, LogicFsmTransition, LogicOp, LogicMathExpr, LogicPositionSource, LogicScript, LogicTimelineSlot, CompareOp,
     ParallaxLayerConfig, PhysicsApplication, RasterLineConfig, SpriteAsset, TilemapAsset,
 };
 
@@ -29,6 +29,7 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     let scroll_tilemap_layers = collect_scroll_tilemap_layers(ast);
     let logic_vars = collect_logic_var_names(ast);
     let has_logic_overlap = ast.logic_scripts.iter().any(script_uses_overlap);
+    let hardware_event_scripts = collect_hardware_event_scripts(ast);
     let sfx_resources = collect_sfx_resources(ast);
     let bgm_tracks = collect_bgm_tracks(ast);
     let include_resources = !ast.sprite_assets.is_empty()
@@ -87,6 +88,10 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
         out.push_str(render_aabb_helper());
         out.push('\n');
     }
+    if !hardware_event_scripts.is_empty() {
+        render_sgdk_hardware_event_handlers(&mut out, &hardware_event_scripts);
+        out.push('\n');
+    }
 
     out.push_str("int main() {\n");
     if let Some((plane_width, plane_height)) = plane_size_for_tilemaps(&tilemap_assets) {
@@ -98,6 +103,9 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
 
     let mut tilemap_draw_index = 0usize;
     let mut retrofx_initialized = false;
+    for (event, _) in &hardware_event_scripts {
+        out.push_str(&sgdk_event_registration(*event));
+    }
     for node in &ast.nodes {
         match node {
             AstNode::SpriteSystemInit => {
@@ -503,7 +511,50 @@ fn render_move_camera(out: &mut String, target: &str, x: i32, y: i32) {
 
 fn render_logic_scripts(out: &mut String, scripts: &[LogicScript], indent: usize) {
     for script in scripts {
+        if matches!(script.ops.first(), Some(LogicOp::HardwareEvent { .. })) {
+            continue;
+        }
         render_logic_ops(out, &script.ops, indent);
+    }
+}
+
+fn collect_hardware_event_scripts(ast: &AstOutput) -> Vec<(HardwareEventKind, Vec<LogicOp>)> {
+    ast.logic_scripts
+        .iter()
+        .filter_map(|script| match script.ops.first() {
+            Some(LogicOp::HardwareEvent { event, ops }) => Some((*event, ops.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn sgdk_event_registration(event: HardwareEventKind) -> String {
+    match event {
+        HardwareEventKind::VBlank => "    SYS_setVBlankCallback(retro_on_vblank);\n".to_string(),
+        HardwareEventKind::HBlank => "    SYS_setHIntCallback(retro_on_hblank);\n".to_string(),
+        HardwareEventKind::DmaDone => "    VDP_setDMACompleteCallback(retro_on_dma_done);\n".to_string(),
+    }
+}
+
+fn sgdk_event_handler_name(event: HardwareEventKind) -> &'static str {
+    match event {
+        HardwareEventKind::VBlank => "retro_on_vblank",
+        HardwareEventKind::HBlank => "retro_on_hblank",
+        HardwareEventKind::DmaDone => "retro_on_dma_done",
+    }
+}
+
+fn render_sgdk_hardware_event_handlers(
+    out: &mut String,
+    scripts: &[(HardwareEventKind, Vec<LogicOp>)],
+) {
+    for (event, ops) in scripts {
+        out.push_str(&format!(
+            "static void {}(void) {{\n",
+            sgdk_event_handler_name(*event)
+        ));
+        render_logic_ops(out, ops, 4);
+        out.push_str("}\n");
     }
 }
 
@@ -606,6 +657,9 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
             }
             LogicOp::TimelineSequence { counter_var, slots } => {
                 render_timeline_sequence(out, counter_var, slots, indent);
+            }
+            LogicOp::HardwareEvent { ops, .. } => {
+                render_logic_ops(out, ops, indent);
             }
             LogicOp::StateMachine { machine_var, states } => {
                 render_fsm_states(out, machine_var, states, indent);
@@ -885,6 +939,9 @@ fn extract_vars_from_op(op: &LogicOp, vars: &mut std::collections::BTreeSet<Stri
                 for sub_op in &slot.actions { extract_vars_from_op(sub_op, vars); }
             }
         }
+        LogicOp::HardwareEvent { ops, .. } => {
+            for sub_op in ops { extract_vars_from_op(sub_op, vars); }
+        }
         LogicOp::StateMachine { machine_var, states } => {
             vars.insert(machine_var.clone());
             for state in states {
@@ -961,6 +1018,7 @@ fn op_uses_overlap(op: &LogicOp) -> bool {
                 || if_true.iter().any(op_uses_overlap)
                 || if_false.iter().any(op_uses_overlap)
         }
+        LogicOp::HardwareEvent { ops, .. } => ops.iter().any(op_uses_overlap),
         _ => false,
     }
 }
@@ -1784,6 +1842,47 @@ mod tests {
         assert!(output.main_c.contains("switch (logic_var_timeline_intro) {"));
         assert!(output.main_c.contains("case 15:"));
         assert!(output.main_c.contains("case 30:"));
+        assert!(output.main_c.contains("SND_startPlayPCM_XGM(SFX_JUMP, 1, SOUND_PCM_CH_AUTO);"));
+    }
+
+    #[test]
+    fn main_c_emits_hardware_event_handlers_and_registration() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: vec![
+                LogicScript {
+                    ops: vec![LogicOp::HardwareEvent {
+                        event: HardwareEventKind::VBlank,
+                        ops: vec![LogicOp::MoveSprite {
+                            target_var: "spr_player".to_string(),
+                            dx: 1,
+                            dy: 0,
+                        }],
+                    }],
+                },
+                LogicScript {
+                    ops: vec![LogicOp::HardwareEvent {
+                        event: HardwareEventKind::HBlank,
+                        ops: vec![LogicOp::PlaySound {
+                            sfx: "jump".to_string(),
+                        }],
+                    }],
+                },
+            ],
+        };
+
+        let output = emit_sgdk(&ast, "Event Demo");
+
+        assert!(output.main_c.contains("static void retro_on_vblank(void) {"));
+        assert!(output.main_c.contains("static void retro_on_hblank(void) {"));
+        assert!(output.main_c.contains("SYS_setVBlankCallback(retro_on_vblank);"));
+        assert!(output.main_c.contains("SYS_setHIntCallback(retro_on_hblank);"));
         assert!(output.main_c.contains("SND_startPlayPCM_XGM(SFX_JUMP, 1, SOUND_PCM_CH_AUTO);"));
     }
 }

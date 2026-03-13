@@ -156,6 +156,20 @@ const GRAPH_TIMELINE: NodeGraph = {
   ],
 };
 
+const GRAPH_HARDWARE_EVENTS: NodeGraph = {
+  nodes: [
+    node("vblank", "event_vblank"),
+    node("hblank", "event_hblank"),
+    node("dma_done", "event_dma_done"),
+    node("move", "sprite_move", { target: "player", dx: 1, dy: 0 }),
+    node("sound", "action_sound", { sfx: "jump" }),
+  ],
+  edges: [
+    { id: "h1", fromNode: "vblank", fromPort: "exec", toNode: "move", toPort: "exec" },
+    { id: "h2", fromNode: "hblank", fromPort: "exec", toNode: "sound", toPort: "exec" },
+  ],
+};
+
 // ── compileGraphToC ───────────────────────────────────────────────────────────
 
 describe("NodeGraph serialization", () => {
@@ -303,6 +317,21 @@ describe("compileGraphToC — SNES", () => {
     expect(code).toContain("case 30:");
     expect(code).toContain("SPR_setPosition(spr_player");
     expect(code).toContain("SND_startPlayPCM(SFX_JUMP");
+  });
+
+  it("emite handlers e registro para hardware event nodes", () => {
+    const mdCode = compileGraphToC(GRAPH_HARDWARE_EVENTS, "EventsDemo", "megadrive");
+    const snesCode = compileGraphToC(GRAPH_HARDWARE_EVENTS, "EventsDemo", "snes");
+
+    expect(mdCode).toContain("static void retro_on_vblank(void) {");
+    expect(mdCode).toContain("SYS_setVBlankCallback(retro_on_vblank);");
+    expect(mdCode).toContain("SYS_setHIntCallback(retro_on_hblank);");
+    expect(mdCode).toContain("static void retro_on_dma_done(void) {");
+
+    expect(snesCode).toContain("static void retro_on_vblank(void) {");
+    expect(snesCode).toContain("nmiSet(retro_on_vblank);");
+    expect(snesCode).toContain("irqInit(); irqSet(IRQ_HBLANK, retro_on_hblank);");
+    expect(snesCode).toContain("dmaSetCallback(retro_on_dma_done);");
   });
 });
 

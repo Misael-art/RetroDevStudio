@@ -24,7 +24,10 @@ export type NodeType =
   | "flow_if"
   | "flow_while"
   | "flow_for"
-  | "timeline_sequence";
+  | "timeline_sequence"
+  | "event_vblank"
+  | "event_hblank"
+  | "event_dma_done";
 
 export interface NodePort {
   id: string;
@@ -104,7 +107,10 @@ function isNodeType(value: unknown): value is NodeType {
     value === "flow_if" ||
     value === "flow_while" ||
     value === "flow_for" ||
-    value === "timeline_sequence"
+    value === "timeline_sequence" ||
+    value === "event_vblank" ||
+    value === "event_hblank" ||
+    value === "event_dma_done"
   );
 }
 
@@ -360,6 +366,24 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
       slot_2_delay: 90,
     },
   },
+  event_vblank: {
+    type: "event_vblank", label: "On VBlank",
+    inputs: [],
+    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
+    params: {},
+  },
+  event_hblank: {
+    type: "event_hblank", label: "On HBlank",
+    inputs: [],
+    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
+    params: {},
+  },
+  event_dma_done: {
+    type: "event_dma_done", label: "On DMA Done",
+    inputs: [],
+    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
+    params: {},
+  },
 };
 
 const NODE_COLORS: Record<NodeType, string> = {
@@ -383,6 +407,9 @@ const NODE_COLORS: Record<NodeType, string> = {
   flow_while:        "border-[#89dceb] bg-[#89dceb]/10",
   flow_for:          "border-[#b4befe] bg-[#b4befe]/10",
   timeline_sequence: "border-[#f5c2e7] bg-[#f5c2e7]/10",
+  event_vblank:      "border-[#a6e3a1] bg-[#a6e3a1]/10",
+  event_hblank:      "border-[#94e2d5] bg-[#94e2d5]/10",
+  event_dma_done:    "border-[#fab387] bg-[#fab387]/10",
 };
 
 // ── Counter for unique IDs ────────────────────────────────────────────────────
@@ -501,6 +528,7 @@ const PALETTE_TYPES: NodeType[] = [
   "fsm_state", "fsm_transition",
   "flow_if", "flow_while", "flow_for",
   "timeline_sequence",
+  "event_vblank", "event_hblank", "event_dma_done",
   "condition_overlap", "logic_and", "action_sound", 
   "scroll_tilemap", "move_camera", "effect_parallax", "effect_raster",
 ];

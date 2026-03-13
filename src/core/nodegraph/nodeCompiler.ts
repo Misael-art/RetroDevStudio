@@ -361,6 +361,58 @@ function collectTimelineSlots(graph: NodeGraph, node: GraphNode): TimelineSlotDe
     .sort((left, right) => left.delay - right.delay);
 }
 
+type HardwareEventNodeType = "event_vblank" | "event_hblank" | "event_dma_done";
+
+type HardwareEventNode = GraphNode & { type: HardwareEventNodeType };
+
+function isHardwareEventNode(node: GraphNode): node is HardwareEventNode {
+  return (
+    node.type === "event_vblank" ||
+    node.type === "event_hblank" ||
+    node.type === "event_dma_done"
+  );
+}
+
+function collectHardwareEventNodes(graph: NodeGraph): HardwareEventNode[] {
+  return graph.nodes.filter(isHardwareEventNode);
+}
+
+function hardwareEventHandlerName(type: HardwareEventNodeType): string {
+  switch (type) {
+    case "event_vblank":
+      return "retro_on_vblank";
+    case "event_hblank":
+      return "retro_on_hblank";
+    case "event_dma_done":
+      return "retro_on_dma_done";
+  }
+}
+
+function emitHardwareEventRegistration(
+  target: "megadrive" | "snes",
+  type: HardwareEventNodeType
+): string {
+  if (target === "snes") {
+    switch (type) {
+      case "event_vblank":
+        return "    nmiSet(retro_on_vblank);\n";
+      case "event_hblank":
+        return "    irqInit(); irqSet(IRQ_HBLANK, retro_on_hblank);\n";
+      case "event_dma_done":
+        return "    dmaSetCallback(retro_on_dma_done);\n";
+    }
+  }
+
+  switch (type) {
+    case "event_vblank":
+      return "    SYS_setVBlankCallback(retro_on_vblank);\n";
+    case "event_hblank":
+      return "    SYS_setHIntCallback(retro_on_hblank);\n";
+    case "event_dma_done":
+      return "    VDP_setDMACompleteCallback(retro_on_dma_done);\n";
+  }
+}
+
 function emitExecChainFromNode(
   graph: NodeGraph,
   node: GraphNode,
@@ -537,8 +589,9 @@ export function compileGraphToC(
 
   const startNodes = graph.nodes.filter((n: GraphNode) => n.type === "event_start");
   const fsmStates = collectFsmStates(graph);
+  const hardwareEvents = collectHardwareEventNodes(graph);
 
-  if (startNodes.length === 0) {
+  if (startNodes.length === 0 && hardwareEvents.length === 0) {
     return out + "// No event_start node found in graph.\n";
   }
 
@@ -570,8 +623,24 @@ export function compileGraphToC(
     out += "};\n";
     out += `static int logic_var_fsm_state = ${fsmStates[0].enumName};\n`;
   }
+  if (hardwareEvents.length > 0) {
+    out += "\n";
+    for (const eventNode of hardwareEvents) {
+      const handlerName = hardwareEventHandlerName(eventNode.type);
+      out += `static void ${handlerName}(void) {\n`;
+      const nextEdge = findOutgoingExecEdge(graph, eventNode.id, "exec");
+      const nextNode = nextEdge ? findNode(graph, nextEdge.toNode) : undefined;
+      if (nextNode) {
+        out += emitExecChainFromNode(graph, nextNode, target, new Set([eventNode.id]));
+      }
+      out += "}\n";
+    }
+  }
 
   out += "\nint main() {\n";
+  for (const eventNode of hardwareEvents) {
+    out += emitHardwareEventRegistration(target, eventNode.type);
+  }
 
   for (const startNode of startNodes) {
     out += emitExecChainFromNode(graph, startNode, target);
