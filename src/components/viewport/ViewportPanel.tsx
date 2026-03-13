@@ -123,6 +123,7 @@ export default function ViewportPanel() {
     logMessage,
     activeScene,
     activeProjectDir,
+    hwStatus,
     selectedEntityId,
     setSelectedEntityId,
     updateEntity,
@@ -172,7 +173,12 @@ export default function ViewportPanel() {
   const [stepBusy, setStepBusy] = useState(false);
   const [audioMuted, setAudioMuted] = useState(false);
   const [assetHotReloadNotice, setAssetHotReloadNotice] = useState<string | null>(null);
+  const [showPerformanceOverlay, setShowPerformanceOverlay] = useState(true);
   const hotReloadNoticeTimerRef = useRef<number | null>(null);
+  const frameTimingRef = useRef<{ lastFrameAt: number; fps: number }>({
+    lastFrameAt: 0,
+    fps: 0,
+  });
 
   activeTabRef.current = activeViewportTab;
   pausedRef.current = emulPaused;
@@ -187,6 +193,16 @@ export default function ViewportPanel() {
     const imageData = context.createImageData(payload.width, payload.height);
     imageData.data.set(new Uint8Array(payload.rgba));
     context.putImageData(imageData, 0, 0);
+
+    const now = performance.now();
+    if (frameTimingRef.current.lastFrameAt > 0) {
+      const deltaMs = now - frameTimingRef.current.lastFrameAt;
+      const nextFps = deltaMs > 0 ? 1000 / deltaMs : 0;
+      frameTimingRef.current.fps = frameTimingRef.current.fps === 0
+        ? nextFps
+        : (frameTimingRef.current.fps * 0.8) + (nextFps * 0.2);
+    }
+    frameTimingRef.current.lastFrameAt = now;
   }, []);
 
   const clearAudioQueue = useCallback(() => {
@@ -1059,6 +1075,14 @@ export default function ViewportPanel() {
     : emulatorActive
       ? "Emulador ativo"
       : "Aguardando emulador...";
+  const dmaBudgetBytes = activeTarget === "snes" ? 8192 : 7372;
+  const dmaUsageBytes = Math.min(hwStatus?.vram_used ?? 0, dmaBudgetBytes);
+  const dmaUsagePercent = Math.min(
+    100,
+    Math.round((dmaUsageBytes / Math.max(dmaBudgetBytes, 1)) * 100)
+  );
+  const overlayFps = frameTimingRef.current.fps > 0 ? frameTimingRef.current.fps.toFixed(1) : "0.0";
+  const overlaySpriteCount = hwStatus?.sprite_count ?? activeScene?.entities.length ?? 0;
 
   const isSnes = activeTarget === "snes";
   const targetLabel = isSnes ? "SNES" : "Mega Drive";
@@ -1087,6 +1111,20 @@ export default function ViewportPanel() {
             title="Alternar snap-to-grid de 8px (atalho: G)"
           >
             Snap 8px {gridSnap ? "ON" : "OFF"}
+          </button>
+        )}
+        {activeViewportTab === "game" && (
+          <button
+            type="button"
+            onClick={() => setShowPerformanceOverlay((current) => !current)}
+            className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
+              showPerformanceOverlay
+                ? "border-[#89b4fa] bg-[#89b4fa]/15 text-[#89b4fa]"
+                : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
+            }`}
+            title="Alternar overlay de performance no Game View"
+          >
+            Overlay {showPerformanceOverlay ? "ON" : "OFF"}
           </button>
         )}
       </div>
@@ -1135,15 +1173,27 @@ export default function ViewportPanel() {
                 Assets alterados no disco. {assetHotReloadNotice}
               </div>
             )}
-            <canvas
-              ref={canvasRef}
-              width={MD_WIDTH}
-              height={MD_HEIGHT}
-              data-testid="viewport-game-canvas"
-              className="border border-[#45475a] bg-black"
-              style={{ imageRendering: "pixelated", width: MD_WIDTH, height: MD_HEIGHT }}
-              tabIndex={0}
-            />
+            <div className="relative">
+              <canvas
+                ref={canvasRef}
+                width={MD_WIDTH}
+                height={MD_HEIGHT}
+                data-testid="viewport-game-canvas"
+                className="border border-[#45475a] bg-black"
+                style={{ imageRendering: "pixelated", width: MD_WIDTH, height: MD_HEIGHT }}
+                tabIndex={0}
+              />
+              {showPerformanceOverlay && (
+                <div
+                  data-testid="viewport-performance-overlay"
+                  className="pointer-events-none absolute left-2 top-2 flex flex-col gap-1 rounded border border-[#313244] bg-[#11111b]/80 px-2 py-1 font-mono text-[10px] text-[#cdd6f4]"
+                >
+                  <span>FPS {overlayFps}</span>
+                  <span>Sprites {overlaySpriteCount}</span>
+                  <span>DMA est. {Math.round(dmaUsageBytes / 1024)}KB / {Math.round(dmaBudgetBytes / 1024)}KB ({dmaUsagePercent}%)</span>
+                </div>
+              )}
+            </div>
             <div className="flex items-center gap-2">
               <button
                 type="button"

@@ -769,6 +769,41 @@ describe("App build flow", () => {
     );
   });
 
+  it("shows and toggles the game performance overlay", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeViewportTab: "game",
+        hwStatus: {
+          vram_used: 4096,
+          vram_limit: 65536,
+          sprite_count: 6,
+          sprite_limit: 80,
+          bg_layers: 1,
+          bg_layers_limit: 4,
+          errors: [],
+          warnings: [],
+        },
+      });
+      await flush();
+      await flush();
+    });
+
+    const overlayToggle = findButton(container, "Overlay ON");
+    const overlay = container.querySelector("[data-testid='viewport-performance-overlay']");
+
+    expect(overlay).not.toBeNull();
+    expect(overlay?.textContent).toContain("Sprites 6");
+    expect(overlay?.textContent).toContain("DMA est.");
+
+    await act(async () => {
+      overlayToggle.click();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='viewport-performance-overlay']")).toBeNull();
+    expect(findButton(container, "Overlay OFF")).toBeInstanceOf(HTMLButtonElement);
+  });
+
   it("creates and disposes the game audio context with the audio stream lifecycle", async () => {
     const audioContextCtor = vi.fn();
     const gainConnect = vi.fn();
