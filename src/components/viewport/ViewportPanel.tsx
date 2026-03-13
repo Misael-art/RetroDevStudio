@@ -31,6 +31,18 @@ const MD_WIDTH = 320;
 const MD_HEIGHT = 224;
 const GRID_SNAP_SIZE = 8;
 const AUDIO_QUEUE_TARGET_FRAMES = 3;
+const RESIZE_HANDLE_SIZE = 8;
+const MIN_ENTITY_SIZE = GRID_SNAP_SIZE;
+
+type ResizeHandle = "nw" | "ne" | "sw" | "se";
+
+type EntityBounds = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  resizable: boolean;
+};
 
 type QueuedAudioChunk = {
   left: Float32Array;
@@ -58,6 +70,50 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 function snapToGrid(value: number, step: number): number {
   return Math.round(value / step) * step;
+}
+
+function getEntityBounds(entity: Entity, target: "megadrive" | "snes"): EntityBounds {
+  if (entity.components?.tilemap) {
+    return {
+      x: entity.transform.x,
+      y: entity.transform.y,
+      width: entity.components.tilemap.map_width * 8,
+      height: entity.components.tilemap.map_height * 8,
+      resizable: false,
+    };
+  }
+
+  if (entity.components?.camera) {
+    return {
+      x: entity.transform.x + (entity.components.camera.offset_x ?? 0),
+      y: entity.transform.y + (entity.components.camera.offset_y ?? 0),
+      width: target === "snes" ? 256 : 320,
+      height: 224,
+      resizable: false,
+    };
+  }
+
+  return {
+    x: entity.transform.x,
+    y: entity.transform.y,
+    width: entity.components?.sprite?.frame_width ?? 32,
+    height: entity.components?.sprite?.frame_height ?? 32,
+    resizable: Boolean(entity.components?.sprite),
+  };
+}
+
+function drawResizeHandle(
+  context: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  fillStyle: string
+) {
+  const half = RESIZE_HANDLE_SIZE / 2;
+  context.fillStyle = fillStyle;
+  context.fillRect(x - half, y - half, RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
+  context.strokeStyle = "#11111b";
+  context.lineWidth = 1;
+  context.strokeRect(x - half, y - half, RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
 }
 
 export default function ViewportPanel() {
@@ -92,13 +148,19 @@ export default function ViewportPanel() {
   const audioUnlistenRef = useRef<(() => void) | null>(null);
   const audioQueueRef = useRef<QueuedAudioChunk[]>([]);
   const dragRef = useRef<{
+    mode: "move" | "resize";
     entityId: string;
+    handle?: ResizeHandle;
     startMx: number;
     startMy: number;
     origX: number;
     origY: number;
+    origWidth: number;
+    origHeight: number;
     lastX: number;
     lastY: number;
+    lastWidth: number;
+    lastHeight: number;
     historyCommitted: boolean;
   } | null>(null);
 
@@ -626,10 +688,11 @@ export default function ViewportPanel() {
     });
 
     activeScene.entities.forEach((entity: Entity, index: number) => {
-      const x = entity.transform.x;
-      const y = entity.transform.y;
-      const width = entity.components?.sprite?.frame_width ?? 32;
-      const height = entity.components?.sprite?.frame_height ?? 32;
+      const bounds = getEntityBounds(entity, activeTarget);
+      const x = bounds.x;
+      const y = bounds.y;
+      const width = bounds.width;
+      const height = bounds.height;
       const isSelected = entity.entity_id === selectedEntityId;
       const color = colors[index % colors.length];
 
@@ -716,6 +779,22 @@ export default function ViewportPanel() {
       context.textAlign = "left";
       context.fillText((entity.prefab ?? entity.entity_id).slice(0, 14), x + 2, y + 10);
 
+      if (isSelected) {
+        context.save();
+        context.strokeStyle = "#f9e2af";
+        context.lineWidth = 1;
+        context.setLineDash([3, 2]);
+        context.strokeRect(x - 2, y - 2, width + 4, height + 4);
+        context.setLineDash([]);
+        if (bounds.resizable) {
+          drawResizeHandle(context, x, y, "#f9e2af");
+          drawResizeHandle(context, x + width, y, "#f9e2af");
+          drawResizeHandle(context, x, y + height, "#f9e2af");
+          drawResizeHandle(context, x + width, y + height, "#f9e2af");
+        }
+        context.restore();
+      }
+
       context.fillStyle = color;
       context.beginPath();
       context.arc(x + width / 2, y + height / 2, 2, 0, Math.PI * 2);
@@ -762,11 +841,13 @@ export default function ViewportPanel() {
 
     for (let index = activeScene.entities.length - 1; index >= 0; index -= 1) {
       const entity = activeScene.entities[index];
-      const x = entity.transform.x;
-      const y = entity.transform.y;
-      const width = entity.components?.sprite?.frame_width ?? 32;
-      const height = entity.components?.sprite?.frame_height ?? 32;
-      if (mx >= x && mx <= x + width && my >= y && my <= y + height) {
+      const bounds = getEntityBounds(entity, activeTarget);
+      if (
+        mx >= bounds.x &&
+        mx <= bounds.x + bounds.width &&
+        my >= bounds.y &&
+        my <= bounds.y + bounds.height
+      ) {
         return entity;
       }
     }
@@ -774,25 +855,85 @@ export default function ViewportPanel() {
     return null;
   }
 
+  function hitTestResizeHandle(mx: number, my: number): { entity: Entity; handle: ResizeHandle } | null {
+    if (!activeScene || !selectedEntityId || selectedEntityId.startsWith("layer::")) {
+      return null;
+    }
+
+    const entity = activeScene.entities.find((candidate) => candidate.entity_id === selectedEntityId);
+    if (!entity) {
+      return null;
+    }
+
+    const bounds = getEntityBounds(entity, activeTarget);
+    if (!bounds.resizable) {
+      return null;
+    }
+
+    const handles: Array<{ handle: ResizeHandle; x: number; y: number }> = [
+      { handle: "nw", x: bounds.x, y: bounds.y },
+      { handle: "ne", x: bounds.x + bounds.width, y: bounds.y },
+      { handle: "sw", x: bounds.x, y: bounds.y + bounds.height },
+      { handle: "se", x: bounds.x + bounds.width, y: bounds.y + bounds.height },
+    ];
+    const radius = RESIZE_HANDLE_SIZE;
+    const matched = handles.find((candidate) =>
+      Math.abs(mx - candidate.x) <= radius && Math.abs(my - candidate.y) <= radius
+    );
+
+    return matched ? { entity, handle: matched.handle } : null;
+  }
+
   function handleMouseDown(event: React.MouseEvent<HTMLCanvasElement>) {
     if (!activeScene) return;
 
     const { mx, my } = canvasCoords(event);
+    const resizeTarget = hitTestResizeHandle(mx, my);
+    if (resizeTarget) {
+      const bounds = getEntityBounds(resizeTarget.entity, activeTarget);
+      setSelectedEntityId(resizeTarget.entity.entity_id);
+      dragRef.current = {
+        mode: "resize",
+        entityId: resizeTarget.entity.entity_id,
+        handle: resizeTarget.handle,
+        startMx: mx,
+        startMy: my,
+        origX: bounds.x,
+        origY: bounds.y,
+        origWidth: bounds.width,
+        origHeight: bounds.height,
+        lastX: bounds.x,
+        lastY: bounds.y,
+        lastWidth: bounds.width,
+        lastHeight: bounds.height,
+        historyCommitted: false,
+      };
+      beginHistoryCapture();
+      setIsDragging(true);
+      return;
+    }
+
     const entity = hitTest(mx, my);
     if (!entity) {
       setSelectedEntityId(null);
       return;
     }
 
+    const bounds = getEntityBounds(entity, activeTarget);
     setSelectedEntityId(entity.entity_id);
     dragRef.current = {
+      mode: "move",
       entityId: entity.entity_id,
       startMx: mx,
       startMy: my,
       origX: entity.transform.x,
       origY: entity.transform.y,
+      origWidth: bounds.width,
+      origHeight: bounds.height,
       lastX: entity.transform.x,
       lastY: entity.transform.y,
+      lastWidth: bounds.width,
+      lastHeight: bounds.height,
       historyCommitted: false,
     };
     beginHistoryCapture();
@@ -804,6 +945,74 @@ export default function ViewportPanel() {
     if (!drag || event.buttons !== 1) return;
 
     const { mx, my } = canvasCoords(event);
+    if (drag.mode === "resize") {
+      const entity = activeScene?.entities.find((candidate) => candidate.entity_id === drag.entityId);
+      const sprite = entity?.components?.sprite;
+      if (!entity || !sprite || !drag.handle) {
+        return;
+      }
+
+      const pointerX = gridSnap ? snapToGrid(mx, GRID_SNAP_SIZE) : Math.round(mx);
+      const pointerY = gridSnap ? snapToGrid(my, GRID_SNAP_SIZE) : Math.round(my);
+      let left = drag.origX;
+      let top = drag.origY;
+      let right = drag.origX + drag.origWidth;
+      let bottom = drag.origY + drag.origHeight;
+
+      if (drag.handle.includes("w")) {
+        left = Math.min(pointerX, right - MIN_ENTITY_SIZE);
+      }
+      if (drag.handle.includes("e")) {
+        right = Math.max(pointerX, left + MIN_ENTITY_SIZE);
+      }
+      if (drag.handle.includes("n")) {
+        top = Math.min(pointerY, bottom - MIN_ENTITY_SIZE);
+      }
+      if (drag.handle.includes("s")) {
+        bottom = Math.max(pointerY, top + MIN_ENTITY_SIZE);
+      }
+
+      const nextX = Math.round(left);
+      const nextY = Math.round(top);
+      const nextWidth = Math.max(Math.round(right - left), MIN_ENTITY_SIZE);
+      const nextHeight = Math.max(Math.round(bottom - top), MIN_ENTITY_SIZE);
+
+      if (
+        nextX === drag.lastX &&
+        nextY === drag.lastY &&
+        nextWidth === drag.lastWidth &&
+        nextHeight === drag.lastHeight
+      ) {
+        return;
+      }
+
+      if (!drag.historyCommitted) {
+        commitHistoryCapture();
+        drag.historyCommitted = true;
+      }
+
+      drag.lastX = nextX;
+      drag.lastY = nextY;
+      drag.lastWidth = nextWidth;
+      drag.lastHeight = nextHeight;
+      updateEntity(
+        drag.entityId,
+        {
+          transform: { x: nextX, y: nextY },
+          components: {
+            ...entity.components,
+            sprite: {
+              ...sprite,
+              frame_width: nextWidth,
+              frame_height: nextHeight,
+            },
+          },
+        },
+        { recordHistory: false }
+      );
+      return;
+    }
+
     const dx = Math.round(mx - drag.startMx);
     const dy = Math.round(my - drag.startMy);
     const nextX = gridSnap ? snapToGrid(drag.origX + dx, GRID_SNAP_SIZE) : drag.origX + dx;
@@ -840,7 +1049,7 @@ export default function ViewportPanel() {
       try {
         await persistActiveScene(projectDir, "Viewport");
       } catch (error: unknown) {
-        logMessage("error", `[Viewport] Falha ao salvar apos mover: ${describeError(error)}`);
+        logMessage("error", `[Viewport] Falha ao salvar apos editar gizmo: ${describeError(error)}`);
       }
     }
   }
@@ -906,11 +1115,11 @@ export default function ViewportPanel() {
                 height: MD_HEIGHT,
                 cursor: isDragging ? "grabbing" : "crosshair",
               }}
-              title="Clique para selecionar. Arraste para mover."
+              title="Clique para selecionar. Arraste para mover ou use os handles para redimensionar sprites."
             />
             <span className="select-none text-[10px] text-[#6c7086]">
               {activeScene
-                ? `${activeScene.entities.length} entidade(s) | ${activeScene.background_layers.length} layer(s) | ${gridSnap ? "snap 8px ativo" : "snap livre"} | arraste para mover`
+                ? `${activeScene.entities.length} entidade(s) | ${activeScene.background_layers.length} layer(s) | ${gridSnap ? "snap 8px ativo" : "snap livre"} | arraste para mover${selectedEntityId && !selectedEntityId.startsWith("layer::") ? " / handles para resize" : ""}`
                 : "Abra um projeto para visualizar a cena"}
             </span>
           </div>

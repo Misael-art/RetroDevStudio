@@ -685,6 +685,90 @@ describe("App build flow", () => {
     expect(banner?.textContent).toContain("assets/sprites/hero.ppm");
   });
 
+  it("resizes the selected sprite from scene gizmos with 8px snapping and persists the change", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeViewportTab: "scene",
+        selectedEntityId: "hero",
+        activeScene: {
+          scene_id: "main_scene",
+          display_name: "Main Scene",
+          background_layers: [],
+          entities: [
+            {
+              entity_id: "hero",
+              prefab: "Hero",
+              transform: { x: 16, y: 16 },
+              components: {
+                sprite: {
+                  asset: "assets/sprites/hero.ppm",
+                  frame_width: 32,
+                  frame_height: 32,
+                },
+              },
+            },
+          ],
+        },
+      });
+      await flush();
+      await flush();
+    });
+
+    const canvas = container.querySelector("canvas");
+    expect(canvas).toBeInstanceOf(HTMLCanvasElement);
+    Object.defineProperty(canvas as HTMLCanvasElement, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        left: 0,
+        top: 0,
+        width: 320,
+        height: 224,
+        right: 320,
+        bottom: 224,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }),
+    });
+
+    await act(async () => {
+      (canvas as HTMLCanvasElement).dispatchEvent(
+        new MouseEvent("mousedown", {
+          bubbles: true,
+          clientX: 48,
+          clientY: 48,
+          button: 0,
+        })
+      );
+      (canvas as HTMLCanvasElement).dispatchEvent(
+        new MouseEvent("mousemove", {
+          bubbles: true,
+          clientX: 65,
+          clientY: 65,
+          buttons: 1,
+        })
+      );
+      (canvas as HTMLCanvasElement).dispatchEvent(
+        new MouseEvent("mouseup", {
+          bubbles: true,
+          clientX: 65,
+          clientY: 65,
+        })
+      );
+      await flush();
+      await flush();
+    });
+
+    const hero = useEditorStore.getState().activeScene?.entities[0];
+    expect(hero?.transform).toEqual({ x: 16, y: 16 });
+    expect(hero?.components.sprite?.frame_width).toBe(48);
+    expect(hero?.components.sprite?.frame_height).toBe(48);
+    expect(mocks.persistActiveScene).toHaveBeenCalledWith(
+      "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      "Viewport"
+    );
+  });
+
   it("creates and disposes the game audio context with the audio stream lifecycle", async () => {
     const audioContextCtor = vi.fn();
     const gainConnect = vi.fn();
