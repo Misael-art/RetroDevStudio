@@ -849,6 +849,32 @@ describe("App build flow", () => {
     expect(findButton(container, "Overlay OFF")).toBeInstanceOf(HTMLButtonElement);
   });
 
+  it("shows the live VRAM budget bar in the toolbar", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        hwStatus: {
+          vram_used: 49152,
+          vram_limit: 65536,
+          sprite_count: 12,
+          sprite_limit: 80,
+          bg_layers: 2,
+          bg_layers_limit: 4,
+          errors: [],
+          warnings: ["VRAM Warning"],
+        },
+      });
+      await flush();
+    });
+
+    const budget = container.querySelector("[data-testid='toolbar-vram-budget']");
+    const label = container.querySelector("[data-testid='toolbar-vram-budget-label']");
+    const bar = container.querySelector("[data-testid='toolbar-vram-budget-bar']") as HTMLElement | null;
+
+    expect(budget).not.toBeNull();
+    expect(label?.textContent).toContain("48 / 64 KB");
+    expect(bar?.style.width).toBe("75%");
+  });
+
   it("creates and disposes the game audio context with the audio stream lifecycle", async () => {
     const audioContextCtor = vi.fn();
     const gainConnect = vi.fn();

@@ -75,6 +75,47 @@ function ToolbarButton({
   );
 }
 
+function ToolbarVramBudget({
+  used,
+  limit,
+  hasErrors,
+  hasWarnings,
+}: {
+  used: number;
+  limit: number;
+  hasErrors: boolean;
+  hasWarnings: boolean;
+}) {
+  const percent = Math.min(100, Math.round((used / Math.max(limit, 1)) * 100));
+  const toneClass = hasErrors
+    ? "bg-[#f38ba8]"
+    : hasWarnings || percent >= 80
+      ? "bg-[#fab387]"
+      : "bg-[#a6e3a1]";
+
+  return (
+    <div
+      data-testid="toolbar-vram-budget"
+      className="flex min-w-[9rem] flex-col gap-1 rounded border border-[#313244] bg-[#11111b] px-2 py-1"
+      title={`VRAM ${Math.round(used / 1024)}KB / ${Math.round(limit / 1024)}KB (${percent}%)`}
+    >
+      <div className="flex items-center justify-between text-[10px]">
+        <span className="text-[#7f849c]">VRAM</span>
+        <span data-testid="toolbar-vram-budget-label" className="font-mono text-[#cdd6f4]">
+          {Math.round(used / 1024)} / {Math.round(limit / 1024)} KB
+        </span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded bg-[#313244]">
+        <div
+          data-testid="toolbar-vram-budget-bar"
+          className={`h-full ${toneClass}`}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function isEditableTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) {
     return false;
@@ -953,6 +994,14 @@ export default function App() {
         <ToolbarButton label="Atalhos" onClick={() => setShowShortcuts(true)} />
 
         <div className="ml-auto flex items-center gap-2">
+          {hwStatus && hwStatus.vram_limit > 0 && (
+            <ToolbarVramBudget
+              used={hwStatus.vram_used}
+              limit={hwStatus.vram_limit}
+              hasErrors={hwStatus.errors.length > 0}
+              hasWarnings={hwStatus.warnings.length > 0}
+            />
+          )}
           <span data-testid="active-project-name" className="max-w-36 truncate text-[10px] text-[#45475a]">
             {activeProjectName || "Sem projeto"}
           </span>
