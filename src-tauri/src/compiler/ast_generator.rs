@@ -237,6 +237,17 @@ pub enum LogicOp {
         var_name: String,
         value: LogicMathExpr,
     },
+    WhileLoop {
+        condition: LogicBoolExpr,
+        body: Vec<LogicOp>,
+        done: Vec<LogicOp>,
+    },
+    ForLoop {
+        loop_var: String,
+        count: LogicMathExpr,
+        body: Vec<LogicOp>,
+        done: Vec<LogicOp>,
+    },
     StateMachine {
         machine_var: String,
         states: Vec<LogicFsmState>,
@@ -1512,6 +1523,121 @@ fn compile_logic_node(
                 })),
             }
         }
+        "flow_if" => {
+            let condition = resolve_bool_expr_from_ports(
+                graph,
+                node,
+                &["condition", "guard"],
+                runtime_entities,
+                &mut std::collections::HashSet::new(),
+            )
+            .unwrap_or(LogicBoolExpr::Literal(false));
+            let mut true_visited = visited.clone();
+            let mut false_visited = visited.clone();
+            let if_true = compile_logic_chain(
+                graph,
+                &node.id,
+                "true",
+                runtime_entities,
+                &mut true_visited,
+                setup_nodes,
+                runtime_nodes,
+                parallax_layers,
+                raster_lines,
+            );
+            let if_false = compile_logic_chain(
+                graph,
+                &node.id,
+                "false",
+                runtime_entities,
+                &mut false_visited,
+                setup_nodes,
+                runtime_nodes,
+                parallax_layers,
+                raster_lines,
+            );
+            Some(CompiledLogicNode::Terminal(LogicOp::ConditionBool {
+                condition,
+                if_true,
+                if_false,
+            }))
+        }
+        "flow_while" => {
+            let condition = resolve_bool_expr_from_ports(
+                graph,
+                node,
+                &["condition", "guard"],
+                runtime_entities,
+                &mut std::collections::HashSet::new(),
+            )
+            .unwrap_or(LogicBoolExpr::Literal(false));
+            let mut body_visited = visited.clone();
+            let mut done_visited = visited.clone();
+            let body = compile_logic_chain(
+                graph,
+                &node.id,
+                "body",
+                runtime_entities,
+                &mut body_visited,
+                setup_nodes,
+                runtime_nodes,
+                parallax_layers,
+                raster_lines,
+            );
+            let done = compile_logic_chain(
+                graph,
+                &node.id,
+                "done",
+                runtime_entities,
+                &mut done_visited,
+                setup_nodes,
+                runtime_nodes,
+                parallax_layers,
+                raster_lines,
+            );
+            Some(CompiledLogicNode::Terminal(LogicOp::WhileLoop {
+                condition,
+                body,
+                done,
+            }))
+        }
+        "flow_for" => {
+            let loop_var = sanitize_identifier(
+                &param_string(node, "var_name").unwrap_or_else(|| "i".to_string()),
+            );
+            let count = resolve_math_expr_from_input(graph, &node.id, "count")
+                .unwrap_or_else(|| LogicMathExpr::Literal(param_i32(node, "count", 0)));
+            let mut body_visited = visited.clone();
+            let mut done_visited = visited.clone();
+            let body = compile_logic_chain(
+                graph,
+                &node.id,
+                "body",
+                runtime_entities,
+                &mut body_visited,
+                setup_nodes,
+                runtime_nodes,
+                parallax_layers,
+                raster_lines,
+            );
+            let done = compile_logic_chain(
+                graph,
+                &node.id,
+                "done",
+                runtime_entities,
+                &mut done_visited,
+                setup_nodes,
+                runtime_nodes,
+                parallax_layers,
+                raster_lines,
+            );
+            Some(CompiledLogicNode::Terminal(LogicOp::ForLoop {
+                loop_var,
+                count,
+                body,
+                done,
+            }))
+        }
         _ => None,
     }
 }
@@ -1619,6 +1745,14 @@ fn build_bool_expr_from_node(
             } else {
                 Some(compare)
             }
+        }
+        "var_get" | "logic_math" | "var_set" => {
+            let math_expr = build_math_expr_from_node(node, graph)?;
+            Some(LogicBoolExpr::Compare {
+                op: CompareOp::Neq,
+                left: Box::new(math_expr),
+                right: Box::new(LogicMathExpr::Literal(0)),
+            })
         }
         _ => None,
     };
@@ -1828,6 +1962,10 @@ fn collect_logic_sound_names_from_ops(
             } => {
                 collect_logic_sound_names_from_ops(if_true, sound_names);
                 collect_logic_sound_names_from_ops(if_false, sound_names);
+            }
+            LogicOp::WhileLoop { body, done, .. } | LogicOp::ForLoop { body, done, .. } => {
+                collect_logic_sound_names_from_ops(body, sound_names);
+                collect_logic_sound_names_from_ops(done, sound_names);
             }
             LogicOp::StateMachine { states, .. } => {
                 for state in states {
@@ -3766,5 +3904,76 @@ mod tests {
                 dy: 0,
             }]
         );
+    }
+
+    #[test]
+    fn generate_ast_compiles_flow_nodes_into_runtime_loops() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
+            name: "Flow Demo".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution { width: 320, height: 224 },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+        };
+        let logic_graph = json!({
+            "version": 1,
+            "nodes": [
+                { "id": "start", "type": "event_start", "label": "Start", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": {} },
+                { "id": "speed", "type": "var_get", "label": "Speed", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": { "var_name": "speed" } },
+                { "id": "if_node", "type": "flow_if", "label": "If", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": {} },
+                { "id": "while_node", "type": "flow_while", "label": "While", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": {} },
+                { "id": "for_node", "type": "flow_for", "label": "For", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": { "var_name": "idx", "count": 3 } },
+                { "id": "move", "type": "sprite_move", "label": "Move", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": { "target": "player", "dx": 1, "dy": 0 } },
+                { "id": "sound", "type": "action_sound", "label": "Sound", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": { "sfx": "jump" } }
+            ],
+            "edges": [
+                { "id": "e1", "fromNode": "start", "fromPort": "exec", "toNode": "if_node", "toPort": "exec" },
+                { "id": "e2", "fromNode": "speed", "fromPort": "value", "toNode": "if_node", "toPort": "condition" },
+                { "id": "e3", "fromNode": "if_node", "fromPort": "true", "toNode": "while_node", "toPort": "exec" },
+                { "id": "e4", "fromNode": "speed", "fromPort": "value", "toNode": "while_node", "toPort": "condition" },
+                { "id": "e5", "fromNode": "while_node", "fromPort": "body", "toNode": "move", "toPort": "exec" },
+                { "id": "e6", "fromNode": "while_node", "fromPort": "done", "toNode": "for_node", "toPort": "exec" },
+                { "id": "e7", "fromNode": "for_node", "fromPort": "body", "toNode": "sound", "toPort": "exec" }
+            ]
+        });
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "player".to_string(),
+                prefab: None,
+                transform: Transform { x: 16, y: 24 },
+                components: Components {
+                    sprite: Some(SpriteComponent {
+                        asset: "assets/sprites/player.png".to_string(),
+                        frame_width: 16,
+                        frame_height: 16,
+                        pivot: None,
+                        palette_slot: 0,
+                        animations: HashMap::new(),
+                        priority: "foreground".to_string(),
+                    }),
+                    logic: Some(crate::ugdm::components::LogicComponent {
+                        graph: Some(logic_graph.to_string()),
+                        variables: HashMap::new(),
+                    }),
+                    ..Components::default()
+                },
+            }],
+            palettes: Vec::new(),
+            retrofx: None,
+        };
+
+        let ast = generate_ast(&project, &scene);
+        let ops = &ast.logic_scripts[0].ops;
+
+        assert!(matches!(ops[0], LogicOp::ConditionBool { .. }));
+        assert!(matches!(ops[0], LogicOp::ConditionBool { ref if_true, .. } if matches!(if_true[0], LogicOp::WhileLoop { .. })));
     }
 }

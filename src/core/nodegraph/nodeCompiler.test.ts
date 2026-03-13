@@ -116,6 +116,27 @@ const GRAPH_FSM: NodeGraph = {
   ],
 };
 
+const GRAPH_FLOW: NodeGraph = {
+  nodes: [
+    node("start", "event_start"),
+    node("speed", "var_get", { var_name: "speed" }),
+    node("if_node", "flow_if"),
+    node("while_node", "flow_while"),
+    node("for_node", "flow_for", { var_name: "idx", count: 3 }),
+    node("move", "sprite_move", { target: "player", dx: 1, dy: 0 }),
+    node("sound", "action_sound", { sfx: "jump" }),
+  ],
+  edges: [
+    { id: "f1", fromNode: "start", fromPort: "exec", toNode: "if_node", toPort: "exec" },
+    { id: "f2", fromNode: "speed", fromPort: "value", toNode: "if_node", toPort: "condition" },
+    { id: "f3", fromNode: "if_node", fromPort: "true", toNode: "while_node", toPort: "exec" },
+    { id: "f4", fromNode: "speed", fromPort: "value", toNode: "while_node", toPort: "condition" },
+    { id: "f5", fromNode: "while_node", fromPort: "body", toNode: "move", toPort: "exec" },
+    { id: "f6", fromNode: "while_node", fromPort: "done", toNode: "for_node", toPort: "exec" },
+    { id: "f7", fromNode: "for_node", fromPort: "body", toNode: "sound", toPort: "exec" },
+  ],
+};
+
 // ── compileGraphToC ───────────────────────────────────────────────────────────
 
 describe("NodeGraph serialization", () => {
@@ -242,6 +263,15 @@ describe("compileGraphToC — SNES", () => {
     expect(code).toContain("logic_var_fsm_state = FSM_STATE_RUN;");
     expect(code).toContain("if (logic_var_fsm_state == FSM_STATE_RUN) {");
     expect(code).toContain("SPR_setPosition(spr_player");
+  });
+
+  it("emite estruturas C reais para flow_if, flow_while e flow_for", () => {
+    const code = compileGraphToC(GRAPH_FLOW, "FlowDemo", "megadrive");
+
+    expect(code).toContain("if ((logic_var_speed != 0)) {");
+    expect(code).toContain("while ((logic_var_speed != 0)) {");
+    expect(code).toContain("for (int idx = 0; idx < 3; idx++) {");
+    expect(code).toContain("SND_startPlayPCM(SFX_JUMP");
   });
 });
 

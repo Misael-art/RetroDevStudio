@@ -20,7 +20,10 @@ export type NodeType =
   | "logic_math"
   | "condition_compare"
   | "fsm_state"
-  | "fsm_transition";
+  | "fsm_transition"
+  | "flow_if"
+  | "flow_while"
+  | "flow_for";
 
 export interface NodePort {
   id: string;
@@ -96,7 +99,10 @@ function isNodeType(value: unknown): value is NodeType {
     value === "logic_math" ||
     value === "condition_compare" ||
     value === "fsm_state" ||
-    value === "fsm_transition"
+    value === "fsm_transition" ||
+    value === "flow_if" ||
+    value === "flow_while" ||
+    value === "flow_for"
   );
 }
 
@@ -301,6 +307,42 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     ],
     params: { target_state: "idle" },
   },
+  flow_if: {
+    type: "flow_if", label: "If",
+    inputs: [
+      { id: "exec", label: "▶", kind: "exec" },
+      { id: "condition", label: "Condition", kind: "data", dataType: "bool" },
+    ],
+    outputs: [
+      { id: "true", label: "True ▶", kind: "exec" },
+      { id: "false", label: "False ▶", kind: "exec" },
+    ],
+    params: {},
+  },
+  flow_while: {
+    type: "flow_while", label: "While",
+    inputs: [
+      { id: "exec", label: "▶", kind: "exec" },
+      { id: "condition", label: "Condition", kind: "data", dataType: "bool" },
+    ],
+    outputs: [
+      { id: "body", label: "Body ▶", kind: "exec" },
+      { id: "done", label: "Done ▶", kind: "exec" },
+    ],
+    params: {},
+  },
+  flow_for: {
+    type: "flow_for", label: "For",
+    inputs: [
+      { id: "exec", label: "▶", kind: "exec" },
+      { id: "count", label: "Count", kind: "data", dataType: "int" },
+    ],
+    outputs: [
+      { id: "body", label: "Body ▶", kind: "exec" },
+      { id: "done", label: "Done ▶", kind: "exec" },
+    ],
+    params: { var_name: "i", count: 4 },
+  },
 };
 
 const NODE_COLORS: Record<NodeType, string> = {
@@ -320,6 +362,9 @@ const NODE_COLORS: Record<NodeType, string> = {
   condition_compare: "border-[#fab387] bg-[#fab387]/10",
   fsm_state:         "border-[#74c7ec] bg-[#74c7ec]/10",
   fsm_transition:    "border-[#94e2d5] bg-[#94e2d5]/10",
+  flow_if:           "border-[#f9e2af] bg-[#f9e2af]/10",
+  flow_while:        "border-[#89dceb] bg-[#89dceb]/10",
+  flow_for:          "border-[#b4befe] bg-[#b4befe]/10",
 };
 
 // ── Counter for unique IDs ────────────────────────────────────────────────────
@@ -436,6 +481,7 @@ const PALETTE_TYPES: NodeType[] = [
   "event_start", "sprite_move", "sprite_anim",
   "var_set", "var_get", "logic_math", "condition_compare",
   "fsm_state", "fsm_transition",
+  "flow_if", "flow_while", "flow_for",
   "condition_overlap", "logic_and", "action_sound", 
   "scroll_tilemap", "move_camera", "effect_parallax", "effect_raster",
 ];

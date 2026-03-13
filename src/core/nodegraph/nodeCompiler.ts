@@ -329,6 +329,14 @@ function emitFsmTransitionChain(
   return out;
 }
 
+function emitFlowCondition(
+  graph: NodeGraph,
+  node: GraphNode,
+  target: "megadrive" | "snes"
+): string {
+  return resolveBooleanInput(graph, node.id, "condition", target) || "0";
+}
+
 function emitExecChainFromNode(
   graph: NodeGraph,
   node: GraphNode,
@@ -401,6 +409,64 @@ function emitExecChainFromNode(
       );
     }
     out += `${indentStr}}\n`;
+    return out;
+  }
+
+  if (node.type === "flow_if") {
+    const conditionExpr = emitFlowCondition(graph, node, target);
+    const trueEdge = findOutgoingExecEdge(graph, node.id, "true");
+    const falseEdge = findOutgoingExecEdge(graph, node.id, "false");
+    const trueNode = trueEdge ? findNode(graph, trueEdge.toNode) : undefined;
+    const falseNode = falseEdge ? findNode(graph, falseEdge.toNode) : undefined;
+
+    let out = `${indentStr}if (${conditionExpr}) {\n`;
+    out += trueNode
+      ? emitExecChainFromNode(graph, trueNode, target, new Set(visited), indent + 4)
+      : `${" ".repeat(indent + 4)}// [true branch]\n`;
+    if (falseNode) {
+      out += `${indentStr}} else {\n`;
+      out += emitExecChainFromNode(graph, falseNode, target, new Set(visited), indent + 4);
+      out += `${indentStr}}\n`;
+    } else {
+      out += `${indentStr}}\n`;
+    }
+    return out;
+  }
+
+  if (node.type === "flow_while") {
+    const conditionExpr = emitFlowCondition(graph, node, target);
+    const bodyEdge = findOutgoingExecEdge(graph, node.id, "body");
+    const doneEdge = findOutgoingExecEdge(graph, node.id, "done");
+    const bodyNode = bodyEdge ? findNode(graph, bodyEdge.toNode) : undefined;
+    const doneNode = doneEdge ? findNode(graph, doneEdge.toNode) : undefined;
+
+    let out = `${indentStr}while (${conditionExpr}) {\n`;
+    out += bodyNode
+      ? emitExecChainFromNode(graph, bodyNode, target, new Set(visited), indent + 4)
+      : `${" ".repeat(indent + 4)}// [loop body]\n`;
+    out += `${indentStr}}\n`;
+    if (doneNode) {
+      out += emitExecChainFromNode(graph, doneNode, target, new Set(visited), indent);
+    }
+    return out;
+  }
+
+  if (node.type === "flow_for") {
+    const countExpr = resolveMathInput(graph, node.id, "count");
+    const loopVar = sanitizeIdentifier(String(node.params.var_name ?? "i"));
+    const bodyEdge = findOutgoingExecEdge(graph, node.id, "body");
+    const doneEdge = findOutgoingExecEdge(graph, node.id, "done");
+    const bodyNode = bodyEdge ? findNode(graph, bodyEdge.toNode) : undefined;
+    const doneNode = doneEdge ? findNode(graph, doneEdge.toNode) : undefined;
+
+    let out = `${indentStr}for (int ${loopVar} = 0; ${loopVar} < ${countExpr}; ${loopVar}++) {\n`;
+    out += bodyNode
+      ? emitExecChainFromNode(graph, bodyNode, target, new Set(visited), indent + 4)
+      : `${" ".repeat(indent + 4)}// [loop body]\n`;
+    out += `${indentStr}}\n`;
+    if (doneNode) {
+      out += emitExecChainFromNode(graph, doneNode, target, new Set(visited), indent);
+    }
     return out;
   }
 

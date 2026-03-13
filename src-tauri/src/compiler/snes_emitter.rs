@@ -771,6 +771,25 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], context: &SnesContext, in
                     value_expr = value_expr
                 ));
             }
+            LogicOp::WhileLoop { condition, body, done } => {
+                let condition_expr = render_bool_expr(out, condition, indent);
+                out.push_str(&format!("{indent}while ({condition}) {{\n", indent = indent_str, condition = condition_expr));
+                render_logic_ops(out, body, context, indent + 4);
+                out.push_str(&format!("{indent}}}\n", indent = indent_str));
+                render_logic_ops(out, done, context, indent);
+            }
+            LogicOp::ForLoop { loop_var, count, body, done } => {
+                let count_expr = render_math_expr(count);
+                out.push_str(&format!(
+                    "{indent}for (s16 {loop_var} = 0; {loop_var} < {count}; {loop_var}++) {{\n",
+                    indent = indent_str,
+                    loop_var = loop_var,
+                    count = count_expr
+                ));
+                render_logic_ops(out, body, context, indent + 4);
+                out.push_str(&format!("{indent}}}\n", indent = indent_str));
+                render_logic_ops(out, done, context, indent);
+            }
             LogicOp::StateMachine { machine_var, states } => {
                 render_fsm_states(out, context, machine_var, states, indent);
             }
@@ -1043,6 +1062,17 @@ fn extract_vars_from_op(op: &LogicOp, vars: &mut std::collections::BTreeSet<Stri
             extract_vars_from_bool(condition, vars);
             for sub_op in if_true { extract_vars_from_op(sub_op, vars); }
             for sub_op in if_false { extract_vars_from_op(sub_op, vars); }
+        }
+        LogicOp::WhileLoop { condition, body, done } => {
+            extract_vars_from_bool(condition, vars);
+            for sub_op in body { extract_vars_from_op(sub_op, vars); }
+            for sub_op in done { extract_vars_from_op(sub_op, vars); }
+        }
+        LogicOp::ForLoop { loop_var, count, body, done } => {
+            vars.insert(loop_var.clone());
+            extract_vars_from_math(count, vars);
+            for sub_op in body { extract_vars_from_op(sub_op, vars); }
+            for sub_op in done { extract_vars_from_op(sub_op, vars); }
         }
         LogicOp::StateMachine { machine_var, states } => {
             vars.insert(machine_var.clone());
@@ -1950,5 +1980,42 @@ mod tests {
         assert!(output.main_c.contains("if (logic_var_fsm_state == 0) {"));
         assert!(output.main_c.contains("logic_var_fsm_state = 1;"));
         assert!(output.main_c.contains("else if (logic_var_fsm_state == 1) {"));
+    }
+
+    #[test]
+    fn snes_emitter_emits_flow_while_and_for_loops() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: vec![LogicScript {
+                ops: vec![LogicOp::WhileLoop {
+                    condition: LogicBoolExpr::Compare {
+                        op: CompareOp::Gt,
+                        left: Box::new(LogicMathExpr::Var("speed".to_string())),
+                        right: Box::new(LogicMathExpr::Literal(0)),
+                    },
+                    body: Vec::new(),
+                    done: vec![LogicOp::ForLoop {
+                        loop_var: "idx".to_string(),
+                        count: LogicMathExpr::Literal(3),
+                        body: vec![LogicOp::PlaySound {
+                            sfx: "jump".to_string(),
+                        }],
+                        done: Vec::new(),
+                    }],
+                }],
+            }],
+        };
+
+        let output = emit_snes(&ast, "Flow Demo");
+
+        assert!(output.main_c.contains("while ((logic_var_speed > 0)) {"));
+        assert!(output.main_c.contains("for (s16 idx = 0; idx < 3; idx++) {"));
+        assert!(output.main_c.contains("spcPlaySound(SFX_JUMP);"));
     }
 }
