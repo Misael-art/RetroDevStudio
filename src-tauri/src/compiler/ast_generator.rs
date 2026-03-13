@@ -248,10 +248,20 @@ pub enum LogicOp {
         body: Vec<LogicOp>,
         done: Vec<LogicOp>,
     },
+    TimelineSequence {
+        counter_var: String,
+        slots: Vec<LogicTimelineSlot>,
+    },
     StateMachine {
         machine_var: String,
         states: Vec<LogicFsmState>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LogicTimelineSlot {
+    pub delay_frames: i32,
+    pub actions: Vec<LogicOp>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1638,6 +1648,49 @@ fn compile_logic_node(
                 done,
             }))
         }
+        "timeline_sequence" => {
+            let counter_var = format!(
+                "timeline_{}",
+                sanitize_identifier(
+                    &param_string(node, "timeline_name").unwrap_or_else(|| node.id.clone())
+                )
+            );
+            let mut slots = Vec::new();
+
+            for index in 0..=2 {
+                let delay = param_i32(node, &format!("slot_{}_delay", index), -1);
+                if delay < 0 {
+                    continue;
+                }
+
+                let mut slot_visited = visited.clone();
+                let actions = compile_logic_chain(
+                    graph,
+                    &node.id,
+                    &format!("slot_{}", index),
+                    runtime_entities,
+                    &mut slot_visited,
+                    setup_nodes,
+                    runtime_nodes,
+                    parallax_layers,
+                    raster_lines,
+                );
+                if actions.is_empty() {
+                    continue;
+                }
+
+                slots.push(LogicTimelineSlot {
+                    delay_frames: delay,
+                    actions,
+                });
+            }
+
+            slots.sort_by_key(|slot| slot.delay_frames);
+            Some(CompiledLogicNode::Terminal(LogicOp::TimelineSequence {
+                counter_var,
+                slots,
+            }))
+        }
         _ => None,
     }
 }
@@ -1966,6 +2019,11 @@ fn collect_logic_sound_names_from_ops(
             LogicOp::WhileLoop { body, done, .. } | LogicOp::ForLoop { body, done, .. } => {
                 collect_logic_sound_names_from_ops(body, sound_names);
                 collect_logic_sound_names_from_ops(done, sound_names);
+            }
+            LogicOp::TimelineSequence { slots, .. } => {
+                for slot in slots {
+                    collect_logic_sound_names_from_ops(&slot.actions, sound_names);
+                }
             }
             LogicOp::StateMachine { states, .. } => {
                 for state in states {
@@ -3975,5 +4033,86 @@ mod tests {
 
         assert!(matches!(ops[0], LogicOp::ConditionBool { .. }));
         assert!(matches!(ops[0], LogicOp::ConditionBool { ref if_true, .. } if matches!(if_true[0], LogicOp::WhileLoop { .. })));
+    }
+
+    #[test]
+    fn generate_ast_compiles_timeline_sequence_into_counter_slots() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
+            name: "Timeline Demo".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution { width: 320, height: 224 },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+        };
+        let logic_graph = json!({
+            "version": 1,
+            "nodes": [
+                { "id": "start", "type": "event_start", "label": "Start", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": {} },
+                { "id": "timeline", "type": "timeline_sequence", "label": "Timeline", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": {
+                    "timeline_name": "intro",
+                    "slot_0_delay": 15,
+                    "slot_1_delay": 30,
+                    "slot_2_delay": 45
+                }},
+                { "id": "move", "type": "sprite_move", "label": "Move", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": { "target": "player", "dx": 2, "dy": 0 } },
+                { "id": "sound", "type": "action_sound", "label": "Sound", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": { "sfx": "jump" } }
+            ],
+            "edges": [
+                { "id": "e1", "fromNode": "start", "fromPort": "exec", "toNode": "timeline", "toPort": "exec" },
+                { "id": "e2", "fromNode": "timeline", "fromPort": "slot_0", "toNode": "move", "toPort": "exec" },
+                { "id": "e3", "fromNode": "timeline", "fromPort": "slot_1", "toNode": "sound", "toPort": "exec" }
+            ]
+        });
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "player".to_string(),
+                prefab: None,
+                transform: Transform { x: 16, y: 24 },
+                components: Components {
+                    sprite: Some(SpriteComponent {
+                        asset: "assets/sprites/player.png".to_string(),
+                        frame_width: 16,
+                        frame_height: 16,
+                        pivot: None,
+                        palette_slot: 0,
+                        animations: HashMap::new(),
+                        priority: "foreground".to_string(),
+                    }),
+                    logic: Some(crate::ugdm::components::LogicComponent {
+                        graph: Some(logic_graph.to_string()),
+                        variables: HashMap::new(),
+                    }),
+                    ..Components::default()
+                },
+            }],
+            palettes: Vec::new(),
+            retrofx: None,
+        };
+
+        let ast = generate_ast(&project, &scene);
+        let timeline = ast
+            .logic_scripts
+            .iter()
+            .flat_map(|script| script.ops.iter())
+            .find_map(|op| match op {
+                LogicOp::TimelineSequence { counter_var, slots } => Some((counter_var, slots)),
+                _ => None,
+            })
+            .expect("timeline graph should compile into timeline op");
+
+        assert_eq!(timeline.0, "timeline_intro");
+        assert_eq!(timeline.1.len(), 2);
+        assert_eq!(timeline.1[0].delay_frames, 15);
+        assert!(matches!(timeline.1[0].actions[0], LogicOp::MoveSprite { .. }));
+        assert_eq!(timeline.1[1].delay_frames, 30);
+        assert!(matches!(timeline.1[1].actions[0], LogicOp::PlaySound { .. }));
     }
 }

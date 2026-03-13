@@ -137,6 +137,25 @@ const GRAPH_FLOW: NodeGraph = {
   ],
 };
 
+const GRAPH_TIMELINE: NodeGraph = {
+  nodes: [
+    node("start", "event_start"),
+    node("timeline", "timeline_sequence", {
+      timeline_name: "intro",
+      slot_0_delay: 15,
+      slot_1_delay: 30,
+      slot_2_delay: 45,
+    }),
+    node("move", "sprite_move", { target: "player", dx: 2, dy: 0 }),
+    node("sound", "action_sound", { sfx: "jump" }),
+  ],
+  edges: [
+    { id: "t1", fromNode: "start", fromPort: "exec", toNode: "timeline", toPort: "exec" },
+    { id: "t2", fromNode: "timeline", fromPort: "slot_0", toNode: "move", toPort: "exec" },
+    { id: "t3", fromNode: "timeline", fromPort: "slot_1", toNode: "sound", toPort: "exec" },
+  ],
+};
+
 // ── compileGraphToC ───────────────────────────────────────────────────────────
 
 describe("NodeGraph serialization", () => {
@@ -271,6 +290,18 @@ describe("compileGraphToC — SNES", () => {
     expect(code).toContain("if ((logic_var_speed != 0)) {");
     expect(code).toContain("while ((logic_var_speed != 0)) {");
     expect(code).toContain("for (int idx = 0; idx < 3; idx++) {");
+    expect(code).toContain("SND_startPlayPCM(SFX_JUMP");
+  });
+
+  it("emite timeline_sequence como counter mais switch/case", () => {
+    const code = compileGraphToC(GRAPH_TIMELINE, "TimelineDemo", "megadrive");
+
+    expect(code).toContain("static int logic_var_timeline_intro;");
+    expect(code).toContain("logic_var_timeline_intro++;");
+    expect(code).toContain("switch (logic_var_timeline_intro) {");
+    expect(code).toContain("case 15:");
+    expect(code).toContain("case 30:");
+    expect(code).toContain("SPR_setPosition(spr_player");
     expect(code).toContain("SND_startPlayPCM(SFX_JUMP");
   });
 });

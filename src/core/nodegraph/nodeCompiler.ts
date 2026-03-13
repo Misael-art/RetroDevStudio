@@ -175,6 +175,10 @@ function collectLogicVariables(graph: NodeGraph): string[] {
     if (node.type === "fsm_state") {
       vars.add("fsm_state");
     }
+    if (node.type === "timeline_sequence") {
+      const timelineName = sanitizeIdentifier(String(node.params.timeline_name ?? node.id));
+      vars.add(`timeline_${timelineName}`);
+    }
   }
 
   return [...vars];
@@ -337,6 +341,26 @@ function emitFlowCondition(
   return resolveBooleanInput(graph, node.id, "condition", target) || "0";
 }
 
+type TimelineSlotDef = {
+  index: number;
+  delay: number;
+  nextNode?: GraphNode;
+};
+
+function collectTimelineSlots(graph: NodeGraph, node: GraphNode): TimelineSlotDef[] {
+  return [0, 1, 2]
+    .map((index) => {
+      const nextEdge = findOutgoingExecEdge(graph, node.id, `slot_${index}`);
+      return {
+        index,
+        delay: Number(node.params[`slot_${index}_delay`] ?? 0),
+        nextNode: nextEdge ? findNode(graph, nextEdge.toNode) : undefined,
+      };
+    })
+    .filter((slot) => slot.nextNode && slot.delay >= 0)
+    .sort((left, right) => left.delay - right.delay);
+}
+
 function emitExecChainFromNode(
   graph: NodeGraph,
   node: GraphNode,
@@ -467,6 +491,26 @@ function emitExecChainFromNode(
     if (doneNode) {
       out += emitExecChainFromNode(graph, doneNode, target, new Set(visited), indent);
     }
+    return out;
+  }
+
+  if (node.type === "timeline_sequence") {
+    const timelineName = sanitizeIdentifier(String(node.params.timeline_name ?? node.id));
+    const counterName = `logic_var_timeline_${timelineName}`;
+    const slots = collectTimelineSlots(graph, node);
+
+    let out = `${indentStr}${counterName}++;\n`;
+    out += `${indentStr}switch (${counterName}) {\n`;
+    for (const slot of slots) {
+      out += `${" ".repeat(indent + 4)}case ${slot.delay}:\n`;
+      if (slot.nextNode) {
+        out += emitExecChainFromNode(graph, slot.nextNode, target, new Set(visited), indent + 8);
+      }
+      out += `${" ".repeat(indent + 8)}break;\n`;
+    }
+    out += `${" ".repeat(indent + 4)}default:\n`;
+    out += `${" ".repeat(indent + 8)}break;\n`;
+    out += `${indentStr}}\n`;
     return out;
   }
 

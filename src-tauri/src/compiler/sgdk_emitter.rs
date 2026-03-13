@@ -2,7 +2,7 @@ use crate::compiler::ast_generator::{
     collect_bgm_tracks, collect_collision_checks, collect_logic_sound_names,
     collect_parallax_layers, collect_physics_applications, collect_raster_lines,
     collect_sfx_resources, collect_tilemap_assets, AabbCollisionCheck, AstNode, AstOutput,
-    LogicBoolExpr, LogicCollisionTarget, LogicFsmState, LogicFsmTransition, LogicOp, LogicMathExpr, CompareOp, LogicPositionSource, LogicScript,
+    LogicBoolExpr, LogicCollisionTarget, LogicFsmState, LogicFsmTransition, LogicOp, LogicMathExpr, LogicPositionSource, LogicScript, LogicTimelineSlot, CompareOp,
     ParallaxLayerConfig, PhysicsApplication, RasterLineConfig, SpriteAsset, TilemapAsset,
 };
 
@@ -604,11 +604,37 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                 out.push_str(&format!("{indent}}}\n", indent = indent_str));
                 render_logic_ops(out, done, indent);
             }
+            LogicOp::TimelineSequence { counter_var, slots } => {
+                render_timeline_sequence(out, counter_var, slots, indent);
+            }
             LogicOp::StateMachine { machine_var, states } => {
                 render_fsm_states(out, machine_var, states, indent);
             }
         }
     }
+}
+
+fn render_timeline_sequence(
+    out: &mut String,
+    counter_var: &str,
+    slots: &[LogicTimelineSlot],
+    indent: usize,
+) {
+    let indent_str = " ".repeat(indent);
+    out.push_str(&format!("{indent}logic_var_{counter}++;\n", indent = indent_str, counter = counter_var));
+    out.push_str(&format!("{indent}switch (logic_var_{counter}) {{\n", indent = indent_str, counter = counter_var));
+    for slot in slots {
+        out.push_str(&format!(
+            "{indent}case {delay}:\n",
+            indent = " ".repeat(indent + 4),
+            delay = slot.delay_frames
+        ));
+        render_logic_ops(out, &slot.actions, indent + 8);
+        out.push_str(&format!("{indent}break;\n", indent = " ".repeat(indent + 8)));
+    }
+    out.push_str(&format!("{indent}default:\n", indent = " ".repeat(indent + 4)));
+    out.push_str(&format!("{indent}break;\n", indent = " ".repeat(indent + 8)));
+    out.push_str(&format!("{indent}}}\n", indent = indent_str));
 }
 
 fn render_fsm_states(out: &mut String, machine_var: &str, states: &[LogicFsmState], indent: usize) {
@@ -852,6 +878,12 @@ fn extract_vars_from_op(op: &LogicOp, vars: &mut std::collections::BTreeSet<Stri
             extract_vars_from_math(count, vars);
             for sub_op in body { extract_vars_from_op(sub_op, vars); }
             for sub_op in done { extract_vars_from_op(sub_op, vars); }
+        }
+        LogicOp::TimelineSequence { counter_var, slots } => {
+            vars.insert(counter_var.clone());
+            for slot in slots {
+                for sub_op in &slot.actions { extract_vars_from_op(sub_op, vars); }
+            }
         }
         LogicOp::StateMachine { machine_var, states } => {
             vars.insert(machine_var.clone());
@@ -1709,6 +1741,49 @@ mod tests {
 
         assert!(output.main_c.contains("while ((logic_var_speed > 0)) {"));
         assert!(output.main_c.contains("for (s16 idx = 0; idx < 3; idx++) {"));
+        assert!(output.main_c.contains("SND_startPlayPCM_XGM(SFX_JUMP, 1, SOUND_PCM_CH_AUTO);"));
+    }
+
+    #[test]
+    fn main_c_emits_timeline_sequence_switch() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: vec![LogicScript {
+                ops: vec![LogicOp::TimelineSequence {
+                    counter_var: "timeline_intro".to_string(),
+                    slots: vec![
+                        crate::compiler::ast_generator::LogicTimelineSlot {
+                            delay_frames: 15,
+                            actions: vec![LogicOp::MoveSprite {
+                                target_var: "spr_player".to_string(),
+                                dx: 2,
+                                dy: 0,
+                            }],
+                        },
+                        crate::compiler::ast_generator::LogicTimelineSlot {
+                            delay_frames: 30,
+                            actions: vec![LogicOp::PlaySound {
+                                sfx: "jump".to_string(),
+                            }],
+                        },
+                    ],
+                }],
+            }],
+        };
+
+        let output = emit_sgdk(&ast, "Timeline Demo");
+
+        assert!(output.main_c.contains("static s32 logic_var_timeline_intro = 0;"));
+        assert!(output.main_c.contains("logic_var_timeline_intro++;"));
+        assert!(output.main_c.contains("switch (logic_var_timeline_intro) {"));
+        assert!(output.main_c.contains("case 15:"));
+        assert!(output.main_c.contains("case 30:"));
         assert!(output.main_c.contains("SND_startPlayPCM_XGM(SFX_JUMP, 1, SOUND_PCM_CH_AUTO);"));
     }
 }

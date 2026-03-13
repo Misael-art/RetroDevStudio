@@ -23,7 +23,8 @@ export type NodeType =
   | "fsm_transition"
   | "flow_if"
   | "flow_while"
-  | "flow_for";
+  | "flow_for"
+  | "timeline_sequence";
 
 export interface NodePort {
   id: string;
@@ -102,7 +103,8 @@ function isNodeType(value: unknown): value is NodeType {
     value === "fsm_transition" ||
     value === "flow_if" ||
     value === "flow_while" ||
-    value === "flow_for"
+    value === "flow_for" ||
+    value === "timeline_sequence"
   );
 }
 
@@ -343,6 +345,21 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     ],
     params: { var_name: "i", count: 4 },
   },
+  timeline_sequence: {
+    type: "timeline_sequence", label: "Timeline",
+    inputs: [{ id: "exec", label: "▶", kind: "exec" }],
+    outputs: [
+      { id: "slot_0", label: "Slot 1 ▶", kind: "exec" },
+      { id: "slot_1", label: "Slot 2 ▶", kind: "exec" },
+      { id: "slot_2", label: "Slot 3 ▶", kind: "exec" },
+    ],
+    params: {
+      timeline_name: "cutscene",
+      slot_0_delay: 30,
+      slot_1_delay: 60,
+      slot_2_delay: 90,
+    },
+  },
 };
 
 const NODE_COLORS: Record<NodeType, string> = {
@@ -365,6 +382,7 @@ const NODE_COLORS: Record<NodeType, string> = {
   flow_if:           "border-[#f9e2af] bg-[#f9e2af]/10",
   flow_while:        "border-[#89dceb] bg-[#89dceb]/10",
   flow_for:          "border-[#b4befe] bg-[#b4befe]/10",
+  timeline_sequence: "border-[#f5c2e7] bg-[#f5c2e7]/10",
 };
 
 // ── Counter for unique IDs ────────────────────────────────────────────────────
@@ -482,6 +500,7 @@ const PALETTE_TYPES: NodeType[] = [
   "var_set", "var_get", "logic_math", "condition_compare",
   "fsm_state", "fsm_transition",
   "flow_if", "flow_while", "flow_for",
+  "timeline_sequence",
   "condition_overlap", "logic_and", "action_sound", 
   "scroll_tilemap", "move_camera", "effect_parallax", "effect_raster",
 ];
