@@ -26,6 +26,23 @@ pub struct BuildResult {
     pub log: Vec<BuildLogLine>,
 }
 
+#[derive(Debug, serde::Serialize, Clone)]
+pub struct MultiTargetBuildEntry {
+    pub target: String,
+    pub ok: bool,
+    pub rom_path: String,
+    pub rom_size_bytes: u64,
+    pub warnings: Vec<String>,
+    pub errors: Vec<String>,
+    pub log: Vec<BuildLogLine>,
+}
+
+#[derive(Debug, serde::Serialize, Clone)]
+pub struct MultiTargetBuildResult {
+    pub ok: bool,
+    pub results: Vec<MultiTargetBuildEntry>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct BuildEnvironment {
     pub sgdk_root: Option<PathBuf>,
@@ -113,6 +130,130 @@ where
         }
     };
 
+    let mut result = run_build_for_project_with_environment(project_dir, &project, environment, on_log);
+    let mut combined_log = log;
+    combined_log.append(&mut result.log);
+    result.log = combined_log;
+    result
+}
+
+pub fn run_build_multi_target<F>(
+    project_dir: &Path,
+    targets: &[String],
+    on_log: F,
+) -> MultiTargetBuildResult
+where
+    F: Fn(BuildLogLine),
+{
+    let environment = BuildEnvironment::detect();
+    run_build_multi_target_with_environment(project_dir, targets, &environment, on_log)
+}
+
+pub fn run_build_multi_target_with_environment<F>(
+    project_dir: &Path,
+    targets: &[String],
+    environment: &BuildEnvironment,
+    on_log: F,
+) -> MultiTargetBuildResult
+where
+    F: Fn(BuildLogLine),
+{
+    let mut log = Vec::new();
+
+    macro_rules! emit {
+        ($level:expr, $message:expr) => {{
+            let entry = BuildLogLine {
+                level: $level.to_string(),
+                message: $message.to_string(),
+            };
+            on_log(entry.clone());
+            log.push(entry);
+        }};
+    }
+
+    emit!("info", format!("Carregando projeto em: {}", project_dir.display()));
+
+    let project = match load_project(project_dir) {
+        Ok(project) => project,
+        Err(error) => {
+            emit!("error", format!("Falha ao carregar project.rds: {}", error));
+            return MultiTargetBuildResult {
+                ok: false,
+                results: vec![MultiTargetBuildEntry {
+                    target: "load_project".to_string(),
+                    ok: false,
+                    rom_path: String::new(),
+                    rom_size_bytes: 0,
+                    warnings: Vec::new(),
+                    errors: vec![format!("Falha ao carregar project.rds: {}", error)],
+                    log,
+                }],
+            };
+        }
+    };
+
+    let mut results = Vec::new();
+
+    for target_name in targets {
+        emit!("info", format!("Iniciando build para target '{}'.", target_name));
+
+        let entry = match project_with_target_override(&project, target_name) {
+            Ok(project_override) => {
+                let prefixed_result =
+                    run_build_for_project_with_environment(project_dir, &project_override, environment, |line| {
+                        on_log(BuildLogLine {
+                            level: line.level.clone(),
+                            message: format!("[{}] {}", target_name, line.message),
+                        });
+                    });
+
+                build_entry_from_result(target_name, prefixed_result)
+            }
+            Err(error) => MultiTargetBuildEntry {
+                target: target_name.clone(),
+                ok: false,
+                rom_path: String::new(),
+                rom_size_bytes: 0,
+                warnings: Vec::new(),
+                errors: vec![error],
+                log: vec![BuildLogLine {
+                    level: "error".to_string(),
+                    message: format!("[{}] target override invalido", target_name),
+                }],
+            },
+        };
+
+        results.push(entry);
+    }
+
+    MultiTargetBuildResult {
+        ok: !results.is_empty() && results.iter().all(|entry| entry.ok),
+        results,
+    }
+}
+
+fn run_build_for_project_with_environment<F>(
+    project_dir: &Path,
+    project: &Project,
+    environment: &BuildEnvironment,
+    on_log: F,
+) -> BuildResult
+where
+    F: Fn(BuildLogLine),
+{
+    let mut log = Vec::new();
+
+    macro_rules! emit {
+        ($level:expr, $message:expr) => {{
+            let entry = BuildLogLine {
+                level: $level.to_string(),
+                message: $message.to_string(),
+            };
+            on_log(entry.clone());
+            log.push(entry);
+        }};
+    }
+
     let target = match target_spec(&project.target) {
         Ok(target) => target,
         Err(error) => {
@@ -192,7 +333,7 @@ where
     }
 
     emit!("info", "Gerando codigo C e manifestos...");
-    let ast = match generate_ast_with_prefabs(project_dir, &project, &scene) {
+    let ast = match generate_ast_with_prefabs(project_dir, project, &scene) {
         Ok(ast) => ast,
         Err(error) => {
             emit!("error", format!("Falha ao gerar AST com prefabs: {}", error));
@@ -220,7 +361,7 @@ where
         }
     };
 
-    let workspace = match prepare_workspace(project_dir, &project, target, &ast, &artifacts) {
+    let workspace = match prepare_workspace(project_dir, project, target, &ast, &artifacts) {
         Ok(workspace) => workspace,
         Err(error) => {
             emit!("error", error);
@@ -298,6 +439,47 @@ where
         ok: true,
         rom_path: rom_path.to_string_lossy().to_string(),
         log,
+    }
+}
+
+fn project_with_target_override(project: &Project, target_name: &str) -> Result<Project, String> {
+    let target = target_spec(target_name).map_err(|error| error.to_string())?;
+    let mut project_override = project.clone();
+    project_override.target = target.target.to_string();
+    project_override.resolution = target.resolution();
+    project_override.palette_mode = target.palette_mode.to_string();
+    Ok(project_override)
+}
+
+fn build_entry_from_result(target: &str, result: BuildResult) -> MultiTargetBuildEntry {
+    let rom_size_bytes = if result.ok && !result.rom_path.is_empty() {
+        fs::metadata(&result.rom_path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    let warnings = result
+        .log
+        .iter()
+        .filter(|line| line.level == "warn")
+        .map(|line| line.message.clone())
+        .collect::<Vec<_>>();
+    let errors = result
+        .log
+        .iter()
+        .filter(|line| line.level == "error")
+        .map(|line| line.message.clone())
+        .collect::<Vec<_>>();
+
+    MultiTargetBuildEntry {
+        target: target.to_string(),
+        ok: result.ok,
+        rom_path: result.rom_path,
+        rom_size_bytes,
+        warnings,
+        errors,
+        log: result.log,
     }
 }
 
@@ -1700,6 +1882,79 @@ mod tests {
         .expect("read SNES audio main.c");
         assert!(main_c.contains("spcSetSoundEntry(SFX_JUMP, 8, 0, (u8*)&jump_sfx);"));
         assert!(main_c.contains("spcLoad((u8*)&stage_theme_bgm);"));
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn multi_target_build_generates_reports_for_megadrive_and_snes() {
+        let _serial = test_serial_guard();
+        let project_dir = workspace_copy("megadrive_dummy");
+        let (sgdk_root, sgdk_make_program) = fake_toolchain("sgdk-multi", "md");
+        let (pvsneslib_root, pvsneslib_make_program) = fake_toolchain("pvsneslib-multi", "sfc");
+        fs::create_dir_all(pvsneslib_root.join("devkitsnes")).expect("create fake devkitsnes");
+        fs::write(
+            pvsneslib_root.join("devkitsnes").join("snes_rules"),
+            "dummy rules",
+        )
+        .expect("write fake snes_rules");
+        let environment = BuildEnvironment {
+            sgdk_root: Some(sgdk_root),
+            sgdk_make_program: Some(sgdk_make_program),
+            pvsneslib_root: Some(pvsneslib_root),
+            pvsneslib_make_program: Some(pvsneslib_make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_multi_target_with_environment(
+            &project_dir,
+            &["megadrive".to_string(), "snes".to_string()],
+            &environment,
+            |_| {},
+        );
+
+        assert!(result.ok, "multi-target result: {:?}", result.results);
+        assert_eq!(result.results.len(), 2);
+        assert_eq!(result.results[0].target, "megadrive");
+        assert!(result.results[0].ok, "megadrive log: {:?}", result.results[0].log);
+        assert!(result.results[0].rom_path.ends_with(".md"));
+        assert!(result.results[0].rom_size_bytes > 0);
+        assert_eq!(result.results[1].target, "snes");
+        assert!(result.results[1].ok, "snes log: {:?}", result.results[1].log);
+        assert!(result.results[1].rom_path.ends_with(".sfc"));
+        assert!(result.results[1].rom_size_bytes > 0);
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn multi_target_build_reports_partial_failure_when_one_toolchain_is_missing() {
+        let _serial = test_serial_guard();
+        let project_dir = workspace_copy("megadrive_dummy");
+        let (sgdk_root, sgdk_make_program) = fake_toolchain("sgdk-multi-partial", "md");
+        let environment = BuildEnvironment {
+            sgdk_root: Some(sgdk_root),
+            sgdk_make_program: Some(sgdk_make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_multi_target_with_environment(
+            &project_dir,
+            &["megadrive".to_string(), "snes".to_string()],
+            &environment,
+            |_| {},
+        );
+
+        assert!(!result.ok);
+        assert_eq!(result.results.len(), 2);
+        assert!(result.results[0].ok);
+        assert!(!result.results[1].ok);
+        assert!(result.results[1]
+            .errors
+            .iter()
+            .any(|error| error.contains("Toolchain PVSnesLib nao encontrada")));
 
         let _ = fs::remove_dir_all(project_dir);
     }

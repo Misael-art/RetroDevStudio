@@ -14,6 +14,21 @@ export interface BuildResult {
   log: BuildLogLine[];
 }
 
+export interface MultiTargetBuildEntry {
+  target: string;
+  ok: boolean;
+  rom_path: string;
+  rom_size_bytes: number;
+  warnings: string[];
+  errors: string[];
+  log: BuildLogLine[];
+}
+
+export interface MultiTargetBuildResult {
+  ok: boolean;
+  results: MultiTargetBuildEntry[];
+}
+
 export interface ValidationResult {
   ok: boolean;
   errors: string[];
@@ -65,6 +80,22 @@ export async function buildProject(
   try {
     const result = await invoke<BuildResult>("build_project", { projectDir });
     return result;
+  } finally {
+    unlisten();
+  }
+}
+
+export async function buildMultiTarget(
+  projectDir: string,
+  targets: string[],
+  onLog: (line: BuildLogLine) => void
+): Promise<MultiTargetBuildResult> {
+  const unlisten: UnlistenFn = await listen<BuildLogLine>("build://log", (event) => {
+    onLog(event.payload);
+  });
+
+  try {
+    return await invoke<MultiTargetBuildResult>("build_multi_target", { projectDir, targets });
   } finally {
     unlisten();
   }

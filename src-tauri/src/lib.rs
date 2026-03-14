@@ -11,7 +11,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use compiler::ast_generator::generate_ast;
-use compiler::build_orch::{run_build, BuildLogLine, BuildResult};
+use compiler::build_orch::{
+    run_build,
+    run_build_multi_target,
+    BuildLogLine,
+    BuildResult,
+    MultiTargetBuildResult,
+};
 use compiler::sgdk_emitter::emit_sgdk;
 use compiler::snes_emitter::emit_snes;
 use core::editor_validation::{
@@ -191,6 +197,18 @@ fn validate_scene_draft(project_dir: String, scene_json: String) -> DraftValidat
 fn build_project(app: AppHandle, project_dir: String) -> BuildResult {
     let dir = PathBuf::from(&project_dir);
     run_build(&dir, move |line: BuildLogLine| {
+        let _ = app.emit("build://log", &line);
+    })
+}
+
+#[tauri::command]
+fn build_multi_target(
+    app: AppHandle,
+    project_dir: String,
+    targets: Vec<String>,
+) -> MultiTargetBuildResult {
+    let dir = PathBuf::from(&project_dir);
+    run_build_multi_target(&dir, &targets, move |line: BuildLogLine| {
         let _ = app.emit("build://log", &line);
     })
 }
@@ -892,6 +910,7 @@ pub fn run() {
             validate_project,
             generate_c_code,
             build_project,
+            build_multi_target,
             validate_scene_draft,
             poll_project_asset_changes,
             // Hardware status

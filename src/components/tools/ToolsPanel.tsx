@@ -5,6 +5,11 @@ import Panel from "../common/Panel";
 import { useEditorStore } from "../../core/store/editorStore";
 import { listenToProjectAssetChanges } from "../../core/ipc/projectWatcherService";
 import type { Scene } from "../../core/ipc/sceneService";
+import {
+  buildMultiTarget,
+  type BuildLogLine,
+  type MultiTargetBuildResult,
+} from "../../core/ipc/buildService";
 import { emulatorReadMemory } from "../../core/ipc/emulatorService";
 import { decodeTilesToImageData, getActivePalette } from "./vramViewer";
 import {
@@ -689,10 +694,12 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
 }
 
 function RuntimeSetup() {
-  const { logMessage } = useEditorStore();
+  const { activeProjectDir, logMessage } = useEditorStore();
   const [items, setItems] = useState<DependencyStatus[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [multiBuildBusy, setMultiBuildBusy] = useState(false);
+  const [multiBuildReport, setMultiBuildReport] = useState<MultiTargetBuildResult | null>(null);
 
   async function refreshStatus() {
     setLoading(true);
@@ -728,6 +735,43 @@ function RuntimeSetup() {
     } finally {
       setBusyId(null);
     }
+  }
+
+  async function runBuildAllTargets() {
+    if (!activeProjectDir) {
+      logMessage("warn", "[Build All] Abra um projeto antes de iniciar o build multi-target.");
+      return;
+    }
+
+    setMultiBuildBusy(true);
+    try {
+      const report = await buildMultiTarget(
+        activeProjectDir,
+        ["megadrive", "snes"],
+        (line: BuildLogLine) => {
+          logMessage(line.level, `[Build All] ${line.message}`);
+        }
+      );
+      setMultiBuildReport(report);
+      logMessage(
+        report.ok ? "success" : "warn",
+        `[Build All] ${report.results.filter((entry) => entry.ok).length}/${report.results.length} target(s) concluidos.`
+      );
+    } catch (error) {
+      logMessage("error", `[Build All] Falha inesperada: ${describeError(error)}`);
+    } finally {
+      setMultiBuildBusy(false);
+    }
+  }
+
+  function formatBytes(value: number): string {
+    if (value <= 0) {
+      return "0 B";
+    }
+    if (value < 1024) {
+      return `${value} B`;
+    }
+    return `${(value / 1024).toFixed(1)} KB`;
   }
 
   return (
@@ -797,6 +841,87 @@ function RuntimeSetup() {
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="flex flex-col gap-3 rounded border border-[#313244] bg-[#11111b] p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex flex-col gap-1">
+            <span className="text-xs font-semibold text-[#cdd6f4]">Multi-Target Build</span>
+            <p className="text-[10px] leading-tight text-[#7f849c]">
+              Compila Mega Drive e SNES em sequencia sem alterar o target salvo do projeto.
+            </p>
+          </div>
+          <button
+            onClick={() => void runBuildAllTargets()}
+            disabled={!activeProjectDir || multiBuildBusy || loading || busyId !== null}
+            className={`rounded px-3 py-1.5 text-[10px] font-semibold transition-colors ${
+              !activeProjectDir || multiBuildBusy || loading || busyId !== null
+                ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
+                : "bg-[#89b4fa] text-[#1e1e2e] hover:bg-[#74a8f0]"
+            }`}
+          >
+            {multiBuildBusy ? "Compilando..." : "Build All Targets"}
+          </button>
+        </div>
+
+        <p className="text-[10px] text-[#45475a]">
+          Projeto ativo: <span className="font-mono text-[#cdd6f4]">{activeProjectDir || "(nenhum)"}</span>
+        </p>
+
+        {multiBuildReport && (
+          <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+            {multiBuildReport.results.map((entry) => (
+              <div key={entry.target} className="flex flex-col gap-2 rounded border border-[#313244] bg-[#1e1e2e] p-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold uppercase text-[#cdd6f4]">{entry.target}</span>
+                  <span className={`text-[10px] font-bold ${entry.ok ? "text-[#a6e3a1]" : "text-[#f38ba8]"}`}>
+                    {entry.ok ? "OK" : "FALHOU"}
+                  </span>
+                  <span className="ml-auto text-[10px] text-[#7f849c]">{formatBytes(entry.rom_size_bytes)}</span>
+                </div>
+
+                <p className="break-all font-mono text-[10px] text-[#7f849c]">
+                  {entry.rom_path || "Sem ROM gerada"}
+                </p>
+
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="rounded bg-[#11111b] p-2">
+                    <div className="text-[9px] uppercase tracking-wide text-[#45475a]">Warnings</div>
+                    <div className="text-sm font-bold text-[#fab387]">{entry.warnings.length}</div>
+                  </div>
+                  <div className="rounded bg-[#11111b] p-2">
+                    <div className="text-[9px] uppercase tracking-wide text-[#45475a]">Errors</div>
+                    <div className="text-sm font-bold text-[#f38ba8]">{entry.errors.length}</div>
+                  </div>
+                  <div className="rounded bg-[#11111b] p-2">
+                    <div className="text-[9px] uppercase tracking-wide text-[#45475a]">Logs</div>
+                    <div className="text-sm font-bold text-[#89b4fa]">{entry.log.length}</div>
+                  </div>
+                </div>
+
+                {entry.warnings.length > 0 && (
+                  <div className="flex max-h-20 flex-col gap-1 overflow-y-auto rounded bg-[#11111b] p-2">
+                    {entry.warnings.map((warning, index) => (
+                      <p key={`${entry.target}-warn-${index}`} className="text-[10px] leading-tight text-[#fab387]">
+                        {warning}
+                      </p>
+                    ))}
+                  </div>
+                )}
+
+                {entry.errors.length > 0 && (
+                  <div className="flex max-h-20 flex-col gap-1 overflow-y-auto rounded bg-[#11111b] p-2">
+                    {entry.errors.map((error, index) => (
+                      <p key={`${entry.target}-error-${index}`} className="text-[10px] leading-tight text-[#f38ba8]">
+                        {error}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <p className="text-[9px] leading-tight text-[#45475a]">
