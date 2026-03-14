@@ -1,7 +1,7 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 **Status:** Documento vivo
 **Ultima revisao canonica:** 2026-03-14
-**Fase ativa real:** Release candidate / beta testing do desktop Tauri, com RC hotfixado apos validacao manual inicial, onboarding/template/fluxo de autoria endurecidos no editor real, staging SGDK alinhado ao `rescomp`, packaging MSI reemitido e updater em placeholder por politica de dependencias
+**Fase ativa real:** Release candidate / beta testing do desktop Tauri, com RC hotfixado apos validacao manual inicial, onboarding/template/fluxo de autoria endurecidos no editor real, pipeline SGDK alinhado ao `rescomp` para staging/conversao de sprites, packaging MSI reemitido e updater em placeholder por politica de dependencias
 
 > **DIRETRIZ PARA AGENTES DE IA**
 > Este roadmap precisa refletir estado real do codigo, nao claims historicas.
@@ -63,14 +63,15 @@
 - Hardening adicional do onboarding/editor concluido em codigo e validado localmente: o `NodeGraphEditor` agora hidrata o schema legado do backend, novos projetos passam a nascer com o graph inicial no formato completo do editor, cenas antigas de onboarding reparam placeholder/edge inicial ao carregar e o editor passou a limitar sprites simples ao envelope suportado por target via `sceneConstraints` (`783f1b0`, `3666375`).
 - Hardening adicional do fluxo de autoria concluido em codigo e validado localmente: cenas vazias agora oferecem `Sprite Inicial` na `Hierarchy`, o `Asset Browser` instancia imagens direto na cena ativa, o `Scene View` explica como sair do estado vazio e os caminhos receberam cobertura dedicada no frontend (`88df160`).
 - Hotfix adicional do build Mega Drive concluido em codigo e validado localmente: o staging SGDK agora copia sprites, tilemaps e audio para `build/megadrive/res/assets/...`, alinhando o workspace ao contrato real do `resources.res`/`ResComp`; a suite Rust de `build_orch` passou a travar esse layout com fixture de sprite real (`ac1ee60`).
-- O bundle MSI foi reemitido novamente apos o hotfix de staging SGDK em `src-tauri/target-test/release/bundle/msi/RetroDev Studio_0.1.0_x64_en-US.msi`, alinhando o pacote de reteste ao estado atual do branch.
+- Hotfix adicional do build Mega Drive concluido em codigo e validado localmente: sprites SGDK agora sao convertidos para `.bmp` no staging, o `resources.res` passou a apontar para esse `.bmp` em vez do `.ppm` cru e o smoke oficial de Windows agora exige que um projeto de onboarding Mega Drive compile com toolchain real (`74b781f`).
+- O bundle MSI foi reemitido novamente apos o hotfix de conversao SGDK em `src-tauri/target-test/release/bundle/msi/RetroDev Studio_0.1.0_x64_en-US.msi`, alinhando o pacote de reteste ao estado atual do branch.
 
 ### Ainda em hardening
 - Runtime real de auto-update continua bloqueado ate aprovacao explicita para adicionar `tauri-plugin-updater` sob a politica atual de dependencias.
 - Repeticao institucional do bundle MSI, do smoke desktop e do fluxo oficial upstream em Windows quando build, emulacao, onboarding ou packaging forem alterados.
 - Este host ainda pode exigir diagnostico adicional para bootstrap WebDriver (`DevToolsActivePort` / `chrome not reachable`) e para `spawn EPERM` em builds desktop fora do wrapper MSVC canonico, embora o smoke local MD/SNES tenha voltado a passar nesta sessao de hotfix.
 - Decisao final de governanca do workflow desktop dedicado (`push`/`pull_request` path-filtered, `workflow_dispatch`, `workflow_call` ou gate protegido).
-- Auditoria residual de UX, com prioridade para revalidar o fluxo de autoria pos-hotfix (cena vazia -> sprite inicial -> inspector -> build), o caminho `Novo Projeto -> Build & Run` no Mega Drive apos o ajuste de staging SGDK e as superficies ainda `Experimental` (`Asset Browser`, `VRAM Viewer`, `Reverse Explorer`, `Asset Extractor`, `RetroFX`) antes de transformar o release candidate em beta institucional.
+- Auditoria residual de UX, com prioridade para revalidar o fluxo de autoria pos-hotfix (cena vazia -> sprite inicial -> inspector -> build), o caminho `Novo Projeto -> Build & Run` no Mega Drive apos os ajustes de staging/conversao SGDK e as superficies ainda `Experimental` (`Asset Browser`, `VRAM Viewer`, `Reverse Explorer`, `Asset Extractor`, `RetroFX`) antes de transformar o release candidate em beta institucional.
 
 ---
 
@@ -183,7 +184,7 @@
 
 1. Manter o baseline canonico verde antes e depois de qualquer ajuste relevante.
 2. Repetir bundle MSI e smoke desktop em host Windows institucional para mudancas sensiveis de build, emulacao, packaging, onboarding e projeto.
-3. Executar QA do onboarding/template inicial, `Novo Projeto -> Build & Run` no Mega Drive, replay/rewind, build multi-target e Patch Studio com compliance.
+3. Executar QA do onboarding/template inicial, `Novo Projeto -> Build & Run` no Mega Drive com o placeholder padrao, replay/rewind, build multi-target e Patch Studio com compliance.
 4. Decidir se a dependencia `tauri-plugin-updater` pode ser aprovada sob a politica atual.
 5. Preparar release notes, criterios de aceite e checklist de beta testing antes de promover o release candidate.
 
