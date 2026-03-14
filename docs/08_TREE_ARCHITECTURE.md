@@ -24,6 +24,7 @@ RetroDevStudio/
 |-- vite.config.ts
 |-- data/
 |   |-- rom_teste.bin
+|   |-- template_registry.json
 |   `-- sonic_test.gen
 |
 |-- docs/
@@ -92,6 +93,7 @@ RetroDevStudio/
 |-- scripts/
 |   |-- bootstrap.ps1
 |   |-- check-tree.cjs
+|   |-- diagnose-desktop-e2e.ps1
 |   |-- e2e-tauri-build-run.mjs
 |   `-- create-icon.mjs
 |

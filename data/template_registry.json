@@ -1,0 +1,39 @@
+{
+  "version": "1.0.0",
+  "templates": [
+    {
+      "id": "empty",
+      "name": "Projeto Vazio",
+      "description": "Cena vazia sem entidades. Para quem quer comecar do zero.",
+      "genre": "blank",
+      "difficulty": "beginner",
+      "features": [],
+      "source_kind": "builtin",
+      "recommended_target": "megadrive",
+      "experimental": false
+    },
+    {
+      "id": "starter_guided",
+      "name": "Primeiro Projeto",
+      "description": "Sprite placeholder com logica minima. Ideal para aprender o editor.",
+      "genre": "tutorial",
+      "difficulty": "beginner",
+      "features": ["sprite", "logic"],
+      "source_kind": "builtin",
+      "recommended_target": "megadrive",
+      "experimental": false
+    },
+    {
+      "id": "platformer_seed",
+      "name": "Plataforma",
+      "description": "Sprite de personagem, tilemap de cenario e som de pulo importados de template SGDK externo. Mega Drive only.",
+      "genre": "platformer",
+      "difficulty": "intermediate",
+      "features": ["sprite", "tilemap", "physics", "collision", "input", "audio", "camera"],
+      "source_kind": "external_sgdk",
+      "default_donor_path": "F:\\Projects\\MegaDrive_DEV\\SGDK_templates\\templates\\plataform",
+      "recommended_target": "megadrive",
+      "experimental": true
+    }
+  ]
+}

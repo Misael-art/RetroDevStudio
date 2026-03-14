@@ -6,9 +6,16 @@ use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::ugdm::components::{
+    AudioComponent,
+    CameraComponent,
+    CollisionComponent,
+    InputComponent,
     Components,
     LogicComponent,
+    PhysicsComponent,
     SpriteComponent,
+    TilemapComponent,
+    Velocity,
 };
 use crate::ugdm::entities::{
     BuildConfig,
@@ -29,12 +36,53 @@ pub const DEFAULT_ENTRY_SCENE: &str = "scenes/main.json";
 pub const DEFAULT_SCENE_ID: &str = "main";
 pub const ONBOARDING_SPRITE_ASSET: &str = "assets/sprites/onboarding_player.ppm";
 pub const ONBOARDING_SPRITE_SIZE: u32 = 16;
+pub const PLATFORMER_PLAYER_ASSET: &str = "assets/sprites/platformer_player.png";
+pub const PLATFORMER_TILESET_ASSET: &str = "assets/tilesets/platformer_level.png";
+pub const PLATFORMER_JUMP_ASSET: &str = "assets/audio/jump.wav";
+const TEMPLATE_REGISTRY_JSON: &str = include_str!("../../../data/template_registry.json");
 
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 pub struct SceneInfo {
     pub path: String,
     pub scene_id: String,
     pub display_name: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct TemplateRegistry {
+    version: String,
+    templates: Vec<TemplateRegistryEntry>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct TemplateRegistryEntry {
+    id: String,
+    name: String,
+    description: String,
+    genre: String,
+    difficulty: String,
+    #[serde(default)]
+    features: Vec<String>,
+    source_kind: String,
+    recommended_target: String,
+    experimental: bool,
+    default_donor_path: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct ProjectTemplateSummary {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub genre: String,
+    pub difficulty: String,
+    pub features: Vec<String>,
+    pub source_kind: String,
+    pub recommended_target: String,
+    pub experimental: bool,
+    pub available: bool,
+    pub availability_reason: Option<String>,
+    pub default_donor_path: Option<String>,
 }
 
 #[derive(Debug)]
@@ -158,6 +206,350 @@ pub fn create_project_skeleton(
     save_scene(project_dir, &project.entry_scene, &scene)?;
 
     Ok(project)
+}
+
+pub fn list_project_templates() -> Result<Vec<ProjectTemplateSummary>, LoadError> {
+    let registry = template_registry()?;
+    if registry.version.trim().is_empty() {
+        return Err(LoadError(
+            "data/template_registry.json invalido: campo 'version' nao pode ser vazio.".to_string(),
+        ));
+    }
+
+    registry
+        .templates
+        .into_iter()
+        .map(|entry| Ok(project_template_summary(&entry)))
+        .collect()
+}
+
+pub fn seed_project_template(
+    project_dir: &Path,
+    template_id: &str,
+    target: &str,
+    donor_path: Option<&Path>,
+) -> Result<Scene, LoadError> {
+    match template_id {
+        "empty" => load_scene(project_dir, DEFAULT_ENTRY_SCENE),
+        "starter_guided" => seed_onboarding_template(project_dir, target),
+        "platformer_seed" => {
+            if target != "megadrive" {
+                return Err(LoadError(
+                    "O template Plataforma experimental esta disponivel apenas para Mega Drive nesta wave."
+                        .to_string(),
+                ));
+            }
+
+            let donor = resolved_template_donor_path(template_id, donor_path)?;
+            seed_platformer_template(project_dir, &donor)
+        }
+        other => Err(LoadError(format!(
+            "Template '{}' nao reconhecido. Use um id presente em data/template_registry.json.",
+            other
+        ))),
+    }
+}
+
+pub fn seed_platformer_template(project_dir: &Path, donor_path: &Path) -> Result<Scene, LoadError> {
+    validate_platformer_donor_path(donor_path)?;
+
+    copy_template_asset(
+        &donor_path.join("res").join("images").join("player.png"),
+        &project_dir.join(PLATFORMER_PLAYER_ASSET),
+    )?;
+    copy_template_asset(
+        &donor_path.join("res").join("images").join("level.png"),
+        &project_dir.join(PLATFORMER_TILESET_ASSET),
+    )?;
+
+    let jump_source = donor_path.join("res").join("sound").join("jump.wav");
+    if jump_source.exists() {
+        copy_template_asset(&jump_source, &project_dir.join(PLATFORMER_JUMP_ASSET))?;
+    }
+
+    let scene = platformer_seed_scene(jump_source.exists());
+    save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
+    Ok(scene)
+}
+
+fn template_registry() -> Result<TemplateRegistry, LoadError> {
+    serde_json::from_str(TEMPLATE_REGISTRY_JSON).map_err(|error| {
+        LoadError(format!(
+            "data/template_registry.json invalido (erro de parsing JSON): {}",
+            error
+        ))
+    })
+}
+
+fn template_registry_entry(template_id: &str) -> Result<TemplateRegistryEntry, LoadError> {
+    template_registry()?
+        .templates
+        .into_iter()
+        .find(|entry| entry.id == template_id)
+        .ok_or_else(|| {
+            LoadError(format!(
+                "Template '{}' nao encontrado em data/template_registry.json.",
+                template_id
+            ))
+        })
+}
+
+fn resolved_template_donor_path(
+    template_id: &str,
+    donor_path: Option<&Path>,
+) -> Result<PathBuf, LoadError> {
+    if let Some(donor_path) = donor_path {
+        return Ok(donor_path.to_path_buf());
+    }
+
+    let entry = template_registry_entry(template_id)?;
+    entry
+        .default_donor_path
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            LoadError(format!(
+                "O template '{}' nao possui donor path padrao configurado.",
+                template_id
+            ))
+        })
+}
+
+fn project_template_summary(entry: &TemplateRegistryEntry) -> ProjectTemplateSummary {
+    let (available, availability_reason) = template_availability(entry);
+
+    ProjectTemplateSummary {
+        id: entry.id.clone(),
+        name: entry.name.clone(),
+        description: entry.description.clone(),
+        genre: entry.genre.clone(),
+        difficulty: entry.difficulty.clone(),
+        features: entry.features.clone(),
+        source_kind: entry.source_kind.clone(),
+        recommended_target: entry.recommended_target.clone(),
+        experimental: entry.experimental,
+        available,
+        availability_reason,
+        default_donor_path: entry.default_donor_path.clone(),
+    }
+}
+
+fn template_availability(entry: &TemplateRegistryEntry) -> (bool, Option<String>) {
+    match entry.source_kind.as_str() {
+        "builtin" => (true, None),
+        "external_sgdk" => {
+            let Some(donor_path) = entry.default_donor_path.as_deref() else {
+                return (
+                    false,
+                    Some("Template externo sem donor path padrao configurado.".to_string()),
+                );
+            };
+
+            match entry.id.as_str() {
+                "platformer_seed" => match validate_platformer_donor_path(Path::new(donor_path)) {
+                    Ok(()) => (true, None),
+                    Err(error) => (false, Some(error.to_string())),
+                },
+                _ => (
+                    false,
+                    Some("Template externo ainda nao possui validador de disponibilidade.".to_string()),
+                ),
+            }
+        }
+        other => (
+            false,
+            Some(format!(
+                "source_kind '{}' nao suportado pelo registry atual.",
+                other
+            )),
+        ),
+    }
+}
+
+fn validate_platformer_donor_path(donor_path: &Path) -> Result<(), LoadError> {
+    if !donor_path.exists() {
+        return Err(LoadError(format!(
+            "Template Plataforma indisponivel: donor path '{}' nao existe.",
+            donor_path.display()
+        )));
+    }
+
+    let player = donor_path.join("res").join("images").join("player.png");
+    if !player.is_file() {
+        return Err(LoadError(format!(
+            "Template Plataforma indisponivel: asset obrigatorio '{}' nao foi encontrado.",
+            player.display()
+        )));
+    }
+
+    let level = donor_path.join("res").join("images").join("level.png");
+    if !level.is_file() {
+        return Err(LoadError(format!(
+            "Template Plataforma indisponivel: asset obrigatorio '{}' nao foi encontrado.",
+            level.display()
+        )));
+    }
+
+    Ok(())
+}
+
+fn copy_template_asset(source: &Path, destination: &Path) -> Result<(), LoadError> {
+    let parent = destination.parent().ok_or_else(|| {
+        LoadError(format!(
+            "Destino de asset '{}' nao possui diretorio pai valido.",
+            destination.display()
+        ))
+    })?;
+    fs::create_dir_all(parent).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel criar o diretorio '{}' para importar assets: {}",
+            parent.display(),
+            error
+        ))
+    })?;
+    fs::copy(source, destination).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel copiar '{}' para '{}': {}",
+            source.display(),
+            destination.display(),
+            error
+        ))
+    })?;
+    Ok(())
+}
+
+fn platformer_seed_scene(has_jump_sound: bool) -> Scene {
+    let mut scene = canonical_scene(DEFAULT_SCENE_ID, Some("Platformer Seed".to_string()));
+    scene.palettes = vec![PaletteEntry {
+        slot: 0,
+        colors: vec![
+            "#0F172A".to_string(),
+            "#1D4ED8".to_string(),
+            "#22C55E".to_string(),
+            "#F8FAFC".to_string(),
+        ],
+    }];
+    scene.entities = vec![
+        Entity {
+            entity_id: "tilemap_bg".to_string(),
+            prefab: None,
+            transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+            components: Components {
+                tilemap: Some(TilemapComponent {
+                    tileset: PLATFORMER_TILESET_ASSET.to_string(),
+                    map_width: 32,
+                    map_height: 32,
+                    scroll_x: 0,
+                    scroll_y: 0,
+                }),
+                ..Components::default()
+            },
+        },
+        Entity {
+            entity_id: "player".to_string(),
+            prefab: None,
+            transform: crate::ugdm::entities::Transform { x: 48, y: 120 },
+            components: Components {
+                sprite: Some(SpriteComponent {
+                    asset: PLATFORMER_PLAYER_ASSET.to_string(),
+                    frame_width: 48,
+                    frame_height: 72,
+                    pivot: None,
+                    palette_slot: 0,
+                    animations: HashMap::new(),
+                    priority: "foreground".to_string(),
+                }),
+                collision: Some(CollisionComponent {
+                    shape: "aabb".to_string(),
+                    width: 32,
+                    height: 64,
+                    offset: None,
+                    solid: true,
+                    layer: Some("player".to_string()),
+                    collides_with: vec!["ground".to_string()],
+                }),
+                input: Some(InputComponent {
+                    device: "joypad1".to_string(),
+                    mapping: HashMap::from([
+                        ("jump".to_string(), "BUTTON_A".to_string()),
+                        ("move_left".to_string(), "DPAD_LEFT".to_string()),
+                        ("move_right".to_string(), "DPAD_RIGHT".to_string()),
+                    ]),
+                }),
+                physics: Some(PhysicsComponent {
+                    gravity: true,
+                    gravity_strength: 6,
+                    max_velocity: Some(Velocity { x: 32, y: 96 }),
+                    friction: 1,
+                    bounce: 0,
+                }),
+                audio: Some(AudioComponent {
+                    sfx: if has_jump_sound {
+                        HashMap::from([("jump".to_string(), PLATFORMER_JUMP_ASSET.to_string())])
+                    } else {
+                        HashMap::new()
+                    },
+                    bgm: None,
+                }),
+                logic: Some(LogicComponent {
+                    graph: Some(platformer_logic_graph()),
+                    variables: HashMap::new(),
+                }),
+                ..Components::default()
+            },
+        },
+        Entity {
+            entity_id: "main_camera".to_string(),
+            prefab: None,
+            transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+            components: Components {
+                camera: Some(CameraComponent {
+                    follow_entity: Some("player".to_string()),
+                    offset_x: 0,
+                    offset_y: 0,
+                }),
+                ..Components::default()
+            },
+        },
+    ];
+    scene
+}
+
+fn platformer_logic_graph() -> String {
+    serde_json::json!({
+        "version": 1,
+        "nodes": [
+            {
+                "id": "start",
+                "type": "event_start",
+                "label": "On Start",
+                "x": 48,
+                "y": 48,
+                "inputs": [],
+                "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "params": {}
+            },
+            {
+                "id": "follow_camera",
+                "type": "move_camera",
+                "label": "Move Camera",
+                "x": 228,
+                "y": 48,
+                "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "params": { "target": "main_camera", "x": 0, "y": 0 }
+            }
+        ],
+        "edges": [
+            {
+                "id": "edge_start_camera",
+                "fromNode": "start",
+                "fromPort": "exec",
+                "toNode": "follow_camera",
+                "toPort": "exec"
+            }
+        ]
+    })
+    .to_string()
 }
 
 pub fn list_scenes(project_dir: &Path) -> Result<Vec<SceneInfo>, LoadError> {
@@ -1352,6 +1744,38 @@ mod tests {
         path
     }
 
+    fn write_platformer_donor_fixture(dir: &Path, with_jump: bool) {
+        fs::create_dir_all(dir.join("res").join("images")).expect("create donor image dir");
+        fs::create_dir_all(dir.join("res").join("sound")).expect("create donor sound dir");
+        fs::create_dir_all(dir.join("out")).expect("create donor out dir");
+        fs::create_dir_all(dir.join("src")).expect("create donor src dir");
+        fs::create_dir_all(dir.join("inc")).expect("create donor inc dir");
+        fs::create_dir_all(dir.join("src").join("boot")).expect("create donor boot dir");
+
+        fs::write(dir.join("res").join("images").join("player.png"), b"fake-player-png")
+            .expect("write player asset");
+        fs::write(dir.join("res").join("images").join("level.png"), b"fake-level-png")
+            .expect("write level asset");
+        if with_jump {
+            fs::write(dir.join("res").join("sound").join("jump.wav"), b"fake-jump-wav")
+                .expect("write jump asset");
+        }
+        fs::write(
+            dir.join("res").join("sound").join("sonic2Emerald.vgm"),
+            b"forbidden-vgm",
+        )
+        .expect("write forbidden vgm");
+        fs::write(dir.join("out").join("rom.bin"), b"forbidden-rom").expect("write rom.bin");
+        fs::write(dir.join("out").join("symbol.txt"), b"forbidden-symbol")
+            .expect("write symbol.txt");
+        fs::write(dir.join("src").join("main.c"), b"int main(void){return 0;}")
+            .expect("write main.c");
+        fs::write(dir.join("inc").join("player.h"), b"void player(void);")
+            .expect("write player.h");
+        fs::write(dir.join("src").join("boot").join("sega.s"), b"boot")
+            .expect("write boot source");
+    }
+
     #[test]
     fn canonical_project_matches_megadrive_schema() {
         let project = canonical_project("Dummy", "megadrive").expect("canonical project");
@@ -1363,6 +1787,63 @@ mod tests {
         assert_eq!(project.palette_mode, "4x16");
         assert_eq!(project.entry_scene, DEFAULT_ENTRY_SCENE);
         assert_eq!(project.build, Some(default_build_config()));
+    }
+
+    #[test]
+    fn list_project_templates_reads_registry_and_builtin_entries_are_available() {
+        let templates = list_project_templates().expect("list templates");
+        let ids = templates.iter().map(|template| template.id.as_str()).collect::<Vec<_>>();
+
+        assert_eq!(ids, vec!["empty", "starter_guided", "platformer_seed"]);
+        assert!(templates
+            .iter()
+            .find(|template| template.id == "empty")
+            .expect("empty template")
+            .available);
+        assert!(templates
+            .iter()
+            .find(|template| template.id == "starter_guided")
+            .expect("starter template")
+            .available);
+    }
+
+    #[test]
+    fn external_platformer_template_reports_unavailable_when_required_asset_is_missing() {
+        let donor_dir = temp_dir("platformer-donor-missing");
+        fs::create_dir_all(donor_dir.join("res").join("images")).expect("create donor images");
+        fs::write(donor_dir.join("res").join("images").join("player.png"), b"fake-player")
+            .expect("write donor player");
+
+        let error = validate_platformer_donor_path(&donor_dir).expect_err("missing level asset");
+        assert!(error.to_string().contains("level.png"));
+
+        let _ = fs::remove_dir_all(donor_dir);
+    }
+
+    #[test]
+    fn seed_platformer_template_copies_only_allowed_assets() {
+        let donor_dir = temp_dir("platformer-donor");
+        let project_dir = temp_dir("platformer-project");
+        create_project_skeleton(&project_dir, "Platformer Seed", "megadrive")
+            .expect("create project skeleton");
+        write_platformer_donor_fixture(&donor_dir, true);
+
+        let scene = seed_platformer_template(&project_dir, &donor_dir).expect("seed platformer");
+        let player = project_dir.join(PLATFORMER_PLAYER_ASSET);
+        let level = project_dir.join(PLATFORMER_TILESET_ASSET);
+        let jump = project_dir.join(PLATFORMER_JUMP_ASSET);
+
+        assert!(player.is_file());
+        assert!(level.is_file());
+        assert!(jump.is_file());
+        assert_eq!(scene.entities.len(), 3);
+        assert!(!project_dir.join("out").exists());
+        assert!(!project_dir.join("src").exists());
+        assert!(!project_dir.join("inc").exists());
+        assert!(!project_dir.join("assets").join("audio").join("sonic2Emerald.vgm").exists());
+
+        let _ = fs::remove_dir_all(donor_dir);
+        let _ = fs::remove_dir_all(project_dir);
     }
 
     #[test]

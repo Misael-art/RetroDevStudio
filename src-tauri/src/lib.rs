@@ -30,14 +30,17 @@ use core::project_mgr::{
     append_patch_audit_entry,
     create_scene as create_project_scene,
     create_project_skeleton,
+    list_project_templates as list_registered_project_templates,
     list_scenes as list_project_scenes,
     load_project,
     load_scene,
     resolve_prefabs,
     save_scene,
+    seed_project_template,
     seed_onboarding_template,
     set_entry_scene,
     update_project_target,
+    ProjectTemplateSummary,
     SceneInfo,
 };
 use ugdm::entities::PatchAuditEntry;
@@ -1138,16 +1141,9 @@ fn safe_project_dir_name(project_name: &str) -> String {
         .collect()
 }
 
-fn create_onboarding_project_at_base_dir(
-    base_dir: &Path,
-    project_name: &str,
-    target: &str,
-) -> Result<OpenProjectResult, String> {
-    let safe_name = safe_project_dir_name(project_name);
-    let project_dir = base_dir.join(&safe_name);
-
+fn ensure_project_dir_available(project_dir: &Path) -> Result<(), String> {
     if project_dir.exists() {
-        let mut entries = fs::read_dir(&project_dir)
+        let mut entries = fs::read_dir(project_dir)
             .map_err(|error| format!("Nao foi possivel inspecionar '{}': {}", project_dir.display(), error))?;
         if entries.next().transpose().map_err(|error| error.to_string())?.is_some() {
             return Err(format!(
@@ -1157,9 +1153,46 @@ fn create_onboarding_project_at_base_dir(
         }
     }
 
+    Ok(())
+}
+
+fn create_onboarding_project_at_base_dir(
+    base_dir: &Path,
+    project_name: &str,
+    target: &str,
+) -> Result<OpenProjectResult, String> {
+    let safe_name = safe_project_dir_name(project_name);
+    let project_dir = base_dir.join(&safe_name);
+
+    ensure_project_dir_available(&project_dir)?;
+
     let project = create_project_skeleton(&project_dir, project_name, target)
         .map_err(|error| error.to_string())?;
     seed_onboarding_template(&project_dir, target).map_err(|error| error.to_string())?;
+
+    Ok(OpenProjectResult {
+        selected: true,
+        path: project_dir.to_string_lossy().to_string(),
+        name: project.name,
+    })
+}
+
+fn create_project_from_template_at_base_dir(
+    base_dir: &Path,
+    project_name: &str,
+    target: &str,
+    template_id: &str,
+    donor_path: Option<&Path>,
+) -> Result<OpenProjectResult, String> {
+    let safe_name = safe_project_dir_name(project_name);
+    let project_dir = base_dir.join(&safe_name);
+
+    ensure_project_dir_available(&project_dir)?;
+
+    let project = create_project_skeleton(&project_dir, project_name, target)
+        .map_err(|error| error.to_string())?;
+    seed_project_template(&project_dir, template_id, target, donor_path)
+        .map_err(|error| error.to_string())?;
 
     Ok(OpenProjectResult {
         selected: true,
@@ -1224,6 +1257,41 @@ fn create_onboarding_project(
 }
 
 /// Resolve um diretório de projeto sem depender de diálogo nativo.
+#[tauri::command]
+fn list_project_templates() -> Result<Vec<ProjectTemplateSummary>, String> {
+    list_registered_project_templates().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn create_project_from_template(
+    project_name: String,
+    target: String,
+    base_dir: String,
+    template_id: String,
+    donor_path: Option<String>,
+) -> Result<OpenProjectResult, String> {
+    let trimmed_name = project_name.trim();
+    let trimmed_base_dir = base_dir.trim();
+    let trimmed_template_id = template_id.trim();
+    let donor_path = donor_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from);
+
+    if trimmed_name.is_empty() || trimmed_base_dir.is_empty() || trimmed_template_id.is_empty() {
+        return Err("Nome do projeto, pasta base e template sao obrigatorios.".into());
+    }
+
+    create_project_from_template_at_base_dir(
+        Path::new(trimmed_base_dir),
+        trimmed_name,
+        &target,
+        trimmed_template_id,
+        donor_path.as_deref(),
+    )
+}
+
 #[tauri::command]
 fn open_project_path(project_dir: String) -> OpenProjectResult {
     let trimmed = project_dir.trim();
@@ -1291,6 +1359,8 @@ pub fn run() {
             open_project_path,
             new_project_dialog,
             create_onboarding_project,
+            list_project_templates,
+            create_project_from_template,
             // Fase 4: Tools
             patch_create_ips,
             patch_apply_ips,
@@ -1352,6 +1422,20 @@ mod tests {
             } else {
                 fs::copy(&src_path, &dst_path).expect("copy fixture file");
             }
+        }
+    }
+
+    fn write_platformer_donor_fixture(dir: &Path, with_jump: bool) {
+        fs::create_dir_all(dir.join("res").join("images")).expect("create donor image dir");
+        fs::create_dir_all(dir.join("res").join("sound")).expect("create donor sound dir");
+
+        fs::write(dir.join("res").join("images").join("player.png"), b"fake-player-png")
+            .expect("write player asset");
+        fs::write(dir.join("res").join("images").join("level.png"), b"fake-level-png")
+            .expect("write level asset");
+        if with_jump {
+            fs::write(dir.join("res").join("sound").join("jump.wav"), b"fake-jump-wav")
+                .expect("write jump asset");
         }
     }
 
@@ -2101,6 +2185,78 @@ pub extern "C" fn retro_run() {
         );
 
         let _ = fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn list_project_templates_returns_registry_entries() {
+        let templates = list_project_templates().expect("list project templates");
+
+        assert_eq!(templates.len(), 3);
+        assert_eq!(templates[0].id, "empty");
+        assert_eq!(templates[1].id, "starter_guided");
+        assert_eq!(templates[2].id, "platformer_seed");
+    }
+
+    #[test]
+    fn create_project_from_template_supports_empty_starter_and_platformer() {
+        let base_dir = temp_dir("template-create");
+        let donor_dir = temp_dir("template-donor");
+        write_platformer_donor_fixture(&donor_dir, true);
+
+        let empty_result = create_project_from_template(
+            "Blank".to_string(),
+            "megadrive".to_string(),
+            base_dir.to_string_lossy().to_string(),
+            "empty".to_string(),
+            None,
+        )
+        .expect("create empty project");
+        let empty_project_dir = PathBuf::from(&empty_result.path);
+        let empty_project = load_project(&empty_project_dir).expect("load empty project");
+        let empty_scene = load_scene(&empty_project_dir, &empty_project.entry_scene).expect("load empty scene");
+        assert!(empty_scene.entities.is_empty());
+
+        let starter_result = create_project_from_template(
+            "Starter".to_string(),
+            "megadrive".to_string(),
+            base_dir.to_string_lossy().to_string(),
+            "starter_guided".to_string(),
+            None,
+        )
+        .expect("create starter project");
+        let starter_project_dir = PathBuf::from(&starter_result.path);
+        let starter_project = load_project(&starter_project_dir).expect("load starter project");
+        let starter_scene =
+            load_scene(&starter_project_dir, &starter_project.entry_scene).expect("load starter scene");
+        assert_eq!(starter_scene.entities.len(), 1);
+
+        let platformer_result = create_project_from_template(
+            "Platformer".to_string(),
+            "megadrive".to_string(),
+            base_dir.to_string_lossy().to_string(),
+            "platformer_seed".to_string(),
+            Some(donor_dir.to_string_lossy().to_string()),
+        )
+        .expect("create platformer project");
+        let platformer_project_dir = PathBuf::from(&platformer_result.path);
+        let platformer_project = load_project(&platformer_project_dir).expect("load platformer project");
+        let platformer_scene = load_scene(&platformer_project_dir, &platformer_project.entry_scene)
+            .expect("load platformer scene");
+
+        assert_eq!(platformer_scene.entities.len(), 3);
+        assert!(platformer_project_dir
+            .join("assets")
+            .join("sprites")
+            .join("platformer_player.png")
+            .is_file());
+        assert!(platformer_project_dir
+            .join("assets")
+            .join("tilesets")
+            .join("platformer_level.png")
+            .is_file());
+
+        let _ = fs::remove_dir_all(base_dir);
+        let _ = fs::remove_dir_all(donor_dir);
     }
 
     #[test]
