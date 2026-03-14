@@ -343,7 +343,7 @@ fn build_resources_res(ast: &AstOutput) -> String {
         out.push_str(&format!(
             "SPRITE {} \"{}\" {} {} NONE {}\n",
             asset.resource_name,
-            asset.asset_path,
+            sprite_resource_path(&asset.asset_path),
             asset.frame_width / 8,
             asset.frame_height / 8,
             resource_animation_time(asset),
@@ -1184,6 +1184,11 @@ fn tilemap_resource_path(asset_path: &str) -> String {
     normalize_path(&path.with_extension("bmp").to_string_lossy())
 }
 
+fn sprite_resource_path(asset_path: &str) -> String {
+    let path = std::path::Path::new(asset_path);
+    normalize_path(&path.with_extension("bmp").to_string_lossy())
+}
+
 fn normalize_path(path: &str) -> String {
     path.replace('\\', "/")
 }
@@ -1274,7 +1279,7 @@ mod tests {
 
         assert!(output
             .resources_res
-            .contains("SPRITE hero \"assets/sprites/hero.png\" 2 2 NONE 6"));
+            .contains("SPRITE hero \"assets/sprites/hero.bmp\" 2 2 NONE 6"));
     }
 
     #[test]

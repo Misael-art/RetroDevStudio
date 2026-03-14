@@ -1862,6 +1862,17 @@ pub extern "C" fn retro_run() {
             );
         }
 
+        let onboarding_project_dir = temp_dir("official-megadrive-onboarding");
+        create_project_skeleton(&onboarding_project_dir, "Official Onboarding", "megadrive")
+            .expect("create official megadrive onboarding project");
+        let onboarding_build = run_build(&onboarding_project_dir, |_| {});
+        assert!(
+            onboarding_build.ok,
+            "megadrive onboarding build failed: {:?}",
+            onboarding_build.log
+        );
+        let _ = fs::remove_dir_all(&onboarding_project_dir);
+
         for (target, fixture_name) in [("megadrive", "megadrive_dummy"), ("snes", "snes_dummy")] {
             let project_dir = temp_dir(&format!("official-{}", target));
             copy_dir_all(&fixture_dir(fixture_name), &project_dir);

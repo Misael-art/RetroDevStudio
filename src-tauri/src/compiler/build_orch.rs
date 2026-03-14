@@ -558,28 +558,24 @@ fn stage_project_assets(
     ast: &AstOutput,
 ) -> Result<(), String> {
     for asset in &ast.sprite_assets {
-        let asset_rel = sanitize_relative_asset_path(&asset.asset_path)?;
-        let source = project_dir.join(&asset_rel);
+        let source_rel = sanitize_relative_asset_path(&asset.asset_path)?;
+        let source = project_dir.join(&source_rel);
         if !source.exists() {
             return Err(format!(
                 "Asset referenciado nao encontrado: '{}'.",
                 source.display()
             ));
         }
-        let destination = workspace_root.join(&asset_rel);
+
+        let destination_rel = sgdk_bitmap_staging_path(&source_rel);
+        let destination = workspace_root.join(&destination_rel);
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent).map_err(|e| {
                 format!("Falha ao preparar pasta de asset '{}': {}", parent.display(), e)
             })?;
         }
-        fs::copy(&source, &destination).map_err(|e| {
-            format!(
-                "Falha ao copiar asset '{}' para '{}': {}",
-                source.display(),
-                destination.display(),
-                e
-            )
-        })?;
+
+        stage_bitmap_asset(&source, &destination, "SGDK")?;
     }
 
     for asset in collect_tilemap_assets(ast) {
@@ -754,6 +750,10 @@ fn stage_bitmap_asset(source: &Path, destination: &Path, target_label: &str) -> 
 }
 
 fn sgdk_tilemap_staging_path(asset_path: &Path) -> PathBuf {
+    sgdk_bitmap_staging_path(asset_path)
+}
+
+fn sgdk_bitmap_staging_path(asset_path: &Path) -> PathBuf {
     let mut staged = asset_path.to_path_buf();
     staged.set_extension("bmp");
     staged
@@ -1717,8 +1717,19 @@ mod tests {
             .join("res")
             .join("assets")
             .join("sprites")
-            .join("onboarding_player.ppm")
+            .join("onboarding_player.bmp")
             .exists());
+        let resources_res = fs::read_to_string(
+            project_dir
+                .join("build")
+                .join("megadrive")
+                .join("res")
+                .join("resources.res"),
+        )
+        .expect("read SGDK resources");
+        assert!(resources_res.contains(
+            "SPRITE player \"assets/sprites/onboarding_player.bmp\" 2 2 NONE 4"
+        ));
 
         let _ = fs::remove_dir_all(project_dir);
     }
