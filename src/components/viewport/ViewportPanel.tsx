@@ -128,6 +128,8 @@ export default function ViewportPanel() {
     activeScene,
     activeProjectDir,
     hwStatus,
+    emulatorLoaded,
+    setEmulatorLoaded,
     selectedEntityId,
     setSelectedEntityId,
     updateEntity,
@@ -363,7 +365,7 @@ export default function ViewportPanel() {
 
   const startEmulatorLoop = useCallback(
     (logStartup: boolean) => {
-      if (loopStartingRef.current || stopLoopRef.current) return;
+      if (!emulatorLoaded || loopStartingRef.current || stopLoopRef.current) return;
 
       const token = loopTokenRef.current + 1;
       loopTokenRef.current = token;
@@ -374,6 +376,9 @@ export default function ViewportPanel() {
           return;
         }
         stopFrameLoop();
+        if (message.includes("Nenhum core Libretro")) {
+          setEmulatorLoaded(false);
+        }
         logMessage("error", `Falha durante loop do emulador: ${message}`);
       })
         .then((stopFn) => {
@@ -386,11 +391,11 @@ export default function ViewportPanel() {
           ) {
             stopFn();
             return;
-          }
+            }
 
-          stopLoopRef.current = stopFn;
-          setEmulatorActive(true);
-          if (logStartup) {
+            stopLoopRef.current = stopFn;
+            setEmulatorActive(true);
+            if (logStartup) {
             logMessage("info", "Loop do emulador iniciado.");
           }
         })
@@ -400,7 +405,7 @@ export default function ViewportPanel() {
           logMessage("error", `Falha ao iniciar emulador: ${describeError(error)}`);
         });
     },
-    [logMessage, renderFrame, stopFrameLoop]
+    [emulatorLoaded, logMessage, renderFrame, setEmulatorLoaded, stopFrameLoop]
   );
 
   const handleSaveState = useCallback(async () => {
@@ -456,7 +461,7 @@ export default function ViewportPanel() {
   }, [emulPaused, logMessage, rewindBusy]);
 
   const handlePause = useCallback(() => {
-    if (emulPaused) {
+    if (!emulatorLoaded || emulPaused) {
       return;
     }
 
@@ -465,7 +470,7 @@ export default function ViewportPanel() {
   }, [emulPaused, logMessage, setEmulPaused]);
 
   const handleResume = useCallback(() => {
-    if (!emulPaused) {
+    if (!emulatorLoaded || !emulPaused) {
       return;
     }
 
@@ -474,7 +479,7 @@ export default function ViewportPanel() {
   }, [emulPaused, logMessage, setEmulPaused]);
 
   const handleStartRecording = useCallback(async () => {
-    if (recordBusy || replayRecording) {
+    if (!emulatorLoaded || recordBusy || replayRecording) {
       return;
     }
 
@@ -492,7 +497,7 @@ export default function ViewportPanel() {
     } finally {
       setRecordBusy(false);
     }
-  }, [logMessage, recordBusy, replayRecording]);
+  }, [emulatorLoaded, logMessage, recordBusy, replayRecording]);
 
   const handleStopRecording = useCallback(async () => {
     if (!activeProjectDir || recordBusy || !replayRecording) {
@@ -520,7 +525,7 @@ export default function ViewportPanel() {
   }, [activeProjectDir, logMessage, recordBusy, replayRecording]);
 
   const handleStepFrame = useCallback(async () => {
-    if (!emulPaused || stepBusy) {
+    if (!emulatorLoaded || !emulPaused || stepBusy) {
       return;
     }
 
@@ -556,7 +561,7 @@ export default function ViewportPanel() {
         logMessage("error", `Falha ao iniciar frame unico: ${describeError(error)}`);
       }
     }
-  }, [emulPaused, logMessage, renderFrame, startFrameLoop, stepBusy]);
+  }, [emulatorLoaded, emulPaused, logMessage, renderFrame, startFrameLoop, stepBusy]);
 
   const handlePlayReplay = useCallback(async () => {
     if (!lastReplayPath || playReplayBusy || replayRecording || !emulPaused) {
@@ -583,7 +588,14 @@ export default function ViewportPanel() {
 
   useEffect(() => {
     if (activeViewportTab !== "game") {
-      shutdownEmulator();
+      stopFrameLoop();
+      disposeAudioPlayback();
+      return;
+    }
+
+    if (!emulatorLoaded) {
+      stopFrameLoop();
+      disposeAudioPlayback();
       return;
     }
 
@@ -594,21 +606,26 @@ export default function ViewportPanel() {
     }
 
     return () => {
-      if (activeViewportTab === "game") {
-        shutdownEmulator();
-      }
+      stopFrameLoop();
+      disposeAudioPlayback();
     };
-  }, [activeViewportTab, shutdownEmulator, startEmulatorLoop, stopFrameLoop]);
+  }, [activeViewportTab, disposeAudioPlayback, emulatorLoaded, startEmulatorLoop, stopFrameLoop]);
 
   useEffect(() => {
-    if (activeViewportTab !== "game") return;
+    if (activeViewportTab !== "game" || !emulatorLoaded) return;
 
     if (emulPaused) {
       stopFrameLoop();
     } else {
       startEmulatorLoop(false);
     }
-  }, [activeViewportTab, emulPaused, startEmulatorLoop, stopFrameLoop]);
+  }, [activeViewportTab, emulatorLoaded, emulPaused, startEmulatorLoop, stopFrameLoop]);
+
+  useEffect(() => {
+    return () => {
+      shutdownEmulator();
+    };
+  }, [shutdownEmulator]);
 
   useEffect(() => {
     if (activeViewportTab !== "game") return;
@@ -1182,11 +1199,13 @@ export default function ViewportPanel() {
     }
   }
 
-  const gameStatus = emulPaused
-    ? "Emulador pausado"
-    : emulatorActive
-      ? "Emulador ativo"
-      : "Aguardando emulador...";
+  const gameStatus = !emulatorLoaded
+    ? "Carregue uma ROM para iniciar o emulador"
+    : emulPaused
+      ? "Emulador pausado"
+      : emulatorActive
+        ? "Emulador ativo"
+        : "Aguardando emulador...";
   const dmaBudgetBytes = hwStatus?.dma_limit ?? (activeTarget === "snes" ? 8192 : 7372);
   const dmaUsageBytes = Math.min(hwStatus?.dma_used ?? hwStatus?.vram_used ?? 0, dmaBudgetBytes);
   const dmaUsagePercent = Math.min(
@@ -1310,7 +1329,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => handlePause()}
-                disabled={emulPaused}
+                disabled={!emulatorLoaded || emulPaused}
                 data-testid="viewport-pause"
                 className="rounded border border-[#fab387]/40 bg-[#fab387]/10 px-2 py-1 text-[10px] font-semibold text-[#fab387] transition-colors hover:bg-[#fab387]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -1319,7 +1338,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => handleResume()}
-                disabled={!emulPaused}
+                disabled={!emulatorLoaded || !emulPaused}
                 data-testid="viewport-resume"
                 className="rounded border border-[#a6e3a1]/40 bg-[#a6e3a1]/10 px-2 py-1 text-[10px] font-semibold text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -1328,7 +1347,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => void handleStepFrame()}
-                disabled={!emulPaused || stepBusy}
+                disabled={!emulatorLoaded || !emulPaused || stepBusy}
                 data-testid="viewport-step-frame"
                 className="rounded border border-[#f9e2af]/40 bg-[#f9e2af]/10 px-2 py-1 text-[10px] font-semibold text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -1337,7 +1356,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => void handleSaveState()}
-                disabled={saveStateBusy}
+                disabled={!emulatorLoaded || saveStateBusy}
                 data-testid="viewport-save-state"
                 className="rounded border border-[#a6e3a1]/40 bg-[#a6e3a1]/10 px-2 py-1 text-[10px] font-semibold text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -1346,7 +1365,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => void handleLoadState()}
-                disabled={loadStateBusy}
+                disabled={!emulatorLoaded || loadStateBusy}
                 data-testid="viewport-load-state"
                 className="rounded border border-[#89b4fa]/40 bg-[#89b4fa]/10 px-2 py-1 text-[10px] font-semibold text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -1355,7 +1374,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => void handleRewind()}
-                disabled={!emulPaused || rewindBusy}
+                disabled={!emulatorLoaded || !emulPaused || rewindBusy}
                 data-testid="viewport-rewind"
                 className="rounded border border-[#f38ba8]/40 bg-[#f38ba8]/10 px-2 py-1 text-[10px] font-semibold text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/20 disabled:cursor-not-allowed disabled:opacity-40"
                 title="Recuar snapshots automáticos do emulador (atalho: R)"
@@ -1365,7 +1384,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => void handleStartRecording()}
-                disabled={recordBusy || replayRecording}
+                disabled={!emulatorLoaded || recordBusy || replayRecording}
                 data-testid="viewport-replay-record"
                 className="rounded border border-[#94e2d5]/40 bg-[#94e2d5]/10 px-2 py-1 text-[10px] font-semibold text-[#94e2d5] transition-colors hover:bg-[#94e2d5]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -1374,7 +1393,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => void handleStopRecording()}
-                disabled={recordBusy || !replayRecording || !activeProjectDir}
+                disabled={!emulatorLoaded || recordBusy || !replayRecording || !activeProjectDir}
                 data-testid="viewport-replay-stop"
                 className="rounded border border-[#f38ba8]/40 bg-[#f38ba8]/10 px-2 py-1 text-[10px] font-semibold text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -1383,7 +1402,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => void handlePlayReplay()}
-                disabled={playReplayBusy || replayRecording || !lastReplayPath || !emulPaused}
+                disabled={!emulatorLoaded || playReplayBusy || replayRecording || !lastReplayPath || !emulPaused}
                 data-testid="viewport-replay-play"
                 className="rounded border border-[#89dceb]/40 bg-[#89dceb]/10 px-2 py-1 text-[10px] font-semibold text-[#89dceb] transition-colors hover:bg-[#89dceb]/20 disabled:cursor-not-allowed disabled:opacity-40"
                 title="Reproduzir o ultimo replay salvo com o estado inicial gravado"

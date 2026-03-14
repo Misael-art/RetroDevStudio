@@ -46,6 +46,7 @@ export interface StoreState {
   activeProjectName: string;
   activeTarget: "megadrive" | "snes";
   activeScenePath: string;
+  emulatorLoaded: boolean;
   selectedEntityId: string | null;
   activeViewportTab: string;
   consoleEntries: ConsoleEntry[];
@@ -67,6 +68,7 @@ export interface StoreActions {
   setActiveProject: (dir: string, name: string) => void;
   setActiveTarget: (target: "megadrive" | "snes") => void;
   setActiveScenePath: (path: string) => void;
+  setEmulatorLoaded: (loaded: boolean) => void;
   setSelectedEntityId: (id: string | null) => void;
   setActiveViewportTab: (id: string) => void;
   logMessage: (level: ConsoleEntry["level"], message: string) => void;
@@ -135,6 +137,8 @@ export const useEditorStore = create<EditorState>((set) => ({
   setActiveTarget: (target) => set({ activeTarget: target }),
   activeScenePath: "",
   setActiveScenePath: (path) => set({ activeScenePath: path }),
+  emulatorLoaded: false,
+  setEmulatorLoaded: (loaded) => set({ emulatorLoaded: loaded }),
 
   selectedEntityId: null,
   setSelectedEntityId: (id) => set({ selectedEntityId: id }),
@@ -147,7 +151,7 @@ export const useEditorStore = create<EditorState>((set) => ({
       id: 0,
       level: "info",
       message:
-        "RetroDev Studio iniciado. Status: hardening do MVP canonico. Use Arquivo -> Abrir/Novo Projeto.",
+        "RetroDev Studio iniciado. Status: release candidate / beta testing do desktop Tauri. Use Arquivo -> Abrir/Novo Projeto.",
       timestamp: new Date().toLocaleTimeString(),
     },
   ],

@@ -269,6 +269,8 @@ export default function App() {
     setActiveProject,
     activeTarget,
     setActiveTarget,
+    emulatorLoaded,
+    setEmulatorLoaded,
     setActiveScene,
     setActiveScenePath,
     activeViewportTab,
@@ -294,6 +296,7 @@ export default function App() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [copiedEntity, setCopiedEntity] = useState<Entity | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const buildInFlightRef = useRef(false);
   const tauriInternals =
     (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   const automationEnabled =
@@ -417,7 +420,23 @@ export default function App() {
   const liveBuildBlocked =
     hwValidationState === "fresh" && Boolean(hwStatus && hwStatus.errors.length > 0);
 
+  async function resetEmulatorSession(switchToScene = false) {
+    try {
+      await emulatorStop();
+    } catch {
+      // Project and target transitions should still reset local editor state even if the core is already stopped.
+    }
+
+    setEmulatorLoaded(false);
+    setEmulPaused(false);
+
+    if (switchToScene) {
+      setActiveViewportTab("scene");
+    }
+  }
+
   async function hydrateProjectState(projectDir: string, projectName: string, scope: string) {
+    await resetEmulatorSession(true);
     const hw = await getHwStatus(projectDir);
     const sceneData = await getSceneData(projectDir);
     if (!sceneData.ok) {
@@ -531,6 +550,7 @@ export default function App() {
         logMessage("error", `[Target] ${result.message}`);
         return;
       }
+      await resetEmulatorSession(true);
       setActiveTarget(target);
       setHwStatus(await getHwStatus(activeProjectDir));
       logMessage("info", `Target alterado para ${target === "megadrive" ? "Mega Drive" : "SNES"}.`);
@@ -606,11 +626,13 @@ export default function App() {
 
       const result = await emulatorLoadRom(romPath);
       if (!result.ok) {
+        setEmulatorLoaded(false);
         if (result.message.includes("Nenhum core Libretro")) setToolsOpen(true);
         logMessage("error", `[Emulador] ${result.message}`);
         return;
       }
 
+      setEmulatorLoaded(true);
       logMessage("success", `ROM carregada: ${romPath}`);
       setActiveViewportTab("game");
       setEmulPaused(false);
@@ -620,15 +642,16 @@ export default function App() {
   }
 
   function handleEmulatorPause() {
+    if (!emulatorLoaded) {
+      return;
+    }
     setEmulPaused(!emulPaused);
     logMessage("info", emulPaused ? "Emulador retomado." : "Emulador pausado.");
   }
 
   async function handleEmulatorStop() {
     try {
-      await emulatorStop();
-      setEmulPaused(false);
-      setActiveViewportTab("scene");
+      await resetEmulatorSession(true);
       logMessage("info", "Emulador parado.");
     } catch (error) {
       logMessage("error", `[Emulador] Falha ao parar: ${describeError(error)}`);
@@ -723,36 +746,37 @@ export default function App() {
       logMessage("warn", "Nenhum projeto aberto. Use Abrir Projeto.");
       return;
     }
-    if (building) {
+    if (building || buildInFlightRef.current) {
       return;
     }
-
-    const state = useEditorStore.getState();
-    if (
-      state.hwValidationState === "fresh" &&
-      state.hwStatus &&
-      state.hwStatus.errors.length > 0
-    ) {
-      state.hwStatus.errors.forEach((error) => logMessage("error", `[HW] ${error}`));
-      logMessage("warn", buildDisabledReason ?? "Build bloqueado pelo preview de hardware.");
-      return;
-    }
-
-    const requiredDependencies =
-      activeTarget === "megadrive"
-        ? (["sgdk", "libretro_megadrive"] as const)
-        : (["pvsneslib", "sgdk", "libretro_snes"] as const);
-
-    const dependenciesReady = await ensureDependencies(
-      [...requiredDependencies],
-      `Build & Run para ${activeTarget === "megadrive" ? "Mega Drive" : "SNES"} requer componentes de terceiros.`
-    );
-    if (!dependenciesReady) return;
-
-    setBuilding(true);
-    logMessage("info", "Iniciando build...");
+    buildInFlightRef.current = true;
 
     try {
+      const state = useEditorStore.getState();
+      if (
+        state.hwValidationState === "fresh" &&
+        state.hwStatus &&
+        state.hwStatus.errors.length > 0
+      ) {
+        state.hwStatus.errors.forEach((error) => logMessage("error", `[HW] ${error}`));
+        logMessage("warn", buildDisabledReason ?? "Build bloqueado pelo preview de hardware.");
+        return;
+      }
+
+      const requiredDependencies =
+        activeTarget === "megadrive"
+          ? (["sgdk", "libretro_megadrive"] as const)
+          : (["pvsneslib", "sgdk", "libretro_snes"] as const);
+
+      const dependenciesReady = await ensureDependencies(
+        [...requiredDependencies],
+        `Build & Run para ${activeTarget === "megadrive" ? "Mega Drive" : "SNES"} requer componentes de terceiros.`
+      );
+      if (!dependenciesReady) return;
+
+      setBuilding(true);
+      logMessage("info", "Iniciando build...");
+
       if (!(await persistActiveScene(activeProjectDir, "Build"))) {
         return;
       }
@@ -777,17 +801,20 @@ export default function App() {
       logMessage("success", `Build concluido. ROM: ${result.rom_path}`);
       const loadResult = await emulatorLoadRom(result.rom_path);
       if (!loadResult.ok) {
+        setEmulatorLoaded(false);
         if (loadResult.message.includes("Nenhum core Libretro")) setToolsOpen(true);
         logMessage("error", `[Emulador] ${loadResult.message}`);
         return;
       }
 
+      setEmulatorLoaded(true);
       logMessage("success", "ROM carregada no emulador.");
       setEmulPaused(false);
       setActiveViewportTab("game");
     } catch (error) {
       logMessage("error", `[Build] Falha inesperada: ${describeError(error)}`);
     } finally {
+      buildInFlightRef.current = false;
       setBuilding(false);
     }
   }
@@ -801,20 +828,13 @@ export default function App() {
   }
 
   async function handleCloseProject() {
-    try {
-      await emulatorStop();
-    } catch {
-      // Closing the project should still clear the UI even if the core is already stopped.
-    }
-
+    await resetEmulatorSession(true);
     setActiveProject("", "");
     setActiveScenePath("");
     setActiveScene(null);
     setHwStatus(null);
     resetHwValidation();
     setSelectedEntityId(null);
-    setEmulPaused(false);
-    setActiveViewportTab("scene");
     logMessage("info", "Projeto fechado.");
   }
 
@@ -1155,8 +1175,8 @@ export default function App() {
           )}
         </div>
         <ToolbarButton label="Carregar ROM" onClick={() => void handleEmulatorLoadRom()} />
-        <ToolbarButton label={emulPaused ? "Retomar" : "Pausar"} onClick={handleEmulatorPause} disabled={activeViewportTab !== "game"} />
-        <ToolbarButton label="Parar" onClick={() => void handleEmulatorStop()} disabled={activeViewportTab !== "game"} accent="danger" />
+        <ToolbarButton label={emulPaused ? "Retomar" : "Pausar"} onClick={handleEmulatorPause} disabled={activeViewportTab !== "game" || !emulatorLoaded} />
+        <ToolbarButton label="Parar" onClick={() => void handleEmulatorStop()} disabled={activeViewportTab !== "game" || !emulatorLoaded} accent="danger" />
         <ToolbarButton label="Copiar" onClick={handleCopyEntity} disabled={!selectedEntityId || selectedEntityId.startsWith("layer::")} />
         <ToolbarButton label="Colar" onClick={() => void handlePasteEntity()} disabled={!copiedEntity || !activeProjectDir} />
         <ToolbarButton label={toolsOpen ? "Inspector" : "Tools"} onClick={() => setToolsOpen((open) => !open)} accent="primary" />

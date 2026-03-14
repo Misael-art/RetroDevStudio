@@ -357,3 +357,11 @@ describe("undo/redo", () => {
     expect(hero.transform).toEqual({ x: 0, y: 0 });
   });
 });
+
+describe("startup messaging", () => {
+  it("keeps the initial console entry aligned with release candidate status", () => {
+    const startupMessage = useEditorStore.getInitialState().consoleEntries[0]?.message ?? "";
+    expect(startupMessage).toContain("release candidate / beta testing");
+    expect(startupMessage).not.toContain("MVP completo");
+  });
+});

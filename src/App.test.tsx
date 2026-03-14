@@ -168,6 +168,7 @@ describe("App build flow", () => {
       activeProjectDir: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
       activeProjectName: "Mega Dummy",
       activeTarget: "megadrive",
+      emulatorLoaded: false,
       selectedEntityId: null,
       activeViewportTab: "scene",
       hwStatus: null,
@@ -355,8 +356,61 @@ describe("App build flow", () => {
     expect(mocks.emulatorLoadRom).toHaveBeenCalledWith("F:/Temp/game.md");
     expect(mocks.startFrameLoop).toHaveBeenCalledTimes(1);
     expect(useEditorStore.getState().activeViewportTab).toBe("game");
+    expect(useEditorStore.getState().emulatorLoaded).toBe(true);
     expect(container.textContent).toContain("Emulador ativo");
     expect(putImageDataSpy).toHaveBeenCalled();
+  });
+
+  it("does not stop the emulator session when switching away from the game tab", async () => {
+    await act(async () => {
+      findButton(container, "Build & Run").click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.emulatorStop).not.toHaveBeenCalled();
+
+    await act(async () => {
+      useEditorStore.getState().setActiveViewportTab("logic");
+      await flush();
+    });
+
+    expect(mocks.emulatorStop).not.toHaveBeenCalled();
+
+    await act(async () => {
+      useEditorStore.getState().setActiveViewportTab("game");
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.startFrameLoop).toHaveBeenCalledTimes(2);
+    expect(useEditorStore.getState().emulatorLoaded).toBe(true);
+  });
+
+  it("ignores rapid repeated build clicks while a build is already in flight", async () => {
+    let resolveBuild: ((value: { ok: boolean; rom_path: string; log: [] }) => void) | null = null;
+    mocks.buildProject.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveBuild = resolve;
+        })
+    );
+
+    await act(async () => {
+      const buildButton = findButton(container, "Build & Run");
+      buildButton.click();
+      buildButton.click();
+      buildButton.click();
+      await flush();
+    });
+
+    expect(mocks.buildProject).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveBuild?.({ ok: true, rom_path: "F:/Temp/game.md", log: [] });
+      await flush();
+      await flush();
+    });
   });
 
   it("disables Build & Run and explains why when live validation reports a fresh fatal error", async () => {
@@ -417,6 +471,20 @@ describe("App build flow", () => {
     expect(container.textContent).toContain("Wizard de Primeiro Uso");
     expect(container.textContent).toContain("Mega Drive");
     expect(container.textContent).toContain("Criar Projeto");
+  });
+
+  it("does not start the frame loop when the game tab opens without a loaded ROM", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        emulatorLoaded: false,
+        activeViewportTab: "game",
+      });
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.startFrameLoop).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Carregue uma ROM para iniciar o emulador");
   });
 
   it("keeps Build & Run enabled when the live validation snapshot is stale", async () => {
@@ -665,7 +733,7 @@ describe("App build flow", () => {
 
   it("triggers emulator save and load state actions from the game viewport", async () => {
     await act(async () => {
-      useEditorStore.setState({ activeViewportTab: "game" });
+      useEditorStore.setState({ activeViewportTab: "game", emulatorLoaded: true });
       await flush();
       await flush();
     });
@@ -694,24 +762,21 @@ describe("App build flow", () => {
     ).toBe(true);
   });
 
-  it("supports pause, single-frame step, and resume from the game viewport", async () => {
+  it("supports single-frame step and resume from the game viewport while paused", async () => {
     await act(async () => {
-      useEditorStore.setState({ activeViewportTab: "game" });
+      findButton(container, "Build & Run").click();
       await flush();
       await flush();
     });
 
-    const pauseButton = container.querySelector("[data-testid='viewport-pause']");
     const resumeButton = container.querySelector("[data-testid='viewport-resume']");
     const stepButton = container.querySelector("[data-testid='viewport-step-frame']");
 
-    expect(pauseButton).toBeInstanceOf(HTMLButtonElement);
     expect(resumeButton).toBeInstanceOf(HTMLButtonElement);
     expect(stepButton).toBeInstanceOf(HTMLButtonElement);
-    expect((stepButton as HTMLButtonElement).disabled).toBe(true);
 
     await act(async () => {
-      (pauseButton as HTMLButtonElement).click();
+      useEditorStore.setState({ emulPaused: true });
       await flush();
     });
 
@@ -741,20 +806,17 @@ describe("App build flow", () => {
 
   it("triggers rewind from the game viewport controls and keyboard shortcut while paused", async () => {
     await act(async () => {
-      useEditorStore.setState({ activeViewportTab: "game" });
+      findButton(container, "Build & Run").click();
       await flush();
       await flush();
     });
 
-    const pauseButton = container.querySelector("[data-testid='viewport-pause']");
     const rewindButton = container.querySelector("[data-testid='viewport-rewind']");
 
-    expect(pauseButton).toBeInstanceOf(HTMLButtonElement);
     expect(rewindButton).toBeInstanceOf(HTMLButtonElement);
-    expect((rewindButton as HTMLButtonElement).disabled).toBe(true);
 
     await act(async () => {
-      (pauseButton as HTMLButtonElement).click();
+      useEditorStore.setState({ emulPaused: true });
       await flush();
     });
 

@@ -695,6 +695,13 @@ impl EmulatorCore {
             .recording
             .take()
             .ok_or_else(|| "Nenhuma gravacao de replay esta ativa.".to_string())?;
+        if recording.frames.is_empty() {
+            self.replay.recording = Some(recording);
+            return Err(
+                "Nenhum frame foi gravado ainda. Retome a emulacao ou avance frames antes de parar o replay."
+                    .to_string(),
+            );
+        }
         let (final_framebuffer, final_frame_size, final_pixel_format) = self.get_framebuffer()?;
         let state = self.handle.lock().map_err(|e| e.to_string())?;
 
@@ -1719,6 +1726,34 @@ pub extern "C" fn retro_run() {
         assert_eq!(framebuffer, replay.final_framebuffer);
         assert_eq!(size, replay.final_frame_size);
         assert_eq!(pixel_format, replay.final_pixel_format);
+
+        emulator.stop().expect("stop emulator");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn replay_stop_requires_at_least_one_recorded_frame() {
+        let _serial = test_serial_guard();
+        let dir = temp_dir("replay-empty");
+        let core_path = compile_mock_core(&dir);
+        let rom_path = write_test_rom(&dir, "replay_empty_test", "gen");
+
+        let mut emulator = EmulatorCore::new(Some(&core_path));
+        emulator.load_rom(&rom_path).expect("load rom into mock core");
+        emulator
+            .start_replay_recording()
+            .expect("start replay recording");
+
+        let error = emulator
+            .stop_replay_recording()
+            .expect_err("stop replay recording should require frames");
+        assert!(error.contains("Nenhum frame foi gravado ainda"));
+
+        emulator.run_frame().expect("run first frame after warning");
+        let replay = emulator
+            .stop_replay_recording()
+            .expect("stop replay recording after a frame");
+        assert_eq!(replay.frames.len(), 1);
 
         emulator.stop().expect("stop emulator");
         let _ = fs::remove_dir_all(dir);
