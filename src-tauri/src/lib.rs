@@ -1203,6 +1203,8 @@ fn open_project_path(project_dir: String) -> OpenProjectResult {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // R2 blocker: updater runtime stays disabled until tauri-plugin-updater is allowed.
+    // The tauri.conf carries only placeholder endpoint metadata under the no-new-deps policy.
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())

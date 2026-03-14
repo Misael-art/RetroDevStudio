@@ -28,6 +28,7 @@
     ],
     "publisher": "RetroDev Team",
     "shortDescription": "RetroDev Studio desktop toolkit for 16-bit console development.",
+    "createUpdaterArtifacts": false,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -40,6 +41,14 @@
         "language": "en-US",
         "upgradeCode": "3f9f8354-4db5-5f1d-8c87-7af1c2c3984a"
       }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://updates.retrodevstudio.example.invalid/{{target}}/{{current_version}}"
+      ],
+      "pubkey": "PLACEHOLDER_UPDATER_PUBKEY_BLOCKED_BY_NO_NEW_DEPS"
     }
   }
 }
