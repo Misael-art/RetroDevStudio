@@ -8,9 +8,11 @@ import { buildProject, generateCCode, validateProject } from "./core/ipc/buildSe
 import { emulatorLoadRom, emulatorStop } from "./core/ipc/emulatorService";
 import { getHwStatus } from "./core/ipc/hwService";
 import {
-  createOnboardingProject,
+  createProjectFromTemplate,
+  listProjectTemplates,
   openProjectDialog,
   openProjectPath,
+  type ProjectTemplateSummary,
   setProjectTarget,
 } from "./core/ipc/projectService";
 import { pollProjectAssetChanges } from "./core/ipc/projectWatcherService";
@@ -290,6 +292,10 @@ export default function App() {
   const [newProjName, setNewProjName] = useState("MeuProjeto");
   const [newProjTarget, setNewProjTarget] = useState<"megadrive" | "snes">("megadrive");
   const [newProjBaseDir, setNewProjBaseDir] = useState("");
+  const [projectTemplates, setProjectTemplates] = useState<ProjectTemplateSummary[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [templateDonorPaths, setTemplateDonorPaths] = useState<Record<string, string>>({});
   const [showProjectWizard, setShowProjectWizard] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
@@ -305,6 +311,9 @@ export default function App() {
     String(import.meta.env.TAURI_ENV_DEBUG ?? "").toLowerCase() === "true" ||
     String(import.meta.env.TAURI_ENV_DEBUG ?? "") === "1" ||
     new URLSearchParams(window.location.search).has("e2e");
+  const selectedTemplate =
+    projectTemplates.find((template) => template.id === selectedTemplateId) ?? null;
+  const selectedTemplateMegadriveOnly = selectedTemplate?.id === "platformer_seed";
 
   useLiveValidationController();
 
@@ -316,6 +325,50 @@ export default function App() {
   }, [showProjectWizard]);
 
   useEffect(() => {
+    if (!showProjectWizard) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadTemplates() {
+      setTemplatesLoading(true);
+      try {
+        const templates = await listProjectTemplates();
+        if (cancelled) {
+          return;
+        }
+        setProjectTemplates(templates);
+        setSelectedTemplateId((current) => {
+          if (templates.some((template) => template.id === current)) {
+            return current;
+          }
+          const defaultTemplate =
+            templates.find((template) => template.id === "platformer_seed" && template.available) ??
+            templates.find((template) => template.id === "starter_guided") ??
+            templates[0];
+          return defaultTemplate?.id ?? "";
+        });
+      } catch (error) {
+        if (!cancelled) {
+          setProjectTemplates([]);
+          logMessage("error", `[Projeto] Falha ao carregar templates: ${describeError(error)}`);
+        }
+      } finally {
+        if (!cancelled) {
+          setTemplatesLoading(false);
+        }
+      }
+    }
+
+    void loadTemplates();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showProjectWizard, logMessage]);
+
+  useEffect(() => {
     if (activeProjectDir) {
       setShowProjectWizard(false);
       return;
@@ -323,6 +376,12 @@ export default function App() {
 
     setShowProjectWizard(true);
   }, [activeProjectDir]);
+
+  useEffect(() => {
+    if (selectedTemplateMegadriveOnly && newProjTarget !== "megadrive") {
+      setNewProjTarget("megadrive");
+    }
+  }, [newProjTarget, selectedTemplateMegadriveOnly]);
 
   useEffect(() => {
     if (!activeProjectDir) {
@@ -575,6 +634,44 @@ export default function App() {
     }
   }
 
+  function templateAvailability(template: ProjectTemplateSummary) {
+    const donorOverride = templateDonorPaths[template.id]?.trim();
+    if (template.source_kind === "external_sgdk" && donorOverride) {
+      return {
+        available: true,
+        reason: "Usando uma pasta doadora selecionada manualmente.",
+      };
+    }
+
+    return {
+      available: template.available,
+      reason: template.availability_reason ?? "",
+    };
+  }
+
+  async function chooseTemplateDonorPath(templateId: string) {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({
+        title: "Escolher pasta doadora do template",
+        directory: true,
+        multiple: false,
+      });
+      if (typeof selected === "string") {
+        setTemplateDonorPaths((current) => ({
+          ...current,
+          [templateId]: selected,
+        }));
+        setSelectedTemplateId(templateId);
+        if (templateId === "platformer_seed") {
+          setNewProjTarget("megadrive");
+        }
+      }
+    } catch (error) {
+      logMessage("error", `[Projeto] Falha ao escolher pasta doadora: ${describeError(error)}`);
+    }
+  }
+
   async function confirmNewProject() {
     if (!newProjName.trim()) {
       logMessage("warn", "[Projeto] Informe um nome para o projeto.");
@@ -584,17 +681,41 @@ export default function App() {
       logMessage("warn", "[Projeto] Escolha a pasta base onde o projeto sera criado.");
       return;
     }
+    if (!selectedTemplate) {
+      logMessage("warn", "[Projeto] Escolha um template antes de criar o projeto.");
+      return;
+    }
+
+    const availability = templateAvailability(selectedTemplate);
+    if (!availability.available) {
+      logMessage(
+        "warn",
+        `[Projeto] O template '${selectedTemplate.name}' ainda nao esta disponivel: ${availability.reason}`
+      );
+      return;
+    }
 
     setCreatingProject(true);
     try {
-      const result = await createOnboardingProject(
+      const donorPath =
+        selectedTemplate.source_kind === "external_sgdk"
+          ? templateDonorPaths[selectedTemplate.id]?.trim() ||
+            selectedTemplate.default_donor_path ||
+            undefined
+          : undefined;
+      const result = await createProjectFromTemplate(
         newProjName.trim(),
         newProjTarget,
-        newProjBaseDir.trim()
+        newProjBaseDir.trim(),
+        selectedTemplate.id,
+        donorPath
       );
       const hydrated = await hydrateProjectState(result.path, result.name, "Projeto");
       if (hydrated) {
-        logMessage("success", `Novo projeto criado: ${result.name} em ${result.path}`);
+        logMessage(
+          "success",
+          `Novo projeto criado a partir de '${selectedTemplate.name}': ${result.name} em ${result.path}`
+        );
       } else {
         logMessage("warn", `[Projeto] Projeto criado, mas a cena inicial nao foi hidratada: ${result.name}`);
       }
@@ -962,62 +1083,184 @@ export default function App() {
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#11111b] text-[#cdd6f4]">
       {showProjectWizard && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="flex w-[28rem] flex-col gap-4 rounded-lg border border-[#313244] bg-[#181825] p-5 shadow-2xl">
+          <div className="flex max-h-[90vh] w-[52rem] flex-col gap-4 overflow-hidden rounded-lg border border-[#313244] bg-[#181825] p-5 shadow-2xl">
             <div className="space-y-1">
               <h2 className="text-sm font-bold text-[#cba6f7]">
                 {activeProjectDir ? "Novo Projeto" : "Wizard de Primeiro Uso"}
               </h2>
               <p className="text-[10px] leading-tight text-[#7f849c]">
-                Escolha o target, o nome e a pasta base. O template inicial cria um sprite
-                placeholder, uma cena principal e um LogicComponent minimo funcional.
+                Escolha um template, ajuste target/nome/pasta base e crie um projeto editavel
+                sem sair do fluxo canonico do editor.
               </p>
             </div>
 
-            <div className="flex gap-2">
-              {(["megadrive", "snes"] as const).map((target) => (
-                <button
-                  key={target}
-                  type="button"
-                  onClick={() => setNewProjTarget(target)}
-                  className={`flex-1 rounded px-3 py-2 text-xs font-semibold transition-colors ${
-                    newProjTarget === target
-                      ? target === "megadrive"
-                        ? "bg-[#a6e3a1] text-[#1e1e2e]"
-                        : "bg-[#89b4fa] text-[#1e1e2e]"
-                      : "bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]"
-                  }`}
-                >
-                  {target === "megadrive" ? "Mega Drive" : "SNES"}
-                </button>
-              ))}
+            <div className="grid gap-3 overflow-y-auto pr-1 md:grid-cols-3">
+              {templatesLoading ? (
+                <div className="col-span-full rounded border border-[#313244] bg-[#11111b] p-4 text-xs text-[#7f849c]">
+                  Carregando galeria de templates...
+                </div>
+              ) : (
+                projectTemplates.map((template) => {
+                  const availability = templateAvailability(template);
+                  const isSelected = template.id === selectedTemplateId;
+                  const donorPath =
+                    templateDonorPaths[template.id] || template.default_donor_path || "";
+                  const isPlatformer = template.id === "platformer_seed";
+
+                  return (
+                    <div
+                      key={template.id}
+                      className={`overflow-hidden rounded border ${
+                        isSelected
+                          ? "border-[#cba6f7] bg-[#1e1e2e]"
+                          : "border-[#313244] bg-[#11111b]"
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        data-testid={`template-card-${template.id}`}
+                        disabled={!availability.available}
+                        onClick={() => {
+                          setSelectedTemplateId(template.id);
+                          if (template.id === "platformer_seed") {
+                            setNewProjTarget("megadrive");
+                          }
+                        }}
+                        className="flex w-full flex-col gap-2 p-3 text-left disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <h3 className="text-sm font-semibold text-[#cdd6f4]">{template.name}</h3>
+                            <p className="text-[10px] uppercase tracking-wide text-[#7f849c]">
+                              {template.genre}
+                            </p>
+                          </div>
+                          {template.experimental ? (
+                            <span className="rounded border border-[#fab387] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#fab387]">
+                              Experimental
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="min-h-[3rem] text-[11px] leading-5 text-[#a6adc8]">
+                          {template.description}
+                        </p>
+                        <div className="flex flex-wrap gap-1">
+                          <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#cdd6f4]">
+                            {template.difficulty}
+                          </span>
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[10px] ${
+                              availability.available
+                                ? "bg-[#a6e3a1]/15 text-[#a6e3a1]"
+                                : "bg-[#f38ba8]/15 text-[#f38ba8]"
+                            }`}
+                          >
+                            {availability.available ? "Disponivel" : "Indisponivel"}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1">
+                          {template.features.length > 0 ? (
+                            template.features.map((feature) => (
+                              <span
+                                key={feature}
+                                className="rounded bg-[#181825] px-1.5 py-0.5 text-[10px] text-[#7f849c]"
+                              >
+                                {feature}
+                              </span>
+                            ))
+                          ) : (
+                            <span className="text-[10px] text-[#6c7086]">Sem presets iniciais.</span>
+                          )}
+                        </div>
+                      </button>
+
+                      {isPlatformer ? (
+                        <div className="border-t border-[#313244] p-3 text-[10px] text-[#7f849c]">
+                          <div className="mb-2">
+                            <p className="text-[#a6adc8]">Template doador</p>
+                            <p className="truncate font-mono text-[#cdd6f4]">
+                              {donorPath || "(selecione uma pasta doadora)"}
+                            </p>
+                          </div>
+                          {availability.reason ? (
+                            <p className="mb-2 text-[#fab387]">{availability.reason}</p>
+                          ) : (
+                            <p className="mb-2 text-[#7f849c]">
+                              Usa assets limpos do template SGDK externo sem copiar ROM, VGM ou artefatos.
+                            </p>
+                          )}
+                          <ToolbarButton
+                            label="Escolher pasta..."
+                            onClick={() => void chooseTemplateDonorPath(template.id)}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })
+              )}
             </div>
 
-            <input
-              ref={inputRef}
-              type="text"
-              value={newProjName}
-              onChange={(event) => setNewProjName(event.target.value)}
-              onKeyDown={(event) => event.key === "Enter" && void confirmNewProject()}
-              placeholder="Nome do projeto"
-              className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1.5 text-sm text-[#cdd6f4] focus:border-[#cba6f7] focus:outline-none"
-            />
-
-            <div className="flex items-center gap-2 rounded border border-[#313244] bg-[#11111b] p-2">
-              <div className="min-w-0 flex-1">
-                <p className="text-[10px] text-[#7f849c]">Pasta base</p>
-                <p className="truncate font-mono text-[10px] text-[#cdd6f4]">
-                  {newProjBaseDir || "(selecione uma pasta)"}
+            <div className="grid gap-3 md:grid-cols-[1.2fr_1fr]">
+              <div className="rounded border border-[#313244] bg-[#11111b] p-3 text-[10px] text-[#7f849c]">
+                <p className="mb-1 text-[#cdd6f4]">
+                  Template selecionado: <span className="font-semibold">{selectedTemplate?.name ?? "Nenhum"}</span>
                 </p>
+                <p className="leading-5">
+                  {selectedTemplate?.description ??
+                    "A galeria de templates sera exibida assim que o catalogo for carregado."}
+                </p>
+                {selectedTemplateMegadriveOnly ? (
+                  <p className="mt-2 text-[#fab387]">
+                    Este seed experimental e Mega Drive only nesta wave.
+                  </p>
+                ) : null}
               </div>
-              <ToolbarButton label="Escolher" onClick={() => void chooseNewProjectBaseDir()} />
+
+              <div className="flex gap-2">
+                {(["megadrive", "snes"] as const).map((target) => (
+                  <button
+                    key={target}
+                    type="button"
+                    disabled={selectedTemplateMegadriveOnly && target === "snes"}
+                    onClick={() => setNewProjTarget(target)}
+                    className={`flex-1 rounded px-3 py-2 text-xs font-semibold transition-colors ${
+                      newProjTarget === target
+                        ? target === "megadrive"
+                          ? "bg-[#a6e3a1] text-[#1e1e2e]"
+                          : "bg-[#89b4fa] text-[#1e1e2e]"
+                        : "bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]"
+                    } disabled:cursor-not-allowed disabled:opacity-40`}
+                  >
+                    {target === "megadrive" ? "Mega Drive" : "SNES"}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="rounded border border-[#313244] bg-[#11111b] p-3 text-[10px] text-[#7f849c]">
-              O template cria `assets/sprites/onboarding_player.ppm`, posiciona a entidade
-              `player` na cena principal e liga `event_start` para `sprite_move` no grafo inicial.
+            <div className="grid gap-3 md:grid-cols-[1fr_1.1fr]">
+              <input
+                ref={inputRef}
+                type="text"
+                value={newProjName}
+                onChange={(event) => setNewProjName(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && void confirmNewProject()}
+                placeholder="Nome do projeto"
+                className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1.5 text-sm text-[#cdd6f4] focus:border-[#cba6f7] focus:outline-none"
+              />
+
+              <div className="flex items-center gap-2 rounded border border-[#313244] bg-[#11111b] p-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] text-[#7f849c]">Pasta base</p>
+                  <p className="truncate font-mono text-[10px] text-[#cdd6f4]">
+                    {newProjBaseDir || "(selecione uma pasta)"}
+                  </p>
+                </div>
+                <ToolbarButton label="Escolher" onClick={() => void chooseNewProjectBaseDir()} />
+              </div>
             </div>
 
-            <div className="flex flex-wrap justify-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2 border-t border-[#313244] pt-2">
               {activeProjectDir ? (
                 <ToolbarButton label="Cancelar" onClick={() => setShowProjectWizard(false)} />
               ) : null}
@@ -1026,7 +1269,7 @@ export default function App() {
                 label={creatingProject ? "Criando..." : "Criar Projeto"}
                 onClick={() => void confirmNewProject()}
                 accent="primary"
-                disabled={creatingProject}
+                disabled={creatingProject || templatesLoading || !selectedTemplate}
               />
             </div>
           </div>

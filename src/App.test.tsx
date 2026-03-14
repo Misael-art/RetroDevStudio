@@ -23,7 +23,9 @@ const mocks = vi.hoisted(() => ({
   validateSceneDraft: vi.fn(),
   openProjectDialog: vi.fn(),
   newProjectDialog: vi.fn(),
-  createOnboardingProject: vi.fn(),
+  dialogOpen: vi.fn(),
+  listProjectTemplates: vi.fn(),
+  createProjectFromTemplate: vi.fn(),
   setProjectTarget: vi.fn(),
   persistActiveScene: vi.fn(),
   reloadSceneFromDisk: vi.fn(),
@@ -56,6 +58,10 @@ vi.mock("./components/nodegraph/NodeGraphEditor", () => ({
 
 vi.mock("./components/retrofx/RetroFXDesigner", () => ({
   default: () => <div data-testid="retrofx" />,
+}));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: mocks.dialogOpen,
 }));
 
 vi.mock("./core/ipc/buildService", () => ({
@@ -101,7 +107,8 @@ vi.mock("./core/ipc/hwService", () => ({
 vi.mock("./core/ipc/projectService", () => ({
   openProjectDialog: mocks.openProjectDialog,
   newProjectDialog: mocks.newProjectDialog,
-  createOnboardingProject: mocks.createOnboardingProject,
+  listProjectTemplates: mocks.listProjectTemplates,
+  createProjectFromTemplate: mocks.createProjectFromTemplate,
   setProjectTarget: mocks.setProjectTarget,
 }));
 
@@ -142,6 +149,53 @@ function createDependencyStatus(id: string) {
     notes: [],
     issues: [],
   };
+}
+
+function defaultProjectTemplates() {
+  return [
+    {
+      id: "empty",
+      name: "Projeto Vazio",
+      description: "Cena vazia sem entidades. Para quem quer comecar do zero.",
+      genre: "blank",
+      difficulty: "beginner",
+      features: [],
+      source_kind: "builtin",
+      recommended_target: "megadrive",
+      experimental: false,
+      available: true,
+      availability_reason: null,
+      default_donor_path: null,
+    },
+    {
+      id: "starter_guided",
+      name: "Primeiro Projeto",
+      description: "Sprite placeholder com logica minima. Ideal para aprender o editor.",
+      genre: "tutorial",
+      difficulty: "beginner",
+      features: ["sprite", "logic"],
+      source_kind: "builtin",
+      recommended_target: "megadrive",
+      experimental: false,
+      available: true,
+      availability_reason: null,
+      default_donor_path: null,
+    },
+    {
+      id: "platformer_seed",
+      name: "Plataforma",
+      description: "Sprite de personagem, tilemap de cenario e som de pulo importados de template SGDK externo.",
+      genre: "platformer",
+      difficulty: "intermediate",
+      features: ["sprite", "tilemap", "physics", "collision", "input", "audio", "camera"],
+      source_kind: "external_sgdk",
+      recommended_target: "megadrive",
+      experimental: true,
+      available: false,
+      availability_reason: "Template Plataforma indisponivel: donor path nao encontrado.",
+      default_donor_path: "F:/Projects/MegaDrive_DEV/SGDK_templates/templates/plataform",
+    },
+  ];
 }
 
 function findButton(container: HTMLElement, label: string): HTMLButtonElement {
@@ -190,6 +244,13 @@ describe("App build flow", () => {
 
     mocks.persistActiveScene.mockResolvedValue(true);
     mocks.reloadSceneFromDisk.mockResolvedValue(true);
+    mocks.dialogOpen.mockResolvedValue("F:/Projects/RetroDevStudio/tests/fixtures");
+    mocks.listProjectTemplates.mockResolvedValue(defaultProjectTemplates());
+    mocks.createProjectFromTemplate.mockResolvedValue({
+      selected: true,
+      path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      name: "MeuProjeto",
+    });
     mocks.getHwStatus.mockResolvedValue({
       vram_used: 0,
       vram_limit: 65536,
@@ -470,7 +531,58 @@ describe("App build flow", () => {
 
     expect(container.textContent).toContain("Wizard de Primeiro Uso");
     expect(container.textContent).toContain("Mega Drive");
+    expect(container.textContent).toContain("Projeto Vazio");
+    expect(container.textContent).toContain("Primeiro Projeto");
+    expect(container.textContent).toContain("Plataforma");
+    expect(container.textContent).toContain("Experimental");
     expect(container.textContent).toContain("Criar Projeto");
+  });
+
+  it("creates a project from the selected template card", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "",
+        activeProjectName: "",
+        activeScenePath: "",
+        activeScene: null,
+        hwStatus: null,
+      });
+      await flush();
+      await flush();
+    });
+
+    const starterCard = container.querySelector(
+      "[data-testid='template-card-starter_guided']"
+    ) as HTMLButtonElement | null;
+    const chooseButton = findButton(container, "Escolher");
+    const createButton = findButton(container, "Criar Projeto");
+    const nameInput = container.querySelector("input[placeholder='Nome do projeto']") as
+      | HTMLInputElement
+      | null;
+
+    await act(async () => {
+      starterCard?.click();
+      chooseButton.click();
+      if (nameInput) {
+        nameInput.value = "Galeria";
+        nameInput.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      await flush();
+    });
+
+    await act(async () => {
+      createButton.click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.createProjectFromTemplate).toHaveBeenCalledWith(
+      "MeuProjeto",
+      "megadrive",
+      "F:/Projects/RetroDevStudio/tests/fixtures",
+      "starter_guided",
+      undefined
+    );
   });
 
   it("does not start the frame loop when the game tab opens without a loaded ROM", async () => {
