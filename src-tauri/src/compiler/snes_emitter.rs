@@ -155,7 +155,6 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
         out.push('\n');
     }
     if !parallax_layers.is_empty() || !raster_lines.is_empty() {
-        out.push_str("static u8 retro_hdma_table[449];\n");
         for (index, _) in parallax_layers.iter().enumerate() {
             out.push_str(&format!("static s16 retro_parallax_offset_{}_x = 0;\n", index));
             out.push_str(&format!("static s16 retro_parallax_offset_{}_y = 0;\n", index));
@@ -235,7 +234,6 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
     }
 
     let mut pads_scanned = false;
-    let mut retrofx_initialized = false;
     for (event, _) in &hardware_event_scripts {
         out.push_str(&snes_event_registration(*event));
     }
@@ -254,20 +252,12 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
                 render_move_camera(&mut out, target, *x, *y);
             }
             AstNode::SetupParallax { layers } => {
-                if !retrofx_initialized {
-                    out.push_str("    setHDMATable(0, retro_hdma_table);\n");
-                    retrofx_initialized = true;
-                }
                 out.push_str(&format!(
                     "    // RetroFX parallax configured for {} layer(s)\n",
                     layers.len()
                 ));
             }
             AstNode::SetupRasterEffect { lines } => {
-                if !retrofx_initialized {
-                    out.push_str("    setHDMATable(0, retro_hdma_table);\n");
-                    retrofx_initialized = true;
-                }
                 out.push_str(&format!(
                     "    // RetroFX raster configured for {} line(s)\n",
                     lines.len()
@@ -1023,44 +1013,72 @@ fn render_retrofx_frame(
         ));
     }
 
-    out.push_str(&format!(
-        "{indent}for (u16 retro_line = 0; retro_line < 224; retro_line++) {{\n",
-        indent = indent_str
-    ));
-    out.push_str(&format!(
-        "{indent}    retro_hdma_table[retro_line * 2] = 1;\n",
-        indent = indent_str
-    ));
-    out.push_str(&format!(
-        "{indent}    retro_hdma_table[(retro_line * 2) + 1] = 0;\n",
-        indent = indent_str
-    ));
-    for (index, _) in parallax_layers.iter().enumerate() {
-        let start = (index * 224) / parallax_layers.len();
-        let end = ((index + 1) * 224) / parallax_layers.len();
-        out.push_str(&format!(
-            "{indent}    if (retro_line >= {start} && retro_line < {end}) retro_hdma_table[(retro_line * 2) + 1] = retro_parallax_offset_{index}_x;\n",
-            indent = indent_str,
-            start = start,
-            end = end,
-            index = index
-        ));
+    let mut boundaries = vec![0usize, 224usize];
+    if !parallax_layers.is_empty() {
+        for index in 0..parallax_layers.len() {
+            boundaries.push((index * 224) / parallax_layers.len());
+            boundaries.push(((index + 1) * 224) / parallax_layers.len());
+        }
     }
-    out.push_str(&format!("{indent}}}\n", indent = indent_str));
-
+    let mut raster_offsets = std::collections::BTreeMap::<usize, i32>::new();
     for line in raster_lines {
-        out.push_str(&format!(
-            "{indent}retro_hdma_table[({scanline} * 2) + 1] += {offset_x};\n",
-            indent = indent_str,
-            scanline = line.scanline,
-            offset_x = line.offset_x
-        ));
+        let scanline = line.scanline.min(223) as usize;
+        boundaries.push(scanline);
+        boundaries.push((scanline + 1).min(224));
+        *raster_offsets.entry(scanline).or_insert(0) += line.offset_x;
     }
+    boundaries.sort_unstable();
+    boundaries.dedup();
 
+    let mut hdma_offset = 0usize;
+    for segment in boundaries.windows(2) {
+        let start = segment[0];
+        let end = segment[1];
+        if end <= start {
+            continue;
+        }
+
+        let base_expr = if parallax_layers.is_empty() {
+            None
+        } else {
+            let layer_index = ((start * parallax_layers.len()) / 224).min(parallax_layers.len() - 1);
+            Some(format!("retro_parallax_offset_{}_x", layer_index))
+        };
+        let raster_delta = raster_offsets.get(&start).copied().unwrap_or_default();
+        let value_expr = match (base_expr, raster_delta) {
+            (Some(expr), 0) => expr,
+            (Some(expr), delta) if delta > 0 => format!("({expr} + {delta})"),
+            (Some(expr), delta) => format!("({expr} - {})", delta.abs()),
+            (None, 0) => "0".to_string(),
+            (None, delta) => delta.to_string(),
+        };
+
+        out.push_str(&format!(
+            "{indent}HDMATable16[{offset}] = {line_count};\n",
+            indent = indent_str,
+            offset = hdma_offset,
+            line_count = end - start
+        ));
+        out.push_str(&format!(
+            "{indent}HDMATable16[{offset}] = (u8)(((u16)({value})) & 0xFF);\n",
+            indent = indent_str,
+            offset = hdma_offset + 1,
+            value = value_expr
+        ));
+        out.push_str(&format!(
+            "{indent}HDMATable16[{offset}] = (u8)((((u16)({value})) >> 8) & 0xFF);\n",
+            indent = indent_str,
+            offset = hdma_offset + 2,
+            value = value_expr
+        ));
+        hdma_offset += 3;
+    }
     out.push_str(&format!(
-        "{indent}retro_hdma_table[448] = 0;\n",
-        indent = indent_str
+        "{indent}HDMATable16[{offset}] = 0;\n",
+        indent = indent_str,
+        offset = hdma_offset
     ));
+    out.push_str(&format!("{indent}setParallaxScrolling(0);\n", indent = indent_str));
     if !parallax_layers.is_empty() {
         out.push_str(&format!(
             "{indent}bgSetScroll(0, retro_parallax_offset_0_x, retro_parallax_offset_0_y);\n",
@@ -1822,13 +1840,16 @@ mod tests {
 
         let output = emit_snes(&ast, "RetroFX Demo");
 
-        assert!(output.main_c.contains("static u8 retro_hdma_table[449];"));
-        assert!(output.main_c.contains("setHDMATable(0, retro_hdma_table);"));
+        assert!(!output.main_c.contains("retro_hdma_table"));
+        assert!(output.main_c.contains("HDMATable16[0] = 128;"));
+        assert!(output.main_c.contains("HDMATable16[3] = 1;"));
+        assert!(output.main_c.contains("HDMATable16[9] = 0;"));
+        assert!(output.main_c.contains("setParallaxScrolling(0);"));
         assert!(output.main_c.contains("retro_parallax_offset_0_x += 2;"));
         assert!(output.main_c.contains("retro_parallax_offset_0_y += 1;"));
         assert!(output
             .main_c
-            .contains("retro_hdma_table[(128 * 2) + 1] += 6;"));
+            .contains("HDMATable16[4] = (u8)(((u16)((retro_parallax_offset_0_x + 6))) & 0xFF);"));
         assert!(output
             .main_c
             .contains("bgSetScroll(0, retro_parallax_offset_0_x, retro_parallax_offset_0_y);"));
