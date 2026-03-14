@@ -540,7 +540,7 @@ fn prepare_workspace(
             )?;
         }
         _ => {
-            stage_project_assets(project_dir, &root, ast)?;
+            stage_project_assets(project_dir, &res_dir, ast)?;
             fs::write(&makefile_path, render_sgdk_makefile(&project_slug))
                 .map_err(|e| format!("Falha ao gravar '{}': {}", makefile_path.display(), e))?;
         }
@@ -1532,6 +1532,64 @@ mod tests {
             .expect("write tilemap scene fixture");
     }
 
+    fn install_megadrive_sprite_fixture(project_dir: &Path) {
+        let sprite_asset = project_dir
+            .join("assets")
+            .join("sprites")
+            .join("onboarding_player.ppm");
+        fs::create_dir_all(
+            sprite_asset
+                .parent()
+                .expect("sprite asset should have parent directory"),
+        )
+        .expect("create megadrive sprite asset dir");
+        fs::copy(
+            fixture_dir("snes_dummy")
+                .join("assets")
+                .join("sprites")
+                .join("hero.ppm"),
+            &sprite_asset,
+        )
+        .expect("copy megadrive sprite fixture");
+
+        let scene_json = r#"{
+  "scene_id": "main",
+  "display_name": "Main Scene",
+  "background_layers": [],
+  "entities": [
+    {
+      "entity_id": "player",
+      "prefab": null,
+      "transform": {
+        "x": 48,
+        "y": 64
+      },
+      "components": {
+        "sprite": {
+          "asset": "assets/sprites/onboarding_player.ppm",
+          "frame_width": 16,
+          "frame_height": 16,
+          "pivot": null,
+          "palette_slot": 0,
+          "animations": {},
+          "priority": "foreground"
+        },
+        "collision": null,
+        "input": null,
+        "physics": null,
+        "audio": null,
+        "logic": null,
+        "camera": null,
+        "tilemap": null
+      }
+    }
+  ],
+  "palettes": []
+}"#;
+        fs::write(project_dir.join("scenes").join("main.json"), scene_json)
+            .expect("write megadrive sprite scene fixture");
+    }
+
     fn install_megadrive_audio_fixture(project_dir: &Path) {
         let audio_dir = project_dir.join("assets").join("audio");
         fs::create_dir_all(&audio_dir).expect("create megadrive audio dir");
@@ -1638,6 +1696,7 @@ mod tests {
     fn build_generates_megadrive_rom_artifact_with_fake_toolchain() {
         let _serial = test_serial_guard();
         let project_dir = workspace_copy("megadrive_dummy");
+        install_megadrive_sprite_fixture(&project_dir);
         let (sgdk_root, make_program) = fake_toolchain("sgdk", "md");
         let environment = BuildEnvironment {
             sgdk_root: Some(sgdk_root),
@@ -1652,6 +1711,14 @@ mod tests {
         assert!(result.rom_path.ends_with(".md"));
         assert!(project_dir.join("build").join("megadrive").join("src").join("main.c").exists());
         assert!(project_dir.join("build").join("megadrive").join("res").join("resources.res").exists());
+        assert!(project_dir
+            .join("build")
+            .join("megadrive")
+            .join("res")
+            .join("assets")
+            .join("sprites")
+            .join("onboarding_player.ppm")
+            .exists());
 
         let _ = fs::remove_dir_all(project_dir);
     }
@@ -1716,6 +1783,7 @@ mod tests {
         let staged_tilemap = project_dir
             .join("build")
             .join("megadrive")
+            .join("res")
             .join("assets")
             .join("tilesets")
             .join("level.bmp");
@@ -1809,6 +1877,7 @@ mod tests {
         assert!(project_dir
             .join("build")
             .join("megadrive")
+            .join("res")
             .join("assets")
             .join("audio")
             .join("jump.wav")
@@ -1816,6 +1885,7 @@ mod tests {
         assert!(project_dir
             .join("build")
             .join("megadrive")
+            .join("res")
             .join("assets")
             .join("audio")
             .join("stage_theme.xgm")
