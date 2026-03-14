@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import Tabs from "../common/Tabs";
 import { useEditorStore } from "../../core/store/editorStore";
 import {
@@ -53,6 +54,13 @@ type QueuedAudioChunk = {
   left: Float32Array;
   right: Float32Array;
   offset: number;
+};
+
+type ViewportAssetCacheEntry = {
+  status: "loading" | "loaded" | "error";
+  source?: CanvasImageSource;
+  width?: number;
+  height?: number;
 };
 
 function describeError(error: unknown): string {
@@ -121,6 +129,58 @@ function drawResizeHandle(
   context.strokeRect(x - half, y - half, RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
 }
 
+function resolveProjectAssetPath(projectDir: string, relativePath: string): string {
+  const normalizedProjectDir = projectDir.replace(/\\/g, "/").replace(/\/+$/, "");
+  const normalizedRelativePath = relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
+  return `${normalizedProjectDir}/${normalizedRelativePath}`;
+}
+
+function decodePpmP3(content: string): ImageData | null {
+  const cleaned = content
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.replace(/#.*$/, "").trim())
+    .filter((line) => line.length > 0)
+    .join(" ")
+    .trim();
+  if (!cleaned.startsWith("P3 ")) {
+    return null;
+  }
+
+  const tokens = cleaned.split(/\s+/);
+  if (tokens.length < 4) {
+    return null;
+  }
+
+  const width = Number(tokens[1]);
+  const height = Number(tokens[2]);
+  const maxValue = Number(tokens[3]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null;
+  }
+  if (!Number.isFinite(maxValue) || maxValue <= 0) {
+    return null;
+  }
+
+  const expectedComponents = width * height * 3;
+  const values = tokens.slice(4, 4 + expectedComponents).map((token) => Number(token));
+  if (values.length !== expectedComponents || values.some((value) => !Number.isFinite(value))) {
+    return null;
+  }
+
+  const pixels = new Uint8ClampedArray(width * height * 4);
+  for (let index = 0; index < width * height; index += 1) {
+    const sourceOffset = index * 3;
+    const targetOffset = index * 4;
+    pixels[targetOffset] = Math.round((values[sourceOffset] / maxValue) * 255);
+    pixels[targetOffset + 1] = Math.round((values[sourceOffset + 1] / maxValue) * 255);
+    pixels[targetOffset + 2] = Math.round((values[sourceOffset + 2] / maxValue) * 255);
+    pixels[targetOffset + 3] = 255;
+  }
+
+  return new ImageData(pixels, width, height);
+}
+
 export default function ViewportPanel() {
   const {
     activeViewportTab,
@@ -155,6 +215,7 @@ export default function ViewportPanel() {
   const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const audioUnlistenRef = useRef<(() => void) | null>(null);
   const audioQueueRef = useRef<QueuedAudioChunk[]>([]);
+  const assetCacheRef = useRef<Map<string, ViewportAssetCacheEntry>>(new Map());
   const dragRef = useRef<{
     mode: "move" | "resize";
     entityId: string;
@@ -186,6 +247,7 @@ export default function ViewportPanel() {
   const [audioMuted, setAudioMuted] = useState(false);
   const [assetHotReloadNotice, setAssetHotReloadNotice] = useState<string | null>(null);
   const [showPerformanceOverlay, setShowPerformanceOverlay] = useState(true);
+  const [assetCacheVersion, setAssetCacheVersion] = useState(0);
   const hotReloadNoticeTimerRef = useRef<number | null>(null);
   const frameTimingRef = useRef<{ lastFrameAt: number; fps: number }>({
     lastFrameAt: 0,
@@ -194,6 +256,86 @@ export default function ViewportPanel() {
 
   activeTabRef.current = activeViewportTab;
   pausedRef.current = emulPaused;
+
+  useEffect(() => {
+    assetCacheRef.current.clear();
+    setAssetCacheVersion((current) => current + 1);
+  }, [activeProjectDir]);
+
+  const getViewportAsset = useCallback(
+    (relativePath?: string | null): ViewportAssetCacheEntry | null => {
+      if (!activeProjectDir || !relativePath) {
+        return null;
+      }
+
+      const absolutePath = resolveProjectAssetPath(activeProjectDir, relativePath);
+      const cached = assetCacheRef.current.get(absolutePath);
+      if (cached) {
+        return cached;
+      }
+
+      const cacheEntry: ViewportAssetCacheEntry = { status: "loading" };
+      assetCacheRef.current.set(absolutePath, cacheEntry);
+      const assetUrl = convertFileSrc(absolutePath);
+
+      if (relativePath.toLowerCase().endsWith(".ppm")) {
+        void fetch(assetUrl)
+          .then((response) => {
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status}`);
+            }
+            return response.text();
+          })
+          .then((content) => {
+            const imageData = decodePpmP3(content);
+            if (!imageData) {
+              throw new Error("PPM P3 invalido");
+            }
+
+            const canvas = document.createElement("canvas");
+            canvas.width = imageData.width;
+            canvas.height = imageData.height;
+            const context = canvas.getContext("2d");
+            if (!context) {
+              throw new Error("Canvas indisponivel");
+            }
+            context.putImageData(imageData, 0, 0);
+
+            assetCacheRef.current.set(absolutePath, {
+              status: "loaded",
+              source: canvas,
+              width: canvas.width,
+              height: canvas.height,
+            });
+            setAssetCacheVersion((current) => current + 1);
+          })
+          .catch(() => {
+            assetCacheRef.current.set(absolutePath, { status: "error" });
+            setAssetCacheVersion((current) => current + 1);
+          });
+
+        return cacheEntry;
+      }
+
+      const image = new Image();
+      image.onload = () => {
+        assetCacheRef.current.set(absolutePath, {
+          status: "loaded",
+          source: image,
+          width: image.naturalWidth || image.width,
+          height: image.naturalHeight || image.height,
+        });
+        setAssetCacheVersion((current) => current + 1);
+      };
+      image.onerror = () => {
+        assetCacheRef.current.set(absolutePath, { status: "error" });
+        setAssetCacheVersion((current) => current + 1);
+      };
+      image.src = assetUrl;
+      return cacheEntry;
+    },
+    [activeProjectDir]
+  );
 
   const renderFrame = useCallback((payload: FramePayload) => {
     const canvas = canvasRef.current;
@@ -784,6 +926,7 @@ export default function ViewportPanel() {
     const context = canvas.getContext("2d");
     if (!context) return;
 
+    context.imageSmoothingEnabled = false;
     context.fillStyle = "#000000";
     context.fillRect(0, 0, MD_WIDTH, MD_HEIGHT);
 
@@ -846,22 +989,30 @@ export default function ViewportPanel() {
         const tilemap = entity.components.tilemap;
         const mapWidth = tilemap.map_width * 8;
         const mapHeight = tilemap.map_height * 8;
+        const tilemapAsset = getViewportAsset(tilemap.tileset);
 
-        context.fillStyle = "rgba(148,226,213,0.08)";
-        context.fillRect(x, y, mapWidth, mapHeight);
-        context.strokeStyle = "rgba(148,226,213,0.30)";
-        context.lineWidth = 0.5;
-        for (let tx = 0; tx <= mapWidth; tx += 8) {
-          context.beginPath();
-          context.moveTo(x + tx, y);
-          context.lineTo(x + tx, y + mapHeight);
-          context.stroke();
-        }
-        for (let ty = 0; ty <= mapHeight; ty += 8) {
-          context.beginPath();
-          context.moveTo(x, y + ty);
-          context.lineTo(x + mapWidth, y + ty);
-          context.stroke();
+        if (tilemapAsset?.status === "loaded" && tilemapAsset.source) {
+          context.save();
+          context.globalAlpha = 0.82;
+          context.drawImage(tilemapAsset.source, x, y, mapWidth, mapHeight);
+          context.restore();
+        } else {
+          context.fillStyle = "rgba(148,226,213,0.08)";
+          context.fillRect(x, y, mapWidth, mapHeight);
+          context.strokeStyle = "rgba(148,226,213,0.30)";
+          context.lineWidth = 0.5;
+          for (let tx = 0; tx <= mapWidth; tx += 8) {
+            context.beginPath();
+            context.moveTo(x + tx, y);
+            context.lineTo(x + tx, y + mapHeight);
+            context.stroke();
+          }
+          for (let ty = 0; ty <= mapHeight; ty += 8) {
+            context.beginPath();
+            context.moveTo(x, y + ty);
+            context.lineTo(x + mapWidth, y + ty);
+            context.stroke();
+          }
         }
 
         context.strokeStyle = isSelected ? "#94e2d5" : "rgba(148,226,213,0.5)";
@@ -913,8 +1064,16 @@ export default function ViewportPanel() {
         return;
       }
 
-      context.fillStyle = `${color}33`;
-      context.fillRect(x, y, width, height);
+      const spriteAsset = getViewportAsset(entity.components?.sprite?.asset);
+      const sprite = entity.components?.sprite;
+      if (spriteAsset?.status === "loaded" && spriteAsset.source && sprite) {
+        const sourceWidth = Math.min(sprite.frame_width, spriteAsset.width ?? sprite.frame_width);
+        const sourceHeight = Math.min(sprite.frame_height, spriteAsset.height ?? sprite.frame_height);
+        context.drawImage(spriteAsset.source, 0, 0, sourceWidth, sourceHeight, x, y, width, height);
+      } else {
+        context.fillStyle = `${color}33`;
+        context.fillRect(x, y, width, height);
+      }
 
       context.strokeStyle = isSelected ? "#ffffff" : color;
       context.lineWidth = isSelected ? 2 : 1;
@@ -946,7 +1105,15 @@ export default function ViewportPanel() {
       context.arc(x + width / 2, y + height / 2, 2, 0, Math.PI * 2);
       context.fill();
     });
-  }, [activeScene, activeTarget, activeViewportTab, gridSnap, selectedEntityId]);
+  }, [
+    activeScene,
+    activeTarget,
+    activeViewportTab,
+    assetCacheVersion,
+    getViewportAsset,
+    gridSnap,
+    selectedEntityId,
+  ]);
 
   useEffect(() => {
     const gainNode = audioGainRef.current;

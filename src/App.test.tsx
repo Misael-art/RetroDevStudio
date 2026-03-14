@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => ({
   openProjectDialog: vi.fn(),
   newProjectDialog: vi.fn(),
   dialogOpen: vi.fn(),
+  convertFileSrc: vi.fn((path: string) => `asset://${path}`),
   listProjectTemplates: vi.fn(),
   createProjectFromTemplate: vi.fn(),
   setProjectTarget: vi.fn(),
@@ -62,6 +63,10 @@ vi.mock("./components/retrofx/RetroFXDesigner", () => ({
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: mocks.dialogOpen,
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: mocks.convertFileSrc,
 }));
 
 vi.mock("./core/ipc/buildService", () => ({
@@ -376,6 +381,7 @@ describe("App build flow", () => {
         stroke: vi.fn(),
         fillText: vi.fn(),
         strokeRect: vi.fn(),
+        drawImage: vi.fn(),
         arc: vi.fn(),
         fill: vi.fn(),
         save: vi.fn(),
@@ -536,6 +542,43 @@ describe("App build flow", () => {
     expect(container.textContent).toContain("Plataforma");
     expect(container.textContent).toContain("Experimental");
     expect(container.textContent).toContain("Criar Projeto");
+  });
+
+  it("asks the viewport to resolve sprite assets into preview URLs", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeScene: {
+          scene_id: "preview_scene",
+          display_name: "Preview Scene",
+          entities: [
+            {
+              entity_id: "hero",
+              prefab: null,
+              transform: { x: 16, y: 24 },
+              components: {
+                sprite: {
+                  asset: "assets/sprites/onboarding_player.ppm",
+                  frame_width: 16,
+                  frame_height: 16,
+                  pivot: undefined,
+                  palette_slot: 0,
+                  animations: {},
+                  priority: "foreground",
+                },
+              },
+            },
+          ],
+          background_layers: [],
+        },
+        selectedEntityId: "hero",
+      });
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.convertFileSrc).toHaveBeenCalledWith(
+      expect.stringContaining("assets/sprites/onboarding_player.ppm")
+    );
   });
 
   it("creates a project from the selected template card", async () => {
