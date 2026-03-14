@@ -198,14 +198,18 @@ pub fn list_scenes(project_dir: &Path) -> Result<Vec<SceneInfo>, LoadError> {
 }
 
 pub fn create_scene(project_dir: &Path, display_name: Option<&str>) -> Result<SceneInfo, LoadError> {
-    let _project = load_project(project_dir)?;
+    let project = load_project(project_dir)?;
     let label = display_name
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or("New Scene");
     let scene_id = next_scene_id(project_dir, label);
     let scene_path = format!("scenes/{}.json", scene_id);
-    let scene = canonical_scene(&scene_id, Some(label.to_string()));
+    let scene = if onboarding_sprite_path(project_dir).exists() {
+        starter_scene(&scene_id, label.to_string(), &project.target)
+    } else {
+        canonical_scene(&scene_id, Some(label.to_string()))
+    };
     save_scene(project_dir, &scene_path, &scene)?;
     Ok(scene_info(&scene_path, &scene))
 }
@@ -239,8 +243,7 @@ pub fn seed_onboarding_template(
     project_dir: &Path,
     target: &str,
 ) -> Result<Scene, LoadError> {
-    let sprite_relative_path = ONBOARDING_SPRITE_ASSET;
-    let sprite_absolute_path = project_dir.join("assets").join("sprites").join("onboarding_player.ppm");
+    let sprite_absolute_path = onboarding_sprite_path(project_dir);
 
     fs::write(&sprite_absolute_path, onboarding_sprite_ppm()).map_err(|error| {
         LoadError(format!(
@@ -249,44 +252,14 @@ pub fn seed_onboarding_template(
             error
         ))
     })?;
-
-    let logic_graph = onboarding_logic_graph();
-
-    let mut scene = canonical_scene(DEFAULT_SCENE_ID, Some("Main Scene".to_string()));
-    scene.display_name = Some(match target {
-        "snes" => "SNES Starter Scene".to_string(),
-        _ => "Mega Drive Starter Scene".to_string(),
-    });
-    scene.palettes = vec![PaletteEntry {
-        slot: 0,
-        colors: vec![
-            "#102030".to_string(),
-            "#2E8B57".to_string(),
-            "#F9E2AF".to_string(),
-            "#FFFFFF".to_string(),
-        ],
-    }];
-    scene.entities = vec![Entity {
-        entity_id: "player".to_string(),
-        prefab: None,
-        transform: crate::ugdm::entities::Transform { x: 48, y: 64 },
-        components: Components {
-            sprite: Some(SpriteComponent {
-                asset: sprite_relative_path.to_string(),
-                frame_width: ONBOARDING_SPRITE_SIZE,
-                frame_height: ONBOARDING_SPRITE_SIZE,
-                pivot: None,
-                palette_slot: 0,
-                animations: HashMap::new(),
-                priority: "foreground".to_string(),
-            }),
-            logic: Some(LogicComponent {
-                graph: Some(logic_graph),
-                variables: HashMap::new(),
-            }),
-            ..Components::default()
+    let scene = starter_scene(
+        DEFAULT_SCENE_ID,
+        match target {
+            "snes" => "SNES Starter Scene".to_string(),
+            _ => "Mega Drive Starter Scene".to_string(),
         },
-    }];
+        target,
+    );
 
     save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
     Ok(scene)
@@ -488,6 +461,46 @@ fn normalized_project_schema_version(project: &Project) -> &str {
     } else {
         version
     }
+}
+
+fn onboarding_sprite_path(project_dir: &Path) -> PathBuf {
+    project_dir.join("assets").join("sprites").join("onboarding_player.ppm")
+}
+
+fn starter_scene(scene_id: &str, display_name: String, _target: &str) -> Scene {
+    let logic_graph = onboarding_logic_graph();
+    let mut scene = canonical_scene(scene_id, Some(display_name));
+    scene.palettes = vec![PaletteEntry {
+        slot: 0,
+        colors: vec![
+            "#102030".to_string(),
+            "#2E8B57".to_string(),
+            "#F9E2AF".to_string(),
+            "#FFFFFF".to_string(),
+        ],
+    }];
+    scene.entities = vec![Entity {
+        entity_id: "player".to_string(),
+        prefab: None,
+        transform: crate::ugdm::entities::Transform { x: 48, y: 64 },
+        components: Components {
+            sprite: Some(SpriteComponent {
+                asset: ONBOARDING_SPRITE_ASSET.to_string(),
+                frame_width: ONBOARDING_SPRITE_SIZE,
+                frame_height: ONBOARDING_SPRITE_SIZE,
+                pivot: None,
+                palette_slot: 0,
+                animations: HashMap::new(),
+                priority: "foreground".to_string(),
+            }),
+            logic: Some(LogicComponent {
+                graph: Some(logic_graph),
+                variables: HashMap::new(),
+            }),
+            ..Components::default()
+        },
+    }];
+    scene
 }
 
 fn normalized_scene_schema_version(scene: &Scene) -> &str {
@@ -1524,6 +1537,40 @@ mod tests {
         let project_dir = temp_dir("list-scenes-empty");
 
         assert!(list_scenes(&project_dir).expect("list empty scenes").is_empty());
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn create_scene_seeds_starter_scene_when_onboarding_asset_exists() {
+        let project_dir = temp_dir("create-scene-starter");
+        create_project_skeleton(&project_dir, "Starter Scenes", "megadrive")
+            .expect("create canonical project");
+        seed_onboarding_template(&project_dir, "megadrive").expect("seed onboarding project");
+
+        let created = create_scene(&project_dir, Some("Teste"))
+            .expect("create scene with starter content");
+        let scene = load_scene(&project_dir, &created.path).expect("load created scene");
+
+        assert_eq!(scene.display_name.as_deref(), Some("Teste"));
+        assert_eq!(scene.entities.len(), 1);
+        assert_eq!(scene.entities[0].entity_id, "player");
+        assert_eq!(
+            scene.entities[0]
+                .components
+                .sprite
+                .as_ref()
+                .map(|sprite| sprite.asset.as_str()),
+            Some(ONBOARDING_SPRITE_ASSET)
+        );
+        assert!(
+            scene.entities[0]
+                .components
+                .logic
+                .as_ref()
+                .and_then(|logic| logic.graph.as_ref())
+                .is_some_and(|graph| graph.contains("\"fromNode\":\"start\""))
+        );
 
         let _ = fs::remove_dir_all(project_dir);
     }

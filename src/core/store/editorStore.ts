@@ -129,6 +129,32 @@ function pushHistoryEntry(stack: UndoEntry[], entry: UndoEntry): UndoEntry[] {
   return [...stack, cloneUndoEntry(entry)].slice(-UNDO_STACK_LIMIT);
 }
 
+function resolveSceneSelection(scene: Scene | null, previousSelection: string | null): string | null {
+  if (!scene) {
+    return null;
+  }
+
+  if (previousSelection) {
+    const selectionStillExists = previousSelection.startsWith("layer::")
+      ? scene.background_layers.some((layer) => `layer::${layer.layer_id}` === previousSelection)
+      : scene.entities.some((entity) => entity.entity_id === previousSelection);
+
+    if (selectionStillExists) {
+      return previousSelection;
+    }
+  }
+
+  if (scene.entities.length > 0) {
+    return scene.entities[0].entity_id;
+  }
+
+  if (scene.background_layers.length > 0) {
+    return `layer::${scene.background_layers[0].layer_id}`;
+  }
+
+  return null;
+}
+
 export const useEditorStore = create<EditorState>((set) => ({
   activeProjectDir: "",
   activeProjectName: "",
@@ -211,6 +237,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   setActiveScene: (scene) =>
     set((state) => ({
       activeScene: scene,
+      selectedEntityId: resolveSceneSelection(scene, state.selectedEntityId),
       sceneRevision: scene ? state.sceneRevision + 1 : 0,
       undoStack: [],
       redoStack: [],

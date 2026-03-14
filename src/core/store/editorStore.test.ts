@@ -242,6 +242,26 @@ describe("setActiveScene", () => {
     expect(useEditorStore.getState().sceneRevision).toBe(8);
   });
 
+  it("seleciona automaticamente a primeira entidade da cena carregada", () => {
+    useEditorStore.setState({ selectedEntityId: null });
+    useEditorStore.getState().setActiveScene({
+      ...EMPTY_SCENE,
+      entities: [makeEntity("player"), makeEntity("enemy")],
+    });
+
+    expect(useEditorStore.getState().selectedEntityId).toBe("player");
+  });
+
+  it("preserva a selecao quando a entidade ainda existe na cena carregada", () => {
+    useEditorStore.setState({ selectedEntityId: "enemy" });
+    useEditorStore.getState().setActiveScene({
+      ...EMPTY_SCENE,
+      entities: [makeEntity("player"), makeEntity("enemy")],
+    });
+
+    expect(useEditorStore.getState().selectedEntityId).toBe("enemy");
+  });
+
   it("reseta o estado de validacao ao limpar a cena", () => {
     useEditorStore.setState({
       activeScene: { ...EMPTY_SCENE },
