@@ -1,7 +1,7 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-03-07
-**Fase ativa real:** Hardening do fluxo `Build -> ROM -> Emulacao` ja validado em Windows com upstream real e em runner GitHub/Windows real
+**Ultima revisao canonica:** 2026-03-14
+**Fase ativa real:** Release candidate / beta testing do desktop Tauri, com packaging MSI validado e updater em placeholder por politica de dependencias
 
 > **DIRETRIZ PARA AGENTES DE IA**
 > Este roadmap precisa refletir estado real do codigo, nao claims historicas.
@@ -18,7 +18,7 @@
 
 ---
 
-## Estado Real em 2026-03-06
+## Estado Real em 2026-03-14
 
 ### Ja implementado em codigo
 - Editor Tauri + React + TypeScript funcional.
@@ -53,14 +53,19 @@
 - O editor agora suporta fluxo basico de multi-cena com catalogo, troca/criacao pela `Hierarchy`, persistencia do `scene_path` ativo e atualizacao canonica de `entry_scene` para manter o build alinhado a cena selecionada.
 - O `Inspector` agora edita `Physics`, `Audio` e `Input` no caminho canonico da cena e exibe resumo read-only do `LogicComponent.graph`, mantendo a edicao estrutural do grafo restrita ao `NodeGraph`.
 - Features ainda parciais agora ficam explicitamente marcadas como `Experimental` na UI para nao mentir sobre prontidao.
+- Onda M concluida em codigo: Asset Browser experimental, hot reload de assets, gizmos de resize, VRAM Viewer experimental, performance overlay e rewind no Game View.
+- Onda N concluida em codigo: FSM Builder, flow nodes, timeline sequence e hardware event nodes integrados de ponta a ponta no NodeGraph.
+- Onda O concluida em codigo: monitoramento live de VRAM, sprites por scanline, DMA e bancos de paleta no `HardwareStatus`, toolbar e paineis.
+- Onda P concluida em codigo: build multi-target com relatorio comparativo, Reverse Explorer experimental e deterministic replay com controles no Game View.
+- Onda Q concluida em codigo: schema migration chain ate `1.2.0`, knowledge tooltips no Inspector e compliance de patches com aviso legal e trilha de auditoria.
+- Onda R concluida em codigo para release candidate: packaging MSI validado localmente, onboarding de primeiro uso com template funcional e configuracao placeholder de updater.
 
 ### Ainda em hardening
-- Confirmacao remota em runner GitHub/Windows dos cenarios mais recentes (`live-error`, `live-stale`, `live-ok`) enquanto este host local segue bloqueado em criacao de sessao WebDriver (`DevToolsActivePort` / `chrome not reachable`).
-- Desbloqueio do build desktop local neste host quando `npm run tauri build -- --debug --no-bundle` falha com `spawn EPERM` em `beforeBuildCommand` (vite/esbuild).
-- Desbloqueio do rebuild Rust/Tauri neste host apos a policy de Application Control passar a bloquear `src-tauri\target\debug\build\tauri-plugin-dialog-*\build-script-build` (`os error 4551`) durante `cargo clippy`/`cargo check`, impedindo a retomada da onda K.
-- Repeticao institucional do fluxo oficial em Windows quando build/emulacao/toolchains forem alterados.
+- Runtime real de auto-update continua bloqueado ate aprovacao explicita para adicionar `tauri-plugin-updater` sob a politica atual de dependencias.
+- Repeticao institucional do bundle MSI, do smoke desktop e do fluxo oficial upstream em Windows quando build, emulacao, onboarding ou packaging forem alterados.
+- Este host ainda pode exigir diagnostico adicional para bootstrap WebDriver (`DevToolsActivePort` / `chrome not reachable`) e para `spawn EPERM` em builds desktop fora do wrapper MSVC canonico.
 - Decisao final de governanca do workflow desktop dedicado (`push`/`pull_request` path-filtered, `workflow_dispatch`, `workflow_call` ou gate protegido).
-- Auditoria residual de UX para handlers async fora do endurecimento ja aplicado em abertura de projeto e salvamento no inspector.
+- Auditoria residual de UX e release notes para transformar o release candidate em beta institucional.
 
 ---
 
@@ -119,36 +124,63 @@
 ---
 
 ## FASE 3 - VISUAL LOGIC & RETROFX
-**Status:** IMPLEMENTADA NO EDITOR, CONGELADA ATE FECHAR VALIDACAO DO CORE
+**Status:** CONCLUIDA EM CODIGO, VALIDADA LOCALMENTE, EM BETA TESTING
 
 - [x] NodeGraph UI agora persiste o grafo em `LogicComponent.graph` com roundtrip de serializacao.
 - [x] NodeGraph compilado para fragmentos C no pipeline SGDK/SNES para os nos MVP, scroll/camera/animacao e efeitos visuais (`event_start`, `sprite_move`, `condition_overlap`, `action_sound`, `effect_parallax`, `effect_raster`, `sprite_anim`, `scroll_tilemap`, `move_camera`, `logic_and` como guard booleano).
+- [x] NodeGraph agora inclui FSM Builder, flow nodes, timeline sequence e hardware event nodes no editor e no pipeline canonico SGDK/SNES.
 - [x] RetroFX UI existente.
 - [x] RetroFX persiste configuracao no scene JSON, exporta parallax/raster real no pipeline SGDK/SNES e permanece `Experimental` ate validar com ROM real.
 - [x] `Game View` consome audio do emulador via `emulator://audio` e Web Audio com mute local, sem criar loop paralelo ao `emulator_run_frame`.
+- [x] A camada de UX do editor agora inclui hot reload, resize gizmos, VRAM Viewer, performance overlay e rewind integrados ao fluxo canonico.
+- [x] O monitor live de hardware agora expoe budgets de VRAM, sprites por scanline, DMA e bancos de paleta.
 - [x] Testes frontend existentes e passando.
-- [ ] Retomar evolucao apenas depois que o hardening do core e a cobertura desktop multi-target estiverem estabilizados.
 
 ---
 
 ## FASE 4 - CAMADA PRO
-**Status:** IMPLEMENTADA NO EDITOR, CONGELADA ATE FECHAR VALIDACAO DO CORE
+**Status:** CONCLUIDA EM CODIGO, VALIDADA LOCALMENTE, EM BETA TESTING
 
 - [x] Patch Studio.
 - [x] Deep Profiler visivel, conectado ao backend real, com deteccao adaptativa de SAT e aviso heuristico sem badge `Experimental`.
 - [x] Asset Extractor visivel, conectado ao backend real e mantido como `Experimental` ate validar extracao ponta a ponta com ROM real.
-- [ ] Retomar expansao apenas depois que o pipeline oficial validado estiver institucionalizado em workflow repetivel.
+- [x] Build multi-target com relatorio comparativo por target no ToolsPanel.
+- [x] Reverse Explorer basico e experimental para ROMs Mega Drive e SNES.
+- [x] Deterministic replay com gravacao, reproducao e validacao opcional de framebuffer final.
+- [x] Knowledge Engine basico no Inspector via JSON estatico empacotado no app.
+- [x] Schema migration chain ate `1.2.0` com warning para projetos mais novos que o app.
+- [x] Compliance de patches com aviso legal, bloqueio de export de ROM completa e auditoria em `project.rds`.
+
+---
+
+## FASE 5 - RELEASE
+**Status:** RELEASE CANDIDATE / BETA TESTING
+
+- [x] Windows MSI packaging validado localmente.
+- [x] Onboarding de primeiro uso com template funcional.
+- [x] Configuracao placeholder de updater com endpoint e pubkey placeholder.
+- [ ] Runtime real de auto-update (bloqueado pela regra atual de nao adicionar dependencias novas).
+
+---
+
+## ONDAS M-R (ESTADO REAL)
+
+- Wave M - concluida (`c5aeae4`, `6a64a9a`, `d04b9d5`, `3bccffc`, `64e5f8f`, `71d227e`)
+- Wave N - concluida (`a5e9a01`, `27e9375`, `31e5e4a`, `0d8db6b`)
+- Wave O - concluida (`6272eda`, `5520c5b`, `b765796`, `9bdaa48`)
+- Wave P - concluida (`8fb9d25`, `738b898`, `23977f1`)
+- Wave Q - concluida (`ac4a4f5`, `f46e4a8`, `733f75f`)
+- Wave R - concluida em release candidate, com updater ainda placeholder (`a7f6529`, `7c3e84d`, `1f012bd`)
 
 ---
 
 ## Ordem Executiva Atual
 
-1. Manter o CI baseline verde antes e depois de qualquer fix relevante.
-2. Tornar a validacao oficial upstream repetivel e institucional para mudancas sensiveis.
-3. Decidir se o workflow desktop dedicado permanece em `push`/`pull_request` path-filtered ou migra para gate manual/ambiente protegido.
-4. Consolidar diagnostico local (`diagnose-desktop-e2e.ps1 -SessionProbe`) sempre que houver falha de sessao WebDriver antes de classificar erro como regressao de codigo.
-5. So depois disso avaliar novas expansoes do desktop E2E sem contaminar o `ci.yml` comum.
-6. So depois disso destravar novas iteracoes de editor, ferramentas e targets futuros.
+1. Manter o baseline canonico verde antes e depois de qualquer ajuste relevante.
+2. Repetir bundle MSI e smoke desktop em host Windows institucional para mudancas sensiveis de build, emulacao, packaging, onboarding e projeto.
+3. Executar QA do onboarding/template inicial, replay/rewind, build multi-target e Patch Studio com compliance.
+4. Decidir se a dependencia `tauri-plugin-updater` pode ser aprovada sob a politica atual.
+5. Preparar release notes, criterios de aceite e checklist de beta testing antes de promover o release candidate.
 
 ---
 
