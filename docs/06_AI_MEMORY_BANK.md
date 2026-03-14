@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Ultima Atualizacao:** 2026-03-14
-**Ultima sessao:** 2026-03-14 (Conclusao das ondas M-R e fechamento para release candidate)
-**Fase Atual:** Release candidate / beta testing do desktop Tauri, com ondas M-R concluidas e updater runtime bloqueado por politica de nao adicionar dependencias novas.
+**Ultima sessao:** 2026-03-14 (Hotfixes pos-RC, recertificacao desktop e reemissao do MSI)
+**Fase Atual:** Release candidate / beta testing do desktop Tauri, com ondas M-R concluidas, RC hotfixado apos validacao manual inicial e updater runtime bloqueado por politica de nao adicionar dependencias novas.
 **Branch sugerida:** `feat/desktop-e2e-workflow`
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
@@ -16,6 +16,15 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-14 - hotfix pos-RC):**
+  - A rodada de validacao manual do MSI revelou bugs reais no RC: ciclo de vida da sessao do emulador ao sair da aba `GM Jogo`, replay vazio aceito como sucesso, reentrada rapida em `Build & Run`, codegen SNES de `RetroFX` com API/HDMA invalida e leitura de input SNES emitindo `scanPads()` fora do contrato atual do PVSnesLib.
+  - O hotfix `26b0911` (`fix: harden emulator session lifecycle`) endureceu o frontend/store do emulador: o core deixa de ser derrubado ao trocar de aba, o loop nao inicia sem ROM carregada, os controles do `Game View` respeitam `emulatorLoaded`, `Build & Run` ganhou trava sincrona contra clique concorrente e replay vazio passou a falhar explicitamente no backend.
+  - O hotfix `ff0228a` (`fix: emit valid snes retrofx hdma`) corrigiu o emitter SNES para gerar HDMA compativel com `HDMATable16`/`setParallaxScrolling(0)`, removendo a API inexistente `setHDMATable`, o loop C invalido e o buffer customizado que quebravam builds SNES com `RetroFX`.
+  - O hotfix `e534af2` (`fix: align snes build pipeline with pvsneslib`) alinhou a leitura de input SNES ao contrato atual do PVSnesLib (sem `scanPads()` explicito) e estabilizou o teste Rust de patch BPS usando uma ROM de teste versionada em `data/`, evitando dependencia de artefato `.sfc` envelhecido em fixture.
+  - O baseline local voltou a ficar verde apos os hotfixes com `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo clippy -- -D warnings` e `cargo test --lib -- --nocapture --test-threads=1`.
+  - As validacoes extras exigidas para build/emulacao tambem passaram: `cargo test official_windows_upstream_validation_smoke_test -- --ignored --nocapture` ficou verde, e o runner desktop `scripts/e2e-tauri-build-run.mjs --skip-build --native-driver msedgedriver.exe` passou para Mega Drive e SNES com o binario reconstruido localmente.
+  - Um novo bundle MSI foi gerado apos os hotfixes em `src-tauri/target-test/release/bundle/msi/RetroDev Studio_0.1.0_x64_en-US.msi` (timestamp local 2026-03-14 09:29), substituindo o pacote desatualizado usado no primeiro beta manual.
 
 * **O que acabou de acontecer (2026-03-14):**
   - As ondas M, N, O, P, Q e R foram concluidas em codigo, validadas localmente com os 6 gates canonicos verdes a cada subtarefa e fechadas nesta trilha `feat/desktop-e2e-workflow`.
@@ -510,8 +519,9 @@
   - GitHub Actions `Desktop E2E` (`22606643935`) -> OK em `windows-latest`, com `Run Mega Drive desktop smoke` e `Run SNES desktop smoke` ambos verdes.
 
 * **Proximo passo imediato:**
-  1. Tratar o produto como release candidate / beta testing: repetir smoke desktop, bundle MSI e QA manual de onboarding, build multi-target, replay, rewind, Patch Studio e monitores live antes de qualquer claim publica de release.
-  2. Decidir se a politica do projeto passara a permitir `tauri-plugin-updater`; ate la, o updater deve permanecer anunciado apenas como configuracao placeholder, nunca como runtime funcional.
+  1. Executar o beta manual em install limpo usando o MSI reemitido desta sessao, com foco em `Asset Browser`, `VRAM Viewer` e `Reverse Explorer` sobre ROM/projeto real, agora que o RC foi recertificado em build, emulacao e packaging.
+  2. Se o beta confirmar estabilidade das superficies ainda `Experimental`, preparar merge controlado para `main`, decidir remocao de badges onde couber e fechar checklist de release notes.
+  3. Manter o updater apenas como placeholder ate autorizacao explicita para adicionar a dependencia/runtime correspondente.
 
 ---
 

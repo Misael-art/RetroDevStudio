@@ -1,7 +1,7 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 **Status:** Documento vivo
 **Ultima revisao canonica:** 2026-03-14
-**Fase ativa real:** Release candidate / beta testing do desktop Tauri, com packaging MSI validado e updater em placeholder por politica de dependencias
+**Fase ativa real:** Release candidate / beta testing do desktop Tauri, com RC hotfixado apos validacao manual inicial, packaging MSI reemitido e updater em placeholder por politica de dependencias
 
 > **DIRETRIZ PARA AGENTES DE IA**
 > Este roadmap precisa refletir estado real do codigo, nao claims historicas.
@@ -59,13 +59,14 @@
 - Onda P concluida em codigo: build multi-target com relatorio comparativo, Reverse Explorer experimental e deterministic replay com controles no Game View.
 - Onda Q concluida em codigo: schema migration chain ate `1.2.0`, knowledge tooltips no Inspector e compliance de patches com aviso legal e trilha de auditoria.
 - Onda R concluida em codigo para release candidate: packaging MSI validado localmente, onboarding de primeiro uso com template funcional e configuracao placeholder de updater.
+- Rodada de hotfix pos-RC concluida em codigo e certificada localmente: sessao do emulador endurecida, replay vazio rejeitado, build concorrente bloqueado, emitter SNES/RetroFX alinhado ao `HDMATable16`, leitura de input SNES alinhada ao PVSnesLib atual, smoke desktop MD/SNES verde e MSI regenerado apos as correcoes (`26b0911`, `ff0228a`, `e534af2`).
 
 ### Ainda em hardening
 - Runtime real de auto-update continua bloqueado ate aprovacao explicita para adicionar `tauri-plugin-updater` sob a politica atual de dependencias.
 - Repeticao institucional do bundle MSI, do smoke desktop e do fluxo oficial upstream em Windows quando build, emulacao, onboarding ou packaging forem alterados.
-- Este host ainda pode exigir diagnostico adicional para bootstrap WebDriver (`DevToolsActivePort` / `chrome not reachable`) e para `spawn EPERM` em builds desktop fora do wrapper MSVC canonico.
+- Este host ainda pode exigir diagnostico adicional para bootstrap WebDriver (`DevToolsActivePort` / `chrome not reachable`) e para `spawn EPERM` em builds desktop fora do wrapper MSVC canonico, embora o smoke local MD/SNES tenha voltado a passar nesta sessao de hotfix.
 - Decisao final de governanca do workflow desktop dedicado (`push`/`pull_request` path-filtered, `workflow_dispatch`, `workflow_call` ou gate protegido).
-- Auditoria residual de UX e release notes para transformar o release candidate em beta institucional.
+- Auditoria residual de UX, validacao manual das superficies ainda `Experimental` (`Asset Browser`, `VRAM Viewer`, `Reverse Explorer`, `Asset Extractor`, `RetroFX`) e release notes para transformar o release candidate em beta institucional.
 
 ---
 
