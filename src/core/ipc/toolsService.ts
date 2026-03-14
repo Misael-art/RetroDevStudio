@@ -80,6 +80,20 @@ export interface RomDependencyResult {
   dependency_id: string;
 }
 
+export interface ReverseExplorerRow {
+  offset: number;
+  bytes: number[];
+  ascii: string;
+  annotation: string;
+}
+
+export interface ReverseExplorerResult {
+  ok: boolean;
+  error: string;
+  total_size: number;
+  rows: ReverseExplorerRow[];
+}
+
 // ── Patch Studio ──────────────────────────────────────────────────────────────
 
 export function patchCreateIps(originalPath: string, modifiedPath: string, patchPath: string): Promise<PatchResult> {
@@ -141,4 +155,13 @@ export async function installThirdPartyDependency(
   } finally {
     unlisten();
   }
+}
+
+export function reverseExplorerRead(
+  romPath: string,
+  target: "megadrive" | "snes",
+  offset: number,
+  length: number
+): Promise<ReverseExplorerResult> {
+  return invoke<ReverseExplorerResult>("reverse_explorer_read", { romPath, target, offset, length });
 }

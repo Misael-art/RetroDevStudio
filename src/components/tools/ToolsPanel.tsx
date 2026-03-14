@@ -29,6 +29,8 @@ import {
   type ThirdPartyDependencyId,
   type AssetExtractorBppMode,
   type ProjectAssetEntry,
+  type ReverseExplorerResult,
+  reverseExplorerRead,
 } from "../../core/ipc/toolsService";
 
 function describeError(error: unknown): string {
@@ -1363,7 +1365,139 @@ function VramViewer() {
   );
 }
 
-type ToolTab = "patch" | "profiler" | "extractor" | "setup" | "memory" | "assets" | "vram";
+function ReverseExplorer() {
+  const { activeTarget, logMessage } = useEditorStore();
+  const [romPath, setRomPath] = useState("");
+  const [target, setTarget] = useState<"megadrive" | "snes">(activeTarget);
+  const [offsetHex, setOffsetHex] = useState("000000");
+  const [lengthHex, setLengthHex] = useState("0100");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ReverseExplorerResult | null>(null);
+
+  useEffect(() => {
+    setTarget(activeTarget);
+  }, [activeTarget]);
+
+  async function inspect() {
+    const offset = parseHexInput(offsetHex);
+    const length = parseHexInput(lengthHex);
+    if (!romPath) {
+      logMessage("warn", "[Reverse] Informe o caminho da ROM.");
+      return;
+    }
+    if (offset === null || length === null) {
+      logMessage("warn", "[Reverse] Offset e length devem estar em hexadecimal.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const inspection = await reverseExplorerRead(romPath, target, offset, length);
+      setResult(inspection);
+      if (!inspection.ok) {
+        logMessage("error", `[Reverse] ${inspection.error}`);
+      } else {
+        logMessage("success", `[Reverse] Janela 0x${formatHex(offset, 6)} carregada para ${target}.`);
+      }
+    } catch (error) {
+      logMessage("error", `[Reverse] Erro inesperado: ${describeError(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-3 p-3">
+      <ExperimentalNotice summary="Leitura paginada de ROM com anotacao heuristica de opcodes 68000/65816. Nao substitui um disassembler completo." />
+
+      <PathField
+        label="ROM alvo"
+        value={romPath}
+        set={setRomPath}
+        placeholder="/roms/game.md"
+        extensions={["md", "bin", "gen", "smc", "sfc"]}
+        accentColor="f9e2af"
+      />
+
+      <div className="flex flex-wrap gap-3">
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] text-[#7f849c]">Target</label>
+          <select
+            value={target}
+            onChange={(event) => setTarget(event.target.value as "megadrive" | "snes")}
+            className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-xs text-[#cdd6f4] focus:border-[#f9e2af] focus:outline-none"
+          >
+            <option value="megadrive">Mega Drive / 68000</option>
+            <option value="snes">SNES / 65816</option>
+          </select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] text-[#7f849c]">Offset</label>
+          <input
+            type="text"
+            value={offsetHex}
+            onChange={(event) => setOffsetHex(event.target.value)}
+            className="w-24 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-right text-xs font-mono text-[#cdd6f4] focus:border-[#f9e2af] focus:outline-none"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] text-[#7f849c]">Length</label>
+          <input
+            type="text"
+            value={lengthHex}
+            onChange={(event) => setLengthHex(event.target.value)}
+            className="w-24 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-right text-xs font-mono text-[#cdd6f4] focus:border-[#f9e2af] focus:outline-none"
+          />
+        </div>
+        <div className="flex items-end">
+          <button
+            onClick={() => void inspect()}
+            disabled={busy}
+            className={`rounded px-3 py-1.5 text-xs font-semibold transition-colors ${
+              busy ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]" : "bg-[#f9e2af] text-[#1e1e2e] hover:bg-[#f5d58b]"
+            }`}
+          >
+            {busy ? "Lendo..." : "Abrir ROM"}
+          </button>
+        </div>
+      </div>
+
+      {result && (
+        <>
+          <div className="rounded bg-[#1e1e2e] px-3 py-2 text-[10px] text-[#7f849c]">
+            Tamanho total: <span className="font-mono text-[#cdd6f4]">0x{formatHex(result.total_size, 6)}</span> ({result.total_size} bytes)
+          </div>
+
+          {!result.ok && (
+            <div className="rounded border border-[#f38ba8] bg-[#1e1e2e] px-3 py-2 text-[10px] text-[#f38ba8]">
+              {result.error}
+            </div>
+          )}
+
+          {result.ok && (
+            <div className="max-h-96 overflow-auto rounded border border-[#313244] bg-[#11111b]">
+              {result.rows.map((row) => (
+                <div
+                  key={row.offset}
+                  className="grid grid-cols-[88px_minmax(0,1fr)_140px_minmax(0,1fr)] gap-3 border-b border-[#1e1e2e] px-3 py-2 text-[10px]"
+                >
+                  <span className="font-mono text-[#89b4fa]">0x{formatHex(row.offset, 6)}</span>
+                  <span className="font-mono text-[#cdd6f4]">
+                    {row.bytes.map((value) => formatHex(value)).join(" ")}
+                  </span>
+                  <span className="font-mono text-[#7f849c]">{row.ascii}</span>
+                  <span className="leading-tight text-[#f9e2af]">{row.annotation}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+type ToolTab = "patch" | "profiler" | "extractor" | "setup" | "memory" | "assets" | "vram" | "reverse";
 
 const TOOL_TABS: { id: ToolTab; label: string; icon: string; experimental?: boolean }[] = [
   { id: "setup", label: "Runtime Setup", icon: "RD" },
@@ -1373,6 +1507,7 @@ const TOOL_TABS: { id: ToolTab; label: string; icon: string; experimental?: bool
   { id: "extractor", label: "Asset Extractor", icon: "AE" },
   { id: "memory", label: "Memory Viewer", icon: "MV" },
   { id: "vram", label: "VRAM Viewer", icon: "VV", experimental: true },
+  { id: "reverse", label: "Reverse Explorer", icon: "RX", experimental: true },
 ];
 
 export default function ToolsPanel({ onRequestInspector }: { onRequestInspector?: () => void }) {
@@ -1408,6 +1543,7 @@ export default function ToolsPanel({ onRequestInspector }: { onRequestInspector?
         {active === "extractor" && <AssetExtractor />}
         {active === "memory" && <MemoryViewer />}
         {active === "vram" && <VramViewer />}
+        {active === "reverse" && <ReverseExplorer />}
       </div>
     </Panel>
   );

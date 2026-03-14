@@ -2,3 +2,4 @@ pub mod patch_studio;
 pub mod deep_profiler;
 pub mod asset_extractor;
 pub mod dependency_manager;
+pub mod reverse_explorer;

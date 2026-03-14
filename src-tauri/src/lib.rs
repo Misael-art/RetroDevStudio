@@ -430,6 +430,7 @@ use tools::dependency_manager::{
     dependency_status_report,
     install_dependency,
 };
+use tools::reverse_explorer::ReverseExplorerResult;
 
 #[tauri::command]
 fn patch_create_ips(original_path: String, modified_path: String, patch_path: String) -> PatchResult {
@@ -471,6 +472,16 @@ fn assets_extract(
         palette_slot,
         BppMode::from_str(&bpp_mode),
     )
+}
+
+#[tauri::command]
+fn reverse_explorer_read(
+    rom_path: String,
+    target: String,
+    offset: usize,
+    length: usize,
+) -> ReverseExplorerResult {
+    tools::reverse_explorer::inspect_rom(&rom_path, &target, offset, length)
 }
 
 #[tauri::command]
@@ -942,6 +953,7 @@ pub fn run() {
             patch_apply_bps,
             profiler_analyze_rom,
             assets_extract,
+            reverse_explorer_read,
             list_project_assets,
             third_party_get_status,
             third_party_install,
