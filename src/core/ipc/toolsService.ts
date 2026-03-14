@@ -7,6 +7,7 @@ export interface PatchResult {
   ok: boolean;
   message: string;
   bytes_changed: number;
+  patch_hash?: string | null;
 }
 
 export interface ProfileIssue {
@@ -96,16 +97,26 @@ export interface ReverseExplorerResult {
 
 // ── Patch Studio ──────────────────────────────────────────────────────────────
 
-export function patchCreateIps(originalPath: string, modifiedPath: string, patchPath: string): Promise<PatchResult> {
-  return invoke("patch_create_ips", { originalPath, modifiedPath, patchPath });
+export function patchCreateIps(
+  originalPath: string,
+  modifiedPath: string,
+  patchPath: string,
+  projectDir?: string | null
+): Promise<PatchResult> {
+  return invoke("patch_create_ips", { originalPath, modifiedPath, patchPath, projectDir: projectDir ?? null });
 }
 
 export function patchApplyIps(romPath: string, patchPath: string, outputPath: string): Promise<PatchResult> {
   return invoke("patch_apply_ips", { romPath, patchPath, outputPath });
 }
 
-export function patchCreateBps(originalPath: string, modifiedPath: string, patchPath: string): Promise<PatchResult> {
-  return invoke("patch_create_bps", { originalPath, modifiedPath, patchPath });
+export function patchCreateBps(
+  originalPath: string,
+  modifiedPath: string,
+  patchPath: string,
+  projectDir?: string | null
+): Promise<PatchResult> {
+  return invoke("patch_create_bps", { originalPath, modifiedPath, patchPath, projectDir: projectDir ?? null });
 }
 
 export function patchApplyBps(romPath: string, patchPath: string, outputPath: string): Promise<PatchResult> {

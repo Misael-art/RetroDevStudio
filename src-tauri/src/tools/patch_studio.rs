@@ -14,14 +14,18 @@ pub struct PatchResult {
     pub ok: bool,
     pub message: String,
     pub bytes_changed: u32,
+    pub patch_hash: Option<String>,
 }
 
 impl PatchResult {
     fn ok(msg: impl Into<String>, changed: u32) -> Self {
-        Self { ok: true, message: msg.into(), bytes_changed: changed }
+        Self { ok: true, message: msg.into(), bytes_changed: changed, patch_hash: None }
+    }
+    fn ok_with_hash(msg: impl Into<String>, changed: u32, patch_hash: String) -> Self {
+        Self { ok: true, message: msg.into(), bytes_changed: changed, patch_hash: Some(patch_hash) }
     }
     fn err(msg: impl Into<String>) -> Self {
-        Self { ok: false, message: msg.into(), bytes_changed: 0 }
+        Self { ok: false, message: msg.into(), bytes_changed: 0, patch_hash: None }
     }
 }
 
@@ -168,6 +172,25 @@ fn crc32_simple(data: &[u8]) -> u32 {
         }
     }
     !crc
+}
+
+pub fn patch_hash_hex(data: &[u8]) -> String {
+    format!("{:08X}", crc32_simple(data))
+}
+
+fn validate_patch_output_path(patch_path: &Path, expected_extension: &str) -> Result<(), String> {
+    let extension = patch_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase());
+
+    match extension.as_deref() {
+        Some(value) if value == expected_extension => Ok(()),
+        _ => Err(format!(
+            "Saida invalida: o Patch Studio exporta apenas arquivos .{}.",
+            expected_extension
+        )),
+    }
 }
 
 fn encode_signed_offset(delta: i64, out: &mut Vec<u8>) {
@@ -372,6 +395,9 @@ pub fn apply_bps(original: &[u8], patch: &[u8]) -> Result<Vec<u8>, String> {
 
 /// Cria um patch IPS a partir de dois arquivos e salva em `patch_path`.
 pub fn create_ips_file(original_path: &Path, modified_path: &Path, patch_path: &Path) -> PatchResult {
+    if let Err(error) = validate_patch_output_path(patch_path, "ips") {
+        return PatchResult::err(error);
+    }
     let orig = match fs::read(original_path) {
         Ok(b) => b,
         Err(e) => return PatchResult::err(format!("Erro ao ler ROM original: {e}")),
@@ -431,6 +457,68 @@ pub fn create_bps_file(original_path: &Path, modified_path: &Path, patch_path: &
         return PatchResult::err(format!("Erro ao salvar patch: {e}"));
     }
     PatchResult::ok(format!("Patch BPS criado: {} bytes de patch.", changed), changed)
+}
+
+pub fn create_ips_file_compliance(
+    original_path: &Path,
+    modified_path: &Path,
+    patch_path: &Path,
+) -> PatchResult {
+    if let Err(error) = validate_patch_output_path(patch_path, "ips") {
+        return PatchResult::err(error);
+    }
+
+    let result = create_ips_file(original_path, modified_path, patch_path);
+    if !result.ok {
+        return result;
+    }
+
+    let patch = match fs::read(patch_path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return PatchResult::err(format!(
+                "Patch IPS criado, mas o hash nao pode ser calculado: {}",
+                error
+            ))
+        }
+    };
+
+    PatchResult::ok_with_hash(
+        result.message,
+        result.bytes_changed,
+        patch_hash_hex(&patch),
+    )
+}
+
+pub fn create_bps_file_compliance(
+    original_path: &Path,
+    modified_path: &Path,
+    patch_path: &Path,
+) -> PatchResult {
+    if let Err(error) = validate_patch_output_path(patch_path, "bps") {
+        return PatchResult::err(error);
+    }
+
+    let result = create_bps_file(original_path, modified_path, patch_path);
+    if !result.ok {
+        return result;
+    }
+
+    let patch = match fs::read(patch_path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return PatchResult::err(format!(
+                "Patch BPS criado, mas o hash nao pode ser calculado: {}",
+                error
+            ))
+        }
+    };
+
+    PatchResult::ok_with_hash(
+        result.message,
+        result.bytes_changed,
+        patch_hash_hex(&patch),
+    )
 }
 
 /// Aplica um patch BPS a uma ROM e salva a ROM patcheada em `output_path`.
@@ -508,6 +596,36 @@ mod tests {
         assert!(optimized.len() < baseline.len());
 
         let restored = apply_bps(&original, &optimized).expect("apply optimized bps");
+        assert_eq!(restored, modified);
+    }
+
+    #[test]
+    fn test_create_and_apply_ips_match() {
+        // Simulates a tiny ROM that got patched
+        let original = vec![0u8; 1000];
+        let mut modified = original.clone();
+        modified[500] = 0xAA;
+        modified[501] = 0xBB;
+        modified[999] = 0xCC;
+
+        let patch = super::create_ips(&original, &modified).expect("Failed to create IPS patch");
+        let restored = super::apply_ips(&original, &patch).expect("Failed to apply IPS patch");
+
+        assert_eq!(restored, modified);
+    }
+
+    #[test]
+    fn test_create_and_apply_bps_match() {
+        // Simulates a tiny ROM that got patched
+        let original = vec![0u8; 1000];
+        let mut modified = original.clone();
+        modified[500] = 0xAA;
+        modified[501] = 0xBB;
+        modified[999] = 0xCC;
+
+        let patch = super::create_bps(&original, &modified).expect("Failed to create BPS patch");
+        let restored = super::apply_bps(&original, &patch).expect("Failed to apply BPS patch");
+
         assert_eq!(restored, modified);
     }
 }

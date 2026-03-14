@@ -14,9 +14,7 @@ import { emulatorReadMemory } from "../../core/ipc/emulatorService";
 import { decodeTilesToImageData, getActivePalette } from "./vramViewer";
 import {
   patchCreateIps,
-  patchApplyIps,
   patchCreateBps,
-  patchApplyBps,
   profilerAnalyzeRom,
   assetsExtract,
   getThirdPartyStatus,
@@ -121,35 +119,36 @@ function HeuristicNotice({ summary }: { summary: string }) {
 }
 
 function PatchStudio() {
-  const { logMessage } = useEditorStore();
-  const [mode, setMode] = useState<"create" | "apply">("create");
+  const { activeProjectDir, logMessage } = useEditorStore();
   const [format, setFormat] = useState<"ips" | "bps">("ips");
   const [pathA, setPathA] = useState("");
   const [pathB, setPathB] = useState("");
   const [pathOut, setPathOut] = useState("");
   const [busy, setBusy] = useState(false);
+  const [legalAccepted, setLegalAccepted] = useState(false);
 
   async function run() {
     if (!pathA || !pathB || !pathOut) {
       logMessage("warn", "Preencha todos os campos de caminho.");
       return;
     }
+    if (!activeProjectDir) {
+      logMessage("warn", "Abra um projeto antes de exportar patches auditaveis.");
+      return;
+    }
+    if (!legalAccepted) {
+      logMessage("warn", "Confirme o aviso legal antes de exportar o patch.");
+      return;
+    }
 
     setBusy(true);
     try {
-      let result;
-      if (mode === "create") {
-        result =
-          format === "ips"
-            ? await patchCreateIps(pathA, pathB, pathOut)
-            : await patchCreateBps(pathA, pathB, pathOut);
-      } else {
-        result =
-          format === "ips"
-            ? await patchApplyIps(pathA, pathB, pathOut)
-            : await patchApplyBps(pathA, pathB, pathOut);
-      }
-      logMessage(result.ok ? "success" : "error", `[Patch] ${result.message}`);
+      const result =
+        format === "ips"
+          ? await patchCreateIps(pathA, pathB, pathOut, activeProjectDir)
+          : await patchCreateBps(pathA, pathB, pathOut, activeProjectDir);
+      const hashSuffix = result.patch_hash ? ` CRC32 ${result.patch_hash}` : "";
+      logMessage(result.ok ? "success" : "error", `[Patch] ${result.message}${hashSuffix}`);
     } catch (error) {
       logMessage("error", `[Patch] Erro inesperado: ${describeError(error)}`);
     } finally {
@@ -157,25 +156,23 @@ function PatchStudio() {
     }
   }
 
-  const labelA = mode === "create" ? "ROM Original" : "ROM Base";
-  const labelB = mode === "create" ? "ROM Modificada" : "Arquivo Patch";
-  const labelOut = mode === "create" ? "Salvar Patch em" : "ROM de Saida";
+  const canCreate = Boolean(activeProjectDir) && legalAccepted && !busy;
 
   return (
     <div className="flex flex-col gap-3 p-3">
       <div className="flex gap-2">
-        {(["create", "apply"] as const).map((currentMode) => (
-          <button
-            key={currentMode}
-            onClick={() => setMode(currentMode)}
-            className={`rounded px-2 py-1 text-xs transition-colors ${mode === currentMode
-              ? "bg-[#cba6f7] font-semibold text-[#1e1e2e]"
-              : "bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]"
-              }`}
-          >
-            {currentMode === "create" ? "Criar Patch" : "Aplicar Patch"}
-          </button>
-        ))}
+        <button
+          className="rounded bg-[#cba6f7] px-2 py-1 text-xs font-semibold text-[#1e1e2e]"
+        >
+          Criar Patch
+        </button>
+        <button
+          disabled
+          title="Aplicar ROM via Patch Studio foi desabilitado por compliance."
+          className="rounded bg-[#313244] px-2 py-1 text-xs text-[#6c7086]"
+        >
+          Aplicar Patch Desabilitado
+        </button>
         <div className="ml-auto flex gap-1">
           {(["ips", "bps"] as const).map((currentFormat) => (
             <button
@@ -192,23 +189,48 @@ function PatchStudio() {
         </div>
       </div>
 
-      <PathField label={labelA} value={pathA} set={setPathA} extensions={["md", "bin", "smc", "sfc"]} />
-      <PathField label={labelB} value={pathB} set={setPathB} extensions={["md", "bin", "ips", "bps"]} />
-      <PathField label={labelOut} value={pathOut} set={setPathOut} extensions={["md", "bin", "ips", "bps"]} />
+      <div className="rounded border border-[#f38ba8] bg-[#181825] p-3">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#f38ba8]">
+          Aviso Legal
+        </p>
+        <p className="mt-2 text-[10px] leading-tight text-[#bac2de]">
+          O RetroDev Studio nao distribui ROMs e nao exporta copias completas neste fluxo.
+          Apenas patches IPS/BPS derivados da sua ROM base sao permitidos.
+        </p>
+        <label className="mt-3 flex items-start gap-2 text-[10px] leading-tight text-[#cdd6f4]">
+          <input
+            type="checkbox"
+            checked={legalAccepted}
+            onChange={(event) => setLegalAccepted(event.target.checked)}
+            className="mt-0.5"
+          />
+          <span>
+            Confirmo que possuo a ROM base e que vou compartilhar apenas o patch diferencial.
+          </span>
+        </label>
+      </div>
+
+      <div className="rounded border border-[#313244] bg-[#11111b] px-3 py-2 text-[10px] text-[#7f849c]">
+        Projeto ativo: <span className="font-mono text-[#cdd6f4]">{activeProjectDir || "(nenhum)"}</span>
+      </div>
+
+      <PathField label="ROM Original" value={pathA} set={setPathA} extensions={["md", "bin", "smc", "sfc"]} />
+      <PathField label="ROM Modificada" value={pathB} set={setPathB} extensions={["md", "bin", "smc", "sfc"]} />
+      <PathField label="Salvar Patch em" value={pathOut} set={setPathOut} extensions={[format]} />
 
       <button
-        disabled={busy}
+        disabled={!canCreate}
         onClick={() => void run()}
-        className={`rounded py-1.5 text-xs font-semibold transition-colors ${busy
+        className={`rounded py-1.5 text-xs font-semibold transition-colors ${!canCreate
           ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
           : "bg-[#cba6f7] text-[#1e1e2e] hover:bg-[#b4a0e0]"
           }`}
       >
-        {busy ? "Processando..." : `${mode === "create" ? "Criar" : "Aplicar"} Patch ${format.toUpperCase()}`}
+        {busy ? "Processando..." : `Criar Patch ${format.toUpperCase()}`}
       </button>
 
       <p className="text-[9px] leading-tight text-[#45475a]">
-        Apenas patches diferenciais. ROMs nao sao distribuidas.
+        Cada exportacao bem-sucedida registra hash e timestamp no project.rds do projeto ativo.
       </p>
     </div>
   );

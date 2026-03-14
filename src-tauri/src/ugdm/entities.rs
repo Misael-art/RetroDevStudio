@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use super::components::Components;
 
-pub const CURRENT_SCHEMA_VERSION: &str = "1.1.0";
+pub const CURRENT_SCHEMA_VERSION: &str = "1.2.0";
 
 fn default_schema_version() -> String {
     CURRENT_SCHEMA_VERSION.to_string()
@@ -105,6 +105,8 @@ pub struct BuildConfig {
     pub optimization: String,
     #[serde(default = "default_artifact_prefix")]
     pub artifact_prefix: String,
+    #[serde(default)]
+    pub patch_audit_log: Vec<PatchAuditEntry>,
 }
 
 fn default_output_dir() -> String {
@@ -117,6 +119,14 @@ fn default_optimization() -> String {
 
 fn default_artifact_prefix() -> String {
     "game".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PatchAuditEntry {
+    pub timestamp_ms: u128,
+    pub format: String,
+    pub patch_path: String,
+    pub patch_hash: String,
 }
 
 // ── Project ───────────────────────────────────────────────────────────────────

@@ -9,6 +9,7 @@ use crate::ugdm::entities::{
     BuildConfig,
     Entity,
     PaletteEntry,
+    PatchAuditEntry,
     Project,
     Resolution,
     Scene,
@@ -86,6 +87,7 @@ pub fn default_build_config() -> BuildConfig {
         output_dir: "build/".to_string(),
         optimization: "size".to_string(),
         artifact_prefix: "game".to_string(),
+        patch_audit_log: Vec::new(),
     }
 }
 
@@ -231,6 +233,17 @@ pub fn set_entry_scene(project_dir: &Path, scene_path: &str) -> Result<Project, 
     let _scene = load_scene(project_dir, scene_path)?;
     let mut project = load_project(project_dir)?;
     project.entry_scene = scene_path.to_string();
+    save_project(project_dir, &project)?;
+    Ok(project)
+}
+
+pub fn append_patch_audit_entry(
+    project_dir: &Path,
+    entry: PatchAuditEntry,
+) -> Result<Project, LoadError> {
+    let mut project = load_project(project_dir)?;
+    let build = project.build.get_or_insert_with(default_build_config);
+    build.patch_audit_log.push(entry);
     save_project(project_dir, &project)?;
     Ok(project)
 }
@@ -455,6 +468,7 @@ fn migrate_project_value(mut value: serde_json::Value) -> Result<serde_json::Val
 
         value = match version.as_str() {
             "1.0.0" => migrate_project_1_0_0_to_1_1_0(value)?,
+            "1.1.0" => migrate_project_1_1_0_to_1_2_0(value)?,
             _ => {
                 if let Some(warning) = schema_warning_message("project.rds", &version) {
                     eprintln!("{warning}");
@@ -486,6 +500,7 @@ fn migrate_scene_value(mut value: serde_json::Value) -> Result<serde_json::Value
 
         value = match version.as_str() {
             "1.0.0" => migrate_scene_1_0_0_to_1_1_0(value)?,
+            "1.1.0" => migrate_scene_1_1_0_to_1_2_0(value)?,
             _ => {
                 if let Some(warning) = schema_warning_message("scene", &version) {
                     eprintln!("{warning}");
@@ -518,6 +533,24 @@ fn migrate_project_1_0_0_to_1_1_0(
     Ok(value)
 }
 
+fn migrate_project_1_1_0_to_1_2_0(
+    mut value: serde_json::Value,
+) -> Result<serde_json::Value, LoadError> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| LoadError("project.rds invalido: raiz JSON deve ser um objeto.".into()))?;
+    object.insert(
+        "schema_version".to_string(),
+        serde_json::Value::String("1.2.0".to_string()),
+    );
+    if let Some(build) = object.get_mut("build").and_then(serde_json::Value::as_object_mut) {
+        build
+            .entry("patch_audit_log".to_string())
+            .or_insert_with(|| serde_json::Value::Array(Vec::new()));
+    }
+    Ok(value)
+}
+
 fn migrate_scene_1_0_0_to_1_1_0(
     mut value: serde_json::Value,
 ) -> Result<serde_json::Value, LoadError> {
@@ -527,6 +560,19 @@ fn migrate_scene_1_0_0_to_1_1_0(
     object.insert(
         "schema_version".to_string(),
         serde_json::Value::String("1.1.0".to_string()),
+    );
+    Ok(value)
+}
+
+fn migrate_scene_1_1_0_to_1_2_0(
+    mut value: serde_json::Value,
+) -> Result<serde_json::Value, LoadError> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| LoadError("scene invalida: raiz JSON deve ser um objeto.".into()))?;
+    object.insert(
+        "schema_version".to_string(),
+        serde_json::Value::String("1.2.0".to_string()),
     );
     Ok(value)
 }
@@ -1139,6 +1185,70 @@ mod tests {
         assert_eq!(
             project.build.as_ref().map(|build| build.artifact_prefix.as_str()),
             Some("game")
+        );
+        assert_eq!(
+            project
+                .build
+                .as_ref()
+                .map(|build| build.patch_audit_log.len()),
+            Some(0)
+        );
+        assert_eq!(scene.schema_version.as_deref(), Some(CURRENT_SCHEMA_VERSION));
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn migration_chain_upgrades_project_schema_1_1_0_to_1_2_0() {
+        let project_dir = temp_dir("migration-1-1-0-to-1-2-0");
+        fs::create_dir_all(project_dir.join("scenes")).expect("create scenes dir");
+
+        let project_v1_1 = serde_json::json!({
+            "rds_version": UGDM_VERSION,
+            "schema_version": "1.1.0",
+            "name": "Compliance Upgrade",
+            "target": "megadrive",
+            "resolution": {
+                "width": 320,
+                "height": 224
+            },
+            "fps": 60,
+            "palette_mode": "4x16",
+            "entry_scene": "scenes/main.json",
+            "build": {
+                "output_dir": "build/",
+                "optimization": "size",
+                "artifact_prefix": "audit"
+            }
+        });
+        let scene_v1_1 = serde_json::json!({
+            "scene_id": DEFAULT_SCENE_ID,
+            "schema_version": "1.1.0",
+            "display_name": "Main Scene",
+            "background_layers": [],
+            "entities": [],
+            "palettes": []
+        });
+
+        fs::write(project_dir.join("project.rds"), project_v1_1.to_string())
+            .expect("write project");
+        fs::write(project_dir.join("scenes").join("main.json"), scene_v1_1.to_string())
+            .expect("write scene");
+
+        let project = load_project(&project_dir).expect("load migrated project");
+        let scene = load_scene(&project_dir, "scenes/main.json").expect("load migrated scene");
+
+        assert_eq!(project.schema_version, CURRENT_SCHEMA_VERSION);
+        assert_eq!(
+            project.build.as_ref().map(|build| build.artifact_prefix.as_str()),
+            Some("audit")
+        );
+        assert_eq!(
+            project
+                .build
+                .as_ref()
+                .map(|build| build.patch_audit_log.len()),
+            Some(0)
         );
         assert_eq!(scene.schema_version.as_deref(), Some(CURRENT_SCHEMA_VERSION));
 

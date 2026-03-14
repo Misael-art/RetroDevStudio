@@ -27,6 +27,7 @@ use core::editor_validation::{
     DraftValidationResult,
 };
 use core::project_mgr::{
+    append_patch_audit_entry,
     create_scene as create_project_scene,
     create_project_skeleton,
     list_scenes as list_project_scenes,
@@ -38,6 +39,7 @@ use core::project_mgr::{
     update_project_target,
     SceneInfo,
 };
+use ugdm::entities::PatchAuditEntry;
 use emulator::frame_buffer::framebuffer_to_rgba;
 use emulator::libretro_ffi::{EmulatorCore, JoypadState, ReplayCapture};
 use hardware::constraint_engine;
@@ -613,7 +615,13 @@ fn emulator_stop(emu: State<EmulatorCoreState>) -> EmulatorCommandResult {
 
 // ── Fase 4: Tools commands ────────────────────────────────────────────────────
 
-use tools::patch_studio::{PatchResult, create_ips_file, apply_ips_file, create_bps_file, apply_bps_file};
+use tools::patch_studio::{
+    PatchResult,
+    apply_bps_file,
+    apply_ips_file,
+    create_bps_file_compliance,
+    create_ips_file_compliance,
+};
 use tools::deep_profiler::{ProfileReport, profile_rom};
 use tools::asset_extractor::{BppMode, ExtractionResult, extract_assets};
 use tools::dependency_manager::{
@@ -627,9 +635,69 @@ use tools::dependency_manager::{
 };
 use tools::reverse_explorer::ReverseExplorerResult;
 
+fn record_patch_audit(
+    project_dir: Option<&str>,
+    format: &str,
+    patch_path: &str,
+    patch_hash: Option<&str>,
+) -> Result<(), String> {
+    let Some(project_dir) = project_dir.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(());
+    };
+    let Some(patch_hash) = patch_hash.filter(|value| !value.is_empty()) else {
+        return Err("Hash do patch ausente para auditoria.".to_string());
+    };
+
+    let timestamp_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+
+    append_patch_audit_entry(
+        Path::new(project_dir),
+        PatchAuditEntry {
+            timestamp_ms,
+            format: format.to_string(),
+            patch_path: patch_path.to_string(),
+            patch_hash: patch_hash.to_string(),
+        },
+    )
+    .map(|_| ())
+    .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
-fn patch_create_ips(original_path: String, modified_path: String, patch_path: String) -> PatchResult {
-    create_ips_file(Path::new(&original_path), Path::new(&modified_path), Path::new(&patch_path))
+fn patch_create_ips(
+    original_path: String,
+    modified_path: String,
+    patch_path: String,
+    project_dir: Option<String>,
+) -> PatchResult {
+    let result = create_ips_file_compliance(
+        Path::new(&original_path),
+        Path::new(&modified_path),
+        Path::new(&patch_path),
+    );
+    if !result.ok {
+        return result;
+    }
+
+    if let Err(error) = record_patch_audit(
+        project_dir.as_deref(),
+        "ips",
+        &patch_path,
+        result.patch_hash.as_deref(),
+    ) {
+        let _ = fs::remove_file(&patch_path);
+        return PatchResult {
+            ok: false,
+            message: format!("Falha ao registrar auditoria do patch. Arquivo removido: {}", error),
+            bytes_changed: 0,
+            patch_hash: None,
+        };
+    }
+
+    result
 }
 
 #[tauri::command]
@@ -638,8 +706,37 @@ fn patch_apply_ips(rom_path: String, patch_path: String, output_path: String) ->
 }
 
 #[tauri::command]
-fn patch_create_bps(original_path: String, modified_path: String, patch_path: String) -> PatchResult {
-    create_bps_file(Path::new(&original_path), Path::new(&modified_path), Path::new(&patch_path))
+fn patch_create_bps(
+    original_path: String,
+    modified_path: String,
+    patch_path: String,
+    project_dir: Option<String>,
+) -> PatchResult {
+    let result = create_bps_file_compliance(
+        Path::new(&original_path),
+        Path::new(&modified_path),
+        Path::new(&patch_path),
+    );
+    if !result.ok {
+        return result;
+    }
+
+    if let Err(error) = record_patch_audit(
+        project_dir.as_deref(),
+        "bps",
+        &patch_path,
+        result.patch_hash.as_deref(),
+    ) {
+        let _ = fs::remove_file(&patch_path);
+        return PatchResult {
+            ok: false,
+            message: format!("Falha ao registrar auditoria do patch. Arquivo removido: {}", error),
+            bytes_changed: 0,
+            patch_hash: None,
+        };
+    }
+
+    result
 }
 
 #[tauri::command]
@@ -1785,6 +1882,7 @@ pub extern "C" fn retro_run() {
             original.to_string_lossy().to_string(),
             modified.to_string_lossy().to_string(),
             patch.to_string_lossy().to_string(),
+            None,
         );
         assert!(create.ok, "create patch failed: {}", create.message);
 
@@ -1800,6 +1898,49 @@ pub extern "C" fn retro_run() {
         assert_eq!(stable_hash(&restored_bytes), stable_hash(&modified_bytes));
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn patch_create_records_audit_entry_in_project_rds() {
+        let project_dir = temp_dir("patch-audit");
+        create_project_skeleton(&project_dir, "Patch Audit", "megadrive")
+            .expect("create canonical project");
+
+        let original = project_dir.join("base.bin");
+        let modified = project_dir.join("modified.bin");
+        let patch = project_dir.join("build").join("audit_patch.ips");
+
+        fs::create_dir_all(project_dir.join("build")).expect("create build dir");
+        fs::write(&original, vec![0u8; 64]).expect("write base rom");
+
+        let mut modified_bytes = vec![0u8; 64];
+        modified_bytes[12] = 0x34;
+        modified_bytes[13] = 0x56;
+        fs::write(&modified, &modified_bytes).expect("write modified rom");
+
+        let result = patch_create_ips(
+            original.to_string_lossy().to_string(),
+            modified.to_string_lossy().to_string(),
+            patch.to_string_lossy().to_string(),
+            Some(project_dir.to_string_lossy().to_string()),
+        );
+        assert!(result.ok, "audit patch creation failed: {}", result.message);
+        assert!(result.patch_hash.as_deref().is_some_and(|value| !value.is_empty()));
+
+        let project = load_project(&project_dir).expect("reload audited project");
+        let audit_log = &project
+            .build
+            .as_ref()
+            .expect("project build config")
+            .patch_audit_log;
+
+        assert_eq!(audit_log.len(), 1);
+        assert_eq!(audit_log[0].format, "ips");
+        assert_eq!(audit_log[0].patch_path, patch.to_string_lossy());
+        assert_eq!(audit_log[0].patch_hash, result.patch_hash.clone().unwrap_or_default());
+        assert!(audit_log[0].timestamp_ms > 0);
+
+        let _ = fs::remove_dir_all(project_dir);
     }
 
     #[test]
