@@ -23,6 +23,7 @@ import NodeGraphEditor from "../nodegraph/NodeGraphEditor";
 import RetroFXDesigner from "../retrofx/RetroFXDesigner";
 import type { Entity } from "../../core/ipc/sceneService";
 import { persistActiveScene } from "../../core/scenePersistence";
+import { constrainSpriteFrameSize } from "../../core/sceneConstraints";
 
 const VIEWPORT_TABS = [
   { id: "scene", label: "Cena", icon: "SC" },
@@ -1117,10 +1118,22 @@ export default function ViewportPanel() {
         bottom = Math.max(pointerY, top + MIN_ENTITY_SIZE);
       }
 
-      const nextX = Math.round(left);
-      const nextY = Math.round(top);
-      const nextWidth = Math.max(Math.round(right - left), MIN_ENTITY_SIZE);
-      const nextHeight = Math.max(Math.round(bottom - top), MIN_ENTITY_SIZE);
+      const rawNextWidth = Math.max(Math.round(right - left), MIN_ENTITY_SIZE);
+      const rawNextHeight = Math.max(Math.round(bottom - top), MIN_ENTITY_SIZE);
+      const constrained = constrainSpriteFrameSize(
+        activeTarget,
+        sprite.asset,
+        rawNextWidth,
+        rawNextHeight
+      );
+      const nextWidth = constrained.frameWidth;
+      const nextHeight = constrained.frameHeight;
+      const nextX = drag.handle.includes("w")
+        ? Math.round(right - nextWidth)
+        : Math.round(left);
+      const nextY = drag.handle.includes("n")
+        ? Math.round(bottom - nextHeight)
+        : Math.round(top);
 
       if (
         nextX === drag.lastX &&

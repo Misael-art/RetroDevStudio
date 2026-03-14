@@ -892,8 +892,8 @@ describe("App build flow", () => {
               components: {
                 sprite: {
                   asset: "assets/sprites/hero.ppm",
-                  frame_width: 32,
-                  frame_height: 32,
+                  frame_width: 16,
+                  frame_height: 16,
                 },
               },
             },
@@ -925,24 +925,24 @@ describe("App build flow", () => {
       (canvas as HTMLCanvasElement).dispatchEvent(
         new MouseEvent("mousedown", {
           bubbles: true,
-          clientX: 48,
-          clientY: 48,
+          clientX: 32,
+          clientY: 32,
           button: 0,
         })
       );
       (canvas as HTMLCanvasElement).dispatchEvent(
         new MouseEvent("mousemove", {
           bubbles: true,
-          clientX: 65,
-          clientY: 65,
+          clientX: 47,
+          clientY: 47,
           buttons: 1,
         })
       );
       (canvas as HTMLCanvasElement).dispatchEvent(
         new MouseEvent("mouseup", {
           bubbles: true,
-          clientX: 65,
-          clientY: 65,
+          clientX: 47,
+          clientY: 47,
         })
       );
       await flush();
@@ -951,8 +951,8 @@ describe("App build flow", () => {
 
     const hero = useEditorStore.getState().activeScene?.entities[0];
     expect(hero?.transform).toEqual({ x: 16, y: 16 });
-    expect(hero?.components.sprite?.frame_width).toBe(48);
-    expect(hero?.components.sprite?.frame_height).toBe(48);
+    expect(hero?.components.sprite?.frame_width).toBe(32);
+    expect(hero?.components.sprite?.frame_height).toBe(32);
     expect(mocks.persistActiveScene).toHaveBeenCalledWith(
       "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
       "Viewport"

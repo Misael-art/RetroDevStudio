@@ -4,6 +4,7 @@ import HardwareLimitsPanel from "./HardwareLimitsPanel";
 import { useEditorStore } from "../../core/store/editorStore";
 import type { BackgroundLayer, Entity } from "../../core/ipc/sceneService";
 import { persistActiveScene } from "../../core/scenePersistence";
+import { constrainSpriteFrameSize } from "../../core/sceneConstraints";
 import { deserializeNodeGraph, serializeNodeGraph } from "../nodegraph/NodeGraphEditor";
 import knowledgeBase from "./knowledgeBase.json";
 
@@ -518,6 +519,7 @@ function graphSummary(serializedGraph?: string): string {
 export default function InspectorPanel() {
   const {
     activeScene,
+    activeTarget,
     logMessage,
     selectedEntityId,
     updateBackgroundLayer,
@@ -580,7 +582,35 @@ export default function InspectorPanel() {
       setSaveStatus("idle");
     }
 
-    const patch = buildEntityPatch(entityToUpdate, def.path, value);
+    const isSpriteFrameField =
+      def.path.length === 3 &&
+      def.path[0] === "components" &&
+      def.path[1] === "sprite" &&
+      (def.path[2] === "frame_width" || def.path[2] === "frame_height");
+    const sprite = entityToUpdate.components.sprite;
+    const patch =
+      isSpriteFrameField && sprite
+        ? {
+            components: {
+              ...entityToUpdate.components,
+              sprite: {
+                ...sprite,
+                ...(() => {
+                  const constrained = constrainSpriteFrameSize(
+                    activeTarget,
+                    sprite.asset,
+                    def.path[2] === "frame_width" ? Number(value) : sprite.frame_width,
+                    def.path[2] === "frame_height" ? Number(value) : sprite.frame_height
+                  );
+                  return {
+                    frame_width: constrained.frameWidth,
+                    frame_height: constrained.frameHeight,
+                  };
+                })(),
+              },
+            },
+          }
+        : buildEntityPatch(entityToUpdate, def.path, value);
     if (Object.keys(patch).length === 0) {
       logMessage("warn", `[Inspector] Campo nao suportado: ${def.key}`);
       return;
