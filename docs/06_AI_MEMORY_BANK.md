@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Ultima Atualizacao:** 2026-03-14
-**Ultima sessao:** 2026-03-14 (Hardening do fluxo de autoria de cena apos feedback do beta manual)
-**Fase Atual:** Release candidate / beta testing do desktop Tauri, com ondas M-R concluidas, RC hotfixado apos validacao manual inicial, onboarding/template/fluxo de autoria endurecidos para o editor real e updater runtime bloqueado por politica de nao adicionar dependencias novas.
+**Ultima sessao:** 2026-03-14 (Hotfix do staging SGDK apos feedback do beta manual)
+**Fase Atual:** Release candidate / beta testing do desktop Tauri, com ondas M-R concluidas, RC hotfixado apos validacao manual inicial, onboarding/template/fluxo de autoria endurecidos para o editor real, staging SGDK alinhado ao `rescomp` e updater runtime bloqueado por politica de nao adicionar dependencias novas.
 **Branch sugerida:** `feat/desktop-e2e-workflow`
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
@@ -16,6 +16,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-14 - hotfix SGDK resource staging):**
+  - O beta manual do RC encontrou uma regressao real no build Mega Drive do projeto template: o `resources.res` era emitido com paths relativos `assets/...`, mas o `build_orch` fazia staging dos arquivos do projeto em `build/megadrive/assets/...` em vez de `build/megadrive/res/assets/...`, quebrando o `rescomp` com `Can't open image ... res/assets/sprites/onboarding_player.ppm`.
+  - O commit `ac1ee60` (`fix: align sgdk asset staging with rescomp`) corrigiu a raiz do problema no backend: o staging SGDK passou a copiar sprites, tilemaps convertidos e assets de audio para dentro de `res/`, alinhando o layout do workspace ao contrato real do `resources.res` e do `ResComp`.
+  - A suite Rust de `build_orch` tambem foi endurecida no mesmo commit para travar exatamente esse contrato: o caso Mega Drive com sprite real agora afirma `build/megadrive/res/assets/sprites/onboarding_player.ppm`, e os asserts de tilemap/audio foram movidos para `build/megadrive/res/assets/...`, impedindo regressao silenciosa do layout.
+  - O baseline local permaneceu verde apos o hotfix com `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` e `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1`.
+  - O bundle MSI foi reemitido apos o hotfix em `src-tauri/target-test/release/bundle/msi/RetroDev Studio_0.1.0_x64_en-US.msi` (timestamp local 2026-03-14 15:11), alinhando o pacote de reteste ao staging SGDK corrigido.
+  - O proximo reteste manual deve repetir explicitamente o fluxo `Novo Projeto -> Build & Run` no target Mega Drive para confirmar que o placeholder `onboarding_player.ppm` volta a compilar no workspace SGDK real.
 
 * **O que acabou de acontecer (2026-03-14 - hardening scene authoring):**
   - O segundo ciclo de beta manual mostrou que o RC ainda parecia "quebrado" em cenas vazias: ao criar/trocar para uma cena sem entidades, o editor deixava a pessoa sem caminho claro para instanciar sprite, o `Asset Browser` apenas listava arquivos sem criar nada na cena ativa e o `Scene View` nao explicava como sair do estado vazio.
@@ -585,7 +593,7 @@ As seguintes decisoes ja foram debatidas e sao finais:
 ## 4. PROXIMO PASSO IMEDIATO (PARA A IA EXECUTAR QUANDO SOLICITADA)
 
 **Tarefa:**
-Continuar o ciclo de release candidate / beta testing do desktop Tauri, agora com foco em revalidar onboarding/template inicial, surfaces experimentais e smoke de instalacao com o editor endurecido.
+Continuar o ciclo de release candidate / beta testing do desktop Tauri, agora com foco em revalidar onboarding/template inicial, build Mega Drive com staging SGDK corrigido, surfaces experimentais e smoke de instalacao com o editor endurecido.
 
 **Pre-requisitos operacionais:**
 * Manter os 6 gates canonicos verdes em toda alteracao relevante.
@@ -595,7 +603,7 @@ Continuar o ciclo de release candidate / beta testing do desktop Tauri, agora co
 
 **Sequencia de acoes recomendada:**
 1. Repetir o baseline canonico e o bundle MSI (`scripts/run-in-msvc.cmd npx tauri build --bundles msi`) no host Windows institucional apropriado.
-2. Executar QA manual sobre onboarding, template inicial, conexao do NodeGraph, build multi-target, deterministic replay, rewind, Patch Studio com compliance, VRAM Viewer e monitores live.
+2. Executar QA manual sobre onboarding, template inicial, conexao do NodeGraph, `Novo Projeto -> Build & Run` no Mega Drive com `onboarding_player.ppm`, build multi-target, deterministic replay, rewind, Patch Studio com compliance, VRAM Viewer e monitores live.
 3. Repetir o smoke desktop Tauri/Windows para os fluxos `Build -> Load ROM -> Run frames` afetados por packaging, onboarding, build ou emulacao.
 4. Decidir se `tauri-plugin-updater` pode ser aprovado; se nao puder, manter a configuracao placeholder e registrar isso claramente nas notas de release/beta.
 5. Validar manualmente `Asset Browser`, `VRAM Viewer` e `Reverse Explorer` com ROM/projeto real para decidir remocao ou manutencao do badge `Experimental`.
