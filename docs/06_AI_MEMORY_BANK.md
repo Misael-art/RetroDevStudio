@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Ultima Atualizacao:** 2026-03-14
-**Ultima sessao:** 2026-03-14 (Hardening do onboarding/NodeGraph apos feedback do beta manual)
-**Fase Atual:** Release candidate / beta testing do desktop Tauri, com ondas M-R concluidas, RC hotfixado apos validacao manual inicial, onboarding/template endurecidos para o editor real e updater runtime bloqueado por politica de nao adicionar dependencias novas.
+**Ultima sessao:** 2026-03-14 (Hardening do fluxo de autoria de cena apos feedback do beta manual)
+**Fase Atual:** Release candidate / beta testing do desktop Tauri, com ondas M-R concluidas, RC hotfixado apos validacao manual inicial, onboarding/template/fluxo de autoria endurecidos para o editor real e updater runtime bloqueado por politica de nao adicionar dependencias novas.
 **Branch sugerida:** `feat/desktop-e2e-workflow`
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
@@ -16,6 +16,13 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-14 - hardening scene authoring):**
+  - O segundo ciclo de beta manual mostrou que o RC ainda parecia "quebrado" em cenas vazias: ao criar/trocar para uma cena sem entidades, o editor deixava a pessoa sem caminho claro para instanciar sprite, o `Asset Browser` apenas listava arquivos sem criar nada na cena ativa e o `Scene View` nao explicava como sair do estado vazio.
+  - O commit `88df160` (`fix: unblock sprite authoring from empty scenes`) fechou esse gargalo no caminho canonico: a `Hierarchy` ganhou CTA explicita `Sprite Inicial` para cenas vazias, reaproveitando o mesmo factory de entidade do onboarding; o `Asset Browser` passou a instanciar assets de imagem diretamente na cena ativa, selecionando a nova entidade e redirecionando o fluxo para o `Scene View`; e o `ViewportPanel` agora exibe hint operacional quando a cena esta vazia.
+  - O hardening reutilizou `src/core/editorEntityFactory.ts` como fonte canonica para criar sprites editaveis a partir de assets reais, incluindo graph/logica inicial quando a cena ainda esta vazia, evitando um segundo pipeline de autoria.
+  - A cobertura frontend ganhou testes dedicados para os dois caminhos de recuperacao do beta manual: `src/components/hierarchy/HierarchyPanel.test.tsx` valida a criacao de `Sprite Inicial` em cena vazia e `src/components/tools/ToolsPanel.test.tsx` valida a instanciacao de imagem a partir do `Asset Browser`.
+  - O baseline local permaneceu verde apos esse hardening com `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` e `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1`.
 
 * **O que acabou de acontecer (2026-03-14 - hardening onboarding/editor):**
   - A segunda rodada de feedback manual mostrou dois problemas estruturais no fluxo de primeiro uso: o `LogicComponent.graph` semeado pelo onboarding usava um schema minimalista aceito pelo backend, mas rejeitado pelo `NodeGraphEditor`, e o placeholder `onboarding_player.ppm` podia ser redimensionado para estados invalidos no editor, bloqueando o build por overflow de sprite simples no Mega Drive.
@@ -527,9 +534,9 @@
   - GitHub Actions `Desktop E2E` (`22606643935`) -> OK em `windows-latest`, com `Run Mega Drive desktop smoke` e `Run SNES desktop smoke` ambos verdes.
 
 * **Proximo passo imediato:**
-  1. Executar o beta manual em install limpo usando o MSI reemitido desta sessao, com foco em `Asset Browser`, `VRAM Viewer` e `Reverse Explorer` sobre ROM/projeto real, agora que o RC foi recertificado em build, emulacao e packaging.
-  2. Se o beta confirmar estabilidade das superficies ainda `Experimental`, preparar merge controlado para `main`, decidir remocao de badges onde couber e fechar checklist de release notes.
-  3. Manter o updater apenas como placeholder ate autorizacao explicita para adicionar a dependencia/runtime correspondente.
+  1. Reexecutar o beta manual em install limpo com foco no fluxo de autoria de cena: criar projeto, abrir/criar cena vazia, usar `Hierarchy > Sprite Inicial`, usar `Tools > Asset Browser > Instanciar`, confirmar selecao no `Inspector` e validar `Build & Run` apos a autoria basica.
+  2. Revalidar `VRAM Viewer` e `Reverse Explorer` sobre ROM/projeto real no mesmo beta, agora que o gargalo de autoria basica foi removido do RC.
+  3. Se o beta confirmar estabilidade das superficies ainda `Experimental`, preparar merge controlado para `main`, decidir remocao de badges onde couber e fechar checklist de release notes; manter o updater apenas como placeholder ate autorizacao explicita para adicionar a dependencia/runtime correspondente.
 
 ---
 
