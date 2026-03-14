@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   validateSceneDraft: vi.fn(),
   openProjectDialog: vi.fn(),
   newProjectDialog: vi.fn(),
+  createOnboardingProject: vi.fn(),
   setProjectTarget: vi.fn(),
   persistActiveScene: vi.fn(),
   reloadSceneFromDisk: vi.fn(),
@@ -100,6 +101,7 @@ vi.mock("./core/ipc/hwService", () => ({
 vi.mock("./core/ipc/projectService", () => ({
   openProjectDialog: mocks.openProjectDialog,
   newProjectDialog: mocks.newProjectDialog,
+  createOnboardingProject: mocks.createOnboardingProject,
   setProjectTarget: mocks.setProjectTarget,
 }));
 
@@ -397,6 +399,24 @@ describe("App build flow", () => {
     });
 
     expect(mocks.buildProject).not.toHaveBeenCalled();
+  });
+
+  it("shows the first-use onboarding wizard when no project is open", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "",
+        activeProjectName: "",
+        activeScenePath: "",
+        activeScene: null,
+        hwStatus: null,
+      });
+      await flush();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("Wizard de Primeiro Uso");
+    expect(container.textContent).toContain("Mega Drive");
+    expect(container.textContent).toContain("Criar Projeto");
   });
 
   it("keeps Build & Run enabled when the live validation snapshot is stale", async () => {

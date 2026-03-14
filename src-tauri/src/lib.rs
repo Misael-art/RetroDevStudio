@@ -35,6 +35,7 @@ use core::project_mgr::{
     load_scene,
     resolve_prefabs,
     save_scene,
+    seed_onboarding_template,
     set_entry_scene,
     update_project_target,
     SceneInfo,
@@ -1130,6 +1131,43 @@ pub struct OpenProjectResult {
     pub name: String,
 }
 
+fn safe_project_dir_name(project_name: &str) -> String {
+    project_name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .collect()
+}
+
+fn create_onboarding_project_at_base_dir(
+    base_dir: &Path,
+    project_name: &str,
+    target: &str,
+) -> Result<OpenProjectResult, String> {
+    let safe_name = safe_project_dir_name(project_name);
+    let project_dir = base_dir.join(&safe_name);
+
+    if project_dir.exists() {
+        let mut entries = fs::read_dir(&project_dir)
+            .map_err(|error| format!("Nao foi possivel inspecionar '{}': {}", project_dir.display(), error))?;
+        if entries.next().transpose().map_err(|error| error.to_string())?.is_some() {
+            return Err(format!(
+                "A pasta '{}' ja existe e nao esta vazia.",
+                project_dir.display()
+            ));
+        }
+    }
+
+    let project = create_project_skeleton(&project_dir, project_name, target)
+        .map_err(|error| error.to_string())?;
+    seed_onboarding_template(&project_dir, target).map_err(|error| error.to_string())?;
+
+    Ok(OpenProjectResult {
+        selected: true,
+        path: project_dir.to_string_lossy().to_string(),
+        name: project.name,
+    })
+}
+
 /// Abre o diálogo nativo "Selecionar pasta do projeto" e retorna o caminho.
 #[tauri::command]
 fn open_project_dialog(app: AppHandle) -> OpenProjectResult {
@@ -1159,21 +1197,30 @@ fn new_project_dialog(app: AppHandle, project_name: String) -> OpenProjectResult
     match result {
         Some(base) => {
             let base_str = base.to_string();
-            let safe_name: String = project_name.chars()
-                .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
-                .collect();
-            let proj_dir = PathBuf::from(&base_str).join(&safe_name);
-
-            match create_project_skeleton(&proj_dir, &project_name, "megadrive") {
-                Ok(project) => {
-                    let path_str = proj_dir.to_string_lossy().to_string();
-                    OpenProjectResult { selected: true, path: path_str, name: project.name }
-                }
-                Err(_) => OpenProjectResult { selected: false, path: String::new(), name: String::new() },
-            }
+            create_onboarding_project_at_base_dir(Path::new(&base_str), &project_name, "megadrive")
+                .unwrap_or(OpenProjectResult {
+                    selected: false,
+                    path: String::new(),
+                    name: String::new(),
+                })
         }
         None => OpenProjectResult { selected: false, path: String::new(), name: String::new() },
     }
+}
+
+#[tauri::command]
+fn create_onboarding_project(
+    project_name: String,
+    target: String,
+    base_dir: String,
+) -> Result<OpenProjectResult, String> {
+    let trimmed_name = project_name.trim();
+    let trimmed_base_dir = base_dir.trim();
+    if trimmed_name.is_empty() || trimmed_base_dir.is_empty() {
+        return Err("Nome do projeto e pasta base sao obrigatorios.".into());
+    }
+
+    create_onboarding_project_at_base_dir(Path::new(trimmed_base_dir), trimmed_name, &target)
 }
 
 /// Resolve um diretório de projeto sem depender de diálogo nativo.
@@ -1243,6 +1290,7 @@ pub fn run() {
             open_project_dialog,
             open_project_path,
             new_project_dialog,
+            create_onboarding_project,
             // Fase 4: Tools
             patch_create_ips,
             patch_apply_ips,
@@ -1993,6 +2041,50 @@ pub extern "C" fn retro_run() {
         assert!(result.name.is_empty());
 
         let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn create_onboarding_project_generates_template_scene_and_asset() {
+        let base_dir = temp_dir("onboarding-project");
+        let result = create_onboarding_project(
+            "Starter Kit".to_string(),
+            "snes".to_string(),
+            base_dir.to_string_lossy().to_string(),
+        )
+        .expect("create onboarding project");
+
+        assert!(result.selected);
+
+        let project_dir = PathBuf::from(&result.path);
+        let project = load_project(&project_dir).expect("load onboarding project");
+        let scene = load_scene(&project_dir, &project.entry_scene).expect("load onboarding scene");
+        let sprite_path = project_dir
+            .join("assets")
+            .join("sprites")
+            .join("onboarding_player.ppm");
+
+        assert_eq!(project.target, "snes");
+        assert!(sprite_path.exists());
+        assert_eq!(scene.entities.len(), 1);
+        assert_eq!(scene.entities[0].entity_id, "player");
+        assert_eq!(
+            scene.entities[0]
+                .components
+                .sprite
+                .as_ref()
+                .map(|sprite| sprite.asset.as_str()),
+            Some("assets/sprites/onboarding_player.ppm")
+        );
+        assert!(
+            scene.entities[0]
+                .components
+                .logic
+                .as_ref()
+                .and_then(|logic| logic.graph.as_ref())
+                .is_some_and(|graph| graph.contains("\"event_start\"") && graph.contains("\"sprite_move\""))
+        );
+
+        let _ = fs::remove_dir_all(base_dir);
     }
 
     #[test]

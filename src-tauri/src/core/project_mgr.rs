@@ -1,10 +1,15 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::cmp::Ordering;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::ugdm::components::{
+    Components,
+    LogicComponent,
+    SpriteComponent,
+};
 use crate::ugdm::entities::{
     BuildConfig,
     Entity,
@@ -226,6 +231,91 @@ pub fn update_project_target(project_dir: &Path, target: &str) -> Result<Project
 
     save_project(project_dir, &project)?;
     Ok(project)
+}
+
+pub fn seed_onboarding_template(
+    project_dir: &Path,
+    target: &str,
+) -> Result<Scene, LoadError> {
+    let sprite_relative_path = "assets/sprites/onboarding_player.ppm";
+    let sprite_absolute_path = project_dir.join("assets").join("sprites").join("onboarding_player.ppm");
+
+    fs::write(&sprite_absolute_path, onboarding_sprite_ppm()).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel criar sprite placeholder '{}': {}",
+            sprite_absolute_path.display(),
+            error
+        ))
+    })?;
+
+    let logic_graph = serde_json::json!({
+        "version": 1,
+        "nodes": [
+            {
+                "id": "start",
+                "type": "event_start",
+                "params": {}
+            },
+            {
+                "id": "move",
+                "type": "sprite_move",
+                "params": {
+                    "target": "player",
+                    "dx": 1,
+                    "dy": 0
+                }
+            }
+        ],
+        "edges": [
+            {
+                "id": "edge_start_move",
+                "fromNode": "start",
+                "fromPort": "exec",
+                "toNode": "move",
+                "toPort": "exec"
+            }
+        ]
+    })
+    .to_string();
+
+    let mut scene = canonical_scene(DEFAULT_SCENE_ID, Some("Main Scene".to_string()));
+    scene.display_name = Some(match target {
+        "snes" => "SNES Starter Scene".to_string(),
+        _ => "Mega Drive Starter Scene".to_string(),
+    });
+    scene.palettes = vec![PaletteEntry {
+        slot: 0,
+        colors: vec![
+            "#102030".to_string(),
+            "#2E8B57".to_string(),
+            "#F9E2AF".to_string(),
+            "#FFFFFF".to_string(),
+        ],
+    }];
+    scene.entities = vec![Entity {
+        entity_id: "player".to_string(),
+        prefab: None,
+        transform: crate::ugdm::entities::Transform { x: 48, y: 64 },
+        components: Components {
+            sprite: Some(SpriteComponent {
+                asset: sprite_relative_path.to_string(),
+                frame_width: 16,
+                frame_height: 16,
+                pivot: None,
+                palette_slot: 0,
+                animations: HashMap::new(),
+                priority: "foreground".to_string(),
+            }),
+            logic: Some(LogicComponent {
+                graph: Some(logic_graph),
+                variables: HashMap::new(),
+            }),
+            ..Components::default()
+        },
+    }];
+
+    save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
+    Ok(scene)
 }
 
 pub fn set_entry_scene(project_dir: &Path, scene_path: &str) -> Result<Project, LoadError> {
@@ -637,6 +727,27 @@ fn next_scene_id(project_dir: &Path, seed: &str) -> String {
     }
 
     candidate
+}
+
+fn onboarding_sprite_ppm() -> String {
+    let mut lines = vec!["P3".to_string(), "16 16".to_string(), "255".to_string()];
+    for y in 0..16 {
+        let mut row = Vec::with_capacity(16);
+        for x in 0..16 {
+            let color = if x == 0 || y == 0 || x == 15 || y == 15 {
+                "16 32 48"
+            } else if ((x == 4 || x == 11) && (5..=6).contains(&y)) || (y == 11 && (5..=10).contains(&x)) {
+                "249 226 175"
+            } else if (x == 5 || x == 10) && (5..=6).contains(&y) {
+                "255 255 255"
+            } else {
+                "46 139 87"
+            };
+            row.push(color);
+        }
+        lines.push(row.join(" "));
+    }
+    format!("{}\n", lines.join("\n"))
 }
 
 fn slugify_scene_id(value: &str) -> String {

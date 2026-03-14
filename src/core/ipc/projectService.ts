@@ -18,6 +18,14 @@ export function newProjectDialog(projectName: string): Promise<OpenProjectResult
   return invoke("new_project_dialog", { projectName });
 }
 
+export function createOnboardingProject(
+  projectName: string,
+  target: "megadrive" | "snes",
+  baseDir: string
+): Promise<OpenProjectResult> {
+  return invoke("create_onboarding_project", { projectName, target, baseDir });
+}
+
 export function setProjectTarget(
   projectDir: string,
   target: "megadrive" | "snes"

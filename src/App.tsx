@@ -8,7 +8,7 @@ import { buildProject, generateCCode, validateProject } from "./core/ipc/buildSe
 import { emulatorLoadRom, emulatorStop } from "./core/ipc/emulatorService";
 import { getHwStatus } from "./core/ipc/hwService";
 import {
-  newProjectDialog,
+  createOnboardingProject,
   openProjectDialog,
   openProjectPath,
   setProjectTarget,
@@ -285,8 +285,11 @@ export default function App() {
 
   const [building, setBuilding] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
-  const [newProjName, setNewProjName] = useState("");
-  const [showNewDialog, setShowNewDialog] = useState(false);
+  const [newProjName, setNewProjName] = useState("MeuProjeto");
+  const [newProjTarget, setNewProjTarget] = useState<"megadrive" | "snes">("megadrive");
+  const [newProjBaseDir, setNewProjBaseDir] = useState("");
+  const [showProjectWizard, setShowProjectWizard] = useState(false);
+  const [creatingProject, setCreatingProject] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [copiedEntity, setCopiedEntity] = useState<Entity | null>(null);
@@ -303,11 +306,20 @@ export default function App() {
   useLiveValidationController();
 
   useEffect(() => {
-    if (showNewDialog && inputRef.current) {
+    if (showProjectWizard && inputRef.current) {
       inputRef.current.focus();
       inputRef.current.select();
     }
-  }, [showNewDialog]);
+  }, [showProjectWizard]);
+
+  useEffect(() => {
+    if (activeProjectDir) {
+      setShowProjectWizard(false);
+      return;
+    }
+
+    setShowProjectWizard(true);
+  }, [activeProjectDir]);
 
   useEffect(() => {
     if (!activeProjectDir) {
@@ -527,12 +539,39 @@ export default function App() {
     }
   }
 
-  async function confirmNewProject() {
-    setShowNewDialog(false);
-    if (!newProjName.trim()) return;
+  async function chooseNewProjectBaseDir() {
     try {
-      const result = await newProjectDialog(newProjName.trim());
-      if (!result.selected) return;
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({
+        title: "Escolher pasta base do projeto",
+        directory: true,
+        multiple: false,
+      });
+      if (typeof selected === "string") {
+        setNewProjBaseDir(selected);
+      }
+    } catch (error) {
+      logMessage("error", `[Projeto] Falha ao escolher pasta base: ${describeError(error)}`);
+    }
+  }
+
+  async function confirmNewProject() {
+    if (!newProjName.trim()) {
+      logMessage("warn", "[Projeto] Informe um nome para o projeto.");
+      return;
+    }
+    if (!newProjBaseDir.trim()) {
+      logMessage("warn", "[Projeto] Escolha a pasta base onde o projeto sera criado.");
+      return;
+    }
+
+    setCreatingProject(true);
+    try {
+      const result = await createOnboardingProject(
+        newProjName.trim(),
+        newProjTarget,
+        newProjBaseDir.trim()
+      );
       const hydrated = await hydrateProjectState(result.path, result.name, "Projeto");
       if (hydrated) {
         logMessage("success", `Novo projeto criado: ${result.name} em ${result.path}`);
@@ -541,6 +580,8 @@ export default function App() {
       }
     } catch (error) {
       logMessage("error", `[Projeto] Falha ao criar projeto: ${describeError(error)}`);
+    } finally {
+      setCreatingProject(false);
     }
   }
 
@@ -899,21 +940,74 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#11111b] text-[#cdd6f4]">
-      {showNewDialog && (
+      {showProjectWizard && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="flex w-72 flex-col gap-3 rounded-lg border border-[#313244] bg-[#181825] p-5 shadow-2xl">
-            <h2 className="text-sm font-bold text-[#cba6f7]">Novo Projeto</h2>
+          <div className="flex w-[28rem] flex-col gap-4 rounded-lg border border-[#313244] bg-[#181825] p-5 shadow-2xl">
+            <div className="space-y-1">
+              <h2 className="text-sm font-bold text-[#cba6f7]">
+                {activeProjectDir ? "Novo Projeto" : "Wizard de Primeiro Uso"}
+              </h2>
+              <p className="text-[10px] leading-tight text-[#7f849c]">
+                Escolha o target, o nome e a pasta base. O template inicial cria um sprite
+                placeholder, uma cena principal e um LogicComponent minimo funcional.
+              </p>
+            </div>
+
+            <div className="flex gap-2">
+              {(["megadrive", "snes"] as const).map((target) => (
+                <button
+                  key={target}
+                  type="button"
+                  onClick={() => setNewProjTarget(target)}
+                  className={`flex-1 rounded px-3 py-2 text-xs font-semibold transition-colors ${
+                    newProjTarget === target
+                      ? target === "megadrive"
+                        ? "bg-[#a6e3a1] text-[#1e1e2e]"
+                        : "bg-[#89b4fa] text-[#1e1e2e]"
+                      : "bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]"
+                  }`}
+                >
+                  {target === "megadrive" ? "Mega Drive" : "SNES"}
+                </button>
+              ))}
+            </div>
+
             <input
               ref={inputRef}
               type="text"
               value={newProjName}
               onChange={(event) => setNewProjName(event.target.value)}
               onKeyDown={(event) => event.key === "Enter" && void confirmNewProject()}
+              placeholder="Nome do projeto"
               className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1.5 text-sm text-[#cdd6f4] focus:border-[#cba6f7] focus:outline-none"
             />
-            <div className="flex justify-end gap-2">
-              <ToolbarButton label="Cancelar" onClick={() => setShowNewDialog(false)} />
-              <ToolbarButton label="Criar" onClick={() => void confirmNewProject()} accent="primary" />
+
+            <div className="flex items-center gap-2 rounded border border-[#313244] bg-[#11111b] p-2">
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] text-[#7f849c]">Pasta base</p>
+                <p className="truncate font-mono text-[10px] text-[#cdd6f4]">
+                  {newProjBaseDir || "(selecione uma pasta)"}
+                </p>
+              </div>
+              <ToolbarButton label="Escolher" onClick={() => void chooseNewProjectBaseDir()} />
+            </div>
+
+            <div className="rounded border border-[#313244] bg-[#11111b] p-3 text-[10px] text-[#7f849c]">
+              O template cria `assets/sprites/onboarding_player.ppm`, posiciona a entidade
+              `player` na cena principal e liga `event_start` para `sprite_move` no grafo inicial.
+            </div>
+
+            <div className="flex flex-wrap justify-end gap-2">
+              {activeProjectDir ? (
+                <ToolbarButton label="Cancelar" onClick={() => setShowProjectWizard(false)} />
+              ) : null}
+              <ToolbarButton label="Abrir Existente" onClick={() => void handleOpenProject()} />
+              <ToolbarButton
+                label={creatingProject ? "Criando..." : "Criar Projeto"}
+                onClick={() => void confirmNewProject()}
+                accent="primary"
+                disabled={creatingProject}
+              />
             </div>
           </div>
         </div>
@@ -960,7 +1054,7 @@ export default function App() {
 
       <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[#313244] bg-[#181825] px-4 py-2">
         <span className="mr-2 text-sm font-bold text-[#cba6f7]">RetroDev Studio</span>
-        <ToolbarButton label="Novo" onClick={() => setShowNewDialog(true)} />
+        <ToolbarButton label="Novo" onClick={() => setShowProjectWizard(true)} />
         <ToolbarButton label="Abrir" onClick={() => void handleOpenProject()} />
         <ToolbarButton label="Fechar" onClick={() => void handleCloseProject()} disabled={!activeProjectDir} />
         <ToolbarButton label="Validar" onClick={() => void handleValidate()} disabled={!activeProjectDir} />
