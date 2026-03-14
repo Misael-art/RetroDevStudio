@@ -23,6 +23,7 @@
   - O commit `3666375` (`fix: clamp simple sprite sizing in editor`) criou `src/core/sceneConstraints.ts` como regra canonica de tamanho de sprite simples no editor, reaproveitada pelo `ViewportPanel` e `InspectorPanel` para impedir dimensoes fora do contrato do target; o placeholder de onboarding ficou travado em 16x16 e sprites simples agora respeitam limites nativos de Mega Drive e SNES ainda no ato da edicao.
   - O baseline local permaneceu verde apos essas correcoes com `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo clippy -- -D warnings` e `cargo test --lib -- --nocapture --test-threads=1`.
   - As validacoes extras tambem passaram novamente no host local apos o hardening: `cargo test --manifest-path .\\src-tauri\\Cargo.toml official_windows_upstream_validation_smoke_test -- --ignored --nocapture` ficou verde e o runner desktop `scripts/e2e-tauri-build-run.mjs --skip-build --native-driver msedgedriver.exe` passou para Mega Drive e SNES.
+  - O bundle MSI foi reemitido apos esse hardening em `src-tauri/target-test/release/bundle/msi/RetroDev Studio_0.1.0_x64_en-US.msi`, substituindo o pacote usado no beta manual anterior.
 
 * **O que acabou de acontecer (2026-03-14 - hotfix pos-RC):**
   - A rodada de validacao manual do MSI revelou bugs reais no RC: ciclo de vida da sessao do emulador ao sair da aba `GM Jogo`, replay vazio aceito como sucesso, reentrada rapida em `Build & Run`, codegen SNES de `RetroFX` com API/HDMA invalida e leitura de input SNES emitindo `scanPads()` fora do contrato atual do PVSnesLib.
