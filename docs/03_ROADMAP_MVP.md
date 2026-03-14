@@ -62,6 +62,7 @@
 - Rodada de hotfix pos-RC concluida em codigo e certificada localmente: sessao do emulador endurecida, replay vazio rejeitado, build concorrente bloqueado, emitter SNES/RetroFX alinhado ao `HDMATable16`, leitura de input SNES alinhada ao PVSnesLib atual, smoke desktop MD/SNES verde e MSI regenerado apos as correcoes (`26b0911`, `ff0228a`, `e534af2`).
 - Hardening adicional do onboarding/editor concluido em codigo e validado localmente: o `NodeGraphEditor` agora hidrata o schema legado do backend, novos projetos passam a nascer com o graph inicial no formato completo do editor, cenas antigas de onboarding reparam placeholder/edge inicial ao carregar e o editor passou a limitar sprites simples ao envelope suportado por target via `sceneConstraints` (`783f1b0`, `3666375`).
 - Hardening adicional do fluxo de autoria concluido em codigo e validado localmente: cenas vazias agora oferecem `Sprite Inicial` na `Hierarchy`, o `Asset Browser` instancia imagens direto na cena ativa, o `Scene View` explica como sair do estado vazio e os caminhos receberam cobertura dedicada no frontend (`88df160`).
+- O bundle MSI foi reemitido apos o hardening do fluxo de autoria em `src-tauri/target-test/release/bundle/msi/RetroDev Studio_0.1.0_x64_en-US.msi`, alinhando o pacote de reteste ao estado atual do branch.
 
 ### Ainda em hardening
 - Runtime real de auto-update continua bloqueado ate aprovacao explicita para adicionar `tauri-plugin-updater` sob a politica atual de dependencias.

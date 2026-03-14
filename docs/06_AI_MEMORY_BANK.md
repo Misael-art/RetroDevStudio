@@ -23,6 +23,7 @@
   - O hardening reutilizou `src/core/editorEntityFactory.ts` como fonte canonica para criar sprites editaveis a partir de assets reais, incluindo graph/logica inicial quando a cena ainda esta vazia, evitando um segundo pipeline de autoria.
   - A cobertura frontend ganhou testes dedicados para os dois caminhos de recuperacao do beta manual: `src/components/hierarchy/HierarchyPanel.test.tsx` valida a criacao de `Sprite Inicial` em cena vazia e `src/components/tools/ToolsPanel.test.tsx` valida a instanciacao de imagem a partir do `Asset Browser`.
   - O baseline local permaneceu verde apos esse hardening com `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` e `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1`.
+  - O bundle MSI foi reemitido apos esse hardening em `src-tauri/target-test/release/bundle/msi/RetroDev Studio_0.1.0_x64_en-US.msi`, pronto para reteste manual do fluxo de autoria corrigido.
 
 * **O que acabou de acontecer (2026-03-14 - hardening onboarding/editor):**
   - A segunda rodada de feedback manual mostrou dois problemas estruturais no fluxo de primeiro uso: o `LogicComponent.graph` semeado pelo onboarding usava um schema minimalista aceito pelo backend, mas rejeitado pelo `NodeGraphEditor`, e o placeholder `onboarding_player.ppm` podia ser redimensionado para estados invalidos no editor, bloqueando o build por overflow de sprite simples no Mega Drive.
