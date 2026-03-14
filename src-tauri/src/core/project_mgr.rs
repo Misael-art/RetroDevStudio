@@ -27,6 +27,8 @@ pub const UGDM_VERSION: &str = "1.0.0";
 pub const LEGACY_SCHEMA_VERSION: &str = "1.0.0";
 pub const DEFAULT_ENTRY_SCENE: &str = "scenes/main.json";
 pub const DEFAULT_SCENE_ID: &str = "main";
+pub const ONBOARDING_SPRITE_ASSET: &str = "assets/sprites/onboarding_player.ppm";
+pub const ONBOARDING_SPRITE_SIZE: u32 = 16;
 
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 pub struct SceneInfo {
@@ -237,7 +239,7 @@ pub fn seed_onboarding_template(
     project_dir: &Path,
     target: &str,
 ) -> Result<Scene, LoadError> {
-    let sprite_relative_path = "assets/sprites/onboarding_player.ppm";
+    let sprite_relative_path = ONBOARDING_SPRITE_ASSET;
     let sprite_absolute_path = project_dir.join("assets").join("sprites").join("onboarding_player.ppm");
 
     fs::write(&sprite_absolute_path, onboarding_sprite_ppm()).map_err(|error| {
@@ -248,35 +250,7 @@ pub fn seed_onboarding_template(
         ))
     })?;
 
-    let logic_graph = serde_json::json!({
-        "version": 1,
-        "nodes": [
-            {
-                "id": "start",
-                "type": "event_start",
-                "params": {}
-            },
-            {
-                "id": "move",
-                "type": "sprite_move",
-                "params": {
-                    "target": "player",
-                    "dx": 1,
-                    "dy": 0
-                }
-            }
-        ],
-        "edges": [
-            {
-                "id": "edge_start_move",
-                "fromNode": "start",
-                "fromPort": "exec",
-                "toNode": "move",
-                "toPort": "exec"
-            }
-        ]
-    })
-    .to_string();
+    let logic_graph = onboarding_logic_graph();
 
     let mut scene = canonical_scene(DEFAULT_SCENE_ID, Some("Main Scene".to_string()));
     scene.display_name = Some(match target {
@@ -299,8 +273,8 @@ pub fn seed_onboarding_template(
         components: Components {
             sprite: Some(SpriteComponent {
                 asset: sprite_relative_path.to_string(),
-                frame_width: 16,
-                frame_height: 16,
+                frame_width: ONBOARDING_SPRITE_SIZE,
+                frame_height: ONBOARDING_SPRITE_SIZE,
                 pivot: None,
                 palette_slot: 0,
                 animations: HashMap::new(),
@@ -452,6 +426,7 @@ pub fn migrate_scene(mut scene: Scene) -> Scene {
     if let Some(warning) = schema_warning_message("scene", &schema_version) {
         eprintln!("{warning}");
     }
+    normalize_onboarding_scene(&mut scene);
     scene
 }
 
@@ -727,6 +702,130 @@ fn next_scene_id(project_dir: &Path, seed: &str) -> String {
     }
 
     candidate
+}
+
+fn normalize_asset_path(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+fn is_onboarding_sprite_asset(path: &str) -> bool {
+    normalize_asset_path(path).eq_ignore_ascii_case(ONBOARDING_SPRITE_ASSET)
+}
+
+fn onboarding_logic_graph() -> String {
+    serde_json::json!({
+        "version": 1,
+        "nodes": [
+            {
+                "id": "start",
+                "type": "event_start",
+                "label": "On Start",
+                "x": 40,
+                "y": 80,
+                "inputs": [],
+                "outputs": [
+                    { "id": "exec", "label": "->", "kind": "exec" }
+                ],
+                "params": {}
+            },
+            {
+                "id": "move",
+                "type": "sprite_move",
+                "label": "Move Sprite",
+                "x": 240,
+                "y": 80,
+                "inputs": [
+                    { "id": "exec", "label": "->", "kind": "exec" },
+                    { "id": "dx", "label": "dx", "kind": "data", "dataType": "int" },
+                    { "id": "dy", "label": "dy", "kind": "data", "dataType": "int" }
+                ],
+                "outputs": [
+                    { "id": "exec", "label": "->", "kind": "exec" }
+                ],
+                "params": {
+                    "target": "player",
+                    "dx": 1,
+                    "dy": 0
+                }
+            }
+        ],
+        "edges": [
+            {
+                "id": "edge_start_move",
+                "fromNode": "start",
+                "fromPort": "exec",
+                "toNode": "move",
+                "toPort": "exec"
+            }
+        ]
+    })
+    .to_string()
+}
+
+fn repair_onboarding_logic_graph(serialized: &str) -> Option<String> {
+    let mut graph = serde_json::from_str::<serde_json::Value>(serialized).ok()?;
+    let root = graph.as_object_mut()?;
+    let nodes = root.get("nodes")?.as_array()?;
+    let edges = root.get("edges")?.as_array()?;
+    if !edges.is_empty() {
+        return None;
+    }
+
+    let start_id = nodes.iter().find_map(|node| {
+        let node_obj = node.as_object()?;
+        (node_obj.get("type")?.as_str()? == "event_start")
+            .then(|| node_obj.get("id")?.as_str())
+            .flatten()
+            .map(str::to_string)
+    })?;
+    let move_id = nodes.iter().find_map(|node| {
+        let node_obj = node.as_object()?;
+        (node_obj.get("type")?.as_str()? == "sprite_move")
+            .then(|| node_obj.get("id")?.as_str())
+            .flatten()
+            .map(str::to_string)
+    })?;
+
+    root.insert(
+        "version".to_string(),
+        root.get("version").cloned().unwrap_or_else(|| serde_json::json!(1)),
+    );
+    root.insert(
+        "edges".to_string(),
+        serde_json::json!([
+            {
+                "id": "edge_start_move",
+                "fromNode": start_id,
+                "fromPort": "exec",
+                "toNode": move_id,
+                "toPort": "exec"
+            }
+        ]),
+    );
+
+    serde_json::to_string(&graph).ok()
+}
+
+fn normalize_onboarding_scene(scene: &mut Scene) {
+    for entity in &mut scene.entities {
+        let Some(sprite) = entity.components.sprite.as_mut() else {
+            continue;
+        };
+        if !is_onboarding_sprite_asset(&sprite.asset) {
+            continue;
+        }
+
+        sprite.frame_width = ONBOARDING_SPRITE_SIZE;
+        sprite.frame_height = ONBOARDING_SPRITE_SIZE;
+
+        if let Some(logic) = entity.components.logic.as_mut() {
+            if let Some(graph) = logic.graph.as_mut() {
+                if let Some(repaired) = repair_onboarding_logic_graph(graph) {
+                    *graph = repaired;
+                }
+            }
+        }
+    }
 }
 
 fn onboarding_sprite_ppm() -> String {
@@ -1499,6 +1598,64 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn migrate_scene_repairs_onboarding_placeholder_and_starter_edge() {
+        let mut scene = canonical_scene(DEFAULT_SCENE_ID, Some("Main Scene".to_string()));
+        scene.entities = vec![Entity {
+            entity_id: "player".to_string(),
+            prefab: None,
+            transform: crate::ugdm::entities::Transform { x: 104, y: 88 },
+            components: Components {
+                sprite: Some(SpriteComponent {
+                    asset: ONBOARDING_SPRITE_ASSET.to_string(),
+                    frame_width: 64,
+                    frame_height: 56,
+                    pivot: None,
+                    palette_slot: 0,
+                    animations: HashMap::new(),
+                    priority: "foreground".to_string(),
+                }),
+                logic: Some(LogicComponent {
+                    graph: Some(
+                        serde_json::json!({
+                            "version": 1,
+                            "nodes": [
+                                { "id": "node_1", "type": "event_start", "params": {} },
+                                {
+                                    "id": "node_2",
+                                    "type": "sprite_move",
+                                    "params": { "target": "player", "dx": 0, "dy": 0 }
+                                }
+                            ],
+                            "edges": []
+                        })
+                        .to_string(),
+                    ),
+                    variables: HashMap::new(),
+                }),
+                ..Components::default()
+            },
+        }];
+
+        let migrated = migrate_scene(scene);
+        let sprite = migrated.entities[0]
+            .components
+            .sprite
+            .as_ref()
+            .expect("onboarding sprite");
+        let graph = migrated.entities[0]
+            .components
+            .logic
+            .as_ref()
+            .and_then(|logic| logic.graph.as_ref())
+            .expect("starter graph");
+
+        assert_eq!(sprite.frame_width, ONBOARDING_SPRITE_SIZE);
+        assert_eq!(sprite.frame_height, ONBOARDING_SPRITE_SIZE);
+        assert!(graph.contains("\"fromNode\":\"node_1\""));
+        assert!(graph.contains("\"toNode\":\"node_2\""));
     }
 
     #[test]

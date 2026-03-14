@@ -190,9 +190,52 @@ describe("NodeGraph serialization", () => {
 
   it("falls back to empty graph for invalid payloads", () => {
     expect(deserializeNodeGraph("not-json")).toEqual(SERIALIZED_EMPTY_GRAPH);
-    expect(deserializeNodeGraph(JSON.stringify({ nodes: [{ id: "n1" }], edges: [] }))).toEqual(
+    expect(
+      deserializeNodeGraph(JSON.stringify({ nodes: [{ id: "n1", type: "unknown" }], edges: [] }))
+    ).toEqual(
       SERIALIZED_EMPTY_GRAPH
     );
+  });
+
+  it("hydrates legacy backend-only node payloads into the editor schema", () => {
+    const serialized = JSON.stringify({
+      version: 1,
+      nodes: [
+        { id: "start", type: "event_start", params: {} },
+        {
+          id: "move",
+          type: "sprite_move",
+          params: { target: "player", dx: 1, dy: 0 },
+        },
+      ],
+      edges: [
+        {
+          id: "edge_start_move",
+          fromNode: "start",
+          fromPort: "exec",
+          toNode: "move",
+          toPort: "exec",
+        },
+      ],
+    });
+
+    const hydrated = deserializeNodeGraph(serialized);
+
+    expect(hydrated.edges).toHaveLength(1);
+    expect(hydrated.nodes).toHaveLength(2);
+    expect(hydrated.nodes[0]).toMatchObject({
+      id: "start",
+      type: "event_start",
+      label: "On Start",
+    });
+    expect(hydrated.nodes[1]).toMatchObject({
+      id: "move",
+      type: "sprite_move",
+      label: "Move Sprite",
+      params: { target: "player", dx: 1, dy: 0 },
+    });
+    expect(hydrated.nodes[1].inputs.length).toBeGreaterThan(0);
+    expect(hydrated.nodes[1].outputs.length).toBeGreaterThan(0);
   });
 });
 

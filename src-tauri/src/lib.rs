@@ -2081,7 +2081,12 @@ pub extern "C" fn retro_run() {
                 .logic
                 .as_ref()
                 .and_then(|logic| logic.graph.as_ref())
-                .is_some_and(|graph| graph.contains("\"event_start\"") && graph.contains("\"sprite_move\""))
+                .is_some_and(|graph| {
+                    graph.contains("\"event_start\"")
+                        && graph.contains("\"sprite_move\"")
+                        && graph.contains("\"label\":\"On Start\"")
+                        && graph.contains("\"fromNode\":\"start\"")
+                })
         );
 
         let _ = fs::remove_dir_all(base_dir);

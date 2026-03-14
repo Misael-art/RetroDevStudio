@@ -163,14 +163,21 @@ export function deserializeNodeGraph(serialized?: string | null): NodeGraph {
     const { nodes, edges } = parsed;
     if (
       !Array.isArray(nodes) ||
-      !nodes.every(isGraphNode) ||
       !Array.isArray(edges) ||
       !edges.every(isNodeEdge)
     ) {
       return cloneGraph(EMPTY_GRAPH);
     }
 
-    return cloneGraph({ nodes, edges });
+    const hydratedNodes = nodes
+      .map((node, index) => hydrateGraphNode(node, index))
+      .filter((node): node is GraphNode => node !== null);
+
+    if (hydratedNodes.length !== nodes.length) {
+      return cloneGraph(EMPTY_GRAPH);
+    }
+
+    return cloneGraph({ nodes: hydratedNodes, edges });
   } catch {
     return cloneGraph(EMPTY_GRAPH);
   }
@@ -413,6 +420,63 @@ const NODE_COLORS: Record<NodeType, string> = {
 };
 
 // ── Counter for unique IDs ────────────────────────────────────────────────────
+function clonePorts(ports: NodePort[]): NodePort[] {
+  return ports.map((port) => ({ ...port }));
+}
+
+function isGraphParamValue(value: unknown): value is string | number {
+  return typeof value === "string" || typeof value === "number";
+}
+
+function coerceNodeParams(type: NodeType, params: unknown): Record<string, string | number> {
+  const defaults = { ...NODE_DEFS[type].params };
+  if (!isRecord(params)) {
+    return defaults;
+  }
+
+  for (const [key, value] of Object.entries(params)) {
+    if (isGraphParamValue(value)) {
+      defaults[key] = value;
+    }
+  }
+
+  return defaults;
+}
+
+function hydrateGraphNode(value: unknown, index: number): GraphNode | null {
+  if (isGraphNode(value)) {
+    return {
+      ...value,
+      inputs: clonePorts(value.inputs),
+      outputs: clonePorts(value.outputs),
+      params: { ...value.params },
+    };
+  }
+
+  if (!isRecord(value) || typeof value.id !== "string" || !isNodeType(value.type)) {
+    return null;
+  }
+
+  const def = NODE_DEFS[value.type];
+
+  return {
+    id: value.id,
+    type: value.type,
+    label: typeof value.label === "string" ? value.label : def.label,
+    x: typeof value.x === "number" ? value.x : 40 + index * 200,
+    y: typeof value.y === "number" ? value.y : 80,
+    inputs:
+      Array.isArray(value.inputs) && value.inputs.every(isNodePort)
+        ? clonePorts(value.inputs)
+        : clonePorts(def.inputs),
+    outputs:
+      Array.isArray(value.outputs) && value.outputs.every(isNodePort)
+        ? clonePorts(value.outputs)
+        : clonePorts(def.outputs),
+    params: coerceNodeParams(value.type, value.params),
+  };
+}
+
 let _nodeCounter = 0;
 let _edgeCounter = 0;
 
@@ -426,8 +490,8 @@ function makeNode(type: NodeType, x: number, y: number): GraphNode {
     id: newNodeId(),
     x,
     y,
-    inputs: def.inputs.map((p) => ({ ...p })),
-    outputs: def.outputs.map((p) => ({ ...p })),
+    inputs: clonePorts(def.inputs),
+    outputs: clonePorts(def.outputs),
     params: { ...def.params },
   };
 }
@@ -719,6 +783,9 @@ export default function NodeGraphEditor() {
           <p className="text-[10px] text-[#45475a] px-1 select-none">
             {selectedEntity ? "Autosave 600ms no LogicComponent.graph" : "Selecione uma entidade para editar"}
           </p>
+          <p className="text-[10px] text-[#45475a] px-1 select-none">
+            Dica: arraste da saida de um no para a entrada do proximo para conectar.
+          </p>
           <p className="text-[10px] text-[#45475a] px-1 select-none">Del = remover nó</p>
         </div>
       </div>
@@ -804,6 +871,11 @@ export default function NodeGraphEditor() {
             <p className="text-[#313244] text-xs select-none">
               Adicione nós pela paleta à esquerda
             </p>
+          </div>
+        )}
+        {selectedEntity && graph.nodes.length > 1 && graph.edges.length === 0 && (
+          <div className="absolute bottom-3 right-3 rounded border border-[#fab387]/40 bg-[#181825]/95 px-3 py-2 text-[10px] text-[#fab387] shadow-lg">
+            Grafo sem conexoes: arraste de uma saida para uma entrada para ligar o fluxo.
           </div>
         )}
       </div>
