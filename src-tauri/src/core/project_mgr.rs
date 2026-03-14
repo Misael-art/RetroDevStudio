@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::cmp::Ordering;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
@@ -17,6 +18,7 @@ use crate::ugdm::entities::{
 use crate::ugdm::entities::{RetroFXConfig, RetroFXParallaxLayer, RetroFXRasterLine};
 
 pub const UGDM_VERSION: &str = "1.0.0";
+pub const LEGACY_SCHEMA_VERSION: &str = "1.0.0";
 pub const DEFAULT_ENTRY_SCENE: &str = "scenes/main.json";
 pub const DEFAULT_SCENE_ID: &str = "main";
 
@@ -83,6 +85,7 @@ pub fn default_build_config() -> BuildConfig {
     BuildConfig {
         output_dir: "build/".to_string(),
         optimization: "size".to_string(),
+        artifact_prefix: "game".to_string(),
     }
 }
 
@@ -244,7 +247,14 @@ pub fn load_project(project_dir: &Path) -> Result<Project, LoadError> {
         ))
     })?;
 
-    let project: Project = serde_json::from_str(&content).map_err(|e| {
+    let project_json: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+        LoadError(format!(
+            "project.rds invalido (erro de parsing JSON): {}",
+            e
+        ))
+    })?;
+    let project_json = migrate_project_value(project_json)?;
+    let project: Project = serde_json::from_value(project_json).map_err(|e| {
         LoadError(format!(
             "project.rds invalido (erro de parsing JSON): {}",
             e
@@ -270,7 +280,14 @@ pub fn load_scene(project_dir: &Path, scene_path: &str) -> Result<Scene, LoadErr
         ))
     })?;
 
-    let scene: Scene = serde_json::from_str(&content).map_err(|e| {
+    let scene_json: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+        LoadError(format!(
+            "Cena '{}' invalida (erro de parsing JSON): {}",
+            scene_path, e
+        ))
+    })?;
+    let scene_json = migrate_scene_value(scene_json)?;
+    let scene: Scene = serde_json::from_value(scene_json).map_err(|e| {
         LoadError(format!(
             "Cena '{}' invalida (erro de parsing JSON): {}",
             scene_path, e
@@ -299,9 +316,15 @@ pub fn resolve_prefabs(project_dir: &Path, scene: &Scene) -> Result<Scene, LoadE
 }
 
 pub fn migrate_project(mut project: Project) -> Project {
-    let schema_version = normalized_project_schema_version(&project).to_string();
-    if project.schema_version.trim().is_empty() {
-        project.schema_version = schema_version.clone();
+    let schema_version = normalize_schema_version(
+        normalized_project_schema_version(&project),
+        CURRENT_SCHEMA_VERSION,
+    );
+    project.schema_version = schema_version.clone();
+    if let Some(build) = project.build.as_mut() {
+        if build.artifact_prefix.trim().is_empty() {
+            build.artifact_prefix = default_build_config().artifact_prefix;
+        }
     }
     if let Some(warning) = schema_warning_message("project.rds", &schema_version) {
         eprintln!("{warning}");
@@ -310,7 +333,10 @@ pub fn migrate_project(mut project: Project) -> Project {
 }
 
 pub fn migrate_scene(mut scene: Scene) -> Scene {
-    let schema_version = normalized_scene_schema_version(&scene).to_string();
+    let schema_version = normalize_schema_version(
+        normalized_scene_schema_version(&scene),
+        CURRENT_SCHEMA_VERSION,
+    );
     if scene
         .schema_version
         .as_deref()
@@ -380,7 +406,7 @@ pub fn validate_project(project: &Project) -> Result<(), LoadError> {
 fn normalized_project_schema_version(project: &Project) -> &str {
     let version = project.schema_version.trim();
     if version.is_empty() {
-        CURRENT_SCHEMA_VERSION
+        LEGACY_SCHEMA_VERSION
     } else {
         version
     }
@@ -392,16 +418,150 @@ fn normalized_scene_schema_version(scene: &Scene) -> &str {
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .unwrap_or(CURRENT_SCHEMA_VERSION)
+        .unwrap_or(LEGACY_SCHEMA_VERSION)
 }
 
 fn schema_warning_message(scope: &str, version: &str) -> Option<String> {
-    (version != CURRENT_SCHEMA_VERSION).then(|| {
-        format!(
-            "{}: schema_version '{}' desconhecida. Aplicando migracao pass-through.",
+    if version == CURRENT_SCHEMA_VERSION {
+        return None;
+    }
+
+    match compare_semver(version, CURRENT_SCHEMA_VERSION) {
+        Some(Ordering::Greater) => Some(format!(
+            "{}: schema_version '{}' mais nova que o app '{}'. Aplicando migracao pass-through conservadora.",
+            scope, version, CURRENT_SCHEMA_VERSION
+        )),
+        _ => Some(format!(
+            "{}: schema_version '{}' desconhecida ou sem migracao disponivel. Aplicando migracao pass-through.",
             scope, version
-        )
-    })
+        )),
+    }
+}
+
+fn migrate_project_value(mut value: serde_json::Value) -> Result<serde_json::Value, LoadError> {
+    let mut version = schema_version_from_value(&value, LEGACY_SCHEMA_VERSION);
+
+    loop {
+        match compare_semver(&version, CURRENT_SCHEMA_VERSION) {
+            Some(Ordering::Equal) => break,
+            Some(Ordering::Greater) => {
+                if let Some(warning) = schema_warning_message("project.rds", &version) {
+                    eprintln!("{warning}");
+                }
+                break;
+            }
+            _ => {}
+        }
+
+        value = match version.as_str() {
+            "1.0.0" => migrate_project_1_0_0_to_1_1_0(value)?,
+            _ => {
+                if let Some(warning) = schema_warning_message("project.rds", &version) {
+                    eprintln!("{warning}");
+                }
+                break;
+            }
+        };
+
+        version = schema_version_from_value(&value, CURRENT_SCHEMA_VERSION);
+    }
+
+    Ok(value)
+}
+
+fn migrate_scene_value(mut value: serde_json::Value) -> Result<serde_json::Value, LoadError> {
+    let mut version = schema_version_from_value(&value, LEGACY_SCHEMA_VERSION);
+
+    loop {
+        match compare_semver(&version, CURRENT_SCHEMA_VERSION) {
+            Some(Ordering::Equal) => break,
+            Some(Ordering::Greater) => {
+                if let Some(warning) = schema_warning_message("scene", &version) {
+                    eprintln!("{warning}");
+                }
+                break;
+            }
+            _ => {}
+        }
+
+        value = match version.as_str() {
+            "1.0.0" => migrate_scene_1_0_0_to_1_1_0(value)?,
+            _ => {
+                if let Some(warning) = schema_warning_message("scene", &version) {
+                    eprintln!("{warning}");
+                }
+                break;
+            }
+        };
+
+        version = schema_version_from_value(&value, CURRENT_SCHEMA_VERSION);
+    }
+
+    Ok(value)
+}
+
+fn migrate_project_1_0_0_to_1_1_0(
+    mut value: serde_json::Value,
+) -> Result<serde_json::Value, LoadError> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| LoadError("project.rds invalido: raiz JSON deve ser um objeto.".into()))?;
+    object.insert(
+        "schema_version".to_string(),
+        serde_json::Value::String("1.1.0".to_string()),
+    );
+    if let Some(build) = object.get_mut("build").and_then(serde_json::Value::as_object_mut) {
+        build
+            .entry("artifact_prefix".to_string())
+            .or_insert_with(|| serde_json::Value::String("game".to_string()));
+    }
+    Ok(value)
+}
+
+fn migrate_scene_1_0_0_to_1_1_0(
+    mut value: serde_json::Value,
+) -> Result<serde_json::Value, LoadError> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| LoadError("scene invalida: raiz JSON deve ser um objeto.".into()))?;
+    object.insert(
+        "schema_version".to_string(),
+        serde_json::Value::String("1.1.0".to_string()),
+    );
+    Ok(value)
+}
+
+fn schema_version_from_value(value: &serde_json::Value, fallback: &str) -> String {
+    value
+        .get("schema_version")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|entry| !entry.is_empty())
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+fn normalize_schema_version(version: &str, fallback: &str) -> String {
+    match compare_semver(version, fallback) {
+        Some(Ordering::Less) | None if version.trim().is_empty() => fallback.to_string(),
+        Some(Ordering::Less) => fallback.to_string(),
+        _ => version.to_string(),
+    }
+}
+
+fn compare_semver(left: &str, right: &str) -> Option<Ordering> {
+    fn parse(value: &str) -> Option<(u32, u32, u32)> {
+        let mut parts = value.split('.');
+        let major = parts.next()?.parse().ok()?;
+        let minor = parts.next()?.parse().ok()?;
+        let patch = parts.next()?.parse().ok()?;
+        if parts.next().is_some() {
+            return None;
+        }
+        Some((major, minor, patch))
+    }
+
+    Some(parse(left)?.cmp(&parse(right)?))
 }
 
 fn scene_info(scene_path: &str, scene: &Scene) -> SceneInfo {
@@ -490,6 +650,12 @@ fn validate_build_config(build: &BuildConfig) -> Result<(), LoadError> {
     if build.output_dir.trim().is_empty() {
         return Err(LoadError(
             "project.rds: build.output_dir nao pode ser vazio.".into(),
+        ));
+    }
+
+    if build.artifact_prefix.trim().is_empty() {
+        return Err(LoadError(
+            "project.rds: build.artifact_prefix nao pode ser vazio.".into(),
         ));
     }
 
@@ -931,6 +1097,55 @@ mod tests {
     }
 
     #[test]
+    fn migration_chain_upgrades_project_schema_1_0_0_to_1_1_0() {
+        let project_dir = temp_dir("schema-chain");
+        fs::create_dir_all(project_dir.join("scenes")).expect("create scenes dir");
+
+        let legacy_project = serde_json::json!({
+            "rds_version": UGDM_VERSION,
+            "schema_version": "1.0.0",
+            "name": "Schema Chain",
+            "target": "megadrive",
+            "resolution": {
+                "width": 320,
+                "height": 224
+            },
+            "fps": 60,
+            "palette_mode": "4x16",
+            "entry_scene": "scenes/main.json",
+            "build": {
+                "output_dir": "build/",
+                "optimization": "size"
+            }
+        });
+        let legacy_scene = serde_json::json!({
+            "scene_id": DEFAULT_SCENE_ID,
+            "schema_version": "1.0.0",
+            "display_name": "Main Scene",
+            "background_layers": [],
+            "entities": [],
+            "palettes": []
+        });
+
+        fs::write(project_dir.join("project.rds"), legacy_project.to_string())
+            .expect("write project");
+        fs::write(project_dir.join("scenes").join("main.json"), legacy_scene.to_string())
+            .expect("write scene");
+
+        let project = load_project(&project_dir).expect("load migrated project");
+        let scene = load_scene(&project_dir, "scenes/main.json").expect("load migrated scene");
+
+        assert_eq!(project.schema_version, CURRENT_SCHEMA_VERSION);
+        assert_eq!(
+            project.build.as_ref().map(|build| build.artifact_prefix.as_str()),
+            Some("game")
+        );
+        assert_eq!(scene.schema_version.as_deref(), Some(CURRENT_SCHEMA_VERSION));
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
     fn load_project_accepts_canonical_megadrive_fixture() {
         let project = load_project(&fixture_dir("megadrive_dummy")).expect("load fixture");
         let scene = load_scene(&fixture_dir("megadrive_dummy"), &project.entry_scene)
@@ -1054,6 +1269,10 @@ mod tests {
 
         assert_eq!(project.schema_version, CURRENT_SCHEMA_VERSION);
         assert_eq!(
+            project.build.as_ref().map(|build| build.artifact_prefix.as_str()),
+            Some("game")
+        );
+        assert_eq!(
             scene.schema_version.as_deref(),
             Some(CURRENT_SCHEMA_VERSION)
         );
@@ -1098,8 +1317,8 @@ mod tests {
         )
         .expect("scene warning");
 
-        assert!(project_warning.contains("schema_version '9.9.9' desconhecida"));
-        assert!(scene_warning.contains("schema_version '9.9.9' desconhecida"));
+        assert!(project_warning.contains("mais nova que o app"));
+        assert!(scene_warning.contains("mais nova que o app"));
     }
 
     #[test]

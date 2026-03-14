@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use super::components::Components;
 
-pub const CURRENT_SCHEMA_VERSION: &str = "1.0.0";
+pub const CURRENT_SCHEMA_VERSION: &str = "1.1.0";
 
 fn default_schema_version() -> String {
     CURRENT_SCHEMA_VERSION.to_string()
@@ -103,6 +103,8 @@ pub struct BuildConfig {
     pub output_dir: String,
     #[serde(default = "default_optimization")]
     pub optimization: String,
+    #[serde(default = "default_artifact_prefix")]
+    pub artifact_prefix: String,
 }
 
 fn default_output_dir() -> String {
@@ -111,6 +113,10 @@ fn default_output_dir() -> String {
 
 fn default_optimization() -> String {
     "size".to_string()
+}
+
+fn default_artifact_prefix() -> String {
+    "game".to_string()
 }
 
 // ── Project ───────────────────────────────────────────────────────────────────
