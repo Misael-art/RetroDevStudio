@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Ultima Atualizacao:** 2026-03-14
-**Ultima sessao:** 2026-03-14 (Hotfixes pos-RC, recertificacao desktop e reemissao do MSI)
-**Fase Atual:** Release candidate / beta testing do desktop Tauri, com ondas M-R concluidas, RC hotfixado apos validacao manual inicial e updater runtime bloqueado por politica de nao adicionar dependencias novas.
+**Ultima sessao:** 2026-03-14 (Hardening do onboarding/NodeGraph apos feedback do beta manual)
+**Fase Atual:** Release candidate / beta testing do desktop Tauri, com ondas M-R concluidas, RC hotfixado apos validacao manual inicial, onboarding/template endurecidos para o editor real e updater runtime bloqueado por politica de nao adicionar dependencias novas.
 **Branch sugerida:** `feat/desktop-e2e-workflow`
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
@@ -16,6 +16,13 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-14 - hardening onboarding/editor):**
+  - A segunda rodada de feedback manual mostrou dois problemas estruturais no fluxo de primeiro uso: o `LogicComponent.graph` semeado pelo onboarding usava um schema minimalista aceito pelo backend, mas rejeitado pelo `NodeGraphEditor`, e o placeholder `onboarding_player.ppm` podia ser redimensionado para estados invalidos no editor, bloqueando o build por overflow de sprite simples no Mega Drive.
+  - O commit `783f1b0` (`fix: harden onboarding graph hydration`) tornou o frontend retrocompativel com o schema legado do grafo, adicionou hint visual de conexao no `NodeGraphEditor`, passou a semear novos projetos com o schema completo do editor e normalizou cenas de onboarding antigas no backend, reparando placeholder 16x16 e o edge inicial `event_start -> sprite_move` quando o fluxo vinha quebrado.
+  - O commit `3666375` (`fix: clamp simple sprite sizing in editor`) criou `src/core/sceneConstraints.ts` como regra canonica de tamanho de sprite simples no editor, reaproveitada pelo `ViewportPanel` e `InspectorPanel` para impedir dimensoes fora do contrato do target; o placeholder de onboarding ficou travado em 16x16 e sprites simples agora respeitam limites nativos de Mega Drive e SNES ainda no ato da edicao.
+  - O baseline local permaneceu verde apos essas correcoes com `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo clippy -- -D warnings` e `cargo test --lib -- --nocapture --test-threads=1`.
+  - As validacoes extras tambem passaram novamente no host local apos o hardening: `cargo test --manifest-path .\\src-tauri\\Cargo.toml official_windows_upstream_validation_smoke_test -- --ignored --nocapture` ficou verde e o runner desktop `scripts/e2e-tauri-build-run.mjs --skip-build --native-driver msedgedriver.exe` passou para Mega Drive e SNES.
 
 * **O que acabou de acontecer (2026-03-14 - hotfix pos-RC):**
   - A rodada de validacao manual do MSI revelou bugs reais no RC: ciclo de vida da sessao do emulador ao sair da aba `GM Jogo`, replay vazio aceito como sucesso, reentrada rapida em `Build & Run`, codegen SNES de `RetroFX` com API/HDMA invalida e leitura de input SNES emitindo `scanPads()` fora do contrato atual do PVSnesLib.
@@ -569,7 +576,7 @@ As seguintes decisoes ja foram debatidas e sao finais:
 ## 4. PROXIMO PASSO IMEDIATO (PARA A IA EXECUTAR QUANDO SOLICITADA)
 
 **Tarefa:**
-Entrar no ciclo de release candidate / beta testing do desktop Tauri apos o fechamento das ondas M-R.
+Continuar o ciclo de release candidate / beta testing do desktop Tauri, agora com foco em revalidar onboarding/template inicial, surfaces experimentais e smoke de instalacao com o editor endurecido.
 
 **Pre-requisitos operacionais:**
 * Manter os 6 gates canonicos verdes em toda alteracao relevante.
@@ -579,10 +586,11 @@ Entrar no ciclo de release candidate / beta testing do desktop Tauri apos o fech
 
 **Sequencia de acoes recomendada:**
 1. Repetir o baseline canonico e o bundle MSI (`scripts/run-in-msvc.cmd npx tauri build --bundles msi`) no host Windows institucional apropriado.
-2. Executar QA manual sobre onboarding, template inicial, build multi-target, deterministic replay, rewind, Patch Studio com compliance, VRAM Viewer e monitores live.
+2. Executar QA manual sobre onboarding, template inicial, conexao do NodeGraph, build multi-target, deterministic replay, rewind, Patch Studio com compliance, VRAM Viewer e monitores live.
 3. Repetir o smoke desktop Tauri/Windows para os fluxos `Build -> Load ROM -> Run frames` afetados por packaging, onboarding, build ou emulacao.
 4. Decidir se `tauri-plugin-updater` pode ser aprovado; se nao puder, manter a configuracao placeholder e registrar isso claramente nas notas de release/beta.
-5. Preparar notas de beta testing, criterios de aceite e lista de riscos residuais para a rodada institucional.
+5. Validar manualmente `Asset Browser`, `VRAM Viewer` e `Reverse Explorer` com ROM/projeto real para decidir remocao ou manutencao do badge `Experimental`.
+6. Preparar notas de beta testing, criterios de aceite e lista de riscos residuais para a rodada institucional.
 
 **Validacao minima obrigatoria antes de marcar qualquer item como concluido:**
 * `npm run check:tree`
