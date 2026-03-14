@@ -13,7 +13,13 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: mocks.listen,
 }));
 
-import { emulatorReadMemory, listenToAudioStream } from "./emulatorService";
+import {
+  emulatorPlayReplay,
+  emulatorReadMemory,
+  emulatorStartRecording,
+  emulatorStopRecording,
+  listenToAudioStream,
+} from "./emulatorService";
 
 describe("emulatorReadMemory", () => {
   beforeEach(() => {
@@ -54,5 +60,33 @@ describe("listenToAudioStream", () => {
     expect(received).toHaveBeenCalledWith(payload);
     stop();
     expect(unlisten).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("replay commands", () => {
+  beforeEach(() => {
+    mocks.invoke.mockReset();
+  });
+
+  it("invokes canonical replay recording commands", async () => {
+    mocks.invoke.mockResolvedValue({
+      ok: true,
+      message: "ok",
+      replay_path: "F:/replay.rds-replay",
+      frames_recorded: 2,
+      framebuffer_match: true,
+    });
+
+    await emulatorStartRecording();
+    await emulatorStopRecording("F:/Projects/Test");
+    await emulatorPlayReplay("F:/Projects/Test/replay.rds-replay");
+
+    expect(mocks.invoke).toHaveBeenNthCalledWith(1, "emulator_start_recording");
+    expect(mocks.invoke).toHaveBeenNthCalledWith(2, "emulator_stop_recording", {
+      projectDir: "F:/Projects/Test",
+    });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(3, "emulator_play_replay", {
+      replayPath: "F:/Projects/Test/replay.rds-replay",
+    });
   });
 });

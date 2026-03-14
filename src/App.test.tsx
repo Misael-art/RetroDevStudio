@@ -12,6 +12,9 @@ const mocks = vi.hoisted(() => ({
   emulatorSaveState: vi.fn(),
   emulatorLoadState: vi.fn(),
   emulatorRewindStep: vi.fn(),
+  emulatorStartRecording: vi.fn(),
+  emulatorStopRecording: vi.fn(),
+  emulatorPlayReplay: vi.fn(),
   emulatorStop: vi.fn(),
   emulatorSendInput: vi.fn(),
   startFrameLoop: vi.fn(),
@@ -79,6 +82,9 @@ vi.mock("./core/ipc/emulatorService", () => ({
   emulatorSaveState: mocks.emulatorSaveState,
   emulatorLoadState: mocks.emulatorLoadState,
   emulatorRewindStep: mocks.emulatorRewindStep,
+  emulatorStartRecording: mocks.emulatorStartRecording,
+  emulatorStopRecording: mocks.emulatorStopRecording,
+  emulatorPlayReplay: mocks.emulatorPlayReplay,
   emulatorStop: mocks.emulatorStop,
   emulatorSendInput: mocks.emulatorSendInput,
   startFrameLoop: mocks.startFrameLoop,
@@ -252,6 +258,27 @@ describe("App build flow", () => {
     mocks.emulatorRewindStep.mockResolvedValue({
       ok: true,
       message: "Rewind restaurado para o frame 0 (0 snapshot(s) restantes, intervalo 1 frame(s)).",
+    });
+    mocks.emulatorStartRecording.mockResolvedValue({
+      ok: true,
+      message: "Gravacao de replay iniciada.",
+      replay_path: "",
+      frames_recorded: 0,
+      framebuffer_match: null,
+    });
+    mocks.emulatorStopRecording.mockResolvedValue({
+      ok: true,
+      message: "Replay salvo no diretorio do projeto.",
+      replay_path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy/replay-1.rds-replay",
+      frames_recorded: 3,
+      framebuffer_match: null,
+    });
+    mocks.emulatorPlayReplay.mockResolvedValue({
+      ok: true,
+      message: "Replay reproduzido (3 frame(s)); framebuffer final confere com a gravacao.",
+      replay_path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy/replay-1.rds-replay",
+      frames_recorded: 3,
+      framebuffer_match: true,
     });
     mocks.emulatorSendInput.mockResolvedValue({
       ok: true,

@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use compiler::ast_generator::generate_ast;
 use compiler::build_orch::{
@@ -38,7 +39,7 @@ use core::project_mgr::{
     SceneInfo,
 };
 use emulator::frame_buffer::framebuffer_to_rgba;
-use emulator::libretro_ffi::{EmulatorCore, JoypadState};
+use emulator::libretro_ffi::{EmulatorCore, JoypadState, ReplayCapture};
 use hardware::constraint_engine;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
@@ -89,6 +90,15 @@ pub struct EmulatorMemoryResult {
     pub ok: bool,
     pub data: Vec<u8>,
     pub total_size: usize,
+}
+
+#[derive(serde::Serialize)]
+pub struct ReplayCommandResult {
+    pub ok: bool,
+    pub message: String,
+    pub replay_path: String,
+    pub frames_recorded: usize,
+    pub framebuffer_match: Option<bool>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -365,6 +375,191 @@ fn emulator_rewind_step(emu: State<EmulatorCoreState>) -> EmulatorCommandResult 
             ),
         },
         Err(error) => EmulatorCommandResult { ok: false, message: error },
+    }
+}
+
+#[tauri::command]
+fn emulator_start_recording(emu: State<EmulatorCoreState>) -> ReplayCommandResult {
+    let mut core = match emu.0.lock() {
+        Ok(c) => c,
+        Err(e) => {
+            return ReplayCommandResult {
+                ok: false,
+                message: e.to_string(),
+                replay_path: String::new(),
+                frames_recorded: 0,
+                framebuffer_match: None,
+            }
+        }
+    };
+
+    match core.start_replay_recording() {
+        Ok(()) => ReplayCommandResult {
+            ok: true,
+            message: "Gravacao de replay iniciada.".to_string(),
+            replay_path: String::new(),
+            frames_recorded: 0,
+            framebuffer_match: None,
+        },
+        Err(error) => ReplayCommandResult {
+            ok: false,
+            message: error,
+            replay_path: String::new(),
+            frames_recorded: 0,
+            framebuffer_match: None,
+        },
+    }
+}
+
+#[tauri::command]
+fn emulator_stop_recording(
+    project_dir: String,
+    emu: State<EmulatorCoreState>,
+) -> ReplayCommandResult {
+    let trimmed = project_dir.trim();
+    if trimmed.is_empty() {
+        return ReplayCommandResult {
+            ok: false,
+            message: "Nenhum projeto aberto para salvar o replay.".to_string(),
+            replay_path: String::new(),
+            frames_recorded: 0,
+            framebuffer_match: None,
+        };
+    }
+
+    let mut core = match emu.0.lock() {
+        Ok(c) => c,
+        Err(e) => {
+            return ReplayCommandResult {
+                ok: false,
+                message: e.to_string(),
+                replay_path: String::new(),
+                frames_recorded: 0,
+                framebuffer_match: None,
+            }
+        }
+    };
+
+    let replay = match core.stop_replay_recording() {
+        Ok(replay) => replay,
+        Err(error) => {
+            return ReplayCommandResult {
+                ok: false,
+                message: error,
+                replay_path: String::new(),
+                frames_recorded: 0,
+                framebuffer_match: None,
+            }
+        }
+    };
+
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+    let replay_path = Path::new(trimmed).join(format!("replay-{}.rds-replay", nonce));
+    let replay_bytes = match serde_json::to_vec_pretty(&replay) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return ReplayCommandResult {
+                ok: false,
+                message: format!("Falha ao serializar replay: {}", error),
+                replay_path: String::new(),
+                frames_recorded: 0,
+                framebuffer_match: None,
+            }
+        }
+    };
+
+    if let Err(error) = fs::write(&replay_path, replay_bytes) {
+        return ReplayCommandResult {
+            ok: false,
+            message: format!("Falha ao gravar replay '{}': {}", replay_path.display(), error),
+            replay_path: String::new(),
+            frames_recorded: 0,
+            framebuffer_match: None,
+        };
+    }
+
+    ReplayCommandResult {
+        ok: true,
+        message: "Replay salvo no diretorio do projeto.".to_string(),
+        replay_path: replay_path.to_string_lossy().to_string(),
+        frames_recorded: replay.frames.len(),
+        framebuffer_match: None,
+    }
+}
+
+#[tauri::command]
+fn emulator_play_replay(
+    app: AppHandle,
+    replay_path: String,
+    emu: State<EmulatorCoreState>,
+) -> ReplayCommandResult {
+    let replay = match fs::read(&replay_path) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return ReplayCommandResult {
+                ok: false,
+                message: format!("Falha ao ler replay '{}': {}", replay_path, error),
+                replay_path: String::new(),
+                frames_recorded: 0,
+                framebuffer_match: None,
+            }
+        }
+    };
+    let replay = match serde_json::from_slice::<ReplayCapture>(&replay) {
+        Ok(replay) => replay,
+        Err(error) => {
+            return ReplayCommandResult {
+                ok: false,
+                message: format!("Replay invalido '{}': {}", replay_path, error),
+                replay_path: String::new(),
+                frames_recorded: 0,
+                framebuffer_match: None,
+            }
+        }
+    };
+
+    let mut core = match emu.0.lock() {
+        Ok(c) => c,
+        Err(e) => {
+            return ReplayCommandResult {
+                ok: false,
+                message: e.to_string(),
+                replay_path: String::new(),
+                frames_recorded: 0,
+                framebuffer_match: None,
+            }
+        }
+    };
+
+    match core.play_replay(&replay) {
+        Ok(summary) => {
+            let _ = emit_emulator_frame_events(&app, &mut core);
+            ReplayCommandResult {
+                ok: true,
+                message: format!(
+                    "Replay reproduzido ({} frame(s)); framebuffer final {}.",
+                    summary.frames_played,
+                    if summary.framebuffer_match {
+                        "confere com a gravacao"
+                    } else {
+                        "divergiu da gravacao"
+                    }
+                ),
+                replay_path,
+                frames_recorded: summary.frames_played,
+                framebuffer_match: Some(summary.framebuffer_match),
+            }
+        }
+        Err(error) => ReplayCommandResult {
+            ok: false,
+            message: error,
+            replay_path: String::new(),
+            frames_recorded: 0,
+            framebuffer_match: None,
+        },
     }
 }
 
@@ -932,6 +1127,9 @@ pub fn run() {
             emulator_save_state,
             emulator_load_state,
             emulator_rewind_step,
+            emulator_start_recording,
+            emulator_stop_recording,
+            emulator_play_replay,
             emulator_read_memory,
             emulator_send_input,
             emulator_stop,

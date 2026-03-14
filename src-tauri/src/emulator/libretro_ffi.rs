@@ -12,7 +12,7 @@ const RETRO_MEMORY_SYSTEM_RAM: u32 = 2;
 const RETRO_MEMORY_VIDEO_RAM: u32 = 3;
 
 #[repr(u32)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum PixelFormat {
     Xrgb1555 = 0,
     Xrgb8888 = 1,
@@ -37,7 +37,7 @@ impl PixelFormat {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FrameSize {
     pub width: u32,
     pub height: u32,
@@ -493,6 +493,40 @@ pub struct EmulatorCore {
     runtime: Option<LoadedCore>,
     saved_state: Option<Vec<u8>>,
     rewind: RewindState,
+    replay: ReplayState,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ReplayCapture {
+    pub rom_path: String,
+    pub initial_state: Vec<u8>,
+    pub frames: Vec<JoypadState>,
+    pub final_framebuffer: Vec<u8>,
+    pub final_frame_size: FrameSize,
+    pub final_pixel_format: PixelFormat,
+}
+
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+pub struct ReplayPlaybackSummary {
+    pub frames_played: usize,
+    pub framebuffer_match: bool,
+}
+
+#[derive(Debug, Clone)]
+struct ReplayRecording {
+    initial_state: Vec<u8>,
+    frames: Vec<JoypadState>,
+}
+
+#[derive(Debug, Default)]
+struct ReplayState {
+    recording: Option<ReplayRecording>,
+}
+
+impl ReplayState {
+    fn reset(&mut self) {
+        self.recording = None;
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -536,6 +570,7 @@ impl EmulatorCore {
             runtime: None,
             saved_state: None,
             rewind: RewindState::default(),
+            replay: ReplayState::default(),
         }
     }
 
@@ -574,6 +609,7 @@ impl EmulatorCore {
 
         self.runtime = Some(runtime);
         self.configure_rewind();
+        self.replay.reset();
         Ok(())
     }
 
@@ -582,14 +618,18 @@ impl EmulatorCore {
             return Err("Nenhum core Libretro carregado. Carregue uma ROM primeiro.".into());
         }
 
-        {
+        let joypad = {
             let state = self.handle.lock().map_err(|e| e.to_string())?;
             if !state.running {
                 return Err("Emulador nao inicializado. Carregue uma ROM primeiro.".into());
             }
-        }
+            state.joypad.clone()
+        };
 
         self.capture_rewind_snapshot_if_due()?;
+        if let Some(recording) = self.replay.recording.as_mut() {
+            recording.frames.push(joypad);
+        }
 
         if let Some(runtime) = &self.runtime {
             unsafe {
@@ -635,6 +675,91 @@ impl EmulatorCore {
 
         self.saved_state = Some(buffer);
         Ok(size)
+    }
+
+    pub fn start_replay_recording(&mut self) -> Result<(), String> {
+        self.runtime
+            .as_ref()
+            .ok_or_else(|| "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string())?;
+        let initial_state = self.serialize_runtime_state()?;
+        self.replay.recording = Some(ReplayRecording {
+            initial_state,
+            frames: Vec::new(),
+        });
+        Ok(())
+    }
+
+    pub fn stop_replay_recording(&mut self) -> Result<ReplayCapture, String> {
+        let recording = self
+            .replay
+            .recording
+            .take()
+            .ok_or_else(|| "Nenhuma gravacao de replay esta ativa.".to_string())?;
+        let (final_framebuffer, final_frame_size, final_pixel_format) = self.get_framebuffer()?;
+        let state = self.handle.lock().map_err(|e| e.to_string())?;
+
+        Ok(ReplayCapture {
+            rom_path: state.rom_path.clone(),
+            initial_state: recording.initial_state,
+            frames: recording.frames,
+            final_framebuffer,
+            final_frame_size,
+            final_pixel_format,
+        })
+    }
+
+    pub fn play_replay(
+        &mut self,
+        replay: &ReplayCapture,
+    ) -> Result<ReplayPlaybackSummary, String> {
+        let runtime = self
+            .runtime
+            .as_ref()
+            .ok_or_else(|| "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string())?;
+        let current_rom = self.handle.lock().map_err(|e| e.to_string())?.rom_path.clone();
+
+        if current_rom != replay.rom_path {
+            return Err(format!(
+                "Replay foi gravado para '{}', mas a ROM atual e '{}'.",
+                replay.rom_path, current_rom
+            ));
+        }
+
+        let expected_size = unsafe { (runtime.api.serialize_size)() };
+        if replay.initial_state.len() != expected_size {
+            return Err(format!(
+                "Replay possui estado inicial com {} bytes, mas o core atual espera {} bytes.",
+                replay.initial_state.len(),
+                expected_size
+            ));
+        }
+
+        let restored = unsafe {
+            (runtime.api.unserialize)(
+                replay.initial_state.as_ptr().cast::<c_void>(),
+                replay.initial_state.len(),
+            )
+        };
+        if !restored {
+            return Err("Falha ao restaurar estado inicial do replay no core Libretro.".to_string());
+        }
+
+        let prior_recording = self.replay.recording.take();
+        for joypad in &replay.frames {
+            self.set_joypad(joypad.clone())?;
+            self.run_frame()?;
+        }
+        self.replay.recording = prior_recording;
+
+        let (framebuffer, frame_size, pixel_format) = self.get_framebuffer()?;
+        let framebuffer_match = framebuffer == replay.final_framebuffer
+            && frame_size == replay.final_frame_size
+            && pixel_format == replay.final_pixel_format;
+
+        Ok(ReplayPlaybackSummary {
+            frames_played: replay.frames.len(),
+            framebuffer_match,
+        })
     }
 
     pub fn load_state(&mut self) -> Result<(), String> {
@@ -755,6 +880,7 @@ impl EmulatorCore {
         state.rom_path.clear();
         self.saved_state = None;
         self.rewind.reset();
+        self.replay.reset();
         Ok(())
     }
 
@@ -1546,6 +1672,53 @@ pub extern "C" fn retro_run() {
             emulator.get_framebuffer().expect("read framebuffer after rewind");
 
         assert_eq!(framebuffer_after_two, framebuffer_after_rewind);
+
+        emulator.stop().expect("stop emulator");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn replay_recording_and_playback_restore_the_same_final_framebuffer() {
+        let _serial = test_serial_guard();
+        let dir = temp_dir("replay");
+        let core_path = compile_mock_core(&dir);
+        let rom_path = write_test_rom(&dir, "replay_test", "gen");
+
+        let mut emulator = EmulatorCore::new(Some(&core_path));
+        emulator.load_rom(&rom_path).expect("load rom into mock core");
+        emulator
+            .start_replay_recording()
+            .expect("start replay recording");
+
+        emulator
+            .set_joypad(JoypadState {
+                a: true,
+                ..JoypadState::default()
+            })
+            .expect("set joypad frame 1");
+        emulator.run_frame().expect("run frame 1");
+
+        emulator
+            .set_joypad(JoypadState {
+                right: true,
+                ..JoypadState::default()
+            })
+            .expect("set joypad frame 2");
+        emulator.run_frame().expect("run frame 2");
+
+        let replay = emulator
+            .stop_replay_recording()
+            .expect("stop replay recording");
+        let summary = emulator.play_replay(&replay).expect("play replay");
+        let (framebuffer, size, pixel_format) =
+            emulator.get_framebuffer().expect("read framebuffer after replay");
+
+        assert_eq!(replay.frames.len(), 2);
+        assert_eq!(summary.frames_played, 2);
+        assert!(summary.framebuffer_match);
+        assert_eq!(framebuffer, replay.final_framebuffer);
+        assert_eq!(size, replay.final_frame_size);
+        assert_eq!(pixel_format, replay.final_pixel_format);
 
         emulator.stop().expect("stop emulator");
         let _ = fs::remove_dir_all(dir);

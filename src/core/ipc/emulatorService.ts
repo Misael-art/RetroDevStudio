@@ -14,6 +14,14 @@ export interface EmulatorMemoryResult {
   total_size: number;
 }
 
+export interface ReplayCommandResult {
+  ok: boolean;
+  message: string;
+  replay_path: string;
+  frames_recorded: number;
+  framebuffer_match: boolean | null;
+}
+
 /** Payload do evento `emulator://frame` — pixels RGBA prontos para ImageData */
 export interface FramePayload {
   width: number;
@@ -68,6 +76,18 @@ export function emulatorLoadState(): Promise<EmulatorCommandResult> {
 
 export function emulatorRewindStep(): Promise<EmulatorCommandResult> {
   return invoke<EmulatorCommandResult>("emulator_rewind_step");
+}
+
+export function emulatorStartRecording(): Promise<ReplayCommandResult> {
+  return invoke<ReplayCommandResult>("emulator_start_recording");
+}
+
+export function emulatorStopRecording(projectDir: string): Promise<ReplayCommandResult> {
+  return invoke<ReplayCommandResult>("emulator_stop_recording", { projectDir });
+}
+
+export function emulatorPlayReplay(replayPath: string): Promise<ReplayCommandResult> {
+  return invoke<ReplayCommandResult>("emulator_play_replay", { replayPath });
 }
 
 export function emulatorReadMemory(

@@ -4,9 +4,12 @@ import { useEditorStore } from "../../core/store/editorStore";
 import {
   JOYPAD_DEFAULT,
   emulatorLoadState,
+  emulatorPlayReplay,
   emulatorRewindStep,
   emulatorSaveState,
   emulatorSendInput,
+  emulatorStartRecording,
+  emulatorStopRecording,
   emulatorStop,
   keyToJoypad,
   listenToAudioStream,
@@ -173,6 +176,10 @@ export default function ViewportPanel() {
   const [loadStateBusy, setLoadStateBusy] = useState(false);
   const [rewindBusy, setRewindBusy] = useState(false);
   const [stepBusy, setStepBusy] = useState(false);
+  const [recordBusy, setRecordBusy] = useState(false);
+  const [playReplayBusy, setPlayReplayBusy] = useState(false);
+  const [replayRecording, setReplayRecording] = useState(false);
+  const [lastReplayPath, setLastReplayPath] = useState<string | null>(null);
   const [audioMuted, setAudioMuted] = useState(false);
   const [assetHotReloadNotice, setAssetHotReloadNotice] = useState<string | null>(null);
   const [showPerformanceOverlay, setShowPerformanceOverlay] = useState(true);
@@ -466,6 +473,52 @@ export default function ViewportPanel() {
     logMessage("info", "Emulador retomado.");
   }, [emulPaused, logMessage, setEmulPaused]);
 
+  const handleStartRecording = useCallback(async () => {
+    if (recordBusy || replayRecording) {
+      return;
+    }
+
+    setRecordBusy(true);
+    try {
+      const result = await emulatorStartRecording();
+      if (!result.ok) {
+        logMessage("error", `[Replay] ${result.message}`);
+        return;
+      }
+      setReplayRecording(true);
+      logMessage("success", `[Replay] ${result.message}`);
+    } catch (error: unknown) {
+      logMessage("error", `[Replay] Falha ao iniciar gravacao: ${describeError(error)}`);
+    } finally {
+      setRecordBusy(false);
+    }
+  }, [logMessage, recordBusy, replayRecording]);
+
+  const handleStopRecording = useCallback(async () => {
+    if (!activeProjectDir || recordBusy || !replayRecording) {
+      return;
+    }
+
+    setRecordBusy(true);
+    try {
+      const result = await emulatorStopRecording(activeProjectDir);
+      if (!result.ok) {
+        logMessage("error", `[Replay] ${result.message}`);
+        return;
+      }
+      setReplayRecording(false);
+      setLastReplayPath(result.replay_path || null);
+      logMessage(
+        "success",
+        `[Replay] ${result.frames_recorded} frame(s) salvos em ${result.replay_path}`
+      );
+    } catch (error: unknown) {
+      logMessage("error", `[Replay] Falha ao finalizar gravacao: ${describeError(error)}`);
+    } finally {
+      setRecordBusy(false);
+    }
+  }, [activeProjectDir, logMessage, recordBusy, replayRecording]);
+
   const handleStepFrame = useCallback(async () => {
     if (!emulPaused || stepBusy) {
       return;
@@ -504,6 +557,29 @@ export default function ViewportPanel() {
       }
     }
   }, [emulPaused, logMessage, renderFrame, startFrameLoop, stepBusy]);
+
+  const handlePlayReplay = useCallback(async () => {
+    if (!lastReplayPath || playReplayBusy || replayRecording || !emulPaused) {
+      return;
+    }
+
+    setPlayReplayBusy(true);
+    try {
+      const result = await emulatorPlayReplay(lastReplayPath);
+      if (!result.ok) {
+        logMessage("error", `[Replay] ${result.message}`);
+        return;
+      }
+      logMessage(
+        result.framebuffer_match === false ? "warn" : "success",
+        `[Replay] ${result.message}`
+      );
+    } catch (error: unknown) {
+      logMessage("error", `[Replay] Falha ao reproduzir replay: ${describeError(error)}`);
+    } finally {
+      setPlayReplayBusy(false);
+    }
+  }, [emulPaused, lastReplayPath, logMessage, playReplayBusy, replayRecording]);
 
   useEffect(() => {
     if (activeViewportTab !== "game") {
@@ -1288,6 +1364,34 @@ export default function ViewportPanel() {
               </button>
               <button
                 type="button"
+                onClick={() => void handleStartRecording()}
+                disabled={recordBusy || replayRecording}
+                data-testid="viewport-replay-record"
+                className="rounded border border-[#94e2d5]/40 bg-[#94e2d5]/10 px-2 py-1 text-[10px] font-semibold text-[#94e2d5] transition-colors hover:bg-[#94e2d5]/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {recordBusy && !replayRecording ? "Record..." : "Record"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleStopRecording()}
+                disabled={recordBusy || !replayRecording || !activeProjectDir}
+                data-testid="viewport-replay-stop"
+                className="rounded border border-[#f38ba8]/40 bg-[#f38ba8]/10 px-2 py-1 text-[10px] font-semibold text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {recordBusy && replayRecording ? "Stop..." : "Stop"}
+              </button>
+              <button
+                type="button"
+                onClick={() => void handlePlayReplay()}
+                disabled={playReplayBusy || replayRecording || !lastReplayPath || !emulPaused}
+                data-testid="viewport-replay-play"
+                className="rounded border border-[#89dceb]/40 bg-[#89dceb]/10 px-2 py-1 text-[10px] font-semibold text-[#89dceb] transition-colors hover:bg-[#89dceb]/20 disabled:cursor-not-allowed disabled:opacity-40"
+                title="Reproduzir o ultimo replay salvo com o estado inicial gravado"
+              >
+                {playReplayBusy ? "Play..." : "Play Replay"}
+              </button>
+              <button
+                type="button"
                 onClick={() => setAudioMuted((current) => !current)}
                 data-testid="viewport-audio-mute"
                 className="rounded border border-[#cba6f7]/40 bg-[#cba6f7]/10 px-2 py-1 text-[10px] font-semibold text-[#cba6f7] transition-colors hover:bg-[#cba6f7]/20"
@@ -1302,6 +1406,12 @@ export default function ViewportPanel() {
               >
                 {gameStatus}
               </span>
+              {replayRecording && <span className="text-[#94e2d5]">REC ativo</span>}
+              {lastReplayPath && !replayRecording && (
+                <span className="max-w-64 truncate text-[#89dceb]" title={lastReplayPath}>
+                  Replay pronto
+                </span>
+              )}
               <span>Z=A | X=B | C=C | Enter=Start | Setas=D-Pad | R=Rewind (pausado)</span>
             </div>
           </div>
