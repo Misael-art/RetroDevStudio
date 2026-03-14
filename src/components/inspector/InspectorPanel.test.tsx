@@ -134,6 +134,28 @@ describe("InspectorPanel", () => {
     expect(container.textContent).toContain("Graph: 2 nodes, 1 edges");
   });
 
+  it("shows contextual knowledge tooltip for inspector sections", async () => {
+    const knowledgeButton = container.querySelector(
+      '[data-testid="inspector-knowledge-physics"]'
+    );
+
+    if (!(knowledgeButton instanceof HTMLButtonElement)) {
+      throw new Error("Physics knowledge button not found");
+    }
+
+    await act(async () => {
+      knowledgeButton.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flush();
+    });
+
+    expect(container.textContent).toContain(
+      "Controla gravidade, atrito, bounce e limites de velocidade da entidade."
+    );
+    expect(container.textContent).toContain(
+      "Gravity e Grav. Strength definem a aceleracao vertical aplicada por frame."
+    );
+  });
+
   it("persists physics.gravity edits through the canonical entity update path", async () => {
     const row = findRow(container, "Gravity");
     const valueTrigger = row.querySelector("span");

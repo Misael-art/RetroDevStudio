@@ -1,9 +1,30 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import Panel from "../common/Panel";
 import HardwareLimitsPanel from "./HardwareLimitsPanel";
 import { useEditorStore } from "../../core/store/editorStore";
 import type { BackgroundLayer, Entity } from "../../core/ipc/sceneService";
 import { persistActiveScene } from "../../core/scenePersistence";
+import { deserializeNodeGraph, serializeNodeGraph } from "../nodegraph/NodeGraphEditor";
+import knowledgeBase from "./knowledgeBase.json";
+
+type KnowledgeSectionId =
+  | "transform"
+  | "sprite"
+  | "collision"
+  | "physics"
+  | "audio"
+  | "input"
+  | "camera"
+  | "tilemap"
+  | "logic"
+  | "background_layer";
+
+type KnowledgeEntry = {
+  summary: string;
+  details: string[];
+};
+
+const INSPECTOR_KNOWLEDGE = knowledgeBase as Record<KnowledgeSectionId, KnowledgeEntry>;
 
 interface PropRowProps {
   label: string;
@@ -83,19 +104,72 @@ function PropRow({ label, value, type, onChange }: PropRowProps) {
   );
 }
 
-interface StaticRowProps {
-  label: string;
-  value: string;
-}
+function KnowledgeTooltipLabel({
+  sectionId,
+  title,
+}: {
+  sectionId: KnowledgeSectionId;
+  title: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const knowledge = INSPECTOR_KNOWLEDGE[sectionId];
 
-function StaticRow({ label, value }: StaticRowProps) {
   return (
-    <tr className="group border-b border-[#313244] last:border-0">
-      <td className="w-1/2 select-none px-3 py-1.5 text-xs text-[#7f849c]">{label}</td>
-      <td className="px-3 py-1.5 font-mono text-xs text-[#cdd6f4]">{value}</td>
-    </tr>
+    <div className="relative flex items-center gap-2">
+      <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#7f849c]">
+        {title}
+      </span>
+      <button
+        type="button"
+        data-testid={`inspector-knowledge-${sectionId}`}
+        className="flex h-4 w-4 items-center justify-center rounded-full border border-[#45475a] text-[9px] font-bold text-[#89b4fa] transition-colors hover:border-[#89b4fa] hover:text-[#b4befe]"
+        onMouseEnter={() => setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onClick={() => setOpen((current) => !current)}
+        aria-label={`Ajuda sobre ${title}`}
+      >
+        ?
+      </button>
+      {open && knowledge && (
+        <div className="absolute left-0 top-6 z-20 w-72 rounded border border-[#313244] bg-[#11111b] p-3 shadow-lg">
+          <p className="text-[10px] font-semibold leading-tight text-[#cdd6f4]">
+            {knowledge.summary}
+          </p>
+          <div className="mt-2 space-y-1">
+            {knowledge.details.map((detail) => (
+              <p key={detail} className="text-[10px] leading-tight text-[#7f849c]">
+                {detail}
+              </p>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
+
+function InspectorSection({
+  sectionId,
+  title,
+  children,
+}: {
+  sectionId: KnowledgeSectionId;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="border-t border-[#313244] px-3 py-3 first:border-t-0">
+      <div className="mb-2">
+        <KnowledgeTooltipLabel sectionId={sectionId} title={title} />
+      </div>
+      {children}
+    </div>
+  );
+}
+
+
 
 interface RecordEntry {
   id: number;
@@ -231,75 +305,115 @@ interface PropDef {
   type: "string" | "int" | "bool";
 }
 
-function entityProps(entity: Entity): PropDef[] {
-  const defs: PropDef[] = [
-    { key: "ID", path: ["entity_id"], type: "string" },
-    { key: "Prefab", path: ["prefab"], type: "string" },
-    { key: "Pos X", path: ["transform", "x"], type: "int" },
-    { key: "Pos Y", path: ["transform", "y"], type: "int" },
+type PropSection = {
+  id: KnowledgeSectionId;
+  title: string;
+  defs: PropDef[];
+};
+
+function entityPropSections(entity: Entity): PropSection[] {
+  const sections: PropSection[] = [
+    {
+      id: "transform",
+      title: "Transform",
+      defs: [
+        { key: "ID", path: ["entity_id"], type: "string" },
+        { key: "Prefab", path: ["prefab"], type: "string" },
+        { key: "Pos X", path: ["transform", "x"], type: "int" },
+        { key: "Pos Y", path: ["transform", "y"], type: "int" },
+      ],
+    },
   ];
 
   if (entity.components?.sprite) {
-    defs.push(
-      { key: "Asset", path: ["components", "sprite", "asset"], type: "string" },
-      { key: "Frame W", path: ["components", "sprite", "frame_width"], type: "int" },
-      { key: "Frame H", path: ["components", "sprite", "frame_height"], type: "int" },
-      { key: "Palette Slot", path: ["components", "sprite", "palette_slot"], type: "int" },
-      { key: "Priority", path: ["components", "sprite", "priority"], type: "string" }
-    );
+    sections.push({
+      id: "sprite",
+      title: "Sprite",
+      defs: [
+        { key: "Asset", path: ["components", "sprite", "asset"], type: "string" },
+        { key: "Frame W", path: ["components", "sprite", "frame_width"], type: "int" },
+        { key: "Frame H", path: ["components", "sprite", "frame_height"], type: "int" },
+        { key: "Palette Slot", path: ["components", "sprite", "palette_slot"], type: "int" },
+        { key: "Priority", path: ["components", "sprite", "priority"], type: "string" },
+      ],
+    });
   }
 
   if (entity.components?.collision) {
-    defs.push(
-      { key: "Col. Shape", path: ["components", "collision", "shape"], type: "string" },
-      { key: "Col. Width", path: ["components", "collision", "width"], type: "int" },
-      { key: "Col. Height", path: ["components", "collision", "height"], type: "int" },
-      { key: "Solid", path: ["components", "collision", "solid"], type: "bool" }
-    );
+    sections.push({
+      id: "collision",
+      title: "Collision",
+      defs: [
+        { key: "Col. Shape", path: ["components", "collision", "shape"], type: "string" },
+        { key: "Col. Width", path: ["components", "collision", "width"], type: "int" },
+        { key: "Col. Height", path: ["components", "collision", "height"], type: "int" },
+        { key: "Solid", path: ["components", "collision", "solid"], type: "bool" },
+      ],
+    });
   }
 
   if (entity.components?.physics) {
-    defs.push(
-      { key: "Gravity", path: ["components", "physics", "gravity"], type: "bool" },
-      {
-        key: "Grav. Strength",
-        path: ["components", "physics", "gravity_strength"],
-        type: "int",
-      },
-      { key: "Max Vel X", path: ["components", "physics", "max_velocity", "x"], type: "int" },
-      { key: "Max Vel Y", path: ["components", "physics", "max_velocity", "y"], type: "int" },
-      { key: "Friction", path: ["components", "physics", "friction"], type: "int" },
-      { key: "Bounce", path: ["components", "physics", "bounce"], type: "int" }
-    );
+    sections.push({
+      id: "physics",
+      title: "Physics",
+      defs: [
+        { key: "Gravity", path: ["components", "physics", "gravity"], type: "bool" },
+        {
+          key: "Grav. Strength",
+          path: ["components", "physics", "gravity_strength"],
+          type: "int",
+        },
+        { key: "Max Vel X", path: ["components", "physics", "max_velocity", "x"], type: "int" },
+        { key: "Max Vel Y", path: ["components", "physics", "max_velocity", "y"], type: "int" },
+        { key: "Friction", path: ["components", "physics", "friction"], type: "int" },
+        { key: "Bounce", path: ["components", "physics", "bounce"], type: "int" },
+      ],
+    });
   }
 
   if (entity.components?.audio) {
-    defs.push({ key: "BGM", path: ["components", "audio", "bgm"], type: "string" });
+    sections.push({
+      id: "audio",
+      title: "Audio",
+      defs: [{ key: "BGM", path: ["components", "audio", "bgm"], type: "string" }],
+    });
   }
 
   if (entity.components?.input) {
-    defs.push({ key: "Device", path: ["components", "input", "device"], type: "string" });
+    sections.push({
+      id: "input",
+      title: "Input",
+      defs: [{ key: "Device", path: ["components", "input", "device"], type: "string" }],
+    });
   }
 
   if (entity.components?.camera) {
-    defs.push(
-      { key: "Follow", path: ["components", "camera", "follow_entity"], type: "string" },
-      { key: "Offset X", path: ["components", "camera", "offset_x"], type: "int" },
-      { key: "Offset Y", path: ["components", "camera", "offset_y"], type: "int" }
-    );
+    sections.push({
+      id: "camera",
+      title: "Camera",
+      defs: [
+        { key: "Follow", path: ["components", "camera", "follow_entity"], type: "string" },
+        { key: "Offset X", path: ["components", "camera", "offset_x"], type: "int" },
+        { key: "Offset Y", path: ["components", "camera", "offset_y"], type: "int" },
+      ],
+    });
   }
 
   if (entity.components?.tilemap) {
-    defs.push(
-      { key: "TM Tileset", path: ["components", "tilemap", "tileset"], type: "string" },
-      { key: "TM Width", path: ["components", "tilemap", "map_width"], type: "int" },
-      { key: "TM Height", path: ["components", "tilemap", "map_height"], type: "int" },
-      { key: "Scroll X", path: ["components", "tilemap", "scroll_x"], type: "int" },
-      { key: "Scroll Y", path: ["components", "tilemap", "scroll_y"], type: "int" }
-    );
+    sections.push({
+      id: "tilemap",
+      title: "Tilemap",
+      defs: [
+        { key: "TM Tileset", path: ["components", "tilemap", "tileset"], type: "string" },
+        { key: "TM Width", path: ["components", "tilemap", "map_width"], type: "int" },
+        { key: "TM Height", path: ["components", "tilemap", "map_height"], type: "int" },
+        { key: "Scroll X", path: ["components", "tilemap", "scroll_x"], type: "int" },
+        { key: "Scroll Y", path: ["components", "tilemap", "scroll_y"], type: "int" },
+      ],
+    });
   }
 
-  return defs;
+  return sections;
 }
 
 const DEFAULT_PROP_VALUES: Record<string, string | number | boolean> = {
@@ -433,6 +547,7 @@ export default function InspectorPanel() {
     () => (entity?.components.logic ? graphSummary(entity.components.logic.graph) : null),
     [entity]
   );
+  const sections = useMemo(() => (entity ? entityPropSections(entity) : []), [entity]);
 
   async function saveScene() {
     const { activeProjectDir } = useEditorStore.getState();
@@ -488,6 +603,24 @@ export default function InspectorPanel() {
     scheduleAutoSave();
   }
 
+  function handleLogicParamChange(nodeId: string, paramKey: string, newValue: string | number | boolean) {
+    if (!selectedEntityId || !entity?.components.logic) return;
+
+    const graph = deserializeNodeGraph(entity.components.logic.graph);
+    const nodeIndex = graph.nodes.findIndex((n) => n.id === nodeId);
+    if (nodeIndex === -1) return;
+
+    // Params are strictly string | number in NodeGraph
+    const val = typeof newValue === "boolean" ? (newValue ? 1 : 0) : newValue;
+    graph.nodes[nodeIndex].params[paramKey] = val;
+
+    const newGraphJson = serializeNodeGraph(graph);
+
+    const patch = buildEntityPatch(entity, ["components", "logic", "graph"], newGraphJson);
+    updateEntity(selectedEntityId, patch);
+    scheduleAutoSave();
+  }
+
   function handleLayerChange(
     layerToUpdate: BackgroundLayer,
     field: keyof BackgroundLayer,
@@ -512,53 +645,117 @@ export default function InspectorPanel() {
           </p>
         ) : entity ? (
           <>
-            <table className="w-full text-xs">
-              <tbody>
-                {entityProps(entity).map((def) => (
-                  <PropRow
-                    key={def.key}
-                    label={def.key}
-                    value={getPropValue(entity, def)}
-                    type={def.type}
-                    onChange={(value) => handleChange(entity, def, value)}
+            {sections.map((section) => (
+              <InspectorSection
+                key={section.id}
+                sectionId={section.id}
+                title={section.title}
+              >
+                <table className="w-full text-xs">
+                  <tbody>
+                    {section.defs.map((def) => (
+                      <PropRow
+                        key={`${section.id}-${def.key}`}
+                        label={def.key}
+                        value={getPropValue(entity, def)}
+                        type={def.type}
+                        onChange={(value) => handleChange(entity, def, value)}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+                {section.id === "audio" && entity.components.audio ? (
+                  <RecordListEditor
+                    label="Audio SFX"
+                    entries={entity.components.audio.sfx}
+                    keyPlaceholder="action"
+                    valuePlaceholder="asset.wav"
+                    onChange={(value) =>
+                      handleRecordFieldChange(entity, ["components", "audio", "sfx"], value)
+                    }
                   />
-                ))}
-                {entityLogicSummary ? <StaticRow label="Logic" value={entityLogicSummary} /> : null}
-              </tbody>
-            </table>
-            {entity.components.audio ? (
-              <RecordListEditor
-                label="Audio SFX"
-                entries={entity.components.audio.sfx}
-                keyPlaceholder="action"
-                valuePlaceholder="asset.wav"
-                onChange={(value) =>
-                  handleRecordFieldChange(entity, ["components", "audio", "sfx"], value)
-                }
-              />
-            ) : null}
-            {entity.components.input ? (
-              <RecordListEditor
-                label="Input Mapping"
-                entries={entity.components.input.mapping}
-                keyPlaceholder="action"
-                valuePlaceholder="button"
-                onChange={(value) =>
-                  handleRecordFieldChange(entity, ["components", "input", "mapping"], value)
-                }
-              />
+                ) : null}
+                {section.id === "input" && entity.components.input ? (
+                  <RecordListEditor
+                    label="Input Mapping"
+                    entries={entity.components.input.mapping}
+                    keyPlaceholder="action"
+                    valuePlaceholder="button"
+                    onChange={(value) =>
+                      handleRecordFieldChange(entity, ["components", "input", "mapping"], value)
+                    }
+                  />
+                ) : null}
+              </InspectorSection>
+            ))}
+            {entity.components.logic ? (
+              <InspectorSection sectionId="logic" title="Logic">
+                <table className="w-full text-xs">
+                  <tbody>
+                    {entityLogicSummary ? (
+                      <tr className="group border-b border-[#313244] last:border-0">
+                        <td className="w-1/2 select-none px-3 py-1.5 text-xs text-[#7f849c]">Graph</td>
+                        <td className="px-3 py-1.5 text-xs">
+                          <span className="font-mono text-[#cdd6f4]">{entityLogicSummary}</span>
+                          <button
+                            type="button"
+                            className="ml-2 text-[10px] text-[#89b4fa] transition-colors hover:text-[#b4befe]"
+                            onClick={() => useEditorStore.getState().setActiveViewportTab("logic")}
+                            title="Editar grafo no NodeGraph"
+                          >
+                            Edit
+                          </button>
+                        </td>
+                      </tr>
+                    ) : null}
+                    {(() => {
+                      const graph = deserializeNodeGraph(entity.components.logic.graph);
+                      const nodesWithParams = graph.nodes.filter((n) => Object.keys(n.params).length > 0);
+
+                      if (nodesWithParams.length === 0) {
+                        return null;
+                      }
+
+                      return nodesWithParams.map((node) => (
+                        <tr key={node.id} className="group border-b border-[#313244] last:border-0 relative">
+                          <td colSpan={2} className="p-0">
+                            <table className="w-full text-xs bg-[#11111b]/30">
+                              <tbody>
+                                <tr className="border-b border-[#313244]/50">
+                                  <td colSpan={2} className="flex items-center gap-2 bg-[#1e1e2e]/50 px-3 py-1 text-[10px] font-bold uppercase text-[#cba6f7]">
+                                    <span>{node.label}</span>
+                                    <span className="font-mono text-[9px] normal-case text-[#45475a]">{node.id}</span>
+                                  </td>
+                                </tr>
+                                {Object.entries(node.params as Record<string, string | number>).map(([pKey, pVal]) => (
+                                  <PropRow
+                                    key={pKey}
+                                    label={pKey}
+                                    value={pVal}
+                                    type={typeof pVal === "number" ? "int" : "string"}
+                                    onChange={(newVal) => handleLogicParamChange(node.id, pKey, newVal)}
+                                  />
+                                ))}
+                              </tbody>
+                            </table>
+                          </td>
+                        </tr>
+                      ));
+                    })()}
+                  </tbody>
+                </table>
+              </InspectorSection>
             ) : null}
             <div className="px-3 py-2">
               <button
                 onClick={() => void saveScene()}
                 disabled={saveStatus === "saving"}
-                className={`w-full rounded py-1 text-xs font-semibold transition-colors ${
-                  saveStatus === "saving"
-                    ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
-                    : saveStatus === "error"
-                      ? "bg-[#f38ba8] text-[#1e1e2e] hover:bg-[#eba0ac]"
+                className={`w-full rounded py-1 text-xs font-semibold transition-colors ${saveStatus === "saving"
+                  ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
+                  : saveStatus === "error"
+                    ? "bg-[#f38ba8] text-[#1e1e2e] hover:bg-[#eba0ac]"
                     : "bg-[#313244] text-[#cba6f7] hover:bg-[#45475a]"
-                }`}
+                  }`}
               >
                 {saveStatus === "saving"
                   ? "Salvando..."
@@ -570,39 +767,40 @@ export default function InspectorPanel() {
           </>
         ) : layer ? (
           <>
-            <table className="w-full text-xs">
-              <tbody>
-                <tr className="border-b border-[#313244]">
-                  <td className="w-1/2 select-none px-3 py-1.5 text-xs text-[#7f849c]">ID</td>
-                  <td className="px-3 py-1.5 font-mono text-xs text-[#cdd6f4]">
-                    {layer.layer_id}
-                  </td>
-                </tr>
-                <PropRow
-                  label="Depth"
-                  value={layer.depth}
-                  type="int"
-                  onChange={(value) => handleLayerChange(layer, "depth", value as number)}
-                />
-                <PropRow
-                  label="Tileset"
-                  value={layer.tileset}
-                  type="string"
-                  onChange={(value) => handleLayerChange(layer, "tileset", value as string)}
-                />
-              </tbody>
-            </table>
+            <InspectorSection sectionId="background_layer" title="Background Layer">
+              <table className="w-full text-xs">
+                <tbody>
+                  <tr className="border-b border-[#313244]">
+                    <td className="w-1/2 select-none px-3 py-1.5 text-xs text-[#7f849c]">ID</td>
+                    <td className="px-3 py-1.5 font-mono text-xs text-[#cdd6f4]">
+                      {layer.layer_id}
+                    </td>
+                  </tr>
+                  <PropRow
+                    label="Depth"
+                    value={layer.depth}
+                    type="int"
+                    onChange={(value) => handleLayerChange(layer, "depth", value as number)}
+                  />
+                  <PropRow
+                    label="Tileset"
+                    value={layer.tileset}
+                    type="string"
+                    onChange={(value) => handleLayerChange(layer, "tileset", value as string)}
+                  />
+                </tbody>
+              </table>
+            </InspectorSection>
             <div className="px-3 py-2">
               <button
                 onClick={() => void saveScene()}
                 disabled={saveStatus === "saving"}
-                className={`w-full rounded py-1 text-xs font-semibold transition-colors ${
-                  saveStatus === "saving"
-                    ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
-                    : saveStatus === "error"
-                      ? "bg-[#f38ba8] text-[#1e1e2e] hover:bg-[#eba0ac]"
+                className={`w-full rounded py-1 text-xs font-semibold transition-colors ${saveStatus === "saving"
+                  ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
+                  : saveStatus === "error"
+                    ? "bg-[#f38ba8] text-[#1e1e2e] hover:bg-[#eba0ac]"
                     : "bg-[#313244] text-[#cba6f7] hover:bg-[#45475a]"
-                }`}
+                  }`}
               >
                 {saveStatus === "saving"
                   ? "Salvando..."
