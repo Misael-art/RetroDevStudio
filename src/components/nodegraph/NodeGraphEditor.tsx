@@ -393,6 +393,76 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
   },
 };
 
+export const NODE_DISPLAY_NAMES: Record<NodeType, string> = {
+  event_start: "Ao Iniciar",
+  sprite_move: "Mover Sprite",
+  sprite_anim: "Animar Sprite",
+  condition_overlap: "Colisao (Overlap)",
+  effect_parallax: "Parallax",
+  effect_raster: "Efeito Raster",
+  logic_and: "E (And)",
+  action_sound: "Tocar Som",
+  scroll_tilemap: "Rolar Cenario",
+  move_camera: "Mover Camera",
+  var_set: "Definir Variavel",
+  var_get: "Ler Variavel",
+  logic_math: "Conta Matematica",
+  condition_compare: "Comparar",
+  fsm_state: "Estado (FSM)",
+  fsm_transition: "Transicao (FSM)",
+  flow_if: "Se (If)",
+  flow_while: "Enquanto (While)",
+  flow_for: "Repetir (For)",
+  timeline_sequence: "Sequencia (Timeline)",
+  event_vblank: "Evento VBlank",
+  event_hblank: "Evento HBlank",
+  event_dma_done: "Evento DMA",
+};
+
+const NODE_PARAM_DISPLAY_NAMES: Record<string, string> = {
+  a: "A",
+  anim: "Animacao",
+  b: "B",
+  condition: "Condicao",
+  count: "Contagem",
+  dx: "Delta X",
+  dy: "Delta Y",
+  layer: "Camada",
+  offset_x: "Offset X",
+  operator: "Operador",
+  scanline: "Scanline",
+  sfx: "Som",
+  speed_x: "Velocidade X",
+  speed_y: "Velocidade Y",
+  state_name: "Estado",
+  target: "Alvo",
+  target_state: "Proximo Estado",
+  timeline_name: "Timeline",
+  value: "Valor",
+  var_name: "Variavel",
+  x: "X",
+  y: "Y",
+};
+
+const NODE_PALETTE_GROUPS: Array<{ label: string; types: NodeType[] }> = [
+  { label: "Eventos", types: ["event_start", "event_vblank", "event_hblank", "event_dma_done"] },
+  { label: "Movimento", types: ["sprite_move", "sprite_anim", "scroll_tilemap", "move_camera"] },
+  { label: "Condicoes", types: ["condition_overlap", "condition_compare", "logic_and"] },
+  { label: "Som", types: ["action_sound"] },
+  { label: "Variaveis", types: ["var_set", "var_get", "logic_math"] },
+  { label: "Fluxo", types: ["flow_if", "flow_while", "flow_for"] },
+  { label: "Estados", types: ["fsm_state", "fsm_transition", "timeline_sequence"] },
+  { label: "Efeitos", types: ["effect_parallax", "effect_raster"] },
+];
+
+export function getNodeDisplayName(type: NodeType): string {
+  return NODE_DISPLAY_NAMES[type] ?? type;
+}
+
+function getNodeParamDisplayName(key: string): string {
+  return NODE_PARAM_DISPLAY_NAMES[key] ?? key;
+}
+
 const NODE_COLORS: Record<NodeType, string> = {
   event_start:       "border-[#a6e3a1] bg-[#a6e3a1]/10",
   sprite_move:       "border-[#89b4fa] bg-[#89b4fa]/10",
@@ -531,7 +601,7 @@ function NodeCard({ node, selected, onMouseDown, onPortMouseDown, onPortMouseUp 
     >
       {/* Header */}
       <div className="px-2 py-1 text-[11px] font-semibold text-[#cdd6f4] border-b border-white/10 cursor-grab">
-        {node.label}
+        {getNodeDisplayName(node.type)}
       </div>
 
       {/* Ports */}
@@ -574,7 +644,7 @@ function NodeCard({ node, selected, onMouseDown, onPortMouseDown, onPortMouseUp 
         <div className="px-2 pb-1.5 flex flex-col gap-0.5 border-t border-white/5">
           {Object.entries(node.params).map(([k, v]) => (
             <div key={k} className="flex justify-between text-[10px]">
-              <span className="text-[#45475a]">{k}</span>
+              <span className="text-[#45475a]">{getNodeParamDisplayName(k)}</span>
               <span className="text-[#cdd6f4] font-mono">{String(v)}</span>
             </div>
           ))}
@@ -585,17 +655,6 @@ function NodeCard({ node, selected, onMouseDown, onPortMouseDown, onPortMouseUp 
 }
 
 // ── Main NodeGraph Editor ─────────────────────────────────────────────────────
-
-const PALETTE_TYPES: NodeType[] = [
-  "event_start", "sprite_move", "sprite_anim",
-  "var_set", "var_get", "logic_math", "condition_compare",
-  "fsm_state", "fsm_transition",
-  "flow_if", "flow_while", "flow_for",
-  "timeline_sequence",
-  "event_vblank", "event_hblank", "event_dma_done",
-  "condition_overlap", "logic_and", "action_sound", 
-  "scroll_tilemap", "move_camera", "effect_parallax", "effect_raster",
-];
 
 export default function NodeGraphEditor() {
   const activeProjectDir = useEditorStore((state) => state.activeProjectDir);
@@ -734,7 +793,7 @@ export default function NodeGraphEditor() {
   const addNode = useCallback((type: NodeType) => {
     const node = makeNode(type, 200, 200);
     setGraph((g) => ({ ...g, nodes: [...g.nodes, node] }));
-    logMessage("info", `Nó adicionado: ${NODE_DEFS[type].label}`);
+    logMessage("info", `No adicionado: ${getNodeDisplayName(type)}`);
   }, [logMessage]);
 
   // ── Delete selected node ───────────────────────────────────────────────────
@@ -769,15 +828,22 @@ export default function NodeGraphEditor() {
       {/* ── Palette sidebar ── */}
       <div className="w-36 shrink-0 bg-[#181825] border-r border-[#313244] flex flex-col gap-1 p-2 overflow-y-auto">
         <p className="text-[10px] text-[#45475a] px-1 mb-1 select-none">NÓDOS</p>
-        {PALETTE_TYPES.map((type) => (
-          <button
-            key={type}
-            className="text-left text-[11px] px-2 py-1 rounded text-[#a6adc8] hover:bg-[#313244] hover:text-[#cdd6f4] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
-            onMouseDown={() => addNode(type)}
-            disabled={!selectedEntity}
-          >
-            {NODE_DEFS[type].label}
-          </button>
+        {NODE_PALETTE_GROUPS.map((group) => (
+          <div key={group.label} className="flex flex-col gap-1">
+            <p className="px-1 pt-1 text-[10px] uppercase tracking-wide text-[#6c7086] select-none">
+              {group.label}
+            </p>
+            {group.types.map((type) => (
+              <button
+                key={type}
+                className="text-left text-[11px] px-2 py-1 rounded text-[#a6adc8] hover:bg-[#313244] hover:text-[#cdd6f4] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
+                onMouseDown={() => addNode(type)}
+                disabled={!selectedEntity}
+              >
+                {getNodeDisplayName(type)}
+              </button>
+            ))}
+          </div>
         ))}
         <div className="mt-auto border-t border-[#313244] pt-2">
           <p className="text-[10px] text-[#45475a] px-1 select-none">

@@ -9,6 +9,7 @@ import { compileGraphToC, parseCToNodes } from "./nodeCompiler";
 import {
   EMPTY_GRAPH as SERIALIZED_EMPTY_GRAPH,
   deserializeNodeGraph,
+  getNodeDisplayName,
   serializeNodeGraph,
   type NodeGraph,
 } from "../../components/nodegraph/NodeGraphEditor";
@@ -185,7 +186,24 @@ describe("NodeGraph serialization", () => {
 
     const serialized = serializeNodeGraph(graph);
 
+    expect(serialized).toContain('"type":"event_start"');
+    expect(serialized).toContain('"type":"sprite_move"');
     expect(deserializeNodeGraph(serialized)).toEqual(graph);
+  });
+
+  it("keeps display names separate from serialized technical ids", () => {
+    expect(getNodeDisplayName("event_start")).toBe("Ao Iniciar");
+    expect(getNodeDisplayName("sprite_move")).toBe("Mover Sprite");
+
+    const serialized = serializeNodeGraph({
+      nodes: [node("n1", "event_start"), node("n2", "sprite_move", { target: "player", dx: 2, dy: 0 })],
+      edges: [edge("e1", "n1", "n2")],
+    });
+
+    expect(serialized).toContain('"type":"event_start"');
+    expect(serialized).toContain('"type":"sprite_move"');
+    expect(serialized).not.toContain("Ao Iniciar");
+    expect(serialized).not.toContain("Mover Sprite");
   });
 
   it("falls back to empty graph for invalid payloads", () => {
