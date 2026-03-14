@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use super::components::Components;
 
-pub const CURRENT_SCHEMA_VERSION: &str = "1.2.0";
+pub const CURRENT_SCHEMA_VERSION: &str = "1.3.0";
 
 fn default_schema_version() -> String {
     CURRENT_SCHEMA_VERSION.to_string()
@@ -138,6 +138,15 @@ pub struct Resolution {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TemplateMetadata {
+    pub template_id: String,
+    pub template_version: String,
+    pub source_kind: String,
+    pub source_path: String,
+    pub imported_at_ms: u128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Project {
     pub rds_version: String,
     #[serde(default = "default_schema_version")]
@@ -150,6 +159,8 @@ pub struct Project {
     pub palette_mode: String,
     pub entry_scene: String,
     pub build: Option<BuildConfig>,
+    #[serde(default)]
+    pub template_metadata: Option<TemplateMetadata>,
 }
 
 fn default_palette_mode() -> String {

@@ -36,6 +36,7 @@ use core::project_mgr::{
     load_scene,
     resolve_prefabs,
     save_scene,
+    stamp_project_template_metadata,
     seed_project_template,
     seed_onboarding_template,
     set_entry_scene,
@@ -1193,6 +1194,8 @@ fn create_project_from_template_at_base_dir(
         .map_err(|error| error.to_string())?;
     seed_project_template(&project_dir, template_id, target, donor_path)
         .map_err(|error| error.to_string())?;
+    stamp_project_template_metadata(&project_dir, template_id, donor_path)
+        .map_err(|error| error.to_string())?;
 
     Ok(OpenProjectResult {
         selected: true,
@@ -1429,14 +1432,23 @@ mod tests {
         fs::create_dir_all(dir.join("res").join("images")).expect("create donor image dir");
         fs::create_dir_all(dir.join("res").join("sound")).expect("create donor sound dir");
 
-        fs::write(dir.join("res").join("images").join("player.png"), b"fake-player-png")
-            .expect("write player asset");
-        fs::write(dir.join("res").join("images").join("level.png"), b"fake-level-png")
-            .expect("write level asset");
+        image::RgbaImage::from_pixel(48, 72, image::Rgba([255, 196, 0, 255]))
+            .save(dir.join("res").join("images").join("player.png"))
+            .expect("write player png");
+        image::RgbaImage::from_pixel(64, 64, image::Rgba([48, 145, 255, 255]))
+            .save(dir.join("res").join("images").join("level.png"))
+            .expect("write level png");
         if with_jump {
-            fs::write(dir.join("res").join("sound").join("jump.wav"), b"fake-jump-wav")
+            fs::write(dir.join("res").join("sound").join("jump.wav"), minimal_wav_bytes())
                 .expect("write jump asset");
         }
+    }
+
+    fn minimal_wav_bytes() -> Vec<u8> {
+        vec![
+            82, 73, 70, 70, 36, 0, 0, 0, 87, 65, 86, 69, 102, 109, 116, 32, 16, 0, 0, 0, 1, 0,
+            1, 0, 68, 172, 0, 0, 68, 172, 0, 0, 1, 0, 8, 0, 100, 97, 116, 97, 0, 0, 0, 0,
+        ]
     }
 
     fn compile_mock_core(dir: &Path) -> PathBuf {
@@ -2244,6 +2256,21 @@ pub extern "C" fn retro_run() {
             .expect("load platformer scene");
 
         assert_eq!(platformer_scene.entities.len(), 3);
+        assert_eq!(platformer_project.schema_version, ugdm::entities::CURRENT_SCHEMA_VERSION);
+        assert_eq!(
+            platformer_project
+                .template_metadata
+                .as_ref()
+                .map(|metadata| metadata.template_id.as_str()),
+            Some("platformer_seed")
+        );
+        assert_eq!(
+            platformer_project
+                .template_metadata
+                .as_ref()
+                .map(|metadata| metadata.source_kind.as_str()),
+            Some("external_sgdk")
+        );
         assert!(platformer_project_dir
             .join("assets")
             .join("sprites")
@@ -2256,6 +2283,54 @@ pub extern "C" fn retro_run() {
             .is_file());
 
         let _ = fs::remove_dir_all(base_dir);
+        let _ = fs::remove_dir_all(donor_dir);
+    }
+
+    #[test]
+    fn platformer_template_build_generates_megadrive_workspace_without_donor_artifacts() {
+        let project_base_dir = temp_dir("platformer-build");
+        let donor_dir = temp_dir("platformer-build-donor");
+        write_platformer_donor_fixture(&donor_dir, true);
+
+        let create_result = create_project_from_template(
+            "Platformer Build".to_string(),
+            "megadrive".to_string(),
+            project_base_dir.to_string_lossy().to_string(),
+            "platformer_seed".to_string(),
+            Some(donor_dir.to_string_lossy().to_string()),
+        )
+        .expect("create platformer project");
+        let project_dir = PathBuf::from(&create_result.path);
+
+        let toolchain_root = temp_dir("fake-sgdk-platformer");
+        let bin_dir = toolchain_root.join("bin");
+        fs::create_dir_all(&bin_dir).expect("create fake sgdk bin");
+        let make_program = fake_make_script(&bin_dir);
+        let environment = BuildEnvironment {
+            sgdk_root: Some(toolchain_root),
+            sgdk_make_program: Some(make_program),
+            ..BuildEnvironment::default()
+        };
+
+        let build_result = run_build_with_environment(&project_dir, &environment, |_| {});
+        assert!(build_result.ok, "build failed: {:?}", build_result.log);
+        assert!(project_dir
+            .join("build")
+            .join("megadrive")
+            .join("res")
+            .join("assets")
+            .join("sprites")
+            .join("platformer_player.bmp")
+            .is_file());
+        assert!(!project_dir
+            .join("build")
+            .join("megadrive")
+            .join("res")
+            .join("sound")
+            .join("sonic2Emerald.vgm")
+            .exists());
+
+        let _ = fs::remove_dir_all(project_base_dir);
         let _ = fs::remove_dir_all(donor_dir);
     }
 

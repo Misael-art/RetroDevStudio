@@ -2216,6 +2216,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            template_metadata: None,
         };
         let scene = Scene {
             scene_id: "main".to_string(),
@@ -2298,6 +2299,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            template_metadata: None,
         };
         let scene = Scene {
             scene_id: "main".to_string(),
@@ -2361,6 +2363,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            template_metadata: None,
         };
         let scene = Scene {
             scene_id: "main".to_string(),
@@ -2449,6 +2452,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            template_metadata: None,
         };
         let scene = Scene {
             scene_id: "main".to_string(),
@@ -2515,6 +2519,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            template_metadata: None,
         };
         let mut player_mapping = HashMap::new();
         player_mapping.insert("move_left".to_string(), "DPAD_LEFT".to_string());
@@ -2597,6 +2602,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            template_metadata: None,
         };
         let scene = Scene {
             scene_id: "main".to_string(),
@@ -2681,6 +2687,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            template_metadata: None,
         };
         let mut player_sfx = HashMap::new();
         player_sfx.insert("jump".to_string(), "assets/audio/jump.wav".to_string());
@@ -2771,6 +2778,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            template_metadata: None,
         };
         let scene = Scene {
             scene_id: "main".to_string(),
@@ -2868,6 +2876,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            template_metadata: None,
         };
         let logic_graph = json!({
             "version": 1,
@@ -2968,6 +2977,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            template_metadata: None,
         };
         let mut animations = HashMap::new();
         animations.insert(
@@ -3097,6 +3107,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            template_metadata: None,
         };
         let logic_graph = json!({
             "version": 1,
@@ -3171,6 +3182,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            template_metadata: None,
         };
         let logic_graph = json!({
             "version": 1,
@@ -3269,6 +3281,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            template_metadata: None,
         };
         let logic_graph = json!({
             "version": 1,
@@ -3483,6 +3496,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            template_metadata: None,
         };
         let logic_graph = json!({
             "version": 1,
@@ -3645,6 +3659,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            template_metadata: None,
         };
         let operators = [
             ("==", CompareOp::Eq),
@@ -3743,6 +3758,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            template_metadata: None,
         };
 
         let logic_graph = json!({
@@ -3941,6 +3957,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            template_metadata: None,
         };
         let logic_graph = json!({
             "version": 1,
@@ -4029,6 +4046,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            template_metadata: None,
         };
         let logic_graph = json!({
             "version": 1,
@@ -4100,6 +4118,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            template_metadata: None,
         };
         let logic_graph = json!({
             "version": 1,
@@ -4181,6 +4200,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            template_metadata: None,
         };
         let logic_graph = json!({
             "version": 1,
@@ -4242,3 +4262,4 @@ mod tests {
         assert!(events.iter().any(|(event, ops)| matches!(event, HardwareEventKind::HBlank) && matches!(ops[0], LogicOp::PlaySound { .. })));
     }
 }
+

@@ -25,6 +25,7 @@ use crate::ugdm::entities::{
     Project,
     Resolution,
     Scene,
+    TemplateMetadata,
     CURRENT_SCHEMA_VERSION,
 };
 #[cfg(test)]
@@ -164,6 +165,7 @@ pub fn canonical_project(project_name: &str, target: &str) -> Result<Project, Lo
         palette_mode: spec.palette_mode.to_string(),
         entry_scene: DEFAULT_ENTRY_SCENE.to_string(),
         build: Some(default_build_config()),
+        template_metadata: None,
     })
 }
 
@@ -451,8 +453,8 @@ fn platformer_seed_scene(has_jump_sound: bool) -> Scene {
             components: Components {
                 sprite: Some(SpriteComponent {
                     asset: PLATFORMER_PLAYER_ASSET.to_string(),
-                    frame_width: 48,
-                    frame_height: 72,
+                    frame_width: 32,
+                    frame_height: 32,
                     pivot: None,
                     palette_slot: 0,
                     animations: HashMap::new(),
@@ -677,6 +679,43 @@ pub fn append_patch_audit_entry(
     Ok(project)
 }
 
+pub fn stamp_project_template_metadata(
+    project_dir: &Path,
+    template_id: &str,
+    donor_path: Option<&Path>,
+) -> Result<Project, LoadError> {
+    let registry = template_registry()?;
+    let entry = registry
+        .templates
+        .into_iter()
+        .find(|entry| entry.id == template_id)
+        .ok_or_else(|| {
+            LoadError(format!(
+                "Template '{}' nao encontrado em data/template_registry.json.",
+                template_id
+            ))
+        })?;
+    let mut project = load_project(project_dir)?;
+    let imported_at_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| LoadError(format!("Relogio do sistema invalido: {}", error)))?
+        .as_millis();
+    let source_path = donor_path
+        .map(|path| path.to_string_lossy().to_string())
+        .or(entry.default_donor_path.clone())
+        .unwrap_or_else(|| "builtin".to_string());
+
+    project.template_metadata = Some(TemplateMetadata {
+        template_id: entry.id,
+        template_version: registry.version,
+        source_kind: entry.source_kind,
+        source_path,
+        imported_at_ms,
+    });
+    save_project(project_dir, &project)?;
+    Ok(project)
+}
+
 /// Le e desserializa o arquivo `project.rds` de um diretorio de projeto.
 pub fn load_project(project_dir: &Path) -> Result<Project, LoadError> {
     let rds_path = project_dir.join("project.rds");
@@ -779,15 +818,7 @@ pub fn migrate_scene(mut scene: Scene) -> Scene {
         normalized_scene_schema_version(&scene),
         CURRENT_SCHEMA_VERSION,
     );
-    if scene
-        .schema_version
-        .as_deref()
-        .map(str::trim)
-        .unwrap_or_default()
-        .is_empty()
-    {
-        scene.schema_version = Some(schema_version.clone());
-    }
+    scene.schema_version = Some(schema_version.clone());
     if let Some(warning) = schema_warning_message("scene", &schema_version) {
         eprintln!("{warning}");
     }
@@ -939,6 +970,7 @@ fn migrate_project_value(mut value: serde_json::Value) -> Result<serde_json::Val
         value = match version.as_str() {
             "1.0.0" => migrate_project_1_0_0_to_1_1_0(value)?,
             "1.1.0" => migrate_project_1_1_0_to_1_2_0(value)?,
+            "1.2.0" => migrate_project_1_2_0_to_1_3_0(value)?,
             _ => {
                 if let Some(warning) = schema_warning_message("project.rds", &version) {
                     eprintln!("{warning}");
@@ -971,6 +1003,7 @@ fn migrate_scene_value(mut value: serde_json::Value) -> Result<serde_json::Value
         value = match version.as_str() {
             "1.0.0" => migrate_scene_1_0_0_to_1_1_0(value)?,
             "1.1.0" => migrate_scene_1_1_0_to_1_2_0(value)?,
+            "1.2.0" => migrate_scene_1_2_0_to_1_3_0(value)?,
             _ => {
                 if let Some(warning) = schema_warning_message("scene", &version) {
                     eprintln!("{warning}");
@@ -1021,6 +1054,22 @@ fn migrate_project_1_1_0_to_1_2_0(
     Ok(value)
 }
 
+fn migrate_project_1_2_0_to_1_3_0(
+    mut value: serde_json::Value,
+) -> Result<serde_json::Value, LoadError> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| LoadError("project.rds invalido: raiz JSON deve ser um objeto.".into()))?;
+    object.insert(
+        "schema_version".to_string(),
+        serde_json::Value::String("1.3.0".to_string()),
+    );
+    object
+        .entry("template_metadata".to_string())
+        .or_insert(serde_json::Value::Null);
+    Ok(value)
+}
+
 fn migrate_scene_1_0_0_to_1_1_0(
     mut value: serde_json::Value,
 ) -> Result<serde_json::Value, LoadError> {
@@ -1043,6 +1092,19 @@ fn migrate_scene_1_1_0_to_1_2_0(
     object.insert(
         "schema_version".to_string(),
         serde_json::Value::String("1.2.0".to_string()),
+    );
+    Ok(value)
+}
+
+fn migrate_scene_1_2_0_to_1_3_0(
+    mut value: serde_json::Value,
+) -> Result<serde_json::Value, LoadError> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| LoadError("scene invalida: raiz JSON deve ser um objeto.".into()))?;
+    object.insert(
+        "schema_version".to_string(),
+        serde_json::Value::String("1.3.0".to_string()),
     );
     Ok(value)
 }
@@ -1752,12 +1814,14 @@ mod tests {
         fs::create_dir_all(dir.join("inc")).expect("create donor inc dir");
         fs::create_dir_all(dir.join("src").join("boot")).expect("create donor boot dir");
 
-        fs::write(dir.join("res").join("images").join("player.png"), b"fake-player-png")
-            .expect("write player asset");
-        fs::write(dir.join("res").join("images").join("level.png"), b"fake-level-png")
-            .expect("write level asset");
+        image::RgbaImage::from_pixel(48, 72, image::Rgba([255, 196, 0, 255]))
+            .save(dir.join("res").join("images").join("player.png"))
+            .expect("write player png");
+        image::RgbaImage::from_pixel(64, 64, image::Rgba([48, 145, 255, 255]))
+            .save(dir.join("res").join("images").join("level.png"))
+            .expect("write level png");
         if with_jump {
-            fs::write(dir.join("res").join("sound").join("jump.wav"), b"fake-jump-wav")
+            fs::write(dir.join("res").join("sound").join("jump.wav"), minimal_wav_bytes())
                 .expect("write jump asset");
         }
         fs::write(
@@ -1774,6 +1838,13 @@ mod tests {
             .expect("write player.h");
         fs::write(dir.join("src").join("boot").join("sega.s"), b"boot")
             .expect("write boot source");
+    }
+
+    fn minimal_wav_bytes() -> Vec<u8> {
+        vec![
+            82, 73, 70, 70, 36, 0, 0, 0, 87, 65, 86, 69, 102, 109, 116, 32, 16, 0, 0, 0, 1, 0,
+            1, 0, 68, 172, 0, 0, 68, 172, 0, 0, 1, 0, 8, 0, 100, 97, 116, 97, 0, 0, 0, 0,
+        ]
     }
 
     #[test]
@@ -1960,6 +2031,52 @@ mod tests {
     }
 
     #[test]
+    fn migration_chain_upgrades_project_schema_1_2_0_to_1_3_0() {
+        let project_dir = temp_dir("migration-1-2-0-to-1-3-0");
+        fs::create_dir_all(project_dir.join("scenes")).expect("create scenes dir");
+
+        let project_v1_2 = serde_json::json!({
+            "rds_version": UGDM_VERSION,
+            "schema_version": "1.2.0",
+            "name": "Template Metadata Upgrade",
+            "target": "megadrive",
+            "resolution": {
+                "width": 320,
+                "height": 224
+            },
+            "fps": 60,
+            "palette_mode": "4x16",
+            "entry_scene": "scenes/main.json",
+            "build": {
+                "output_dir": "build/",
+                "optimization": "size",
+                "artifact_prefix": "game",
+                "patch_audit_log": []
+            }
+        });
+        let scene_v1_2 = serde_json::json!({
+            "scene_id": DEFAULT_SCENE_ID,
+            "schema_version": "1.2.0",
+            "display_name": "Main Scene",
+            "background_layers": [],
+            "entities": [],
+            "palettes": []
+        });
+
+        fs::write(project_dir.join("project.rds"), project_v1_2.to_string())
+            .expect("write project");
+        fs::write(project_dir.join("scenes").join("main.json"), scene_v1_2.to_string())
+            .expect("write scene");
+
+        let project = load_project(&project_dir).expect("load migrated project");
+
+        assert_eq!(project.schema_version, CURRENT_SCHEMA_VERSION);
+        assert!(project.template_metadata.is_none());
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
     fn load_project_accepts_canonical_megadrive_fixture() {
         let project = load_project(&fixture_dir("megadrive_dummy")).expect("load fixture");
         let scene = load_scene(&fixture_dir("megadrive_dummy"), &project.entry_scene)
@@ -2120,6 +2237,7 @@ mod tests {
             project.build.as_ref().map(|build| build.artifact_prefix.as_str()),
             Some("game")
         );
+        assert!(project.template_metadata.is_none());
         assert_eq!(
             scene.schema_version.as_deref(),
             Some(CURRENT_SCHEMA_VERSION)
@@ -2201,6 +2319,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: DEFAULT_ENTRY_SCENE.to_string(),
             build: Some(default_build_config()),
+            template_metadata: None,
         };
         let scene = Scene {
             scene_id: DEFAULT_SCENE_ID.to_string(),
