@@ -3,8 +3,10 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import Panel from "../common/Panel";
 import { useEditorStore } from "../../core/store/editorStore";
+import { persistActiveScene } from "../../core/scenePersistence";
 import { listenToProjectAssetChanges } from "../../core/ipc/projectWatcherService";
 import type { Scene } from "../../core/ipc/sceneService";
+import { createSpriteEntityFromAsset } from "../../core/editorEntityFactory";
 import {
   buildMultiTarget,
   type BuildLogLine,
@@ -554,13 +556,17 @@ function assetPreviewUrl(asset: ProjectAssetEntry): string | null {
 function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
   const {
     activeProjectDir,
+    activeTarget,
     activeScene,
+    addEntity,
     setSelectedEntityId,
+    setActiveViewportTab,
     logMessage,
   } = useEditorStore();
   const [assets, setAssets] = useState<ProjectAssetEntry[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [instantiatingAssetPath, setInstantiatingAssetPath] = useState<string | null>(null);
 
   const references = useMemo(() => collectAssetReferences(activeScene), [activeScene]);
 
@@ -641,10 +647,13 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
     };
   }, [activeProjectDir]);
 
-  function handleAssetDoubleClick(asset: ProjectAssetEntry) {
+  function handleFocusReferencedAsset(asset: ProjectAssetEntry) {
     const matches = references.get(asset.relative_path) ?? [];
     if (matches.length === 0) {
-      logMessage("info", `[Assets] '${asset.relative_path}' nao esta referenciado pela cena ativa.`);
+      logMessage(
+        "info",
+        `[Assets] '${asset.relative_path}' ainda nao esta referenciado pela cena ativa. Use Instanciar para criar um sprite.`
+      );
       return;
     }
 
@@ -653,9 +662,51 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
     logMessage("info", `[Assets] Selecionado no Inspector: ${matches[0].label}`);
   }
 
+  async function handleInstantiateAsset(asset: ProjectAssetEntry) {
+    const { activeScene: currentScene } = useEditorStore.getState();
+
+    if (!activeProjectDir || !currentScene) {
+      logMessage("warn", "[Assets] Abra um projeto com uma cena ativa antes de instanciar sprites.");
+      return;
+    }
+
+    if (asset.kind !== "image") {
+      logMessage("warn", `[Assets] Apenas assets de imagem podem ser instanciados na cena: ${asset.relative_path}`);
+      return;
+    }
+
+    setInstantiatingAssetPath(asset.relative_path);
+    try {
+      const entity = createSpriteEntityFromAsset({
+        assetPath: asset.relative_path,
+        target: activeTarget,
+        existingEntityIds: currentScene.entities.map((candidate) => candidate.entity_id),
+        includeStarterLogic:
+          currentScene.entities.length === 0 && currentScene.background_layers.length === 0,
+      });
+
+      addEntity(entity);
+      setSelectedEntityId(entity.entity_id);
+      setActiveViewportTab("scene");
+
+      const saved = await persistActiveScene(
+        activeProjectDir,
+        "Assets",
+        `Sprite '${entity.prefab ?? entity.entity_id}' instanciado a partir de '${asset.relative_path}'.`
+      );
+      if (!saved) {
+        return;
+      }
+    } catch (instantiationError) {
+      logMessage("error", `[Assets] Falha ao instanciar '${asset.relative_path}': ${describeError(instantiationError)}`);
+    } finally {
+      setInstantiatingAssetPath(null);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-3 p-3">
-      <ExperimentalNotice summary="Catalogo visual inicial dos assets do projeto ativo. Preview e foco no Inspector ainda estao em validacao com projeto real." />
+      <ExperimentalNotice summary="Catalogo visual dos assets do projeto ativo. Duplo clique foca referencias existentes ou instancia imagens na cena ativa quando ainda nao houver uso." />
 
       <div className="flex items-center justify-between rounded bg-[#1e1e2e] px-3 py-2">
         <span className="text-[10px] text-[#7f849c]">
@@ -677,11 +728,18 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
         {assets.map((asset) => {
           const preview = assetPreviewUrl(asset);
           const matches = references.get(asset.relative_path) ?? [];
+          const canInstantiate = asset.kind === "image" && Boolean(activeProjectDir && activeScene);
+          const isInstantiating = instantiatingAssetPath === asset.relative_path;
           return (
-            <button
+            <div
               key={asset.relative_path}
-              type="button"
-              onDoubleClick={() => handleAssetDoubleClick(asset)}
+              onDoubleClick={() => {
+                if (asset.kind === "image" && matches.length === 0) {
+                  void handleInstantiateAsset(asset);
+                  return;
+                }
+                handleFocusReferencedAsset(asset);
+              }}
               className="flex min-h-28 flex-col gap-2 rounded border border-[#313244] bg-[#1e1e2e] p-2 text-left transition-colors hover:border-[#cba6f7]"
               title={`${asset.relative_path}${matches.length > 0 ? `\nReferencias: ${matches.map((match) => match.label).join(", ")}` : ""}`}
             >
@@ -705,7 +763,32 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
               <p className="line-clamp-2 break-all font-mono text-[10px] text-[#cdd6f4]">
                 {asset.relative_path}
               </p>
-            </button>
+              <div className="mt-auto flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleFocusReferencedAsset(asset)}
+                  className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[10px] font-semibold text-[#cdd6f4] transition-colors hover:border-[#cba6f7] hover:text-[#cba6f7]"
+                >
+                  {matches.length > 0 ? "Focar" : "Detalhes"}
+                </button>
+                {asset.kind === "image" && (
+                  <button
+                    type="button"
+                    onClick={() => void handleInstantiateAsset(asset)}
+                    onDoubleClick={(event) => event.stopPropagation()}
+                    disabled={!canInstantiate || isInstantiating}
+                    className="rounded border border-[#89b4fa]/40 bg-[#89b4fa]/10 px-2 py-1 text-[10px] font-semibold text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20 disabled:cursor-not-allowed disabled:opacity-40"
+                    title={
+                      canInstantiate
+                        ? "Criar um sprite na cena ativa usando este asset."
+                        : "Abra uma cena ativa para instanciar sprites."
+                    }
+                  >
+                    {isInstantiating ? "Criando..." : "Instanciar"}
+                  </button>
+                )}
+              </div>
+            </div>
           );
         })}
       </div>

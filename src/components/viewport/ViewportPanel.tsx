@@ -1299,6 +1299,15 @@ export default function ViewportPanel() {
               }}
               title="Clique para selecionar. Arraste para mover ou use os handles para redimensionar sprites."
             />
+            {activeScene &&
+              activeScene.entities.length === 0 &&
+              activeScene.background_layers.length === 0 && (
+                <div className="max-w-[320px] rounded border border-[#89b4fa]/30 bg-[#89b4fa]/8 px-3 py-2 text-center text-[10px] leading-relaxed text-[#89b4fa]">
+                  Cena vazia. Use <span className="font-semibold">Hierarchy &gt; Sprite Inicial</span> ou{" "}
+                  <span className="font-semibold">Tools &gt; Asset Browser &gt; Instanciar</span> para
+                  comecar a montar a cena.
+                </div>
+              )}
             <span className="select-none text-[10px] text-[#6c7086]">
               {activeScene
                 ? `${activeScene.entities.length} entidade(s) | ${activeScene.background_layers.length} layer(s) | ${gridSnap ? "snap 8px ativo" : "snap livre"} | arraste para mover${selectedEntityId && !selectedEntityId.startsWith("layer::") ? " / handles para resize" : ""}`
