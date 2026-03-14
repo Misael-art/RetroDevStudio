@@ -1906,10 +1906,10 @@ pub extern "C" fn retro_run() {
     #[test]
     fn patch_studio_bps_roundtrip_preserves_modified_project_rom_hash() {
         let dir = temp_dir("patch-project");
-        let original = fixture_dir("snes_dummy")
-            .join("build")
-            .join("snes")
-            .join("canonical_snes_dummy.sfc");
+        let original = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("data")
+            .join("cputest-basicl_snes.sfc");
         let modified = dir.join("canonical_snes_dummy_modified.sfc");
         let patch = dir.join("project_assets.bps");
         let restored = dir.join("canonical_snes_dummy_restored.sfc");

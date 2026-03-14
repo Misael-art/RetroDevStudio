@@ -233,7 +233,6 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
         ));
     }
 
-    let mut pads_scanned = false;
     for (event, _) in &hardware_event_scripts {
         out.push_str(&snes_event_registration(*event));
     }
@@ -280,10 +279,6 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
                 ));
             }
             AstNode::ReadInputDevice { device, state_var } => {
-                if !pads_scanned {
-                    out.push_str("        scanPads();\n");
-                    pads_scanned = true;
-                }
                 out.push_str(&format!(
                     "        u16 {} = padsCurrent({});\n",
                     state_var,
@@ -1758,7 +1753,7 @@ mod tests {
 
         let output = emit_snes(&ast, "Input Demo");
 
-        assert!(output.main_c.contains("scanPads();"));
+        assert!(!output.main_c.contains("scanPads();"));
         assert!(output
             .main_c
             .contains("u16 joypad_1_state = padsCurrent(0);"));
