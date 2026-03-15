@@ -248,7 +248,8 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
                 render_scroll_tilemap(&mut out, layer, *dx, *dy);
             }
             AstNode::MoveCamera { target, x, y } => {
-                render_move_camera(&mut out, target, *x, *y);
+                let camera_bgs = collect_camera_scroll_bgs(ast);
+                render_move_camera(&mut out, target, *x, *y, &camera_bgs);
             }
             AstNode::SetupParallax { layers } => {
                 out.push_str(&format!(
@@ -549,7 +550,7 @@ fn render_scroll_tilemap(out: &mut String, layer: &str, dx: i32, dy: i32) {
     ));
 }
 
-fn render_move_camera(out: &mut String, target: &str, x: i32, y: i32) {
+fn render_move_camera(out: &mut String, target: &str, x: i32, y: i32, bg_numbers: &[u8]) {
     let (x_expr, y_expr) = if target.starts_with("spr_") {
         (
             format!("{}_x + {}", target, x),
@@ -559,7 +560,12 @@ fn render_move_camera(out: &mut String, target: &str, x: i32, y: i32) {
         (x.to_string(), y.to_string())
     };
 
-    out.push_str(&format!("        bgSetScroll(0, {}, {});\n", x_expr, y_expr));
+    for bg_number in bg_numbers {
+        out.push_str(&format!(
+            "        bgSetScroll({}, {}, {});\n",
+            bg_number, x_expr, y_expr
+        ));
+    }
 }
 
 fn render_aabb_helper() -> &'static str {
@@ -1490,6 +1496,38 @@ fn collect_scroll_tilemap_layers(ast: &AstOutput) -> Vec<String> {
     layers
 }
 
+fn collect_camera_scroll_bgs(ast: &AstOutput) -> Vec<u8> {
+    let mut bg_numbers = Vec::new();
+    let mut next_bg_number = 0u8;
+
+    for node in &ast.nodes {
+        if matches!(node, AstNode::DrawTilemap { .. }) {
+            let bg_number = next_bg_number.min(2);
+            next_bg_number = next_bg_number.saturating_add(1);
+            if !bg_numbers.contains(&bg_number) {
+                bg_numbers.push(bg_number);
+            }
+        }
+    }
+
+    if !bg_numbers.is_empty() {
+        return bg_numbers;
+    }
+
+    for layer in collect_scroll_tilemap_layers(ast) {
+        let bg_number = snes_bg_number(&layer);
+        if !bg_numbers.contains(&bg_number) {
+            bg_numbers.push(bg_number);
+        }
+    }
+
+    if bg_numbers.is_empty() {
+        vec![0]
+    } else {
+        bg_numbers
+    }
+}
+
 fn snes_bg_number(layer: &str) -> u8 {
     match layer {
         "BG_B" | "BG2" => 1,
@@ -1904,6 +1942,19 @@ mod tests {
     fn snes_emitter_emits_runtime_tilemap_scroll_and_camera_commands() {
         let ast = AstOutput {
             nodes: vec![
+                AstNode::LoadTilemap {
+                    resource_name: "level_bg".to_string(),
+                    asset_path: "assets/tilesets/level.png".to_string(),
+                    map_width: 32,
+                    map_height: 32,
+                },
+                AstNode::DrawTilemap {
+                    resource_name: "level_bg".to_string(),
+                    x: 0,
+                    y: 0,
+                    scroll_x: 0,
+                    scroll_y: 0,
+                },
                 AstNode::GameLoopBegin,
                 AstNode::ScrollTilemap {
                     layer: "BG_B".to_string(),
@@ -1935,6 +1986,85 @@ mod tests {
         assert!(output
             .main_c
             .contains("bgSetScroll(0, spr_hero_x + 12, spr_hero_y + -4);"));
+    }
+
+    #[test]
+    fn snes_emitter_move_camera_falls_back_to_bg0_without_tilemaps() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::MoveCamera {
+                    target: "spr_hero".to_string(),
+                    x: 12,
+                    y: -4,
+                },
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: Vec::new(),
+        };
+
+        let output = emit_snes(&ast, "Fallback Camera");
+
+        assert!(output
+            .main_c
+            .contains("bgSetScroll(0, spr_hero_x + 12, spr_hero_y + -4);"));
+    }
+
+    #[test]
+    fn snes_emitter_move_camera_scrolls_all_active_backgrounds() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::LoadTilemap {
+                    resource_name: "level_bg".to_string(),
+                    asset_path: "assets/tilesets/level.png".to_string(),
+                    map_width: 32,
+                    map_height: 32,
+                },
+                AstNode::DrawTilemap {
+                    resource_name: "level_bg".to_string(),
+                    x: 0,
+                    y: 0,
+                    scroll_x: 0,
+                    scroll_y: 0,
+                },
+                AstNode::LoadTilemap {
+                    resource_name: "foreground".to_string(),
+                    asset_path: "assets/tilesets/foreground.png".to_string(),
+                    map_width: 32,
+                    map_height: 32,
+                },
+                AstNode::DrawTilemap {
+                    resource_name: "foreground".to_string(),
+                    x: 0,
+                    y: 0,
+                    scroll_x: 0,
+                    scroll_y: 0,
+                },
+                AstNode::GameLoopBegin,
+                AstNode::MoveCamera {
+                    target: "spr_hero".to_string(),
+                    x: 12,
+                    y: -4,
+                },
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: Vec::new(),
+        };
+
+        let output = emit_snes(&ast, "Dual Background Camera");
+
+        assert!(output
+            .main_c
+            .contains("bgSetScroll(0, spr_hero_x + 12, spr_hero_y + -4);"));
+        assert!(output
+            .main_c
+            .contains("bgSetScroll(1, spr_hero_x + 12, spr_hero_y + -4);"));
     }
 
     #[test]

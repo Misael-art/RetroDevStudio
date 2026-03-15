@@ -289,7 +289,8 @@ fn build_main_c(ast: &AstOutput, project_name: &str) -> String {
                 render_scroll_tilemap(&mut out, layer, *dx, *dy);
             }
             AstNode::MoveCamera { target, x, y } => {
-                render_move_camera(&mut out, target, *x, *y);
+                let camera_planes = collect_camera_scroll_planes(ast);
+                render_move_camera(&mut out, target, *x, *y, &camera_planes);
             }
             AstNode::DrawText {
                 x,
@@ -489,7 +490,7 @@ fn render_scroll_tilemap(out: &mut String, layer: &str, dx: i32, dy: i32) {
     ));
 }
 
-fn render_move_camera(out: &mut String, target: &str, x: i32, y: i32) {
+fn render_move_camera(out: &mut String, target: &str, x: i32, y: i32, planes: &[&str]) {
     let (x_expr, y_expr) = if target.starts_with("spr_") {
         (
             format!("SPR_getX({}) + {}", target, x),
@@ -499,14 +500,16 @@ fn render_move_camera(out: &mut String, target: &str, x: i32, y: i32) {
         (x.to_string(), y.to_string())
     };
 
-    out.push_str(&format!(
-        "        VDP_setHorizontalScroll(BG_A, {});\n",
-        x_expr
-    ));
-    out.push_str(&format!(
-        "        VDP_setVerticalScroll(BG_A, {});\n",
-        y_expr
-    ));
+    for plane in planes {
+        out.push_str(&format!(
+            "        VDP_setHorizontalScroll({}, {});\n",
+            plane, x_expr
+        ));
+        out.push_str(&format!(
+            "        VDP_setVerticalScroll({}, {});\n",
+            plane, y_expr
+        ));
+    }
 }
 
 fn render_logic_scripts(out: &mut String, scripts: &[LogicScript], indent: usize) {
@@ -1139,6 +1142,44 @@ fn collect_scroll_tilemap_layers(ast: &AstOutput) -> Vec<String> {
     layers
 }
 
+fn collect_camera_scroll_planes(ast: &AstOutput) -> Vec<&'static str> {
+    let mut planes = Vec::new();
+    let mut tilemap_index = 0usize;
+
+    for node in &ast.nodes {
+        if matches!(node, AstNode::DrawTilemap { .. }) {
+            let plane = tilemap_plane(tilemap_index);
+            tilemap_index += 1;
+            if plane != "WINDOW" && !planes.contains(&plane) {
+                planes.push(plane);
+            }
+        }
+    }
+
+    if !planes.is_empty() {
+        return if planes.len() >= 2 {
+            vec!["BG_B", "BG_A"]
+        } else {
+            planes
+        };
+    }
+
+    for layer in collect_scroll_tilemap_layers(ast) {
+        let plane = sgdk_scroll_plane(&layer);
+        if plane != "WINDOW" && !planes.contains(&plane) {
+            planes.push(plane);
+        }
+    }
+
+    if planes.is_empty() {
+        vec!["BG_A"]
+    } else if planes.len() >= 2 {
+        vec!["BG_B", "BG_A"]
+    } else {
+        planes
+    }
+}
+
 fn tilemap_plane(index: usize) -> &'static str {
     match index {
         0 => "BG_B",
@@ -1591,6 +1632,19 @@ mod tests {
     fn main_c_emits_runtime_tilemap_scroll_and_camera_commands() {
         let ast = AstOutput {
             nodes: vec![
+                AstNode::LoadTilemap {
+                    resource_name: "level_bg".to_string(),
+                    asset_path: "assets/tilesets/level.png".to_string(),
+                    map_width: 32,
+                    map_height: 32,
+                },
+                AstNode::DrawTilemap {
+                    resource_name: "level_bg".to_string(),
+                    x: 0,
+                    y: 0,
+                    scroll_x: 0,
+                    scroll_y: 0,
+                },
                 AstNode::GameLoopBegin,
                 AstNode::ScrollTilemap {
                     layer: "BG_B".to_string(),
@@ -1622,6 +1676,94 @@ mod tests {
         assert!(output
             .main_c
             .contains("VDP_setVerticalScroll(BG_B, tm_scroll_y_bg_b);"));
+        assert!(output
+            .main_c
+            .contains("VDP_setHorizontalScroll(BG_B, SPR_getX(spr_hero) + 12);"));
+        assert!(output
+            .main_c
+            .contains("VDP_setVerticalScroll(BG_B, SPR_getY(spr_hero) + -4);"));
+    }
+
+    #[test]
+    fn main_c_move_camera_falls_back_to_bg_a_without_tilemaps() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::MoveCamera {
+                    target: "spr_hero".to_string(),
+                    x: 12,
+                    y: -4,
+                },
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: Vec::new(),
+        };
+
+        let output = emit_sgdk(&ast, "Fallback Camera");
+
+        assert!(output
+            .main_c
+            .contains("VDP_setHorizontalScroll(BG_A, SPR_getX(spr_hero) + 12);"));
+        assert!(output
+            .main_c
+            .contains("VDP_setVerticalScroll(BG_A, SPR_getY(spr_hero) + -4);"));
+    }
+
+    #[test]
+    fn main_c_move_camera_scrolls_both_background_planes_when_two_tilemaps_are_active() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::LoadTilemap {
+                    resource_name: "level_bg".to_string(),
+                    asset_path: "assets/tilesets/level.png".to_string(),
+                    map_width: 32,
+                    map_height: 32,
+                },
+                AstNode::DrawTilemap {
+                    resource_name: "level_bg".to_string(),
+                    x: 0,
+                    y: 0,
+                    scroll_x: 0,
+                    scroll_y: 0,
+                },
+                AstNode::LoadTilemap {
+                    resource_name: "foreground".to_string(),
+                    asset_path: "assets/tilesets/foreground.png".to_string(),
+                    map_width: 32,
+                    map_height: 32,
+                },
+                AstNode::DrawTilemap {
+                    resource_name: "foreground".to_string(),
+                    x: 0,
+                    y: 0,
+                    scroll_x: 0,
+                    scroll_y: 0,
+                },
+                AstNode::GameLoopBegin,
+                AstNode::MoveCamera {
+                    target: "spr_hero".to_string(),
+                    x: 12,
+                    y: -4,
+                },
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: Vec::new(),
+        };
+
+        let output = emit_sgdk(&ast, "Dual Plane Camera");
+
+        assert!(output
+            .main_c
+            .contains("VDP_setHorizontalScroll(BG_B, SPR_getX(spr_hero) + 12);"));
+        assert!(output
+            .main_c
+            .contains("VDP_setVerticalScroll(BG_B, SPR_getY(spr_hero) + -4);"));
         assert!(output
             .main_c
             .contains("VDP_setHorizontalScroll(BG_A, SPR_getX(spr_hero) + 12);"));
