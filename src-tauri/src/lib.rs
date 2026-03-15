@@ -30,13 +30,16 @@ use core::project_mgr::{
     append_patch_audit_entry,
     create_scene as create_project_scene,
     create_project_skeleton,
+    import_sgdk_project as import_sgdk_scene,
     list_project_templates as list_registered_project_templates,
     list_scenes as list_project_scenes,
     load_project,
     load_scene,
     resolve_prefabs,
     save_scene,
+    stamp_imported_sgdk_metadata,
     stamp_project_template_metadata,
+    sync_external_graph_refs,
     seed_project_template,
     seed_onboarding_template,
     set_entry_scene,
@@ -1129,7 +1132,12 @@ fn create_scene(project_dir: String, display_name: Option<String>) -> Result<Sce
 
 /// Salva o JSON de cena de volta para o arquivo entry_scene do projeto.
 #[tauri::command]
-fn save_scene_data(project_dir: String, scene_json: String, scene_path: Option<String>) -> EmulatorCommandResult {
+fn save_scene_data(
+    project_dir: String,
+    scene_json: String,
+    scene_path: Option<String>,
+    resolved_scene_json: Option<String>,
+) -> EmulatorCommandResult {
     if project_dir.is_empty() {
         return EmulatorCommandResult { ok: false, message: "Nenhum projeto aberto.".into() };
     }
@@ -1142,13 +1150,35 @@ fn save_scene_data(project_dir: String, scene_json: String, scene_path: Option<S
     if serde_json::from_str::<serde_json::Value>(&scene_json).is_err() {
         return EmulatorCommandResult { ok: false, message: "JSON de cena inválido.".into() };
     }
-    let scene = match serde_json::from_str::<ugdm::entities::Scene>(&scene_json) {
+    let mut scene = match serde_json::from_str::<ugdm::entities::Scene>(&scene_json) {
         Ok(scene) => scene,
         Err(e) => return EmulatorCommandResult {
             ok: false,
             message: format!("JSON de cena invalido: {}", e),
         },
     };
+    if let Some(resolved_scene_json) = resolved_scene_json
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let resolved_scene = match serde_json::from_str::<ugdm::entities::Scene>(resolved_scene_json) {
+            Ok(scene) => scene,
+            Err(error) => {
+                return EmulatorCommandResult {
+                    ok: false,
+                    message: format!("JSON de cena resolvida invalido: {}", error),
+                }
+            }
+        };
+
+        if let Err(error) = sync_external_graph_refs(&dir, &mut scene, &resolved_scene) {
+            return EmulatorCommandResult {
+                ok: false,
+                message: error.to_string(),
+            };
+        }
+    }
     let target_scene_path = scene_path
         .as_deref()
         .map(str::trim)
@@ -1251,6 +1281,28 @@ fn create_project_from_template_at_base_dir(
     })
 }
 
+fn import_sgdk_project_at_base_dir(
+    base_dir: &Path,
+    project_name: &str,
+    sgdk_path: &Path,
+) -> Result<OpenProjectResult, String> {
+    let safe_name = safe_project_dir_name(project_name);
+    let project_dir = base_dir.join(&safe_name);
+
+    ensure_project_dir_available(&project_dir)?;
+
+    let project = create_project_skeleton(&project_dir, project_name, "megadrive")
+        .map_err(|error| error.to_string())?;
+    import_sgdk_scene(&project_dir, sgdk_path).map_err(|error| error.to_string())?;
+    stamp_imported_sgdk_metadata(&project_dir, sgdk_path).map_err(|error| error.to_string())?;
+
+    Ok(OpenProjectResult {
+        selected: true,
+        path: project_dir.to_string_lossy().to_string(),
+        name: project.name,
+    })
+}
+
 /// Abre o diálogo nativo "Selecionar pasta do projeto" e retorna o caminho.
 #[tauri::command]
 fn open_project_dialog(app: AppHandle) -> OpenProjectResult {
@@ -1343,6 +1395,27 @@ fn create_project_from_template(
 }
 
 #[tauri::command]
+fn import_sgdk_project(
+    project_name: String,
+    base_dir: String,
+    sgdk_path: String,
+) -> Result<OpenProjectResult, String> {
+    let trimmed_name = project_name.trim();
+    let trimmed_base_dir = base_dir.trim();
+    let trimmed_sgdk_path = sgdk_path.trim();
+
+    if trimmed_name.is_empty() || trimmed_base_dir.is_empty() || trimmed_sgdk_path.is_empty() {
+        return Err("Nome do projeto, pasta base e caminho SGDK sao obrigatorios.".into());
+    }
+
+    import_sgdk_project_at_base_dir(
+        Path::new(trimmed_base_dir),
+        trimmed_name,
+        Path::new(trimmed_sgdk_path),
+    )
+}
+
+#[tauri::command]
 fn open_project_path(project_dir: String) -> OpenProjectResult {
     let trimmed = project_dir.trim();
     if trimmed.is_empty() {
@@ -1412,6 +1485,7 @@ pub fn run() {
             create_onboarding_project,
             list_project_templates,
             create_project_from_template,
+            import_sgdk_project,
             // Fase 4: Tools
             patch_create_ips,
             patch_apply_ips,
@@ -1490,6 +1564,46 @@ mod tests {
             fs::write(dir.join("res").join("sound").join("jump.wav"), minimal_wav_bytes())
                 .expect("write jump asset");
         }
+    }
+
+    fn write_generic_sgdk_donor_fixture(dir: &Path) {
+        fs::create_dir_all(dir.join("res").join("images")).expect("create donor image dir");
+        fs::create_dir_all(dir.join("res").join("maps")).expect("create donor map dir");
+        fs::create_dir_all(dir.join("res").join("sound")).expect("create donor sound dir");
+        fs::create_dir_all(dir.join("out")).expect("create donor out dir");
+        fs::create_dir_all(dir.join("src")).expect("create donor src dir");
+        fs::create_dir_all(dir.join("inc")).expect("create donor inc dir");
+        fs::create_dir_all(dir.join("boot")).expect("create donor boot dir");
+
+        image::RgbaImage::from_pixel(32, 32, image::Rgba([0, 220, 120, 255]))
+            .save(dir.join("res").join("images").join("hero.png"))
+            .expect("write hero sprite");
+        image::RgbaImage::from_pixel(128, 128, image::Rgba([32, 64, 180, 255]))
+            .save(dir.join("res").join("maps").join("stage.png"))
+            .expect("write stage image");
+        fs::write(dir.join("res").join("sound").join("jump.wav"), minimal_wav_bytes())
+            .expect("write wav");
+        fs::write(dir.join("res").join("sound").join("theme.xgm"), b"xgm-data")
+            .expect("write xgm");
+        fs::write(dir.join("res").join("sound").join("forbidden.vgm"), b"vgm-data")
+            .expect("write vgm");
+        fs::write(
+            dir.join("res").join("resources.res"),
+            [
+                "SPRITE hero images/hero.png 4 4 FAST 0",
+                "IMAGE stage maps/stage.png NONE",
+                "WAV jump sound/jump.wav 22050",
+                "XGM theme sound/theme.xgm",
+                "VGM forbidden sound/forbidden.vgm",
+            ]
+            .join("\n"),
+        )
+        .expect("write resources.res");
+        fs::write(dir.join("out").join("rom.bin"), b"forbidden-rom").expect("write rom");
+        fs::write(dir.join("src").join("main.c"), b"int main(void){return 0;}")
+            .expect("write main");
+        fs::write(dir.join("inc").join("game.h"), b"void game(void);").expect("write header");
+        fs::write(dir.join("boot").join("startup.s"), b"boot").expect("write boot");
     }
 
     fn minimal_wav_bytes() -> Vec<u8> {
@@ -2251,17 +2365,23 @@ pub extern "C" fn retro_run() {
     fn list_project_templates_returns_registry_entries() {
         let templates = list_project_templates().expect("list project templates");
 
-        assert_eq!(templates.len(), 3);
+        assert_eq!(templates.len(), 7);
         assert_eq!(templates[0].id, "empty");
         assert_eq!(templates[1].id, "starter_guided");
         assert_eq!(templates[2].id, "platformer_seed");
+        assert_eq!(templates[3].id, "rpg_seed");
+        assert_eq!(templates[4].id, "fighter_seed");
+        assert_eq!(templates[5].id, "racing_seed");
+        assert_eq!(templates[6].id, "action_seed");
     }
 
     #[test]
-    fn create_project_from_template_supports_empty_starter_and_platformer() {
+    fn create_project_from_template_supports_empty_starter_platformer_and_generic_external_seed() {
         let base_dir = temp_dir("template-create");
-        let donor_dir = temp_dir("template-donor");
-        write_platformer_donor_fixture(&donor_dir, true);
+        let platformer_donor_dir = temp_dir("template-donor-platformer");
+        let generic_donor_dir = temp_dir("template-donor-generic");
+        write_platformer_donor_fixture(&platformer_donor_dir, true);
+        write_generic_sgdk_donor_fixture(&generic_donor_dir);
 
         let empty_result = create_project_from_template(
             "Blank".to_string(),
@@ -2295,7 +2415,7 @@ pub extern "C" fn retro_run() {
             "megadrive".to_string(),
             base_dir.to_string_lossy().to_string(),
             "platformer_seed".to_string(),
-            Some(donor_dir.to_string_lossy().to_string()),
+            Some(platformer_donor_dir.to_string_lossy().to_string()),
         )
         .expect("create platformer project");
         let platformer_project_dir = PathBuf::from(&platformer_result.path);
@@ -2329,9 +2449,45 @@ pub extern "C" fn retro_run() {
             .join("tilesets")
             .join("platformer_level.png")
             .is_file());
+        assert!(platformer_project_dir
+            .join("prefabs")
+            .join("platformer_player.json")
+            .is_file());
+        assert!(platformer_project_dir
+            .join("graphs")
+            .join("platformer_player_logic.json")
+            .is_file());
+
+        let imported_result = create_project_from_template(
+            "RPG Import".to_string(),
+            "megadrive".to_string(),
+            base_dir.to_string_lossy().to_string(),
+            "rpg_seed".to_string(),
+            Some(generic_donor_dir.to_string_lossy().to_string()),
+        )
+        .expect("create generic imported project");
+        let imported_project_dir = PathBuf::from(&imported_result.path);
+        let imported_project = load_project(&imported_project_dir).expect("load imported project");
+        let imported_scene =
+            load_scene(&imported_project_dir, &imported_project.entry_scene).expect("load imported scene");
+
+        assert_eq!(
+            imported_project
+                .template_metadata
+                .as_ref()
+                .map(|metadata| metadata.template_id.as_str()),
+            Some("rpg_seed")
+        );
+        assert!(imported_project_dir
+            .join("assets")
+            .join("sprites")
+            .join("hero.png")
+            .is_file());
+        assert!(imported_scene.entities.iter().any(|entity| entity.entity_id == "main_camera"));
 
         let _ = fs::remove_dir_all(base_dir);
-        let _ = fs::remove_dir_all(donor_dir);
+        let _ = fs::remove_dir_all(platformer_donor_dir);
+        let _ = fs::remove_dir_all(generic_donor_dir);
     }
 
     #[test]
@@ -2361,6 +2517,117 @@ pub extern "C" fn retro_run() {
                 .map(|sprite| sprite.asset.as_str()),
             Some("assets/sprites/hero.png")
         );
+    }
+
+    #[test]
+    fn save_scene_data_keeps_graph_ref_externalized_when_resolved_scene_is_supplied() {
+        let project_dir = temp_dir("save-scene-graph-ref");
+        create_project_skeleton(&project_dir, "Graph Save", "megadrive")
+            .expect("create project skeleton");
+        fs::create_dir_all(project_dir.join("graphs")).expect("create graphs dir");
+        fs::write(
+            project_dir.join("graphs").join("player_logic.json"),
+            "{\"version\":1,\"nodes\":[],\"edges\":[]}",
+        )
+        .expect("write initial graph");
+
+        let source_scene = serde_json::json!({
+            "scene_id": "main",
+            "schema_version": ugdm::entities::CURRENT_SCHEMA_VERSION,
+            "display_name": "Main",
+            "background_layers": [],
+            "entities": [
+                {
+                    "entity_id": "player",
+                    "prefab": null,
+                    "transform": { "x": 0, "y": 0 },
+                    "components": {
+                        "logic": {
+                            "graph_ref": "graphs/player_logic.json",
+                            "variables": {}
+                        }
+                    }
+                }
+            ],
+            "palettes": []
+        });
+        let resolved_scene = serde_json::json!({
+            "scene_id": "main",
+            "schema_version": ugdm::entities::CURRENT_SCHEMA_VERSION,
+            "display_name": "Main",
+            "background_layers": [],
+            "entities": [
+                {
+                    "entity_id": "player",
+                    "prefab": null,
+                    "transform": { "x": 0, "y": 0 },
+                    "components": {
+                        "logic": {
+                            "graph_ref": "graphs/player_logic.json",
+                            "graph": "{\"version\":1,\"nodes\":[{\"id\":\"start\",\"type\":\"event_start\"}],\"edges\":[]}",
+                            "variables": {}
+                        }
+                    }
+                }
+            ],
+            "palettes": []
+        });
+
+        let result = save_scene_data(
+            project_dir.to_string_lossy().to_string(),
+            serde_json::to_string_pretty(&source_scene).expect("serialize source scene"),
+            Some("scenes/main.json".to_string()),
+            Some(serde_json::to_string_pretty(&resolved_scene).expect("serialize resolved scene")),
+        );
+
+        assert!(result.ok, "{}", result.message);
+
+        let saved_scene = fs::read_to_string(project_dir.join("scenes").join("main.json"))
+            .expect("read saved scene");
+        assert!(saved_scene.contains("\"graph_ref\": \"graphs/player_logic.json\""));
+        assert!(!saved_scene.contains("\"graph\":"));
+
+        let saved_graph = fs::read_to_string(project_dir.join("graphs").join("player_logic.json"))
+            .expect("read saved graph");
+        assert!(saved_graph.contains("\"event_start\""));
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn import_sgdk_project_command_creates_native_project_without_forbidden_assets() {
+        let base_dir = temp_dir("import-sgdk-command");
+        let donor_dir = temp_dir("import-sgdk-donor");
+        write_generic_sgdk_donor_fixture(&donor_dir);
+
+        let result = import_sgdk_project(
+            "Imported SGDK".to_string(),
+            base_dir.to_string_lossy().to_string(),
+            donor_dir.to_string_lossy().to_string(),
+        )
+        .expect("import sgdk project");
+
+        let project_dir = PathBuf::from(&result.path);
+        let project = load_project(&project_dir).expect("load imported project");
+        let scene = load_scene(&project_dir, &project.entry_scene).expect("load imported scene");
+
+        assert_eq!(
+            project
+                .template_metadata
+                .as_ref()
+                .map(|metadata| metadata.source_kind.as_str()),
+            Some("imported_sgdk")
+        );
+        assert!(project_dir.join("assets").join("sprites").join("hero.png").is_file());
+        assert!(project_dir.join("assets").join("tilesets").join("stage.png").is_file());
+        assert!(project_dir.join("assets").join("audio").join("jump.wav").is_file());
+        assert!(project_dir.join("assets").join("audio").join("theme.xgm").is_file());
+        assert!(!project_dir.join("assets").join("audio").join("forbidden.vgm").exists());
+        assert!(!project_dir.join("out").exists());
+        assert_eq!(scene.entities.len(), 4);
+
+        let _ = fs::remove_dir_all(base_dir);
+        let _ = fs::remove_dir_all(donor_dir);
     }
 
     #[test]

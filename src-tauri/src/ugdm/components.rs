@@ -115,7 +115,12 @@ pub struct LogicVariable {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LogicComponent {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub graph: Option<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph_ref: Option<String>,
     #[serde(default)]
     pub variables: HashMap<String, LogicVariable>,
 }

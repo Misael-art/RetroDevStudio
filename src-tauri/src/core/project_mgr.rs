@@ -70,6 +70,14 @@ struct TemplateRegistryEntry {
     default_donor_path: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SgdkResourceEntry {
+    kind: String,
+    name: String,
+    asset_path: String,
+    params: Vec<String>,
+}
+
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 pub struct ProjectTemplateSummary {
     pub id: String,
@@ -232,23 +240,22 @@ pub fn seed_project_template(
     donor_path: Option<&Path>,
 ) -> Result<Scene, LoadError> {
     match template_id {
-        "empty" => load_scene(project_dir, DEFAULT_ENTRY_SCENE),
-        "starter_guided" => seed_onboarding_template(project_dir, target),
-        "platformer_seed" => {
-            if target != "megadrive" {
-                return Err(LoadError(
-                    "O template Plataforma experimental esta disponivel apenas para Mega Drive nesta wave."
-                        .to_string(),
-                ));
-            }
+        "empty" => return load_scene(project_dir, DEFAULT_ENTRY_SCENE),
+        "starter_guided" => return seed_onboarding_template(project_dir, target),
+        _ => {}
+    }
 
-            let donor = resolved_template_donor_path(template_id, donor_path)?;
-            seed_platformer_template(project_dir, &donor)
-        }
-        other => Err(LoadError(format!(
-            "Template '{}' nao reconhecido. Use um id presente em data/template_registry.json.",
-            other
-        ))),
+    if target != "megadrive" {
+        return Err(LoadError(
+            "Templates SGDK experimentais estao disponiveis apenas para Mega Drive nesta wave."
+                .to_string(),
+        ));
+    }
+
+    let donor = resolved_template_donor_path(template_id, donor_path)?;
+    match template_id {
+        "platformer_seed" => seed_platformer_template(project_dir, &donor),
+        _ => import_sgdk_project(project_dir, &donor),
     }
 }
 
@@ -269,7 +276,158 @@ pub fn seed_platformer_template(project_dir: &Path, donor_path: &Path) -> Result
         copy_template_asset(&jump_source, &project_dir.join(PLATFORMER_JUMP_ASSET))?;
     }
 
-    let scene = platformer_seed_scene(jump_source.exists());
+    save_prefab_entity(
+        project_dir,
+        "platformer_player.json",
+        &platformer_player_prefab(jump_source.exists()),
+    )?;
+    save_prefab_entity(project_dir, "platformer_camera.json", &platformer_camera_prefab())?;
+    save_prefab_entity(project_dir, "platformer_tilemap.json", &platformer_tilemap_prefab())?;
+    save_graph_asset(
+        project_dir,
+        "graphs/platformer_player_logic.json",
+        &platformer_logic_graph(),
+    )?;
+
+    let scene = platformer_seed_scene();
+    save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
+    Ok(scene)
+}
+
+pub fn import_sgdk_project(project_dir: &Path, sgdk_path: &Path) -> Result<Scene, LoadError> {
+    validate_sgdk_project_path(sgdk_path)?;
+
+    let manifest_path = find_sgdk_manifest_path(sgdk_path)?;
+    let manifest = fs::read_to_string(&manifest_path).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel ler manifesto SGDK '{}': {}",
+            manifest_path.display(),
+            error
+        ))
+    })?;
+    let resources = parse_sgdk_manifest(&manifest);
+
+    let mut scene = canonical_scene(DEFAULT_SCENE_ID, Some("Imported SGDK Project".to_string()));
+    let mut imported_tilemaps = HashSet::new();
+    let mut audio_sfx = HashMap::new();
+    let mut audio_bgm: Option<String> = None;
+    let mut first_sprite_id: Option<String> = None;
+
+    for resource in resources {
+        let Some(destination) = sgdk_asset_destination(&resource.kind, &resource.asset_path) else {
+            continue;
+        };
+
+        let source_path = sgdk_resource_source_path(sgdk_path, &resource.asset_path);
+        if !source_path.is_file() {
+            if resource.kind == "VGM" {
+                continue;
+            }
+            return Err(LoadError(format!(
+                "Recurso SGDK '{}' aponta para asset inexistente '{}'.",
+                resource.name,
+                source_path.display()
+            )));
+        }
+
+        copy_template_asset(&source_path, &project_dir.join(&destination))?;
+
+        match resource.kind.as_str() {
+            "SPRITE" => {
+                let width_tiles = resource
+                    .params
+                    .first()
+                    .and_then(|value| value.parse::<u32>().ok())
+                    .unwrap_or(2);
+                let height_tiles = resource
+                    .params
+                    .get(1)
+                    .and_then(|value| value.parse::<u32>().ok())
+                    .unwrap_or(width_tiles);
+                let entity_id = sgdk_entity_id(&resource.name);
+                if first_sprite_id.is_none() {
+                    first_sprite_id = Some(entity_id.clone());
+                }
+                scene.entities.push(Entity {
+                    entity_id,
+                    prefab: None,
+                    transform: crate::ugdm::entities::Transform { x: 32, y: 32 },
+                    components: Components {
+                        sprite: Some(SpriteComponent {
+                            asset: destination,
+                            frame_width: width_tiles.saturating_mul(8).max(8),
+                            frame_height: height_tiles.saturating_mul(8).max(8),
+                            pivot: None,
+                            palette_slot: 0,
+                            animations: HashMap::new(),
+                            priority: "foreground".to_string(),
+                        }),
+                        ..Components::default()
+                    },
+                });
+            }
+            "IMAGE" | "TILESET" | "TILEMAP" | "MAP" | "PALETTE" => {
+                if imported_tilemaps.insert(destination.clone()) {
+                    scene.entities.push(Entity {
+                        entity_id: format!("{}_tilemap", sgdk_entity_id(&resource.name)),
+                        prefab: None,
+                        transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+                        components: Components {
+                            tilemap: Some(TilemapComponent {
+                                tileset: destination,
+                                map_width: 32,
+                                map_height: 32,
+                                scroll_x: 0,
+                                scroll_y: 0,
+                            }),
+                            ..Components::default()
+                        },
+                    });
+                }
+            }
+            "WAV" | "PCM" => {
+                audio_sfx.insert(resource.name.clone(), destination);
+            }
+            "XGM" => {
+                if audio_bgm.is_none() {
+                    audio_bgm = Some(destination);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if !audio_sfx.is_empty() || audio_bgm.is_some() {
+        scene.entities.push(Entity {
+            entity_id: "audio_bank".to_string(),
+            prefab: None,
+            transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+            components: Components {
+                audio: Some(AudioComponent {
+                    sfx: audio_sfx,
+                    bgm: audio_bgm,
+                }),
+                ..Components::default()
+            },
+        });
+    }
+
+    if let Some(follow_entity) = first_sprite_id {
+        scene.entities.push(Entity {
+            entity_id: "main_camera".to_string(),
+            prefab: None,
+            transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+            components: Components {
+                camera: Some(CameraComponent {
+                    follow_entity: Some(follow_entity),
+                    offset_x: 0,
+                    offset_y: 0,
+                }),
+                ..Components::default()
+            },
+        });
+    }
+
     save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
     Ok(scene)
 }
@@ -351,10 +509,10 @@ fn template_availability(entry: &TemplateRegistryEntry) -> (bool, Option<String>
                     Ok(()) => (true, None),
                     Err(error) => (false, Some(error.to_string())),
                 },
-                _ => (
-                    false,
-                    Some("Template externo ainda nao possui validador de disponibilidade.".to_string()),
-                ),
+                _ => match validate_sgdk_project_path(Path::new(donor_path)) {
+                    Ok(()) => (true, None),
+                    Err(error) => (false, Some(error.to_string())),
+                },
             }
         }
         other => (
@@ -419,7 +577,331 @@ fn copy_template_asset(source: &Path, destination: &Path) -> Result<(), LoadErro
     Ok(())
 }
 
-fn platformer_seed_scene(has_jump_sound: bool) -> Scene {
+fn tokenize_sgdk_resource_line(line: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+
+    for character in line.chars() {
+        match character {
+            '"' => {
+                in_quotes = !in_quotes;
+            }
+            '#' if !in_quotes => {
+                break;
+            }
+            ' ' | '\t' if !in_quotes => {
+                if !current.is_empty() {
+                    tokens.push(current.clone());
+                    current.clear();
+                }
+            }
+            _ => current.push(character),
+        }
+    }
+
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+
+    tokens
+}
+
+fn parse_sgdk_manifest(manifest: &str) -> Vec<SgdkResourceEntry> {
+    manifest
+        .lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                return None;
+            }
+
+            let tokens = tokenize_sgdk_resource_line(trimmed);
+            if tokens.len() < 3 {
+                return None;
+            }
+
+            Some(SgdkResourceEntry {
+                kind: tokens[0].to_ascii_uppercase(),
+                name: tokens[1].clone(),
+                asset_path: tokens[2].replace('\\', "/"),
+                params: tokens[3..].to_vec(),
+            })
+        })
+        .collect()
+}
+
+fn find_sgdk_manifest_path(sgdk_path: &Path) -> Result<PathBuf, LoadError> {
+    let direct = sgdk_path.join("resources.res");
+    if direct.is_file() {
+        return Ok(direct);
+    }
+
+    let canonical = sgdk_path.join("res").join("resources.res");
+    if canonical.is_file() {
+        return Ok(canonical);
+    }
+
+    let res_dir = sgdk_path.join("res");
+    if res_dir.is_dir() {
+        for entry in fs::read_dir(&res_dir).map_err(|error| {
+            LoadError(format!(
+                "Nao foi possivel listar manifests SGDK em '{}': {}",
+                res_dir.display(),
+                error
+            ))
+        })? {
+            let entry = entry.map_err(|error| {
+                LoadError(format!(
+                    "Nao foi possivel ler manifesto SGDK em '{}': {}",
+                    res_dir.display(),
+                    error
+                ))
+            })?;
+            let path = entry.path();
+            if path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("res")) {
+                return Ok(path);
+            }
+        }
+    }
+
+    Err(LoadError(format!(
+        "Projeto SGDK invalido: nenhum resources.res foi encontrado em '{}'.",
+        sgdk_path.display()
+    )))
+}
+
+fn validate_sgdk_project_path(sgdk_path: &Path) -> Result<(), LoadError> {
+    if !sgdk_path.exists() {
+        return Err(LoadError(format!(
+            "Projeto SGDK indisponivel: donor path '{}' nao existe.",
+            sgdk_path.display()
+        )));
+    }
+
+    let manifest_path = find_sgdk_manifest_path(sgdk_path)?;
+    let manifest = fs::read_to_string(&manifest_path).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel ler manifesto SGDK '{}': {}",
+            manifest_path.display(),
+            error
+        ))
+    })?;
+    let resources = parse_sgdk_manifest(&manifest);
+    if resources.is_empty() {
+        return Err(LoadError(format!(
+            "Projeto SGDK invalido: o manifesto '{}' nao possui recursos importaveis.",
+            manifest_path.display()
+        )));
+    }
+
+    if !resources
+        .iter()
+        .any(|resource| sgdk_asset_destination(&resource.kind, &resource.asset_path).is_some())
+    {
+        return Err(LoadError(format!(
+            "Projeto SGDK invalido: o manifesto '{}' nao possui recursos suportados para importacao.",
+            manifest_path.display()
+        )));
+    }
+
+    Ok(())
+}
+
+fn sgdk_resource_source_path(sgdk_path: &Path, asset_path: &str) -> PathBuf {
+    let normalized = asset_path.replace('\\', "/");
+    let relative = PathBuf::from(&normalized);
+    let under_res = sgdk_path.join("res").join(&relative);
+    if under_res.exists() {
+        under_res
+    } else {
+        sgdk_path.join(relative)
+    }
+}
+
+fn sgdk_asset_destination(kind: &str, asset_path: &str) -> Option<String> {
+    let filename = Path::new(asset_path)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(str::to_string)?;
+
+    match kind {
+        "SPRITE" => Some(format!("assets/sprites/{}", filename)),
+        "IMAGE" | "TILESET" | "TILEMAP" | "MAP" | "PALETTE" => {
+            Some(format!("assets/tilesets/{}", filename))
+        }
+        "WAV" | "PCM" | "XGM" => Some(format!("assets/audio/{}", filename)),
+        "VGM" => None,
+        _ => None,
+    }
+}
+
+fn sgdk_entity_id(name: &str) -> String {
+    let mut id = String::new();
+    for character in name.chars() {
+        if character.is_ascii_alphanumeric() {
+            id.push(character.to_ascii_lowercase());
+        } else if character == '_' || character == '-' {
+            id.push('_');
+        }
+    }
+    if id.is_empty() {
+        "resource".to_string()
+    } else {
+        id
+    }
+}
+
+fn save_prefab_entity(project_dir: &Path, prefab_name: &str, entity: &Entity) -> Result<(), LoadError> {
+    let prefab_path = project_dir.join("prefabs").join(prefab_name);
+    let parent = prefab_path.parent().ok_or_else(|| {
+        LoadError(format!(
+            "Prefab '{}' nao possui diretorio pai valido.",
+            prefab_path.display()
+        ))
+    })?;
+    fs::create_dir_all(parent).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel criar o diretorio '{}' para salvar prefab: {}",
+            parent.display(),
+            error
+        ))
+    })?;
+    let serialized = serde_json::to_string_pretty(entity).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel serializar prefab '{}': {}",
+            prefab_name, error
+        ))
+    })?;
+    fs::write(&prefab_path, serialized).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel salvar prefab '{}' em '{}': {}",
+            prefab_name,
+            prefab_path.display(),
+            error
+        ))
+    })?;
+    Ok(())
+}
+
+fn save_graph_asset(project_dir: &Path, graph_ref: &str, graph_json: &str) -> Result<(), LoadError> {
+    let graph_path = graph_write_path(project_dir, graph_ref)?;
+    let parent = graph_path.parent().ok_or_else(|| {
+        LoadError(format!(
+            "Graph '{}' nao possui diretorio pai valido.",
+            graph_path.display()
+        ))
+    })?;
+    fs::create_dir_all(parent).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel criar o diretorio '{}' para salvar graph: {}",
+            parent.display(),
+            error
+        ))
+    })?;
+    fs::write(&graph_path, graph_json).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel salvar graph '{}' em '{}': {}",
+            graph_ref,
+            graph_path.display(),
+            error
+        ))
+    })?;
+    Ok(())
+}
+
+fn platformer_player_prefab(has_jump_sound: bool) -> Entity {
+    Entity {
+        entity_id: "platformer_player_prefab".to_string(),
+        prefab: None,
+        transform: crate::ugdm::entities::Transform { x: 48, y: 120 },
+        components: Components {
+            sprite: Some(SpriteComponent {
+                asset: PLATFORMER_PLAYER_ASSET.to_string(),
+                frame_width: 32,
+                frame_height: 32,
+                pivot: None,
+                palette_slot: 0,
+                animations: HashMap::new(),
+                priority: "foreground".to_string(),
+            }),
+            collision: Some(CollisionComponent {
+                shape: "aabb".to_string(),
+                width: 32,
+                height: 64,
+                offset: None,
+                solid: true,
+                layer: Some("player".to_string()),
+                collides_with: vec!["ground".to_string()],
+            }),
+            input: Some(InputComponent {
+                device: "joypad1".to_string(),
+                mapping: HashMap::from([
+                    ("jump".to_string(), "BUTTON_A".to_string()),
+                    ("move_left".to_string(), "DPAD_LEFT".to_string()),
+                    ("move_right".to_string(), "DPAD_RIGHT".to_string()),
+                ]),
+            }),
+            physics: Some(PhysicsComponent {
+                gravity: true,
+                gravity_strength: 6,
+                max_velocity: Some(Velocity { x: 32, y: 96 }),
+                friction: 1,
+                bounce: 0,
+            }),
+            audio: Some(AudioComponent {
+                sfx: if has_jump_sound {
+                    HashMap::from([("jump".to_string(), PLATFORMER_JUMP_ASSET.to_string())])
+                } else {
+                    HashMap::new()
+                },
+                bgm: None,
+            }),
+            logic: Some(LogicComponent {
+                graph: None,
+                graph_ref: Some("graphs/platformer_player_logic.json".to_string()),
+                variables: HashMap::new(),
+            }),
+            ..Components::default()
+        },
+    }
+}
+
+fn platformer_camera_prefab() -> Entity {
+    Entity {
+        entity_id: "platformer_camera_prefab".to_string(),
+        prefab: None,
+        transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+        components: Components {
+            camera: Some(CameraComponent {
+                follow_entity: Some("player".to_string()),
+                offset_x: 0,
+                offset_y: 0,
+            }),
+            ..Components::default()
+        },
+    }
+}
+
+fn platformer_tilemap_prefab() -> Entity {
+    Entity {
+        entity_id: "platformer_tilemap_prefab".to_string(),
+        prefab: None,
+        transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+        components: Components {
+            tilemap: Some(TilemapComponent {
+                tileset: PLATFORMER_TILESET_ASSET.to_string(),
+                map_width: 32,
+                map_height: 32,
+                scroll_x: 0,
+                scroll_y: 0,
+            }),
+            ..Components::default()
+        },
+    }
+}
+
+fn platformer_seed_scene() -> Scene {
     let mut scene = canonical_scene(DEFAULT_SCENE_ID, Some("Platformer Seed".to_string()));
     scene.palettes = vec![PaletteEntry {
         slot: 0,
@@ -433,84 +915,21 @@ fn platformer_seed_scene(has_jump_sound: bool) -> Scene {
     scene.entities = vec![
         Entity {
             entity_id: "tilemap_bg".to_string(),
-            prefab: None,
+            prefab: Some("platformer_tilemap.json".to_string()),
             transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
-            components: Components {
-                tilemap: Some(TilemapComponent {
-                    tileset: PLATFORMER_TILESET_ASSET.to_string(),
-                    map_width: 32,
-                    map_height: 32,
-                    scroll_x: 0,
-                    scroll_y: 0,
-                }),
-                ..Components::default()
-            },
+            components: Components::default(),
         },
         Entity {
             entity_id: "player".to_string(),
-            prefab: None,
+            prefab: Some("platformer_player.json".to_string()),
             transform: crate::ugdm::entities::Transform { x: 48, y: 120 },
-            components: Components {
-                sprite: Some(SpriteComponent {
-                    asset: PLATFORMER_PLAYER_ASSET.to_string(),
-                    frame_width: 32,
-                    frame_height: 32,
-                    pivot: None,
-                    palette_slot: 0,
-                    animations: HashMap::new(),
-                    priority: "foreground".to_string(),
-                }),
-                collision: Some(CollisionComponent {
-                    shape: "aabb".to_string(),
-                    width: 32,
-                    height: 64,
-                    offset: None,
-                    solid: true,
-                    layer: Some("player".to_string()),
-                    collides_with: vec!["ground".to_string()],
-                }),
-                input: Some(InputComponent {
-                    device: "joypad1".to_string(),
-                    mapping: HashMap::from([
-                        ("jump".to_string(), "BUTTON_A".to_string()),
-                        ("move_left".to_string(), "DPAD_LEFT".to_string()),
-                        ("move_right".to_string(), "DPAD_RIGHT".to_string()),
-                    ]),
-                }),
-                physics: Some(PhysicsComponent {
-                    gravity: true,
-                    gravity_strength: 6,
-                    max_velocity: Some(Velocity { x: 32, y: 96 }),
-                    friction: 1,
-                    bounce: 0,
-                }),
-                audio: Some(AudioComponent {
-                    sfx: if has_jump_sound {
-                        HashMap::from([("jump".to_string(), PLATFORMER_JUMP_ASSET.to_string())])
-                    } else {
-                        HashMap::new()
-                    },
-                    bgm: None,
-                }),
-                logic: Some(LogicComponent {
-                    graph: Some(platformer_logic_graph()),
-                    variables: HashMap::new(),
-                }),
-                ..Components::default()
-            },
+            components: Components::default(),
         },
         Entity {
             entity_id: "main_camera".to_string(),
-            prefab: None,
+            prefab: Some("platformer_camera.json".to_string()),
             transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
-            components: Components {
-                camera: Some(CameraComponent {
-                    follow_entity: Some("player".to_string()),
-                    offset_x: 0,
-                    offset_y: 0,
-                }),
-                ..Components::default()
-            },
+            components: Components::default(),
         },
     ];
     scene
@@ -695,20 +1114,50 @@ pub fn stamp_project_template_metadata(
                 template_id
             ))
         })?;
-    let mut project = load_project(project_dir)?;
-    let imported_at_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| LoadError(format!("Relogio do sistema invalido: {}", error)))?
-        .as_millis();
     let source_path = donor_path
         .map(|path| path.to_string_lossy().to_string())
         .or(entry.default_donor_path.clone())
         .unwrap_or_else(|| "builtin".to_string());
 
+    stamp_project_metadata(
+        project_dir,
+        entry.id,
+        registry.version,
+        entry.source_kind,
+        source_path,
+    )
+}
+
+pub fn stamp_imported_sgdk_metadata(
+    project_dir: &Path,
+    source_path: &Path,
+) -> Result<Project, LoadError> {
+    stamp_project_metadata(
+        project_dir,
+        "imported_sgdk".to_string(),
+        "1.0.0".to_string(),
+        "imported_sgdk".to_string(),
+        source_path.to_string_lossy().to_string(),
+    )
+}
+
+fn stamp_project_metadata(
+    project_dir: &Path,
+    template_id: String,
+    template_version: String,
+    source_kind: String,
+    source_path: String,
+) -> Result<Project, LoadError> {
+    let mut project = load_project(project_dir)?;
+    let imported_at_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| LoadError(format!("Relogio do sistema invalido: {}", error)))?
+        .as_millis();
+
     project.template_metadata = Some(TemplateMetadata {
-        template_id: entry.id,
-        template_version: registry.version,
-        source_kind: entry.source_kind,
+        template_id,
+        template_version,
+        source_kind,
         source_path,
         imported_at_ms,
     });
@@ -786,7 +1235,8 @@ pub fn resolve_prefabs(project_dir: &Path, scene: &Scene) -> Result<Scene, LoadE
         .iter()
         .map(|entity| {
             let mut stack = Vec::new();
-            resolve_entity_prefab(project_dir, entity, &mut stack)
+            let resolved_entity = resolve_entity_prefab(project_dir, entity, &mut stack)?;
+            resolve_entity_logic_graph(project_dir, &resolved_entity)
         })
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -794,6 +1244,60 @@ pub fn resolve_prefabs(project_dir: &Path, scene: &Scene) -> Result<Scene, LoadE
         entities,
         ..scene.clone()
     })
+}
+
+pub fn sync_external_graph_refs(
+    project_dir: &Path,
+    source_scene: &mut Scene,
+    resolved_scene: &Scene,
+) -> Result<(), LoadError> {
+    for source_entity in &mut source_scene.entities {
+        let Some(source_logic) = source_entity.components.logic.as_mut() else {
+            continue;
+        };
+
+        let Some(graph_ref) = source_logic
+            .graph_ref
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+
+        let resolved_logic = resolved_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == source_entity.entity_id)
+            .and_then(|entity| entity.components.logic.as_ref());
+
+        let Some(graph_json) = resolved_logic
+            .and_then(|logic| logic.graph.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            continue;
+        };
+
+        let full_path = graph_write_path(project_dir, graph_ref)?;
+        if let Some(parent) = full_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                LoadError(format!(
+                    "Nao foi possivel criar diretorio para graph_ref '{}': {}",
+                    graph_ref, error
+                ))
+            })?;
+        }
+        fs::write(&full_path, graph_json).map_err(|error| {
+            LoadError(format!(
+                "Nao foi possivel escrever graph_ref '{}' para entidade '{}': {}",
+                graph_ref, source_entity.entity_id, error
+            ))
+        })?;
+        source_logic.graph = None;
+    }
+
+    Ok(())
 }
 
 pub fn migrate_project(mut project: Project) -> Project {
@@ -918,6 +1422,7 @@ fn starter_scene(scene_id: &str, display_name: String, _target: &str) -> Scene {
             }),
             logic: Some(LogicComponent {
                 graph: Some(logic_graph),
+                graph_ref: None,
                 variables: HashMap::new(),
             }),
             ..Components::default()
@@ -1533,6 +2038,95 @@ fn normalize_prefab_ref(prefab_ref: &str) -> Result<PathBuf, LoadError> {
     Ok(relative)
 }
 
+fn resolve_entity_logic_graph(project_dir: &Path, entity: &Entity) -> Result<Entity, LoadError> {
+    let Some(logic) = entity.components.logic.as_ref() else {
+        return Ok(entity.clone());
+    };
+
+    let Some(graph_ref) = logic
+        .graph_ref
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(entity.clone());
+    };
+
+    if logic.graph.as_deref().is_some_and(|graph| !graph.trim().is_empty()) {
+        return Ok(entity.clone());
+    }
+
+    let full_path = graph_path(project_dir, graph_ref)?;
+    let content = fs::read_to_string(&full_path).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel ler graph_ref '{}' para entidade '{}': {}",
+            graph_ref, entity.entity_id, error
+        ))
+    })?;
+
+    let mut resolved_entity = entity.clone();
+    if let Some(resolved_logic) = resolved_entity.components.logic.as_mut() {
+        resolved_logic.graph = Some(content);
+    }
+
+    Ok(resolved_entity)
+}
+
+fn graph_path(project_dir: &Path, graph_ref: &str) -> Result<PathBuf, LoadError> {
+    let relative = normalize_graph_ref(graph_ref)?;
+    let full_path = project_dir.join("graphs").join(&relative);
+
+    if !full_path.exists() {
+        return Err(LoadError(format!(
+            "Graph '{}' nao encontrado em '{}'.",
+            graph_ref,
+            full_path.display()
+        )));
+    }
+
+    Ok(full_path)
+}
+
+fn graph_write_path(project_dir: &Path, graph_ref: &str) -> Result<PathBuf, LoadError> {
+    let relative = normalize_graph_ref(graph_ref)?;
+    Ok(project_dir.join("graphs").join(relative))
+}
+
+fn normalize_graph_ref(graph_ref: &str) -> Result<PathBuf, LoadError> {
+    let trimmed = graph_ref.trim();
+    if trimmed.is_empty() {
+        return Err(LoadError("scene: campo 'graph_ref' nao pode ser vazio.".into()));
+    }
+
+    let relative = PathBuf::from(trimmed);
+    if relative.is_absolute()
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(LoadError(format!(
+            "Graph ref '{}' deve usar caminho relativo dentro de 'graphs/'.",
+            graph_ref
+        )));
+    }
+
+    if let Ok(stripped) = relative.strip_prefix("graphs") {
+        let normalized = stripped.to_path_buf();
+        if normalized.as_os_str().is_empty() {
+            return Err(LoadError(format!(
+                "Graph ref '{}' deve usar caminho relativo dentro de 'graphs/'.",
+                graph_ref
+            )));
+        }
+        return Ok(normalized);
+    }
+
+    Ok(relative)
+}
+
 fn load_prefab_entity(prefab_path: &Path) -> Result<Entity, LoadError> {
     let content = fs::read_to_string(prefab_path).map_err(|error| {
         LoadError(format!(
@@ -1840,6 +2434,46 @@ mod tests {
             .expect("write boot source");
     }
 
+    fn write_generic_sgdk_donor_fixture(dir: &Path) {
+        fs::create_dir_all(dir.join("res").join("images")).expect("create donor image dir");
+        fs::create_dir_all(dir.join("res").join("maps")).expect("create donor map dir");
+        fs::create_dir_all(dir.join("res").join("sound")).expect("create donor sound dir");
+        fs::create_dir_all(dir.join("out")).expect("create donor out dir");
+        fs::create_dir_all(dir.join("src")).expect("create donor src dir");
+        fs::create_dir_all(dir.join("inc")).expect("create donor inc dir");
+        fs::create_dir_all(dir.join("boot")).expect("create donor boot dir");
+
+        image::RgbaImage::from_pixel(32, 32, image::Rgba([0, 220, 120, 255]))
+            .save(dir.join("res").join("images").join("hero.png"))
+            .expect("write hero sprite");
+        image::RgbaImage::from_pixel(128, 128, image::Rgba([32, 64, 180, 255]))
+            .save(dir.join("res").join("maps").join("stage.png"))
+            .expect("write stage image");
+        fs::write(dir.join("res").join("sound").join("jump.wav"), minimal_wav_bytes())
+            .expect("write wav");
+        fs::write(dir.join("res").join("sound").join("theme.xgm"), b"xgm-data")
+            .expect("write xgm");
+        fs::write(dir.join("res").join("sound").join("forbidden.vgm"), b"vgm-data")
+            .expect("write vgm");
+        fs::write(
+            dir.join("res").join("resources.res"),
+            [
+                "SPRITE hero images/hero.png 4 4 FAST 0",
+                "IMAGE stage maps/stage.png NONE",
+                "WAV jump sound/jump.wav 22050",
+                "XGM theme sound/theme.xgm",
+                "VGM forbidden sound/forbidden.vgm",
+            ]
+            .join("\n"),
+        )
+        .expect("write resources.res");
+        fs::write(dir.join("out").join("rom.bin"), b"forbidden-rom").expect("write rom");
+        fs::write(dir.join("src").join("main.c"), b"int main(void){return 0;}")
+            .expect("write main");
+        fs::write(dir.join("inc").join("game.h"), b"void game(void);").expect("write header");
+        fs::write(dir.join("boot").join("startup.s"), b"boot").expect("write boot");
+    }
+
     fn minimal_wav_bytes() -> Vec<u8> {
         vec![
             82, 73, 70, 70, 36, 0, 0, 0, 87, 65, 86, 69, 102, 109, 116, 32, 16, 0, 0, 0, 1, 0,
@@ -1865,7 +2499,18 @@ mod tests {
         let templates = list_project_templates().expect("list templates");
         let ids = templates.iter().map(|template| template.id.as_str()).collect::<Vec<_>>();
 
-        assert_eq!(ids, vec!["empty", "starter_guided", "platformer_seed"]);
+        assert_eq!(
+            ids,
+            vec![
+                "empty",
+                "starter_guided",
+                "platformer_seed",
+                "rpg_seed",
+                "fighter_seed",
+                "racing_seed",
+                "action_seed",
+            ]
+        );
         assert!(templates
             .iter()
             .find(|template| template.id == "empty")
@@ -1908,10 +2553,201 @@ mod tests {
         assert!(level.is_file());
         assert!(jump.is_file());
         assert_eq!(scene.entities.len(), 3);
+        assert_eq!(scene.entities[0].prefab.as_deref(), Some("platformer_tilemap.json"));
+        assert_eq!(scene.entities[1].prefab.as_deref(), Some("platformer_player.json"));
+        assert_eq!(scene.entities[2].prefab.as_deref(), Some("platformer_camera.json"));
+        assert!(project_dir.join("prefabs").join("platformer_player.json").is_file());
+        assert!(project_dir.join("prefabs").join("platformer_camera.json").is_file());
+        assert!(project_dir.join("prefabs").join("platformer_tilemap.json").is_file());
+        assert!(project_dir.join("graphs").join("platformer_player_logic.json").is_file());
         assert!(!project_dir.join("out").exists());
         assert!(!project_dir.join("src").exists());
         assert!(!project_dir.join("inc").exists());
         assert!(!project_dir.join("assets").join("audio").join("sonic2Emerald.vgm").exists());
+
+        let _ = fs::remove_dir_all(donor_dir);
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn resolve_prefabs_loads_logic_graph_from_graph_ref() {
+        let project_dir = temp_dir("graph-ref-resolve");
+        create_project_skeleton(&project_dir, "Graph Ref Resolve", "megadrive")
+            .expect("create project skeleton");
+        save_graph_asset(
+            &project_dir,
+            "graphs/player_logic.json",
+            &platformer_logic_graph(),
+        )
+        .expect("save graph asset");
+
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            schema_version: Some(CURRENT_SCHEMA_VERSION.to_string()),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "player".to_string(),
+                prefab: None,
+                transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+                components: Components {
+                    logic: Some(LogicComponent {
+                        graph: None,
+                        graph_ref: Some("graphs/player_logic.json".to_string()),
+                        variables: HashMap::new(),
+                    }),
+                    ..Components::default()
+                },
+            }],
+            palettes: Vec::new(),
+            retrofx: None,
+        };
+
+        let resolved = resolve_prefabs(&project_dir, &scene).expect("resolve graph ref");
+
+        assert!(resolved.entities[0]
+            .components
+            .logic
+            .as_ref()
+            .and_then(|logic| logic.graph.as_ref())
+            .is_some_and(|graph| graph.contains("\"event_start\"")));
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn sync_external_graph_refs_writes_graph_file_and_keeps_scene_externalized() {
+        let project_dir = temp_dir("graph-ref-sync");
+        create_project_skeleton(&project_dir, "Graph Ref Sync", "megadrive")
+            .expect("create project skeleton");
+
+        let mut source_scene = Scene {
+            scene_id: "main".to_string(),
+            schema_version: Some(CURRENT_SCHEMA_VERSION.to_string()),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "player".to_string(),
+                prefab: None,
+                transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+                components: Components {
+                    logic: Some(LogicComponent {
+                        graph: Some("{\"stale\":true}".to_string()),
+                        graph_ref: Some("graphs/player_logic.json".to_string()),
+                        variables: HashMap::new(),
+                    }),
+                    ..Components::default()
+                },
+            }],
+            palettes: Vec::new(),
+            retrofx: None,
+        };
+        let resolved_scene = Scene {
+            entities: vec![Entity {
+                entity_id: "player".to_string(),
+                prefab: None,
+                transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+                components: Components {
+                    logic: Some(LogicComponent {
+                        graph: Some(platformer_logic_graph()),
+                        graph_ref: Some("graphs/player_logic.json".to_string()),
+                        variables: HashMap::new(),
+                    }),
+                    ..Components::default()
+                },
+            }],
+            ..source_scene.clone()
+        };
+
+        sync_external_graph_refs(&project_dir, &mut source_scene, &resolved_scene)
+            .expect("sync external graphs");
+
+        let saved_graph = fs::read_to_string(project_dir.join("graphs").join("player_logic.json"))
+            .expect("read saved graph");
+        assert!(saved_graph.contains("\"event_start\""));
+        assert_eq!(
+            source_scene.entities[0]
+                .components
+                .logic
+                .as_ref()
+                .and_then(|logic| logic.graph.as_ref()),
+            None
+        );
+        assert_eq!(
+            source_scene.entities[0]
+                .components
+                .logic
+                .as_ref()
+                .and_then(|logic| logic.graph_ref.as_deref()),
+            Some("graphs/player_logic.json")
+        );
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn parse_sgdk_manifest_extracts_kind_name_path_and_params() {
+        let manifest = r#"
+            SPRITE hero "images/hero.png" 4 4 FAST 0
+            IMAGE stage maps/stage.png NONE
+            WAV jump sound/jump.wav 22050
+            # comment
+            VGM forbidden sound/forbidden.vgm
+        "#;
+
+        let resources = parse_sgdk_manifest(manifest);
+
+        assert_eq!(resources.len(), 4);
+        assert_eq!(resources[0].kind, "SPRITE");
+        assert_eq!(resources[0].name, "hero");
+        assert_eq!(resources[0].asset_path, "images/hero.png");
+        assert_eq!(resources[0].params, vec!["4", "4", "FAST", "0"]);
+        assert_eq!(resources[1].kind, "IMAGE");
+        assert_eq!(resources[2].kind, "WAV");
+        assert_eq!(resources[3].kind, "VGM");
+    }
+
+    #[test]
+    fn import_sgdk_project_copies_supported_assets_and_skips_forbidden_outputs() {
+        let donor_dir = temp_dir("sgdk-import-donor");
+        let project_dir = temp_dir("sgdk-import-project");
+        create_project_skeleton(&project_dir, "Imported SGDK", "megadrive")
+            .expect("create project skeleton");
+        write_generic_sgdk_donor_fixture(&donor_dir);
+
+        let scene = import_sgdk_project(&project_dir, &donor_dir).expect("import sgdk project");
+
+        assert!(project_dir.join("assets").join("sprites").join("hero.png").is_file());
+        assert!(project_dir.join("assets").join("tilesets").join("stage.png").is_file());
+        assert!(project_dir.join("assets").join("audio").join("jump.wav").is_file());
+        assert!(project_dir.join("assets").join("audio").join("theme.xgm").is_file());
+        assert!(!project_dir.join("assets").join("audio").join("forbidden.vgm").exists());
+        assert!(!project_dir.join("src").exists());
+        assert!(!project_dir.join("inc").exists());
+        assert!(!project_dir.join("out").exists());
+        assert_eq!(scene.entities.len(), 4);
+        assert!(scene
+            .entities
+            .iter()
+            .any(|entity| entity.components.sprite.as_ref().is_some_and(|sprite| sprite.asset == "assets/sprites/hero.png")));
+        assert!(scene.entities.iter().any(|entity| {
+            entity
+                .components
+                .tilemap
+                .as_ref()
+                .is_some_and(|tilemap| tilemap.tileset == "assets/tilesets/stage.png")
+        }));
+        assert!(scene.entities.iter().any(|entity| {
+            entity
+                .components
+                .audio
+                .as_ref()
+                .is_some_and(|audio| {
+                    audio.sfx.get("jump") == Some(&"assets/audio/jump.wav".to_string())
+                        && audio.bgm.as_deref() == Some("assets/audio/theme.xgm")
+                })
+        }));
+        assert!(scene.entities.iter().any(|entity| entity.entity_id == "main_camera"));
 
         let _ = fs::remove_dir_all(donor_dir);
         let _ = fs::remove_dir_all(project_dir);
@@ -2279,6 +3115,7 @@ mod tests {
                         })
                         .to_string(),
                     ),
+                    graph_ref: None,
                     variables: HashMap::new(),
                 }),
                 ..Components::default()
@@ -2506,3 +3343,4 @@ mod tests {
         let _ = fs::remove_dir_all(project_dir);
     }
 }
+

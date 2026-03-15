@@ -94,8 +94,8 @@ export async function persistActiveScene(
   scope: string,
   successMessage?: string
 ): Promise<boolean> {
-  const { activeScenePath, activeSceneSource, logMessage } = useEditorStore.getState();
-  if (!activeSceneSource) {
+  const { activeScene, activeScenePath, activeSceneSource, logMessage } = useEditorStore.getState();
+  if (!activeSceneSource || !activeScene) {
     return true;
   }
 
@@ -103,7 +103,8 @@ export async function persistActiveScene(
     const result = await saveSceneData(
       projectDir,
       JSON.stringify(activeSceneSource, null, 2),
-      activeScenePath || undefined
+      activeScenePath || undefined,
+      JSON.stringify(activeScene, null, 2)
     );
     if (result.ok) {
       if (successMessage) {

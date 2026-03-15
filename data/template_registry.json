@@ -34,6 +34,54 @@
       "default_donor_path": "F:\\Projects\\MegaDrive_DEV\\SGDK_templates\\templates\\plataform",
       "recommended_target": "megadrive",
       "experimental": true
+    },
+    {
+      "id": "rpg_seed",
+      "name": "RPG Top-Down",
+      "description": "Importa recursos SGDK externos de um projeto RPG e cria uma cena base editavel.",
+      "genre": "rpg",
+      "difficulty": "intermediate",
+      "features": ["sprite", "tilemap", "camera", "audio"],
+      "source_kind": "external_sgdk",
+      "default_donor_path": "F:\\Projects\\MegaDrive_DEV\\SGDK_templates\\templates\\rpg",
+      "recommended_target": "megadrive",
+      "experimental": true
+    },
+    {
+      "id": "fighter_seed",
+      "name": "Beat'em Up",
+      "description": "Importa recursos SGDK externos de um projeto de combate e cria uma cena base editavel.",
+      "genre": "action",
+      "difficulty": "advanced",
+      "features": ["sprite", "tilemap", "audio", "camera"],
+      "source_kind": "external_sgdk",
+      "default_donor_path": "F:\\Projects\\MegaDrive_DEV\\SGDK_templates\\templates\\briga_de_rua",
+      "recommended_target": "megadrive",
+      "experimental": true
+    },
+    {
+      "id": "racing_seed",
+      "name": "Corrida",
+      "description": "Importa recursos SGDK externos de um projeto de corrida e cria uma cena base editavel.",
+      "genre": "racing",
+      "difficulty": "intermediate",
+      "features": ["sprite", "tilemap", "audio", "camera"],
+      "source_kind": "external_sgdk",
+      "default_donor_path": "F:\\Projects\\MegaDrive_DEV\\SGDK_templates\\templates\\corrida_space",
+      "recommended_target": "megadrive",
+      "experimental": true
+    },
+    {
+      "id": "action_seed",
+      "name": "Acao",
+      "description": "Importa recursos SGDK externos de um projeto de acao e cria uma cena base editavel.",
+      "genre": "action",
+      "difficulty": "advanced",
+      "features": ["sprite", "tilemap", "audio", "camera"],
+      "source_kind": "external_sgdk",
+      "default_donor_path": "F:\\Projects\\MegaDrive_DEV\\SGDK_templates\\templates\\a\u00e7\u00e3o",
+      "recommended_target": "megadrive",
+      "experimental": true
     }
   ]
 }

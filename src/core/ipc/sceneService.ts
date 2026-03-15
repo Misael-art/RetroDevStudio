@@ -75,6 +75,7 @@ export interface LogicVariable {
 
 export interface LogicComponent {
   graph?: string;
+  graph_ref?: string | null;
   variables?: Record<string, LogicVariable>;
 }
 
@@ -188,9 +189,10 @@ export function getSceneData(projectDir: string, scenePath?: string): Promise<Sc
 export function saveSceneData(
   projectDir: string,
   sceneJson: string,
-  scenePath?: string
+  scenePath?: string,
+  resolvedSceneJson?: string
 ): Promise<{ ok: boolean; message: string }> {
-  return invoke("save_scene_data", { projectDir, sceneJson, scenePath });
+  return invoke("save_scene_data", { projectDir, sceneJson, scenePath, resolvedSceneJson });
 }
 
 export function listScenes(projectDir: string): Promise<SceneInfo[]> {

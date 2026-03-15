@@ -2929,6 +2929,7 @@ mod tests {
                 components: Components {
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
+                        graph_ref: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -3045,6 +3046,7 @@ mod tests {
                     }),
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
+                        graph_ref: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -3149,6 +3151,7 @@ mod tests {
                 components: Components {
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
+                        graph_ref: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -3247,6 +3250,7 @@ mod tests {
                         }),
                         logic: Some(crate::ugdm::components::LogicComponent {
                             graph: Some(logic_graph.to_string()),
+                            graph_ref: None,
                             variables: HashMap::new(),
                         }),
                         ..Components::default()
@@ -3398,6 +3402,7 @@ mod tests {
                         }),
                         logic: Some(crate::ugdm::components::LogicComponent {
                             graph: Some(logic_graph.to_string()),
+                            graph_ref: None,
                             variables: HashMap::new(),
                         }),
                         ..Components::default()
@@ -3608,6 +3613,7 @@ mod tests {
                 components: Components {
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
+                        graph_ref: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -3722,6 +3728,7 @@ mod tests {
                     components: Components {
                         logic: Some(crate::ugdm::components::LogicComponent {
                             graph: Some(graph.to_string()),
+                            graph_ref: None,
                             variables: HashMap::new(),
                         }),
                         ..Components::default()
@@ -3847,6 +3854,7 @@ mod tests {
                         }),
                         logic: Some(crate::ugdm::components::LogicComponent {
                             graph: Some(logic_graph),
+                            graph_ref: None,
                             variables: HashMap::new(),
                         }),
                         ..Components::default()
@@ -3998,6 +4006,7 @@ mod tests {
                     }),
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
+                        graph_ref: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -4090,6 +4099,7 @@ mod tests {
                     }),
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
+                        graph_ref: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -4160,6 +4170,7 @@ mod tests {
                     }),
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
+                        graph_ref: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -4237,6 +4248,7 @@ mod tests {
                     }),
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
+                        graph_ref: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -4262,4 +4274,5 @@ mod tests {
         assert!(events.iter().any(|(event, ops)| matches!(event, HardwareEventKind::HBlank) && matches!(ops[0], LogicOp::PlaySound { .. })));
     }
 }
+
 
