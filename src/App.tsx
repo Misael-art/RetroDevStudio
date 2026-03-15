@@ -18,12 +18,15 @@ import {
 import { pollProjectAssetChanges } from "./core/ipc/projectWatcherService";
 import {
   getSceneData,
-  parseScene,
   type Entity,
   type Scene,
 } from "./core/ipc/sceneService";
 import { useEditorStore } from "./core/store/editorStore";
-import { persistActiveScene, reloadSceneFromDisk } from "./core/scenePersistence";
+import {
+  hydrateSceneResult,
+  persistActiveScene,
+  reloadSceneFromDisk,
+} from "./core/scenePersistence";
 import {
   detectRomDependency,
   getThirdPartyStatus,
@@ -508,8 +511,8 @@ export default function App() {
       return false;
     }
 
-    const scene = parseScene(sceneData);
-    if (!scene) {
+    const hydrated = await hydrateSceneResult(projectDir, sceneData);
+    if (!hydrated) {
       setActiveProject(projectDir, projectName);
       setSelectedEntityId(null);
       setHwStatus(hw);
@@ -523,7 +526,7 @@ export default function App() {
     setSelectedEntityId(null);
     setHwStatus(hw);
     setActiveScenePath(sceneData.scene_path);
-    setActiveScene(scene);
+    setActiveScene(hydrated.resolvedScene, hydrated.sourceScene);
     if (sceneData.target === "megadrive" || sceneData.target === "snes") {
       setActiveTarget(sceneData.target);
     }
@@ -974,7 +977,7 @@ export default function App() {
         }
 
         state.setSelectedEntityId(null);
-        state.setActiveScene(scene);
+        state.setActiveScene(scene, scene);
         return true;
       },
       getState: () => {

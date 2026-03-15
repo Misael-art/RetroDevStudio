@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   listProjectTemplates: vi.fn(),
   createProjectFromTemplate: vi.fn(),
   setProjectTarget: vi.fn(),
+  hydrateSceneResult: vi.fn(),
   persistActiveScene: vi.fn(),
   reloadSceneFromDisk: vi.fn(),
   getThirdPartyStatus: vi.fn(),
@@ -118,6 +119,7 @@ vi.mock("./core/ipc/projectService", () => ({
 }));
 
 vi.mock("./core/scenePersistence", () => ({
+  hydrateSceneResult: mocks.hydrateSceneResult,
   persistActiveScene: mocks.persistActiveScene,
   reloadSceneFromDisk: mocks.reloadSceneFromDisk,
 }));
@@ -242,11 +244,31 @@ describe("App build flow", () => {
         entities: [],
         background_layers: [],
       },
+      activeSceneSource: {
+        scene_id: "main_scene",
+        display_name: "Main Scene",
+        entities: [],
+        background_layers: [],
+      },
       emulPaused: false,
       consoleEntries: [],
       consoleVisible: true,
     });
 
+    mocks.hydrateSceneResult.mockResolvedValue({
+      sourceScene: {
+        scene_id: "main_scene",
+        display_name: "Main Scene",
+        entities: [],
+        background_layers: [],
+      },
+      resolvedScene: {
+        scene_id: "main_scene",
+        display_name: "Main Scene",
+        entities: [],
+        background_layers: [],
+      },
+    });
     mocks.persistActiveScene.mockResolvedValue(true);
     mocks.reloadSceneFromDisk.mockResolvedValue(true);
     mocks.dialogOpen.mockResolvedValue("F:/Projects/RetroDevStudio/tests/fixtures");
@@ -706,6 +728,27 @@ describe("App build flow", () => {
   });
 
   it("keeps Build & Run enabled when the live validation snapshot only has warnings", async () => {
+    mocks.validateSceneDraft.mockResolvedValue({
+      ok: true,
+      error: "",
+      hw_status: {
+        vram_used: 57344,
+        vram_limit: 65536,
+        sprite_count: 1,
+        sprite_limit: 80,
+        scanline_sprite_peak: 1,
+        scanline_sprite_limit: 20,
+        dma_used: 57344,
+        dma_limit: 7372,
+        palette_banks_used: 1,
+        palette_banks_limit: 4,
+        bg_layers: 0,
+        bg_layers_limit: 4,
+        errors: [],
+        warnings: ["VRAM Warning: uso alto de VRAM."],
+      },
+    });
+
     await act(async () => {
       useEditorStore.setState({
         hwStatus: {

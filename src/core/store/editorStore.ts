@@ -38,6 +38,7 @@ export interface Tab {
 
 export interface UndoEntry {
   activeScene: Scene | null;
+  activeSceneSource: Scene | null;
   selectedEntityId: string | null;
 }
 
@@ -61,6 +62,7 @@ export interface StoreState {
   redoStack: UndoEntry[];
   pendingHistorySnapshot: UndoEntry | null;
   activeScene: Scene | null;
+  activeSceneSource: Scene | null;
   emulPaused: boolean;
 }
 
@@ -80,7 +82,7 @@ export interface StoreActions {
   setHwValidationError: (revision: number, error: string) => void;
   requestHwValidationRefresh: () => void;
   resetHwValidation: () => void;
-  setActiveScene: (scene: Scene | null) => void;
+  setActiveScene: (scene: Scene | null, sourceScene?: Scene | null) => void;
   beginHistoryCapture: () => void;
   commitHistoryCapture: () => void;
   cancelHistoryCapture: () => void;
@@ -111,16 +113,57 @@ function cloneSceneSnapshot(scene: Scene | null): Scene | null {
   return scene ? structuredClone(scene) : null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function mergePatchedValue<T>(current: T, patch: unknown): T {
+  if (!isRecord(patch)) {
+    return structuredClone(patch) as T;
+  }
+
+  const currentRecord: Record<string, unknown> = isRecord(current) ? current : {};
+  const merged: Record<string, unknown> = { ...currentRecord };
+
+  for (const [key, value] of Object.entries(patch)) {
+    merged[key] = mergePatchedValue(currentRecord[key], value);
+  }
+
+  return merged as T;
+}
+
+function prunePatchAgainstBase(patch: unknown, base: unknown): unknown | undefined {
+  if (!isRecord(patch)) {
+    return Object.is(patch, base) ? undefined : structuredClone(patch);
+  }
+
+  const baseRecord = isRecord(base) ? base : {};
+  const pruned: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(patch)) {
+    const child = prunePatchAgainstBase(value, baseRecord[key]);
+    if (child !== undefined) {
+      pruned[key] = child;
+    }
+  }
+
+  return Object.keys(pruned).length > 0 ? pruned : undefined;
+}
+
 function cloneUndoEntry(entry: UndoEntry): UndoEntry {
   return {
     activeScene: cloneSceneSnapshot(entry.activeScene),
+    activeSceneSource: cloneSceneSnapshot(entry.activeSceneSource),
     selectedEntityId: entry.selectedEntityId,
   };
 }
 
-function createUndoEntry(state: Pick<StoreState, "activeScene" | "selectedEntityId">): UndoEntry {
+function createUndoEntry(
+  state: Pick<StoreState, "activeScene" | "activeSceneSource" | "selectedEntityId">
+): UndoEntry {
   return {
     activeScene: cloneSceneSnapshot(state.activeScene),
+    activeSceneSource: cloneSceneSnapshot(state.activeSceneSource),
     selectedEntityId: state.selectedEntityId,
   };
 }
@@ -234,9 +277,11 @@ export const useEditorStore = create<EditorState>((set) => ({
   resetHwValidation: () => set({ ...INITIAL_VALIDATION_STATE }),
 
   activeScene: null,
-  setActiveScene: (scene) =>
+  activeSceneSource: null,
+  setActiveScene: (scene, sourceScene = scene) =>
     set((state) => ({
       activeScene: scene,
+      activeSceneSource: sourceScene,
       selectedEntityId: resolveSceneSelection(scene, state.selectedEntityId),
       sceneRevision: scene ? state.sceneRevision + 1 : 0,
       undoStack: [],
@@ -271,6 +316,17 @@ export const useEditorStore = create<EditorState>((set) => ({
     set((state) => {
       if (!state.activeScene) return {};
       const recordHistory = options?.recordHistory ?? true;
+      const resolvedEntity = state.activeScene.entities.find((entity) => entity.entity_id === entityId);
+      const preferredSourceScene = state.activeSceneSource ?? state.activeScene;
+      const sourceScene = preferredSourceScene.entities.some((entity) => entity.entity_id === entityId)
+        ? preferredSourceScene
+        : state.activeScene;
+      const sourceEntity = sourceScene.entities.find((entity) => entity.entity_id === entityId);
+      if (!resolvedEntity || !sourceEntity) {
+        return {};
+      }
+
+      const sourcePatch = prunePatchAgainstBase(patch, resolvedEntity);
       return {
         ...(recordHistory
           ? {
@@ -282,7 +338,15 @@ export const useEditorStore = create<EditorState>((set) => ({
         activeScene: {
           ...state.activeScene,
           entities: state.activeScene.entities.map((entity) =>
-            entity.entity_id === entityId ? { ...entity, ...patch } : entity
+            entity.entity_id === entityId ? mergePatchedValue(entity, patch) : entity
+          ),
+        },
+        activeSceneSource: {
+          ...sourceScene,
+          entities: sourceScene.entities.map((entity) =>
+            entity.entity_id === entityId && sourcePatch !== undefined
+              ? mergePatchedValue(entity, sourcePatch)
+              : entity
           ),
         },
         sceneRevision: state.sceneRevision + 1,
@@ -291,6 +355,10 @@ export const useEditorStore = create<EditorState>((set) => ({
   addEntity: (entity) =>
     set((state) => {
       if (!state.activeScene) return {};
+      const sourceScene =
+        state.activeSceneSource?.scene_id === state.activeScene.scene_id
+          ? state.activeSceneSource
+          : state.activeScene;
       return {
         undoStack: pushHistoryEntry(state.undoStack, createUndoEntry(state)),
         redoStack: [],
@@ -299,12 +367,20 @@ export const useEditorStore = create<EditorState>((set) => ({
           ...state.activeScene,
           entities: [...state.activeScene.entities, entity],
         },
+        activeSceneSource: {
+          ...sourceScene,
+          entities: [...sourceScene.entities, structuredClone(entity)],
+        },
         sceneRevision: state.sceneRevision + 1,
       };
     }),
   removeEntity: (entityId) =>
     set((state) => {
       if (!state.activeScene) return {};
+      const preferredSourceScene = state.activeSceneSource ?? state.activeScene;
+      const sourceScene = preferredSourceScene.entities.some((entity) => entity.entity_id === entityId)
+        ? preferredSourceScene
+        : state.activeScene;
       return {
         undoStack: pushHistoryEntry(state.undoStack, createUndoEntry(state)),
         redoStack: [],
@@ -313,6 +389,10 @@ export const useEditorStore = create<EditorState>((set) => ({
           ...state.activeScene,
           entities: state.activeScene.entities.filter((entity) => entity.entity_id !== entityId),
         },
+        activeSceneSource: {
+          ...sourceScene,
+          entities: sourceScene.entities.filter((entity) => entity.entity_id !== entityId),
+        },
         selectedEntityId: state.selectedEntityId === entityId ? null : state.selectedEntityId,
         sceneRevision: state.sceneRevision + 1,
       };
@@ -320,6 +400,12 @@ export const useEditorStore = create<EditorState>((set) => ({
   updateBackgroundLayer: (layerId, patch) =>
     set((state) => {
       if (!state.activeScene) return {};
+      const preferredSourceScene = state.activeSceneSource ?? state.activeScene;
+      const sourceScene = preferredSourceScene.background_layers.some(
+        (layer) => layer.layer_id === layerId
+      )
+        ? preferredSourceScene
+        : state.activeScene;
       return {
         undoStack: pushHistoryEntry(state.undoStack, createUndoEntry(state)),
         redoStack: [],
@@ -327,7 +413,13 @@ export const useEditorStore = create<EditorState>((set) => ({
         activeScene: {
           ...state.activeScene,
           background_layers: state.activeScene.background_layers.map((layer) =>
-            layer.layer_id === layerId ? { ...layer, ...patch } : layer
+            layer.layer_id === layerId ? mergePatchedValue(layer, patch) : layer
+          ),
+        },
+        activeSceneSource: {
+          ...sourceScene,
+          background_layers: sourceScene.background_layers.map((layer) =>
+            layer.layer_id === layerId ? mergePatchedValue(layer, patch) : layer
           ),
         },
         sceneRevision: state.sceneRevision + 1,
@@ -344,6 +436,7 @@ export const useEditorStore = create<EditorState>((set) => ({
 
       return {
         activeScene: cloneSceneSnapshot(previous.activeScene),
+        activeSceneSource: cloneSceneSnapshot(previous.activeSceneSource),
         selectedEntityId: previous.selectedEntityId,
         undoStack: state.undoStack.slice(0, -1),
         redoStack: pushHistoryEntry(state.redoStack, createUndoEntry(state)),
@@ -362,6 +455,7 @@ export const useEditorStore = create<EditorState>((set) => ({
 
       return {
         activeScene: cloneSceneSnapshot(next.activeScene),
+        activeSceneSource: cloneSceneSnapshot(next.activeSceneSource),
         selectedEntityId: next.selectedEntityId,
         undoStack: pushHistoryEntry(state.undoStack, createUndoEntry(state)),
         redoStack: state.redoStack.slice(0, -1),

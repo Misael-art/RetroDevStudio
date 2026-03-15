@@ -1008,10 +1008,22 @@ pub struct SceneDataResult {
     pub scene_path: String,
 }
 
+#[derive(serde::Serialize)]
+pub struct ResolveSceneResult {
+    pub ok: bool,
+    pub error: String,
+    pub scene_json: String,
+}
+
 /// Retorna o JSON completo da cena de entrada do projeto (entry_scene).
 #[tauri::command]
 fn get_scene_data(project_dir: String, scene_path: Option<String>) -> SceneDataResult {
     load_scene_result(Path::new(&project_dir), scene_path.as_deref())
+}
+
+#[tauri::command]
+fn resolve_scene_prefabs(project_dir: String, scene_json: String) -> ResolveSceneResult {
+    resolve_scene_prefabs_result(Path::new(&project_dir), &scene_json)
 }
 
 #[tauri::command]
@@ -1061,6 +1073,41 @@ fn load_scene_result(project_dir: &Path, scene_path: Option<&str>) -> SceneDataR
     let scene_json = serde_json::to_string_pretty(&scene).unwrap_or_default();
     SceneDataResult { ok: true, error: String::new(), scene_json,
         project_name: project.name, target: project.target, scene_path: resolved_scene_path }
+}
+
+fn resolve_scene_prefabs_result(project_dir: &Path, scene_json: &str) -> ResolveSceneResult {
+    let project_dir_str = project_dir.to_string_lossy();
+    if project_dir_str.trim().is_empty() {
+        return ResolveSceneResult {
+            ok: false,
+            error: "Nenhum projeto aberto.".into(),
+            scene_json: String::new(),
+        };
+    }
+
+    let scene = match serde_json::from_str::<ugdm::entities::Scene>(scene_json) {
+        Ok(scene) => scene,
+        Err(error) => {
+            return ResolveSceneResult {
+                ok: false,
+                error: format!("JSON de cena invalido: {}", error),
+                scene_json: String::new(),
+            }
+        }
+    };
+
+    match resolve_prefabs(project_dir, &scene) {
+        Ok(resolved_scene) => ResolveSceneResult {
+            ok: true,
+            error: String::new(),
+            scene_json: serde_json::to_string_pretty(&resolved_scene).unwrap_or_default(),
+        },
+        Err(error) => ResolveSceneResult {
+            ok: false,
+            error: error.to_string(),
+            scene_json: String::new(),
+        },
+    }
 }
 
 #[tauri::command]
@@ -1352,6 +1399,7 @@ pub fn run() {
             emulator_stop,
             // Cena
             get_scene_data,
+            resolve_scene_prefabs,
             switch_scene,
             list_scenes,
             create_scene,
@@ -2284,6 +2332,35 @@ pub extern "C" fn retro_run() {
 
         let _ = fs::remove_dir_all(base_dir);
         let _ = fs::remove_dir_all(donor_dir);
+    }
+
+    #[test]
+    fn resolve_scene_prefabs_command_returns_resolved_scene_payload() {
+        let project_dir = fixture_dir("prefab_dummy");
+        let project = load_project(&project_dir).expect("load prefab project");
+        let scene = load_scene(&project_dir, &project.entry_scene).expect("load prefab scene");
+        let scene_json = serde_json::to_string(&scene).expect("serialize raw prefab scene");
+
+        let result = resolve_scene_prefabs_result(&project_dir, &scene_json);
+
+        assert!(result.ok, "{}", result.error);
+        let resolved_scene: ugdm::entities::Scene =
+            serde_json::from_str(&result.scene_json).expect("parse resolved scene json");
+        let entity = resolved_scene
+            .entities
+            .iter()
+            .find(|candidate| candidate.entity_id == "hero_instance")
+            .expect("resolved prefab entity");
+
+        assert_eq!(entity.prefab.as_deref(), Some("hero.json"));
+        assert_eq!(
+            entity
+                .components
+                .sprite
+                .as_ref()
+                .map(|sprite| sprite.asset.as_str()),
+            Some("assets/sprites/hero.png")
+        );
     }
 
     #[test]

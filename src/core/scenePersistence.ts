@@ -1,8 +1,46 @@
-import { getSceneData, parseScene, saveSceneData } from "./ipc/sceneService";
+import {
+  getSceneData,
+  parseScene,
+  parseSceneJson,
+  resolveScenePrefabs,
+  saveSceneData,
+  type Scene,
+  type SceneDataResult,
+} from "./ipc/sceneService";
 import { useEditorStore } from "./store/editorStore";
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+export interface HydratedScenePair {
+  sourceScene: Scene;
+  resolvedScene: Scene;
+}
+
+export async function hydrateSceneResult(
+  projectDir: string,
+  sceneData: SceneDataResult
+): Promise<HydratedScenePair | null> {
+  const sourceScene = parseScene(sceneData);
+  if (!sourceScene) {
+    return null;
+  }
+
+  const resolvedResult = await resolveScenePrefabs(projectDir, sourceScene);
+  if (!resolvedResult.ok) {
+    throw new Error(resolvedResult.error || "Falha ao resolver prefabs da cena.");
+  }
+
+  const resolvedScene = parseSceneJson(resolvedResult.scene_json);
+  if (!resolvedScene) {
+    throw new Error("Falha ao reconstruir a cena resolvida.");
+  }
+
+  return {
+    sourceScene,
+    resolvedScene,
+  };
 }
 
 export async function reloadSceneFromDisk(projectDir: string, scope: string): Promise<boolean> {
@@ -22,19 +60,23 @@ export async function reloadSceneFromDisk(projectDir: string, scope: string): Pr
       return false;
     }
 
-    const scene = parseScene(sceneData);
-    if (!scene) {
+    const hydrated = await hydrateSceneResult(projectDir, sceneData);
+    if (!hydrated) {
       logMessage("error", `[${scope}] Falha ao reidratar a cena salva.`);
       return false;
     }
 
     setActiveScenePath(sceneData.scene_path);
-    setActiveScene(scene);
+    setActiveScene(hydrated.resolvedScene, hydrated.sourceScene);
     if (selectedEntityId) {
       const isLayerSelection = selectedEntityId.startsWith("layer::");
       const selectionStillExists = isLayerSelection
-        ? scene.background_layers.some((layer) => `layer::${layer.layer_id}` === selectedEntityId)
-        : scene.entities.some((entity) => entity.entity_id === selectedEntityId);
+        ? hydrated.resolvedScene.background_layers.some(
+            (layer) => `layer::${layer.layer_id}` === selectedEntityId
+          )
+        : hydrated.resolvedScene.entities.some(
+            (entity) => entity.entity_id === selectedEntityId
+          );
 
       if (!selectionStillExists) {
         setSelectedEntityId(null);
@@ -52,15 +94,15 @@ export async function persistActiveScene(
   scope: string,
   successMessage?: string
 ): Promise<boolean> {
-  const { activeScene, activeScenePath, logMessage } = useEditorStore.getState();
-  if (!activeScene) {
+  const { activeScenePath, activeSceneSource, logMessage } = useEditorStore.getState();
+  if (!activeSceneSource) {
     return true;
   }
 
   try {
     const result = await saveSceneData(
       projectDir,
-      JSON.stringify(activeScene, null, 2),
+      JSON.stringify(activeSceneSource, null, 2),
       activeScenePath || undefined
     );
     if (result.ok) {

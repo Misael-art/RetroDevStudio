@@ -5,11 +5,10 @@ import {
   createScene,
   getSceneData,
   listScenes,
-  parseScene,
   switchScene,
   type SceneInfo,
 } from "../../core/ipc/sceneService";
-import { persistActiveScene } from "../../core/scenePersistence";
+import { hydrateSceneResult, persistActiveScene } from "../../core/scenePersistence";
 import { listProjectAssets } from "../../core/ipc/toolsService";
 import {
   createSpriteEntityFromAsset,
@@ -77,16 +76,19 @@ export default function HierarchyPanel() {
         return false;
       }
 
-      const scene = parseScene(result);
-      if (!scene) {
+      const hydrated = await hydrateSceneResult(activeProjectDir, result);
+      if (!hydrated) {
         logMessage("error", "[Hierarchy] Falha ao reidratar a cena selecionada.");
         return false;
       }
 
       setSelectedEntityId(null);
       setActiveScenePath(result.scene_path);
-      setActiveScene(scene);
-      logMessage("success", `[Hierarchy] Cena ativa: ${scene.display_name ?? scene.scene_id}`);
+      setActiveScene(hydrated.resolvedScene, hydrated.sourceScene);
+      logMessage(
+        "success",
+        `[Hierarchy] Cena ativa: ${hydrated.resolvedScene.display_name ?? hydrated.resolvedScene.scene_id}`
+      );
       return true;
     } catch (error) {
       logMessage("error", `[Hierarchy] Falha ao trocar cena: ${describeError(error)}`);
@@ -109,15 +111,20 @@ export default function HierarchyPanel() {
 
     setIsLoadingScenes(true);
     Promise.all([listScenes(activeProjectDir), getSceneData(activeProjectDir)])
-      .then(([scenes, result]) => {
+      .then(async ([scenes, result]) => {
         if (cancelled) return;
         setSceneItems(scenes);
 
-        const scene = parseScene(result);
+        const hydrated = await hydrateSceneResult(activeProjectDir, result);
         setActiveScenePath(result.scene_path);
-        setActiveScene(scene);
+        setActiveScene(
+          hydrated?.resolvedScene ?? null,
+          hydrated?.sourceScene ?? null
+        );
         if (!result.ok) {
           logMessage("warn", `[Hierarchy] ${result.error}`);
+        } else if (!hydrated) {
+          logMessage("error", "[Hierarchy] Falha ao reidratar a cena carregada.");
         }
       })
       .catch((error: unknown) => {

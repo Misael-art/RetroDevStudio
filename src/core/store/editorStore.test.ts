@@ -34,6 +34,7 @@ const EMPTY_SCENE: Scene = {
 beforeEach(() => {
   useEditorStore.setState({
     activeScene: null,
+    activeSceneSource: null,
     selectedEntityId: null,
     sceneRevision: 0,
     hwValidationState: "idle",
@@ -276,6 +277,41 @@ describe("setActiveScene", () => {
     expect(useEditorStore.getState().hwValidatedRevision).toBe(0);
     expect(useEditorStore.getState().hwValidationError).toBeNull();
   });
+
+  it("stores the raw source scene separately when both snapshots are provided", () => {
+    const sourceScene: Scene = {
+      ...EMPTY_SCENE,
+      entities: [
+        {
+          entity_id: "hero",
+          prefab: "hero.json",
+          transform: { x: 0, y: 0 },
+          components: { physics: { friction: 2 } },
+        },
+      ],
+    };
+    const resolvedScene: Scene = {
+      ...EMPTY_SCENE,
+      entities: [
+        {
+          entity_id: "hero",
+          prefab: "hero.json",
+          transform: { x: 0, y: 0 },
+          components: {
+            sprite: { asset: "assets/sprites/hero.png", frame_width: 16, frame_height: 16 },
+            physics: { friction: 2, gravity: false },
+          },
+        },
+      ],
+    };
+
+    useEditorStore.getState().setActiveScene(resolvedScene, sourceScene);
+
+    const state = useEditorStore.getState();
+    expect(state.activeScene).toEqual(resolvedScene);
+    expect(state.activeSceneSource).toEqual(sourceScene);
+    expect(state.activeSceneSource?.entities[0]?.components.sprite).toBeUndefined();
+  });
 });
 
 describe("undo/redo", () => {
@@ -375,6 +411,56 @@ describe("undo/redo", () => {
 
     const hero = useEditorStore.getState().activeScene!.entities[0];
     expect(hero.transform).toEqual({ x: 0, y: 0 });
+  });
+
+  it("preserves prefab references in activeSceneSource while editing the resolved entity", () => {
+    const sourceScene: Scene = {
+      ...EMPTY_SCENE,
+      entities: [
+        {
+          entity_id: "hero",
+          prefab: "hero.json",
+          transform: { x: 0, y: 0 },
+          components: { physics: { friction: 1 } },
+        },
+      ],
+    };
+    const resolvedScene: Scene = {
+      ...EMPTY_SCENE,
+      entities: [
+        {
+          entity_id: "hero",
+          prefab: "hero.json",
+          transform: { x: 0, y: 0 },
+          components: {
+            sprite: { asset: "assets/sprites/hero.png", frame_width: 16, frame_height: 16 },
+            physics: { friction: 1, gravity: false },
+          },
+        },
+      ],
+    };
+
+    useEditorStore.getState().setActiveScene(resolvedScene, sourceScene);
+    useEditorStore.getState().updateEntity("hero", {
+      components: {
+        sprite: { asset: "assets/sprites/hero_alt.png", frame_width: 16, frame_height: 16 },
+        physics: { friction: 1, gravity: false },
+      },
+    });
+
+    const state = useEditorStore.getState();
+    expect(state.activeScene?.entities[0]?.components.sprite?.asset).toBe(
+      "assets/sprites/hero_alt.png"
+    );
+    expect(state.activeSceneSource?.entities[0]?.prefab).toBe("hero.json");
+    expect(state.activeSceneSource?.entities[0]?.components.physics).toEqual({ friction: 1 });
+    expect(state.activeSceneSource?.entities[0]?.components.sprite).toEqual({
+      asset: "assets/sprites/hero_alt.png",
+    });
+
+    useEditorStore.getState().undo();
+
+    expect(useEditorStore.getState().activeSceneSource).toEqual(sourceScene);
   });
 });
 

@@ -173,6 +173,12 @@ export interface SceneDataResult {
   scene_path: string;
 }
 
+export interface ResolveSceneResult {
+  ok: boolean;
+  error: string;
+  scene_json: string;
+}
+
 // ── IPC wrappers ──────────────────────────────────────────────────────────────
 
 export function getSceneData(projectDir: string, scenePath?: string): Promise<SceneDataResult> {
@@ -199,12 +205,30 @@ export function createScene(projectDir: string, displayName?: string): Promise<S
   return invoke("create_scene", { projectDir, displayName });
 }
 
-/** Parseia scene_json da SceneDataResult em um objeto Scene tipado. */
-export function parseScene(result: SceneDataResult): Scene | null {
-  if (!result.ok) return null;
+export function resolveScenePrefabs(
+  projectDir: string,
+  scene: Scene
+): Promise<ResolveSceneResult> {
+  return invoke("resolve_scene_prefabs", {
+    projectDir,
+    sceneJson: JSON.stringify(scene),
+  });
+}
+
+export function parseSceneJson(sceneJson?: string | null): Scene | null {
+  if (!sceneJson) {
+    return null;
+  }
+
   try {
-    return JSON.parse(result.scene_json) as Scene;
+    return JSON.parse(sceneJson) as Scene;
   } catch {
     return null;
   }
+}
+
+/** Parseia scene_json da SceneDataResult em um objeto Scene tipado. */
+export function parseScene(result: SceneDataResult): Scene | null {
+  if (!result.ok) return null;
+  return parseSceneJson(result.scene_json);
 }

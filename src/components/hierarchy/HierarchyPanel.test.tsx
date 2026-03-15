@@ -8,9 +8,9 @@ import { useEditorStore } from "../../core/store/editorStore";
 const mocks = vi.hoisted(() => ({
   listScenes: vi.fn(),
   getSceneData: vi.fn(),
-  parseScene: vi.fn(),
   switchScene: vi.fn(),
   createScene: vi.fn(),
+  hydrateSceneResult: vi.fn(),
   persistActiveScene: vi.fn(),
   listProjectAssets: vi.fn(),
 }));
@@ -18,12 +18,12 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../core/ipc/sceneService", () => ({
   listScenes: mocks.listScenes,
   getSceneData: mocks.getSceneData,
-  parseScene: mocks.parseScene,
   switchScene: mocks.switchScene,
   createScene: mocks.createScene,
 }));
 
 vi.mock("../../core/scenePersistence", () => ({
+  hydrateSceneResult: mocks.hydrateSceneResult,
   persistActiveScene: mocks.persistActiveScene,
 }));
 
@@ -74,6 +74,7 @@ describe("HierarchyPanel", () => {
       activeScenePath: "scenes/main.json",
       selectedEntityId: null,
       activeScene: emptyScene,
+      activeSceneSource: emptyScene,
       activeViewportTab: "scene",
       emulatorLoaded: false,
       hwStatus: null,
@@ -105,7 +106,6 @@ describe("HierarchyPanel", () => {
       target: "megadrive",
       scene_path: "scenes/main.json",
     });
-    mocks.parseScene.mockImplementation((result: { scene_json: string }) => JSON.parse(result.scene_json));
     mocks.switchScene.mockResolvedValue({
       ok: true,
       error: "",
@@ -113,6 +113,13 @@ describe("HierarchyPanel", () => {
       project_name: "Mega Dummy",
       target: "megadrive",
       scene_path: "scenes/main.json",
+    });
+    mocks.hydrateSceneResult.mockImplementation(async (_projectDir: string, result: { scene_json: string }) => {
+      const scene = JSON.parse(result.scene_json);
+      return {
+        sourceScene: scene,
+        resolvedScene: scene,
+      };
     });
     mocks.createScene.mockResolvedValue({
       path: "scenes/main.json",
