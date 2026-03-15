@@ -31,10 +31,11 @@ interface PropRowProps {
   label: string;
   value: string | number | boolean;
   type: "string" | "int" | "bool";
+  sourceState?: "override" | "inherited" | null;
   onChange: (value: string | number | boolean) => void;
 }
 
-function PropRow({ label, value, type, onChange }: PropRowProps) {
+function PropRow({ label, value, type, sourceState = null, onChange }: PropRowProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value));
 
@@ -63,7 +64,22 @@ function PropRow({ label, value, type, onChange }: PropRowProps) {
 
   return (
     <tr className="group border-b border-[#313244] last:border-0">
-      <td className="w-1/2 select-none px-3 py-1.5 text-xs text-[#7f849c]">{label}</td>
+      <td className="w-1/2 select-none px-3 py-1.5 text-xs text-[#7f849c]">
+        <div className="flex items-center gap-2">
+          <span>{label}</span>
+          {sourceState ? (
+            <span
+              className={`rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${
+                sourceState === "override"
+                  ? "bg-[#a6e3a1]/15 text-[#a6e3a1]"
+                  : "bg-[#89b4fa]/15 text-[#89b4fa]"
+              }`}
+            >
+              {sourceState === "override" ? "Override" : "Herdado"}
+            </span>
+          ) : null}
+        </div>
+      </td>
       <td className="px-3 py-1.5 text-xs">
         {editing ? (
           type === "bool" ? (
@@ -460,6 +476,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function hasPath(obj: unknown, path: string[]): boolean {
+  let current: unknown = obj;
+
+  for (const key of path) {
+    if (!isRecord(current) || !(key in current)) {
+      return false;
+    }
+    current = current[key];
+  }
+
+  return true;
+}
+
 function buildNestedRecordPatch(
   current: Record<string, unknown> | undefined,
   path: string[],
@@ -519,6 +548,7 @@ function graphSummary(serializedGraph?: string): string {
 export default function InspectorPanel() {
   const {
     activeScene,
+    activeSceneSource,
     activeTarget,
     logMessage,
     selectedEntityId,
@@ -542,6 +572,9 @@ export default function InspectorPanel() {
   const entity = isLayer
     ? null
     : activeScene?.entities.find((item) => item.entity_id === selectedEntityId) ?? null;
+  const sourceEntity = isLayer
+    ? null
+    : activeSceneSource?.entities.find((item) => item.entity_id === selectedEntityId) ?? null;
   const layer = isLayer
     ? activeScene?.background_layers.find((item) => `layer::${item.layer_id}` === selectedEntityId) ?? null
     : null;
@@ -689,6 +722,13 @@ export default function InspectorPanel() {
                         label={def.key}
                         value={getPropValue(entity, def)}
                         type={def.type}
+                        sourceState={
+                          entity.prefab && sourceEntity
+                            ? hasPath(sourceEntity, def.path)
+                              ? "override"
+                              : "inherited"
+                            : null
+                        }
                         onChange={(value) => handleChange(entity, def, value)}
                       />
                     ))}

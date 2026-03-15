@@ -25,7 +25,7 @@ function flush() {
 
 function findRow(container: HTMLElement, label: string): HTMLTableRowElement {
   const cell = Array.from(container.querySelectorAll("td")).find(
-    (element) => element.textContent?.trim() === label
+    (element) => element.textContent?.includes(label)
   );
   if (!(cell instanceof HTMLTableCellElement) || !(cell.parentElement instanceof HTMLTableRowElement)) {
     throw new Error(`Row not found: ${label}`);
@@ -97,6 +97,10 @@ describe("InspectorPanel", () => {
         ...EMPTY_SCENE,
         entities: [physicsFixtureEntity()],
       },
+      activeSceneSource: {
+        ...EMPTY_SCENE,
+        entities: [physicsFixtureEntity()],
+      },
       selectedEntityId: "hero",
       sceneRevision: 1,
       hwStatus: null,
@@ -158,7 +162,7 @@ describe("InspectorPanel", () => {
 
   it("persists physics.gravity edits through the canonical entity update path", async () => {
     const row = findRow(container, "Gravity");
-    const valueTrigger = row.querySelector("span");
+    const valueTrigger = row.querySelector("td:last-child span");
 
     await act(async () => {
       valueTrigger?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
@@ -182,5 +186,36 @@ describe("InspectorPanel", () => {
     );
 
     expect(updatedEntity?.components.physics?.gravity).toBe(false);
+  });
+
+  it("shows inherited and override badges for prefab-backed fields", async () => {
+    const resolvedEntity = physicsFixtureEntity();
+    const sourceEntity: Entity = {
+      entity_id: "hero",
+      prefab: "hero_prefab",
+      transform: { x: 12, y: 24 },
+      components: {
+        physics: {
+          gravity: true,
+        },
+      },
+    };
+
+    await act(async () => {
+      useEditorStore.setState({
+        activeScene: {
+          ...EMPTY_SCENE,
+          entities: [resolvedEntity],
+        },
+        activeSceneSource: {
+          ...EMPTY_SCENE,
+          entities: [sourceEntity],
+        },
+      });
+      await flush();
+    });
+
+    expect(container.textContent).toContain("Override");
+    expect(container.textContent).toContain("Herdado");
   });
 });
