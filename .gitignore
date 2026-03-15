@@ -9,6 +9,8 @@ dist/
 
 # --- Rust / Backend ---
 target/
+src-tauri/target-test/
+whitelist_target/
 Cargo.lock
 
 # --- Tauri ---

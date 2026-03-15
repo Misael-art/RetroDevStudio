@@ -394,4 +394,13 @@ mod tests {
         assert_eq!(report.sprite_count, 6);
         assert!(report.sprite_peak >= 1);
     }
+
+    #[test]
+    fn profile_bytes_detects_small_rom_error() {
+        let rom = vec![0u8; 128];
+        let report = profile_bytes(&rom);
+        assert!(!report.ok);
+        assert_eq!(report.issues.len(), 1);
+        assert_eq!(report.issues[0].severity, super::Severity::Error);
+    }
 }

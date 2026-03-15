@@ -102,7 +102,8 @@ export function getLiveToolbarIndicator({
       return {
         label: "DESATUAL.",
         tone: "warn",
-        detail: "O draft mudou depois da ultima analise live.",
+        detail:
+          "O draft mudou depois da ultima analise live. Edite a cena para acionar a revalidacao automatica ou use Revalidar agora.",
       };
     case "error":
       return {
@@ -145,6 +146,7 @@ export function useLiveValidationController() {
     activeTarget,
     activeScene,
     sceneRevision,
+    hwValidationRefreshTick,
     resetHwValidation,
     setHwValidationPending,
     setHwValidationResult,
@@ -155,6 +157,7 @@ export function useLiveValidationController() {
       activeTarget: state.activeTarget,
       activeScene: state.activeScene,
       sceneRevision: state.sceneRevision,
+      hwValidationRefreshTick: state.hwValidationRefreshTick,
       resetHwValidation: state.resetHwValidation,
       setHwValidationPending: state.setHwValidationPending,
       setHwValidationResult: state.setHwValidationResult,
@@ -221,6 +224,7 @@ export function useLiveValidationController() {
     activeProjectDir,
     activeScene,
     activeTarget,
+    hwValidationRefreshTick,
     resetHwValidation,
     sceneRevision,
     setHwValidationError,

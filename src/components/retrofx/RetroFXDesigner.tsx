@@ -16,6 +16,10 @@ function newId(existingIds: string[]) {
   return `fx_${fxCounter}`;
 }
 
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 const DEFAULT_PARALLAX: RetroFXParallaxLayer[] = [
   { id: "p0", name: "BG1 (Far)", speed_x: 1, speed_y: 0, enabled: true },
   { id: "p1", name: "BG2 (Mid)", speed_x: 2, speed_y: 0, enabled: true },
@@ -143,54 +147,47 @@ export default function RetroFXDesigner() {
     }
 
     setSaving(true);
-    useEditorStore.setState((state) => {
-      if (!state.activeScene) {
-        return state;
-      }
+    try {
+      useEditorStore.setState((state) => {
+        if (!state.activeScene) {
+          return state;
+        }
 
-      return {
-        activeScene: {
-          ...state.activeScene,
-          retrofx: {
-            parallax_layers: structuredClone(parallax),
-            raster_lines: structuredClone(raster),
+        return {
+          activeScene: {
+            ...state.activeScene,
+            retrofx: {
+              parallax_layers: structuredClone(parallax),
+              raster_lines: structuredClone(raster),
+            },
           },
-        },
-        sceneRevision: state.sceneRevision + 1,
-      };
-    });
+          sceneRevision: state.sceneRevision + 1,
+        };
+      });
 
-    await persistActiveScene(
-      activeProjectDir,
-      "RetroFX",
-      "Configuracao salva no scene JSON. Emissao para build continua experimental."
-    );
-    setSaving(false);
+      await persistActiveScene(
+        activeProjectDir,
+        "RetroFX",
+        "Configuracao salva no scene JSON. Emissao para build continua experimental."
+      );
+    } catch (error: unknown) {
+      logMessage("error", `[RetroFX] Falha ao salvar configuracao: ${describeError(error)}`);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
     <div className="flex h-full w-full overflow-hidden">
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-        <div className="border-b border-[#313244] bg-[#181825] p-2">
-          <div className="flex items-center gap-2">
-            <span className="rounded border border-[#fab387] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#fab387]">
-              Experimental
-            </span>
-            <span className="text-[10px] leading-tight text-[#7f849c]">
-              Configuracao persistida no scene JSON. Emissao para build ainda nao foi integrada.
-            </span>
-          </div>
-        </div>
-
         <div className="flex shrink-0 border-b border-[#313244]">
           {(["parallax", "raster"] as const).map((currentTab) => (
             <button
               key={currentTab}
-              className={`px-3 py-1.5 text-xs capitalize transition-colors ${
-                tab === currentTab
+              className={`px-3 py-1.5 text-xs capitalize transition-colors ${tab === currentTab
                   ? "border-b-2 border-[#cba6f7] text-[#cba6f7]"
                   : "text-[#6c7086] hover:text-[#a6adc8]"
-              }`}
+                }`}
               onClick={() => setTab(currentTab)}
             >
               {currentTab === "parallax" ? "Parallax" : "Raster"}
@@ -206,9 +203,8 @@ export default function RetroFXDesigner() {
             {parallax.map((layer) => (
               <div
                 key={layer.id}
-                className={`mb-1.5 flex flex-col gap-1.5 rounded border p-2 ${
-                  layer.enabled ? "border-[#313244] bg-[#1e1e2e]" : "border-[#313244]/40 bg-transparent opacity-50"
-                }`}
+                className={`mb-1.5 flex flex-col gap-1.5 rounded border p-2 ${layer.enabled ? "border-[#313244] bg-[#1e1e2e]" : "border-[#313244]/40 bg-transparent opacity-50"
+                  }`}
               >
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-medium text-[#cdd6f4]">{layer.name}</span>
@@ -253,9 +249,8 @@ export default function RetroFXDesigner() {
             {raster.map((line) => (
               <div
                 key={line.id}
-                className={`mb-1.5 flex flex-col gap-1.5 rounded border p-2 ${
-                  line.enabled ? "border-[#313244] bg-[#1e1e2e]" : "border-[#313244]/40 opacity-50"
-                }`}
+                className={`mb-1.5 flex flex-col gap-1.5 rounded border p-2 ${line.enabled ? "border-[#313244] bg-[#1e1e2e]" : "border-[#313244]/40 opacity-50"
+                  }`}
               >
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-medium text-[#cdd6f4]">Scanline {line.scanline}</span>
@@ -294,11 +289,10 @@ export default function RetroFXDesigner() {
 
         <div className="mt-auto shrink-0 border-t border-[#313244] p-2">
           <button
-            className={`w-full rounded py-1 text-xs font-semibold transition-colors ${
-              saving
+            className={`w-full rounded py-1 text-xs font-semibold transition-colors ${saving
                 ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
                 : "bg-[#cba6f7] text-[#1e1e2e] hover:bg-[#b4a0e0]"
-            }`}
+              }`}
             disabled={saving}
             onClick={() => void applyFX()}
           >
