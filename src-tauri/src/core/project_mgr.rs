@@ -1,32 +1,17 @@
-use std::collections::{HashMap, HashSet};
 use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::ugdm::components::{
-    AudioComponent,
-    CameraComponent,
-    CollisionComponent,
-    InputComponent,
-    Components,
-    LogicComponent,
-    PhysicsComponent,
-    SpriteComponent,
-    TilemapComponent,
-    Velocity,
+    AudioComponent, CameraComponent, CollisionComponent, Components, InputComponent,
+    LogicComponent, PhysicsComponent, SpriteComponent, TilemapComponent, Velocity,
 };
 use crate::ugdm::entities::{
-    BuildConfig,
-    Entity,
-    PaletteEntry,
-    PatchAuditEntry,
-    Project,
-    Resolution,
-    Scene,
-    TemplateMetadata,
-    CURRENT_SCHEMA_VERSION,
+    BuildConfig, Entity, PaletteEntry, PatchAuditEntry, Project, Resolution, Scene,
+    TemplateMetadata, CURRENT_SCHEMA_VERSION,
 };
 #[cfg(test)]
 use crate::ugdm::entities::{RetroFXConfig, RetroFXParallaxLayer, RetroFXRasterLine};
@@ -158,7 +143,9 @@ pub fn default_build_config() -> BuildConfig {
 pub fn canonical_project(project_name: &str, target: &str) -> Result<Project, LoadError> {
     let trimmed_name = project_name.trim();
     if trimmed_name.is_empty() {
-        return Err(LoadError("project.rds: campo 'name' nao pode ser vazio.".into()));
+        return Err(LoadError(
+            "project.rds: campo 'name' nao pode ser vazio.".into(),
+        ));
     }
 
     let spec = target_spec(target)?;
@@ -206,9 +193,8 @@ pub fn create_project_skeleton(
         project_dir.join("prefabs"),
         project_dir.join("graphs"),
     ] {
-        fs::create_dir_all(&dir).map_err(|e| {
-            LoadError(format!("Nao foi possivel criar '{}': {}", dir.display(), e))
-        })?;
+        fs::create_dir_all(&dir)
+            .map_err(|e| LoadError(format!("Nao foi possivel criar '{}': {}", dir.display(), e)))?;
     }
 
     let scene = canonical_scene(DEFAULT_SCENE_ID, Some("Main Scene".to_string()));
@@ -281,12 +267,20 @@ pub fn seed_platformer_template(project_dir: &Path, donor_path: &Path) -> Result
         "platformer_player.json",
         &platformer_player_prefab(jump_source.exists()),
     )?;
-    save_prefab_entity(project_dir, "platformer_camera.json", &platformer_camera_prefab())?;
-    save_prefab_entity(project_dir, "platformer_tilemap.json", &platformer_tilemap_prefab())?;
+    save_prefab_entity(
+        project_dir,
+        "platformer_camera.json",
+        &platformer_camera_prefab(),
+    )?;
+    save_prefab_entity(
+        project_dir,
+        "platformer_tilemap.json",
+        &platformer_tilemap_prefab(),
+    )?;
     save_graph_asset(
         project_dir,
         "graphs/platformer_player_logic.json",
-        &platformer_logic_graph(),
+        &platformer_logic_graph_with_sound(jump_source.exists()),
     )?;
 
     let scene = platformer_seed_scene();
@@ -296,22 +290,15 @@ pub fn seed_platformer_template(project_dir: &Path, donor_path: &Path) -> Result
 
 pub fn import_sgdk_project(project_dir: &Path, sgdk_path: &Path) -> Result<Scene, LoadError> {
     validate_sgdk_project_path(sgdk_path)?;
-
-    let manifest_path = find_sgdk_manifest_path(sgdk_path)?;
-    let manifest = fs::read_to_string(&manifest_path).map_err(|error| {
-        LoadError(format!(
-            "Nao foi possivel ler manifesto SGDK '{}': {}",
-            manifest_path.display(),
-            error
-        ))
-    })?;
-    let resources = parse_sgdk_manifest(&manifest);
+    let resources = load_sgdk_resources(sgdk_path)?;
 
     let mut scene = canonical_scene(DEFAULT_SCENE_ID, Some("Imported SGDK Project".to_string()));
     let mut imported_tilemaps = HashSet::new();
     let mut audio_sfx = HashMap::new();
     let mut audio_bgm: Option<String> = None;
     let mut first_sprite_id: Option<String> = None;
+    let mut tilemap_entities = Vec::new();
+    let mut sprite_entities = Vec::new();
 
     for resource in resources {
         let Some(destination) = sgdk_asset_destination(&resource.kind, &resource.asset_path) else {
@@ -345,10 +332,11 @@ pub fn import_sgdk_project(project_dir: &Path, sgdk_path: &Path) -> Result<Scene
                     .and_then(|value| value.parse::<u32>().ok())
                     .unwrap_or(width_tiles);
                 let entity_id = sgdk_entity_id(&resource.name);
+                let is_primary_sprite = first_sprite_id.is_none();
                 if first_sprite_id.is_none() {
                     first_sprite_id = Some(entity_id.clone());
                 }
-                scene.entities.push(Entity {
+                sprite_entities.push(Entity {
                     entity_id,
                     prefab: None,
                     transform: crate::ugdm::entities::Transform { x: 32, y: 32 },
@@ -362,13 +350,18 @@ pub fn import_sgdk_project(project_dir: &Path, sgdk_path: &Path) -> Result<Scene
                             animations: HashMap::new(),
                             priority: "foreground".to_string(),
                         }),
+                        logic: is_primary_sprite.then(|| LogicComponent {
+                            graph: Some(imported_sprite_logic_graph(&resource.name)),
+                            graph_ref: None,
+                            variables: HashMap::new(),
+                        }),
                         ..Components::default()
                     },
                 });
             }
-            "IMAGE" | "TILESET" | "TILEMAP" | "MAP" | "PALETTE" => {
+            "IMAGE" | "TILESET" | "TILEMAP" | "MAP" => {
                 if imported_tilemaps.insert(destination.clone()) {
-                    scene.entities.push(Entity {
+                    tilemap_entities.push(Entity {
                         entity_id: format!("{}_tilemap", sgdk_entity_id(&resource.name)),
                         prefab: None,
                         transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
@@ -388,7 +381,7 @@ pub fn import_sgdk_project(project_dir: &Path, sgdk_path: &Path) -> Result<Scene
             "WAV" | "PCM" => {
                 audio_sfx.insert(resource.name.clone(), destination);
             }
-            "XGM" => {
+            "XGM" | "XGM2" => {
                 if audio_bgm.is_none() {
                     audio_bgm = Some(destination);
                 }
@@ -396,6 +389,9 @@ pub fn import_sgdk_project(project_dir: &Path, sgdk_path: &Path) -> Result<Scene
             _ => {}
         }
     }
+
+    scene.entities.extend(tilemap_entities);
+    scene.entities.extend(sprite_entities);
 
     if !audio_sfx.is_empty() || audio_bgm.is_some() {
         scene.entities.push(Entity {
@@ -463,15 +459,12 @@ fn resolved_template_donor_path(
     }
 
     let entry = template_registry_entry(template_id)?;
-    entry
-        .default_donor_path
-        .map(PathBuf::from)
-        .ok_or_else(|| {
-            LoadError(format!(
-                "O template '{}' nao possui donor path padrao configurado.",
-                template_id
-            ))
-        })
+    entry.default_donor_path.map(PathBuf::from).ok_or_else(|| {
+        LoadError(format!(
+            "O template '{}' nao possui donor path padrao configurado.",
+            template_id
+        ))
+    })
 }
 
 fn project_template_summary(entry: &TemplateRegistryEntry) -> ProjectTemplateSummary {
@@ -631,19 +624,20 @@ fn parse_sgdk_manifest(manifest: &str) -> Vec<SgdkResourceEntry> {
         .collect()
 }
 
-fn find_sgdk_manifest_path(sgdk_path: &Path) -> Result<PathBuf, LoadError> {
+fn find_sgdk_manifest_paths(sgdk_path: &Path) -> Result<Vec<PathBuf>, LoadError> {
     let direct = sgdk_path.join("resources.res");
     if direct.is_file() {
-        return Ok(direct);
+        return Ok(vec![direct]);
     }
 
     let canonical = sgdk_path.join("res").join("resources.res");
     if canonical.is_file() {
-        return Ok(canonical);
+        return Ok(vec![canonical]);
     }
 
     let res_dir = sgdk_path.join("res");
     if res_dir.is_dir() {
+        let mut manifests = Vec::new();
         for entry in fs::read_dir(&res_dir).map_err(|error| {
             LoadError(format!(
                 "Nao foi possivel listar manifests SGDK em '{}': {}",
@@ -659,14 +653,21 @@ fn find_sgdk_manifest_path(sgdk_path: &Path) -> Result<PathBuf, LoadError> {
                 ))
             })?;
             let path = entry.path();
-            if path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("res")) {
-                return Ok(path);
+            if path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("res"))
+            {
+                manifests.push(path);
             }
+        }
+        manifests.sort();
+        if !manifests.is_empty() {
+            return Ok(manifests);
         }
     }
 
     Err(LoadError(format!(
-        "Projeto SGDK invalido: nenhum resources.res foi encontrado em '{}'.",
+        "Projeto SGDK invalido: nenhum manifesto .res foi encontrado em '{}'.",
         sgdk_path.display()
     )))
 }
@@ -679,19 +680,12 @@ fn validate_sgdk_project_path(sgdk_path: &Path) -> Result<(), LoadError> {
         )));
     }
 
-    let manifest_path = find_sgdk_manifest_path(sgdk_path)?;
-    let manifest = fs::read_to_string(&manifest_path).map_err(|error| {
-        LoadError(format!(
-            "Nao foi possivel ler manifesto SGDK '{}': {}",
-            manifest_path.display(),
-            error
-        ))
-    })?;
-    let resources = parse_sgdk_manifest(&manifest);
+    let manifest_paths = find_sgdk_manifest_paths(sgdk_path)?;
+    let resources = load_sgdk_resources(sgdk_path)?;
     if resources.is_empty() {
         return Err(LoadError(format!(
-            "Projeto SGDK invalido: o manifesto '{}' nao possui recursos importaveis.",
-            manifest_path.display()
+            "Projeto SGDK invalido: nenhum manifesto .res em '{}' possui recursos importaveis.",
+            sgdk_path.display()
         )));
     }
 
@@ -699,13 +693,36 @@ fn validate_sgdk_project_path(sgdk_path: &Path) -> Result<(), LoadError> {
         .iter()
         .any(|resource| sgdk_asset_destination(&resource.kind, &resource.asset_path).is_some())
     {
+        let manifests = manifest_paths
+            .iter()
+            .map(|path| path.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
         return Err(LoadError(format!(
-            "Projeto SGDK invalido: o manifesto '{}' nao possui recursos suportados para importacao.",
-            manifest_path.display()
+            "Projeto SGDK invalido: os manifestos '{}' nao possuem recursos suportados para importacao.",
+            manifests
         )));
     }
 
     Ok(())
+}
+
+fn load_sgdk_resources(sgdk_path: &Path) -> Result<Vec<SgdkResourceEntry>, LoadError> {
+    let manifest_paths = find_sgdk_manifest_paths(sgdk_path)?;
+    let mut resources = Vec::new();
+
+    for manifest_path in manifest_paths {
+        let manifest = fs::read_to_string(&manifest_path).map_err(|error| {
+            LoadError(format!(
+                "Nao foi possivel ler manifesto SGDK '{}': {}",
+                manifest_path.display(),
+                error
+            ))
+        })?;
+        resources.extend(parse_sgdk_manifest(&manifest));
+    }
+
+    Ok(resources)
 }
 
 fn sgdk_resource_source_path(sgdk_path: &Path, asset_path: &str) -> PathBuf {
@@ -730,7 +747,7 @@ fn sgdk_asset_destination(kind: &str, asset_path: &str) -> Option<String> {
         "IMAGE" | "TILESET" | "TILEMAP" | "MAP" | "PALETTE" => {
             Some(format!("assets/tilesets/{}", filename))
         }
-        "WAV" | "PCM" | "XGM" => Some(format!("assets/audio/{}", filename)),
+        "WAV" | "PCM" | "XGM" | "XGM2" => Some(format!("assets/audio/{}", filename)),
         "VGM" => None,
         _ => None,
     }
@@ -752,7 +769,11 @@ fn sgdk_entity_id(name: &str) -> String {
     }
 }
 
-fn save_prefab_entity(project_dir: &Path, prefab_name: &str, entity: &Entity) -> Result<(), LoadError> {
+fn save_prefab_entity(
+    project_dir: &Path,
+    prefab_name: &str,
+    entity: &Entity,
+) -> Result<(), LoadError> {
     let prefab_path = project_dir.join("prefabs").join(prefab_name);
     let parent = prefab_path.parent().ok_or_else(|| {
         LoadError(format!(
@@ -784,7 +805,11 @@ fn save_prefab_entity(project_dir: &Path, prefab_name: &str, entity: &Entity) ->
     Ok(())
 }
 
-fn save_graph_asset(project_dir: &Path, graph_ref: &str, graph_json: &str) -> Result<(), LoadError> {
+fn save_graph_asset(
+    project_dir: &Path,
+    graph_ref: &str,
+    graph_json: &str,
+) -> Result<(), LoadError> {
     let graph_path = graph_write_path(project_dir, graph_ref)?;
     let parent = graph_path.parent().ok_or_else(|| {
         LoadError(format!(
@@ -935,7 +960,91 @@ fn platformer_seed_scene() -> Scene {
     scene
 }
 
+#[cfg(test)]
 fn platformer_logic_graph() -> String {
+    platformer_logic_graph_with_sound(true)
+}
+
+fn platformer_logic_graph_with_sound(has_jump_sound: bool) -> String {
+    let mut nodes = vec![
+        serde_json::json!({
+            "id": "start",
+            "type": "event_start",
+            "label": "On Start",
+            "x": 48,
+            "y": 48,
+            "inputs": [],
+            "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+            "params": {}
+        }),
+        serde_json::json!({
+            "id": "move_player",
+            "type": "sprite_move",
+            "label": "Move Sprite",
+            "x": 228,
+            "y": 32,
+            "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+            "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+            "params": { "target": "player", "dx": 2, "dy": 0 }
+        }),
+        serde_json::json!({
+            "id": "follow_camera",
+            "type": "move_camera",
+            "label": "Move Camera",
+            "x": 408,
+            "y": 32,
+            "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+            "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+            "params": { "target": "main_camera", "x": 0, "y": 0 }
+        }),
+    ];
+    let mut edges = vec![
+        serde_json::json!({
+            "id": "edge_start_move",
+            "fromNode": "start",
+            "fromPort": "exec",
+            "toNode": "move_player",
+            "toPort": "exec"
+        }),
+        serde_json::json!({
+            "id": "edge_move_camera",
+            "fromNode": "move_player",
+            "fromPort": "exec",
+            "toNode": "follow_camera",
+            "toPort": "exec"
+        }),
+    ];
+
+    if has_jump_sound {
+        nodes.push(serde_json::json!({
+            "id": "jump_sound",
+            "type": "action_sound",
+            "label": "Play Sound",
+            "x": 588,
+            "y": 32,
+            "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+            "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+            "params": { "sfx": "jump" }
+        }));
+        edges.push(serde_json::json!({
+            "id": "edge_camera_sound",
+            "fromNode": "follow_camera",
+            "fromPort": "exec",
+            "toNode": "jump_sound",
+            "toPort": "exec"
+        }));
+    }
+
+    serde_json::json!({
+        "version": 1,
+        "nodes": nodes,
+        "edges": edges
+    })
+    .to_string()
+}
+
+fn imported_sprite_logic_graph(resource_name: &str) -> String {
+    let target = sgdk_entity_id(resource_name);
     serde_json::json!({
         "version": 1,
         "nodes": [
@@ -950,22 +1059,22 @@ fn platformer_logic_graph() -> String {
                 "params": {}
             },
             {
-                "id": "follow_camera",
-                "type": "move_camera",
-                "label": "Move Camera",
+                "id": "move_sprite",
+                "type": "sprite_move",
+                "label": "Move Sprite",
                 "x": 228,
                 "y": 48,
                 "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
-                "params": { "target": "main_camera", "x": 0, "y": 0 }
+                "params": { "target": target, "dx": 2, "dy": 0 }
             }
         ],
         "edges": [
             {
-                "id": "edge_start_camera",
+                "id": "edge_start_move",
                 "fromNode": "start",
                 "fromPort": "exec",
-                "toNode": "follow_camera",
+                "toNode": "move_sprite",
                 "toPort": "exec"
             }
         ]
@@ -995,7 +1104,8 @@ pub fn list_scenes(project_dir: &Path) -> Result<Vec<SceneInfo>, LoadError> {
             ))
         })?;
         let path = entry.path();
-        if !path.is_file() || path.extension().and_then(|extension| extension.to_str()) != Some("json")
+        if !path.is_file()
+            || path.extension().and_then(|extension| extension.to_str()) != Some("json")
         {
             continue;
         }
@@ -1010,7 +1120,10 @@ pub fn list_scenes(project_dir: &Path) -> Result<Vec<SceneInfo>, LoadError> {
     Ok(scenes)
 }
 
-pub fn create_scene(project_dir: &Path, display_name: Option<&str>) -> Result<SceneInfo, LoadError> {
+pub fn create_scene(
+    project_dir: &Path,
+    display_name: Option<&str>,
+) -> Result<SceneInfo, LoadError> {
     let project = load_project(project_dir)?;
     let label = display_name
         .map(str::trim)
@@ -1052,10 +1165,7 @@ pub fn update_project_target(project_dir: &Path, target: &str) -> Result<Project
     Ok(project)
 }
 
-pub fn seed_onboarding_template(
-    project_dir: &Path,
-    target: &str,
-) -> Result<Scene, LoadError> {
+pub fn seed_onboarding_template(project_dir: &Path, target: &str) -> Result<Scene, LoadError> {
     let sprite_absolute_path = onboarding_sprite_path(project_dir);
 
     fs::write(&sprite_absolute_path, onboarding_sprite_ppm()).map_err(|error| {
@@ -1340,7 +1450,9 @@ pub fn validate_project(project: &Project) -> Result<(), LoadError> {
     }
 
     if project.name.trim().is_empty() {
-        return Err(LoadError("project.rds: campo 'name' nao pode ser vazio.".into()));
+        return Err(LoadError(
+            "project.rds: campo 'name' nao pode ser vazio.".into(),
+        ));
     }
 
     let spec = target_spec(&project.target)?;
@@ -1359,9 +1471,7 @@ pub fn validate_project(project: &Project) -> Result<(), LoadError> {
     if project.palette_mode != spec.palette_mode {
         return Err(LoadError(format!(
             "project.rds: palette_mode invalido para '{}'. Esperado '{}', recebido '{}'.",
-            spec.target,
-            spec.palette_mode,
-            project.palette_mode
+            spec.target, spec.palette_mode, project.palette_mode
         )));
     }
 
@@ -1391,7 +1501,10 @@ fn normalized_project_schema_version(project: &Project) -> &str {
 }
 
 fn onboarding_sprite_path(project_dir: &Path) -> PathBuf {
-    project_dir.join("assets").join("sprites").join("onboarding_player.ppm")
+    project_dir
+        .join("assets")
+        .join("sprites")
+        .join("onboarding_player.ppm")
 }
 
 fn starter_scene(scene_id: &str, display_name: String, _target: &str) -> Scene {
@@ -1533,7 +1646,10 @@ fn migrate_project_1_0_0_to_1_1_0(
         "schema_version".to_string(),
         serde_json::Value::String("1.1.0".to_string()),
     );
-    if let Some(build) = object.get_mut("build").and_then(serde_json::Value::as_object_mut) {
+    if let Some(build) = object
+        .get_mut("build")
+        .and_then(serde_json::Value::as_object_mut)
+    {
         build
             .entry("artifact_prefix".to_string())
             .or_insert_with(|| serde_json::Value::String("game".to_string()));
@@ -1551,7 +1667,10 @@ fn migrate_project_1_1_0_to_1_2_0(
         "schema_version".to_string(),
         serde_json::Value::String("1.2.0".to_string()),
     );
-    if let Some(build) = object.get_mut("build").and_then(serde_json::Value::as_object_mut) {
+    if let Some(build) = object
+        .get_mut("build")
+        .and_then(serde_json::Value::as_object_mut)
+    {
         build
             .entry("patch_audit_log".to_string())
             .or_insert_with(|| serde_json::Value::Array(Vec::new()));
@@ -1760,7 +1879,9 @@ fn repair_onboarding_logic_graph(serialized: &str) -> Option<String> {
 
     root.insert(
         "version".to_string(),
-        root.get("version").cloned().unwrap_or_else(|| serde_json::json!(1)),
+        root.get("version")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!(1)),
     );
     root.insert(
         "edges".to_string(),
@@ -1807,7 +1928,9 @@ fn onboarding_sprite_ppm() -> String {
         for x in 0..16 {
             let color = if x == 0 || y == 0 || x == 15 || y == 15 {
                 "16 32 48"
-            } else if ((x == 4 || x == 11) && (5..=6).contains(&y)) || (y == 11 && (5..=10).contains(&x)) {
+            } else if ((x == 4 || x == 11) && (5..=6).contains(&y))
+                || (y == 11 && (5..=10).contains(&x))
+            {
                 "249 226 175"
             } else if (x == 5 || x == 10) && (5..=6).contains(&y) {
                 "255 255 255"
@@ -1846,12 +1969,17 @@ fn slugify_scene_id(value: &str) -> String {
 
 pub fn validate_scene(scene: &Scene) -> Result<(), LoadError> {
     if scene.scene_id.trim().is_empty() {
-        return Err(LoadError("scene: campo 'scene_id' nao pode ser vazio.".into()));
+        return Err(LoadError(
+            "scene: campo 'scene_id' nao pode ser vazio.".into(),
+        ));
     }
 
     ensure_unique_ids(
         "entity_id",
-        scene.entities.iter().map(|entity| entity.entity_id.as_str()),
+        scene
+            .entities
+            .iter()
+            .map(|entity| entity.entity_id.as_str()),
     )?;
     ensure_unique_ids(
         "layer_id",
@@ -1912,10 +2040,12 @@ fn validate_scene_path(scene_path: &str) -> Result<(), LoadError> {
         )));
     }
 
-    if path
-        .components()
-        .any(|component| matches!(component, Component::ParentDir | Component::RootDir | Component::Prefix(_)))
-    {
+    if path.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
         return Err(LoadError(format!(
             "project.rds: caminho '{}' nao pode sair da raiz do projeto.",
             trimmed
@@ -1972,7 +2102,11 @@ fn resolve_entity_prefab(
     entity: &Entity,
     stack: &mut Vec<String>,
 ) -> Result<Entity, LoadError> {
-    let Some(prefab_ref) = entity.prefab.as_deref().map(str::trim).filter(|value| !value.is_empty())
+    let Some(prefab_ref) = entity
+        .prefab
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
     else {
         return Ok(entity.clone());
     };
@@ -2013,7 +2147,9 @@ fn prefab_path(project_dir: &Path, prefab_ref: &str) -> Result<PathBuf, LoadErro
 fn normalize_prefab_ref(prefab_ref: &str) -> Result<PathBuf, LoadError> {
     let trimmed = prefab_ref.trim();
     if trimmed.is_empty() {
-        return Err(LoadError("scene: campo 'prefab' nao pode ser vazio.".into()));
+        return Err(LoadError(
+            "scene: campo 'prefab' nao pode ser vazio.".into(),
+        ));
     }
 
     let mut relative = PathBuf::from(trimmed);
@@ -2052,7 +2188,11 @@ fn resolve_entity_logic_graph(project_dir: &Path, entity: &Entity) -> Result<Ent
         return Ok(entity.clone());
     };
 
-    if logic.graph.as_deref().is_some_and(|graph| !graph.trim().is_empty()) {
+    if logic
+        .graph
+        .as_deref()
+        .is_some_and(|graph| !graph.trim().is_empty())
+    {
         return Ok(entity.clone());
     }
 
@@ -2095,7 +2235,9 @@ fn graph_write_path(project_dir: &Path, graph_ref: &str) -> Result<PathBuf, Load
 fn normalize_graph_ref(graph_ref: &str) -> Result<PathBuf, LoadError> {
     let trimmed = graph_ref.trim();
     if trimmed.is_empty() {
-        return Err(LoadError("scene: campo 'graph_ref' nao pode ser vazio.".into()));
+        return Err(LoadError(
+            "scene: campo 'graph_ref' nao pode ser vazio.".into(),
+        ));
     }
 
     let relative = PathBuf::from(trimmed);
@@ -2208,7 +2350,11 @@ fn write_json<T: serde::Serialize>(path: impl AsRef<Path>, value: &T) -> Result<
 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| {
-            LoadError(format!("Nao foi possivel criar '{}': {}", parent.display(), e))
+            LoadError(format!(
+                "Nao foi possivel criar '{}': {}",
+                parent.display(),
+                e
+            ))
         })?;
     }
 
@@ -2319,11 +2465,7 @@ fn replace_file_atomically_windows(temp_path: &Path, destination: &Path) -> Resu
             .encode_wide()
             .chain(Some(0))
             .collect();
-        let temp_wide: Vec<u16> = temp_path
-            .as_os_str()
-            .encode_wide()
-            .chain(Some(0))
-            .collect();
+        let temp_wide: Vec<u16> = temp_path.as_os_str().encode_wide().chain(Some(0)).collect();
 
         let replaced = unsafe {
             ReplaceFileW(
@@ -2415,8 +2557,11 @@ mod tests {
             .save(dir.join("res").join("images").join("level.png"))
             .expect("write level png");
         if with_jump {
-            fs::write(dir.join("res").join("sound").join("jump.wav"), minimal_wav_bytes())
-                .expect("write jump asset");
+            fs::write(
+                dir.join("res").join("sound").join("jump.wav"),
+                minimal_wav_bytes(),
+            )
+            .expect("write jump asset");
         }
         fs::write(
             dir.join("res").join("sound").join("sonic2Emerald.vgm"),
@@ -2428,10 +2573,8 @@ mod tests {
             .expect("write symbol.txt");
         fs::write(dir.join("src").join("main.c"), b"int main(void){return 0;}")
             .expect("write main.c");
-        fs::write(dir.join("inc").join("player.h"), b"void player(void);")
-            .expect("write player.h");
-        fs::write(dir.join("src").join("boot").join("sega.s"), b"boot")
-            .expect("write boot source");
+        fs::write(dir.join("inc").join("player.h"), b"void player(void);").expect("write player.h");
+        fs::write(dir.join("src").join("boot").join("sega.s"), b"boot").expect("write boot source");
     }
 
     fn write_generic_sgdk_donor_fixture(dir: &Path) {
@@ -2449,12 +2592,17 @@ mod tests {
         image::RgbaImage::from_pixel(128, 128, image::Rgba([32, 64, 180, 255]))
             .save(dir.join("res").join("maps").join("stage.png"))
             .expect("write stage image");
-        fs::write(dir.join("res").join("sound").join("jump.wav"), minimal_wav_bytes())
-            .expect("write wav");
-        fs::write(dir.join("res").join("sound").join("theme.xgm"), b"xgm-data")
-            .expect("write xgm");
-        fs::write(dir.join("res").join("sound").join("forbidden.vgm"), b"vgm-data")
-            .expect("write vgm");
+        fs::write(
+            dir.join("res").join("sound").join("jump.wav"),
+            minimal_wav_bytes(),
+        )
+        .expect("write wav");
+        fs::write(dir.join("res").join("sound").join("theme.xgm"), b"xgm-data").expect("write xgm");
+        fs::write(
+            dir.join("res").join("sound").join("forbidden.vgm"),
+            b"vgm-data",
+        )
+        .expect("write vgm");
         fs::write(
             dir.join("res").join("resources.res"),
             [
@@ -2474,10 +2622,67 @@ mod tests {
         fs::write(dir.join("boot").join("startup.s"), b"boot").expect("write boot");
     }
 
+    fn write_split_sgdk_donor_fixture(dir: &Path) {
+        fs::create_dir_all(dir.join("res").join("sprite")).expect("create donor sprite dir");
+        fs::create_dir_all(dir.join("res").join("stages")).expect("create donor stages dir");
+        fs::create_dir_all(dir.join("res").join("sound")).expect("create donor sound dir");
+        fs::create_dir_all(dir.join("out")).expect("create donor out dir");
+        fs::create_dir_all(dir.join("src")).expect("create donor src dir");
+        fs::create_dir_all(dir.join("inc")).expect("create donor inc dir");
+        fs::create_dir_all(dir.join("boot")).expect("create donor boot dir");
+
+        image::RgbaImage::from_pixel(32, 32, image::Rgba([255, 150, 48, 255]))
+            .save(dir.join("res").join("sprite").join("hero.png"))
+            .expect("write split hero sprite");
+        image::RgbaImage::from_pixel(128, 128, image::Rgba([32, 96, 196, 255]))
+            .save(dir.join("res").join("stages").join("forest.png"))
+            .expect("write split stage image");
+        fs::write(
+            dir.join("res").join("sound").join("jump.wav"),
+            minimal_wav_bytes(),
+        )
+        .expect("write split wav");
+        fs::write(
+            dir.join("res").join("sound").join("theme.xgm2"),
+            b"xgm2-data",
+        )
+        .expect("write split xgm2");
+        fs::write(
+            dir.join("res").join("sound").join("forbidden.vgm"),
+            b"vgm-data",
+        )
+        .expect("write split vgm");
+        fs::write(
+            dir.join("res").join("sprites.res"),
+            "SPRITE hero sprite/hero.png 4 4 FAST 0",
+        )
+        .expect("write sprites.res");
+        fs::write(
+            dir.join("res").join("stages.res"),
+            "IMAGE forest stages/forest.png NONE",
+        )
+        .expect("write stages.res");
+        fs::write(
+            dir.join("res").join("audio.res"),
+            [
+                "WAV jump sound/jump.wav 22050",
+                "XGM2 theme sound/theme.xgm2",
+                "VGM forbidden sound/forbidden.vgm",
+            ]
+            .join("\n"),
+        )
+        .expect("write audio.res");
+        fs::write(dir.join("out").join("rom.bin"), b"forbidden-rom").expect("write split rom");
+        fs::write(dir.join("src").join("main.c"), b"int main(void){return 0;}")
+            .expect("write split main");
+        fs::write(dir.join("inc").join("game.h"), b"void game(void);").expect("write split header");
+        fs::write(dir.join("boot").join("startup.s"), b"boot").expect("write split boot");
+    }
+
     fn minimal_wav_bytes() -> Vec<u8> {
         vec![
-            82, 73, 70, 70, 36, 0, 0, 0, 87, 65, 86, 69, 102, 109, 116, 32, 16, 0, 0, 0, 1, 0,
-            1, 0, 68, 172, 0, 0, 68, 172, 0, 0, 1, 0, 8, 0, 100, 97, 116, 97, 0, 0, 0, 0,
+            82, 73, 70, 70, 36, 0, 0, 0, 87, 65, 86, 69, 102, 109, 116, 32, 16, 0, 0, 0, 1, 0, 1,
+            0, 68, 172, 0, 0, 68, 172, 0, 0, 1, 0, 8, 0, 100, 97, 116, 97, 0, 0, 0, 0,
         ]
     }
 
@@ -2488,7 +2693,13 @@ mod tests {
         assert_eq!(project.rds_version, UGDM_VERSION);
         assert_eq!(project.schema_version, CURRENT_SCHEMA_VERSION);
         assert_eq!(project.target, "megadrive");
-        assert_eq!(project.resolution, Resolution { width: 320, height: 224 });
+        assert_eq!(
+            project.resolution,
+            Resolution {
+                width: 320,
+                height: 224
+            }
+        );
         assert_eq!(project.palette_mode, "4x16");
         assert_eq!(project.entry_scene, DEFAULT_ENTRY_SCENE);
         assert_eq!(project.build, Some(default_build_config()));
@@ -2497,7 +2708,10 @@ mod tests {
     #[test]
     fn list_project_templates_reads_registry_and_builtin_entries_are_available() {
         let templates = list_project_templates().expect("list templates");
-        let ids = templates.iter().map(|template| template.id.as_str()).collect::<Vec<_>>();
+        let ids = templates
+            .iter()
+            .map(|template| template.id.as_str())
+            .collect::<Vec<_>>();
 
         assert_eq!(
             ids,
@@ -2511,24 +2725,31 @@ mod tests {
                 "action_seed",
             ]
         );
-        assert!(templates
-            .iter()
-            .find(|template| template.id == "empty")
-            .expect("empty template")
-            .available);
-        assert!(templates
-            .iter()
-            .find(|template| template.id == "starter_guided")
-            .expect("starter template")
-            .available);
+        assert!(
+            templates
+                .iter()
+                .find(|template| template.id == "empty")
+                .expect("empty template")
+                .available
+        );
+        assert!(
+            templates
+                .iter()
+                .find(|template| template.id == "starter_guided")
+                .expect("starter template")
+                .available
+        );
     }
 
     #[test]
     fn external_platformer_template_reports_unavailable_when_required_asset_is_missing() {
         let donor_dir = temp_dir("platformer-donor-missing");
         fs::create_dir_all(donor_dir.join("res").join("images")).expect("create donor images");
-        fs::write(donor_dir.join("res").join("images").join("player.png"), b"fake-player")
-            .expect("write donor player");
+        fs::write(
+            donor_dir.join("res").join("images").join("player.png"),
+            b"fake-player",
+        )
+        .expect("write donor player");
 
         let error = validate_platformer_donor_path(&donor_dir).expect_err("missing level asset");
         assert!(error.to_string().contains("level.png"));
@@ -2553,17 +2774,42 @@ mod tests {
         assert!(level.is_file());
         assert!(jump.is_file());
         assert_eq!(scene.entities.len(), 3);
-        assert_eq!(scene.entities[0].prefab.as_deref(), Some("platformer_tilemap.json"));
-        assert_eq!(scene.entities[1].prefab.as_deref(), Some("platformer_player.json"));
-        assert_eq!(scene.entities[2].prefab.as_deref(), Some("platformer_camera.json"));
-        assert!(project_dir.join("prefabs").join("platformer_player.json").is_file());
-        assert!(project_dir.join("prefabs").join("platformer_camera.json").is_file());
-        assert!(project_dir.join("prefabs").join("platformer_tilemap.json").is_file());
-        assert!(project_dir.join("graphs").join("platformer_player_logic.json").is_file());
+        assert_eq!(
+            scene.entities[0].prefab.as_deref(),
+            Some("platformer_tilemap.json")
+        );
+        assert_eq!(
+            scene.entities[1].prefab.as_deref(),
+            Some("platformer_player.json")
+        );
+        assert_eq!(
+            scene.entities[2].prefab.as_deref(),
+            Some("platformer_camera.json")
+        );
+        assert!(project_dir
+            .join("prefabs")
+            .join("platformer_player.json")
+            .is_file());
+        assert!(project_dir
+            .join("prefabs")
+            .join("platformer_camera.json")
+            .is_file());
+        assert!(project_dir
+            .join("prefabs")
+            .join("platformer_tilemap.json")
+            .is_file());
+        assert!(project_dir
+            .join("graphs")
+            .join("platformer_player_logic.json")
+            .is_file());
         assert!(!project_dir.join("out").exists());
         assert!(!project_dir.join("src").exists());
         assert!(!project_dir.join("inc").exists());
-        assert!(!project_dir.join("assets").join("audio").join("sonic2Emerald.vgm").exists());
+        assert!(!project_dir
+            .join("assets")
+            .join("audio")
+            .join("sonic2Emerald.vgm")
+            .exists());
 
         let _ = fs::remove_dir_all(donor_dir);
         let _ = fs::remove_dir_all(project_dir);
@@ -2717,19 +2963,40 @@ mod tests {
 
         let scene = import_sgdk_project(&project_dir, &donor_dir).expect("import sgdk project");
 
-        assert!(project_dir.join("assets").join("sprites").join("hero.png").is_file());
-        assert!(project_dir.join("assets").join("tilesets").join("stage.png").is_file());
-        assert!(project_dir.join("assets").join("audio").join("jump.wav").is_file());
-        assert!(project_dir.join("assets").join("audio").join("theme.xgm").is_file());
-        assert!(!project_dir.join("assets").join("audio").join("forbidden.vgm").exists());
+        assert!(project_dir
+            .join("assets")
+            .join("sprites")
+            .join("hero.png")
+            .is_file());
+        assert!(project_dir
+            .join("assets")
+            .join("tilesets")
+            .join("stage.png")
+            .is_file());
+        assert!(project_dir
+            .join("assets")
+            .join("audio")
+            .join("jump.wav")
+            .is_file());
+        assert!(project_dir
+            .join("assets")
+            .join("audio")
+            .join("theme.xgm")
+            .is_file());
+        assert!(!project_dir
+            .join("assets")
+            .join("audio")
+            .join("forbidden.vgm")
+            .exists());
         assert!(!project_dir.join("src").exists());
         assert!(!project_dir.join("inc").exists());
         assert!(!project_dir.join("out").exists());
         assert_eq!(scene.entities.len(), 4);
-        assert!(scene
-            .entities
-            .iter()
-            .any(|entity| entity.components.sprite.as_ref().is_some_and(|sprite| sprite.asset == "assets/sprites/hero.png")));
+        assert!(scene.entities.iter().any(|entity| entity
+            .components
+            .sprite
+            .as_ref()
+            .is_some_and(|sprite| sprite.asset == "assets/sprites/hero.png")));
         assert!(scene.entities.iter().any(|entity| {
             entity
                 .components
@@ -2738,16 +3005,100 @@ mod tests {
                 .is_some_and(|tilemap| tilemap.tileset == "assets/tilesets/stage.png")
         }));
         assert!(scene.entities.iter().any(|entity| {
+            entity.components.audio.as_ref().is_some_and(|audio| {
+                audio.sfx.get("jump") == Some(&"assets/audio/jump.wav".to_string())
+                    && audio.bgm.as_deref() == Some("assets/audio/theme.xgm")
+            })
+        }));
+        assert!(scene
+            .entities
+            .iter()
+            .any(|entity| entity.entity_id == "main_camera"));
+        let primary_sprite = scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "hero")
+            .expect("primary sprite");
+        assert!(primary_sprite
+            .components
+            .logic
+            .as_ref()
+            .and_then(|logic| logic.graph.as_deref())
+            .is_some_and(|graph| graph.contains("\"event_start\"")));
+
+        let _ = fs::remove_dir_all(donor_dir);
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn import_sgdk_project_combines_split_manifests_and_keeps_visual_entities_in_front_of_audio() {
+        let donor_dir = temp_dir("sgdk-split-import-donor");
+        let project_dir = temp_dir("sgdk-split-import-project");
+        create_project_skeleton(&project_dir, "Imported Split SGDK", "megadrive")
+            .expect("create project skeleton");
+        write_split_sgdk_donor_fixture(&donor_dir);
+
+        validate_sgdk_project_path(&donor_dir).expect("validate split sgdk donor");
+        let scene =
+            import_sgdk_project(&project_dir, &donor_dir).expect("import split sgdk project");
+
+        assert!(project_dir
+            .join("assets")
+            .join("sprites")
+            .join("hero.png")
+            .is_file());
+        assert!(project_dir
+            .join("assets")
+            .join("tilesets")
+            .join("forest.png")
+            .is_file());
+        assert!(project_dir
+            .join("assets")
+            .join("audio")
+            .join("jump.wav")
+            .is_file());
+        assert!(project_dir
+            .join("assets")
+            .join("audio")
+            .join("theme.xgm2")
+            .is_file());
+        assert!(!project_dir
+            .join("assets")
+            .join("audio")
+            .join("forbidden.vgm")
+            .exists());
+        assert!(scene
+            .entities
+            .first()
+            .and_then(|entity| entity.components.tilemap.as_ref())
+            .is_some());
+        assert!(scene
+            .entities
+            .get(1)
+            .and_then(|entity| entity.components.sprite.as_ref())
+            .is_some());
+        assert!(scene
+            .entities
+            .iter()
+            .any(|entity| entity.entity_id == "audio_bank"));
+        let hero = scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "hero")
+            .expect("imported hero");
+        assert!(hero
+            .components
+            .logic
+            .as_ref()
+            .and_then(|logic| logic.graph.as_deref())
+            .is_some_and(|graph| graph.contains("\"sprite_move\"")));
+        assert!(scene.entities.iter().any(|entity| {
             entity
                 .components
                 .audio
                 .as_ref()
-                .is_some_and(|audio| {
-                    audio.sfx.get("jump") == Some(&"assets/audio/jump.wav".to_string())
-                        && audio.bgm.as_deref() == Some("assets/audio/theme.xgm")
-                })
+                .is_some_and(|audio| audio.bgm.as_deref() == Some("assets/audio/theme.xgm2"))
         }));
-        assert!(scene.entities.iter().any(|entity| entity.entity_id == "main_camera"));
 
         let _ = fs::remove_dir_all(donor_dir);
         let _ = fs::remove_dir_all(project_dir);
@@ -2786,15 +3137,21 @@ mod tests {
 
         fs::write(project_dir.join("project.rds"), legacy_project.to_string())
             .expect("write project");
-        fs::write(project_dir.join("scenes").join("main.json"), legacy_scene.to_string())
-            .expect("write scene");
+        fs::write(
+            project_dir.join("scenes").join("main.json"),
+            legacy_scene.to_string(),
+        )
+        .expect("write scene");
 
         let project = load_project(&project_dir).expect("load migrated project");
         let scene = load_scene(&project_dir, "scenes/main.json").expect("load migrated scene");
 
         assert_eq!(project.schema_version, CURRENT_SCHEMA_VERSION);
         assert_eq!(
-            project.build.as_ref().map(|build| build.artifact_prefix.as_str()),
+            project
+                .build
+                .as_ref()
+                .map(|build| build.artifact_prefix.as_str()),
             Some("game")
         );
         assert_eq!(
@@ -2804,7 +3161,10 @@ mod tests {
                 .map(|build| build.patch_audit_log.len()),
             Some(0)
         );
-        assert_eq!(scene.schema_version.as_deref(), Some(CURRENT_SCHEMA_VERSION));
+        assert_eq!(
+            scene.schema_version.as_deref(),
+            Some(CURRENT_SCHEMA_VERSION)
+        );
 
         let _ = fs::remove_dir_all(project_dir);
     }
@@ -2843,15 +3203,21 @@ mod tests {
 
         fs::write(project_dir.join("project.rds"), project_v1_1.to_string())
             .expect("write project");
-        fs::write(project_dir.join("scenes").join("main.json"), scene_v1_1.to_string())
-            .expect("write scene");
+        fs::write(
+            project_dir.join("scenes").join("main.json"),
+            scene_v1_1.to_string(),
+        )
+        .expect("write scene");
 
         let project = load_project(&project_dir).expect("load migrated project");
         let scene = load_scene(&project_dir, "scenes/main.json").expect("load migrated scene");
 
         assert_eq!(project.schema_version, CURRENT_SCHEMA_VERSION);
         assert_eq!(
-            project.build.as_ref().map(|build| build.artifact_prefix.as_str()),
+            project
+                .build
+                .as_ref()
+                .map(|build| build.artifact_prefix.as_str()),
             Some("audit")
         );
         assert_eq!(
@@ -2861,7 +3227,10 @@ mod tests {
                 .map(|build| build.patch_audit_log.len()),
             Some(0)
         );
-        assert_eq!(scene.schema_version.as_deref(), Some(CURRENT_SCHEMA_VERSION));
+        assert_eq!(
+            scene.schema_version.as_deref(),
+            Some(CURRENT_SCHEMA_VERSION)
+        );
 
         let _ = fs::remove_dir_all(project_dir);
     }
@@ -2901,8 +3270,11 @@ mod tests {
 
         fs::write(project_dir.join("project.rds"), project_v1_2.to_string())
             .expect("write project");
-        fs::write(project_dir.join("scenes").join("main.json"), scene_v1_2.to_string())
-            .expect("write scene");
+        fs::write(
+            project_dir.join("scenes").join("main.json"),
+            scene_v1_2.to_string(),
+        )
+        .expect("write scene");
 
         let project = load_project(&project_dir).expect("load migrated project");
 
@@ -2915,12 +3287,18 @@ mod tests {
     #[test]
     fn load_project_accepts_canonical_megadrive_fixture() {
         let project = load_project(&fixture_dir("megadrive_dummy")).expect("load fixture");
-        let scene = load_scene(&fixture_dir("megadrive_dummy"), &project.entry_scene)
-            .expect("load scene");
+        let scene =
+            load_scene(&fixture_dir("megadrive_dummy"), &project.entry_scene).expect("load scene");
 
         assert_eq!(project.schema_version, CURRENT_SCHEMA_VERSION);
         assert_eq!(project.target, "megadrive");
-        assert_eq!(project.resolution, Resolution { width: 320, height: 224 });
+        assert_eq!(
+            project.resolution,
+            Resolution {
+                width: 320,
+                height: 224
+            }
+        );
         assert_eq!(project.palette_mode, "4x16");
         assert_eq!(scene.scene_id, DEFAULT_SCENE_ID);
         assert_eq!(
@@ -2932,12 +3310,18 @@ mod tests {
     #[test]
     fn load_project_accepts_canonical_snes_fixture() {
         let project = load_project(&fixture_dir("snes_dummy")).expect("load fixture");
-        let scene = load_scene(&fixture_dir("snes_dummy"), &project.entry_scene)
-            .expect("load scene");
+        let scene =
+            load_scene(&fixture_dir("snes_dummy"), &project.entry_scene).expect("load scene");
 
         assert_eq!(project.schema_version, CURRENT_SCHEMA_VERSION);
         assert_eq!(project.target, "snes");
-        assert_eq!(project.resolution, Resolution { width: 256, height: 224 });
+        assert_eq!(
+            project.resolution,
+            Resolution {
+                width: 256,
+                height: 224
+            }
+        );
         assert_eq!(project.palette_mode, "8x16");
         assert_eq!(scene.scene_id, DEFAULT_SCENE_ID);
         assert_eq!(
@@ -2956,7 +3340,10 @@ mod tests {
             .expect("save bonus scene");
 
         let scenes = list_scenes(&project_dir).expect("list project scenes");
-        let paths = scenes.iter().map(|scene| scene.path.as_str()).collect::<Vec<_>>();
+        let paths = scenes
+            .iter()
+            .map(|scene| scene.path.as_str())
+            .collect::<Vec<_>>();
 
         assert_eq!(paths, vec!["scenes/bonus_stage.json", "scenes/main.json"]);
         assert_eq!(scenes[0].scene_id, "bonus_stage");
@@ -2970,7 +3357,9 @@ mod tests {
     fn list_scenes_returns_empty_when_directory_is_missing() {
         let project_dir = temp_dir("list-scenes-empty");
 
-        assert!(list_scenes(&project_dir).expect("list empty scenes").is_empty());
+        assert!(list_scenes(&project_dir)
+            .expect("list empty scenes")
+            .is_empty());
 
         let _ = fs::remove_dir_all(project_dir);
     }
@@ -2982,8 +3371,8 @@ mod tests {
             .expect("create canonical project");
         seed_onboarding_template(&project_dir, "megadrive").expect("seed onboarding project");
 
-        let created = create_scene(&project_dir, Some("Teste"))
-            .expect("create scene with starter content");
+        let created =
+            create_scene(&project_dir, Some("Teste")).expect("create scene with starter content");
         let scene = load_scene(&project_dir, &created.path).expect("load created scene");
 
         assert_eq!(scene.display_name.as_deref(), Some("Teste"));
@@ -2997,14 +3386,12 @@ mod tests {
                 .map(|sprite| sprite.asset.as_str()),
             Some(ONBOARDING_SPRITE_ASSET)
         );
-        assert!(
-            scene.entities[0]
-                .components
-                .logic
-                .as_ref()
-                .and_then(|logic| logic.graph.as_ref())
-                .is_some_and(|graph| graph.contains("\"fromNode\":\"start\""))
-        );
+        assert!(scene.entities[0]
+            .components
+            .logic
+            .as_ref()
+            .and_then(|logic| logic.graph.as_ref())
+            .is_some_and(|graph| graph.contains("\"fromNode\":\"start\"")));
 
         let _ = fs::remove_dir_all(project_dir);
     }
@@ -3018,8 +3405,8 @@ mod tests {
         save_scene(&project_dir, "scenes/bonus_stage.json", &bonus_scene)
             .expect("save bonus scene");
 
-        let updated = set_entry_scene(&project_dir, "scenes/bonus_stage.json")
-            .expect("update entry scene");
+        let updated =
+            set_entry_scene(&project_dir, "scenes/bonus_stage.json").expect("update entry scene");
         let reloaded = load_project(&project_dir).expect("reload project");
 
         assert_eq!(updated.entry_scene, "scenes/bonus_stage.json");
@@ -3070,7 +3457,10 @@ mod tests {
 
         assert_eq!(project.schema_version, CURRENT_SCHEMA_VERSION);
         assert_eq!(
-            project.build.as_ref().map(|build| build.artifact_prefix.as_str()),
+            project
+                .build
+                .as_ref()
+                .map(|build| build.artifact_prefix.as_str()),
             Some("game")
         );
         assert!(project.template_metadata.is_none());
@@ -3168,16 +3558,12 @@ mod tests {
             retrofx: None,
         };
 
-        let project_warning = schema_warning_message(
-            "project.rds",
-            normalized_project_schema_version(&project),
-        )
-        .expect("project warning");
-        let scene_warning = schema_warning_message(
-            "scene",
-            normalized_scene_schema_version(&scene),
-        )
-        .expect("scene warning");
+        let project_warning =
+            schema_warning_message("project.rds", normalized_project_schema_version(&project))
+                .expect("project warning");
+        let scene_warning =
+            schema_warning_message("scene", normalized_scene_schema_version(&scene))
+                .expect("scene warning");
 
         assert!(project_warning.contains("mais nova que o app"));
         assert!(scene_warning.contains("mais nova que o app"));
@@ -3212,7 +3598,10 @@ mod tests {
         assert_eq!(physics.gravity_strength, 3);
         assert_eq!(physics.friction, 4);
         assert_eq!(
-            physics.max_velocity.as_ref().map(|velocity| (velocity.x, velocity.y)),
+            physics
+                .max_velocity
+                .as_ref()
+                .map(|velocity| (velocity.x, velocity.y)),
             Some((64, 32))
         );
     }
@@ -3251,7 +3640,10 @@ mod tests {
         let scene = load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load scene");
 
         assert_eq!(created, loaded);
-        assert_eq!(scene, canonical_scene(DEFAULT_SCENE_ID, Some("Main Scene".to_string())));
+        assert_eq!(
+            scene,
+            canonical_scene(DEFAULT_SCENE_ID, Some("Main Scene".to_string()))
+        );
         assert!(project_dir.join("assets").join("sprites").exists());
         assert!(project_dir.join("assets").join("tilesets").exists());
         assert!(project_dir.join("assets").join("audio").exists());
@@ -3284,7 +3676,8 @@ mod tests {
         });
 
         save_scene(&project_dir, &project.entry_scene, &scene).expect("save retrofx scene");
-        let reloaded = load_scene(&project_dir, &project.entry_scene).expect("reload retrofx scene");
+        let reloaded =
+            load_scene(&project_dir, &project.entry_scene).expect("reload retrofx scene");
 
         assert_eq!(reloaded.retrofx, scene.retrofx);
 
@@ -3302,7 +3695,13 @@ mod tests {
 
         assert_eq!(updated, reloaded);
         assert_eq!(reloaded.target, "snes");
-        assert_eq!(reloaded.resolution, Resolution { width: 256, height: 224 });
+        assert_eq!(
+            reloaded.resolution,
+            Resolution {
+                width: 256,
+                height: 224
+            }
+        );
         assert_eq!(reloaded.palette_mode, "8x16");
 
         let _ = fs::remove_dir_all(project_dir);
@@ -3311,8 +3710,7 @@ mod tests {
     #[test]
     fn save_project_replaces_existing_file_without_leaking_temp_files() {
         let project_dir = temp_dir("atomic-save");
-        let mut project = canonical_project("Atomic Test", "megadrive")
-            .expect("canonical project");
+        let mut project = canonical_project("Atomic Test", "megadrive").expect("canonical project");
 
         save_project(&project_dir, &project).expect("initial save");
         project.name = "Atomic Test Updated".to_string();
@@ -3336,11 +3734,12 @@ mod tests {
             file_names
         );
         assert_eq!(
-            load_project(&project_dir).expect("load updated project").name,
+            load_project(&project_dir)
+                .expect("load updated project")
+                .name,
             "Atomic Test Updated"
         );
 
         let _ = fs::remove_dir_all(project_dir);
     }
 }
-

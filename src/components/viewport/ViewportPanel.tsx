@@ -115,6 +115,21 @@ function getEntityBounds(entity: Entity, target: "megadrive" | "snes"): EntityBo
   };
 }
 
+function entityDisplayLabel(entity: Entity): string {
+  return entity.entity_id.trim() || entity.prefab?.replace(/\.json$/i, "") || "entity";
+}
+
+function releaseViewportAsset(entry: ViewportAssetCacheEntry) {
+  if (
+    entry.source &&
+    typeof entry.source === "object" &&
+    "close" in entry.source &&
+    typeof (entry.source as { close?: () => void }).close === "function"
+  ) {
+    (entry.source as { close: () => void }).close();
+  }
+}
+
 function drawResizeHandle(
   context: CanvasRenderingContext2D,
   x: number,
@@ -258,6 +273,9 @@ export default function ViewportPanel() {
   pausedRef.current = emulPaused;
 
   useEffect(() => {
+    for (const entry of assetCacheRef.current.values()) {
+      releaseViewportAsset(entry);
+    }
     assetCacheRef.current.clear();
     setAssetCacheVersion((current) => current + 1);
   }, [activeProjectDir]);
@@ -277,6 +295,39 @@ export default function ViewportPanel() {
       const cacheEntry: ViewportAssetCacheEntry = { status: "loading" };
       assetCacheRef.current.set(absolutePath, cacheEntry);
       const assetUrl = convertFileSrc(absolutePath);
+      const markLoaded = (source: CanvasImageSource, width: number, height: number) => {
+        assetCacheRef.current.set(absolutePath, {
+          status: "loaded",
+          source,
+          width,
+          height,
+        });
+        setAssetCacheVersion((current) => current + 1);
+      };
+      const markError = () => {
+        assetCacheRef.current.set(absolutePath, { status: "error" });
+        setAssetCacheVersion((current) => current + 1);
+      };
+      const loadImageElement = (imageSrc: string, options?: { revokeOnLoad?: boolean; fallbackToAssetUrl?: boolean }) => {
+        const image = new Image();
+        image.onload = () => {
+          if (options?.revokeOnLoad && typeof URL.revokeObjectURL === "function") {
+            URL.revokeObjectURL(imageSrc);
+          }
+          markLoaded(image, image.naturalWidth || image.width, image.naturalHeight || image.height);
+        };
+        image.onerror = () => {
+          if (options?.revokeOnLoad && typeof URL.revokeObjectURL === "function") {
+            URL.revokeObjectURL(imageSrc);
+          }
+          if (options?.fallbackToAssetUrl && imageSrc !== assetUrl) {
+            loadImageElement(assetUrl);
+            return;
+          }
+          markError();
+        };
+        image.src = imageSrc;
+      };
 
       if (relativePath.toLowerCase().endsWith(".ppm")) {
         void fetch(assetUrl)
@@ -301,37 +352,40 @@ export default function ViewportPanel() {
             }
             context.putImageData(imageData, 0, 0);
 
-            assetCacheRef.current.set(absolutePath, {
-              status: "loaded",
-              source: canvas,
-              width: canvas.width,
-              height: canvas.height,
-            });
-            setAssetCacheVersion((current) => current + 1);
+            markLoaded(canvas, canvas.width, canvas.height);
           })
-          .catch(() => {
-            assetCacheRef.current.set(absolutePath, { status: "error" });
-            setAssetCacheVersion((current) => current + 1);
-          });
+          .catch(markError);
 
         return cacheEntry;
       }
 
-      const image = new Image();
-      image.onload = () => {
-        assetCacheRef.current.set(absolutePath, {
-          status: "loaded",
-          source: image,
-          width: image.naturalWidth || image.width,
-          height: image.naturalHeight || image.height,
+      void fetch(assetUrl)
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          return response.blob();
+        })
+        .then((blob) => {
+          if (typeof createImageBitmap === "function") {
+            return createImageBitmap(blob).then((bitmap) => {
+              markLoaded(bitmap, bitmap.width, bitmap.height);
+            });
+          }
+
+          if (typeof URL.createObjectURL === "function") {
+            loadImageElement(URL.createObjectURL(blob), {
+              revokeOnLoad: true,
+              fallbackToAssetUrl: true,
+            });
+            return;
+          }
+
+          loadImageElement(assetUrl);
+        })
+        .catch(() => {
+          loadImageElement(assetUrl);
         });
-        setAssetCacheVersion((current) => current + 1);
-      };
-      image.onerror = () => {
-        assetCacheRef.current.set(absolutePath, { status: "error" });
-        setAssetCacheVersion((current) => current + 1);
-      };
-      image.src = assetUrl;
       return cacheEntry;
     },
     [activeProjectDir]
@@ -1021,7 +1075,7 @@ export default function ViewportPanel() {
         context.fillStyle = "#94e2d5";
         context.font = "9px monospace";
         context.textAlign = "left";
-        context.fillText(`TM ${entity.prefab ?? entity.entity_id}`.slice(0, 16), x + 2, y + 10);
+        context.fillText(`TM ${entityDisplayLabel(entity)}`.slice(0, 16), x + 2, y + 10);
         if (isSelected) {
           context.fillStyle = "rgba(148,226,213,0.15)";
           context.fillRect(x, y, mapWidth, mapHeight);
@@ -1047,7 +1101,7 @@ export default function ViewportPanel() {
         context.fillStyle = isSelected ? "#f9e2af" : "rgba(249,226,175,0.7)";
         context.font = "9px monospace";
         context.textAlign = "left";
-        context.fillText(`CAM ${entity.prefab ?? entity.entity_id}`.slice(0, 16), x + offsetX + 2, y + offsetY + 10);
+        context.fillText(`CAM ${entityDisplayLabel(entity)}`.slice(0, 16), x + offsetX + 2, y + offsetY + 10);
 
         context.strokeStyle = isSelected ? "#f9e2af" : "rgba(249,226,175,0.4)";
         context.lineWidth = 1;
@@ -1082,7 +1136,7 @@ export default function ViewportPanel() {
       context.fillStyle = isSelected ? "#ffffff" : color;
       context.font = "9px monospace";
       context.textAlign = "left";
-      context.fillText((entity.prefab ?? entity.entity_id).slice(0, 14), x + 2, y + 10);
+      context.fillText(entityDisplayLabel(entity).slice(0, 14), x + 2, y + 10);
 
       if (isSelected) {
         context.save();

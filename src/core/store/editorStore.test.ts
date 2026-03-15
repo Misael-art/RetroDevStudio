@@ -253,6 +253,54 @@ describe("setActiveScene", () => {
     expect(useEditorStore.getState().selectedEntityId).toBe("player");
   });
 
+  it("prioriza a entidade player ou a primeira com sprite/logica ao carregar a cena", () => {
+    useEditorStore.setState({ selectedEntityId: null });
+    useEditorStore.getState().setActiveScene({
+      ...EMPTY_SCENE,
+      entities: [
+        {
+          entity_id: "tilemap_bg",
+          prefab: "platformer_tilemap.json",
+          transform: { x: 0, y: 0 },
+          components: {
+            tilemap: {
+              tileset: "assets/tilesets/platformer_level.png",
+              map_width: 32,
+              map_height: 32,
+            },
+          },
+        },
+        {
+          entity_id: "player",
+          prefab: "platformer_player.json",
+          transform: { x: 48, y: 120 },
+          components: {
+            sprite: {
+              asset: "assets/sprites/platformer_player.png",
+              frame_width: 32,
+              frame_height: 32,
+            },
+            logic: {
+              graph_ref: "graphs/platformer_player_logic.json",
+            },
+          },
+        },
+        {
+          entity_id: "audio_bank",
+          prefab: null,
+          transform: { x: 0, y: 0 },
+          components: {
+            audio: {
+              sfx: { jump: "assets/audio/jump.wav" },
+            },
+          },
+        },
+      ],
+    });
+
+    expect(useEditorStore.getState().selectedEntityId).toBe("player");
+  });
+
   it("preserva a selecao quando a entidade ainda existe na cena carregada", () => {
     useEditorStore.setState({ selectedEntityId: "enemy" });
     useEditorStore.getState().setActiveScene({
@@ -461,6 +509,57 @@ describe("undo/redo", () => {
     useEditorStore.getState().undo();
 
     expect(useEditorStore.getState().activeSceneSource).toEqual(sourceScene);
+  });
+
+  it("preserva graph_ref herdado ao editar o grafo resolvido de uma instancia de prefab", () => {
+    const sourceScene: Scene = {
+      ...EMPTY_SCENE,
+      entities: [
+        {
+          entity_id: "player",
+          prefab: "platformer_player.json",
+          transform: { x: 48, y: 120 },
+          components: {},
+        },
+      ],
+    };
+    const resolvedScene: Scene = {
+      ...EMPTY_SCENE,
+      entities: [
+        {
+          entity_id: "player",
+          prefab: "platformer_player.json",
+          transform: { x: 48, y: 120 },
+          components: {
+            sprite: {
+              asset: "assets/sprites/platformer_player.png",
+              frame_width: 32,
+              frame_height: 32,
+            },
+            logic: {
+              graph_ref: "graphs/platformer_player_logic.json",
+              graph: "{\"version\":1,\"nodes\":[{\"id\":\"start\",\"type\":\"event_start\",\"params\":{}}],\"edges\":[]}",
+            },
+          },
+        },
+      ],
+    };
+
+    useEditorStore.getState().setActiveScene(resolvedScene, sourceScene);
+    useEditorStore.getState().updateEntity("player", {
+      components: {
+        ...resolvedScene.entities[0].components,
+        logic: {
+          ...resolvedScene.entities[0].components.logic,
+          graph:
+            "{\"version\":1,\"nodes\":[{\"id\":\"start\",\"type\":\"event_start\",\"params\":{}},{\"id\":\"move\",\"type\":\"sprite_move\",\"params\":{\"target\":\"player\",\"dx\":2,\"dy\":0}}],\"edges\":[]}",
+        },
+      },
+    });
+
+    const persistedLogic = useEditorStore.getState().activeSceneSource?.entities[0]?.components.logic;
+    expect(persistedLogic?.graph_ref).toBe("graphs/platformer_player_logic.json");
+    expect(persistedLogic?.graph).toContain("\"sprite_move\"");
   });
 });
 

@@ -150,6 +150,41 @@ function prunePatchAgainstBase(patch: unknown, base: unknown): unknown | undefin
   return Object.keys(pruned).length > 0 ? pruned : undefined;
 }
 
+function preserveInheritedGraphRef(
+  sourcePatch: unknown,
+  patch: unknown,
+  sourceEntity: Entity,
+  resolvedEntity: Entity
+): unknown | undefined {
+  if (!isRecord(sourcePatch) || !isRecord(patch)) {
+    return sourcePatch;
+  }
+
+  const patchComponents = isRecord(patch.components) ? patch.components : null;
+  const patchLogic = patchComponents && isRecord(patchComponents.logic) ? patchComponents.logic : null;
+  if (!patchLogic || !Object.prototype.hasOwnProperty.call(patchLogic, "graph")) {
+    return sourcePatch;
+  }
+
+  const resolvedGraphRef = resolvedEntity.components.logic?.graph_ref;
+  const sourceGraphRef = sourceEntity.components.logic?.graph_ref;
+  if (!resolvedGraphRef || sourceGraphRef) {
+    return sourcePatch;
+  }
+
+  const nextPatch = structuredClone(sourcePatch) as Record<string, unknown>;
+  const nextComponents = isRecord(nextPatch.components)
+    ? { ...(nextPatch.components as Record<string, unknown>) }
+    : {};
+  const nextLogic = isRecord(nextComponents.logic)
+    ? { ...(nextComponents.logic as Record<string, unknown>) }
+    : {};
+  nextLogic.graph_ref = resolvedGraphRef;
+  nextComponents.logic = nextLogic;
+  nextPatch.components = nextComponents;
+  return nextPatch;
+}
+
 function cloneUndoEntry(entry: UndoEntry): UndoEntry {
   return {
     activeScene: cloneSceneSnapshot(entry.activeScene),
@@ -188,7 +223,21 @@ function resolveSceneSelection(scene: Scene | null, previousSelection: string | 
   }
 
   if (scene.entities.length > 0) {
-    return scene.entities[0].entity_id;
+    const preferredEntity = [...scene.entities].sort((left, right) => {
+      const score = (entity: Entity) => {
+        let total = 0;
+        if (entity.entity_id === "player") total += 100;
+        if (entity.components?.logic) total += 60;
+        if (entity.components?.sprite) total += 40;
+        if (entity.components?.camera) total += 20;
+        if (entity.components?.tilemap) total += 10;
+        return total;
+      };
+
+      return score(right) - score(left);
+    })[0];
+
+    return preferredEntity?.entity_id ?? scene.entities[0].entity_id;
   }
 
   if (scene.background_layers.length > 0) {
@@ -326,7 +375,12 @@ export const useEditorStore = create<EditorState>((set) => ({
         return {};
       }
 
-      const sourcePatch = prunePatchAgainstBase(patch, resolvedEntity);
+      const sourcePatch = preserveInheritedGraphRef(
+        prunePatchAgainstBase(patch, resolvedEntity),
+        patch,
+        sourceEntity,
+        resolvedEntity
+      );
       return {
         ...(recordHistory
           ? {

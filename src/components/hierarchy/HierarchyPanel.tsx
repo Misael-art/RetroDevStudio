@@ -33,6 +33,10 @@ function entityType(entity: { components?: { sprite?: unknown; collision?: unkno
   return "object";
 }
 
+function entityDisplayName(entity: { entity_id: string; prefab?: string | null }): string {
+  return entity.entity_id.trim() || entity.prefab?.replace(/\.json$/i, "") || "entity";
+}
+
 export default function HierarchyPanel() {
   const {
     selectedEntityId, setSelectedEntityId,
@@ -151,7 +155,9 @@ export default function HierarchyPanel() {
   const filterLower = filterText.toLowerCase();
   const filteredEntities = filterText
     ? entities.filter((entity) =>
-      (entity.prefab ?? entity.entity_id).toLowerCase().includes(filterLower)
+      [entityDisplayName(entity), entity.prefab ?? ""].some((value) =>
+        value.toLowerCase().includes(filterLower)
+      )
     )
     : entities;
   const filteredLayers = filterText
@@ -453,7 +459,9 @@ export default function HierarchyPanel() {
                 ].join(" ")}
               >
                 <span className="text-[#7f849c]">{TYPE_ICON[type] ?? "○"}</span>
-                <span>{entity.prefab ?? entity.entity_id}</span>
+                <span title={entity.prefab ? `Prefab: ${entity.prefab}` : entity.entity_id}>
+                  {entityDisplayName(entity)}
+                </span>
                 <span className="ml-auto text-[#45475a]">{type}</span>
               </li>
             );

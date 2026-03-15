@@ -219,6 +219,26 @@ function findButton(container: HTMLElement, label: string): HTMLButtonElement {
   return button;
 }
 
+function findButtonInContext(
+  container: HTMLElement,
+  label: string,
+  contextText: string
+): HTMLButtonElement {
+  const button = Array.from(container.querySelectorAll("button")).find((element) => {
+    if (!(element instanceof HTMLButtonElement) || element.textContent?.trim() !== label) {
+      return false;
+    }
+
+    return element.parentElement?.textContent?.includes(contextText) ?? false;
+  });
+
+  if (!(button instanceof HTMLButtonElement)) {
+    throw new Error(`Button not found: ${label} in context ${contextText}`);
+  }
+
+  return button;
+}
+
 describe("App build flow", () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -626,21 +646,21 @@ describe("App build flow", () => {
     const starterCard = container.querySelector(
       "[data-testid='template-card-starter_guided']"
     ) as HTMLButtonElement | null;
-    const chooseButton = findButton(container, "Escolher");
+    const chooseButton = findButtonInContext(container, "Escolher", "Pasta base");
     const createButton = findButton(container, "Criar Projeto");
-    const nameInput = container.querySelector("input[placeholder='Nome do projeto']") as
-      | HTMLInputElement
-      | null;
 
     await act(async () => {
       starterCard?.click();
-      chooseButton.click();
-      if (nameInput) {
-        nameInput.value = "Galeria";
-        nameInput.dispatchEvent(new Event("input", { bubbles: true }));
-      }
       await flush();
     });
+
+    await act(async () => {
+      chooseButton.click();
+      await flush();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("F:/Projects/RetroDevStudio/tests/fixtures");
 
     await act(async () => {
       createButton.click();
@@ -671,7 +691,7 @@ describe("App build flow", () => {
       await flush();
     });
 
-    const chooseButton = findButton(container, "Escolher");
+    const chooseButton = findButtonInContext(container, "Escolher", "Pasta base");
     const importButton = findButton(container, "Importar Projeto SGDK");
 
     await act(async () => {
