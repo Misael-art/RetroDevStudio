@@ -12,6 +12,26 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
 const driverServerUrl = process.env.RDS_E2E_DRIVER_URL ?? "http://127.0.0.1:4444";
+const defaultDebugAppPath = path.join(
+  repoRoot,
+  "src-tauri",
+  "target-test",
+  "debug",
+  "retro-dev-studio.exe"
+);
+const defaultReleaseAppPath = path.join(
+  repoRoot,
+  "src-tauri",
+  "target-test",
+  "release",
+  "retro-dev-studio.exe"
+);
+const defaultWebDriverPath = path.join(
+  repoRoot,
+  "toolchains",
+  "webdriver",
+  "msedgedriver.exe"
+);
 
 function fail(message) {
   throw new Error(message);
@@ -32,15 +52,35 @@ async function readProjectMetadata(projectDir) {
   };
 }
 
+async function resolveDefaultDesktopApp(skipBuild) {
+  if (skipBuild && await pathExists(defaultReleaseAppPath)) {
+    return defaultReleaseAppPath;
+  }
+
+  if (await pathExists(defaultDebugAppPath)) {
+    return defaultDebugAppPath;
+  }
+
+  if (await pathExists(defaultReleaseAppPath)) {
+    return defaultReleaseAppPath;
+  }
+
+  return skipBuild ? defaultReleaseAppPath : defaultDebugAppPath;
+}
+
 function parseArgs(argv) {
   const options = {
     skipBuild: false,
     externalDriver: false,
     scenario: "build-run",
     project: path.join(repoRoot, "src-tauri", "tests", "fixtures", "projects", "megadrive_dummy"),
-    app: path.join(repoRoot, "src-tauri", "target-test", "debug", "retro-dev-studio.exe"),
+    app: "",
+    appExplicitlyProvided: false,
     tauriDriver: process.env.TAURI_DRIVER_PATH ?? "",
-    nativeDriver: process.env.RDS_EDGE_DRIVER_PATH ?? process.env.NATIVE_DRIVER_PATH ?? "",
+    nativeDriver:
+      process.env.RDS_EDGE_DRIVER_PATH ??
+      process.env.NATIVE_DRIVER_PATH ??
+      defaultWebDriverPath,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -81,6 +121,7 @@ function parseArgs(argv) {
       options.scenario = value;
     } else if (argument === "--app") {
       options.app = path.resolve(repoRoot, value);
+      options.appExplicitlyProvided = true;
     } else if (argument === "--tauri-driver") {
       options.tauriDriver = path.resolve(repoRoot, value);
     } else if (argument === "--native-driver") {
@@ -873,6 +914,9 @@ async function main() {
   }
 
   const options = parseArgs(process.argv.slice(2));
+  if (!options.appExplicitlyProvided) {
+    options.app = await resolveDefaultDesktopApp(options.skipBuild);
+  }
   const driverStartupTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_DRIVER_TIMEOUT_MS,
     30000

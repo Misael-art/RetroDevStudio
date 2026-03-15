@@ -100,6 +100,8 @@ RetroDevStudio/
 `-- toolchains/
     |-- sgdk/
     |-- pvsneslib/
+    |-- webdriver/
+    |   `-- msedgedriver.exe
     `-- libretro/
         `-- cores/
 ```
@@ -113,6 +115,7 @@ RetroDevStudio/
 - IPC de frontend fica em `src/core/ipc/`.
 - Fixtures backend ficam em `src-tauri/tests/fixtures/`.
 - Dependencias de terceiros instaladas sob demanda vivem em `toolchains/` e nao devem ser versionadas no Git.
+- Drivers locais de validacao desktop, como `msedgedriver.exe`, devem ficar em `toolchains/webdriver/`, nunca soltos na raiz do repositorio.
 
 ---
 
@@ -126,5 +129,6 @@ RetroDevStudio/
 - `scripts/e2e-tauri-build-run.mjs` e o runner canonico de regressao desktop/Tauri para `Build -> Load ROM -> Run frames`.
 - `.github/workflows/desktop-e2e.yml` e o workflow canonico de regressao desktop em Windows e ja foi validado em runner GitHub real.
 - `toolchains/libretro/cores/` e o local canonico dos DLLs de core baixados do upstream oficial.
+- `toolchains/webdriver/msedgedriver.exe` e o local canonico do driver nativo usado pelo runner desktop/Tauri e pelos scripts de diagnostico locais.
 - `docs/09_AGENT_DEV_MODE.md` consolida a hierarquia de verdade, os gates e as regras anti-poluicao para agentes.
 - `.github/workflows/ci.yml` e o baseline canonico de validacao automatizada do projeto e deve ser mantido verde em mudancas relevantes.

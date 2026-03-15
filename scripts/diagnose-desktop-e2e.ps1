@@ -109,11 +109,19 @@ function Invoke-WebDriverSessionProbe([string]$AppPath, [string]$DriverPath) {
 }
 
 if ([string]::IsNullOrWhiteSpace($NativeDriverPath)) {
-  $NativeDriverPath = Join-Path $RepoRoot "msedgedriver.exe"
+  $canonicalDriverPath = Join-Path $RepoRoot "toolchains\webdriver\msedgedriver.exe"
+  $legacyDriverPath = Join-Path $RepoRoot "msedgedriver.exe"
+  if (Test-Path $canonicalDriverPath) {
+    $NativeDriverPath = $canonicalDriverPath
+  } else {
+    $NativeDriverPath = $legacyDriverPath
+  }
 }
 
 $tauriDriverPath = Join-Path $env:USERPROFILE ".cargo\\bin\\tauri-driver.exe"
-$appPath = Join-Path $RepoRoot "src-tauri\\target-test\\debug\\retro-dev-studio.exe"
+$releaseAppPath = Join-Path $RepoRoot "src-tauri\\target-test\\release\\retro-dev-studio.exe"
+$debugAppPath = Join-Path $RepoRoot "src-tauri\\target-test\\debug\\retro-dev-studio.exe"
+$appPath = if (Test-Path $releaseAppPath) { $releaseAppPath } else { $debugAppPath }
 $webViewPath = "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\145.0.3800.82\msedgewebview2.exe"
 
 Write-Step "Environment"

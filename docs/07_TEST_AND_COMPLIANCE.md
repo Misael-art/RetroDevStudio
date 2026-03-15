@@ -62,7 +62,7 @@
 5. `cargo clippy -- -D warnings`
 6. `cargo test --lib -- --nocapture`
 7. `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests` quando a mudanca tocar build/emulacao/toolchains reais no Windows
-8. `node scripts/e2e-tauri-build-run.mjs --skip-build --native-driver <caminho-do-msedgedriver.exe>` quando a mudanca tocar o fluxo publico `Build -> Load ROM -> Run frames`
+8. `node scripts/e2e-tauri-build-run.mjs --skip-build --native-driver .\toolchains\webdriver\msedgedriver.exe` quando a mudanca tocar o fluxo publico `Build -> Load ROM -> Run frames`
 9. Em host Windows com policy que bloqueia bootstrap interno do driver, usar fallback `--external-driver` com `tauri-driver` iniciado fora do processo Node.
 10. Se a sessao WebDriver falhar em `DevToolsActivePort`/`chrome not reachable`, executar `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-desktop-e2e.ps1 -SessionProbe` e registrar o resultado.
 11. Atualizacao de `docs/03_ROADMAP_MVP.md` e `docs/06_AI_MEMORY_BANK.md` quando o estado do produto mudar
@@ -76,7 +76,7 @@ Nenhuma etapa deve ser tratada como `concluida` sem certificacao real do fluxo a
 
 - O setup automatico de terceiros ja existe e a validacao oficial em Windows foi comprovada, mas ela continua obrigatoria em mudancas relevantes de build/emulacao/toolchain.
 - No Windows, o caminho SNES precisa de Git Bash/MSYS2 real; o shim do WSL nao deve ser tratado como shell suportado.
-- O runner desktop/Tauri depende de `tauri-driver` e `msedgedriver` provisionados localmente; sem isso o teste de aplicacao nao deve ser marcado como executado.
+- O runner desktop/Tauri depende de `tauri-driver` e `msedgedriver` provisionados localmente; sem isso o teste de aplicacao nao deve ser marcado como executado. O caminho local canonico para o driver nativo e `toolchains/webdriver/msedgedriver.exe`.
 - Neste host local foi observado que `child_process.spawn` com `stdio` contendo `pipe` pode falhar com `EPERM`; o runner canonico ja usa bootstrap interno com `stdio: inherit` e oferece fallback `--external-driver`.
 - Mesmo com bootstrap funcional do driver, a criacao de sessao WebDriver pode falhar localmente com `DevToolsActivePort/chrome not reachable`; nesse caso, a certificacao institucional deve ocorrer no `desktop-e2e.yml` em runner GitHub/Windows.
 - Para diagnostico rapido e padronizado de ambiente local, usar `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-desktop-e2e.ps1`; para reproduzir handshake real de sessao, habilitar `-SessionProbe`.
