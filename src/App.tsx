@@ -9,6 +9,7 @@ import { emulatorLoadRom, emulatorStop } from "./core/ipc/emulatorService";
 import { getHwStatus } from "./core/ipc/hwService";
 import {
   createProjectFromTemplate,
+  importSgdkProject,
   listProjectTemplates,
   openProjectDialog,
   openProjectPath,
@@ -316,7 +317,7 @@ export default function App() {
     new URLSearchParams(window.location.search).has("e2e");
   const selectedTemplate =
     projectTemplates.find((template) => template.id === selectedTemplateId) ?? null;
-  const selectedTemplateMegadriveOnly = selectedTemplate?.id === "platformer_seed";
+  const selectedTemplateMegadriveOnly = selectedTemplate?.source_kind === "external_sgdk";
 
   useLiveValidationController();
 
@@ -666,13 +667,26 @@ export default function App() {
           [templateId]: selected,
         }));
         setSelectedTemplateId(templateId);
-        if (templateId === "platformer_seed") {
+        if (
+          projectTemplates.find((template) => template.id === templateId)?.source_kind ===
+          "external_sgdk"
+        ) {
           setNewProjTarget("megadrive");
         }
       }
     } catch (error) {
       logMessage("error", `[Projeto] Falha ao escolher pasta doadora: ${describeError(error)}`);
     }
+  }
+
+  async function chooseSgdkProjectPath() {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const selected = await open({
+      title: "Escolher projeto SGDK para importar",
+      directory: true,
+      multiple: false,
+    });
+    return typeof selected === "string" ? selected : null;
   }
 
   async function confirmNewProject() {
@@ -724,6 +738,43 @@ export default function App() {
       }
     } catch (error) {
       logMessage("error", `[Projeto] Falha ao criar projeto: ${describeError(error)}`);
+    } finally {
+      setCreatingProject(false);
+    }
+  }
+
+  async function handleImportSgdkProject() {
+    if (!newProjName.trim()) {
+      logMessage("warn", "[Projeto] Informe um nome para o projeto importado.");
+      return;
+    }
+    if (!newProjBaseDir.trim()) {
+      logMessage("warn", "[Projeto] Escolha a pasta base onde o projeto importado sera criado.");
+      return;
+    }
+
+    try {
+      const sgdkPath = await chooseSgdkProjectPath();
+      if (!sgdkPath) {
+        return;
+      }
+
+      setCreatingProject(true);
+      const result = await importSgdkProject(newProjName.trim(), newProjBaseDir.trim(), sgdkPath);
+      const hydrated = await hydrateProjectState(result.path, result.name, "Projeto");
+      if (hydrated) {
+        logMessage(
+          "success",
+          `Projeto SGDK importado: ${result.name} em ${result.path}`
+        );
+      } else {
+        logMessage(
+          "warn",
+          `[Projeto] Importacao concluida, mas a cena inicial nao foi hidratada: ${result.name}`
+        );
+      }
+    } catch (error) {
+      logMessage("error", `[Projeto] Falha ao importar projeto SGDK: ${describeError(error)}`);
     } finally {
       setCreatingProject(false);
     }
@@ -1108,7 +1159,7 @@ export default function App() {
                   const isSelected = template.id === selectedTemplateId;
                   const donorPath =
                     templateDonorPaths[template.id] || template.default_donor_path || "";
-                  const isPlatformer = template.id === "platformer_seed";
+                  const isExternalSgdk = template.source_kind === "external_sgdk";
 
                   return (
                     <div
@@ -1125,7 +1176,7 @@ export default function App() {
                         disabled={!availability.available}
                         onClick={() => {
                           setSelectedTemplateId(template.id);
-                          if (template.id === "platformer_seed") {
+                          if (template.source_kind === "external_sgdk") {
                             setNewProjTarget("megadrive");
                           }
                         }}
@@ -1177,7 +1228,7 @@ export default function App() {
                         </div>
                       </button>
 
-                      {isPlatformer ? (
+                      {isExternalSgdk ? (
                         <div className="border-t border-[#313244] p-3 text-[10px] text-[#7f849c]">
                           <div className="mb-2">
                             <p className="text-[#a6adc8]">Template doador</p>
@@ -1268,6 +1319,11 @@ export default function App() {
                 <ToolbarButton label="Cancelar" onClick={() => setShowProjectWizard(false)} />
               ) : null}
               <ToolbarButton label="Abrir Existente" onClick={() => void handleOpenProject()} />
+              <ToolbarButton
+                label={creatingProject ? "Importando..." : "Importar Projeto SGDK"}
+                onClick={() => void handleImportSgdkProject()}
+                disabled={creatingProject || templatesLoading}
+              />
               <ToolbarButton
                 label={creatingProject ? "Criando..." : "Criar Projeto"}
                 onClick={() => void confirmNewProject()}

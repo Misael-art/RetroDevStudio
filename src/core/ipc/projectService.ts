@@ -61,6 +61,18 @@ export function createProjectFromTemplate(
   });
 }
 
+export function importSgdkProject(
+  projectName: string,
+  baseDir: string,
+  sgdkPath: string
+): Promise<OpenProjectResult> {
+  return invoke("import_sgdk_project", {
+    projectName,
+    baseDir,
+    sgdkPath,
+  });
+}
+
 export function setProjectTarget(
   projectDir: string,
   target: "megadrive" | "snes"
