@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Ultima Atualizacao:** 2026-03-14
-**Ultima sessao:** 2026-03-14 (Hotfix do pipeline SGDK para sprites do onboarding)
-**Fase Atual:** Release candidate / beta testing do desktop Tauri, com ondas M-R concluidas, RC hotfixado apos validacao manual inicial, onboarding/template/fluxo de autoria endurecidos para o editor real, pipeline SGDK alinhado ao `rescomp` para staging e conversao de sprites e updater runtime bloqueado por politica de nao adicionar dependencias novas.
+**Ultima sessao:** 2026-03-14 (Template Gallery, prefabs persistiveis e importacao SGDK experimental)
+**Fase Atual:** Release candidate / beta testing do desktop Tauri, com ondas M-R concluidas, RC hotfixado, galeria de templates experimental ativa, seed `platformer` sanitizado para Mega Drive, prefabs persistiveis com `activeSceneSource/activeScene`, `graph_ref` externalizado, importacao SGDK generica experimental e updater runtime ainda bloqueado por politica de nao adicionar dependencias novas.
 **Branch sugerida:** `feat/desktop-e2e-workflow`
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
@@ -16,6 +16,16 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-14 - template gallery, prefabs e importador SGDK):**
+  - A trilha S1-S3 do plano de templates foi implementada no branch `feat/desktop-e2e-workflow` com os commits `63b0bac`, `14a1d6d`, `7257031`, `e177cc8`, `0ecc6fc`, `9d56f68`, `a0eaf04`, `d70a9e6`, `4a059a1` e `f978a18`.
+  - A `Wave S1` ficou funcional de ponta a ponta para uso leigo: o onboarding virou galeria de templates, o app passou a listar seeds pelo `data/template_registry.json`, o seed `platformer_seed` importa apenas assets permitidos do doador SGDK, o `project.rds` agora guarda `template_metadata`, o `ViewportPanel` renderiza preview real de sprite/tilemap e o `NodeGraphEditor` ganhou labels amigaveis em PT-BR.
+  - A `Wave S1` tambem corrigiu o codegen de camera no runtime: `move_camera` deixou de hardcodar `BG_A` e agora segue o plano real do tilemap ou sincroniza os dois planos quando ha multiplos backgrounds ativos.
+  - A `Wave S2` consolidou a base correta de autoria com heranca: o editor agora distingue `activeSceneSource` (persistivel) de `activeScene` (resolvida), o `Inspector` mostra campos `Herdado`/`Override`, `LogicComponent` ganhou `graph_ref` com persistencia externalizada em `graphs/*.json` e o seed `platformer` passou a nascer com `prefabs/platformer_*.json` + `graphs/platformer_player_logic.json`.
+  - A `Wave S3` abriu a porta para reaproveitar projetos SGDK externos com compliance: o backend agora faz parse tolerante de `resources.res`, copia apenas recursos suportados para `assets/`, ignora `VGM`, ROMs, `out/`, `boot/`, codigo C e headers, expõe IPC dedicado `import_sgdk_project` e a galeria foi expandida com seeds experimentais de `rpg`, `fighter`, `racing` e `action`.
+  - O wizard agora oferece botao explicito `Importar Projeto SGDK`, reusando nome/pasta base do fluxo canonico, sem criar pipeline paralelo de onboarding.
+  - A limitacao estrutural atual do editor continua explicita: o seed `platformer` permanece compilavel com frame simples `32x32`, mesmo quando o asset doador e maior, porque o validador autoritativo de Mega Drive ainda nao aceita meta-sprites compostos; a fidelidade completa do controlador/plano de plataforma fica para uma onda futura de presets/meta-sprites.
+  - A rodada completa de validacao desta sessao ficou verde com `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test` (127 testes frontend), `cargo clippy -- -D warnings`, `cargo test --lib -- --nocapture --test-threads=1` (154 testes Rust + 1 smoke ignorado), `cargo test official_windows_upstream_validation_smoke_test -- --ignored --nocapture` e `node scripts/e2e-tauri-build-run.mjs --skip-build --native-driver .\\msedgedriver.exe`.
 
 * **O que acabou de acontecer (2026-03-14 - hotfix SGDK sprite conversion):**
   - O reteste manual do RC mostrou que o hotfix anterior havia corrigido o layout do workspace SGDK, mas ainda faltava fechar o formato do asset: o placeholder `assets/sprites/onboarding_player.ppm` estava sendo copiado para `res/assets/...` e referenciado cru no `resources.res`, mas o `ResComp` nao conseguiu abrir esse `.ppm` ASCII `P3`.
@@ -550,9 +560,9 @@
   - GitHub Actions `Desktop E2E` (`22606643935`) -> OK em `windows-latest`, com `Run Mega Drive desktop smoke` e `Run SNES desktop smoke` ambos verdes.
 
 * **Proximo passo imediato:**
-  1. Reexecutar o beta manual em install limpo com foco no fluxo de autoria de cena: criar projeto, abrir/criar cena vazia, usar `Hierarchy > Sprite Inicial`, usar `Tools > Asset Browser > Instanciar`, confirmar selecao no `Inspector` e validar `Build & Run` apos a autoria basica.
-  2. Revalidar `VRAM Viewer` e `Reverse Explorer` sobre ROM/projeto real no mesmo beta, agora que o gargalo de autoria basica foi removido do RC.
-  3. Se o beta confirmar estabilidade das superficies ainda `Experimental`, preparar merge controlado para `main`, decidir remocao de badges onde couber e fechar checklist de release notes; manter o updater apenas como placeholder ate autorizacao explicita para adicionar a dependencia/runtime correspondente.
+  1. Reexecutar beta manual focado em leigos no novo wizard: `Projeto Vazio`, `Primeiro Projeto`, `Plataforma` e `Importar Projeto SGDK`, avaliando se a galeria, os cards, os badges e os labels PT-BR realmente reduzem a confusao do primeiro uso.
+  2. Validar manualmente o seed `platformer` no editor completo: abrir a cena principal, confirmar preview visual real de sprite/tilemap, editar overrides em entidade com prefab, salvar/reabrir o projeto e executar `Build & Run` em Mega Drive sem regressao de compliance.
+  3. Definir a proxima onda estrutural apos esse beta: presets compostos de gameplay para leigos (controlador de plataforma/camera/colisao), suporte futuro a meta-sprites para sair do limite `32x32` do seed atual e eventual remocao do badge `Experimental` dos templates que se mostrarem estaveis.
 
 ---
 
@@ -600,7 +610,7 @@ As seguintes decisoes ja foram debatidas e sao finais:
 ## 4. PROXIMO PASSO IMEDIATO (PARA A IA EXECUTAR QUANDO SOLICITADA)
 
 **Tarefa:**
-Continuar o ciclo de release candidate / beta testing do desktop Tauri, agora com foco em revalidar onboarding/template inicial, build Mega Drive com staging/conversao SGDK corrigidos, surfaces experimentais e smoke de instalacao com o editor endurecido.
+Continuar o ciclo de release candidate / beta testing do desktop Tauri, agora com foco em validar a nova galeria de templates, o seed `platformer`, a persistencia de prefabs/graphs externalizados e a importacao SGDK experimental com usuarios leigos e projetos reais.
 
 **Pre-requisitos operacionais:**
 * Manter os 6 gates canonicos verdes em toda alteracao relevante.
@@ -609,12 +619,12 @@ Continuar o ciclo de release candidate / beta testing do desktop Tauri, agora co
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
 **Sequencia de acoes recomendada:**
-1. Repetir o baseline canonico e o bundle MSI (`scripts/run-in-msvc.cmd npx tauri build --bundles msi`) no host Windows institucional apropriado.
-2. Executar QA manual sobre onboarding, template inicial, conexao do NodeGraph, `Novo Projeto -> Build & Run` no Mega Drive com o placeholder padrao, build multi-target, deterministic replay, rewind, Patch Studio com compliance, VRAM Viewer e monitores live.
-3. Repetir o smoke desktop Tauri/Windows para os fluxos `Build -> Load ROM -> Run frames` afetados por packaging, onboarding, build ou emulacao.
-4. Decidir se `tauri-plugin-updater` pode ser aprovado; se nao puder, manter a configuracao placeholder e registrar isso claramente nas notas de release/beta.
-5. Validar manualmente `Asset Browser`, `VRAM Viewer` e `Reverse Explorer` com ROM/projeto real para decidir remocao ou manutencao do badge `Experimental`.
-6. Preparar notas de beta testing, criterios de aceite e lista de riscos residuais para a rodada institucional.
+1. Repetir o baseline canonico e, se o escopo tocar release, o bundle MSI (`scripts/run-in-msvc.cmd npx tauri build --bundles msi`) no host Windows institucional apropriado.
+2. Executar QA manual do wizard/galeria com pessoas leigas, cobrindo `Projeto Vazio`, `Primeiro Projeto`, `Plataforma`, `Importar Projeto SGDK`, preview real no viewport, labels PT-BR no NodeGraph e feedback visual de `Herdado`/`Override` no inspector.
+3. Validar `Build & Run` em Mega Drive para `platformer_seed` e para pelo menos um projeto SGDK importado genericamente, confirmando que o pipeline continua sem copiar `VGM`, ROMs ou artefatos de build.
+4. Decidir a proxima onda de UX/engine para templates: presets compostos de comportamento, meta-sprites e possivel reducao do badge `Experimental` conforme os resultados do beta.
+5. Manter `tauri-plugin-updater` apenas como placeholder ate autorizacao explicita para adicionar a dependencia/runtime correspondente.
+6. Preparar notas de beta testing, criterios de aceite e lista de riscos residuais para a rodada institucional com a nova galeria de templates.
 
 **Validacao minima obrigatoria antes de marcar qualquer item como concluido:**
 * `npm run check:tree`

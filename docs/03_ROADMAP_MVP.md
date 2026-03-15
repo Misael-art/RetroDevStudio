@@ -1,7 +1,7 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 **Status:** Documento vivo
 **Ultima revisao canonica:** 2026-03-14
-**Fase ativa real:** Release candidate / beta testing do desktop Tauri, com RC hotfixado apos validacao manual inicial, onboarding/template/fluxo de autoria endurecidos no editor real, pipeline SGDK alinhado ao `rescomp` para staging/conversao de sprites, packaging MSI reemitido e updater em placeholder por politica de dependencias
+**Fase ativa real:** Release candidate / beta testing do desktop Tauri, com RC hotfixado apos validacao manual inicial, galeria de templates experimental ativa, seed `platformer` sanitizado, prefabs/graphs persistiveis, importacao SGDK generica experimental, pipeline SGDK alinhado ao `rescomp` e updater em placeholder por politica de dependencias
 
 > **DIRETRIZ PARA AGENTES DE IA**
 > Este roadmap precisa refletir estado real do codigo, nao claims historicas.
@@ -39,6 +39,14 @@
 - Undo/redo do editor com atalhos globais, pilha limitada e agrupamento de drag no viewport.
 - Grid snap de 8px no Scene View com toggle visual e atalho `G`.
 - Resolucao de prefab no pipeline canonico com merge de entidades antes de validacao/build/codegen.
+- O editor agora separa `activeSceneSource` e `activeScene`, preservando referencias de prefab/graph externo no save enquanto usa a cena resolvida para viewport, inspector e build.
+- O `Inspector` agora marca visualmente campos `Herdado` e `Override` para entidades baseadas em prefab.
+- `LogicComponent` agora aceita `graph_ref` com persistencia externalizada em `graphs/*.json`, mantendo `graph` inline apenas para retrocompatibilidade.
+- O seed `platformer` agora nasce com `prefabs/platformer_*.json`, `graphs/platformer_player_logic.json` e `template_metadata` no `project.rds`.
+- O onboarding virou galeria de templates com cards, status de disponibilidade, badge `Experimental`, donor override para templates SGDK externos e botao dedicado `Importar Projeto SGDK`.
+- O `ViewportPanel` agora renderiza preview real de sprite/tilemap via asset URL, com fallback para caixa colorida.
+- O `NodeGraphEditor` agora mostra labels amigaveis em PT-BR e paleta agrupada para leigos, sem alterar os IDs tecnicos serializados.
+- O backend agora faz parse de `resources.res` e importa projetos SGDK externos sanitizando apenas assets suportados, ignorando `VGM`, ROMs, `out/`, `boot/`, codigo C e headers.
 - Deep Profiler destravado na UI e conectado ao backend real, agora com deteccao adaptativa de SAT por scoring de candidatos em vez de offsets fixos e aviso heuristico funcional sem badge `Experimental`.
 - Asset Extractor destravado na UI e conectado ao backend real, agora com modos `auto`/`2bpp`/`4bpp` e autodeteccao heuristica para tiles 2bpp, permanecendo `Experimental` ate validar extracao ponta a ponta com ROM real.
 - RetroFX agora persiste configuracao de parallax/raster no scene JSON, o designer foi reabilitado e o pipeline SGDK/SNES passou a emitir scroll/parallax real, permanecendo `Experimental` ate validacao com ROM real.
@@ -178,15 +186,22 @@
 - Wave Q - concluida (`ac4a4f5`, `f46e4a8`, `733f75f`)
 - Wave R - concluida em release candidate, com updater ainda placeholder (`a7f6529`, `7c3e84d`, `1f012bd`)
 
+## ONDAS S1-S3 (ESTADO REAL)
+
+- Wave S1 - concluida e validada localmente (`63b0bac`, `14a1d6d`, `7257031`, `e177cc8`, `0ecc6fc`, `9d56f68`)
+- Wave S2 - concluida e validada localmente (`a0eaf04`, `d70a9e6`, `4a059a1`)
+- Wave S3 - concluida e validada localmente (`4a059a1`, `f978a18`)
+
 ---
 
 ## Ordem Executiva Atual
 
 1. Manter o baseline canonico verde antes e depois de qualquer ajuste relevante.
-2. Repetir bundle MSI e smoke desktop em host Windows institucional para mudancas sensiveis de build, emulacao, packaging, onboarding e projeto.
-3. Executar QA do onboarding/template inicial, `Novo Projeto -> Build & Run` no Mega Drive com o placeholder padrao, replay/rewind, build multi-target e Patch Studio com compliance.
-4. Decidir se a dependencia `tauri-plugin-updater` pode ser aprovada sob a politica atual.
-5. Preparar release notes, criterios de aceite e checklist de beta testing antes de promover o release candidate.
+2. Repetir bundle MSI e smoke desktop em host Windows institucional para mudancas sensiveis de build, emulacao, packaging, onboarding, templates e projeto.
+3. Executar QA com leigos na nova galeria: `Projeto Vazio`, `Primeiro Projeto`, `Plataforma` e `Importar Projeto SGDK`, confirmando que preview visual, labels PT-BR e cards reduzem a friccao do primeiro uso.
+4. Validar manualmente `platformer_seed` e pelo menos um projeto SGDK importado genericamente em `Build & Run` Mega Drive, preservando compliance e sem reintroduzir artefatos proibidos.
+5. Planejar a proxima onda de templates/presets com foco em comportamento composto e meta-sprites, ja que o seed atual continua limitado ao envelope simples `32x32` do validador.
+6. Decidir se a dependencia `tauri-plugin-updater` pode ser aprovada sob a politica atual e preparar release notes/checklist de beta testing antes de promover o release candidate.
 
 ---
 
