@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
-**Ultima Atualizacao:** 2026-03-14
-**Ultima sessao:** 2026-03-14 (Template Gallery, prefabs persistiveis e importacao SGDK experimental)
-**Fase Atual:** Release candidate / beta testing do desktop Tauri, com ondas M-R concluidas, RC hotfixado, galeria de templates experimental ativa, seed `platformer` sanitizado para Mega Drive, prefabs persistiveis com `activeSceneSource/activeScene`, `graph_ref` externalizado, importacao SGDK generica experimental e updater runtime ainda bloqueado por politica de nao adicionar dependencias novas.
+**Ultima Atualizacao:** 2026-03-16
+**Ultima sessao:** 2026-03-16 (RDS overlay para projetos SGDK externos + discovery por subdiretorio)
+**Fase Atual:** Release candidate / beta testing do desktop Tauri, com ondas M-R concluidas, RC hotfixado, galeria de templates experimental ativa, seed `platformer` sanitizado para Mega Drive, prefabs persistiveis com `activeSceneSource/activeScene`, `graph_ref` externalizado, importacao SGDK generica experimental, overlay `rds/` para projetos SGDK externos com discovery por subdiretorio e updater runtime ainda bloqueado por politica de nao adicionar dependencias novas.
 **Branch sugerida:** `feat/desktop-e2e-workflow`
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
@@ -16,6 +16,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-16 - RDS overlay + discovery por subdiretorio):**
+  - Foi implementado o conceito de **overlay `rds/`** para projetos SGDK externos: um subdiretorio fino contendo `project.rds`, `scenes/main.json`, `graphs/`, `prefabs/` e NTFS Junctions para `assets/` e `build/`, sem duplicar nenhum arquivo e sem tocar no projeto original.
+  - O primeiro overlay foi criado e validado para o projeto `Mortal Kombat Plus [VER.001] [SGDK 211] [GEN] [ENGINE] [LUTA]`, mapeando 4 arquivos `.res` (sprites, audio, stages, gfx) para 12 entidades RDS com 2 background layers, camera e audio bank.
+  - O backend ganhou `discover_project_rds()` em `project_mgr.rs`, que busca `project.rds` na raiz e, se nao encontrar, procura em subdiretorios de primeiro nivel com prioridade para `rds/project.rds`.
+  - O IPC `open_project_dialog` em `lib.rs` foi atualizado para usar `discover_project_rds()`, permitindo que o usuario aponte para a raiz de qualquer projeto SGDK externo e o app localize automaticamente o overlay `rds/`.
+  - Documentacao atualizada: `docs/05_ARCHITECTURE_UGDM.md` secao 10 (overlay e discovery), `docs/08_TREE_ARCHITECTURE.md` (regra de overlay) e `docs/06_AI_MEMORY_BANK.md` (esta entrada).
+  - Testes Rust adicionados para: discovery na raiz, discovery em `rds/`, discovery em subdiretorio arbitrario, prioridade raiz sobre subdir e diretorio vazio.
 
 * **O que acabou de acontecer (2026-03-14 - template gallery, prefabs e importador SGDK):**
   - A trilha S1-S3 do plano de templates foi implementada no branch `feat/desktop-e2e-workflow` com os commits `63b0bac`, `14a1d6d`, `7257031`, `e177cc8`, `0ecc6fc`, `9d56f68`, `a0eaf04`, `d70a9e6`, `4a059a1` e `f978a18`.
@@ -560,9 +568,10 @@
   - GitHub Actions `Desktop E2E` (`22606643935`) -> OK em `windows-latest`, com `Run Mega Drive desktop smoke` e `Run SNES desktop smoke` ambos verdes.
 
 * **Proximo passo imediato:**
-  1. Reexecutar beta manual focado em leigos no novo wizard: `Projeto Vazio`, `Primeiro Projeto`, `Plataforma` e `Importar Projeto SGDK`, avaliando se a galeria, os cards, os badges e os labels PT-BR realmente reduzem a confusao do primeiro uso.
-  2. Validar manualmente o seed `platformer` no editor completo: abrir a cena principal, confirmar preview visual real de sprite/tilemap, editar overrides em entidade com prefab, salvar/reabrir o projeto e executar `Build & Run` em Mega Drive sem regressao de compliance.
-  3. Definir a proxima onda estrutural apos esse beta: presets compostos de gameplay para leigos (controlador de plataforma/camera/colisao), suporte futuro a meta-sprites para sair do limite `32x32` do seed atual e eventual remocao do badge `Experimental` dos templates que se mostrarem estaveis.
+  1. Testar discovery de overlay `rds/` no app desktop: apontar o dialog para a raiz de um projeto SGDK externo com overlay e confirmar que o app carrega o projeto corretamente.
+  2. Criar overlays `rds/` para outros projetos SGDK em `F:\Projects\MegaDrive_DEV\SGDK_Engines\` e validar o discovery automatico.
+  3. Avaliar automacao de criacao de overlay: implementar comando IPC `create_rds_overlay` que analisa um projeto SGDK e gera o overlay `rds/` automaticamente (parse de `.res`, criacao de junctions, geracao de `project.rds` e `scenes/main.json`).
+  4. Reexecutar beta manual focado em leigos no wizard, incluindo o novo fluxo de abertura de projeto SGDK externo via overlay.
 
 ---
 

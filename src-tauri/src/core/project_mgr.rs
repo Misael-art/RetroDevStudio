@@ -245,8 +245,87 @@ pub fn seed_project_template(
     }
 }
 
+struct DonorDimensions {
+    sprite_frame_width: u32,
+    sprite_frame_height: u32,
+    tilemap_width: u32,
+    tilemap_height: u32,
+}
+
+fn extract_donor_dimensions(donor_path: &Path) -> DonorDimensions {
+    let mut dims = DonorDimensions {
+        sprite_frame_width: 24,
+        sprite_frame_height: 24,
+        tilemap_width: 64,
+        tilemap_height: 64,
+    };
+
+    let resources = load_sgdk_resources(donor_path).unwrap_or_default();
+
+    for resource in &resources {
+        if resource.kind.as_str() == "SPRITE" {
+            let width_tiles = resource
+                .params
+                .first()
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(3);
+            let height_tiles = resource
+                .params
+                .get(1)
+                .and_then(|v| v.parse::<u32>().ok())
+                .unwrap_or(width_tiles);
+            dims.sprite_frame_width = width_tiles.saturating_mul(8).max(8);
+            dims.sprite_frame_height = height_tiles.saturating_mul(8).max(8);
+            break;
+        }
+    }
+
+    for resource in &resources {
+        if matches!(resource.kind.as_str(), "TILESET" | "MAP" | "IMAGE") {
+            let source = sgdk_resource_source_path(donor_path, &resource.asset_path);
+            if source.is_file() {
+                if let Ok(data) = fs::read(&source) {
+                    if let Some((w, h)) = png_dimensions(&data) {
+                        dims.tilemap_width = (w / 8).max(1);
+                        dims.tilemap_height = (h / 8).max(1);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    dims
+}
+
+fn png_dimensions(data: &[u8]) -> Option<(u32, u32)> {
+    if data.len() < 24 {
+        return None;
+    }
+    let png_signature: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
+    if data[..8] != png_signature {
+        return None;
+    }
+    let width = u32::from_be_bytes([data[16], data[17], data[18], data[19]]);
+    let height = u32::from_be_bytes([data[20], data[21], data[22], data[23]]);
+    Some((width, height))
+}
+
+fn tilemap_dims_from_source(source_path: &Path) -> (u32, u32) {
+    if source_path.is_file() {
+        if let Ok(data) = fs::read(source_path) {
+            if let Some((w, h)) = png_dimensions(&data) {
+                return ((w / 8).max(1), (h / 8).max(1));
+            }
+        }
+    }
+    (64, 64)
+}
+
 pub fn seed_platformer_template(project_dir: &Path, donor_path: &Path) -> Result<Scene, LoadError> {
     validate_platformer_donor_path(donor_path)?;
+
+    let donor_dims = extract_donor_dimensions(donor_path);
 
     copy_template_asset(
         &donor_path.join("res").join("images").join("player.png"),
@@ -265,7 +344,11 @@ pub fn seed_platformer_template(project_dir: &Path, donor_path: &Path) -> Result
     save_prefab_entity(
         project_dir,
         "platformer_player.json",
-        &platformer_player_prefab(jump_source.exists()),
+        &platformer_player_prefab_with_dims(
+            jump_source.exists(),
+            donor_dims.sprite_frame_width,
+            donor_dims.sprite_frame_height,
+        ),
     )?;
     save_prefab_entity(
         project_dir,
@@ -275,7 +358,10 @@ pub fn seed_platformer_template(project_dir: &Path, donor_path: &Path) -> Result
     save_prefab_entity(
         project_dir,
         "platformer_tilemap.json",
-        &platformer_tilemap_prefab(),
+        &platformer_tilemap_prefab_with_dims(
+            donor_dims.tilemap_width,
+            donor_dims.tilemap_height,
+        ),
     )?;
     save_graph_asset(
         project_dir,
@@ -361,6 +447,7 @@ pub fn import_sgdk_project(project_dir: &Path, sgdk_path: &Path) -> Result<Scene
             }
             "IMAGE" | "TILESET" | "TILEMAP" | "MAP" => {
                 if imported_tilemaps.insert(destination.clone()) {
+                    let (mw, mh) = tilemap_dims_from_source(&source_path);
                     tilemap_entities.push(Entity {
                         entity_id: format!("{}_tilemap", sgdk_entity_id(&resource.name)),
                         prefab: None,
@@ -368,8 +455,8 @@ pub fn import_sgdk_project(project_dir: &Path, sgdk_path: &Path) -> Result<Scene
                         components: Components {
                             tilemap: Some(TilemapComponent {
                                 tileset: destination,
-                                map_width: 32,
-                                map_height: 32,
+                                map_width: mw,
+                                map_height: mh,
                                 scroll_x: 0,
                                 scroll_y: 0,
                             }),
@@ -835,7 +922,11 @@ fn save_graph_asset(
     Ok(())
 }
 
-fn platformer_player_prefab(has_jump_sound: bool) -> Entity {
+fn platformer_player_prefab_with_dims(
+    has_jump_sound: bool,
+    frame_width: u32,
+    frame_height: u32,
+) -> Entity {
     Entity {
         entity_id: "platformer_player_prefab".to_string(),
         prefab: None,
@@ -843,8 +934,8 @@ fn platformer_player_prefab(has_jump_sound: bool) -> Entity {
         components: Components {
             sprite: Some(SpriteComponent {
                 asset: PLATFORMER_PLAYER_ASSET.to_string(),
-                frame_width: 32,
-                frame_height: 32,
+                frame_width,
+                frame_height,
                 pivot: None,
                 palette_slot: 0,
                 animations: HashMap::new(),
@@ -852,8 +943,8 @@ fn platformer_player_prefab(has_jump_sound: bool) -> Entity {
             }),
             collision: Some(CollisionComponent {
                 shape: "aabb".to_string(),
-                width: 32,
-                height: 64,
+                width: frame_width,
+                height: frame_height.saturating_mul(2),
                 offset: None,
                 solid: true,
                 layer: Some("player".to_string()),
@@ -908,7 +999,7 @@ fn platformer_camera_prefab() -> Entity {
     }
 }
 
-fn platformer_tilemap_prefab() -> Entity {
+fn platformer_tilemap_prefab_with_dims(map_width: u32, map_height: u32) -> Entity {
     Entity {
         entity_id: "platformer_tilemap_prefab".to_string(),
         prefab: None,
@@ -916,8 +1007,8 @@ fn platformer_tilemap_prefab() -> Entity {
         components: Components {
             tilemap: Some(TilemapComponent {
                 tileset: PLATFORMER_TILESET_ASSET.to_string(),
-                map_width: 32,
-                map_height: 32,
+                map_width,
+                map_height,
                 scroll_x: 0,
                 scroll_y: 0,
             }),
@@ -1273,6 +1364,43 @@ fn stamp_project_metadata(
     });
     save_project(project_dir, &project)?;
     Ok(project)
+}
+
+/// Procura `project.rds` no diretorio fornecido e, se nao encontrar,
+/// busca em subdiretorios de primeiro nivel com prioridade para `rds/`.
+/// Retorna o diretorio que contem o `project.rds` encontrado.
+pub fn discover_project_rds(dir: &Path) -> Result<PathBuf, LoadError> {
+    // 1. Caminho canonico: project.rds na raiz
+    if dir.join("project.rds").is_file() {
+        return Ok(dir.to_path_buf());
+    }
+
+    // 2. Overlay preferencial: rds/project.rds
+    let rds_subdir = dir.join("rds");
+    if rds_subdir.join("project.rds").is_file() {
+        return Ok(rds_subdir);
+    }
+
+    // 3. Busca em subdiretorios de primeiro nivel
+    let entries = fs::read_dir(dir).map_err(|e| {
+        LoadError(format!(
+            "Nao foi possivel ler diretorio '{}': {}",
+            dir.display(),
+            e
+        ))
+    })?;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() && path.join("project.rds").is_file() {
+            return Ok(path);
+        }
+    }
+
+    Err(LoadError(format!(
+        "project.rds nao encontrado em '{}' nem em seus subdiretorios imediatos.",
+        dir.display()
+    )))
 }
 
 /// Le e desserializa o arquivo `project.rds` de um diretorio de projeto.
@@ -2556,6 +2684,12 @@ mod tests {
         image::RgbaImage::from_pixel(64, 64, image::Rgba([48, 145, 255, 255]))
             .save(dir.join("res").join("images").join("level.png"))
             .expect("write level png");
+        fs::write(
+            dir.join("res").join("resources.res"),
+            "SPRITE  player_sprite  \"images/player.png\"  3 3  FAST 5\n\
+             TILESET level_tileset  \"images/level.png\"  FAST ALL\n",
+        )
+        .expect("write resources.res");
         if with_jump {
             fs::write(
                 dir.join("res").join("sound").join("jump.wav"),
@@ -3741,5 +3875,91 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(project_dir);
+    }
+
+    // ── discover_project_rds tests ──────────────────────────────────────
+
+    #[test]
+    fn discover_project_rds_at_root() {
+        let dir = temp_dir("discover-root");
+        create_project_skeleton(&dir, "Root Project", "megadrive")
+            .expect("create skeleton");
+
+        let found = discover_project_rds(&dir).expect("should find at root");
+        assert_eq!(found, dir);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn discover_project_rds_in_rds_subdir() {
+        let dir = temp_dir("discover-rds");
+        let rds_dir = dir.join("rds");
+        create_project_skeleton(&rds_dir, "Overlay Project", "megadrive")
+            .expect("create skeleton in rds/");
+
+        let found = discover_project_rds(&dir).expect("should find in rds/");
+        assert_eq!(found, rds_dir);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn discover_project_rds_in_arbitrary_subdir() {
+        let dir = temp_dir("discover-arb");
+        let sub = dir.join("myproject");
+        create_project_skeleton(&sub, "Sub Project", "snes")
+            .expect("create skeleton in subdir");
+
+        let found = discover_project_rds(&dir).expect("should find in subdir");
+        assert_eq!(found, sub);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn discover_project_rds_root_has_priority() {
+        let dir = temp_dir("discover-prio");
+        create_project_skeleton(&dir, "Root Wins", "megadrive")
+            .expect("create root skeleton");
+        let rds_dir = dir.join("rds");
+        create_project_skeleton(&rds_dir, "Overlay Loses", "megadrive")
+            .expect("create rds/ skeleton");
+
+        let found = discover_project_rds(&dir).expect("should find root first");
+        assert_eq!(found, dir);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn discover_project_rds_empty_dir_fails() {
+        let dir = temp_dir("discover-empty");
+
+        let result = discover_project_rds(&dir);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("project.rds nao encontrado"));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn discover_project_rds_prefers_rds_over_other_subdir() {
+        let dir = temp_dir("discover-rds-prio");
+        // Create both rds/ and another subdir with project.rds
+        let rds_dir = dir.join("rds");
+        create_project_skeleton(&rds_dir, "RDS Overlay", "megadrive")
+            .expect("create rds/ skeleton");
+        let other_dir = dir.join("zzz_other");
+        create_project_skeleton(&other_dir, "Other", "megadrive")
+            .expect("create other skeleton");
+
+        let found = discover_project_rds(&dir).expect("should find rds/ first");
+        assert_eq!(found, rds_dir);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

@@ -360,5 +360,49 @@ Antes de gerar codigo C a partir de um UGDM, o backend Rust DEVE executar estas 
 
 ---
 
+## 10. RDS OVERLAY PARA PROJETOS EXTERNOS
+
+Projetos SGDK desenvolvidos fora do RetroDevStudio podem ser abertos sem alterar sua estrutura original atraves de um **overlay `rds/`**: um subdiretorio fino que contem o `project.rds`, cenas e links para os assets reais.
+
+### 10.1 Estrutura do Overlay
+
+```text
+ProjetoSGDK/
+  src/              # Codigo C original (intocado)
+  res/              # Resources SGDK originais (intocado)
+  out/              # Build output original (intocado)
+  rds/              # <-- Overlay RetroDevStudio
+    project.rds     # Manifesto RDS canonico
+    scenes/
+      main.json     # Cena gerada a partir dos .res
+    graphs/         # Node graphs (vazio se nao houver)
+    prefabs/        # Prefabs (vazio se nao houver)
+    assets/         # Junctions NTFS para os assets reais
+      sprites/  --> ../../res/sprite/
+      tilesets/ --> ../../res/stages/
+      audio/   --> ../../res/sound/
+      gfx/     --> ../../res/gfx/
+    build/      --> ../../out/
+```
+
+### 10.2 Regras
+
+1. **Zero duplicacao:** Os subdiretorios de `rds/assets/` e `rds/build/` sao NTFS Junctions (Windows) ou symlinks (Unix) apontando para os diretorios originais. Nenhum asset e copiado.
+2. **Projeto original intocado:** O overlay nunca modifica, move ou remove arquivos do projeto SGDK host.
+3. **Custo minimo:** Apenas `project.rds` e `scenes/*.json` sao arquivos reais dentro de `rds/`. O overhead tipico e menor que 10KB.
+4. **Mapeamento de recursos:** Cada tipo de recurso SGDK (`.res`) e mapeado para entidades RDS na cena importada, seguindo as mesmas regras do importador generico (`import_sgdk_project`).
+
+### 10.3 Discovery por Subdiretorio
+
+Quando `project.rds` nao e encontrado na raiz do diretorio selecionado, o backend busca automaticamente em subdiretorios de primeiro nivel, com prioridade para `rds/project.rds`. A ordem de busca e:
+
+1. `<dir>/project.rds` (caminho canonico padrao)
+2. `<dir>/rds/project.rds` (overlay preferencial)
+3. Qualquer `<dir>/<subdir>/project.rds` encontrado em subdiretorios imediatos
+
+O `project_dir` retornado ao frontend aponta para o diretorio que contem o `project.rds` encontrado, garantindo que paths relativos internos (`entry_scene`, `assets/`) resolvam corretamente.
+
+---
+
 **[Fim da Especificacao UGDM]**
 *Este documento define o contrato entre o Editor (React) e o Backend (Rust). Qualquer alteracao neste schema requer atualizacao simultanea em: este documento, os structs Rust em `src-tauri/src/ugdm/`, e os tipos TypeScript em `src/core/ipc/`.*

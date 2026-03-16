@@ -125,6 +125,7 @@ RetroDevStudio/
 - `src-tauri/src/compiler/build_orch.rs` e a fonte canonica do pipeline `UGDM -> workspace -> ROM`.
 - `data/template_registry.json` e o catalogo canonico da galeria de templates do wizard; seeds externos apontam para donor paths locais do usuario e nao devem embutir ROMs, VGMs de terceiros ou artefatos de build no repositorio.
 - `prefabs/` e `graphs/` sao diretorios de projeto gerados dentro de cada workspace `.rds` do usuario; nao vivem na raiz do repositorio e devem continuar sendo tratados como dados do projeto, nao como modulos do app.
+- Projetos SGDK externos podem conter um subdiretorio `rds/` (overlay) com `project.rds`, `scenes/`, `graphs/`, `prefabs/` e junctions NTFS para `assets/` e `build/`. O backend faz discovery de `project.rds` em subdiretorios de primeiro nivel quando nao encontra na raiz. Ver `docs/05_ARCHITECTURE_UGDM.md` secao 10.
 - O caminho SNES real usa staging de asset no workspace e gera `hdr.asm`, `data.asm` e regras `gfx4snes`.
 - `scripts/e2e-tauri-build-run.mjs` e o runner canonico de regressao desktop/Tauri para `Build -> Load ROM -> Run frames`.
 - `.github/workflows/desktop-e2e.yml` e o workflow canonico de regressao desktop em Windows e ja foi validado em runner GitHub real.

@@ -30,6 +30,7 @@ use core::project_mgr::{
     append_patch_audit_entry,
     create_scene as create_project_scene,
     create_project_skeleton,
+    discover_project_rds,
     import_sgdk_project as import_sgdk_scene,
     list_project_templates as list_registered_project_templates,
     list_scenes as list_project_scenes,
@@ -1304,22 +1305,32 @@ fn import_sgdk_project_at_base_dir(
 }
 
 /// Abre o diálogo nativo "Selecionar pasta do projeto" e retorna o caminho.
+/// Usa discovery por subdiretorio: se project.rds nao existir na raiz,
+/// busca em rds/ e demais subdiretorios de primeiro nivel.
 #[tauri::command]
 fn open_project_dialog(app: AppHandle) -> OpenProjectResult {
     let result = app.dialog().file().blocking_pick_folder();
     match result {
         Some(path) => {
-            let path_str = path.to_string();
-            let name = std::path::Path::new(&path_str)
+            let selected_dir = PathBuf::from(path.to_string());
+            let fallback_name = selected_dir
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| "Projeto".to_string());
-            // Tenta carregar project.rds para obter nome real do projeto
-            let project_name = {
-                let dir = PathBuf::from(&path_str);
-                load_project(&dir).map(|p| p.name).unwrap_or(name)
-            };
-            OpenProjectResult { selected: true, path: path_str, name: project_name }
+
+            // Discovery: procura project.rds na raiz, rds/ ou subdirs
+            let project_dir = discover_project_rds(&selected_dir)
+                .unwrap_or_else(|_| selected_dir.clone());
+
+            let project_name = load_project(&project_dir)
+                .map(|p| p.name)
+                .unwrap_or_else(|_| fallback_name);
+
+            OpenProjectResult {
+                selected: true,
+                path: project_dir.to_string_lossy().to_string(),
+                name: project_name,
+            }
         }
         None => OpenProjectResult { selected: false, path: String::new(), name: String::new() },
     }
