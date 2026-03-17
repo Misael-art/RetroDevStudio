@@ -57,7 +57,16 @@ pub fn validate_scene_draft(project_dir: &Path, scene_json: &str) -> DraftValida
         Err(error) => return DraftValidationResult::failure(error.to_string()),
     };
 
-    match constraint_engine::hw_status_for_target(&project.target, &resolved_scene) {
+    let source_kind = project
+        .template_metadata
+        .as_ref()
+        .map(|meta| meta.source_kind.as_str());
+
+    match constraint_engine::hw_status_for_target_with_source_kind(
+        &project.target,
+        &resolved_scene,
+        source_kind,
+    ) {
         Ok(hw_status) => DraftValidationResult::success(hw_status),
         Err(error) => DraftValidationResult::failure(error),
     }
@@ -68,7 +77,16 @@ pub fn authoritative_hw_status(project_dir: &Path) -> Result<HwStatus, String> {
     let scene = load_scene(project_dir, &project.entry_scene).map_err(|error| error.to_string())?;
     let resolved_scene = resolve_prefabs(project_dir, &scene).map_err(|error| error.to_string())?;
 
-    constraint_engine::hw_status_for_target(&project.target, &resolved_scene)
+    let source_kind = project
+        .template_metadata
+        .as_ref()
+        .map(|meta| meta.source_kind.as_str());
+
+    constraint_engine::hw_status_for_target_with_source_kind(
+        &project.target,
+        &resolved_scene,
+        source_kind,
+    )
 }
 
 #[cfg(test)]

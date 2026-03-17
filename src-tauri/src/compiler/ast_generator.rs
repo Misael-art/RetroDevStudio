@@ -1,4 +1,4 @@
-use serde::Deserialize;
+﻿use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
@@ -2236,12 +2236,14 @@ mod tests {
                         palette_slot: 1,
                         animations,
                         priority: "foreground".to_string(),
+                    meta_sprite: false,
                     }),
                     ..Components::default()
                 },
             }],
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -2323,6 +2325,7 @@ mod tests {
             }],
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -2408,6 +2411,7 @@ mod tests {
             ],
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -2497,6 +2501,7 @@ mod tests {
             ],
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -2560,6 +2565,7 @@ mod tests {
             ],
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -2622,6 +2628,7 @@ mod tests {
                         palette_slot: 0,
                         animations: HashMap::new(),
                         priority: "foreground".to_string(),
+                    meta_sprite: false,
                     }),
                     physics: Some(crate::ugdm::components::PhysicsComponent {
                         gravity: true,
@@ -2635,6 +2642,7 @@ mod tests {
             }],
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -2728,6 +2736,7 @@ mod tests {
             ],
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -2819,6 +2828,7 @@ mod tests {
                     },
                 ],
             }),
+            collision_map: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -2937,6 +2947,7 @@ mod tests {
             }],
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -3043,6 +3054,7 @@ mod tests {
                         palette_slot: 0,
                         animations,
                         priority: "foreground".to_string(),
+                    meta_sprite: false,
                     }),
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
@@ -3054,6 +3066,7 @@ mod tests {
             }],
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -3159,6 +3172,7 @@ mod tests {
             }],
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -3234,6 +3248,7 @@ mod tests {
                             palette_slot: 0,
                             animations: HashMap::new(),
                             priority: "foreground".to_string(),
+                        meta_sprite: false,
                         }),
                         ..Components::default()
                     },
@@ -3259,6 +3274,7 @@ mod tests {
             ],
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -3390,6 +3406,7 @@ mod tests {
                             palette_slot: 0,
                             animations: HashMap::new(),
                             priority: "foreground".to_string(),
+                        meta_sprite: false,
                         }),
                         collision: Some(crate::ugdm::components::CollisionComponent {
                             shape: "aabb".to_string(),
@@ -3421,6 +3438,7 @@ mod tests {
                             palette_slot: 0,
                             animations: HashMap::new(),
                             priority: "foreground".to_string(),
+                        meta_sprite: false,
                         }),
                         collision: Some(crate::ugdm::components::CollisionComponent {
                             shape: "aabb".to_string(),
@@ -3447,6 +3465,7 @@ mod tests {
                             palette_slot: 0,
                             animations: HashMap::new(),
                             priority: "foreground".to_string(),
+                        meta_sprite: false,
                         }),
                         collision: Some(crate::ugdm::components::CollisionComponent {
                             shape: "aabb".to_string(),
@@ -3463,6 +3482,7 @@ mod tests {
             ],
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -3621,6 +3641,7 @@ mod tests {
             }],
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -3735,8 +3756,9 @@ mod tests {
                     },
                 }],
                 palettes: Vec::new(),
-                retrofx: None,
-            };
+            retrofx: None,
+            collision_map: None,
+        };
 
             let ast = generate_ast(&project, &scene);
             let script = ast.logic_scripts.first().expect("logic script should exist");
@@ -3778,7 +3800,7 @@ mod tests {
                     "x": 0,
                     "y": 0,
                     "inputs": [],
-                    "outputs": [{ "id": "exec", "label": "▶", "kind": "exec" }],
+                    "outputs": [{ "id": "exec", "label": "â–¶", "kind": "exec" }],
                     "params": {}
                 },
                 {
@@ -3787,8 +3809,8 @@ mod tests {
                     "label": "Move Sprite",
                     "x": 120,
                     "y": 0,
-                    "inputs": [{ "id": "exec", "label": "▶", "kind": "exec" }],
-                    "outputs": [{ "id": "exec", "label": "▶", "kind": "exec" }],
+                    "inputs": [{ "id": "exec", "label": "â–¶", "kind": "exec" }],
+                    "outputs": [{ "id": "exec", "label": "â–¶", "kind": "exec" }],
                     "params": { "target": "player", "dx": 2, "dy": -1 }
                 },
                 {
@@ -3799,8 +3821,8 @@ mod tests {
                     "y": 0,
                     "inputs": [],
                     "outputs": [
-                        { "id": "true", "label": "True ▶", "kind": "exec" },
-                        { "id": "false", "label": "False ▶", "kind": "exec" }
+                        { "id": "true", "label": "True â–¶", "kind": "exec" },
+                        { "id": "false", "label": "False â–¶", "kind": "exec" }
                     ],
                     "params": { "a": "player", "b": "enemy" }
                 },
@@ -3810,8 +3832,8 @@ mod tests {
                     "label": "Play Sound",
                     "x": 360,
                     "y": 0,
-                    "inputs": [{ "id": "exec", "label": "▶", "kind": "exec" }],
-                    "outputs": [{ "id": "exec", "label": "▶", "kind": "exec" }],
+                    "inputs": [{ "id": "exec", "label": "â–¶", "kind": "exec" }],
+                    "outputs": [{ "id": "exec", "label": "â–¶", "kind": "exec" }],
                     "params": { "sfx": "jump" }
                 }
             ],
@@ -3842,6 +3864,7 @@ mod tests {
                             palette_slot: 0,
                             animations: HashMap::new(),
                             priority: "foreground".to_string(),
+                        meta_sprite: false,
                         }),
                         collision: Some(crate::ugdm::components::CollisionComponent {
                             shape: "aabb".to_string(),
@@ -3873,6 +3896,7 @@ mod tests {
                             palette_slot: 0,
                             animations: HashMap::new(),
                             priority: "foreground".to_string(),
+                        meta_sprite: false,
                         }),
                         collision: Some(crate::ugdm::components::CollisionComponent {
                             shape: "aabb".to_string(),
@@ -3889,6 +3913,7 @@ mod tests {
             ],
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -4003,6 +4028,7 @@ mod tests {
                         palette_slot: 0,
                         animations: HashMap::new(),
                         priority: "foreground".to_string(),
+                    meta_sprite: false,
                     }),
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
@@ -4014,6 +4040,7 @@ mod tests {
             }],
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -4096,6 +4123,7 @@ mod tests {
                         palette_slot: 0,
                         animations: HashMap::new(),
                         priority: "foreground".to_string(),
+                    meta_sprite: false,
                     }),
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
@@ -4107,6 +4135,7 @@ mod tests {
             }],
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -4167,6 +4196,7 @@ mod tests {
                         palette_slot: 0,
                         animations: HashMap::new(),
                         priority: "foreground".to_string(),
+                    meta_sprite: false,
                     }),
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
@@ -4178,6 +4208,7 @@ mod tests {
             }],
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -4245,6 +4276,7 @@ mod tests {
                         palette_slot: 0,
                         animations: HashMap::new(),
                         priority: "foreground".to_string(),
+                    meta_sprite: false,
                     }),
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
@@ -4256,6 +4288,7 @@ mod tests {
             }],
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -4274,5 +4307,6 @@ mod tests {
         assert!(events.iter().any(|(event, ops)| matches!(event, HardwareEventKind::HBlank) && matches!(ops[0], LogicOp::PlaySound { .. })));
     }
 }
+
 
 

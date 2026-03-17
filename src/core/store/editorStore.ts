@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { BackgroundLayer, Entity, Scene } from "../ipc/sceneService";
+import type { BackgroundLayer, CollisionMap, Entity, Scene } from "../ipc/sceneService";
 
 const UNDO_STACK_LIMIT = 50;
 
@@ -40,6 +40,15 @@ export interface UndoEntry {
   activeScene: Scene | null;
   activeSceneSource: Scene | null;
   selectedEntityId: string | null;
+  editorMode: EditorMode;
+}
+
+export type EditorMode = "select" | "paint" | "erase" | "collision";
+
+export interface ActiveBrush {
+  kind: "prefab" | "tile";
+  id: string; // prefab filename or tile id
+  assetPath?: string;
 }
 
 export interface StoreState {
@@ -64,6 +73,10 @@ export interface StoreState {
   activeScene: Scene | null;
   activeSceneSource: Scene | null;
   emulPaused: boolean;
+  viewportZoom: number;
+  projectSourceKind: string;
+  editorMode: EditorMode;
+  activeBrush: ActiveBrush | null;
 }
 
 export interface StoreActions {
@@ -94,9 +107,22 @@ export interface StoreActions {
   addEntity: (entity: Entity) => void;
   removeEntity: (entityId: string) => void;
   updateBackgroundLayer: (layerId: string, patch: Partial<BackgroundLayer>) => void;
+  /**
+   * Pinta ou apaga um tile do collision_map pelo índice linear.
+   * Se collision_map ainda não existe na cena, auto-inicializa com dimensões
+   * padrão do activeTarget (MD=40x28, SNES=32x28, tile=8x8).
+   * Não empurra o undo stack — use beginHistoryCapture / commitHistoryCapture
+   * ao redor do drag para criar uma entrada única de undo.
+   */
+  updateCollisionMap: (tileIndex: number, value: 0 | 1) => void;
   undo: () => void;
   redo: () => void;
   setEmulPaused: (paused: boolean) => void;
+  setViewportZoom: (zoom: number) => void;
+  resetViewportZoom: () => void;
+  setProjectSourceKind: (kind: string) => void;
+  setEditorMode: (mode: EditorMode) => void;
+  setActiveBrush: (brush: ActiveBrush | null) => void;
 }
 
 export type EditorState = StoreState & StoreActions;
@@ -190,16 +216,18 @@ function cloneUndoEntry(entry: UndoEntry): UndoEntry {
     activeScene: cloneSceneSnapshot(entry.activeScene),
     activeSceneSource: cloneSceneSnapshot(entry.activeSceneSource),
     selectedEntityId: entry.selectedEntityId,
+    editorMode: entry.editorMode,
   };
 }
 
 function createUndoEntry(
-  state: Pick<StoreState, "activeScene" | "activeSceneSource" | "selectedEntityId">
+  state: Pick<StoreState, "activeScene" | "activeSceneSource" | "selectedEntityId" | "editorMode">
 ): UndoEntry {
   return {
     activeScene: cloneSceneSnapshot(state.activeScene),
     activeSceneSource: cloneSceneSnapshot(state.activeSceneSource),
     selectedEntityId: state.selectedEntityId,
+    editorMode: state.editorMode,
   };
 }
 
@@ -451,6 +479,39 @@ export const useEditorStore = create<EditorState>((set) => ({
         sceneRevision: state.sceneRevision + 1,
       };
     }),
+  updateCollisionMap: (tileIndex, value) =>
+    set((state) => {
+      if (!state.activeScene) return {};
+
+      // Auto-inicializa o mapa se ainda é null.
+      const defaultDims: Record<"megadrive" | "snes", Pick<CollisionMap, "width" | "height" | "tile_width" | "tile_height">> = {
+        megadrive: { width: 40, height: 28, tile_width: 8, tile_height: 8 },
+        snes:      { width: 32, height: 28, tile_width: 8, tile_height: 8 },
+      };
+
+      const existingMap = state.activeScene.collision_map;
+      const collisionMap: CollisionMap = existingMap ?? {
+        ...defaultDims[state.activeTarget],
+        data: Array<number>(
+          defaultDims[state.activeTarget].width * defaultDims[state.activeTarget].height
+        ).fill(0),
+      };
+
+      // Guarda limites: ignora índice fora do array.
+      const capacity = collisionMap.width * collisionMap.height;
+      if (tileIndex < 0 || tileIndex >= capacity) return {};
+
+      const newData = collisionMap.data.slice();
+      newData[tileIndex] = value;
+
+      return {
+        activeScene: {
+          ...state.activeScene,
+          collision_map: { ...collisionMap, data: newData },
+        },
+        sceneRevision: state.sceneRevision + 1,
+      };
+    }),
   updateBackgroundLayer: (layerId, patch) =>
     set((state) => {
       if (!state.activeScene) return {};
@@ -520,4 +581,18 @@ export const useEditorStore = create<EditorState>((set) => ({
 
   emulPaused: false,
   setEmulPaused: (paused) => set({ emulPaused: paused }),
+
+  viewportZoom: 1.0,
+  setViewportZoom: (zoom) =>
+    set({ viewportZoom: Math.min(4.0, Math.max(0.25, zoom)) }),
+  resetViewportZoom: () => set({ viewportZoom: 1.0 }),
+
+  projectSourceKind: "",
+  setProjectSourceKind: (kind) => set({ projectSourceKind: kind }),
+
+  editorMode: "select",
+  setEditorMode: (mode) => set({ editorMode: mode }),
+
+  activeBrush: null,
+  setActiveBrush: (brush) => set({ activeBrush: brush }),
 }));

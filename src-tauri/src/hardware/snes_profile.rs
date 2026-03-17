@@ -81,7 +81,15 @@ fn estimate_max_scanline_sprites(scene: &Scene) -> u32 {
 }
 
 pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
+    validate_scene_with_source_kind(scene, None)
+}
+
+pub fn validate_scene_with_source_kind(
+    scene: &Scene,
+    source_kind: Option<&str>,
+) -> Vec<ValidationError> {
     let mut errors: Vec<ValidationError> = Vec::new();
+    let is_sgdk = matches!(source_kind, Some("external_sgdk") | Some("imported_sgdk"));
     let mut canonical_sprite_size: Option<(u32, u32)> = None;
 
     let sprite_count = scene
@@ -106,6 +114,11 @@ pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
 
     for entity in &scene.entities {
         if let Some(sprite) = &entity.components.sprite {
+            // Skip validation for 0×0 sprites (camera/audio entities)
+            if sprite.frame_width == 0 && sprite.frame_height == 0 {
+                continue;
+            }
+
             if sprite.frame_width % 8 != 0 || sprite.frame_height % 8 != 0 {
                 errors.push(ValidationError::fatal(format!(
                     "Entidade '{}': dimensoes de sprite ({} x {}) nao sao multiplas de 8.",
@@ -113,27 +126,30 @@ pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
                 )));
             }
 
-            if sprite.frame_width > 64 || sprite.frame_height > 64 {
-                errors.push(ValidationError::fatal(format!(
-                    "Entidade '{}': sprite {}x{} excede o tamanho maximo nativo do SNES (64x64).",
-                    entity.entity_id, sprite.frame_width, sprite.frame_height
-                )));
-            }
+            // Meta-sprites bypass the native size limit
+            if !sprite.meta_sprite {
+                if sprite.frame_width > 64 || sprite.frame_height > 64 {
+                    errors.push(ValidationError::fatal(format!(
+                        "Entidade '{}': sprite {}x{} excede o tamanho maximo nativo do SNES (64x64).",
+                        entity.entity_id, sprite.frame_width, sprite.frame_height
+                    )));
+                }
 
-            if sprite.frame_width != sprite.frame_height {
-                errors.push(ValidationError::fatal(format!(
-                    "Entidade '{}': o exporter SNES atual suporta apenas sprites simples quadrados (8x8, 16x16, 32x32 ou 64x64). Recebido: {}x{}.",
-                    entity.entity_id, sprite.frame_width, sprite.frame_height
-                )));
-            }
+                if sprite.frame_width != sprite.frame_height {
+                    errors.push(ValidationError::fatal(format!(
+                        "Entidade '{}': o exporter SNES atual suporta apenas sprites simples quadrados (8x8, 16x16, 32x32 ou 64x64). Recebido: {}x{}.",
+                        entity.entity_id, sprite.frame_width, sprite.frame_height
+                    )));
+                }
 
-            if !supported_simple_sprite_size(sprite.frame_width)
-                || !supported_simple_sprite_size(sprite.frame_height)
-            {
-                errors.push(ValidationError::fatal(format!(
-                    "Entidade '{}': tamanho de sprite {}x{} nao suportado pelo caminho SNES atual. Use 8x8, 16x16, 32x32 ou 64x64.",
-                    entity.entity_id, sprite.frame_width, sprite.frame_height
-                )));
+                if !supported_simple_sprite_size(sprite.frame_width)
+                    || !supported_simple_sprite_size(sprite.frame_height)
+                {
+                    errors.push(ValidationError::fatal(format!(
+                        "Entidade '{}': tamanho de sprite {}x{} nao suportado pelo caminho SNES atual. Use 8x8, 16x16, 32x32 ou 64x64.",
+                        entity.entity_id, sprite.frame_width, sprite.frame_height
+                    )));
+                }
             }
 
             match canonical_sprite_size {
@@ -177,6 +193,9 @@ pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
     let mut vram_used: u32 = 0;
     for entity in &scene.entities {
         if let Some(sprite) = &entity.components.sprite {
+            if sprite.frame_width == 0 || sprite.frame_height == 0 {
+                continue;
+            }
             let tiles_w = (sprite.frame_width / 8).max(1);
             let tiles_h = (sprite.frame_height / 8).max(1);
             let total_frames = sprite
@@ -190,23 +209,32 @@ pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
     }
 
     if vram_used > SNES_VRAM_BYTES {
-        errors.push(ValidationError::fatal(format!(
-            "VRAM Overflow: a cena consome {}KB de sprites. Limite do SNES: 64KB.",
-            vram_used / 1024
-        )));
+        if is_sgdk {
+            errors.push(ValidationError::warning(format!(
+                "[SGDK Gerenciado] VRAM Overflow: a cena consome {}KB de sprites. Limite do SNES: 64KB.",
+                vram_used / 1024
+            )));
+        } else {
+            errors.push(ValidationError::fatal(format!(
+                "VRAM Overflow: a cena consome {}KB de sprites. Limite do SNES: 64KB.",
+                vram_used / 1024
+            )));
+        }
     } else if vram_used > (SNES_VRAM_BYTES * 80 / 100) {
+        let prefix = if is_sgdk { "[SGDK Gerenciado] " } else { "" };
         errors.push(ValidationError::warning(format!(
-            "VRAM Warning: uso de VRAM estimado em {}KB ({}% do limite de 64KB).",
-            vram_used / 1024,
+            "{}VRAM Warning: uso de VRAM estimado em {}KB ({}% do limite de 64KB).",
+            prefix, vram_used / 1024,
             vram_used * 100 / SNES_VRAM_BYTES
         )));
     }
 
     let dma_used = vram_used;
     if dma_used > (SNES_DMA_VBLANK_BYTES * 80 / 100) {
+        let prefix = if is_sgdk { "[SGDK Gerenciado] " } else { "" };
         errors.push(ValidationError::warning(format!(
-            "DMA Warning: upload estimado em {}KB por frame ({}% do budget de {}KB no VBlank).",
-            dma_used / 1024,
+            "{}DMA Warning: upload estimado em {}KB por frame ({}% do budget de {}KB no VBlank).",
+            prefix, dma_used / 1024,
             dma_used * 100 / SNES_DMA_VBLANK_BYTES,
             SNES_DMA_VBLANK_BYTES / 1024
         )));
@@ -236,10 +264,40 @@ pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
         )));
     }
 
+    // ── CollisionMap constraint (schema 1.4.0+) ──────────────────────────────
+    if let Some(cmap) = &scene.collision_map {
+        let pixel_width = cmap.width * cmap.tile_width as u32;
+        let pixel_height = cmap.height * cmap.tile_height as u32;
+        if pixel_width > SNES_RESOLUTION_W {
+            errors.push(ValidationError::fatal(format!(
+                "CollisionMap: largura em pixels ({} tiles * {} px = {} px) excede a resolucao horizontal do SNES ({} px).",
+                cmap.width, cmap.tile_width, pixel_width, SNES_RESOLUTION_W
+            )));
+        }
+        if pixel_height > SNES_RESOLUTION_H {
+            errors.push(ValidationError::fatal(format!(
+                "CollisionMap: altura em pixels ({} tiles * {} px = {} px) excede a resolucao vertical do SNES ({} px).",
+                cmap.height, cmap.tile_height, pixel_height, SNES_RESOLUTION_H
+            )));
+        }
+        let expected_len = (cmap.width * cmap.height) as usize;
+        if cmap.data.len() != expected_len {
+            errors.push(ValidationError::warning(format!(
+                "CollisionMap: data.len()={} mas width*height={}. O mapa pode estar corrompido.",
+                cmap.data.len(), expected_len
+            )));
+        }
+    }
+
     errors
 }
 
+#[allow(dead_code)]
 pub fn hw_status(scene: &Scene) -> HwStatus {
+    hw_status_with_source_kind(scene, None)
+}
+
+pub fn hw_status_with_source_kind(scene: &Scene, source_kind: Option<&str>) -> HwStatus {
     let sprite_count = scene
         .entities
         .iter()
@@ -249,6 +307,9 @@ pub fn hw_status(scene: &Scene) -> HwStatus {
     let mut vram_used: u32 = 0;
     for entity in &scene.entities {
         if let Some(sprite) = &entity.components.sprite {
+            if sprite.frame_width == 0 || sprite.frame_height == 0 {
+                continue;
+            }
             let tiles_w = (sprite.frame_width / 8).max(1);
             let tiles_h = (sprite.frame_height / 8).max(1);
             let total_frames = sprite
@@ -261,7 +322,7 @@ pub fn hw_status(scene: &Scene) -> HwStatus {
         }
     }
 
-    let validation = validate_scene(scene);
+    let validation = validate_scene_with_source_kind(scene, source_kind);
     let errors = validation
         .iter()
         .filter(|error| error.is_fatal)
@@ -311,6 +372,7 @@ mod tests {
                     palette_slot,
                     animations: Default::default(),
                     priority: "foreground".to_string(),
+                    meta_sprite: false,
                 }),
                 ..Default::default()
             },
@@ -326,6 +388,7 @@ mod tests {
             entities: Vec::new(),
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         }
     }
 

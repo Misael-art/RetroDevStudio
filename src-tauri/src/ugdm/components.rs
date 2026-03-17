@@ -29,6 +29,8 @@ pub struct SpriteComponent {
     pub animations: HashMap<String, AnimationDef>,
     #[serde(default = "default_priority")]
     pub priority: String,
+    #[serde(default)]
+    pub meta_sprite: bool,
 }
 
 fn default_priority() -> String {

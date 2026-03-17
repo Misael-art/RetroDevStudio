@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
-**Ultima Atualizacao:** 2026-03-16
-**Ultima sessao:** 2026-03-16 (RDS overlay para projetos SGDK externos + discovery por subdiretorio)
-**Fase Atual:** Release candidate / beta testing do desktop Tauri, com ondas M-R concluidas, RC hotfixado, galeria de templates experimental ativa, seed `platformer` sanitizado para Mega Drive, prefabs persistiveis com `activeSceneSource/activeScene`, `graph_ref` externalizado, importacao SGDK generica experimental, overlay `rds/` para projetos SGDK externos com discovery por subdiretorio e updater runtime ainda bloqueado por politica de nao adicionar dependencias novas.
+**Ultima Atualizacao:** 2026-03-17
+**Ultima sessao:** 2026-03-17 (Sprint 2: CollisionMap — schema 1.4.0, editor mode, codegen SGDK/SNES)
+**Fase Atual:** Release candidate / beta testing do desktop Tauri, com ondas M-R concluidas, RC hotfixado, galeria de templates experimental ativa, seed `platformer` sanitizado para Mega Drive, prefabs persistiveis com `activeSceneSource/activeScene`, `graph_ref` externalizado, importacao SGDK generica experimental, overlay `rds/` para projetos SGDK externos com discovery por subdiretorio, UX SGDK import com meta-sprites/zoom/hierarquia/asset tree/onboarding/warnings implementada, Ondas 1 e 2 de paint/erase/paleta contextual/drag-to-paint/brush ghost implementadas e updater runtime ainda bloqueado por politica de nao adicionar dependencias novas.
 **Branch sugerida:** `feat/desktop-e2e-workflow`
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
@@ -16,6 +16,59 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-17 - Sprint 2: CollisionMap / Pilar 2):**
+  - Implementado CollisionMap de ponta a ponta como pre-requisito de Pilar 1 (Layers). Schema UGDM bumped `1.3.0` -> `1.4.0`.
+  - **Rust — entities.rs:** Novo struct `CollisionMap { width, height, data: Vec<u8> }` com metodos `empty(w,h)`, `tile_index`, `is_solid` e `normalize(&self) -> Vec<u8>` (puro, nao-mutante). Campo `collision_map: Option<CollisionMap>` adicionado a `Scene`.
+  - **Rust — hardware profiles:** `md_profile.rs` e `snes_profile.rs` agora validam dimensoes (MD: 40x28, SNES: 32x28) e comprimento do `data` array em `validate_scene_with_source_kind`. Erro fatal se fora dos limites.
+  - **Rust — emitters:** `sgdk_emitter.rs` e `snes_emitter.rs` ganharam `emit_sgdk_with_collision` / `emit_snes_with_collision` que emitem `static const u8 rds_collision_map[]` antes de `int main()`. Wrapper `emit_sgdk` / `emit_snes` mantem retrocompatibilidade marcada com `#[allow(dead_code)]`.
+  - **Rust — build_orch.rs e lib.rs:** Chamam `resolved_scene.collision_map.as_ref().map(|m| m.normalize())` e passam o slice para os novos emitters.
+  - **TypeScript — sceneService.ts:** Interface `CollisionMap` + campo `collision_map?: CollisionMap | null` em `Scene`.
+  - **TypeScript — editorStore.ts:** `EditorMode` ganhou `"collision"`; action `updateCollisionMap(tileIndex, 0|1)` com auto-init (MD=40x28, SNES=32x28) quando o mapa e null.
+  - **UI — ContextualPalette.tsx:** Secao Collision com toggle e instrucoes; badge vermelho no modo collision.
+  - **UI — ViewportPanel.tsx:** Overlay vermelho semi-transparente (alpha 0.35) para tiles solidos; pintura por click/drag com dedup de celula (`collisionDragRef`); atalho `C`; cursor highlight (0.55 alpha); botao 🛡️ na toolbar flutuante; status bar contextual `"🛡️ Colisao — Esq: solido · Dir: livre · Esc: sair"`; `onContextMenu` suprime menu nativo no canvas.
+  - **Testes:** Todos os 167 testes Rust passaram apos adicionar `collision_map: None` em todos os literais de `Scene {}` nos testes. 139 testes frontend OK. `cargo clippy -- -D warnings` limpo.
+  - Arquivos modificados: `entities.rs`, `md_profile.rs`, `snes_profile.rs`, `sgdk_emitter.rs`, `snes_emitter.rs`, `build_orch.rs`, `lib.rs`, `ast_generator.rs`, `sceneService.ts`, `editorStore.ts`, `ContextualPalette.tsx`, `ViewportPanel.tsx`.
+
+* **O que acabou de acontecer (2026-03-17 - Onda 2: Drag-to-Paint/Erase + Brush Ghost + UX Polish):**
+  - Implementada a Onda 2 do plano de ferramentas contextuais, adicionando drag-to-paint, drag-to-erase, brush ghost preview, Escape e status bar contextual.
+  - **Drag-to-paint:** arrastar com mouse pressionado em paint mode agora stampa sprites continuamente ao longo do caminho, com grid-cell dedup (`paintDragRef` rastreia `lastPaintCell` para evitar re-stamp na mesma celula). Todo o drag agrupa como uma unica entrada de undo via `beginHistoryCapture/commitHistoryCapture`, com batch persist no `mouseUp`.
+  - **Drag-to-erase:** arrastar em erase mode agora remove entidades ao longo do caminho, com dedup por `erasedIds: Set<string>` no `eraseDragRef`. Mesmo padrao de undo grouping e batch persist.
+  - **Brush ghost preview:** retangulo semi-transparente (`#89b4fa`, alpha 0.25, borda dashed) desenhado na posicao do mouse no canvas quando paint mode + brush ativo. Usa `constrainSpriteFrameSize()` para dimensoes corretas do ghost. Rastreado via `sceneMousePos` state.
+  - **Escape:** tecla Escape agora limpa brush (`setActiveBrush(null)`) e retorna ao select mode.
+  - **Status bar contextual:** status span do viewport agora mostra modo/brush info: `"✏️ Pintar (brushId)"` ou `"🧹 Apagar — clique/arraste para remover"` quando fora do select mode.
+  - `handleMouseLeave` adicionado para limpar ghost preview e finalizar drags ao sair do canvas.
+  - Import de `ONBOARDING_SPRITE_SIZE` e `setActiveBrush` adicionados ao componente.
+  - Validacao: tsc limpo, 139 testes frontend, lint limpo.
+  - Arquivo modificado: `ViewportPanel.tsx`.
+
+* **O que acabou de acontecer (2026-03-17 - Onda 1: Paint/Erase Mode + Paleta Contextual):**
+  - Implementada a Onda 1 do plano de ferramentas contextuais inspirado em Tiled/GameMaker, cobrindo modos de edicao (select/paint/erase), paleta de assets real e atalhos de teclado.
+  - `EditorMode` simplificado para `"select" | "paint" | "erase"` (removido `fill` que nao tinha suporte no UGDM).
+  - `ContextualPalette.tsx` reescrito: substituiu 4 itens mock hardcoded por consumo real de `listProjectAssets()`, agrupamento por tipo (sprites/prefabs/tilemaps/audio/other), thumbnails reais para sprites via `convertFileSrc()`, secoes collapsiveis, botao "Limpar brush" e zero `any`.
+  - Paint handler em `ViewportPanel.tsx` agora usa `createSpriteEntityFromAsset()` (entidade completa com sprite dimensionado e ID unico) em vez de prefab stub vazio com `components: {}`.
+  - Guard pre-paint: verifica `spriteCount >= sprite_limit` antes de instanciar, mostra warning e cancela se o limite for atingido.
+  - Persistencia automatica: `persistActiveScene()` chamado apos paint e apos erase.
+  - Cursor contextual: `copy` (paint com brush ativo), `not-allowed` (paint sem brush), `pointer` (erase), `crosshair` (select), `grabbing` (drag).
+  - Atalhos de teclado V/B/E para alternar modos no scene tab, com mesmas guardas do atalho G (sem modifiers, sem repeat, sem editable target).
+  - Floating toolbar: `as any` substituido por `as const` para type safety.
+  - 10 novos testes em `editorStore.test.ts`: 5 para `setEditorMode` (default, switch, return, undo restore) e 5 para `setActiveBrush` (default null, set, assetPath, clear, replace).
+  - Validacao: tsc limpo, 139 testes frontend (10 novos), lint limpo.
+  - Arquivos modificados: `editorStore.ts`, `ContextualPalette.tsx`, `ViewportPanel.tsx`, `editorStore.test.ts`.
+
+* **O que acabou de acontecer (2026-03-16 - UX SGDK Import: 8-prompt implementation):**
+  - Foi implementado um pacote de 8 melhorias de UX para projetos SGDK importados, cobrindo meta-sprites, viewport, hierarquia, validacao, asset browser, zoom, onboarding e camera.
+  - **PROMPT 8 (Camera):** Guards em `md_profile.rs` e `snes_profile.rs` agora pulam entidades com sprite 0×0 (cameras sem sprite) em `validate_scene()` e `hw_status()`, eliminando erros falsos de sprite em cenas com camera. Teste: `camera_entity_does_not_produce_sprite_errors`.
+  - **PROMPT 1 (Meta-sprites):** `SpriteComponent` em `components.rs` ganhou campo `#[serde(default)] pub meta_sprite: bool`. Quando `meta_sprite: true`, os hardware profiles MD/SNES ignoram o limite simples de 32×32/64×64 (o sprite sera fatiado em runtime pelo SGDK). O importador `import_sgdk_project()` agora marca sprites >32px como `meta_sprite: true`. Testes: `meta_sprite_bypasses_32x32_limit`, `non_meta_sprite_still_rejects_above_32x32`, `meta_sprite_still_counts_vram`.
+  - **PROMPT 4 (Warnings):** `validate_scene_with_source_kind()` e `hw_status_with_source_kind()` adicionados em ambos os profiles. Quando `source_kind == "external_sgdk"`, overflow de VRAM vira warning com prefixo `[SGDK Gerenciado]` em vez de erro. O `constraint_engine.rs` e `editor_validation.rs` propagam `source_kind` a partir de `project.template_metadata`. Teste: `sgdk_project_vram_overflow_is_warning_not_error`.
+  - **PROMPT 2 (Viewport sprites):** Investigacao confirmou que o caminho existente `resolveProjectAssetPath()` + `convertFileSrc()` ja resolve corretamente assets via NTFS junctions do overlay `rds/`. Nenhuma mudanca de codigo necessaria.
+  - **PROMPT 6 (Zoom):** `editorStore.ts` ganhou `viewportZoom` (clamped 0.25-4.0), `setViewportZoom` e `resetViewportZoom`. O `ViewportPanel` agora suporta Ctrl+Scroll para zoom, botoes +/-, Ctrl+0 para reset, indicador de % e escalamento CSS do canvas com `canvasCoords()` zoom-aware.
+  - **PROMPT 3 (Hierarquia):** `HierarchyPanel.tsx` agora agrupa entidades por tipo (camera/sprite/tilemap/audio/object) com headers collapsiveis, contagem por grupo e indentacao visual.
+  - **PROMPT 5 (Asset Browser):** `ToolsPanel.tsx` ganhou `buildAssetTree()` e `AssetTreeView` recursivo com toggle tree/grid, painel de detalhe com thumbnail e botao Instanciar. Teste ajustado em `ToolsPanel.test.tsx`.
+  - **PROMPT 7 (Onboarding):** `editorStore.ts` ganhou `projectSourceKind`, alimentado via `SceneDataResult.source_kind` no `App.tsx`. O `ViewportPanel` mostra toast dismissivel para projetos `external_sgdk`, persistido em localStorage.
+  - IPC: `SceneDataResult` em `lib.rs` e `sceneService.ts` ganhou campo `source_kind: String`/`source_kind: string`, alimentado a partir de `project.template_metadata`.
+  - Todos os 13 construtores de `SpriteComponent` em `ast_generator.rs` e 1 em `project_mgr.rs` foram atualizados para incluir `meta_sprite: false`.
+  - Validacao local: 166 testes Rust, 129 testes frontend, cargo clippy limpo, tsc limpo, lint limpo. O gate `check:tree` falha por diretorio pre-existente `hamoopig_example` (nao introduzido por esta mudanca).
 
 * **O que acabou de acontecer (2026-03-16 - RDS overlay + discovery por subdiretorio):**
   - Foi implementado o conceito de **overlay `rds/`** para projetos SGDK externos: um subdiretorio fino contendo `project.rds`, `scenes/main.json`, `graphs/`, `prefabs/` e NTFS Junctions para `assets/` e `build/`, sem duplicar nenhum arquivo e sem tocar no projeto original.
@@ -371,6 +424,14 @@
   - A toolbar do editor agora tambem expoe warning live nao-fatal perto de `Build & Run`, para que o usuario nao dependa exclusivamente do painel lateral para entender o risco atual.
   - O modo de trabalho dos agentes agora esta consolidado em documento canonico proprio para reduzir divergencia de onboarding, claims falsos de entrega e poluicao estrutural.
   - Dados em `data/`: `rom_teste.bin` e `sonic_test.gen` continuam uteis para validacao manual de Mega Drive, mas o uso dessas ROMs deve respeitar compliance/licenciamento.
+
+* **Validacoes verificadas em 2026-03-17 (Sprint 2 - CollisionMap):**
+  - `npm run check:tree` -> OK (falha pre-existente `hamoopig_example` inalterada).
+  - `npm run lint` -> OK.
+  - `npx tsc --noEmit` -> OK.
+  - `npm test` -> OK, 139/139.
+  - `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` -> OK.
+  - `cargo test --manifest-path src-tauri/Cargo.toml --lib` -> OK, 167 aprovados / 1 ignorado.
 
 * **Validacoes verificadas em 2026-03-06 (sessao 41):**
   - `node --check scripts/e2e-tauri-build-run.mjs` -> OK.

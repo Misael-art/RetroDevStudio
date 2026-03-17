@@ -563,6 +563,73 @@ describe("undo/redo", () => {
   });
 });
 
+describe("setEditorMode", () => {
+  it("defaults to select mode", () => {
+    expect(useEditorStore.getState().editorMode).toBe("select");
+  });
+
+  it("switches to paint mode", () => {
+    useEditorStore.getState().setEditorMode("paint");
+    expect(useEditorStore.getState().editorMode).toBe("paint");
+  });
+
+  it("switches to erase mode", () => {
+    useEditorStore.getState().setEditorMode("erase");
+    expect(useEditorStore.getState().editorMode).toBe("erase");
+  });
+
+  it("returns to select mode", () => {
+    useEditorStore.getState().setEditorMode("paint");
+    useEditorStore.getState().setEditorMode("select");
+    expect(useEditorStore.getState().editorMode).toBe("select");
+  });
+
+  it("undo restores previous editorMode captured in snapshot", () => {
+    useEditorStore.setState({ activeScene: { ...EMPTY_SCENE }, editorMode: "select" });
+    useEditorStore.getState().setEditorMode("paint");
+    useEditorStore.getState().addEntity(makeEntity("hero"));
+
+    useEditorStore.getState().undo();
+
+    expect(useEditorStore.getState().editorMode).toBe("paint");
+  });
+});
+
+describe("setActiveBrush", () => {
+  it("defaults to null", () => {
+    expect(useEditorStore.getState().activeBrush).toBeNull();
+  });
+
+  it("sets a brush with kind and id", () => {
+    useEditorStore.getState().setActiveBrush({ kind: "prefab", id: "player.json" });
+    const brush = useEditorStore.getState().activeBrush;
+    expect(brush).toEqual({ kind: "prefab", id: "player.json" });
+  });
+
+  it("sets a brush with assetPath", () => {
+    useEditorStore.getState().setActiveBrush({
+      kind: "prefab",
+      id: "assets/sprites/hero.png",
+      assetPath: "assets/sprites/hero.png",
+    });
+    const brush = useEditorStore.getState().activeBrush;
+    expect(brush?.assetPath).toBe("assets/sprites/hero.png");
+  });
+
+  it("clears brush back to null", () => {
+    useEditorStore.getState().setActiveBrush({ kind: "prefab", id: "coin.json" });
+    useEditorStore.getState().setActiveBrush(null);
+    expect(useEditorStore.getState().activeBrush).toBeNull();
+  });
+
+  it("replaces previous brush entirely", () => {
+    useEditorStore.getState().setActiveBrush({ kind: "prefab", id: "a.json" });
+    useEditorStore.getState().setActiveBrush({ kind: "tile", id: "tile_42" });
+    const brush = useEditorStore.getState().activeBrush;
+    expect(brush).toEqual({ kind: "tile", id: "tile_42" });
+  });
+});
+
 describe("startup messaging", () => {
   it("keeps the initial console entry aligned with release candidate status", () => {
     const startupMessage = useEditorStore.getInitialState().consoleEntries[0]?.message ?? "";

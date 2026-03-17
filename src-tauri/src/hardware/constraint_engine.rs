@@ -3,9 +3,17 @@ use crate::ugdm::entities::Scene;
 use super::{md_profile, snes_profile, HwStatus};
 
 pub fn hw_status_for_target(target: &str, scene: &Scene) -> Result<HwStatus, String> {
+    hw_status_for_target_with_source_kind(target, scene, None)
+}
+
+pub fn hw_status_for_target_with_source_kind(
+    target: &str,
+    scene: &Scene,
+    source_kind: Option<&str>,
+) -> Result<HwStatus, String> {
     match target {
-        "megadrive" => Ok(md_profile::hw_status(scene)),
-        "snes" => Ok(snes_profile::hw_status(scene)),
+        "megadrive" => Ok(md_profile::hw_status_with_source_kind(scene, source_kind)),
+        "snes" => Ok(snes_profile::hw_status_with_source_kind(scene, source_kind)),
         other => Err(format!(
             "Target '{}' nao suportado. Use 'megadrive' ou 'snes'.",
             other
@@ -27,6 +35,7 @@ mod tests {
             entities: Vec::new(),
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         }
     }
 

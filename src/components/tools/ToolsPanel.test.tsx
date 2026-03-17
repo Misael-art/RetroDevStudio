@@ -195,6 +195,15 @@ describe("ToolsPanel Asset Browser", () => {
       await flush();
     });
 
+    // In tree view, click the asset file to select it and show the detail panel
+    await act(async () => {
+      const fileBtn = Array.from(container.querySelectorAll("button")).find(
+        (el) => el.textContent?.includes("onboarding_player.ppm")
+      );
+      fileBtn?.click();
+      await flush();
+    });
+
     await act(async () => {
       findButton(container, "Instanciar").click();
       await flush();

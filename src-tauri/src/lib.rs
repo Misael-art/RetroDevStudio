@@ -19,8 +19,8 @@ use compiler::build_orch::{
     BuildResult,
     MultiTargetBuildResult,
 };
-use compiler::sgdk_emitter::emit_sgdk;
-use compiler::snes_emitter::emit_snes;
+use compiler::sgdk_emitter::emit_sgdk_with_collision;
+use compiler::snes_emitter::emit_snes_with_collision;
 use core::editor_validation::{
     authoritative_hw_status,
     validate_scene_draft as validate_scene_draft_impl,
@@ -198,9 +198,11 @@ fn generate_c_code(project_dir: String) -> GenerateResult {
     }
 
     let ast = generate_ast(&project, &resolved_scene);
+    let collision_data = resolved_scene.collision_map.as_ref().map(|m| m.normalize());
+    let collision_slice = collision_data.as_deref();
     let (main_c, resources_res) = match project.target.as_str() {
-        "snes" => { let o = emit_snes(&ast, &project.name); (o.main_c, o.resources_res) }
-        _ => { let o = emit_sgdk(&ast, &project.name); (o.main_c, o.resources_res) }
+        "snes" => { let o = emit_snes_with_collision(&ast, &project.name, collision_slice); (o.main_c, o.resources_res) }
+        _ => { let o = emit_sgdk_with_collision(&ast, &project.name, collision_slice); (o.main_c, o.resources_res) }
     };
     GenerateResult { ok: true, main_c, resources_res, errors: vec![], warnings }
 }
@@ -1010,6 +1012,7 @@ pub struct SceneDataResult {
     pub project_name: String,
     pub target: String,
     pub scene_path: String,
+    pub source_kind: String,
 }
 
 #[derive(serde::Serialize)]
@@ -1040,6 +1043,7 @@ fn switch_scene(project_dir: String, scene_path: String) -> SceneDataResult {
             project_name: String::new(),
             target: String::new(),
             scene_path,
+            source_kind: String::new(),
         };
     }
     load_scene_result(Path::new(&project_dir), Some(scene_path.as_str()))
@@ -1055,6 +1059,7 @@ fn load_scene_result(project_dir: &Path, scene_path: Option<&str>) -> SceneDataR
             project_name: String::new(),
             target: String::new(),
             scene_path: String::new(),
+            source_kind: String::new(),
         };
     }
 
@@ -1062,8 +1067,13 @@ fn load_scene_result(project_dir: &Path, scene_path: Option<&str>) -> SceneDataR
     let project = match load_project(&dir) {
         Ok(p) => p,
         Err(e) => return SceneDataResult { ok: false, error: e.to_string(),
-            scene_json: String::new(), project_name: String::new(), target: String::new(), scene_path: String::new() },
+            scene_json: String::new(), project_name: String::new(), target: String::new(), scene_path: String::new(), source_kind: String::new() },
     };
+    let source_kind = project
+        .template_metadata
+        .as_ref()
+        .map(|meta| meta.source_kind.clone())
+        .unwrap_or_default();
     let resolved_scene_path = scene_path
         .map(str::trim)
         .filter(|path| !path.is_empty())
@@ -1072,11 +1082,11 @@ fn load_scene_result(project_dir: &Path, scene_path: Option<&str>) -> SceneDataR
     let scene = match load_scene(&dir, &resolved_scene_path) {
         Ok(s) => s,
         Err(e) => return SceneDataResult { ok: false, error: e.to_string(),
-            scene_json: String::new(), project_name: project.name, target: project.target, scene_path: resolved_scene_path },
+            scene_json: String::new(), project_name: project.name, target: project.target, scene_path: resolved_scene_path, source_kind },
     };
     let scene_json = serde_json::to_string_pretty(&scene).unwrap_or_default();
     SceneDataResult { ok: true, error: String::new(), scene_json,
-        project_name: project.name, target: project.target, scene_path: resolved_scene_path }
+        project_name: project.name, target: project.target, scene_path: resolved_scene_path, source_kind }
 }
 
 fn resolve_scene_prefabs_result(project_dir: &Path, scene_json: &str) -> ResolveSceneResult {

@@ -173,6 +173,7 @@ pub fn canonical_scene(scene_id: &str, display_name: Option<String>) -> Scene {
         entities: Vec::new(),
         palettes: Vec::new(),
         retrofx: None,
+        collision_map: None,
     }
 }
 
@@ -422,6 +423,9 @@ pub fn import_sgdk_project(project_dir: &Path, sgdk_path: &Path) -> Result<Scene
                 if first_sprite_id.is_none() {
                     first_sprite_id = Some(entity_id.clone());
                 }
+                let frame_w = width_tiles.saturating_mul(8).max(8);
+                let frame_h = height_tiles.saturating_mul(8).max(8);
+                let is_meta = frame_w > 32 || frame_h > 32;
                 sprite_entities.push(Entity {
                     entity_id,
                     prefab: None,
@@ -429,12 +433,13 @@ pub fn import_sgdk_project(project_dir: &Path, sgdk_path: &Path) -> Result<Scene
                     components: Components {
                         sprite: Some(SpriteComponent {
                             asset: destination,
-                            frame_width: width_tiles.saturating_mul(8).max(8),
-                            frame_height: height_tiles.saturating_mul(8).max(8),
+                            frame_width: frame_w,
+                            frame_height: frame_h,
                             pivot: None,
                             palette_slot: 0,
                             animations: HashMap::new(),
                             priority: "foreground".to_string(),
+                            meta_sprite: is_meta,
                         }),
                         logic: is_primary_sprite.then(|| LogicComponent {
                             graph: Some(imported_sprite_logic_graph(&resource.name)),
@@ -940,6 +945,7 @@ fn platformer_player_prefab_with_dims(
                 palette_slot: 0,
                 animations: HashMap::new(),
                 priority: "foreground".to_string(),
+                meta_sprite: false,
             }),
             collision: Some(CollisionComponent {
                 shape: "aabb".to_string(),
@@ -1660,6 +1666,7 @@ fn starter_scene(scene_id: &str, display_name: String, _target: &str) -> Scene {
                 palette_slot: 0,
                 animations: HashMap::new(),
                 priority: "foreground".to_string(),
+                meta_sprite: false,
             }),
             logic: Some(LogicComponent {
                 graph: Some(logic_graph),
@@ -2981,6 +2988,7 @@ mod tests {
             }],
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         };
 
         let resolved = resolve_prefabs(&project_dir, &scene).expect("resolve graph ref");
@@ -3021,6 +3029,7 @@ mod tests {
             }],
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         };
         let resolved_scene = Scene {
             entities: vec![Entity {
@@ -3622,6 +3631,7 @@ mod tests {
                     palette_slot: 0,
                     animations: HashMap::new(),
                     priority: "foreground".to_string(),
+                meta_sprite: false,
                 }),
                 logic: Some(LogicComponent {
                     graph: Some(
@@ -3690,6 +3700,7 @@ mod tests {
             entities: Vec::new(),
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         };
 
         let project_warning =

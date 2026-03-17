@@ -83,7 +83,19 @@ fn estimate_max_scanline_sprites(scene: &Scene) -> u32 {
 /// Valida uma Scene contra as hardware constraints do Mega Drive.
 /// Retorna lista de erros/avisos. Erros fatais bloqueiam o build.
 pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
+    validate_scene_with_source_kind(scene, None)
+}
+
+/// Valida uma Scene com contexto de `source_kind`.
+/// Quando `source_kind` é `Some("external_sgdk")`, VRAM overflow e DMA budget
+/// são reclassificados como warnings (não fatais), pois o SGDK gerencia esses
+/// recursos internamente.
+pub fn validate_scene_with_source_kind(
+    scene: &Scene,
+    source_kind: Option<&str>,
+) -> Vec<ValidationError> {
     let mut errors: Vec<ValidationError> = Vec::new();
+    let is_sgdk = matches!(source_kind, Some("external_sgdk") | Some("imported_sgdk"));
 
     let sprite_count = scene
         .entities
@@ -107,6 +119,11 @@ pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
 
     for entity in &scene.entities {
         if let Some(sprite) = &entity.components.sprite {
+            // Skip validation for 0×0 sprites (e.g. entities without real sprite data)
+            if sprite.frame_width == 0 && sprite.frame_height == 0 {
+                continue;
+            }
+
             if sprite.frame_width % 8 != 0 || sprite.frame_height % 8 != 0 {
                 errors.push(ValidationError::fatal(format!(
                     "Entidade '{}': dimensoes de sprite ({} x {}) nao sao multiplas de 8 (tile-aligned).",
@@ -114,7 +131,10 @@ pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
                 )));
             }
 
-            if sprite.frame_width > 32 || sprite.frame_height > 32 {
+            // Meta-sprites (SGDK ResComp decomposes automatically) bypass the 32x32 limit
+            if !sprite.meta_sprite
+                && (sprite.frame_width > 32 || sprite.frame_height > 32)
+            {
                 errors.push(ValidationError::fatal(format!(
                     "Entidade '{}': sprite {}x{} excede o tamanho maximo nativo do Mega Drive (32x32). Use meta-sprites compostos.",
                     entity.entity_id, sprite.frame_width, sprite.frame_height
@@ -148,6 +168,10 @@ pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
     let mut vram_used: u32 = 0;
     for entity in &scene.entities {
         if let Some(sprite) = &entity.components.sprite {
+            // Skip VRAM calc for 0×0 sprites (camera/audio entities with empty sprite stub)
+            if sprite.frame_width == 0 || sprite.frame_height == 0 {
+                continue;
+            }
             let tiles_w = sprite.frame_width / 8;
             let tiles_h = sprite.frame_height / 8;
             let total_frames = sprite
@@ -161,23 +185,33 @@ pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
     }
 
     if vram_used > MD_VRAM_BYTES {
-        errors.push(ValidationError::fatal(format!(
-            "VRAM Overflow: a cena consome {}KB de sprites. Limite do Mega Drive: 64KB.",
-            vram_used / 1024
-        )));
+        let prefix = if is_sgdk { "[SGDK Gerenciado] " } else { "" };
+        if is_sgdk {
+            errors.push(ValidationError::warning(format!(
+                "{}VRAM Overflow: a cena consome {}KB de sprites. Limite do Mega Drive: 64KB.",
+                prefix, vram_used / 1024
+            )));
+        } else {
+            errors.push(ValidationError::fatal(format!(
+                "VRAM Overflow: a cena consome {}KB de sprites. Limite do Mega Drive: 64KB.",
+                vram_used / 1024
+            )));
+        }
     } else if vram_used > (MD_VRAM_BYTES * 80 / 100) {
+        let prefix = if is_sgdk { "[SGDK Gerenciado] " } else { "" };
         errors.push(ValidationError::warning(format!(
-            "VRAM Warning: uso de VRAM estimado em {}KB ({}% do limite de 64KB). Pouco espaco para tiles de background.",
-            vram_used / 1024,
+            "{}VRAM Warning: uso de VRAM estimado em {}KB ({}% do limite de 64KB). Pouco espaco para tiles de background.",
+            prefix, vram_used / 1024,
             vram_used * 100 / MD_VRAM_BYTES
         )));
     }
 
     let dma_used = vram_used;
     if dma_used > (MD_DMA_VBLANK_BYTES * 80 / 100) {
+        let prefix = if is_sgdk { "[SGDK Gerenciado] " } else { "" };
         errors.push(ValidationError::warning(format!(
-            "DMA Warning: upload estimado em {}KB por frame ({}% do budget de {}KB no VBlank).",
-            dma_used / 1024,
+            "{}DMA Warning: upload estimado em {}KB por frame ({}% do budget de {}KB no VBlank).",
+            prefix, dma_used / 1024,
             dma_used * 100 / MD_DMA_VBLANK_BYTES,
             MD_DMA_VBLANK_BYTES / 1024
         )));
@@ -207,12 +241,43 @@ pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
         )));
     }
 
+    // ── CollisionMap constraint (schema 1.4.0+) ──────────────────────────────
+    if let Some(cmap) = &scene.collision_map {
+        let pixel_width = cmap.width * cmap.tile_width as u32;
+        let pixel_height = cmap.height * cmap.tile_height as u32;
+        if pixel_width > MD_RESOLUTION_W {
+            errors.push(ValidationError::fatal(format!(
+                "CollisionMap: largura em pixels ({} tiles * {} px = {} px) excede a resolucao horizontal do Mega Drive ({} px).",
+                cmap.width, cmap.tile_width, pixel_width, MD_RESOLUTION_W
+            )));
+        }
+        if pixel_height > MD_RESOLUTION_H {
+            errors.push(ValidationError::fatal(format!(
+                "CollisionMap: altura em pixels ({} tiles * {} px = {} px) excede a resolucao vertical do Mega Drive ({} px).",
+                cmap.height, cmap.tile_height, pixel_height, MD_RESOLUTION_H
+            )));
+        }
+        let expected_len = (cmap.width * cmap.height) as usize;
+        if cmap.data.len() != expected_len {
+            errors.push(ValidationError::warning(format!(
+                "CollisionMap: data.len()={} mas width*height={}. O mapa pode estar corrompido.",
+                cmap.data.len(), expected_len
+            )));
+        }
+    }
+
     errors
 }
 
 /// Calcula o `HwStatus` de uma cena sem retornar apenas pass/fail.
 /// Usado pelo comando IPC `get_hw_status` para alimentar o painel UI.
+#[allow(dead_code)]
 pub fn hw_status(scene: &Scene) -> HwStatus {
+    hw_status_with_source_kind(scene, None)
+}
+
+/// Calcula o `HwStatus` com contexto de `source_kind` para projetos importados.
+pub fn hw_status_with_source_kind(scene: &Scene, source_kind: Option<&str>) -> HwStatus {
     let sprite_count = scene
         .entities
         .iter()
@@ -222,6 +287,10 @@ pub fn hw_status(scene: &Scene) -> HwStatus {
     let mut vram_used: u32 = 0;
     for entity in &scene.entities {
         if let Some(sprite) = &entity.components.sprite {
+            // Skip VRAM calc for 0×0 sprites (camera/audio entities)
+            if sprite.frame_width == 0 || sprite.frame_height == 0 {
+                continue;
+            }
             let tiles_w = (sprite.frame_width / 8).max(1);
             let tiles_h = (sprite.frame_height / 8).max(1);
             let total_frames = sprite
@@ -234,7 +303,7 @@ pub fn hw_status(scene: &Scene) -> HwStatus {
         }
     }
 
-    let validation = validate_scene(scene);
+    let validation = validate_scene_with_source_kind(scene, source_kind);
     let errors: Vec<String> = validation
         .iter()
         .filter(|error| error.is_fatal)
@@ -284,6 +353,44 @@ mod tests {
                     palette_slot,
                     animations: Default::default(),
                     priority: "foreground".to_string(),
+                    meta_sprite: false,
+                }),
+                ..Default::default()
+            },
+        }
+    }
+
+    fn meta_sprite_entity(id: &str, frame_width: u32, frame_height: u32) -> Entity {
+        Entity {
+            entity_id: id.to_string(),
+            prefab: None,
+            transform: Transform { x: 0, y: 0 },
+            components: Components {
+                sprite: Some(SpriteComponent {
+                    asset: "assets/sprites/test.png".to_string(),
+                    frame_width,
+                    frame_height,
+                    pivot: None,
+                    palette_slot: 0,
+                    animations: Default::default(),
+                    priority: "foreground".to_string(),
+                    meta_sprite: true,
+                }),
+                ..Default::default()
+            },
+        }
+    }
+
+    fn camera_entity(id: &str) -> Entity {
+        Entity {
+            entity_id: id.to_string(),
+            prefab: None,
+            transform: Transform { x: 0, y: 0 },
+            components: Components {
+                camera: Some(crate::ugdm::components::CameraComponent {
+                    follow_entity: None,
+                    offset_x: 0,
+                    offset_y: 0,
                 }),
                 ..Default::default()
             },
@@ -299,6 +406,7 @@ mod tests {
             entities: Vec::new(),
             palettes: Vec::new(),
             retrofx: None,
+            collision_map: None,
         }
     }
 
@@ -396,5 +504,121 @@ mod tests {
         assert_eq!(status.palette_banks_limit, MD_PALETTE_SLOTS as u32);
         assert_eq!(status.bg_layers_limit, 3);
         assert!(status.errors.is_empty());
+    }
+
+    // ── PROMPT 8: Camera entity does not produce false sprite errors ──
+
+    #[test]
+    fn camera_entity_does_not_produce_sprite_errors() {
+        let mut scene = empty_scene();
+        scene.entities.push(camera_entity("main_camera"));
+
+        let errors = validate_scene(&scene);
+
+        assert!(
+            !errors.iter().any(|error| error.is_fatal),
+            "Camera-only entity should not produce fatal errors: {:?}",
+            errors
+        );
+        let status = hw_status(&scene);
+        assert!(status.errors.is_empty());
+        assert_eq!(status.vram_used, 0);
+    }
+
+    // ── PROMPT 1: Meta-sprite bypasses 32x32 limit ──
+
+    #[test]
+    fn meta_sprite_bypasses_32x32_limit() {
+        let mut scene = empty_scene();
+        scene.entities.push(meta_sprite_entity("boss", 128, 120));
+
+        let errors = validate_scene(&scene);
+
+        assert!(
+            !errors.iter().any(|error| error.is_fatal && error.message.contains("32x32")),
+            "Meta-sprite should not trigger 32x32 limit: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn non_meta_sprite_still_rejects_above_32x32() {
+        let mut scene = empty_scene();
+        scene.entities.push(sprite_entity("boss", 64, 64, 0));
+
+        let errors = validate_scene(&scene);
+
+        assert!(
+            errors.iter().any(|error| error.is_fatal && error.message.contains("32x32")),
+            "Non-meta sprite >32x32 should be rejected"
+        );
+    }
+
+    #[test]
+    fn meta_sprite_still_counts_vram() {
+        let mut scene = empty_scene();
+        scene.entities.push(meta_sprite_entity("boss", 128, 128));
+
+        let status = hw_status(&scene);
+
+        assert!(status.vram_used > 0, "Meta-sprite VRAM should be calculated");
+    }
+
+    // ── PROMPT 4: SGDK source_kind reclassifies VRAM overflow ──
+
+    #[test]
+    fn sgdk_project_vram_overflow_is_warning_not_error() {
+        let mut scene = empty_scene();
+        // 10 × 128x128 meta-sprites = 10 × 8,192 B = 80 KB > 64 KB VRAM limit.
+        // Keeps sprite count below the 80 sprites per screen constraint.
+        for i in 0..10 {
+            scene.entities
+                .push(meta_sprite_entity(&format!("spr_{i}"), 128, 128));
+        }
+
+        let errors_native = validate_scene_with_source_kind(&scene, None);
+        let errors_sgdk = validate_scene_with_source_kind(&scene, Some("external_sgdk"));
+
+        // Native project: VRAM overflow is fatal
+        assert!(
+            errors_native.iter().any(|error| error.is_fatal && error.message.contains("VRAM Overflow")),
+            "Native project should have fatal VRAM overflow"
+        );
+
+        // SGDK project: VRAM overflow is warning (not fatal)
+        assert!(
+            !errors_sgdk.iter().any(|error| error.is_fatal && error.message.contains("VRAM Overflow")),
+            "SGDK project should not have fatal VRAM overflow: {:?}",
+            errors_sgdk
+        );
+        assert!(
+            errors_sgdk.iter().any(|error| !error.is_fatal && error.message.contains("VRAM Overflow")),
+            "SGDK project should have VRAM overflow as warning"
+        );
+        assert!(
+            errors_sgdk.iter().any(|error| error.message.contains("SGDK Gerenciado")),
+            "SGDK warning should have [SGDK Gerenciado] prefix"
+        );
+    }
+
+    #[test]
+    fn imported_sgdk_project_vram_overflow_is_also_warning() {
+        let mut scene = empty_scene();
+        for i in 0..10 {
+            scene.entities
+                .push(meta_sprite_entity(&format!("spr_{i}"), 128, 128));
+        }
+
+        let errors = validate_scene_with_source_kind(&scene, Some("imported_sgdk"));
+
+        assert!(
+            !errors.iter().any(|error| error.is_fatal && error.message.contains("VRAM Overflow")),
+            "imported_sgdk should not have fatal VRAM overflow: {:?}",
+            errors
+        );
+        assert!(
+            errors.iter().any(|error| !error.is_fatal && error.message.contains("SGDK Gerenciado")),
+            "imported_sgdk should produce [SGDK Gerenciado] warning"
+        );
     }
 }

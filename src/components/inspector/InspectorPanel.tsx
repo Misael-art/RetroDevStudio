@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import Panel from "../common/Panel";
 import HardwareLimitsPanel from "./HardwareLimitsPanel";
 import { useEditorStore } from "../../core/store/editorStore";
@@ -545,6 +545,65 @@ function graphSummary(serializedGraph?: string): string {
   }
 }
 
+// ── LogicVariable Slider ─────────────────────────────────────────────────────
+
+interface LogicVariableSliderProps {
+  varName: string;
+  variable: import("../../core/ipc/sceneService").LogicVariable;
+  onChange: (value: number) => void;
+}
+
+function LogicVariableSlider({ varName, variable, onChange }: LogicVariableSliderProps) {
+  const min = variable.min ?? 0;
+  const max = variable.max ?? 100;
+  const rawDefault = variable.default;
+  const currentValue = typeof rawDefault === "number" ? rawDefault : min;
+  const [draft, setDraft] = useState(currentValue);
+
+  useEffect(() => {
+    const next = typeof rawDefault === "number" ? rawDefault : min;
+    setDraft(next);
+  }, [rawDefault, min]);
+
+  function handleSlider(event: ChangeEvent<HTMLInputElement>) {
+    const next = Number(event.target.value);
+    setDraft(next);
+    onChange(next);
+  }
+
+  const pct = max > min ? Math.round(((draft - min) / (max - min)) * 100) : 0;
+
+  return (
+    <tr className="group border-b border-[#313244] last:border-0">
+      <td className="w-1/2 select-none px-3 py-1.5 text-xs text-[#7f849c]">
+        <span>{varName}</span>
+        <span className="ml-1 rounded bg-[#cba6f7]/15 px-1 py-0.5 text-[9px] font-mono text-[#cba6f7]">
+          {variable.type}
+        </span>
+      </td>
+      <td className="px-3 py-1.5">
+        <div className="flex items-center gap-2">
+          <input
+            type="range"
+            min={min}
+            max={max}
+            step={1}
+            value={draft}
+            onChange={handleSlider}
+            className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-[#313244] accent-[#cba6f7]"
+          />
+          <span className="w-8 shrink-0 text-right font-mono text-xs text-[#cdd6f4]">{draft}</span>
+          <span className="shrink-0 text-[9px] text-[#45475a]">{pct}%</span>
+        </div>
+        <div className="flex justify-between text-[8px] text-[#45475a]">
+          <span>{min}</span>
+          <span>{max}</span>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 export default function InspectorPanel() {
   const {
     activeScene,
@@ -708,6 +767,35 @@ export default function InspectorPanel() {
           </p>
         ) : entity ? (
           <>
+            {/* Entity header badge */}
+            <div className="flex items-center gap-2 border-b border-[#313244] bg-[#181825] px-3 py-2">
+              <span
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded border border-[#cba6f7]/40 bg-[#cba6f7]/10 text-[9px] font-bold text-[#cba6f7]"
+                aria-hidden
+              >
+                {entity.components.camera
+                  ? "CAM"
+                  : entity.components.tilemap
+                    ? "TM"
+                    : entity.components.sprite
+                      ? "SP"
+                      : "OBJ"}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-mono text-[11px] font-semibold text-[#cdd6f4]" title={entity.entity_id}>
+                  {entity.entity_id}
+                </p>
+                {entity.prefab && (
+                  <p className="truncate text-[9px] text-[#89b4fa]" title={entity.prefab}>
+                    prefab: {entity.prefab.replace(/\.json$/i, "")}
+                  </p>
+                )}
+              </div>
+              <div className="flex shrink-0 flex-col items-end gap-0.5 text-[8px] text-[#45475a]">
+                <span>{Object.values(entity.components).filter(Boolean).length} comp.</span>
+                <span>({entity.transform.x}, {entity.transform.y})</span>
+              </div>
+            </div>
             {sections.map((section) => (
               <InspectorSection
                 key={section.id}
@@ -814,6 +902,59 @@ export default function InspectorPanel() {
                     })()}
                   </tbody>
                 </table>
+                {/* LogicVariable sliders — variables with min/max defined */}
+                {entity.components.logic.variables &&
+                  Object.keys(entity.components.logic.variables).length > 0 && (
+                    <div className="border-t border-[#313244] px-0 pt-1">
+                      <p className="px-3 py-1 text-[9px] font-semibold uppercase tracking-[0.15em] text-[#45475a]">
+                        Variáveis
+                      </p>
+                      <table className="w-full text-xs">
+                        <tbody>
+                          {Object.entries(entity.components.logic.variables).map(([varName, variable]) =>
+                            variable.min !== undefined && variable.max !== undefined ? (
+                              <LogicVariableSlider
+                                key={varName}
+                                varName={varName}
+                                variable={variable}
+                                onChange={(value) => {
+                                  if (!entity.components.logic?.variables) return;
+                                  const nextVariables = {
+                                    ...entity.components.logic.variables,
+                                    [varName]: { ...variable, default: value },
+                                  };
+                                  updateEntity(
+                                    entity.entity_id,
+                                    buildEntityPatch(entity, ["components", "logic", "variables"], nextVariables)
+                                  );
+                                  scheduleAutoSave();
+                                }}
+                              />
+                            ) : (
+                              <PropRow
+                                key={varName}
+                                label={varName}
+                                value={typeof variable.default === "number" || typeof variable.default === "string" || typeof variable.default === "boolean" ? variable.default : String(variable.default ?? "")}
+                                type={variable.type === "bool" ? "bool" : variable.type === "int" || variable.type === "float" ? "int" : "string"}
+                                onChange={(value) => {
+                                  if (!entity.components.logic?.variables) return;
+                                  const nextVariables = {
+                                    ...entity.components.logic.variables,
+                                    [varName]: { ...variable, default: value },
+                                  };
+                                  updateEntity(
+                                    entity.entity_id,
+                                    buildEntityPatch(entity, ["components", "logic", "variables"], nextVariables)
+                                  );
+                                  scheduleAutoSave();
+                                }}
+                              />
+                            )
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
               </InspectorSection>
             ) : null}
             <div className="px-3 py-2">

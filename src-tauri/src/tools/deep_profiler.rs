@@ -6,9 +6,9 @@
 //!   - Contagem de sprites por scanline (simula a SAT do VDP)
 //!   - Lista de problemas detectados
 
-use std::path::Path;
-use std::fs;
 use serde::Serialize;
+use std::fs;
+use std::path::Path;
 
 // ── Mega Drive constants (doc 04) ─────────────────────────────────────────────
 
@@ -57,7 +57,11 @@ struct SatCandidate {
 
 /// Nível de severidade de um problema detectado.
 #[derive(Debug, Serialize, Clone, PartialEq)]
-pub enum Severity { Info, Warning, Error }
+pub enum Severity {
+    Info,
+    Warning,
+    Error,
+}
 
 #[derive(Debug, Serialize, Clone)]
 pub struct ProfileIssue {
@@ -97,11 +101,13 @@ pub struct ProfileReport {
 pub fn profile_rom(rom_path: &Path) -> ProfileReport {
     let rom = match fs::read(rom_path) {
         Ok(b) => b,
-        Err(e) => return ProfileReport {
-            ok: false,
-            error: format!("Erro ao ler ROM: {e}"),
-            ..Default::default()
-        },
+        Err(e) => {
+            return ProfileReport {
+                ok: false,
+                error: format!("Erro ao ler ROM: {e}"),
+                ..Default::default()
+            }
+        }
     };
 
     profile_bytes(&rom)
@@ -110,7 +116,7 @@ pub fn profile_rom(rom_path: &Path) -> ProfileReport {
 /// Versão que aceita bytes diretamente (útil para testes e para ROMs já em memória).
 pub fn profile_bytes(rom: &[u8]) -> ProfileReport {
     let mut report = ProfileReport {
-        dma_heatmap:   vec![0u16; MD_SCANLINES],
+        dma_heatmap: vec![0u16; MD_SCANLINES],
         sprite_heatmap: vec![0u8; MD_SCANLINES],
         ok: true,
         ..Default::default()
@@ -119,7 +125,8 @@ pub fn profile_bytes(rom: &[u8]) -> ProfileReport {
     if rom.len() < 0x200 {
         report.issues.push(ProfileIssue {
             severity: Severity::Error,
-            message: "ROM muito pequena para ser um binário Mega Drive válido (< 512 bytes).".to_string(),
+            message: "ROM muito pequena para ser um binário Mega Drive válido (< 512 bytes)."
+                .to_string(),
         });
         report.ok = false;
         return report;
@@ -132,7 +139,10 @@ pub fn profile_bytes(rom: &[u8]) -> ProfileReport {
     if !magic_str.contains("SEGA") {
         report.issues.push(ProfileIssue {
             severity: Severity::Warning,
-            message: format!("Header offset 0x100 não contém 'SEGA': '{}'. Pode não ser uma ROM MD válida.", &magic_str[..magic_str.len().min(16)]),
+            message: format!(
+                "Header offset 0x100 não contém 'SEGA': '{}'. Pode não ser uma ROM MD válida.",
+                &magic_str[..magic_str.len().min(16)]
+            ),
         });
     }
 
@@ -141,7 +151,11 @@ pub fn profile_bytes(rom: &[u8]) -> ProfileReport {
     // procurando sequências que pareçam entradas de sprite (Y < 224, X < 320).
     let sat_offset = find_sat_candidate(rom);
     let sat_data = if let Some(off) = sat_offset {
-        if off + SAT_SIZE <= rom.len() { &rom[off..off + SAT_SIZE] } else { &[] }
+        if off + SAT_SIZE <= rom.len() {
+            &rom[off..off + SAT_SIZE]
+        } else {
+            &[]
+        }
     } else {
         &[]
     };
@@ -151,15 +165,19 @@ pub fn profile_bytes(rom: &[u8]) -> ProfileReport {
     if !sat_data.is_empty() {
         for sprite_idx in 0..80usize {
             let base = sprite_idx * 8;
-            if base + 8 > sat_data.len() { break; }
+            if base + 8 > sat_data.len() {
+                break;
+            }
             let entry = sat_entry(&sat_data[base..base + 8]);
 
             // Filtra entradas inválidas/não usadas
-            if !entry.has_plausible_position() { continue; }
+            if !entry.has_plausible_position() {
+                continue;
+            }
             sprites_parsed += 1;
 
             let y_start = (entry.y as usize).saturating_sub(SAT_Y_MIN as usize);
-            let y_end   = (y_start + entry.height_pixels()).min(MD_SCANLINES);
+            let y_end = (y_start + entry.height_pixels()).min(MD_SCANLINES);
             for sl in y_start..y_end {
                 report.sprite_heatmap[sl] = report.sprite_heatmap[sl].saturating_add(1);
             }
@@ -173,7 +191,10 @@ pub fn profile_bytes(rom: &[u8]) -> ProfileReport {
     if sprites_parsed > MD_SPRITES_MAX_SCREEN {
         report.issues.push(ProfileIssue {
             severity: Severity::Error,
-            message: format!("SAT overflow: {} sprites declarados. Limite MD: {}.", sprites_parsed, MD_SPRITES_MAX_SCREEN),
+            message: format!(
+                "SAT overflow: {} sprites declarados. Limite MD: {}.",
+                sprites_parsed, MD_SPRITES_MAX_SCREEN
+            ),
         });
     }
 
@@ -181,12 +202,18 @@ pub fn profile_bytes(rom: &[u8]) -> ProfileReport {
         if count as u32 > MD_SPRITES_MAX_SCANLINE {
             report.issues.push(ProfileIssue {
                 severity: Severity::Error,
-                message: format!("Sprite overflow na scanline {}: {} sprites. Limite por scanline: {}.", sl, count, MD_SPRITES_MAX_SCANLINE),
+                message: format!(
+                    "Sprite overflow na scanline {}: {} sprites. Limite por scanline: {}.",
+                    sl, count, MD_SPRITES_MAX_SCANLINE
+                ),
             });
         } else if count as u32 > MD_SPRITES_MAX_SCANLINE * 80 / 100 {
             report.issues.push(ProfileIssue {
                 severity: Severity::Warning,
-                message: format!("Scanline {} próxima do limite: {} / {} sprites.", sl, count, MD_SPRITES_MAX_SCANLINE),
+                message: format!(
+                    "Scanline {} próxima do limite: {} / {} sprites.",
+                    sl, count, MD_SPRITES_MAX_SCANLINE
+                ),
             });
         }
     }
@@ -196,9 +223,9 @@ pub fn profile_bytes(rom: &[u8]) -> ProfileReport {
     // do vblank (scanlines 224–261 mapeadas na área de inatividade).
     // Como só temos 224 entradas, concentramos nas primeiras 8 scanlines (vblank sim).
     let tile_section_size = estimate_tile_section_size(rom) as u32;
-    let dma_per_frame     = tile_section_size.min(MD_DMA_VBLANK_BYTES);
-    let vblank_lines      = 8usize; // proxy das linhas de vblank visíveis no heatmap
-    let dma_per_line      = (dma_per_frame / vblank_lines as u32) as u16;
+    let dma_per_frame = tile_section_size.min(MD_DMA_VBLANK_BYTES);
+    let vblank_lines = 8usize; // proxy das linhas de vblank visíveis no heatmap
+    let dma_per_line = (dma_per_frame / vblank_lines as u32) as u16;
 
     for sl in 0..vblank_lines.min(MD_SCANLINES) {
         report.dma_heatmap[sl] = dma_per_line;
@@ -362,7 +389,11 @@ mod tests {
                 sprite_idx,
                 128 + sprite_idx as u16 * 8,
                 0b0000_0101,
-                if sprite_idx == 9 { 0 } else { (sprite_idx + 1) as u8 },
+                if sprite_idx == 9 {
+                    0
+                } else {
+                    (sprite_idx + 1) as u8
+                },
                 160 + sprite_idx as u16 * 8,
             );
         }
@@ -383,7 +414,11 @@ mod tests {
                 sprite_idx,
                 128 + sprite_idx as u16 * 4,
                 0b0000_0101,
-                if sprite_idx == 5 { 0 } else { (sprite_idx + 1) as u8 },
+                if sprite_idx == 5 {
+                    0
+                } else {
+                    (sprite_idx + 1) as u8
+                },
                 192,
             );
         }

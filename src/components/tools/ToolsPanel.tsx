@@ -3,6 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import Panel from "../common/Panel";
 import { useEditorStore } from "../../core/store/editorStore";
+import ContextualPalette from "./ContextualPalette";
 import { persistActiveScene } from "../../core/scenePersistence";
 import { listenToProjectAssetChanges } from "../../core/ipc/projectWatcherService";
 import type { Scene } from "../../core/ipc/sceneService";
@@ -553,6 +554,140 @@ function assetPreviewUrl(asset: ProjectAssetEntry): string | null {
   return convertFileSrc(asset.absolute_path);
 }
 
+interface AssetTreeNode {
+  name: string;
+  path: string;
+  isDir: boolean;
+  children: AssetTreeNode[];
+  asset?: ProjectAssetEntry;
+  fileCount: number;
+}
+
+function buildAssetTree(assets: ProjectAssetEntry[]): AssetTreeNode {
+  const root: AssetTreeNode = { name: "", path: "", isDir: true, children: [], fileCount: 0 };
+
+  for (const asset of assets) {
+    const segments = asset.relative_path.replace(/\\/g, "/").split("/");
+    let current = root;
+    for (let index = 0; index < segments.length; index += 1) {
+      const segment = segments[index];
+      const isLast = index === segments.length - 1;
+      if (isLast) {
+        current.children.push({
+          name: segment,
+          path: asset.relative_path,
+          isDir: false,
+          children: [],
+          asset,
+          fileCount: 0,
+        });
+      } else {
+        let dir = current.children.find((child) => child.isDir && child.name === segment);
+        if (!dir) {
+          dir = {
+            name: segment,
+            path: segments.slice(0, index + 1).join("/"),
+            isDir: true,
+            children: [],
+            fileCount: 0,
+          };
+          current.children.push(dir);
+        }
+        current = dir;
+      }
+    }
+  }
+
+  function countFiles(node: AssetTreeNode): number {
+    if (!node.isDir) return 1;
+    let total = 0;
+    for (const child of node.children) {
+      total += countFiles(child);
+    }
+    node.fileCount = total;
+    return total;
+  }
+  countFiles(root);
+
+  return root;
+}
+
+function AssetTreeView({
+  node,
+  collapsed,
+  onToggle,
+  onSelect,
+  previewUrl,
+  depth,
+}: {
+  node: AssetTreeNode;
+  collapsed: Set<string>;
+  onToggle: (path: string) => void;
+  onSelect: (asset: ProjectAssetEntry) => void;
+  previewUrl: (asset: ProjectAssetEntry) => string | null;
+  depth: number;
+}) {
+  if (node.isDir) {
+    const isCollapsed = collapsed.has(node.path);
+    return (
+      <>
+        {node.name && (
+          <button
+            type="button"
+            onClick={() => onToggle(node.path)}
+            className="flex w-full items-center gap-1.5 py-0.5 text-[10px] text-[#a6adc8] transition-colors hover:text-[#cdd6f4]"
+            style={{ paddingLeft: `${depth * 12 + 4}px` }}
+          >
+            <span className="text-[8px]">{isCollapsed ? "\u25b8" : "\u25be"}</span>
+            <span className="font-semibold">{node.name}/</span>
+            <span className="ml-auto font-mono text-[#45475a]">{node.fileCount}</span>
+          </button>
+        )}
+        {!isCollapsed &&
+          node.children.map((child) => (
+            <AssetTreeView
+              key={child.path}
+              node={child}
+              collapsed={collapsed}
+              onToggle={onToggle}
+              onSelect={onSelect}
+              previewUrl={previewUrl}
+              depth={node.name ? depth + 1 : depth}
+            />
+          ))}
+      </>
+    );
+  }
+
+  const asset = node.asset!;
+  const preview = previewUrl(asset);
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(asset)}
+      className="flex w-full items-center gap-2 rounded py-0.5 text-left text-[10px] text-[#cdd6f4] transition-colors hover:bg-[#313244]"
+      style={{ paddingLeft: `${depth * 12 + 4}px` }}
+      title={asset.relative_path}
+    >
+      {preview ? (
+        <img
+          src={preview}
+          alt={node.name}
+          className="h-4 w-4 shrink-0 rounded object-cover"
+        />
+      ) : (
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded bg-[#313244] text-[8px] font-bold text-[#89b4fa]">
+          {asset.kind === "audio" ? "A" : "F"}
+        </span>
+      )}
+      <span className="truncate">{node.name}</span>
+      <span className="ml-auto shrink-0 rounded bg-[#313244] px-1 py-0.5 text-[8px] uppercase text-[#7f849c]">
+        {asset.kind}
+      </span>
+    </button>
+  );
+}
+
 function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
   const {
     activeProjectDir,
@@ -567,8 +702,12 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [instantiatingAssetPath, setInstantiatingAssetPath] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"grid" | "tree">("tree");
+  const [treeCollapsed, setTreeCollapsed] = useState<Set<string>>(new Set());
+  const [selectedTreeAsset, setSelectedTreeAsset] = useState<ProjectAssetEntry | null>(null);
 
   const references = useMemo(() => collectAssetReferences(activeScene), [activeScene]);
+  const assetTree = useMemo(() => buildAssetTree(assets), [assets]);
 
   useEffect(() => {
     if (!activeProjectDir) {
@@ -704,6 +843,18 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
     }
   }
 
+  function toggleTreeNode(path: string) {
+    setTreeCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }
+
   return (
     <div className="flex flex-col gap-3 p-3">
       <ExperimentalNotice summary="Catalogo visual dos assets do projeto ativo. Duplo clique foca referencias existentes ou instancia imagens na cena ativa quando ainda nao houver uso." />
@@ -712,9 +863,27 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
         <span className="text-[10px] text-[#7f849c]">
           Projeto: <span className="font-mono text-[#cdd6f4]">{activeProjectDir || "(nenhum)"}</span>
         </span>
-        <span className="text-[10px] text-[#7f849c]">
-          Assets: <span className="font-mono text-[#cdd6f4]">{assets.length}</span>
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-[#7f849c]">
+            Assets: <span className="font-mono text-[#cdd6f4]">{assets.length}</span>
+          </span>
+          <div className="flex gap-0.5">
+            {(["tree", "grid"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setViewMode(mode)}
+                className={`rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase transition-colors ${
+                  viewMode === mode
+                    ? "bg-[#cba6f7]/20 text-[#cba6f7]"
+                    : "text-[#6c7086] hover:text-[#a6adc8]"
+                }`}
+              >
+                {mode === "tree" ? "\u25e6" : "\u25a6"} {mode}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {busy && <p className="text-[10px] text-[#89b4fa]">Carregando catalogo de assets...</p>}
@@ -724,7 +893,61 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-2">
+      {viewMode === "tree" && assets.length > 0 && (
+        <div className="flex flex-col gap-0.5 rounded border border-[#313244] bg-[#11111b] p-2">
+          <AssetTreeView
+            node={assetTree}
+            collapsed={treeCollapsed}
+            onToggle={toggleTreeNode}
+            onSelect={(asset) => {
+              setSelectedTreeAsset(asset);
+              const matches = references.get(asset.relative_path) ?? [];
+              if (matches.length > 0) {
+                setSelectedEntityId(matches[0].entityId);
+              }
+            }}
+            previewUrl={assetPreviewUrl}
+            depth={0}
+          />
+        </div>
+      )}
+
+      {viewMode === "tree" && selectedTreeAsset && (
+        <div className="flex flex-col gap-2 rounded border border-[#cba6f7]/30 bg-[#1e1e2e] p-3">
+          {assetPreviewUrl(selectedTreeAsset) && (
+            <div className="flex h-24 items-center justify-center overflow-hidden rounded bg-[#11111b]">
+              <img
+                src={assetPreviewUrl(selectedTreeAsset)!}
+                alt={selectedTreeAsset.relative_path}
+                className="h-full w-full object-contain"
+                style={{ imageRendering: "pixelated" }}
+              />
+            </div>
+          )}
+          <p className="break-all font-mono text-[10px] text-[#cdd6f4]">{selectedTreeAsset.relative_path}</p>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleFocusReferencedAsset(selectedTreeAsset)}
+              className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[10px] font-semibold text-[#cdd6f4] transition-colors hover:border-[#cba6f7] hover:text-[#cba6f7]"
+            >
+              Focar
+            </button>
+            {selectedTreeAsset.kind === "image" && (
+              <button
+                type="button"
+                onClick={() => void handleInstantiateAsset(selectedTreeAsset)}
+                disabled={!activeProjectDir || !activeScene || instantiatingAssetPath === selectedTreeAsset.relative_path}
+                className="rounded border border-[#89b4fa]/40 bg-[#89b4fa]/10 px-2 py-1 text-[10px] font-semibold text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {instantiatingAssetPath === selectedTreeAsset.relative_path ? "Criando..." : "Instanciar"}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {viewMode === "grid" && <div className="grid grid-cols-2 gap-2">
         {assets.map((asset) => {
           const preview = assetPreviewUrl(asset);
           const matches = references.get(asset.relative_path) ?? [];
@@ -791,7 +1014,7 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
             </div>
           );
         })}
-      </div>
+      </div>}
 
       {!busy && assets.length === 0 && (
         <p className="text-[10px] text-[#45475a]">Nenhum asset encontrado em `assets/`.</p>
@@ -1602,10 +1825,11 @@ function ReverseExplorer() {
   );
 }
 
-type ToolTab = "patch" | "profiler" | "extractor" | "setup" | "memory" | "assets" | "vram" | "reverse";
+type ToolTab = "patch" | "profiler" | "extractor" | "setup" | "memory" | "assets" | "vram" | "reverse" | "palette";
 
 const TOOL_TABS: { id: ToolTab; label: string; icon: string; experimental?: boolean }[] = [
   { id: "setup", label: "Runtime Setup", icon: "RD" },
+  { id: "palette", label: "Paleta", icon: "🎨" },
   { id: "assets", label: "Asset Browser", icon: "AB", experimental: true },
   { id: "patch", label: "Patch Studio", icon: "PT" },
   { id: "profiler", label: "Deep Profiler", icon: "DP" },
@@ -1642,6 +1866,7 @@ export default function ToolsPanel({ onRequestInspector }: { onRequestInspector?
 
       <div className="flex-1 overflow-y-auto">
         {active === "setup" && <RuntimeSetup />}
+        {active === "palette" && <ContextualPalette />}
         {active === "assets" && <AssetBrowser onRequestInspector={onRequestInspector} />}
         {active === "patch" && <PatchStudio />}
         {active === "profiler" && <DeepProfiler />}

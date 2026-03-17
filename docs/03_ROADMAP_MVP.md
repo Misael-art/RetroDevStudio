@@ -1,7 +1,7 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-03-14
-**Fase ativa real:** Release candidate / beta testing do desktop Tauri, com RC hotfixado apos validacao manual inicial, galeria de templates experimental ativa, seed `platformer` sanitizado, prefabs/graphs persistiveis, importacao SGDK generica experimental, pipeline SGDK alinhado ao `rescomp` e updater em placeholder por politica de dependencias
+**Ultima revisao canonica:** 2026-03-17
+**Fase ativa real:** Release candidate / beta testing do desktop Tauri, com RC hotfixado apos validacao manual inicial, galeria de templates experimental ativa, seed `platformer` sanitizado, prefabs/graphs persistiveis, importacao SGDK generica experimental com UX de meta-sprites/zoom/hierarquia/asset tree/onboarding/warnings, Ondas 1 e 2 de paint/erase/paleta contextual/drag-to-paint/brush ghost implementadas, pipeline SGDK alinhado ao `rescomp` e updater em placeholder por politica de dependencias
 
 > **DIRETRIZ PARA AGENTES DE IA**
 > Este roadmap precisa refletir estado real do codigo, nao claims historicas.
@@ -79,7 +79,7 @@
 - Repeticao institucional do bundle MSI, do smoke desktop e do fluxo oficial upstream em Windows quando build, emulacao, onboarding ou packaging forem alterados.
 - Este host ainda pode exigir diagnostico adicional para bootstrap WebDriver (`DevToolsActivePort` / `chrome not reachable`) e para `spawn EPERM` em builds desktop fora do wrapper MSVC canonico, embora o smoke local MD/SNES tenha voltado a passar nesta sessao de hotfix.
 - Decisao final de governanca do workflow desktop dedicado (`push`/`pull_request` path-filtered, `workflow_dispatch`, `workflow_call` ou gate protegido).
-- Auditoria residual de UX, com prioridade para revalidar o fluxo de autoria pos-hotfix (cena vazia -> sprite inicial -> inspector -> build), o caminho `Novo Projeto -> Build & Run` no Mega Drive apos os ajustes de staging/conversao SGDK e as superficies ainda `Experimental` (`Asset Browser`, `VRAM Viewer`, `Reverse Explorer`, `Asset Extractor`, `RetroFX`) antes de transformar o release candidate em beta institucional.
+- Auditoria residual de UX, com prioridade para revalidar o fluxo de autoria pos-hotfix (cena vazia -> sprite inicial -> inspector -> build), o caminho `Novo Projeto -> Build & Run` no Mega Drive apos os ajustes de staging/conversao SGDK, a nova UX de import SGDK (meta-sprites, zoom, hierarquia, asset tree, onboarding, warnings) e as superficies ainda `Experimental` (`VRAM Viewer`, `Reverse Explorer`, `Asset Extractor`, `RetroFX`) antes de transformar o release candidate em beta institucional.
 
 ---
 
@@ -192,6 +192,39 @@
 - Wave S2 - concluida e validada localmente (`a0eaf04`, `d70a9e6`, `4a059a1`)
 - Wave S3 - concluida e validada localmente (`4a059a1`, `f978a18`)
 
+## UX SGDK IMPORT (ESTADO REAL)
+
+- Meta-sprites (PROMPT 1) - concluida: campo `meta_sprite` em `SpriteComponent`, bypass de limite simples nos profiles, importador marca sprites >32px
+- Viewport sprites (PROMPT 2) - concluida: caminho existente ja resolve via NTFS junctions, sem mudanca necessaria
+- Hierarquia por tipo (PROMPT 3) - concluida: agrupamento camera/sprite/tilemap/audio/object com headers collapsiveis
+- Warnings SGDK (PROMPT 4) - concluida: VRAM overflow vira warning com `[SGDK Gerenciado]` para projetos `external_sgdk`
+- Asset Browser tree (PROMPT 5) - concluida: navegacao hierarquica, toggle tree/grid, thumbnail, botao Instanciar
+- Zoom viewport (PROMPT 6) - concluida: Ctrl+Scroll, +/-, Ctrl+0, 0.25x-4.0x, canvas CSS scaling
+- Onboarding SGDK (PROMPT 7) - concluida: toast dismissivel para projetos importados, persistido em localStorage
+- Camera errors (PROMPT 8) - concluida: guards para 0×0 sprites em ambos os profiles
+
+## ONDA 1 — PAINT/ERASE + PALETA CONTEXTUAL (ESTADO REAL)
+
+- EditorMode cleanup - concluida: removido `fill` do union type, simplificado para `select | paint | erase`
+- Paleta real por tipo - concluida: `ContextualPalette` consome `listProjectAssets()`, agrupa por sprites/prefabs/tilemaps/audio/other, thumbnails reais, secoes collapsiveis
+- Paint com entidade completa - concluida: usa `createSpriteEntityFromAsset()` com sprite dimensionado, ID unico, persist automatico
+- Erase com persist - concluida: `persistActiveScene()` apos remocao
+- Guard pre-paint - concluida: verifica sprite count vs limite de hardware antes de instanciar
+- Cursor contextual - concluida: cursor muda por modo (copy/not-allowed/pointer/crosshair/grabbing)
+- Atalhos V/B/E - concluida: alternancia de modo por teclado no scene tab
+- Type safety - concluida: `as any` removido do floating toolbar e da ContextualPalette
+- Testes - concluida: 10 novos testes para setEditorMode e setActiveBrush
+- Validacao: tsc limpo, 139 testes frontend, lint limpo
+
+## ONDA 2 — DRAG-TO-PAINT/ERASE + BRUSH GHOST + UX POLISH (ESTADO REAL)
+
+- Drag-to-paint - concluida: arrastar em paint mode stampa sprites continuamente com grid-cell dedup via `paintDragRef`, undo grouping e batch persist
+- Drag-to-erase - concluida: arrastar em erase mode remove entidades com dedup via `eraseDragRef`, undo grouping e batch persist
+- Brush ghost preview - concluida: retangulo semi-transparente `#89b4fa` com borda dashed na posicao do mouse, dimensoes via `constrainSpriteFrameSize()`
+- Escape - concluida: limpa brush e retorna ao select mode
+- Status bar contextual - concluida: mostra modo/brush info quando fora do select mode
+- Validacao: tsc limpo, 139 testes frontend, lint limpo
+
 ---
 
 ## Ordem Executiva Atual
@@ -200,7 +233,7 @@
 2. Repetir bundle MSI e smoke desktop em host Windows institucional para mudancas sensiveis de build, emulacao, packaging, onboarding, templates e projeto.
 3. Executar QA com leigos na nova galeria: `Projeto Vazio`, `Primeiro Projeto`, `Plataforma` e `Importar Projeto SGDK`, confirmando que preview visual, labels PT-BR e cards reduzem a friccao do primeiro uso.
 4. Validar manualmente `platformer_seed` e pelo menos um projeto SGDK importado genericamente em `Build & Run` Mega Drive, preservando compliance e sem reintroduzir artefatos proibidos.
-5. Planejar a proxima onda de templates/presets com foco em comportamento composto e meta-sprites, ja que o seed atual continua limitado ao envelope simples `32x32` do validador.
+5. Planejar a proxima onda de templates/presets com foco em comportamento composto, ja que o suporte a meta-sprites agora existe no validador e no importador SGDK.
 6. Decidir se a dependencia `tauri-plugin-updater` pode ser aprovada sob a politica atual e preparar release notes/checklist de beta testing antes de promover o release candidate.
 
 ---

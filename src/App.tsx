@@ -289,6 +289,7 @@ export default function App() {
     resetHwValidation,
     undo,
     redo,
+    setProjectSourceKind,
   } = useEditorStore();
 
   const [building, setBuilding] = useState(false);
@@ -528,6 +529,7 @@ export default function App() {
     setHwStatus(hw);
     setActiveScenePath(sceneData.scene_path);
     setActiveScene(hydrated.resolvedScene, hydrated.sourceScene);
+    setProjectSourceKind(sceneData.source_kind ?? "");
     if (sceneData.target === "megadrive" || sceneData.target === "snes") {
       setActiveTarget(sceneData.target);
     }

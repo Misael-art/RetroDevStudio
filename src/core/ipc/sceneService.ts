@@ -26,6 +26,8 @@ export interface SpriteComponent {
   palette_slot?: number;
   animations?: Record<string, AnimationDef>;
   priority?: string;
+  /** Experimental: SGDK ResComp decomposes meta-sprites automatically. */
+  meta_sprite?: boolean;
 }
 
 export interface CollisionOffset {
@@ -149,6 +151,20 @@ export interface RetroFXConfig {
   raster_lines: RetroFXRasterLine[];
 }
 
+/** Mapa de colisão grid-based (schema 1.4.0+). */
+export interface CollisionMap {
+  /** Tamanho do tile em pixels (horizontal). Padrão: 8. */
+  tile_width: number;
+  /** Tamanho do tile em pixels (vertical). Padrão: 8. */
+  tile_height: number;
+  /** Número de tiles na horizontal. */
+  width: number;
+  /** Número de tiles na vertical. */
+  height: number;
+  /** Dados: 0 = livre, 1 = sólido. Tamanho = width * height. */
+  data: number[];
+}
+
 export interface Scene {
   scene_id: string;
   schema_version?: string | null;
@@ -157,6 +173,8 @@ export interface Scene {
   background_layers: BackgroundLayer[];
   palettes?: PaletteEntry[];
   retrofx?: RetroFXConfig | null;
+  /** Mapa de colisão grid-based (schema 1.4.0+). Null = sem mapa de colisão. */
+  collision_map?: CollisionMap | null;
 }
 
 export interface SceneInfo {
@@ -172,6 +190,7 @@ export interface SceneDataResult {
   project_name: string;
   target: string;
   scene_path: string;
+  source_kind: string;
 }
 
 export interface ResolveSceneResult {

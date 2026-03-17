@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Panel from "../common/Panel";
 import { useEditorStore } from "../../core/store/editorStore";
 import {
@@ -23,13 +23,31 @@ const TYPE_ICON: Record<string, string> = {
   sprite: "◈",
   tilemap: "▦",
   camera: "⊙",
+  audio: "♫",
   layer: "▬",
+  object: "○",
 };
 
-function entityType(entity: { components?: { sprite?: unknown; collision?: unknown; tilemap?: unknown; camera?: unknown } }): string {
+const GROUP_ORDER: string[] = ["camera", "sprite", "tilemap", "audio", "object"];
+
+const GROUP_LABELS: Record<string, string> = {
+  camera: "Câmeras",
+  sprite: "Sprites",
+  tilemap: "Cenários",
+  audio: "Áudio",
+  object: "Outros",
+};
+
+interface EntityGroup {
+  type: string;
+  entities: Array<{ entity_id: string; prefab?: string | null; components?: { sprite?: unknown; collision?: unknown; tilemap?: unknown; camera?: unknown; audio?: unknown } }>;
+}
+
+function entityType(entity: { components?: { sprite?: unknown; collision?: unknown; tilemap?: unknown; camera?: unknown; audio?: unknown } }): string {
   if (entity.components?.camera) return "camera";
   if (entity.components?.tilemap) return "tilemap";
   if (entity.components?.sprite) return "sprite";
+  if (entity.components?.audio && !entity.components?.sprite) return "audio";
   return "object";
 }
 
@@ -57,6 +75,7 @@ export default function HierarchyPanel() {
   const [isCreatingScene, setIsCreatingScene] = useState(false);
   const [sceneItems, setSceneItems] = useState<SceneInfo[]>([]);
   const [filterText, setFilterText] = useState("");
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
   async function refreshSceneCatalog(projectDir: string) {
     const scenes = await listScenes(projectDir);
@@ -165,6 +184,38 @@ export default function HierarchyPanel() {
       layer.layer_id.toLowerCase().includes(filterLower)
     )
     : bgLayers;
+
+  const entityGroups: EntityGroup[] = useMemo(() => {
+    const grouped = new Map<string, EntityGroup>();
+    for (const type of GROUP_ORDER) {
+      grouped.set(type, { type, entities: [] });
+    }
+    for (const entity of filteredEntities) {
+      const type = entityType(entity);
+      const group = grouped.get(type);
+      if (group) {
+        group.entities.push(entity);
+      } else {
+        const fallback = grouped.get("object")!;
+        fallback.entities.push(entity);
+      }
+    }
+    return GROUP_ORDER.map((type) => grouped.get(type)!).filter(
+      (group) => group.entities.length > 0
+    );
+  }, [filteredEntities]);
+
+  function toggleGroup(type: string) {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) {
+        next.delete(type);
+      } else {
+        next.add(type);
+      }
+      return next;
+    });
+  }
 
   async function resolveDefaultSpriteAsset(): Promise<string | null> {
     if (!activeProjectDir) {
@@ -443,26 +494,47 @@ export default function HierarchyPanel() {
             );
           })}
 
-          {/* Entities */}
-          {filteredEntities.map((entity) => {
-            const isSelected = entity.entity_id === selectedEntityId;
-            const type = entityType(entity);
+          {/* Entities (grouped by type) */}
+          {entityGroups.map((group) => {
+            const isCollapsed = collapsedGroups.has(group.type);
             return (
-              <li
-                key={entity.entity_id}
-                onClick={() => setSelectedEntityId(entity.entity_id)}
-                className={[
-                  "flex items-center gap-2 px-3 py-1 cursor-pointer select-none text-xs transition-colors",
-                  isSelected
-                    ? "bg-[#313244] text-[#cdd6f4]"
-                    : "text-[#a6adc8] hover:bg-[#24243a] hover:text-[#cdd6f4]",
-                ].join(" ")}
-              >
-                <span className="text-[#7f849c]">{TYPE_ICON[type] ?? "○"}</span>
-                <span title={entity.prefab ? `Prefab: ${entity.prefab}` : entity.entity_id}>
-                  {entityDisplayName(entity)}
-                </span>
-                <span className="ml-auto text-[#45475a]">{type}</span>
+              <li key={`group::${group.type}`}>
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(group.type)}
+                  className="flex w-full items-center gap-1.5 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#585b70] transition-colors hover:text-[#a6adc8]"
+                >
+                  <span className="text-[8px]">{isCollapsed ? "▸" : "▾"}</span>
+                  <span>{TYPE_ICON[group.type] ?? "○"}</span>
+                  <span>{GROUP_LABELS[group.type] ?? group.type}</span>
+                  <span className="ml-auto font-mono text-[#45475a]">{group.entities.length}</span>
+                </button>
+                {!isCollapsed && (
+                  <ul>
+                    {group.entities.map((entity) => {
+                      const isSelected = entity.entity_id === selectedEntityId;
+                      const type = entityType(entity);
+                      return (
+                        <li
+                          key={entity.entity_id}
+                          onClick={() => setSelectedEntityId(entity.entity_id)}
+                          className={[
+                            "flex items-center gap-2 pl-6 pr-3 py-1 cursor-pointer select-none text-xs transition-colors",
+                            isSelected
+                              ? "bg-[#313244] text-[#cdd6f4]"
+                              : "text-[#a6adc8] hover:bg-[#24243a] hover:text-[#cdd6f4]",
+                          ].join(" ")}
+                        >
+                          <span className="text-[#7f849c]">{TYPE_ICON[type] ?? "○"}</span>
+                          <span title={entity.prefab ? `Prefab: ${entity.prefab}` : entity.entity_id}>
+                            {entityDisplayName(entity)}
+                          </span>
+                          <span className="ml-auto text-[#45475a]">{type}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
               </li>
             );
           })}

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use super::components::Components;
 
-pub const CURRENT_SCHEMA_VERSION: &str = "1.3.0";
+pub const CURRENT_SCHEMA_VERSION: &str = "1.4.0";
 
 fn default_schema_version() -> String {
     CURRENT_SCHEMA_VERSION.to_string()
@@ -77,7 +77,77 @@ pub struct RetroFXConfig {
     pub raster_lines: Vec<RetroFXRasterLine>,
 }
 
-// ── Scene ─────────────────────────────────────────────────────────────────────
+// ── Collision Map (grid-based, tile-aligned) ───────────────────────────────────
+
+/// Mapa de colisão baseado em grid de tiles.
+/// Cada byte em `data` é 0 (livre) ou 1 (sólido).
+/// Índice = tile_y * width + tile_x.
+/// Limites: MD = 40x28 tiles (320x224 @ 8x8), SNES = 32x28 tiles (256x224 @ 8x8).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CollisionMap {
+    /// Tamanho do tile em pixels (horizontal). Deve ser múltiplo de 8.
+    #[serde(default = "default_tile_size")]
+    pub tile_width: u8,
+    /// Tamanho do tile em pixels (vertical). Deve ser múltiplo de 8.
+    #[serde(default = "default_tile_size")]
+    pub tile_height: u8,
+    /// Número de tiles na horizontal.
+    pub width: u32,
+    /// Número de tiles na vertical.
+    pub height: u32,
+    /// Dados do mapa: 0 = livre, 1 = sólido. Tamanho esperado = width * height.
+    #[serde(default)]
+    pub data: Vec<u8>,
+}
+
+fn default_tile_size() -> u8 {
+    8
+}
+
+impl CollisionMap {
+    /// Cria um mapa de colisão vazio com as dimensões fornecidas.
+    #[allow(dead_code)]
+    pub fn empty(tile_width: u8, tile_height: u8, width: u32, height: u32) -> Self {
+        Self {
+            tile_width,
+            tile_height,
+            width,
+            height,
+            data: vec![0u8; (width * height) as usize],
+        }
+    }
+
+    /// Retorna o índice correto no vetor `data` para a posição (tx, ty).
+    #[allow(dead_code)]
+    pub fn tile_index(&self, tx: u32, ty: u32) -> Option<usize> {
+        if tx < self.width && ty < self.height {
+            Some((ty * self.width + tx) as usize)
+        } else {
+            None
+        }
+    }
+
+    /// Retorna se o tile em (tx, ty) é sólido.
+    #[allow(dead_code)]
+    pub fn is_solid(&self, tx: u32, ty: u32) -> bool {
+        self.tile_index(tx, ty)
+            .and_then(|i| self.data.get(i))
+            .copied()
+            .unwrap_or(0)
+            != 0
+    }
+
+    /// Retorna `data` normalizado para o tamanho correto (width * height), preenchendo com 0
+    /// se o slice for menor, ou truncando se for maior. Não muta `self`.
+    pub fn normalize(&self) -> Vec<u8> {
+        let expected = (self.width * self.height) as usize;
+        let mut data = self.data.clone();
+        data.resize(expected, 0);
+        data
+    }
+}
+
+// ── Scene ────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Scene {
@@ -93,6 +163,9 @@ pub struct Scene {
     pub palettes: Vec<PaletteEntry>,
     #[serde(default)]
     pub retrofx: Option<RetroFXConfig>,
+    /// Mapa de colisão grid-based (schema 1.4.0+). None = sem mapa de colisão.
+    #[serde(default)]
+    pub collision_map: Option<CollisionMap>,
 }
 
 // ── Build Config ──────────────────────────────────────────────────────────────

@@ -126,7 +126,12 @@ Uma cena e a unidade basica de jogo (fase, menu, cutscene).
   ],
   "palettes": [
     { "slot": 0, "colors": ["#000000", "#2244AA", "#44AAFF", "#FFFFFF", "#000000", "#000000", "#000000", "#000000", "#000000", "#000000", "#000000", "#000000", "#000000", "#000000", "#000000", "#000000"] }
-  ]
+  ],
+  "collision_map": {
+    "width": 40,
+    "height": 28,
+    "data": [0, 0, 1, 1, 0]
+  }
 }
 ```
 
@@ -138,6 +143,32 @@ Uma cena e a unidade basica de jogo (fase, menu, cutscene).
 | Max background_layers | MD: 2 scroll + 1 window, SNES: varia por mode | Erro de build |
 | Palette slots | MD: 4 slots de 16 cores, SNES: 16 slots de 16 | Erro se exceder |
 | VRAM total | Soma de todos tiles carregados <= 64KB | Erro de build |
+| CollisionMap dimensoes | MD: 40×28, SNES: 32×28 (em tiles de 8px) | Erro de build |
+| CollisionMap data length | `data.len()` deve ser igual a `width * height` | Erro de build |
+
+### 4.1 CollisionMap (campo opcional na Scene)
+
+O `collision_map` e um mapa tile-a-tile de solideidade da cena, pintado diretamente no Viewport Editor. E opcional — sua ausencia e tratada como mapa vazio pelo codegen.
+
+```json
+{
+  "collision_map": {
+    "width": 40,
+    "height": 28,
+    "data": [0, 1, 1, 0]
+  }
+}
+```
+
+| Campo | Tipo | Descricao |
+|-------|------|-----------|
+| `width` | integer | Largura em tiles (MD: 40, SNES: 32) |
+| `height` | integer | Altura em tiles (MD: 28, SNES: 28) |
+| `data` | array de 0/1 | Flat array row-major. `0` = livre, `1` = solido |
+
+**Regra:** `data.len()` DEVE ser exatamente `width * height`. O backend Rust valida e rejeita com erro antes do codegen.
+**Codegen:** O emitter SGDK emite `static const u8 rds_collision_map[]` antes de `int main()`. O emitter SNES faz o mesmo. Tiles nao declarados (mapa ausente) sao tratados como `0` (livre).
+**Editor:** Atalho `C` ativa o modo `collision` no Viewport. Clique esquerdo = solido (1), clique direito = livre (0). Overlay semi-transparente vermelho indica tiles solidos.
 
 ---
 
@@ -204,8 +235,9 @@ Uma entidade e qualquer "coisa" na cena: jogador, inimigo, item, trigger, HUD el
 | `palette_slot` | integer | Nao | Indice da paleta (0-3 MD, 0-15 SNES). Default: 0 |
 | `animations` | object | Nao | Mapa nome->animacao |
 | `priority` | string | Nao | `"foreground"` ou `"background"`. Default: `"foreground"` |
+| `meta_sprite` | boolean | Nao | Se `true`, indica que o sprite sera fatiado em meta-sprite composto pelo runtime SGDK. O validador de hardware ignora o limite simples de frame (32×32 MD / 64×64 SNES) para meta-sprites, mas continua contabilizando VRAM. Default: `false`. Setado automaticamente pelo importador SGDK para sprites >32px. |
 
-**Regra para IA:** `frame_width` e `frame_height` DEVEM ser multiplos de 8. Se o usuario especificar 17x25, o build DEVE falhar com: `"Sprite dimensions must be multiples of 8 (tile-aligned). Got 17x25."`
+**Regra para IA:** `frame_width` e `frame_height` DEVEM ser multiplos de 8.
 
 ### 6.2 Collision Component
 
@@ -332,6 +364,8 @@ Antes de gerar codigo C a partir de um UGDM, o backend Rust DEVE executar estas 
 | 8 | Variaveis de logica usam tipos validos | Este doc (secao 6.6) | Erro fatal |
 | 9 | Background layers nao excedem limites do target | `04_HARDWARE_SPECS.md` | Erro fatal |
 | 10 | DMA bandwidth por frame estimada | `04_HARDWARE_SPECS.md` | Warning |
+| 11 | `collision_map.data.len()` == `width * height` | Este doc (secao 4.1) | Erro fatal |
+| 12 | `collision_map` dimensoes dentro dos limites do target | Este doc (secao 4.1) | Erro fatal |
 
 ---
 

@@ -6,8 +6,8 @@ use crate::compiler::ast_generator::{
     collect_bgm_tracks, collect_sfx_resources, collect_tilemap_assets, generate_ast_with_prefabs,
     AstOutput,
 };
-use crate::compiler::sgdk_emitter::emit_sgdk;
-use crate::compiler::snes_emitter::emit_snes;
+use crate::compiler::sgdk_emitter::emit_sgdk_with_collision;
+use crate::compiler::snes_emitter::emit_snes_with_collision;
 use crate::core::project_mgr::{load_project, load_scene, resolve_prefabs, target_spec, TargetSpec};
 use crate::hardware::md_profile;
 use crate::hardware::snes_profile;
@@ -344,16 +344,19 @@ where
             };
         }
     };
+    // Normalise collision map data before passing to emitter (handles null and length mismatches)
+    let collision_data = resolved_scene.collision_map.as_ref().map(|m| m.normalize());
+    let collision_slice = collision_data.as_deref();
     let artifacts = match target.target {
         "snes" => {
-            let output = emit_snes(&ast, &project.name);
+            let output = emit_snes_with_collision(&ast, &project.name, collision_slice);
             EmitArtifacts {
                 main_c: output.main_c,
                 resources_res: output.resources_res,
             }
         }
         _ => {
-            let output = emit_sgdk(&ast, &project.name);
+            let output = emit_sgdk_with_collision(&ast, &project.name, collision_slice);
             EmitArtifacts {
                 main_c: output.main_c,
                 resources_res: output.resources_res,
