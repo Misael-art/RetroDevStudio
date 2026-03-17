@@ -1116,7 +1116,19 @@ export default function ViewportPanel() {
       context.fillText(`BG: ${layer.layer_id}`, 4, 10 + index * 12);
     });
 
+    // Build set of entity_ids hidden by a layer with visible=false
+    const hiddenByLayer = new Set<string>();
+    for (const sceneLayer of activeScene.layers ?? []) {
+      if (!sceneLayer.visible) {
+        for (const eid of sceneLayer.entity_ids) {
+          hiddenByLayer.add(eid);
+        }
+      }
+    }
+
     activeScene.entities.forEach((entity: Entity, index: number) => {
+      if (hiddenByLayer.has(entity.entity_id)) return;
+
       const bounds = getEntityBounds(entity, activeTarget);
       const x = bounds.x;
       const y = bounds.y;

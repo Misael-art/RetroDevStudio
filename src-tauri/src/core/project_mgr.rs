@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+﻿use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, Write};
@@ -174,6 +174,7 @@ pub fn canonical_scene(scene_id: &str, display_name: Option<String>) -> Scene {
         palettes: Vec::new(),
         retrofx: None,
         collision_map: None,
+        layers: None,
     }
 }
 
@@ -2989,6 +2990,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
 
         let resolved = resolve_prefabs(&project_dir, &scene).expect("resolve graph ref");
@@ -3030,6 +3032,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
         let resolved_scene = Scene {
             entities: vec![Entity {
@@ -3701,6 +3704,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
 
         let project_warning =

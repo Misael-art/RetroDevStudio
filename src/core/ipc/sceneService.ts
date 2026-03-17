@@ -151,6 +151,24 @@ export interface RetroFXConfig {
   raster_lines: RetroFXRasterLine[];
 }
 
+/** Camada de editor (schema 1.5.0+). Agrupa entidades por visibilidade e lock. */
+export interface SceneLayer {
+  /** Identificador único da camada (slug). */
+  id: string;
+  /** Nome exibido no painel de camadas. */
+  name: string;
+  /** Tipo da camada: "sprite" | "tile" | "background" | "object". */
+  kind: string;
+  /** Se false, entidades desta camada são omitidas do viewport. Padrão: true. */
+  visible: boolean;
+  /** Se true, bloqueia edição no viewport. Padrão: false. */
+  locked: boolean;
+  /** Ordem visual (z-order). Menor = mais atrás. */
+  depth: number;
+  /** IDs das entidades atribuídas a esta camada. */
+  entity_ids: string[];
+}
+
 /** Mapa de colisão grid-based (schema 1.4.0+). */
 export interface CollisionMap {
   /** Tamanho do tile em pixels (horizontal). Padrão: 8. */
@@ -175,6 +193,8 @@ export interface Scene {
   retrofx?: RetroFXConfig | null;
   /** Mapa de colisão grid-based (schema 1.4.0+). Null = sem mapa de colisão. */
   collision_map?: CollisionMap | null;
+  /** Camadas de editor (schema 1.5.0+). Null = sem sistema de camadas. */
+  layers?: SceneLayer[] | null;
 }
 
 export interface SceneInfo {

@@ -24,6 +24,10 @@ WixTools/
 # --- Toolchains (binarios pesados, baixar separadamente) ---
 toolchains/sgdk/
 toolchains/pvsneslib/
+toolchains/env/
+toolchains/webdriver/
+toolchains/libretro/cores/
+toolchains/libretro/.retrodev-install-*.json
 !toolchains/sgdk/.gitkeep
 !toolchains/pvsneslib/.gitkeep
 

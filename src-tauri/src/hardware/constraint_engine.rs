@@ -1,4 +1,4 @@
-use crate::ugdm::entities::Scene;
+﻿use crate::ugdm::entities::Scene;
 
 use super::{md_profile, snes_profile, HwStatus};
 
@@ -36,6 +36,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         }
     }
 

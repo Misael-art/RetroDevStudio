@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Ultima Atualizacao:** 2026-03-17
-**Ultima sessao:** 2026-03-17 (Sprint 2: CollisionMap — schema 1.4.0, editor mode, codegen SGDK/SNES)
-**Fase Atual:** Release candidate / beta testing do desktop Tauri, com ondas M-R concluidas, RC hotfixado, galeria de templates experimental ativa, seed `platformer` sanitizado para Mega Drive, prefabs persistiveis com `activeSceneSource/activeScene`, `graph_ref` externalizado, importacao SGDK generica experimental, overlay `rds/` para projetos SGDK externos com discovery por subdiretorio, UX SGDK import com meta-sprites/zoom/hierarquia/asset tree/onboarding/warnings implementada, Ondas 1 e 2 de paint/erase/paleta contextual/drag-to-paint/brush ghost implementadas e updater runtime ainda bloqueado por politica de nao adicionar dependencias novas.
+**Ultima sessao:** 2026-03-17 (Sprint 3: Layer System Pilar 1 + tauri-plugin-updater)
+**Fase Atual:** Release candidate / beta testing do desktop Tauri, com ondas M-R concluidas, RC hotfixado, galeria de templates experimental ativa, seed `platformer` sanitizado para Mega Drive, prefabs persistiveis com `activeSceneSource/activeScene`, `graph_ref` externalizado, importacao SGDK generica experimental, overlay `rds/` para projetos SGDK externos com discovery por subdiretorio, UX SGDK import com meta-sprites/zoom/hierarquia/asset tree/onboarding/warnings implementada, Ondas 1 e 2 de paint/erase/paleta contextual/drag-to-paint/brush ghost implementadas, Sprint 1 (Inspector Sliders), Sprint 2 (CollisionMap) e Sprint 3 (Layer System + tauri-plugin-updater) concluidos com todos os 6 gates verdes.
 **Branch sugerida:** `feat/desktop-e2e-workflow`
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
@@ -16,6 +16,31 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-17 - Sprint 3: Layer System Pilar 1 + tauri-plugin-updater):**
+  - Implementado Layer System (Pilar 1) de ponta a ponta. Schema UGDM bumped `1.4.0 -> 1.5.0`.
+  - **Rust — entities.rs:** Novo struct `SceneLayer { id, name, kind, visible, locked, depth, entity_ids: Vec<String> }` com helper `default_visible() -> bool`. Campo `layers: Option<Vec<SceneLayer>>` adicionado a `Scene`. `CURRENT_SCHEMA_VERSION` bumped para `"1.5.0"`. `layers: None` adicionado a todos os literais `Scene {}` nos testes em `ast_generator.rs`, `project_mgr.rs`, `constraint_engine.rs`, `md_profile.rs`, `snes_profile.rs`.
+  - **Rust — tauri-plugin-updater:** `tauri-plugin-updater = "2"` adicionado ao `Cargo.toml`. Plugin registrado em `src-tauri/src/lib.rs` com `.plugin(tauri_plugin_updater::Builder::new().build())`. Sem UI de update — endpoint/pubkey permanecem placeholder.
+  - **TypeScript — sceneService.ts:** Interface `SceneLayer { id, name, kind, visible, locked, depth, entity_ids }` adicionada. Campo `layers?: SceneLayer[] | null` adicionado a `Scene`.
+  - **TypeScript — editorStore.ts:** Importa `SceneLayer`; `activeLayerId: string | null` no estado; actions `setActiveLayerId`, `createLayer`, `deleteLayer`, `updateLayer`, `assignEntityToLayer` implementadas com undo/redo e persist de `activeSceneSource`.
+  - **UI — LayerPanel.tsx:** Novo componente `src/components/hierarchy/LayerPanel.tsx` com lista de camadas, criar/deletar, toggle visible/locked, renomear inline, botao de atribuir entidade selecionada a camada ativa.
+  - **UI — App.tsx:** Tabs `Cena|Camadas` no aside esquerdo com `useState<"scene" | "layers">("scene")`; renderiza `<LayerPanel />` quando aba `layers` ativa.
+  - **Viewport — ViewportPanel.tsx:** Filtro de visibilidade por camada: conjunto `hiddenByLayer` construido antes do `forEach` de entidades; entidades em camadas com `visible=false` sao saltadas no canvas de cena.
+  - **Testes — editorStore.test.ts:** 12 novos testes para `createLayer` (3), `deleteLayer` (3), `updateLayer` (3), `assignEntityToLayer` (3). Tipo `SceneLayer` importado.
+  - **Limpeza:** Diretorio untracked `hamoopig_example/` (leftover de smoke testing anterior) removido para manter check:tree verde.
+  - **Gates:** tsc limpo, lint limpo, check:tree verde, 151 testes frontend (12 novos), 167 testes Rust (1 ignorado), cargo clippy limpo.
+  - Arquivos modificados: `entities.rs`, `ast_generator.rs`, `project_mgr.rs`, `constraint_engine.rs`, `md_profile.rs`, `snes_profile.rs`, `lib.rs`, `Cargo.toml`, `sceneService.ts`, `editorStore.ts`, `editorStore.test.ts`, `LayerPanel.tsx` (novo), `App.tsx`, `ViewportPanel.tsx`, `docs/05_ARCHITECTURE_UGDM.md`, `docs/03_ROADMAP_MVP.md`, `docs/06_AI_MEMORY_BANK.md`.
+
+* **QA Roteiro — Layer System (execucao humana):**
+  1. Abrir projeto existente (ex: platformer_seed). Verificar que a aba `Camadas` aparece no painel esquerdo.
+  2. Clicar em `+ Camada`. Verificar que uma nova camada e criada com nome padrao e aparece na lista.
+  3. Renomear a camada clicando no nome. Verificar que o nome e salvo ao pressionar Enter ou ao perder foco.
+  4. Selecionar uma entidade na aba `Cena`. Voltar para `Camadas` e clicar no botao de atribuicao. Verificar que a entidade aparece na camada.
+  5. Clicar no icone de visibilidade (olho) da camada. Verificar que a entidade desaparece do canvas de cena. Clicar novamente para restaurar.
+  6. Clicar no icone de lock. Verificar feedback visual de camada bloqueada.
+  7. Deletar a camada. Verificar que a lista e atualizada e que a entidade ainda aparece na cena (nao e deletada, apenas desatribuida).
+  8. Desfazer (`Ctrl+Z`) as operacoes de criar/deletar camada. Verificar que o undo stack funciona corretamente.
+  9. Salvar a cena. Fechar e reabrir o projeto. Verificar que as camadas persistem no JSON.
 
 * **O que acabou de acontecer (2026-03-17 - Sprint 2: CollisionMap / Pilar 2):**
   - Implementado CollisionMap de ponta a ponta como pre-requisito de Pilar 1 (Layers). Schema UGDM bumped `1.3.0` -> `1.4.0`.

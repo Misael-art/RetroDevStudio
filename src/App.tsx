@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import Console from "./components/common/Console";
 import HierarchyPanel from "./components/hierarchy/HierarchyPanel";
+import LayerPanel from "./components/hierarchy/LayerPanel";
 import InspectorPanel from "./components/inspector/InspectorPanel";
 import ToolsPanel from "./components/tools/ToolsPanel";
 import ViewportPanel from "./components/viewport/ViewportPanel";
@@ -294,6 +295,7 @@ export default function App() {
 
   const [building, setBuilding] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [leftPanelTab, setLeftPanelTab] = useState<"scene" | "layers">("scene");
   const [newProjName, setNewProjName] = useState("MeuProjeto");
   const [newProjTarget, setNewProjTarget] = useState<"megadrive" | "snes">("megadrive");
   const [newProjBaseDir, setNewProjBaseDir] = useState("");
@@ -1533,8 +1535,32 @@ export default function App() {
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        <aside className="w-56 shrink-0 overflow-hidden border-r border-[#313244]">
-          <HierarchyPanel />
+        <aside className="w-56 shrink-0 overflow-hidden border-r border-[#313244] flex flex-col">
+          <div className="flex shrink-0 border-b border-[#313244]">
+            <button
+              onClick={() => setLeftPanelTab("scene")}
+              className={`flex-1 py-0.5 text-[10px] font-semibold transition-colors ${
+                leftPanelTab === "scene"
+                  ? "bg-[#313244] text-[#cdd6f4]"
+                  : "text-[#45475a] hover:text-[#a6adc8]"
+              }`}
+            >
+              Cena
+            </button>
+            <button
+              onClick={() => setLeftPanelTab("layers")}
+              className={`flex-1 py-0.5 text-[10px] font-semibold transition-colors ${
+                leftPanelTab === "layers"
+                  ? "bg-[#313244] text-[#cdd6f4]"
+                  : "text-[#45475a] hover:text-[#a6adc8]"
+              }`}
+            >
+              Camadas
+            </button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {leftPanelTab === "layers" ? <LayerPanel /> : <HierarchyPanel />}
+          </div>
         </aside>
         <main className="flex-1 overflow-hidden">
           <ViewportPanel />

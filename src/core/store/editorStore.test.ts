@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { useEditorStore } from "./editorStore";
-import type { Scene, Entity, BackgroundLayer } from "../ipc/sceneService";
+import type { Scene, Entity, BackgroundLayer, SceneLayer } from "../ipc/sceneService";
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -627,6 +627,114 @@ describe("setActiveBrush", () => {
     useEditorStore.getState().setActiveBrush({ kind: "tile", id: "tile_42" });
     const brush = useEditorStore.getState().activeBrush;
     expect(brush).toEqual({ kind: "tile", id: "tile_42" });
+  });
+});
+
+// ── layer actions ────────────────────────────────────────────────────────────
+
+function makeSceneLayer(id: string, overrides: Partial<SceneLayer> = {}): SceneLayer {
+  return { id, name: id, kind: "sprite", visible: true, locked: false, depth: 0, entity_ids: [], ...overrides };
+}
+
+describe("createLayer", () => {
+  it("não faz nada se não há cena ativa", () => {
+    useEditorStore.getState().createLayer("BG", "sprite");
+    expect(useEditorStore.getState().activeScene).toBeNull();
+  });
+
+  it("adiciona camada com atributos padrão corretos", () => {
+    useEditorStore.setState({ activeScene: { ...EMPTY_SCENE } });
+    useEditorStore.getState().createLayer("Background", "sprite");
+    const layers = useEditorStore.getState().activeScene!.layers ?? [];
+    expect(layers).toHaveLength(1);
+    expect(layers[0].name).toBe("Background");
+    expect(layers[0].kind).toBe("sprite");
+    expect(layers[0].visible).toBe(true);
+    expect(layers[0].locked).toBe(false);
+    expect(layers[0].entity_ids).toHaveLength(0);
+  });
+
+  it("incrementa sceneRevision ao criar camada", () => {
+    useEditorStore.setState({ activeScene: { ...EMPTY_SCENE }, sceneRevision: 2 });
+    useEditorStore.getState().createLayer("Foreground", "tile");
+    expect(useEditorStore.getState().sceneRevision).toBe(3);
+  });
+});
+
+describe("deleteLayer", () => {
+  it("remove camada pelo id", () => {
+    const layer = makeSceneLayer("layer_1");
+    useEditorStore.setState({ activeScene: { ...EMPTY_SCENE, layers: [layer] } });
+    useEditorStore.getState().deleteLayer("layer_1");
+    expect(useEditorStore.getState().activeScene!.layers).toHaveLength(0);
+  });
+
+  it("limpa activeLayerId ao remover a camada ativa", () => {
+    const layer = makeSceneLayer("layer_1");
+    useEditorStore.setState({ activeScene: { ...EMPTY_SCENE, layers: [layer] }, activeLayerId: "layer_1" });
+    useEditorStore.getState().deleteLayer("layer_1");
+    expect(useEditorStore.getState().activeLayerId).toBeNull();
+  });
+
+  it("mantém activeLayerId ao remover outra camada", () => {
+    const l1 = makeSceneLayer("layer_1");
+    const l2 = makeSceneLayer("layer_2");
+    useEditorStore.setState({ activeScene: { ...EMPTY_SCENE, layers: [l1, l2] }, activeLayerId: "layer_1" });
+    useEditorStore.getState().deleteLayer("layer_2");
+    expect(useEditorStore.getState().activeLayerId).toBe("layer_1");
+  });
+});
+
+describe("updateLayer", () => {
+  it("altera visible para false", () => {
+    const layer = makeSceneLayer("layer_1", { visible: true });
+    useEditorStore.setState({ activeScene: { ...EMPTY_SCENE, layers: [layer] } });
+    useEditorStore.getState().updateLayer("layer_1", { visible: false });
+    expect(useEditorStore.getState().activeScene!.layers![0].visible).toBe(false);
+  });
+
+  it("altera locked para true", () => {
+    const layer = makeSceneLayer("layer_1", { locked: false });
+    useEditorStore.setState({ activeScene: { ...EMPTY_SCENE, layers: [layer] } });
+    useEditorStore.getState().updateLayer("layer_1", { locked: true });
+    expect(useEditorStore.getState().activeScene!.layers![0].locked).toBe(true);
+  });
+
+  it("não altera outras camadas ao atualizar uma", () => {
+    const l1 = makeSceneLayer("l1", { visible: true });
+    const l2 = makeSceneLayer("l2", { visible: true });
+    useEditorStore.setState({ activeScene: { ...EMPTY_SCENE, layers: [l1, l2] } });
+    useEditorStore.getState().updateLayer("l1", { visible: false });
+    expect(useEditorStore.getState().activeScene!.layers![1].visible).toBe(true);
+  });
+});
+
+describe("assignEntityToLayer", () => {
+  it("atribui entidade à camada alvo", () => {
+    const layer = makeSceneLayer("layer_1");
+    useEditorStore.setState({ activeScene: { ...EMPTY_SCENE, layers: [layer] } });
+    useEditorStore.getState().assignEntityToLayer("hero", "layer_1");
+    expect(useEditorStore.getState().activeScene!.layers![0].entity_ids).toContain("hero");
+  });
+
+  it("remove entidade de camadas anteriores ao reatribuir", () => {
+    const l1 = makeSceneLayer("layer_1", { entity_ids: ["hero"] });
+    const l2 = makeSceneLayer("layer_2");
+    useEditorStore.setState({ activeScene: { ...EMPTY_SCENE, layers: [l1, l2] } });
+    useEditorStore.getState().assignEntityToLayer("hero", "layer_2");
+    const layers = useEditorStore.getState().activeScene!.layers!;
+    expect(layers[0].entity_ids).not.toContain("hero");
+    expect(layers[1].entity_ids).toContain("hero");
+  });
+
+  it("remove entidade de todas as camadas ao passar layerId null", () => {
+    const l1 = makeSceneLayer("layer_1", { entity_ids: ["hero"] });
+    const l2 = makeSceneLayer("layer_2", { entity_ids: ["hero"] });
+    useEditorStore.setState({ activeScene: { ...EMPTY_SCENE, layers: [l1, l2] } });
+    useEditorStore.getState().assignEntityToLayer("hero", null);
+    const layers = useEditorStore.getState().activeScene!.layers!;
+    expect(layers[0].entity_ids).not.toContain("hero");
+    expect(layers[1].entity_ids).not.toContain("hero");
   });
 });
 

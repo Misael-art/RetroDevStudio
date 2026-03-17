@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use super::components::Components;
 
-pub const CURRENT_SCHEMA_VERSION: &str = "1.4.0";
+pub const CURRENT_SCHEMA_VERSION: &str = "1.5.0";
 
 fn default_schema_version() -> String {
     CURRENT_SCHEMA_VERSION.to_string()
@@ -147,6 +147,36 @@ impl CollisionMap {
     }
 }
 
+// ── Scene Layer (editor metadata, no codegen impact) ─────────────────────────────
+
+/// Camada de editor (schema 1.5.0+). Agrupa entidades por visibilidade e lock.
+/// Puramente metadado de editor — não afeta codegen nem hardware profiles.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SceneLayer {
+    /// Identificador único da camada (slug, e.g. "layer_sprites").
+    pub id: String,
+    /// Nome exibido no painel de camadas.
+    pub name: String,
+    /// Tipo da camada: "sprite" | "tile" | "background" | "object".
+    pub kind: String,
+    /// Se false, entidades desta camada são omitidas do viewport.
+    #[serde(default = "default_visible")]
+    pub visible: bool,
+    /// Se true, bloqueia edição das entidades no viewport.
+    #[serde(default)]
+    pub locked: bool,
+    /// Ordem visual (z-order). Menor = mais atrás.
+    #[serde(default)]
+    pub depth: u32,
+    /// IDs das entidades atribuídas a esta camada.
+    #[serde(default)]
+    pub entity_ids: Vec<String>,
+}
+
+fn default_visible() -> bool {
+    true
+}
+
 // ── Scene ────────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -166,6 +196,9 @@ pub struct Scene {
     /// Mapa de colisão grid-based (schema 1.4.0+). None = sem mapa de colisão.
     #[serde(default)]
     pub collision_map: Option<CollisionMap>,
+    /// Camadas de editor (schema 1.5.0+). None = sem sistema de camadas.
+    #[serde(default)]
+    pub layers: Option<Vec<SceneLayer>>,
 }
 
 // ── Build Config ──────────────────────────────────────────────────────────────

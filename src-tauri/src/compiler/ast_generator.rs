@@ -2244,6 +2244,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -2326,6 +2327,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -2412,6 +2414,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -2502,6 +2505,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -2566,6 +2570,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -2643,6 +2648,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -2737,6 +2743,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -2829,6 +2836,7 @@ mod tests {
                 ],
             }),
             collision_map: None,
+            layers: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -2948,6 +2956,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -3067,6 +3076,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -3173,6 +3183,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -3275,6 +3286,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -3483,6 +3495,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -3642,6 +3655,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -3758,6 +3772,7 @@ mod tests {
                 palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
 
             let ast = generate_ast(&project, &scene);
@@ -3914,6 +3929,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -4041,6 +4057,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -4136,6 +4153,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -4209,6 +4227,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
 
         let ast = generate_ast(&project, &scene);
@@ -4289,6 +4308,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         };
 
         let ast = generate_ast(&project, &scene);

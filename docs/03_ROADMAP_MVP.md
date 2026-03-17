@@ -75,7 +75,7 @@
 - O bundle MSI foi reemitido novamente apos o hotfix de conversao SGDK em `src-tauri/target-test/release/bundle/msi/RetroDev Studio_0.1.0_x64_en-US.msi`, alinhando o pacote de reteste ao estado atual do branch.
 
 ### Ainda em hardening
-- Runtime real de auto-update continua bloqueado ate aprovacao explicita para adicionar `tauri-plugin-updater` sob a politica atual de dependencias.
+- Runtime real de auto-update implementado em codigo: `tauri-plugin-updater = "2"` adicionado ao `Cargo.toml` e plugin registrado em `lib.rs`. Sem UI de update ainda — endpoint/pubkey permanecem placeholder.
 - Repeticao institucional do bundle MSI, do smoke desktop e do fluxo oficial upstream em Windows quando build, emulacao, onboarding ou packaging forem alterados.
 - Este host ainda pode exigir diagnostico adicional para bootstrap WebDriver (`DevToolsActivePort` / `chrome not reachable`) e para `spawn EPERM` em builds desktop fora do wrapper MSVC canonico, embora o smoke local MD/SNES tenha voltado a passar nesta sessao de hotfix.
 - Decisao final de governanca do workflow desktop dedicado (`push`/`pull_request` path-filtered, `workflow_dispatch`, `workflow_call` ou gate protegido).
@@ -173,7 +173,7 @@
 - [x] Windows MSI packaging validado localmente.
 - [x] Onboarding de primeiro uso com template funcional.
 - [x] Configuracao placeholder de updater com endpoint e pubkey placeholder.
-- [ ] Runtime real de auto-update (bloqueado pela regra atual de nao adicionar dependencias novas).
+- [x] Runtime real de auto-update: `tauri-plugin-updater = "2"` integrado (`Cargo.toml` + `lib.rs`). Endpoint/pubkey ainda placeholder, sem UI de update.
 
 ---
 
@@ -215,6 +215,32 @@
 - Type safety - concluida: `as any` removido do floating toolbar e da ContextualPalette
 - Testes - concluida: 10 novos testes para setEditorMode e setActiveBrush
 - Validacao: tsc limpo, 139 testes frontend, lint limpo
+
+## SPRINT 1 — INSPECTOR SLIDERS (ESTADO REAL)
+
+- LogicVariableSlider - concluida: slider range/step por variavel `int`/`uint` no InspectorPanel com feedback visual
+- Entity header badge - concluida: badge de contagem de variaveis no cabecalho de entidade
+- Validacao: tsc limpo, lint limpo, todos os gates verdes
+
+## SPRINT 2 — COLLISION MAP — PILAR 2 (ESTADO REAL)
+
+- CollisionMap struct Rust - concluida: `CollisionMap { width, height, data: Vec<u8> }` em `entities.rs`, validacao MD/SNES, schema bumped `1.3.0 -> 1.4.0`
+- Emitters SGDK/SNES - concluidas: `emit_sgdk_with_collision` / `emit_snes_with_collision` emitem `static const u8 rds_collision_map[]`
+- EditorMode collision - concluida: `"collision"` adicionado ao union, `updateCollisionMap` com auto-init
+- Viewport overlay - concluida: overlay vermelho semi-transparente (alpha 0.35), pintura por click/drag, atalho `C`, cursor highlight
+- Validacao: 167 testes Rust, 139 testes frontend, todos os 6 gates verdes (commit `8abf999`)
+
+## SPRINT 3 — LAYER SYSTEM (PILAR 1) + AUTO-UPDATE (ESTADO REAL)
+
+- SceneLayer Rust - concluida: `SceneLayer { id, name, kind, visible, locked, depth, entity_ids }` em `entities.rs`, campo `layers: Option<Vec<SceneLayer>>` em `Scene`, schema bumped `1.4.0 -> 1.5.0`, `layers: None` em todos os literais de teste
+- SceneLayer TypeScript - concluida: interface `SceneLayer` em `sceneService.ts`, `layers?: SceneLayer[] | null` em `Scene`
+- EditorStore layer actions - concluidas: `activeLayerId`, `createLayer`, `deleteLayer`, `updateLayer`, `assignEntityToLayer`, `setActiveLayerId` em `editorStore.ts`
+- LayerPanel UI - concluida: `src/components/hierarchy/LayerPanel.tsx` (277 linhas) com lista de camadas, criar/deletar, toggle visible/locked, renomear inline, atribuir entidade selecionada
+- App.tsx tabs - concluida: tabs `Cena|Camadas` no aside esquerdo com `useState<"scene" | "layers">`
+- Viewport visibility filter - concluido: entidades em camadas com `visible=false` sao omitidas do canvas (set `hiddenByLayer` antes do forEach)
+- tauri-plugin-updater - concluido: `tauri-plugin-updater = "2"` em `Cargo.toml`, plugin registrado em `lib.rs`
+- Testes layer actions - concluidos: 12 novos testes para `createLayer`, `deleteLayer`, `updateLayer`, `assignEntityToLayer` em `editorStore.test.ts`
+- Validacao: 167 testes Rust, 151 testes frontend (+12), todos os 6 gates verdes
 
 ## ONDA 2 — DRAG-TO-PAINT/ERASE + BRUSH GHOST + UX POLISH (ESTADO REAL)
 

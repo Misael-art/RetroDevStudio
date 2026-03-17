@@ -170,6 +170,49 @@ O `collision_map` e um mapa tile-a-tile de solideidade da cena, pintado diretame
 **Codegen:** O emitter SGDK emite `static const u8 rds_collision_map[]` antes de `int main()`. O emitter SNES faz o mesmo. Tiles nao declarados (mapa ausente) sao tratados como `0` (livre).
 **Editor:** Atalho `C` ativa o modo `collision` no Viewport. Clique esquerdo = solido (1), clique direito = livre (0). Overlay semi-transparente vermelho indica tiles solidos.
 
+### 4.2 SceneLayer (campo opcional na Scene — schema 1.5.0+)
+
+O `layers` e um array de camadas de editor que agrupa entidades por visibilidade e lock. E opcional e invisivel ao codegen — sua ausencia e equivalente a `layers: []`.
+
+```json
+{
+  "layers": [
+    {
+      "id": "layer_background",
+      "name": "Background",
+      "kind": "tile",
+      "visible": true,
+      "locked": false,
+      "depth": 0,
+      "entity_ids": ["tilemap_bg"]
+    },
+    {
+      "id": "layer_sprites",
+      "name": "Sprites",
+      "kind": "sprite",
+      "visible": true,
+      "locked": false,
+      "depth": 1,
+      "entity_ids": ["player_1", "enemy_01"]
+    }
+  ]
+}
+```
+
+| Campo | Tipo | Descricao |
+|-------|------|-----------|
+| `id` | string | Identificador unico da camada (slug gerado pelo editor). |
+| `name` | string | Nome exibido no LayerPanel. |
+| `kind` | string | Tipo semantico: `"sprite"`, `"tile"`, `"background"`, `"object"`. |
+| `visible` | boolean | Se `false`, entidades desta camada sao omitidas do Viewport Editor. Nao afeta o codegen. |
+| `locked` | boolean | Se `true`, bloqueia edicao de entidades desta camada no Viewport Editor. |
+| `depth` | integer | Ordem visual no LayerPanel (menor = mais atras). |
+| `entity_ids` | array de string | IDs das entidades atribuidas a esta camada. Uma entidade pode estar em no maximo uma camada. |
+
+**Regra:** `entity_ids` referencia IDs de entidades existentes em `scene.entities`. O backend nao valida a consistencia dos ids — e responsabilidade do editor manter a sincronia ao criar/deletar entidades.
+**Codegen:** O campo `layers` e ignorado pelos emitters SGDK e SNES. Nao tem efeito sobre a ROM gerada.
+**Editor:** O `LayerPanel` (tab `Camadas` no aside esquerdo) gerencia criacao/remocao/renomeacao/visibilidade/lock. O `ViewportPanel` omite entidades em camadas com `visible=false` do canvas de cena.
+
 ---
 
 ## 5. SCHEMA: ENTITY (Unidade Basica de Jogo)

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { BackgroundLayer, CollisionMap, Entity, Scene } from "../ipc/sceneService";
+import type { BackgroundLayer, CollisionMap, Entity, Scene, SceneLayer } from "../ipc/sceneService";
 
 const UNDO_STACK_LIMIT = 50;
 
@@ -58,6 +58,8 @@ export interface StoreState {
   activeScenePath: string;
   emulatorLoaded: boolean;
   selectedEntityId: string | null;
+  /** ID da camada ativa no LayerPanel. null = sem camada selecionada. */
+  activeLayerId: string | null;
   activeViewportTab: string;
   consoleEntries: ConsoleEntry[];
   consoleVisible: boolean;
@@ -85,6 +87,15 @@ export interface StoreActions {
   setActiveScenePath: (path: string) => void;
   setEmulatorLoaded: (loaded: boolean) => void;
   setSelectedEntityId: (id: string | null) => void;
+  setActiveLayerId: (id: string | null) => void;
+  /** Cria uma nova camada na cena ativa. */
+  createLayer: (name: string, kind: string) => void;
+  /** Remove uma camada pelo id. Entidades da camada ficam sem camada atribuída. */
+  deleteLayer: (layerId: string) => void;
+  /** Atualiza campos de uma camada (name, visible, locked, depth). */
+  updateLayer: (layerId: string, patch: Partial<SceneLayer>) => void;
+  /** Atribui uma entidade a uma camada (remove-a de outras camadas primeiro). */
+  assignEntityToLayer: (entityId: string, layerId: string | null) => void;
   setActiveViewportTab: (id: string) => void;
   logMessage: (level: ConsoleEntry["level"], message: string) => void;
   clearConsole: () => void;
@@ -353,6 +364,9 @@ export const useEditorStore = create<EditorState>((set) => ({
     })),
   resetHwValidation: () => set({ ...INITIAL_VALIDATION_STATE }),
 
+  activeLayerId: null,
+  setActiveLayerId: (id) => set({ activeLayerId: id }),
+
   activeScene: null,
   activeSceneSource: null,
   setActiveScene: (scene, sourceScene = scene) =>
@@ -595,4 +609,88 @@ export const useEditorStore = create<EditorState>((set) => ({
 
   activeBrush: null,
   setActiveBrush: (brush) => set({ activeBrush: brush }),
+
+  createLayer: (name, kind) =>
+    set((state) => {
+      if (!state.activeScene) return {};
+      const id = `layer_${Date.now()}`;
+      const newLayer: SceneLayer = {
+        id,
+        name,
+        kind,
+        visible: true,
+        locked: false,
+        depth: (state.activeScene.layers?.length ?? 0),
+        entity_ids: [],
+      };
+      const currentLayers = state.activeScene.layers ?? [];
+      const sourceLayers = state.activeSceneSource?.layers ?? currentLayers;
+      return {
+        undoStack: pushHistoryEntry(state.undoStack, createUndoEntry(state)),
+        redoStack: [],
+        pendingHistorySnapshot: null,
+        activeScene: { ...state.activeScene, layers: [...currentLayers, newLayer] },
+        activeSceneSource: state.activeSceneSource
+          ? { ...state.activeSceneSource, layers: [...sourceLayers, structuredClone(newLayer)] }
+          : state.activeSceneSource,
+        sceneRevision: state.sceneRevision + 1,
+      };
+    }),
+
+  deleteLayer: (layerId) =>
+    set((state) => {
+      if (!state.activeScene) return {};
+      const filterLayer = (layers: SceneLayer[] | null | undefined) =>
+        (layers ?? []).filter((l) => l.id !== layerId);
+      return {
+        undoStack: pushHistoryEntry(state.undoStack, createUndoEntry(state)),
+        redoStack: [],
+        pendingHistorySnapshot: null,
+        activeScene: { ...state.activeScene, layers: filterLayer(state.activeScene.layers) },
+        activeSceneSource: state.activeSceneSource
+          ? { ...state.activeSceneSource, layers: filterLayer(state.activeSceneSource.layers) }
+          : state.activeSceneSource,
+        activeLayerId: state.activeLayerId === layerId ? null : state.activeLayerId,
+        sceneRevision: state.sceneRevision + 1,
+      };
+    }),
+
+  updateLayer: (layerId, patch) =>
+    set((state) => {
+      if (!state.activeScene) return {};
+      const applyPatch = (layers: SceneLayer[] | null | undefined): SceneLayer[] =>
+        (layers ?? []).map((l) => (l.id === layerId ? { ...l, ...patch } : l));
+      return {
+        undoStack: pushHistoryEntry(state.undoStack, createUndoEntry(state)),
+        redoStack: [],
+        pendingHistorySnapshot: null,
+        activeScene: { ...state.activeScene, layers: applyPatch(state.activeScene.layers) },
+        activeSceneSource: state.activeSceneSource
+          ? { ...state.activeSceneSource, layers: applyPatch(state.activeSceneSource.layers) }
+          : state.activeSceneSource,
+        sceneRevision: state.sceneRevision + 1,
+      };
+    }),
+
+  assignEntityToLayer: (entityId, layerId) =>
+    set((state) => {
+      if (!state.activeScene) return {};
+      const reassign = (layers: SceneLayer[] | null | undefined): SceneLayer[] =>
+        (layers ?? []).map((l) => ({
+          ...l,
+          entity_ids: l.id === layerId
+            ? [...new Set([...l.entity_ids, entityId])]
+            : l.entity_ids.filter((id) => id !== entityId),
+        }));
+      return {
+        undoStack: pushHistoryEntry(state.undoStack, createUndoEntry(state)),
+        redoStack: [],
+        pendingHistorySnapshot: null,
+        activeScene: { ...state.activeScene, layers: reassign(state.activeScene.layers) },
+        activeSceneSource: state.activeSceneSource
+          ? { ...state.activeSceneSource, layers: reassign(state.activeSceneSource.layers) }
+          : state.activeSceneSource,
+        sceneRevision: state.sceneRevision + 1,
+      };
+    }),
 }));

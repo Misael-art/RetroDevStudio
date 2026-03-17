@@ -1,4 +1,4 @@
-use crate::hardware::HwStatus;
+﻿use crate::hardware::HwStatus;
 use crate::ugdm::entities::Scene;
 
 // Mega Drive Hardware Constraints (doc 04 — imutavel)
@@ -407,6 +407,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         }
     }
 

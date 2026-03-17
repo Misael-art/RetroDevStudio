@@ -1,4 +1,4 @@
-use crate::hardware::HwStatus;
+﻿use crate::hardware::HwStatus;
 use crate::ugdm::entities::Scene;
 
 pub const SNES_VRAM_BYTES: u32 = 65_536;
@@ -389,6 +389,7 @@ mod tests {
             palettes: Vec::new(),
             retrofx: None,
             collision_map: None,
+            layers: None,
         }
     }
 
