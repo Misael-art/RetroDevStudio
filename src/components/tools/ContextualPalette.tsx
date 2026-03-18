@@ -64,21 +64,16 @@ function PaletteItem({
     <button
       onClick={onSelect}
       disabled={!item.paintable}
-      className={`group flex flex-col items-center gap-1.5 p-2 rounded-lg border transition-all ${
+      className={`group/card relative flex flex-col items-center gap-1 p-1.5 rounded border transition-all ${
         isActive
           ? "bg-[#89b4fa]/20 border-[#89b4fa]"
           : item.paintable
             ? "bg-[#181825] border-[#313244] hover:border-[#45475a]"
             : "bg-[#181825] border-[#313244] opacity-50 cursor-not-allowed"
       }`}
-      title={
-        item.paintable
-          ? `Clique para selecionar: ${item.assetPath}`
-          : `${item.assetPath} (nao pintavel)`
-      }
     >
       <div
-        className={`w-12 h-12 rounded flex items-center justify-center overflow-hidden ${
+        className={`flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded bg-black/20 ${
           isActive ? "ring-1 ring-[#89b4fa]" : ""
         }`}
       >
@@ -86,22 +81,25 @@ function PaletteItem({
           <img
             src={thumbnailUrl}
             alt={item.label}
-            className="w-full h-full object-contain"
+            className="h-8 w-8 object-contain"
             style={{ imageRendering: "pixelated" }}
           />
         ) : (
-          <span className={`text-xl ${isActive ? "text-[#89b4fa]" : "text-[#7f849c]"}`}>
+          <span className={`text-base ${isActive ? "text-[#89b4fa]" : "text-[#7f849c]"}`}>
             {CATEGORY_META[item.category].icon}
           </span>
         )}
       </div>
       <span
-        className={`text-[10px] truncate w-full text-center ${
+        className={`min-w-0 w-full truncate text-center text-[9px] ${
           isActive ? "text-[#cdd6f4] font-semibold" : "text-[#a6adc8]"
         }`}
       >
         {item.label}
       </span>
+      <div className="pointer-events-none absolute left-1/2 top-full z-10 mt-1 max-w-48 -translate-x-1/2 rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[9px] text-[#a6adc8] opacity-0 shadow-lg transition-opacity duration-150 group-hover/card:opacity-100">
+        {item.paintable ? `Clique para selecionar: ${item.assetPath}` : `${item.assetPath} (não pintável)`}
+      </div>
     </button>
   );
 }
@@ -110,10 +108,13 @@ function PaletteItem({
 
 export default function ContextualPalette() {
   const activeProjectDir = useEditorStore((s) => s.activeProjectDir);
+  const activeViewportTab = useEditorStore((s) => s.activeViewportTab);
   const activeBrush = useEditorStore((s) => s.activeBrush);
   const editorMode = useEditorStore((s) => s.editorMode);
   const setActiveBrush = useEditorStore((s) => s.setActiveBrush);
   const setEditorMode = useEditorStore((s) => s.setEditorMode);
+
+  const isSceneTab = activeViewportTab === "scene";
 
   const [assets, setAssets] = useState<ProjectAssetEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -209,43 +210,57 @@ export default function ContextualPalette() {
     collision: "Colis\u00e3o",
   };
 
+  if (!isSceneTab) {
+    return (
+      <div className="flex flex-col h-full items-center justify-center bg-[#1e1e2e] p-6 text-center">
+        <p className="text-[11px] font-semibold text-[#7f849c]">
+          Abra a aba Cena para usar a paleta
+        </p>
+        <p className="mt-2 text-[10px] text-[#45475a] leading-relaxed">
+          A paleta de sprites, prefabs e o modo colisão estão disponíveis apenas quando a aba &quot;SC Cena&quot; está ativa no viewport.
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex flex-col h-full bg-[#1e1e2e]">
-      <div className="p-3 border-b border-[#313244]">
+    <div className="flex flex-col h-full min-h-0 bg-[#1e1e2e] overflow-x-hidden">
+      <div className="shrink-0 border-b border-[#313244] px-3 py-2">
         <h3 className="text-[10px] font-bold text-[#7f849c] uppercase tracking-wider">
           Paleta de Assets
         </h3>
-        <p className="text-[9px] text-[#45475a] mt-1">
-          Selecione um sprite ou prefab para pintar na cena. Atalhos: V/B/E.
+        <p className="text-[9px] text-[#45475a] mt-0.5">
+          Selecione um sprite ou prefab para pintar. Atalhos: V/B/E.
         </p>
       </div>
 
-      {/* ── Collision section ─────────────────────────────────────── */}
-      <div className="p-3 border-b border-[#313244]">
-        <p className="text-[9px] font-bold text-[#7f849c] uppercase tracking-wider mb-2">
-          🛡️ Colisão
-        </p>
-        <button
-          type="button"
-          onClick={() => setEditorMode(editorMode === "collision" ? "select" : "collision")}
-          className={`w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded border text-[10px] font-semibold transition-colors ${
-            editorMode === "collision"
-              ? "bg-[#f38ba8]/20 border-[#f38ba8] text-[#f38ba8]"
-              : "bg-[#181825] border-[#313244] text-[#a6adc8] hover:border-[#45475a]"
-          }`}
-          title="Ativar modo de colisão (atalho: C)"
-        >
-          <span>{editorMode === "collision" ? "\u25a0" : "\u25a1"}</span>
-          <span>{editorMode === "collision" ? "Sair do modo colisão" : "Modo colisão"}</span>
-        </button>
+      {/* ── Collision toggle ─────────────────────────────────────── */}
+      <div className="shrink-0 border-b border-[#313244] px-3 py-2">
+        <div className="relative group/toggle">
+          <button
+            type="button"
+            onClick={() => setEditorMode(editorMode === "collision" ? "select" : "collision")}
+            className={`flex w-full items-center justify-center gap-1.5 rounded px-2 py-1.5 text-[10px] font-semibold transition-all ${
+              editorMode === "collision"
+                ? "bg-[#f38ba8]/25 border border-[#f38ba8] text-[#f38ba8] shadow-sm"
+                : "border border-[#313244] bg-[#181825] text-[#a6adc8] hover:border-[#45475a] hover:bg-[#313244]/50"
+            }`}
+          >
+            <span className="text-[12px]">{editorMode === "collision" ? "\u25a0" : "\u25a1"}</span>
+            <span>{editorMode === "collision" ? "Sair do modo colisão" : "Modo colisão"}</span>
+          </button>
+          <div className="pointer-events-none absolute left-1/2 top-full z-20 mt-1 -translate-x-1/2 whitespace-nowrap rounded border border-[#313244] bg-[#11111b] px-2 py-1.5 text-[9px] text-[#a6adc8] opacity-0 shadow-lg transition-opacity duration-150 group-hover/toggle:opacity-100">
+            Ativar modo de colisão (atalho: C)
+          </div>
+        </div>
         {editorMode === "collision" && (
-          <p className="text-[9px] text-[#f38ba8]/70 mt-1.5 leading-snug">
+          <p className="text-[9px] text-[#f38ba8]/70 mt-1 leading-snug">
             👉 Esq: sólido · Dir: livre · Esc: sair
           </p>
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3">
+      <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-3">
         {loading && (
           <p className="text-[10px] text-[#89b4fa]">Carregando assets...</p>
         )}
@@ -281,7 +296,7 @@ export default function ContextualPalette() {
                 <span className="ml-auto font-mono text-[#45475a] normal-case">{items.length}</span>
               </button>
               {!isCollapsed && (
-                <div className="grid grid-cols-2 gap-2 mt-1">
+                <div className="grid grid-cols-2 gap-1.5 mt-1">
                   {items.map((item) => (
                     <PaletteItem
                       key={item.id}
@@ -297,7 +312,7 @@ export default function ContextualPalette() {
         })}
       </div>
 
-      <div className="p-3 bg-[#181825] border-t border-[#313244]">
+      <div className="mt-auto shrink-0 border-t border-[#313244] bg-[#1e1e2e] px-3 py-2">
         <div className="flex items-center justify-between text-[10px] text-[#7f849c]">
           <span>Modo: <span
             className={`font-mono uppercase ${
@@ -315,7 +330,7 @@ export default function ContextualPalette() {
           )}
         </div>
         {activeBrush && (
-          <p className="text-[9px] text-[#45475a] mt-1 truncate" title={activeBrush.assetPath ?? activeBrush.id}>
+          <p className="mt-1 min-w-0 truncate text-[9px] text-[#45475a]" title={activeBrush.assetPath ?? activeBrush.id}>
             Brush: {displayLabel(activeBrush.assetPath ?? activeBrush.id)}
           </p>
         )}

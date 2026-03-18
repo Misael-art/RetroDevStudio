@@ -31,7 +31,10 @@ export default function LayerPanel() {
     createLayer,
     deleteLayer,
     updateLayer,
+    moveLayerUp,
+    moveLayerDown,
     assignEntityToLayer,
+    setEditorMode,
     logMessage,
   } = useEditorStore();
 
@@ -62,8 +65,27 @@ export default function LayerPanel() {
     void persistAfter(() => updateLayer(layer.id, { locked: !layer.locked }));
   }
 
-  function handleSelectLayer(layerId: string) {
-    setActiveLayerId(activeLayerId === layerId ? null : layerId);
+  function handleSelectLayer(layer: SceneLayer) {
+    const isNewSelection = activeLayerId !== layer.id;
+    setActiveLayerId(isNewSelection ? layer.id : null);
+    
+    if (isNewSelection) {
+      if (layer.kind === "collision") {
+        setEditorMode("collision");
+      } else if (layer.kind === "sprite" || layer.kind === "tile") {
+        setEditorMode("paint");
+      }
+    }
+  }
+
+  function handleMoveUp(e: React.MouseEvent, layerId: string) {
+    e.stopPropagation();
+    void persistAfter(() => moveLayerUp(layerId));
+  }
+
+  function handleMoveDown(e: React.MouseEvent, layerId: string) {
+    e.stopPropagation();
+    void persistAfter(() => moveLayerDown(layerId));
   }
 
   function handleStartRename(layer: SceneLayer) {
@@ -181,13 +203,30 @@ export default function LayerPanel() {
         {[...layers].sort((a, b) => b.depth - a.depth).map((layer) => (
           <div
             key={layer.id}
-            onClick={() => handleSelectLayer(layer.id)}
+            onClick={() => handleSelectLayer(layer)}
             className={`group flex cursor-pointer items-center gap-1 border-b border-[#313244] px-2 py-1 transition-colors ${
               activeLayerId === layer.id
-                ? "bg-[#313244]"
+                ? "bg-[#313244] ring-1 ring-inset ring-[#89b4fa]/30"
                 : "hover:bg-[#1e1e2e]"
             }`}
           >
+            {/* Reorder buttons */}
+            <div className="flex flex-col gap-0.5 mr-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button
+                onClick={(e) => handleMoveUp(e, layer.id)}
+                className="text-[8px] hover:text-[#89b4fa]"
+                title="Mover para cima (Frente)"
+              >
+                ▲
+              </button>
+              <button
+                onClick={(e) => handleMoveDown(e, layer.id)}
+                className="text-[8px] hover:text-[#89b4fa]"
+                title="Mover para baixo (Trás)"
+              >
+                ▼
+              </button>
+            </div>
             {/* Visible toggle */}
             <button
               onClick={(e) => { e.stopPropagation(); handleToggleVisible(layer); }}

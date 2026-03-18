@@ -37,7 +37,8 @@ RetroDevStudio/
 |   |-- 06_AI_MEMORY_BANK.md
 |   |-- 07_TEST_AND_COMPLIANCE.md
 |   |-- 08_TREE_ARCHITECTURE.md
-|   `-- 09_AGENT_DEV_MODE.md
+|   |-- 09_AGENT_DEV_MODE.md
+|   `-- 10_QA_ROTEIRO_RC.md
 |
 |-- src/
 |   |-- App.tsx
@@ -51,6 +52,8 @@ RetroDevStudio/
 |   |-- core/
 |   |   |-- ipc/
 |   |   `-- store/
+|   |-- test/
+|   |   `-- setup.ts
 |   `-- views/
 |
 |-- src-tauri/
@@ -92,10 +95,11 @@ RetroDevStudio/
 |
 |-- scripts/
 |   |-- bootstrap.ps1
+|   |-- build.mjs
 |   |-- check-tree.cjs
+|   |-- create-icon.mjs
 |   |-- diagnose-desktop-e2e.ps1
-|   |-- e2e-tauri-build-run.mjs
-|   `-- create-icon.mjs
+|   `-- e2e-tauri-build-run.mjs
 |
 `-- toolchains/
     |-- sgdk/
@@ -127,6 +131,7 @@ RetroDevStudio/
 - `prefabs/` e `graphs/` sao diretorios de projeto gerados dentro de cada workspace `.rds` do usuario; nao vivem na raiz do repositorio e devem continuar sendo tratados como dados do projeto, nao como modulos do app.
 - Projetos SGDK externos podem conter um subdiretorio `rds/` (overlay) com `project.rds`, `scenes/`, `graphs/`, `prefabs/` e junctions NTFS para `assets/` e `build/`. O backend faz discovery de `project.rds` em subdiretorios de primeiro nivel quando nao encontra na raiz. Ver `docs/05_ARCHITECTURE_UGDM.md` secao 10.
 - O caminho SNES real usa staging de asset no workspace e gera `hdr.asm`, `data.asm` e regras `gfx4snes`.
+- `scripts/build.mjs` e o script canonico de compilacao: gera MSI, EXE Debug e EXE Portable. Uso: `node scripts/build.mjs <debug|msi|portable|all>`. Scripts npm: `build:debug`, `build:msi`, `build:portable`, `build:all`. O `build-test.bat` e um wrapper legado que chama `build.mjs debug`.
 - `scripts/e2e-tauri-build-run.mjs` e o runner canonico de regressao desktop/Tauri para `Build -> Load ROM -> Run frames`.
 - `.github/workflows/desktop-e2e.yml` e o workflow canonico de regressao desktop em Windows e ja foi validado em runner GitHub real.
 - `toolchains/libretro/cores/` e o local canonico dos DLLs de core baixados do upstream oficial.

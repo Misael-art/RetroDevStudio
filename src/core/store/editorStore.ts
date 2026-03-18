@@ -94,6 +94,10 @@ export interface StoreActions {
   deleteLayer: (layerId: string) => void;
   /** Atualiza campos de uma camada (name, visible, locked, depth). */
   updateLayer: (layerId: string, patch: Partial<SceneLayer>) => void;
+  /** Move a camada para cima na profundidade (renderiza sobre as outras). */
+  moveLayerUp: (layerId: string) => void;
+  /** Move a camada para baixo na profundidade (renderiza atrás das outras). */
+  moveLayerDown: (layerId: string) => void;
   /** Atribui uma entidade a uma camada (remove-a de outras camadas primeiro). */
   assignEntityToLayer: (entityId: string, layerId: string | null) => void;
   setActiveViewportTab: (id: string) => void;
@@ -596,10 +600,10 @@ export const useEditorStore = create<EditorState>((set) => ({
   emulPaused: false,
   setEmulPaused: (paused) => set({ emulPaused: paused }),
 
-  viewportZoom: 1.0,
+  viewportZoom: 1.75,
   setViewportZoom: (zoom) =>
     set({ viewportZoom: Math.min(4.0, Math.max(0.25, zoom)) }),
-  resetViewportZoom: () => set({ viewportZoom: 1.0 }),
+  resetViewportZoom: () => set({ viewportZoom: 1.75 }),
 
   projectSourceKind: "",
   setProjectSourceKind: (kind) => set({ projectSourceKind: kind }),
@@ -668,6 +672,46 @@ export const useEditorStore = create<EditorState>((set) => ({
         activeSceneSource: state.activeSceneSource
           ? { ...state.activeSceneSource, layers: applyPatch(state.activeSceneSource.layers) }
           : state.activeSceneSource,
+        sceneRevision: state.sceneRevision + 1,
+      };
+    }),
+  
+  moveLayerUp: (layerId) =>
+    set((state) => {
+      if (!state.activeScene) return {};
+      const layers = [...(state.activeScene.layers ?? [])].sort((a, b) => a.depth - b.depth);
+      const idx = layers.findIndex(l => l.id === layerId);
+      if (idx === -1 || idx === layers.length - 1) return {};
+
+      // Swap depth with the layer above it
+      const tempDepth = layers[idx].depth;
+      layers[idx].depth = layers[idx + 1].depth;
+      layers[idx + 1].depth = tempDepth;
+
+      return {
+        undoStack: pushHistoryEntry(state.undoStack, createUndoEntry(state)),
+        redoStack: [],
+        activeScene: { ...state.activeScene, layers },
+        sceneRevision: state.sceneRevision + 1,
+      };
+    }),
+
+  moveLayerDown: (layerId) =>
+    set((state) => {
+      if (!state.activeScene) return {};
+      const layers = [...(state.activeScene.layers ?? [])].sort((a, b) => a.depth - b.depth);
+      const idx = layers.findIndex(l => l.id === layerId);
+      if (idx <= 0) return {};
+
+      // Swap depth with the layer below it
+      const tempDepth = layers[idx].depth;
+      layers[idx].depth = layers[idx - 1].depth;
+      layers[idx - 1].depth = tempDepth;
+
+      return {
+        undoStack: pushHistoryEntry(state.undoStack, createUndoEntry(state)),
+        redoStack: [],
+        activeScene: { ...state.activeScene, layers },
         sceneRevision: state.sceneRevision + 1,
       };
     }),

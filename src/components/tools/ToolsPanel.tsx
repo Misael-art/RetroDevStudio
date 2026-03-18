@@ -100,7 +100,25 @@ function PathField({
   );
 }
 
-export function ExperimentalNotice({ summary }: { summary: string }) {
+export function ExperimentalNotice({
+  summary,
+  compact = false,
+}: {
+  summary: string;
+  compact?: boolean;
+}) {
+  if (compact) {
+    return (
+      <div className="flex shrink-0 items-center gap-2 border-b border-[#313244] bg-[#181825]/80 px-2 py-1">
+        <span className="rounded border border-[#fab387] px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-[#fab387]">
+          Experimental
+        </span>
+        <span className="min-w-0 truncate text-[9px] text-[#7f849c]" title={summary}>
+          {summary}
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="rounded border border-[#fab387] bg-[#181825] p-2">
       <div className="flex items-center gap-2">
@@ -665,22 +683,25 @@ function AssetTreeView({
     <button
       type="button"
       onClick={() => onSelect(asset)}
-      className="flex w-full items-center gap-2 rounded py-0.5 text-left text-[10px] text-[#cdd6f4] transition-colors hover:bg-[#313244]"
+      className="flex min-w-0 w-full items-center gap-2 rounded py-0.5 text-left text-[10px] text-[#cdd6f4] transition-colors hover:bg-[#313244]"
       style={{ paddingLeft: `${depth * 12 + 4}px` }}
       title={asset.relative_path}
     >
       {preview ? (
-        <img
-          src={preview}
-          alt={node.name}
-          className="h-4 w-4 shrink-0 rounded object-cover"
-        />
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded bg-black/20">
+          <img
+            src={preview}
+            alt={node.name}
+            className="h-6 w-6 object-contain"
+            style={{ imageRendering: "pixelated" }}
+          />
+        </div>
       ) : (
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded bg-[#313244] text-[8px] font-bold text-[#89b4fa]">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-[#313244] text-[8px] font-bold text-[#89b4fa]">
           {asset.kind === "audio" ? "A" : "F"}
         </span>
       )}
-      <span className="truncate">{node.name}</span>
+      <span className="min-w-0 truncate">{node.name}</span>
       <span className="ml-auto shrink-0 rounded bg-[#313244] px-1 py-0.5 text-[8px] uppercase text-[#7f849c]">
         {asset.kind}
       </span>
@@ -856,11 +877,14 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
   }
 
   return (
-    <div className="flex flex-col gap-3 p-3">
-      <ExperimentalNotice summary="Catalogo visual dos assets do projeto ativo. Duplo clique foca referencias existentes ou instancia imagens na cena ativa quando ainda nao houver uso." />
+    <div className="flex min-h-0 flex-col gap-2 overflow-x-hidden p-3">
+      <ExperimentalNotice
+        compact
+        summary="Catalogo visual dos assets. Duplo clique foca referencias ou instancia imagens na cena."
+      />
 
-      <div className="flex items-center justify-between rounded bg-[#1e1e2e] px-3 py-2">
-        <span className="text-[10px] text-[#7f849c]">
+      <div className="flex shrink-0 items-center justify-between gap-2 overflow-hidden rounded bg-[#1e1e2e] px-3 py-2">
+        <span className="min-w-0 truncate text-[10px] text-[#7f849c]" title={activeProjectDir || "(nenhum)"}>
           Projeto: <span className="font-mono text-[#cdd6f4]">{activeProjectDir || "(nenhum)"}</span>
         </span>
         <div className="flex items-center gap-2">
@@ -894,7 +918,7 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
       )}
 
       {viewMode === "tree" && assets.length > 0 && (
-        <div className="flex flex-col gap-0.5 rounded border border-[#313244] bg-[#11111b] p-2">
+        <div className="scrollbar-thin min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden rounded border border-[#313244] bg-[#11111b] p-2">
           <AssetTreeView
             node={assetTree}
             collapsed={treeCollapsed}
@@ -915,16 +939,18 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
       {viewMode === "tree" && selectedTreeAsset && (
         <div className="flex flex-col gap-2 rounded border border-[#cba6f7]/30 bg-[#1e1e2e] p-3">
           {assetPreviewUrl(selectedTreeAsset) && (
-            <div className="flex h-24 items-center justify-center overflow-hidden rounded bg-[#11111b]">
+            <div className="flex h-24 w-full items-center justify-center overflow-hidden rounded bg-black/20">
               <img
                 src={assetPreviewUrl(selectedTreeAsset)!}
                 alt={selectedTreeAsset.relative_path}
-                className="h-full w-full object-contain"
+                className="h-full w-full max-h-24 max-w-full object-contain"
                 style={{ imageRendering: "pixelated" }}
               />
             </div>
           )}
-          <p className="break-all font-mono text-[10px] text-[#cdd6f4]">{selectedTreeAsset.relative_path}</p>
+          <p className="min-w-0 truncate font-mono text-[10px] text-[#cdd6f4]" title={selectedTreeAsset.relative_path}>
+            {selectedTreeAsset.relative_path}
+          </p>
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -947,7 +973,9 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
         </div>
       )}
 
-      {viewMode === "grid" && <div className="grid grid-cols-2 gap-2">
+      {viewMode === "grid" && (
+        <div className="scrollbar-thin min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="grid grid-cols-2 gap-2 p-2">
         {assets.map((asset) => {
           const preview = assetPreviewUrl(asset);
           const matches = references.get(asset.relative_path) ?? [];
@@ -966,9 +994,14 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
               className="flex min-h-28 flex-col gap-2 rounded border border-[#313244] bg-[#1e1e2e] p-2 text-left transition-colors hover:border-[#cba6f7]"
               title={`${asset.relative_path}${matches.length > 0 ? `\nReferencias: ${matches.map((match) => match.label).join(", ")}` : ""}`}
             >
-              <div className="flex h-16 items-center justify-center overflow-hidden rounded bg-[#11111b]">
+              <div className="flex h-16 w-full shrink-0 items-center justify-center overflow-hidden rounded bg-black/20">
                 {preview ? (
-                  <img src={preview} alt={asset.relative_path} className="h-full w-full object-contain" />
+                  <img
+                    src={preview}
+                    alt={asset.relative_path}
+                    className="h-14 w-14 object-contain"
+                    style={{ imageRendering: "pixelated" }}
+                  />
                 ) : (
                   <span className="text-lg font-bold text-[#89b4fa]">
                     {asset.kind === "audio" ? "AUD" : "FILE"}
@@ -983,7 +1016,7 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
                   <span className="text-[9px] text-[#a6e3a1]">{matches.length} ref.</span>
                 )}
               </div>
-              <p className="line-clamp-2 break-all font-mono text-[10px] text-[#cdd6f4]">
+              <p className="min-w-0 truncate font-mono text-[10px] text-[#cdd6f4]" title={asset.relative_path}>
                 {asset.relative_path}
               </p>
               <div className="mt-auto flex items-center gap-2">
@@ -1014,7 +1047,9 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
             </div>
           );
         })}
-      </div>}
+        </div>
+        </div>
+      )}
 
       {!busy && assets.length === 0 && (
         <p className="text-[10px] text-[#45475a]">Nenhum asset encontrado em `assets/`.</p>
@@ -1282,6 +1317,37 @@ function formatAscii(value: number): string {
   return value >= 32 && value <= 126 ? String.fromCharCode(value) : ".";
 }
 
+function parseSearchToBytes(query: string): number[] | null {
+  const trimmed = query.trim();
+  if (!trimmed) return null;
+
+  const hexMatch = trimmed.match(/^[0-9a-fA-F\s]+$/);
+  if (hexMatch) {
+    const hexParts = trimmed.split(/\s+/).filter(Boolean);
+    const bytes: number[] = [];
+    for (const part of hexParts) {
+      if (part.length === 1) {
+        const n = parseInt(part, 16);
+        if (Number.isNaN(n)) return null;
+        bytes.push(n);
+      } else if (part.length === 2) {
+        const n = parseInt(part, 16);
+        if (Number.isNaN(n)) return null;
+        bytes.push(n);
+      } else {
+        for (let i = 0; i < part.length; i += 2) {
+          const n = parseInt(part.slice(i, i + 2), 16);
+          if (Number.isNaN(n)) return null;
+          bytes.push(n);
+        }
+      }
+    }
+    return bytes.length > 0 ? bytes : null;
+  }
+
+  return [...trimmed].map((c) => c.charCodeAt(0) & 0xff);
+}
+
 function MemoryViewer() {
   const { logMessage } = useEditorStore();
   const [region, setRegion] = useState<number>(2);
@@ -1293,6 +1359,11 @@ function MemoryViewer() {
   const [data, setData] = useState<number[]>([]);
   const [totalSize, setTotalSize] = useState(0);
   const [lastOffset, setLastOffset] = useState(0);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [highlightRowIndex, setHighlightRowIndex] = useState<number | null>(null);
+  const [lastSearchFrom, setLastSearchFrom] = useState(0);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const rowRefsRef = useRef<Map<number, HTMLDivElement>>(new Map());
   const inFlightRef = useRef(false);
 
   async function readMemory(silent = false) {
@@ -1318,6 +1389,8 @@ function MemoryViewer() {
       setData(result.data);
       setTotalSize(result.total_size);
       setLastOffset(offset);
+      setLastSearchFrom(0);
+      setHighlightRowIndex(null);
       setError(null);
       if (!silent) {
         logMessage(
@@ -1347,6 +1420,53 @@ function MemoryViewer() {
 
     return () => window.clearInterval(intervalId);
   }, [autoRefresh, region, offsetHex, lengthHex]);
+
+  function findNextMatch(): number | null {
+    const pattern = parseSearchToBytes(searchQuery);
+    if (!pattern || pattern.length === 0 || data.length === 0) return null;
+
+    for (let i = lastSearchFrom; i <= data.length - pattern.length; i += 1) {
+      let match = true;
+      for (let j = 0; j < pattern.length; j += 1) {
+        if (data[i + j] !== pattern[j]) {
+          match = false;
+          break;
+        }
+      }
+      if (match) return i;
+    }
+    for (let i = 0; i < lastSearchFrom && i <= data.length - pattern.length; i += 1) {
+      let match = true;
+      for (let j = 0; j < pattern.length; j += 1) {
+        if (data[i + j] !== pattern[j]) {
+          match = false;
+          break;
+        }
+      }
+      if (match) return i;
+    }
+    return null;
+  }
+
+  function handleSearchNext() {
+    const pattern = parseSearchToBytes(searchQuery);
+    if (!pattern || pattern.length === 0) {
+      logMessage("warn", "[Memory] Digite um valor hex (ex: FF 00) ou texto para buscar.");
+      return;
+    }
+    const found = findNextMatch();
+    if (found === null) {
+      setHighlightRowIndex(null);
+      logMessage("info", "[Memory] Padrao nao encontrado.");
+      return;
+    }
+    const rowIndex = Math.floor(found / 16);
+    setHighlightRowIndex(rowIndex);
+    setLastSearchFrom(found + 1);
+    const rowEl = rowRefsRef.current.get(rowIndex);
+    rowEl?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    logMessage("info", `[Memory] Encontrado em offset 0x${formatHex(lastOffset + found, 4)}.`);
+  }
 
   const rows: { address: string; bytes: string; ascii: string }[] = [];
   for (let index = 0; index < data.length; index += 16) {
@@ -1438,19 +1558,54 @@ function MemoryViewer() {
         </div>
       )}
 
+      <div className="flex flex-wrap items-end gap-2 border-b border-[#313244] pb-2">
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] text-[#7f849c]">Buscar (Hex ou Texto)</label>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                handleSearchNext();
+              }
+            }}
+            placeholder="Ex: FF 00 ou LIVES"
+            className="w-40 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-xs font-mono text-[#cdd6f4] focus:border-[#f9e2af] focus:outline-none"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={handleSearchNext}
+          disabled={data.length === 0 || busy}
+          className="rounded border border-[#89b4fa]/40 bg-[#89b4fa]/10 px-2 py-1 text-[10px] font-semibold text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Procurar Proximo
+        </button>
+      </div>
+
       <div className="rounded border border-[#313244] bg-[#11111b]">
         <div className="flex items-center gap-4 border-b border-[#313244] px-3 py-2 text-[10px] uppercase tracking-wide text-[#45475a]">
           <span className="w-20 shrink-0">Address</span>
           <span className="flex-1">Hex</span>
           <span className="w-20 shrink-0">ASCII</span>
         </div>
-        <div className="max-h-72 overflow-y-auto px-3 py-2">
+        <div ref={scrollContainerRef} className="max-h-72 overflow-y-auto px-3 py-2">
           {rows.length === 0 ? (
             <p className="text-[10px] text-[#45475a]">Nenhum byte carregado.</p>
           ) : (
             <div className="flex flex-col gap-1 font-mono text-[11px] text-[#cdd6f4]">
-              {rows.map((row) => (
-                <div key={row.address} className="flex items-start gap-4 whitespace-pre">
+              {rows.map((row, rowIndex) => (
+                <div
+                  key={row.address}
+                  ref={(el) => {
+                    if (el) rowRefsRef.current.set(rowIndex, el);
+                  }}
+                  className={`flex items-start gap-4 whitespace-pre rounded px-1 py-0.5 ${
+                    highlightRowIndex === rowIndex ? "bg-[#f9e2af]/25 ring-1 ring-[#f9e2af]/60" : ""
+                  }`}
+                >
                   <span className="w-20 shrink-0 text-[#f9e2af]">{row.address}</span>
                   <span className="flex-1 text-[#a6e3a1]">{row.bytes}</span>
                   <span className="w-20 shrink-0 text-[#89b4fa]">{row.ascii}</span>

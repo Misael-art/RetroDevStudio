@@ -1139,6 +1139,7 @@ describe("App build flow", () => {
     await act(async () => {
       useEditorStore.setState({
         activeViewportTab: "scene",
+        viewportZoom: 1.0,
         selectedEntityId: "hero",
         activeScene: {
           scene_id: "main_scene",

@@ -444,16 +444,33 @@ const NODE_PARAM_DISPLAY_NAMES: Record<string, string> = {
   y: "Y",
 };
 
-const NODE_PALETTE_GROUPS: Array<{ label: string; types: NodeType[] }> = [
-  { label: "Eventos", types: ["event_start", "event_vblank", "event_hblank", "event_dma_done"] },
-  { label: "Movimento", types: ["sprite_move", "sprite_anim", "scroll_tilemap", "move_camera"] },
-  { label: "Condicoes", types: ["condition_overlap", "condition_compare", "logic_and"] },
-  { label: "Som", types: ["action_sound"] },
-  { label: "Variaveis", types: ["var_set", "var_get", "logic_math"] },
-  { label: "Fluxo", types: ["flow_if", "flow_while", "flow_for"] },
-  { label: "Estados", types: ["fsm_state", "fsm_transition", "timeline_sequence"] },
-  { label: "Efeitos", types: ["effect_parallax", "effect_raster"] },
+const NODE_PALETTE_GROUPS: Array<{ label: string; icon: string; types: NodeType[] }> = [
+  { label: "Eventos", icon: "\u26a1", types: ["event_start", "event_vblank", "event_hblank", "event_dma_done"] },
+  { label: "Movimento", icon: "\ud83c\udfc3", types: ["sprite_move", "sprite_anim", "scroll_tilemap", "move_camera"] },
+  { label: "Condicoes", icon: "?", types: ["condition_overlap", "condition_compare", "logic_and"] },
+  { label: "Som", icon: "\ud83d\udd0a", types: ["action_sound"] },
+  { label: "Variaveis", icon: "\ud83d\udcca", types: ["var_set", "var_get", "logic_math"] },
+  { label: "Fluxo", icon: "\u2937", types: ["flow_if", "flow_while", "flow_for"] },
+  { label: "Estados", icon: "\u2690\ufe0f", types: ["fsm_state", "fsm_transition", "timeline_sequence"] },
+  { label: "Efeitos", icon: "\u2728", types: ["effect_parallax", "effect_raster"] },
 ];
+
+/** Header background por categoria (Blueprints-style) */
+const GROUP_HEADER_BG: Record<string, string> = {
+  Eventos: "bg-[#722f37]",
+  Movimento: "bg-[#1e3a5f]",
+  Condicoes: "bg-[#4a4a3a]",
+  Som: "bg-[#6b5b2a]",
+  Variaveis: "bg-[#4a4a3a]",
+  Fluxo: "bg-[#6b5b2a]",
+  Estados: "bg-[#5c4a7a]",
+  Efeitos: "bg-[#5c4a7a]",
+};
+
+function getGroupForType(type: NodeType): string {
+  const group = NODE_PALETTE_GROUPS.find((g) => g.types.includes(type));
+  return group?.label ?? "Outros";
+}
 
 export function getNodeDisplayName(type: NodeType): string {
   return NODE_DISPLAY_NAMES[type] ?? type;
@@ -462,32 +479,6 @@ export function getNodeDisplayName(type: NodeType): string {
 function getNodeParamDisplayName(key: string): string {
   return NODE_PARAM_DISPLAY_NAMES[key] ?? key;
 }
-
-const NODE_COLORS: Record<NodeType, string> = {
-  event_start:       "border-[#a6e3a1] bg-[#a6e3a1]/10",
-  sprite_move:       "border-[#89b4fa] bg-[#89b4fa]/10",
-  sprite_anim:       "border-[#89b4fa] bg-[#89b4fa]/10",
-  condition_overlap: "border-[#fab387] bg-[#fab387]/10",
-  effect_parallax:   "border-[#cba6f7] bg-[#cba6f7]/10",
-  effect_raster:     "border-[#cba6f7] bg-[#cba6f7]/10",
-  logic_and:         "border-[#f38ba8] bg-[#f38ba8]/10",
-  action_sound:      "border-[#f9e2af] bg-[#f9e2af]/10",
-  scroll_tilemap:    "border-[#94e2d5] bg-[#94e2d5]/10",
-  move_camera:       "border-[#f9e2af] bg-[#f9e2af]/10",
-  var_set:           "border-[#cba6f7] bg-[#cba6f7]/10",
-  var_get:           "border-[#cba6f7] bg-[#cba6f7]/10",
-  logic_math:        "border-[#f38ba8] bg-[#f38ba8]/10",
-  condition_compare: "border-[#fab387] bg-[#fab387]/10",
-  fsm_state:         "border-[#74c7ec] bg-[#74c7ec]/10",
-  fsm_transition:    "border-[#94e2d5] bg-[#94e2d5]/10",
-  flow_if:           "border-[#f9e2af] bg-[#f9e2af]/10",
-  flow_while:        "border-[#89dceb] bg-[#89dceb]/10",
-  flow_for:          "border-[#b4befe] bg-[#b4befe]/10",
-  timeline_sequence: "border-[#f5c2e7] bg-[#f5c2e7]/10",
-  event_vblank:      "border-[#a6e3a1] bg-[#a6e3a1]/10",
-  event_hblank:      "border-[#94e2d5] bg-[#94e2d5]/10",
-  event_dma_done:    "border-[#fab387] bg-[#fab387]/10",
-};
 
 // ── Counter for unique IDs ────────────────────────────────────────────────────
 function clonePorts(ports: NodePort[]): NodePort[] {
@@ -591,45 +582,54 @@ interface NodeCardProps {
 }
 
 function NodeCard({ node, selected, onMouseDown, onPortMouseDown, onPortMouseUp }: NodeCardProps) {
-  const colorClass = NODE_COLORS[node.type];
+  const group = getGroupForType(node.type);
+  const headerBg = GROUP_HEADER_BG[group] ?? "bg-[#4a4a3a]";
 
   return (
     <div
-      className={`absolute select-none rounded border ${colorClass} ${selected ? "ring-1 ring-white/40" : ""} min-w-[160px]`}
+      className={`absolute select-none min-w-[160px] rounded-xl border border-slate-700 bg-slate-900/90 shadow-lg backdrop-blur-sm ${
+        selected ? "ring-2 ring-blue-500 shadow-2xl" : ""
+      }`}
       style={{ left: node.x, top: node.y }}
       onMouseDown={onMouseDown}
     >
-      {/* Header */}
-      <div className="px-2 py-1 text-[11px] font-semibold text-[#cdd6f4] border-b border-white/10 cursor-grab">
+      {/* Header colorido por categoria */}
+      <div
+        className={`rounded-t-xl px-3 py-1.5 text-[11px] font-semibold text-white/95 cursor-grab ${headerBg}`}
+      >
         {getNodeDisplayName(node.type)}
       </div>
 
       {/* Ports */}
-      <div className="flex gap-2 px-2 py-1.5">
+      <div className="flex gap-2 px-3 py-2">
         {/* Inputs */}
-        <div className="flex flex-col gap-1 flex-1">
+        <div className="flex flex-1 flex-col gap-1.5">
           {node.inputs.map((port) => (
-            <div key={port.id} className="flex items-center gap-1.5">
+            <div key={port.id} className="flex items-center gap-2">
               <div
-                className={`w-2.5 h-2.5 rounded-full border cursor-crosshair shrink-0 ${
-                  port.kind === "exec" ? "border-[#a6e3a1] bg-[#a6e3a1]/30" : "border-[#89b4fa] bg-[#89b4fa]/30"
+                className={`h-3 w-3 shrink-0 cursor-crosshair rounded-full border-2 ${
+                  port.kind === "exec"
+                    ? "border-white bg-white/90"
+                    : "border-[#89b4fa] bg-[#89b4fa]/60"
                 }`}
                 onMouseDown={(e) => onPortMouseDown(e, port.id, false)}
                 onMouseUp={(e) => onPortMouseUp(e, port.id, false)}
               />
-              <span className="text-[10px] text-[#7f849c]">{port.label}</span>
+              <span className="text-[10px] text-[#a6adc8]">{port.label}</span>
             </div>
           ))}
         </div>
 
         {/* Outputs */}
-        <div className="flex flex-col gap-1 items-end">
+        <div className="flex flex-col items-end gap-1.5">
           {node.outputs.map((port) => (
-            <div key={port.id} className="flex items-center gap-1.5">
-              <span className="text-[10px] text-[#7f849c]">{port.label}</span>
+            <div key={port.id} className="flex items-center gap-2">
+              <span className="text-[10px] text-[#a6adc8]">{port.label}</span>
               <div
-                className={`w-2.5 h-2.5 rounded-full border cursor-crosshair shrink-0 ${
-                  port.kind === "exec" ? "border-[#a6e3a1] bg-[#a6e3a1]/30" : "border-[#89b4fa] bg-[#89b4fa]/30"
+                className={`h-3 w-3 shrink-0 cursor-crosshair rounded-full border-2 ${
+                  port.kind === "exec"
+                    ? "border-white bg-white/90"
+                    : "border-[#89b4fa] bg-[#89b4fa]/60"
                 }`}
                 onMouseDown={(e) => onPortMouseDown(e, port.id, true)}
                 onMouseUp={(e) => onPortMouseUp(e, port.id, true)}
@@ -641,11 +641,11 @@ function NodeCard({ node, selected, onMouseDown, onPortMouseDown, onPortMouseUp 
 
       {/* Params */}
       {Object.keys(node.params).length > 0 && (
-        <div className="px-2 pb-1.5 flex flex-col gap-0.5 border-t border-white/5">
+        <div className="flex flex-col gap-0.5 border-t border-slate-700/50 px-3 pb-2 pt-1.5">
           {Object.entries(node.params).map(([k, v]) => (
             <div key={k} className="flex justify-between text-[10px]">
-              <span className="text-[#45475a]">{getNodeParamDisplayName(k)}</span>
-              <span className="text-[#cdd6f4] font-mono">{String(v)}</span>
+              <span className="text-[#6c7086]">{getNodeParamDisplayName(k)}</span>
+              <span className="font-mono text-[#cdd6f4]">{String(v)}</span>
             </div>
           ))}
         </div>
@@ -670,6 +670,8 @@ export default function NodeGraphEditor() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dragging, setDragging] = useState<{ nodeId: string; offsetX: number; offsetY: number } | null>(null);
   const [pendingEdge, setPendingEdge] = useState<{ fromNode: string; fromPort: string; x: number; y: number } | null>(null);
+  const [paletteSearch, setPaletteSearch] = useState("");
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const svgRef = useRef<SVGSVGElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const saveTimerRef = useRef<number | null>(null);
@@ -822,37 +824,87 @@ export default function NodeGraphEditor() {
     return `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`;
   }
 
+  const searchLower = paletteSearch.trim().toLowerCase();
+  const filteredGroups = searchLower
+    ? NODE_PALETTE_GROUPS.map((g) => ({
+        ...g,
+        types: g.types.filter(
+          (t) =>
+            getNodeDisplayName(t).toLowerCase().includes(searchLower) ||
+            t.toLowerCase().includes(searchLower)
+        ),
+      })).filter((g) => g.types.length > 0)
+    : NODE_PALETTE_GROUPS;
+
+  function toggleGroup(label: string) {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  }
+
   return (
-    <div className="flex h-full w-full bg-[#11111b] overflow-hidden">
+    <div className="flex h-full w-full overflow-hidden bg-[#11111b]">
 
       {/* ── Palette sidebar ── */}
-      <div className="w-36 shrink-0 bg-[#181825] border-r border-[#313244] flex flex-col gap-1 p-2 overflow-y-auto">
-        <p className="text-[10px] text-[#45475a] px-1 mb-1 select-none">NÓDOS</p>
-        {NODE_PALETTE_GROUPS.map((group) => (
-          <div key={group.label} className="flex flex-col gap-1">
-            <p className="px-1 pt-1 text-[10px] uppercase tracking-wide text-[#6c7086] select-none">
-              {group.label}
-            </p>
-            {group.types.map((type) => (
-              <button
-                key={type}
-                className="text-left text-[11px] px-2 py-1 rounded text-[#a6adc8] hover:bg-[#313244] hover:text-[#cdd6f4] transition-colors disabled:cursor-not-allowed disabled:opacity-40"
-                onMouseDown={() => addNode(type)}
-                disabled={!selectedEntity}
-              >
-                {getNodeDisplayName(type)}
-              </button>
-            ))}
+      <div className="flex w-40 shrink-0 flex-col overflow-x-hidden border-r border-[#313244] bg-[#181825]">
+        <div className="shrink-0 border-b border-[#313244] p-2">
+          <div className="relative">
+            <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-[#6c7086]">
+              &#x1f50d;
+            </span>
+            <input
+              type="search"
+              placeholder="Buscar nó..."
+              value={paletteSearch}
+              onChange={(e) => setPaletteSearch(e.target.value)}
+              className="w-full rounded border border-[#313244] bg-[#11111b] py-1 pl-7 pr-2 text-[10px] text-[#cdd6f4] placeholder:text-[#6c7086] focus:border-[#89b4fa] focus:outline-none"
+            />
           </div>
-        ))}
-        <div className="mt-auto border-t border-[#313244] pt-2">
-          <p className="text-[10px] text-[#45475a] px-1 select-none">
+        </div>
+        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
+          <p className="mb-1 select-none px-1 text-[10px] text-[#45475a]">NÓS</p>
+          {filteredGroups.map((group) => {
+            const isCollapsed = collapsedGroups.has(group.label);
+            return (
+              <div key={group.label} className="mb-3">
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(group.label)}
+                  className="flex w-full items-center gap-1.5 px-1 py-1 text-left text-[10px] font-semibold uppercase tracking-wide text-[#6c7086] transition-colors hover:text-[#a6adc8]"
+                >
+                  <span className="text-[9px]">{isCollapsed ? "\u25b8" : "\u25be"}</span>
+                  <span>{group.icon}</span>
+                  <span>{group.label}</span>
+                </button>
+                {!isCollapsed &&
+                  group.types.map((type) => (
+                    <button
+                      key={type}
+                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-[#a6adc8] transition-colors hover:bg-[#313244] hover:text-[#cdd6f4] disabled:cursor-not-allowed disabled:opacity-40"
+                      onMouseDown={() => addNode(type)}
+                      disabled={!selectedEntity}
+                    >
+                      <span className="text-[12px] opacity-80">
+                        {NODE_PALETTE_GROUPS.find((g) => g.types.includes(type))?.icon ?? "\u2699\ufe0f"}
+                      </span>
+                      <span className="min-w-0 truncate">{getNodeDisplayName(type)}</span>
+                    </button>
+                  ))}
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-auto shrink-0 border-t border-[#313244] p-2">
+          <p className="select-none px-1 text-[10px] text-[#45475a]">
             {selectedEntity ? "Autosave 600ms no LogicComponent.graph" : "Selecione uma entidade para editar"}
           </p>
-          <p className="text-[10px] text-[#45475a] px-1 select-none">
-            Dica: arraste da saida de um no para a entrada do proximo para conectar.
+          <p className="mt-1 select-none px-1 text-[10px] text-[#45475a]">
+            Dica: arraste da saída para a entrada para conectar.
           </p>
-          <p className="text-[10px] text-[#45475a] px-1 select-none">Del = remover nó</p>
+          <p className="select-none px-1 text-[10px] text-[#45475a]">Del = remover nó</p>
         </div>
       </div>
 

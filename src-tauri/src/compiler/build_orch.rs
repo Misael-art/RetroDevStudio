@@ -1912,7 +1912,7 @@ mod tests {
                 .join("resources.res"),
         )
         .expect("read SGDK audio resources");
-        assert!(resources_res.contains("WAV jump \"assets/audio/jump.wav\" 2ADPCM"));
+        assert!(resources_res.contains("WAV jump \"assets/audio/jump.wav\" XGM"));
         assert!(resources_res.contains("XGM stage_theme \"assets/audio/stage_theme.xgm\""));
 
         let _ = fs::remove_dir_all(project_dir);

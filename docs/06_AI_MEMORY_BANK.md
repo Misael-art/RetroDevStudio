@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
-**Ultima Atualizacao:** 2026-03-17
-**Ultima sessao:** 2026-03-17 (Sprint 3: Layer System Pilar 1 + tauri-plugin-updater)
-**Fase Atual:** Release candidate / beta testing do desktop Tauri, com ondas M-R concluidas, RC hotfixado, galeria de templates experimental ativa, seed `platformer` sanitizado para Mega Drive, prefabs persistiveis com `activeSceneSource/activeScene`, `graph_ref` externalizado, importacao SGDK generica experimental, overlay `rds/` para projetos SGDK externos com discovery por subdiretorio, UX SGDK import com meta-sprites/zoom/hierarquia/asset tree/onboarding/warnings implementada, Ondas 1 e 2 de paint/erase/paleta contextual/drag-to-paint/brush ghost implementadas, Sprint 1 (Inspector Sliders), Sprint 2 (CollisionMap) e Sprint 3 (Layer System + tauri-plugin-updater) concluidos com todos os 6 gates verdes.
+**Ultima Atualizacao:** 2026-03-18
+**Ultima sessao:** 2026-03-18 (Sprint Visual: Viewport WYSIWYG, Zooms, Fix Emulador, Memory Viewer + Frontend Overhaul)
+**Fase Atual:** Release candidate / beta testing do desktop Tauri, com ondas M-R concluidas, RC hotfixado, galeria de templates experimental ativa, seed `platformer` sanitizado para Mega Drive, prefabs persistiveis com `activeSceneSource/activeScene`, `graph_ref` externalizado, importacao SGDK generica experimental, overlay `rds/` para projetos SGDK externos com discovery por subdiretorio, UX SGDK import com meta-sprites/zoom/hierarquia/asset tree/onboarding/warnings implementada, Ondas 1 e 2 de paint/erase/paleta contextual/drag-to-paint/brush ghost implementadas, Sprint 1 (Inspector Sliders), Sprint 2 (CollisionMap) e Sprint 3 (Layer System + tauri-plugin-updater) concluidos, Sprint Visual (Viewport WYSIWYG, zoom 175%, fix botoes emulador, busca Memory Viewer) concluida com todos os 6 gates verdes.
 **Branch sugerida:** `feat/desktop-e2e-workflow`
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
@@ -16,6 +16,44 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-18 - Frontend Overhaul + Sprint Visual + Hotfix SGDK 2.11+):**
+  - **Frontend Overhaul consolidado:**
+    - **Passo 1 (Layout):** Layout dinamico com `react-resizable-panels` (Group, Panel, useDefaultLayout) em `App.tsx`; `LayoutSplitter.tsx` com 4px, hover/active; paineis esquerdo 15%, centro flexivel, direito 20%; persistencia em localStorage `retrodev-layout`.
+    - **Passo 2 (NodeGraph):** NodeGraphEditor reformulado estilo Unreal Blueprints/Unity Visual Scripting: paleta com scrollbars customizadas, busca, accordions expansiveis, icones por grupo; nos com headers coloridos por categoria (Eventos=vinho, Acoes=azul, Condicoes=cinza); selecao com ring-2 ring-blue-500 shadow-2xl.
+    - **Passo 3 (Asset Browser):** Limpeza de overflow; thumbnails com `imageRendering: pixelated`; Inspector com preview visual via `convertFileSrc` + `resolveProjectAssetPath`; `pathUtils.ts` compartilhado.
+    - **Passo 4 (Sprint Visual):** Viewport WYSIWYG com `drawImage` real (pre-carregamento de assets, contornos condicionais apenas quando selecionado ou modo colisao/pintura/apagar); zoom padrao inicial 175% no store e no Game View; fix dos botoes do emulador (Pausar, Retomar, Step, etc.) usando `emulatorActive` como fallback alem de `emulatorLoaded`; busca de padroes no Memory Viewer (hex ou texto, Procurar Proximo, scroll e highlight da linha encontrada).
+  - **Hotfix SGDK Emitter 2.11+:** Remocao de `SPR_getX`/`SPR_getY` (inexistentes no SGDK 2.x); posicao de sprites em variaveis locais `spr_XXX_x`/`spr_XXX_y`; atualizacao do driver de audio `2ADPCM` -> `XGM` no `resources.res`.
+  - Gates: check:tree, lint, tsc, 151 testes frontend, cargo clippy OK.
+
+* **O que acabou de acontecer (2026-03-17 - Modernizacao SGDK Emitter para 2.11+):**
+  - Emitter SGDK atualizado para APIs modernas: `SND_startPlayPCM_XGM` -> `XGM_startPlayPCM`; removido `SPR_getX`/`SPR_getY` (nao existem no SGDK 2.x). Posicao de sprites agora em variaveis locais `spr_XXX_x`/`spr_XXX_y` em main(); MoveSprite e ApplyPhysics atualizam essas vars e chamam `SPR_setPosition`. `rds_collision_map` com `__attribute__((unused))` para silenciar warning. Testes Rust atualizados. Cargo clippy OK; 166 testes passaram (1 falha pre-existente em list_project_templates).
+
+* **O que acabou de acontecer (2026-03-17 - Script unificado de compilacao):**
+  - Criado `scripts/build.mjs` como script canonico de compilacao: gera MSI, EXE Debug e EXE Portable. Uso: `node scripts/build.mjs <debug|msi|portable|all>`. Scripts npm: `build:debug`, `build:msi`, `build:portable`, `build:all`. O `build-test.bat` passou a ser wrapper legado que chama `build.mjs debug`. Documentado em `docs/08_TREE_ARCHITECTURE.md`.
+
+* **O que acabou de acontecer (2026-03-17 - UX/UI Passo 2: NodeGraph LG Logic):**
+  - NodeGraphEditor reformulado visualmente estilo Unreal Blueprints/Unity Visual Scripting: paleta de nos com scrollbar-thin, busca, accordions expansiveis, icones por grupo; nos com headers coloridos por categoria (Eventos=vinho, Acoes=azul, Condicoes=cinza), corpo bg-slate-900/90, rounded-xl, portas maiores; selecao com ring-2 ring-blue-500 shadow-2xl. Gates: check:tree, lint, tsc, testes frontend OK. Onda de UX do Frontend Overhaul concluida.
+
+* **O que acabou de acontecer (2026-03-17 - hotfix SGDK audio driver):**
+  - ResComp falhava com `Unrecognized sound driver: '2ADPCM'`. Emitter SGDK em `sgdk_emitter.rs` passou a emitir `WAV [nome] "[path]" XGM` em vez de `2ADPCM`. Testes em `sgdk_emitter.rs` e `build_orch.rs` atualizados para assert `XGM`. Cargo clippy OK; 166 testes Rust passaram (1 falha pre-existente em `list_project_templates_reads_registry_and_builtin_entries_are_available`).
+
+* **O que acabou de acontecer (2026-03-17 - UX/UI Passo 1: Layout com Splitters):**
+  - Layout dinamico com `react-resizable-panels` (Group, Panel, useDefaultLayout) em `App.tsx`; `LayoutSplitter.tsx` com 4px, hover/active; paineis esquerdo 15%, centro flexivel, direito 20%; persistencia em localStorage `retrodev-layout`; mock ResizeObserver em `src/test/setup.ts` para testes jsdom.
+
+* **O que acabou de acontecer (2026-03-17 - UX/UI Passos 3 e 4: feedback visual + tipografia/densidade):**
+  - **Passo 3:** Asset Browser Grid View com `imageRendering: pixelated`; Hierarchy ja tinha icones por tipo; Inspector com preview visual do sprite asset (convertFileSrc + resolveProjectAssetPath). Criado `src/core/pathUtils.ts` com `resolveProjectAssetPath` compartilhado; ViewportPanel passou a importar dele.
+  - **Passo 4:** Tema Tailwind com `@theme` (font-sans, font-mono) e `@layer base` em `src/styles/index.css`; Inspector com densidade de IDE (py-3->py-2, py-1.5->py-1, px-3->px-2); PropRow com coluna de rotulos fixa (w-24 min-w-24); RecordListEditor em grid `grid-cols-[1fr_1fr_auto]`; Panel header py-1.5->py-1.
+  - Gates: check:tree, lint, tsc, 151 testes frontend OK.
+
+* **O que acabou de acontecer (2026-03-17 - bateria grep/validacao + roteiro QA RC):**
+  - Executada bateria de grep/read_file para confirmar implementacoes de `SceneLayer`, `CollisionMap` e `sgdk_emitter`/`emit_sgdk_with_collision`/`emit_snes_with_collision`.
+  - **SceneLayer:** `entities.rs` (struct Rust), `sceneService.ts` (interface TS), `editorStore.ts` (actions), `LayerPanel.tsx` (UI), `ViewportPanel.tsx` (filtro visibility). Schema 1.5.0.
+  - **CollisionMap:** `entities.rs` (struct + `normalize()`), `md_profile.rs`/`snes_profile.rs` (validacao), `sgdk_emitter.rs`/`snes_emitter.rs` (`emit_*_with_collision`), `ViewportPanel.tsx` (overlay + paint). Schema 1.4.0.
+  - **sgdk_emitter:** `emit_sgdk_with_collision` em `sgdk_emitter.rs`, `emit_snes_with_collision` em `snes_emitter.rs`; `build_orch.rs` e `lib.rs` passam `collision_slice` para os emitters.
+  - Validacoes executadas: `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (151 testes). Cargo clippy/test em background.
+  - Criado `docs/10_QA_ROTEIRO_RC.md`: roteiro passo-a-passo para testadores leigos (Blocos A–F: onboarding, camadas, colisao/pintura, Build & Run, ferramentas, persistencia) e checklist de evidencias para promocao RC.
+  - Atualizado `docs/08_TREE_ARCHITECTURE.md` com `10_QA_ROTEIRO_RC.md`.
 
 * **O que acabou de acontecer (2026-03-17 - Sprint 3: Layer System Pilar 1 + tauri-plugin-updater):**
   - Implementado Layer System (Pilar 1) de ponta a ponta. Schema UGDM bumped `1.4.0 -> 1.5.0`.
@@ -449,6 +487,13 @@
   - A toolbar do editor agora tambem expoe warning live nao-fatal perto de `Build & Run`, para que o usuario nao dependa exclusivamente do painel lateral para entender o risco atual.
   - O modo de trabalho dos agentes agora esta consolidado em documento canonico proprio para reduzir divergencia de onboarding, claims falsos de entrega e poluicao estrutural.
   - Dados em `data/`: `rom_teste.bin` e `sonic_test.gen` continuam uteis para validacao manual de Mega Drive, mas o uso dessas ROMs deve respeitar compliance/licenciamento.
+
+* **Validacoes verificadas em 2026-03-17 (bateria grep/roteiro QA):**
+  - `npm run check:tree` -> OK.
+  - `npm run lint` -> OK.
+  - `npx tsc --noEmit` -> OK.
+  - `npm test` -> OK, 151/151.
+  - `cargo clippy` e `cargo test --lib` em execucao em background (lock de pacote).
 
 * **Validacoes verificadas em 2026-03-17 (Sprint 2 - CollisionMap):**
   - `npm run check:tree` -> OK (falha pre-existente `hamoopig_example` inalterada).

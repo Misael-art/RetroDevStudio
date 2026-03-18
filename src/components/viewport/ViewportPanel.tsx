@@ -26,6 +26,7 @@ import type { Entity } from "../../core/ipc/sceneService";
 import { persistActiveScene } from "../../core/scenePersistence";
 import { constrainSpriteFrameSize, ONBOARDING_SPRITE_SIZE } from "../../core/sceneConstraints";
 import { createSpriteEntityFromAsset } from "../../core/editorEntityFactory";
+import { resolveProjectAssetPath } from "../../core/pathUtils";
 
 const VIEWPORT_TABS = [
   { id: "scene", label: "Cena", icon: "SC" },
@@ -148,12 +149,6 @@ function drawResizeHandle(
   context.strokeRect(x - half, y - half, RESIZE_HANDLE_SIZE, RESIZE_HANDLE_SIZE);
 }
 
-function resolveProjectAssetPath(projectDir: string, relativePath: string): string {
-  const normalizedProjectDir = projectDir.replace(/\\/g, "/").replace(/\/+$/, "");
-  const normalizedRelativePath = relativePath.replace(/\\/g, "/").replace(/^\/+/, "");
-  return `${normalizedProjectDir}/${normalizedRelativePath}`;
-}
-
 function decodePpmP3(content: string): ImageData | null {
   const cleaned = content
     .replace(/\r/g, "")
@@ -229,6 +224,8 @@ export default function ViewportPanel() {
     removeEntity,
     setActiveBrush,
     updateCollisionMap,
+    activeLayerId,
+    assignEntityToLayer,
   } = useEditorStore();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -292,6 +289,10 @@ export default function ViewportPanel() {
   const [showPerformanceOverlay, setShowPerformanceOverlay] = useState(true);
   const [assetCacheVersion, setAssetCacheVersion] = useState(0);
   const [sceneMousePos, setSceneMousePos] = useState<{ x: number; y: number } | null>(null);
+  const [viewportPan, setViewportPan] = useState({ x: 0, y: 0 });
+  const [spacePressed, setSpacePressed] = useState(false);
+  const [isPanning, setIsPanning] = useState(false);
+  const panDragRef = useRef<{ startX: number; startY: number; startPanX: number; startPanY: number } | null>(null);
   const [sgdkOnboardingDismissed, setSgdkOnboardingDismissed] = useState(
     () => localStorage.getItem("rds:sgdk-onboarding-dismissed") === "1"
   );
@@ -314,6 +315,14 @@ export default function ViewportPanel() {
     assetCacheRef.current.clear();
     setAssetCacheVersion((current) => current + 1);
   }, [activeProjectDir]);
+
+  useEffect(() => {
+    if (activeViewportTab !== "scene") {
+      setViewportPan({ x: 0, y: 0 });
+      panDragRef.current = null;
+      setIsPanning(false);
+    }
+  }, [activeViewportTab]);
 
   const getViewportAsset = useCallback(
     (relativePath?: string | null): ViewportAssetCacheEntry | null => {
@@ -425,6 +434,26 @@ export default function ViewportPanel() {
     },
     [activeProjectDir]
   );
+
+  // Pré-carregamento de assets da cena para garantir WYSIWYG no primeiro frame
+  useEffect(() => {
+    if (activeViewportTab !== "scene" || !activeScene || !activeProjectDir) return;
+    activeScene.entities.forEach((entity) => {
+      const sprite = entity.components?.sprite;
+      if (sprite?.asset) {
+        getViewportAsset(sprite.asset);
+      }
+      const tilemap = entity.components?.tilemap;
+      if (tilemap?.tileset) {
+        getViewportAsset(tilemap.tileset);
+      }
+    });
+    activeScene.background_layers.forEach((layer) => {
+      if (layer.tileset) {
+        getViewportAsset(layer.tileset);
+      }
+    });
+  }, [activeViewportTab, activeScene, activeProjectDir, getViewportAsset]);
 
   const renderFrame = useCallback((payload: FramePayload) => {
     const canvas = canvasRef.current;
@@ -693,22 +722,22 @@ export default function ViewportPanel() {
   }, [emulPaused, logMessage, rewindBusy]);
 
   const handlePause = useCallback(() => {
-    if (!emulatorLoaded || emulPaused) {
+    if ((!emulatorLoaded && !emulatorActive) || emulPaused) {
       return;
     }
 
     setEmulPaused(true);
     logMessage("info", "Emulador pausado.");
-  }, [emulPaused, logMessage, setEmulPaused]);
+  }, [emulatorActive, emulPaused, emulatorLoaded, logMessage, setEmulPaused]);
 
   const handleResume = useCallback(() => {
-    if (!emulatorLoaded || !emulPaused) {
+    if ((!emulatorLoaded && !emulatorActive) || !emulPaused) {
       return;
     }
 
     setEmulPaused(false);
     logMessage("info", "Emulador retomado.");
-  }, [emulPaused, logMessage, setEmulPaused]);
+  }, [emulatorActive, emulPaused, emulatorLoaded, logMessage, setEmulPaused]);
 
   const handleStartRecording = useCallback(async () => {
     if (!emulatorLoaded || recordBusy || replayRecording) {
@@ -757,7 +786,7 @@ export default function ViewportPanel() {
   }, [activeProjectDir, logMessage, recordBusy, replayRecording]);
 
   const handleStepFrame = useCallback(async () => {
-    if (!emulatorLoaded || !emulPaused || stepBusy) {
+    if ((!emulatorLoaded && !emulatorActive) || !emulPaused || stepBusy) {
       return;
     }
 
@@ -793,7 +822,7 @@ export default function ViewportPanel() {
         logMessage("error", `Falha ao iniciar frame unico: ${describeError(error)}`);
       }
     }
-  }, [emulatorLoaded, emulPaused, logMessage, renderFrame, startFrameLoop, stepBusy]);
+  }, [emulatorActive, emulatorLoaded, emulPaused, logMessage, renderFrame, startFrameLoop, stepBusy]);
 
   const handlePlayReplay = useCallback(async () => {
     if (!lastReplayPath || playReplayBusy || replayRecording || !emulPaused) {
@@ -984,6 +1013,11 @@ export default function ViewportPanel() {
     if (activeViewportTab !== "scene") return;
 
     function onKeyDown(event: KeyboardEvent) {
+      if (event.code === "Space") {
+        event.preventDefault();
+        setSpacePressed(true);
+        return;
+      }
       if (isEditableTarget(event.target)) return;
 
       if (
@@ -1041,6 +1075,17 @@ export default function ViewportPanel() {
       }
     }
 
+    function onKeyUp(event: KeyboardEvent) {
+      if (event.code === "Space") {
+        event.preventDefault();
+        setSpacePressed(false);
+        if (panDragRef.current) {
+          panDragRef.current = null;
+          setIsPanning(false);
+        }
+      }
+    }
+
     function onWheel(event: WheelEvent) {
       if (!event.ctrlKey && !event.metaKey) return;
       event.preventDefault();
@@ -1050,12 +1095,39 @@ export default function ViewportPanel() {
     }
 
     window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
     window.addEventListener("wheel", onWheel, { passive: false });
     return () => {
       window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("wheel", onWheel);
     };
   }, [activeViewportTab, resetViewportZoom, setViewportZoom, viewportZoom]);
+
+  useEffect(() => {
+    if (activeViewportTab !== "scene" || !panDragRef.current) return;
+
+    function onPanMove(event: MouseEvent) {
+      const pan = panDragRef.current;
+      if (!pan) return;
+      setViewportPan({
+        x: pan.startPanX + (event.clientX - pan.startX),
+        y: pan.startPanY + (event.clientY - pan.startY),
+      });
+    }
+
+    function onPanUp() {
+      panDragRef.current = null;
+      setIsPanning(false);
+    }
+
+    window.addEventListener("mousemove", onPanMove);
+    window.addEventListener("mouseup", onPanUp);
+    return () => {
+      window.removeEventListener("mousemove", onPanMove);
+      window.removeEventListener("mouseup", onPanUp);
+    };
+  }, [activeViewportTab]);
 
   useEffect(() => {
     if (activeViewportTab !== "scene") return;
@@ -1142,8 +1214,11 @@ export default function ViewportPanel() {
         const mapWidth = tilemap.map_width * 8;
         const mapHeight = tilemap.map_height * 8;
         const tilemapAsset = getViewportAsset(tilemap.tileset);
+        const tilemapImageLoaded = tilemapAsset?.status === "loaded" && tilemapAsset.source;
+        const showTilemapGizmos =
+          isSelected || editorMode === "collision" || editorMode === "paint" || editorMode === "erase";
 
-        if (tilemapAsset?.status === "loaded" && tilemapAsset.source) {
+        if (tilemapImageLoaded && tilemapAsset.source) {
           context.save();
           context.globalAlpha = 0.82;
           context.drawImage(tilemapAsset.source, x, y, mapWidth, mapHeight);
@@ -1167,13 +1242,15 @@ export default function ViewportPanel() {
           }
         }
 
-        context.strokeStyle = isSelected ? "#94e2d5" : "rgba(148,226,213,0.5)";
-        context.lineWidth = isSelected ? 2 : 1;
-        context.strokeRect(x, y, mapWidth, mapHeight);
-        context.fillStyle = "#94e2d5";
-        context.font = "9px monospace";
-        context.textAlign = "left";
-        context.fillText(`TM ${entityDisplayLabel(entity)}`.slice(0, 16), x + 2, y + 10);
+        if (showTilemapGizmos || !tilemapImageLoaded) {
+          context.strokeStyle = isSelected ? "#94e2d5" : "rgba(148,226,213,0.5)";
+          context.lineWidth = isSelected ? 2 : 1;
+          context.strokeRect(x, y, mapWidth, mapHeight);
+          context.fillStyle = "#94e2d5";
+          context.font = "9px monospace";
+          context.textAlign = "left";
+          context.fillText(`TM ${entityDisplayLabel(entity)}`.slice(0, 16), x + 2, y + 10);
+        }
         if (isSelected) {
           context.fillStyle = "rgba(148,226,213,0.15)";
           context.fillRect(x, y, mapWidth, mapHeight);
@@ -1218,7 +1295,11 @@ export default function ViewportPanel() {
 
       const spriteAsset = getViewportAsset(entity.components?.sprite?.asset);
       const sprite = entity.components?.sprite;
-      if (spriteAsset?.status === "loaded" && spriteAsset.source && sprite) {
+      const spriteImageLoaded = spriteAsset?.status === "loaded" && spriteAsset.source && sprite;
+      const showSpriteGizmos =
+        isSelected || editorMode === "collision" || editorMode === "paint" || editorMode === "erase";
+
+      if (spriteImageLoaded && spriteAsset.source) {
         const sourceWidth = Math.min(sprite.frame_width, spriteAsset.width ?? sprite.frame_width);
         const sourceHeight = Math.min(sprite.frame_height, spriteAsset.height ?? sprite.frame_height);
         context.drawImage(spriteAsset.source, 0, 0, sourceWidth, sourceHeight, x, y, width, height);
@@ -1227,14 +1308,19 @@ export default function ViewportPanel() {
         context.fillRect(x, y, width, height);
       }
 
-      context.strokeStyle = isSelected ? "#ffffff" : color;
-      context.lineWidth = isSelected ? 2 : 1;
-      context.strokeRect(x, y, width, height);
-
-      context.fillStyle = isSelected ? "#ffffff" : color;
-      context.font = "9px monospace";
-      context.textAlign = "left";
-      context.fillText(entityDisplayLabel(entity).slice(0, 14), x + 2, y + 10);
+      if (showSpriteGizmos || !spriteImageLoaded) {
+        context.strokeStyle = isSelected ? "#ffffff" : color;
+        context.lineWidth = isSelected ? 2 : 1;
+        context.strokeRect(x, y, width, height);
+        context.fillStyle = isSelected ? "#ffffff" : color;
+        context.font = "9px monospace";
+        context.textAlign = "left";
+        context.fillText(entityDisplayLabel(entity).slice(0, 14), x + 2, y + 10);
+        context.fillStyle = color;
+        context.beginPath();
+        context.arc(x + width / 2, y + height / 2, 2, 0, Math.PI * 2);
+        context.fill();
+      }
 
       if (isSelected) {
         context.save();
@@ -1251,11 +1337,6 @@ export default function ViewportPanel() {
         }
         context.restore();
       }
-
-      context.fillStyle = color;
-      context.beginPath();
-      context.arc(x + width / 2, y + height / 2, 2, 0, Math.PI * 2);
-      context.fill();
     });
 
     // ── Collision map overlay ─────────────────────────────────────────────
@@ -1413,6 +1494,20 @@ export default function ViewportPanel() {
   }
 
   function handleMouseDown(event: React.MouseEvent<HTMLCanvasElement>) {
+    const isPanIntent =
+      event.button === 1 || (event.button === 0 && spacePressed);
+    if (isPanIntent) {
+      event.preventDefault();
+      panDragRef.current = {
+        startX: event.clientX,
+        startY: event.clientY,
+        startPanX: viewportPan.x,
+        startPanY: viewportPan.y,
+      };
+      setIsPanning(true);
+      return;
+    }
+
     if (!activeScene) return;
 
     const { mx, my } = canvasCoords(event);
@@ -1438,8 +1533,14 @@ export default function ViewportPanel() {
         y: paintY,
       });
       addEntity(entity);
+      if (activeLayerId) {
+        assignEntityToLayer(entity.entity_id, activeLayerId);
+      }
       setSelectedEntityId(entity.entity_id);
-      logMessage("success", `Sprite '${entity.entity_id}' pintado na cena.`);
+      logMessage(
+        "success",
+        `Sprite '${entity.entity_id}' pintado na cena${activeLayerId ? ` (Camada: ${activeLayerId})` : ""}.`
+      );
       const cellKey = `${paintX},${paintY}`;
       paintDragRef.current = { lastPaintCell: cellKey, paintedInDrag: true };
       return;
@@ -1813,48 +1914,6 @@ export default function ViewportPanel() {
           onTabChange={setActiveViewportTab}
           className="flex-1 border-b-0"
         />
-        {activeViewportTab === "scene" && (
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setViewportZoom(Math.max(ZOOM_MIN, viewportZoom - ZOOM_STEP))}
-              className="rounded border border-[#313244] bg-[#11111b] px-1.5 py-0.5 text-[10px] font-semibold text-[#6c7086] transition-colors hover:text-[#a6adc8] disabled:opacity-30"
-              disabled={viewportZoom <= ZOOM_MIN}
-              title="Diminuir zoom (Ctrl+-)"
-            >
-              −
-            </button>
-            <button
-              type="button"
-              onClick={() => resetViewportZoom()}
-              className="min-w-[40px] rounded border border-[#313244] bg-[#11111b] px-1.5 py-0.5 text-center text-[10px] font-semibold text-[#6c7086] transition-colors hover:text-[#a6adc8]"
-              title="Resetar zoom (Ctrl+0)"
-            >
-              {Math.round(viewportZoom * 100)}%
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewportZoom(Math.min(ZOOM_MAX, viewportZoom + ZOOM_STEP))}
-              className="rounded border border-[#313244] bg-[#11111b] px-1.5 py-0.5 text-[10px] font-semibold text-[#6c7086] transition-colors hover:text-[#a6adc8] disabled:opacity-30"
-              disabled={viewportZoom >= ZOOM_MAX}
-              title="Aumentar zoom (Ctrl+=)"
-            >
-              +
-            </button>
-            <button
-              type="button"
-              onClick={() => setGridSnap((current) => !current)}
-              className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
-                gridSnap
-                  ? "border-[#94e2d5] bg-[#94e2d5]/15 text-[#94e2d5]"
-                  : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
-              }`}
-              title="Alternar snap-to-grid de 8px (atalho: G)"
-            >
-              Snap 8px {gridSnap ? "ON" : "OFF"}
-            </button>
-          </div>
-        )}
         {activeViewportTab === "game" && (
           <button
             type="button"
@@ -1871,41 +1930,84 @@ export default function ViewportPanel() {
         )}
       </div>
 
-      <div className="relative flex-1 overflow-hidden bg-[#11111b]">
-        {/* Floating Toolbar */}
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex gap-1 p-1 rounded-full bg-[#181825]/80 backdrop-blur-md border border-[#313244] shadow-2xl">
-          {([
-            { id: "select" as const, icon: "🖱️", label: "Selecionar (V)", activeColor: "bg-[#89b4fa]" },
-            { id: "paint" as const, icon: "✏️", label: "Pintar (B)", activeColor: "bg-[#89b4fa]" },
-            { id: "erase" as const, icon: "🧹", label: "Apagar (E)", activeColor: "bg-[#89b4fa]" },
-            { id: "collision" as const, icon: "🛡️", label: "Colis\u00e3o (C)", activeColor: "bg-[#f38ba8]" },
-          ]).map((tool) => (
-            <button
-              key={tool.id}
-              onClick={() => setEditorMode(tool.id)}
-              className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
-                editorMode === tool.id
-                  ? `${tool.activeColor} text-[#11111b] scale-110 shadow-lg`
-                  : "text-[#7f849c] hover:bg-[#313244] hover:text-[#cdd6f4]"
-              }`}
-              title={tool.label}
-            >
-              <span className="text-sm">{tool.icon}</span>
-            </button>
-          ))}
-        </div>
-
+      <div className="relative flex-1 overflow-hidden bg-[#11111b] flex flex-col">
         <div
-          className={`flex-1 overflow-hidden bg-[#11111b] h-full ${
+          className={`flex-1 overflow-hidden bg-[#11111b] h-full min-h-0 ${
             activeViewportTab === "logic" || activeViewportTab === "retrofx"
               ? "flex"
-              : "flex items-center justify-center"
+              : "flex flex-col"
           }`}
         >
           {activeViewportTab === "scene" && (
-            <div className="flex flex-col items-center gap-2">
+            <div className="flex flex-1 flex-col min-h-0">
+            {/* Toolbar horizontal dedicada (V, B, E, C, G, Zoom) */}
+            <div className="flex shrink-0 items-center gap-1 border-b border-[#313244] bg-[#181825] px-2 py-1.5">
+              {([
+                { id: "select" as const, icon: "🖱️", label: "Selecionar (V)", activeColor: "bg-[#89b4fa]" },
+                { id: "paint" as const, icon: "✏️", label: "Pintar (B)", activeColor: "bg-[#89b4fa]" },
+                { id: "erase" as const, icon: "🧹", label: "Apagar (E)", activeColor: "bg-[#89b4fa]" },
+                { id: "collision" as const, icon: "🛡️", label: "Colis\u00e3o (C)", activeColor: "bg-[#f38ba8]" },
+              ]).map((tool) => (
+                <button
+                  key={tool.id}
+                  type="button"
+                  onClick={() => setEditorMode(tool.id)}
+                  className={`rounded px-2 py-1 text-[10px] font-semibold transition-all ${
+                    editorMode === tool.id
+                      ? `${tool.activeColor} text-[#11111b]`
+                      : "text-[#7f849c] hover:bg-[#313244] hover:text-[#cdd6f4]"
+                  }`}
+                  title={tool.label}
+                >
+                  {tool.icon}
+                </button>
+              ))}
+              <div className="mx-1 w-px bg-[#313244] self-stretch" />
+              <button
+                type="button"
+                onClick={() => setGridSnap((current) => !current)}
+                className={`rounded px-2 py-1 text-[10px] font-semibold transition-colors ${
+                  gridSnap
+                    ? "border border-[#94e2d5] bg-[#94e2d5]/15 text-[#94e2d5]"
+                    : "border border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
+                }`}
+                title="Snap ao grid 8px (G)"
+              >
+                G
+              </button>
+              <div className="mx-1 w-px bg-[#313244] self-stretch" />
+              <button
+                type="button"
+                onClick={() => setViewportZoom(Math.max(ZOOM_MIN, viewportZoom - ZOOM_STEP))}
+                className="rounded border border-[#313244] bg-[#11111b] px-1.5 py-0.5 text-[10px] font-semibold text-[#6c7086] transition-colors hover:text-[#a6adc8] disabled:opacity-30"
+                disabled={viewportZoom <= ZOOM_MIN}
+                title="Zoom out (Ctrl+-)"
+              >
+                −
+              </button>
+              <button
+                type="button"
+                onClick={() => resetViewportZoom()}
+                className="min-w-[40px] rounded border border-[#313244] bg-[#11111b] px-1.5 py-0.5 text-center text-[10px] font-semibold text-[#6c7086] transition-colors hover:text-[#a6adc8]"
+                title="Reset zoom (Ctrl+0)"
+              >
+                {Math.round(viewportZoom * 100)}%
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewportZoom(Math.min(ZOOM_MAX, viewportZoom + ZOOM_STEP))}
+                className="rounded border border-[#313244] bg-[#11111b] px-1.5 py-0.5 text-[10px] font-semibold text-[#6c7086] transition-colors hover:text-[#a6adc8] disabled:opacity-30"
+                disabled={viewportZoom >= ZOOM_MAX}
+                title="Zoom in (Ctrl+=)"
+              >
+                +
+              </button>
+            </div>
+
+            {/* Área de canvas com overflow para mais espaço */}
+            <div className="relative flex-1 overflow-hidden min-h-0">
             {showSgdkOnboarding && (
-              <div className="flex max-w-[420px] items-start gap-2 rounded border border-[#fab387]/40 bg-[#fab387]/10 px-3 py-2">
+              <div className="absolute left-1/2 top-4 z-10 -translate-x-1/2 flex max-w-[420px] items-start gap-2 rounded border border-[#fab387]/40 bg-[#fab387]/10 px-3 py-2">
                 <div className="flex-1">
                   <p className="text-[10px] font-semibold text-[#fab387]">
                     Projeto importado de SGDK externo
@@ -1928,41 +2030,53 @@ export default function ViewportPanel() {
                 </button>
               </div>
             )}
-            <canvas
-              ref={sceneCanvasRef}
-              width={MD_WIDTH}
-              height={MD_HEIGHT}
-              onMouseDown={handleMouseDown}
-              onMouseMove={handleMouseMove}
-              onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseLeave}
-              onContextMenu={(e) => e.preventDefault()}
-              className="border border-[#45475a]"
+            <div
+              className="absolute left-1/2 top-1/2"
               style={{
-                imageRendering: "pixelated",
-                width: MD_WIDTH * viewportZoom,
-                height: MD_HEIGHT * viewportZoom,
-                cursor: isDragging
-                  ? "grabbing"
-                  : editorMode === "paint"
-                    ? activeBrush
-                      ? "copy"
-                      : "not-allowed"
-                    : editorMode === "erase"
-                      ? "pointer"
-                      : "crosshair",
+                transform: `translate(calc(-50% + ${viewportPan.x}px), calc(-50% + ${viewportPan.y}px)) scale(${viewportZoom})`,
               }}
-              title="Clique para selecionar. Arraste para mover ou use os handles para redimensionar sprites. Ctrl+Scroll para zoom."
-            />
+            >
+              <canvas
+                ref={sceneCanvasRef}
+                width={MD_WIDTH}
+                height={MD_HEIGHT}
+                onMouseDown={handleMouseDown}
+                onMouseMove={handleMouseMove}
+                onMouseUp={handleMouseUp}
+                onMouseLeave={handleMouseLeave}
+                onContextMenu={(e) => e.preventDefault()}
+                className="border border-[#45475a]"
+                style={{
+                  imageRendering: "pixelated",
+                  width: MD_WIDTH,
+                  height: MD_HEIGHT,
+                  cursor: isPanning
+                    ? "grabbing"
+                    : isDragging
+                      ? "grabbing"
+                      : editorMode === "paint"
+                        ? activeBrush
+                          ? "copy"
+                          : "not-allowed"
+                        : editorMode === "erase"
+                          ? "pointer"
+                          : spacePressed
+                            ? "grab"
+                            : "crosshair",
+                }}
+                title="Clique para selecionar. Arraste para mover. Espaço+arraste ou botão do meio: pan. Ctrl+Scroll: zoom."
+              />
+            </div>
             {activeScene &&
               activeScene.entities.length === 0 &&
               activeScene.background_layers.length === 0 && (
-                <div className="max-w-[320px] rounded border border-[#89b4fa]/30 bg-[#89b4fa]/8 px-3 py-2 text-center text-[10px] leading-relaxed text-[#89b4fa]">
+                <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 max-w-[320px] rounded border border-[#89b4fa]/30 bg-[#89b4fa]/8 px-3 py-2 text-center text-[10px] leading-relaxed text-[#89b4fa]">
                   Cena vazia. Use <span className="font-semibold">Hierarchy &gt; Sprite Inicial</span> ou{" "}
                   <span className="font-semibold">Tools &gt; Asset Browser &gt; Instanciar</span> para
                   comecar a montar a cena.
                 </div>
               )}
+            <div className="absolute bottom-0 left-0 right-0 shrink-0 border-t border-[#313244] bg-[#181825]/90 px-2 py-1">
             <span className="select-none text-[10px] text-[#6c7086]">
               {activeScene
                 ? `${activeScene.entities.length} entidade(s) | ${activeScene.background_layers.length} layer(s) | ${gridSnap ? "snap 8px ativo" : "snap livre"}${
@@ -1976,6 +2090,8 @@ export default function ViewportPanel() {
                   }`
                 : "Abra um projeto para visualizar a cena"}
             </span>
+            </div>
+            </div>
           </div>
         )}
 
@@ -1996,7 +2112,11 @@ export default function ViewportPanel() {
                 height={MD_HEIGHT}
                 data-testid="viewport-game-canvas"
                 className="border border-[#45475a] bg-black"
-                style={{ imageRendering: "pixelated", width: MD_WIDTH, height: MD_HEIGHT }}
+                style={{
+                  imageRendering: "pixelated",
+                  width: MD_WIDTH * 1.75,
+                  height: MD_HEIGHT * 1.75,
+                }}
                 tabIndex={0}
               />
               {showPerformanceOverlay && (
@@ -2014,7 +2134,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => handlePause()}
-                disabled={!emulatorLoaded || emulPaused}
+                disabled={(!emulatorLoaded && !emulatorActive) || emulPaused}
                 data-testid="viewport-pause"
                 className="rounded border border-[#fab387]/40 bg-[#fab387]/10 px-2 py-1 text-[10px] font-semibold text-[#fab387] transition-colors hover:bg-[#fab387]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -2023,7 +2143,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => handleResume()}
-                disabled={!emulatorLoaded || !emulPaused}
+                disabled={(!emulatorLoaded && !emulatorActive) || !emulPaused}
                 data-testid="viewport-resume"
                 className="rounded border border-[#a6e3a1]/40 bg-[#a6e3a1]/10 px-2 py-1 text-[10px] font-semibold text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -2032,7 +2152,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => void handleStepFrame()}
-                disabled={!emulatorLoaded || !emulPaused || stepBusy}
+                disabled={(!emulatorLoaded && !emulatorActive) || !emulPaused || stepBusy}
                 data-testid="viewport-step-frame"
                 className="rounded border border-[#f9e2af]/40 bg-[#f9e2af]/10 px-2 py-1 text-[10px] font-semibold text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -2041,7 +2161,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => void handleSaveState()}
-                disabled={!emulatorLoaded || saveStateBusy}
+                disabled={(!emulatorLoaded && !emulatorActive) || saveStateBusy}
                 data-testid="viewport-save-state"
                 className="rounded border border-[#a6e3a1]/40 bg-[#a6e3a1]/10 px-2 py-1 text-[10px] font-semibold text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -2050,7 +2170,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => void handleLoadState()}
-                disabled={!emulatorLoaded || loadStateBusy}
+                disabled={(!emulatorLoaded && !emulatorActive) || loadStateBusy}
                 data-testid="viewport-load-state"
                 className="rounded border border-[#89b4fa]/40 bg-[#89b4fa]/10 px-2 py-1 text-[10px] font-semibold text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -2059,7 +2179,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => void handleRewind()}
-                disabled={!emulatorLoaded || !emulPaused || rewindBusy}
+                disabled={(!emulatorLoaded && !emulatorActive) || !emulPaused || rewindBusy}
                 data-testid="viewport-rewind"
                 className="rounded border border-[#f38ba8]/40 bg-[#f38ba8]/10 px-2 py-1 text-[10px] font-semibold text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/20 disabled:cursor-not-allowed disabled:opacity-40"
                 title="Recuar snapshots automáticos do emulador (atalho: R)"
@@ -2069,7 +2189,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => void handleStartRecording()}
-                disabled={!emulatorLoaded || recordBusy || replayRecording}
+                disabled={(!emulatorLoaded && !emulatorActive) || recordBusy || replayRecording}
                 data-testid="viewport-replay-record"
                 className="rounded border border-[#94e2d5]/40 bg-[#94e2d5]/10 px-2 py-1 text-[10px] font-semibold text-[#94e2d5] transition-colors hover:bg-[#94e2d5]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -2078,7 +2198,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => void handleStopRecording()}
-                disabled={!emulatorLoaded || recordBusy || !replayRecording || !activeProjectDir}
+                disabled={(!emulatorLoaded && !emulatorActive) || recordBusy || !replayRecording || !activeProjectDir}
                 data-testid="viewport-replay-stop"
                 className="rounded border border-[#f38ba8]/40 bg-[#f38ba8]/10 px-2 py-1 text-[10px] font-semibold text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -2087,7 +2207,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => void handlePlayReplay()}
-                disabled={!emulatorLoaded || playReplayBusy || replayRecording || !lastReplayPath || !emulPaused}
+                disabled={(!emulatorLoaded && !emulatorActive) || playReplayBusy || replayRecording || !lastReplayPath || !emulPaused}
                 data-testid="viewport-replay-play"
                 className="rounded border border-[#89dceb]/40 bg-[#89dceb]/10 px-2 py-1 text-[10px] font-semibold text-[#89dceb] transition-colors hover:bg-[#89dceb]/20 disabled:cursor-not-allowed disabled:opacity-40"
                 title="Reproduzir o ultimo replay salvo com o estado inicial gravado"

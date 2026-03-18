@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { Group, Panel, useDefaultLayout } from "react-resizable-panels";
 import Console from "./components/common/Console";
+import LayoutSplitter from "./components/common/LayoutSplitter";
 import HierarchyPanel from "./components/hierarchy/HierarchyPanel";
 import LayerPanel from "./components/hierarchy/LayerPanel";
 import InspectorPanel from "./components/inspector/InspectorPanel";
@@ -318,6 +320,13 @@ export default function App() {
     String(import.meta.env.TAURI_ENV_DEBUG ?? "").toLowerCase() === "true" ||
     String(import.meta.env.TAURI_ENV_DEBUG ?? "") === "1" ||
     new URLSearchParams(window.location.search).has("e2e");
+
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
+    id: "retrodev-layout",
+    storage: typeof window !== "undefined" ? localStorage : undefined,
+    panelIds: ["left", "center", "right"],
+  });
+
   const selectedTemplate =
     projectTemplates.find((template) => template.id === selectedTemplateId) ?? null;
   const selectedTemplateMegadriveOnly = selectedTemplate?.source_kind === "external_sgdk";
@@ -1534,8 +1543,19 @@ export default function App() {
         </div>
       </header>
 
-      <div className="flex flex-1 overflow-hidden">
-        <aside className="w-56 shrink-0 overflow-hidden border-r border-[#313244] flex flex-col">
+      <Group
+        id="retrodev-layout"
+        orientation="horizontal"
+        className="flex flex-1 overflow-hidden"
+        defaultLayout={defaultLayout}
+        onLayoutChanged={onLayoutChanged}
+      >
+        <Panel
+          id="left"
+          defaultSize={15}
+          minSize={10}
+          className="flex flex-col overflow-hidden border-r border-[#313244]"
+        >
           <div className="flex shrink-0 border-b border-[#313244]">
             <button
               onClick={() => setLeftPanelTab("scene")}
@@ -1561,14 +1581,21 @@ export default function App() {
           <div className="min-h-0 flex-1 overflow-hidden">
             {leftPanelTab === "layers" ? <LayerPanel /> : <HierarchyPanel />}
           </div>
-        </aside>
-        <main className="flex-1 overflow-hidden">
+        </Panel>
+        <LayoutSplitter />
+        <Panel id="center" minSize={20} className="overflow-hidden">
           <ViewportPanel />
-        </main>
-        <aside className="w-64 shrink-0 overflow-hidden border-l border-[#313244]">
+        </Panel>
+        <LayoutSplitter />
+        <Panel
+          id="right"
+          defaultSize={20}
+          minSize={15}
+          className="overflow-hidden border-l border-[#313244]"
+        >
           {toolsOpen ? <ToolsPanel onRequestInspector={() => setToolsOpen(false)} /> : <InspectorPanel />}
-        </aside>
-      </div>
+        </Panel>
+      </Group>
 
       <Console />
     </div>

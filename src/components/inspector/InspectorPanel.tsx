@@ -1,6 +1,8 @@
 import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import Panel from "../common/Panel";
 import HardwareLimitsPanel from "./HardwareLimitsPanel";
+import { resolveProjectAssetPath } from "../../core/pathUtils";
 import { useEditorStore } from "../../core/store/editorStore";
 import type { BackgroundLayer, Entity } from "../../core/ipc/sceneService";
 import { persistActiveScene } from "../../core/scenePersistence";
@@ -64,7 +66,7 @@ function PropRow({ label, value, type, sourceState = null, onChange }: PropRowPr
 
   return (
     <tr className="group border-b border-[#313244] last:border-0">
-      <td className="w-1/2 select-none px-3 py-1.5 text-xs text-[#7f849c]">
+      <td className="w-24 min-w-24 max-w-32 select-none px-2 py-1 text-xs text-[#7f849c] align-top">
         <div className="flex items-center gap-2">
           <span>{label}</span>
           {sourceState ? (
@@ -80,7 +82,7 @@ function PropRow({ label, value, type, sourceState = null, onChange }: PropRowPr
           ) : null}
         </div>
       </td>
-      <td className="px-3 py-1.5 text-xs">
+      <td className="px-2 py-1 text-xs">
         {editing ? (
           type === "bool" ? (
             <select
@@ -177,8 +179,8 @@ function InspectorSection({
   children: ReactNode;
 }) {
   return (
-    <div className="border-t border-[#313244] px-3 py-3 first:border-t-0">
-      <div className="mb-2">
+    <div className="border-t border-[#313244] px-3 py-2 first:border-t-0">
+      <div className="mb-1.5">
         <KnowledgeTooltipLabel sectionId={sectionId} title={title} />
       </div>
       {children}
@@ -283,13 +285,13 @@ function RecordListEditor({
           + Add
         </button>
       </div>
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         {draftEntries.map((entry) => (
-          <div key={entry.id} className="flex items-center gap-2">
+          <div key={entry.id} className="grid grid-cols-[1fr_1fr_auto] items-center gap-2">
             <input
               value={entry.key}
               placeholder={keyPlaceholder}
-              className="w-1/2 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 font-mono text-xs text-[#cdd6f4] focus:border-[#cba6f7] focus:outline-none"
+              className="min-w-0 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 font-mono text-xs text-[#cdd6f4] focus:border-[#cba6f7] focus:outline-none"
               onChange={(event) => updateEntry(entry.id, "key", event.target.value)}
               onBlur={handleBlur}
               onKeyDown={(event) => event.key === "Enter" && handleBlur()}
@@ -297,7 +299,7 @@ function RecordListEditor({
             <input
               value={entry.value}
               placeholder={valuePlaceholder}
-              className="flex-1 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 font-mono text-xs text-[#cdd6f4] focus:border-[#cba6f7] focus:outline-none"
+              className="min-w-0 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 font-mono text-xs text-[#cdd6f4] focus:border-[#cba6f7] focus:outline-none"
               onChange={(event) => updateEntry(entry.id, "value", event.target.value)}
               onBlur={handleBlur}
               onKeyDown={(event) => event.key === "Enter" && handleBlur()}
@@ -575,13 +577,13 @@ function LogicVariableSlider({ varName, variable, onChange }: LogicVariableSlide
 
   return (
     <tr className="group border-b border-[#313244] last:border-0">
-      <td className="w-1/2 select-none px-3 py-1.5 text-xs text-[#7f849c]">
+      <td className="w-24 min-w-24 select-none px-2 py-1 text-xs text-[#7f849c]">
         <span>{varName}</span>
         <span className="ml-1 rounded bg-[#cba6f7]/15 px-1 py-0.5 text-[9px] font-mono text-[#cba6f7]">
           {variable.type}
         </span>
       </td>
-      <td className="px-3 py-1.5">
+      <td className="px-2 py-1">
         <div className="flex items-center gap-2">
           <input
             type="range"
@@ -606,6 +608,7 @@ function LogicVariableSlider({ varName, variable, onChange }: LogicVariableSlide
 
 export default function InspectorPanel() {
   const {
+    activeProjectDir,
     activeScene,
     activeSceneSource,
     activeTarget,
@@ -802,6 +805,25 @@ export default function InspectorPanel() {
                 sectionId={section.id}
                 title={section.title}
               >
+                {section.id === "sprite" &&
+                  entity.components.sprite?.asset &&
+                  activeProjectDir && (() => {
+                    const absolutePath = resolveProjectAssetPath(
+                      activeProjectDir,
+                      entity.components.sprite!.asset
+                    );
+                    const previewSrc = convertFileSrc(absolutePath);
+                    return (
+                      <div className="mb-3 flex items-center justify-center overflow-hidden rounded border border-[#313244] bg-[#11111b] p-2">
+                        <img
+                          src={previewSrc}
+                          alt={entity.components.sprite!.asset}
+                          className="max-h-24 max-w-full object-contain"
+                          style={{ imageRendering: "pixelated" }}
+                        />
+                      </div>
+                    );
+                  })()}
                 <table className="w-full text-xs">
                   <tbody>
                     {section.defs.map((def) => (
@@ -852,8 +874,8 @@ export default function InspectorPanel() {
                   <tbody>
                     {entityLogicSummary ? (
                       <tr className="group border-b border-[#313244] last:border-0">
-                        <td className="w-1/2 select-none px-3 py-1.5 text-xs text-[#7f849c]">Graph</td>
-                        <td className="px-3 py-1.5 text-xs">
+                        <td className="w-24 min-w-24 select-none px-2 py-1 text-xs text-[#7f849c]">Graph</td>
+                        <td className="px-2 py-1 text-xs">
                           <span className="font-mono text-[#cdd6f4]">{entityLogicSummary}</span>
                           <button
                             type="button"
@@ -982,8 +1004,8 @@ export default function InspectorPanel() {
               <table className="w-full text-xs">
                 <tbody>
                   <tr className="border-b border-[#313244]">
-                    <td className="w-1/2 select-none px-3 py-1.5 text-xs text-[#7f849c]">ID</td>
-                    <td className="px-3 py-1.5 font-mono text-xs text-[#cdd6f4]">
+                    <td className="w-24 min-w-24 select-none px-2 py-1 text-xs text-[#7f849c]">ID</td>
+                    <td className="px-2 py-1 font-mono text-xs text-[#cdd6f4]">
                       {layer.layer_id}
                     </td>
                   </tr>
