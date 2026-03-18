@@ -1518,6 +1518,8 @@ pub fn run() {
             third_party_get_status,
             third_party_install,
             third_party_detect_rom_dependency,
+            // Photo2SGDK
+            tools::photo2sgdk::art_process_palette,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -2385,7 +2387,7 @@ pub extern "C" fn retro_run() {
     fn list_project_templates_returns_registry_entries() {
         let templates = list_project_templates().expect("list project templates");
 
-        assert_eq!(templates.len(), 7);
+        assert_eq!(templates.len(), 8);
         assert_eq!(templates[0].id, "empty");
         assert_eq!(templates[1].id, "starter_guided");
         assert_eq!(templates[2].id, "platformer_seed");
@@ -2393,6 +2395,7 @@ pub extern "C" fn retro_run() {
         assert_eq!(templates[4].id, "fighter_seed");
         assert_eq!(templates[5].id, "racing_seed");
         assert_eq!(templates[6].id, "action_seed");
+        assert_eq!(templates[7].id, "platformer_gm");
     }
 
     #[test]
@@ -2504,6 +2507,26 @@ pub extern "C" fn retro_run() {
             .join("hero.png")
             .is_file());
         assert!(imported_scene.entities.iter().any(|entity| entity.entity_id == "main_camera"));
+
+        let gm_result = create_project_from_template(
+            "GM Platformer".to_string(),
+            "megadrive".to_string(),
+            base_dir.to_string_lossy().to_string(),
+            "platformer_gm".to_string(),
+            Some(platformer_donor_dir.to_string_lossy().to_string()),
+        )
+        .expect("create platformer_gm project");
+        let gm_project_dir = PathBuf::from(&gm_result.path);
+        let gm_project = load_project(&gm_project_dir).expect("load gm project");
+        let gm_scene = load_scene(&gm_project_dir, &gm_project.entry_scene).expect("load gm scene");
+
+        assert_eq!(gm_scene.layers.as_ref().map(|l| l.len()), Some(5));
+        assert!(gm_scene.collision_map.is_some());
+        assert_eq!(gm_scene.collision_map.as_ref().unwrap().width, 40);
+        assert_eq!(gm_scene.collision_map.as_ref().unwrap().height, 28);
+        assert_eq!(gm_scene.entities.len(), 3);
+        assert_eq!(gm_scene.layers.as_ref().unwrap()[0].name, "BACKGROUND");
+        assert_eq!(gm_scene.layers.as_ref().unwrap()[4].name, "COLLISIONS");
 
         let _ = fs::remove_dir_all(base_dir);
         let _ = fs::remove_dir_all(platformer_donor_dir);

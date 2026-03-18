@@ -1560,7 +1560,7 @@ function MemoryViewer() {
 
       <div className="flex flex-wrap items-end gap-2 border-b border-[#313244] pb-2">
         <div className="flex flex-col gap-1">
-          <label className="text-[10px] text-[#7f849c]">Buscar (Hex ou Texto)</label>
+          <label className="text-[10px] text-[#7f849c]">Buscar Hex...</label>
           <input
             type="text"
             value={searchQuery}
@@ -1571,7 +1571,7 @@ function MemoryViewer() {
                 handleSearchNext();
               }
             }}
-            placeholder="Ex: FF 00 ou LIVES"
+            placeholder="Buscar Hex..."
             className="w-40 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-xs font-mono text-[#cdd6f4] focus:border-[#f9e2af] focus:outline-none"
           />
         </div>

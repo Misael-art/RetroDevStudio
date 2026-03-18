@@ -23,6 +23,7 @@
 - Vite
 - TailwindCSS
 - Zustand para estado de editor
+- react-resizable-panels para layout redimensionavel (docking/splitters)
 - ESLint para lint estatico do frontend
 
 ### Backend / Core
@@ -42,10 +43,11 @@
 - Instalacao sob demanda no Windows a partir do upstream oficial
 
 ### Crates de suporte aprovadas no backend
+- `base64` para codificacao de imagens processadas (Photo2SGDK)
 - `libloading` para carregar cores Libretro
 - `reqwest` para baixar SDKs/cores oficiais sob demanda
 - `zip` e `sevenz-rust2` para extrair pacotes oficiais
-- `image` para staging/conversao de asset real no caminho SNES
+- `image` para staging/conversao de asset real no caminho SNES e processamento Photo2SGDK (quantizacao, palette snapping Mega Drive)
 
 ### Ferramentas aprovadas de validacao e processo
 - `scripts/check-tree.cjs` para validar a estrutura raiz

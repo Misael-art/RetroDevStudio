@@ -17,6 +17,13 @@
 
 ## 1. STATUS ATUAL DO PROJETO
 
+* **O que acabou de acontecer (2026-03-18 - Photo2SGDK Fundacao e Modulo 1):**
+  - Integrado modulo Photo2SGDK como Transformador de Assets 100% isolado (nao altera sgdk_emitter, build_orch ou project.rds).
+  - **Frontend:** Nova aba AT ArtStudio no ViewportPanel; `ArtStudioPanel.tsx` com area de drop, botao Selecionar imagem, Split View (Original vs Processado); `artStudioService.ts` com `artProcessPalette`.
+  - **Backend:** `src-tauri/src/tools/photo2sgdk.rs` com comando IPC `art_process_palette`; quantizacao Median Cut para 15 cores; palette snapping Mega Drive (8 niveis por canal: 0, 36, 73, 109, 146, 182, 219, 255); retorno em base64 PNG.
+  - **Dependencias:** `base64 = "0.22"`; `image` com feature `jpeg` para suporte JPG. Documentado em `docs/02_TECH_STACK.md` e `docs/08_TREE_ARCHITECTURE.md`.
+  - Gates: check:tree, lint, tsc, 151 testes frontend OK; cargo clippy OK.
+
 * **O que acabou de acontecer (2026-03-18 - Frontend Overhaul + Sprint Visual + Hotfix SGDK 2.11+):**
   - **Frontend Overhaul consolidado:**
     - **Passo 1 (Layout):** Layout dinamico com `react-resizable-panels` (Group, Panel, useDefaultLayout) em `App.tsx`; `LayoutSplitter.tsx` com 4px, hover/active; paineis esquerdo 15%, centro flexivel, direito 20%; persistencia em localStorage `retrodev-layout`.

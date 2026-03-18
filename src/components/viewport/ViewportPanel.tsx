@@ -21,6 +21,7 @@ import {
 } from "../../core/ipc/emulatorService";
 import { listenToProjectAssetChanges } from "../../core/ipc/projectWatcherService";
 import NodeGraphEditor from "../nodegraph/NodeGraphEditor";
+import ArtStudioPanel from "../artstudio/ArtStudioPanel";
 import RetroFXDesigner from "../retrofx/RetroFXDesigner";
 import type { Entity } from "../../core/ipc/sceneService";
 import { persistActiveScene } from "../../core/scenePersistence";
@@ -33,6 +34,7 @@ const VIEWPORT_TABS = [
   { id: "game", label: "Jogo", icon: "GM" },
   { id: "logic", label: "Logic", icon: "LG" },
   { id: "retrofx", label: "RetroFX", icon: "FX" },
+  { id: "artstudio", label: "ArtStudio", icon: "AT" },
 ];
 
 const MD_WIDTH = 320;
@@ -349,6 +351,12 @@ export default function ViewportPanel() {
         setAssetCacheVersion((current) => current + 1);
       };
       const markError = () => {
+        console.warn(
+          "[Viewport] Falha ao carregar asset:",
+          absolutePath,
+          "| assetUrl:",
+          assetUrl
+        );
         assetCacheRef.current.set(absolutePath, { status: "error" });
         setAssetCacheVersion((current) => current + 1);
       };
@@ -398,7 +406,10 @@ export default function ViewportPanel() {
 
             markLoaded(canvas, canvas.width, canvas.height);
           })
-          .catch(markError);
+          .catch((err) => {
+            console.warn("[Viewport] PPM fetch falhou:", absolutePath, err);
+            markError();
+          });
 
         return cacheEntry;
       }
@@ -427,7 +438,8 @@ export default function ViewportPanel() {
 
           loadImageElement(assetUrl);
         })
-        .catch(() => {
+        .catch((err) => {
+          console.warn("[Viewport] Asset fetch falhou:", absolutePath, err);
           loadImageElement(assetUrl);
         });
       return cacheEntry;
@@ -1933,7 +1945,7 @@ export default function ViewportPanel() {
       <div className="relative flex-1 overflow-hidden bg-[#11111b] flex flex-col">
         <div
           className={`flex-1 overflow-hidden bg-[#11111b] h-full min-h-0 ${
-            activeViewportTab === "logic" || activeViewportTab === "retrofx"
+            activeViewportTab === "logic" || activeViewportTab === "retrofx" || activeViewportTab === "artstudio"
               ? "flex"
               : "flex flex-col"
           }`}
@@ -2105,18 +2117,22 @@ export default function ViewportPanel() {
                 Assets alterados no disco. {assetHotReloadNotice}
               </div>
             )}
-            <div className="relative">
+            <div
+              className="relative inline-block"
+              style={{
+                width: MD_WIDTH,
+                height: MD_HEIGHT,
+                transform: "scale(1.75)",
+                transformOrigin: "center center",
+              }}
+            >
               <canvas
                 ref={canvasRef}
                 width={MD_WIDTH}
                 height={MD_HEIGHT}
                 data-testid="viewport-game-canvas"
                 className="border border-[#45475a] bg-black"
-                style={{
-                  imageRendering: "pixelated",
-                  width: MD_WIDTH * 1.75,
-                  height: MD_HEIGHT * 1.75,
-                }}
+                style={{ imageRendering: "pixelated" }}
                 tabIndex={0}
               />
               {showPerformanceOverlay && (
@@ -2250,6 +2266,12 @@ export default function ViewportPanel() {
         {activeViewportTab === "retrofx" && (
           <div className="h-full w-full">
             <RetroFXDesigner />
+          </div>
+        )}
+
+        {activeViewportTab === "artstudio" && (
+          <div className="h-full w-full">
+            <ArtStudioPanel />
           </div>
         )}
       </div>

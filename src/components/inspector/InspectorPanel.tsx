@@ -866,6 +866,29 @@ export default function InspectorPanel() {
                     }
                   />
                 ) : null}
+                {(section.id === "sprite" || section.id === "tilemap") && (
+                  <div className="mt-3 border-t border-[#313244] pt-3">
+                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[#45475a]">
+                      🛠️ Otimizações SGDK (Em Breve)
+                    </p>
+                    <div className="flex flex-col gap-2">
+                      <button
+                        type="button"
+                        disabled
+                        className="cursor-not-allowed rounded border border-[#45475a] bg-slate-800/50 px-2 py-1.5 text-[10px] font-mono text-[#6c7086] opacity-60"
+                      >
+                        🎨 Quantizar Cores (16-bits)
+                      </button>
+                      <button
+                        type="button"
+                        disabled
+                        className="cursor-not-allowed rounded border border-[#45475a] bg-slate-800/50 px-2 py-1.5 text-[10px] font-mono text-[#6c7086] opacity-60"
+                      >
+                        🧩 Extrair Tilemap/Tileset
+                      </button>
+                    </div>
+                  </div>
+                )}
               </InspectorSection>
             ))}
             {entity.components.logic ? (

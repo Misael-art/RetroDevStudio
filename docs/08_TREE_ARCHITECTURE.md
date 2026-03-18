@@ -48,6 +48,8 @@ RetroDevStudio/
 |   |   |-- hierarchy/
 |   |   |-- inspector/
 |   |   |-- tools/
+|   |   |-- artstudio/
+|   |   |   `-- ArtStudioPanel.tsx
 |   |   `-- viewport/
 |   |-- core/
 |   |   |-- ipc/
@@ -88,7 +90,9 @@ RetroDevStudio/
 |       |   |-- asset_extractor.rs
 |       |   |-- deep_profiler.rs
 |       |   |-- dependency_manager.rs
-|       |   `-- patch_studio.rs
+|       |   |-- patch_studio.rs
+|       |   |-- photo2sgdk.rs
+|       |   `-- reverse_explorer.rs
 |       `-- ugdm/
 |           |-- components.rs
 |           `-- entities.rs
