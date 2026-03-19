@@ -6,10 +6,12 @@
 node_modules/
 dist/
 *.local
+tsconfig.tsbuildinfo
 
 # --- Rust / Backend ---
 target/
 src-tauri/target-test/
+src-tauri/target-sprint*/
 whitelist_target/
 Cargo.lock
 

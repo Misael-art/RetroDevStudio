@@ -1,17 +1,18 @@
-﻿use std::cmp::Ordering;
+use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::ugdm::components::{
     AudioComponent, CameraComponent, CollisionComponent, Components, InputComponent,
     LogicComponent, PhysicsComponent, SpriteComponent, TilemapComponent, Velocity,
 };
 use crate::ugdm::entities::{
-    BuildConfig, Entity, PaletteEntry, PatchAuditEntry, Project, Resolution, Scene,
-    TemplateMetadata, CURRENT_SCHEMA_VERSION,
+    BuildConfig, CollisionMap, Entity, PaletteEntry, PatchAuditEntry, Project, Resolution, Scene,
+    SceneLayer, TemplateMetadata, CURRENT_SCHEMA_VERSION,
 };
 #[cfg(test)]
 use crate::ugdm::entities::{RetroFXConfig, RetroFXParallaxLayer, RetroFXRasterLine};
@@ -26,6 +27,11 @@ pub const PLATFORMER_PLAYER_ASSET: &str = "assets/sprites/platformer_player.png"
 pub const PLATFORMER_TILESET_ASSET: &str = "assets/tilesets/platformer_level.png";
 pub const PLATFORMER_JUMP_ASSET: &str = "assets/audio/jump.wav";
 const TEMPLATE_REGISTRY_JSON: &str = include_str!("../../../data/template_registry.json");
+
+/// Número máximo de tentativas em operações de I/O sujeitas a sharing violation (antivírus/Windows).
+const FILE_IO_RETRY_ATTEMPTS: u32 = 5;
+/// Intervalo entre tentativas (ms). Padrão para antivírus no Windows.
+const FILE_IO_RETRY_DELAY_MS: u64 = 50;
 
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 pub struct SceneInfo {
@@ -243,6 +249,7 @@ pub fn seed_project_template(
     let donor = resolved_template_donor_path(template_id, donor_path)?;
     match template_id {
         "platformer_seed" => seed_platformer_template(project_dir, &donor),
+        "platformer_gm" => seed_platformer_gm_template(project_dir, &donor),
         _ => import_sgdk_project(project_dir, &donor),
     }
 }
@@ -376,6 +383,58 @@ pub fn seed_platformer_template(project_dir: &Path, donor_path: &Path) -> Result
     Ok(scene)
 }
 
+pub fn seed_platformer_gm_template(project_dir: &Path, donor_path: &Path) -> Result<Scene, LoadError> {
+    validate_platformer_donor_path(donor_path)?;
+
+    let donor_dims = extract_donor_dimensions(donor_path);
+
+    copy_template_asset(
+        &donor_path.join("res").join("images").join("player.png"),
+        &project_dir.join(PLATFORMER_PLAYER_ASSET),
+    )?;
+    copy_template_asset(
+        &donor_path.join("res").join("images").join("level.png"),
+        &project_dir.join(PLATFORMER_TILESET_ASSET),
+    )?;
+
+    let jump_source = donor_path.join("res").join("sound").join("jump.wav");
+    if jump_source.exists() {
+        copy_template_asset(&jump_source, &project_dir.join(PLATFORMER_JUMP_ASSET))?;
+    }
+
+    save_prefab_entity(
+        project_dir,
+        "platformer_player.json",
+        &platformer_player_prefab_with_dims(
+            jump_source.exists(),
+            donor_dims.sprite_frame_width,
+            donor_dims.sprite_frame_height,
+        ),
+    )?;
+    save_prefab_entity(
+        project_dir,
+        "platformer_camera.json",
+        &platformer_camera_prefab(),
+    )?;
+    save_prefab_entity(
+        project_dir,
+        "platformer_tilemap.json",
+        &platformer_tilemap_prefab_with_dims(
+            donor_dims.tilemap_width,
+            donor_dims.tilemap_height,
+        ),
+    )?;
+    save_graph_asset(
+        project_dir,
+        "graphs/platformer_player_logic.json",
+        &platformer_logic_graph_with_sound(jump_source.exists()),
+    )?;
+
+    let scene = platformer_gm_seed_scene();
+    save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
+    Ok(scene)
+}
+
 pub fn import_sgdk_project(project_dir: &Path, sgdk_path: &Path) -> Result<Scene, LoadError> {
     validate_sgdk_project_path(sgdk_path)?;
     let resources = load_sgdk_resources(sgdk_path)?;
@@ -429,6 +488,7 @@ pub fn import_sgdk_project(project_dir: &Path, sgdk_path: &Path) -> Result<Scene
                 let is_meta = frame_w > 32 || frame_h > 32;
                 sprite_entities.push(Entity {
                     entity_id,
+                    display_name: Some(resource.name.clone()),
                     prefab: None,
                     transform: crate::ugdm::entities::Transform { x: 32, y: 32 },
                     components: Components {
@@ -456,6 +516,7 @@ pub fn import_sgdk_project(project_dir: &Path, sgdk_path: &Path) -> Result<Scene
                     let (mw, mh) = tilemap_dims_from_source(&source_path);
                     tilemap_entities.push(Entity {
                         entity_id: format!("{}_tilemap", sgdk_entity_id(&resource.name)),
+                        display_name: Some(resource.name.clone()),
                         prefab: None,
                         transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
                         components: Components {
@@ -489,6 +550,7 @@ pub fn import_sgdk_project(project_dir: &Path, sgdk_path: &Path) -> Result<Scene
     if !audio_sfx.is_empty() || audio_bgm.is_some() {
         scene.entities.push(Entity {
             entity_id: "audio_bank".to_string(),
+            display_name: Some("Audio Bank".to_string()),
             prefab: None,
             transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
             components: Components {
@@ -504,6 +566,7 @@ pub fn import_sgdk_project(project_dir: &Path, sgdk_path: &Path) -> Result<Scene
     if let Some(follow_entity) = first_sprite_id {
         scene.entities.push(Entity {
             entity_id: "main_camera".to_string(),
+            display_name: Some("Main Camera".to_string()),
             prefab: None,
             transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
             components: Components {
@@ -935,6 +998,7 @@ fn platformer_player_prefab_with_dims(
 ) -> Entity {
     Entity {
         entity_id: "platformer_player_prefab".to_string(),
+        display_name: None,
         prefab: None,
         transform: crate::ugdm::entities::Transform { x: 48, y: 120 },
         components: Components {
@@ -993,6 +1057,7 @@ fn platformer_player_prefab_with_dims(
 fn platformer_camera_prefab() -> Entity {
     Entity {
         entity_id: "platformer_camera_prefab".to_string(),
+        display_name: None,
         prefab: None,
         transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
         components: Components {
@@ -1009,6 +1074,7 @@ fn platformer_camera_prefab() -> Entity {
 fn platformer_tilemap_prefab_with_dims(map_width: u32, map_height: u32) -> Entity {
     Entity {
         entity_id: "platformer_tilemap_prefab".to_string(),
+        display_name: None,
         prefab: None,
         transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
         components: Components {
@@ -1038,24 +1104,143 @@ fn platformer_seed_scene() -> Scene {
     scene.entities = vec![
         Entity {
             entity_id: "tilemap_bg".to_string(),
+            display_name: Some("Tilemap".to_string()),
             prefab: Some("platformer_tilemap.json".to_string()),
             transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
             components: Components::default(),
         },
         Entity {
             entity_id: "player".to_string(),
+            display_name: Some("Player".to_string()),
             prefab: Some("platformer_player.json".to_string()),
             transform: crate::ugdm::entities::Transform { x: 48, y: 120 },
             components: Components::default(),
         },
         Entity {
             entity_id: "main_camera".to_string(),
+            display_name: Some("Main Camera".to_string()),
             prefab: Some("platformer_camera.json".to_string()),
             transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
             components: Components::default(),
         },
     ];
     scene
+}
+
+fn platformer_gm_seed_scene() -> Scene {
+    let mut scene = canonical_scene(DEFAULT_SCENE_ID, Some("Platformer GameMaker".to_string()));
+    scene.palettes = vec![PaletteEntry {
+        slot: 0,
+        colors: vec![
+            "#080C14".to_string(), // Deep background
+            "#1D4ED8".to_string(), // Blue
+            "#15803D".to_string(), // Green
+            "#F1F5F9".to_string(), // White
+        ],
+    }];
+
+    // Configure 5 layers: BACKGROUND, MIDGROUND, FOREGROUND, INSTANCES, COLLISIONS
+    scene.layers = Some(vec![
+        SceneLayer {
+            id: "layer_bg".to_string(),
+            name: "BACKGROUND".to_string(),
+            kind: "background".to_string(),
+            visible: true,
+            locked: false,
+            depth: 0,
+            entity_ids: Vec::new(),
+        },
+        SceneLayer {
+            id: "layer_mid".to_string(),
+            name: "MIDGROUND".to_string(),
+            kind: "tile".to_string(),
+            visible: true,
+            locked: false,
+            depth: 1,
+            entity_ids: vec!["tilemap_bg".to_string()],
+        },
+        SceneLayer {
+            id: "layer_fore".to_string(),
+            name: "FOREGROUND".to_string(),
+            kind: "tile".to_string(),
+            visible: true,
+            locked: false,
+            depth: 2,
+            entity_ids: Vec::new(),
+        },
+        SceneLayer {
+            id: "layer_instances".to_string(),
+            name: "INSTANCES".to_string(),
+            kind: "sprite".to_string(),
+            visible: true,
+            locked: false,
+            depth: 3,
+            entity_ids: vec!["player".to_string(), "main_camera".to_string()],
+        },
+        SceneLayer {
+            id: "layer_collisions".to_string(),
+            name: "COLLISIONS".to_string(),
+            kind: "object".to_string(),
+            visible: true,
+            locked: false,
+            depth: 4,
+            entity_ids: Vec::new(),
+        },
+    ]);
+
+    scene.entities = vec![
+        Entity {
+            entity_id: "tilemap_bg".to_string(),
+            display_name: Some("Tilemap".to_string()),
+            prefab: Some("platformer_tilemap.json".to_string()),
+            transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+            components: Components::default(),
+        },
+        Entity {
+            entity_id: "player".to_string(),
+            display_name: Some("Player".to_string()),
+            prefab: Some("platformer_player.json".to_string()),
+            transform: crate::ugdm::entities::Transform { x: 48, y: 120 },
+            components: Components::default(),
+        },
+        Entity {
+            entity_id: "main_camera".to_string(),
+            display_name: Some("Main Camera".to_string()),
+            prefab: Some("platformer_camera.json".to_string()),
+            transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+            components: Components::default(),
+        },
+    ];
+
+    scene.collision_map = Some(platformer_gm_collision_data());
+    scene
+}
+
+fn platformer_gm_collision_data() -> CollisionMap {
+    // Standard 40x28 grid for 320x224 res (8x8 tiles)
+    let width = 40;
+    let height = 28;
+    let mut data = vec![0; (width * height) as usize];
+
+    // Seed a simple ground platform at the bottom (lines 26 and 27)
+    for x in 0..width {
+        let idx = (26 * width + x) as usize;
+        if idx < data.len() {
+            data[idx] = 1;
+        }
+        let idx_last = (27 * width + x) as usize;
+        if idx_last < data.len() {
+            data[idx_last] = 1;
+        }
+    }
+
+    CollisionMap {
+        tile_width: 8,
+        tile_height: 8,
+        width,
+        height,
+        data,
+    }
 }
 
 #[cfg(test)]
@@ -1656,6 +1841,7 @@ fn starter_scene(scene_id: &str, display_name: String, _target: &str) -> Scene {
     }];
     scene.entities = vec![Entity {
         entity_id: "player".to_string(),
+        display_name: Some("Player".to_string()),
         prefab: None,
         transform: crate::ugdm::entities::Transform { x: 48, y: 64 },
         components: Components {
@@ -1725,6 +1911,9 @@ fn migrate_project_value(mut value: serde_json::Value) -> Result<serde_json::Val
             "1.0.0" => migrate_project_1_0_0_to_1_1_0(value)?,
             "1.1.0" => migrate_project_1_1_0_to_1_2_0(value)?,
             "1.2.0" => migrate_project_1_2_0_to_1_3_0(value)?,
+            "1.3.0" => migrate_project_1_3_0_to_1_4_0(value)?,
+            "1.4.0" => migrate_project_1_4_0_to_1_5_0(value)?,
+            "1.5.0" => migrate_project_1_5_0_to_1_6_0(value)?,
             _ => {
                 if let Some(warning) = schema_warning_message("project.rds", &version) {
                     eprintln!("{warning}");
@@ -1758,6 +1947,9 @@ fn migrate_scene_value(mut value: serde_json::Value) -> Result<serde_json::Value
             "1.0.0" => migrate_scene_1_0_0_to_1_1_0(value)?,
             "1.1.0" => migrate_scene_1_1_0_to_1_2_0(value)?,
             "1.2.0" => migrate_scene_1_2_0_to_1_3_0(value)?,
+            "1.3.0" => migrate_scene_1_3_0_to_1_4_0(value)?,
+            "1.4.0" => migrate_scene_1_4_0_to_1_5_0(value)?,
+            "1.5.0" => migrate_scene_1_5_0_to_1_6_0(value)?,
             _ => {
                 if let Some(warning) = schema_warning_message("scene", &version) {
                     eprintln!("{warning}");
@@ -1830,6 +2022,45 @@ fn migrate_project_1_2_0_to_1_3_0(
     Ok(value)
 }
 
+fn migrate_project_1_3_0_to_1_4_0(
+    mut value: serde_json::Value,
+) -> Result<serde_json::Value, LoadError> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| LoadError("project.rds invalido: raiz JSON deve ser um objeto.".into()))?;
+    object.insert(
+        "schema_version".to_string(),
+        serde_json::Value::String("1.4.0".to_string()),
+    );
+    Ok(value)
+}
+
+fn migrate_project_1_4_0_to_1_5_0(
+    mut value: serde_json::Value,
+) -> Result<serde_json::Value, LoadError> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| LoadError("project.rds invalido: raiz JSON deve ser um objeto.".into()))?;
+    object.insert(
+        "schema_version".to_string(),
+        serde_json::Value::String("1.5.0".to_string()),
+    );
+    Ok(value)
+}
+
+fn migrate_project_1_5_0_to_1_6_0(
+    mut value: serde_json::Value,
+) -> Result<serde_json::Value, LoadError> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| LoadError("project.rds invalido: raiz JSON deve ser um objeto.".into()))?;
+    object.insert(
+        "schema_version".to_string(),
+        serde_json::Value::String("1.6.0".to_string()),
+    );
+    Ok(value)
+}
+
 fn migrate_scene_1_0_0_to_1_1_0(
     mut value: serde_json::Value,
 ) -> Result<serde_json::Value, LoadError> {
@@ -1867,6 +2098,108 @@ fn migrate_scene_1_2_0_to_1_3_0(
         serde_json::Value::String("1.3.0".to_string()),
     );
     Ok(value)
+}
+
+fn migrate_scene_1_3_0_to_1_4_0(
+    mut value: serde_json::Value,
+) -> Result<serde_json::Value, LoadError> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| LoadError("scene invalida: raiz JSON deve ser um objeto.".into()))?;
+    object.insert(
+        "schema_version".to_string(),
+        serde_json::Value::String("1.4.0".to_string()),
+    );
+    object
+        .entry("collision_map".to_string())
+        .or_insert(serde_json::Value::Null);
+    Ok(value)
+}
+
+fn migrate_scene_1_4_0_to_1_5_0(
+    mut value: serde_json::Value,
+) -> Result<serde_json::Value, LoadError> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| LoadError("scene invalida: raiz JSON deve ser um objeto.".into()))?;
+    object.insert(
+        "schema_version".to_string(),
+        serde_json::Value::String("1.5.0".to_string()),
+    );
+    object
+        .entry("layers".to_string())
+        .or_insert(serde_json::Value::Null);
+    Ok(value)
+}
+
+fn migrate_scene_1_5_0_to_1_6_0(
+    mut value: serde_json::Value,
+) -> Result<serde_json::Value, LoadError> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| LoadError("scene invalida: raiz JSON deve ser um objeto.".into()))?;
+    object.insert(
+        "schema_version".to_string(),
+        serde_json::Value::String("1.6.0".to_string()),
+    );
+
+    let Some(entities) = object
+        .get_mut("entities")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return Ok(value);
+    };
+
+    for entity in entities {
+        let Some(entity_object) = entity.as_object_mut() else {
+            continue;
+        };
+
+        let current_display_name = entity_object
+            .get("display_name")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty())
+            .map(str::to_string);
+
+        let prefab_value = entity_object
+            .get("prefab")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty())
+            .map(str::to_string);
+
+        entity_object
+            .entry("display_name".to_string())
+            .or_insert(serde_json::Value::Null);
+
+        if current_display_name.is_none() {
+            if let Some(prefab) = prefab_value {
+                if prefab_value_looks_like_legacy_display_name(&prefab) {
+                    entity_object.insert(
+                        "display_name".to_string(),
+                        serde_json::Value::String(prefab),
+                    );
+                    entity_object.insert("prefab".to_string(), serde_json::Value::Null);
+                }
+            }
+        }
+    }
+
+    Ok(value)
+}
+
+fn prefab_value_looks_like_legacy_display_name(prefab_ref: &str) -> bool {
+    let trimmed = prefab_ref.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    trimmed.contains(char::is_whitespace)
+        || trimmed.chars().any(|ch| ch.is_ascii_uppercase())
+        || trimmed
+            .chars()
+            .any(|ch| !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '/' | '.')))
 }
 
 fn schema_version_from_value(value: &serde_json::Value, fallback: &str) -> String {
@@ -2502,10 +2835,40 @@ fn write_json<T: serde::Serialize>(path: impl AsRef<Path>, value: &T) -> Result<
         ))
     })?;
 
-    write_text_atomically(path, &json)
+    write_text_atomically_with_retry(path, &json)
 }
 
-fn write_text_atomically(path: &Path, contents: &str) -> Result<(), LoadError> {
+fn write_text_atomically_with_retry(path: &Path, contents: &str) -> Result<(), LoadError> {
+    let mut last_error = None;
+    for attempt in 1..=FILE_IO_RETRY_ATTEMPTS {
+        match write_text_atomically_once(path, contents) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                let is_retriable = is_retriable_atomic_write_error(&e);
+                last_error = Some(e);
+                if attempt < FILE_IO_RETRY_ATTEMPTS && is_retriable {
+                    thread::sleep(Duration::from_millis(FILE_IO_RETRY_DELAY_MS));
+                    continue;
+                }
+                return Err(last_error.expect("atomic write error"));
+            }
+        }
+    }
+    last_error.map_or_else(
+        || Err(LoadError("Falha desconhecida em write_text_atomically.".into())),
+        Err,
+    )
+}
+
+fn is_retriable_atomic_write_error(error: &LoadError) -> bool {
+    error.0.contains("os error 5")
+        || error.0.contains("os error 32")
+        || error.0.contains("Access is denied")
+        || error.0.contains("Acesso negado")
+        || error.0.contains("Sharing")
+}
+
+fn write_text_atomically_once(path: &Path, contents: &str) -> Result<(), LoadError> {
     let temp_path = temp_path_for(path);
     let mut file = File::create(&temp_path).map_err(|e| {
         LoadError(format!(
@@ -2583,6 +2946,8 @@ fn replace_file_atomically_windows(temp_path: &Path, destination: &Path) -> Resu
     use std::os::windows::ffi::OsStrExt;
 
     type Bool = i32;
+    const MOVEFILE_REPLACE_EXISTING: u32 = 0x0000_0001;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x0000_0008;
 
     unsafe extern "system" {
         fn ReplaceFileW(
@@ -2593,16 +2958,21 @@ fn replace_file_atomically_windows(temp_path: &Path, destination: &Path) -> Resu
             lp_exclude: *mut core::ffi::c_void,
             lp_reserved: *mut core::ffi::c_void,
         ) -> Bool;
+        fn MoveFileExW(
+            lp_existing_file_name: *const u16,
+            lp_new_file_name: *const u16,
+            dw_flags: u32,
+        ) -> Bool;
     }
 
-    if destination.exists() {
-        let destination_wide: Vec<u16> = destination
-            .as_os_str()
-            .encode_wide()
-            .chain(Some(0))
-            .collect();
-        let temp_wide: Vec<u16> = temp_path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let destination_wide: Vec<u16> = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect();
+    let temp_wide: Vec<u16> = temp_path.as_os_str().encode_wide().chain(Some(0)).collect();
 
+    if destination.exists() {
         let replaced = unsafe {
             ReplaceFileW(
                 destination_wide.as_ptr(),
@@ -2618,13 +2988,37 @@ fn replace_file_atomically_windows(temp_path: &Path, destination: &Path) -> Resu
             return Ok(());
         }
 
-        let error = io::Error::last_os_error();
+        let replace_error = io::Error::last_os_error();
+        let moved = unsafe {
+            MoveFileExW(
+                temp_wide.as_ptr(),
+                destination_wide.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        };
+        if moved != 0 {
+            return Ok(());
+        }
+
+        let move_error = io::Error::last_os_error();
         let _ = fs::remove_file(temp_path);
         return Err(LoadError(format!(
-            "Nao foi possivel substituir '{}': {}",
+            "Nao foi possivel substituir '{}': {}. Fallback MoveFileExW tambem falhou: {}",
             destination.display(),
-            error
+            replace_error,
+            move_error
         )));
+    }
+
+    let moved = unsafe {
+        MoveFileExW(
+            temp_wide.as_ptr(),
+            destination_wide.as_ptr(),
+            MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if moved != 0 {
+        return Ok(());
     }
 
     fs::rename(temp_path, destination).map_err(|e| {
@@ -2865,6 +3259,7 @@ mod tests {
                 "fighter_seed",
                 "racing_seed",
                 "action_seed",
+                "platformer_gm",
             ]
         );
         assert!(
@@ -2976,6 +3371,7 @@ mod tests {
             background_layers: Vec::new(),
             entities: vec![Entity {
                 entity_id: "player".to_string(),
+                display_name: None,
                 prefab: None,
                 transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
                 components: Components {
@@ -3018,6 +3414,7 @@ mod tests {
             background_layers: Vec::new(),
             entities: vec![Entity {
                 entity_id: "player".to_string(),
+                display_name: None,
                 prefab: None,
                 transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
                 components: Components {
@@ -3037,6 +3434,7 @@ mod tests {
         let resolved_scene = Scene {
             entities: vec![Entity {
                 entity_id: "player".to_string(),
+                display_name: None,
                 prefab: None,
                 transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
                 components: Components {
@@ -3431,6 +3829,59 @@ mod tests {
     }
 
     #[test]
+    fn migration_chain_upgrades_scene_schema_1_5_0_to_1_6_0_and_promotes_legacy_display_name() {
+        let project_dir = temp_dir("migration-1-5-0-to-1-6-0");
+        fs::create_dir_all(project_dir.join("scenes")).expect("create scenes dir");
+
+        let scene_v1_5 = serde_json::json!({
+            "scene_id": DEFAULT_SCENE_ID,
+            "schema_version": "1.5.0",
+            "display_name": "Main Scene",
+            "background_layers": [],
+            "entities": [
+                {
+                    "entity_id": "boss",
+                    "prefab": "Hero Boss",
+                    "transform": { "x": 32, "y": 48 },
+                    "components": {}
+                },
+                {
+                    "entity_id": "player",
+                    "prefab": "platformer_player.json",
+                    "transform": { "x": 48, "y": 120 },
+                    "components": {}
+                }
+            ],
+            "palettes": [],
+            "collision_map": null,
+            "layers": null
+        });
+
+        fs::write(
+            project_dir.join("scenes").join("main.json"),
+            scene_v1_5.to_string(),
+        )
+        .expect("write scene");
+
+        let scene = load_scene(&project_dir, "scenes/main.json").expect("load migrated scene");
+
+        assert_eq!(scene.schema_version.as_deref(), Some(CURRENT_SCHEMA_VERSION));
+        assert_eq!(scene.entities[0].display_name.as_deref(), Some("Hero Boss"));
+        assert!(scene.entities[0].prefab.is_none());
+        assert_eq!(
+            scene.entities[1].display_name.as_deref(),
+            None,
+            "valid prefab refs should keep display_name empty by default"
+        );
+        assert_eq!(
+            scene.entities[1].prefab.as_deref(),
+            Some("platformer_player.json")
+        );
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
     fn load_project_accepts_canonical_megadrive_fixture() {
         let project = load_project(&fixture_dir("megadrive_dummy")).expect("load fixture");
         let scene =
@@ -3623,6 +4074,7 @@ mod tests {
         let mut scene = canonical_scene(DEFAULT_SCENE_ID, Some("Main Scene".to_string()));
         scene.entities = vec![Entity {
             entity_id: "player".to_string(),
+            display_name: Some("Player".to_string()),
             prefab: None,
             transform: crate::ugdm::entities::Transform { x: 104, y: 88 },
             components: Components {

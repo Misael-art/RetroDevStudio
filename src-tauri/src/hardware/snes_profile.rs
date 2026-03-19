@@ -361,6 +361,7 @@ mod tests {
     fn sprite_entity(id: &str, frame_width: u32, frame_height: u32, palette_slot: u8) -> Entity {
         Entity {
             entity_id: id.to_string(),
+            display_name: None,
             prefab: None,
             transform: Transform { x: 0, y: 0 },
             components: Components {

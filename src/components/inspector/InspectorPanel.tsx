@@ -8,6 +8,7 @@ import type { BackgroundLayer, Entity } from "../../core/ipc/sceneService";
 import { persistActiveScene } from "../../core/scenePersistence";
 import { constrainSpriteFrameSize } from "../../core/sceneConstraints";
 import { deserializeNodeGraph, serializeNodeGraph } from "../nodegraph/NodeGraphEditor";
+import { getEntityDisplayName } from "../../core/entityDisplay";
 import knowledgeBase from "./knowledgeBase.json";
 
 type KnowledgeSectionId =
@@ -337,6 +338,7 @@ function entityPropSections(entity: Entity): PropSection[] {
       title: "Transform",
       defs: [
         { key: "ID", path: ["entity_id"], type: "string" },
+        { key: "Display Name", path: ["display_name"], type: "string" },
         { key: "Prefab", path: ["prefab"], type: "string" },
         { key: "Pos X", path: ["transform", "x"], type: "int" },
         { key: "Pos Y", path: ["transform", "y"], type: "int" },
@@ -785,8 +787,11 @@ export default function InspectorPanel() {
                       : "OBJ"}
               </span>
               <div className="min-w-0 flex-1">
-                <p className="truncate font-mono text-[11px] font-semibold text-[#cdd6f4]" title={entity.entity_id}>
-                  {entity.entity_id}
+                <p className="truncate font-mono text-[11px] font-semibold text-[#cdd6f4]" title={getEntityDisplayName(entity)}>
+                  {getEntityDisplayName(entity)}
+                </p>
+                <p className="truncate text-[9px] text-[#7f849c]" title={entity.entity_id}>
+                  id: {entity.entity_id}
                 </p>
                 {entity.prefab && (
                   <p className="truncate text-[9px] text-[#89b4fa]" title={entity.prefab}>

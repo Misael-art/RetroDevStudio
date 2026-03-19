@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
-**Ultima Atualizacao:** 2026-03-18
-**Ultima sessao:** 2026-03-18 (Sprint Visual: Viewport WYSIWYG, Zooms, Fix Emulador, Memory Viewer + Frontend Overhaul)
-**Fase Atual:** Release candidate / beta testing do desktop Tauri, com ondas M-R concluidas, RC hotfixado, galeria de templates experimental ativa, seed `platformer` sanitizado para Mega Drive, prefabs persistiveis com `activeSceneSource/activeScene`, `graph_ref` externalizado, importacao SGDK generica experimental, overlay `rds/` para projetos SGDK externos com discovery por subdiretorio, UX SGDK import com meta-sprites/zoom/hierarquia/asset tree/onboarding/warnings implementada, Ondas 1 e 2 de paint/erase/paleta contextual/drag-to-paint/brush ghost implementadas, Sprint 1 (Inspector Sliders), Sprint 2 (CollisionMap) e Sprint 3 (Layer System + tauri-plugin-updater) concluidos, Sprint Visual (Viewport WYSIWYG, zoom 175%, fix botoes emulador, busca Memory Viewer) concluida com todos os 6 gates verdes.
+**Ultima Atualizacao:** 2026-03-19
+**Ultima sessao:** 2026-03-19 (Hardening de persistencia/schema/templates/UI e baseline restaurada)
+**Fase Atual:** Release candidate / beta testing do desktop Tauri, com baseline automatizada restaurada (check-tree, lint, tsc, vitest, cargo clippy, cargo test), persistencia atomica endurecida no Windows, schema UGDM explicitamente migrado ate `1.6.0`, galeria de templates alinhada com `platformer_gm`, `prefab` separado de `display_name`, badges `Experimental` reconciliados na UI e nos docs, `nodeCompiler.ts` rebaixado para legado/experimental fora do pipeline canonico e smoke desktop `live-ok` novamente validado no host local. O smoke completo `Build -> Run` no app desktop deste host ainda exige nova investigacao antes de qualquer claim de verde institucional.
 **Branch sugerida:** `feat/desktop-e2e-workflow`
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
@@ -16,6 +16,51 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-19 - Hardening de persistencia, schema, templates e UI):**
+  - **Persistencia Windows:** `project_mgr.rs` passou a tratar `ERROR_ACCESS_DENIED` / `ERROR_SHARING_VIOLATION` como transientes, com retry e fallback `MoveFileExW(..., MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)` para save atomico de projeto/cena.
+  - **Schema UGDM 1.6.0:** cadeia explicita de migracao completada (`1.3 -> 1.4` collision_map, `1.4 -> 1.5` layers, `1.5 -> 1.6` display_name), mantendo leitura retrocompativel e escrita no formato novo.
+  - **Semantica de entidade:** `prefab` voltou a significar apenas referencia canonica; `display_name` foi introduzido no schema/IPC/frontend; labels visiveis agora seguem `display_name ?? basename(prefab) ?? entity_id`.
+  - **Templates ponta a ponta:** `platformer_gm` ficou alinhado entre registry, testes Rust/TS, fixture dummy, wizard e docs.
+  - **UI honesta sobre maturidade:** `Asset Extractor` e `Memory Viewer` voltaram a exibir badge/notice `Experimental`; `nodeCompiler.ts` foi marcado como legado/experimental e nao-canonico.
+  - **Gates verificados nesta rodada:** `check-tree` OK, `eslint` OK, `tsc --noEmit` OK, `vitest` OK (153 testes), `cargo clippy -- -D warnings` OK, `cargo test --lib -- --nocapture` OK (173 aprovados / 0 falhas / 1 ignorado).
+  - **Smoke desktop:** `live-ok` com `--skip-build` voltou a passar no app Tauri local. O smoke completo `Build & Run` do dummy Mega Drive ainda falha neste host com emulador nao ativando apos o clique, portanto nao deve ser anunciado como verde institucional.
+
+### Matriz objetiva por subsistema (2026-03-19)
+
+| Subsistema | Status | Leitura objetiva |
+|------|------|------|
+| Infra desktop Tauri + IPC + store base | Robusto | Integracao Rust/React/Tauri real e coerente. |
+| Persistencia de projeto/cena e save atomico Windows | Robusto | Regressao `os error 5` corrigida e validada pelos gates Rust. |
+| Schema UGDM, paridade Rust-TS e migracoes | Parcial | Tipos e migracoes explicitas agora cobrem ate `1.6.0`, mas ainda requerem repeticao institucional em cenarios de projeto antigo real. |
+| Wizard, onboarding e catalogo de templates | Parcial | Fluxo real e alinhado com `platformer_gm`, ainda em beta manual. |
+| Importacao SGDK / overlay `rds/` | Experimental | Fluxo real, ainda sensivel a QA manual e projetos externos. |
+| Build orchestration MD/SNES | Robusto | Pipeline canonico `UGDM -> workspace -> ROM` continua real e coberto. |
+| Emulacao Libretro / Game View | Parcial | Fluxo real e integrado, mas o smoke desktop completo ainda nao esta verde neste host. |
+| Live validation e hardware profiles | Robusto | Validacao autoritativa continua coerente com os targets. |
+| Collision map | Parcial | Funcional e migrado, ainda precisa de repeticao institucional apos a rodada de schema. |
+| Layer system | Parcial | Funcional e persistente, ainda jovem como superficie de produto. |
+| NodeGraph canonico backend (AST/emitter) | Parcial | Codigo real e util, mas ainda concentrado e complexo. |
+| `nodeCompiler.ts` frontend legado | Fake | Nao sustenta claim de caminho oficial; ficou explicitamente legado/experimental. |
+| RetroFX | Experimental | Superficie real, sem certificacao suficiente para sair desse status. |
+| Deep Profiler | Parcial | Ferramenta real, mas heuristica. |
+| Asset Extractor | Experimental | Ferramenta real, ainda sem certificacao ponta a ponta. |
+| Memory Viewer / VRAM Viewer / Reverse Explorer | Experimental | Ferramentas reais de inspecao, ainda nao robustas como fluxo principal. |
+| ArtStudio | Experimental | Codigo real, ainda em evolucao e sem hardening de produto. |
+| Processo, CI e coerencia documental do checkout atual | Parcial | Gates voltaram a verde, mas ainda ha smoke desktop manual pendente neste host. |
+
+* **O que acabou de acontecer (2026-03-19 - ArtStudio Sprint 2: Motor de Animação e UGDM):**
+  - **useSpriteAnimator.ts:** Hook para loop de animação com requestAnimationFrame e FPS configurável.
+  - **ArtStudioPanel:** Estado com useReducer (SpriteSequence: name, frames, fps, loop); seleção de frames no grid (clique toggle); feedback visual (bg-blue-500/40 + numeração); preview animado com drawImage slice; sequências editáveis (input), deletáveis (lixeira), nova sequência auto-selecionada; botão "Aplicar na Cena" com comportamento misto (Atualizar Entidade Selecionada vs Criar Nova Entidade); validação (sequências com frames); toast "Salvo!" 2s.
+  - **editorEntityFactory:** createSpriteEntityFromAsset aceita frameWidth, frameHeight e animations para integração UGDM.
+  - Gates: check:tree, lint, 151 testes OK.
+
+* **O que acabou de acontecer (2026-03-19 - ArtStudio Sprint 1: Layout e Sprite Slicer):**
+  - ArtStudioPanel reformulado em layout de 3 colunas (estilo Unity Sprite Editor / GameMaker).
+  - **Coluna Esquerda:** Botão Carregar Sprite Sheet (Tauri open), canvas com imagem e grid de fatiamento; inputs Frame Width/Height (padrão 32x32).
+  - **Coluna Meio:** Paleta Mega Drive (16 slots: transparente + 15 cores); lista Sequences (IDLE, RUN, JUMP) com botão + Nova Sequência; dropdown Compressão SGDK (NONE, APLIB, FAST, BEST).
+  - **Coluna Direita:** Preview (placeholder), FPS input, botões Play/Stop/Loop; bloco Output (.res) com string `SPRITE name "path" [W] [H] [COMP]`.
+  - Apenas Tailwind; sem lógica de animação nem ferramentas de desenho nesta sprint. Gates: check:tree, lint, tsc, 151 testes OK.
 
 * **O que acabou de acontecer (2026-03-18 - Photo2SGDK Fundacao e Modulo 1):**
   - Integrado modulo Photo2SGDK como Transformador de Assets 100% isolado (nao altera sgdk_emitter, build_orch ou project.rds).
@@ -706,10 +751,10 @@
   - GitHub Actions `Desktop E2E` (`22606643935`) -> OK em `windows-latest`, com `Run Mega Drive desktop smoke` e `Run SNES desktop smoke` ambos verdes.
 
 * **Proximo passo imediato:**
-  1. Testar discovery de overlay `rds/` no app desktop: apontar o dialog para a raiz de um projeto SGDK externo com overlay e confirmar que o app carrega o projeto corretamente.
-  2. Criar overlays `rds/` para outros projetos SGDK em `F:\Projects\MegaDrive_DEV\SGDK_Engines\` e validar o discovery automatico.
-  3. Avaliar automacao de criacao de overlay: implementar comando IPC `create_rds_overlay` que analisa um projeto SGDK e gera o overlay `rds/` automaticamente (parse de `.res`, criacao de junctions, geracao de `project.rds` e `scenes/main.json`).
-  4. Reexecutar beta manual focado em leigos no wizard, incluindo o novo fluxo de abertura de projeto SGDK externo via overlay.
+  1. Reexecutar smoke desktop `Build -> Run` em host Windows institucional para Mega Drive e SNES apos o hardening de persistencia/schema, sem depender apenas do `live-ok --skip-build`.
+  2. Validar manualmente o wizard com `platformer_gm`, `Projeto Vazio`, `Primeiro Projeto` e `Importar Projeto SGDK`, confirmando persistencia, labels `display_name` e badges `Experimental`.
+  3. Continuar a limpeza estrutural dos arquivos grandes (`project_mgr.rs`, `lib.rs`, `ViewportPanel.tsx`, `ToolsPanel.tsx`, `App.tsx`) por extracoes pequenas e de baixo risco, sem regressao funcional.
+  4. Repetir QA de importacao SGDK/overlay `rds/` em projetos externos reais antes de rebaixar o status `Experimental`.
 
 ---
 
@@ -850,4 +895,3 @@ Continuar o ciclo de release candidate / beta testing do desktop Tauri, agora co
 
 **[Sinalizador de Fim de Leitura]**
 *Se voce e uma IA e acabou de ler este documento no inicio de uma sessao, responda com: **"[Contexto Carregado] Hardening do MVP. Prioridade: preservar o fluxo canonico validado, manter o desktop E2E repetivel e expandir cobertura sem poluir a arquitetura."***
-

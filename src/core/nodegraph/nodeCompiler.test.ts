@@ -1,7 +1,8 @@
 /**
- * nodeCompiler.test.ts — Testes de integração para o compilador Node → C
+ * nodeCompiler.test.ts — Testes do compilador legado/experimental Node → C.
  *
- * Sprint P9: Vitest — cobre compileGraphToC() para Mega Drive e SNES.
+ * Esta suite cobre apenas o utilitario frontend nao-canonico. O pipeline oficial
+ * de codegen continua sendo validado no backend Rust.
  */
 
 import { describe, it, expect } from "vitest";

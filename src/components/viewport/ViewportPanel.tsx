@@ -27,6 +27,7 @@ import type { Entity } from "../../core/ipc/sceneService";
 import { persistActiveScene } from "../../core/scenePersistence";
 import { constrainSpriteFrameSize, ONBOARDING_SPRITE_SIZE } from "../../core/sceneConstraints";
 import { createSpriteEntityFromAsset } from "../../core/editorEntityFactory";
+import { getEntityDisplayName } from "../../core/entityDisplay";
 import { resolveProjectAssetPath } from "../../core/pathUtils";
 
 const VIEWPORT_TABS = [
@@ -123,7 +124,7 @@ function getEntityBounds(entity: Entity, target: "megadrive" | "snes"): EntityBo
 }
 
 function entityDisplayLabel(entity: Entity): string {
-  return entity.entity_id.trim() || entity.prefab?.replace(/\.json$/i, "") || "entity";
+  return getEntityDisplayName(entity);
 }
 
 function releaseViewportAsset(entry: ViewportAssetCacheEntry) {
@@ -2288,7 +2289,12 @@ export default function ViewportPanel() {
         </span>
         {selectedEntityId && !selectedEntityId.startsWith("layer::") && (
           <span className="ml-auto select-none text-[10px] text-[#cba6f7]">
-            {activeScene?.entities.find((entity) => entity.entity_id === selectedEntityId)?.prefab ?? selectedEntityId}
+            {(() => {
+              const selectedEntity = activeScene?.entities.find(
+                (entity) => entity.entity_id === selectedEntityId
+              );
+              return selectedEntity ? getEntityDisplayName(selectedEntity) : selectedEntityId;
+            })()}
           </span>
         )}
       </div>

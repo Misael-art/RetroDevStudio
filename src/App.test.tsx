@@ -204,6 +204,20 @@ function defaultProjectTemplates() {
       availability_reason: "Template Plataforma indisponivel: donor path nao encontrado.",
       default_donor_path: "F:/Projects/MegaDrive_DEV/SGDK_templates/templates/plataform",
     },
+    {
+      id: "platformer_gm",
+      name: "Plataforma GameMaker",
+      description: "Experiencia completa estilo GameMaker: camadas nomeadas, colisao visual, prefabs prontos e paleta vibrante. Mega Drive only.",
+      genre: "platformer",
+      difficulty: "intermediate",
+      features: ["sprite", "tilemap", "physics", "collision", "input", "audio", "camera", "layers"],
+      source_kind: "external_sgdk",
+      recommended_target: "megadrive",
+      experimental: true,
+      available: false,
+      availability_reason: "Template Plataforma GameMaker indisponivel: donor path nao encontrado.",
+      default_donor_path: "F:/Projects/MegaDrive_DEV/SGDK_templates/templates/plataform",
+    },
   ];
 }
 
@@ -1148,7 +1162,8 @@ describe("App build flow", () => {
           entities: [
             {
               entity_id: "hero",
-              prefab: "Hero",
+              display_name: "Hero",
+              prefab: null,
               transform: { x: 16, y: 16 },
               components: {
                 sprite: {

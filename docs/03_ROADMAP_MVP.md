@@ -1,7 +1,7 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-03-17
-**Fase ativa real:** Release candidate / beta testing do desktop Tauri, com RC hotfixado apos validacao manual inicial, galeria de templates experimental ativa, seed `platformer` sanitizado, prefabs/graphs persistiveis, importacao SGDK generica experimental com UX de meta-sprites/zoom/hierarquia/asset tree/onboarding/warnings, Ondas 1 e 2 de paint/erase/paleta contextual/drag-to-paint/brush ghost implementadas, pipeline SGDK alinhado ao `rescomp` e updater em placeholder por politica de dependencias
+**Ultima revisao canonica:** 2026-03-19
+**Fase ativa real:** Release candidate / beta testing do desktop Tauri, com baseline automatizada restaurada, persistencia atomica Windows endurecida, schema UGDM migrado explicitamente ate `1.6.0`, galeria de templates alinhada com `platformer_gm`, semantica `prefab` vs `display_name` separada, importacao SGDK generica ainda `Experimental` e UI novamente coerente com os badges/documentos de maturidade
 
 > **DIRETRIZ PARA AGENTES DE IA**
 > Este roadmap precisa refletir estado real do codigo, nao claims historicas.
@@ -18,7 +18,7 @@
 
 ---
 
-## Estado Real em 2026-03-14
+## Estado Real em 2026-03-19
 
 ### Ja implementado em codigo
 - Editor Tauri + React + TypeScript funcional.
@@ -35,7 +35,7 @@
 - Cobertura desktop E2E dos estados live `LIVE`, `WARN`, `BLOQUEADO`, `ERRO LIVE`, `DESATUAL.` e `ANALISANDO` por target no runner canonico/workflow dedicado.
 - Runner desktop com diagnostico explicito de bootstrap do driver (`code/syscall/path`) para falhas locais de permissao (`spawn EPERM`).
 - Runner desktop com hint operacional para falhas de sessao (`DevToolsActivePort/chrome not reachable`) e script de diagnostico com `-SessionProbe` para evidencia local reproduzivel.
-- Pause/resume do viewport preservando o core Libretro, autosave fresco no hierarchy e persistencia atomica de projeto/cena.
+- Pause/resume do viewport preservando o core Libretro, autosave fresco no hierarchy e persistencia atomica de projeto/cena endurecida no Windows contra `Access denied` / `Sharing violation`.
 - Undo/redo do editor com atalhos globais, pilha limitada e agrupamento de drag no viewport.
 - Grid snap de 8px no Scene View com toggle visual e atalho `G`.
 - Resolucao de prefab no pipeline canonico com merge de entidades antes de validacao/build/codegen.
@@ -43,12 +43,12 @@
 - O `Inspector` agora marca visualmente campos `Herdado` e `Override` para entidades baseadas em prefab.
 - `LogicComponent` agora aceita `graph_ref` com persistencia externalizada em `graphs/*.json`, mantendo `graph` inline apenas para retrocompatibilidade.
 - O seed `platformer` agora nasce com `prefabs/platformer_*.json`, `graphs/platformer_player_logic.json` e `template_metadata` no `project.rds`.
-- O onboarding virou galeria de templates com cards, status de disponibilidade, badge `Experimental`, donor override para templates SGDK externos e botao dedicado `Importar Projeto SGDK`.
+- O onboarding virou galeria de templates com cards, status de disponibilidade, badge `Experimental`, donor override para templates SGDK externos, botao dedicado `Importar Projeto SGDK` e alinhamento ponta a ponta do template `platformer_gm`.
 - O `ViewportPanel` agora renderiza preview real de sprite/tilemap via asset URL, com fallback para caixa colorida.
 - O `NodeGraphEditor` agora mostra labels amigaveis em PT-BR e paleta agrupada para leigos, sem alterar os IDs tecnicos serializados.
 - O backend agora faz parse de `resources.res` e importa projetos SGDK externos sanitizando apenas assets suportados, ignorando `VGM`, ROMs, `out/`, `boot/`, codigo C e headers.
 - Deep Profiler destravado na UI e conectado ao backend real, agora com deteccao adaptativa de SAT por scoring de candidatos em vez de offsets fixos e aviso heuristico funcional sem badge `Experimental`.
-- Asset Extractor destravado na UI e conectado ao backend real, agora com modos `auto`/`2bpp`/`4bpp` e autodeteccao heuristica para tiles 2bpp, permanecendo `Experimental` ate validar extracao ponta a ponta com ROM real.
+- Asset Extractor destravado na UI e conectado ao backend real, agora com modos `auto`/`2bpp`/`4bpp`, notice/badge `Experimental` explicitos e autodeteccao heuristica para tiles 2bpp, permanecendo `Experimental` ate validar extracao ponta a ponta com ROM real.
 - RetroFX agora persiste configuracao de parallax/raster no scene JSON, o designer foi reabilitado e o pipeline SGDK/SNES passou a emitir scroll/parallax real, permanecendo `Experimental` ate validacao com ROM real.
 - NodeGraph agora persiste nos componentes de logica via `LogicComponent.graph`, com roundtrip de serializacao no frontend e autosave no JSON da cena.
 - NodeGraph agora compila os nos persistidos para C no pipeline canonico, com emissao integrada no game loop SGDK/SNES para `event_start`, `sprite_move`, `condition_overlap`, `action_sound`, `effect_parallax`, `effect_raster`, `sprite_anim`, `scroll_tilemap`, `move_camera` e guards booleanos via `logic_and`.
@@ -56,11 +56,11 @@
 - Save states basicos do emulador agora usam serializacao real do Libretro com slot em memoria, IPC dedicado e controles de salvar/carregar no `Game View`.
 - `Game View` agora expoe `pause`, `resume` e `step 1 frame` no proprio painel, reaproveitando `emulator_run_frame` e o loop canonico existente sem pipeline paralelo.
 - `Game View` agora recebe audio real do Libretro por evento `emulator://audio`, reproduz via Web Audio API com fila curta sincronizada ao frame loop e expoe toggle de mute no painel.
-- `ToolsPanel` agora expoe um `Memory Viewer` basico ligado ao Libretro real, com leitura de SRAM/WRAM/VRAM, grid hexadecimal e auto-refresh, mantido como `Experimental`.
-- `project.rds` e `scenes/*.json` agora carregam `schema_version`, aplicam migracao pass-through de `1.0.0` e preservam compatibilidade com fixtures legadas sem o campo.
+- `ToolsPanel` agora expoe um `Memory Viewer` basico ligado ao Libretro real, com leitura de SRAM/WRAM/VRAM, grid hexadecimal, auto-refresh e sinalizacao `Experimental` explicita.
+- `project.rds` e `scenes/*.json` agora carregam `schema_version`, aplicam cadeia explicita de migracao ate `1.6.0` (`collision_map`, `layers`, `display_name`) e preservam compatibilidade com fixtures legadas sem o campo.
 - O editor agora suporta fluxo basico de multi-cena com catalogo, troca/criacao pela `Hierarchy`, persistencia do `scene_path` ativo e atualizacao canonica de `entry_scene` para manter o build alinhado a cena selecionada.
 - O `Inspector` agora edita `Physics`, `Audio` e `Input` no caminho canonico da cena e exibe resumo read-only do `LogicComponent.graph`, mantendo a edicao estrutural do grafo restrita ao `NodeGraph`.
-- Features ainda parciais agora ficam explicitamente marcadas como `Experimental` na UI para nao mentir sobre prontidao.
+- Features ainda parciais agora ficam explicitamente marcadas como `Experimental` na UI para nao mentir sobre prontidao; `nodeCompiler.ts` frontend legado permanece fora do pipeline canonico e deve ser tratado como superficie experimental/nao-oficial.
 - Onda M concluida em codigo: Asset Browser experimental, hot reload de assets, gizmos de resize, VRAM Viewer experimental, performance overlay e rewind no Game View.
 - Onda N concluida em codigo: FSM Builder, flow nodes, timeline sequence e hardware event nodes integrados de ponta a ponta no NodeGraph.
 - Onda O concluida em codigo: monitoramento live de VRAM, sprites por scanline, DMA e bancos de paleta no `HardwareStatus`, toolbar e paineis.
@@ -79,7 +79,7 @@
 - Repeticao institucional do bundle MSI, do smoke desktop e do fluxo oficial upstream em Windows quando build, emulacao, onboarding ou packaging forem alterados.
 - Este host ainda pode exigir diagnostico adicional para bootstrap WebDriver (`DevToolsActivePort` / `chrome not reachable`) e para `spawn EPERM` em builds desktop fora do wrapper MSVC canonico, embora o smoke local MD/SNES tenha voltado a passar nesta sessao de hotfix.
 - Decisao final de governanca do workflow desktop dedicado (`push`/`pull_request` path-filtered, `workflow_dispatch`, `workflow_call` ou gate protegido).
-- Auditoria residual de UX, com prioridade para revalidar o fluxo de autoria pos-hotfix (cena vazia -> sprite inicial -> inspector -> build), o caminho `Novo Projeto -> Build & Run` no Mega Drive apos os ajustes de staging/conversao SGDK, a nova UX de import SGDK (meta-sprites, zoom, hierarquia, asset tree, onboarding, warnings) e as superficies ainda `Experimental` (`VRAM Viewer`, `Reverse Explorer`, `Asset Extractor`, `RetroFX`) antes de transformar o release candidate em beta institucional.
+- Auditoria residual de UX, com prioridade para revalidar o fluxo de autoria pos-hotfix (cena vazia -> sprite inicial -> inspector -> build), o caminho `Novo Projeto -> Build & Run` no Mega Drive e no SNES apos os ajustes de persistencia/schema, a nova UX de import SGDK (meta-sprites, zoom, hierarquia, asset tree, onboarding, warnings) e as superficies ainda `Experimental` (`VRAM Viewer`, `Reverse Explorer`, `Asset Extractor`, `RetroFX`, `ArtStudio`) antes de transformar o release candidate em beta institucional.
 
 ---
 
@@ -162,7 +162,7 @@
 - [x] Reverse Explorer basico e experimental para ROMs Mega Drive e SNES.
 - [x] Deterministic replay com gravacao, reproducao e validacao opcional de framebuffer final.
 - [x] Knowledge Engine basico no Inspector via JSON estatico empacotado no app.
-- [x] Schema migration chain ate `1.2.0` com warning para projetos mais novos que o app.
+- [x] Schema migration chain ate `1.6.0` com suporte explicito para `collision_map`, `layers` e `display_name`, mantendo warning para projetos mais novos que o app.
 - [x] Compliance de patches com aviso legal, bloqueio de export de ROM completa e auditoria em `project.rds`.
 
 ---

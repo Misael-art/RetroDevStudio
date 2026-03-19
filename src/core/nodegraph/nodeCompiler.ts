@@ -1,11 +1,11 @@
 /**
- * nodeCompiler.ts — Conversor bidirecional NodeGraph ↔ C (Fase 3)
+ * nodeCompiler.ts — Utilitario legado/experimental NodeGraph ↔ C.
  *
- * Node → C:  percorre o grafo a partir dos nós "event_start", segue arestas exec
- *            e emite código C equivalente para SGDK/PVSnesLib.
+ * Nao faz parte do pipeline canonico do app. O fluxo oficial Build -> ROM usa o
+ * backend Rust (AST generator + emitters SGDK/PVSnesLib), nao este arquivo.
  *
- * C → Node:  parse básico de main.c gerado (SPR_addSprite, oamSet, parallax calls)
- *            e reconstrói nós correspondentes.
+ * Mantido apenas para experimentacao local, testes de compatibilidade e estudos
+ * de serializacao do NodeGraph no frontend.
  */
 
 import type { NodeGraph, GraphNode, NodeEdge } from "../../components/nodegraph/NodeGraphEditor";

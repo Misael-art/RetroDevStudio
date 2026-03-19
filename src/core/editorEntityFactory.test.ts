@@ -25,7 +25,8 @@ describe("editorEntityFactory", () => {
     });
 
     expect(entity.entity_id).toBe("hero_2");
-    expect(entity.prefab).toBe("Hero");
+    expect(entity.display_name).toBe("Hero");
+    expect(entity.prefab).toBeNull();
     expect(entity.components.sprite).toMatchObject({
       asset: "assets/sprites/hero.ppm",
       frame_width: 16,

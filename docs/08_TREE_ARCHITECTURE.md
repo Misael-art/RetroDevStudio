@@ -19,6 +19,7 @@ RetroDevStudio/
 |
 |-- README.md
 |-- CLAUDE.md
+|-- build-test.bat
 |-- eslint.config.mjs
 |-- package.json
 |-- vite.config.ts
@@ -49,7 +50,8 @@ RetroDevStudio/
 |   |   |-- inspector/
 |   |   |-- tools/
 |   |   |-- artstudio/
-|   |   |   `-- ArtStudioPanel.tsx
+|   |   |   |-- ArtStudioPanel.tsx
+|   |   |   `-- useSpriteAnimator.ts
 |   |   `-- viewport/
 |   |-- core/
 |   |   |-- ipc/
@@ -95,7 +97,8 @@ RetroDevStudio/
 |       |   `-- reverse_explorer.rs
 |       `-- ugdm/
 |           |-- components.rs
-|           `-- entities.rs
+|           |-- entities.rs
+|           `-- serde_helpers.rs
 |
 |-- scripts/
 |   |-- bootstrap.ps1
@@ -140,5 +143,6 @@ RetroDevStudio/
 - `.github/workflows/desktop-e2e.yml` e o workflow canonico de regressao desktop em Windows e ja foi validado em runner GitHub real.
 - `toolchains/libretro/cores/` e o local canonico dos DLLs de core baixados do upstream oficial.
 - `toolchains/webdriver/msedgedriver.exe` e o local canonico do driver nativo usado pelo runner desktop/Tauri e pelos scripts de diagnostico locais.
+- `tsconfig.tsbuildinfo`, `src-tauri/target-test/` e `src-tauri/target-sprint*/` sao artefatos gerados locais e nao fazem parte da arvore canonica versionada.
 - `docs/09_AGENT_DEV_MODE.md` consolida a hierarquia de verdade, os gates e as regras anti-poluicao para agentes.
 - `.github/workflows/ci.yml` e o baseline canonico de validacao automatizada do projeto e deve ser mantido verde em mudancas relevantes.

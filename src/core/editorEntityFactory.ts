@@ -1,4 +1,4 @@
-import type { Entity } from "./ipc/sceneService";
+import type { AnimationDef, Entity } from "./ipc/sceneService";
 import type { ProjectAssetEntry } from "./ipc/toolsService";
 import {
   constrainSpriteFrameSize,
@@ -107,6 +107,9 @@ export function createSpriteEntityFromAsset(options: {
   x?: number;
   y?: number;
   includeStarterLogic?: boolean;
+  frameWidth?: number;
+  frameHeight?: number;
+  animations?: Record<string, AnimationDef>;
 }): Entity {
   const {
     assetPath,
@@ -116,19 +119,23 @@ export function createSpriteEntityFromAsset(options: {
     x = DEFAULT_SPRITE_X,
     y = DEFAULT_SPRITE_Y,
     includeStarterLogic = false,
+    frameWidth: optFrameWidth,
+    frameHeight: optFrameHeight,
+    animations: optAnimations,
   } = options;
   const entityBaseId = slugifyEntityId(suggestedName ?? assetPath);
   const entityId = ensureUniqueEntityId(entityBaseId, existingEntityIds);
   const constrainedFrame = constrainSpriteFrameSize(
     target,
     assetPath,
-    ONBOARDING_SPRITE_SIZE,
-    ONBOARDING_SPRITE_SIZE
+    optFrameWidth ?? ONBOARDING_SPRITE_SIZE,
+    optFrameHeight ?? ONBOARDING_SPRITE_SIZE
   );
 
   return {
     entity_id: entityId,
-    prefab: displayNameFromAsset(suggestedName ?? assetPath),
+    display_name: displayNameFromAsset(suggestedName ?? assetPath),
+    prefab: null,
     transform: { x, y },
     components: {
       sprite: {
@@ -137,7 +144,7 @@ export function createSpriteEntityFromAsset(options: {
         frame_height: constrainedFrame.frameHeight,
         palette_slot: 0,
         priority: "foreground",
-        animations: {},
+        animations: optAnimations ?? {},
       },
       ...(includeStarterLogic
         ? {

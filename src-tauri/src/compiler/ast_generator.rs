@@ -2225,6 +2225,7 @@ mod tests {
             background_layers: Vec::new(),
             entities: vec![Entity {
                 entity_id: "hero".to_string(),
+                display_name: None,
                 prefab: None,
                 transform: Transform { x: 32, y: 48 },
                 components: Components {
@@ -2311,6 +2312,7 @@ mod tests {
             background_layers: Vec::new(),
             entities: vec![Entity {
                 entity_id: "background".to_string(),
+                display_name: None,
                 prefab: None,
                 transform: Transform { x: 16, y: 24 },
                 components: Components {
@@ -2378,6 +2380,7 @@ mod tests {
             entities: vec![
                 Entity {
                     entity_id: "player".to_string(),
+                    display_name: None,
                     prefab: None,
                     transform: Transform { x: 16, y: 24 },
                     components: Components {
@@ -2395,6 +2398,7 @@ mod tests {
                 },
                 Entity {
                     entity_id: "badnik".to_string(),
+                    display_name: None,
                     prefab: None,
                     transform: Transform { x: 40, y: 28 },
                     components: Components {
@@ -2469,6 +2473,7 @@ mod tests {
             entities: vec![
                 Entity {
                     entity_id: "player".to_string(),
+                    display_name: None,
                     prefab: None,
                     transform: Transform { x: 16, y: 24 },
                     components: Components {
@@ -2486,6 +2491,7 @@ mod tests {
                 },
                 Entity {
                     entity_id: "ring".to_string(),
+                    display_name: None,
                     prefab: None,
                     transform: Transform { x: 40, y: 28 },
                     components: Components {
@@ -2544,6 +2550,7 @@ mod tests {
             entities: vec![
                 Entity {
                     entity_id: "player".to_string(),
+                    display_name: None,
                     prefab: None,
                     transform: Transform { x: 16, y: 24 },
                     components: Components {
@@ -2556,6 +2563,7 @@ mod tests {
                 },
                 Entity {
                     entity_id: "support".to_string(),
+                    display_name: None,
                     prefab: None,
                     transform: Transform { x: 40, y: 24 },
                     components: Components {
@@ -2622,6 +2630,7 @@ mod tests {
             background_layers: Vec::new(),
             entities: vec![Entity {
                 entity_id: "hero".to_string(),
+                display_name: None,
                 prefab: None,
                 transform: Transform { x: 32, y: 48 },
                 components: Components {
@@ -2717,6 +2726,7 @@ mod tests {
             entities: vec![
                 Entity {
                     entity_id: "player".to_string(),
+                    display_name: None,
                     prefab: None,
                     transform: Transform { x: 16, y: 24 },
                     components: Components {
@@ -2729,6 +2739,7 @@ mod tests {
                 },
                 Entity {
                     entity_id: "support".to_string(),
+                    display_name: None,
                     prefab: None,
                     transform: Transform { x: 40, y: 24 },
                     components: Components {
@@ -2942,6 +2953,7 @@ mod tests {
             background_layers: Vec::new(),
             entities: vec![Entity {
                 entity_id: "controller".to_string(),
+                display_name: None,
                 prefab: None,
                 transform: Transform { x: 0, y: 0 },
                 components: Components {
@@ -3052,6 +3064,7 @@ mod tests {
             background_layers: Vec::new(),
             entities: vec![Entity {
                 entity_id: "hero".to_string(),
+                display_name: None,
                 prefab: None,
                 transform: Transform { x: 16, y: 24 },
                 components: Components {
@@ -3169,6 +3182,7 @@ mod tests {
             background_layers: Vec::new(),
             entities: vec![Entity {
                 entity_id: "controller".to_string(),
+                display_name: None,
                 prefab: None,
                 transform: Transform { x: 0, y: 0 },
                 components: Components {
@@ -3248,6 +3262,7 @@ mod tests {
             entities: vec![
                 Entity {
                     entity_id: "hero".to_string(),
+                    display_name: None,
                     prefab: None,
                     transform: Transform { x: 16, y: 24 },
                     components: Components {
@@ -3266,6 +3281,7 @@ mod tests {
                 },
                 Entity {
                     entity_id: "camera_rig".to_string(),
+                    display_name: None,
                     prefab: None,
                     transform: Transform { x: 0, y: 0 },
                     components: Components {
@@ -3407,6 +3423,7 @@ mod tests {
             entities: vec![
                 Entity {
                     entity_id: "player".to_string(),
+                    display_name: None,
                     prefab: None,
                     transform: Transform { x: 16, y: 24 },
                     components: Components {
@@ -3439,6 +3456,7 @@ mod tests {
                 },
                 Entity {
                     entity_id: "enemy".to_string(),
+                    display_name: None,
                     prefab: None,
                     transform: Transform { x: 32, y: 24 },
                     components: Components {
@@ -3466,6 +3484,7 @@ mod tests {
                 },
                 Entity {
                     entity_id: "pickup".to_string(),
+                    display_name: None,
                     prefab: None,
                     transform: Transform { x: 24, y: 24 },
                     components: Components {
@@ -3641,6 +3660,7 @@ mod tests {
             background_layers: Vec::new(),
             entities: vec![Entity {
                 entity_id: "logic_host".to_string(),
+                display_name: None,
                 prefab: None,
                 transform: Transform { x: 0, y: 0 },
                 components: Components {
@@ -3758,6 +3778,7 @@ mod tests {
                 background_layers: Vec::new(),
                 entities: vec![Entity {
                     entity_id: format!("logic_host_{}", index),
+                    display_name: None,
                     prefab: None,
                     transform: Transform { x: 0, y: 0 },
                     components: Components {
@@ -3868,6 +3889,7 @@ mod tests {
             entities: vec![
                 Entity {
                     entity_id: "player".to_string(),
+                    display_name: None,
                     prefab: None,
                     transform: Transform { x: 16, y: 24 },
                     components: Components {
@@ -3900,6 +3922,7 @@ mod tests {
                 },
                 Entity {
                     entity_id: "enemy".to_string(),
+                    display_name: None,
                     prefab: None,
                     transform: Transform { x: 48, y: 24 },
                     components: Components {
@@ -4033,6 +4056,7 @@ mod tests {
             background_layers: Vec::new(),
             entities: vec![Entity {
                 entity_id: "player".to_string(),
+                display_name: None,
                 prefab: None,
                 transform: Transform { x: 16, y: 24 },
                 components: Components {
@@ -4129,6 +4153,7 @@ mod tests {
             background_layers: Vec::new(),
             entities: vec![Entity {
                 entity_id: "player".to_string(),
+                display_name: None,
                 prefab: None,
                 transform: Transform { x: 16, y: 24 },
                 components: Components {
@@ -4203,6 +4228,7 @@ mod tests {
             background_layers: Vec::new(),
             entities: vec![Entity {
                 entity_id: "player".to_string(),
+                display_name: None,
                 prefab: None,
                 transform: Transform { x: 16, y: 24 },
                 components: Components {
@@ -4284,6 +4310,7 @@ mod tests {
             background_layers: Vec::new(),
             entities: vec![Entity {
                 entity_id: "player".to_string(),
+                display_name: None,
                 prefab: None,
                 transform: Transform { x: 16, y: 24 },
                 components: Components {

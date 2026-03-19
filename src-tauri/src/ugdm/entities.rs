@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
-use super::components::Components;
 
-pub const CURRENT_SCHEMA_VERSION: &str = "1.5.0";
+use super::components::Components;
+use super::serde_helpers::deserialize_f64_to_i32;
+
+pub const CURRENT_SCHEMA_VERSION: &str = "1.6.0";
 
 fn default_schema_version() -> String {
     CURRENT_SCHEMA_VERSION.to_string()
@@ -12,7 +14,9 @@ fn default_schema_version() -> String {
 /// Posição em pixels inteiros (hardware 16-bit não usa float).
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct Transform {
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
     pub x: i32,
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
     pub y: i32,
 }
 
@@ -21,6 +25,9 @@ pub struct Transform {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Entity {
     pub entity_id: String,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     pub prefab: Option<String>,
     pub transform: Transform,
     #[serde(default)]
@@ -31,7 +38,9 @@ pub struct Entity {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ScrollSpeed {
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
     pub x: i32,
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
     pub y: i32,
 }
 
@@ -56,7 +65,9 @@ pub struct PaletteEntry {
 pub struct RetroFXParallaxLayer {
     pub id: String,
     pub name: String,
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
     pub speed_x: i32,
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
     pub speed_y: i32,
     pub enabled: bool,
 }
@@ -65,6 +76,7 @@ pub struct RetroFXParallaxLayer {
 pub struct RetroFXRasterLine {
     pub id: String,
     pub scanline: u32,
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
     pub offset_x: i32,
     pub enabled: bool,
 }

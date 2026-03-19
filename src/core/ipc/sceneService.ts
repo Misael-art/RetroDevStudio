@@ -108,6 +108,7 @@ export interface Components {
 
 export interface Entity {
   entity_id: string;
+  display_name?: string | null;
   prefab?: string | null;
   transform: Transform;
   components: Components;

@@ -14,6 +14,7 @@ import {
   createSpriteEntityFromAsset,
   pickDefaultSpriteAsset,
 } from "../../core/editorEntityFactory";
+import { getEntityDisplayName } from "../../core/entityDisplay";
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -40,7 +41,7 @@ const GROUP_LABELS: Record<string, string> = {
 
 interface EntityGroup {
   type: string;
-  entities: Array<{ entity_id: string; prefab?: string | null; components?: { sprite?: unknown; collision?: unknown; tilemap?: unknown; camera?: unknown; audio?: unknown } }>;
+  entities: Array<{ entity_id: string; display_name?: string | null; prefab?: string | null; components?: { sprite?: unknown; collision?: unknown; tilemap?: unknown; camera?: unknown; audio?: unknown } }>;
 }
 
 function entityType(entity: { components?: { sprite?: unknown; collision?: unknown; tilemap?: unknown; camera?: unknown; audio?: unknown } }): string {
@@ -49,10 +50,6 @@ function entityType(entity: { components?: { sprite?: unknown; collision?: unkno
   if (entity.components?.sprite) return "sprite";
   if (entity.components?.audio && !entity.components?.sprite) return "audio";
   return "object";
-}
-
-function entityDisplayName(entity: { entity_id: string; prefab?: string | null }): string {
-  return entity.entity_id.trim() || entity.prefab?.replace(/\.json$/i, "") || "entity";
 }
 
 export default function HierarchyPanel() {
@@ -174,7 +171,7 @@ export default function HierarchyPanel() {
   const filterLower = filterText.toLowerCase();
   const filteredEntities = filterText
     ? entities.filter((entity) =>
-      [entityDisplayName(entity), entity.prefab ?? ""].some((value) =>
+      [getEntityDisplayName(entity), entity.prefab ?? ""].some((value) =>
         value.toLowerCase().includes(filterLower)
       )
     )
@@ -251,7 +248,7 @@ export default function HierarchyPanel() {
       await persistActiveScene(
         activeProjectDir,
         "Hierarchy",
-        `Sprite '${entity.prefab ?? entity.entity_id}' criado a partir de '${assetPath}'.`
+        `Sprite '${getEntityDisplayName(entity)}' criado a partir de '${assetPath}'.`
       );
     } catch (error: unknown) {
       logMessage("error", `[Hierarchy] Falha ao criar sprite inicial: ${describeError(error)}`);
@@ -261,15 +258,16 @@ export default function HierarchyPanel() {
   }
 
   async function handleAddEntity() {
-    const prefab = newName.trim();
-    if (!activeProjectDir || !activeScene || !prefab || isAdding) return;
+    const displayName = newName.trim();
+    if (!activeProjectDir || !activeScene || !displayName || isAdding) return;
 
     setIsAdding(true);
     try {
-      const id = `${prefab.toLowerCase().replace(/\s+/g, "_")}_${Date.now()}`;
+      const id = `${displayName.toLowerCase().replace(/\s+/g, "_")}_${Date.now()}`;
       const newEntity = {
         entity_id: id,
-        prefab,
+        display_name: displayName,
+        prefab: null,
         transform: { x: 16, y: 16 },
         components: {},
       };
@@ -277,7 +275,7 @@ export default function HierarchyPanel() {
       addEntity(newEntity);
       setSelectedEntityId(id);
 
-      const saved = await persistActiveScene(activeProjectDir, "Hierarchy", `Entidade '${newEntity.prefab}' adicionada.`);
+      const saved = await persistActiveScene(activeProjectDir, "Hierarchy", `Entidade '${displayName}' adicionada.`);
 
       if (saved) {
         setShowAddDialog(false);
@@ -305,7 +303,8 @@ export default function HierarchyPanel() {
     setIsDeleting(true);
     try {
       const entityId = selectedEntityId;
-      const name = activeScene.entities.find((entity) => entity.entity_id === entityId)?.prefab ?? entityId;
+      const targetEntity = activeScene.entities.find((entity) => entity.entity_id === entityId);
+      const name = targetEntity ? getEntityDisplayName(targetEntity) : entityId;
       removeEntity(entityId);
 
       const saved = await persistActiveScene(activeProjectDir, "Hierarchy", `Entidade '${name}' removida.`);
@@ -527,7 +526,7 @@ export default function HierarchyPanel() {
                         >
                           <span className="text-[#7f849c]">{TYPE_ICON[type] ?? "○"}</span>
                           <span title={entity.prefab ? `Prefab: ${entity.prefab}` : entity.entity_id}>
-                            {entityDisplayName(entity)}
+                            {getEntityDisplayName(entity)}
                           </span>
                           <span className="ml-auto text-[#45475a]">{type}</span>
                         </li>

@@ -4,8 +4,10 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import Panel from "../common/Panel";
 import { useEditorStore } from "../../core/store/editorStore";
 import ContextualPalette from "./ContextualPalette";
+import { getEntityDisplayName } from "../../core/entityDisplay";
 import { persistActiveScene } from "../../core/scenePersistence";
 import { listenToProjectAssetChanges } from "../../core/ipc/projectWatcherService";
+import { ExperimentalNotice, HeuristicNotice } from "./ToolNotices";
 import type { Scene } from "../../core/ipc/sceneService";
 import { createSpriteEntityFromAsset } from "../../core/editorEntityFactory";
 import {
@@ -96,45 +98,6 @@ function PathField({
           ...
         </button>
       </div>
-    </div>
-  );
-}
-
-export function ExperimentalNotice({
-  summary,
-  compact = false,
-}: {
-  summary: string;
-  compact?: boolean;
-}) {
-  if (compact) {
-    return (
-      <div className="flex shrink-0 items-center gap-2 border-b border-[#313244] bg-[#181825]/80 px-2 py-1">
-        <span className="rounded border border-[#fab387] px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-[#fab387]">
-          Experimental
-        </span>
-        <span className="min-w-0 truncate text-[9px] text-[#7f849c]" title={summary}>
-          {summary}
-        </span>
-      </div>
-    );
-  }
-  return (
-    <div className="rounded border border-[#fab387] bg-[#181825] p-2">
-      <div className="flex items-center gap-2">
-        <span className="rounded border border-[#fab387] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#fab387]">
-          Experimental
-        </span>
-        <span className="text-[10px] leading-tight text-[#7f849c]">{summary}</span>
-      </div>
-    </div>
-  );
-}
-
-function HeuristicNotice({ summary }: { summary: string }) {
-  return (
-    <div className="rounded border border-[#89b4fa] bg-[#181825] p-2 text-[10px] leading-tight text-[#89b4fa]">
-      {summary}
     </div>
   );
 }
@@ -421,6 +384,8 @@ function AssetExtractor() {
 
   return (
     <div className="flex flex-col gap-3 p-3">
+      <ExperimentalNotice summary="Extracao heuristica de tiles e paletas direto da ROM. Excelente para exploracao rapida, mas ainda nao substitui um pipeline curado de importacao." />
+
       <PathField
         label="ROM (.md / .bin)"
         value={romPath}
@@ -540,20 +505,20 @@ function collectAssetReferences(scene: Scene | null): Map<string, AssetReference
     pushReference(
       entity.components.sprite?.asset,
       entity.entity_id,
-      `Sprite · ${entity.prefab ?? entity.entity_id}`
+      `Sprite · ${getEntityDisplayName(entity)}`
     );
     pushReference(
       entity.components.tilemap?.tileset,
       entity.entity_id,
-      `Tilemap · ${entity.prefab ?? entity.entity_id}`
+      `Tilemap · ${getEntityDisplayName(entity)}`
     );
 
     const audio = entity.components.audio;
     if (audio?.bgm) {
-      pushReference(audio.bgm, entity.entity_id, `BGM · ${entity.prefab ?? entity.entity_id}`);
+      pushReference(audio.bgm, entity.entity_id, `BGM · ${getEntityDisplayName(entity)}`);
     }
     for (const [action, assetPath] of Object.entries(audio?.sfx ?? {})) {
-      pushReference(assetPath, entity.entity_id, `SFX ${action} · ${entity.prefab ?? entity.entity_id}`);
+      pushReference(assetPath, entity.entity_id, `SFX ${action} · ${getEntityDisplayName(entity)}`);
     }
   }
 
@@ -852,7 +817,7 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
       const saved = await persistActiveScene(
         activeProjectDir,
         "Assets",
-        `Sprite '${entity.prefab ?? entity.entity_id}' instanciado a partir de '${asset.relative_path}'.`
+        `Sprite '${getEntityDisplayName(entity)}' instanciado a partir de '${asset.relative_path}'.`
       );
       if (!saved) {
         return;
@@ -1483,6 +1448,8 @@ function MemoryViewer() {
 
   return (
     <div className="flex flex-col gap-3 p-3">
+      <ExperimentalNotice summary="Leitor bruto de memoria do core ativo. Util para inspecao e debugging, mas a navegacao ainda e de baixo nivel e sujeita ao estado do emulador." />
+
       <div className="flex flex-wrap gap-3">
         <div className="flex flex-col gap-1">
           <label className="text-[10px] text-[#7f849c]">Regiao</label>
@@ -1988,8 +1955,8 @@ const TOOL_TABS: { id: ToolTab; label: string; icon: string; experimental?: bool
   { id: "assets", label: "Asset Browser", icon: "AB", experimental: true },
   { id: "patch", label: "Patch Studio", icon: "PT" },
   { id: "profiler", label: "Deep Profiler", icon: "DP" },
-  { id: "extractor", label: "Asset Extractor", icon: "AE" },
-  { id: "memory", label: "Memory Viewer", icon: "MV" },
+  { id: "extractor", label: "Asset Extractor", icon: "AE", experimental: true },
+  { id: "memory", label: "Memory Viewer", icon: "MV", experimental: true },
   { id: "vram", label: "VRAM Viewer", icon: "VV", experimental: true },
   { id: "reverse", label: "Reverse Explorer", icon: "RX", experimental: true },
 ];

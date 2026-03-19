@@ -43,6 +43,7 @@ import {
   getLiveBuildWarningSummary,
   useLiveValidationController,
 } from "./core/validation/liveValidationController";
+import { getEntityDisplayName } from "./core/entityDisplay";
 
 function ToolbarButton({
   label,
@@ -904,7 +905,7 @@ export default function App() {
     const entity = activeScene.entities.find((item) => item.entity_id === currentSelected);
     if (!entity) return;
     setCopiedEntity(entity);
-    logMessage("info", `[Editar] Entidade copiada: ${entity.prefab ?? entity.entity_id}`);
+    logMessage("info", `[Editar] Entidade copiada: ${getEntityDisplayName(entity)}`);
   }
 
   async function handlePasteEntity() {
@@ -921,7 +922,7 @@ export default function App() {
       };
       addEntity(pasted);
       if (await persistActiveScene(activeProjectDir, "Editar")) {
-        logMessage("success", `[Editar] Entidade colada: ${pasted.prefab ?? pasted.entity_id}`);
+        logMessage("success", `[Editar] Entidade colada: ${getEntityDisplayName(pasted)}`);
       }
     } catch (error) {
       logMessage("error", `[Editar] Falha ao colar entidade: ${describeError(error)}`);
