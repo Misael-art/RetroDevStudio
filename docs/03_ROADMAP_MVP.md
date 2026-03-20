@@ -1,7 +1,7 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 **Status:** Documento vivo
 **Ultima revisao canonica:** 2026-03-20
-**Fase ativa real:** Release candidate / beta testing do desktop Tauri, com baseline automatizada restaurada, persistencia atomica Windows endurecida, schema UGDM migrado explicitamente ate `1.6.0`, galeria de templates alinhada com `platformer_gm`, semantica `prefab` vs `display_name` separada, importacao SGDK generica ainda `Experimental`, UI novamente coerente com os badges/documentos de maturidade, smoke desktop completo `Build -> ROM -> Run` reproduzido novamente no host local durante a sprint de consolidacao do Game View e ArtStudio institucionalizado na baseline do workspace como superficie `Experimental`, com validacao minima de dados, roundtrip de persistencia/schema cobertos por testes e ingestao visual endurecida para imagens externas com diagnostico claro. A repeticao em baseline commitada continua obrigatoria antes de qualquer claim institucional definitiva.
+**Fase ativa real:** Release candidate / beta testing do desktop Tauri, com baseline automatizada restaurada, persistencia atomica Windows endurecida, schema UGDM migrado explicitamente ate `1.6.0`, galeria de templates alinhada com `platformer_gm`, semantica `prefab` vs `display_name` separada, importacao SGDK generica ainda `Experimental`, UI novamente coerente com os badges/documentos de maturidade, smoke desktop completo `Build -> ROM -> Run` reproduzido novamente no host local durante a sprint de consolidacao do Game View, ArtStudio institucionalizado na baseline do workspace como superficie `Experimental`, com validacao minima de dados, roundtrip de persistencia/schema cobertos por testes e ingestao visual endurecida para imagens externas com diagnostico claro, RetroFX com editor visual-first de parallax/raster ainda `Experimental`, e o shell principal agora reorganizado como workspace adaptativo com rail lateral, painel contextual, presets de layout, focus mode e console colapsavel por padrao. A repeticao em baseline commitada continua obrigatoria antes de qualquer claim institucional definitiva.
 
 > **DIRETRIZ PARA AGENTES DE IA**
 > Este roadmap precisa refletir estado real do codigo, nao claims historicas.
@@ -49,7 +49,7 @@
 - O backend agora faz parse de `resources.res` e importa projetos SGDK externos sanitizando apenas assets suportados, ignorando `VGM`, ROMs, `out/`, `boot/`, codigo C e headers.
 - Deep Profiler destravado na UI e conectado ao backend real, agora com deteccao adaptativa de SAT por scoring de candidatos em vez de offsets fixos e aviso heuristico funcional sem badge `Experimental`.
 - Asset Extractor destravado na UI e conectado ao backend real, agora com modos `auto`/`2bpp`/`4bpp`, notice/badge `Experimental` explicitos e autodeteccao heuristica para tiles 2bpp, permanecendo `Experimental` ate validar extracao ponta a ponta com ROM real.
-- RetroFX agora persiste configuracao de parallax/raster no scene JSON, o designer foi reabilitado e o pipeline SGDK/SNES passou a emitir scroll/parallax real, permanecendo `Experimental` ate validacao com ROM real.
+- RetroFX agora persiste configuracao de parallax/raster no scene JSON, o designer foi reabilitado como editor visual-first com lista de camadas, preview animado, controles pedagogicos e persistencia segura na cena fonte, e o pipeline SGDK/SNES continua emitindo scroll/parallax real; a superficie permanece `Experimental` ate validacao com ROM/cenas reais.
 - NodeGraph agora persiste nos componentes de logica via `LogicComponent.graph`, com roundtrip de serializacao no frontend e autosave no JSON da cena.
 - NodeGraph agora compila os nos persistidos para C no pipeline canonico, com emissao integrada no game loop SGDK/SNES para `event_start`, `sprite_move`, `condition_overlap`, `action_sound`, `effect_parallax`, `effect_raster`, `sprite_anim`, `scroll_tilemap`, `move_camera` e guards booleanos via `logic_and`.
 - Patch Studio agora gera BPS com `SourceCopy` quando encontra runs reaproveitaveis da ROM original, reduzindo tamanho de patch sem alterar o apply canonico ja validado.
@@ -60,6 +60,7 @@
 - `ToolsPanel` agora expoe um `Memory Viewer` basico ligado ao Libretro real, com leitura de SRAM/WRAM/VRAM, grid hexadecimal, auto-refresh e sinalizacao `Experimental` explicita.
 - O `ArtStudio` agora integra a baseline do workspace como superficie `Experimental`, gravando animacoes no schema canonico da entidade sprite com validacao minima de origem do asset, nomes de sequencia e dimensoes de frame antes de persistir.
 - O `ArtStudio` agora aceita ingestao de imagens externas para preparo visual, com suporte frontend a `PNG`, `BMP`, `JPG/JPEG`, `GIF`, `WebP` e `PPM`, fallback de carregamento via `Blob`, metadados do arquivo e bloqueio explicito de "Aplicar na Cena" enquanto o asset ainda nao estiver em `assets/sprites`.
+- O shell principal agora funciona como workspace adaptativo: rail lateral por contexto (`Scene`, `Game`, `Logic`, `FX`, `Art`, `Debug`), top bar reduzida a acoes globais, painel direito alternando entre `Inspector` e `Tools`, presets `Artist/Logic/Debug/Playtest`, focus mode e console fechado por padrao com autoabertura em erro.
 - `project.rds` e `scenes/*.json` agora carregam `schema_version`, aplicam cadeia explicita de migracao ate `1.6.0` (`collision_map`, `layers`, `display_name`) e preservam compatibilidade com fixtures legadas sem o campo.
 - O editor agora suporta fluxo basico de multi-cena com catalogo, troca/criacao pela `Hierarchy`, persistencia do `scene_path` ativo e atualizacao canonica de `entry_scene` para manter o build alinhado a cena selecionada.
 - O `Inspector` agora edita `Physics`, `Audio` e `Input` no caminho canonico da cena e exibe resumo read-only do `LogicComponent.graph`, mantendo a edicao estrutural do grafo restrita ao `NodeGraph`.
@@ -83,6 +84,7 @@
 - Este host continua sujeito a diagnosticos ocasionais de WebDriver em cenarios locais (`DevToolsActivePort` / `chrome not reachable` ou policies de `spawn`), mas o smoke desktop canonico `Build -> ROM -> Run` voltou a passar nesta sprint de consolidacao do Game View.
 - Decisao final de governanca do workflow desktop dedicado (`push`/`pull_request` path-filtered, `workflow_dispatch`, `workflow_call` ou gate protegido).
 - O `ArtStudio` permanece `Experimental`: a persistencia/schema estao validados, mas ainda falta prova ponta a ponta de animacao autorada chegando ao runtime por fluxo institucional completo.
+- O shell principal agora esta muito mais organizado e responsivo, mas ainda nao implementa docking livre nem serializacao rica de layouts por workspace; por enquanto, a baseline canonica e de presets/contexto, nao de window manager completo.
 - Auditoria residual de UX, com prioridade para revalidar o fluxo de autoria pos-hotfix (cena vazia -> sprite inicial -> inspector -> build), o caminho `Novo Projeto -> Build & Run` no Mega Drive e no SNES apos os ajustes de persistencia/schema, a nova UX de import SGDK (meta-sprites, zoom, hierarquia, asset tree, onboarding, warnings) e as superficies ainda `Experimental` (`VRAM Viewer`, `Reverse Explorer`, `Asset Extractor`, `RetroFX`, `ArtStudio`) antes de transformar o release candidate em beta institucional.
 
 ---
@@ -147,7 +149,7 @@
 - [x] NodeGraph UI agora persiste o grafo em `LogicComponent.graph` com roundtrip de serializacao.
 - [x] NodeGraph compilado para fragmentos C no pipeline SGDK/SNES para os nos MVP, scroll/camera/animacao e efeitos visuais (`event_start`, `sprite_move`, `condition_overlap`, `action_sound`, `effect_parallax`, `effect_raster`, `sprite_anim`, `scroll_tilemap`, `move_camera`, `logic_and` como guard booleano).
 - [x] NodeGraph agora inclui FSM Builder, flow nodes, timeline sequence e hardware event nodes no editor e no pipeline canonico SGDK/SNES.
-- [x] RetroFX UI existente.
+- [x] RetroFX visual-first com lista de camadas, preview animado e controles pedagogicos no editor.
 - [x] RetroFX persiste configuracao no scene JSON, exporta parallax/raster real no pipeline SGDK/SNES e permanece `Experimental` ate validar com ROM real.
 - [x] `Game View` consome audio do emulador via `emulator://audio` e Web Audio com mute local, sem criar loop paralelo ao `emulator_run_frame`.
 - [x] A camada de UX do editor agora inclui hot reload, resize gizmos, VRAM Viewer, performance overlay e rewind integrados ao fluxo canonico.

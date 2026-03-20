@@ -327,10 +327,11 @@ export const useEditorStore = create<EditorState>((set) => ({
           timestamp: new Date().toLocaleTimeString(),
         },
       ],
+      consoleVisible: level === "error" ? true : state.consoleVisible,
     })),
   clearConsole: () => set({ consoleEntries: [] }),
 
-  consoleVisible: true,
+  consoleVisible: false,
   toggleConsole: () => set((state) => ({ consoleVisible: !state.consoleVisible })),
 
   hwStatus: null,

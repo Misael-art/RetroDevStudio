@@ -1,11 +1,19 @@
 import { useEffect, useRef, useState } from "react";
-import { Group, Panel, useDefaultLayout } from "react-resizable-panels";
+import {
+  Group,
+  Panel,
+  type GroupImperativeHandle,
+  useDefaultLayout,
+} from "react-resizable-panels";
 import Console from "./components/common/Console";
 import LayoutSplitter from "./components/common/LayoutSplitter";
 import HierarchyPanel from "./components/hierarchy/HierarchyPanel";
 import LayerPanel from "./components/hierarchy/LayerPanel";
 import InspectorPanel from "./components/inspector/InspectorPanel";
-import ToolsPanel from "./components/tools/ToolsPanel";
+import ToolsPanel, {
+  type ToolTab,
+  type ToolWorkspace,
+} from "./components/tools/ToolsPanel";
 import ViewportPanel from "./components/viewport/ViewportPanel";
 import { buildProject, generateCCode, validateProject } from "./core/ipc/buildService";
 import { emulatorLoadRom, emulatorStop } from "./core/ipc/emulatorService";
@@ -81,6 +89,106 @@ function ToolbarButton({
       className={`rounded px-2 py-1 text-xs font-semibold transition-colors ${palette} disabled:cursor-not-allowed disabled:opacity-40`}
     >
       {label}
+    </button>
+  );
+}
+
+type ShellWorkspace = "scene" | "game" | "logic" | "retrofx" | "artstudio" | "debug";
+type LayoutPresetId = "artist" | "logic" | "debug" | "playtest";
+type LayoutMap = {
+  left: number;
+  center: number;
+  right: number;
+};
+
+const LAYOUT_STORAGE_KEY = "retrodev-shell-saved-layout";
+
+const WORKSPACE_ITEMS: {
+  id: ShellWorkspace;
+  label: string;
+  icon: string;
+  description: string;
+}[] = [
+  { id: "scene", label: "Scene", icon: "SC", description: "Composicao e edicao da cena" },
+  { id: "game", label: "Game", icon: "GM", description: "Playtest e runtime" },
+  { id: "logic", label: "Logic", icon: "LG", description: "Fluxo visual e scripting" },
+  { id: "retrofx", label: "FX", icon: "FX", description: "Profundidade e parallax" },
+  { id: "artstudio", label: "Art", icon: "AT", description: "Sprites, slicing e preview" },
+  { id: "debug", label: "Debug", icon: "DB", description: "Analise e ferramentas avancadas" },
+];
+
+function getPresetLayout(preset: LayoutPresetId, width: number): LayoutMap {
+  const compact = width < 1180;
+  const narrow = width < 960;
+
+  if (preset === "playtest") {
+    return { left: 0, center: 100, right: 0 };
+  }
+
+  if (preset === "debug") {
+    if (narrow) {
+      return { left: 0, center: 54, right: 46 };
+    }
+    if (compact) {
+      return { left: 10, center: 50, right: 40 };
+    }
+    return { left: 14, center: 50, right: 36 };
+  }
+
+  if (preset === "logic") {
+    if (narrow) {
+      return { left: 0, center: 68, right: 32 };
+    }
+    if (compact) {
+      return { left: 14, center: 62, right: 24 };
+    }
+    return { left: 15, center: 60, right: 25 };
+  }
+
+  if (narrow) {
+    return { left: 0, center: 72, right: 28 };
+  }
+  if (compact) {
+    return { left: 16, center: 64, right: 20 };
+  }
+  return { left: 18, center: 60, right: 22 };
+}
+
+function WorkspaceRailButton({
+  icon,
+  label,
+  active,
+  title,
+  onClick,
+  accent = "default",
+}: {
+  icon: string;
+  label: string;
+  active: boolean;
+  title: string;
+  onClick: () => void;
+  accent?: "default" | "debug";
+}) {
+  const activeTone =
+    accent === "debug"
+      ? "border-[#f9e2af]/45 bg-[#f9e2af]/12 text-[#f9e2af]"
+      : "border-[#cba6f7]/45 bg-[#cba6f7]/14 text-[#e9d5ff]";
+
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      className={`group flex w-full flex-col items-center gap-1 rounded-2xl border px-2 py-2 text-center transition-colors ${
+        active
+          ? activeTone
+          : "border-transparent text-[#7f849c] hover:border-[#313244] hover:bg-[#11111b] hover:text-[#e5e7eb]"
+      }`}
+    >
+      <span className="rounded-xl border border-current/20 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]">
+        {icon}
+      </span>
+      <span className="text-[10px] font-semibold text-current">{label}</span>
     </button>
   );
 }
@@ -294,11 +402,22 @@ export default function App() {
     undo,
     redo,
     setProjectSourceKind,
+    consoleVisible,
+    toggleConsole,
   } = useEditorStore();
 
   const [building, setBuilding] = useState(false);
-  const [toolsOpen, setToolsOpen] = useState(false);
+  const [rightPanelMode, setRightPanelMode] = useState<"inspector" | "tools">("inspector");
+  const [toolPanelActive, setToolPanelActive] = useState<ToolTab>("setup");
+  const [toolPanelWorkspace, setToolPanelWorkspace] = useState<ToolWorkspace>("editing");
+  const [toolPanelShowAdvanced, setToolPanelShowAdvanced] = useState(false);
+  const [activeWorkspace, setActiveWorkspace] = useState<ShellWorkspace>("scene");
   const [leftPanelTab, setLeftPanelTab] = useState<"scene" | "layers">("scene");
+  const [focusedShell, setFocusedShell] = useState(false);
+  const [layoutPreset, setLayoutPreset] = useState<LayoutPresetId>("artist");
+  const [shellWidth, setShellWidth] = useState(
+    typeof window !== "undefined" ? window.innerWidth : 1440
+  );
   const [newProjName, setNewProjName] = useState("MeuProjeto");
   const [newProjTarget, setNewProjTarget] = useState<"megadrive" | "snes">("megadrive");
   const [newProjBaseDir, setNewProjBaseDir] = useState("");
@@ -313,6 +432,9 @@ export default function App() {
   const [copiedEntity, setCopiedEntity] = useState<Entity | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const buildInFlightRef = useRef(false);
+  const panelGroupRef = useRef<GroupImperativeHandle | null>(null);
+  const lastNonFocusLayoutRef = useRef<LayoutMap | null>(null);
+  const applyingLayoutRef = useRef(false);
   const tauriInternals =
     (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   const automationEnabled =
@@ -333,6 +455,156 @@ export default function App() {
   const selectedTemplateMegadriveOnly = selectedTemplate?.source_kind === "external_sgdk";
 
   useLiveValidationController();
+
+  useEffect(() => {
+    function handleResize() {
+      setShellWidth(window.innerWidth);
+    }
+
+    window.addEventListener("resize", handleResize);
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
+  }, []);
+
+  function openToolsWorkspace(
+    activeTool: ToolTab,
+    workspace: ToolWorkspace,
+    showAdvanced = false
+  ) {
+    setRightPanelMode("tools");
+    setToolPanelActive(activeTool);
+    setToolPanelWorkspace(workspace);
+    setToolPanelShowAdvanced(showAdvanced);
+  }
+
+  function applyShellLayout(nextLayout: LayoutMap) {
+    applyingLayoutRef.current = true;
+    panelGroupRef.current?.setLayout(nextLayout);
+    onLayoutChanged(nextLayout);
+    window.setTimeout(() => {
+      applyingLayoutRef.current = false;
+    }, 0);
+  }
+
+  function applyLayoutPreset(preset: LayoutPresetId) {
+    setFocusedShell(false);
+    setLayoutPreset(preset);
+    const nextLayout = getPresetLayout(preset, shellWidth);
+    lastNonFocusLayoutRef.current = nextLayout;
+    applyShellLayout(nextLayout);
+  }
+
+  function toggleFocusMode() {
+    if (!focusedShell) {
+      const currentLayout = panelGroupRef.current?.getLayout();
+      if (currentLayout) {
+        lastNonFocusLayoutRef.current = {
+          left: currentLayout.left ?? 0,
+          center: currentLayout.center ?? 100,
+          right: currentLayout.right ?? 0,
+        };
+      }
+      setFocusedShell(true);
+      applyShellLayout({ left: 0, center: 100, right: 0 });
+      if (consoleVisible) {
+        toggleConsole();
+      }
+      return;
+    }
+
+    setFocusedShell(false);
+    applyShellLayout(
+      lastNonFocusLayoutRef.current ?? getPresetLayout(layoutPreset, shellWidth)
+    );
+  }
+
+  function saveCurrentLayout() {
+    const layout = panelGroupRef.current?.getLayout();
+    if (!layout) {
+      return;
+    }
+
+    localStorage.setItem(
+      LAYOUT_STORAGE_KEY,
+      JSON.stringify({
+        left: layout.left ?? 0,
+        center: layout.center ?? 100,
+        right: layout.right ?? 0,
+      } satisfies LayoutMap)
+    );
+    logMessage("success", "[Layout] Layout atual salvo para restauracao rapida.");
+  }
+
+  function restoreSavedLayout() {
+    const raw = localStorage.getItem(LAYOUT_STORAGE_KEY);
+    if (!raw) {
+      logMessage("warn", "[Layout] Nenhum layout salvo neste host.");
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as Partial<LayoutMap>;
+      const nextLayout: LayoutMap = {
+        left: Number(parsed.left ?? 18),
+        center: Number(parsed.center ?? 60),
+        right: Number(parsed.right ?? 22),
+      };
+      setFocusedShell(false);
+      lastNonFocusLayoutRef.current = nextLayout;
+      applyShellLayout(nextLayout);
+      logMessage("success", "[Layout] Layout salvo restaurado.");
+    } catch {
+      logMessage("error", "[Layout] Falha ao ler layout salvo neste host.");
+    }
+  }
+
+  useEffect(() => {
+    if (focusedShell) {
+      return;
+    }
+
+    applyShellLayout(getPresetLayout(layoutPreset, shellWidth));
+  }, [layoutPreset, shellWidth]);
+
+  useEffect(() => {
+    if (focusedShell) {
+      return;
+    }
+
+    if (activeWorkspace === "debug") {
+      setLayoutPreset("debug");
+      return;
+    }
+
+    if (activeWorkspace === "logic") {
+      setLayoutPreset("logic");
+      return;
+    }
+
+    if (activeWorkspace === "game") {
+      setLayoutPreset("playtest");
+      return;
+    }
+
+    setLayoutPreset("artist");
+  }, [activeWorkspace, focusedShell]);
+
+  useEffect(() => {
+    if (activeWorkspace === "debug") {
+      return;
+    }
+
+    if (
+      activeViewportTab === "scene" ||
+      activeViewportTab === "game" ||
+      activeViewportTab === "logic" ||
+      activeViewportTab === "retrofx" ||
+      activeViewportTab === "artstudio"
+    ) {
+      setActiveWorkspace(activeViewportTab);
+    }
+  }, [activeViewportTab, activeWorkspace]);
 
   useEffect(() => {
     if (showProjectWizard && inputRef.current) {
@@ -560,7 +832,7 @@ export default function App() {
       );
       if (missing.length === 0) return true;
 
-      setToolsOpen(true);
+      openToolsWorkspace("setup", "editing");
       const summary = missing
         .map((item) => `- ${item.label}: ${item.issues[0] ?? item.install_dir}`)
         .join("\n");
@@ -816,7 +1088,9 @@ export default function App() {
       const result = await emulatorLoadRom(romPath);
       if (!result.ok) {
         setEmulatorLoaded(false);
-        if (result.message.includes("Nenhum core Libretro")) setToolsOpen(true);
+        if (result.message.includes("Nenhum core Libretro")) {
+          openToolsWorkspace("setup", "editing");
+        }
         logMessage("error", `[Emulador] ${result.message}`);
         return;
       }
@@ -899,6 +1173,26 @@ export default function App() {
     }
   }
 
+  async function handleSaveScene() {
+    if (!activeProjectDir) {
+      logMessage("warn", "Nenhum projeto aberto.");
+      return;
+    }
+
+    try {
+      const saved = await persistActiveScene(
+        activeProjectDir,
+        "Save",
+        "Cena salva no projeto ativo."
+      );
+      if (saved) {
+        requestHwValidationRefresh();
+      }
+    } catch (error) {
+      logMessage("error", `[Save] Falha ao salvar: ${describeError(error)}`);
+    }
+  }
+
   function handleCopyEntity() {
     const { activeScene, selectedEntityId: currentSelected } = useEditorStore.getState();
     if (!currentSelected || currentSelected.startsWith("layer::") || !activeScene) return;
@@ -927,6 +1221,19 @@ export default function App() {
     } catch (error) {
       logMessage("error", `[Editar] Falha ao colar entidade: ${describeError(error)}`);
       await reloadSceneFromDisk(activeProjectDir, "Editar");
+    }
+  }
+
+  async function handlePlay() {
+    if (!emulatorLoaded) {
+      await handleEmulatorLoadRom();
+      return;
+    }
+
+    setActiveViewportTab("game");
+    setActiveWorkspace("game");
+    if (emulPaused) {
+      handleEmulatorPause();
     }
   }
 
@@ -991,7 +1298,9 @@ export default function App() {
       const loadResult = await emulatorLoadRom(result.rom_path);
       if (!loadResult.ok) {
         setEmulatorLoaded(false);
-        if (loadResult.message.includes("Nenhum core Libretro")) setToolsOpen(true);
+        if (loadResult.message.includes("Nenhum core Libretro")) {
+          openToolsWorkspace("setup", "editing");
+        }
         logMessage("error", `[Emulador] ${loadResult.message}`);
         return;
       }
@@ -1025,6 +1334,22 @@ export default function App() {
     resetHwValidation();
     setSelectedEntityId(null);
     logMessage("info", "Projeto fechado.");
+  }
+
+  function handleWorkspaceSelect(workspace: ShellWorkspace) {
+    setActiveWorkspace(workspace);
+
+    if (workspace === "debug") {
+      openToolsWorkspace("profiler", "debug", true);
+      return;
+    }
+
+    setActiveViewportTab(workspace);
+    setRightPanelMode("inspector");
+
+    if (workspace === "scene") {
+      setLeftPanelTab("scene");
+    }
   }
 
   useEffect(() => {
@@ -1388,25 +1713,76 @@ export default function App() {
         </div>
       )}
 
-      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[#313244] bg-[#181825] px-4 py-2">
-        <span className="mr-2 text-sm font-bold text-[#cba6f7]">RetroDev Studio</span>
+      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[#313244] bg-[linear-gradient(180deg,#181825,#111827)] px-4 py-3">
+        <div className="mr-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#cba6f7]">
+            RetroDev Studio
+          </div>
+          <div className="mt-1 text-xs text-[#94a3b8]">
+            Workspace adaptativo para autoria, playtest e debug.
+          </div>
+        </div>
         <ToolbarButton label="Novo" onClick={() => setShowProjectWizard(true)} />
         <ToolbarButton label="Abrir" onClick={() => void handleOpenProject()} />
-        <ToolbarButton label="Fechar" onClick={() => void handleCloseProject()} disabled={!activeProjectDir} />
-        <ToolbarButton label="Validar" onClick={() => void handleValidate()} disabled={!activeProjectDir} />
-        <ToolbarButton label="Gerar C" onClick={() => void handleGenerateC()} disabled={!activeProjectDir} />
-        <div
-          className="flex items-center gap-2"
-          title={
-            liveBuildBlocked
-              ? buildDisabledReason ?? undefined
-              : buildWarningSummary ?? undefined
-          }
-        >
+        <ToolbarButton
+          label="Salvar"
+          onClick={() => void handleSaveScene()}
+          disabled={!activeProjectDir}
+          accent="primary"
+        />
+        <ToolbarButton
+          label="Build & Run"
+          onClick={() => void handleBuildAndRun()}
+          disabled={building || !activeProjectDir || liveBuildBlocked}
+          accent="success"
+          testId="toolbar-build-run"
+          title={liveBuildBlocked ? buildDisabledReason ?? undefined : buildWarningSummary ?? undefined}
+          describedBy={liveBuildBlocked ? "build-disabled-reason" : undefined}
+        />
+        <ToolbarButton
+          label="Play"
+          onClick={() => void handlePlay()}
+          disabled={!activeProjectDir}
+          accent="default"
+        />
+        <ToolbarButton
+          label="Stop"
+          onClick={() => void handleEmulatorStop()}
+          disabled={!emulatorLoaded}
+          accent="danger"
+        />
+      </header>
+
+      <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-[#313244] bg-[#11111b] px-4 py-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            data-testid="active-project-name"
+            className="max-w-40 truncate rounded-full border border-[#313244] bg-[#181825] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#cdd6f4]"
+          >
+            {activeProjectName || "Sem projeto"}
+          </span>
+          <div className="flex overflow-hidden rounded-full border border-[#313244] bg-[#0b1020]">
+            {(["megadrive", "snes"] as const).map((target) => (
+              <button
+                key={target}
+                onClick={() => void handleSwitchTarget(target)}
+                disabled={!activeProjectDir || activeTarget === target}
+                className={`px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] ${
+                  activeTarget === target
+                    ? target === "megadrive"
+                      ? "bg-[#a6e3a1] text-[#1e1e2e]"
+                      : "bg-[#89b4fa] text-[#1e1e2e]"
+                    : "text-[#7f849c] disabled:cursor-not-allowed"
+                }`}
+              >
+                {target === "megadrive" ? "MD" : "SNES"}
+              </button>
+            ))}
+          </div>
           {buildLiveIndicator && (
             <span
               data-testid="build-live-state"
-              className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${
+              className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${
                 buildLiveIndicator.tone === "error"
                   ? "bg-[#f38ba8]/15 text-[#f38ba8]"
                   : buildLiveIndicator.tone === "warn"
@@ -1420,15 +1796,6 @@ export default function App() {
               {buildLiveIndicator.label}
             </span>
           )}
-          <ToolbarButton
-            label="Build & Run"
-            onClick={() => void handleBuildAndRun()}
-            disabled={building || !activeProjectDir || liveBuildBlocked}
-            accent="success"
-            testId="toolbar-build-run"
-            title={liveBuildBlocked ? buildDisabledReason ?? undefined : buildWarningSummary ?? undefined}
-            describedBy={liveBuildBlocked ? "build-disabled-reason" : undefined}
-          />
           {liveBuildBlocked && buildDisabledReason && (
             <span
               id="build-disabled-reason"
@@ -1490,16 +1857,8 @@ export default function App() {
             </>
           )}
         </div>
-        <ToolbarButton label="Carregar ROM" onClick={() => void handleEmulatorLoadRom()} />
-        <ToolbarButton label={emulPaused ? "Retomar" : "Pausar"} onClick={handleEmulatorPause} disabled={activeViewportTab !== "game" || !emulatorLoaded} />
-        <ToolbarButton label="Parar" onClick={() => void handleEmulatorStop()} disabled={activeViewportTab !== "game" || !emulatorLoaded} accent="danger" />
-        <ToolbarButton label="Copiar" onClick={handleCopyEntity} disabled={!selectedEntityId || selectedEntityId.startsWith("layer::")} />
-        <ToolbarButton label="Colar" onClick={() => void handlePasteEntity()} disabled={!copiedEntity || !activeProjectDir} />
-        <ToolbarButton label={toolsOpen ? "Inspector" : "Tools"} onClick={() => setToolsOpen((open) => !open)} accent="primary" />
-        <ToolbarButton label="Sobre" onClick={() => setShowAbout(true)} />
-        <ToolbarButton label="Atalhos" onClick={() => setShowShortcuts(true)} />
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           {hwStatus && hwStatus.vram_limit > 0 && (
             <ToolbarVramBudget
               used={hwStatus.vram_used}
@@ -1520,83 +1879,184 @@ export default function App() {
               limit={hwStatus.palette_banks_limit}
             />
           )}
-          <span data-testid="active-project-name" className="max-w-36 truncate text-[10px] text-[#45475a]">
-            {activeProjectName || "Sem projeto"}
-          </span>
-          <div className="flex overflow-hidden rounded border border-[#313244] bg-[#11111b]">
-            {(["megadrive", "snes"] as const).map((target) => (
+          <div className="flex items-center gap-1 rounded-full border border-[#313244] bg-[#181825] p-1">
+            {(["artist", "logic", "debug", "playtest"] as LayoutPresetId[]).map((preset) => (
               <button
-                key={target}
-                onClick={() => void handleSwitchTarget(target)}
-                disabled={!activeProjectDir || activeTarget === target}
-                className={`px-2 py-0.5 text-[10px] font-bold ${
-                  activeTarget === target
-                    ? target === "megadrive"
-                      ? "bg-[#a6e3a1] text-[#1e1e2e]"
-                      : "bg-[#89b4fa] text-[#1e1e2e]"
-                    : "text-[#45475a] disabled:cursor-not-allowed"
+                key={preset}
+                type="button"
+                onClick={() => applyLayoutPreset(preset)}
+                className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors ${
+                  !focusedShell && layoutPreset === preset
+                    ? "bg-[#cba6f7] text-[#111827]"
+                    : "text-[#94a3b8] hover:bg-[#1f2937] hover:text-[#e5e7eb]"
                 }`}
               >
-                {target === "megadrive" ? "MD" : "SNES"}
+                {preset === "artist"
+                  ? "Artist"
+                  : preset === "logic"
+                    ? "Logic"
+                    : preset === "debug"
+                      ? "Debug"
+                      : "Playtest"}
               </button>
             ))}
           </div>
+          <ToolbarButton label="Salvar layout" onClick={saveCurrentLayout} />
+          <ToolbarButton label="Restaurar layout" onClick={restoreSavedLayout} />
+          <ToolbarButton
+            label={focusedShell ? "Sair do foco" : "Focus"}
+            onClick={toggleFocusMode}
+          />
+          <ToolbarButton
+            label={rightPanelMode === "tools" ? "Inspector" : "Tools"}
+            onClick={() =>
+              rightPanelMode === "tools"
+                ? setRightPanelMode("inspector")
+                : openToolsWorkspace("palette", activeWorkspace === "debug" ? "debug" : "editing", activeWorkspace === "debug")
+            }
+            accent="primary"
+          />
+          <ToolbarButton label="Validar" onClick={() => void handleValidate()} disabled={!activeProjectDir} />
+          <ToolbarButton label="Gerar C" onClick={() => void handleGenerateC()} disabled={!activeProjectDir} />
+          <ToolbarButton label="Copiar" onClick={handleCopyEntity} disabled={!selectedEntityId || selectedEntityId.startsWith("layer::")} />
+          <ToolbarButton label="Colar" onClick={() => void handlePasteEntity()} disabled={!copiedEntity || !activeProjectDir} />
+          <ToolbarButton
+            label={consoleVisible ? "Console" : "Console"}
+            onClick={toggleConsole}
+          />
+          <ToolbarButton label="Atalhos" onClick={() => setShowShortcuts(true)} />
+          <ToolbarButton label="Sobre" onClick={() => setShowAbout(true)} />
+          <ToolbarButton label="Fechar" onClick={() => void handleCloseProject()} disabled={!activeProjectDir} />
         </div>
-      </header>
+      </div>
 
-      <Group
-        id="retrodev-layout"
-        orientation="horizontal"
-        className="flex flex-1 overflow-hidden"
-        defaultLayout={defaultLayout}
-        onLayoutChanged={onLayoutChanged}
-      >
-        <Panel
-          id="left"
-          defaultSize={15}
-          minSize={10}
-          className="flex flex-col overflow-hidden border-r border-[#313244]"
-        >
-          <div className="flex shrink-0 border-b border-[#313244]">
-            <button
-              onClick={() => setLeftPanelTab("scene")}
-              className={`flex-1 py-0.5 text-[10px] font-semibold transition-colors ${
-                leftPanelTab === "scene"
-                  ? "bg-[#313244] text-[#cdd6f4]"
-                  : "text-[#45475a] hover:text-[#a6adc8]"
-              }`}
-            >
-              Cena
-            </button>
-            <button
-              onClick={() => setLeftPanelTab("layers")}
-              className={`flex-1 py-0.5 text-[10px] font-semibold transition-colors ${
-                leftPanelTab === "layers"
-                  ? "bg-[#313244] text-[#cdd6f4]"
-                  : "text-[#45475a] hover:text-[#a6adc8]"
-              }`}
-            >
-              Camadas
-            </button>
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <aside className="flex w-[74px] shrink-0 flex-col justify-between border-r border-[#313244] bg-[#0b1020]">
+          <div className="flex flex-col gap-2 px-2 py-3">
+            {WORKSPACE_ITEMS.map((workspace) => (
+              <WorkspaceRailButton
+                key={workspace.id}
+                icon={workspace.icon}
+                label={workspace.label}
+                active={activeWorkspace === workspace.id}
+                title={workspace.description}
+                accent={workspace.id === "debug" ? "debug" : "default"}
+                onClick={() => handleWorkspaceSelect(workspace.id)}
+              />
+            ))}
           </div>
-          <div className="min-h-0 flex-1 overflow-hidden">
-            {leftPanelTab === "layers" ? <LayerPanel /> : <HierarchyPanel />}
+
+          <div className="flex flex-col gap-2 border-t border-[#1f2937] px-2 py-3">
+            <WorkspaceRailButton
+              icon="IN"
+              label="Inspector"
+              active={rightPanelMode === "inspector"}
+              title="Mostrar painel contextual de propriedades"
+              onClick={() => setRightPanelMode("inspector")}
+            />
+            <WorkspaceRailButton
+              icon="TL"
+              label="Tools"
+              active={rightPanelMode === "tools"}
+              title="Mostrar workspace contextual de ferramentas"
+              onClick={() =>
+                openToolsWorkspace(
+                  toolPanelActive,
+                  activeWorkspace === "debug" ? "debug" : "editing",
+                  activeWorkspace === "debug" || toolPanelShowAdvanced
+                )
+              }
+            />
+            <WorkspaceRailButton
+              icon="CS"
+              label="Console"
+              active={consoleVisible}
+              title="Alternar console inferior"
+              onClick={toggleConsole}
+            />
+            <WorkspaceRailButton
+              icon="FM"
+              label="Focus"
+              active={focusedShell}
+              title="Ocultar paineis laterais e priorizar o canvas"
+              onClick={toggleFocusMode}
+            />
           </div>
-        </Panel>
-        <LayoutSplitter />
-        <Panel id="center" minSize={20} className="overflow-hidden">
-          <ViewportPanel />
-        </Panel>
-        <LayoutSplitter />
-        <Panel
-          id="right"
-          defaultSize={20}
-          minSize={15}
-          className="overflow-hidden border-l border-[#313244]"
+        </aside>
+
+        <Group
+          id="retrodev-layout"
+          orientation="horizontal"
+          groupRef={panelGroupRef}
+          className="min-w-0 flex flex-1 overflow-hidden"
+          defaultLayout={defaultLayout}
+          onLayoutChanged={(layout) => {
+            if (!focusedShell) {
+              lastNonFocusLayoutRef.current = {
+                left: layout.left ?? 0,
+                center: layout.center ?? 100,
+                right: layout.right ?? 0,
+              };
+            }
+            onLayoutChanged(layout);
+          }}
         >
-          {toolsOpen ? <ToolsPanel onRequestInspector={() => setToolsOpen(false)} /> : <InspectorPanel />}
-        </Panel>
-      </Group>
+          <Panel
+            id="left"
+            defaultSize={15}
+            minSize={0}
+            className="flex flex-col overflow-hidden border-r border-[#313244]"
+          >
+            <div className="flex shrink-0 border-b border-[#313244] bg-[#11111b]">
+              <button
+                onClick={() => setLeftPanelTab("scene")}
+                className={`flex-1 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors ${
+                  leftPanelTab === "scene"
+                    ? "bg-[#313244] text-[#cdd6f4]"
+                    : "text-[#45475a] hover:text-[#a6adc8]"
+                }`}
+              >
+                Cena
+              </button>
+              <button
+                onClick={() => setLeftPanelTab("layers")}
+                className={`flex-1 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors ${
+                  leftPanelTab === "layers"
+                    ? "bg-[#313244] text-[#cdd6f4]"
+                    : "text-[#45475a] hover:text-[#a6adc8]"
+                }`}
+              >
+                Camadas
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-hidden">
+              {leftPanelTab === "layers" ? <LayerPanel /> : <HierarchyPanel />}
+            </div>
+          </Panel>
+          <LayoutSplitter />
+          <Panel id="center" minSize={20} className="overflow-hidden">
+            <ViewportPanel showWorkspaceTabs={false} />
+          </Panel>
+          <LayoutSplitter />
+          <Panel
+            id="right"
+            defaultSize={20}
+            minSize={0}
+            className="overflow-hidden border-l border-[#313244]"
+          >
+            {rightPanelMode === "tools" ? (
+              <ToolsPanel
+                onRequestInspector={() => setRightPanelMode("inspector")}
+                initialActive={toolPanelActive}
+                workspace={toolPanelWorkspace}
+                showAdvancedByDefault={toolPanelShowAdvanced}
+              />
+            ) : (
+              <InspectorPanel />
+            )}
+          </Panel>
+        </Group>
+      </div>
 
       <Console />
     </div>

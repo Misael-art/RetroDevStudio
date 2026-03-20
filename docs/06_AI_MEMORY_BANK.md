@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Ultima Atualizacao:** 2026-03-20
-**Ultima sessao:** 2026-03-20 (ArtStudio - hardening de importacao e UX de ingestao)
-**Fase Atual:** Release candidate / beta testing do desktop Tauri, com baseline automatizada restaurada (check-tree, lint, tsc, vitest, cargo clippy, cargo test), persistencia atomica endurecida no Windows, schema UGDM explicitamente migrado ate `1.6.0`, galeria de templates alinhada com `platformer_gm`, `prefab` separado de `display_name`, badges `Experimental` reconciliados na UI e nos docs, `nodeCompiler.ts` rebaixado para legado/experimental fora do pipeline canonico, smoke desktop completo `Build -> ROM -> Run` novamente reproduzido no host local e ArtStudio agora institucionalizado na baseline do workspace como superficie `Experimental`, com validacao minima de entrada, roundtrip de persistencia/schema coberto por testes e importacao de imagens endurecida para ingestao externa, diagnostico claro e fluxo visual mais produtivo. A repeticao em baseline commitada continua obrigatoria antes de qualquer claim institucional definitiva.
+**Ultima sessao:** 2026-03-20 (Shell UX - Tools workspace e layout adaptativo)
+**Fase Atual:** Release candidate / beta testing do desktop Tauri, com baseline automatizada restaurada (check-tree, lint, tsc, vitest, cargo clippy, cargo test), persistencia atomica endurecida no Windows, schema UGDM explicitamente migrado ate `1.6.0`, galeria de templates alinhada com `platformer_gm`, `prefab` separado de `display_name`, badges `Experimental` reconciliados na UI e nos docs, `nodeCompiler.ts` rebaixado para legado/experimental fora do pipeline canonico, smoke desktop completo `Build -> ROM -> Run` novamente reproduzido no host local, ArtStudio institucionalizado na baseline do workspace como superficie `Experimental`, RetroFX com editor visual-first de parallax/raster ainda `Experimental` e o shell principal agora reorganizado como workspace adaptativo com rail lateral, painel contextual, presets de layout, focus mode e console colapsavel por padrao. A repeticao em baseline commitada continua obrigatoria antes de qualquer claim institucional definitiva.
 **Branch sugerida:** `feat/desktop-e2e-workflow`
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
@@ -16,6 +16,29 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-20 - Shell UX: Tools workspace e layout adaptativo):**
+  - **Workspace mais limpo:** `App.tsx` deixou de concentrar todas as acoes e contextos no topo; a navegacao principal agora usa rail lateral com `Scene`, `Game`, `Logic`, `FX`, `Art` e `Debug`, enquanto a top bar ficou restrita a acoes globais (`Novo`, `Abrir`, `Salvar`, `Build & Run`, `Play`, `Stop`).
+  - **Painel contextual real:** `ToolsPanel.tsx` saiu do modelo de tabs planas e passou a operar como workspace contextual com categorias `Create`, `Configure`, `Analyze` e `Experimental`, separando melhor autoria, setup, analise e superficies em hardening.
+  - **Modo basico vs avancado:** ferramentas tecnicas deixaram de competir com o fluxo principal; por padrao, o workspace mostra o recorte basico e a trilha avancada fica atras do toggle `Avancado`, com o workspace `Debug` entrando ja orientado para analise.
+  - **Indicadores secundarios:** budgets de VRAM, scanline e paleta foram mantidos, mas agora vivem na faixa secundaria junto do estado live, presets de layout e acoes utilitarias, reduzindo competicao visual com o fluxo principal.
+  - **Layout adaptativo sem mentir sobre escopo:** o shell ganhou presets `Artist`, `Logic`, `Debug` e `Playtest`, salvamento/restauro de layout, focus mode e painel direito alternavel entre `Inspector` e `Tools`; isso melhora muito a ergonomia, mas ainda nao equivale a docking livre completo.
+  - **Console menos invasivo:** `consoleVisible` passou a iniciar fechado, continua disponivel sob demanda e agora abre automaticamente em logs `error`, reduzindo ruido constante sem esconder falhas importantes.
+  - **Viewport integrado ao shell:** `ViewportPanel.tsx` agora pode ocultar a barra interna de tabs quando o shell principal assume a navegacao de workspace, evitando duplicacao de contexto entre viewport e App.
+  - **Cobertura frontend ajustada:** `ToolsPanel.test.tsx` passou a validar o novo fluxo contextual do `Asset Browser`; `App.test.tsx` agora cobre a alternancia do painel direito entre `Inspector` e `Tools`.
+  - **Gates reexecutados no workspace atual:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (169 testes), `cargo clippy -- -D warnings` OK, `cargo test --lib -- --nocapture` OK (174 aprovados / 0 falhas / 1 ignorado).
+  - **Status honesto mantido:** a UX do shell subiu bastante de nivel, mas esta rodada nao implementou docking livre, drag-and-dock entre paineis ou serializacao canonicamente rica de layouts por modo; o ganho real foi organizacao, responsividade e foco visual dentro da arquitetura atual.
+
+* **O que acabou de acontecer (2026-03-20 - RetroFX: editor visual-first de profundidade e movimento):**
+  - **Parallax visual-first:** `RetroFXDesigner.tsx` deixou de ser um formulario tecnico simples e passou a usar layout em 3 areas (`Layers`, `Preview grande`, `Propriedades`), com foco didatico e feedback imediato.
+  - **Preview animado real:** o tab `Parallax` agora simula movimento continuo com `play/pause`, loop visual, leitura pedagogica de profundidade e labels amigaveis (`Far`, `Mid`, `Near`) em vez de depender apenas de numeros.
+  - **Lista de camadas util:** cada camada ganhou card visual com toggle de visibilidade, velocidade X/Y resumida, indicador de profundidade e reorder por drag para reorganizar o efeito.
+  - **Controles melhores:** propriedades da camada selecionada agora usam sliders + input numerico com ajuste fino por teclado, tooltips explicativos e atualizacao instantanea do preview.
+  - **Persistencia segura:** o `Salvar RetroFX` agora grava `retrofx` tanto em `activeScene` quanto em `activeSceneSource` antes de chamar `persistActiveScene`, evitando perder configuracao na cena fonte.
+  - **Raster preservado:** o tab `Raster` foi mantido como editor auxiliar, com preview local e sem alterar backend/pipeline.
+  - **Cobertura dedicada:** `RetroFXDesigner.test.tsx` agora cobre workspace visual/pedagogico, atualizacao imediata dos controles, toggle do preview e persistencia do payload `retrofx`.
+  - **Gates reexecutados no workspace atual:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (168 testes), `cargo clippy -- -D warnings` OK, `cargo test --lib -- --nocapture` OK (174 aprovados / 0 falhas / 1 ignorado). Houve uma falha transitoria inicial em `tests::e2e_build_load_and_run_frame` por `LoadLibraryExW failed` ao carregar o mock core, mas o teste isolado e o rerun completo passaram, caracterizando instabilidade de host/runner e nao regressao do RetroFX.
+  - **Status honesto mantido:** RetroFX continua `Experimental`; a UX de autoria evoluiu muito, mas ainda falta validacao com cenas reais/ROM real para rebaixar risco institucional.
 
 * **O que acabou de acontecer (2026-03-20 - ArtStudio: hardening de importacao e UX de ingestao):**
   - **Causa real das falhas de imagem:** o painel colapsava qualquer erro em `img.onerror` com a mensagem generica `[ArtStudio] Falha ao carregar imagem.`, sem distinguir formato nao suportado, path invalido, falha do asset protocol, arquivo ausente, permissao ou decode quebrado.
@@ -70,12 +93,12 @@
 | Layer system | Parcial | Funcional e persistente, ainda jovem como superficie de produto. |
 | NodeGraph canonico backend (AST/emitter) | Parcial | Codigo real e util, mas ainda concentrado e complexo. |
 | `nodeCompiler.ts` frontend legado | Fake | Nao sustenta claim de caminho oficial; ficou explicitamente legado/experimental. |
-| RetroFX | Experimental | Superficie real, sem certificacao suficiente para sair desse status. |
+| RetroFX | Experimental | Superficie real, agora com editor visual-first, preview animado e persistencia coberta por testes; ainda sem certificacao com ROM/cenas reais. |
 | Deep Profiler | Parcial | Ferramenta real, mas heuristica. |
 | Asset Extractor | Experimental | Ferramenta real, ainda sem certificacao ponta a ponta. |
 | Memory Viewer / VRAM Viewer / Reverse Explorer | Experimental | Ferramentas reais de inspecao, ainda nao robustas como fluxo principal. |
 | ArtStudio | Experimental | Superficie institucionalizada na baseline do workspace, com validacao minima de dados e roundtrip de persistencia/schema cobertos; ainda falta prova ponta a ponta de animacao no runtime. |
-| Processo, CI e coerencia documental do checkout atual | Parcial | Gates e smoke desktop canonico ficaram verdes no workspace atual, mas ainda ha WIP fora do escopo desta sprint e a repeticao institucional precisa ocorrer sobre baseline commitada. |
+| Processo, CI e coerencia documental do checkout atual | Parcial | Gates e smoke desktop canonico ficaram verdes no workspace atual, o shell foi reorganizado com sucesso, mas ainda ha WIP fora da baseline commitada e a repeticao institucional continua necessaria. |
 
 * **O que acabou de acontecer (2026-03-19 - ArtStudio Sprint 2: Motor de Animação e UGDM):**
   - **useSpriteAnimator.ts:** Hook para loop de animação com requestAnimationFrame e FPS configurável.
@@ -779,10 +802,10 @@
   - GitHub Actions `Desktop E2E` (`22606643935`) -> OK em `windows-latest`, com `Run Mega Drive desktop smoke` e `Run SNES desktop smoke` ambos verdes.
 
 * **Proximo passo imediato:**
-  1. Abrir uma sprint pequena de prova ponta a ponta `ArtStudio -> entidade sprite -> logica/pipeline -> runtime`, sem expandir funcionalidade nem iniciar NodeGraph novo.
-  2. Validar manualmente o wizard com `platformer_gm`, `Projeto Vazio`, `Primeiro Projeto` e `Importar Projeto SGDK`, confirmando persistencia, labels `display_name` e badges `Experimental`.
-  3. Continuar a limpeza estrutural dos arquivos grandes (`project_mgr.rs`, `lib.rs`, `ViewportPanel.tsx`, `ToolsPanel.tsx`, `App.tsx`) por extracoes pequenas e de baixo risco, sem regressao funcional.
-  4. Repetir QA de importacao SGDK/overlay `rds/` em projetos externos reais antes de rebaixar o status `Experimental`.
+  1. Formalizar a etapa de trazer imagem externa para dentro do projeto no ArtStudio, sem tocar ainda no pipeline SGDK, para fechar o elo entre ingestao visual e asset canonico.
+  2. Validar RetroFX `Experimental` com cenas reais e pelo menos um smoke `Build & Run` usando configuracao de parallax persistida, confirmando que a nova UX nao mascara problemas de integracao.
+  3. Abrir depois uma sprint pequena de prova ponta a ponta `ArtStudio -> entidade sprite -> logica/pipeline -> runtime`, sem expandir funcionalidade nem iniciar NodeGraph novo.
+  4. Continuar a limpeza estrutural dos arquivos grandes (`project_mgr.rs`, `lib.rs`, `ViewportPanel.tsx`, `ToolsPanel.tsx`, `App.tsx`) por extracoes pequenas e de baixo risco, sem regressao funcional.
 
 ---
 

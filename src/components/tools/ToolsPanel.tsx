@@ -1947,55 +1947,367 @@ function ReverseExplorer() {
   );
 }
 
-type ToolTab = "patch" | "profiler" | "extractor" | "setup" | "memory" | "assets" | "vram" | "reverse" | "palette";
+export type ToolTab =
+  | "patch"
+  | "profiler"
+  | "extractor"
+  | "setup"
+  | "memory"
+  | "assets"
+  | "vram"
+  | "reverse"
+  | "palette";
 
-const TOOL_TABS: { id: ToolTab; label: string; icon: string; experimental?: boolean }[] = [
-  { id: "setup", label: "Runtime Setup", icon: "RD" },
-  { id: "palette", label: "Paleta", icon: "🎨" },
-  { id: "assets", label: "Asset Browser", icon: "AB", experimental: true },
-  { id: "patch", label: "Patch Studio", icon: "PT" },
-  { id: "profiler", label: "Deep Profiler", icon: "DP" },
-  { id: "extractor", label: "Asset Extractor", icon: "AE", experimental: true },
-  { id: "memory", label: "Memory Viewer", icon: "MV", experimental: true },
-  { id: "vram", label: "VRAM Viewer", icon: "VV", experimental: true },
-  { id: "reverse", label: "Reverse Explorer", icon: "RX", experimental: true },
+type ToolCategory = "create" | "configure" | "analyze" | "experimental";
+export type ToolWorkspace = "editing" | "debug";
+
+type ToolDescriptor = {
+  id: ToolTab;
+  label: string;
+  icon: string;
+  category: ToolCategory;
+  description: string;
+  advanced?: boolean;
+  experimental?: boolean;
+};
+
+const TOOL_CATEGORIES: {
+  id: ToolCategory;
+  label: string;
+  caption: string;
+}[] = [
+  { id: "create", label: "Create", caption: "autoria e montagem" },
+  { id: "configure", label: "Configure", caption: "setup e saida" },
+  { id: "analyze", label: "Analyze", caption: "debug e leitura tecnica" },
+  { id: "experimental", label: "Experimental", caption: "superficies em hardening" },
 ];
 
-export default function ToolsPanel({ onRequestInspector }: { onRequestInspector?: () => void }) {
-  const [active, setActive] = useState<ToolTab>("setup");
+const TOOL_TABS: ToolDescriptor[] = [
+  {
+    id: "palette",
+    label: "Paleta Contextual",
+    icon: "CR",
+    category: "create",
+    description: "Brushes e assets de autoria contextual para a cena ativa.",
+  },
+  {
+    id: "setup",
+    label: "Runtime Setup",
+    icon: "RD",
+    category: "configure",
+    description: "Dependencias oficiais, toolchains e estado do runtime.",
+  },
+  {
+    id: "patch",
+    label: "Patch Studio",
+    icon: "PT",
+    category: "configure",
+    description: "Criacao auditavel de patches IPS/BPS sem poluir o fluxo principal.",
+  },
+  {
+    id: "profiler",
+    label: "Deep Profiler",
+    icon: "DP",
+    category: "analyze",
+    description: "Analise heuristica de sprites, DMA e hotspots de ROM.",
+    advanced: true,
+  },
+  {
+    id: "assets",
+    label: "Asset Browser",
+    icon: "AB",
+    category: "experimental",
+    description: "Navegacao e instancia de assets reais do projeto.",
+    advanced: true,
+    experimental: true,
+  },
+  {
+    id: "extractor",
+    label: "Asset Extractor",
+    icon: "AE",
+    category: "experimental",
+    description: "Extracao heuristica de tiles e paletas direto da ROM.",
+    advanced: true,
+    experimental: true,
+  },
+  {
+    id: "memory",
+    label: "Memory Viewer",
+    icon: "MV",
+    category: "experimental",
+    description: "Inspecao de memoria do core ativo com busca e highlight.",
+    advanced: true,
+    experimental: true,
+  },
+  {
+    id: "vram",
+    label: "VRAM Viewer",
+    icon: "VV",
+    category: "experimental",
+    description: "Leitura de tiles 4bpp da VRAM para debug visual rapido.",
+    advanced: true,
+    experimental: true,
+  },
+  {
+    id: "reverse",
+    label: "Reverse Explorer",
+    icon: "RX",
+    category: "experimental",
+    description: "Janela de ROM com anotacao heuristica de opcodes por target.",
+    advanced: true,
+    experimental: true,
+  },
+];
+
+function getToolDescriptor(toolId: ToolTab): ToolDescriptor {
+  return TOOL_TABS.find((tool) => tool.id === toolId) ?? TOOL_TABS[0];
+}
+
+function renderToolPanel(
+  active: ToolTab,
+  onRequestInspector?: () => void
+) {
+  switch (active) {
+    case "setup":
+      return <RuntimeSetup />;
+    case "palette":
+      return <ContextualPalette />;
+    case "assets":
+      return <AssetBrowser onRequestInspector={onRequestInspector} />;
+    case "patch":
+      return <PatchStudio />;
+    case "profiler":
+      return <DeepProfiler />;
+    case "extractor":
+      return <AssetExtractor />;
+    case "memory":
+      return <MemoryViewer />;
+    case "vram":
+      return <VramViewer />;
+    case "reverse":
+      return <ReverseExplorer />;
+    default:
+      return null;
+  }
+}
+
+export default function ToolsPanel({
+  onRequestInspector,
+  initialActive = "setup",
+  workspace = "editing",
+  showAdvancedByDefault = false,
+}: {
+  onRequestInspector?: () => void;
+  initialActive?: ToolTab;
+  workspace?: ToolWorkspace;
+  showAdvancedByDefault?: boolean;
+}) {
+  const [showAdvanced, setShowAdvanced] = useState(showAdvancedByDefault);
+  const [activeCategory, setActiveCategory] = useState<ToolCategory>(() =>
+    getToolDescriptor(initialActive).category
+  );
+  const [active, setActive] = useState<ToolTab>(initialActive);
+
+  useEffect(() => {
+    setShowAdvanced(showAdvancedByDefault || workspace === "debug");
+  }, [showAdvancedByDefault, workspace]);
+
+  useEffect(() => {
+    const nextDescriptor = getToolDescriptor(initialActive);
+    setActive(initialActive);
+    setActiveCategory(nextDescriptor.category);
+  }, [initialActive]);
+
+  const visibleTools = TOOL_TABS.filter((tool) => showAdvanced || !tool.advanced);
+  const safeActive = visibleTools.some((tool) => tool.id === active)
+    ? active
+    : visibleTools[0]?.id ?? "setup";
+  const activeDescriptor = getToolDescriptor(safeActive);
+  const toolsInCategory = visibleTools.filter((tool) => tool.category === activeCategory);
+  const fallbackCategory =
+    toolsInCategory.length > 0
+      ? activeCategory
+      : TOOL_CATEGORIES.find((category) =>
+          visibleTools.some((tool) => tool.category === category.id)
+        )?.id ?? "create";
+  useEffect(() => {
+    if (safeActive !== active) {
+      setActive(safeActive);
+    }
+  }, [active, safeActive]);
+
+  useEffect(() => {
+    if (fallbackCategory !== activeCategory) {
+      setActiveCategory(fallbackCategory);
+    }
+  }, [activeCategory, fallbackCategory]);
 
   return (
-    <Panel title="Tools - Camada Pro" className="flex h-full flex-col">
-      <div className="flex shrink-0 border-b border-[#313244]">
-        {TOOL_TABS.map((tab) => (
+    <Panel
+      title={workspace === "debug" ? "Debug Workspace" : "Tools Workspace"}
+      className="flex h-full flex-col bg-[#11131f]"
+      headerActions={
+        <>
           <button
-            key={tab.id}
-            onClick={() => setActive(tab.id)}
-            className={`px-3 py-1.5 text-xs transition-colors ${active === tab.id ? "border-b-2 border-[#cba6f7] text-[#cdd6f4]" : "text-[#6c7086] hover:text-[#a6adc8]"
-              }`}
+            type="button"
+            onClick={() => setShowAdvanced((current) => !current)}
+            className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors ${
+              showAdvanced
+                ? "border-[#f9e2af]/40 bg-[#f9e2af]/12 text-[#f9e2af]"
+                : "border-[#313244] bg-[#11111b] text-[#7f849c] hover:text-[#cdd6f4]"
+            }`}
           >
-            <span>
-              {tab.icon} {tab.label}
-            </span>
-            {tab.experimental && (
-              <span className="ml-1 rounded border border-[#fab387] px-1 py-0 text-[9px] font-semibold uppercase tracking-wide text-[#fab387]">
-                Experimental
-              </span>
-            )}
+            {showAdvanced ? "Avancado ON" : "Avancado OFF"}
           </button>
-        ))}
-      </div>
+          {onRequestInspector && (
+            <button
+              type="button"
+              onClick={onRequestInspector}
+              className="rounded-full border border-[#313244] bg-[#11111b] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#cdd6f4] transition-colors hover:border-[#89b4fa] hover:text-[#89b4fa]"
+            >
+              Inspector
+            </button>
+          )}
+        </>
+      }
+    >
+      <div className="flex h-full min-h-0 flex-col xl:flex-row">
+        <aside className="flex w-full shrink-0 flex-col border-b border-[#1f2937] bg-[#0b1020] xl:w-[230px] xl:border-b-0 xl:border-r">
+          <div className="border-b border-[#1f2937] px-4 py-4">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#cba6f7]">
+              {workspace === "debug" ? "Modo avancado" : "Modo basico"}
+            </div>
+            <div className="mt-2 text-[12px] leading-5 text-[#94a3b8]">
+              {workspace === "debug"
+                ? "Ferramentas de leitura, runtime e analise ficam em destaque."
+                : "Mostre apenas o que faz sentido para autoria. Ferramentas tecnicas ficam fora do caminho por padrao."}
+            </div>
+          </div>
 
-      <div className="flex-1 overflow-y-auto">
-        {active === "setup" && <RuntimeSetup />}
-        {active === "palette" && <ContextualPalette />}
-        {active === "assets" && <AssetBrowser onRequestInspector={onRequestInspector} />}
-        {active === "patch" && <PatchStudio />}
-        {active === "profiler" && <DeepProfiler />}
-        {active === "extractor" && <AssetExtractor />}
-        {active === "memory" && <MemoryViewer />}
-        {active === "vram" && <VramViewer />}
-        {active === "reverse" && <ReverseExplorer />}
+          <div className="flex-1 overflow-y-auto px-3 py-3">
+            <div className="space-y-3">
+              {TOOL_CATEGORIES.filter((category) =>
+                visibleTools.some((tool) => tool.category === category.id)
+              ).map((category) => {
+                const isActiveCategory = fallbackCategory === category.id;
+                const categoryTools = visibleTools.filter(
+                  (tool) => tool.category === category.id
+                );
+
+                return (
+                  <div
+                    key={category.id}
+                    className={`rounded-2xl border p-2 ${
+                      isActiveCategory
+                        ? "border-[#313244] bg-[#131a2a]"
+                        : "border-transparent bg-transparent"
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setActiveCategory(category.id)}
+                      className={`flex w-full items-start justify-between rounded-xl px-2 py-2 text-left transition-colors ${
+                        isActiveCategory
+                          ? "bg-[#1b2334] text-[#e5e7eb]"
+                          : "text-[#94a3b8] hover:bg-[#131a2a] hover:text-[#e5e7eb]"
+                      }`}
+                    >
+                      <div>
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.18em]">
+                          {category.label}
+                        </div>
+                        <div className="mt-1 text-[11px] text-[#64748b]">
+                          {category.caption}
+                        </div>
+                      </div>
+                      <span className="rounded-full border border-[#313244] bg-[#0b1020] px-2 py-0.5 text-[10px] font-mono text-[#cdd6f4]">
+                        {categoryTools.length}
+                      </span>
+                    </button>
+
+                    {isActiveCategory && (
+                      <div className="mt-2 space-y-1">
+                        {categoryTools.map((tool) => (
+                          <button
+                            key={tool.id}
+                            type="button"
+                            onClick={() => setActive(tool.id)}
+                            className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition-colors ${
+                              safeActive === tool.id
+                                ? "bg-[#cba6f7] text-[#111827]"
+                                : "bg-[#111827] text-[#cdd6f4] hover:bg-[#1f2937]"
+                            }`}
+                          >
+                            <span className="flex items-center gap-3">
+                              <span className="rounded-lg border border-current/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]">
+                                {tool.icon}
+                              </span>
+                              <span className="min-w-0 truncate">{tool.label}</span>
+                            </span>
+                            {tool.experimental && (
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] ${
+                                  safeActive === tool.id
+                                    ? "bg-[#111827]/14 text-[#111827]"
+                                    : "bg-[#fab387]/12 text-[#fab387]"
+                                }`}
+                              >
+                                Exp
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </aside>
+
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className="border-b border-[#1f2937] bg-[#0f172a] px-5 py-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
+                  {fallbackCategory === "create"
+                    ? "Create"
+                    : fallbackCategory === "configure"
+                      ? "Configure"
+                      : fallbackCategory === "analyze"
+                        ? "Analyze"
+                        : "Experimental"}
+                </div>
+                <div className="mt-1 text-lg font-semibold text-[#e5e7eb]">
+                  {activeDescriptor.label}
+                </div>
+                <div className="mt-2 max-w-2xl text-[12px] leading-6 text-[#94a3b8]">
+                  {activeDescriptor.description}
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <span className="rounded-full border border-[#313244] bg-[#11111b] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#cdd6f4]">
+                  {workspace === "debug" ? "Debug" : "Editing"}
+                </span>
+                {activeDescriptor.experimental && (
+                  <span className="rounded-full border border-[#fab387]/40 bg-[#fab387]/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#fab387]">
+                    Experimental
+                  </span>
+                )}
+                {activeDescriptor.advanced && (
+                  <span className="rounded-full border border-[#89b4fa]/35 bg-[#89b4fa]/10 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#89b4fa]">
+                    Analise
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto bg-[#11111b]">
+            {renderToolPanel(safeActive, onRequestInspector)}
+          </div>
+        </div>
       </div>
     </Panel>
   );

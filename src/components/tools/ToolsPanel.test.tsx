@@ -190,6 +190,18 @@ describe("ToolsPanel Asset Browser", () => {
 
   it("instantiates an image asset into the active scene", async () => {
     await act(async () => {
+      findButton(container, "Avancado OFF").click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Experimental/).click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
       findButton(container, /Asset Browser/).click();
       await flush();
       await flush();

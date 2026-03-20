@@ -320,7 +320,11 @@ function decodePpmP3(content: string): ImageData | null {
   return new ImageData(pixels, width, height);
 }
 
-export default function ViewportPanel() {
+export default function ViewportPanel({
+  showWorkspaceTabs = true,
+}: {
+  showWorkspaceTabs?: boolean;
+}) {
   const {
     activeViewportTab,
     setActiveViewportTab,
@@ -2802,28 +2806,34 @@ export default function ViewportPanel() {
 
   return (
     <div className="flex h-full flex-col bg-[#1e1e2e]">
-      <div className="flex items-center justify-between border-b border-[#313244] bg-[#181825] pr-3">
-        <Tabs
-          tabs={VIEWPORT_TABS}
-          activeTab={activeViewportTab}
-          onTabChange={setActiveViewportTab}
-          className="flex-1 border-b-0"
-        />
-        {activeViewportTab === "game" && (
-          <button
-            type="button"
-            onClick={() => setShowPerformanceOverlay((current) => !current)}
-            className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
-              showPerformanceOverlay
-                ? "border-[#89b4fa] bg-[#89b4fa]/15 text-[#89b4fa]"
-                : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
-            }`}
-            title="Alternar overlay de performance no Game View"
-          >
-            Overlay {showPerformanceOverlay ? "ON" : "OFF"}
-          </button>
-        )}
-      </div>
+      {(showWorkspaceTabs || activeViewportTab === "game") && (
+        <div className="flex items-center justify-between border-b border-[#313244] bg-[#181825] pr-3">
+          {showWorkspaceTabs ? (
+            <Tabs
+              tabs={VIEWPORT_TABS}
+              activeTab={activeViewportTab}
+              onTabChange={setActiveViewportTab}
+              className="flex-1 border-b-0"
+            />
+          ) : (
+            <div className="min-h-8 flex-1" />
+          )}
+          {activeViewportTab === "game" && (
+            <button
+              type="button"
+              onClick={() => setShowPerformanceOverlay((current) => !current)}
+              className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
+                showPerformanceOverlay
+                  ? "border-[#89b4fa] bg-[#89b4fa]/15 text-[#89b4fa]"
+                  : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
+              }`}
+              title="Alternar overlay de performance no Game View"
+            >
+              Overlay {showPerformanceOverlay ? "ON" : "OFF"}
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="relative flex-1 overflow-hidden bg-[#11111b] flex flex-col">
         <div

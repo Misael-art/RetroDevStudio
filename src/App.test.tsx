@@ -1407,6 +1407,27 @@ describe("App build flow", () => {
     expect(findButton(container, "Overlay OFF")).toBeInstanceOf(HTMLButtonElement);
   });
 
+  it("switches the contextual right panel between inspector and tools", async () => {
+    expect(container.querySelector("[data-testid='inspector']")).not.toBeNull();
+    expect(container.querySelector("[data-testid='tools']")).toBeNull();
+
+    await act(async () => {
+      findButton(container, "Tools").click();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='tools']")).not.toBeNull();
+    expect(container.querySelector("[data-testid='inspector']")).toBeNull();
+
+    await act(async () => {
+      findButton(container, "Inspector").click();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='inspector']")).not.toBeNull();
+    expect(container.querySelector("[data-testid='tools']")).toBeNull();
+  });
+
   it("shows the live VRAM budget bar in the toolbar", async () => {
     await act(async () => {
       useEditorStore.setState({
