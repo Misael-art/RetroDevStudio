@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use super::serde_helpers::deserialize_f64_to_i32;
+
 // ── Sprite ────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -13,7 +15,9 @@ pub struct AnimationDef {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Pivot {
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
     pub x: i32,
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
     pub y: i32,
 }
 
@@ -41,7 +45,9 @@ fn default_priority() -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CollisionOffset {
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
     pub x: i32,
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
     pub y: i32,
 }
 
@@ -74,7 +80,9 @@ pub struct InputComponent {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Velocity {
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
     pub x: i32,
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
     pub y: i32,
 }
 
@@ -82,12 +90,12 @@ pub struct Velocity {
 pub struct PhysicsComponent {
     #[serde(default = "default_true")]
     pub gravity: bool,
-    #[serde(default = "default_gravity")]
+    #[serde(default = "default_gravity", deserialize_with = "deserialize_f64_to_i32")]
     pub gravity_strength: i32,
     pub max_velocity: Option<Velocity>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_f64_to_i32")]
     pub friction: i32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_f64_to_i32")]
     pub bounce: i32,
 }
 
@@ -132,9 +140,9 @@ pub struct LogicComponent {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CameraComponent {
     pub follow_entity: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_f64_to_i32")]
     pub offset_x: i32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_f64_to_i32")]
     pub offset_y: i32,
 }
 
@@ -145,9 +153,9 @@ pub struct TilemapComponent {
     pub tileset: String,
     pub map_width: u32,
     pub map_height: u32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_f64_to_i32")]
     pub scroll_x: i32,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_f64_to_i32")]
     pub scroll_y: i32,
 }
 

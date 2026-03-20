@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
-**Ultima Atualizacao:** 2026-03-19
-**Ultima sessao:** 2026-03-19 (Hardening de persistencia/schema/templates/UI e baseline restaurada)
-**Fase Atual:** Release candidate / beta testing do desktop Tauri, com baseline automatizada restaurada (check-tree, lint, tsc, vitest, cargo clippy, cargo test), persistencia atomica endurecida no Windows, schema UGDM explicitamente migrado ate `1.6.0`, galeria de templates alinhada com `platformer_gm`, `prefab` separado de `display_name`, badges `Experimental` reconciliados na UI e nos docs, `nodeCompiler.ts` rebaixado para legado/experimental fora do pipeline canonico e smoke desktop `live-ok` novamente validado no host local. O smoke completo `Build -> Run` no app desktop deste host ainda exige nova investigacao antes de qualquer claim de verde institucional.
+**Ultima Atualizacao:** 2026-03-20
+**Ultima sessao:** 2026-03-20 (ArtStudio - hardening de importacao e UX de ingestao)
+**Fase Atual:** Release candidate / beta testing do desktop Tauri, com baseline automatizada restaurada (check-tree, lint, tsc, vitest, cargo clippy, cargo test), persistencia atomica endurecida no Windows, schema UGDM explicitamente migrado ate `1.6.0`, galeria de templates alinhada com `platformer_gm`, `prefab` separado de `display_name`, badges `Experimental` reconciliados na UI e nos docs, `nodeCompiler.ts` rebaixado para legado/experimental fora do pipeline canonico, smoke desktop completo `Build -> ROM -> Run` novamente reproduzido no host local e ArtStudio agora institucionalizado na baseline do workspace como superficie `Experimental`, com validacao minima de entrada, roundtrip de persistencia/schema coberto por testes e importacao de imagens endurecida para ingestao externa, diagnostico claro e fluxo visual mais produtivo. A repeticao em baseline commitada continua obrigatoria antes de qualquer claim institucional definitiva.
 **Branch sugerida:** `feat/desktop-e2e-workflow`
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
@@ -17,6 +17,34 @@
 
 ## 1. STATUS ATUAL DO PROJETO
 
+* **O que acabou de acontecer (2026-03-20 - ArtStudio: hardening de importacao e UX de ingestao):**
+  - **Causa real das falhas de imagem:** o painel colapsava qualquer erro em `img.onerror` com a mensagem generica `[ArtStudio] Falha ao carregar imagem.`, sem distinguir formato nao suportado, path invalido, falha do asset protocol, arquivo ausente, permissao ou decode quebrado.
+  - **Importacao endurecida:** `ArtStudioPanel.tsx` agora aceita `PNG`, `BMP`, `JPG/JPEG`, `GIF`, `WebP` e `PPM`, tenta carregar via `convertFileSrc()` e usa fallback `fetch -> Blob -> objectURL` quando a primeira rota falha.
+  - **Ingestao externa segura:** imagens fora de `assets/sprites` deixam de ser rejeitadas como se estivessem quebradas; agora entram no canvas para preparo, slicing e preview, mas continuam bloqueadas para "Aplicar na Cena" ate serem movidas para a arvore canonica do projeto.
+  - **UX de producao:** o layout do ArtStudio foi reorganizado em 3 areas claras (`Source / Sprite Sheet`, `Sequences / Configuracao`, `Preview / Output / Apply`), com canvas maior, zoom, pan por scroll, estado vazio instrutivo, metadados do arquivo carregado e CTA principal de importacao mais evidente.
+  - **Diagnostico claro:** a UI agora mostra nome do arquivo, formato, resolucao, origem (`Projeto` vs `Externa`) e mensagens acionaveis para `formato nao suportado`, `arquivo nao encontrado`, `permissao`, `asset protocol` e `decode`.
+  - **Cobertura frontend:** `ArtStudioPanel.test.ts` agora cobre deteccao de formatos, classificacao de falhas, roundtrip helper de animacoes e dois fluxos reais de importacao (`imagem externa` e `asset do projeto`).
+  - **Gates reexecutados no workspace atual:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (164 testes), `cargo clippy -- -D warnings` OK, `cargo test --lib -- --nocapture` OK (174 aprovados / 0 falhas / 1 ignorado). Houve uma falha transitoria inicial no mock core `read_memory_returns_predictable_mock_core_bytes`, mas o teste isolado e o rerun completo passaram, caracterizando instabilidade de host/runner e nao regressao do ArtStudio.
+  - **Status honesto mantido:** o ArtStudio continua `Experimental`; esta rodada endureceu ingestao, produtividade e seguranca de dados, mas nao abriu conversao para Mega Drive nem integracao nova com NodeGraph.
+
+* **O que acabou de acontecer (2026-03-19 - Decisao e institucionalizacao minima do ArtStudio):**
+  - **Status decidido:** o ArtStudio deixou de ser tratado como WIP fora da baseline do workspace e passou a integrar a baseline atual como superficie `Experimental`.
+  - **Escopo da institucionalizacao:** nenhuma feature nova foi aberta; a rodada focou apenas em consistencia, persistencia e seguranca de dados do caminho `ArtStudioPanel -> editorStore -> sceneService -> project_mgr -> schema/pipeline`.
+  - **Validacao minima no frontend:** `ArtStudioPanel.tsx` agora so aceita salvar sprite sheets que ja estejam dentro de `assets/sprites` do projeto, preserva subdiretorios em vez de achatar para basename, valida nomes/chaves de animacao, rejeita duplicidade apos normalizacao, bloqueia frame maior que o sprite sheet e aplica `constrainSpriteFrameSize()` antes de gravar na entidade.
+  - **Sinalizacao honesta:** o painel agora exibe aviso explicito `Experimental - salva animacoes na entidade sprite, mas ainda nao esta totalmente integrado ao pipeline`.
+  - **Cobertura adicionada:** `ArtStudioPanel.test.ts` valida origem segura do asset e normalizacao de animacoes; `editorEntityFactory.test.ts` cobre preservacao das animacoes e constrain por target; `sceneService.test.ts` cobre parse do schema com `animations/frame_width/frame_height`; `project_mgr.rs` ganhou roundtrip `save/load` para payload de animacao.
+  - **Gates reexecutados no estado atual do workspace:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (159 testes), `cargo clippy -- -D warnings` OK, `cargo test --lib -- --nocapture` OK (174 aprovados / 0 falhas / 1 ignorado).
+  - **Risco residual mantido explicito:** o ArtStudio ja produz e persiste dados validos no schema canonico, mas ainda nao possui prova ponta a ponta de autoria de animacao chegando ao runtime por fluxo institucional completo; por isso permanece `Experimental`.
+
+* **O que acabou de acontecer (2026-03-19 - Consolidacao do fluxo desktop `Build -> ROM -> Run` e coerencia do Game View):**
+  - **Game View coerente:** `ViewportPanel.tsx` passou a usar o mesmo conceito de sessao do emulador (`emulatorLoaded || emulatorActive`) tanto no texto de status quanto nos controles do painel, evitando contradicao entre "Carregue uma ROM" e uma sessao ja existente.
+  - **Cobertura frontend reforcada:** `App.test.tsx` agora cobre explicitamente a transicao `ROM carregada -> aguardando emulador -> emulador ativo` e o estado textual de `Emulador pausado`.
+  - **Gates reexecutados no estado atual do workspace:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (154 testes), `cargo clippy -- -D warnings` OK, `cargo test --lib -- --nocapture` OK (173 aprovados / 0 falhas / 1 ignorado).
+  - **Smoke desktop canonico:** `node scripts/e2e-tauri-build-run.mjs --native-driver .\\toolchains\\webdriver\\msedgedriver.exe` passou em 1 tentativa neste host, incluindo `Build -> Load ROM -> Run frames` para o fixture `megadrive_dummy`.
+  - **Distincao baseline vs worktree:** o fluxo desktop canonico ficou verde no estado atual do workspace, mas o repositório continua com WIP nao institucionalizado fora do escopo desta sprint (`ArtStudioPanel.tsx`, `useSpriteAnimator.ts`, `components.rs`, `mod.rs`, `serde_helpers.rs`), que nao deve ser promovido automaticamente a baseline de produto.
+
+  - **Atualizacao posterior desta trilha:** apos a rodada de decisao do ArtStudio registrada acima, `ArtStudioPanel.tsx`, `useSpriteAnimator.ts`, `components.rs`, `mod.rs` e `serde_helpers.rs` deixam de contar como WIP fora da baseline do workspace e passam a compor a superficie `Experimental` institucionalizada desta area.
+
 * **O que acabou de acontecer (2026-03-19 - Hardening de persistencia, schema, templates e UI):**
   - **Persistencia Windows:** `project_mgr.rs` passou a tratar `ERROR_ACCESS_DENIED` / `ERROR_SHARING_VIOLATION` como transientes, com retry e fallback `MoveFileExW(..., MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)` para save atomico de projeto/cena.
   - **Schema UGDM 1.6.0:** cadeia explicita de migracao completada (`1.3 -> 1.4` collision_map, `1.4 -> 1.5` layers, `1.5 -> 1.6` display_name), mantendo leitura retrocompativel e escrita no formato novo.
@@ -24,7 +52,7 @@
   - **Templates ponta a ponta:** `platformer_gm` ficou alinhado entre registry, testes Rust/TS, fixture dummy, wizard e docs.
   - **UI honesta sobre maturidade:** `Asset Extractor` e `Memory Viewer` voltaram a exibir badge/notice `Experimental`; `nodeCompiler.ts` foi marcado como legado/experimental e nao-canonico.
   - **Gates verificados nesta rodada:** `check-tree` OK, `eslint` OK, `tsc --noEmit` OK, `vitest` OK (153 testes), `cargo clippy -- -D warnings` OK, `cargo test --lib -- --nocapture` OK (173 aprovados / 0 falhas / 1 ignorado).
-  - **Smoke desktop:** `live-ok` com `--skip-build` voltou a passar no app Tauri local. O smoke completo `Build & Run` do dummy Mega Drive ainda falha neste host com emulador nao ativando apos o clique, portanto nao deve ser anunciado como verde institucional.
+  - **Smoke desktop:** naquela rodada, `live-ok` com `--skip-build` voltou a passar no app Tauri local, mas o smoke completo `Build & Run` do dummy Mega Drive ainda falhava neste host. Esse ponto foi revalidado e superado pela sprint posterior de consolidacao do Game View registrada acima.
 
 ### Matriz objetiva por subsistema (2026-03-19)
 
@@ -36,7 +64,7 @@
 | Wizard, onboarding e catalogo de templates | Parcial | Fluxo real e alinhado com `platformer_gm`, ainda em beta manual. |
 | Importacao SGDK / overlay `rds/` | Experimental | Fluxo real, ainda sensivel a QA manual e projetos externos. |
 | Build orchestration MD/SNES | Robusto | Pipeline canonico `UGDM -> workspace -> ROM` continua real e coberto. |
-| Emulacao Libretro / Game View | Parcial | Fluxo real e integrado, mas o smoke desktop completo ainda nao esta verde neste host. |
+| Emulacao Libretro / Game View | Parcial | Fluxo real e integrado; o smoke desktop completo `Build -> ROM -> Run` voltou a passar neste host, mas a repeticao institucional ainda deve ocorrer em baseline commitada. |
 | Live validation e hardware profiles | Robusto | Validacao autoritativa continua coerente com os targets. |
 | Collision map | Parcial | Funcional e migrado, ainda precisa de repeticao institucional apos a rodada de schema. |
 | Layer system | Parcial | Funcional e persistente, ainda jovem como superficie de produto. |
@@ -46,8 +74,8 @@
 | Deep Profiler | Parcial | Ferramenta real, mas heuristica. |
 | Asset Extractor | Experimental | Ferramenta real, ainda sem certificacao ponta a ponta. |
 | Memory Viewer / VRAM Viewer / Reverse Explorer | Experimental | Ferramentas reais de inspecao, ainda nao robustas como fluxo principal. |
-| ArtStudio | Experimental | Codigo real, ainda em evolucao e sem hardening de produto. |
-| Processo, CI e coerencia documental do checkout atual | Parcial | Gates voltaram a verde, mas ainda ha smoke desktop manual pendente neste host. |
+| ArtStudio | Experimental | Superficie institucionalizada na baseline do workspace, com validacao minima de dados e roundtrip de persistencia/schema cobertos; ainda falta prova ponta a ponta de animacao no runtime. |
+| Processo, CI e coerencia documental do checkout atual | Parcial | Gates e smoke desktop canonico ficaram verdes no workspace atual, mas ainda ha WIP fora do escopo desta sprint e a repeticao institucional precisa ocorrer sobre baseline commitada. |
 
 * **O que acabou de acontecer (2026-03-19 - ArtStudio Sprint 2: Motor de Animação e UGDM):**
   - **useSpriteAnimator.ts:** Hook para loop de animação com requestAnimationFrame e FPS configurável.
@@ -751,7 +779,7 @@
   - GitHub Actions `Desktop E2E` (`22606643935`) -> OK em `windows-latest`, com `Run Mega Drive desktop smoke` e `Run SNES desktop smoke` ambos verdes.
 
 * **Proximo passo imediato:**
-  1. Reexecutar smoke desktop `Build -> Run` em host Windows institucional para Mega Drive e SNES apos o hardening de persistencia/schema, sem depender apenas do `live-ok --skip-build`.
+  1. Abrir uma sprint pequena de prova ponta a ponta `ArtStudio -> entidade sprite -> logica/pipeline -> runtime`, sem expandir funcionalidade nem iniciar NodeGraph novo.
   2. Validar manualmente o wizard com `platformer_gm`, `Projeto Vazio`, `Primeiro Projeto` e `Importar Projeto SGDK`, confirmando persistencia, labels `display_name` e badges `Experimental`.
   3. Continuar a limpeza estrutural dos arquivos grandes (`project_mgr.rs`, `lib.rs`, `ViewportPanel.tsx`, `ToolsPanel.tsx`, `App.tsx`) por extracoes pequenas e de baixo risco, sem regressao funcional.
   4. Repetir QA de importacao SGDK/overlay `rds/` em projetos externos reais antes de rebaixar o status `Experimental`.

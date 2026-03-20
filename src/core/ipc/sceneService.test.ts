@@ -10,6 +10,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 import {
   listScenes,
+  parseSceneJson,
   resolveScenePrefabs,
   switchScene,
   type Scene,
@@ -75,6 +76,46 @@ describe("sceneService", () => {
     expect(mocks.invoke).toHaveBeenCalledWith("resolve_scene_prefabs", {
       projectDir: "F:/Projects/RetroDevStudio/demo",
       sceneJson: JSON.stringify(scene),
+    });
+  });
+
+  it("parses sprite animations and frame dimensions from the canonical scene schema", () => {
+    const scene = parseSceneJson(`{
+      "scene_id": "main",
+      "entities": [
+        {
+          "entity_id": "hero",
+          "transform": { "x": 12, "y": 24 },
+          "components": {
+            "sprite": {
+              "asset": "assets/sprites/hero.png",
+              "frame_width": 16,
+              "frame_height": 16,
+              "animations": {
+                "run": {
+                  "frames": [0, 1, 2],
+                  "fps": 12,
+                  "loop": true
+                }
+              }
+            }
+          }
+        }
+      ],
+      "background_layers": []
+    }`);
+
+    expect(scene?.entities[0].components.sprite).toMatchObject({
+      asset: "assets/sprites/hero.png",
+      frame_width: 16,
+      frame_height: 16,
+      animations: {
+        run: {
+          frames: [0, 1, 2],
+          fps: 12,
+          loop: true,
+        },
+      },
     });
   });
 });

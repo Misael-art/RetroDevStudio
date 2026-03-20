@@ -51,4 +51,34 @@ describe("editorEntityFactory", () => {
     expect(entity.components.logic?.graph).toContain("\"target\":\"onboarding_player\"");
     expect(createStarterLogicGraph("player")).toContain("\"fromNode\":\"start\"");
   });
+
+  it("preserves sprite animations and constrains frame size for the target", () => {
+    const entity = createSpriteEntityFromAsset({
+      assetPath: "assets/sprites/hero.ppm",
+      target: "snes",
+      existingEntityIds: [],
+      frameWidth: 20,
+      frameHeight: 12,
+      animations: {
+        run: {
+          frames: [0, 1, 2],
+          fps: 12,
+          loop: true,
+        },
+      },
+    });
+
+    expect(entity.components.sprite).toMatchObject({
+      asset: "assets/sprites/hero.ppm",
+      frame_width: 32,
+      frame_height: 32,
+      animations: {
+        run: {
+          frames: [0, 1, 2],
+          fps: 12,
+          loop: true,
+        },
+      },
+    });
+  });
 });

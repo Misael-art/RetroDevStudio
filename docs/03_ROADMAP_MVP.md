@@ -1,7 +1,7 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-03-19
-**Fase ativa real:** Release candidate / beta testing do desktop Tauri, com baseline automatizada restaurada, persistencia atomica Windows endurecida, schema UGDM migrado explicitamente ate `1.6.0`, galeria de templates alinhada com `platformer_gm`, semantica `prefab` vs `display_name` separada, importacao SGDK generica ainda `Experimental` e UI novamente coerente com os badges/documentos de maturidade
+**Ultima revisao canonica:** 2026-03-20
+**Fase ativa real:** Release candidate / beta testing do desktop Tauri, com baseline automatizada restaurada, persistencia atomica Windows endurecida, schema UGDM migrado explicitamente ate `1.6.0`, galeria de templates alinhada com `platformer_gm`, semantica `prefab` vs `display_name` separada, importacao SGDK generica ainda `Experimental`, UI novamente coerente com os badges/documentos de maturidade, smoke desktop completo `Build -> ROM -> Run` reproduzido novamente no host local durante a sprint de consolidacao do Game View e ArtStudio institucionalizado na baseline do workspace como superficie `Experimental`, com validacao minima de dados, roundtrip de persistencia/schema cobertos por testes e ingestao visual endurecida para imagens externas com diagnostico claro. A repeticao em baseline commitada continua obrigatoria antes de qualquer claim institucional definitiva.
 
 > **DIRETRIZ PARA AGENTES DE IA**
 > Este roadmap precisa refletir estado real do codigo, nao claims historicas.
@@ -55,8 +55,11 @@
 - Patch Studio agora gera BPS com `SourceCopy` quando encontra runs reaproveitaveis da ROM original, reduzindo tamanho de patch sem alterar o apply canonico ja validado.
 - Save states basicos do emulador agora usam serializacao real do Libretro com slot em memoria, IPC dedicado e controles de salvar/carregar no `Game View`.
 - `Game View` agora expoe `pause`, `resume` e `step 1 frame` no proprio painel, reaproveitando `emulator_run_frame` e o loop canonico existente sem pipeline paralelo.
+- O `Game View` agora alinha o texto de status e o enablement dos controles ao mesmo conceito de sessao do emulador, evitando contradicoes entre ROM carregada, loop ativo e estado pausado.
 - `Game View` agora recebe audio real do Libretro por evento `emulator://audio`, reproduz via Web Audio API com fila curta sincronizada ao frame loop e expoe toggle de mute no painel.
 - `ToolsPanel` agora expoe um `Memory Viewer` basico ligado ao Libretro real, com leitura de SRAM/WRAM/VRAM, grid hexadecimal, auto-refresh e sinalizacao `Experimental` explicita.
+- O `ArtStudio` agora integra a baseline do workspace como superficie `Experimental`, gravando animacoes no schema canonico da entidade sprite com validacao minima de origem do asset, nomes de sequencia e dimensoes de frame antes de persistir.
+- O `ArtStudio` agora aceita ingestao de imagens externas para preparo visual, com suporte frontend a `PNG`, `BMP`, `JPG/JPEG`, `GIF`, `WebP` e `PPM`, fallback de carregamento via `Blob`, metadados do arquivo e bloqueio explicito de "Aplicar na Cena" enquanto o asset ainda nao estiver em `assets/sprites`.
 - `project.rds` e `scenes/*.json` agora carregam `schema_version`, aplicam cadeia explicita de migracao ate `1.6.0` (`collision_map`, `layers`, `display_name`) e preservam compatibilidade com fixtures legadas sem o campo.
 - O editor agora suporta fluxo basico de multi-cena com catalogo, troca/criacao pela `Hierarchy`, persistencia do `scene_path` ativo e atualizacao canonica de `entry_scene` para manter o build alinhado a cena selecionada.
 - O `Inspector` agora edita `Physics`, `Audio` e `Input` no caminho canonico da cena e exibe resumo read-only do `LogicComponent.graph`, mantendo a edicao estrutural do grafo restrita ao `NodeGraph`.
@@ -77,8 +80,9 @@
 ### Ainda em hardening
 - Runtime real de auto-update implementado em codigo: `tauri-plugin-updater = "2"` adicionado ao `Cargo.toml` e plugin registrado em `lib.rs`. Sem UI de update ainda — endpoint/pubkey permanecem placeholder.
 - Repeticao institucional do bundle MSI, do smoke desktop e do fluxo oficial upstream em Windows quando build, emulacao, onboarding ou packaging forem alterados.
-- Este host ainda pode exigir diagnostico adicional para bootstrap WebDriver (`DevToolsActivePort` / `chrome not reachable`) e para `spawn EPERM` em builds desktop fora do wrapper MSVC canonico, embora o smoke local MD/SNES tenha voltado a passar nesta sessao de hotfix.
+- Este host continua sujeito a diagnosticos ocasionais de WebDriver em cenarios locais (`DevToolsActivePort` / `chrome not reachable` ou policies de `spawn`), mas o smoke desktop canonico `Build -> ROM -> Run` voltou a passar nesta sprint de consolidacao do Game View.
 - Decisao final de governanca do workflow desktop dedicado (`push`/`pull_request` path-filtered, `workflow_dispatch`, `workflow_call` ou gate protegido).
+- O `ArtStudio` permanece `Experimental`: a persistencia/schema estao validados, mas ainda falta prova ponta a ponta de animacao autorada chegando ao runtime por fluxo institucional completo.
 - Auditoria residual de UX, com prioridade para revalidar o fluxo de autoria pos-hotfix (cena vazia -> sprite inicial -> inspector -> build), o caminho `Novo Projeto -> Build & Run` no Mega Drive e no SNES apos os ajustes de persistencia/schema, a nova UX de import SGDK (meta-sprites, zoom, hierarquia, asset tree, onboarding, warnings) e as superficies ainda `Experimental` (`VRAM Viewer`, `Reverse Explorer`, `Asset Extractor`, `RetroFX`, `ArtStudio`) antes de transformar o release candidate em beta institucional.
 
 ---

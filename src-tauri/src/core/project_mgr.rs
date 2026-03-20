@@ -3047,6 +3047,8 @@ fn sync_parent_dir(_path: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ugdm::components::AnimationDef;
+    use crate::ugdm::entities::Transform;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn fixture_dir(name: &str) -> std::path::PathBuf {
@@ -4281,6 +4283,81 @@ mod tests {
             load_scene(&project_dir, &project.entry_scene).expect("reload retrofx scene");
 
         assert_eq!(reloaded.retrofx, scene.retrofx);
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn save_and_load_scene_preserves_sprite_animation_payload() {
+        let project_dir = temp_dir("sprite-animations");
+        let project = create_project_skeleton(&project_dir, "Sprite Anim Save", "megadrive")
+            .expect("create canonical project");
+        let mut scene = canonical_scene(DEFAULT_SCENE_ID, Some("Main Scene".to_string()));
+        scene.entities.push(Entity {
+            entity_id: "hero".to_string(),
+            display_name: Some("Hero".to_string()),
+            prefab: None,
+            transform: Transform { x: 32, y: 48 },
+            components: Components {
+                sprite: Some(SpriteComponent {
+                    asset: "assets/sprites/hero.png".to_string(),
+                    frame_width: 16,
+                    frame_height: 16,
+                    pivot: None,
+                    palette_slot: 0,
+                    animations: HashMap::from([
+                        (
+                            "idle".to_string(),
+                            AnimationDef {
+                                frames: vec![0],
+                                fps: 6,
+                                looping: true,
+                            },
+                        ),
+                        (
+                            "run".to_string(),
+                            AnimationDef {
+                                frames: vec![1, 2, 3],
+                                fps: 12,
+                                looping: true,
+                            },
+                        ),
+                    ]),
+                    priority: "foreground".to_string(),
+                    meta_sprite: false,
+                }),
+                ..Components::default()
+            },
+        });
+
+        save_scene(&project_dir, &project.entry_scene, &scene).expect("save animated scene");
+        let reloaded =
+            load_scene(&project_dir, &project.entry_scene).expect("reload animated scene");
+
+        let sprite = reloaded
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "hero")
+            .and_then(|entity| entity.components.sprite.as_ref())
+            .expect("reloaded sprite");
+        assert_eq!(sprite.frame_width, 16);
+        assert_eq!(sprite.frame_height, 16);
+        assert_eq!(
+            sprite.animations.get("idle"),
+            Some(&AnimationDef {
+                frames: vec![0],
+                fps: 6,
+                looping: true,
+            })
+        );
+        assert_eq!(
+            sprite.animations.get("run"),
+            Some(&AnimationDef {
+                frames: vec![1, 2, 3],
+                fps: 12,
+                looping: true,
+            })
+        );
 
         let _ = fs::remove_dir_all(project_dir);
     }

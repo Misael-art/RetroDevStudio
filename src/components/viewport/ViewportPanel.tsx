@@ -41,14 +41,18 @@ const VIEWPORT_TABS = [
 const MD_WIDTH = 320;
 const MD_HEIGHT = 224;
 const GRID_SNAP_SIZE = 8;
+const SUB_GRID_SIZE = 4;
 const ZOOM_STEP = 0.25;
 const ZOOM_MIN = 0.25;
 const ZOOM_MAX = 4.0;
 const AUDIO_QUEUE_TARGET_FRAMES = 3;
 const RESIZE_HANDLE_SIZE = 8;
 const MIN_ENTITY_SIZE = GRID_SNAP_SIZE;
+const SCENE_RULER_SIZE = 18;
+const GUIDE_SCREEN_TOLERANCE = 6;
 
 type ResizeHandle = "nw" | "ne" | "sw" | "se";
+type SceneGuideOrientation = "horizontal" | "vertical";
 
 type EntityBounds = {
   x: number;
@@ -71,8 +75,25 @@ type ViewportAssetCacheEntry = {
   height?: number;
 };
 
+type SceneGuide = {
+  id: string;
+  orientation: SceneGuideOrientation;
+  position: number;
+};
+
+type GuideDragState = {
+  id: string;
+  orientation: SceneGuideOrientation;
+  position: number;
+  creating: boolean;
+};
+
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -91,6 +112,107 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 function snapToGrid(value: number, step: number): number {
   return Math.round(value / step) * step;
+}
+
+function getSceneDimensions(target: "megadrive" | "snes") {
+  return {
+    width: target === "snes" ? 256 : MD_WIDTH,
+    height: MD_HEIGHT,
+  };
+}
+
+function getGuideStorageKey(projectDir: string, scenePath: string | null | undefined): string | null {
+  if (!projectDir || !scenePath) {
+    return null;
+  }
+
+  return `rds:scene-guides:${encodeURIComponent(projectDir)}:${encodeURIComponent(scenePath)}`;
+}
+
+function loadSceneGuides(storageKey: string | null): SceneGuide[] {
+  if (!storageKey) {
+    return [];
+  }
+
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed
+      .filter((item): item is SceneGuide => {
+        return (
+          typeof item === "object" &&
+          item !== null &&
+          typeof (item as SceneGuide).id === "string" &&
+          ((item as SceneGuide).orientation === "horizontal"
+            || (item as SceneGuide).orientation === "vertical") &&
+          Number.isFinite((item as SceneGuide).position)
+        );
+      })
+      .map((guide) => ({
+        id: guide.id,
+        orientation: guide.orientation,
+        position: Math.round(guide.position),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function saveSceneGuides(storageKey: string | null, guides: SceneGuide[]) {
+  if (!storageKey) {
+    return;
+  }
+
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(guides));
+  } catch {
+    // Ignore localStorage quota / privacy failures in the editor shell.
+  }
+}
+
+function createSceneGuideId() {
+  return `guide_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getRulerStep(zoom: number) {
+  const options = [4, 8, 16, 32, 64, 128];
+  return options.find((step) => step * zoom >= 48) ?? 256;
+}
+
+function drawRepeatedAsset(
+  context: CanvasRenderingContext2D,
+  asset: ViewportAssetCacheEntry,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  offsetX = 0,
+  offsetY = 0
+) {
+  if (!asset.source || !asset.width || !asset.height) {
+    return;
+  }
+
+  const tileWidth = Math.max(1, asset.width);
+  const tileHeight = Math.max(1, asset.height);
+  const normalizedOffsetX = ((offsetX % tileWidth) + tileWidth) % tileWidth;
+  const normalizedOffsetY = ((offsetY % tileHeight) + tileHeight) % tileHeight;
+  const startX = x - normalizedOffsetX;
+  const startY = y - normalizedOffsetY;
+
+  for (let drawY = startY; drawY < y + height; drawY += tileHeight) {
+    for (let drawX = startX; drawX < x + width; drawX += tileWidth) {
+      context.drawImage(asset.source, drawX, drawY, tileWidth, tileHeight);
+    }
+  }
 }
 
 function getEntityBounds(entity: Entity, target: "megadrive" | "snes"): EntityBounds {
@@ -204,6 +326,7 @@ export default function ViewportPanel() {
     setActiveViewportTab,
     logMessage,
     activeScene,
+    activeScenePath,
     activeProjectDir,
     hwStatus,
     emulatorLoaded,
@@ -233,6 +356,9 @@ export default function ViewportPanel() {
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneCanvasRef = useRef<HTMLCanvasElement>(null);
+  const sceneOverlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const sceneRulerTopRef = useRef<HTMLCanvasElement>(null);
+  const sceneRulerLeftRef = useRef<HTMLCanvasElement>(null);
   const stopLoopRef = useRef<(() => void) | null>(null);
   const loopStartingRef = useRef(false);
   const loopTokenRef = useRef(0);
@@ -279,6 +405,16 @@ export default function ViewportPanel() {
   const [emulatorActive, setEmulatorActive] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [gridSnap, setGridSnap] = useState(true);
+  const [showGrid, setShowGrid] = useState(true);
+  const [showSubGrid, setShowSubGrid] = useState(true);
+  const [showBackground, setShowBackground] = useState(true);
+  const [showTilemaps, setShowTilemaps] = useState(true);
+  const [showSprites, setShowSprites] = useState(true);
+  const [showCollisionOverlay, setShowCollisionOverlay] = useState(true);
+  const [guideSnap, setGuideSnap] = useState(true);
+  const [gameViewLight, setGameViewLight] = useState(false);
+  const [sceneGuides, setSceneGuides] = useState<SceneGuide[]>([]);
+  const [guideDrag, setGuideDrag] = useState<GuideDragState | null>(null);
   const [saveStateBusy, setSaveStateBusy] = useState(false);
   const [loadStateBusy, setLoadStateBusy] = useState(false);
   const [rewindBusy, setRewindBusy] = useState(false);
@@ -301,12 +437,23 @@ export default function ViewportPanel() {
   );
   const projectSourceKind = useEditorStore((state) => state.projectSourceKind);
   const isSgdkProject = projectSourceKind === "external_sgdk" || projectSourceKind === "imported_sgdk";
+  const hasEmulatorSession = emulatorLoaded || emulatorActive;
   const showSgdkOnboarding = isSgdkProject && !sgdkOnboardingDismissed;
   const hotReloadNoticeTimerRef = useRef<number | null>(null);
   const frameTimingRef = useRef<{ lastFrameAt: number; fps: number }>({
     lastFrameAt: 0,
     fps: 0,
   });
+  const sceneDimensions = getSceneDimensions(activeTarget);
+  const sceneWidth = sceneDimensions.width;
+  const sceneHeight = sceneDimensions.height;
+  const sceneScaleWidth = Math.round(sceneWidth * viewportZoom);
+  const sceneScaleHeight = Math.round(sceneHeight * viewportZoom);
+  const sceneChromeOffset = gameViewLight ? 0 : SCENE_RULER_SIZE;
+  const sceneGuideStorageKey = getGuideStorageKey(
+    activeProjectDir,
+    activeScenePath || activeScene?.scene_id || null
+  );
 
   activeTabRef.current = activeViewportTab;
   pausedRef.current = emulPaused;
@@ -326,6 +473,35 @@ export default function ViewportPanel() {
       setIsPanning(false);
     }
   }, [activeViewportTab]);
+
+  useEffect(() => {
+    setSceneGuides(loadSceneGuides(sceneGuideStorageKey));
+  }, [sceneGuideStorageKey]);
+
+  useEffect(() => {
+    setSceneGuides((current) =>
+      current
+        .map((guide) => ({
+          ...guide,
+          position: clamp(
+            guide.position,
+            0,
+            guide.orientation === "vertical" ? sceneWidth : sceneHeight
+          ),
+        }))
+        .sort((left, right) => left.position - right.position)
+    );
+  }, [sceneHeight, sceneWidth]);
+
+  useEffect(() => {
+    saveSceneGuides(sceneGuideStorageKey, sceneGuides);
+  }, [sceneGuideStorageKey, sceneGuides]);
+
+  useEffect(() => {
+    if (gameViewLight) {
+      setSceneMousePos(null);
+    }
+  }, [gameViewLight]);
 
   const getViewportAsset = useCallback(
     (relativePath?: string | null): ViewportAssetCacheEntry | null => {
@@ -462,11 +638,104 @@ export default function ViewportPanel() {
       }
     });
     activeScene.background_layers.forEach((layer) => {
-      if (layer.tileset) {
-        getViewportAsset(layer.tileset);
+      const backgroundAsset = layer.tilemap ?? layer.tileset;
+      if (backgroundAsset) {
+        getViewportAsset(backgroundAsset);
       }
     });
   }, [activeViewportTab, activeScene, activeProjectDir, getViewportAsset]);
+
+  const getGuideSnapStep = useCallback(() => {
+    return showSubGrid ? SUB_GRID_SIZE : GRID_SNAP_SIZE;
+  }, [showSubGrid]);
+
+  const snapPositionToGuides = useCallback(
+    (value: number, orientation: SceneGuideOrientation) => {
+      if (!guideSnap || sceneGuides.length === 0) {
+        return value;
+      }
+
+      const threshold = GUIDE_SCREEN_TOLERANCE / Math.max(viewportZoom, 0.25);
+      let best = value;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (const guide of sceneGuides) {
+        if (guide.orientation !== orientation) {
+          continue;
+        }
+        const distance = Math.abs(guide.position - value);
+        if (distance <= threshold && distance < bestDistance) {
+          best = guide.position;
+          bestDistance = distance;
+        }
+      }
+
+      return best;
+    },
+    [guideSnap, sceneGuides, viewportZoom]
+  );
+
+  const getSceneCoordsFromClient = useCallback(
+    (clientX: number, clientY: number) => {
+      const frame = sceneOverlayCanvasRef.current ?? sceneCanvasRef.current;
+      if (!frame) {
+        return null;
+      }
+
+      const rect = frame.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) {
+        return null;
+      }
+
+      return {
+        x: clamp(((clientX - rect.left) / rect.width) * sceneWidth, 0, sceneWidth),
+        y: clamp(((clientY - rect.top) / rect.height) * sceneHeight, 0, sceneHeight),
+      };
+    },
+    [sceneHeight, sceneWidth]
+  );
+
+  const startGuideDrag = useCallback(
+    (orientation: SceneGuideOrientation, clientX: number, clientY: number, guideId?: string) => {
+      const coords = getSceneCoordsFromClient(clientX, clientY);
+      if (!coords) {
+        return;
+      }
+
+      const axisLimit = orientation === "vertical" ? sceneWidth : sceneHeight;
+      const axisValue = orientation === "vertical" ? coords.x : coords.y;
+      const snapStep = getGuideSnapStep();
+      const snapped = guideSnap ? snapToGrid(axisValue, snapStep) : axisValue;
+      const clamped = clamp(Math.round(snapped), 0, axisLimit);
+      setGuideDrag({
+        id: guideId ?? createSceneGuideId(),
+        orientation,
+        position: clamped,
+        creating: !guideId,
+      });
+    },
+    [getGuideSnapStep, getSceneCoordsFromClient, guideSnap, sceneHeight, sceneWidth]
+  );
+
+  const getGuideHit = useCallback(
+    (mx: number, my: number) => {
+      const tolerance = GUIDE_SCREEN_TOLERANCE / Math.max(viewportZoom, 0.25);
+      let bestGuide: SceneGuide | null = null;
+      let bestDistance = Number.POSITIVE_INFINITY;
+
+      for (const guide of sceneGuides) {
+        const distance = guide.orientation === "vertical"
+          ? Math.abs(mx - guide.position)
+          : Math.abs(my - guide.position);
+        if (distance <= tolerance && distance < bestDistance) {
+          bestGuide = guide;
+          bestDistance = distance;
+        }
+      }
+
+      return bestGuide;
+    },
+    [sceneGuides, viewportZoom]
+  );
 
   const renderFrame = useCallback((payload: FramePayload) => {
     const canvas = canvasRef.current;
@@ -735,22 +1004,22 @@ export default function ViewportPanel() {
   }, [emulPaused, logMessage, rewindBusy]);
 
   const handlePause = useCallback(() => {
-    if ((!emulatorLoaded && !emulatorActive) || emulPaused) {
+    if (!hasEmulatorSession || emulPaused) {
       return;
     }
 
     setEmulPaused(true);
     logMessage("info", "Emulador pausado.");
-  }, [emulatorActive, emulPaused, emulatorLoaded, logMessage, setEmulPaused]);
+  }, [emulPaused, hasEmulatorSession, logMessage, setEmulPaused]);
 
   const handleResume = useCallback(() => {
-    if ((!emulatorLoaded && !emulatorActive) || !emulPaused) {
+    if (!hasEmulatorSession || !emulPaused) {
       return;
     }
 
     setEmulPaused(false);
     logMessage("info", "Emulador retomado.");
-  }, [emulatorActive, emulPaused, emulatorLoaded, logMessage, setEmulPaused]);
+  }, [emulPaused, hasEmulatorSession, logMessage, setEmulPaused]);
 
   const handleStartRecording = useCallback(async () => {
     if (!emulatorLoaded || recordBusy || replayRecording) {
@@ -799,7 +1068,7 @@ export default function ViewportPanel() {
   }, [activeProjectDir, logMessage, recordBusy, replayRecording]);
 
   const handleStepFrame = useCallback(async () => {
-    if ((!emulatorLoaded && !emulatorActive) || !emulPaused || stepBusy) {
+    if (!hasEmulatorSession || !emulPaused || stepBusy) {
       return;
     }
 
@@ -835,7 +1104,7 @@ export default function ViewportPanel() {
         logMessage("error", `Falha ao iniciar frame unico: ${describeError(error)}`);
       }
     }
-  }, [emulatorActive, emulatorLoaded, emulPaused, logMessage, renderFrame, startFrameLoop, stepBusy]);
+  }, [emulPaused, hasEmulatorSession, logMessage, renderFrame, startFrameLoop, stepBusy]);
 
   const handlePlayReplay = useCallback(async () => {
     if (!lastReplayPath || playReplayBusy || replayRecording || !emulPaused) {
@@ -1143,44 +1412,194 @@ export default function ViewportPanel() {
   }, [activeViewportTab]);
 
   useEffect(() => {
+    if (activeViewportTab !== "scene" || !guideDrag) {
+      return;
+    }
+
+    const activeGuideDrag = guideDrag;
+
+    function onGuideMove(event: MouseEvent) {
+      const coords = getSceneCoordsFromClient(event.clientX, event.clientY);
+      if (!coords) {
+        return;
+      }
+
+      const axisLimit = activeGuideDrag.orientation === "vertical" ? sceneWidth : sceneHeight;
+      const axisValue = activeGuideDrag.orientation === "vertical" ? coords.x : coords.y;
+      const snapStep = getGuideSnapStep();
+      const snapped = guideSnap ? snapToGrid(axisValue, snapStep) : axisValue;
+      setGuideDrag((current) =>
+        current
+          ? {
+              ...current,
+              position: clamp(Math.round(snapped), 0, axisLimit),
+            }
+          : current
+      );
+    }
+
+    function onGuideUp() {
+      setSceneGuides((current) => {
+        const activeGuide = activeGuideDrag;
+        const nextGuide: SceneGuide = {
+          id: activeGuide.id,
+          orientation: activeGuide.orientation,
+          position: activeGuide.position,
+        };
+
+        const remaining = current.filter((guide) => guide.id !== activeGuide.id);
+        return [...remaining, nextGuide].sort((left, right) => left.position - right.position);
+      });
+      setGuideDrag(null);
+    }
+
+    window.addEventListener("mousemove", onGuideMove);
+    window.addEventListener("mouseup", onGuideUp);
+    return () => {
+      window.removeEventListener("mousemove", onGuideMove);
+      window.removeEventListener("mouseup", onGuideUp);
+    };
+  }, [
+    activeViewportTab,
+    getGuideSnapStep,
+    getSceneCoordsFromClient,
+    guideDrag,
+    guideSnap,
+    sceneHeight,
+    sceneWidth,
+  ]);
+
+  useEffect(() => {
     if (activeViewportTab !== "scene") return;
 
     const canvas = sceneCanvasRef.current;
     if (!canvas) return;
 
+    canvas.width = sceneWidth;
+    canvas.height = sceneHeight;
+
     const context = canvas.getContext("2d");
     if (!context) return;
 
     context.imageSmoothingEnabled = false;
-    context.fillStyle = "#000000";
-    context.fillRect(0, 0, MD_WIDTH, MD_HEIGHT);
-
-    if (gridSnap) {
-      context.strokeStyle = "rgba(205,214,244,0.08)";
-      context.lineWidth = 1;
-      for (let x = 0; x <= MD_WIDTH; x += GRID_SNAP_SIZE) {
-        context.beginPath();
-        context.moveTo(x, 0);
-        context.lineTo(x, MD_HEIGHT);
-        context.stroke();
-      }
-      for (let y = 0; y <= MD_HEIGHT; y += GRID_SNAP_SIZE) {
-        context.beginPath();
-        context.moveTo(0, y);
-        context.lineTo(MD_WIDTH, y);
-        context.stroke();
-      }
-    }
+    context.clearRect(0, 0, sceneWidth, sceneHeight);
+    context.fillStyle = "#060816";
+    context.fillRect(0, 0, sceneWidth, sceneHeight);
 
     if (!activeScene) {
-      context.fillStyle = "#45475a";
-      context.font = "11px monospace";
-      context.textAlign = "center";
-      context.fillText("320 x 224 - Mega Drive Safe Area", MD_WIDTH / 2, MD_HEIGHT / 2);
-      context.fillText("Abra um projeto para ver a cena", MD_WIDTH / 2, MD_HEIGHT / 2 + 16);
       return;
     }
 
+    const compositionHiddenByLayer = new Set<string>();
+    const compositionLayerDepthByEntityId = new Map<string, number>();
+    for (const sceneLayer of activeScene.layers ?? []) {
+      for (const entityId of sceneLayer.entity_ids) {
+        compositionLayerDepthByEntityId.set(entityId, sceneLayer.depth ?? 0);
+      }
+      if (!sceneLayer.visible) {
+        for (const entityId of sceneLayer.entity_ids) {
+          compositionHiddenByLayer.add(entityId);
+        }
+      }
+    }
+
+    const compositionEntities = activeScene.entities
+      .map((entity, index) => ({
+        entity,
+        index,
+        depth: compositionLayerDepthByEntityId.get(entity.entity_id) ?? 0,
+      }))
+      .filter(({ entity }) => !compositionHiddenByLayer.has(entity.entity_id))
+      .sort((left, right) => {
+        if (left.depth !== right.depth) {
+          return left.depth - right.depth;
+        }
+        return left.index - right.index;
+      });
+
+    if (showBackground) {
+      [...activeScene.background_layers]
+        .sort((left, right) => left.depth - right.depth)
+        .forEach((layer) => {
+          const backgroundAsset = getViewportAsset(layer.tilemap ?? layer.tileset);
+          if (backgroundAsset?.status !== "loaded" || !backgroundAsset.source) {
+            return;
+          }
+
+          context.save();
+          context.globalAlpha = 0.92;
+          drawRepeatedAsset(
+            context,
+            backgroundAsset,
+            0,
+            0,
+            sceneWidth,
+            sceneHeight,
+            layer.scroll_speed?.x ?? 0,
+            layer.scroll_speed?.y ?? 0
+          );
+          context.restore();
+        });
+    }
+
+    if (showTilemaps) {
+      compositionEntities
+        .filter(({ entity }) => Boolean(entity.components?.tilemap))
+        .forEach(({ entity }) => {
+          const tilemap = entity.components?.tilemap;
+          if (!tilemap) {
+            return;
+          }
+
+          const tilemapAsset = getViewportAsset(tilemap.tileset);
+          if (tilemapAsset?.status !== "loaded" || !tilemapAsset.source) {
+            return;
+          }
+
+          const bounds = getEntityBounds(entity, activeTarget);
+          drawRepeatedAsset(
+            context,
+            tilemapAsset,
+            bounds.x,
+            bounds.y,
+            bounds.width,
+            bounds.height,
+            tilemap.scroll_x ?? 0,
+            tilemap.scroll_y ?? 0
+          );
+        });
+    }
+
+    if (showSprites) {
+      compositionEntities
+        .filter(({ entity }) => Boolean(entity.components?.sprite))
+        .forEach(({ entity }) => {
+          const sprite = entity.components?.sprite;
+          const spriteAsset = getViewportAsset(sprite?.asset);
+          if (!sprite || spriteAsset?.status !== "loaded" || !spriteAsset.source) {
+            return;
+          }
+
+          const bounds = getEntityBounds(entity, activeTarget);
+          const sourceWidth = Math.min(sprite.frame_width, spriteAsset.width ?? sprite.frame_width);
+          const sourceHeight = Math.min(sprite.frame_height, spriteAsset.height ?? sprite.frame_height);
+          context.drawImage(
+            spriteAsset.source,
+            0,
+            0,
+            sourceWidth,
+            sourceHeight,
+            bounds.x,
+            bounds.y,
+            bounds.width,
+            bounds.height
+          );
+        });
+    }
+
+    return;
+
+    /*
     const colors = [
       "#cba6f7",
       "#89b4fa",
@@ -1409,17 +1828,406 @@ export default function ViewportPanel() {
       context.setLineDash([]);
       context.restore();
     }
+    */
+  }, [
+    activeScene,
+    activeTarget,
+    activeViewportTab,
+    assetCacheVersion,
+    getViewportAsset,
+    sceneHeight,
+    sceneWidth,
+    showBackground,
+    showSprites,
+    showTilemaps,
+  ]);
+
+  useEffect(() => {
+    if (activeViewportTab !== "scene") return;
+
+    const canvas = sceneOverlayCanvasRef.current;
+    if (!canvas) return;
+
+    canvas.width = Math.max(sceneScaleWidth, 1);
+    canvas.height = Math.max(sceneScaleHeight, 1);
+
+    const context = canvas.getContext("2d");
+    if (!context) return;
+
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.imageSmoothingEnabled = true;
+
+    const drawVerticalLine = (position: number, color: string, width = 1) => {
+      const x = Math.round(position * viewportZoom) + 0.5;
+      context.strokeStyle = color;
+      context.lineWidth = width;
+      context.beginPath();
+      context.moveTo(x, 0);
+      context.lineTo(x, sceneScaleHeight);
+      context.stroke();
+    };
+
+    const drawHorizontalLine = (position: number, color: string, width = 1) => {
+      const y = Math.round(position * viewportZoom) + 0.5;
+      context.strokeStyle = color;
+      context.lineWidth = width;
+      context.beginPath();
+      context.moveTo(0, y);
+      context.lineTo(sceneScaleWidth, y);
+      context.stroke();
+    };
+
+    if (!activeScene) {
+      context.fillStyle = "#45475a";
+      context.font = "11px monospace";
+      context.textAlign = "center";
+      context.fillText(
+        `${sceneWidth} x ${sceneHeight} - ${activeTarget === "snes" ? "SNES" : "Mega Drive"} Safe Area`,
+        sceneScaleWidth / 2,
+        sceneScaleHeight / 2
+      );
+      context.fillText("Abra um projeto para ver a cena", sceneScaleWidth / 2, sceneScaleHeight / 2 + 16);
+      return;
+    }
+
+    if (gameViewLight) {
+      return;
+    }
+
+    const hiddenByLayer = new Set<string>();
+    const layerDepthByEntityId = new Map<string, number>();
+    for (const sceneLayer of activeScene.layers ?? []) {
+      for (const entityId of sceneLayer.entity_ids) {
+        layerDepthByEntityId.set(entityId, sceneLayer.depth ?? 0);
+      }
+      if (!sceneLayer.visible) {
+        for (const entityId of sceneLayer.entity_ids) {
+          hiddenByLayer.add(entityId);
+        }
+      }
+    }
+
+    const orderedEntities = activeScene.entities
+      .map((entity, index) => ({
+        entity,
+        index,
+        depth: layerDepthByEntityId.get(entity.entity_id) ?? 0,
+      }))
+      .filter(({ entity }) => !hiddenByLayer.has(entity.entity_id))
+      .sort((left, right) => {
+        if (left.depth !== right.depth) {
+          return left.depth - right.depth;
+        }
+        return left.index - right.index;
+      });
+
+    if (showGrid) {
+      const showMinorGrid = showSubGrid && SUB_GRID_SIZE * viewportZoom >= 6;
+      const minorAlpha = clamp(0.03 + (viewportZoom - 0.25) * 0.03, 0.03, 0.1);
+      const majorAlpha = clamp(0.09 + viewportZoom * 0.04, 0.09, 0.24);
+
+      if (showMinorGrid) {
+        for (let x = 0; x <= sceneWidth; x += SUB_GRID_SIZE) {
+          if (x % GRID_SNAP_SIZE === 0) continue;
+          drawVerticalLine(x, `rgba(137,180,250,${minorAlpha.toFixed(3)})`);
+        }
+        for (let y = 0; y <= sceneHeight; y += SUB_GRID_SIZE) {
+          if (y % GRID_SNAP_SIZE === 0) continue;
+          drawHorizontalLine(y, `rgba(137,180,250,${minorAlpha.toFixed(3)})`);
+        }
+      }
+
+      for (let x = 0; x <= sceneWidth; x += GRID_SNAP_SIZE) {
+        drawVerticalLine(x, `rgba(180,190,254,${majorAlpha.toFixed(3)})`);
+      }
+      for (let y = 0; y <= sceneHeight; y += GRID_SNAP_SIZE) {
+        drawHorizontalLine(y, `rgba(180,190,254,${majorAlpha.toFixed(3)})`);
+      }
+    }
+
+    if (showCollisionOverlay && activeScene.collision_map) {
+      const collisionMap = activeScene.collision_map;
+      const tileWidth = collisionMap.tile_width;
+      const tileHeight = collisionMap.tile_height;
+      context.save();
+      context.fillStyle = "rgba(243,139,168,0.28)";
+      for (let tileIndex = 0; tileIndex < collisionMap.data.length; tileIndex += 1) {
+        if (collisionMap.data[tileIndex] !== 1) continue;
+        const tileX = (tileIndex % collisionMap.width) * tileWidth * viewportZoom;
+        const tileY = Math.floor(tileIndex / collisionMap.width) * tileHeight * viewportZoom;
+        context.fillRect(
+          Math.round(tileX),
+          Math.round(tileY),
+          Math.round(tileWidth * viewportZoom),
+          Math.round(tileHeight * viewportZoom)
+        );
+      }
+      context.restore();
+
+      for (let x = 0; x <= collisionMap.width * tileWidth; x += tileWidth) {
+        drawVerticalLine(x, "rgba(243,139,168,0.24)");
+      }
+      for (let y = 0; y <= collisionMap.height * tileHeight; y += tileHeight) {
+        drawHorizontalLine(y, "rgba(243,139,168,0.24)");
+      }
+    }
+
+    orderedEntities.forEach(({ entity, index }) => {
+      const bounds = getEntityBounds(entity, activeTarget);
+      const x = Math.round(bounds.x * viewportZoom);
+      const y = Math.round(bounds.y * viewportZoom);
+      const width = Math.round(bounds.width * viewportZoom);
+      const height = Math.round(bounds.height * viewportZoom);
+      const isSelected = entity.entity_id === selectedEntityId;
+      const color = entity.components?.tilemap
+        ? "#94e2d5"
+        : entity.components?.camera
+          ? "#f9e2af"
+          : ["#cba6f7", "#89b4fa", "#a6e3a1", "#fab387", "#f38ba8", "#94e2d5"][index % 6];
+
+      if (entity.components?.camera) {
+        context.save();
+        context.setLineDash([6, 4]);
+        context.strokeStyle = isSelected ? "#f9e2af" : "rgba(249,226,175,0.58)";
+        context.lineWidth = isSelected ? 2 : 1;
+        context.strokeRect(x + 0.5, y + 0.5, width, height);
+        context.setLineDash([]);
+        context.fillStyle = isSelected ? "#f9e2af" : "rgba(249,226,175,0.8)";
+        context.font = "10px monospace";
+        context.fillText(`CAM ${entityDisplayLabel(entity)}`.slice(0, 22), x + 6, y + 14);
+        context.restore();
+        return;
+      }
+
+      if (entity.components?.tilemap) {
+        if (!showTilemaps) return;
+        context.strokeStyle = isSelected ? "#94e2d5" : "rgba(148,226,213,0.58)";
+        context.lineWidth = isSelected ? 2 : 1;
+        context.strokeRect(x + 0.5, y + 0.5, width, height);
+        context.fillStyle = "#94e2d5";
+        context.font = "10px monospace";
+        context.fillText(`TM ${entityDisplayLabel(entity)}`.slice(0, 22), x + 6, y + 14);
+        if (isSelected) {
+          context.fillStyle = "rgba(148,226,213,0.16)";
+          context.fillRect(x, y, width, height);
+        }
+        return;
+      }
+
+      if (entity.components?.sprite) {
+        if (!showSprites) return;
+        context.strokeStyle = isSelected ? "#ffffff" : color;
+        context.lineWidth = isSelected ? 2 : 1;
+        context.strokeRect(x + 0.5, y + 0.5, width, height);
+        context.fillStyle = isSelected ? "#ffffff" : color;
+        context.font = "10px monospace";
+        context.fillText(entityDisplayLabel(entity).slice(0, 22), x + 6, y + 14);
+        if (isSelected) {
+          context.save();
+          context.strokeStyle = "#f9e2af";
+          context.lineWidth = 1;
+          context.setLineDash([4, 3]);
+          context.strokeRect(x - 2.5, y - 2.5, width + 4, height + 4);
+          context.setLineDash([]);
+          if (bounds.resizable) {
+            drawResizeHandle(context, x, y, "#f9e2af");
+            drawResizeHandle(context, x + width, y, "#f9e2af");
+            drawResizeHandle(context, x, y + height, "#f9e2af");
+            drawResizeHandle(context, x + width, y + height, "#f9e2af");
+          }
+          context.restore();
+        }
+        return;
+      }
+
+      context.strokeStyle = "rgba(205,214,244,0.55)";
+      context.strokeRect(x + 0.5, y + 0.5, width, height);
+      context.fillStyle = "#cdd6f4";
+      context.font = "10px monospace";
+      context.fillText(entityDisplayLabel(entity).slice(0, 22), x + 6, y + 14);
+    });
+
+    if (editorMode === "collision" && sceneMousePos) {
+      const collisionMap = activeScene.collision_map;
+      const tileWidth = collisionMap?.tile_width ?? GRID_SNAP_SIZE;
+      const tileHeight = collisionMap?.tile_height ?? GRID_SNAP_SIZE;
+      const mapWidth = collisionMap?.width ?? (activeTarget === "snes" ? 32 : 40);
+      const mapHeight = collisionMap?.height ?? 28;
+      const tileX = Math.floor(sceneMousePos.x / tileWidth);
+      const tileY = Math.floor(sceneMousePos.y / tileHeight);
+      if (tileX >= 0 && tileX < mapWidth && tileY >= 0 && tileY < mapHeight) {
+        const screenX = Math.round(tileX * tileWidth * viewportZoom);
+        const screenY = Math.round(tileY * tileHeight * viewportZoom);
+        context.fillStyle = "rgba(243,139,168,0.55)";
+        context.fillRect(
+          screenX,
+          screenY,
+          Math.round(tileWidth * viewportZoom),
+          Math.round(tileHeight * viewportZoom)
+        );
+        context.strokeStyle = "#f38ba8";
+        context.lineWidth = 1;
+        context.strokeRect(
+          screenX + 0.5,
+          screenY + 0.5,
+          Math.round(tileWidth * viewportZoom),
+          Math.round(tileHeight * viewportZoom)
+        );
+      }
+    }
+
+    if (editorMode === "paint" && activeBrush && sceneMousePos) {
+      const ghostSize = constrainSpriteFrameSize(
+        activeTarget,
+        activeBrush.assetPath ?? activeBrush.id,
+        ONBOARDING_SPRITE_SIZE,
+        ONBOARDING_SPRITE_SIZE
+      );
+      let ghostX = gridSnap ? snapToGrid(sceneMousePos.x, GRID_SNAP_SIZE) : Math.round(sceneMousePos.x);
+      let ghostY = gridSnap ? snapToGrid(sceneMousePos.y, GRID_SNAP_SIZE) : Math.round(sceneMousePos.y);
+      ghostX = snapPositionToGuides(ghostX, "vertical");
+      ghostY = snapPositionToGuides(ghostY, "horizontal");
+      const screenX = Math.round(ghostX * viewportZoom);
+      const screenY = Math.round(ghostY * viewportZoom);
+      const screenWidth = Math.round(ghostSize.frameWidth * viewportZoom);
+      const screenHeight = Math.round(ghostSize.frameHeight * viewportZoom);
+      context.save();
+      context.globalAlpha = 0.25;
+      context.fillStyle = "#89b4fa";
+      context.fillRect(screenX, screenY, screenWidth, screenHeight);
+      context.globalAlpha = 0.85;
+      context.strokeStyle = "#89b4fa";
+      context.lineWidth = 1;
+      context.setLineDash([4, 3]);
+      context.strokeRect(screenX + 0.5, screenY + 0.5, screenWidth, screenHeight);
+      context.setLineDash([]);
+      context.restore();
+    }
+
+    const guidesToRender = guideDrag
+      ? [...sceneGuides.filter((guide) => guide.id !== guideDrag.id), guideDrag]
+      : sceneGuides;
+    guidesToRender.forEach((guide) => {
+      const isActiveGuide = guideDrag?.id === guide.id;
+      const guideColor = isActiveGuide ? "#f9e2af" : "#89dceb";
+      if (guide.orientation === "vertical") {
+        drawVerticalLine(guide.position, guideColor, isActiveGuide ? 2 : 1);
+        context.fillStyle = guideColor;
+        context.font = "10px monospace";
+        context.fillText(`${guide.position}px`, Math.round(guide.position * viewportZoom) + 4, 12);
+      } else {
+        drawHorizontalLine(guide.position, guideColor, isActiveGuide ? 2 : 1);
+        context.fillStyle = guideColor;
+        context.font = "10px monospace";
+        context.fillText(`${guide.position}px`, 6, Math.round(guide.position * viewportZoom) - 4);
+      }
+    });
   }, [
     activeBrush,
     activeScene,
     activeTarget,
     activeViewportTab,
-    assetCacheVersion,
     editorMode,
-    getViewportAsset,
+    gameViewLight,
     gridSnap,
+    guideDrag,
+    sceneGuides,
+    sceneHeight,
     sceneMousePos,
+    sceneScaleHeight,
+    sceneScaleWidth,
+    sceneWidth,
     selectedEntityId,
+    showCollisionOverlay,
+    showGrid,
+    showSprites,
+    showSubGrid,
+    showTilemaps,
+    snapPositionToGuides,
+    viewportZoom,
+  ]);
+
+  useEffect(() => {
+    const topCanvas = sceneRulerTopRef.current;
+    const leftCanvas = sceneRulerLeftRef.current;
+    if (!topCanvas || !leftCanvas) return;
+
+    topCanvas.width = Math.max(sceneScaleWidth, 1);
+    topCanvas.height = SCENE_RULER_SIZE;
+    leftCanvas.width = SCENE_RULER_SIZE;
+    leftCanvas.height = Math.max(sceneScaleHeight, 1);
+
+    const topContext = topCanvas.getContext("2d");
+    const leftContext = leftCanvas.getContext("2d");
+    if (!topContext || !leftContext) return;
+
+    topContext.clearRect(0, 0, topCanvas.width, topCanvas.height);
+    leftContext.clearRect(0, 0, leftCanvas.width, leftCanvas.height);
+
+    if (activeViewportTab !== "scene" || gameViewLight) {
+      return;
+    }
+
+    const rulerStep = getRulerStep(viewportZoom);
+    const guideMarkers = guideDrag
+      ? [...sceneGuides.filter((guide) => guide.id !== guideDrag.id), guideDrag]
+      : sceneGuides;
+
+    topContext.fillStyle = "#181825";
+    topContext.fillRect(0, 0, topCanvas.width, topCanvas.height);
+    topContext.strokeStyle = "#313244";
+    topContext.strokeRect(0.5, 0.5, topCanvas.width - 1, topCanvas.height - 1);
+    topContext.fillStyle = "#6c7086";
+    topContext.font = "10px monospace";
+
+    for (let pixel = 0; pixel <= sceneWidth; pixel += rulerStep) {
+      const x = Math.round(pixel * viewportZoom) + 0.5;
+      topContext.strokeStyle = "rgba(108,112,134,0.85)";
+      topContext.beginPath();
+      topContext.moveTo(x, SCENE_RULER_SIZE);
+      topContext.lineTo(x, pixel % (rulerStep * 2) === 0 ? 5 : 9);
+      topContext.stroke();
+      topContext.fillText(`${pixel}`, Math.min(x + 3, topCanvas.width - 28), 11);
+    }
+
+    leftContext.fillStyle = "#181825";
+    leftContext.fillRect(0, 0, leftCanvas.width, leftCanvas.height);
+    leftContext.strokeStyle = "#313244";
+    leftContext.strokeRect(0.5, 0.5, leftCanvas.width - 1, leftCanvas.height - 1);
+    leftContext.fillStyle = "#6c7086";
+    leftContext.font = "10px monospace";
+
+    for (let pixel = 0; pixel <= sceneHeight; pixel += rulerStep) {
+      const y = Math.round(pixel * viewportZoom) + 0.5;
+      leftContext.strokeStyle = "rgba(108,112,134,0.85)";
+      leftContext.beginPath();
+      leftContext.moveTo(SCENE_RULER_SIZE, y);
+      leftContext.lineTo(pixel % (rulerStep * 2) === 0 ? 5 : 9, y);
+      leftContext.stroke();
+      leftContext.fillText(`${pixel}`, 2, Math.min(y - 2, leftCanvas.height - 4));
+    }
+
+    guideMarkers.forEach((guide) => {
+      if (guide.orientation === "vertical") {
+        const x = Math.round(guide.position * viewportZoom);
+        topContext.fillStyle = "#89dceb";
+        topContext.fillRect(Math.max(0, x - 1), 0, 3, SCENE_RULER_SIZE);
+      } else {
+        const y = Math.round(guide.position * viewportZoom);
+        leftContext.fillStyle = "#89dceb";
+        leftContext.fillRect(0, Math.max(0, y - 1), SCENE_RULER_SIZE, 3);
+      }
+    });
+  }, [
+    activeViewportTab,
+    gameViewLight,
+    guideDrag,
+    sceneGuides,
+    sceneHeight,
+    sceneScaleHeight,
+    sceneScaleWidth,
+    sceneWidth,
+    viewportZoom,
   ]);
 
   useEffect(() => {
@@ -1449,9 +2257,9 @@ export default function ViewportPanel() {
   }, [activeViewportTab, clearAudioQueue, emulPaused]);
 
   function canvasCoords(event: React.MouseEvent<HTMLCanvasElement>) {
-    const rect = (event.target as HTMLCanvasElement).getBoundingClientRect();
-    const scaleX = MD_WIDTH / (MD_WIDTH * viewportZoom);
-    const scaleY = MD_HEIGHT / (MD_HEIGHT * viewportZoom);
+    const rect = event.currentTarget.getBoundingClientRect();
+    const scaleX = sceneWidth / Math.max(rect.width, 1);
+    const scaleY = sceneHeight / Math.max(rect.height, 1);
     return {
       mx: (event.clientX - rect.left) * scaleX,
       my: (event.clientY - rect.top) * scaleY,
@@ -1461,8 +2269,26 @@ export default function ViewportPanel() {
   function hitTest(mx: number, my: number) {
     if (!activeScene) return null;
 
+    const hiddenByLayer = new Set<string>();
+    for (const sceneLayer of activeScene.layers ?? []) {
+      if (!sceneLayer.visible) {
+        for (const entityId of sceneLayer.entity_ids) {
+          hiddenByLayer.add(entityId);
+        }
+      }
+    }
+
     for (let index = activeScene.entities.length - 1; index >= 0; index -= 1) {
       const entity = activeScene.entities[index];
+      if (hiddenByLayer.has(entity.entity_id)) {
+        continue;
+      }
+      if (entity.components?.tilemap && !showTilemaps) {
+        continue;
+      }
+      if (entity.components?.sprite && !showSprites) {
+        continue;
+      }
       const bounds = getEntityBounds(entity, activeTarget);
       if (
         mx >= bounds.x &&
@@ -1521,9 +2347,25 @@ export default function ViewportPanel() {
       return;
     }
 
+    if (gameViewLight) {
+      return;
+    }
+
     if (!activeScene) return;
 
     const { mx, my } = canvasCoords(event);
+
+    const guideHit = getGuideHit(mx, my);
+    if (guideHit && editorMode === "select") {
+      event.preventDefault();
+      setGuideDrag({
+        id: guideHit.id,
+        orientation: guideHit.orientation,
+        position: guideHit.position,
+        creating: false,
+      });
+      return;
+    }
 
     if (editorMode === "paint" && activeBrush) {
       const currentEntities = activeScene.entities;
@@ -1535,8 +2377,10 @@ export default function ViewportPanel() {
       }
 
       beginHistoryCapture();
-      const paintX = gridSnap ? snapToGrid(mx, GRID_SNAP_SIZE) : Math.round(mx);
-      const paintY = gridSnap ? snapToGrid(my, GRID_SNAP_SIZE) : Math.round(my);
+      let paintX = gridSnap ? snapToGrid(mx, GRID_SNAP_SIZE) : Math.round(mx);
+      let paintY = gridSnap ? snapToGrid(my, GRID_SNAP_SIZE) : Math.round(my);
+      paintX = snapPositionToGuides(paintX, "vertical");
+      paintY = snapPositionToGuides(paintY, "horizontal");
       const entity = createSpriteEntityFromAsset({
         assetPath: activeBrush.assetPath ?? activeBrush.id,
         target: activeTarget,
@@ -1643,6 +2487,10 @@ export default function ViewportPanel() {
   function handleMouseMove(event: React.MouseEvent<HTMLCanvasElement>) {
     const { mx, my } = canvasCoords(event);
 
+    if (gameViewLight || guideDrag) {
+      return;
+    }
+
     // Track mouse position for brush ghost preview and collision cursor
     if ((editorMode === "paint" && activeBrush) || editorMode === "collision") {
       setSceneMousePos({ x: mx, y: my });
@@ -1652,8 +2500,10 @@ export default function ViewportPanel() {
 
     // Paint drag — stamp entities along mouse path with grid-cell dedup
     if (editorMode === "paint" && activeBrush && paintDragRef.current && event.buttons === 1) {
-      const paintX = gridSnap ? snapToGrid(mx, GRID_SNAP_SIZE) : Math.round(mx);
-      const paintY = gridSnap ? snapToGrid(my, GRID_SNAP_SIZE) : Math.round(my);
+      let paintX = gridSnap ? snapToGrid(mx, GRID_SNAP_SIZE) : Math.round(mx);
+      let paintY = gridSnap ? snapToGrid(my, GRID_SNAP_SIZE) : Math.round(my);
+      paintX = snapPositionToGuides(paintX, "vertical");
+      paintY = snapPositionToGuides(paintY, "horizontal");
       const cellKey = `${paintX},${paintY}`;
       if (cellKey !== paintDragRef.current.lastPaintCell) {
         const currentEntities = useEditorStore.getState().activeScene?.entities ?? [];
@@ -1716,8 +2566,10 @@ export default function ViewportPanel() {
         return;
       }
 
-      const pointerX = gridSnap ? snapToGrid(mx, GRID_SNAP_SIZE) : Math.round(mx);
-      const pointerY = gridSnap ? snapToGrid(my, GRID_SNAP_SIZE) : Math.round(my);
+      let pointerX = gridSnap ? snapToGrid(mx, GRID_SNAP_SIZE) : Math.round(mx);
+      let pointerY = gridSnap ? snapToGrid(my, GRID_SNAP_SIZE) : Math.round(my);
+      pointerX = snapPositionToGuides(pointerX, "vertical");
+      pointerY = snapPositionToGuides(pointerY, "horizontal");
       let left = drag.origX;
       let top = drag.origY;
       let right = drag.origX + drag.origWidth;
@@ -1791,8 +2643,10 @@ export default function ViewportPanel() {
 
     const dx = Math.round(mx - drag.startMx);
     const dy = Math.round(my - drag.startMy);
-    const nextX = gridSnap ? snapToGrid(drag.origX + dx, GRID_SNAP_SIZE) : drag.origX + dx;
-    const nextY = gridSnap ? snapToGrid(drag.origY + dy, GRID_SNAP_SIZE) : drag.origY + dy;
+    let nextX = gridSnap ? snapToGrid(drag.origX + dx, GRID_SNAP_SIZE) : drag.origX + dx;
+    let nextY = gridSnap ? snapToGrid(drag.origY + dy, GRID_SNAP_SIZE) : drag.origY + dy;
+    nextX = snapPositionToGuides(nextX, "vertical");
+    nextY = snapPositionToGuides(nextY, "horizontal");
     if (nextX === drag.lastX && nextY === drag.lastY) {
       return;
     }
@@ -1896,13 +2750,41 @@ export default function ViewportPanel() {
     setSceneMousePos(null);
   }
 
-  const gameStatus = !emulatorLoaded
+  function handleSceneDoubleClick(event: React.MouseEvent<HTMLCanvasElement>) {
+    if (gameViewLight) {
+      return;
+    }
+
+    const { mx, my } = canvasCoords(event);
+    const guideHit = getGuideHit(mx, my);
+    if (!guideHit) {
+      return;
+    }
+
+    setSceneGuides((current) => current.filter((guide) => guide.id !== guideHit.id));
+  }
+
+  function handleRulerMouseDown(
+    orientation: SceneGuideOrientation,
+    event: React.MouseEvent<HTMLCanvasElement>
+  ) {
+    if (gameViewLight) {
+      return;
+    }
+
+    event.preventDefault();
+    startGuideDrag(orientation, event.clientX, event.clientY);
+  }
+
+  const gameStatus = !hasEmulatorSession
     ? "Carregue uma ROM para iniciar o emulador"
     : emulPaused
       ? "Emulador pausado"
       : emulatorActive
         ? "Emulador ativo"
-        : "Aguardando emulador...";
+        : emulatorLoaded
+          ? "ROM carregada - aguardando emulador..."
+          : "Aguardando emulador...";
   const dmaBudgetBytes = hwStatus?.dma_limit ?? (activeTarget === "snes" ? 8192 : 7372);
   const dmaUsageBytes = Math.min(hwStatus?.dma_used ?? hwStatus?.vram_used ?? 0, dmaBudgetBytes);
   const dmaUsagePercent = Math.min(
@@ -1988,6 +2870,102 @@ export default function ViewportPanel() {
               >
                 G
               </button>
+              <button
+                type="button"
+                onClick={() => setShowGrid((current) => !current)}
+                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
+                  showGrid
+                    ? "border-[#89b4fa] bg-[#89b4fa]/15 text-[#89b4fa]"
+                    : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
+                }`}
+                title="Mostrar grid principal"
+              >
+                Grid
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowSubGrid((current) => !current)}
+                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
+                  showSubGrid
+                    ? "border-[#89b4fa] bg-[#89b4fa]/15 text-[#89b4fa]"
+                    : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
+                }`}
+                title="Mostrar sub-grid"
+              >
+                Sub
+              </button>
+              <button
+                type="button"
+                onClick={() => setGuideSnap((current) => !current)}
+                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
+                  guideSnap
+                    ? "border-[#94e2d5] bg-[#94e2d5]/15 text-[#94e2d5]"
+                    : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
+                }`}
+                title="Snap para guias e grid"
+              >
+                Guide
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowBackground((current) => !current)}
+                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
+                  showBackground
+                    ? "border-[#a6e3a1] bg-[#a6e3a1]/15 text-[#a6e3a1]"
+                    : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
+                }`}
+                title="Mostrar background"
+              >
+                BG
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowTilemaps((current) => !current)}
+                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
+                  showTilemaps
+                    ? "border-[#94e2d5] bg-[#94e2d5]/15 text-[#94e2d5]"
+                    : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
+                }`}
+                title="Mostrar tilemaps"
+              >
+                TM
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowSprites((current) => !current)}
+                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
+                  showSprites
+                    ? "border-[#cba6f7] bg-[#cba6f7]/15 text-[#cba6f7]"
+                    : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
+                }`}
+                title="Mostrar sprites"
+              >
+                SP
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowCollisionOverlay((current) => !current)}
+                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
+                  showCollisionOverlay
+                    ? "border-[#f38ba8] bg-[#f38ba8]/15 text-[#f38ba8]"
+                    : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
+                }`}
+                title="Mostrar overlay de colisao"
+              >
+                Col
+              </button>
+              <button
+                type="button"
+                onClick={() => setGameViewLight((current) => !current)}
+                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
+                  gameViewLight
+                    ? "border-[#f9e2af] bg-[#f9e2af]/15 text-[#f9e2af]"
+                    : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
+                }`}
+                title="Game View Light"
+              >
+                GV
+              </button>
               <div className="mx-1 w-px bg-[#313244] self-stretch" />
               <button
                 type="button"
@@ -2046,38 +3024,100 @@ export default function ViewportPanel() {
             <div
               className="absolute left-1/2 top-1/2"
               style={{
-                transform: `translate(calc(-50% + ${viewportPan.x}px), calc(-50% + ${viewportPan.y}px)) scale(${viewportZoom})`,
+                transform: `translate(calc(-50% + ${viewportPan.x}px), calc(-50% + ${viewportPan.y}px))`,
+                width: sceneScaleWidth + sceneChromeOffset,
+                height: sceneScaleHeight + sceneChromeOffset,
               }}
             >
+              {!gameViewLight && (
+                <div
+                  className="absolute left-0 top-0 border border-[#313244] bg-[#181825]"
+                  style={{ width: SCENE_RULER_SIZE, height: SCENE_RULER_SIZE }}
+                />
+              )}
+              {!gameViewLight && (
+                <canvas
+                  ref={sceneRulerTopRef}
+                  data-testid="viewport-scene-ruler-top"
+                  width={sceneScaleWidth}
+                  height={SCENE_RULER_SIZE}
+                  onMouseDown={(event) => handleRulerMouseDown("vertical", event)}
+                  className="absolute border border-[#313244]"
+                  style={{
+                    left: SCENE_RULER_SIZE,
+                    top: 0,
+                    width: sceneScaleWidth,
+                    height: SCENE_RULER_SIZE,
+                    cursor: "col-resize",
+                  }}
+                />
+              )}
+              {!gameViewLight && (
+                <canvas
+                  ref={sceneRulerLeftRef}
+                  data-testid="viewport-scene-ruler-left"
+                  width={SCENE_RULER_SIZE}
+                  height={sceneScaleHeight}
+                  onMouseDown={(event) => handleRulerMouseDown("horizontal", event)}
+                  className="absolute border border-[#313244]"
+                  style={{
+                    left: 0,
+                    top: SCENE_RULER_SIZE,
+                    width: SCENE_RULER_SIZE,
+                    height: sceneScaleHeight,
+                    cursor: "row-resize",
+                  }}
+                />
+              )}
               <canvas
                 ref={sceneCanvasRef}
-                width={MD_WIDTH}
-                height={MD_HEIGHT}
+                data-testid="viewport-scene-canvas"
+                width={sceneWidth}
+                height={sceneHeight}
+                className="absolute border border-[#45475a]"
+                style={{
+                  imageRendering: "pixelated",
+                  left: sceneChromeOffset,
+                  top: sceneChromeOffset,
+                  width: sceneScaleWidth,
+                  height: sceneScaleHeight,
+                }}
+                title="Clique para selecionar. Arraste para mover. Espaço+arraste ou botão do meio: pan. Ctrl+Scroll: zoom."
+              />
+              <canvas
+                ref={sceneOverlayCanvasRef}
+                data-testid="viewport-scene-overlay"
+                width={sceneScaleWidth}
+                height={sceneScaleHeight}
                 onMouseDown={handleMouseDown}
                 onMouseMove={handleMouseMove}
                 onMouseUp={handleMouseUp}
                 onMouseLeave={handleMouseLeave}
-                onContextMenu={(e) => e.preventDefault()}
-                className="border border-[#45475a]"
+                onDoubleClick={handleSceneDoubleClick}
+                onContextMenu={(event) => event.preventDefault()}
+                className="absolute"
                 style={{
-                  imageRendering: "pixelated",
-                  width: MD_WIDTH,
-                  height: MD_HEIGHT,
+                  left: sceneChromeOffset,
+                  top: sceneChromeOffset,
+                  width: sceneScaleWidth,
+                  height: sceneScaleHeight,
                   cursor: isPanning
                     ? "grabbing"
                     : isDragging
                       ? "grabbing"
-                      : editorMode === "paint"
-                        ? activeBrush
-                          ? "copy"
-                          : "not-allowed"
-                        : editorMode === "erase"
-                          ? "pointer"
-                          : spacePressed
-                            ? "grab"
-                            : "crosshair",
+                      : gameViewLight
+                        ? "grab"
+                        : editorMode === "paint"
+                          ? activeBrush
+                            ? "copy"
+                            : "not-allowed"
+                          : editorMode === "erase"
+                            ? "pointer"
+                            : spacePressed
+                              ? "grab"
+                              : "crosshair",
                 }}
-                title="Clique para selecionar. Arraste para mover. Espaço+arraste ou botão do meio: pan. Ctrl+Scroll: zoom."
+                title="Cena WYSIWYG. Arraste para editar; espaco+arraste ou botao do meio para pan; duplo clique em uma guia para remover."
               />
             </div>
             {activeScene &&
@@ -2092,8 +3132,10 @@ export default function ViewportPanel() {
             <div className="absolute bottom-0 left-0 right-0 shrink-0 border-t border-[#313244] bg-[#181825]/90 px-2 py-1">
             <span className="select-none text-[10px] text-[#6c7086]">
               {activeScene
-                ? `${activeScene.entities.length} entidade(s) | ${activeScene.background_layers.length} layer(s) | ${gridSnap ? "snap 8px ativo" : "snap livre"}${
-                    editorMode === "paint"
+                ? `${activeScene.entities.length} entidade(s) | ${activeScene.background_layers.length} layer(s) | ${sceneGuides.length} guia(s) | ${gridSnap ? "snap 8px" : "snap livre"} | ${showGrid ? "grid on" : "grid off"}${
+                    gameViewLight
+                      ? " | Game View Light"
+                      : editorMode === "paint"
                       ? ` | ✏️ Pintar${activeBrush ? ` (${activeBrush.id})` : " — selecione um brush"}`
                       : editorMode === "erase"
                         ? " | 🧹 Apagar — clique/arraste para remover"
@@ -2151,7 +3193,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => handlePause()}
-                disabled={(!emulatorLoaded && !emulatorActive) || emulPaused}
+                disabled={!hasEmulatorSession || emulPaused}
                 data-testid="viewport-pause"
                 className="rounded border border-[#fab387]/40 bg-[#fab387]/10 px-2 py-1 text-[10px] font-semibold text-[#fab387] transition-colors hover:bg-[#fab387]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -2160,7 +3202,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => handleResume()}
-                disabled={(!emulatorLoaded && !emulatorActive) || !emulPaused}
+                disabled={!hasEmulatorSession || !emulPaused}
                 data-testid="viewport-resume"
                 className="rounded border border-[#a6e3a1]/40 bg-[#a6e3a1]/10 px-2 py-1 text-[10px] font-semibold text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -2169,7 +3211,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => void handleStepFrame()}
-                disabled={(!emulatorLoaded && !emulatorActive) || !emulPaused || stepBusy}
+                disabled={!hasEmulatorSession || !emulPaused || stepBusy}
                 data-testid="viewport-step-frame"
                 className="rounded border border-[#f9e2af]/40 bg-[#f9e2af]/10 px-2 py-1 text-[10px] font-semibold text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -2178,7 +3220,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => void handleSaveState()}
-                disabled={(!emulatorLoaded && !emulatorActive) || saveStateBusy}
+                disabled={!hasEmulatorSession || saveStateBusy}
                 data-testid="viewport-save-state"
                 className="rounded border border-[#a6e3a1]/40 bg-[#a6e3a1]/10 px-2 py-1 text-[10px] font-semibold text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -2187,7 +3229,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => void handleLoadState()}
-                disabled={(!emulatorLoaded && !emulatorActive) || loadStateBusy}
+                disabled={!hasEmulatorSession || loadStateBusy}
                 data-testid="viewport-load-state"
                 className="rounded border border-[#89b4fa]/40 bg-[#89b4fa]/10 px-2 py-1 text-[10px] font-semibold text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -2196,7 +3238,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => void handleRewind()}
-                disabled={(!emulatorLoaded && !emulatorActive) || !emulPaused || rewindBusy}
+                disabled={!hasEmulatorSession || !emulPaused || rewindBusy}
                 data-testid="viewport-rewind"
                 className="rounded border border-[#f38ba8]/40 bg-[#f38ba8]/10 px-2 py-1 text-[10px] font-semibold text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/20 disabled:cursor-not-allowed disabled:opacity-40"
                 title="Recuar snapshots automáticos do emulador (atalho: R)"
@@ -2206,7 +3248,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => void handleStartRecording()}
-                disabled={(!emulatorLoaded && !emulatorActive) || recordBusy || replayRecording}
+                disabled={!hasEmulatorSession || recordBusy || replayRecording}
                 data-testid="viewport-replay-record"
                 className="rounded border border-[#94e2d5]/40 bg-[#94e2d5]/10 px-2 py-1 text-[10px] font-semibold text-[#94e2d5] transition-colors hover:bg-[#94e2d5]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -2215,7 +3257,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => void handleStopRecording()}
-                disabled={(!emulatorLoaded && !emulatorActive) || recordBusy || !replayRecording || !activeProjectDir}
+                disabled={!hasEmulatorSession || recordBusy || !replayRecording || !activeProjectDir}
                 data-testid="viewport-replay-stop"
                 className="rounded border border-[#f38ba8]/40 bg-[#f38ba8]/10 px-2 py-1 text-[10px] font-semibold text-[#f38ba8] transition-colors hover:bg-[#f38ba8]/20 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -2224,7 +3266,7 @@ export default function ViewportPanel() {
               <button
                 type="button"
                 onClick={() => void handlePlayReplay()}
-                disabled={(!emulatorLoaded && !emulatorActive) || playReplayBusy || replayRecording || !lastReplayPath || !emulPaused}
+                disabled={!hasEmulatorSession || playReplayBusy || replayRecording || !lastReplayPath || !emulPaused}
                 data-testid="viewport-replay-play"
                 className="rounded border border-[#89dceb]/40 bg-[#89dceb]/10 px-2 py-1 text-[10px] font-semibold text-[#89dceb] transition-colors hover:bg-[#89dceb]/20 disabled:cursor-not-allowed disabled:opacity-40"
                 title="Reproduzir o ultimo replay salvo com o estado inicial gravado"

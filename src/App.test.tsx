@@ -260,6 +260,7 @@ describe("App build flow", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    localStorage.clear();
 
     useEditorStore.setState({
       activeProjectDir: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
@@ -436,6 +437,7 @@ describe("App build flow", () => {
           width,
           height,
         }),
+        clearRect: vi.fn(),
         putImageData: putImageDataSpy,
         fillRect: vi.fn(),
         beginPath: vi.fn(),
@@ -489,6 +491,34 @@ describe("App build flow", () => {
     expect(useEditorStore.getState().emulatorLoaded).toBe(true);
     expect(container.textContent).toContain("Emulador ativo");
     expect(putImageDataSpy).toHaveBeenCalled();
+  });
+
+  it("shows a waiting status after loading the ROM and before the emulator loop becomes active", async () => {
+    let resolveLoopStart: ((stopLoop: () => void) => void) | null = null;
+    mocks.startFrameLoop.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveLoopStart = resolve;
+        })
+    );
+
+    await act(async () => {
+      findButton(container, "Build & Run").click();
+      await flush();
+      await flush();
+    });
+
+    const gameStatus = container.querySelector("[data-testid='viewport-game-status']");
+    expect(gameStatus).toBeInstanceOf(HTMLSpanElement);
+    expect(gameStatus?.textContent).toContain("ROM carregada - aguardando emulador...");
+
+    await act(async () => {
+      resolveLoopStart?.(vi.fn());
+      await flush();
+      await flush();
+    });
+
+    expect(gameStatus?.textContent).toContain("Emulador ativo");
   });
 
   it("does not stop the emulator session when switching away from the game tab", async () => {
@@ -1055,6 +1085,7 @@ describe("App build flow", () => {
     });
 
     expect(useEditorStore.getState().emulPaused).toBe(true);
+    expect(container.textContent).toContain("Emulador pausado");
     expect((stepButton as HTMLButtonElement).disabled).toBe(false);
 
     await act(async () => {
@@ -1076,6 +1107,7 @@ describe("App build flow", () => {
 
     expect(useEditorStore.getState().emulPaused).toBe(false);
     expect(mocks.startFrameLoop).toHaveBeenCalledTimes(3);
+    expect(container.textContent).toContain("Emulador ativo");
   });
 
   it("triggers rewind from the game viewport controls and keyboard shortcut while paused", async () => {
@@ -1180,7 +1212,7 @@ describe("App build flow", () => {
       await flush();
     });
 
-    const canvas = container.querySelector("canvas");
+    const canvas = container.querySelector("[data-testid='viewport-scene-overlay']");
     expect(canvas).toBeInstanceOf(HTMLCanvasElement);
     Object.defineProperty(canvas as HTMLCanvasElement, "getBoundingClientRect", {
       configurable: true,
@@ -1233,6 +1265,105 @@ describe("App build flow", () => {
       "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
       "Viewport"
     );
+  });
+
+  it("supports rulers, guides, and game view light in the scene viewport", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeViewportTab: "scene",
+        activeScenePath: "scenes/main.json",
+        viewportZoom: 1.0,
+        activeScene: {
+          scene_id: "main_scene",
+          display_name: "Main Scene",
+          background_layers: [],
+          entities: [],
+        },
+      });
+      await flush();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='viewport-scene-ruler-top']")).not.toBeNull();
+    expect(container.querySelector("[data-testid='viewport-scene-ruler-left']")).not.toBeNull();
+
+    await act(async () => {
+      findButton(container, "GV").click();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='viewport-scene-ruler-top']")).toBeNull();
+
+    await act(async () => {
+      findButton(container, "GV").click();
+      await flush();
+      await flush();
+    });
+
+    const overlay = container.querySelector(
+      "[data-testid='viewport-scene-overlay']"
+    ) as HTMLCanvasElement | null;
+    const rulerTop = container.querySelector(
+      "[data-testid='viewport-scene-ruler-top']"
+    ) as HTMLCanvasElement | null;
+
+    expect(overlay).toBeInstanceOf(HTMLCanvasElement);
+    expect(rulerTop).toBeInstanceOf(HTMLCanvasElement);
+
+    Object.defineProperty(overlay as HTMLCanvasElement, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        left: 18,
+        top: 18,
+        width: 320,
+        height: 224,
+        right: 338,
+        bottom: 242,
+        x: 18,
+        y: 18,
+        toJSON: () => ({}),
+      }),
+    });
+
+    await act(async () => {
+      (rulerTop as HTMLCanvasElement).dispatchEvent(
+        new MouseEvent("mousedown", {
+          bubbles: true,
+          clientX: 50,
+          clientY: 8,
+          button: 0,
+        })
+      );
+      await flush();
+    });
+
+    await act(async () => {
+      window.dispatchEvent(
+        new MouseEvent("mousemove", {
+          bubbles: true,
+          clientX: 50,
+          clientY: 48,
+          buttons: 1,
+        })
+      );
+      window.dispatchEvent(
+        new MouseEvent("mouseup", {
+          bubbles: true,
+          clientX: 50,
+          clientY: 48,
+          button: 0,
+        })
+      );
+      await flush();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("1 guia(s)");
+    expect(
+      localStorage.getItem(
+        "rds:scene-guides:F%3A%2FProjects%2FRetroDevStudio%2Ftests%2Ffixtures%2Fprojects%2Fmegadrive_dummy:scenes%2Fmain.json"
+      )
+    ).toContain("\"orientation\":\"vertical\"");
   });
 
   it("shows and toggles the game performance overlay", async () => {
