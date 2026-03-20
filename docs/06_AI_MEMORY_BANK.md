@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Ultima Atualizacao:** 2026-03-20
-**Ultima sessao:** 2026-03-20 (Shell UX - Tools workspace e layout adaptativo)
-**Fase Atual:** Release candidate / beta testing do desktop Tauri, com baseline automatizada restaurada (check-tree, lint, tsc, vitest, cargo clippy, cargo test), persistencia atomica endurecida no Windows, schema UGDM explicitamente migrado ate `1.6.0`, galeria de templates alinhada com `platformer_gm`, `prefab` separado de `display_name`, badges `Experimental` reconciliados na UI e nos docs, `nodeCompiler.ts` rebaixado para legado/experimental fora do pipeline canonico, smoke desktop completo `Build -> ROM -> Run` novamente reproduzido no host local, ArtStudio institucionalizado na baseline do workspace como superficie `Experimental`, RetroFX com editor visual-first de parallax/raster ainda `Experimental` e o shell principal agora reorganizado como workspace adaptativo com rail lateral, painel contextual, presets de layout, focus mode e console colapsavel por padrao. A repeticao em baseline commitada continua obrigatoria antes de qualquer claim institucional definitiva.
+**Ultima sessao:** 2026-03-20 (Hardening de build scripts, guardrails de workspace e alinhamento canonico)
+**Fase Atual:** Release candidate / beta testing do desktop Tauri, com baseline automatizada restaurada (check-tree, lint, tsc, vitest, cargo clippy, cargo test), persistencia atomica endurecida no Windows, schema UGDM explicitamente migrado ate `1.6.0`, galeria de templates alinhada com `platformer_gm`, `prefab` separado de `display_name`, badges `Experimental` reconciliados na UI e nos docs, `nodeCompiler.ts` rebaixado para legado/experimental fora do pipeline canonico, smoke desktop completo `Build -> ROM -> Run` novamente reproduzido no host local, ArtStudio institucionalizado na baseline do workspace como superficie `Experimental`, RetroFX com editor visual-first de parallax/raster ainda `Experimental`, shell principal reorganizado como workspace adaptativo com rail lateral/painel contextual/presets de layout/focus mode e, agora, caminho canonico de build endurecido contra `output_dir` hostil, falso-verde por artefato ausente e drift entre script, CI e documentacao. A repeticao em baseline commitada continua obrigatoria antes de qualquer claim institucional definitiva.
 **Branch sugerida:** `feat/desktop-e2e-workflow`
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
@@ -16,6 +16,15 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-20 - Hardening de build scripts, guardrails de workspace e alinhamento canonico):**
+  - **Workspace de build confinado ao projeto:** `build_orch.rs` agora sanitiza `build.output_dir` antes de montar o workspace e rejeita caminhos absolutos, `..` e qualquer valor que tente escapar da raiz do projeto; a suite Rust ganhou cobertura dedicada para esse guardrail e para garantir que diretorios irmaos nao sejam tocados em caso de configuracao hostil.
+  - **Script canonico sem falso-verde:** `scripts/build.mjs` agora limpa os artefatos esperados antes da compilacao e falha explicitamente se o EXE/MSI correspondente nao for gerado ao final. Isso elimina o caso em que o script terminava com `exit 0` apenas relatando `nao encontrado`.
+  - **Fonte unica de build desktop:** o workflow `.github/workflows/desktop-e2e.yml` passou a chamar `npm run build:debug` em vez de `npm run tauri build -- --debug --no-bundle` diretamente, e agora observa mudancas em `scripts/build.mjs` no path filter.
+  - **Governanca alinhada:** `08_TREE_ARCHITECTURE.md` passou a listar os wrappers/scripts reais (`run-in-msvc.cmd`, `run-cargo-msvc.cmd`, `validate-upstream-windows.ps1` e afins), e o guidance canonico de MSI em Windows institucional agora aponta para `scripts/run-in-msvc.cmd npm run build:msi`.
+  - **Gate Rust unificado:** a comparacao local desta rodada confirmou flake do mock core quando a suite roda em paralelo; por isso o baseline canonico institucional volta a usar `cargo test --lib -- --nocapture --test-threads=1`, alinhando Memory Bank, CI e documentacao de processo em torno do caminho deterministico.
+  - **Validacao desta rodada:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK, `cargo clippy -- -D warnings` OK, `cargo test --lib -- --nocapture --test-threads=1` OK, `node --check scripts/build.mjs` OK e `npm run build:debug` OK com artefato novo em `src-tauri/target-test/debug/retro-dev-studio.exe`. O rerun em paralelo voltou a exibir instabilidade no mock core (`rewind_restores_previous_mock_core_snapshot` / `LoadLibraryExW failed`), reforcando a decisao pelo serial.
+  - **Status honesto mantido:** o caminho canonico de build ficou mais seguro e menos ambíguo, mas a robustez institucional completa continua dependendo de repeticao em host Windows apropriado quando o escopo tocar bundle MSI, toolchains reais ou smoke desktop remoto.
 
 * **O que acabou de acontecer (2026-03-20 - Shell UX: Tools workspace e layout adaptativo):**
   - **Workspace mais limpo:** `App.tsx` deixou de concentrar todas as acoes e contextos no topo; a navegacao principal agora usa rail lateral com `Scene`, `Game`, `Logic`, `FX`, `Art` e `Debug`, enquanto a top bar ficou restrita a acoes globais (`Novo`, `Abrir`, `Salvar`, `Build & Run`, `Play`, `Stop`).
@@ -862,7 +871,7 @@ Continuar o ciclo de release candidate / beta testing do desktop Tauri, agora co
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
 **Sequencia de acoes recomendada:**
-1. Repetir o baseline canonico e, se o escopo tocar release, o bundle MSI (`scripts/run-in-msvc.cmd npx tauri build --bundles msi`) no host Windows institucional apropriado.
+1. Repetir o baseline canonico e, se o escopo tocar release, o bundle MSI (`scripts/run-in-msvc.cmd npm run build:msi`) no host Windows institucional apropriado.
 2. Executar QA manual do wizard/galeria com pessoas leigas, cobrindo `Projeto Vazio`, `Primeiro Projeto`, `Plataforma`, `Importar Projeto SGDK`, preview real no viewport, labels PT-BR no NodeGraph e feedback visual de `Herdado`/`Override` no inspector.
 3. Validar `Build & Run` em Mega Drive para `platformer_seed` e para pelo menos um projeto SGDK importado genericamente, confirmando que o pipeline continua sem copiar `VGM`, ROMs ou artefatos de build.
 4. Decidir a proxima onda de UX/engine para templates: presets compostos de comportamento, meta-sprites e possivel reducao do badge `Experimental` conforme os resultados do beta.

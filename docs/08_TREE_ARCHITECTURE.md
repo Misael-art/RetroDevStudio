@@ -104,9 +104,16 @@ RetroDevStudio/
 |   |-- bootstrap.ps1
 |   |-- build.mjs
 |   |-- check-tree.cjs
+|   |-- check-tree.ps1
+|   |-- create-icon-v2.mjs
 |   |-- create-icon.mjs
 |   |-- diagnose-desktop-e2e.ps1
-|   `-- e2e-tauri-build-run.mjs
+|   |-- e2e-tauri-build-run.mjs
+|   |-- run-bootstrap.ps1
+|   |-- run-cargo-msvc.cmd
+|   |-- run-in-msvc.cmd
+|   |-- setup-rust.ps1
+|   `-- validate-upstream-windows.ps1
 |
 `-- toolchains/
     |-- sgdk/
@@ -139,7 +146,10 @@ RetroDevStudio/
 - Projetos SGDK externos podem conter um subdiretorio `rds/` (overlay) com `project.rds`, `scenes/`, `graphs/`, `prefabs/` e junctions NTFS para `assets/` e `build/`. O backend faz discovery de `project.rds` em subdiretorios de primeiro nivel quando nao encontra na raiz. Ver `docs/05_ARCHITECTURE_UGDM.md` secao 10.
 - O caminho SNES real usa staging de asset no workspace e gera `hdr.asm`, `data.asm` e regras `gfx4snes`.
 - `scripts/build.mjs` e o script canonico de compilacao: gera MSI, EXE Debug e EXE Portable. Uso: `node scripts/build.mjs <debug|msi|portable|all>`. Scripts npm: `build:debug`, `build:msi`, `build:portable`, `build:all`. O `build-test.bat` e um wrapper legado que chama `build.mjs debug`.
+- `scripts/run-in-msvc.cmd` e o wrapper canonico para executar comandos Node/npm em ambiente MSVC preparado no Windows institucional; usar junto de `build.mjs` quando o host exigir `vcvars64.bat`.
+- `scripts/run-cargo-msvc.cmd` e o wrapper canonico para comandos `cargo` em ambiente MSVC preparado no Windows institucional.
 - `scripts/e2e-tauri-build-run.mjs` e o runner canonico de regressao desktop/Tauri para `Build -> Load ROM -> Run frames`.
+- `scripts/validate-upstream-windows.ps1` e o script canonico de validacao upstream real com SGDK, PVSnesLib e cores Libretro oficiais.
 - `.github/workflows/desktop-e2e.yml` e o workflow canonico de regressao desktop em Windows e ja foi validado em runner GitHub real.
 - `toolchains/libretro/cores/` e o local canonico dos DLLs de core baixados do upstream oficial.
 - `toolchains/webdriver/msedgedriver.exe` e o local canonico do driver nativo usado pelo runner desktop/Tauri e pelos scripts de diagnostico locais.

@@ -24,6 +24,7 @@ on:
       - ".github/workflows/desktop-e2e.yml"
       - "package.json"
       - "package-lock.json"
+      - "scripts/build.mjs"
       - "scripts/e2e-tauri-build-run.mjs"
       - "src/**"
       - "src-tauri/**"
@@ -36,6 +37,7 @@ on:
       - ".github/workflows/desktop-e2e.yml"
       - "package.json"
       - "package-lock.json"
+      - "scripts/build.mjs"
       - "scripts/e2e-tauri-build-run.mjs"
       - "src/**"
       - "src-tauri/**"
@@ -95,8 +97,8 @@ jobs:
           }
           "RDS_EDGE_DRIVER_PATH=$driverPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Build debug desktop app
-        run: npm run tauri build -- --debug --no-bundle
+      - name: Build debug desktop app (canonical script)
+        run: npm run build:debug
 
       - name: Report resolved target
         run: |

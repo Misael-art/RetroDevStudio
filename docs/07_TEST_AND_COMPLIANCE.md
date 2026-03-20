@@ -36,7 +36,7 @@
 
 ### 2.2 Unitarios
 - Frontend: Vitest.
-- Backend: `cargo test --lib -- --nocapture`.
+- Backend: `cargo test --lib -- --nocapture --test-threads=1`.
 - Cobrir parser/schema, hardware profiles, framebuffer, dependency manager e fluxos de editor sensiveis.
 
 ### 2.3 Integracao
@@ -60,7 +60,7 @@
 3. `npx tsc --noEmit`
 4. `npm test`
 5. `cargo clippy -- -D warnings`
-6. `cargo test --lib -- --nocapture`
+6. `cargo test --lib -- --nocapture --test-threads=1`
 7. `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests` quando a mudanca tocar build/emulacao/toolchains reais no Windows
 8. `node scripts/e2e-tauri-build-run.mjs --skip-build --native-driver .\toolchains\webdriver\msedgedriver.exe` quando a mudanca tocar o fluxo publico `Build -> Load ROM -> Run frames`
 9. Em host Windows com policy que bloqueia bootstrap interno do driver, usar fallback `--external-driver` com `tauri-driver` iniciado fora do processo Node.

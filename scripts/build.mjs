@@ -19,8 +19,7 @@ import path from "node:path";
 import process from "node:process";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { access } from "node:fs/promises";
-import { readdir } from "node:fs/promises";
+import { access, readdir, rm } from "node:fs/promises";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -70,9 +69,37 @@ async function pathExists(filePath) {
   }
 }
 
-async function runFrontendBuild() {
-  console.log("\n[1/2] Compilando frontend (tsc + vite build)...\n");
-  await spawnLogged(npmCommand(), ["run", "build"]);
+async function removeIfExists(filePath) {
+  if (!(await pathExists(filePath))) {
+    return;
+  }
+
+  await rm(filePath, { force: true, recursive: false });
+}
+
+async function cleanupExpectedArtifacts(mode) {
+  const modesToClean = mode === "all" ? ["debug", "msi", "portable"] : [mode];
+
+  if (modesToClean.includes("debug")) {
+    await removeIfExists(DEBUG_EXE);
+  }
+
+  if (modesToClean.includes("portable")) {
+    await removeIfExists(RELEASE_EXE);
+  }
+
+  if (modesToClean.includes("msi")) {
+    try {
+      const entries = await readdir(MSI_DIR);
+      await Promise.all(
+        entries
+          .filter((entry) => entry.endsWith(".msi"))
+          .map((entry) => removeIfExists(path.join(MSI_DIR, entry)))
+      );
+    } catch {
+      // Directory is created lazily by Tauri when bundling.
+    }
+  }
 }
 
 async function runTauriBuild(mode) {
@@ -90,7 +117,7 @@ async function runTauriBuild(mode) {
     default:
       throw new Error(`Modo invalido: ${mode}`);
   }
-  console.log(`\n[2/2] Compilando Tauri (modo: ${mode})...\n`);
+  console.log(`\n[Build] Compilando Tauri (modo: ${mode})...\n`);
   await spawnLogged(npmCommand(), tauriArgs);
 }
 
@@ -116,6 +143,22 @@ async function reportArtifacts(mode, artifacts) {
   console.log("============================================================\n");
 }
 
+async function assertArtifactsGenerated(artifacts) {
+  const missing = [];
+
+  for (const [label, filePath] of artifacts) {
+    if (filePath.includes("*") || !(await pathExists(filePath))) {
+      missing.push(`${label}: ${filePath}`);
+    }
+  }
+
+  if (missing.length > 0) {
+    throw new Error(
+      `Compilacao concluida sem os artefatos esperados:\n- ${missing.join("\n- ")}`
+    );
+  }
+}
+
 async function main() {
   const mode = process.argv[2]?.toLowerCase();
   if (!mode || !VALID_MODES.includes(mode)) {
@@ -132,9 +175,10 @@ async function main() {
   console.log(`Target dir: ${TARGET_DIR}`);
 
   try {
-    await runFrontendBuild();
-
     const modesToRun = mode === "all" ? ["debug", "msi", "portable"] : [mode];
+    console.log("\n[Prep] Limpando artefatos esperados antes da compilacao...\n");
+    await cleanupExpectedArtifacts(mode);
+
     for (const m of modesToRun) {
       await runTauriBuild(m);
     }
@@ -152,6 +196,7 @@ async function main() {
     }
 
     await reportArtifacts(mode, artifacts);
+    await assertArtifactsGenerated(artifacts);
     process.exit(0);
   } catch (error) {
     console.error("\n[ERRO]", error instanceof Error ? error.message : String(error));

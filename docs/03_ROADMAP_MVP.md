@@ -18,7 +18,7 @@
 
 ---
 
-## Estado Real em 2026-03-19
+## Estado Real em 2026-03-20
 
 ### Ja implementado em codigo
 - Editor Tauri + React + TypeScript funcional.
@@ -61,6 +61,7 @@
 - O `ArtStudio` agora integra a baseline do workspace como superficie `Experimental`, gravando animacoes no schema canonico da entidade sprite com validacao minima de origem do asset, nomes de sequencia e dimensoes de frame antes de persistir.
 - O `ArtStudio` agora aceita ingestao de imagens externas para preparo visual, com suporte frontend a `PNG`, `BMP`, `JPG/JPEG`, `GIF`, `WebP` e `PPM`, fallback de carregamento via `Blob`, metadados do arquivo e bloqueio explicito de "Aplicar na Cena" enquanto o asset ainda nao estiver em `assets/sprites`.
 - O shell principal agora funciona como workspace adaptativo: rail lateral por contexto (`Scene`, `Game`, `Logic`, `FX`, `Art`, `Debug`), top bar reduzida a acoes globais, painel direito alternando entre `Inspector` e `Tools`, presets `Artist/Logic/Debug/Playtest`, focus mode e console fechado por padrao com autoabertura em erro.
+- O pipeline de build foi endurecido contra configuracoes hostis de projeto: `build.output_dir` agora precisa permanecer relativo ao workspace e o script canonico `scripts/build.mjs` limpa os artefatos esperados antes da compilacao, falhando explicitamente se o EXE/MSI esperado nao for gerado.
 - `project.rds` e `scenes/*.json` agora carregam `schema_version`, aplicam cadeia explicita de migracao ate `1.6.0` (`collision_map`, `layers`, `display_name`) e preservam compatibilidade com fixtures legadas sem o campo.
 - O editor agora suporta fluxo basico de multi-cena com catalogo, troca/criacao pela `Hierarchy`, persistencia do `scene_path` ativo e atualizacao canonica de `entry_scene` para manter o build alinhado a cena selecionada.
 - O `Inspector` agora edita `Physics`, `Audio` e `Input` no caminho canonico da cena e exibe resumo read-only do `LogicComponent.graph`, mantendo a edicao estrutural do grafo restrita ao `NodeGraph`.

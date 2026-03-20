@@ -498,6 +498,7 @@ fn prepare_workspace(
         .as_ref()
         .map(|build| build.output_dir.as_str())
         .unwrap_or("build/");
+    let output_root = sanitize_build_output_dir(output_root)?;
     let root = project_dir.join(output_root).join(target.target);
     if root.exists() {
         fs::remove_dir_all(&root)
@@ -1270,6 +1271,51 @@ fn sanitize_relative_asset_path(asset_path: &str) -> Result<PathBuf, String> {
     Ok(path.to_path_buf())
 }
 
+fn sanitize_build_output_dir(output_dir: &str) -> Result<PathBuf, String> {
+    let trimmed = output_dir.trim();
+    if trimmed.is_empty() {
+        return Err("Build.output_dir nao pode ser vazio.".to_string());
+    }
+
+    let path = Path::new(trimmed);
+    if path.is_absolute() {
+        return Err(format!(
+            "Build.output_dir '{}' deve permanecer relativo ao projeto.",
+            output_dir
+        ));
+    }
+
+    if path.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
+        return Err(format!(
+            "Build.output_dir '{}' nao pode escapar da raiz do projeto.",
+            output_dir
+        ));
+    }
+
+    let normalized = path
+        .components()
+        .filter_map(|component| match component {
+            Component::CurDir => None,
+            Component::Normal(segment) => Some(segment),
+            _ => None,
+        })
+        .collect::<PathBuf>();
+
+    if normalized.as_os_str().is_empty() {
+        return Err(format!(
+            "Build.output_dir '{}' nao pode resolver para a raiz do projeto.",
+            output_dir
+        ));
+    }
+
+    Ok(normalized)
+}
+
 fn detect_root(env_var: &str, local_dir_name: &str) -> Option<PathBuf> {
     if let Ok(path) = std::env::var(env_var) {
         let path = PathBuf::from(path);
@@ -1434,6 +1480,14 @@ mod tests {
         let dst = temp_dir(fixture_name);
         copy_dir_all(&fixture_dir(fixture_name), &dst);
         dst
+    }
+
+    fn write_project_fixture(project_dir: &Path, project: &Project) {
+        fs::write(
+            project_dir.join("project.rds"),
+            serde_json::to_string_pretty(project).expect("serialize fixture project"),
+        )
+        .expect("write fixture project");
     }
 
     fn fake_make_script(dir: &Path, extension: &str) -> PathBuf {
@@ -1676,6 +1730,19 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_build_output_dir_rejects_paths_outside_project_root() {
+        let _serial = test_serial_guard();
+        assert!(sanitize_build_output_dir("../outside").is_err());
+        assert!(sanitize_build_output_dir("./build/output").is_ok());
+
+        if cfg!(target_os = "windows") {
+            assert!(sanitize_build_output_dir(r"C:\outside").is_err());
+        } else {
+            assert!(sanitize_build_output_dir("/outside").is_err());
+        }
+    }
+
+    #[test]
     fn build_fails_when_toolchain_is_missing() {
         let _serial = test_serial_guard();
         let project_dir = workspace_copy("megadrive_dummy");
@@ -1693,6 +1760,65 @@ mod tests {
             .any(|entry| entry.message.contains("Toolchain SGDK nao encontrada")));
 
         let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn build_rejects_output_dir_that_escapes_project_without_touching_sibling_dir() {
+        let _serial = test_serial_guard();
+        let project_dir = workspace_copy("megadrive_dummy");
+        install_megadrive_sprite_fixture(&project_dir);
+
+        let sibling_name = format!(
+            "retro-dev-studio-build-sibling-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time before unix epoch")
+                .as_nanos()
+        );
+        let sibling_dir = project_dir
+            .parent()
+            .expect("workspace should have parent dir")
+            .join(&sibling_name);
+        fs::create_dir_all(&sibling_dir).expect("create sibling dir");
+        let sibling_marker = sibling_dir.join("marker.txt");
+        fs::write(&sibling_marker, "keep").expect("write sibling marker");
+
+        let mut project = load_project(&project_dir).expect("load project fixture");
+        project
+            .build
+            .as_mut()
+            .expect("fixture should contain build config")
+            .output_dir = format!("../{}", sibling_name);
+        write_project_fixture(&project_dir, &project);
+
+        let (sgdk_root, make_program) = fake_toolchain("sgdk-output-dir-escape", "md");
+        let environment = BuildEnvironment {
+            sgdk_root: Some(sgdk_root),
+            sgdk_make_program: Some(make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_with_environment(&project_dir, &environment, |_| {});
+
+        assert!(!result.ok);
+        assert!(result
+            .log
+            .iter()
+            .any(|entry| entry
+                .message
+                .contains("Build.output_dir '../")
+                && entry
+                    .message
+                    .contains("nao pode escapar da raiz do projeto")));
+        assert!(sibling_dir.exists());
+        assert_eq!(
+            fs::read_to_string(&sibling_marker).expect("read sibling marker"),
+            "keep"
+        );
+
+        let _ = fs::remove_dir_all(project_dir);
+        let _ = fs::remove_dir_all(sibling_dir);
     }
 
     #[test]

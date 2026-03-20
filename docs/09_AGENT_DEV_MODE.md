@@ -51,7 +51,7 @@ Uma tarefa tambem nao esta concluida enquanto faltar certificacao real no escopo
 - `npx tsc --noEmit`
 - `npm test`
 - `cargo clippy -- -D warnings`
-- `cargo test --lib -- --nocapture`
+- `cargo test --lib -- --nocapture --test-threads=1`
 
 ### 3.2 Gates extras quando a mudanca toca o core
 - Reexecutar `scripts/validate-upstream-windows.ps1` quando a mudanca tocar build/emulacao de Mega Drive ou SNES com toolchains oficiais no Windows.
