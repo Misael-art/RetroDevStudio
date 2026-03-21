@@ -20,7 +20,7 @@ import { emulatorLoadRom, emulatorStop } from "./core/ipc/emulatorService";
 import { getHwStatus } from "./core/ipc/hwService";
 import {
   createProjectFromTemplate,
-  importSgdkProject,
+  importLegacySgdkProject,
   listProjectTemplates,
   openProjectDialog,
   openProjectPath,
@@ -402,6 +402,7 @@ export default function App() {
     undo,
     redo,
     setProjectSourceKind,
+    setProjectLegacyIndex,
     consoleVisible,
     toggleConsole,
   } = useEditorStore();
@@ -794,6 +795,8 @@ export default function App() {
       logMessage("warn", `[${scope}] ${sceneData.error}`);
       setActiveScenePath("");
       setActiveScene(null);
+      setProjectSourceKind("");
+      setProjectLegacyIndex(null);
       return false;
     }
 
@@ -805,6 +808,8 @@ export default function App() {
       logMessage("error", `[${scope}] Falha ao reconstruir a cena do projeto.`);
       setActiveScenePath("");
       setActiveScene(null);
+      setProjectSourceKind("");
+      setProjectLegacyIndex(null);
       return false;
     }
 
@@ -814,6 +819,7 @@ export default function App() {
     setActiveScenePath(sceneData.scene_path);
     setActiveScene(hydrated.resolvedScene, hydrated.sourceScene);
     setProjectSourceKind(sceneData.source_kind ?? "");
+    setProjectLegacyIndex(sceneData.legacy_sgdk_index ?? null);
     if (sceneData.target === "megadrive" || sceneData.target === "snes") {
       setActiveTarget(sceneData.target);
     }
@@ -870,6 +876,9 @@ export default function App() {
       const hydrated = await hydrateProjectState(result.path, result.name, "Projeto");
       if (hydrated) {
         logMessage("success", `Projeto aberto: ${result.name} (${result.path})`);
+        if (result.notice) {
+          logMessage("info", `[Projeto] ${result.notice}`);
+        }
       } else {
         logMessage("warn", `[Projeto] Projeto aberto sem cena valida: ${result.name} (${result.path})`);
       }
@@ -888,6 +897,9 @@ export default function App() {
       throw new Error(`Falha ao hidratar o projeto: ${result.path}`);
     }
     logMessage("success", `Projeto aberto: ${result.name} (${result.path})`);
+    if (result.notice) {
+      logMessage("info", `[Projeto] ${result.notice}`);
+    }
     return true;
   }
 
@@ -980,10 +992,6 @@ export default function App() {
       logMessage("warn", "[Projeto] Informe um nome para o projeto.");
       return;
     }
-    if (!newProjBaseDir.trim()) {
-      logMessage("warn", "[Projeto] Escolha a pasta base onde o projeto sera criado.");
-      return;
-    }
     if (!selectedTemplate) {
       logMessage("warn", "[Projeto] Escolha um template antes de criar o projeto.");
       return;
@@ -1019,6 +1027,9 @@ export default function App() {
           "success",
           `Novo projeto criado a partir de '${selectedTemplate.name}': ${result.name} em ${result.path}`
         );
+        if (result.notice) {
+          logMessage("info", `[Projeto] ${result.notice}`);
+        }
       } else {
         logMessage("warn", `[Projeto] Projeto criado, mas a cena inicial nao foi hidratada: ${result.name}`);
       }
@@ -1034,10 +1045,6 @@ export default function App() {
       logMessage("warn", "[Projeto] Informe um nome para o projeto importado.");
       return;
     }
-    if (!newProjBaseDir.trim()) {
-      logMessage("warn", "[Projeto] Escolha a pasta base onde o projeto importado sera criado.");
-      return;
-    }
 
     try {
       const sgdkPath = await chooseSgdkProjectPath();
@@ -1046,13 +1053,16 @@ export default function App() {
       }
 
       setCreatingProject(true);
-      const result = await importSgdkProject(newProjName.trim(), newProjBaseDir.trim(), sgdkPath);
+      const result = await importLegacySgdkProject(newProjName.trim(), sgdkPath);
       const hydrated = await hydrateProjectState(result.path, result.name, "Projeto");
       if (hydrated) {
         logMessage(
           "success",
           `Projeto SGDK importado: ${result.name} em ${result.path}`
         );
+        if (result.notice) {
+          logMessage("info", `[Projeto] ${result.notice}`);
+        }
       } else {
         logMessage(
           "warn",
@@ -1646,7 +1656,7 @@ export default function App() {
                 <div className="min-w-0 flex-1">
                   <p className="text-[10px] text-[#7f849c]">Pasta base</p>
                   <p className="truncate font-mono text-[10px] text-[#cdd6f4]">
-                    {newProjBaseDir || "(selecione uma pasta)"}
+                    {newProjBaseDir || "(automatico pelo sistema)"}
                   </p>
                 </div>
                 <ToolbarButton label="Escolher" onClick={() => void chooseNewProjectBaseDir()} />

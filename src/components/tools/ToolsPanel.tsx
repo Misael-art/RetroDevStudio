@@ -8,7 +8,7 @@ import { getEntityDisplayName } from "../../core/entityDisplay";
 import { persistActiveScene } from "../../core/scenePersistence";
 import { listenToProjectAssetChanges } from "../../core/ipc/projectWatcherService";
 import { ExperimentalNotice, HeuristicNotice } from "./ToolNotices";
-import type { Scene } from "../../core/ipc/sceneService";
+import type { LegacySgdkIndex, Scene } from "../../core/ipc/sceneService";
 import { createSpriteEntityFromAsset } from "../../core/editorEntityFactory";
 import {
   buildMultiTarget,
@@ -25,12 +25,14 @@ import {
   getThirdPartyStatus,
   installThirdPartyDependency,
   listProjectAssets,
+  readLegacyProjectFile,
   type ProfileReport,
   type ProfileIssue,
   type DependencyStatus,
   type DependencyLogLine,
   type ThirdPartyDependencyId,
   type AssetExtractorBppMode,
+  type LegacyProjectFilePreview,
   type ProjectAssetEntry,
   type ReverseExplorerResult,
   reverseExplorerRead,
@@ -476,6 +478,129 @@ function AssetExtractor() {
   );
 }
 
+function LegacySgdkProjectCard({
+  projectName,
+  overlayDir,
+  legacyIndex,
+}: {
+  projectName: string;
+  overlayDir: string;
+  legacyIndex: LegacySgdkIndex;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const sections = [
+    { id: "src", label: "Codigo C", files: legacyIndex.source_files },
+    { id: "hdr", label: "Headers", files: legacyIndex.header_files },
+    { id: "man", label: "Manifests", files: legacyIndex.manifest_files },
+    { id: "res", label: "Recursos host", files: legacyIndex.resource_files },
+    { id: "out", label: "Build host", files: legacyIndex.output_files },
+  ].filter((section) => section.files.length > 0);
+
+  const totalTrackedFiles = sections.reduce((total, section) => total + section.files.length, 0);
+
+  return (
+    <div
+      data-testid="runtime-legacy-sgdk-card"
+      className="flex flex-col gap-3 rounded border border-[#89b4fa]/35 bg-[#0f172a] p-3"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <div className="flex items-center gap-2">
+            <span className="rounded-full border border-[#89b4fa]/30 bg-[#89b4fa]/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#89b4fa]">
+              SGDK legado
+            </span>
+            <span className="rounded-full border border-[#313244] bg-[#11111b] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#cdd6f4]">
+              Overlay rds/
+            </span>
+          </div>
+          <span className="text-xs font-semibold text-[#e5e7eb]">
+            {projectName || "Projeto adotado"}
+          </span>
+          <p className="text-[10px] leading-tight text-[#94a3b8]">
+            O codigo host continua intacto. O editor le o indice do projeto legado e usa apenas
+            o overlay canonico para metadata, cena e assets importados.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setExpanded((current) => !current)}
+          className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[10px] font-semibold text-[#cdd6f4] transition-colors hover:border-[#89b4fa] hover:text-[#89b4fa]"
+        >
+          {expanded ? "Ocultar indice" : "Ver indice"}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 xl:grid-cols-4">
+        <div className="rounded border border-[#1f2937] bg-[#11111b] p-2">
+          <div className="text-[9px] uppercase tracking-wide text-[#64748b]">Host root</div>
+          <div className="mt-1 break-all font-mono text-[10px] text-[#cdd6f4]">
+            {legacyIndex.host_root}
+          </div>
+        </div>
+        <div className="rounded border border-[#1f2937] bg-[#11111b] p-2">
+          <div className="text-[9px] uppercase tracking-wide text-[#64748b]">Overlay</div>
+          <div className="mt-1 break-all font-mono text-[10px] text-[#cdd6f4]">{overlayDir}</div>
+        </div>
+        <div className="rounded border border-[#1f2937] bg-[#11111b] p-2">
+          <div className="text-[9px] uppercase tracking-wide text-[#64748b]">Arquivos</div>
+          <div className="mt-1 text-sm font-bold text-[#89b4fa]">{totalTrackedFiles}</div>
+        </div>
+        <div className="rounded border border-[#1f2937] bg-[#11111b] p-2">
+          <div className="text-[9px] uppercase tracking-wide text-[#64748b]">Buckets</div>
+          <div className="mt-1 text-sm font-bold text-[#cba6f7]">{sections.length}</div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 xl:grid-cols-5">
+        {sections.map((section) => (
+          <div
+            key={section.id}
+            className="rounded border border-[#1f2937] bg-[#11111b] px-2 py-1.5"
+          >
+            <div className="text-[9px] uppercase tracking-wide text-[#64748b]">
+              {section.label}
+            </div>
+            <div className="mt-1 text-sm font-bold text-[#e5e7eb]">{section.files.length}</div>
+          </div>
+        ))}
+      </div>
+
+      {expanded && (
+        <div className="grid grid-cols-1 gap-2 xl:grid-cols-2">
+          {sections.map((section) => (
+            <div
+              key={`${section.id}-details`}
+              className="rounded border border-[#1f2937] bg-[#11111b] p-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#89b4fa]">
+                  {section.label}
+                </span>
+                <span className="text-[10px] font-mono text-[#7f849c]">
+                  {section.files.length} item(ns)
+                </span>
+              </div>
+              <div className="mt-2 flex max-h-32 flex-col gap-1 overflow-y-auto">
+                {section.files.slice(0, 10).map((file) => (
+                  <p key={file} className="break-all font-mono text-[10px] text-[#cdd6f4]">
+                    {file}
+                  </p>
+                ))}
+                {section.files.length > 10 && (
+                  <p className="text-[10px] text-[#64748b]">
+                    ...e mais {section.files.length - 10} item(ns)
+                  </p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface AssetBrowserProps {
   onRequestInspector?: () => void;
 }
@@ -535,6 +660,26 @@ function assetPreviewUrl(asset: ProjectAssetEntry): string | null {
     return null;
   }
   return convertFileSrc(asset.absolute_path);
+}
+
+interface LegacyIndexSection {
+  id: string;
+  label: string;
+  files: string[];
+}
+
+function buildLegacyIndexSections(index: LegacySgdkIndex | null): LegacyIndexSection[] {
+  if (!index) {
+    return [];
+  }
+
+  return [
+    { id: "source", label: "src/", files: index.source_files },
+    { id: "headers", label: "inc/", files: index.header_files },
+    { id: "manifests", label: "res/", files: index.manifest_files },
+    { id: "resources", label: "assets host", files: index.resource_files },
+    { id: "output", label: "out/", files: index.output_files },
+  ].filter((section) => section.files.length > 0);
 }
 
 interface AssetTreeNode {
@@ -679,6 +824,8 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
     activeProjectDir,
     activeTarget,
     activeScene,
+    projectSourceKind,
+    projectLegacyIndex,
     addEntity,
     setSelectedEntityId,
     setActiveViewportTab,
@@ -691,9 +838,18 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
   const [viewMode, setViewMode] = useState<"grid" | "tree">("tree");
   const [treeCollapsed, setTreeCollapsed] = useState<Set<string>>(new Set());
   const [selectedTreeAsset, setSelectedTreeAsset] = useState<ProjectAssetEntry | null>(null);
+  const [selectedLegacyFile, setSelectedLegacyFile] = useState<string | null>(null);
+  const [legacyPreview, setLegacyPreview] = useState<LegacyProjectFilePreview | null>(null);
+  const [legacyPreviewBusy, setLegacyPreviewBusy] = useState(false);
+  const [legacyPreviewError, setLegacyPreviewError] = useState<string | null>(null);
 
   const references = useMemo(() => collectAssetReferences(activeScene), [activeScene]);
   const assetTree = useMemo(() => buildAssetTree(assets), [assets]);
+  const legacySections = useMemo(
+    () =>
+      projectSourceKind === "external_sgdk" ? buildLegacyIndexSections(projectLegacyIndex) : [],
+    [projectLegacyIndex, projectSourceKind]
+  );
 
   useEffect(() => {
     if (!activeProjectDir) {
@@ -772,6 +928,17 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
     };
   }, [activeProjectDir]);
 
+  useEffect(() => {
+    if (projectSourceKind === "external_sgdk" && projectLegacyIndex) {
+      return;
+    }
+
+    setSelectedLegacyFile(null);
+    setLegacyPreview(null);
+    setLegacyPreviewError(null);
+    setLegacyPreviewBusy(false);
+  }, [projectLegacyIndex, projectSourceKind]);
+
   function handleFocusReferencedAsset(asset: ProjectAssetEntry) {
     const matches = references.get(asset.relative_path) ?? [];
     if (matches.length === 0) {
@@ -841,6 +1008,25 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
     });
   }
 
+  async function handleSelectLegacyFile(relativePath: string) {
+    if (!activeProjectDir) {
+      return;
+    }
+
+    setSelectedLegacyFile(relativePath);
+    setLegacyPreviewBusy(true);
+    setLegacyPreviewError(null);
+    try {
+      const result = await readLegacyProjectFile(activeProjectDir, relativePath);
+      setLegacyPreview(result);
+    } catch (previewError) {
+      setLegacyPreview(null);
+      setLegacyPreviewError(describeError(previewError));
+    } finally {
+      setLegacyPreviewBusy(false);
+    }
+  }
+
   return (
     <div className="flex min-h-0 flex-col gap-2 overflow-x-hidden p-3">
       <ExperimentalNotice
@@ -856,6 +1042,14 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
           <span className="text-[10px] text-[#7f849c]">
             Assets: <span className="font-mono text-[#cdd6f4]">{assets.length}</span>
           </span>
+          {legacySections.length > 0 && (
+            <span className="text-[10px] text-[#7f849c]">
+              Host SGDK:{" "}
+              <span className="font-mono text-[#cdd6f4]">
+                {legacySections.reduce((count, section) => count + section.files.length, 0)}
+              </span>
+            </span>
+          )}
           <div className="flex gap-0.5">
             {(["tree", "grid"] as const).map((mode) => (
               <button
@@ -882,22 +1076,77 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
         </div>
       )}
 
-      {viewMode === "tree" && assets.length > 0 && (
+      {viewMode === "tree" && (assets.length > 0 || legacySections.length > 0) && (
         <div className="scrollbar-thin min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden rounded border border-[#313244] bg-[#11111b] p-2">
-          <AssetTreeView
-            node={assetTree}
-            collapsed={treeCollapsed}
-            onToggle={toggleTreeNode}
-            onSelect={(asset) => {
-              setSelectedTreeAsset(asset);
-              const matches = references.get(asset.relative_path) ?? [];
-              if (matches.length > 0) {
-                setSelectedEntityId(matches[0].entityId);
-              }
-            }}
-            previewUrl={assetPreviewUrl}
-            depth={0}
-          />
+          {assets.length > 0 && (
+            <div className="flex flex-col gap-1 pb-3">
+              <div className="px-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#89b4fa]">
+                Assets canonicos
+              </div>
+              <AssetTreeView
+                node={assetTree}
+                collapsed={treeCollapsed}
+                onToggle={toggleTreeNode}
+                onSelect={(asset) => {
+                  setSelectedTreeAsset(asset);
+                  setSelectedLegacyFile(null);
+                  setLegacyPreview(null);
+                  setLegacyPreviewError(null);
+                  const matches = references.get(asset.relative_path) ?? [];
+                  if (matches.length > 0) {
+                    setSelectedEntityId(matches[0].entityId);
+                  }
+                }}
+                previewUrl={assetPreviewUrl}
+                depth={0}
+              />
+            </div>
+          )}
+
+          {legacySections.length > 0 && (
+            <div className="flex flex-col gap-3 border-t border-[#1f2937] pt-3">
+              <div className="flex flex-col gap-1 px-1">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#f9e2af]">
+                  Projeto host SGDK
+                </span>
+                <p className="text-[10px] leading-tight text-[#94a3b8]">
+                  Navegacao somente leitura dos arquivos mapeados pelo overlay legado.
+                </p>
+              </div>
+              {legacySections.map((section) => (
+                <div
+                  key={`legacy-${section.id}`}
+                  className="rounded border border-[#1f2937] bg-[#0f172a]/30 p-2"
+                >
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#f9e2af]">
+                      {section.label}
+                    </span>
+                    <span className="font-mono text-[10px] text-[#7f849c]">
+                      {section.files.length} item(ns)
+                    </span>
+                  </div>
+                  <div className="flex max-h-28 flex-col gap-1 overflow-y-auto">
+                    {section.files.map((file) => (
+                      <button
+                        key={file}
+                        type="button"
+                        onClick={() => void handleSelectLegacyFile(file)}
+                        className={`rounded px-2 py-1 text-left font-mono text-[10px] transition-colors ${
+                          selectedLegacyFile === file
+                            ? "bg-[#f9e2af]/10 text-[#f9e2af]"
+                            : "text-[#cdd6f4] hover:bg-[#313244]"
+                        }`}
+                        title={file}
+                      >
+                        {file}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -935,6 +1184,52 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
               </button>
             )}
           </div>
+        </div>
+      )}
+
+      {viewMode === "tree" && selectedLegacyFile && (
+        <div
+          data-testid="legacy-file-preview"
+          className="flex flex-col gap-2 rounded border border-[#f9e2af]/30 bg-[#1e1e2e] p-3"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p
+                className="min-w-0 truncate font-mono text-[10px] text-[#f9e2af]"
+                title={selectedLegacyFile}
+              >
+                {selectedLegacyFile}
+              </p>
+              <p className="text-[10px] text-[#94a3b8]">
+                Arquivo legado do host SGDK. Visualizacao somente leitura.
+              </p>
+            </div>
+            <span className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#f9e2af]">
+              Read-only
+            </span>
+          </div>
+
+          {legacyPreviewBusy && (
+            <p className="text-[10px] text-[#89b4fa]">Carregando preview do arquivo legado...</p>
+          )}
+
+          {legacyPreviewError && (
+            <div className="rounded border border-[#f38ba8] bg-[#11111b] px-3 py-2 text-[10px] text-[#f38ba8]">
+              {legacyPreviewError}
+            </div>
+          )}
+
+          {legacyPreview && (
+            <>
+              <p className="break-all font-mono text-[10px] text-[#7f849c]">
+                {legacyPreview.absolute_path}
+              </p>
+              <p className="text-[10px] text-[#94a3b8]">{legacyPreview.note}</p>
+              <pre className="scrollbar-thin max-h-48 overflow-auto rounded border border-[#1f2937] bg-[#11111b] p-3 text-[10px] leading-relaxed text-[#cdd6f4]">
+                {legacyPreview.content}
+              </pre>
+            </>
+          )}
         </div>
       )}
 
@@ -1016,7 +1311,7 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
         </div>
       )}
 
-      {!busy && assets.length === 0 && (
+      {!busy && assets.length === 0 && legacySections.length === 0 && (
         <p className="text-[10px] text-[#45475a]">Nenhum asset encontrado em `assets/`.</p>
       )}
     </div>
@@ -1024,7 +1319,13 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
 }
 
 function RuntimeSetup() {
-  const { activeProjectDir, logMessage } = useEditorStore();
+  const {
+    activeProjectDir,
+    activeProjectName,
+    projectSourceKind,
+    projectLegacyIndex,
+    logMessage,
+  } = useEditorStore();
   const [items, setItems] = useState<DependencyStatus[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1121,6 +1422,14 @@ function RuntimeSetup() {
           {loading ? "Atualizando..." : "Atualizar"}
         </button>
       </div>
+
+      {projectSourceKind === "external_sgdk" && projectLegacyIndex && (
+        <LegacySgdkProjectCard
+          projectName={activeProjectName}
+          overlayDir={activeProjectDir}
+          legacyIndex={projectLegacyIndex}
+        />
+      )}
 
       <div className="flex flex-col gap-2">
         {items.map((item) => (

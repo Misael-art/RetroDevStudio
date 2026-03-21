@@ -1,4 +1,4 @@
-﻿use crate::hardware::HwStatus;
+use crate::hardware::HwStatus;
 use crate::ugdm::entities::Scene;
 
 // Mega Drive Hardware Constraints (doc 04 — imutavel)
@@ -132,9 +132,7 @@ pub fn validate_scene_with_source_kind(
             }
 
             // Meta-sprites (SGDK ResComp decomposes automatically) bypass the 32x32 limit
-            if !sprite.meta_sprite
-                && (sprite.frame_width > 32 || sprite.frame_height > 32)
-            {
+            if !sprite.meta_sprite && (sprite.frame_width > 32 || sprite.frame_height > 32) {
                 errors.push(ValidationError::fatal(format!(
                     "Entidade '{}': sprite {}x{} excede o tamanho maximo nativo do Mega Drive (32x32). Use meta-sprites compostos.",
                     entity.entity_id, sprite.frame_width, sprite.frame_height
@@ -189,7 +187,8 @@ pub fn validate_scene_with_source_kind(
         if is_sgdk {
             errors.push(ValidationError::warning(format!(
                 "{}VRAM Overflow: a cena consome {}KB de sprites. Limite do Mega Drive: 64KB.",
-                prefix, vram_used / 1024
+                prefix,
+                vram_used / 1024
             )));
         } else {
             errors.push(ValidationError::fatal(format!(
@@ -211,7 +210,8 @@ pub fn validate_scene_with_source_kind(
         let prefix = if is_sgdk { "[SGDK Gerenciado] " } else { "" };
         errors.push(ValidationError::warning(format!(
             "{}DMA Warning: upload estimado em {}KB por frame ({}% do budget de {}KB no VBlank).",
-            prefix, dma_used / 1024,
+            prefix,
+            dma_used / 1024,
             dma_used * 100 / MD_DMA_VBLANK_BYTES,
             MD_DMA_VBLANK_BYTES / 1024
         )));
@@ -261,7 +261,8 @@ pub fn validate_scene_with_source_kind(
         if cmap.data.len() != expected_len {
             errors.push(ValidationError::warning(format!(
                 "CollisionMap: data.len()={} mas width*height={}. O mapa pode estar corrompido.",
-                cmap.data.len(), expected_len
+                cmap.data.len(),
+                expected_len
             )));
         }
     }
@@ -423,11 +424,9 @@ mod tests {
 
         let errors = validate_scene(&scene);
 
-        assert!(
-            errors
-                .iter()
-                .any(|error| error.is_fatal && error.message.contains("Sprite overflow"))
-        );
+        assert!(errors
+            .iter()
+            .any(|error| error.is_fatal && error.message.contains("Sprite overflow")));
     }
 
     #[test]
@@ -439,11 +438,9 @@ mod tests {
 
         let errors = validate_scene(&scene);
 
-        assert!(
-            errors
-                .iter()
-                .any(|error| !error.is_fatal && error.message.contains("Sprite Warning"))
-        );
+        assert!(errors
+            .iter()
+            .any(|error| !error.is_fatal && error.message.contains("Sprite Warning")));
         assert!(!errors.iter().any(|error| error.is_fatal));
     }
 
@@ -460,11 +457,9 @@ mod tests {
 
         let errors = validate_scene(&scene);
 
-        assert!(
-            errors.iter().any(|error| {
-                !error.is_fatal && error.message.contains("Sprite Scanline Warning")
-            })
-        );
+        assert!(errors
+            .iter()
+            .any(|error| { !error.is_fatal && error.message.contains("Sprite Scanline Warning") }));
     }
 
     #[test]
@@ -480,16 +475,12 @@ mod tests {
 
         let errors = validate_scene(&scene);
 
-        assert!(
-            errors
-                .iter()
-                .any(|error| error.is_fatal && error.message.contains("palette_slot"))
-        );
-        assert!(
-            errors
-                .iter()
-                .any(|error| error.is_fatal && error.message.contains("Palette slot"))
-        );
+        assert!(errors
+            .iter()
+            .any(|error| error.is_fatal && error.message.contains("palette_slot")));
+        assert!(errors
+            .iter()
+            .any(|error| error.is_fatal && error.message.contains("Palette slot")));
     }
 
     #[test]
@@ -539,7 +530,9 @@ mod tests {
         let errors = validate_scene(&scene);
 
         assert!(
-            !errors.iter().any(|error| error.is_fatal && error.message.contains("32x32")),
+            !errors
+                .iter()
+                .any(|error| error.is_fatal && error.message.contains("32x32")),
             "Meta-sprite should not trigger 32x32 limit: {:?}",
             errors
         );
@@ -553,7 +546,9 @@ mod tests {
         let errors = validate_scene(&scene);
 
         assert!(
-            errors.iter().any(|error| error.is_fatal && error.message.contains("32x32")),
+            errors
+                .iter()
+                .any(|error| error.is_fatal && error.message.contains("32x32")),
             "Non-meta sprite >32x32 should be rejected"
         );
     }
@@ -565,7 +560,10 @@ mod tests {
 
         let status = hw_status(&scene);
 
-        assert!(status.vram_used > 0, "Meta-sprite VRAM should be calculated");
+        assert!(
+            status.vram_used > 0,
+            "Meta-sprite VRAM should be calculated"
+        );
     }
 
     // ── PROMPT 4: SGDK source_kind reclassifies VRAM overflow ──
@@ -576,7 +574,8 @@ mod tests {
         // 10 × 128x128 meta-sprites = 10 × 8,192 B = 80 KB > 64 KB VRAM limit.
         // Keeps sprite count below the 80 sprites per screen constraint.
         for i in 0..10 {
-            scene.entities
+            scene
+                .entities
                 .push(meta_sprite_entity(&format!("spr_{i}"), 128, 128));
         }
 
@@ -585,22 +584,30 @@ mod tests {
 
         // Native project: VRAM overflow is fatal
         assert!(
-            errors_native.iter().any(|error| error.is_fatal && error.message.contains("VRAM Overflow")),
+            errors_native
+                .iter()
+                .any(|error| error.is_fatal && error.message.contains("VRAM Overflow")),
             "Native project should have fatal VRAM overflow"
         );
 
         // SGDK project: VRAM overflow is warning (not fatal)
         assert!(
-            !errors_sgdk.iter().any(|error| error.is_fatal && error.message.contains("VRAM Overflow")),
+            !errors_sgdk
+                .iter()
+                .any(|error| error.is_fatal && error.message.contains("VRAM Overflow")),
             "SGDK project should not have fatal VRAM overflow: {:?}",
             errors_sgdk
         );
         assert!(
-            errors_sgdk.iter().any(|error| !error.is_fatal && error.message.contains("VRAM Overflow")),
+            errors_sgdk
+                .iter()
+                .any(|error| !error.is_fatal && error.message.contains("VRAM Overflow")),
             "SGDK project should have VRAM overflow as warning"
         );
         assert!(
-            errors_sgdk.iter().any(|error| error.message.contains("SGDK Gerenciado")),
+            errors_sgdk
+                .iter()
+                .any(|error| error.message.contains("SGDK Gerenciado")),
             "SGDK warning should have [SGDK Gerenciado] prefix"
         );
     }
@@ -609,19 +616,24 @@ mod tests {
     fn imported_sgdk_project_vram_overflow_is_also_warning() {
         let mut scene = empty_scene();
         for i in 0..10 {
-            scene.entities
+            scene
+                .entities
                 .push(meta_sprite_entity(&format!("spr_{i}"), 128, 128));
         }
 
         let errors = validate_scene_with_source_kind(&scene, Some("imported_sgdk"));
 
         assert!(
-            !errors.iter().any(|error| error.is_fatal && error.message.contains("VRAM Overflow")),
+            !errors
+                .iter()
+                .any(|error| error.is_fatal && error.message.contains("VRAM Overflow")),
             "imported_sgdk should not have fatal VRAM overflow: {:?}",
             errors
         );
         assert!(
-            errors.iter().any(|error| !error.is_fatal && error.message.contains("SGDK Gerenciado")),
+            errors
+                .iter()
+                .any(|error| !error.is_fatal && error.message.contains("SGDK Gerenciado")),
             "imported_sgdk should produce [SGDK Gerenciado] warning"
         );
     }

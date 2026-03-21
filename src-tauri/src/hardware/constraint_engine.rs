@@ -1,4 +1,4 @@
-﻿use crate::ugdm::entities::Scene;
+use crate::ugdm::entities::Scene;
 
 use super::{md_profile, snes_profile, HwStatus};
 
@@ -42,7 +42,8 @@ mod tests {
 
     #[test]
     fn rejects_unknown_target() {
-        let error = hw_status_for_target("unknown", &empty_scene()).expect_err("target should fail");
+        let error =
+            hw_status_for_target("unknown", &empty_scene()).expect_err("target should fail");
         assert!(error.contains("nao suportado"));
     }
 

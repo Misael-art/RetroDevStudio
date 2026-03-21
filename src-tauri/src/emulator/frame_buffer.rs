@@ -21,7 +21,13 @@ pub fn framebuffer_to_rgba(src: &[u8], size: FrameSize, pixel_format: PixelForma
                     src[src_offset + 2],
                     src[src_offset + 3],
                 ]);
-                write_rgba(&mut rgba, index, expand_8((pixel >> 16) as u8), expand_8((pixel >> 8) as u8), expand_8(pixel as u8));
+                write_rgba(
+                    &mut rgba,
+                    index,
+                    expand_8((pixel >> 16) as u8),
+                    expand_8((pixel >> 8) as u8),
+                    expand_8(pixel as u8),
+                );
             }
         }
         PixelFormat::Rgb565 => {

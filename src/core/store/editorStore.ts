@@ -1,6 +1,13 @@
 import { create } from "zustand";
 
-import type { BackgroundLayer, CollisionMap, Entity, Scene, SceneLayer } from "../ipc/sceneService";
+import type {
+  BackgroundLayer,
+  CollisionMap,
+  Entity,
+  LegacySgdkIndex,
+  Scene,
+  SceneLayer,
+} from "../ipc/sceneService";
 
 const UNDO_STACK_LIMIT = 50;
 
@@ -77,6 +84,7 @@ export interface StoreState {
   emulPaused: boolean;
   viewportZoom: number;
   projectSourceKind: string;
+  projectLegacyIndex: LegacySgdkIndex | null;
   editorMode: EditorMode;
   activeBrush: ActiveBrush | null;
 }
@@ -136,6 +144,7 @@ export interface StoreActions {
   setViewportZoom: (zoom: number) => void;
   resetViewportZoom: () => void;
   setProjectSourceKind: (kind: string) => void;
+  setProjectLegacyIndex: (index: LegacySgdkIndex | null) => void;
   setEditorMode: (mode: EditorMode) => void;
   setActiveBrush: (brush: ActiveBrush | null) => void;
 }
@@ -608,6 +617,8 @@ export const useEditorStore = create<EditorState>((set) => ({
 
   projectSourceKind: "",
   setProjectSourceKind: (kind) => set({ projectSourceKind: kind }),
+  projectLegacyIndex: null,
+  setProjectLegacyIndex: (index) => set({ projectLegacyIndex: index }),
 
   editorMode: "select",
   setEditorMode: (mode) => set({ editorMode: mode }),

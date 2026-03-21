@@ -40,6 +40,15 @@ export interface ProjectAssetEntry {
   kind: "image" | "audio" | "other";
 }
 
+export interface LegacyProjectFilePreview {
+  relative_path: string;
+  absolute_path: string;
+  content: string;
+  previewable: boolean;
+  readonly: boolean;
+  note: string;
+}
+
 export type AssetExtractorBppMode = "auto" | "2bpp" | "4bpp";
 
 export type ThirdPartyDependencyId =
@@ -143,6 +152,16 @@ export function assetsExtract(
 
 export function listProjectAssets(projectDir: string): Promise<ProjectAssetEntry[]> {
   return invoke<ProjectAssetEntry[]>("list_project_assets", { projectDir });
+}
+
+export function readLegacyProjectFile(
+  projectDir: string,
+  relativePath: string
+): Promise<LegacyProjectFilePreview> {
+  return invoke<LegacyProjectFilePreview>("read_legacy_project_file", {
+    projectDir,
+    relativePath,
+  });
 }
 
 export function getThirdPartyStatus(): Promise<DependencyStatusReport> {

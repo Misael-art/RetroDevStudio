@@ -204,6 +204,15 @@ export interface SceneInfo {
   display_name: string;
 }
 
+export interface LegacySgdkIndex {
+  host_root: string;
+  source_files: string[];
+  header_files: string[];
+  manifest_files: string[];
+  resource_files: string[];
+  output_files: string[];
+}
+
 export interface SceneDataResult {
   ok: boolean;
   error: string;
@@ -212,6 +221,7 @@ export interface SceneDataResult {
   target: string;
   scene_path: string;
   source_kind: string;
+  legacy_sgdk_index?: LegacySgdkIndex | null;
 }
 
 export interface ResolveSceneResult {

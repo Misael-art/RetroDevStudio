@@ -3,9 +3,9 @@
 //! Compliance legal: este módulo NUNCA distribui ROMs. Apenas gera/aplica patches
 //! diferenciais (IPS/BPS) que requerem que o usuário forneça a ROM original.
 
+use serde::Serialize;
 use std::fs;
 use std::path::Path;
-use serde::Serialize;
 
 // ── Resultado ────────────────────────────────────────────────────────────────
 
@@ -19,13 +19,28 @@ pub struct PatchResult {
 
 impl PatchResult {
     fn ok(msg: impl Into<String>, changed: u32) -> Self {
-        Self { ok: true, message: msg.into(), bytes_changed: changed, patch_hash: None }
+        Self {
+            ok: true,
+            message: msg.into(),
+            bytes_changed: changed,
+            patch_hash: None,
+        }
     }
     fn ok_with_hash(msg: impl Into<String>, changed: u32, patch_hash: String) -> Self {
-        Self { ok: true, message: msg.into(), bytes_changed: changed, patch_hash: Some(patch_hash) }
+        Self {
+            ok: true,
+            message: msg.into(),
+            bytes_changed: changed,
+            patch_hash: Some(patch_hash),
+        }
     }
     fn err(msg: impl Into<String>) -> Self {
-        Self { ok: false, message: msg.into(), bytes_changed: 0, patch_hash: None }
+        Self {
+            ok: false,
+            message: msg.into(),
+            bytes_changed: 0,
+            patch_hash: None,
+        }
     }
 }
 
@@ -36,7 +51,7 @@ impl PatchResult {
 // EOF: "EOF" (3 bytes)
 
 const IPS_HEADER: &[u8] = b"PATCH";
-const IPS_EOF:    &[u8] = b"EOF";
+const IPS_EOF: &[u8] = b"EOF";
 
 /// Cria um patch IPS comparando `original` com `modified`.
 /// Retorna os bytes do patch IPS (para salvar em arquivo).
@@ -63,8 +78,8 @@ pub fn create_ips(original: &[u8], modified: &[u8]) -> Result<Vec<u8>, String> {
         let offset = start as u32;
         // offset 3 bytes BE
         patch.push(((offset >> 16) & 0xFF) as u8);
-        patch.push(((offset >>  8) & 0xFF) as u8);
-        patch.push( (offset        & 0xFF) as u8);
+        patch.push(((offset >> 8) & 0xFF) as u8);
+        patch.push((offset & 0xFF) as u8);
         // size 2 bytes BE
         let size = data.len() as u16;
         patch.push((size >> 8) as u8);
@@ -93,8 +108,8 @@ pub fn apply_ips(original: &[u8], patch: &[u8]) -> Result<Vec<u8>, String> {
             break;
         }
         let offset = ((patch[pos] as usize) << 16)
-                   | ((patch[pos + 1] as usize) << 8)
-                   |  (patch[pos + 2] as usize);
+            | ((patch[pos + 1] as usize) << 8)
+            | (patch[pos + 2] as usize);
         pos += 3;
 
         if pos + 2 > patch.len() {
@@ -108,12 +123,16 @@ pub fn apply_ips(original: &[u8], patch: &[u8]) -> Result<Vec<u8>, String> {
             if pos + 3 > patch.len() {
                 return Err("Patch corrompido: RLE record incompleto.".to_string());
             }
-            let rle_len  = ((patch[pos] as usize) << 8) | (patch[pos + 1] as usize);
+            let rle_len = ((patch[pos] as usize) << 8) | (patch[pos + 1] as usize);
             let rle_byte = patch[pos + 2];
             pos += 3;
             let end = offset + rle_len;
-            if end > rom.len() { rom.resize(end, 0); }
-            for b in &mut rom[offset..end] { *b = rle_byte; }
+            if end > rom.len() {
+                rom.resize(end, 0);
+            }
+            for b in &mut rom[offset..end] {
+                *b = rle_byte;
+            }
         } else {
             if pos + size > patch.len() {
                 return Err("Patch corrompido: dados incompletos.".to_string());
@@ -121,7 +140,9 @@ pub fn apply_ips(original: &[u8], patch: &[u8]) -> Result<Vec<u8>, String> {
             let data = &patch[pos..pos + size];
             pos += size;
             let end = offset + size;
-            if end > rom.len() { rom.resize(end, 0); }
+            if end > rom.len() {
+                rom.resize(end, 0);
+            }
             rom[offset..end].copy_from_slice(data);
         }
     }
@@ -140,15 +161,19 @@ fn encode_varint(mut value: u64, out: &mut Vec<u8>) {
     loop {
         let mut x = (value & 0x7F) as u8;
         value >>= 7;
-        if value == 0 { x |= 0x80; }
+        if value == 0 {
+            x |= 0x80;
+        }
         out.push(x);
-        if x & 0x80 != 0 { break; }
+        if x & 0x80 != 0 {
+            break;
+        }
     }
 }
 
 fn decode_varint(data: &[u8], pos: &mut usize) -> Result<u64, String> {
     let mut result = 0u64;
-    let mut shift  = 0u32;
+    let mut shift = 0u32;
     loop {
         if *pos >= data.len() {
             return Err("BPS: varint truncado.".to_string());
@@ -157,7 +182,9 @@ fn decode_varint(data: &[u8], pos: &mut usize) -> Result<u64, String> {
         *pos += 1;
         result |= ((b & 0x7F) as u64) << shift;
         shift += 7;
-        if b & 0x80 != 0 { break; }
+        if b & 0x80 != 0 {
+            break;
+        }
     }
     Ok(result)
 }
@@ -167,8 +194,11 @@ fn crc32_simple(data: &[u8]) -> u32 {
     for &b in data {
         crc ^= b as u32;
         for _ in 0..8 {
-            if crc & 1 != 0 { crc = (crc >> 1) ^ 0xEDB8_8320; }
-            else             { crc >>= 1; }
+            if crc & 1 != 0 {
+                crc = (crc >> 1) ^ 0xEDB8_8320;
+            } else {
+                crc >>= 1;
+            }
         }
     }
     !crc
@@ -202,7 +232,11 @@ fn encode_signed_offset(delta: i64, out: &mut Vec<u8>) {
     encode_varint(encoded, out);
 }
 
-fn source_copy_candidate(original: &[u8], modified: &[u8], target_pos: usize) -> Option<(usize, usize)> {
+fn source_copy_candidate(
+    original: &[u8],
+    modified: &[u8],
+    target_pos: usize,
+) -> Option<(usize, usize)> {
     if target_pos >= modified.len() {
         return None;
     }
@@ -315,21 +349,24 @@ pub fn apply_bps(original: &[u8], patch: &[u8]) -> Result<Vec<u8>, String> {
     }
 
     // Verificar CRC32 do patch (últimos 4 bytes)
-    let patch_body   = &patch[..patch.len() - 4];
-    let stored_crc   = u32::from_le_bytes(patch[patch.len()-4..].try_into().unwrap());
+    let patch_body = &patch[..patch.len() - 4];
+    let stored_crc = u32::from_le_bytes(patch[patch.len() - 4..].try_into().unwrap());
     let computed_crc = crc32_simple(patch_body);
     if stored_crc != computed_crc {
-        return Err(format!("Patch BPS corrompido: CRC32 inválido (esperado {:08X}, obtido {:08X}).", stored_crc, computed_crc));
+        return Err(format!(
+            "Patch BPS corrompido: CRC32 inválido (esperado {:08X}, obtido {:08X}).",
+            stored_crc, computed_crc
+        ));
     }
 
     let mut pos = BPS_HEADER.len();
     let _source_size = decode_varint(patch, &mut pos)?;
-    let target_size  = decode_varint(patch, &mut pos)? as usize;
+    let target_size = decode_varint(patch, &mut pos)? as usize;
     let metadata_size = decode_varint(patch, &mut pos)? as usize;
     pos += metadata_size; // skip metadata
 
     let actions_end = patch.len() - 12; // 3× CRC32
-    let mut output  = vec![0u8; target_size];
+    let mut output = vec![0u8; target_size];
     let mut out_pos = 0usize;
     let mut src_pos = 0i64;
     let mut out_off = 0i64;
@@ -364,7 +401,9 @@ pub fn apply_bps(original: &[u8], patch: &[u8]) -> Result<Vec<u8>, String> {
                 let sign: i64 = if offset_data & 1 != 0 { -1 } else { 1 };
                 src_pos += sign * ((offset_data >> 1) as i64);
                 for _ in 0..length {
-                    if out_pos >= target_size { break; }
+                    if out_pos >= target_size {
+                        break;
+                    }
                     let s = src_pos as usize;
                     output[out_pos] = if s < original.len() { original[s] } else { 0 };
                     out_pos += 1;
@@ -377,7 +416,9 @@ pub fn apply_bps(original: &[u8], patch: &[u8]) -> Result<Vec<u8>, String> {
                 let sign: i64 = if offset_data & 1 != 0 { -1 } else { 1 };
                 out_off += sign * ((offset_data >> 1) as i64);
                 for _ in 0..length {
-                    if out_pos >= target_size { break; }
+                    if out_pos >= target_size {
+                        break;
+                    }
                     let o = out_off as usize;
                     output[out_pos] = if o < out_pos { output[o] } else { 0 };
                     out_pos += 1;
@@ -394,7 +435,11 @@ pub fn apply_bps(original: &[u8], patch: &[u8]) -> Result<Vec<u8>, String> {
 // ── IPC-level helpers (chamados de lib.rs) ───────────────────────────────────
 
 /// Cria um patch IPS a partir de dois arquivos e salva em `patch_path`.
-pub fn create_ips_file(original_path: &Path, modified_path: &Path, patch_path: &Path) -> PatchResult {
+pub fn create_ips_file(
+    original_path: &Path,
+    modified_path: &Path,
+    patch_path: &Path,
+) -> PatchResult {
     if let Err(error) = validate_patch_output_path(patch_path, "ips") {
         return PatchResult::err(error);
     }
@@ -414,7 +459,10 @@ pub fn create_ips_file(original_path: &Path, modified_path: &Path, patch_path: &
     if let Err(e) = fs::write(patch_path, &patch) {
         return PatchResult::err(format!("Erro ao salvar patch: {e}"));
     }
-    PatchResult::ok(format!("Patch IPS criado: {} bytes de diferença.", changed), changed)
+    PatchResult::ok(
+        format!("Patch IPS criado: {} bytes de diferença.", changed),
+        changed,
+    )
 }
 
 /// Aplica um patch IPS a uma ROM e salva a ROM patcheada em `output_path`.
@@ -431,15 +479,26 @@ pub fn apply_ips_file(rom_path: &Path, patch_path: &Path, output_path: &Path) ->
         Ok(r) => r,
         Err(e) => return PatchResult::err(e),
     };
-    let changed = patched.iter().zip(rom.iter()).filter(|(a, b)| a != b).count() as u32;
+    let changed = patched
+        .iter()
+        .zip(rom.iter())
+        .filter(|(a, b)| a != b)
+        .count() as u32;
     if let Err(e) = fs::write(output_path, &patched) {
         return PatchResult::err(format!("Erro ao salvar ROM patcheada: {e}"));
     }
-    PatchResult::ok(format!("Patch IPS aplicado: {} bytes alterados.", changed), changed)
+    PatchResult::ok(
+        format!("Patch IPS aplicado: {} bytes alterados.", changed),
+        changed,
+    )
 }
 
 /// Cria um patch BPS a partir de dois arquivos e salva em `patch_path`.
-pub fn create_bps_file(original_path: &Path, modified_path: &Path, patch_path: &Path) -> PatchResult {
+pub fn create_bps_file(
+    original_path: &Path,
+    modified_path: &Path,
+    patch_path: &Path,
+) -> PatchResult {
     let orig = match fs::read(original_path) {
         Ok(b) => b,
         Err(e) => return PatchResult::err(format!("Erro ao ler ROM original: {e}")),
@@ -456,7 +515,10 @@ pub fn create_bps_file(original_path: &Path, modified_path: &Path, patch_path: &
     if let Err(e) = fs::write(patch_path, &patch) {
         return PatchResult::err(format!("Erro ao salvar patch: {e}"));
     }
-    PatchResult::ok(format!("Patch BPS criado: {} bytes de patch.", changed), changed)
+    PatchResult::ok(
+        format!("Patch BPS criado: {} bytes de patch.", changed),
+        changed,
+    )
 }
 
 pub fn create_ips_file_compliance(
@@ -483,11 +545,7 @@ pub fn create_ips_file_compliance(
         }
     };
 
-    PatchResult::ok_with_hash(
-        result.message,
-        result.bytes_changed,
-        patch_hash_hex(&patch),
-    )
+    PatchResult::ok_with_hash(result.message, result.bytes_changed, patch_hash_hex(&patch))
 }
 
 pub fn create_bps_file_compliance(
@@ -514,11 +572,7 @@ pub fn create_bps_file_compliance(
         }
     };
 
-    PatchResult::ok_with_hash(
-        result.message,
-        result.bytes_changed,
-        patch_hash_hex(&patch),
-    )
+    PatchResult::ok_with_hash(result.message, result.bytes_changed, patch_hash_hex(&patch))
 }
 
 /// Aplica um patch BPS a uma ROM e salva a ROM patcheada em `output_path`.
@@ -535,16 +589,23 @@ pub fn apply_bps_file(rom_path: &Path, patch_path: &Path, output_path: &Path) ->
         Ok(r) => r,
         Err(e) => return PatchResult::err(e),
     };
-    let changed = patched.iter().zip(rom.iter()).filter(|(a, b)| a != b).count() as u32;
+    let changed = patched
+        .iter()
+        .zip(rom.iter())
+        .filter(|(a, b)| a != b)
+        .count() as u32;
     if let Err(e) = fs::write(output_path, &patched) {
         return PatchResult::err(format!("Erro ao salvar ROM patcheada: {e}"));
     }
-    PatchResult::ok(format!("Patch BPS aplicado: {} bytes alterados.", changed), changed)
+    PatchResult::ok(
+        format!("Patch BPS aplicado: {} bytes alterados.", changed),
+        changed,
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{apply_bps, create_bps, crc32_simple, encode_varint, BPS_HEADER};
+    use super::{apply_bps, crc32_simple, create_bps, encode_varint, BPS_HEADER};
 
     fn create_bps_target_read_only(original: &[u8], modified: &[u8]) -> Vec<u8> {
         let mut patch = BPS_HEADER.to_vec();

@@ -90,7 +90,10 @@ pub struct Velocity {
 pub struct PhysicsComponent {
     #[serde(default = "default_true")]
     pub gravity: bool,
-    #[serde(default = "default_gravity", deserialize_with = "deserialize_f64_to_i32")]
+    #[serde(
+        default = "default_gravity",
+        deserialize_with = "deserialize_f64_to_i32"
+    )]
     pub gravity_strength: i32,
     pub max_velocity: Option<Velocity>,
     #[serde(default, deserialize_with = "deserialize_f64_to_i32")]

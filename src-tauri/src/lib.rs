@@ -5,55 +5,38 @@ mod hardware;
 mod tools;
 mod ugdm;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use compiler::ast_generator::generate_ast;
 use compiler::build_orch::{
-    run_build,
-    run_build_multi_target,
-    BuildLogLine,
-    BuildResult,
-    MultiTargetBuildResult,
+    run_build, run_build_multi_target, BuildLogLine, BuildResult, MultiTargetBuildResult,
 };
 use compiler::sgdk_emitter::emit_sgdk_with_collision;
 use compiler::snes_emitter::emit_snes_with_collision;
 use core::editor_validation::{
-    authoritative_hw_status,
-    validate_scene_draft as validate_scene_draft_impl,
+    authoritative_hw_status, validate_scene_draft as validate_scene_draft_impl,
     DraftValidationResult,
 };
 use core::project_mgr::{
-    append_patch_audit_entry,
-    create_scene as create_project_scene,
-    create_project_skeleton,
-    discover_project_rds,
+    append_patch_audit_entry, create_project_skeleton, create_scene as create_project_scene,
+    discover_project_rds, import_legacy_sgdk_project as wrap_legacy_sgdk_project,
     import_sgdk_project as import_sgdk_scene,
     list_project_templates as list_registered_project_templates,
-    list_scenes as list_project_scenes,
-    load_project,
-    load_scene,
-    resolve_prefabs,
-    save_scene,
-    stamp_imported_sgdk_metadata,
-    stamp_project_template_metadata,
-    sync_external_graph_refs,
-    seed_project_template,
-    seed_onboarding_template,
-    set_entry_scene,
-    update_project_target,
-    ProjectTemplateSummary,
-    SceneInfo,
+    list_scenes as list_project_scenes, load_legacy_sgdk_index, load_project, load_scene,
+    resolve_prefabs, save_scene, seed_onboarding_template, seed_project_template, set_entry_scene,
+    stamp_imported_sgdk_metadata, stamp_project_template_metadata, sync_external_graph_refs,
+    update_project_target, LegacySgdkIndex, ProjectTemplateSummary, SceneInfo,
 };
-use ugdm::entities::PatchAuditEntry;
 use emulator::frame_buffer::framebuffer_to_rgba;
 use emulator::libretro_ffi::{EmulatorCore, JoypadState, ReplayCapture};
 use hardware::constraint_engine;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
+use ugdm::entities::PatchAuditEntry;
 
 // HwStatus canônico definido em hardware::mod
 use hardware::HwStatus;
@@ -119,6 +102,16 @@ pub struct ProjectAssetEntry {
     pub kind: String,
 }
 
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct LegacyProjectFilePreview {
+    pub relative_path: String,
+    pub absolute_path: String,
+    pub content: String,
+    pub previewable: bool,
+    pub readonly: bool,
+    pub note: String,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct AudioPayload {
     pub sample_rate: u32,
@@ -144,7 +137,13 @@ fn validate_project(project_dir: String) -> ValidationResult {
     let dir = PathBuf::from(&project_dir);
     let hw_status = match authoritative_hw_status(&dir) {
         Ok(status) => status,
-        Err(error) => return ValidationResult { ok: false, errors: vec![error], warnings: vec![] },
+        Err(error) => {
+            return ValidationResult {
+                ok: false,
+                errors: vec![error],
+                warnings: vec![],
+            }
+        }
     };
 
     ValidationResult {
@@ -160,11 +159,27 @@ fn generate_c_code(project_dir: String) -> GenerateResult {
 
     let project = match load_project(&dir) {
         Ok(p) => p,
-        Err(e) => return GenerateResult { ok: false, main_c: String::new(), resources_res: String::new(), errors: vec![e.to_string()], warnings: vec![] },
+        Err(e) => {
+            return GenerateResult {
+                ok: false,
+                main_c: String::new(),
+                resources_res: String::new(),
+                errors: vec![e.to_string()],
+                warnings: vec![],
+            }
+        }
     };
     let scene = match load_scene(&dir, &project.entry_scene) {
         Ok(s) => s,
-        Err(e) => return GenerateResult { ok: false, main_c: String::new(), resources_res: String::new(), errors: vec![e.to_string()], warnings: vec![] },
+        Err(e) => {
+            return GenerateResult {
+                ok: false,
+                main_c: String::new(),
+                resources_res: String::new(),
+                errors: vec![e.to_string()],
+                warnings: vec![],
+            }
+        }
     };
     let resolved_scene = match resolve_prefabs(&dir, &scene) {
         Ok(scene) => scene,
@@ -178,7 +193,8 @@ fn generate_c_code(project_dir: String) -> GenerateResult {
             }
         }
     };
-    let hw_status = match constraint_engine::hw_status_for_target(&project.target, &resolved_scene) {
+    let hw_status = match constraint_engine::hw_status_for_target(&project.target, &resolved_scene)
+    {
         Ok(status) => status,
         Err(error) => {
             return GenerateResult {
@@ -194,17 +210,35 @@ fn generate_c_code(project_dir: String) -> GenerateResult {
     let errors = hw_status.errors;
     let warnings = hw_status.warnings;
     if !errors.is_empty() {
-        return GenerateResult { ok: false, main_c: String::new(), resources_res: String::new(), errors, warnings };
+        return GenerateResult {
+            ok: false,
+            main_c: String::new(),
+            resources_res: String::new(),
+            errors,
+            warnings,
+        };
     }
 
     let ast = generate_ast(&project, &resolved_scene);
     let collision_data = resolved_scene.collision_map.as_ref().map(|m| m.normalize());
     let collision_slice = collision_data.as_deref();
     let (main_c, resources_res) = match project.target.as_str() {
-        "snes" => { let o = emit_snes_with_collision(&ast, &project.name, collision_slice); (o.main_c, o.resources_res) }
-        _ => { let o = emit_sgdk_with_collision(&ast, &project.name, collision_slice); (o.main_c, o.resources_res) }
+        "snes" => {
+            let o = emit_snes_with_collision(&ast, &project.name, collision_slice);
+            (o.main_c, o.resources_res)
+        }
+        _ => {
+            let o = emit_sgdk_with_collision(&ast, &project.name, collision_slice);
+            (o.main_c, o.resources_res)
+        }
     };
-    GenerateResult { ok: true, main_c, resources_res, errors: vec![], warnings }
+    GenerateResult {
+        ok: true,
+        main_c,
+        resources_res,
+        errors: vec![],
+        warnings,
+    }
 }
 
 #[tauri::command]
@@ -253,13 +287,15 @@ fn get_hw_status(project_dir: String) -> HwStatus {
 
 /// Carrega uma ROM .md no emulador e inicia o modo simulado/real.
 #[tauri::command]
-fn emulator_load_rom(
-    rom_path: String,
-    emu: State<EmulatorCoreState>,
-) -> EmulatorCommandResult {
+fn emulator_load_rom(rom_path: String, emu: State<EmulatorCoreState>) -> EmulatorCommandResult {
     let mut core = match emu.0.lock() {
         Ok(c) => c,
-        Err(e) => return EmulatorCommandResult { ok: false, message: e.to_string() },
+        Err(e) => {
+            return EmulatorCommandResult {
+                ok: false,
+                message: e.to_string(),
+            }
+        }
     };
 
     match core.load_rom(Path::new(&rom_path)) {
@@ -272,24 +308,32 @@ fn emulator_load_rom(
                 _ => format!("ROM carregada: {}", rom_path),
             },
         },
-        Err(e) => EmulatorCommandResult { ok: false, message: e },
+        Err(e) => EmulatorCommandResult {
+            ok: false,
+            message: e,
+        },
     }
 }
 
 /// Executa um frame do emulador e emite o resultado via evento `emulator://frame`.
 /// O frontend chama este comando a cada ~16ms (60fps) via `setInterval`.
 #[tauri::command]
-fn emulator_run_frame(
-    app: AppHandle,
-    emu: State<EmulatorCoreState>,
-) -> EmulatorCommandResult {
+fn emulator_run_frame(app: AppHandle, emu: State<EmulatorCoreState>) -> EmulatorCommandResult {
     let mut core = match emu.0.lock() {
         Ok(c) => c,
-        Err(e) => return EmulatorCommandResult { ok: false, message: e.to_string() },
+        Err(e) => {
+            return EmulatorCommandResult {
+                ok: false,
+                message: e.to_string(),
+            }
+        }
     };
 
     if let Err(e) = core.run_frame() {
-        return EmulatorCommandResult { ok: false, message: e };
+        return EmulatorCommandResult {
+            ok: false,
+            message: e,
+        };
     }
 
     if let Err(error) = emit_emulator_frame_events(&app, &mut core) {
@@ -299,7 +343,10 @@ fn emulator_run_frame(
         };
     }
 
-    EmulatorCommandResult { ok: true, message: String::new() }
+    EmulatorCommandResult {
+        ok: true,
+        message: String::new(),
+    }
 }
 
 trait EmulatorEventSink {
@@ -344,7 +391,12 @@ fn emit_emulator_frame_events<S: EmulatorEventSink>(
 fn emulator_save_state(emu: State<EmulatorCoreState>) -> EmulatorCommandResult {
     let mut core = match emu.0.lock() {
         Ok(c) => c,
-        Err(e) => return EmulatorCommandResult { ok: false, message: e.to_string() },
+        Err(e) => {
+            return EmulatorCommandResult {
+                ok: false,
+                message: e.to_string(),
+            }
+        }
     };
 
     match core.save_state() {
@@ -352,7 +404,10 @@ fn emulator_save_state(emu: State<EmulatorCoreState>) -> EmulatorCommandResult {
             ok: true,
             message: format!("Save state salvo ({} bytes).", size),
         },
-        Err(error) => EmulatorCommandResult { ok: false, message: error },
+        Err(error) => EmulatorCommandResult {
+            ok: false,
+            message: error,
+        },
     }
 }
 
@@ -360,7 +415,12 @@ fn emulator_save_state(emu: State<EmulatorCoreState>) -> EmulatorCommandResult {
 fn emulator_load_state(emu: State<EmulatorCoreState>) -> EmulatorCommandResult {
     let mut core = match emu.0.lock() {
         Ok(c) => c,
-        Err(e) => return EmulatorCommandResult { ok: false, message: e.to_string() },
+        Err(e) => {
+            return EmulatorCommandResult {
+                ok: false,
+                message: e.to_string(),
+            }
+        }
     };
 
     match core.load_state() {
@@ -368,7 +428,10 @@ fn emulator_load_state(emu: State<EmulatorCoreState>) -> EmulatorCommandResult {
             ok: true,
             message: "Save state restaurado.".to_string(),
         },
-        Err(error) => EmulatorCommandResult { ok: false, message: error },
+        Err(error) => EmulatorCommandResult {
+            ok: false,
+            message: error,
+        },
     }
 }
 
@@ -376,7 +439,12 @@ fn emulator_load_state(emu: State<EmulatorCoreState>) -> EmulatorCommandResult {
 fn emulator_rewind_step(emu: State<EmulatorCoreState>) -> EmulatorCommandResult {
     let mut core = match emu.0.lock() {
         Ok(c) => c,
-        Err(e) => return EmulatorCommandResult { ok: false, message: e.to_string() },
+        Err(e) => {
+            return EmulatorCommandResult {
+                ok: false,
+                message: e.to_string(),
+            }
+        }
     };
 
     match core.rewind_step() {
@@ -487,7 +555,11 @@ fn emulator_stop_recording(
     if let Err(error) = fs::write(&replay_path, replay_bytes) {
         return ReplayCommandResult {
             ok: false,
-            message: format!("Falha ao gravar replay '{}': {}", replay_path.display(), error),
+            message: format!(
+                "Falha ao gravar replay '{}': {}",
+                replay_path.display(),
+                error
+            ),
             replay_path: String::new(),
             frames_recorded: 0,
             framebuffer_match: None,
@@ -601,12 +673,23 @@ fn emulator_send_input(
 ) -> EmulatorCommandResult {
     let core = match emu.0.lock() {
         Ok(c) => c,
-        Err(e) => return EmulatorCommandResult { ok: false, message: e.to_string() },
+        Err(e) => {
+            return EmulatorCommandResult {
+                ok: false,
+                message: e.to_string(),
+            }
+        }
     };
 
     match core.set_joypad(joypad) {
-        Ok(()) => EmulatorCommandResult { ok: true, message: String::new() },
-        Err(e) => EmulatorCommandResult { ok: false, message: e },
+        Ok(()) => EmulatorCommandResult {
+            ok: true,
+            message: String::new(),
+        },
+        Err(e) => EmulatorCommandResult {
+            ok: false,
+            message: e,
+        },
     }
 }
 
@@ -615,34 +698,37 @@ fn emulator_send_input(
 fn emulator_stop(emu: State<EmulatorCoreState>) -> EmulatorCommandResult {
     let mut core = match emu.0.lock() {
         Ok(c) => c,
-        Err(e) => return EmulatorCommandResult { ok: false, message: e.to_string() },
+        Err(e) => {
+            return EmulatorCommandResult {
+                ok: false,
+                message: e.to_string(),
+            }
+        }
     };
 
     match core.stop() {
-        Ok(()) => EmulatorCommandResult { ok: true, message: "Emulador parado.".into() },
-        Err(e) => EmulatorCommandResult { ok: false, message: e },
+        Ok(()) => EmulatorCommandResult {
+            ok: true,
+            message: "Emulador parado.".into(),
+        },
+        Err(e) => EmulatorCommandResult {
+            ok: false,
+            message: e,
+        },
     }
 }
 
 // ── Fase 4: Tools commands ────────────────────────────────────────────────────
 
-use tools::patch_studio::{
-    PatchResult,
-    apply_bps_file,
-    apply_ips_file,
-    create_bps_file_compliance,
-    create_ips_file_compliance,
-};
-use tools::deep_profiler::{ProfileReport, profile_rom};
-use tools::asset_extractor::{BppMode, ExtractionResult, extract_assets};
+use tools::asset_extractor::{extract_assets, BppMode, ExtractionResult};
+use tools::deep_profiler::{profile_rom, ProfileReport};
 use tools::dependency_manager::{
-    DependencyInstallResult,
-    DependencyLogLine,
-    DependencyStatusReport,
-    RomDependencyResult,
-    dependency_for_rom_path,
-    dependency_status_report,
-    install_dependency,
+    dependency_for_rom_path, dependency_status_report, install_dependency, DependencyInstallResult,
+    DependencyLogLine, DependencyStatusReport, RomDependencyResult,
+};
+use tools::patch_studio::{
+    apply_bps_file, apply_ips_file, create_bps_file_compliance, create_ips_file_compliance,
+    PatchResult,
 };
 use tools::reverse_explorer::ReverseExplorerResult;
 
@@ -702,7 +788,10 @@ fn patch_create_ips(
         let _ = fs::remove_file(&patch_path);
         return PatchResult {
             ok: false,
-            message: format!("Falha ao registrar auditoria do patch. Arquivo removido: {}", error),
+            message: format!(
+                "Falha ao registrar auditoria do patch. Arquivo removido: {}",
+                error
+            ),
             bytes_changed: 0,
             patch_hash: None,
         };
@@ -713,7 +802,11 @@ fn patch_create_ips(
 
 #[tauri::command]
 fn patch_apply_ips(rom_path: String, patch_path: String, output_path: String) -> PatchResult {
-    apply_ips_file(Path::new(&rom_path), Path::new(&patch_path), Path::new(&output_path))
+    apply_ips_file(
+        Path::new(&rom_path),
+        Path::new(&patch_path),
+        Path::new(&output_path),
+    )
 }
 
 #[tauri::command]
@@ -741,7 +834,10 @@ fn patch_create_bps(
         let _ = fs::remove_file(&patch_path);
         return PatchResult {
             ok: false,
-            message: format!("Falha ao registrar auditoria do patch. Arquivo removido: {}", error),
+            message: format!(
+                "Falha ao registrar auditoria do patch. Arquivo removido: {}",
+                error
+            ),
             bytes_changed: 0,
             patch_hash: None,
         };
@@ -752,7 +848,11 @@ fn patch_create_bps(
 
 #[tauri::command]
 fn patch_apply_bps(rom_path: String, patch_path: String, output_path: String) -> PatchResult {
-    apply_bps_file(Path::new(&rom_path), Path::new(&patch_path), Path::new(&output_path))
+    apply_bps_file(
+        Path::new(&rom_path),
+        Path::new(&patch_path),
+        Path::new(&output_path),
+    )
 }
 
 #[tauri::command]
@@ -805,6 +905,178 @@ fn list_project_assets(project_dir: String) -> Result<Vec<ProjectAssetEntry>, St
     Ok(entries)
 }
 
+const LEGACY_TEXT_PREVIEW_LIMIT: usize = 128 * 1024;
+
+fn normalize_legacy_relative_path(relative_path: &str) -> Result<PathBuf, String> {
+    let trimmed = relative_path.trim();
+    if trimmed.is_empty() {
+        return Err("Caminho legado vazio.".to_string());
+    }
+
+    let path = Path::new(trimmed);
+    if path.is_absolute() {
+        return Err(format!(
+            "Caminho legado '{}' deve permanecer relativo ao projeto host.",
+            relative_path
+        ));
+    }
+
+    if path.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
+        return Err(format!(
+            "Caminho legado '{}' nao pode escapar do projeto host.",
+            relative_path
+        ));
+    }
+
+    let normalized = path
+        .components()
+        .filter_map(|component| match component {
+            Component::CurDir => None,
+            Component::Normal(segment) => Some(segment),
+            _ => None,
+        })
+        .collect::<PathBuf>();
+
+    if normalized.as_os_str().is_empty() {
+        return Err(format!(
+            "Caminho legado '{}' nao pode resolver para a raiz do host.",
+            relative_path
+        ));
+    }
+
+    Ok(normalized)
+}
+
+fn is_legacy_previewable_text_file(path: &Path) -> bool {
+    let lower_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if lower_name == "makefile" {
+        return true;
+    }
+
+    matches!(
+        path.extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "c" | "h" | "res" | "s" | "asm" | "inc" | "txt" | "md" | "mak" | "cfg" | "ini"
+    )
+}
+
+fn legacy_index_paths(index: &LegacySgdkIndex) -> HashSet<&str> {
+    index
+        .source_files
+        .iter()
+        .chain(index.header_files.iter())
+        .chain(index.manifest_files.iter())
+        .chain(index.resource_files.iter())
+        .chain(index.output_files.iter())
+        .map(String::as_str)
+        .collect()
+}
+
+fn load_legacy_host_root(project_dir: &Path) -> Result<PathBuf, String> {
+    let project = load_project(project_dir).map_err(|error| error.to_string())?;
+    let metadata = project
+        .template_metadata
+        .as_ref()
+        .ok_or_else(|| "Projeto atual nao possui metadata de origem externa.".to_string())?;
+
+    if metadata.source_kind != "external_sgdk" {
+        return Err("Projeto atual nao esta em modo SGDK legado.".to_string());
+    }
+
+    let source_path = metadata.source_path.trim();
+    if source_path.is_empty() {
+        return Err("Projeto SGDK legado sem caminho raiz do host.".to_string());
+    }
+
+    Ok(PathBuf::from(source_path))
+}
+
+#[tauri::command]
+fn read_legacy_project_file(
+    project_dir: String,
+    relative_path: String,
+) -> Result<LegacyProjectFilePreview, String> {
+    let project_dir = project_dir.trim();
+    if project_dir.is_empty() {
+        return Err("Abra um projeto antes de consultar arquivos legados.".to_string());
+    }
+
+    let overlay_dir = PathBuf::from(project_dir);
+    let host_root = load_legacy_host_root(&overlay_dir)?;
+    let legacy_index = load_legacy_sgdk_index(&overlay_dir)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "Indice SGDK legado indisponivel para este projeto.".to_string())?;
+    let relative_path = normalize_legacy_relative_path(&relative_path)?;
+    let normalized_path = relative_path.to_string_lossy().replace('\\', "/");
+
+    if !legacy_index_paths(&legacy_index).contains(normalized_path.as_str()) {
+        return Err(format!(
+            "Arquivo legado '{}' nao faz parte do indice adotado pelo projeto.",
+            normalized_path
+        ));
+    }
+
+    let absolute_path = host_root.join(&relative_path);
+    if !absolute_path.is_file() {
+        return Err(format!(
+            "Arquivo legado '{}' nao encontrado no host '{}'.",
+            normalized_path,
+            host_root.display()
+        ));
+    }
+
+    if !is_legacy_previewable_text_file(&absolute_path) {
+        return Ok(LegacyProjectFilePreview {
+            relative_path: normalized_path,
+            absolute_path: absolute_path.to_string_lossy().to_string(),
+            content: "Visualizacao inline disponivel apenas para arquivos texto do host SGDK.".to_string(),
+            previewable: false,
+            readonly: true,
+            note: "Somente leitura. Arquivos binarios permanecem no host original.".to_string(),
+        });
+    }
+
+    let bytes = fs::read(&absolute_path).map_err(|error| {
+        format!(
+            "Falha ao ler arquivo legado '{}': {}",
+            absolute_path.display(),
+            error
+        )
+    })?;
+    let preview_len = bytes.len().min(LEGACY_TEXT_PREVIEW_LIMIT);
+    let mut content = String::from_utf8_lossy(&bytes[..preview_len]).into_owned();
+    let note = if bytes.len() > LEGACY_TEXT_PREVIEW_LIMIT {
+        content.push_str("\n\n/* preview truncado pelo RetroDev Studio */\n");
+        format!(
+            "Preview truncado em {} KB para manter a UI responsiva.",
+            LEGACY_TEXT_PREVIEW_LIMIT / 1024
+        )
+    } else {
+        "Somente leitura. Edite no host original se quiser preservar o fluxo legado.".to_string()
+    };
+
+    Ok(LegacyProjectFilePreview {
+        relative_path: normalized_path,
+        absolute_path: absolute_path.to_string_lossy().to_string(),
+        content,
+        previewable: true,
+        readonly: true,
+        note,
+    })
+}
+
 fn collect_project_assets(
     root: &Path,
     current: &Path,
@@ -813,8 +1085,9 @@ fn collect_project_assets(
     for dir_entry in fs::read_dir(current)
         .map_err(|error| format!("Falha ao listar '{}': {}", current.display(), error))?
     {
-        let dir_entry = dir_entry
-            .map_err(|error| format!("Falha ao ler entrada de '{}': {}", current.display(), error))?;
+        let dir_entry = dir_entry.map_err(|error| {
+            format!("Falha ao ler entrada de '{}': {}", current.display(), error)
+        })?;
         let path = dir_entry.path();
         let file_type = dir_entry
             .file_type()
@@ -853,8 +1126,9 @@ fn collect_asset_fingerprints(
     for dir_entry in fs::read_dir(current)
         .map_err(|error| format!("Falha ao listar '{}': {}", current.display(), error))?
     {
-        let dir_entry = dir_entry
-            .map_err(|error| format!("Falha ao ler entrada de '{}': {}", current.display(), error))?;
+        let dir_entry = dir_entry.map_err(|error| {
+            format!("Falha ao ler entrada de '{}': {}", current.display(), error)
+        })?;
         let path = dir_entry.path();
         let file_type = dir_entry
             .file_type()
@@ -869,9 +1143,9 @@ fn collect_asset_fingerprints(
             continue;
         }
 
-        let metadata = dir_entry
-            .metadata()
-            .map_err(|error| format!("Falha ao ler metadados de '{}': {}", path.display(), error))?;
+        let metadata = dir_entry.metadata().map_err(|error| {
+            format!("Falha ao ler metadados de '{}': {}", path.display(), error)
+        })?;
         let modified_ms = metadata
             .modified()
             .ok()
@@ -896,7 +1170,9 @@ fn collect_asset_fingerprints(
     Ok(())
 }
 
-fn snapshot_project_assets(project_dir: &Path) -> Result<HashMap<String, AssetFingerprint>, String> {
+fn snapshot_project_assets(
+    project_dir: &Path,
+) -> Result<HashMap<String, AssetFingerprint>, String> {
     let assets_dir = project_dir.join("assets");
     let mut entries = HashMap::new();
     if !assets_dir.exists() {
@@ -1008,11 +1284,12 @@ fn third_party_detect_rom_dependency(rom_path: String) -> RomDependencyResult {
 pub struct SceneDataResult {
     pub ok: bool,
     pub error: String,
-    pub scene_json: String,   // JSON da cena serializado
+    pub scene_json: String, // JSON da cena serializado
     pub project_name: String,
     pub target: String,
     pub scene_path: String,
     pub source_kind: String,
+    pub legacy_sgdk_index: Option<LegacySgdkIndex>,
 }
 
 #[derive(serde::Serialize)]
@@ -1044,6 +1321,7 @@ fn switch_scene(project_dir: String, scene_path: String) -> SceneDataResult {
             target: String::new(),
             scene_path,
             source_kind: String::new(),
+            legacy_sgdk_index: None,
         };
     }
     load_scene_result(Path::new(&project_dir), Some(scene_path.as_str()))
@@ -1060,20 +1338,42 @@ fn load_scene_result(project_dir: &Path, scene_path: Option<&str>) -> SceneDataR
             target: String::new(),
             scene_path: String::new(),
             source_kind: String::new(),
+            legacy_sgdk_index: None,
         };
     }
 
     let dir = PathBuf::from(project_dir);
     let project = match load_project(&dir) {
         Ok(p) => p,
-        Err(e) => return SceneDataResult { ok: false, error: e.to_string(),
-            scene_json: String::new(), project_name: String::new(), target: String::new(), scene_path: String::new(), source_kind: String::new() },
+        Err(e) => {
+            return SceneDataResult {
+                ok: false,
+                error: e.to_string(),
+                scene_json: String::new(),
+                project_name: String::new(),
+                target: String::new(),
+                scene_path: String::new(),
+                source_kind: String::new(),
+                legacy_sgdk_index: None,
+            }
+        }
     };
     let source_kind = project
         .template_metadata
         .as_ref()
         .map(|meta| meta.source_kind.clone())
         .unwrap_or_default();
+    let legacy_sgdk_index = match load_legacy_sgdk_index(&dir) {
+        Ok(index) => index,
+        Err(error) => {
+            eprintln!(
+                "[get_scene_data] aviso: indice SGDK legado indisponivel em '{}': {}",
+                dir.display(),
+                error
+            );
+            None
+        }
+    };
     let resolved_scene_path = scene_path
         .map(str::trim)
         .filter(|path| !path.is_empty())
@@ -1081,12 +1381,30 @@ fn load_scene_result(project_dir: &Path, scene_path: Option<&str>) -> SceneDataR
         .to_string();
     let scene = match load_scene(&dir, &resolved_scene_path) {
         Ok(s) => s,
-        Err(e) => return SceneDataResult { ok: false, error: e.to_string(),
-            scene_json: String::new(), project_name: project.name, target: project.target, scene_path: resolved_scene_path, source_kind },
+        Err(e) => {
+            return SceneDataResult {
+                ok: false,
+                error: e.to_string(),
+                scene_json: String::new(),
+                project_name: project.name,
+                target: project.target,
+                scene_path: resolved_scene_path,
+                source_kind,
+                legacy_sgdk_index,
+            }
+        }
     };
     let scene_json = serde_json::to_string_pretty(&scene).unwrap_or_default();
-    SceneDataResult { ok: true, error: String::new(), scene_json,
-        project_name: project.name, target: project.target, scene_path: resolved_scene_path, source_kind }
+    SceneDataResult {
+        ok: true,
+        error: String::new(),
+        scene_json,
+        project_name: project.name,
+        target: project.target,
+        scene_path: resolved_scene_path,
+        source_kind,
+        legacy_sgdk_index,
+    }
 }
 
 fn resolve_scene_prefabs_result(project_dir: &Path, scene_json: &str) -> ResolveSceneResult {
@@ -1150,38 +1468,52 @@ fn save_scene_data(
     resolved_scene_json: Option<String>,
 ) -> EmulatorCommandResult {
     if project_dir.is_empty() {
-        return EmulatorCommandResult { ok: false, message: "Nenhum projeto aberto.".into() };
+        return EmulatorCommandResult {
+            ok: false,
+            message: "Nenhum projeto aberto.".into(),
+        };
     }
     let dir = PathBuf::from(&project_dir);
     let project = match load_project(&dir) {
         Ok(p) => p,
-        Err(e) => return EmulatorCommandResult { ok: false, message: e.to_string() },
+        Err(e) => {
+            return EmulatorCommandResult {
+                ok: false,
+                message: e.to_string(),
+            }
+        }
     };
     // Valida que é JSON válido antes de salvar
     if serde_json::from_str::<serde_json::Value>(&scene_json).is_err() {
-        return EmulatorCommandResult { ok: false, message: "JSON de cena inválido.".into() };
+        return EmulatorCommandResult {
+            ok: false,
+            message: "JSON de cena inválido.".into(),
+        };
     }
     let mut scene = match serde_json::from_str::<ugdm::entities::Scene>(&scene_json) {
         Ok(scene) => scene,
-        Err(e) => return EmulatorCommandResult {
-            ok: false,
-            message: format!("JSON de cena invalido: {}", e),
-        },
+        Err(e) => {
+            return EmulatorCommandResult {
+                ok: false,
+                message: format!("JSON de cena invalido: {}", e),
+            }
+        }
     };
     if let Some(resolved_scene_json) = resolved_scene_json
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        let resolved_scene = match serde_json::from_str::<ugdm::entities::Scene>(resolved_scene_json) {
-            Ok(scene) => scene,
-            Err(error) => {
-                return EmulatorCommandResult {
-                    ok: false,
-                    message: format!("JSON de cena resolvida invalido: {}", error),
+        let resolved_scene =
+            match serde_json::from_str::<ugdm::entities::Scene>(resolved_scene_json) {
+                Ok(scene) => scene,
+                Err(error) => {
+                    return EmulatorCommandResult {
+                        ok: false,
+                        message: format!("JSON de cena resolvida invalido: {}", error),
+                    }
                 }
-            }
-        };
+            };
 
         if let Err(error) = sync_external_graph_refs(&dir, &mut scene, &resolved_scene) {
             return EmulatorCommandResult {
@@ -1196,8 +1528,14 @@ fn save_scene_data(
         .filter(|path| !path.is_empty())
         .unwrap_or(project.entry_scene.as_str());
     match save_scene(&dir, target_scene_path, &scene) {
-        Ok(()) => EmulatorCommandResult { ok: true, message: "Cena salva.".into() },
-        Err(e) => EmulatorCommandResult { ok: false, message: e.to_string() },
+        Ok(()) => EmulatorCommandResult {
+            ok: true,
+            message: "Cena salva.".into(),
+        },
+        Err(e) => EmulatorCommandResult {
+            ok: false,
+            message: e.to_string(),
+        },
     }
 }
 
@@ -1205,12 +1543,21 @@ fn save_scene_data(
 #[tauri::command]
 fn set_project_target(project_dir: String, target: String) -> EmulatorCommandResult {
     if project_dir.is_empty() {
-        return EmulatorCommandResult { ok: false, message: "Nenhum projeto aberto.".into() };
+        return EmulatorCommandResult {
+            ok: false,
+            message: "Nenhum projeto aberto.".into(),
+        };
     }
     let dir = PathBuf::from(&project_dir);
     match update_project_target(&dir, &target) {
-        Ok(project) => EmulatorCommandResult { ok: true, message: project.target },
-        Err(e) => EmulatorCommandResult { ok: false, message: e.to_string() },
+        Ok(project) => EmulatorCommandResult {
+            ok: true,
+            message: project.target,
+        },
+        Err(e) => EmulatorCommandResult {
+            ok: false,
+            message: e.to_string(),
+        },
     }
 }
 
@@ -1221,20 +1568,160 @@ pub struct OpenProjectResult {
     pub selected: bool,
     pub path: String,
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub base_dir: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
+}
+
+struct ResolvedBaseDir {
+    path: PathBuf,
+    notice: Option<String>,
 }
 
 fn safe_project_dir_name(project_name: &str) -> String {
     project_name
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
+}
+
+fn empty_open_project_result() -> OpenProjectResult {
+    OpenProjectResult {
+        selected: false,
+        path: String::new(),
+        name: String::new(),
+        base_dir: None,
+        notice: None,
+    }
+}
+
+fn automatic_project_base_dir_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Some(user_profile) = std::env::var_os("USERPROFILE").map(PathBuf::from) {
+        candidates.push(user_profile.join("Documents").join("RetroDevProjects"));
+        candidates.push(
+            user_profile
+                .join("OneDrive")
+                .join("Documents")
+                .join("RetroDevProjects"),
+        );
+    }
+
+    if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
+        candidates.push(home.join("Documents").join("RetroDevProjects"));
+        candidates.push(home.join("RetroDevProjects"));
+    }
+
+    candidates.push(std::env::temp_dir().join("RetroDevProjects"));
+    candidates.dedup();
+    candidates
+}
+
+fn ensure_base_dir_writable(base_dir: &Path) -> Result<(), String> {
+    fs::create_dir_all(base_dir).map_err(|error| {
+        format!(
+            "Nao foi possivel preparar '{}': {}",
+            base_dir.display(),
+            error
+        )
+    })?;
+
+    let probe_path = base_dir.join(format!(
+        ".rds-probe-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| format!("Relogio do sistema invalido: {}", error))?
+            .as_nanos()
+    ));
+    fs::write(&probe_path, b"probe").map_err(|error| {
+        format!(
+            "Nao foi possivel validar escrita em '{}': {}",
+            base_dir.display(),
+            error
+        )
+    })?;
+    let _ = fs::remove_file(probe_path);
+    Ok(())
+}
+
+fn resolve_project_base_dir_with_candidates(
+    requested_base_dir: Option<&Path>,
+    automatic_candidates: &[PathBuf],
+) -> Result<ResolvedBaseDir, String> {
+    if let Some(requested_base_dir) = requested_base_dir
+        .map(Path::to_path_buf)
+        .filter(|path| !path.as_os_str().is_empty())
+    {
+        if ensure_base_dir_writable(&requested_base_dir).is_ok() {
+            return Ok(ResolvedBaseDir {
+                path: requested_base_dir,
+                notice: None,
+            });
+        }
+
+        for candidate in automatic_candidates {
+            if ensure_base_dir_writable(candidate).is_ok() {
+                return Ok(ResolvedBaseDir {
+                    path: candidate.clone(),
+                    notice: Some(format!(
+                        "A pasta '{}' nao estava pronta para escrita. O projeto foi criado em '{}' para manter o fluxo.",
+                        requested_base_dir.display(),
+                        candidate.display()
+                    )),
+                });
+            }
+        }
+
+        return Err(format!(
+            "Nao foi possivel usar '{}' nem localizar uma pasta automatica segura para criar o projeto.",
+            requested_base_dir.display()
+        ));
+    }
+
+    for candidate in automatic_candidates {
+        if ensure_base_dir_writable(candidate).is_ok() {
+            return Ok(ResolvedBaseDir {
+                path: candidate.clone(),
+                notice: Some(format!(
+                    "Pasta base nao informada. Usando '{}' automaticamente.",
+                    candidate.display()
+                )),
+            });
+        }
+    }
+
+    Err("Nao foi possivel localizar uma pasta automatica segura para criar o projeto.".into())
+}
+
+fn resolve_project_base_dir(requested_base_dir: Option<&Path>) -> Result<ResolvedBaseDir, String> {
+    let candidates = automatic_project_base_dir_candidates();
+    resolve_project_base_dir_with_candidates(requested_base_dir, &candidates)
 }
 
 fn ensure_project_dir_available(project_dir: &Path) -> Result<(), String> {
     if project_dir.exists() {
-        let mut entries = fs::read_dir(project_dir)
-            .map_err(|error| format!("Nao foi possivel inspecionar '{}': {}", project_dir.display(), error))?;
-        if entries.next().transpose().map_err(|error| error.to_string())?.is_some() {
+        let mut entries = fs::read_dir(project_dir).map_err(|error| {
+            format!(
+                "Nao foi possivel inspecionar '{}': {}",
+                project_dir.display(),
+                error
+            )
+        })?;
+        if entries
+            .next()
+            .transpose()
+            .map_err(|error| error.to_string())?
+            .is_some()
+        {
             return Err(format!(
                 "A pasta '{}' ja existe e nao esta vazia.",
                 project_dir.display()
@@ -1263,6 +1750,8 @@ fn create_onboarding_project_at_base_dir(
         selected: true,
         path: project_dir.to_string_lossy().to_string(),
         name: project.name,
+        base_dir: Some(base_dir.to_string_lossy().to_string()),
+        notice: None,
     })
 }
 
@@ -1289,6 +1778,8 @@ fn create_project_from_template_at_base_dir(
         selected: true,
         path: project_dir.to_string_lossy().to_string(),
         name: project.name,
+        base_dir: Some(base_dir.to_string_lossy().to_string()),
+        notice: None,
     })
 }
 
@@ -1311,7 +1802,57 @@ fn import_sgdk_project_at_base_dir(
         selected: true,
         path: project_dir.to_string_lossy().to_string(),
         name: project.name,
+        base_dir: Some(base_dir.to_string_lossy().to_string()),
+        notice: None,
     })
+}
+
+fn resolve_or_wrap_project_dir(
+    selected_dir: &Path,
+    project_name_override: Option<&str>,
+) -> Result<OpenProjectResult, String> {
+    let fallback_name = selected_dir
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "Projeto".to_string());
+
+    if let Ok(project_dir) = discover_project_rds(selected_dir) {
+        let project_name = load_project(&project_dir)
+            .map(|p| p.name)
+            .unwrap_or(fallback_name);
+        return Ok(OpenProjectResult {
+            selected: true,
+            path: project_dir.to_string_lossy().to_string(),
+            name: project_name,
+            base_dir: None,
+            notice: None,
+        });
+    }
+
+    let overlay_dir = wrap_legacy_sgdk_project(selected_dir, project_name_override)
+        .map_err(|error| error.to_string())?;
+    let project = load_project(&overlay_dir).map_err(|error| error.to_string())?;
+    Ok(OpenProjectResult {
+        selected: true,
+        path: overlay_dir.to_string_lossy().to_string(),
+        name: project.name,
+        base_dir: None,
+        notice: Some(format!(
+            "Projeto SGDK legado adotado em modo nao-destrutivo via overlay 'rds/' em '{}'.",
+            overlay_dir.display()
+        )),
+    })
+}
+
+fn attach_base_dir_notice(
+    mut result: OpenProjectResult,
+    resolved_base_dir: ResolvedBaseDir,
+) -> OpenProjectResult {
+    result.base_dir = Some(resolved_base_dir.path.to_string_lossy().to_string());
+    if resolved_base_dir.notice.is_some() {
+        result.notice = resolved_base_dir.notice;
+    }
+    result
 }
 
 /// Abre o diálogo nativo "Selecionar pasta do projeto" e retorna o caminho.
@@ -1321,28 +1862,9 @@ fn import_sgdk_project_at_base_dir(
 fn open_project_dialog(app: AppHandle) -> OpenProjectResult {
     let result = app.dialog().file().blocking_pick_folder();
     match result {
-        Some(path) => {
-            let selected_dir = PathBuf::from(path.to_string());
-            let fallback_name = selected_dir
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| "Projeto".to_string());
-
-            // Discovery: procura project.rds na raiz, rds/ ou subdirs
-            let project_dir = discover_project_rds(&selected_dir)
-                .unwrap_or_else(|_| selected_dir.clone());
-
-            let project_name = load_project(&project_dir)
-                .map(|p| p.name)
-                .unwrap_or_else(|_| fallback_name);
-
-            OpenProjectResult {
-                selected: true,
-                path: project_dir.to_string_lossy().to_string(),
-                name: project_name,
-            }
-        }
-        None => OpenProjectResult { selected: false, path: String::new(), name: String::new() },
+        Some(path) => resolve_or_wrap_project_dir(&PathBuf::from(path.to_string()), None)
+            .unwrap_or_else(|_| empty_open_project_result()),
+        None => empty_open_project_result(),
     }
 }
 
@@ -1354,13 +1876,9 @@ fn new_project_dialog(app: AppHandle, project_name: String) -> OpenProjectResult
         Some(base) => {
             let base_str = base.to_string();
             create_onboarding_project_at_base_dir(Path::new(&base_str), &project_name, "megadrive")
-                .unwrap_or(OpenProjectResult {
-                    selected: false,
-                    path: String::new(),
-                    name: String::new(),
-                })
+                .unwrap_or_else(|_| empty_open_project_result())
         }
-        None => OpenProjectResult { selected: false, path: String::new(), name: String::new() },
+        None => empty_open_project_result(),
     }
 }
 
@@ -1372,11 +1890,16 @@ fn create_onboarding_project(
 ) -> Result<OpenProjectResult, String> {
     let trimmed_name = project_name.trim();
     let trimmed_base_dir = base_dir.trim();
-    if trimmed_name.is_empty() || trimmed_base_dir.is_empty() {
-        return Err("Nome do projeto e pasta base sao obrigatorios.".into());
+    if trimmed_name.is_empty() {
+        return Err("Nome do projeto e obrigatorio.".into());
     }
 
-    create_onboarding_project_at_base_dir(Path::new(trimmed_base_dir), trimmed_name, &target)
+    let resolved_base_dir = resolve_project_base_dir(
+        (!trimmed_base_dir.is_empty()).then(|| Path::new(trimmed_base_dir)),
+    )?;
+    let result =
+        create_onboarding_project_at_base_dir(&resolved_base_dir.path, trimmed_name, &target)?;
+    Ok(attach_base_dir_notice(result, resolved_base_dir))
 }
 
 /// Resolve um diretório de projeto sem depender de diálogo nativo.
@@ -1402,17 +1925,21 @@ fn create_project_from_template(
         .filter(|path| !path.is_empty())
         .map(PathBuf::from);
 
-    if trimmed_name.is_empty() || trimmed_base_dir.is_empty() || trimmed_template_id.is_empty() {
-        return Err("Nome do projeto, pasta base e template sao obrigatorios.".into());
+    if trimmed_name.is_empty() || trimmed_template_id.is_empty() {
+        return Err("Nome do projeto e template sao obrigatorios.".into());
     }
 
-    create_project_from_template_at_base_dir(
-        Path::new(trimmed_base_dir),
+    let resolved_base_dir = resolve_project_base_dir(
+        (!trimmed_base_dir.is_empty()).then(|| Path::new(trimmed_base_dir)),
+    )?;
+    let result = create_project_from_template_at_base_dir(
+        &resolved_base_dir.path,
         trimmed_name,
         &target,
         trimmed_template_id,
         donor_path.as_deref(),
-    )
+    )?;
+    Ok(attach_base_dir_notice(result, resolved_base_dir))
 }
 
 #[tauri::command]
@@ -1425,14 +1952,35 @@ fn import_sgdk_project(
     let trimmed_base_dir = base_dir.trim();
     let trimmed_sgdk_path = sgdk_path.trim();
 
-    if trimmed_name.is_empty() || trimmed_base_dir.is_empty() || trimmed_sgdk_path.is_empty() {
-        return Err("Nome do projeto, pasta base e caminho SGDK sao obrigatorios.".into());
+    if trimmed_name.is_empty() || trimmed_sgdk_path.is_empty() {
+        return Err("Nome do projeto e caminho SGDK sao obrigatorios.".into());
     }
 
-    import_sgdk_project_at_base_dir(
-        Path::new(trimmed_base_dir),
+    let resolved_base_dir = resolve_project_base_dir(
+        (!trimmed_base_dir.is_empty()).then(|| Path::new(trimmed_base_dir)),
+    )?;
+    let result = import_sgdk_project_at_base_dir(
+        &resolved_base_dir.path,
         trimmed_name,
         Path::new(trimmed_sgdk_path),
+    )?;
+    Ok(attach_base_dir_notice(result, resolved_base_dir))
+}
+
+#[tauri::command]
+fn import_legacy_sgdk_project(
+    project_name: String,
+    sgdk_path: String,
+) -> Result<OpenProjectResult, String> {
+    let trimmed_name = project_name.trim();
+    let trimmed_sgdk_path = sgdk_path.trim();
+    if trimmed_sgdk_path.is_empty() {
+        return Err("Caminho do projeto SGDK e obrigatorio.".into());
+    }
+
+    resolve_or_wrap_project_dir(
+        Path::new(trimmed_sgdk_path),
+        (!trimmed_name.is_empty()).then_some(trimmed_name),
     )
 }
 
@@ -1440,22 +1988,11 @@ fn import_sgdk_project(
 fn open_project_path(project_dir: String) -> OpenProjectResult {
     let trimmed = project_dir.trim();
     if trimmed.is_empty() {
-        return OpenProjectResult { selected: false, path: String::new(), name: String::new() };
+        return empty_open_project_result();
     }
 
-    let dir = PathBuf::from(trimmed);
-    let project = match load_project(&dir) {
-        Ok(project) => project,
-        Err(_) => {
-            return OpenProjectResult { selected: false, path: String::new(), name: String::new() };
-        }
-    };
-
-    OpenProjectResult {
-        selected: true,
-        path: dir.to_string_lossy().to_string(),
-        name: project.name,
-    }
+    resolve_or_wrap_project_dir(&PathBuf::from(trimmed), None)
+        .unwrap_or_else(|_| empty_open_project_result())
 }
 
 // ── App Builder ───────────────────────────────────────────────────────────────
@@ -1506,6 +2043,7 @@ pub fn run() {
             list_project_templates,
             create_project_from_template,
             import_sgdk_project,
+            import_legacy_sgdk_project,
             // Fase 4: Tools
             patch_create_ips,
             patch_apply_ips,
@@ -1515,11 +2053,13 @@ pub fn run() {
             assets_extract,
             reverse_explorer_read,
             list_project_assets,
+            read_legacy_project_file,
             third_party_get_status,
             third_party_install,
             third_party_detect_rom_dependency,
             // Photo2SGDK
             tools::photo2sgdk::art_process_palette,
+            tools::photo2sgdk::import_art_asset,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -1583,8 +2123,11 @@ mod tests {
             .save(dir.join("res").join("images").join("level.png"))
             .expect("write level png");
         if with_jump {
-            fs::write(dir.join("res").join("sound").join("jump.wav"), minimal_wav_bytes())
-                .expect("write jump asset");
+            fs::write(
+                dir.join("res").join("sound").join("jump.wav"),
+                minimal_wav_bytes(),
+            )
+            .expect("write jump asset");
         }
     }
 
@@ -1603,12 +2146,17 @@ mod tests {
         image::RgbaImage::from_pixel(128, 128, image::Rgba([32, 64, 180, 255]))
             .save(dir.join("res").join("maps").join("stage.png"))
             .expect("write stage image");
-        fs::write(dir.join("res").join("sound").join("jump.wav"), minimal_wav_bytes())
-            .expect("write wav");
-        fs::write(dir.join("res").join("sound").join("theme.xgm"), b"xgm-data")
-            .expect("write xgm");
-        fs::write(dir.join("res").join("sound").join("forbidden.vgm"), b"vgm-data")
-            .expect("write vgm");
+        fs::write(
+            dir.join("res").join("sound").join("jump.wav"),
+            minimal_wav_bytes(),
+        )
+        .expect("write wav");
+        fs::write(dir.join("res").join("sound").join("theme.xgm"), b"xgm-data").expect("write xgm");
+        fs::write(
+            dir.join("res").join("sound").join("forbidden.vgm"),
+            b"vgm-data",
+        )
+        .expect("write vgm");
         fs::write(
             dir.join("res").join("resources.res"),
             [
@@ -1630,8 +2178,8 @@ mod tests {
 
     fn minimal_wav_bytes() -> Vec<u8> {
         vec![
-            82, 73, 70, 70, 36, 0, 0, 0, 87, 65, 86, 69, 102, 109, 116, 32, 16, 0, 0, 0, 1, 0,
-            1, 0, 68, 172, 0, 0, 68, 172, 0, 0, 1, 0, 8, 0, 100, 97, 116, 97, 0, 0, 0, 0,
+            82, 73, 70, 70, 36, 0, 0, 0, 87, 65, 86, 69, 102, 109, 116, 32, 16, 0, 0, 0, 1, 0, 1,
+            0, 68, 172, 0, 0, 68, 172, 0, 0, 1, 0, 8, 0, 100, 97, 116, 97, 0, 0, 0, 0,
         ]
     }
 
@@ -2032,7 +2580,9 @@ pub extern "C" fn retro_run() {
         let rom_path = write_test_rom(&dir, "audio_event", "gen");
 
         let mut emulator = EmulatorCore::new(Some(&core_path));
-        emulator.load_rom(&rom_path).expect("load rom into mock core");
+        emulator
+            .load_rom(&rom_path)
+            .expect("load rom into mock core");
         emulator.run_frame().expect("run frame");
 
         #[derive(Default)]
@@ -2079,20 +2629,12 @@ pub extern "C" fn retro_run() {
                 samples: vec![0, 0, 1, -1],
             }
         );
-        assert_eq!(
-            sink.frames
-                .lock()
-                .expect("lock frame events")
-                .len(),
-            1
-        );
-        assert!(
-            emulator
-                .take_audio_samples()
-                .expect("audio buffer should be drained")
-                .1
-                .is_empty()
-        );
+        assert_eq!(sink.frames.lock().expect("lock frame events").len(), 1);
+        assert!(emulator
+            .take_audio_samples()
+            .expect("audio buffer should be drained")
+            .1
+            .is_empty());
 
         emulator.stop().expect("stop emulator");
         let _ = fs::remove_dir_all(dir);
@@ -2107,28 +2649,17 @@ pub extern "C" fn retro_run() {
 
         let _serial = test_serial_guard();
 
-        for dependency_id in [
-            "sgdk",
-            "pvsneslib",
-            "libretro_megadrive",
-            "libretro_snes",
-        ] {
+        for dependency_id in ["sgdk", "pvsneslib", "libretro_megadrive", "libretro_snes"] {
             let result = install_dependency(dependency_id, |_| {});
             assert!(
                 result.ok,
                 "failed to install {}: {}",
-                dependency_id,
-                result.message
+                dependency_id, result.message
             );
         }
 
         let status_report = dependency_status_report();
-        for dependency_id in [
-            "sgdk",
-            "pvsneslib",
-            "libretro_megadrive",
-            "libretro_snes",
-        ] {
+        for dependency_id in ["sgdk", "pvsneslib", "libretro_megadrive", "libretro_snes"] {
             let item = status_report
                 .items
                 .iter()
@@ -2137,8 +2668,7 @@ pub extern "C" fn retro_run() {
             assert!(
                 item.installed,
                 "dependency {} still not installed: {:?}",
-                dependency_id,
-                item.issues
+                dependency_id, item.issues
             );
         }
 
@@ -2161,8 +2691,7 @@ pub extern "C" fn retro_run() {
             assert!(
                 build_result.ok,
                 "{} build failed: {:?}",
-                target,
-                build_result.log
+                target, build_result.log
             );
 
             let mut emulator = EmulatorCore::new(None);
@@ -2179,8 +2708,16 @@ pub extern "C" fn retro_run() {
                 .get_framebuffer()
                 .unwrap_or_else(|error| panic!("failed to read {} framebuffer: {}", target, error));
 
-            assert!(size.width > 0, "{} framebuffer width should be non-zero", target);
-            assert!(size.height > 0, "{} framebuffer height should be non-zero", target);
+            assert!(
+                size.width > 0,
+                "{} framebuffer width should be non-zero",
+                target
+            );
+            assert!(
+                size.height > 0,
+                "{} framebuffer height should be non-zero",
+                target
+            );
             assert!(
                 !framebuffer.is_empty(),
                 "{} framebuffer should not be empty after running frames",
@@ -2266,7 +2803,10 @@ pub extern "C" fn retro_run() {
             Some(project_dir.to_string_lossy().to_string()),
         );
         assert!(result.ok, "audit patch creation failed: {}", result.message);
-        assert!(result.patch_hash.as_deref().is_some_and(|value| !value.is_empty()));
+        assert!(result
+            .patch_hash
+            .as_deref()
+            .is_some_and(|value| !value.is_empty()));
 
         let project = load_project(&project_dir).expect("reload audited project");
         let audit_log = &project
@@ -2278,7 +2818,10 @@ pub extern "C" fn retro_run() {
         assert_eq!(audit_log.len(), 1);
         assert_eq!(audit_log[0].format, "ips");
         assert_eq!(audit_log[0].patch_path, patch.to_string_lossy());
-        assert_eq!(audit_log[0].patch_hash, result.patch_hash.clone().unwrap_or_default());
+        assert_eq!(
+            audit_log[0].patch_hash,
+            result.patch_hash.clone().unwrap_or_default()
+        );
         assert!(audit_log[0].timestamp_ms > 0);
 
         let _ = fs::remove_dir_all(project_dir);
@@ -2298,7 +2841,11 @@ pub extern "C" fn retro_run() {
             let x = 192u16 & 0x01FF;
             rom[base..base + 2].copy_from_slice(&y.to_be_bytes());
             rom[base + 2] = 0b0000_0101;
-            rom[base + 3] = if sprite_idx == 5 { 0 } else { (sprite_idx + 1) as u8 };
+            rom[base + 3] = if sprite_idx == 5 {
+                0
+            } else {
+                (sprite_idx + 1) as u8
+            };
             rom[base + 6..base + 8].copy_from_slice(&x.to_be_bytes());
         }
         fs::write(&rom_path, rom).expect("write profiler rom");
@@ -2335,6 +2882,203 @@ pub extern "C" fn retro_run() {
     }
 
     #[test]
+    fn resolve_project_base_dir_with_candidates_falls_back_and_creates_directory() {
+        let requested_parent = temp_dir("requested-base-file");
+        let requested_file = requested_parent.join("not-a-directory");
+        fs::write(&requested_file, b"blocked").expect("write blocking file");
+        let automatic_base = temp_dir("automatic-base-root").join("RetroDevProjects");
+
+        let resolved = resolve_project_base_dir_with_candidates(
+            Some(requested_file.as_path()),
+            std::slice::from_ref(&automatic_base),
+        )
+        .expect("resolve automatic fallback");
+
+        println!(
+            "[fallback-base-dir] requested='{}' resolved='{}'",
+            requested_file.display(),
+            resolved.path.display()
+        );
+        assert_eq!(resolved.path, automatic_base);
+        assert!(automatic_base.is_dir());
+        assert!(resolved
+            .notice
+            .as_deref()
+            .is_some_and(|notice| notice.contains("fluxo")));
+
+        let _ = fs::remove_dir_all(requested_parent);
+        let _ = fs::remove_dir_all(automatic_base.parent().unwrap_or(Path::new("")));
+    }
+
+    #[test]
+    fn open_project_path_wraps_legacy_sgdk_directory_in_place() {
+        let legacy_dir = temp_dir("open-legacy-sgdk");
+        write_generic_sgdk_donor_fixture(&legacy_dir);
+
+        let result = open_project_path(legacy_dir.to_string_lossy().to_string());
+        println!("[open-legacy] {}", result.path);
+
+        assert!(result.selected);
+        assert_eq!(result.path, legacy_dir.join("rds").to_string_lossy());
+        assert!(result
+            .notice
+            .as_deref()
+            .is_some_and(|notice| notice.contains("overlay 'rds/'")));
+        assert!(legacy_dir.join("rds").join("project.rds").is_file());
+
+        let _ = fs::remove_dir_all(legacy_dir);
+    }
+
+    #[test]
+    fn get_scene_data_exposes_legacy_sgdk_index_for_overlay_projects() {
+        let legacy_dir = temp_dir("scene-data-legacy-index");
+        write_generic_sgdk_donor_fixture(&legacy_dir);
+
+        let opened = open_project_path(legacy_dir.to_string_lossy().to_string());
+        assert!(opened.selected);
+
+        let scene_data = get_scene_data(opened.path.clone(), None);
+        assert!(scene_data.ok, "scene data error: {}", scene_data.error);
+        assert_eq!(scene_data.source_kind, "external_sgdk");
+
+        let legacy_index = scene_data
+            .legacy_sgdk_index
+            .expect("legacy SGDK index should be exposed");
+        println!(
+            "[scene-data-legacy-index] overlay='{}' c_files={} manifests={}",
+            opened.path,
+            legacy_index.source_files.len(),
+            legacy_index.manifest_files.len()
+        );
+        assert!(legacy_index
+            .source_files
+            .iter()
+            .any(|path| path == "src/main.c"));
+        assert!(legacy_index
+            .header_files
+            .iter()
+            .any(|path| path == "inc/game.h"));
+        assert!(legacy_index
+            .manifest_files
+            .iter()
+            .any(|path| path == "res/resources.res"));
+
+        let _ = fs::remove_dir_all(legacy_dir);
+    }
+
+    #[test]
+    fn read_legacy_project_file_returns_read_only_preview_for_wrapped_host_code() {
+        let legacy_dir = temp_dir("legacy-preview");
+        write_generic_sgdk_donor_fixture(&legacy_dir);
+
+        let opened = open_project_path(legacy_dir.to_string_lossy().to_string());
+        assert!(opened.selected);
+
+        let preview = read_legacy_project_file(opened.path.clone(), "src/main.c".to_string())
+            .expect("read legacy project file");
+
+        assert_eq!(preview.relative_path, "src/main.c");
+        assert!(preview.readonly);
+        assert!(preview.previewable);
+        assert!(preview.content.contains("int main(void){return 0;}"));
+
+        let _ = fs::remove_dir_all(legacy_dir);
+    }
+
+    #[test]
+    fn import_legacy_sgdk_project_command_wraps_directory_without_copying_code() {
+        let legacy_dir = temp_dir("legacy-import-command");
+        write_generic_sgdk_donor_fixture(&legacy_dir);
+
+        let result = import_legacy_sgdk_project(
+            "Legado Adoptado".to_string(),
+            legacy_dir.to_string_lossy().to_string(),
+        )
+        .expect("import legacy sgdk");
+        println!("[legacy-import-command] {}", result.path);
+
+        let overlay_dir = PathBuf::from(&result.path);
+        let project = load_project(&overlay_dir).expect("load wrapped legacy project");
+        assert!(result.selected);
+        assert_eq!(project.name, "Legado Adoptado");
+        assert_eq!(
+            project
+                .template_metadata
+                .as_ref()
+                .map(|metadata| metadata.source_kind.as_str()),
+            Some("external_sgdk")
+        );
+        assert!(legacy_dir.join("src").join("main.c").is_file());
+        assert!(overlay_dir.join("legacy_sgdk_index.json").is_file());
+
+        let _ = fs::remove_dir_all(legacy_dir);
+    }
+
+    #[test]
+    fn e2e_legacy_overlay_build_load_and_run_frame() {
+        let _serial = test_serial_guard();
+        let legacy_dir = temp_dir("legacy-build-run");
+        fs::create_dir_all(legacy_dir.join("src")).expect("create legacy src");
+        fs::create_dir_all(legacy_dir.join("inc")).expect("create legacy inc");
+        fs::write(
+            legacy_dir.join("src").join("main.c"),
+            b"int main(void){return 0;}",
+        )
+        .expect("write legacy main.c");
+        fs::write(legacy_dir.join("inc").join("game.h"), b"void game(void);")
+            .expect("write legacy header");
+        fs::write(legacy_dir.join("Makefile"), "PROJECT_NAME := legacy_host\n")
+            .expect("write legacy makefile");
+
+        let opened = open_project_path(legacy_dir.to_string_lossy().to_string());
+        assert!(opened.selected);
+
+        let toolchain_root = temp_dir("legacy-fake-sgdk");
+        let bin_dir = toolchain_root.join("bin");
+        fs::create_dir_all(&bin_dir).expect("create fake bin");
+        let make_program = fake_make_script(&bin_dir);
+        let environment = BuildEnvironment {
+            sgdk_root: Some(toolchain_root),
+            sgdk_make_program: Some(make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let build_result =
+            run_build_with_environment(Path::new(&opened.path), &environment, |_| {});
+        println!(
+            "[legacy-build-run] overlay='{}' rom='{}' entries={}",
+            opened.path,
+            build_result.rom_path,
+            build_result.log.len()
+        );
+        for entry in &build_result.log {
+            println!("[legacy-build-run][{}] {}", entry.level, entry.message);
+        }
+        assert!(build_result.ok, "legacy build failed: {:?}", build_result.log);
+
+        let core_dir = temp_dir("legacy-mock-core");
+        let core_path = compile_mock_core(&core_dir);
+        let mut emulator = EmulatorCore::new(Some(&core_path));
+        emulator
+            .load_rom(Path::new(&build_result.rom_path))
+            .expect("load legacy host rom");
+        emulator.run_frame().expect("run legacy host frame");
+
+        let (framebuffer, size, pixel_format) =
+            emulator.get_framebuffer().expect("read legacy framebuffer");
+
+        assert_eq!(size.width, 256);
+        assert_eq!(size.height, 224);
+        assert_eq!(pixel_format, emulator::libretro_ffi::PixelFormat::Xrgb8888);
+        assert!(framebuffer.iter().any(|byte| *byte != 0));
+
+        emulator.stop().expect("stop legacy emulator");
+        let _ = fs::remove_dir_all(legacy_dir);
+        let _ = fs::remove_dir_all(core_dir);
+    }
+
+    #[test]
     fn create_onboarding_project_generates_template_scene_and_asset() {
         let base_dir = temp_dir("onboarding-project");
         let result = create_onboarding_project(
@@ -2345,6 +3089,10 @@ pub extern "C" fn retro_run() {
         .expect("create onboarding project");
 
         assert!(result.selected);
+        assert_eq!(
+            result.base_dir.as_deref(),
+            Some(base_dir.to_string_lossy().as_ref())
+        );
 
         let project_dir = PathBuf::from(&result.path);
         let project = load_project(&project_dir).expect("load onboarding project");
@@ -2366,21 +3114,80 @@ pub extern "C" fn retro_run() {
                 .map(|sprite| sprite.asset.as_str()),
             Some("assets/sprites/onboarding_player.ppm")
         );
-        assert!(
-            scene.entities[0]
-                .components
-                .logic
-                .as_ref()
-                .and_then(|logic| logic.graph.as_ref())
-                .is_some_and(|graph| {
-                    graph.contains("\"event_start\"")
-                        && graph.contains("\"sprite_move\"")
-                        && graph.contains("\"label\":\"On Start\"")
-                        && graph.contains("\"fromNode\":\"start\"")
-                })
-        );
+        assert!(scene.entities[0]
+            .components
+            .logic
+            .as_ref()
+            .and_then(|logic| logic.graph.as_ref())
+            .is_some_and(|graph| {
+                graph.contains("\"event_start\"")
+                    && graph.contains("\"sprite_move\"")
+                    && graph.contains("\"label\":\"On Start\"")
+                    && graph.contains("\"fromNode\":\"start\"")
+            }));
 
         let _ = fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn create_onboarding_project_allows_empty_base_dir_when_candidates_are_available() {
+        let automatic_base = temp_dir("onboarding-auto-root").join("RetroDevProjects");
+        let resolved =
+            resolve_project_base_dir_with_candidates(None, std::slice::from_ref(&automatic_base))
+                .expect("resolve automatic base dir");
+        let result =
+            create_onboarding_project_at_base_dir(&resolved.path, "Auto Starter", "megadrive")
+                .expect("create automatic onboarding project");
+
+        println!(
+            "[auto-onboarding] base='{}' project='{}'",
+            resolved.path.display(),
+            result.path
+        );
+        assert!(automatic_base.is_dir());
+        assert!(PathBuf::from(&result.path).starts_with(&automatic_base));
+
+        let _ = fs::remove_dir_all(automatic_base.parent().unwrap_or(Path::new("")));
+    }
+
+    #[test]
+    fn automatic_onboarding_base_dir_supports_canonical_megadrive_build() {
+        let automatic_base = temp_dir("onboarding-auto-build-root").join("RetroDevProjects");
+        let resolved =
+            resolve_project_base_dir_with_candidates(None, std::slice::from_ref(&automatic_base))
+                .expect("resolve automatic base dir");
+        let result =
+            create_onboarding_project_at_base_dir(&resolved.path, "Auto Build Starter", "megadrive")
+                .expect("create automatic onboarding project");
+
+        let project_dir = PathBuf::from(&result.path);
+        let toolchain_root = temp_dir("fake-sgdk-auto-onboarding");
+        let bin_dir = toolchain_root.join("bin");
+        fs::create_dir_all(&bin_dir).expect("create fake sgdk bin");
+        let make_program = fake_make_script(&bin_dir);
+        let environment = BuildEnvironment {
+            sgdk_root: Some(toolchain_root),
+            sgdk_make_program: Some(make_program),
+            ..BuildEnvironment::default()
+        };
+
+        let build_result = run_build_with_environment(&project_dir, &environment, |_| {});
+        assert!(
+            build_result.ok,
+            "automatic onboarding build failed: {:?}",
+            build_result.log
+        );
+        assert!(
+            project_dir
+                .join("build")
+                .join("megadrive")
+                .join("out")
+                .join("artifact.md")
+                .is_file(),
+            "expected ROM artifact inside automatic onboarding workspace"
+        );
+
+        let _ = fs::remove_dir_all(automatic_base.parent().unwrap_or(Path::new("")));
     }
 
     #[test]
@@ -2416,7 +3223,8 @@ pub extern "C" fn retro_run() {
         .expect("create empty project");
         let empty_project_dir = PathBuf::from(&empty_result.path);
         let empty_project = load_project(&empty_project_dir).expect("load empty project");
-        let empty_scene = load_scene(&empty_project_dir, &empty_project.entry_scene).expect("load empty scene");
+        let empty_scene =
+            load_scene(&empty_project_dir, &empty_project.entry_scene).expect("load empty scene");
         assert!(empty_scene.entities.is_empty());
 
         let starter_result = create_project_from_template(
@@ -2429,8 +3237,8 @@ pub extern "C" fn retro_run() {
         .expect("create starter project");
         let starter_project_dir = PathBuf::from(&starter_result.path);
         let starter_project = load_project(&starter_project_dir).expect("load starter project");
-        let starter_scene =
-            load_scene(&starter_project_dir, &starter_project.entry_scene).expect("load starter scene");
+        let starter_scene = load_scene(&starter_project_dir, &starter_project.entry_scene)
+            .expect("load starter scene");
         assert_eq!(starter_scene.entities.len(), 1);
 
         let platformer_result = create_project_from_template(
@@ -2442,12 +3250,16 @@ pub extern "C" fn retro_run() {
         )
         .expect("create platformer project");
         let platformer_project_dir = PathBuf::from(&platformer_result.path);
-        let platformer_project = load_project(&platformer_project_dir).expect("load platformer project");
+        let platformer_project =
+            load_project(&platformer_project_dir).expect("load platformer project");
         let platformer_scene = load_scene(&platformer_project_dir, &platformer_project.entry_scene)
             .expect("load platformer scene");
 
         assert_eq!(platformer_scene.entities.len(), 3);
-        assert_eq!(platformer_project.schema_version, ugdm::entities::CURRENT_SCHEMA_VERSION);
+        assert_eq!(
+            platformer_project.schema_version,
+            ugdm::entities::CURRENT_SCHEMA_VERSION
+        );
         assert_eq!(
             platformer_project
                 .template_metadata
@@ -2491,8 +3303,8 @@ pub extern "C" fn retro_run() {
         .expect("create generic imported project");
         let imported_project_dir = PathBuf::from(&imported_result.path);
         let imported_project = load_project(&imported_project_dir).expect("load imported project");
-        let imported_scene =
-            load_scene(&imported_project_dir, &imported_project.entry_scene).expect("load imported scene");
+        let imported_scene = load_scene(&imported_project_dir, &imported_project.entry_scene)
+            .expect("load imported scene");
 
         assert_eq!(
             imported_project
@@ -2506,7 +3318,10 @@ pub extern "C" fn retro_run() {
             .join("sprites")
             .join("hero.png")
             .is_file());
-        assert!(imported_scene.entities.iter().any(|entity| entity.entity_id == "main_camera"));
+        assert!(imported_scene
+            .entities
+            .iter()
+            .any(|entity| entity.entity_id == "main_camera"));
 
         let gm_result = create_project_from_template(
             "GM Platformer".to_string(),
@@ -2661,11 +3476,31 @@ pub extern "C" fn retro_run() {
                 .map(|metadata| metadata.source_kind.as_str()),
             Some("imported_sgdk")
         );
-        assert!(project_dir.join("assets").join("sprites").join("hero.png").is_file());
-        assert!(project_dir.join("assets").join("tilesets").join("stage.png").is_file());
-        assert!(project_dir.join("assets").join("audio").join("jump.wav").is_file());
-        assert!(project_dir.join("assets").join("audio").join("theme.xgm").is_file());
-        assert!(!project_dir.join("assets").join("audio").join("forbidden.vgm").exists());
+        assert!(project_dir
+            .join("assets")
+            .join("sprites")
+            .join("hero.png")
+            .is_file());
+        assert!(project_dir
+            .join("assets")
+            .join("tilesets")
+            .join("stage.png")
+            .is_file());
+        assert!(project_dir
+            .join("assets")
+            .join("audio")
+            .join("jump.wav")
+            .is_file());
+        assert!(project_dir
+            .join("assets")
+            .join("audio")
+            .join("theme.xgm")
+            .is_file());
+        assert!(!project_dir
+            .join("assets")
+            .join("audio")
+            .join("forbidden.vgm")
+            .exists());
         assert!(!project_dir.join("out").exists());
         assert_eq!(scene.entities.len(), 4);
 

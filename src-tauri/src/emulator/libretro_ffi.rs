@@ -189,8 +189,7 @@ type RetroEnvironmentCallback = unsafe extern "C" fn(cmd: u32, data: *mut c_void
 type RetroVideoRefreshCallback =
     unsafe extern "C" fn(data: *const c_void, width: u32, height: u32, pitch: usize);
 type RetroAudioSampleCallback = unsafe extern "C" fn(left: i16, right: i16);
-type RetroAudioSampleBatchCallback =
-    unsafe extern "C" fn(data: *const i16, frames: usize) -> usize;
+type RetroAudioSampleBatchCallback = unsafe extern "C" fn(data: *const i16, frames: usize) -> usize;
 type RetroInputPollCallback = unsafe extern "C" fn();
 type RetroInputStateCallback =
     unsafe extern "C" fn(port: u32, device: u32, index: u32, id: u32) -> i16;
@@ -421,13 +420,13 @@ impl LoadedCore {
             (api.get_system_av_info)(&mut av_info);
         }
 
-        let pixel_format = with_active_emulator(|state| state.pixel_format)
-            .unwrap_or(PixelFormat::Xrgb8888);
+        let pixel_format =
+            with_active_emulator(|state| state.pixel_format).unwrap_or(PixelFormat::Xrgb8888);
         let frame_size = FrameSize {
             width: av_info.geometry.base_width.max(1),
             height: av_info.geometry.base_height.max(1),
-            pitch: (av_info.geometry.base_width.max(1) as usize
-                * pixel_format.bytes_per_pixel()) as u32,
+            pitch: (av_info.geometry.base_width.max(1) as usize * pixel_format.bytes_per_pixel())
+                as u32,
         };
 
         let api_version = unsafe { (api.api_version)() };
@@ -643,7 +642,11 @@ impl EmulatorCore {
 
     pub fn get_framebuffer(&self) -> Result<(Vec<u8>, FrameSize, PixelFormat), String> {
         let state = self.handle.lock().map_err(|e| e.to_string())?;
-        Ok((state.framebuffer.clone(), state.frame_size, state.pixel_format))
+        Ok((
+            state.framebuffer.clone(),
+            state.frame_size,
+            state.pixel_format,
+        ))
     }
 
     pub fn take_audio_samples(&self) -> Result<(u32, Vec<i16>), String> {
@@ -655,10 +658,9 @@ impl EmulatorCore {
     }
 
     pub fn save_state(&mut self) -> Result<usize, String> {
-        let runtime = self
-            .runtime
-            .as_ref()
-            .ok_or_else(|| "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string())?;
+        let runtime = self.runtime.as_ref().ok_or_else(|| {
+            "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string()
+        })?;
         let size = unsafe { (runtime.api.serialize_size)() };
 
         if size == 0 {
@@ -666,9 +668,8 @@ impl EmulatorCore {
         }
 
         let mut buffer = vec![0u8; size];
-        let serialized = unsafe {
-            (runtime.api.serialize)(buffer.as_mut_ptr().cast::<c_void>(), buffer.len())
-        };
+        let serialized =
+            unsafe { (runtime.api.serialize)(buffer.as_mut_ptr().cast::<c_void>(), buffer.len()) };
         if !serialized {
             return Err("Falha ao serializar o estado do core Libretro.".to_string());
         }
@@ -678,9 +679,9 @@ impl EmulatorCore {
     }
 
     pub fn start_replay_recording(&mut self) -> Result<(), String> {
-        self.runtime
-            .as_ref()
-            .ok_or_else(|| "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string())?;
+        self.runtime.as_ref().ok_or_else(|| {
+            "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string()
+        })?;
         let initial_state = self.serialize_runtime_state()?;
         self.replay.recording = Some(ReplayRecording {
             initial_state,
@@ -715,15 +716,16 @@ impl EmulatorCore {
         })
     }
 
-    pub fn play_replay(
-        &mut self,
-        replay: &ReplayCapture,
-    ) -> Result<ReplayPlaybackSummary, String> {
-        let runtime = self
-            .runtime
-            .as_ref()
-            .ok_or_else(|| "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string())?;
-        let current_rom = self.handle.lock().map_err(|e| e.to_string())?.rom_path.clone();
+    pub fn play_replay(&mut self, replay: &ReplayCapture) -> Result<ReplayPlaybackSummary, String> {
+        let runtime = self.runtime.as_ref().ok_or_else(|| {
+            "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string()
+        })?;
+        let current_rom = self
+            .handle
+            .lock()
+            .map_err(|e| e.to_string())?
+            .rom_path
+            .clone();
 
         if current_rom != replay.rom_path {
             return Err(format!(
@@ -748,7 +750,9 @@ impl EmulatorCore {
             )
         };
         if !restored {
-            return Err("Falha ao restaurar estado inicial do replay no core Libretro.".to_string());
+            return Err(
+                "Falha ao restaurar estado inicial do replay no core Libretro.".to_string(),
+            );
         }
 
         let prior_recording = self.replay.recording.take();
@@ -770,10 +774,9 @@ impl EmulatorCore {
     }
 
     pub fn load_state(&mut self) -> Result<(), String> {
-        let runtime = self
-            .runtime
-            .as_ref()
-            .ok_or_else(|| "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string())?;
+        let runtime = self.runtime.as_ref().ok_or_else(|| {
+            "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string()
+        })?;
         let saved_state = self
             .saved_state
             .as_ref()
@@ -802,10 +805,9 @@ impl EmulatorCore {
     }
 
     pub fn rewind_step(&mut self) -> Result<(u64, usize, u64), String> {
-        let runtime = self
-            .runtime
-            .as_ref()
-            .ok_or_else(|| "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string())?;
+        let runtime = self.runtime.as_ref().ok_or_else(|| {
+            "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string()
+        })?;
         let config = self
             .rewind
             .config
@@ -816,7 +818,10 @@ impl EmulatorCore {
             .pop_back()
             .ok_or_else(|| "Ainda nao ha snapshots suficientes para rewind.".to_string())?;
         let restored = unsafe {
-            (runtime.api.unserialize)(snapshot.bytes.as_ptr().cast::<c_void>(), snapshot.bytes.len())
+            (runtime.api.unserialize)(
+                snapshot.bytes.as_ptr().cast::<c_void>(),
+                snapshot.bytes.len(),
+            )
         };
         if !restored {
             return Err("Falha ao restaurar snapshot do rewind no core Libretro.".to_string());
@@ -836,10 +841,9 @@ impl EmulatorCore {
         offset: usize,
         length: usize,
     ) -> Result<(Vec<u8>, usize), String> {
-        let runtime = self
-            .runtime
-            .as_ref()
-            .ok_or_else(|| "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string())?;
+        let runtime = self.runtime.as_ref().ok_or_else(|| {
+            "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string()
+        })?;
         let total_size = unsafe { (runtime.api.get_memory_size)(region) };
 
         if total_size == 0 || length == 0 || offset >= total_size {
@@ -893,7 +897,10 @@ impl EmulatorCore {
 
     #[allow(dead_code)]
     pub fn is_running(&self) -> bool {
-        self.handle.lock().map(|state| state.running).unwrap_or(false)
+        self.handle
+            .lock()
+            .map(|state| state.running)
+            .unwrap_or(false)
     }
 
     pub fn loaded_core_label(&self) -> Option<&str> {
@@ -937,19 +944,17 @@ impl EmulatorCore {
     }
 
     fn serialize_runtime_state(&self) -> Result<Vec<u8>, String> {
-        let runtime = self
-            .runtime
-            .as_ref()
-            .ok_or_else(|| "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string())?;
+        let runtime = self.runtime.as_ref().ok_or_else(|| {
+            "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string()
+        })?;
         let size = unsafe { (runtime.api.serialize_size)() };
         if size == 0 {
             return Err("O core Libretro atual nao suporta save states.".to_string());
         }
 
         let mut buffer = vec![0u8; size];
-        let serialized = unsafe {
-            (runtime.api.serialize)(buffer.as_mut_ptr().cast::<c_void>(), buffer.len())
-        };
+        let serialized =
+            unsafe { (runtime.api.serialize)(buffer.as_mut_ptr().cast::<c_void>(), buffer.len()) };
         if !serialized {
             return Err("Falha ao serializar o estado do core Libretro.".to_string());
         }
@@ -1008,7 +1013,10 @@ fn reset_emulator_state(handle: &EmulatorHandle, rom_path: &Path) -> Result<(), 
     Ok(())
 }
 
-fn locate_core_path(explicit_core_path: Option<&Path>, target: CoreTarget) -> Result<PathBuf, String> {
+fn locate_core_path(
+    explicit_core_path: Option<&Path>,
+    target: CoreTarget,
+) -> Result<PathBuf, String> {
     if let Some(path) = explicit_core_path {
         if path.exists() {
             return Ok(path.to_path_buf());
@@ -1064,7 +1072,10 @@ fn core_search_roots() -> Vec<PathBuf> {
         manifest_dir.join("cores"),
         manifest_dir.join("libretro"),
         manifest_dir.join("toolchains").join("libretro"),
-        manifest_dir.join("toolchains").join("libretro").join("cores"),
+        manifest_dir
+            .join("toolchains")
+            .join("libretro")
+            .join("cores"),
     ];
 
     if let Some(repo_root) = manifest_dir.parent() {
@@ -1092,7 +1103,11 @@ fn core_library_extension() -> &'static str {
 }
 
 fn detect_rom_target(rom_path: &Path) -> Option<CoreTarget> {
-    match rom_path.extension().and_then(|ext| ext.to_str()).map(|ext| ext.to_ascii_lowercase()) {
+    match rom_path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.to_ascii_lowercase())
+    {
         Some(ext) if ext == "md" || ext == "gen" => Some(CoreTarget::MegaDrive),
         Some(ext) if ext == "sfc" || ext == "smc" => Some(CoreTarget::Snes),
         Some(ext) if ext == "bin" => sniff_rom_target(rom_path),
@@ -1574,7 +1589,9 @@ pub extern "C" fn retro_run() {
         let rom_path = write_test_rom(&dir, "sonic_test", "gen");
 
         let mut emulator = EmulatorCore::new(Some(&core_path));
-        emulator.load_rom(&rom_path).expect("load rom into mock core");
+        emulator
+            .load_rom(&rom_path)
+            .expect("load rom into mock core");
         emulator
             .set_joypad(JoypadState {
                 a: true,
@@ -1607,8 +1624,7 @@ pub extern "C" fn retro_run() {
         install_active_emulator(&handle).expect("install active emulator");
         let samples = [10i16, -10, 20, -20];
 
-        let accepted =
-            unsafe { retro_audio_sample_batch_callback(samples.as_ptr(), 2) };
+        let accepted = unsafe { retro_audio_sample_batch_callback(samples.as_ptr(), 2) };
 
         assert_eq!(accepted, 2);
         {
@@ -1628,23 +1644,28 @@ pub extern "C" fn retro_run() {
         let rom_path = write_test_rom(&dir, "save_test", "gen");
 
         let mut emulator = EmulatorCore::new(Some(&core_path));
-        emulator.load_rom(&rom_path).expect("load rom into mock core");
+        emulator
+            .load_rom(&rom_path)
+            .expect("load rom into mock core");
 
         emulator.run_frame().expect("run first frame");
-        let (_, size_before, format_before) =
-            emulator.get_framebuffer().expect("read framebuffer after first frame");
+        let (_, size_before, format_before) = emulator
+            .get_framebuffer()
+            .expect("read framebuffer after first frame");
 
         let saved_size = emulator.save_state().expect("save emulator state");
         assert_eq!(saved_size, 8);
 
         emulator.run_frame().expect("run second frame");
-        let (advanced_framebuffer, advanced_size, advanced_format) =
-            emulator.get_framebuffer().expect("read framebuffer after second frame");
+        let (advanced_framebuffer, advanced_size, advanced_format) = emulator
+            .get_framebuffer()
+            .expect("read framebuffer after second frame");
 
         emulator.load_state().expect("restore emulator state");
         emulator.run_frame().expect("run restored frame");
-        let (restored_framebuffer, restored_size, restored_format) =
-            emulator.get_framebuffer().expect("read framebuffer after restore");
+        let (restored_framebuffer, restored_size, restored_format) = emulator
+            .get_framebuffer()
+            .expect("read framebuffer after restore");
 
         assert_eq!(size_before, advanced_size);
         assert_eq!(format_before, advanced_format);
@@ -1664,19 +1685,23 @@ pub extern "C" fn retro_run() {
         let rom_path = write_test_rom(&dir, "rewind_test", "gen");
 
         let mut emulator = EmulatorCore::new(Some(&core_path));
-        emulator.load_rom(&rom_path).expect("load rom into mock core");
+        emulator
+            .load_rom(&rom_path)
+            .expect("load rom into mock core");
 
         emulator.run_frame().expect("run frame 1");
         emulator.run_frame().expect("run frame 2");
-        let (framebuffer_after_two, _, _) =
-            emulator.get_framebuffer().expect("read framebuffer after frame 2");
+        let (framebuffer_after_two, _, _) = emulator
+            .get_framebuffer()
+            .expect("read framebuffer after frame 2");
 
         let rewind_result = emulator.rewind_step().expect("rewind one snapshot");
         assert_eq!(rewind_result.0, 1);
 
         emulator.run_frame().expect("run restored frame");
-        let (framebuffer_after_rewind, _, _) =
-            emulator.get_framebuffer().expect("read framebuffer after rewind");
+        let (framebuffer_after_rewind, _, _) = emulator
+            .get_framebuffer()
+            .expect("read framebuffer after rewind");
 
         assert_eq!(framebuffer_after_two, framebuffer_after_rewind);
 
@@ -1692,7 +1717,9 @@ pub extern "C" fn retro_run() {
         let rom_path = write_test_rom(&dir, "replay_test", "gen");
 
         let mut emulator = EmulatorCore::new(Some(&core_path));
-        emulator.load_rom(&rom_path).expect("load rom into mock core");
+        emulator
+            .load_rom(&rom_path)
+            .expect("load rom into mock core");
         emulator
             .start_replay_recording()
             .expect("start replay recording");
@@ -1717,8 +1744,9 @@ pub extern "C" fn retro_run() {
             .stop_replay_recording()
             .expect("stop replay recording");
         let summary = emulator.play_replay(&replay).expect("play replay");
-        let (framebuffer, size, pixel_format) =
-            emulator.get_framebuffer().expect("read framebuffer after replay");
+        let (framebuffer, size, pixel_format) = emulator
+            .get_framebuffer()
+            .expect("read framebuffer after replay");
 
         assert_eq!(replay.frames.len(), 2);
         assert_eq!(summary.frames_played, 2);
@@ -1739,7 +1767,9 @@ pub extern "C" fn retro_run() {
         let rom_path = write_test_rom(&dir, "replay_empty_test", "gen");
 
         let mut emulator = EmulatorCore::new(Some(&core_path));
-        emulator.load_rom(&rom_path).expect("load rom into mock core");
+        emulator
+            .load_rom(&rom_path)
+            .expect("load rom into mock core");
         emulator
             .start_replay_recording()
             .expect("start replay recording");
@@ -1787,7 +1817,9 @@ pub extern "C" fn retro_run() {
         let rom_path = write_test_rom(&dir, "memory_test", "gen");
 
         let mut emulator = EmulatorCore::new(Some(&core_path));
-        emulator.load_rom(&rom_path).expect("load rom into mock core");
+        emulator
+            .load_rom(&rom_path)
+            .expect("load rom into mock core");
 
         let (bytes, total_size) = emulator
             .read_memory(RETRO_MEMORY_SYSTEM_RAM, 0x10, 0x10)
@@ -1808,12 +1840,12 @@ pub extern "C" fn retro_run() {
         let rom_path = write_test_rom(&dir, "audio_test", "gen");
 
         let mut emulator = EmulatorCore::new(Some(&core_path));
-        emulator.load_rom(&rom_path).expect("load rom into mock core");
+        emulator
+            .load_rom(&rom_path)
+            .expect("load rom into mock core");
         emulator.run_frame().expect("run frame");
 
-        let (sample_rate, samples) = emulator
-            .take_audio_samples()
-            .expect("drain audio samples");
+        let (sample_rate, samples) = emulator.take_audio_samples().expect("drain audio samples");
 
         assert_eq!(sample_rate, 44_100);
         assert_eq!(samples, vec![0, 0, 1, -1]);

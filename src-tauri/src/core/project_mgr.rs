@@ -69,6 +69,22 @@ struct SgdkResourceEntry {
     params: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SgdkAssetMaterialization {
+    Copy,
+    LinkOrCopy,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct LegacySgdkIndex {
+    pub host_root: String,
+    pub source_files: Vec<String>,
+    pub header_files: Vec<String>,
+    pub manifest_files: Vec<String>,
+    pub resource_files: Vec<String>,
+    pub output_files: Vec<String>,
+}
+
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 pub struct ProjectTemplateSummary {
     pub id: String,
@@ -367,10 +383,7 @@ pub fn seed_platformer_template(project_dir: &Path, donor_path: &Path) -> Result
     save_prefab_entity(
         project_dir,
         "platformer_tilemap.json",
-        &platformer_tilemap_prefab_with_dims(
-            donor_dims.tilemap_width,
-            donor_dims.tilemap_height,
-        ),
+        &platformer_tilemap_prefab_with_dims(donor_dims.tilemap_width, donor_dims.tilemap_height),
     )?;
     save_graph_asset(
         project_dir,
@@ -383,7 +396,10 @@ pub fn seed_platformer_template(project_dir: &Path, donor_path: &Path) -> Result
     Ok(scene)
 }
 
-pub fn seed_platformer_gm_template(project_dir: &Path, donor_path: &Path) -> Result<Scene, LoadError> {
+pub fn seed_platformer_gm_template(
+    project_dir: &Path,
+    donor_path: &Path,
+) -> Result<Scene, LoadError> {
     validate_platformer_donor_path(donor_path)?;
 
     let donor_dims = extract_donor_dimensions(donor_path);
@@ -419,10 +435,7 @@ pub fn seed_platformer_gm_template(project_dir: &Path, donor_path: &Path) -> Res
     save_prefab_entity(
         project_dir,
         "platformer_tilemap.json",
-        &platformer_tilemap_prefab_with_dims(
-            donor_dims.tilemap_width,
-            donor_dims.tilemap_height,
-        ),
+        &platformer_tilemap_prefab_with_dims(donor_dims.tilemap_width, donor_dims.tilemap_height),
     )?;
     save_graph_asset(
         project_dir,
@@ -438,8 +451,73 @@ pub fn seed_platformer_gm_template(project_dir: &Path, donor_path: &Path) -> Res
 pub fn import_sgdk_project(project_dir: &Path, sgdk_path: &Path) -> Result<Scene, LoadError> {
     validate_sgdk_project_path(sgdk_path)?;
     let resources = load_sgdk_resources(sgdk_path)?;
+    import_sgdk_resources_into_scene(
+        project_dir,
+        sgdk_path,
+        &resources,
+        SgdkAssetMaterialization::Copy,
+        "Imported SGDK Project",
+    )
+}
 
-    let mut scene = canonical_scene(DEFAULT_SCENE_ID, Some("Imported SGDK Project".to_string()));
+pub fn import_legacy_sgdk_project(
+    sgdk_root: &Path,
+    project_name_override: Option<&str>,
+) -> Result<PathBuf, LoadError> {
+    let index = scan_legacy_sgdk_project(sgdk_root)?;
+    let overlay_dir = sgdk_root.join("rds");
+    if overlay_dir.join("project.rds").is_file() {
+        write_legacy_sgdk_index(&overlay_dir, &index)?;
+        return Ok(overlay_dir);
+    }
+
+    let project_name = project_name_override
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            sgdk_root
+                .file_name()
+                .map(|name| name.to_string_lossy().trim().to_string())
+                .filter(|name| !name.is_empty())
+        })
+        .unwrap_or_else(|| "Projeto SGDK Legado".to_string());
+
+    create_project_skeleton(&overlay_dir, &project_name, "megadrive")?;
+
+    let resources = load_sgdk_resources_if_present(sgdk_root)?;
+    if resources
+        .iter()
+        .any(|resource| sgdk_asset_destination(&resource.kind, &resource.asset_path).is_some())
+    {
+        import_sgdk_resources_into_scene(
+            &overlay_dir,
+            sgdk_root,
+            &resources,
+            SgdkAssetMaterialization::LinkOrCopy,
+            "Legacy SGDK Overlay",
+        )?;
+    }
+
+    stamp_project_metadata(
+        &overlay_dir,
+        "legacy_sgdk_overlay".to_string(),
+        "1.0.0".to_string(),
+        "external_sgdk".to_string(),
+        sgdk_root.to_string_lossy().to_string(),
+    )?;
+    write_legacy_sgdk_index(&overlay_dir, &index)?;
+    Ok(overlay_dir)
+}
+
+fn import_sgdk_resources_into_scene(
+    project_dir: &Path,
+    sgdk_path: &Path,
+    resources: &[SgdkResourceEntry],
+    materialization: SgdkAssetMaterialization,
+    scene_name: &str,
+) -> Result<Scene, LoadError> {
+    let mut scene = canonical_scene(DEFAULT_SCENE_ID, Some(scene_name.to_string()));
     let mut imported_tilemaps = HashSet::new();
     let mut audio_sfx = HashMap::new();
     let mut audio_bgm: Option<String> = None;
@@ -464,7 +542,11 @@ pub fn import_sgdk_project(project_dir: &Path, sgdk_path: &Path) -> Result<Scene
             )));
         }
 
-        copy_template_asset(&source_path, &project_dir.join(&destination))?;
+        materialize_sgdk_asset(
+            &source_path,
+            &project_dir.join(&destination),
+            materialization,
+        )?;
 
         match resource.kind.as_str() {
             "SPRITE" => {
@@ -582,6 +664,17 @@ pub fn import_sgdk_project(project_dir: &Path, sgdk_path: &Path) -> Result<Scene
 
     save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
     Ok(scene)
+}
+
+fn materialize_sgdk_asset(
+    source: &Path,
+    destination: &Path,
+    materialization: SgdkAssetMaterialization,
+) -> Result<(), LoadError> {
+    match materialization {
+        SgdkAssetMaterialization::Copy => copy_template_asset(source, destination),
+        SgdkAssetMaterialization::LinkOrCopy => link_or_copy_template_asset(source, destination),
+    }
 }
 
 fn template_registry() -> Result<TemplateRegistry, LoadError> {
@@ -720,6 +813,213 @@ fn copy_template_asset(source: &Path, destination: &Path) -> Result<(), LoadErro
             "Nao foi possivel copiar '{}' para '{}': {}",
             source.display(),
             destination.display(),
+            error
+        ))
+    })?;
+    Ok(())
+}
+
+fn link_or_copy_template_asset(source: &Path, destination: &Path) -> Result<(), LoadError> {
+    let parent = destination.parent().ok_or_else(|| {
+        LoadError(format!(
+            "Destino de asset '{}' nao possui diretorio pai valido.",
+            destination.display()
+        ))
+    })?;
+    fs::create_dir_all(parent).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel criar o diretorio '{}' para importar assets: {}",
+            parent.display(),
+            error
+        ))
+    })?;
+
+    if destination.exists() {
+        fs::remove_file(destination).map_err(|error| {
+            LoadError(format!(
+                "Nao foi possivel limpar o asset projetado '{}': {}",
+                destination.display(),
+                error
+            ))
+        })?;
+    }
+
+    if fs::hard_link(source, destination).is_ok() {
+        return Ok(());
+    }
+
+    copy_template_asset(source, destination)
+}
+
+fn load_sgdk_resources_if_present(sgdk_path: &Path) -> Result<Vec<SgdkResourceEntry>, LoadError> {
+    match find_sgdk_manifest_paths(sgdk_path) {
+        Ok(paths) if !paths.is_empty() => load_sgdk_resources(sgdk_path),
+        Ok(_) => Ok(Vec::new()),
+        Err(_) => Ok(Vec::new()),
+    }
+}
+
+fn scan_legacy_sgdk_project(sgdk_root: &Path) -> Result<LegacySgdkIndex, LoadError> {
+    if !sgdk_root.is_dir() {
+        return Err(LoadError(format!(
+            "Projeto SGDK legado invalido: '{}' nao e um diretorio.",
+            sgdk_root.display()
+        )));
+    }
+
+    let mut source_files =
+        collect_recursive_files_by_extension(sgdk_root, &["c", "s", "asm"], &["rds"])?;
+    let mut header_files = collect_recursive_files_by_extension(sgdk_root, &["h"], &["rds"])?;
+    let manifest_files = load_manifest_paths_if_present(sgdk_root)?;
+    let resource_files = collect_recursive_files(sgdk_root.join("res"), sgdk_root)?;
+    let output_files = collect_recursive_files(sgdk_root.join("out"), sgdk_root)?;
+
+    source_files.sort();
+    source_files.dedup();
+    header_files.sort();
+    header_files.dedup();
+
+    let has_legacy_markers = !source_files.is_empty()
+        || !header_files.is_empty()
+        || !manifest_files.is_empty()
+        || sgdk_root.join("src").is_dir()
+        || sgdk_root.join("res").is_dir()
+        || sgdk_root.join("inc").is_dir()
+        || sgdk_root.join("out").is_dir()
+        || sgdk_root.join("main.c").is_file();
+    if !has_legacy_markers {
+        return Err(LoadError(format!(
+            "Diretorio '{}' nao parece um projeto SGDK legado nem um workspace RDS valido.",
+            sgdk_root.display()
+        )));
+    }
+
+    Ok(LegacySgdkIndex {
+        host_root: sgdk_root.to_string_lossy().to_string(),
+        source_files,
+        header_files,
+        manifest_files,
+        resource_files,
+        output_files,
+    })
+}
+
+fn load_manifest_paths_if_present(sgdk_root: &Path) -> Result<Vec<String>, LoadError> {
+    match find_sgdk_manifest_paths(sgdk_root) {
+        Ok(paths) => {
+            let mut manifests = paths
+                .into_iter()
+                .filter_map(|path| {
+                    path.strip_prefix(sgdk_root)
+                        .ok()
+                        .map(normalize_relative_path)
+                })
+                .collect::<Vec<_>>();
+            manifests.sort();
+            manifests.dedup();
+            Ok(manifests)
+        }
+        Err(_) => Ok(Vec::new()),
+    }
+}
+
+fn collect_recursive_files_by_extension(
+    root: &Path,
+    allowed_extensions: &[&str],
+    excluded_first_segments: &[&str],
+) -> Result<Vec<String>, LoadError> {
+    let mut collected = Vec::new();
+    collect_recursive_files_inner(root, root, &mut collected, &|path, relative| {
+        let first_segment = relative.split('/').next().unwrap_or_default();
+        if excluded_first_segments
+            .iter()
+            .any(|segment| first_segment.eq_ignore_ascii_case(segment))
+        {
+            return false;
+        }
+
+        path.extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                allowed_extensions
+                    .iter()
+                    .any(|expected| extension.eq_ignore_ascii_case(expected))
+            })
+    })?;
+    Ok(collected)
+}
+
+fn collect_recursive_files(dir: PathBuf, root: &Path) -> Result<Vec<String>, LoadError> {
+    let mut collected = Vec::new();
+    collect_recursive_files_inner(&dir, root, &mut collected, &|_, _| true)?;
+    Ok(collected)
+}
+
+fn collect_recursive_files_inner(
+    current_dir: &Path,
+    root: &Path,
+    collected: &mut Vec<String>,
+    include: &dyn Fn(&Path, &str) -> bool,
+) -> Result<(), LoadError> {
+    if !current_dir.exists() {
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(current_dir).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel ler diretorio legado '{}': {}",
+            current_dir.display(),
+            error
+        ))
+    })? {
+        let entry = entry.map_err(|error| {
+            LoadError(format!(
+                "Nao foi possivel ler entrada em '{}': {}",
+                current_dir.display(),
+                error
+            ))
+        })?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_recursive_files_inner(&path, root, collected, include)?;
+            continue;
+        }
+
+        let Ok(relative) = path.strip_prefix(root) else {
+            continue;
+        };
+        let normalized = normalize_relative_path(relative);
+        if include(&path, &normalized) {
+            collected.push(normalized);
+        }
+    }
+
+    Ok(())
+}
+
+fn normalize_relative_path(path: &Path) -> String {
+    path.components()
+        .filter_map(|component| match component {
+            Component::Normal(segment) => Some(segment.to_string_lossy().to_string()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn write_legacy_sgdk_index(overlay_dir: &Path, index: &LegacySgdkIndex) -> Result<(), LoadError> {
+    let index_path = overlay_dir.join("legacy_sgdk_index.json");
+    let serialized = serde_json::to_string_pretty(index).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel serializar o indice SGDK legado '{}': {}",
+            index_path.display(),
+            error
+        ))
+    })?;
+    fs::write(&index_path, serialized).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel salvar o indice SGDK legado '{}': {}",
+            index_path.display(),
             error
         ))
     })?;
@@ -1674,6 +1974,31 @@ pub fn resolve_prefabs(project_dir: &Path, scene: &Scene) -> Result<Scene, LoadE
         entities,
         ..scene.clone()
     })
+}
+
+pub fn load_legacy_sgdk_index(project_dir: &Path) -> Result<Option<LegacySgdkIndex>, LoadError> {
+    let index_path = project_dir.join("legacy_sgdk_index.json");
+    if !index_path.is_file() {
+        return Ok(None);
+    }
+
+    let raw = fs::read_to_string(&index_path).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel ler o indice SGDK legado '{}': {}",
+            index_path.display(),
+            error
+        ))
+    })?;
+
+    let index = serde_json::from_str::<LegacySgdkIndex>(&raw).map_err(|error| {
+        LoadError(format!(
+            "Indice SGDK legado invalido em '{}': {}",
+            index_path.display(),
+            error
+        ))
+    })?;
+
+    Ok(Some(index))
 }
 
 pub fn sync_external_graph_refs(
@@ -2855,7 +3180,11 @@ fn write_text_atomically_with_retry(path: &Path, contents: &str) -> Result<(), L
         }
     }
     last_error.map_or_else(
-        || Err(LoadError("Falha desconhecida em write_text_atomically.".into())),
+        || {
+            Err(LoadError(
+                "Falha desconhecida em write_text_atomically.".into(),
+            ))
+        },
         Err,
     )
 }
@@ -3158,6 +3487,12 @@ mod tests {
             .expect("write main");
         fs::write(dir.join("inc").join("game.h"), b"void game(void);").expect("write header");
         fs::write(dir.join("boot").join("startup.s"), b"boot").expect("write boot");
+    }
+
+    fn read_legacy_index(overlay_dir: &Path) -> LegacySgdkIndex {
+        let raw = fs::read_to_string(overlay_dir.join("legacy_sgdk_index.json"))
+            .expect("read legacy index");
+        serde_json::from_str(&raw).expect("parse legacy index")
     }
 
     fn write_split_sgdk_donor_fixture(dir: &Path) {
@@ -3651,6 +3986,97 @@ mod tests {
     }
 
     #[test]
+    fn import_legacy_sgdk_project_creates_overlay_for_main_c_only_workspace() {
+        let legacy_dir = temp_dir("legacy-overlay-main-c");
+        fs::create_dir_all(legacy_dir.join("src")).expect("create legacy src");
+        fs::create_dir_all(legacy_dir.join("inc")).expect("create legacy inc");
+        fs::write(
+            legacy_dir.join("src").join("main.c"),
+            b"int main(void){return 0;}",
+        )
+        .expect("write legacy main.c");
+        fs::write(legacy_dir.join("inc").join("game.h"), b"void game(void);")
+            .expect("write legacy header");
+
+        let overlay_dir = import_legacy_sgdk_project(&legacy_dir, Some("Legacy Wrapper"))
+            .expect("wrap legacy project");
+        println!("[legacy-main-c] overlay={}", overlay_dir.display());
+
+        let project = load_project(&overlay_dir).expect("load overlay project");
+        let scene = load_scene(&overlay_dir, DEFAULT_ENTRY_SCENE).expect("load overlay scene");
+        let index = read_legacy_index(&overlay_dir);
+
+        assert_eq!(project.name, "Legacy Wrapper");
+        assert_eq!(
+            project
+                .template_metadata
+                .as_ref()
+                .map(|metadata| metadata.source_kind.as_str()),
+            Some("external_sgdk")
+        );
+        assert!(overlay_dir.join("project.rds").is_file());
+        assert!(legacy_dir.join("src").join("main.c").is_file());
+        assert!(scene.entities.is_empty());
+        assert!(index.source_files.iter().any(|path| path == "src/main.c"));
+        assert!(index.header_files.iter().any(|path| path == "inc/game.h"));
+
+        let _ = fs::remove_dir_all(legacy_dir);
+    }
+
+    #[test]
+    fn import_legacy_sgdk_project_materializes_assets_and_writes_index() {
+        let legacy_dir = temp_dir("legacy-overlay-full");
+        write_generic_sgdk_donor_fixture(&legacy_dir);
+
+        let overlay_dir =
+            import_legacy_sgdk_project(&legacy_dir, None).expect("wrap populated legacy project");
+        println!("[legacy-full] overlay={}", overlay_dir.display());
+
+        let project = load_project(&overlay_dir).expect("load overlay project");
+        let scene = load_scene(&overlay_dir, DEFAULT_ENTRY_SCENE).expect("load overlay scene");
+        let index = read_legacy_index(&overlay_dir);
+
+        assert_eq!(
+            project
+                .template_metadata
+                .as_ref()
+                .map(|metadata| metadata.template_id.as_str()),
+            Some("legacy_sgdk_overlay")
+        );
+        assert!(overlay_dir
+            .join("assets")
+            .join("sprites")
+            .join("hero.png")
+            .is_file());
+        assert!(overlay_dir
+            .join("assets")
+            .join("tilesets")
+            .join("stage.png")
+            .is_file());
+        assert!(overlay_dir
+            .join("assets")
+            .join("audio")
+            .join("jump.wav")
+            .is_file());
+        assert!(scene
+            .entities
+            .iter()
+            .any(|entity| entity.entity_id == "hero"));
+        assert!(scene
+            .entities
+            .iter()
+            .any(|entity| entity.entity_id == "main_camera"));
+        assert!(index
+            .manifest_files
+            .iter()
+            .any(|path| path == "res/resources.res"));
+        assert!(index.output_files.iter().any(|path| path == "out/rom.bin"));
+        assert!(index.source_files.iter().any(|path| path == "src/main.c"));
+
+        let _ = fs::remove_dir_all(legacy_dir);
+    }
+
+    #[test]
     fn migration_chain_upgrades_project_schema_1_0_0_to_1_1_0() {
         let project_dir = temp_dir("schema-chain");
         fs::create_dir_all(project_dir.join("scenes")).expect("create scenes dir");
@@ -3867,7 +4293,10 @@ mod tests {
 
         let scene = load_scene(&project_dir, "scenes/main.json").expect("load migrated scene");
 
-        assert_eq!(scene.schema_version.as_deref(), Some(CURRENT_SCHEMA_VERSION));
+        assert_eq!(
+            scene.schema_version.as_deref(),
+            Some(CURRENT_SCHEMA_VERSION)
+        );
         assert_eq!(scene.entities[0].display_name.as_deref(), Some("Hero Boss"));
         assert!(scene.entities[0].prefab.is_none());
         assert_eq!(
@@ -4088,7 +4517,7 @@ mod tests {
                     palette_slot: 0,
                     animations: HashMap::new(),
                     priority: "foreground".to_string(),
-                meta_sprite: false,
+                    meta_sprite: false,
                 }),
                 logic: Some(LogicComponent {
                     graph: Some(
@@ -4426,8 +4855,7 @@ mod tests {
     #[test]
     fn discover_project_rds_at_root() {
         let dir = temp_dir("discover-root");
-        create_project_skeleton(&dir, "Root Project", "megadrive")
-            .expect("create skeleton");
+        create_project_skeleton(&dir, "Root Project", "megadrive").expect("create skeleton");
 
         let found = discover_project_rds(&dir).expect("should find at root");
         assert_eq!(found, dir);
@@ -4452,8 +4880,7 @@ mod tests {
     fn discover_project_rds_in_arbitrary_subdir() {
         let dir = temp_dir("discover-arb");
         let sub = dir.join("myproject");
-        create_project_skeleton(&sub, "Sub Project", "snes")
-            .expect("create skeleton in subdir");
+        create_project_skeleton(&sub, "Sub Project", "snes").expect("create skeleton in subdir");
 
         let found = discover_project_rds(&dir).expect("should find in subdir");
         assert_eq!(found, sub);
@@ -4464,8 +4891,7 @@ mod tests {
     #[test]
     fn discover_project_rds_root_has_priority() {
         let dir = temp_dir("discover-prio");
-        create_project_skeleton(&dir, "Root Wins", "megadrive")
-            .expect("create root skeleton");
+        create_project_skeleton(&dir, "Root Wins", "megadrive").expect("create root skeleton");
         let rds_dir = dir.join("rds");
         create_project_skeleton(&rds_dir, "Overlay Loses", "megadrive")
             .expect("create rds/ skeleton");
@@ -4498,8 +4924,7 @@ mod tests {
         create_project_skeleton(&rds_dir, "RDS Overlay", "megadrive")
             .expect("create rds/ skeleton");
         let other_dir = dir.join("zzz_other");
-        create_project_skeleton(&other_dir, "Other", "megadrive")
-            .expect("create other skeleton");
+        create_project_skeleton(&other_dir, "Other", "megadrive").expect("create other skeleton");
 
         let found = discover_project_rds(&dir).expect("should find rds/ first");
         assert_eq!(found, rds_dir);

@@ -27,7 +27,7 @@ const mocks = vi.hoisted(() => ({
   convertFileSrc: vi.fn((path: string) => `asset://${path}`),
   listProjectTemplates: vi.fn(),
   createProjectFromTemplate: vi.fn(),
-  importSgdkProject: vi.fn(),
+  importLegacySgdkProject: vi.fn(),
   setProjectTarget: vi.fn(),
   hydrateSceneResult: vi.fn(),
   persistActiveScene: vi.fn(),
@@ -116,7 +116,7 @@ vi.mock("./core/ipc/projectService", () => ({
   newProjectDialog: mocks.newProjectDialog,
   listProjectTemplates: mocks.listProjectTemplates,
   createProjectFromTemplate: mocks.createProjectFromTemplate,
-  importSgdkProject: mocks.importSgdkProject,
+  importLegacySgdkProject: mocks.importLegacySgdkProject,
   setProjectTarget: mocks.setProjectTarget,
 }));
 
@@ -315,10 +315,11 @@ describe("App build flow", () => {
       path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
       name: "MeuProjeto",
     });
-    mocks.importSgdkProject.mockResolvedValue({
+    mocks.importLegacySgdkProject.mockResolvedValue({
       selected: true,
-      path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy/rds",
       name: "Importado",
+      notice: "Projeto SGDK legado adotado em modo nao-destrutivo via overlay 'rds/'.",
     });
     mocks.getHwStatus.mockResolvedValue({
       vram_used: 0,
@@ -721,6 +722,45 @@ describe("App build flow", () => {
     );
   });
 
+  it("allows creating a project without choosing a base directory explicitly", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "",
+        activeProjectName: "",
+        activeScenePath: "",
+        activeScene: null,
+        activeSceneSource: null,
+        hwStatus: null,
+      });
+      await flush();
+      await flush();
+    });
+
+    const starterCard = container.querySelector(
+      "[data-testid='template-card-starter_guided']"
+    ) as HTMLButtonElement | null;
+    const createButton = findButton(container, "Criar Projeto");
+
+    await act(async () => {
+      starterCard?.click();
+      await flush();
+    });
+
+    await act(async () => {
+      createButton.click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.createProjectFromTemplate).toHaveBeenCalledWith(
+      "MeuProjeto",
+      "megadrive",
+      "",
+      "starter_guided",
+      undefined
+    );
+  });
+
   it("imports an arbitrary SGDK project from the wizard", async () => {
     await act(async () => {
       useEditorStore.setState({
@@ -735,13 +775,7 @@ describe("App build flow", () => {
       await flush();
     });
 
-    const chooseButton = findButtonInContext(container, "Escolher", "Pasta base");
     const importButton = findButton(container, "Importar Projeto SGDK");
-
-    await act(async () => {
-      chooseButton.click();
-      await flush();
-    });
 
     await act(async () => {
       importButton.click();
@@ -749,9 +783,8 @@ describe("App build flow", () => {
       await flush();
     });
 
-    expect(mocks.importSgdkProject).toHaveBeenCalledWith(
+    expect(mocks.importLegacySgdkProject).toHaveBeenCalledWith(
       "MeuProjeto",
-      "F:/Projects/RetroDevStudio/tests/fixtures",
       "F:/Projects/RetroDevStudio/tests/fixtures"
     );
   });

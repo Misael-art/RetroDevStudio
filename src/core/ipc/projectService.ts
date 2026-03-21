@@ -4,6 +4,8 @@ export interface OpenProjectResult {
   selected: boolean;
   path: string;
   name: string;
+  base_dir?: string | null;
+  notice?: string | null;
 }
 
 export interface ProjectTemplateSummary {
@@ -69,6 +71,16 @@ export function importSgdkProject(
   return invoke("import_sgdk_project", {
     projectName,
     baseDir,
+    sgdkPath,
+  });
+}
+
+export function importLegacySgdkProject(
+  projectName: string,
+  sgdkPath: string
+): Promise<OpenProjectResult> {
+  return invoke("import_legacy_sgdk_project", {
+    projectName,
     sgdkPath,
   });
 }

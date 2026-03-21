@@ -2,8 +2,10 @@ use crate::compiler::ast_generator::{
     collect_bgm_tracks, collect_collision_checks, collect_logic_sound_names,
     collect_parallax_layers, collect_physics_applications, collect_raster_lines,
     collect_sfx_resources, collect_tilemap_assets, AabbCollisionCheck, AstNode, AstOutput,
-    HardwareEventKind, LogicBoolExpr, LogicCollisionTarget, LogicFsmState, LogicFsmTransition, LogicOp, LogicMathExpr, LogicPositionSource, LogicScript, LogicTimelineSlot, CompareOp,
-    ParallaxLayerConfig, PhysicsApplication, RasterLineConfig, SpriteAsset, TilemapAsset,
+    CompareOp, HardwareEventKind, LogicBoolExpr, LogicCollisionTarget, LogicFsmState,
+    LogicFsmTransition, LogicMathExpr, LogicOp, LogicPositionSource, LogicScript,
+    LogicTimelineSlot, ParallaxLayerConfig, PhysicsApplication, RasterLineConfig, SpriteAsset,
+    TilemapAsset,
 };
 
 #[derive(Debug)]
@@ -94,8 +96,14 @@ fn build_main_c_with_collision(
     if !parallax_layers.is_empty() || !raster_lines.is_empty() {
         out.push_str("static s16 retro_hscroll_table[224];\n");
         for (index, _) in parallax_layers.iter().enumerate() {
-            out.push_str(&format!("static s16 retro_parallax_offset_{}_x = 0;\n", index));
-            out.push_str(&format!("static s16 retro_parallax_offset_{}_y = 0;\n", index));
+            out.push_str(&format!(
+                "static s16 retro_parallax_offset_{}_x = 0;\n",
+                index
+            ));
+            out.push_str(&format!(
+                "static s16 retro_parallax_offset_{}_y = 0;\n",
+                index
+            ));
         }
         out.push('\n');
     }
@@ -125,8 +133,16 @@ fn build_main_c_with_collision(
     out.push_str("int main() {\n");
     let sprite_positions = collect_sprite_position_vars(ast);
     for (var_name, x, y) in &sprite_positions {
-        out.push_str(&format!("    s16 {var_name}_x = {x};\n", var_name = var_name, x = x));
-        out.push_str(&format!("    s16 {var_name}_y = {y};\n", var_name = var_name, y = y));
+        out.push_str(&format!(
+            "    s16 {var_name}_x = {x};\n",
+            var_name = var_name,
+            x = x
+        ));
+        out.push_str(&format!(
+            "    s16 {var_name}_y = {y};\n",
+            var_name = var_name,
+            y = y
+        ));
     }
     if !sprite_positions.is_empty() {
         out.push('\n');
@@ -582,7 +598,9 @@ fn sgdk_event_registration(event: HardwareEventKind) -> String {
     match event {
         HardwareEventKind::VBlank => "    SYS_setVBlankCallback(retro_on_vblank);\n".to_string(),
         HardwareEventKind::HBlank => "    SYS_setHIntCallback(retro_on_hblank);\n".to_string(),
-        HardwareEventKind::DmaDone => "    VDP_setDMACompleteCallback(retro_on_dma_done);\n".to_string(),
+        HardwareEventKind::DmaDone => {
+            "    VDP_setDMACompleteCallback(retro_on_dma_done);\n".to_string()
+        }
     }
 }
 
@@ -691,14 +709,27 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                     value_expr = value_expr
                 ));
             }
-            LogicOp::WhileLoop { condition, body, done } => {
+            LogicOp::WhileLoop {
+                condition,
+                body,
+                done,
+            } => {
                 let condition_expr = render_bool_expr(out, condition, indent);
-                out.push_str(&format!("{indent}while ({condition}) {{\n", indent = indent_str, condition = condition_expr));
+                out.push_str(&format!(
+                    "{indent}while ({condition}) {{\n",
+                    indent = indent_str,
+                    condition = condition_expr
+                ));
                 render_logic_ops(out, body, indent + 4);
                 out.push_str(&format!("{indent}}}\n", indent = indent_str));
                 render_logic_ops(out, done, indent);
             }
-            LogicOp::ForLoop { loop_var, count, body, done } => {
+            LogicOp::ForLoop {
+                loop_var,
+                count,
+                body,
+                done,
+            } => {
                 let count_expr = render_math_expr(count);
                 out.push_str(&format!(
                     "{indent}for (s16 {loop_var} = 0; {loop_var} < {count}; {loop_var}++) {{\n",
@@ -716,7 +747,10 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
             LogicOp::HardwareEvent { ops, .. } => {
                 render_logic_ops(out, ops, indent);
             }
-            LogicOp::StateMachine { machine_var, states } => {
+            LogicOp::StateMachine {
+                machine_var,
+                states,
+            } => {
                 render_fsm_states(out, machine_var, states, indent);
             }
         }
@@ -730,8 +764,16 @@ fn render_timeline_sequence(
     indent: usize,
 ) {
     let indent_str = " ".repeat(indent);
-    out.push_str(&format!("{indent}logic_var_{counter}++;\n", indent = indent_str, counter = counter_var));
-    out.push_str(&format!("{indent}switch (logic_var_{counter}) {{\n", indent = indent_str, counter = counter_var));
+    out.push_str(&format!(
+        "{indent}logic_var_{counter}++;\n",
+        indent = indent_str,
+        counter = counter_var
+    ));
+    out.push_str(&format!(
+        "{indent}switch (logic_var_{counter}) {{\n",
+        indent = indent_str,
+        counter = counter_var
+    ));
     for slot in slots {
         out.push_str(&format!(
             "{indent}case {delay}:\n",
@@ -739,10 +781,19 @@ fn render_timeline_sequence(
             delay = slot.delay_frames
         ));
         render_logic_ops(out, &slot.actions, indent + 8);
-        out.push_str(&format!("{indent}break;\n", indent = " ".repeat(indent + 8)));
+        out.push_str(&format!(
+            "{indent}break;\n",
+            indent = " ".repeat(indent + 8)
+        ));
     }
-    out.push_str(&format!("{indent}default:\n", indent = " ".repeat(indent + 4)));
-    out.push_str(&format!("{indent}break;\n", indent = " ".repeat(indent + 8)));
+    out.push_str(&format!(
+        "{indent}default:\n",
+        indent = " ".repeat(indent + 4)
+    ));
+    out.push_str(&format!(
+        "{indent}break;\n",
+        indent = " ".repeat(indent + 8)
+    ));
     out.push_str(&format!("{indent}}}\n", indent = indent_str));
 }
 
@@ -850,10 +901,18 @@ fn render_math_expr(expr: &LogicMathExpr) -> String {
     match expr {
         LogicMathExpr::Literal(val) => val.to_string(),
         LogicMathExpr::Var(name) => format!("logic_var_{}", name),
-        LogicMathExpr::Add(left, right) => format!("({} + {})", render_math_expr(left), render_math_expr(right)),
-        LogicMathExpr::Sub(left, right) => format!("({} - {})", render_math_expr(left), render_math_expr(right)),
-        LogicMathExpr::Mul(left, right) => format!("({} * {})", render_math_expr(left), render_math_expr(right)),
-        LogicMathExpr::Div(left, right) => format!("({} / {})", render_math_expr(left), render_math_expr(right)),
+        LogicMathExpr::Add(left, right) => {
+            format!("({} + {})", render_math_expr(left), render_math_expr(right))
+        }
+        LogicMathExpr::Sub(left, right) => {
+            format!("({} - {})", render_math_expr(left), render_math_expr(right))
+        }
+        LogicMathExpr::Mul(left, right) => {
+            format!("({} * {})", render_math_expr(left), render_math_expr(right))
+        }
+        LogicMathExpr::Div(left, right) => {
+            format!("({} / {})", render_math_expr(left), render_math_expr(right))
+        }
     }
 }
 
@@ -917,7 +976,10 @@ fn render_retrofx_frame(
         "{indent}VDP_setHorizontalScrollLine(BG_A, 0, retro_hscroll_table, 224, DMA);\n",
         indent = indent_str
     ));
-    if parallax_layers.first().is_some_and(|layer| layer.speed_y != 0) {
+    if parallax_layers
+        .first()
+        .is_some_and(|layer| layer.speed_y != 0)
+    {
         out.push_str(&format!(
             "{indent}VDP_setVerticalScroll(BG_A, retro_parallax_offset_0_y);\n",
             indent = indent_str
@@ -968,43 +1030,87 @@ fn extract_vars_from_op(op: &LogicOp, vars: &mut std::collections::BTreeSet<Stri
             vars.insert(var_name.clone());
             extract_vars_from_math(value, vars);
         }
-        LogicOp::ConditionOverlap { if_true, if_false, .. } => {
-            for sub_op in if_true { extract_vars_from_op(sub_op, vars); }
-            for sub_op in if_false { extract_vars_from_op(sub_op, vars); }
+        LogicOp::ConditionOverlap {
+            if_true, if_false, ..
+        } => {
+            for sub_op in if_true {
+                extract_vars_from_op(sub_op, vars);
+            }
+            for sub_op in if_false {
+                extract_vars_from_op(sub_op, vars);
+            }
         }
-        LogicOp::ConditionBool { condition, if_true, if_false } => {
+        LogicOp::ConditionBool {
+            condition,
+            if_true,
+            if_false,
+        } => {
             extract_vars_from_bool(condition, vars);
-            for sub_op in if_true { extract_vars_from_op(sub_op, vars); }
-            for sub_op in if_false { extract_vars_from_op(sub_op, vars); }
+            for sub_op in if_true {
+                extract_vars_from_op(sub_op, vars);
+            }
+            for sub_op in if_false {
+                extract_vars_from_op(sub_op, vars);
+            }
         }
-        LogicOp::WhileLoop { condition, body, done } => {
+        LogicOp::WhileLoop {
+            condition,
+            body,
+            done,
+        } => {
             extract_vars_from_bool(condition, vars);
-            for sub_op in body { extract_vars_from_op(sub_op, vars); }
-            for sub_op in done { extract_vars_from_op(sub_op, vars); }
+            for sub_op in body {
+                extract_vars_from_op(sub_op, vars);
+            }
+            for sub_op in done {
+                extract_vars_from_op(sub_op, vars);
+            }
         }
-        LogicOp::ForLoop { loop_var, count, body, done } => {
+        LogicOp::ForLoop {
+            loop_var,
+            count,
+            body,
+            done,
+        } => {
             vars.insert(loop_var.clone());
             extract_vars_from_math(count, vars);
-            for sub_op in body { extract_vars_from_op(sub_op, vars); }
-            for sub_op in done { extract_vars_from_op(sub_op, vars); }
+            for sub_op in body {
+                extract_vars_from_op(sub_op, vars);
+            }
+            for sub_op in done {
+                extract_vars_from_op(sub_op, vars);
+            }
         }
         LogicOp::TimelineSequence { counter_var, slots } => {
             vars.insert(counter_var.clone());
             for slot in slots {
-                for sub_op in &slot.actions { extract_vars_from_op(sub_op, vars); }
+                for sub_op in &slot.actions {
+                    extract_vars_from_op(sub_op, vars);
+                }
             }
         }
         LogicOp::HardwareEvent { ops, .. } => {
-            for sub_op in ops { extract_vars_from_op(sub_op, vars); }
+            for sub_op in ops {
+                extract_vars_from_op(sub_op, vars);
+            }
         }
-        LogicOp::StateMachine { machine_var, states } => {
+        LogicOp::StateMachine {
+            machine_var,
+            states,
+        } => {
             vars.insert(machine_var.clone());
             for state in states {
-                for sub_op in &state.body { extract_vars_from_op(sub_op, vars); }
+                for sub_op in &state.body {
+                    extract_vars_from_op(sub_op, vars);
+                }
                 for transition in &state.transitions {
                     extract_vars_from_bool(&transition.condition, vars);
-                    for sub_op in &transition.if_matched { extract_vars_from_op(sub_op, vars); }
-                    for sub_op in &transition.if_unmatched { extract_vars_from_op(sub_op, vars); }
+                    for sub_op in &transition.if_matched {
+                        extract_vars_from_op(sub_op, vars);
+                    }
+                    for sub_op in &transition.if_unmatched {
+                        extract_vars_from_op(sub_op, vars);
+                    }
                 }
             }
         }
@@ -1029,9 +1135,13 @@ fn extract_vars_from_bool(expr: &LogicBoolExpr, vars: &mut std::collections::BTr
 
 fn extract_vars_from_math(expr: &LogicMathExpr, vars: &mut std::collections::BTreeSet<String>) {
     match expr {
-        LogicMathExpr::Var(name) => { vars.insert(name.clone()); }
-        LogicMathExpr::Add(left, right) | LogicMathExpr::Sub(left, right) | 
-        LogicMathExpr::Mul(left, right) | LogicMathExpr::Div(left, right) => {
+        LogicMathExpr::Var(name) => {
+            vars.insert(name.clone());
+        }
+        LogicMathExpr::Add(left, right)
+        | LogicMathExpr::Sub(left, right)
+        | LogicMathExpr::Mul(left, right)
+        | LogicMathExpr::Div(left, right) => {
             extract_vars_from_math(left, vars);
             extract_vars_from_math(right, vars);
         }
@@ -1185,15 +1295,10 @@ fn plane_size_for_tilemaps(tilemap_assets: &[TilemapAsset]) -> Option<(u16, u16)
 /// Sprites that need position tracking (SGDK 2.x: no SPR_getX/SPR_getY).
 /// Returns (var_name, initial_x, initial_y). Initial values from SpawnSprite; defaults (0,0) for logic-only refs.
 fn collect_sprite_position_vars(ast: &AstOutput) -> Vec<(String, i32, i32)> {
-    let mut spawns: std::collections::HashMap<String, (i32, i32)> = std::collections::HashMap::new();
+    let mut spawns: std::collections::HashMap<String, (i32, i32)> =
+        std::collections::HashMap::new();
     for node in &ast.nodes {
-        if let AstNode::SpawnSprite {
-            var_name,
-            x,
-            y,
-            ..
-        } = node
-        {
+        if let AstNode::SpawnSprite { var_name, x, y, .. } = node {
             spawns.insert(var_name.clone(), (*x, *y));
         }
     }
@@ -1237,9 +1342,7 @@ fn collect_sprite_vars_from_ops(ops: &[LogicOp], out: &mut std::collections::BTr
                 }
             }
             LogicOp::ConditionBool {
-                if_true,
-                if_false,
-                ..
+                if_true, if_false, ..
             } => {
                 collect_sprite_vars_from_ops(if_true, out);
                 collect_sprite_vars_from_ops(if_false, out);
@@ -1586,18 +1689,18 @@ mod tests {
 
         let output = emit_sgdk(&ast, "RetroFX Demo");
 
-        assert!(output.main_c.contains("static s16 retro_hscroll_table[224];"));
+        assert!(output
+            .main_c
+            .contains("static s16 retro_hscroll_table[224];"));
         assert!(output
             .main_c
             .contains("VDP_setScrollingMode(HSCROLL_LINE, VSCROLL_PLANE);"));
         assert!(output.main_c.contains("retro_parallax_offset_0_x += 2;"));
         assert!(output.main_c.contains("retro_parallax_offset_0_y += 1;"));
+        assert!(output.main_c.contains("retro_hscroll_table[128] += 6;"));
         assert!(output
             .main_c
-            .contains("retro_hscroll_table[128] += 6;"));
-        assert!(output.main_c.contains(
-            "VDP_setHorizontalScrollLine(BG_A, 0, retro_hscroll_table, 224, DMA);"
-        ));
+            .contains("VDP_setHorizontalScrollLine(BG_A, 0, retro_hscroll_table, 224, DMA);"));
         assert!(output
             .main_c
             .contains("VDP_setVerticalScroll(BG_A, retro_parallax_offset_0_y);"));
@@ -1675,9 +1778,7 @@ mod tests {
         assert!(output.main_c.contains(
             "u8 collision_player_badnik = retro_aabb_intersects(18, 28, 16, 24, 40, 28, 24, 24);"
         ));
-        assert!(output
-            .main_c
-            .contains("// Collision: player <-> badnik"));
+        assert!(output.main_c.contains("// Collision: player <-> badnik"));
     }
 
     #[test]
@@ -1760,14 +1861,18 @@ mod tests {
         assert!(output.main_c.contains("static s32 spr_hero_vel_x = 0;"));
         assert!(output.main_c.contains("static s32 spr_hero_vel_y = 0;"));
         assert!(output.main_c.contains("spr_hero_vel_y += 6;"));
-        assert!(output.main_c.contains("if (spr_hero_vel_x > 48) spr_hero_vel_x = 48;"));
-        assert!(output.main_c.contains("if (spr_hero_vel_y > 96) spr_hero_vel_y = 96;"));
-        assert!(output.main_c.contains(
-            "s16 spr_hero_next_x = spr_hero_x + (spr_hero_vel_x / 16);"
-        ));
-        assert!(output.main_c.contains(
-            "SPR_setPosition(spr_hero, spr_hero_x, spr_hero_y);"
-        ));
+        assert!(output
+            .main_c
+            .contains("if (spr_hero_vel_x > 48) spr_hero_vel_x = 48;"));
+        assert!(output
+            .main_c
+            .contains("if (spr_hero_vel_y > 96) spr_hero_vel_y = 96;"));
+        assert!(output
+            .main_c
+            .contains("s16 spr_hero_next_x = spr_hero_x + (spr_hero_vel_x / 16);"));
+        assert!(output
+            .main_c
+            .contains("SPR_setPosition(spr_hero, spr_hero_x, spr_hero_y);"));
     }
 
     #[test]
@@ -1930,9 +2035,9 @@ mod tests {
         let output = emit_sgdk(&ast, "Logic Demo");
 
         assert!(output.main_c.contains("static u8 retro_aabb_intersects("));
-        assert!(output.main_c.contains(
-            "spr_player_x += 2; spr_player_y += -1;"
-        ));
+        assert!(output
+            .main_c
+            .contains("spr_player_x += 2; spr_player_y += -1;"));
         assert!(output.main_c.contains(
             "if (retro_aabb_intersects(spr_player_x + 0, spr_player_y + 0, 16, 16, spr_enemy_x + 1, spr_enemy_y + 2, 16, 16)) {"
         ));
@@ -1989,11 +2094,17 @@ mod tests {
         let output = emit_sgdk(&ast, "Logic Vars Demo");
 
         assert!(output.main_c.contains("static s32 logic_var_score = 0;"));
-        assert!(output.main_c.contains("logic_var_score = (((logic_var_score + 2) * (6 - 1)) / 5);"));
+        assert!(output
+            .main_c
+            .contains("logic_var_score = (((logic_var_score + 2) * (6 - 1)) / 5);"));
         assert!(output.main_c.contains("if ((logic_var_score >= 10)) {"));
-        assert!(output.main_c.contains("XGM_startPlayPCM(SFX_WIN, 1, SOUND_PCM_CH_AUTO);"));
+        assert!(output
+            .main_c
+            .contains("XGM_startPlayPCM(SFX_WIN, 1, SOUND_PCM_CH_AUTO);"));
         assert!(output.main_c.contains("} else {"));
-        assert!(output.main_c.contains("XGM_startPlayPCM(SFX_LOSE, 1, SOUND_PCM_CH_AUTO);"));
+        assert!(output
+            .main_c
+            .contains("XGM_startPlayPCM(SFX_LOSE, 1, SOUND_PCM_CH_AUTO);"));
     }
 
     #[test]
@@ -2043,10 +2154,14 @@ mod tests {
 
         let output = emit_sgdk(&ast, "FSM Demo");
 
-        assert!(output.main_c.contains("static s32 logic_var_fsm_state = 0;"));
+        assert!(output
+            .main_c
+            .contains("static s32 logic_var_fsm_state = 0;"));
         assert!(output.main_c.contains("if (logic_var_fsm_state == 0) {"));
         assert!(output.main_c.contains("logic_var_fsm_state = 1;"));
-        assert!(output.main_c.contains("else if (logic_var_fsm_state == 1) {"));
+        assert!(output
+            .main_c
+            .contains("else if (logic_var_fsm_state == 1) {"));
         assert!(output.main_c.contains("SPR_setPosition(spr_player"));
     }
 
@@ -2087,8 +2202,12 @@ mod tests {
         let output = emit_sgdk(&ast, "Flow Demo");
 
         assert!(output.main_c.contains("while ((logic_var_speed > 0)) {"));
-        assert!(output.main_c.contains("for (s16 idx = 0; idx < 3; idx++) {"));
-        assert!(output.main_c.contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH_AUTO);"));
+        assert!(output
+            .main_c
+            .contains("for (s16 idx = 0; idx < 3; idx++) {"));
+        assert!(output
+            .main_c
+            .contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH_AUTO);"));
     }
 
     #[test]
@@ -2126,12 +2245,18 @@ mod tests {
 
         let output = emit_sgdk(&ast, "Timeline Demo");
 
-        assert!(output.main_c.contains("static s32 logic_var_timeline_intro = 0;"));
+        assert!(output
+            .main_c
+            .contains("static s32 logic_var_timeline_intro = 0;"));
         assert!(output.main_c.contains("logic_var_timeline_intro++;"));
-        assert!(output.main_c.contains("switch (logic_var_timeline_intro) {"));
+        assert!(output
+            .main_c
+            .contains("switch (logic_var_timeline_intro) {"));
         assert!(output.main_c.contains("case 15:"));
         assert!(output.main_c.contains("case 30:"));
-        assert!(output.main_c.contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH_AUTO);"));
+        assert!(output
+            .main_c
+            .contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH_AUTO);"));
     }
 
     #[test]
@@ -2168,10 +2293,20 @@ mod tests {
 
         let output = emit_sgdk(&ast, "Event Demo");
 
-        assert!(output.main_c.contains("static void retro_on_vblank(void) {"));
-        assert!(output.main_c.contains("static void retro_on_hblank(void) {"));
-        assert!(output.main_c.contains("SYS_setVBlankCallback(retro_on_vblank);"));
-        assert!(output.main_c.contains("SYS_setHIntCallback(retro_on_hblank);"));
-        assert!(output.main_c.contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH_AUTO);"));
+        assert!(output
+            .main_c
+            .contains("static void retro_on_vblank(void) {"));
+        assert!(output
+            .main_c
+            .contains("static void retro_on_hblank(void) {"));
+        assert!(output
+            .main_c
+            .contains("SYS_setVBlankCallback(retro_on_vblank);"));
+        assert!(output
+            .main_c
+            .contains("SYS_setHIntCallback(retro_on_hblank);"));
+        assert!(output
+            .main_c
+            .contains("XGM_startPlayPCM(SFX_JUMP, 1, SOUND_PCM_CH_AUTO);"));
     }
 }

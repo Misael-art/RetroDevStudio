@@ -1,8 +1,13 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEditorStore } from "../../core/store/editorStore";
 import { createSpriteEntityFromAsset } from "../../core/editorEntityFactory";
+import {
+  artProcessPalette,
+  type ArtContentBounds,
+  importArtAsset,
+  type ArtSuggestedFrame,
+} from "../../core/ipc/artStudioService";
 import type { AnimationDef } from "../../core/ipc/sceneService";
 import { constrainSpriteFrameSize } from "../../core/sceneConstraints";
 import { useSpriteAnimator } from "./useSpriteAnimator";
@@ -25,19 +30,6 @@ type ArtStudioFormatExtension = keyof typeof ARTSTUDIO_FORMAT_LABELS;
 type ArtStudioLoadStatus = "idle" | "loading" | "loaded" | "error";
 type ArtStudioSourceScope = "none" | "project" | "external";
 
-interface ArtStudioImageMeta {
-  sourcePath: string;
-  displayName: string;
-  format: string | null;
-}
-
-interface LoadedArtStudioImage extends ArtStudioImageMeta {
-  image: HTMLImageElement;
-  url: string;
-  revokeUrl: string | null;
-  size: { width: number; height: number };
-}
-
 interface ArtStudioImageRequest {
   sourcePath?: string;
   file?: File;
@@ -45,10 +37,6 @@ interface ArtStudioImageRequest {
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function createErrorWithCause(message: string, cause: unknown): Error {
-  return Object.assign(new Error(message), { cause });
 }
 
 function normalizeFsPath(value: string): string {
@@ -192,86 +180,38 @@ async function loadImageElement(url: string): Promise<HTMLImageElement> {
   return img;
 }
 
-async function loadArtStudioImage(
-  request: ArtStudioImageRequest
-): Promise<LoadedArtStudioImage> {
-  const sourceLabel = request.sourcePath ?? request.file?.name ?? "";
-  if (!sourceLabel) {
-    throw new Error("invalid path");
+function resolveDroppedFilePath(file: File): string | null {
+  const fileWithPath = file as File & { path?: string };
+  return typeof fileWithPath.path === "string" && fileWithPath.path.trim()
+    ? fileWithPath.path
+    : null;
+}
+
+function getArtStudioFriendlyError(sourceLabel: string, error: unknown): string {
+  const detail = describeError(error).trim();
+  if (
+    detail.startsWith("Falha ao") ||
+    detail.startsWith("Arquivo nao") ||
+    detail.startsWith("O caminho informado")
+  ) {
+    return detail;
   }
 
-  const format = getArtStudioImageFormatLabel(sourceLabel, request.file?.type);
-  if (!format) {
-    throw new Error("unsupported format");
-  }
+  return describeArtStudioLoadFailure(sourceLabel, error);
+}
 
-  if (request.file) {
-    if (request.file.size <= 0) {
-      throw new Error("empty file");
-    }
-    const objectUrl = URL.createObjectURL(request.file);
-    try {
-      const image = await loadImageElement(objectUrl);
-      return {
-        image,
-        url: objectUrl,
-        revokeUrl: objectUrl,
-        size: { width: image.naturalWidth, height: image.naturalHeight },
-        sourcePath: sourceLabel,
-        displayName: basenameWithExtension(sourceLabel),
-        format,
-      };
-    } catch (error) {
-      URL.revokeObjectURL(objectUrl);
-      throw error;
-    }
-  }
-
-  const assetUrl = convertFileSrc(sourceLabel);
-  try {
-    const image = await loadImageElement(assetUrl);
-    return {
-      image,
-      url: assetUrl,
-      revokeUrl: null,
-      size: { width: image.naturalWidth, height: image.naturalHeight },
-      sourcePath: sourceLabel,
-      displayName: basenameWithExtension(sourceLabel),
-      format,
-    };
-  } catch (assetError) {
-    try {
-      const response = await fetch(assetUrl);
-      if (!response.ok) {
-        throw createErrorWithCause(`http ${response.status}`, assetError);
-      }
-      const blob = await response.blob();
-      if (blob.size <= 0) {
-        throw createErrorWithCause("empty file", assetError);
-      }
-      const objectUrl = URL.createObjectURL(blob);
-      try {
-        const image = await loadImageElement(objectUrl);
-        return {
-          image,
-          url: objectUrl,
-          revokeUrl: objectUrl,
-          size: { width: image.naturalWidth, height: image.naturalHeight },
-          sourcePath: sourceLabel,
-          displayName: basenameWithExtension(sourceLabel),
-          format,
-        };
-      } catch (decodeError) {
-        URL.revokeObjectURL(objectUrl);
-        throw decodeError;
-      }
-    } catch (fallbackError) {
-      throw createErrorWithCause(
-        `asset load: ${describeError(assetError)} | fallback: ${describeError(fallbackError)}`,
-        fallbackError
-      );
-    }
-  }
+async function loadArtStudioPreviewFromBase64(processedBase64: string): Promise<{
+  image: HTMLImageElement;
+  url: string;
+  size: { width: number; height: number };
+}> {
+  const url = `data:image/png;base64,${processedBase64}`;
+  const image = await loadImageElement(url);
+  return {
+    image,
+    url,
+    size: { width: image.naturalWidth, height: image.naturalHeight },
+  };
 }
 
 export function resolveArtStudioSpriteAssetPath(
@@ -369,6 +309,16 @@ interface ArtStudioState {
   spriteSheetLoadStatus: ArtStudioLoadStatus;
   spriteSheetLoadMessage: string | null;
   spriteSheetScope: ArtStudioSourceScope;
+  spriteSheetFrameCount: number | null;
+  spriteSheetBackgroundMode: string | null;
+  spriteSheetTransparentPixels: number | null;
+  spriteSheetPalette: string[];
+  spriteSheetWarnings: string[];
+  spriteSheetContentBounds: ArtContentBounds | null;
+  spriteSheetRecommendedOutput: { width: number; height: number; scalePercent: number } | null;
+  spriteSheetMetaSpriteCandidate: boolean;
+  suggestedFrames: ArtSuggestedFrame[];
+  slicingMode: string | null;
   sourceZoom: number;
   frameWidth: number;
   frameHeight: number;
@@ -378,6 +328,7 @@ interface ArtStudioState {
   compression: string;
   spriteName: string;
   spritePath: string;
+  spriteSourceAssetPath: string;
   saveFeedback: boolean;
   validationError: string | null;
 }
@@ -396,6 +347,35 @@ type ArtStudioAction =
       scope: ArtStudioSourceScope;
       zoom: number;
       message: string | null;
+      frameCount: number | null;
+      backgroundMode: string | null;
+      transparentPixels: number | null;
+      palette: string[];
+      warnings: string[];
+      contentBounds: ArtContentBounds | null;
+      recommendedOutput: { width: number; height: number; scalePercent: number } | null;
+      metaSpriteCandidate: boolean;
+      suggestedFrames: ArtSuggestedFrame[];
+      slicingMode: string | null;
+      suggestedFrameWidth: number;
+      suggestedFrameHeight: number;
+    }
+  | {
+      type: "SET_IMPORTED_ASSET";
+      path: string;
+      name: string;
+      width: number;
+      height: number;
+    }
+  | {
+      type: "UPDATE_SLICING_SUGGESTIONS";
+      frameWidth: number;
+      frameHeight: number;
+      suggestedFrames: ArtSuggestedFrame[];
+      warnings: string[];
+      contentBounds: ArtContentBounds | null;
+      recommendedOutput: { width: number; height: number; scalePercent: number } | null;
+      slicingMode: string | null;
     }
   | { type: "LOAD_SPRITE_ERROR"; message: string }
   | { type: "SET_SOURCE_ZOOM"; value: number }
@@ -420,6 +400,7 @@ function artStudioReducer(state: ArtStudioState, action: ArtStudioAction): ArtSt
         ...state,
         spriteSheetLoadStatus: "loading",
         spriteSheetLoadMessage: `Carregando ${action.sourceLabel}...`,
+        spriteSheetWarnings: [],
         saveFeedback: false,
         validationError: null,
       };
@@ -434,9 +415,22 @@ function artStudioReducer(state: ArtStudioState, action: ArtStudioAction): ArtSt
         spriteSheetLoadStatus: "loaded",
         spriteSheetLoadMessage: action.message,
         spriteSheetScope: action.scope,
+        spriteSheetFrameCount: action.frameCount,
+        spriteSheetBackgroundMode: action.backgroundMode,
+        spriteSheetTransparentPixels: action.transparentPixels,
+        spriteSheetPalette: action.palette,
+        spriteSheetWarnings: action.warnings,
+        spriteSheetContentBounds: action.contentBounds,
+        spriteSheetRecommendedOutput: action.recommendedOutput,
+        spriteSheetMetaSpriteCandidate: action.metaSpriteCandidate,
+        suggestedFrames: action.suggestedFrames,
+        slicingMode: action.slicingMode,
         sourceZoom: action.zoom,
-        spritePath: action.path,
+        spritePath: "",
+        spriteSourceAssetPath: action.path,
         spriteName: action.name,
+        frameWidth: action.suggestedFrameWidth,
+        frameHeight: action.suggestedFrameHeight,
         saveFeedback: false,
         validationError: null,
       };
@@ -445,8 +439,45 @@ function artStudioReducer(state: ArtStudioState, action: ArtStudioAction): ArtSt
         ...state,
         spriteSheetLoadStatus: "error",
         spriteSheetLoadMessage: action.message,
+        spriteSheetFrameCount: null,
+        spriteSheetBackgroundMode: null,
+        spriteSheetTransparentPixels: null,
+        spriteSheetPalette: [],
+        spriteSheetWarnings: [],
+        spriteSheetContentBounds: null,
+        spriteSheetRecommendedOutput: null,
+        spriteSheetMetaSpriteCandidate: false,
+        suggestedFrames: [],
+        slicingMode: null,
         saveFeedback: false,
       };
+    case "SET_IMPORTED_ASSET":
+      return {
+        ...state,
+        spritePath: action.path,
+        spriteName: action.name,
+        frameWidth: action.width,
+        frameHeight: action.height,
+        validationError: null,
+      };
+    case "UPDATE_SLICING_SUGGESTIONS":
+      {
+        const available = new Set(action.suggestedFrames.map((frame) => frame.index));
+        return {
+          ...state,
+          frameWidth: action.frameWidth,
+          frameHeight: action.frameHeight,
+          suggestedFrames: action.suggestedFrames,
+          spriteSheetWarnings: action.warnings,
+          spriteSheetContentBounds: action.contentBounds,
+          spriteSheetRecommendedOutput: action.recommendedOutput,
+          slicingMode: action.slicingMode,
+          sequences: state.sequences.map((sequence) => ({
+            ...sequence,
+            frames: sequence.frames.filter((frame) => available.has(frame)),
+          })),
+        };
+      }
     case "SET_SOURCE_ZOOM":
       return {
         ...state,
@@ -545,6 +576,16 @@ const INITIAL_STATE: ArtStudioState = {
   spriteSheetLoadStatus: "idle",
   spriteSheetLoadMessage: null,
   spriteSheetScope: "none",
+  spriteSheetFrameCount: null,
+  spriteSheetBackgroundMode: null,
+  spriteSheetTransparentPixels: null,
+  spriteSheetPalette: [],
+  spriteSheetWarnings: [],
+  spriteSheetContentBounds: null,
+  spriteSheetRecommendedOutput: null,
+  spriteSheetMetaSpriteCandidate: false,
+  suggestedFrames: [],
+  slicingMode: null,
   sourceZoom: 1,
   frameWidth: 32,
   frameHeight: 32,
@@ -558,6 +599,7 @@ const INITIAL_STATE: ArtStudioState = {
   compression: "NONE",
   spriteName: "sprite",
   spritePath: "",
+  spriteSourceAssetPath: "",
   saveFeedback: false,
   validationError: null,
 };
@@ -588,14 +630,13 @@ const COMPRESSION_OPTIONS = [
   { value: "BEST", label: "BEST" },
 ] as const;
 
-function getGridCellIndex(
+function getSuggestedFrameIndex(
   canvasRect: DOMRect,
   canvasWidth: number,
   canvasHeight: number,
   imgWidth: number,
   imgHeight: number,
-  frameWidth: number,
-  frameHeight: number,
+  frames: ArtSuggestedFrame[],
   clientX: number,
   clientY: number
 ): number | null {
@@ -606,10 +647,16 @@ function getGridCellIndex(
   if (imgX < 0 || imgY < 0 || imgX >= imgWidth || imgY >= imgHeight) {
     return null;
   }
-  const cellX = Math.floor(imgX / frameWidth);
-  const cellY = Math.floor(imgY / frameHeight);
-  const cols = Math.max(1, Math.floor(imgWidth / frameWidth));
-  return cellY * cols + cellX;
+
+  const match = frames.find(
+    (frame) =>
+      imgX >= frame.x &&
+      imgX < frame.x + frame.width &&
+      imgY >= frame.y &&
+      imgY < frame.y + frame.height
+  );
+
+  return match?.index ?? null;
 }
 
 export default function ArtStudioPanel() {
@@ -627,7 +674,7 @@ export default function ArtStudioPanel() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
-  const transientObjectUrlRef = useRef<string | null>(null);
+  const processingRequestIdRef = useRef(0);
   const saveFeedbackTimeoutRef = useRef<number | null>(null);
   const [currentPreviewCell, setCurrentPreviewCell] = useState<number>(-1);
   const [dragActive, setDragActive] = useState(false);
@@ -645,7 +692,8 @@ export default function ArtStudioPanel() {
     state.spriteSheetSize && state.frameHeight > 0
       ? Math.max(1, Math.floor(state.spriteSheetSize.height / state.frameHeight))
       : 0;
-  const totalFrameSlots = totalGridColumns * totalGridRows;
+  const totalFrameSlots =
+    state.suggestedFrames.length > 0 ? state.suggestedFrames.length : totalGridColumns * totalGridRows;
   const usedFrameCount = new Set(state.sequences.flatMap((sequence) => sequence.frames)).size;
   const externalSourceLoaded =
     state.spriteSheetLoadStatus === "loaded" && state.spriteSheetScope === "external";
@@ -654,13 +702,11 @@ export default function ArtStudioPanel() {
     Boolean(activeScene) &&
     Boolean(state.spriteSheetUrl) &&
     Boolean(state.spritePath) &&
+    state.suggestedFrames.length > 0 &&
     state.spriteSheetLoadStatus === "loaded";
 
   useEffect(() => {
     return () => {
-      if (transientObjectUrlRef.current) {
-        URL.revokeObjectURL(transientObjectUrlRef.current);
-      }
       if (saveFeedbackTimeoutRef.current !== null) {
         window.clearTimeout(saveFeedbackTimeoutRef.current);
       }
@@ -677,34 +723,52 @@ export default function ArtStudioPanel() {
     }, [])
   );
 
-  const releaseTransientUrl = useCallback(() => {
-    if (transientObjectUrlRef.current) {
-      URL.revokeObjectURL(transientObjectUrlRef.current);
-      transientObjectUrlRef.current = null;
-    }
-  }, []);
-
   const ingestSpriteSheet = useCallback(
     async (request: ArtStudioImageRequest) => {
-      const sourceLabel = request.sourcePath ?? request.file?.name ?? "imagem";
+      const sourcePath = request.sourcePath ?? (request.file ? resolveDroppedFilePath(request.file) : null);
+      const sourceLabel = sourcePath ?? request.file?.name ?? "imagem";
       dispatch({ type: "START_SPRITE_LOAD", sourceLabel: basenameWithExtension(sourceLabel) });
 
       try {
-        const loaded = await loadArtStudioImage(request);
-        releaseTransientUrl();
-        if (loaded.revokeUrl) {
-          transientObjectUrlRef.current = loaded.revokeUrl;
+        if (!sourcePath) {
+          throw new Error(
+            "O drag-and-drop atual nao expôs um caminho nativo. Use 'Importar imagem' para processar este arquivo com o backend do ArtStudio."
+          );
         }
 
+        const processed = await artProcessPalette(sourcePath);
+        if (!processed.ok || !processed.processed_base64) {
+          throw new Error(processed.error ?? "Falha ao processar a imagem no backend.");
+        }
+
+        const loaded = await loadArtStudioPreviewFromBase64(processed.processed_base64);
+
         const relativeAssetPath =
-          activeProjectDir && request.sourcePath
-            ? resolveArtStudioSpriteAssetPath(activeProjectDir, request.sourcePath)
+          activeProjectDir && sourcePath
+            ? resolveArtStudioSpriteAssetPath(activeProjectDir, sourcePath)
             : null;
-        const spriteName = basenameWithoutExtension(relativeAssetPath ?? loaded.sourcePath);
+        const spriteName = basenameWithoutExtension(relativeAssetPath ?? sourcePath);
         const scope: ArtStudioSourceScope = relativeAssetPath ? "project" : "external";
         const message = relativeAssetPath
-          ? "Imagem pronta para slicing e aplicacao na cena."
-          : "Imagem carregada para preparo. Para aplicar na cena, mova ou copie o arquivo para assets/sprites.";
+          ? "Imagem processada no backend, quantizada e pronta para slicing."
+          : "Imagem processada no backend para preparo. Para aplicar na cena, mova ou copie o arquivo para assets/sprites.";
+
+        const suggestedFrame = constrainSpriteFrameSize(
+          activeTarget,
+          relativeAssetPath ?? undefined,
+          processed.suggested_frame_width ?? 32,
+          processed.suggested_frame_height ?? 32
+        );
+        const recommendedOutput =
+          processed.recommended_output_width &&
+          processed.recommended_output_height &&
+          processed.recommended_scale_percent
+            ? {
+                width: processed.recommended_output_width,
+                height: processed.recommended_output_height,
+                scalePercent: processed.recommended_scale_percent,
+              }
+            : null;
 
         dispatch({
           type: "LOAD_SPRITE",
@@ -712,21 +776,33 @@ export default function ArtStudioPanel() {
           size: loaded.size,
           path: relativeAssetPath ?? "",
           name: spriteName,
-          sourcePath: loaded.sourcePath,
-          displayName: loaded.displayName,
-          format: loaded.format,
+          sourcePath,
+          displayName: basenameWithExtension(sourcePath),
+          format: processed.format ?? getArtStudioImageFormatLabel(sourcePath, request.file?.type),
           scope,
           zoom: getInitialSourceZoom(loaded.size),
           message,
+          frameCount: processed.frame_count,
+          backgroundMode: processed.background_mode,
+          transparentPixels: processed.transparent_pixels,
+          palette: processed.palette,
+          warnings: processed.warnings,
+          contentBounds: processed.content_bounds,
+          recommendedOutput,
+          metaSpriteCandidate: processed.meta_sprite_candidate,
+          suggestedFrames: processed.suggested_frames,
+          slicingMode: processed.slicing_mode,
+          suggestedFrameWidth: suggestedFrame.frameWidth,
+          suggestedFrameHeight: suggestedFrame.frameHeight,
         });
 
         imageRef.current = loaded.image;
         logMessage(
           relativeAssetPath ? "success" : "info",
-          `[ArtStudio] Imagem carregada: ${loaded.displayName} (${loaded.format ?? "imagem"} ${loaded.size.width}x${loaded.size.height}).`
+          `[ArtStudio] Imagem processada no backend: ${basenameWithExtension(sourcePath)} (${processed.format ?? "imagem"} ${loaded.size.width}x${loaded.size.height}, paleta ${processed.palette_size}/16).`
         );
       } catch (error) {
-        const friendlyMessage = describeArtStudioLoadFailure(sourceLabel, error);
+        const friendlyMessage = getArtStudioFriendlyError(sourceLabel, error);
         dispatch({ type: "LOAD_SPRITE_ERROR", message: friendlyMessage });
         logMessage(
           "error",
@@ -734,7 +810,7 @@ export default function ArtStudioPanel() {
         );
       }
     },
-    [activeProjectDir, logMessage, releaseTransientUrl]
+    [activeProjectDir, activeTarget, logMessage]
   );
 
   const handleLoadSpriteSheet = useCallback(async () => {
@@ -787,21 +863,83 @@ export default function ArtStudioPanel() {
     dispatch({ type: "ADD_SEQUENCE", id, name: `ANIM_${count}` });
   }, [state.sequences.length]);
 
+  const refreshSlicingSuggestions = useCallback(
+    async (sourcePath: string, nextWidth: number, nextHeight: number) => {
+      const requestId = processingRequestIdRef.current + 1;
+      processingRequestIdRef.current = requestId;
+
+      try {
+        const processed = await artProcessPalette(sourcePath, {
+          gridWidth: nextWidth,
+          gridHeight: nextHeight,
+          slicingMode: "grid",
+        });
+
+        if (processingRequestIdRef.current !== requestId || !processed.ok) {
+          if (!processed.ok) {
+            throw new Error(processed.error ?? "Falha ao atualizar slicing.");
+          }
+          return;
+        }
+
+        const constrained = constrainSpriteFrameSize(
+          activeTarget,
+          state.spritePath || state.spriteSourceAssetPath || undefined,
+          processed.suggested_frame_width ?? nextWidth,
+          processed.suggested_frame_height ?? nextHeight
+        );
+        const recommendedOutput =
+          processed.recommended_output_width &&
+          processed.recommended_output_height &&
+          processed.recommended_scale_percent
+            ? {
+                width: processed.recommended_output_width,
+                height: processed.recommended_output_height,
+                scalePercent: processed.recommended_scale_percent,
+              }
+            : null;
+
+        dispatch({
+          type: "UPDATE_SLICING_SUGGESTIONS",
+          frameWidth: constrained.frameWidth,
+          frameHeight: constrained.frameHeight,
+          suggestedFrames: processed.suggested_frames,
+          warnings: processed.warnings,
+          contentBounds: processed.content_bounds,
+          recommendedOutput,
+          slicingMode: processed.slicing_mode,
+        });
+      } catch (error) {
+        const friendlyMessage = getArtStudioFriendlyError(sourcePath, error);
+        dispatch({ type: "SET_VALIDATION_ERROR", message: friendlyMessage });
+        logMessage(
+          "error",
+          `[ArtStudio] Falha ao recalcular slicing: ${friendlyMessage} Detalhe tecnico: ${describeError(error)}`
+        );
+      }
+    },
+    [activeTarget, logMessage, state.spritePath, state.spriteSourceAssetPath]
+  );
+
   const handleCanvasClick = useCallback(
     (event: React.MouseEvent<HTMLCanvasElement>) => {
-      if (!state.activeSequenceId || !state.spriteSheetSize || !canvasRef.current) {
+      if (
+        !state.activeSequenceId ||
+        !state.spriteSheetSize ||
+        !canvasRef.current ||
+        state.suggestedFrames.length === 0
+      ) {
         return;
       }
 
       const rect = canvasRef.current.getBoundingClientRect();
-      const cell = getGridCellIndex(
+      const cell = getSuggestedFrameIndex(
         rect,
         rect.width,
         rect.height,
         state.spriteSheetSize.width,
         state.spriteSheetSize.height,
-        state.frameWidth,
-        state.frameHeight,
+        state.suggestedFrames,
         event.clientX,
         event.clientY
       );
@@ -809,7 +947,7 @@ export default function ArtStudioPanel() {
         dispatch({ type: "TOGGLE_FRAME", cellIndex: cell });
       }
     },
-    [state.activeSequenceId, state.spriteSheetSize, state.frameWidth, state.frameHeight]
+    [state.activeSequenceId, state.spriteSheetSize, state.suggestedFrames]
   );
 
   const setSourceZoom = useCallback((value: number) => {
@@ -830,7 +968,7 @@ export default function ArtStudioPanel() {
     (nextWidth: number, nextHeight: number) => {
       const constrained = constrainSpriteFrameSize(
         activeTarget,
-        state.spritePath || undefined,
+        state.spritePath || state.spriteSourceAssetPath || undefined,
         nextWidth,
         nextHeight
       );
@@ -839,8 +977,15 @@ export default function ArtStudioPanel() {
         width: constrained.frameWidth,
         height: constrained.frameHeight,
       });
+      if (state.spriteSheetSourcePath) {
+        void refreshSlicingSuggestions(
+          state.spriteSheetSourcePath,
+          constrained.frameWidth,
+          constrained.frameHeight
+        );
+      }
     },
-    [activeTarget, state.spritePath]
+    [activeTarget, refreshSlicingSuggestions, state.spritePath, state.spriteSheetSourcePath, state.spriteSourceAssetPath]
   );
 
   const handleApplyToScene = useCallback(() => {
@@ -862,7 +1007,7 @@ export default function ArtStudioPanel() {
       dispatch({
         type: "SET_VALIDATION_ERROR",
         message:
-          "A imagem foi carregada apenas para preparo. Mova ou copie o arquivo para assets/sprites do projeto antes de aplicar na cena.",
+          "Gere primeiro o asset canonico em assets/sprites para alinhar os frames com o pipeline oficial antes de aplicar na cena.",
       });
       return;
     }
@@ -976,10 +1121,69 @@ export default function ArtStudioPanel() {
     logMessage,
   ]);
 
+  const handleImportToProject = useCallback(async () => {
+    if (!activeProjectDir) {
+      dispatch({
+        type: "SET_VALIDATION_ERROR",
+        message: "Abra um projeto antes de gerar o asset canonico do ArtStudio.",
+      });
+      return;
+    }
+    if (!state.spriteSheetSourcePath) {
+      dispatch({
+        type: "SET_VALIDATION_ERROR",
+        message: "Carregue uma imagem antes de importar para assets/sprites.",
+      });
+      return;
+    }
+
+    try {
+      const imported = await importArtAsset(state.spriteSheetSourcePath, activeProjectDir, {
+        spriteName: state.spriteName,
+        gridWidth: state.frameWidth,
+        gridHeight: state.frameHeight,
+        slicingMode: state.slicingMode ?? "grid",
+      });
+
+      if (!imported.ok || !imported.relative_path) {
+        throw new Error(imported.error ?? "Falha ao gerar asset canonico.");
+      }
+
+      const nextName =
+        imported.sprite_name ?? basenameWithoutExtension(imported.relative_path);
+      dispatch({
+        type: "SET_IMPORTED_ASSET",
+        path: imported.relative_path,
+        name: nextName,
+        width: imported.frame_width ?? state.frameWidth,
+        height: imported.frame_height ?? state.frameHeight,
+      });
+      logMessage(
+        "success",
+        `[ArtStudio] Asset canonico gerado em ${imported.relative_path} com ${imported.frame_count} frame(s).`
+      );
+    } catch (error) {
+      const message = getArtStudioFriendlyError(state.spriteSheetSourcePath, error);
+      dispatch({ type: "SET_VALIDATION_ERROR", message });
+      logMessage(
+        "error",
+        `[ArtStudio] Falha ao importar asset canonico: ${message} Detalhe tecnico: ${describeError(error)}`
+      );
+    }
+  }, [
+    activeProjectDir,
+    logMessage,
+    state.frameHeight,
+    state.frameWidth,
+    state.slicingMode,
+    state.spriteName,
+    state.spriteSheetSourcePath,
+  ]);
+
   useEffect(() => {
     const constrained = constrainSpriteFrameSize(
       activeTarget,
-      state.spritePath || undefined,
+      state.spritePath || state.spriteSourceAssetPath || undefined,
       state.frameWidth,
       state.frameHeight
     );
@@ -993,7 +1197,7 @@ export default function ArtStudioPanel() {
         height: constrained.frameHeight,
       });
     }
-  }, [activeTarget, state.spritePath, state.frameWidth, state.frameHeight]);
+  }, [activeTarget, state.spritePath, state.spriteSourceAssetPath, state.frameWidth, state.frameHeight]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1014,49 +1218,43 @@ export default function ArtStudioPanel() {
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
 
-    const cols = Math.max(1, Math.floor(image.naturalWidth / state.frameWidth));
     const fontSize = Math.max(
       10,
       Math.min(18, Math.floor(Math.min(state.frameWidth, state.frameHeight) / 2))
     );
 
+    state.suggestedFrames.forEach((frame) => {
+      ctx.strokeStyle = "rgba(249, 226, 175, 0.58)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(frame.x + 0.5, frame.y + 0.5, frame.width - 1, frame.height - 1);
+    });
+
     if (activeSequence) {
       for (let order = 0; order < activeSequence.frames.length; order += 1) {
-        const cell = activeSequence.frames[order];
-        const cellX = (cell % cols) * state.frameWidth;
-        const cellY = Math.floor(cell / cols) * state.frameHeight;
+        const frame = state.suggestedFrames.find(
+          (candidate) => candidate.index === activeSequence.frames[order]
+        );
+        if (!frame) {
+          continue;
+        }
+
         ctx.fillStyle = "rgba(96, 165, 250, 0.28)";
-        ctx.fillRect(cellX, cellY, state.frameWidth, state.frameHeight);
+        ctx.fillRect(frame.x, frame.y, frame.width, frame.height);
         ctx.strokeStyle = "rgba(191, 219, 254, 0.9)";
         ctx.lineWidth = 1;
-        ctx.strokeRect(cellX + 0.5, cellY + 0.5, state.frameWidth - 1, state.frameHeight - 1);
+        ctx.strokeRect(frame.x + 0.5, frame.y + 0.5, frame.width - 1, frame.height - 1);
         ctx.fillStyle = "#f9e2af";
         ctx.font = `${fontSize}px monospace`;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(
           String(order + 1),
-          cellX + state.frameWidth / 2,
-          cellY + state.frameHeight / 2
+          frame.x + frame.width / 2,
+          frame.y + frame.height / 2
         );
       }
     }
-
-    ctx.strokeStyle = "rgba(249, 226, 175, 0.58)";
-    ctx.lineWidth = 1;
-    for (let x = 0; x <= image.naturalWidth; x += state.frameWidth) {
-      ctx.beginPath();
-      ctx.moveTo(x + 0.5, 0);
-      ctx.lineTo(x + 0.5, image.naturalHeight);
-      ctx.stroke();
-    }
-    for (let y = 0; y <= image.naturalHeight; y += state.frameHeight) {
-      ctx.beginPath();
-      ctx.moveTo(0, y + 0.5);
-      ctx.lineTo(image.naturalWidth, y + 0.5);
-      ctx.stroke();
-    }
-  }, [state.spriteSheetSize, state.frameWidth, state.frameHeight, activeSequence]);
+  }, [state.spriteSheetSize, state.frameWidth, state.frameHeight, state.suggestedFrames, activeSequence]);
 
   useEffect(() => {
     const canvas = previewCanvasRef.current;
@@ -1078,27 +1276,25 @@ export default function ArtStudioPanel() {
     }
 
     const image = imageRef.current;
-    const cols = Math.max(1, Math.floor(state.spriteSheetSize.width / state.frameWidth));
     const cellIndex = state.playing ? currentPreviewCell : activeSequence?.frames[0] ?? -1;
+    const frame = state.suggestedFrames.find((candidate) => candidate.index === cellIndex);
 
-    if (cellIndex < 0) {
+    if (cellIndex < 0 || !frame) {
       return;
     }
 
-    const sourceX = (cellIndex % cols) * state.frameWidth;
-    const sourceY = Math.floor(cellIndex / cols) * state.frameHeight;
-    const scale = Math.min(canvas.width / state.frameWidth, canvas.height / state.frameHeight, 5);
-    const drawWidth = state.frameWidth * scale;
-    const drawHeight = state.frameHeight * scale;
+    const scale = Math.min(canvas.width / frame.width, canvas.height / frame.height, 5);
+    const drawWidth = frame.width * scale;
+    const drawHeight = frame.height * scale;
     const drawX = (canvas.width - drawWidth) / 2;
     const drawY = (canvas.height - drawHeight) / 2;
 
     ctx.drawImage(
       image,
-      sourceX,
-      sourceY,
-      state.frameWidth,
-      state.frameHeight,
+      frame.x,
+      frame.y,
+      frame.width,
+      frame.height,
       drawX,
       drawY,
       drawWidth,
@@ -1111,6 +1307,7 @@ export default function ArtStudioPanel() {
     currentPreviewCell,
     state.playing,
     activeSequence,
+    state.suggestedFrames,
   ]);
 
   const loadToneClass =
@@ -1132,6 +1329,8 @@ export default function ArtStudioPanel() {
       : state.spriteSheetScope === "external"
         ? "Externa"
         : "Nao carregada";
+  const displayPalette =
+    state.spriteSheetPalette.length > 0 ? state.spriteSheetPalette : MEGA_DRIVE_PALETTE;
 
   const resOutput = `SPRITE ${state.spriteName || "sprite"} "${state.spritePath || "PENDENTE_IMPORTACAO"}" [${state.frameWidth}] [${state.frameHeight}] [${state.compression}]`;
 
@@ -1287,6 +1486,18 @@ export default function ArtStudioPanel() {
                     Diagnostico
                   </div>
                   <p className="mt-3 text-[12px] leading-5 text-[#cbd5e1]">{loadStatusText}</p>
+                  {state.spriteSheetWarnings.length > 0 && (
+                    <ul className="mt-3 space-y-2 text-[11px] leading-5 text-[#f9e2af]">
+                      {state.spriteSheetWarnings.map((warning) => (
+                        <li
+                          key={warning}
+                          className="rounded-xl border border-[#f9e2af]/20 bg-[#f9e2af]/8 px-3 py-2"
+                        >
+                          {warning}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
 
                 <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
@@ -1308,11 +1519,45 @@ export default function ArtStudioPanel() {
                         ? `${state.spriteSheetSize.width} x ${state.spriteSheetSize.height}`
                         : "-"}
                     </dd>
+                    <dt className="text-[#64748b]">Frames</dt>
+                    <dd className="font-medium text-[#e2e8f0]">
+                      {state.spriteSheetFrameCount ?? "-"}
+                    </dd>
                     <dt className="text-[#64748b]">Origem</dt>
                     <dd className="font-medium text-[#e2e8f0]">{sourceOriginLabel}</dd>
+                    <dt className="text-[#64748b]">Transparencia</dt>
+                    <dd className="font-medium text-[#e2e8f0]">
+                      {state.spriteSheetBackgroundMode
+                        ? `${state.spriteSheetBackgroundMode} (${state.spriteSheetTransparentPixels ?? 0} px)`
+                        : "-"}
+                    </dd>
+                    <dt className="text-[#64748b]">Bounds</dt>
+                    <dd className="font-medium text-[#e2e8f0]">
+                      {state.spriteSheetContentBounds
+                        ? `${state.spriteSheetContentBounds.width}x${state.spriteSheetContentBounds.height} -> ${state.spriteSheetContentBounds.aligned_width}x${state.spriteSheetContentBounds.aligned_height}`
+                        : "-"}
+                    </dd>
+                    <dt className="text-[#64748b]">Saida sug.</dt>
+                    <dd className="font-medium text-[#e2e8f0]">
+                      {state.spriteSheetRecommendedOutput
+                        ? `${state.spriteSheetRecommendedOutput.width}x${state.spriteSheetRecommendedOutput.height} @ ${state.spriteSheetRecommendedOutput.scalePercent}%`
+                        : "-"}
+                    </dd>
+                    <dt className="text-[#64748b]">Slicing</dt>
+                    <dd className="font-medium text-[#e2e8f0]">
+                      {state.slicingMode ?? "-"} ({state.suggestedFrames.length} frames)
+                    </dd>
+                    <dt className="text-[#64748b]">Perfil</dt>
+                    <dd className="font-medium text-[#e2e8f0]">
+                      {state.spriteSheetMetaSpriteCandidate ? "Meta-sprite" : "Sprite simples"}
+                    </dd>
+                    <dt className="text-[#64748b]">Fonte</dt>
+                    <dd className="truncate font-medium text-[#e2e8f0]">
+                      {state.spriteSheetSourcePath || "-"}
+                    </dd>
                     <dt className="text-[#64748b]">Asset</dt>
                     <dd className="truncate font-medium text-[#e2e8f0]">
-                      {state.spritePath || "Pendente de mover para assets/sprites"}
+                      {state.spritePath || "Pendente de importacao canonica"}
                     </dd>
                   </dl>
                 </div>
@@ -1357,7 +1602,7 @@ export default function ArtStudioPanel() {
                   </div>
                   <div className="mt-3 rounded-xl border border-[#1f2937] bg-[#111827] px-3 py-2 text-[11px] text-[#94a3b8]">
                     {state.spriteSheetSize
-                      ? `${totalFrameSlots} quadros disponiveis em ${totalGridColumns} colunas x ${totalGridRows} linhas.`
+                      ? `${totalFrameSlots} frame(s) sugeridos${state.slicingMode ? ` via ${state.slicingMode}` : ""}.`
                       : "Carregue uma imagem para destravar o slicing."}
                   </div>
                 </div>
@@ -1542,7 +1787,7 @@ export default function ArtStudioPanel() {
                   Paleta alvo
                 </div>
                 <div className="mt-2 grid grid-cols-4 gap-2">
-                  {MEGA_DRIVE_PALETTE.map((color, index) => (
+                  {displayPalette.map((color, index) => (
                     <div
                       key={index}
                       className="aspect-square rounded-lg border border-[#334155]"
@@ -1627,9 +1872,9 @@ export default function ArtStudioPanel() {
               </div>
             </div>
 
-            {externalSourceLoaded && (
+            {(externalSourceLoaded || (state.spriteSheetLoadStatus === "loaded" && !state.spritePath)) && (
               <div className="rounded-2xl border border-[#fab387]/35 bg-[#fab387]/10 px-4 py-3 text-[12px] leading-5 text-[#fcd9bd]">
-                Imagem externa carregada com sucesso. Voce pode fatiar, montar sequencias e revisar o preview agora. Para aplicar a entidade na cena, mova ou copie o arquivo para <span className="font-semibold">assets/sprites</span> do projeto.
+                A imagem foi processada com sucesso, mas ainda nao virou um asset canonico do projeto. Gere o sprite sheet em <span className="font-semibold">assets/sprites</span> para alinhar os indices de frame com o pipeline oficial antes de aplicar na cena.
               </div>
             )}
 
@@ -1647,6 +1892,17 @@ export default function ArtStudioPanel() {
                 {resOutput}
               </pre>
             </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                void handleImportToProject();
+              }}
+              disabled={!state.spriteSheetSourcePath || !activeProjectDir || state.suggestedFrames.length === 0}
+              className="rounded-2xl border border-[#89b4fa]/40 bg-[#89b4fa]/12 px-4 py-3 text-sm font-semibold text-[#dbeafe] transition-colors hover:bg-[#89b4fa]/18 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {state.spritePath ? "Regerar asset canonico" : "Trazer para assets/sprites"}
+            </button>
 
             <button
               type="button"

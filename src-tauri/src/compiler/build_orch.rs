@@ -8,7 +8,9 @@ use crate::compiler::ast_generator::{
 };
 use crate::compiler::sgdk_emitter::emit_sgdk_with_collision;
 use crate::compiler::snes_emitter::emit_snes_with_collision;
-use crate::core::project_mgr::{load_project, load_scene, resolve_prefabs, target_spec, TargetSpec};
+use crate::core::project_mgr::{
+    load_project, load_scene, resolve_prefabs, target_spec, TargetSpec,
+};
 use crate::hardware::md_profile;
 use crate::hardware::snes_profile;
 use crate::ugdm::entities::Project;
@@ -116,7 +118,10 @@ where
         }};
     }
 
-    emit!("info", format!("Carregando projeto em: {}", project_dir.display()));
+    emit!(
+        "info",
+        format!("Carregando projeto em: {}", project_dir.display())
+    );
 
     let project = match load_project(project_dir) {
         Ok(project) => project,
@@ -130,7 +135,8 @@ where
         }
     };
 
-    let mut result = run_build_for_project_with_environment(project_dir, &project, environment, on_log);
+    let mut result =
+        run_build_for_project_with_environment(project_dir, &project, environment, on_log);
     let mut combined_log = log;
     combined_log.append(&mut result.log);
     result.log = combined_log;
@@ -171,7 +177,10 @@ where
         }};
     }
 
-    emit!("info", format!("Carregando projeto em: {}", project_dir.display()));
+    emit!(
+        "info",
+        format!("Carregando projeto em: {}", project_dir.display())
+    );
 
     let project = match load_project(project_dir) {
         Ok(project) => project,
@@ -195,17 +204,24 @@ where
     let mut results = Vec::new();
 
     for target_name in targets {
-        emit!("info", format!("Iniciando build para target '{}'.", target_name));
+        emit!(
+            "info",
+            format!("Iniciando build para target '{}'.", target_name)
+        );
 
         let entry = match project_with_target_override(&project, target_name) {
             Ok(project_override) => {
-                let prefixed_result =
-                    run_build_for_project_with_environment(project_dir, &project_override, environment, |line| {
+                let prefixed_result = run_build_for_project_with_environment(
+                    project_dir,
+                    &project_override,
+                    environment,
+                    |line| {
                         on_log(BuildLogLine {
                             level: line.level.clone(),
                             message: format!("[{}] {}", target_name, line.message),
                         });
-                    });
+                    },
+                );
 
                 build_entry_from_result(target_name, prefixed_result)
             }
@@ -268,15 +284,150 @@ where
 
     emit!(
         "info",
-        format!("Projeto '{}' carregado. Target: {}", project.name, project.target)
+        format!(
+            "Projeto '{}' carregado. Target: {}",
+            project.name, project.target
+        )
     );
+
+    let legacy_host_root = match legacy_sgdk_host_root(project_dir, project) {
+        Ok(root) => root,
+        Err(error) => {
+            emit!("error", error);
+            return BuildResult {
+                ok: false,
+                rom_path: String::new(),
+                log,
+            };
+        }
+    };
+
+    if let Some(host_root) = legacy_host_root {
+        if target.target != "megadrive" {
+            emit!(
+                "error",
+                "Projetos SGDK legados em modo overlay suportam apenas build Mega Drive."
+            );
+            return BuildResult {
+                ok: false,
+                rom_path: String::new(),
+                log,
+            };
+        }
+
+        if !host_root.is_dir() {
+            emit!(
+                "error",
+                format!(
+                    "Raiz do projeto SGDK legado nao encontrada: {}",
+                    host_root.display()
+                )
+            );
+            return BuildResult {
+                ok: false,
+                rom_path: String::new(),
+                log,
+            };
+        }
+
+        let Some(makefile_path) = find_makefile(&host_root) else {
+            emit!(
+                "error",
+                format!(
+                    "Projeto SGDK legado em '{}' nao possui Makefile nativo para delegacao.",
+                    host_root.display()
+                )
+            );
+            return BuildResult {
+                ok: false,
+                rom_path: String::new(),
+                log,
+            };
+        };
+
+        emit!(
+            "info",
+            format!(
+                "Modo overlay SGDK legado detectado. Delegando build para host '{}'.",
+                host_root.display()
+            )
+        );
+        emit!(
+            "info",
+            format!("Makefile host localizado: {}", makefile_path.display())
+        );
+
+        let toolchain = match resolve_toolchain(environment, target) {
+            Ok(toolchain) => toolchain,
+            Err(error) => {
+                emit!("error", error);
+                return BuildResult {
+                    ok: false,
+                    rom_path: String::new(),
+                    log,
+                };
+            }
+        };
+
+        emit!(
+            "info",
+            format!(
+                "Toolchain localizada: {} (make: {})",
+                toolchain.root.display(),
+                toolchain.make_program.display()
+            )
+        );
+
+        let workspace = BuildWorkspace {
+            root: host_root.clone(),
+            out_dir: host_root.join("out"),
+        };
+
+        if let Err(error) = invoke_make(&toolchain, &workspace, target, &mut log, &on_log) {
+            emit!("error", error);
+            return BuildResult {
+                ok: false,
+                rom_path: String::new(),
+                log,
+            };
+        }
+
+        let rom_path = match detect_rom_artifact(&workspace, target) {
+            Some(path) => path,
+            None => {
+                emit!(
+                    "error",
+                    format!(
+                        "Build legado terminou sem artefato de ROM valido em '{}'.",
+                        host_root.display()
+                    )
+                );
+                return BuildResult {
+                    ok: false,
+                    rom_path: String::new(),
+                    log,
+                };
+            }
+        };
+
+        emit!("success", format!("ROM gerada: {}", rom_path.display()));
+
+        return BuildResult {
+            ok: true,
+            rom_path: rom_path.to_string_lossy().to_string(),
+            log,
+        };
+    }
 
     let scene = match load_scene(project_dir, &project.entry_scene) {
         Ok(scene) => scene,
         Err(error) => {
             emit!(
                 "error",
-                format!("Falha ao carregar cena '{}': {}", project.entry_scene, error)
+                format!(
+                    "Falha ao carregar cena '{}': {}",
+                    project.entry_scene, error
+                )
             );
             return BuildResult {
                 ok: false,
@@ -336,7 +487,10 @@ where
     let ast = match generate_ast_with_prefabs(project_dir, project, &scene) {
         Ok(ast) => ast,
         Err(error) => {
-            emit!("error", format!("Falha ao gerar AST com prefabs: {}", error));
+            emit!(
+                "error",
+                format!("Falha ao gerar AST com prefabs: {}", error)
+            );
             return BuildResult {
                 ok: false,
                 rom_path: String::new(),
@@ -378,7 +532,10 @@ where
 
     emit!(
         "success",
-        format!("Workspace de build preparado em: {}", workspace.root.display())
+        format!(
+            "Workspace de build preparado em: {}",
+            workspace.root.display()
+        )
     );
 
     let toolchain = match resolve_toolchain(environment, target) {
@@ -486,6 +643,36 @@ fn build_entry_from_result(target: &str, result: BuildResult) -> MultiTargetBuil
     }
 }
 
+fn legacy_sgdk_host_root(project_dir: &Path, project: &Project) -> Result<Option<PathBuf>, String> {
+    let Some(metadata) = project.template_metadata.as_ref() else {
+        return Ok(None);
+    };
+
+    if metadata.source_kind != "external_sgdk" {
+        return Ok(None);
+    }
+
+    let is_legacy_overlay = metadata.template_id == "legacy_sgdk_overlay"
+        || project_dir.join("legacy_sgdk_index.json").is_file();
+    if !is_legacy_overlay {
+        return Ok(None);
+    }
+
+    let source_path = metadata.source_path.trim();
+    if source_path.is_empty() {
+        return Err("Projeto SGDK legado sem caminho raiz do host.".to_string());
+    }
+
+    Ok(Some(PathBuf::from(source_path)))
+}
+
+fn find_makefile(root: &Path) -> Option<PathBuf> {
+    ["Makefile", "makefile"]
+        .into_iter()
+        .map(|candidate| root.join(candidate))
+        .find(|candidate| candidate.is_file())
+}
+
 fn prepare_workspace(
     project_dir: &Path,
     project: &Project,
@@ -501,8 +688,13 @@ fn prepare_workspace(
     let output_root = sanitize_build_output_dir(output_root)?;
     let root = project_dir.join(output_root).join(target.target);
     if root.exists() {
-        fs::remove_dir_all(&root)
-            .map_err(|e| format!("Nao foi possivel limpar workspace '{}': {}", root.display(), e))?;
+        fs::remove_dir_all(&root).map_err(|e| {
+            format!(
+                "Nao foi possivel limpar workspace '{}': {}",
+                root.display(),
+                e
+            )
+        })?;
     }
 
     let src_dir = root.join("src");
@@ -511,7 +703,13 @@ fn prepare_workspace(
     fs::create_dir_all(&src_dir)
         .and_then(|_| fs::create_dir_all(&res_dir))
         .and_then(|_| fs::create_dir_all(&out_dir))
-        .map_err(|e| format!("Nao foi possivel criar workspace '{}': {}", root.display(), e))?;
+        .map_err(|e| {
+            format!(
+                "Nao foi possivel criar workspace '{}': {}",
+                root.display(),
+                e
+            )
+        })?;
 
     let makefile_path = root.join("Makefile");
     let project_slug = sanitize_project_name(&project.name);
@@ -520,13 +718,8 @@ fn prepare_workspace(
 
     fs::write(&main_c_path, &artifacts.main_c)
         .map_err(|e| format!("Falha ao gravar '{}': {}", main_c_path.display(), e))?;
-    fs::write(&resources_res_path, &artifacts.resources_res).map_err(|e| {
-        format!(
-            "Falha ao gravar '{}': {}",
-            resources_res_path.display(),
-            e
-        )
-    })?;
+    fs::write(&resources_res_path, &artifacts.resources_res)
+        .map_err(|e| format!("Falha ao gravar '{}': {}", resources_res_path.display(), e))?;
 
     match target.target {
         "snes" => {
@@ -534,14 +727,24 @@ fn prepare_workspace(
             let data_asm = render_snes_data_asm(ast);
             let hdr_asm = render_snes_header(project);
             fs::write(root.join("data.asm"), &data_asm).map_err(|e| {
-                format!("Falha ao gravar 'data.asm' do SNES em '{}': {}", root.display(), e)
+                format!(
+                    "Falha ao gravar 'data.asm' do SNES em '{}': {}",
+                    root.display(),
+                    e
+                )
             })?;
             fs::write(root.join("hdr.asm"), &hdr_asm).map_err(|e| {
-                format!("Falha ao gravar 'hdr.asm' do SNES em '{}': {}", root.display(), e)
+                format!(
+                    "Falha ao gravar 'hdr.asm' do SNES em '{}': {}",
+                    root.display(),
+                    e
+                )
             })?;
-            fs::write(&makefile_path, render_pvsneslib_makefile(&project_slug, ast)).map_err(
-                |e| format!("Falha ao gravar '{}': {}", makefile_path.display(), e),
-            )?;
+            fs::write(
+                &makefile_path,
+                render_pvsneslib_makefile(&project_slug, ast),
+            )
+            .map_err(|e| format!("Falha ao gravar '{}': {}", makefile_path.display(), e))?;
         }
         _ => {
             stage_project_assets(project_dir, &res_dir, ast)?;
@@ -550,10 +753,7 @@ fn prepare_workspace(
         }
     }
 
-    Ok(BuildWorkspace {
-        root,
-        out_dir,
-    })
+    Ok(BuildWorkspace { root, out_dir })
 }
 
 fn stage_project_assets(
@@ -575,7 +775,11 @@ fn stage_project_assets(
         let destination = workspace_root.join(&destination_rel);
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent).map_err(|e| {
-                format!("Falha ao preparar pasta de asset '{}': {}", parent.display(), e)
+                format!(
+                    "Falha ao preparar pasta de asset '{}': {}",
+                    parent.display(),
+                    e
+                )
             })?;
         }
 
@@ -596,7 +800,11 @@ fn stage_project_assets(
         let destination = workspace_root.join(&destination_rel);
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent).map_err(|e| {
-                format!("Falha ao preparar pasta de asset '{}': {}", parent.display(), e)
+                format!(
+                    "Falha ao preparar pasta de asset '{}': {}",
+                    parent.display(),
+                    e
+                )
             })?;
         }
 
@@ -670,7 +878,11 @@ fn stage_project_raw_asset(
     let destination = workspace_root.join(&source_rel);
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent).map_err(|e| {
-            format!("Falha ao preparar pasta de asset '{}': {}", parent.display(), e)
+            format!(
+                "Falha ao preparar pasta de asset '{}': {}",
+                parent.display(),
+                e
+            )
         })?;
     }
     fs::copy(&source, &destination).map_err(|e| {
@@ -702,7 +914,11 @@ fn stage_snes_audio_asset(
         ));
     }
 
-    let destination = src_dir.join(snes_audio_staging_filename(resource_name, asset_path, suffix));
+    let destination = src_dir.join(snes_audio_staging_filename(
+        resource_name,
+        asset_path,
+        suffix,
+    ));
     fs::copy(&source, &destination).map_err(|e| {
         format!(
             "Falha ao copiar asset SNES audio '{}' para '{}': {}",
@@ -839,8 +1055,13 @@ fn write_indexed_bmp_8bit(image: &image::DynamicImage, destination: &Path) -> Re
         bytes.resize(bytes.len() + (row_stride - width), 0);
     }
 
-    fs::write(destination, bytes)
-        .map_err(|e| format!("falha ao gravar BMP indexado '{}': {}", destination.display(), e))
+    fs::write(destination, bytes).map_err(|e| {
+        format!(
+            "falha ao gravar BMP indexado '{}': {}",
+            destination.display(),
+            e
+        )
+    })
 }
 
 fn render_sgdk_makefile(project_slug: &str) -> String {
@@ -933,7 +1154,10 @@ fn render_snes_data_asm(ast: &AstOutput) -> String {
 
     out.push_str(".section \".rosprite\" superfree\n\n");
     for asset in &ast.sprite_assets {
-        out.push_str(&format!(".include \"src/{}_data.as\"\n", asset.resource_name));
+        out.push_str(&format!(
+            ".include \"src/{}_data.as\"\n",
+            asset.resource_name
+        ));
     }
     out.push_str("\n.ends\n");
 
@@ -1027,7 +1251,11 @@ fn resolve_toolchain(
             let make_program = environment
                 .sgdk_make_program
                 .clone()
-                .or_else(|| (!environment.disable_auto_detect).then(|| detect_make_program(&root)).flatten())
+                .or_else(|| {
+                    (!environment.disable_auto_detect)
+                        .then(|| detect_make_program(&root))
+                        .flatten()
+                })
                 .ok_or_else(|| {
                     format!(
                         "Nao foi possivel localizar 'make' para SGDK em '{}'.",
@@ -1052,11 +1280,23 @@ fn resolve_toolchain(
             let make_program = environment
                 .pvsneslib_make_program
                 .clone()
-                .or_else(|| (!environment.disable_auto_detect).then(|| detect_make_program(&root)).flatten())
-                .or_else(|| (!environment.disable_auto_detect).then(|| find_in_path(&["make", "mingw32-make"])).flatten())
                 .or_else(|| {
                     (!environment.disable_auto_detect)
-                        .then(|| detect_root("SGDK_ROOT", "sgdk").as_deref().and_then(detect_make_program))
+                        .then(|| detect_make_program(&root))
+                        .flatten()
+                })
+                .or_else(|| {
+                    (!environment.disable_auto_detect)
+                        .then(|| find_in_path(&["make", "mingw32-make"]))
+                        .flatten()
+                })
+                .or_else(|| {
+                    (!environment.disable_auto_detect)
+                        .then(|| {
+                            detect_root("SGDK_ROOT", "sgdk")
+                                .as_deref()
+                                .and_then(detect_make_program)
+                        })
                         .flatten()
                 })
                 .ok_or_else(|| {
@@ -1068,10 +1308,11 @@ fn resolve_toolchain(
             Ok(Toolchain {
                 root,
                 make_program,
-                bash_program: environment
-                    .pvsneslib_bash_program
-                    .clone()
-                    .or_else(|| (!environment.disable_auto_detect).then(detect_bash_program).flatten()),
+                bash_program: environment.pvsneslib_bash_program.clone().or_else(|| {
+                    (!environment.disable_auto_detect)
+                        .then(detect_bash_program)
+                        .flatten()
+                }),
             })
         }
         other => Err(format!("Target '{}' nao suportado.", other)),
@@ -1115,7 +1356,10 @@ where
             let mut command = Command::new(bash_program);
             command.current_dir(&workspace.root);
             command.env("PVSNESLIB_HOME", to_shell_friendly_path(&toolchain.root));
-            command.env("PVSNESLIB_LIBDIR_WIN", snes_library_dir_windows(&toolchain.root));
+            command.env(
+                "PVSNESLIB_LIBDIR_WIN",
+                snes_library_dir_windows(&toolchain.root),
+            );
             command
                 .arg("-lc")
                 .arg(format!("'{}'", bash_make.replace('\'', "'\\''")));
@@ -1130,7 +1374,10 @@ where
             let mut command = Command::new(&toolchain.make_program);
             command.current_dir(&workspace.root);
             command.env("PVSNESLIB_HOME", to_shell_friendly_path(&toolchain.root));
-            command.env("PVSNESLIB_LIBDIR_WIN", snes_library_dir_windows(&toolchain.root));
+            command.env(
+                "PVSNESLIB_LIBDIR_WIN",
+                snes_library_dir_windows(&toolchain.root),
+            );
             command.output().map_err(|e| {
                 format!(
                     "Falha ao iniciar build SNES em '{}': {}",
@@ -1146,7 +1393,10 @@ where
             "snes" => {
                 if cfg!(target_os = "windows") {
                     command.env("PVSNESLIB_HOME", to_shell_friendly_path(&toolchain.root));
-                    command.env("PVSNESLIB_LIBDIR_WIN", snes_library_dir_windows(&toolchain.root));
+                    command.env(
+                        "PVSNESLIB_LIBDIR_WIN",
+                        snes_library_dir_windows(&toolchain.root),
+                    );
                 } else {
                     command.env("PVSNESLIB_HOME", &toolchain.root);
                 }
@@ -1213,8 +1463,11 @@ fn collect_files(dir: &Path) -> Result<Vec<PathBuf>, String> {
         return Ok(files);
     }
 
-    for entry in fs::read_dir(dir).map_err(|e| format!("Falha ao listar '{}': {}", dir.display(), e))? {
-        let entry = entry.map_err(|e| format!("Falha ao ler entrada em '{}': {}", dir.display(), e))?;
+    for entry in
+        fs::read_dir(dir).map_err(|e| format!("Falha ao listar '{}': {}", dir.display(), e))?
+    {
+        let entry =
+            entry.map_err(|e| format!("Falha ao ler entrada em '{}': {}", dir.display(), e))?;
         let path = entry.path();
         if path.is_dir() {
             files.extend(collect_files(&path)?);
@@ -1326,11 +1579,12 @@ fn detect_root(env_var: &str, local_dir_name: &str) -> Option<PathBuf> {
 
     let local = repo_root().join("toolchains").join(local_dir_name);
     if local_dir_name == "sgdk" {
-        if local.join("makefile.gen").exists() || (local.join("bin").exists() && local.join("inc").exists()) {
+        if local.join("makefile.gen").exists()
+            || (local.join("bin").exists() && local.join("inc").exists())
+        {
             return Some(local);
         }
-    } else if local_dir_name == "pvsneslib"
-        && local.join("devkitsnes").join("snes_rules").exists()
+    } else if local_dir_name == "pvsneslib" && local.join("devkitsnes").join("snes_rules").exists()
     {
         return Some(local);
     }
@@ -1401,7 +1655,11 @@ fn platform_make_name() -> &'static str {
 }
 
 fn find_in_path(candidates: &[&str]) -> Option<PathBuf> {
-    let locator = if cfg!(target_os = "windows") { "where" } else { "which" };
+    let locator = if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    };
     for candidate in candidates {
         if let Ok(output) = Command::new(locator).arg(candidate).output() {
             if output.status.success() {
@@ -1428,6 +1686,8 @@ fn repo_root() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tools::photo2sgdk::import_art_asset_internal;
+    use image::{ImageBuffer, Rgba};
     use std::sync::{Mutex, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -1647,6 +1907,79 @@ mod tests {
             .expect("write megadrive sprite scene fixture");
     }
 
+    fn write_artstudio_source_png(path: &Path) {
+        let image = ImageBuffer::from_fn(32, 16, |x, y| {
+            if (2..14).contains(&x) && (2..14).contains(&y) {
+                Rgba([255u8, 255, 255, 255])
+            } else if (18..30).contains(&x) && (2..14).contains(&y) {
+                Rgba([255u8, 0, 0, 255])
+            } else {
+                Rgba([0u8, 0, 0, 0])
+            }
+        });
+        image
+            .save(path)
+            .expect("write synthetic ArtStudio source image");
+    }
+
+    fn install_artstudio_scene_fixture(
+        project_dir: &Path,
+        relative_asset_path: &str,
+        frame_width: u32,
+        frame_height: u32,
+    ) {
+        let scene_json = format!(
+            r#"{{
+  "scene_id": "main",
+  "schema_version": "1.6.0",
+  "display_name": "Main Scene",
+  "background_layers": [],
+  "entities": [
+    {{
+      "entity_id": "artstudio_hero",
+      "display_name": "ArtStudio Hero",
+      "prefab": null,
+      "transform": {{
+        "x": 48,
+        "y": 64
+      }},
+      "components": {{
+        "sprite": {{
+          "asset": "{relative_asset_path}",
+          "frame_width": {frame_width},
+          "frame_height": {frame_height},
+          "pivot": null,
+          "palette_slot": 0,
+          "animations": {{
+            "idle": {{
+              "frames": [0, 1],
+              "fps": 15,
+              "loop": true
+            }}
+          }},
+          "priority": "foreground",
+          "meta_sprite": false
+        }},
+        "collision": null,
+        "input": null,
+        "physics": null,
+        "audio": null,
+        "logic": null,
+        "camera": null,
+        "tilemap": null
+      }}
+    }}
+  ],
+  "palettes": [],
+  "retrofx": null,
+  "collision_map": null,
+  "layers": null
+}}"#
+        );
+        fs::write(project_dir.join("scenes").join("main.json"), scene_json)
+            .expect("write ArtStudio scene fixture");
+    }
+
     fn install_megadrive_audio_fixture(project_dir: &Path) {
         let audio_dir = project_dir.join("assets").join("audio");
         fs::create_dir_all(&audio_dir).expect("create megadrive audio dir");
@@ -1805,9 +2138,7 @@ mod tests {
         assert!(result
             .log
             .iter()
-            .any(|entry| entry
-                .message
-                .contains("Build.output_dir '../")
+            .any(|entry| entry.message.contains("Build.output_dir '../")
                 && entry
                     .message
                     .contains("nao pode escapar da raiz do projeto")));
@@ -1838,8 +2169,18 @@ mod tests {
 
         assert!(result.ok, "build log: {:?}", result.log);
         assert!(result.rom_path.ends_with(".md"));
-        assert!(project_dir.join("build").join("megadrive").join("src").join("main.c").exists());
-        assert!(project_dir.join("build").join("megadrive").join("res").join("resources.res").exists());
+        assert!(project_dir
+            .join("build")
+            .join("megadrive")
+            .join("src")
+            .join("main.c")
+            .exists());
+        assert!(project_dir
+            .join("build")
+            .join("megadrive")
+            .join("res")
+            .join("resources.res")
+            .exists());
         assert!(project_dir
             .join("build")
             .join("megadrive")
@@ -1856,10 +2197,138 @@ mod tests {
                 .join("resources.res"),
         )
         .expect("read SGDK resources");
-        assert!(resources_res.contains(
-            "SPRITE player \"assets/sprites/onboarding_player.bmp\" 2 2 NONE 4"
-        ));
+        assert!(resources_res
+            .contains("SPRITE player \"assets/sprites/onboarding_player.bmp\" 2 2 NONE 4"));
 
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn build_generates_megadrive_workspace_for_artstudio_imported_asset() {
+        let _serial = test_serial_guard();
+        let project_dir = workspace_copy("megadrive_dummy");
+        let source_image = temp_dir("artstudio-source").join("artstudio_hero.png");
+        write_artstudio_source_png(&source_image);
+
+        let import_result = import_art_asset_internal(
+            source_image.to_string_lossy().into_owned(),
+            project_dir.to_string_lossy().into_owned(),
+            Some("artstudio_hero".to_string()),
+            Some(16),
+            Some(16),
+            Some("grid".to_string()),
+        )
+        .expect("import ArtStudio asset into canonical project tree");
+
+        assert!(import_result.ok);
+        assert_eq!(
+            import_result.relative_path.as_deref(),
+            Some("assets/sprites/artstudio_hero.png")
+        );
+        assert_eq!(import_result.frame_width, Some(16));
+        assert_eq!(import_result.frame_height, Some(16));
+        assert_eq!(import_result.frame_count, 2);
+
+        install_artstudio_scene_fixture(
+            &project_dir,
+            import_result
+                .relative_path
+                .as_deref()
+                .expect("relative asset path should be present"),
+            import_result.frame_width.expect("imported frame width"),
+            import_result.frame_height.expect("imported frame height"),
+        );
+
+        let (sgdk_root, make_program) = fake_toolchain("sgdk-artstudio", "md");
+        let environment = BuildEnvironment {
+            sgdk_root: Some(sgdk_root),
+            sgdk_make_program: Some(make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_with_environment(&project_dir, &environment, |_| {});
+
+        assert!(result.ok, "build log: {:?}", result.log);
+        assert!(result.rom_path.ends_with(".md"));
+        let resources_res = fs::read_to_string(
+            project_dir
+                .join("build")
+                .join("megadrive")
+                .join("res")
+                .join("resources.res"),
+        )
+        .expect("read SGDK resources");
+        assert!(resources_res
+            .contains("SPRITE artstudio_hero \"assets/sprites/artstudio_hero.bmp\" 2 2 NONE 4"));
+        assert!(project_dir
+            .join("build")
+            .join("megadrive")
+            .join("res")
+            .join("assets")
+            .join("sprites")
+            .join("artstudio_hero.bmp")
+            .exists());
+        assert!(result
+            .log
+            .iter()
+            .any(|entry| entry.message.contains("Workspace de build preparado")));
+        assert!(result
+            .log
+            .iter()
+            .any(|entry| entry.message.contains("ROM gerada")));
+
+        let _ = fs::remove_file(source_image);
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    #[ignore = "manual proof with official SGDK toolchain"]
+    fn artstudio_imported_asset_builds_with_detected_sgdk() {
+        let _serial = test_serial_guard();
+        let project_dir = workspace_copy("megadrive_dummy");
+        let source_image = temp_dir("artstudio-live-source").join("artstudio_live.png");
+        write_artstudio_source_png(&source_image);
+
+        let import_result = import_art_asset_internal(
+            source_image.to_string_lossy().into_owned(),
+            project_dir.to_string_lossy().into_owned(),
+            Some("artstudio_live".to_string()),
+            Some(16),
+            Some(16),
+            Some("grid".to_string()),
+        )
+        .expect("import ArtStudio asset with live SGDK");
+
+        install_artstudio_scene_fixture(
+            &project_dir,
+            import_result
+                .relative_path
+                .as_deref()
+                .expect("relative asset path should exist"),
+            import_result.frame_width.expect("frame width"),
+            import_result.frame_height.expect("frame height"),
+        );
+
+        let environment = BuildEnvironment::detect();
+        let result = run_build_with_environment(&project_dir, &environment, |line| {
+            println!("[build:{}] {}", line.level, line.message);
+        });
+
+        assert!(result.ok, "live build log: {:?}", result.log);
+        let resources_res = fs::read_to_string(
+            project_dir
+                .join("build")
+                .join("megadrive")
+                .join("res")
+                .join("resources.res"),
+        )
+        .expect("read live SGDK resources");
+        println!("[resources.res]\n{}", resources_res);
+        assert!(resources_res
+            .contains("SPRITE artstudio_hero \"assets/sprites/artstudio_live.bmp\" 2 2 NONE 4"));
+
+        let _ = fs::remove_file(source_image);
         let _ = fs::remove_dir_all(project_dir);
     }
 
@@ -1885,15 +2354,33 @@ mod tests {
 
         assert!(result.ok, "build log: {:?}", result.log);
         assert!(result.rom_path.ends_with(".sfc"));
-        assert!(project_dir.join("build").join("snes").join("Makefile").exists());
+        assert!(project_dir
+            .join("build")
+            .join("snes")
+            .join("Makefile")
+            .exists());
         let hdr_path = project_dir.join("build").join("snes").join("hdr.asm");
         let data_path = project_dir.join("build").join("snes").join("data.asm");
-        let bmp_path = project_dir.join("build").join("snes").join("src").join("controller_root.bmp");
+        let bmp_path = project_dir
+            .join("build")
+            .join("snes")
+            .join("src")
+            .join("controller_root.bmp");
         assert!(bmp_path.exists());
         assert!(hdr_path.exists());
         assert!(data_path.exists());
-        assert!(!project_dir.join("build").join("snes").join("src").join("data.asm").exists());
-        assert!(!project_dir.join("build").join("snes").join("src").join("hdr.asm").exists());
+        assert!(!project_dir
+            .join("build")
+            .join("snes")
+            .join("src")
+            .join("data.asm")
+            .exists());
+        assert!(!project_dir
+            .join("build")
+            .join("snes")
+            .join("src")
+            .join("hdr.asm")
+            .exists());
         let bmp_bytes = fs::read(&bmp_path).expect("read staged bmp");
         assert_eq!(&bmp_bytes[0..2], b"BM");
         assert_eq!(u16::from_le_bytes([bmp_bytes[28], bmp_bytes[29]]), 8);
@@ -1936,7 +2423,9 @@ mod tests {
                 .join("resources.res"),
         )
         .expect("read SGDK resources");
-        assert!(resources_res.contains("IMAGE background_tilemap \"assets/tilesets/level.bmp\" NONE"));
+        assert!(
+            resources_res.contains("IMAGE background_tilemap \"assets/tilesets/level.bmp\" NONE")
+        );
         let main_c = fs::read_to_string(
             project_dir
                 .join("build")
@@ -1978,19 +2467,19 @@ mod tests {
             .join("src")
             .join("background_tilemap.bmp");
         assert!(staged_bmp.exists());
-        let data_asm = fs::read_to_string(
-            project_dir.join("build").join("snes").join("data.asm"),
-        )
-        .expect("read SNES data asm");
+        let data_asm = fs::read_to_string(project_dir.join("build").join("snes").join("data.asm"))
+            .expect("read SNES data asm");
         assert!(data_asm.contains("background_tilemap_map:"));
         assert!(data_asm.contains(".incbin \"src/background_tilemap.map\""));
-        let makefile = fs::read_to_string(
-            project_dir.join("build").join("snes").join("Makefile"),
-        )
-        .expect("read SNES makefile");
+        let makefile = fs::read_to_string(project_dir.join("build").join("snes").join("Makefile"))
+            .expect("read SNES makefile");
         assert!(makefile.contains("$(GFXCONV) -s 8 -o 16 -u 16 -e 0 -p -m -t bmp -i $<"));
         let main_c = fs::read_to_string(
-            project_dir.join("build").join("snes").join("src").join("main.c"),
+            project_dir
+                .join("build")
+                .join("snes")
+                .join("src")
+                .join("main.c"),
         )
         .expect("read SNES main.c");
         assert!(main_c.contains("bgInitMapSet(0, (u8*)&background_tilemap_map"));
@@ -2078,16 +2567,18 @@ mod tests {
             .join("src")
             .join("stage_theme_bgm.spc")
             .exists());
-        let data_asm = fs::read_to_string(
-            project_dir.join("build").join("snes").join("data.asm"),
-        )
-        .expect("read SNES audio data asm");
+        let data_asm = fs::read_to_string(project_dir.join("build").join("snes").join("data.asm"))
+            .expect("read SNES audio data asm");
         assert!(data_asm.contains("jump_sfx:"));
         assert!(data_asm.contains(".incbin \"src/jump_sfx.brr\""));
         assert!(data_asm.contains("stage_theme_bgm:"));
         assert!(data_asm.contains(".incbin \"src/stage_theme_bgm.spc\""));
         let main_c = fs::read_to_string(
-            project_dir.join("build").join("snes").join("src").join("main.c"),
+            project_dir
+                .join("build")
+                .join("snes")
+                .join("src")
+                .join("main.c"),
         )
         .expect("read SNES audio main.c");
         assert!(main_c.contains("spcSetSoundEntry(SFX_JUMP, 8, 0, (u8*)&jump_sfx);"));
@@ -2127,11 +2618,19 @@ mod tests {
         assert!(result.ok, "multi-target result: {:?}", result.results);
         assert_eq!(result.results.len(), 2);
         assert_eq!(result.results[0].target, "megadrive");
-        assert!(result.results[0].ok, "megadrive log: {:?}", result.results[0].log);
+        assert!(
+            result.results[0].ok,
+            "megadrive log: {:?}",
+            result.results[0].log
+        );
         assert!(result.results[0].rom_path.ends_with(".md"));
         assert!(result.results[0].rom_size_bytes > 0);
         assert_eq!(result.results[1].target, "snes");
-        assert!(result.results[1].ok, "snes log: {:?}", result.results[1].log);
+        assert!(
+            result.results[1].ok,
+            "snes log: {:?}",
+            result.results[1].log
+        );
         assert!(result.results[1].rom_path.ends_with(".sfc"));
         assert!(result.results[1].rom_size_bytes > 0);
 
@@ -2167,6 +2666,94 @@ mod tests {
             .any(|error| error.contains("Toolchain PVSnesLib nao encontrada")));
 
         let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn legacy_sgdk_overlay_build_delegates_to_host_workspace() {
+        let _serial = test_serial_guard();
+        let host_dir = temp_dir("legacy-host-build");
+        fs::create_dir_all(host_dir.join("src")).expect("create legacy src");
+        fs::create_dir_all(host_dir.join("inc")).expect("create legacy inc");
+        fs::write(host_dir.join("src").join("main.c"), b"int main(void){return 0;}")
+            .expect("write legacy main.c");
+        fs::write(host_dir.join("inc").join("game.h"), b"void game(void);")
+            .expect("write legacy header");
+        fs::write(host_dir.join("Makefile"), "PROJECT_NAME := legacy_host\n")
+            .expect("write legacy makefile");
+
+        let overlay_dir = crate::core::project_mgr::import_legacy_sgdk_project(
+            &host_dir,
+            Some("Legacy Host Wrapper"),
+        )
+        .expect("wrap legacy sgdk host");
+        println!(
+            "[legacy-build-delegate] host='{}' overlay='{}'",
+            host_dir.display(),
+            overlay_dir.display()
+        );
+
+        let (sgdk_root, sgdk_make_program) = fake_toolchain("sgdk-legacy-host", "md");
+        let environment = BuildEnvironment {
+            sgdk_root: Some(sgdk_root),
+            sgdk_make_program: Some(sgdk_make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_with_environment(&overlay_dir, &environment, |_| {});
+
+        assert!(result.ok, "legacy build log: {:?}", result.log);
+        assert!(host_dir.join("out").join("artifact.md").is_file());
+        assert!(PathBuf::from(&result.rom_path).starts_with(host_dir.join("out")));
+        assert!(!overlay_dir.join("build").join("megadrive").exists());
+        assert!(result.log.iter().any(|line| line.message.contains("Delegando build para host")));
+
+        let _ = fs::remove_dir_all(host_dir);
+    }
+
+    #[test]
+    fn legacy_sgdk_overlay_multi_target_marks_snes_as_unsupported() {
+        let _serial = test_serial_guard();
+        let host_dir = temp_dir("legacy-host-multi-target");
+        fs::create_dir_all(host_dir.join("src")).expect("create legacy src");
+        fs::create_dir_all(host_dir.join("inc")).expect("create legacy inc");
+        fs::write(host_dir.join("src").join("main.c"), b"int main(void){return 0;}")
+            .expect("write legacy main.c");
+        fs::write(host_dir.join("inc").join("game.h"), b"void game(void);")
+            .expect("write legacy header");
+        fs::write(host_dir.join("Makefile"), "PROJECT_NAME := legacy_host\n")
+            .expect("write legacy makefile");
+
+        let overlay_dir = crate::core::project_mgr::import_legacy_sgdk_project(
+            &host_dir,
+            Some("Legacy Host Multi"),
+        )
+        .expect("wrap legacy sgdk host");
+        let (sgdk_root, sgdk_make_program) = fake_toolchain("sgdk-legacy-host-multi", "md");
+        let environment = BuildEnvironment {
+            sgdk_root: Some(sgdk_root),
+            sgdk_make_program: Some(sgdk_make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_multi_target_with_environment(
+            &overlay_dir,
+            &["megadrive".to_string(), "snes".to_string()],
+            &environment,
+            |_| {},
+        );
+
+        assert!(!result.ok);
+        assert_eq!(result.results.len(), 2);
+        assert!(result.results[0].ok, "legacy megadrive log: {:?}", result.results[0].log);
+        assert!(!result.results[1].ok);
+        assert!(result.results[1]
+            .errors
+            .iter()
+            .any(|error| error.contains("apenas build Mega Drive")));
+
+        let _ = fs::remove_dir_all(host_dir);
     }
 
     #[test]

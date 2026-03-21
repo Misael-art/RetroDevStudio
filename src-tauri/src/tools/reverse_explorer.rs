@@ -40,7 +40,10 @@ pub fn inspect_rom(
     if offset >= total_size {
         return ReverseExplorerResult {
             ok: false,
-            error: format!("Offset 0x{:X} fora do tamanho da ROM ({} bytes).", offset, total_size),
+            error: format!(
+                "Offset 0x{:X} fora do tamanho da ROM ({} bytes).",
+                offset, total_size
+            ),
             total_size,
             rows: Vec::new(),
         };
@@ -104,9 +107,10 @@ fn annotate_megadrive_row(bytes: &[u8]) -> Vec<String> {
             0x4EB9 => Some("JSR abs.l"),
             0x4EF9 => Some("JMP abs.l"),
             value if value & 0xFF00 == 0x6000 => Some("BRA"),
-            value if (value & 0xF000) == 0x1000
-                || (value & 0xF000) == 0x2000
-                || (value & 0xF000) == 0x3000 =>
+            value
+                if (value & 0xF000) == 0x1000
+                    || (value & 0xF000) == 0x2000
+                    || (value & 0xF000) == 0x3000 =>
             {
                 Some("MOVE")
             }

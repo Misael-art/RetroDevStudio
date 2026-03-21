@@ -1,4 +1,4 @@
-﻿use crate::hardware::HwStatus;
+use crate::hardware::HwStatus;
 use crate::ugdm::entities::Scene;
 
 pub const SNES_VRAM_BYTES: u32 = 65_536;
@@ -224,7 +224,8 @@ pub fn validate_scene_with_source_kind(
         let prefix = if is_sgdk { "[SGDK Gerenciado] " } else { "" };
         errors.push(ValidationError::warning(format!(
             "{}VRAM Warning: uso de VRAM estimado em {}KB ({}% do limite de 64KB).",
-            prefix, vram_used / 1024,
+            prefix,
+            vram_used / 1024,
             vram_used * 100 / SNES_VRAM_BYTES
         )));
     }
@@ -234,7 +235,8 @@ pub fn validate_scene_with_source_kind(
         let prefix = if is_sgdk { "[SGDK Gerenciado] " } else { "" };
         errors.push(ValidationError::warning(format!(
             "{}DMA Warning: upload estimado em {}KB por frame ({}% do budget de {}KB no VBlank).",
-            prefix, dma_used / 1024,
+            prefix,
+            dma_used / 1024,
             dma_used * 100 / SNES_DMA_VBLANK_BYTES,
             SNES_DMA_VBLANK_BYTES / 1024
         )));
@@ -284,7 +286,8 @@ pub fn validate_scene_with_source_kind(
         if cmap.data.len() != expected_len {
             errors.push(ValidationError::warning(format!(
                 "CollisionMap: data.len()={} mas width*height={}. O mapa pode estar corrompido.",
-                cmap.data.len(), expected_len
+                cmap.data.len(),
+                expected_len
             )));
         }
     }
@@ -409,11 +412,9 @@ mod tests {
 
         let errors = validate_scene(&scene);
 
-        assert!(
-            errors
-                .iter()
-                .any(|error| error.is_fatal && error.message.contains("background layers"))
-        );
+        assert!(errors
+            .iter()
+            .any(|error| error.is_fatal && error.message.contains("background layers")));
     }
 
     #[test]
@@ -423,7 +424,9 @@ mod tests {
 
         let errors = validate_scene(&scene);
 
-        assert!(errors.iter().any(|error| error.is_fatal && error.message.contains("64x64")));
+        assert!(errors
+            .iter()
+            .any(|error| error.is_fatal && error.message.contains("64x64")));
     }
 
     #[test]
@@ -435,11 +438,9 @@ mod tests {
 
         let errors = validate_scene(&scene);
 
-        assert!(
-            errors
-                .iter()
-                .any(|error| !error.is_fatal && error.message.contains("Sprite Warning"))
-        );
+        assert!(errors
+            .iter()
+            .any(|error| !error.is_fatal && error.message.contains("Sprite Warning")));
         assert!(!errors.iter().any(|error| error.is_fatal));
     }
 
@@ -450,11 +451,9 @@ mod tests {
 
         let errors = validate_scene(&scene);
 
-        assert!(
-            errors
-                .iter()
-                .any(|error| error.is_fatal && error.message.contains("sprites simples quadrados"))
-        );
+        assert!(errors
+            .iter()
+            .any(|error| error.is_fatal && error.message.contains("sprites simples quadrados")));
     }
 
     #[test]
@@ -470,11 +469,9 @@ mod tests {
 
         let errors = validate_scene(&scene);
 
-        assert!(
-            errors.iter().any(|error| {
-                !error.is_fatal && error.message.contains("Sprite Scanline Warning")
-            })
-        );
+        assert!(errors
+            .iter()
+            .any(|error| { !error.is_fatal && error.message.contains("Sprite Scanline Warning") }));
     }
 
     #[test]

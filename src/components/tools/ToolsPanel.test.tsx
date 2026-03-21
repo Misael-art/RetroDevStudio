@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   installThirdPartyDependency: vi.fn(),
   detectRomDependency: vi.fn(),
   listProjectAssets: vi.fn(),
+  readLegacyProjectFile: vi.fn(),
   reverseExplorerRead: vi.fn(),
   patchCreateIps: vi.fn(),
   patchCreateBps: vi.fn(),
@@ -50,6 +51,7 @@ vi.mock("../../core/ipc/toolsService", () => ({
   installThirdPartyDependency: mocks.installThirdPartyDependency,
   detectRomDependency: mocks.detectRomDependency,
   listProjectAssets: mocks.listProjectAssets,
+  readLegacyProjectFile: mocks.readLegacyProjectFile,
   reverseExplorerRead: mocks.reverseExplorerRead,
   patchCreateIps: mocks.patchCreateIps,
   patchCreateBps: mocks.patchCreateBps,
@@ -106,6 +108,8 @@ describe("ToolsPanel Asset Browser", () => {
       emulPaused: false,
       consoleEntries: [],
       consoleVisible: true,
+      projectSourceKind: "",
+      projectLegacyIndex: null,
       activeScene: {
         scene_id: "main",
         display_name: "Main",
@@ -124,6 +128,14 @@ describe("ToolsPanel Asset Browser", () => {
         kind: "image",
       },
     ]);
+    mocks.readLegacyProjectFile.mockResolvedValue({
+      relative_path: "src/main.c",
+      absolute_path: "F:/Projects/MegaDrive_DEV/SonicLegacy/src/main.c",
+      content: "int main(void) { return 0; }",
+      previewable: true,
+      readonly: true,
+      note: "Somente leitura.",
+    });
     mocks.reverseExplorerRead.mockResolvedValue({
       ok: true,
       error: "",
@@ -234,5 +246,99 @@ describe("ToolsPanel Asset Browser", () => {
       "Assets",
       "Sprite 'onboarding_player' instanciado a partir de 'assets/sprites/onboarding_player.ppm'."
     );
+  });
+
+  it("shows the adopted SGDK host summary in runtime setup", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "F:/Projects/MegaDrive_DEV/SonicLegacy/rds",
+        activeProjectName: "Sonic Legacy",
+        projectSourceKind: "external_sgdk",
+        projectLegacyIndex: {
+          host_root: "F:/Projects/MegaDrive_DEV/SonicLegacy",
+          source_files: ["src/main.c", "src/player.c"],
+          header_files: ["inc/game.h"],
+          manifest_files: ["res/resources.res"],
+          resource_files: ["res/sprites/hero.png", "res/stage/level.png"],
+          output_files: ["out/rom.bin"],
+        },
+      });
+      await flush();
+      await flush();
+    });
+
+    const card = container.querySelector("[data-testid='runtime-legacy-sgdk-card']");
+    expect(card).not.toBeNull();
+    expect(card?.textContent).toContain("SGDK legado");
+    expect(card?.textContent).toContain("Sonic Legacy");
+    expect(card?.textContent).toContain("F:/Projects/MegaDrive_DEV/SonicLegacy");
+
+    await act(async () => {
+      findButton(container, "Ver indice").click();
+      await flush();
+    });
+
+    expect(card?.textContent).toContain("src/main.c");
+    expect(card?.textContent).toContain("res/resources.res");
+    expect(card?.textContent).toContain("out/rom.bin");
+  });
+
+  it("shows read-only legacy SGDK files inside the asset browser", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "F:/Projects/MegaDrive_DEV/SonicLegacy/rds",
+        projectSourceKind: "external_sgdk",
+        projectLegacyIndex: {
+          host_root: "F:/Projects/MegaDrive_DEV/SonicLegacy",
+          source_files: ["src/main.c"],
+          header_files: ["inc/game.h"],
+          manifest_files: ["res/resources.res"],
+          resource_files: [],
+          output_files: ["out/rom.bin"],
+        },
+      });
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, "Avancado OFF").click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Experimental/).click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Asset Browser/).click();
+      await flush();
+      await flush();
+    });
+
+    const legacyFileButton = Array.from(container.querySelectorAll("button")).find((element) =>
+      element.textContent?.includes("src/main.c")
+    );
+
+    expect(container.textContent).toContain("Projeto host SGDK");
+    expect(legacyFileButton).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      legacyFileButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.readLegacyProjectFile).toHaveBeenCalledWith(
+      "F:/Projects/MegaDrive_DEV/SonicLegacy/rds",
+      "src/main.c"
+    );
+    expect(container.querySelector("[data-testid='legacy-file-preview']")?.textContent).toContain(
+      "int main(void) { return 0; }"
+    );
+    expect(container.textContent).toContain("Read-only");
   });
 });

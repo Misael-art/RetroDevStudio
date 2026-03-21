@@ -376,14 +376,13 @@ pub fn extract_assets(
                 record_extraction_error(&mut result, format!("Erro ao salvar paletas: {error}"));
             } else {
                 result.palettes_extracted = palettes.len() as u32;
-                result.files.push(palette_path.to_string_lossy().to_string());
+                result
+                    .files
+                    .push(palette_path.to_string_lossy().to_string());
             }
         }
         Err(error) => {
-            record_extraction_error(
-                &mut result,
-                format!("Erro ao serializar paletas: {error}"),
-            );
+            record_extraction_error(&mut result, format!("Erro ao serializar paletas: {error}"));
         }
     }
 

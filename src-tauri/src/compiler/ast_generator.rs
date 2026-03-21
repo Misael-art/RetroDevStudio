@@ -1,4 +1,4 @@
-﻿use serde::Deserialize;
+use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
@@ -448,7 +448,12 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
 
     for entity in &scene.entities {
         if let Some(collision) = &entity.components.collision {
-            if let Some(source) = collision_source(entity.entity_id.as_str(), entity.transform.x, entity.transform.y, collision) {
+            if let Some(source) = collision_source(
+                entity.entity_id.as_str(),
+                entity.transform.x,
+                entity.transform.y,
+                collision,
+            ) {
                 collision_sources.push(source);
             }
         }
@@ -514,7 +519,10 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
         let animations = sprite_animations(project.fps, sprite);
         let default_animation = default_animation(project.fps, sprite);
 
-        if !sprite_assets.iter().any(|asset| asset.asset_path == sprite.asset) {
+        if !sprite_assets
+            .iter()
+            .any(|asset| asset.asset_path == sprite.asset)
+        {
             sprite_assets.push(SpriteAsset {
                 resource_name: resource_name.clone(),
                 asset_path: sprite.asset.clone(),
@@ -556,10 +564,7 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
         }
 
         if let Some(physics) = &entity.components.physics {
-            physics_applications.push(physics_application(
-                &var_name,
-                physics,
-            ));
+            physics_applications.push(physics_application(&var_name, physics));
         }
     }
 
@@ -585,7 +590,9 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
         });
     }
     if !raster_lines.is_empty() {
-        nodes.push(AstNode::SetupRasterEffect { lines: raster_lines });
+        nodes.push(AstNode::SetupRasterEffect {
+            lines: raster_lines,
+        });
     }
     if !audio_sfx_resources.is_empty() {
         nodes.push(AstNode::InitAudio {
@@ -599,10 +606,15 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
         });
     }
     nodes.push(AstNode::GameLoopBegin);
-    nodes.extend(input_reads.iter().cloned().map(|read| AstNode::ReadInputDevice {
-        device: read.device,
-        state_var: read.state_var,
-    }));
+    nodes.extend(
+        input_reads
+            .iter()
+            .cloned()
+            .map(|read| AstNode::ReadInputDevice {
+                device: read.device,
+                state_var: read.state_var,
+            }),
+    );
     nodes.extend(
         input_actions
             .iter()
@@ -616,17 +628,20 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
             }),
     );
     nodes.extend(collision_nodes(&collision_sources));
-    nodes.extend(physics_applications.iter().cloned().map(|application| {
-        AstNode::ApplyPhysics {
-            var_name: application.var_name,
-            gravity: application.gravity,
-            gravity_strength: application.gravity_strength,
-            max_velocity_x: application.max_velocity_x,
-            max_velocity_y: application.max_velocity_y,
-            friction: application.friction,
-            bounce: application.bounce,
-        }
-    }));
+    nodes.extend(
+        physics_applications
+            .iter()
+            .cloned()
+            .map(|application| AstNode::ApplyPhysics {
+                var_name: application.var_name,
+                gravity: application.gravity,
+                gravity_strength: application.gravity_strength,
+                max_velocity_x: application.max_velocity_x,
+                max_velocity_y: application.max_velocity_y,
+                friction: application.friction,
+                bounce: application.bounce,
+            }),
+    );
     nodes.extend(logic_output.runtime_nodes.iter().cloned());
     nodes.push(AstNode::SpriteUpdate);
     nodes.push(AstNode::VSync);
@@ -843,8 +858,16 @@ fn collision_source(
         return None;
     }
 
-    let offset_x = collision.offset.as_ref().map(|offset| offset.x).unwrap_or(0);
-    let offset_y = collision.offset.as_ref().map(|offset| offset.y).unwrap_or(0);
+    let offset_x = collision
+        .offset
+        .as_ref()
+        .map(|offset| offset.x)
+        .unwrap_or(0);
+    let offset_y = collision
+        .offset
+        .as_ref()
+        .map(|offset| offset.y)
+        .unwrap_or(0);
 
     Some(CollisionSource {
         box_def: CollisionBox {
@@ -929,17 +952,26 @@ fn logic_runtime_entity(
     sprite_resource_name: Option<&String>,
     project_fps: u32,
 ) -> Option<LogicRuntimeEntity> {
-    let (width, height, offset_x, offset_y) = match (&entity.components.collision, &entity.components.sprite) {
-        (Some(collision), _) if collision.shape == "aabb" => (
-            collision.width,
-            collision.height,
-            collision.offset.as_ref().map(|offset| offset.x).unwrap_or(0),
-            collision.offset.as_ref().map(|offset| offset.y).unwrap_or(0),
-        ),
-        (_, Some(sprite)) => (sprite.frame_width, sprite.frame_height, 0, 0),
-        _ if entity.components.camera.is_some() => (0, 0, 0, 0),
-        _ => return None,
-    };
+    let (width, height, offset_x, offset_y) =
+        match (&entity.components.collision, &entity.components.sprite) {
+            (Some(collision), _) if collision.shape == "aabb" => (
+                collision.width,
+                collision.height,
+                collision
+                    .offset
+                    .as_ref()
+                    .map(|offset| offset.x)
+                    .unwrap_or(0),
+                collision
+                    .offset
+                    .as_ref()
+                    .map(|offset| offset.y)
+                    .unwrap_or(0),
+            ),
+            (_, Some(sprite)) => (sprite.frame_width, sprite.frame_height, 0, 0),
+            _ if entity.components.camera.is_some() => (0, 0, 0, 0),
+            _ => return None,
+        };
 
     let position = sprite_var_name
         .cloned()
@@ -960,15 +992,19 @@ fn logic_runtime_entity(
         }),
         _ => None,
     };
-    let camera = entity.components.camera.as_ref().map(|camera| LogicRuntimeCamera {
-        follow_sprite_var: camera
-            .follow_entity
-            .as_ref()
-            .and_then(|entity_id| sprite_var_names.get(entity_id))
-            .cloned(),
-        offset_x: camera.offset_x,
-        offset_y: camera.offset_y,
-    });
+    let camera = entity
+        .components
+        .camera
+        .as_ref()
+        .map(|camera| LogicRuntimeCamera {
+            follow_sprite_var: camera
+                .follow_entity
+                .as_ref()
+                .and_then(|entity_id| sprite_var_names.get(entity_id))
+                .cloned(),
+            offset_x: camera.offset_x,
+            offset_y: camera.offset_y,
+        });
 
     Some(LogicRuntimeEntity {
         collision_target: LogicCollisionTarget {
@@ -1033,21 +1069,27 @@ fn compile_logic_graph(
 ) -> CompiledLogicOutput {
     let mut output = CompiledLogicOutput::default();
 
-    output.scripts.extend(graph.nodes.iter().filter(|node| node.node_type == "event_start").filter_map(|start_node| {
-            let mut visited = std::collections::HashSet::new();
-            let ops = compile_logic_chain(
-                graph,
-                &start_node.id,
-                "exec",
-                runtime_entities,
-                &mut visited,
-                &mut output.setup_nodes,
-                &mut output.runtime_nodes,
-                &mut output.parallax_layers,
-                &mut output.raster_lines,
-            );
-            (!ops.is_empty()).then_some(LogicScript { ops })
-        }));
+    output.scripts.extend(
+        graph
+            .nodes
+            .iter()
+            .filter(|node| node.node_type == "event_start")
+            .filter_map(|start_node| {
+                let mut visited = std::collections::HashSet::new();
+                let ops = compile_logic_chain(
+                    graph,
+                    &start_node.id,
+                    "exec",
+                    runtime_entities,
+                    &mut visited,
+                    &mut output.setup_nodes,
+                    &mut output.runtime_nodes,
+                    &mut output.parallax_layers,
+                    &mut output.raster_lines,
+                );
+                (!ops.is_empty()).then_some(LogicScript { ops })
+            }),
+    );
 
     if let Some(fsm_script) = compile_fsm_script(graph, runtime_entities, &mut output) {
         output.scripts.push(fsm_script);
@@ -1120,7 +1162,9 @@ fn compile_fsm_script(
     let states = state_nodes
         .iter()
         .enumerate()
-        .map(|(index, node)| compile_fsm_state(graph, node, index, &state_nodes, runtime_entities, output))
+        .map(|(index, node)| {
+            compile_fsm_state(graph, node, index, &state_nodes, runtime_entities, output)
+        })
         .collect::<Vec<_>>();
 
     Some(LogicScript {
@@ -1152,13 +1196,8 @@ fn compile_fsm_state(
         &mut output.raster_lines,
     );
 
-    let transitions = compile_fsm_transitions(
-        graph,
-        &node.id,
-        ordered_states,
-        runtime_entities,
-        output,
-    );
+    let transitions =
+        compile_fsm_transitions(graph, &node.id, ordered_states, runtime_entities, output);
 
     LogicFsmState {
         state_name: sanitize_identifier(
@@ -1342,7 +1381,8 @@ fn compile_logic_node(
         "sprite_move" => {
             let target = param_string(node, "target")?;
             let runtime = runtime_entities.get(&target)?;
-            let LogicPositionSource::SpriteVar { var_name } = &runtime.collision_target.position else {
+            let LogicPositionSource::SpriteVar { var_name } = &runtime.collision_target.position
+            else {
                 return None;
             };
 
@@ -1431,11 +1471,8 @@ fn compile_logic_node(
                 );
                 return Some(CompiledLogicNode::NoOp);
             };
-            let Some((anim_index, animation)) = sprite
-                .animations
-                .iter()
-                .enumerate()
-                .find(|(_, animation)| {
+            let Some((anim_index, animation)) =
+                sprite.animations.iter().enumerate().find(|(_, animation)| {
                     animation.name == anim_name
                         || sanitize_identifier(&animation.name) == sanitize_identifier(&anim_name)
                 })
@@ -1515,7 +1552,9 @@ fn compile_logic_node(
             Some(CompiledLogicNode::NoOp)
         }
         "var_set" => {
-            let var_name = sanitize_identifier(&param_string(node, "var_name").unwrap_or_else(|| "temp_var".to_string()));
+            let var_name = sanitize_identifier(
+                &param_string(node, "var_name").unwrap_or_else(|| "temp_var".to_string()),
+            );
             let value_expr = resolve_math_expr_from_input(graph, &node.id, "value")?;
             Some(CompiledLogicNode::Linear(LogicOp::SetVar {
                 var_name,
@@ -1551,7 +1590,7 @@ fn compile_logic_node(
                 parallax_layers,
                 raster_lines,
             );
-            
+
             let compare_expr = LogicBoolExpr::Compare {
                 op,
                 left: Box::new(left),
@@ -1780,10 +1819,7 @@ fn resolve_bool_expr_from_input(
         .edges
         .iter()
         .find(|edge| edge.to_node == to_node_id && edge.to_port == to_port)?;
-    let source_node = graph
-        .nodes
-        .iter()
-        .find(|node| node.id == edge.from_node)?;
+    let source_node = graph.nodes.iter().find(|node| node.id == edge.from_node)?;
     build_bool_expr_from_node(
         source_node,
         &edge.from_port,
@@ -1822,8 +1858,9 @@ fn build_bool_expr_from_node(
             }
         }
         "logic_and" => {
-            let left = resolve_bool_expr_from_input(graph, &node.id, "a", runtime_entities, visited)
-                .unwrap_or(LogicBoolExpr::Literal(false));
+            let left =
+                resolve_bool_expr_from_input(graph, &node.id, "a", runtime_entities, visited)
+                    .unwrap_or(LogicBoolExpr::Literal(false));
             let right =
                 resolve_bool_expr_from_input(graph, &node.id, "b", runtime_entities, visited)
                     .unwrap_or(LogicBoolExpr::Literal(false));
@@ -1880,12 +1917,16 @@ fn resolve_math_expr_from_input(
     to_node_id: &str,
     to_port: &str,
 ) -> Option<LogicMathExpr> {
-    if let Some(edge) = graph.edges.iter().find(|edge| edge.to_node == to_node_id && edge.to_port == to_port) {
+    if let Some(edge) = graph
+        .edges
+        .iter()
+        .find(|edge| edge.to_node == to_node_id && edge.to_port == to_port)
+    {
         if let Some(source_node) = graph.nodes.iter().find(|node| node.id == edge.from_node) {
             return build_math_expr_from_node(source_node, graph);
         }
     }
-    
+
     let to_node = graph.nodes.iter().find(|node| node.id == to_node_id)?;
     if let Some(Value::Number(num)) = to_node.params.get(to_port) {
         if let Some(val) = num.as_i64() {
@@ -1897,7 +1938,7 @@ fn resolve_math_expr_from_input(
             return Some(LogicMathExpr::Literal(val));
         }
     }
-    
+
     Some(LogicMathExpr::Literal(0))
 }
 
@@ -1908,8 +1949,10 @@ fn build_math_expr_from_node(
     match node.node_type.as_str() {
         "logic_math" => {
             let op_str = param_string(node, "operator").unwrap_or_else(|| "+".to_string());
-            let a = resolve_math_expr_from_input(graph, &node.id, "a").unwrap_or(LogicMathExpr::Literal(0));
-            let b = resolve_math_expr_from_input(graph, &node.id, "b").unwrap_or(LogicMathExpr::Literal(0));
+            let a = resolve_math_expr_from_input(graph, &node.id, "a")
+                .unwrap_or(LogicMathExpr::Literal(0));
+            let b = resolve_math_expr_from_input(graph, &node.id, "b")
+                .unwrap_or(LogicMathExpr::Literal(0));
             match op_str.as_str() {
                 "-" => Some(LogicMathExpr::Sub(Box::new(a), Box::new(b))),
                 "*" => Some(LogicMathExpr::Mul(Box::new(a), Box::new(b))),
@@ -1918,7 +1961,9 @@ fn build_math_expr_from_node(
             }
         }
         "var_get" => {
-            let var_name = sanitize_identifier(&param_string(node, "var_name").unwrap_or_else(|| "temp_var".to_string()));
+            let var_name = sanitize_identifier(
+                &param_string(node, "var_name").unwrap_or_else(|| "temp_var".to_string()),
+            );
             Some(LogicMathExpr::Var(var_name))
         }
         _ => Some(LogicMathExpr::Literal(param_i32(node, "value", 0))),
@@ -2237,7 +2282,7 @@ mod tests {
                         palette_slot: 1,
                         animations,
                         priority: "foreground".to_string(),
-                    meta_sprite: false,
+                        meta_sprite: false,
                     }),
                     ..Components::default()
                 },
@@ -2642,7 +2687,7 @@ mod tests {
                         palette_slot: 0,
                         animations: HashMap::new(),
                         priority: "foreground".to_string(),
-                    meta_sprite: false,
+                        meta_sprite: false,
                     }),
                     physics: Some(crate::ugdm::components::PhysicsComponent {
                         gravity: true,
@@ -3076,7 +3121,7 @@ mod tests {
                         palette_slot: 0,
                         animations,
                         priority: "foreground".to_string(),
-                    meta_sprite: false,
+                        meta_sprite: false,
                     }),
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
@@ -3274,7 +3319,7 @@ mod tests {
                             palette_slot: 0,
                             animations: HashMap::new(),
                             priority: "foreground".to_string(),
-                        meta_sprite: false,
+                            meta_sprite: false,
                         }),
                         ..Components::default()
                     },
@@ -3435,7 +3480,7 @@ mod tests {
                             palette_slot: 0,
                             animations: HashMap::new(),
                             priority: "foreground".to_string(),
-                        meta_sprite: false,
+                            meta_sprite: false,
                         }),
                         collision: Some(crate::ugdm::components::CollisionComponent {
                             shape: "aabb".to_string(),
@@ -3468,7 +3513,7 @@ mod tests {
                             palette_slot: 0,
                             animations: HashMap::new(),
                             priority: "foreground".to_string(),
-                        meta_sprite: false,
+                            meta_sprite: false,
                         }),
                         collision: Some(crate::ugdm::components::CollisionComponent {
                             shape: "aabb".to_string(),
@@ -3496,7 +3541,7 @@ mod tests {
                             palette_slot: 0,
                             animations: HashMap::new(),
                             priority: "foreground".to_string(),
-                        meta_sprite: false,
+                            meta_sprite: false,
                         }),
                         collision: Some(crate::ugdm::components::CollisionComponent {
                             shape: "aabb".to_string(),
@@ -3524,7 +3569,9 @@ mod tests {
             .iter()
             .flat_map(|script| script.ops.iter())
             .find_map(|op| match op {
-                LogicOp::ConditionBool { condition, if_true, .. } => Some((condition, if_true)),
+                LogicOp::ConditionBool {
+                    condition, if_true, ..
+                } => Some((condition, if_true)),
                 _ => None,
             })
             .expect("logic_and should compile into a guarded condition");
@@ -3548,7 +3595,10 @@ mod tests {
             schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
             name: "Logic Vars".to_string(),
             target: "megadrive".to_string(),
-            resolution: Resolution { width: 320, height: 224 },
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
             fps: 60,
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
@@ -3679,7 +3729,10 @@ mod tests {
         };
 
         let ast = generate_ast(&project, &scene);
-        let script = ast.logic_scripts.first().expect("logic script should exist");
+        let script = ast
+            .logic_scripts
+            .first()
+            .expect("logic script should exist");
 
         assert!(script.ops.iter().any(|op| matches!(
             op,
@@ -3715,7 +3768,10 @@ mod tests {
             schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
             name: "Logic Compare Ops".to_string(),
             target: "megadrive".to_string(),
-            resolution: Resolution { width: 320, height: 224 },
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
             fps: 60,
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
@@ -3791,20 +3847,28 @@ mod tests {
                     },
                 }],
                 palettes: Vec::new(),
-            retrofx: None,
-            collision_map: None,
-            layers: None,
-        };
+                retrofx: None,
+                collision_map: None,
+                layers: None,
+            };
 
             let ast = generate_ast(&project, &scene);
-            let script = ast.logic_scripts.first().expect("logic script should exist");
-            assert!(script.ops.iter().any(|op| matches!(
-                op,
-                LogicOp::ConditionBool {
-                    condition: LogicBoolExpr::Compare { op, .. },
-                    ..
-                } if *op == expected_op
-            )), "operator {} should map to {:?}", operator, expected_op);
+            let script = ast
+                .logic_scripts
+                .first()
+                .expect("logic script should exist");
+            assert!(
+                script.ops.iter().any(|op| matches!(
+                    op,
+                    LogicOp::ConditionBool {
+                        condition: LogicBoolExpr::Compare { op, .. },
+                        ..
+                    } if *op == expected_op
+                )),
+                "operator {} should map to {:?}",
+                operator,
+                expected_op
+            );
         }
     }
 
@@ -3901,7 +3965,7 @@ mod tests {
                             palette_slot: 0,
                             animations: HashMap::new(),
                             priority: "foreground".to_string(),
-                        meta_sprite: false,
+                            meta_sprite: false,
                         }),
                         collision: Some(crate::ugdm::components::CollisionComponent {
                             shape: "aabb".to_string(),
@@ -3934,7 +3998,7 @@ mod tests {
                             palette_slot: 0,
                             animations: HashMap::new(),
                             priority: "foreground".to_string(),
-                        meta_sprite: false,
+                            meta_sprite: false,
                         }),
                         collision: Some(crate::ugdm::components::CollisionComponent {
                             shape: "aabb".to_string(),
@@ -4024,7 +4088,10 @@ mod tests {
             schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
             name: "FSM Demo".to_string(),
             target: "megadrive".to_string(),
-            resolution: Resolution { width: 320, height: 224 },
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
             fps: 60,
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
@@ -4068,7 +4135,7 @@ mod tests {
                         palette_slot: 0,
                         animations: HashMap::new(),
                         priority: "foreground".to_string(),
-                    meta_sprite: false,
+                        meta_sprite: false,
                     }),
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
@@ -4090,7 +4157,10 @@ mod tests {
             .iter()
             .flat_map(|script| script.ops.iter())
             .find_map(|op| match op {
-                LogicOp::StateMachine { machine_var, states } => Some((machine_var, states)),
+                LogicOp::StateMachine {
+                    machine_var,
+                    states,
+                } => Some((machine_var, states)),
                 _ => None,
             })
             .expect("fsm graph should compile into a state machine");
@@ -4118,7 +4188,10 @@ mod tests {
             schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
             name: "Flow Demo".to_string(),
             target: "megadrive".to_string(),
-            resolution: Resolution { width: 320, height: 224 },
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
             fps: 60,
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
@@ -4165,7 +4238,7 @@ mod tests {
                         palette_slot: 0,
                         animations: HashMap::new(),
                         priority: "foreground".to_string(),
-                    meta_sprite: false,
+                        meta_sprite: false,
                     }),
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
@@ -4185,7 +4258,9 @@ mod tests {
         let ops = &ast.logic_scripts[0].ops;
 
         assert!(matches!(ops[0], LogicOp::ConditionBool { .. }));
-        assert!(matches!(ops[0], LogicOp::ConditionBool { ref if_true, .. } if matches!(if_true[0], LogicOp::WhileLoop { .. })));
+        assert!(
+            matches!(ops[0], LogicOp::ConditionBool { ref if_true, .. } if matches!(if_true[0], LogicOp::WhileLoop { .. }))
+        );
     }
 
     #[test]
@@ -4195,7 +4270,10 @@ mod tests {
             schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
             name: "Timeline Demo".to_string(),
             target: "megadrive".to_string(),
-            resolution: Resolution { width: 320, height: 224 },
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
             fps: 60,
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
@@ -4240,7 +4318,7 @@ mod tests {
                         palette_slot: 0,
                         animations: HashMap::new(),
                         priority: "foreground".to_string(),
-                    meta_sprite: false,
+                        meta_sprite: false,
                     }),
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
@@ -4270,9 +4348,15 @@ mod tests {
         assert_eq!(timeline.0, "timeline_intro");
         assert_eq!(timeline.1.len(), 2);
         assert_eq!(timeline.1[0].delay_frames, 15);
-        assert!(matches!(timeline.1[0].actions[0], LogicOp::MoveSprite { .. }));
+        assert!(matches!(
+            timeline.1[0].actions[0],
+            LogicOp::MoveSprite { .. }
+        ));
         assert_eq!(timeline.1[1].delay_frames, 30);
-        assert!(matches!(timeline.1[1].actions[0], LogicOp::PlaySound { .. }));
+        assert!(matches!(
+            timeline.1[1].actions[0],
+            LogicOp::PlaySound { .. }
+        ));
     }
 
     #[test]
@@ -4282,7 +4366,10 @@ mod tests {
             schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
             name: "Event Demo".to_string(),
             target: "megadrive".to_string(),
-            resolution: Resolution { width: 320, height: 224 },
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
             fps: 60,
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
@@ -4322,7 +4409,7 @@ mod tests {
                         palette_slot: 0,
                         animations: HashMap::new(),
                         priority: "foreground".to_string(),
-                    meta_sprite: false,
+                        meta_sprite: false,
                     }),
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
@@ -4349,11 +4436,17 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(events.len(), 3);
-        assert!(matches!(events[0].0, HardwareEventKind::VBlank | HardwareEventKind::HBlank | HardwareEventKind::DmaDone));
-        assert!(events.iter().any(|(event, ops)| matches!(event, HardwareEventKind::VBlank) && matches!(ops[0], LogicOp::MoveSprite { .. })));
-        assert!(events.iter().any(|(event, ops)| matches!(event, HardwareEventKind::HBlank) && matches!(ops[0], LogicOp::PlaySound { .. })));
+        assert!(matches!(
+            events[0].0,
+            HardwareEventKind::VBlank | HardwareEventKind::HBlank | HardwareEventKind::DmaDone
+        ));
+        assert!(events
+            .iter()
+            .any(|(event, ops)| matches!(event, HardwareEventKind::VBlank)
+                && matches!(ops[0], LogicOp::MoveSprite { .. })));
+        assert!(events
+            .iter()
+            .any(|(event, ops)| matches!(event, HardwareEventKind::HBlank)
+                && matches!(ops[0], LogicOp::PlaySound { .. })));
     }
 }
-
-
-

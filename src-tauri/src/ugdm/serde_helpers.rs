@@ -24,10 +24,7 @@ where
             if truncated >= i32::MIN as f64 && truncated <= i32::MAX as f64 {
                 Ok(truncated as i32)
             } else {
-                Err(D::Error::custom(format!(
-                    "float {} fora do range i32",
-                    v
-                )))
+                Err(D::Error::custom(format!("float {} fora do range i32", v)))
             }
         }
     }

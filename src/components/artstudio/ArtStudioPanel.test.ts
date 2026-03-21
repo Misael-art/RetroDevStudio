@@ -13,15 +13,17 @@ import { useEditorStore } from "../../core/store/editorStore";
 
 const mocks = vi.hoisted(() => ({
   open: vi.fn(),
-  convertFileSrc: vi.fn((path: string) => `asset://${path}`),
+  artProcessPalette: vi.fn(),
+  importArtAsset: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: mocks.open,
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({
-  convertFileSrc: mocks.convertFileSrc,
+vi.mock("../../core/ipc/artStudioService", () => ({
+  artProcessPalette: mocks.artProcessPalette,
+  importArtAsset: mocks.importArtAsset,
 }));
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -129,6 +131,66 @@ describe("ArtStudioPanel import flow", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    mocks.artProcessPalette.mockResolvedValue({
+      ok: true,
+      processed_base64: "ZmFrZS1wbmctcHJldmlldw==",
+      error: null,
+      format: "PNG",
+      source_width: 256,
+      source_height: 128,
+      processed_width: 256,
+      processed_height: 128,
+      frame_count: 1,
+      background_mode: "corner",
+      transparent_pixels: 128,
+      palette: [
+        "transparent",
+        "#000000",
+        "#242424",
+        "#494949",
+        "#6d6d6d",
+        "#929292",
+        "#b6b6b6",
+        "#dbdbdb",
+      ],
+      palette_size: 8,
+      content_bounds: {
+        x: 0,
+        y: 0,
+        width: 64,
+        height: 32,
+        aligned_x: 0,
+        aligned_y: 0,
+        aligned_width: 64,
+        aligned_height: 32,
+        tile_cols: 8,
+        tile_rows: 4,
+      },
+      suggested_frame_width: 32,
+      suggested_frame_height: 32,
+      recommended_output_width: 32,
+      recommended_output_height: 32,
+      recommended_scale_percent: 100,
+      meta_sprite_candidate: false,
+      slicing_mode: "grid",
+      suggested_frames: [
+        { index: 0, x: 0, y: 0, width: 32, height: 32 },
+        { index: 1, x: 32, y: 0, width: 32, height: 32 },
+      ],
+      warnings: [],
+    });
+    mocks.importArtAsset.mockResolvedValue({
+      ok: true,
+      error: null,
+      relative_path: "assets/sprites/hero_sheet.png",
+      absolute_path: "F:/Projects/RetroDevStudio/demo/assets/sprites/hero_sheet.png",
+      sprite_name: "hero_sheet",
+      frame_width: 32,
+      frame_height: 32,
+      frame_count: 2,
+      generated_width: 64,
+      generated_height: 32,
+    });
 
     useEditorStore.setState({
       activeProjectDir: "F:/Projects/RetroDevStudio/demo",
@@ -247,12 +309,14 @@ describe("ArtStudioPanel import flow", () => {
     });
 
     expect(container.textContent).toContain("hero.webp");
-    expect(container.textContent).toContain("WebP");
-    expect(container.textContent).toContain("Imagem externa carregada com sucesso");
+    expect(container.textContent).toContain("PNG");
+    expect(container.textContent).toContain("ainda nao virou um asset canonico do projeto");
+    expect(container.textContent).toContain("corner (128 px)");
     expect(findButton(container, /Aplicar/).disabled).toBe(true);
+    expect(mocks.artProcessPalette).toHaveBeenCalledWith("D:/Downloads/hero.webp");
   });
 
-  it("loads a project asset and unlocks apply to scene", async () => {
+  it("imports the canonical sprite sheet before unlocking apply", async () => {
     mocks.open.mockResolvedValue(
       "F:/Projects/RetroDevStudio/demo/assets/sprites/hero/run.png"
     );
@@ -265,6 +329,85 @@ describe("ArtStudioPanel import flow", () => {
 
     expect(container.textContent).toContain("hero/run.png");
     expect(container.textContent).toContain("Imagem pronta");
+    expect(findButton(container, /Aplicar/).disabled).toBe(true);
+    expect(container.textContent).toContain("Sprite simples");
+
+    await act(async () => {
+      findButton(container, "Trazer para assets/sprites").click();
+      await flush();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("assets/sprites/hero_sheet.png");
     expect(findButton(container, /Aplicar/).disabled).toBe(false);
+    expect(mocks.importArtAsset).toHaveBeenCalledWith(
+      "F:/Projects/RetroDevStudio/demo/assets/sprites/hero/run.png",
+      "F:/Projects/RetroDevStudio/demo",
+      {
+        spriteName: "run",
+        gridWidth: 32,
+        gridHeight: 32,
+        slicingMode: "grid",
+      }
+    );
+
+    await act(async () => {
+      findButton(container, /Aplicar/).click();
+      await flush();
+    });
+
+    const appliedEntity = useEditorStore
+      .getState()
+      .activeScene?.entities.find((entity) => entity.entity_id === "hero_sheet");
+    expect(appliedEntity?.components.sprite).toEqual({
+      asset: "assets/sprites/hero_sheet.png",
+      frame_width: 32,
+      frame_height: 32,
+      palette_slot: 0,
+      priority: "foreground",
+      animations: {
+        idle: {
+          frames: [0],
+          fps: 1,
+          loop: true,
+        },
+      },
+    });
+  });
+
+  it("surfaces backend processing errors with actionable feedback", async () => {
+    mocks.open.mockResolvedValue("D:/Downloads/broken.gif");
+    mocks.artProcessPalette.mockResolvedValueOnce({
+      ok: false,
+      processed_base64: null,
+      error: "Falha ao decodificar imagem: formato corrompido.",
+      format: null,
+      source_width: null,
+      source_height: null,
+      processed_width: null,
+      processed_height: null,
+      frame_count: null,
+      background_mode: null,
+      transparent_pixels: null,
+      palette: [],
+      palette_size: 0,
+      content_bounds: null,
+      suggested_frame_width: null,
+      suggested_frame_height: null,
+      recommended_output_width: null,
+      recommended_output_height: null,
+      recommended_scale_percent: null,
+      meta_sprite_candidate: false,
+      warnings: [],
+    });
+
+    await act(async () => {
+      findButton(container, "Importar imagem").click();
+      await flush();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("Falha ao decodificar imagem");
+    expect(findButton(container, /Aplicar/).disabled).toBe(true);
   });
 });

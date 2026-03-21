@@ -115,7 +115,10 @@ impl DependencyKind {
             "pvsneslib" => Ok(Self::PvsnesLib),
             "libretro_megadrive" => Ok(Self::LibretroMegaDriveCore),
             "libretro_snes" => Ok(Self::LibretroSnesCore),
-            other => Err(format!("Dependencia de terceiros desconhecida: '{}'.", other)),
+            other => Err(format!(
+                "Dependencia de terceiros desconhecida: '{}'.",
+                other
+            )),
         }
     }
 
@@ -174,11 +177,15 @@ impl DependencyKind {
                 root.join("makefile.gen").exists()
                     || (root.join("bin").exists() && root.join("inc").exists())
             }
-            Self::PvsnesLib => self.install_dir().join("devkitsnes").join("snes_rules").exists(),
-            Self::LibretroMegaDriveCore => contains_core_candidate(&self.install_dir(), &[
-                MEGADRIVE_CORE_CANDIDATES[0],
-                MEGADRIVE_CORE_CANDIDATES[1],
-            ]),
+            Self::PvsnesLib => self
+                .install_dir()
+                .join("devkitsnes")
+                .join("snes_rules")
+                .exists(),
+            Self::LibretroMegaDriveCore => contains_core_candidate(
+                &self.install_dir(),
+                &[MEGADRIVE_CORE_CANDIDATES[0], MEGADRIVE_CORE_CANDIDATES[1]],
+            ),
             Self::LibretroSnesCore => {
                 contains_core_candidate(&self.install_dir(), SNES_CORE_CANDIDATES)
             }
@@ -356,7 +363,10 @@ where
     let client = match Client::builder().user_agent("RetroDevStudio").build() {
         Ok(client) => client,
         Err(error) => {
-            logger.emit("error", format!("Falha ao preparar cliente HTTP: {}", error));
+            logger.emit(
+                "error",
+                format!("Falha ao preparar cliente HTTP: {}", error),
+            );
             return DependencyInstallResult {
                 ok: false,
                 dependency_id: dependency.id().to_string(),
@@ -420,7 +430,10 @@ where
     F: Fn(DependencyLogLine),
 {
     logger.emit("info", "Consultando release oficial do SGDK...");
-    let release = fetch_latest_release(client, "https://api.github.com/repos/Stephane-D/SGDK/releases/latest")?;
+    let release = fetch_latest_release(
+        client,
+        "https://api.github.com/repos/Stephane-D/SGDK/releases/latest",
+    )?;
     let asset = release
         .assets
         .iter()
@@ -439,7 +452,8 @@ where
         .map_err(|e| format!("Falha ao extrair pacote SGDK: {}", e))?;
 
     let source_root = find_install_root(&extracted_dir, |path| {
-        path.join("makefile.gen").exists() || (path.join("bin").exists() && path.join("inc").exists())
+        path.join("makefile.gen").exists()
+            || (path.join("bin").exists() && path.join("inc").exists())
     })
     .ok_or_else(|| "Pacote SGDK extraido sem estrutura reconhecivel.".to_string())?;
 
@@ -489,8 +503,7 @@ where
             lower.ends_with(".zip") && lower.contains("windows")
         })
         .ok_or_else(|| {
-            "A release oficial do PVSnesLib nao expoe um asset Windows .zip esperado."
-                .to_string()
+            "A release oficial do PVSnesLib nao expoe um asset Windows .zip esperado.".to_string()
         })?;
 
     let temp_dir = temp_install_dir("pvsneslib")?;
@@ -544,7 +557,10 @@ fn install_libretro_cores<F>(
 where
     F: Fn(DependencyLogLine),
 {
-    logger.emit("info", "Consultando release oficial mais recente do RetroArch...");
+    logger.emit(
+        "info",
+        "Consultando release oficial mais recente do RetroArch...",
+    );
     let release = fetch_latest_release(
         client,
         "https://api.github.com/repos/libretro/RetroArch/releases/latest",
@@ -560,7 +576,10 @@ where
     download_to_file(client, &download_url, &archive_path, logger)?;
 
     let install_dir = DependencyKind::LibretroMegaDriveCore.install_dir();
-    logger.emit("info", "Extraindo apenas os cores Libretro suportados pelo app...");
+    logger.emit(
+        "info",
+        "Extraindo apenas os cores Libretro suportados pelo app...",
+    );
     let copied_cores = extract_supported_libretro_cores(&archive_path, &install_dir)?;
     let manifest = InstallManifest {
         dependency_id: "libretro_cores".to_string(),
@@ -618,8 +637,13 @@ where
     F: Fn(DependencyLogLine),
 {
     if let Some(parent) = destination.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Falha ao preparar download em '{}': {}", parent.display(), e))?;
+        fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "Falha ao preparar download em '{}': {}",
+                parent.display(),
+                e
+            )
+        })?;
     }
 
     logger.emit("info", format!("Baixando: {}", url));
@@ -632,20 +656,33 @@ where
     if let Some(length) = response.content_length() {
         logger.emit(
             "info",
-            format!("Tamanho informado pelo servidor: {:.1} MB", length as f64 / 1_048_576.0),
+            format!(
+                "Tamanho informado pelo servidor: {:.1} MB",
+                length as f64 / 1_048_576.0
+            ),
         );
     }
 
     let mut file = File::create(destination)
         .map_err(|e| format!("Falha ao criar arquivo '{}': {}", destination.display(), e))?;
-    io::copy(&mut response, &mut file)
-        .map_err(|e| format!("Falha ao gravar download '{}': {}", destination.display(), e))?;
+    io::copy(&mut response, &mut file).map_err(|e| {
+        format!(
+            "Falha ao gravar download '{}': {}",
+            destination.display(),
+            e
+        )
+    })?;
     Ok(())
 }
 
 fn extract_zip(archive_path: &Path, target_dir: &Path) -> Result<(), String> {
-    let file = File::open(archive_path)
-        .map_err(|e| format!("Falha ao abrir arquivo zip '{}': {}", archive_path.display(), e))?;
+    let file = File::open(archive_path).map_err(|e| {
+        format!(
+            "Falha ao abrir arquivo zip '{}': {}",
+            archive_path.display(),
+            e
+        )
+    })?;
     let mut archive = ZipArchive::new(file)
         .map_err(|e| format!("Falha ao ler zip '{}': {}", archive_path.display(), e))?;
     archive
@@ -679,7 +716,8 @@ fn copy_dir_all(source: &Path, destination: &Path) -> Result<(), String> {
     for entry in fs::read_dir(source)
         .map_err(|e| format!("Falha ao listar '{}': {}", source.display(), e))?
     {
-        let entry = entry.map_err(|e| format!("Falha ao ler entrada em '{}': {}", source.display(), e))?;
+        let entry =
+            entry.map_err(|e| format!("Falha ao ler entrada em '{}': {}", source.display(), e))?;
         let source_path = entry.path();
         let destination_path = destination.join(entry.file_name());
         if source_path.is_dir() {
@@ -731,7 +769,10 @@ fn contains_core_candidate(root: &Path, candidates: &[&str]) -> bool {
         .any(|path| path.exists())
 }
 
-fn extract_supported_libretro_cores(archive_path: &Path, destination: &Path) -> Result<Vec<String>, String> {
+fn extract_supported_libretro_cores(
+    archive_path: &Path,
+    destination: &Path,
+) -> Result<Vec<String>, String> {
     if destination.exists() {
         fs::remove_dir_all(destination).map_err(|e| {
             format!(
@@ -759,7 +800,10 @@ fn extract_supported_libretro_cores(archive_path: &Path, destination: &Path) -> 
         }
 
         let entry_name = entry.name().replace('\\', "/");
-        let Some(file_name) = Path::new(&entry_name).file_name().and_then(|name| name.to_str()) else {
+        let Some(file_name) = Path::new(&entry_name)
+            .file_name()
+            .and_then(|name| name.to_str())
+        else {
             io::copy(reader, &mut io::sink()).map_err(sevenz_rust2::Error::io)?;
             return Ok(true);
         };
@@ -772,7 +816,10 @@ fn extract_supported_libretro_cores(archive_path: &Path, destination: &Path) -> 
         let destination_path = destination.join(file_name);
         sevenz_rust2::default_entry_extract_fn(entry, reader, &destination_path)?;
 
-        if let Some(stem) = Path::new(file_name).file_stem().and_then(|name| name.to_str()) {
+        if let Some(stem) = Path::new(file_name)
+            .file_stem()
+            .and_then(|name| name.to_str())
+        {
             if !copied.iter().any(|existing| existing == stem) {
                 copied.push(stem.to_string());
             }
@@ -782,17 +829,21 @@ fn extract_supported_libretro_cores(archive_path: &Path, destination: &Path) -> 
     })
     .map_err(|e| format!("Falha ao extrair pacote de cores Libretro: {}", e))?;
 
-    if !copied
-        .iter()
-        .any(|candidate| MEGADRIVE_CORE_CANDIDATES.iter().any(|expected| expected == candidate))
-    {
-        return Err("Nenhum core suportado de Mega Drive foi encontrado no pacote oficial.".to_string());
+    if !copied.iter().any(|candidate| {
+        MEGADRIVE_CORE_CANDIDATES
+            .iter()
+            .any(|expected| expected == candidate)
+    }) {
+        return Err(
+            "Nenhum core suportado de Mega Drive foi encontrado no pacote oficial.".to_string(),
+        );
     }
 
-    if !copied
-        .iter()
-        .any(|candidate| SNES_CORE_CANDIDATES.iter().any(|expected| expected == candidate))
-    {
+    if !copied.iter().any(|candidate| {
+        SNES_CORE_CANDIDATES
+            .iter()
+            .any(|expected| expected == candidate)
+    }) {
         return Err("Nenhum core suportado de SNES foi encontrado no pacote oficial.".to_string());
     }
 
@@ -824,8 +875,13 @@ fn copy_supported_libretro_cores_for_test(
         })?;
     }
 
-    fs::create_dir_all(destination)
-        .map_err(|e| format!("Falha ao preparar destino de teste '{}': {}", destination.display(), e))?;
+    fs::create_dir_all(destination).map_err(|e| {
+        format!(
+            "Falha ao preparar destino de teste '{}': {}",
+            destination.display(),
+            e
+        )
+    })?;
 
     let extension = shared_library_extension();
     let mut copied = Vec::new();
@@ -865,12 +921,18 @@ fn write_manifest(
     file_name: String,
     manifest: &InstallManifest,
 ) -> Result<(), String> {
-    fs::create_dir_all(&manifest_dir)
-        .map_err(|e| format!("Falha ao preparar manifest em '{}': {}", manifest_dir.display(), e))?;
+    fs::create_dir_all(&manifest_dir).map_err(|e| {
+        format!(
+            "Falha ao preparar manifest em '{}': {}",
+            manifest_dir.display(),
+            e
+        )
+    })?;
     let path = manifest_dir.join(file_name);
     let json = serde_json::to_vec_pretty(manifest)
         .map_err(|e| format!("Falha ao serializar manifest '{}': {}", path.display(), e))?;
-    fs::write(&path, json).map_err(|e| format!("Falha ao gravar manifest '{}': {}", path.display(), e))
+    fs::write(&path, json)
+        .map_err(|e| format!("Falha ao gravar manifest '{}': {}", path.display(), e))
 }
 
 fn manifest_file_name(dependency: DependencyKind) -> String {
@@ -927,7 +989,11 @@ fn detect_make_program(root: &Path) -> Option<PathBuf> {
 }
 
 fn find_in_path(candidates: &[&str]) -> Option<PathBuf> {
-    let locator = if cfg!(target_os = "windows") { "where" } else { "which" };
+    let locator = if cfg!(target_os = "windows") {
+        "where"
+    } else {
+        "which"
+    };
     for candidate in candidates {
         if let Ok(output) = Command::new(locator).arg(candidate).output() {
             if output.status.success() {
@@ -1057,13 +1123,15 @@ mod tests {
         let copied = copy_supported_libretro_cores_for_test(&source_dir, &destination_dir)
             .expect("install supported cores");
 
-        assert!(copied.iter().any(|candidate| candidate == "genesis_plus_gx_libretro"));
-        assert!(copied.iter().any(|candidate| candidate == "snes9x_libretro"));
-        assert!(
-            !destination_dir
-                .join(format!("vice_xvic_libretro.{}", extension))
-                .exists()
-        );
+        assert!(copied
+            .iter()
+            .any(|candidate| candidate == "genesis_plus_gx_libretro"));
+        assert!(copied
+            .iter()
+            .any(|candidate| candidate == "snes9x_libretro"));
+        assert!(!destination_dir
+            .join(format!("vice_xvic_libretro.{}", extension))
+            .exists());
 
         let _ = fs::remove_dir_all(source_dir);
         let _ = fs::remove_dir_all(destination_dir);
