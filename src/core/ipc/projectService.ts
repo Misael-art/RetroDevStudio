@@ -35,6 +35,10 @@ export function newProjectDialog(projectName: string): Promise<OpenProjectResult
   return invoke("new_project_dialog", { projectName });
 }
 
+export function suggestProjectBaseDir(): Promise<string> {
+  return invoke("suggest_project_base_dir");
+}
+
 export function createOnboardingProject(
   projectName: string,
   target: "megadrive" | "snes",

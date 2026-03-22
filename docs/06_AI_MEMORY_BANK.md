@@ -1,6 +1,6 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Ultima Atualizacao:** 2026-03-21
-**Ultima sessao:** 2026-03-21 (Wrapper SGDK final - Asset Browser legado read-only e delegacao de build ao host)
+**Ultima sessao:** 2026-03-21 (Auditoria de tasks interrompidas + onboarding com pasta automatica visivel)
 **Fase Atual:** Release candidate / beta testing do desktop Tauri, com baseline automatizada restaurada (check-tree, lint, tsc, vitest, cargo clippy, cargo test), persistencia atomica endurecida no Windows, schema UGDM explicitamente migrado ate `1.6.0`, galeria de templates alinhada com `platformer_gm`, `prefab` separado de `display_name`, badges `Experimental` reconciliados na UI e nos docs, `nodeCompiler.ts` rebaixado para legado/experimental fora do pipeline canonico, smoke desktop completo `Build -> ROM -> Run` novamente reproduzido no host local, ArtStudio institucionalizado na baseline do workspace como superficie `Experimental`, agora com ingestao/backend multiformato em Rust, `suggested_frames` alinhados, importacao canonica para `assets/sprites` e pipeline basico `ArtStudio -> entidade sprite -> resources.res/build` provado localmente sem criar pipeline paralelo, RetroFX com editor visual-first de parallax/raster ainda `Experimental`, shell principal reorganizado como workspace adaptativo com rail lateral/painel contextual/presets de layout/focus mode, Project Manager agora com fallback automatico de pasta base para novos projetos, navegacao read-only dos arquivos do host SGDK no Asset Browser, adocao nao-destrutiva de projetos SGDK legados via overlay `rds/` e delegacao de `Build & Run` para o Makefile raiz do host quando o projeto aberto esta em modo overlay, sem quebrar o build canonico dos templates com donor. A repeticao em baseline commitada continua obrigatoria antes de qualquer claim institucional definitiva.
 **Branch sugerida:** `feat/desktop-e2e-workflow`
 
@@ -16,6 +16,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-21 - Auditoria de tasks interrompidas e refinamento seguro do wizard):**
+  - **Sem alteracoes fantasmas nas areas criticas:** a auditoria do worktree confirmou que nao havia mudancas pendentes em `App.tsx`, `ToolsPanel.tsx`, `project_mgr.rs`, `lib.rs` ou `ArtStudioPanel.tsx` vindas do agente interrompido. As unicas diffs locais fora desta rodada estavam restritas ao hardening dos scripts de build e docs correlatos.
+  - **Wizard mais claro sem mudar o contrato do backend:** `lib.rs` ganhou o comando `suggest_project_base_dir`, e `App.tsx` agora mostra no onboarding a pasta automatica preferencial antes da criacao, em vez de deixar apenas o texto generico `(automatico pelo sistema)`.
+  - **Validacao de template mais explicita:** o card-resumo do template selecionado agora mostra o estado do fluxo (`pronto` vs `indisponivel`), o motivo do bloqueio quando existir e, para seeds `external_sgdk`, a pasta doadora atual ou a instrucao objetiva para liberar o template.
+  - **Decisao de governanca mantida:** a rodada nao promoveu duas ideias do rascunho interrompido. `.res` funcional para todos os assets ficou rejeitado por tender a um pipeline paralelo ao emitter canonico; `Adopt Asset` generico para qualquer arquivo do host legado tambem ficou adiado, porque o wrapper `rds/` ja materializa automaticamente os recursos SGDK suportados e o restante ainda exige uma politica de destino canonico que nao vale abrir no hardening atual.
+  - **Cobertura nova:** `App.test.tsx` agora cobre a exibicao da pasta base sugerida pelo backend, e `lib.rs` ganhou teste unitario para a sugestao de UI escolher o primeiro candidato automatico esperado.
+  - **Barra verde desta rodada:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (174 testes), `cargo clippy -- -D warnings` OK e `cargo test --lib -- --nocapture --test-threads=1` OK (200 aprovados / 0 falhas / 2 ignorados).
 
 * **O que acabou de acontecer (2026-03-21 - Wrapper SGDK final: Asset Browser legado e delegacao de build):**
   - **Tree host visivel na UI:** `ToolsPanel.tsx` agora renderiza no `Asset Browser` uma secao `Projeto host SGDK` quando `projectLegacyIndex` esta presente. Os buckets `src/`, `inc/`, `res/`, `assets host` e `out/` aparecem como navegacao read-only, deixando claro que o codigo legado foi adotado sem virar editor paralelo.

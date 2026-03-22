@@ -24,6 +24,7 @@ import {
   listProjectTemplates,
   openProjectDialog,
   openProjectPath,
+  suggestProjectBaseDir,
   type ProjectTemplateSummary,
   setProjectTarget,
 } from "./core/ipc/projectService";
@@ -422,6 +423,7 @@ export default function App() {
   const [newProjName, setNewProjName] = useState("MeuProjeto");
   const [newProjTarget, setNewProjTarget] = useState<"megadrive" | "snes">("megadrive");
   const [newProjBaseDir, setNewProjBaseDir] = useState("");
+  const [automaticBaseDirHint, setAutomaticBaseDirHint] = useState("");
   const [projectTemplates, setProjectTemplates] = useState<ProjectTemplateSummary[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
@@ -454,6 +456,12 @@ export default function App() {
   const selectedTemplate =
     projectTemplates.find((template) => template.id === selectedTemplateId) ?? null;
   const selectedTemplateMegadriveOnly = selectedTemplate?.source_kind === "external_sgdk";
+  const selectedTemplateAvailability = selectedTemplate
+    ? templateAvailability(selectedTemplate)
+    : null;
+  const selectedTemplateDonorPath = selectedTemplate
+    ? templateDonorPaths[selectedTemplate.id] || selectedTemplate.default_donor_path || ""
+    : "";
 
   useLiveValidationController();
 
@@ -657,6 +665,30 @@ export default function App() {
       cancelled = true;
     };
   }, [showProjectWizard, logMessage]);
+
+  useEffect(() => {
+    if (!showProjectWizard) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void suggestProjectBaseDir()
+      .then((path) => {
+        if (!cancelled) {
+          setAutomaticBaseDirHint(path);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setAutomaticBaseDirHint("");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showProjectWizard]);
 
   useEffect(() => {
     if (activeProjectDir) {
@@ -1618,6 +1650,33 @@ export default function App() {
                     Este seed experimental e Mega Drive only nesta wave.
                   </p>
                 ) : null}
+                {selectedTemplate ? (
+                  <div className="mt-3 rounded border border-[#313244] bg-[#181825] px-3 py-2">
+                    <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#94e2d5]">
+                      Validacao do fluxo
+                    </p>
+                    <p
+                      className={`mt-1 leading-5 ${
+                        selectedTemplateAvailability?.available ? "text-[#a6e3a1]" : "text-[#f38ba8]"
+                      }`}
+                    >
+                      {selectedTemplateAvailability?.available
+                        ? "Template pronto para criar projeto."
+                        : selectedTemplateAvailability?.reason || "Template ainda indisponivel para este fluxo."}
+                    </p>
+                    {selectedTemplate.source_kind === "external_sgdk" ? (
+                      <p className="mt-1 leading-5 text-[#fab387]">
+                        {selectedTemplateDonorPath
+                          ? `Template doador atual: ${selectedTemplateDonorPath}`
+                          : "Escolha uma pasta doadora SGDK para liberar este template experimental."}
+                      </p>
+                    ) : (
+                      <p className="mt-1 leading-5 text-[#94a3b8]">
+                        Template interno: nenhuma pasta doadora externa e necessaria.
+                      </p>
+                    )}
+                  </div>
+                ) : null}
               </div>
 
               <div className="flex gap-2">
@@ -1652,14 +1711,23 @@ export default function App() {
                 className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1.5 text-sm text-[#cdd6f4] focus:border-[#cba6f7] focus:outline-none"
               />
 
-              <div className="flex items-center gap-2 rounded border border-[#313244] bg-[#11111b] p-2">
-                <div className="min-w-0 flex-1">
-                  <p className="text-[10px] text-[#7f849c]">Pasta base</p>
-                  <p className="truncate font-mono text-[10px] text-[#cdd6f4]">
-                    {newProjBaseDir || "(automatico pelo sistema)"}
-                  </p>
+              <div className="rounded border border-[#313244] bg-[#11111b] p-2">
+                <div className="flex items-center gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10px] text-[#7f849c]">Pasta base</p>
+                    <p className="truncate font-mono text-[10px] text-[#cdd6f4]">
+                      {newProjBaseDir || automaticBaseDirHint || "(automatico pelo sistema)"}
+                    </p>
+                  </div>
+                  <ToolbarButton label="Escolher" onClick={() => void chooseNewProjectBaseDir()} />
                 </div>
-                <ToolbarButton label="Escolher" onClick={() => void chooseNewProjectBaseDir()} />
+                <p className="mt-2 text-[10px] leading-5 text-[#7f849c]">
+                  {newProjBaseDir
+                    ? "Pasta manual selecionada. Se ela falhar na escrita, o backend fara fallback seguro e avisara no console."
+                    : automaticBaseDirHint
+                      ? `Se voce nao escolher uma pasta, o RetroDev usara '${automaticBaseDirHint}' automaticamente.`
+                      : "Se voce nao escolher uma pasta, o backend tentara resolver uma localizacao automatica segura."}
+                </p>
               </div>
             </div>
 

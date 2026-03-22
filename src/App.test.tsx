@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   listProjectTemplates: vi.fn(),
   createProjectFromTemplate: vi.fn(),
   importLegacySgdkProject: vi.fn(),
+  suggestProjectBaseDir: vi.fn(),
   setProjectTarget: vi.fn(),
   hydrateSceneResult: vi.fn(),
   persistActiveScene: vi.fn(),
@@ -117,6 +118,7 @@ vi.mock("./core/ipc/projectService", () => ({
   listProjectTemplates: mocks.listProjectTemplates,
   createProjectFromTemplate: mocks.createProjectFromTemplate,
   importLegacySgdkProject: mocks.importLegacySgdkProject,
+  suggestProjectBaseDir: mocks.suggestProjectBaseDir,
   setProjectTarget: mocks.setProjectTarget,
 }));
 
@@ -310,6 +312,9 @@ describe("App build flow", () => {
     mocks.reloadSceneFromDisk.mockResolvedValue(true);
     mocks.dialogOpen.mockResolvedValue("F:/Projects/RetroDevStudio/tests/fixtures");
     mocks.listProjectTemplates.mockResolvedValue(defaultProjectTemplates());
+    mocks.suggestProjectBaseDir.mockResolvedValue(
+      "C:/Users/Test/Documents/RetroDevProjects"
+    );
     mocks.createProjectFromTemplate.mockResolvedValue({
       selected: true,
       path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
@@ -758,6 +763,26 @@ describe("App build flow", () => {
       "",
       "starter_guided",
       undefined
+    );
+  });
+
+  it("shows the backend-provided automatic base directory hint in the wizard", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "",
+        activeProjectName: "",
+        activeScenePath: "",
+        activeScene: null,
+        activeSceneSource: null,
+        hwStatus: null,
+      });
+      await flush();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("C:/Users/Test/Documents/RetroDevProjects");
+    expect(container.textContent).toContain(
+      "Se voce nao escolher uma pasta, o RetroDev usara"
     );
   });
 
