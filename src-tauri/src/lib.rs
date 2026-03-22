@@ -2763,6 +2763,7 @@ pub extern "C" fn retro_run() {
         let original = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("data")
+            .join("snes roms")
             .join("cputest-basicl_snes.sfc");
         let modified = dir.join("canonical_snes_dummy_modified.sfc");
         let patch = dir.join("project_assets.bps");
