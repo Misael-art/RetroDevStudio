@@ -1252,6 +1252,21 @@ mod tests {
         path
     }
 
+    fn mock_core_build_dir(dir: &Path) -> PathBuf {
+        let base_dir = std::env::var_os("RDS_TEST_CORE_DIR")
+            .or_else(|| std::env::var_os("CARGO_TARGET_DIR"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| dir.to_path_buf());
+        let suffix = dir
+            .file_name()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.is_empty())
+            .unwrap_or("default");
+        let output_dir = base_dir.join("mock-core-fixtures").join(suffix);
+        fs::create_dir_all(&output_dir).expect("failed to create mock core output dir");
+        output_dir
+    }
+
     fn mock_core_source() -> String {
         r#"
 use std::ffi::{c_char, c_void, CStr};
@@ -1523,8 +1538,9 @@ pub extern "C" fn retro_run() {
     }
 
     fn compile_mock_core(dir: &Path) -> PathBuf {
-        let source_path = dir.join("mock_core.rs");
-        let output_path = dir.join(format!("mock_core.{}", core_library_extension()));
+        let build_dir = mock_core_build_dir(dir);
+        let source_path = build_dir.join("mock_core.rs");
+        let output_path = build_dir.join(format!("mock_core.{}", core_library_extension()));
         fs::write(&source_path, mock_core_source()).expect("write mock core source");
 
         let output = std::process::Command::new("rustc")

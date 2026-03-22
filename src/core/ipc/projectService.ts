@@ -23,6 +23,20 @@ export interface ProjectTemplateSummary {
   default_donor_path?: string | null;
 }
 
+export interface ExternalImportProfileSummary {
+  id: string;
+  name: string;
+  family: string;
+  description: string;
+  source_engine: string;
+  support_status: string;
+  supported_levels: string[];
+  recommended_target: "megadrive" | "snes";
+  experimental: boolean;
+  importable: boolean;
+  mega_drive_only: boolean;
+}
+
 export function openProjectDialog(): Promise<OpenProjectResult> {
   return invoke("open_project_dialog");
 }
@@ -51,6 +65,10 @@ export function listProjectTemplates(): Promise<ProjectTemplateSummary[]> {
   return invoke("list_project_templates");
 }
 
+export function listExternalImportProfiles(): Promise<ExternalImportProfileSummary[]> {
+  return invoke("list_external_import_profiles");
+}
+
 export function createProjectFromTemplate(
   projectName: string,
   target: "megadrive" | "snes",
@@ -76,6 +94,32 @@ export function importSgdkProject(
     projectName,
     baseDir,
     sgdkPath,
+  });
+}
+
+export function importMugenProject(
+  projectName: string,
+  baseDir: string,
+  mugenPath: string
+): Promise<OpenProjectResult> {
+  return invoke("import_mugen_project", {
+    projectName,
+    baseDir,
+    mugenPath,
+  });
+}
+
+export function importExternalProject(
+  projectName: string,
+  baseDir: string,
+  profileId: string,
+  projectPath: string
+): Promise<OpenProjectResult> {
+  return invoke("import_external_project", {
+    projectName,
+    baseDir,
+    profileId,
+    projectPath,
   });
 }
 

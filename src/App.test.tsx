@@ -22,12 +22,16 @@ const mocks = vi.hoisted(() => ({
   getHwStatus: vi.fn(),
   validateSceneDraft: vi.fn(),
   openProjectDialog: vi.fn(),
+  openProjectPath: vi.fn(),
   newProjectDialog: vi.fn(),
   dialogOpen: vi.fn(),
   convertFileSrc: vi.fn((path: string) => `asset://${path}`),
   listProjectTemplates: vi.fn(),
+  listExternalImportProfiles: vi.fn(),
   createProjectFromTemplate: vi.fn(),
-  importLegacySgdkProject: vi.fn(),
+  importExternalProject: vi.fn(),
+  importSgdkProject: vi.fn(),
+  importMugenProject: vi.fn(),
   suggestProjectBaseDir: vi.fn(),
   setProjectTarget: vi.fn(),
   hydrateSceneResult: vi.fn(),
@@ -114,10 +118,14 @@ vi.mock("./core/ipc/hwService", () => ({
 
 vi.mock("./core/ipc/projectService", () => ({
   openProjectDialog: mocks.openProjectDialog,
+  openProjectPath: mocks.openProjectPath,
   newProjectDialog: mocks.newProjectDialog,
   listProjectTemplates: mocks.listProjectTemplates,
+  listExternalImportProfiles: mocks.listExternalImportProfiles,
   createProjectFromTemplate: mocks.createProjectFromTemplate,
-  importLegacySgdkProject: mocks.importLegacySgdkProject,
+  importExternalProject: mocks.importExternalProject,
+  importSgdkProject: mocks.importSgdkProject,
+  importMugenProject: mocks.importMugenProject,
   suggestProjectBaseDir: mocks.suggestProjectBaseDir,
   setProjectTarget: mocks.setProjectTarget,
 }));
@@ -223,6 +231,63 @@ function defaultProjectTemplates() {
   ];
 }
 
+function defaultExternalImportProfiles() {
+  return [
+    {
+      id: "sgdk",
+      name: "SGDK",
+      family: "16-bit",
+      description: "Importa manifests .res, assets, cena base e audio de projetos SGDK externos.",
+      source_engine: "sgdk",
+      support_status: "Experimental",
+      supported_levels: ["L1", "L2", "L3"],
+      recommended_target: "megadrive",
+      experimental: true,
+      importable: true,
+      mega_drive_only: true,
+    },
+    {
+      id: "mugen",
+      name: "MUGEN",
+      family: "Fighting",
+      description: "Importa personagem, stage e screenpack via DEF/AIR com assets visuais e sonoros reais.",
+      source_engine: "mugen",
+      support_status: "Experimental",
+      supported_levels: ["L1", "L2", "L3"],
+      recommended_target: "megadrive",
+      experimental: true,
+      importable: true,
+      mega_drive_only: true,
+    },
+    {
+      id: "godot",
+      name: "Godot 2D",
+      family: "2D Geral",
+      description: "Importa Sprite2D, Camera2D e AudioStreamPlayer de cenas .tscn com proveniencia registrada.",
+      source_engine: "godot",
+      support_status: "Experimental",
+      supported_levels: ["L1", "L2", "L3"],
+      recommended_target: "megadrive",
+      experimental: true,
+      importable: true,
+      mega_drive_only: true,
+    },
+    {
+      id: "gamemaker",
+      name: "GameMaker Studio 2",
+      family: "2D Geral",
+      description: "Perfil planejado para rooms, sprites e sounds, ainda sem adapter canonico.",
+      source_engine: "gamemaker",
+      support_status: "Parcial",
+      supported_levels: ["L1"],
+      recommended_target: "megadrive",
+      experimental: true,
+      importable: false,
+      mega_drive_only: true,
+    },
+  ];
+}
+
 function findButton(container: HTMLElement, label: string): HTMLButtonElement {
   const button = Array.from(container.querySelectorAll("button")).find(
     (element) => element.textContent?.trim() === label
@@ -312,6 +377,7 @@ describe("App build flow", () => {
     mocks.reloadSceneFromDisk.mockResolvedValue(true);
     mocks.dialogOpen.mockResolvedValue("F:/Projects/RetroDevStudio/tests/fixtures");
     mocks.listProjectTemplates.mockResolvedValue(defaultProjectTemplates());
+    mocks.listExternalImportProfiles.mockResolvedValue(defaultExternalImportProfiles());
     mocks.suggestProjectBaseDir.mockResolvedValue(
       "C:/Users/Test/Documents/RetroDevProjects"
     );
@@ -320,11 +386,23 @@ describe("App build flow", () => {
       path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
       name: "MeuProjeto",
     });
-    mocks.importLegacySgdkProject.mockResolvedValue({
+    mocks.importExternalProject.mockResolvedValue({
       selected: true,
-      path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy/rds",
-      name: "Importado",
-      notice: "Projeto SGDK legado adotado em modo nao-destrutivo via overlay 'rds/'.",
+      path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      name: "Importado Externo",
+      notice: "Importacao externa experimental concluida com 1 cena nativa.",
+    });
+    mocks.importSgdkProject.mockResolvedValue({
+      selected: true,
+      path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      name: "Importado SGDK",
+      notice: "Projeto SGDK importado para o formato nativo.",
+    });
+    mocks.importMugenProject.mockResolvedValue({
+      selected: true,
+      path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      name: "Importado MUGEN",
+      notice: "Importacao MUGEN experimental concluida com 3 cena(s) e 1 origem(ns) ignorada(s).",
     });
     mocks.getHwStatus.mockResolvedValue({
       vram_used: 0,
@@ -786,7 +864,7 @@ describe("App build flow", () => {
     );
   });
 
-  it("imports an arbitrary SGDK project from the wizard", async () => {
+  it("imports an arbitrary external project from the wizard using the default profile", async () => {
     await act(async () => {
       useEditorStore.setState({
         activeProjectDir: "",
@@ -800,7 +878,7 @@ describe("App build flow", () => {
       await flush();
     });
 
-    const importButton = findButton(container, "Importar Projeto SGDK");
+    const importButton = findButton(container, "Importar Externo");
 
     await act(async () => {
       importButton.click();
@@ -808,8 +886,52 @@ describe("App build flow", () => {
       await flush();
     });
 
-    expect(mocks.importLegacySgdkProject).toHaveBeenCalledWith(
+    expect(mocks.importExternalProject).toHaveBeenCalledWith(
       "MeuProjeto",
+      "",
+      "sgdk",
+      "F:/Projects/RetroDevStudio/tests/fixtures"
+    );
+  });
+
+  it("imports an arbitrary external project with the selected profile", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "",
+        activeProjectName: "",
+        activeScenePath: "",
+        activeScene: null,
+        activeSceneSource: null,
+        hwStatus: null,
+      });
+      await flush();
+      await flush();
+    });
+
+    const profileSelect = container.querySelector(
+      "[data-testid='external-import-profile-select']"
+    ) as HTMLSelectElement | null;
+    const importButton = findButton(container, "Importar Externo");
+
+    await act(async () => {
+      if (!profileSelect) {
+        throw new Error("External import profile select not found");
+      }
+      profileSelect.value = "godot";
+      profileSelect.dispatchEvent(new Event("change", { bubbles: true }));
+      await flush();
+    });
+
+    await act(async () => {
+      importButton.click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.importExternalProject).toHaveBeenCalledWith(
+      "MeuProjeto",
+      "",
+      "godot",
       "F:/Projects/RetroDevStudio/tests/fixtures"
     );
   });

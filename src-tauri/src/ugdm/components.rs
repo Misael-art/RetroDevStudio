@@ -6,19 +6,57 @@ use super::serde_helpers::deserialize_f64_to_i32;
 // ── Sprite ────────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AnimationDef {
-    pub frames: Vec<u32>,
-    pub fps: u32,
-    #[serde(rename = "loop")]
-    pub looping: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Pivot {
     #[serde(deserialize_with = "deserialize_f64_to_i32")]
     pub x: i32,
     #[serde(deserialize_with = "deserialize_f64_to_i32")]
     pub y: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MugenCollisionBox {
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
+    pub x1: i32,
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
+    pub y1: i32,
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
+    pub x2: i32,
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
+    pub y2: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MugenAnimationFrame {
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
+    pub group: i32,
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
+    pub image: i32,
+    pub axis: Option<Pivot>,
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
+    pub duration: i32,
+    #[serde(default)]
+    pub flags: Vec<String>,
+    #[serde(default)]
+    pub clsn1: Vec<MugenCollisionBox>,
+    #[serde(default)]
+    pub clsn2: Vec<MugenCollisionBox>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AnimationDef {
+    pub frames: Vec<u32>,
+    pub fps: u32,
+    #[serde(rename = "loop")]
+    pub looping: bool,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frame_durations: Option<Vec<i32>>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub loop_start: Option<u32>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mugen_frames: Option<Vec<MugenAnimationFrame>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

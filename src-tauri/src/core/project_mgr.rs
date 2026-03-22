@@ -6,9 +6,12 @@ use std::path::{Component, Path, PathBuf};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use image::{ImageBuffer, Rgba, RgbaImage};
+
 use crate::ugdm::components::{
-    AudioComponent, CameraComponent, CollisionComponent, Components, InputComponent,
-    LogicComponent, PhysicsComponent, SpriteComponent, TilemapComponent, Velocity,
+    AnimationDef, AudioComponent, CameraComponent, CollisionComponent, CollisionOffset, Components,
+    InputComponent, LogicComponent, MugenAnimationFrame, MugenCollisionBox, PhysicsComponent, Pivot,
+    SpriteComponent, TilemapComponent, Velocity,
 };
 use crate::ugdm::entities::{
     BuildConfig, CollisionMap, Entity, PaletteEntry, PatchAuditEntry, Project, Resolution, Scene,
@@ -70,6 +73,107 @@ struct SgdkResourceEntry {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MugenCandidateKind {
+    Character,
+    Stage,
+    Screenpack,
+}
+
+#[derive(Debug, Clone)]
+struct MugenCandidate {
+    kind: MugenCandidateKind,
+    root_dir: PathBuf,
+    def_path: PathBuf,
+    display_name: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct MugenImportReport {
+    pub primary_scene: Scene,
+    pub imported_scenes: usize,
+    pub skipped_sources: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ExternalImportReport {
+    pub primary_scene: Scene,
+    pub imported_scenes: usize,
+    pub skipped_sources: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct MugenIniSection {
+    name: String,
+    entries: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
+struct MugenAirFrame {
+    group: i32,
+    image: i32,
+    axis_x: i32,
+    axis_y: i32,
+    duration: i32,
+    flags: Vec<String>,
+    clsn1: Vec<MugenCollisionBox>,
+    clsn2: Vec<MugenCollisionBox>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct MugenAirAction {
+    action_no: i32,
+    loop_start: Option<u32>,
+    frames: Vec<MugenAirFrame>,
+}
+
+#[derive(Debug, Clone)]
+struct MugenSffSprite {
+    group: i32,
+    image: i32,
+    axis: Pivot,
+    pixels: RgbaImage,
+}
+
+#[derive(Debug, Clone)]
+struct MugenSound {
+    group: i32,
+    sound_no: i32,
+    payload: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+struct MugenCharacterAtlas {
+    image: RgbaImage,
+    frame_indices: HashMap<(i32, i32), u32>,
+    cell_width: u32,
+    cell_height: u32,
+    pivot: Pivot,
+}
+
+type MugenSpriteKey = (i32, i32);
+type MugenSpritePathMatch = (MugenSpriteKey, PathBuf);
+
+#[derive(Debug, Clone)]
+struct GodotExtResource {
+    _resource_type: String,
+    path: String,
+}
+
+#[derive(Debug, Clone)]
+struct GodotNode {
+    name: String,
+    node_type: String,
+    _parent: String,
+    properties: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone)]
+struct GodotSceneParse {
+    ext_resources: HashMap<String, GodotExtResource>,
+    nodes: Vec<GodotNode>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SgdkAssetMaterialization {
     Copy,
     LinkOrCopy,
@@ -100,6 +204,156 @@ pub struct ProjectTemplateSummary {
     pub availability_reason: Option<String>,
     pub default_donor_path: Option<String>,
 }
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct ExternalImportProfileSummary {
+    pub id: String,
+    pub name: String,
+    pub family: String,
+    pub description: String,
+    pub source_engine: String,
+    pub support_status: String,
+    pub supported_levels: Vec<String>,
+    pub recommended_target: String,
+    pub experimental: bool,
+    pub importable: bool,
+    pub mega_drive_only: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ExternalImportProfileDefinition {
+    id: &'static str,
+    name: &'static str,
+    family: &'static str,
+    description: &'static str,
+    source_engine: &'static str,
+    support_status: &'static str,
+    supported_levels: &'static [&'static str],
+    recommended_target: &'static str,
+    experimental: bool,
+    importable: bool,
+    mega_drive_only: bool,
+}
+
+const EXTERNAL_IMPORT_PROFILES: &[ExternalImportProfileDefinition] = &[
+    ExternalImportProfileDefinition {
+        id: "sgdk",
+        name: "SGDK",
+        family: "16-bit",
+        description: "Importa manifests .res, assets, cena base e audio de projetos SGDK externos.",
+        source_engine: "sgdk",
+        support_status: "Experimental",
+        supported_levels: &["L1", "L2", "L3"],
+        recommended_target: "megadrive",
+        experimental: true,
+        importable: true,
+        mega_drive_only: true,
+    },
+    ExternalImportProfileDefinition {
+        id: "mugen",
+        name: "MUGEN",
+        family: "Fighting",
+        description: "Importa personagem, stage e screenpack via DEF/AIR com assets visuais e sonoros reais.",
+        source_engine: "mugen",
+        support_status: "Experimental",
+        supported_levels: &["L1", "L2", "L3"],
+        recommended_target: "megadrive",
+        experimental: true,
+        importable: true,
+        mega_drive_only: true,
+    },
+    ExternalImportProfileDefinition {
+        id: "ikemen_go",
+        name: "Ikemen GO",
+        family: "Fighting",
+        description: "Usa a mesma base de importacao MUGEN para colecoes IKEMEN GO compatíveis.",
+        source_engine: "ikemen_go",
+        support_status: "Experimental",
+        supported_levels: &["L1", "L2", "L3"],
+        recommended_target: "megadrive",
+        experimental: true,
+        importable: true,
+        mega_drive_only: true,
+    },
+    ExternalImportProfileDefinition {
+        id: "godot",
+        name: "Godot 2D",
+        family: "2D scene-tree",
+        description: "Importa Sprite2D, Camera2D e AudioStreamPlayer de cenas .tscn; nos complexos permanecem sinalizados como experimentais.",
+        source_engine: "godot",
+        support_status: "Experimental",
+        supported_levels: &["L1", "L2", "L3"],
+        recommended_target: "megadrive",
+        experimental: true,
+        importable: true,
+        mega_drive_only: true,
+    },
+    ExternalImportProfileDefinition {
+        id: "gamemaker",
+        name: "GameMaker Studio 2",
+        family: "2D room-based",
+        description: "Roadmap: rooms, sprites e sounds em formato .yyp/.yy.",
+        source_engine: "gamemaker",
+        support_status: "Parcial",
+        supported_levels: &["L1"],
+        recommended_target: "megadrive",
+        experimental: true,
+        importable: false,
+        mega_drive_only: true,
+    },
+    ExternalImportProfileDefinition {
+        id: "construct",
+        name: "Construct",
+        family: "2D event-sheet",
+        description: "Roadmap: layouts, sprites e audio com logica convertida apenas por hints.",
+        source_engine: "construct",
+        support_status: "Parcial",
+        supported_levels: &["L1"],
+        recommended_target: "megadrive",
+        experimental: true,
+        importable: false,
+        mega_drive_only: true,
+    },
+    ExternalImportProfileDefinition {
+        id: "rpg_maker",
+        name: "RPG Maker",
+        family: "Data-driven RPG",
+        description: "Roadmap: mapas, tilesets, audio e eventos skeleton.",
+        source_engine: "rpg_maker",
+        support_status: "Parcial",
+        supported_levels: &["L1"],
+        recommended_target: "megadrive",
+        experimental: true,
+        importable: false,
+        mega_drive_only: true,
+    },
+    ExternalImportProfileDefinition {
+        id: "unity_2d",
+        name: "Unity 2D",
+        family: "General 2D",
+        description: "Planejado para projetos 2D com serializacao em texto habilitada.",
+        source_engine: "unity_2d",
+        support_status: "Nao suportado",
+        supported_levels: &[],
+        recommended_target: "megadrive",
+        experimental: true,
+        importable: false,
+        mega_drive_only: true,
+    },
+    ExternalImportProfileDefinition {
+        id: "paper2d_bridge",
+        name: "Paper2D / Unreal",
+        family: "Exporter bridge",
+        description: "Nao ha leitura nativa nesta wave; o caminho planejado e um pacote intermediario exportado.",
+        source_engine: "paper2d_bridge",
+        support_status: "Nao suportado",
+        supported_levels: &[],
+        recommended_target: "megadrive",
+        experimental: true,
+        importable: false,
+        mega_drive_only: true,
+    },
+];
 
 #[derive(Debug)]
 pub struct LoadError(pub String);
@@ -240,6 +494,29 @@ pub fn list_project_templates() -> Result<Vec<ProjectTemplateSummary>, LoadError
         .templates
         .into_iter()
         .map(|entry| Ok(project_template_summary(&entry)))
+        .collect()
+}
+
+pub fn list_external_import_profiles() -> Vec<ExternalImportProfileSummary> {
+    EXTERNAL_IMPORT_PROFILES
+        .iter()
+        .map(|profile| ExternalImportProfileSummary {
+            id: profile.id.to_string(),
+            name: profile.name.to_string(),
+            family: profile.family.to_string(),
+            description: profile.description.to_string(),
+            source_engine: profile.source_engine.to_string(),
+            support_status: profile.support_status.to_string(),
+            supported_levels: profile
+                .supported_levels
+                .iter()
+                .map(|level| (*level).to_string())
+                .collect(),
+            recommended_target: profile.recommended_target.to_string(),
+            experimental: profile.experimental,
+            importable: profile.importable,
+            mega_drive_only: profile.mega_drive_only,
+        })
         .collect()
 }
 
@@ -505,6 +782,8 @@ pub fn import_legacy_sgdk_project(
         "1.0.0".to_string(),
         "external_sgdk".to_string(),
         sgdk_root.to_string_lossy().to_string(),
+        Some("sgdk".to_string()),
+        Some("legacy_sgdk_overlay_v1".to_string()),
     )?;
     write_legacy_sgdk_index(&overlay_dir, &index)?;
     Ok(overlay_dir)
@@ -765,6 +1044,20 @@ fn template_availability(entry: &TemplateRegistryEntry) -> (bool, Option<String>
             )),
         ),
     }
+}
+
+fn external_import_profile_definition(
+    profile_id: &str,
+) -> Result<&'static ExternalImportProfileDefinition, LoadError> {
+    EXTERNAL_IMPORT_PROFILES
+        .iter()
+        .find(|profile| profile.id == profile_id)
+        .ok_or_else(|| {
+            LoadError(format!(
+                "Perfil de importacao externa '{}' nao esta registrado.",
+                profile_id
+            ))
+        })
 }
 
 fn validate_platformer_donor_path(donor_path: &Path) -> Result<(), LoadError> {
@@ -1665,6 +1958,2240 @@ fn imported_sprite_logic_graph(resource_name: &str) -> String {
     .to_string()
 }
 
+pub fn import_mugen_project(
+    project_dir: &Path,
+    mugen_path: &Path,
+) -> Result<MugenImportReport, LoadError> {
+    if !mugen_path.exists() {
+        return Err(LoadError(format!(
+            "Projeto MUGEN indisponivel: '{}' nao existe.",
+            mugen_path.display()
+        )));
+    }
+
+    let candidates = scan_mugen_candidates(mugen_path)?;
+    if candidates.is_empty() {
+        return Err(LoadError(format!(
+            "Nenhum modelo MUGEN suportado foi encontrado em '{}'. Use uma pasta de personagem, stage ou screenpack.",
+            mugen_path.display()
+        )));
+    }
+
+    let mut imported = Vec::new();
+    let mut skipped = Vec::new();
+
+    for candidate in candidates {
+        match import_mugen_candidate(project_dir, &candidate) {
+            Ok(mut scenes) => imported.append(&mut scenes),
+            Err(error) => skipped.push(format!("{}: {}", candidate.display_name, error)),
+        }
+    }
+
+    if imported.is_empty() {
+        return Err(LoadError(format!(
+            "Nao foi possivel importar nenhum modelo MUGEN valido de '{}'. {}",
+            mugen_path.display(),
+            skipped.join(" | ")
+        )));
+    }
+
+    let primary_scene = imported.remove(0);
+    save_scene(project_dir, DEFAULT_ENTRY_SCENE, &primary_scene)?;
+    for scene in imported.iter() {
+        let scene_id = next_scene_id(project_dir, &scene.scene_id);
+        let scene_path = format!("scenes/{}.json", scene_id);
+        let mut extra_scene = scene.clone();
+        extra_scene.scene_id = scene_id.clone();
+        if extra_scene.display_name.is_none() {
+            extra_scene.display_name = Some(scene_id);
+        }
+        save_scene(project_dir, &scene_path, &extra_scene)?;
+    }
+    set_entry_scene(project_dir, DEFAULT_ENTRY_SCENE)?;
+
+    Ok(MugenImportReport {
+        primary_scene,
+        imported_scenes: 1 + imported.len(),
+        skipped_sources: skipped,
+    })
+}
+
+fn import_mugen_candidate(project_dir: &Path, candidate: &MugenCandidate) -> Result<Vec<Scene>, LoadError> {
+    match candidate.kind {
+        MugenCandidateKind::Character => import_mugen_character_candidate(project_dir, candidate)
+            .map(|scene| vec![scene]),
+        MugenCandidateKind::Stage => import_mugen_stage_candidate(project_dir, candidate)
+            .map(|scene| vec![scene]),
+        MugenCandidateKind::Screenpack => import_mugen_screenpack_candidate(project_dir, candidate),
+    }
+}
+
+fn scan_mugen_candidates(root: &Path) -> Result<Vec<MugenCandidate>, LoadError> {
+    let mut direct = detect_mugen_candidates_in_root(root)?;
+    if !direct.is_empty() {
+        direct.sort_by(|left, right| left.display_name.cmp(&right.display_name));
+        return Ok(direct);
+    }
+
+    let mut nested = Vec::new();
+    for child in sorted_directory_entries(root)? {
+        if child.is_dir() {
+            nested.extend(detect_mugen_candidates_in_root(&child)?);
+        }
+    }
+    nested.sort_by(|left, right| left.display_name.cmp(&right.display_name));
+    Ok(nested)
+}
+
+fn detect_mugen_candidates_in_root(root: &Path) -> Result<Vec<MugenCandidate>, LoadError> {
+    if root.join("data").join("system.def").is_file() {
+        let def_path = root.join("data").join("system.def");
+        let display_name = read_text_lossy(&def_path)
+            .ok()
+            .and_then(|content| mugen_info_name(&content))
+            .or_else(|| {
+                root.file_name()
+                    .map(|value| value.to_string_lossy().trim().to_string())
+                    .filter(|value| !value.is_empty())
+            })
+            .unwrap_or_else(|| "Screenpack".to_string());
+        return Ok(vec![MugenCandidate {
+            kind: MugenCandidateKind::Screenpack,
+            root_dir: root.to_path_buf(),
+            def_path,
+            display_name,
+        }]);
+    }
+
+    let mut def_files = sorted_directory_entries(root)?
+        .into_iter()
+        .filter(|path| {
+            path.is_file()
+                && path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("def"))
+        })
+        .collect::<Vec<_>>();
+    def_files.sort();
+
+    let mut stage_candidates = Vec::new();
+    let mut character_candidates = Vec::new();
+
+    for def_path in def_files {
+        let content = read_text_lossy(&def_path)?;
+        let lowered = content.to_ascii_lowercase();
+        if lowered.contains("[bgdef]") || lowered.contains("[stageinfo]") {
+            let display_name = mugen_info_name(&content)
+                .or_else(|| def_path.file_stem().map(|value| value.to_string_lossy().to_string()))
+                .unwrap_or_else(|| "Stage".to_string());
+            stage_candidates.push(MugenCandidate {
+                kind: MugenCandidateKind::Stage,
+                root_dir: root.to_path_buf(),
+                def_path,
+                display_name,
+            });
+            continue;
+        }
+
+        let sections = parse_mugen_ini(&content);
+        let Some(files_section) = find_section(&sections, "files") else {
+            continue;
+        };
+        if files_section.entries.contains_key("sprite") && files_section.entries.contains_key("anim") {
+            let folder_name = root
+                .file_name()
+                .map(|value| value.to_string_lossy().trim().to_string())
+                .filter(|value| !value.is_empty());
+            let stem = def_path
+                .file_stem()
+                .map(|value| value.to_string_lossy().trim().to_string())
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "character".to_string());
+            let display_name = mugen_info_name(&content)
+                .or(folder_name.clone())
+                .unwrap_or_else(|| stem.clone());
+            let score = mugen_character_def_score(&stem, folder_name.as_deref());
+            character_candidates.push((score, MugenCandidate {
+                kind: MugenCandidateKind::Character,
+                root_dir: root.to_path_buf(),
+                def_path,
+                display_name,
+            }));
+        }
+    }
+
+    if !stage_candidates.is_empty() {
+        return Ok(stage_candidates);
+    }
+
+    if character_candidates.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    character_candidates.sort_by(|left, right| right.0.cmp(&left.0));
+    Ok(vec![character_candidates.remove(0).1])
+}
+
+fn sorted_directory_entries(root: &Path) -> Result<Vec<PathBuf>, LoadError> {
+    if !root.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut entries = fs::read_dir(root)
+        .map_err(|error| {
+            LoadError(format!(
+                "Nao foi possivel listar '{}': {}",
+                root.display(),
+                error
+            ))
+        })?
+        .filter_map(|entry| entry.ok().map(|value| value.path()))
+        .collect::<Vec<_>>();
+    entries.sort();
+    Ok(entries)
+}
+
+fn read_text_lossy(path: &Path) -> Result<String, LoadError> {
+    let bytes = fs::read(path).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel ler '{}': {}",
+            path.display(),
+            error
+        ))
+    })?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+fn parse_mugen_ini(content: &str) -> Vec<MugenIniSection> {
+    let mut sections = Vec::new();
+    let mut current: Option<MugenIniSection> = None;
+
+    for raw_line in content.lines() {
+        let trimmed = strip_mugen_comment(raw_line);
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            if let Some(section) = current.take() {
+                sections.push(section);
+            }
+            current = Some(MugenIniSection {
+                name: trimmed[1..trimmed.len() - 1].trim().to_string(),
+                entries: HashMap::new(),
+            });
+            continue;
+        }
+
+        if let Some((key, value)) = trimmed.split_once('=') {
+            let section = current.get_or_insert_with(MugenIniSection::default);
+            section.entries.insert(
+                key.trim().to_ascii_lowercase(),
+                value.trim().trim_matches('"').trim().to_string(),
+            );
+        }
+    }
+
+    if let Some(section) = current {
+        sections.push(section);
+    }
+
+    sections
+}
+
+fn find_section<'a>(sections: &'a [MugenIniSection], name: &str) -> Option<&'a MugenIniSection> {
+    sections
+        .iter()
+        .find(|section| section.name.eq_ignore_ascii_case(name))
+}
+
+fn strip_mugen_comment(line: &str) -> String {
+    line.split(';').next().unwrap_or_default().trim().to_string()
+}
+
+fn mugen_info_name(content: &str) -> Option<String> {
+    let sections = parse_mugen_ini(content);
+    let info = find_section(&sections, "info")?;
+    info.entries
+        .get("displayname")
+        .or_else(|| info.entries.get("name"))
+        .map(|value| value.trim().trim_matches('"').trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn mugen_character_def_score(stem: &str, folder_name: Option<&str>) -> i32 {
+    let lowered = stem.to_ascii_lowercase();
+    let mut score = 0;
+    if let Some(folder_name) = folder_name {
+        let folder = folder_name.to_ascii_lowercase();
+        if lowered == folder {
+            score += 100;
+        }
+        if lowered.contains(&folder) {
+            score += 50;
+        }
+    }
+    if lowered == "command" || lowered.ends_with("command") {
+        score -= 200;
+    }
+    if lowered.contains("master") || lowered.contains("normal") || lowered.contains("violent") {
+        score -= 40;
+    }
+    score
+}
+
+fn parse_mugen_air(content: &str) -> Vec<MugenAirAction> {
+    let mut actions = Vec::new();
+    let mut current: Option<MugenAirAction> = None;
+    let mut default_clsn1 = Vec::new();
+    let mut default_clsn2 = Vec::new();
+    let mut pending_clsn1 = Vec::new();
+    let mut pending_clsn2 = Vec::new();
+
+    for raw_line in content.lines() {
+        let trimmed = strip_mugen_comment(raw_line);
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if let Some(action_no) = parse_begin_action(&trimmed) {
+            if let Some(action) = current.take() {
+                actions.push(action);
+            }
+            current = Some(MugenAirAction {
+                action_no,
+                loop_start: None,
+                frames: Vec::new(),
+            });
+            default_clsn1.clear();
+            default_clsn2.clear();
+            pending_clsn1.clear();
+            pending_clsn2.clear();
+            continue;
+        }
+
+        let Some(action) = current.as_mut() else {
+            continue;
+        };
+
+        if trimmed.eq_ignore_ascii_case("loopstart") {
+            action.loop_start = Some(action.frames.len() as u32);
+            continue;
+        }
+
+        if trimmed.to_ascii_lowercase().starts_with("clsn1default") {
+            default_clsn1.clear();
+            continue;
+        }
+        if trimmed.to_ascii_lowercase().starts_with("clsn2default") {
+            default_clsn2.clear();
+            continue;
+        }
+        if trimmed.to_ascii_lowercase().starts_with("clsn1:") {
+            pending_clsn1.clear();
+            continue;
+        }
+        if trimmed.to_ascii_lowercase().starts_with("clsn2:") {
+            pending_clsn2.clear();
+            continue;
+        }
+
+        if let Some(collision) = parse_mugen_collision_line(&trimmed, "clsn1") {
+            if pending_clsn1.is_empty() && action.frames.is_empty() {
+                default_clsn1.push(collision);
+            } else {
+                pending_clsn1.push(collision);
+            }
+            continue;
+        }
+        if let Some(collision) = parse_mugen_collision_line(&trimmed, "clsn2") {
+            if pending_clsn2.is_empty() && action.frames.is_empty() {
+                default_clsn2.push(collision);
+            } else {
+                pending_clsn2.push(collision);
+            }
+            continue;
+        }
+
+        if let Some(frame) = parse_mugen_air_frame_line(&trimmed) {
+            action.frames.push(MugenAirFrame {
+                group: frame.group,
+                image: frame.image,
+                axis_x: frame.axis_x,
+                axis_y: frame.axis_y,
+                duration: frame.duration,
+                flags: frame.flags,
+                clsn1: if pending_clsn1.is_empty() {
+                    default_clsn1.clone()
+                } else {
+                    pending_clsn1.clone()
+                },
+                clsn2: if pending_clsn2.is_empty() {
+                    default_clsn2.clone()
+                } else {
+                    pending_clsn2.clone()
+                },
+            });
+            pending_clsn1.clear();
+            pending_clsn2.clear();
+        }
+    }
+
+    if let Some(action) = current {
+        actions.push(action);
+    }
+
+    actions
+}
+
+fn parse_begin_action(line: &str) -> Option<i32> {
+    let lowered = line.to_ascii_lowercase();
+    if !lowered.starts_with("[begin action") || !lowered.ends_with(']') {
+        return None;
+    }
+    let inner = line
+        .trim()
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .trim();
+    inner
+        .split_whitespace()
+        .last()
+        .and_then(|value| value.parse::<i32>().ok())
+}
+
+fn parse_mugen_collision_line(line: &str, prefix: &str) -> Option<MugenCollisionBox> {
+    let lowered = line.to_ascii_lowercase();
+    if !lowered.starts_with(prefix) || !lowered.contains('=') {
+        return None;
+    }
+    let (_, values) = line.split_once('=')?;
+    let numbers = values
+        .split(',')
+        .filter_map(|value| value.trim().parse::<i32>().ok())
+        .collect::<Vec<_>>();
+    if numbers.len() != 4 {
+        return None;
+    }
+    Some(MugenCollisionBox {
+        x1: numbers[0],
+        y1: numbers[1],
+        x2: numbers[2],
+        y2: numbers[3],
+    })
+}
+
+fn parse_mugen_air_frame_line(line: &str) -> Option<MugenAirFrame> {
+    let parts = line
+        .split(',')
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>();
+    if parts.len() < 5 {
+        return None;
+    }
+    let group = parts[0].parse::<i32>().ok()?;
+    let image = parts[1].parse::<i32>().ok()?;
+    let axis_x = parts[2].parse::<i32>().ok()?;
+    let axis_y = parts[3].parse::<i32>().ok()?;
+    let duration = parts[4].parse::<i32>().ok()?;
+    let flags = parts[5..]
+        .iter()
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_uppercase())
+        .collect::<Vec<_>>();
+    Some(MugenAirFrame {
+        group,
+        image,
+        axis_x,
+        axis_y,
+        duration,
+        flags,
+        clsn1: Vec::new(),
+        clsn2: Vec::new(),
+    })
+}
+
+fn import_mugen_character_candidate(
+    project_dir: &Path,
+    candidate: &MugenCandidate,
+) -> Result<Scene, LoadError> {
+    let def_content = read_text_lossy(&candidate.def_path)?;
+    let sections = parse_mugen_ini(&def_content);
+    let files = find_section(&sections, "files").ok_or_else(|| {
+        LoadError(format!(
+            "Character '{}' nao possui secao [Files] valida.",
+            candidate.def_path.display()
+        ))
+    })?;
+
+    let anim_rel = files.entries.get("anim").ok_or_else(|| {
+        LoadError(format!(
+            "Character '{}' nao define arquivo AIR em [Files].",
+            candidate.def_path.display()
+        ))
+    })?;
+    let sprite_rel = files.entries.get("sprite").ok_or_else(|| {
+        LoadError(format!(
+            "Character '{}' nao define arquivo SFF em [Files].",
+            candidate.def_path.display()
+        ))
+    })?;
+    let anim_path = candidate.root_dir.join(anim_rel);
+    let sprite_path = candidate.root_dir.join(sprite_rel);
+    let actions = parse_mugen_air(&read_text_lossy(&anim_path)?);
+    if actions.is_empty() {
+        return Err(LoadError(format!(
+            "Arquivo AIR '{}' nao possui actions importaveis.",
+            anim_path.display()
+        )));
+    }
+
+    let requested_refs = collect_mugen_action_refs(&actions);
+    let extracted_sprites = load_mugen_sprite_assets(&sprite_path, &requested_refs)?;
+    if extracted_sprites.is_empty() {
+        return Err(LoadError(format!(
+            "Nenhum sprite referenciado pelo AIR foi encontrado em '{}' nem em work/*_sff.",
+            sprite_path.display()
+        )));
+    }
+
+    let atlas = compose_mugen_character_atlas(&extracted_sprites)?;
+    let character_slug = sgdk_entity_id(&candidate.display_name);
+    let atlas_asset = format!("assets/sprites/mugen_{}_atlas.png", character_slug);
+    save_rgba_image(&project_dir.join(&atlas_asset), &atlas.image)?;
+
+    let mut animations = mugen_actions_to_animation_defs(&actions, &atlas.frame_indices);
+    if let Some(idle) = animations.get("action_0").cloned() {
+        animations.insert("idle".to_string(), idle);
+    }
+
+    let mut scene = canonical_scene(
+        &sgdk_entity_id(&candidate.display_name),
+        Some(candidate.display_name.clone()),
+    );
+    let entity_id = sgdk_entity_id(&candidate.display_name);
+    scene.entities.push(Entity {
+        entity_id: entity_id.clone(),
+        display_name: Some(candidate.display_name.clone()),
+        prefab: None,
+        transform: crate::ugdm::entities::Transform { x: 96, y: 96 },
+        components: Components {
+            sprite: Some(SpriteComponent {
+                asset: atlas_asset,
+                frame_width: atlas.cell_width,
+                frame_height: atlas.cell_height,
+                pivot: Some(atlas.pivot.clone()),
+                palette_slot: 0,
+                animations,
+                priority: "foreground".to_string(),
+                meta_sprite: atlas.cell_width > 32 || atlas.cell_height > 32,
+            }),
+            collision: mugen_collision_component_from_actions(&actions),
+            logic: Some(LogicComponent {
+                graph: Some(imported_mugen_idle_logic_graph(&entity_id)),
+                graph_ref: None,
+                variables: HashMap::new(),
+            }),
+            ..Components::default()
+        },
+    });
+
+    let audio_sfx = files
+        .entries
+        .get("sound")
+        .map(|path| candidate.root_dir.join(path))
+        .filter(|path| path.is_file())
+        .and_then(|snd_path| load_mugen_sounds(&snd_path).ok())
+        .map(|sounds| save_mugen_sounds(project_dir, &character_slug, &sounds))
+        .transpose()?
+        .unwrap_or_default();
+    if !audio_sfx.is_empty() {
+        scene.entities.push(mugen_audio_bank_entity("audio_bank", audio_sfx, None));
+    }
+
+    scene.entities.push(Entity {
+        entity_id: "main_camera".to_string(),
+        display_name: Some("Main Camera".to_string()),
+        prefab: None,
+        transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+        components: Components {
+            camera: Some(CameraComponent {
+                follow_entity: Some(entity_id),
+                offset_x: 0,
+                offset_y: 0,
+            }),
+            ..Components::default()
+        },
+    });
+
+    Ok(scene)
+}
+
+fn import_mugen_stage_candidate(
+    project_dir: &Path,
+    candidate: &MugenCandidate,
+) -> Result<Scene, LoadError> {
+    let content = read_text_lossy(&candidate.def_path)?;
+    let sections = parse_mugen_ini(&content);
+    let stage_slug = sgdk_entity_id(&candidate.display_name);
+    let mut scene = canonical_scene(&stage_slug, Some(candidate.display_name.clone()));
+
+    if let Some(loose_background) = discover_loose_background_image(&candidate.root_dir, &candidate.def_path) {
+        let asset_rel = format!(
+            "assets/tilesets/{}_bg{}",
+            stage_slug,
+            loose_background
+                .extension()
+                .and_then(|value| value.to_str())
+                .map(|value| format!(".{}", value))
+                .unwrap_or_else(|| ".png".to_string())
+        );
+        copy_template_asset(&loose_background, &project_dir.join(&asset_rel))?;
+        scene.entities.push(static_mugen_sprite_entity(
+            "bg_0",
+            candidate.display_name.as_str(),
+            &asset_rel,
+            &project_dir.join(&asset_rel),
+            0,
+            0,
+        )?);
+    } else {
+        let bg_sections = sections
+            .iter()
+            .filter(|section| {
+                let lowered = section.name.to_ascii_lowercase();
+                lowered.starts_with("bg ") && lowered != "bgdef"
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let bgdef = find_section(&sections, "bgdef").ok_or_else(|| {
+            LoadError(format!(
+                "Stage '{}' nao possui [BGdef].",
+                candidate.def_path.display()
+            ))
+        })?;
+        let spr_rel = bgdef.entries.get("spr").ok_or_else(|| {
+            LoadError(format!(
+                "Stage '{}' nao define sprite archive em [BGdef].",
+                candidate.def_path.display()
+            ))
+        })?;
+        let actions = parse_mugen_air(&content);
+        let refs = collect_stage_sprite_refs(&bg_sections, &actions);
+        let sprites = load_mugen_sprite_assets(&candidate.root_dir.join(spr_rel), &refs)?;
+        for (index, section) in bg_sections.iter().enumerate() {
+            if let Some((group, image)) = stage_section_sprite_ref(section, &actions) {
+                let Some(sprite) = sprites.get(&(group, image)) else {
+                    continue;
+                };
+                let asset_rel = format!(
+                    "assets/tilesets/{}_bg_{}_{}_{}.png",
+                    stage_slug, index, group, image
+                );
+                save_rgba_image(&project_dir.join(&asset_rel), &sprite.pixels)?;
+                let (x, y) = parse_pair_i32(section.entries.get("start").map(String::as_str))
+                    .unwrap_or((0, 0));
+                scene.entities.push(static_mugen_sprite_entity(
+                    &format!("bg_{}", index),
+                    section.name.as_str(),
+                    &asset_rel,
+                    &project_dir.join(&asset_rel),
+                    x,
+                    y,
+                )?);
+            }
+        }
+    }
+
+    if let Some(bgm_path) = resolve_mugen_music_path(
+        candidate.root_dir.as_path(),
+        find_section(&sections, "music").and_then(|section| section.entries.get("bgmusic")),
+    ) {
+        let ext = bgm_path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("bin");
+        let asset_rel = format!("assets/audio/{}_bgm.{}", stage_slug, ext);
+        copy_template_asset(&bgm_path, &project_dir.join(&asset_rel))?;
+        scene.entities.push(mugen_audio_bank_entity(
+            "audio_bank",
+            HashMap::new(),
+            Some(asset_rel),
+        ));
+    }
+
+    if scene.entities.is_empty() {
+        return Err(LoadError(format!(
+            "Stage '{}' nao produziu assets importaveis nesta wave experimental.",
+            candidate.display_name
+        )));
+    }
+    Ok(scene)
+}
+
+fn import_mugen_screenpack_candidate(
+    project_dir: &Path,
+    candidate: &MugenCandidate,
+) -> Result<Vec<Scene>, LoadError> {
+    let content = read_text_lossy(&candidate.def_path)?;
+    let sections = parse_mugen_ini(&content);
+    let data_root = candidate
+        .def_path
+        .parent()
+        .ok_or_else(|| LoadError("system.def invalido: diretorio pai ausente.".to_string()))?;
+    let files = find_section(&sections, "files").ok_or_else(|| {
+        LoadError(format!(
+            "Screenpack '{}' nao possui [Files].",
+            candidate.def_path.display()
+        ))
+    })?;
+    let spr_rel = files.entries.get("spr").ok_or_else(|| {
+        LoadError(format!(
+            "Screenpack '{}' nao define system.sff em [Files].",
+            candidate.def_path.display()
+        ))
+    })?;
+    let sprite_archive = data_root.join(spr_rel);
+
+    let title_sections = sections
+        .iter()
+        .filter(|section| section.name.to_ascii_lowercase().starts_with("titlebg "))
+        .cloned()
+        .collect::<Vec<_>>();
+    let select_sections = sections
+        .iter()
+        .filter(|section| section.name.to_ascii_lowercase().starts_with("selectbg "))
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let mut refs = collect_stage_sprite_refs(&title_sections, &[]);
+    refs.extend(collect_stage_sprite_refs(&select_sections, &[]));
+    let extracted = if !refs.is_empty() {
+        load_mugen_sprite_assets(&sprite_archive, &refs)?
+    } else {
+        HashMap::new()
+    };
+
+    let mut scenes = Vec::new();
+    let mut scene_errors = Vec::new();
+    if !title_sections.is_empty() {
+        let title_bgm = resolve_mugen_music_path(
+            data_root,
+            find_section(&sections, "music").and_then(|music| music.entries.get("title.bgm")),
+        );
+        match build_mugen_visual_scene(
+            project_dir,
+            &format!("{} Title", candidate.display_name),
+            &title_sections,
+            &extracted,
+            title_bgm.as_ref(),
+            "title",
+        ) {
+            Ok(scene) => scenes.push(scene),
+            Err(error) => scene_errors.push(format!("title: {}", error)),
+        }
+    }
+    if !select_sections.is_empty() {
+        let select_bgm = resolve_mugen_music_path(
+            data_root,
+            find_section(&sections, "music").and_then(|music| music.entries.get("select.bgm")),
+        );
+        match build_mugen_visual_scene(
+            project_dir,
+            &format!("{} Select", candidate.display_name),
+            &select_sections,
+            &extracted,
+            select_bgm.as_ref(),
+            "select",
+        ) {
+            Ok(scene) => scenes.push(scene),
+            Err(error) => scene_errors.push(format!("select: {}", error)),
+        }
+    }
+
+    if scenes.is_empty() {
+        return Err(LoadError(format!(
+            "Screenpack '{}' nao possui BGs importaveis suportados nesta wave. {}",
+            candidate.display_name,
+            scene_errors.join(" | ")
+        )));
+    }
+
+    Ok(scenes)
+}
+
+fn build_mugen_visual_scene(
+    project_dir: &Path,
+    display_name: &str,
+    sections: &[MugenIniSection],
+    extracted_sprites: &HashMap<(i32, i32), MugenSffSprite>,
+    music_path: Option<&PathBuf>,
+    asset_prefix: &str,
+) -> Result<Scene, LoadError> {
+    let mut scene = canonical_scene(&sgdk_entity_id(display_name), Some(display_name.to_string()));
+    let scene_slug = sgdk_entity_id(display_name);
+
+    for (index, section) in sections.iter().enumerate() {
+        if let Some((group, image)) = stage_section_sprite_ref(section, &[]) {
+            let Some(sprite) = extracted_sprites.get(&(group, image)) else {
+                continue;
+            };
+            let asset_rel = format!(
+                "assets/tilesets/{}_{}_{}_{}_{}.png",
+                scene_slug, asset_prefix, index, group, image
+            );
+            save_rgba_image(&project_dir.join(&asset_rel), &sprite.pixels)?;
+            let (x, y) =
+                parse_pair_i32(section.entries.get("start").map(String::as_str)).unwrap_or((0, 0));
+            scene.entities.push(static_mugen_sprite_entity(
+                &format!("{}_{}", asset_prefix, index),
+                section.name.as_str(),
+                &asset_rel,
+                &project_dir.join(&asset_rel),
+                x,
+                y,
+            )?);
+        }
+    }
+
+    if let Some(music_path) = music_path {
+        if music_path.is_file() {
+            let ext = music_path
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or("bin");
+            let asset_rel = format!("assets/audio/{}_{}.{}", scene_slug, asset_prefix, ext);
+            copy_template_asset(music_path, &project_dir.join(&asset_rel))?;
+            scene.entities.push(mugen_audio_bank_entity(
+                "audio_bank",
+                HashMap::new(),
+                Some(asset_rel),
+            ));
+        }
+    }
+
+    if !scene
+        .entities
+        .iter()
+        .any(|entity| entity.components.sprite.is_some() || entity.components.tilemap.is_some())
+    {
+        return Err(LoadError(format!(
+            "Cena '{}' nao gerou nenhum asset visual importavel.",
+            display_name
+        )));
+    }
+
+    Ok(scene)
+}
+
+fn static_mugen_sprite_entity(
+    entity_id: &str,
+    display_name: &str,
+    asset_rel: &str,
+    asset_abs: &Path,
+    x: i32,
+    y: i32,
+) -> Result<Entity, LoadError> {
+    let (width, height) = image::image_dimensions(asset_abs).unwrap_or((32, 32));
+    Ok(Entity {
+        entity_id: entity_id.to_string(),
+        display_name: Some(display_name.to_string()),
+        prefab: None,
+        transform: crate::ugdm::entities::Transform { x, y },
+        components: Components {
+            sprite: Some(SpriteComponent {
+                asset: asset_rel.to_string(),
+                frame_width: width,
+                frame_height: height,
+                pivot: None,
+                palette_slot: 0,
+                animations: HashMap::new(),
+                priority: "background".to_string(),
+                meta_sprite: width > 32 || height > 32,
+            }),
+            ..Components::default()
+        },
+    })
+}
+
+fn mugen_audio_bank_entity(
+    entity_id: &str,
+    sfx: HashMap<String, String>,
+    bgm: Option<String>,
+) -> Entity {
+    Entity {
+        entity_id: entity_id.to_string(),
+        display_name: Some("Audio Bank".to_string()),
+        prefab: None,
+        transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+        components: Components {
+            audio: Some(AudioComponent { sfx, bgm }),
+            ..Components::default()
+        },
+    }
+}
+
+fn collect_mugen_action_refs(actions: &[MugenAirAction]) -> HashSet<(i32, i32)> {
+    actions
+        .iter()
+        .flat_map(|action| action.frames.iter().map(|frame| (frame.group, frame.image)))
+        .collect()
+}
+
+fn mugen_actions_to_animation_defs(
+    actions: &[MugenAirAction],
+    frame_indices: &HashMap<(i32, i32), u32>,
+) -> HashMap<String, AnimationDef> {
+    let mut animations = HashMap::new();
+    for action in actions {
+        let frames = action
+            .frames
+            .iter()
+            .filter_map(|frame| frame_indices.get(&(frame.group, frame.image)).copied())
+            .collect::<Vec<_>>();
+        if frames.is_empty() {
+            continue;
+        }
+        let durations = action
+            .frames
+            .iter()
+            .map(|frame| frame.duration.max(1))
+            .collect::<Vec<_>>();
+        let positive = durations.iter().copied().filter(|value| *value > 0).collect::<Vec<_>>();
+        let avg = if positive.is_empty() {
+            1.0
+        } else {
+            positive.iter().sum::<i32>() as f32 / positive.len() as f32
+        };
+        let fps = (60.0 / avg.max(1.0)).round().clamp(1.0, 60.0) as u32;
+        let mugen_frames = action
+            .frames
+            .iter()
+            .map(|frame| MugenAnimationFrame {
+                group: frame.group,
+                image: frame.image,
+                axis: Some(Pivot {
+                    x: frame.axis_x,
+                    y: frame.axis_y,
+                }),
+                duration: frame.duration,
+                flags: frame.flags.clone(),
+                clsn1: frame.clsn1.clone(),
+                clsn2: frame.clsn2.clone(),
+            })
+            .collect::<Vec<_>>();
+        animations.insert(
+            format!("action_{}", action.action_no),
+            AnimationDef {
+                frames,
+                fps,
+                looping: action.loop_start.is_some(),
+                frame_durations: Some(durations),
+                loop_start: action.loop_start,
+                mugen_frames: Some(mugen_frames),
+            },
+        );
+    }
+    animations
+}
+
+fn mugen_collision_component_from_actions(actions: &[MugenAirAction]) -> Option<CollisionComponent> {
+    let boxes = actions
+        .iter()
+        .find(|action| action.action_no == 0)
+        .and_then(|action| action.frames.first())
+        .map(|frame| frame.clsn2.as_slice())
+        .or_else(|| {
+            actions
+                .iter()
+                .flat_map(|action| action.frames.iter())
+                .find(|frame| !frame.clsn2.is_empty())
+                .map(|frame| frame.clsn2.as_slice())
+        })?;
+    if boxes.is_empty() {
+        return None;
+    }
+
+    let min_x = boxes.iter().map(|entry| entry.x1.min(entry.x2)).min()?;
+    let min_y = boxes.iter().map(|entry| entry.y1.min(entry.y2)).min()?;
+    let max_x = boxes.iter().map(|entry| entry.x1.max(entry.x2)).max()?;
+    let max_y = boxes.iter().map(|entry| entry.y1.max(entry.y2)).max()?;
+
+    Some(CollisionComponent {
+        shape: "aabb".to_string(),
+        width: (max_x - min_x).unsigned_abs().max(1),
+        height: (max_y - min_y).unsigned_abs().max(1),
+        offset: Some(CollisionOffset { x: min_x, y: min_y }),
+        solid: true,
+        layer: Some("player".to_string()),
+        collides_with: vec!["enemy".to_string(), "stage".to_string()],
+    })
+}
+
+fn imported_mugen_idle_logic_graph(entity_id: &str) -> String {
+    serde_json::json!({
+        "version": 1,
+        "nodes": [
+            {
+                "id": "start",
+                "type": "event_start",
+                "label": "On Start",
+                "x": 40,
+                "y": 80,
+                "inputs": [],
+                "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "params": {}
+            },
+            {
+                "id": "idle_anim",
+                "type": "sprite_anim",
+                "label": "Set Animation",
+                "x": 260,
+                "y": 80,
+                "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "params": { "target": entity_id, "anim": "idle" }
+            }
+        ],
+        "edges": [
+            {
+                "id": "edge_start_idle",
+                "fromNode": "start",
+                "fromPort": "exec",
+                "toNode": "idle_anim",
+                "toPort": "exec"
+            }
+        ]
+    })
+    .to_string()
+}
+
+fn compose_mugen_character_atlas(
+    sprites: &HashMap<(i32, i32), MugenSffSprite>,
+) -> Result<MugenCharacterAtlas, LoadError> {
+    if sprites.is_empty() {
+        return Err(LoadError(
+            "Nao ha sprites suficientes para compor atlas MUGEN.".to_string(),
+        ));
+    }
+
+    let mut ordered = sprites.values().cloned().collect::<Vec<_>>();
+    ordered.sort_by(|left, right| {
+        left.group
+            .cmp(&right.group)
+            .then(left.image.cmp(&right.image))
+    });
+
+    let anchor_x = ordered.iter().map(|sprite| sprite.axis.x).max().unwrap_or(0).max(0) as u32;
+    let anchor_y = ordered.iter().map(|sprite| sprite.axis.y).max().unwrap_or(0).max(0) as u32;
+    let cell_width = ordered
+        .iter()
+        .map(|sprite| {
+            anchor_x + sprite.pixels.width().saturating_sub(sprite.axis.x.max(0) as u32)
+        })
+        .max()
+        .unwrap_or(32)
+        .max(1);
+    let cell_height = ordered
+        .iter()
+        .map(|sprite| {
+            anchor_y + sprite.pixels.height().saturating_sub(sprite.axis.y.max(0) as u32)
+        })
+        .max()
+        .unwrap_or(32)
+        .max(1);
+    let count = ordered.len() as f32;
+    let cols = count.sqrt().ceil().max(1.0) as u32;
+    let rows = (ordered.len() as u32).div_ceil(cols);
+    let mut atlas = ImageBuffer::from_pixel(cols * cell_width, rows * cell_height, Rgba([0, 0, 0, 0]));
+    let mut frame_indices = HashMap::new();
+
+    for (index, sprite) in ordered.iter().enumerate() {
+        let index_u32 = index as u32;
+        let cell_x = (index_u32 % cols) * cell_width;
+        let cell_y = (index_u32 / cols) * cell_height;
+        let offset_x = cell_x + anchor_x.saturating_sub(sprite.axis.x.max(0) as u32);
+        let offset_y = cell_y + anchor_y.saturating_sub(sprite.axis.y.max(0) as u32);
+        for y in 0..sprite.pixels.height() {
+            for x in 0..sprite.pixels.width() {
+                atlas.put_pixel(offset_x + x, offset_y + y, *sprite.pixels.get_pixel(x, y));
+            }
+        }
+        frame_indices.insert((sprite.group, sprite.image), index_u32);
+    }
+
+    Ok(MugenCharacterAtlas {
+        image: atlas,
+        frame_indices,
+        cell_width,
+        cell_height,
+        pivot: Pivot {
+            x: anchor_x as i32,
+            y: anchor_y as i32,
+        },
+    })
+}
+
+fn discover_loose_background_image(root_dir: &Path, def_path: &Path) -> Option<PathBuf> {
+    let stem = def_path.file_stem()?.to_string_lossy().to_ascii_lowercase();
+    sorted_directory_entries(root_dir)
+        .ok()?
+        .into_iter()
+        .find(|path| {
+            path.is_file()
+                && path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| {
+                        ["png", "bmp", "jpg", "jpeg"]
+                            .iter()
+                            .any(|expected| extension.eq_ignore_ascii_case(expected))
+                    })
+                && path
+                    .file_stem()
+                    .map(|value| value.to_string_lossy().to_ascii_lowercase())
+                    .is_some_and(|candidate| candidate == stem)
+        })
+}
+
+fn resolve_mugen_music_path(root_dir: &Path, value: Option<&String>) -> Option<PathBuf> {
+    let raw = value?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let direct = root_dir.join(raw);
+    if direct.is_file() {
+        return Some(direct);
+    }
+    let relative = raw
+        .strip_prefix("data/")
+        .or_else(|| raw.strip_prefix("data\\"))
+        .unwrap_or(raw);
+    let fallback = root_dir.join(relative);
+    fallback.is_file().then_some(fallback)
+}
+
+fn collect_stage_sprite_refs(
+    sections: &[MugenIniSection],
+    actions: &[MugenAirAction],
+) -> HashSet<(i32, i32)> {
+    sections
+        .iter()
+        .filter_map(|section| stage_section_sprite_ref(section, actions))
+        .collect()
+}
+
+fn stage_section_sprite_ref(
+    section: &MugenIniSection,
+    actions: &[MugenAirAction],
+) -> Option<(i32, i32)> {
+    if let Some(spriteno) = section.entries.get("spriteno") {
+        return parse_pair_i32(Some(spriteno));
+    }
+    if let Some(actionno) = section.entries.get("actionno").and_then(|value| value.parse::<i32>().ok()) {
+        return actions
+            .iter()
+            .find(|action| action.action_no == actionno)
+            .and_then(|action| action.frames.first())
+            .map(|frame| (frame.group, frame.image));
+    }
+    None
+}
+
+fn parse_pair_i32(value: Option<&str>) -> Option<(i32, i32)> {
+    let value = value?;
+    let numbers = value
+        .split(',')
+        .filter_map(|entry| entry.trim().parse::<i32>().ok())
+        .collect::<Vec<_>>();
+    (numbers.len() >= 2).then_some((numbers[0], numbers[1]))
+}
+
+fn save_mugen_sounds(
+    project_dir: &Path,
+    prefix: &str,
+    sounds: &[MugenSound],
+) -> Result<HashMap<String, String>, LoadError> {
+    let mut mapping = HashMap::new();
+    for sound in sounds {
+        if !sound.payload.starts_with(b"RIFF") {
+            continue;
+        }
+        let asset_rel = format!(
+            "assets/audio/{}_snd_{}_{}.wav",
+            prefix, sound.group, sound.sound_no
+        );
+        let destination = project_dir.join(&asset_rel);
+        let parent = destination.parent().ok_or_else(|| {
+            LoadError(format!(
+                "Destino de audio '{}' nao possui diretorio pai valido.",
+                destination.display()
+            ))
+        })?;
+        fs::create_dir_all(parent).map_err(|error| {
+            LoadError(format!(
+                "Nao foi possivel criar o diretorio '{}' para audio MUGEN: {}",
+                parent.display(),
+                error
+            ))
+        })?;
+        fs::write(&destination, &sound.payload).map_err(|error| {
+            LoadError(format!(
+                "Nao foi possivel salvar audio '{}' em '{}': {}",
+                prefix,
+                destination.display(),
+                error
+            ))
+        })?;
+        mapping.insert(
+            format!("snd_{}_{}", sound.group, sound.sound_no),
+            asset_rel,
+        );
+    }
+    Ok(mapping)
+}
+
+fn load_mugen_sounds(path: &Path) -> Result<Vec<MugenSound>, LoadError> {
+    if path.is_file() && fs::read(path).is_ok_and(|bytes| bytes.starts_with(b"ElecbyteSnd")) {
+        let decoded = extract_mugen_snd_v1(path)?;
+        if !decoded.is_empty() {
+            return Ok(decoded);
+        }
+    }
+    Ok(Vec::new())
+}
+
+fn save_rgba_image(path: &Path, image: &RgbaImage) -> Result<(), LoadError> {
+    let parent = path.parent().ok_or_else(|| {
+        LoadError(format!(
+            "Destino de imagem '{}' nao possui diretorio pai valido.",
+            path.display()
+        ))
+    })?;
+    fs::create_dir_all(parent).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel criar o diretorio '{}' para imagem MUGEN: {}",
+            parent.display(),
+            error
+        ))
+    })?;
+    image.save(path).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel salvar imagem '{}' em '{}': {}",
+            path.file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("asset"),
+            path.display(),
+            error
+        ))
+    })
+}
+
+fn mugen_sff_is_v1(path: &Path) -> Result<bool, LoadError> {
+    let bytes = fs::read(path).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel ler SFF '{}': {}",
+            path.display(),
+            error
+        ))
+    })?;
+    Ok(bytes.starts_with(b"ElecbyteSpr")
+        && read_le_u8(&bytes, 15).unwrap_or_default() == 1)
+}
+
+fn load_mugen_sprite_assets(
+    archive_path: &Path,
+    requested: &HashSet<(i32, i32)>,
+) -> Result<HashMap<(i32, i32), MugenSffSprite>, LoadError> {
+    if archive_path.is_file() && mugen_sff_is_v1(archive_path)? {
+        let decoded = extract_mugen_sff_v1(archive_path, requested)?;
+        if !decoded.is_empty() {
+            return Ok(decoded);
+        }
+    }
+    extract_mugen_work_sprites(archive_path, requested)
+}
+
+fn extract_mugen_work_sprites(
+    archive_path: &Path,
+    requested: &HashSet<(i32, i32)>,
+) -> Result<HashMap<(i32, i32), MugenSffSprite>, LoadError> {
+    let mut extracted = HashMap::new();
+    for directory in mugen_work_sprite_directories(archive_path) {
+        if !directory.is_dir() {
+            continue;
+        }
+        for ((group, image), sprite_path) in mugen_requested_sprite_paths(&directory, requested)? {
+            let pixels = image::open(&sprite_path)
+                .map_err(|error| {
+                    LoadError(format!(
+                        "Nao foi possivel abrir sprite MUGEN extraido '{}': {}",
+                        sprite_path.display(),
+                        error
+                    ))
+                })?
+                .to_rgba8();
+            extracted.insert(
+                (group, image),
+                MugenSffSprite {
+                    group,
+                    image,
+                    axis: Pivot { x: 0, y: 0 },
+                    pixels,
+                },
+            );
+        }
+        if !extracted.is_empty() {
+            break;
+        }
+    }
+    Ok(extracted)
+}
+
+fn mugen_requested_sprite_paths(
+    directory: &Path,
+    requested: &HashSet<(i32, i32)>,
+) -> Result<Vec<MugenSpritePathMatch>, LoadError> {
+    let mut matches = Vec::new();
+    for entry in fs::read_dir(directory).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel listar sprites MUGEN extraidos em '{}': {}",
+            directory.display(),
+            error
+        ))
+    })? {
+        let path = entry
+            .map_err(|error| {
+                LoadError(format!(
+                    "Nao foi possivel iterar sprites MUGEN extraidos em '{}': {}",
+                    directory.display(),
+                    error
+                ))
+            })?
+            .path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(extension) = path.extension().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if !["png", "bmp", "jpg", "jpeg"]
+            .iter()
+            .any(|expected| extension.eq_ignore_ascii_case(expected))
+        {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let Some((group, image)) = parse_mugen_sprite_file_stem(stem) else {
+            continue;
+        };
+        if requested.is_empty() || requested.contains(&(group, image)) {
+            matches.push(((group, image), path));
+        }
+    }
+    matches.sort_by(|left, right| left.0.cmp(&right.0));
+    Ok(matches)
+}
+
+fn parse_mugen_sprite_file_stem(stem: &str) -> Option<(i32, i32)> {
+    let normalized = stem.replace('_', "-");
+    let (group, image) = normalized.split_once('-')?;
+    Some((group.trim().parse::<i32>().ok()?, image.trim().parse::<i32>().ok()?))
+}
+
+fn mugen_work_sprite_directories(archive_path: &Path) -> Vec<PathBuf> {
+    let Some(parent) = archive_path.parent() else {
+        return Vec::new();
+    };
+    let stem = archive_path
+        .file_stem()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| "sprites".to_string());
+    let mut directories = Vec::new();
+    for base in [
+        parent.join("work").join(format!("{}_sff", stem)),
+        parent.join(format!("{}_sff", stem)),
+    ] {
+        directories.push(base.join("sd"));
+        directories.push(base.join("hd"));
+        directories.push(base);
+    }
+    directories
+}
+
+fn extract_mugen_sff_v1(
+    path: &Path,
+    requested: &HashSet<(i32, i32)>,
+) -> Result<HashMap<(i32, i32), MugenSffSprite>, LoadError> {
+    let bytes = fs::read(path).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel ler SFF '{}': {}",
+            path.display(),
+            error
+        ))
+    })?;
+    if !bytes.starts_with(b"ElecbyteSpr") {
+        return Err(LoadError(format!(
+            "Arquivo '{}' nao e um SFF Elecbyte valido.",
+            path.display()
+        )));
+    }
+    if read_le_u8(&bytes, 15).unwrap_or_default() != 1 {
+        return Err(LoadError(format!(
+            "SFF '{}' usa versao nao suportada nesta wave (apenas v1).",
+            path.display()
+        )));
+    }
+
+    let image_count = read_le_u32(&bytes, 20).unwrap_or(0) as usize;
+    let subheader_offset = read_le_u32(&bytes, 24).unwrap_or(512) as usize;
+    let subheader_size = read_le_u32(&bytes, 28).unwrap_or(32).max(32) as usize;
+    let mut cursor = subheader_offset;
+    let mut decoded = Vec::<Option<(Pivot, RgbaImage)>>::new();
+    let mut extracted = HashMap::new();
+
+    for _ in 0..image_count.max(1) {
+        if cursor == 0 || cursor + subheader_size > bytes.len() {
+            break;
+        }
+        let next_offset = read_le_u32(&bytes, cursor).unwrap_or(0) as usize;
+        let length = read_le_u32(&bytes, cursor + 4).unwrap_or(0) as usize;
+        let axis = Pivot {
+            x: read_le_i16(&bytes, cursor + 8).unwrap_or(0) as i32,
+            y: read_le_i16(&bytes, cursor + 10).unwrap_or(0) as i32,
+        };
+        let group = read_le_u16(&bytes, cursor + 12).unwrap_or(0) as i32;
+        let image = read_le_u16(&bytes, cursor + 14).unwrap_or(0) as i32;
+        let linked_index = read_le_u16(&bytes, cursor + 16).unwrap_or(0) as usize;
+
+        let decoded_entry = if length > 0 {
+            let data_start = cursor + subheader_size;
+            let data_end = data_start.saturating_add(length);
+            if data_end > bytes.len() {
+                return Err(LoadError(format!(
+                    "SFF '{}' possui sprite truncado em group={}, image={}.",
+                    path.display(),
+                    group,
+                    image
+                )));
+            }
+            let rgba = decode_mugen_pcx(&bytes[data_start..data_end])?;
+            Some((axis.clone(), rgba))
+        } else if linked_index > 0 {
+            decoded
+                .get(linked_index)
+                .and_then(|value| value.as_ref().cloned())
+        } else {
+            None
+        };
+
+        if let Some((stored_axis, stored_pixels)) = decoded_entry.clone() {
+            if requested.is_empty() || requested.contains(&(group, image)) {
+                extracted.insert(
+                    (group, image),
+                    MugenSffSprite {
+                        group,
+                        image,
+                        axis: stored_axis,
+                        pixels: stored_pixels,
+                    },
+                );
+            }
+        }
+        decoded.push(decoded_entry);
+
+        if next_offset == 0 {
+            break;
+        }
+        cursor = next_offset;
+    }
+
+    Ok(extracted)
+}
+
+fn extract_mugen_snd_v1(path: &Path) -> Result<Vec<MugenSound>, LoadError> {
+    let bytes = fs::read(path).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel ler SND '{}': {}",
+            path.display(),
+            error
+        ))
+    })?;
+    if !bytes.starts_with(b"ElecbyteSnd") {
+        return Err(LoadError(format!(
+            "Arquivo '{}' nao e um SND Elecbyte valido.",
+            path.display()
+        )));
+    }
+    let mut cursor = read_le_u32(&bytes, 20).unwrap_or(512) as usize;
+    let mut sounds = Vec::new();
+
+    while cursor > 0 && cursor + 16 <= bytes.len() {
+        let next_offset = read_le_u32(&bytes, cursor).unwrap_or(0) as usize;
+        let length = read_le_u32(&bytes, cursor + 4).unwrap_or(0) as usize;
+        let group = read_le_u32(&bytes, cursor + 8).unwrap_or(0) as i32;
+        let sound_no = read_le_u32(&bytes, cursor + 12).unwrap_or(0) as i32;
+        let data_start = cursor + 16;
+        let data_end = data_start.saturating_add(length);
+        if data_end > bytes.len() {
+            break;
+        }
+        sounds.push(MugenSound {
+            group,
+            sound_no,
+            payload: bytes[data_start..data_end].to_vec(),
+        });
+        if next_offset == 0 {
+            break;
+        }
+        cursor = next_offset;
+    }
+
+    Ok(sounds)
+}
+
+fn decode_mugen_pcx(bytes: &[u8]) -> Result<RgbaImage, LoadError> {
+    if bytes.len() < 128 + 769 {
+        return Err(LoadError(
+            "PCX MUGEN invalido: arquivo pequeno demais.".to_string(),
+        ));
+    }
+    if bytes[0] != 0x0A || bytes[2] != 1 || bytes[3] != 8 {
+        return Err(LoadError(
+            "PCX MUGEN invalido: apenas PCX RLE 8bpp sao suportados nesta wave.".to_string(),
+        ));
+    }
+
+    let xmin = read_le_u16(bytes, 4).unwrap_or(0) as u32;
+    let ymin = read_le_u16(bytes, 6).unwrap_or(0) as u32;
+    let xmax = read_le_u16(bytes, 8).unwrap_or(0) as u32;
+    let ymax = read_le_u16(bytes, 10).unwrap_or(0) as u32;
+    let width = xmax.saturating_sub(xmin) + 1;
+    let height = ymax.saturating_sub(ymin) + 1;
+    let color_planes = read_le_u8(bytes, 65).unwrap_or(1).max(1) as usize;
+    let bytes_per_line = read_le_u16(bytes, 66).unwrap_or(width as u16) as usize;
+    if bytes[bytes.len() - 769] != 0x0C {
+        return Err(LoadError(
+            "PCX MUGEN invalido: palette 8-bit ausente.".to_string(),
+        ));
+    }
+
+    let pixel_data_end = bytes.len() - 769;
+    let decoded_stride = bytes_per_line * color_planes;
+    let expected = decoded_stride * height as usize;
+    let mut decoded = Vec::with_capacity(expected);
+    let mut index = 128usize;
+    while decoded.len() < expected && index < pixel_data_end {
+        let value = bytes[index];
+        index += 1;
+        if value & 0xC0 == 0xC0 {
+            if index >= pixel_data_end {
+                break;
+            }
+            let run = (value & 0x3F) as usize;
+            let repeated = bytes[index];
+            index += 1;
+            for _ in 0..run {
+                decoded.push(repeated);
+            }
+        } else {
+            decoded.push(value);
+        }
+    }
+    decoded.resize(expected, 0);
+
+    let palette = &bytes[bytes.len() - 768..];
+    let mut image = ImageBuffer::from_pixel(width, height, Rgba([0, 0, 0, 0]));
+    for y in 0..height as usize {
+        let row_start = y * decoded_stride;
+        for x in 0..width as usize {
+            let palette_index = decoded[row_start + x] as usize;
+            let color_offset = palette_index * 3;
+            let rgba = if color_offset + 2 < palette.len() {
+                let alpha = if palette_index == 0 { 0 } else { 255 };
+                Rgba([
+                    palette[color_offset],
+                    palette[color_offset + 1],
+                    palette[color_offset + 2],
+                    alpha,
+                ])
+            } else {
+                Rgba([0, 0, 0, 0])
+            };
+            image.put_pixel(x as u32, y as u32, rgba);
+        }
+    }
+    Ok(image)
+}
+
+fn read_le_u8(bytes: &[u8], offset: usize) -> Option<u8> {
+    bytes.get(offset).copied()
+}
+
+fn read_le_u16(bytes: &[u8], offset: usize) -> Option<u16> {
+    let slice = bytes.get(offset..offset + 2)?;
+    Some(u16::from_le_bytes([slice[0], slice[1]]))
+}
+
+fn read_le_i16(bytes: &[u8], offset: usize) -> Option<i16> {
+    let slice = bytes.get(offset..offset + 2)?;
+    Some(i16::from_le_bytes([slice[0], slice[1]]))
+}
+
+fn read_le_u32(bytes: &[u8], offset: usize) -> Option<u32> {
+    let slice = bytes.get(offset..offset + 4)?;
+    Some(u32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]]))
+}
+
+pub fn import_external_project(
+    project_dir: &Path,
+    profile_id: &str,
+    source_path: &Path,
+) -> Result<ExternalImportReport, LoadError> {
+    let profile = external_import_profile_definition(profile_id)?;
+    if !profile.importable {
+        return Err(LoadError(format!(
+            "O perfil '{}' ainda nao esta importavel nesta wave (status: {}).",
+            profile.name, profile.support_status
+        )));
+    }
+
+    match profile.id {
+        "sgdk" => import_sgdk_project(project_dir, source_path).map(|scene| ExternalImportReport {
+            primary_scene: scene,
+            imported_scenes: 1,
+            skipped_sources: Vec::new(),
+        }),
+        "mugen" | "ikemen_go" => {
+            let report = import_mugen_project(project_dir, source_path)?;
+            Ok(ExternalImportReport {
+                primary_scene: report.primary_scene,
+                imported_scenes: report.imported_scenes,
+                skipped_sources: report.skipped_sources,
+            })
+        }
+        "godot" => import_godot_project(project_dir, source_path),
+        _ => Err(LoadError(format!(
+            "O perfil '{}' ainda nao possui adapter canonico.",
+            profile.name
+        ))),
+    }
+}
+
+pub fn stamp_imported_external_profile_metadata(
+    project_dir: &Path,
+    profile_id: &str,
+    source_path: &Path,
+) -> Result<Project, LoadError> {
+    let profile = external_import_profile_definition(profile_id)?;
+    let (template_id, template_version, source_kind, import_profile) = match profile.id {
+        "sgdk" => (
+            "imported_sgdk".to_string(),
+            "1.0.0".to_string(),
+            "imported_sgdk".to_string(),
+            "sgdk_manifest_v1".to_string(),
+        ),
+        "mugen" => (
+            "imported_mugen".to_string(),
+            "1.0.0".to_string(),
+            "imported_mugen".to_string(),
+            "mugen_def_air_v1".to_string(),
+        ),
+        "ikemen_go" => (
+            "imported_ikemen_go".to_string(),
+            "1.0.0".to_string(),
+            "imported_ikemen_go".to_string(),
+            "ikemen_go_mugen_v1".to_string(),
+        ),
+        "godot" => (
+            "imported_godot".to_string(),
+            "1.0.0".to_string(),
+            "imported_godot".to_string(),
+            "godot_tscn_v1".to_string(),
+        ),
+        _ => (
+            format!("imported_{}", profile.source_engine),
+            "1.0.0".to_string(),
+            "imported_external".to_string(),
+            format!("{}_v1", profile.source_engine),
+        ),
+    };
+
+    stamp_external_import_metadata(
+        project_dir,
+        template_id,
+        template_version,
+        source_kind,
+        profile.source_engine.to_string(),
+        import_profile,
+        source_path,
+    )
+}
+
+pub fn import_godot_project(
+    project_dir: &Path,
+    godot_path: &Path,
+) -> Result<ExternalImportReport, LoadError> {
+    validate_godot_project_path(godot_path)?;
+    let scene_path = detect_godot_primary_scene_path(godot_path)?;
+    let content = read_text_lossy(&scene_path)?;
+    let parsed = parse_godot_scene(&content)?;
+    let scene_display_name = scene_path
+        .file_stem()
+        .map(|value| value.to_string_lossy().trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "Godot Scene".to_string());
+    let GodotSceneParse {
+        ext_resources,
+        nodes,
+    } = parsed;
+
+    let mut scene = canonical_scene(DEFAULT_SCENE_ID, Some(scene_display_name));
+
+    let mut entity_ids = HashSet::new();
+    let mut first_sprite_id: Option<String> = None;
+    let mut audio_sfx = HashMap::new();
+    let mut audio_bgm: Option<String> = None;
+    let mut pending_cameras = Vec::new();
+    let mut asset_cache: HashMap<PathBuf, String> = HashMap::new();
+    let mut skipped = Vec::new();
+
+    for node in nodes {
+        match node.node_type.as_str() {
+            "Sprite2D" => {
+                let Some(texture_ref) = node.properties.get("texture") else {
+                    skipped.push(format!("{}: Sprite2D sem textura.", node.name));
+                    continue;
+                };
+                let Some(texture_id) = godot_ext_resource_id(texture_ref) else {
+                    skipped.push(format!("{}: referencia de textura Godot nao suportada.", node.name));
+                    continue;
+                };
+                let Some(texture_resource) = ext_resources.get(&texture_id) else {
+                    skipped.push(format!(
+                        "{}: ExtResource '{}' nao encontrada para Sprite2D.",
+                        node.name, texture_id
+                    ));
+                    continue;
+                };
+                let texture_source = resolve_godot_resource_path(godot_path, &texture_resource.path);
+                if !texture_source.is_file() {
+                    skipped.push(format!(
+                        "{}: textura '{}' nao encontrada no projeto Godot.",
+                        node.name,
+                        texture_source.display()
+                    ));
+                    continue;
+                }
+
+                let asset = materialize_external_file(
+                    project_dir,
+                    godot_path,
+                    &texture_source,
+                    "sprites",
+                    "godot",
+                    &mut asset_cache,
+                )?;
+                let (frame_width, frame_height) =
+                    image::image_dimensions(&texture_source).unwrap_or((32, 32));
+                let entity_id = unique_entity_id(&mut entity_ids, &node.name, "sprite");
+                if first_sprite_id.is_none() {
+                    first_sprite_id = Some(entity_id.clone());
+                }
+                let (x, y) = parse_godot_position(node.properties.get("position"));
+                scene.entities.push(Entity {
+                    entity_id,
+                    display_name: Some(node.name.clone()),
+                    prefab: None,
+                    transform: crate::ugdm::entities::Transform { x, y },
+                    components: Components {
+                        sprite: Some(SpriteComponent {
+                            asset,
+                            frame_width: frame_width.max(1),
+                            frame_height: frame_height.max(1),
+                            pivot: None,
+                            palette_slot: 0,
+                            animations: HashMap::new(),
+                            priority: "foreground".to_string(),
+                            meta_sprite: frame_width > 32 || frame_height > 32,
+                        }),
+                        ..Components::default()
+                    },
+                });
+            }
+            "Camera2D" => {
+                let entity_id = unique_entity_id(&mut entity_ids, &node.name, "camera");
+                let (x, y) = parse_godot_position(node.properties.get("position"));
+                pending_cameras.push((entity_id, node.name, x, y));
+            }
+            "AudioStreamPlayer" | "AudioStreamPlayer2D" => {
+                let Some(stream_ref) = node.properties.get("stream") else {
+                    skipped.push(format!("{}: player de audio sem stream.", node.name));
+                    continue;
+                };
+                let Some(stream_id) = godot_ext_resource_id(stream_ref) else {
+                    skipped.push(format!("{}: referencia de audio Godot nao suportada.", node.name));
+                    continue;
+                };
+                let Some(stream_resource) = ext_resources.get(&stream_id) else {
+                    skipped.push(format!(
+                        "{}: ExtResource '{}' nao encontrada para audio.",
+                        node.name, stream_id
+                    ));
+                    continue;
+                };
+                let audio_source = resolve_godot_resource_path(godot_path, &stream_resource.path);
+                if !audio_source.is_file() {
+                    skipped.push(format!(
+                        "{}: audio '{}' nao encontrado no projeto Godot.",
+                        node.name,
+                        audio_source.display()
+                    ));
+                    continue;
+                }
+
+                let asset = materialize_external_file(
+                    project_dir,
+                    godot_path,
+                    &audio_source,
+                    "audio",
+                    "godot",
+                    &mut asset_cache,
+                )?;
+                if node.node_type == "AudioStreamPlayer" && audio_bgm.is_none() {
+                    audio_bgm = Some(asset);
+                } else {
+                    audio_sfx.insert(slugify_scene_id(&node.name), asset);
+                }
+            }
+            "AnimatedSprite2D" | "TileMap" | "TileMapLayer" => {
+                skipped.push(format!(
+                    "{}: no '{}' ainda nao possui conversao nativa nesta wave.",
+                    node.name, node.node_type
+                ));
+            }
+            _ => {}
+        }
+    }
+
+    for (entity_id, display_name, x, y) in pending_cameras {
+        scene.entities.push(Entity {
+            entity_id,
+            display_name: Some(display_name),
+            prefab: None,
+            transform: crate::ugdm::entities::Transform { x, y },
+            components: Components {
+                camera: Some(CameraComponent {
+                    follow_entity: first_sprite_id.clone(),
+                    offset_x: 0,
+                    offset_y: 0,
+                }),
+                ..Components::default()
+            },
+        });
+    }
+
+    if !audio_sfx.is_empty() || audio_bgm.is_some() {
+        let entity_id = unique_entity_id(&mut entity_ids, "audio_bank", "audio");
+        scene.entities.push(Entity {
+            entity_id,
+            display_name: Some("Godot Audio Bank".to_string()),
+            prefab: None,
+            transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+            components: Components {
+                audio: Some(AudioComponent {
+                    sfx: audio_sfx,
+                    bgm: audio_bgm,
+                }),
+                ..Components::default()
+            },
+        });
+    }
+
+    if first_sprite_id.is_some()
+        && !scene
+            .entities
+            .iter()
+            .any(|entity| entity.components.camera.is_some())
+    {
+        scene.entities.push(Entity {
+            entity_id: unique_entity_id(&mut entity_ids, "main_camera", "camera"),
+            display_name: Some("Main Camera".to_string()),
+            prefab: None,
+            transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+            components: Components {
+                camera: Some(CameraComponent {
+                    follow_entity: first_sprite_id,
+                    offset_x: 0,
+                    offset_y: 0,
+                }),
+                ..Components::default()
+            },
+        });
+    }
+
+    save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
+    Ok(ExternalImportReport {
+        primary_scene: scene,
+        imported_scenes: 1,
+        skipped_sources: skipped,
+    })
+}
+
+fn validate_godot_project_path(godot_path: &Path) -> Result<(), LoadError> {
+    if !godot_path.is_dir() {
+        return Err(LoadError(format!(
+            "Projeto Godot invalido: '{}' nao e um diretorio.",
+            godot_path.display()
+        )));
+    }
+
+    if godot_path.join("project.godot").is_file() {
+        return Ok(());
+    }
+
+    let scenes =
+        collect_recursive_files_by_extension(godot_path, &["tscn"], &[".godot", "addons", "import", "rds"])?;
+    if scenes.is_empty() {
+        return Err(LoadError(format!(
+            "Projeto Godot invalido: nenhum arquivo 'project.godot' ou '.tscn' encontrado em '{}'.",
+            godot_path.display()
+        )));
+    }
+
+    Ok(())
+}
+
+fn detect_godot_primary_scene_path(godot_path: &Path) -> Result<PathBuf, LoadError> {
+    let project_file = godot_path.join("project.godot");
+    if project_file.is_file() {
+        let content = read_text_lossy(&project_file)?;
+        if let Some(scene_res_path) = find_godot_project_main_scene(&content) {
+            let scene_path = resolve_godot_resource_path(godot_path, &scene_res_path);
+            if scene_path.is_file() {
+                return Ok(scene_path);
+            }
+        }
+    }
+
+    let mut scenes =
+        collect_recursive_files_by_extension(godot_path, &["tscn"], &[".godot", "addons", "import", "rds"])?;
+    scenes.sort();
+    let first_scene = scenes.into_iter().next().ok_or_else(|| {
+        LoadError(format!(
+            "Projeto Godot invalido: nenhum '.tscn' importavel encontrado em '{}'.",
+            godot_path.display()
+        ))
+    })?;
+    Ok(godot_path.join(PathBuf::from(first_scene)))
+}
+
+fn find_godot_project_main_scene(content: &str) -> Option<String> {
+    let mut current_section = String::new();
+    for raw_line in content.lines() {
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() || trimmed.starts_with(';') || trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            current_section = trimmed[1..trimmed.len() - 1].trim().to_string();
+            continue;
+        }
+        if current_section.eq_ignore_ascii_case("application") {
+            let (key, value) = trimmed.split_once('=')?;
+            if key.trim().eq_ignore_ascii_case("run/main_scene") {
+                return godot_string_value(value.trim());
+            }
+        }
+    }
+    None
+}
+
+fn parse_godot_scene(content: &str) -> Result<GodotSceneParse, LoadError> {
+    let mut ext_resources = HashMap::new();
+    let mut nodes = Vec::new();
+    let mut current_kind: Option<String> = None;
+    let mut current_attrs = HashMap::new();
+    let mut current_props = HashMap::new();
+
+    let flush_section =
+        |kind: &Option<String>,
+         attrs: &HashMap<String, String>,
+         props: &HashMap<String, String>,
+         ext_resources: &mut HashMap<String, GodotExtResource>,
+         nodes: &mut Vec<GodotNode>| {
+            let Some(kind) = kind.as_deref() else {
+                return;
+            };
+            match kind {
+                "ext_resource" => {
+                    let Some(id) = attrs.get("id").cloned() else {
+                        return;
+                    };
+                    let Some(path) = attrs.get("path").cloned() else {
+                        return;
+                    };
+                    ext_resources.insert(
+                        id,
+                        GodotExtResource {
+                            _resource_type: attrs.get("type").cloned().unwrap_or_default(),
+                            path,
+                        },
+                    );
+                }
+                "node" => {
+                    let Some(name) = attrs.get("name").cloned() else {
+                        return;
+                    };
+                    let Some(node_type) = attrs.get("type").cloned() else {
+                        return;
+                    };
+                    nodes.push(GodotNode {
+                        name,
+                        node_type,
+                        _parent: attrs
+                            .get("parent")
+                            .cloned()
+                            .unwrap_or_else(|| ".".to_string()),
+                        properties: props.clone(),
+                    });
+                }
+                _ => {}
+            }
+        };
+
+    for raw_line in content.lines() {
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() || trimmed.starts_with(';') || trimmed.starts_with('#') {
+            continue;
+        }
+
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            flush_section(
+                &current_kind,
+                &current_attrs,
+                &current_props,
+                &mut ext_resources,
+                &mut nodes,
+            );
+            let (kind, attrs) = parse_godot_section_header(trimmed)?;
+            current_kind = Some(kind);
+            current_attrs = attrs;
+            current_props = HashMap::new();
+            continue;
+        }
+
+        if let Some((key, value)) = trimmed.split_once('=') {
+            current_props.insert(key.trim().to_string(), value.trim().to_string());
+        }
+    }
+
+    flush_section(
+        &current_kind,
+        &current_attrs,
+        &current_props,
+        &mut ext_resources,
+        &mut nodes,
+    );
+
+    Ok(GodotSceneParse {
+        ext_resources,
+        nodes,
+    })
+}
+
+fn parse_godot_section_header(line: &str) -> Result<(String, HashMap<String, String>), LoadError> {
+    let inner = line
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .ok_or_else(|| LoadError(format!("Cabecalho Godot invalido: '{}'.", line)))?;
+    let mut chars = inner.chars().peekable();
+    let mut kind = String::new();
+    while let Some(&ch) = chars.peek() {
+        if ch.is_whitespace() {
+            break;
+        }
+        kind.push(ch);
+        chars.next();
+    }
+
+    while chars.peek().is_some_and(|ch| ch.is_whitespace()) {
+        chars.next();
+    }
+
+    let mut attrs = HashMap::new();
+    while chars.peek().is_some() {
+        let mut key = String::new();
+        while let Some(&ch) = chars.peek() {
+            if ch == '=' || ch.is_whitespace() {
+                break;
+            }
+            key.push(ch);
+            chars.next();
+        }
+        while chars.peek().is_some_and(|ch| ch.is_whitespace()) {
+            chars.next();
+        }
+        if chars.peek() != Some(&'=') {
+            while chars.peek().is_some_and(|ch| ch.is_whitespace()) {
+                chars.next();
+            }
+            if chars.peek().is_none() {
+                break;
+            }
+            continue;
+        }
+        chars.next();
+        while chars.peek().is_some_and(|ch| ch.is_whitespace()) {
+            chars.next();
+        }
+
+        let mut value = String::new();
+        if chars.peek() == Some(&'"') {
+            chars.next();
+            for ch in chars.by_ref() {
+                if ch == '"' {
+                    break;
+                }
+                value.push(ch);
+            }
+        } else {
+            while let Some(&ch) = chars.peek() {
+                if ch.is_whitespace() {
+                    break;
+                }
+                value.push(ch);
+                chars.next();
+            }
+        }
+
+        if !key.trim().is_empty() {
+            attrs.insert(key.trim().to_string(), value.trim().to_string());
+        }
+
+        while chars.peek().is_some_and(|ch| ch.is_whitespace()) {
+            chars.next();
+        }
+    }
+
+    if kind.trim().is_empty() {
+        return Err(LoadError(format!("Cabecalho Godot sem tipo: '{}'.", line)));
+    }
+
+    Ok((kind.trim().to_string(), attrs))
+}
+
+fn resolve_godot_resource_path(root: &Path, value: &str) -> PathBuf {
+    let trimmed = value.trim().trim_matches('"');
+    let relative = trimmed.trim_start_matches("res://");
+    root.join(PathBuf::from(relative.replace('/', "\\")))
+}
+
+fn godot_ext_resource_id(value: &str) -> Option<String> {
+    let marker = "ExtResource(\"";
+    let rest = value.split_once(marker)?.1;
+    let id = rest.split('"').next()?.trim();
+    if id.is_empty() {
+        None
+    } else {
+        Some(id.to_string())
+    }
+}
+
+fn godot_string_value(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if let Some(content) = trimmed
+        .strip_prefix("&\"")
+        .and_then(|value| value.strip_suffix('"'))
+    {
+        return Some(content.to_string());
+    }
+    if let Some(content) = trimmed
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'))
+    {
+        return Some(content.to_string());
+    }
+    None
+}
+
+fn parse_godot_position(value: Option<&String>) -> (i32, i32) {
+    let Some(value) = value else {
+        return (0, 0);
+    };
+    let Some(open) = value.find('(') else {
+        return (0, 0);
+    };
+    let Some(close) = value.rfind(')') else {
+        return (0, 0);
+    };
+    let values = value[open + 1..close]
+        .split(',')
+        .map(|part| part.trim().parse::<f32>().ok())
+        .collect::<Vec<_>>();
+    let x = values
+        .first()
+        .and_then(|value| *value)
+        .unwrap_or(0.0)
+        .round() as i32;
+    let y = values
+        .get(1)
+        .and_then(|value| *value)
+        .unwrap_or(0.0)
+        .round() as i32;
+    (x, y)
+}
+
+fn materialize_external_file(
+    project_dir: &Path,
+    source_root: &Path,
+    source_path: &Path,
+    bucket: &str,
+    prefix: &str,
+    cache: &mut HashMap<PathBuf, String>,
+) -> Result<String, LoadError> {
+    if let Some(destination) = cache.get(source_path) {
+        return Ok(destination.clone());
+    }
+
+    let relative = source_path.strip_prefix(source_root).unwrap_or(source_path);
+    let mut relative_without_ext = relative.to_path_buf();
+    relative_without_ext.set_extension("");
+    let slug = slugify_scene_id(&normalize_relative_path(&relative_without_ext));
+    let extension = source_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "bin".to_string());
+    let destination = format!("assets/{}/{}_{}.{}", bucket, prefix, slug, extension);
+    copy_template_asset(source_path, &project_dir.join(&destination))?;
+    cache.insert(source_path.to_path_buf(), destination.clone());
+    Ok(destination)
+}
+
+fn unique_entity_id(existing: &mut HashSet<String>, seed: &str, fallback_prefix: &str) -> String {
+    let mut base = slugify_scene_id(seed);
+    if base == "scene" {
+        base = fallback_prefix.to_string();
+    }
+    if existing.insert(base.clone()) {
+        return base;
+    }
+
+    let mut index = 2u32;
+    loop {
+        let candidate = format!("{}_{}", base, index);
+        if existing.insert(candidate.clone()) {
+            return candidate;
+        }
+        index = index.saturating_add(1);
+    }
+}
+
 pub fn list_scenes(project_dir: &Path) -> Result<Vec<SceneInfo>, LoadError> {
     let scenes_dir = project_dir.join("scenes");
     if !scenes_dir.exists() {
@@ -1818,6 +4345,8 @@ pub fn stamp_project_template_metadata(
         registry.version,
         entry.source_kind,
         source_path,
+        None,
+        None,
     )
 }
 
@@ -1825,12 +4354,49 @@ pub fn stamp_imported_sgdk_metadata(
     project_dir: &Path,
     source_path: &Path,
 ) -> Result<Project, LoadError> {
-    stamp_project_metadata(
+    stamp_external_import_metadata(
         project_dir,
         "imported_sgdk".to_string(),
         "1.0.0".to_string(),
         "imported_sgdk".to_string(),
+        "sgdk".to_string(),
+        "sgdk_manifest_v1".to_string(),
+        source_path,
+    )
+}
+
+pub fn stamp_imported_mugen_metadata(
+    project_dir: &Path,
+    source_path: &Path,
+) -> Result<Project, LoadError> {
+    stamp_external_import_metadata(
+        project_dir,
+        "imported_mugen".to_string(),
+        "1.0.0".to_string(),
+        "imported_mugen".to_string(),
+        "mugen".to_string(),
+        "mugen_def_air_v1".to_string(),
+        source_path,
+    )
+}
+
+pub fn stamp_external_import_metadata(
+    project_dir: &Path,
+    template_id: String,
+    template_version: String,
+    source_kind: String,
+    source_engine: String,
+    import_profile: String,
+    source_path: &Path,
+) -> Result<Project, LoadError> {
+    stamp_project_metadata(
+        project_dir,
+        template_id,
+        template_version,
+        source_kind,
         source_path.to_string_lossy().to_string(),
+        Some(source_engine),
+        Some(import_profile),
     )
 }
 
@@ -1840,6 +4406,8 @@ fn stamp_project_metadata(
     template_version: String,
     source_kind: String,
     source_path: String,
+    source_engine: Option<String>,
+    import_profile: Option<String>,
 ) -> Result<Project, LoadError> {
     let mut project = load_project(project_dir)?;
     let imported_at_ms = SystemTime::now()
@@ -1852,6 +4420,8 @@ fn stamp_project_metadata(
         template_version,
         source_kind,
         source_path,
+        source_engine,
+        import_profile,
         imported_at_ms,
     });
     save_project(project_dir, &project)?;
@@ -3559,6 +6129,175 @@ mod tests {
         ]
     }
 
+    fn write_test_png(path: &Path, width: u32, height: u32, rgba: [u8; 4]) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create png parent");
+        }
+        image::RgbaImage::from_pixel(width, height, image::Rgba(rgba))
+            .save(path)
+            .expect("write png");
+    }
+
+    fn write_godot_fixture(root: &Path) {
+        fs::create_dir_all(root.join("art")).expect("create godot art dir");
+        fs::create_dir_all(root.join("audio")).expect("create godot audio dir");
+        write_test_png(&root.join("art").join("hero.png"), 24, 32, [96, 220, 180, 255]);
+        fs::write(root.join("audio").join("jump.wav"), minimal_wav_bytes())
+            .expect("write godot wav");
+        fs::write(
+            root.join("project.godot"),
+            [
+                "[application]",
+                "config/name=\"Godot Fixture\"",
+                "run/main_scene=\"res://main.tscn\"",
+            ]
+            .join("\n"),
+        )
+        .expect("write project.godot");
+        fs::write(
+            root.join("main.tscn"),
+            [
+                "[gd_scene load_steps=3 format=3]",
+                "[ext_resource type=\"Texture2D\" path=\"res://art/hero.png\" id=\"1\"]",
+                "[ext_resource type=\"AudioStream\" path=\"res://audio/jump.wav\" id=\"2\"]",
+                "[node name=\"Main\" type=\"Node2D\"]",
+                "[node name=\"Hero\" type=\"Sprite2D\" parent=\".\"]",
+                "position = Vector2(24, 40)",
+                "texture = ExtResource(\"1\")",
+                "[node name=\"Camera\" type=\"Camera2D\" parent=\".\"]",
+                "position = Vector2(8, 12)",
+                "[node name=\"Jump\" type=\"AudioStreamPlayer2D\" parent=\".\"]",
+                "stream = ExtResource(\"2\")",
+                "[node name=\"LegacyAnim\" type=\"AnimatedSprite2D\" parent=\".\"]",
+                "position = Vector2(0, 0)",
+            ]
+            .join("\n"),
+        )
+        .expect("write main.tscn");
+    }
+
+    fn write_mugen_character_fixture(root: &Path) {
+        fs::create_dir_all(root.join("work").join("hero_sff").join("sd"))
+            .expect("create mugen character work dir");
+        fs::write(
+            root.join("hero.def"),
+            [
+                "[Info]",
+                "name = \"Hero MUGEN\"",
+                "",
+                "[Files]",
+                "anim = hero.air",
+                "sprite = hero.sff",
+                "",
+            ]
+            .join("\n"),
+        )
+        .expect("write mugen character def");
+        fs::write(
+            root.join("hero.air"),
+            [
+                "[Begin Action 0]",
+                "Clsn2Default: 1",
+                "Clsn2[0] = -8, -16, 8, 0",
+                "0, 0, 0, 0, 4",
+                "Loopstart",
+                "0, 0, 0, 0, 4",
+            ]
+            .join("\n"),
+        )
+        .expect("write mugen air");
+        write_test_png(
+            &root.join("work").join("hero_sff").join("sd").join("0-0.png"),
+            32,
+            48,
+            [240, 120, 32, 255],
+        );
+    }
+
+    fn write_mugen_stage_fixture(root: &Path) {
+        fs::create_dir_all(root).expect("create mugen stage dir");
+        fs::write(
+            root.join("stage.def"),
+            [
+                "[Info]",
+                "name = \"Downtown Stage\"",
+                "",
+                "[BGdef]",
+                "spr = stage.sff",
+                "",
+                "[BG 0]",
+                "type = normal",
+                "spriteno = 0,0",
+                "start = 12, 24",
+                "",
+                "[Music]",
+                "bgmusic = theme.mp3",
+            ]
+            .join("\n"),
+        )
+        .expect("write mugen stage def");
+        write_test_png(&root.join("stage.png"), 160, 96, [32, 96, 200, 255]);
+        fs::write(root.join("theme.mp3"), b"fake-mp3").expect("write mugen stage music");
+    }
+
+    fn write_mugen_screenpack_fixture(root: &Path) {
+        let data_root = root.join("data");
+        fs::create_dir_all(data_root.join("work").join("system_sff").join("sd"))
+            .expect("create mugen screenpack work dir");
+        fs::write(
+            data_root.join("system.def"),
+            [
+                "[Info]",
+                "name = \"Retro Screenpack\"",
+                "",
+                "[Files]",
+                "spr = system.sff",
+                "",
+                "[Music]",
+                "title.bgm = title.mp3",
+                "select.bgm = select.mp3",
+                "",
+                "[TitleBGdef]",
+                "",
+                "[TitleBG 0]",
+                "type = normal",
+                "spriteno = 0,0",
+                "start = 0,0",
+                "",
+                "[SelectBGdef]",
+                "",
+                "[SelectBG 0]",
+                "type = normal",
+                "spriteno = 1,0",
+                "start = 4,8",
+            ]
+            .join("\n"),
+        )
+        .expect("write mugen system.def");
+        write_test_png(
+            &data_root
+                .join("work")
+                .join("system_sff")
+                .join("sd")
+                .join("0-0.png"),
+            128,
+            64,
+            [128, 40, 200, 255],
+        );
+        write_test_png(
+            &data_root
+                .join("work")
+                .join("system_sff")
+                .join("sd")
+                .join("1-0.png"),
+            128,
+            64,
+            [40, 180, 200, 255],
+        );
+        fs::write(data_root.join("title.mp3"), b"title-mp3").expect("write title bgm");
+        fs::write(data_root.join("select.mp3"), b"select-mp3").expect("write select bgm");
+    }
+
     #[test]
     fn canonical_project_matches_megadrive_schema() {
         let project = canonical_project("Dummy", "megadrive").expect("canonical project");
@@ -3613,6 +6352,37 @@ mod tests {
                 .expect("starter template")
                 .available
         );
+    }
+
+    #[test]
+    fn list_external_import_profiles_exposes_support_matrix() {
+        let profiles = list_external_import_profiles();
+
+        assert!(profiles.iter().any(|profile| {
+            profile.id == "sgdk"
+                && profile.importable
+                && profile.support_status == "Experimental"
+        }));
+        assert!(profiles.iter().any(|profile| {
+            profile.id == "mugen"
+                && profile.importable
+                && profile.source_engine == "mugen"
+        }));
+        assert!(profiles.iter().any(|profile| {
+            profile.id == "ikemen_go"
+                && profile.importable
+                && profile.source_engine == "ikemen_go"
+        }));
+        assert!(profiles.iter().any(|profile| {
+            profile.id == "godot"
+                && profile.importable
+                && profile.supported_levels == vec!["L1", "L2", "L3"]
+        }));
+        assert!(profiles.iter().any(|profile| {
+            profile.id == "gamemaker"
+                && !profile.importable
+                && profile.support_status == "Parcial"
+        }));
     }
 
     #[test]
@@ -3983,6 +6753,190 @@ mod tests {
 
         let _ = fs::remove_dir_all(donor_dir);
         let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn import_mugen_project_builds_native_scenes_from_character_stage_and_screenpack_roots() {
+        let donor_root = temp_dir("mugen-import-root");
+        let project_dir = temp_dir("mugen-import-project");
+        create_project_skeleton(&project_dir, "Imported MUGEN", "megadrive")
+            .expect("create project skeleton");
+
+        write_mugen_character_fixture(&donor_root.join("Hero"));
+        write_mugen_stage_fixture(&donor_root.join("Downtown"));
+        write_mugen_screenpack_fixture(&donor_root.join("Retro"));
+
+        let report = import_mugen_project(&project_dir, &donor_root).expect("import mugen project");
+        let scenes = list_scenes(&project_dir).expect("list imported scenes");
+
+        assert_eq!(report.imported_scenes, 4);
+        assert!(report.skipped_sources.is_empty());
+        assert_eq!(scenes.len(), 4);
+
+        let loaded_scenes = scenes
+            .iter()
+            .map(|scene| load_scene(&project_dir, &scene.path).expect("load imported scene"))
+            .collect::<Vec<_>>();
+
+        let character_scene = loaded_scenes
+            .iter()
+            .find(|scene| scene.display_name.as_deref() == Some("Hero MUGEN"))
+            .expect("character scene");
+        let character = character_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "heromugen")
+            .expect("hero entity");
+        assert!(character
+            .components
+            .sprite
+            .as_ref()
+            .is_some_and(|sprite| sprite.asset.ends_with("mugen_heromugen_atlas.png")));
+        assert!(character
+            .components
+            .logic
+            .as_ref()
+            .and_then(|logic| logic.graph.as_deref())
+            .is_some_and(|graph| graph.contains("\"sprite_anim\"")));
+        assert!(character
+            .components
+            .collision
+            .as_ref()
+            .is_some_and(|collision| collision.layer.as_deref() == Some("player")));
+
+        let stage_scene = loaded_scenes
+            .iter()
+            .find(|scene| scene.display_name.as_deref() == Some("Downtown Stage"))
+            .expect("stage scene");
+        assert!(stage_scene.entities.iter().any(|entity| entity
+            .components
+            .sprite
+            .as_ref()
+            .is_some_and(|sprite| sprite.asset.ends_with("downtownstage_bg.png"))));
+        assert!(stage_scene.entities.iter().any(|entity| entity
+            .components
+            .audio
+            .as_ref()
+            .is_some_and(|audio| audio.bgm.as_deref() == Some("assets/audio/downtownstage_bgm.mp3"))));
+
+        let title_scene = loaded_scenes
+            .iter()
+            .find(|scene| scene.display_name.as_deref() == Some("Retro Screenpack Title"))
+            .expect("title scene");
+        assert!(title_scene.entities.iter().any(|entity| entity
+            .components
+            .sprite
+            .as_ref()
+            .is_some_and(|sprite| sprite.asset.contains("_title_"))));
+
+        let select_scene = loaded_scenes
+            .iter()
+            .find(|scene| scene.display_name.as_deref() == Some("Retro Screenpack Select"))
+            .expect("select scene");
+        assert!(select_scene.entities.iter().any(|entity| entity
+            .components
+            .sprite
+            .as_ref()
+            .is_some_and(|sprite| sprite.asset.contains("_select_"))));
+
+        let _ = fs::remove_dir_all(project_dir);
+        let _ = fs::remove_dir_all(donor_root);
+    }
+
+    #[test]
+    fn import_godot_project_creates_native_scene_with_sprite_audio_camera_and_skips() {
+        let donor_root = temp_dir("godot-import-root");
+        let project_dir = temp_dir("godot-import-project");
+        create_project_skeleton(&project_dir, "Imported Godot", "megadrive")
+            .expect("create project skeleton");
+        write_godot_fixture(&donor_root);
+
+        let report = import_godot_project(&project_dir, &donor_root).expect("import godot project");
+        let scene = load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load imported godot scene");
+
+        assert_eq!(report.imported_scenes, 1);
+        assert!(report
+            .skipped_sources
+            .iter()
+            .any(|entry| entry.contains("AnimatedSprite2D")));
+        assert!(scene.entities.iter().any(|entity| {
+            entity
+                .components
+                .sprite
+                .as_ref()
+                .is_some_and(|sprite| sprite.asset == "assets/sprites/godot_art_hero.png")
+        }));
+        assert!(scene.entities.iter().any(|entity| {
+            entity
+                .components
+                .audio
+                .as_ref()
+                .is_some_and(|audio| {
+                    audio
+                        .sfx
+                        .values()
+                        .any(|asset| asset == "assets/audio/godot_audio_jump.wav")
+                })
+        }));
+        assert!(scene.entities.iter().any(|entity| {
+            entity.components.camera.as_ref().is_some_and(|camera| {
+                camera
+                    .follow_entity
+                    .as_deref()
+                    .is_some_and(|target| target == "hero")
+            })
+        }));
+        assert!(project_dir
+            .join("assets")
+            .join("sprites")
+            .join("godot_art_hero.png")
+            .is_file());
+        assert!(project_dir
+            .join("assets")
+            .join("audio")
+            .join("godot_audio_jump.wav")
+            .is_file());
+
+        let project = stamp_imported_external_profile_metadata(&project_dir, "godot", &donor_root)
+            .expect("stamp godot metadata");
+        let metadata = project.template_metadata.expect("template metadata");
+        assert_eq!(metadata.source_kind, "imported_godot");
+        assert_eq!(metadata.source_engine.as_deref(), Some("godot"));
+        assert_eq!(metadata.import_profile.as_deref(), Some("godot_tscn_v1"));
+
+        let _ = fs::remove_dir_all(project_dir);
+        let _ = fs::remove_dir_all(donor_root);
+    }
+
+    #[test]
+    #[ignore = "host-local validation against repo sample roots"]
+    fn import_mugen_project_supports_repo_sample_roots_when_present() {
+        let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("workspace root")
+            .to_path_buf();
+        let sample_roots = [
+            repo_root.join("data").join("character air"),
+            repo_root.join("data").join("background air"),
+            repo_root.join("data").join("screenpack air"),
+        ];
+
+        for sample_root in sample_roots {
+            if !sample_root.is_dir() {
+                eprintln!("[mugen-sample-skip] {}", sample_root.display());
+                continue;
+            }
+
+            let project_dir = temp_dir("mugen-sample-project");
+            create_project_skeleton(&project_dir, "Repo Sample MUGEN", "megadrive")
+                .expect("create sample project skeleton");
+
+            let report =
+                import_mugen_project(&project_dir, &sample_root).expect("import repo sample root");
+            assert!(report.imported_scenes > 0, "{}", sample_root.display());
+
+            let _ = fs::remove_dir_all(project_dir);
+        }
     }
 
     #[test]
@@ -4741,6 +7695,9 @@ mod tests {
                                 frames: vec![0],
                                 fps: 6,
                                 looping: true,
+                                frame_durations: None,
+                                loop_start: None,
+                                mugen_frames: None,
                             },
                         ),
                         (
@@ -4749,6 +7706,9 @@ mod tests {
                                 frames: vec![1, 2, 3],
                                 fps: 12,
                                 looping: true,
+                                frame_durations: None,
+                                loop_start: None,
+                                mugen_frames: None,
                             },
                         ),
                     ]),
@@ -4777,6 +7737,9 @@ mod tests {
                 frames: vec![0],
                 fps: 6,
                 looping: true,
+                frame_durations: None,
+                loop_start: None,
+                mugen_frames: None,
             })
         );
         assert_eq!(
@@ -4785,6 +7748,9 @@ mod tests {
                 frames: vec![1, 2, 3],
                 fps: 12,
                 looping: true,
+                frame_durations: None,
+                loop_start: None,
+                mugen_frames: None,
             })
         );
 

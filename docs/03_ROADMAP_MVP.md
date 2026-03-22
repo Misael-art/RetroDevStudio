@@ -1,7 +1,7 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-03-21
-**Fase ativa real:** Release candidate / beta testing do desktop Tauri, com baseline automatizada restaurada, persistencia atomica Windows endurecida, schema UGDM migrado explicitamente ate `1.6.0`, galeria de templates alinhada com `platformer_gm`, semantica `prefab` vs `display_name` separada, importacao SGDK generica ainda `Experimental`, UI novamente coerente com os badges/documentos de maturidade, smoke desktop completo `Build -> ROM -> Run` reproduzido novamente no host local durante a sprint de consolidacao do Game View, ArtStudio institucionalizado na baseline do workspace como superficie `Experimental`, com validacao minima de dados, ingestao backend Rust, `suggested_frames` alinhados, importacao canonica para `assets/sprites` e pipeline basico validado localmente ate `resources.res/build`, RetroFX com editor visual-first de parallax/raster ainda `Experimental`, shell principal reorganizado como workspace adaptativo com rail lateral, painel contextual, presets de layout, focus mode e console colapsavel por padrao, e o Project Manager agora capaz de criar projetos com pasta base automatica, expor a arvore host SGDK em modo read-only e adotar projetos SGDK legados via overlay `rds/` com delegacao de build ao Makefile do host, sem tocar no codigo original. A repeticao em baseline commitada continua obrigatoria antes de qualquer claim institucional definitiva.
+**Ultima revisao canonica:** 2026-03-22
+**Fase ativa real:** Release candidate / beta testing do desktop Tauri, com baseline automatizada restaurada, persistencia atomica Windows endurecida, schema UGDM migrado explicitamente ate `1.6.0`, galeria de templates alinhada com `platformer_gm`, semantica `prefab` vs `display_name` separada, importacao SGDK generica ainda `Experimental`, importacao MUGEN agora entrando no fluxo canonico como superficie `Experimental` para personagem/stage/screenpack (com assets reais e sem conversao integral de `CMD/CNS` nesta wave), nova camada comum de importadores externos iniciada com registry de perfis, `Ikemen GO` tratado como extensao do eixo MUGEN e `Godot 2D` entrando como primeiro adapter adicional `Experimental` para `assets + cena + audio` sem portar scripts, UI novamente coerente com os badges/documentos de maturidade, smoke desktop completo `Build -> ROM -> Run` reproduzido novamente no host local durante a sprint de consolidacao do Game View, ArtStudio institucionalizado na baseline do workspace como superficie `Experimental`, com validacao minima de dados, ingestao backend Rust, `suggested_frames` alinhados, importacao canonica para `assets/sprites` e pipeline basico validado localmente ate `resources.res/build`, RetroFX com editor visual-first de parallax/raster ainda `Experimental`, shell principal reorganizado como workspace adaptativo com rail lateral, painel contextual, presets de layout, focus mode e console colapsavel por padrao, e o Project Manager agora capaz de criar projetos com pasta base automatica, expor a arvore host SGDK em modo read-only e adotar projetos SGDK legados via overlay `rds/` com delegacao de build ao Makefile do host, sem tocar no codigo original. A repeticao em baseline commitada continua obrigatoria antes de qualquer claim institucional definitiva.
 
 > **DIRETRIZ PARA AGENTES DE IA**
 > Este roadmap precisa refletir estado real do codigo, nao claims historicas.
@@ -47,6 +47,9 @@
 - O `ViewportPanel` agora renderiza preview real de sprite/tilemap via asset URL, com fallback para caixa colorida.
 - O `NodeGraphEditor` agora mostra labels amigaveis em PT-BR e paleta agrupada para leigos, sem alterar os IDs tecnicos serializados.
 - O backend agora faz parse de `resources.res` e importa projetos SGDK externos sanitizando apenas assets suportados, ignorando `VGM`, ROMs, `out/`, `boot/`, codigo C e headers.
+- O backend agora importa projetos MUGEN em modo `Experimental`, cobrindo personagem/stage/screenpack por `DEF`/`AIR`, atlas visual, colisao MUGEN basica e fallback para sprites extraidos em `work/*_sff` quando existirem.
+- O backend agora expoe uma matriz canonica de importadores externos e um comando generico `import_external_project`, permitindo que o wizard trate SGDK, MUGEN, Ikemen GO e Godot 2D sob o mesmo contrato de proveniencia.
+- O backend agora importa projetos Godot 2D em modo `Experimental`, cobrindo `project.godot` + `.tscn`, `Sprite2D`, `Camera2D`, `AudioStreamPlayer`/`AudioStreamPlayer2D`, assets reais, cena nativa `.rds` e metadata `source_engine/import_profile`, sem prometer conversao de `GDScript`, `AnimatedSprite2D` ou `TileMap` nesta wave.
 - Deep Profiler destravado na UI e conectado ao backend real, agora com deteccao adaptativa de SAT por scoring de candidatos em vez de offsets fixos e aviso heuristico funcional sem badge `Experimental`.
 - Asset Extractor destravado na UI e conectado ao backend real, agora com modos `auto`/`2bpp`/`4bpp`, notice/badge `Experimental` explicitos e autodeteccao heuristica para tiles 2bpp, permanecendo `Experimental` ate validar extracao ponta a ponta com ROM real.
 - RetroFX agora persiste configuracao de parallax/raster no scene JSON, o designer foi reabilitado como editor visual-first com lista de camadas, preview animado, controles pedagogicos e persistencia segura na cena fonte, e o pipeline SGDK/SNES continua emitindo scroll/parallax real; a superficie permanece `Experimental` ate validacao com ROM/cenas reais.
@@ -86,6 +89,7 @@
 ### Ainda em hardening
 - Runtime real de auto-update implementado em codigo: `tauri-plugin-updater = "2"` adicionado ao `Cargo.toml` e plugin registrado em `lib.rs`. Sem UI de update ainda — endpoint/pubkey permanecem placeholder.
 - Repeticao institucional do bundle MSI, do smoke desktop e do fluxo oficial upstream em Windows quando build, emulacao, onboarding ou packaging forem alterados.
+- Validacao Rust completa do importador MUGEN neste host apos o bloqueio AppLocker sobre a harness recompilada; por enquanto, a rodada ficou com `cargo test --lib --no-run` verde, `cargo clippy` verde e cobertura frontend verde, mas sem claim de certificacao Rust final.
 - Este host continua sujeito a diagnosticos ocasionais de WebDriver em cenarios locais (`DevToolsActivePort` / `chrome not reachable` ou policies de `spawn`), mas o smoke desktop canonico `Build -> ROM -> Run` voltou a passar nesta sprint de consolidacao do Game View.
 - Decisao final de governanca do workflow desktop dedicado (`push`/`pull_request` path-filtered, `workflow_dispatch`, `workflow_call` ou gate protegido).
 - O `ArtStudio` permanece `Experimental`: persistencia/schema, ingestao backend, `suggested_frames`, importacao canonica e pipeline basico ate `resources.res/build` ja estao validados localmente, mas ainda falta repeticao institucional com toolchain oficial e prova adicional da animacao autorada chegando ao runtime.
@@ -185,6 +189,7 @@
 - [x] Onboarding de primeiro uso com template funcional.
 - [x] Configuracao placeholder de updater com endpoint e pubkey placeholder.
 - [x] Runtime real de auto-update: `tauri-plugin-updater = "2"` integrado (`Cargo.toml` + `lib.rs`). Endpoint/pubkey ainda placeholder, sem UI de update.
+- **Decisao MVP (2026-03-22):** Auto-updater completo (endpoint real, UI de update, pubkey de producao) **deferido para pos-MVP**. O crate `tauri-plugin-updater` permanece no `Cargo.toml` como placeholder funcional, mas nenhum trabalho adicional sera investido nesta area ate o MVP ser fechado e a dependencia ser aprovada formalmente sob a politica de stack (`docs/02_TECH_STACK.md`).
 
 ---
 
@@ -213,6 +218,20 @@
 - Zoom viewport (PROMPT 6) - concluida: Ctrl+Scroll, +/-, Ctrl+0, 0.25x-4.0x, canvas CSS scaling
 - Onboarding SGDK (PROMPT 7) - concluida: toast dismissivel para projetos importados, persistido em localStorage
 - Camera errors (PROMPT 8) - concluida: guards para 0×0 sprites em ambos os profiles
+
+## IMPORT MUGEN (ESTADO REAL)
+
+- Fluxo canonico de importacao - implementado em codigo: `import_mugen_project` no backend + comando Tauri + botao dedicado no wizard
+- Cobertura funcional atual - experimental: personagem, stage e screenpack com assets reais, `AIR`/animacao, audio conservador e fallback para `work/*_sff`
+- Fora de escopo desta wave - explicito: conversao total de `CMD/CNS` e paridade completa de gameplay com engines MUGEN/SGDK de luta
+
+## IMPORTADORES EXTERNOS (ESTADO REAL)
+
+- Registry comum de adapters - implementado em codigo: `list_external_import_profiles` expoe perfis com `support_status`, niveis `L1-L4`, target recomendado e importabilidade real
+- Wizard/IPC generico - implementado em codigo: `Importar Externo` usa `import_external_project` como rota unica para adapters suportados, sem proliferar fluxos paralelos na UI
+- `Ikemen GO` - experimental: tratado como extensao do dominio MUGEN, reutilizando o adapter conservador de `DEF`/`AIR` sem abrir um pipeline separado
+- `Godot 2D` - experimental: importa `Sprite2D`, `Camera2D`, `AudioStreamPlayer`/`AudioStreamPlayer2D`, assets reais e metadata de proveniencia; `AnimatedSprite2D`, `TileMap`, `TileMapLayer` e `GDScript` seguem fora de escopo nesta wave
+- `GameMaker Studio 2`, `Construct`, `RPG Maker`, `Unity 2D` e `Paper2D bridge` - presentes apenas na matriz de suporte como planejamento honesto; ainda nao possuem adapter canonico importavel
 
 ## ONDA 1 — PAINT/ERASE + PALETA CONTEXTUAL (ESTADO REAL)
 

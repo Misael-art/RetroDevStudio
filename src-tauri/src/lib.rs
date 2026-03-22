@@ -24,12 +24,17 @@ use core::editor_validation::{
 use core::project_mgr::{
     append_patch_audit_entry, create_project_skeleton, create_scene as create_project_scene,
     discover_project_rds, import_legacy_sgdk_project as wrap_legacy_sgdk_project,
+    import_external_project as import_external_scene,
+    import_mugen_project as import_mugen_scene,
     import_sgdk_project as import_sgdk_scene,
+    list_external_import_profiles as list_registered_external_import_profiles,
     list_project_templates as list_registered_project_templates,
     list_scenes as list_project_scenes, load_legacy_sgdk_index, load_project, load_scene,
     resolve_prefabs, save_scene, seed_onboarding_template, seed_project_template, set_entry_scene,
+    stamp_imported_external_profile_metadata, stamp_imported_mugen_metadata,
     stamp_imported_sgdk_metadata, stamp_project_template_metadata, sync_external_graph_refs,
-    update_project_target, LegacySgdkIndex, ProjectTemplateSummary, SceneInfo,
+    update_project_target, ExternalImportProfileSummary, LegacySgdkIndex, ProjectTemplateSummary,
+    SceneInfo,
 };
 use emulator::frame_buffer::framebuffer_to_rgba;
 use emulator::libretro_ffi::{EmulatorCore, JoypadState, ReplayCapture};
@@ -1822,6 +1827,107 @@ fn import_sgdk_project_at_base_dir(
     })
 }
 
+fn import_mugen_project_at_base_dir(
+    base_dir: &Path,
+    project_name: &str,
+    mugen_path: &Path,
+) -> Result<OpenProjectResult, String> {
+    let safe_name = safe_project_dir_name(project_name);
+    let project_dir = base_dir.join(&safe_name);
+
+    ensure_project_dir_available(&project_dir)?;
+
+    let project = create_project_skeleton(&project_dir, project_name, "megadrive")
+        .map_err(|error| error.to_string())?;
+    let report = import_mugen_scene(&project_dir, mugen_path).map_err(|error| error.to_string())?;
+    stamp_imported_mugen_metadata(&project_dir, mugen_path).map_err(|error| error.to_string())?;
+    let primary_scene_label = report
+        .primary_scene
+        .display_name
+        .clone()
+        .unwrap_or_else(|| report.primary_scene.scene_id.clone());
+
+    let notice = if report.skipped_sources.is_empty() {
+        Some(format!(
+            "Importacao MUGEN experimental concluida com {} cena(s) nativa(s). Cena inicial: {}.",
+            report.imported_scenes, primary_scene_label
+        ))
+    } else {
+        Some(format!(
+            "Importacao MUGEN experimental concluiu {} cena(s); cena inicial: {}; {} origem(ns) foram ignorada(s): {}",
+            report.imported_scenes,
+            primary_scene_label,
+            report.skipped_sources.len(),
+            report.skipped_sources.join(" | ")
+        ))
+    };
+
+    Ok(OpenProjectResult {
+        selected: true,
+        path: project_dir.to_string_lossy().to_string(),
+        name: project.name,
+        base_dir: Some(base_dir.to_string_lossy().to_string()),
+        notice,
+    })
+}
+
+fn external_import_notice(
+    profile: &ExternalImportProfileSummary,
+    report: &core::project_mgr::ExternalImportReport,
+) -> Option<String> {
+    let primary_scene_label = report
+        .primary_scene
+        .display_name
+        .clone()
+        .unwrap_or_else(|| report.primary_scene.scene_id.clone());
+    if report.skipped_sources.is_empty() {
+        Some(format!(
+            "Importacao {} experimental concluida com {} cena(s) nativa(s). Cena inicial: {}.",
+            profile.name, report.imported_scenes, primary_scene_label
+        ))
+    } else {
+        Some(format!(
+            "Importacao {} experimental concluiu {} cena(s); cena inicial: {}; {} item(ns) ficaram fora do escopo desta wave: {}",
+            profile.name,
+            report.imported_scenes,
+            primary_scene_label,
+            report.skipped_sources.len(),
+            report.skipped_sources.join(" | ")
+        ))
+    }
+}
+
+fn import_external_project_at_base_dir(
+    base_dir: &Path,
+    project_name: &str,
+    profile_id: &str,
+    project_path: &Path,
+) -> Result<OpenProjectResult, String> {
+    let safe_name = safe_project_dir_name(project_name);
+    let project_dir = base_dir.join(&safe_name);
+    ensure_project_dir_available(&project_dir)?;
+
+    let project = create_project_skeleton(&project_dir, project_name, "megadrive")
+        .map_err(|error| error.to_string())?;
+    let report =
+        import_external_scene(&project_dir, profile_id, project_path).map_err(|error| error.to_string())?;
+    stamp_imported_external_profile_metadata(&project_dir, profile_id, project_path)
+        .map_err(|error| error.to_string())?;
+
+    let profile = list_registered_external_import_profiles()
+        .into_iter()
+        .find(|candidate| candidate.id == profile_id)
+        .ok_or_else(|| format!("Perfil externo '{}' nao encontrado.", profile_id))?;
+
+    Ok(OpenProjectResult {
+        selected: true,
+        path: project_dir.to_string_lossy().to_string(),
+        name: project.name,
+        base_dir: Some(base_dir.to_string_lossy().to_string()),
+        notice: external_import_notice(&profile, &report),
+    })
+}
+
 fn resolve_or_wrap_project_dir(
     selected_dir: &Path,
     project_name_override: Option<&str>,
@@ -1924,6 +2030,11 @@ fn list_project_templates() -> Result<Vec<ProjectTemplateSummary>, String> {
 }
 
 #[tauri::command]
+fn list_external_import_profiles() -> Vec<ExternalImportProfileSummary> {
+    list_registered_external_import_profiles()
+}
+
+#[tauri::command]
 fn create_project_from_template(
     project_name: String,
     target: String,
@@ -1958,6 +2069,34 @@ fn create_project_from_template(
 }
 
 #[tauri::command]
+fn import_external_project(
+    project_name: String,
+    base_dir: String,
+    profile_id: String,
+    project_path: String,
+) -> Result<OpenProjectResult, String> {
+    let trimmed_name = project_name.trim();
+    let trimmed_base_dir = base_dir.trim();
+    let trimmed_profile_id = profile_id.trim();
+    let trimmed_project_path = project_path.trim();
+
+    if trimmed_name.is_empty() || trimmed_profile_id.is_empty() || trimmed_project_path.is_empty() {
+        return Err("Nome do projeto, perfil de importacao e pasta externa sao obrigatorios.".into());
+    }
+
+    let resolved_base_dir = resolve_project_base_dir(
+        (!trimmed_base_dir.is_empty()).then(|| Path::new(trimmed_base_dir)),
+    )?;
+    let result = import_external_project_at_base_dir(
+        &resolved_base_dir.path,
+        trimmed_name,
+        trimmed_profile_id,
+        Path::new(trimmed_project_path),
+    )?;
+    Ok(attach_base_dir_notice(result, resolved_base_dir))
+}
+
+#[tauri::command]
 fn import_sgdk_project(
     project_name: String,
     base_dir: String,
@@ -1978,6 +2117,31 @@ fn import_sgdk_project(
         &resolved_base_dir.path,
         trimmed_name,
         Path::new(trimmed_sgdk_path),
+    )?;
+    Ok(attach_base_dir_notice(result, resolved_base_dir))
+}
+
+#[tauri::command]
+fn import_mugen_project(
+    project_name: String,
+    base_dir: String,
+    mugen_path: String,
+) -> Result<OpenProjectResult, String> {
+    let trimmed_name = project_name.trim();
+    let trimmed_base_dir = base_dir.trim();
+    let trimmed_mugen_path = mugen_path.trim();
+
+    if trimmed_name.is_empty() || trimmed_mugen_path.is_empty() {
+        return Err("Nome do projeto e caminho MUGEN sao obrigatorios.".into());
+    }
+
+    let resolved_base_dir = resolve_project_base_dir(
+        (!trimmed_base_dir.is_empty()).then(|| Path::new(trimmed_base_dir)),
+    )?;
+    let result = import_mugen_project_at_base_dir(
+        &resolved_base_dir.path,
+        trimmed_name,
+        Path::new(trimmed_mugen_path),
     )?;
     Ok(attach_base_dir_notice(result, resolved_base_dir))
 }
@@ -2057,8 +2221,11 @@ pub fn run() {
             create_onboarding_project,
             suggest_project_base_dir,
             list_project_templates,
+            list_external_import_profiles,
             create_project_from_template,
+            import_external_project,
             import_sgdk_project,
+            import_mugen_project,
             import_legacy_sgdk_project,
             // Fase 4: Tools
             patch_create_ips,
@@ -2209,9 +2376,107 @@ mod tests {
         ]
     }
 
+    fn write_test_png(path: &Path, width: u32, height: u32, rgba: [u8; 4]) {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("create png parent");
+        }
+        image::RgbaImage::from_pixel(width, height, image::Rgba(rgba))
+            .save(path)
+            .expect("write png");
+    }
+
+    fn write_godot_fixture(root: &Path) {
+        fs::create_dir_all(root.join("art")).expect("create godot art dir");
+        fs::create_dir_all(root.join("audio")).expect("create godot audio dir");
+        write_test_png(&root.join("art").join("hero.png"), 24, 32, [96, 220, 180, 255]);
+        fs::write(root.join("audio").join("jump.wav"), minimal_wav_bytes())
+            .expect("write godot wav");
+        fs::write(
+            root.join("project.godot"),
+            [
+                "[application]",
+                "config/name=\"Godot Fixture\"",
+                "run/main_scene=\"res://main.tscn\"",
+            ]
+            .join("\n"),
+        )
+        .expect("write project.godot");
+        fs::write(
+            root.join("main.tscn"),
+            [
+                "[gd_scene load_steps=3 format=3]",
+                "[ext_resource type=\"Texture2D\" path=\"res://art/hero.png\" id=\"1\"]",
+                "[ext_resource type=\"AudioStream\" path=\"res://audio/jump.wav\" id=\"2\"]",
+                "[node name=\"Main\" type=\"Node2D\"]",
+                "[node name=\"Hero\" type=\"Sprite2D\" parent=\".\"]",
+                "position = Vector2(24, 40)",
+                "texture = ExtResource(\"1\")",
+                "[node name=\"Camera\" type=\"Camera2D\" parent=\".\"]",
+                "position = Vector2(8, 12)",
+                "[node name=\"Jump\" type=\"AudioStreamPlayer2D\" parent=\".\"]",
+                "stream = ExtResource(\"2\")",
+            ]
+            .join("\n"),
+        )
+        .expect("write main.tscn");
+    }
+
+    fn mock_core_build_dir(dir: &Path) -> PathBuf {
+        let base_dir = std::env::var_os("RDS_TEST_CORE_DIR")
+            .or_else(|| std::env::var_os("CARGO_TARGET_DIR"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| dir.to_path_buf());
+        let suffix = dir
+            .file_name()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.is_empty())
+            .unwrap_or("default");
+        let output_dir = base_dir.join("mock-core-fixtures").join(suffix);
+        fs::create_dir_all(&output_dir).expect("failed to create mock core output dir");
+        output_dir
+    }
+
+    fn write_mugen_character_fixture(root: &Path) {
+        fs::create_dir_all(root.join("work").join("hero_sff").join("sd"))
+            .expect("create mugen character work dir");
+        fs::write(
+            root.join("hero.def"),
+            [
+                "[Info]",
+                "name = \"Hero MUGEN\"",
+                "",
+                "[Files]",
+                "anim = hero.air",
+                "sprite = hero.sff",
+            ]
+            .join("\n"),
+        )
+        .expect("write mugen def");
+        fs::write(
+            root.join("hero.air"),
+            [
+                "[Begin Action 0]",
+                "Clsn2Default: 1",
+                "Clsn2[0] = -8, -16, 8, 0",
+                "0, 0, 0, 0, 4",
+                "Loopstart",
+                "0, 0, 0, 0, 4",
+            ]
+            .join("\n"),
+        )
+        .expect("write mugen air");
+        write_test_png(
+            &root.join("work").join("hero_sff").join("sd").join("0-0.png"),
+            32,
+            48,
+            [220, 96, 48, 255],
+        );
+    }
+
     fn compile_mock_core(dir: &Path) -> PathBuf {
-        let source_path = dir.join("mock_core.rs");
-        let output_path = dir.join(if cfg!(target_os = "windows") {
+        let build_dir = mock_core_build_dir(dir);
+        let source_path = build_dir.join("mock_core.rs");
+        let output_path = build_dir.join(if cfg!(target_os = "windows") {
             "mock_core.dll"
         } else if cfg!(target_os = "macos") {
             "mock_core.dylib"
@@ -3243,6 +3508,37 @@ pub extern "C" fn retro_run() {
     }
 
     #[test]
+    fn list_external_import_profiles_returns_support_matrix() {
+        let profiles = list_external_import_profiles();
+
+        assert!(profiles.iter().any(|profile| {
+            profile.id == "sgdk"
+                && profile.importable
+                && profile.support_status == "Experimental"
+        }));
+        assert!(profiles.iter().any(|profile| {
+            profile.id == "mugen"
+                && profile.importable
+                && profile.source_engine == "mugen"
+        }));
+        assert!(profiles.iter().any(|profile| {
+            profile.id == "ikemen_go"
+                && profile.importable
+                && profile.source_engine == "ikemen_go"
+        }));
+        assert!(profiles.iter().any(|profile| {
+            profile.id == "godot"
+                && profile.importable
+                && profile.supported_levels == vec!["L1", "L2", "L3"]
+        }));
+        assert!(profiles.iter().any(|profile| {
+            profile.id == "gamemaker"
+                && !profile.importable
+                && profile.support_status == "Parcial"
+        }));
+    }
+
+    #[test]
     fn create_project_from_template_supports_empty_starter_platformer_and_generic_external_seed() {
         let base_dir = temp_dir("template-create");
         let platformer_donor_dir = temp_dir("template-donor-platformer");
@@ -3540,6 +3836,86 @@ pub extern "C" fn retro_run() {
             .exists());
         assert!(!project_dir.join("out").exists());
         assert_eq!(scene.entities.len(), 4);
+
+        let _ = fs::remove_dir_all(base_dir);
+        let _ = fs::remove_dir_all(donor_dir);
+    }
+
+    #[test]
+    fn import_mugen_project_command_creates_native_project_with_metadata_and_scene() {
+        let base_dir = temp_dir("import-mugen-command");
+        let donor_dir = temp_dir("import-mugen-donor");
+        write_mugen_character_fixture(&donor_dir);
+
+        let result = import_mugen_project(
+            "Imported MUGEN".to_string(),
+            base_dir.to_string_lossy().to_string(),
+            donor_dir.to_string_lossy().to_string(),
+        )
+        .expect("import mugen project");
+
+        let project_dir = PathBuf::from(&result.path);
+        let project = load_project(&project_dir).expect("load imported mugen project");
+        let scene = load_scene(&project_dir, &project.entry_scene).expect("load imported mugen scene");
+
+        assert_eq!(
+            project
+                .template_metadata
+                .as_ref()
+                .map(|metadata| metadata.source_kind.as_str()),
+            Some("imported_mugen")
+        );
+        assert!(project_dir
+            .join("assets")
+            .join("sprites")
+            .join("mugen_heromugen_atlas.png")
+            .is_file());
+        assert!(scene.entities.iter().any(|entity| entity
+            .components
+            .sprite
+            .as_ref()
+            .is_some_and(|sprite| sprite.asset.ends_with("mugen_heromugen_atlas.png"))));
+        assert!(result
+            .notice
+            .as_deref()
+            .is_some_and(|notice| notice.contains("Importacao MUGEN experimental")));
+
+        let _ = fs::remove_dir_all(base_dir);
+        let _ = fs::remove_dir_all(donor_dir);
+    }
+
+    #[test]
+    fn import_external_project_command_supports_godot_and_stamps_metadata() {
+        let base_dir = temp_dir("import-godot-command");
+        let donor_dir = temp_dir("import-godot-donor");
+        write_godot_fixture(&donor_dir);
+
+        let result = import_external_project(
+            "Imported Godot".to_string(),
+            base_dir.to_string_lossy().to_string(),
+            "godot".to_string(),
+            donor_dir.to_string_lossy().to_string(),
+        )
+        .expect("import godot project");
+
+        let project_dir = PathBuf::from(&result.path);
+        let project = load_project(&project_dir).expect("load imported godot project");
+        let scene =
+            load_scene(&project_dir, &project.entry_scene).expect("load imported godot scene");
+
+        let metadata = project.template_metadata.as_ref().expect("template metadata");
+        assert_eq!(metadata.source_kind, "imported_godot");
+        assert_eq!(metadata.source_engine.as_deref(), Some("godot"));
+        assert_eq!(metadata.import_profile.as_deref(), Some("godot_tscn_v1"));
+        assert!(scene.entities.iter().any(|entity| entity
+            .components
+            .sprite
+            .as_ref()
+            .is_some_and(|sprite| sprite.asset == "assets/sprites/godot_art_hero.png")));
+        assert!(result
+            .notice
+            .as_deref()
+            .is_some_and(|notice| notice.contains("Godot 2D")));
 
         let _ = fs::remove_dir_all(base_dir);
         let _ = fs::remove_dir_all(donor_dir);

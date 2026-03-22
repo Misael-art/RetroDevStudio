@@ -2245,6 +2245,9 @@ mod tests {
                 frames: vec![1, 2, 3, 4],
                 fps: 10,
                 looping: true,
+                frame_durations: None,
+                loop_start: None,
+                mugen_frames: None,
             },
         );
 
@@ -3064,6 +3067,9 @@ mod tests {
                 frames: vec![0],
                 fps: 6,
                 looping: true,
+                frame_durations: None,
+                loop_start: None,
+                mugen_frames: None,
             },
         );
         animations.insert(
@@ -3072,6 +3078,9 @@ mod tests {
                 frames: vec![1, 2, 3],
                 fps: 12,
                 looping: true,
+                frame_durations: None,
+                loop_start: None,
+                mugen_frames: None,
             },
         );
         let logic_graph = json!({
@@ -4448,5 +4457,113 @@ mod tests {
             .iter()
             .any(|(event, ops)| matches!(event, HardwareEventKind::HBlank)
                 && matches!(ops[0], LogicOp::PlaySound { .. })));
+    }
+
+    // ── Step 1: AnimationDef roundtrip proof ────────────────────────────────
+
+    #[test]
+    fn multiframe_sprite_animations_produce_correct_ast_sprite_assets() {
+        let mut animations = HashMap::new();
+        animations.insert(
+            "idle".to_string(),
+            AnimationDef {
+                frames: vec![0, 1],
+                fps: 8,
+                looping: true,
+                frame_durations: None,
+                loop_start: None,
+                mugen_frames: None,
+            },
+        );
+        animations.insert(
+            "run".to_string(),
+            AnimationDef {
+                frames: vec![2, 3],
+                fps: 15,
+                looping: true,
+                frame_durations: None,
+                loop_start: None,
+                mugen_frames: None,
+            },
+        );
+
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
+            name: "AnimTest".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+            template_metadata: None,
+        };
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "hero".to_string(),
+                display_name: Some("Hero".to_string()),
+                prefab: None,
+                transform: Transform { x: 16, y: 24 },
+                components: Components {
+                    sprite: Some(SpriteComponent {
+                        asset: "assets/sprites/hero.png".to_string(),
+                        frame_width: 16,
+                        frame_height: 16,
+                        pivot: None,
+                        palette_slot: 0,
+                        animations,
+                        priority: "foreground".to_string(),
+                        meta_sprite: false,
+                    }),
+                    collision: None,
+                    input: None,
+                    physics: None,
+                    audio: None,
+                    logic: None,
+                    camera: None,
+                    tilemap: None,
+                },
+            }],
+            palettes: Vec::new(),
+            retrofx: None,
+            collision_map: None,
+            layers: None,
+        };
+
+        let ast = generate_ast(&project, &scene);
+
+        // Verify sprite asset has 2 named animations sorted alphabetically
+        assert_eq!(ast.sprite_assets.len(), 1);
+        let asset = &ast.sprite_assets[0];
+        assert_eq!(asset.resource_name, "hero");
+        assert_eq!(asset.animations.len(), 2);
+        assert_eq!(asset.animations[0].name, "idle");
+        assert_eq!(asset.animations[0].frames, vec![0, 1]);
+        assert!(asset.animations[0].looping);
+        assert_eq!(asset.animations[1].name, "run");
+        assert_eq!(asset.animations[1].frames, vec![2, 3]);
+        assert!(asset.animations[1].looping);
+
+        // frame_time: 60fps project / 8fps anim = 8, 60/15 = 4
+        assert_eq!(asset.animations[0].frame_time, 8);
+        assert_eq!(asset.animations[1].frame_time, 4);
+
+        // Default animation is the first alphabetically (idle)
+        assert!(asset.default_animation.is_some());
+        assert_eq!(asset.default_animation.as_ref().unwrap().name, "idle");
+
+        // SetAnimation node exists in the AST
+        assert!(ast.nodes.iter().any(|node| matches!(
+            node,
+            AstNode::SetAnimation { var_name, .. } if var_name == "spr_hero"
+        )));
     }
 }

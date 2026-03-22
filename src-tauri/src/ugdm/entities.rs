@@ -261,6 +261,12 @@ pub struct TemplateMetadata {
     pub template_version: String,
     pub source_kind: String,
     pub source_path: String,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_engine: Option<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub import_profile: Option<String>,
     pub imported_at_ms: u128,
 }
 

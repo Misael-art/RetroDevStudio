@@ -20,11 +20,13 @@ import { emulatorLoadRom, emulatorStop } from "./core/ipc/emulatorService";
 import { getHwStatus } from "./core/ipc/hwService";
 import {
   createProjectFromTemplate,
-  importLegacySgdkProject,
+  importExternalProject,
+  listExternalImportProfiles,
   listProjectTemplates,
   openProjectDialog,
   openProjectPath,
   suggestProjectBaseDir,
+  type ExternalImportProfileSummary,
   type ProjectTemplateSummary,
   setProjectTarget,
 } from "./core/ipc/projectService";
@@ -425,8 +427,10 @@ export default function App() {
   const [newProjBaseDir, setNewProjBaseDir] = useState("");
   const [automaticBaseDirHint, setAutomaticBaseDirHint] = useState("");
   const [projectTemplates, setProjectTemplates] = useState<ProjectTemplateSummary[]>([]);
+  const [externalImportProfiles, setExternalImportProfiles] = useState<ExternalImportProfileSummary[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [selectedExternalImportProfileId, setSelectedExternalImportProfileId] = useState("");
   const [templateDonorPaths, setTemplateDonorPaths] = useState<Record<string, string>>({});
   const [showProjectWizard, setShowProjectWizard] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
@@ -462,6 +466,8 @@ export default function App() {
   const selectedTemplateDonorPath = selectedTemplate
     ? templateDonorPaths[selectedTemplate.id] || selectedTemplate.default_donor_path || ""
     : "";
+  const selectedExternalImportProfile =
+    externalImportProfiles.find((profile) => profile.id === selectedExternalImportProfileId) ?? null;
 
   useLiveValidationController();
 
@@ -632,11 +638,15 @@ export default function App() {
     async function loadTemplates() {
       setTemplatesLoading(true);
       try {
-        const templates = await listProjectTemplates();
+        const [templates, profiles] = await Promise.all([
+          listProjectTemplates(),
+          listExternalImportProfiles(),
+        ]);
         if (cancelled) {
           return;
         }
         setProjectTemplates(templates);
+        setExternalImportProfiles(profiles);
         setSelectedTemplateId((current) => {
           if (templates.some((template) => template.id === current)) {
             return current;
@@ -647,9 +657,17 @@ export default function App() {
             templates[0];
           return defaultTemplate?.id ?? "";
         });
+        setSelectedExternalImportProfileId((current) => {
+          if (profiles.some((profile) => profile.id === current)) {
+            return current;
+          }
+          const defaultProfile = profiles.find((profile) => profile.importable) ?? profiles[0];
+          return defaultProfile?.id ?? "";
+        });
       } catch (error) {
         if (!cancelled) {
           setProjectTemplates([]);
+          setExternalImportProfiles([]);
           logMessage("error", `[Projeto] Falha ao carregar templates: ${describeError(error)}`);
         }
       } finally {
@@ -1009,10 +1027,10 @@ export default function App() {
     }
   }
 
-  async function chooseSgdkProjectPath() {
+  async function chooseExternalProjectPath(profile: ExternalImportProfileSummary) {
     const { open } = await import("@tauri-apps/plugin-dialog");
     const selected = await open({
-      title: "Escolher projeto SGDK para importar",
+      title: `Escolher projeto ${profile.name} para importar`,
       directory: true,
       multiple: false,
     });
@@ -1072,25 +1090,47 @@ export default function App() {
     }
   }
 
-  async function handleImportSgdkProject() {
+  async function handleImportExternalProject() {
     if (!newProjName.trim()) {
       logMessage("warn", "[Projeto] Informe um nome para o projeto importado.");
       return;
     }
+    if (!selectedExternalImportProfile) {
+      logMessage("warn", "[Projeto] Escolha um importador externo antes de continuar.");
+      return;
+    }
+    if (!selectedExternalImportProfile.importable) {
+      logMessage(
+        "warn",
+        `[Projeto] O perfil '${selectedExternalImportProfile.name}' ainda nao esta importavel: ${selectedExternalImportProfile.support_status}.`
+      );
+      return;
+    }
+    if (selectedExternalImportProfile.mega_drive_only && newProjTarget !== "megadrive") {
+      logMessage(
+        "info",
+        `[Projeto] O perfil '${selectedExternalImportProfile.name}' sera importado como projeto Mega Drive nesta wave.`
+      );
+    }
 
     try {
-      const sgdkPath = await chooseSgdkProjectPath();
-      if (!sgdkPath) {
+      const projectPath = await chooseExternalProjectPath(selectedExternalImportProfile);
+      if (!projectPath) {
         return;
       }
 
       setCreatingProject(true);
-      const result = await importLegacySgdkProject(newProjName.trim(), sgdkPath);
+      const result = await importExternalProject(
+        newProjName.trim(),
+        newProjBaseDir.trim(),
+        selectedExternalImportProfile.id,
+        projectPath
+      );
       const hydrated = await hydrateProjectState(result.path, result.name, "Projeto");
       if (hydrated) {
         logMessage(
           "success",
-          `Projeto SGDK importado: ${result.name} em ${result.path}`
+          `Projeto externo (${selectedExternalImportProfile.name}) importado: ${result.name} em ${result.path}`
         );
         if (result.notice) {
           logMessage("info", `[Projeto] ${result.notice}`);
@@ -1102,7 +1142,10 @@ export default function App() {
         );
       }
     } catch (error) {
-      logMessage("error", `[Projeto] Falha ao importar projeto SGDK: ${describeError(error)}`);
+      logMessage(
+        "error",
+        `[Projeto] Falha ao importar projeto ${selectedExternalImportProfile.name}: ${describeError(error)}`
+      );
     } finally {
       setCreatingProject(false);
     }
@@ -1679,25 +1722,77 @@ export default function App() {
                 ) : null}
               </div>
 
-              <div className="flex gap-2">
-                {(["megadrive", "snes"] as const).map((target) => (
-                  <button
-                    key={target}
-                    type="button"
-                    disabled={selectedTemplateMegadriveOnly && target === "snes"}
-                    onClick={() => setNewProjTarget(target)}
-                    className={`flex-1 rounded px-3 py-2 text-xs font-semibold transition-colors ${
-                      newProjTarget === target
-                        ? target === "megadrive"
-                          ? "bg-[#a6e3a1] text-[#1e1e2e]"
-                          : "bg-[#89b4fa] text-[#1e1e2e]"
-                        : "bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]"
-                    } disabled:cursor-not-allowed disabled:opacity-40`}
+              <div className="rounded border border-[#313244] bg-[#11111b] p-3 text-[10px] text-[#7f849c]">
+                <p className="mb-1 text-[#cdd6f4]">
+                  Importador externo:{" "}
+                  <span className="font-semibold">
+                    {selectedExternalImportProfile?.name ?? "Nenhum"}
+                  </span>
+                </p>
+                <p className="leading-5">
+                  {selectedExternalImportProfile?.description ??
+                    "Escolha um adaptador externo para importar projetos reais para o formato nativo do RetroDev."}
+                </p>
+                <div className="mt-3 flex flex-wrap gap-1">
+                  <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#cdd6f4]">
+                    {selectedExternalImportProfile?.family ?? "External"}
+                  </span>
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-[10px] ${
+                      selectedExternalImportProfile?.importable
+                        ? "bg-[#a6e3a1]/15 text-[#a6e3a1]"
+                        : "bg-[#fab387]/15 text-[#fab387]"
+                    }`}
                   >
-                    {target === "megadrive" ? "Mega Drive" : "SNES"}
-                  </button>
-                ))}
+                    {selectedExternalImportProfile?.support_status ?? "Nao suportado"}
+                  </span>
+                  {selectedExternalImportProfile?.supported_levels.map((level) => (
+                    <span
+                      key={level}
+                      className="rounded bg-[#181825] px-1.5 py-0.5 text-[10px] text-[#7f849c]"
+                    >
+                      {level}
+                    </span>
+                  ))}
+                </div>
+                <select
+                  data-testid="external-import-profile-select"
+                  value={selectedExternalImportProfileId}
+                  onChange={(event) => setSelectedExternalImportProfileId(event.target.value)}
+                  className="mt-3 w-full rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1.5 text-[11px] text-[#cdd6f4] focus:border-[#cba6f7] focus:outline-none"
+                >
+                  {externalImportProfiles.map((profile) => (
+                    <option key={profile.id} value={profile.id}>
+                      {profile.name} · {profile.support_status}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-2 leading-5 text-[#94a3b8]">
+                  {selectedExternalImportProfile?.mega_drive_only
+                    ? "Esta wave de importacao externa continua Mega Drive only para manter o caminho canonico enxuto."
+                    : "Perfil externo compativel com o fluxo atual do wizard."}
+                </p>
               </div>
+            </div>
+
+            <div className="flex gap-2">
+              {(["megadrive", "snes"] as const).map((target) => (
+                <button
+                  key={target}
+                  type="button"
+                  disabled={selectedTemplateMegadriveOnly && target === "snes"}
+                  onClick={() => setNewProjTarget(target)}
+                  className={`flex-1 rounded px-3 py-2 text-xs font-semibold transition-colors ${
+                    newProjTarget === target
+                      ? target === "megadrive"
+                        ? "bg-[#a6e3a1] text-[#1e1e2e]"
+                        : "bg-[#89b4fa] text-[#1e1e2e]"
+                      : "bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]"
+                  } disabled:cursor-not-allowed disabled:opacity-40`}
+                >
+                  {target === "megadrive" ? "Mega Drive" : "SNES"}
+                </button>
+              ))}
             </div>
 
             <div className="grid gap-3 md:grid-cols-[1fr_1.1fr]">
@@ -1737,8 +1832,8 @@ export default function App() {
               ) : null}
               <ToolbarButton label="Abrir Existente" onClick={() => void handleOpenProject()} />
               <ToolbarButton
-                label={creatingProject ? "Importando..." : "Importar Projeto SGDK"}
-                onClick={() => void handleImportSgdkProject()}
+                label={creatingProject ? "Importando..." : "Importar Externo"}
+                onClick={() => void handleImportExternalProject()}
                 disabled={creatingProject || templatesLoading}
               />
               <ToolbarButton
