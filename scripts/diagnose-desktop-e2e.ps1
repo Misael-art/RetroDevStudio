@@ -35,6 +35,19 @@ function Run-Command([string]$CommandLine) {
   }
 }
 
+function Read-BuildReport([string]$ReportPath) {
+  if (!(Test-Path $ReportPath)) {
+    return $null
+  }
+
+  try {
+    return Get-Content $ReportPath -Raw | ConvertFrom-Json
+  } catch {
+    Write-Sub "Build report" "Invalido: $($_.Exception.Message)"
+    return $null
+  }
+}
+
 function Invoke-WebDriverSessionProbe([string]$AppPath, [string]$DriverPath) {
   Write-Step "WebDriver Session Probe"
 
@@ -47,7 +60,7 @@ function Invoke-WebDriverSessionProbe([string]$AppPath, [string]$DriverPath) {
     return
   }
 
-  $probeRoot = Join-Path ([System.IO.Path]::GetTempPath()) "retrodev-desktop-e2e-diagnostics"
+  $probeRoot = Join-Path $RepoRoot "src-tauri\target-test\validation\desktop-e2e"
   $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
   $probeDir = Join-Path $probeRoot "session-probe-$timestamp"
   New-Item -ItemType Directory -Force -Path $probeDir | Out-Null
@@ -121,7 +134,30 @@ if ([string]::IsNullOrWhiteSpace($NativeDriverPath)) {
 $tauriDriverPath = Join-Path $env:USERPROFILE ".cargo\\bin\\tauri-driver.exe"
 $releaseAppPath = Join-Path $RepoRoot "src-tauri\\target-test\\release\\retro-dev-studio.exe"
 $debugAppPath = Join-Path $RepoRoot "src-tauri\\target-test\\debug\\retro-dev-studio.exe"
-$appPath = if (Test-Path $releaseAppPath) { $releaseAppPath } else { $debugAppPath }
+$buildReportPath = Join-Path $RepoRoot "src-tauri\\target-test\\validation\\build-report.json"
+$buildReport = Read-BuildReport $buildReportPath
+$reportedReleasePath = $null
+$reportedDebugPath = $null
+if ($buildReport -and $buildReport.modes) {
+  if ($buildReport.modes.portable) {
+    $reportedReleasePath = $buildReport.modes.portable.canonicalExe
+  }
+  if ($buildReport.modes.debug) {
+    $reportedDebugPath = $buildReport.modes.debug.canonicalExe
+  }
+}
+$appPath =
+  if (Test-Path $releaseAppPath) {
+    $releaseAppPath
+  } elseif ($reportedReleasePath -and (Test-Path $reportedReleasePath)) {
+    $reportedReleasePath
+  } elseif (Test-Path $debugAppPath) {
+    $debugAppPath
+  } elseif ($reportedDebugPath -and (Test-Path $reportedDebugPath)) {
+    $reportedDebugPath
+  } else {
+    $debugAppPath
+  }
 $webViewPath = "C:\Program Files (x86)\Microsoft\EdgeWebView\Application\145.0.3800.82\msedgewebview2.exe"
 
 Write-Step "Environment"
@@ -129,6 +165,19 @@ Write-Sub "RepoRoot" $RepoRoot
 Write-Sub "NativeDriverPath" $NativeDriverPath
 Write-Sub "tauri-driver" $tauriDriverPath
 Write-Sub "Desktop app" $appPath
+Write-Sub "Build report" $(if (Test-Path $buildReportPath) { $buildReportPath } else { "Nao encontrado" })
+if ($buildReport) {
+  Write-Sub "Build report generatedAt" $buildReport.generatedAt
+  Write-Sub "Build report requestedTargetDir" $buildReport.requestedTargetDir
+  if ($buildReport.modes.portable) {
+    Write-Sub "Portable effectiveTargetDir" $buildReport.modes.portable.effectiveTargetDir
+    Write-Sub "Portable shadow fallback" ([string]$buildReport.modes.portable.usedShadowFallback)
+  }
+  if ($buildReport.modes.debug) {
+    Write-Sub "Debug effectiveTargetDir" $buildReport.modes.debug.effectiveTargetDir
+    Write-Sub "Debug shadow fallback" ([string]$buildReport.modes.debug.usedShadowFallback)
+  }
+}
 Write-Sub "Node available" ((Test-Command "node").ToString())
 Write-Sub "npm.cmd available" ((Test-Command "npm.cmd").ToString())
 

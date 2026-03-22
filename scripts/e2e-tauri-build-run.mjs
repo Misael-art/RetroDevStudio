@@ -32,6 +32,16 @@ const defaultWebDriverPath = path.join(
   "webdriver",
   "msedgedriver.exe"
 );
+const validationDir = path.join(
+  repoRoot,
+  "src-tauri",
+  "target-test",
+  "validation"
+);
+const buildReportPath = path.join(
+  validationDir,
+  "build-report.json"
+);
 
 function fail(message) {
   throw new Error(message);
@@ -52,11 +62,20 @@ async function readProjectMetadata(projectDir) {
   };
 }
 
-async function resolveDefaultDesktopApp(skipBuild) {
-  if (skipBuild && await pathExists(defaultReleaseAppPath)) {
-    return defaultReleaseAppPath;
+async function readBuildReport() {
+  if (!(await pathExists(buildReportPath))) {
+    return null;
   }
 
+  try {
+    const raw = await readFile(buildReportPath, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function resolveDefaultDesktopApp() {
   if (await pathExists(defaultDebugAppPath)) {
     return defaultDebugAppPath;
   }
@@ -65,7 +84,22 @@ async function resolveDefaultDesktopApp(skipBuild) {
     return defaultReleaseAppPath;
   }
 
-  return skipBuild ? defaultReleaseAppPath : defaultDebugAppPath;
+  const buildReport = await readBuildReport();
+  const portableCanonical = buildReport?.modes?.portable?.canonicalExe;
+  if (portableCanonical && await pathExists(portableCanonical)) {
+    return portableCanonical;
+  }
+
+  const debugCanonical = buildReport?.modes?.debug?.canonicalExe;
+  if (debugCanonical && await pathExists(debugCanonical)) {
+    return debugCanonical;
+  }
+
+  if (portableCanonical && await pathExists(portableCanonical)) {
+    return portableCanonical;
+  }
+
+  return defaultDebugAppPath;
 }
 
 function parseArgs(argv) {
@@ -755,6 +789,31 @@ async function clickElement(sessionId, elementId) {
   await webdriverRequest("POST", `/session/${sessionId}/element/${elementId}/click`, {});
 }
 
+async function waitForBuildRunReady(sessionId, timeoutMs) {
+  return waitFor(
+    async () =>
+      executeScript(
+        sessionId,
+        `
+          const button = document.querySelector('[data-testid="toolbar-build-run"]');
+          const state = window.__RDS_E2E__?.getState?.() ?? null;
+          if (!button || !state) return false;
+          const validationState = state.hwValidationState ?? "";
+          const hasProject = Boolean(state.activeProjectDir);
+          return hasProject && validationState !== "pending" && !button.disabled
+            ? {
+                validationState,
+                activeProjectDir: state.activeProjectDir,
+              }
+            : false;
+        `
+      ),
+    timeoutMs,
+    "Toolbar Build & Run nao ficou pronto para clique.",
+    250
+  );
+}
+
 async function getTitle(sessionId) {
   const response = await webdriverRequest("GET", `/session/${sessionId}/title`);
   return response.value ?? "";
@@ -915,7 +974,7 @@ async function main() {
 
   const options = parseArgs(process.argv.slice(2));
   if (!options.appExplicitlyProvided) {
-    options.app = await resolveDefaultDesktopApp(options.skipBuild);
+    options.app = await resolveDefaultDesktopApp();
   }
   const driverStartupTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_DRIVER_TIMEOUT_MS,
@@ -961,12 +1020,15 @@ async function main() {
 
   if (!options.skipBuild) {
     console.log("== Building debug Tauri app ==");
-    await spawnLogged(npmCommand(), ["run", "tauri", "build", "--", "--debug", "--no-bundle"]);
+    await spawnLogged(npmCommand(), ["run", "build:debug"]);
+    if (!options.appExplicitlyProvided) {
+      options.app = await resolveDefaultDesktopApp();
+    }
   }
 
   await assertPathExists(
     options.app,
-    `Binario debug do Tauri nao encontrado: ${options.app}`
+    `Binario canonico do Tauri nao encontrado: ${options.app}`
   );
 
   console.log(options.externalDriver ? "== Using external tauri-driver ==" : "== Starting tauri-driver ==");
@@ -1415,6 +1477,14 @@ async function main() {
       console.log(`Estado stale: ${staleStatus.liveState} | Hint: ${staleStatus.staleHint}`);
       console.log(`Estado apos revalidar: ${pendingStatus.liveState} | Resumo: ${pendingStatus.pendingSummary}`);
       return;
+    }
+
+    try {
+      await waitForBuildRunReady(sessionId, liveValidationTimeoutMs);
+    } catch (error) {
+      const diagnostics = formatAppDiagnostics(await collectAppDiagnostics(sessionId));
+      const details = error instanceof Error ? error.message : String(error);
+      fail(diagnostics ? `${details}\n${diagnostics}` : details);
     }
 
     const buildRunButton = await findElement(sessionId, "[data-testid='toolbar-build-run']");

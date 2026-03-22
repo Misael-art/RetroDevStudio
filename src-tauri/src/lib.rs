@@ -1579,6 +1579,16 @@ struct ResolvedBaseDir {
     notice: Option<String>,
 }
 
+fn suggested_project_base_dir_path(candidates: &[PathBuf]) -> Result<String, String> {
+    candidates
+        .iter()
+        .find(|candidate| !candidate.as_os_str().is_empty())
+        .map(|candidate| candidate.to_string_lossy().to_string())
+        .ok_or_else(|| {
+            "Nao foi possivel sugerir uma pasta base automatica para novos projetos.".to_string()
+        })
+}
+
 fn safe_project_dir_name(project_name: &str) -> String {
     project_name
         .chars()
@@ -1705,6 +1715,11 @@ fn resolve_project_base_dir_with_candidates(
 fn resolve_project_base_dir(requested_base_dir: Option<&Path>) -> Result<ResolvedBaseDir, String> {
     let candidates = automatic_project_base_dir_candidates();
     resolve_project_base_dir_with_candidates(requested_base_dir, &candidates)
+}
+
+#[tauri::command]
+fn suggest_project_base_dir() -> Result<String, String> {
+    suggested_project_base_dir_path(&automatic_project_base_dir_candidates())
 }
 
 fn ensure_project_dir_available(project_dir: &Path) -> Result<(), String> {
@@ -2040,6 +2055,7 @@ pub fn run() {
             open_project_path,
             new_project_dialog,
             create_onboarding_project,
+            suggest_project_base_dir,
             list_project_templates,
             create_project_from_template,
             import_sgdk_project,
@@ -2080,7 +2096,17 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("system time before unix epoch")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!(
+        let base_dir = if cfg!(target_os = "windows") {
+            std::env::var_os("LOCALAPPDATA")
+                .map(PathBuf::from)
+                .unwrap_or_else(std::env::temp_dir)
+                .join("RetroDevStudio")
+                .join("test-sandbox")
+        } else {
+            std::env::temp_dir()
+        };
+        fs::create_dir_all(&base_dir).expect("failed to create safe temp root");
+        let path = base_dir.join(format!(
             "retro-dev-studio-e2e-{}-{}-{}",
             prefix,
             std::process::id(),
@@ -3148,6 +3174,16 @@ pub extern "C" fn retro_run() {
         assert!(PathBuf::from(&result.path).starts_with(&automatic_base));
 
         let _ = fs::remove_dir_all(automatic_base.parent().unwrap_or(Path::new("")));
+    }
+
+    #[test]
+    fn suggested_project_base_dir_path_returns_first_candidate_for_ui_preview() {
+        let first = PathBuf::from("C:/Users/Test/Documents/RetroDevProjects");
+        let second = PathBuf::from("D:/Fallback/RetroDevProjects");
+        let suggested = suggested_project_base_dir_path(&[first.clone(), second])
+            .expect("suggest automatic base dir for ui");
+
+        assert_eq!(suggested, first.to_string_lossy());
     }
 
     #[test]
