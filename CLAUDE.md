@@ -50,6 +50,7 @@ Responda com `[Contexto Carregado]` antes de propor qualquer acao relevante.
 
 ## Ao Encerrar Sessao
 Se algo relevante foi feito, atualize ou proponha atualizacao de `docs/06_AI_MEMORY_BANK.md`.
+- Quando a entrega estiver validada com gates verdes e houver mudancas rastreaveis do escopo, crie commit(s) coerentes e faca `git push` no branch atual, salvo instrucao contraria do usuario ou necessidade explicita de curadoria adicional.
 
 ## Comandos Uteis
 - Validar estrutura: `npm run check:tree`

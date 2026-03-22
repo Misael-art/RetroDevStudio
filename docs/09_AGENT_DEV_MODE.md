@@ -37,6 +37,7 @@
 7. Implementar no caminho canonico existente, nao em um paralelo.
 8. Rodar os gates aplicaveis.
 9. Atualizar docs canonicos se o estado real mudou.
+10. Quando a entrega estiver validada com gates verdes e houver mudancas rastreaveis do escopo, criar commit(s) coerentes e executar `git push` no branch atual, salvo instrucao contraria do usuario ou necessidade explicita de curadoria adicional antes da publicacao.
 
 Uma tarefa nao esta concluida enquanto o repositorio continuar anunciando um estado mais maduro do que o codigo e os gates sustentam.
 Uma tarefa tambem nao esta concluida enquanto faltar certificacao real no escopo alterado: prova funcional correspondente, gates verdes e ausencia de erro bloqueante ou regressao conhecida naquele fluxo.
@@ -130,6 +131,7 @@ Leitura sintetica:
 - [ ] O estado real anunciado pelo repositorio continua honesto?
 - [ ] Os documentos de onboarding continuam coerentes com o Memory Bank?
 - [ ] Os gates aplicaveis foram rodados e passaram?
+- [ ] Se houve mudancas rastreaveis no escopo, os commit(s) e o `git push` correspondente foram feitos apos a validacao verde?
 - [ ] Existe certificacao real suficiente para qualquer claim de `validado`, `concluido` ou `fechado` feita nesta sessao?
 - [ ] Se algo continua parcial, a UI e a documentacao deixam isso claro?
 - [ ] Nao foi criado modulo, script, doc ou fluxo paralelo ao canonico?

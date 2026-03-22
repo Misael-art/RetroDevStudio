@@ -17,6 +17,10 @@
 
 ## 1. STATUS ATUAL DO PROJETO
 
+* **O que acabou de acontecer (2026-03-22 - Diretriz de publicacao apos validacao verde):**
+  - **Onboarding canonico fechado em `CLAUDE.md`:** a decisao de governanca desta sessao formalizou `CLAUDE.md` como arquivo unico de onboarding para agentes na raiz do repositorio; `AGENTS.md` permanece fora do fluxo institucional por enquanto.
+  - **Regra futura para agentes:** `CLAUDE.md` e `docs/09_AGENT_DEV_MODE.md` agora deixam explicito que, quando a entrega tiver gates verdes e houver mudancas rastreaveis no escopo, o agente deve criar commit(s) coerentes e executar `git push` no branch atual, salvo instrucao contraria do usuario ou necessidade real de curadoria adicional antes da publicacao.
+
 * **O que acabou de acontecer (2026-03-21 - Auditoria de tasks interrompidas e refinamento seguro do wizard):**
   - **Sem alteracoes fantasmas nas areas criticas:** a auditoria do worktree confirmou que nao havia mudancas pendentes em `App.tsx`, `ToolsPanel.tsx`, `project_mgr.rs`, `lib.rs` ou `ArtStudioPanel.tsx` vindas do agente interrompido. As unicas diffs locais fora desta rodada estavam restritas ao hardening dos scripts de build e docs correlatos.
   - **Wizard mais claro sem mudar o contrato do backend:** `lib.rs` ganhou o comando `suggest_project_base_dir`, e `App.tsx` agora mostra no onboarding a pasta automatica preferencial antes da criacao, em vez de deixar apenas o texto generico `(automatico pelo sistema)`.
