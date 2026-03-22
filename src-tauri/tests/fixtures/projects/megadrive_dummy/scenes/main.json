@@ -28,5 +28,7 @@
     }
   ],
   "palettes": [],
-  "retrofx": null
+  "retrofx": null,
+  "collision_map": null,
+  "layers": null
 }
