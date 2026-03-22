@@ -58,3 +58,4 @@ Se algo relevante foi feito, atualize ou proponha atualizacao de `docs/06_AI_MEM
 - Testes frontend: `npm test`
 - Lint Rust: `cargo clippy -- -D warnings`
 - Testes Rust: `cargo test --lib -- --nocapture`
+- Compilacao: `npm run build:debug` | `build:msi` | `build:portable` | `build:all` (script canonico: `scripts/build.mjs`)

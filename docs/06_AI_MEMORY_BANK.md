@@ -25,6 +25,12 @@
   - **Cobertura nova:** `App.test.tsx` agora cobre a exibicao da pasta base sugerida pelo backend, e `lib.rs` ganhou teste unitario para a sugestao de UI escolher o primeiro candidato automatico esperado.
   - **Barra verde desta rodada:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (174 testes), `cargo clippy -- -D warnings` OK e `cargo test --lib -- --nocapture --test-threads=1` OK (200 aprovados / 0 falhas / 2 ignorados).
 
+* **O que acabou de acontecer (2026-03-21 - Script canonico de build: resiliencia e abertura da pasta do binario):**
+  - **Descoberta do `.exe` neste host:** o executavel canonico de debug continua em `src-tauri/target-test/debug/retro-dev-studio.exe`, e o portable/release em `src-tauri/target-test/release/retro-dev-studio.exe`.
+  - **Script mais resiliente:** `scripts/build.mjs` agora resolve o `.exe` final de forma mais robusta quando o artefato esperado nao aparece exatamente no nome fixo, escolhe o MSI mais recente e deixou de apagar preventivamente o binario antigo; a validacao passa a exigir que o artefato tenha sido atualizado nesta execucao, evitando falso-verde sem destruir o ultimo build funcional do usuario.
+  - **UX de teste local:** o script agora aceita `--open-dir` para abrir a pasta do artefato ao final do build local, sem disparar isso em CI. `package.json` ganhou atalhos `build:debug:open`, `build:msi:open` e `build:portable:open`.
+  - **Docs alinhados:** `08_TREE_ARCHITECTURE.md` agora documenta o uso `node scripts/build.mjs <debug|msi|portable|all> [--open-dir]`.
+
 * **O que acabou de acontecer (2026-03-21 - Wrapper SGDK final: Asset Browser legado e delegacao de build):**
   - **Tree host visivel na UI:** `ToolsPanel.tsx` agora renderiza no `Asset Browser` uma secao `Projeto host SGDK` quando `projectLegacyIndex` esta presente. Os buckets `src/`, `inc/`, `res/`, `assets host` e `out/` aparecem como navegacao read-only, deixando claro que o codigo legado foi adotado sem virar editor paralelo.
   - **Preview read-only seguro:** o backend ganhou o comando `read_legacy_project_file`, que so permite abrir arquivos previamente indexados pelo `legacy_sgdk_index.json`, bloqueia caminhos absolutos/`..`, limita preview a texto e marca a leitura como `readonly`. O frontend mostra nota, caminho absoluto e conteudo truncado quando necessario.
