@@ -2770,4 +2770,363 @@ mod tests {
             );
         }
     }
+
+    // ── Step 1: ArtStudio multi-frame animation → runtime proof ─────────────
+
+    #[test]
+    fn artstudio_multiframe_animation_reaches_resources_res_and_main_c() {
+        let _serial = test_serial_guard();
+        let project_dir = workspace_copy("megadrive_dummy");
+        let source_image = temp_dir("artstudio-multiframe").join("hero_anim.png");
+        // 64x16 PNG → 4 frames of 16x16
+        let image = ImageBuffer::from_fn(64, 16, |x, _y| {
+            let frame = x / 16;
+            match frame {
+                0 => Rgba([255u8, 0, 0, 255]),
+                1 => Rgba([0u8, 255, 0, 255]),
+                2 => Rgba([0u8, 0, 255, 255]),
+                _ => Rgba([255u8, 255, 0, 255]),
+            }
+        });
+        image.save(&source_image).expect("write multiframe source");
+
+        let import_result = import_art_asset_internal(
+            source_image.to_string_lossy().into_owned(),
+            project_dir.to_string_lossy().into_owned(),
+            Some("hero_anim".to_string()),
+            Some(16),
+            Some(16),
+            Some("grid".to_string()),
+        )
+        .expect("import multiframe asset");
+        assert!(import_result.ok);
+        assert_eq!(import_result.frame_count, 4);
+
+        // Scene with two named animations referencing the 4 frames
+        let scene_json = format!(
+            r#"{{
+  "scene_id": "main",
+  "schema_version": "1.6.0",
+  "display_name": "Main Scene",
+  "background_layers": [],
+  "entities": [
+    {{
+      "entity_id": "hero_anim",
+      "display_name": "Hero Animated",
+      "prefab": null,
+      "transform": {{ "x": 48, "y": 64 }},
+      "components": {{
+        "sprite": {{
+          "asset": "{}",
+          "frame_width": 16,
+          "frame_height": 16,
+          "pivot": null,
+          "palette_slot": 0,
+          "animations": {{
+            "idle": {{ "frames": [0, 1], "fps": 8, "loop": true }},
+            "run": {{ "frames": [2, 3], "fps": 15, "loop": true }}
+          }},
+          "priority": "foreground",
+          "meta_sprite": false
+        }},
+        "collision": null,
+        "input": null,
+        "physics": null,
+        "audio": null,
+        "logic": null,
+        "camera": null,
+        "tilemap": null
+      }}
+    }}
+  ],
+  "palettes": [],
+  "retrofx": null,
+  "collision_map": null,
+  "layers": null
+}}"#,
+            import_result
+                .relative_path
+                .as_deref()
+                .expect("relative path")
+        );
+        fs::write(project_dir.join("scenes").join("main.json"), scene_json)
+            .expect("write multiframe scene");
+
+        let (sgdk_root, make_program) = fake_toolchain("sgdk-multiframe", "md");
+        let environment = BuildEnvironment {
+            sgdk_root: Some(sgdk_root),
+            sgdk_make_program: Some(make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_with_environment(&project_dir, &environment, |_| {});
+        assert!(result.ok, "multiframe build log: {:?}", result.log);
+
+        // Verify resources.res contains the SPRITE with correct tile dimensions
+        let resources_res = fs::read_to_string(
+            project_dir
+                .join("build")
+                .join("megadrive")
+                .join("res")
+                .join("resources.res"),
+        )
+        .expect("read resources.res");
+        assert!(
+            resources_res.contains("SPRITE hero_anim \"assets/sprites/hero_anim.bmp\""),
+            "resources.res should reference the ArtStudio sprite: {}",
+            resources_res
+        );
+
+        // Verify main.c contains animation setup (SPR_setAnim)
+        let main_c = fs::read_to_string(
+            project_dir
+                .join("build")
+                .join("megadrive")
+                .join("src")
+                .join("main.c"),
+        )
+        .expect("read main.c");
+        assert!(
+            main_c.contains("SPR_setAnim("),
+            "main.c should set initial animation: {}",
+            main_c
+        );
+        // Verify the sprite is spawned
+        assert!(
+            main_c.contains("SPR_addSprite("),
+            "main.c should spawn the sprite: {}",
+            main_c
+        );
+
+        let _ = fs::remove_file(source_image);
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    // ── Step 2: RetroFX scene config → parallax/raster in main.c ────────────
+
+    #[test]
+    fn retrofx_scene_config_generates_parallax_and_raster_in_main_c() {
+        let _serial = test_serial_guard();
+        let project_dir = workspace_copy("megadrive_dummy");
+        install_megadrive_sprite_fixture(&project_dir);
+
+        // Overwrite scene with RetroFX parallax + raster config
+        let scene_json = r#"{
+  "scene_id": "main",
+  "schema_version": "1.6.0",
+  "display_name": "Main Scene",
+  "background_layers": [],
+  "entities": [
+    {
+      "entity_id": "player",
+      "prefab": null,
+      "transform": { "x": 48, "y": 64 },
+      "components": {
+        "sprite": {
+          "asset": "assets/sprites/onboarding_player.ppm",
+          "frame_width": 16,
+          "frame_height": 16,
+          "pivot": null,
+          "palette_slot": 0,
+          "animations": {},
+          "priority": "foreground"
+        },
+        "collision": null,
+        "input": null,
+        "physics": null,
+        "audio": null,
+        "logic": null,
+        "camera": null,
+        "tilemap": null
+      }
+    }
+  ],
+  "palettes": [],
+  "retrofx": {
+    "parallax_layers": [
+      {
+        "id": "layer_far",
+        "name": "BG_B",
+        "speed_x": 1,
+        "speed_y": 0,
+        "enabled": true
+      },
+      {
+        "id": "layer_near",
+        "name": "BG_A",
+        "speed_x": 3,
+        "speed_y": 0,
+        "enabled": true
+      }
+    ],
+    "raster_lines": [
+      {
+        "id": "raster_1",
+        "scanline": 100,
+        "offset_x": 4,
+        "enabled": true
+      }
+    ]
+  },
+  "collision_map": null,
+  "layers": null
+}"#;
+        fs::write(project_dir.join("scenes").join("main.json"), scene_json)
+            .expect("write retrofx scene");
+
+        let (sgdk_root, make_program) = fake_toolchain("sgdk-retrofx", "md");
+        let environment = BuildEnvironment {
+            sgdk_root: Some(sgdk_root),
+            sgdk_make_program: Some(make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_with_environment(&project_dir, &environment, |_| {});
+        assert!(result.ok, "retrofx build log: {:?}", result.log);
+
+        let main_c = fs::read_to_string(
+            project_dir
+                .join("build")
+                .join("megadrive")
+                .join("src")
+                .join("main.c"),
+        )
+        .expect("read main.c");
+
+        // RetroFX init: HSCROLL_LINE mode
+        assert!(
+            main_c.contains("VDP_setScrollingMode(HSCROLL_LINE, VSCROLL_PLANE)"),
+            "main.c should init line scrolling: {}",
+            main_c
+        );
+
+        // Parallax offset updates in game loop
+        assert!(
+            main_c.contains("retro_parallax_offset_0_x += 1"),
+            "main.c should update far layer offset: {}",
+            main_c
+        );
+        assert!(
+            main_c.contains("retro_parallax_offset_1_x += 3"),
+            "main.c should update near layer offset: {}",
+            main_c
+        );
+
+        // Raster line offset applied
+        assert!(
+            main_c.contains("retro_hscroll_table[100] += 4"),
+            "main.c should apply raster offset at scanline 100: {}",
+            main_c
+        );
+
+        // Scroll table declaration
+        assert!(
+            main_c.contains("static s16 retro_hscroll_table[224]"),
+            "main.c should declare hscroll table: {}",
+            main_c
+        );
+
+        // DMA push for scroll
+        assert!(
+            main_c.contains("VDP_setHorizontalScrollLine("),
+            "main.c should push scroll table via DMA: {}",
+            main_c
+        );
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    // ── Step 2b: RetroFX SNES smoke ─────────────────────────────────────────
+
+    #[test]
+    fn retrofx_scene_config_generates_hdma_parallax_in_snes_main_c() {
+        let _serial = test_serial_guard();
+        let project_dir = workspace_copy("snes_dummy");
+
+        let scene_json = r#"{
+  "scene_id": "main",
+  "schema_version": "1.6.0",
+  "display_name": "Main Scene",
+  "background_layers": [],
+  "entities": [
+    {
+      "entity_id": "controller_root",
+      "prefab": null,
+      "transform": { "x": 16, "y": 24 },
+      "components": {
+        "sprite": {
+          "asset": "assets/sprites/hero.ppm",
+          "frame_width": 16,
+          "frame_height": 16,
+          "pivot": null,
+          "palette_slot": 0,
+          "animations": {},
+          "priority": "foreground"
+        },
+        "collision": null,
+        "input": null,
+        "physics": null,
+        "audio": null,
+        "logic": null,
+        "camera": null,
+        "tilemap": null
+      }
+    }
+  ],
+  "palettes": [],
+  "retrofx": {
+    "parallax_layers": [
+      {
+        "id": "bg_slow",
+        "name": "BG_A",
+        "speed_x": 2,
+        "speed_y": 0,
+        "enabled": true
+      }
+    ],
+    "raster_lines": []
+  },
+  "collision_map": null,
+  "layers": null
+}"#;
+        fs::write(project_dir.join("scenes").join("main.json"), scene_json)
+            .expect("write snes retrofx scene");
+
+        let (pvsneslib_root, make_program) = fake_toolchain("pvsneslib-retrofx", "sfc");
+        fs::create_dir_all(pvsneslib_root.join("devkitsnes")).expect("create fake devkitsnes");
+        fs::write(
+            pvsneslib_root.join("devkitsnes").join("snes_rules"),
+            "dummy rules",
+        )
+        .expect("write fake snes_rules");
+        let environment = BuildEnvironment {
+            pvsneslib_root: Some(pvsneslib_root),
+            pvsneslib_make_program: Some(make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_with_environment(&project_dir, &environment, |_| {});
+        assert!(result.ok, "snes retrofx build log: {:?}", result.log);
+
+        let main_c = fs::read_to_string(
+            project_dir
+                .join("build")
+                .join("snes")
+                .join("src")
+                .join("main.c"),
+        )
+        .expect("read snes main.c");
+
+        // SNES RetroFX uses HDMA parallax (HDMATable16 / setParallaxScrolling)
+        assert!(
+            main_c.contains("HDMATable16") || main_c.contains("setParallaxScrolling") || main_c.contains("retro_parallax"),
+            "snes main.c should contain HDMA parallax setup: {}",
+            main_c
+        );
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
 }
