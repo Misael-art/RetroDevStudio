@@ -22,6 +22,7 @@
   - **ArtStudio multiframe → runtime provado:** novo teste Rust `artstudio_multiframe_animation_reaches_resources_res_and_main_c` prova que um sprite de 4 frames importado via ArtStudio com duas animacoes nomeadas (idle/run) chega ao `resources.res` com `SPRITE` correto e ao `main.c` com `SPR_setAnim` e `SPR_addSprite`.
   - **AnimationDef roundtrip provado:** novo teste Rust `multiframe_sprite_animations_produce_correct_ast_sprite_assets` prova que `AnimationDef` com `fps` e `frames` produz `SpriteAnimation` no AST com `frame_time` correto (60fps projeto / 8fps anim = 8, 60/15 = 4), sorting alfabetico e `default_animation` resolvido.
   - **RetroFX parallax/raster → main.c provado (MD + SNES):** novos testes Rust `retrofx_scene_config_generates_parallax_and_raster_in_main_c` e `retrofx_scene_config_generates_hdma_parallax_in_snes_main_c` provam que config RetroFX persistida na cena JSON (2 parallax layers + 1 raster line) gera `VDP_setScrollingMode(HSCROLL_LINE)`, offsets de parallax no game loop, `retro_hscroll_table[100] += 4` e DMA push no SGDK; e HDMA parallax no SNES.
+  - **Release readiness agregada em artefato canonico:** `scripts/release-readiness.mjs` agora consolida baseline, dirty worktree, artefatos, report de build/upstream e checklist manual em `src-tauri/target-test/validation/release-readiness.{json,md}`. `package.json` ganhou `release:readiness` e `release:readiness:baseline`, e o QA RC agora referencia esse report como evidencia formal de promocao.
   - **Maturity matrix corrigida:** Editor subiu de 3.0 para 3.5 (NodeGraph completo, ArtStudio pipeline provado), UX subiu de 2.5 para 3.0 (shell adaptativo, paint/erase, collision map, zoom). Data atualizada para 2026-03-22.
   - **Refactoring de ViewportPanel/ToolsPanel adiado:** apos analise, o ViewportPanel (3355 LOC) tem estado profundamente entrelacado entre Scene View e Game View. Risco de regressao no RC justifica adiar para pos-MVP.
 
@@ -946,10 +947,11 @@ Fechar o MVP do desktop Tauri: provas de pipeline agora cobertas por testes dete
 
 **Sequencia de acoes recomendada:**
 1. Executar QA manual (`docs/10_QA_ROTEIRO_RC.md` Blocos A-F) com usuarios leigos cobrindo templates, Build & Run e superficies experimentais.
-2. Validar `platformer_seed` e pelo menos um projeto SGDK importado com `Build & Run` Mega Drive usando SGDK real instalado.
-3. Repetir bundle MSI quando o escopo tocar release (`scripts/run-in-msvc.cmd npm run build:msi`).
-4. Considerar refactoring de ViewportPanel/ToolsPanel como melhoria pos-MVP (risco vs beneficio avaliado).
-5. Preparar notas de beta testing, criterios de aceite e lista de riscos residuais para a rodada institucional.
+2. Gerar e anexar `src-tauri/target-test/validation/release-readiness.md` em cada rodada de promocao RC -> beta/producao, reduzindo falso positivo de readiness.
+3. Validar `platformer_seed` e pelo menos um projeto SGDK importado com `Build & Run` Mega Drive usando SGDK real instalado.
+4. Repetir bundle MSI quando o escopo tocar release (`scripts/run-in-msvc.cmd npm run build:msi`).
+5. Considerar refactoring de ViewportPanel/ToolsPanel como melhoria pos-MVP (risco vs beneficio avaliado).
+6. Preparar notas de beta testing, criterios de aceite e lista de riscos residuais para a rodada institucional.
 
 **Validacao minima obrigatoria antes de marcar qualquer item como concluido:**
 * `npm run check:tree`

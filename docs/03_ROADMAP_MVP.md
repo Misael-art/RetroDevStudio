@@ -32,6 +32,7 @@
 - Validacao oficial upstream em Windows com SGDK, PVSnesLib e cores Libretro reais via `scripts/validate-upstream-windows.ps1`.
 - E2E de aplicacao desktop/Tauri via `scripts/e2e-tauri-build-run.mjs` para `Build -> Load ROM -> Run frames`.
 - Workflow dedicado `.github/workflows/desktop-e2e.yml` validado em runner GitHub/Windows real para Mega Drive e SNES.
+- Agregador canonico de readiness de release em `scripts/release-readiness.mjs`, gerando `src-tauri/target-test/validation/release-readiness.{json,md}` com baseline, artefatos, upstream report, dirty worktree e QA manual pendente.
 - Cobertura desktop E2E dos estados live `LIVE`, `WARN`, `BLOQUEADO`, `ERRO LIVE`, `DESATUAL.` e `ANALISANDO` por target no runner canonico/workflow dedicado.
 - Runner desktop com diagnostico explicito de bootstrap do driver (`code/syscall/path`) para falhas locais de permissao (`spawn EPERM`).
 - Runner desktop com hint operacional para falhas de sessao (`DevToolsActivePort/chrome not reachable`) e script de diagnostico com `-SessionProbe` para evidencia local reproduzivel.
@@ -286,11 +287,12 @@
 ## Ordem Executiva Atual
 
 1. Manter o baseline canonico verde antes e depois de qualquer ajuste relevante.
-2. Repetir bundle MSI e smoke desktop em host Windows institucional para mudancas sensiveis de build, emulacao, packaging, onboarding, templates e projeto.
-3. Executar QA com leigos na nova galeria: `Projeto Vazio`, `Primeiro Projeto`, `Plataforma` e `Importar Projeto SGDK`, confirmando que preview visual, labels PT-BR e cards reduzem a friccao do primeiro uso.
-4. Validar manualmente `platformer_seed` e pelo menos um projeto SGDK importado genericamente em `Build & Run` Mega Drive, preservando compliance e sem reintroduzir artefatos proibidos.
-5. Planejar a proxima onda de templates/presets com foco em comportamento composto, ja que o suporte a meta-sprites agora existe no validador e no importador SGDK.
-6. Decidir se a dependencia `tauri-plugin-updater` pode ser aprovada sob a politica atual e preparar release notes/checklist de beta testing antes de promover o release candidate.
+2. Gerar `release-readiness.md` a cada rodada de promocao RC -> beta/producao para consolidar baseline, artefatos, dirty worktree e QA manual pendente.
+3. Repetir bundle MSI e smoke desktop em host Windows institucional para mudancas sensiveis de build, emulacao, packaging, onboarding, templates e projeto.
+4. Executar QA com leigos na nova galeria: `Projeto Vazio`, `Primeiro Projeto`, `Plataforma` e `Importar Projeto SGDK`, confirmando que preview visual, labels PT-BR e cards reduzem a friccao do primeiro uso.
+5. Validar manualmente `platformer_seed` e pelo menos um projeto SGDK importado genericamente em `Build & Run` Mega Drive, preservando compliance e sem reintroduzir artefatos proibidos.
+6. Planejar a proxima onda de templates/presets com foco em comportamento composto, ja que o suporte a meta-sprites agora existe no validador e no importador SGDK.
+7. Decidir se a dependencia `tauri-plugin-updater` pode ser aprovada sob a politica atual e preparar release notes/checklist de beta testing antes de promover o release candidate.
 
 ---
 

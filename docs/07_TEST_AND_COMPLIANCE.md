@@ -67,6 +67,12 @@
 10. Se a sessao WebDriver falhar em `DevToolsActivePort`/`chrome not reachable`, executar `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-desktop-e2e.ps1 -SessionProbe` e registrar o resultado.
 11. Atualizacao de `docs/03_ROADMAP_MVP.md` e `docs/06_AI_MEMORY_BANK.md` quando o estado do produto mudar
 
+### 3.1 Agregacao canonica de readiness
+- `node scripts/release-readiness.mjs` gera um snapshot objetivo do estado de release em `src-tauri/target-test/validation/release-readiness.json` e `release-readiness.md`.
+- `npm run release:readiness:baseline` reexecuta os 6 gates locais antes de gerar o report.
+- O report deve ser tratado como a fotografia canonica da promocao RC -> beta/producao: artefatos, dirty worktree, baseline, upstream report, QA manual pendente e bloqueadores explicitos.
+- O agregador nao substitui a validacao manual nem o smoke institutional em Windows; ele reduz falso positivo e centraliza evidencias.
+
 Nenhum agente deve chamar uma feature de `pronta`, `completa` ou `entregue` se esse gate nao foi satisfeito ou se a feature continua parcial/experimental.
 Nenhuma etapa deve ser tratada como `concluida` sem certificacao real do fluxo afetado, sem erro bloqueante conhecido e sem evidencia fake ou paralela ao caminho canonico.
 

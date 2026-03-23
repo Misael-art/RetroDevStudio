@@ -1,7 +1,7 @@
 # 10 - ROTEIRO QA RELEASE CANDIDATE
 **Status:** Documento operacional
 **Objetivo:** Guiar testadores leigos na validacao do RC antes da promocao a beta institucional.
-**Ultima revisao:** 2026-03-17
+**Ultima revisao:** 2026-03-22
 
 > Este roteiro e pensado para pessoas sem experiencia tecnica. Cada passo deve ser executavel com cliques e esperas visiveis. Ao concluir, preencha o checklist de evidencias no final.
 
@@ -11,24 +11,24 @@
 
 - [ ] Windows 10/11 (64-bit)
 - [ ] RetroDev Studio instalado via MSI (`RetroDev Studio_0.1.0_x64_en-US.msi`) ou executavel de desenvolvimento
-- [ ] Espaco em disco livre para toolchains (SGDK, PVSnesLib, cores Libretro) — o app pedira instalacao sob demanda
+- [ ] Espaco em disco livre para toolchains (SGDK, PVSnesLib, cores Libretro) - o app pedira instalacao sob demanda
 
 ---
 
 ## 2. ROTEIRO PASSO A PASSO
 
-### Bloco A — Primeiro uso e onboarding
+### Bloco A - Primeiro uso e onboarding
 
 | # | Acao | O que esperar | Evidencia |
 |---|------|---------------|-----------|
 | A1 | Abrir o RetroDev Studio | Janela do app abre, sem erro de crash | Screenshot da janela inicial |
 | A2 | Ver a tela de boas-vindas / galeria de templates | Cards: Projeto Vazio, Primeiro Projeto, Plataforma, Importar Projeto SGDK | Screenshot da galeria |
 | A3 | Clicar em **Plataforma** | Projeto e criado, editor carrega com cena e entidades | Screenshot do editor com Hierarchy visivel |
-| A4 | Aguardar 2–3 segundos | Nenhum erro vermelho na tela; status bar sem mensagem de falha | OK / Falhou |
+| A4 | Aguardar 2-3 segundos | Nenhum erro vermelho na tela; status bar sem mensagem de falha | OK / Falhou |
 | A5 | Clicar na aba **Cena** no painel esquerdo | Lista de entidades (Camera, Hero, etc.) aparece | OK / Falhou |
 | A6 | Clicar na aba **Camadas** | Lista de camadas aparece; botao "+ Camada" visivel | Screenshot do LayerPanel |
 
-### Bloco B — Edicao de cena e camadas
+### Bloco B - Edicao de cena e camadas
 
 | # | Acao | O que esperar | Evidencia |
 |---|------|---------------|-----------|
@@ -41,7 +41,7 @@
 | B7 | Clicar novamente no olho | Entidade volta a aparecer | OK / Falhou |
 | B8 | Pressionar **Ctrl+Z** duas vezes | Undo restaura estado anterior (camada deletada ou alteracao revertida) | OK / Falhou |
 
-### Bloco C — Modo colisao e pintura
+### Bloco C - Modo colisao e pintura
 
 | # | Acao | O que esperar | Evidencia |
 |---|------|---------------|-----------|
@@ -53,7 +53,7 @@
 | C6 | Selecionar um sprite na paleta e clicar no canvas | Novo sprite e criado na posicao clicada | OK / Falhou |
 | C7 | Pressionar **V** ou voltar ao modo Selecionar | Modo selecionar ativo | OK / Falhou |
 
-### Bloco D — Build e emulacao (Mega Drive)
+### Bloco D - Build e emulacao (Mega Drive)
 
 | # | Acao | O que esperar | Evidencia |
 |---|------|---------------|-----------|
@@ -61,11 +61,11 @@
 | D2 | Se pedir instalacao: aceitar e aguardar | SGDK, cores Libretro baixados e instalados | OK / Falhou / N/A |
 | D3 | Aguardar o build terminar | Barra de progresso ou indicador de conclusao; sem erro vermelho | OK / Falhou |
 | D4 | Ver a aba **GM Jogo** | Emulador carrega a ROM; jogo aparece na janela | Screenshot do Game View |
-| D5 | Aguardar 2–3 segundos | Jogo roda (sprites se movem ou cena estatica) sem crash | OK / Falhou |
+| D5 | Aguardar 2-3 segundos | Jogo roda (sprites se movem ou cena estatica) sem crash | OK / Falhou |
 | D6 | Clicar em **Pausar** no Game View | Jogo pausa | OK / Falhou |
 | D7 | Clicar em **Continuar** | Jogo volta a rodar | OK / Falhou |
 
-### Bloco E — Ferramentas e paineis
+### Bloco E - Ferramentas e paineis
 
 | # | Acao | O que esperar | Evidencia |
 |---|------|---------------|-----------|
@@ -75,7 +75,7 @@
 | E4 | Abrir o **Inspector** (painel direito) | Propriedades da entidade selecionada aparecem | OK / Falhou |
 | E5 | Alterar um valor (ex: posicao X) no Inspector | Valor atualiza; viewport reflete a mudanca | OK / Falhou |
 
-### Bloco F — Persistencia e fechamento
+### Bloco F - Persistencia e fechamento
 
 | # | Acao | O que esperar | Evidencia |
 |---|------|---------------|-----------|
@@ -92,33 +92,34 @@ Preencha apos executar o roteiro. Todos os itens devem estar marcados para aprov
 
 ### Gates automaticos (executados pelo dev/CI)
 
-- [ ] `npm run check:tree` — OK
-- [ ] `npm run lint` — OK
-- [ ] `npx tsc --noEmit` — OK
-- [ ] `npm test` — 151 testes passando
-- [ ] `cargo clippy -- -D warnings` — OK
-- [ ] `cargo test --lib` — 167 testes passando (1 ignorado)
+- [ ] `npm run check:tree` - OK
+- [ ] `npm run lint` - OK
+- [ ] `npx tsc --noEmit` - OK
+- [ ] `npm test` - baseline vigente verde
+- [ ] `cargo clippy -- -D warnings` - OK
+- [ ] `cargo test --lib` - baseline vigente verde
+- [ ] `npm run release:readiness:baseline` - report gerado em `src-tauri/target-test/validation/release-readiness.md`
 
 ### Evidencias manuais (testador leigo)
 
-- [ ] Bloco A (onboarding) — todos os passos OK
-- [ ] Bloco B (camadas) — todos os passos OK
-- [ ] Bloco C (colisao/pintura) — todos os passos OK
-- [ ] Bloco D (Build & Run Mega Drive) — todos os passos OK
-- [ ] Bloco E (ferramentas) — todos os passos OK
-- [ ] Bloco F (persistencia) — todos os passos OK
+- [ ] Bloco A (onboarding) - todos os passos OK
+- [ ] Bloco B (camadas) - todos os passos OK
+- [ ] Bloco C (colisao/pintura) - todos os passos OK
+- [ ] Bloco D (Build & Run Mega Drive) - todos os passos OK
+- [ ] Bloco E (ferramentas) - todos os passos OK
+- [ ] Bloco F (persistencia) - todos os passos OK
 
 ### Evidencias opcionais (ambiente com toolchains)
 
-- [ ] Build & Run SNES — ROM compila e abre no emulador
-- [ ] Smoke E2E desktop — `npm run test:e2e:desktop:md` e `:snes` passam
-- [ ] MSI instalado em maquina limpa — app abre e onboarding funciona
+- [ ] Build & Run SNES - ROM compila e abre no emulador
+- [ ] Smoke E2E desktop - `npm run test:e2e:desktop:md` e `:snes` passam
+- [ ] MSI instalado em maquina limpa - app abre e onboarding funciona
 
 ### Bloqueadores conhecidos (nao impedem RC, mas devem ser registrados)
 
-- [ ] `DevToolsActivePort` / `chrome not reachable` — E2E local falha; usar runner GitHub
-- [ ] `spawn EPERM` no build — ambiente institucional; usar runner GitHub
-- [ ] Toolchain nao instalada — usuario deve aceitar instalacao sob demanda
+- [ ] `DevToolsActivePort` / `chrome not reachable` - E2E local falha; usar runner GitHub
+- [ ] `spawn EPERM` no build - ambiente institucional; usar runner GitHub
+- [ ] Toolchain nao instalada - usuario deve aceitar instalacao sob demanda
 
 ---
 
@@ -131,6 +132,7 @@ Preencha apos executar o roteiro. Todos os itens devem estar marcados para aprov
 | Screenshot do editor | Hierarchy + Viewport visiveis |
 | Screenshot do LayerPanel | Aba Camadas |
 | Screenshot do Game View | Aba GM Jogo com ROM rodando |
+| Report de readiness | `src-tauri/target-test/validation/release-readiness.md` |
 | Log de erro (se houver) | Console do app ou mensagem na UI |
 
 ---

@@ -113,6 +113,7 @@ RetroDevStudio/
 |   |-- create-icon.mjs
 |   |-- diagnose-desktop-e2e.ps1
 |   |-- e2e-tauri-build-run.mjs
+|   |-- release-readiness.mjs
 |   |-- run-bootstrap.ps1
 |   |-- run-cargo-msvc.cmd
 |   |-- run-in-msvc.cmd
@@ -151,6 +152,7 @@ RetroDevStudio/
 - Projetos SGDK externos podem conter um subdiretorio `rds/` (overlay) com `project.rds`, `scenes/`, `graphs/`, `prefabs/` e junctions NTFS para `assets/` e `build/`. O backend faz discovery de `project.rds` em subdiretorios de primeiro nivel quando nao encontra na raiz. Ver `docs/05_ARCHITECTURE_UGDM.md` secao 10.
 - O caminho SNES real usa staging de asset no workspace e gera `hdr.asm`, `data.asm` e regras `gfx4snes`.
 - `scripts/build.mjs` e o script canonico de compilacao: gera MSI, EXE Debug e EXE Portable. Uso: `node scripts/build.mjs <debug|msi|portable|all> [--open-dir]`. Scripts npm: `build:debug`, `build:debug:open`, `build:msi`, `build:msi:open`, `build:portable`, `build:portable:open`, `build:all`. O `build-test.bat` e um wrapper legado que chama `build.mjs debug`.
+- `scripts/release-readiness.mjs` e o agregador canonico de readiness para promocao RC -> beta/producao: consolida baseline, artefatos, dirty worktree, reports de build/upstream e checklist manual em `src-tauri/target-test/validation/release-readiness.{json,md}`. Scripts npm: `release:readiness`, `release:readiness:baseline`.
 - `scripts/run-in-msvc.cmd` e o wrapper canonico para executar comandos Node/npm em ambiente MSVC preparado no Windows institucional; usar junto de `build.mjs` quando o host exigir `vcvars64.bat`.
 - `scripts/run-cargo-msvc.cmd` e o wrapper canonico para comandos `cargo` em ambiente MSVC preparado no Windows institucional.
 - `scripts/e2e-tauri-build-run.mjs` e o runner canonico de regressao desktop/Tauri para `Build -> Load ROM -> Run frames`.
