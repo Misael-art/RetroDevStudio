@@ -735,7 +735,17 @@ use tools::patch_studio::{
     apply_bps_file, apply_ips_file, create_bps_file_compliance, create_ips_file_compliance,
     PatchResult,
 };
+use tools::reverse::{
+    AudioCandidate, CallGraphEdge, CodeXref, DisassemblyResult, GraphicsCandidate, ReverseAnnotation,
+    RomAnalysisManifest, TextCandidate,
+};
 use tools::reverse_explorer::ReverseExplorerResult;
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RomTextExtractionResult {
+    pub text_regions: Vec<TextCandidate>,
+    pub pointer_tables: Vec<tools::reverse::manifest::PointerTableCandidate>,
+}
 
 fn record_patch_audit(
     project_dir: Option<&str>,
@@ -890,6 +900,57 @@ fn reverse_explorer_read(
     length: usize,
 ) -> ReverseExplorerResult {
     tools::reverse_explorer::inspect_rom(&rom_path, &target, offset, length)
+}
+
+#[tauri::command]
+fn rom_analyze(rom_path: String) -> Result<RomAnalysisManifest, String> {
+    tools::reverse::analyze_rom(&rom_path)
+}
+
+#[tauri::command]
+fn rom_disassemble(
+    rom_path: String,
+    offset: usize,
+    length: usize,
+) -> Result<DisassemblyResult, String> {
+    tools::reverse::disassemble_rom(&rom_path, offset, length)
+}
+
+#[tauri::command]
+fn rom_get_xrefs(rom_path: String) -> Result<Vec<CodeXref>, String> {
+    tools::reverse::get_xrefs(&rom_path)
+}
+
+#[tauri::command]
+fn rom_get_call_graph(rom_path: String) -> Result<Vec<CallGraphEdge>, String> {
+    tools::reverse::get_call_graph(&rom_path)
+}
+
+#[tauri::command]
+fn rom_extract_graphics(rom_path: String) -> Result<Vec<GraphicsCandidate>, String> {
+    tools::reverse::extract_graphics(&rom_path)
+}
+
+#[tauri::command]
+fn rom_extract_text(rom_path: String) -> Result<RomTextExtractionResult, String> {
+    let (text_regions, pointer_tables) = tools::reverse::extract_text(&rom_path)?;
+    Ok(RomTextExtractionResult {
+        text_regions,
+        pointer_tables,
+    })
+}
+
+#[tauri::command]
+fn rom_extract_audio(rom_path: String) -> Result<Vec<AudioCandidate>, String> {
+    tools::reverse::extract_audio(&rom_path)
+}
+
+#[tauri::command]
+fn rom_save_annotations(
+    rom_path: String,
+    annotations: Vec<ReverseAnnotation>,
+) -> Result<usize, String> {
+    tools::reverse::save_rom_annotations(&rom_path, &annotations)
 }
 
 #[tauri::command]
@@ -2235,6 +2296,14 @@ pub fn run() {
             profiler_analyze_rom,
             assets_extract,
             reverse_explorer_read,
+            rom_analyze,
+            rom_disassemble,
+            rom_get_xrefs,
+            rom_get_call_graph,
+            rom_extract_graphics,
+            rom_extract_text,
+            rom_extract_audio,
+            rom_save_annotations,
             list_project_assets,
             read_legacy_project_file,
             third_party_get_status,

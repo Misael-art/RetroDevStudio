@@ -12,6 +12,9 @@ const mocks = vi.hoisted(() => ({
   listProjectAssets: vi.fn(),
   readLegacyProjectFile: vi.fn(),
   reverseExplorerRead: vi.fn(),
+  romAnalyze: vi.fn(),
+  romDisassemble: vi.fn(),
+  romSaveAnnotations: vi.fn(),
   patchCreateIps: vi.fn(),
   patchCreateBps: vi.fn(),
   profilerAnalyzeRom: vi.fn(),
@@ -53,6 +56,9 @@ vi.mock("../../core/ipc/toolsService", () => ({
   listProjectAssets: mocks.listProjectAssets,
   readLegacyProjectFile: mocks.readLegacyProjectFile,
   reverseExplorerRead: mocks.reverseExplorerRead,
+  romAnalyze: mocks.romAnalyze,
+  romDisassemble: mocks.romDisassemble,
+  romSaveAnnotations: mocks.romSaveAnnotations,
   patchCreateIps: mocks.patchCreateIps,
   patchCreateBps: mocks.patchCreateBps,
   profilerAnalyzeRom: mocks.profilerAnalyzeRom,
@@ -142,6 +148,53 @@ describe("ToolsPanel Asset Browser", () => {
       total_size: 0,
       rows: [],
     });
+    mocks.romAnalyze.mockResolvedValue({
+      ok: true,
+      error: "",
+      target: "megadrive",
+      source_path: "F:/roms/test.md",
+      detected_format: "md",
+      stripped_header_bytes: 0,
+      total_size: 4096,
+      hashes: { crc32: "deadbeef", sha1: "0123456789abcdef0123456789abcdef01234567" },
+      header: {
+        console_name: "SEGA GENESIS",
+        internal_title: "RETRO TEST",
+        region: "U",
+        version: "01",
+        publisher: null,
+        entry_point: 512,
+      },
+      mapper: "linear_rom",
+      special_chips: [],
+      segments: [{ start: 0, end: 512, kind: "header", label: "Header", bank_index: null, confidence: 100 }],
+      graphics_regions: [{ id: "gfx_000", start: 512, end: 768, kind: "tileset", bpp: 4, tile_width: 8, tile_height: 8, tile_count: 8, palette_slot: 0, confidence: 80, note: "ok" }],
+      text_regions: [],
+      audio_regions: [],
+      code_regions: [{
+        start: 512,
+        end: 520,
+        architecture: "68000",
+        entry_points: [512],
+        functions: [{ address: 512, end: 520, name: "sub_000200", executed: false, confidence: 80 }],
+        xrefs: [{ from: 512, to: 768, kind: "call", label: "call @ 000200" }],
+        disassembly: [],
+      }],
+      pointer_tables: [],
+      compression_regions: [],
+      call_graph: [{ from: 512, to: 768, kind: "call" }],
+      logic_hints: [],
+      annotations: [],
+      trace: { available: false, executed_regions: [], note: "future" },
+      projection_status: { supported: false, status: "analysis_only", message: "future" },
+    });
+    mocks.romDisassemble.mockResolvedValue({
+      ok: true,
+      error: "",
+      total_size: 4096,
+      rows: [{ offset: 512, bytes: [0x4e, 0x71], size: 2, text: "nop", kind: "nop", target: null }],
+    });
+    mocks.romSaveAnnotations.mockResolvedValue(1);
     mocks.patchCreateIps.mockResolvedValue({
       ok: true,
       message: "ok",
@@ -340,5 +393,108 @@ describe("ToolsPanel Asset Browser", () => {
       "int main(void) { return 0; }"
     );
     expect(container.textContent).toContain("Read-only");
+  });
+
+  it("analyzes a ROM in the reverse workspace", async () => {
+    await act(async () => {
+      findButton(container, "Avancado OFF").click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Experimental/).click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Reverse Workspace/).click();
+      await flush();
+      await flush();
+    });
+
+    const romInput = Array.from(container.querySelectorAll("input")).find((element) =>
+      element.getAttribute("placeholder")?.includes("/roms/game.md")
+    );
+    expect(romInput).toBeTruthy();
+
+    await act(async () => {
+      if (romInput instanceof HTMLInputElement) {
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          "value"
+        )?.set;
+        setter?.call(romInput, "F:/roms/test.md");
+        romInput.dispatchEvent(new Event("input", { bubbles: true }));
+        romInput.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, "Analisar ROM").click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.romAnalyze).toHaveBeenCalledWith("F:/roms/test.md");
+    expect(container.textContent).toContain("linear_rom");
+    expect(container.textContent).toContain("RETRO TEST");
+
+    await act(async () => {
+      findButton(container, "Code").click();
+      await flush();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("call @ 000200");
+    expect(container.textContent).toContain("000200 → 000300");
+
+    const labelInput = Array.from(container.querySelectorAll("input")).find((element) =>
+      element.getAttribute("placeholder")?.includes("spawn_player")
+    );
+    const commentInput = container.querySelector("textarea");
+
+    await act(async () => {
+      if (labelInput instanceof HTMLInputElement) {
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLInputElement.prototype,
+          "value"
+        )?.set;
+        setter?.call(labelInput, "entrypoint_label");
+        labelInput.dispatchEvent(new Event("input", { bubbles: true }));
+        labelInput.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      if (commentInput instanceof HTMLTextAreaElement) {
+        const setter = Object.getOwnPropertyDescriptor(
+          HTMLTextAreaElement.prototype,
+          "value"
+        )?.set;
+        setter?.call(commentInput, "Primeira anotacao");
+        commentInput.dispatchEvent(new Event("input", { bubbles: true }));
+        commentInput.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, "Salvar anotacao").click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.romSaveAnnotations).toHaveBeenCalledWith("F:/roms/test.md", [
+      {
+        kind: "label",
+        start: 512,
+        end: null,
+        label: "entrypoint_label",
+        comment: "Primeira anotacao",
+      },
+    ]);
+    expect(container.textContent).toContain("entrypoint_label");
   });
 });

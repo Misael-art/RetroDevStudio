@@ -2,6 +2,8 @@ use serde::Serialize;
 use std::fs;
 use std::path::Path;
 
+use crate::tools::reverse;
+
 const TILE_BYTES_4BPP: usize = 32;
 const TILE_BYTES_2BPP: usize = 16;
 const TILE_SIZE: usize = 8;
@@ -163,6 +165,55 @@ fn extract_palettes(rom: &[u8]) -> Vec<ExtractedPalette> {
     }
 
     palettes
+}
+
+fn extract_tiles_from_candidates(
+    rom: &[u8],
+    candidates: &[reverse::manifest::GraphicsCandidate],
+    max_tiles: u32,
+    bpp_mode: BppMode,
+) -> Vec<ExtractedTile> {
+    let mut tiles = Vec::new();
+
+    for candidate in candidates {
+        let candidate_bpp = candidate.bpp;
+        let tile_bytes = if candidate_bpp == 2 {
+            TILE_BYTES_2BPP
+        } else {
+            TILE_BYTES_4BPP
+        };
+        let allowed = match bpp_mode {
+            BppMode::Auto => true,
+            BppMode::TwoBpp => candidate_bpp == 2,
+            BppMode::FourBpp => candidate_bpp == 4,
+        };
+        if !allowed {
+            continue;
+        }
+
+        let mut offset = candidate.start as usize;
+        let end = (candidate.end as usize).min(rom.len());
+        while offset + tile_bytes <= end && tiles.len() < max_tiles as usize {
+            let pixels = if candidate_bpp == 2 {
+                let mut raw = [0u8; TILE_BYTES_2BPP];
+                raw.copy_from_slice(&rom[offset..offset + TILE_BYTES_2BPP]);
+                decode_tile_2bpp(&raw)
+            } else {
+                decode_tile(&rom[offset..offset + TILE_BYTES_4BPP])
+            };
+            tiles.push(ExtractedTile {
+                index: tiles.len() as u32,
+                rom_offset: offset as u32,
+                pixels,
+            });
+            offset += tile_bytes;
+        }
+        if tiles.len() >= max_tiles as usize {
+            break;
+        }
+    }
+
+    tiles
 }
 
 fn write_png_minimal(
@@ -386,7 +437,16 @@ pub fn extract_assets(
         }
     }
 
-    for tile in extract_tiles_from_rom(&rom, max_tiles, bpp_mode) {
+    let candidate_tiles = reverse::analyze_rom(rom_path.to_string_lossy().as_ref())
+        .map(|manifest| extract_tiles_from_candidates(&rom, &manifest.graphics_regions, max_tiles, bpp_mode))
+        .unwrap_or_default();
+    let tiles = if candidate_tiles.is_empty() {
+        extract_tiles_from_rom(&rom, max_tiles, bpp_mode)
+    } else {
+        candidate_tiles
+    };
+
+    for tile in tiles {
         let tile_name = format!("tile_{:05}.png", tile.index);
         let tile_path = output_dir.join(&tile_name);
         match write_png_minimal(

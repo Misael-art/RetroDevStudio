@@ -1,7 +1,7 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
-**Ultima Atualizacao:** 2026-03-22
-**Ultima sessao:** 2026-03-22 (Importadores externos: registry comum + Godot 2D experimental)
-**Fase Atual:** Release candidate / beta testing do desktop Tauri, com baseline automatizada restaurada (check-tree, lint, tsc, vitest, cargo clippy, cargo test), persistencia atomica endurecida no Windows, schema UGDM explicitamente migrado ate `1.6.0`, galeria de templates alinhada com `platformer_gm`, `prefab` separado de `display_name`, badges `Experimental` reconciliados na UI e nos docs, `nodeCompiler.ts` rebaixado para legado/experimental fora do pipeline canonico, smoke desktop completo `Build -> ROM -> Run` novamente reproduzido no host local, ArtStudio institucionalizado na baseline do workspace como superficie `Experimental`, agora com ingestao/backend multiformato em Rust, `suggested_frames` alinhados, importacao canonica para `assets/sprites` e pipeline basico `ArtStudio -> entidade sprite -> resources.res/build` provado localmente sem criar pipeline paralelo, RetroFX com editor visual-first de parallax/raster ainda `Experimental`, shell principal reorganizado como workspace adaptativo com rail lateral/painel contextual/presets de layout/focus mode, Project Manager agora com fallback automatico de pasta base para novos projetos, navegacao read-only dos arquivos do host SGDK no Asset Browser, adocao nao-destrutiva de projetos SGDK legados via overlay `rds/` e delegacao de `Build & Run` para o Makefile raiz do host quando o projeto aberto esta em modo overlay, sem quebrar o build canonico dos templates com donor, importacao MUGEN entrando no mesmo fluxo canonico como superficie `Experimental` para personagem/stage/screenpack com assets visuais/sonoros reais, e a nova camada comum de importadores externos agora exposta no wizard/IPC com `Godot 2D` como primeiro adapter adicional alem de SGDK/MUGEN e `Ikemen GO` tratado como extensao do eixo MUGEN. A repeticao em baseline commitada continua obrigatoria antes de qualquer claim institucional definitiva.
+**Ultima Atualizacao:** 2026-03-23
+**Ultima sessao:** 2026-03-23 (Reverse Core canonico experimental para ROMs MD/SNES)
+**Fase Atual:** Release candidate / beta testing do desktop Tauri, com baseline automatizada restaurada (check-tree, lint, tsc, vitest, cargo clippy, cargo test), persistencia atomica endurecida no Windows, schema UGDM explicitamente migrado ate `1.6.0`, galeria de templates alinhada com `platformer_gm`, `prefab` separado de `display_name`, badges `Experimental` reconciliados na UI e nos docs, `nodeCompiler.ts` rebaixado para legado/experimental fora do pipeline canonico, smoke desktop completo `Build -> ROM -> Run` novamente reproduzido no host local, ArtStudio institucionalizado na baseline do workspace como superficie `Experimental`, agora com ingestao/backend multiformato em Rust, `suggested_frames` alinhados, importacao canonica para `assets/sprites` e pipeline basico `ArtStudio -> entidade sprite -> resources.res/build` provado localmente sem criar pipeline paralelo, RetroFX com editor visual-first de parallax/raster ainda `Experimental`, shell principal reorganizado como workspace adaptativo com rail lateral/painel contextual/presets de layout/focus mode, Project Manager agora com fallback automatico de pasta base para novos projetos, navegacao read-only dos arquivos do host SGDK no Asset Browser, adocao nao-destrutiva de projetos SGDK legados via overlay `rds/` e delegacao de `Build & Run` para o Makefile raiz do host quando o projeto aberto esta em modo overlay, sem quebrar o build canonico dos templates com donor, importacao MUGEN entrando no mesmo fluxo canonico como superficie `Experimental` para personagem/stage/screenpack com assets visuais/sonoros reais, a nova camada comum de importadores externos agora exposta no wizard/IPC com `Godot 2D` como primeiro adapter adicional alem de SGDK/MUGEN e `Ikemen GO` tratado como extensao do eixo MUGEN, e agora um reverse core canonico em `src-tauri/src/tools/reverse/` para Mega Drive/SNES com manifesto, segmentacao, extractors por dominio, disassembly inicial, xrefs/call graph basicos e anotacoes persistidas por sidecar com hash. A repeticao em baseline commitada continua obrigatoria antes de qualquer claim institucional definitiva.
 **Branch sugerida:** `feat/desktop-e2e-workflow`
 
 > **DIRETRIZ DE SISTEMA PARA AGENTES DE IA:**
@@ -16,6 +16,15 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO
+
+* **O que acabou de acontecer (2026-03-23 - Reverse Core canonico experimental para ROMs):**
+  - **Arquitetura reversa canonica criada:** `src-tauri/src/tools/reverse/` agora concentra `manifest`, `platform`, `loader`, `graphics`, `text`, `audio`, `code`, `trace`, `annotations` e `projection`, com adapter-base por plataforma e implementacoes iniciais para `Mega Drive` e `SNES`.
+  - **Manifesto reverso como fonte de verdade:** `RomAnalysisManifest` passou a registrar hashes, header, mapper, chips especiais, segmentos/banks, candidatos de grafico/texto/audio, regioes de codigo, pointer tables, compressao, `logic_hints`, `annotations`, `trace` e `projection_status`.
+  - **Compatibilidade sem pipeline paralelo:** `asset_extractor.rs` e `reverse_explorer.rs` agora operam como superfices de compatibilidade derivadas do reverse core canonico, em vez de manter heuristicas soltas sem proveniencia comum.
+  - **IPC novo exposto ao app:** `lib.rs` e `toolsService.ts` agora expoem `rom_analyze`, `rom_disassemble`, `rom_get_xrefs`, `rom_get_call_graph`, `rom_extract_graphics`, `rom_extract_text`, `rom_extract_audio` e `rom_save_annotations`.
+  - **Workspace reverso integrado na UI:** `ToolsPanel.tsx` ganhou o `Reverse Workspace` como superficie canonica `Experimental`, com abas `ROM Map`, `Hex`, `Graphics`, `Text`, `Audio`, `Code` e `Projection`, incluindo leitura de `xrefs/call graph` e persistencia de anotacoes em sidecar validado por hash.
+  - **Barra verde desta rodada:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (177 testes), `cargo clippy -- -D warnings` OK e `cargo test --lib -- --nocapture --test-threads=1` OK (227 aprovados / 0 falhas / 3 ignorados) com `CARGO_TARGET_DIR=C:\\Users\\misae\\AppData\\Local\\RetroDevStudio\\cargo-target-shadow`.
+  - **Status honesto mantido:** esta rodada fecha a fundacao/Onda 1 do reverse core e parte inicial da Onda 2 (disassembly/xrefs/anotacoes), mas `trace` com Libretro real, projecao `.rds` e recuperacao avancada de logica continuam em hardening e nao podem ser anunciados como decompilacao completa.
 
 * **O que acabou de acontecer (2026-03-22 - Fechamento do MVP: provas de pipeline e sync documental):**
   - **Auto-updater deferido explicitamente para pos-MVP:** decisao registrada no Roadmap e Memory Bank. O crate `tauri-plugin-updater` permanece como placeholder; nenhum trabalho adicional sera investido ate o MVP ser fechado e a dependencia aprovada formalmente.
@@ -181,7 +190,7 @@
 | RetroFX | Experimental | Superficie real, agora com editor visual-first, preview animado e persistencia coberta por testes; ainda sem certificacao com ROM/cenas reais. |
 | Deep Profiler | Parcial | Ferramenta real, mas heuristica. |
 | Asset Extractor | Experimental | Ferramenta real, ainda sem certificacao ponta a ponta. |
-| Memory Viewer / VRAM Viewer / Reverse Explorer | Experimental | Ferramentas reais de inspecao, ainda nao robustas como fluxo principal. |
+| Memory Viewer / VRAM Viewer / Reverse Explorer | Experimental | Ferramentas reais de inspecao; o Reverse Workspace agora tem manifesto canonico, disassembly inicial, xrefs/call graph e anotacoes persistidas, mas ainda sem trace/projecao certificados. |
 | ArtStudio | Experimental | Superficie institucionalizada na baseline do workspace, com ingestao backend, `suggested_frames`, importacao canonica e pipeline basico ate `resources.res/build` provados localmente; ainda falta repeticao institucional com toolchain oficial e prova adicional de runtime para animacao autorada. |
 | Processo, CI e coerencia documental do checkout atual | Parcial | Gates e smoke desktop canonico ficaram verdes no workspace atual, o shell foi reorganizado com sucesso, mas ainda ha WIP fora da baseline commitada e a repeticao institucional continua necessaria. |
 
@@ -662,6 +671,7 @@
   - Expandindo a cobertura da validacao live do editor para warnings intermediarios e paridade entre preview, UX de bloqueio e validacao autoritativa no backend.
   - O baseline de CI inclui estrutura, lint, typecheck, `cargo clippy`, testes frontend e testes Rust, e existe workflow desktop dedicado com gatilhos remotos controlados para regressao multi-target.
   - O protocolo operacional desta fase passa a ser ciclico: proxima iteracao tecnica, disparo remoto do workflow desktop, proxima iteracao tecnica e registro no Memory Bank, sem deixar lacunas de handoff entre sessoes materiais.
+  - No eixo de engenharia reversa, a prioridade imediata deixou de ser heuristica solta e passou a ser endurecer o reverse core canonico (`manifesto -> extractors -> disassembly -> anotacoes`), sem vender `trace` ou projecao `.rds` como prontas antes da prova real.
 
 * **Estado real resumido:**
   - Frontend/editor: funcional e agora com fluxo amigavel para instalar dependencias externas sem sair do app.
@@ -887,8 +897,8 @@
   - GitHub Actions `Desktop E2E` (`22606643935`) -> OK em `windows-latest`, com `Run Mega Drive desktop smoke` e `Run SNES desktop smoke` ambos verdes.
 
 * **Proximo passo imediato:**
-  1. Abrir a sprint pequena de prova ponta a ponta `ArtStudio -> entidade sprite -> logica/pipeline -> runtime`, agora que o asset canonico e os indices de frame ja foram alinhados com a sprite sheet gerada no projeto.
-  2. Validar RetroFX `Experimental` com cenas reais e pelo menos um smoke `Build & Run` usando configuracao de parallax persistida, confirmando que a nova UX nao mascara problemas de integracao.
+  1. Instrumentar o overlay de `trace` com Libretro real no reverse core, para que o manifesto deixe de depender apenas de heuristica/disassembly estatico ao separar `code vs data`.
+  2. Expandir as fixtures sinteticas do reverse core para texto/audio/grafico e subir a cobertura do disassembler inicial (`68000` / `65816`) sem prometer decompilacao total.
   3. Continuar a limpeza estrutural dos arquivos grandes (`project_mgr.rs`, `lib.rs`, `ViewportPanel.tsx`, `ToolsPanel.tsx`, `App.tsx`) por extracoes pequenas e de baixo risco, sem regressao funcional.
 
 ---
@@ -937,7 +947,7 @@ As seguintes decisoes ja foram debatidas e sao finais:
 ## 4. PROXIMO PASSO IMEDIATO (PARA A IA EXECUTAR QUANDO SOLICITADA)
 
 **Tarefa:**
-Fechar o MVP do desktop Tauri: provas de pipeline agora cobertas por testes deterministicos, documentacao sincronizada e QA manual como proximo gargalo real.
+Fechar o MVP do desktop Tauri preservando a baseline verde, enquanto o reverse core novo sobe por ondas pequenas (`manifesto -> disassembly/xrefs -> trace -> projecao`) sem quebrar o fluxo canonico do produto.
 
 **Pre-requisitos operacionais:**
 * Manter os 6 gates canonicos verdes em toda alteracao relevante.

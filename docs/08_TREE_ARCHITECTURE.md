@@ -98,7 +98,18 @@ RetroDevStudio/
 |       |   |-- dependency_manager.rs
 |       |   |-- patch_studio.rs
 |       |   |-- photo2sgdk.rs
-|       |   `-- reverse_explorer.rs
+|       |   |-- reverse_explorer.rs
+|       |   `-- reverse/
+|       |       |-- annotations.rs
+|       |       |-- audio.rs
+|       |       |-- code.rs
+|       |       |-- graphics.rs
+|       |       |-- loader.rs
+|       |       |-- manifest.rs
+|       |       |-- mod.rs
+|       |       |-- platform.rs
+|       |       |-- projection.rs
+|       |       `-- trace.rs
 |       `-- ugdm/
 |           |-- components.rs
 |           |-- entities.rs
@@ -135,6 +146,7 @@ RetroDevStudio/
 
 - UI, layout, estado visual e componentes React vao para `src/`.
 - Build, parse, validacao, emulacao, assets e filesystem vao para `src-tauri/src/`.
+- O reverse core canonico de ROMs deve viver em `src-tauri/src/tools/reverse/`; wrappers legados como `asset_extractor.rs` e `reverse_explorer.rs` continuam como superfícies de compatibilidade.
 - IPC de frontend fica em `src/core/ipc/`.
 - Fixtures backend ficam em `src-tauri/tests/fixtures/`.
 - Dependencias de terceiros instaladas sob demanda vivem em `toolchains/` e nao devem ser versionadas no Git.
