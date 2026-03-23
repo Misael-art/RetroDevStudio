@@ -260,11 +260,63 @@ function defaultExternalImportProfiles() {
       mega_drive_only: true,
     },
     {
+      id: "ikemen_go",
+      name: "Ikemen GO",
+      family: "Fighting",
+      description: "Reaproveita o adapter conservador do eixo MUGEN com metadata propria.",
+      source_engine: "ikemen_go",
+      support_status: "Experimental",
+      supported_levels: ["L1", "L2", "L3"],
+      recommended_target: "megadrive",
+      experimental: true,
+      importable: true,
+      mega_drive_only: true,
+    },
+    {
       id: "godot",
       name: "Godot 2D",
       family: "2D Geral",
       description: "Importa Sprite2D, Camera2D e AudioStreamPlayer de cenas .tscn com proveniencia registrada.",
       source_engine: "godot",
+      support_status: "Experimental",
+      supported_levels: ["L1", "L2", "L3"],
+      recommended_target: "megadrive",
+      experimental: true,
+      importable: true,
+      mega_drive_only: true,
+    },
+    {
+      id: "construct",
+      name: "Construct",
+      family: "2D Event Sheet",
+      description: "Importa layouts, sprites, audio e preserva event sheets como hints explicitos.",
+      source_engine: "construct",
+      support_status: "Experimental",
+      supported_levels: ["L1", "L2", "L3"],
+      recommended_target: "megadrive",
+      experimental: true,
+      importable: true,
+      mega_drive_only: true,
+    },
+    {
+      id: "rpg_maker",
+      name: "RPG Maker",
+      family: "Data-driven RPG",
+      description: "Importa mapas, personagens, audio e eventos como hints explicitos.",
+      source_engine: "rpg_maker",
+      support_status: "Experimental",
+      supported_levels: ["L1", "L2", "L3"],
+      recommended_target: "megadrive",
+      experimental: true,
+      importable: true,
+      mega_drive_only: true,
+    },
+    {
+      id: "openbor",
+      name: "OpenBOR",
+      family: "Beat'em up",
+      description: "Importa modelos, estagios e audio com hints explicitos de logica.",
+      source_engine: "openbor",
       support_status: "Experimental",
       supported_levels: ["L1", "L2", "L3"],
       recommended_target: "megadrive",
@@ -934,6 +986,34 @@ describe("App build flow", () => {
       "godot",
       "F:/Projects/RetroDevStudio/tests/fixtures"
     );
+  });
+
+  it("shows the newly supported external profiles in the selector", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "",
+        activeProjectName: "",
+        activeScenePath: "",
+        activeScene: null,
+        activeSceneSource: null,
+        hwStatus: null,
+      });
+      await flush();
+      await flush();
+    });
+
+    const profileSelect = container.querySelector(
+      "[data-testid='external-import-profile-select']"
+    ) as HTMLSelectElement | null;
+
+    if (!profileSelect) {
+      throw new Error("External import profile select not found");
+    }
+
+    const options = Array.from(profileSelect.options).map((option) => option.value);
+    expect(options).toContain("construct");
+    expect(options).toContain("rpg_maker");
+    expect(options).toContain("openbor");
   });
 
   it("does not start the frame loop when the game tab opens without a loaded ROM", async () => {

@@ -68,6 +68,7 @@ function physicsFixtureEntity(): Entity {
           ],
           edges: [{ id: "e1", fromNode: "n1", toNode: "n2" }],
         }),
+        logic_hints: ["Hint importado do adapter externo."],
       },
     },
   };
@@ -136,6 +137,8 @@ describe("InspectorPanel", () => {
     expect(container.textContent).toContain("Audio SFX");
     expect(container.textContent).toContain("Input Mapping");
     expect(container.textContent).toContain("Graph: 2 nodes, 1 edges");
+    expect(container.textContent).toContain("Imported Hints");
+    expect(container.textContent).toContain("Hint importado do adapter externo.");
   });
 
   it("shows contextual knowledge tooltip for inspector sections", async () => {

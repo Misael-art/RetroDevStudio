@@ -173,6 +173,55 @@ struct GodotSceneParse {
     nodes: Vec<GodotNode>,
 }
 
+#[derive(Debug, Clone)]
+struct ConstructObjectType {
+    name: String,
+    plugin_id: String,
+    display_asset: Option<PathBuf>,
+    audio_assets: Vec<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+struct ConstructLayoutInstance {
+    object_name: String,
+    x: i32,
+    y: i32,
+}
+
+#[derive(Debug, Clone)]
+struct RpgMakerEventCommand {
+    code: i32,
+    parameters: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Clone)]
+struct OpenBorModelAsset {
+    name: String,
+    display_asset: Option<PathBuf>,
+    audio_assets: Vec<PathBuf>,
+    logic_hints: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct OpenBorLevelAsset {
+    name: String,
+    background_asset: Option<PathBuf>,
+    music_asset: Option<PathBuf>,
+    logic_hints: Vec<String>,
+}
+
+struct ImportedSpriteEntitySpec {
+    entity_id: String,
+    display_name: String,
+    asset: String,
+    source_path: PathBuf,
+    x: i32,
+    y: i32,
+    input: Option<InputComponent>,
+    physics: Option<PhysicsComponent>,
+    logic_hints: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SgdkAssetMaterialization {
     Copy,
@@ -305,26 +354,39 @@ const EXTERNAL_IMPORT_PROFILES: &[ExternalImportProfileDefinition] = &[
         id: "construct",
         name: "Construct",
         family: "2D event-sheet",
-        description: "Roadmap: layouts, sprites e audio com logica convertida apenas por hints.",
+        description: "Importa layouts, sprites, tile backgrounds e audio de projetos em pasta, preservando event sheets como hints explicitos.",
         source_engine: "construct",
-        support_status: "Parcial",
-        supported_levels: &["L1"],
+        support_status: "Experimental",
+        supported_levels: &["L1", "L2", "L3"],
         recommended_target: "megadrive",
         experimental: true,
-        importable: false,
+        importable: true,
         mega_drive_only: true,
     },
     ExternalImportProfileDefinition {
         id: "rpg_maker",
         name: "RPG Maker",
         family: "Data-driven RPG",
-        description: "Roadmap: mapas, tilesets, audio e eventos skeleton.",
+        description: "Importa mapas, tilesets, audio e eventos baseados em JSON, preservando comandos como hints.",
         source_engine: "rpg_maker",
-        support_status: "Parcial",
-        supported_levels: &["L1"],
+        support_status: "Experimental",
+        supported_levels: &["L1", "L2", "L3"],
         recommended_target: "megadrive",
         experimental: true,
-        importable: false,
+        importable: true,
+        mega_drive_only: true,
+    },
+    ExternalImportProfileDefinition {
+        id: "openbor",
+        name: "OpenBOR",
+        family: "Beat'em up",
+        description: "Importa modelos, estagios e audio de modulos OpenBOR com hints explicitos de logica.",
+        source_engine: "openbor",
+        support_status: "Experimental",
+        supported_levels: &["L1", "L2", "L3"],
+        recommended_target: "megadrive",
+        experimental: true,
+        importable: true,
         mega_drive_only: true,
     },
     ExternalImportProfileDefinition {
@@ -866,6 +928,7 @@ fn import_sgdk_resources_into_scene(
                         logic: is_primary_sprite.then(|| LogicComponent {
                             graph: Some(imported_sprite_logic_graph(&resource.name)),
                             graph_ref: None,
+                            logic_hints: Vec::new(),
                             variables: HashMap::new(),
                         }),
                         ..Components::default()
@@ -1300,6 +1363,21 @@ fn normalize_relative_path(path: &Path) -> String {
         .join("/")
 }
 
+fn collapse_relative_components(path: &Path) -> PathBuf {
+    let mut collapsed = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(segment) => collapsed.push(segment),
+            Component::ParentDir => {
+                collapsed.pop();
+            }
+            Component::CurDir => {}
+            Component::RootDir | Component::Prefix(_) => {}
+        }
+    }
+    collapsed
+}
+
 fn write_legacy_sgdk_index(overlay_dir: &Path, index: &LegacySgdkIndex) -> Result<(), LoadError> {
     let index_path = overlay_dir.join("legacy_sgdk_index.json");
     let serialized = serde_json::to_string_pretty(index).map_err(|error| {
@@ -1640,6 +1718,7 @@ fn platformer_player_prefab_with_dims(
             logic: Some(LogicComponent {
                 graph: None,
                 graph_ref: Some("graphs/platformer_player_logic.json".to_string()),
+                logic_hints: Vec::new(),
                 variables: HashMap::new(),
             }),
             ..Components::default()
@@ -2412,6 +2491,84 @@ fn parse_mugen_air_frame_line(line: &str) -> Option<MugenAirFrame> {
     })
 }
 
+fn collect_mugen_character_logic_hints(
+    root_dir: &Path,
+    files: &MugenIniSection,
+) -> Result<Vec<String>, LoadError> {
+    let mut hints = Vec::new();
+    let mut seen_paths = HashSet::new();
+    let mut seen_hints = HashSet::new();
+
+    for (key, relative) in &files.entries {
+        let lowered_key = key.to_ascii_lowercase();
+        if !matches!(
+            lowered_key.as_str(),
+            "cmd" | "cns" | "st" | "stcommon" | "state"
+        ) && !lowered_key.starts_with("st")
+        {
+            continue;
+        }
+        let path = root_dir.join(relative);
+        if !path.is_file() {
+            continue;
+        }
+        let normalized_path = path.to_string_lossy().to_string();
+        if !seen_paths.insert(normalized_path) {
+            continue;
+        }
+
+        let content = read_text_lossy(&path)?;
+        let relative_label = path
+            .strip_prefix(root_dir)
+            .ok()
+            .map(normalize_relative_path)
+            .unwrap_or_else(|| path.display().to_string());
+        hints.push(format!(
+            "Arquivo MUGEN '{}' preservado como hint explicito.",
+            relative_label
+        ));
+
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with(';') {
+                continue;
+            }
+            let lowered = trimmed.to_ascii_lowercase();
+            let candidate = if lowered.starts_with("[command") {
+                Some("Define comandos de input em CMD.".to_string())
+            } else if lowered.contains("changestate") {
+                Some("Usa ChangeState para trocar estados.".to_string())
+            } else if lowered.contains("hitdef") {
+                Some("Usa HitDef para ataques/dano.".to_string())
+            } else if lowered.contains("velset") || lowered.contains("veladd") {
+                Some("Controla velocidade com VelSet/VelAdd.".to_string())
+            } else if lowered.contains("posadd") || lowered.contains("posset") {
+                Some("Ajusta posicao com PosAdd/PosSet.".to_string())
+            } else if lowered.contains("playsnd") {
+                Some("Aciona audio com PlaySnd.".to_string())
+            } else if lowered.contains("helper") {
+                Some("Usa Helper para entidades auxiliares.".to_string())
+            } else if lowered.starts_with("name =") {
+                Some(format!("Comando MUGEN {}.", trimmed))
+            } else {
+                None
+            };
+
+            if let Some(candidate) = candidate {
+                let lowered_candidate = candidate.to_ascii_lowercase();
+                if seen_hints.insert(lowered_candidate) {
+                    hints.push(candidate);
+                }
+            }
+            if hints.len() >= 10 {
+                return Ok(hints);
+            }
+        }
+    }
+
+    Ok(hints)
+}
+
 fn import_mugen_character_candidate(
     project_dir: &Path,
     candidate: &MugenCandidate,
@@ -2471,6 +2628,7 @@ fn import_mugen_character_candidate(
         Some(candidate.display_name.clone()),
     );
     let entity_id = sgdk_entity_id(&candidate.display_name);
+    let logic_hints = collect_mugen_character_logic_hints(&candidate.root_dir, files)?;
     scene.entities.push(Entity {
         entity_id: entity_id.clone(),
         display_name: Some(candidate.display_name.clone()),
@@ -2488,11 +2646,10 @@ fn import_mugen_character_candidate(
                 meta_sprite: atlas.cell_width > 32 || atlas.cell_height > 32,
             }),
             collision: mugen_collision_component_from_actions(&actions),
-            logic: Some(LogicComponent {
-                graph: Some(imported_mugen_idle_logic_graph(&entity_id)),
-                graph_ref: None,
-                variables: HashMap::new(),
-            }),
+            logic: Some(imported_logic_component(
+                Some(imported_mugen_idle_logic_graph(&entity_id)),
+                logic_hints,
+            )),
             ..Components::default()
         },
     });
@@ -3574,6 +3731,9 @@ pub fn import_external_project(
             })
         }
         "godot" => import_godot_project(project_dir, source_path),
+        "construct" => import_construct_project(project_dir, source_path),
+        "rpg_maker" => import_rpg_maker_project(project_dir, source_path),
+        "openbor" => import_openbor_project(project_dir, source_path),
         _ => Err(LoadError(format!(
             "O perfil '{}' ainda nao possui adapter canonico.",
             profile.name
@@ -3611,6 +3771,24 @@ pub fn stamp_imported_external_profile_metadata(
             "1.0.0".to_string(),
             "imported_godot".to_string(),
             "godot_tscn_v1".to_string(),
+        ),
+        "construct" => (
+            "imported_construct".to_string(),
+            "1.0.0".to_string(),
+            "imported_construct".to_string(),
+            "construct_folder_v1".to_string(),
+        ),
+        "rpg_maker" => (
+            "imported_rpg_maker".to_string(),
+            "1.0.0".to_string(),
+            "imported_rpg_maker".to_string(),
+            "rpg_maker_data_json_v1".to_string(),
+        ),
+        "openbor" => (
+            "imported_openbor".to_string(),
+            "1.0.0".to_string(),
+            "imported_openbor".to_string(),
+            "openbor_module_v1".to_string(),
         ),
         _ => (
             format!("imported_{}", profile.source_engine),
@@ -3658,26 +3836,68 @@ pub fn import_godot_project(
     let mut pending_cameras = Vec::new();
     let mut asset_cache: HashMap<PathBuf, String> = HashMap::new();
     let mut skipped = Vec::new();
+    let mut node_logic = HashMap::new();
+
+    for node in &nodes {
+        let Some(script_path) = godot_node_script_path(godot_path, node, &ext_resources) else {
+            continue;
+        };
+        let script = read_text_lossy(&script_path)?;
+        let (mut hints, input, physics) = analyze_godot_script(&script);
+        let script_label = script_path
+            .strip_prefix(godot_path)
+            .ok()
+            .map(normalize_relative_path)
+            .unwrap_or_else(|| script_path.display().to_string());
+        hints.insert(0, format!("Script Godot preservado como hint: {}.", script_label));
+        node_logic.insert(node.name.clone(), (hints, input, physics));
+    }
 
     for node in nodes {
+        let inherited_logic = node_logic.get(&node.name).cloned().or_else(|| {
+            node._parent
+                .split('/')
+                .next_back()
+                .filter(|candidate| !candidate.trim().is_empty() && *candidate != ".")
+                .and_then(|candidate| node_logic.get(candidate).cloned())
+        });
         match node.node_type.as_str() {
-            "Sprite2D" => {
-                let Some(texture_ref) = node.properties.get("texture") else {
-                    skipped.push(format!("{}: Sprite2D sem textura.", node.name));
-                    continue;
-                };
-                let Some(texture_id) = godot_ext_resource_id(texture_ref) else {
-                    skipped.push(format!("{}: referencia de textura Godot nao suportada.", node.name));
-                    continue;
-                };
-                let Some(texture_resource) = ext_resources.get(&texture_id) else {
+            "Sprite2D" | "AnimatedSprite2D" => {
+                let texture_source = if node.node_type == "Sprite2D" {
+                    if let Some(texture_ref) = node.properties.get("texture") {
+                        let Some(texture_id) = godot_ext_resource_id(texture_ref) else {
+                            skipped.push(format!(
+                                "{}: referencia de textura Godot nao suportada.",
+                                node.name
+                            ));
+                            continue;
+                        };
+                        let Some(texture_resource) = ext_resources.get(&texture_id) else {
+                            skipped.push(format!(
+                                "{}: ExtResource '{}' nao encontrada para Sprite2D.",
+                                node.name, texture_id
+                            ));
+                            continue;
+                        };
+                        resolve_godot_resource_path(godot_path, &texture_resource.path)
+                    } else if let Some(asset) =
+                        godot_node_visual_asset_path(godot_path, &node, &ext_resources)
+                    {
+                        asset
+                    } else {
+                        skipped.push(format!("{}: Sprite2D sem textura.", node.name));
+                        continue;
+                    }
+                } else if let Some(asset) = godot_node_visual_asset_path(godot_path, &node, &ext_resources) {
+                    asset
+                } else {
                     skipped.push(format!(
-                        "{}: ExtResource '{}' nao encontrada para Sprite2D.",
-                        node.name, texture_id
+                        "{}: AnimatedSprite2D sem atlas/frames importaveis nesta wave.",
+                        node.name
                     ));
                     continue;
                 };
-                let texture_source = resolve_godot_resource_path(godot_path, &texture_resource.path);
+
                 if !texture_source.is_file() {
                     skipped.push(format!(
                         "{}: textura '{}' nao encontrada no projeto Godot.",
@@ -3695,37 +3915,62 @@ pub fn import_godot_project(
                     "godot",
                     &mut asset_cache,
                 )?;
-                let (frame_width, frame_height) =
-                    image::image_dimensions(&texture_source).unwrap_or((32, 32));
                 let entity_id = unique_entity_id(&mut entity_ids, &node.name, "sprite");
                 if first_sprite_id.is_none() {
                     first_sprite_id = Some(entity_id.clone());
                 }
                 let (x, y) = parse_godot_position(node.properties.get("position"));
-                scene.entities.push(Entity {
+                let (mut logic_hints, input, physics) =
+                    inherited_logic.unwrap_or_else(|| (Vec::new(), None, None));
+                if node.node_type == "AnimatedSprite2D" {
+                    logic_hints.push(
+                        "AnimatedSprite2D importado como sprite estatico; frames e playback permanecem como hints."
+                            .to_string(),
+                    );
+                }
+                scene.entities.push(imported_sprite_entity(ImportedSpriteEntitySpec {
                     entity_id,
-                    display_name: Some(node.name.clone()),
-                    prefab: None,
-                    transform: crate::ugdm::entities::Transform { x, y },
-                    components: Components {
-                        sprite: Some(SpriteComponent {
-                            asset,
-                            frame_width: frame_width.max(1),
-                            frame_height: frame_height.max(1),
-                            pivot: None,
-                            palette_slot: 0,
-                            animations: HashMap::new(),
-                            priority: "foreground".to_string(),
-                            meta_sprite: frame_width > 32 || frame_height > 32,
-                        }),
-                        ..Components::default()
-                    },
-                });
+                    display_name: node.name.clone(),
+                    asset,
+                    source_path: texture_source,
+                    x,
+                    y,
+                    input,
+                    physics,
+                    logic_hints,
+                }));
             }
             "Camera2D" => {
                 let entity_id = unique_entity_id(&mut entity_ids, &node.name, "camera");
                 let (x, y) = parse_godot_position(node.properties.get("position"));
                 pending_cameras.push((entity_id, node.name, x, y));
+            }
+            "TileMap" | "TileMapLayer" => {
+                let Some(tileset_source) = godot_node_visual_asset_path(godot_path, &node, &ext_resources) else {
+                    skipped.push(format!(
+                        "{}: {} sem tileset visual importavel nesta wave.",
+                        node.name, node.node_type
+                    ));
+                    continue;
+                };
+                let asset = materialize_external_file(
+                    project_dir,
+                    godot_path,
+                    &tileset_source,
+                    "tilesets",
+                    "godot",
+                    &mut asset_cache,
+                )?;
+                let entity_id = unique_entity_id(&mut entity_ids, &node.name, "tilemap");
+                let (x, y) = parse_godot_position(node.properties.get("position"));
+                scene.entities.push(imported_tilemap_entity(
+                    entity_id,
+                    node.name.clone(),
+                    asset,
+                    &tileset_source,
+                    x,
+                    y,
+                ));
             }
             "AudioStreamPlayer" | "AudioStreamPlayer2D" => {
                 let Some(stream_ref) = node.properties.get("stream") else {
@@ -3767,48 +4012,24 @@ pub fn import_godot_project(
                     audio_sfx.insert(slugify_scene_id(&node.name), asset);
                 }
             }
-            "AnimatedSprite2D" | "TileMap" | "TileMapLayer" => {
-                skipped.push(format!(
-                    "{}: no '{}' ainda nao possui conversao nativa nesta wave.",
-                    node.name, node.node_type
-                ));
-            }
             _ => {}
         }
     }
 
     for (entity_id, display_name, x, y) in pending_cameras {
-        scene.entities.push(Entity {
-            entity_id,
-            display_name: Some(display_name),
-            prefab: None,
-            transform: crate::ugdm::entities::Transform { x, y },
-            components: Components {
-                camera: Some(CameraComponent {
-                    follow_entity: first_sprite_id.clone(),
-                    offset_x: 0,
-                    offset_y: 0,
-                }),
-                ..Components::default()
-            },
-        });
+        let mut entity = imported_camera_entity(entity_id, display_name, first_sprite_id.clone());
+        entity.transform = crate::ugdm::entities::Transform { x, y };
+        scene.entities.push(entity);
     }
 
     if !audio_sfx.is_empty() || audio_bgm.is_some() {
         let entity_id = unique_entity_id(&mut entity_ids, "audio_bank", "audio");
-        scene.entities.push(Entity {
-            entity_id,
-            display_name: Some("Godot Audio Bank".to_string()),
-            prefab: None,
-            transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
-            components: Components {
-                audio: Some(AudioComponent {
-                    sfx: audio_sfx,
-                    bgm: audio_bgm,
-                }),
-                ..Components::default()
-            },
-        });
+        scene.entities.push(external_audio_bank_entity(
+            &entity_id,
+            "Godot Audio Bank",
+            audio_sfx,
+            audio_bgm,
+        ));
     }
 
     if first_sprite_id.is_some()
@@ -3817,20 +4038,11 @@ pub fn import_godot_project(
             .iter()
             .any(|entity| entity.components.camera.is_some())
     {
-        scene.entities.push(Entity {
-            entity_id: unique_entity_id(&mut entity_ids, "main_camera", "camera"),
-            display_name: Some("Main Camera".to_string()),
-            prefab: None,
-            transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
-            components: Components {
-                camera: Some(CameraComponent {
-                    follow_entity: first_sprite_id,
-                    offset_x: 0,
-                    offset_y: 0,
-                }),
-                ..Components::default()
-            },
-        });
+        scene.entities.push(imported_camera_entity(
+            unique_entity_id(&mut entity_ids, "main_camera", "camera"),
+            "Main Camera".to_string(),
+            first_sprite_id,
+        ));
     }
 
     save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
@@ -4145,6 +4357,1267 @@ fn parse_godot_position(value: Option<&String>) -> (i32, i32) {
     (x, y)
 }
 
+fn godot_node_script_path(
+    root: &Path,
+    node: &GodotNode,
+    ext_resources: &HashMap<String, GodotExtResource>,
+) -> Option<PathBuf> {
+    let script_ref = node.properties.get("script")?;
+    let script_id = godot_ext_resource_id(script_ref)?;
+    let resource = ext_resources.get(&script_id)?;
+    let script_path = resolve_godot_resource_path(root, &resource.path);
+    script_path.is_file().then_some(script_path)
+}
+
+fn godot_node_visual_asset_path(
+    root: &Path,
+    node: &GodotNode,
+    ext_resources: &HashMap<String, GodotExtResource>,
+) -> Option<PathBuf> {
+    node.properties.values().find_map(|value| {
+        let resource_id = godot_ext_resource_id(value)?;
+        let resource = ext_resources.get(&resource_id)?;
+        let asset_path = resolve_godot_resource_path(root, &resource.path);
+        (asset_path.is_file()
+            && asset_path
+                .to_str()
+                .is_some_and(string_looks_like_visual_asset))
+        .then_some(asset_path)
+    })
+}
+
+fn analyze_godot_script(script: &str) -> (Vec<String>, Option<InputComponent>, Option<PhysicsComponent>) {
+    let lowered = script.to_ascii_lowercase();
+    let mut hints = Vec::new();
+    let mut mapping = HashMap::new();
+
+    if lowered.contains("_physics_process") {
+        hints.push("Godot script define _physics_process(delta).".to_string());
+    } else if lowered.contains("_process") {
+        hints.push("Godot script define _process(delta).".to_string());
+    }
+
+    if lowered.contains("input.is_action_pressed(\"ui_left\")")
+        || lowered.contains("input.is_action_pressed('ui_left')")
+    {
+        mapping.insert("move_left".to_string(), "DPAD_LEFT".to_string());
+        hints.push("Mapeado input Godot ui_left -> move_left.".to_string());
+    }
+    if lowered.contains("input.is_action_pressed(\"ui_right\")")
+        || lowered.contains("input.is_action_pressed('ui_right')")
+    {
+        mapping.insert("move_right".to_string(), "DPAD_RIGHT".to_string());
+        hints.push("Mapeado input Godot ui_right -> move_right.".to_string());
+    }
+    if lowered.contains("input.is_action_pressed(\"ui_up\")")
+        || lowered.contains("input.is_action_pressed('ui_up')")
+    {
+        mapping.insert("move_up".to_string(), "DPAD_UP".to_string());
+        hints.push("Mapeado input Godot ui_up -> move_up.".to_string());
+    }
+    if lowered.contains("input.is_action_pressed(\"ui_down\")")
+        || lowered.contains("input.is_action_pressed('ui_down')")
+    {
+        mapping.insert("move_down".to_string(), "DPAD_DOWN".to_string());
+        hints.push("Mapeado input Godot ui_down -> move_down.".to_string());
+    }
+    if lowered.contains("input.is_action_just_pressed(\"ui_accept\")")
+        || lowered.contains("input.is_action_just_pressed('ui_accept')")
+        || lowered.contains("input.is_action_just_pressed(\"jump\")")
+        || lowered.contains("input.is_action_just_pressed('jump')")
+        || lowered.contains("jump_velocity")
+    {
+        mapping.insert("jump".to_string(), "BUTTON_A".to_string());
+        hints.push("Mapeado input Godot de salto/accept -> jump.".to_string());
+    }
+
+    if lowered.contains("move_and_slide") {
+        hints.push("Script Godot usa move_and_slide; mantido como hint explicito.".to_string());
+    }
+    if lowered.contains(".play(") || lowered.contains("animatedsprite2d") {
+        hints.push("Script Godot aciona animacoes via play().".to_string());
+    }
+    if lowered.contains("velocity.y +=") || lowered.contains("gravity") {
+        hints.push("Script Godot aplica gravidade/velocidade vertical.".to_string());
+    }
+    if lowered.contains("position.x +=")
+        || lowered.contains("position.x -=")
+        || lowered.contains("velocity.x")
+    {
+        hints.push("Script Godot atualiza deslocamento horizontal.".to_string());
+    }
+
+    let input = (!mapping.is_empty()).then_some(InputComponent {
+        device: "joypad1".to_string(),
+        mapping,
+    });
+    let physics = (lowered.contains("velocity.y +=")
+        || lowered.contains("gravity")
+        || lowered.contains("jump_velocity"))
+    .then_some(PhysicsComponent {
+        gravity: true,
+        gravity_strength: 6,
+        max_velocity: Some(Velocity { x: 32, y: 96 }),
+        friction: 1,
+        bounce: 0,
+    });
+
+    (hints, input, physics)
+}
+
+fn validate_construct_project_path(construct_path: &Path) -> Result<(), LoadError> {
+    if !construct_path.is_dir() {
+        return Err(LoadError(format!(
+            "Projeto Construct invalido: '{}' nao e um diretorio.",
+            construct_path.display()
+        )));
+    }
+
+    let has_project_file = construct_path.join("project.c3proj").is_file()
+        || construct_path.join("project.caproj").is_file()
+        || !collect_recursive_files_by_extension(
+            construct_path,
+            &["c3proj", "caproj"],
+            &["export", "rds", "node_modules"],
+        )?
+        .is_empty();
+    let has_layouts =
+        !collect_recursive_files_by_extension(&construct_path.join("layouts"), &["json"], &[])?
+            .is_empty();
+    let has_objects =
+        !collect_recursive_files_by_extension(&construct_path.join("objectTypes"), &["json"], &[])?
+            .is_empty();
+    if has_project_file || has_layouts || has_objects {
+        return Ok(());
+    }
+
+    Err(LoadError(format!(
+        "Projeto Construct invalido: nenhum project.c3proj, layout ou objectType encontrado em '{}'.",
+        construct_path.display()
+    )))
+}
+
+fn detect_construct_primary_layout_path(construct_path: &Path) -> Result<PathBuf, LoadError> {
+    let mut layouts =
+        collect_recursive_files_by_extension(&construct_path.join("layouts"), &["json"], &[])?;
+    layouts.sort();
+    let first = layouts.into_iter().next().ok_or_else(|| {
+        LoadError(format!(
+            "Projeto Construct invalido: nenhum layout JSON encontrado em '{}'.",
+            construct_path.display()
+        ))
+    })?;
+    Ok(construct_path.join("layouts").join(first.replace('/', "\\")))
+}
+
+fn parse_construct_object_type(root: &Path, path: &Path) -> Result<ConstructObjectType, LoadError> {
+    let value = read_json_lossy(path)?;
+    let name = find_first_json_string_for_keys(&value, &["name", "objectName", "typeName"])
+        .or_else(|| {
+            path.file_stem()
+                .map(|stem| stem.to_string_lossy().trim().to_string())
+                .filter(|stem| !stem.is_empty())
+        })
+        .unwrap_or_else(|| "construct_object".to_string());
+    let plugin_id =
+        find_first_json_string_for_keys(&value, &["plugin-id", "pluginId", "plugin", "type"])
+            .unwrap_or_else(|| "sprite".to_string());
+    let current_dir = path.parent().unwrap_or(root);
+    let strings = json_strings(&value);
+    let display_asset = strings.iter().find_map(|candidate| {
+        string_looks_like_visual_asset(candidate)
+            .then(|| resolve_external_asset_candidate(root, current_dir, candidate))
+            .flatten()
+    });
+    let audio_assets = dedupe_paths(
+        strings
+            .iter()
+            .filter(|candidate| string_looks_like_audio_asset(candidate))
+            .filter_map(|candidate| resolve_external_asset_candidate(root, current_dir, candidate))
+            .collect(),
+    );
+    Ok(ConstructObjectType {
+        name,
+        plugin_id,
+        display_asset,
+        audio_assets,
+    })
+}
+
+fn load_construct_object_types(
+    construct_path: &Path,
+) -> Result<HashMap<String, ConstructObjectType>, LoadError> {
+    let mut result = HashMap::new();
+    let mut paths =
+        collect_recursive_files_by_extension(&construct_path.join("objectTypes"), &["json"], &[])?;
+    paths.sort();
+    for relative in paths {
+        let full_path = construct_path
+            .join("objectTypes")
+            .join(relative.replace('/', "\\"));
+        let object_type = parse_construct_object_type(construct_path, &full_path)?;
+        result.insert(object_type.name.clone(), object_type);
+    }
+    Ok(result)
+}
+
+fn construct_collect_layout_instances(
+    value: &serde_json::Value,
+    sink: &mut Vec<ConstructLayoutInstance>,
+) {
+    match value {
+        serde_json::Value::Object(entries) => {
+            let object_name = entries
+                .get("objectName")
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| entries.get("type").and_then(serde_json::Value::as_str))
+                .or_else(|| entries.get("name").and_then(serde_json::Value::as_str))
+                .or_else(|| entries.get("objectType").and_then(serde_json::Value::as_str))
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            let x = entries
+                .get("x")
+                .and_then(json_value_to_i32)
+                .or_else(|| {
+                    entries
+                        .get("worldInfo")
+                        .and_then(|info| info.get("x"))
+                        .and_then(json_value_to_i32)
+                });
+            let y = entries
+                .get("y")
+                .and_then(json_value_to_i32)
+                .or_else(|| {
+                    entries
+                        .get("worldInfo")
+                        .and_then(|info| info.get("y"))
+                        .and_then(json_value_to_i32)
+                });
+            if let (Some(object_name), Some(x), Some(y)) = (object_name, x, y) {
+                sink.push(ConstructLayoutInstance { object_name, x, y });
+            }
+            for child in entries.values() {
+                construct_collect_layout_instances(child, sink);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                construct_collect_layout_instances(item, sink);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn construct_event_sheet_hints(construct_path: &Path) -> Result<Vec<String>, LoadError> {
+    let mut hints = Vec::new();
+    let mut seen = HashSet::new();
+    let mut paths =
+        collect_recursive_files_by_extension(&construct_path.join("eventSheets"), &["json"], &[])?;
+    paths.sort();
+    for relative in paths.into_iter().take(3) {
+        let full_path = construct_path
+            .join("eventSheets")
+            .join(relative.replace('/', "\\"));
+        let json = read_json_lossy(&full_path)?;
+        let label = Path::new(&relative)
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().to_string())
+            .unwrap_or_else(|| relative.clone());
+        hints.push(format!(
+            "Construct event sheet '{}' preservada como hint explicito.",
+            label
+        ));
+        for text in json_strings(&json) {
+            let lowered = text.to_ascii_lowercase();
+            if text.trim().is_empty()
+                || string_looks_like_visual_asset(&text)
+                || string_looks_like_audio_asset(&text)
+                || !["jump", "move", "attack", "spawn", "audio", "music", "event"]
+                    .iter()
+                    .any(|keyword| lowered.contains(keyword))
+            {
+                continue;
+            }
+            if seen.insert(lowered) {
+                hints.push(format!("Construct hint: {}.", text.trim()));
+            }
+            if hints.len() >= 8 {
+                return Ok(hints);
+            }
+        }
+    }
+    Ok(hints)
+}
+
+pub fn import_construct_project(
+    project_dir: &Path,
+    construct_path: &Path,
+) -> Result<ExternalImportReport, LoadError> {
+    validate_construct_project_path(construct_path)?;
+    let layout_path = detect_construct_primary_layout_path(construct_path)?;
+    let layout_json = read_json_lossy(&layout_path)?;
+    let object_types = load_construct_object_types(construct_path)?;
+    let event_sheet_hints = construct_event_sheet_hints(construct_path)?;
+
+    let scene_name = layout_path
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().trim().to_string())
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or_else(|| "Construct Layout".to_string());
+    let mut scene = canonical_scene(DEFAULT_SCENE_ID, Some(scene_name));
+    let mut entity_ids = HashSet::new();
+    let mut asset_cache = HashMap::new();
+    let mut first_sprite_id: Option<String> = None;
+    let mut skipped = Vec::new();
+    let mut logic_assigned = false;
+
+    let mut layout_instances = Vec::new();
+    construct_collect_layout_instances(&layout_json, &mut layout_instances);
+    let mut seen_instances = HashSet::new();
+    for instance in layout_instances {
+        let key = format!("{}:{}:{}", instance.object_name, instance.x, instance.y);
+        if !seen_instances.insert(key) {
+            continue;
+        }
+        let Some(object_type) = object_types.get(&instance.object_name) else {
+            continue;
+        };
+        let Some(display_asset) = object_type.display_asset.as_ref() else {
+            continue;
+        };
+
+        let entity_id = unique_entity_id(&mut entity_ids, &instance.object_name, "construct");
+        let asset = materialize_external_file(
+            project_dir,
+            construct_path,
+            display_asset,
+            if object_type.plugin_id.to_ascii_lowercase().contains("tile") {
+                "tilesets"
+            } else {
+                "sprites"
+            },
+            "construct",
+            &mut asset_cache,
+        )?;
+        if object_type.plugin_id.to_ascii_lowercase().contains("tile") {
+            scene.entities.push(imported_tilemap_entity(
+                entity_id,
+                object_type.name.clone(),
+                asset,
+                display_asset,
+                instance.x,
+                instance.y,
+            ));
+            continue;
+        }
+        let mut logic_hints = Vec::new();
+        if !logic_assigned && !event_sheet_hints.is_empty() {
+            logic_hints.extend(event_sheet_hints.clone());
+            logic_assigned = true;
+        }
+        if first_sprite_id.is_none() {
+            first_sprite_id = Some(entity_id.clone());
+        }
+        scene.entities.push(imported_sprite_entity(ImportedSpriteEntitySpec {
+            entity_id,
+            display_name: object_type.name.clone(),
+            asset,
+            source_path: display_asset.clone(),
+            x: instance.x,
+            y: instance.y,
+            input: None,
+            physics: None,
+            logic_hints,
+        }));
+    }
+
+    if first_sprite_id.is_none() {
+        let mut fallback_x = 32;
+        for object_type in object_types.values() {
+            let Some(display_asset) = object_type.display_asset.as_ref() else {
+                continue;
+            };
+            let entity_id = unique_entity_id(&mut entity_ids, &object_type.name, "construct");
+            let asset = materialize_external_file(
+                project_dir,
+                construct_path,
+                display_asset,
+                "sprites",
+                "construct",
+                &mut asset_cache,
+            )?;
+            let mut logic_hints = Vec::new();
+            if !logic_assigned && !event_sheet_hints.is_empty() {
+                logic_hints.extend(event_sheet_hints.clone());
+                logic_assigned = true;
+            }
+            if first_sprite_id.is_none() {
+                first_sprite_id = Some(entity_id.clone());
+            }
+            scene.entities.push(imported_sprite_entity(ImportedSpriteEntitySpec {
+                entity_id,
+                display_name: object_type.name.clone(),
+                asset,
+                source_path: display_asset.clone(),
+                x: fallback_x,
+                y: 96,
+                input: None,
+                physics: None,
+                logic_hints,
+            }));
+            fallback_x += 48;
+        }
+    }
+
+    let mut audio_sources = object_types
+        .values()
+        .flat_map(|object_type| object_type.audio_assets.clone())
+        .collect::<Vec<_>>();
+    for relative in collect_recursive_files_by_extension(
+        construct_path,
+        &["wav", "ogg", "mp3", "m4a", "flac"],
+        &["export", "rds", "node_modules"],
+    )? {
+        audio_sources.push(construct_path.join(relative.replace('/', "\\")));
+    }
+    let mut sfx = HashMap::new();
+    let mut bgm = None;
+    for source in dedupe_paths(audio_sources) {
+        if !source.is_file() {
+            continue;
+        }
+        let asset = materialize_external_file(
+            project_dir,
+            construct_path,
+            &source,
+            "audio",
+            "construct",
+            &mut asset_cache,
+        )?;
+        let name = source
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| "audio".to_string());
+        if bgm.is_none()
+            && ["bgm", "music", "theme", "track"]
+                .iter()
+                .any(|key| name.to_ascii_lowercase().contains(key))
+        {
+            bgm = Some(asset);
+        } else {
+            sfx.insert(slugify_scene_id(&name), asset);
+        }
+    }
+    if !sfx.is_empty() || bgm.is_some() {
+        let audio_id = unique_entity_id(&mut entity_ids, "audio_bank", "audio");
+        scene.entities.push(external_audio_bank_entity(
+            &audio_id,
+            "Construct Audio Bank",
+            sfx,
+            bgm,
+        ));
+    }
+
+    if let Some(follow_entity) = first_sprite_id {
+        scene.entities.push(imported_camera_entity(
+            unique_entity_id(&mut entity_ids, "main_camera", "camera"),
+            "Main Camera".to_string(),
+            Some(follow_entity),
+        ));
+    } else if scene.entities.is_empty() {
+        skipped.push("Nenhum sprite/layout visual foi materializado do projeto Construct.".to_string());
+    }
+
+    save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
+    Ok(ExternalImportReport {
+        primary_scene: scene,
+        imported_scenes: 1,
+        skipped_sources: skipped,
+    })
+}
+
+fn validate_rpg_maker_project_path(rpg_path: &Path) -> Result<(), LoadError> {
+    if !rpg_path.is_dir() {
+        return Err(LoadError(format!(
+            "Projeto RPG Maker invalido: '{}' nao e um diretorio.",
+            rpg_path.display()
+        )));
+    }
+    let data_dir = rpg_path.join("data");
+    if data_dir.join("MapInfos.json").is_file()
+        || !collect_recursive_files_by_extension(&data_dir, &["json"], &[])?.is_empty()
+    {
+        return Ok(());
+    }
+
+    Err(LoadError(format!(
+        "Projeto RPG Maker invalido: pasta 'data' com JSONs canonicos nao encontrada em '{}'.",
+        rpg_path.display()
+    )))
+}
+
+fn detect_rpg_maker_primary_map(rpg_path: &Path) -> Result<(PathBuf, String), LoadError> {
+    let data_dir = rpg_path.join("data");
+    let map_infos_path = data_dir.join("MapInfos.json");
+    if map_infos_path.is_file() {
+        let value = read_json_lossy(&map_infos_path)?;
+        let mut candidates = Vec::new();
+        match value {
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    let Some(id) = item.get("id").and_then(json_value_to_i32) else {
+                        continue;
+                    };
+                    let name = item
+                        .get("name")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or("Map")
+                        .to_string();
+                    candidates.push((id, name));
+                }
+            }
+            serde_json::Value::Object(entries) => {
+                for (key, item) in entries {
+                    let id = item
+                        .get("id")
+                        .and_then(json_value_to_i32)
+                        .or_else(|| key.parse::<i32>().ok());
+                    let Some(id) = id else {
+                        continue;
+                    };
+                    let name = item
+                        .get("name")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .unwrap_or("Map")
+                        .to_string();
+                    candidates.push((id, name));
+                }
+            }
+            _ => {}
+        }
+        candidates.sort_by_key(|(id, _)| *id);
+        if let Some((map_id, name)) = candidates.into_iter().find(|(id, _)| *id > 0) {
+            let path = data_dir.join(format!("Map{:03}.json", map_id));
+            if path.is_file() {
+                return Ok((path, name));
+            }
+        }
+    }
+
+    let mut maps = collect_recursive_files_by_extension(&data_dir, &["json"], &[])?;
+    maps.retain(|path| {
+        Path::new(path)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("Map") && name != "MapInfos.json")
+    });
+    maps.sort();
+    let first = maps.into_iter().next().ok_or_else(|| {
+        LoadError(format!(
+            "Projeto RPG Maker invalido: nenhum arquivo MapXXX.json encontrado em '{}'.",
+            data_dir.display()
+        ))
+    })?;
+    let path = data_dir.join(first.replace('/', "\\"));
+    let name = path
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().to_string())
+        .unwrap_or_else(|| "RPG Map".to_string());
+    Ok((path, name))
+}
+
+fn parse_rpg_maker_event_commands(value: &serde_json::Value) -> Vec<RpgMakerEventCommand> {
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            let code = entry.get("code").and_then(json_value_to_i32)?;
+            let parameters = entry
+                .get("parameters")
+                .and_then(serde_json::Value::as_array)
+                .cloned()
+                .unwrap_or_default();
+            Some(RpgMakerEventCommand { code, parameters })
+        })
+        .collect()
+}
+
+fn rpg_maker_command_hint(command: &RpgMakerEventCommand) -> Option<String> {
+    let first_param_label = command
+        .parameters
+        .iter()
+        .find_map(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let label = match command.code {
+        101 | 401 => "mostra dialogo",
+        111 => "executa condicao",
+        117 => "chama common event",
+        201 => "transfere jogador",
+        205 => "move rota",
+        230 => "espera frames",
+        241 => "toca BGM",
+        245 => "toca BGS",
+        250 => "toca SE",
+        301 => "inicia batalha",
+        355 | 655 => "executa script",
+        _ => return None,
+    };
+    Some(match first_param_label {
+        Some(parameter) => format!("Evento RPG Maker {}: {}.", label, parameter),
+        None => format!("Evento RPG Maker {}.", label),
+    })
+}
+
+pub fn import_rpg_maker_project(
+    project_dir: &Path,
+    rpg_path: &Path,
+) -> Result<ExternalImportReport, LoadError> {
+    validate_rpg_maker_project_path(rpg_path)?;
+    let (map_path, map_name) = detect_rpg_maker_primary_map(rpg_path)?;
+    let map_json = read_json_lossy(&map_path)?;
+    let mut scene = canonical_scene(DEFAULT_SCENE_ID, Some(map_name));
+    let mut entity_ids = HashSet::new();
+    let mut asset_cache = HashMap::new();
+    let mut skipped = Vec::new();
+    let mut first_sprite_id: Option<String> = None;
+
+    let parallax_name = map_json
+        .get("parallaxName")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let mut tilemap_source = parallax_name
+        .as_deref()
+        .and_then(|name| resolve_named_asset(rpg_path, &["img/parallaxes"], name, &["png", "bmp", "jpg"]));
+    if tilemap_source.is_none() {
+        let tileset_name = map_json
+            .get("tilesetId")
+            .and_then(json_value_to_i32)
+            .and_then(|tileset_id| {
+                let tilesets = read_json_lossy(&rpg_path.join("data").join("Tilesets.json")).ok()?;
+                tilesets
+                    .as_array()
+                    .and_then(|items| {
+                        items.iter().find(|item| {
+                            item.get("id").and_then(json_value_to_i32) == Some(tileset_id)
+                        })
+                    })
+                    .and_then(|item| {
+                        item.get("tilesetNames")
+                            .and_then(serde_json::Value::as_array)
+                            .and_then(|items| items.iter().find_map(serde_json::Value::as_str))
+                            .map(str::to_string)
+                    })
+            });
+        tilemap_source = tileset_name
+            .as_deref()
+            .and_then(|name| resolve_named_asset(rpg_path, &["img/tilesets"], name, &["png", "bmp", "jpg"]));
+    }
+    if let Some(source) = tilemap_source {
+        let asset = materialize_external_file(
+            project_dir,
+            rpg_path,
+            &source,
+            "tilesets",
+            "rpgmaker",
+            &mut asset_cache,
+        )?;
+        scene.entities.push(imported_tilemap_entity(
+            unique_entity_id(&mut entity_ids, "map_background", "tilemap"),
+            "Map Background".to_string(),
+            asset,
+            &source,
+            0,
+            0,
+        ));
+    }
+
+    let events = map_json
+        .get("events")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for event in events {
+        let Some(event_object) = event.as_object() else {
+            continue;
+        };
+        let event_name = event_object
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("RPG Event")
+            .to_string();
+        let event_x = event_object.get("x").and_then(json_value_to_i32).unwrap_or(0) * 32;
+        let event_y = event_object.get("y").and_then(json_value_to_i32).unwrap_or(0) * 32;
+        let pages = event_object
+            .get("pages")
+            .and_then(serde_json::Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let character_name = pages.iter().find_map(|page| {
+            page.get("image")
+                .and_then(|image| image.get("characterName"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+        });
+        let Some(character_name) = character_name else {
+            continue;
+        };
+        let Some(source) = resolve_named_asset(
+            rpg_path,
+            &["img/characters"],
+            &character_name,
+            &["png", "bmp", "jpg"],
+        ) else {
+            skipped.push(format!(
+                "{}: character sprite '{}' nao encontrado.",
+                event_name, character_name
+            ));
+            continue;
+        };
+        let asset = materialize_external_file(
+            project_dir,
+            rpg_path,
+            &source,
+            "sprites",
+            "rpgmaker",
+            &mut asset_cache,
+        )?;
+        let entity_id = unique_entity_id(&mut entity_ids, &event_name, "event");
+        if first_sprite_id.is_none() {
+            first_sprite_id = Some(entity_id.clone());
+        }
+        let mut logic_hints = vec![format!(
+            "Evento RPG Maker '{}' preservado como entidade editavel.",
+            event_name
+        )];
+        let commands = pages
+            .iter()
+            .flat_map(|page| parse_rpg_maker_event_commands(page.get("list").unwrap_or(&serde_json::Value::Null)))
+            .collect::<Vec<_>>();
+        for command in &commands {
+            if let Some(hint) = rpg_maker_command_hint(command) {
+                logic_hints.push(hint);
+            }
+            if logic_hints.len() >= 8 {
+                break;
+            }
+        }
+        scene.entities.push(imported_sprite_entity(ImportedSpriteEntitySpec {
+            entity_id,
+            display_name: event_name,
+            asset,
+            source_path: source,
+            x: event_x,
+            y: event_y,
+            input: None,
+            physics: None,
+            logic_hints,
+        }));
+    }
+
+    if first_sprite_id.is_none() {
+        let mut characters = collect_recursive_files_by_extension(
+            &rpg_path.join("img").join("characters"),
+            &["png", "bmp", "jpg"],
+            &[],
+        )?;
+        characters.sort();
+        if let Some(relative) = characters.into_iter().next() {
+            let source = rpg_path
+                .join("img")
+                .join("characters")
+                .join(relative.replace('/', "\\"));
+            let asset = materialize_external_file(
+                project_dir,
+                rpg_path,
+                &source,
+                "sprites",
+                "rpgmaker",
+                &mut asset_cache,
+            )?;
+            let entity_id = unique_entity_id(&mut entity_ids, "player", "sprite");
+            first_sprite_id = Some(entity_id.clone());
+            scene.entities.push(imported_sprite_entity(ImportedSpriteEntitySpec {
+                entity_id,
+                display_name: "Player".to_string(),
+                asset,
+                source_path: source,
+                x: 64,
+                y: 96,
+                input: None,
+                physics: None,
+                logic_hints: vec![
+                    "Sprite RPG Maker importado sem eventos; comandos permanecem externos."
+                        .to_string(),
+                ],
+            }));
+        }
+    }
+
+    let map_bgm = map_json
+        .get("bgm")
+        .and_then(|bgm| bgm.get("name"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let mut bgm_asset = map_bgm
+        .as_deref()
+        .and_then(|name| resolve_named_asset(rpg_path, &["audio/bgm"], name, &["ogg", "m4a", "mp3", "wav"]));
+    if bgm_asset.is_none() {
+        let mut bgm_files = collect_recursive_files_by_extension(
+            &rpg_path.join("audio").join("bgm"),
+            &["ogg", "m4a", "mp3", "wav"],
+            &[],
+        )?;
+        bgm_files.sort();
+        bgm_asset = bgm_files
+            .into_iter()
+            .next()
+            .map(|relative| rpg_path.join("audio").join("bgm").join(relative.replace('/', "\\")));
+    }
+    let mut sfx = HashMap::new();
+    let bgm = if let Some(source) = bgm_asset {
+        Some(materialize_external_file(
+            project_dir,
+            rpg_path,
+            &source,
+            "audio",
+            "rpgmaker",
+            &mut asset_cache,
+        )?)
+    } else {
+        None
+    };
+    for relative in collect_recursive_files_by_extension(
+        &rpg_path.join("audio").join("se"),
+        &["ogg", "m4a", "mp3", "wav"],
+        &[],
+    )? {
+        let source = rpg_path
+            .join("audio")
+            .join("se")
+            .join(relative.replace('/', "\\"));
+        let asset = materialize_external_file(
+            project_dir,
+            rpg_path,
+            &source,
+            "audio",
+            "rpgmaker",
+            &mut asset_cache,
+        )?;
+        let name = source
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("se");
+        sfx.insert(slugify_scene_id(name), asset);
+        if sfx.len() >= 8 {
+            break;
+        }
+    }
+    if !sfx.is_empty() || bgm.is_some() {
+        let audio_id = unique_entity_id(&mut entity_ids, "audio_bank", "audio");
+        scene.entities.push(external_audio_bank_entity(
+            &audio_id,
+            "RPG Maker Audio Bank",
+            sfx,
+            bgm,
+        ));
+    }
+
+    if let Some(follow_entity) = first_sprite_id {
+        scene.entities.push(imported_camera_entity(
+            unique_entity_id(&mut entity_ids, "main_camera", "camera"),
+            "Main Camera".to_string(),
+            Some(follow_entity),
+        ));
+    }
+
+    save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
+    Ok(ExternalImportReport {
+        primary_scene: scene,
+        imported_scenes: 1,
+        skipped_sources: skipped,
+    })
+}
+
+fn validate_openbor_project_path(openbor_path: &Path) -> Result<(), LoadError> {
+    if !openbor_path.is_dir() {
+        return Err(LoadError(format!(
+            "Projeto OpenBOR invalido: '{}' nao e um diretorio.",
+            openbor_path.display()
+        )));
+    }
+
+    if openbor_path.join("data").join("chars").is_dir()
+        || openbor_path.join("data").join("levels").is_dir()
+        || openbor_path.join("chars").is_dir()
+        || openbor_path.join("levels").is_dir()
+        || openbor_path.join("models.txt").is_file()
+        || openbor_path.join("levels.txt").is_file()
+    {
+        return Ok(());
+    }
+
+    Err(LoadError(format!(
+        "Projeto OpenBOR invalido: nenhum diretorio 'chars/levels' ou manifest models/levels encontrado em '{}'.",
+        openbor_path.display()
+    )))
+}
+
+fn parse_openbor_model_file(root: &Path, path: &Path) -> Result<OpenBorModelAsset, LoadError> {
+    let content = read_text_lossy(path)?;
+    let mut name = path
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().trim().to_string())
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or_else(|| "openbor_model".to_string());
+    let mut display_asset = None;
+    let mut audio_assets = Vec::new();
+    let mut logic_hints = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+        let lowered = trimmed.to_ascii_lowercase();
+        let parts = trimmed.split_whitespace().collect::<Vec<_>>();
+        if parts.len() >= 2 && parts[0].eq_ignore_ascii_case("name") {
+            name = parts[1..].join(" ");
+        }
+        for token in &parts[1..] {
+            if display_asset.is_none() && string_looks_like_visual_asset(token) {
+                display_asset = resolve_external_asset_candidate(root, path.parent().unwrap_or(root), token);
+            }
+            if string_looks_like_audio_asset(token) {
+                if let Some(audio_asset) =
+                    resolve_external_asset_candidate(root, path.parent().unwrap_or(root), token)
+                {
+                    audio_assets.push(audio_asset);
+                }
+            }
+        }
+        for keyword in ["anim", "attack", "jump", "spawnframe", "followanim", "combostep", "sound"] {
+            if lowered.starts_with(keyword) {
+                logic_hints.push(format!("Modelo OpenBOR usa comando '{}'.", keyword));
+                break;
+            }
+        }
+    }
+
+    if display_asset.is_none() {
+        display_asset = resolve_named_asset(
+            root,
+            &["data/chars", "chars", "data/sprites", "sprites"],
+            &name,
+            &["png", "gif", "bmp", "jpg"],
+        );
+    }
+
+    Ok(OpenBorModelAsset {
+        name,
+        display_asset,
+        audio_assets: dedupe_paths(audio_assets),
+        logic_hints,
+    })
+}
+
+fn load_openbor_model_assets(openbor_path: &Path) -> Result<Vec<OpenBorModelAsset>, LoadError> {
+    let mut model_paths = Vec::new();
+    for directory in [openbor_path.join("data").join("chars"), openbor_path.join("chars")] {
+        for relative in collect_recursive_files_by_extension(&directory, &["txt"], &[])? {
+            model_paths.push(directory.join(relative.replace('/', "\\")));
+        }
+    }
+    for manifest in [
+        openbor_path.join("data").join("models.txt"),
+        openbor_path.join("models.txt"),
+    ] {
+        if !manifest.is_file() {
+            continue;
+        }
+        let content = read_text_lossy(&manifest)?;
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+                continue;
+            }
+            if let Some(candidate) = resolve_external_asset_candidate(
+                openbor_path,
+                manifest.parent().unwrap_or(openbor_path),
+                trimmed,
+            ) {
+                model_paths.push(candidate);
+            }
+        }
+    }
+    let model_paths = dedupe_paths(model_paths);
+    let mut assets = Vec::new();
+    for path in model_paths {
+        if path
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("txt"))
+        {
+            assets.push(parse_openbor_model_file(openbor_path, &path)?);
+        }
+    }
+    Ok(assets)
+}
+
+fn parse_openbor_level_file(root: &Path, path: &Path) -> Result<OpenBorLevelAsset, LoadError> {
+    let content = read_text_lossy(path)?;
+    let mut name = path
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().trim().to_string())
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or_else(|| "openbor_level".to_string());
+    let mut background_asset = None;
+    let mut music_asset = None;
+    let mut logic_hints = Vec::new();
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+            continue;
+        }
+        let lowered = trimmed.to_ascii_lowercase();
+        let parts = trimmed.split_whitespace().collect::<Vec<_>>();
+        if parts.len() >= 2 && parts[0].eq_ignore_ascii_case("name") {
+            name = parts[1..].join(" ");
+        }
+        for token in &parts[1..] {
+            if background_asset.is_none() && string_looks_like_visual_asset(token) {
+                background_asset =
+                    resolve_external_asset_candidate(root, path.parent().unwrap_or(root), token);
+            }
+            if music_asset.is_none() && string_looks_like_audio_asset(token) {
+                music_asset =
+                    resolve_external_asset_candidate(root, path.parent().unwrap_or(root), token);
+            }
+        }
+        for keyword in ["spawn", "boss", "wait", "branch", "hole", "wall", "music"] {
+            if lowered.starts_with(keyword) {
+                logic_hints.push(format!("Estagio OpenBOR usa comando '{}'.", keyword));
+                break;
+            }
+        }
+    }
+
+    Ok(OpenBorLevelAsset {
+        name,
+        background_asset,
+        music_asset,
+        logic_hints,
+    })
+}
+
+fn load_openbor_level_assets(openbor_path: &Path) -> Result<Vec<OpenBorLevelAsset>, LoadError> {
+    let mut level_paths = Vec::new();
+    for directory in [
+        openbor_path.join("data").join("levels"),
+        openbor_path.join("levels"),
+    ] {
+        for relative in collect_recursive_files_by_extension(&directory, &["txt"], &[])? {
+            level_paths.push(directory.join(relative.replace('/', "\\")));
+        }
+    }
+    for manifest in [
+        openbor_path.join("data").join("levels.txt"),
+        openbor_path.join("levels.txt"),
+    ] {
+        if !manifest.is_file() {
+            continue;
+        }
+        let content = read_text_lossy(&manifest)?;
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
+                continue;
+            }
+            if let Some(candidate) = resolve_external_asset_candidate(
+                openbor_path,
+                manifest.parent().unwrap_or(openbor_path),
+                trimmed,
+            ) {
+                level_paths.push(candidate);
+            }
+        }
+    }
+    let level_paths = dedupe_paths(level_paths);
+    let mut levels = Vec::new();
+    for path in level_paths {
+        if path
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("txt"))
+        {
+            levels.push(parse_openbor_level_file(openbor_path, &path)?);
+        }
+    }
+    Ok(levels)
+}
+
+pub fn import_openbor_project(
+    project_dir: &Path,
+    openbor_path: &Path,
+) -> Result<ExternalImportReport, LoadError> {
+    validate_openbor_project_path(openbor_path)?;
+    let models = load_openbor_model_assets(openbor_path)?;
+    let levels = load_openbor_level_assets(openbor_path)?;
+    let scene_name = levels
+        .first()
+        .map(|level| level.name.clone())
+        .unwrap_or_else(|| "OpenBOR Stage".to_string());
+    let mut scene = canonical_scene(DEFAULT_SCENE_ID, Some(scene_name));
+    let mut entity_ids = HashSet::new();
+    let mut asset_cache = HashMap::new();
+    let mut skipped = Vec::new();
+    let mut first_sprite_id: Option<String> = None;
+    let mut audio_sfx = HashMap::new();
+    let mut bgm = None;
+
+    if let Some(level) = levels.first() {
+        if let Some(background) = &level.background_asset {
+            let asset = materialize_external_file(
+                project_dir,
+                openbor_path,
+                background,
+                "tilesets",
+                "openbor",
+                &mut asset_cache,
+            )?;
+            scene.entities.push(imported_tilemap_entity(
+                unique_entity_id(&mut entity_ids, "stage_background", "tilemap"),
+                format!("{} Background", level.name),
+                asset,
+                background,
+                0,
+                0,
+            ));
+        }
+        if let Some(music) = &level.music_asset {
+            bgm = Some(materialize_external_file(
+                project_dir,
+                openbor_path,
+                music,
+                "audio",
+                "openbor",
+                &mut asset_cache,
+            )?);
+        }
+    }
+
+    let mut sprite_x = 64;
+    for model in &models {
+        let Some(display_asset) = model.display_asset.as_ref() else {
+            skipped.push(format!(
+                "{}: modelo OpenBOR sem asset visual resolvido.",
+                model.name
+            ));
+            continue;
+        };
+        let asset = materialize_external_file(
+            project_dir,
+            openbor_path,
+            display_asset,
+            "sprites",
+            "openbor",
+            &mut asset_cache,
+        )?;
+        let entity_id = unique_entity_id(&mut entity_ids, &model.name, "fighter");
+        if first_sprite_id.is_none() {
+            first_sprite_id = Some(entity_id.clone());
+        }
+        let mut logic_hints = model.logic_hints.clone();
+        if let Some(level) = levels.first() {
+            logic_hints.extend(level.logic_hints.clone());
+        }
+        scene.entities.push(imported_sprite_entity(ImportedSpriteEntitySpec {
+            entity_id,
+            display_name: model.name.clone(),
+            asset,
+            source_path: display_asset.clone(),
+            x: sprite_x,
+            y: 112,
+            input: Some(InputComponent {
+                device: "joypad1".to_string(),
+                mapping: HashMap::from([
+                    ("move_left".to_string(), "DPAD_LEFT".to_string()),
+                    ("move_right".to_string(), "DPAD_RIGHT".to_string()),
+                    ("attack".to_string(), "BUTTON_B".to_string()),
+                    ("jump".to_string(), "BUTTON_A".to_string()),
+                ]),
+            }),
+            physics: Some(PhysicsComponent {
+                gravity: true,
+                gravity_strength: 6,
+                max_velocity: Some(Velocity { x: 32, y: 96 }),
+                friction: 1,
+                bounce: 0,
+            }),
+            logic_hints,
+        }));
+        sprite_x += 56;
+
+        for source in &model.audio_assets {
+            let asset = materialize_external_file(
+                project_dir,
+                openbor_path,
+                source,
+                "audio",
+                "openbor",
+                &mut asset_cache,
+            )?;
+            let name = source
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("sfx");
+            audio_sfx.insert(slugify_scene_id(name), asset);
+        }
+    }
+
+    if !audio_sfx.is_empty() || bgm.is_some() {
+        let audio_id = unique_entity_id(&mut entity_ids, "audio_bank", "audio");
+        scene.entities.push(external_audio_bank_entity(
+            &audio_id,
+            "OpenBOR Audio Bank",
+            audio_sfx,
+            bgm,
+        ));
+    }
+
+    if let Some(follow_entity) = first_sprite_id {
+        scene.entities.push(imported_camera_entity(
+            unique_entity_id(&mut entity_ids, "main_camera", "camera"),
+            "Main Camera".to_string(),
+            Some(follow_entity),
+        ));
+    }
+
+    save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
+    Ok(ExternalImportReport {
+        primary_scene: scene,
+        imported_scenes: 1,
+        skipped_sources: skipped,
+    })
+}
+
 fn materialize_external_file(
     project_dir: &Path,
     source_root: &Path,
@@ -4158,7 +5631,7 @@ fn materialize_external_file(
     }
 
     let relative = source_path.strip_prefix(source_root).unwrap_or(source_path);
-    let mut relative_without_ext = relative.to_path_buf();
+    let mut relative_without_ext = collapse_relative_components(relative);
     relative_without_ext.set_extension("");
     let slug = slugify_scene_id(&normalize_relative_path(&relative_without_ext));
     let extension = source_path
@@ -4190,6 +5663,278 @@ fn unique_entity_id(existing: &mut HashSet<String>, seed: &str, fallback_prefix:
         }
         index = index.saturating_add(1);
     }
+}
+
+fn read_json_lossy(path: &Path) -> Result<serde_json::Value, LoadError> {
+    let content = read_text_lossy(path)?;
+    serde_json::from_str(&content).map_err(|error| {
+        LoadError(format!(
+            "JSON invalido em '{}': {}",
+            path.display(),
+            error
+        ))
+    })
+}
+
+fn collect_json_strings(value: &serde_json::Value, sink: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(text) => sink.push(text.clone()),
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_json_strings(item, sink);
+            }
+        }
+        serde_json::Value::Object(entries) => {
+            for value in entries.values() {
+                collect_json_strings(value, sink);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn json_strings(value: &serde_json::Value) -> Vec<String> {
+    let mut strings = Vec::new();
+    collect_json_strings(value, &mut strings);
+    strings
+}
+
+fn find_first_json_string_for_keys(
+    value: &serde_json::Value,
+    keys: &[&str],
+) -> Option<String> {
+    match value {
+        serde_json::Value::Object(entries) => {
+            for key in keys {
+                if let Some(found) = entries.get(*key).and_then(serde_json::Value::as_str) {
+                    let trimmed = found.trim();
+                    if !trimmed.is_empty() {
+                        return Some(trimmed.to_string());
+                    }
+                }
+            }
+            entries
+                .values()
+                .find_map(|entry| find_first_json_string_for_keys(entry, keys))
+        }
+        serde_json::Value::Array(items) => items
+            .iter()
+            .find_map(|entry| find_first_json_string_for_keys(entry, keys)),
+        _ => None,
+    }
+}
+
+fn asset_extension(value: &str) -> Option<String> {
+    let trimmed = value.trim().trim_matches('"').trim_matches('\'');
+    let extension = Path::new(trimmed)
+        .extension()
+        .and_then(|candidate| candidate.to_str())?;
+    let lowered = extension.to_ascii_lowercase();
+    (!lowered.is_empty()).then_some(lowered)
+}
+
+fn string_looks_like_visual_asset(value: &str) -> bool {
+    asset_extension(value).is_some_and(|extension| {
+        ["png", "bmp", "jpg", "jpeg", "gif", "webp", "ppm"]
+            .iter()
+            .any(|allowed| extension == *allowed)
+    })
+}
+
+fn string_looks_like_audio_asset(value: &str) -> bool {
+    asset_extension(value).is_some_and(|extension| {
+        ["wav", "ogg", "mp3", "m4a", "flac", "xgm", "pcm"]
+            .iter()
+            .any(|allowed| extension == *allowed)
+    })
+}
+
+fn resolve_external_asset_candidate(root: &Path, current_dir: &Path, raw: &str) -> Option<PathBuf> {
+    let trimmed = raw.trim().trim_matches('"').trim_matches('\'');
+    if trimmed.is_empty() || trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        return None;
+    }
+    let normalized = trimmed
+        .replace("res://", "")
+        .replace('\\', "/")
+        .trim_start_matches("./")
+        .trim_start_matches('/')
+        .to_string();
+    if normalized.is_empty() {
+        return None;
+    }
+
+    let relative = PathBuf::from(normalized.replace('/', "\\"));
+    let candidates = [
+        current_dir.join(&relative),
+        root.join(&relative),
+        root.join("data").join(&relative),
+        root.join("audio").join(&relative),
+        root.join("img").join(&relative),
+    ];
+
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.is_file())
+}
+
+fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut seen = HashSet::new();
+    let mut ordered = Vec::new();
+    for path in paths {
+        let key = path.to_string_lossy().to_string();
+        if seen.insert(key) {
+            ordered.push(path);
+        }
+    }
+    ordered
+}
+
+fn imported_logic_component(graph: Option<String>, logic_hints: Vec<String>) -> LogicComponent {
+    LogicComponent {
+        graph,
+        graph_ref: None,
+        logic_hints,
+        variables: HashMap::new(),
+    }
+}
+
+fn external_audio_bank_entity(
+    entity_id: &str,
+    display_name: &str,
+    sfx: HashMap<String, String>,
+    bgm: Option<String>,
+) -> Entity {
+    Entity {
+        entity_id: entity_id.to_string(),
+        display_name: Some(display_name.to_string()),
+        prefab: None,
+        transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+        components: Components {
+            audio: Some(AudioComponent { sfx, bgm }),
+            ..Components::default()
+        },
+    }
+}
+
+fn imported_sprite_entity(spec: ImportedSpriteEntitySpec) -> Entity {
+    let ImportedSpriteEntitySpec {
+        entity_id,
+        display_name,
+        asset,
+        source_path,
+        x,
+        y,
+        input,
+        physics,
+        logic_hints,
+    } = spec;
+
+    let (frame_width, frame_height) = image::image_dimensions(&source_path).unwrap_or((32, 32));
+    let has_logic = !logic_hints.is_empty() || input.is_some() || physics.is_some();
+    let logic = has_logic.then(|| {
+        imported_logic_component(Some(imported_sprite_logic_graph(&entity_id)), logic_hints)
+    });
+
+    Entity {
+        entity_id: entity_id.clone(),
+        display_name: Some(display_name),
+        prefab: None,
+        transform: crate::ugdm::entities::Transform { x, y },
+        components: Components {
+            sprite: Some(SpriteComponent {
+                asset,
+                frame_width: frame_width.max(1),
+                frame_height: frame_height.max(1),
+                pivot: None,
+                palette_slot: 0,
+                animations: HashMap::new(),
+                priority: "foreground".to_string(),
+                meta_sprite: frame_width > 32 || frame_height > 32,
+            }),
+            input,
+            physics,
+            logic,
+            ..Components::default()
+        },
+    }
+}
+
+fn imported_tilemap_entity(
+    entity_id: String,
+    display_name: String,
+    asset: String,
+    source_path: &Path,
+    x: i32,
+    y: i32,
+) -> Entity {
+    let (map_width, map_height) = tilemap_dims_from_source(source_path);
+    Entity {
+        entity_id,
+        display_name: Some(display_name),
+        prefab: None,
+        transform: crate::ugdm::entities::Transform { x, y },
+        components: Components {
+            tilemap: Some(TilemapComponent {
+                tileset: asset,
+                map_width,
+                map_height,
+                scroll_x: 0,
+                scroll_y: 0,
+            }),
+            ..Components::default()
+        },
+    }
+}
+
+fn imported_camera_entity(entity_id: String, display_name: String, follow_entity: Option<String>) -> Entity {
+    Entity {
+        entity_id,
+        display_name: Some(display_name),
+        prefab: None,
+        transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+        components: Components {
+            camera: Some(CameraComponent {
+                follow_entity,
+                offset_x: 0,
+                offset_y: 0,
+            }),
+            ..Components::default()
+        },
+    }
+}
+
+fn json_value_to_i32(value: &serde_json::Value) -> Option<i32> {
+    match value {
+        serde_json::Value::Number(number) => number.as_f64().map(|value| value.round() as i32),
+        serde_json::Value::String(text) => text.trim().parse::<f32>().ok().map(|value| value.round() as i32),
+        _ => None,
+    }
+}
+
+fn resolve_named_asset(
+    root: &Path,
+    directories: &[&str],
+    base_name: &str,
+    extensions: &[&str],
+) -> Option<PathBuf> {
+    let trimmed = base_name.trim().trim_matches('"').trim_matches('\'');
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if string_looks_like_visual_asset(trimmed) || string_looks_like_audio_asset(trimmed) {
+        return resolve_external_asset_candidate(root, root, trimmed);
+    }
+
+    directories
+        .iter()
+        .flat_map(|directory| {
+            extensions.iter().map(move |extension| {
+                root.join(directory).join(format!("{}.{}", trimmed, extension))
+            })
+        })
+        .find(|candidate| candidate.is_file())
 }
 
 pub fn list_scenes(project_dir: &Path) -> Result<Vec<SceneInfo>, LoadError> {
@@ -4753,6 +6498,7 @@ fn starter_scene(scene_id: &str, display_name: String, _target: &str) -> Scene {
             logic: Some(LogicComponent {
                 graph: Some(logic_graph),
                 graph_ref: None,
+                logic_hints: Vec::new(),
                 variables: HashMap::new(),
             }),
             ..Components::default()
@@ -6485,6 +8231,7 @@ mod tests {
                     logic: Some(LogicComponent {
                         graph: None,
                         graph_ref: Some("graphs/player_logic.json".to_string()),
+                        logic_hints: Vec::new(),
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -6528,6 +8275,7 @@ mod tests {
                     logic: Some(LogicComponent {
                         graph: Some("{\"stale\":true}".to_string()),
                         graph_ref: Some("graphs/player_logic.json".to_string()),
+                        logic_hints: Vec::new(),
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -6548,6 +8296,7 @@ mod tests {
                     logic: Some(LogicComponent {
                         graph: Some(platformer_logic_graph()),
                         graph_ref: Some("graphs/player_logic.json".to_string()),
+                        logic_hints: Vec::new(),
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -7490,6 +9239,7 @@ mod tests {
                         .to_string(),
                     ),
                     graph_ref: None,
+                    logic_hints: Vec::new(),
                     variables: HashMap::new(),
                 }),
                 ..Components::default()

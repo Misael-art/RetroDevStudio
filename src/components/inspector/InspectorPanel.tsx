@@ -646,6 +646,13 @@ export default function InspectorPanel() {
     () => (entity?.components.logic ? graphSummary(entity.components.logic.graph) : null),
     [entity]
   );
+  const entityLogicHints = useMemo(
+    () =>
+      entity?.components.logic?.logic_hints?.filter(
+        (hint): hint is string => typeof hint === "string" && hint.trim().length > 0
+      ) ?? [],
+    [entity]
+  );
   const sections = useMemo(() => (entity ? entityPropSections(entity) : []), [entity]);
 
   async function saveScene() {
@@ -913,6 +920,32 @@ export default function InspectorPanel() {
                           >
                             Edit
                           </button>
+                        </td>
+                      </tr>
+                    ) : null}
+                    {entity.components.logic.graph_ref ? (
+                      <tr className="group border-b border-[#313244] last:border-0">
+                        <td className="w-24 min-w-24 select-none px-2 py-1 text-xs text-[#7f849c]">Graph Ref</td>
+                        <td className="px-2 py-1 text-xs">
+                          <span className="font-mono text-[#cdd6f4]">
+                            {entity.components.logic.graph_ref}
+                          </span>
+                        </td>
+                      </tr>
+                    ) : null}
+                    {entityLogicHints.length > 0 ? (
+                      <tr className="group border-b border-[#313244] last:border-0">
+                        <td className="w-24 min-w-24 select-none px-2 py-1 align-top text-xs text-[#7f849c]">
+                          Imported Hints
+                        </td>
+                        <td className="px-2 py-1 text-xs">
+                          <div className="flex flex-col gap-1">
+                            {entityLogicHints.map((hint, index) => (
+                              <span key={`${index}-${hint}`} className="text-[#cdd6f4]">
+                                {hint}
+                              </span>
+                            ))}
+                          </div>
                         </td>
                       </tr>
                     ) : null}

@@ -2388,9 +2388,32 @@ mod tests {
     fn write_godot_fixture(root: &Path) {
         fs::create_dir_all(root.join("art")).expect("create godot art dir");
         fs::create_dir_all(root.join("audio")).expect("create godot audio dir");
+        fs::create_dir_all(root.join("scripts")).expect("create godot scripts dir");
         write_test_png(&root.join("art").join("hero.png"), 24, 32, [96, 220, 180, 255]);
+        write_test_png(&root.join("art").join("tiles.png"), 128, 64, [48, 96, 220, 255]);
         fs::write(root.join("audio").join("jump.wav"), minimal_wav_bytes())
             .expect("write godot wav");
+        fs::write(
+            root.join("scripts").join("hero.gd"),
+            [
+                "extends Sprite2D",
+                "var gravity = 980.0",
+                "var jump_velocity = -320.0",
+                "var velocity = Vector2.ZERO",
+                "",
+                "func _physics_process(delta):",
+                "    if Input.is_action_pressed(\"ui_left\"):",
+                "        velocity.x = -80",
+                "    if Input.is_action_pressed(\"ui_right\"):",
+                "        velocity.x = 80",
+                "    if Input.is_action_just_pressed(\"ui_accept\"):",
+                "        velocity.y = jump_velocity",
+                "    velocity.y += gravity * delta",
+                "    move_and_slide()",
+            ]
+            .join("\n"),
+        )
+        .expect("write godot script");
         fs::write(
             root.join("project.godot"),
             [
@@ -2404,13 +2427,19 @@ mod tests {
         fs::write(
             root.join("main.tscn"),
             [
-                "[gd_scene load_steps=3 format=3]",
+                "[gd_scene load_steps=5 format=3]",
                 "[ext_resource type=\"Texture2D\" path=\"res://art/hero.png\" id=\"1\"]",
                 "[ext_resource type=\"AudioStream\" path=\"res://audio/jump.wav\" id=\"2\"]",
+                "[ext_resource type=\"Texture2D\" path=\"res://art/tiles.png\" id=\"3\"]",
+                "[ext_resource type=\"Script\" path=\"res://scripts/hero.gd\" id=\"4\"]",
                 "[node name=\"Main\" type=\"Node2D\"]",
                 "[node name=\"Hero\" type=\"Sprite2D\" parent=\".\"]",
                 "position = Vector2(24, 40)",
                 "texture = ExtResource(\"1\")",
+                "script = ExtResource(\"4\")",
+                "[node name=\"Level\" type=\"TileMapLayer\" parent=\".\"]",
+                "position = Vector2(0, 0)",
+                "texture = ExtResource(\"3\")",
                 "[node name=\"Camera\" type=\"Camera2D\" parent=\".\"]",
                 "position = Vector2(8, 12)",
                 "[node name=\"Jump\" type=\"AudioStreamPlayer2D\" parent=\".\"]",
@@ -2419,6 +2448,194 @@ mod tests {
             .join("\n"),
         )
         .expect("write main.tscn");
+    }
+
+    fn write_construct_fixture(root: &Path) {
+        fs::create_dir_all(root.join("objectTypes")).expect("create construct objectTypes dir");
+        fs::create_dir_all(root.join("layouts")).expect("create construct layouts dir");
+        fs::create_dir_all(root.join("eventSheets")).expect("create construct eventSheets dir");
+        fs::create_dir_all(root.join("sprites")).expect("create construct sprites dir");
+        fs::create_dir_all(root.join("backgrounds")).expect("create construct backgrounds dir");
+        fs::create_dir_all(root.join("audio")).expect("create construct audio dir");
+        write_test_png(&root.join("sprites").join("hero.png"), 32, 32, [220, 120, 64, 255]);
+        write_test_png(
+            &root.join("backgrounds").join("stage.png"),
+            160,
+            96,
+            [60, 90, 180, 255],
+        );
+        fs::write(root.join("audio").join("jump.wav"), minimal_wav_bytes())
+            .expect("write construct jump");
+        fs::write(root.join("audio").join("theme.wav"), minimal_wav_bytes())
+            .expect("write construct theme");
+        fs::write(
+            root.join("project.c3proj"),
+            serde_json::json!({
+                "name": "Construct Fixture",
+                "version": 1
+            })
+            .to_string(),
+        )
+        .expect("write project.c3proj");
+        fs::write(
+            root.join("objectTypes").join("Hero.json"),
+            serde_json::json!({
+                "name": "Hero",
+                "plugin-id": "Sprite",
+                "texture": "sprites/hero.png",
+                "jumpSound": "audio/jump.wav"
+            })
+            .to_string(),
+        )
+        .expect("write Hero object type");
+        fs::write(
+            root.join("objectTypes").join("Backdrop.json"),
+            serde_json::json!({
+                "name": "Backdrop",
+                "plugin-id": "TiledBg",
+                "texture": "backgrounds/stage.png"
+            })
+            .to_string(),
+        )
+        .expect("write Backdrop object type");
+        fs::write(
+            root.join("layouts").join("Level1.json"),
+            serde_json::json!({
+                "name": "Level1",
+                "instances": [
+                    { "objectName": "Backdrop", "x": 0, "y": 0 },
+                    { "objectName": "Hero", "x": 48, "y": 96 }
+                ]
+            })
+            .to_string(),
+        )
+        .expect("write construct layout");
+        fs::write(
+            root.join("eventSheets").join("gameplay.json"),
+            serde_json::json!({
+                "events": [
+                    { "name": "PlayerJump", "action": "jump" },
+                    { "name": "EnemySpawn", "action": "spawn" }
+                ]
+            })
+            .to_string(),
+        )
+        .expect("write construct events");
+    }
+
+    fn write_rpg_maker_fixture(root: &Path) {
+        fs::create_dir_all(root.join("data")).expect("create rpg data dir");
+        fs::create_dir_all(root.join("img").join("characters")).expect("create rpg characters dir");
+        fs::create_dir_all(root.join("img").join("parallaxes")).expect("create rpg parallaxes dir");
+        fs::create_dir_all(root.join("img").join("tilesets")).expect("create rpg tilesets dir");
+        fs::create_dir_all(root.join("audio").join("bgm")).expect("create rpg bgm dir");
+        fs::create_dir_all(root.join("audio").join("se")).expect("create rpg se dir");
+        write_test_png(&root.join("img").join("characters").join("Actor1.png"), 48, 48, [220, 180, 96, 255]);
+        write_test_png(
+            &root.join("img").join("parallaxes").join("ForestBg.png"),
+            160,
+            120,
+            [32, 120, 64, 255],
+        );
+        write_test_png(
+            &root.join("img").join("tilesets").join("Grassland.png"),
+            128,
+            128,
+            [90, 140, 50, 255],
+        );
+        fs::write(root.join("audio").join("bgm").join("field.wav"), minimal_wav_bytes())
+            .expect("write rpg bgm");
+        fs::write(root.join("audio").join("se").join("confirm.wav"), minimal_wav_bytes())
+            .expect("write rpg se");
+        fs::write(
+            root.join("data").join("MapInfos.json"),
+            serde_json::json!([
+                null,
+                { "id": 1, "name": "Forest" }
+            ])
+            .to_string(),
+        )
+        .expect("write map infos");
+        fs::write(
+            root.join("data").join("Tilesets.json"),
+            serde_json::json!([
+                null,
+                { "id": 1, "tilesetNames": ["Grassland"] }
+            ])
+            .to_string(),
+        )
+        .expect("write tilesets");
+        fs::write(
+            root.join("data").join("Map001.json"),
+            serde_json::json!({
+                "tilesetId": 1,
+                "parallaxName": "ForestBg",
+                "bgm": { "name": "field" },
+                "events": [
+                    null,
+                    {
+                        "id": 1,
+                        "name": "Guide",
+                        "x": 3,
+                        "y": 4,
+                        "pages": [
+                            {
+                                "image": { "characterName": "Actor1" },
+                                "list": [
+                                    { "code": 101, "parameters": ["Hello"] },
+                                    { "code": 241, "parameters": ["field"] }
+                                ]
+                            }
+                        ]
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .expect("write map001");
+    }
+
+    fn write_openbor_fixture(root: &Path) {
+        fs::create_dir_all(root.join("data").join("chars")).expect("create openbor chars dir");
+        fs::create_dir_all(root.join("data").join("levels")).expect("create openbor levels dir");
+        fs::create_dir_all(root.join("data").join("art")).expect("create openbor art dir");
+        fs::create_dir_all(root.join("data").join("audio")).expect("create openbor audio dir");
+        write_test_png(&root.join("data").join("art").join("hero.png"), 48, 64, [200, 80, 80, 255]);
+        write_test_png(
+            &root.join("data").join("art").join("stage.png"),
+            176,
+            96,
+            [60, 60, 120, 255],
+        );
+        fs::write(root.join("data").join("audio").join("punch.wav"), minimal_wav_bytes())
+            .expect("write openbor punch");
+        fs::write(root.join("data").join("audio").join("theme.wav"), minimal_wav_bytes())
+            .expect("write openbor theme");
+        fs::write(
+            root.join("data").join("chars").join("hero.txt"),
+            [
+                "name Hero",
+                "anim idle",
+                "load ../art/hero.png",
+                "sound ../audio/punch.wav",
+                "attack1 1",
+                "jump 1",
+            ]
+            .join("\n"),
+        )
+        .expect("write openbor model");
+        fs::write(
+            root.join("data").join("levels").join("stage1.txt"),
+            [
+                "name Downtown",
+                "background ../art/stage.png",
+                "music ../audio/theme.wav",
+                "spawn enemy",
+                "wait 20",
+            ]
+            .join("\n"),
+        )
+        .expect("write openbor level");
     }
 
     fn mock_core_build_dir(dir: &Path) -> PathBuf {
@@ -2448,6 +2665,8 @@ mod tests {
                 "[Files]",
                 "anim = hero.air",
                 "sprite = hero.sff",
+                "cmd = hero.cmd",
+                "cns = hero.cns",
             ]
             .join("\n"),
         )
@@ -2465,6 +2684,31 @@ mod tests {
             .join("\n"),
         )
         .expect("write mugen air");
+        fs::write(
+            root.join("hero.cmd"),
+            [
+                "[Command]",
+                "name = \"jump\"",
+                "command = ~D, U, a",
+            ]
+            .join("\n"),
+        )
+        .expect("write mugen cmd");
+        fs::write(
+            root.join("hero.cns"),
+            [
+                "[State -1, AI]",
+                "type = ChangeState",
+                "trigger1 = command = \"jump\"",
+                "value = 40",
+                "",
+                "[State 200, Attack]",
+                "type = HitDef",
+                "trigger1 = animelem = 2",
+            ]
+            .join("\n"),
+        )
+        .expect("write mugen cns");
         write_test_png(
             &root.join("work").join("hero_sff").join("sd").join("0-0.png"),
             32,
@@ -3532,6 +3776,21 @@ pub extern "C" fn retro_run() {
                 && profile.supported_levels == vec!["L1", "L2", "L3"]
         }));
         assert!(profiles.iter().any(|profile| {
+            profile.id == "construct"
+                && profile.importable
+                && profile.support_status == "Experimental"
+        }));
+        assert!(profiles.iter().any(|profile| {
+            profile.id == "rpg_maker"
+                && profile.importable
+                && profile.source_engine == "rpg_maker"
+        }));
+        assert!(profiles.iter().any(|profile| {
+            profile.id == "openbor"
+                && profile.importable
+                && profile.family == "Beat'em up"
+        }));
+        assert!(profiles.iter().any(|profile| {
             profile.id == "gamemaker"
                 && !profile.importable
                 && profile.support_status == "Parcial"
@@ -3875,6 +4134,16 @@ pub extern "C" fn retro_run() {
             .sprite
             .as_ref()
             .is_some_and(|sprite| sprite.asset.ends_with("mugen_heromugen_atlas.png"))));
+        let fighter = scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "heromugen")
+            .expect("fighter entity");
+        assert!(fighter
+            .components
+            .logic
+            .as_ref()
+            .is_some_and(|logic| !logic.logic_hints.is_empty()));
         assert!(result
             .notice
             .as_deref()
@@ -3907,15 +4176,204 @@ pub extern "C" fn retro_run() {
         assert_eq!(metadata.source_kind, "imported_godot");
         assert_eq!(metadata.source_engine.as_deref(), Some("godot"));
         assert_eq!(metadata.import_profile.as_deref(), Some("godot_tscn_v1"));
+        let hero = scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "hero")
+            .expect("godot hero entity");
+        assert_eq!(
+            hero.components
+                .sprite
+                .as_ref()
+                .map(|sprite| sprite.asset.as_str()),
+            Some("assets/sprites/godot_art_hero.png")
+        );
+        assert!(hero.components.input.is_some());
+        assert!(hero.components.physics.is_some());
+        assert!(hero
+            .components
+            .logic
+            .as_ref()
+            .is_some_and(|logic| !logic.logic_hints.is_empty()));
         assert!(scene.entities.iter().any(|entity| entity
             .components
-            .sprite
+            .tilemap
             .as_ref()
-            .is_some_and(|sprite| sprite.asset == "assets/sprites/godot_art_hero.png")));
+            .is_some_and(|tilemap| tilemap.tileset == "assets/tilesets/godot_art_tiles.png")));
         assert!(result
             .notice
             .as_deref()
             .is_some_and(|notice| notice.contains("Godot 2D")));
+
+        let _ = fs::remove_dir_all(base_dir);
+        let _ = fs::remove_dir_all(donor_dir);
+    }
+
+    #[test]
+    fn import_external_project_command_supports_ikemen_go_metadata() {
+        let base_dir = temp_dir("import-ikemen-command");
+        let donor_dir = temp_dir("import-ikemen-donor");
+        write_mugen_character_fixture(&donor_dir);
+
+        let result = import_external_project(
+            "Imported Ikemen".to_string(),
+            base_dir.to_string_lossy().to_string(),
+            "ikemen_go".to_string(),
+            donor_dir.to_string_lossy().to_string(),
+        )
+        .expect("import ikemen project");
+
+        let project_dir = PathBuf::from(&result.path);
+        let project = load_project(&project_dir).expect("load imported ikemen project");
+        let metadata = project.template_metadata.as_ref().expect("template metadata");
+        assert_eq!(metadata.source_kind, "imported_ikemen_go");
+        assert_eq!(metadata.source_engine.as_deref(), Some("ikemen_go"));
+        assert_eq!(metadata.import_profile.as_deref(), Some("ikemen_go_mugen_v1"));
+
+        let _ = fs::remove_dir_all(base_dir);
+        let _ = fs::remove_dir_all(donor_dir);
+    }
+
+    #[test]
+    fn import_external_project_command_supports_construct() {
+        let base_dir = temp_dir("import-construct-command");
+        let donor_dir = temp_dir("import-construct-donor");
+        write_construct_fixture(&donor_dir);
+
+        let result = import_external_project(
+            "Imported Construct".to_string(),
+            base_dir.to_string_lossy().to_string(),
+            "construct".to_string(),
+            donor_dir.to_string_lossy().to_string(),
+        )
+        .expect("import construct project");
+
+        let project_dir = PathBuf::from(&result.path);
+        let project = load_project(&project_dir).expect("load imported construct project");
+        let scene =
+            load_scene(&project_dir, &project.entry_scene).expect("load imported construct scene");
+
+        let metadata = project.template_metadata.as_ref().expect("template metadata");
+        assert_eq!(metadata.source_kind, "imported_construct");
+        assert_eq!(metadata.source_engine.as_deref(), Some("construct"));
+        assert_eq!(metadata.import_profile.as_deref(), Some("construct_folder_v1"));
+        assert!(scene.entities.iter().any(|entity| entity
+            .components
+            .sprite
+            .as_ref()
+            .is_some_and(|sprite| sprite.asset == "assets/sprites/construct_sprites_hero.png")));
+        assert!(scene.entities.iter().any(|entity| entity
+            .components
+            .tilemap
+            .as_ref()
+            .is_some_and(|tilemap| tilemap.tileset == "assets/tilesets/construct_backgrounds_stage.png")));
+
+        let hero = scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "hero")
+            .expect("construct hero");
+        assert!(hero
+            .components
+            .logic
+            .as_ref()
+            .is_some_and(|logic| !logic.logic_hints.is_empty()));
+
+        let _ = fs::remove_dir_all(base_dir);
+        let _ = fs::remove_dir_all(donor_dir);
+    }
+
+    #[test]
+    fn import_external_project_command_supports_rpg_maker() {
+        let base_dir = temp_dir("import-rpgmaker-command");
+        let donor_dir = temp_dir("import-rpgmaker-donor");
+        write_rpg_maker_fixture(&donor_dir);
+
+        let result = import_external_project(
+            "Imported RPG Maker".to_string(),
+            base_dir.to_string_lossy().to_string(),
+            "rpg_maker".to_string(),
+            donor_dir.to_string_lossy().to_string(),
+        )
+        .expect("import rpg maker project");
+
+        let project_dir = PathBuf::from(&result.path);
+        let project = load_project(&project_dir).expect("load imported rpg maker project");
+        let scene =
+            load_scene(&project_dir, &project.entry_scene).expect("load imported rpg maker scene");
+
+        let metadata = project.template_metadata.as_ref().expect("template metadata");
+        assert_eq!(metadata.source_kind, "imported_rpg_maker");
+        assert_eq!(metadata.source_engine.as_deref(), Some("rpg_maker"));
+        assert_eq!(
+            metadata.import_profile.as_deref(),
+            Some("rpg_maker_data_json_v1")
+        );
+        assert!(scene.entities.iter().any(|entity| entity
+            .components
+            .tilemap
+            .as_ref()
+            .is_some_and(|tilemap| tilemap.tileset == "assets/tilesets/rpgmaker_img_parallaxes_forestbg.png")));
+        let guide = scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "guide")
+            .expect("guide event entity");
+        assert!(guide
+            .components
+            .logic
+            .as_ref()
+            .is_some_and(|logic| !logic.logic_hints.is_empty()));
+        assert!(scene.entities.iter().any(|entity| entity
+            .components
+            .audio
+            .as_ref()
+            .is_some_and(|audio| audio.bgm.as_deref() == Some("assets/audio/rpgmaker_audio_bgm_field.wav"))));
+
+        let _ = fs::remove_dir_all(base_dir);
+        let _ = fs::remove_dir_all(donor_dir);
+    }
+
+    #[test]
+    fn import_external_project_command_supports_openbor() {
+        let base_dir = temp_dir("import-openbor-command");
+        let donor_dir = temp_dir("import-openbor-donor");
+        write_openbor_fixture(&donor_dir);
+
+        let result = import_external_project(
+            "Imported OpenBOR".to_string(),
+            base_dir.to_string_lossy().to_string(),
+            "openbor".to_string(),
+            donor_dir.to_string_lossy().to_string(),
+        )
+        .expect("import openbor project");
+
+        let project_dir = PathBuf::from(&result.path);
+        let project = load_project(&project_dir).expect("load imported openbor project");
+        let scene =
+            load_scene(&project_dir, &project.entry_scene).expect("load imported openbor scene");
+
+        let metadata = project.template_metadata.as_ref().expect("template metadata");
+        assert_eq!(metadata.source_kind, "imported_openbor");
+        assert_eq!(metadata.source_engine.as_deref(), Some("openbor"));
+        assert_eq!(metadata.import_profile.as_deref(), Some("openbor_module_v1"));
+        let hero = scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "hero")
+            .expect("openbor hero entity");
+        assert!(hero.components.input.is_some());
+        assert!(hero.components.physics.is_some());
+        assert!(hero
+            .components
+            .logic
+            .as_ref()
+            .is_some_and(|logic| !logic.logic_hints.is_empty()));
+        assert!(scene.entities.iter().any(|entity| entity
+            .components
+            .tilemap
+            .as_ref()
+            .is_some_and(|tilemap| tilemap.tileset == "assets/tilesets/openbor_data_art_stage.png")));
 
         let _ = fs::remove_dir_all(base_dir);
         let _ = fs::remove_dir_all(donor_dir);

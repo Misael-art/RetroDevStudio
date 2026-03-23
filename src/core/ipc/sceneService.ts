@@ -78,6 +78,7 @@ export interface LogicVariable {
 export interface LogicComponent {
   graph?: string;
   graph_ref?: string | null;
+  logic_hints?: string[];
   variables?: Record<string, LogicVariable>;
 }
 
