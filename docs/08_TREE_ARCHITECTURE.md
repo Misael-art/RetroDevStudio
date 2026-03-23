@@ -24,9 +24,13 @@ RetroDevStudio/
 |-- package.json
 |-- vite.config.ts
 |-- data/
-|   |-- rom_teste.bin
+|   |-- Blackheart_grande.gif
+|   |-- Earthquake_large.png
+|   |-- KenMasters_normal.png
+|   |-- MegaMan_pequeno.png
+|   |-- MetalSlug_Backgrounds.png
 |   |-- template_registry.json
-|   `-- sonic_test.gen
+|   `-- ...
 |
 |-- docs/
 |   |-- 00_AI_DIRECTIVES.md
@@ -142,6 +146,7 @@ RetroDevStudio/
 - `src-tauri/src/tools/dependency_manager.rs` e a fonte canonica para detectar e instalar SGDK, PVSnesLib e cores Libretro.
 - `src-tauri/src/compiler/build_orch.rs` e a fonte canonica do pipeline `UGDM -> workspace -> ROM`.
 - `data/template_registry.json` e o catalogo canonico da galeria de templates do wizard; seeds externos apontam para donor paths locais do usuario e nao devem embutir ROMs, VGMs de terceiros ou artefatos de build no repositorio.
+- ROMs, packs MUGEN/Ikemen, screenpacks e outros corpus locais de validacao devem permanecer fora da arvore versionada do repositorio. Quando necessarios para QA local, devem viver em diretorio externo BYOR e nunca ser tratados como fixture canonica do app.
 - `prefabs/` e `graphs/` sao diretorios de projeto gerados dentro de cada workspace `.rds` do usuario; nao vivem na raiz do repositorio e devem continuar sendo tratados como dados do projeto, nao como modulos do app.
 - Projetos SGDK externos podem conter um subdiretorio `rds/` (overlay) com `project.rds`, `scenes/`, `graphs/`, `prefabs/` e junctions NTFS para `assets/` e `build/`. O backend faz discovery de `project.rds` em subdiretorios de primeiro nivel quando nao encontra na raiz. Ver `docs/05_ARCHITECTURE_UGDM.md` secao 10.
 - O caminho SNES real usa staging de asset no workspace e gera `hdr.asm`, `data.asm` e regras `gfx4snes`.
