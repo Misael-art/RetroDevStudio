@@ -99,7 +99,7 @@ Uma tarefa tambem nao esta concluida enquanto faltar certificacao real no escopo
 
 ---
 
-## 6. MATRIZ DE MATURIDADE ATUAL (2026-03-03)
+## 6. MATRIZ DE MATURIDADE ATUAL (2026-03-22)
 
 Escala:
 - `0` inexistente
@@ -112,17 +112,18 @@ Escala:
 | Area | Nota | Leitura objetiva | Gargalo atual |
 |------|------|------------------|---------------|
 | Infra | 4.5/5 | Base de app, IPC, persistencia, CI e workflow desktop dedicado agora estao validados localmente e em runner GitHub/Windows real | Falta decidir a governanca final do workflow sem perder agilidade |
-| Editor | 3.0/5 | Editor funcional para uso interno com persistencia e viewport | Nem toda superficie esta integrada ao pipeline real |
-| Build | 4.0/5 | Pipeline real por target com workspace, staging e ROM validado com upstream oficial em Windows | Export ainda simples e SNES continua sensivel a mudancas no workspace |
-| Emulacao | 4.2/5 | Libretro FFI real, carga de ROM, input e framebuffer validados com smoke upstream, runner local e workflow GitHub/Windows | Falta apenas preservar esse baseline ao endurecer o processo |
+| Editor | 3.5/5 | NodeGraph 100% feito (1003 LOC, 23 node types, canvas SVG, drag/connect, paleta, auto-save, compila para C), workspace adaptativo com rail lateral e presets, ArtStudio institucionalizado com pipeline ate build provado | Refactoring de ViewportPanel/ToolsPanel monoliticos pode melhorar manutenibilidade |
+| Build | 4.0/5 | Pipeline real por target com workspace, staging e ROM validado com upstream oficial em Windows; ArtStudio multiframe ate resources.res provado; RetroFX parallax/raster ate main.c provado | Export ainda simples e SNES continua sensivel a mudancas no workspace |
+| Emulacao | 4.2/5 | Libretro FFI real, carga de ROM, input, framebuffer e audio validados com smoke upstream, runner local e workflow GitHub/Windows | Falta apenas preservar esse baseline ao endurecer o processo |
 | Toolchains | 4.0/5 | Setup sob demanda real e validado em Windows com SGDK, PVSnesLib e cores Libretro oficiais | Continua dependente de ambiente externo e compliance de licenca |
-| UX | 2.5/5 | UI mais honesta e com superficies experimentais rotuladas | Ainda ha polimento e previsibilidade a fechar |
-| Testes | 4.9/5 | Baseline forte de testes, smoke upstream oficial, desktop E2E multi-target e workflow dedicado reutilizavel agora validados em runner GitHub/Windows real | Falta apenas calibrar custo/processo do gate remoto sem afrouxar cobertura |
+| UX | 3.0/5 | Shell adaptativo com 6 contextos, presets de layout, focus mode, console colapsavel, palette contextual com paint/erase, collision map editor, zoom viewport e superficies experimentais rotuladas | Ainda ha polimento para leigos e ViewportPanel monolitico |
+| Testes | 4.9/5 | Baseline forte de testes, smoke upstream oficial, desktop E2E multi-target e workflow dedicado reutilizavel agora validados em runner GitHub/Windows real; novos testes de prova ArtStudio multiframe e RetroFX parallax/raster | Falta apenas calibrar custo/processo do gate remoto sem afrouxar cobertura |
 
 Leitura sintetica:
-- O projeto esta acima de simples scaffold ou demo.
-- O estado correto e `alpha interna em hardening`, nao `Fase 0`.
-- O bloqueio principal nao e mais ausencia de validacao oficial nem de runner remoto; agora e endurecer UX/processo sem diluir o gate conquistado.
+- O projeto esta em `beta tecnica / hardening`, com provas reais de pipeline ponta a ponta.
+- NodeGraph, Audio e ArtStudio-ate-build estao mais maduros do que a documentacao anterior indicava.
+- Auto-updater deferido para pos-MVP por decisao explicita (2026-03-22).
+- O bloqueio principal agora e QA manual com leigos e repeticao institucional das provas em baseline commitada.
 
 ---
 

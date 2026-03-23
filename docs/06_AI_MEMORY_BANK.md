@@ -17,6 +17,14 @@
 
 ## 1. STATUS ATUAL DO PROJETO
 
+* **O que acabou de acontecer (2026-03-22 - Fechamento do MVP: provas de pipeline e sync documental):**
+  - **Auto-updater deferido explicitamente para pos-MVP:** decisao registrada no Roadmap e Memory Bank. O crate `tauri-plugin-updater` permanece como placeholder; nenhum trabalho adicional sera investido ate o MVP ser fechado e a dependencia aprovada formalmente.
+  - **ArtStudio multiframe → runtime provado:** novo teste Rust `artstudio_multiframe_animation_reaches_resources_res_and_main_c` prova que um sprite de 4 frames importado via ArtStudio com duas animacoes nomeadas (idle/run) chega ao `resources.res` com `SPRITE` correto e ao `main.c` com `SPR_setAnim` e `SPR_addSprite`.
+  - **AnimationDef roundtrip provado:** novo teste Rust `multiframe_sprite_animations_produce_correct_ast_sprite_assets` prova que `AnimationDef` com `fps` e `frames` produz `SpriteAnimation` no AST com `frame_time` correto (60fps projeto / 8fps anim = 8, 60/15 = 4), sorting alfabetico e `default_animation` resolvido.
+  - **RetroFX parallax/raster → main.c provado (MD + SNES):** novos testes Rust `retrofx_scene_config_generates_parallax_and_raster_in_main_c` e `retrofx_scene_config_generates_hdma_parallax_in_snes_main_c` provam que config RetroFX persistida na cena JSON (2 parallax layers + 1 raster line) gera `VDP_setScrollingMode(HSCROLL_LINE)`, offsets de parallax no game loop, `retro_hscroll_table[100] += 4` e DMA push no SGDK; e HDMA parallax no SNES.
+  - **Maturity matrix corrigida:** Editor subiu de 3.0 para 3.5 (NodeGraph completo, ArtStudio pipeline provado), UX subiu de 2.5 para 3.0 (shell adaptativo, paint/erase, collision map, zoom). Data atualizada para 2026-03-22.
+  - **Refactoring de ViewportPanel/ToolsPanel adiado:** apos analise, o ViewportPanel (3355 LOC) tem estado profundamente entrelacado entre Scene View e Game View. Risco de regressao no RC justifica adiar para pos-MVP.
+
 * **O que acabou de acontecer (2026-03-22 - Importadores externos: registry comum + Godot 2D experimental):**
   - **Arquitetura comum de adapters iniciada:** `project_mgr.rs` agora expoe uma matriz canonica de perfis externos (`sgdk`, `mugen`, `ikemen_go`, `godot`, `gamemaker`, `construct`, `rpg_maker`, `unity_2d`, `paper2d_bridge`) com `support_status`, niveis `L1-L4`, target recomendado e flag de importabilidade. Isso passou para o frontend via `list_external_import_profiles` e para o wizard como superficie unica `Importar Externo`.
   - **Primeiro adapter novo alem do eixo SGDK/MUGEN:** `Godot 2D` entrou como importador `Experimental` no backend. O escopo honesto desta wave cobre `project.godot` + `.tscn`, `Sprite2D`, `Camera2D`, `AudioStreamPlayer`/`AudioStreamPlayer2D`, copia real de assets para `assets/sprites` e `assets/audio`, cena `.rds` nativa e metadata de proveniencia registrada.
@@ -928,21 +936,20 @@ As seguintes decisoes ja foram debatidas e sao finais:
 ## 4. PROXIMO PASSO IMEDIATO (PARA A IA EXECUTAR QUANDO SOLICITADA)
 
 **Tarefa:**
-Continuar o ciclo de release candidate / beta testing do desktop Tauri, agora com foco em validar a nova galeria de templates, o seed `platformer`, a persistencia de prefabs/graphs externalizados e a importacao SGDK experimental com usuarios leigos e projetos reais.
+Fechar o MVP do desktop Tauri: provas de pipeline agora cobertas por testes deterministicos, documentacao sincronizada e QA manual como proximo gargalo real.
 
 **Pre-requisitos operacionais:**
 * Manter os 6 gates canonicos verdes em toda alteracao relevante.
-* Nao anunciar auto-update como funcional enquanto `tauri-plugin-updater` continuar bloqueado pela politica de nao adicionar dependencias novas.
+* **Auto-updater deferido para pos-MVP (decisao 2026-03-22):** manter `tauri-plugin-updater` apenas como placeholder; nenhum trabalho adicional (endpoint real, UI, pubkey) sera investido ate o MVP ser fechado e a dependencia formalmente aprovada em `docs/02_TECH_STACK.md`.
 * Reexecutar bundle MSI e smoke desktop em host Windows institucional sempre que a mudanca tocar packaging, emulacao, build orchestration, onboarding ou fluxo de projeto.
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
 **Sequencia de acoes recomendada:**
-1. Repetir o baseline canonico e, se o escopo tocar release, o bundle MSI (`scripts/run-in-msvc.cmd npm run build:msi`) no host Windows institucional apropriado.
-2. Executar QA manual do wizard/galeria com pessoas leigas, cobrindo `Projeto Vazio`, `Primeiro Projeto`, `Plataforma`, `Importar Projeto SGDK`, preview real no viewport, labels PT-BR no NodeGraph e feedback visual de `Herdado`/`Override` no inspector.
-3. Validar `Build & Run` em Mega Drive para `platformer_seed` e para pelo menos um projeto SGDK importado genericamente, confirmando que o pipeline continua sem copiar `VGM`, ROMs ou artefatos de build.
-4. Decidir a proxima onda de UX/engine para templates: presets compostos de comportamento, meta-sprites e possivel reducao do badge `Experimental` conforme os resultados do beta.
-5. **Auto-updater deferido para pos-MVP (decisao 2026-03-22):** manter `tauri-plugin-updater` apenas como placeholder; nenhum trabalho adicional (endpoint real, UI, pubkey) sera investido ate o MVP ser fechado e a dependencia formalmente aprovada em `docs/02_TECH_STACK.md`.
-6. Preparar notas de beta testing, criterios de aceite e lista de riscos residuais para a rodada institucional com a nova galeria de templates.
+1. Executar QA manual (`docs/10_QA_ROTEIRO_RC.md` Blocos A-F) com usuarios leigos cobrindo templates, Build & Run e superficies experimentais.
+2. Validar `platformer_seed` e pelo menos um projeto SGDK importado com `Build & Run` Mega Drive usando SGDK real instalado.
+3. Repetir bundle MSI quando o escopo tocar release (`scripts/run-in-msvc.cmd npm run build:msi`).
+4. Considerar refactoring de ViewportPanel/ToolsPanel como melhoria pos-MVP (risco vs beneficio avaliado).
+5. Preparar notas de beta testing, criterios de aceite e lista de riscos residuais para a rodada institucional.
 
 **Validacao minima obrigatoria antes de marcar qualquer item como concluido:**
 * `npm run check:tree`
