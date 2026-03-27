@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
@@ -1403,6 +1404,7 @@ where
             }
             _ => {
                 command.env("SGDK", &toolchain.root);
+                configure_java_for_sgdk(&mut command);
             }
         }
         command.output().map_err(|e| {
@@ -1592,6 +1594,15 @@ fn detect_root(env_var: &str, local_dir_name: &str) -> Option<PathBuf> {
     None
 }
 
+fn configure_java_for_sgdk(command: &mut Command) {
+    let Some(java_home) = detect_java_home() else {
+        return;
+    };
+
+    command.env("JAVA_HOME", &java_home);
+    prepend_to_path(command, &java_home.join("bin"));
+}
+
 fn detect_make_program(root: &Path) -> Option<PathBuf> {
     for candidate in [
         root.join("bin").join(platform_make_name()),
@@ -1605,6 +1616,16 @@ fn detect_make_program(root: &Path) -> Option<PathBuf> {
     }
 
     find_in_path(&["make", "mingw32-make"])
+}
+
+fn detect_java_home() -> Option<PathBuf> {
+    std::env::var_os("JAVA_HOME")
+        .map(PathBuf::from)
+        .filter(|path| is_java_home_candidate(path))
+        .or_else(|| {
+            let local = repo_root().join("toolchains").join("jdk");
+            is_java_home_candidate(&local).then_some(local)
+        })
 }
 
 fn detect_bash_program() -> Option<PathBuf> {
@@ -1632,6 +1653,38 @@ fn detect_bash_program() -> Option<PathBuf> {
                         .contains("\\windows\\system32\\bash.exe")
             })
     })
+}
+
+fn is_java_home_candidate(path: &Path) -> bool {
+    path.join("bin").join(platform_java_name()).exists()
+}
+
+fn platform_java_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "java.exe"
+    } else {
+        "java"
+    }
+}
+
+fn prepend_to_path(command: &mut Command, entry: &Path) {
+    if !entry.exists() {
+        return;
+    }
+
+    let existing = std::env::var_os("PATH").unwrap_or_default();
+    let mut path_value = OsString::new();
+    path_value.push(entry.as_os_str());
+    if !existing.is_empty() {
+        path_value.push(if cfg!(target_os = "windows") {
+            ";"
+        } else {
+            ":"
+        });
+        path_value.push(existing);
+    }
+
+    command.env("PATH", path_value);
 }
 
 fn to_shell_friendly_path(path: &Path) -> String {

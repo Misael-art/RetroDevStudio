@@ -71,6 +71,28 @@ struct GithubReleaseAsset {
     browser_download_url: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct AdoptiumAvailableReleases {
+    most_recent_lts: u32,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdoptiumPackage {
+    link: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdoptiumBinary {
+    package: AdoptiumPackage,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdoptiumRelease {
+    binary: AdoptiumBinary,
+    release_link: String,
+    release_name: String,
+}
+
 struct InstallLogger<'a, F>
 where
     F: Fn(DependencyLogLine),
@@ -102,6 +124,7 @@ where
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DependencyKind {
+    Jdk,
     Sgdk,
     PvsnesLib,
     LibretroMegaDriveCore,
@@ -111,6 +134,7 @@ enum DependencyKind {
 impl DependencyKind {
     fn from_id(id: &str) -> Result<Self, String> {
         match id {
+            "jdk" => Ok(Self::Jdk),
             "sgdk" => Ok(Self::Sgdk),
             "pvsneslib" => Ok(Self::PvsnesLib),
             "libretro_megadrive" => Ok(Self::LibretroMegaDriveCore),
@@ -124,6 +148,7 @@ impl DependencyKind {
 
     fn id(self) -> &'static str {
         match self {
+            Self::Jdk => "jdk",
             Self::Sgdk => "sgdk",
             Self::PvsnesLib => "pvsneslib",
             Self::LibretroMegaDriveCore => "libretro_megadrive",
@@ -133,6 +158,7 @@ impl DependencyKind {
 
     fn label(self) -> &'static str {
         match self {
+            Self::Jdk => "JDK (Temurin LTS)",
             Self::Sgdk => "SGDK",
             Self::PvsnesLib => "PVSnesLib",
             Self::LibretroMegaDriveCore => "Libretro Core: Mega Drive",
@@ -142,6 +168,7 @@ impl DependencyKind {
 
     fn source_url(self) -> &'static str {
         match self {
+            Self::Jdk => "https://adoptium.net/temurin/releases/",
             Self::Sgdk => "https://github.com/Stephane-D/SGDK/releases",
             Self::PvsnesLib => "https://github.com/alekmaul/pvsneslib/releases",
             Self::LibretroMegaDriveCore | Self::LibretroSnesCore => {
@@ -152,6 +179,7 @@ impl DependencyKind {
 
     fn install_dir(self) -> PathBuf {
         match self {
+            Self::Jdk => repo_root().join("toolchains").join("jdk"),
             Self::Sgdk => repo_root().join("toolchains").join("sgdk"),
             Self::PvsnesLib => repo_root().join("toolchains").join("pvsneslib"),
             Self::LibretroMegaDriveCore | Self::LibretroSnesCore => repo_root()
@@ -172,6 +200,7 @@ impl DependencyKind {
 
     fn is_installed(self) -> bool {
         match self {
+            Self::Jdk => detect_java_program().is_some(),
             Self::Sgdk => {
                 let root = self.install_dir();
                 root.join("makefile.gen").exists()
@@ -193,13 +222,32 @@ impl DependencyKind {
     }
 
     fn status(self) -> DependencyStatus {
-        let install_dir = self.install_dir();
+        let install_dir = match self {
+            Self::Jdk => detect_java_install_dir(),
+            _ => self.install_dir(),
+        };
         let manifest = read_manifest(self.manifest_dir(), manifest_file_name(self));
         let installed = self.is_installed();
         let mut notes = Vec::new();
         let mut issues = Vec::new();
 
         match self {
+            Self::Jdk => {
+                notes.push(
+                    "Instalacao automatica usa o Temurin LTS oficial em formato ZIP, sem alterar o sistema global."
+                        .to_string(),
+                );
+                notes.push(
+                    "Quando presente em `toolchains/jdk`, o app injeta `JAVA_HOME` e `PATH` localmente no build SGDK."
+                        .to_string(),
+                );
+                if !installed {
+                    issues.push(
+                        "Java/JDK nao encontrado em JAVA_HOME, `toolchains/jdk` ou PATH."
+                            .to_string(),
+                    );
+                }
+            }
             Self::Sgdk => {
                 notes.push(
                     "Instalacao automatica usa a release oficial do SGDK em GitHub Releases."
@@ -209,9 +257,9 @@ impl DependencyKind {
                     "O build do Mega Drive continua falhando explicitamente se o toolchain nao estiver operacional."
                         .to_string(),
                 );
-                if cfg!(target_os = "windows") && find_in_path(&["java"]).is_none() {
+                if cfg!(target_os = "windows") && detect_java_program().is_none() {
                     issues.push(
-                        "Java nao encontrado no PATH. O SGDK upstream usa Java em parte das ferramentas."
+                        "Java/JDK nao encontrado. O SGDK upstream usa Java em parte das ferramentas."
                             .to_string(),
                     );
                 }
@@ -286,6 +334,7 @@ impl DependencyKind {
 pub fn dependency_status_report() -> DependencyStatusReport {
     DependencyStatusReport {
         items: [
+            DependencyKind::Jdk,
             DependencyKind::Sgdk,
             DependencyKind::PvsnesLib,
             DependencyKind::LibretroMegaDriveCore,
@@ -378,6 +427,7 @@ where
     };
 
     let install_result = match dependency {
+        DependencyKind::Jdk => install_jdk(&client, &mut logger),
         DependencyKind::Sgdk => install_sgdk(&client, &mut logger),
         DependencyKind::PvsnesLib => install_pvsneslib(&client, &mut logger),
         DependencyKind::LibretroMegaDriveCore | DependencyKind::LibretroSnesCore => {
@@ -425,6 +475,63 @@ where
     }
 }
 
+fn install_jdk<F>(client: &Client, logger: &mut InstallLogger<F>) -> Result<String, String>
+where
+    F: Fn(DependencyLogLine),
+{
+    logger.emit("info", "Consultando release oficial do Temurin LTS...");
+    let (release_name, release_link, package_link) = fetch_latest_temurin_lts_package(client)?;
+    logger.emit("info", format!("Release LTS selecionada: {}", release_name));
+
+    let temp_dir = temp_install_dir("jdk")?;
+    let archive_name = package_link
+        .rsplit('/')
+        .next()
+        .filter(|name| !name.trim().is_empty())
+        .unwrap_or("temurin-jdk.zip");
+    let archive_path = temp_dir.join(archive_name);
+    download_to_file(client, &package_link, &archive_path, logger)?;
+
+    let extracted_dir = temp_dir.join("extracted");
+    fs::create_dir_all(&extracted_dir)
+        .map_err(|e| format!("Falha ao preparar extracao do JDK: {}", e))?;
+    logger.emit("info", "Extraindo JDK...");
+    extract_zip(&archive_path, &extracted_dir)?;
+
+    let source_root = find_install_root(&extracted_dir, is_java_home_candidate)
+        .ok_or_else(|| "Pacote JDK extraido sem estrutura reconhecivel.".to_string())?;
+
+    let install_dir = DependencyKind::Jdk.install_dir();
+    replace_dir_contents(&source_root, &install_dir)?;
+    write_manifest(
+        DependencyKind::Jdk.manifest_dir(),
+        manifest_file_name(DependencyKind::Jdk),
+        &InstallManifest {
+            dependency_id: DependencyKind::Jdk.id().to_string(),
+            version: release_name.clone(),
+            source_url: release_link,
+            installed_at_unix: unix_timestamp_now(),
+        },
+    )?;
+
+    let java_program = install_dir.join("bin").join(platform_java_name());
+    if !java_program.exists() {
+        return Err(format!(
+            "JDK instalada em '{}', mas '{}' nao foi encontrado.",
+            install_dir.display(),
+            java_program.display()
+        ));
+    }
+
+    let message = format!(
+        "JDK {} instalada em '{}'.",
+        release_name,
+        install_dir.to_string_lossy()
+    );
+    logger.emit("success", &message);
+    Ok(message)
+}
+
 fn install_sgdk<F>(client: &Client, logger: &mut InstallLogger<F>) -> Result<String, String>
 where
     F: Fn(DependencyLogLine),
@@ -470,10 +577,10 @@ where
         },
     )?;
 
-    if find_in_path(&["java"]).is_none() {
+    if detect_java_program().is_none() {
         logger.emit(
             "warn",
-            "SGDK instalado, mas Java nao foi encontrado no PATH. Algumas ferramentas upstream podem requerer Java.",
+            "SGDK instalado, mas Java/JDK nao foi encontrado. Instale o item 'JDK (Temurin LTS)' no Runtime Setup para completar o ambiente.",
         );
     }
 
@@ -625,6 +732,39 @@ fn fetch_latest_release(client: &Client, url: &str) -> Result<GithubRelease, Str
         .map_err(|e| format!("Falha ao consultar release oficial: {}", e))?
         .json::<GithubRelease>()
         .map_err(|e| format!("Falha ao ler metadata de release oficial: {}", e))
+}
+
+fn fetch_latest_temurin_lts_package(client: &Client) -> Result<(String, String, String), String> {
+    let available = client
+        .get("https://api.adoptium.net/v3/info/available_releases")
+        .send()
+        .and_then(reqwest::blocking::Response::error_for_status)
+        .map_err(|e| format!("Falha ao consultar releases LTS do Temurin: {}", e))?
+        .json::<AdoptiumAvailableReleases>()
+        .map_err(|e| format!("Falha ao ler releases LTS do Temurin: {}", e))?;
+
+    let releases_url = format!(
+        "https://api.adoptium.net/v3/assets/latest/{}/hotspot?os=windows&architecture=x64&image_type=jdk&jvm_impl=hotspot&heap_size=normal&vendor=eclipse",
+        available.most_recent_lts
+    );
+    let mut releases = client
+        .get(&releases_url)
+        .send()
+        .and_then(reqwest::blocking::Response::error_for_status)
+        .map_err(|e| format!("Falha ao consultar pacote Temurin LTS: {}", e))?
+        .json::<Vec<AdoptiumRelease>>()
+        .map_err(|e| format!("Falha ao ler metadata do pacote Temurin LTS: {}", e))?;
+
+    let release = releases
+        .drain(..)
+        .next()
+        .ok_or_else(|| "A API oficial do Temurin nao retornou um pacote JDK LTS para Windows x64.".to_string())?;
+
+    Ok((
+        release.release_name,
+        release.release_link,
+        release.binary.package.link,
+    ))
 }
 
 fn download_to_file<F>(
@@ -988,6 +1128,44 @@ fn detect_make_program(root: &Path) -> Option<PathBuf> {
     bundled.exists().then_some(bundled)
 }
 
+fn platform_java_name() -> &'static str {
+    if cfg!(target_os = "windows") {
+        "java.exe"
+    } else {
+        "java"
+    }
+}
+
+fn is_java_home_candidate(path: &Path) -> bool {
+    path.join("bin").join(platform_java_name()).exists()
+}
+
+fn detect_java_home() -> Option<PathBuf> {
+    std::env::var_os("JAVA_HOME")
+        .map(PathBuf::from)
+        .filter(|path| is_java_home_candidate(path))
+        .or_else(|| {
+            let local = DependencyKind::Jdk.install_dir();
+            is_java_home_candidate(&local).then_some(local)
+        })
+}
+
+fn detect_java_program() -> Option<PathBuf> {
+    detect_java_home()
+        .map(|root| root.join("bin").join(platform_java_name()))
+        .filter(|path| path.exists())
+        .or_else(|| find_in_path(&["java"]))
+}
+
+fn detect_java_install_dir() -> PathBuf {
+    detect_java_home()
+        .or_else(|| {
+            detect_java_program()
+                .and_then(|program| program.parent().and_then(Path::parent).map(Path::to_path_buf))
+        })
+        .unwrap_or_else(|| DependencyKind::Jdk.install_dir())
+}
+
 fn find_in_path(candidates: &[&str]) -> Option<PathBuf> {
     let locator = if cfg!(target_os = "windows") {
         "where"
@@ -1049,7 +1227,24 @@ fn has_megadrive_header(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
+    use std::sync::{Mutex, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_serial_guard() -> std::sync::MutexGuard<'static, ()> {
+        static TEST_SERIAL: OnceLock<Mutex<()>> = OnceLock::new();
+        TEST_SERIAL
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("dependency_manager test serial lock poisoned")
+    }
+
+    fn restore_env_var(name: &str, value: Option<OsString>) {
+        match value {
+            Some(value) => unsafe { std::env::set_var(name, value) },
+            None => unsafe { std::env::remove_var(name) },
+        }
+    }
 
     fn temp_dir(prefix: &str) -> PathBuf {
         let nonce = SystemTime::now()
@@ -1088,6 +1283,10 @@ mod tests {
 
     #[test]
     fn manifest_file_names_are_stable() {
+        assert_eq!(
+            manifest_file_name(DependencyKind::Jdk),
+            ".retrodev-install-jdk.json"
+        );
         assert_eq!(
             manifest_file_name(DependencyKind::Sgdk),
             ".retrodev-install-sgdk.json"
@@ -1135,5 +1334,25 @@ mod tests {
 
         let _ = fs::remove_dir_all(source_dir);
         let _ = fs::remove_dir_all(destination_dir);
+    }
+
+    #[test]
+    fn jdk_status_detects_java_home() {
+        let _serial = test_serial_guard();
+        let java_home = temp_dir("java-home");
+        let java_bin = java_home.join("bin");
+        fs::create_dir_all(&java_bin).expect("create java home bin dir");
+        fs::write(java_bin.join(platform_java_name()), b"fake-java").expect("write fake java");
+
+        let previous_java_home = std::env::var_os("JAVA_HOME");
+        unsafe { std::env::set_var("JAVA_HOME", &java_home) };
+
+        let status = DependencyKind::Jdk.status();
+        assert!(status.installed, "jdk status should detect JAVA_HOME");
+        assert_eq!(PathBuf::from(&status.install_dir), java_home);
+        assert!(status.issues.is_empty(), "unexpected issues: {:?}", status.issues);
+
+        restore_env_var("JAVA_HOME", previous_java_home);
+        let _ = fs::remove_dir_all(status.install_dir);
     }
 }

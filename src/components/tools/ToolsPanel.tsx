@@ -1353,6 +1353,57 @@ function RuntimeSetup() {
     void refreshStatus();
   }, []);
 
+  async function ensureDependencies(
+    dependencyIds: ThirdPartyDependencyId[],
+    reason: string,
+    logPrefix: string
+  ) {
+    try {
+      const report = await getThirdPartyStatus();
+      setItems(report.items);
+
+      const missing = report.items.filter(
+        (item) => dependencyIds.includes(item.id as ThirdPartyDependencyId) && !item.installed
+      );
+      if (missing.length === 0) {
+        return true;
+      }
+
+      const summary = missing
+        .map((item) => `- ${item.label}: ${item.issues[0] ?? item.install_dir}`)
+        .join("\n");
+      const confirmed = window.confirm(
+        `${reason}\n\nDependencias ausentes:\n${summary}\n\nInstalar automaticamente agora?`
+      );
+      if (!confirmed) {
+        logMessage("warn", `${logPrefix} Operacao cancelada: dependencias externas pendentes.`);
+        return false;
+      }
+
+      for (const item of missing) {
+        setBusyId(item.id);
+        logMessage("info", `${logPrefix} Instalando ${item.label}...`);
+        try {
+          const result = await installThirdPartyDependency(item.id, (line: DependencyLogLine) => {
+            logMessage(line.level, `[Setup] ${line.message}`);
+          });
+          if (!result.ok) {
+            logMessage("error", `${logPrefix} ${result.message}`);
+            return false;
+          }
+        } finally {
+          setBusyId(null);
+        }
+      }
+
+      await refreshStatus();
+      return true;
+    } catch (error) {
+      logMessage("error", `${logPrefix} ${describeError(error)}`);
+      return false;
+    }
+  }
+
   async function install(dependencyId: ThirdPartyDependencyId | string, label: string) {
     const confirmed = window.confirm(
       `Instalar ${label} agora? O download sera feito do upstream oficial e gravado apenas no ambiente local.`
@@ -1376,6 +1427,15 @@ function RuntimeSetup() {
   async function runBuildAllTargets() {
     if (!activeProjectDir) {
       logMessage("warn", "[Build All] Abra um projeto antes de iniciar o build multi-target.");
+      return;
+    }
+
+    const dependenciesReady = await ensureDependencies(
+      ["jdk", "sgdk", "pvsneslib"],
+      "Build multi-target requer JDK, SGDK e PVSnesLib configurados no ambiente local.",
+      "[Build All]"
+    );
+    if (!dependenciesReady) {
       return;
     }
 
@@ -1416,7 +1476,7 @@ function RuntimeSetup() {
         <div className="flex flex-col gap-1">
           <span className="text-xs font-semibold text-[#cdd6f4]">Runtime Setup</span>
           <p className="text-[10px] leading-tight text-[#7f849c]">
-            Instala sob demanda SGDK, PVSnesLib e cores Libretro oficiais sem versionar binarios no repositorio.
+            Instala sob demanda JDK (Temurin LTS), SGDK, PVSnesLib e cores Libretro oficiais sem versionar binarios no repositorio.
           </p>
         </div>
         <button

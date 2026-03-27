@@ -2,6 +2,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import { getGameViewportScale } from "./components/viewport/ViewportPanel";
 import { useEditorStore } from "./core/store/editorStore";
 
 const mocks = vi.hoisted(() => ({
@@ -372,6 +373,18 @@ function findButtonInContext(
   return button;
 }
 
+describe("getGameViewportScale", () => {
+  it("uses integer scaling that fits the available area", () => {
+    expect(getGameViewportScale(640, 448)).toBe(2);
+    expect(getGameViewportScale(960, 672)).toBe(3);
+  });
+
+  it("falls back to 1x when space is tight or invalid", () => {
+    expect(getGameViewportScale(500, 300)).toBe(1);
+    expect(getGameViewportScale(0, 0)).toBe(1);
+  });
+});
+
 describe("App build flow", () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -494,6 +507,7 @@ describe("App build flow", () => {
     });
     mocks.getThirdPartyStatus.mockResolvedValue({
       items: [
+        createDependencyStatus("jdk"),
         createDependencyStatus("sgdk"),
         createDependencyStatus("libretro_megadrive"),
         createDependencyStatus("pvsneslib"),
@@ -627,6 +641,51 @@ describe("App build flow", () => {
     expect(useEditorStore.getState().emulatorLoaded).toBe(true);
     expect(container.textContent).toContain("Emulador ativo");
     expect(putImageDataSpy).toHaveBeenCalled();
+  });
+
+  it("installs the missing JDK before Build & Run on Mega Drive", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    mocks.getThirdPartyStatus.mockResolvedValue({
+      items: [
+        {
+          ...createDependencyStatus("jdk"),
+          label: "JDK (Temurin LTS)",
+          installed: false,
+          version: null,
+          issues: ["Java/JDK nao encontrado em JAVA_HOME, `toolchains/jdk` ou PATH."],
+        },
+        createDependencyStatus("sgdk"),
+        createDependencyStatus("libretro_megadrive"),
+        createDependencyStatus("pvsneslib"),
+        createDependencyStatus("libretro_snes"),
+      ],
+    });
+    mocks.installThirdPartyDependency.mockResolvedValue({
+      ok: true,
+      dependency_id: "jdk",
+      message: "JDK instalada no ambiente local.",
+      status: createDependencyStatus("jdk"),
+      log: [],
+    });
+
+    await act(async () => {
+      findButton(container, "Build & Run").click();
+      await flush();
+      await flush();
+    });
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      expect.stringContaining("JDK (Temurin LTS)")
+    );
+    expect(mocks.installThirdPartyDependency).toHaveBeenCalledWith(
+      "jdk",
+      expect.any(Function)
+    );
+    expect(mocks.buildProject).toHaveBeenCalledTimes(1);
+    expect(mocks.emulatorLoadRom).toHaveBeenCalledWith("F:/Temp/game.md");
+
+    confirmSpy.mockRestore();
   });
 
   it("shows a waiting status after loading the ROM and before the emulator loop becomes active", async () => {

@@ -172,4 +172,76 @@ mod tests {
         let (candidates, _) = analyze_graphics(&loaded);
         assert!(!candidates.is_empty());
     }
+
+    #[test]
+    fn analyze_graphics_detects_palette_slot_candidates() {
+        // Build ROM with a valid 32-byte palette block (all LE16 words with bit15==0)
+        // followed by a run of 4BPP tiles
+        let mut bytes = vec![0u8; 0x400];
+        // Palette at offset 0: 16 LE16 words all with bit15==0
+        for i in 0..16 {
+            let offset = i * 2;
+            bytes[offset] = 0x1F;
+            bytes[offset + 1] = 0x00; // value 0x001F, bit15==0
+        }
+        // 4BPP tile run at offset 0x100 (8 tiles * 32 bytes = 256 bytes of non-trivial data)
+        for i in 0..(TILE_BYTES_4BPP * 8) {
+            bytes[0x100 + i] = if i % 2 == 0 { 0x12 } else { 0x34 };
+        }
+
+        let loaded = LoadedRom {
+            target: "megadrive".to_string(),
+            source_path: "dummy.rom".to_string(),
+            bytes,
+            detected_format: "bin".to_string(),
+            stripped_header_bytes: 0,
+            header: RomHeader::default(),
+            mapper: String::new(),
+            special_chips: Vec::new(),
+            segments: Vec::new(),
+            entry_points: vec![0],
+            trace_note: String::new(),
+        };
+
+        let (candidates, _) = analyze_graphics(&loaded);
+        assert!(!candidates.is_empty(), "should find tile candidates");
+        assert!(
+            candidates.iter().any(|c| c.palette_slot.is_some()),
+            "at least one candidate should have a palette_slot assigned"
+        );
+    }
+
+    #[test]
+    fn analyze_graphics_produces_compression_candidates_for_large_runs() {
+        // Build ROM with 130 tiles of 4BPP (130 * 32 = 4160 bytes) of non-trivial data
+        let tile_count = 130;
+        let data_size = tile_count * TILE_BYTES_4BPP;
+        let mut bytes = vec![0u8; 0x100 + data_size];
+        for i in 0..data_size {
+            bytes[0x100 + i] = if i % 3 == 0 { 0xAB } else if i % 3 == 1 { 0xCD } else { 0x12 };
+        }
+
+        let loaded = LoadedRom {
+            target: "megadrive".to_string(),
+            source_path: "dummy.rom".to_string(),
+            bytes,
+            detected_format: "bin".to_string(),
+            stripped_header_bytes: 0,
+            header: RomHeader::default(),
+            mapper: String::new(),
+            special_chips: Vec::new(),
+            segments: Vec::new(),
+            entry_points: vec![0],
+            trace_note: String::new(),
+        };
+
+        let (candidates, compression_regions) = analyze_graphics(&loaded);
+        assert!(!candidates.is_empty(), "should find tile candidates");
+        assert!(
+            !compression_regions.is_empty(),
+            "large tile run should produce compression candidates"
+        );
+        assert_eq!(compression_regions[0].scheme, "unknown_tiles_block");
+        assert_eq!(compression_regions[0].confidence, 25);
+    }
 }

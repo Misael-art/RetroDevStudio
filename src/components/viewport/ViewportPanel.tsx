@@ -50,6 +50,7 @@ const RESIZE_HANDLE_SIZE = 8;
 const MIN_ENTITY_SIZE = GRID_SNAP_SIZE;
 const SCENE_RULER_SIZE = 18;
 const GUIDE_SCREEN_TOLERANCE = 6;
+const GAME_VIEWPORT_PADDING = 24;
 
 type ResizeHandle = "nw" | "ne" | "sw" | "se";
 type SceneGuideOrientation = "horizontal" | "vertical";
@@ -94,6 +95,27 @@ function describeError(error: unknown): string {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+export function getGameViewportScale(
+  availableWidth: number,
+  availableHeight: number,
+  baseWidth = MD_WIDTH,
+  baseHeight = MD_HEIGHT
+): number {
+  if (
+    !Number.isFinite(availableWidth) ||
+    !Number.isFinite(availableHeight) ||
+    availableWidth <= 0 ||
+    availableHeight <= 0
+  ) {
+    return 1;
+  }
+
+  const widthScale = Math.floor(availableWidth / baseWidth);
+  const heightScale = Math.floor(availableHeight / baseHeight);
+
+  return Math.max(1, Math.min(widthScale, heightScale));
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -359,6 +381,7 @@ export default function ViewportPanel({
   } = useEditorStore();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const gameViewportStageRef = useRef<HTMLDivElement>(null);
   const sceneCanvasRef = useRef<HTMLCanvasElement>(null);
   const sceneOverlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRulerTopRef = useRef<HTMLCanvasElement>(null);
@@ -425,6 +448,7 @@ export default function ViewportPanel({
   const [stepBusy, setStepBusy] = useState(false);
   const [recordBusy, setRecordBusy] = useState(false);
   const [playReplayBusy, setPlayReplayBusy] = useState(false);
+  const [gameViewportScale, setGameViewportScale] = useState(1);
   const [replayRecording, setReplayRecording] = useState(false);
   const [lastReplayPath, setLastReplayPath] = useState<string | null>(null);
   const [audioMuted, setAudioMuted] = useState(false);
@@ -1215,6 +1239,46 @@ export default function ViewportPanel({
       window.removeEventListener("keyup", onKeyUp);
     };
   }, [activeViewportTab, handleRewind]);
+
+  useEffect(() => {
+    if (activeViewportTab !== "game") {
+      return;
+    }
+
+    function updateGameScale() {
+      const stage = gameViewportStageRef.current;
+      if (!stage) {
+        setGameViewportScale(1);
+        return;
+      }
+
+      const rect = stage.getBoundingClientRect();
+      const nextScale = getGameViewportScale(
+        rect.width - GAME_VIEWPORT_PADDING,
+        rect.height - GAME_VIEWPORT_PADDING
+      );
+
+      setGameViewportScale((current) => (current === nextScale ? current : nextScale));
+    }
+
+    updateGameScale();
+
+    if (typeof ResizeObserver === "function") {
+      const observer = new ResizeObserver(() => {
+        updateGameScale();
+      });
+
+      const stage = gameViewportStageRef.current;
+      if (stage) {
+        observer.observe(stage);
+      }
+
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener("resize", updateGameScale);
+    return () => window.removeEventListener("resize", updateGameScale);
+  }, [activeViewportTab]);
 
   useEffect(() => {
     if (activeViewportTab !== "game") {
@@ -3161,43 +3225,54 @@ export default function ViewportPanel({
         )}
 
         {activeViewportTab === "game" && (
-          <div className="flex flex-col items-center gap-2">
+          <div className="flex min-h-0 flex-1 flex-col gap-2">
             {assetHotReloadNotice && (
               <div
                 data-testid="viewport-asset-hot-reload"
-                className="rounded border border-[#f9e2af]/40 bg-[#f9e2af]/10 px-3 py-1 text-[10px] font-semibold text-[#f9e2af]"
+                className="mx-auto rounded border border-[#f9e2af]/40 bg-[#f9e2af]/10 px-3 py-1 text-[10px] font-semibold text-[#f9e2af]"
               >
                 Assets alterados no disco. {assetHotReloadNotice}
               </div>
             )}
             <div
-              className="relative inline-block"
-              style={{
-                width: MD_WIDTH,
-                height: MD_HEIGHT,
-                transform: "scale(1.75)",
-                transformOrigin: "center center",
-              }}
+              ref={gameViewportStageRef}
+              className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-2xl border border-[#313244] bg-[radial-gradient(circle_at_top,#111827,#05070f_72%)] p-3"
             >
-              <canvas
-                ref={canvasRef}
-                width={MD_WIDTH}
-                height={MD_HEIGHT}
-                data-testid="viewport-game-canvas"
-                className="border border-[#45475a] bg-black"
-                style={{ imageRendering: "pixelated" }}
-                tabIndex={0}
-              />
-              {showPerformanceOverlay && (
-                <div
-                  data-testid="viewport-performance-overlay"
-                  className="pointer-events-none absolute left-2 top-2 flex flex-col gap-1 rounded border border-[#313244] bg-[#11111b]/80 px-2 py-1 font-mono text-[10px] text-[#cdd6f4]"
-                >
-                  <span>FPS {overlayFps}</span>
-                  <span>Sprites {overlaySpriteCount}</span>
-                  <span>DMA est. {Math.round(dmaUsageBytes / 1024)}KB / {Math.round(dmaBudgetBytes / 1024)}KB ({dmaUsagePercent}%)</span>
+              <div
+                className="relative inline-block"
+                data-testid="viewport-game-stage"
+                style={{
+                  width: MD_WIDTH * gameViewportScale,
+                  height: MD_HEIGHT * gameViewportScale,
+                }}
+              >
+                <canvas
+                  ref={canvasRef}
+                  width={MD_WIDTH}
+                  height={MD_HEIGHT}
+                  data-testid="viewport-game-canvas"
+                  className="border border-[#45475a] bg-black shadow-[0_16px_40px_rgba(0,0,0,0.35)]"
+                  style={{
+                    imageRendering: "pixelated",
+                    width: MD_WIDTH * gameViewportScale,
+                    height: MD_HEIGHT * gameViewportScale,
+                  }}
+                  tabIndex={0}
+                />
+                {showPerformanceOverlay && (
+                  <div
+                    data-testid="viewport-performance-overlay"
+                    className="pointer-events-none absolute left-2 top-2 flex flex-col gap-1 rounded border border-[#313244] bg-[#11111b]/80 px-2 py-1 font-mono text-[10px] text-[#cdd6f4]"
+                  >
+                    <span>FPS {overlayFps}</span>
+                    <span>Sprites {overlaySpriteCount}</span>
+                    <span>DMA est. {Math.round(dmaUsageBytes / 1024)}KB / {Math.round(dmaBudgetBytes / 1024)}KB ({dmaUsagePercent}%)</span>
+                  </div>
+                )}
+                <div className="pointer-events-none absolute bottom-2 right-2 rounded border border-[#313244] bg-[#11111b]/80 px-2 py-1 text-[10px] font-mono text-[#7f849c]">
+                  {MD_WIDTH}x{MD_HEIGHT} @ {gameViewportScale}x
                 </div>
-              )}
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <button

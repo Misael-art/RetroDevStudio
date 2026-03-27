@@ -52,6 +52,7 @@ export interface LegacyProjectFilePreview {
 export type AssetExtractorBppMode = "auto" | "2bpp" | "4bpp";
 
 export type ThirdPartyDependencyId =
+  | "jdk"
   | "sgdk"
   | "pvsneslib"
   | "libretro_megadrive"

@@ -411,4 +411,281 @@ mod tests {
         assert_eq!(graph.len(), 1);
         assert!(!hints.is_empty());
     }
+
+    #[test]
+    fn decode_megadrive_instruction_coverage() {
+        let mut rom = Vec::new();
+        // NOP
+        rom.extend_from_slice(&[0x4E, 0x71]);
+        // JSR abs.l $00000100
+        rom.extend_from_slice(&[0x4E, 0xB9, 0x00, 0x00, 0x01, 0x00]);
+        // JMP abs.l $00000200
+        rom.extend_from_slice(&[0x4E, 0xF9, 0x00, 0x00, 0x02, 0x00]);
+        // JSR abs.w $0300
+        rom.extend_from_slice(&[0x4E, 0xB8, 0x03, 0x00]);
+        // JMP abs.w $0400
+        rom.extend_from_slice(&[0x4E, 0xF8, 0x04, 0x00]);
+        // MOVEQ #42, d0
+        rom.extend_from_slice(&[0x70, 0x2A]);
+        // BRA 8-bit (disp=+4)
+        rom.extend_from_slice(&[0x60, 0x04]);
+        // BSR 8-bit (disp=+6)
+        rom.extend_from_slice(&[0x61, 0x06]);
+        // RTS
+        rom.extend_from_slice(&[0x4E, 0x75]);
+
+        let loaded = sample_loaded("megadrive", rom, vec![0]);
+        let result = disassemble_region(&loaded, 0, 64);
+        assert!(result.ok);
+
+        // NOP at offset 0
+        assert_eq!(result.rows[0].kind, "nop");
+        assert_eq!(result.rows[0].size, 2);
+        // JSR abs.l at offset 2
+        assert_eq!(result.rows[1].kind, "call");
+        assert_eq!(result.rows[1].size, 6);
+        assert_eq!(result.rows[1].target, Some(0x100));
+        assert!(result.rows[1].text.contains("jsr"));
+        // JMP abs.l at offset 8
+        assert_eq!(result.rows[2].kind, "jump");
+        assert_eq!(result.rows[2].size, 6);
+        assert_eq!(result.rows[2].target, Some(0x200));
+        // JSR abs.w at offset 14
+        assert_eq!(result.rows[3].kind, "call");
+        assert_eq!(result.rows[3].size, 4);
+        assert_eq!(result.rows[3].target, Some(0x0300));
+        assert!(result.rows[3].text.contains("jsr"));
+        // JMP abs.w at offset 18
+        assert_eq!(result.rows[4].kind, "jump");
+        assert_eq!(result.rows[4].size, 4);
+        assert_eq!(result.rows[4].target, Some(0x0400));
+        // MOVEQ at offset 22
+        assert_eq!(result.rows[5].kind, "move");
+        assert!(result.rows[5].text.contains("moveq"));
+        assert!(result.rows[5].text.contains("42"));
+        // BRA 8-bit at offset 24
+        assert_eq!(result.rows[6].kind, "branch");
+        assert!(result.rows[6].text.contains("bra"));
+        assert_eq!(result.rows[6].target, Some(24 + 2 + 4));
+        // BSR 8-bit at offset 26
+        assert_eq!(result.rows[7].kind, "call");
+        assert!(result.rows[7].text.contains("bsr"));
+        assert_eq!(result.rows[7].target, Some(26 + 2 + 6));
+        // RTS at offset 28
+        assert_eq!(result.rows[8].kind, "return");
+        assert!(result.rows[8].text.contains("rts"));
+    }
+
+    #[test]
+    fn decode_megadrive_bra_bsr_16bit_displacement() {
+        let mut rom = Vec::new();
+        // BRA 16-bit: opcode=0x6000, disp16=0x0010
+        rom.extend_from_slice(&[0x60, 0x00, 0x00, 0x10]);
+        // BSR 16-bit: opcode=0x6100, disp16=0x0020
+        rom.extend_from_slice(&[0x61, 0x00, 0x00, 0x20]);
+
+        let loaded = sample_loaded("megadrive", rom, vec![0]);
+        let result = disassemble_region(&loaded, 0, 16);
+        assert!(result.ok);
+
+        // BRA 16-bit at offset 0: size=4, target = 0 + 2 + 0x10 = 0x12
+        assert_eq!(result.rows[0].size, 4);
+        assert_eq!(result.rows[0].kind, "branch");
+        assert_eq!(result.rows[0].target, Some(0x12));
+        assert!(result.rows[0].text.contains("bra"));
+
+        // BSR 16-bit at offset 4: size=4, target = 4 + 2 + 0x20 = 0x26
+        assert_eq!(result.rows[1].size, 4);
+        assert_eq!(result.rows[1].kind, "call");
+        assert_eq!(result.rows[1].target, Some(0x26));
+        assert!(result.rows[1].text.contains("bsr"));
+    }
+
+    #[test]
+    fn decode_megadrive_unknown_opcode_produces_dc_w() {
+        // 0xFFFF is unrecognized, 0x4E75 is RTS
+        let rom = vec![0xFF, 0xFF, 0x4E, 0x75];
+        let loaded = sample_loaded("megadrive", rom, vec![0]);
+        let result = disassemble_region(&loaded, 0, 8);
+        assert!(result.ok);
+        assert_eq!(result.rows[0].kind, "data");
+        assert!(result.rows[0].text.contains("dc.w"));
+        // Second instruction should be RTS
+        assert_eq!(result.rows[1].kind, "return");
+    }
+
+    #[test]
+    fn decode_megadrive_terminal_stops_function_walk() {
+        // NOP + NOP + RTS + NOP
+        let rom = vec![
+            0x4E, 0x71, // NOP
+            0x4E, 0x71, // NOP
+            0x4E, 0x75, // RTS (terminal)
+            0x4E, 0x71, // NOP (should NOT be reached)
+        ];
+        let loaded = sample_loaded("megadrive", rom, vec![0]);
+        let (regions, _, _) = analyze_code(&loaded);
+        assert_eq!(regions.len(), 1);
+        let disasm = &regions[0].disassembly;
+        // Should have 3 instructions (NOP, NOP, RTS) and stop at the terminal
+        assert_eq!(disasm.len(), 3);
+        assert_eq!(disasm[2].kind, "return");
+    }
+
+    #[test]
+    fn decode_snes_instruction_coverage() {
+        let mut rom = Vec::new();
+        // NOP
+        rom.push(0xEA);
+        // LDA #$42
+        rom.extend_from_slice(&[0xA9, 0x42]);
+        // LDX #$10
+        rom.extend_from_slice(&[0xA2, 0x10]);
+        // LDY #$20
+        rom.extend_from_slice(&[0xA0, 0x20]);
+        // REP #$30
+        rom.extend_from_slice(&[0xC2, 0x30]);
+        // SEP #$20
+        rom.extend_from_slice(&[0xE2, 0x20]);
+        // STA $2100
+        rom.extend_from_slice(&[0x8D, 0x00, 0x21]);
+        // LDA $4210
+        rom.extend_from_slice(&[0xAD, 0x10, 0x42]);
+        // JSR $8000
+        rom.extend_from_slice(&[0x20, 0x00, 0x80]);
+        // JMP $9000
+        rom.extend_from_slice(&[0x4C, 0x00, 0x90]);
+
+        let loaded = sample_loaded("snes", rom, vec![0]);
+        let result = disassemble_region(&loaded, 0, 64);
+        assert!(result.ok);
+
+        assert_eq!(result.rows[0].kind, "nop");
+        assert_eq!(result.rows[0].size, 1);
+        // LDA #$42
+        assert_eq!(result.rows[1].kind, "immediate");
+        assert_eq!(result.rows[1].size, 2);
+        assert!(result.rows[1].text.contains("lda #$42"));
+        // LDX #$10
+        assert!(result.rows[2].text.contains("ldx #$10"));
+        // LDY #$20
+        assert!(result.rows[3].text.contains("ldy #$20"));
+        // REP #$30
+        assert!(result.rows[4].text.contains("rep #$30"));
+        // SEP #$20
+        assert!(result.rows[5].text.contains("sep #$20"));
+        // STA $2100
+        assert_eq!(result.rows[6].kind, "memory");
+        assert_eq!(result.rows[6].size, 3);
+        assert!(result.rows[6].text.contains("sta $2100"));
+        // LDA $4210
+        assert!(result.rows[7].text.contains("lda $4210"));
+        // JSR $8000
+        assert_eq!(result.rows[8].kind, "call");
+        assert_eq!(result.rows[8].size, 3);
+        assert_eq!(result.rows[8].target, Some(0x8000));
+        // JMP $9000
+        assert_eq!(result.rows[9].kind, "jump");
+        assert_eq!(result.rows[9].target, Some(0x9000));
+    }
+
+    #[test]
+    fn decode_snes_long_and_branch_instructions() {
+        let mut rom = Vec::new();
+        // JSL $010000
+        rom.extend_from_slice(&[0x22, 0x00, 0x00, 0x01]);
+        // JML $020000
+        rom.extend_from_slice(&[0x5C, 0x00, 0x00, 0x02]);
+        // BRA +4
+        rom.extend_from_slice(&[0x80, 0x04]);
+        // BNE +2
+        rom.extend_from_slice(&[0xD0, 0x02]);
+        // BEQ +0
+        rom.extend_from_slice(&[0xF0, 0x00]);
+        // RTL
+        rom.push(0x6B);
+        // RTS
+        rom.push(0x60);
+
+        let loaded = sample_loaded("snes", rom, vec![0]);
+        let result = disassemble_region(&loaded, 0, 32);
+        assert!(result.ok);
+
+        // JSL: size=4, call, target=0x010000
+        assert_eq!(result.rows[0].size, 4);
+        assert_eq!(result.rows[0].kind, "call");
+        assert_eq!(result.rows[0].target, Some(0x010000));
+
+        // JML: size=4, jump (terminal), target=0x020000
+        assert_eq!(result.rows[1].size, 4);
+        assert_eq!(result.rows[1].kind, "jump");
+        assert_eq!(result.rows[1].target, Some(0x020000));
+
+        // BRA: size=2, branch (terminal), target = 8 + 2 + 4 = 14
+        assert_eq!(result.rows[2].size, 2);
+        assert_eq!(result.rows[2].kind, "branch");
+        assert_eq!(result.rows[2].target, Some(14));
+
+        // BNE: size=2, branch (non-terminal), target = 10 + 2 + 2 = 14
+        assert_eq!(result.rows[3].kind, "branch");
+        assert_eq!(result.rows[3].target, Some(14));
+
+        // BEQ: size=2, branch (non-terminal), target = 12 + 2 + 0 = 14
+        assert_eq!(result.rows[4].kind, "branch");
+        assert_eq!(result.rows[4].target, Some(14));
+
+        // RTL: return (terminal)
+        assert_eq!(result.rows[5].kind, "return");
+        assert!(result.rows[5].text.contains("rtl"));
+
+        // RTS: return (terminal)
+        assert_eq!(result.rows[6].kind, "return");
+        assert!(result.rows[6].text.contains("rts"));
+    }
+
+    #[test]
+    fn decode_snes_unknown_opcode_produces_db() {
+        // 0x02 = COP (not decoded), 0x60 = RTS
+        let rom = vec![0x02, 0x60];
+        let loaded = sample_loaded("snes", rom, vec![0]);
+        let result = disassemble_region(&loaded, 0, 8);
+        assert!(result.ok);
+        assert_eq!(result.rows[0].kind, "data");
+        assert!(result.rows[0].text.contains("db $02"));
+        // Second byte is RTS
+        assert_eq!(result.rows[1].kind, "return");
+    }
+
+    #[test]
+    fn analyze_code_walks_multiple_entry_points_and_builds_xrefs() {
+        // At offset 0x00: JSR $00000010 + RTS
+        // At offset 0x10: NOP + RTS
+        let mut rom = vec![0u8; 0x14];
+        // JSR abs.l $00000010
+        rom[0] = 0x4E;
+        rom[1] = 0xB9;
+        rom[2..6].copy_from_slice(&0x0000_0010u32.to_be_bytes());
+        // RTS at offset 6
+        rom[6] = 0x4E;
+        rom[7] = 0x75;
+        // NOP at offset 0x10
+        rom[0x10] = 0x4E;
+        rom[0x11] = 0x71;
+        // RTS at offset 0x12
+        rom[0x12] = 0x4E;
+        rom[0x13] = 0x75;
+
+        let loaded = sample_loaded("megadrive", rom, vec![0]);
+        let (regions, graph, _) = analyze_code(&loaded);
+
+        assert_eq!(regions.len(), 1);
+        // Should discover 2 functions: sub at 0 and sub at 0x10
+        assert!(regions[0].functions.len() >= 2);
+
+        // Call graph should have edge from 0 -> 0x10
+        assert!(graph.iter().any(|edge| edge.from == 0 && edge.to == 0x10 && edge.kind == "call"));
+
+        // Xrefs should have a call entry
+        assert!(regions[0].xrefs.iter().any(|xref| xref.to == 0x10 && xref.kind == "call"));
+    }
 }

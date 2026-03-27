@@ -1,133 +1,150 @@
 # RetroDev Studio
 
-> Plataforma desktop para desenvolvimento, preservacao e engenharia reversa de jogos 16-bits.
+> Plataforma desktop para desenvolvimento, preservacao e engenharia reversa de jogos 16-bit, com foco atual em Mega Drive e SNES.
 
-![Versao](https://img.shields.io/badge/Versao-4.0_Blueprint-blue.svg)
-![Status](https://img.shields.io/badge/Status-Alpha_Interna_Hardening-orange.svg)
+![Status](https://img.shields.io/badge/Status-Beta_Tecnica_%2F_Hardening-orange.svg)
+![Targets](https://img.shields.io/badge/Targets-Mega_Drive_%2B_SNES-blue.svg)
+![Desktop](https://img.shields.io/badge/Desktop-Tauri_2-0ea5e9.svg)
+![Pipeline](https://img.shields.io/badge/Pipeline-Build_%E2%86%92_ROM_%E2%86%92_Emulacao-green.svg)
 ![Licenca](https://img.shields.io/badge/Licenca-Proprietaria-red.svg)
-![AI Ready](https://img.shields.io/badge/AI_Agents-Supported-brightgreen.svg)
 
 ---
 
 ## Estado Real
 
-- Data de referencia: 2026-03-04.
-- Fase ativa real: hardening do fluxo `Build -> ROM -> Emulacao`, ja validado em Windows com upstream real, E2E desktop local e workflow GitHub/Windows multi-target.
-- `Fase 0` esta concluida e verificada.
-- `Fases 1 e 2` ja foram validadas em Windows com toolchains e cores upstream reais e agora estao em hardening.
-- `Fases 3 e 4` existem no editor, porem parte das superficies continuam `Experimental` ou congeladas ate o core ser fechado.
-- Se este README divergir do estado operacional, prevalecem `docs/06_AI_MEMORY_BANK.md`, `docs/03_ROADMAP_MVP.md` e `docs/09_AGENT_DEV_MODE.md`.
+- Data de referencia: `2026-03-27`.
+- Fase ativa real: `release candidate / beta testing do desktop Tauri`, com foco em hardening do fluxo canonico `Build -> ROM -> Emulacao`.
+- O estado operacional canônico fica em [docs/06_AI_MEMORY_BANK.md](./docs/06_AI_MEMORY_BANK.md).
+- Se este `README` divergir do estado real, prevalecem:
+  `docs/06_AI_MEMORY_BANK.md` -> `docs/03_ROADMAP_MVP.md` -> `docs/09_AGENT_DEV_MODE.md`.
 
-### Regra de certificacao real
+### O que esta certificado hoje
 
-- Nenhuma etapa, fase, feature ou fluxo pode ser tratado como `concluido`, `fechado`, `pronto` ou `validado` apenas porque existe no codigo.
-- Neste repositorio, esses termos so valem quando houver caminho canonico real, gates aplicaveis verdes, prova funcional correspondente e ausencia de erro bloqueante no escopo certificado.
-- Mock, stub, texto de UI, CI afrouxado, teste que nao exercita o caminho canonico ou documento otimista nao contam como certificacao.
-- Se restar duvida relevante, warning estrutural ou dependencia de nova comprovacao institucional, o status correto e `em hardening`, nao `concluido`.
+- Editor desktop com `Tauri + React + TypeScript + Rust`.
+- Pipeline real por target para `Mega Drive` e `SNES`.
+- Emulacao integrada via `Libretro`.
+- Setup nativo sob demanda de `JDK`, `SGDK`, `PVSnesLib` e cores `Libretro` no Windows.
+- Validacao oficial upstream em Windows via [scripts/validate-upstream-windows.ps1](./scripts/validate-upstream-windows.ps1).
+- Smoke desktop local `Build -> ROM -> Run` via [scripts/e2e-tauri-build-run.mjs](./scripts/e2e-tauri-build-run.mjs).
+- Baseline local restaurada neste host com:
+  `check-tree`, `lint`, `tsc`, `vitest`, `cargo clippy` e `cargo test`.
 
-## O Que Ja Existe No Codigo
+### O que ainda esta em hardening
 
-- Editor desktop com Tauri + React + TypeScript funcional.
-- Persistencia canonica de `project.rds` e `scenes/*.json`, com escrita atomica no backend Rust.
-- Build orchestration real por target para `megadrive` e `snes`, com workspace, staging e deteccao de ROM.
-- Emulacao integrada via Libretro FFI no Rust.
-- Instalacao sob demanda de SGDK, PVSnesLib e cores Libretro oficiais no Windows.
-- CI com validacao estrutural, lint, typecheck, `cargo clippy`, testes frontend e testes Rust.
+- O foco do projeto ainda nao e expansao de escopo; e consolidacao do caminho canonico e QA.
+- O shell principal ja e forte, mas ainda nao e um sistema de docking livre no nivel de uma IDE madura.
+- O build desktop local via `scripts/build.mjs` ainda precisa de repetibilidade total neste host sem workarounds locais de ambiente.
+- Ferramentas como `ArtStudio`, `RetroFX`, `Reverse Workspace`, `Asset Extractor` e `Memory Viewer` continuam visiveis, mas com status `Experimental` onde o backend e a certificacao ainda nao sustentam claim plena.
 
-## O Que Ainda Falta Para Fechar O MVP
+---
 
-- Tornar repetivel o baseline de validacao oficial em Windows para mudancas sensiveis de build/emulacao/toolchain.
-- Decidir se o workflow desktop dedicado permanece em `push`/`pull_request` path-filtered ou migra para gate protegido por ambiente.
-- Auditar handlers async residuais fora do endurecimento ja aplicado em abertura de projeto e salvamento de cena.
-- Retomar apenas depois disso as superficies hoje marcadas como `Experimental`.
+## O Produto Hoje
 
-## Arquitetura De Alto Nivel
+RetroDev Studio ja passou de prototipo. O produto esta em uma fase de `beta tecnica / hardening`, com provas reais de pipeline e validacao de host Windows para:
 
-```mermaid
-graph TD
-    subgraph CAMADA CORE - Criacao
-        E[Editor Runtime] --> U[Universal Game Data Model - UGDM]
-        U --> RRC[Retro Runtime Core]
-    end
+- criar/abrir projeto;
+- editar cena e ativos;
+- compilar ROM para Mega Drive ou SNES;
+- carregar ROM no emulador integrado;
+- validar o fluxo por smoke desktop e por upstream oficial.
 
-    subgraph HARDWARE ENGINES
-        RRC --> HC[Hardware Constraint Engine]
-        RRC --> HP[Hardware Profile Engine]
-    end
+O produto ainda nao deve ser descrito como engine plenamente pronta para producao comercial nem como substituto direto de Unity/GameMaker. A prioridade atual e consistencia, ergonomia e repetibilidade dos fluxos certificados.
 
-    subgraph TARGETS
-        HP --> MD[Mega Drive / Genesis - SGDK]
-        HP --> SNES[SNES - PVSnesLib]
-    end
+---
 
-    HC -.->|Valida limites de VRAM, DMA, CPU| E
+## Fluxo Canonico
+
+```text
+Projeto (.rds / UGDM)
+    -> editor desktop
+    -> validacao por hardware profile
+    -> build workspace por target
+    -> ROM
+    -> emulacao Libretro
 ```
 
-## Estrutura Do Projeto
+### Targets atuais
+
+- `megadrive` -> `SGDK`
+- `snes` -> `PVSnesLib`
+
+### Stack principal
+
+| Camada | Tecnologia |
+|--------|------------|
+| Desktop | Tauri 2 |
+| Frontend | React + TypeScript + Vite + TailwindCSS + Zustand |
+| Backend | Rust |
+| Emulacao | Libretro via FFI |
+| Mega Drive SDK | SGDK |
+| SNES SDK | PVSnesLib |
+| Modelo de dados | UGDM JSON (`.rds`, `scenes/*.json`) |
+
+---
+
+## Superficies Visiveis
+
+### Core ja integrado ao fluxo principal
+
+- Editor de cena
+- Hierarchy / Inspector
+- Asset Browser
+- Build & Run
+- Game View com emulador integrado
+- Setup nativo de dependencias externas
+- Importacao externa sob escopo controlado
+
+### Ainda marcadas como `Experimental`
+
+- ArtStudio
+- RetroFX
+- Reverse Workspace
+- Asset Extractor
+- Memory Viewer
+- Partes do NodeGraph fora do pipeline canonico consolidado
+
+Essas superficies existem de verdade no produto, mas continuam com rotulo de maturidade controlado para nao prometer mais do que o fluxo atual entrega.
+
+---
+
+## Estrutura Essencial
 
 ```text
 RetroDevStudio/
-|
-|-- .github/
-|   `-- workflows/
-|       |-- ci.yml
-|       `-- desktop-e2e.yml
-|
 |-- README.md
 |-- CLAUDE.md
-|-- eslint.config.mjs
-|-- package.json
-|-- vite.config.ts
-|-- data/
-|   |-- rom_teste.bin
-|   `-- sonic_test.gen
-|
 |-- docs/
-|   |-- 00_AI_DIRECTIVES.md
-|   |-- 01_PRD_MASTER.md
-|   |-- 02_TECH_STACK.md
-|   |-- 03_ROADMAP_MVP.md
-|   |-- 04_HARDWARE_SPECS.md
-|   |-- 05_ARCHITECTURE_UGDM.md
-|   |-- 06_AI_MEMORY_BANK.md
-|   |-- 07_TEST_AND_COMPLIANCE.md
-|   |-- 08_TREE_ARCHITECTURE.md
-|   `-- 09_AGENT_DEV_MODE.md
-|
 |-- scripts/
-|   |-- bootstrap.ps1
-|   |-- check-tree.cjs
-|   |-- check-tree.ps1
-|   `-- e2e-tauri-build-run.mjs
-|
 |-- src/
-|   `-- ...
-|
 |-- src-tauri/
-|   `-- ...
-|
 `-- toolchains/
-    `-- ...
 ```
 
-## Orientacao Para Agentes De IA
+O mapa detalhado de diretorios fica em [docs/08_TREE_ARCHITECTURE.md](./docs/08_TREE_ARCHITECTURE.md).
 
-- Ponto de entrada unico: `docs/00_AI_DIRECTIVES.md`.
-- Hierarquia de verdade para conflito documental:
-  `docs/06_AI_MEMORY_BANK.md` -> `docs/03_ROADMAP_MVP.md` -> `docs/09_AGENT_DEV_MODE.md` -> `docs/08_TREE_ARCHITECTURE.md` -> `docs/02_TECH_STACK.md` -> `docs/07_TEST_AND_COMPLIANCE.md` -> `README.md` / `CLAUDE.md`.
-- Nenhum agente deve declarar feature como pronta se ela estiver parcial, experimental, sem gate ou sem validacao oficial quando exigida.
+---
 
-**Prompt de inicializacao recomendado**
+## Documentos De Verdade
 
-```text
-Iniciando nova sessao no RetroDev Studio.
-Leia primeiro docs/00_AI_DIRECTIVES.md.
-Depois: docs/06_AI_MEMORY_BANK.md, docs/03_ROADMAP_MVP.md e docs/08_TREE_ARCHITECTURE.md.
-Se a tarefa tocar processo, CI, estado documental ou conflito entre documentos, leia tambem docs/09_AGENT_DEV_MODE.md.
-Responda com "[Contexto Carregado]" e proponha o plano de acao.
-```
+- [docs/06_AI_MEMORY_BANK.md](./docs/06_AI_MEMORY_BANK.md): estado operacional real, proximo passo e memoria do projeto.
+- [docs/03_ROADMAP_MVP.md](./docs/03_ROADMAP_MVP.md): fase vigente e escopo do produto.
+- [docs/09_AGENT_DEV_MODE.md](./docs/09_AGENT_DEV_MODE.md): regras de processo, entrega e push.
+- [docs/07_TEST_AND_COMPLIANCE.md](./docs/07_TEST_AND_COMPLIANCE.md): gates, compliance e validacao oficial.
+- [docs/08_TREE_ARCHITECTURE.md](./docs/08_TREE_ARCHITECTURE.md): organizacao canonica de arquivos.
 
-## Gates Minimos De Validacao
+### Onboarding para agentes
+
+1. Ler `docs/06_AI_MEMORY_BANK.md`.
+2. Ler `docs/03_ROADMAP_MVP.md`.
+3. Ler `docs/08_TREE_ARCHITECTURE.md`.
+4. Ler `docs/09_AGENT_DEV_MODE.md` quando a tarefa tocar processo, CI, docs, estado ou governanca.
+5. Responder com `[Contexto Carregado]` antes de propor mudanca relevante.
+
+---
+
+## Validacao Minima
+
+Antes de declarar entrega relevante:
 
 - `npm run check:tree`
 - `npm run lint`
@@ -135,40 +152,22 @@ Responda com "[Contexto Carregado]" e proponha o plano de acao.
 - `npm test`
 - `cargo clippy -- -D warnings`
 - `cargo test --lib -- --nocapture`
-- Validacao manual com dependencias oficiais quando a mudanca tocar build, emulacao ou toolchains reais.
 
-Sem isso, a entrega nao pode ser anunciada como real nem livre de erro bloqueante.
+Quando a mudanca tocar `build`, `emulacao` ou `toolchains` reais no Windows, tambem:
 
-## Roadmap De Desenvolvimento
+- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests`
+- `node scripts/e2e-tauri-build-run.mjs --skip-build --native-driver .\toolchains\webdriver\msedgedriver.exe`
 
-| Fase | Objetivo | Status real |
-|------|---------|-------------|
-| **Fase 0: Fundacao** | Setup Tauri + React + Rust | Concluida e verificada sob os gates canonicos |
-| **Fase 1: Core Mega Drive** | Gerar ROM jogavel a partir do editor | Validada em Windows com fluxo real, em hardening |
-| **Fase 2: Abstracao (SNES)** | Provar engine agnostica | Validada em Windows com fluxo real, em hardening |
-| **Fase 3: Visual Logic** | NodeGraph e RetroFX | Implementada no editor, congelada ate fechar o core |
-| **Fase 4: Camada Pro** | Engenharia Reversa e Profiler | Implementada no editor, com superficies experimentais/parciais |
+Sem esses gates, o status correto continua sendo `em hardening`.
 
-Para detalhes e sprint atual, consulte `docs/03_ROADMAP_MVP.md`.
+---
 
-## Tech Stack
+## Compliance
 
-| Camada | Tecnologia |
-|--------|-----------|
-| Desktop Framework | Tauri 2 |
-| Frontend | React + TypeScript + Vite + TailwindCSS + Zustand |
-| Backend / Core | Rust |
-| Emulacao | Libretro API via FFI |
-| Mega Drive SDK | SGDK |
-| SNES SDK | PVSnesLib |
-| Formato de Dados | JSON `.rds` (UGDM) |
-| Validacao de Processo | `check-tree.cjs`, ESLint, TypeScript `--noEmit`, `cargo clippy`, suites de teste |
+- O projeto nao distribui ROM comercial.
+- O usuario traz a propria ROM quando usar recursos de engenharia reversa.
+- Modificacao de ROM comercial deve privilegiar `IPS` e `BPS`.
+- `SGDK`, `PVSnesLib` e cores `Libretro` devem ser baixados do upstream oficial, sob demanda.
+- Binarios de terceiros instalados em `toolchains/` nao devem ser versionados no Git.
 
-## Aviso Legal & Compliance
-
-- O software nao distribui ROMs comerciais.
-- O usuario traz a propria ROM quando usar superfices de engenharia reversa.
-- A camada de modificacao em ROM comercial deve privilegiar patches diferenciais, como IPS e BPS.
-- SDKs e cores de terceiros devem ser baixados do upstream oficial, sob demanda e com consentimento do usuario.
-
-Para detalhes completos, consulte `docs/07_TEST_AND_COMPLIANCE.md`.
+Detalhes completos em [docs/07_TEST_AND_COMPLIANCE.md](./docs/07_TEST_AND_COMPLIANCE.md).

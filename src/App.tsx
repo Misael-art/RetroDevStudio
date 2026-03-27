@@ -1346,7 +1346,7 @@ export default function App() {
 
       const requiredDependencies =
         activeTarget === "megadrive"
-          ? (["sgdk", "libretro_megadrive"] as const)
+          ? (["jdk", "sgdk", "libretro_megadrive"] as const)
           : (["pvsneslib", "sgdk", "libretro_snes"] as const);
 
       const dependenciesReady = await ensureDependencies(

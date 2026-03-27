@@ -9,13 +9,14 @@ if ($env:OS -ne "Windows_NT") {
 }
 
 Write-Host "== RetroDev Studio: validacao oficial upstream =="
-Write-Host "1. Baixa SGDK, PVSnesLib e cores Libretro oficiais sob demanda"
+Write-Host "1. Baixa JDK, SGDK, PVSnesLib e cores Libretro oficiais sob demanda"
 Write-Host "2. Executa o smoke test ignorado de build + load ROM + run frame"
 Write-Host ""
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $validationDir = Join-Path $repoRoot "src-tauri\target-test\validation"
 $validationReportPath = Join-Path $validationDir "upstream-validation.json"
+$cargoRunner = Join-Path $repoRoot "scripts\run-cargo-msvc.cmd"
 $targetRoot = if ($env:RDS_VALIDATE_TARGET_DIR) {
   $env:RDS_VALIDATE_TARGET_DIR
 } elseif ($env:LOCALAPPDATA) {
@@ -25,11 +26,14 @@ $targetRoot = if ($env:RDS_VALIDATE_TARGET_DIR) {
 }
 
 New-Item -ItemType Directory -Force -Path $validationDir | Out-Null
+if (-not (Test-Path $cargoRunner)) {
+  throw "Runner canonico do Cargo com MSVC nao encontrado em '$cargoRunner'."
+}
 Write-Host "Cargo target dir: $targetRoot"
 $env:CARGO_TARGET_DIR = $targetRoot
 
 function Invoke-CargoChecked([string[]]$Arguments) {
-  & cargo @Arguments
+  & $cargoRunner @Arguments
   if ($LASTEXITCODE -ne 0) {
     throw "cargo $($Arguments -join ' ') falhou com exit $LASTEXITCODE."
   }
@@ -68,6 +72,7 @@ try {
     "test",
     "--manifest-path",
     ".\src-tauri\Cargo.toml",
+    "--lib",
     "official_windows_upstream_validation_smoke_test",
     "--",
     "--ignored",

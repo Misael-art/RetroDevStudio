@@ -3253,7 +3253,7 @@ pub extern "C" fn retro_run() {
 
         let _serial = test_serial_guard();
 
-        for dependency_id in ["sgdk", "pvsneslib", "libretro_megadrive", "libretro_snes"] {
+        for dependency_id in ["jdk", "sgdk", "pvsneslib", "libretro_megadrive", "libretro_snes"] {
             let result = install_dependency(dependency_id, |_| {});
             assert!(
                 result.ok,
@@ -3263,7 +3263,7 @@ pub extern "C" fn retro_run() {
         }
 
         let status_report = dependency_status_report();
-        for dependency_id in ["sgdk", "pvsneslib", "libretro_megadrive", "libretro_snes"] {
+        for dependency_id in ["jdk", "sgdk", "pvsneslib", "libretro_megadrive", "libretro_snes"] {
             let item = status_report
                 .items
                 .iter()

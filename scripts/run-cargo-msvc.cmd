@@ -21,7 +21,13 @@ if not exist "%VCVARS%" (
 
 set "CARGOEXE=%USERPROFILE%\.cargo\bin\cargo.exe"
 if not exist "%CARGOEXE%" (
-  echo cargo.exe not found at "%CARGOEXE%"
+  set "CARGOEXE="
+  for /f "usebackq delims=" %%I in (`where cargo.exe 2^>nul`) do (
+    if not defined CARGOEXE set "CARGOEXE=%%I"
+  )
+)
+if not defined CARGOEXE (
+  echo cargo.exe not found in "%%USERPROFILE%%\.cargo\bin" or PATH
   exit /b 1
 )
 

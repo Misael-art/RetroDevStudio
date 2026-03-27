@@ -194,4 +194,76 @@ mod tests {
         let (regions, _) = analyze_text(&loaded);
         assert!(regions.iter().any(|region| region.encoding == "shift-jis-like"));
     }
+
+    #[test]
+    fn analyze_text_finds_megadrive_be32_pointer_table() {
+        let mut rom = vec![0u8; 0x200];
+        // 4 ASCII strings (>=6 chars each) at known offsets
+        let strings: &[(&[u8], usize)] = &[
+            (b"HELLO WORLD!!", 0x100),
+            (b"GAME OVER!!! ", 0x110),
+            (b"PLAYER ONE!! ", 0x120),
+            (b"CONTINUE?!!? ", 0x130),
+        ];
+        for &(text, offset) in strings {
+            let end = offset + text.len().min(rom.len() - offset);
+            rom[offset..end].copy_from_slice(&text[..end - offset]);
+        }
+        // BE32 pointer table at offset 0x00 pointing to text offsets
+        for (index, &(_, offset)) in strings.iter().enumerate() {
+            let base = index * 4;
+            rom[base..base + 4].copy_from_slice(&(offset as u32).to_be_bytes());
+        }
+
+        let loaded = sample_loaded("megadrive", rom);
+        let (text_regions, pointer_tables) = analyze_text(&loaded);
+
+        assert!(!text_regions.is_empty(), "should find text regions");
+        assert!(!pointer_tables.is_empty(), "should find pointer tables");
+
+        let table = &pointer_tables[0];
+        assert_eq!(table.encoding, "be32");
+        assert_eq!(table.entry_size, 4);
+        assert!(table.destinations.len() >= 3);
+        // Verify destinations point near our string offsets
+        for &(_, offset) in &strings[..3] {
+            assert!(
+                table.destinations.iter().any(|dest| dest.abs_diff(offset as u32) <= 4),
+                "destination should point near offset 0x{:X}",
+                offset
+            );
+        }
+    }
+
+    #[test]
+    fn analyze_text_finds_snes_le16_pointer_table() {
+        let mut rom = vec![0u8; 0x200];
+        // 4 ASCII strings at known offsets
+        let strings: &[(&[u8], usize)] = &[
+            (b"STAGE ONE!!!", 0x100),
+            (b"STAGE TWO!!!", 0x110),
+            (b"STAGE THREE!", 0x120),
+            (b"FINAL BOSS!!", 0x130),
+        ];
+        for &(text, offset) in strings {
+            let end = offset + text.len().min(rom.len() - offset);
+            rom[offset..end].copy_from_slice(&text[..end - offset]);
+        }
+        // LE16 pointer table at offset 0x00 pointing to text offsets (low 16 bits)
+        for (index, &(_, offset)) in strings.iter().enumerate() {
+            let base = index * 2;
+            rom[base..base + 2].copy_from_slice(&(offset as u16).to_le_bytes());
+        }
+
+        let loaded = sample_loaded("snes", rom);
+        let (text_regions, pointer_tables) = analyze_text(&loaded);
+
+        assert!(!text_regions.is_empty(), "should find text regions");
+        assert!(!pointer_tables.is_empty(), "should find pointer tables");
+
+        let table = &pointer_tables[0];
+        assert_eq!(table.encoding, "le16");
+        assert_eq!(table.entry_size, 2);
+        assert!(table.destinations.len() >= 3);
+    }
 }

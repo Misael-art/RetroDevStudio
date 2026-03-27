@@ -87,6 +87,29 @@ function findButton(container: HTMLElement, matcher: string | RegExp): HTMLButto
   return button;
 }
 
+function createDependencyStatus(id: string, overrides: Partial<Record<string, unknown>> = {}) {
+  const labels: Record<string, string> = {
+    jdk: "JDK (Temurin LTS)",
+    sgdk: "SGDK",
+    pvsneslib: "PVSnesLib",
+    libretro_megadrive: "Libretro Core: Mega Drive",
+    libretro_snes: "Libretro Core: SNES",
+  };
+
+  return {
+    id,
+    label: labels[id] ?? id,
+    installed: true,
+    version: "test-version",
+    install_dir: `F:/Toolchains/${id}`,
+    notes: [],
+    issues: [],
+    source_url: `https://example.invalid/${id}`,
+    auto_install_supported: true,
+    ...overrides,
+  };
+}
+
 describe("ToolsPanel Asset Browser", () => {
   let container: HTMLDivElement;
   let root: Root;
@@ -334,6 +357,57 @@ describe("ToolsPanel Asset Browser", () => {
     expect(card?.textContent).toContain("src/main.c");
     expect(card?.textContent).toContain("res/resources.res");
     expect(card?.textContent).toContain("out/rom.bin");
+  });
+
+  it("installs missing toolchains before Build All Targets", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    mocks.getThirdPartyStatus
+      .mockResolvedValueOnce({
+        items: [
+          {
+            ...createDependencyStatus("jdk"),
+            installed: false,
+            version: null,
+            issues: ["Java/JDK nao encontrado em JAVA_HOME, `toolchains/jdk` ou PATH."],
+          },
+          createDependencyStatus("sgdk"),
+          createDependencyStatus("pvsneslib"),
+        ],
+      })
+      .mockResolvedValueOnce({
+        items: [
+          createDependencyStatus("jdk"),
+          createDependencyStatus("sgdk"),
+          createDependencyStatus("pvsneslib"),
+        ],
+      });
+    mocks.installThirdPartyDependency.mockResolvedValueOnce({
+      ok: true,
+      dependency_id: "jdk",
+      message: "JDK instalada no ambiente local.",
+      status: createDependencyStatus("jdk"),
+      log: [],
+    });
+
+    await act(async () => {
+      findButton(container, "Build All Targets").click();
+      await flush();
+      await flush();
+    });
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Build multi-target requer JDK, SGDK e PVSnesLib")
+    );
+    expect(mocks.installThirdPartyDependency).toHaveBeenCalledWith(
+      "jdk",
+      expect.any(Function)
+    );
+    expect(mocks.buildMultiTarget).toHaveBeenCalledWith(
+      "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      ["megadrive", "snes"],
+      expect.any(Function)
+    );
   });
 
   it("shows read-only legacy SGDK files inside the asset browser", async () => {
