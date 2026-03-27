@@ -58,7 +58,22 @@ vi.mock("./components/inspector/InspectorPanel", () => ({
 }));
 
 vi.mock("./components/tools/ToolsPanel", () => ({
-  default: () => <div data-testid="tools" />,
+  default: ({
+    initialActive,
+    workspace,
+    showAdvancedByDefault,
+  }: {
+    initialActive?: string;
+    workspace?: string;
+    showAdvancedByDefault?: boolean;
+  }) => (
+    <div
+      data-testid="tools"
+      data-active={initialActive ?? ""}
+      data-workspace={workspace ?? ""}
+      data-advanced={showAdvancedByDefault ? "true" : "false"}
+    />
+  ),
 }));
 
 vi.mock("./components/nodegraph/NodeGraphEditor", () => ({
@@ -830,6 +845,48 @@ describe("App build flow", () => {
     expect(container.textContent).toContain("Plataforma");
     expect(container.textContent).toContain("Experimental");
     expect(container.textContent).toContain("Criar Projeto");
+  });
+
+  it("shows a contextual guide in the scene workspace and opens the asset browser from it", async () => {
+    const guide = container.querySelector("[data-testid='workspace-guide']");
+
+    expect(guide?.textContent).toContain("Scene Workspace");
+    expect(guide?.textContent).toContain("Hierarchy fica a esquerda");
+
+    await act(async () => {
+      findButton(guide as HTMLElement, "Abrir Asset Browser").click();
+      await flush();
+    });
+
+    const toolsPanel = container.querySelector("[data-testid='tools']");
+    expect(toolsPanel).toBeInstanceOf(HTMLDivElement);
+    expect(toolsPanel?.getAttribute("data-active")).toBe("assets");
+    expect(toolsPanel?.getAttribute("data-workspace")).toBe("editing");
+    expect(toolsPanel?.getAttribute("data-advanced")).toBe("false");
+  });
+
+  it("updates the contextual guide for the logic workspace and opens the contextual palette", async () => {
+    await act(async () => {
+      useEditorStore.getState().setActiveViewportTab("logic");
+      await flush();
+      await flush();
+    });
+
+    const guide = container.querySelector("[data-testid='workspace-guide']");
+
+    expect(guide?.textContent).toContain("Logic Workspace");
+    expect(guide?.textContent).toContain("Paleta Contextual");
+
+    await act(async () => {
+      findButton(guide as HTMLElement, "Abrir Paleta Contextual").click();
+      await flush();
+    });
+
+    const toolsPanel = container.querySelector("[data-testid='tools']");
+    expect(toolsPanel).toBeInstanceOf(HTMLDivElement);
+    expect(toolsPanel?.getAttribute("data-active")).toBe("palette");
+    expect(toolsPanel?.getAttribute("data-workspace")).toBe("editing");
+    expect(toolsPanel?.getAttribute("data-advanced")).toBe("false");
   });
 
   it("asks the viewport to resolve sprite assets into preview URLs", async () => {

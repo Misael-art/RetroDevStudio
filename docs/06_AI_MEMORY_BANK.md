@@ -54,6 +54,13 @@
   - **Cobertura frontend adicionada:** `ToolsPanel.test.tsx` agora prova que um `JDK` ausente e instalado automaticamente antes do `Build All Targets`, e que o build multi-target so dispara depois desse precheck.
   - **Validacao focada desta rodada:** `npx tsc --noEmit`, `npx eslint src/components/tools/ToolsPanel.tsx src/components/tools/ToolsPanel.test.tsx` e `npx vitest run src/components/tools/ToolsPanel.test.tsx` devem permanecer verdes antes de promover este ajuste.
 
+* **O que acabou de acontecer (2026-03-27 - Shell UX: guia contextual de workspace para onboarding):**
+  - **Descoberta de recursos sem criar sistema paralelo:** `App.tsx` agora exibe um `Workspace Guide` logo abaixo da top bar quando existe projeto aberto e o shell nao esta em focus mode, usando o workspace atual como contexto (`Scene`, `Logic`, `Game`, `FX`, `Art`, `Debug`).
+  - **Acoes rapidas alinhadas ao fluxo real:** cada workspace passou a expor 2-3 CTAs conservadores ja existentes (`Abrir Asset Browser`, `Abrir Paleta Contextual`, `Abrir Runtime Setup`, `Abrir Profiler`, `Rodar no Emulador`, `Validar Projeto`, `Abrir Inspector`) sem novo IPC nem duplicacao de fluxo.
+  - **Feedback operacional mais claro:** o card tambem mostra um badge de estado herdando o resumo live atual (`bloqueio de build`, `warning live`, `sessao do emulador pronta` ou painel direito ativo), ajudando usuarios novos a entender o que fazer em seguida.
+  - **Cobertura frontend adicionada:** `App.test.tsx` agora prova que o guia aparece no `Scene Workspace`, abre o `Asset Browser`, responde a mudanca para `Logic Workspace` e encaminha corretamente para a `Paleta Contextual`.
+  - **Validacao desta rodada:** `npx eslint src/App.tsx src/App.test.tsx`, `npx tsc --noEmit` e `npx vitest run src/App.test.tsx` ficaram verdes (`35` testes), mantendo a mudanca pequena e isolada no shell.
+
 * **O que acabou de acontecer (2026-03-23 - Reverse Core canonico experimental para ROMs):**
   - **Arquitetura reversa canonica criada:** `src-tauri/src/tools/reverse/` agora concentra `manifest`, `platform`, `loader`, `graphics`, `text`, `audio`, `code`, `trace`, `annotations` e `projection`, com adapter-base por plataforma e implementacoes iniciais para `Mega Drive` e `SNES`.
   - **Manifesto reverso como fonte de verdade:** `RomAnalysisManifest` passou a registrar hashes, header, mapper, chips especiais, segmentos/banks, candidatos de grafico/texto/audio, regioes de codigo, pointer tables, compressao, `logic_hints`, `annotations`, `trace` e `projection_status`.

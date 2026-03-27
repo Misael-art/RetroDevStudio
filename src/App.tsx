@@ -196,6 +196,80 @@ function WorkspaceRailButton({
   );
 }
 
+type WorkspaceGuideAction = {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  accent?: "default" | "primary" | "success" | "danger";
+  title?: string;
+};
+
+type WorkspaceGuide = {
+  eyebrow: string;
+  title: string;
+  summary: string;
+  detail: string;
+  signal?: {
+    tone: "info" | "warn" | "error" | "success";
+    label: string;
+  };
+  actions: WorkspaceGuideAction[];
+};
+
+function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
+  const signalToneClass =
+    guide.signal?.tone === "error"
+      ? "border-[#f38ba8]/35 bg-[#f38ba8]/10 text-[#f38ba8]"
+      : guide.signal?.tone === "warn"
+        ? "border-[#fab387]/35 bg-[#fab387]/10 text-[#fab387]"
+        : guide.signal?.tone === "success"
+          ? "border-[#a6e3a1]/35 bg-[#a6e3a1]/10 text-[#a6e3a1]"
+          : "border-[#89b4fa]/35 bg-[#89b4fa]/10 text-[#89b4fa]";
+
+  return (
+    <section
+      data-testid="workspace-guide"
+      className="mx-4 mt-3 rounded-2xl border border-[#313244] bg-[linear-gradient(135deg,#0b1020,#111827_55%,#0f172a)] px-4 py-3 shadow-[0_16px_32px_rgba(0,0,0,0.18)]"
+    >
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#89b4fa]">
+            {guide.eyebrow}
+          </p>
+          <h2 className="mt-1 text-sm font-semibold text-[#e2e8f0]">{guide.title}</h2>
+          <p className="mt-1 text-xs leading-5 text-[#cbd5e1]">{guide.summary}</p>
+          <p className="mt-2 text-[11px] leading-5 text-[#94a3b8]">{guide.detail}</p>
+          {guide.signal ? (
+            <div
+              data-testid="workspace-guide-signal"
+              className={`mt-3 inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold ${signalToneClass}`}
+            >
+              {guide.signal.label}
+            </div>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2 lg:max-w-[22rem] lg:justify-end">
+          {guide.actions.map((action) => (
+            <ToolbarButton
+              key={action.label}
+              label={action.label}
+              onClick={action.onClick}
+              disabled={action.disabled}
+              accent={action.accent}
+              title={action.title}
+            />
+          ))}
+        </div>
+      </div>
+      <p className="mt-3 text-[10px] leading-5 text-[#7f849c]">
+        Dica: a rail lateral troca de workspace, os presets Artist/Logic/Debug/Playtest reorganizam
+        o shell e o botao <span className="font-semibold text-[#cdd6f4]">Tools</span> sempre abre o
+        painel contextual da tarefa atual.
+      </p>
+    </section>
+  );
+}
+
 function ToolbarVramBudget({
   used,
   limit,
@@ -468,6 +542,8 @@ export default function App() {
     : "";
   const selectedExternalImportProfile =
     externalImportProfiles.find((profile) => profile.id === selectedExternalImportProfileId) ?? null;
+  const workspaceMeta =
+    WORKSPACE_ITEMS.find((workspace) => workspace.id === activeWorkspace) ?? WORKSPACE_ITEMS[0];
 
   useLiveValidationController();
 
@@ -1437,6 +1513,201 @@ export default function App() {
     }
   }
 
+  const workspaceGuide = activeProjectDir
+    ? (() => {
+        const sharedSignal = liveBuildBlocked && buildDisabledReason
+          ? {
+              tone: "error" as const,
+              label: buildDisabledReason,
+            }
+          : buildWarningSummary
+            ? {
+                tone: "warn" as const,
+                label: buildWarningSummary,
+              }
+            : emulatorLoaded && activeWorkspace === "game"
+              ? {
+                  tone: "success" as const,
+                  label: "Sessao do emulador pronta para playtest.",
+                }
+              : {
+                  tone: "info" as const,
+                  label: `Painel direito atual: ${rightPanelMode === "tools" ? "Tools" : "Inspector"}.`,
+                };
+
+        if (activeWorkspace === "logic") {
+          return {
+            eyebrow: "Logic Workspace",
+            title: "Edite a logica visual da cena sem perder o contexto do projeto.",
+            summary:
+              "O NodeGraph fica no canvas central, enquanto o painel direito pode alternar entre a Paleta Contextual e o Inspector.",
+            detail:
+              "Abra a paleta quando quiser descobrir blocos disponiveis, valide o projeto antes de compilar e use o Inspector para revisar a entidade selecionada.",
+            signal: sharedSignal,
+            actions: [
+              {
+                label: "Abrir Paleta Contextual",
+                onClick: () => openToolsWorkspace("palette", "editing"),
+                accent: "primary",
+              },
+              {
+                label: "Validar Projeto",
+                onClick: () => void handleValidate(),
+              },
+              {
+                label: "Abrir Inspector",
+                onClick: () => setRightPanelMode("inspector"),
+              },
+            ],
+          } satisfies WorkspaceGuide;
+        }
+
+        if (activeWorkspace === "game") {
+          return {
+            eyebrow: "Game Workspace",
+            title: "Teste o runtime rapidamente e itere sem sair do editor.",
+            summary:
+              "Build & Run recompila a cena ativa; Runtime Setup ajuda a conferir toolchains e o profiler fica a um clique do playtest.",
+            detail:
+              "Quando o build estiver pronto, use o emulador integrado para validar fluxo, input e status de hardware antes de voltar para a cena.",
+            signal: sharedSignal,
+            actions: [
+              {
+                label: "Rodar no Emulador",
+                onClick: () => void handleBuildAndRun(),
+                accent: "success",
+                disabled: building || liveBuildBlocked,
+                title: liveBuildBlocked ? buildDisabledReason ?? undefined : undefined,
+              },
+              {
+                label: "Abrir Runtime Setup",
+                onClick: () => openToolsWorkspace("setup", "editing"),
+              },
+              {
+                label: "Abrir Profiler",
+                onClick: () => openToolsWorkspace("profiler", "debug", true),
+              },
+            ],
+          } satisfies WorkspaceGuide;
+        }
+
+        if (activeWorkspace === "retrofx") {
+          return {
+            eyebrow: "FX Workspace",
+            title: "Ajuste profundidade, parallax e raster com feedback visual.",
+            summary:
+              "Use o canvas central para desenhar a leitura do efeito e o Inspector para revisar rapidamente a entidade ou cena relacionada.",
+            detail:
+              "Depois de mexer nos efeitos, valide o projeto e rode no emulador para confirmar o comportamento no target real.",
+            signal: sharedSignal,
+            actions: [
+              {
+                label: "Abrir Inspector",
+                onClick: () => setRightPanelMode("inspector"),
+                accent: "primary",
+              },
+              {
+                label: "Validar Projeto",
+                onClick: () => void handleValidate(),
+              },
+              {
+                label: "Rodar no Emulador",
+                onClick: () => void handleBuildAndRun(),
+                accent: "success",
+                disabled: building || liveBuildBlocked,
+                title: liveBuildBlocked ? buildDisabledReason ?? undefined : undefined,
+              },
+            ],
+          } satisfies WorkspaceGuide;
+        }
+
+        if (activeWorkspace === "artstudio") {
+          return {
+            eyebrow: "Art Workspace",
+            title: "Prepare sprites e sequencias antes de voltar para a cena.",
+            summary:
+              "ArtStudio concentra slicing, preview e apply, enquanto o Asset Browser continua sendo o ponto de entrada para os assets canonicos do projeto.",
+            detail:
+              "Abra o Asset Browser para escolher a origem certa, use o Inspector para confirmar a entidade alvo e rode no emulador quando quiser checar o resultado.",
+            signal: sharedSignal,
+            actions: [
+              {
+                label: "Abrir Asset Browser",
+                onClick: () => openToolsWorkspace("assets", "editing"),
+                accent: "primary",
+              },
+              {
+                label: "Abrir Inspector",
+                onClick: () => setRightPanelMode("inspector"),
+              },
+              {
+                label: "Rodar no Emulador",
+                onClick: () => void handleBuildAndRun(),
+                accent: "success",
+                disabled: building || liveBuildBlocked,
+                title: liveBuildBlocked ? buildDisabledReason ?? undefined : undefined,
+              },
+            ],
+          } satisfies WorkspaceGuide;
+        }
+
+        if (activeWorkspace === "debug") {
+          return {
+            eyebrow: "Debug Workspace",
+            title: "Analise o projeto ativo sem sair do fluxo principal.",
+            summary:
+              "Profiler, Memory Viewer, Runtime Setup e Reverse Workspace ficam concentrados aqui para reduzir cliques e contexto perdido.",
+            detail:
+              "Comece pelo profiler para localizar gargalos, use o memory viewer para inspecionar a sessao atual e mantenha o Runtime Setup por perto quando houver suspeita de ambiente.",
+            signal: sharedSignal,
+            actions: [
+              {
+                label: "Abrir Profiler",
+                onClick: () => openToolsWorkspace("profiler", "debug", true),
+                accent: "primary",
+              },
+              {
+                label: "Abrir Memory Viewer",
+                onClick: () => openToolsWorkspace("memory", "debug", true),
+              },
+              {
+                label: "Abrir Runtime Setup",
+                onClick: () => openToolsWorkspace("setup", "debug", true),
+              },
+            ],
+          } satisfies WorkspaceGuide;
+        }
+
+        return {
+          eyebrow: "Scene Workspace",
+          title: "Monte a cena e refine entidades sem sair do canvas.",
+          summary:
+            "Hierarchy fica a esquerda, viewport no centro e o painel direito alterna entre Inspector e Tools para manter o fluxo de autoria mais curto.",
+          detail:
+            "Abra o Asset Browser quando quiser descobrir recursos do projeto, use o Inspector para revisar componentes da selecao atual e rode no emulador assim que a cena estiver pronta.",
+          signal: sharedSignal,
+          actions: [
+            {
+              label: "Abrir Asset Browser",
+              onClick: () => openToolsWorkspace("assets", "editing"),
+              accent: "primary",
+            },
+            {
+              label: "Abrir Inspector",
+              onClick: () => setRightPanelMode("inspector"),
+            },
+            {
+              label: "Rodar no Emulador",
+              onClick: () => void handleBuildAndRun(),
+              accent: "success",
+              disabled: building || liveBuildBlocked,
+              title: liveBuildBlocked ? buildDisabledReason ?? undefined : undefined,
+            },
+          ],
+        } satisfies WorkspaceGuide;
+      })()
+    : null;
+
   useEffect(() => {
     if (!automationEnabled) {
       delete window.__RDS_E2E__;
@@ -2102,6 +2373,10 @@ export default function App() {
           <ToolbarButton label="Fechar" onClick={() => void handleCloseProject()} disabled={!activeProjectDir} />
         </div>
       </div>
+
+      {!showProjectWizard && !focusedShell && workspaceGuide && (
+        <WorkspaceGuideCard key={workspaceMeta.id} guide={workspaceGuide} />
+      )}
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <aside className="flex w-[74px] shrink-0 flex-col justify-between border-r border-[#313244] bg-[#0b1020]">
