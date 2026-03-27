@@ -9,6 +9,10 @@ const mocks = vi.hoisted(() => ({
   persistActiveScene: vi.fn(),
 }));
 
+vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: (path: string) => `asset://${path}`,
+}));
+
 vi.mock("../../core/scenePersistence", () => ({
   persistActiveScene: mocks.persistActiveScene,
 }));
@@ -69,6 +73,22 @@ function physicsFixtureEntity(): Entity {
           edges: [{ id: "e1", fromNode: "n1", toNode: "n2" }],
         }),
         logic_hints: ["Hint importado do adapter externo."],
+      },
+    },
+  };
+}
+
+function spriteFixtureEntity(): Entity {
+  return {
+    entity_id: "hero_sprite",
+    prefab: null,
+    transform: { x: 16, y: 24 },
+    components: {
+      sprite: {
+        asset: "assets/sprites/hero.ppm",
+        frame_width: 16,
+        frame_height: 16,
+        animations: {},
       },
     },
   };
@@ -220,5 +240,41 @@ describe("InspectorPanel", () => {
 
     expect(container.textContent).toContain("Override");
     expect(container.textContent).toContain("Herdado");
+  });
+
+  it("resolves the canonical sprite preview path and falls back cleanly on load failure", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeScene: {
+          ...EMPTY_SCENE,
+          entities: [spriteFixtureEntity()],
+        },
+        activeSceneSource: {
+          ...EMPTY_SCENE,
+          entities: [spriteFixtureEntity()],
+        },
+        selectedEntityId: "hero_sprite",
+      });
+      await flush();
+      await flush();
+    });
+
+    const preview = container.querySelector(
+      "[data-testid='inspector-asset-preview']"
+    ) as HTMLImageElement | null;
+
+    expect(preview).toBeInstanceOf(HTMLImageElement);
+    expect(preview?.getAttribute("src")).toBe(
+      "asset://F:/Projects/RetroDevStudio/src-tauri/tests/fixtures/projects/megadrive_dummy/assets/sprites/hero.ppm"
+    );
+
+    await act(async () => {
+      preview?.dispatchEvent(new Event("error"));
+      await flush();
+    });
+
+    expect(
+      container.querySelector("[data-testid='inspector-asset-preview-fallback']")?.textContent
+    ).toContain("Preview indisponivel");
   });
 });

@@ -1,8 +1,7 @@
 import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import AssetPreview from "../common/AssetPreview";
 import Panel from "../common/Panel";
 import HardwareLimitsPanel from "./HardwareLimitsPanel";
-import { resolveProjectAssetPath } from "../../core/pathUtils";
 import { useEditorStore } from "../../core/store/editorStore";
 import type { BackgroundLayer, Entity } from "../../core/ipc/sceneService";
 import { persistActiveScene } from "../../core/scenePersistence";
@@ -819,23 +818,21 @@ export default function InspectorPanel() {
               >
                 {section.id === "sprite" &&
                   entity.components.sprite?.asset &&
-                  activeProjectDir && (() => {
-                    const absolutePath = resolveProjectAssetPath(
-                      activeProjectDir,
-                      entity.components.sprite!.asset
-                    );
-                    const previewSrc = convertFileSrc(absolutePath);
-                    return (
-                      <div className="mb-3 flex items-center justify-center overflow-hidden rounded border border-[#313244] bg-[#11111b] p-2">
-                        <img
-                          src={previewSrc}
-                          alt={entity.components.sprite!.asset}
-                          className="max-h-24 max-w-full object-contain"
-                          style={{ imageRendering: "pixelated" }}
-                        />
-                      </div>
-                    );
-                  })()}
+                  activeProjectDir && (
+                    <div className="mb-3 flex items-center justify-center overflow-hidden rounded border border-[#313244] bg-[#11111b] p-2">
+                      <AssetPreview
+                        testId="inspector-asset-preview"
+                        fallbackTestId="inspector-asset-preview-fallback"
+                        projectDir={activeProjectDir}
+                        relativePath={entity.components.sprite!.asset}
+                        alt={entity.components.sprite!.asset}
+                        imageClassName="max-h-24 max-w-full object-contain"
+                        fallbackClassName="flex h-24 w-full items-center justify-center text-[10px] font-semibold uppercase tracking-[0.12em] text-[#7f849c]"
+                        fallbackLabel="Preview indisponivel"
+                        pixelated
+                      />
+                    </div>
+                  )}
                 <table className="w-full text-xs">
                   <tbody>
                     {section.defs.map((def) => (

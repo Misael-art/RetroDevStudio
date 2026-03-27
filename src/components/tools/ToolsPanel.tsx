@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import AssetPreview from "../common/AssetPreview";
 import Panel from "../common/Panel";
 import { useEditorStore } from "../../core/store/editorStore";
 import ContextualPalette from "./ContextualPalette";
@@ -660,13 +660,6 @@ function collectAssetReferences(scene: Scene | null): Map<string, AssetReference
   return references;
 }
 
-function assetPreviewUrl(asset: ProjectAssetEntry): string | null {
-  if (asset.kind !== "image") {
-    return null;
-  }
-  return convertFileSrc(asset.absolute_path);
-}
-
 interface LegacyIndexSection {
   id: string;
   label: string;
@@ -750,14 +743,12 @@ function AssetTreeView({
   collapsed,
   onToggle,
   onSelect,
-  previewUrl,
   depth,
 }: {
   node: AssetTreeNode;
   collapsed: Set<string>;
   onToggle: (path: string) => void;
   onSelect: (asset: ProjectAssetEntry) => void;
-  previewUrl: (asset: ProjectAssetEntry) => string | null;
   depth: number;
 }) {
   if (node.isDir) {
@@ -784,7 +775,6 @@ function AssetTreeView({
               collapsed={collapsed}
               onToggle={onToggle}
               onSelect={onSelect}
-              previewUrl={previewUrl}
               depth={node.name ? depth + 1 : depth}
             />
           ))}
@@ -793,7 +783,6 @@ function AssetTreeView({
   }
 
   const asset = node.asset!;
-  const preview = previewUrl(asset);
   return (
     <button
       type="button"
@@ -802,13 +791,15 @@ function AssetTreeView({
       style={{ paddingLeft: `${depth * 12 + 4}px` }}
       title={asset.relative_path}
     >
-      {preview ? (
+      {asset.kind === "image" ? (
         <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded bg-black/20">
-          <img
-            src={preview}
+          <AssetPreview
+            absolutePath={asset.absolute_path}
             alt={node.name}
-            className="h-6 w-6 object-contain"
-            style={{ imageRendering: "pixelated" }}
+            imageClassName="h-6 w-6 object-contain"
+            fallbackClassName="flex h-6 w-6 items-center justify-center text-[8px] font-bold text-[#89b4fa]"
+            fallbackLabel="IMG"
+            pixelated
           />
         </div>
       ) : (
@@ -1102,7 +1093,6 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
                     setSelectedEntityId(matches[0].entityId);
                   }
                 }}
-                previewUrl={assetPreviewUrl}
                 depth={0}
               />
             </div>
@@ -1157,13 +1147,17 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
 
       {viewMode === "tree" && selectedTreeAsset && (
         <div className="flex flex-col gap-2 rounded border border-[#cba6f7]/30 bg-[#1e1e2e] p-3">
-          {assetPreviewUrl(selectedTreeAsset) && (
+          {selectedTreeAsset.kind === "image" && (
             <div className="flex h-24 w-full items-center justify-center overflow-hidden rounded bg-black/20">
-              <img
-                src={assetPreviewUrl(selectedTreeAsset)!}
+              <AssetPreview
+                testId="asset-browser-selected-preview"
+                fallbackTestId="asset-browser-selected-preview-fallback"
+                absolutePath={selectedTreeAsset.absolute_path}
                 alt={selectedTreeAsset.relative_path}
-                className="h-full w-full max-h-24 max-w-full object-contain"
-                style={{ imageRendering: "pixelated" }}
+                imageClassName="h-full w-full max-h-24 max-w-full object-contain"
+                fallbackClassName="flex h-full w-full items-center justify-center text-[10px] font-semibold uppercase tracking-[0.12em] text-[#7f849c]"
+                fallbackLabel="Preview indisponivel"
+                pixelated
               />
             </div>
           )}
@@ -1242,7 +1236,6 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
         <div className="scrollbar-thin min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
         <div className="grid grid-cols-2 gap-2 p-2">
         {assets.map((asset) => {
-          const preview = assetPreviewUrl(asset);
           const matches = references.get(asset.relative_path) ?? [];
           const canInstantiate = asset.kind === "image" && Boolean(activeProjectDir && activeScene);
           const isInstantiating = instantiatingAssetPath === asset.relative_path;
@@ -1260,12 +1253,14 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
               title={`${asset.relative_path}${matches.length > 0 ? `\nReferencias: ${matches.map((match) => match.label).join(", ")}` : ""}`}
             >
               <div className="flex h-16 w-full shrink-0 items-center justify-center overflow-hidden rounded bg-black/20">
-                {preview ? (
-                  <img
-                    src={preview}
+                {asset.kind === "image" ? (
+                  <AssetPreview
+                    absolutePath={asset.absolute_path}
                     alt={asset.relative_path}
-                    className="h-14 w-14 object-contain"
-                    style={{ imageRendering: "pixelated" }}
+                    imageClassName="h-14 w-14 object-contain"
+                    fallbackClassName="flex h-14 w-14 items-center justify-center text-[8px] font-bold text-[#89b4fa]"
+                    fallbackLabel="IMG"
+                    pixelated
                   />
                 ) : (
                   <span className="text-lg font-bold text-[#89b4fa]">

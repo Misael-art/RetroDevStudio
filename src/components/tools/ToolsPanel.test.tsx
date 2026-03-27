@@ -571,4 +571,48 @@ describe("ToolsPanel Asset Browser", () => {
     ]);
     expect(container.textContent).toContain("entrypoint_label");
   });
+
+  it("shows a consistent fallback when the selected asset preview fails to load", async () => {
+    await act(async () => {
+      findButton(container, "Avancado OFF").click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Experimental/).click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Asset Browser/).click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      const fileBtn = Array.from(container.querySelectorAll("button")).find(
+        (element) => element.textContent?.includes("onboarding_player.ppm")
+      );
+      fileBtn?.click();
+      await flush();
+      await flush();
+    });
+
+    const preview = container.querySelector(
+      "[data-testid='asset-browser-selected-preview']"
+    ) as HTMLImageElement | null;
+    expect(preview).toBeInstanceOf(HTMLImageElement);
+
+    await act(async () => {
+      preview?.dispatchEvent(new Event("error"));
+      await flush();
+      await flush();
+    });
+
+    expect(
+      container.querySelector("[data-testid='asset-browser-selected-preview-fallback']")?.textContent
+    ).toContain("Preview indisponivel");
+  });
 });
