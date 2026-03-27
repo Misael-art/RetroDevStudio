@@ -1,6 +1,7 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { persistActiveScene } from "../../core/scenePersistence";
 import { useEditorStore } from "../../core/store/editorStore";
+import { getEntityDisplayName } from "../../core/entityDisplay";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -60,13 +61,113 @@ export interface NodeGraph {
   edges: NodeEdge[];
 }
 
+type ViewOffset = {
+  x: number;
+  y: number;
+};
+
+type GraphBounds = {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+};
+
+type NodeGraphSummary = {
+  totalNodes: number;
+  totalEdges: number;
+  entryNodeIds: string[];
+  disconnectedNodeIds: string[];
+};
+
+type MiniMapNode = {
+  id: string;
+  type: NodeType;
+  x: number;
+  y: number;
+};
+
 export const EMPTY_GRAPH: NodeGraph = {
   nodes: [],
   edges: [],
 };
 
+const NODE_CARD_WIDTH = 160;
+const NODE_CARD_HEIGHT = 56;
+const FOCUS_PADDING = 24;
+const MINIMAP_WIDTH = 176;
+const MINIMAP_HEIGHT = 112;
+const MINIMAP_PADDING = 10;
+
+const EVENT_NODE_TYPES: NodeType[] = [
+  "event_start",
+  "event_vblank",
+  "event_hblank",
+  "event_dma_done",
+];
+
 function cloneGraph(graph: NodeGraph): NodeGraph {
   return structuredClone(graph);
+}
+
+export function getNodeGraphBounds(graph: NodeGraph): GraphBounds | null {
+  if (graph.nodes.length === 0) {
+    return null;
+  }
+
+  const xs = graph.nodes.map((node) => node.x);
+  const ys = graph.nodes.map((node) => node.y);
+
+  return {
+    minX: Math.min(...xs),
+    minY: Math.min(...ys),
+    maxX: Math.max(...xs) + NODE_CARD_WIDTH,
+    maxY: Math.max(...ys) + NODE_CARD_HEIGHT,
+  };
+}
+
+export function summarizeNodeGraph(graph: NodeGraph): NodeGraphSummary {
+  const connectedNodeIds = new Set<string>();
+  graph.edges.forEach((edge) => {
+    connectedNodeIds.add(edge.fromNode);
+    connectedNodeIds.add(edge.toNode);
+  });
+
+  return {
+    totalNodes: graph.nodes.length,
+    totalEdges: graph.edges.length,
+    entryNodeIds: graph.nodes
+      .filter((node) => EVENT_NODE_TYPES.includes(node.type))
+      .map((node) => node.id),
+    disconnectedNodeIds: graph.nodes
+      .filter((node) => !connectedNodeIds.has(node.id))
+      .map((node) => node.id),
+  };
+}
+
+export function buildNodeMiniMap(
+  graph: NodeGraph,
+  width = MINIMAP_WIDTH,
+  height = MINIMAP_HEIGHT,
+  padding = MINIMAP_PADDING
+): MiniMapNode[] {
+  const bounds = getNodeGraphBounds(graph);
+  if (!bounds) {
+    return [];
+  }
+
+  const innerWidth = Math.max(1, width - padding * 2);
+  const innerHeight = Math.max(1, height - padding * 2);
+  const graphWidth = Math.max(1, bounds.maxX - bounds.minX);
+  const graphHeight = Math.max(1, bounds.maxY - bounds.minY);
+  const scale = Math.min(innerWidth / graphWidth, innerHeight / graphHeight);
+
+  return graph.nodes.map((node) => ({
+    id: node.id,
+    type: node.type,
+    x: padding + (node.x - bounds.minX) * scale,
+    y: padding + (node.y - bounds.minY) * scale,
+  }));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -575,22 +676,33 @@ const INITIAL_GRAPH: NodeGraph = {
 
 interface NodeCardProps {
   node: GraphNode;
+  screenX: number;
+  screenY: number;
   selected: boolean;
   onMouseDown: (e: React.MouseEvent) => void;
   onPortMouseDown: (e: React.MouseEvent, portId: string, isOutput: boolean) => void;
   onPortMouseUp: (e: React.MouseEvent, portId: string, isOutput: boolean) => void;
 }
 
-function NodeCard({ node, selected, onMouseDown, onPortMouseDown, onPortMouseUp }: NodeCardProps) {
+function NodeCard({
+  node,
+  screenX,
+  screenY,
+  selected,
+  onMouseDown,
+  onPortMouseDown,
+  onPortMouseUp,
+}: NodeCardProps) {
   const group = getGroupForType(node.type);
   const headerBg = GROUP_HEADER_BG[group] ?? "bg-[#4a4a3a]";
 
   return (
     <div
+      data-testid={`node-card-${node.id}`}
       className={`absolute select-none min-w-[160px] rounded-xl border border-slate-700 bg-slate-900/90 shadow-lg backdrop-blur-sm ${
         selected ? "ring-2 ring-blue-500 shadow-2xl" : ""
       }`}
-      style={{ left: node.x, top: node.y }}
+      style={{ left: screenX, top: screenY }}
       onMouseDown={onMouseDown}
     >
       {/* Header colorido por categoria */}
@@ -672,6 +784,8 @@ export default function NodeGraphEditor() {
   const [pendingEdge, setPendingEdge] = useState<{ fromNode: string; fromPort: string; x: number; y: number } | null>(null);
   const [paletteSearch, setPaletteSearch] = useState("");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [viewOffset, setViewOffset] = useState<ViewOffset>({ x: 0, y: 0 });
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const svgRef = useRef<SVGSVGElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const saveTimerRef = useRef<number | null>(null);
@@ -685,8 +799,23 @@ export default function NodeGraphEditor() {
     setSelectedId(null);
     setDragging(null);
     setPendingEdge(null);
+    setViewOffset({ x: 0, y: 0 });
     lastPersistedGraphRef.current = serializeNodeGraph(nextGraph);
   }, [selectedEntity]);
+
+  useEffect(() => {
+    function measureCanvas() {
+      const rect = canvasRef.current?.getBoundingClientRect();
+      setCanvasSize({
+        width: rect?.width ?? 0,
+        height: rect?.height ?? 0,
+      });
+    }
+
+    measureCanvas();
+    window.addEventListener("resize", measureCanvas);
+    return () => window.removeEventListener("resize", measureCanvas);
+  }, []);
 
   useEffect(() => {
     if (!selectedEntity || !activeProjectDir) {
@@ -743,8 +872,12 @@ export default function NodeGraphEditor() {
     if ((e.target as HTMLElement).classList.contains("cursor-crosshair")) return;
     setSelectedId(nodeId);
     const node = graph.nodes.find((n) => n.id === nodeId)!;
-    setDragging({ nodeId, offsetX: e.clientX - node.x, offsetY: e.clientY - node.y });
-  }, [graph.nodes]);
+    setDragging({
+      nodeId,
+      offsetX: e.clientX - (node.x + viewOffset.x),
+      offsetY: e.clientY - (node.y + viewOffset.y),
+    });
+  }, [graph.nodes, viewOffset.x, viewOffset.y]);
 
   const onMouseMove = useCallback((e: React.MouseEvent) => {
     if (dragging) {
@@ -752,7 +885,11 @@ export default function NodeGraphEditor() {
         ...g,
         nodes: g.nodes.map((n) =>
           n.id === dragging.nodeId
-            ? { ...n, x: e.clientX - dragging.offsetX, y: e.clientY - dragging.offsetY }
+            ? {
+                ...n,
+                x: e.clientX - viewOffset.x - dragging.offsetX,
+                y: e.clientY - viewOffset.y - dragging.offsetY,
+              }
             : n
         ),
       }));
@@ -760,7 +897,7 @@ export default function NodeGraphEditor() {
     if (pendingEdge) {
       setPendingEdge((p) => p ? { ...p, x: e.clientX, y: e.clientY } : null);
     }
-  }, [dragging, pendingEdge]);
+  }, [dragging, pendingEdge, viewOffset.x, viewOffset.y]);
 
   const onMouseUp = useCallback(() => {
     setDragging(null);
@@ -816,13 +953,75 @@ export default function NodeGraphEditor() {
   // ── Edge SVG path ─────────────────────────────────────────────────────────
   // Simplified: bezier between node positions (port positions approximated)
   function edgePath(fromNode: GraphNode, toNode: GraphNode): string {
-    const x1 = fromNode.x + 160; // right edge
-    const y1 = fromNode.y + 24;
-    const x2 = toNode.x;         // left edge
-    const y2 = toNode.y + 24;
+    const x1 = fromNode.x + viewOffset.x + NODE_CARD_WIDTH; // right edge
+    const y1 = fromNode.y + viewOffset.y + 24;
+    const x2 = toNode.x + viewOffset.x;                     // left edge
+    const y2 = toNode.y + viewOffset.y + 24;
     const cx = (x1 + x2) / 2;
     return `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`;
   }
+
+  const graphSummary = useMemo(() => summarizeNodeGraph(graph), [graph]);
+  const miniMapNodes = useMemo(
+    () => buildNodeMiniMap(graph, MINIMAP_WIDTH, MINIMAP_HEIGHT, MINIMAP_PADDING),
+    [graph]
+  );
+
+  const graphBounds = useMemo(() => getNodeGraphBounds(graph), [graph]);
+
+  const miniMapViewport = useMemo(() => {
+    if (!graphBounds) {
+      return null;
+    }
+
+    const innerWidth = Math.max(1, MINIMAP_WIDTH - MINIMAP_PADDING * 2);
+    const innerHeight = Math.max(1, MINIMAP_HEIGHT - MINIMAP_PADDING * 2);
+    const graphWidth = Math.max(1, graphBounds.maxX - graphBounds.minX);
+    const graphHeight = Math.max(1, graphBounds.maxY - graphBounds.minY);
+    const scale = Math.min(innerWidth / graphWidth, innerHeight / graphHeight);
+
+    const viewportLeft = MINIMAP_PADDING + Math.max(0, -viewOffset.x - graphBounds.minX) * scale;
+    const viewportTop = MINIMAP_PADDING + Math.max(0, -viewOffset.y - graphBounds.minY) * scale;
+    const viewportWidth = Math.min(innerWidth, Math.max(28, canvasSize.width * scale));
+    const viewportHeight = Math.min(innerHeight, Math.max(20, canvasSize.height * scale));
+
+    return {
+      left: viewportLeft,
+      top: viewportTop,
+      width: viewportWidth,
+      height: viewportHeight,
+    };
+  }, [canvasSize.height, canvasSize.width, graphBounds, viewOffset.x, viewOffset.y]);
+
+  const selectedNode = graph.nodes.find((node) => node.id === selectedId) ?? null;
+
+  const focusNode = useCallback((nodeId: string) => {
+    const targetNode = graph.nodes.find((node) => node.id === nodeId);
+    if (!targetNode) {
+      return;
+    }
+
+    const rect = canvasRef.current?.getBoundingClientRect();
+    const width = rect?.width ?? canvasSize.width;
+    const height = rect?.height ?? canvasSize.height;
+
+    const desiredX = Math.max(FOCUS_PADDING, width / 2 - NODE_CARD_WIDTH / 2);
+    const desiredY = Math.max(FOCUS_PADDING, height / 2 - NODE_CARD_HEIGHT / 2);
+
+    setViewOffset({
+      x: desiredX - targetNode.x,
+      y: desiredY - targetNode.y,
+    });
+    setSelectedId(nodeId);
+  }, [canvasSize.height, canvasSize.width, graph.nodes]);
+
+  const focusEntryNode = useCallback(() => {
+    const firstEntryNode = graphSummary.entryNodeIds[0];
+    if (!firstEntryNode) {
+      return;
+    }
+    focusNode(firstEntryNode);
+  }, [focusNode, graphSummary.entryNodeIds]);
 
   const searchLower = paletteSearch.trim().toLowerCase();
   const filteredGroups = searchLower
@@ -911,6 +1110,7 @@ export default function NodeGraphEditor() {
       {/* ── Canvas ── */}
       <div
         ref={canvasRef}
+        data-testid="nodegraph-canvas"
         className="relative flex-1 overflow-hidden cursor-default"
         style={{
           backgroundImage:
@@ -927,6 +1127,80 @@ export default function NodeGraphEditor() {
             <p className="max-w-xs text-center text-xs text-[#6c7086]">
               Selecione uma entidade na hierarquia para carregar ou criar o `LogicComponent.graph`.
             </p>
+          </div>
+        )}
+
+        {selectedEntity && (
+          <div
+            data-testid="nodegraph-overview"
+            className="absolute left-3 top-3 z-10 flex max-w-[19rem] flex-col gap-2 rounded-xl border border-[#313244] bg-[#181825]/95 px-3 py-2 text-[10px] shadow-lg backdrop-blur-sm"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#89b4fa]">
+                  Logic Context
+                </p>
+                <p className="truncate text-[11px] font-semibold text-[#cdd6f4]">
+                  {getEntityDisplayName(selectedEntity)}
+                </p>
+                <p className="truncate text-[#6c7086]">entity_id: {selectedEntity.entity_id}</p>
+              </div>
+              <span className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-[#a6adc8]">
+                {graphSummary.totalNodes} nos
+              </span>
+            </div>
+
+            <div className="flex flex-wrap gap-1.5">
+              <span className="rounded bg-[#11111b] px-2 py-1 text-[#a6adc8]">
+                Conexoes: <span className="font-semibold text-[#cdd6f4]">{graphSummary.totalEdges}</span>
+              </span>
+              <span className="rounded bg-[#11111b] px-2 py-1 text-[#a6adc8]">
+                Eventos: <span className="font-semibold text-[#cdd6f4]">{graphSummary.entryNodeIds.length}</span>
+              </span>
+              <span className="rounded bg-[#11111b] px-2 py-1 text-[#a6adc8]">
+                Soltos: <span className="font-semibold text-[#cdd6f4]">{graphSummary.disconnectedNodeIds.length}</span>
+              </span>
+            </div>
+
+            {graphSummary.totalNodes > 0 && graphSummary.entryNodeIds.length === 0 && (
+              <p className="text-[#fab387]">
+                Grafo sem evento de entrada: adicione um no de evento para iniciar o fluxo.
+              </p>
+            )}
+            {graphSummary.disconnectedNodeIds.length > 0 && graphSummary.totalNodes > 1 && (
+              <p className="text-[#f9e2af]">
+                {graphSummary.disconnectedNodeIds.length} no(s) ainda sem conexao no fluxo atual.
+              </p>
+            )}
+
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                data-testid="nodegraph-focus-entry"
+                onClick={focusEntryNode}
+                disabled={graphSummary.entryNodeIds.length === 0}
+                className="rounded border border-[#89b4fa]/40 bg-[#89b4fa]/10 px-2 py-1 font-semibold text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Ir para Inicio
+              </button>
+              <button
+                type="button"
+                data-testid="nodegraph-focus-selected"
+                onClick={() => selectedNode && focusNode(selectedNode.id)}
+                disabled={!selectedNode}
+                className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 font-semibold text-[#cdd6f4] transition-colors hover:border-[#cba6f7] hover:text-[#cba6f7] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Centralizar Selecao
+              </button>
+              <button
+                type="button"
+                data-testid="nodegraph-reset-view"
+                onClick={() => setViewOffset({ x: 0, y: 0 })}
+                className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 font-semibold text-[#a6adc8] transition-colors hover:text-[#cdd6f4]"
+              >
+                Resetar Vista
+              </button>
+            </div>
           </div>
         )}
 
@@ -957,8 +1231,8 @@ export default function NodeGraphEditor() {
             const rect = canvasRef.current?.getBoundingClientRect();
             const ox = rect ? pendingEdge.x - rect.left : pendingEdge.x;
             const oy = rect ? pendingEdge.y - rect.top  : pendingEdge.y;
-            const x1 = from.x + 160;
-            const y1 = from.y + 24;
+            const x1 = from.x + viewOffset.x + NODE_CARD_WIDTH;
+            const y1 = from.y + viewOffset.y + 24;
             return (
               <path
                 d={`M ${x1} ${y1} C ${(x1+ox)/2} ${y1}, ${(x1+ox)/2} ${oy}, ${ox} ${oy}`}
@@ -976,12 +1250,62 @@ export default function NodeGraphEditor() {
           <NodeCard
             key={node.id}
             node={node}
+            screenX={node.x + viewOffset.x}
+            screenY={node.y + viewOffset.y}
             selected={node.id === selectedId}
             onMouseDown={(e) => onNodeMouseDown(e, node.id)}
             onPortMouseDown={(e, portId, isOutput) => onPortMouseDown(e, node.id, portId, isOutput)}
             onPortMouseUp={(e, portId, isOutput) => onPortMouseUp(e, node.id, portId, isOutput)}
           />
         ))}
+
+        {selectedEntity && graph.nodes.length > 0 && (
+          <div
+            data-testid="nodegraph-minimap"
+            className="absolute bottom-3 right-3 z-10 rounded-xl border border-[#313244] bg-[#181825]/95 p-2 shadow-lg backdrop-blur-sm"
+          >
+            <div className="mb-2 flex items-center justify-between gap-3 text-[9px] uppercase tracking-[0.16em] text-[#6c7086]">
+              <span>MiniMapa</span>
+              <span>{graph.nodes.length} nos</span>
+            </div>
+            <div
+              className="relative overflow-hidden rounded border border-[#313244] bg-[#0b1020]"
+              style={{ width: MINIMAP_WIDTH, height: MINIMAP_HEIGHT }}
+            >
+              {miniMapViewport && (
+                <div
+                  className="absolute rounded border border-[#89b4fa]/70 bg-[#89b4fa]/10"
+                  style={{
+                    left: miniMapViewport.left,
+                    top: miniMapViewport.top,
+                    width: miniMapViewport.width,
+                    height: miniMapViewport.height,
+                  }}
+                />
+              )}
+              {miniMapNodes.map((node) => (
+                <button
+                  key={`minimap-${node.id}`}
+                  type="button"
+                  data-testid={`nodegraph-minimap-node-${node.id}`}
+                  title={getNodeDisplayName(node.type)}
+                  onClick={() => focusNode(node.id)}
+                  className={`absolute h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border transition-transform hover:scale-125 ${
+                    node.id === selectedId
+                      ? "border-[#f9e2af] bg-[#f9e2af]"
+                      : EVENT_NODE_TYPES.includes(node.type)
+                        ? "border-[#a6e3a1] bg-[#a6e3a1]/90"
+                        : "border-[#cba6f7] bg-[#cba6f7]/90"
+                  }`}
+                  style={{ left: node.x, top: node.y }}
+                />
+              ))}
+            </div>
+            <p className="mt-2 text-[9px] text-[#6c7086]">
+              Clique em um ponto para navegar sem mover o layout salvo.
+            </p>
+          </div>
+        )}
 
         {/* Empty state */}
         {graph.nodes.length === 0 && (

@@ -68,6 +68,13 @@
   - **Cobertura dedicada adicionada:** `InspectorPanel.test.tsx` agora prova a resolucao do caminho canonico para sprite preview e o fallback limpo apos erro; `ToolsPanel.test.tsx` cobre o fallback consistente no preview selecionado do `Asset Browser`.
   - **Validacao completa desta rodada:** `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test` (`185` testes), `scripts\\run-cargo-msvc.cmd clippy --manifest-path .\\src-tauri\\Cargo.toml -- -D warnings` e `scripts\\run-cargo-msvc.cmd test --manifest-path .\\src-tauri\\Cargo.toml --lib -- --nocapture --test-threads=1` ficaram verdes. O warning conhecido de `asset://`/canvas no jsdom continua nao-bloqueante e segue restrito ao `ViewportPanel`.
 
+* **O que acabou de acontecer (2026-03-27 - NodeGraph com contexto e navegacao local mais proximos de IDE/Blueprint):**
+  - **Navegacao sem poluir o grafo salvo:** `NodeGraphEditor.tsx` ganhou um `viewOffset` local nao persistido, permitindo recentrar a vista no grafo sem mover os nos no `LogicComponent.graph` gravado em disco.
+  - **Overview contextual adicionado:** o canvas agora mostra um card `Logic Context` com entidade ativa, contagem de nos/conexoes/eventos, alerta para ausencia de evento de entrada e sinalizacao de nos soltos, reduzindo a necessidade de “adivinhar” o estado do grafo.
+  - **MiniMapa clicavel real:** o editor agora exibe um `MiniMapa` no canto inferior direito com viewport local e pontos clicaveis por no; tambem ganhou acoes `Ir para Inicio`, `Centralizar Selecao` e `Resetar Vista`, aproximando a navegacao do feeling de ferramentas como Unreal Blueprints sem criar camera persistida nem refatorar o compilador.
+  - **Cobertura nova:** `NodeGraphEditor.test.tsx` valida o resumo do grafo, a projecao dos nos no minimapa e o foco do no de entrada sem alterar o grafo serializado.
+  - **Validacao focal desta rodada:** `npx eslint src/components/nodegraph/NodeGraphEditor.tsx src/components/nodegraph/NodeGraphEditor.test.tsx`, `npx tsc --noEmit` e `npx vitest run src/components/nodegraph/NodeGraphEditor.test.tsx` ficaram verdes.
+
 * **O que acabou de acontecer (2026-03-23 - Reverse Core canonico experimental para ROMs):**
   - **Arquitetura reversa canonica criada:** `src-tauri/src/tools/reverse/` agora concentra `manifest`, `platform`, `loader`, `graphics`, `text`, `audio`, `code`, `trace`, `annotations` e `projection`, com adapter-base por plataforma e implementacoes iniciais para `Mega Drive` e `SNES`.
   - **Manifesto reverso como fonte de verdade:** `RomAnalysisManifest` passou a registrar hashes, header, mapper, chips especiais, segmentos/banks, candidatos de grafico/texto/audio, regioes de codigo, pointer tables, compressao, `logic_hints`, `annotations`, `trace` e `projection_status`.
