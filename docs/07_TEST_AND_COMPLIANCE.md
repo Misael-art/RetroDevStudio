@@ -62,6 +62,7 @@
 5. `cargo clippy -- -D warnings`
 6. `cargo test --lib -- --nocapture --test-threads=1`
 7. `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests` quando a mudanca tocar build/emulacao/toolchains reais no Windows
+   Observacao canonica: este gate deve ser rerodado de forma direta, a partir do shell, e nao embrulhado por `scripts/run-in-msvc.cmd`, porque o proprio `validate-upstream-windows.ps1` ja chama internamente o runner MSVC canonico quando necessario.
 8. `node scripts/e2e-tauri-build-run.mjs --skip-build --native-driver .\toolchains\webdriver\msedgedriver.exe` quando a mudanca tocar o fluxo publico `Build -> Load ROM -> Run frames`
 9. Em host Windows com policy que bloqueia bootstrap interno do driver, usar fallback `--external-driver` com `tauri-driver` iniciado fora do processo Node.
 10. Se a sessao WebDriver falhar em `DevToolsActivePort`/`chrome not reachable`, executar `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-desktop-e2e.ps1 -SessionProbe` e registrar o resultado.
@@ -81,6 +82,7 @@ Nenhuma etapa deve ser tratada como `concluida` sem certificacao real do fluxo a
 ## 4. ALERTAS ESPECIFICOS DO ESTADO ATUAL
 
 - O setup automatico de terceiros ja existe e a validacao oficial em Windows foi comprovada, mas ela continua obrigatoria em mudancas relevantes de build/emulacao/toolchain.
+- O modo correto de rerodar o gate upstream oficial neste host e no fluxo atual do projeto e direto: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests`. Nao embrulhar esse script com `scripts/run-in-msvc.cmd`.
 - No Windows, o caminho SNES precisa de Git Bash/MSYS2 real; o shim do WSL nao deve ser tratado como shell suportado.
 - O runner desktop/Tauri depende de `tauri-driver` e `msedgedriver` provisionados localmente; sem isso o teste de aplicacao nao deve ser marcado como executado. O caminho local canonico para o driver nativo e `toolchains/webdriver/msedgedriver.exe`.
 - Neste host local foi observado que `child_process.spawn` com `stdio` contendo `pipe` pode falhar com `EPERM`; o runner canonico ja usa bootstrap interno com `stdio: inherit` e oferece fallback `--external-driver`.

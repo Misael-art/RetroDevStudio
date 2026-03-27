@@ -56,6 +56,8 @@ Uma tarefa tambem nao esta concluida enquanto faltar certificacao real no escopo
 
 ### 3.2 Gates extras quando a mudanca toca o core
 - Reexecutar `scripts/validate-upstream-windows.ps1` quando a mudanca tocar build/emulacao de Mega Drive ou SNES com toolchains oficiais no Windows.
+  O modo canonico de execucao e direto: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests`.
+  Nao embrulhar esse script com `scripts/run-in-msvc.cmd`, porque ele proprio ja resolve o runner MSVC canonico internamente.
 - Confirmar shell Unix-like suportado quando a mudanca tocar o caminho SNES de Windows.
 - Revalidar com cores Libretro oficiais quando a mudanca tocar carga de ROM ou selecao de core.
 - Reexecutar o runner desktop `scripts/e2e-tauri-build-run.mjs` quando a mudanca tocar o fluxo `Build -> Load ROM -> Run frames` do app como um todo.
