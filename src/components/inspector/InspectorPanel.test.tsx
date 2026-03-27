@@ -78,7 +78,9 @@ function physicsFixtureEntity(): Entity {
   };
 }
 
-function spriteFixtureEntity(): Entity {
+function spriteFixtureEntity(
+  overrides?: Partial<NonNullable<Entity["components"]["sprite"]>>
+): Entity {
   return {
     entity_id: "hero_sprite",
     prefab: null,
@@ -88,7 +90,9 @@ function spriteFixtureEntity(): Entity {
         asset: "assets/sprites/hero.ppm",
         frame_width: 16,
         frame_height: 16,
+        palette_slot: 0,
         animations: {},
+        ...overrides,
       },
     },
   };
@@ -276,5 +280,44 @@ describe("InspectorPanel", () => {
     expect(
       container.querySelector("[data-testid='inspector-asset-preview-fallback']")?.textContent
     ).toContain("Preview indisponivel");
+  });
+
+  it("normalizes sprite build settings for the active target from the Inspector action", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeTarget: "megadrive",
+        activeScene: {
+          ...EMPTY_SCENE,
+          entities: [spriteFixtureEntity({ frame_width: 25, frame_height: 9, palette_slot: 5 })],
+        },
+        activeSceneSource: {
+          ...EMPTY_SCENE,
+          entities: [spriteFixtureEntity({ frame_width: 25, frame_height: 9, palette_slot: 5 })],
+        },
+        selectedEntityId: "hero_sprite",
+      });
+      await flush();
+    });
+
+    const normalizeButton = container.querySelector(
+      "[data-testid='inspector-normalize-sprite-target']"
+    );
+
+    if (!(normalizeButton instanceof HTMLButtonElement)) {
+      throw new Error("Normalize sprite button not found");
+    }
+
+    await act(async () => {
+      normalizeButton.click();
+      await flush();
+    });
+
+    const updatedEntity = useEditorStore.getState().activeScene?.entities.find(
+      (entity) => entity.entity_id === "hero_sprite"
+    );
+
+    expect(updatedEntity?.components.sprite?.frame_width).toBe(32);
+    expect(updatedEntity?.components.sprite?.frame_height).toBe(16);
+    expect(updatedEntity?.components.sprite?.palette_slot).toBe(3);
   });
 });

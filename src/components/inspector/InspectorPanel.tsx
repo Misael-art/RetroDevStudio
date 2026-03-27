@@ -5,7 +5,10 @@ import HardwareLimitsPanel from "./HardwareLimitsPanel";
 import { useEditorStore } from "../../core/store/editorStore";
 import type { BackgroundLayer, Entity } from "../../core/ipc/sceneService";
 import { persistActiveScene } from "../../core/scenePersistence";
-import { constrainSpriteFrameSize } from "../../core/sceneConstraints";
+import {
+  constrainSpriteFrameSize,
+  constrainSpritePaletteSlot,
+} from "../../core/sceneConstraints";
 import { deserializeNodeGraph, serializeNodeGraph } from "../nodegraph/NodeGraphEditor";
 import { getEntityDisplayName } from "../../core/entityDisplay";
 import knowledgeBase from "./knowledgeBase.json";
@@ -548,6 +551,10 @@ function graphSummary(serializedGraph?: string): string {
   }
 }
 
+function targetDisplayName(target: "megadrive" | "snes"): string {
+  return target === "megadrive" ? "Mega Drive" : "SNES";
+}
+
 // ── LogicVariable Slider ─────────────────────────────────────────────────────
 
 interface LogicVariableSliderProps {
@@ -680,6 +687,70 @@ export default function InspectorPanel() {
     }, 600);
   }
 
+  function buildSpriteTargetPatch(
+    entityToUpdate: Entity,
+    overrides?: Partial<NonNullable<Entity["components"]["sprite"]>>
+  ) {
+    const sprite = entityToUpdate.components.sprite;
+    if (!sprite) {
+      return null;
+    }
+
+    const nextFrame = constrainSpriteFrameSize(
+      activeTarget,
+      overrides?.asset ?? sprite.asset,
+      overrides?.frame_width ?? sprite.frame_width,
+      overrides?.frame_height ?? sprite.frame_height
+    );
+    const nextPaletteSlot = constrainSpritePaletteSlot(
+      activeTarget,
+      overrides?.palette_slot ?? sprite.palette_slot ?? 0
+    );
+    const nextSprite = {
+      ...sprite,
+      ...overrides,
+      frame_width: nextFrame.frameWidth,
+      frame_height: nextFrame.frameHeight,
+      palette_slot: nextPaletteSlot,
+    };
+
+    return {
+      nextSprite,
+      patch: {
+        components: {
+          ...entityToUpdate.components,
+          sprite: nextSprite,
+        },
+      } satisfies Partial<Entity>,
+    };
+  }
+
+  function handleNormalizeSpriteTarget(entityToUpdate: Entity) {
+    if (saveStatus === "error") {
+      setSaveStatus("idle");
+    }
+
+    const normalized = buildSpriteTargetPatch(entityToUpdate);
+    if (!normalized) {
+      return;
+    }
+
+    const currentSprite = entityToUpdate.components.sprite!;
+    const changed =
+      normalized.nextSprite.frame_width !== currentSprite.frame_width ||
+      normalized.nextSprite.frame_height !== currentSprite.frame_height ||
+      normalized.nextSprite.palette_slot !== (currentSprite.palette_slot ?? 0);
+
+    updateEntity(entityToUpdate.entity_id, normalized.patch);
+    scheduleAutoSave();
+    logMessage(
+      "info",
+      changed
+        ? `[Inspector] Sprite normalizado para ${targetDisplayName(activeTarget)}.`
+        : `[Inspector] Sprite ja atende ao target ${targetDisplayName(activeTarget)}.`
+    );
+  }
+
   function handleChange(entityToUpdate: Entity, def: PropDef, value: string | number | boolean) {
     if (saveStatus === "error") {
       setSaveStatus("idle");
@@ -690,29 +761,22 @@ export default function InspectorPanel() {
       def.path[0] === "components" &&
       def.path[1] === "sprite" &&
       (def.path[2] === "frame_width" || def.path[2] === "frame_height");
+    const isSpritePaletteField =
+      def.path.length === 3 &&
+      def.path[0] === "components" &&
+      def.path[1] === "sprite" &&
+      def.path[2] === "palette_slot";
     const sprite = entityToUpdate.components.sprite;
     const patch =
       isSpriteFrameField && sprite
-        ? {
-            components: {
-              ...entityToUpdate.components,
-              sprite: {
-                ...sprite,
-                ...(() => {
-                  const constrained = constrainSpriteFrameSize(
-                    activeTarget,
-                    sprite.asset,
-                    def.path[2] === "frame_width" ? Number(value) : sprite.frame_width,
-                    def.path[2] === "frame_height" ? Number(value) : sprite.frame_height
-                  );
-                  return {
-                    frame_width: constrained.frameWidth,
-                    frame_height: constrained.frameHeight,
-                  };
-                })(),
-              },
-            },
-          }
+        ? buildSpriteTargetPatch(entityToUpdate, {
+            frame_width: def.path[2] === "frame_width" ? Number(value) : sprite.frame_width,
+            frame_height: def.path[2] === "frame_height" ? Number(value) : sprite.frame_height,
+          })?.patch ?? {}
+        : isSpritePaletteField && sprite
+          ? buildSpriteTargetPatch(entityToUpdate, {
+              palette_slot: Number(value),
+            })?.patch ?? {}
         : buildEntityPatch(entityToUpdate, def.path, value);
     if (Object.keys(patch).length === 0) {
       logMessage("warn", `[Inspector] Campo nao suportado: ${def.key}`);
@@ -875,19 +939,38 @@ export default function InspectorPanel() {
                     }
                   />
                 ) : null}
-                {(section.id === "sprite" || section.id === "tilemap") && (
+                {section.id === "sprite" && entity.components.sprite ? (
                   <div className="mt-3 border-t border-[#313244] pt-3">
                     <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[#45475a]">
-                      🛠️ Otimizações SGDK (Em Breve)
+                      Preparacao para Build
+                    </p>
+                    <p className="mb-2 text-[10px] leading-relaxed text-[#7f849c]">
+                      {activeTarget === "megadrive"
+                        ? "Mega Drive usa grid de 8px, sprite simples ate 32x32 e palette slots 0-3."
+                        : "SNES usa sprites simples quadrados 8/16/32/64 e palette slots 0-7."}
                     </p>
                     <div className="flex flex-col gap-2">
                       <button
                         type="button"
-                        disabled
-                        className="cursor-not-allowed rounded border border-[#45475a] bg-slate-800/50 px-2 py-1.5 text-[10px] font-mono text-[#6c7086] opacity-60"
+                        data-testid="inspector-normalize-sprite-target"
+                        className="rounded border border-[#89b4fa]/40 bg-[#89b4fa]/10 px-2 py-1.5 text-[10px] font-mono text-[#89b4fa] transition-colors hover:border-[#89b4fa] hover:bg-[#89b4fa]/20 hover:text-[#cdd6f4]"
+                        onClick={() => handleNormalizeSpriteTarget(entity)}
                       >
-                        🎨 Quantizar Cores (16-bits)
+                        {`📐 Normalizar Sprite para ${targetDisplayName(activeTarget)}`}
                       </button>
+                    </div>
+                  </div>
+                ) : null}
+                {section.id === "tilemap" && (
+                  <div className="mt-3 border-t border-[#313244] pt-3">
+                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[#45475a]">
+                      Ferramentas Avancadas (Experimental)
+                    </p>
+                    <p className="mb-2 text-[10px] leading-relaxed text-[#7f849c]">
+                      A extracao automatica de tileset/tilemap continua experimental e ainda depende do
+                      pipeline oficial de assets.
+                    </p>
+                    <div className="flex flex-col gap-2">
                       <button
                         type="button"
                         disabled

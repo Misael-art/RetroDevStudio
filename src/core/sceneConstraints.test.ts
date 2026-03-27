@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  constrainSpritePaletteSlot,
   constrainSpriteFrameSize,
   isOnboardingSpriteAsset,
   ONBOARDING_SPRITE_ASSET,
@@ -29,5 +30,11 @@ describe("sceneConstraints", () => {
       frameWidth: 64,
       frameHeight: 64,
     });
+  });
+
+  it("clamps palette slots to the supported range of each target", () => {
+    expect(constrainSpritePaletteSlot("megadrive", -4)).toBe(0);
+    expect(constrainSpritePaletteSlot("megadrive", 9)).toBe(3);
+    expect(constrainSpritePaletteSlot("snes", 12)).toBe(7);
   });
 });

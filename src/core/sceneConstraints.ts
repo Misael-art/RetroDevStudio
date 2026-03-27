@@ -5,6 +5,8 @@ export const ONBOARDING_SPRITE_SIZE = 16;
 export const TILE_SIZE = 8;
 
 const MD_SIMPLE_SPRITE_MAX = 32;
+const MD_PALETTE_SLOT_MAX = 3;
+const SNES_PALETTE_SLOT_MAX = 7;
 const SNES_SIMPLE_SPRITE_SIZES = [8, 16, 32, 64] as const;
 
 function normalizeAssetPath(asset?: string): string {
@@ -59,4 +61,13 @@ export function constrainSpriteFrameSize(
     frameWidth: squareSize,
     frameHeight: squareSize,
   };
+}
+
+export function constrainSpritePaletteSlot(
+  target: EditorTarget,
+  paletteSlot: number | undefined
+): number {
+  const normalized = Number.isFinite(paletteSlot) ? Math.trunc(paletteSlot ?? 0) : 0;
+  const maxSlot = target === "megadrive" ? MD_PALETTE_SLOT_MAX : SNES_PALETTE_SLOT_MAX;
+  return clamp(normalized, 0, maxSlot);
 }
