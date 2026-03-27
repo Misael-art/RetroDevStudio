@@ -33,7 +33,7 @@
 
 - O foco do projeto ainda nao e expansao de escopo; e consolidacao do caminho canonico e QA.
 - O shell principal ja e forte, mas ainda nao e um sistema de docking livre no nivel de uma IDE madura.
-- O build desktop local via `scripts/build.mjs` ainda precisa de repetibilidade total neste host sem workarounds locais de ambiente.
+- O build desktop local canonico via `scripts/build.mjs debug` / `npm run build:debug` voltou a passar neste host, usando o shadow target automatico previsto no proprio script e sem override manual de `beforeBuildCommand`.
 - Ferramentas como `ArtStudio`, `RetroFX`, `Reverse Workspace`, `Asset Extractor` e `Memory Viewer` continuam visiveis, mas com status `Experimental` onde o backend e a certificacao ainda nao sustentam claim plena.
 
 ---
