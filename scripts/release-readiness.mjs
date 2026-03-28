@@ -103,6 +103,7 @@ const EXPERIMENTAL_SURFACES = [
 const LOCAL_ONLY_STATUS_PATHS = new Set([
   ".claude/settings.local.json",
   "AGENTS.md",
+  "docs/ESTUDO_FRONTEND_GUI_NAO_CANONICO.md",
 ]);
 
 function npmCommand() {
@@ -153,6 +154,10 @@ function parseArgs(argv) {
   }
 
   return options;
+}
+
+function shouldAutoRunDesktopE2E(options) {
+  return process.platform === "win32" && options.runBaseline && !options.runDesktopE2E;
 }
 
 function createEmptyGateResult(gate) {
@@ -574,7 +579,9 @@ async function main() {
     );
   }
 
-  if (options.runDesktopE2E) {
+  const shouldRunDesktopE2E = options.runDesktopE2E || shouldAutoRunDesktopE2E(options);
+
+  if (shouldRunDesktopE2E) {
     if (!(await pathExists(WEBDRIVER_PATH))) {
       auxiliary.desktopE2E = {
         label: "desktop-e2e",
