@@ -380,6 +380,10 @@ export function romAnalyze(romPath: string): Promise<RomAnalysisManifest> {
   return invoke<RomAnalysisManifest>("rom_analyze", { romPath });
 }
 
+export function romAnalyzeWithEmulatorTrace(romPath: string): Promise<RomAnalysisManifest> {
+  return invoke<RomAnalysisManifest>("rom_analyze_with_emulator_trace", { romPath });
+}
+
 export function romDisassemble(
   romPath: string,
   offset: number,

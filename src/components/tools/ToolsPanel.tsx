@@ -37,7 +37,7 @@ import {
   type RomAnalysisManifest,
   type ReverseAnnotation,
   type ReverseExplorerResult,
-  romAnalyze,
+  romAnalyzeWithEmulatorTrace,
   romDisassemble,
   romSaveAnnotations,
   reverseExplorerRead,
@@ -2239,7 +2239,7 @@ function ReverseWorkspace() {
 
     setBusy(true);
     try {
-      const nextManifest = await romAnalyze(romPath);
+      const nextManifest = await romAnalyzeWithEmulatorTrace(romPath);
       setManifest(nextManifest);
       setActiveView("map");
       logMessage(
@@ -2316,6 +2316,15 @@ function ReverseWorkspace() {
   const summaryChips = manifest?.special_chips.length
     ? manifest.special_chips.join(", ")
     : "nenhum";
+  const traceAvailable = manifest?.trace.available ?? false;
+  const traceStatusLabel = traceAvailable
+    ? "Overlay ativo"
+    : manifest?.trace.note
+      ? "Sem overlay ao vivo"
+      : "Indisponivel";
+  const traceBadgeClassName = traceAvailable
+    ? "border-[#a6e3a1]/40 bg-[#a6e3a1]/10 text-[#a6e3a1]"
+    : "border-[#fab387]/35 bg-[#fab387]/10 text-[#fab387]";
   const codeRegion = manifest?.code_regions[0] ?? null;
   const xrefs = useMemo(
     () => manifest?.code_regions.flatMap((region) => region.xrefs) ?? [],
@@ -2423,6 +2432,32 @@ function ReverseWorkspace() {
               <div className="mt-1 text-[10px] text-[#94a3b8]">
                 CODE {manifest.code_regions.length} · XREF {manifest.code_regions.reduce((sum, region) => sum + region.xrefs.length, 0)}
               </div>
+            </div>
+          </div>
+
+          <div
+            data-testid="reverse-trace-status-card"
+            className="rounded border border-[#313244] bg-[#11111b] p-3"
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-[10px] uppercase tracking-[0.16em] text-[#7f849c]">
+                  Trace dinamico
+                </div>
+                <div className="mt-2 text-sm font-semibold text-[#e5e7eb]">
+                  {traceStatusLabel}
+                </div>
+              </div>
+              <span
+                className={`rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${traceBadgeClassName}`}
+              >
+                {traceAvailable
+                  ? `${manifest.trace.executed_regions.length} regiao(oes) executada(s)`
+                  : "Sessao estendida opcional"}
+              </span>
+            </div>
+            <div className="mt-2 text-[10px] text-[#94a3b8]">
+              {manifest.trace.note || "Nenhuma sessao do emulador compativel foi usada nesta analise."}
             </div>
           </div>
 

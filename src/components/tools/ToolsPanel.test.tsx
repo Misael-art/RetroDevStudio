@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   readLegacyProjectFile: vi.fn(),
   reverseExplorerRead: vi.fn(),
   romAnalyze: vi.fn(),
+  romAnalyzeWithEmulatorTrace: vi.fn(),
   romDisassemble: vi.fn(),
   romSaveAnnotations: vi.fn(),
   patchCreateIps: vi.fn(),
@@ -57,6 +58,7 @@ vi.mock("../../core/ipc/toolsService", () => ({
   readLegacyProjectFile: mocks.readLegacyProjectFile,
   reverseExplorerRead: mocks.reverseExplorerRead,
   romAnalyze: mocks.romAnalyze,
+  romAnalyzeWithEmulatorTrace: mocks.romAnalyzeWithEmulatorTrace,
   romDisassemble: mocks.romDisassemble,
   romSaveAnnotations: mocks.romSaveAnnotations,
   patchCreateIps: mocks.patchCreateIps,
@@ -171,7 +173,7 @@ describe("ToolsPanel Asset Browser", () => {
       total_size: 0,
       rows: [],
     });
-    mocks.romAnalyze.mockResolvedValue({
+    const reverseManifestFixture = {
       ok: true,
       error: "",
       target: "megadrive",
@@ -208,9 +210,11 @@ describe("ToolsPanel Asset Browser", () => {
       call_graph: [{ from: 512, to: 768, kind: "call" }],
       logic_hints: [],
       annotations: [],
-      trace: { available: false, executed_regions: [], note: "future" },
+      trace: { available: false, executed_regions: [], note: "Trace dinamico indisponivel para esta ROM nesta sessao." },
       projection_status: { supported: false, status: "analysis_only", message: "future" },
-    });
+    };
+    mocks.romAnalyze.mockResolvedValue(reverseManifestFixture);
+    mocks.romAnalyzeWithEmulatorTrace.mockResolvedValue(reverseManifestFixture);
     mocks.romDisassemble.mockResolvedValue({
       ok: true,
       error: "",
@@ -513,9 +517,12 @@ describe("ToolsPanel Asset Browser", () => {
       await flush();
     });
 
-    expect(mocks.romAnalyze).toHaveBeenCalledWith("F:/roms/test.md");
+    expect(mocks.romAnalyzeWithEmulatorTrace).toHaveBeenCalledWith("F:/roms/test.md");
     expect(container.textContent).toContain("linear_rom");
     expect(container.textContent).toContain("RETRO TEST");
+    expect(
+      container.querySelector("[data-testid='reverse-trace-status-card']")?.textContent
+    ).toContain("Trace dinamico indisponivel para esta ROM nesta sessao.");
 
     await act(async () => {
       findButton(container, "Code").click();
