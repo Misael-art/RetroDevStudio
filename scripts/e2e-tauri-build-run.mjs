@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { access, readFile } from "node:fs/promises";
+import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -146,6 +146,7 @@ function parseArgs(argv) {
           "live-warning-sprites",
           "live-error",
           "live-stale",
+          "onboarding-shell",
         ].includes(
           value
         )
@@ -402,6 +403,14 @@ function buildLiveOverflowScenario(target, scenario) {
   };
 }
 
+function artifactTimestamp() {
+  return new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
+}
+
+async function ensureValidationDir() {
+  await mkdir(validationDir, { recursive: true });
+}
+
 async function pathExists(candidate) {
   if (!candidate) return false;
   try {
@@ -636,6 +645,100 @@ async function executeAsyncScript(sessionId, script, args = []) {
   return response.value;
 }
 
+async function readAutomationState(sessionId) {
+  return executeScript(
+    sessionId,
+    "return window.__RDS_E2E__?.getState?.() ?? null;"
+  );
+}
+
+async function fillInputBySelector(sessionId, selector, value) {
+  const result = await executeScript(
+    sessionId,
+    `
+      const input = document.querySelector(arguments[0]);
+      if (!(input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement)) {
+        return false;
+      }
+      const prototype =
+        input instanceof HTMLTextAreaElement
+          ? HTMLTextAreaElement.prototype
+          : HTMLInputElement.prototype;
+      const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
+      const setValue = descriptor?.set;
+      if (typeof setValue !== "function") {
+        return false;
+      }
+      input.focus();
+      setValue.call(input, arguments[1]);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    `,
+    [selector, value]
+  );
+
+  if (!result) {
+    fail(`Falha ao preencher input via seletor: ${selector}`);
+  }
+}
+
+async function clickButtonByText(sessionId, label) {
+  const result = await executeScript(
+    sessionId,
+    `
+      const normalizedLabel = String(arguments[0]).trim();
+      const button = Array.from(document.querySelectorAll("button")).find((candidate) => {
+        const text = candidate.textContent?.replace(/\\s+/g, " ").trim() ?? "";
+        return text === normalizedLabel;
+      });
+      if (!(button instanceof HTMLButtonElement) || button.disabled) {
+        return false;
+      }
+      button.click();
+      return true;
+    `,
+    [label]
+  );
+
+  if (!result) {
+    fail(`Botao nao encontrado ou desabilitado: ${label}`);
+  }
+}
+
+async function captureScreenshot(sessionId, filename) {
+  await ensureValidationDir();
+  const response = await webdriverRequest("GET", `/session/${sessionId}/screenshot`);
+  const base64 = response.value;
+  if (typeof base64 !== "string" || base64.length === 0) {
+    fail("WebDriver nao retornou screenshot valida.");
+  }
+
+  const outputPath = path.join(validationDir, filename);
+  await writeFile(outputPath, Buffer.from(base64, "base64"));
+  return outputPath;
+}
+
+async function cleanupTemporaryProject(projectDir) {
+  if (!projectDir) {
+    return true;
+  }
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      await rm(projectDir, { recursive: true, force: true });
+      if (!(await pathExists(projectDir))) {
+        return true;
+      }
+    } catch {
+      // Retry while the app/OS releases any remaining file handles.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  return !(await pathExists(projectDir));
+}
+
 async function setSceneDraft(sessionId, draft) {
   const result = await executeAsyncScript(
     sessionId,
@@ -819,6 +922,31 @@ async function getTitle(sessionId) {
   return response.value ?? "";
 }
 
+async function waitForOnboardingWizard(sessionId) {
+  return waitFor(
+    async () =>
+      executeScript(
+        sessionId,
+        `
+          const templateCard = document.querySelector('[data-testid="template-card-platformer_seed"]');
+          const nameInput = document.querySelector('input[placeholder="Nome do projeto"]');
+          const createButton = Array.from(document.querySelectorAll("button")).find((button) => {
+            const text = button.textContent?.replace(/\\s+/g, " ").trim() ?? "";
+            return text === "Criar Projeto";
+          });
+          return templateCard && nameInput && createButton
+            ? {
+                createDisabled: Boolean(createButton.disabled),
+              }
+            : false;
+        `
+      ),
+    30000,
+    "Wizard de primeiro uso nao ficou pronto com template e acoes visiveis.",
+    250
+  );
+}
+
 function summarizeDriverLogs(logs) {
   return logs.slice(-20).join("\n");
 }
@@ -982,12 +1110,17 @@ async function main() {
   );
   const emulatorActivationTimeoutMs = parsePositiveInteger(process.env.RDS_E2E_RUN_TIMEOUT_MS, 180000);
   const liveValidationTimeoutMs = parsePositiveInteger(process.env.RDS_E2E_LIVE_TIMEOUT_MS, 60000);
-  await assertPathExists(
-    options.project,
-    `Projeto de fixture nao encontrado: ${options.project}`
-  );
-  const projectMetadata = await readProjectMetadata(options.project);
-  if (!projectMetadata.name || !projectMetadata.target) {
+  const requiresExistingProject = options.scenario !== "onboarding-shell";
+  if (requiresExistingProject) {
+    await assertPathExists(
+      options.project,
+      `Projeto de fixture nao encontrado: ${options.project}`
+    );
+  }
+  const projectMetadata = requiresExistingProject
+    ? await readProjectMetadata(options.project)
+    : { name: "", target: "" };
+  if (requiresExistingProject && (!projectMetadata.name || !projectMetadata.target)) {
     fail(`project.rds invalido ou incompleto em ${options.project}`);
   }
 
@@ -1071,6 +1204,7 @@ async function main() {
   }
 
   let sessionId = "";
+  let temporaryProjectDir = "";
   try {
     await waitFor(
       async () => {
@@ -1116,6 +1250,113 @@ async function main() {
       "API de automacao do app nao ficou disponivel"
     );
 
+    if (options.scenario === "onboarding-shell") {
+      const artifactPrefix = `onboarding-shell-${artifactTimestamp()}`;
+      await waitForOnboardingWizard(sessionId);
+      const wizardScreenshot = await captureScreenshot(
+        sessionId,
+        `${artifactPrefix}-wizard.png`
+      );
+
+      const templateCard = await findElement(sessionId, "[data-testid='template-card-platformer_seed']");
+      await clickElement(sessionId, templateCard);
+      await waitForOnboardingWizard(sessionId);
+
+      const generatedProjectName = `E2E_Onboarding_${Date.now()}`;
+      await fillInputBySelector(
+        sessionId,
+        'input[placeholder="Nome do projeto"]',
+        generatedProjectName
+      );
+      await clickButtonByText(sessionId, "Criar Projeto");
+
+      const createdState = await waitFor(
+        async () => {
+          const state = await readAutomationState(sessionId);
+          return state?.activeProjectDir &&
+            state?.activeProjectName === generatedProjectName
+            ? state
+            : false;
+        },
+        45000,
+        "Projeto de onboarding nao foi criado e hidratado no shell.",
+        500
+      );
+
+      temporaryProjectDir = createdState.activeProjectDir;
+
+      const editorScreenshot = await captureScreenshot(
+        sessionId,
+        `${artifactPrefix}-editor.png`
+      );
+
+      const sceneTabVisible = await executeScript(
+        sessionId,
+        `
+          return Array.from(document.querySelectorAll("button")).some((button) => {
+            const text = button.textContent?.replace(/\\s+/g, " ").trim() ?? "";
+            return text === "Cena";
+          });
+        `
+      );
+      if (!sceneTabVisible) {
+        fail("Aba 'Cena' nao ficou visivel apos criar o projeto pelo wizard.");
+      }
+
+      await clickButtonByText(sessionId, "Camadas");
+      await waitFor(
+        async () =>
+          executeScript(
+            sessionId,
+            `
+              return Array.from(document.querySelectorAll("button")).some((button) => {
+                const text = button.textContent?.replace(/\\s+/g, " ").trim() ?? "";
+                return text === "+ Camada";
+              });
+            `
+          ),
+        15000,
+        "LayerPanel nao ficou visivel apos abrir a aba Camadas.",
+        250
+      );
+
+      const layerScreenshot = await captureScreenshot(
+        sessionId,
+        `${artifactPrefix}-layers.png`
+      );
+
+      const shellReady = await executeScript(
+        sessionId,
+        `
+          const bodyText = (document.body?.textContent ?? "").toLowerCase();
+          return (
+            bodyText.includes("build & run") &&
+            bodyText.includes("artist") &&
+            bodyText.includes("logic") &&
+            bodyText.includes("debug") &&
+            bodyText.includes("playtest") &&
+            bodyText.includes("scene workspace")
+          );
+        `
+      );
+      if (!shellReady) {
+        fail("Shell principal nao exibiu os affordances esperados apos o onboarding.");
+      }
+
+      const finalState = await readAutomationState(sessionId);
+      if (!finalState?.activeProjectDir || finalState.activeProjectName !== generatedProjectName) {
+        fail("Estado final do onboarding nao expôs o projeto criado na automacao.");
+      }
+
+      console.log("OK: Desktop Tauri onboarding/shell E2E passou.");
+      console.log(`Projeto criado: ${generatedProjectName}`);
+      console.log(`Diretorio temporario: ${temporaryProjectDir}`);
+      console.log(`Evidencias: ${wizardScreenshot}`);
+      console.log(`Evidencias: ${editorScreenshot}`);
+      console.log(`Evidencias: ${layerScreenshot}`);
+      return;
+    }
+
     const openResult = await executeAsyncScript(
       sessionId,
       `
@@ -1139,11 +1380,8 @@ async function main() {
 
     await waitFor(
       async () => {
-        const projectName = await executeScript(
-          sessionId,
-          "return document.querySelector('[data-testid=\"active-project-name\"]')?.textContent?.trim() ?? '';"
-        );
-        return projectName && projectName !== "Sem projeto";
+        const state = await readAutomationState(sessionId);
+        return state?.activeProjectDir && state.activeProjectName ? state : false;
       },
       15000,
       "Projeto nao apareceu na UI"
@@ -1583,6 +1821,14 @@ async function main() {
     }
     if (driverProcess) {
       driverProcess.kill();
+    }
+    if (temporaryProjectDir) {
+      const cleaned = await cleanupTemporaryProject(temporaryProjectDir);
+      if (!cleaned) {
+        console.warn(
+          `[cleanup] Nao foi possivel remover o projeto temporario criado pelo onboarding: ${temporaryProjectDir}`
+        );
+      }
     }
   }
 }

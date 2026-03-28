@@ -61,6 +61,13 @@
   - **Ruido residual ainda externo ao repo:** os warnings de `--localstorage-file` permanecem aparecendo no host Codex/Node atual, mas nao sao gerados por codigo do projeto e nao afetam o resultado da suite.
   - **Prova da rodada:** `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `scripts\\run-cargo-msvc.cmd clippy --manifest-path .\\src-tauri\\Cargo.toml -- -D warnings` e `scripts\\run-cargo-msvc.cmd test --manifest-path .\\src-tauri\\Cargo.toml --lib -- --nocapture --test-threads=1` ficaram verdes apos o ajuste.
 
+* **O que acabou de acontecer (2026-03-28 - QA desktop: onboarding e shell agora têm evidência automatizada real):**
+  - **Runner desktop reaproveitado sem fluxo paralelo:** `scripts/e2e-tauri-build-run.mjs` ganhou o cenario `onboarding-shell`, usando o mesmo `tauri-driver`/`msedgedriver` canonico para validar a galeria inicial, criacao de projeto por template, shell principal carregado e aba `Camadas`.
+  - **Sem inventar automacao fora do app:** o cenario usa apenas a UI real (`template-card-platformer_seed`, input `Nome do projeto`, botao `Criar Projeto`, affordances do shell e `+ Camada`) e o estado de automacao ja exposto por `window.__RDS_E2E__`, sem novo IPC nem alteracao no pipeline canonico do produto.
+  - **Evidencia material gerada em disco:** a rodada salva screenshots em `src-tauri/target-test/validation/` para wizard, shell/editor e `LayerPanel`, ajudando a reduzir a dependencia de relato manual nos primeiros passos do RC.
+  - **Higiene do host preservada:** o projeto criado pela automacao recebe nome unico e e removido ao fim do cenario, evitando sujeira permanente no diretório automatico de projetos do host.
+  - **Escopo honesto mantido:** isso nao substitui o QA manual A-F; apenas reduz o bloco de incerteza no primeiro uso/shell e cria uma prova repetivel para o onboarding antes da promocao institucional.
+
 * **O que acabou de acontecer (2026-03-27 - Hardening do setup nativo: precheck no Build All):**
   - **Fluxo publico alinhado:** `Runtime Setup` agora aplica o mesmo precheck conservador de dependencias antes de `Build All Targets`, em vez de deixar o build multi-target cair diretamente no backend com ambiente incompleto.
   - **Dependencias corretas para build multi-target:** o painel passou a exigir `JDK`, `SGDK` e `PVSnesLib` antes de compilar Mega Drive + SNES em sequencia, sem exigir cores Libretro para um fluxo que apenas gera ROMs.
