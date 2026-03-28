@@ -51,6 +51,14 @@ export interface UndoEntry {
 }
 
 export type EditorMode = "select" | "paint" | "erase" | "collision";
+export type EditorWorkspace =
+  | "explorer"
+  | "scene"
+  | "game"
+  | "logic"
+  | "retrofx"
+  | "artstudio"
+  | "debug";
 
 export interface ActiveBrush {
   kind: "prefab" | "tile";
@@ -67,6 +75,7 @@ export interface StoreState {
   selectedEntityId: string | null;
   /** ID da camada ativa no LayerPanel. null = sem camada selecionada. */
   activeLayerId: string | null;
+  activeWorkspace: EditorWorkspace;
   activeViewportTab: string;
   consoleEntries: ConsoleEntry[];
   consoleVisible: boolean;
@@ -96,6 +105,7 @@ export interface StoreActions {
   setEmulatorLoaded: (loaded: boolean) => void;
   setSelectedEntityId: (id: string | null) => void;
   setActiveLayerId: (id: string | null) => void;
+  setActiveWorkspace: (workspace: EditorWorkspace) => void;
   /** Cria uma nova camada na cena ativa. */
   createLayer: (name: string, kind: string) => void;
   /** Remove uma camada pelo id. Entidades da camada ficam sem camada atribuída. */
@@ -313,6 +323,8 @@ export const useEditorStore = create<EditorState>((set) => ({
   selectedEntityId: null,
   setSelectedEntityId: (id) => set({ selectedEntityId: id }),
 
+  activeWorkspace: "scene",
+  setActiveWorkspace: (workspace) => set({ activeWorkspace: workspace }),
   activeViewportTab: "scene",
   setActiveViewportTab: (id) => set({ activeViewportTab: id }),
 

@@ -43,6 +43,11 @@ const mocks = vi.hoisted(() => ({
   detectRomDependency: vi.fn(),
   pollProjectAssetChanges: vi.fn(),
   listenToProjectAssetChanges: vi.fn(),
+  getSceneData: vi.fn(),
+  listScenes: vi.fn(),
+  switchScene: vi.fn(),
+  listProjectAssets: vi.fn(),
+  readLegacyProjectFile: vi.fn(),
 }));
 
 vi.mock("./components/common/Console", () => ({
@@ -152,10 +157,18 @@ vi.mock("./core/scenePersistence", () => ({
   reloadSceneFromDisk: mocks.reloadSceneFromDisk,
 }));
 
+vi.mock("./core/ipc/sceneService", () => ({
+  getSceneData: mocks.getSceneData,
+  listScenes: mocks.listScenes,
+  switchScene: mocks.switchScene,
+}));
+
 vi.mock("./core/ipc/toolsService", () => ({
   getThirdPartyStatus: mocks.getThirdPartyStatus,
   installThirdPartyDependency: mocks.installThirdPartyDependency,
   detectRomDependency: mocks.detectRomDependency,
+  listProjectAssets: mocks.listProjectAssets,
+  readLegacyProjectFile: mocks.readLegacyProjectFile,
 }));
 
 vi.mock("./core/ipc/projectWatcherService", () => ({
@@ -416,6 +429,7 @@ describe("App build flow", () => {
       emulatorLoaded: false,
       selectedEntityId: null,
       activeViewportTab: "scene",
+      activeWorkspace: "scene",
       hwStatus: null,
       sceneRevision: 1,
       hwValidationState: "idle",
@@ -433,6 +447,15 @@ describe("App build flow", () => {
         display_name: "Main Scene",
         entities: [],
         background_layers: [],
+      },
+      projectSourceKind: "external_sgdk",
+      projectLegacyIndex: {
+        host_root: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy/legacy",
+        source_files: ["src/main.c"],
+        header_files: ["inc/main.h"],
+        manifest_files: ["res/gfx.res"],
+        resource_files: ["assets/hero.png"],
+        output_files: [],
       },
       emulPaused: false,
       consoleEntries: [],
@@ -452,6 +475,85 @@ describe("App build flow", () => {
         entities: [],
         background_layers: [],
       },
+    });
+    mocks.getSceneData.mockResolvedValue({
+      ok: true,
+      error: "",
+      scene_json: JSON.stringify({
+        scene_id: "main_scene",
+        display_name: "Main Scene",
+        entities: [],
+        background_layers: [],
+      }),
+      project_name: "Mega Dummy",
+      target: "megadrive",
+      scene_path: "scenes/main.json",
+      source_kind: "external_sgdk",
+      legacy_sgdk_index: {
+        host_root: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy/legacy",
+        source_files: ["src/main.c"],
+        header_files: ["inc/main.h"],
+        manifest_files: ["res/gfx.res"],
+        resource_files: ["assets/hero.png"],
+        output_files: [],
+      },
+    });
+    mocks.listScenes.mockResolvedValue([
+      {
+        path: "scenes/main.json",
+        scene_id: "main_scene",
+        display_name: "Main Scene",
+      },
+      {
+        path: "scenes/boss.json",
+        scene_id: "boss_scene",
+        display_name: "Boss Scene",
+      },
+    ]);
+    mocks.switchScene.mockResolvedValue({
+      ok: true,
+      error: "",
+      scene_json: JSON.stringify({
+        scene_id: "boss_scene",
+        display_name: "Boss Scene",
+        entities: [],
+        background_layers: [],
+      }),
+      project_name: "Mega Dummy",
+      target: "megadrive",
+      scene_path: "scenes/boss.json",
+      source_kind: "external_sgdk",
+      legacy_sgdk_index: {
+        host_root: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy/legacy",
+        source_files: ["src/main.c"],
+        header_files: ["inc/main.h"],
+        manifest_files: ["res/gfx.res"],
+        resource_files: ["assets/hero.png"],
+        output_files: [],
+      },
+    });
+    mocks.listProjectAssets.mockResolvedValue([
+      {
+        relative_path: "assets/sprites/hero.png",
+        absolute_path:
+          "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy/assets/sprites/hero.png",
+        kind: "image",
+      },
+      {
+        relative_path: "assets/audio/jump.wav",
+        absolute_path:
+          "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy/assets/audio/jump.wav",
+        kind: "audio",
+      },
+    ]);
+    mocks.readLegacyProjectFile.mockResolvedValue({
+      relative_path: "src/main.c",
+      absolute_path:
+        "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy/legacy/src/main.c",
+      content: "int main(void) { return 0; }",
+      previewable: true,
+      readonly: true,
+      note: "Arquivo legado somente leitura.",
     });
     mocks.persistActiveScene.mockResolvedValue(true);
     mocks.reloadSceneFromDisk.mockResolvedValue(true);
@@ -652,6 +754,7 @@ describe("App build flow", () => {
     expect(mocks.buildProject).toHaveBeenCalledTimes(1);
     expect(mocks.emulatorLoadRom).toHaveBeenCalledWith("F:/Temp/game.md");
     expect(mocks.startFrameLoop).toHaveBeenCalledTimes(1);
+    expect(useEditorStore.getState().activeWorkspace).toBe("game");
     expect(useEditorStore.getState().activeViewportTab).toBe("game");
     expect(useEditorStore.getState().emulatorLoaded).toBe(true);
     expect(container.textContent).toContain("Emulador ativo");
@@ -850,7 +953,7 @@ describe("App build flow", () => {
   it("shows a contextual guide in the scene workspace and opens the asset browser from it", async () => {
     const guide = container.querySelector("[data-testid='workspace-guide']");
 
-    expect(guide?.textContent).toContain("Scene Workspace");
+    expect(guide?.textContent).toContain("Scene Editor");
     expect(guide?.textContent).toContain("Hierarchy fica a esquerda");
 
     await act(async () => {
@@ -863,6 +966,26 @@ describe("App build flow", () => {
     expect(toolsPanel?.getAttribute("data-active")).toBe("assets");
     expect(toolsPanel?.getAttribute("data-workspace")).toBe("editing");
     expect(toolsPanel?.getAttribute("data-advanced")).toBe("false");
+  });
+
+  it("opens the unified top bar menu and reaches the About dialog", async () => {
+    await act(async () => {
+      findButton(container, "Menu").click();
+      await flush();
+    });
+
+    const menuButton = container.querySelector("[data-testid='menu-action-about']");
+    expect(menuButton).toBeInstanceOf(HTMLButtonElement);
+    expect(container.querySelector("[data-testid='unified-topbar-breadcrumbs']")?.textContent).toContain(
+      "Mega Dummy"
+    );
+
+    await act(async () => {
+      (menuButton as HTMLButtonElement).click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("Tauri 2 · React 19 · Rust");
   });
 
   it("updates the contextual guide for the logic workspace and opens the contextual palette", async () => {
@@ -887,6 +1010,119 @@ describe("App build flow", () => {
     expect(toolsPanel?.getAttribute("data-active")).toBe("palette");
     expect(toolsPanel?.getAttribute("data-workspace")).toBe("editing");
     expect(toolsPanel?.getAttribute("data-advanced")).toBe("false");
+  });
+
+  it("switches workspaces from the activity bar and updates shell routing", async () => {
+    const logicButton = container.querySelector(
+      "[data-testid='workspace-rail-logic']"
+    ) as HTMLButtonElement | null;
+    const artButton = container.querySelector(
+      "[data-testid='workspace-rail-artstudio']"
+    ) as HTMLButtonElement | null;
+
+    expect(logicButton).toBeInstanceOf(HTMLButtonElement);
+    expect(artButton).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      logicButton?.click();
+      await flush();
+    });
+
+    expect(useEditorStore.getState().activeWorkspace).toBe("logic");
+    expect(useEditorStore.getState().activeViewportTab).toBe("logic");
+    expect(container.querySelector("[data-testid='workspace-guide']")?.textContent).toContain(
+      "Logic Workspace"
+    );
+
+    await act(async () => {
+      artButton?.click();
+      await flush();
+    });
+
+    expect(useEditorStore.getState().activeWorkspace).toBe("artstudio");
+    expect(useEditorStore.getState().activeViewportTab).toBe("artstudio");
+    expect(container.querySelector("[data-testid='workspace-guide']")?.textContent).toContain(
+      "Art Workspace"
+    );
+  });
+
+  it("renders the explorer workspace from the activity bar with synthesized project data", async () => {
+    const explorerButton = container.querySelector(
+      "[data-testid='workspace-rail-explorer']"
+    ) as HTMLButtonElement | null;
+
+    expect(explorerButton).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      explorerButton?.click();
+      await flush();
+      await flush();
+    });
+
+    expect(useEditorStore.getState().activeWorkspace).toBe("explorer");
+    expect(useEditorStore.getState().activeViewportTab).toBe("scene");
+    expect(container.textContent).toContain("Workspace contextual de arquivos");
+    expect(container.textContent).toContain("Cenas 2");
+    expect(container.textContent).toContain("hero.png");
+    expect(container.textContent).toContain("src/main.c");
+  });
+
+  it("keeps the game view accessible after moving through the explorer workspace", async () => {
+    const explorerButton = container.querySelector(
+      "[data-testid='workspace-rail-explorer']"
+    ) as HTMLButtonElement | null;
+    const gameButton = container.querySelector(
+      "[data-testid='workspace-rail-game']"
+    ) as HTMLButtonElement | null;
+
+    await act(async () => {
+      findButton(container, "Build & Run").click();
+      await flush();
+      await flush();
+    });
+
+    expect(useEditorStore.getState().activeWorkspace).toBe("game");
+    expect(useEditorStore.getState().emulatorLoaded).toBe(true);
+    const stopCallsBeforeExplorer = mocks.emulatorStop.mock.calls.length;
+
+    await act(async () => {
+      explorerButton?.click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.emulatorStop).toHaveBeenCalledTimes(stopCallsBeforeExplorer);
+    expect(useEditorStore.getState().activeWorkspace).toBe("explorer");
+    expect(useEditorStore.getState().emulatorLoaded).toBe(true);
+
+    await act(async () => {
+      gameButton?.click();
+      await flush();
+      await flush();
+    });
+
+    expect(useEditorStore.getState().activeWorkspace).toBe("game");
+    expect(useEditorStore.getState().activeViewportTab).toBe("game");
+    expect(useEditorStore.getState().emulatorLoaded).toBe(true);
+  });
+
+  it("switches to the game workspace when Play is pressed with an emulator session ready", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeWorkspace: "scene",
+        activeViewportTab: "scene",
+        emulatorLoaded: true,
+      });
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, "Play").click();
+      await flush();
+    });
+
+    expect(useEditorStore.getState().activeWorkspace).toBe("game");
+    expect(useEditorStore.getState().activeViewportTab).toBe("game");
   });
 
   it("asks the viewport to resolve sprite assets into preview URLs", async () => {

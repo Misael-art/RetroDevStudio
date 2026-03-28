@@ -11,7 +11,6 @@ import {
   emulatorSendInput,
   emulatorStartRecording,
   emulatorStopRecording,
-  emulatorStop,
   keyToJoypad,
   listenToAudioStream,
   startFrameLoop,
@@ -917,10 +916,9 @@ export default function ViewportPanel({
     setEmulatorActive(false);
   }, []);
 
-  const shutdownEmulator = useCallback(() => {
+  const detachViewportRuntime = useCallback(() => {
     stopFrameLoop();
     disposeAudioPlayback();
-    emulatorStop().catch(() => {});
   }, [disposeAudioPlayback, stopFrameLoop]);
 
   const showHotReloadNotice = useCallback((message: string) => {
@@ -1194,9 +1192,9 @@ export default function ViewportPanel({
 
   useEffect(() => {
     return () => {
-      shutdownEmulator();
+      detachViewportRuntime();
     };
-  }, [shutdownEmulator]);
+  }, [detachViewportRuntime]);
 
   useEffect(() => {
     if (activeViewportTab !== "game") return;

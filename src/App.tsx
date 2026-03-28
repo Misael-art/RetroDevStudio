@@ -8,6 +8,10 @@ import {
 } from "react-resizable-panels";
 import Console from "./components/common/Console";
 import LayoutSplitter from "./components/common/LayoutSplitter";
+import UnifiedTopBar, {
+  type UnifiedTopBarSection,
+} from "./components/common/UnifiedTopBar";
+import ExplorerWorkspace from "./components/explorer/ExplorerWorkspace";
 import HierarchyPanel from "./components/hierarchy/HierarchyPanel";
 import LayerPanel from "./components/hierarchy/LayerPanel";
 import InspectorPanel from "./components/inspector/InspectorPanel";
@@ -37,7 +41,10 @@ import {
   type Entity,
   type Scene,
 } from "./core/ipc/sceneService";
-import { useEditorStore } from "./core/store/editorStore";
+import {
+  useEditorStore,
+  type EditorWorkspace,
+} from "./core/store/editorStore";
 import {
   hydrateSceneResult,
   persistActiveScene,
@@ -97,7 +104,6 @@ function ToolbarButton({
   );
 }
 
-type ShellWorkspace = "scene" | "game" | "logic" | "retrofx" | "artstudio" | "debug";
 type LayoutPresetId = "artist" | "logic" | "debug" | "playtest";
 type LayoutMap = {
   left: number;
@@ -108,11 +114,12 @@ type LayoutMap = {
 const LAYOUT_STORAGE_KEY = "retrodev-shell-saved-layout";
 
 const WORKSPACE_ITEMS: {
-  id: ShellWorkspace;
+  id: EditorWorkspace;
   label: string;
   icon: string;
   description: string;
 }[] = [
+  { id: "explorer", label: "Explorer", icon: "EX", description: "Arquivos, assets e cenas" },
   { id: "scene", label: "Scene", icon: "SC", description: "Composicao e edicao da cena" },
   { id: "game", label: "Game", icon: "GM", description: "Playtest e runtime" },
   { id: "logic", label: "Logic", icon: "LG", description: "Fluxo visual e scripting" },
@@ -165,6 +172,7 @@ function WorkspaceRailButton({
   title,
   onClick,
   accent = "default",
+  testId,
 }: {
   icon: string;
   label: string;
@@ -172,6 +180,7 @@ function WorkspaceRailButton({
   title: string;
   onClick: () => void;
   accent?: "default" | "debug";
+  testId?: string;
 }) {
   const activeTone =
     accent === "debug"
@@ -182,6 +191,7 @@ function WorkspaceRailButton({
     <button
       type="button"
       title={title}
+      data-testid={testId}
       onClick={onClick}
       className={`group flex w-full flex-col items-center gap-1 rounded-2xl border px-2 py-2 text-center transition-colors ${
         active
@@ -462,6 +472,7 @@ export default function App() {
     hwValidationState,
     activeProjectDir,
     activeProjectName,
+    activeScenePath,
     setActiveProject,
     activeTarget,
     setActiveTarget,
@@ -469,6 +480,8 @@ export default function App() {
     setEmulatorLoaded,
     setActiveScene,
     setActiveScenePath,
+    activeWorkspace,
+    setActiveWorkspace,
     activeViewportTab,
     setActiveViewportTab,
     setSelectedEntityId,
@@ -490,7 +503,6 @@ export default function App() {
   const [toolPanelActive, setToolPanelActive] = useState<ToolTab>("setup");
   const [toolPanelWorkspace, setToolPanelWorkspace] = useState<ToolWorkspace>("editing");
   const [toolPanelShowAdvanced, setToolPanelShowAdvanced] = useState(false);
-  const [activeWorkspace, setActiveWorkspace] = useState<ShellWorkspace>("scene");
   const [leftPanelTab, setLeftPanelTab] = useState<"scene" | "layers">("scene");
   const [focusedShell, setFocusedShell] = useState(false);
   const [layoutPreset, setLayoutPreset] = useState<LayoutPresetId>("artist");
@@ -512,6 +524,7 @@ export default function App() {
   const [showAbout, setShowAbout] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [copiedEntity, setCopiedEntity] = useState<Entity | null>(null);
+  const [explorerBreadcrumb, setExplorerBreadcrumb] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const buildInFlightRef = useRef(false);
   const panelGroupRef = useRef<GroupImperativeHandle | null>(null);
@@ -577,14 +590,6 @@ export default function App() {
     window.setTimeout(() => {
       applyingLayoutRef.current = false;
     }, 0);
-  }
-
-  function applyLayoutPreset(preset: LayoutPresetId) {
-    setFocusedShell(false);
-    setLayoutPreset(preset);
-    const nextLayout = getPresetLayout(preset, shellWidth);
-    lastNonFocusLayoutRef.current = nextLayout;
-    applyShellLayout(nextLayout);
   }
 
   function toggleFocusMode() {
@@ -683,7 +688,7 @@ export default function App() {
   }, [activeWorkspace, focusedShell]);
 
   useEffect(() => {
-    if (activeWorkspace === "debug") {
+    if (activeWorkspace === "debug" || activeWorkspace === "explorer") {
       return;
     }
 
@@ -696,7 +701,13 @@ export default function App() {
     ) {
       setActiveWorkspace(activeViewportTab);
     }
-  }, [activeViewportTab, activeWorkspace]);
+  }, [activeViewportTab, activeWorkspace, setActiveWorkspace]);
+
+  useEffect(() => {
+    if (activeWorkspace !== "explorer") {
+      setExplorerBreadcrumb(null);
+    }
+  }, [activeWorkspace]);
 
   useEffect(() => {
     if (showProjectWizard && inputRef.current) {
@@ -895,6 +906,92 @@ export default function App() {
     buildLiveIndicator?.label === "ERRO LIVE" ? buildLiveIndicator.detail : null;
   const liveBuildBlocked =
     hwValidationState === "fresh" && Boolean(hwStatus && hwStatus.errors.length > 0);
+  const breadcrumbItems = [
+    activeProjectName || "Sem projeto",
+    activeWorkspace === "explorer"
+      ? "Explorer"
+      : activeScenePath || workspaceMeta.label,
+    ...(activeWorkspace === "explorer" && explorerBreadcrumb ? [explorerBreadcrumb] : []),
+  ];
+  const topBarMenuSections: UnifiedTopBarSection[] = [
+    {
+      title: "Projeto",
+      actions: [
+        {
+          label: "Novo",
+          onClick: () => setShowProjectWizard(true),
+          accent: "primary",
+        },
+        {
+          label: "Abrir",
+          onClick: () => void handleOpenProject(),
+        },
+        {
+          label: creatingProject ? "Importando..." : "Importar Externo",
+          onClick: () => void handleImportExternalProject(),
+          disabled: creatingProject || templatesLoading,
+        },
+        {
+          label: "Salvar",
+          onClick: () => void handleSaveScene(),
+          disabled: !activeProjectDir,
+        },
+        {
+          label: "Fechar",
+          onClick: () => void handleCloseProject(),
+          disabled: !activeProjectDir,
+          accent: "danger",
+        },
+      ],
+    },
+    {
+      title: "Ferramentas",
+      actions: [
+        {
+          label: "Validar",
+          onClick: () => void handleValidate(),
+          disabled: !activeProjectDir,
+        },
+        {
+          label: "Gerar C",
+          onClick: () => void handleGenerateC(),
+          disabled: !activeProjectDir,
+        },
+        {
+          label: "Copiar",
+          onClick: handleCopyEntity,
+          disabled: !selectedEntityId || selectedEntityId.startsWith("layer::"),
+        },
+        {
+          label: "Colar",
+          onClick: () => void handlePasteEntity(),
+          disabled: !copiedEntity || !activeProjectDir,
+        },
+      ],
+    },
+    {
+      title: "Layout",
+      actions: [
+        {
+          label: "Salvar layout",
+          onClick: saveCurrentLayout,
+        },
+        {
+          label: "Restaurar layout",
+          onClick: restoreSavedLayout,
+        },
+        {
+          label: "Atalhos",
+          onClick: () => setShowShortcuts(true),
+        },
+        {
+          label: "Sobre",
+          onClick: () => setShowAbout(true),
+          testId: "menu-action-about",
+        },
+      ],
+    },
+  ];
 
   async function resetEmulatorSession(switchToScene = false) {
     try {
@@ -908,6 +1005,7 @@ export default function App() {
 
     if (switchToScene) {
       setActiveViewportTab("scene");
+      setActiveWorkspace("scene");
     }
   }
 
@@ -1467,6 +1565,7 @@ export default function App() {
       logMessage("success", "ROM carregada no emulador.");
       setEmulPaused(false);
       setActiveViewportTab("game");
+      setActiveWorkspace("game");
     } catch (error) {
       logMessage("error", `[Build] Falha inesperada: ${describeError(error)}`);
     } finally {
@@ -1494,7 +1593,7 @@ export default function App() {
     logMessage("info", "Projeto fechado.");
   }
 
-  function handleWorkspaceSelect(workspace: ShellWorkspace) {
+  function handleWorkspaceSelect(workspace: EditorWorkspace) {
     setActiveWorkspace(workspace);
 
     if (workspace === "debug") {
@@ -1502,8 +1601,13 @@ export default function App() {
       return;
     }
 
-    setActiveViewportTab(workspace);
     setRightPanelMode("inspector");
+    if (workspace === "explorer") {
+      setActiveViewportTab("scene");
+      return;
+    }
+
+    setActiveViewportTab(workspace);
 
     if (workspace === "scene") {
       setLeftPanelTab("scene");
@@ -1531,6 +1635,33 @@ export default function App() {
                   tone: "info" as const,
                   label: `Painel direito atual: ${rightPanelMode === "tools" ? "Tools" : "Inspector"}.`,
                 };
+
+        if (activeWorkspace === "explorer") {
+          return {
+            eyebrow: "Explorer Workspace",
+            title: "Navegue pelas cenas, assets canonicos e arquivos do host legado sem sair do shell.",
+            summary:
+              "A arvore sintetizada usa apenas as APIs atuais do projeto e prepara o caminho para um explorer completo depois, sem mudar contratos do backend nesta wave.",
+            detail:
+              "Escolha uma cena para ativar, revise assets do projeto e abra o Scene Editor quando quiser voltar para a autoria no canvas.",
+            signal: sharedSignal,
+            actions: [
+              {
+                label: "Abrir Scene Editor",
+                onClick: () => handleWorkspaceSelect("scene"),
+                accent: "primary",
+              },
+              {
+                label: "Abrir Asset Browser",
+                onClick: () => openToolsWorkspace("assets", "editing"),
+              },
+              {
+                label: "Abrir Inspector",
+                onClick: () => setRightPanelMode("inspector"),
+              },
+            ],
+          } satisfies WorkspaceGuide;
+        }
 
         if (activeWorkspace === "logic") {
           return {
@@ -1623,9 +1754,9 @@ export default function App() {
             eyebrow: "Art Workspace",
             title: "Prepare sprites e sequencias antes de voltar para a cena.",
             summary:
-              "ArtStudio concentra slicing, preview e apply, enquanto o Asset Browser continua sendo o ponto de entrada para os assets canonicos do projeto.",
+              "ArtStudio agora organiza stage, timeline e inspector no proprio workspace, enquanto o Asset Browser continua sendo o ponto de entrada para os assets canonicos do projeto.",
             detail:
-              "Abra o Asset Browser para escolher a origem certa, use o Inspector para confirmar a entidade alvo e rode no emulador quando quiser checar o resultado.",
+              "Abra o Asset Browser para escolher a origem certa, revise a sequencia no inspector contextual do workspace e rode no emulador quando quiser checar o resultado.",
             signal: sharedSignal,
             actions: [
               {
@@ -1676,7 +1807,7 @@ export default function App() {
         }
 
         return {
-          eyebrow: "Scene Workspace",
+          eyebrow: "Scene Editor",
           title: "Monte a cena e refine entidades sem sair do canvas.",
           summary:
             "Hierarchy fica a esquerda, viewport no centro e o painel direito alterna entre Inspector e Tools para manter o fluxo de autoria mais curto.",
@@ -2154,230 +2285,171 @@ export default function App() {
         </div>
       )}
 
-      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[#313244] bg-[linear-gradient(180deg,#181825,#111827)] px-4 py-3">
-        <div className="mr-4">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#cba6f7]">
-            RetroDev Studio
-          </div>
-          <div className="mt-1 text-xs text-[#94a3b8]">
-            Workspace adaptativo para autoria, playtest e debug.
-          </div>
-        </div>
-        <ToolbarButton label="Novo" onClick={() => setShowProjectWizard(true)} />
-        <ToolbarButton label="Abrir" onClick={() => void handleOpenProject()} />
-        <ToolbarButton
-          label="Salvar"
-          onClick={() => void handleSaveScene()}
-          disabled={!activeProjectDir}
-          accent="primary"
-        />
-        <ToolbarButton
-          label="Build & Run"
-          onClick={() => void handleBuildAndRun()}
-          disabled={building || !activeProjectDir || liveBuildBlocked}
-          accent="success"
-          testId="toolbar-build-run"
-          title={liveBuildBlocked ? buildDisabledReason ?? undefined : buildWarningSummary ?? undefined}
-          describedBy={liveBuildBlocked ? "build-disabled-reason" : undefined}
-        />
-        <ToolbarButton
-          label="Play"
-          onClick={() => void handlePlay()}
-          disabled={!activeProjectDir}
-          accent="default"
-        />
-        <ToolbarButton
-          label="Stop"
-          onClick={() => void handleEmulatorStop()}
-          disabled={!emulatorLoaded}
-          accent="danger"
-        />
-      </header>
-
-      <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-[#313244] bg-[#11111b] px-4 py-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <span
-            data-testid="active-project-name"
-            className="max-w-40 truncate rounded-full border border-[#313244] bg-[#181825] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[#cdd6f4]"
-          >
-            {activeProjectName || "Sem projeto"}
-          </span>
-          <div className="flex overflow-hidden rounded-full border border-[#313244] bg-[#0b1020]">
-            {(["megadrive", "snes"] as const).map((target) => (
-              <button
-                key={target}
-                onClick={() => void handleSwitchTarget(target)}
-                disabled={!activeProjectDir || activeTarget === target}
-                className={`px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] ${
-                  activeTarget === target
-                    ? target === "megadrive"
-                      ? "bg-[#a6e3a1] text-[#1e1e2e]"
-                      : "bg-[#89b4fa] text-[#1e1e2e]"
-                    : "text-[#7f849c] disabled:cursor-not-allowed"
-                }`}
-              >
-                {target === "megadrive" ? "MD" : "SNES"}
-              </button>
-            ))}
-          </div>
-          {buildLiveIndicator && (
-            <span
-              data-testid="build-live-state"
-              className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${
-                buildLiveIndicator.tone === "error"
-                  ? "bg-[#f38ba8]/15 text-[#f38ba8]"
-                  : buildLiveIndicator.tone === "warn"
-                    ? "bg-[#fab387]/15 text-[#fab387]"
-                    : buildLiveIndicator.tone === "info"
-                      ? "bg-[#89b4fa]/15 text-[#89b4fa]"
-                      : "bg-[#a6e3a1]/15 text-[#a6e3a1]"
-              }`}
-              title={buildLiveIndicator.detail}
-            >
-              {buildLiveIndicator.label}
-            </span>
-          )}
-          {liveBuildBlocked && buildDisabledReason && (
-            <span
-              id="build-disabled-reason"
-              data-testid="build-disabled-reason"
-              aria-live="polite"
-              className="max-w-52 truncate text-[10px] text-[#f38ba8]"
-              title={buildDisabledReason}
-            >
-              {buildDisabledReason}
-            </span>
-          )}
-          {!liveBuildBlocked && buildWarningSummary && (
-            <span
-              data-testid="build-warning-summary"
-              aria-live="polite"
-              className="max-w-52 truncate text-[10px] text-[#fab387]"
-              title={buildWarningSummary}
-            >
-              {buildWarningSummary}
-            </span>
-          )}
-          {!liveBuildBlocked && liveBuildErrorSummary && (
-            <span
-              data-testid="build-live-error-summary"
-              aria-live="polite"
-              className="max-w-52 truncate text-[10px] text-[#f38ba8]"
-              title={liveBuildErrorSummary}
-            >
-              Live com falha: {liveBuildErrorSummary}
-            </span>
-          )}
-          {!liveBuildBlocked &&
-            !buildWarningSummary &&
-            !liveBuildErrorSummary &&
-            liveBuildPendingSummary && (
+      <UnifiedTopBar
+        appName="RetroDev Studio"
+        appTagline="Workspace adaptativo para autoria, playtest e debug."
+        breadcrumbs={breadcrumbItems}
+        menuSections={topBarMenuSections}
+        centerContent={
+          <>
+            <div className="flex overflow-hidden rounded-full border border-[#313244] bg-[#0b1020]">
+              {(["megadrive", "snes"] as const).map((target) => (
+                <button
+                  key={target}
+                  onClick={() => void handleSwitchTarget(target)}
+                  disabled={!activeProjectDir || activeTarget === target}
+                  className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] transition-colors ${
+                    activeTarget === target
+                      ? target === "megadrive"
+                        ? "bg-[#a6e3a1] text-[#1e1e2e]"
+                        : "bg-[#89b4fa] text-[#1e1e2e]"
+                      : "text-[#7f849c] hover:bg-[#111827] disabled:cursor-not-allowed"
+                  }`}
+                >
+                  {target === "megadrive" ? "MD" : "SNES"}
+                </button>
+              ))}
+            </div>
+            <ToolbarButton
+              label="Build & Run"
+              onClick={() => void handleBuildAndRun()}
+              disabled={building || !activeProjectDir || liveBuildBlocked}
+              accent="success"
+              testId="toolbar-build-run"
+              title={liveBuildBlocked ? buildDisabledReason ?? undefined : buildWarningSummary ?? undefined}
+              describedBy={liveBuildBlocked ? "build-disabled-reason" : undefined}
+            />
+            <ToolbarButton
+              label="Play"
+              onClick={() => void handlePlay()}
+              disabled={!activeProjectDir}
+            />
+            <ToolbarButton
+              label="Stop"
+              onClick={() => void handleEmulatorStop()}
+              disabled={!emulatorLoaded}
+              accent="danger"
+            />
+            {buildLiveIndicator && (
               <span
-                data-testid="build-live-pending-summary"
-                aria-live="polite"
-                className="max-w-52 truncate text-[10px] text-[#89b4fa]"
-                title={liveBuildPendingSummary}
+                data-testid="build-live-state"
+                className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${
+                  buildLiveIndicator.tone === "error"
+                    ? "bg-[#f38ba8]/15 text-[#f38ba8]"
+                    : buildLiveIndicator.tone === "warn"
+                      ? "bg-[#fab387]/15 text-[#fab387]"
+                      : buildLiveIndicator.tone === "info"
+                        ? "bg-[#89b4fa]/15 text-[#89b4fa]"
+                        : "bg-[#a6e3a1]/15 text-[#a6e3a1]"
+                }`}
+                title={buildLiveIndicator.detail}
               >
-                Live em analise...
+                {buildLiveIndicator.label}
               </span>
             )}
-          {buildLiveIndicator?.label === "DESATUAL." && (
-            <>
+            {liveBuildBlocked && buildDisabledReason && (
               <span
-                data-testid="build-stale-hint"
-                className="max-w-52 truncate text-[10px] text-[#89b4fa]"
-                title="Edite a cena para acionar a revalidacao automatica ou use Revalidar agora."
+                id="build-disabled-reason"
+                data-testid="build-disabled-reason"
+                aria-live="polite"
+                className="max-w-52 truncate text-[10px] text-[#f38ba8]"
+                title={buildDisabledReason}
               >
-                Edite a cena para revalidar
+                {buildDisabledReason}
               </span>
-              <ToolbarButton
-                label="Revalidar agora"
-                onClick={handleRevalidateLiveSnapshot}
-                testId="build-stale-revalidate"
-              />
-            </>
-          )}
-        </div>
-
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          {hwStatus && hwStatus.vram_limit > 0 && (
-            <ToolbarVramBudget
-              used={hwStatus.vram_used}
-              limit={hwStatus.vram_limit}
-              hasErrors={hwStatus.errors.length > 0}
-              hasWarnings={hwStatus.warnings.length > 0}
-            />
-          )}
-          {hwStatus && hwStatus.scanline_sprite_limit > 0 && (
-            <ToolbarScanlineBudget
-              peak={hwStatus.scanline_sprite_peak}
-              limit={hwStatus.scanline_sprite_limit}
-            />
-          )}
-          {hwStatus && hwStatus.palette_banks_limit > 0 && (
-            <ToolbarPaletteBudget
-              used={hwStatus.palette_banks_used}
-              limit={hwStatus.palette_banks_limit}
-            />
-          )}
-          <div className="flex items-center gap-1 rounded-full border border-[#313244] bg-[#181825] p-1">
-            {(["artist", "logic", "debug", "playtest"] as LayoutPresetId[]).map((preset) => (
-              <button
-                key={preset}
-                type="button"
-                onClick={() => applyLayoutPreset(preset)}
-                className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors ${
-                  !focusedShell && layoutPreset === preset
-                    ? "bg-[#cba6f7] text-[#111827]"
-                    : "text-[#94a3b8] hover:bg-[#1f2937] hover:text-[#e5e7eb]"
-                }`}
+            )}
+            {!liveBuildBlocked && buildWarningSummary && (
+              <span
+                data-testid="build-warning-summary"
+                aria-live="polite"
+                className="max-w-52 truncate text-[10px] text-[#fab387]"
+                title={buildWarningSummary}
               >
-                {preset === "artist"
-                  ? "Artist"
-                  : preset === "logic"
-                    ? "Logic"
-                    : preset === "debug"
-                      ? "Debug"
-                      : "Playtest"}
-              </button>
-            ))}
-          </div>
-          <ToolbarButton label="Salvar layout" onClick={saveCurrentLayout} />
-          <ToolbarButton label="Restaurar layout" onClick={restoreSavedLayout} />
-          <ToolbarButton
-            label={focusedShell ? "Sair do foco" : "Focus"}
-            onClick={toggleFocusMode}
-          />
-          <ToolbarButton
-            label={rightPanelMode === "tools" ? "Inspector" : "Tools"}
-            onClick={() =>
-              rightPanelMode === "tools"
-                ? setRightPanelMode("inspector")
-                : openToolsWorkspace("palette", activeWorkspace === "debug" ? "debug" : "editing", activeWorkspace === "debug")
-            }
-            accent="primary"
-          />
-          <ToolbarButton label="Validar" onClick={() => void handleValidate()} disabled={!activeProjectDir} />
-          <ToolbarButton label="Gerar C" onClick={() => void handleGenerateC()} disabled={!activeProjectDir} />
-          <ToolbarButton label="Copiar" onClick={handleCopyEntity} disabled={!selectedEntityId || selectedEntityId.startsWith("layer::")} />
-          <ToolbarButton label="Colar" onClick={() => void handlePasteEntity()} disabled={!copiedEntity || !activeProjectDir} />
-          <ToolbarButton
-            label={consoleVisible ? "Console" : "Console"}
-            onClick={toggleConsole}
-          />
-          <ToolbarButton label="Atalhos" onClick={() => setShowShortcuts(true)} />
-          <ToolbarButton label="Sobre" onClick={() => setShowAbout(true)} />
-          <ToolbarButton label="Fechar" onClick={() => void handleCloseProject()} disabled={!activeProjectDir} />
-        </div>
-      </div>
+                {buildWarningSummary}
+              </span>
+            )}
+            {!liveBuildBlocked && liveBuildErrorSummary && (
+              <span
+                data-testid="build-live-error-summary"
+                aria-live="polite"
+                className="max-w-52 truncate text-[10px] text-[#f38ba8]"
+                title={liveBuildErrorSummary}
+              >
+                Live com falha: {liveBuildErrorSummary}
+              </span>
+            )}
+            {!liveBuildBlocked &&
+              !buildWarningSummary &&
+              !liveBuildErrorSummary &&
+              liveBuildPendingSummary && (
+                <span
+                  data-testid="build-live-pending-summary"
+                  aria-live="polite"
+                  className="max-w-52 truncate text-[10px] text-[#89b4fa]"
+                  title={liveBuildPendingSummary}
+                >
+                  Live em analise...
+                </span>
+              )}
+            {buildLiveIndicator?.label === "DESATUAL." && (
+              <>
+                <span
+                  data-testid="build-stale-hint"
+                  className="max-w-52 truncate text-[10px] text-[#89b4fa]"
+                  title="Edite a cena para acionar a revalidacao automatica ou use Revalidar agora."
+                >
+                  Edite a cena para revalidar
+                </span>
+                <ToolbarButton
+                  label="Revalidar agora"
+                  onClick={handleRevalidateLiveSnapshot}
+                  testId="build-stale-revalidate"
+                />
+              </>
+            )}
+          </>
+        }
+        rightContent={
+          <>
+            {hwStatus && hwStatus.vram_limit > 0 && (
+              <ToolbarVramBudget
+                used={hwStatus.vram_used}
+                limit={hwStatus.vram_limit}
+                hasErrors={hwStatus.errors.length > 0}
+                hasWarnings={hwStatus.warnings.length > 0}
+              />
+            )}
+            {hwStatus && hwStatus.scanline_sprite_limit > 0 && (
+              <ToolbarScanlineBudget
+                peak={hwStatus.scanline_sprite_peak}
+                limit={hwStatus.scanline_sprite_limit}
+              />
+            )}
+            {hwStatus && hwStatus.palette_banks_limit > 0 && (
+              <ToolbarPaletteBudget
+                used={hwStatus.palette_banks_used}
+                limit={hwStatus.palette_banks_limit}
+              />
+            )}
+            <ToolbarButton
+              label={focusedShell ? "Sair do foco" : "Focus"}
+              onClick={toggleFocusMode}
+            />
+            <ToolbarButton label="Console" onClick={toggleConsole} />
+          </>
+        }
+      />
 
       {!showProjectWizard && !focusedShell && workspaceGuide && (
         <WorkspaceGuideCard key={workspaceMeta.id} guide={workspaceGuide} />
       )}
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <aside className="flex w-[74px] shrink-0 flex-col justify-between border-r border-[#313244] bg-[#0b1020]">
-          <div className="flex flex-col gap-2 px-2 py-3">
+        <aside
+          data-testid="workspace-activity-bar"
+          className="flex w-[56px] shrink-0 flex-col border-r border-[#27272a] bg-[#09090b]"
+        >
+          <div className="flex flex-1 flex-col items-center gap-2 px-1.5 py-3">
             {WORKSPACE_ITEMS.map((workspace) => (
               <WorkspaceRailButton
                 key={workspace.id}
@@ -2386,46 +2458,10 @@ export default function App() {
                 active={activeWorkspace === workspace.id}
                 title={workspace.description}
                 accent={workspace.id === "debug" ? "debug" : "default"}
+                testId={`workspace-rail-${workspace.id}`}
                 onClick={() => handleWorkspaceSelect(workspace.id)}
               />
             ))}
-          </div>
-
-          <div className="flex flex-col gap-2 border-t border-[#1f2937] px-2 py-3">
-            <WorkspaceRailButton
-              icon="IN"
-              label="Inspector"
-              active={rightPanelMode === "inspector"}
-              title="Mostrar painel contextual de propriedades"
-              onClick={() => setRightPanelMode("inspector")}
-            />
-            <WorkspaceRailButton
-              icon="TL"
-              label="Tools"
-              active={rightPanelMode === "tools"}
-              title="Mostrar workspace contextual de ferramentas"
-              onClick={() =>
-                openToolsWorkspace(
-                  toolPanelActive,
-                  activeWorkspace === "debug" ? "debug" : "editing",
-                  activeWorkspace === "debug" || toolPanelShowAdvanced
-                )
-              }
-            />
-            <WorkspaceRailButton
-              icon="CS"
-              label="Console"
-              active={consoleVisible}
-              title="Alternar console inferior"
-              onClick={toggleConsole}
-            />
-            <WorkspaceRailButton
-              icon="FM"
-              label="Focus"
-              active={focusedShell}
-              title="Ocultar paineis laterais e priorizar o canvas"
-              onClick={toggleFocusMode}
-            />
           </div>
         </aside>
 
@@ -2452,35 +2488,60 @@ export default function App() {
             minSize={0}
             className="flex flex-col overflow-hidden border-r border-[#313244]"
           >
-            <div className="flex shrink-0 border-b border-[#313244] bg-[#11111b]">
-              <button
-                onClick={() => setLeftPanelTab("scene")}
-                className={`flex-1 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors ${
-                  leftPanelTab === "scene"
-                    ? "bg-[#313244] text-[#cdd6f4]"
-                    : "text-[#45475a] hover:text-[#a6adc8]"
-                }`}
-              >
-                Cena
-              </button>
-              <button
-                onClick={() => setLeftPanelTab("layers")}
-                className={`flex-1 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors ${
-                  leftPanelTab === "layers"
-                    ? "bg-[#313244] text-[#cdd6f4]"
-                    : "text-[#45475a] hover:text-[#a6adc8]"
-                }`}
-              >
-                Camadas
-              </button>
-            </div>
-            <div className="min-h-0 flex-1 overflow-hidden">
-              {leftPanelTab === "layers" ? <LayerPanel /> : <HierarchyPanel />}
-            </div>
+            {activeWorkspace === "explorer" ? (
+              <div className="flex h-full min-h-0 flex-col bg-[#0b1120]">
+                <div className="border-b border-[#313244] px-3 py-2">
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#7dd3fc]">
+                    Explorer
+                  </div>
+                  <div className="mt-1 text-[11px] text-[#64748b]">
+                    Estrutura sintetizada no stage central.
+                  </div>
+                </div>
+                <div className="min-h-0 flex-1 px-3 py-4 text-[12px] leading-6 text-[#94a3b8]">
+                  Use o workspace central para navegar por cenas, assets canonicos e arquivos do host legado sem mudar contratos de IPC.
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="flex shrink-0 border-b border-[#313244] bg-[#11111b]">
+                  <button
+                    onClick={() => setLeftPanelTab("scene")}
+                    className={`flex-1 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors ${
+                      leftPanelTab === "scene"
+                        ? "bg-[#313244] text-[#cdd6f4]"
+                        : "text-[#45475a] hover:text-[#a6adc8]"
+                    }`}
+                  >
+                    Cena
+                  </button>
+                  <button
+                    onClick={() => setLeftPanelTab("layers")}
+                    className={`flex-1 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] transition-colors ${
+                      leftPanelTab === "layers"
+                        ? "bg-[#313244] text-[#cdd6f4]"
+                        : "text-[#45475a] hover:text-[#a6adc8]"
+                    }`}
+                  >
+                    Camadas
+                  </button>
+                </div>
+                <div className="min-h-0 flex-1 overflow-hidden">
+                  {leftPanelTab === "layers" ? <LayerPanel /> : <HierarchyPanel />}
+                </div>
+              </>
+            )}
           </Panel>
           <LayoutSplitter />
           <Panel id="center" minSize={20} className="overflow-hidden">
-            <ViewportPanel showWorkspaceTabs={false} />
+            {activeWorkspace === "explorer" ? (
+              <ExplorerWorkspace
+                onSelectionChange={setExplorerBreadcrumb}
+                onOpenSceneEditor={() => handleWorkspaceSelect("scene")}
+              />
+            ) : (
+              <ViewportPanel showWorkspaceTabs={false} />
+            )}
           </Panel>
           <LayoutSplitter />
           <Panel
@@ -2489,16 +2550,60 @@ export default function App() {
             minSize={0}
             className="overflow-hidden border-l border-[#313244]"
           >
-            {rightPanelMode === "tools" ? (
-              <ToolsPanel
-                onRequestInspector={() => setRightPanelMode("inspector")}
-                initialActive={toolPanelActive}
-                workspace={toolPanelWorkspace}
-                showAdvancedByDefault={toolPanelShowAdvanced}
-              />
-            ) : (
-              <InspectorPanel />
-            )}
+            <div className="flex h-full min-h-0 flex-col bg-[#09090b]">
+              <div className="flex items-center justify-between border-b border-[#27272a] bg-[#111827] px-3 py-2">
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#94a3b8]">
+                    {rightPanelMode === "tools" ? "Tools" : "Inspector"}
+                  </div>
+                  <div className="mt-1 text-[11px] text-[#64748b]">
+                    Painel contextual do workspace ativo
+                  </div>
+                </div>
+                <div className="flex items-center gap-1 rounded-full border border-[#313244] bg-[#09090b] p-1">
+                  <button
+                    type="button"
+                    onClick={() => setRightPanelMode("inspector")}
+                    className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors ${
+                      rightPanelMode === "inspector"
+                        ? "bg-[#cba6f7] text-[#111827]"
+                        : "text-[#94a3b8] hover:bg-[#1f2937] hover:text-[#e5e7eb]"
+                    }`}
+                  >
+                    Inspector
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openToolsWorkspace(
+                        toolPanelActive === "setup" ? "palette" : toolPanelActive,
+                        activeWorkspace === "debug" ? "debug" : "editing",
+                        activeWorkspace === "debug" || toolPanelShowAdvanced
+                      )
+                    }
+                    className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors ${
+                      rightPanelMode === "tools"
+                        ? "bg-[#cba6f7] text-[#111827]"
+                        : "text-[#94a3b8] hover:bg-[#1f2937] hover:text-[#e5e7eb]"
+                    }`}
+                  >
+                    Tools
+                  </button>
+                </div>
+              </div>
+              <div className="min-h-0 flex-1 overflow-hidden">
+                {rightPanelMode === "tools" ? (
+                  <ToolsPanel
+                    onRequestInspector={() => setRightPanelMode("inspector")}
+                    initialActive={toolPanelActive}
+                    workspace={toolPanelWorkspace}
+                    showAdvancedByDefault={toolPanelShowAdvanced}
+                  />
+                ) : (
+                  <InspectorPanel />
+                )}
+              </div>
+            </div>
           </Panel>
         </Group>
       </div>

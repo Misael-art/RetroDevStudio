@@ -51,6 +51,10 @@ RetroDevStudio/
 |   |-- main.tsx
 |   |-- components/
 |   |   |-- common/
+|   |   |   |-- LayoutSplitter.tsx
+|   |   |   `-- UnifiedTopBar.tsx
+|   |   |-- explorer/
+|   |   |   `-- ExplorerWorkspace.tsx
 |   |   |-- hierarchy/
 |   |   |-- inspector/
 |   |   |-- tools/

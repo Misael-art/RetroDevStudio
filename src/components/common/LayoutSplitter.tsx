@@ -4,21 +4,29 @@
  */
 import { Separator } from "react-resizable-panels";
 
-const SPLITTER_CLASS =
-  "w-px min-w-px flex-shrink-0 bg-[#313244]/60 transition-colors duration-150 " +
-  "hover:bg-[#89b4fa] " +
-  "data-[separator=pointer]:bg-[#89b4fa]";
-
 interface LayoutSplitterProps {
   id?: string;
+  orientation?: "horizontal" | "vertical";
 }
 
-export default function LayoutSplitter({ id }: LayoutSplitterProps) {
+export default function LayoutSplitter({
+  id,
+  orientation = "horizontal",
+}: LayoutSplitterProps) {
+  const className =
+    orientation === "vertical"
+      ? "h-px min-h-px w-full flex-shrink-0 bg-[#313244]/60 transition-colors duration-150 hover:bg-[#89b4fa] data-[separator=pointer]:bg-[#89b4fa]"
+      : "w-px min-w-px flex-shrink-0 bg-[#313244]/60 transition-colors duration-150 hover:bg-[#89b4fa] data-[separator=pointer]:bg-[#89b4fa]";
+
   return (
     <Separator
       id={id}
-      className={SPLITTER_CLASS}
-      style={{ flexBasis: 4, minWidth: 4 }}
+      className={className}
+      style={
+        orientation === "vertical"
+          ? { flexBasis: 4, minHeight: 4 }
+          : { flexBasis: 4, minWidth: 4 }
+      }
     />
   );
 }
