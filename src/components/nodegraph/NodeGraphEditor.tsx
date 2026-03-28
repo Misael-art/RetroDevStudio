@@ -87,6 +87,20 @@ type MiniMapNode = {
   y: number;
 };
 
+type GuidedFlowCommentary = {
+  title: string;
+  summary: string;
+  comments: string[];
+  hardwareNote: string;
+  limitation?: string;
+};
+
+type QuickActionTemplate = GuidedFlowCommentary & {
+  id: "player_controller" | "enemy_logic" | "timer_event";
+  actionLabel: string;
+  buildGraph: () => NodeGraph;
+};
+
 export const EMPTY_GRAPH: NodeGraph = {
   nodes: [],
   edges: [],
@@ -658,6 +672,127 @@ function makeNode(type: NodeType, x: number, y: number): GraphNode {
   };
 }
 
+function makeEdge(
+  fromNode: GraphNode,
+  fromPort: string,
+  toNode: GraphNode,
+  toPort: string
+): NodeEdge {
+  return {
+    id: newEdgeId(),
+    fromNode: fromNode.id,
+    fromPort,
+    toNode: toNode.id,
+    toPort,
+  };
+}
+
+function buildPlayerControllerQuickActionGraph(): NodeGraph {
+  const start = makeNode("event_start", 140, 160);
+  const move = makeNode("sprite_move", 380, 156);
+  const anim = makeNode("sprite_anim", 620, 156);
+
+  move.params = { ...move.params, target: "player", dx: 2, dy: 0 };
+  anim.params = { ...anim.params, target: "player", anim: "run" };
+
+  return {
+    nodes: [start, move, anim],
+    edges: [
+      makeEdge(start, "exec", move, "exec"),
+      makeEdge(move, "exec", anim, "exec"),
+    ],
+  };
+}
+
+function buildEnemyLogicQuickActionGraph(): NodeGraph {
+  const patrolStart = makeNode("event_start", 140, 120);
+  const patrolAnim = makeNode("sprite_anim", 380, 116);
+  const overlap = makeNode("condition_overlap", 140, 296);
+  const hitSound = makeNode("action_sound", 380, 296);
+
+  patrolAnim.params = { ...patrolAnim.params, target: "enemy", anim: "patrol" };
+  overlap.params = { ...overlap.params, a: "player", b: "enemy" };
+  hitSound.params = { ...hitSound.params, sfx: "hit" };
+
+  return {
+    nodes: [patrolStart, patrolAnim, overlap, hitSound],
+    edges: [
+      makeEdge(patrolStart, "exec", patrolAnim, "exec"),
+      makeEdge(overlap, "true", hitSound, "exec"),
+    ],
+  };
+}
+
+function buildTimerQuickActionGraph(): NodeGraph {
+  const start = makeNode("event_start", 140, 192);
+  const timeline = makeNode("timeline_sequence", 400, 176);
+  const sound = makeNode("action_sound", 680, 192);
+
+  timeline.params = {
+    ...timeline.params,
+    timeline_name: "wait_60_frames",
+    slot_0_delay: 30,
+    slot_1_delay: 60,
+    slot_2_delay: 120,
+  };
+  sound.params = { ...sound.params, sfx: "timer" };
+
+  return {
+    nodes: [start, timeline, sound],
+    edges: [
+      makeEdge(start, "exec", timeline, "exec"),
+      makeEdge(timeline, "slot_1", sound, "exec"),
+    ],
+  };
+}
+
+const QUICK_ACTION_TEMPLATES: QuickActionTemplate[] = [
+  {
+    id: "player_controller",
+    actionLabel: "Criar Player Controller Basico",
+    title: "Player Controller Basico",
+    summary: "Monta um fluxo inicial de movimento do player com animacao ligada ao mesmo encadeamento.",
+    comments: [
+      "Ao Iniciar prepara o fluxo principal sem depender de wiring manual no primeiro minuto.",
+      "Mover Sprite usa deltas pequenos, compativeis com logica de 16-bits e tuning posterior no Inspector.",
+      "Animar Sprite fecha o esqueleto visual para o personagem entrar no loop canônico logo no bootstrap.",
+    ],
+    hardwareNote:
+      "Fluxo conservador: so usa nos ja suportados no pipeline atual de SGDK e SNES.",
+    buildGraph: buildPlayerControllerQuickActionGraph,
+  },
+  {
+    id: "enemy_logic",
+    actionLabel: "Logica de Inimigo Simples",
+    title: "Logica de Inimigo Simples",
+    summary: "Combina um estado inicial de patrulha com um gatilho de overlap para feedback imediato.",
+    comments: [
+      "Ao Iniciar coloca o inimigo em uma animacao base de patrulha para o grafo nao nascer parado.",
+      "Colisao (Overlap) separa o ramo de contato entre player e enemy sem inventar eventos fora do schema atual.",
+      "Tocar Som funciona como feedback imediato enquanto a acao destrutiva ainda nao esta institucionalizada no NodeGraph.",
+    ],
+    hardwareNote:
+      "O overlap ja conversa com o build atual; destroy/remove ainda nao entra nesta wave de onboarding.",
+    limitation:
+      "A remocao de entidade continua fora deste atalho para nao prometer um no que o pipeline canonico ainda nao expoe.",
+    buildGraph: buildEnemyLogicQuickActionGraph,
+  },
+  {
+    id: "timer_event",
+    actionLabel: "Timer Event",
+    title: "Timer Event",
+    summary: "Cria uma sequencia de tempo fixa e hardware-friendly para disparos por frame.",
+    comments: [
+      "Ao Iniciar aciona a timeline sem exigir no auxiliar extra para o primeiro teste.",
+      "Sequencia (Timeline) usa 60 frames como marco canônico, facil de mapear para um segundo em 60 Hz.",
+      "Tocar Som no slot de 60 frames deixa claro onde encaixar uma acao real quando o usuario evoluir o fluxo.",
+    ],
+    hardwareNote:
+      "A timeline usa delays discretos por frame, o que combina melhor com o runtime retro do que tempos soltos em milissegundos.",
+    buildGraph: buildTimerQuickActionGraph,
+  },
+];
+
 // ── Initial graph (demo) ──────────────────────────────────────────────────────
 
 const INITIAL_GRAPH: NodeGraph = {
@@ -766,6 +901,58 @@ function NodeCard({
   );
 }
 
+interface EmptyStateOverlayProps {
+  onApplyTemplate: (template: QuickActionTemplate) => void;
+}
+
+function EmptyStateOverlay({ onApplyTemplate }: EmptyStateOverlayProps) {
+  return (
+    <div
+      data-testid="nodegraph-empty-overlay"
+      className="absolute inset-0 z-10 flex items-center justify-center bg-[#11111b]/60 px-6 py-8"
+    >
+      <div className="w-full max-w-4xl rounded-2xl border border-dashed border-[#45475a] bg-[#181825]/95 p-6 shadow-2xl backdrop-blur-sm">
+        <div className="mb-5 flex flex-col gap-2">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#89b4fa]">
+            Guided Empty State
+          </p>
+          <h2 className="text-xl font-semibold text-[#cdd6f4]">
+            Comece o primeiro fluxo sem precisar descobrir a paleta inteira
+          </h2>
+          <p className="max-w-3xl text-sm text-[#a6adc8]">
+            Escolha um atalho para gerar um grafo base com nos ja conectados. Depois voce pode ajustar os parametros,
+            trocar nos e expandir o fluxo pela paleta lateral.
+          </p>
+        </div>
+
+        <div className="grid gap-3 lg:grid-cols-3">
+          {QUICK_ACTION_TEMPLATES.map((template) => (
+            <button
+              key={template.id}
+              type="button"
+              data-testid={`nodegraph-template-${template.id}`}
+              onClick={() => onApplyTemplate(template)}
+              className="flex h-full flex-col rounded-xl border border-[#313244] bg-[#11111b]/90 p-4 text-left transition-colors hover:border-[#89b4fa]/60 hover:bg-[#1e1e2e]"
+            >
+              <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#89b4fa]">
+                Quick Action
+              </span>
+              <span className="mt-2 text-sm font-semibold text-[#cdd6f4]">{template.actionLabel}</span>
+              <span className="mt-2 text-xs leading-5 text-[#a6adc8]">{template.summary}</span>
+              <span className="mt-3 text-[10px] leading-4 text-[#6c7086]">{template.hardwareNote}</span>
+            </button>
+          ))}
+        </div>
+
+        <p className="mt-4 text-[11px] text-[#6c7086]">
+          Esses atalhos usam somente nos ja suportados no pipeline atual. O objetivo aqui e acelerar descoberta, nao
+          criar um fluxo paralelo.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── Main NodeGraph Editor ─────────────────────────────────────────────────────
 
 export default function NodeGraphEditor() {
@@ -786,6 +973,7 @@ export default function NodeGraphEditor() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [viewOffset, setViewOffset] = useState<ViewOffset>({ x: 0, y: 0 });
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
+  const [guidedCommentary, setGuidedCommentary] = useState<GuidedFlowCommentary | null>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const saveTimerRef = useRef<number | null>(null);
@@ -800,6 +988,7 @@ export default function NodeGraphEditor() {
     setDragging(null);
     setPendingEdge(null);
     setViewOffset({ x: 0, y: 0 });
+    setGuidedCommentary(null);
     lastPersistedGraphRef.current = serializeNodeGraph(nextGraph);
   }, [selectedEntity]);
 
@@ -933,6 +1122,23 @@ export default function NodeGraphEditor() {
     const node = makeNode(type, 200, 200);
     setGraph((g) => ({ ...g, nodes: [...g.nodes, node] }));
     logMessage("info", `No adicionado: ${getNodeDisplayName(type)}`);
+  }, [logMessage]);
+
+  const applyQuickActionTemplate = useCallback((template: QuickActionTemplate) => {
+    const nextGraph = template.buildGraph();
+    setGraph(nextGraph);
+    setSelectedId(nextGraph.nodes[0]?.id ?? null);
+    setDragging(null);
+    setPendingEdge(null);
+    setViewOffset({ x: 0, y: 0 });
+    setGuidedCommentary({
+      title: template.title,
+      summary: template.summary,
+      comments: template.comments,
+      hardwareNote: template.hardwareNote,
+      limitation: template.limitation,
+    });
+    logMessage("info", `Fluxo guiado aplicado: ${template.title}`);
   }, [logMessage]);
 
   // ── Delete selected node ───────────────────────────────────────────────────
@@ -1307,11 +1513,36 @@ export default function NodeGraphEditor() {
           </div>
         )}
 
+        {selectedEntity && guidedCommentary && graph.nodes.length > 0 && (
+          <div
+            data-testid="nodegraph-guided-commentary"
+            className="absolute bottom-3 left-3 z-10 max-w-[24rem] rounded-xl border border-[#313244] bg-[#181825]/95 px-4 py-3 text-[11px] shadow-lg backdrop-blur-sm"
+          >
+            <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#89b4fa]">
+              Guided Commentary
+            </p>
+            <p className="mt-1 text-sm font-semibold text-[#cdd6f4]">{guidedCommentary.title}</p>
+            <p className="mt-1 text-[#a6adc8]">{guidedCommentary.summary}</p>
+            <ul className="mt-3 list-disc space-y-1 pl-4 text-[#bac2de]">
+              {guidedCommentary.comments.map((comment) => (
+                <li key={comment}>{comment}</li>
+              ))}
+            </ul>
+            <p className="mt-3 text-[10px] text-[#6c7086]">{guidedCommentary.hardwareNote}</p>
+            {guidedCommentary.limitation && (
+              <p className="mt-2 text-[10px] text-[#fab387]">{guidedCommentary.limitation}</p>
+            )}
+          </div>
+        )}
+
         {/* Empty state */}
-        {graph.nodes.length === 0 && (
+        {selectedEntity && graph.nodes.length === 0 && (
+          <EmptyStateOverlay onApplyTemplate={applyQuickActionTemplate} />
+        )}
+        {!selectedEntity && graph.nodes.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <p className="text-[#313244] text-xs select-none">
-              Adicione nós pela paleta à esquerda
+              Adicione nós pela paleta a esquerda
             </p>
           </div>
         )}

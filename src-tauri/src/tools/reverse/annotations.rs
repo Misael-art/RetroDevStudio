@@ -91,4 +91,34 @@ mod tests {
         let _ = fs::remove_file(sidecar);
         let _ = fs::remove_file(rom_path);
     }
+
+    #[test]
+    fn load_annotations_returns_empty_on_hash_mismatch() {
+        let rom_path = temp_rom_path("hash-mismatch");
+        fs::write(&rom_path, [0u8; 4]).expect("write temp rom");
+
+        let saved_hashes = RomHashes {
+            crc32: "deadbeef".to_string(),
+            sha1: "0123456789abcdef0123456789abcdef01234567".to_string(),
+        };
+        let requested_hashes = RomHashes {
+            crc32: "feedface".to_string(),
+            sha1: "ffffffffffffffffffffffffffffffffffffffff".to_string(),
+        };
+        let annotations = vec![ReverseAnnotation {
+            kind: "text".to_string(),
+            start: 0x40,
+            end: Some(0x44),
+            label: "String".to_string(),
+            comment: "Nao deveria carregar com hash divergente".to_string(),
+        }];
+
+        save_annotations(&rom_path, &saved_hashes, &annotations).expect("save annotations");
+        let reloaded = load_annotations(&rom_path, &requested_hashes).expect("load annotations");
+        assert!(reloaded.is_empty());
+
+        let sidecar = sidecar_path(&rom_path);
+        let _ = fs::remove_file(sidecar);
+        let _ = fs::remove_file(rom_path);
+    }
 }

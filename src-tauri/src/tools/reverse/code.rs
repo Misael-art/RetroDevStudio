@@ -5,6 +5,7 @@ use super::manifest::{
     LogicHint,
 };
 use super::platform::LoadedRom;
+use super::trace::ExecutionTraceLog;
 
 const MAX_FUNCTIONS: usize = 24;
 const MAX_INSTRUCTIONS_PER_FUNCTION: usize = 128;
@@ -35,6 +36,27 @@ fn read_le_u24(bytes: &[u8], offset: usize) -> Option<u32> {
         .map(|slice| u32::from(slice[0]) | (u32::from(slice[1]) << 8) | (u32::from(slice[2]) << 16))
 }
 
+fn align_megadrive_code_address(address: u32) -> u32 {
+    address & !1
+}
+
+fn normalize_code_address(loaded: &LoadedRom, address: u32) -> u32 {
+    if loaded.target == "megadrive" {
+        align_megadrive_code_address(address)
+    } else {
+        address
+    }
+}
+
+fn trace_allows_address(trace: Option<&ExecutionTraceLog>, address: u32) -> bool {
+    trace.map(|log| log.was_executed(address)).unwrap_or(true)
+}
+
+fn target_points_inside_instruction(target: u32, current_offset: usize, next_cursor: usize) -> bool {
+    let target = target as usize;
+    target > current_offset && target < next_cursor
+}
+
 fn decode_megadrive(bytes: &[u8], offset: usize) -> DecodedInstruction {
     let opcode = read_be_u16(bytes, offset).unwrap_or(0);
     let mut row = DisassemblyRow {
@@ -61,6 +83,7 @@ fn decode_megadrive(bytes: &[u8], offset: usize) -> DecodedInstruction {
             if let Some(target) = read_be_u32(bytes, offset + 2) {
                 row.bytes = bytes.get(offset..offset + 6).unwrap_or(&[]).to_vec();
                 row.size = 6;
+                let target = align_megadrive_code_address(target);
                 row.text = format!("jsr ${:08X}", target);
                 row.kind = "call".to_string();
                 row.target = Some(target);
@@ -70,6 +93,7 @@ fn decode_megadrive(bytes: &[u8], offset: usize) -> DecodedInstruction {
             if let Some(target) = read_be_u32(bytes, offset + 2) {
                 row.bytes = bytes.get(offset..offset + 6).unwrap_or(&[]).to_vec();
                 row.size = 6;
+                let target = align_megadrive_code_address(target);
                 row.text = format!("jmp ${:08X}", target);
                 row.kind = "jump".to_string();
                 row.target = Some(target);
@@ -80,18 +104,20 @@ fn decode_megadrive(bytes: &[u8], offset: usize) -> DecodedInstruction {
             if let Some(target) = read_be_u16(bytes, offset + 2) {
                 row.bytes = bytes.get(offset..offset + 4).unwrap_or(&[]).to_vec();
                 row.size = 4;
+                let target = align_megadrive_code_address(u32::from(target));
                 row.text = format!("jsr ${:04X}.w", target);
                 row.kind = "call".to_string();
-                row.target = Some(u32::from(target));
+                row.target = Some(target);
             }
         }
         0x4EF8 => {
             if let Some(target) = read_be_u16(bytes, offset + 2) {
                 row.bytes = bytes.get(offset..offset + 4).unwrap_or(&[]).to_vec();
                 row.size = 4;
+                let target = align_megadrive_code_address(u32::from(target));
                 row.text = format!("jmp ${:04X}.w", target);
                 row.kind = "jump".to_string();
-                row.target = Some(u32::from(target));
+                row.target = Some(target);
                 terminal = true;
             }
         }
@@ -106,6 +132,7 @@ fn decode_megadrive(bytes: &[u8], offset: usize) -> DecodedInstruction {
             } else {
                 ((offset as i32) + 2 + disp8) as u32
             };
+            let target = align_megadrive_code_address(target);
             row.text = if kind == "call" {
                 format!("bsr ${:08X}", target)
             } else {
@@ -120,6 +147,22 @@ fn decode_megadrive(bytes: &[u8], offset: usize) -> DecodedInstruction {
             let imm = (value & 0x00FF) as i8;
             row.text = format!("moveq #{}, d{}", imm, register);
             row.kind = "move".to_string();
+        }
+        value if (value & 0xF000) == 0x1000 && ((value >> 6) & 0x7) == 0 => {
+            let destination = (value >> 9) & 0x7;
+            let source_mode = (value >> 3) & 0x7;
+            let source_register = value & 0x7;
+            match source_mode {
+                0b011 => {
+                    row.text = format!("move.b (a{})+, d{}", source_register, destination);
+                    row.kind = "move".to_string();
+                }
+                0b100 => {
+                    row.text = format!("move.b -(a{}), d{}", source_register, destination);
+                    row.kind = "move".to_string();
+                }
+                _ => {}
+            }
         }
         _ => {}
     }
@@ -217,6 +260,13 @@ fn decode_snes(bytes: &[u8], offset: usize) -> DecodedInstruction {
             row.target = Some(target);
             terminal = opcode == 0x80;
         }
+        0xA7 => {
+            let operand = bytes.get(offset + 1).copied().unwrap_or(0);
+            row.bytes = bytes.get(offset..offset + 2).unwrap_or(&[]).to_vec();
+            row.size = 2;
+            row.text = format!("lda [${:02X}]", operand);
+            row.kind = "memory".to_string();
+        }
         _ => {}
     }
 
@@ -259,16 +309,34 @@ pub fn disassemble_region(loaded: &LoadedRom, offset: usize, length: usize) -> D
 }
 
 pub fn analyze_code(loaded: &LoadedRom) -> (Vec<CodeRegion>, Vec<CallGraphEdge>, Vec<LogicHint>) {
-    let mut queue: VecDeque<u32> = loaded.entry_points.iter().copied().collect();
+    analyze_code_with_trace(loaded, None)
+}
+
+fn analyze_code_with_trace(
+    loaded: &LoadedRom,
+    trace: Option<&ExecutionTraceLog>,
+) -> (Vec<CodeRegion>, Vec<CallGraphEdge>, Vec<LogicHint>) {
+    let normalized_entry_points = loaded
+        .entry_points
+        .iter()
+        .copied()
+        .map(|address| normalize_code_address(loaded, address))
+        .collect::<HashSet<_>>();
+    let mut queue: VecDeque<u32> = normalized_entry_points.iter().copied().collect();
     let mut visited = HashSet::new();
     let mut rows = Vec::new();
     let mut xrefs = Vec::new();
     let mut call_graph = Vec::new();
 
     while let Some(function_start) = queue.pop_front() {
-        if !visited.insert(function_start) || visited.len() > MAX_FUNCTIONS {
+        if function_start as usize >= loaded.bytes.len()
+            || visited.contains(&function_start)
+            || visited.len() > MAX_FUNCTIONS
+            || !trace_allows_address(trace, function_start)
+        {
             continue;
         }
+        visited.insert(function_start);
 
         let mut cursor = function_start as usize;
         let mut instructions = 0usize;
@@ -289,7 +357,10 @@ pub fn analyze_code(loaded: &LoadedRom) -> (Vec<CodeRegion>, Vec<CallGraphEdge>,
                         to: target,
                         kind: "call".to_string(),
                     });
-                    if target < loaded.bytes.len() as u32 {
+                    if target < loaded.bytes.len() as u32
+                        && !target_points_inside_instruction(target, cursor, next_cursor)
+                        && trace_allows_address(trace, target)
+                    {
                         queue.push_back(target);
                     }
                 }
@@ -322,8 +393,19 @@ pub fn analyze_code(loaded: &LoadedRom) -> (Vec<CodeRegion>, Vec<CallGraphEdge>,
                 .map(|row| row.offset + u32::from(row.size))
                 .unwrap_or(address),
             name: format!("sub_{:06X}", address),
-            executed: false,
-            confidence: if loaded.entry_points.contains(&address) { 85 } else { 61 },
+            executed: trace.map(|log| log.was_executed(address)).unwrap_or(false),
+            confidence: {
+                let base = if normalized_entry_points.contains(&address) {
+                    85
+                } else {
+                    61
+                };
+                let trace_bonus = trace
+                    .and_then(|log| log.cpu_states.get(&address))
+                    .map(|state| if state.m_flag != state.x_flag { 8 } else { 4 })
+                    .unwrap_or(0);
+                (base + trace_bonus).min(100)
+            },
         })
         .collect::<Vec<_>>();
 
@@ -332,7 +414,7 @@ pub fn analyze_code(loaded: &LoadedRom) -> (Vec<CodeRegion>, Vec<CallGraphEdge>,
         .last()
         .map(|row| row.offset + u32::from(row.size))
         .unwrap_or(region_start);
-    let logic_hints = vec![
+    let mut logic_hints = vec![
         LogicHint {
             id: format!("logic_entry_{:06X}", region_start),
             category: "code".to_string(),
@@ -344,14 +426,28 @@ pub fn analyze_code(loaded: &LoadedRom) -> (Vec<CodeRegion>, Vec<CallGraphEdge>,
             start: Some(region_start),
             end: Some(region_end),
         },
+    ];
+    logic_hints.push(if let Some(trace_log) = trace {
+        LogicHint {
+            id: "trace_overlay_active".to_string(),
+            category: "trace".to_string(),
+            message: format!(
+                "Trace dinamico aplicado: {} PCs executados e {} estados CPU capturados.",
+                trace_log.executed_pcs.len(),
+                trace_log.cpu_states.len()
+            ),
+            start: None,
+            end: None,
+        }
+    } else {
         LogicHint {
             id: "trace_future_overlay".to_string(),
             category: "trace".to_string(),
             message: "Trace Libretro ainda nao coleta execucao nesta wave; overlay futuro ja previsto na arquitetura.".to_string(),
             start: None,
             end: None,
-        },
-    ];
+        }
+    });
 
     let code_regions = if rows.is_empty() {
         Vec::new()
@@ -360,7 +456,7 @@ pub fn analyze_code(loaded: &LoadedRom) -> (Vec<CodeRegion>, Vec<CallGraphEdge>,
             start: region_start,
             end: region_end,
             architecture: if loaded.target == "snes" { "65816" } else { "68000" }.to_string(),
-            entry_points: loaded.entry_points.clone(),
+            entry_points: normalized_entry_points.iter().copied().collect(),
             functions: function_candidates,
             xrefs,
             disassembly: rows,
@@ -375,6 +471,7 @@ mod tests {
     use super::*;
     use crate::tools::reverse::manifest::RomHeader;
     use crate::tools::reverse::platform::LoadedRom;
+    use crate::tools::reverse::trace::{CpuState, ExecutionTraceLog};
 
     fn sample_loaded(target: &str, bytes: Vec<u8>, entry_points: Vec<u32>) -> LoadedRom {
         LoadedRom {
@@ -687,5 +784,117 @@ mod tests {
 
         // Xrefs should have a call entry
         assert!(regions[0].xrefs.iter().any(|xref| xref.to == 0x10 && xref.kind == "call"));
+    }
+
+    #[test]
+    fn decode_megadrive_indirect_auto_increment_side_effects() {
+        let rom = vec![
+            0x10, 0x18, // move.b (a0)+, d0
+            0x14, 0x21, // move.b -(a1), d2
+        ];
+        let loaded = sample_loaded("megadrive", rom, vec![0]);
+        let result = disassemble_region(&loaded, 0, 8);
+        assert!(result.ok);
+        assert_eq!(result.rows[0].kind, "move");
+        assert!(result.rows[0].text.contains("(a0)+"));
+        assert!(result.rows[0].text.contains("d0"));
+        assert_eq!(result.rows[1].kind, "move");
+        assert!(result.rows[1].text.contains("-(a1)"));
+        assert!(result.rows[1].text.contains("d2"));
+    }
+
+    #[test]
+    fn decode_megadrive_data_alignment_even() {
+        let rom = vec![0x60, 0x03, 0x4E, 0x75];
+        let loaded = sample_loaded("megadrive", rom, vec![0]);
+        let result = disassemble_region(&loaded, 0, 8);
+        assert!(result.ok);
+        assert_eq!(result.rows[0].kind, "branch");
+        assert_eq!(result.rows[0].target, Some(4));
+    }
+
+    #[test]
+    fn decode_snes_bank_crossing_trampolines() {
+        let mut rom = vec![0u8; 0x10010];
+        rom[0..4].copy_from_slice(&[0x22, 0x00, 0x00, 0x01]); // JSL $010000
+        rom[4] = 0x6B; // RTL
+        rom[0x10000] = 0xEA; // NOP in another bank
+        rom[0x10001] = 0x6B; // RTL
+
+        let loaded = sample_loaded("snes", rom, vec![0]);
+        let mut trace = ExecutionTraceLog::default();
+        trace.mark_executed_with_state(
+            0,
+            CpuState {
+                m_flag: false,
+                x_flag: true,
+            },
+        );
+        trace.mark_executed_with_state(
+            0x010000,
+            CpuState {
+                m_flag: true,
+                x_flag: true,
+            },
+        );
+
+        let (regions, graph, hints) = analyze_code_with_trace(&loaded, Some(&trace));
+
+        assert_eq!(regions.len(), 1);
+        assert!(graph.iter().any(|edge| edge.from == 0 && edge.to == 0x010000));
+        assert!(regions[0].functions.iter().any(|function| function.address == 0x010000 && function.executed));
+        assert!(hints.iter().any(|hint| hint.message.contains("Trace dinamico aplicado")));
+    }
+
+    #[test]
+    fn decode_snes_direct_page_indirect_long() {
+        let rom = vec![0xA7, 0x12, 0x60];
+        let loaded = sample_loaded("snes", rom, vec![0]);
+        let result = disassemble_region(&loaded, 0, 8);
+        assert!(result.ok);
+        assert_eq!(result.rows[0].kind, "memory");
+        assert_eq!(result.rows[0].size, 2);
+        assert!(result.rows[0].text.contains("lda [$12]"));
+        assert_eq!(result.rows[1].kind, "return");
+    }
+
+    #[test]
+    fn analyze_code_handles_ascii_disguised_as_code() {
+        let mut rom = vec![0u8; 0x30];
+        rom[0] = 0x4E;
+        rom[1] = 0xB9;
+        rom[2..6].copy_from_slice(&0x0000_0020u32.to_be_bytes());
+        rom[6] = 0x4E;
+        rom[7] = 0x75;
+        rom[0x20..0x24].copy_from_slice(b"GAME");
+
+        let loaded = sample_loaded("megadrive", rom, vec![0]);
+        let mut trace = ExecutionTraceLog::default();
+        trace.mark_executed(0);
+
+        let (regions, _, _) = analyze_code_with_trace(&loaded, Some(&trace));
+        let data_view = disassemble_region(&loaded, 0x20, 4);
+
+        assert_eq!(regions.len(), 1);
+        assert!(!regions[0].functions.iter().any(|function| function.address == 0x20));
+        assert!(!regions[0].disassembly.iter().any(|row| row.offset >= 0x20));
+        assert_eq!(data_view.rows[0].kind, "data");
+    }
+
+    #[test]
+    fn analyze_code_handles_pointers_to_middle_of_instructions() {
+        let mut rom = vec![0u8; 0x10];
+        rom[0] = 0x4E;
+        rom[1] = 0xB9;
+        rom[2..6].copy_from_slice(&0x0000_0002u32.to_be_bytes());
+        rom[6] = 0x4E;
+        rom[7] = 0x75;
+
+        let loaded = sample_loaded("megadrive", rom, vec![0]);
+        let (regions, graph, _) = analyze_code(&loaded);
+
+        assert_eq!(regions.len(), 1);
+        assert!(graph.iter().any(|edge| edge.to == 0x2));
+        assert!(!regions[0].functions.iter().any(|function| function.address == 0x2));
     }
 }

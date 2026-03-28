@@ -17,6 +17,7 @@ RetroDevStudio/
 |       |-- ci.yml
 |       `-- desktop-e2e.yml
 |
+|-- .gitignore
 |-- README.md
 |-- CLAUDE.md
 |-- build-test.bat
@@ -65,6 +66,7 @@ RetroDevStudio/
 |   `-- views/
 |
 |-- src-tauri/
+|   |-- .gitignore
 |   |-- Cargo.toml
 |   |-- build.rs
 |   |-- tauri.conf.json
@@ -106,6 +108,7 @@ RetroDevStudio/
 |       |       |-- graphics.rs
 |       |       |-- loader.rs
 |       |       |-- manifest.rs
+|       |       |-- matching.rs
 |       |       |-- mod.rs
 |       |       |-- platform.rs
 |       |       |-- projection.rs

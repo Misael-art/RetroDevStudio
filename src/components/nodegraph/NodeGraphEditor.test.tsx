@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import NodeGraphEditor, {
+  EMPTY_GRAPH,
   buildNodeMiniMap,
   serializeNodeGraph,
   summarizeNodeGraph,
@@ -75,6 +76,28 @@ const GRAPH_FIXTURE: NodeGraph = {
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
 
+function buildSceneWithGraph(graph: NodeGraph) {
+  return {
+    scene_id: "main_scene",
+    display_name: "Main Scene",
+    entities: [
+      {
+        entity_id: "hero",
+        display_name: "Hero",
+        prefab: null,
+        transform: { x: 16, y: 24 },
+        components: {
+          logic: {
+            graph: serializeNodeGraph(graph),
+          },
+        },
+      },
+    ],
+    background_layers: [],
+    palettes: [],
+  };
+}
+
 describe("NodeGraphEditor helpers", () => {
   it("summarizes entry and disconnected nodes for the overview", () => {
     const summary = summarizeNodeGraph(GRAPH_FIXTURE);
@@ -122,44 +145,8 @@ describe("NodeGraphEditor", () => {
       pendingHistorySnapshot: null,
       emulatorLoaded: false,
       emulPaused: false,
-      activeScene: {
-        scene_id: "main_scene",
-        display_name: "Main Scene",
-        entities: [
-          {
-            entity_id: "hero",
-            display_name: "Hero",
-            prefab: null,
-            transform: { x: 16, y: 24 },
-            components: {
-              logic: {
-                graph: serializeNodeGraph(GRAPH_FIXTURE),
-              },
-            },
-          },
-        ],
-        background_layers: [],
-        palettes: [],
-      },
-      activeSceneSource: {
-        scene_id: "main_scene",
-        display_name: "Main Scene",
-        entities: [
-          {
-            entity_id: "hero",
-            display_name: "Hero",
-            prefab: null,
-            transform: { x: 16, y: 24 },
-            components: {
-              logic: {
-                graph: serializeNodeGraph(GRAPH_FIXTURE),
-              },
-            },
-          },
-        ],
-        background_layers: [],
-        palettes: [],
-      },
+      activeScene: buildSceneWithGraph(GRAPH_FIXTURE),
+      activeSceneSource: buildSceneWithGraph(GRAPH_FIXTURE),
     });
 
     container = document.createElement("div");
@@ -217,6 +204,39 @@ describe("NodeGraphEditor", () => {
     expect(entryCard?.style.left).not.toBe("1200px");
     expect(useEditorStore.getState().activeScene?.entities[0].components.logic?.graph).toBe(
       serializeNodeGraph(GRAPH_FIXTURE)
+    );
+  });
+
+  it("shows a guided empty state and hydrates a quick action without changing the graph schema", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeScene: buildSceneWithGraph(EMPTY_GRAPH),
+        activeSceneSource: buildSceneWithGraph(EMPTY_GRAPH),
+      });
+      await flush();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='nodegraph-empty-overlay']")).toBeInstanceOf(HTMLDivElement);
+    expect(container.textContent).toContain("Criar Player Controller Basico");
+
+    await act(async () => {
+      (container.querySelector("[data-testid='nodegraph-template-player_controller']") as HTMLButtonElement).click();
+      await flush();
+      await flush();
+    });
+
+    const nodeCards = container.querySelectorAll("[data-testid^='node-card-']");
+    expect(nodeCards.length).toBe(3);
+    expect(container.querySelector("[data-testid='nodegraph-guided-commentary']")?.textContent).toContain(
+      "Player Controller Basico"
+    );
+    expect(container.querySelector("[data-testid='nodegraph-guided-commentary']")?.textContent).toContain(
+      "Fluxo conservador"
+    );
+    expect(container.querySelector("[data-testid='nodegraph-overview']")?.textContent).toContain("3 nos");
+    expect(useEditorStore.getState().activeScene?.entities[0].components.logic?.graph).toBe(
+      serializeNodeGraph(EMPTY_GRAPH)
     );
   });
 });

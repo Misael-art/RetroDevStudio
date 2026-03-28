@@ -1743,25 +1743,28 @@ describe("App build flow", () => {
   });
 
   it("shows and toggles the game performance overlay", async () => {
+    const liveOverlayStatus = {
+      vram_used: 4096,
+      vram_limit: 65536,
+      sprite_count: 6,
+      sprite_limit: 80,
+      scanline_sprite_peak: 4,
+      scanline_sprite_limit: 20,
+      dma_used: 4096,
+      dma_limit: 7372,
+      palette_banks_used: 2,
+      palette_banks_limit: 4,
+      bg_layers: 1,
+      bg_layers_limit: 4,
+      errors: [],
+      warnings: [],
+    };
+    mocks.getHwStatus.mockResolvedValue(liveOverlayStatus);
+
     await act(async () => {
       useEditorStore.setState({
         activeViewportTab: "game",
-        hwStatus: {
-          vram_used: 4096,
-          vram_limit: 65536,
-          sprite_count: 6,
-          sprite_limit: 80,
-          scanline_sprite_peak: 4,
-          scanline_sprite_limit: 20,
-          dma_used: 4096,
-          dma_limit: 7372,
-          palette_banks_used: 2,
-          palette_banks_limit: 4,
-          bg_layers: 1,
-          bg_layers_limit: 4,
-          errors: [],
-          warnings: [],
-        },
+        hwStatus: liveOverlayStatus,
       });
       await flush();
       await flush();

@@ -5,6 +5,9 @@ mod hardware;
 mod tools;
 mod ugdm;
 
+pub use tools::reverse::matching::BinaryDiffScorer;
+pub use tools::reverse::trace::{CpuState, ExecutionTraceLog};
+
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
