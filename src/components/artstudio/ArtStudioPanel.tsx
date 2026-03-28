@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useReducer,
+  useRef,
+  useState,
+  type DragEvent,
+  type MouseEvent as ReactMouseEvent,
+  type WheelEvent as ReactWheelEvent,
+} from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEditorStore } from "../../core/store/editorStore";
 import { createSpriteEntityFromAsset } from "../../core/editorEntityFactory";
@@ -14,7 +23,7 @@ import { useSpriteAnimator } from "./useSpriteAnimator";
 
 const ARTSTUDIO_SUPPORTED_FORMATS_LABEL = "PNG, BMP, JPG/JPEG, GIF, WebP e PPM";
 const ARTSTUDIO_CANVAS_MIN_ZOOM = 0.2;
-const ARTSTUDIO_CANVAS_MAX_ZOOM = 8;
+const ARTSTUDIO_CANVAS_MAX_ZOOM = 24;
 
 const ARTSTUDIO_FORMAT_LABELS = {
   png: "PNG",
@@ -148,6 +157,58 @@ function clampZoom(value: number): number {
     return 1;
   }
   return Math.min(ARTSTUDIO_CANVAS_MAX_ZOOM, Math.max(ARTSTUDIO_CANVAS_MIN_ZOOM, value));
+}
+
+export function getArtStudioPanOffsets({
+  startX,
+  startY,
+  currentX,
+  currentY,
+  scrollLeft,
+  scrollTop,
+}: {
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
+  scrollLeft: number;
+  scrollTop: number;
+}) {
+  return {
+    scrollLeft: scrollLeft - (currentX - startX),
+    scrollTop: scrollTop - (currentY - startY),
+  };
+}
+
+export function getArtStudioWheelZoomState({
+  clientX,
+  clientY,
+  deltaY,
+  rect,
+  scrollLeft,
+  scrollTop,
+  sourceZoom,
+}: {
+  clientX: number;
+  clientY: number;
+  deltaY: number;
+  rect: Pick<DOMRect, "left" | "top">;
+  scrollLeft: number;
+  scrollTop: number;
+  sourceZoom: number;
+}) {
+  const pointerX = clientX - rect.left + scrollLeft;
+  const pointerY = clientY - rect.top + scrollTop;
+  const nextZoom = clampZoom(sourceZoom * Math.exp(-deltaY * 0.0015));
+  const ratio = nextZoom / sourceZoom;
+  const viewportX = clientX - rect.left;
+  const viewportY = clientY - rect.top;
+
+  return {
+    nextZoom,
+    scrollLeft: pointerX * ratio - viewportX,
+    scrollTop: pointerY * ratio - viewportY,
+  };
 }
 
 function getInitialSourceZoom(size: { width: number; height: number }): number {
@@ -594,7 +655,7 @@ const INITIAL_STATE: ArtStudioState = {
     { id: "seq_run", name: "RUN", frames: [], fps: 12, loop: true },
     { id: "seq_jump", name: "JUMP", frames: [], fps: 8, loop: false },
   ],
-  activeSequenceId: "seq_idle",
+  activeSequenceId: null,
   playing: false,
   compression: "NONE",
   spriteName: "sprite",
@@ -630,7 +691,7 @@ const COMPRESSION_OPTIONS = [
   { value: "BEST", label: "BEST" },
 ] as const;
 
-function getSuggestedFrameIndex(
+export function getSuggestedFrameIndex(
   canvasRect: DOMRect,
   canvasWidth: number,
   canvasHeight: number,
@@ -673,11 +734,20 @@ export default function ArtStudioPanel() {
   const [state, dispatch] = useReducer(artStudioReducer, INITIAL_STATE);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
+  const stageScrollRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const processingRequestIdRef = useRef(0);
   const saveFeedbackTimeoutRef = useRef<number | null>(null);
+  const panStateRef = useRef<{
+    startX: number;
+    startY: number;
+    scrollLeft: number;
+    scrollTop: number;
+  } | null>(null);
   const [currentPreviewCell, setCurrentPreviewCell] = useState<number>(-1);
   const [dragActive, setDragActive] = useState(false);
+  const [spacePressed, setSpacePressed] = useState(false);
+  const [panning, setPanning] = useState(false);
 
   const activeSequence = state.sequences.find((sequence) => sequence.id === state.activeSequenceId);
   const selectedEntity = activeScene?.entities.find((entity) => entity.entity_id === selectedEntityId);
@@ -710,6 +780,54 @@ export default function ArtStudioPanel() {
       if (saveFeedbackTimeoutRef.current !== null) {
         window.clearTimeout(saveFeedbackTimeoutRef.current);
       }
+    };
+  }, []);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === " ") {
+        setSpacePressed(true);
+      }
+    }
+
+    function handleKeyUp(event: KeyboardEvent) {
+      if (event.key === " ") {
+        setSpacePressed(false);
+      }
+    }
+
+    function handleMouseMove(event: MouseEvent) {
+      if (!panStateRef.current || !stageScrollRef.current) {
+        return;
+      }
+
+      const nextOffsets = getArtStudioPanOffsets({
+        startX: panStateRef.current.startX,
+        startY: panStateRef.current.startY,
+        currentX: event.clientX,
+        currentY: event.clientY,
+        scrollLeft: panStateRef.current.scrollLeft,
+        scrollTop: panStateRef.current.scrollTop,
+      });
+      stageScrollRef.current.scrollLeft = nextOffsets.scrollLeft;
+      stageScrollRef.current.scrollTop = nextOffsets.scrollTop;
+    }
+
+    function handleMouseUp() {
+      panStateRef.current = null;
+      setPanning(false);
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
     };
   }, []);
 
@@ -797,6 +915,9 @@ export default function ArtStudioPanel() {
         });
 
         imageRef.current = loaded.image;
+        if (typeof stageScrollRef.current?.scrollTo === "function") {
+          stageScrollRef.current.scrollTo({ left: 0, top: 0 });
+        }
         logMessage(
           relativeAssetPath ? "success" : "info",
           `[ArtStudio] Imagem processada no backend: ${basenameWithExtension(sourcePath)} (${processed.format ?? "imagem"} ${loaded.size.width}x${loaded.size.height}, paleta ${processed.palette_size}/16).`
@@ -842,7 +963,7 @@ export default function ArtStudioPanel() {
   }, [ingestSpriteSheet, logMessage]);
 
   const handleDrop = useCallback(
-    async (event: React.DragEvent<HTMLDivElement>) => {
+    async (event: DragEvent<HTMLDivElement>) => {
       event.preventDefault();
       event.stopPropagation();
       setDragActive(false);
@@ -927,7 +1048,8 @@ export default function ArtStudioPanel() {
         !state.activeSequenceId ||
         !state.spriteSheetSize ||
         !canvasRef.current ||
-        state.suggestedFrames.length === 0
+        state.suggestedFrames.length === 0 ||
+        spacePressed
       ) {
         return;
       }
@@ -947,7 +1069,7 @@ export default function ArtStudioPanel() {
         dispatch({ type: "TOGGLE_FRAME", cellIndex: cell });
       }
     },
-    [state.activeSequenceId, state.spriteSheetSize, state.suggestedFrames]
+    [spacePressed, state.activeSequenceId, state.spriteSheetSize, state.suggestedFrames]
   );
 
   const setSourceZoom = useCallback((value: number) => {
@@ -963,6 +1085,53 @@ export default function ArtStudioPanel() {
       value: getInitialSourceZoom(state.spriteSheetSize),
     });
   }, [state.spriteSheetSize]);
+
+  const handleStageWheel = useCallback(
+    (event: ReactWheelEvent<HTMLDivElement>) => {
+      if (!state.spriteSheetSize || !stageScrollRef.current) {
+        return;
+      }
+
+      event.preventDefault();
+      const container = stageScrollRef.current;
+      const rect = container.getBoundingClientRect();
+      const nextState = getArtStudioWheelZoomState({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        deltaY: event.deltaY,
+        rect,
+        scrollLeft: container.scrollLeft,
+        scrollTop: container.scrollTop,
+        sourceZoom: state.sourceZoom,
+      });
+
+      dispatch({ type: "SET_SOURCE_ZOOM", value: nextState.nextZoom });
+
+      window.requestAnimationFrame(() => {
+        container.scrollLeft = nextState.scrollLeft;
+        container.scrollTop = nextState.scrollTop;
+      });
+    },
+    [state.sourceZoom, state.spriteSheetSize]
+  );
+
+  const handleStageMouseDown = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      if ((!spacePressed && event.button !== 1) || !stageScrollRef.current) {
+        return;
+      }
+
+      event.preventDefault();
+      panStateRef.current = {
+        startX: event.clientX,
+        startY: event.clientY,
+        scrollLeft: stageScrollRef.current.scrollLeft,
+        scrollTop: stageScrollRef.current.scrollTop,
+      };
+      setPanning(true);
+    },
+    [spacePressed]
+  );
 
   const applyConstrainedFrameSize = useCallback(
     (nextWidth: number, nextHeight: number) => {
@@ -1335,30 +1504,46 @@ export default function ArtStudioPanel() {
   const resOutput = `SPRITE ${state.spriteName || "sprite"} "${state.spritePath || "PENDENTE_IMPORTACAO"}" [${state.frameWidth}] [${state.frameHeight}] [${state.compression}]`;
 
   return (
-    <div className="flex h-full flex-col gap-3 bg-[#0b0f19]">
-      <div className="mx-3 mt-3 rounded-xl border border-[#fab387]/35 bg-[linear-gradient(135deg,rgba(250,179,135,0.14),rgba(137,180,250,0.08))] px-4 py-3 text-[11px] text-[#f9e2af]">
-        <div className="font-semibold uppercase tracking-[0.24em] text-[#fab387]">
-          ArtStudio Experimental
+    <div className="flex h-full flex-col gap-2 bg-[#0b0f19]">
+      <div className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#313244] bg-[linear-gradient(135deg,#111827,#0f172a_58%,#172554)] px-4 py-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="rounded-full border border-[#fab387]/35 bg-[#fab387]/12 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#fab387]">
+              Experimental
+            </span>
+            <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#7dd3fc]">
+              Art Studio
+            </span>
+          </div>
+          <p className="mt-2 text-[12px] text-[#cbd5e1]">
+            Workspace de ingestao, slicing e animacao de sprites.
+          </p>
         </div>
-        <p className="mt-1 text-[12px] leading-5 text-[#f5e0dc]">
-          Ferramenta de ingestao e preparo de sprites. Importa imagens cruas, permite slicing e preview, mas a integracao total com o pipeline ainda nao esta fechada.
-        </p>
+        <div className="flex flex-wrap items-center gap-2 text-[10px] text-[#94a3b8]">
+          <span className="rounded-full border border-[#1f2937] bg-[#0b1120] px-2.5 py-1">
+            {ARTSTUDIO_SUPPORTED_FORMATS_LABEL}
+          </span>
+          <span className="rounded-full border border-[#1f2937] bg-[#0b1120] px-2.5 py-1">
+            Zoom wheel
+          </span>
+          <span className="rounded-full border border-[#1f2937] bg-[#0b1120] px-2.5 py-1">
+            Space + drag
+          </span>
+        </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 gap-3 px-3 pb-3 xl:grid-cols-[minmax(0,1.45fr)_minmax(300px,340px)_minmax(320px,0.95fr)]">
-        <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[#313244] bg-[linear-gradient(180deg,#111827,#0f172a)] shadow-[0_18px_50px_rgba(0,0,0,0.28)]">
+      <div className="grid min-h-0 flex-1 gap-3 px-3 pb-3 xl:grid-cols-[minmax(0,1fr)_360px] xl:grid-rows-[minmax(0,1fr)_240px]">
+        <section
+          data-testid="artstudio-main-stage"
+          className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[#313244] bg-[linear-gradient(180deg,#111827,#0f172a)] shadow-[0_18px_50px_rgba(0,0,0,0.28)] xl:col-start-1 xl:row-start-1"
+        >
           <div className="border-b border-[#1f2937] px-4 py-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
-                  1. Source / Sprite Sheet
+                  Source Stage
                 </p>
-                <h3 className="mt-1 text-sm font-semibold text-[#e2e8f0]">
-                  Importe uma imagem bruta e prepare o slicing
-                </h3>
-                <p className="mt-1 text-[11px] text-[#94a3b8]">
-                  Aceita {ARTSTUDIO_SUPPORTED_FORMATS_LABEL}. Use arquivos do projeto ou imagens externas para preparar a animacao.
-                </p>
+                <h3 className="mt-1 text-sm font-semibold text-[#e2e8f0]">Canvas de origem</h3>
               </div>
               <button
                 type="button"
@@ -1389,7 +1574,7 @@ export default function ArtStudioPanel() {
               </span>
             </div>
 
-            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_260px]">
+            <div className="grid gap-3 grid-cols-1">
               <div
                 className={`flex min-h-[420px] flex-col overflow-hidden rounded-2xl border border-dashed ${
                   dragActive
@@ -1409,12 +1594,23 @@ export default function ArtStudioPanel() {
                 onDrop={handleDrop}
               >
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#1f2937] px-4 py-3">
-                  <div className="text-[11px] text-[#94a3b8]">
+                  <div>
                     <div className="font-semibold uppercase tracking-[0.18em] text-[#cbd5e1]">
                       Canvas de origem
                     </div>
-                    <div className="mt-1">
-                      Clique nos quadros para montar a sequencia ativa. Arraste uma imagem para esta area se preferir.
+                    <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-[#94a3b8]">
+                      <span
+                        className="rounded-full border border-[#1f2937] bg-[#0b1120] px-2 py-0.5"
+                        title="Role para aproximar ou afastar"
+                      >
+                        Zoom wheel
+                      </span>
+                      <span
+                        className="rounded-full border border-[#1f2937] bg-[#0b1120] px-2 py-0.5"
+                        title="Segure espaco e arraste para mover o stage"
+                      >
+                        Space + drag
+                      </span>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1445,12 +1641,20 @@ export default function ArtStudioPanel() {
                   </div>
                 </div>
 
-                <div className="min-h-0 flex-1 overflow-auto px-4 py-4">
+                <div
+                  ref={stageScrollRef}
+                  className={`min-h-0 flex-1 overflow-auto px-4 py-4 ${
+                    panning ? "cursor-grabbing" : spacePressed ? "cursor-grab" : ""
+                  }`}
+                  onMouseDown={handleStageMouseDown}
+                  onWheel={handleStageWheel}
+                  title="Scroll: zoom. Espaço + arraste: pan."
+                >
                   {state.spriteSheetUrl && state.spriteSheetSize ? (
                     <div className="inline-flex min-h-full min-w-full items-center justify-center">
                       <canvas
                         ref={canvasRef}
-                        className="cursor-crosshair rounded-lg shadow-[0_14px_40px_rgba(0,0,0,0.35)]"
+                        className={`${spacePressed ? "" : "cursor-crosshair "}rounded-lg shadow-[0_14px_40px_rgba(0,0,0,0.35)]`}
                         style={{
                           imageRendering: "pixelated",
                           width: `${Math.max(1, state.spriteSheetSize.width * state.sourceZoom)}px`,
@@ -1462,25 +1666,20 @@ export default function ArtStudioPanel() {
                     </div>
                   ) : (
                     <div className="flex h-full min-h-[320px] flex-col items-center justify-center gap-4 px-6 text-center">
-                      <div className="rounded-2xl border border-[#7dd3fc]/25 bg-[#0f172a]/80 p-5 shadow-[0_20px_40px_rgba(0,0,0,0.25)]">
+                      <div className="rounded-2xl border border-[#7dd3fc]/25 bg-[#0f172a]/80 px-6 py-5 shadow-[0_20px_40px_rgba(0,0,0,0.25)]">
                         <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
-                          Fluxo recomendado
+                          Stage vazio
                         </div>
-                        <div className="mt-3 space-y-2 text-sm text-[#e2e8f0]">
-                          <p>1. Importe uma imagem crua ou arraste o arquivo para esta area.</p>
-                          <p>2. Ajuste o grid de slicing.</p>
-                          <p>3. Monte sequencias, valide no preview e aplique na entidade.</p>
-                        </div>
+                        <p className="mt-3 max-w-xl text-[12px] leading-6 text-[#94a3b8]">
+                          Importe uma imagem ou solte um arquivo para abrir o sprite sheet.
+                        </p>
                       </div>
-                      <p className="max-w-xl text-[12px] leading-6 text-[#94a3b8]">
-                        O ArtStudio nao presume um sprite sheet pronto para a plataforma. Ele pode receber imagens grandes, recortes soltos, fundos solidos e arquivos em formatos comuns para preparar a conversao futura.
-                      </p>
                     </div>
                   )}
                 </div>
               </div>
 
-              <div className="flex flex-col gap-3">
+              <div className="hidden flex-col gap-3">
                 <div className="rounded-2xl border border-[#1f2937] bg-[#0f172a] p-4">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
                     Diagnostico
@@ -1611,106 +1810,178 @@ export default function ArtStudioPanel() {
           </div>
         </section>
 
-        <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[#313244] bg-[linear-gradient(180deg,#111827,#0f172a)] shadow-[0_18px_50px_rgba(0,0,0,0.28)]">
+        <section
+          data-testid="artstudio-timeline"
+          className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[#313244] bg-[linear-gradient(180deg,#111827,#0f172a)] shadow-[0_18px_50px_rgba(0,0,0,0.28)] xl:col-start-1 xl:row-start-2"
+        >
           <div className="border-b border-[#1f2937] px-4 py-3">
             <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#cba6f7]">
-              2. Sequences / Configuracao
+              Timeline
             </p>
             <h3 className="mt-1 text-sm font-semibold text-[#e2e8f0]">
               Organize quadros em animacoes reutilizaveis
             </h3>
           </div>
 
-          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-            <div className="grid grid-cols-2 gap-2">
-              <div className="rounded-xl border border-[#1f2937] bg-[#0b1220] px-3 py-2">
-                <div className="text-[10px] uppercase tracking-[0.2em] text-[#64748b]">Sequencias</div>
-                <div className="mt-1 text-lg font-semibold text-[#e2e8f0]">
-                  {state.sequences.length}
-                </div>
-              </div>
-              <div className="rounded-xl border border-[#1f2937] bg-[#0b1220] px-3 py-2">
-                <div className="text-[10px] uppercase tracking-[0.2em] text-[#64748b]">
-                  Frames usados
-                </div>
-                <div className="mt-1 text-lg font-semibold text-[#e2e8f0]">
-                  {usedFrameCount}
-                </div>
-              </div>
-            </div>
-
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
             <div className="flex items-center justify-between">
-              <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#cba6f7]">
-                  Lista de sequencias
-                </div>
-                <div className="mt-1 text-[12px] text-[#94a3b8]">
-                  Clique nos quadros do canvas para preencher a sequencia ativa.
-                </div>
+              <div className="flex items-center gap-2">
+                <span className="rounded-full border border-[#313244] bg-[#0b1220] px-2.5 py-1 text-[10px] font-semibold text-[#94a3b8]">
+                  Sequencias {state.sequences.length}
+                </span>
+                <span className="rounded-full border border-[#313244] bg-[#0b1220] px-2.5 py-1 text-[10px] font-semibold text-[#94a3b8]">
+                  Frames usados {usedFrameCount}
+                </span>
               </div>
-              <button
-                type="button"
-                onClick={handleAddSequence}
-                className="rounded-xl border border-[#cba6f7]/40 bg-[#cba6f7]/12 px-3 py-1.5 text-[11px] font-semibold text-[#e9d5ff] transition-colors hover:bg-[#cba6f7]/18"
-              >
-                + Nova sequencia
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => dispatch({ type: "SELECT_SEQUENCE", id: null })}
+                  className={`rounded-xl border px-3 py-1.5 text-[11px] font-semibold transition-colors ${
+                    state.activeSequenceId === null
+                      ? "border-[#7dd3fc]/40 bg-[#7dd3fc]/10 text-[#dff6ff]"
+                      : "border-[#313244] bg-[#111827] text-[#cbd5e1] hover:bg-[#1e293b]"
+                  }`}
+                >
+                  Imagem
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAddSequence}
+                  className="rounded-xl border border-[#cba6f7]/40 bg-[#cba6f7]/12 px-3 py-1.5 text-[11px] font-semibold text-[#e9d5ff] transition-colors hover:bg-[#cba6f7]/18"
+                >
+                  + Nova sequencia
+                </button>
+              </div>
             </div>
 
-            <ul className="space-y-2">
-              {state.sequences.map((sequence) => {
-                const isActive = state.activeSequenceId === sequence.id;
-                return (
-                  <li
-                    key={sequence.id}
-                    role="button"
-                    tabIndex={0}
-                    className={`rounded-2xl border px-3 py-3 transition-colors ${
-                      isActive
-                        ? "border-[#cba6f7]/45 bg-[#cba6f7]/10"
-                        : "border-[#1f2937] bg-[#0b1220] hover:border-[#334155]"
-                    }`}
-                    onClick={() => dispatch({ type: "SELECT_SEQUENCE", id: sequence.id })}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        dispatch({ type: "SELECT_SEQUENCE", id: sequence.id });
-                      }
-                    }}
-                  >
-                    <div className="flex items-start gap-2">
-                      <input
-                        type="text"
-                        value={sequence.name}
-                        onChange={(event) =>
-                          dispatch({
-                            type: "RENAME_SEQUENCE",
-                            id: sequence.id,
-                            name: event.target.value,
-                          })
+            <div className="min-h-0 overflow-x-auto overflow-y-hidden">
+              <div className="flex min-h-full gap-3">
+                {state.sequences.map((sequence) => {
+                  const isActive = state.activeSequenceId === sequence.id;
+                  return (
+                    <div
+                      key={sequence.id}
+                      role="button"
+                      tabIndex={0}
+                      data-testid={`artstudio-sequence-card-${sequence.id}`}
+                      className={`flex min-w-[220px] max-w-[220px] flex-col gap-2 rounded-2xl border px-3 py-3 transition-colors ${
+                        isActive
+                          ? "border-[#cba6f7]/45 bg-[#cba6f7]/10"
+                          : "border-[#1f2937] bg-[#0b1220] hover:border-[#334155]"
+                      }`}
+                      onClick={() => dispatch({ type: "SELECT_SEQUENCE", id: sequence.id })}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          dispatch({ type: "SELECT_SEQUENCE", id: sequence.id });
                         }
-                        onClick={(event) => event.stopPropagation()}
-                        className="min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-0 py-0 text-sm font-semibold text-[#e2e8f0] focus:border-transparent focus:outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          dispatch({ type: "DELETE_SEQUENCE", id: sequence.id });
-                        }}
-                        className="rounded-lg border border-[#f38ba8]/35 bg-[#f38ba8]/10 px-2 py-1 text-[11px] font-semibold text-[#fda4af] transition-colors hover:bg-[#f38ba8]/16"
-                        title="Remover sequencia"
-                      >
-                        Remover
-                      </button>
+                      }}
+                    >
+                      <div className="flex items-start gap-2">
+                        <input
+                          type="text"
+                          value={sequence.name}
+                          onChange={(event) =>
+                            dispatch({
+                              type: "RENAME_SEQUENCE",
+                              id: sequence.id,
+                              name: event.target.value,
+                            })
+                          }
+                          onClick={(event) => event.stopPropagation()}
+                          className="min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-0 py-0 text-sm font-semibold text-[#e2e8f0] focus:border-transparent focus:outline-none"
+                        />
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            dispatch({ type: "DELETE_SEQUENCE", id: sequence.id });
+                          }}
+                          className="rounded-lg border border-[#f38ba8]/35 bg-[#f38ba8]/10 px-2 py-1 text-[11px] font-semibold text-[#fda4af] transition-colors hover:bg-[#f38ba8]/16"
+                          title="Remover sequencia"
+                        >
+                          Remover
+                        </button>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] text-[#94a3b8]">
+                        <span>{sequence.frames.length} frame(s)</span>
+                        <span>{sequence.loop ? "Loop" : "One shot"}</span>
+                      </div>
+                      <div className="truncate rounded-xl border border-[#1f2937] bg-[#111827] px-2.5 py-2 text-[11px] text-[#94a3b8]">
+                        {sequence.frames.length > 0
+                          ? `Frames selecionados: ${sequence.frames.join(", ")}`
+                          : "Sem frames ainda"}
+                      </div>
                     </div>
-                    <div className="mt-2 flex items-center justify-between text-[11px] text-[#94a3b8]">
-                      <span>{sequence.frames.length} frame(s)</span>
-                      <span>{sequence.loop ? "Loop" : "One shot"}</span>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section
+          data-testid="artstudio-inspector"
+          className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[#313244] bg-[linear-gradient(180deg,#111827,#0f172a)] shadow-[0_18px_50px_rgba(0,0,0,0.28)] xl:col-start-2 xl:row-span-2"
+        >
+          <div className="border-b border-[#1f2937] px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#a6e3a1]">
+              Inspector
+            </p>
+            <h3 className="mt-1 text-sm font-semibold text-[#e2e8f0]">Preview, output e apply</h3>
+          </div>
+
+          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+            <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#a6e3a1]">
+                    Preview
+                  </div>
+                  <div className="mt-1 text-[12px] text-[#94a3b8]">
+                    Validacao visual da sequencia ativa
+                  </div>
+                </div>
+                <div className="text-right text-[11px] text-[#94a3b8]">
+                  <div>{activeSequence?.name ?? "Sem sequencia"}</div>
+                  <div>{activeSequence?.frames.length ?? 0} frame(s)</div>
+                </div>
+              </div>
+              <div className="relative mt-4 flex min-h-[260px] items-center justify-center overflow-hidden rounded-2xl border border-[#1f2937] bg-[radial-gradient(circle_at_top,#0f172a,#030712_72%)]">
+                <canvas
+                  ref={previewCanvasRef}
+                  width={260}
+                  height={260}
+                  className="max-h-full max-w-full"
+                  style={{ imageRendering: "pixelated" }}
+                />
+                {!state.spriteSheetUrl && (
+                  <span className="absolute px-6 text-center text-[12px] leading-5 text-[#475569]">
+                    Sem preview ainda.
+                  </span>
+                )}
+              </div>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => dispatch({ type: "SET_PLAYING", playing: true })}
+                  disabled={!activeSequence?.frames.length}
+                  className="rounded-xl border border-[#a6e3a1]/45 bg-[#a6e3a1]/14 px-3 py-1.5 text-[11px] font-semibold text-[#bbf7d0] transition-colors hover:bg-[#a6e3a1]/20 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Play
+                </button>
+                <button
+                  type="button"
+                  onClick={() => dispatch({ type: "SET_PLAYING", playing: false })}
+                  className="rounded-xl border border-[#f38ba8]/45 bg-[#f38ba8]/12 px-3 py-1.5 text-[11px] font-semibold text-[#fecdd3] transition-colors hover:bg-[#f38ba8]/18"
+                >
+                  Stop
+                </button>
+                <span className="rounded-full border border-[#1f2937] bg-[#111827] px-2.5 py-1 text-[10px] font-semibold text-[#94a3b8]">
+                  {state.playing ? "Animando" : "Parado"}
+                </span>
+              </div>
+            </div>
 
             {activeSequence ? (
               <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
@@ -1756,15 +2027,94 @@ export default function ArtStudioPanel() {
                   </div>
                 </div>
               </div>
-            ) : (
-              <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4 text-[12px] text-[#94a3b8]">
-                Crie ou selecione uma sequencia para editar FPS, loop e quadros.
+            ) : null}
+
+            <div className="rounded-2xl border border-[#1f2937] bg-[#0f172a] p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
+                Diagnostico
               </div>
-            )}
+              <p className="mt-3 text-[12px] leading-5 text-[#cbd5e1]">{loadStatusText}</p>
+              {state.spriteSheetWarnings.length > 0 && (
+                <ul className="mt-3 space-y-2 text-[11px] leading-5 text-[#f9e2af]">
+                  {state.spriteSheetWarnings.map((warning) => (
+                    <li
+                      key={warning}
+                      className="rounded-xl border border-[#f9e2af]/20 bg-[#f9e2af]/8 px-3 py-2"
+                    >
+                      {warning}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
 
             <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#cba6f7]">
-                Preparacao para SGDK
+              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
+                Metadados
+              </div>
+              <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-[12px]">
+                <dt className="text-[#64748b]">Arquivo</dt>
+                <dd className="truncate font-medium text-[#e2e8f0]">{state.spriteSheetDisplayName || "Nenhum"}</dd>
+                <dt className="text-[#64748b]">Formato</dt>
+                <dd className="font-medium text-[#e2e8f0]">{state.spriteSheetFormat ?? "-"}</dd>
+                <dt className="text-[#64748b]">Resolucao</dt>
+                <dd className="font-medium text-[#e2e8f0]">
+                  {state.spriteSheetSize ? `${state.spriteSheetSize.width} x ${state.spriteSheetSize.height}` : "-"}
+                </dd>
+                <dt className="text-[#64748b]">Origem</dt>
+                <dd className="font-medium text-[#e2e8f0]">{sourceOriginLabel}</dd>
+                <dt className="text-[#64748b]">Transparencia</dt>
+                <dd className="font-medium text-[#e2e8f0]">
+                  {state.spriteSheetBackgroundMode
+                    ? `${state.spriteSheetBackgroundMode} (${state.spriteSheetTransparentPixels ?? 0} px)`
+                    : "-"}
+                </dd>
+                <dt className="text-[#64748b]">Perfil</dt>
+                <dd className="font-medium text-[#e2e8f0]">
+                  {state.spriteSheetMetaSpriteCandidate ? "Meta-sprite" : "Sprite simples"}
+                </dd>
+                <dt className="text-[#64748b]">Asset</dt>
+                <dd className="truncate font-medium text-[#e2e8f0]">{state.spritePath || "Pendente de importacao canonica"}</dd>
+              </dl>
+            </div>
+
+            <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
+                Configuracoes de exportacao
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <label className="space-y-1 text-[11px] text-[#94a3b8]">
+                  <span>Frame W</span>
+                  <input
+                    type="number"
+                    min={8}
+                    max={64}
+                    value={state.frameWidth}
+                    onChange={(event) =>
+                      applyConstrainedFrameSize(
+                        Math.max(8, Math.min(64, Number(event.target.value) || 32)),
+                        state.frameHeight
+                      )
+                    }
+                    className="w-full rounded-xl border border-[#334155] bg-[#111827] px-3 py-2 text-sm font-mono text-[#e2e8f0] focus:border-[#7dd3fc] focus:outline-none"
+                  />
+                </label>
+                <label className="space-y-1 text-[11px] text-[#94a3b8]">
+                  <span>Frame H</span>
+                  <input
+                    type="number"
+                    min={8}
+                    max={64}
+                    value={state.frameHeight}
+                    onChange={(event) =>
+                      applyConstrainedFrameSize(
+                        state.frameWidth,
+                        Math.max(8, Math.min(64, Number(event.target.value) || 32))
+                      )
+                    }
+                    className="w-full rounded-xl border border-[#334155] bg-[#111827] px-3 py-2 text-sm font-mono text-[#e2e8f0] focus:border-[#7dd3fc] focus:outline-none"
+                  />
+                </label>
               </div>
               <label className="mt-3 block space-y-1 text-[11px] text-[#94a3b8]">
                 <span>Compressao</span>
@@ -1773,7 +2123,7 @@ export default function ArtStudioPanel() {
                   onChange={(event) =>
                     dispatch({ type: "SET_COMPRESSION", value: event.target.value })
                   }
-                  className="w-full rounded-xl border border-[#334155] bg-[#111827] px-3 py-2 text-sm font-mono text-[#e2e8f0] focus:border-[#cba6f7] focus:outline-none"
+                  className="w-full rounded-xl border border-[#334155] bg-[#111827] px-3 py-2 text-sm font-mono text-[#e2e8f0] focus:border-[#7dd3fc] focus:outline-none"
                 >
                   {COMPRESSION_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
@@ -1805,70 +2155,6 @@ export default function ArtStudioPanel() {
                     />
                   ))}
                 </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[#313244] bg-[linear-gradient(180deg,#111827,#0f172a)] shadow-[0_18px_50px_rgba(0,0,0,0.28)]">
-          <div className="border-b border-[#1f2937] px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#a6e3a1]">
-              3. Preview / Output / Apply
-            </p>
-            <h3 className="mt-1 text-sm font-semibold text-[#e2e8f0]">
-              Revise a animacao e aplique com seguranca
-            </h3>
-          </div>
-
-          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-            <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#a6e3a1]">
-                    Preview
-                  </div>
-                  <div className="mt-1 text-[12px] text-[#94a3b8]">
-                    Validacao visual da sequencia ativa
-                  </div>
-                </div>
-                <div className="text-right text-[11px] text-[#94a3b8]">
-                  <div>{activeSequence?.name ?? "Sem sequencia"}</div>
-                  <div>{activeSequence?.frames.length ?? 0} frame(s)</div>
-                </div>
-              </div>
-              <div className="relative mt-4 flex min-h-[260px] items-center justify-center overflow-hidden rounded-2xl border border-[#1f2937] bg-[radial-gradient(circle_at_top,#0f172a,#030712_72%)]">
-                <canvas
-                  ref={previewCanvasRef}
-                  width={260}
-                  height={260}
-                  className="max-h-full max-w-full"
-                  style={{ imageRendering: "pixelated" }}
-                />
-                {!state.spriteSheetUrl && (
-                  <span className="absolute px-6 text-center text-[12px] leading-5 text-[#475569]">
-                    Importe uma imagem e selecione frames para validar a animacao aqui.
-                  </span>
-                )}
-              </div>
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => dispatch({ type: "SET_PLAYING", playing: true })}
-                  disabled={!activeSequence?.frames.length}
-                  className="rounded-xl border border-[#a6e3a1]/45 bg-[#a6e3a1]/14 px-3 py-1.5 text-[11px] font-semibold text-[#bbf7d0] transition-colors hover:bg-[#a6e3a1]/20 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Play
-                </button>
-                <button
-                  type="button"
-                  onClick={() => dispatch({ type: "SET_PLAYING", playing: false })}
-                  className="rounded-xl border border-[#f38ba8]/45 bg-[#f38ba8]/12 px-3 py-1.5 text-[11px] font-semibold text-[#fecdd3] transition-colors hover:bg-[#f38ba8]/18"
-                >
-                  Stop
-                </button>
-                <span className="rounded-full border border-[#1f2937] bg-[#111827] px-2.5 py-1 text-[10px] font-semibold text-[#94a3b8]">
-                  {state.playing ? "Animando" : "Parado"}
-                </span>
               </div>
             </div>
 
@@ -1921,14 +2207,6 @@ export default function ArtStudioPanel() {
                   : "Aplicar e criar entidade na cena"}
             </button>
 
-            <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4 text-[12px] leading-5 text-[#94a3b8]">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#a6e3a1]">
-                Proximo passo natural
-              </div>
-              <p className="mt-2">
-                O layout agora cobre o fluxo importar, fatiar, animar, revisar e aplicar. A conversao real para Mega Drive continua sendo uma etapa futura do pipeline.
-              </p>
-            </div>
           </div>
         </section>
       </div>

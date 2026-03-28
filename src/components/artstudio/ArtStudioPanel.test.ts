@@ -6,6 +6,9 @@ import ArtStudioPanel, {
   buildArtStudioAnimations,
   describeArtStudioLoadFailure,
   getArtStudioImageFormatLabel,
+  getArtStudioPanOffsets,
+  getArtStudioWheelZoomState,
+  getSuggestedFrameIndex,
   resolveArtStudioSpriteAssetPath,
   type SpriteSequence,
 } from "./ArtStudioPanel";
@@ -118,6 +121,67 @@ describe("ArtStudioPanel helpers", () => {
         fps: 12,
         loop: true,
       },
+    });
+  });
+
+  it("maps canvas client coordinates back to the correct suggested frame", () => {
+    expect(
+      getSuggestedFrameIndex(
+        new DOMRect(10, 20, 128, 64),
+        128,
+        64,
+        64,
+        32,
+        [
+          { index: 0, x: 0, y: 0, width: 32, height: 32 },
+          { index: 1, x: 32, y: 0, width: 32, height: 32 },
+        ],
+        95,
+        40
+      )
+    ).toBe(1);
+
+    expect(
+      getSuggestedFrameIndex(
+        new DOMRect(10, 20, 128, 64),
+        128,
+        64,
+        64,
+        32,
+        [{ index: 0, x: 0, y: 0, width: 32, height: 32 }],
+        5,
+        10
+      )
+    ).toBeNull();
+  });
+
+  it("computes stage zoom and pan offsets from pointer helpers", () => {
+    const nextZoomState = getArtStudioWheelZoomState({
+      clientX: 50,
+      clientY: 40,
+      deltaY: -100,
+      rect: { left: 0, top: 0 },
+      scrollLeft: 20,
+      scrollTop: 10,
+      sourceZoom: 1,
+    });
+
+    expect(nextZoomState.nextZoom).toBeCloseTo(1.16, 2);
+    expect(nextZoomState.scrollLeft).toBeCloseTo(31.33, 2);
+    expect(nextZoomState.scrollTop).toBeCloseTo(18.09, 2);
+
+    expect(
+      getArtStudioPanOffsets({
+        startX: 100,
+        startY: 80,
+        currentX: 124,
+        currentY: 92,
+        scrollLeft: 40,
+        scrollTop: 30,
+      })
+    ).toEqual({
+      scrollLeft: 16,
+      scrollTop: 18,
     });
   });
 });
@@ -314,6 +378,53 @@ describe("ArtStudioPanel import flow", () => {
     expect(container.textContent).toContain("corner (128 px)");
     expect(findButton(container, /Aplicar/).disabled).toBe(true);
     expect(mocks.artProcessPalette).toHaveBeenCalledWith("D:/Downloads/hero.webp");
+  });
+
+  it("renders the docked layout and keeps the inspector contextual until a sequence is selected", async () => {
+    mocks.open.mockResolvedValue("D:/Downloads/hero.webp");
+
+    await act(async () => {
+      findButton(container, "Importar imagem").click();
+      await flush();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='artstudio-main-stage']")).not.toBeNull();
+    expect(container.querySelector("[data-testid='artstudio-timeline']")).not.toBeNull();
+    expect(container.querySelector("[data-testid='artstudio-inspector']")).not.toBeNull();
+    expect(
+      (
+        container.querySelector(
+          "[data-testid='artstudio-sequence-card-seq_idle'] input"
+        ) as HTMLInputElement | null
+      )?.value
+    ).toBe("IDLE");
+    expect(
+      (
+        container.querySelector(
+          "[data-testid='artstudio-sequence-card-seq_run'] input"
+        ) as HTMLInputElement | null
+      )?.value
+    ).toBe("RUN");
+    expect(
+      (
+        container.querySelector(
+          "[data-testid='artstudio-sequence-card-seq_jump'] input"
+        ) as HTMLInputElement | null
+      )?.value
+    ).toBe("JUMP");
+    expect(container.textContent).toContain("Metadados");
+    expect(container.textContent).not.toContain("Sequencia ativa");
+
+    await act(async () => {
+      (
+        container.querySelector("[data-testid='artstudio-sequence-card-seq_idle']") as HTMLElement
+      )?.click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("Sequencia ativa");
+    expect(container.textContent).toContain("Loop automatico");
   });
 
   it("imports the canonical sprite sheet before unlocking apply", async () => {
