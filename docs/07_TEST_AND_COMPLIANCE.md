@@ -71,6 +71,7 @@
 ### 3.1 Agregacao canonica de readiness
 - `node scripts/release-readiness.mjs` gera um snapshot objetivo do estado de release em `src-tauri/target-test/validation/release-readiness.json` e `release-readiness.md`.
 - `npm run release:readiness:baseline` reexecuta os 6 gates locais e, em Windows com `toolchains/webdriver/msedgedriver.exe` disponivel, tambem executa o `desktop E2E` canonico com `--skip-build` antes de gerar o report.
+- Em Windows, os gates Rust da baseline de readiness devem rodar pelo wrapper canonico `scripts/run-cargo-msvc.cmd --manifest-path .\\src-tauri\\Cargo.toml`, e nao por `cargo` cru nem forçando `CARGO_TARGET_DIR=cargo-target-shadow` para esses dois gates.
 - O report deve ser tratado como a fotografia canonica da promocao RC -> beta/producao: artefatos, dirty worktree, baseline, upstream report, QA manual pendente e bloqueadores explicitos.
 - O agregador nao substitui a validacao manual nem o smoke institutional em Windows; ele reduz falso positivo e centraliza evidencias.
 

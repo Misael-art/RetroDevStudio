@@ -24,6 +24,7 @@ import {
   mkdir,
   readFile,
   readdir,
+  rm,
   stat,
   writeFile,
 } from "node:fs/promises";
@@ -57,27 +58,53 @@ const DEFAULT_CARGO_TARGET_DIR =
       )
     : path.join(os.tmpdir(), "retrodevstudio-cargo-target");
 
+function cargoBaselineGate(id, label, unixArgs, windowsArgs) {
+  if (process.platform === "win32") {
+    return {
+      id,
+      label,
+      command: path.join("scripts", "run-cargo-msvc.cmd"),
+      args: windowsArgs,
+      cwd: repoRoot,
+      useCargoTargetDir: false,
+    };
+  }
+
+  return {
+    id,
+    label,
+    command: "cargo",
+    args: unixArgs,
+    cwd: path.join(repoRoot, "src-tauri"),
+    useCargoTargetDir: true,
+  };
+}
+
 const BASELINE_GATES = [
   { id: "check_tree", label: "check:tree", command: npmCommand(), args: ["run", "check:tree"] },
   { id: "lint", label: "lint", command: npmCommand(), args: ["run", "lint"] },
   { id: "tsc", label: "tsc --noEmit", command: npxCommand(), args: ["tsc", "--noEmit"] },
   { id: "frontend_tests", label: "npm test", command: npmCommand(), args: ["test"] },
-  {
-    id: "cargo_clippy",
-    label: "cargo clippy",
-    command: "cargo",
-    args: ["clippy", "--", "-D", "warnings"],
-    cwd: path.join(repoRoot, "src-tauri"),
-    useCargoTargetDir: true,
-  },
-  {
-    id: "cargo_test",
-    label: "cargo test --lib",
-    command: "cargo",
-    args: ["test", "--lib", "--", "--nocapture", "--test-threads=1"],
-    cwd: path.join(repoRoot, "src-tauri"),
-    useCargoTargetDir: true,
-  },
+  cargoBaselineGate(
+    "cargo_clippy",
+    "cargo clippy",
+    ["clippy", "--", "-D", "warnings"],
+    ["clippy", "--manifest-path", ".\\src-tauri\\Cargo.toml", "--", "-D", "warnings"]
+  ),
+  cargoBaselineGate(
+    "cargo_test",
+    "cargo test --lib",
+    ["test", "--lib", "--", "--nocapture", "--test-threads=1"],
+    [
+      "test",
+      "--manifest-path",
+      ".\\src-tauri\\Cargo.toml",
+      "--lib",
+      "--",
+      "--nocapture",
+      "--test-threads=1",
+    ]
+  ),
 ];
 
 const MANUAL_QA_BLOCKS = [
@@ -105,6 +132,21 @@ const LOCAL_ONLY_STATUS_PATHS = new Set([
   "AGENTS.md",
   "docs/ESTUDO_FRONTEND_GUI_NAO_CANONICO.md",
 ]);
+
+function shouldResetShadowTargetBeforeBaseline(options) {
+  if (!options.runBaseline || process.platform !== "win32") {
+    return false;
+  }
+
+  if (process.env.CARGO_TARGET_DIR || process.env.RDS_DISABLE_SHADOW_TARGET_RESET === "1") {
+    return false;
+  }
+
+  return (
+    path.basename(DEFAULT_CARGO_TARGET_DIR).toLowerCase() === "cargo-target-shadow" &&
+    BASELINE_GATES.some((gate) => gate.useCargoTargetDir)
+  );
+}
 
 function npmCommand() {
   return process.platform === "win32" ? "npm.cmd" : "npm";
@@ -180,6 +222,31 @@ async function pathExists(candidatePath) {
   } catch {
     return false;
   }
+}
+
+async function resetShadowTargetCacheIfNeeded(options) {
+  if (!shouldResetShadowTargetBeforeBaseline(options)) {
+    return null;
+  }
+
+  const expectedPath = path.resolve(
+    process.env.LOCALAPPDATA ?? os.tmpdir(),
+    "RetroDevStudio",
+    "cargo-target-shadow"
+  );
+  const resolvedPath = path.resolve(DEFAULT_CARGO_TARGET_DIR);
+  if (resolvedPath !== expectedPath) {
+    throw new Error(
+      `Shadow target inesperado para reset seguro: ${resolvedPath} (esperado: ${expectedPath})`
+    );
+  }
+
+  if (await pathExists(resolvedPath)) {
+    await rm(resolvedPath, { recursive: true, force: true });
+  }
+  await mkdir(resolvedPath, { recursive: true });
+  console.log(`[Release Readiness] Shadow target resetado antes da baseline: ${resolvedPath}`);
+  return resolvedPath;
 }
 
 async function readJsonIfExists(filePath) {
@@ -545,6 +612,7 @@ function toMarkdown(report) {
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   await mkdir(VALIDATION_DIR, { recursive: true });
+  await resetShadowTargetCacheIfNeeded(options);
 
   const gitState = await collectGitState();
   const gateResults = BASELINE_GATES.map((gate) => createEmptyGateResult(gate));
