@@ -2331,6 +2331,82 @@ function ReverseWorkspace() {
     [manifest]
   );
   const callGraph = manifest?.call_graph ?? [];
+  const executedFunctionAddresses = useMemo(() => {
+    const addresses = new Set<number>();
+    for (const region of manifest?.code_regions ?? []) {
+      for (const fnCandidate of region.functions) {
+        if (fnCandidate.executed) {
+          addresses.add(fnCandidate.address);
+        }
+      }
+    }
+    return addresses;
+  }, [manifest]);
+  const prioritizedFunctions = useMemo(
+    () =>
+      (codeRegion?.functions ?? [])
+        .map((fnCandidate, index) => ({ fnCandidate, index }))
+        .sort((left, right) => {
+          const tracePriority =
+            Number(right.fnCandidate.executed) - Number(left.fnCandidate.executed);
+          if (tracePriority !== 0) {
+            return tracePriority;
+          }
+          return left.index - right.index;
+        }),
+    [codeRegion]
+  );
+  const prioritizedXrefs = useMemo(
+    () =>
+      xrefs
+        .map((xref, index) => ({
+          xref,
+          index,
+          touchedByTrace:
+            traceAvailable &&
+            (executedFunctionAddresses.has(xref.from) ||
+              executedFunctionAddresses.has(xref.to)),
+        }))
+        .sort((left, right) => {
+          const tracePriority =
+            Number(right.touchedByTrace) - Number(left.touchedByTrace);
+          if (tracePriority !== 0) {
+            return tracePriority;
+          }
+          return left.index - right.index;
+        }),
+    [executedFunctionAddresses, traceAvailable, xrefs]
+  );
+  const prioritizedCallGraph = useMemo(
+    () =>
+      callGraph
+        .map((edge, index) => ({
+          edge,
+          index,
+          touchedByTrace:
+            traceAvailable &&
+            (executedFunctionAddresses.has(edge.from) ||
+              executedFunctionAddresses.has(edge.to)),
+        }))
+        .sort((left, right) => {
+          const tracePriority =
+            Number(right.touchedByTrace) - Number(left.touchedByTrace);
+          if (tracePriority !== 0) {
+            return tracePriority;
+          }
+          return left.index - right.index;
+        }),
+    [callGraph, executedFunctionAddresses, traceAvailable]
+  );
+  const executedFunctionCount = prioritizedFunctions.filter(
+    ({ fnCandidate }) => fnCandidate.executed
+  ).length;
+  const touchedXrefCount = prioritizedXrefs.filter(
+    ({ touchedByTrace }) => touchedByTrace
+  ).length;
+  const touchedCallGraphCount = prioritizedCallGraph.filter(
+    ({ touchedByTrace }) => touchedByTrace
+  ).length;
   const viewTabs: { id: typeof activeView; label: string }[] = [
     { id: "map", label: "ROM Map" },
     { id: "hex", label: "Hex" },
@@ -2641,10 +2717,56 @@ function ReverseWorkspace() {
             <div className="grid gap-3 xl:grid-cols-[minmax(280px,360px)_minmax(0,1fr)]">
               <div className="space-y-2 rounded border border-[#313244] bg-[#11111b] p-3">
                 <div className="text-[10px] uppercase tracking-[0.16em] text-[#7f849c]">Funcoes</div>
-                {codeRegion?.functions.length ? (
-                  codeRegion.functions.map((fnCandidate) => (
-                    <div key={fnCandidate.address} className="rounded border border-[#1e1e2e] bg-[#0f172a] p-3 text-[10px]">
-                      <div className="font-mono text-[#cdd6f4]">{fnCandidate.name}</div>
+                <div
+                  data-testid="reverse-code-trace-summary"
+                  className="rounded border border-[#1e1e2e] bg-[#0f172a] p-3 text-[10px]"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-semibold text-[#e5e7eb]">
+                      {traceAvailable ? "Sessao com trace aplicada" : "Analise estatica priorizada"}
+                    </span>
+                    <span
+                      className={`rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] ${
+                        traceAvailable
+                          ? "border-[#a6e3a1]/40 bg-[#a6e3a1]/10 text-[#a6e3a1]"
+                          : "border-[#313244] bg-[#11111b] text-[#94a3b8]"
+                      }`}
+                    >
+                      {traceAvailable ? "Trace ativo" : "Sem trace ao vivo"}
+                    </span>
+                  </div>
+                  <div className="mt-2 text-[#94a3b8]">
+                    Funcoes executadas: {executedFunctionCount} · Xrefs tocadas: {touchedXrefCount}
+                    {" "}· Arestas tocadas: {touchedCallGraphCount}
+                  </div>
+                  <div className="mt-1 text-[#7f849c]">
+                    {traceAvailable
+                      ? "Itens tocados pela sessao sobem para o topo desta vista para acelerar a leitura do fluxo executado."
+                      : manifest.trace.note || "Ative uma sessao compativel no emulador para priorizar a navegacao por execucao real."}
+                  </div>
+                </div>
+                {prioritizedFunctions.length ? (
+                  prioritizedFunctions.map(({ fnCandidate, index }) => (
+                    <div
+                      key={fnCandidate.address}
+                      data-testid="reverse-code-function"
+                      className={`rounded border p-3 text-[10px] ${
+                        fnCandidate.executed
+                          ? "border-[#a6e3a1]/40 bg-[#0f2a1d]"
+                          : "border-[#1e1e2e] bg-[#0f172a]"
+                      }`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="font-mono text-[#cdd6f4]">{fnCandidate.name}</div>
+                        <div className="flex items-center gap-2">
+                          {fnCandidate.executed && (
+                            <span className="rounded-full border border-[#a6e3a1]/40 bg-[#a6e3a1]/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-[#a6e3a1]">
+                              Executada
+                            </span>
+                          )}
+                          <span className="text-[9px] text-[#7f849c]">#{index + 1}</span>
+                        </div>
+                      </div>
                       <div className="mt-1 text-[#94a3b8]">
                         {formatHex(fnCandidate.address, 6)} - {formatHex(fnCandidate.end, 6)}
                       </div>
@@ -2657,13 +2779,35 @@ function ReverseWorkspace() {
                   Call graph: {callGraph.length} aresta(s) · Xrefs: {xrefs.length}
                 </div>
                 <div className="space-y-2 pt-2">
-                  <div className="text-[10px] uppercase tracking-[0.16em] text-[#7f849c]">Xrefs</div>
-                  {xrefs.length === 0 ? (
+                  <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.16em] text-[#7f849c]">
+                    <span>Xrefs</span>
+                    {traceAvailable && touchedXrefCount > 0 && (
+                      <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[#a6e3a1]">
+                        Priorizadas pela sessao
+                      </span>
+                    )}
+                  </div>
+                  {prioritizedXrefs.length === 0 ? (
                     <p className="text-[10px] text-[#7f849c]">Nenhuma cross-reference mapeada nesta janela.</p>
                   ) : (
-                    xrefs.slice(0, 12).map((xref) => (
-                      <div key={`${xref.from}-${xref.to}-${xref.kind}`} className="rounded border border-[#1e1e2e] bg-[#0f172a] p-3 text-[10px]">
-                        <div className="font-mono text-[#cdd6f4]">{xref.label}</div>
+                    prioritizedXrefs.slice(0, 12).map(({ xref, touchedByTrace }) => (
+                      <div
+                        key={`${xref.from}-${xref.to}-${xref.kind}`}
+                        data-testid="reverse-code-xref"
+                        className={`rounded border p-3 text-[10px] ${
+                          touchedByTrace
+                            ? "border-[#a6e3a1]/40 bg-[#0f2a1d]"
+                            : "border-[#1e1e2e] bg-[#0f172a]"
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="font-mono text-[#cdd6f4]">{xref.label}</div>
+                          {touchedByTrace && (
+                            <span className="rounded-full border border-[#a6e3a1]/40 bg-[#a6e3a1]/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-[#a6e3a1]">
+                              Trace
+                            </span>
+                          )}
+                        </div>
                         <div className="mt-1 text-[#94a3b8]">
                           {formatHex(xref.from, 6)} → {formatHex(xref.to, 6)} · {xref.kind}
                         </div>
@@ -2672,14 +2816,36 @@ function ReverseWorkspace() {
                   )}
                 </div>
                 <div className="space-y-2 pt-2">
-                  <div className="text-[10px] uppercase tracking-[0.16em] text-[#7f849c]">Call graph</div>
-                  {callGraph.length === 0 ? (
+                  <div className="flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.16em] text-[#7f849c]">
+                    <span>Call graph</span>
+                    {traceAvailable && touchedCallGraphCount > 0 && (
+                      <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[#a6e3a1]">
+                        Priorizado pela sessao
+                      </span>
+                    )}
+                  </div>
+                  {prioritizedCallGraph.length === 0 ? (
                     <p className="text-[10px] text-[#7f849c]">Nenhuma aresta de call graph detectada.</p>
                   ) : (
-                    callGraph.slice(0, 12).map((edge) => (
-                      <div key={`${edge.from}-${edge.to}-${edge.kind}`} className="rounded border border-[#1e1e2e] bg-[#0f172a] p-3 text-[10px]">
-                        <div className="font-mono text-[#cdd6f4]">
-                          {formatHex(edge.from, 6)} → {formatHex(edge.to, 6)}
+                    prioritizedCallGraph.slice(0, 12).map(({ edge, touchedByTrace }) => (
+                      <div
+                        key={`${edge.from}-${edge.to}-${edge.kind}`}
+                        data-testid="reverse-code-edge"
+                        className={`rounded border p-3 text-[10px] ${
+                          touchedByTrace
+                            ? "border-[#a6e3a1]/40 bg-[#0f2a1d]"
+                            : "border-[#1e1e2e] bg-[#0f172a]"
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="font-mono text-[#cdd6f4]">
+                            {formatHex(edge.from, 6)} → {formatHex(edge.to, 6)}
+                          </div>
+                          {touchedByTrace && (
+                            <span className="rounded-full border border-[#a6e3a1]/40 bg-[#a6e3a1]/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-[#a6e3a1]">
+                              Trace
+                            </span>
+                          )}
                         </div>
                         <div className="mt-1 text-[#94a3b8]">{edge.kind}</div>
                       </div>
