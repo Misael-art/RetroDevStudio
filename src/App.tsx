@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
 import {
   Group,
   Panel,
@@ -1048,7 +1049,6 @@ export default function App() {
 
   async function chooseNewProjectBaseDir() {
     try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
       const selected = await open({
         title: "Escolher pasta base do projeto",
         directory: true,
@@ -1079,7 +1079,6 @@ export default function App() {
 
   async function chooseTemplateDonorPath(templateId: string) {
     try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
       const selected = await open({
         title: "Escolher pasta doadora do template",
         directory: true,
@@ -1104,7 +1103,6 @@ export default function App() {
   }
 
   async function chooseExternalProjectPath(profile: ExternalImportProfileSummary) {
-    const { open } = await import("@tauri-apps/plugin-dialog");
     const selected = await open({
       title: `Escolher projeto ${profile.name} para importar`,
       directory: true,
@@ -1229,7 +1227,6 @@ export default function App() {
 
   async function handleEmulatorLoadRom() {
     try {
-      const { open } = await import("@tauri-apps/plugin-dialog");
       const selected = await open({
         title: "Carregar ROM",
         filters: [{ name: "ROM", extensions: ["md", "bin", "gen", "smc", "sfc", "rom"] }],
