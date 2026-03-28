@@ -312,6 +312,13 @@ pub fn analyze_code(loaded: &LoadedRom) -> (Vec<CodeRegion>, Vec<CallGraphEdge>,
     analyze_code_with_trace(loaded, None)
 }
 
+pub fn analyze_code_with_trace_overlay(
+    loaded: &LoadedRom,
+    trace: &ExecutionTraceLog,
+) -> (Vec<CodeRegion>, Vec<CallGraphEdge>, Vec<LogicHint>) {
+    analyze_code_with_trace(loaded, Some(trace))
+}
+
 fn analyze_code_with_trace(
     loaded: &LoadedRom,
     trace: Option<&ExecutionTraceLog>,

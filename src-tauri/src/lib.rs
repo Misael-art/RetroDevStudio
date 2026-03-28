@@ -40,7 +40,7 @@ use core::project_mgr::{
     SceneInfo,
 };
 use emulator::frame_buffer::framebuffer_to_rgba;
-use emulator::libretro_ffi::{EmulatorCore, JoypadState, ReplayCapture};
+use emulator::libretro_ffi::{EmulatorCore, JoypadState, ReplayCapture, RuntimeExecutionTraceCapture};
 use hardware::constraint_engine;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
@@ -673,6 +673,14 @@ fn emulator_read_memory(
     })
 }
 
+#[tauri::command]
+fn emulator_get_execution_trace(
+    emu: State<EmulatorCoreState>,
+) -> Result<RuntimeExecutionTraceCapture, String> {
+    let core = emu.0.lock().map_err(|e| e.to_string())?;
+    Ok(core.execution_trace_capture())
+}
+
 /// Envia o estado dos botões do joypad 1 para o emulador.
 #[tauri::command]
 fn emulator_send_input(
@@ -908,6 +916,35 @@ fn reverse_explorer_read(
 #[tauri::command]
 fn rom_analyze(rom_path: String) -> Result<RomAnalysisManifest, String> {
     tools::reverse::analyze_rom(&rom_path)
+}
+
+#[tauri::command]
+fn rom_analyze_with_emulator_trace(
+    rom_path: String,
+    emu: State<EmulatorCoreState>,
+) -> Result<RomAnalysisManifest, String> {
+    let trace_capture = {
+        let core = emu.0.lock().map_err(|e| e.to_string())?;
+        core.execution_trace_capture()
+    };
+
+    if Path::new(&trace_capture.rom_path) == Path::new(&rom_path)
+        && trace_capture.available
+        && !trace_capture.trace.executed_pcs.is_empty()
+    {
+        return tools::reverse::analyze_rom_with_trace(
+            &rom_path,
+            &trace_capture.trace,
+            Some(trace_capture.note.as_str()),
+        );
+    }
+
+    let mut manifest = tools::reverse::analyze_rom(&rom_path)?;
+    if Path::new(&trace_capture.rom_path) == Path::new(&rom_path) && !trace_capture.note.is_empty() {
+        manifest.trace.note = trace_capture.note;
+        manifest.trace.available = trace_capture.available;
+    }
+    Ok(manifest)
 }
 
 #[tauri::command]
@@ -2268,6 +2305,7 @@ pub fn run() {
             emulator_stop_recording,
             emulator_play_replay,
             emulator_read_memory,
+            emulator_get_execution_trace,
             emulator_send_input,
             emulator_stop,
             // Cena
@@ -2300,6 +2338,7 @@ pub fn run() {
             assets_extract,
             reverse_explorer_read,
             rom_analyze,
+            rom_analyze_with_emulator_trace,
             rom_disassemble,
             rom_get_xrefs,
             rom_get_call_graph,

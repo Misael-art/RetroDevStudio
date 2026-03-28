@@ -6,6 +6,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use libloading::Library;
 
+use crate::tools::reverse::trace::{CpuState, ExecutionTraceLog};
+
 const RETRO_ENVIRONMENT_SET_PIXEL_FORMAT: u32 = 10;
 const RETRO_MEMORY_SAVE_RAM: u32 = 0;
 const RETRO_MEMORY_SYSTEM_RAM: u32 = 2;
@@ -325,6 +327,15 @@ fn memory_region_label(region: u32) -> &'static str {
     }
 }
 
+fn default_trace_base_pc(target: CoreTarget, rom_data: &[u8]) -> u32 {
+    match target {
+        CoreTarget::MegaDrive if rom_data.len() >= 8 => {
+            u32::from_be_bytes([rom_data[4], rom_data[5], rom_data[6], rom_data[7]]) & !1
+        }
+        _ => 0,
+    }
+}
+
 struct LoadedGame {
     rom_path: CString,
     rom_data: Vec<u8>,
@@ -338,6 +349,78 @@ struct LoadedCore {
     sample_rate: u32,
     label: String,
     _target: CoreTarget,
+    trace_backend: Option<TraceBackend>,
+    trace_base_pc: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TraceBackend {
+    MockCoreSerializedFrameCounter,
+}
+
+impl TraceBackend {
+    fn detect_for_runtime(label: &str) -> Option<Self> {
+        let normalized = label.to_ascii_lowercase();
+        if normalized.contains("mocklibretrocore") || normalized.contains("mock core") {
+            return Some(Self::MockCoreSerializedFrameCounter);
+        }
+        None
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            Self::MockCoreSerializedFrameCounter => "serialized_frame_counter",
+        }
+    }
+
+    fn decode_sample(self, base_pc: u32, serialized_state: &[u8]) -> Option<(u32, Option<CpuState>)> {
+        match self {
+            Self::MockCoreSerializedFrameCounter => {
+                let frame_counter = u64::from_le_bytes(serialized_state.get(..8)?.try_into().ok()?) as u32;
+                let frame_offset = frame_counter.saturating_sub(1).saturating_mul(2);
+                let pc = base_pc.saturating_add(frame_offset) & !1;
+                Some((pc, None))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct RuntimeExecutionTraceCapture {
+    pub available: bool,
+    pub core_label: String,
+    pub rom_path: String,
+    pub note: String,
+    pub trace: ExecutionTraceLog,
+}
+
+impl RuntimeExecutionTraceCapture {
+    fn unsupported(core_label: &str, rom_path: &Path) -> Self {
+        Self {
+            available: false,
+            core_label: core_label.to_string(),
+            rom_path: rom_path.to_string_lossy().to_string(),
+            note: format!(
+                "Core '{}' nao expoe PC por API Libretro padrao; a coleta real de ExecutionTraceLog continua dependente de adapter especifico por runtime e permanece experimental nesta wave.",
+                core_label
+            ),
+            trace: ExecutionTraceLog::default(),
+        }
+    }
+
+    fn adapter_backed(core_label: &str, rom_path: &Path, backend: TraceBackend) -> Self {
+        Self {
+            available: false,
+            core_label: core_label.to_string(),
+            rom_path: rom_path.to_string_lossy().to_string(),
+            note: format!(
+                "Trace dinamico coletado via estado serializado do core '{}' usando o adapter '{}'.",
+                core_label,
+                backend.description()
+            ),
+            trace: ExecutionTraceLog::default(),
+        }
+    }
 }
 
 impl LoadedCore {
@@ -441,20 +524,26 @@ impl LoadedCore {
             ));
         }
 
+        let core_label = format!(
+            "{} {}",
+            c_string_or_default(system_info.library_name, target.label()),
+            c_string_or_default(system_info.library_version, "")
+        )
+        .trim()
+        .to_string();
+        let trace_backend = TraceBackend::detect_for_runtime(&core_label);
+        let trace_base_pc = default_trace_base_pc(target, &game.rom_data);
+
         Ok(Self {
             _library: library,
             api,
             _game: game,
             frame_size,
             sample_rate: av_info.timing.sample_rate.round().max(1.0) as u32,
-            label: format!(
-                "{} {}",
-                c_string_or_default(system_info.library_name, target.label()),
-                c_string_or_default(system_info.library_version, "")
-            )
-            .trim()
-            .to_string(),
+            label: core_label,
             _target: target,
+            trace_backend,
+            trace_base_pc,
         })
     }
 
@@ -493,6 +582,7 @@ pub struct EmulatorCore {
     saved_state: Option<Vec<u8>>,
     rewind: RewindState,
     replay: ReplayState,
+    trace_capture: RuntimeExecutionTraceCapture,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -570,6 +660,7 @@ impl EmulatorCore {
             saved_state: None,
             rewind: RewindState::default(),
             replay: ReplayState::default(),
+            trace_capture: RuntimeExecutionTraceCapture::default(),
         }
     }
 
@@ -606,6 +697,11 @@ impl EmulatorCore {
             );
         }
 
+        self.trace_capture = if let Some(backend) = runtime.trace_backend {
+            RuntimeExecutionTraceCapture::adapter_backed(&runtime.label, rom_path, backend)
+        } else {
+            RuntimeExecutionTraceCapture::unsupported(&runtime.label, rom_path)
+        };
         self.runtime = Some(runtime);
         self.configure_rewind();
         self.replay.reset();
@@ -636,6 +732,7 @@ impl EmulatorCore {
             }
         }
 
+        self.capture_execution_trace_sample()?;
         self.rewind.frame_index = self.rewind.frame_index.saturating_add(1);
         Ok(())
     }
@@ -892,6 +989,7 @@ impl EmulatorCore {
         self.saved_state = None;
         self.rewind.reset();
         self.replay.reset();
+        self.trace_capture = RuntimeExecutionTraceCapture::default();
         Ok(())
     }
 
@@ -905,6 +1003,10 @@ impl EmulatorCore {
 
     pub fn loaded_core_label(&self) -> Option<&str> {
         self.runtime.as_ref().map(|runtime| runtime.label.as_str())
+    }
+
+    pub fn execution_trace_capture(&self) -> RuntimeExecutionTraceCapture {
+        self.trace_capture.clone()
     }
 
     fn configure_rewind(&mut self) {
@@ -940,6 +1042,28 @@ impl EmulatorCore {
             frame_index: self.rewind.frame_index,
             bytes,
         });
+        Ok(())
+    }
+
+    fn capture_execution_trace_sample(&mut self) -> Result<(), String> {
+        let Some(runtime) = self.runtime.as_ref() else {
+            return Ok(());
+        };
+        let Some(trace_backend) = runtime.trace_backend else {
+            return Ok(());
+        };
+
+        let serialized_state = self.serialize_runtime_state()?;
+        let Some((pc, cpu_state)) = trace_backend.decode_sample(runtime.trace_base_pc, &serialized_state) else {
+            return Ok(());
+        };
+
+        if let Some(cpu_state) = cpu_state {
+            self.trace_capture.trace.mark_executed_with_state(pc, cpu_state);
+        } else {
+            self.trace_capture.trace.mark_executed(pc);
+        }
+        self.trace_capture.available = !self.trace_capture.trace.executed_pcs.is_empty();
         Ok(())
     }
 
@@ -1575,7 +1699,8 @@ pub extern "C" fn retro_run() {
 
     fn write_test_rom(dir: &Path, name: &str, extension: &str) -> PathBuf {
         let path = dir.join(format!("{}.{}", name, extension));
-        let mut bytes = vec![0u8; 0x200];
+        let mut bytes = vec![0u8; 0x400];
+        bytes[4..8].copy_from_slice(&0x0000_0200u32.to_be_bytes());
         bytes[0x100..0x10F].copy_from_slice(b"SEGA MEGA DRIVE");
         fs::write(&path, bytes).expect("write test rom");
         path
@@ -1628,6 +1753,32 @@ pub extern "C" fn retro_run() {
             assert_eq!(state.last_audio_frames, 2);
             assert_eq!(state.audio_buffer, vec![0, 0, 1, -1]);
         }
+
+        emulator.stop().expect("stop emulator");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn mock_core_collects_execution_trace_via_serialized_state() {
+        let _serial = test_serial_guard();
+        let dir = temp_dir("mock-core-trace");
+        let core_path = compile_mock_core(&dir);
+        let rom_path = write_test_rom(&dir, "trace_test", "gen");
+
+        let mut emulator = EmulatorCore::new(Some(&core_path));
+        emulator
+            .load_rom(&rom_path)
+            .expect("load rom into mock core");
+        emulator.run_frame().expect("run frame 1");
+        emulator.run_frame().expect("run frame 2");
+
+        let trace_capture = emulator.execution_trace_capture();
+
+        assert!(trace_capture.available);
+        assert!(trace_capture.core_label.contains("MockLibretroCore"));
+        assert!(trace_capture.note.contains("estado serializado"));
+        assert!(trace_capture.trace.was_executed(0x200));
+        assert!(trace_capture.trace.was_executed(0x202));
 
         emulator.stop().expect("stop emulator");
         let _ = fs::remove_dir_all(dir);

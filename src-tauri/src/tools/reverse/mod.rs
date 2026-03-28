@@ -18,13 +18,32 @@ pub use manifest::{
 };
 
 pub fn analyze_rom(rom_path: &str) -> Result<RomAnalysisManifest, String> {
+    analyze_rom_internal(rom_path, None)
+}
+
+pub fn analyze_rom_with_trace(
+    rom_path: &str,
+    trace: &trace::ExecutionTraceLog,
+    trace_note: Option<&str>,
+) -> Result<RomAnalysisManifest, String> {
+    analyze_rom_internal(rom_path, Some((trace, trace_note)))
+}
+
+fn analyze_rom_internal(
+    rom_path: &str,
+    trace_overlay: Option<(&trace::ExecutionTraceLog, Option<&str>)>,
+) -> Result<RomAnalysisManifest, String> {
     let path = Path::new(rom_path);
     let loaded = loader::load_rom(path)?;
     let mut manifest = loader::base_manifest(&loaded);
     let (graphics_regions, compression_regions) = graphics::analyze_graphics(&loaded);
     let (text_regions, pointer_tables) = text::analyze_text(&loaded);
     let audio_regions = audio::analyze_audio(&loaded);
-    let (code_regions, call_graph, mut logic_hints) = code::analyze_code(&loaded);
+    let (code_regions, call_graph, mut logic_hints) = if let Some((trace_log, _)) = trace_overlay {
+        code::analyze_code_with_trace_overlay(&loaded, trace_log)
+    } else {
+        code::analyze_code(&loaded)
+    };
 
     logic_hints.push(manifest::LogicHint {
         id: "projection_guard".to_string(),
@@ -42,6 +61,13 @@ pub fn analyze_rom(rom_path: &str) -> Result<RomAnalysisManifest, String> {
     manifest.code_regions = code_regions;
     manifest.call_graph = call_graph;
     manifest.logic_hints = logic_hints;
+    if let Some((trace_log, trace_note)) = trace_overlay {
+        manifest.trace = trace::trace_status_from_log(
+            &loaded,
+            trace_log,
+            trace_note.unwrap_or(loaded.trace_note.as_str()),
+        );
+    }
     manifest.projection_status = projection::projection_status_for_manifest(&manifest);
     manifest.annotations = annotations::load_annotations(path, &manifest.hashes)?;
 
@@ -251,6 +277,34 @@ mod tests {
         assert!(!manifest.pointer_tables.is_empty());
         assert!(!manifest.call_graph.is_empty());
         assert!(!manifest.compression_regions.is_empty());
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn analyze_rom_with_trace_marks_executed_functions_for_megadrive() {
+        let path = temp_rom_path("md-trace", "bin");
+        let rom = build_megadrive_fixture();
+        fs::write(&path, &rom).expect("write md rom");
+
+        let mut trace_log = trace::ExecutionTraceLog::default();
+        trace_log.mark_executed(0x200);
+        trace_log.mark_executed(0x202);
+
+        let manifest = analyze_rom_with_trace(
+            path.to_string_lossy().as_ref(),
+            &trace_log,
+            Some("Trace dinamico vindo do emulador de teste."),
+        )
+        .expect("analyze rom with trace");
+
+        assert!(manifest.trace.available);
+        assert!(manifest.trace.note.contains("emulador de teste"));
+        assert!(!manifest.trace.executed_regions.is_empty());
+        assert!(manifest.code_regions[0]
+            .functions
+            .iter()
+            .any(|function| function.address == 0x200 && function.executed));
 
         let _ = fs::remove_file(path);
     }
