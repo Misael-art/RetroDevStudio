@@ -62,7 +62,20 @@
       "Bash(du:*)",
       "Bash(wc:*)",
       "Bash(mkdir:*)",
-      "Bash(cmd:*)"
+      "Bash(cmd:*)",
+      "Bash(xargs grep:*)",
+      "Bash(xargs:*)",
+      "Bash(cd /f)",
+      "Bash(wait bnl1vjxr1)",
+      "Read(//tmp/claude/F--Projects-RetroDevStudio/tasks/**)",
+      "Bash(tasklist:*)",
+      "Bash(CARGO_TARGET_DIR=target cargo clippy:*)",
+      "Bash(CARGO_TARGET_DIR=\"C:/tmp/rds-target\" cargo clippy:*)",
+      "Bash(cargo check:*)",
+      "Bash(CARGO_TARGET_DIR=\"C:/temp/retro-cargo-target\" cargo test:*)",
+      "Bash(CARGO_TARGET_DIR=\"$HOME/.cargo-target-retro\" cargo test:*)",
+      "Bash(CARGO_TARGET_DIR=\"C:/Users/misae/retro-cargo-target\" cargo test:*)",
+      "Bash(CARGO_TARGET_DIR=\"C:/Users/misae/AppData/Local/RetroDevStudio/cargo-target-shadow\" cargo test:*)"
     ]
   }
 }

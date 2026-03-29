@@ -1,7 +1,10 @@
 @echo off
 setlocal
 
-set "VSWHERE=C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
+set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+if not exist "%VSWHERE%" (
+  set "VSWHERE=C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
+)
 if not exist "%VSWHERE%" (
   echo vswhere.exe not found at "%VSWHERE%"
   exit /b 1

@@ -1,14 +1,21 @@
 import {
+  createContext,
   useCallback,
+  useContext,
   useEffect,
+  useMemo,
   useReducer,
   useRef,
   useState,
+  type Dispatch,
   type DragEvent,
   type MouseEvent as ReactMouseEvent,
+  type MutableRefObject,
   type WheelEvent as ReactWheelEvent,
 } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { Group, Panel } from "react-resizable-panels";
+import LayoutSplitter from "../common/LayoutSplitter";
 import { useEditorStore } from "../../core/store/editorStore";
 import { createSpriteEntityFromAsset } from "../../core/editorEntityFactory";
 import {
@@ -718,6 +725,513 @@ export function getSuggestedFrameIndex(
   );
 
   return match?.index ?? null;
+}
+
+interface ArtStudioContextValue {
+  state: ArtStudioState;
+  dispatch: Dispatch<ArtStudioAction>;
+  activeProjectDir: string;
+  activeSequence: SpriteSequence | undefined;
+  canUpdateEntity: boolean;
+  canApplyToScene: boolean;
+  totalFrameSlots: number;
+  usedFrameCount: number;
+  externalSourceLoaded: boolean;
+  loadStatusText: string;
+  sourceOriginLabel: string;
+  displayPalette: string[];
+  resOutput: string;
+  previewCanvasRef: MutableRefObject<HTMLCanvasElement | null>;
+  handleAddSequence: () => void;
+  applyConstrainedFrameSize: (nextWidth: number, nextHeight: number) => void;
+  handleImportToProject: () => Promise<void>;
+  handleApplyToScene: () => void;
+}
+
+const ArtStudioContext = createContext<ArtStudioContextValue | null>(null);
+
+function useArtStudioContext() {
+  const context = useContext(ArtStudioContext);
+  if (!context) {
+    throw new Error("ArtStudioContext indisponivel fora do provider.");
+  }
+  return context;
+}
+
+function ArtStudioTimelineSection() {
+  const { state, dispatch, usedFrameCount, handleAddSequence } = useArtStudioContext();
+
+  return (
+    <section
+      data-testid="artstudio-timeline"
+      className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-[#313244] bg-[linear-gradient(180deg,#111827,#0f172a)] shadow-[0_18px_50px_rgba(0,0,0,0.28)]"
+    >
+      <div className="border-b border-[#1f2937] px-4 py-3">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#cba6f7]">
+          Timeline
+        </p>
+        <h3 className="mt-1 text-sm font-semibold text-[#e2e8f0]">
+          Organize quadros em animacoes reutilizaveis
+        </h3>
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="rounded-full border border-[#313244] bg-[#0b1220] px-2.5 py-1 text-[10px] font-semibold text-[#94a3b8]">
+              Sequencias {state.sequences.length}
+            </span>
+            <span className="rounded-full border border-[#313244] bg-[#0b1220] px-2.5 py-1 text-[10px] font-semibold text-[#94a3b8]">
+              Frames usados {usedFrameCount}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => dispatch({ type: "SELECT_SEQUENCE", id: null })}
+              className={`rounded-xl border px-3 py-1.5 text-[11px] font-semibold transition-colors ${
+                state.activeSequenceId === null
+                  ? "border-[#7dd3fc]/40 bg-[#7dd3fc]/10 text-[#dff6ff]"
+                  : "border-[#313244] bg-[#111827] text-[#cbd5e1] hover:bg-[#1e293b]"
+              }`}
+            >
+              Imagem
+            </button>
+            <button
+              type="button"
+              onClick={handleAddSequence}
+              className="rounded-xl border border-[#cba6f7]/40 bg-[#cba6f7]/12 px-3 py-1.5 text-[11px] font-semibold text-[#e9d5ff] transition-colors hover:bg-[#cba6f7]/18"
+            >
+              + Nova sequencia
+            </button>
+          </div>
+        </div>
+
+        <div className="min-h-0 overflow-x-auto overflow-y-hidden">
+          <div className="flex min-h-full gap-3">
+            {state.sequences.map((sequence) => {
+              const isActive = state.activeSequenceId === sequence.id;
+              return (
+                <div
+                  key={sequence.id}
+                  role="button"
+                  tabIndex={0}
+                  data-testid={`artstudio-sequence-card-${sequence.id}`}
+                  className={`flex min-w-[220px] max-w-[220px] flex-col gap-2 rounded-2xl border px-3 py-3 transition-colors ${
+                    isActive
+                      ? "border-[#cba6f7]/45 bg-[#cba6f7]/10"
+                      : "border-[#1f2937] bg-[#0b1220] hover:border-[#334155]"
+                  }`}
+                  onClick={() => dispatch({ type: "SELECT_SEQUENCE", id: sequence.id })}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      dispatch({ type: "SELECT_SEQUENCE", id: sequence.id });
+                    }
+                  }}
+                >
+                  <div className="flex items-start gap-2">
+                    <input
+                      type="text"
+                      value={sequence.name}
+                      onChange={(event) =>
+                        dispatch({
+                          type: "RENAME_SEQUENCE",
+                          id: sequence.id,
+                          name: event.target.value,
+                        })
+                      }
+                      onClick={(event) => event.stopPropagation()}
+                      className="min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-0 py-0 text-sm font-semibold text-[#e2e8f0] focus:border-transparent focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        dispatch({ type: "DELETE_SEQUENCE", id: sequence.id });
+                      }}
+                      className="rounded-lg border border-[#f38ba8]/35 bg-[#f38ba8]/10 px-2 py-1 text-[11px] font-semibold text-[#fda4af] transition-colors hover:bg-[#f38ba8]/16"
+                      title="Remover sequencia"
+                    >
+                      Remover
+                    </button>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] text-[#94a3b8]">
+                    <span>{sequence.frames.length} frame(s)</span>
+                    <span>{sequence.loop ? "Loop" : "One shot"}</span>
+                  </div>
+                  <div className="truncate rounded-xl border border-[#1f2937] bg-[#111827] px-2.5 py-2 text-[11px] text-[#94a3b8]">
+                    {sequence.frames.length > 0
+                      ? `Frames selecionados: ${sequence.frames.join(", ")}`
+                      : "Sem frames ainda"}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ArtStudioInspectorSection() {
+  const {
+    state,
+    dispatch,
+    activeProjectDir,
+    activeSequence,
+    canUpdateEntity,
+    canApplyToScene,
+    totalFrameSlots,
+    externalSourceLoaded,
+    loadStatusText,
+    sourceOriginLabel,
+    displayPalette,
+    resOutput,
+    previewCanvasRef,
+    handleImportToProject,
+    handleApplyToScene,
+    applyConstrainedFrameSize,
+  } = useArtStudioContext();
+
+  return (
+    <section
+      data-testid="artstudio-inspector"
+      className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[#313244] bg-[linear-gradient(180deg,#111827,#0f172a)] shadow-[0_18px_50px_rgba(0,0,0,0.28)]"
+    >
+      <div className="border-b border-[#1f2937] px-4 py-3">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#a6e3a1]">
+          Inspector
+        </p>
+        <h3 className="mt-1 text-sm font-semibold text-[#e2e8f0]">Preview, output e apply</h3>
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+        <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#a6e3a1]">
+                Preview
+              </div>
+              <div className="mt-1 text-[12px] text-[#94a3b8]">
+                {activeSequence ? "Validacao visual da sequencia ativa" : "Metadados e status da imagem carregada"}
+              </div>
+            </div>
+            <div className="text-right text-[11px] text-[#94a3b8]">
+              <div>{activeSequence?.name ?? "Sem sequencia"}</div>
+              <div>{activeSequence?.frames.length ?? 0} frame(s)</div>
+            </div>
+          </div>
+          <div className="relative mt-4 flex min-h-[260px] items-center justify-center overflow-hidden rounded-2xl border border-[#1f2937] bg-[radial-gradient(circle_at_top,#0f172a,#030712_72%)]">
+            <canvas
+              ref={previewCanvasRef}
+              width={260}
+              height={260}
+              className="max-h-full max-w-full"
+              style={{ imageRendering: "pixelated" }}
+            />
+            {!state.spriteSheetUrl && (
+              <span className="absolute px-6 text-center text-[12px] leading-5 text-[#475569]">
+                Sem preview ainda.
+              </span>
+            )}
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => dispatch({ type: "SET_PLAYING", playing: true })}
+              disabled={!activeSequence?.frames.length}
+              className="rounded-xl border border-[#a6e3a1]/45 bg-[#a6e3a1]/14 px-3 py-1.5 text-[11px] font-semibold text-[#bbf7d0] transition-colors hover:bg-[#a6e3a1]/20 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Play
+            </button>
+            <button
+              type="button"
+              onClick={() => dispatch({ type: "SET_PLAYING", playing: false })}
+              className="rounded-xl border border-[#f38ba8]/45 bg-[#f38ba8]/12 px-3 py-1.5 text-[11px] font-semibold text-[#fecdd3] transition-colors hover:bg-[#f38ba8]/18"
+            >
+              Stop
+            </button>
+            <span className="rounded-full border border-[#1f2937] bg-[#111827] px-2.5 py-1 text-[10px] font-semibold text-[#94a3b8]">
+              {state.playing ? "Animando" : "Parado"}
+            </span>
+          </div>
+        </div>
+
+        {activeSequence ? (
+          <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#cba6f7]">
+              Sequencia ativa
+            </div>
+            <div className="mt-3 space-y-3">
+              <label className="space-y-1 text-[11px] text-[#94a3b8]">
+                <span>FPS</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={60}
+                  value={activeSequence.fps}
+                  onChange={(event) =>
+                    dispatch({
+                      type: "SET_SEQUENCE_FPS",
+                      id: activeSequence.id,
+                      fps: Math.max(1, Math.min(60, Number(event.target.value) || 12)),
+                    })
+                  }
+                  className="w-full rounded-xl border border-[#334155] bg-[#111827] px-3 py-2 text-sm font-mono text-[#e2e8f0] focus:border-[#cba6f7] focus:outline-none"
+                />
+              </label>
+              <label className="flex items-center gap-2 text-[12px] text-[#e2e8f0]">
+                <input
+                  type="checkbox"
+                  checked={activeSequence.loop}
+                  onChange={(event) =>
+                    dispatch({
+                      type: "SET_SEQUENCE_LOOP",
+                      id: activeSequence.id,
+                      loop: event.target.checked,
+                    })
+                  }
+                />
+                Loop automatico
+              </label>
+              <div className="rounded-xl border border-[#1f2937] bg-[#111827] px-3 py-2 text-[11px] text-[#94a3b8]">
+                {activeSequence.frames.length > 0
+                  ? `Frames selecionados: ${activeSequence.frames.join(", ")}`
+                  : "Selecione quadros no canvas para preencher esta sequencia."}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
+              Metadados da imagem
+            </div>
+            <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-[12px]">
+              <dt className="text-[#64748b]">Arquivo</dt>
+              <dd className="truncate font-medium text-[#e2e8f0]">{state.spriteSheetDisplayName || "Nenhum"}</dd>
+              <dt className="text-[#64748b]">Formato</dt>
+              <dd className="font-medium text-[#e2e8f0]">{state.spriteSheetFormat ?? "-"}</dd>
+              <dt className="text-[#64748b]">Resolucao</dt>
+              <dd className="font-medium text-[#e2e8f0]">
+                {state.spriteSheetSize ? `${state.spriteSheetSize.width} x ${state.spriteSheetSize.height}` : "-"}
+              </dd>
+              <dt className="text-[#64748b]">Origem</dt>
+              <dd className="font-medium text-[#e2e8f0]">{sourceOriginLabel}</dd>
+              <dt className="text-[#64748b]">Frames</dt>
+              <dd className="font-medium text-[#e2e8f0]">
+                {state.spriteSheetFrameCount ?? (totalFrameSlots > 0 ? totalFrameSlots : "-")}
+              </dd>
+              <dt className="text-[#64748b]">Asset</dt>
+              <dd className="truncate font-medium text-[#e2e8f0]">
+                {state.spritePath || "Pendente de importacao canonica"}
+              </dd>
+            </dl>
+          </div>
+        )}
+
+        <div className="rounded-2xl border border-[#1f2937] bg-[#0f172a] p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
+            Diagnostico
+          </div>
+          <p className="mt-3 text-[12px] leading-5 text-[#cbd5e1]">{loadStatusText}</p>
+          {state.spriteSheetWarnings.length > 0 && (
+            <ul className="mt-3 space-y-2 text-[11px] leading-5 text-[#f9e2af]">
+              {state.spriteSheetWarnings.map((warning) => (
+                <li
+                  key={warning}
+                  className="rounded-xl border border-[#f9e2af]/20 bg-[#f9e2af]/8 px-3 py-2"
+                >
+                  {warning}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
+            Metadados completos
+          </div>
+          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-[12px]">
+            <dt className="text-[#64748b]">Arquivo</dt>
+            <dd className="truncate font-medium text-[#e2e8f0]">{state.spriteSheetDisplayName || "Nenhum"}</dd>
+            <dt className="text-[#64748b]">Formato</dt>
+            <dd className="font-medium text-[#e2e8f0]">{state.spriteSheetFormat ?? "-"}</dd>
+            <dt className="text-[#64748b]">Resolucao</dt>
+            <dd className="font-medium text-[#e2e8f0]">
+              {state.spriteSheetSize ? `${state.spriteSheetSize.width} x ${state.spriteSheetSize.height}` : "-"}
+            </dd>
+            <dt className="text-[#64748b]">Origem</dt>
+            <dd className="font-medium text-[#e2e8f0]">{sourceOriginLabel}</dd>
+            <dt className="text-[#64748b]">Transparencia</dt>
+            <dd className="font-medium text-[#e2e8f0]">
+              {state.spriteSheetBackgroundMode
+                ? `${state.spriteSheetBackgroundMode} (${state.spriteSheetTransparentPixels ?? 0} px)`
+                : "-"}
+            </dd>
+            <dt className="text-[#64748b]">Bounds</dt>
+            <dd className="font-medium text-[#e2e8f0]">
+              {state.spriteSheetContentBounds
+                ? `${state.spriteSheetContentBounds.width}x${state.spriteSheetContentBounds.height} -> ${state.spriteSheetContentBounds.aligned_width}x${state.spriteSheetContentBounds.aligned_height}`
+                : "-"}
+            </dd>
+            <dt className="text-[#64748b]">Saida sug.</dt>
+            <dd className="font-medium text-[#e2e8f0]">
+              {state.spriteSheetRecommendedOutput
+                ? `${state.spriteSheetRecommendedOutput.width}x${state.spriteSheetRecommendedOutput.height} @ ${state.spriteSheetRecommendedOutput.scalePercent}%`
+                : "-"}
+            </dd>
+            <dt className="text-[#64748b]">Slicing</dt>
+            <dd className="font-medium text-[#e2e8f0]">
+              {state.slicingMode ?? "-"} ({state.suggestedFrames.length} frames)
+            </dd>
+            <dt className="text-[#64748b]">Perfil</dt>
+            <dd className="font-medium text-[#e2e8f0]">
+              {state.spriteSheetMetaSpriteCandidate ? "Meta-sprite" : "Sprite simples"}
+            </dd>
+            <dt className="text-[#64748b]">Fonte</dt>
+            <dd className="truncate font-medium text-[#e2e8f0]">
+              {state.spriteSheetSourcePath || "-"}
+            </dd>
+            <dt className="text-[#64748b]">Asset</dt>
+            <dd className="truncate font-medium text-[#e2e8f0]">
+              {state.spritePath || "Pendente de importacao canonica"}
+            </dd>
+          </dl>
+        </div>
+
+        <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
+            Configuracoes de exportacao
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <label className="space-y-1 text-[11px] text-[#94a3b8]">
+              <span>Frame W</span>
+              <input
+                type="number"
+                min={8}
+                max={64}
+                value={state.frameWidth}
+                onChange={(event) =>
+                  applyConstrainedFrameSize(
+                    Math.max(8, Math.min(64, Number(event.target.value) || 32)),
+                    state.frameHeight
+                  )
+                }
+                className="w-full rounded-xl border border-[#334155] bg-[#111827] px-3 py-2 text-sm font-mono text-[#e2e8f0] focus:border-[#7dd3fc] focus:outline-none"
+              />
+            </label>
+            <label className="space-y-1 text-[11px] text-[#94a3b8]">
+              <span>Frame H</span>
+              <input
+                type="number"
+                min={8}
+                max={64}
+                value={state.frameHeight}
+                onChange={(event) =>
+                  applyConstrainedFrameSize(
+                    state.frameWidth,
+                    Math.max(8, Math.min(64, Number(event.target.value) || 32))
+                  )
+                }
+                className="w-full rounded-xl border border-[#334155] bg-[#111827] px-3 py-2 text-sm font-mono text-[#e2e8f0] focus:border-[#7dd3fc] focus:outline-none"
+              />
+            </label>
+          </div>
+          <label className="mt-3 block space-y-1 text-[11px] text-[#94a3b8]">
+            <span>Compressao</span>
+            <select
+              value={state.compression}
+              onChange={(event) =>
+                dispatch({ type: "SET_COMPRESSION", value: event.target.value })
+              }
+              className="w-full rounded-xl border border-[#334155] bg-[#111827] px-3 py-2 text-sm font-mono text-[#e2e8f0] focus:border-[#7dd3fc] focus:outline-none"
+            >
+              {COMPRESSION_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="mt-3 rounded-xl border border-[#1f2937] bg-[#111827] p-3">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-[#64748b]">
+              Paleta alvo
+            </div>
+            <div className="mt-2 grid grid-cols-4 gap-2">
+              {displayPalette.map((color, index) => (
+                <div
+                  key={index}
+                  className="aspect-square rounded-lg border border-[#334155]"
+                  style={{
+                    backgroundColor: color === "transparent" ? "transparent" : color,
+                    backgroundImage:
+                      color === "transparent"
+                        ? "linear-gradient(45deg, #334155 25%, transparent 25%), linear-gradient(-45deg, #334155 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #334155 75%), linear-gradient(-45deg, transparent 75%, #334155 75%)"
+                        : undefined,
+                    backgroundSize: color === "transparent" ? "8px 8px" : undefined,
+                    backgroundPosition:
+                      color === "transparent" ? "0 0, 0 4px, 4px -4px, -4px 0" : undefined,
+                  }}
+                  title={index === 0 ? "Transparente" : `Slot ${index}`}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {(externalSourceLoaded || (state.spriteSheetLoadStatus === "loaded" && !state.spritePath)) && (
+          <div className="rounded-2xl border border-[#fab387]/35 bg-[#fab387]/10 px-4 py-3 text-[12px] leading-5 text-[#fcd9bd]">
+            A imagem foi processada com sucesso, mas ainda nao virou um asset canonico do projeto. Gere o sprite sheet em <span className="font-semibold">assets/sprites</span> para alinhar os indices de frame com o pipeline oficial antes de aplicar na cena.
+          </div>
+        )}
+
+        {state.validationError && (
+          <div className="rounded-2xl border border-[#f38ba8]/35 bg-[#f38ba8]/10 px-4 py-3 text-[12px] leading-5 text-[#fecdd3]">
+            {state.validationError}
+          </div>
+        )}
+
+        <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#a6e3a1]">
+            Output (.res)
+          </div>
+          <pre className="mt-3 overflow-x-auto rounded-xl border border-[#1f2937] bg-[#020617] p-3 font-mono text-[11px] leading-5 text-[#86efac]">
+            {resOutput}
+          </pre>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            void handleImportToProject();
+          }}
+          disabled={!state.spriteSheetSourcePath || !activeProjectDir || state.suggestedFrames.length === 0}
+          className="rounded-2xl border border-[#89b4fa]/40 bg-[#89b4fa]/12 px-4 py-3 text-sm font-semibold text-[#dbeafe] transition-colors hover:bg-[#89b4fa]/18 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {state.spritePath ? "Regerar asset canonico" : "Trazer para assets/sprites"}
+        </button>
+
+        <button
+          type="button"
+          onClick={handleApplyToScene}
+          disabled={!canApplyToScene}
+          className={`rounded-2xl px-4 py-3 text-sm font-semibold transition-colors ${
+            state.saveFeedback
+              ? "bg-[#a6e3a1] text-[#082f1a]"
+              : "bg-[#a6e3a1]/90 text-[#082f1a] hover:bg-[#a6e3a1] disabled:cursor-not-allowed disabled:opacity-45"
+          }`}
+        >
+          {state.saveFeedback
+            ? "Aplicado com sucesso"
+            : canUpdateEntity
+              ? "Atualizar entidade selecionada"
+              : "Aplicar e criar entidade na cena"}
+        </button>
+      </div>
+    </section>
+  );
 }
 
 export default function ArtStudioPanel() {
@@ -1502,9 +2016,50 @@ export default function ArtStudioPanel() {
     state.spriteSheetPalette.length > 0 ? state.spriteSheetPalette : MEGA_DRIVE_PALETTE;
 
   const resOutput = `SPRITE ${state.spriteName || "sprite"} "${state.spritePath || "PENDENTE_IMPORTACAO"}" [${state.frameWidth}] [${state.frameHeight}] [${state.compression}]`;
+  const contextValue = useMemo<ArtStudioContextValue>(
+    () => ({
+      state,
+      dispatch,
+      activeProjectDir,
+      activeSequence,
+      canUpdateEntity,
+      canApplyToScene,
+      totalFrameSlots,
+      usedFrameCount,
+      externalSourceLoaded,
+      loadStatusText,
+      sourceOriginLabel,
+      displayPalette,
+      resOutput,
+      previewCanvasRef,
+      handleAddSequence,
+      applyConstrainedFrameSize,
+      handleImportToProject,
+      handleApplyToScene,
+    }),
+    [
+      state,
+      activeProjectDir,
+      activeSequence,
+      canUpdateEntity,
+      canApplyToScene,
+      totalFrameSlots,
+      usedFrameCount,
+      externalSourceLoaded,
+      loadStatusText,
+      sourceOriginLabel,
+      displayPalette,
+      resOutput,
+      handleAddSequence,
+      applyConstrainedFrameSize,
+      handleImportToProject,
+      handleApplyToScene,
+    ]
+  );
 
   return (
-    <div className="flex h-full flex-col gap-2 bg-[#0b0f19]">
+    <ArtStudioContext.Provider value={contextValue}>
+      <div className="flex h-full flex-col gap-2 bg-[#0b0f19]">
       <div className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#313244] bg-[linear-gradient(135deg,#111827,#0f172a_58%,#172554)] px-4 py-3">
         <div>
           <div className="flex items-center gap-2">
@@ -1532,10 +2087,15 @@ export default function ArtStudioPanel() {
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 gap-3 px-3 pb-3 xl:grid-cols-[minmax(0,1fr)_360px] xl:grid-rows-[minmax(0,1fr)_240px]">
-        <section
+      <div className="grid min-h-0 flex-1 gap-3 px-3 pb-3 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <Group
+          orientation="vertical"
+          className="min-h-0"
+        >
+          <Panel minSize={42} defaultSize={68}>
+            <section
           data-testid="artstudio-main-stage"
-          className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[#313244] bg-[linear-gradient(180deg,#111827,#0f172a)] shadow-[0_18px_50px_rgba(0,0,0,0.28)] xl:col-start-1 xl:row-start-1"
+          className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-[#313244] bg-[linear-gradient(180deg,#111827,#0f172a)] shadow-[0_18px_50px_rgba(0,0,0,0.28)]"
         >
           <div className="border-b border-[#1f2937] px-4 py-3">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1679,537 +2239,19 @@ export default function ArtStudioPanel() {
                 </div>
               </div>
 
-              <div className="hidden flex-col gap-3">
-                <div className="rounded-2xl border border-[#1f2937] bg-[#0f172a] p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
-                    Diagnostico
-                  </div>
-                  <p className="mt-3 text-[12px] leading-5 text-[#cbd5e1]">{loadStatusText}</p>
-                  {state.spriteSheetWarnings.length > 0 && (
-                    <ul className="mt-3 space-y-2 text-[11px] leading-5 text-[#f9e2af]">
-                      {state.spriteSheetWarnings.map((warning) => (
-                        <li
-                          key={warning}
-                          className="rounded-xl border border-[#f9e2af]/20 bg-[#f9e2af]/8 px-3 py-2"
-                        >
-                          {warning}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-
-                <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
-                    Metadados
-                  </div>
-                  <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-[12px]">
-                    <dt className="text-[#64748b]">Arquivo</dt>
-                    <dd className="truncate font-medium text-[#e2e8f0]">
-                      {state.spriteSheetDisplayName || "Nenhum"}
-                    </dd>
-                    <dt className="text-[#64748b]">Formato</dt>
-                    <dd className="font-medium text-[#e2e8f0]">
-                      {state.spriteSheetFormat ?? "-"}
-                    </dd>
-                    <dt className="text-[#64748b]">Resolucao</dt>
-                    <dd className="font-medium text-[#e2e8f0]">
-                      {state.spriteSheetSize
-                        ? `${state.spriteSheetSize.width} x ${state.spriteSheetSize.height}`
-                        : "-"}
-                    </dd>
-                    <dt className="text-[#64748b]">Frames</dt>
-                    <dd className="font-medium text-[#e2e8f0]">
-                      {state.spriteSheetFrameCount ?? "-"}
-                    </dd>
-                    <dt className="text-[#64748b]">Origem</dt>
-                    <dd className="font-medium text-[#e2e8f0]">{sourceOriginLabel}</dd>
-                    <dt className="text-[#64748b]">Transparencia</dt>
-                    <dd className="font-medium text-[#e2e8f0]">
-                      {state.spriteSheetBackgroundMode
-                        ? `${state.spriteSheetBackgroundMode} (${state.spriteSheetTransparentPixels ?? 0} px)`
-                        : "-"}
-                    </dd>
-                    <dt className="text-[#64748b]">Bounds</dt>
-                    <dd className="font-medium text-[#e2e8f0]">
-                      {state.spriteSheetContentBounds
-                        ? `${state.spriteSheetContentBounds.width}x${state.spriteSheetContentBounds.height} -> ${state.spriteSheetContentBounds.aligned_width}x${state.spriteSheetContentBounds.aligned_height}`
-                        : "-"}
-                    </dd>
-                    <dt className="text-[#64748b]">Saida sug.</dt>
-                    <dd className="font-medium text-[#e2e8f0]">
-                      {state.spriteSheetRecommendedOutput
-                        ? `${state.spriteSheetRecommendedOutput.width}x${state.spriteSheetRecommendedOutput.height} @ ${state.spriteSheetRecommendedOutput.scalePercent}%`
-                        : "-"}
-                    </dd>
-                    <dt className="text-[#64748b]">Slicing</dt>
-                    <dd className="font-medium text-[#e2e8f0]">
-                      {state.slicingMode ?? "-"} ({state.suggestedFrames.length} frames)
-                    </dd>
-                    <dt className="text-[#64748b]">Perfil</dt>
-                    <dd className="font-medium text-[#e2e8f0]">
-                      {state.spriteSheetMetaSpriteCandidate ? "Meta-sprite" : "Sprite simples"}
-                    </dd>
-                    <dt className="text-[#64748b]">Fonte</dt>
-                    <dd className="truncate font-medium text-[#e2e8f0]">
-                      {state.spriteSheetSourcePath || "-"}
-                    </dd>
-                    <dt className="text-[#64748b]">Asset</dt>
-                    <dd className="truncate font-medium text-[#e2e8f0]">
-                      {state.spritePath || "Pendente de importacao canonica"}
-                    </dd>
-                  </dl>
-                </div>
-
-                <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
-                    Slicing
-                  </div>
-                  <div className="mt-3 grid grid-cols-2 gap-3">
-                    <label className="space-y-1 text-[11px] text-[#94a3b8]">
-                      <span>Frame W</span>
-                      <input
-                        type="number"
-                        min={8}
-                        max={64}
-                        value={state.frameWidth}
-                        onChange={(event) =>
-                          applyConstrainedFrameSize(
-                            Math.max(8, Math.min(64, Number(event.target.value) || 32)),
-                            state.frameHeight
-                          )
-                        }
-                        className="w-full rounded-xl border border-[#334155] bg-[#111827] px-3 py-2 text-sm font-mono text-[#e2e8f0] focus:border-[#7dd3fc] focus:outline-none"
-                      />
-                    </label>
-                    <label className="space-y-1 text-[11px] text-[#94a3b8]">
-                      <span>Frame H</span>
-                      <input
-                        type="number"
-                        min={8}
-                        max={64}
-                        value={state.frameHeight}
-                        onChange={(event) =>
-                          applyConstrainedFrameSize(
-                            state.frameWidth,
-                            Math.max(8, Math.min(64, Number(event.target.value) || 32))
-                          )
-                        }
-                        className="w-full rounded-xl border border-[#334155] bg-[#111827] px-3 py-2 text-sm font-mono text-[#e2e8f0] focus:border-[#7dd3fc] focus:outline-none"
-                      />
-                    </label>
-                  </div>
-                  <div className="mt-3 rounded-xl border border-[#1f2937] bg-[#111827] px-3 py-2 text-[11px] text-[#94a3b8]">
-                    {state.spriteSheetSize
-                      ? `${totalFrameSlots} frame(s) sugeridos${state.slicingMode ? ` via ${state.slicingMode}` : ""}.`
-                      : "Carregue uma imagem para destravar o slicing."}
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
         </section>
+          </Panel>
+          <LayoutSplitter orientation="vertical" />
+          <Panel minSize={18} defaultSize={32}>
+            <ArtStudioTimelineSection />
+          </Panel>
+        </Group>
 
-        <section
-          data-testid="artstudio-timeline"
-          className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[#313244] bg-[linear-gradient(180deg,#111827,#0f172a)] shadow-[0_18px_50px_rgba(0,0,0,0.28)] xl:col-start-1 xl:row-start-2"
-        >
-          <div className="border-b border-[#1f2937] px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#cba6f7]">
-              Timeline
-            </p>
-            <h3 className="mt-1 text-sm font-semibold text-[#e2e8f0]">
-              Organize quadros em animacoes reutilizaveis
-            </h3>
-          </div>
-
-          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="rounded-full border border-[#313244] bg-[#0b1220] px-2.5 py-1 text-[10px] font-semibold text-[#94a3b8]">
-                  Sequencias {state.sequences.length}
-                </span>
-                <span className="rounded-full border border-[#313244] bg-[#0b1220] px-2.5 py-1 text-[10px] font-semibold text-[#94a3b8]">
-                  Frames usados {usedFrameCount}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => dispatch({ type: "SELECT_SEQUENCE", id: null })}
-                  className={`rounded-xl border px-3 py-1.5 text-[11px] font-semibold transition-colors ${
-                    state.activeSequenceId === null
-                      ? "border-[#7dd3fc]/40 bg-[#7dd3fc]/10 text-[#dff6ff]"
-                      : "border-[#313244] bg-[#111827] text-[#cbd5e1] hover:bg-[#1e293b]"
-                  }`}
-                >
-                  Imagem
-                </button>
-                <button
-                  type="button"
-                  onClick={handleAddSequence}
-                  className="rounded-xl border border-[#cba6f7]/40 bg-[#cba6f7]/12 px-3 py-1.5 text-[11px] font-semibold text-[#e9d5ff] transition-colors hover:bg-[#cba6f7]/18"
-                >
-                  + Nova sequencia
-                </button>
-              </div>
-            </div>
-
-            <div className="min-h-0 overflow-x-auto overflow-y-hidden">
-              <div className="flex min-h-full gap-3">
-                {state.sequences.map((sequence) => {
-                  const isActive = state.activeSequenceId === sequence.id;
-                  return (
-                    <div
-                      key={sequence.id}
-                      role="button"
-                      tabIndex={0}
-                      data-testid={`artstudio-sequence-card-${sequence.id}`}
-                      className={`flex min-w-[220px] max-w-[220px] flex-col gap-2 rounded-2xl border px-3 py-3 transition-colors ${
-                        isActive
-                          ? "border-[#cba6f7]/45 bg-[#cba6f7]/10"
-                          : "border-[#1f2937] bg-[#0b1220] hover:border-[#334155]"
-                      }`}
-                      onClick={() => dispatch({ type: "SELECT_SEQUENCE", id: sequence.id })}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          dispatch({ type: "SELECT_SEQUENCE", id: sequence.id });
-                        }
-                      }}
-                    >
-                      <div className="flex items-start gap-2">
-                        <input
-                          type="text"
-                          value={sequence.name}
-                          onChange={(event) =>
-                            dispatch({
-                              type: "RENAME_SEQUENCE",
-                              id: sequence.id,
-                              name: event.target.value,
-                            })
-                          }
-                          onClick={(event) => event.stopPropagation()}
-                          className="min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-0 py-0 text-sm font-semibold text-[#e2e8f0] focus:border-transparent focus:outline-none"
-                        />
-                        <button
-                          type="button"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            dispatch({ type: "DELETE_SEQUENCE", id: sequence.id });
-                          }}
-                          className="rounded-lg border border-[#f38ba8]/35 bg-[#f38ba8]/10 px-2 py-1 text-[11px] font-semibold text-[#fda4af] transition-colors hover:bg-[#f38ba8]/16"
-                          title="Remover sequencia"
-                        >
-                          Remover
-                        </button>
-                      </div>
-                      <div className="flex items-center justify-between text-[11px] text-[#94a3b8]">
-                        <span>{sequence.frames.length} frame(s)</span>
-                        <span>{sequence.loop ? "Loop" : "One shot"}</span>
-                      </div>
-                      <div className="truncate rounded-xl border border-[#1f2937] bg-[#111827] px-2.5 py-2 text-[11px] text-[#94a3b8]">
-                        {sequence.frames.length > 0
-                          ? `Frames selecionados: ${sequence.frames.join(", ")}`
-                          : "Sem frames ainda"}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section
-          data-testid="artstudio-inspector"
-          className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-[#313244] bg-[linear-gradient(180deg,#111827,#0f172a)] shadow-[0_18px_50px_rgba(0,0,0,0.28)] xl:col-start-2 xl:row-span-2"
-        >
-          <div className="border-b border-[#1f2937] px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#a6e3a1]">
-              Inspector
-            </p>
-            <h3 className="mt-1 text-sm font-semibold text-[#e2e8f0]">Preview, output e apply</h3>
-          </div>
-
-          <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-            <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#a6e3a1]">
-                    Preview
-                  </div>
-                  <div className="mt-1 text-[12px] text-[#94a3b8]">
-                    Validacao visual da sequencia ativa
-                  </div>
-                </div>
-                <div className="text-right text-[11px] text-[#94a3b8]">
-                  <div>{activeSequence?.name ?? "Sem sequencia"}</div>
-                  <div>{activeSequence?.frames.length ?? 0} frame(s)</div>
-                </div>
-              </div>
-              <div className="relative mt-4 flex min-h-[260px] items-center justify-center overflow-hidden rounded-2xl border border-[#1f2937] bg-[radial-gradient(circle_at_top,#0f172a,#030712_72%)]">
-                <canvas
-                  ref={previewCanvasRef}
-                  width={260}
-                  height={260}
-                  className="max-h-full max-w-full"
-                  style={{ imageRendering: "pixelated" }}
-                />
-                {!state.spriteSheetUrl && (
-                  <span className="absolute px-6 text-center text-[12px] leading-5 text-[#475569]">
-                    Sem preview ainda.
-                  </span>
-                )}
-              </div>
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => dispatch({ type: "SET_PLAYING", playing: true })}
-                  disabled={!activeSequence?.frames.length}
-                  className="rounded-xl border border-[#a6e3a1]/45 bg-[#a6e3a1]/14 px-3 py-1.5 text-[11px] font-semibold text-[#bbf7d0] transition-colors hover:bg-[#a6e3a1]/20 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Play
-                </button>
-                <button
-                  type="button"
-                  onClick={() => dispatch({ type: "SET_PLAYING", playing: false })}
-                  className="rounded-xl border border-[#f38ba8]/45 bg-[#f38ba8]/12 px-3 py-1.5 text-[11px] font-semibold text-[#fecdd3] transition-colors hover:bg-[#f38ba8]/18"
-                >
-                  Stop
-                </button>
-                <span className="rounded-full border border-[#1f2937] bg-[#111827] px-2.5 py-1 text-[10px] font-semibold text-[#94a3b8]">
-                  {state.playing ? "Animando" : "Parado"}
-                </span>
-              </div>
-            </div>
-
-            {activeSequence ? (
-              <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#cba6f7]">
-                  Sequencia ativa
-                </div>
-                <div className="mt-3 space-y-3">
-                  <label className="space-y-1 text-[11px] text-[#94a3b8]">
-                    <span>FPS</span>
-                    <input
-                      type="number"
-                      min={1}
-                      max={60}
-                      value={activeSequence.fps}
-                      onChange={(event) =>
-                        dispatch({
-                          type: "SET_SEQUENCE_FPS",
-                          id: activeSequence.id,
-                          fps: Math.max(1, Math.min(60, Number(event.target.value) || 12)),
-                        })
-                      }
-                      className="w-full rounded-xl border border-[#334155] bg-[#111827] px-3 py-2 text-sm font-mono text-[#e2e8f0] focus:border-[#cba6f7] focus:outline-none"
-                    />
-                  </label>
-                  <label className="flex items-center gap-2 text-[12px] text-[#e2e8f0]">
-                    <input
-                      type="checkbox"
-                      checked={activeSequence.loop}
-                      onChange={(event) =>
-                        dispatch({
-                          type: "SET_SEQUENCE_LOOP",
-                          id: activeSequence.id,
-                          loop: event.target.checked,
-                        })
-                      }
-                    />
-                    Loop automatico
-                  </label>
-                  <div className="rounded-xl border border-[#1f2937] bg-[#111827] px-3 py-2 text-[11px] text-[#94a3b8]">
-                    {activeSequence.frames.length > 0
-                      ? `Frames selecionados: ${activeSequence.frames.join(", ")}`
-                      : "Selecione quadros no canvas para preencher esta sequencia."}
-                  </div>
-                </div>
-              </div>
-            ) : null}
-
-            <div className="rounded-2xl border border-[#1f2937] bg-[#0f172a] p-4">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
-                Diagnostico
-              </div>
-              <p className="mt-3 text-[12px] leading-5 text-[#cbd5e1]">{loadStatusText}</p>
-              {state.spriteSheetWarnings.length > 0 && (
-                <ul className="mt-3 space-y-2 text-[11px] leading-5 text-[#f9e2af]">
-                  {state.spriteSheetWarnings.map((warning) => (
-                    <li
-                      key={warning}
-                      className="rounded-xl border border-[#f9e2af]/20 bg-[#f9e2af]/8 px-3 py-2"
-                    >
-                      {warning}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-
-            <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
-                Metadados
-              </div>
-              <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-[12px]">
-                <dt className="text-[#64748b]">Arquivo</dt>
-                <dd className="truncate font-medium text-[#e2e8f0]">{state.spriteSheetDisplayName || "Nenhum"}</dd>
-                <dt className="text-[#64748b]">Formato</dt>
-                <dd className="font-medium text-[#e2e8f0]">{state.spriteSheetFormat ?? "-"}</dd>
-                <dt className="text-[#64748b]">Resolucao</dt>
-                <dd className="font-medium text-[#e2e8f0]">
-                  {state.spriteSheetSize ? `${state.spriteSheetSize.width} x ${state.spriteSheetSize.height}` : "-"}
-                </dd>
-                <dt className="text-[#64748b]">Origem</dt>
-                <dd className="font-medium text-[#e2e8f0]">{sourceOriginLabel}</dd>
-                <dt className="text-[#64748b]">Transparencia</dt>
-                <dd className="font-medium text-[#e2e8f0]">
-                  {state.spriteSheetBackgroundMode
-                    ? `${state.spriteSheetBackgroundMode} (${state.spriteSheetTransparentPixels ?? 0} px)`
-                    : "-"}
-                </dd>
-                <dt className="text-[#64748b]">Perfil</dt>
-                <dd className="font-medium text-[#e2e8f0]">
-                  {state.spriteSheetMetaSpriteCandidate ? "Meta-sprite" : "Sprite simples"}
-                </dd>
-                <dt className="text-[#64748b]">Asset</dt>
-                <dd className="truncate font-medium text-[#e2e8f0]">{state.spritePath || "Pendente de importacao canonica"}</dd>
-              </dl>
-            </div>
-
-            <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
-                Configuracoes de exportacao
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-3">
-                <label className="space-y-1 text-[11px] text-[#94a3b8]">
-                  <span>Frame W</span>
-                  <input
-                    type="number"
-                    min={8}
-                    max={64}
-                    value={state.frameWidth}
-                    onChange={(event) =>
-                      applyConstrainedFrameSize(
-                        Math.max(8, Math.min(64, Number(event.target.value) || 32)),
-                        state.frameHeight
-                      )
-                    }
-                    className="w-full rounded-xl border border-[#334155] bg-[#111827] px-3 py-2 text-sm font-mono text-[#e2e8f0] focus:border-[#7dd3fc] focus:outline-none"
-                  />
-                </label>
-                <label className="space-y-1 text-[11px] text-[#94a3b8]">
-                  <span>Frame H</span>
-                  <input
-                    type="number"
-                    min={8}
-                    max={64}
-                    value={state.frameHeight}
-                    onChange={(event) =>
-                      applyConstrainedFrameSize(
-                        state.frameWidth,
-                        Math.max(8, Math.min(64, Number(event.target.value) || 32))
-                      )
-                    }
-                    className="w-full rounded-xl border border-[#334155] bg-[#111827] px-3 py-2 text-sm font-mono text-[#e2e8f0] focus:border-[#7dd3fc] focus:outline-none"
-                  />
-                </label>
-              </div>
-              <label className="mt-3 block space-y-1 text-[11px] text-[#94a3b8]">
-                <span>Compressao</span>
-                <select
-                  value={state.compression}
-                  onChange={(event) =>
-                    dispatch({ type: "SET_COMPRESSION", value: event.target.value })
-                  }
-                  className="w-full rounded-xl border border-[#334155] bg-[#111827] px-3 py-2 text-sm font-mono text-[#e2e8f0] focus:border-[#7dd3fc] focus:outline-none"
-                >
-                  {COMPRESSION_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="mt-3 rounded-xl border border-[#1f2937] bg-[#111827] p-3">
-                <div className="text-[10px] uppercase tracking-[0.2em] text-[#64748b]">
-                  Paleta alvo
-                </div>
-                <div className="mt-2 grid grid-cols-4 gap-2">
-                  {displayPalette.map((color, index) => (
-                    <div
-                      key={index}
-                      className="aspect-square rounded-lg border border-[#334155]"
-                      style={{
-                        backgroundColor: color === "transparent" ? "transparent" : color,
-                        backgroundImage:
-                          color === "transparent"
-                            ? "linear-gradient(45deg, #334155 25%, transparent 25%), linear-gradient(-45deg, #334155 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #334155 75%), linear-gradient(-45deg, transparent 75%, #334155 75%)"
-                            : undefined,
-                        backgroundSize: color === "transparent" ? "8px 8px" : undefined,
-                        backgroundPosition:
-                          color === "transparent" ? "0 0, 0 4px, 4px -4px, -4px 0" : undefined,
-                      }}
-                      title={index === 0 ? "Transparente" : `Slot ${index}`}
-                    />
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {(externalSourceLoaded || (state.spriteSheetLoadStatus === "loaded" && !state.spritePath)) && (
-              <div className="rounded-2xl border border-[#fab387]/35 bg-[#fab387]/10 px-4 py-3 text-[12px] leading-5 text-[#fcd9bd]">
-                A imagem foi processada com sucesso, mas ainda nao virou um asset canonico do projeto. Gere o sprite sheet em <span className="font-semibold">assets/sprites</span> para alinhar os indices de frame com o pipeline oficial antes de aplicar na cena.
-              </div>
-            )}
-
-            {state.validationError && (
-              <div className="rounded-2xl border border-[#f38ba8]/35 bg-[#f38ba8]/10 px-4 py-3 text-[12px] leading-5 text-[#fecdd3]">
-                {state.validationError}
-              </div>
-            )}
-
-            <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#a6e3a1]">
-                Output (.res)
-              </div>
-              <pre className="mt-3 overflow-x-auto rounded-xl border border-[#1f2937] bg-[#020617] p-3 font-mono text-[11px] leading-5 text-[#86efac]">
-                {resOutput}
-              </pre>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                void handleImportToProject();
-              }}
-              disabled={!state.spriteSheetSourcePath || !activeProjectDir || state.suggestedFrames.length === 0}
-              className="rounded-2xl border border-[#89b4fa]/40 bg-[#89b4fa]/12 px-4 py-3 text-sm font-semibold text-[#dbeafe] transition-colors hover:bg-[#89b4fa]/18 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {state.spritePath ? "Regerar asset canonico" : "Trazer para assets/sprites"}
-            </button>
-
-            <button
-              type="button"
-              onClick={handleApplyToScene}
-              disabled={!canApplyToScene}
-              className={`rounded-2xl px-4 py-3 text-sm font-semibold transition-colors ${
-                state.saveFeedback
-                  ? "bg-[#a6e3a1] text-[#082f1a]"
-                  : "bg-[#a6e3a1]/90 text-[#082f1a] hover:bg-[#a6e3a1] disabled:cursor-not-allowed disabled:opacity-45"
-              }`}
-            >
-              {state.saveFeedback
-                ? "Aplicado com sucesso"
-                : canUpdateEntity
-                  ? "Atualizar entidade selecionada"
-                  : "Aplicar e criar entidade na cena"}
-            </button>
-
-          </div>
-        </section>
+        <ArtStudioInspectorSection />
       </div>
-    </div>
+      </div>
+    </ArtStudioContext.Provider>
   );
 }
