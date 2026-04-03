@@ -32,6 +32,21 @@ if (-not (Test-Path $cargoRunner)) {
 Write-Host "Cargo target dir: $targetRoot"
 $env:CARGO_TARGET_DIR = $targetRoot
 
+function Stop-StaleTargetProcesses([string]$TargetRoot) {
+  $resolvedTargetRoot = [System.IO.Path]::GetFullPath($TargetRoot)
+  $staleProcesses = Get-CimInstance Win32_Process | Where-Object {
+    $_.ExecutablePath -and [System.IO.Path]::GetFullPath($_.ExecutablePath).StartsWith(
+      $resolvedTargetRoot,
+      [System.StringComparison]::OrdinalIgnoreCase
+    )
+  }
+
+  foreach ($process in $staleProcesses) {
+    Write-Host "Encerrando processo residual do target upstream: PID=$($process.ProcessId) Path=$($process.ExecutablePath)"
+    Stop-Process -Id $process.ProcessId -Force -ErrorAction Stop
+  }
+}
+
 function Invoke-CargoChecked([string[]]$Arguments) {
   & $cargoRunner @Arguments
   if ($LASTEXITCODE -ne 0) {
@@ -53,6 +68,8 @@ function Write-ValidationReport([bool]$Success, [string]$ErrorMessage) {
 }
 
 try {
+  Stop-StaleTargetProcesses -TargetRoot $targetRoot
+
   if (-not $SkipRustTests) {
     Write-Host "Rodando suite Rust baseline..."
     Invoke-CargoChecked @(

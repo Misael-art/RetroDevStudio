@@ -206,6 +206,39 @@ if (typeof globalThis.createImageBitmap !== "function") {
   });
 }
 
+// Stub URL.createObjectURL / revokeObjectURL para suprimir warnings de
+// "not fully decoded/resolved objectURL" no jsdom durante testes de assets.
+if (typeof URL.createObjectURL !== "function") {
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true,
+    writable: true,
+    value: () => `blob:mock-object-url-${Math.random().toString(36).slice(2)}`,
+  });
+}
+
+if (typeof URL.revokeObjectURL !== "function") {
+  Object.defineProperty(URL, "revokeObjectURL", {
+    configurable: true,
+    writable: true,
+    value: () => undefined,
+  });
+}
+
+// Suprimir warnings de --localstorage-file do host Node (externo ao repo).
+// Esses warnings vêm do runtime do Vitest/jsdom e não indicam falha real.
+const _originalConsoleWarn = console.warn.bind(console);
+console.warn = (...args: unknown[]) => {
+  const msg = args.length > 0 ? String(args[0]) : "";
+  if (
+    msg.includes("--localstorage-file") ||
+    msg.includes("objectURL") ||
+    msg.includes("not fully decoded")
+  ) {
+    return;
+  }
+  _originalConsoleWarn(...args);
+};
+
 if (typeof originalFetch === "function") {
   Object.defineProperty(globalThis, "fetch", {
     configurable: true,

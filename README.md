@@ -12,8 +12,8 @@
 
 ## Estado Real
 
-- Data de referencia: `2026-03-27`.
-- Fase ativa real: `release candidate / beta testing do desktop Tauri`, com foco em hardening do fluxo canonico `Build -> ROM -> Emulacao`.
+- Data de referencia: `2026-04-03`.
+- Fase ativa real: `hardening / QA do MVP desktop`, com foco em manter o fluxo canonico `Build -> ROM -> Emulacao` repetivel em host Windows limpo.
 - O estado operacional canônico fica em [docs/06_AI_MEMORY_BANK.md](./docs/06_AI_MEMORY_BANK.md).
 - Se este `README` divergir do estado real, prevalecem:
   `docs/06_AI_MEMORY_BANK.md` -> `docs/03_ROADMAP_MVP.md` -> `docs/09_AGENT_DEV_MODE.md`.
@@ -26,14 +26,16 @@
 - Setup nativo sob demanda de `JDK`, `SGDK`, `PVSnesLib` e cores `Libretro` no Windows.
 - Validacao oficial upstream em Windows via [scripts/validate-upstream-windows.ps1](./scripts/validate-upstream-windows.ps1).
 - Smoke desktop local `Build -> ROM -> Run` via [scripts/e2e-tauri-build-run.mjs](./scripts/e2e-tauri-build-run.mjs).
-- Baseline local restaurada neste host com:
-  `check-tree`, `lint`, `tsc`, `vitest`, `cargo clippy` e `cargo test`.
+- Build canonico local via `npm run build:debug`.
+- Bootstrap seguro para host limpo via [scripts/bootstrap.ps1](./scripts/bootstrap.ps1).
+- Baseline recertificada neste host em `2026-04-03` com:
+  `check-tree`, `lint`, `tsc`, `npm test`, `cargo clippy`, `cargo test`, `build:debug` e `validate-upstream-windows`.
 
 ### O que ainda esta em hardening
 
 - O foco do projeto ainda nao e expansao de escopo; e consolidacao do caminho canonico e QA.
-- O shell principal ja e forte, mas ainda nao e um sistema de docking livre no nivel de uma IDE madura.
-- O build desktop local canonico via `scripts/build.mjs debug` / `npm run build:debug` voltou a passar neste host, usando o shadow target automatico previsto no proprio script e sem override manual de `beforeBuildCommand`.
+- O shell principal ja e forte, mas ainda nao e um sistema de docking livre no nivel de uma IDE madura; a migracao para docking livre continua `deferred`.
+- O updater nativo continua apenas em preparacao institucional no backend; nao existe claim de superficie final de auto-update pronta no shell do usuario.
 - Ferramentas como `ArtStudio`, `RetroFX`, `Reverse Workspace`, `Asset Extractor` e `Memory Viewer` continuam visiveis, mas com status `Experimental` onde o backend e a certificacao ainda nao sustentam claim plena.
 
 ---
@@ -61,6 +63,15 @@ Projeto (.rds / UGDM)
     -> build workspace por target
     -> ROM
     -> emulacao Libretro
+```
+
+```mermaid
+flowchart LR
+    A["Projeto UGDM (.rds)"] --> B["Editor Desktop"]
+    B --> C["Validacao por hardware profile"]
+    C --> D["Workspace por target"]
+    D --> E["ROM"]
+    E --> F["Emulacao Libretro"]
 ```
 
 ### Targets atuais
@@ -124,6 +135,18 @@ O mapa detalhado de diretorios fica em [docs/08_TREE_ARCHITECTURE.md](./docs/08_
 
 ---
 
+## Windows Limpo
+
+Para subir o projeto de forma conservadora em um host Windows novo:
+
+1. `npm ci`
+2. `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\bootstrap.ps1`
+3. `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests`
+
+O bootstrap atual nao cria scaffold, nao reescreve arquivos do repositório e pode opcionalmente rodar o baseline completo do projeto.
+
+---
+
 ## Documentos De Verdade
 
 - [docs/06_AI_MEMORY_BANK.md](./docs/06_AI_MEMORY_BANK.md): estado operacional real, proximo passo e memoria do projeto.
@@ -152,6 +175,7 @@ Antes de declarar entrega relevante:
 - `npm test`
 - `cargo clippy -- -D warnings`
 - `cargo test --lib -- --nocapture`
+- `npm run build:debug`
 
 Quando a mudanca tocar `build`, `emulacao` ou `toolchains` reais no Windows, tambem:
 

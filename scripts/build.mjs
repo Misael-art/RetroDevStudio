@@ -364,17 +364,16 @@ async function cleanCanonicalProfileDir(profile, preservedNames = []) {
   const profileDir = path.join(CANONICAL_TARGET_DIR, profile);
   await mkdir(profileDir, { recursive: true });
   const preserved = new Set(preservedNames.map((name) => name.toLowerCase()));
+  const { files, directories } = runtimeFilesForProfile(profile);
+  const removableEntries = [...files, ...directories].filter(
+    (entry) => !preserved.has(entry.toLowerCase())
+  );
 
-  try {
-    const entries = await readdir(profileDir);
-    await Promise.all(
-      entries
-        .filter((entry) => !preserved.has(entry.toLowerCase()))
-        .map((entry) => rm(path.join(profileDir, entry), { recursive: true, force: true }))
-    );
-  } catch {
-    // The profile directory is created lazily during staging.
-  }
+  await Promise.all(
+    removableEntries.map((entry) =>
+      rm(path.join(profileDir, entry), { recursive: true, force: true })
+    )
+  );
 }
 
 async function ensureOperationalLayout() {

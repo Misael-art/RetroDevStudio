@@ -42,9 +42,14 @@ jobs:
         working-directory: src-tauri
         run: cargo clippy -- -D warnings
 
+      # cargo test --lib isolado com --test-threads=1 para evitar conflitos de I/O
+      # e lockfile em hosts Windows com AppLocker/antivirus ativo.
+      # Para suites pesadas multithreaded, use o workflow desktop-e2e.yml num runner dedicado.
       - name: Rust tests
         working-directory: src-tauri
         run: cargo test --lib -- --nocapture --test-threads=1
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
 
       - name: Frontend tests
         run: npm test

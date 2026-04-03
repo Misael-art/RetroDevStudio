@@ -33,3 +33,15 @@
     background: #585b70;
   }
 }
+
+/* Shortcut hint overlay: fade-in suave (C1) */
+@keyframes rds-hint-fade-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -46%) scale(0.88);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}

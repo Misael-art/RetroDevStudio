@@ -40,7 +40,9 @@ RetroDevStudio/
 |   |-- 03_ROADMAP_MVP.md
 |   |-- 04_HARDWARE_SPECS.md
 |   |-- 05_ARCHITECTURE_UGDM.md
-|   |-- 06_AI_MEMORY_BANK.md
+|   |-- 06_AI_MEMORY_BANK.md             (redirect -> 06_CURRENT_WAVE_AI_BANK.md)
+|   |-- 06_CURRENT_WAVE_AI_BANK.md      (memoria ativa Wave S+)
+|   |-- 06_AI_MEMORY_BANK_WAVE_A_R.md  (arquivo historico Waves A-R)
 |   |-- 07_TEST_AND_COMPLIANCE.md
 |   |-- 08_TREE_ARCHITECTURE.md
 |   |-- 09_AGENT_DEV_MODE.md
@@ -181,4 +183,5 @@ RetroDevStudio/
 - `toolchains/webdriver/msedgedriver.exe` e o local canonico do driver nativo usado pelo runner desktop/Tauri e pelos scripts de diagnostico locais.
 - `tsconfig.tsbuildinfo`, `src-tauri/target-test/` e `src-tauri/target-sprint*/` sao artefatos gerados locais e nao fazem parte da arvore canonica versionada.
 - `docs/09_AGENT_DEV_MODE.md` consolida a hierarquia de verdade, os gates e as regras anti-poluicao para agentes.
+- `docs/06_CURRENT_WAVE_AI_BANK.md` e o arquivo de memoria ativa do agente para a wave corrente (Wave S+); `docs/06_AI_MEMORY_BANK.md` continua sendo a entrada canonica e pode redirecionar para a wave ativa; `docs/06_AI_MEMORY_BANK_WAVE_A_R.md` guarda o historico das waves A-R para consulta pontual.
 - `.github/workflows/ci.yml` e o baseline canonico de validacao automatizada do projeto e deve ser mantido verde em mudancas relevantes.

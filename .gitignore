@@ -70,3 +70,11 @@ bootstrap.log
 # --- Temp scripts ---
 scripts/setup-rust.ps1
 scripts/run-bootstrap.ps1
+
+# --- Tauri signing (private key must never be committed) ---
+scripts/_tauri_signing
+scripts/_tauri_signing.pub
+
+# --- Local diagnostics ---
+vitest-err.txt
+vitest-output.txt

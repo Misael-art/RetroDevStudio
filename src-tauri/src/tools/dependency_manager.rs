@@ -331,6 +331,55 @@ impl DependencyKind {
     }
 }
 
+fn ensure_sgdk_boot_templates(install_dir: &Path) -> Result<(), String> {
+    let boot_dir = install_dir.join("src").join("boot");
+    let sega_source = boot_dir.join("sega.s");
+    let rom_head_source = boot_dir.join("rom_head.c");
+    if sega_source.exists() && rom_head_source.exists() {
+        return Ok(());
+    }
+
+    let fallback_boot_dir = install_dir
+        .join("project")
+        .join("template")
+        .join("src")
+        .join("boot");
+    let fallback_sega = fallback_boot_dir.join("sega.s");
+    let fallback_rom_head = fallback_boot_dir.join("rom_head.c");
+
+    if !fallback_sega.exists() || !fallback_rom_head.exists() {
+        return Err(format!(
+            "Instalacao do SGDK em '{}' nao contem boot files em 'src/boot' nem no template oficial.",
+            install_dir.display()
+        ));
+    }
+
+    fs::create_dir_all(&boot_dir).map_err(|e| {
+        format!(
+            "Falha ao preparar boot files do SGDK em '{}': {}",
+            boot_dir.display(),
+            e
+        )
+    })?;
+
+    fs::copy(&fallback_sega, &sega_source).map_err(|e| {
+        format!(
+            "Falha ao restaurar '{}': {}",
+            sega_source.display(),
+            e
+        )
+    })?;
+    fs::copy(&fallback_rom_head, &rom_head_source).map_err(|e| {
+        format!(
+            "Falha ao restaurar '{}': {}",
+            rom_head_source.display(),
+            e
+        )
+    })?;
+
+    Ok(())
+}
+
 pub fn dependency_status_report() -> DependencyStatusReport {
     DependencyStatusReport {
         items: [
@@ -395,6 +444,36 @@ where
     };
 
     let mut logger = InstallLogger::new(&on_log);
+    let current_status = dependency.status();
+
+    if current_status.installed {
+        if matches!(dependency, DependencyKind::Sgdk) {
+            if let Err(error) = ensure_sgdk_boot_templates(&dependency.install_dir()) {
+                logger.emit("error", &error);
+                return DependencyInstallResult {
+                    ok: false,
+                    dependency_id: dependency.id().to_string(),
+                    message: error,
+                    status: dependency.status(),
+                    log: logger.log,
+                };
+            }
+        }
+
+        let message = format!(
+            "{} ja esta disponivel em '{}'.",
+            current_status.label, current_status.install_dir
+        );
+        logger.emit("info", &message);
+        return DependencyInstallResult {
+            ok: true,
+            dependency_id: dependency.id().to_string(),
+            message,
+            status: current_status,
+            log: logger.log,
+        };
+    }
+
     if !cfg!(target_os = "windows") {
         logger.emit(
             "error",
@@ -566,6 +645,7 @@ where
 
     let install_dir = DependencyKind::Sgdk.install_dir();
     replace_dir_contents(&source_root, &install_dir)?;
+    ensure_sgdk_boot_templates(&install_dir)?;
     write_manifest(
         DependencyKind::Sgdk.manifest_dir(),
         manifest_file_name(DependencyKind::Sgdk),

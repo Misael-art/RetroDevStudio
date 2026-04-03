@@ -467,6 +467,9 @@ export default function ViewportPanel({
   const hasEmulatorSession = emulatorLoaded || emulatorActive;
   const showSgdkOnboarding = isSgdkProject && !sgdkOnboardingDismissed;
   const hotReloadNoticeTimerRef = useRef<number | null>(null);
+  const [shortcutHint, setShortcutHint] = useState<{ key: string; label: string } | null>(null);
+  const shortcutHintTimerRef = useRef<number | null>(null);
+  const lastOverlayHwStatusRef = useRef(hwStatus);
   const frameTimingRef = useRef<{ lastFrameAt: number; fps: number }>({
     lastFrameAt: 0,
     fps: 0,
@@ -1360,6 +1363,15 @@ export default function ViewportPanel({
   useEffect(() => {
     if (activeViewportTab !== "scene") return;
 
+    function showHint(key: string, label: string) {
+      if (shortcutHintTimerRef.current !== null) clearTimeout(shortcutHintTimerRef.current);
+      setShortcutHint({ key, label });
+      shortcutHintTimerRef.current = window.setTimeout(() => {
+        setShortcutHint(null);
+        shortcutHintTimerRef.current = null;
+      }, 1500);
+    }
+
     function onKeyDown(event: KeyboardEvent) {
       if (event.code === "Space") {
         event.preventDefault();
@@ -1379,26 +1391,31 @@ export default function ViewportPanel({
         if (key === "g") {
           event.preventDefault();
           setGridSnap((current) => !current);
+          showHint("G", gridSnap ? "Snap Livre" : "Snap 8px");
           return;
         }
         if (key === "v") {
           event.preventDefault();
           setEditorMode("select");
+          showHint("V", "Selecionar");
           return;
         }
         if (key === "b") {
           event.preventDefault();
           setEditorMode("paint");
+          showHint("B", "Pintar");
           return;
         }
         if (key === "e") {
           event.preventDefault();
           setEditorMode("erase");
+          showHint("E", "Apagar");
           return;
         }
         if (key === "c") {
           event.preventDefault();
           setEditorMode("collision");
+          showHint("C", "Colis\u00e3o");
           return;
         }
         if (key === "escape") {
@@ -1450,7 +1467,26 @@ export default function ViewportPanel({
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("wheel", onWheel);
     };
-  }, [activeViewportTab, resetViewportZoom, setViewportZoom, viewportZoom]);
+  }, [activeViewportTab, gridSnap, resetViewportZoom, setViewportZoom, viewportZoom]);
+
+  useEffect(() => {
+    return useEditorStore.subscribe((state) => {
+      if (
+        state.hwStatus &&
+        (
+          state.hwStatus.sprite_count > 0 ||
+          state.hwStatus.dma_used > 0 ||
+          state.hwStatus.palette_banks_used > 0 ||
+          state.hwStatus.bg_layers > 0 ||
+          state.hwStatus.errors.length > 0 ||
+          state.hwStatus.warnings.length > 0 ||
+          lastOverlayHwStatusRef.current === null
+        )
+      ) {
+        lastOverlayHwStatusRef.current = state.hwStatus;
+      }
+    });
+  }, []);
 
   useEffect(() => {
     if (activeViewportTab !== "scene" || !panDragRef.current) return;
@@ -2851,14 +2887,30 @@ export default function ViewportPanel({
         : emulatorLoaded
           ? "ROM carregada - aguardando emulador..."
           : "Aguardando emulador...";
-  const dmaBudgetBytes = hwStatus?.dma_limit ?? (activeTarget === "snes" ? 8192 : 7372);
-  const dmaUsageBytes = Math.min(hwStatus?.dma_used ?? hwStatus?.vram_used ?? 0, dmaBudgetBytes);
+  const overlayStatusLooksEmpty = Boolean(
+    hwStatus &&
+      hwStatus.sprite_count === 0 &&
+      hwStatus.dma_used === 0 &&
+      hwStatus.palette_banks_used === 0 &&
+      hwStatus.bg_layers === 0 &&
+      hwStatus.errors.length === 0 &&
+      hwStatus.warnings.length === 0
+  );
+  const overlayHwStatus =
+    overlayStatusLooksEmpty && lastOverlayHwStatusRef.current
+      ? lastOverlayHwStatusRef.current
+      : hwStatus ?? lastOverlayHwStatusRef.current;
+  const dmaBudgetBytes = overlayHwStatus?.dma_limit ?? (activeTarget === "snes" ? 8192 : 7372);
+  const dmaUsageBytes = Math.min(
+    overlayHwStatus?.dma_used ?? overlayHwStatus?.vram_used ?? 0,
+    dmaBudgetBytes
+  );
   const dmaUsagePercent = Math.min(
     100,
     Math.round((dmaUsageBytes / Math.max(dmaBudgetBytes, 1)) * 100)
   );
   const overlayFps = frameTimingRef.current.fps > 0 ? frameTimingRef.current.fps.toFixed(1) : "0.0";
-  const overlaySpriteCount = hwStatus?.sprite_count ?? activeScene?.entities.length ?? 0;
+  const overlaySpriteCount = overlayHwStatus?.sprite_count ?? activeScene?.entities.length ?? 0;
 
   const isSnes = activeTarget === "snes";
   const targetLabel = isSnes ? "SNES" : "Mega Drive";
@@ -3191,6 +3243,20 @@ export default function ViewportPanel({
                 }}
                 title="Cena WYSIWYG. Arraste para editar; espaco+arraste ou botao do meio para pan; duplo clique em uma guia para remover."
               />
+              {shortcutHint && (
+                <div
+                  key={shortcutHint.key}
+                  className="pointer-events-none absolute left-1/2 top-1/2 z-20 flex flex-col items-center gap-1 rounded-xl border border-white/20 bg-black/55 px-5 py-3 backdrop-blur-sm"
+                  style={{ animation: "rds-hint-fade-in 0.18s ease-out both" }}
+                >
+                  <span className="text-[11px] font-semibold tracking-wide text-white/90">
+                    {shortcutHint.label}
+                  </span>
+                  <kbd className="rounded bg-white/15 px-2 py-0.5 font-mono text-[10px] text-white/50">
+                    {shortcutHint.key.toUpperCase()}
+                  </kbd>
+                </div>
+              )}
             </div>
             {activeScene &&
               activeScene.entities.length === 0 &&

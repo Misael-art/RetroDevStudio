@@ -3296,7 +3296,10 @@ pub extern "C" fn retro_run() {
         let _serial = test_serial_guard();
 
         for dependency_id in ["jdk", "sgdk", "pvsneslib", "libretro_megadrive", "libretro_snes"] {
-            let result = install_dependency(dependency_id, |_| {});
+            eprintln!("[upstream] ensuring dependency '{}'", dependency_id);
+            let result = install_dependency(dependency_id, |line| {
+                eprintln!("[upstream][dependency:{}][{}] {}", dependency_id, line.level, line.message);
+            });
             assert!(
                 result.ok,
                 "failed to install {}: {}",
@@ -3304,6 +3307,7 @@ pub extern "C" fn retro_run() {
             );
         }
 
+        eprintln!("[upstream] validating dependency status report");
         let status_report = dependency_status_report();
         for dependency_id in ["jdk", "sgdk", "pvsneslib", "libretro_megadrive", "libretro_snes"] {
             let item = status_report
@@ -3319,9 +3323,15 @@ pub extern "C" fn retro_run() {
         }
 
         let onboarding_project_dir = temp_dir("official-megadrive-onboarding");
+        eprintln!(
+            "[upstream] building official onboarding project at {}",
+            onboarding_project_dir.display()
+        );
         create_project_skeleton(&onboarding_project_dir, "Official Onboarding", "megadrive")
             .expect("create official megadrive onboarding project");
-        let onboarding_build = run_build(&onboarding_project_dir, |_| {});
+        let onboarding_build = run_build(&onboarding_project_dir, |line| {
+            eprintln!("[upstream][build:onboarding][{}] {}", line.level, line.message);
+        });
         assert!(
             onboarding_build.ok,
             "megadrive onboarding build failed: {:?}",
@@ -3333,13 +3343,24 @@ pub extern "C" fn retro_run() {
             let project_dir = temp_dir(&format!("official-{}", target));
             copy_dir_all(&fixture_dir(fixture_name), &project_dir);
 
-            let build_result = run_build(&project_dir, |_| {});
+            eprintln!(
+                "[upstream] building fixture '{}' from {}",
+                target,
+                project_dir.display()
+            );
+            let build_result = run_build(&project_dir, |line| {
+                eprintln!("[upstream][build:{}][{}] {}", target, line.level, line.message);
+            });
             assert!(
                 build_result.ok,
                 "{} build failed: {:?}",
                 target, build_result.log
             );
 
+            eprintln!(
+                "[upstream] loading rom for '{}' from {}",
+                target, build_result.rom_path
+            );
             let mut emulator = EmulatorCore::new(None);
             emulator
                 .load_rom(Path::new(&build_result.rom_path))
@@ -3349,6 +3370,7 @@ pub extern "C" fn retro_run() {
                     .run_frame()
                     .unwrap_or_else(|error| panic!("failed to run {} frame: {}", target, error));
             }
+            eprintln!("[upstream] captured framebuffer for '{}'", target);
 
             let (framebuffer, size, _) = emulator
                 .get_framebuffer()
@@ -3373,6 +3395,7 @@ pub extern "C" fn retro_run() {
             emulator
                 .stop()
                 .unwrap_or_else(|error| panic!("failed to stop {} emulator: {}", target, error));
+            eprintln!("[upstream] completed validation for '{}'", target);
             let _ = fs::remove_dir_all(project_dir);
         }
     }
@@ -3380,16 +3403,15 @@ pub extern "C" fn retro_run() {
     #[test]
     fn patch_studio_bps_roundtrip_preserves_modified_project_rom_hash() {
         let dir = temp_dir("patch-project");
-        let original = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("data")
-            .join("snes roms")
-            .join("cputest-basicl_snes.sfc");
+        let original = fixture_dir("snes_dummy")
+            .join("build")
+            .join("snes")
+            .join("canonical_snes_dummy.sfc");
         let modified = dir.join("canonical_snes_dummy_modified.sfc");
         let patch = dir.join("project_assets.bps");
         let restored = dir.join("canonical_snes_dummy_restored.sfc");
 
-        let mut modified_bytes = fs::read(&original).expect("read canonical snes rom");
+        let mut modified_bytes = fs::read(&original).expect("read tracked canonical snes rom");
         let replacement_asset = fs::read(
             fixture_dir("snes_dummy")
                 .join("assets")

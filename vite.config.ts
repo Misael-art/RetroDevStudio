@@ -42,7 +42,7 @@ export default defineConfig({
     environment: "jsdom",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     setupFiles: ["src/test/setup.ts"],
-    pool: "threads",
+    pool: process.platform === "win32" ? "forks" : "threads",
     fileParallelism: false,
     maxWorkers: 1,
   },
