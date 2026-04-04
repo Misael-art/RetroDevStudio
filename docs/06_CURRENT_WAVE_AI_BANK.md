@@ -27,6 +27,9 @@
   - **Host limpo sem ROM local escondida:** o teste Rust `patch_studio_bps_roundtrip_preserves_modified_project_rom_hash` deixou de depender de ROM solta em `data/snes roms/` e passou a usar a fixture rastreada `snes_dummy`.
   - **Regressao visual evitada no overlay live:** `ViewportPanel.tsx` preserva o ultimo snapshot util de `hwStatus` para a HUD de performance quando a revalidacao live retorna um payload zerado temporario.
   - **Vitest estabilizado no Windows canonico:** `vite.config.ts` passou a usar `pool: "forks"` no Windows, eliminando o timeout intermitente de worker em `src/App.test.tsx` sem reduzir cobertura.
+  - **Build report endurecido para auditoria real:** `scripts/build.mjs` agora gera `src-tauri/target-test/validation/build-report.json` em modo `fresh-only`, registrando apenas os modos executados na rodada atual e impedindo heranca silenciosa de secoes antigas de `debug`, `portable` ou `msi`.
+  - **Readiness baseline ficou mais fiel ao estado institucional do Windows:** `scripts/release-readiness.mjs --run-baseline` agora aciona automaticamente `build:debug`, `validate-upstream-windows` e `desktop E2E` quando o host esta apto, exigindo timestamps frescos de `build-report.json`, `upstream-validation.json` e do `retro-dev-studio.exe` gerado na mesma rodada.
+  - **Auditoria do GitHub ficou mais legivel:** `.github/workflows/ci.yml` e `.github/workflows/desktop-e2e.yml` agora publicam resumo objetivo em `GITHUB_STEP_SUMMARY` e anexos de `src-tauri/target-test/validation/**`, reduzindo a dependencia de leitura crua de logs por push.
   - **Prova material desta rodada neste host (2026-04-03):** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (`200` testes), `cargo clippy -- -D warnings` OK, `cargo test --lib -- --nocapture --test-threads=1` OK (`253` aprovados / `0` falhas / `3` ignorados), `npm run build:debug` OK e `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\validate-upstream-windows.ps1 -SkipRustTests` OK.
 
 ## 1. STATUS ATUAL DO PROJETO
@@ -600,6 +603,7 @@ Fechar o MVP do desktop Tauri preservando a baseline verde, enquanto o reverse c
 **Pre-requisitos operacionais:**
 * Manter os 6 gates canonicos verdes em toda alteracao relevante.
 * **Auto-updater deferido para pos-MVP (decisao 2026-03-22):** manter `tauri-plugin-updater` apenas como placeholder; nenhum trabalho adicional (endpoint real, UI, pubkey) sera investido ate o MVP ser fechado e a dependencia formalmente aprovada em `docs/02_TECH_STACK.md`.
+* Em Windows, usar `npm run release:readiness:baseline` como fotografia canônica de readiness sempre que a sessao tocar build/toolchains/emulacao; a rodada precisa renovar `build-report.json`, `upstream-validation.json` e o EXE debug.
 * Reexecutar bundle MSI e smoke desktop em host Windows institucional sempre que a mudanca tocar packaging, emulacao, build orchestration, onboarding ou fluxo de projeto.
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
@@ -608,8 +612,9 @@ Fechar o MVP do desktop Tauri preservando a baseline verde, enquanto o reverse c
 2. Gerar e anexar `src-tauri/target-test/validation/release-readiness.md` em cada rodada de promocao RC -> beta/producao, reduzindo falso positivo de readiness.
 3. Validar `platformer_seed` e pelo menos um projeto SGDK importado com `Build & Run` Mega Drive usando SGDK real instalado.
 4. Repetir bundle MSI quando o escopo tocar release (`scripts/run-in-msvc.cmd npm run build:msi`).
-5. Considerar refactoring de ViewportPanel/ToolsPanel como melhoria pos-MVP (risco vs beneficio avaliado).
-6. Preparar notas de beta testing, criterios de aceite e lista de riscos residuais para a rodada institucional.
+5. Manter `README.md`, `docs/07_TEST_AND_COMPLIANCE.md` e os workflows do GitHub sincronizados sempre que o contrato de readiness mudar.
+6. Considerar refactoring de ViewportPanel/ToolsPanel como melhoria pos-MVP (risco vs beneficio avaliado).
+7. Preparar notas de beta testing, criterios de aceite e lista de riscos residuais para a rodada institucional.
 
 **Validacao minima obrigatoria antes de marcar qualquer item como concluido:**
 * `npm run check:tree`

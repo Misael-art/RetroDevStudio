@@ -33,12 +33,15 @@ jobs:
         run: npm ci
 
       - name: Structure check
+        id: structure_check
         run: npm run check:tree
 
       - name: Frontend lint
+        id: frontend_lint
         run: npm run lint
 
       - name: Rust clippy
+        id: rust_clippy
         working-directory: src-tauri
         run: cargo clippy -- -D warnings
 
@@ -46,13 +49,44 @@ jobs:
       # e lockfile em hosts Windows com AppLocker/antivirus ativo.
       # Para suites pesadas multithreaded, use o workflow desktop-e2e.yml num runner dedicado.
       - name: Rust tests
+        id: rust_tests
         working-directory: src-tauri
         run: cargo test --lib -- --nocapture --test-threads=1
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
 
       - name: Frontend tests
+        id: frontend_tests
         run: npm test
 
       - name: TypeScript check
+        id: tsc_check
         run: npx tsc --noEmit
+
+      - name: Write CI summary
+        if: always()
+        run: |
+          $lines = @(
+            "# CI Summary",
+            "",
+            "- Ref: ${{ github.ref_name }}",
+            "- Commit: ${{ github.sha }}",
+            "- Structure check: ${{ steps.structure_check.outcome }}",
+            "- Frontend lint: ${{ steps.frontend_lint.outcome }}",
+            "- Rust clippy: ${{ steps.rust_clippy.outcome }}",
+            "- Rust tests: ${{ steps.rust_tests.outcome }}",
+            "- Frontend tests: ${{ steps.frontend_tests.outcome }}",
+            "- TypeScript check: ${{ steps.tsc_check.outcome }}",
+            "- Overall job: ${{ job.status }}",
+            ""
+          )
+          $lines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+      - name: Upload CI validation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-validation-${{ github.run_id }}
+          path: |
+            src-tauri/target-test/validation/**
+          if-no-files-found: ignore

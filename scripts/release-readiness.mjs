@@ -202,6 +202,14 @@ function shouldAutoRunDesktopE2E(options) {
   return process.platform === "win32" && options.runBaseline && !options.runDesktopE2E;
 }
 
+function shouldAutoRunBuildDebug(options) {
+  return process.platform === "win32" && options.runBaseline && !options.runBuildMode;
+}
+
+function shouldAutoRunUpstream(options) {
+  return process.platform === "win32" && options.runBaseline && !options.runUpstream;
+}
+
 function createEmptyGateResult(gate) {
   return {
     id: gate.id,
@@ -299,6 +307,38 @@ async function inspectFile(filePath) {
     exists: true,
     sizeBytes: metadata.size,
     lastModifiedIso: metadata.mtime.toISOString(),
+  };
+}
+
+function parseIsoDate(candidate) {
+  if (typeof candidate !== "string" || candidate.trim().length === 0) {
+    return null;
+  }
+
+  const parsed = Date.parse(candidate);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isFreshSince(candidateIso, referenceIso) {
+  const candidate = parseIsoDate(candidateIso);
+  const reference = parseIsoDate(referenceIso);
+  if (candidate === null || reference === null) {
+    return false;
+  }
+
+  return candidate >= reference;
+}
+
+function createSyntheticAuxiliaryFailure(label, command, error) {
+  return {
+    label,
+    command,
+    status: "failed",
+    durationMs: 0,
+    startedAt: null,
+    finishedAt: null,
+    exitCode: null,
+    error,
   };
 }
 
@@ -401,11 +441,13 @@ async function gitOutput(args, options = {}) {
 }
 
 async function collectGitState() {
-  const [branch, commit, status] = await Promise.all([
+  const [branchByRevParse, branchByShowCurrent, commit, status] = await Promise.all([
     gitOutput(["rev-parse", "--abbrev-ref", "HEAD"]),
+    gitOutput(["branch", "--show-current"]).catch(() => ""),
     gitOutput(["rev-parse", "HEAD"]),
     gitOutput(["status", "--porcelain"], { trim: false }),
   ]);
+  const branch = branchByShowCurrent || branchByRevParse || "HEAD";
 
   const dirtyEntries = status
     .split(/\r?\n/)
@@ -526,8 +568,33 @@ function classifyReadiness({
   if (auxiliary.build?.status === "failed") {
     blockers.push("Build canonicamente solicitado nesta rodada falhou.");
   }
+  if (auxiliary.build?.status === "passed") {
+    const expectedMode = auxiliary.build.requestedMode;
+    if (!expectedMode || !buildReport?.modes?.[expectedMode]) {
+      blockers.push(
+        `build-report.json nao registrou o modo '${expectedMode ?? "desconhecido"}' desta rodada.`
+      );
+    } else if (!isFreshSince(buildReport.generatedAt, auxiliary.build.startedAt)) {
+      blockers.push("build-report.json nao foi atualizado nesta rodada de build.");
+    }
+
+    if (expectedMode === "debug") {
+      if (!artifacts.debugExe.exists) {
+        blockers.push("Executavel debug canonico ausente apos build:debug desta rodada.");
+      } else if (!isFreshSince(artifacts.debugExe.lastModifiedIso, auxiliary.build.startedAt)) {
+        blockers.push("Executavel debug canonico nao foi renovado na rodada atual de build.");
+      }
+    }
+  }
   if (auxiliary.upstream?.status === "failed") {
     blockers.push("validate-upstream-windows falhou nesta rodada.");
+  }
+  if (auxiliary.upstream?.status === "passed") {
+    if (!upstreamReport?.success) {
+      blockers.push("validate-upstream-windows passou, mas upstream-validation.json nao ficou verde.");
+    } else if (!isFreshSince(upstreamReport.generatedAt, auxiliary.upstream.startedAt)) {
+      blockers.push("upstream-validation.json nao foi atualizado nesta rodada.");
+    }
   }
   if (auxiliary.desktopE2E?.status === "failed") {
     blockers.push("Desktop E2E falhou nesta rodada.");
@@ -561,6 +628,10 @@ function toMarkdown(report) {
     (gate) =>
       `- ${gate.label}: ${gate.status}${gate.durationMs ? ` (${gate.durationMs} ms)` : ""}`
   );
+  const auxiliaryLines = Object.entries(report.auxiliary).map(([, value]) => {
+    const trigger = value.autoTriggered ? " [auto]" : "";
+    return `- ${value.label}: ${value.status}${trigger}${value.durationMs ? ` (${value.durationMs} ms)` : ""}`;
+  });
   const artifactLines = [
     `- Debug EXE: ${report.artifacts.debugExe.exists ? "OK" : "ausente"}${report.artifacts.debugExe.path ? ` - ${report.artifacts.debugExe.path}` : ""}`,
     `- Release EXE: ${report.artifacts.releaseExe.exists ? "OK" : "ausente"}${report.artifacts.releaseExe.path ? ` - ${report.artifacts.releaseExe.path}` : ""}`,
@@ -593,6 +664,9 @@ function toMarkdown(report) {
     "## Gates baseline",
     ...gateLines,
     "",
+    "## Gates auxiliares",
+    ...(auxiliaryLines.length > 0 ? auxiliaryLines : ["- Nenhum gate auxiliar executado."]),
+    "",
     "## Artefatos canonicos",
     ...artifactLines,
     "",
@@ -617,13 +691,17 @@ async function main() {
   const gitState = await collectGitState();
   const gateResults = BASELINE_GATES.map((gate) => createEmptyGateResult(gate));
   const auxiliary = {};
+  const effectiveBuildMode = options.runBuildMode ?? (shouldAutoRunBuildDebug(options) ? "debug" : null);
+  const shouldRunUpstreamNow = options.runUpstream || shouldAutoRunUpstream(options);
 
-  if (options.runBuildMode) {
+  if (effectiveBuildMode) {
     auxiliary.build = await runAuxiliaryCommand(
-      `build:${options.runBuildMode}`,
+      `build:${effectiveBuildMode}`,
       "node",
-      [path.join("scripts", "build.mjs"), options.runBuildMode]
+      [path.join("scripts", "build.mjs"), effectiveBuildMode]
     );
+    auxiliary.build.requestedMode = effectiveBuildMode;
+    auxiliary.build.autoTriggered = shouldAutoRunBuildDebug(options);
   }
 
   if (options.runBaseline) {
@@ -632,7 +710,7 @@ async function main() {
     }
   }
 
-  if (options.runUpstream) {
+  if (shouldRunUpstreamNow) {
     auxiliary.upstream = await runAuxiliaryCommand(
       "validate-upstream-windows",
       powershellCommand(),
@@ -645,22 +723,31 @@ async function main() {
         "-SkipRustTests",
       ]
     );
+    auxiliary.upstream.autoTriggered = shouldAutoRunUpstream(options);
   }
 
   const shouldRunDesktopE2E = options.runDesktopE2E || shouldAutoRunDesktopE2E(options);
 
   if (shouldRunDesktopE2E) {
-    if (!(await pathExists(WEBDRIVER_PATH))) {
-      auxiliary.desktopE2E = {
-        label: "desktop-e2e",
-        command: `node scripts/e2e-tauri-build-run.mjs --skip-build --native-driver ${WEBDRIVER_PATH}`,
-        status: "failed",
-        durationMs: 0,
-        startedAt: null,
-        finishedAt: null,
-        exitCode: null,
-        error: "msedgedriver.exe ausente no caminho canonico.",
-      };
+    const desktopCommand = `node scripts/e2e-tauri-build-run.mjs --skip-build --native-driver ${WEBDRIVER_PATH}`;
+    if (auxiliary.build?.requestedMode === "debug" && auxiliary.build.status !== "passed") {
+      auxiliary.desktopE2E = createSyntheticAuxiliaryFailure(
+        "desktop-e2e",
+        desktopCommand,
+        "Build debug da rodada falhou; desktop E2E foi bloqueado preventivamente."
+      );
+    } else if (!(await pathExists(DEBUG_EXE_PATH))) {
+      auxiliary.desktopE2E = createSyntheticAuxiliaryFailure(
+        "desktop-e2e",
+        desktopCommand,
+        "Executavel debug canonico ausente; desktop E2E com --skip-build nao pode iniciar."
+      );
+    } else if (!(await pathExists(WEBDRIVER_PATH))) {
+      auxiliary.desktopE2E = createSyntheticAuxiliaryFailure(
+        "desktop-e2e",
+        desktopCommand,
+        "msedgedriver.exe ausente no caminho canonico."
+      );
     } else {
       auxiliary.desktopE2E = await runAuxiliaryCommand(
         "desktop-e2e",
@@ -673,6 +760,7 @@ async function main() {
         ]
       );
     }
+    auxiliary.desktopE2E.autoTriggered = shouldAutoRunDesktopE2E(options);
   }
 
   const [buildReport, upstreamReport, manualQa, debugExe, releaseExe, latestMsi, webdriver] =

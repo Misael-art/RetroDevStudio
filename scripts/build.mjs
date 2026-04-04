@@ -133,26 +133,15 @@ function normalizeMode(mode) {
 function buildReportTemplate() {
   return {
     generatedAt: new Date().toISOString(),
+    freshOnly: true,
     canonicalTargetDir: CANONICAL_TARGET_DIR,
     devWorkTargetDir: DEV_WORK_TARGET_DIR,
     validationDir: VALIDATION_DIR,
     requestedTargetDir: REQUESTED_TARGET_DIR,
     shadowTargetDir: SHADOW_TARGET_DIR,
+    executedModes: [],
     modes: {},
   };
-}
-
-async function readExistingBuildReport() {
-  if (!(await pathExists(BUILD_REPORT_PATH))) {
-    return null;
-  }
-
-  try {
-    const raw = await readFile(BUILD_REPORT_PATH, "utf8");
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
 }
 
 function spawnLogged(command, args, options = {}) {
@@ -513,14 +502,8 @@ async function buildModeWithFallback(mode) {
 }
 
 async function writeBuildReport(buildResults) {
-  const existingReport = await readExistingBuildReport();
-  const report = {
-    ...existingReport,
-    ...buildReportTemplate(),
-    modes: {
-      ...(existingReport?.modes ?? {}),
-    },
-  };
+  const report = buildReportTemplate();
+  report.executedModes = buildResults.map((result) => result.mode);
   for (const result of buildResults) {
     const canonicalProfileDir = path.join(CANONICAL_TARGET_DIR, result.profile);
     report.modes[result.mode] = {
@@ -528,10 +511,9 @@ async function writeBuildReport(buildResults) {
       effectiveTargetDir: result.effectiveTargetDir,
       usedShadowFallback: result.usedShadowFallback,
       blockedDll: result.blockedDll,
-      canonicalExe:
-        result.profile === "debug"
-          ? path.join(canonicalProfileDir, "retro-dev-studio.exe")
-          : path.join(canonicalProfileDir, "retro-dev-studio.exe"),
+      generatedAt: report.generatedAt,
+      canonicalProfileDir,
+      canonicalExe: path.join(canonicalProfileDir, "retro-dev-studio.exe"),
       canonicalMsiDir:
         result.profile === "release"
           ? path.join(canonicalProfileDir, "bundle", "msi")

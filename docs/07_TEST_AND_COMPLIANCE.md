@@ -70,7 +70,9 @@
 
 ### 3.1 Agregacao canonica de readiness
 - `node scripts/release-readiness.mjs` gera um snapshot objetivo do estado de release em `src-tauri/target-test/validation/release-readiness.json` e `release-readiness.md`.
-- `npm run release:readiness:baseline` reexecuta os 6 gates locais e, em Windows com `toolchains/webdriver/msedgedriver.exe` disponivel, tambem executa o `desktop E2E` canonico com `--skip-build` antes de gerar o report.
+- `npm run release:readiness:baseline` reexecuta os 6 gates locais e, em Windows, tambem dispara automaticamente `build:debug` e `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests`; se `toolchains/webdriver/msedgedriver.exe` estiver disponivel, o agregador tambem executa o `desktop E2E` canonico com `--skip-build`.
+- Em Windows, o report so deve ficar verde quando `build-report.json`, `upstream-validation.json` e o executavel debug canonico tiverem timestamps frescos da propria rodada.
+- `src-tauri/target-test/validation/build-report.json` deve ser tratado como artefato `fresh-only`: cada execucao registra apenas os modos realmente rodados naquela rodada, sem herdar secoes antigas de `portable`, `msi` ou outros perfis.
 - Em Windows, os gates Rust da baseline de readiness devem rodar pelo wrapper canonico `scripts/run-cargo-msvc.cmd --manifest-path .\\src-tauri\\Cargo.toml`, e nao por `cargo` cru nem forçando `CARGO_TARGET_DIR=cargo-target-shadow` para esses dois gates.
 - O report deve ser tratado como a fotografia canonica da promocao RC -> beta/producao: artefatos, dirty worktree, baseline, upstream report, QA manual pendente e bloqueadores explicitos.
 - O agregador nao substitui a validacao manual nem o smoke institutional em Windows; ele reduz falso positivo e centraliza evidencias.
@@ -91,5 +93,6 @@ Nenhuma etapa deve ser tratada como `concluida` sem certificacao real do fluxo a
 - Para diagnostico rapido e padronizado de ambiente local, usar `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-desktop-e2e.ps1`; para reproduzir handshake real de sessao, habilitar `-SessionProbe`.
 - Historico relevante deste host: o comando cru `npm run tauri build -- --debug --no-bundle` ja apresentou sensibilidade a policy/AppLocker no `beforeBuildCommand`. Para validacao local canônica, preferir `npm run build:debug` / `node scripts/build.mjs debug`, que hoje volta a passar usando o shadow target automatico previsto no proprio script. A prova institucional de desktop continua no runner GitHub/Windows quando o escopo tocar packaging ou regressao sensivel de build.
 - O workflow `desktop-e2e.yml` foi separado do `ci.yml`, ganhou `concurrency`, `timeout` e gatilhos dedicados por caminho, e ja passou em runner GitHub/Windows real; nao migrar esse smoke para o job unico do `ci.yml` sem justificativa forte de custo/tempo.
+- Os workflows `ci.yml` e `desktop-e2e.yml` agora devem publicar sumarios em `GITHUB_STEP_SUMMARY` e anexar `src-tauri/target-test/validation/**` como artefatos de auditoria por execucao.
 - A existencia de toolchain/core instalado localmente nao substitui compliance de licenca.
 - Superficies experimentais devem continuar claramente marcadas ate deixarem de ser parciais ou stub.

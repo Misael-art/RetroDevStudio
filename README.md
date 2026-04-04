@@ -27,6 +27,9 @@
 - Validacao oficial upstream em Windows via [scripts/validate-upstream-windows.ps1](./scripts/validate-upstream-windows.ps1).
 - Smoke desktop local `Build -> ROM -> Run` via [scripts/e2e-tauri-build-run.mjs](./scripts/e2e-tauri-build-run.mjs).
 - Build canonico local via `npm run build:debug`.
+- `build-report.json` fresh-only por rodada, sem herdar modos antigos de outras execucoes.
+- `npm run release:readiness:baseline` agora reroda automaticamente `build:debug`, `validate-upstream-windows` e `desktop E2E` em Windows apto, exigindo artefatos frescos da propria rodada.
+- Workflows do GitHub agora publicam sumario legivel e artefatos de validacao para auditoria por push.
 - Bootstrap seguro para host limpo via [scripts/bootstrap.ps1](./scripts/bootstrap.ps1).
 - Baseline recertificada neste host em `2026-04-03` com:
   `check-tree`, `lint`, `tsc`, `npm test`, `cargo clippy`, `cargo test`, `build:debug` e `validate-upstream-windows`.
@@ -145,6 +148,13 @@ Para subir o projeto de forma conservadora em um host Windows novo:
 
 O bootstrap atual nao cria scaffold, nao reescreve arquivos do repositório e pode opcionalmente rodar o baseline completo do projeto.
 
+Para uma fotografia consolidada de readiness no Windows, o caminho canonico agora e:
+
+1. `npm run release:readiness:baseline`
+2. inspecionar `src-tauri/target-test/validation/release-readiness.md`
+
+Essa rodada passa a exigir que `build-report.json`, `upstream-validation.json` e o executavel debug tenham sido renovados na propria execucao.
+
 ---
 
 ## Documentos De Verdade
@@ -181,6 +191,7 @@ Quando a mudanca tocar `build`, `emulacao` ou `toolchains` reais no Windows, tam
 
 - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests`
 - `node scripts/e2e-tauri-build-run.mjs --skip-build --native-driver .\toolchains\webdriver\msedgedriver.exe`
+- `npm run release:readiness:baseline`
 
 Sem esses gates, o status correto continua sendo `em hardening`.
 

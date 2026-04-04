@@ -98,6 +98,7 @@ jobs:
           "RDS_EDGE_DRIVER_PATH=$driverPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Build debug desktop app (canonical script)
+        id: build_debug
         run: npm run build:debug
 
       - name: Report resolved target
@@ -237,3 +238,52 @@ jobs:
             exit 1
           }
           Write-Host "All executed E2E scenarios passed."
+
+      - name: Publish desktop E2E summary
+        if: always()
+        shell: pwsh
+        run: |
+          $lines = @(
+            "# Desktop E2E Summary",
+            "",
+            "- Target: $env:RDS_E2E_TARGET",
+            "- Build debug: ${{ steps.build_debug.outcome }}",
+            "- Smoke Mega Drive: ${{ steps.smoke_md.outcome }}",
+            "- Smoke SNES: ${{ steps.smoke_snes.outcome }}",
+            "- Live overflow MD: ${{ steps.live_overflow_md.outcome }}",
+            "- Live overflow SNES: ${{ steps.live_overflow_snes.outcome }}",
+            "- Live VRAM overflow MD: ${{ steps.live_vram_overflow_md.outcome }}",
+            "- Live VRAM overflow SNES: ${{ steps.live_vram_overflow_snes.outcome }}",
+            "- Live VRAM warning MD: ${{ steps.live_vram_warning_md.outcome }}",
+            "- Live VRAM warning SNES: ${{ steps.live_vram_warning_snes.outcome }}",
+            "- Live sprite warning MD: ${{ steps.live_sprite_warning_md.outcome }}",
+            "- Live sprite warning SNES: ${{ steps.live_sprite_warning_snes.outcome }}",
+            "- Live ok MD: ${{ steps.live_ok_md.outcome }}",
+            "- Live ok SNES: ${{ steps.live_ok_snes.outcome }}",
+            "- Live error MD: ${{ steps.live_error_md.outcome }}",
+            "- Live error SNES: ${{ steps.live_error_snes.outcome }}",
+            "- Live stale MD: ${{ steps.live_stale_md.outcome }}",
+            "- Live stale SNES: ${{ steps.live_stale_snes.outcome }}",
+            "- Overall job: ${{ job.status }}",
+            ""
+          )
+
+          $validationDir = Join-Path $PWD 'src-tauri\target-test\validation'
+          if (Test-Path $validationDir) {
+            $lines += "## Validation artifacts"
+            Get-ChildItem $validationDir -File | Sort-Object Name | ForEach-Object {
+              $lines += "- $($_.Name)"
+            }
+            $lines += ""
+          }
+
+          $lines | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+      - name: Upload desktop validation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-e2e-validation-${{ github.run_id }}-${{ env.RDS_E2E_TARGET }}
+          path: |
+            src-tauri/target-test/validation/**
+          if-no-files-found: ignore
