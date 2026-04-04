@@ -16,6 +16,15 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+* **O que acabou de acontecer (2026-04-04 - Host limpo: templates externos sem caminho absoluto embedado e higiene do repo):**
+  - **Catalogo de templates ficou agnostico ao host:** `data/template_registry.json` deixou de carregar `default_donor_path` absolutos da maquina original (`F:\Projects\MegaDrive_DEV\...`) para `platformer_seed`, `platformer_gm` e demais templates SGDK externos.
+  - **Backend agora modela o caso honesto de donor manual:** `src-tauri/src/core/project_mgr.rs` passou a tratar templates SGDK sem donor padrao como `usaveis, mas dependentes de escolha manual neste host`, em vez de marca-los como indisponiveis por causa de um path embedado no repositório.
+  - **Erro de criacao ficou mais claro e menos enganoso:** `resolved_template_donor_path(...)` agora exige explicitamente uma pasta doadora manual quando o catalogo nao traz donor padrao, em vez de sugerir que faltou um valor versionado no repo.
+  - **Wizard alinhado ao estado real do host:** `src/App.tsx` agora diferencia `Configurado`, `Requer pasta` e `Indisponivel`; templates SGDK externos continuam selecionaveis no card, mas `Criar Projeto` so prossegue depois da escolha de uma pasta doadora valida.
+  - **Cobertura frontend endurecida para esse contrato:** `src/App.test.tsx` ganhou prova explicita de que o wizard bloqueia a criacao sem donor path e libera o fluxo assim que o usuario escolhe a pasta doadora manualmente.
+  - **Repo mais limpo para multiplos agentes:** `.claude/settings.local.json`, que estava versionado com permissoes e caminhos absolutos da maquina antiga, foi removido do Git e blindado em `.gitignore` como arquivo local.
+  - **Validacao real desta rodada:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (`202` testes), `scripts\run-cargo-msvc.cmd clippy --manifest-path .\src-tauri\Cargo.toml -- -D warnings` OK e `scripts\run-cargo-msvc.cmd test --manifest-path .\src-tauri\Cargo.toml --lib -- --nocapture --test-threads=1` OK (`255` aprovados / `0` falhas / `3` ignorados).
+
 * **O que acabou de acontecer (2026-04-04 - QA RC institucional, fixtures BYOR-safe e shell menos denso):**
   - **Roteiro RC `A-F` virou evidencia executavel:** `scripts/e2e-tauri-build-run.mjs` ganhou o cenario `qa-rc`, que percorre onboarding, camadas, colisao/pintura, `Build & Run`, paineis e persistencia no app desktop real, gerando `src-tauri/target-test/validation/manual-qa-status.json` e screenshots `qa-rc-*.png`.
   - **Prova real desta rodada de QA RC (2026-04-04):** todos os blocos `A-F` ficaram `passed` no report canonico, com evidencias para wizard, editor, LayerPanel, camada oculta, pintura, game view e reabertura do projeto.

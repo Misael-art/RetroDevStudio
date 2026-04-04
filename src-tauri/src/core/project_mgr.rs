@@ -30,6 +30,8 @@ pub const PLATFORMER_PLAYER_ASSET: &str = "assets/sprites/platformer_player.png"
 pub const PLATFORMER_TILESET_ASSET: &str = "assets/tilesets/platformer_level.png";
 pub const PLATFORMER_JUMP_ASSET: &str = "assets/audio/jump.wav";
 const TEMPLATE_REGISTRY_JSON: &str = include_str!("../../../data/template_registry.json");
+const MANUAL_SGDK_DONOR_REQUIRED_MESSAGE: &str =
+    "Requer uma pasta doadora SGDK escolhida manualmente neste host.";
 
 /// Número máximo de tentativas em operações de I/O sujeitas a sharing violation (antivírus/Windows).
 const FILE_IO_RETRY_ATTEMPTS: u32 = 5;
@@ -1052,7 +1054,7 @@ fn resolved_template_donor_path(
     let entry = template_registry_entry(template_id)?;
     entry.default_donor_path.map(PathBuf::from).ok_or_else(|| {
         LoadError(format!(
-            "O template '{}' nao possui donor path padrao configurado.",
+            "O template '{}' requer uma pasta doadora SGDK escolhida manualmente neste host.",
             template_id
         ))
     })
@@ -1082,10 +1084,7 @@ fn template_availability(entry: &TemplateRegistryEntry) -> (bool, Option<String>
         "builtin" => (true, None),
         "external_sgdk" => {
             let Some(donor_path) = entry.default_donor_path.as_deref() else {
-                return (
-                    false,
-                    Some("Template externo sem donor path padrao configurado.".to_string()),
-                );
+                return (true, Some(MANUAL_SGDK_DONOR_REQUIRED_MESSAGE.to_string()));
             };
 
             match entry.id.as_str() {
@@ -8098,6 +8097,26 @@ mod tests {
                 .expect("starter template")
                 .available
         );
+        let platformer = templates
+            .iter()
+            .find(|template| template.id == "platformer_seed")
+            .expect("platformer template");
+        assert!(platformer.available);
+        assert_eq!(platformer.default_donor_path, None);
+        assert_eq!(
+            platformer.availability_reason.as_deref(),
+            Some(MANUAL_SGDK_DONOR_REQUIRED_MESSAGE)
+        );
+    }
+
+    #[test]
+    fn resolved_template_donor_path_requires_manual_selection_when_registry_has_no_default() {
+        let error = resolved_template_donor_path("platformer_seed", None)
+            .expect_err("platformer_seed should require a manual donor path");
+
+        assert!(error
+            .to_string()
+            .contains("requer uma pasta doadora SGDK escolhida manualmente"));
     }
 
     #[test]

@@ -239,9 +239,9 @@ function defaultProjectTemplates() {
       source_kind: "external_sgdk",
       recommended_target: "megadrive",
       experimental: true,
-      available: false,
-      availability_reason: "Template Plataforma indisponivel: donor path nao encontrado.",
-      default_donor_path: "F:/Projects/MegaDrive_DEV/SGDK_templates/templates/plataform",
+      available: true,
+      availability_reason: "Requer uma pasta doadora SGDK escolhida manualmente neste host.",
+      default_donor_path: null,
     },
     {
       id: "platformer_gm",
@@ -253,9 +253,9 @@ function defaultProjectTemplates() {
       source_kind: "external_sgdk",
       recommended_target: "megadrive",
       experimental: true,
-      available: false,
-      availability_reason: "Template Plataforma GameMaker indisponivel: donor path nao encontrado.",
-      default_donor_path: "F:/Projects/MegaDrive_DEV/SGDK_templates/templates/plataform",
+      available: true,
+      availability_reason: "Requer uma pasta doadora SGDK escolhida manualmente neste host.",
+      default_donor_path: null,
     },
   ];
 }
@@ -1258,6 +1258,99 @@ describe("App build flow", () => {
       "",
       "starter_guided",
       undefined
+    );
+  });
+
+  it("requires a donor folder before creating an external SGDK template project", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "",
+        activeProjectName: "",
+        activeScenePath: "",
+        activeScene: null,
+        activeSceneSource: null,
+        hwStatus: null,
+      });
+      await flush();
+      await flush();
+    });
+
+    const platformerCard = container.querySelector(
+      "[data-testid='template-card-platformer_seed']"
+    ) as HTMLButtonElement | null;
+    const createButton = findButton(container, "Criar Projeto");
+
+    await act(async () => {
+      platformerCard?.click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("Requer pasta");
+
+    await act(async () => {
+      createButton.click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.createProjectFromTemplate).not.toHaveBeenCalled();
+    expect(
+      useEditorStore
+        .getState()
+        .consoleEntries.some((entry) =>
+          entry.message.includes("Requer uma pasta doadora SGDK escolhida manualmente")
+        )
+    ).toBe(true);
+  });
+
+  it("creates an external SGDK template project after choosing a donor folder manually", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "",
+        activeProjectName: "",
+        activeScenePath: "",
+        activeScene: null,
+        activeSceneSource: null,
+        hwStatus: null,
+      });
+      await flush();
+      await flush();
+    });
+
+    mocks.dialogOpen.mockResolvedValueOnce("F:/Projects/RetroDevStudio/tests/donors/platformer");
+
+    const platformerCard = container.querySelector(
+      "[data-testid='template-card-platformer_seed']"
+    ) as HTMLButtonElement | null;
+    const chooseDonorButton = findButtonInContext(container, "Escolher pasta...", "Template doador");
+    const createButton = findButton(container, "Criar Projeto");
+
+    await act(async () => {
+      platformerCard?.click();
+      await flush();
+    });
+
+    await act(async () => {
+      chooseDonorButton.click();
+      await flush();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("Configurado");
+    expect(container.textContent).toContain("F:/Projects/RetroDevStudio/tests/donors/platformer");
+
+    await act(async () => {
+      createButton.click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.createProjectFromTemplate).toHaveBeenCalledWith(
+      "MeuProjeto",
+      "megadrive",
+      "",
+      "platformer_seed",
+      "F:/Projects/RetroDevStudio/tests/donors/platformer"
     );
   });
 

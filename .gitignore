@@ -50,6 +50,7 @@ build/
 # --- IDE ---
 .vscode/
 .cursor/
+.claude/settings.local.json
 .idea/
 *.swp
 *.swo

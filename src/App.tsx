@@ -1187,16 +1187,35 @@ export default function App() {
 
   function templateAvailability(template: ProjectTemplateSummary) {
     const donorOverride = templateDonorPaths[template.id]?.trim();
+    const donorPath = donorOverride || template.default_donor_path || "";
     if (template.source_kind === "external_sgdk" && donorOverride) {
       return {
         available: true,
+        readyToCreate: true,
         reason: "Usando uma pasta doadora selecionada manualmente.",
+        statusLabel: "Configurado",
+        tone: "success" as const,
+      };
+    }
+
+    if (template.source_kind === "external_sgdk" && !donorPath) {
+      return {
+        available: true,
+        readyToCreate: false,
+        reason:
+          template.availability_reason ??
+          "Requer uma pasta doadora SGDK escolhida manualmente neste host.",
+        statusLabel: "Requer pasta",
+        tone: "warn" as const,
       };
     }
 
     return {
       available: template.available,
+      readyToCreate: template.available,
       reason: template.availability_reason ?? "",
+      statusLabel: template.available ? "Disponivel" : "Indisponivel",
+      tone: template.available ? ("success" as const) : ("danger" as const),
     };
   }
 
@@ -1250,6 +1269,10 @@ export default function App() {
         "warn",
         `[Projeto] O template '${selectedTemplate.name}' ainda nao esta disponivel: ${availability.reason}`
       );
+      return;
+    }
+    if (!availability.readyToCreate) {
+      logMessage("warn", `[Projeto] ${availability.reason}`);
       return;
     }
 
@@ -2156,12 +2179,14 @@ export default function App() {
                           </span>
                           <span
                             className={`rounded px-1.5 py-0.5 text-[10px] ${
-                              availability.available
+                              availability.tone === "success"
                                 ? "bg-[#a6e3a1]/15 text-[#a6e3a1]"
-                                : "bg-[#f38ba8]/15 text-[#f38ba8]"
+                                : availability.tone === "warn"
+                                  ? "bg-[#fab387]/15 text-[#fab387]"
+                                  : "bg-[#f38ba8]/15 text-[#f38ba8]"
                             }`}
                           >
-                            {availability.available ? "Disponivel" : "Indisponivel"}
+                            {availability.statusLabel}
                           </span>
                         </div>
                         <div className="flex flex-wrap gap-1">
@@ -2228,10 +2253,14 @@ export default function App() {
                     </p>
                     <p
                       className={`mt-1 leading-5 ${
-                        selectedTemplateAvailability?.available ? "text-[#a6e3a1]" : "text-[#f38ba8]"
+                        selectedTemplateAvailability?.readyToCreate
+                          ? "text-[#a6e3a1]"
+                          : selectedTemplateAvailability?.available
+                            ? "text-[#fab387]"
+                            : "text-[#f38ba8]"
                       }`}
                     >
-                      {selectedTemplateAvailability?.available
+                      {selectedTemplateAvailability?.readyToCreate
                         ? "Template pronto para criar projeto."
                         : selectedTemplateAvailability?.reason || "Template ainda indisponivel para este fluxo."}
                     </p>
@@ -2239,7 +2268,7 @@ export default function App() {
                       <p className="mt-1 leading-5 text-[#fab387]">
                         {selectedTemplateDonorPath
                           ? `Template doador atual: ${selectedTemplateDonorPath}`
-                          : "Escolha uma pasta doadora SGDK para liberar este template experimental."}
+                          : "Escolha uma pasta doadora SGDK antes de criar este template experimental."}
                       </p>
                     ) : (
                       <p className="mt-1 leading-5 text-[#94a3b8]">
