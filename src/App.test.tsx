@@ -1055,15 +1055,22 @@ describe("App build flow", () => {
 
     await act(async () => {
       explorerButton?.click();
-      await flush();
-      await flush();
-      for (let attempt = 0; attempt < 12; attempt += 1) {
-        if (container.textContent?.includes("Workspace contextual de arquivos")) {
-          break;
-        }
-        await flush();
-      }
     });
+
+    const explorerDeadline = Date.now() + 3000;
+    while (Date.now() < explorerDeadline) {
+      const text = container.textContent ?? "";
+      if (
+        text.includes("Workspace contextual de arquivos") &&
+        text.includes("Cenas 2") &&
+        text.includes("hero.png")
+      ) {
+        break;
+      }
+      await act(async () => {
+        await flush();
+      });
+    }
 
     expect(useEditorStore.getState().activeWorkspace).toBe("explorer");
     expect(useEditorStore.getState().activeViewportTab).toBe("scene");
