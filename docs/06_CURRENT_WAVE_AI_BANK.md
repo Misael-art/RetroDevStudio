@@ -16,6 +16,14 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+* **O que acabou de acontecer (2026-04-04 - Shell menos denso e onboarding mais honesto no primeiro uso):**
+  - **Wizard de primeiro uso agora prioriza o caminho realmente criavel neste host:** `src/App.tsx` deixou de selecionar por padrao um template SGDK externo que ainda exige donor manual; a escolha inicial passou a priorizar `starter_guided`/templates builtin disponiveis, reduzindo o risco de o primeiro contato cair num estado bloqueado logo na abertura.
+  - **Primeiro sucesso ficou explicitado no proprio wizard:** o modal agora renderiza um card `Primeiro sucesso` com o caminho recomendado ate `Scene -> Game`, incluindo bloqueio honesto para donor SGDK ausente, revisao da cena inicial e `Build & Run` no target selecionado.
+  - **Rail lateral ganhou organizacao por etapa de uso sem trocar a arquitetura do shell:** os workspaces agora aparecem agrupados em `Core`, `Autoria` e `Debug`, com `Art` e `FX` marcados como `Exp.` diretamente na navegação para reforcar a maturidade real dessas superficies.
+  - **A mudanca foi mantida conservadora:** nenhuma rota, IPC, preset ou contrato do `react-resizable-panels` foi trocado; a rodada ficou restrita a organizacao visual, selecao default do wizard e copy orientada ao fluxo canonico ja existente.
+  - **Medicao de bundle apos a rodada de UX/performance:** `npm run build` gerou `assets/index-CBgUETdP.js` com `387.21 kB` bruto / `117.65 kB` gzip. O ganho estrutural da rodada anterior foi preservado; esta rodada concentrou mais legibilidade do shell do que reducao adicional de peso.
+  - **Barra verde desta rodada:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (`202` testes), `scripts\\run-cargo-msvc.cmd clippy --manifest-path .\\src-tauri\\Cargo.toml -- -D warnings` OK, `scripts\\run-cargo-msvc.cmd test --manifest-path .\\src-tauri\\Cargo.toml --lib -- --nocapture --test-threads=1` OK (`255` aprovados / `0` falhas / `3` ignorados) e `npm run build` OK.
+
 * **O que acabou de acontecer (2026-04-04 - Smoke upstream agora certifica `platformer_seed`, import SGDK real e shell mais leve):**
   - **Gate oficial Mega Drive ficou mais fiel ao wizard atual:** `official_windows_upstream_validation_smoke_test` em `src-tauri/src/lib.rs` agora nao valida apenas onboarding e fixtures dummy; ele tambem cria um projeto `platformer_seed` a partir de donor sintetico e importa um projeto SGDK sintetico pelo comando canonico `import_sgdk_project(...)`, levando ambos ate `Build -> ROM -> Run frames` com SGDK real instalado.
   - **Sem criar trilha paralela de certificacao:** `scripts/validate-upstream-windows.ps1` permaneceu intacto como entrypoint institucional; a ampliacao aconteceu no proprio smoke ignorado oficial, preservando `upstream-validation.json` como fonte unica de verdade para esse gate.
@@ -641,10 +649,10 @@ Fechar o MVP do desktop Tauri preservando a baseline verde, enquanto o reverse c
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
 **Sequencia de acoes recomendada:**
-1. Continuar reduzindo o chunk principal do shell sem abrir a frente de docking livre antes da hora; priorizar splits conservadores adicionais no shell e nos paineis de autoria, sempre medindo com `npm run build`.
-2. Repetir bundle MSI apenas quando o escopo tocar release/packaging (`scripts/run-in-msvc.cmd npm run build:msi`).
-3. Manter `validate-upstream-windows` e `release:readiness:baseline` como fotografia institucional sempre que alteracoes futuras tocarem build, emulacao, onboarding ou toolchains.
-4. Avancar para a reducao de densidade do shell e refinamento do onboarding somente depois que a trilha atual de performance estabilizar sem regressao.
+1. Avancar da densidade/onboarding para autoria diaria (`Inspector`, `Layers`, `Asset Browser`, `Scene flow`), mantendo o shell atual estavel e sem abrir docking livre antes da hora.
+2. Continuar medindo o chunk principal do shell a cada rodada relevante de `App.tsx`/`ViewportPanel` com `npm run build`, evitando regressao silenciosa de bundle.
+3. Repetir bundle MSI apenas quando o escopo tocar release/packaging (`scripts/run-in-msvc.cmd npm run build:msi`).
+4. Manter `validate-upstream-windows` e `release:readiness:baseline` como fotografia institucional sempre que alteracoes futuras tocarem build, emulacao, onboarding ou toolchains.
 
 **Validacao minima obrigatoria antes de marcar qualquer item como concluido:**
 * `npm run check:tree`

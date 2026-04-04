@@ -43,6 +43,7 @@
 - O foco do projeto ainda nao e expansao de escopo; e consolidacao do caminho canonico e QA.
 - O shell principal ja e forte, mas ainda nao e um sistema de docking livre no nivel de uma IDE madura; a migracao para docking livre continua `deferred`.
 - O shell ficou mais leve nesta wave com lazy-load adicional de `Logic`, `RetroFX` e `ArtStudio`; o chunk principal caiu para cerca de `382 kB` bruto / `116 kB` gzip, mas ainda segue em hardening.
+- O wizard de primeiro uso agora prioriza um template builtin realmente criavel neste host, mostra um checklist de `Primeiro sucesso` e a rail lateral agrupa workspaces por etapa de uso, com `Art` e `FX` explicitamente marcados como `Exp.`.
 - O updater nativo continua apenas em preparacao institucional no backend; nao existe claim de superficie final de auto-update pronta no shell do usuario.
 - Ferramentas como `ArtStudio`, `RetroFX`, `Reverse Workspace`, `Asset Extractor` e `Memory Viewer` continuam visiveis, mas com status `Experimental` onde o backend e a certificacao ainda nao sustentam claim plena.
 

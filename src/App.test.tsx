@@ -948,6 +948,12 @@ describe("App build flow", () => {
     expect(container.textContent).toContain("Plataforma");
     expect(container.textContent).toContain("Experimental");
     expect(container.textContent).toContain("Criar Projeto");
+    expect(container.querySelector("[data-testid='template-first-success']")?.textContent).toContain(
+      "Primeiro Projeto"
+    );
+    expect(container.querySelector("[data-testid='template-first-success']")?.textContent).toContain(
+      "Rodar Build & Run (Mega Drive)"
+    );
   });
 
   it("shows a contextual guide in the scene workspace and opens the asset browser from it", async () => {
@@ -1013,6 +1019,7 @@ describe("App build flow", () => {
   });
 
   it("switches workspaces from the activity bar and updates shell routing", async () => {
+    const activityBar = container.querySelector("[data-testid='workspace-activity-bar']");
     const logicButton = container.querySelector(
       "[data-testid='workspace-rail-logic']"
     ) as HTMLButtonElement | null;
@@ -1022,6 +1029,10 @@ describe("App build flow", () => {
 
     expect(logicButton).toBeInstanceOf(HTMLButtonElement);
     expect(artButton).toBeInstanceOf(HTMLButtonElement);
+    expect(activityBar?.textContent).toContain("Core");
+    expect(activityBar?.textContent).toContain("Autoria");
+    expect(activityBar?.textContent).toContain("Debug");
+    expect(artButton?.textContent).toContain("Exp.");
 
     await act(async () => {
       logicButton?.click();
@@ -1286,6 +1297,12 @@ describe("App build flow", () => {
     });
 
     expect(container.textContent).toContain("Requer pasta");
+    expect(container.querySelector("[data-testid='template-first-success']")?.textContent).toContain(
+      "Escolher pasta doadora SGDK"
+    );
+    expect(container.querySelector("[data-testid='template-first-success']")?.textContent).toContain(
+      "Bloqueio"
+    );
 
     await act(async () => {
       createButton.click();
@@ -1338,6 +1355,12 @@ describe("App build flow", () => {
 
     expect(container.textContent).toContain("Configurado");
     expect(container.textContent).toContain("F:/Projects/RetroDevStudio/tests/donors/platformer");
+    expect(container.querySelector("[data-testid='template-first-success']")?.textContent).toContain(
+      "Pasta doadora configurada"
+    );
+    expect(container.querySelector("[data-testid='template-first-success']")?.textContent).toContain(
+      "Pronto"
+    );
 
     await act(async () => {
       createButton.click();

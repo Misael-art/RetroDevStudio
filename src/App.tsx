@@ -104,6 +104,7 @@ function ToolbarButton({
 }
 
 type LayoutPresetId = "artist" | "logic" | "debug" | "playtest";
+type WorkspaceGroupId = "core" | "authoring" | "advanced";
 type LayoutMap = {
   left: number;
   center: number;
@@ -117,15 +118,169 @@ const WORKSPACE_ITEMS: {
   label: string;
   icon: string;
   description: string;
+  group: WorkspaceGroupId;
+  badge?: string;
 }[] = [
-  { id: "explorer", label: "Explorer", icon: "EX", description: "Arquivos, assets e cenas" },
-  { id: "scene", label: "Scene", icon: "SC", description: "Composicao e edicao da cena" },
-  { id: "game", label: "Game", icon: "GM", description: "Playtest e runtime" },
-  { id: "logic", label: "Logic", icon: "LG", description: "Fluxo visual e scripting" },
-  { id: "retrofx", label: "FX", icon: "FX", description: "Profundidade e parallax" },
-  { id: "artstudio", label: "Art", icon: "AT", description: "Sprites, slicing e preview" },
-  { id: "debug", label: "Debug", icon: "DB", description: "Analise e ferramentas avancadas" },
+  {
+    id: "scene",
+    label: "Scene",
+    icon: "SC",
+    description: "Composicao e edicao da cena",
+    group: "core",
+  },
+  {
+    id: "game",
+    label: "Game",
+    icon: "GM",
+    description: "Playtest e runtime",
+    group: "core",
+  },
+  {
+    id: "explorer",
+    label: "Explorer",
+    icon: "EX",
+    description: "Arquivos, assets e cenas",
+    group: "core",
+  },
+  {
+    id: "logic",
+    label: "Logic",
+    icon: "LG",
+    description: "Fluxo visual e scripting",
+    group: "authoring",
+  },
+  {
+    id: "artstudio",
+    label: "Art",
+    icon: "AT",
+    description: "Sprites, slicing e preview",
+    group: "authoring",
+    badge: "Exp.",
+  },
+  {
+    id: "retrofx",
+    label: "FX",
+    icon: "FX",
+    description: "Profundidade e parallax",
+    group: "authoring",
+    badge: "Exp.",
+  },
+  {
+    id: "debug",
+    label: "Debug",
+    icon: "DB",
+    description: "Analise e ferramentas avancadas",
+    group: "advanced",
+  },
 ];
+
+const WORKSPACE_GROUPS: {
+  id: WorkspaceGroupId;
+  label: string;
+}[] = [
+  { id: "core", label: "Core" },
+  { id: "authoring", label: "Autoria" },
+  { id: "advanced", label: "Debug" },
+];
+
+type FirstSuccessStep = {
+  label: string;
+  detail: string;
+  tone: "info" | "warn" | "success";
+};
+
+function getTargetLabel(target: "megadrive" | "snes") {
+  return target === "megadrive" ? "Mega Drive" : "SNES";
+}
+
+function getDefaultTemplateId(templates: ProjectTemplateSummary[]) {
+  const builtinReady =
+    templates.find((template) => template.id === "starter_guided" && template.available) ??
+    templates.find((template) => template.id === "empty" && template.available) ??
+    templates.find(
+      (template) => template.available && template.source_kind !== "external_sgdk"
+    );
+
+  if (builtinReady) {
+    return builtinReady.id;
+  }
+
+  const externalReady = templates.find(
+    (template) => template.available && template.source_kind === "external_sgdk"
+  );
+  return externalReady?.id ?? templates[0]?.id ?? "";
+}
+
+function getTemplateFirstSuccessSteps({
+  template,
+  target,
+  availability,
+  donorPath,
+}: {
+  template: ProjectTemplateSummary;
+  target: "megadrive" | "snes";
+  availability: {
+    available: boolean;
+    readyToCreate: boolean;
+    reason: string;
+  };
+  donorPath: string;
+}): FirstSuccessStep[] {
+  const targetLabel = getTargetLabel(target);
+  const steps: FirstSuccessStep[] = [];
+
+  if (template.source_kind === "external_sgdk") {
+    steps.push(
+      donorPath.trim()
+        ? {
+            label: "Pasta doadora configurada",
+            detail:
+              "O wizard vai montar o template a partir da pasta escolhida, sem depender de caminhos absolutos deste host.",
+            tone: "success",
+          }
+        : {
+            label: "Escolher pasta doadora SGDK",
+            detail:
+              availability.reason ||
+              "Selecione a pasta doadora antes de criar este template experimental.",
+            tone: "warn",
+          }
+    );
+  }
+
+  steps.push({
+    label: `Criar o projeto em ${targetLabel}`,
+    detail: availability.readyToCreate
+      ? "O projeto abre diretamente no Scene workspace, com a cena inicial hidratada no shell atual."
+      : "Assim que a configuracao minima estiver pronta, o wizard cria o projeto e abre a cena inicial.",
+    tone: availability.readyToCreate ? "success" : "info",
+  });
+
+  steps.push(
+    template.id === "empty"
+      ? {
+          label: "Instanciar o primeiro asset",
+          detail:
+            "Abra o Asset Browser no Scene workspace para colocar o primeiro sprite ou tilemap antes do playtest.",
+          tone: "info",
+        }
+      : {
+          label: "Revisar a cena inicial",
+          detail:
+            "Confirme entidades, camadas e Inspector no Scene workspace antes de ir para o emulador.",
+          tone: "info",
+        }
+  );
+
+  steps.push({
+    label: `Rodar Build & Run (${targetLabel})`,
+    detail:
+      "Use o Game workspace para compilar e validar a ROM no emulador integrado sem sair do fluxo canonico.",
+    tone: "info",
+  });
+
+  return steps;
+}
 
 function getPresetLayout(preset: LayoutPresetId, width: number): LayoutMap {
   const compact = width < 1180;
@@ -171,6 +326,7 @@ function WorkspaceRailButton({
   title,
   onClick,
   accent = "default",
+  badge,
   testId,
 }: {
   icon: string;
@@ -179,6 +335,7 @@ function WorkspaceRailButton({
   title: string;
   onClick: () => void;
   accent?: "default" | "debug";
+  badge?: string;
   testId?: string;
 }) {
   const activeTone =
@@ -202,6 +359,11 @@ function WorkspaceRailButton({
         {icon}
       </span>
       <span className="text-[10px] font-semibold text-current">{label}</span>
+      {badge ? (
+        <span className="text-[8px] font-semibold uppercase tracking-[0.18em] text-[#fab387]">
+          {badge}
+        </span>
+      ) : null}
     </button>
   );
 }
@@ -282,6 +444,80 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
         </p>
       </details>
     </section>
+  );
+}
+
+function TemplateFirstSuccessCard({
+  templateName,
+  targetLabel,
+  steps,
+}: {
+  templateName: string;
+  targetLabel: string;
+  steps: FirstSuccessStep[];
+}) {
+  function toneClass(tone: FirstSuccessStep["tone"]) {
+    if (tone === "success") {
+      return "border-[#a6e3a1]/25 bg-[#a6e3a1]/10 text-[#a6e3a1]";
+    }
+    if (tone === "warn") {
+      return "border-[#fab387]/25 bg-[#fab387]/10 text-[#fab387]";
+    }
+    return "border-[#89b4fa]/25 bg-[#89b4fa]/10 text-[#89b4fa]";
+  }
+
+  return (
+    <div
+      data-testid="template-first-success"
+      className="rounded border border-[#313244] bg-[#11111b] p-3 text-[10px] text-[#7f849c]"
+    >
+      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#94e2d5]">
+            Primeiro sucesso
+          </p>
+          <p className="mt-1 text-[#cdd6f4]">
+            Caminho recomendado para <span className="font-semibold">{templateName}</span>
+          </p>
+          <p className="mt-1 leading-5 text-[#94a3b8]">
+            Fluxo canonico desta escolha: <span className="font-semibold text-[#cdd6f4]">Scene</span>{" "}
+            primeiro, depois <span className="font-semibold text-[#cdd6f4]">Game</span> para o
+            playtest em {targetLabel}.
+          </p>
+        </div>
+        <span className="rounded-full border border-[#313244] bg-[#181825] px-2.5 py-1 text-[9px] font-semibold uppercase tracking-[0.16em] text-[#cdd6f4]">
+          {targetLabel}
+        </span>
+      </div>
+
+      <ol className="mt-3 grid gap-2 md:grid-cols-2">
+        {steps.map((step, index) => (
+          <li
+            key={`${step.label}-${index}`}
+            className="rounded border border-[#313244] bg-[#181825] px-3 py-2"
+          >
+            <div className="flex items-start gap-2">
+              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#0b1020] text-[9px] font-semibold text-[#cba6f7]">
+                {index + 1}
+              </span>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-[11px] font-semibold text-[#e2e8f0]">{step.label}</p>
+                  <span className={`rounded-full border px-2 py-0.5 text-[8px] font-semibold uppercase tracking-[0.14em] ${toneClass(step.tone)}`}>
+                    {step.tone === "success"
+                      ? "Pronto"
+                      : step.tone === "warn"
+                        ? "Bloqueio"
+                        : "Proximo"}
+                  </span>
+                </div>
+                <p className="mt-1 leading-5 text-[#94a3b8]">{step.detail}</p>
+              </div>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 
@@ -579,6 +815,15 @@ export default function App() {
   const selectedTemplateDonorPath = selectedTemplate
     ? templateDonorPaths[selectedTemplate.id] || selectedTemplate.default_donor_path || ""
     : "";
+  const selectedTemplateFirstSuccessSteps =
+    selectedTemplate && selectedTemplateAvailability
+      ? getTemplateFirstSuccessSteps({
+          template: selectedTemplate,
+          target: newProjTarget,
+          availability: selectedTemplateAvailability,
+          donorPath: selectedTemplateDonorPath,
+        })
+      : [];
   const selectedExternalImportProfile =
     externalImportProfiles.find((profile) => profile.id === selectedExternalImportProfileId) ?? null;
   const workspaceMeta =
@@ -764,11 +1009,7 @@ export default function App() {
           if (templates.some((template) => template.id === current)) {
             return current;
           }
-          const defaultTemplate =
-            templates.find((template) => template.id === "platformer_seed" && template.available) ??
-            templates.find((template) => template.id === "starter_guided") ??
-            templates[0];
-          return defaultTemplate?.id ?? "";
+          return getDefaultTemplateId(templates);
         });
         setSelectedExternalImportProfileId((current) => {
           if (profiles.some((profile) => profile.id === current)) {
@@ -2332,6 +2573,19 @@ export default function App() {
               </div>
             </div>
 
+            {selectedTemplate ? (
+              <TemplateFirstSuccessCard
+                templateName={selectedTemplate.name}
+                targetLabel={getTargetLabel(newProjTarget)}
+                steps={selectedTemplateFirstSuccessSteps}
+              />
+            ) : (
+              <div className="rounded border border-[#313244] bg-[#11111b] p-3 text-[10px] leading-5 text-[#7f849c]">
+                Escolha um template para o wizard montar um caminho recomendado ate o primeiro
+                playtest no fluxo canonico atual.
+              </div>
+            )}
+
             <div className="flex gap-2">
               {(["megadrive", "snes"] as const).map((target) => (
                 <button
@@ -2607,19 +2861,36 @@ export default function App() {
           data-testid="workspace-activity-bar"
           className="flex w-[56px] shrink-0 flex-col border-r border-[#27272a] bg-[#09090b]"
         >
-          <div className="flex flex-1 flex-col items-center gap-2 px-1.5 py-3">
-            {WORKSPACE_ITEMS.map((workspace) => (
-              <WorkspaceRailButton
-                key={workspace.id}
-                icon={workspace.icon}
-                label={workspace.label}
-                active={activeWorkspace === workspace.id}
-                title={workspace.description}
-                accent={workspace.id === "debug" ? "debug" : "default"}
-                testId={`workspace-rail-${workspace.id}`}
-                onClick={() => handleWorkspaceSelect(workspace.id)}
-              />
-            ))}
+          <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-1.5 py-3">
+            {WORKSPACE_GROUPS.map((group) => {
+              const groupItems = WORKSPACE_ITEMS.filter((workspace) => workspace.group === group.id);
+              return (
+                <div
+                  key={group.id}
+                  data-testid={`workspace-rail-group-${group.id}`}
+                  className="rounded-2xl border border-[#18181b] bg-[#0b1120] px-1 py-1.5"
+                >
+                  <p className="px-1 text-center text-[8px] font-semibold uppercase tracking-[0.18em] text-[#475569]">
+                    {group.label}
+                  </p>
+                  <div className="mt-1 flex flex-col items-center gap-2">
+                    {groupItems.map((workspace) => (
+                      <WorkspaceRailButton
+                        key={workspace.id}
+                        icon={workspace.icon}
+                        label={workspace.label}
+                        active={activeWorkspace === workspace.id}
+                        title={workspace.description}
+                        accent={workspace.id === "debug" ? "debug" : "default"}
+                        badge={workspace.badge}
+                        testId={`workspace-rail-${workspace.id}`}
+                        onClick={() => handleWorkspaceSelect(workspace.id)}
+                      />
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </aside>
 
