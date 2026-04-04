@@ -64,6 +64,7 @@ describe("HierarchyPanel", () => {
       display_name: "Main",
       entities: [],
       background_layers: [],
+      layers: [],
       palettes: [],
     };
 
@@ -155,6 +156,13 @@ describe("HierarchyPanel", () => {
   });
 
   it("creates a starter sprite from the empty-scene CTA", async () => {
+    expect(container.querySelector("[data-testid='hierarchy-scene-summary']")?.textContent).toContain(
+      "Cenas: 1"
+    );
+    expect(container.querySelector("[data-testid='hierarchy-scene-summary']")?.textContent).toContain(
+      "Entidades: 0"
+    );
+
     await act(async () => {
       findButton(container, "Sprite Inicial").click();
       await flush();
@@ -175,5 +183,34 @@ describe("HierarchyPanel", () => {
       "Hierarchy",
       "Sprite 'onboarding_player' criado a partir de 'assets/sprites/onboarding_player.ppm'."
     );
+    expect(container.querySelector("[data-testid='hierarchy-scene-summary']")?.textContent).toContain(
+      "Entidades: 1"
+    );
+  });
+
+  it("shows a no-match message when the hierarchy filter hides every item", async () => {
+    await act(async () => {
+      findButton(container, "Sprite Inicial").click();
+      await flush();
+      await flush();
+    });
+
+    const filterInput = container.querySelector(
+      "input[placeholder='Buscar...']"
+    ) as HTMLInputElement | null;
+
+    expect(filterInput).toBeInstanceOf(HTMLInputElement);
+
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value"
+      )?.set;
+      valueSetter?.call(filterInput, "inexistente");
+      filterInput!.dispatchEvent(new Event("input", { bubbles: true }));
+      await flush();
+    });
+
+    expect(container.textContent).toContain('Nenhum item corresponde a "inexistente" na cena ativa.');
   });
 });

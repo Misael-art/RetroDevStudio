@@ -167,6 +167,7 @@ export default function HierarchyPanel() {
 
   const entities = activeScene?.entities ?? [];
   const bgLayers = activeScene?.background_layers ?? [];
+  const sceneLayerCount = activeScene?.layers?.length ?? 0;
 
   const filterLower = filterText.toLowerCase();
   const filteredEntities = filterText
@@ -181,6 +182,7 @@ export default function HierarchyPanel() {
       layer.layer_id.toLowerCase().includes(filterLower)
     )
     : bgLayers;
+  const filteredItemCount = filteredEntities.length + filteredLayers.length;
 
   const entityGroups: EntityGroup[] = useMemo(() => {
     const grouped = new Map<string, EntityGroup>();
@@ -446,6 +448,24 @@ export default function HierarchyPanel() {
           <p className="mt-1 truncate text-[10px] text-[#45475a]">
             {activeSceneSelectValue || "Nenhuma cena ativa"}
           </p>
+          <div
+            data-testid="hierarchy-scene-summary"
+            className="mt-2 flex flex-wrap gap-1.5 text-[9px] text-[#7f849c]"
+          >
+            {[
+              { label: "Cenas", value: sceneItems.length },
+              { label: "Camadas", value: sceneLayerCount },
+              { label: "Entidades", value: entities.length },
+              { label: "Fundos", value: bgLayers.length },
+            ].map((item) => (
+              <span
+                key={item.label}
+                className="rounded-full border border-[#313244] bg-[#181825] px-2 py-0.5"
+              >
+                {item.label}: <span className="font-semibold text-[#cdd6f4]">{item.value}</span>
+              </span>
+            ))}
+          </div>
         </div>
 
         <div className="border-b border-[#313244] px-3 py-2 flex items-center gap-2">
@@ -537,6 +557,12 @@ export default function HierarchyPanel() {
               </li>
             );
           })}
+
+          {filterText && filteredItemCount === 0 && (entities.length > 0 || bgLayers.length > 0) && (
+            <li className="px-3 py-4 text-[11px] italic text-[#6c7086]">
+              Nenhum item corresponde a &quot;{filterText}&quot; na cena ativa.
+            </li>
+          )}
 
           {entities.length === 0 && bgLayers.length === 0 && activeProjectDir && (
             <li className="px-3 pt-4">

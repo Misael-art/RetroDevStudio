@@ -16,6 +16,12 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+* **O que acabou de acontecer (2026-04-04 - Autoria diaria: Hierarchy agora orienta melhor a cena ativa):**
+  - **Hierarchy ganhou contexto rapido de cena sem alterar store, schema ou persistencia:** `src/components/hierarchy/HierarchyPanel.tsx` agora mostra um resumo compacto da cena ativa (`Cenas`, `Camadas`, `Entidades`, `Fundos`) logo abaixo do seletor de cena, reduzindo o custo de orientacao quando o usuario alterna entre cenas e camadas.
+  - **Busca da hierarchy deixou de falhar silenciosamente:** quando a cena possui itens mas o filtro nao encontra correspondencias, o painel agora exibe uma mensagem explicita com o termo buscado, em vez de simplesmente parecer vazio.
+  - **Escopo mantido conservador:** nenhuma mudanca foi feita em `createScene`, `switchScene`, `persistActiveScene`, schema UGDM, build ou emulacao; a rodada ficou estritamente no fluxo de autoria diaria da sidebar esquerda.
+  - **Cobertura e baseline renovadas apos a mudanca:** `src/components/hierarchy/HierarchyPanel.test.tsx` agora trava o resumo da cena e o feedback de filtro vazio. A barra verde desta rodada fechou com `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (`203` testes), `scripts\\run-cargo-msvc.cmd clippy --manifest-path .\\src-tauri\\Cargo.toml -- -D warnings` OK e `scripts\\run-cargo-msvc.cmd test --manifest-path .\\src-tauri\\Cargo.toml --lib -- --nocapture --test-threads=1` OK (`255` aprovados / `0` falhas / `3` ignorados).
+
 * **O que acabou de acontecer (2026-04-04 - Shell menos denso e onboarding mais honesto no primeiro uso):**
   - **Wizard de primeiro uso agora prioriza o caminho realmente criavel neste host:** `src/App.tsx` deixou de selecionar por padrao um template SGDK externo que ainda exige donor manual; a escolha inicial passou a priorizar `starter_guided`/templates builtin disponiveis, reduzindo o risco de o primeiro contato cair num estado bloqueado logo na abertura.
   - **Primeiro sucesso ficou explicitado no proprio wizard:** o modal agora renderiza um card `Primeiro sucesso` com o caminho recomendado ate `Scene -> Game`, incluindo bloqueio honesto para donor SGDK ausente, revisao da cena inicial e `Build & Run` no target selecionado.
@@ -649,7 +655,7 @@ Fechar o MVP do desktop Tauri preservando a baseline verde, enquanto o reverse c
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
 **Sequencia de acoes recomendada:**
-1. Avancar da densidade/onboarding para autoria diaria (`Inspector`, `Layers`, `Asset Browser`, `Scene flow`), mantendo o shell atual estavel e sem abrir docking livre antes da hora.
+1. Continuar a frente de autoria diaria por `Inspector`, `LayerPanel` e `Asset Browser`, priorizando ganhos de orientacao/descoberta e mantendo o shell atual estavel.
 2. Continuar medindo o chunk principal do shell a cada rodada relevante de `App.tsx`/`ViewportPanel` com `npm run build`, evitando regressao silenciosa de bundle.
 3. Repetir bundle MSI apenas quando o escopo tocar release/packaging (`scripts/run-in-msvc.cmd npm run build:msi`).
 4. Manter `validate-upstream-windows` e `release:readiness:baseline` como fotografia institucional sempre que alteracoes futuras tocarem build, emulacao, onboarding ou toolchains.
