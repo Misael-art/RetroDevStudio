@@ -25,6 +25,7 @@
 - Emulacao integrada via `Libretro`.
 - Setup nativo sob demanda de `JDK`, `SGDK`, `PVSnesLib` e cores `Libretro` no Windows.
 - Validacao oficial upstream em Windows via [scripts/validate-upstream-windows.ps1](./scripts/validate-upstream-windows.ps1).
+- O smoke upstream oficial agora cobre onboarding, `platformer_seed`, pelo menos um projeto SGDK importado e as fixtures canonicas com SGDK real instalado.
 - Smoke desktop local `Build -> ROM -> Run` via [scripts/e2e-tauri-build-run.mjs](./scripts/e2e-tauri-build-run.mjs).
 - Build canonico local via `npm run build:debug`.
 - `build-report.json` fresh-only por rodada, sem herdar modos antigos de outras execucoes.
@@ -41,7 +42,7 @@
 
 - O foco do projeto ainda nao e expansao de escopo; e consolidacao do caminho canonico e QA.
 - O shell principal ja e forte, mas ainda nao e um sistema de docking livre no nivel de uma IDE madura; a migracao para docking livre continua `deferred`.
-- O shell ficou menos denso e mais leve nesta wave com lazy-load de paineis secundarios, mas o chunk principal ainda esta grande e segue em hardening.
+- O shell ficou mais leve nesta wave com lazy-load adicional de `Logic`, `RetroFX` e `ArtStudio`; o chunk principal caiu para cerca de `382 kB` bruto / `116 kB` gzip, mas ainda segue em hardening.
 - O updater nativo continua apenas em preparacao institucional no backend; nao existe claim de superficie final de auto-update pronta no shell do usuario.
 - Ferramentas como `ArtStudio`, `RetroFX`, `Reverse Workspace`, `Asset Extractor` e `Memory Viewer` continuam visiveis, mas com status `Experimental` onde o backend e a certificacao ainda nao sustentam claim plena.
 

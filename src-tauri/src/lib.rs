@@ -3325,6 +3325,58 @@ pub extern "C" fn retro_run() {
 
         let _serial = test_serial_guard();
 
+        fn assert_upstream_build_and_run(label: &str, project_dir: &Path) {
+            eprintln!(
+                "[upstream] building '{}' project at {}",
+                label,
+                project_dir.display()
+            );
+            let build_result = run_build(project_dir, |line| {
+                eprintln!("[upstream][build:{}][{}] {}", label, line.level, line.message);
+            });
+            assert!(build_result.ok, "{} build failed: {:?}", label, build_result.log);
+
+            eprintln!(
+                "[upstream] loading rom for '{}' from {}",
+                label, build_result.rom_path
+            );
+            let mut emulator = EmulatorCore::new(None);
+            emulator
+                .load_rom(Path::new(&build_result.rom_path))
+                .unwrap_or_else(|error| panic!("failed to load {} rom: {}", label, error));
+            for _ in 0..5 {
+                emulator
+                    .run_frame()
+                    .unwrap_or_else(|error| panic!("failed to run {} frame: {}", label, error));
+            }
+            eprintln!("[upstream] captured framebuffer for '{}'", label);
+
+            let (framebuffer, size, _) = emulator
+                .get_framebuffer()
+                .unwrap_or_else(|error| panic!("failed to read {} framebuffer: {}", label, error));
+
+            assert!(
+                size.width > 0,
+                "{} framebuffer width should be non-zero",
+                label
+            );
+            assert!(
+                size.height > 0,
+                "{} framebuffer height should be non-zero",
+                label
+            );
+            assert!(
+                !framebuffer.is_empty(),
+                "{} framebuffer should not be empty after running frames",
+                label
+            );
+
+            emulator
+                .stop()
+                .unwrap_or_else(|error| panic!("failed to stop {} emulator: {}", label, error));
+            eprintln!("[upstream] completed validation for '{}'", label);
+        }
+
         for dependency_id in ["jdk", "sgdk", "pvsneslib", "libretro_megadrive", "libretro_snes"] {
             eprintln!("[upstream] ensuring dependency '{}'", dependency_id);
             let result = install_dependency(dependency_id, |line| {
@@ -3359,73 +3411,58 @@ pub extern "C" fn retro_run() {
         );
         create_project_skeleton(&onboarding_project_dir, "Official Onboarding", "megadrive")
             .expect("create official megadrive onboarding project");
-        let onboarding_build = run_build(&onboarding_project_dir, |line| {
-            eprintln!("[upstream][build:onboarding][{}] {}", line.level, line.message);
-        });
-        assert!(
-            onboarding_build.ok,
-            "megadrive onboarding build failed: {:?}",
-            onboarding_build.log
-        );
+        assert_upstream_build_and_run("onboarding", &onboarding_project_dir);
         let _ = fs::remove_dir_all(&onboarding_project_dir);
+
+        let platformer_base_dir = temp_dir("official-platformer-seed");
+        let platformer_donor_dir = temp_dir("official-platformer-seed-donor");
+        write_platformer_donor_fixture(&platformer_donor_dir, true);
+        let platformer_result = create_project_from_template(
+            "Official Platformer Seed".to_string(),
+            "megadrive".to_string(),
+            platformer_base_dir.to_string_lossy().to_string(),
+            "platformer_seed".to_string(),
+            Some(platformer_donor_dir.to_string_lossy().to_string()),
+        )
+        .expect("create official platformer_seed project");
+        let platformer_project_dir = PathBuf::from(&platformer_result.path);
+        assert!(platformer_project_dir
+            .join("assets")
+            .join("sprites")
+            .join("platformer_player.png")
+            .is_file());
+        assert_upstream_build_and_run("template-platformer_seed", &platformer_project_dir);
+        let _ = fs::remove_dir_all(&platformer_base_dir);
+        let _ = fs::remove_dir_all(&platformer_donor_dir);
+
+        let imported_base_dir = temp_dir("official-imported-sgdk");
+        let imported_donor_dir = temp_dir("official-imported-sgdk-donor");
+        write_generic_sgdk_donor_fixture(&imported_donor_dir);
+        let imported_result = import_sgdk_project(
+            "Official Imported SGDK".to_string(),
+            imported_base_dir.to_string_lossy().to_string(),
+            imported_donor_dir.to_string_lossy().to_string(),
+        )
+        .expect("import official sgdk project");
+        let imported_project_dir = PathBuf::from(&imported_result.path);
+        assert!(imported_project_dir
+            .join("assets")
+            .join("sprites")
+            .join("hero.png")
+            .is_file());
+        assert!(imported_project_dir
+            .join("assets")
+            .join("audio")
+            .join("theme.xgm")
+            .is_file());
+        assert_upstream_build_and_run("imported-sgdk", &imported_project_dir);
+        let _ = fs::remove_dir_all(&imported_base_dir);
+        let _ = fs::remove_dir_all(&imported_donor_dir);
 
         for (target, fixture_name) in [("megadrive", "megadrive_dummy"), ("snes", "snes_dummy")] {
             let project_dir = temp_dir(&format!("official-{}", target));
             copy_dir_all(&fixture_dir(fixture_name), &project_dir);
-
-            eprintln!(
-                "[upstream] building fixture '{}' from {}",
-                target,
-                project_dir.display()
-            );
-            let build_result = run_build(&project_dir, |line| {
-                eprintln!("[upstream][build:{}][{}] {}", target, line.level, line.message);
-            });
-            assert!(
-                build_result.ok,
-                "{} build failed: {:?}",
-                target, build_result.log
-            );
-
-            eprintln!(
-                "[upstream] loading rom for '{}' from {}",
-                target, build_result.rom_path
-            );
-            let mut emulator = EmulatorCore::new(None);
-            emulator
-                .load_rom(Path::new(&build_result.rom_path))
-                .unwrap_or_else(|error| panic!("failed to load {} rom: {}", target, error));
-            for _ in 0..5 {
-                emulator
-                    .run_frame()
-                    .unwrap_or_else(|error| panic!("failed to run {} frame: {}", target, error));
-            }
-            eprintln!("[upstream] captured framebuffer for '{}'", target);
-
-            let (framebuffer, size, _) = emulator
-                .get_framebuffer()
-                .unwrap_or_else(|error| panic!("failed to read {} framebuffer: {}", target, error));
-
-            assert!(
-                size.width > 0,
-                "{} framebuffer width should be non-zero",
-                target
-            );
-            assert!(
-                size.height > 0,
-                "{} framebuffer height should be non-zero",
-                target
-            );
-            assert!(
-                !framebuffer.is_empty(),
-                "{} framebuffer should not be empty after running frames",
-                target
-            );
-
-            emulator
-                .stop()
-                .unwrap_or_else(|error| panic!("failed to stop {} emulator: {}", target, error));
-            eprintln!("[upstream] completed validation for '{}'", target);
+            assert_upstream_build_and_run(target, &project_dir);
             let _ = fs::remove_dir_all(project_dir);
         }
     }

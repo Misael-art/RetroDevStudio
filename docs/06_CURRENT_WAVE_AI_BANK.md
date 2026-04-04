@@ -16,6 +16,16 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+* **O que acabou de acontecer (2026-04-04 - Smoke upstream agora certifica `platformer_seed`, import SGDK real e shell mais leve):**
+  - **Gate oficial Mega Drive ficou mais fiel ao wizard atual:** `official_windows_upstream_validation_smoke_test` em `src-tauri/src/lib.rs` agora nao valida apenas onboarding e fixtures dummy; ele tambem cria um projeto `platformer_seed` a partir de donor sintetico e importa um projeto SGDK sintetico pelo comando canonico `import_sgdk_project(...)`, levando ambos ate `Build -> ROM -> Run frames` com SGDK real instalado.
+  - **Sem criar trilha paralela de certificacao:** `scripts/validate-upstream-windows.ps1` permaneceu intacto como entrypoint institucional; a ampliacao aconteceu no proprio smoke ignorado oficial, preservando `upstream-validation.json` como fonte unica de verdade para esse gate.
+  - **Prova real desta certificacao em 2026-04-04:** `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\validate-upstream-windows.ps1 -SkipRustTests` fechou `success = true` em `src-tauri/target-test/validation/upstream-validation.json`, com logs explicitos de `onboarding`, `template-platformer_seed`, `imported-sgdk`, `megadrive` e `snes`.
+  - **Fotografia institucional renovada no Windows:** `npm run release:readiness:baseline` passou novamente com `build:debug`, `desktop-e2e`, baseline JS/TS e suites Rust, renovando `build-report.json`, `upstream-validation.json` e o `retro-dev-studio.exe` debug na mesma rodada.
+  - **Trilha de beta institucional ficou objetiva em documento canonico:** `docs/07_TEST_AND_COMPLIANCE.md` agora lista criterios de aceite da rodada de beta (`promotion`, `A-F`, timestamps frescos, worktree limpo, smoke upstream completo) e os riscos residuais que ainda precisam acompanhar qualquer nota publica.
+  - **Shell principal perdeu peso sem trocar arquitetura:** `src/components/viewport/ViewportPanel.tsx` passou a lazy-load `NodeGraphEditor`, `RetroFXDesigner` e `ArtStudioPanel`, mantendo `Scene` e `Game View` diretos e sem mexer no layout canonico baseado em `react-resizable-panels`.
+  - **Medicao objetiva apos o split conservador do viewport:** `npm run build` reduziu o chunk principal de `382.41 kB` bruto / `116.40 kB` gzip, enquanto `NodeGraphEditor` (~`31.77 kB`), `RetroFXDesigner` (~`24.90 kB`) e `ArtStudioPanel` (~`47.23 kB`) passaram a sair em chunks proprios. A diretriz continua honesta: performance melhorou materialmente, mas o shell ainda nao deve ser tratado como otimizado/final.
+  - **Barra verde desta rodada:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (`202` testes), `scripts\\run-cargo-msvc.cmd clippy --manifest-path .\\src-tauri\\Cargo.toml -- -D warnings` OK, `scripts\\run-cargo-msvc.cmd test --manifest-path .\\src-tauri\\Cargo.toml --lib -- --nocapture --test-threads=1` OK (`255` aprovados / `0` falhas / `3` ignorados), `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\validate-upstream-windows.ps1 -SkipRustTests` OK e `npm run release:readiness:baseline` OK.
+
 * **O que acabou de acontecer (2026-04-04 - Host limpo: templates externos sem caminho absoluto embedado e higiene do repo):**
   - **Catalogo de templates ficou agnostico ao host:** `data/template_registry.json` deixou de carregar `default_donor_path` absolutos da maquina original (`F:\Projects\MegaDrive_DEV\...`) para `platformer_seed`, `platformer_gm` e demais templates SGDK externos.
   - **Backend agora modela o caso honesto de donor manual:** `src-tauri/src/core/project_mgr.rs` passou a tratar templates SGDK sem donor padrao como `usaveis, mas dependentes de escolha manual neste host`, em vez de marca-los como indisponiveis por causa de um path embedado no repositório.
@@ -631,11 +641,10 @@ Fechar o MVP do desktop Tauri preservando a baseline verde, enquanto o reverse c
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
 **Sequencia de acoes recomendada:**
-1. Endurecer ainda mais fixtures `BYOR-safe` e o caminho de host limpo, eliminando qualquer dependencia residual de corpus local ou de diretórios gerados em fixtures.
-2. Validar `platformer_seed` e pelo menos um projeto SGDK importado com `Build & Run` Mega Drive usando SGDK real instalado.
-3. Repetir bundle MSI quando o escopo tocar release (`scripts/run-in-msvc.cmd npm run build:msi`).
-4. Preparar notas de beta testing, criterios de aceite e lista de riscos residuais para a rodada institucional.
-5. Continuar reduzindo o chunk principal do shell sem abrir a frente de docking livre antes da hora.
+1. Continuar reduzindo o chunk principal do shell sem abrir a frente de docking livre antes da hora; priorizar splits conservadores adicionais no shell e nos paineis de autoria, sempre medindo com `npm run build`.
+2. Repetir bundle MSI apenas quando o escopo tocar release/packaging (`scripts/run-in-msvc.cmd npm run build:msi`).
+3. Manter `validate-upstream-windows` e `release:readiness:baseline` como fotografia institucional sempre que alteracoes futuras tocarem build, emulacao, onboarding ou toolchains.
+4. Avancar para a reducao de densidade do shell e refinamento do onboarding somente depois que a trilha atual de performance estabilizar sem regressao.
 
 **Validacao minima obrigatoria antes de marcar qualquer item como concluido:**
 * `npm run check:tree`

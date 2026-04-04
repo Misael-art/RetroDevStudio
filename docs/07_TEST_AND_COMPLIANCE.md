@@ -83,6 +83,21 @@
 - O report deve ser tratado como a fotografia canonica da promocao RC -> beta/producao: artefatos, dirty worktree, baseline, upstream report, QA manual pendente e bloqueadores explicitos.
 - O agregador nao substitui a validacao manual nem o smoke institutional em Windows; ele reduz falso positivo e centraliza evidencias.
 
+### 3.2 Criterios de aceite para rodada institucional de beta
+- `npm run release:readiness:promotion` deve fechar verde na propria rodada de promocao.
+- `src-tauri/target-test/validation/manual-qa-status.json` deve registrar os blocos `A-F` como `passed`, com screenshots `qa-rc-*.png` da mesma rodada.
+- Em Windows, `build-report.json`, `upstream-validation.json` e o executavel debug canonico devem ter timestamps frescos da mesma execucao institucional.
+- O worktree deve estar limpo no momento do snapshot que sera usado como evidencia de promocao.
+- Se o escopo tocar build Mega Drive/SGDK real, a evidencia institucional deve cobrir onboarding, `platformer_seed`, pelo menos um projeto SGDK importado e as fixtures canonicas do smoke upstream oficial.
+- Nenhuma superficie `Experimental` pode ser promovida documentalmente para `pronta` sem mudar o badge na UI, a documentacao e a cobertura do fluxo afetado.
+
+### 3.3 Riscos residuais que precisam acompanhar notas de beta
+- O shell principal melhorou materialmente de bundle, mas ainda segue em hardening e nao deve ser descrito como totalmente otimizado.
+- `ArtStudio`, `RetroFX`, `Reverse Workspace`, `Asset Extractor`, `Memory Viewer` e importadores parciais continuam `Experimental`.
+- A repeticao de MSI continua obrigatoria quando o escopo tocar release/packaging, mesmo que a baseline local esteja verde.
+- O host local pode continuar sujeito a falhas ocasionais de WebDriver; quando isso ocorrer, a evidencia institucional principal deve vir do workflow GitHub/Windows.
+- Qualquer regressao em `Build -> ROM -> Emulacao` invalida claim de promocao, mesmo que UI, docs ou smoke parciais permaneçam verdes.
+
 Nenhum agente deve chamar uma feature de `pronta`, `completa` ou `entregue` se esse gate nao foi satisfeito ou se a feature continua parcial/experimental.
 Nenhuma etapa deve ser tratada como `concluida` sem certificacao real do fluxo afetado, sem erro bloqueante conhecido e sem evidencia fake ou paralela ao caminho canonico.
 

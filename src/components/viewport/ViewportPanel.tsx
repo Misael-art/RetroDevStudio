@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import Tabs from "../common/Tabs";
 import { useEditorStore } from "../../core/store/editorStore";
@@ -19,9 +19,6 @@ import {
   type JoypadState,
 } from "../../core/ipc/emulatorService";
 import { listenToProjectAssetChanges } from "../../core/ipc/projectWatcherService";
-import NodeGraphEditor from "../nodegraph/NodeGraphEditor";
-import ArtStudioPanel from "../artstudio/ArtStudioPanel";
-import RetroFXDesigner from "../retrofx/RetroFXDesigner";
 import type { Entity } from "../../core/ipc/sceneService";
 import { persistActiveScene } from "../../core/scenePersistence";
 import { constrainSpriteFrameSize, ONBOARDING_SPRITE_SIZE } from "../../core/sceneConstraints";
@@ -36,6 +33,10 @@ const VIEWPORT_TABS = [
   { id: "retrofx", label: "RetroFX", icon: "FX" },
   { id: "artstudio", label: "ArtStudio", icon: "AT" },
 ];
+
+const NodeGraphEditor = lazy(() => import("../nodegraph/NodeGraphEditor"));
+const ArtStudioPanel = lazy(() => import("../artstudio/ArtStudioPanel"));
+const RetroFXDesigner = lazy(() => import("../retrofx/RetroFXDesigner"));
 
 const MD_WIDTH = 320;
 const MD_HEIGHT = 224;
@@ -201,6 +202,14 @@ function saveSceneGuides(storageKey: string | null, guides: SceneGuide[]) {
 
 function createSceneGuideId() {
   return `guide_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function WorkspaceViewportFallback({ label }: { label: string }) {
+  return (
+    <div className="flex h-full w-full items-center justify-center bg-[#09090b] px-4 text-center text-[11px] text-[#64748b]">
+      {label}
+    </div>
+  );
 }
 
 function getRulerStep(zoom: number) {
@@ -3451,19 +3460,25 @@ export default function ViewportPanel({
 
         {activeViewportTab === "logic" && (
           <div className="h-full w-full">
-            <NodeGraphEditor />
+            <Suspense fallback={<WorkspaceViewportFallback label="Carregando Logic..." />}>
+              <NodeGraphEditor />
+            </Suspense>
           </div>
         )}
 
         {activeViewportTab === "retrofx" && (
           <div className="h-full w-full">
-            <RetroFXDesigner />
+            <Suspense fallback={<WorkspaceViewportFallback label="Carregando RetroFX..." />}>
+              <RetroFXDesigner />
+            </Suspense>
           </div>
         )}
 
         {activeViewportTab === "artstudio" && (
           <div className="h-full w-full">
-            <ArtStudioPanel />
+            <Suspense fallback={<WorkspaceViewportFallback label="Carregando ArtStudio..." />}>
+              <ArtStudioPanel />
+            </Suspense>
           </div>
         )}
       </div>
