@@ -16,6 +16,15 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+* **O que acabou de acontecer (2026-04-04 - Autoria diaria: LayerPanel, Asset Browser e Inspector agora explicam melhor o contexto ativo):**
+  - **LayerPanel ficou mais orientado ao estado atual da cena:** `src/components/hierarchy/LayerPanel.tsx` agora mostra um resumo compacto com `Camadas`, `Ativa` e `Entidade`, descreve o estado da camada selecionada (`visível/oculta`, `bloqueada/editável`, quantidade de entidades) e oferece `Limpar` para sair da camada ativa sem mudar store, schema ou persistencia.
+  - **Atribuicao de entidade deixou de depender de descoberta implícita:** quando existe entidade selecionada, mas nenhuma camada ativa, o painel agora renderiza uma dica explicita para orientar a atribuicao correta antes de entrar no footer de `Atribuir à camada ativa`.
+  - **Asset Browser passou a mostrar impacto real na cena ativa:** `src/components/tools/ToolsPanel.tsx` agora exibe se o asset selecionado ainda nao esta referenciado ou quantos itens da cena ativa o utilizam, com labels como `Sprite · hero`, reduzindo o custo de rastrear reutilizacao antes de instanciar ou editar.
+  - **Inspector ganhou contexto rapido de destino e organizacao:** `src/components/inspector/InspectorPanel.tsx` agora mostra `Target` e `Camadas` diretamente no cabecalho da entidade, facilitando ler o contexto de build e agrupamento sem navegar para outros paineis.
+  - **Escopo permaneceu conservador:** nenhuma mudanca foi feita em schema UGDM, `persistActiveScene`, importadores, build orchestration, emulacao ou layout global; a rodada ficou restrita a descoberta/orientacao da autoria diaria dentro do shell atual.
+  - **Bundle permaneceu sob controle depois do pacote de contexto:** `npm run build` seguiu verde e passou a emitir `InspectorPanel` em ~`30.46 kB`, `ToolsPanel` em ~`90.49 kB` e o chunk principal em ~`389.83 kB` bruto / `118.29 kB` gzip. A leitura honesta continua a mesma: o shell esta melhor distribuido, mas ainda nao deve ser tratado como otimizado/final.
+  - **Cobertura e baseline renovadas apos a rodada:** `src/components/hierarchy/LayerPanel.test.tsx` foi criado para travar resumo, hint de atribuicao e o fluxo `selecionar camada -> entrar em paint -> atribuir entidade -> limpar`. `src/components/tools/ToolsPanel.test.tsx` agora cobre o resumo de referencias do Asset Browser, e `src/components/inspector/InspectorPanel.test.tsx` cobre o contexto `Target/Camadas`. A barra verde desta rodada fechou com `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (`208` testes), `scripts\\run-cargo-msvc.cmd clippy --manifest-path .\\src-tauri\\Cargo.toml -- -D warnings` OK e `scripts\\run-cargo-msvc.cmd test --manifest-path .\\src-tauri\\Cargo.toml --lib -- --nocapture --test-threads=1` OK (`255` aprovados / `0` falhas / `3` ignorados).
+
 * **O que acabou de acontecer (2026-04-04 - Autoria diaria: Hierarchy agora orienta melhor a cena ativa):**
   - **Hierarchy ganhou contexto rapido de cena sem alterar store, schema ou persistencia:** `src/components/hierarchy/HierarchyPanel.tsx` agora mostra um resumo compacto da cena ativa (`Cenas`, `Camadas`, `Entidades`, `Fundos`) logo abaixo do seletor de cena, reduzindo o custo de orientacao quando o usuario alterna entre cenas e camadas.
   - **Busca da hierarchy deixou de falhar silenciosamente:** quando a cena possui itens mas o filtro nao encontra correspondencias, o painel agora exibe uma mensagem explicita com o termo buscado, em vez de simplesmente parecer vazio.
@@ -655,7 +664,7 @@ Fechar o MVP do desktop Tauri preservando a baseline verde, enquanto o reverse c
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
 **Sequencia de acoes recomendada:**
-1. Continuar a frente de autoria diaria por `Inspector`, `LayerPanel` e `Asset Browser`, priorizando ganhos de orientacao/descoberta e mantendo o shell atual estavel.
+1. Encadear o proximo bloco conservador em `scene flow` e `import SGDK`, priorizando abertura honesta de projetos legados, warnings claros e zero regressao no fluxo canonico atual.
 2. Continuar medindo o chunk principal do shell a cada rodada relevante de `App.tsx`/`ViewportPanel` com `npm run build`, evitando regressao silenciosa de bundle.
 3. Repetir bundle MSI apenas quando o escopo tocar release/packaging (`scripts/run-in-msvc.cmd npm run build:msi`).
 4. Manter `validate-upstream-windows` e `release:readiness:baseline` como fotografia institucional sempre que alteracoes futuras tocarem build, emulacao, onboarding ou toolchains.

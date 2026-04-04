@@ -841,6 +841,10 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
 
   const references = useMemo(() => collectAssetReferences(activeScene), [activeScene]);
   const assetTree = useMemo(() => buildAssetTree(assets), [assets]);
+  const selectedAssetMatches = useMemo(
+    () => (selectedTreeAsset ? references.get(selectedTreeAsset.relative_path) ?? [] : []),
+    [references, selectedTreeAsset]
+  );
   const legacySections = useMemo(
     () =>
       projectSourceKind === "external_sgdk" ? buildLegacyIndexSections(projectLegacyIndex) : [],
@@ -1164,6 +1168,38 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
           <p className="min-w-0 truncate font-mono text-[10px] text-[#cdd6f4]" title={selectedTreeAsset.relative_path}>
             {selectedTreeAsset.relative_path}
           </p>
+          <div
+            data-testid="asset-browser-reference-summary"
+            className="rounded border border-[#313244] bg-[#11111b] px-2.5 py-2 text-[10px] text-[#94a3b8]"
+          >
+            {selectedAssetMatches.length > 0 ? (
+              <div className="flex flex-col gap-1.5">
+                <p>
+                  Referenciado por{" "}
+                  <span className="font-semibold text-[#cdd6f4]">
+                    {selectedAssetMatches.length} item(ns)
+                  </span>{" "}
+                  na cena ativa.
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {selectedAssetMatches.map((match) => (
+                    <span
+                      key={`${match.entityId}-${match.label}`}
+                      className="rounded-full border border-[#313244] bg-[#181825] px-2 py-0.5 text-[9px] text-[#cdd6f4]"
+                    >
+                      {match.label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p>
+                Ainda nao referenciado pela cena ativa. Use{" "}
+                <span className="font-semibold text-[#89b4fa]">Instanciar</span> para criar um
+                sprite ou deixe este asset reservado para uma etapa futura.
+              </p>
+            )}
+          </div>
           <div className="flex items-center gap-2">
             <button
               type="button"

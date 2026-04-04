@@ -328,6 +328,102 @@ describe("ToolsPanel Asset Browser", () => {
     );
   });
 
+  it("shows when the selected asset is not yet referenced by the active scene", async () => {
+    await act(async () => {
+      findButton(container, "Avancado OFF").click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Experimental/).click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Asset Browser/).click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      const fileBtn = Array.from(container.querySelectorAll("button")).find(
+        (el) => el.textContent?.includes("onboarding_player.ppm")
+      );
+      fileBtn?.click();
+      await flush();
+    });
+
+    expect(
+      container.querySelector("[data-testid='asset-browser-reference-summary']")?.textContent
+    ).toContain("Ainda nao referenciado pela cena ativa.");
+  });
+
+  it("shows the current scene references for the selected asset", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeScene: {
+          scene_id: "main",
+          display_name: "Main",
+          entities: [
+            {
+              entity_id: "hero",
+              prefab: null,
+              transform: { x: 16, y: 24 },
+              components: {
+                sprite: {
+                  asset: "assets/sprites/onboarding_player.ppm",
+                  frame_width: 16,
+                  frame_height: 16,
+                  palette_slot: 0,
+                  animations: {},
+                },
+              },
+            },
+          ],
+          background_layers: [],
+          palettes: [],
+        },
+      });
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, "Avancado OFF").click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Experimental/).click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Asset Browser/).click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      const fileBtn = Array.from(container.querySelectorAll("button")).find(
+        (el) => el.textContent?.includes("onboarding_player.ppm")
+      );
+      fileBtn?.click();
+      await flush();
+    });
+
+    expect(
+      container.querySelector("[data-testid='asset-browser-reference-summary']")?.textContent
+    ).toContain("Referenciado por 1 item(ns) na cena ativa.");
+    expect(
+      container.querySelector("[data-testid='asset-browser-reference-summary']")?.textContent
+    ).toContain("Sprite · hero");
+  });
+
   it("shows the adopted SGDK host summary in runtime setup", async () => {
     await act(async () => {
       useEditorStore.setState({

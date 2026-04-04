@@ -669,6 +669,15 @@ export default function InspectorPanel() {
       ) ?? [],
     [entity]
   );
+  const entityAssignedLayers = useMemo(() => {
+    if (!entity || !activeScene?.layers) {
+      return [];
+    }
+
+    return activeScene.layers
+      .filter((sceneLayer) => sceneLayer.entity_ids.includes(entity.entity_id))
+      .map((sceneLayer) => sceneLayer.name);
+  }, [activeScene?.layers, entity]);
   const sections = useMemo(() => (entity ? entityPropSections(entity) : []), [entity]);
 
   async function saveScene() {
@@ -878,6 +887,20 @@ export default function InspectorPanel() {
                     prefab: {entity.prefab.replace(/\.json$/i, "")}
                   </p>
                 )}
+                <div
+                  data-testid="inspector-entity-context"
+                  className="mt-1 flex flex-wrap gap-1 text-[9px] text-[#7f849c]"
+                >
+                  <span className="rounded-full border border-[#313244] bg-[#11111b] px-2 py-0.5">
+                    Target: <span className="font-semibold text-[#cdd6f4]">{targetDisplayName(activeTarget)}</span>
+                  </span>
+                  <span className="rounded-full border border-[#313244] bg-[#11111b] px-2 py-0.5">
+                    Camadas:{" "}
+                    <span className="font-semibold text-[#cdd6f4]">
+                      {entityAssignedLayers.length > 0 ? entityAssignedLayers.join(", ") : "nenhuma"}
+                    </span>
+                  </span>
+                </div>
               </div>
               <div className="flex shrink-0 flex-col items-end gap-0.5 text-[8px] text-[#45475a]">
                 <span>{Object.values(entity.components).filter(Boolean).length} comp.</span>

@@ -45,6 +45,8 @@ export default function LayerPanel() {
   const [showCreate, setShowCreate] = useState(false);
 
   const layers: SceneLayer[] = activeScene?.layers ?? [];
+  const selectedEntityIsAssignable =
+    Boolean(selectedEntityId) && !selectedEntityId?.startsWith("layer::");
 
   async function persistAfter(action: () => void) {
     action();
@@ -68,7 +70,7 @@ export default function LayerPanel() {
   function handleSelectLayer(layer: SceneLayer) {
     const isNewSelection = activeLayerId !== layer.id;
     setActiveLayerId(isNewSelection ? layer.id : null);
-    
+
     if (isNewSelection) {
       if (layer.kind === "collision") {
         setEditorMode("collision");
@@ -142,13 +144,56 @@ export default function LayerPanel() {
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[#313244] px-2 py-1.5">
         <span className="font-semibold text-[#a6adc8]">Camadas</span>
-        <button
-          onClick={() => setShowCreate((v) => !v)}
-          title="Adicionar camada"
-          className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] hover:bg-[#45475a]"
-        >
-          + Camada
-        </button>
+        <div className="flex items-center gap-1">
+          {activeLayerId ? (
+            <button
+              type="button"
+              onClick={() => setActiveLayerId(null)}
+              title="Limpar camada ativa"
+              className="rounded border border-[#313244] px-1.5 py-0.5 text-[10px] text-[#cdd6f4] hover:border-[#89b4fa] hover:text-[#89b4fa]"
+            >
+              Limpar
+            </button>
+          ) : null}
+          <button
+            onClick={() => setShowCreate((v) => !v)}
+            title="Adicionar camada"
+            className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] hover:bg-[#45475a]"
+          >
+            + Camada
+          </button>
+        </div>
+      </div>
+
+      <div
+        data-testid="layer-panel-summary"
+        className="border-b border-[#313244] bg-[#11111b] px-2 py-2 text-[10px] text-[#7f849c]"
+      >
+        <div className="flex flex-wrap gap-1.5">
+          <span className="rounded-full border border-[#313244] bg-[#181825] px-2 py-0.5">
+            Camadas: <span className="font-semibold text-[#cdd6f4]">{layers.length}</span>
+          </span>
+          <span className="rounded-full border border-[#313244] bg-[#181825] px-2 py-0.5">
+            Ativa:{" "}
+            <span className="font-semibold text-[#cdd6f4]">
+              {selectedLayer?.name ?? "Nenhuma"}
+            </span>
+          </span>
+          {selectedEntityIsAssignable ? (
+            <span className="rounded-full border border-[#313244] bg-[#181825] px-2 py-0.5">
+              Entidade: <span className="font-semibold text-[#cdd6f4]">{selectedEntityId}</span>
+            </span>
+          ) : null}
+        </div>
+        <p className="mt-2 leading-5 text-[#94a3b8]">
+          {selectedLayer
+            ? `${KIND_LABELS[selectedLayer.kind] ?? selectedLayer.kind} · ${
+                selectedLayer.visible ? "visível" : "oculta"
+              } · ${selectedLayer.locked ? "bloqueada" : "editável"} · ${
+                selectedLayer.entity_ids.length
+              } entidade(s).`
+            : "Selecione uma camada para controlar visibilidade, lock e organização da cena ativa."}
+        </p>
       </div>
 
       {/* Create form */}
@@ -197,12 +242,14 @@ export default function LayerPanel() {
       <div className="flex-1 overflow-y-auto">
         {layers.length === 0 && (
           <div className="p-3 text-center text-[11px] text-[#45475a]">
-            Sem camadas. Clique em &quot;+ Camada&quot; para criar.
+            Sem camadas. Clique em &quot;+ Camada&quot; para organizar sprites, tiles e objetos da
+            cena ativa.
           </div>
         )}
         {[...layers].sort((a, b) => b.depth - a.depth).map((layer) => (
           <div
             key={layer.id}
+            data-testid={`layer-row-${layer.id}`}
             onClick={() => handleSelectLayer(layer)}
             className={`group flex cursor-pointer items-center gap-1 border-b border-[#313244] px-2 py-1 transition-colors ${
               activeLayerId === layer.id
@@ -309,6 +356,16 @@ export default function LayerPanel() {
               Atribuir à camada ativa
             </button>
           )}
+        </div>
+      )}
+
+      {!activeLayerId && selectedEntityIsAssignable && layers.length > 0 && (
+        <div
+          data-testid="layer-panel-assignment-hint"
+          className="border-t border-[#313244] bg-[#11111b] p-2 text-[10px] text-[#94a3b8]"
+        >
+          Selecione uma camada para atribuir <span className="font-semibold text-[#cdd6f4]">{selectedEntityId}</span>{" "}
+          ao grupo correto.
         </div>
       )}
     </div>

@@ -246,6 +246,52 @@ describe("InspectorPanel", () => {
     expect(container.textContent).toContain("Herdado");
   });
 
+  it("shows target and layer context for the selected entity", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeTarget: "megadrive",
+        activeScene: {
+          ...EMPTY_SCENE,
+          entities: [physicsFixtureEntity()],
+          layers: [
+            {
+              id: "gameplay",
+              name: "Gameplay",
+              kind: "sprite",
+              visible: true,
+              locked: false,
+              depth: 0,
+              entity_ids: ["hero"],
+            },
+          ],
+        },
+        activeSceneSource: {
+          ...EMPTY_SCENE,
+          entities: [physicsFixtureEntity()],
+          layers: [
+            {
+              id: "gameplay",
+              name: "Gameplay",
+              kind: "sprite",
+              visible: true,
+              locked: false,
+              depth: 0,
+              entity_ids: ["hero"],
+            },
+          ],
+        },
+      });
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='inspector-entity-context']")?.textContent).toContain(
+      "Target: Mega Drive"
+    );
+    expect(container.querySelector("[data-testid='inspector-entity-context']")?.textContent).toContain(
+      "Camadas: Gameplay"
+    );
+  });
+
   it("resolves the canonical sprite preview path and falls back cleanly on load failure", async () => {
     await act(async () => {
       useEditorStore.setState({
