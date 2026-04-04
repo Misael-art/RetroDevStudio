@@ -212,6 +212,30 @@ function WorkspaceViewportFallback({ label }: { label: string }) {
   );
 }
 
+function getSgdkOnboardingContent(projectSourceKind: string) {
+  if (projectSourceKind === "external_sgdk") {
+    return {
+      title: "Projeto SGDK legado em overlay",
+      body:
+        "Este workspace usa um overlay rds/ sobre o host SGDK. Codigo e manifests do host seguem somente leitura, e Build & Run continua delegado ao Makefile do host. Avisos de hardware nesta cena sao informativos, nao bloqueantes.",
+    };
+  }
+
+  if (projectSourceKind === "imported_sgdk") {
+    return {
+      title: "Projeto importado de SGDK",
+      body:
+        "Este projeto ja foi convertido para o formato nativo do RetroDev, mas meta-sprites, VRAM e DMA ainda seguem a semantica do ResComp/SGDK. Avisos de hardware nesta cena continuam informativos, nao bloqueantes.",
+    };
+  }
+
+  return {
+    title: "Projeto vindo de SGDK",
+    body:
+      "Este projeto veio de uma origem SGDK. Revise warnings de hardware como orientacao de integracao, nao como bloqueio imediato.",
+  };
+}
+
 function getRulerStep(zoom: number) {
   const options = [4, 8, 16, 32, 64, 128];
   return options.find((step) => step * zoom >= 48) ?? 256;
@@ -475,6 +499,7 @@ export default function ViewportPanel({
   const isSgdkProject = projectSourceKind === "external_sgdk" || projectSourceKind === "imported_sgdk";
   const hasEmulatorSession = emulatorLoaded || emulatorActive;
   const showSgdkOnboarding = isSgdkProject && !sgdkOnboardingDismissed;
+  const sgdkOnboarding = getSgdkOnboardingContent(projectSourceKind);
   const hotReloadNoticeTimerRef = useRef<number | null>(null);
   const [shortcutHint, setShortcutHint] = useState<{ key: string; label: string } | null>(null);
   const shortcutHintTimerRef = useRef<number | null>(null);
@@ -3131,15 +3156,16 @@ export default function ViewportPanel({
             {/* Área de canvas com overflow para mais espaço */}
             <div className="relative flex-1 overflow-hidden min-h-0">
             {showSgdkOnboarding && (
-              <div className="absolute left-1/2 top-4 z-10 -translate-x-1/2 flex max-w-[420px] items-start gap-2 rounded border border-[#fab387]/40 bg-[#fab387]/10 px-3 py-2">
+              <div
+                data-testid="viewport-sgdk-onboarding"
+                className="absolute left-1/2 top-4 z-10 -translate-x-1/2 flex max-w-[420px] items-start gap-2 rounded border border-[#fab387]/40 bg-[#fab387]/10 px-3 py-2"
+              >
                 <div className="flex-1">
                   <p className="text-[10px] font-semibold text-[#fab387]">
-                    Projeto importado de SGDK externo
+                    {sgdkOnboarding.title}
                   </p>
                   <p className="mt-1 text-[10px] leading-relaxed text-[#a6adc8]">
-                    Este projeto foi importado de um projeto SGDK. Meta-sprites, VRAM e DMA sao
-                    gerenciados pelo ResComp/SGDK — avisos de hardware nesta cena sao informativos,
-                    nao bloqueantes.
+                    {sgdkOnboarding.body}
                   </p>
                 </div>
                 <button

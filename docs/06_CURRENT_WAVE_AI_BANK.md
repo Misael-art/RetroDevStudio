@@ -16,6 +16,14 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+* **O que acabou de acontecer (2026-04-04 - Import SGDK: onboarding do Viewport agora distingue overlay legado de import nativo):**
+  - **O banner SGDK do Viewport deixou de misturar dois contratos diferentes:** `src/components/viewport/ViewportPanel.tsx` agora gera copy especifica para `external_sgdk` e `imported_sgdk`, em vez de tratar qualquer projeto vindo de SGDK como se fosse a mesma classe de origem.
+  - **Overlay legado ficou explicitado onde o usuario mais toma decisoes visuais:** para `external_sgdk`, o onboarding agora diz que o workspace usa um overlay `rds/`, que codigo/manifests do host continuam read-only e que `Build & Run` segue delegado ao `Makefile` do host.
+  - **Importacao nativa ganhou mensagem mais honesta:** para `imported_sgdk`, o banner agora explica que o projeto ja foi convertido para o formato nativo do RetroDev, mas ainda carrega semantica de `ResComp/SGDK` para meta-sprites, VRAM e DMA, mantendo warnings como informativos.
+  - **Escopo conservador preservado:** nenhuma mudanca foi feita no orquestrador de build, no importador Rust, nas regras de hardware ou na persistencia da cena; esta rodada ajustou apenas a camada de orientacao do `Viewport`.
+  - **Cobertura integrada adicionada no shell real:** `src/App.test.tsx` ganhou provas para os dois estados do banner (`overlay legado` e `importado nativo`), reaproveitando o `ViewportPanel` real dentro do app em vez de criar um stub artificial para esse contrato.
+  - **Barra verde desta rodada:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (`212` testes), `npm run build` OK, `scripts\\run-cargo-msvc.cmd clippy --manifest-path .\\src-tauri\\Cargo.toml -- -D warnings` OK e `scripts\\run-cargo-msvc.cmd test --manifest-path .\\src-tauri\\Cargo.toml --lib -- --nocapture --test-threads=1` OK (`255` aprovados / `0` falhas / `3` ignorados). O bundle seguiu controlado com chunk principal em ~`390.42 kB` bruto / `118.55 kB` gzip.
+
 * **O que acabou de acontecer (2026-04-04 - Import SGDK: Explorer agora deixa mais honesto o contrato do overlay legado):**
   - **ExplorerWorkspace passou a explicar o modo legado antes de qualquer clique:** `src/components/explorer/ExplorerWorkspace.tsx` agora mostra um resumo `Overlay SGDK` com `host_root`, quantidade de arquivos indexados, badge de `Read-only host` e a regra objetiva de que `Build & Run delega ao Makefile do host`.
   - **A fronteira entre `rds/` e host ficou explicita na navegacao:** o empty state do `Explorer` agora diferencia o que continua editavel no overlay e o que permanece somente leitura no host SGDK, reduzindo a chance de um agente ou usuario assumir que todo o workspace aberto virou um projeto nativo comum.
@@ -672,8 +680,8 @@ Fechar o MVP do desktop Tauri preservando a baseline verde, enquanto o reverse c
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
 **Sequencia de acoes recomendada:**
-1. Continuar o endurecimento de `scene flow`/`import SGDK` nos pontos de entrada restantes, priorizando warnings claros, resumo de proveniencia e zero regressao no overlay legado que ja builda via host.
-2. Retomar a frente de `NodeGraph` para casos de gameplay comum somente depois de fechar a camada de descoberta/orientacao do fluxo legado atual.
+1. Encerrar o eixo imediato de descoberta/orientacao do fluxo legado com pequenos ajustes restantes apenas se surgirem lacunas objetivas; na ausencia delas, mover a proxima rodada para `NodeGraph` em casos de gameplay comum.
+2. Retomar a frente de `NodeGraph` com ganhos conservadores de usabilidade e exemplos guiados, sem alterar emitter, schema ou pipeline SGDK/SNES.
 3. Continuar medindo o chunk principal do shell a cada rodada relevante de `App.tsx`/`ViewportPanel` com `npm run build`, evitando regressao silenciosa de bundle.
 4. Repetir bundle MSI apenas quando o escopo tocar release/packaging (`scripts/run-in-msvc.cmd npm run build:msi`).
 5. Manter `validate-upstream-windows` e `release:readiness:baseline` como fotografia institucional sempre que alteracoes futuras tocarem build, emulacao, onboarding ou toolchains.

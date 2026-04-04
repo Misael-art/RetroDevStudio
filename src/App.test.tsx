@@ -1091,6 +1091,30 @@ describe("App build flow", () => {
     expect(container.textContent).toContain("src/main.c");
   });
 
+  it("shows overlay-specific SGDK onboarding copy for legacy host projects", () => {
+    const onboarding = container.querySelector("[data-testid='viewport-sgdk-onboarding']");
+
+    expect(onboarding?.textContent).toContain("Projeto SGDK legado em overlay");
+    expect(onboarding?.textContent).toContain("overlay rds/");
+    expect(onboarding?.textContent).toContain("Makefile do host");
+  });
+
+  it("switches the SGDK onboarding copy when the project is already imported into the native format", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        projectSourceKind: "imported_sgdk",
+        projectLegacyIndex: null,
+      });
+      await flush();
+    });
+
+    const onboarding = container.querySelector("[data-testid='viewport-sgdk-onboarding']");
+
+    expect(onboarding?.textContent).toContain("Projeto importado de SGDK");
+    expect(onboarding?.textContent).toContain("formato nativo do RetroDev");
+    expect(onboarding?.textContent).not.toContain("Makefile do host");
+  });
+
   it("keeps the game view accessible after moving through the explorer workspace", async () => {
     const explorerButton = container.querySelector(
       "[data-testid='workspace-rail-explorer']"
