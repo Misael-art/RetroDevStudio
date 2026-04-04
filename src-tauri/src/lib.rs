@@ -2409,6 +2409,9 @@ mod tests {
             let src_path = entry.path();
             let dst_path = dst.join(entry.file_name());
             if src_path.is_dir() {
+                if entry.file_name() == std::ffi::OsStr::new("build") {
+                    continue;
+                }
                 copy_dir_all(&src_path, &dst_path);
             } else {
                 fs::copy(&src_path, &dst_path).expect("copy fixture file");
@@ -3170,6 +3173,33 @@ pub extern "C" fn retro_run() {
 }
 "#
         .to_string()
+    }
+
+    #[test]
+    fn fixture_copy_skips_generated_build_directories() {
+        let src = temp_dir("fixture-copy-src");
+        let dst = temp_dir("fixture-copy-dst");
+
+        fs::create_dir_all(src.join("scenes")).expect("create fixture scenes");
+        fs::create_dir_all(src.join("build").join("megadrive").join("out"))
+            .expect("create generated build dir");
+        fs::write(src.join("project.rds"), b"{\"name\":\"Fixture\"}").expect("write project");
+        fs::write(src.join("scenes").join("main.json"), b"{\"scene_id\":\"main\"}")
+            .expect("write scene");
+        fs::write(src.join("build").join("megadrive").join("out").join("rom.bin"), b"rom")
+            .expect("write generated rom");
+
+        copy_dir_all(&src, &dst);
+
+        assert!(dst.join("project.rds").is_file());
+        assert!(dst.join("scenes").join("main.json").is_file());
+        assert!(
+            !dst.join("build").exists(),
+            "fixture copy should ignore generated build directories"
+        );
+
+        let _ = fs::remove_dir_all(src);
+        let _ = fs::remove_dir_all(dst);
     }
 
     #[test]

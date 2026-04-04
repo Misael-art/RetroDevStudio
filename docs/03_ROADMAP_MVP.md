@@ -302,6 +302,55 @@
 
 ---
 
+## ROADMAP OPERACIONAL TRIMESTRAL — Q2 2026
+
+**Janela:** abril -> junho de 2026
+**Objetivo do trimestre:** consolidar o core real do produto, reduzir risco institucional, melhorar UX do shell/autoria diaria e elevar apenas as superficies experimentais com melhor custo/beneficio, sem abrir frentes de alto risco antes da hora.
+
+### Owners sugeridos
+
+- `Infra/Release`: CI, build, MSI, readiness, host Windows limpo
+- `Core/Desktop`: shell, viewport, inspector, scene flow, editor
+- `Backend/Toolchain`: Rust core, build orchestration, fixtures, importadores
+- `UX/Product`: onboarding, ergonomia, densidade visual, narrativa de produto
+- `Tools/Experimental`: ArtStudio, RetroFX, Reverse, Asset Extractor
+- `QA/Validation`: desktop E2E, QA RC, reports, beta criteria
+
+### Ordem operacional do trimestre
+
+| Ordem | Janela | Frente | Owner sugerido | Dependencias | Risco | Gate de aceite |
+|------|--------|--------|----------------|--------------|-------|----------------|
+| 1 | Semana 1-2 | Preservacao institucional do core | Infra/Release + QA/Validation | Nenhuma | Alto | `npm run release:readiness:promotion` verde em worktree limpo, com `desktop E2E`, `qa-rc`, `build:debug` e `validate-upstream-windows` verdes |
+| 2 | Semana 1-3 | Fixtures BYOR-safe e host limpo | Backend/Toolchain | 1 | Alto | Nenhum teste relevante depende de corpus local oculto, `build/` versionado ou ROM comercial; baseline verde em clone limpo |
+| 3 | Semana 2-4 | Hardening de build/release | Infra/Release + Backend/Toolchain | 1, 2 | Alto | `build-report.json` continua fresh-only, MSI reprodutivel, `validate-upstream-windows` repetivel e sem falso-verde conhecido |
+| 4 | Semana 3-5 | Performance do shell | Core/Desktop | 1 | Medio | Reducao mensuravel do chunk principal sem regressao em `App.test.tsx`, `qa-rc` ou `desktop-e2e` |
+| 5 | Semana 4-6 | Reducao de densidade do shell | UX/Product + Core/Desktop | 4 | Medio | Shell mais legivel, onboarding mais claro e nenhuma perda de acesso ao fluxo core |
+| 6 | Semana 5-7 | Onboarding e primeiro sucesso do usuario | UX/Product + Core/Desktop | 5 | Medio | Usuario leigo consegue `criar -> editar -> build -> rodar` sem ambiguidade recorrente |
+| 7 | Semana 6-8 | Autoria diaria: inspector, layers, asset browser, scene flow | Core/Desktop | 5, 6 | Medio | Fluxo principal de edicao mais rapido, previsivel e sem regressao de persistencia/build |
+| 8 | Semana 7-9 | Import SGDK: robustez para casos reais | Backend/Toolchain + Core/Desktop | 2, 7 | Medio/Alto | Projeto legado real abre, navega, builda e roda sem destruir o host original |
+| 9 | Semana 8-10 | NodeGraph: usabilidade para gameplay comum | Core/Desktop + Backend/Toolchain | 7 | Medio | Casos comuns de logica ficam mais acessiveis sem quebrar o emitter SGDK/SNES |
+| 10 | Semana 9-11 | ArtStudio: de experimental forte para beta tecnica real | Tools/Experimental + Backend/Toolchain | 2, 7 | Medio | `ArtStudio -> cena -> build -> runtime` provado em rodada institucional |
+| 11 | Semana 10-12 | RetroFX: estabilizacao do editor visual-first | Tools/Experimental | 7 | Medio | Configuracao persistida chega ao runtime em casos reais, com docs e UI honestas |
+| 12 | Semana 10-12 | Reverse Workspace: consolidacao minima util | Tools/Experimental | 2 | Medio | Manifesto, disassembly, xrefs e anotacoes operam com UX tecnica coerente e sem claim inflada |
+| 13 | Semana 12 | Fechamento do trimestre e decisao de Q3 | Infra/Release + UX/Product + QA/Validation | 1-12 | Alto | Maturidade reavaliada, docs canonicas alinhadas e ordem do proximo trimestre definida sem wishful thinking |
+
+### Itens explicitamente fora de Q2 2026
+
+- Docking livre completo como default
+- Auto-updater final de producao
+- Importador MUGEN com conversao ampla de gameplay
+- Novos adapters grandes (`GameMaker Studio 2`, `Construct`, `RPG Maker`, `Unity 2D`, `Paper2D bridge`)
+- Expansao de escopo visual que concorra com o hardening do fluxo core
+
+### Regra de governanca do trimestre
+
+- Nenhuma frente `Experimental` sobe de maturidade sem prova canônica correspondente.
+- Nenhuma melhoria visual justifica regressao do caminho `Build -> ROM -> Emulacao`.
+- Nenhum owner deve abrir frente nova sem fechar o risco da frente anterior de mesma prioridade.
+- Qualquer claim de conclusao em Q2 exige: gates aplicaveis verdes, docs coerentes, ausencia de erro bloqueante no escopo e evidencia real do fluxo afetado.
+
+---
+
 ## Regra de Atualizacao
 
 - Marque `[x]` apenas quando houver codigo funcional e validacao correspondente.
