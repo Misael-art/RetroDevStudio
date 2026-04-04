@@ -60,6 +60,20 @@ function buildLegacyIndexSections(index: LegacySgdkIndex | null): LegacyIndexSec
   ].filter((section) => section.files.length > 0);
 }
 
+function countLegacyIndexedFiles(index: LegacySgdkIndex | null): number {
+  if (!index) {
+    return 0;
+  }
+
+  return (
+    index.source_files.length +
+    index.header_files.length +
+    index.manifest_files.length +
+    index.resource_files.length +
+    index.output_files.length
+  );
+}
+
 function buildAssetTree(assets: ProjectAssetEntry[]): AssetTreeNode {
   const root: AssetTreeNode = { name: "", path: "", isDir: true, children: [], fileCount: 0 };
 
@@ -208,6 +222,11 @@ export default function ExplorerWorkspace({
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set());
 
   const assetTree = useMemo(() => buildAssetTree(assets), [assets]);
+  const isLegacyOverlayProject = projectSourceKind === "external_sgdk" && Boolean(projectLegacyIndex);
+  const legacyIndexedFileCount = useMemo(
+    () => countLegacyIndexedFiles(projectLegacyIndex),
+    [projectLegacyIndex]
+  );
   const legacySections = useMemo(
     () => (projectSourceKind === "external_sgdk" ? buildLegacyIndexSections(projectLegacyIndex) : []),
     [projectLegacyIndex, projectSourceKind]
@@ -480,6 +499,42 @@ export default function ExplorerWorkspace({
       <div className="grid min-h-0 flex-1 gap-0 xl:grid-cols-[320px_minmax(0,1fr)]">
         <aside className="min-h-0 overflow-auto border-r border-[#27272a] bg-[#0b1120]">
           <div className="space-y-4 p-3">
+            {isLegacyOverlayProject ? (
+              <section
+                data-testid="legacy-host-summary"
+                className="rounded-2xl border border-[#3f3f46] bg-[#111827] p-3"
+              >
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#f9e2af]">
+                      Overlay SGDK
+                    </div>
+                    <p className="mt-2 break-all font-mono text-[10px] text-[#cbd5e1]">
+                      {projectLegacyIndex?.host_root}
+                    </p>
+                  </div>
+                  <span className="rounded-full border border-[#f9e2af]/30 bg-[#f9e2af]/10 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.16em] text-[#f9e2af]">
+                    Read-only host
+                  </span>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-1.5 text-[9px] text-[#cbd5e1]">
+                  <span className="rounded-full border border-[#313244] bg-[#0b1120] px-2 py-0.5">
+                    Overlay rds/
+                  </span>
+                  <span className="rounded-full border border-[#313244] bg-[#0b1120] px-2 py-0.5">
+                    {legacyIndexedFileCount} arquivo(s) indexado(s)
+                  </span>
+                  <span className="rounded-full border border-[#313244] bg-[#0b1120] px-2 py-0.5">
+                    Build &amp; Run delega ao Makefile do host
+                  </span>
+                </div>
+                <p className="mt-3 text-[11px] leading-5 text-[#94a3b8]">
+                  Cenas e assets abaixo continuam editáveis no overlay <span className="font-mono text-[#e4e4e7]">rds/</span>.
+                  Arquivos do host SGDK seguem somente leitura nesta workspace.
+                </p>
+              </section>
+            ) : null}
+
             <section className="rounded-2xl border border-[#1f2937] bg-[#0f172a]/60 p-3">
               <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-[#7dd3fc]">
                 Scenes
@@ -598,8 +653,13 @@ export default function ExplorerWorkspace({
                   <div className="text-[12px] font-semibold uppercase tracking-[0.2em] text-[#7dd3fc]">
                     Explorer Ready
                   </div>
-                  <p className="mt-3 max-w-lg text-[13px] leading-6 text-[#94a3b8]">
-                    Selecione uma cena, asset ou arquivo legado para navegar pela estrutura sintetizada do projeto.
+                  <p
+                    data-testid="explorer-empty-state-copy"
+                    className="mt-3 max-w-lg text-[13px] leading-6 text-[#94a3b8]"
+                  >
+                    {isLegacyOverlayProject
+                      ? "Selecione uma cena do overlay, um asset canonico ou um arquivo legado do host SGDK para navegar entre o que continua editavel em rds/ e o que permanece somente leitura."
+                      : "Selecione uma cena, asset ou arquivo legado para navegar pela estrutura sintetizada do projeto."}
                   </p>
                 </div>
               </div>
@@ -617,6 +677,15 @@ export default function ExplorerWorkspace({
                         {selection.scene.display_name}
                       </h2>
                       <p className="mt-2 font-mono text-[12px] text-[#94a3b8]">{selection.scene.path}</p>
+                      <p
+                        data-testid="explorer-selection-source"
+                        className="mt-3 text-[11px] text-[#94a3b8]"
+                      >
+                        Origem:{" "}
+                        <span className="font-semibold text-[#e4e4e7]">
+                          {isLegacyOverlayProject ? "overlay rds/scenes" : "projeto canônico"}
+                        </span>
+                      </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
                       <button
@@ -668,6 +737,15 @@ export default function ExplorerWorkspace({
                       <h2 className="mt-2 text-xl font-semibold text-[#f8fafc]">
                         {selection.asset.relative_path.split("/").pop() ?? selection.asset.relative_path}
                       </h2>
+                      <p
+                        data-testid="explorer-selection-source"
+                        className="mt-3 text-[11px] text-[#94a3b8]"
+                      >
+                        Origem:{" "}
+                        <span className="font-semibold text-[#e4e4e7]">
+                          {isLegacyOverlayProject ? "assets canônicos do overlay" : "projeto canônico"}
+                        </span>
+                      </p>
                       <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[12px]">
                         <dt className="text-[#64748b]">Caminho</dt>
                         <dd className="break-all font-mono text-[#e4e4e7]">{selection.asset.relative_path}</dd>

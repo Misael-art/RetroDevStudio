@@ -16,6 +16,14 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+* **O que acabou de acontecer (2026-04-04 - Import SGDK: Explorer agora deixa mais honesto o contrato do overlay legado):**
+  - **ExplorerWorkspace passou a explicar o modo legado antes de qualquer clique:** `src/components/explorer/ExplorerWorkspace.tsx` agora mostra um resumo `Overlay SGDK` com `host_root`, quantidade de arquivos indexados, badge de `Read-only host` e a regra objetiva de que `Build & Run delega ao Makefile do host`.
+  - **A fronteira entre `rds/` e host ficou explicita na navegacao:** o empty state do `Explorer` agora diferencia o que continua editavel no overlay e o que permanece somente leitura no host SGDK, reduzindo a chance de um agente ou usuario assumir que todo o workspace aberto virou um projeto nativo comum.
+  - **Selecoes de cena e asset deixaram de parecer ambíguas:** os cards de detalhe agora mostram `Origem: overlay rds/scenes` e `Origem: assets canônicos do overlay` quando o projeto aberto veio de `external_sgdk`, reforcando que a autoria segue no overlay e nao sobre os arquivos host.
+  - **Escopo mantido conservador:** nenhuma mudanca foi feita em `build_orch.rs`, importadores Rust, delegacao de build, schema UGDM, persistencia de cena ou emulacao; a rodada ficou restrita a tornar o fluxo legado mais honesto e menos propenso a erro humano na camada de exploracao.
+  - **Cobertura dedicada adicionada para um contrato que antes estava implícito:** `src/components/explorer/ExplorerWorkspace.test.tsx` foi criado para travar o resumo do overlay legado e os labels de origem de cena/asset, evitando regressao silenciosa dessa semantica read-only.
+  - **Barra verde desta rodada:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (`210` testes), `npm run build` OK, `scripts\\run-cargo-msvc.cmd clippy --manifest-path .\\src-tauri\\Cargo.toml -- -D warnings` OK e `scripts\\run-cargo-msvc.cmd test --manifest-path .\\src-tauri\\Cargo.toml --lib -- --nocapture --test-threads=1` OK (`255` aprovados / `0` falhas / `3` ignorados). O bundle seguiu honesto com `ExplorerWorkspace` em ~`16.68 kB` e chunk principal em ~`389.83 kB` bruto / `118.30 kB` gzip.
+
 * **O que acabou de acontecer (2026-04-04 - Autoria diaria: LayerPanel, Asset Browser e Inspector agora explicam melhor o contexto ativo):**
   - **LayerPanel ficou mais orientado ao estado atual da cena:** `src/components/hierarchy/LayerPanel.tsx` agora mostra um resumo compacto com `Camadas`, `Ativa` e `Entidade`, descreve o estado da camada selecionada (`visível/oculta`, `bloqueada/editável`, quantidade de entidades) e oferece `Limpar` para sair da camada ativa sem mudar store, schema ou persistencia.
   - **Atribuicao de entidade deixou de depender de descoberta implícita:** quando existe entidade selecionada, mas nenhuma camada ativa, o painel agora renderiza uma dica explicita para orientar a atribuicao correta antes de entrar no footer de `Atribuir à camada ativa`.
@@ -664,10 +672,11 @@ Fechar o MVP do desktop Tauri preservando a baseline verde, enquanto o reverse c
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
 **Sequencia de acoes recomendada:**
-1. Encadear o proximo bloco conservador em `scene flow` e `import SGDK`, priorizando abertura honesta de projetos legados, warnings claros e zero regressao no fluxo canonico atual.
-2. Continuar medindo o chunk principal do shell a cada rodada relevante de `App.tsx`/`ViewportPanel` com `npm run build`, evitando regressao silenciosa de bundle.
-3. Repetir bundle MSI apenas quando o escopo tocar release/packaging (`scripts/run-in-msvc.cmd npm run build:msi`).
-4. Manter `validate-upstream-windows` e `release:readiness:baseline` como fotografia institucional sempre que alteracoes futuras tocarem build, emulacao, onboarding ou toolchains.
+1. Continuar o endurecimento de `scene flow`/`import SGDK` nos pontos de entrada restantes, priorizando warnings claros, resumo de proveniencia e zero regressao no overlay legado que ja builda via host.
+2. Retomar a frente de `NodeGraph` para casos de gameplay comum somente depois de fechar a camada de descoberta/orientacao do fluxo legado atual.
+3. Continuar medindo o chunk principal do shell a cada rodada relevante de `App.tsx`/`ViewportPanel` com `npm run build`, evitando regressao silenciosa de bundle.
+4. Repetir bundle MSI apenas quando o escopo tocar release/packaging (`scripts/run-in-msvc.cmd npm run build:msi`).
+5. Manter `validate-upstream-windows` e `release:readiness:baseline` como fotografia institucional sempre que alteracoes futuras tocarem build, emulacao, onboarding ou toolchains.
 
 **Validacao minima obrigatoria antes de marcar qualquer item como concluido:**
 * `npm run check:tree`
