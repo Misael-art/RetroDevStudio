@@ -38,7 +38,9 @@
     "test:e2e:desktop:live-stale:md": "node scripts/e2e-tauri-build-run.mjs --scenario live-stale --project src-tauri/tests/fixtures/projects/megadrive_dummy",
     "test:e2e:desktop:live-stale:snes": "node scripts/e2e-tauri-build-run.mjs --scenario live-stale --project src-tauri/tests/fixtures/projects/snes_dummy",
     "test:e2e:desktop:onboarding-shell": "node scripts/e2e-tauri-build-run.mjs --scenario onboarding-shell",
+    "test:e2e:desktop:qa-rc": "node scripts/e2e-tauri-build-run.mjs --scenario qa-rc",
     "test:watch": "vitest",
+    "release:readiness:promotion": "node scripts/release-readiness.mjs --run-baseline --manual-qa-json src-tauri/target-test/validation/manual-qa-status.json --strict",
     "tauri": "tauri"
   },
   "dependencies": {

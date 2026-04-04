@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   Group,
@@ -11,14 +11,9 @@ import LayoutSplitter from "./components/common/LayoutSplitter";
 import UnifiedTopBar, {
   type UnifiedTopBarSection,
 } from "./components/common/UnifiedTopBar";
-import ExplorerWorkspace from "./components/explorer/ExplorerWorkspace";
 import HierarchyPanel from "./components/hierarchy/HierarchyPanel";
 import LayerPanel from "./components/hierarchy/LayerPanel";
-import InspectorPanel from "./components/inspector/InspectorPanel";
-import ToolsPanel, {
-  type ToolTab,
-  type ToolWorkspace,
-} from "./components/tools/ToolsPanel";
+import type { ToolTab, ToolWorkspace } from "./components/tools/ToolsPanel";
 import ViewportPanel from "./components/viewport/ViewportPanel";
 import { buildProject, generateCCode, validateProject } from "./core/ipc/buildService";
 import { emulatorLoadRom, emulatorStop } from "./core/ipc/emulatorService";
@@ -63,6 +58,10 @@ import {
   useLiveValidationController,
 } from "./core/validation/liveValidationController";
 import { getEntityDisplayName } from "./core/entityDisplay";
+
+const ExplorerWorkspace = lazy(() => import("./components/explorer/ExplorerWorkspace"));
+const InspectorPanel = lazy(() => import("./components/inspector/InspectorPanel"));
+const ToolsPanel = lazy(() => import("./components/tools/ToolsPanel"));
 
 function ToolbarButton({
   label,
@@ -249,11 +248,10 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
           </p>
           <h2 className="mt-1 text-sm font-semibold text-[#e2e8f0]">{guide.title}</h2>
           <p className="mt-1 text-xs leading-5 text-[#cbd5e1]">{guide.summary}</p>
-          <p className="mt-2 text-[11px] leading-5 text-[#94a3b8]">{guide.detail}</p>
           {guide.signal ? (
             <div
               data-testid="workspace-guide-signal"
-              className={`mt-3 inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold ${signalToneClass}`}
+              className={`mt-2 inline-flex max-w-full items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold ${signalToneClass}`}
             >
               {guide.signal.label}
             </div>
@@ -272,12 +270,26 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
           ))}
         </div>
       </div>
-      <p className="mt-3 text-[10px] leading-5 text-[#7f849c]">
-        Dica: a rail lateral troca de workspace, os presets Artist/Logic/Debug/Playtest reorganizam
-        o shell e o botao <span className="font-semibold text-[#cdd6f4]">Tools</span> sempre abre o
-        painel contextual da tarefa atual.
-      </p>
+      <details className="mt-2 rounded-xl border border-[#1f2937] bg-black/10 px-3 py-2">
+        <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7f849c]">
+          Contexto do workspace
+        </summary>
+        <p className="mt-2 text-[11px] leading-5 text-[#94a3b8]">{guide.detail}</p>
+        <p className="mt-2 text-[10px] leading-5 text-[#7f849c]">
+          Dica: a rail lateral troca de workspace, os presets Artist/Logic/Debug/Playtest reorganizam
+          o shell e o botao <span className="font-semibold text-[#cdd6f4]">Tools</span> sempre abre o
+          painel contextual da tarefa atual.
+        </p>
+      </details>
     </section>
+  );
+}
+
+function WorkspacePanelPlaceholder({ label }: { label: string }) {
+  return (
+    <div className="flex h-full min-h-0 items-center justify-center bg-[#09090b] px-4 text-center text-[11px] text-[#64748b]">
+      {label}
+    </div>
   );
 }
 
@@ -453,7 +465,20 @@ type AutomationState = {
 
 type AutomationApi = {
   openProject: (projectDir: string) => Promise<boolean>;
+  closeProject: () => Promise<void>;
+  persistScene: (scope?: string, successMessage?: string) => Promise<boolean>;
   setSceneDraft: (scene: Scene) => Promise<boolean>;
+  setSelectedEntityId: (entityId: string | null) => boolean;
+  setActiveLayerId: (layerId: string | null) => boolean;
+  setEditorMode: (mode: "select" | "paint" | "erase" | "collision") => boolean;
+  setActiveBrush: (relativeAssetPath: string | null) => boolean;
+  setRightPanelMode: (mode: "inspector" | "tools") => boolean;
+  openToolsWorkspace: (
+    activeTool: ToolTab,
+    workspace?: ToolWorkspace,
+    showAdvanced?: boolean
+  ) => boolean;
+  selectWorkspace: (workspace: EditorWorkspace) => boolean;
   getState: () => AutomationState;
 };
 
@@ -1844,6 +1869,14 @@ export default function App() {
 
     window.__RDS_E2E__ = {
       openProject: (projectDir: string) => openProjectAtPath(projectDir, "E2E"),
+      closeProject: () => handleCloseProject(),
+      persistScene: (scope = "E2E", successMessage?: string) => {
+        const state = useEditorStore.getState();
+        if (!state.activeProjectDir) {
+          throw new Error("Nenhum projeto aberto para persistir a cena.");
+        }
+        return persistActiveScene(state.activeProjectDir, scope, successMessage);
+      },
       setSceneDraft: async (scene: Scene) => {
         const state = useEditorStore.getState();
         if (!state.activeProjectDir) {
@@ -1852,6 +1885,50 @@ export default function App() {
 
         state.setSelectedEntityId(null);
         state.setActiveScene(scene, scene);
+        return true;
+      },
+      setSelectedEntityId: (entityId: string | null) => {
+        useEditorStore.getState().setSelectedEntityId(entityId);
+        return true;
+      },
+      setActiveLayerId: (layerId: string | null) => {
+        useEditorStore.getState().setActiveLayerId(layerId);
+        return true;
+      },
+      setEditorMode: (mode: "select" | "paint" | "erase" | "collision") => {
+        useEditorStore.getState().setEditorMode(mode);
+        return true;
+      },
+      setActiveBrush: (relativeAssetPath: string | null) => {
+        const state = useEditorStore.getState();
+        state.setActiveBrush(
+          relativeAssetPath
+            ? {
+                kind: "prefab",
+                id: relativeAssetPath,
+                assetPath: relativeAssetPath,
+              }
+            : null
+        );
+        if (relativeAssetPath) {
+          state.setEditorMode("paint");
+        }
+        return true;
+      },
+      setRightPanelMode: (mode: "inspector" | "tools") => {
+        setRightPanelMode(mode);
+        return true;
+      },
+      openToolsWorkspace: (
+        activeTool: ToolTab,
+        workspace: ToolWorkspace = "editing",
+        showAdvanced = false
+      ) => {
+        openToolsWorkspace(activeTool, workspace, showAdvanced);
+        return true;
+      },
+      selectWorkspace: (workspace: EditorWorkspace) => {
+        handleWorkspaceSelect(workspace);
         return true;
       },
       getState: () => {
@@ -1902,12 +1979,64 @@ export default function App() {
           activeProjectDir: state.activeProjectDir,
           activeProjectName: state.activeProjectName,
           activeTarget: state.activeTarget,
+          activeWorkspace: state.activeWorkspace,
           activeViewportTab: state.activeViewportTab,
+          activeScenePath: state.activeScenePath,
+          emulatorLoaded: state.emulatorLoaded,
+          emulPaused: state.emulPaused,
           sceneRevision: state.sceneRevision,
+          selectedEntityId: state.selectedEntityId,
+          activeLayerId: state.activeLayerId,
+          editorMode: state.editorMode,
+          rightPanelMode,
           hwValidationState: state.hwValidationState,
           hwValidatedRevision: state.hwValidatedRevision,
           hwValidationError: state.hwValidationError,
           activeSceneEntityCount: state.activeScene?.entities.length ?? 0,
+          activeBrush: state.activeBrush
+            ? {
+                kind: state.activeBrush.kind,
+                id: state.activeBrush.id,
+                assetPath: state.activeBrush.assetPath ?? null,
+              }
+            : null,
+          activeScene: state.activeScene
+            ? {
+                sceneId: state.activeScene.scene_id,
+                displayName: state.activeScene.display_name ?? state.activeScene.scene_id,
+                entityCount: state.activeScene.entities.length,
+                backgroundLayerCount: state.activeScene.background_layers.length,
+                editorLayerCount: state.activeScene.layers?.length ?? 0,
+                collisionSolidCount:
+                  state.activeScene.collision_map?.data.filter((value) => value === 1).length ?? 0,
+                entities: state.activeScene.entities.map((entity) => ({
+                  id: entity.entity_id,
+                  displayName: getEntityDisplayName(entity),
+                  x: entity.transform.x,
+                  y: entity.transform.y,
+                  spriteAsset: entity.components.sprite?.asset ?? null,
+                  type: entity.components.camera
+                    ? "camera"
+                    : entity.components.tilemap
+                      ? "tilemap"
+                      : entity.components.sprite
+                        ? "sprite"
+                        : entity.components.audio && !entity.components.sprite
+                          ? "audio"
+                          : "object",
+                })),
+                layers: (state.activeScene.layers ?? []).map((layer) => ({
+                  id: layer.id,
+                  name: layer.name,
+                  kind: layer.kind,
+                  visible: layer.visible,
+                  locked: layer.locked,
+                  depth: layer.depth,
+                  entityCount: layer.entity_ids.length,
+                  entityIds: [...layer.entity_ids],
+                })),
+              }
+            : null,
           hwStatus: state.hwStatus
             ? {
                 spriteCount: state.hwStatus.sprite_count,
@@ -1954,7 +2083,7 @@ export default function App() {
     return () => {
       delete window.__RDS_E2E__;
     };
-  }, [automationEnabled]);
+  }, [automationEnabled, rightPanelMode]);
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#11111b] text-[#cdd6f4]">
@@ -2535,10 +2664,12 @@ export default function App() {
           <LayoutSplitter />
           <Panel id="center" minSize={20} className="overflow-hidden">
             {activeWorkspace === "explorer" ? (
-              <ExplorerWorkspace
-                onSelectionChange={setExplorerBreadcrumb}
-                onOpenSceneEditor={() => handleWorkspaceSelect("scene")}
-              />
+              <Suspense fallback={<WorkspacePanelPlaceholder label="Carregando Explorer..." />}>
+                <ExplorerWorkspace
+                  onSelectionChange={setExplorerBreadcrumb}
+                  onOpenSceneEditor={() => handleWorkspaceSelect("scene")}
+                />
+              </Suspense>
             ) : (
               <ViewportPanel showWorkspaceTabs={false} />
             )}
@@ -2593,14 +2724,18 @@ export default function App() {
               </div>
               <div className="min-h-0 flex-1 overflow-hidden">
                 {rightPanelMode === "tools" ? (
-                  <ToolsPanel
-                    onRequestInspector={() => setRightPanelMode("inspector")}
-                    initialActive={toolPanelActive}
-                    workspace={toolPanelWorkspace}
-                    showAdvancedByDefault={toolPanelShowAdvanced}
-                  />
+                  <Suspense fallback={<WorkspacePanelPlaceholder label="Carregando Tools..." />}>
+                    <ToolsPanel
+                      onRequestInspector={() => setRightPanelMode("inspector")}
+                      initialActive={toolPanelActive}
+                      workspace={toolPanelWorkspace}
+                      showAdvancedByDefault={toolPanelShowAdvanced}
+                    />
+                  </Suspense>
                 ) : (
-                  <InspectorPanel />
+                  <Suspense fallback={<WorkspacePanelPlaceholder label="Carregando Inspector..." />}>
+                    <InspectorPanel />
+                  </Suspense>
                 )}
               </div>
             </div>

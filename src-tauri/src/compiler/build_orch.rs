@@ -1782,6 +1782,9 @@ mod tests {
             let src_path = entry.path();
             let dst_path = dst.join(entry.file_name());
             if src_path.is_dir() {
+                if entry.file_name() == std::ffi::OsStr::new("build") {
+                    continue;
+                }
                 copy_dir_all(&src_path, &dst_path);
             } else {
                 fs::copy(&src_path, &dst_path).expect("copy fixture file");

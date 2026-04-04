@@ -3403,15 +3403,18 @@ pub extern "C" fn retro_run() {
     #[test]
     fn patch_studio_bps_roundtrip_preserves_modified_project_rom_hash() {
         let dir = temp_dir("patch-project");
-        let original = fixture_dir("snes_dummy")
-            .join("build")
-            .join("snes")
-            .join("canonical_snes_dummy.sfc");
+        let original = dir.join("canonical_snes_dummy_original.sfc");
         let modified = dir.join("canonical_snes_dummy_modified.sfc");
         let patch = dir.join("project_assets.bps");
         let restored = dir.join("canonical_snes_dummy_restored.sfc");
 
-        let mut modified_bytes = fs::read(&original).expect("read tracked canonical snes rom");
+        let mut original_bytes = vec![0u8; 256 * 1024];
+        for (index, byte) in original_bytes.iter_mut().enumerate() {
+            *byte = (index % 251) as u8;
+        }
+        fs::write(&original, &original_bytes).expect("write synthetic canonical snes rom");
+
+        let mut modified_bytes = original_bytes.clone();
         let replacement_asset = fs::read(
             fixture_dir("snes_dummy")
                 .join("assets")

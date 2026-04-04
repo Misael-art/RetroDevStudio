@@ -1,9 +1,11 @@
 # 10 - ROTEIRO QA RELEASE CANDIDATE
 **Status:** Documento operacional
 **Objetivo:** Guiar testadores leigos na validacao do RC antes da promocao a beta institucional.
-**Ultima revisao:** 2026-03-22
+**Ultima revisao:** 2026-04-04
 
 > Este roteiro e pensado para pessoas sem experiencia tecnica. Cada passo deve ser executavel com cliques e esperas visiveis. Ao concluir, preencha o checklist de evidencias no final.
+
+> Caminho institucional automatizado da Wave S+: `npm run test:e2e:desktop:qa-rc`. Esse cenario executa os blocos `A-F` no app desktop real, grava `src-tauri/target-test/validation/manual-qa-status.json` e salva screenshots `qa-rc-*.png`. Ele nao substitui beta test com pessoas reais, mas passou a ser a evidencia canonica minima da trilha RC neste host Windows.
 
 ---
 
@@ -98,9 +100,10 @@ Preencha apos executar o roteiro. Todos os itens devem estar marcados para aprov
 - [ ] `npm test` - baseline vigente verde
 - [ ] `cargo clippy -- -D warnings` - OK
 - [ ] `cargo test --lib` - baseline vigente verde
-- [ ] `npm run release:readiness:baseline` - report gerado em `src-tauri/target-test/validation/release-readiness.md`
+- [ ] `npm run test:e2e:desktop:qa-rc` - report gerado em `src-tauri/target-test/validation/manual-qa-status.json`
+- [ ] `npm run release:readiness:promotion` - report gerado em `src-tauri/target-test/validation/release-readiness.md`
 
-### Evidencias manuais (testador leigo)
+### Evidencias do roteiro A-F
 
 - [ ] Bloco A (onboarding) - todos os passos OK
 - [ ] Bloco B (camadas) - todos os passos OK
@@ -132,6 +135,8 @@ Preencha apos executar o roteiro. Todos os itens devem estar marcados para aprov
 | Screenshot do editor | Hierarchy + Viewport visiveis |
 | Screenshot do LayerPanel | Aba Camadas |
 | Screenshot do Game View | Aba GM Jogo com ROM rodando |
+| Report do roteiro A-F | `src-tauri/target-test/validation/manual-qa-status.json` |
+| Screenshots automatizadas do QA RC | `src-tauri/target-test/validation/qa-rc-*.png` |
 | Report de readiness | `src-tauri/target-test/validation/release-readiness.md` |
 | Log de erro (se houver) | Console do app ou mensagem na UI |
 

@@ -12,7 +12,7 @@
 
 ## Estado Real
 
-- Data de referencia: `2026-04-03`.
+- Data de referencia: `2026-04-04`.
 - Fase ativa real: `hardening / QA do MVP desktop`, com foco em manter o fluxo canonico `Build -> ROM -> Emulacao` repetivel em host Windows limpo.
 - O estado operacional canônico fica em [docs/06_AI_MEMORY_BANK.md](./docs/06_AI_MEMORY_BANK.md).
 - Se este `README` divergir do estado real, prevalecem:
@@ -29,15 +29,18 @@
 - Build canonico local via `npm run build:debug`.
 - `build-report.json` fresh-only por rodada, sem herdar modos antigos de outras execucoes.
 - `npm run release:readiness:baseline` agora reroda automaticamente `build:debug`, `validate-upstream-windows` e `desktop E2E` em Windows apto, exigindo artefatos frescos da propria rodada.
+- `npm run test:e2e:desktop:qa-rc` agora percorre os blocos `A-F` do roteiro RC no app desktop real e grava `src-tauri/target-test/validation/manual-qa-status.json` com screenshots `qa-rc-*.png`.
+- `npm run release:readiness:promotion` agrega baseline, build/upstream, desktop E2E e o report `manual-qa-status.json` em modo `strict`.
 - Workflows do GitHub agora publicam sumario legivel e artefatos de validacao para auditoria por push.
 - Bootstrap seguro para host limpo via [scripts/bootstrap.ps1](./scripts/bootstrap.ps1).
-- Baseline recertificada neste host em `2026-04-03` com:
-  `check-tree`, `lint`, `tsc`, `npm test`, `cargo clippy`, `cargo test`, `build:debug` e `validate-upstream-windows`.
+- Baseline recertificada neste host em `2026-04-04` com:
+  `check-tree`, `lint`, `tsc`, `npm test`, `cargo clippy`, `cargo test`, `build`, `build:debug`, `validate-upstream-windows` e `qa-rc`.
 
 ### O que ainda esta em hardening
 
 - O foco do projeto ainda nao e expansao de escopo; e consolidacao do caminho canonico e QA.
 - O shell principal ja e forte, mas ainda nao e um sistema de docking livre no nivel de uma IDE madura; a migracao para docking livre continua `deferred`.
+- O shell ficou menos denso e mais leve nesta wave com lazy-load de paineis secundarios, mas o chunk principal ainda esta grande e segue em hardening.
 - O updater nativo continua apenas em preparacao institucional no backend; nao existe claim de superficie final de auto-update pronta no shell do usuario.
 - Ferramentas como `ArtStudio`, `RetroFX`, `Reverse Workspace`, `Asset Extractor` e `Memory Viewer` continuam visiveis, mas com status `Experimental` onde o backend e a certificacao ainda nao sustentam claim plena.
 
@@ -154,6 +157,13 @@ Para uma fotografia consolidada de readiness no Windows, o caminho canonico agor
 2. inspecionar `src-tauri/target-test/validation/release-readiness.md`
 
 Essa rodada passa a exigir que `build-report.json`, `upstream-validation.json` e o executavel debug tenham sido renovados na propria execucao.
+
+Para a rodada institucional de promocao RC, o caminho conservador agora e:
+
+1. `npm run test:e2e:desktop:qa-rc`
+2. `npm run release:readiness:promotion`
+3. inspecionar `src-tauri/target-test/validation/manual-qa-status.json`
+4. inspecionar `src-tauri/target-test/validation/release-readiness.md`
 
 ---
 

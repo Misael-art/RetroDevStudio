@@ -42,6 +42,10 @@ const buildReportPath = path.join(
   validationDir,
   "build-report.json"
 );
+const manualQaStatusPath = path.join(
+  validationDir,
+  "manual-qa-status.json"
+);
 
 function fail(message) {
   throw new Error(message);
@@ -147,6 +151,7 @@ function parseArgs(argv) {
           "live-error",
           "live-stale",
           "onboarding-shell",
+          "qa-rc",
         ].includes(
           value
         )
@@ -652,6 +657,73 @@ async function readAutomationState(sessionId) {
   );
 }
 
+async function callAutomationApi(sessionId, methodName, args = []) {
+  const result = await executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const api = window.__RDS_E2E__;
+      const methodName = arguments[0];
+      const methodArgs = Array.isArray(arguments[1]) ? arguments[1] : [];
+      if (!api || typeof api[methodName] !== "function") {
+        done({ ok: false, error: "Metodo de automacao indisponivel: " + methodName });
+        return;
+      }
+
+      Promise.resolve(api[methodName](...methodArgs))
+        .then((value) => done({ ok: true, value }))
+        .catch((error) => done({ ok: false, error: String(error) }));
+    `,
+    [methodName, args]
+  );
+
+  if (!result?.ok) {
+    fail(`Falha na API de automacao (${methodName}): ${result?.error ?? "sem diagnostico"}`);
+  }
+
+  return result.value;
+}
+
+function createManualQaReport() {
+  return {
+    generatedAt: null,
+    scenario: "qa-rc",
+    projectName: "",
+    projectDir: "",
+    app: "",
+    artifacts: [],
+    blocks: {
+      A: { status: "pending", note: null },
+      B: { status: "pending", note: null },
+      C: { status: "pending", note: null },
+      D: { status: "pending", note: null },
+      E: { status: "pending", note: null },
+      F: { status: "pending", note: null },
+    },
+  };
+}
+
+async function writeManualQaReport(report) {
+  await ensureValidationDir();
+  report.generatedAt = new Date().toISOString();
+  await writeFile(manualQaStatusPath, `${JSON.stringify(report, null, 2)}\n`);
+}
+
+function registerArtifact(report, filePath, label) {
+  report.artifacts.push({
+    label,
+    path: filePath,
+  });
+}
+
+async function markManualQaBlock(report, blockId, status, note) {
+  report.blocks[blockId] = {
+    status,
+    note,
+  };
+  await writeManualQaReport(report);
+}
+
 async function fillInputBySelector(sessionId, selector, value) {
   const result = await executeScript(
     sessionId,
@@ -680,6 +752,299 @@ async function fillInputBySelector(sessionId, selector, value) {
 
   if (!result) {
     fail(`Falha ao preencher input via seletor: ${selector}`);
+  }
+}
+
+async function waitForBodyText(sessionId, fragment, timeoutMs, label) {
+  return waitFor(
+    async () =>
+      executeScript(
+        sessionId,
+        `
+          const bodyText = document.body?.textContent?.replace(/\\s+/g, " ").trim() ?? "";
+          return bodyText.includes(arguments[0]) ? bodyText : false;
+        `,
+        [fragment]
+      ),
+    timeoutMs,
+    label,
+    250
+  );
+}
+
+async function pressKey(sessionId, key, options = {}) {
+  const code = options.code ?? key;
+  const ctrlKey = Boolean(options.ctrlKey);
+  const shiftKey = Boolean(options.shiftKey);
+  const altKey = Boolean(options.altKey);
+  const result = await executeScript(
+    sessionId,
+    `
+      const eventInit = {
+        key: arguments[0],
+        code: arguments[1],
+        ctrlKey: arguments[2],
+        shiftKey: arguments[3],
+        altKey: arguments[4],
+        bubbles: true,
+        cancelable: true,
+      };
+      const down = new KeyboardEvent("keydown", eventInit);
+      const up = new KeyboardEvent("keyup", eventInit);
+      window.dispatchEvent(down);
+      window.dispatchEvent(up);
+      return true;
+    `,
+    [key, code, ctrlKey, shiftKey, altKey]
+  );
+
+  if (!result) {
+    fail(`Falha ao disparar atalho de teclado: ${key}`);
+  }
+}
+
+async function clickHierarchyEntityByLabel(sessionId, label) {
+  const result = await executeScript(
+    sessionId,
+    `
+      const normalizedLabel = String(arguments[0]).trim();
+      const candidate = Array.from(document.querySelectorAll("li"))
+        .find((node) => {
+          const text = node.textContent?.replace(/\\s+/g, " ").trim() ?? "";
+          return text.includes(normalizedLabel);
+        });
+      if (!(candidate instanceof HTMLElement)) {
+        return false;
+      }
+      candidate.click();
+      return true;
+    `,
+    [label]
+  );
+
+  if (!result) {
+    fail(`Entidade nao encontrada na Hierarchy: ${label}`);
+  }
+}
+
+async function selectLayerByName(sessionId, layerName) {
+  const result = await executeScript(
+    sessionId,
+    `
+      const normalized = String(arguments[0]).trim();
+      const label = Array.from(document.querySelectorAll("span[title]")).find((candidate) =>
+        (candidate.getAttribute("title") ?? "").startsWith(normalized)
+      );
+      const row = label?.closest("div[class*='group']");
+      if (!(row instanceof HTMLElement)) {
+        return false;
+      }
+      row.click();
+      return true;
+    `,
+    [layerName]
+  );
+
+  if (!result) {
+    fail(`Camada nao encontrada para selecao: ${layerName}`);
+  }
+}
+
+async function renameLayer(sessionId, currentName, nextName) {
+  const activated = await executeScript(
+    sessionId,
+    `
+      const normalized = String(arguments[0]).trim();
+      const label = Array.from(document.querySelectorAll("span[title]")).find((candidate) =>
+        (candidate.getAttribute("title") ?? "").startsWith(normalized)
+      );
+      if (!(label instanceof HTMLElement)) {
+        return false;
+      }
+      label.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+      return true;
+    `,
+    [currentName]
+  );
+
+  if (!activated) {
+    fail(`Camada nao encontrada para renomear: ${currentName}`);
+  }
+
+  await waitFor(
+    async () =>
+      executeScript(
+        sessionId,
+        `
+          const inputs = Array.from(document.querySelectorAll("input"));
+          return inputs.some((candidate) => candidate.value === arguments[0]) ? true : false;
+        `,
+        [currentName]
+      ),
+    10000,
+    `Campo de rename da camada '${currentName}' nao ficou ativo.`,
+    100
+  );
+
+  const renamed = await executeScript(
+    sessionId,
+    `
+      const currentName = String(arguments[0]).trim();
+      const nextName = String(arguments[1]);
+      const input = Array.from(document.querySelectorAll("input"))
+        .find((candidate) => candidate.value === currentName);
+      if (!(input instanceof HTMLInputElement)) {
+        return false;
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+      const setValue = descriptor?.set;
+      if (typeof setValue !== "function") {
+        return false;
+      }
+      input.focus();
+      setValue.call(input, nextName);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      input.blur();
+      return true;
+    `,
+    [currentName, nextName]
+  );
+
+  if (!renamed) {
+    fail(`Falha ao concluir rename da camada '${currentName}' -> '${nextName}'.`);
+  }
+}
+
+async function toggleLayerVisibility(sessionId, layerName) {
+  const result = await executeScript(
+    sessionId,
+    `
+      const normalized = String(arguments[0]).trim();
+      const label = Array.from(document.querySelectorAll("span[title]")).find((candidate) =>
+        (candidate.getAttribute("title") ?? "").startsWith(normalized)
+      );
+      const row = label?.closest("div[class*='group']");
+      if (!(row instanceof HTMLElement)) {
+        return false;
+      }
+      const button = Array.from(row.querySelectorAll("button")).find((candidate) => {
+        const title = candidate.getAttribute("title") ?? "";
+        return title === "Ocultar camada" || title === "Mostrar camada";
+      });
+      if (!(button instanceof HTMLButtonElement)) {
+        return false;
+      }
+      button.click();
+      return true;
+    `,
+    [layerName]
+  );
+
+  if (!result) {
+    fail(`Falha ao alternar visibilidade da camada: ${layerName}`);
+  }
+}
+
+async function sceneOverlayPointerAction(sessionId, x, y, button = 0) {
+  const result = await executeScript(
+    sessionId,
+    `
+      const overlay = document.querySelector('[data-testid="viewport-scene-overlay"]');
+      if (!(overlay instanceof HTMLCanvasElement)) {
+        return false;
+      }
+      const rect = overlay.getBoundingClientRect();
+      const clientX = rect.left + Number(arguments[0]);
+      const clientY = rect.top + Number(arguments[1]);
+      const button = Number(arguments[2]);
+      const buttons = button === 2 ? 2 : 1;
+      const eventInit = {
+        bubbles: true,
+        cancelable: true,
+        button,
+        buttons,
+        clientX,
+        clientY,
+      };
+      overlay.dispatchEvent(new MouseEvent("mousemove", eventInit));
+      overlay.dispatchEvent(new MouseEvent("mousedown", eventInit));
+      overlay.dispatchEvent(new MouseEvent("mouseup", eventInit));
+      overlay.dispatchEvent(new MouseEvent("click", eventInit));
+      if (button === 2) {
+        overlay.dispatchEvent(new MouseEvent("contextmenu", eventInit));
+      }
+      return true;
+    `,
+    [x, y, button]
+  );
+
+  if (!result) {
+    fail("Falha ao interagir com o overlay da cena.");
+  }
+}
+
+async function updateInspectorIntField(sessionId, label, value) {
+  const fieldSlug = String(label)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const valueSelector = `[data-testid="inspector-prop-${fieldSlug}-value"]`;
+  const inputSelector = `[data-testid="inspector-prop-${fieldSlug}-input"]`;
+  const activated = await executeScript(
+    sessionId,
+    `
+      const valueNode = document.querySelector(arguments[0]);
+      if (!(valueNode instanceof HTMLElement)) {
+        return false;
+      }
+      valueNode.click();
+      return true;
+    `,
+    [valueSelector]
+  );
+
+  if (!activated) {
+    fail(`Falha ao abrir campo do Inspector para: ${label}`);
+  }
+
+  await waitFor(
+    async () =>
+      executeScript(
+        sessionId,
+        "return Boolean(document.querySelector(arguments[0]));",
+        [inputSelector]
+      ),
+    10000,
+    `Input do Inspector nao ficou disponivel para: ${label}`,
+    50
+  );
+
+  const updated = await executeScript(
+    sessionId,
+    `
+      const input = document.querySelector(arguments[0]);
+      const nextValue = String(arguments[1]);
+      if (!(input instanceof HTMLInputElement)) {
+        return false;
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+      const setValue = descriptor?.set;
+      if (typeof setValue !== "function") {
+        return false;
+      }
+      input.focus();
+      setValue.call(input, nextValue);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      input.blur();
+      return true;
+    `,
+    [inputSelector, value]
+  );
+
+  if (!updated) {
+    fail(`Falha ao atualizar campo do Inspector: ${label}`);
   }
 }
 
@@ -1110,7 +1475,8 @@ async function main() {
   );
   const emulatorActivationTimeoutMs = parsePositiveInteger(process.env.RDS_E2E_RUN_TIMEOUT_MS, 180000);
   const liveValidationTimeoutMs = parsePositiveInteger(process.env.RDS_E2E_LIVE_TIMEOUT_MS, 60000);
-  const requiresExistingProject = options.scenario !== "onboarding-shell";
+  const requiresExistingProject =
+    options.scenario !== "onboarding-shell" && options.scenario !== "qa-rc";
   if (requiresExistingProject) {
     await assertPathExists(
       options.project,
@@ -1355,6 +1721,620 @@ async function main() {
       console.log(`Evidencias: ${editorScreenshot}`);
       console.log(`Evidencias: ${layerScreenshot}`);
       return;
+    }
+
+    if (options.scenario === "qa-rc") {
+      const artifactPrefix = `qa-rc-${artifactTimestamp()}`;
+      const manualQaReport = createManualQaReport();
+      manualQaReport.app = options.app;
+      let currentBlock = "A";
+
+      try {
+        await waitForOnboardingWizard(sessionId);
+        const wizardScreenshot = await captureScreenshot(
+          sessionId,
+          `${artifactPrefix}-A-wizard.png`
+        );
+        registerArtifact(manualQaReport, wizardScreenshot, "A - wizard");
+
+        const templateCard = await findElement(sessionId, "[data-testid='template-card-platformer_seed']");
+        await clickElement(sessionId, templateCard);
+        await waitForOnboardingWizard(sessionId);
+
+        const generatedProjectName = `QA_RC_${Date.now()}`;
+        await fillInputBySelector(
+          sessionId,
+          'input[placeholder="Nome do projeto"]',
+          generatedProjectName
+        );
+        await clickButtonByText(sessionId, "Criar Projeto");
+
+        const createdState = await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.activeProjectDir &&
+              state?.activeProjectName === generatedProjectName &&
+              state?.activeScene?.entityCount >= 1
+              ? state
+              : false;
+          },
+          45000,
+          "Projeto RC nao foi criado e hidratado no shell.",
+          500
+        );
+
+        temporaryProjectDir = createdState.activeProjectDir;
+        manualQaReport.projectName = generatedProjectName;
+        manualQaReport.projectDir = temporaryProjectDir;
+
+        const editorScreenshot = await captureScreenshot(
+          sessionId,
+          `${artifactPrefix}-A-editor.png`
+        );
+        registerArtifact(manualQaReport, editorScreenshot, "A - editor");
+
+        await clickButtonByText(sessionId, "Cena");
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.activeScene?.entityCount >= 1 ? state : false;
+          },
+          15000,
+          "Hierarchy nao exibiu a cena ativa apos onboarding.",
+          250
+        );
+
+        await clickButtonByText(sessionId, "Camadas");
+        await waitFor(
+          async () => {
+            const bodyText = await executeScript(
+              sessionId,
+              `return document.body?.textContent?.replace(/\\s+/g, " ").trim() ?? "";`
+            );
+            return bodyText.includes("+ Camada") ? bodyText : false;
+          },
+          15000,
+          "LayerPanel nao ficou visivel apos onboarding.",
+          250
+        );
+        const layerScreenshot = await captureScreenshot(
+          sessionId,
+          `${artifactPrefix}-A-layers.png`
+        );
+        registerArtifact(manualQaReport, layerScreenshot, "A - camadas");
+
+        await markManualQaBlock(
+          manualQaReport,
+          "A",
+          "passed",
+          [
+            `Wizard, editor e LayerPanel validados para '${generatedProjectName}'.`,
+            `Evidencias: ${path.basename(wizardScreenshot)}, ${path.basename(editorScreenshot)}, ${path.basename(layerScreenshot)}.`,
+          ].join(" ")
+        );
+
+        currentBlock = "B";
+        await clickButtonByText(sessionId, "+ Camada");
+        await waitFor(
+          async () =>
+            executeScript(
+              sessionId,
+              `
+                const inputs = Array.from(document.querySelectorAll("input"));
+                return inputs.some((candidate) => candidate.value === "Nova Camada") ? true : false;
+              `
+            ),
+          10000,
+          "Formulario de criacao da camada nao ficou visivel.",
+          100
+        );
+        await clickButtonByText(sessionId, "Criar");
+        const layerCreatedState = await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.activeScene?.layers?.some((layer) => layer.name === "Nova Camada")
+              ? state
+              : false;
+          },
+          10000,
+          "Camada padrao nao foi criada.",
+          100
+        );
+
+        await renameLayer(sessionId, "Nova Camada", "Fundo");
+        const renamedLayerState = await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.activeScene?.layers?.find((layer) => layer.name === "Fundo") ?? false;
+          },
+          10000,
+          "Camada renomeada 'Fundo' nao apareceu no estado da cena.",
+          100
+        );
+
+        await clickButtonByText(sessionId, "Cena");
+        const hierarchyState = await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            const candidate = state?.activeScene?.entities?.find((entity) => entity.type !== "camera");
+            return candidate ? { state, candidate } : false;
+          },
+          15000,
+          "Nenhuma entidade editavel foi encontrada na Hierarchy do projeto RC.",
+          250
+        );
+
+        const targetEntity = hierarchyState.candidate;
+        await clickHierarchyEntityByLabel(sessionId, targetEntity.displayName);
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.selectedEntityId === targetEntity.id ? state : false;
+          },
+          10000,
+          `Entidade '${targetEntity.displayName}' nao ficou selecionada.`,
+          100
+        );
+
+        await clickButtonByText(sessionId, "Camadas");
+        await selectLayerByName(sessionId, "Fundo");
+        await clickButtonByText(sessionId, "Atribuir à camada ativa");
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            const layer = state?.activeScene?.layers?.find((candidate) => candidate.name === "Fundo");
+            return layer?.entityIds?.includes(targetEntity.id) ? state : false;
+          },
+          10000,
+          "Entidade selecionada nao foi atribuida a camada 'Fundo'.",
+          100
+        );
+
+        await toggleLayerVisibility(sessionId, "Fundo");
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            const layer = state?.activeScene?.layers?.find((candidate) => candidate.name === "Fundo");
+            return layer && layer.visible === false ? state : false;
+          },
+          10000,
+          "Camada 'Fundo' nao ficou invisivel apos alternar o olho.",
+          100
+        );
+        const hiddenLayerScreenshot = await captureScreenshot(
+          sessionId,
+          `${artifactPrefix}-B-layer-hidden.png`
+        );
+        registerArtifact(manualQaReport, hiddenLayerScreenshot, "B - camada oculta");
+
+        await toggleLayerVisibility(sessionId, "Fundo");
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            const layer = state?.activeScene?.layers?.find((candidate) => candidate.name === "Fundo");
+            return layer && layer.visible === true ? state : false;
+          },
+          10000,
+          "Camada 'Fundo' nao voltou a ficar visivel.",
+          100
+        );
+
+        await pressKey(sessionId, "z", { code: "KeyZ", ctrlKey: true });
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            const layer = state?.activeScene?.layers?.find((candidate) => candidate.name === "Fundo");
+            return layer && layer.visible === false ? state : false;
+          },
+          10000,
+          "Primeiro Ctrl+Z nao restaurou o estado anterior da camada.",
+          100
+        );
+        await pressKey(sessionId, "z", { code: "KeyZ", ctrlKey: true });
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            const layer = state?.activeScene?.layers?.find((candidate) => candidate.name === "Fundo");
+            return layer && layer.visible === true ? state : false;
+          },
+          10000,
+          "Segundo Ctrl+Z nao concluiu a restauracao da camada.",
+          100
+        );
+
+        await markManualQaBlock(
+          manualQaReport,
+          "B",
+          "passed",
+          [
+            `Camada 'Fundo' criada, renomeada e vinculada a '${targetEntity.displayName}'.`,
+            `Undo restaurou as alternancias de visibilidade.`,
+            `Evidencia: ${path.basename(hiddenLayerScreenshot)}.`,
+          ].join(" ")
+        );
+
+        currentBlock = "C";
+        await pressKey(sessionId, "c", { code: "KeyC" });
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.editorMode === "collision" ? state : false;
+          },
+          10000,
+          "Modo colisao nao ativou via atalho.",
+          100
+        );
+
+        await sceneOverlayPointerAction(sessionId, 24, 24, 0);
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.activeScene?.collisionSolidCount >= 1 ? state : false;
+          },
+          10000,
+          "Clique esquerdo no overlay nao marcou tile solido.",
+          100
+        );
+
+        await sceneOverlayPointerAction(sessionId, 24, 24, 2);
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.activeScene?.collisionSolidCount === 0 ? state : false;
+          },
+          10000,
+          "Clique direito no overlay nao limpou o tile de colisao.",
+          100
+        );
+
+        await pressKey(sessionId, "Escape", { code: "Escape" });
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.editorMode === "select" ? state : false;
+          },
+          10000,
+          "Escape nao retornou o editor ao modo selecao.",
+          100
+        );
+
+        await callAutomationApi(sessionId, "openToolsWorkspace", ["palette", "editing", true]);
+        await waitForBodyText(
+          sessionId,
+          "Paleta de Assets",
+          15000,
+          "Paleta contextual nao ficou visivel no painel Tools."
+        );
+
+        const brushAsset =
+          (await readAutomationState(sessionId))?.activeScene?.entities?.find(
+            (entity) => entity.spriteAsset
+          )?.spriteAsset ?? null;
+        if (!brushAsset) {
+          fail("Nenhum asset de sprite ficou disponivel para validar pintura.");
+        }
+        await callAutomationApi(sessionId, "setActiveBrush", [brushAsset]);
+        await pressKey(sessionId, "b", { code: "KeyB" });
+        const paintReadyState = await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.editorMode === "paint" && state?.activeBrush?.assetPath === brushAsset
+              ? state
+              : false;
+          },
+          10000,
+          "Modo pintar nao ficou armado com o brush esperado.",
+          100
+        );
+
+        const entityCountBeforePaint = paintReadyState.activeScene.entityCount;
+        await sceneOverlayPointerAction(sessionId, 112, 80, 0);
+        const paintedState = await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.activeScene?.entityCount === entityCountBeforePaint + 1 ? state : false;
+          },
+          10000,
+          "Clique de pintura nao criou uma nova entidade na cena.",
+          100
+        );
+        const paintScreenshot = await captureScreenshot(
+          sessionId,
+          `${artifactPrefix}-C-painted-scene.png`
+        );
+        registerArtifact(manualQaReport, paintScreenshot, "C - pintura");
+
+        await pressKey(sessionId, "v", { code: "KeyV" });
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.editorMode === "select" ? state : false;
+          },
+          10000,
+          "Modo selecao nao voltou apos atalho V.",
+          100
+        );
+
+        await markManualQaBlock(
+          manualQaReport,
+          "C",
+          "passed",
+          [
+            "Colisao respondeu a clique esquerdo/direito e saiu com Esc.",
+            `Pintura criou uma entidade adicional usando '${brushAsset}'.`,
+            `Evidencia: ${path.basename(paintScreenshot)}.`,
+          ].join(" ")
+        );
+
+        currentBlock = "D";
+        try {
+          await waitForBuildRunReady(sessionId, liveValidationTimeoutMs);
+        } catch (error) {
+          const diagnostics = formatAppDiagnostics(await collectAppDiagnostics(sessionId));
+          const details = error instanceof Error ? error.message : String(error);
+          fail(diagnostics ? `${details}\n${diagnostics}` : details);
+        }
+
+        const buildRunButton = await findElement(sessionId, "[data-testid='toolbar-build-run']");
+        await clickElement(sessionId, buildRunButton);
+        await waitFor(
+          async () => {
+            const status = await executeScript(
+              sessionId,
+              "return document.querySelector('[data-testid=\"viewport-game-status\"]')?.textContent?.trim() ?? '';"
+            );
+            return status === "Emulador ativo";
+          },
+          emulatorActivationTimeoutMs,
+          "Build & Run do RC nao ativou o emulador.",
+          1000
+        );
+
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.activeWorkspace === "game" && state?.activeViewportTab === "game"
+              ? state
+              : false;
+          },
+          15000,
+          "Workspace de jogo nao ficou ativo apos Build & Run.",
+          250
+        );
+
+        const gameScreenshot = await captureScreenshot(
+          sessionId,
+          `${artifactPrefix}-D-game-view.png`
+        );
+        registerArtifact(manualQaReport, gameScreenshot, "D - game view");
+
+        const pauseButton = await findElement(sessionId, "[data-testid='viewport-pause']");
+        await clickElement(sessionId, pauseButton);
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.emulPaused === true ? state : false;
+          },
+          10000,
+          "Botao Pausar nao refletiu o estado pausado.",
+          100
+        );
+
+        const resumeButton = await findElement(sessionId, "[data-testid='viewport-resume']");
+        await clickElement(sessionId, resumeButton);
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.emulPaused === false ? state : false;
+          },
+          10000,
+          "Botao Retomar nao restaurou a execucao do emulador.",
+          100
+        );
+
+        await markManualQaBlock(
+          manualQaReport,
+          "D",
+          "passed",
+          [
+            "Build & Run concluiu com o emulador ativo.",
+            "Pausar/Retomar responderam sem crash.",
+            `Evidencia: ${path.basename(gameScreenshot)}.`,
+          ].join(" ")
+        );
+
+        currentBlock = "E";
+        await callAutomationApi(sessionId, "selectWorkspace", ["scene"]);
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.activeWorkspace === "scene" ? state : false;
+          },
+          10000,
+          "Workspace de cena nao voltou antes da validacao de ferramentas.",
+          100
+        );
+
+        await callAutomationApi(sessionId, "openToolsWorkspace", ["assets", "editing", true]);
+        await waitForBodyText(
+          sessionId,
+          "Asset Browser",
+          15000,
+          "Asset Browser nao abriu no painel Tools."
+        );
+        await waitForBodyText(
+          sessionId,
+          "Assets canonicos",
+          20000,
+          "Catalogo canonico de assets nao ficou visivel."
+        );
+
+        const assetToInstantiate = path.basename(brushAsset);
+        const selectedAsset = await executeScript(
+          sessionId,
+          `
+            const normalized = String(arguments[0]).trim();
+            const button = Array.from(document.querySelectorAll("button")).find((candidate) => {
+              const text = candidate.textContent?.replace(/\\s+/g, " ").trim() ?? "";
+              return text.includes(normalized);
+            });
+            if (!(button instanceof HTMLButtonElement)) {
+              return false;
+            }
+            button.click();
+            return true;
+          `,
+          [assetToInstantiate]
+        );
+        if (!selectedAsset) {
+          fail(`Asset '${assetToInstantiate}' nao foi encontrado no Asset Browser.`);
+        }
+
+        await waitForBodyText(
+          sessionId,
+          "Instanciar",
+          10000,
+          "Acao de instanciar nao apareceu para o asset selecionado."
+        );
+        const entityCountBeforeInstantiate = paintedState.activeScene.entityCount;
+        await clickButtonByText(sessionId, "Instanciar");
+        const instancedState = await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.activeScene?.entityCount === entityCountBeforeInstantiate + 1 ? state : false;
+          },
+          15000,
+          "Asset Browser nao instanciou um novo sprite na cena ativa.",
+          100
+        );
+
+        await callAutomationApi(sessionId, "setRightPanelMode", ["inspector"]);
+        await waitForBodyText(
+          sessionId,
+          "Inspector",
+          10000,
+          "Inspector nao abriu no painel direito."
+        );
+
+        const inspectorTargetId = instancedState.selectedEntityId;
+        const inspectorTarget = instancedState.activeScene.entities.find(
+          (entity) => entity.id === inspectorTargetId
+        );
+        if (!inspectorTarget) {
+          fail("Inspector abriu sem uma entidade valida selecionada.");
+        }
+        await callAutomationApi(sessionId, "setSelectedEntityId", [inspectorTargetId]);
+        await waitFor(
+          async () =>
+            executeScript(
+              sessionId,
+              "return Boolean(document.querySelector('[data-testid=\"inspector-prop-pos-x-value\"]'));"
+            ),
+          15000,
+          "Campo Pos X nao ficou disponivel no Inspector.",
+          100
+        );
+        const targetPosX = inspectorTarget.x + 8;
+        await updateInspectorIntField(sessionId, "Pos X", targetPosX);
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            const entity = state?.activeScene?.entities?.find((candidate) => candidate.id === inspectorTargetId);
+            return entity?.x === targetPosX ? state : false;
+          },
+          15000,
+          "Inspector nao refletiu a alteracao de Pos X na cena.",
+          100
+        );
+        await callAutomationApi(sessionId, "persistScene", ["Inspector QA RC"]);
+
+        await markManualQaBlock(
+          manualQaReport,
+          "E",
+          "passed",
+          [
+            `Asset Browser abriu, instanciou '${assetToInstantiate}' e manteve a selecao no Inspector.`,
+            `Inspector atualizou Pos X para ${targetPosX}.`,
+          ].join(" ")
+        );
+
+        currentBlock = "F";
+        await callAutomationApi(sessionId, "persistScene", ["Persistencia QA RC"]);
+
+        await deleteSession(sessionId);
+        sessionId = "";
+
+        sessionId = await createSession(options.app);
+        await waitFor(
+          async () => {
+            const title = await getTitle(sessionId);
+            return title.includes("RetroDev Studio");
+          },
+          15000,
+          "Janela do app nao reabriu para validar persistencia."
+        );
+        await waitFor(
+          async () =>
+            executeScript(
+              sessionId,
+              "return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"
+            ),
+          15000,
+          "API de automacao nao voltou apos reabrir o app"
+        );
+
+        await callAutomationApi(sessionId, "openProject", [temporaryProjectDir]);
+        const reopenedState = await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            const layer = state?.activeScene?.layers?.find((candidate) => candidate.name === "Fundo");
+            const entity = state?.activeScene?.entities?.find((candidate) => candidate.id === inspectorTargetId);
+            return state?.activeProjectDir === temporaryProjectDir &&
+              layer &&
+              entity?.x === targetPosX
+              ? state
+              : false;
+          },
+          20000,
+          "Projeto RC nao reabriu com as alteracoes persistidas.",
+          250
+        );
+
+        const reopenScreenshot = await captureScreenshot(
+          sessionId,
+          `${artifactPrefix}-F-reopen.png`
+        );
+        registerArtifact(manualQaReport, reopenScreenshot, "F - reopen");
+
+        await markManualQaBlock(
+          manualQaReport,
+          "F",
+          "passed",
+          [
+            `Projeto reaberto em '${reopenedState.activeProjectDir}' com camada 'Fundo' e Pos X=${targetPosX}.`,
+            `Evidencia: ${path.basename(reopenScreenshot)}.`,
+          ].join(" ")
+        );
+
+        await writeManualQaReport(manualQaReport);
+        console.log("OK: Desktop Tauri QA RC A-F passou.");
+        console.log(`Projeto criado: ${generatedProjectName}`);
+        console.log(`Diretorio temporario: ${temporaryProjectDir}`);
+        console.log(`Relatorio QA: ${manualQaStatusPath}`);
+        for (const artifact of manualQaReport.artifacts) {
+          console.log(`Evidencias: ${artifact.path}`);
+        }
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        await markManualQaBlock(
+          manualQaReport,
+          currentBlock,
+          "failed",
+          `Falha no bloco ${currentBlock}: ${message}`
+        );
+        throw error;
+      }
     }
 
     const openResult = await executeAsyncScript(

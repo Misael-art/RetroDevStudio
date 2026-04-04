@@ -1057,6 +1057,12 @@ describe("App build flow", () => {
       explorerButton?.click();
       await flush();
       await flush();
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        if (container.textContent?.includes("Workspace contextual de arquivos")) {
+          break;
+        }
+        await flush();
+      }
     });
 
     expect(useEditorStore.getState().activeWorkspace).toBe("explorer");

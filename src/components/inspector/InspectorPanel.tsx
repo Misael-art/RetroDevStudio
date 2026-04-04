@@ -43,6 +43,10 @@ interface PropRowProps {
 function PropRow({ label, value, type, sourceState = null, onChange }: PropRowProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(String(value));
+  const testIdBase = `inspector-prop-${label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")}`;
 
   useEffect(() => {
     setDraft(String(value));
@@ -68,7 +72,10 @@ function PropRow({ label, value, type, sourceState = null, onChange }: PropRowPr
   }
 
   return (
-    <tr className="group border-b border-[#313244] last:border-0">
+    <tr
+      data-testid={`${testIdBase}-row`}
+      className="group border-b border-[#313244] last:border-0"
+    >
       <td className="w-24 min-w-24 max-w-32 select-none px-2 py-1 text-xs text-[#7f849c] align-top">
         <div className="flex items-center gap-2">
           <span>{label}</span>
@@ -91,6 +98,7 @@ function PropRow({ label, value, type, sourceState = null, onChange }: PropRowPr
             <select
               autoFocus
               value={draft}
+              data-testid={`${testIdBase}-input`}
               className="w-full rounded border border-[#cba6f7] bg-[#1e1e2e] px-1 py-0.5 text-xs text-[#cdd6f4] focus:outline-none"
               onChange={(event) => {
                 setDraft(event.target.value);
@@ -106,6 +114,7 @@ function PropRow({ label, value, type, sourceState = null, onChange }: PropRowPr
               autoFocus
               type={type === "int" ? "number" : "text"}
               value={draft}
+              data-testid={`${testIdBase}-input`}
               className="w-full rounded border border-[#cba6f7] bg-[#1e1e2e] px-1 py-0.5 font-mono text-xs text-[#cdd6f4] focus:outline-none"
               onChange={(event) => setDraft(event.target.value)}
               onBlur={commit}
@@ -114,6 +123,7 @@ function PropRow({ label, value, type, sourceState = null, onChange }: PropRowPr
           )
         ) : (
           <span
+            data-testid={`${testIdBase}-value`}
             className="cursor-pointer font-mono text-[#cdd6f4] transition-colors hover:text-[#cba6f7]"
             onClick={() => setEditing(true)}
             title="Clique para editar"
