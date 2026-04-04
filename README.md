@@ -31,6 +31,7 @@
 - `npm run release:readiness:baseline` agora reroda automaticamente `build:debug`, `validate-upstream-windows` e `desktop E2E` em Windows apto, exigindo artefatos frescos da propria rodada.
 - `npm run test:e2e:desktop:qa-rc` agora percorre os blocos `A-F` do roteiro RC no app desktop real e grava `src-tauri/target-test/validation/manual-qa-status.json` com screenshots `qa-rc-*.png`.
 - `npm run release:readiness:promotion` agrega baseline, build/upstream, desktop E2E e o report `manual-qa-status.json` em modo `strict`.
+- `src-tauri/target-test/validation/release-readiness.json` fechou esta rodada com `readyForPromotion = true` em `2026-04-04T03:07:15.245Z`, usando worktree limpo no commit `941b4dbefa5e6187a5d813e02b0254ada950213d`.
 - Workflows do GitHub agora publicam sumario legivel e artefatos de validacao para auditoria por push.
 - Bootstrap seguro para host limpo via [scripts/bootstrap.ps1](./scripts/bootstrap.ps1).
 - Baseline recertificada neste host em `2026-04-04` com:

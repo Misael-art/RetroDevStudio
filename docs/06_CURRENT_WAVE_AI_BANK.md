@@ -20,11 +20,12 @@
   - **Roteiro RC `A-F` virou evidencia executavel:** `scripts/e2e-tauri-build-run.mjs` ganhou o cenario `qa-rc`, que percorre onboarding, camadas, colisao/pintura, `Build & Run`, paineis e persistencia no app desktop real, gerando `src-tauri/target-test/validation/manual-qa-status.json` e screenshots `qa-rc-*.png`.
   - **Prova real desta rodada de QA RC (2026-04-04):** todos os blocos `A-F` ficaram `passed` no report canonico, com evidencias para wizard, editor, LayerPanel, camada oculta, pintura, game view e reabertura do projeto.
   - **Promocao institucional ganhou um entrypoint unico:** `npm run release:readiness:promotion` agora representa a fotografia conservadora de RC -> beta/producao, agregando baseline, `build:debug`, `validate-upstream-windows`, desktop E2E e o report `manual-qa-status.json` em modo `strict`.
+  - **Promocao institucional comprovada no agregado:** `src-tauri/target-test/validation/release-readiness.json` fechou com `readyForPromotion = true` em `2026-04-04T03:07:15.245Z`, worktree limpo no commit `941b4dbefa5e6187a5d813e02b0254ada950213d` e `A-F` totalmente aprovados.
   - **Fixtures ficaram mais honestas para host limpo:** `src-tauri/src/compiler/build_orch.rs` passou a ignorar diretorios `build/` ao copiar fixtures, o teste `patch_studio_bps_roundtrip_preserves_modified_project_rom_hash` migrou para ROM sintetica em memoria e os `build/` versionados de `megadrive_dummy`/`snes_dummy` sairam do repositorio.
   - **Cobertura nao depende mais de acervo local escondido:** o backend continua provando patch/build com assets tracked ou sinteticos, sem exigir ROM comercial, corpus solto em `data/` ou artefato gerado previamente dentro das fixtures.
   - **Shell principal ficou menos pesado sem trocar arquitetura:** `App.tsx` passou a lazy-load de `ExplorerWorkspace`, `InspectorPanel` e `ToolsPanel`; o `Workspace Guide` foi compactado com detalhes colapsados, reduzindo densidade visual e custo de carga inicial sem mexer no layout canonico baseado em `react-resizable-panels`.
-  - **Medicao objetiva desta rodada de bundle:** `npm run build` passou a emitir chunks dedicados para `ExplorerWorkspace` (~14 KB), `InspectorPanel` (~30 KB) e `ToolsPanel` (~90 KB). O chunk principal do shell ainda segue grande (~485 KB), entao performance continua em hardening e ainda nao autoriza claim de shell final otimizado.
-  - **Validacao desta sessao em 2026-04-04:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (`200` testes), `cargo clippy -- -D warnings` OK, `cargo test --lib -- --nocapture --test-threads=1` OK (`253` aprovados / `0` falhas / `3` ignorados), `npm run build` OK, `npm run build:debug` OK e `node scripts/e2e-tauri-build-run.mjs --scenario qa-rc --skip-build --native-driver .\\toolchains\\webdriver\\msedgedriver.exe` OK.
+  - **Medicao objetiva desta rodada de bundle:** `npm run build` passou a emitir chunks dedicados para `ExplorerWorkspace` (~26.83 KB), `InspectorPanel` (~52.46 KB) e `ToolsPanel` (~164.01 KB). O chunk principal do shell ainda segue grande (~1,098.25 KB bruto / ~204.66 KB gzip), entao performance continua em hardening e ainda nao autoriza claim de shell final otimizado.
+  - **Validacao desta sessao em 2026-04-04:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (`200` testes), `cargo clippy -- -D warnings` OK, `cargo test --lib -- --nocapture --test-threads=1` OK (`253` aprovados / `0` falhas / `3` ignorados), `npm run build` OK, `npm run build:debug` OK, `node scripts/e2e-tauri-build-run.mjs --scenario qa-rc --skip-build --native-driver .\\toolchains\\webdriver\\msedgedriver.exe` OK e `npm run release:readiness:promotion` OK.
 
 * **O que acabou de acontecer (2026-04-03 - Recuperacao cautelosa da Wave S+ e recertificacao do baseline):**
   - **Status real consolidado:** a avaliacao profunda confirmou que o projeto continua em `hardening / QA do MVP`; o shell principal e o pipeline canonico estao fortes, mas o produto ainda nao deve ser tratado como release final.
@@ -618,12 +619,11 @@ Fechar o MVP do desktop Tauri preservando a baseline verde, enquanto o reverse c
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
 **Sequencia de acoes recomendada:**
-1. Rodar `npm run release:readiness:promotion` em worktree limpo para anexar a trilha completa `baseline + build/upstream + desktop E2E + QA RC A-F` sem falso positivo de dirty tree.
-2. Validar `platformer_seed` e pelo menos um projeto SGDK importado com `Build & Run` Mega Drive usando SGDK real instalado.
-3. Repetir bundle MSI quando o escopo tocar release (`scripts/run-in-msvc.cmd npm run build:msi`).
-4. Preparar notas de beta testing, criterios de aceite e lista de riscos residuais para a rodada institucional.
-5. Continuar reduzindo o chunk principal do shell sem abrir a frente de docking livre antes da hora.
-6. Considerar refactoring de ViewportPanel/ToolsPanel como melhoria pos-MVP (risco vs beneficio avaliado).
+1. Validar `platformer_seed` e pelo menos um projeto SGDK importado com `Build & Run` Mega Drive usando SGDK real instalado.
+2. Repetir bundle MSI quando o escopo tocar release (`scripts/run-in-msvc.cmd npm run build:msi`).
+3. Preparar notas de beta testing, criterios de aceite e lista de riscos residuais para a rodada institucional.
+4. Continuar reduzindo o chunk principal do shell sem abrir a frente de docking livre antes da hora.
+5. Considerar refactoring de ViewportPanel/ToolsPanel como melhoria pos-MVP (risco vs beneficio avaliado).
 
 **Validacao minima obrigatoria antes de marcar qualquer item como concluido:**
 * `npm run check:tree`
