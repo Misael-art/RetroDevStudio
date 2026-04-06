@@ -105,6 +105,16 @@ function cloneRetroFXConfig(config?: RetroFXConfig | null): RetroFXConfig {
   });
 }
 
+function serializeRetroFXConfig(config: RetroFXConfig): string {
+  return JSON.stringify({
+    parallax_layers: config.parallax_layers.map((layer, index) => ({
+      ...layer,
+      name: normalizeLayerName(layer.name, index),
+    })),
+    raster_lines: config.raster_lines,
+  });
+}
+
 function moveArrayItem<T>(items: T[], fromIndex: number, toIndex: number): T[] {
   if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) {
     return items;
@@ -347,9 +357,64 @@ function ParallaxPreview({
   );
 }
 
+interface RetroFXBuildPlanCardProps {
+  scenePath: string | null;
+  hasUnsavedChanges: boolean;
+  enabledParallaxCount: number;
+  enabledRasterCount: number;
+}
+
+function RetroFXBuildPlanCard({
+  scenePath,
+  hasUnsavedChanges,
+  enabledParallaxCount,
+  enabledRasterCount,
+}: RetroFXBuildPlanCardProps) {
+  const persistenceLabel = hasUnsavedChanges
+    ? "Alteracoes locais ainda nao salvas"
+    : "Scene JSON sincronizado";
+  const buildLabel = hasUnsavedChanges
+    ? "Build continua lendo apenas a versao salva do scene JSON."
+    : "Build local pode consumir a configuracao salva atual do scene JSON."
+    ;
+  const nextStepLabel = !scenePath
+    ? "Abra uma cena antes de validar RetroFX no build."
+    : hasUnsavedChanges
+      ? "Salve o RetroFX para levar estas alteracoes ao scene JSON antes do build."
+      : enabledParallaxCount === 0 && enabledRasterCount === 0
+        ? "Ative ao menos uma camada ou scanline antes de validar no build."
+        : "Pronto para validar no build local, mantendo o status Experimental.";
+
+  return (
+    <div
+      data-testid="retrofx-build-plan"
+      className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4"
+    >
+      <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#a6e3a1]">
+        Plano de emissao
+      </div>
+      <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-[12px]">
+        <dt className="text-[#64748b]">Cena</dt>
+        <dd className="truncate font-medium text-[#e2e8f0]">{scenePath ?? "Nenhuma cena ativa"}</dd>
+        <dt className="text-[#64748b]">Persistencia</dt>
+        <dd className="font-medium text-[#e2e8f0]">{persistenceLabel}</dd>
+        <dt className="text-[#64748b]">Build</dt>
+        <dd className="font-medium text-[#e2e8f0]">{buildLabel}</dd>
+        <dt className="text-[#64748b]">Ativos</dt>
+        <dd className="font-medium text-[#e2e8f0]">
+          {enabledParallaxCount} parallax / {enabledRasterCount} raster
+        </dd>
+        <dt className="text-[#64748b]">Proximo passo</dt>
+        <dd className="font-medium text-[#e2e8f0]">{nextStepLabel}</dd>
+      </dl>
+    </div>
+  );
+}
+
 export default function RetroFXDesigner() {
   const activeProjectDir = useEditorStore((state) => state.activeProjectDir);
   const activeScene = useEditorStore((state) => state.activeScene);
+  const activeScenePath = useEditorStore((state) => state.activeScenePath);
   const logMessage = useEditorStore((state) => state.logMessage);
   const [parallax, setParallax] = useState<RetroFXParallaxLayer[]>(() =>
     cloneRetroFXConfig(useEditorStore.getState().activeScene?.retrofx).parallax_layers
@@ -369,6 +434,15 @@ export default function RetroFXDesigner() {
 
   const selectedLayer =
     parallax.find((layer) => layer.id === selectedLayerId) ?? parallax[0] ?? null;
+  const enabledParallaxCount = parallax.filter((layer) => layer.enabled).length;
+  const enabledRasterCount = raster.filter((line) => line.enabled).length;
+  const currentRetroFX: RetroFXConfig = {
+    parallax_layers: parallax,
+    raster_lines: raster,
+  };
+  const persistedRetroFX = cloneRetroFXConfig(activeScene?.retrofx);
+  const hasUnsavedChanges =
+    serializeRetroFXConfig(currentRetroFX) !== serializeRetroFXConfig(persistedRetroFX);
 
   useEffect(() => {
     const retrofx = cloneRetroFXConfig(activeScene?.retrofx);
@@ -836,9 +910,9 @@ export default function RetroFXDesigner() {
                     />
                   </div>
 
-                  <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#cdd6f4]">
-                      Leitura pedagogica
+                <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#cdd6f4]">
+                    Leitura pedagogica
                     </div>
                     <div className="mt-3 space-y-3 text-[12px] leading-6 text-[#94a3b8]">
                       <p>
@@ -849,6 +923,13 @@ export default function RetroFXDesigner() {
                       </p>
                     </div>
                   </div>
+
+                  <RetroFXBuildPlanCard
+                    scenePath={activeScenePath}
+                    hasUnsavedChanges={hasUnsavedChanges}
+                    enabledParallaxCount={enabledParallaxCount}
+                    enabledRasterCount={enabledRasterCount}
+                  />
                 </>
               ) : (
                 <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4 text-[12px] leading-6 text-[#94a3b8]">
@@ -962,12 +1043,18 @@ export default function RetroFXDesigner() {
               Preview raster
             </div>
             <RasterPreview lines={raster} />
-            <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4 text-[12px] leading-6 text-[#94a3b8]">
-              Use scanlines para quebrar a imagem em faixas com offsets diferentes. O efeito continua experimental e serve como apoio visual rapido.
-            </div>
-            <button
-              data-testid="retrofx-save"
-              className={`mt-auto w-full rounded-2xl py-3 text-sm font-semibold transition-colors ${
+              <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4 text-[12px] leading-6 text-[#94a3b8]">
+                Use scanlines para quebrar a imagem em faixas com offsets diferentes. O efeito continua experimental e serve como apoio visual rapido.
+              </div>
+              <RetroFXBuildPlanCard
+                scenePath={activeScenePath}
+                hasUnsavedChanges={hasUnsavedChanges}
+                enabledParallaxCount={enabledParallaxCount}
+                enabledRasterCount={enabledRasterCount}
+              />
+              <button
+                data-testid="retrofx-save"
+                className={`mt-auto w-full rounded-2xl py-3 text-sm font-semibold transition-colors ${
                 saving
                   ? "cursor-not-allowed bg-[#45475a] text-[#6c7086]"
                   : "bg-[#cba6f7] text-[#111827] hover:bg-[#b4a0e0]"

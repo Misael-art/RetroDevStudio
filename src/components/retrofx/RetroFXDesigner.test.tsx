@@ -177,6 +177,31 @@ describe("RetroFXDesigner", () => {
     expect(container.textContent).toContain("X 7");
   });
 
+  it("keeps build-readiness honest while retrofx changes are only local", async () => {
+    expect(container.querySelector("[data-testid='retrofx-build-plan']")?.textContent).toContain(
+      "scenes/main.json"
+    );
+    expect(container.querySelector("[data-testid='retrofx-build-plan']")?.textContent).toContain(
+      "Scene JSON sincronizado"
+    );
+
+    const number = container.querySelector(
+      "[data-testid='retrofx-speed-x-number']"
+    ) as HTMLInputElement | null;
+
+    await act(async () => {
+      setInputValue(number!, "8");
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='retrofx-build-plan']")?.textContent).toContain(
+      "Alteracoes locais ainda nao salvas"
+    );
+    expect(container.querySelector("[data-testid='retrofx-build-plan']")?.textContent).toContain(
+      "Salve o RetroFX para levar estas alteracoes ao scene JSON antes do build."
+    );
+  });
+
   it("toggles the animated preview state without losing the pedagogical workspace", async () => {
     await act(async () => {
       findButton(container, "Pause").click();
@@ -185,6 +210,20 @@ describe("RetroFXDesigner", () => {
 
     expect(findButton(container, "Play")).toBeInstanceOf(HTMLButtonElement);
     expect(container.textContent).toContain("LoopPausado");
+  });
+
+  it("shows the same emission contract on the raster tab", async () => {
+    await act(async () => {
+      findButton(container, "Raster").click();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='retrofx-build-plan']")?.textContent).toContain(
+      "Build local pode consumir a configuracao salva atual do scene JSON."
+    );
+    expect(container.querySelector("[data-testid='retrofx-build-plan']")?.textContent).toContain(
+      "3 parallax / 1 raster"
+    );
   });
 
   it("persists retrofx changes into both active scene copies", async () => {
@@ -207,6 +246,9 @@ describe("RetroFXDesigner", () => {
       "F:/Projects/RetroDevStudio/demo",
       "RetroFX",
       "Configuracao salva no scene JSON. Emissao para build continua experimental."
+    );
+    expect(container.querySelector("[data-testid='retrofx-build-plan']")?.textContent).toContain(
+      "Scene JSON sincronizado"
     );
     expect(
       useEditorStore.getState().activeScene?.retrofx?.parallax_layers[0]?.speed_x

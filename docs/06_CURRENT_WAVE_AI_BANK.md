@@ -16,6 +16,14 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+* **O que acabou de acontecer (2026-04-06 - RetroFX: emissao agora explicita o que ainda esta so no preview local):**
+  - **O caminho `designer -> cena -> build` ficou mais honesto na própria UI:** `src/components/retrofx/RetroFXDesigner.tsx` agora mostra um card `Plano de emissao` com `Cena`, `Persistencia`, `Build`, `Ativos` e `Proximo passo`, deixando visivel quando o usuário está apenas vendo alterações locais no preview e quando o `scene JSON` já está sincronizado para o build local.
+  - **A distinção crítica entre preview e emissão foi tornada explícita sem criar store ou schema paralelo:** o estado local do editor passa a comparar a configuração em memória com o `retrofx` salvo na cena ativa e informa `Alteracoes locais ainda nao salvas` até que `Salvar RetroFX` persista o conteúdo no `scene JSON`.
+  - **A mesma leitura agora vale para `Parallax` e `Raster`:** o card foi reaproveitado nos dois modos do editor, evitando que a aba de raster continue parecendo um preview isolado do pipeline canônico.
+  - **Cobertura real adicionada para o novo contrato:** `src/components/retrofx/RetroFXDesigner.test.tsx` agora prova o estado sincronizado inicial, o estado intermediário `preview local -> salvar antes do build` e a presença do mesmo contrato na aba `Raster`.
+  - **Escopo mantido estritamente conservador:** nenhuma mudança foi feita em `sceneService`, emitter SGDK/SNES, build orchestration, toolchains ou runtime; a rodada ficou toda no `RetroFXDesigner` e na sua cobertura frontend.
+  - **Barra verde desta rodada:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (`219` testes), `npm run build` OK, `scripts\\run-cargo-msvc.cmd clippy --manifest-path .\\src-tauri\\Cargo.toml -- -D warnings` OK e `scripts\\run-cargo-msvc.cmd test --manifest-path .\\src-tauri\\Cargo.toml --lib -- --nocapture --test-threads=1` OK (`255` aprovados / `0` falhas / `3` ignorados). O chunk dedicado de `RetroFXDesigner` ficou em ~`27.03 kB` bruto / `6.93 kB` gzip e o shell principal permaneceu em ~`390.42 kB` bruto / `118.55 kB` gzip.
+
 * **O que acabou de acontecer (2026-04-06 - ArtStudio: apply agora explicita destino, prontidao de build e proximo bloqueio):**
   - **O fluxo `ingestao -> entidade/cena -> build` ficou mais legivel sem criar pipeline novo:** `src/components/artstudio/ArtStudioPanel.tsx` agora expõe um card `Plano de apply` com `Destino`, `Build`, `Frames` e `Proximo passo`, deixando claro se o `Aplicar` vai criar uma entidade nova ou atualizar a entidade sprite atualmente selecionada.
   - **O destino passou a respeitar o contexto real da cena:** quando existe `selectedEntityId` apontando para uma entidade com `SpriteComponent`, o plano informa `Atualizar entidade ...`; nos demais casos, usa o ID projetado pelo caminho canônico de `createSpriteEntityFromAsset(...)` para antecipar a criação da nova entidade na cena atual.
@@ -694,7 +702,7 @@ As seguintes decisoes ja foram debatidas e sao finais:
 ## 4. PROXIMO PASSO IMEDIATO (PARA A IA EXECUTAR QUANDO SOLICITADA)
 
 **Tarefa:**
-Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as superficies `Experimental` que consigam provar valor no caminho canônico atual. Nesta etapa, o proximo alvo real passa a ser `RetroFX`, exigindo evidência conservadora do caminho `designer -> cena -> build` sem tocar em toolchains, build orchestration ou emulação.
+Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as superficies `Experimental` que consigam provar valor no caminho canônico atual. Com `ArtStudio` e `RetroFX` agora mais honestos até o build local, o próximo alvo real passa a ser consolidar a utilidade mínima do `Reverse Workspace`, sem inflar claim de engenharia reversa “completa”.
 
 **Pre-requisitos operacionais:**
 * Manter os 6 gates canonicos verdes em toda alteracao relevante.
@@ -704,9 +712,9 @@ Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as 
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
 **Sequencia de acoes recomendada:**
-1. Avancar para `RetroFX` com a mesma barra conservadora aplicada ao `ArtStudio`, provando o caminho `designer -> persistencia na cena -> build` sem abrir pipeline visual paralelo nem inflar maturidade para runtime final.
+1. Avancar para o `Reverse Workspace` com a mesma barra conservadora, focando primeiro em clareza operacional e utilidade mínima recorrente antes de qualquer claim nova sobre recuperação de lógica ou projeção `.rds`.
 2. Continuar medindo o chunk principal do shell e os chunks dedicados de `ArtStudio`/`RetroFX` a cada rodada relevante de UI com `npm run build`, evitando regressao silenciosa de bundle.
-3. So reabrir a frente de `ArtStudio` para claim maior quando houver prova institucional adicional chegando ao runtime real; por enquanto, a superficie continua `Experimental` apesar do caminho local ate build estar mais claro.
+3. So reabrir `ArtStudio` ou `RetroFX` para claim maior quando houver prova institucional adicional chegando ao runtime real; por enquanto, ambas as superficies continuam `Experimental` apesar do caminho local ate build estar mais claro.
 4. Repetir bundle MSI apenas quando o escopo tocar release/packaging (`scripts/run-in-msvc.cmd npm run build:msi`).
 5. Manter `validate-upstream-windows` e `release:readiness:baseline` como fotografia institucional sempre que alteracoes futuras tocarem build, emulacao, onboarding ou toolchains.
 
