@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-04-04
+**Ultima Atualizacao:** 2026-04-06
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -9,12 +9,20 @@
 > Nao altere a secao "Decisoes Arquiteturais Consolidadas" sem ordem expressa do usuario.
 > Historico de sessoes anteriores a 2026-03-14 esta em docs/06_AI_MEMORY_BANK_WAVE_A_R.md.
 >
-> **WAVE S+ segue ativa em 2026-04-04:**
+> **WAVE S+ segue ativa em 2026-04-06:**
 > Foco: recuperar coerencia multi-agente, manter o fluxo canonico `Build -> ROM -> Emulacao` verde, endurecer hosts Windows limpos e documentar o estado real no GitHub sem claims infladas.
 
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-04-06 - NodeGraph: quick actions agora respeitam a entidade real da cena):**
+  - **Atalhos guiados deixaram de nascer com alvos genéricos desconectados da cena:** `src/components/nodegraph/NodeGraphEditor.tsx` agora resolve `Player Controller Basico` e `Logica de Inimigo Simples` a partir da entidade realmente selecionada, usando `entity_id` canônico do editor em vez de fixar sempre `player`/`enemy`.
+  - **O fluxo de overlap ficou mais honesto quando existe outra entidade na cena:** o atalho `Logica de Inimigo Simples` passa a usar a primeira contraparte real encontrada no scene graph como alvo complementar do `condition_overlap`, reduzindo o risco de um grafo de onboarding nascer apontando para IDs que nem existem no projeto aberto.
+  - **Empty state agora deixa esse contrato visível antes do clique:** o `Guided Empty State` ganhou uma dica contextual explicando qual entidade será usada como alvo principal, sem criar metadata paralela nem alterar schema, emitter ou pipeline SGDK/SNES.
+  - **Escopo mantido conservador:** esta rodada ficou restrita ao `NodeGraphEditor` e à sua cobertura frontend; nenhuma mudança foi feita em `nodeCompiler`, emitter Rust, persistência do schema, build orchestration, emulação ou nos contratos do shell principal.
+  - **Cobertura real adicionada para gameplay comum:** `src/components/nodegraph/NodeGraphEditor.test.tsx` agora trava três contratos importantes: hint contextual do empty state, atalho de player usando a entidade selecionada como `target` e atalho de inimigo reaproveitando outra entidade real da cena como contraparte de overlap.
+  - **Barra verde desta rodada:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (`214` testes), `npm run build` OK, `scripts\\run-cargo-msvc.cmd clippy --manifest-path .\\src-tauri\\Cargo.toml -- -D warnings` OK e `scripts\\run-cargo-msvc.cmd test --manifest-path .\\src-tauri\\Cargo.toml --lib -- --nocapture --test-threads=1` OK (`255` aprovados / `0` falhas / `3` ignorados). O build de producao manteve o shell em ~`390.42 kB` bruto / `118.55 kB` gzip e o chunk dedicado de `NodeGraphEditor` em ~`32.66 kB` bruto / `9.77 kB` gzip.
 
 * **O que acabou de acontecer (2026-04-04 - Import SGDK: onboarding do Viewport agora distingue overlay legado de import nativo):**
   - **O banner SGDK do Viewport deixou de misturar dois contratos diferentes:** `src/components/viewport/ViewportPanel.tsx` agora gera copy especifica para `external_sgdk` e `imported_sgdk`, em vez de tratar qualquer projeto vindo de SGDK como se fosse a mesma classe de origem.
@@ -680,8 +688,8 @@ Fechar o MVP do desktop Tauri preservando a baseline verde, enquanto o reverse c
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
 **Sequencia de acoes recomendada:**
-1. Encerrar o eixo imediato de descoberta/orientacao do fluxo legado com pequenos ajustes restantes apenas se surgirem lacunas objetivas; na ausencia delas, mover a proxima rodada para `NodeGraph` em casos de gameplay comum.
-2. Retomar a frente de `NodeGraph` com ganhos conservadores de usabilidade e exemplos guiados, sem alterar emitter, schema ou pipeline SGDK/SNES.
+1. Continuar a frente de `NodeGraph` em casos de gameplay comum com ganhos conservadores de usabilidade, priorizando health checks, reparos guiados e descoberta local sem alterar emitter, schema ou pipeline SGDK/SNES.
+2. Se o bloco de `NodeGraph` ficar estavel por mais uma rodada verde, retomar a trilha de superficies `Experimental` mais promissoras (`ArtStudio`/`RetroFX`) sempre com prova real ate build/runtime e sem abrir escopo novo.
 3. Continuar medindo o chunk principal do shell a cada rodada relevante de `App.tsx`/`ViewportPanel` com `npm run build`, evitando regressao silenciosa de bundle.
 4. Repetir bundle MSI apenas quando o escopo tocar release/packaging (`scripts/run-in-msvc.cmd npm run build:msi`).
 5. Manter `validate-upstream-windows` e `release:readiness:baseline` como fotografia institucional sempre que alteracoes futuras tocarem build, emulacao, onboarding ou toolchains.

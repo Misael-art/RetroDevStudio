@@ -25,6 +25,20 @@ function flush() {
   });
 }
 
+function buildLogicEntity(entityId: string, displayName: string, graph: NodeGraph) {
+  return {
+    entity_id: entityId,
+    display_name: displayName,
+    prefab: null,
+    transform: { x: 16, y: 24 },
+    components: {
+      logic: {
+        graph: serializeNodeGraph(graph),
+      },
+    },
+  };
+}
+
 const GRAPH_FIXTURE: NodeGraph = {
   nodes: [
     {
@@ -76,23 +90,14 @@ const GRAPH_FIXTURE: NodeGraph = {
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
 
-function buildSceneWithGraph(graph: NodeGraph) {
+function buildSceneWithGraph(
+  graph: NodeGraph,
+  entities = [buildLogicEntity("hero", "Hero", graph)]
+) {
   return {
     scene_id: "main_scene",
     display_name: "Main Scene",
-    entities: [
-      {
-        entity_id: "hero",
-        display_name: "Hero",
-        prefab: null,
-        transform: { x: 16, y: 24 },
-        components: {
-          logic: {
-            graph: serializeNodeGraph(graph),
-          },
-        },
-      },
-    ],
+    entities,
     background_layers: [],
     palettes: [],
   };
@@ -218,6 +223,7 @@ describe("NodeGraphEditor", () => {
     });
 
     expect(container.querySelector("[data-testid='nodegraph-empty-overlay']")).toBeInstanceOf(HTMLDivElement);
+    expect(container.querySelector("[data-testid='nodegraph-empty-target-hint']")?.textContent).toContain("Hero");
     expect(container.textContent).toContain("Criar Player Controller Basico");
 
     await act(async () => {
@@ -238,5 +244,67 @@ describe("NodeGraphEditor", () => {
     expect(useEditorStore.getState().activeScene?.entities[0].components.logic?.graph).toBe(
       serializeNodeGraph(EMPTY_GRAPH)
     );
+  });
+
+  it("applies the player controller quick action using the selected entity as target", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        selectedEntityId: "runner_main",
+        activeScene: buildSceneWithGraph(EMPTY_GRAPH, [
+          buildLogicEntity("runner_main", "Runner Main", EMPTY_GRAPH),
+        ]),
+        activeSceneSource: buildSceneWithGraph(EMPTY_GRAPH, [
+          buildLogicEntity("runner_main", "Runner Main", EMPTY_GRAPH),
+        ]),
+      });
+      await flush();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='nodegraph-empty-target-hint']")?.textContent).toContain(
+      "Runner Main"
+    );
+
+    await act(async () => {
+      (container.querySelector("[data-testid='nodegraph-template-player_controller']") as HTMLButtonElement).click();
+      await flush();
+      await flush();
+    });
+
+    const nodeCardTexts = Array.from(container.querySelectorAll("[data-testid^='node-card-']")).map(
+      (element) => element.textContent ?? ""
+    );
+
+    expect(nodeCardTexts.some((text) => text.includes("runner_main"))).toBe(true);
+  });
+
+  it("uses another scene entity as overlap counterpart for the enemy quick action", async () => {
+    const entities = [
+      buildLogicEntity("hero_player", "Hero Player", EMPTY_GRAPH),
+      buildLogicEntity("sentinel_enemy", "Sentinel Enemy", EMPTY_GRAPH),
+    ];
+
+    await act(async () => {
+      useEditorStore.setState({
+        selectedEntityId: "sentinel_enemy",
+        activeScene: buildSceneWithGraph(EMPTY_GRAPH, entities),
+        activeSceneSource: buildSceneWithGraph(EMPTY_GRAPH, entities),
+      });
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      (container.querySelector("[data-testid='nodegraph-template-enemy_logic']") as HTMLButtonElement).click();
+      await flush();
+      await flush();
+    });
+
+    const nodeCardTexts = Array.from(container.querySelectorAll("[data-testid^='node-card-']")).map(
+      (element) => element.textContent ?? ""
+    );
+
+    expect(nodeCardTexts.some((text) => text.includes("hero_player"))).toBe(true);
+    expect(nodeCardTexts.some((text) => text.includes("sentinel_enemy"))).toBe(true);
   });
 });

@@ -95,10 +95,16 @@ type GuidedFlowCommentary = {
   limitation?: string;
 };
 
+type QuickActionContext = {
+  selectedEntityId: string | null;
+  selectedEntityLabel: string | null;
+  otherEntityId: string | null;
+};
+
 type QuickActionTemplate = GuidedFlowCommentary & {
   id: "player_controller" | "enemy_logic" | "timer_event";
   actionLabel: string;
-  buildGraph: () => NodeGraph;
+  buildGraph: (context: QuickActionContext) => NodeGraph;
 };
 
 export const EMPTY_GRAPH: NodeGraph = {
@@ -687,13 +693,37 @@ function makeEdge(
   };
 }
 
-function buildPlayerControllerQuickActionGraph(): NodeGraph {
+function resolveQuickActionPrimaryTarget(
+  context: QuickActionContext,
+  fallbackTarget: string
+): string {
+  return context.selectedEntityId?.trim() ? context.selectedEntityId : fallbackTarget;
+}
+
+function resolveQuickActionSecondaryTarget(
+  context: QuickActionContext,
+  primaryTarget: string,
+  fallbackTarget: string
+): string {
+  if (context.otherEntityId && context.otherEntityId !== primaryTarget) {
+    return context.otherEntityId;
+  }
+
+  if (fallbackTarget !== primaryTarget) {
+    return fallbackTarget;
+  }
+
+  return primaryTarget === "player" ? "enemy" : "player";
+}
+
+function buildPlayerControllerQuickActionGraph(context: QuickActionContext): NodeGraph {
   const start = makeNode("event_start", 140, 160);
   const move = makeNode("sprite_move", 380, 156);
   const anim = makeNode("sprite_anim", 620, 156);
+  const target = resolveQuickActionPrimaryTarget(context, "player");
 
-  move.params = { ...move.params, target: "player", dx: 2, dy: 0 };
-  anim.params = { ...anim.params, target: "player", anim: "run" };
+  move.params = { ...move.params, target, dx: 2, dy: 0 };
+  anim.params = { ...anim.params, target, anim: "run" };
 
   return {
     nodes: [start, move, anim],
@@ -704,14 +734,16 @@ function buildPlayerControllerQuickActionGraph(): NodeGraph {
   };
 }
 
-function buildEnemyLogicQuickActionGraph(): NodeGraph {
+function buildEnemyLogicQuickActionGraph(context: QuickActionContext): NodeGraph {
   const patrolStart = makeNode("event_start", 140, 120);
   const patrolAnim = makeNode("sprite_anim", 380, 116);
   const overlap = makeNode("condition_overlap", 140, 296);
   const hitSound = makeNode("action_sound", 380, 296);
+  const enemyTarget = resolveQuickActionPrimaryTarget(context, "enemy");
+  const playerTarget = resolveQuickActionSecondaryTarget(context, enemyTarget, "player");
 
-  patrolAnim.params = { ...patrolAnim.params, target: "enemy", anim: "patrol" };
-  overlap.params = { ...overlap.params, a: "player", b: "enemy" };
+  patrolAnim.params = { ...patrolAnim.params, target: enemyTarget, anim: "patrol" };
+  overlap.params = { ...overlap.params, a: playerTarget, b: enemyTarget };
   hitSound.params = { ...hitSound.params, sfx: "hit" };
 
   return {
@@ -723,7 +755,8 @@ function buildEnemyLogicQuickActionGraph(): NodeGraph {
   };
 }
 
-function buildTimerQuickActionGraph(): NodeGraph {
+function buildTimerQuickActionGraph(context: QuickActionContext): NodeGraph {
+  void context;
   const start = makeNode("event_start", 140, 192);
   const timeline = makeNode("timeline_sequence", 400, 176);
   const sound = makeNode("action_sound", 680, 192);
@@ -903,9 +936,13 @@ function NodeCard({
 
 interface EmptyStateOverlayProps {
   onApplyTemplate: (template: QuickActionTemplate) => void;
+  selectedEntityLabel?: string | null;
 }
 
-function EmptyStateOverlay({ onApplyTemplate }: EmptyStateOverlayProps) {
+function EmptyStateOverlay({
+  onApplyTemplate,
+  selectedEntityLabel,
+}: EmptyStateOverlayProps) {
   return (
     <div
       data-testid="nodegraph-empty-overlay"
@@ -923,6 +960,12 @@ function EmptyStateOverlay({ onApplyTemplate }: EmptyStateOverlayProps) {
             Escolha um atalho para gerar um grafo base com nos ja conectados. Depois voce pode ajustar os parametros,
             trocar nos e expandir o fluxo pela paleta lateral.
           </p>
+          {selectedEntityLabel && (
+            <p className="max-w-3xl text-xs text-[#89b4fa]" data-testid="nodegraph-empty-target-hint">
+              Os atalhos vao usar <span className="font-semibold text-[#cdd6f4]">{selectedEntityLabel}</span> como
+              alvo principal quando fizer sentido para o fluxo.
+            </p>
+          )}
         </div>
 
         <div className="grid gap-3 lg:grid-cols-3">
@@ -1117,6 +1160,16 @@ export default function NodeGraphEditor() {
     logMessage("info", `Conexão criada: ${edge.fromNode}:${edge.fromPort} → ${edge.toNode}:${edge.toPort}`);
   }, [pendingEdge, logMessage]);
 
+  const quickActionContext = useMemo<QuickActionContext>(() => {
+    const selectedEntityIdValue = selectedEntity?.entity_id ?? null;
+    return {
+      selectedEntityId: selectedEntityIdValue,
+      selectedEntityLabel: selectedEntity ? getEntityDisplayName(selectedEntity) : null,
+      otherEntityId:
+        activeScene?.entities.find((entity) => entity.entity_id !== selectedEntityIdValue)?.entity_id ?? null,
+    };
+  }, [activeScene, selectedEntity]);
+
   // ── Add node from palette ──────────────────────────────────────────────────
   const addNode = useCallback((type: NodeType) => {
     const node = makeNode(type, 200, 200);
@@ -1125,7 +1178,7 @@ export default function NodeGraphEditor() {
   }, [logMessage]);
 
   const applyQuickActionTemplate = useCallback((template: QuickActionTemplate) => {
-    const nextGraph = template.buildGraph();
+    const nextGraph = template.buildGraph(quickActionContext);
     setGraph(nextGraph);
     setSelectedId(nextGraph.nodes[0]?.id ?? null);
     setDragging(null);
@@ -1138,8 +1191,11 @@ export default function NodeGraphEditor() {
       hardwareNote: template.hardwareNote,
       limitation: template.limitation,
     });
-    logMessage("info", `Fluxo guiado aplicado: ${template.title}`);
-  }, [logMessage]);
+    const contextSuffix = quickActionContext.selectedEntityLabel
+      ? ` para ${quickActionContext.selectedEntityLabel}`
+      : "";
+    logMessage("info", `Fluxo guiado aplicado: ${template.title}${contextSuffix}`);
+  }, [logMessage, quickActionContext]);
 
   // ── Delete selected node ───────────────────────────────────────────────────
   useEffect(() => {
@@ -1537,7 +1593,10 @@ export default function NodeGraphEditor() {
 
         {/* Empty state */}
         {selectedEntity && graph.nodes.length === 0 && (
-          <EmptyStateOverlay onApplyTemplate={applyQuickActionTemplate} />
+          <EmptyStateOverlay
+            onApplyTemplate={applyQuickActionTemplate}
+            selectedEntityLabel={quickActionContext.selectedEntityLabel}
+          />
         )}
         {!selectedEntity && graph.nodes.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
