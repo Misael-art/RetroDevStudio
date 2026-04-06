@@ -16,6 +16,14 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+* **O que acabou de acontecer (2026-04-06 - NodeGraph: overview agora sai de alerta passivo para reparo guiado):**
+  - **Warnings de grafo ganharam ações locais, sem magia oculta:** `src/components/nodegraph/NodeGraphEditor.tsx` agora oferece `Adicionar Inicio` quando o grafo nao tem evento de entrada e `Ir para No Solto` quando existem nós desconectados, transformando o overview em apoio de reparo em vez de apenas diagnóstico passivo.
+  - **A correção continua conservadora e explícita:** `Adicionar Inicio` só cria um `event_start` posicionado perto do grafo atual e deixa a conexão final na mão do usuário; não há autowiring nem alteração silenciosa de fluxo.
+  - **Navegação local ficou mais útil para grafos incompletos:** o atalho `Ir para No Solto` recentra o primeiro nó desconectado usando a mesma câmera local não persistida já existente, sem mexer no layout salvo no `LogicComponent.graph`.
+  - **Cobertura real adicionada para esses contratos de reparo:** `src/components/nodegraph/NodeGraphEditor.test.tsx` agora trava o fluxo `grafo sem entrada -> adicionar inicio` e o foco guiado em nó solto a partir do overview.
+  - **Escopo mantido estritamente no frontend canônico:** nenhuma mudança foi feita em emitter, `nodeCompiler`, schema, build orchestration, emulação ou validação de hardware; esta rodada permaneceu inteiramente dentro do `NodeGraphEditor`.
+  - **Barra verde desta rodada:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (`216` testes), `npm run build` OK, `scripts\\run-cargo-msvc.cmd clippy --manifest-path .\\src-tauri\\Cargo.toml -- -D warnings` OK e `scripts\\run-cargo-msvc.cmd test --manifest-path .\\src-tauri\\Cargo.toml --lib -- --nocapture --test-threads=1` OK (`255` aprovados / `0` falhas / `3` ignorados). O chunk dedicado de `NodeGraphEditor` ficou em ~`33.66 kB` bruto / `9.96 kB` gzip e o shell principal permaneceu em ~`390.42 kB` bruto / `118.55 kB` gzip.
+
 * **O que acabou de acontecer (2026-04-06 - NodeGraph: quick actions agora respeitam a entidade real da cena):**
   - **Atalhos guiados deixaram de nascer com alvos genéricos desconectados da cena:** `src/components/nodegraph/NodeGraphEditor.tsx` agora resolve `Player Controller Basico` e `Logica de Inimigo Simples` a partir da entidade realmente selecionada, usando `entity_id` canônico do editor em vez de fixar sempre `player`/`enemy`.
   - **O fluxo de overlap ficou mais honesto quando existe outra entidade na cena:** o atalho `Logica de Inimigo Simples` passa a usar a primeira contraparte real encontrada no scene graph como alvo complementar do `condition_overlap`, reduzindo o risco de um grafo de onboarding nascer apontando para IDs que nem existem no projeto aberto.
@@ -688,8 +696,8 @@ Fechar o MVP do desktop Tauri preservando a baseline verde, enquanto o reverse c
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
 **Sequencia de acoes recomendada:**
-1. Continuar a frente de `NodeGraph` em casos de gameplay comum com ganhos conservadores de usabilidade, priorizando health checks, reparos guiados e descoberta local sem alterar emitter, schema ou pipeline SGDK/SNES.
-2. Se o bloco de `NodeGraph` ficar estavel por mais uma rodada verde, retomar a trilha de superficies `Experimental` mais promissoras (`ArtStudio`/`RetroFX`) sempre com prova real ate build/runtime e sem abrir escopo novo.
+1. Retomar a trilha de superficies `Experimental` mais promissoras pelo `ArtStudio`, exigindo prova conservadora do caminho `ingestao -> entidade/cena -> build` sem abrir novo pipeline nem inflar maturidade para runtime final.
+2. Se `ArtStudio` mantiver baseline verde e prova real ate build, seguir para `RetroFX` com a mesma barra de evidência antes de qualquer claim nova sobre a frente visual do produto.
 3. Continuar medindo o chunk principal do shell a cada rodada relevante de `App.tsx`/`ViewportPanel` com `npm run build`, evitando regressao silenciosa de bundle.
 4. Repetir bundle MSI apenas quando o escopo tocar release/packaging (`scripts/run-in-msvc.cmd npm run build:msi`).
 5. Manter `validate-upstream-windows` e `release:readiness:baseline` como fotografia institucional sempre que alteracoes futuras tocarem build, emulacao, onboarding ou toolchains.

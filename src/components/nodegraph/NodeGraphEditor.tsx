@@ -1285,6 +1285,34 @@ export default function NodeGraphEditor() {
     focusNode(firstEntryNode);
   }, [focusNode, graphSummary.entryNodeIds]);
 
+  const focusFirstDisconnectedNode = useCallback(() => {
+    const firstDisconnectedNode = graphSummary.disconnectedNodeIds[0];
+    if (!firstDisconnectedNode) {
+      return;
+    }
+    focusNode(firstDisconnectedNode);
+  }, [focusNode, graphSummary.disconnectedNodeIds]);
+
+  const addEntryNode = useCallback(() => {
+    if (graphSummary.entryNodeIds.length > 0) {
+      return;
+    }
+
+    const anchorNode = selectedNode ?? graph.nodes[0] ?? null;
+    const startNode = makeNode(
+      "event_start",
+      anchorNode ? Math.max(40, anchorNode.x - 220) : 140,
+      anchorNode ? anchorNode.y : 160
+    );
+
+    setGraph((currentGraph) => ({
+      ...currentGraph,
+      nodes: [...currentGraph.nodes, startNode],
+    }));
+    setSelectedId(startNode.id);
+    logMessage("info", "No de entrada adicionado para orientar o fluxo atual.");
+  }, [graph.nodes, graphSummary.entryNodeIds.length, logMessage, selectedNode]);
+
   const searchLower = paletteSearch.trim().toLowerCase();
   const filteredGroups = searchLower
     ? NODE_PALETTE_GROUPS.map((g) => ({
@@ -1445,6 +1473,16 @@ export default function NodeGraphEditor() {
               >
                 Ir para Inicio
               </button>
+              {graphSummary.entryNodeIds.length === 0 && graphSummary.totalNodes > 0 && (
+                <button
+                  type="button"
+                  data-testid="nodegraph-add-entry"
+                  onClick={addEntryNode}
+                  className="rounded border border-[#fab387]/40 bg-[#fab387]/10 px-2 py-1 font-semibold text-[#fab387] transition-colors hover:bg-[#fab387]/20"
+                >
+                  Adicionar Inicio
+                </button>
+              )}
               <button
                 type="button"
                 data-testid="nodegraph-focus-selected"
@@ -1462,6 +1500,16 @@ export default function NodeGraphEditor() {
               >
                 Resetar Vista
               </button>
+              {graphSummary.disconnectedNodeIds.length > 0 && graphSummary.totalNodes > 1 && (
+                <button
+                  type="button"
+                  data-testid="nodegraph-focus-disconnected"
+                  onClick={focusFirstDisconnectedNode}
+                  className="rounded border border-[#f9e2af]/40 bg-[#f9e2af]/10 px-2 py-1 font-semibold text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/20"
+                >
+                  Ir para No Solto
+                </button>
+              )}
             </div>
           </div>
         )}

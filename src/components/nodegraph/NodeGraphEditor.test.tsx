@@ -87,6 +87,36 @@ const GRAPH_FIXTURE: NodeGraph = {
   ],
 };
 
+const GRAPH_WITHOUT_ENTRY: NodeGraph = {
+  nodes: [
+    {
+      id: "move_only",
+      type: "sprite_move",
+      label: "Move Sprite",
+      x: 1180,
+      y: 640,
+      inputs: [
+        { id: "exec", label: "▶", kind: "exec" },
+        { id: "dx", label: "dx", kind: "data", dataType: "int" },
+        { id: "dy", label: "dy", kind: "data", dataType: "int" },
+      ],
+      outputs: [{ id: "exec", label: "▶", kind: "exec" }],
+      params: { target: "hero", dx: 1, dy: 0 },
+    },
+    {
+      id: "sound_only",
+      type: "action_sound",
+      label: "Play Sound",
+      x: 1540,
+      y: 760,
+      inputs: [{ id: "exec", label: "▶", kind: "exec" }],
+      outputs: [{ id: "exec", label: "▶", kind: "exec" }],
+      params: { sfx: "hit" },
+    },
+  ],
+  edges: [],
+};
+
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
 
@@ -244,6 +274,66 @@ describe("NodeGraphEditor", () => {
     expect(useEditorStore.getState().activeScene?.entities[0].components.logic?.graph).toBe(
       serializeNodeGraph(EMPTY_GRAPH)
     );
+  });
+
+  it("adds an entry node from the overview when the graph has no event node yet", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeScene: buildSceneWithGraph(GRAPH_WITHOUT_ENTRY),
+        activeSceneSource: buildSceneWithGraph(GRAPH_WITHOUT_ENTRY),
+      });
+      await flush();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='nodegraph-overview']")?.textContent).toContain(
+      "Grafo sem evento de entrada"
+    );
+
+    await act(async () => {
+      (container.querySelector("[data-testid='nodegraph-add-entry']") as HTMLButtonElement).click();
+      await flush();
+      await flush();
+    });
+
+    expect(container.querySelectorAll("[data-testid^='node-card-']")).toHaveLength(3);
+    expect(container.querySelector("[data-testid='nodegraph-overview']")?.textContent).toContain("Eventos:");
+    expect(container.querySelector("[data-testid='nodegraph-overview']")?.textContent).not.toContain(
+      "Grafo sem evento de entrada"
+    );
+  });
+
+  it("focuses the first disconnected node from the overview helper", async () => {
+    const canvas = container.querySelector("[data-testid='nodegraph-canvas']") as HTMLDivElement | null;
+    if (!canvas) {
+      throw new Error("NodeGraph canvas not found");
+    }
+
+    Object.defineProperty(canvas, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 800,
+        bottom: 600,
+        width: 800,
+        height: 600,
+        toJSON: () => ({}),
+      }),
+    });
+
+    const freeNodeCard = container.querySelector("[data-testid='node-card-free_node']") as HTMLDivElement | null;
+    expect(freeNodeCard?.style.left).toBe("1840px");
+
+    await act(async () => {
+      (container.querySelector("[data-testid='nodegraph-focus-disconnected']") as HTMLButtonElement).click();
+      await flush();
+      await flush();
+    });
+
+    expect(freeNodeCard?.style.left).not.toBe("1840px");
   });
 
   it("applies the player controller quick action using the selected entity as target", async () => {
