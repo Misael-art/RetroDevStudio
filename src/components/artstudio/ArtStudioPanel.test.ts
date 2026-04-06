@@ -451,6 +451,12 @@ describe("ArtStudioPanel import flow", () => {
 
     expect(container.textContent).toContain("assets/sprites/hero_sheet.png");
     expect(findButton(container, /Aplicar/).disabled).toBe(false);
+    expect(container.querySelector("[data-testid='artstudio-apply-plan']")?.textContent).toContain(
+      "Criar entidade hero_sheet"
+    );
+    expect(container.querySelector("[data-testid='artstudio-apply-plan']")?.textContent).toContain(
+      "Pronto para criar hero_sheet na cena atual."
+    );
     expect(mocks.importArtAsset).toHaveBeenCalledWith(
       "F:/Projects/RetroDevStudio/demo/assets/sprites/hero/run.png",
       "F:/Projects/RetroDevStudio/demo",
@@ -484,6 +490,61 @@ describe("ArtStudioPanel import flow", () => {
         },
       },
     });
+  });
+
+  it("explains when apply will update the selected sprite entity instead of creating a new one", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        selectedEntityId: "hero_existing",
+        activeScene: {
+          scene_id: "main",
+          display_name: "Main",
+          entities: [
+            {
+              entity_id: "hero_existing",
+              display_name: "Hero Existing",
+              prefab: null,
+              transform: { x: 32, y: 48 },
+              components: {
+                sprite: {
+                  asset: "assets/sprites/hero_old.png",
+                  frame_width: 32,
+                  frame_height: 32,
+                  palette_slot: 0,
+                  priority: "foreground",
+                  animations: {},
+                },
+              },
+            },
+          ],
+          background_layers: [],
+          palettes: [],
+        },
+      });
+      await flush();
+    });
+    mocks.open.mockResolvedValue(
+      "F:/Projects/RetroDevStudio/demo/assets/sprites/hero/run.png"
+    );
+
+    await act(async () => {
+      findButton(container, "Importar imagem").click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, "Trazer para assets/sprites").click();
+      await flush();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='artstudio-apply-plan']")?.textContent).toContain(
+      "Atualizar entidade hero_existing"
+    );
+    expect(container.querySelector("[data-testid='artstudio-apply-plan']")?.textContent).toContain(
+      "Pronto para atualizar hero_existing na cena atual."
+    );
   });
 
   it("surfaces backend processing errors with actionable feedback", async () => {

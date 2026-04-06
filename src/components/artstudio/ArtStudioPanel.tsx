@@ -741,6 +741,9 @@ interface ArtStudioContextValue {
   sourceOriginLabel: string;
   displayPalette: string[];
   resOutput: string;
+  applyPlanLabel: string;
+  buildReadinessLabel: string;
+  applyNextStepLabel: string;
   previewCanvasRef: MutableRefObject<HTMLCanvasElement | null>;
   handleAddSequence: () => void;
   applyConstrainedFrameSize: (nextWidth: number, nextHeight: number) => void;
@@ -880,14 +883,18 @@ function ArtStudioInspectorSection() {
     dispatch,
     activeProjectDir,
     activeSequence,
-    canUpdateEntity,
-    canApplyToScene,
-    totalFrameSlots,
-    externalSourceLoaded,
-    loadStatusText,
-    sourceOriginLabel,
+      canUpdateEntity,
+      canApplyToScene,
+      totalFrameSlots,
+      usedFrameCount,
+      externalSourceLoaded,
+      loadStatusText,
+      sourceOriginLabel,
     displayPalette,
     resOutput,
+    applyPlanLabel,
+    buildReadinessLabel,
+    applyNextStepLabel,
     previewCanvasRef,
     handleImportToProject,
     handleApplyToScene,
@@ -1047,6 +1054,29 @@ function ArtStudioInspectorSection() {
               ))}
             </ul>
           )}
+        </div>
+
+        <div
+          data-testid="artstudio-apply-plan"
+          className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4"
+        >
+          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#a6e3a1]">
+            Plano de apply
+          </div>
+          <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-[12px]">
+            <dt className="text-[#64748b]">Destino</dt>
+            <dd className="font-medium text-[#e2e8f0]">{applyPlanLabel}</dd>
+            <dt className="text-[#64748b]">Build</dt>
+            <dd className="truncate font-medium text-[#e2e8f0]">{buildReadinessLabel}</dd>
+            <dt className="text-[#64748b]">Frames</dt>
+            <dd className="font-medium text-[#e2e8f0]">
+              {usedFrameCount > 0
+                ? `${usedFrameCount} frame(s) ja selecionados nas sequencias`
+                : "Selecione frames em pelo menos uma sequencia"}
+            </dd>
+            <dt className="text-[#64748b]">Proximo passo</dt>
+            <dd className="font-medium text-[#e2e8f0]">{applyNextStepLabel}</dd>
+          </dl>
         </div>
 
         <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
@@ -1279,6 +1309,7 @@ export default function ArtStudioPanel() {
   const totalFrameSlots =
     state.suggestedFrames.length > 0 ? state.suggestedFrames.length : totalGridColumns * totalGridRows;
   const usedFrameCount = new Set(state.sequences.flatMap((sequence) => sequence.frames)).size;
+  const hasValidAnimationFrames = state.sequences.some((sequence) => sequence.frames.length > 0);
   const externalSourceLoaded =
     state.spriteSheetLoadStatus === "loaded" && state.spriteSheetScope === "external";
   const canApplyToScene =
@@ -1288,6 +1319,51 @@ export default function ArtStudioPanel() {
     Boolean(state.spritePath) &&
     state.suggestedFrames.length > 0 &&
     state.spriteSheetLoadStatus === "loaded";
+  const projectedEntityId = useMemo(() => {
+    if (!activeScene || !state.spritePath) {
+      return null;
+    }
+
+    return createSpriteEntityFromAsset({
+      assetPath: state.spritePath,
+      target: activeTarget,
+      existingEntityIds: activeScene.entities.map((entity) => entity.entity_id),
+      suggestedName: state.spriteName,
+      frameWidth: state.frameWidth,
+      frameHeight: state.frameHeight,
+    }).entity_id;
+  }, [
+    activeScene,
+    activeTarget,
+    state.frameHeight,
+    state.frameWidth,
+    state.spriteName,
+    state.spritePath,
+  ]);
+  const applyPlanLabel =
+    canUpdateEntity && selectedEntityId
+      ? `Atualizar entidade ${selectedEntityId}`
+      : projectedEntityId
+        ? `Criar entidade ${projectedEntityId}`
+        : "Criar entidade na cena";
+  const buildReadinessLabel = state.spritePath
+    ? `Asset canonico pronto em ${state.spritePath}`
+    : "Asset canonico pendente em assets/sprites";
+  const applyNextStepLabel = !activeProjectDir
+    ? "Abra um projeto antes de continuar."
+    : !activeScene
+      ? "Abra uma cena antes de aplicar na cena."
+      : !state.spriteSheetUrl
+        ? "Importe uma imagem para iniciar o preparo."
+        : !state.spritePath
+          ? "Gere primeiro o asset canonico em assets/sprites."
+          : !hasValidAnimationFrames
+            ? "Selecione frames em pelo menos uma sequencia."
+            : canUpdateEntity && selectedEntityId
+              ? `Pronto para atualizar ${selectedEntityId} na cena atual.`
+              : projectedEntityId
+                ? `Pronto para criar ${projectedEntityId} na cena atual.`
+                : "Pronto para aplicar na cena atual.";
 
   useEffect(() => {
     return () => {
@@ -2031,6 +2107,9 @@ export default function ArtStudioPanel() {
       sourceOriginLabel,
       displayPalette,
       resOutput,
+      applyPlanLabel,
+      buildReadinessLabel,
+      applyNextStepLabel,
       previewCanvasRef,
       handleAddSequence,
       applyConstrainedFrameSize,
@@ -2050,6 +2129,9 @@ export default function ArtStudioPanel() {
       sourceOriginLabel,
       displayPalette,
       resOutput,
+      applyPlanLabel,
+      buildReadinessLabel,
+      applyNextStepLabel,
       handleAddSequence,
       applyConstrainedFrameSize,
       handleImportToProject,

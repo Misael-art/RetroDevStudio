@@ -16,6 +16,14 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+* **O que acabou de acontecer (2026-04-06 - ArtStudio: apply agora explicita destino, prontidao de build e proximo bloqueio):**
+  - **O fluxo `ingestao -> entidade/cena -> build` ficou mais legivel sem criar pipeline novo:** `src/components/artstudio/ArtStudioPanel.tsx` agora expõe um card `Plano de apply` com `Destino`, `Build`, `Frames` e `Proximo passo`, deixando claro se o `Aplicar` vai criar uma entidade nova ou atualizar a entidade sprite atualmente selecionada.
+  - **O destino passou a respeitar o contexto real da cena:** quando existe `selectedEntityId` apontando para uma entidade com `SpriteComponent`, o plano informa `Atualizar entidade ...`; nos demais casos, usa o ID projetado pelo caminho canônico de `createSpriteEntityFromAsset(...)` para antecipar a criação da nova entidade na cena atual.
+  - **A prontidao para build ficou honesta no próprio painel:** o card agora diferencia `Asset canonico pronto em assets/sprites/...` de `Asset canonico pendente`, e o `Proximo passo` aponta o bloqueio real mais próximo (`abra projeto`, `abra cena`, `importe imagem`, `gere asset canonico`, `selecione frames`) antes de liberar a claim local de pronto para apply.
+  - **Cobertura frontend travada para os dois caminhos canônicos:** `src/components/artstudio/ArtStudioPanel.test.ts` agora prova tanto o cenário `criar entidade nova` quanto `atualizar entidade selecionada`, além de ter sido corrigido um warning de `act(...)` para a suíte permanecer limpa sem regressão de harness.
+  - **Escopo mantido conservador:** nenhuma mudança foi feita em schema, IPC Rust, `build_orch.rs`, emitter SGDK/SNES, toolchains ou runtime de emulação; esta rodada reforçou apenas a clareza operacional do `ArtStudio` já existente.
+  - **Barra verde desta rodada:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (`217` testes), `npm run build` OK, `scripts\\run-cargo-msvc.cmd clippy --manifest-path .\\src-tauri\\Cargo.toml -- -D warnings` OK e `scripts\\run-cargo-msvc.cmd test --manifest-path .\\src-tauri\\Cargo.toml --lib -- --nocapture --test-threads=1` OK (`255` aprovados / `0` falhas / `3` ignorados). O chunk dedicado de `ArtStudioPanel` ficou em ~`49.23 kB` bruto / `12.95 kB` gzip, enquanto o shell principal permaneceu em ~`390.42 kB` bruto / `118.55 kB` gzip.
+
 * **O que acabou de acontecer (2026-04-06 - NodeGraph: overview agora sai de alerta passivo para reparo guiado):**
   - **Warnings de grafo ganharam ações locais, sem magia oculta:** `src/components/nodegraph/NodeGraphEditor.tsx` agora oferece `Adicionar Inicio` quando o grafo nao tem evento de entrada e `Ir para No Solto` quando existem nós desconectados, transformando o overview em apoio de reparo em vez de apenas diagnóstico passivo.
   - **A correção continua conservadora e explícita:** `Adicionar Inicio` só cria um `event_start` posicionado perto do grafo atual e deixa a conexão final na mão do usuário; não há autowiring nem alteração silenciosa de fluxo.
@@ -686,7 +694,7 @@ As seguintes decisoes ja foram debatidas e sao finais:
 ## 4. PROXIMO PASSO IMEDIATO (PARA A IA EXECUTAR QUANDO SOLICITADA)
 
 **Tarefa:**
-Fechar o MVP do desktop Tauri preservando a baseline verde, enquanto o reverse core novo sobe por ondas pequenas (`manifesto -> disassembly/xrefs -> trace -> projecao`), agora ja com scaffold dinamico conservador, sem quebrar o fluxo canonico do produto.
+Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as superficies `Experimental` que consigam provar valor no caminho canônico atual. Nesta etapa, o proximo alvo real passa a ser `RetroFX`, exigindo evidência conservadora do caminho `designer -> cena -> build` sem tocar em toolchains, build orchestration ou emulação.
 
 **Pre-requisitos operacionais:**
 * Manter os 6 gates canonicos verdes em toda alteracao relevante.
@@ -696,9 +704,9 @@ Fechar o MVP do desktop Tauri preservando a baseline verde, enquanto o reverse c
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
 **Sequencia de acoes recomendada:**
-1. Retomar a trilha de superficies `Experimental` mais promissoras pelo `ArtStudio`, exigindo prova conservadora do caminho `ingestao -> entidade/cena -> build` sem abrir novo pipeline nem inflar maturidade para runtime final.
-2. Se `ArtStudio` mantiver baseline verde e prova real ate build, seguir para `RetroFX` com a mesma barra de evidência antes de qualquer claim nova sobre a frente visual do produto.
-3. Continuar medindo o chunk principal do shell a cada rodada relevante de `App.tsx`/`ViewportPanel` com `npm run build`, evitando regressao silenciosa de bundle.
+1. Avancar para `RetroFX` com a mesma barra conservadora aplicada ao `ArtStudio`, provando o caminho `designer -> persistencia na cena -> build` sem abrir pipeline visual paralelo nem inflar maturidade para runtime final.
+2. Continuar medindo o chunk principal do shell e os chunks dedicados de `ArtStudio`/`RetroFX` a cada rodada relevante de UI com `npm run build`, evitando regressao silenciosa de bundle.
+3. So reabrir a frente de `ArtStudio` para claim maior quando houver prova institucional adicional chegando ao runtime real; por enquanto, a superficie continua `Experimental` apesar do caminho local ate build estar mais claro.
 4. Repetir bundle MSI apenas quando o escopo tocar release/packaging (`scripts/run-in-msvc.cmd npm run build:msi`).
 5. Manter `validate-upstream-windows` e `release:readiness:baseline` como fotografia institucional sempre que alteracoes futuras tocarem build, emulacao, onboarding ou toolchains.
 
