@@ -2443,6 +2443,15 @@ function ReverseWorkspace() {
   const touchedCallGraphCount = prioritizedCallGraph.filter(
     ({ touchedByTrace }) => touchedByTrace
   ).length;
+  const reverseReadinessLabel = !manifest
+    ? "Analise uma ROM para liberar mapa estrutural, leituras Hex/Code e anotacoes."
+    : activeView !== "code"
+      ? "Abra Code para priorizar funcoes/xrefs e registrar anotacoes persistidas."
+      : manifest.annotations.length === 0
+        ? "Salve ao menos uma anotacao para transformar achados em contexto persistido."
+        : !manifest.projection_status.supported
+          ? "Projection continua informativa nesta wave; use anotacoes como saida persistida."
+          : "Projection suportada para esta ROM; revise hints antes de gerar qualquer saida.";
   const viewTabs: { id: typeof activeView; label: string }[] = [
     { id: "map", label: "ROM Map" },
     { id: "hex", label: "Hex" },
@@ -2571,6 +2580,38 @@ function ReverseWorkspace() {
             <div className="mt-2 text-[10px] text-[#94a3b8]">
               {manifest.trace.note || "Nenhuma sessao do emulador compativel foi usada nesta analise."}
             </div>
+          </div>
+
+          <div
+            data-testid="reverse-operational-plan"
+            className="rounded border border-[#313244] bg-[#11111b] p-3"
+          >
+            <div className="text-[10px] uppercase tracking-[0.16em] text-[#7f849c]">
+              Trilha operacional
+            </div>
+            <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-[10px]">
+              <dt className="text-[#64748b]">Leitura util hoje</dt>
+              <dd className="text-[#cdd6f4]">
+                ROM Map, Hex, Code e heuristicas de Graphics/Text/Audio.
+              </dd>
+              <dt className="text-[#64748b]">Trace</dt>
+              <dd className="text-[#cdd6f4]">
+                {traceAvailable
+                  ? "Sessao com overlay ativo para priorizar navegacao real."
+                  : "Leitura estatica; overlay ao vivo indisponivel nesta sessao."}
+              </dd>
+              <dt className="text-[#64748b]">Persistencia</dt>
+              <dd className="text-[#cdd6f4]">
+                {manifest.annotations.length} anotacao(oes) salva(s) para esta ROM.
+              </dd>
+              <dt className="text-[#64748b]">Projection</dt>
+              <dd className="text-[#cdd6f4]">
+                {manifest.projection_status.status} ·{" "}
+                {manifest.projection_status.supported ? "suportada" : "somente informativa"}
+              </dd>
+              <dt className="text-[#64748b]">Proximo passo</dt>
+              <dd className="text-[#cdd6f4]">{reverseReadinessLabel}</dd>
+            </dl>
           </div>
 
           <div className="flex flex-wrap gap-2">

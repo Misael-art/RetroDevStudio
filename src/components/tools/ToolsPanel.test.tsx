@@ -619,6 +619,12 @@ describe("ToolsPanel Asset Browser", () => {
     expect(
       container.querySelector("[data-testid='reverse-trace-status-card']")?.textContent
     ).toContain("Trace dinamico indisponivel para esta ROM nesta sessao.");
+    expect(
+      container.querySelector("[data-testid='reverse-operational-plan']")?.textContent
+    ).toContain("ROM Map, Hex, Code e heuristicas de Graphics/Text/Audio.");
+    expect(
+      container.querySelector("[data-testid='reverse-operational-plan']")?.textContent
+    ).toContain("Abra Code para priorizar funcoes/xrefs e registrar anotacoes persistidas.");
 
     await act(async () => {
       findButton(container, "Code").click();
@@ -673,6 +679,12 @@ describe("ToolsPanel Asset Browser", () => {
       },
     ]);
     expect(container.textContent).toContain("entrypoint_label");
+    expect(
+      container.querySelector("[data-testid='reverse-operational-plan']")?.textContent
+    ).toContain("1 anotacao(oes) salva(s) para esta ROM.");
+    expect(
+      container.querySelector("[data-testid='reverse-operational-plan']")?.textContent
+    ).toContain("Projection continua informativa nesta wave; use anotacoes como saida persistida.");
   });
 
   it("prioritizes executed functions and touched graph edges when trace is available", async () => {

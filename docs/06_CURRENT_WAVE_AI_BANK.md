@@ -16,6 +16,14 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+* **O que acabou de acontecer (2026-04-06 - Reverse Workspace: leitura recorrente e projection futura agora ficam explicitadas):**
+  - **O workspace reverso ganhou uma trilha operacional honesta em vez de parecer uma suite “completa”:** `src/components/tools/ToolsPanel.tsx` agora renderiza um card `Trilha operacional` dizendo explicitamente o que ja e util hoje (`ROM Map`, `Hex`, `Code` e heuristicas `Graphics/Text/Audio`), quantas anotacoes persistidas a ROM ja tem, se o trace esta ativo e qual o estado real da `Projection`.
+  - **O próximo passo passou a depender do estado real da análise:** antes da primeira leitura, a orientação continua sendo `Analise uma ROM`; depois do manifesto, a UI pede para abrir `Code`; sem anotacoes, ela recomenda persistir contexto; e, quando a projeção continua `analysis_only`, o painel deixa claro que `Projection` segue apenas informativa nesta wave.
+  - **Persistencia util ganhou prioridade sobre promessa futura:** o card reforca que anotacoes sao hoje a saida persistida concreta do `Reverse Workspace`, enquanto a projecao `.rds` continua em hardening sem geracao automatica nesta rodada.
+  - **Cobertura real adicionada para esse contrato:** `src/components/tools/ToolsPanel.test.tsx` agora trava a trilha `analisar ROM -> abrir Code -> salvar anotacao`, verificando tanto o estado inicial da trilha quanto a transicao para `1 anotacao salva` e a mensagem honesta de `Projection` ainda informativa.
+  - **Escopo conservador preservado:** nenhuma mudanca foi feita no core Rust de reverse, no manifesto, em `toolsService`, na emissao `.rds`, em build/emulacao ou em toolchains; a rodada ficou inteiramente na camada de leitura operacional do frontend.
+  - **Barra verde desta rodada:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (`219` testes), `npm run build` OK, `scripts\\run-cargo-msvc.cmd clippy --manifest-path .\\src-tauri\\Cargo.toml -- -D warnings` OK e `scripts\\run-cargo-msvc.cmd test --manifest-path .\\src-tauri\\Cargo.toml --lib -- --nocapture --test-threads=1` OK (`255` aprovados / `0` falhas / `3` ignorados). O chunk de `ToolsPanel` subiu para ~`92.23 kB` bruto / `21.84 kB` gzip; isso nao bloqueia a rodada, mas recoloca `performance do shell` de volta na fila conservadora antes de expandir ainda mais as superficies experimentais.
+
 * **O que acabou de acontecer (2026-04-06 - RetroFX: emissao agora explicita o que ainda esta so no preview local):**
   - **O caminho `designer -> cena -> build` ficou mais honesto na própria UI:** `src/components/retrofx/RetroFXDesigner.tsx` agora mostra um card `Plano de emissao` com `Cena`, `Persistencia`, `Build`, `Ativos` e `Proximo passo`, deixando visivel quando o usuário está apenas vendo alterações locais no preview e quando o `scene JSON` já está sincronizado para o build local.
   - **A distinção crítica entre preview e emissão foi tornada explícita sem criar store ou schema paralelo:** o estado local do editor passa a comparar a configuração em memória com o `retrofx` salvo na cena ativa e informa `Alteracoes locais ainda nao salvas` até que `Salvar RetroFX` persista o conteúdo no `scene JSON`.
@@ -702,7 +710,7 @@ As seguintes decisoes ja foram debatidas e sao finais:
 ## 4. PROXIMO PASSO IMEDIATO (PARA A IA EXECUTAR QUANDO SOLICITADA)
 
 **Tarefa:**
-Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as superficies `Experimental` que consigam provar valor no caminho canônico atual. Com `ArtStudio` e `RetroFX` agora mais honestos até o build local, o próximo alvo real passa a ser consolidar a utilidade mínima do `Reverse Workspace`, sem inflar claim de engenharia reversa “completa”.
+Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as superficies `Experimental` que consigam provar valor no caminho canônico atual. Com `ArtStudio`, `RetroFX` e `Reverse Workspace` mais honestos até o build/leitura local, o próximo alvo real volta a ser conter regressão de bundle e densidade do shell antes de abrir novas camadas de UX experimental.
 
 **Pre-requisitos operacionais:**
 * Manter os 6 gates canonicos verdes em toda alteracao relevante.
@@ -712,8 +720,8 @@ Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as 
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
 **Sequencia de acoes recomendada:**
-1. Avancar para o `Reverse Workspace` com a mesma barra conservadora, focando primeiro em clareza operacional e utilidade mínima recorrente antes de qualquer claim nova sobre recuperação de lógica ou projeção `.rds`.
-2. Continuar medindo o chunk principal do shell e os chunks dedicados de `ArtStudio`/`RetroFX` a cada rodada relevante de UI com `npm run build`, evitando regressao silenciosa de bundle.
+1. Conter regressao de bundle no shell e em `ToolsPanel`, medindo impacto real de cada rodada com `npm run build` antes de abrir novas superfícies ou aprofundar `Reverse Workspace`.
+2. So reabrir `Reverse Workspace` para claims mais fortes quando continuar cabendo no budget atual de UI e sem criar promessa falsa de projeção `.rds` automática.
 3. So reabrir `ArtStudio` ou `RetroFX` para claim maior quando houver prova institucional adicional chegando ao runtime real; por enquanto, ambas as superficies continuam `Experimental` apesar do caminho local ate build estar mais claro.
 4. Repetir bundle MSI apenas quando o escopo tocar release/packaging (`scripts/run-in-msvc.cmd npm run build:msi`).
 5. Manter `validate-upstream-windows` e `release:readiness:baseline` como fotografia institucional sempre que alteracoes futuras tocarem build, emulacao, onboarding ou toolchains.
