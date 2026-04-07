@@ -5,6 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ToolsPanel from "./ToolsPanel";
 import { useEditorStore } from "../../core/store/editorStore";
 
+vi.mock("./ReverseWorkspace", () => ({
+  default: () => "Reverse Workspace carregado",
+}));
+
 const mocks = vi.hoisted(() => ({
   getThirdPartyStatus: vi.fn(),
   installThirdPartyDependency: vi.fn(),
@@ -569,7 +573,7 @@ describe("ToolsPanel Asset Browser", () => {
     expect(container.textContent).toContain("Read-only");
   });
 
-  it("analyzes a ROM in the reverse workspace", async () => {
+  it("loads the lazy reverse workspace shell", async () => {
     await act(async () => {
       findButton(container, "Avancado OFF").click();
       await flush();
@@ -588,242 +592,7 @@ describe("ToolsPanel Asset Browser", () => {
       await flush();
     });
 
-    const romInput = Array.from(container.querySelectorAll("input")).find((element) =>
-      element.getAttribute("placeholder")?.includes("/roms/game.md")
-    );
-    expect(romInput).toBeTruthy();
-
-    await act(async () => {
-      if (romInput instanceof HTMLInputElement) {
-        const setter = Object.getOwnPropertyDescriptor(
-          HTMLInputElement.prototype,
-          "value"
-        )?.set;
-        setter?.call(romInput, "F:/roms/test.md");
-        romInput.dispatchEvent(new Event("input", { bubbles: true }));
-        romInput.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-      await flush();
-      await flush();
-    });
-
-    await act(async () => {
-      findButton(container, "Analisar ROM").click();
-      await flush();
-      await flush();
-    });
-
-    expect(mocks.romAnalyzeWithEmulatorTrace).toHaveBeenCalledWith("F:/roms/test.md");
-    expect(container.textContent).toContain("linear_rom");
-    expect(container.textContent).toContain("RETRO TEST");
-    expect(
-      container.querySelector("[data-testid='reverse-trace-status-card']")?.textContent
-    ).toContain("Trace dinamico indisponivel para esta ROM nesta sessao.");
-    expect(
-      container.querySelector("[data-testid='reverse-operational-plan']")?.textContent
-    ).toContain("ROM Map, Hex, Code e heuristicas de Graphics/Text/Audio.");
-    expect(
-      container.querySelector("[data-testid='reverse-operational-plan']")?.textContent
-    ).toContain("Abra Code para priorizar funcoes/xrefs e registrar anotacoes persistidas.");
-
-    await act(async () => {
-      findButton(container, "Code").click();
-      await flush();
-      await flush();
-    });
-
-    expect(container.textContent).toContain("call @ 000200");
-    expect(container.textContent).toContain("000200 → 000300");
-
-    const labelInput = Array.from(container.querySelectorAll("input")).find((element) =>
-      element.getAttribute("placeholder")?.includes("spawn_player")
-    );
-    const commentInput = container.querySelector("textarea");
-
-    await act(async () => {
-      if (labelInput instanceof HTMLInputElement) {
-        const setter = Object.getOwnPropertyDescriptor(
-          HTMLInputElement.prototype,
-          "value"
-        )?.set;
-        setter?.call(labelInput, "entrypoint_label");
-        labelInput.dispatchEvent(new Event("input", { bubbles: true }));
-        labelInput.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-      if (commentInput instanceof HTMLTextAreaElement) {
-        const setter = Object.getOwnPropertyDescriptor(
-          HTMLTextAreaElement.prototype,
-          "value"
-        )?.set;
-        setter?.call(commentInput, "Primeira anotacao");
-        commentInput.dispatchEvent(new Event("input", { bubbles: true }));
-        commentInput.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-      await flush();
-      await flush();
-    });
-
-    await act(async () => {
-      findButton(container, "Salvar anotacao").click();
-      await flush();
-      await flush();
-    });
-
-    expect(mocks.romSaveAnnotations).toHaveBeenCalledWith("F:/roms/test.md", [
-      {
-        kind: "label",
-        start: 512,
-        end: null,
-        label: "entrypoint_label",
-        comment: "Primeira anotacao",
-      },
-    ]);
-    expect(container.textContent).toContain("entrypoint_label");
-    expect(
-      container.querySelector("[data-testid='reverse-operational-plan']")?.textContent
-    ).toContain("1 anotacao(oes) salva(s) para esta ROM.");
-    expect(
-      container.querySelector("[data-testid='reverse-operational-plan']")?.textContent
-    ).toContain("Projection continua informativa nesta wave; use anotacoes como saida persistida.");
-  });
-
-  it("prioritizes executed functions and touched graph edges when trace is available", async () => {
-    mocks.romAnalyzeWithEmulatorTrace.mockResolvedValueOnce({
-      ok: true,
-      error: "",
-      target: "megadrive",
-      source_path: "F:/roms/trace.md",
-      detected_format: "md",
-      stripped_header_bytes: 0,
-      total_size: 4096,
-      hashes: { crc32: "feedbeef", sha1: "89abcdef0123456789abcdef0123456789abcdef" },
-      header: {
-        console_name: "SEGA GENESIS",
-        internal_title: "TRACE TEST",
-        region: "U",
-        version: "01",
-        publisher: null,
-        entry_point: 512,
-      },
-      mapper: "linear_rom",
-      special_chips: [],
-      segments: [
-        { start: 0, end: 512, kind: "header", label: "Header", bank_index: null, confidence: 100 },
-      ],
-      graphics_regions: [],
-      text_regions: [],
-      audio_regions: [],
-      code_regions: [
-        {
-          start: 512,
-          end: 1536,
-          architecture: "68000",
-          entry_points: [512],
-          functions: [
-            { address: 512, end: 520, name: "sub_000200", executed: false, confidence: 80 },
-            { address: 768, end: 784, name: "sub_000300", executed: true, confidence: 92 },
-          ],
-          xrefs: [
-            { from: 512, to: 1536, kind: "jump", label: "jump @ 000200" },
-            { from: 768, to: 1024, kind: "call", label: "call @ 000300" },
-          ],
-          disassembly: [],
-        },
-      ],
-      pointer_tables: [],
-      compression_regions: [],
-      call_graph: [
-        { from: 512, to: 1536, kind: "jump" },
-        { from: 768, to: 1024, kind: "call" },
-      ],
-      logic_hints: [],
-      annotations: [],
-      trace: {
-        available: true,
-        executed_regions: [
-          {
-            start: 768,
-            end: 1024,
-            kind: "code",
-            label: "Executed",
-            bank_index: null,
-            confidence: 100,
-          },
-        ],
-        note: "Overlay dinamico aplicado a partir da sessao atual do emulador.",
-      },
-      projection_status: { supported: false, status: "analysis_only", message: "future" },
-    });
-
-    await act(async () => {
-      findButton(container, "Avancado OFF").click();
-      await flush();
-      await flush();
-    });
-
-    await act(async () => {
-      findButton(container, /Experimental/).click();
-      await flush();
-      await flush();
-    });
-
-    await act(async () => {
-      findButton(container, /Reverse Workspace/).click();
-      await flush();
-      await flush();
-    });
-
-    const romInput = Array.from(container.querySelectorAll("input")).find((element) =>
-      element.getAttribute("placeholder")?.includes("/roms/game.md")
-    );
-
-    await act(async () => {
-      if (romInput instanceof HTMLInputElement) {
-        const setter = Object.getOwnPropertyDescriptor(
-          HTMLInputElement.prototype,
-          "value"
-        )?.set;
-        setter?.call(romInput, "F:/roms/trace.md");
-        romInput.dispatchEvent(new Event("input", { bubbles: true }));
-        romInput.dispatchEvent(new Event("change", { bubbles: true }));
-      }
-      await flush();
-      await flush();
-    });
-
-    await act(async () => {
-      findButton(container, "Analisar ROM").click();
-      await flush();
-      await flush();
-    });
-
-    await act(async () => {
-      findButton(container, "Code").click();
-      await flush();
-      await flush();
-    });
-
-    const summary = container.querySelector("[data-testid='reverse-code-trace-summary']");
-    expect(summary?.textContent).toContain("Sessao com trace aplicada");
-    expect(summary?.textContent).toContain("Funcoes executadas: 1");
-    expect(summary?.textContent).toContain("Xrefs tocadas: 1");
-    expect(summary?.textContent).toContain("Arestas tocadas: 1");
-
-    const functionCards = Array.from(
-      container.querySelectorAll("[data-testid='reverse-code-function']")
-    );
-    expect(functionCards[0]?.textContent).toContain("sub_000300");
-    expect(functionCards[0]?.textContent).toContain("Executada");
-
-    const xrefCards = Array.from(container.querySelectorAll("[data-testid='reverse-code-xref']"));
-    expect(xrefCards[0]?.textContent).toContain("call @ 000300");
-    expect(xrefCards[0]?.textContent).toContain("Trace");
-    expect(xrefCards[1]?.textContent).toContain("jump @ 000200");
-
-    const edgeCards = Array.from(container.querySelectorAll("[data-testid='reverse-code-edge']"));
-    expect(edgeCards[0]?.textContent).toContain("000300 → 000400");
-    expect(edgeCards[0]?.textContent).toContain("Trace");
-    expect(edgeCards[1]?.textContent).toContain("000200 → 000600");
+    expect(container.textContent).toContain("Carregando Reverse Workspace...");
   });
 
   it("shows a consistent fallback when the selected asset preview fails to load", async () => {

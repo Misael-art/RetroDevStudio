@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-04-06
+**Ultima Atualizacao:** 2026-04-07
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -9,12 +9,19 @@
 > Nao altere a secao "Decisoes Arquiteturais Consolidadas" sem ordem expressa do usuario.
 > Historico de sessoes anteriores a 2026-03-14 esta em docs/06_AI_MEMORY_BANK_WAVE_A_R.md.
 >
-> **WAVE S+ segue ativa em 2026-04-06:**
+> **WAVE S+ segue ativa em 2026-04-07:**
 > Foco: recuperar coerencia multi-agente, manter o fluxo canonico `Build -> ROM -> Emulacao` verde, endurecer hosts Windows limpos e documentar o estado real no GitHub sem claims infladas.
 
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-04-07 - Performance do shell: `ReverseWorkspace` saiu do chunk inicial do `ToolsPanel`):**
+  - **A fronteira de carregamento do `ToolsPanel` ficou mais conservadora e mais leve:** `src/components/tools/ReverseWorkspace.tsx` foi extraido para modulo proprio, `src/components/tools/ToolPathField.tsx` consolidou o seletor de caminho reutilizado e `src/components/tools/ToolsPanel.tsx` passou a lazy-load apenas o `Reverse Workspace`, mantendo `Patch`, `Profiler`, `Runtime Setup`, `Asset Browser`, `Memory Viewer` e `VRAM` no caminho direto ja conhecido.
+  - **O ganho agora e medido em build real, nao inferido:** `npm run build` passou a emitir `assets/ToolsPanel-D-8JuYLU.js` com ~`67.10 kB` bruto / `17.33 kB` gzip e um novo chunk dedicado `assets/ReverseWorkspace-CPlEtbKm.js` com ~`26.12 kB` bruto / `5.79 kB` gzip. O chunk principal permaneceu praticamente estavel em ~`390.44 kB` bruto / `118.56 kB` gzip, o que confirma ganho local no shell sem prometer uma otimizacao global ainda nao entregue.
+  - **A cobertura acompanhou a extração em vez de depender de um arquivo gigante:** `src/components/tools/ReverseWorkspace.test.tsx` agora certifica `analisar ROM -> abrir Code -> salvar anotacao` e a priorizacao por trace diretamente no componente extraido, enquanto `src/components/tools/ToolsPanel.test.tsx` ficou com a prova leve da borda lazy (`Carregando Reverse Workspace...`) sem carregar o contrato inteiro dentro da suite do painel.
+  - **Escopo manteve a linha conservadora da wave:** nenhuma mudanca foi feita em `toolsService`, manifesto Rust, schema, emitter, build orchestration, emulacao ou toolchains. Esta rodada ficou restrita a modularizacao/lazy-load do frontend e reorganizacao da cobertura associada.
+  - **Barra verde desta rodada:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (`220` testes), `npm run build` OK, `scripts\\run-cargo-msvc.cmd clippy --manifest-path .\\src-tauri\\Cargo.toml -- -D warnings` OK e `scripts\\run-cargo-msvc.cmd test --manifest-path .\\src-tauri\\Cargo.toml --lib -- --nocapture --test-threads=1` OK (`255` aprovados / `0` falhas / `3` ignorados). O `Reverse Workspace` continua `Experimental`; a rodada melhorou custo inicial do shell, mas `densidade do shell` e reducao do chunk principal seguem abertas.
 
 * **O que acabou de acontecer (2026-04-06 - Reverse Workspace: leitura recorrente e projection futura agora ficam explicitadas):**
   - **O workspace reverso ganhou uma trilha operacional honesta em vez de parecer uma suite “completa”:** `src/components/tools/ToolsPanel.tsx` agora renderiza um card `Trilha operacional` dizendo explicitamente o que ja e util hoje (`ROM Map`, `Hex`, `Code` e heuristicas `Graphics/Text/Audio`), quantas anotacoes persistidas a ROM ja tem, se o trace esta ativo e qual o estado real da `Projection`.
@@ -710,7 +717,7 @@ As seguintes decisoes ja foram debatidas e sao finais:
 ## 4. PROXIMO PASSO IMEDIATO (PARA A IA EXECUTAR QUANDO SOLICITADA)
 
 **Tarefa:**
-Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as superficies `Experimental` que consigam provar valor no caminho canônico atual. Com `ArtStudio`, `RetroFX` e `Reverse Workspace` mais honestos até o build/leitura local, o próximo alvo real volta a ser conter regressão de bundle e densidade do shell antes de abrir novas camadas de UX experimental.
+Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as superficies `Experimental` que consigam provar valor no caminho canônico atual. Com o split conservador do `Reverse Workspace` ja certificado e o `ToolsPanel` novamente abaixo do pico anterior, o próximo alvo real passa a ser reduzir densidade do shell e continuar limpando o chunk principal sem reabrir frentes novas nem mexer no fluxo `Build -> ROM -> Emulacao`.
 
 **Pre-requisitos operacionais:**
 * Manter os 6 gates canonicos verdes em toda alteracao relevante.
