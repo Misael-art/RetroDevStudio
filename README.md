@@ -12,7 +12,7 @@
 
 ## Estado Real
 
-- Data de referencia: `2026-04-04`.
+- Data de referencia: `2026-04-09`.
 - Fase ativa real: `hardening / QA do MVP desktop`, com foco em manter o fluxo canonico `Build -> ROM -> Emulacao` repetivel em host Windows limpo.
 - O estado operacional canônico fica em [docs/06_AI_MEMORY_BANK.md](./docs/06_AI_MEMORY_BANK.md).
 - Se este `README` divergir do estado real, prevalecem:
@@ -35,7 +35,7 @@
 - `src-tauri/target-test/validation/release-readiness.json` fechou esta rodada com `readyForPromotion = true` em `2026-04-04T03:07:15.245Z`, usando worktree limpo no commit `941b4dbefa5e6187a5d813e02b0254ada950213d`.
 - Workflows do GitHub agora publicam sumario legivel e artefatos de validacao para auditoria por push.
 - Bootstrap seguro para host limpo via [scripts/bootstrap.ps1](./scripts/bootstrap.ps1).
-- Baseline recertificada neste host em `2026-04-04` com:
+- Baseline recertificada neste host em `2026-04-09` com:
   `check-tree`, `lint`, `tsc`, `npm test`, `cargo clippy`, `cargo test`, `build`, `build:debug`, `validate-upstream-windows` e `qa-rc`.
 
 ### O que ainda esta em hardening
@@ -43,7 +43,7 @@
 - O foco do projeto ainda nao e expansao de escopo; e consolidacao do caminho canonico e QA.
 - O shell principal ja e forte, mas ainda nao e um sistema de docking livre no nivel de uma IDE madura; a migracao para docking livre continua `deferred`.
 - O shell ficou mais leve nesta wave com lazy-load adicional de `Logic`, `RetroFX` e `ArtStudio`; o chunk principal caiu para cerca de `382 kB` bruto / `116 kB` gzip, mas ainda segue em hardening.
-- O wizard de primeiro uso agora prioriza um template builtin realmente criavel neste host, mostra um checklist de `Primeiro sucesso` e a rail lateral agrupa workspaces por etapa de uso, com `Art` e `FX` explicitamente marcados como `Exp.`.
+- O wizard de primeiro uso agora prioriza um template builtin realmente criavel neste host, mostra um checklist de `Primeiro sucesso`, trata `Importar Externo` como trilha secundaria expansivel e a rail lateral agrupa workspaces por etapa de uso, com `Art` e `FX` explicitamente marcados como `Exp.`.
 - O updater nativo continua apenas em preparacao institucional no backend; nao existe claim de superficie final de auto-update pronta no shell do usuario.
 - Ferramentas como `ArtStudio`, `RetroFX`, `Reverse Workspace`, `Asset Extractor` e `Memory Viewer` continuam visiveis, mas com status `Experimental` onde o backend e a certificacao ainda nao sustentam claim plena.
 

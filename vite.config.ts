@@ -42,7 +42,9 @@ export default defineConfig({
     environment: "jsdom",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     setupFiles: ["src/test/setup.ts"],
-    pool: process.platform === "win32" ? "forks" : "threads",
+    // Threads + single worker preserved test isolation while eliminating
+    // the intermittent worker bootstrap failures we were seeing on Windows.
+    pool: "threads",
     fileParallelism: false,
     maxWorkers: 1,
   },

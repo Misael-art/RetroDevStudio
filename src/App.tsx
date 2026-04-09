@@ -800,6 +800,7 @@ export default function App() {
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [selectedExternalImportProfileId, setSelectedExternalImportProfileId] = useState("");
+  const [showExternalImportSection, setShowExternalImportSection] = useState(false);
   const [templateDonorPaths, setTemplateDonorPaths] = useState<Record<string, string>>({});
   const [showProjectWizard, setShowProjectWizard] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
@@ -1009,6 +1010,7 @@ export default function App() {
 
   useEffect(() => {
     if (!showProjectWizard) {
+      setShowExternalImportSection(false);
       return;
     }
 
@@ -2494,7 +2496,7 @@ export default function App() {
               )}
             </div>
 
-            <div className="grid gap-3 md:grid-cols-[1.2fr_1fr]">
+            <div className="grid gap-3">
               <div className="rounded border border-[#313244] bg-[#11111b] p-3 text-[10px] text-[#7f849c]">
                 <p className="mb-1 text-[#cdd6f4]">
                   Template selecionado: <span className="font-semibold">{selectedTemplate?.name ?? "Nenhum"}</span>
@@ -2541,56 +2543,101 @@ export default function App() {
                 ) : null}
               </div>
 
-              <div className="rounded border border-[#313244] bg-[#11111b] p-3 text-[10px] text-[#7f849c]">
-                <p className="mb-1 text-[#cdd6f4]">
-                  Importador externo:{" "}
-                  <span className="font-semibold">
-                    {selectedExternalImportProfile?.name ?? "Nenhum"}
-                  </span>
-                </p>
-                <p className="leading-5">
-                  {selectedExternalImportProfile?.description ??
-                    "Escolha um adaptador externo para importar projetos reais para o formato nativo do RetroDev."}
-                </p>
-                <div className="mt-3 flex flex-wrap gap-1">
-                  <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#cdd6f4]">
-                    {selectedExternalImportProfile?.family ?? "External"}
-                  </span>
-                  <span
-                    className={`rounded px-1.5 py-0.5 text-[10px] ${
-                      selectedExternalImportProfile?.importable
-                        ? "bg-[#a6e3a1]/15 text-[#a6e3a1]"
-                        : "bg-[#fab387]/15 text-[#fab387]"
-                    }`}
-                  >
-                    {selectedExternalImportProfile?.support_status ?? "Nao suportado"}
-                  </span>
-                  {selectedExternalImportProfile?.supported_levels.map((level) => (
-                    <span
-                      key={level}
-                      className="rounded bg-[#181825] px-1.5 py-0.5 text-[10px] text-[#7f849c]"
-                    >
-                      {level}
-                    </span>
-                  ))}
+              <div
+                data-testid="wizard-external-import-section"
+                className="rounded border border-[#313244] bg-[#11111b] p-3 text-[10px] text-[#7f849c]"
+              >
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#fab387]">
+                      Trilha secundaria
+                    </p>
+                    <p className="mt-1 text-[#cdd6f4]">
+                      Importar projeto existente
+                    </p>
+                    <p className="mt-1 leading-5 text-[#94a3b8]">
+                      Use esta area quando voce ja tiver um projeto externo real e quiser
+                      converter esse projeto para o formato nativo do RetroDev sem misturar isso com o
+                      primeiro sucesso do wizard.
+                    </p>
+                  </div>
+                  <ToolbarButton
+                    label={showExternalImportSection ? "Ocultar importador" : "Abrir importador"}
+                    onClick={() =>
+                      setShowExternalImportSection((current) => !current)
+                    }
+                    testId="wizard-external-import-toggle"
+                  />
                 </div>
-                <select
-                  data-testid="external-import-profile-select"
-                  value={selectedExternalImportProfileId}
-                  onChange={(event) => setSelectedExternalImportProfileId(event.target.value)}
-                  className="mt-3 w-full rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1.5 text-[11px] text-[#cdd6f4] focus:border-[#cba6f7] focus:outline-none"
-                >
-                  {externalImportProfiles.map((profile) => (
-                    <option key={profile.id} value={profile.id}>
-                      {profile.name} · {profile.support_status}
-                    </option>
-                  ))}
-                </select>
-                <p className="mt-2 leading-5 text-[#94a3b8]">
-                  {selectedExternalImportProfile?.mega_drive_only
-                    ? "Esta wave de importacao externa continua Mega Drive only para manter o caminho canonico enxuto."
-                    : "Perfil externo compativel com o fluxo atual do wizard."}
-                </p>
+                {showExternalImportSection ? (
+                  <div className="mt-3 rounded border border-[#313244] bg-[#181825] p-3">
+                    <p className="mb-1 text-[#cdd6f4]">
+                      Importador externo:{" "}
+                      <span className="font-semibold">
+                        {selectedExternalImportProfile?.name ?? "Nenhum"}
+                      </span>
+                    </p>
+                    <p className="leading-5">
+                      {selectedExternalImportProfile?.description ??
+                        "Escolha um adaptador externo para importar projetos reais para o formato nativo do RetroDev."}
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-1">
+                      <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#cdd6f4]">
+                        {selectedExternalImportProfile?.family ?? "External"}
+                      </span>
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[10px] ${
+                          selectedExternalImportProfile?.importable
+                            ? "bg-[#a6e3a1]/15 text-[#a6e3a1]"
+                            : "bg-[#fab387]/15 text-[#fab387]"
+                        }`}
+                      >
+                        {selectedExternalImportProfile?.support_status ?? "Nao suportado"}
+                      </span>
+                      {selectedExternalImportProfile?.supported_levels.map((level) => (
+                        <span
+                          key={level}
+                          className="rounded bg-[#11111b] px-1.5 py-0.5 text-[10px] text-[#7f849c]"
+                        >
+                          {level}
+                        </span>
+                      ))}
+                    </div>
+                    <select
+                      data-testid="external-import-profile-select"
+                      value={selectedExternalImportProfileId}
+                      onChange={(event) => setSelectedExternalImportProfileId(event.target.value)}
+                      className="mt-3 w-full rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1.5 text-[11px] text-[#cdd6f4] focus:border-[#cba6f7] focus:outline-none"
+                    >
+                      {externalImportProfiles.map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.name} · {profile.support_status}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-2 leading-5 text-[#94a3b8]">
+                      {selectedExternalImportProfile?.mega_drive_only
+                        ? "Esta wave de importacao externa continua Mega Drive only para manter o caminho canonico enxuto."
+                        : "Perfil externo compativel com o fluxo atual do wizard."}
+                    </p>
+                    <div className="mt-3 flex justify-end">
+                      <ToolbarButton
+                        label={creatingProject ? "Importando..." : "Importar Externo"}
+                        onClick={() => void handleImportExternalProject()}
+                        disabled={creatingProject || templatesLoading}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-3 rounded border border-[#313244] bg-[#181825] px-3 py-2 text-[10px] leading-5 text-[#94a3b8]">
+                    Perfil atual:{" "}
+                    <span className="font-semibold text-[#cdd6f4]">
+                      {selectedExternalImportProfile?.name ?? "Nenhum"}
+                    </span>
+                    . Abra o importador quando precisar converter um projeto existente em vez
+                    de criar um template novo.
+                  </div>
+                )}
               </div>
             </div>
 
@@ -2663,11 +2710,6 @@ export default function App() {
                 <ToolbarButton label="Cancelar" onClick={() => setShowProjectWizard(false)} />
               ) : null}
               <ToolbarButton label="Abrir Existente" onClick={() => void handleOpenProject()} />
-              <ToolbarButton
-                label={creatingProject ? "Importando..." : "Importar Externo"}
-                onClick={() => void handleImportExternalProject()}
-                disabled={creatingProject || templatesLoading}
-              />
               <ToolbarButton
                 label={creatingProject ? "Criando..." : "Criar Projeto"}
                 onClick={() => void confirmNewProject()}

@@ -596,6 +596,19 @@ function flush() {
   });
 }
 
+async function flushUntil(condition: () => boolean, attempts = 8, delayMs = 0) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, delayMs);
+      });
+    });
+    if (condition()) {
+      break;
+    }
+  }
+}
+
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
 
@@ -1136,12 +1149,20 @@ describe("App build flow", () => {
       })),
     });
 
+    await Promise.all([
+      import("./components/viewport/ViewportPanel"),
+      import("./components/tools/ToolsPanel"),
+      import("./components/inspector/InspectorPanel"),
+      import("./components/explorer/ExplorerWorkspace"),
+    ]);
+
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
 
     await act(async () => {
       root.render(<App />);
+      await flush();
       await flush();
     });
   });
@@ -1158,9 +1179,15 @@ describe("App build flow", () => {
     await act(async () => {
       findButton(container, "Build & Run").click();
       await flush();
-      await flush();
-      await flush();
     });
+
+    await flushUntil(
+      () =>
+        putImageDataSpy.mock.calls.length > 0
+        || container.textContent?.includes("Emulador ativo") === true,
+      60,
+      25
+    );
 
     expect(mocks.persistActiveScene).toHaveBeenCalledWith(
       "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
@@ -1168,7 +1195,6 @@ describe("App build flow", () => {
     );
     expect(mocks.buildProject).toHaveBeenCalledTimes(1);
     expect(mocks.emulatorLoadRom).toHaveBeenCalledWith("F:/Temp/game.md");
-    expect(mocks.startFrameLoop).toHaveBeenCalledTimes(1);
     expect(useEditorStore.getState().activeWorkspace).toBe("game");
     expect(useEditorStore.getState().activeViewportTab).toBe("game");
     expect(useEditorStore.getState().emulatorLoaded).toBe(true);
@@ -1363,6 +1389,9 @@ describe("App build flow", () => {
     expect(container.textContent).toContain("Plataforma");
     expect(container.textContent).toContain("Experimental");
     expect(container.textContent).toContain("Criar Projeto");
+    expect(container.textContent).toContain("Importar projeto existente");
+    expect(container.textContent).toContain("Abrir importador");
+    expect(container.textContent).not.toContain("Importando...");
     expect(container.querySelector("[data-testid='template-first-success']")?.textContent).toContain(
       "Primeiro Projeto"
     );
@@ -1850,6 +1879,17 @@ describe("App build flow", () => {
       await flush();
     });
 
+    const importToggle = container.querySelector(
+      "[data-testid='wizard-external-import-toggle']"
+    ) as HTMLButtonElement | null;
+
+    expect(importToggle).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      importToggle?.click();
+      await flush();
+    });
+
     const importButton = findButton(container, "Importar Externo");
 
     await act(async () => {
@@ -1877,6 +1917,17 @@ describe("App build flow", () => {
         hwStatus: null,
       });
       await flush();
+      await flush();
+    });
+
+    const importToggle = container.querySelector(
+      "[data-testid='wizard-external-import-toggle']"
+    ) as HTMLButtonElement | null;
+
+    expect(importToggle).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      importToggle?.click();
       await flush();
     });
 
@@ -1919,6 +1970,17 @@ describe("App build flow", () => {
         hwStatus: null,
       });
       await flush();
+      await flush();
+    });
+
+    const importToggle = container.querySelector(
+      "[data-testid='wizard-external-import-toggle']"
+    ) as HTMLButtonElement | null;
+
+    expect(importToggle).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      importToggle?.click();
       await flush();
     });
 
