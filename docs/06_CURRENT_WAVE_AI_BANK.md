@@ -16,6 +16,14 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+* **O que acabou de acontecer (2026-04-09 - Onboarding institucional: wizard desktop voltou a ficar clicavel e o primeiro sucesso foi recertificado no app empacotado):**
+  - **O modal do wizard voltou a respeitar viewport desktop real:** `src/App.tsx` separou o fluxo em `project-wizard-body` rolavel e `project-wizard-actions` fixo, mantendo o footer principal visivel mesmo quando a galeria cresce no host Windows atual.
+  - **O CTA principal agora reflete o estado verdadeiro do template:** `Criar Projeto` passou a respeitar `selectedTemplateAvailability.readyToCreate`, ficando desabilitado para templates `external_sgdk` ainda dependentes de pasta doadora manual em vez de deixar a UI aparentar um caminho que o backend bloquearia.
+  - **O desktop E2E voltou ao primeiro sucesso canônico real:** `scripts/e2e-tauri-build-run.mjs` migrou `onboarding-shell` e `qa-rc` do seed `platformer_seed` para o template builtin `starter_guided`, e o check final do shell foi alinhado aos affordances reais do app atual (`workspace-rail-*`, `Build & Run` e `Scene Editor`) em vez de depender de copy antiga de presets.
+  - **A rodada so foi promovida depois de falhar duas vezes no produto real:** primeiro o `onboarding-shell` caiu por `element not interactable` com o footer do wizard cortado; depois caiu porque o cenario ainda escolhia um template `Requer pasta`; so apos corrigir os dois pontos o fluxo voltou a passar no app empacotado.
+  - **Barra verde institucional desta rodada:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (`220` testes), `scripts\\run-cargo-msvc.cmd clippy --manifest-path .\\src-tauri\\Cargo.toml -- -D warnings` OK, `scripts\\run-cargo-msvc.cmd test --manifest-path .\\src-tauri\\Cargo.toml --lib -- --nocapture --test-threads=1` OK (`255` aprovados / `0` falhas / `3` ignorados), `npm run test:e2e:desktop:onboarding-shell` OK, `npm run test:e2e:desktop:qa-rc` OK, `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\validate-upstream-windows.ps1 -SkipRustTests` OK e `npm run release:readiness:baseline` OK.
+  - **Leitura honesta:** `onboarding / primeiro sucesso` avancou materialmente e agora tem prova desktop repetivel nesta wave, mas ainda segue em hardening; qualquer mudanca futura em shell, wizard, templates, packaging ou build precisa rerodar o mesmo pacote de evidencias.
+
 * **O que acabou de acontecer (2026-04-09 - Onboarding hardening: wizard de primeiro uso ficou mais focado e a baseline Vitest voltou a ficar estavel em `threads`):**
   - **O primeiro sucesso do wizard ficou mais protegido contra desvio de fluxo:** `src/App.tsx` manteve o caminho principal `Criar Projeto`/`Abrir Existente` visivel no footer e moveu `Importar Externo` para uma trilha secundaria expansivel (`Abrir importador`), reduzindo ruído no primeiro uso sem remover o importador generico canonico do produto.
   - **O importador externo agora continua acessivel, mas nao compete com o caminho principal:** os perfis de `import_external_project` seguem presentes no wizard, porem somente depois de expandir a secao secundaria, o que deixa o onboarding mais honesto para usuarios leigos e preserva o mesmo backend/matriz de perfis ja canônicos.
@@ -731,7 +739,7 @@ As seguintes decisoes ja foram debatidas e sao finais:
 ## 4. PROXIMO PASSO IMEDIATO (PARA A IA EXECUTAR QUANDO SOLICITADA)
 
 **Tarefa:**
-Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as superficies `Experimental` que consigam provar valor no caminho canônico atual. Com o split conservador do `ViewportPanel` ja certificado, a baseline Vitest novamente repetivel em `threads` neste host e o wizard do primeiro uso mais focado no caminho principal, o proximo alvo real passa a ser terminar `onboarding / primeiro sucesso` com provas de UX conservadoras, sem reabrir frentes novas nem mexer no fluxo `Build -> ROM -> Emulacao`.
+Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as superficies `Experimental` que consigam provar valor no caminho canônico atual. Com o wizard do primeiro uso novamente certificado no desktop real desta wave, o proximo alvo real volta a ser reduzir `densidade do shell` no `Scene Editor`/`Workspace Guide` sem reabrir frentes novas nem tocar no fluxo `Build -> ROM -> Emulacao`.
 
 **Pre-requisitos operacionais:**
 * Manter os 6 gates canonicos verdes em toda alteracao relevante.

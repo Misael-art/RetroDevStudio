@@ -1392,6 +1392,12 @@ describe("App build flow", () => {
     expect(container.textContent).toContain("Importar projeto existente");
     expect(container.textContent).toContain("Abrir importador");
     expect(container.textContent).not.toContain("Importando...");
+    expect(container.querySelector("[data-testid='project-wizard-body']")).toBeInstanceOf(HTMLDivElement);
+    const wizardActions = container.querySelector("[data-testid='project-wizard-actions']");
+    expect(wizardActions).toBeInstanceOf(HTMLDivElement);
+    expect(wizardActions?.textContent).toContain("Criar Projeto");
+    expect(wizardActions?.textContent).toContain("Abrir Existente");
+    expect(wizardActions?.textContent).not.toContain("Importar Externo");
     expect(container.querySelector("[data-testid='template-first-success']")?.textContent).toContain(
       "Primeiro Projeto"
     );
@@ -1765,6 +1771,7 @@ describe("App build flow", () => {
     });
 
     expect(container.textContent).toContain("Requer pasta");
+    expect(createButton.disabled).toBe(true);
     expect(container.querySelector("[data-testid='template-first-success']")?.textContent).toContain(
       "Escolher pasta doadora SGDK"
     );
@@ -1779,13 +1786,6 @@ describe("App build flow", () => {
     });
 
     expect(mocks.createProjectFromTemplate).not.toHaveBeenCalled();
-    expect(
-      useEditorStore
-        .getState()
-        .consoleEntries.some((entry) =>
-          entry.message.includes("Requer uma pasta doadora SGDK escolhida manualmente")
-        )
-    ).toBe(true);
   });
 
   it("creates an external SGDK template project after choosing a donor folder manually", async () => {
@@ -1822,6 +1822,7 @@ describe("App build flow", () => {
     });
 
     expect(container.textContent).toContain("Configurado");
+    expect(createButton.disabled).toBe(false);
     expect(container.textContent).toContain("F:/Projects/RetroDevStudio/tests/donors/platformer");
     expect(container.querySelector("[data-testid='template-first-success']")?.textContent).toContain(
       "Pasta doadora configurada"

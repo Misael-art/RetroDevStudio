@@ -12,7 +12,7 @@
 | `docs/06_AI_MEMORY_BANK_WAVE_A_R.md` | Historico arquivado das waves A-R |
 
 **Fluxo canonico:** leia este arquivo primeiro e siga imediatamente para `docs/06_CURRENT_WAVE_AI_BANK.md`.
-**Atualizacao ativa mais recente:** hardening de `onboarding / primeiro sucesso` e baseline Vitest reestabilizada em `threads` no host Windows atual em `2026-04-09`.
+**Atualizacao ativa mais recente:** `onboarding / primeiro sucesso` voltou a ficar certificado no desktop real desta wave em `2026-04-09`, com wizard rolavel + footer fixo, CTA respeitando `readyToCreate`, `onboarding-shell`/`qa-rc` verdes e baseline institucional rerodada sem drift.
 
 Em caso de conflito documental, a hierarquia continua sendo:
 `docs/06_AI_MEMORY_BANK.md` -> `docs/03_ROADMAP_MVP.md` -> `docs/09_AGENT_DEV_MODE.md`.

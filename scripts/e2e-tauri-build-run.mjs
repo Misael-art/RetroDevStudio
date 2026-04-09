@@ -1293,7 +1293,7 @@ async function waitForOnboardingWizard(sessionId) {
       executeScript(
         sessionId,
         `
-          const templateCard = document.querySelector('[data-testid="template-card-platformer_seed"]');
+          const templateCard = document.querySelector('[data-testid="template-card-starter_guided"]');
           const nameInput = document.querySelector('input[placeholder="Nome do projeto"]');
           const createButton = Array.from(document.querySelectorAll("button")).find((button) => {
             const text = button.textContent?.replace(/\\s+/g, " ").trim() ?? "";
@@ -1624,7 +1624,7 @@ async function main() {
         `${artifactPrefix}-wizard.png`
       );
 
-      const templateCard = await findElement(sessionId, "[data-testid='template-card-platformer_seed']");
+      const templateCard = await findElement(sessionId, "[data-testid='template-card-starter_guided']");
       await clickElement(sessionId, templateCard);
       await waitForOnboardingWizard(sessionId);
 
@@ -1694,14 +1694,18 @@ async function main() {
       const shellReady = await executeScript(
         sessionId,
         `
-          const bodyText = (document.body?.textContent ?? "").toLowerCase();
+          const guideText = document.querySelector('[data-testid="workspace-guide"]')?.textContent?.toLowerCase() ?? "";
+          const hasBuildAndRun = Array.from(document.querySelectorAll("button")).some((button) => {
+            const text = button.textContent?.replace(/\\s+/g, " ").trim() ?? "";
+            return text === "Build & Run";
+          });
           return (
-            bodyText.includes("build & run") &&
-            bodyText.includes("artist") &&
-            bodyText.includes("logic") &&
-            bodyText.includes("debug") &&
-            bodyText.includes("playtest") &&
-            bodyText.includes("scene workspace")
+            hasBuildAndRun &&
+            Boolean(document.querySelector('[data-testid="workspace-rail-scene"]')) &&
+            Boolean(document.querySelector('[data-testid="workspace-rail-game"]')) &&
+            Boolean(document.querySelector('[data-testid="workspace-rail-logic"]')) &&
+            Boolean(document.querySelector('[data-testid="workspace-rail-debug"]')) &&
+            guideText.includes("scene editor")
           );
         `
       );
@@ -1737,7 +1741,7 @@ async function main() {
         );
         registerArtifact(manualQaReport, wizardScreenshot, "A - wizard");
 
-        const templateCard = await findElement(sessionId, "[data-testid='template-card-platformer_seed']");
+        const templateCard = await findElement(sessionId, "[data-testid='template-card-starter_guided']");
         await clickElement(sessionId, templateCard);
         await waitForOnboardingWizard(sessionId);
 

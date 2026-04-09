@@ -2375,8 +2375,8 @@ export default function App() {
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#11111b] text-[#cdd6f4]">
       {showProjectWizard && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="flex max-h-[90vh] w-[52rem] flex-col gap-4 overflow-hidden rounded-lg border border-[#313244] bg-[#181825] p-5 shadow-2xl">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3">
+          <div className="flex max-h-[calc(100vh-1.5rem)] min-h-0 w-[52rem] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden rounded-lg border border-[#313244] bg-[#181825] p-5 shadow-2xl">
             <div className="space-y-1">
               <h2 className="text-sm font-bold text-[#cba6f7]">
                 {activeProjectDir ? "Novo Projeto" : "Wizard de Primeiro Uso"}
@@ -2387,7 +2387,11 @@ export default function App() {
               </p>
             </div>
 
-            <div className="grid gap-3 overflow-y-auto pr-1 md:grid-cols-3">
+            <div
+              data-testid="project-wizard-body"
+              className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1"
+            >
+              <div className="grid gap-3 md:grid-cols-3">
               {templatesLoading ? (
                 <div className="col-span-full rounded border border-[#313244] bg-[#11111b] p-4 text-xs text-[#7f849c]">
                   Carregando galeria de templates...
@@ -2704,8 +2708,12 @@ export default function App() {
                 </p>
               </div>
             </div>
+            </div>
 
-            <div className="flex flex-wrap justify-end gap-2 border-t border-[#313244] pt-2">
+            <div
+              data-testid="project-wizard-actions"
+              className="mt-4 flex flex-wrap justify-end gap-2 border-t border-[#313244] bg-[#181825] pt-3"
+            >
               {activeProjectDir ? (
                 <ToolbarButton label="Cancelar" onClick={() => setShowProjectWizard(false)} />
               ) : null}
@@ -2714,7 +2722,12 @@ export default function App() {
                 label={creatingProject ? "Criando..." : "Criar Projeto"}
                 onClick={() => void confirmNewProject()}
                 accent="primary"
-                disabled={creatingProject || templatesLoading || !selectedTemplate}
+                disabled={
+                  creatingProject ||
+                  templatesLoading ||
+                  !selectedTemplate ||
+                  !selectedTemplateAvailability?.readyToCreate
+                }
               />
             </div>
           </div>
