@@ -25,6 +25,7 @@ import { constrainSpriteFrameSize, ONBOARDING_SPRITE_SIZE } from "../../core/sce
 import { createSpriteEntityFromAsset } from "../../core/editorEntityFactory";
 import { getEntityDisplayName } from "../../core/entityDisplay";
 import { resolveProjectAssetPath } from "../../core/pathUtils";
+import { getGameViewportScale } from "./gameViewportScale";
 
 const VIEWPORT_TABS = [
   { id: "scene", label: "Cena", icon: "SC" },
@@ -95,27 +96,6 @@ function describeError(error: unknown): string {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
-}
-
-export function getGameViewportScale(
-  availableWidth: number,
-  availableHeight: number,
-  baseWidth = MD_WIDTH,
-  baseHeight = MD_HEIGHT
-): number {
-  if (
-    !Number.isFinite(availableWidth) ||
-    !Number.isFinite(availableHeight) ||
-    availableWidth <= 0 ||
-    availableHeight <= 0
-  ) {
-    return 1;
-  }
-
-  const widthScale = Math.floor(availableWidth / baseWidth);
-  const heightScale = Math.floor(availableHeight / baseHeight);
-
-  return Math.max(1, Math.min(widthScale, heightScale));
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {

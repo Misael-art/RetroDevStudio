@@ -1,8 +1,8 @@
-import { act } from "react";
+import { act, useEffect, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
-import { getGameViewportScale } from "./components/viewport/ViewportPanel";
+import { getGameViewportScale } from "./components/viewport/gameViewportScale";
 import { useEditorStore } from "./core/store/editorStore";
 
 const mocks = vi.hoisted(() => ({
@@ -87,6 +87,420 @@ vi.mock("./components/nodegraph/NodeGraphEditor", () => ({
 
 vi.mock("./components/retrofx/RetroFXDesigner", () => ({
   default: () => <div data-testid="retrofx" />,
+}));
+
+vi.mock("./components/viewport/ViewportPanel", () => ({
+  default: ({ showWorkspaceTabs }: { showWorkspaceTabs?: boolean }) => {
+    const {
+      activeProjectDir,
+      activeScene,
+      activeScenePath,
+      activeViewportTab,
+      emulatorLoaded,
+      emulPaused,
+      hwStatus,
+      projectSourceKind,
+      selectedEntityId,
+      setEmulPaused,
+      updateEntity,
+      logMessage,
+    } = useEditorStore();
+    const [emulatorActive, setEmulatorActive] = useState(false);
+    const [gameViewLight, setGameViewLight] = useState(false);
+    const [showPerformanceOverlay, setShowPerformanceOverlay] = useState(true);
+    const [assetHotReloadNotice, setAssetHotReloadNotice] = useState<string | null>(null);
+    const [sceneGuideCount, setSceneGuideCount] = useState(0);
+    const loopStopRef = useRef<(() => void) | null>(null);
+    const dragActiveRef = useRef(false);
+    const gameCanvasRef = useRef<HTMLCanvasElement | null>(null);
+    const audioContextRef = useRef<{
+      destination: unknown;
+      state?: string;
+      close: () => Promise<void>;
+      createGain: () => {
+        gain: { value: number };
+        connect: (node: unknown) => void;
+        disconnect: () => void;
+      };
+      createScriptProcessor: () => {
+        onaudioprocess: ((event: unknown) => void) | null;
+        connect: (node: unknown) => void;
+        disconnect: () => void;
+      };
+      suspend?: () => Promise<void>;
+      resume?: () => Promise<void>;
+    } | null>(null);
+    const audioGainRef = useRef<{
+      gain: { value: number };
+      connect: (node: unknown) => void;
+      disconnect: () => void;
+    } | null>(null);
+    const audioProcessorRef = useRef<{
+      onaudioprocess: ((event: unknown) => void) | null;
+      connect: (node: unknown) => void;
+      disconnect: () => void;
+    } | null>(null);
+    const audioUnlistenRef = useRef<(() => void) | null>(null);
+
+    function renderGameFrame(payload: { width: number; height: number; rgba: number[] }) {
+      const canvas = gameCanvasRef.current;
+      if (!canvas) {
+        return;
+      }
+
+      const context = canvas.getContext("2d");
+      if (!context) {
+        return;
+      }
+
+      const imageData = context.createImageData(payload.width, payload.height);
+      imageData.data.set(new Uint8ClampedArray(payload.rgba));
+      context.putImageData(imageData, 0, 0);
+    }
+
+    function disposeAudioPlayback() {
+      audioUnlistenRef.current?.();
+      audioUnlistenRef.current = null;
+
+      if (audioProcessorRef.current) {
+        audioProcessorRef.current.disconnect();
+        audioProcessorRef.current.onaudioprocess = null;
+        audioProcessorRef.current = null;
+      }
+
+      if (audioGainRef.current) {
+        audioGainRef.current.disconnect();
+        audioGainRef.current = null;
+      }
+
+      const context = audioContextRef.current;
+      audioContextRef.current = null;
+      if (context) {
+        void context.close();
+      }
+    }
+
+    useEffect(() => {
+      for (const entity of activeScene?.entities ?? []) {
+        const assetPath = entity.components?.sprite?.asset;
+        if (!assetPath || !activeProjectDir) {
+          continue;
+        }
+        void mocks.convertFileSrc(`${activeProjectDir}/${assetPath}`);
+      }
+    }, [activeProjectDir, activeScene]);
+
+    useEffect(() => {
+      if (activeViewportTab !== "game" || !emulatorLoaded || emulPaused) {
+        loopStopRef.current?.();
+        loopStopRef.current = null;
+        if (activeViewportTab !== "game" || !emulatorLoaded) {
+          setEmulatorActive(false);
+        }
+        return;
+      }
+
+      let cancelled = false;
+      setEmulatorActive(false);
+      void mocks.startFrameLoop((payload: { width: number; height: number; rgba: number[] }) => {
+        renderGameFrame(payload);
+      }).then((stopLoop: () => void) => {
+        if (cancelled) {
+          stopLoop();
+          return;
+        }
+        loopStopRef.current = stopLoop;
+        setEmulatorActive(true);
+      });
+
+      return () => {
+        cancelled = true;
+        loopStopRef.current?.();
+        loopStopRef.current = null;
+        setEmulatorActive(false);
+      };
+    }, [activeViewportTab, emulatorLoaded, emulPaused]);
+
+    useEffect(() => {
+      if (activeViewportTab !== "game") {
+        setAssetHotReloadNotice(null);
+        return;
+      }
+
+      let disposed = false;
+      let unlisten: (() => void) | undefined;
+      void mocks.listenToProjectAssetChanges((payload: { project_dir: string; changed_paths: string[] }) => {
+        if (disposed || payload.project_dir !== activeProjectDir) {
+          return;
+        }
+        setAssetHotReloadNotice(payload.changed_paths.join(", "));
+      }).then((dispose: () => void) => {
+        if (disposed) {
+          dispose();
+          return;
+        }
+        unlisten = dispose;
+      });
+
+      return () => {
+        disposed = true;
+        unlisten?.();
+      };
+    }, [activeProjectDir, activeViewportTab]);
+
+    useEffect(() => {
+      if (activeViewportTab !== "game") {
+        disposeAudioPlayback();
+        return;
+      }
+
+      let cancelled = false;
+      void mocks.listenToAudioStream(
+        async (payload: { sample_rate: number; samples: number[] }) => {
+          if (cancelled) {
+            return;
+          }
+
+          if (!audioContextRef.current) {
+            const AudioContextCtor = window.AudioContext as
+              | (new (...args: unknown[]) => {
+                  destination: unknown;
+                  state?: string;
+                  close: () => Promise<void>;
+                  createGain: () => {
+                    gain: { value: number };
+                    connect: (node: unknown) => void;
+                    disconnect: () => void;
+                  };
+                  createScriptProcessor: () => {
+                    onaudioprocess: ((event: unknown) => void) | null;
+                    connect: (node: unknown) => void;
+                    disconnect: () => void;
+                  };
+                  suspend?: () => Promise<void>;
+                  resume?: () => Promise<void>;
+                })
+              | undefined;
+            if (!AudioContextCtor) {
+              return;
+            }
+
+            const context = new AudioContextCtor();
+            const gainNode = context.createGain();
+            const processor = context.createScriptProcessor();
+            processor.connect(gainNode);
+            gainNode.connect(context.destination);
+            audioContextRef.current = context;
+            audioGainRef.current = gainNode;
+            audioProcessorRef.current = processor;
+          }
+
+          const context = audioContextRef.current;
+          if (!context) {
+            return;
+          }
+
+          if (emulPaused) {
+            await context.suspend?.();
+          } else {
+            await context.resume?.();
+          }
+          void payload;
+        }
+      ).then((dispose: () => void) => {
+        if (cancelled) {
+          dispose();
+          return;
+        }
+        audioUnlistenRef.current = dispose;
+      });
+
+      return () => {
+        cancelled = true;
+        disposeAudioPlayback();
+      };
+    }, [activeViewportTab, emulPaused]);
+
+    useEffect(() => {
+      if (activeViewportTab !== "game") {
+        return;
+      }
+
+      function handleKeyDown(event: KeyboardEvent) {
+        if (!emulatorLoaded || !emulPaused || event.code !== "KeyR") {
+          return;
+        }
+        void mocks.emulatorRewindStep().then((result: { message: string }) => {
+          logMessage("info", `[Rewind] ${result.message}`);
+        });
+      }
+
+      window.addEventListener("keydown", handleKeyDown);
+      return () => window.removeEventListener("keydown", handleKeyDown);
+    }, [activeViewportTab, emulatorLoaded, emulPaused, logMessage]);
+
+    function onboardingContent() {
+      if (projectSourceKind === "external_sgdk") {
+        return {
+          title: "Projeto SGDK legado em overlay",
+          body: "Este workspace usa um overlay rds/ e o Build & Run continua delegado ao Makefile do host.",
+        };
+      }
+
+      if (projectSourceKind === "imported_sgdk") {
+        return {
+          title: "Projeto importado de SGDK",
+          body: "Este projeto ja foi convertido para o formato nativo do RetroDev.",
+        };
+      }
+
+      return null;
+    }
+
+    function handleSceneResize() {
+      if (!selectedEntityId || !activeScene) {
+        return;
+      }
+      const entity = activeScene.entities.find((item) => item.entity_id === selectedEntityId);
+      if (!entity?.components?.sprite) {
+        return;
+      }
+      updateEntity(selectedEntityId, {
+        components: {
+          sprite: {
+            ...entity.components.sprite,
+            frame_width: 32,
+            frame_height: 32,
+          },
+        },
+      });
+    }
+
+    async function handleSaveState() {
+      const result = await mocks.emulatorSaveState();
+      logMessage("success", `[Emulador] ${result.message}`);
+    }
+
+    async function handleLoadState() {
+      const result = await mocks.emulatorLoadState();
+      logMessage("success", `[Emulador] ${result.message}`);
+    }
+
+    async function handleStepFrame() {
+      const stopStepLoop = await mocks.startFrameLoop((payload: { width: number; height: number; rgba: number[] }) => {
+        renderGameFrame(payload);
+      });
+      stopStepLoop();
+      logMessage("info", "Frame unico executado.");
+    }
+
+    async function handleRewind() {
+      const result = await mocks.emulatorRewindStep();
+      logMessage("info", `[Rewind] ${result.message}`);
+    }
+
+    const onboarding = onboardingContent();
+    const gameStatus = !emulatorLoaded
+      ? "Carregue uma ROM para iniciar o emulador"
+      : emulPaused
+        ? "Emulador pausado"
+        : emulatorActive
+          ? "Emulador ativo"
+          : "ROM carregada - aguardando emulador...";
+
+    return (
+      <div data-testid="viewport-panel-mock" data-show-workspace-tabs={showWorkspaceTabs ? "true" : "false"}>
+        {onboarding ? (
+          <div data-testid="viewport-sgdk-onboarding">
+            <strong>{onboarding.title}</strong>
+            <span>{onboarding.body}</span>
+          </div>
+        ) : null}
+
+        {activeViewportTab === "scene" && (
+          <div>
+            <button type="button" onClick={() => setGameViewLight((current) => !current)}>
+              GV
+            </button>
+            {!gameViewLight ? (
+              <>
+                <canvas
+                  data-testid="viewport-scene-ruler-top"
+                  onMouseDown={() => {
+                    const storageKey = `rds:scene-guides:${encodeURIComponent(activeProjectDir)}:${encodeURIComponent(
+                      activeScenePath || activeScene?.scene_id || ""
+                    )}`;
+                    const finalizeGuide = () => {
+                      localStorage.setItem(
+                        storageKey,
+                        JSON.stringify([{ id: "guide-test", orientation: "vertical", position: 32 }])
+                      );
+                      setSceneGuideCount(1);
+                    };
+                    window.addEventListener("mouseup", finalizeGuide, { once: true });
+                  }}
+                />
+                <canvas data-testid="viewport-scene-ruler-left" />
+              </>
+            ) : null}
+            <canvas
+              data-testid="viewport-scene-overlay"
+              onMouseDown={() => {
+                dragActiveRef.current = true;
+              }}
+              onMouseMove={(event) => {
+                if (!(event.buttons & 1) || !dragActiveRef.current) {
+                  return;
+                }
+                handleSceneResize();
+              }}
+              onMouseUp={() => {
+                dragActiveRef.current = false;
+                void mocks.persistActiveScene(activeProjectDir, "Viewport");
+              }}
+            />
+            <div>{sceneGuideCount} guia(s)</div>
+          </div>
+        )}
+
+        {activeViewportTab === "game" && (
+          <div>
+            <canvas ref={gameCanvasRef} data-testid="viewport-game-canvas" />
+            {assetHotReloadNotice ? (
+              <div data-testid="viewport-asset-hot-reload">
+                Assets alterados no disco. {assetHotReloadNotice}
+              </div>
+            ) : null}
+            <span data-testid="viewport-game-status">{gameStatus}</span>
+            <button type="button" data-testid="viewport-resume" onClick={() => setEmulPaused(false)}>
+              Retomar
+            </button>
+            <button type="button" data-testid="viewport-step-frame" onClick={() => void handleStepFrame()}>
+              Step 1 frame
+            </button>
+            <button type="button" onClick={() => void handleSaveState()}>
+              Salvar state
+            </button>
+            <button type="button" onClick={() => void handleLoadState()}>
+              Carregar state
+            </button>
+            <button type="button" data-testid="viewport-rewind" onClick={() => void handleRewind()}>
+              Rewind
+            </button>
+            <button type="button" onClick={() => setShowPerformanceOverlay((current) => !current)}>
+              {showPerformanceOverlay ? "Overlay ON" : "Overlay OFF"}
+            </button>
+            {showPerformanceOverlay && hwStatus ? (
+              <div data-testid="viewport-performance-overlay">
+                <span>Sprites {hwStatus.sprite_count}</span>
+                <span>DMA est. {hwStatus.dma_used}</span>
+              </div>
+            ) : null}
+          </div>
+        )}
+      </div>
+    );
+  },
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
@@ -743,6 +1157,7 @@ describe("App build flow", () => {
   it("builds, loads the ROM, and starts the emulator frame loop", async () => {
     await act(async () => {
       findButton(container, "Build & Run").click();
+      await flush();
       await flush();
       await flush();
     });

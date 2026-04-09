@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-04-07
+**Ultima Atualizacao:** 2026-04-09
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -9,12 +9,19 @@
 > Nao altere a secao "Decisoes Arquiteturais Consolidadas" sem ordem expressa do usuario.
 > Historico de sessoes anteriores a 2026-03-14 esta em docs/06_AI_MEMORY_BANK_WAVE_A_R.md.
 >
-> **WAVE S+ segue ativa em 2026-04-07:**
+> **WAVE S+ segue ativa em 2026-04-09:**
 > Foco: recuperar coerencia multi-agente, manter o fluxo canonico `Build -> ROM -> Emulacao` verde, endurecer hosts Windows limpos e documentar o estado real no GitHub sem claims infladas.
 
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-04-09 - Shell hardening: `ViewportPanel` saiu do chunk inicial e o guia contextual ficou menos denso):**
+  - **O split do viewport agora esta provado em build real e com cobertura preservada:** `src/App.tsx` passou a lazy-load `src/components/viewport/ViewportPanel.tsx`, `src/components/viewport/gameViewportScale.ts` isolou o helper puro de escala e `src/App.test.tsx` ganhou um mock de `ViewportPanel` mais fiel ao shell, cobrindo render de frame, `step/resume`, guias e ciclo de audio sem puxar o modulo pesado para o chunk inicial do app em teste.
+  - **A reducao do bundle principal foi material e medida, nao inferida:** `npm run build` passou a emitir `assets/index-CcfBHJuS.js` com ~`336.48 kB` bruto / `102.40 kB` gzip e um chunk dedicado `assets/ViewportPanel-QCBFMNhD.js` com ~`53.59 kB` bruto / `16.60 kB` gzip. Isso fecha a parte mais critica da frente `Performance do shell` desta wave sem tocar em build orchestration, emulacao, schema ou toolchains.
+  - **A densidade do shell tambem comecou a cair no caminho certo:** `WorkspaceGuideCard` em `src/App.tsx` agora prioriza apenas as duas acoes principais no topo e move a terceira acao para a area colapsavel `Contexto do workspace`, reduzindo ruído visual sem remover nenhum caminho funcional do shell atual.
+  - **O contrato do shell ficou mais honesto para testes e manutencao:** a suite `src/App.test.tsx` voltou a rodar inteira sem timeout de worker no Windows, mantendo a prova do fluxo `Build -> ROM -> emulador`, do onboarding SGDK, da rail de workspaces e dos controles do `Game View` mesmo com a nova fronteira lazy do viewport.
+  - **Barra verde desta rodada:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (`220` testes), `npm run build` OK, `scripts\\run-cargo-msvc.cmd clippy --manifest-path .\\src-tauri\\Cargo.toml -- -D warnings` OK e `scripts\\run-cargo-msvc.cmd test --manifest-path .\\src-tauri\\Cargo.toml --lib -- --nocapture --test-threads=1` OK (`255` aprovados / `0` falhas / `3` ignorados). O shell melhorou materialmente, mas `densidade do shell` e `onboarding/primeiro sucesso` ainda seguem em hardening antes de qualquer claim de UX final.
 
 * **O que acabou de acontecer (2026-04-07 - Performance do shell: `ReverseWorkspace` saiu do chunk inicial do `ToolsPanel`):**
   - **A fronteira de carregamento do `ToolsPanel` ficou mais conservadora e mais leve:** `src/components/tools/ReverseWorkspace.tsx` foi extraido para modulo proprio, `src/components/tools/ToolPathField.tsx` consolidou o seletor de caminho reutilizado e `src/components/tools/ToolsPanel.tsx` passou a lazy-load apenas o `Reverse Workspace`, mantendo `Patch`, `Profiler`, `Runtime Setup`, `Asset Browser`, `Memory Viewer` e `VRAM` no caminho direto ja conhecido.
@@ -717,7 +724,7 @@ As seguintes decisoes ja foram debatidas e sao finais:
 ## 4. PROXIMO PASSO IMEDIATO (PARA A IA EXECUTAR QUANDO SOLICITADA)
 
 **Tarefa:**
-Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as superficies `Experimental` que consigam provar valor no caminho canônico atual. Com o split conservador do `Reverse Workspace` ja certificado e o `ToolsPanel` novamente abaixo do pico anterior, o próximo alvo real passa a ser reduzir densidade do shell e continuar limpando o chunk principal sem reabrir frentes novas nem mexer no fluxo `Build -> ROM -> Emulacao`.
+Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as superficies `Experimental` que consigam provar valor no caminho canônico atual. Com o split conservador do `ViewportPanel` ja certificado, o chunk principal agora materialmente menor e a primeira compactacao do `WorkspaceGuideCard` ja entregue, o proximo alvo real passa a ser consolidar `onboarding / primeiro sucesso` sem reabrir frentes novas nem mexer no fluxo `Build -> ROM -> Emulacao`.
 
 **Pre-requisitos operacionais:**
 * Manter os 6 gates canonicos verdes em toda alteracao relevante.

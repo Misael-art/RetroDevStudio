@@ -14,7 +14,6 @@ import UnifiedTopBar, {
 import HierarchyPanel from "./components/hierarchy/HierarchyPanel";
 import LayerPanel from "./components/hierarchy/LayerPanel";
 import type { ToolTab, ToolWorkspace } from "./components/tools/ToolsPanel";
-import ViewportPanel from "./components/viewport/ViewportPanel";
 import { buildProject, generateCCode, validateProject } from "./core/ipc/buildService";
 import { emulatorLoadRom, emulatorStop } from "./core/ipc/emulatorService";
 import { getHwStatus } from "./core/ipc/hwService";
@@ -62,6 +61,7 @@ import { getEntityDisplayName } from "./core/entityDisplay";
 const ExplorerWorkspace = lazy(() => import("./components/explorer/ExplorerWorkspace"));
 const InspectorPanel = lazy(() => import("./components/inspector/InspectorPanel"));
 const ToolsPanel = lazy(() => import("./components/tools/ToolsPanel"));
+const ViewportPanel = lazy(() => import("./components/viewport/ViewportPanel"));
 
 function ToolbarButton({
   label,
@@ -397,6 +397,8 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
         : guide.signal?.tone === "success"
           ? "border-[#a6e3a1]/35 bg-[#a6e3a1]/10 text-[#a6e3a1]"
           : "border-[#89b4fa]/35 bg-[#89b4fa]/10 text-[#89b4fa]";
+  const primaryActions = guide.actions.slice(0, 2);
+  const secondaryActions = guide.actions.slice(2);
 
   return (
     <section
@@ -419,8 +421,8 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
             </div>
           ) : null}
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2 lg:max-w-[22rem] lg:justify-end">
-          {guide.actions.map((action) => (
+        <div className="flex shrink-0 flex-wrap gap-2 lg:max-w-[18rem] lg:justify-end">
+          {primaryActions.map((action) => (
             <ToolbarButton
               key={action.label}
               label={action.label}
@@ -438,10 +440,29 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
         </summary>
         <p className="mt-2 text-[11px] leading-5 text-[#94a3b8]">{guide.detail}</p>
         <p className="mt-2 text-[10px] leading-5 text-[#7f849c]">
-          Dica: a rail lateral troca de workspace, os presets Artist/Logic/Debug/Playtest reorganizam
-          o shell e o botao <span className="font-semibold text-[#cdd6f4]">Tools</span> sempre abre o
-          painel contextual da tarefa atual.
+          Dica: use a rail lateral para trocar de workspace, os presets Artist/Logic/Debug/Playtest
+          para reorganizar o shell e o botao <span className="font-semibold text-[#cdd6f4]">Tools</span>{" "}
+          para abrir o painel contextual da tarefa atual.
         </p>
+        {secondaryActions.length > 0 ? (
+          <div className="mt-3 border-t border-[#1f2937] pt-3">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">
+              Mais acoes
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {secondaryActions.map((action) => (
+                <ToolbarButton
+                  key={action.label}
+                  label={action.label}
+                  onClick={action.onClick}
+                  disabled={action.disabled}
+                  accent={action.accent}
+                  title={action.title}
+                />
+              ))}
+            </div>
+          </div>
+        ) : null}
       </details>
     </section>
   );
@@ -2971,7 +2992,9 @@ export default function App() {
                 />
               </Suspense>
             ) : (
-              <ViewportPanel showWorkspaceTabs={false} />
+              <Suspense fallback={<WorkspacePanelPlaceholder label="Carregando Workspace..." />}>
+                <ViewportPanel showWorkspaceTabs={false} />
+              </Suspense>
             )}
           </Panel>
           <LayoutSplitter />

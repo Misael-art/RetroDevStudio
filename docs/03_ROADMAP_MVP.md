@@ -312,7 +312,7 @@
 **Janela:** abril -> junho de 2026
 **Objetivo do trimestre:** consolidar o core real do produto, reduzir risco institucional, melhorar UX do shell/autoria diaria e elevar apenas as superficies experimentais com melhor custo/beneficio, sem abrir frentes de alto risco antes da hora.
 
-**Status de execucao em 2026-04-07:** frentes `1-3` seguem fechadas e verificadas; a frente `4` avancou com um split conservador do `Reverse Workspace`, reduzindo `ToolsPanel` para ~`67.10 kB` bruto / `17.33 kB` gzip e movendo o modulo reverso para um chunk dedicado de ~`26.12 kB` bruto / `5.79 kB` gzip. O chunk principal continua em ~`390.44 kB` bruto / `118.56 kB` gzip, portanto `performance do shell` segue em hardening e a proxima frente real continua sendo `densidade do shell`.
+**Status de execucao em 2026-04-09:** frentes `1-4` seguem fechadas e verificadas no estado atual do branch; a frente `5` entrou em hardening com duas entregas conservadoras no shell: `ViewportPanel` saiu do chunk inicial e o `WorkspaceGuideCard` passou a priorizar so as acoes principais no topo. O build atual mede o chunk principal em ~`336.48 kB` bruto / `102.40 kB` gzip, `ViewportPanel` em ~`53.59 kB` bruto / `16.60 kB` gzip, `ToolsPanel` em ~`67.13 kB` bruto / `17.35 kB` gzip e `ReverseWorkspace` em ~`26.16 kB` bruto / `5.81 kB` gzip. `Performance do shell` deixou de ser apenas local e passa a contar como reducao material medida; o proximo alvo real do trimestre fica em `onboarding / primeiro sucesso`, ainda sem abrir docking livre nem novas superficies.
 
 ### Owners sugeridos
 
