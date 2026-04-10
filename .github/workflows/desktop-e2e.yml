@@ -205,7 +205,7 @@ jobs:
 
       - name: Verify all E2E scenarios passed
         if: always()
-        shell: pwsh
+        shell: bash
         env:
           SMOKE_MD: ${{ steps.smoke_md.outcome }}
           SMOKE_SNES: ${{ steps.smoke_snes.outcome }}
@@ -224,37 +224,43 @@ jobs:
           LIVE_STALE_MD: ${{ steps.live_stale_md.outcome }}
           LIVE_STALE_SNES: ${{ steps.live_stale_snes.outcome }}
         run: |
-          $steps = @{
-            'smoke_md' = $env:SMOKE_MD
-            'smoke_snes' = $env:SMOKE_SNES
-            'live_overflow_md' = $env:LIVE_OVERFLOW_MD
-            'live_overflow_snes' = $env:LIVE_OVERFLOW_SNES
-            'live_vram_overflow_md' = $env:LIVE_VRAM_OVERFLOW_MD
-            'live_vram_overflow_snes' = $env:LIVE_VRAM_OVERFLOW_SNES
-            'live_vram_warning_md' = $env:LIVE_VRAM_WARNING_MD
-            'live_vram_warning_snes' = $env:LIVE_VRAM_WARNING_SNES
-            'live_sprite_warning_md' = $env:LIVE_SPRITE_WARNING_MD
-            'live_sprite_warning_snes' = $env:LIVE_SPRITE_WARNING_SNES
-            'live_ok_md' = $env:LIVE_OK_MD
-            'live_ok_snes' = $env:LIVE_OK_SNES
-            'live_error_md' = $env:LIVE_ERROR_MD
-            'live_error_snes' = $env:LIVE_ERROR_SNES
-            'live_stale_md' = $env:LIVE_STALE_MD
-            'live_stale_snes' = $env:LIVE_STALE_SNES
-          }
-          $failed = @()
-          $skippedOrEmpty = @('', 'skipped')
-          foreach ($entry in $steps.GetEnumerator()) {
-            if ($skippedOrEmpty -contains $entry.Value) { continue }
-            if ($entry.Value -ne 'success') {
-              $failed += "$($entry.Key) ($($entry.Value))"
-            }
-          }
-          if ($failed.Count -gt 0) {
-            Write-Host "::error::E2E scenarios failed: $($failed -join ', ')"
+          declare -A steps=(
+            [smoke_md]="$SMOKE_MD"
+            [smoke_snes]="$SMOKE_SNES"
+            [live_overflow_md]="$LIVE_OVERFLOW_MD"
+            [live_overflow_snes]="$LIVE_OVERFLOW_SNES"
+            [live_vram_overflow_md]="$LIVE_VRAM_OVERFLOW_MD"
+            [live_vram_overflow_snes]="$LIVE_VRAM_OVERFLOW_SNES"
+            [live_vram_warning_md]="$LIVE_VRAM_WARNING_MD"
+            [live_vram_warning_snes]="$LIVE_VRAM_WARNING_SNES"
+            [live_sprite_warning_md]="$LIVE_SPRITE_WARNING_MD"
+            [live_sprite_warning_snes]="$LIVE_SPRITE_WARNING_SNES"
+            [live_ok_md]="$LIVE_OK_MD"
+            [live_ok_snes]="$LIVE_OK_SNES"
+            [live_error_md]="$LIVE_ERROR_MD"
+            [live_error_snes]="$LIVE_ERROR_SNES"
+            [live_stale_md]="$LIVE_STALE_MD"
+            [live_stale_snes]="$LIVE_STALE_SNES"
+          )
+
+          failed=()
+          for key in "${!steps[@]}"; do
+            value="${steps[$key]}"
+            value="${value//$'\r'/}"
+            if [[ -z "$value" || "$value" == "skipped" ]]; then
+              continue
+            fi
+            if [[ "$value" != "success" ]]; then
+              failed+=("$key ($value)")
+            fi
+          done
+
+          if (( ${#failed[@]} > 0 )); then
+            printf '::error::E2E scenarios failed: %s\n' "$(IFS=', '; echo "${failed[*]}")"
             exit 1
-          }
-          Write-Host "All executed E2E scenarios passed."
+          fi
+
+          echo "All executed E2E scenarios passed."
 
       - name: Publish desktop E2E summary
         if: always()
