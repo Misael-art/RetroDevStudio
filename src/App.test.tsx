@@ -1175,6 +1175,136 @@ describe("App build flow", () => {
     container.remove();
   });
 
+  it("hydrates an existing project through the automation openProject bridge", async () => {
+    const automationWindow = window as Window & {
+      __TAURI_INTERNALS__?: unknown;
+      __RDS_E2E__?: {
+        openProject: (projectDir: string) => Promise<boolean>;
+      };
+    };
+    automationWindow.__TAURI_INTERNALS__ = {};
+
+    mocks.openProjectPath.mockResolvedValue({
+      selected: true,
+      path: "F:/Projects/RetroDevStudio/src-tauri/tests/fixtures/projects/snes_dummy",
+      name: "SNES Dummy",
+    });
+    mocks.getHwStatus.mockResolvedValue({
+      vram_used: 1024,
+      vram_limit: 65536,
+      sprite_count: 4,
+      sprite_limit: 128,
+      scanline_sprite_peak: 2,
+      scanline_sprite_limit: 32,
+      dma_used: 128,
+      dma_limit: 7372,
+      palette_banks_used: 2,
+      palette_banks_limit: 8,
+      bg_layers: 2,
+      bg_layers_limit: 4,
+      errors: [],
+      warnings: [],
+    });
+    mocks.getSceneData.mockResolvedValue({
+      ok: true,
+      error: "",
+      scene_json: JSON.stringify({
+        scene_id: "level1",
+        display_name: "Level 1",
+        entities: [
+          {
+            entity_id: "hero",
+            display_name: "Hero",
+            transform: { x: 24, y: 32 },
+            components: {},
+          },
+        ],
+        background_layers: [],
+      }),
+      project_name: "SNES Dummy",
+      target: "snes",
+      scene_path: "scenes/level1.json",
+      source_kind: "builtin",
+      legacy_sgdk_index: null,
+    });
+    mocks.hydrateSceneResult.mockResolvedValue({
+      sourceScene: {
+        scene_id: "level1",
+        display_name: "Level 1",
+        entities: [
+          {
+            entity_id: "hero",
+            display_name: "Hero",
+            transform: { x: 24, y: 32 },
+            components: {},
+          },
+        ],
+        background_layers: [],
+      },
+      resolvedScene: {
+        scene_id: "level1",
+        display_name: "Level 1",
+        entities: [
+          {
+            entity_id: "hero",
+            display_name: "Hero",
+            transform: { x: 24, y: 32 },
+            components: {},
+          },
+        ],
+        background_layers: [],
+      },
+    });
+    mocks.listScenes.mockResolvedValue([
+      {
+        path: "scenes/level1.json",
+        scene_id: "level1",
+        display_name: "Level 1",
+      },
+    ]);
+
+    await act(async () => {
+      root.unmount();
+      await flush();
+      root = createRoot(container);
+      root.render(<App />);
+      await flush();
+      await flush();
+    });
+
+    expect(typeof automationWindow.__RDS_E2E__?.openProject).toBe("function");
+
+    let opened = false;
+    await act(async () => {
+      opened = await automationWindow.__RDS_E2E__!.openProject(
+        "F:/Projects/RetroDevStudio/src-tauri/tests/fixtures/projects/snes_dummy"
+      );
+      await flush();
+      await flush();
+    });
+
+    expect(opened).toBe(true);
+    expect(mocks.openProjectPath).toHaveBeenCalledWith(
+      "F:/Projects/RetroDevStudio/src-tauri/tests/fixtures/projects/snes_dummy"
+    );
+
+    const state = useEditorStore.getState();
+    expect(state.activeProjectDir).toBe(
+      "F:/Projects/RetroDevStudio/src-tauri/tests/fixtures/projects/snes_dummy"
+    );
+    expect(state.activeProjectName).toBe("SNES Dummy");
+    expect(state.activeTarget).toBe("snes");
+    expect(state.activeScenePath).toBe("scenes/level1.json");
+    expect(state.projectSourceKind).toBe("builtin");
+    expect(state.activeScene?.display_name).toBe("Level 1");
+    expect(state.consoleEntries.some((entry) => entry.message.includes("Projeto aberto: SNES Dummy"))).toBe(
+      true
+    );
+
+    delete automationWindow.__RDS_E2E__;
+    delete automationWindow.__TAURI_INTERNALS__;
+  });
+
   it("builds, loads the ROM, and starts the emulator frame loop", async () => {
     await act(async () => {
       findButton(container, "Build & Run").click();

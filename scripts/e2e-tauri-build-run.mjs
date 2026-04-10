@@ -412,6 +412,24 @@ function artifactTimestamp() {
   return new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
 }
 
+function escapeGithubAnnotation(value) {
+  return String(value).replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
+}
+
+function emitGithubErrorAnnotation(message) {
+  if (process.env.GITHUB_ACTIONS !== "true") {
+    return;
+  }
+
+  const normalized = String(message ?? "").trim();
+  if (!normalized) {
+    return;
+  }
+
+  const limited = normalized.length > 4000 ? `${normalized.slice(0, 3997)}...` : normalized;
+  console.error(`::error::${escapeGithubAnnotation(limited)}`);
+}
+
 async function ensureValidationDir() {
   await mkdir(validationDir, { recursive: true });
 }
@@ -2818,6 +2836,8 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(`ERRO: ${error instanceof Error ? error.message : String(error)}`);
+  const details = error instanceof Error ? error.message : String(error);
+  emitGithubErrorAnnotation(details);
+  console.error(`ERRO: ${details}`);
   process.exit(1);
 });

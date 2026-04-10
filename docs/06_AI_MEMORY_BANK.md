@@ -12,7 +12,7 @@
 | `docs/06_AI_MEMORY_BANK_WAVE_A_R.md` | Historico arquivado das waves A-R |
 
 **Fluxo canonico:** leia este arquivo primeiro e siga imediatamente para `docs/06_CURRENT_WAVE_AI_BANK.md`.
-**Atualizacao ativa mais recente:** `build:debug` e `validate-upstream-windows` voltaram a ficar certificados localmente em `2026-04-10`, com `scripts/build.mjs` preservando o cache aquecido do Cargo no caminho `direct-cargo-debug`, `validate-upstream-windows.ps1` endurecido contra `os error 4551` em targets frios e leitura honesta de que o desktop E2E desta rodada depende do runner GitHub/Windows porque este host passou a bloquear o `tauri-driver.exe`.
+**Atualizacao ativa mais recente:** `build:debug` e `validate-upstream-windows` voltaram a ficar certificados localmente em `2026-04-10`, com `scripts/build.mjs` preservando o cache aquecido do Cargo no caminho `direct-cargo-debug`, `validate-upstream-windows.ps1` endurecido contra `os error 4551` em targets frios e leitura honesta de que o desktop E2E desta rodada depende do runner GitHub/Windows porque este host passou a bloquear o `tauri-driver.exe`. Na mesma wave, `.github/workflows/desktop-e2e.yml` deixou de mascarar falhas com trechos bash residuais, `scripts/e2e-tauri-build-run.mjs` passou a emitir anotacoes `::error::` no GitHub Actions e o bridge `window.__RDS_E2E__.openProject(...)` ganhou cobertura explicita em `src/App.test.tsx`, tornando visivel que o proximo gargalo real esta nos cenarios desktop remotos ainda falhando no runner, e nao mais na verificacao final do workflow.
 
 Em caso de conflito documental, a hierarquia continua sendo:
 `docs/06_AI_MEMORY_BANK.md` -> `docs/03_ROADMAP_MVP.md` -> `docs/09_AGENT_DEV_MODE.md`.
