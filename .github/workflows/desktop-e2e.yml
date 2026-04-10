@@ -107,160 +107,204 @@ jobs:
           Write-Host "Desktop E2E driver startup timeout: $env:RDS_E2E_DRIVER_TIMEOUT_MS ms"
           Write-Host "Desktop E2E timeout: $env:RDS_E2E_RUN_TIMEOUT_MS ms"
 
+      - name: Initialize desktop E2E pass ledger
+        run: |
+          $ledgerPath = Join-Path $env:RUNNER_TEMP 'desktop-e2e-passed.txt'
+          if (Test-Path $ledgerPath) {
+            Remove-Item -Path $ledgerPath -Force
+          }
+          New-Item -ItemType File -Path $ledgerPath -Force | Out-Null
+          "RDS_E2E_LEDGER=$ledgerPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Run Mega Drive desktop smoke
         id: smoke_md
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
         continue-on-error: true
-        run: npm run test:e2e:desktop:md -- --skip-build
+        run: |
+          npm run test:e2e:desktop:md -- --skip-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'smoke_md'
 
       - name: Run SNES desktop smoke
         id: smoke_snes
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
         continue-on-error: true
-        run: npm run test:e2e:desktop:snes -- --skip-build
+        run: |
+          npm run test:e2e:desktop:snes -- --skip-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'smoke_snes'
 
       - name: Run Mega Drive live overflow desktop E2E
         id: live_overflow_md
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
         continue-on-error: true
-        run: npm run test:e2e:desktop:live-overflow:md -- --skip-build
+        run: |
+          npm run test:e2e:desktop:live-overflow:md -- --skip-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_overflow_md'
 
       - name: Run SNES live overflow desktop E2E
         id: live_overflow_snes
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
         continue-on-error: true
-        run: npm run test:e2e:desktop:live-overflow:snes -- --skip-build
+        run: |
+          npm run test:e2e:desktop:live-overflow:snes -- --skip-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_overflow_snes'
 
       - name: Run Mega Drive live VRAM overflow desktop E2E
         id: live_vram_overflow_md
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
         continue-on-error: true
-        run: npm run test:e2e:desktop:live-overflow-vram:md -- --skip-build
+        run: |
+          npm run test:e2e:desktop:live-overflow-vram:md -- --skip-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_vram_overflow_md'
 
       - name: Run SNES live VRAM overflow desktop E2E
         id: live_vram_overflow_snes
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
         continue-on-error: true
-        run: npm run test:e2e:desktop:live-overflow-vram:snes -- --skip-build
+        run: |
+          npm run test:e2e:desktop:live-overflow-vram:snes -- --skip-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_vram_overflow_snes'
 
       - name: Run Mega Drive live VRAM warning desktop E2E
         id: live_vram_warning_md
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
         continue-on-error: true
-        run: npm run test:e2e:desktop:live-warning-vram:md -- --skip-build
+        run: |
+          npm run test:e2e:desktop:live-warning-vram:md -- --skip-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_vram_warning_md'
 
       - name: Run SNES live VRAM warning desktop E2E
         id: live_vram_warning_snes
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
         continue-on-error: true
-        run: npm run test:e2e:desktop:live-warning-vram:snes -- --skip-build
+        run: |
+          npm run test:e2e:desktop:live-warning-vram:snes -- --skip-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_vram_warning_snes'
 
       - name: Run Mega Drive live sprite warning desktop E2E
         id: live_sprite_warning_md
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
         continue-on-error: true
-        run: npm run test:e2e:desktop:live-warning-sprites:md -- --skip-build
+        run: |
+          npm run test:e2e:desktop:live-warning-sprites:md -- --skip-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_sprite_warning_md'
 
       - name: Run SNES live sprite warning desktop E2E
         id: live_sprite_warning_snes
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
         continue-on-error: true
-        run: npm run test:e2e:desktop:live-warning-sprites:snes -- --skip-build
+        run: |
+          npm run test:e2e:desktop:live-warning-sprites:snes -- --skip-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_sprite_warning_snes'
 
       - name: Run Mega Drive live healthy desktop E2E
         id: live_ok_md
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
         continue-on-error: true
-        run: npm run test:e2e:desktop:live-ok:md -- --skip-build
+        run: |
+          npm run test:e2e:desktop:live-ok:md -- --skip-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_ok_md'
 
       - name: Run SNES live healthy desktop E2E
         id: live_ok_snes
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
         continue-on-error: true
-        run: npm run test:e2e:desktop:live-ok:snes -- --skip-build
+        run: |
+          npm run test:e2e:desktop:live-ok:snes -- --skip-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_ok_snes'
 
       - name: Run Mega Drive live error desktop E2E
         id: live_error_md
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
         continue-on-error: true
-        run: npm run test:e2e:desktop:live-error:md -- --skip-build
+        run: |
+          npm run test:e2e:desktop:live-error:md -- --skip-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_error_md'
 
       - name: Run SNES live error desktop E2E
         id: live_error_snes
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
         continue-on-error: true
-        run: npm run test:e2e:desktop:live-error:snes -- --skip-build
+        run: |
+          npm run test:e2e:desktop:live-error:snes -- --skip-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_error_snes'
 
       - name: Run Mega Drive live stale desktop E2E
         id: live_stale_md
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
         continue-on-error: true
-        run: npm run test:e2e:desktop:live-stale:md -- --skip-build
+        run: |
+          npm run test:e2e:desktop:live-stale:md -- --skip-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_stale_md'
 
       - name: Run SNES live stale desktop E2E
         id: live_stale_snes
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
         continue-on-error: true
-        run: npm run test:e2e:desktop:live-stale:snes -- --skip-build
+        run: |
+          npm run test:e2e:desktop:live-stale:snes -- --skip-build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_stale_snes'
 
       - name: Verify all E2E scenarios passed
         if: always()
-        shell: bash
-        env:
-          SMOKE_MD: ${{ steps.smoke_md.outcome }}
-          SMOKE_SNES: ${{ steps.smoke_snes.outcome }}
-          LIVE_OVERFLOW_MD: ${{ steps.live_overflow_md.outcome }}
-          LIVE_OVERFLOW_SNES: ${{ steps.live_overflow_snes.outcome }}
-          LIVE_VRAM_OVERFLOW_MD: ${{ steps.live_vram_overflow_md.outcome }}
-          LIVE_VRAM_OVERFLOW_SNES: ${{ steps.live_vram_overflow_snes.outcome }}
-          LIVE_VRAM_WARNING_MD: ${{ steps.live_vram_warning_md.outcome }}
-          LIVE_VRAM_WARNING_SNES: ${{ steps.live_vram_warning_snes.outcome }}
-          LIVE_SPRITE_WARNING_MD: ${{ steps.live_sprite_warning_md.outcome }}
-          LIVE_SPRITE_WARNING_SNES: ${{ steps.live_sprite_warning_snes.outcome }}
-          LIVE_OK_MD: ${{ steps.live_ok_md.outcome }}
-          LIVE_OK_SNES: ${{ steps.live_ok_snes.outcome }}
-          LIVE_ERROR_MD: ${{ steps.live_error_md.outcome }}
-          LIVE_ERROR_SNES: ${{ steps.live_error_snes.outcome }}
-          LIVE_STALE_MD: ${{ steps.live_stale_md.outcome }}
-          LIVE_STALE_SNES: ${{ steps.live_stale_snes.outcome }}
+        shell: pwsh
         run: |
-          declare -A steps=(
-            [smoke_md]="$SMOKE_MD"
-            [smoke_snes]="$SMOKE_SNES"
-            [live_overflow_md]="$LIVE_OVERFLOW_MD"
-            [live_overflow_snes]="$LIVE_OVERFLOW_SNES"
-            [live_vram_overflow_md]="$LIVE_VRAM_OVERFLOW_MD"
-            [live_vram_overflow_snes]="$LIVE_VRAM_OVERFLOW_SNES"
-            [live_vram_warning_md]="$LIVE_VRAM_WARNING_MD"
-            [live_vram_warning_snes]="$LIVE_VRAM_WARNING_SNES"
-            [live_sprite_warning_md]="$LIVE_SPRITE_WARNING_MD"
-            [live_sprite_warning_snes]="$LIVE_SPRITE_WARNING_SNES"
-            [live_ok_md]="$LIVE_OK_MD"
-            [live_ok_snes]="$LIVE_OK_SNES"
-            [live_error_md]="$LIVE_ERROR_MD"
-            [live_error_snes]="$LIVE_ERROR_SNES"
-            [live_stale_md]="$LIVE_STALE_MD"
-            [live_stale_snes]="$LIVE_STALE_SNES"
+          if (-not (Test-Path $env:RDS_E2E_LEDGER)) {
+            throw "Ledger de cenarios E2E nao encontrado em $env:RDS_E2E_LEDGER"
+          }
+
+          $expectedMd = @(
+            'smoke_md',
+            'live_overflow_md',
+            'live_vram_overflow_md',
+            'live_vram_warning_md',
+            'live_sprite_warning_md',
+            'live_ok_md',
+            'live_error_md',
+            'live_stale_md'
+          )
+          $expectedSnes = @(
+            'smoke_snes',
+            'live_overflow_snes',
+            'live_vram_overflow_snes',
+            'live_vram_warning_snes',
+            'live_sprite_warning_snes',
+            'live_ok_snes',
+            'live_error_snes',
+            'live_stale_snes'
           )
 
-          failed=()
-          for key in "${!steps[@]}"; do
-            value="${steps[$key]}"
-            value="${value//$'\r'/}"
-            if [[ -z "$value" || "$value" == "skipped" ]]; then
-              continue
-            fi
-            if [[ "$value" != "success" ]]; then
-              failed+=("$key ($value)")
-            fi
-          done
+          $expected = switch ($env:RDS_E2E_TARGET) {
+            'megadrive' { $expectedMd }
+            'snes' { $expectedSnes }
+            default { @($expectedMd + $expectedSnes) }
+          }
+          $executed = Get-Content -Path $env:RDS_E2E_LEDGER | Where-Object {
+            -not [string]::IsNullOrWhiteSpace($_)
+          }
+          $missing = @($expected | Where-Object { $_ -notin $executed })
 
-          if (( ${#failed[@]} > 0 )); then
-            printf '::error::E2E scenarios failed: %s\n' "$(IFS=', '; echo "${failed[*]}")"
+          if ($missing.Count -gt 0) {
+            Write-Host "::error::E2E scenarios missing success markers: $($missing -join ', ')"
             exit 1
-          fi
+          }
 
-          echo "All executed E2E scenarios passed."
+          Write-Host "All executed E2E scenarios passed."
 
       - name: Publish desktop E2E summary
         if: always()
