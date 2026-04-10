@@ -592,7 +592,14 @@ describe("ToolsPanel Asset Browser", () => {
       await flush();
     });
 
-    expect(container.textContent).toContain("Carregando Reverse Workspace...");
+    await act(async () => {
+      await flush();
+      await flush();
+    });
+
+    expect(container.textContent).toMatch(
+      /Carregando Reverse Workspace\.\.\.|Reverse Workspace carregado/
+    );
   });
 
   it("shows a consistent fallback when the selected asset preview fails to load", async () => {

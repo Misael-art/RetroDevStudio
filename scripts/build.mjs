@@ -58,15 +58,18 @@ const LEGACY_BUILD_REPORT_PATH = path.join(CANONICAL_TARGET_DIR, "build-report.j
 const DEBUG_EXE = path.join(CANONICAL_TARGET_DIR, "debug", "retro-dev-studio.exe");
 const RELEASE_EXE = path.join(CANONICAL_TARGET_DIR, "release", "retro-dev-studio.exe");
 const MSI_DIR = path.join(CANONICAL_TARGET_DIR, "release", "bundle", "msi");
-const LEGACY_ROOT_ARTIFACTS = [
+const CARGO_CACHE_ROOT_ARTIFACTS = [
   ".rustc_info.json",
-  "build-report.json",
   ".cargo-lock",
   ".fingerprint",
   "build",
   "deps",
   "examples",
   "incremental",
+];
+
+const LEGACY_ROOT_RUNTIME_ARTIFACTS = [
+  "build-report.json",
   "app_lib.d",
   "app_lib.dll",
   "app_lib.dll.exp",
@@ -85,8 +88,22 @@ function npmCommand() {
   return process.platform === "win32" ? "npm.cmd" : "npm";
 }
 
+function cargoCommand() {
+  return process.platform === "win32"
+    ? path.join("scripts", "run-cargo-msvc.cmd")
+    : "cargo";
+}
+
 function profileForMode(mode) {
   return mode === "debug" ? "debug" : "release";
+}
+
+function shouldUseDirectCargoDebug(mode) {
+  return (
+    process.platform === "win32" &&
+    mode === "debug" &&
+    process.env.RDS_FORCE_TAURI_CLI_DEBUG !== "1"
+  );
 }
 
 function runtimeFilesForProfile(profile) {
@@ -128,6 +145,20 @@ function shouldPreemptivelyUseShadowTarget(targetDir, mode) {
 
 function normalizeMode(mode) {
   return mode === "all" ? ["debug", "msi", "portable"] : [mode];
+}
+
+function targetDirForMode(mode) {
+  if (shouldUseDirectCargoDebug(mode) && !process.env.CARGO_TARGET_DIR) {
+    return CANONICAL_TARGET_DIR;
+  }
+  return REQUESTED_TARGET_DIR;
+}
+
+function shouldPreserveCanonicalCargoCache(modes) {
+  return modes.some(
+    (mode) =>
+      shouldUseDirectCargoDebug(mode) && samePath(targetDirForMode(mode), CANONICAL_TARGET_DIR)
+  );
 }
 
 function buildReportTemplate() {
@@ -373,9 +404,13 @@ async function ensureOperationalLayout() {
   await mkdir(path.dirname(RELEASE_EXE), { recursive: true });
 }
 
-async function pruneLegacyRootArtifacts() {
+async function pruneLegacyRootArtifacts({ preserveCargoCache = false } = {}) {
+  const removableArtifacts = preserveCargoCache
+    ? LEGACY_ROOT_RUNTIME_ARTIFACTS
+    : [...CARGO_CACHE_ROOT_ARTIFACTS, ...LEGACY_ROOT_RUNTIME_ARTIFACTS];
+
   await Promise.all(
-    LEGACY_ROOT_ARTIFACTS.map((name) =>
+    removableArtifacts.map((name) =>
       rm(path.join(CANONICAL_TARGET_DIR, name), { recursive: true, force: true })
     )
   );
@@ -449,10 +484,48 @@ async function runTauriBuild(mode, effectiveTargetDir) {
   });
 }
 
+async function runFrontendBuild() {
+  console.log("\n[Build] Gerando frontend via npm run build antes do cargo build...\n");
+  await spawnLogged(npmCommand(), ["run", "build"]);
+}
+
+async function runCargoBuild(mode, effectiveTargetDir) {
+  const cargoArgs = ["build", "--manifest-path"];
+  if (process.platform === "win32") {
+    cargoArgs.push(".\\src-tauri\\Cargo.toml");
+  } else {
+    cargoArgs.push(path.join("src-tauri", "Cargo.toml"));
+  }
+
+  if (profileForMode(mode) === "release") {
+    cargoArgs.push("--release");
+  }
+
+  console.log(`\n[Build] Compilando via cargo direto (modo: ${mode})...\n`);
+  console.log(`[Build] Cargo target efetivo: ${effectiveTargetDir}`);
+  await spawnLogged(cargoCommand(), cargoArgs, {
+    env: { ...process.env, CARGO_TARGET_DIR: effectiveTargetDir },
+  });
+}
+
+async function runBuildCommand(mode, effectiveTargetDir) {
+  if (shouldUseDirectCargoDebug(mode)) {
+    await runFrontendBuild();
+    await runCargoBuild(mode, effectiveTargetDir);
+    return "direct-cargo-debug";
+  }
+
+  await runTauriBuild(mode, effectiveTargetDir);
+  return "tauri-cli";
+}
+
 async function buildModeWithFallback(mode) {
   const profile = profileForMode(mode);
-  const firstTarget = REQUESTED_TARGET_DIR;
-  const useShadowPreemptively = shouldPreemptivelyUseShadowTarget(firstTarget, mode);
+  const directCargoDebug = shouldUseDirectCargoDebug(mode);
+  const firstTarget = targetDirForMode(mode);
+  const useShadowPreemptively = directCargoDebug
+    ? false
+    : shouldPreemptivelyUseShadowTarget(firstTarget, mode);
   const initialTarget = useShadowPreemptively ? SHADOW_TARGET_DIR : firstTarget;
 
   if (useShadowPreemptively) {
@@ -463,7 +536,7 @@ async function buildModeWithFallback(mode) {
   }
 
   try {
-    await runTauriBuild(mode, initialTarget);
+    const buildStrategy = await runBuildCommand(mode, initialTarget);
     await stageArtifactsForMode(mode, initialTarget);
     return {
       mode,
@@ -471,13 +544,42 @@ async function buildModeWithFallback(mode) {
       effectiveTargetDir: initialTarget,
       usedShadowFallback: path.resolve(initialTarget) === path.resolve(SHADOW_TARGET_DIR),
       blockedDll: null,
+      buildStrategy,
     };
   } catch (firstError) {
-    if (
-      process.platform !== "win32" ||
-      path.resolve(initialTarget) === path.resolve(SHADOW_TARGET_DIR)
-    ) {
+    if (process.platform !== "win32") {
       throw firstError;
+    }
+
+    if (directCargoDebug) {
+      throw firstError;
+    }
+
+    if (path.resolve(initialTarget) === path.resolve(SHADOW_TARGET_DIR)) {
+      if (samePath(firstTarget, SHADOW_TARGET_DIR)) {
+        throw firstError;
+      }
+
+      console.log("\n[Retry] Shadow target preventivo falhou neste host.");
+      console.log(`[Retry] Reexecutando no target solicitado pelo workspace: ${firstTarget}\n`);
+
+      try {
+        const buildStrategy = await runBuildCommand(mode, firstTarget);
+        await stageArtifactsForMode(mode, firstTarget);
+        return {
+          mode,
+          profile,
+          effectiveTargetDir: firstTarget,
+          usedShadowFallback: false,
+          blockedDll: null,
+          buildStrategy,
+        };
+      } catch (secondError) {
+        throw new Error(
+          `Build falhou no shadow target (${SHADOW_TARGET_DIR}) e no target solicitado (${firstTarget}).`,
+          { cause: secondError }
+        );
+      }
     }
 
     const blockedDll = await detectBlockedDll(firstTarget, profile);
@@ -489,7 +591,7 @@ async function buildModeWithFallback(mode) {
     console.log(`[Retry] DLL bloqueada detectada: ${blockedDll}`);
     console.log(`[Retry] Reexecutando no shadow target permitido: ${SHADOW_TARGET_DIR}\n`);
 
-    await runTauriBuild(mode, SHADOW_TARGET_DIR);
+    const buildStrategy = await runBuildCommand(mode, SHADOW_TARGET_DIR);
     await stageArtifactsForMode(mode, SHADOW_TARGET_DIR);
     return {
       mode,
@@ -497,6 +599,7 @@ async function buildModeWithFallback(mode) {
       effectiveTargetDir: SHADOW_TARGET_DIR,
       usedShadowFallback: true,
       blockedDll,
+      buildStrategy,
     };
   }
 }
@@ -508,6 +611,7 @@ async function writeBuildReport(buildResults) {
     const canonicalProfileDir = path.join(CANONICAL_TARGET_DIR, result.profile);
     report.modes[result.mode] = {
       profile: result.profile,
+      buildStrategy: result.buildStrategy ?? "tauri-cli",
       effectiveTargetDir: result.effectiveTargetDir,
       usedShadowFallback: result.usedShadowFallback,
       blockedDll: result.blockedDll,
@@ -637,8 +741,14 @@ async function main() {
 
   try {
     await ensureOperationalLayout();
-    await pruneLegacyRootArtifacts();
     const modesToRun = normalizeMode(mode);
+    const preserveCargoCache = shouldPreserveCanonicalCargoCache(modesToRun);
+    if (preserveCargoCache) {
+      console.log(
+        "\n[Prep] Preservando cache aquecido do Cargo em src-tauri/target-test para o caminho direct-cargo-debug.\n"
+      );
+    }
+    await pruneLegacyRootArtifacts({ preserveCargoCache });
     const buildStartedAt = Date.now();
     const buildResults = [];
     console.log("\n[Prep] Mantendo artefatos anteriores e validando atualizacao por timestamp.\n");

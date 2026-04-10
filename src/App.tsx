@@ -380,6 +380,7 @@ type WorkspaceGuide = {
   eyebrow: string;
   title: string;
   summary: string;
+  checkpoints?: string[];
   detail: string;
   signal?: {
     tone: "info" | "warn" | "error" | "success";
@@ -411,7 +412,19 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
             {guide.eyebrow}
           </p>
           <h2 className="mt-1 text-sm font-semibold text-[#e2e8f0]">{guide.title}</h2>
-          <p className="mt-1 text-xs leading-5 text-[#cbd5e1]">{guide.summary}</p>
+          <p className="mt-1 text-[11px] leading-5 text-[#cbd5e1]">{guide.summary}</p>
+          {guide.checkpoints?.length ? (
+            <div className="mt-2 flex flex-wrap gap-1.5" data-testid="workspace-guide-checkpoints">
+              {guide.checkpoints.map((checkpoint) => (
+                <span
+                  key={checkpoint}
+                  className="inline-flex items-center rounded-full border border-[#313244] bg-black/15 px-2 py-1 text-[10px] font-medium text-[#bac2de]"
+                >
+                  {checkpoint}
+                </span>
+              ))}
+            </div>
+          ) : null}
           {guide.signal ? (
             <div
               data-testid="workspace-guide-signal"
@@ -436,14 +449,20 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
       </div>
       <details className="mt-2 rounded-xl border border-[#1f2937] bg-black/10 px-3 py-2">
         <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7f849c]">
-          Contexto do workspace
+          Contexto e atalhos
         </summary>
         <p className="mt-2 text-[11px] leading-5 text-[#94a3b8]">{guide.detail}</p>
-        <p className="mt-2 text-[10px] leading-5 text-[#7f849c]">
-          Dica: use a rail lateral para trocar de workspace, os presets Artist/Logic/Debug/Playtest
-          para reorganizar o shell e o botao <span className="font-semibold text-[#cdd6f4]">Tools</span>{" "}
-          para abrir o painel contextual da tarefa atual.
-        </p>
+        <div className="mt-2 flex flex-wrap gap-1.5 text-[10px] text-[#7f849c]">
+          <span className="rounded-full border border-[#1f2937] bg-black/10 px-2 py-1">
+            Rail: troca workspace
+          </span>
+          <span className="rounded-full border border-[#1f2937] bg-black/10 px-2 py-1">
+            Presets: reorganizam o shell
+          </span>
+          <span className="rounded-full border border-[#1f2937] bg-black/10 px-2 py-1">
+            Tools: painel contextual
+          </span>
+        </div>
         {secondaryActions.length > 0 ? (
           <div className="mt-3 border-t border-[#1f2937] pt-3">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#64748b]">
@@ -2120,11 +2139,16 @@ export default function App() {
 
         return {
           eyebrow: "Scene Editor",
-          title: "Monte a cena e refine entidades sem sair do canvas.",
+          title: "Monte a cena e valide a selecao sem sair do canvas.",
           summary:
-            "Hierarchy fica a esquerda, viewport no centro e o painel direito alterna entre Inspector e Tools para manter o fluxo de autoria mais curto.",
+            "Hierarchy, viewport e painel direito ficam alinhados para editar, inspecionar e rodar com menos troca de contexto.",
+          checkpoints: [
+            "Hierarchy: selecao e cenas",
+            "Inspector/Tools: propriedades e utilitarios",
+            "Build & Run: validacao rapida",
+          ],
           detail:
-            "Abra o Asset Browser quando quiser descobrir recursos do projeto, use o Inspector para revisar componentes da selecao atual e rode no emulador assim que a cena estiver pronta.",
+            "Abra o Asset Browser para instanciar recursos canonicos, revise a entidade ativa no Inspector e rode no emulador assim que a cena estiver pronta.",
           signal: sharedSignal,
           actions: [
             {

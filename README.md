@@ -12,7 +12,7 @@
 
 ## Estado Real
 
-- Data de referencia: `2026-04-09`.
+- Data de referencia: `2026-04-10`.
 - Fase ativa real: `hardening / QA do MVP desktop`, com foco em manter o fluxo canonico `Build -> ROM -> Emulacao` repetivel em host Windows limpo.
 - O estado operacional canônico fica em [docs/06_AI_MEMORY_BANK.md](./docs/06_AI_MEMORY_BANK.md).
 - Se este `README` divergir do estado real, prevalecem:
@@ -35,8 +35,8 @@
 - `src-tauri/target-test/validation/release-readiness.json` fechou esta rodada com `readyForPromotion = true` em `2026-04-04T03:07:15.245Z`, usando worktree limpo no commit `941b4dbefa5e6187a5d813e02b0254ada950213d`.
 - Workflows do GitHub agora publicam sumario legivel e artefatos de validacao para auditoria por push.
 - Bootstrap seguro para host limpo via [scripts/bootstrap.ps1](./scripts/bootstrap.ps1).
-- Baseline recertificada neste host em `2026-04-09` com:
-  `check-tree`, `lint`, `tsc`, `npm test`, `cargo clippy`, `cargo test`, `build`, `build:debug`, `validate-upstream-windows` e `qa-rc`.
+- `build:debug` e `validate-upstream-windows` foram recertificados novamente neste host em `2026-04-10`.
+- Leitura honesta desta sessao: este host passou a bloquear o binario `tauri-driver.exe`, inclusive no fallback `--external-driver`; por isso, a recertificacao institucional de `desktop E2E` e `qa-rc` desta rodada precisa vir do workflow GitHub/Windows apos o push, e nao pode ser tratada como prova local renovada.
 
 ### O que ainda esta em hardening
 

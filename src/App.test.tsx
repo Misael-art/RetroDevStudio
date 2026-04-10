@@ -1410,7 +1410,9 @@ describe("App build flow", () => {
     const guide = container.querySelector("[data-testid='workspace-guide']");
 
     expect(guide?.textContent).toContain("Scene Editor");
-    expect(guide?.textContent).toContain("Hierarchy fica a esquerda");
+    expect(guide?.textContent).toContain("Hierarchy, viewport e painel direito");
+    expect(guide?.textContent).toContain("Hierarchy: selecao e cenas");
+    expect(guide?.textContent).toContain("Build & Run: validacao rapida");
 
     await act(async () => {
       findButton(guide as HTMLElement, "Abrir Asset Browser").click();
@@ -2627,6 +2629,11 @@ describe("App build flow", () => {
       warnings: [],
     };
     mocks.getHwStatus.mockResolvedValue(liveOverlayStatus);
+    mocks.validateSceneDraft.mockResolvedValue({
+      ok: true,
+      error: "",
+      hw_status: liveOverlayStatus,
+    });
 
     await act(async () => {
       useEditorStore.setState({
@@ -2675,24 +2682,32 @@ describe("App build flow", () => {
   });
 
   it("shows the live VRAM budget bar in the toolbar", async () => {
+    const toolbarBudgetStatus = {
+      vram_used: 49152,
+      vram_limit: 65536,
+      sprite_count: 12,
+      sprite_limit: 80,
+      scanline_sprite_peak: 18,
+      scanline_sprite_limit: 20,
+      dma_used: 49152,
+      dma_limit: 7372,
+      palette_banks_used: 3,
+      palette_banks_limit: 4,
+      bg_layers: 2,
+      bg_layers_limit: 4,
+      errors: [],
+      warnings: ["VRAM Warning"],
+    };
+    mocks.getHwStatus.mockResolvedValue(toolbarBudgetStatus);
+    mocks.validateSceneDraft.mockResolvedValue({
+      ok: true,
+      error: "",
+      hw_status: toolbarBudgetStatus,
+    });
+
     await act(async () => {
       useEditorStore.setState({
-        hwStatus: {
-          vram_used: 49152,
-          vram_limit: 65536,
-          sprite_count: 12,
-          sprite_limit: 80,
-          scanline_sprite_peak: 18,
-          scanline_sprite_limit: 20,
-          dma_used: 49152,
-          dma_limit: 7372,
-          palette_banks_used: 3,
-          palette_banks_limit: 4,
-          bg_layers: 2,
-          bg_layers_limit: 4,
-          errors: [],
-          warnings: ["VRAM Warning"],
-        },
+        hwStatus: toolbarBudgetStatus,
       });
       await flush();
     });

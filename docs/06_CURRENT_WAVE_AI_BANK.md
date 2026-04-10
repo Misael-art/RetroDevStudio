@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-04-09
+**Ultima Atualizacao:** 2026-04-10
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -15,6 +15,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-04-10 - Build debug e upstream voltaram a ficar verdes localmente; desktop desta rodada ficou bloqueado por policy externa do host):**
+  - **`build:debug` foi recuperado no caminho canonico deste host sem maquiar a causa:** `scripts/build.mjs` passou a separar caches raiz do Cargo de artefatos transitórios de runtime e preservar `build/deps/.fingerprint/incremental` quando o Windows usa `direct-cargo-debug` diretamente em `src-tauri/target-test`. Isso impediu que o script destruísse o cache aquecido que o próprio host consegue executar e trouxe de volta `npm run build:debug` com `retro-dev-studio.exe` e `build-report.json` frescos na mesma rodada.
+  - **A prova upstream agora é registrada de forma mais resiliente e auditável:** `scripts/validate-upstream-windows.ps1` passou a capturar stdout/stderr do Cargo em log real, registrar `requestedCargoTargetDir` versus `effectiveCargoTargetDir` no report e preparar retry conservador para o target canônico aquecido quando o target dedicado frio sofrer `os error 4551` por AppLocker. Nesta sessão o gate voltou a passar integralmente com `success = true`.
+  - **O shell manteve o endurecimento iniciado nas rodadas anteriores:** `src/App.tsx` reduziu densidade do `Workspace Guide` com checkpoints explícitos no `Scene Editor`, `src/App.test.tsx` alinhou os asserts e os cenários de HUD/live budget ao estado real do store, `src/components/tools/ToolsPanel.test.tsx` absorveu a borda lazy do `Reverse Workspace` sem afrouxar prova real e `vite.config.ts` voltou ao baseline `forks + isolate + 1 worker`, que hoje é o contrato mais estável deste host Windows.
+  - **O bloqueio restante desta rodada é externo ao repositório e foi reproduzido sem ambiguidade:** tanto o bootstrap interno de `node scripts/e2e-tauri-build-run.mjs --skip-build --native-driver .\\toolchains\\webdriver\\msedgedriver.exe` quanto o fallback documentado `--external-driver` falharam porque este host passou a bloquear o próprio `tauri-driver.exe` por política de Controle de Aplicativo. Isso invalida claim de recertificação desktop local nesta sessão; a evidência institucional correspondente precisa vir do workflow GitHub/Windows após o push.
+  - **Barra verde local desta rodada:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (`220` testes), `scripts\\run-cargo-msvc.cmd clippy --manifest-path .\\src-tauri\\Cargo.toml -- -D warnings` OK, `scripts\\run-cargo-msvc.cmd test --manifest-path .\\src-tauri\\Cargo.toml --lib -- --nocapture --test-threads=1` OK (`255` aprovados / `0` falhas / `3` ignorados), `npm run build:debug` OK e `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\validate-upstream-windows.ps1 -SkipRustTests` OK.
+  - **Leitura honesta:** a rodada fechou `build` e `upstream` localmente, mas `desktop E2E`/`qa-rc` continuam em hardening nesta sessão porque o host atual bloqueou o binário do `tauri-driver`. O próximo passo institucional correto é push + repetição em runner GitHub/Windows, sem promover texto/local report além do que a política do host sustentou.
 
 * **O que acabou de acontecer (2026-04-09 - Onboarding institucional: wizard desktop voltou a ficar clicavel e o primeiro sucesso foi recertificado no app empacotado):**
   - **O modal do wizard voltou a respeitar viewport desktop real:** `src/App.tsx` separou o fluxo em `project-wizard-body` rolavel e `project-wizard-actions` fixo, mantendo o footer principal visivel mesmo quando a galeria cresce no host Windows atual.
