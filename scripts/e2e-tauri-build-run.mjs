@@ -2435,17 +2435,38 @@ async function main() {
     );
 
     if (!openResult?.ok) {
-      fail(`Falha ao abrir projeto no app: ${openResult?.error ?? "sem diagnostico"}`);
+      const diagnostics = formatAppDiagnostics(await collectAppDiagnostics(sessionId));
+      fail(
+        [
+          `Falha ao abrir projeto no app: ${openResult?.error ?? "sem diagnostico"}`,
+          diagnostics,
+        ]
+          .filter(Boolean)
+          .join("\n")
+      );
     }
 
-    await waitFor(
-      async () => {
-        const state = await readAutomationState(sessionId);
-        return state?.activeProjectDir && state.activeProjectName ? state : false;
-      },
-      15000,
-      "Projeto nao apareceu na UI"
-    );
+    try {
+      await waitFor(
+        async () => {
+          const state = await readAutomationState(sessionId);
+          return state?.activeProjectDir && state.activeProjectName ? state : false;
+        },
+        15000,
+        "Projeto nao apareceu na UI"
+      );
+    } catch (error) {
+      const diagnostics = formatAppDiagnostics(await collectAppDiagnostics(sessionId));
+      const details = error instanceof Error ? error.message : String(error);
+      fail(
+        [
+          details,
+          diagnostics,
+        ]
+          .filter(Boolean)
+          .join("\n")
+      );
+    }
 
     if (options.scenario === "live-ok") {
       const liveOkScenario = buildLiveOkScenario(projectMetadata.target);
