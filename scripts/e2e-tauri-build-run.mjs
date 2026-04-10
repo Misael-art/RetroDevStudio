@@ -46,6 +46,7 @@ const manualQaStatusPath = path.join(
   validationDir,
   "manual-qa-status.json"
 );
+let currentE2eRunContext = null;
 
 function fail(message) {
   throw new Error(message);
@@ -428,6 +429,50 @@ function emitGithubErrorAnnotation(message) {
 
   const limited = normalized.length > 4000 ? `${normalized.slice(0, 3997)}...` : normalized;
   console.error(`::error::${escapeGithubAnnotation(limited)}`);
+}
+
+function sanitizeFailureReportSegment(value) {
+  return String(value ?? "unknown")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "unknown";
+}
+
+function getDesktopFailureReportPath(scenario) {
+  return path.join(
+    validationDir,
+    `desktop-e2e-failure-${sanitizeFailureReportSegment(scenario)}.json`
+  );
+}
+
+async function clearDesktopFailureReport(scenario) {
+  const targetPath = getDesktopFailureReportPath(scenario);
+  if (await pathExists(targetPath)) {
+    await rm(targetPath, { force: true });
+  }
+}
+
+async function writeDesktopFailureReport(error) {
+  const scenario = currentE2eRunContext?.scenario ?? "unknown";
+  await ensureValidationDir();
+  const payload = {
+    generatedAt: new Date().toISOString(),
+    scenario,
+    project: currentE2eRunContext?.project ?? null,
+    projectName: currentE2eRunContext?.projectName ?? null,
+    projectTarget: currentE2eRunContext?.projectTarget ?? null,
+    app: currentE2eRunContext?.app ?? null,
+    externalDriver: currentE2eRunContext?.externalDriver ?? null,
+    sessionId: currentE2eRunContext?.sessionId ?? null,
+    driverServerUrl,
+    error: error instanceof Error ? error.message : String(error),
+    stack: error instanceof Error ? error.stack ?? null : null,
+  };
+  await writeFile(
+    getDesktopFailureReportPath(scenario),
+    `${JSON.stringify(payload, null, 2)}\n`
+  );
 }
 
 async function ensureValidationDir() {
@@ -1487,6 +1532,16 @@ async function main() {
   if (!options.appExplicitlyProvided) {
     options.app = await resolveDefaultDesktopApp();
   }
+  currentE2eRunContext = {
+    scenario: options.scenario,
+    project: options.project,
+    projectName: null,
+    projectTarget: null,
+    app: options.app,
+    externalDriver: options.externalDriver,
+    sessionId: null,
+  };
+  await clearDesktopFailureReport(options.scenario);
   const driverStartupTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_DRIVER_TIMEOUT_MS,
     30000
@@ -1504,6 +1559,8 @@ async function main() {
   const projectMetadata = requiresExistingProject
     ? await readProjectMetadata(options.project)
     : { name: "", target: "" };
+  currentE2eRunContext.projectName = projectMetadata.name || null;
+  currentE2eRunContext.projectTarget = projectMetadata.target || null;
   if (requiresExistingProject && (!projectMetadata.name || !projectMetadata.target)) {
     fail(`project.rds invalido ou incompleto em ${options.project}`);
   }
@@ -1607,6 +1664,7 @@ async function main() {
 
     try {
       sessionId = await createSession(options.app);
+      currentE2eRunContext.sessionId = sessionId;
     } catch (error) {
       const details = error instanceof Error ? error.message : String(error);
       fail(sessionBootstrapHint(details, options));
@@ -2835,8 +2893,9 @@ async function main() {
   }
 }
 
-main().catch((error) => {
+main().catch(async (error) => {
   const details = error instanceof Error ? error.message : String(error);
+  await writeDesktopFailureReport(error).catch(() => {});
   emitGithubErrorAnnotation(details);
   console.error(`ERRO: ${details}`);
   process.exit(1);
