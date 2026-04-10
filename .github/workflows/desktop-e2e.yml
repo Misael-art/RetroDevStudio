@@ -206,24 +206,41 @@ jobs:
       - name: Verify all E2E scenarios passed
         if: always()
         shell: pwsh
+        env:
+          SMOKE_MD: ${{ steps.smoke_md.outcome }}
+          SMOKE_SNES: ${{ steps.smoke_snes.outcome }}
+          LIVE_OVERFLOW_MD: ${{ steps.live_overflow_md.outcome }}
+          LIVE_OVERFLOW_SNES: ${{ steps.live_overflow_snes.outcome }}
+          LIVE_VRAM_OVERFLOW_MD: ${{ steps.live_vram_overflow_md.outcome }}
+          LIVE_VRAM_OVERFLOW_SNES: ${{ steps.live_vram_overflow_snes.outcome }}
+          LIVE_VRAM_WARNING_MD: ${{ steps.live_vram_warning_md.outcome }}
+          LIVE_VRAM_WARNING_SNES: ${{ steps.live_vram_warning_snes.outcome }}
+          LIVE_SPRITE_WARNING_MD: ${{ steps.live_sprite_warning_md.outcome }}
+          LIVE_SPRITE_WARNING_SNES: ${{ steps.live_sprite_warning_snes.outcome }}
+          LIVE_OK_MD: ${{ steps.live_ok_md.outcome }}
+          LIVE_OK_SNES: ${{ steps.live_ok_snes.outcome }}
+          LIVE_ERROR_MD: ${{ steps.live_error_md.outcome }}
+          LIVE_ERROR_SNES: ${{ steps.live_error_snes.outcome }}
+          LIVE_STALE_MD: ${{ steps.live_stale_md.outcome }}
+          LIVE_STALE_SNES: ${{ steps.live_stale_snes.outcome }}
         run: |
           $steps = @{
-            'smoke_md' = '${{ steps.smoke_md.outcome }}'
-            'smoke_snes' = '${{ steps.smoke_snes.outcome }}'
-            'live_overflow_md' = '${{ steps.live_overflow_md.outcome }}'
-            'live_overflow_snes' = '${{ steps.live_overflow_snes.outcome }}'
-            'live_vram_overflow_md' = '${{ steps.live_vram_overflow_md.outcome }}'
-            'live_vram_overflow_snes' = '${{ steps.live_vram_overflow_snes.outcome }}'
-            'live_vram_warning_md' = '${{ steps.live_vram_warning_md.outcome }}'
-            'live_vram_warning_snes' = '${{ steps.live_vram_warning_snes.outcome }}'
-            'live_sprite_warning_md' = '${{ steps.live_sprite_warning_md.outcome }}'
-            'live_sprite_warning_snes' = '${{ steps.live_sprite_warning_snes.outcome }}'
-            'live_ok_md' = '${{ steps.live_ok_md.outcome }}'
-            'live_ok_snes' = '${{ steps.live_ok_snes.outcome }}'
-            'live_error_md' = '${{ steps.live_error_md.outcome }}'
-            'live_error_snes' = '${{ steps.live_error_snes.outcome }}'
-            'live_stale_md' = '${{ steps.live_stale_md.outcome }}'
-            'live_stale_snes' = '${{ steps.live_stale_snes.outcome }}'
+            'smoke_md' = $env:SMOKE_MD
+            'smoke_snes' = $env:SMOKE_SNES
+            'live_overflow_md' = $env:LIVE_OVERFLOW_MD
+            'live_overflow_snes' = $env:LIVE_OVERFLOW_SNES
+            'live_vram_overflow_md' = $env:LIVE_VRAM_OVERFLOW_MD
+            'live_vram_overflow_snes' = $env:LIVE_VRAM_OVERFLOW_SNES
+            'live_vram_warning_md' = $env:LIVE_VRAM_WARNING_MD
+            'live_vram_warning_snes' = $env:LIVE_VRAM_WARNING_SNES
+            'live_sprite_warning_md' = $env:LIVE_SPRITE_WARNING_MD
+            'live_sprite_warning_snes' = $env:LIVE_SPRITE_WARNING_SNES
+            'live_ok_md' = $env:LIVE_OK_MD
+            'live_ok_snes' = $env:LIVE_OK_SNES
+            'live_error_md' = $env:LIVE_ERROR_MD
+            'live_error_snes' = $env:LIVE_ERROR_SNES
+            'live_stale_md' = $env:LIVE_STALE_MD
+            'live_stale_snes' = $env:LIVE_STALE_SNES
           }
           $failed = @()
           $skippedOrEmpty = @('', 'skipped')
