@@ -1,6 +1,6 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Status:** ENTRADA CANONICA
-**Ultima Atualizacao:** 2026-04-10
+**Ultima Atualizacao:** 2026-04-13
 
 ## ATENCAO PARA AGENTES DE IA
 
@@ -12,7 +12,7 @@
 | `docs/06_AI_MEMORY_BANK_WAVE_A_R.md` | Historico arquivado das waves A-R |
 
 **Fluxo canonico:** leia este arquivo primeiro e siga imediatamente para `docs/06_CURRENT_WAVE_AI_BANK.md`.
-**Atualizacao ativa mais recente:** `build:debug` e `validate-upstream-windows` voltaram a ficar certificados localmente em `2026-04-10`, com `scripts/build.mjs` preservando o cache aquecido do Cargo no caminho `direct-cargo-debug`, `validate-upstream-windows.ps1` endurecido contra `os error 4551` em targets frios e leitura honesta de que o desktop E2E desta rodada depende do runner GitHub/Windows porque este host passou a bloquear o `tauri-driver.exe`. Na mesma wave, `.github/workflows/desktop-e2e.yml` deixou de mascarar falhas com trechos bash residuais, `scripts/e2e-tauri-build-run.mjs` passou a emitir anotacoes `::error::` no GitHub Actions e a gravar `desktop-e2e-failure-*.json` em `src-tauri/target-test/validation/`, e o bridge `window.__RDS_E2E__.openProject(...)` ganhou cobertura explicita em `src/App.test.tsx`, tornando visivel que o proximo gargalo real esta nos cenarios desktop remotos ainda falhando no runner, e nao mais na verificacao final do workflow.
+**Atualizacao ativa mais recente:** em `2026-04-13`, a wave S+ continuou endurecendo o fechamento institucional do MVP: o run publico `Desktop E2E #140` foi delimitado como falha de bootstrap da janela (`Janela do app nao abriu corretamente`) apos a criacao da sessao WebDriver, `scripts/e2e-tauri-build-run.mjs` passou a usar um handshake mais tolerante baseado em `document.title` + estado do DOM + raiz React + `window.__RDS_E2E__`, `.github/workflows/desktop-e2e.yml` ganhou `RDS_E2E_UI_TIMEOUT_MS=30000`, e `scripts/release-readiness.mjs` passou a registrar upstream/diferenca contra `origin/main` para impedir snapshot de promocao que esconda branch publica desatualizada. A leitura honesta segue a mesma: `build:debug`, `validate-upstream-windows` e `qa-rc` continuam com evidencias recentes, mas o produto ainda esta em `hardening` ate o `Desktop E2E` remoto ficar verde e a promocao ser regenerada em worktree limpo.
 
 Em caso de conflito documental, a hierarquia continua sendo:
 `docs/06_AI_MEMORY_BANK.md` -> `docs/03_ROADMAP_MVP.md` -> `docs/09_AGENT_DEV_MODE.md`.

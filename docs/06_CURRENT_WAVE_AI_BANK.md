@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-04-10
+**Ultima Atualizacao:** 2026-04-13
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -15,6 +15,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-04-13 - Bootstrap do desktop E2E e readiness de promocao agora expoem o bloqueio certo):**
+  - **A falha remota atual ficou delimitada com mais precisao:** o run publico `Desktop E2E #140` do branch `feat/desktop-e2e-workflow` segue `failing`, mas a anotacao principal agora esta clara: o bloqueio comum e `Janela do app nao abriu corretamente` logo apos a criacao da sessao WebDriver, e nao mais a verificacao final do ledger.
+  - **O runner desktop ficou menos fragil no bootstrap da janela:** `scripts/e2e-tauri-build-run.mjs` trocou o gate inicial baseado apenas em `GET /title` por um handshake mais tolerante, que aceita `document.title`, estado do DOM, raiz React e `window.__RDS_E2E__`, e passa a anexar `Diagnostico de bootstrap da janela` quando o app nao estabilizar a tempo.
+  - **O workflow institucional agora deixa o timeout de UI explicito:** `.github/workflows/desktop-e2e.yml` ganhou `RDS_E2E_UI_TIMEOUT_MS=30000` e publica esse valor no sumario do job, reduzindo ambiguidade entre falha de driver, falha de sessao e falha de bootstrap do shell.
+  - **A fotografia de promocao passou a denunciar defasagem de branch por padrao:** `scripts/release-readiness.mjs` agora registra upstream configurado e divergencia contra `origin/main`, marcando a promocao como pendente quando a branch candidata ainda estiver a frente da trilha publica. Isso evita snapshot "verde" que esconda que o estado publico ainda nao recebeu a wave atual.
+  - **Barra verde local desta rodada de hardening:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK e `npm test` OK (`221` testes). A prova local do desktop continua bloqueada neste host porque `tauri-driver` nao esta disponivel e a cadeia Rust/MSVC segue fora do PATH desta sessao.
+  - **Leitura honesta:** esta rodada melhora a chance de o proximo rerun no GitHub/Windows ficar verde ou, no minimo, publicar diagnostico suficiente para o proximo ajuste. O status real continua `hardening` ate o `Desktop E2E` remoto passar e a promocao ser reexecutada com snapshot institucional limpo.
 
 * **O que acabou de acontecer (2026-04-10 - Workflow desktop agora expõe a falha real do runner e o bridge de abertura ganhou cobertura dedicada):**
   - **O workflow desktop deixou de encobrir falhas reais com um passo final quebrado:** `.github/workflows/desktop-e2e.yml` foi corrigido para remover restos de shell `bash` em job `pwsh`, e a verificacao de ledger/artefatos voltou a refletir o resultado verdadeiro da matriz E2E em vez de introduzir um falso-vermelho no fim do job.
@@ -755,7 +763,7 @@ As seguintes decisoes ja foram debatidas e sao finais:
 ## 4. PROXIMO PASSO IMEDIATO (PARA A IA EXECUTAR QUANDO SOLICITADA)
 
 **Tarefa:**
-Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as superficies `Experimental` que consigam provar valor no caminho canônico atual. Com o wizard do primeiro uso novamente certificado no desktop real desta wave, o proximo alvo real volta a ser reduzir `densidade do shell` no `Scene Editor`/`Workspace Guide` sem reabrir frentes novas nem tocar no fluxo `Build -> ROM -> Emulacao`.
+Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as superficies `Experimental` que consigam provar valor no caminho canônico atual. O proximo alvo imediato desta wave passou a ser rerodar o `Desktop E2E` no GitHub/Windows com o bootstrap endurecido, capturar o resultado verdadeiro do branch candidato e so depois regenerar a fotografia institucional de promocao em worktree limpo; qualquer trabalho adicional de UX/shell continua secundario frente a esse gate.
 
 **Pre-requisitos operacionais:**
 * Manter os 6 gates canonicos verdes em toda alteracao relevante.

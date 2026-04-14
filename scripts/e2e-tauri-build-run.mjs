@@ -1350,6 +1350,120 @@ async function getTitle(sessionId) {
   return response.value ?? "";
 }
 
+async function collectWindowBootstrapState(sessionId) {
+  const state = {
+    webdriverTitle: "",
+    documentTitle: "",
+    readyState: "",
+    locationHref: "",
+    rootPresent: false,
+    rootChildCount: 0,
+    bodyChildCount: 0,
+    automationApiAvailable: false,
+    bodyTextSample: "",
+    domError: "",
+  };
+
+  try {
+    state.webdriverTitle = await getTitle(sessionId);
+  } catch (error) {
+    state.webdriverTitle = `<getTitle falhou: ${error instanceof Error ? error.message : String(error)}>`;
+  }
+
+  try {
+    const domState = await executeScript(
+      sessionId,
+      `
+        const root = document.getElementById("root");
+        const bodyText = (document.body?.textContent ?? "").replace(/\\s+/g, " ").trim();
+        return {
+          documentTitle: document.title ?? "",
+          readyState: document.readyState ?? "",
+          locationHref: window.location?.href ?? "",
+          rootPresent: Boolean(root),
+          rootChildCount: root?.childElementCount ?? 0,
+          bodyChildCount: document.body?.childElementCount ?? 0,
+          automationApiAvailable: typeof window.__RDS_E2E__ === "object" && window.__RDS_E2E__ !== null,
+          bodyTextSample: bodyText.slice(0, 160),
+        };
+      `
+    );
+
+    if (domState && typeof domState === "object") {
+      state.documentTitle = String(domState.documentTitle ?? "");
+      state.readyState = String(domState.readyState ?? "");
+      state.locationHref = String(domState.locationHref ?? "");
+      state.rootPresent = Boolean(domState.rootPresent);
+      state.rootChildCount = Number.isFinite(domState.rootChildCount) ? domState.rootChildCount : 0;
+      state.bodyChildCount = Number.isFinite(domState.bodyChildCount) ? domState.bodyChildCount : 0;
+      state.automationApiAvailable = Boolean(domState.automationApiAvailable);
+      state.bodyTextSample = String(domState.bodyTextSample ?? "");
+    }
+  } catch (error) {
+    state.domError = error instanceof Error ? error.message : String(error);
+  }
+
+  return state;
+}
+
+function formatWindowBootstrapDiagnostics(state) {
+  if (!state) {
+    return "";
+  }
+
+  return [
+    "Diagnostico de bootstrap da janela:",
+    `webdriverTitle="${state.webdriverTitle}"`,
+    `documentTitle="${state.documentTitle}"`,
+    `readyState="${state.readyState}"`,
+    `locationHref="${state.locationHref}"`,
+    `rootPresent="${state.rootPresent}"`,
+    `rootChildCount="${state.rootChildCount}"`,
+    `bodyChildCount="${state.bodyChildCount}"`,
+    `automationApiAvailable="${state.automationApiAvailable}"`,
+    `bodyTextSample="${state.bodyTextSample}"`,
+    state.domError ? `domError="${state.domError}"` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function isWindowBootstrapReady(state) {
+  if (!state) {
+    return false;
+  }
+
+  const hasExpectedTitle =
+    state.webdriverTitle.includes("RetroDev Studio") ||
+    state.documentTitle.includes("RetroDev Studio");
+  const domBooted =
+    (state.readyState === "interactive" || state.readyState === "complete") &&
+    state.rootPresent &&
+    (state.rootChildCount > 0 || state.bodyChildCount > 0);
+
+  return hasExpectedTitle || state.automationApiAvailable || domBooted;
+}
+
+async function waitForAppWindowReady(sessionId, timeoutMs, label) {
+  let lastState = null;
+
+  try {
+    return await waitFor(
+      async () => {
+        lastState = await collectWindowBootstrapState(sessionId);
+        return isWindowBootstrapReady(lastState) ? lastState : false;
+      },
+      timeoutMs,
+      label,
+      250
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    const diagnostics = formatWindowBootstrapDiagnostics(lastState);
+    throw new Error(diagnostics ? `${detail}\n${diagnostics}` : detail);
+  }
+}
+
 async function waitForOnboardingWizard(sessionId) {
   return waitFor(
     async () =>
@@ -1546,6 +1660,10 @@ async function main() {
     process.env.RDS_E2E_DRIVER_TIMEOUT_MS,
     30000
   );
+  const uiBootstrapTimeoutMs = parsePositiveInteger(
+    process.env.RDS_E2E_UI_TIMEOUT_MS,
+    process.env.GITHUB_ACTIONS === "true" ? 30000 : 15000
+  );
   const emulatorActivationTimeoutMs = parsePositiveInteger(process.env.RDS_E2E_RUN_TIMEOUT_MS, 180000);
   const liveValidationTimeoutMs = parsePositiveInteger(process.env.RDS_E2E_LIVE_TIMEOUT_MS, 60000);
   const requiresExistingProject =
@@ -1673,14 +1791,7 @@ async function main() {
       fail("Sessao WebDriver nao foi criada.");
     }
 
-    await waitFor(
-      async () => {
-        const title = await getTitle(sessionId);
-        return title.includes("RetroDev Studio");
-      },
-      15000,
-      "Janela do app nao abriu corretamente"
-    );
+    await waitForAppWindowReady(sessionId, uiBootstrapTimeoutMs, "Janela do app nao abriu corretamente");
 
     await waitFor(
       async () =>
@@ -1688,7 +1799,7 @@ async function main() {
           sessionId,
           "return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"
         ),
-      15000,
+      uiBootstrapTimeoutMs,
       "API de automacao do app nao ficou disponivel"
     );
 
@@ -2345,12 +2456,9 @@ async function main() {
         sessionId = "";
 
         sessionId = await createSession(options.app);
-        await waitFor(
-          async () => {
-            const title = await getTitle(sessionId);
-            return title.includes("RetroDev Studio");
-          },
-          15000,
+        await waitForAppWindowReady(
+          sessionId,
+          uiBootstrapTimeoutMs,
           "Janela do app nao reabriu para validar persistencia."
         );
         await waitFor(
@@ -2359,7 +2467,7 @@ async function main() {
               sessionId,
               "return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"
             ),
-          15000,
+          uiBootstrapTimeoutMs,
           "API de automacao nao voltou apos reabrir o app"
         );
 

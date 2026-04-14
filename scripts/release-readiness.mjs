@@ -441,11 +441,12 @@ async function gitOutput(args, options = {}) {
 }
 
 async function collectGitState() {
-  const [branchByRevParse, branchByShowCurrent, commit, status] = await Promise.all([
+  const [branchByRevParse, branchByShowCurrent, commit, status, trackingRef] = await Promise.all([
     gitOutput(["rev-parse", "--abbrev-ref", "HEAD"]),
     gitOutput(["branch", "--show-current"]).catch(() => ""),
     gitOutput(["rev-parse", "HEAD"]),
     gitOutput(["status", "--porcelain"], { trim: false }),
+    gitOutput(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]).catch(() => ""),
   ]);
   const branch = branchByShowCurrent || branchByRevParse || "HEAD";
 
@@ -462,11 +463,39 @@ async function collectGitState() {
       };
     });
 
+  const [trackingDivergence, originMainDivergence] = await Promise.all([
+    trackingRef
+      ? gitOutput(["rev-list", "--left-right", "--count", `${branch}...${trackingRef}`])
+          .then(parseAheadBehindCounts)
+          .catch(() => null)
+      : Promise.resolve(null),
+    gitOutput(["rev-list", "--left-right", "--count", `${branch}...origin/main`])
+      .then(parseAheadBehindCounts)
+      .catch(() => null),
+  ]);
+
   return {
     branch,
     commit,
+    trackingRef: trackingRef || null,
+    trackingDivergence,
+    originMainRef: "origin/main",
+    originMainDivergence,
     dirtyEntries,
     dirtyTrackedEntries: dirtyEntries.filter((entry) => !entry.localOnly),
+  };
+}
+
+function parseAheadBehindCounts(raw) {
+  const [aheadRaw = "0", behindRaw = "0"] = String(raw ?? "")
+    .trim()
+    .split(/\s+/);
+  const ahead = Number.parseInt(aheadRaw, 10);
+  const behind = Number.parseInt(behindRaw, 10);
+
+  return {
+    ahead: Number.isFinite(ahead) ? ahead : 0,
+    behind: Number.isFinite(behind) ? behind : 0,
   };
 }
 
@@ -546,6 +575,32 @@ function classifyReadiness({
         .map((entry) => entry.path)
         .join(", ")}`
     );
+  }
+
+  if (gitState.trackingRef && gitState.trackingDivergence) {
+    if (gitState.trackingDivergence.ahead > 0) {
+      blockers.push(
+        `Branch local ainda nao publicada integralmente: ${gitState.branch} esta ${gitState.trackingDivergence.ahead} commit(s) a frente de ${gitState.trackingRef}.`
+      );
+    }
+    if (gitState.trackingDivergence.behind > 0) {
+      warnings.push(
+        `Branch local esta ${gitState.trackingDivergence.behind} commit(s) atras de ${gitState.trackingRef}.`
+      );
+    }
+  }
+
+  if (gitState.originMainDivergence) {
+    if (gitState.branch !== "main" && gitState.originMainDivergence.ahead > 0) {
+      blockers.push(
+        `Promocao para a trilha publica ainda pendente: ${gitState.branch} esta ${gitState.originMainDivergence.ahead} commit(s) a frente de origin/main.`
+      );
+    }
+    if (gitState.originMainDivergence.behind > 0) {
+      warnings.push(
+        `${gitState.branch} esta ${gitState.originMainDivergence.behind} commit(s) atras de origin/main.`
+      );
+    }
   }
 
   if (!buildReport) {
@@ -659,6 +714,9 @@ function toMarkdown(report) {
     `- Gerado em: ${report.generatedAt}`,
     `- Branch: ${report.git.branch}`,
     `- Commit: ${report.git.commit}`,
+    `- Upstream track: ${report.git.trackingRef ?? "(sem upstream configurado)"}`,
+    `- Divergencia vs upstream: +${report.git.trackingDivergence?.ahead ?? 0} / -${report.git.trackingDivergence?.behind ?? 0}`,
+    `- Divergencia vs origin/main: +${report.git.originMainDivergence?.ahead ?? 0} / -${report.git.originMainDivergence?.behind ?? 0}`,
     `- Pronto para promocao: ${report.summary.readyForPromotion ? "SIM" : "NAO"}`,
     "",
     "## Gates baseline",
@@ -798,6 +856,10 @@ async function main() {
     git: {
       branch: gitState.branch,
       commit: gitState.commit,
+      trackingRef: gitState.trackingRef,
+      trackingDivergence: gitState.trackingDivergence,
+      originMainRef: gitState.originMainRef,
+      originMainDivergence: gitState.originMainDivergence,
       dirtyEntries: gitState.dirtyEntries,
       dirtyTrackedEntries: gitState.dirtyTrackedEntries,
     },
