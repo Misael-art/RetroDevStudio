@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-04-13
+**Ultima Atualizacao:** 2026-04-16 (rodada 3)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -11,10 +11,60 @@
 >
 > **WAVE S+ segue ativa em 2026-04-09:**
 > Foco: recuperar coerencia multi-agente, manter o fluxo canonico `Build -> ROM -> Emulacao` verde, endurecer hosts Windows limpos e documentar o estado real no GitHub sem claims infladas.
+>
+> **Governanca documental ativa desde 2026-04-15:**
+> `docs/03_ROADMAP_MVP.md` passou a ser a matriz permanente de fases, superficies e importadores.
+> Este arquivo fica restrito a cronologia da wave, evidencias recentes e proximo passo imediato.
 
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-04-16 rodada 3 - Causa raiz do Desktop E2E remoto identificada e corrigida no workflow):**
+  - **Causa raiz do `ERR_CONNECTION_REFUSED` no runner GitHub/Windows:** o `build.mjs` usa `direct-cargo-debug` (cargo build direto, sem Tauri CLI) no Windows por padrão. Isso gera um binario com `#[cfg(dev)]` ativo, que faz o Tauri runtime tentar conectar ao dev server local (`http://localhost:1420`) em vez de servir os assets estaticos embutidos. No CI nao ha dev server, entao a janela mostra `ERR_CONNECTION_REFUSED` e todos os 16 cenarios E2E falham silenciosamente (mascarados pelo `continue-on-error: true`).
+  - **Fix aplicada:** adicionado `RDS_FORCE_TAURI_CLI_DEBUG: "1"` no env do workflow `desktop-e2e.yml`. Isso forca o `build.mjs` a usar `tauri build --debug --no-bundle` (via Tauri CLI), que produz um binario com assets embutidos e `#[cfg(not(dev))]` correto.
+  - **Diagnostico adicionado ao ledger:** o step `Verify all E2E scenarios passed` agora imprime bytes raw do ledger, contagem de itens esperados vs executados, e um step separado `Report step outcomes before verification` mostra o `outcome` real de cada cenario (distinguindo `success` real de `continue-on-error` mascarado).
+  - **Nenhuma mudanca em codigo de producao.** Apenas workflow CI e documentacao.
+  - **Proximo passo imediato:** push para o branch `feat/desktop-e2e-workflow` e triggerar a run remota para confirmar que o fix resolve o `ERR_CONNECTION_REFUSED` no runner GitHub/Windows.
+
+* **O que acabou de acontecer (2026-04-16 rodada 2 - Auditoria cruzada shell real x matriz x README e correcao de drift no Logic workspace):**
+  - **Auditoria completa de `WORKSPACE_ITEMS`, `TOOL_TABS`, paineis laterais e top bar contra a Matriz de Superficies de `docs/03_ROADMAP_MVP.md`:** as 18 linhas da matriz correspondem 1:1 com as superficies perceptiveis no codigo (`src/App.tsx`, `src/components/tools/ToolsPanel.tsx`, `src/components/viewport/ViewportPanel.tsx`). Nenhuma superficie visivel ficou sem linha e nenhuma linha da matriz existe sem superficie real no shell.
+  - **Drift corrigido no README:** `README.md` listava `Logic workspace` dentro de "Ainda marcadas como Experimental", mas a matriz do roadmap (autoridade superior) e o proprio codigo (grupo `authoring`, sem badge `Exp.`) o tratam como `Core MVP` com certificacao `Local`. A correcao moveu Logic para a secao core do README, qualificando que a certificacao e apenas local. Na mesma edicao, `Deep Profiler` e `Paleta Contextual` passaram a ser mencionados explicitamente no resumo do Debug workspace para refletir o shell real.
+  - **Nenhuma superficie foi promovida ou rebaixada nesta rodada.** A Matriz de Superficies permanece inalterada; o ganho foi eliminar a divergencia entre o README (onboarding publico) e a Matriz (fonte canonica de maturidade).
+  - **Proximo passo imediato:** atacar o bloqueador institucional dominante da wave: manter `Desktop E2E` repetivel no GitHub/Windows e rerodar readiness limpo quando a proxima rodada funcional tocar shell, wizard, build ou ferramentas do `Debug workspace`.
+
+* **O que acabou de acontecer (2026-04-16 - Matriz de Superficies agora espelha o shell visivel 1:1 e o onboarding publico foi sincronizado):**
+  - **O roadmap central deixou de agrupar demais o shell real:** `docs/03_ROADMAP_MVP.md` trocou linhas amplas como `Editor desktop / Scene flow` e `Onboarding / Criacao de projeto / Shell principal` por superficies perceptiveis do produto atual, incluindo `Scene`, `Game`, `Explorer`, `Logic`, `ArtStudio`, `RetroFX`, `Debug`, `Hierarchy`, `Layers`, `Inspector` e cada aba relevante do `Debug workspace`.
+  - **A leitura de maturidade ficou mais honesta dentro da propria matriz:** `Asset Browser` passou a aparecer como `Experimental` com `Em hardening`, refletindo o fato de que a UI ainda o marca como experimental apesar de ele ja participar da prova `qa-rc` bloco `E`.
+  - **As linhas nao visuais sairam da matriz de superficies para o lugar certo:** build por target, importadores, legados e updater continuam documentados no roadmap, mas nao fingem mais ser superficies do shell quando na pratica sao capacidades ou itens de governanca.
+  - **O onboarding publico foi sincronizado na mesma rodada:** `README.md` deixou de tratar `Asset Browser` como core consolidado e passou a resumir melhor o shell visivel de hoje sem contrariar a UI nem o roadmap central.
+  - **Leitura honesta da rodada:** esta foi uma rodada de saneamento estrutural da documentacao. Nenhuma superficie foi promovida artificialmente; o ganho foi reduzir a chance de humanos e agentes lerem estados diferentes para o mesmo produto.
+  - **Proximo passo imediato:** atacar o bloqueador institucional dominante da wave com a matriz agora coerente: manter `Desktop E2E` repetivel no GitHub/Windows e rerodar readiness limpo quando a proxima rodada funcional tocar shell, wizard, build ou ferramentas do `Debug workspace`.
+
+* **O que acabou de acontecer (2026-04-15 - Roadmap central reorganizado e protocolo anti-ambiguidade endurecido):**
+  - **O roadmap central deixou de competir com o diario da wave:** `docs/03_ROADMAP_MVP.md` foi reestruturado para virar a matriz permanente de fases, superficies visiveis e importadores, com eixos canonicos de `Escopo`, `Implementacao` e `Certificacao`.
+  - **O onboarding ficou mais conservador e menos volatil:** `README.md` deixou de repetir snapshots institucionais detalhados e voltou a funcionar como resumo curto com links para as fontes canonicas.
+  - **O processo agora fecha o circuito documental de forma explicita:** `docs/09_AGENT_DEV_MODE.md` ganhou um protocolo obrigatorio de sincronizacao por tipo de mudanca, incluindo a regra de que nova superficie visivel ou novo importador precisa entrar no roadmap antes de qualquer claim de maturidade.
+  - **A principal correção de deriva desta rodada foi nos importadores externos:** `docs/03_ROADMAP_MVP.md` passou a listar explicitamente `construct`, `rpg_maker` e `openbor` como itens reais do registry atual, evitando que codigo `importable` continue sendo descrito como se fosse apenas planejamento.
+  - **Leitura honesta da rodada:** nenhuma maturidade foi inflada; a mudanca foi de governanca documental. O objetivo foi reduzir ambiguidades e impedir que o repositorio volte a anunciar um estado diferente do que o codigo e as evidencias sustentam.
+  - **Proximo passo imediato:** manter a nova matriz do roadmap sincronizada com o registry real de importadores, continuar tratando este arquivo apenas como diario operacional e rerodar readiness/QA institucional quando a proxima rodada funcional tocar shell, wizard, build ou importadores.
+
+* **O que acabou de acontecer (2026-04-15 - Wizard agora antecipa conflito com projeto existente e sugere nome livre antes do clique final):**
+  - **O backend ganhou um preview canonico de destino em vez de depender de inferencia do frontend:** `src-tauri/src/lib.rs` agora expoe `preview_project_destination`, reutilizando a descoberta real de `project.rds` para diferenciar pasta livre, pasta ocupada comum e pasta que ja contem um projeto RetroDev valido.
+  - **O wizard passou a sugerir um nome unico no proprio campo quando ainda esta em modo automatico:** se o nome inicial apontar para uma pasta ocupada, `src/App.tsx` ajusta o campo para `MeuProjeto 2`, `MeuProjeto 3`, etc. antes do envio, reduzindo a chance de o usuario bater no mesmo erro evitavel da rodada anterior.
+  - **Quando o nome original aponta para um projeto RetroDev existente, a UX agora oferece o CTA correto:** o wizard mostra um card `Projeto RetroDev encontrado` com caminho real, explica que o original pode ser aberto imediatamente e expõe `Abrir projeto existente` sem forcar tentativa de criacao para descobrir isso tarde demais.
+  - **A trilha alternativa continua honesta e nao destrutiva:** se o usuario quiser mesmo criar outro projeto, o wizard mantem o nome sugerido e o backend continua reservando uma pasta livre sem sobrescrever o projeto existente.
+  - **Cobertura ampliada nas duas pontas:** `src/App.test.tsx` agora prova a sugestao automatica de nome livre e o CTA de abrir projeto existente; `src-tauri/src/lib.rs` ganhou testes dedicados para `existing_project` versus `occupied` no preview de destino.
+  - **Barra verde local desta rodada:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (`223` testes), `cargo clippy --manifest-path src-tauri\\Cargo.toml -- -D warnings` OK e `cargo test --manifest-path src-tauri\\Cargo.toml --lib -- --nocapture --test-threads=1` OK (`259` aprovados / `0` falhas / `3` ignorados).
+  - **Proximo passo imediato:** regenerar MSI/portable com essa UX atualizada e validar manualmente o fluxo `Menu inicial -> Criar Projeto` em um host limpo, cobrindo tanto `Abrir projeto existente` quanto a criacao automatica com nome sugerido.
+
+* **O que acabou de acontecer (2026-04-14 - Wizard de novo projeto agora contorna colisao de pasta e orienta melhor o destino real):**
+  - **O onboarding deixou de falhar no caso mais comum de pasta ja ocupada:** `src-tauri/src/lib.rs` trocou o bloqueio direto por uma reserva automatica de destino, reaproveitando a pasta pedida quando ela estiver vazia e criando `MeuProjeto_2`, `MeuProjeto_3`, etc. quando o nome preferido ja existir com conteudo.
+  - **A UX agora explica para onde o projeto vai antes do clique final:** `src/App.tsx` passou a mostrar `Destino estimado` no wizard de criacao e deixa explicito que, se a pasta padrao ja existir, o app criara um sufixo numerico automaticamente em vez de interromper o fluxo com erro evitavel.
+  - **O retorno do backend ficou mais honesto para o usuario:** quando houver colisao, o app preserva o fluxo e anexa um aviso legivel informando que a pasta original ja estava ocupada e qual destino alternativo foi reservado automaticamente.
+  - **Cobertura adicionada nos dois lados do shell:** `src/App.test.tsx` ganhou prova do preview de destino e da dica de auto-sufixo; `src-tauri/src/lib.rs` ganhou testes para reserva automatica de pasta ocupada e merge de avisos sem perder contexto operacional.
+  - **Barra verde local desta rodada:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (`222` testes), `cargo clippy --manifest-path src-tauri\\Cargo.toml -- -D warnings` OK e `cargo test --manifest-path src-tauri\\Cargo.toml --lib -- --nocapture --test-threads=1` OK (`257` aprovados / `0` falhas / `3` ignorados).
+  - **Proximo passo imediato:** regenerar os binarios empacotados com essa melhoria de onboarding e repetir a validacao manual do fluxo `Menu inicial -> Criar Projeto` no MSI/portable, confirmando que a experiencia passou a escolher um destino livre sem interromper o usuario com erro evitavel.
 
 * **O que acabou de acontecer (2026-04-13 - Bootstrap do desktop E2E e readiness de promocao agora expoem o bloqueio certo):**
   - **A falha remota atual ficou delimitada com mais precisao:** o run publico `Desktop E2E #140` do branch `feat/desktop-e2e-workflow` segue `failing`, mas a anotacao principal agora esta clara: o bloqueio comum e `Janela do app nao abriu corretamente` logo apos a criacao da sessao WebDriver, e nao mais a verificacao final do ledger.
@@ -488,28 +538,11 @@
   - **Gates verificados nesta rodada:** `check-tree` OK, `eslint` OK, `tsc --noEmit` OK, `vitest` OK (153 testes), `cargo clippy -- -D warnings` OK, `cargo test --lib -- --nocapture` OK (173 aprovados / 0 falhas / 1 ignorado).
   - **Smoke desktop:** naquela rodada, `live-ok` com `--skip-build` voltou a passar no app Tauri local, mas o smoke completo `Build & Run` do dummy Mega Drive ainda falhava neste host. Esse ponto foi revalidado e superado pela sprint posterior de consolidacao do Game View registrada acima.
 
-### Matriz objetiva por subsistema (2026-03-19)
+### Nota de governanca documental (2026-04-15)
 
-| Subsistema | Status | Leitura objetiva |
-|------|------|------|
-| Infra desktop Tauri + IPC + store base | Robusto | Integracao Rust/React/Tauri real e coerente. |
-| Persistencia de projeto/cena e save atomico Windows | Robusto | Regressao `os error 5` corrigida e validada pelos gates Rust. |
-| Schema UGDM, paridade Rust-TS e migracoes | Parcial | Tipos e migracoes explicitas agora cobrem ate `1.6.0`, mas ainda requerem repeticao institucional em cenarios de projeto antigo real. |
-| Wizard, onboarding e catalogo de templates | Parcial | Fluxo real e alinhado com `platformer_gm`, ainda em beta manual. |
-| Importacao SGDK / overlay `rds/` | Experimental | Fluxo real, ainda sensivel a QA manual e projetos externos. |
-| Build orchestration MD/SNES | Robusto | Pipeline canonico `UGDM -> workspace -> ROM` continua real e coberto. |
-| Emulacao Libretro / Game View | Parcial | Fluxo real e integrado; o smoke desktop completo `Build -> ROM -> Run` voltou a passar neste host, mas a repeticao institucional ainda deve ocorrer em baseline commitada. |
-| Live validation e hardware profiles | Robusto | Validacao autoritativa continua coerente com os targets. |
-| Collision map | Parcial | Funcional e migrado, ainda precisa de repeticao institucional apos a rodada de schema. |
-| Layer system | Parcial | Funcional e persistente, ainda jovem como superficie de produto. |
-| NodeGraph canonico backend (AST/emitter) | Parcial | Codigo real e util, mas ainda concentrado e complexo. |
-| `nodeCompiler.ts` frontend legado | Fake | Nao sustenta claim de caminho oficial; ficou explicitamente legado/experimental. |
-| RetroFX | Experimental | Superficie real, agora com editor visual-first, preview animado e persistencia coberta por testes; ainda sem certificacao com ROM/cenas reais. |
-| Deep Profiler | Parcial | Ferramenta real, mas heuristica. |
-| Asset Extractor | Experimental | Ferramenta real, ainda sem certificacao ponta a ponta. |
-| Memory Viewer / VRAM Viewer / Reverse Explorer | Experimental | Ferramentas reais de inspecao; o Reverse Workspace agora tem manifesto canonico, disassembly inicial, xrefs/call graph e anotacoes persistidas, mas ainda sem trace/projecao certificados. |
-| ArtStudio | Experimental | Superficie institucionalizada na baseline do workspace, com ingestao backend, `suggested_frames`, importacao canonica e pipeline basico ate `resources.res/build` provados localmente; ainda falta repeticao institucional com toolchain oficial e prova adicional de runtime para animacao autorada. |
-| Processo, CI e coerencia documental do checkout atual | Parcial | Gates e smoke desktop canonico ficaram verdes no workspace atual, o shell foi reorganizado com sucesso, mas ainda ha WIP fora da baseline commitada e a repeticao institucional continua necessaria. |
+- A matriz permanente de maturidade do produto nao fica mais neste arquivo.
+- Desde `2026-04-15`, fases, superficies visiveis e importadores devem ser consultados em `docs/03_ROADMAP_MVP.md`.
+- Este arquivo continua guardando apenas cronologia, evidencias recentes, leituras honestas da wave e proximos passos imediatos.
 
 * **O que acabou de acontecer (2026-03-19 - ArtStudio Sprint 2: Motor de Animação e UGDM):**
   - **useSpriteAnimator.ts:** Hook para loop de animação com requestAnimationFrame e FPS configurável.

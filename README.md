@@ -10,56 +10,30 @@
 
 ---
 
-## Estado Real
+## Estado Atual
 
-- Data de referencia: `2026-04-10`.
-- Fase ativa real: `hardening / QA do MVP desktop`, com foco em manter o fluxo canonico `Build -> ROM -> Emulacao` repetivel em host Windows limpo.
-- O estado operacional canônico fica em [docs/06_AI_MEMORY_BANK.md](./docs/06_AI_MEMORY_BANK.md).
-- Se este `README` divergir do estado real, prevalecem:
-  `docs/06_AI_MEMORY_BANK.md` -> `docs/03_ROADMAP_MVP.md` -> `docs/09_AGENT_DEV_MODE.md`.
+- Fase ativa real: `release candidate / beta tecnica em hardening`.
+- O foco atual nao e abrir escopo novo; e manter o fluxo canonico `Build -> ROM -> Emulacao` repetivel e documentado com honestidade.
+- O estado operacional canonico fica em [docs/06_AI_MEMORY_BANK.md](./docs/06_AI_MEMORY_BANK.md).
+- A matriz permanente de fases, superficies e importadores fica em [docs/03_ROADMAP_MVP.md](./docs/03_ROADMAP_MVP.md).
+- As regras de processo e sincronizacao documental ficam em [docs/09_AGENT_DEV_MODE.md](./docs/09_AGENT_DEV_MODE.md).
 
-### O que esta certificado hoje
-
-- Editor desktop com `Tauri + React + TypeScript + Rust`.
-- Pipeline real por target para `Mega Drive` e `SNES`.
-- Emulacao integrada via `Libretro`.
-- Setup nativo sob demanda de `JDK`, `SGDK`, `PVSnesLib` e cores `Libretro` no Windows.
-- Validacao oficial upstream em Windows via [scripts/validate-upstream-windows.ps1](./scripts/validate-upstream-windows.ps1).
-- O smoke upstream oficial agora cobre onboarding, `platformer_seed`, pelo menos um projeto SGDK importado e as fixtures canonicas com SGDK real instalado.
-- Smoke desktop local `Build -> ROM -> Run` via [scripts/e2e-tauri-build-run.mjs](./scripts/e2e-tauri-build-run.mjs).
-- Build canonico local via `npm run build:debug`.
-- `build-report.json` fresh-only por rodada, sem herdar modos antigos de outras execucoes.
-- `npm run release:readiness:baseline` agora reroda automaticamente `build:debug`, `validate-upstream-windows` e `desktop E2E` em Windows apto, exigindo artefatos frescos da propria rodada.
-- `npm run test:e2e:desktop:qa-rc` agora percorre os blocos `A-F` do roteiro RC no app desktop real e grava `src-tauri/target-test/validation/manual-qa-status.json` com screenshots `qa-rc-*.png`.
-- `npm run release:readiness:promotion` agrega baseline, build/upstream, desktop E2E e o report `manual-qa-status.json` em modo `strict`.
-- `src-tauri/target-test/validation/release-readiness.json` fechou esta rodada com `readyForPromotion = true` em `2026-04-04T03:07:15.245Z`, usando worktree limpo no commit `941b4dbefa5e6187a5d813e02b0254ada950213d`.
-- Workflows do GitHub agora publicam sumario legivel e artefatos de validacao para auditoria por push.
-- Bootstrap seguro para host limpo via [scripts/bootstrap.ps1](./scripts/bootstrap.ps1).
-- `build:debug` e `validate-upstream-windows` foram recertificados novamente neste host em `2026-04-10`.
-- Leitura honesta desta sessao: este host passou a bloquear o binario `tauri-driver.exe`, inclusive no fallback `--external-driver`; por isso, a recertificacao institucional de `desktop E2E` e `qa-rc` desta rodada precisa vir do workflow GitHub/Windows apos o push, e nao pode ser tratada como prova local renovada.
-
-### O que ainda esta em hardening
-
-- O foco do projeto ainda nao e expansao de escopo; e consolidacao do caminho canonico e QA.
-- O shell principal ja e forte, mas ainda nao e um sistema de docking livre no nivel de uma IDE madura; a migracao para docking livre continua `deferred`.
-- O shell ficou mais leve nesta wave com lazy-load adicional de `Logic`, `RetroFX` e `ArtStudio`; o chunk principal caiu para cerca de `382 kB` bruto / `116 kB` gzip, mas ainda segue em hardening.
-- O wizard de primeiro uso agora prioriza um template builtin realmente criavel neste host, mostra um checklist de `Primeiro sucesso`, trata `Importar Externo` como trilha secundaria expansivel e a rail lateral agrupa workspaces por etapa de uso, com `Art` e `FX` explicitamente marcados como `Exp.`.
-- O updater nativo continua apenas em preparacao institucional no backend; nao existe claim de superficie final de auto-update pronta no shell do usuario.
-- Ferramentas como `ArtStudio`, `RetroFX`, `Reverse Workspace`, `Asset Extractor` e `Memory Viewer` continuam visiveis, mas com status `Experimental` onde o backend e a certificacao ainda nao sustentam claim plena.
+Se este `README` divergir do estado real, prevalecem:
+`docs/06_AI_MEMORY_BANK.md` -> `docs/03_ROADMAP_MVP.md` -> `docs/09_AGENT_DEV_MODE.md`.
 
 ---
 
 ## O Produto Hoje
 
-RetroDev Studio ja passou de prototipo. O produto esta em uma fase de `beta tecnica / hardening`, com provas reais de pipeline e validacao de host Windows para:
+RetroDev Studio ja passou de prototipo. O produto hoje consegue:
 
-- criar/abrir projeto;
-- editar cena e ativos;
-- compilar ROM para Mega Drive ou SNES;
-- carregar ROM no emulador integrado;
-- validar o fluxo por smoke desktop e por upstream oficial.
+- criar e abrir projetos `.rds`
+- editar cena e ativos
+- compilar ROM para `Mega Drive` e `SNES`
+- carregar ROM no emulador integrado
+- validar o caminho principal por gates locais, readiness e smoke desktop
 
-O produto ainda nao deve ser descrito como engine plenamente pronta para producao comercial nem como substituto direto de Unity/GameMaker. A prioridade atual e consistencia, ergonomia e repetibilidade dos fluxos certificados.
+O produto ainda nao deve ser descrito como engine totalmente pronta para producao comercial. A prioridade atual e consistencia, ergonomia e repetibilidade dos fluxos certificados.
 
 ---
 
@@ -106,41 +80,25 @@ flowchart LR
 
 ### Core ja integrado ao fluxo principal
 
-- Editor de cena
-- Hierarchy / Inspector
-- Asset Browser
-- Build & Run
-- Game View com emulador integrado
-- Setup nativo de dependencias externas
-- Importacao externa sob escopo controlado
+- Menu inicial / criacao e abertura de projetos `.rds`
+- Scene workspace com `Hierarchy`, `Layers` e `Inspector`
+- Game workspace com `Build & Run` e emulador integrado
+- Explorer workspace
+- Logic workspace / NodeGraph canonico (certificacao local, sem prova institucional dedicada ainda)
+- Debug workspace com `Runtime Setup`, `Patch Studio`, `Paleta Contextual` e `Deep Profiler`
 
 ### Ainda marcadas como `Experimental`
 
+- Asset Browser
 - ArtStudio
 - RetroFX
 - Reverse Workspace
 - Asset Extractor
 - Memory Viewer
-- Partes do NodeGraph fora do pipeline canonico consolidado
+- VRAM Viewer
+- Importadores externos fora do eixo principal do MVP
 
-Essas superficies existem de verdade no produto, mas continuam com rotulo de maturidade controlado para nao prometer mais do que o fluxo atual entrega.
-
----
-
-## Estrutura Essencial
-
-```text
-RetroDevStudio/
-|-- README.md
-|-- CLAUDE.md
-|-- docs/
-|-- scripts/
-|-- src/
-|-- src-tauri/
-`-- toolchains/
-```
-
-O mapa detalhado de diretorios fica em [docs/08_TREE_ARCHITECTURE.md](./docs/08_TREE_ARCHITECTURE.md).
+Essas superficies existem de verdade no produto, mas continuam com rotulo de maturidade controlado para nao prometer mais do que o fluxo atual entrega. A lista canonica e mais detalhada fica no roadmap central.
 
 ---
 
@@ -152,16 +110,14 @@ Para subir o projeto de forma conservadora em um host Windows novo:
 2. `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\bootstrap.ps1`
 3. `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests`
 
-O bootstrap atual nao cria scaffold, nao reescreve arquivos do repositório e pode opcionalmente rodar o baseline completo do projeto.
+O bootstrap atual nao cria scaffold, nao reescreve arquivos do repositorio e pode opcionalmente rodar o baseline completo do projeto.
 
-Para uma fotografia consolidada de readiness no Windows, o caminho canonico agora e:
+Para uma fotografia consolidada de readiness no Windows:
 
 1. `npm run release:readiness:baseline`
 2. inspecionar `src-tauri/target-test/validation/release-readiness.md`
 
-Essa rodada passa a exigir que `build-report.json`, `upstream-validation.json` e o executavel debug tenham sido renovados na propria execucao.
-
-Para a rodada institucional de promocao RC, o caminho conservador agora e:
+Para a rodada institucional de promocao RC:
 
 1. `npm run test:e2e:desktop:qa-rc`
 2. `npm run release:readiness:promotion`
@@ -172,50 +128,8 @@ Para a rodada institucional de promocao RC, o caminho conservador agora e:
 
 ## Documentos De Verdade
 
-- [docs/06_AI_MEMORY_BANK.md](./docs/06_AI_MEMORY_BANK.md): estado operacional real, proximo passo e memoria do projeto.
-- [docs/03_ROADMAP_MVP.md](./docs/03_ROADMAP_MVP.md): fase vigente e escopo do produto.
-- [docs/09_AGENT_DEV_MODE.md](./docs/09_AGENT_DEV_MODE.md): regras de processo, entrega e push.
-- [docs/07_TEST_AND_COMPLIANCE.md](./docs/07_TEST_AND_COMPLIANCE.md): gates, compliance e validacao oficial.
+- [docs/06_AI_MEMORY_BANK.md](./docs/06_AI_MEMORY_BANK.md): estado operacional real, prioridade imediata e entrada canonica.
+- [docs/03_ROADMAP_MVP.md](./docs/03_ROADMAP_MVP.md): fases, superficies e importadores com matriz central de maturidade.
+- [docs/09_AGENT_DEV_MODE.md](./docs/09_AGENT_DEV_MODE.md): regras de processo, sincronizacao documental e gates.
+- [docs/07_TEST_AND_COMPLIANCE.md](./docs/07_TEST_AND_COMPLIANCE.md): compliance, readiness e validacao oficial.
 - [docs/08_TREE_ARCHITECTURE.md](./docs/08_TREE_ARCHITECTURE.md): organizacao canonica de arquivos.
-
-### Onboarding para agentes
-
-1. Ler `docs/06_AI_MEMORY_BANK.md`.
-2. Ler `docs/03_ROADMAP_MVP.md`.
-3. Ler `docs/08_TREE_ARCHITECTURE.md`.
-4. Ler `docs/09_AGENT_DEV_MODE.md` quando a tarefa tocar processo, CI, docs, estado ou governanca.
-5. Responder com `[Contexto Carregado]` antes de propor mudanca relevante.
-
----
-
-## Validacao Minima
-
-Antes de declarar entrega relevante:
-
-- `npm run check:tree`
-- `npm run lint`
-- `npx tsc --noEmit`
-- `npm test`
-- `cargo clippy -- -D warnings`
-- `cargo test --lib -- --nocapture`
-- `npm run build:debug`
-
-Quando a mudanca tocar `build`, `emulacao` ou `toolchains` reais no Windows, tambem:
-
-- `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests`
-- `node scripts/e2e-tauri-build-run.mjs --skip-build --native-driver .\toolchains\webdriver\msedgedriver.exe`
-- `npm run release:readiness:baseline`
-
-Sem esses gates, o status correto continua sendo `em hardening`.
-
----
-
-## Compliance
-
-- O projeto nao distribui ROM comercial.
-- O usuario traz a propria ROM quando usar recursos de engenharia reversa.
-- Modificacao de ROM comercial deve privilegiar `IPS` e `BPS`.
-- `SGDK`, `PVSnesLib` e cores `Libretro` devem ser baixados do upstream oficial, sob demanda.
-- Binarios de terceiros instalados em `toolchains/` nao devem ser versionados no Git.
-
-Detalhes completos em [docs/07_TEST_AND_COMPLIANCE.md](./docs/07_TEST_AND_COMPLIANCE.md).

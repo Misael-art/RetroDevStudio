@@ -62,6 +62,7 @@ jobs:
       RDS_E2E_DRIVER_TIMEOUT_MS: 60000
       RDS_E2E_UI_TIMEOUT_MS: 30000
       RDS_E2E_RUN_TIMEOUT_MS: 300000
+      RDS_FORCE_TAURI_CLI_DEBUG: "1"
       RDS_E2E_TARGET: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || github.event_name == 'workflow_call' && inputs.target || 'all' }}
     steps:
       - name: Checkout
@@ -262,6 +263,28 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_stale_snes'
 
+      - name: Report step outcomes before verification
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host "Step outcomes (outcome / conclusion):"
+          Write-Host "  smoke_md:              ${{ steps.smoke_md.outcome }}"
+          Write-Host "  smoke_snes:            ${{ steps.smoke_snes.outcome }}"
+          Write-Host "  live_overflow_md:      ${{ steps.live_overflow_md.outcome }}"
+          Write-Host "  live_overflow_snes:    ${{ steps.live_overflow_snes.outcome }}"
+          Write-Host "  live_vram_overflow_md: ${{ steps.live_vram_overflow_md.outcome }}"
+          Write-Host "  live_vram_overflow_snes: ${{ steps.live_vram_overflow_snes.outcome }}"
+          Write-Host "  live_vram_warning_md:  ${{ steps.live_vram_warning_md.outcome }}"
+          Write-Host "  live_vram_warning_snes: ${{ steps.live_vram_warning_snes.outcome }}"
+          Write-Host "  live_sprite_warning_md: ${{ steps.live_sprite_warning_md.outcome }}"
+          Write-Host "  live_sprite_warning_snes: ${{ steps.live_sprite_warning_snes.outcome }}"
+          Write-Host "  live_ok_md:            ${{ steps.live_ok_md.outcome }}"
+          Write-Host "  live_ok_snes:          ${{ steps.live_ok_snes.outcome }}"
+          Write-Host "  live_error_md:         ${{ steps.live_error_md.outcome }}"
+          Write-Host "  live_error_snes:       ${{ steps.live_error_snes.outcome }}"
+          Write-Host "  live_stale_md:         ${{ steps.live_stale_md.outcome }}"
+          Write-Host "  live_stale_snes:       ${{ steps.live_stale_snes.outcome }}"
+
       - name: Verify all E2E scenarios passed
         if: always()
         shell: pwsh
@@ -269,6 +292,17 @@ jobs:
           if (-not (Test-Path $env:RDS_E2E_LEDGER)) {
             throw "Ledger de cenarios E2E nao encontrado em $env:RDS_E2E_LEDGER"
           }
+
+          Write-Host "--- Ledger diagnostics ---"
+          Write-Host "Ledger path: $env:RDS_E2E_LEDGER"
+          $rawBytes = [System.IO.File]::ReadAllBytes($env:RDS_E2E_LEDGER)
+          Write-Host "Ledger size: $($rawBytes.Length) bytes"
+          if ($rawBytes.Length -gt 0) {
+            Write-Host "First 10 bytes: $($rawBytes[0..[Math]::Min(9,$rawBytes.Length-1)] -join ',')"
+          }
+          $rawText = [System.IO.File]::ReadAllText($env:RDS_E2E_LEDGER)
+          Write-Host "Raw content:`n$rawText"
+          Write-Host "--- End diagnostics ---"
 
           $expectedMd = @(
             'smoke_md',
@@ -296,17 +330,21 @@ jobs:
             'snes' { $expectedSnes }
             default { @($expectedMd + $expectedSnes) }
           }
-          $executed = Get-Content -Path $env:RDS_E2E_LEDGER | Where-Object {
+          $executed = Get-Content -Path $env:RDS_E2E_LEDGER | ForEach-Object { $_.Trim() } | Where-Object {
             -not [string]::IsNullOrWhiteSpace($_)
           }
+
+          Write-Host "Expected ($($expected.Count)): $($expected -join ', ')"
+          Write-Host "Executed ($(@($executed).Count)): $(@($executed) -join ', ')"
+
           $missing = @($expected | Where-Object { $_ -notin $executed })
 
           if ($missing.Count -gt 0) {
-            Write-Host "::error::E2E scenarios missing success markers: $($missing -join ', ')"
+            Write-Host "::error::E2E scenarios missing success markers ($($missing.Count)): $($missing -join ', ')"
             exit 1
           }
 
-          Write-Host "All executed E2E scenarios passed."
+          Write-Host "All $($expected.Count) E2E scenarios passed."
 
       - name: Publish desktop E2E summary
         if: always()
