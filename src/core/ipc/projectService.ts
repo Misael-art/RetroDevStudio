@@ -8,6 +8,23 @@ export interface OpenProjectResult {
   notice?: string | null;
 }
 
+export type ProjectDestinationCollisionStatus =
+  | "available"
+  | "occupied"
+  | "existing_project";
+
+export interface ProjectDestinationPreview {
+  requested_name: string;
+  suggested_name: string;
+  requested_dir_name: string;
+  suggested_dir_name: string;
+  preferred_path: string;
+  resolved_path: string;
+  collision_status: ProjectDestinationCollisionStatus;
+  existing_project_path?: string | null;
+  existing_project_name?: string | null;
+}
+
 export interface ProjectTemplateSummary {
   id: string;
   name: string;
@@ -51,6 +68,13 @@ export function newProjectDialog(projectName: string): Promise<OpenProjectResult
 
 export function suggestProjectBaseDir(): Promise<string> {
   return invoke("suggest_project_base_dir");
+}
+
+export function previewProjectDestination(
+  projectName: string,
+  baseDir: string
+): Promise<ProjectDestinationPreview> {
+  return invoke("preview_project_destination", { projectName, baseDir });
 }
 
 export function createOnboardingProject(

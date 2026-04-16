@@ -24,8 +24,10 @@ import {
   listProjectTemplates,
   openProjectDialog,
   openProjectPath,
+  previewProjectDestination,
   suggestProjectBaseDir,
   type ExternalImportProfileSummary,
+  type ProjectDestinationPreview,
   type ProjectTemplateSummary,
   setProjectTarget,
 } from "./core/ipc/projectService";
@@ -191,6 +193,30 @@ type FirstSuccessStep = {
 
 function getTargetLabel(target: "megadrive" | "snes") {
   return target === "megadrive" ? "Mega Drive" : "SNES";
+}
+
+function sanitizeProjectDirName(projectName: string) {
+  const sanitized = projectName
+    .trim()
+    .split("")
+    .map((character) =>
+      /[A-Za-z0-9_-]/.test(character) ? character : "_"
+    )
+    .join("")
+    .replace(/_+/g, "_")
+    .replace(/^[_-]+|[_-]+$/g, "");
+
+  return sanitized || "Projeto";
+}
+
+function joinProjectPathPreview(baseDir: string, leafName: string) {
+  if (!baseDir.trim()) {
+    return leafName;
+  }
+
+  const normalizedBaseDir = baseDir.replace(/[\\/]+$/, "");
+  const separator = normalizedBaseDir.includes("\\") ? "\\" : "/";
+  return `${normalizedBaseDir}${separator}${leafName}`;
 }
 
 function getDefaultTemplateId(templates: ProjectTemplateSummary[]) {
@@ -811,9 +837,16 @@ export default function App() {
     typeof window !== "undefined" ? window.innerWidth : 1440
   );
   const [newProjName, setNewProjName] = useState("MeuProjeto");
+  const [projectNameSuggestionMode, setProjectNameSuggestionMode] = useState<"auto" | "manual">(
+    "auto"
+  );
   const [newProjTarget, setNewProjTarget] = useState<"megadrive" | "snes">("megadrive");
   const [newProjBaseDir, setNewProjBaseDir] = useState("");
   const [automaticBaseDirHint, setAutomaticBaseDirHint] = useState("");
+  const [projectDestinationPreview, setProjectDestinationPreview] =
+    useState<ProjectDestinationPreview | null>(null);
+  const [lastExistingProjectPreview, setLastExistingProjectPreview] =
+    useState<ProjectDestinationPreview | null>(null);
   const [projectTemplates, setProjectTemplates] = useState<ProjectTemplateSummary[]>([]);
   const [externalImportProfiles, setExternalImportProfiles] = useState<ExternalImportProfileSummary[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
@@ -867,6 +900,24 @@ export default function App() {
       : [];
   const selectedExternalImportProfile =
     externalImportProfiles.find((profile) => profile.id === selectedExternalImportProfileId) ?? null;
+  const estimatedProjectRoot = (newProjBaseDir || automaticBaseDirHint).trim();
+  const estimatedProjectDirName =
+    projectDestinationPreview?.suggested_dir_name ?? sanitizeProjectDirName(newProjName);
+  const estimatedProjectDestination =
+    projectDestinationPreview?.resolved_path ??
+    joinProjectPathPreview(estimatedProjectRoot, estimatedProjectDirName);
+  const pendingSuggestedProjectName =
+    projectDestinationPreview?.suggested_name &&
+    projectDestinationPreview.suggested_name !== newProjName
+      ? projectDestinationPreview.suggested_name
+      : null;
+  const detectedExistingProjectPreview =
+    projectDestinationPreview?.collision_status === "existing_project"
+      ? projectDestinationPreview
+      : lastExistingProjectPreview &&
+          lastExistingProjectPreview.suggested_name === newProjName
+        ? lastExistingProjectPreview
+        : null;
   const workspaceMeta =
     WORKSPACE_ITEMS.find((workspace) => workspace.id === activeWorkspace) ?? WORKSPACE_ITEMS[0];
 
@@ -1103,6 +1154,49 @@ export default function App() {
       cancelled = true;
     };
   }, [showProjectWizard]);
+
+  useEffect(() => {
+    if (!showProjectWizard) {
+      setProjectDestinationPreview(null);
+      setLastExistingProjectPreview(null);
+      return;
+    }
+
+    if (!estimatedProjectRoot) {
+      setProjectDestinationPreview(null);
+      return;
+    }
+
+    let cancelled = false;
+    void previewProjectDestination(newProjName, estimatedProjectRoot)
+      .then((preview) => {
+        if (cancelled) {
+          return;
+        }
+
+        setProjectDestinationPreview(preview);
+        if (preview.collision_status === "existing_project") {
+          setLastExistingProjectPreview(preview);
+        }
+
+        if (
+          projectNameSuggestionMode === "auto" &&
+          preview.suggested_name.trim() &&
+          preview.suggested_name !== newProjName
+        ) {
+          setNewProjName(preview.suggested_name);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setProjectDestinationPreview(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showProjectWizard, estimatedProjectRoot, newProjName, projectNameSuggestionMode]);
 
   useEffect(() => {
     if (activeProjectDir) {
@@ -1465,6 +1559,39 @@ export default function App() {
       }
     } catch (error) {
       logMessage("error", `[Projeto] Falha ao escolher pasta base: ${describeError(error)}`);
+    }
+  }
+
+  function handleProjectNameChange(projectName: string) {
+    setProjectNameSuggestionMode("manual");
+    setLastExistingProjectPreview(null);
+    setNewProjName(projectName);
+  }
+
+  function applySuggestedProjectName() {
+    if (!pendingSuggestedProjectName) {
+      return;
+    }
+
+    setProjectNameSuggestionMode("auto");
+    setNewProjName(pendingSuggestedProjectName);
+  }
+
+  async function openDetectedExistingProject() {
+    const existingProjectPath = detectedExistingProjectPreview?.existing_project_path?.trim();
+    if (!existingProjectPath) {
+      return;
+    }
+
+    try {
+      await openProjectAtPath(existingProjectPath, "Projeto");
+      setShowProjectWizard(false);
+      setLastExistingProjectPreview(null);
+    } catch (error) {
+      logMessage(
+        "error",
+        `[Projeto] Falha ao abrir projeto existente: ${describeError(error)}`
+      );
     }
   }
 
@@ -2703,15 +2830,39 @@ export default function App() {
             </div>
 
             <div className="grid gap-3 md:grid-cols-[1fr_1.1fr]">
-              <input
-                ref={inputRef}
-                type="text"
-                value={newProjName}
-                onChange={(event) => setNewProjName(event.target.value)}
-                onKeyDown={(event) => event.key === "Enter" && void confirmNewProject()}
-                placeholder="Nome do projeto"
-                className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1.5 text-sm text-[#cdd6f4] focus:border-[#cba6f7] focus:outline-none"
-              />
+              <div className="space-y-2">
+                <input
+                  ref={inputRef}
+                  type="text"
+                  value={newProjName}
+                  onChange={(event) => handleProjectNameChange(event.target.value)}
+                  onKeyDown={(event) => event.key === "Enter" && void confirmNewProject()}
+                  placeholder="Nome do projeto"
+                  className="w-full rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1.5 text-sm text-[#cdd6f4] focus:border-[#cba6f7] focus:outline-none"
+                />
+
+                {pendingSuggestedProjectName ? (
+                  <div className="rounded border border-[#45475a] bg-[#11111b] p-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-[10px] text-[#7f849c]">Nome sugerido</p>
+                        <p
+                          data-testid="wizard-project-name-suggestion"
+                          className="truncate text-xs font-semibold text-[#a6e3a1]"
+                        >
+                          {pendingSuggestedProjectName}
+                        </p>
+                      </div>
+                      <ToolbarButton label="Usar" onClick={applySuggestedProjectName} />
+                    </div>
+                    <p className="mt-2 text-[10px] leading-5 text-[#7f849c]">
+                      {projectDestinationPreview?.collision_status === "existing_project"
+                        ? "O nome original aponta para um projeto RetroDev ja valido. Use o nome sugerido para criar outro sem sobrescrever o existente."
+                        : "O nome atual ja ocupa a pasta preferida. Use o nome sugerido para o RetroDev criar o projeto em um destino livre ja nesta tentativa."}
+                    </p>
+                  </div>
+                ) : null}
+              </div>
 
               <div className="rounded border border-[#313244] bg-[#11111b] p-2">
                 <div className="flex items-center gap-2">
@@ -2723,15 +2874,66 @@ export default function App() {
                   </div>
                   <ToolbarButton label="Escolher" onClick={() => void chooseNewProjectBaseDir()} />
                 </div>
+                <div className="mt-2 border-t border-[#313244] pt-2">
+                  <p className="text-[10px] text-[#7f849c]">Destino estimado</p>
+                  <p
+                    data-testid="wizard-project-destination"
+                    className="truncate font-mono text-[10px] text-[#f9e2af]"
+                  >
+                    {estimatedProjectDestination}
+                  </p>
+                </div>
                 <p className="mt-2 text-[10px] leading-5 text-[#7f849c]">
-                  {newProjBaseDir
-                    ? "Pasta manual selecionada. Se ela falhar na escrita, o backend fara fallback seguro e avisara no console."
+                  {detectedExistingProjectPreview
+                    ? `Ja existe um projeto RetroDev valido em '${detectedExistingProjectPreview.preferred_path}'. Se quiser continuar nele, use 'Abrir projeto existente'. Se preferir criar outro, o wizard sugere um nome livre automaticamente.`
+                    : newProjBaseDir
+                    ? `Pasta manual selecionada. Se ela falhar na escrita, o backend fara fallback seguro; se '${estimatedProjectDirName}' ja existir, o RetroDev cria '${estimatedProjectDirName}_2' automaticamente.`
                     : automaticBaseDirHint
-                      ? `Se voce nao escolher uma pasta, o RetroDev usara '${automaticBaseDirHint}' automaticamente.`
-                      : "Se voce nao escolher uma pasta, o backend tentara resolver uma localizacao automatica segura."}
+                      ? `Se voce nao escolher uma pasta, o RetroDev usara '${automaticBaseDirHint}' automaticamente. Se '${estimatedProjectDirName}' ja existir, ele cria '${estimatedProjectDirName}_2' para manter o fluxo.`
+                      : `Se voce nao escolher uma pasta, o backend tentara resolver uma localizacao automatica segura. Se '${estimatedProjectDirName}' ja existir, ele criara '${estimatedProjectDirName}_2' automaticamente.`}
                 </p>
               </div>
             </div>
+
+            {detectedExistingProjectPreview?.existing_project_path ? (
+              <div
+                data-testid="wizard-existing-project-card"
+                className="mt-3 rounded border border-[#89b4fa]/40 bg-[#11111b] p-3"
+              >
+                <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#89b4fa]">
+                  Projeto RetroDev encontrado
+                </p>
+                <p className="mt-2 text-xs text-[#cdd6f4]">
+                  O nome original ja aponta para{" "}
+                  <span className="font-semibold text-[#a6e3a1]">
+                    {detectedExistingProjectPreview.existing_project_name ?? "um projeto existente"}
+                  </span>
+                  .
+                </p>
+                <p
+                  data-testid="wizard-existing-project-path"
+                  className="mt-2 truncate font-mono text-[10px] text-[#94e2d5]"
+                >
+                  {detectedExistingProjectPreview.existing_project_path}
+                </p>
+                <p className="mt-2 text-[10px] leading-5 text-[#7f849c]">
+                  {pendingSuggestedProjectName
+                    ? `Se a sua intencao era continuar no projeto original, abra-o agora. Se voce queria um projeto novo, o wizard pode trocar o campo para '${pendingSuggestedProjectName}' sem interromper o fluxo.`
+                    : `Se voce queria um projeto novo, o wizard ja ajustou o nome para '${newProjName}' e manteve o projeto original intacto. Se a intencao era continuar no original, voce pode abri-lo daqui.`}
+                </p>
+                <div className="mt-3 flex flex-wrap justify-end gap-2">
+                  {pendingSuggestedProjectName ? (
+                    <ToolbarButton label="Usar nome sugerido" onClick={applySuggestedProjectName} />
+                  ) : null}
+                  <ToolbarButton
+                    label="Abrir projeto existente"
+                    onClick={() => void openDetectedExistingProject()}
+                    accent="success"
+                    testId="wizard-open-existing-project"
+                  />
+                </div>
+              </div>
+            ) : null}
             </div>
 
             <div

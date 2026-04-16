@@ -1,9 +1,10 @@
 # 09 - AGENT DEV MODE & QUALITY GATES
 **Status:** Canonico
-**Objetivo:** Consolidar a hierarquia de verdade, os gates de entrega, a matriz de maturidade e as regras anti-poluicao do projeto.
+**Objetivo:** Consolidar a hierarquia de verdade, os gates de entrega e o protocolo que impede drift documental.
 
 > Este documento nao substitui o `Memory Bank` como fonte de estado atual.
-> Ele codifica como agentes e humanos devem trabalhar para que o projeto nao acumule duplicacoes, informativos falsos, fakes, gambiarras e regressao silenciosa.
+> Ele define como humanos e agentes devem trabalhar para que o repositorio nao volte a produzir:
+> claims falsos, docs conflitantes, fluxos paralelos e maturidade inflada.
 
 ---
 
@@ -12,8 +13,8 @@
 | Ordem | Fonte | Resolve o que |
 |------|-------|---------------|
 | 1 | `docs/06_AI_MEMORY_BANK.md` | Estado operacional real, prioridade imediata e conflitos de sessao |
-| 2 | `docs/03_ROADMAP_MVP.md` | Escopo do produto e fase vigente |
-| 3 | `docs/09_AGENT_DEV_MODE.md` | Regras de processo, gates e anti-poluicao |
+| 2 | `docs/03_ROADMAP_MVP.md` | Escopo do produto, fases e matriz permanente de maturidade |
+| 3 | `docs/09_AGENT_DEV_MODE.md` | Regras de processo, sincronizacao documental e gates |
 | 4 | `docs/08_TREE_ARCHITECTURE.md` | Onde arquivos e diretorios devem existir |
 | 5 | `docs/02_TECH_STACK.md` | Tecnologias e ferramentas aprovadas |
 | 6 | `docs/07_TEST_AND_COMPLIANCE.md` | Compliance, validacao minima e barra de entrega |
@@ -21,8 +22,14 @@
 
 **Regra pratica**
 - Se uma fonte inferior contradizer uma superior, a fonte superior vence.
-- Se a divergencia for detectada durante a tarefa, o agente deve corrigi-la na mesma sessao.
-- Nenhum agente pode usar onboarding desatualizado como justificativa para estado falso do produto.
+- Se a divergencia for detectada durante a tarefa, ela deve ser corrigida na mesma sessao.
+- Nenhum agente pode usar onboarding desatualizado para justificar estado falso do produto.
+
+### Papel de cada documento canonico
+
+- `docs/06_AI_MEMORY_BANK.md` + `docs/06_CURRENT_WAVE_AI_BANK.md`: diario operacional, evidencias recentes, proximo passo.
+- `docs/03_ROADMAP_MVP.md`: matriz central de fases, superficies e importadores.
+- `README.md`: onboarding curto e links; nao pode carregar snapshot institucional detalhado.
 
 ---
 
@@ -44,9 +51,32 @@ Uma tarefa tambem nao esta concluida enquanto faltar certificacao real no escopo
 
 ---
 
-## 3. GATES NAO NEGOCIAVEIS
+## 3. PROTOCOLO DE SINCRONIZACAO DOCUMENTAL
 
-### 3.1 Baseline minimo local e CI
+### 3.1 Regras obrigatorias
+
+1. Se o estado de uma feature mudar, atualizar `docs/06_CURRENT_WAVE_AI_BANK.md` e `docs/03_ROADMAP_MVP.md` na mesma sessao.
+2. Se o onboarding/resumo publico mudar, atualizar `README.md` na mesma sessao.
+3. Se surgir nova superficie visivel ou novo importador no codigo, criar linha correspondente na matriz do roadmap antes de qualquer claim de entrega.
+4. Um item nao pode continuar descrito como `planejamento` se o codigo o marcar como `importable: true`.
+5. Um item nao pode sair de `Experimental` sem evidencia institucional e sem alinhamento de UI, docs e backend.
+6. `docs/09_AGENT_DEV_MODE.md` nao deve manter matriz independente de maturidade do produto; a matriz permanente vive em `docs/03_ROADMAP_MVP.md`.
+
+### 3.2 Vocabulario controlado
+
+- `Em codigo`: existe no repositorio.
+- `Validado localmente`: ha prova local do fluxo afetado.
+- `Validado institucionalmente`: ha evidencia canonica da rodada/host institucional.
+- `Em hardening`: existe validacao real, mas o item ainda nao deve ser tratado como fechado.
+- `Experimental`: visivel, parcial ou fora do criterio de fechamento.
+- `Fora do MVP/Q2`: nao entra no fechamento atual, mesmo que exista algum codigo.
+
+---
+
+## 4. GATES NAO NEGOCIAVEIS
+
+### 4.1 Baseline minimo local e CI
+
 - `npm run check:tree`
 - `npm run lint`
 - `npx tsc --noEmit`
@@ -54,7 +84,8 @@ Uma tarefa tambem nao esta concluida enquanto faltar certificacao real no escopo
 - `cargo clippy -- -D warnings`
 - `cargo test --lib -- --nocapture --test-threads=1`
 
-### 3.2 Gates extras quando a mudanca toca o core
+### 4.2 Gates extras quando a mudanca toca o core
+
 - Reexecutar `scripts/validate-upstream-windows.ps1` quando a mudanca tocar build/emulacao de Mega Drive ou SNES com toolchains oficiais no Windows.
   O modo canonico de execucao e direto: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests`.
   Nao embrulhar esse script com `scripts/run-in-msvc.cmd`, porque ele proprio ja resolve o runner MSVC canonico internamente.
@@ -63,7 +94,8 @@ Uma tarefa tambem nao esta concluida enquanto faltar certificacao real no escopo
 - Reexecutar o runner desktop `scripts/e2e-tauri-build-run.mjs` quando a mudanca tocar o fluxo `Build -> Load ROM -> Run frames` do app como um todo.
 - Preferir o workflow dedicado `.github/workflows/desktop-e2e.yml` para repeticao institucional em Windows, seja via `workflow_dispatch`, `workflow_call` ou gatilhos `push`/`pull_request` filtrados por caminho, preservando o `ci.yml` comum como baseline rapido e robusto.
 
-### 3.3 Regra de entrega
+### 4.3 Regra de entrega
+
 - Nao usar termos como `pronto`, `completo`, `fechado`, `MVP concluido` ou `pipeline validado` sem satisfazer os gates correspondentes.
 - `Validado` e `concluido` exigem certificacao real, nao so implementacao em codigo ou CI verde.
 - Certificacao real, neste projeto, significa ao mesmo tempo:
@@ -76,7 +108,7 @@ Uma tarefa tambem nao esta concluida enquanto faltar certificacao real no escopo
 
 ---
 
-## 4. REGRAS ANTI-POLUICAO E ANTI-GAMBIARRA
+## 5. REGRAS ANTI-POLUICAO E ANTI-GAMBIARRA
 
 - Nao criar modulo, store, IPC, pipeline ou emitter duplicado quando ja existe um canonico.
 - Nao criar documento paralelo para estado real; use `06_AI_MEMORY_BANK.md` e `03_ROADMAP_MVP.md`.
@@ -91,7 +123,7 @@ Uma tarefa tambem nao esta concluida enquanto faltar certificacao real no escopo
 
 ---
 
-## 5. REGRAS DE COESAO E CONSERVACAO FUNCIONAL
+## 6. REGRAS DE COESAO E CONSERVACAO FUNCIONAL
 
 - Toda mudanca em `save`, `build`, `run`, `emulator`, `dependency setup` ou `schema` deve preservar o comportamento canonico ou ajustar testes/fixtures na mesma sessao.
 - Mudancas em fluxo publico do app devem priorizar o arquivo canonico responsavel em vez de espalhar logica em novos arquivos.
@@ -101,56 +133,31 @@ Uma tarefa tambem nao esta concluida enquanto faltar certificacao real no escopo
 
 ---
 
-## 6. MATRIZ DE MATURIDADE ATUAL (2026-03-22)
-
-Escala:
-- `0` inexistente
-- `1` scaffold
-- `2` prova de conceito
-- `3` alpha interna funcional
-- `4` beta tecnica / hardening
-- `5` pronta para release
-
-| Area | Nota | Leitura objetiva | Gargalo atual |
-|------|------|------------------|---------------|
-| Infra | 4.5/5 | Base de app, IPC, persistencia, CI e workflow desktop dedicado agora estao validados localmente e em runner GitHub/Windows real | Falta decidir a governanca final do workflow sem perder agilidade |
-| Editor | 3.5/5 | NodeGraph 100% feito (1003 LOC, 23 node types, canvas SVG, drag/connect, paleta, auto-save, compila para C), workspace adaptativo com rail lateral e presets, ArtStudio institucionalizado com pipeline ate build provado | Refactoring de ViewportPanel/ToolsPanel monoliticos pode melhorar manutenibilidade |
-| Build | 4.0/5 | Pipeline real por target com workspace, staging e ROM validado com upstream oficial em Windows; ArtStudio multiframe ate resources.res provado; RetroFX parallax/raster ate main.c provado | Export ainda simples e SNES continua sensivel a mudancas no workspace |
-| Emulacao | 4.2/5 | Libretro FFI real, carga de ROM, input, framebuffer e audio validados com smoke upstream, runner local e workflow GitHub/Windows | Falta apenas preservar esse baseline ao endurecer o processo |
-| Toolchains | 4.0/5 | Setup sob demanda real e validado em Windows com SGDK, PVSnesLib e cores Libretro oficiais | Continua dependente de ambiente externo e compliance de licenca |
-| UX | 3.0/5 | Shell adaptativo com 6 contextos, presets de layout, focus mode, console colapsavel, palette contextual com paint/erase, collision map editor, zoom viewport e superficies experimentais rotuladas | Ainda ha polimento para leigos e ViewportPanel monolitico |
-| Testes | 4.9/5 | Baseline forte de testes, smoke upstream oficial, desktop E2E multi-target e workflow dedicado reutilizavel agora validados em runner GitHub/Windows real; novos testes de prova ArtStudio multiframe e RetroFX parallax/raster | Falta apenas calibrar custo/processo do gate remoto sem afrouxar cobertura |
-
-Leitura sintetica:
-- O projeto esta em `beta tecnica / hardening`, com provas reais de pipeline ponta a ponta.
-- NodeGraph, Audio e ArtStudio-ate-build estao mais maduros do que a documentacao anterior indicava.
-- Auto-updater deferido para pos-MVP por decisao explicita (2026-03-22).
-- O bloqueio principal agora e QA manual com leigos e repeticao institucional das provas em baseline commitada.
-
----
-
 ## 7. CHECKLIST DE FECHAMENTO DE SESSAO
 
 - [ ] O estado real anunciado pelo repositorio continua honesto?
-- [ ] Os documentos de onboarding continuam coerentes com o Memory Bank?
+- [ ] O roadmap central (`docs/03_ROADMAP_MVP.md`) continua coerente com o codigo?
+- [ ] O diario operacional (`docs/06_CURRENT_WAVE_AI_BANK.md`) foi atualizado se o estado mudou?
+- [ ] O onboarding publico (`README.md`) continua coerente com o roadmap e o Memory Bank?
 - [ ] Os gates aplicaveis foram rodados e passaram?
-- [ ] Se houve mudancas rastreaveis no escopo, os commit(s) e o `git push` correspondente foram feitos apos a validacao verde?
+- [ ] Se houve nova superficie visivel ou importador, a matriz do roadmap recebeu a linha correspondente?
 - [ ] Existe certificacao real suficiente para qualquer claim de `validado`, `concluido` ou `fechado` feita nesta sessao?
 - [ ] Se algo continua parcial, a UI e a documentacao deixam isso claro?
 - [ ] Nao foi criado modulo, script, doc ou fluxo paralelo ao canonico?
-- [ ] O Memory Bank precisa ser atualizado?
 
 ---
 
 ## 8. FALHAS PROCESSUAIS QUE DEVEM GERAR CORRECAO IMEDIATA
 
-1. README ou arquivo de onboarding chamando de concluido algo ainda nao validado.
+1. `README.md` ou arquivo de onboarding chamando de concluido algo ainda nao validado.
 2. CI verde, mas porque o gate foi afrouxado ou desviado.
 3. Feature visivel sem rotulo de parcial/experimental, apesar de backend incompleto.
 4. Duplicacao de store, service, pipeline, schema ou documentacao de estado.
 5. Dependencia nova adicionada sem justificativa e sem reflexo nos docs canonicos.
 6. Mudanca de fluxo publico sem teste, fixture ou prova funcional correspondente.
 7. Claim de `concluido` ou `validado` sustentada apenas por mock, stub, output cosmetico ou teste que nao passa pelo caminho canonico.
+8. Item descrito como `planejamento` apesar de o registry real do codigo marca-lo como `importable: true`.
+9. Nova superficie visivel no produto sem linha correspondente no roadmap central.
 
 ---
 

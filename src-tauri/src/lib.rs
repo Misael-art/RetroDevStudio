@@ -1680,9 +1680,48 @@ pub struct OpenProjectResult {
     pub notice: Option<String>,
 }
 
+#[derive(Debug, serde::Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectDestinationCollisionStatus {
+    Available,
+    Occupied,
+    ExistingProject,
+}
+
+#[derive(serde::Serialize)]
+pub struct ProjectDestinationPreview {
+    pub requested_name: String,
+    pub suggested_name: String,
+    pub requested_dir_name: String,
+    pub suggested_dir_name: String,
+    pub preferred_path: String,
+    pub resolved_path: String,
+    pub collision_status: ProjectDestinationCollisionStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub existing_project_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub existing_project_name: Option<String>,
+}
+
 struct ResolvedBaseDir {
     path: PathBuf,
     notice: Option<String>,
+}
+
+#[derive(Clone)]
+struct ExistingProjectPreview {
+    path: PathBuf,
+    name: String,
+}
+
+struct ProjectDirPreview {
+    requested_name: String,
+    safe_name: String,
+    preferred_dir: PathBuf,
+    resolved_dir: PathBuf,
+    suffix: Option<usize>,
+    collision_status: ProjectDestinationCollisionStatus,
+    existing_project: Option<ExistingProjectPreview>,
 }
 
 fn suggested_project_base_dir_path(candidates: &[PathBuf]) -> Result<String, String> {
@@ -1696,16 +1735,42 @@ fn suggested_project_base_dir_path(candidates: &[PathBuf]) -> Result<String, Str
 }
 
 fn safe_project_dir_name(project_name: &str) -> String {
-    project_name
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '_' || c == '-' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
+    let mut sanitized = String::new();
+    let mut last_was_separator = false;
+
+    for character in project_name.trim().chars() {
+        if character.is_alphanumeric() || character == '_' || character == '-' {
+            sanitized.push(character);
+            last_was_separator = false;
+        } else if !sanitized.is_empty() && !last_was_separator {
+            sanitized.push('_');
+            last_was_separator = true;
+        }
+    }
+
+    let sanitized = sanitized.trim_matches(['_', '-']).to_string();
+    if sanitized.is_empty() {
+        "Projeto".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn display_project_name(project_name: &str) -> String {
+    let trimmed = project_name.trim();
+    if trimmed.is_empty() {
+        "Projeto".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn suggested_project_name_with_suffix(project_name: &str, suffix: Option<usize>) -> String {
+    let base_name = display_project_name(project_name);
+    match suffix {
+        Some(suffix) => format!("{} {}", base_name, suffix),
+        None => base_name,
+    }
 }
 
 fn empty_open_project_result() -> OpenProjectResult {
@@ -1828,29 +1893,162 @@ fn suggest_project_base_dir() -> Result<String, String> {
     suggested_project_base_dir_path(&automatic_project_base_dir_candidates())
 }
 
-fn ensure_project_dir_available(project_dir: &Path) -> Result<(), String> {
-    if project_dir.exists() {
-        let mut entries = fs::read_dir(project_dir).map_err(|error| {
-            format!(
-                "Nao foi possivel inspecionar '{}': {}",
-                project_dir.display(),
-                error
-            )
-        })?;
-        if entries
-            .next()
-            .transpose()
-            .map_err(|error| error.to_string())?
-            .is_some()
-        {
-            return Err(format!(
-                "A pasta '{}' ja existe e nao esta vazia.",
-                project_dir.display()
-            ));
+#[tauri::command]
+fn preview_project_destination(
+    project_name: String,
+    base_dir: String,
+) -> Result<ProjectDestinationPreview, String> {
+    let trimmed_base_dir = base_dir.trim();
+    let resolved_base_dir = if trimmed_base_dir.is_empty() {
+        resolve_project_base_dir(None)?
+    } else {
+        ResolvedBaseDir {
+            path: PathBuf::from(trimmed_base_dir),
+            notice: None,
+        }
+    };
+
+    project_destination_preview(&resolved_base_dir.path, &project_name)
+}
+
+fn project_dir_contains_entries(project_dir: &Path) -> Result<bool, String> {
+    if !project_dir.exists() {
+        return Ok(false);
+    }
+
+    let mut entries = fs::read_dir(project_dir).map_err(|error| {
+        format!(
+            "Nao foi possivel inspecionar '{}': {}",
+            project_dir.display(),
+            error
+        )
+    })?;
+
+    Ok(entries
+        .next()
+        .transpose()
+        .map_err(|error| error.to_string())?
+        .is_some())
+}
+
+fn find_existing_project_preview(project_dir: &Path) -> Option<ExistingProjectPreview> {
+    let discovered_dir = discover_project_rds(project_dir).ok()?;
+    let project = load_project(&discovered_dir).ok()?;
+    Some(ExistingProjectPreview {
+        path: discovered_dir,
+        name: project.name,
+    })
+}
+
+fn find_next_available_project_dir(
+    base_dir: &Path,
+    safe_name: &str,
+) -> Result<(PathBuf, usize), String> {
+    for suffix in 2..10_000 {
+        let candidate_dir = base_dir.join(format!("{}_{}", safe_name, suffix));
+        if !project_dir_contains_entries(&candidate_dir)? {
+            return Ok((candidate_dir, suffix));
         }
     }
 
-    Ok(())
+    Err(format!(
+        "Nao foi possivel reservar uma pasta livre para '{}' dentro de '{}'.",
+        safe_name,
+        base_dir.display()
+    ))
+}
+
+fn preview_project_dir(base_dir: &Path, project_name: &str) -> Result<ProjectDirPreview, String> {
+    let requested_name = display_project_name(project_name);
+    let safe_name = safe_project_dir_name(project_name);
+    let preferred_dir = base_dir.join(&safe_name);
+    let preferred_dir_has_entries = project_dir_contains_entries(&preferred_dir)?;
+
+    if !preferred_dir_has_entries {
+        return Ok(ProjectDirPreview {
+            requested_name,
+            safe_name,
+            preferred_dir: preferred_dir.clone(),
+            resolved_dir: preferred_dir,
+            suffix: None,
+            collision_status: ProjectDestinationCollisionStatus::Available,
+            existing_project: None,
+        });
+    }
+
+    let existing_project = find_existing_project_preview(&preferred_dir);
+    let (resolved_dir, suffix) = find_next_available_project_dir(base_dir, &safe_name)?;
+
+    Ok(ProjectDirPreview {
+        requested_name,
+        safe_name,
+        preferred_dir,
+        resolved_dir,
+        suffix: Some(suffix),
+        collision_status: if existing_project.is_some() {
+            ProjectDestinationCollisionStatus::ExistingProject
+        } else {
+            ProjectDestinationCollisionStatus::Occupied
+        },
+        existing_project,
+    })
+}
+
+fn project_destination_preview(
+    base_dir: &Path,
+    project_name: &str,
+) -> Result<ProjectDestinationPreview, String> {
+    let preview = preview_project_dir(base_dir, project_name)?;
+
+    Ok(ProjectDestinationPreview {
+        requested_name: preview.requested_name,
+        suggested_name: suggested_project_name_with_suffix(project_name, preview.suffix),
+        requested_dir_name: preview.safe_name.clone(),
+        suggested_dir_name: preview
+            .resolved_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or(&preview.safe_name)
+            .to_string(),
+        preferred_path: preview.preferred_dir.to_string_lossy().to_string(),
+        resolved_path: preview.resolved_dir.to_string_lossy().to_string(),
+        collision_status: preview.collision_status,
+        existing_project_path: preview
+            .existing_project
+            .as_ref()
+            .map(|existing| existing.path.to_string_lossy().to_string()),
+        existing_project_name: preview.existing_project.map(|existing| existing.name),
+    })
+}
+
+fn reserve_project_dir(base_dir: &Path, project_name: &str) -> Result<(PathBuf, Option<String>), String> {
+    let preview = preview_project_dir(base_dir, project_name)?;
+    let notice = match (preview.collision_status, preview.existing_project.as_ref()) {
+        (ProjectDestinationCollisionStatus::Available, _) => None,
+        (ProjectDestinationCollisionStatus::ExistingProject, Some(existing_project)) => Some(format!(
+            "A pasta '{}' ja continha o projeto RetroDev '{}'. O RetroDev criou este novo projeto em '{}' automaticamente para manter o fluxo sem sobrescrever o original.",
+            preview.preferred_dir.display(),
+            existing_project.name,
+            preview.resolved_dir.display()
+        )),
+        _ => Some(format!(
+            "A pasta '{}' ja existia e nao estava vazia. O RetroDev criou este projeto em '{}' automaticamente para manter o fluxo.",
+            preview.preferred_dir.display(),
+            preview.resolved_dir.display()
+        )),
+    };
+
+    Ok((preview.resolved_dir, notice))
+}
+
+fn merge_project_notices(primary: Option<String>, secondary: Option<String>) -> Option<String> {
+    match (primary, secondary) {
+        (Some(primary), Some(secondary)) if primary == secondary => Some(primary),
+        (Some(primary), Some(secondary)) => Some(format!("{} {}", primary, secondary)),
+        (Some(primary), None) => Some(primary),
+        (None, Some(secondary)) => Some(secondary),
+        (None, None) => None,
+    }
 }
 
 fn create_onboarding_project_at_base_dir(
@@ -1858,10 +2056,7 @@ fn create_onboarding_project_at_base_dir(
     project_name: &str,
     target: &str,
 ) -> Result<OpenProjectResult, String> {
-    let safe_name = safe_project_dir_name(project_name);
-    let project_dir = base_dir.join(&safe_name);
-
-    ensure_project_dir_available(&project_dir)?;
+    let (project_dir, notice) = reserve_project_dir(base_dir, project_name)?;
 
     let project = create_project_skeleton(&project_dir, project_name, target)
         .map_err(|error| error.to_string())?;
@@ -1872,7 +2067,7 @@ fn create_onboarding_project_at_base_dir(
         path: project_dir.to_string_lossy().to_string(),
         name: project.name,
         base_dir: Some(base_dir.to_string_lossy().to_string()),
-        notice: None,
+        notice,
     })
 }
 
@@ -1883,10 +2078,7 @@ fn create_project_from_template_at_base_dir(
     template_id: &str,
     donor_path: Option<&Path>,
 ) -> Result<OpenProjectResult, String> {
-    let safe_name = safe_project_dir_name(project_name);
-    let project_dir = base_dir.join(&safe_name);
-
-    ensure_project_dir_available(&project_dir)?;
+    let (project_dir, notice) = reserve_project_dir(base_dir, project_name)?;
 
     let project = create_project_skeleton(&project_dir, project_name, target)
         .map_err(|error| error.to_string())?;
@@ -1900,7 +2092,7 @@ fn create_project_from_template_at_base_dir(
         path: project_dir.to_string_lossy().to_string(),
         name: project.name,
         base_dir: Some(base_dir.to_string_lossy().to_string()),
-        notice: None,
+        notice,
     })
 }
 
@@ -1909,10 +2101,7 @@ fn import_sgdk_project_at_base_dir(
     project_name: &str,
     sgdk_path: &Path,
 ) -> Result<OpenProjectResult, String> {
-    let safe_name = safe_project_dir_name(project_name);
-    let project_dir = base_dir.join(&safe_name);
-
-    ensure_project_dir_available(&project_dir)?;
+    let (project_dir, notice) = reserve_project_dir(base_dir, project_name)?;
 
     let project = create_project_skeleton(&project_dir, project_name, "megadrive")
         .map_err(|error| error.to_string())?;
@@ -1924,7 +2113,7 @@ fn import_sgdk_project_at_base_dir(
         path: project_dir.to_string_lossy().to_string(),
         name: project.name,
         base_dir: Some(base_dir.to_string_lossy().to_string()),
-        notice: None,
+        notice,
     })
 }
 
@@ -1933,10 +2122,7 @@ fn import_mugen_project_at_base_dir(
     project_name: &str,
     mugen_path: &Path,
 ) -> Result<OpenProjectResult, String> {
-    let safe_name = safe_project_dir_name(project_name);
-    let project_dir = base_dir.join(&safe_name);
-
-    ensure_project_dir_available(&project_dir)?;
+    let (project_dir, dir_notice) = reserve_project_dir(base_dir, project_name)?;
 
     let project = create_project_skeleton(&project_dir, project_name, "megadrive")
         .map_err(|error| error.to_string())?;
@@ -1968,7 +2154,7 @@ fn import_mugen_project_at_base_dir(
         path: project_dir.to_string_lossy().to_string(),
         name: project.name,
         base_dir: Some(base_dir.to_string_lossy().to_string()),
-        notice,
+        notice: merge_project_notices(dir_notice, notice),
     })
 }
 
@@ -2004,9 +2190,7 @@ fn import_external_project_at_base_dir(
     profile_id: &str,
     project_path: &Path,
 ) -> Result<OpenProjectResult, String> {
-    let safe_name = safe_project_dir_name(project_name);
-    let project_dir = base_dir.join(&safe_name);
-    ensure_project_dir_available(&project_dir)?;
+    let (project_dir, dir_notice) = reserve_project_dir(base_dir, project_name)?;
 
     let project = create_project_skeleton(&project_dir, project_name, "megadrive")
         .map_err(|error| error.to_string())?;
@@ -2025,7 +2209,7 @@ fn import_external_project_at_base_dir(
         path: project_dir.to_string_lossy().to_string(),
         name: project.name,
         base_dir: Some(base_dir.to_string_lossy().to_string()),
-        notice: external_import_notice(&profile, &report),
+        notice: merge_project_notices(dir_notice, external_import_notice(&profile, &report)),
     })
 }
 
@@ -2071,9 +2255,7 @@ fn attach_base_dir_notice(
     resolved_base_dir: ResolvedBaseDir,
 ) -> OpenProjectResult {
     result.base_dir = Some(resolved_base_dir.path.to_string_lossy().to_string());
-    if resolved_base_dir.notice.is_some() {
-        result.notice = resolved_base_dir.notice;
-    }
+    result.notice = merge_project_notices(result.notice, resolved_base_dir.notice);
     result
 }
 
@@ -2322,6 +2504,7 @@ pub fn run() {
             new_project_dialog,
             create_onboarding_project,
             suggest_project_base_dir,
+            preview_project_destination,
             list_project_templates,
             list_external_import_profiles,
             create_project_from_template,
@@ -3887,6 +4070,94 @@ pub extern "C" fn retro_run() {
         assert!(PathBuf::from(&result.path).starts_with(&automatic_base));
 
         let _ = fs::remove_dir_all(automatic_base.parent().unwrap_or(Path::new("")));
+    }
+
+    #[test]
+    fn create_onboarding_project_auto_suffixes_when_the_default_folder_is_busy() {
+        let base_dir = temp_dir("onboarding-collision-root");
+        let occupied_dir = base_dir.join("MeuProjeto");
+        fs::create_dir_all(&occupied_dir).expect("create occupied project dir");
+        fs::write(occupied_dir.join("project.rds"), "{}").expect("seed occupied project dir");
+
+        let result = create_onboarding_project_at_base_dir(&base_dir, "MeuProjeto", "megadrive")
+            .expect("create onboarding project with suffix");
+        let resolved_dir = PathBuf::from(&result.path);
+
+        assert_eq!(
+            resolved_dir.file_name().and_then(|name| name.to_str()),
+            Some("MeuProjeto_2")
+        );
+        assert!(
+            result.notice.as_deref().is_some_and(|notice| {
+                notice.contains("MeuProjeto")
+                    && notice.contains("MeuProjeto_2")
+                    && notice.contains("automaticamente")
+            }),
+            "expected notice describing the automatic suffix, got {:?}",
+            result.notice
+        );
+        assert!(resolved_dir.join("project.rds").is_file());
+
+        let _ = fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn project_destination_preview_detects_existing_retrodev_project_and_suggests_opening_it() {
+        let base_dir = temp_dir("project-preview-existing-root");
+        let existing_project_dir = base_dir.join("MeuProjeto");
+        create_project_skeleton(&existing_project_dir, "Projeto Antigo", "megadrive")
+            .expect("create existing project");
+
+        let preview =
+            project_destination_preview(&base_dir, "MeuProjeto").expect("preview project destination");
+
+        assert_eq!(
+            preview.collision_status,
+            ProjectDestinationCollisionStatus::ExistingProject
+        );
+        assert_eq!(preview.suggested_name, "MeuProjeto 2");
+        assert_eq!(preview.suggested_dir_name, "MeuProjeto_2");
+        assert_eq!(
+            PathBuf::from(&preview.existing_project_path.expect("existing project path"))
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some("MeuProjeto")
+        );
+        assert_eq!(preview.existing_project_name.as_deref(), Some("Projeto Antigo"));
+
+        let _ = fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn project_destination_preview_marks_busy_non_project_folder_as_occupied() {
+        let base_dir = temp_dir("project-preview-occupied-root");
+        let occupied_dir = base_dir.join("MeuProjeto");
+        fs::create_dir_all(&occupied_dir).expect("create occupied dir");
+        fs::write(occupied_dir.join("readme.txt"), "busy").expect("seed occupied dir");
+
+        let preview =
+            project_destination_preview(&base_dir, "MeuProjeto").expect("preview occupied destination");
+
+        assert_eq!(preview.collision_status, ProjectDestinationCollisionStatus::Occupied);
+        assert_eq!(preview.suggested_name, "MeuProjeto 2");
+        assert_eq!(preview.suggested_dir_name, "MeuProjeto_2");
+        assert!(preview.existing_project_path.is_none());
+        assert!(preview.existing_project_name.is_none());
+
+        let _ = fs::remove_dir_all(base_dir);
+    }
+
+    #[test]
+    fn merge_project_notices_preserves_both_contexts() {
+        let merged = merge_project_notices(
+            Some("Pasta base automatica selecionada.".to_string()),
+            Some("Projeto criado em MeuProjeto_2.".to_string()),
+        );
+
+        assert_eq!(
+            merged.as_deref(),
+            Some("Pasta base automatica selecionada. Projeto criado em MeuProjeto_2.")
+        );
     }
 
     #[test]

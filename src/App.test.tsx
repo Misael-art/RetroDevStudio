@@ -34,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   importSgdkProject: vi.fn(),
   importMugenProject: vi.fn(),
   suggestProjectBaseDir: vi.fn(),
+  previewProjectDestination: vi.fn(),
   setProjectTarget: vi.fn(),
   hydrateSceneResult: vi.fn(),
   persistActiveScene: vi.fn(),
@@ -562,6 +563,7 @@ vi.mock("./core/ipc/projectService", () => ({
   importSgdkProject: mocks.importSgdkProject,
   importMugenProject: mocks.importMugenProject,
   suggestProjectBaseDir: mocks.suggestProjectBaseDir,
+  previewProjectDestination: mocks.previewProjectDestination,
   setProjectTarget: mocks.setProjectTarget,
 }));
 
@@ -623,6 +625,39 @@ function createDependencyStatus(id: string) {
     auto_install_supported: true,
     notes: [],
     issues: [],
+  };
+}
+
+function sanitizeProjectDirNameForMock(projectName: string) {
+  const sanitized = projectName
+    .trim()
+    .split("")
+    .map((character) => (/[A-Za-z0-9_-]/.test(character) ? character : "_"))
+    .join("")
+    .replace(/_+/g, "_")
+    .replace(/^[_-]+|[_-]+$/g, "");
+
+  return sanitized || "Projeto";
+}
+
+function createProjectDestinationPreview(
+  projectName: string,
+  baseDir: string,
+  overrides: Partial<Record<string, unknown>> = {}
+) {
+  const normalizedBaseDir = baseDir || "C:/Users/Test/Documents/RetroDevProjects";
+  const safeName = sanitizeProjectDirNameForMock(projectName);
+  return {
+    requested_name: projectName.trim() || "Projeto",
+    suggested_name: projectName.trim() || "Projeto",
+    requested_dir_name: safeName,
+    suggested_dir_name: safeName,
+    preferred_path: `${normalizedBaseDir}/${safeName}`,
+    resolved_path: `${normalizedBaseDir}/${safeName}`,
+    collision_status: "available",
+    existing_project_path: null,
+    existing_project_name: null,
+    ...overrides,
   };
 }
 
@@ -989,6 +1024,9 @@ describe("App build flow", () => {
     mocks.listExternalImportProfiles.mockResolvedValue(defaultExternalImportProfiles());
     mocks.suggestProjectBaseDir.mockResolvedValue(
       "C:/Users/Test/Documents/RetroDevProjects"
+    );
+    mocks.previewProjectDestination.mockImplementation((projectName: string, baseDir: string) =>
+      Promise.resolve(createProjectDestinationPreview(projectName, baseDir))
     );
     mocks.createProjectFromTemplate.mockResolvedValue({
       selected: true,
@@ -1995,6 +2033,122 @@ describe("App build flow", () => {
     expect(container.textContent).toContain("C:/Users/Test/Documents/RetroDevProjects");
     expect(container.textContent).toContain(
       "Se voce nao escolher uma pasta, o RetroDev usara"
+    );
+  });
+
+  it("shows the estimated project destination and the automatic suffix hint in the wizard", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "",
+        activeProjectName: "",
+        activeScenePath: "",
+        activeScene: null,
+        activeSceneSource: null,
+        hwStatus: null,
+      });
+      await flush();
+      await flush();
+    });
+
+    const destination = container.querySelector(
+      "[data-testid='wizard-project-destination']"
+    ) as HTMLElement | null;
+    const nameInput = container.querySelector(
+      "input[placeholder='Nome do projeto']"
+    ) as HTMLInputElement | null;
+
+    expect(destination?.textContent).toContain(
+      "C:/Users/Test/Documents/RetroDevProjects/MeuProjeto"
+    );
+    expect(container.textContent).toContain("MeuProjeto_2");
+
+    await act(async () => {
+      if (!nameInput) {
+        throw new Error("Project name input not found");
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value"
+      );
+      descriptor?.set?.call(nameInput, "Meu Projeto!");
+      nameInput.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+      nameInput.dispatchEvent(new Event("change", { bubbles: true }));
+      await flush();
+      await flush();
+    });
+
+    expect(destination?.textContent).toContain(
+      "C:/Users/Test/Documents/RetroDevProjects/Meu_Projeto"
+    );
+    expect(container.textContent).toContain("Meu_Projeto_2");
+  });
+
+  it("offers to open an existing RetroDev project and auto-suggests a free name", async () => {
+    mocks.previewProjectDestination.mockImplementation((projectName: string, baseDir: string) => {
+      if (projectName === "MeuProjeto") {
+        return Promise.resolve(
+          createProjectDestinationPreview(projectName, baseDir, {
+            suggested_name: "MeuProjeto 2",
+            suggested_dir_name: "MeuProjeto_2",
+            resolved_path: `${baseDir}/MeuProjeto_2`,
+            collision_status: "existing_project",
+            existing_project_path: `${baseDir}/MeuProjeto`,
+            existing_project_name: "Projeto Antigo",
+          })
+        );
+      }
+
+      return Promise.resolve(createProjectDestinationPreview(projectName, baseDir));
+    });
+    mocks.openProjectPath.mockResolvedValue({
+      selected: true,
+      path: "C:/Users/Test/Documents/RetroDevProjects/MeuProjeto",
+      name: "Projeto Antigo",
+    });
+
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "",
+        activeProjectName: "",
+        activeScenePath: "",
+        activeScene: null,
+        activeSceneSource: null,
+        hwStatus: null,
+      });
+      await flush();
+      await flush();
+    });
+
+    await flushUntil(() => {
+      const nameInput = container.querySelector(
+        "input[placeholder='Nome do projeto']"
+      ) as HTMLInputElement | null;
+      return nameInput?.value === "MeuProjeto 2";
+    });
+
+    const nameInput = container.querySelector(
+      "input[placeholder='Nome do projeto']"
+    ) as HTMLInputElement | null;
+    const existingProjectButton = container.querySelector(
+      "[data-testid='wizard-open-existing-project']"
+    ) as HTMLButtonElement | null;
+
+    expect(nameInput?.value).toBe("MeuProjeto 2");
+    expect(container.textContent).toContain("Projeto RetroDev encontrado");
+    expect(container.textContent).toContain("Projeto Antigo");
+    expect(container.textContent).toContain("MeuProjeto 2");
+    expect(
+      container.querySelector("[data-testid='wizard-existing-project-path']")?.textContent
+    ).toContain("C:/Users/Test/Documents/RetroDevProjects/MeuProjeto");
+
+    await act(async () => {
+      existingProjectButton?.click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.openProjectPath).toHaveBeenCalledWith(
+      "C:/Users/Test/Documents/RetroDevProjects/MeuProjeto"
     );
   });
 
