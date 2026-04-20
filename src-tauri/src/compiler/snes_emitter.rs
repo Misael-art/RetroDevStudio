@@ -23,6 +23,7 @@ struct SpriteSizeConfig {
 #[derive(Debug, Clone)]
 struct SpawnedSprite {
     var_name: String,
+    resource_name: String,
     sprite_index: u16,
     initial_x: i32,
     initial_y: i32,
@@ -95,14 +96,19 @@ fn build_main_c_with_collision(
     let bgm_tracks = collect_bgm_tracks(ast);
     let has_logic_overlap = ast.logic_scripts.iter().any(script_uses_overlap);
     let hardware_event_scripts = collect_hardware_event_scripts(ast);
-    let size_config = ast
+    let default_size_config = SpriteSizeConfig {
+        oam_size: "OBJ_SIZE16_L32",
+        sprite_size: "OBJ_SMALL",
+    };
+    let asset_size_configs: std::collections::HashMap<String, SpriteSizeConfig> = ast
         .sprite_assets
-        .first()
-        .and_then(|asset| sprite_size_config(asset.frame_width, asset.frame_height))
-        .unwrap_or(SpriteSizeConfig {
-            oam_size: "OBJ_SIZE16_L32",
-            sprite_size: "OBJ_SMALL",
-        });
+        .iter()
+        .map(|asset| {
+            let config = sprite_size_config(asset.frame_width, asset.frame_height)
+                .unwrap_or(default_size_config);
+            (asset.resource_name.clone(), config)
+        })
+        .collect();
     let tile_base_lookup = tile_base_lookup(ast);
     let context = build_context(ast, &tile_base_lookup);
 
@@ -245,12 +251,16 @@ fn build_main_c_with_collision(
     let mut tile_base = 0u16;
     for asset in &ast.sprite_assets {
         let vram_address = tile_base.saturating_mul(16);
+        let asset_config = asset_size_configs
+            .get(&asset.resource_name)
+            .copied()
+            .unwrap_or(default_size_config);
         out.push_str(&format!(
             "    oamInitGfxSet(&{name}_til, (&{name}_tilend - &{name}_til), &{name}_pal, (&{name}_palend - &{name}_pal), {palette}, 0x{address:04X}, {oam_size});\n",
             name = asset.resource_name,
             palette = asset.palette_slot,
             address = vram_address,
-            oam_size = size_config.oam_size
+            oam_size = asset_config.oam_size
         ));
         tile_base = tile_base.saturating_add(tile_count(asset));
     }
@@ -267,9 +277,13 @@ fn build_main_c_with_collision(
             tile = initial_tile_for_spawn(&context, &spawn.var_name).unwrap_or(spawn.tile_base),
             palette = spawn.palette_slot
         ));
+        let spawn_size_config = asset_size_configs
+            .get(&spawn.resource_name)
+            .copied()
+            .unwrap_or(default_size_config);
         out.push_str(&format!(
             "    oamSetEx({}, {}, OBJ_SHOW);\n",
-            spawn.sprite_index, size_config.sprite_size
+            spawn.sprite_index, spawn_size_config.sprite_size
         ));
     }
 
@@ -467,6 +481,7 @@ fn build_context(
                     .unwrap_or_default();
                 let spawn = SpawnedSprite {
                     var_name: var_name.clone(),
+                    resource_name: resource_name.clone(),
                     sprite_index: next_sprite_index,
                     initial_x: *x,
                     initial_y: *y,

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
-import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -762,6 +762,7 @@ function createManualQaReport() {
       D: { status: "pending", note: null },
       E: { status: "pending", note: null },
       F: { status: "pending", note: null },
+      G: { status: "pending", note: null },
     },
   };
 }
@@ -1643,6 +1644,23 @@ async function main() {
   }
 
   const options = parseArgs(process.argv.slice(2));
+  try {
+    const preflightUrl = pathToFileURL(
+      path.join(repoRoot, "scripts", "sgdk-e2e-host-preflight.mjs")
+    ).href;
+    const { logPreflightSummary } = await import(preflightUrl);
+    await logPreflightSummary(
+      {
+        externalDriver: options.externalDriver,
+        tauriDriver: options.tauriDriver,
+        nativeDriver: options.nativeDriver,
+      },
+      repoRoot
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.warn(`[RDS preflight host] indisponivel ou erro: ${detail}`);
+  }
   if (!options.appExplicitlyProvided) {
     options.app = await resolveDefaultDesktopApp();
   }
@@ -2504,8 +2522,164 @@ async function main() {
           ].join(" ")
         );
 
+        currentBlock = "G";
+        const sgdkDonorFixture = path.join(
+          repoRoot,
+          "src-tauri",
+          "tests",
+          "fixtures",
+          "projects",
+          "sgdk_e2e_donor"
+        );
+        await access(sgdkDonorFixture, fsConstants.F_OK).catch(() => {
+          fail(
+            `Fixture SGDK E2E ausente em '${sgdkDonorFixture}'. Este cenario exige o doador versionado no repositorio.`
+          );
+        });
+        const sgdkBaseDir = path.dirname(temporaryProjectDir);
+        const sgdkProjectName = `QA_RC_SGTK_${Date.now()}`;
+        const sgdkProjectDir = await callAutomationApi(sessionId, "importSgdkProject", [
+          sgdkProjectName,
+          sgdkBaseDir,
+          sgdkDonorFixture,
+        ]);
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.activeProjectDir === sgdkProjectDir && state?.activeScene?.entityCount >= 1
+              ? state
+              : false;
+          },
+          60000,
+          "Importacao SGDK via automacao nao hidratou o projeto nativo.",
+          500
+        );
+
+        await callAutomationApi(sessionId, "selectWorkspace", ["scene"]);
+        await pressKey(sessionId, "c", { code: "KeyC" });
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.editorMode === "collision" ? state : false;
+          },
+          15000,
+          "Modo colisao nao ativou no projeto SGDK importado.",
+          250
+        );
+        await sceneOverlayPointerAction(sessionId, 32, 32, 0);
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.activeScene?.collisionSolidCount >= 1 ? state : false;
+          },
+          15000,
+          "Clique de colisao nao persistiu no projeto SGDK importado.",
+          250
+        );
+        await callAutomationApi(sessionId, "persistScene", ["SGDK import QA RC"]);
+        await pressKey(sessionId, "Escape", { code: "Escape" });
+
+        await deleteSession(sessionId);
+        sessionId = "";
+        sessionId = await createSession(options.app);
+        await waitForAppWindowReady(
+          sessionId,
+          uiBootstrapTimeoutMs,
+          "Janela do app nao reabriu para validar SGDK reaberto."
+        );
+        await waitFor(
+          async () =>
+            executeScript(
+              sessionId,
+              "return typeof window.__RDS_E2E__ === 'object' && window.__RDS_E2E__ !== null;"
+            ),
+          uiBootstrapTimeoutMs,
+          "API de automacao nao voltou apos reabrir para bloco G"
+        );
+        await callAutomationApi(sessionId, "openProject", [sgdkProjectDir]);
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.activeProjectDir === sgdkProjectDir &&
+              state?.activeScene?.collisionSolidCount >= 1
+              ? state
+              : false;
+          },
+          25000,
+          "Projeto SGDK nao reabriu com colisao editada.",
+          250
+        );
+
+        try {
+          await waitForBuildRunReady(sessionId, liveValidationTimeoutMs);
+        } catch (error) {
+          const diagnostics = formatAppDiagnostics(await collectAppDiagnostics(sessionId));
+          const details = error instanceof Error ? error.message : String(error);
+          fail(diagnostics ? `${details}\n${diagnostics}` : details);
+        }
+        const buildRunSgdk = await findElement(sessionId, "[data-testid='toolbar-build-run']");
+        await clickElement(sessionId, buildRunSgdk);
+        try {
+          await waitFor(
+            async () => {
+              const status = await executeScript(
+                sessionId,
+                "return document.querySelector('[data-testid=\"viewport-game-status\"]')?.textContent?.trim() ?? '';"
+              );
+              return status === "Emulador ativo";
+            },
+            emulatorActivationTimeoutMs,
+            "Build & Run do projeto SGDK importado nao ativou o emulador.",
+            1000
+          );
+        } catch (buildRunError) {
+          const diagnostics = formatAppDiagnostics(await collectAppDiagnostics(sessionId));
+          const details = buildRunError instanceof Error ? buildRunError.message : String(buildRunError);
+          fail(diagnostics ? `${details}\n${diagnostics}` : details);
+        }
+
+        // ROM lives in build/megadrive/out/ for native RDS projects
+        const buildOutDir = path.join(sgdkProjectDir, "build", "megadrive", "out");
+        const legacyOutDir = path.join(sgdkProjectDir, "out");
+        const outDir = await pathExists(buildOutDir) ? buildOutDir : legacyOutDir;
+        const outEntries = await readdir(outDir).catch(() => []);
+        const romName = outEntries.find((entry) => {
+          const lower = entry.toLowerCase();
+          return lower.endsWith(".md") || lower.endsWith(".bin") || lower.endsWith(".gen");
+        });
+        if (!romName) {
+          fail(
+            `Bloco G: nenhuma ROM .md encontrada em '${outDir}' (entradas: ${outEntries.join(", ") || "(vazio)"}).`
+          );
+        }
+        const romAbs = path.join(outDir, romName);
+        const romBytes = await readFile(romAbs);
+        const segBuf = Buffer.from("SEGA", "ascii");
+        if (!romBytes.includes(segBuf)) {
+          fail(
+            `Bloco G: ficheiro '${romName}' (${romBytes.length} B) nao contem marca 'SEGA' esperada para ROM Mega Drive.`
+          );
+        }
+
+        const sgdkChainShot = await captureScreenshot(
+          sessionId,
+          `${artifactPrefix}-G-sgdk-chain.png`
+        );
+        registerArtifact(manualQaReport, sgdkChainShot, "G - sgdk import reopen build rom");
+
+        await markManualQaBlock(
+          manualQaReport,
+          "G",
+          "passed",
+          [
+            `Import SGDK -> colisao -> persistir -> reabrir -> Build & Run -> ROM '${romName}' com cabecalho SEGA verificado em disco.`,
+            `Projeto: ${sgdkProjectDir}`,
+            `Evidencia: ${path.basename(sgdkChainShot)}.`,
+          ].join(" ")
+        );
+
         await writeManualQaReport(manualQaReport);
-        console.log("OK: Desktop Tauri QA RC A-F passou.");
+        console.log("OK: Desktop Tauri QA RC A-G passou.");
         console.log(`Projeto criado: ${generatedProjectName}`);
         console.log(`Diretorio temporario: ${temporaryProjectDir}`);
         console.log(`Relatorio QA: ${manualQaStatusPath}`);

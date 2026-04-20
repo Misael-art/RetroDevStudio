@@ -634,6 +634,8 @@ export default function InspectorPanel() {
     selectedEntityId,
     updateBackgroundLayer,
     updateEntity,
+    clearTilemapCells,
+    activeBrush,
   } = useEditorStore();
 
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "error">("idle");
@@ -658,10 +660,19 @@ export default function InspectorPanel() {
   const layer = isLayer
     ? activeScene?.background_layers.find((item) => `layer::${item.layer_id}` === selectedEntityId) ?? null
     : null;
-  const entityLogicSummary = useMemo(
-    () => (entity?.components.logic ? graphSummary(entity.components.logic.graph) : null),
-    [entity]
-  );
+  const entityLogicSummary = useMemo(() => {
+    const logic = entity?.components.logic;
+    if (!logic) {
+      return null;
+    }
+    if (logic.graph?.trim()) {
+      return graphSummary(logic.graph);
+    }
+    if (logic.graph_ref?.trim()) {
+      return `Graph: externo (${logic.graph_ref})`;
+    }
+    return graphSummary(undefined);
+  }, [entity]);
   const entityLogicHints = useMemo(
     () =>
       entity?.components.logic?.logic_hints?.filter(
@@ -856,9 +867,25 @@ export default function InspectorPanel() {
     <Panel title="Inspector" className="flex h-full flex-col">
       <div className="flex-1 overflow-auto">
         {!selectedEntityId ? (
-          <p className="px-3 py-4 text-xs italic text-[#45475a]">
-            Selecione uma entidade na Hierarchy.
-          </p>
+          <div className="px-3 py-4 text-xs text-[#45475a]">
+            <p className="italic">Selecione uma entidade na Hierarchy.</p>
+            {activeScene?.collision_map ? (
+              <div className="mt-3 rounded border border-[#313244] bg-[#11111b]/40 p-2 text-[#cdd6f4]">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-[#89b4fa]">
+                  Collision map (cena)
+                </p>
+                <p className="mt-1 font-mono text-[10px]">
+                  {activeScene.collision_map.width}×{activeScene.collision_map.height} tiles (
+                  {activeScene.collision_map.tile_width}×{activeScene.collision_map.tile_height}px)
+                </p>
+                <p className="mt-1 text-[10px] text-[#7f849c]">
+                  Sólidos:{" "}
+                  {activeScene.collision_map.data.filter((v) => v === 1).length} /{" "}
+                  {activeScene.collision_map.data.length}
+                </p>
+              </div>
+            ) : null}
+          </div>
         ) : entity ? (
           <>
             {/* Entity header badge */}
@@ -972,6 +999,28 @@ export default function InspectorPanel() {
                     }
                   />
                 ) : null}
+                {section.id === "sprite" &&
+                entity.components.sprite &&
+                entity.components.sprite.animations &&
+                Object.keys(entity.components.sprite.animations).length > 0 ? (
+                  <div className="mt-3 border-t border-[#313244] pt-3">
+                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[#45475a]">
+                      Animacoes (UGDM)
+                    </p>
+                    <ul className="mb-3 max-h-28 space-y-1 overflow-y-auto text-[10px] text-[#a6adc8]">
+                      {Object.entries(entity.components.sprite.animations).map(([name, def]) => (
+                        <li key={name} className="font-mono">
+                          <span className="text-[#89b4fa]">{name}</span>
+                          <span className="text-[#45475a]"> — </span>
+                          <span>
+                            {def.frames?.length ?? 0} quadros @ {def.fps ?? "?"} fps
+                            {def.loop ? " (loop)" : ""}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
                 {section.id === "sprite" && entity.components.sprite ? (
                   <div className="mt-3 border-t border-[#313244] pt-3">
                     <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[#45475a]">
@@ -994,26 +1043,74 @@ export default function InspectorPanel() {
                     </div>
                   </div>
                 ) : null}
-                {section.id === "tilemap" && (
-                  <div className="mt-3 border-t border-[#313244] pt-3">
-                    <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[#45475a]">
-                      Ferramentas Avancadas (Experimental)
-                    </p>
-                    <p className="mb-2 text-[10px] leading-relaxed text-[#7f849c]">
-                      A extracao automatica de tileset/tilemap continua experimental e ainda depende do
-                      pipeline oficial de assets.
-                    </p>
-                    <div className="flex flex-col gap-2">
-                      <button
-                        type="button"
-                        disabled
-                        className="cursor-not-allowed rounded border border-[#45475a] bg-slate-800/50 px-2 py-1.5 text-[10px] font-mono text-[#6c7086] opacity-60"
-                      >
-                        🧩 Extrair Tilemap/Tileset
-                      </button>
+                {section.id === "tilemap" && (() => {
+                  const tm = entity.components.tilemap!;
+                  const total = tm.map_width * tm.map_height;
+                  const cells = tm.cells ?? [];
+                  const filled = cells.reduce(
+                    (acc, v) => acc + ((v | 0) > 0 ? 1 : 0),
+                    0
+                  );
+                  const percent = total > 0 ? Math.round((filled / total) * 100) : 0;
+                  const brushTileIndex =
+                    activeBrush?.kind === "tile" ? activeBrush.tileIndex ?? 0 : null;
+                  return (
+                    <div className="mt-3 border-t border-[#313244] pt-3">
+                      <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[#45475a]">
+                        Pintura de Células
+                      </p>
+                      <div className="mb-2 flex items-center justify-between text-[10px] text-[#a6adc8]">
+                        <span>
+                          Preenchidas:{" "}
+                          <span className="font-mono text-[#cdd6f4]">
+                            {filled}/{total}
+                          </span>{" "}
+                          <span className="text-[#45475a]">({percent}%)</span>
+                        </span>
+                        <span>
+                          Tile ativo:{" "}
+                          <span className="font-mono text-[#89b4fa]">
+                            #{brushTileIndex ?? "—"}
+                          </span>
+                        </span>
+                      </div>
+                      <div className="flex flex-col gap-2">
+                        <button
+                          type="button"
+                          disabled={filled === 0}
+                          data-testid="inspector-clear-tilemap-cells"
+                          onClick={() => {
+                            clearTilemapCells(entity.entity_id);
+                            logMessage("info", `[Inspector] Limpeza de células aplicada a '${entity.entity_id}'.`);
+                          }}
+                          className={`rounded border px-2 py-1.5 text-[10px] font-mono transition-colors ${
+                            filled === 0
+                              ? "cursor-not-allowed border-[#45475a] bg-slate-800/50 text-[#6c7086] opacity-60"
+                              : "border-[#f38ba8]/40 bg-[#f38ba8]/10 text-[#f38ba8] hover:border-[#f38ba8] hover:bg-[#f38ba8]/20"
+                          }`}
+                        >
+                          🧹 Limpar Células Pintadas
+                        </button>
+                      </div>
+                      <p className="mt-3 mb-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[#45475a]">
+                        Ferramentas Avancadas (Experimental)
+                      </p>
+                      <p className="mb-2 text-[10px] leading-relaxed text-[#7f849c]">
+                        A extracao automatica de tileset/tilemap continua experimental e ainda depende do
+                        pipeline oficial de assets.
+                      </p>
+                      <div className="flex flex-col gap-2">
+                        <button
+                          type="button"
+                          disabled
+                          className="cursor-not-allowed rounded border border-[#45475a] bg-slate-800/50 px-2 py-1.5 text-[10px] font-mono text-[#6c7086] opacity-60"
+                        >
+                          🧩 Extrair Tilemap/Tileset
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
               </InspectorSection>
             ))}
             {entity.components.logic ? (
@@ -1043,6 +1140,21 @@ export default function InspectorPanel() {
                           <span className="font-mono text-[#cdd6f4]">
                             {entity.components.logic.graph_ref}
                           </span>
+                        </td>
+                      </tr>
+                    ) : null}
+                    {entity.components.logic.external_source_refs &&
+                    entity.components.logic.external_source_refs.length > 0 ? (
+                      <tr className="group border-b border-[#313244] last:border-0">
+                        <td className="w-24 min-w-24 align-top select-none px-2 py-1 text-xs text-[#7f849c]">
+                          Fontes C
+                        </td>
+                        <td className="px-2 py-1 text-xs">
+                          <ul className="list-inside list-disc font-mono text-[#cdd6f4]">
+                            {entity.components.logic.external_source_refs.map((ref) => (
+                              <li key={ref}>{ref}</li>
+                            ))}
+                          </ul>
                         </td>
                       </tr>
                     ) : null}

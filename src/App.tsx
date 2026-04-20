@@ -20,6 +20,7 @@ import { getHwStatus } from "./core/ipc/hwService";
 import {
   createProjectFromTemplate,
   importExternalProject,
+  importSgdkProject,
   listExternalImportProfiles,
   listProjectTemplates,
   openProjectDialog,
@@ -767,6 +768,12 @@ type AutomationState = {
 
 type AutomationApi = {
   openProject: (projectDir: string) => Promise<boolean>;
+  /** Importa doador SGDK para `baseDir` e abre o projeto nativo gerado; devolve o caminho absoluto. */
+  importSgdkProject: (
+    projectName: string,
+    baseDir: string,
+    sgdkDonorPath: string
+  ) => Promise<string>;
   closeProject: () => Promise<void>;
   persistScene: (scope?: string, successMessage?: string) => Promise<boolean>;
   setSceneDraft: (scene: Scene) => Promise<boolean>;
@@ -2004,7 +2011,17 @@ export default function App() {
         logMessage(line.level, line.message);
       });
       if (!result.ok) {
-        logMessage("error", "Build falhou. Verifique o Console para detalhes.");
+        const errorLines = result.log
+          .filter((line) => line.level === "error")
+          .map((line) => line.message.trim())
+          .filter((msg) => msg.length > 0);
+        const tail = errorLines.slice(-6).join(" | ");
+        logMessage(
+          "error",
+          tail.length > 0
+            ? `Build falhou (toolchain / makefile / emissao). Resumo: ${tail}`
+            : "Build falhou sem linhas de erro estruturadas no log; verifique o Console para o historico completo."
+        );
         return;
       }
 
@@ -2307,6 +2324,11 @@ export default function App() {
 
     window.__RDS_E2E__ = {
       openProject: (projectDir: string) => openProjectAtPath(projectDir, "E2E"),
+      importSgdkProject: async (projectName: string, baseDir: string, sgdkDonorPath: string) => {
+        const result = await importSgdkProject(projectName, baseDir, sgdkDonorPath);
+        await openProjectAtPath(result.path, "E2E SGDK");
+        return result.path;
+      },
       closeProject: () => handleCloseProject(),
       persistScene: (scope = "E2E", successMessage?: string) => {
         const state = useEditorStore.getState();

@@ -2370,6 +2370,7 @@ mod tests {
                         map_height: 32,
                         scroll_x: 4,
                         scroll_y: 8,
+                        cells: Vec::new(),
                     }),
                     ..Components::default()
                 },
@@ -3009,6 +3010,7 @@ mod tests {
                         graph: Some(logic_graph.to_string()),
                         graph_ref: None,
                         logic_hints: Vec::new(),
+                        external_source_refs: Vec::new(),
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -3137,6 +3139,7 @@ mod tests {
                         graph: Some(logic_graph.to_string()),
                         graph_ref: None,
                         logic_hints: Vec::new(),
+                        external_source_refs: Vec::new(),
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -3246,6 +3249,7 @@ mod tests {
                         graph: Some(logic_graph.to_string()),
                         graph_ref: None,
                         logic_hints: Vec::new(),
+                        external_source_refs: Vec::new(),
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -3351,6 +3355,7 @@ mod tests {
                             graph: Some(logic_graph.to_string()),
                             graph_ref: None,
                             logic_hints: Vec::new(),
+                            external_source_refs: Vec::new(),
                             variables: HashMap::new(),
                         }),
                         ..Components::default()
@@ -3508,6 +3513,7 @@ mod tests {
                             graph: Some(logic_graph.to_string()),
                             graph_ref: None,
                             logic_hints: Vec::new(),
+                            external_source_refs: Vec::new(),
                             variables: HashMap::new(),
                         }),
                         ..Components::default()
@@ -3732,6 +3738,7 @@ mod tests {
                         graph: Some(logic_graph.to_string()),
                         graph_ref: None,
                         logic_hints: Vec::new(),
+                        external_source_refs: Vec::new(),
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -3857,6 +3864,7 @@ mod tests {
                             graph: Some(graph.to_string()),
                             graph_ref: None,
                             logic_hints: Vec::new(),
+                            external_source_refs: Vec::new(),
                             variables: HashMap::new(),
                         }),
                         ..Components::default()
@@ -3996,6 +4004,7 @@ mod tests {
                             graph: Some(logic_graph),
                             graph_ref: None,
                             logic_hints: Vec::new(),
+                            external_source_refs: Vec::new(),
                             variables: HashMap::new(),
                         }),
                         ..Components::default()
@@ -4158,6 +4167,7 @@ mod tests {
                         graph: Some(logic_graph.to_string()),
                         graph_ref: None,
                         logic_hints: Vec::new(),
+                        external_source_refs: Vec::new(),
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -4262,6 +4272,7 @@ mod tests {
                         graph: Some(logic_graph.to_string()),
                         graph_ref: None,
                         logic_hints: Vec::new(),
+                        external_source_refs: Vec::new(),
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -4343,6 +4354,7 @@ mod tests {
                         graph: Some(logic_graph.to_string()),
                         graph_ref: None,
                         logic_hints: Vec::new(),
+                        external_source_refs: Vec::new(),
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -4435,6 +4447,7 @@ mod tests {
                         graph: Some(logic_graph.to_string()),
                         graph_ref: None,
                         logic_hints: Vec::new(),
+                        external_source_refs: Vec::new(),
                         variables: HashMap::new(),
                     }),
                     ..Components::default()

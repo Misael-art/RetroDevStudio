@@ -235,22 +235,6 @@ function isNodeType(value: unknown): value is NodeType {
   );
 }
 
-function isGraphNode(value: unknown): value is GraphNode {
-  return (
-    isRecord(value) &&
-    typeof value.id === "string" &&
-    isNodeType(value.type) &&
-    typeof value.label === "string" &&
-    typeof value.x === "number" &&
-    typeof value.y === "number" &&
-    Array.isArray(value.inputs) &&
-    value.inputs.every(isNodePort) &&
-    Array.isArray(value.outputs) &&
-    value.outputs.every(isNodePort) &&
-    isRecord(value.params)
-  );
-}
-
 function isNodeEdge(value: unknown): value is NodeEdge {
   return (
     isRecord(value) &&
@@ -270,6 +254,20 @@ export function serializeNodeGraph(graph: NodeGraph): string {
   });
 }
 
+function edgeConnectsValidPorts(
+  edge: NodeEdge,
+  nodeById: Map<string, GraphNode>
+): boolean {
+  const fromNode = nodeById.get(edge.fromNode);
+  const toNode = nodeById.get(edge.toNode);
+  if (!fromNode || !toNode) {
+    return false;
+  }
+  const fromOk = fromNode.outputs.some((port) => port.id === edge.fromPort);
+  const toOk = toNode.inputs.some((port) => port.id === edge.toPort);
+  return fromOk && toOk;
+}
+
 export function deserializeNodeGraph(serialized?: string | null): NodeGraph {
   if (!serialized) {
     return cloneGraph(EMPTY_GRAPH);
@@ -282,23 +280,24 @@ export function deserializeNodeGraph(serialized?: string | null): NodeGraph {
     }
 
     const { nodes, edges } = parsed;
-    if (
-      !Array.isArray(nodes) ||
-      !Array.isArray(edges) ||
-      !edges.every(isNodeEdge)
-    ) {
+    if (!Array.isArray(nodes) || !Array.isArray(edges)) {
       return cloneGraph(EMPTY_GRAPH);
     }
+
+    const rawEdges = edges.filter(isNodeEdge);
 
     const hydratedNodes = nodes
       .map((node, index) => hydrateGraphNode(node, index))
       .filter((node): node is GraphNode => node !== null);
 
-    if (hydratedNodes.length !== nodes.length) {
+    if (hydratedNodes.length === 0) {
       return cloneGraph(EMPTY_GRAPH);
     }
 
-    return cloneGraph({ nodes: hydratedNodes, edges });
+    const nodeById = new Map(hydratedNodes.map((node) => [node.id, node]));
+    const validEdges = rawEdges.filter((edge) => edgeConnectsValidPorts(edge, nodeById));
+
+    return cloneGraph({ nodes: hydratedNodes, edges: validEdges });
   } catch {
     return cloneGraph(EMPTY_GRAPH);
   }
@@ -606,6 +605,22 @@ function clonePorts(ports: NodePort[]): NodePort[] {
   return ports.map((port) => ({ ...port }));
 }
 
+/** Junta portos do JSON importado com os portos canónicos do editor (mesmo id conserva label/kind do ficheiro). */
+function mergePortsWithDefinition(
+  defaults: NodePort[],
+  incoming: unknown
+): NodePort[] {
+  if (!Array.isArray(incoming)) {
+    return clonePorts(defaults);
+  }
+  const parsed = incoming.filter(isNodePort);
+  const byId = new Map(parsed.map((port) => [port.id, port]));
+  return defaults.map((defPort) => {
+    const hit = byId.get(defPort.id);
+    return hit ? { ...defPort, ...hit } : { ...defPort };
+  });
+}
+
 function isGraphParamValue(value: unknown): value is string | number {
   return typeof value === "string" || typeof value === "number";
 }
@@ -626,20 +641,13 @@ function coerceNodeParams(type: NodeType, params: unknown): Record<string, strin
 }
 
 function hydrateGraphNode(value: unknown, index: number): GraphNode | null {
-  if (isGraphNode(value)) {
-    return {
-      ...value,
-      inputs: clonePorts(value.inputs),
-      outputs: clonePorts(value.outputs),
-      params: { ...value.params },
-    };
-  }
-
   if (!isRecord(value) || typeof value.id !== "string" || !isNodeType(value.type)) {
     return null;
   }
 
   const def = NODE_DEFS[value.type];
+  const inputs = mergePortsWithDefinition(def.inputs, value.inputs);
+  const outputs = mergePortsWithDefinition(def.outputs, value.outputs);
 
   return {
     id: value.id,
@@ -647,14 +655,8 @@ function hydrateGraphNode(value: unknown, index: number): GraphNode | null {
     label: typeof value.label === "string" ? value.label : def.label,
     x: typeof value.x === "number" ? value.x : 40 + index * 200,
     y: typeof value.y === "number" ? value.y : 80,
-    inputs:
-      Array.isArray(value.inputs) && value.inputs.every(isNodePort)
-        ? clonePorts(value.inputs)
-        : clonePorts(def.inputs),
-    outputs:
-      Array.isArray(value.outputs) && value.outputs.every(isNodePort)
-        ? clonePorts(value.outputs)
-        : clonePorts(def.outputs),
+    inputs,
+    outputs,
     params: coerceNodeParams(value.type, value.params),
   };
 }
@@ -1394,6 +1396,12 @@ export default function NodeGraphEditor() {
             Dica: arraste da saída para a entrada para conectar.
           </p>
           <p className="select-none px-1 text-[10px] text-[#45475a]">Del = remover nó</p>
+          {selectedEntity?.components.logic?.graph_ref && graph.nodes.length === 0 ? (
+            <p className="mt-1 px-1 text-[9px] leading-snug text-[#f9e2af]">
+              graph_ref {selectedEntity.components.logic.graph_ref}: grafo vazio na cena em memória; o build resolve o
+              ficheiro em disco. Edite aqui para materializar `graph` inline ou reabra a cena após import.
+            </p>
+          ) : null}
         </div>
       </div>
 

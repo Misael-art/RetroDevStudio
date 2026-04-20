@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useEditorStore } from "../../core/store/editorStore";
 import { listProjectAssets, type ProjectAssetEntry } from "../../core/ipc/toolsService";
-import type { ActiveBrush, EditorMode } from "../../core/store/editorStore";
+import type { ActiveBrush, EditorMode, TilePaintTool } from "../../core/store/editorStore";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -106,6 +106,182 @@ function PaletteItem({
 
 // ── Main Component ────────────────────────────────────────────────────────────
 
+// ── TilePalette (apenas quando entidade-tilemap está selecionada) ─────────────
+
+const TILE_TOOL_META: Record<TilePaintTool, { label: string; icon: string; hint: string }> = {
+  pencil: { label: "Lápis", icon: "\u270f", hint: "Pintar célula (P)" },
+  eraser: { label: "Borracha", icon: "\u232b", hint: "Apagar célula (X)" },
+  picker: { label: "Conta-gotas", icon: "\ud83d\udd0d", hint: "Capturar tile (I)" },
+  rect: { label: "Retângulo", icon: "\u25a2", hint: "Preencher retângulo (R)" },
+  fill: { label: "Balde", icon: "\u25b2", hint: "Flood fill (G)" },
+  stamp: { label: "Carimbo", icon: "\ud83d\udcf7", hint: "Stamp (reservado)" },
+};
+
+const TILE_TOOL_ORDER: TilePaintTool[] = ["pencil", "eraser", "picker", "rect", "fill"];
+
+function TilePalette({
+  tilesetAbsolutePath,
+  tileSize,
+  tilemapEntityId,
+}: {
+  tilesetAbsolutePath: string;
+  tileSize: number;
+  tilemapEntityId: string;
+}) {
+  const activeBrush = useEditorStore((s) => s.activeBrush);
+  const setActiveBrush = useEditorStore((s) => s.setActiveBrush);
+  const setEditorMode = useEditorStore((s) => s.setEditorMode);
+  const tilePaintTool = useEditorStore((s) => s.tilePaintTool);
+  const setTilePaintTool = useEditorStore((s) => s.setTilePaintTool);
+  const setActiveTilemapId = useEditorStore((s) => s.setActiveTilemapId);
+  const activeTilemapId = useEditorStore((s) => s.activeTilemapId);
+
+  const url = useMemo(() => convertFileSrc(tilesetAbsolutePath), [tilesetAbsolutePath]);
+  const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
+
+  useEffect(() => {
+    if (!url) return;
+    const img = new Image();
+    img.onload = () => setDims({ w: img.naturalWidth, h: img.naturalHeight });
+    img.onerror = () => setDims(null);
+    img.src = url;
+  }, [url]);
+
+  const grid = useMemo(() => {
+    if (!dims || tileSize <= 0) return null;
+    const cols = Math.max(0, Math.floor(dims.w / tileSize));
+    const rows = Math.max(0, Math.floor(dims.h / tileSize));
+    if (cols === 0 || rows === 0) return null;
+    return { cols, rows };
+  }, [dims, tileSize]);
+
+  function handlePickTile(tileIndex: number) {
+    setActiveBrush({
+      kind: "tile",
+      id: `tile:${tileIndex}`,
+      tileIndex,
+    });
+    setEditorMode("paint");
+    setActiveTilemapId(tilemapEntityId);
+  }
+
+  const activeTileIndex =
+    activeBrush?.kind === "tile" ? (activeBrush.tileIndex ?? 0) : null;
+
+  const lockedToThisTilemap =
+    activeTilemapId === tilemapEntityId && activeBrush?.kind === "tile";
+
+  return (
+    <div className="shrink-0 border-b border-[#313244] px-3 py-2">
+      <div className="flex items-center justify-between">
+        <h4 className="text-[10px] font-bold text-[#7f849c] uppercase tracking-wider">
+          Tilemap: Paleta de Tiles
+        </h4>
+        {lockedToThisTilemap && (
+          <span className="rounded border border-[#a6e3a1]/40 bg-[#a6e3a1]/10 px-1 py-0.5 text-[8px] font-mono text-[#a6e3a1]">
+            ATIVO
+          </span>
+        )}
+      </div>
+
+      {/* Tool toolbar */}
+      <div className="mt-2 flex gap-1">
+        {TILE_TOOL_ORDER.map((tool) => {
+          const meta = TILE_TOOL_META[tool];
+          const isActive = tilePaintTool === tool;
+          return (
+            <button
+              key={tool}
+              type="button"
+              title={meta.hint}
+              onClick={() => {
+                setTilePaintTool(tool);
+                setEditorMode("paint");
+                setActiveTilemapId(tilemapEntityId);
+              }}
+              className={`flex-1 rounded border px-1 py-1 text-[10px] transition-colors ${
+                isActive
+                  ? "bg-[#89b4fa]/20 border-[#89b4fa] text-[#89b4fa]"
+                  : "border-[#313244] bg-[#181825] text-[#a6adc8] hover:border-[#45475a]"
+              }`}
+            >
+              {meta.icon}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Status readout */}
+      <div className="mt-2 flex items-center justify-between text-[9px] text-[#7f849c]">
+        <span>
+          Tile ativo:{" "}
+          <span className="font-mono text-[#cdd6f4]">
+            #{activeTileIndex ?? "—"}
+          </span>
+        </span>
+        <span>
+          Tool:{" "}
+          <span className="font-mono uppercase text-[#89b4fa]">
+            {TILE_TOOL_META[tilePaintTool].label}
+          </span>
+        </span>
+      </div>
+
+      {/* Tile grid */}
+      {grid ? (
+        <div
+          className="mt-2 grid gap-[1px] overflow-hidden rounded border border-[#313244] bg-[#11111b]"
+          style={{ gridTemplateColumns: `repeat(${grid.cols}, 1fr)` }}
+        >
+          {/* Index 0 = vazio */}
+          <button
+            type="button"
+            title="Tile vazio (0) — use com borracha"
+            onClick={() => handlePickTile(0)}
+            className={`aspect-square bg-[#313244]/40 hover:bg-[#f38ba8]/20 transition-colors ${
+              activeTileIndex === 0 ? "ring-2 ring-inset ring-[#f38ba8]" : ""
+            }`}
+          >
+            <span className="text-[7px] text-[#45475a]">×</span>
+          </button>
+          {Array.from({ length: grid.cols * grid.rows - 1 }, (_, i) => {
+            const tileIndex = i + 1;
+            const atlasIdx = tileIndex - 1;
+            const col = atlasIdx % grid.cols;
+            const row = Math.floor(atlasIdx / grid.cols);
+            return (
+              <button
+                key={tileIndex}
+                type="button"
+                title={`Tile #${tileIndex} (col ${col}, row ${row})`}
+                onClick={() => handlePickTile(tileIndex)}
+                className={`aspect-square transition-transform hover:scale-105 ${
+                  activeTileIndex === tileIndex
+                    ? "ring-2 ring-inset ring-[#89b4fa]"
+                    : ""
+                }`}
+                style={{
+                  backgroundImage: `url(${url})`,
+                  backgroundSize: `${grid.cols * 100}% ${grid.rows * 100}%`,
+                  backgroundPosition: `${(col * 100) / Math.max(1, grid.cols - 1)}% ${
+                    (row * 100) / Math.max(1, grid.rows - 1)
+                  }%`,
+                  backgroundRepeat: "no-repeat",
+                  imageRendering: "pixelated",
+                }}
+              />
+            );
+          })}
+        </div>
+      ) : (
+        <p className="mt-2 text-[9px] text-[#45475a]">
+          Carregando tileset ou dimensões não-múltiplas de {tileSize}px.
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function ContextualPalette() {
   const activeProjectDir = useEditorStore((s) => s.activeProjectDir);
   const activeViewportTab = useEditorStore((s) => s.activeViewportTab);
@@ -113,6 +289,9 @@ export default function ContextualPalette() {
   const editorMode = useEditorStore((s) => s.editorMode);
   const setActiveBrush = useEditorStore((s) => s.setActiveBrush);
   const setEditorMode = useEditorStore((s) => s.setEditorMode);
+  const activeScene = useEditorStore((s) => s.activeScene);
+  const selectedEntityId = useEditorStore((s) => s.selectedEntityId);
+  const tilePaintSize = useEditorStore((s) => s.tilePaintSize);
 
   const isSceneTab = activeViewportTab === "scene";
 
@@ -151,6 +330,20 @@ export default function ContextualPalette() {
       cancelled = true;
     };
   }, [activeProjectDir]);
+
+  // Resolve a tilemap selecionada (se houver) e o asset do tileset
+  const selectedTilemap = useMemo(() => {
+    if (!selectedEntityId || !activeScene) return null;
+    const entity = activeScene.entities.find((e) => e.entity_id === selectedEntityId);
+    const tm = entity?.components?.tilemap;
+    if (!entity || !tm) return null;
+    return { entity, tileset: tm.tileset };
+  }, [activeScene, selectedEntityId]);
+
+  const selectedTilesetAsset = useMemo(() => {
+    if (!selectedTilemap) return null;
+    return assets.find((a) => a.relative_path === selectedTilemap.tileset) ?? null;
+  }, [assets, selectedTilemap]);
 
   const groupedItems = useMemo(() => {
     const groups = new Map<PaletteCategory, PaletteCategoryItem[]>();
@@ -233,6 +426,15 @@ export default function ContextualPalette() {
           Selecione um sprite ou prefab para pintar. Atalhos: V/B/E.
         </p>
       </div>
+
+      {/* ── Tile palette (tilemap selecionado) ─────────────────────── */}
+      {selectedTilemap && selectedTilesetAsset && (
+        <TilePalette
+          tilesetAbsolutePath={selectedTilesetAsset.absolute_path}
+          tileSize={tilePaintSize > 0 ? tilePaintSize : 8}
+          tilemapEntityId={selectedTilemap.entity.entity_id}
+        />
+      )}
 
       {/* ── Collision toggle ─────────────────────────────────────── */}
       <div className="shrink-0 border-b border-[#313244] px-3 py-2">

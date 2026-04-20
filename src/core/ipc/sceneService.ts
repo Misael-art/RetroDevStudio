@@ -79,6 +79,8 @@ export interface LogicComponent {
   graph?: string;
   graph_ref?: string | null;
   logic_hints?: string[];
+  /** Caminhos no doador (ex. C) rastreados sem carregar AST no frontend. */
+  external_source_refs?: string[];
   variables?: Record<string, LogicVariable>;
 }
 
@@ -94,6 +96,9 @@ export interface TilemapComponent {
   map_height: number;
   scroll_x?: number;
   scroll_y?: number;
+  /** Malha pintada por célula. Row-major, tamanho `map_width * map_height`.
+   *  0 = vazio; >0 = índice do tile no tileset. Omisso em projetos importados. */
+  cells?: number[];
 }
 
 export interface Components {

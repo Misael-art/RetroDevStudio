@@ -51,6 +51,13 @@ export interface UndoEntry {
 }
 
 export type EditorMode = "select" | "paint" | "erase" | "collision";
+export type TilePaintTool = "pencil" | "eraser" | "picker" | "rect" | "fill" | "stamp";
+
+export interface TileStampPattern {
+  width: number;
+  height: number;
+  cells: number[];
+}
 export type EditorWorkspace =
   | "explorer"
   | "scene"
@@ -64,6 +71,8 @@ export interface ActiveBrush {
   kind: "prefab" | "tile";
   id: string; // prefab filename or tile id
   assetPath?: string;
+  /** Índice do tile no tileset quando `kind === "tile"`. 0 = vazio. */
+  tileIndex?: number;
 }
 
 export interface StoreState {
@@ -96,6 +105,17 @@ export interface StoreState {
   projectLegacyIndex: LegacySgdkIndex | null;
   editorMode: EditorMode;
   activeBrush: ActiveBrush | null;
+  /** Ferramenta ativa do editor de tilemap (pencil/eraser/picker/rect/fill/stamp). */
+  tilePaintTool: TilePaintTool;
+  /** Entidade-tilemap explicitamente selecionada para pintura.
+   *  `null` quando Paint está desligado ou nenhum tilemap está em foco. */
+  activeTilemapId: string | null;
+  /** Tamanho do tile em pixels do tileset ativo (padrão MD/SNES: 8). */
+  tilePaintSize: number;
+  /** Retângulo em pré-visualização (rect tool em drag). */
+  tilePaintRectPreview: { c0: number; r0: number; c1: number; r1: number } | null;
+  /** Padrão ativo para a ferramenta `stamp` (subgrade pintada). */
+  tileStampPattern: TileStampPattern | null;
 }
 
 export interface StoreActions {
@@ -157,6 +177,41 @@ export interface StoreActions {
   setProjectLegacyIndex: (index: LegacySgdkIndex | null) => void;
   setEditorMode: (mode: EditorMode) => void;
   setActiveBrush: (brush: ActiveBrush | null) => void;
+  setTilePaintTool: (tool: TilePaintTool) => void;
+  setActiveTilemapId: (id: string | null) => void;
+  setTilePaintSize: (size: number) => void;
+  setTilePaintRectPreview: (
+    preview: { c0: number; r0: number; c1: number; r1: number } | null
+  ) => void;
+  setTileStampPattern: (pattern: TileStampPattern | null) => void;
+  /** Pinta a célula (col,row) da entidade-tilemap com `tileIndex`.
+   *  Materializa `cells[]` sob demanda quando o projeto é importado sem malha.
+   *  Usa `beginHistoryCapture/commitHistoryCapture` externamente para agrupar drags. */
+  paintTilemapCell: (
+    entityId: string,
+    col: number,
+    row: number,
+    tileIndex: number
+  ) => void;
+  /** Preenche o retângulo [c0..c1] × [r0..r1] inclusivo com `tileIndex`.
+   *  Coordenadas fora do mapa são recortadas. Cria uma única entrada de undo. */
+  fillTilemapRect: (
+    entityId: string,
+    c0: number,
+    r0: number,
+    c1: number,
+    r1: number,
+    tileIndex: number
+  ) => void;
+  /** Flood 4-vizinhança a partir de (col,row). No-op se target já é `tileIndex`. */
+  fillTilemapFlood: (
+    entityId: string,
+    col: number,
+    row: number,
+    tileIndex: number
+  ) => void;
+  /** Limpa toda a malha pintada; reverte para o fallback do tileset esticado. */
+  clearTilemapCells: (entityId: string) => void;
 }
 
 export type EditorState = StoreState & StoreActions;
@@ -543,12 +598,16 @@ export const useEditorStore = create<EditorState>((set) => ({
 
       const newData = collisionMap.data.slice();
       newData[tileIndex] = value;
+      const updatedCollisionMap = { ...collisionMap, data: newData };
 
       return {
         activeScene: {
           ...state.activeScene,
-          collision_map: { ...collisionMap, data: newData },
+          collision_map: updatedCollisionMap,
         },
+        activeSceneSource: state.activeSceneSource
+          ? { ...state.activeSceneSource, collision_map: updatedCollisionMap }
+          : state.activeSceneSource,
         sceneRevision: state.sceneRevision + 1,
       };
     }),
@@ -637,6 +696,245 @@ export const useEditorStore = create<EditorState>((set) => ({
 
   activeBrush: null,
   setActiveBrush: (brush) => set({ activeBrush: brush }),
+
+  tilePaintTool: "pencil",
+  setTilePaintTool: (tool) => set({ tilePaintTool: tool }),
+
+  activeTilemapId: null,
+  setActiveTilemapId: (id) => set({ activeTilemapId: id }),
+
+  tilePaintSize: 8,
+  setTilePaintSize: (size) =>
+    set({ tilePaintSize: Math.max(1, Math.min(64, Math.round(size))) }),
+
+  tilePaintRectPreview: null,
+  setTilePaintRectPreview: (preview) => set({ tilePaintRectPreview: preview }),
+
+  tileStampPattern: null,
+  setTileStampPattern: (pattern) => set({ tileStampPattern: pattern }),
+
+  paintTilemapCell: (entityId, col, row, tileIndex) =>
+    set((state) => {
+      if (!state.activeScene) return {};
+      const entity = state.activeScene.entities.find((e) => e.entity_id === entityId);
+      const tilemap = entity?.components?.tilemap;
+      if (!entity || !tilemap) return {};
+      if (col < 0 || row < 0 || col >= tilemap.map_width || row >= tilemap.map_height) return {};
+      const total = tilemap.map_width * tilemap.map_height;
+      const base =
+        tilemap.cells && tilemap.cells.length === total
+          ? tilemap.cells
+          : new Array<number>(total).fill(0);
+      const idx = row * tilemap.map_width + col;
+      const clamped = Math.max(0, Math.floor(tileIndex));
+      if (base[idx] === clamped) return {};
+      const cells = base.slice();
+      cells[idx] = clamped;
+      const patchedEntity: Entity = {
+        ...entity,
+        components: {
+          ...entity.components,
+          tilemap: { ...tilemap, cells },
+        },
+      };
+      const preferredSourceScene = state.activeSceneSource ?? state.activeScene;
+      const sourceScene = preferredSourceScene.entities.some((e) => e.entity_id === entityId)
+        ? preferredSourceScene
+        : state.activeScene;
+      return {
+        activeScene: {
+          ...state.activeScene,
+          entities: state.activeScene.entities.map((e) =>
+            e.entity_id === entityId ? patchedEntity : e
+          ),
+        },
+        activeSceneSource: {
+          ...sourceScene,
+          entities: sourceScene.entities.map((e) =>
+            e.entity_id === entityId
+              ? {
+                  ...e,
+                  components: {
+                    ...e.components,
+                    tilemap: { ...(e.components.tilemap ?? tilemap), cells: cells.slice() },
+                  },
+                }
+              : e
+          ),
+        },
+        sceneRevision: state.sceneRevision + 1,
+      };
+    }),
+
+  fillTilemapRect: (entityId, c0, r0, c1, r1, tileIndex) =>
+    set((state) => {
+      if (!state.activeScene) return {};
+      const entity = state.activeScene.entities.find((e) => e.entity_id === entityId);
+      const tilemap = entity?.components?.tilemap;
+      if (!entity || !tilemap) return {};
+      const total = tilemap.map_width * tilemap.map_height;
+      const minC = Math.max(0, Math.min(c0, c1));
+      const maxC = Math.min(tilemap.map_width - 1, Math.max(c0, c1));
+      const minR = Math.max(0, Math.min(r0, r1));
+      const maxR = Math.min(tilemap.map_height - 1, Math.max(r0, r1));
+      if (minC > maxC || minR > maxR) return {};
+      const base =
+        tilemap.cells && tilemap.cells.length === total
+          ? tilemap.cells.slice()
+          : new Array<number>(total).fill(0);
+      const clamped = Math.max(0, Math.floor(tileIndex));
+      let changed = false;
+      for (let r = minR; r <= maxR; r++) {
+        for (let c = minC; c <= maxC; c++) {
+          const idx = r * tilemap.map_width + c;
+          if (base[idx] !== clamped) {
+            base[idx] = clamped;
+            changed = true;
+          }
+        }
+      }
+      if (!changed) return {};
+      const preferredSourceScene = state.activeSceneSource ?? state.activeScene;
+      const sourceScene = preferredSourceScene.entities.some((e) => e.entity_id === entityId)
+        ? preferredSourceScene
+        : state.activeScene;
+      return {
+        undoStack: pushHistoryEntry(state.undoStack, createUndoEntry(state)),
+        redoStack: [],
+        pendingHistorySnapshot: null,
+        activeScene: {
+          ...state.activeScene,
+          entities: state.activeScene.entities.map((e) =>
+            e.entity_id === entityId
+              ? {
+                  ...e,
+                  components: { ...e.components, tilemap: { ...tilemap, cells: base } },
+                }
+              : e
+          ),
+        },
+        activeSceneSource: {
+          ...sourceScene,
+          entities: sourceScene.entities.map((e) =>
+            e.entity_id === entityId
+              ? {
+                  ...e,
+                  components: {
+                    ...e.components,
+                    tilemap: { ...(e.components.tilemap ?? tilemap), cells: base.slice() },
+                  },
+                }
+              : e
+          ),
+        },
+        sceneRevision: state.sceneRevision + 1,
+      };
+    }),
+
+  fillTilemapFlood: (entityId, col, row, tileIndex) =>
+    set((state) => {
+      if (!state.activeScene) return {};
+      const entity = state.activeScene.entities.find((e) => e.entity_id === entityId);
+      const tilemap = entity?.components?.tilemap;
+      if (!entity || !tilemap) return {};
+      if (col < 0 || row < 0 || col >= tilemap.map_width || row >= tilemap.map_height) return {};
+      const w = tilemap.map_width;
+      const h = tilemap.map_height;
+      const total = w * h;
+      const base =
+        tilemap.cells && tilemap.cells.length === total
+          ? tilemap.cells.slice()
+          : new Array<number>(total).fill(0);
+      const clamped = Math.max(0, Math.floor(tileIndex));
+      const seed = row * w + col;
+      const target = base[seed];
+      if (target === clamped) return {};
+      // BFS iterativa (4-vizinhança) — evita stack overflow em mapas grandes
+      const queue: number[] = [seed];
+      while (queue.length > 0) {
+        const idx = queue.pop() as number;
+        if (base[idx] !== target) continue;
+        base[idx] = clamped;
+        const c = idx % w;
+        const r = (idx - c) / w;
+        if (c > 0) queue.push(idx - 1);
+        if (c < w - 1) queue.push(idx + 1);
+        if (r > 0) queue.push(idx - w);
+        if (r < h - 1) queue.push(idx + w);
+      }
+      const preferredSourceScene = state.activeSceneSource ?? state.activeScene;
+      const sourceScene = preferredSourceScene.entities.some((e) => e.entity_id === entityId)
+        ? preferredSourceScene
+        : state.activeScene;
+      return {
+        undoStack: pushHistoryEntry(state.undoStack, createUndoEntry(state)),
+        redoStack: [],
+        pendingHistorySnapshot: null,
+        activeScene: {
+          ...state.activeScene,
+          entities: state.activeScene.entities.map((e) =>
+            e.entity_id === entityId
+              ? {
+                  ...e,
+                  components: { ...e.components, tilemap: { ...tilemap, cells: base } },
+                }
+              : e
+          ),
+        },
+        activeSceneSource: {
+          ...sourceScene,
+          entities: sourceScene.entities.map((e) =>
+            e.entity_id === entityId
+              ? {
+                  ...e,
+                  components: {
+                    ...e.components,
+                    tilemap: { ...(e.components.tilemap ?? tilemap), cells: base.slice() },
+                  },
+                }
+              : e
+          ),
+        },
+        sceneRevision: state.sceneRevision + 1,
+      };
+    }),
+
+  clearTilemapCells: (entityId) =>
+    set((state) => {
+      if (!state.activeScene) return {};
+      const entity = state.activeScene.entities.find((e) => e.entity_id === entityId);
+      const tilemap = entity?.components?.tilemap;
+      if (!entity || !tilemap || !tilemap.cells || tilemap.cells.length === 0) return {};
+      const preferredSourceScene = state.activeSceneSource ?? state.activeScene;
+      const sourceScene = preferredSourceScene.entities.some((e) => e.entity_id === entityId)
+        ? preferredSourceScene
+        : state.activeScene;
+      const strip = (e: Entity): Entity => {
+        const tm = e.components.tilemap;
+        if (!tm) return e;
+        const { cells: _drop, ...rest } = tm;
+        void _drop;
+        return { ...e, components: { ...e.components, tilemap: rest } };
+      };
+      return {
+        undoStack: pushHistoryEntry(state.undoStack, createUndoEntry(state)),
+        redoStack: [],
+        pendingHistorySnapshot: null,
+        activeScene: {
+          ...state.activeScene,
+          entities: state.activeScene.entities.map((e) =>
+            e.entity_id === entityId ? strip(e) : e
+          ),
+        },
+        activeSceneSource: {
+          ...sourceScene,
+          entities: sourceScene.entities.map((e) =>
+            e.entity_id === entityId ? strip(e) : e
+          ),
+        },
+        sceneRevision: state.sceneRevision + 1,
+      };
+    }),
 
   createLayer: (name, kind) =>
     set((state) => {

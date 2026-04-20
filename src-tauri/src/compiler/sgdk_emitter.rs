@@ -1303,6 +1303,11 @@ fn collect_sprite_position_vars(ast: &AstOutput) -> Vec<(String, i32, i32)> {
         }
     }
     let mut needed = std::collections::BTreeSet::new();
+    // Qualquer SpawnSprite precisa de variáveis s16 *_x / *_y antes do corpo de main, mesmo que o
+    // NodeGraph ainda não referencie o sprite em MoveSprite (ex.: fixture megadrive_dummy + build SGDK real).
+    for var_name in spawns.keys() {
+        needed.insert(var_name.clone());
+    }
     for node in &ast.nodes {
         if let AstNode::MoveCamera { target, .. } = node {
             if target.starts_with("spr_") {

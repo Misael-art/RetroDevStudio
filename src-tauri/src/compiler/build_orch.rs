@@ -484,7 +484,10 @@ where
         };
     }
 
-    emit!("info", "Gerando codigo C e manifestos...");
+    emit!(
+        "info",
+        "Gerando codigo C e manifestos a partir do modelo canónico RDS (cena + project.rds); nao le o C do doador SGDK em runtime."
+    );
     let ast = match generate_ast_with_prefabs(project_dir, project, &scene) {
         Ok(ast) => ast,
         Err(error) => {
@@ -2255,6 +2258,46 @@ mod tests {
         .expect("read SGDK resources");
         assert!(resources_res
             .contains("SPRITE player \"assets/sprites/onboarding_player.bmp\" 2 2 NONE 4"));
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    /// Quando `SGDK_ROOT` ou `toolchains/sgdk` apontam para uma instalação real com `makefile.gen`
+    /// e `make` funcional, prova build canónico sem fake-make. Em hosts sem toolchain, retorna cedo.
+    #[test]
+    fn megadrive_build_runs_with_detected_sgdk_toolchain_when_present() {
+        let _serial = test_serial_guard();
+        let env = BuildEnvironment::detect();
+        let Some(root) = env.sgdk_root.as_ref() else {
+            return;
+        };
+        if !root.join("makefile.gen").is_file() {
+            return;
+        }
+        if env.sgdk_make_program.is_none() {
+            return;
+        }
+
+        let project_dir = workspace_copy("megadrive_dummy");
+        install_megadrive_sprite_fixture(&project_dir);
+
+        let result = run_build_with_environment(&project_dir, &env, |_| {});
+
+        assert!(
+            result.ok,
+            "build com SGDK real deve concluir quando toolchain completa; log: {:?}",
+            result.log
+        );
+        assert!(!result.rom_path.is_empty());
+        let rom_full = project_dir.join(&result.rom_path);
+        assert!(rom_full.is_file(), "rom em {}", rom_full.display());
+        let rom_bytes = fs::read(&rom_full).expect("read rom bytes");
+        assert!(
+            rom_bytes.windows(4).any(|w| w == b"SEGA"),
+            "ROM Mega Drive deve conter marca SEGA (cabecalho MD ou bootstrap); len={} primeiros 64B={:02x?}",
+            rom_bytes.len(),
+            &rom_bytes[..rom_bytes.len().min(64)]
+        );
 
         let _ = fs::remove_dir_all(project_dir);
     }

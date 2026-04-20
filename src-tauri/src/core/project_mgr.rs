@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
@@ -101,6 +101,155 @@ pub struct ExternalImportReport {
     pub primary_scene: Scene,
     pub imported_scenes: usize,
     pub skipped_sources: Vec<String>,
+}
+
+/// Fonte descartada durante o import SGDK com motivo rastreavel.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct SgdkSkippedSource {
+    /// Descricao legivel da origem (ex.: `VGM forbidden`).
+    pub source: String,
+    /// Classe canonica do skip: `UnsupportedKind`, `MissingAsset`, `ForbiddenFormat`.
+    pub reason: String,
+    /// Mensagem humana adicional.
+    pub detail: String,
+}
+
+/// Mapeamento explicito entre recurso SGDK e asset canonico emitido.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct SgdkImportMapping {
+    pub resource_kind: String,
+    pub resource_name: String,
+    pub source_relative: String,
+    pub destination: String,
+}
+
+/// Sumario das origens do doador SGDK consumidas nesta importacao.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default, PartialEq, Eq)]
+pub struct SgdkSourceSummary {
+    pub donor_root: String,
+    pub manifests: Vec<String>,
+    pub resources_total: usize,
+    pub resources_accepted: usize,
+    pub resources_skipped: usize,
+    pub fingerprint: String,
+}
+
+/// Cena extra derivada do doador SGDK alem da primaria.
+///
+/// A Fase B separa por tilemap anchor: cada `IMAGE`/`TILESET`/`MAP`/`TILEMAP`
+/// extra alem do primeiro vira sua propria cena canonica sob `scenes/<slug>.json`.
+#[derive(Debug, Clone)]
+pub struct SgdkImportedSceneDescriptor {
+    pub scene_id: String,
+    pub display_name: String,
+    pub scene_path: String,
+    pub entity_count: usize,
+    pub tilemap_cells: usize,
+    pub tilemap_unique_tiles: u32,
+}
+
+/// Relatorio rico do importador SGDK.
+///
+/// Expoe paridade com `ExternalImportReport`/`MugenImportReport` e adiciona
+/// fallbacks explicitos e sumario do doador para rastreabilidade completa.
+#[derive(Debug, Clone)]
+pub struct SgdkImportReport {
+    pub primary_scene: Scene,
+    pub imported_scenes: usize,
+    pub skipped_sources: Vec<SgdkSkippedSource>,
+    pub warnings: Vec<String>,
+    pub fallbacks: Vec<String>,
+    pub source_summary: SgdkSourceSummary,
+    /// Caminho relativo do ledger `.rds/imports/sgdk/*.json` escrito.
+    pub manifest_path: Option<String>,
+    /// Caminho relativo da cena primaria no projeto (sempre populado).
+    pub primary_scene_path: String,
+    /// Cenas adicionais criadas quando o doador possui multiplos tilemap anchors.
+    pub additional_scenes: Vec<SgdkImportedSceneDescriptor>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+struct SgdkImportLedgerHistoryEntry {
+    timestamp_unix: u64,
+    fingerprint: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+struct SgdkImportLedgerScene {
+    scene_id: String,
+    display_name: String,
+    scene_path: String,
+    role: String,
+    entity_count: usize,
+    tilemap_cells: usize,
+    tilemap_unique_tiles: u32,
+}
+
+/// Auditoria Fase C (animacoes + collision_map) persistida no ledger `sgdk-import/v4+` (campo `phase_c`).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+struct SgdkImportLedgerPhaseC {
+    /// Ex.: `nonzero_tile_index` quando collision_map foi derivado do tilemap canonico.
+    #[serde(default)]
+    collision_derivation_rule: Option<String>,
+    #[serde(default)]
+    primary_collision_solid_cells: Option<u64>,
+    #[serde(default)]
+    primary_sprite_animation_rows: Option<u32>,
+    #[serde(default)]
+    primary_sprite_animation_names: Vec<String>,
+}
+
+/// Auditoria Fase D (padroes main.c + ficheiros de grafo por sprite).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+struct SgdkImportLedgerPhaseD {
+    /// Grupos de tokens observados no scan textual agregado (legacy: iniciado em `src/main.c`).
+    #[serde(default)]
+    detected_main_c_token_groups: Vec<String>,
+    /// Ficheiros C/H do doador efetivamente lidos no scan controlado (paths relativos ao root SGDK).
+    #[serde(default)]
+    donor_logic_scanned_paths: Vec<String>,
+    /// `graph_ref` persistidos (paths `graphs/sgdk_import_<entity>.json`).
+    #[serde(default)]
+    logic_graph_refs: Vec<String>,
+    /// Heuristica de classe de gameplay quando sinais sao combinados (nao e certificacao).
+    #[serde(default)]
+    heuristic_gameplay_class: Option<String>,
+    /// Chamadas `func(` observadas num TU cujo corpo/prototipo foi noutro ficheiro escaneado (heuristica).
+    #[serde(default)]
+    cross_unit_function_refs: Vec<String>,
+    /// Sprites com linha SPR_* no mesmo texto que o identificador do recurso (`entity_id@rel`).
+    #[serde(default)]
+    entity_spr_local_signal_hits: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+struct SgdkImportLedger {
+    schema_version: String,
+    scene_id: String,
+    donor_root: String,
+    donor_basename: String,
+    fingerprint: String,
+    last_imported_at_unix: u64,
+    manifests: Vec<String>,
+    mappings: Vec<SgdkImportMapping>,
+    skipped_sources: Vec<SgdkSkippedSource>,
+    warnings: Vec<String>,
+    fallbacks: Vec<String>,
+    history: Vec<SgdkImportLedgerHistoryEntry>,
+    #[serde(default)]
+    scenes: Vec<SgdkImportLedgerScene>,
+    #[serde(default)]
+    phase_c: SgdkImportLedgerPhaseC,
+    #[serde(default)]
+    phase_d: SgdkImportLedgerPhaseD,
+}
+
+const SGDK_IMPORT_LEDGER_SCHEMA: &str = "sgdk-import/v4";
+const SGDK_IMPORT_LEDGER_DIR: &str = ".rds/imports/sgdk";
+
+/// `graph_ref` estável por entidade: um ficheiro JSON por `entity_id` (slug SGDK).
+fn sgdk_import_sprite_logic_graph_ref(entity_id: &str) -> String {
+    format!("graphs/sgdk_import_{}.json", entity_id.trim())
 }
 
 #[derive(Debug, Clone, Default)]
@@ -607,7 +756,7 @@ pub fn seed_project_template(
     match template_id {
         "platformer_seed" => seed_platformer_template(project_dir, &donor),
         "platformer_gm" => seed_platformer_gm_template(project_dir, &donor),
-        _ => import_sgdk_project(project_dir, &donor),
+        _ => import_sgdk_project(project_dir, &donor).map(|report| report.primary_scene),
     }
 }
 
@@ -686,6 +835,1037 @@ fn tilemap_dims_from_source(source_path: &Path) -> (u32, u32) {
         }
     }
     (64, 64)
+}
+
+/// Resultado da extracao de celulas a partir de um PNG de tileset/mapa SGDK.
+///
+/// Reconstroi `cells[]` canonico via deduplicacao 8x8:
+/// - cada tile 8x8 vira uma entrada do dicionario
+/// - tiles totalmente transparentes viram `0` (vazio) em `cells[]`
+/// - demais tiles recebem indice 1-based dentro do dicionario
+///
+/// Esse caminho cobre o caso mais comum em SGDK: o "map" e uma PNG monolitica onde a
+/// colocacao ja esta embutida (um grande "background bake"). Para projetos com .tmx
+/// dedicado ou `.map` binario, a reconstrucao fica como fallback explicito no report.
+struct ExtractedSgdkTilemap {
+    map_width: u32,
+    map_height: u32,
+    cells: Vec<u32>,
+    unique_tiles: u32,
+}
+
+fn extract_sgdk_tilemap_cells(source_path: &Path) -> Option<ExtractedSgdkTilemap> {
+    let img = image::open(source_path).ok()?;
+    let rgba = img.to_rgba8();
+    let w = rgba.width();
+    let h = rgba.height();
+    if w < 8 || h < 8 || w % 8 != 0 || h % 8 != 0 {
+        return None;
+    }
+    let tiles_x = w / 8;
+    let tiles_y = h / 8;
+    // Reconstrucao so agrega valor se houver mais de um tile no eixo maior.
+    if tiles_x == 0 || tiles_y == 0 || (tiles_x == 1 && tiles_y == 1) {
+        return None;
+    }
+
+    let row_stride = (w as usize) * 4;
+    let pixels = rgba.as_raw();
+    let mut dict: HashMap<[u8; 256], u32> = HashMap::new();
+    let mut cells: Vec<u32> = Vec::with_capacity((tiles_x * tiles_y) as usize);
+    let mut next_index: u32 = 1;
+
+    for ty in 0..tiles_y {
+        for tx in 0..tiles_x {
+            let mut tile_bytes = [0u8; 256]; // 8x8 pixels * 4 bytes RGBA
+            for py in 0..8u32 {
+                let src_y = (ty * 8 + py) as usize;
+                let src_x = (tx * 8) as usize;
+                let src_offset = src_y * row_stride + src_x * 4;
+                let dst_offset = (py as usize) * 32;
+                tile_bytes[dst_offset..dst_offset + 32]
+                    .copy_from_slice(&pixels[src_offset..src_offset + 32]);
+            }
+            let fully_transparent = tile_bytes.chunks_exact(4).all(|px| px[3] == 0);
+            if fully_transparent {
+                cells.push(0);
+                continue;
+            }
+            let idx = *dict.entry(tile_bytes).or_insert_with(|| {
+                let current = next_index;
+                next_index = next_index.saturating_add(1);
+                current
+            });
+            cells.push(idx);
+        }
+    }
+
+    if cells.iter().all(|cell| *cell == 0) {
+        // PNG totalmente transparente: reconstrucao nao adiciona sinal util.
+        return None;
+    }
+
+    Some(ExtractedSgdkTilemap {
+        map_width: tiles_x,
+        map_height: tiles_y,
+        cells,
+        unique_tiles: dict.len() as u32,
+    })
+}
+
+/// Resultado da Fase C para um recurso SPRITE (dimensoes de quadro + animacoes).
+struct SgdkSpriteSheetDerived {
+    frame_width: u32,
+    frame_height: u32,
+    animations: HashMap<String, AnimationDef>,
+    notes: Vec<String>,
+}
+
+/// Leitura leve dos ficheiros C/H do doador para a Fase D (sem parser C completo).
+#[derive(Debug, Clone, Default)]
+struct SgdkDonorLogicScan {
+    joy_read_detected: bool,
+    map_scroll_h_detected: bool,
+    map_scroll_v_detected: bool,
+    busy_loop_detected: bool,
+    vblank_sync_detected: bool,
+    spr_engine_detected: bool,
+    /// Paths relativos ao root do doador (ex.: `src/main.c`, `src/player_control.c`).
+    donor_logic_scanned_paths: Vec<String>,
+    /// Texto fonte por path relativo (apenas ficheiros efetivamente visitados pelo scan).
+    source_text_by_rel: HashMap<String, String>,
+    /// Versao colapsada (sem whitespace) por path relativo.
+    collapsed_by_rel: HashMap<String, String>,
+    /// Nomes de funcoes observados por ficheiro (heuristica linha-a-linha; nao e AST completo).
+    function_defs_by_rel: HashMap<String, HashSet<String>>,
+    /// Chamadas `ident(` entre TU distintos com definicao textual observada doutro ficheiro.
+    cross_unit_function_refs: Vec<String>,
+}
+
+impl SgdkDonorLogicScan {
+    fn map_scroll_any(&self) -> bool {
+        self.map_scroll_h_detected || self.map_scroll_v_detected
+    }
+
+    fn ledger_token_groups(&self) -> Vec<String> {
+        let mut v = Vec::new();
+        if self.joy_read_detected {
+            v.push("joy_read".to_string());
+        }
+        if self.map_scroll_h_detected {
+            v.push("map_scroll_h".to_string());
+        }
+        if self.map_scroll_v_detected {
+            v.push("map_scroll_v".to_string());
+        }
+        if self.busy_loop_detected {
+            v.push("busy_loop".to_string());
+        }
+        if self.vblank_sync_detected {
+            v.push("vblank_sync".to_string());
+        }
+        if self.spr_engine_detected {
+            v.push("spr_engine".to_string());
+        }
+        v
+    }
+
+    fn merge_tokens_from_collapsed_source(&mut self, collapsed: &str) {
+        if collapsed.contains("JOY_readJoypad(") || collapsed.contains("JOY_read(") {
+            self.joy_read_detected = true;
+        }
+        if collapsed.contains("MAP_scrollH(") {
+            self.map_scroll_h_detected = true;
+        }
+        if collapsed.contains("MAP_scrollV(") {
+            self.map_scroll_v_detected = true;
+        }
+        if collapsed.contains("while(1)")
+            || collapsed.contains("while(true")
+            || collapsed.contains("for(;;)")
+        {
+            self.busy_loop_detected = true;
+        }
+        if collapsed.contains("SYS_doVBlankProcess(")
+            || collapsed.contains("VDP_waitVSync(")
+            || collapsed.contains("VDP_waitDMACompletion(")
+        {
+            self.vblank_sync_detected = true;
+        }
+        if collapsed.contains("SPR_addSprite(")
+            || collapsed.contains("SPR_setPosition(")
+            || collapsed.contains("SPR_update(")
+            || collapsed.contains("SPR_init(")
+        {
+            self.spr_engine_detected = true;
+        }
+    }
+
+    /// Heuristica agregada em todos os ficheiros visitados (ordem: casos mais especificos primeiro).
+    fn heuristic_gameplay_class(&self) -> Option<String> {
+        if self.map_scroll_v_detected && self.joy_read_detected && self.spr_engine_detected {
+            return Some("shmup_vertical_signals".to_string());
+        }
+        if self.joy_read_detected && self.spr_engine_detected && self.map_scroll_h_detected {
+            return Some("run_and_gun_horizontal_signals".to_string());
+        }
+        if self.map_scroll_v_detected && !self.map_scroll_h_detected && !self.joy_read_detected {
+            return Some("vertical_scroller_signals".to_string());
+        }
+        if self.joy_read_detected && self.map_scroll_h_detected {
+            return Some("platformer_horizontal_scroller_signals".to_string());
+        }
+        None
+    }
+
+    /// Materializa stencil extra no grafo do sprite primario apenas para classes com sinal forte.
+    fn primary_graph_materialization_class(&self) -> Option<&'static str> {
+        match self.heuristic_gameplay_class().as_deref() {
+            Some("shmup_vertical_signals") => Some("shmup_vertical_signals"),
+            Some("run_and_gun_horizontal_signals") => Some("run_and_gun_horizontal_signals"),
+            _ => None,
+        }
+    }
+
+    /// Heuristica de materializacao de grafo para sprite primario ou secundario com SPR_* local ao recurso.
+    fn graph_materialization_class_for_sprite_role(
+        &self,
+        is_primary_sprite: bool,
+        secondary_local_spr: bool,
+    ) -> Option<&'static str> {
+        if is_primary_sprite || secondary_local_spr {
+            self.primary_graph_materialization_class()
+        } else {
+            None
+        }
+    }
+
+    fn compute_cross_unit_function_refs(&mut self) {
+        let mut def_site: HashMap<String, String> = HashMap::new();
+        let mut rel_keys: Vec<String> = self.function_defs_by_rel.keys().cloned().collect();
+        rel_keys.sort();
+        for rel in rel_keys {
+            if let Some(set) = self.function_defs_by_rel.get(&rel) {
+                for n in set {
+                    def_site.entry(n.clone()).or_insert_with(|| rel.clone());
+                }
+            }
+        }
+        let mut seen = HashSet::new();
+        let mut refs = Vec::new();
+        let mut collapsed_rels: Vec<String> = self.collapsed_by_rel.keys().cloned().collect();
+        collapsed_rels.sort();
+        for rel in collapsed_rels {
+            let Some(collapsed) = self.collapsed_by_rel.get(&rel) else {
+                continue;
+            };
+            for (fname, def_rel) in &def_site {
+                if def_rel == &rel {
+                    continue;
+                }
+                if fname.len() < 2 || is_sgdk_c_keyword(fname) {
+                    continue;
+                }
+                let needle = format!("{fname}(");
+                if !collapsed.contains(&needle) {
+                    continue;
+                }
+                let line = format!(
+                    "chamada_textual `{}(` em '{}' — definicao heuristica em '{}'",
+                    fname, rel, def_rel
+                );
+                if seen.insert(line.clone()) {
+                    refs.push(line);
+                }
+            }
+        }
+        refs.sort();
+        self.cross_unit_function_refs = refs;
+    }
+
+    /// Linha com SPR_addSprite / SPR_setPosition no mesmo texto que o identificador canonico do recurso.
+    fn entity_resource_spr_touch_rel(&self, resource_name: &str) -> Option<String> {
+        let entity_id = sgdk_entity_id(resource_name);
+        if entity_id.len() < 2 {
+            return None;
+        }
+        let mut rel_keys: Vec<String> = self.source_text_by_rel.keys().cloned().collect();
+        rel_keys.sort();
+        for rel in rel_keys {
+            let Some(src) = self.source_text_by_rel.get(&rel) else {
+                continue;
+            };
+            for raw_line in src.lines() {
+                let line = strip_cpp_line_comment(raw_line).trim();
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                if !line.contains("SPR_addSprite") && !line.contains("SPR_setPosition") {
+                    continue;
+                }
+                if c_token_boundary_substring(line, &entity_id) {
+                    return Some(rel);
+                }
+            }
+        }
+        None
+    }
+}
+
+fn strip_cpp_line_comment(line: &str) -> &str {
+    line.find("//").map(|idx| &line[..idx]).unwrap_or(line)
+}
+
+fn is_sgdk_c_keyword(name: &str) -> bool {
+    matches!(
+        name,
+        "if" | "while" | "for" | "switch" | "return" | "case" | "else" | "do" | "sizeof" | "break" | "continue"
+    )
+}
+
+fn looks_like_sgdk_macro_api_identifier(name: &str) -> bool {
+    name.starts_with("SPR_")
+        || name.starts_with("MAP_")
+        || name.starts_with("JOY_")
+        || name.starts_with("VDP_")
+        || name.starts_with("SYS_")
+}
+
+fn c_token_boundary_substring(haystack: &str, needle: &str) -> bool {
+    if needle.len() < 2 {
+        return false;
+    }
+    for (idx, _) in haystack.match_indices(needle) {
+        let before = haystack[..idx].chars().last();
+        let after = haystack[idx + needle.len()..].chars().next();
+        let before_ok = before.is_none_or(|c| !c.is_ascii_alphanumeric() && c != '_');
+        let after_ok = after.is_none_or(|c| !c.is_ascii_alphanumeric() && c != '_');
+        if before_ok && after_ok {
+            return true;
+        }
+    }
+    false
+}
+
+fn collect_sgdk_c_function_names_for_audit(source: &str, into: &mut HashSet<String>) {
+    for raw in source.lines() {
+        let line = strip_cpp_line_comment(raw).trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(name) = extract_sgdk_line_function_def_name(line) {
+            into.insert(name);
+        }
+    }
+}
+
+/// Extrai nome de funcao apenas quando a linha parece definicao/prototipo (heuristica conservadora).
+fn extract_sgdk_line_function_def_name(line: &str) -> Option<String> {
+    if line.contains("typedef") {
+        return None;
+    }
+    let work = if let Some(brace) = line.find('{') {
+        line[..brace].trim()
+    } else if line.ends_with(';') {
+        line.trim_end_matches(';').trim()
+    } else {
+        return None;
+    };
+    let open = work.find('(')?;
+    let before = work[..open].trim();
+    let tokens: Vec<&str> = before.split_whitespace().collect();
+    if tokens.len() < 2 {
+        return None;
+    }
+    let name = tokens
+        .last()?
+        .trim_start_matches('*')
+        .to_string();
+    if name.is_empty() {
+        return None;
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return None;
+    }
+    if is_sgdk_c_keyword(&name) {
+        return None;
+    }
+    if looks_like_sgdk_macro_api_identifier(&name) {
+        return None;
+    }
+    if name.chars().all(|c| c.is_ascii_uppercase() || c == '_') && name.len() > 3 {
+        return None;
+    }
+    Some(name)
+}
+
+fn sgdk_donor_rel_path(sgdk_root: &Path, file: &Path) -> Option<String> {
+    let rel = file.strip_prefix(sgdk_root).ok()?;
+    let s = rel.to_string_lossy().replace('\\', "/");
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+/// Extrai apenas `#include "local.h"` (nao processa includes de sistema `<>`).
+fn extract_sgdk_quoted_includes(source: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for raw_line in source.lines() {
+        let line = raw_line.trim_start();
+        if !line.starts_with('#') {
+            continue;
+        }
+        let mut rest = line[1..].trim_start();
+        if !rest.starts_with("include") {
+            continue;
+        }
+        rest = rest["include".len()..].trim_start();
+        let Some(inner) = rest.strip_prefix('"') else {
+            continue;
+        };
+        let Some(end) = inner.find('"') else {
+            continue;
+        };
+        let inc = inner[..end].trim();
+        if inc.is_empty() {
+            continue;
+        }
+        out.push(inc.to_string());
+    }
+    out
+}
+
+fn resolve_sgdk_quoted_include_path(sgdk_root: &Path, from_file: &Path, include_lit: &str) -> Option<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(parent) = from_file.parent() {
+        candidates.push(parent.join(include_lit));
+    }
+    candidates.push(sgdk_root.join("src").join(include_lit));
+    candidates.push(sgdk_root.join("inc").join(include_lit));
+    if include_lit.contains('/') || include_lit.contains('\\') {
+        candidates.push(sgdk_root.join(include_lit));
+    }
+    candidates.into_iter().find(|p| p.is_file())
+}
+
+fn scan_sgdk_donor_logic_scan(sgdk_path: &Path) -> SgdkDonorLogicScan {
+    let mut scan = SgdkDonorLogicScan::default();
+    let main_c = sgdk_path.join("src").join("main.c");
+    if !main_c.is_file() {
+        return scan;
+    }
+
+    const MAX_SCANNED_FILES: usize = 18;
+    let mut queue: VecDeque<PathBuf> = VecDeque::new();
+    let mut visited: HashSet<String> = HashSet::new();
+    queue.push_back(main_c);
+
+    while let Some(abs_path) = queue.pop_front() {
+        if visited.len() >= MAX_SCANNED_FILES {
+            break;
+        }
+        let visit_key = abs_path.to_string_lossy().to_string();
+        if !abs_path.is_file() || !visited.insert(visit_key) {
+            continue;
+        }
+
+        let Ok(text) = fs::read_to_string(&abs_path) else {
+            continue;
+        };
+        let collapsed: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+        scan.merge_tokens_from_collapsed_source(&collapsed);
+        if let Some(rel) = sgdk_donor_rel_path(sgdk_path, &abs_path) {
+            scan.donor_logic_scanned_paths.push(rel.clone());
+            scan
+                .source_text_by_rel
+                .insert(rel.clone(), text.clone());
+            scan.collapsed_by_rel.insert(rel.clone(), collapsed.clone());
+            let bucket = scan.function_defs_by_rel.entry(rel).or_default();
+            collect_sgdk_c_function_names_for_audit(&text, bucket);
+        }
+
+        for inc in extract_sgdk_quoted_includes(&text) {
+            let base_name = Path::new(&inc)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(inc.as_str());
+            if base_name.eq_ignore_ascii_case("genesis.h")
+                || base_name.eq_ignore_ascii_case("types.h")
+                || base_name.eq_ignore_ascii_case("sprite_eng.h")
+            {
+                continue;
+            }
+            if let Some(resolved) = resolve_sgdk_quoted_include_path(sgdk_path, &abs_path, &inc) {
+                let res_key = resolved.to_string_lossy().to_string();
+                if !visited.contains(&res_key) {
+                    queue.push_back(resolved.clone());
+                }
+                if inc.to_ascii_lowercase().ends_with(".h") {
+                    if let Some(stem) = Path::new(&inc).file_stem().and_then(|s| s.to_str()) {
+                        let companion_c = resolved
+                            .parent()
+                            .unwrap_or(sgdk_path)
+                            .join(format!("{stem}.c"));
+                        if companion_c.is_file() {
+                            let ck = companion_c.to_string_lossy().to_string();
+                            if !visited.contains(&ck) {
+                                queue.push_back(companion_c);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    scan.donor_logic_scanned_paths.sort();
+    scan.donor_logic_scanned_paths.dedup();
+    scan.compute_cross_unit_function_refs();
+    scan
+}
+
+fn is_sgdk_rescomp_compression_token(token: &str) -> bool {
+    let u = token.trim().to_ascii_uppercase();
+    matches!(
+        u.as_str(),
+        "BEST" | "AUTO" | "NONE" | "APLIB" | "FAST" | "LZ4W"
+    ) || matches!(token.trim(), "-1" | "0" | "1" | "2")
+}
+
+fn parse_sgdk_sprite_axis_extent(token: &str, axis_px: u32) -> Result<u32, String> {
+    let t = token.trim();
+    if t.is_empty() {
+        return Err("parametro vazio".into());
+    }
+    let bytes = t.as_bytes();
+    let last = *bytes.last().unwrap_or(&b'0');
+    if last == b'p' || last == b'P' {
+        let num: u32 = t[..bytes.len() - 1]
+            .parse()
+            .map_err(|_| "largura/altura em px invalida".to_string())?;
+        if num == 0 || !num.is_multiple_of(8) {
+            return Err("dimensao em px deve ser multiplo de 8".into());
+        }
+        Ok(num)
+    } else if last == b'f' || last == b'F' {
+        let frames: u32 = t[..bytes.len() - 1]
+            .parse()
+            .map_err(|_| "contagem de frames 'f' invalida".to_string())?;
+        if frames == 0 {
+            return Err("contagem de frames deve ser > 0".into());
+        }
+        if !axis_px.is_multiple_of(frames) {
+            return Err(format!(
+                "eixo de imagem {} nao divisivel por {} frames",
+                axis_px, frames
+            ));
+        }
+        Ok(axis_px / frames)
+    } else {
+        let tiles: u32 = t
+            .parse()
+            .map_err(|_| "dimensao em tiles invalida (use inteiro ou sufixo p/f)".to_string())?;
+        Ok(tiles.saturating_mul(8).max(8))
+    }
+}
+
+fn parse_sgdk_sprite_compression_time_ticks(params: &[String]) -> (u32, Option<String>) {
+    let mut idx = 2usize;
+    if params.len() <= idx {
+        return (0, None);
+    }
+    if is_sgdk_rescomp_compression_token(&params[idx]) {
+        let label = params[idx].clone();
+        idx += 1;
+        if params.len() <= idx {
+            return (0, Some(label));
+        }
+        let time_raw = &params[idx];
+        if time_raw.starts_with("[[") {
+            return (0, Some(label));
+        }
+        let ticks: u32 = time_raw.parse().unwrap_or(0);
+        return (ticks, Some(label));
+    }
+    let ticks: u32 = params[idx].parse().unwrap_or(0);
+    (ticks, None)
+}
+
+fn derive_sgdk_sprite_sheet_from_rescomp_png(
+    png_path: &Path,
+    resource_name: &str,
+    params: &[String],
+) -> SgdkSpriteSheetDerived {
+    let mut notes = Vec::new();
+    let legacy_tiles_w = || {
+        params
+            .first()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(2)
+            .saturating_mul(8)
+            .max(8)
+    };
+    let legacy_tiles_h = || {
+        params
+            .get(1)
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or_else(|| {
+                params
+                    .first()
+                    .and_then(|v| v.parse::<u32>().ok())
+                    .unwrap_or(2)
+            })
+            .saturating_mul(8)
+            .max(8)
+    };
+    if params.len() < 2 {
+        notes.push(format!(
+            "sprite '{}': linha .res sem width/height completos; usando heuristica legacy em tiles.",
+            resource_name
+        ));
+        return SgdkSpriteSheetDerived {
+            frame_width: legacy_tiles_w(),
+            frame_height: legacy_tiles_h(),
+            animations: HashMap::new(),
+            notes,
+        };
+    }
+    let (img_w, img_h) = match image::image_dimensions(png_path) {
+        Ok(v) => v,
+        Err(e) => {
+            notes.push(format!(
+                "sprite '{}': falha ao ler dimensoes do PNG ({}); usando heuristica legacy em tiles.",
+                resource_name, e
+            ));
+            return SgdkSpriteSheetDerived {
+                frame_width: legacy_tiles_w(),
+                frame_height: legacy_tiles_h(),
+                animations: HashMap::new(),
+                notes,
+            };
+        }
+    };
+    let frame_w = match parse_sgdk_sprite_axis_extent(&params[0], img_w) {
+        Ok(v) => v,
+        Err(msg) => {
+            notes.push(format!(
+                "sprite '{}': width '{}' invalido ({}); fallback legacy em tiles.",
+                resource_name, params[0], msg
+            ));
+            return SgdkSpriteSheetDerived {
+                frame_width: legacy_tiles_w(),
+                frame_height: legacy_tiles_h(),
+                animations: HashMap::new(),
+                notes,
+            };
+        }
+    };
+    let frame_h = match parse_sgdk_sprite_axis_extent(&params[1], img_h) {
+        Ok(v) => v,
+        Err(msg) => {
+            notes.push(format!(
+                "sprite '{}': height '{}' invalido ({}); fallback legacy em tiles.",
+                resource_name, params[1], msg
+            ));
+            return SgdkSpriteSheetDerived {
+                frame_width: legacy_tiles_w(),
+                frame_height: legacy_tiles_h(),
+                animations: HashMap::new(),
+                notes,
+            };
+        }
+    };
+    if frame_w == 0
+        || frame_h == 0
+        || !img_w.is_multiple_of(frame_w)
+        || !img_h.is_multiple_of(frame_h)
+    {
+        notes.push(format!(
+            "sprite '{}': sheet {}x{} nao alinha com frame {}x{}; animacoes nao derivadas (fallback legacy em tiles).",
+            resource_name, img_w, img_h, frame_w, frame_h
+        ));
+        return SgdkSpriteSheetDerived {
+            frame_width: legacy_tiles_w(),
+            frame_height: legacy_tiles_h(),
+            animations: HashMap::new(),
+            notes,
+        };
+    }
+    let frames_x = img_w / frame_w;
+    let rows = img_h / frame_h;
+    let (time_ticks, _compression) = parse_sgdk_sprite_compression_time_ticks(params);
+    let fps = if time_ticks > 0 {
+        60u32.saturating_div(time_ticks.max(1)).max(1)
+    } else {
+        notes.push(format!(
+            "sprite '{}': timer SGDK=0 (sem auto-advance no hardware); fps=8 apenas para preview no editor.",
+            resource_name
+        ));
+        8
+    };
+    let mut animations = HashMap::new();
+    for row in 0..rows {
+        let anim_name = if rows == 1 {
+            "default".to_string()
+        } else {
+            format!("sheet_row_{}", row)
+        };
+        let frame_indices: Vec<u32> = (0..frames_x).map(|col| row * frames_x + col).collect();
+        let looping = frame_indices.len() > 1 && time_ticks > 0;
+        animations.insert(
+            anim_name,
+            AnimationDef {
+                frames: frame_indices,
+                fps,
+                looping,
+                frame_durations: None,
+                loop_start: None,
+                mugen_frames: None,
+            },
+        );
+    }
+    notes.push(format!(
+        "sprite '{}': animacoes derivadas da grelha rescomp ({} fileira(s), {} quadro(s) por fileira); ver SGDK rescomp SPRITE.",
+        resource_name, rows, frames_x
+    ));
+    SgdkSpriteSheetDerived {
+        frame_width: frame_w,
+        frame_height: frame_h,
+        animations,
+        notes,
+    }
+}
+
+fn derive_sgdk_scene_collision_map_from_tile_cells(
+    cells: &[u32],
+    map_width: u32,
+    map_height: u32,
+) -> Option<(CollisionMap, String)> {
+    let expected = map_width.checked_mul(map_height)? as usize;
+    if cells.len() != expected || expected == 0 {
+        return None;
+    }
+    let data: Vec<u8> = cells.iter().map(|c| if *c == 0 { 0u8 } else { 1u8 }).collect();
+    let solid = data.iter().filter(|&&v| v != 0).count() as u64;
+    let note = format!(
+        "Fase C: collision_map derivado por regra rastreavel: solido onde indice de tile != 0, livre onde == 0 (indice 0 = tile totalmente transparente em extract_sgdk_tilemap_cells); grade {}x{} tiles, {} celulas solidas.",
+        map_width, map_height, solid
+    );
+    Some((
+        CollisionMap {
+            tile_width: 8,
+            tile_height: 8,
+            width: map_width,
+            height: map_height,
+            data,
+        },
+        note,
+    ))
+}
+
+fn imported_sprite_logic_graph_phase_d(
+    resource_name: &str,
+    scan: &SgdkDonorLogicScan,
+    is_primary_sprite: bool,
+    secondary_local_spr: bool,
+) -> String {
+    let target = sgdk_entity_id(resource_name);
+    let mat_class =
+        scan.graph_materialization_class_for_sprite_role(is_primary_sprite, secondary_local_spr);
+    let (mv_dx, mv_dy) = match mat_class {
+        Some("shmup_vertical_signals") => (0, -2),
+        _ => (2, 0),
+    };
+    let start = serde_json::json!({
+        "id": "start",
+        "type": "event_start",
+        "label": "On Start",
+        "x": 48,
+        "y": 48,
+        "inputs": [],
+        "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+        "params": {}
+    });
+    let move_sprite = serde_json::json!({
+        "id": "move_sprite",
+        "type": "sprite_move",
+        "label": "Move Sprite",
+        "x": 228,
+        "y": 48,
+        "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+        "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+        "params": { "target": target, "dx": mv_dx, "dy": mv_dy }
+    });
+    let mut nodes: Vec<serde_json::Value> = vec![start, move_sprite];
+    let mut edges: Vec<serde_json::Value> = vec![serde_json::json!({
+        "id": "edge_start_move",
+        "fromNode": "start",
+        "fromPort": "exec",
+        "toNode": "move_sprite",
+        "toPort": "exec"
+    })];
+    let mut tail_node = "move_sprite";
+    if mat_class.is_some() {
+        let sfx_label = match mat_class {
+            Some("shmup_vertical_signals") => "Disparo (heuristica shmup)",
+            Some("run_and_gun_horizontal_signals") => "Disparo (heuristica run-and-gun)",
+            _ => "Disparo (heuristica)",
+        };
+        nodes.push(serde_json::json!({
+            "id": "fire_hint",
+            "type": "action_sound",
+            "label": sfx_label,
+            "x": 228,
+            "y": 168,
+            "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+            "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+            "params": { "sfx": "fire" }
+        }));
+        edges.push(serde_json::json!({
+            "id": "edge_move_fire",
+            "fromNode": "move_sprite",
+            "fromPort": "exec",
+            "toNode": "fire_hint",
+            "toPort": "exec"
+        }));
+        tail_node = "fire_hint";
+    }
+    if scan.map_scroll_any() {
+        let (dx, dy, label_suffix) = if scan.map_scroll_v_detected && !scan.map_scroll_h_detected {
+            (0, -1, "MAP_scrollV")
+        } else if scan.map_scroll_h_detected && !scan.map_scroll_v_detected {
+            (-1, 0, "MAP_scrollH")
+        } else {
+            (-1, -1, "MAP_scrollH+V")
+        };
+        let scroll_label = format!("Scroll Tilemap ({label_suffix})");
+        nodes.push(serde_json::json!({
+            "id": "scroll_bg",
+            "type": "scroll_tilemap",
+            "label": scroll_label,
+            "x": 408,
+            "y": 48,
+            "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+            "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+            "params": { "layer": "BG_A", "dx": dx, "dy": dy }
+        }));
+        edges.push(serde_json::json!({
+            "id": "edge_tail_scroll",
+            "fromNode": tail_node,
+            "fromPort": "exec",
+            "toNode": "scroll_bg",
+            "toPort": "exec"
+        }));
+    }
+    serde_json::json!({
+        "version": 1,
+        "nodes": nodes,
+        "edges": edges
+    })
+    .to_string()
+}
+
+fn apply_sgdk_phase_d_to_sprite_entity(
+    project_dir: &Path,
+    entity: &mut Entity,
+    resource_name: &str,
+    scan: &SgdkDonorLogicScan,
+    is_primary_sprite: bool,
+    secondary_local_spr: bool,
+) -> Result<String, LoadError> {
+    let Some(logic) = entity.components.logic.as_mut() else {
+        return Ok(String::new());
+    };
+    let graph_ref = sgdk_import_sprite_logic_graph_ref(&entity.entity_id);
+    let graph_json = imported_sprite_logic_graph_phase_d(
+        resource_name,
+        scan,
+        is_primary_sprite,
+        secondary_local_spr,
+    );
+    let graph_path = graph_write_path(project_dir, &graph_ref)?;
+    if let Some(parent) = graph_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            LoadError(format!(
+                "Fase D: nao foi possivel criar diretorio para graph_ref '{}': {}",
+                graph_ref, error
+            ))
+        })?;
+    }
+    fs::write(&graph_path, &graph_json).map_err(|error| {
+        LoadError(format!(
+            "Fase D: nao foi possivel gravar NodeGraph canônico em '{}': {}",
+            graph_path.display(),
+            error
+        ))
+    })?;
+    logic.graph = None;
+    logic.graph_ref = Some(graph_ref.clone());
+    for rel in &scan.donor_logic_scanned_paths {
+        logic.external_source_refs.push(rel.clone());
+    }
+    logic.external_source_refs.sort();
+    logic.external_source_refs.dedup();
+    if is_primary_sprite {
+        let scan_src_hint = if scan.donor_logic_scanned_paths.len() > 1 {
+            format!(
+                "Fase D: scan textual agregado em {} ficheiro(s) do doador: {}.",
+                scan.donor_logic_scanned_paths.len(),
+                scan.donor_logic_scanned_paths.join(", ")
+            )
+        } else {
+            "Fase D: scan textual limitado ao(s) ficheiro(s) listado(s) em external_source_refs.".into()
+        };
+        logic.logic_hints.push(scan_src_hint);
+        if scan.joy_read_detected {
+            logic.logic_hints.push(
+                "Fase D: padraio JOY_readJoypad/JOY_read reconhecido no agregado do doador; InputComponent materializado no sprite primario.".into(),
+            );
+        }
+        if scan.map_scroll_h_detected {
+            logic.logic_hints.push(
+                "Fase D: padraio MAP_scrollH reconhecido; scroll horizontal encadeado em scroll_tilemap.".into(),
+            );
+        }
+        if scan.map_scroll_v_detected {
+            logic.logic_hints.push(
+                "Fase D: padraio MAP_scrollV reconhecido; scroll vertical encadeado em scroll_tilemap.".into(),
+            );
+        }
+        if scan.busy_loop_detected {
+            logic.logic_hints.push(
+                "Fase D: laco infinito (while(1)/while(true/for(;;)) observado no agregado do doador — semantica tipica de loop de gameplay SGDK.".into(),
+            );
+        }
+        if scan.vblank_sync_detected {
+            logic.logic_hints.push(
+                "Fase D: sincronismo vertical (SYS_doVBlankProcess/VDP_waitVSync/VDP_waitDMACompletion) observado no agregado do doador.".into(),
+            );
+        }
+        if scan.spr_engine_detected {
+            logic.logic_hints.push(
+                "Fase D: API de sprites SGDK (SPR_addSprite/SPR_setPosition/SPR_update/SPR_init) observada — padrao plataforma/run-and-gun/shmup com update por frame.".into(),
+            );
+        }
+        if let Some(class) = scan.heuristic_gameplay_class() {
+            logic.logic_hints.push(format!(
+                "Fase D: heuristica de classe de gameplay (nao certificada): '{}'.",
+                class
+            ));
+        }
+        if !scan.joy_read_detected && !scan.map_scroll_any() {
+            logic.logic_hints.push(
+                "Fase D: nenhum padrao distintivo (JOY_* / MAP_scroll*) no agregado do doador; grafo base mantido.".into(),
+            );
+        }
+        if scan.primary_graph_materialization_class().is_some() {
+            logic.logic_hints.push(
+                "Fase D: heuristica de alta confianca — stencil extra (movimento + action_sound 'fire') materializado no grafo do sprite primario.".into(),
+            );
+        }
+        logic.logic_hints.push(
+            "Fase D: codigo SGDK original permanece em C externo; graph canônico nao e round-trip textual."
+                .into(),
+        );
+        logic.logic_hints.push(format!(
+            "Fase D: grafo desta entidade persistido em '{}' (reimport sobrescreve o mesmo ficheiro).",
+            graph_ref
+        ));
+        if scan.joy_read_detected {
+            entity.components.input = Some(InputComponent {
+                device: "joypad_1".into(),
+                mapping: HashMap::from([
+                    ("move_left".into(), "DPAD_LEFT".into()),
+                    ("move_right".into(), "DPAD_RIGHT".into()),
+                    ("jump".into(), "BUTTON_C".into()),
+                ]),
+            });
+        }
+    } else {
+        logic.logic_hints.push(
+            "Fase D: padroes globais de src/main.c estao detalhados no sprite primario e no ledger.phase_d; esta entidade partilha o mesmo scan textual.".into(),
+        );
+        logic.logic_hints.push(format!(
+            "Fase D: grafo desta entidade persistido em '{}'.",
+            graph_ref
+        ));
+        if secondary_local_spr {
+            if let Some(rel) = scan.entity_resource_spr_touch_rel(resource_name) {
+                logic.logic_hints.push(format!(
+                    "Fase D: linha SPR_* no doador ('{}') partilha identificador '{}' com este recurso — materializacao de stencil alinhada ao scan (nao e comportamento C original).",
+                    rel,
+                    sgdk_entity_id(resource_name)
+                ));
+            }
+        }
+    }
+    Ok(graph_ref)
+}
+
+/// Agrupamento canonico de camadas de editor para cenas importadas do SGDK.
+///
+/// A Fase B materializa apenas o que foi observado no doador: nao inventamos
+/// parallax/HUD quando nao ha sinal estrutural para isso. As camadas emitidas sao:
+/// - `background` (kind=`tile`): entidades com `TilemapComponent`
+/// - `gameplay` (kind=`sprite`): entidades com `SpriteComponent` + camera
+/// - `audio_objects` (kind=`object`): audio bank (opcional)
+fn derive_sgdk_scene_layers(
+    tilemap_entity_ids: &[String],
+    sprite_entity_ids: &[String],
+    camera_entity_ids: &[String],
+    audio_entity_ids: &[String],
+) -> Option<Vec<SceneLayer>> {
+    let mut layers: Vec<SceneLayer> = Vec::new();
+
+    if !tilemap_entity_ids.is_empty() {
+        layers.push(SceneLayer {
+            id: "layer_background".to_string(),
+            name: "Cenario / Background".to_string(),
+            kind: "tile".to_string(),
+            visible: true,
+            locked: false,
+            depth: 0,
+            entity_ids: tilemap_entity_ids.to_vec(),
+        });
+    }
+
+    if !sprite_entity_ids.is_empty() || !camera_entity_ids.is_empty() {
+        let mut entity_ids = Vec::with_capacity(sprite_entity_ids.len() + camera_entity_ids.len());
+        entity_ids.extend(sprite_entity_ids.iter().cloned());
+        entity_ids.extend(camera_entity_ids.iter().cloned());
+        layers.push(SceneLayer {
+            id: "layer_gameplay".to_string(),
+            name: "Gameplay".to_string(),
+            kind: "sprite".to_string(),
+            visible: true,
+            locked: false,
+            depth: 10,
+            entity_ids,
+        });
+    }
+
+    if !audio_entity_ids.is_empty() {
+        layers.push(SceneLayer {
+            id: "layer_audio_objects".to_string(),
+            name: "Audio".to_string(),
+            kind: "object".to_string(),
+            visible: true,
+            locked: true,
+            depth: 20,
+            entity_ids: audio_entity_ids.to_vec(),
+        });
+    }
+
+    if layers.is_empty() {
+        None
+    } else {
+        Some(layers)
+    }
 }
 
 pub fn seed_platformer_template(project_dir: &Path, donor_path: &Path) -> Result<Scene, LoadError> {
@@ -789,7 +1969,10 @@ pub fn seed_platformer_gm_template(
     Ok(scene)
 }
 
-pub fn import_sgdk_project(project_dir: &Path, sgdk_path: &Path) -> Result<Scene, LoadError> {
+pub fn import_sgdk_project(
+    project_dir: &Path,
+    sgdk_path: &Path,
+) -> Result<SgdkImportReport, LoadError> {
     validate_sgdk_project_path(sgdk_path)?;
     let resources = load_sgdk_resources(sgdk_path)?;
     import_sgdk_resources_into_scene(
@@ -853,29 +2036,137 @@ pub fn import_legacy_sgdk_project(
     Ok(overlay_dir)
 }
 
+struct SgdkTilemapMaterialization {
+    entity: Entity,
+    entity_id: String,
+    display_name: String,
+    cells_count: usize,
+    unique_tiles: u32,
+    had_cells: bool,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn build_sgdk_tilemap_entity(
+    resource: &SgdkResourceEntry,
+    destination: &str,
+    source_path: &Path,
+    fallbacks: &mut Vec<String>,
+) -> SgdkTilemapMaterialization {
+    let entity_id = format!("{}_tilemap", sgdk_entity_id(&resource.name));
+    let display_name = resource.name.clone();
+
+    let (map_width, map_height, cells, unique_tiles, had_cells) =
+        match extract_sgdk_tilemap_cells(source_path) {
+            Some(extracted) => (
+                extracted.map_width,
+                extracted.map_height,
+                extracted.cells,
+                extracted.unique_tiles,
+                true,
+            ),
+            None => {
+                let (mw, mh) = tilemap_dims_from_source(source_path);
+                fallbacks.push(format!(
+                    "tilemap '{}': cells[] vazio (PNG indisponivel, <8x8 ou totalmente transparente).",
+                    resource.name
+                ));
+                (mw, mh, Vec::new(), 0, false)
+            }
+        };
+    let cells_count = cells.len();
+
+    let entity = Entity {
+        entity_id: entity_id.clone(),
+        display_name: Some(display_name.clone()),
+        prefab: None,
+        transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+        components: Components {
+            tilemap: Some(TilemapComponent {
+                tileset: destination.to_string(),
+                map_width,
+                map_height,
+                scroll_x: 0,
+                scroll_y: 0,
+                cells,
+            }),
+            ..Components::default()
+        },
+    };
+
+    SgdkTilemapMaterialization {
+        entity,
+        entity_id,
+        display_name,
+        cells_count,
+        unique_tiles,
+        had_cells,
+    }
+}
+
+fn sgdk_scene_slug_from_display(display: &str) -> String {
+    let mut slug = String::new();
+    for ch in display.chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch.to_ascii_lowercase());
+        } else if ch == '_' || ch == '-' || ch == ' ' {
+            slug.push('_');
+        }
+    }
+    let trimmed = slug.trim_matches('_').to_string();
+    if trimmed.is_empty() {
+        "scene".to_string()
+    } else {
+        trimmed
+    }
+}
+
 fn import_sgdk_resources_into_scene(
     project_dir: &Path,
     sgdk_path: &Path,
     resources: &[SgdkResourceEntry],
     materialization: SgdkAssetMaterialization,
     scene_name: &str,
-) -> Result<Scene, LoadError> {
-    let mut scene = canonical_scene(DEFAULT_SCENE_ID, Some(scene_name.to_string()));
-    let mut imported_tilemaps = HashSet::new();
-    let mut audio_sfx = HashMap::new();
+) -> Result<SgdkImportReport, LoadError> {
+    let mut imported_tilemaps: HashSet<String> = HashSet::new();
+    let mut audio_sfx: HashMap<String, String> = HashMap::new();
     let mut audio_bgm: Option<String> = None;
     let mut first_sprite_id: Option<String> = None;
-    let mut tilemap_entities = Vec::new();
-    let mut sprite_entities = Vec::new();
+    let mut tilemap_slots: Vec<SgdkTilemapMaterialization> = Vec::new();
+    let mut sprite_entities: Vec<Entity> = Vec::new();
+
+    let mut skipped_sources: Vec<SgdkSkippedSource> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
+    let mut fallbacks: Vec<String> = Vec::new();
+    let mut mappings: Vec<SgdkImportMapping> = Vec::new();
 
     for resource in resources {
         let Some(destination) = sgdk_asset_destination(&resource.kind, &resource.asset_path) else {
+            let reason = match resource.kind.as_str() {
+                "VGM" => "ForbiddenFormat",
+                _ => "UnsupportedKind",
+            };
+            skipped_sources.push(SgdkSkippedSource {
+                source: format!("{} {}", resource.kind, resource.name),
+                reason: reason.to_string(),
+                detail: format!(
+                    "Recurso '{}' do tipo '{}' nao possui destino canonico no importador SGDK.",
+                    resource.name, resource.kind
+                ),
+            });
             continue;
         };
 
         let source_path = sgdk_resource_source_path(sgdk_path, &resource.asset_path);
         if !source_path.is_file() {
             if resource.kind == "VGM" {
+                skipped_sources.push(SgdkSkippedSource {
+                    source: format!("{} {}", resource.kind, resource.name),
+                    reason: "MissingAsset".to_string(),
+                    detail: format!(
+                        "Asset VGM '{}' nao foi localizado no doador; recurso ignorado.",
+                        source_path.display()
+                    ),
+                });
                 continue;
             }
             return Err(LoadError(format!(
@@ -891,26 +2182,40 @@ fn import_sgdk_resources_into_scene(
             materialization,
         )?;
 
+        let source_relative = source_path
+            .strip_prefix(sgdk_path)
+            .ok()
+            .map(normalize_relative_path)
+            .unwrap_or_else(|| source_path.display().to_string());
+
+        mappings.push(SgdkImportMapping {
+            resource_kind: resource.kind.clone(),
+            resource_name: resource.name.clone(),
+            source_relative,
+            destination: destination.clone(),
+        });
+
         match resource.kind.as_str() {
             "SPRITE" => {
-                let width_tiles = resource
-                    .params
-                    .first()
-                    .and_then(|value| value.parse::<u32>().ok())
-                    .unwrap_or(2);
-                let height_tiles = resource
-                    .params
-                    .get(1)
-                    .and_then(|value| value.parse::<u32>().ok())
-                    .unwrap_or(width_tiles);
                 let entity_id = sgdk_entity_id(&resource.name);
-                let is_primary_sprite = first_sprite_id.is_none();
                 if first_sprite_id.is_none() {
                     first_sprite_id = Some(entity_id.clone());
                 }
-                let frame_w = width_tiles.saturating_mul(8).max(8);
-                let frame_h = height_tiles.saturating_mul(8).max(8);
-                let is_meta = frame_w > 32 || frame_h > 32;
+                let derived = derive_sgdk_sprite_sheet_from_rescomp_png(
+                    &source_path,
+                    &resource.name,
+                    &resource.params,
+                );
+                for note in &derived.notes {
+                    fallbacks.push(note.clone());
+                }
+                if derived.animations.is_empty() {
+                    fallbacks.push(format!(
+                        "sprite '{}': animations vazias apos derivacao (parametros ou PNG incompativeis com rescomp SPRITE).",
+                        resource.name
+                    ));
+                }
+                let is_meta = derived.frame_width > 32 || derived.frame_height > 32;
                 sprite_entities.push(Entity {
                     entity_id,
                     display_name: Some(resource.name.clone()),
@@ -919,18 +2224,19 @@ fn import_sgdk_resources_into_scene(
                     components: Components {
                         sprite: Some(SpriteComponent {
                             asset: destination,
-                            frame_width: frame_w,
-                            frame_height: frame_h,
+                            frame_width: derived.frame_width,
+                            frame_height: derived.frame_height,
                             pivot: None,
                             palette_slot: 0,
-                            animations: HashMap::new(),
+                            animations: derived.animations,
                             priority: "foreground".to_string(),
                             meta_sprite: is_meta,
                         }),
-                        logic: is_primary_sprite.then(|| LogicComponent {
+                        logic: Some(LogicComponent {
                             graph: Some(imported_sprite_logic_graph(&resource.name)),
                             graph_ref: None,
                             logic_hints: Vec::new(),
+                            external_source_refs: Vec::new(),
                             variables: HashMap::new(),
                         }),
                         ..Components::default()
@@ -939,23 +2245,18 @@ fn import_sgdk_resources_into_scene(
             }
             "IMAGE" | "TILESET" | "TILEMAP" | "MAP" => {
                 if imported_tilemaps.insert(destination.clone()) {
-                    let (mw, mh) = tilemap_dims_from_source(&source_path);
-                    tilemap_entities.push(Entity {
-                        entity_id: format!("{}_tilemap", sgdk_entity_id(&resource.name)),
-                        display_name: Some(resource.name.clone()),
-                        prefab: None,
-                        transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
-                        components: Components {
-                            tilemap: Some(TilemapComponent {
-                                tileset: destination,
-                                map_width: mw,
-                                map_height: mh,
-                                scroll_x: 0,
-                                scroll_y: 0,
-                            }),
-                            ..Components::default()
-                        },
-                    });
+                    let slot = build_sgdk_tilemap_entity(
+                        resource,
+                        &destination,
+                        &source_path,
+                        &mut fallbacks,
+                    );
+                    tilemap_slots.push(slot);
+                } else {
+                    warnings.push(format!(
+                        "Tilemap '{}' reusa destino '{}' ja importado; entidade nao duplicada.",
+                        resource.name, destination
+                    ));
                 }
             }
             "WAV" | "PCM" => {
@@ -964,18 +2265,97 @@ fn import_sgdk_resources_into_scene(
             "XGM" | "XGM2" => {
                 if audio_bgm.is_none() {
                     audio_bgm = Some(destination);
+                } else {
+                    warnings.push(format!(
+                        "BGM '{}' ignorada: projeto ja possui trilha principal materializada.",
+                        resource.name
+                    ));
                 }
             }
-            _ => {}
+            other => {
+                warnings.push(format!(
+                    "Recurso SGDK '{}' de tipo '{}' materializado como asset generico.",
+                    resource.name, other
+                ));
+            }
         }
     }
 
-    scene.entities.extend(tilemap_entities);
-    scene.entities.extend(sprite_entities);
+    let donor_logic_scan = scan_sgdk_donor_logic_scan(sgdk_path);
+    let mut phase_d_ledger = SgdkImportLedgerPhaseD {
+        detected_main_c_token_groups: donor_logic_scan.ledger_token_groups(),
+        donor_logic_scanned_paths: donor_logic_scan.donor_logic_scanned_paths.clone(),
+        heuristic_gameplay_class: donor_logic_scan.heuristic_gameplay_class(),
+        logic_graph_refs: Vec::new(),
+        cross_unit_function_refs: donor_logic_scan.cross_unit_function_refs.clone(),
+        entity_spr_local_signal_hits: Vec::new(),
+    };
+    for ent in &sprite_entities {
+        let resource_name = ent
+            .display_name
+            .clone()
+            .unwrap_or_else(|| ent.entity_id.clone());
+        if let Some(rel) = donor_logic_scan.entity_resource_spr_touch_rel(&resource_name) {
+            let hit = format!("{}@{}", sgdk_entity_id(&resource_name), rel);
+            phase_d_ledger.entity_spr_local_signal_hits.push(hit);
+        }
+    }
+    phase_d_ledger
+        .entity_spr_local_signal_hits
+        .sort();
+    phase_d_ledger.entity_spr_local_signal_hits.dedup();
+    for (idx, ent) in sprite_entities.iter_mut().enumerate() {
+        let resource_name = ent
+            .display_name
+            .clone()
+            .unwrap_or_else(|| ent.entity_id.clone());
+        let secondary_local_spr =
+            idx != 0 && donor_logic_scan.entity_resource_spr_touch_rel(&resource_name).is_some();
+        let graph_ref = apply_sgdk_phase_d_to_sprite_entity(
+            project_dir,
+            ent,
+            &resource_name,
+            &donor_logic_scan,
+            idx == 0,
+            secondary_local_spr,
+        )?;
+        if !graph_ref.is_empty() {
+            phase_d_ledger.logic_graph_refs.push(graph_ref);
+        }
+    }
+    phase_d_ledger.logic_graph_refs.sort();
+    phase_d_ledger.logic_graph_refs.dedup();
+
+    // -- cena primaria: primeiro tilemap + todos os sprites + audio + camera
+    let mut primary_scene = canonical_scene(DEFAULT_SCENE_ID, Some(scene_name.to_string()));
+    let mut primary_tilemap_ids: Vec<String> = Vec::new();
+    let mut primary_sprite_ids: Vec<String> = Vec::new();
+    let mut primary_camera_ids: Vec<String> = Vec::new();
+    let mut primary_audio_ids: Vec<String> = Vec::new();
+
+    let mut tilemap_iter = tilemap_slots.into_iter();
+    let primary_tilemap = tilemap_iter.next();
+    let extra_tilemaps: Vec<SgdkTilemapMaterialization> = tilemap_iter.collect();
+
+    let primary_tilemap_stats = primary_tilemap
+        .as_ref()
+        .map(|slot| (slot.cells_count, slot.unique_tiles, slot.had_cells));
+
+    if let Some(slot) = primary_tilemap {
+        primary_tilemap_ids.push(slot.entity_id.clone());
+        primary_scene.entities.push(slot.entity);
+    }
+
+    for entity in sprite_entities.drain(..) {
+        primary_sprite_ids.push(entity.entity_id.clone());
+        primary_scene.entities.push(entity);
+    }
 
     if !audio_sfx.is_empty() || audio_bgm.is_some() {
-        scene.entities.push(Entity {
-            entity_id: "audio_bank".to_string(),
+        let audio_id = "audio_bank".to_string();
+        primary_audio_ids.push(audio_id.clone());
+        primary_scene.entities.push(Entity {
+            entity_id: audio_id,
             display_name: Some("Audio Bank".to_string()),
             prefab: None,
             transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
@@ -989,9 +2369,11 @@ fn import_sgdk_resources_into_scene(
         });
     }
 
-    if let Some(follow_entity) = first_sprite_id {
-        scene.entities.push(Entity {
-            entity_id: "main_camera".to_string(),
+    if let Some(follow_entity) = first_sprite_id.clone() {
+        let camera_id = "main_camera".to_string();
+        primary_camera_ids.push(camera_id.clone());
+        primary_scene.entities.push(Entity {
+            entity_id: camera_id,
             display_name: Some("Main Camera".to_string()),
             prefab: None,
             transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
@@ -1006,8 +2388,350 @@ fn import_sgdk_resources_into_scene(
         });
     }
 
-    save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
-    Ok(scene)
+    primary_scene.layers = derive_sgdk_scene_layers(
+        &primary_tilemap_ids,
+        &primary_sprite_ids,
+        &primary_camera_ids,
+        &primary_audio_ids,
+    );
+
+    let mut phase_c_ledger = SgdkImportLedgerPhaseC::default();
+    if let Some(tid) = primary_tilemap_ids.first() {
+        if let Some(ent) = primary_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == *tid)
+        {
+            if let Some(tm) = ent.components.tilemap.as_ref() {
+                if tm.cells.is_empty() {
+                    fallbacks.push(
+                        "Fase C: collision_map nao derivado (tilemap primario com cells[] vazio)."
+                            .into(),
+                    );
+                } else if let Some((cmap, note)) = derive_sgdk_scene_collision_map_from_tile_cells(
+                    &tm.cells,
+                    tm.map_width,
+                    tm.map_height,
+                ) {
+                    phase_c_ledger.collision_derivation_rule = Some("nonzero_tile_index".into());
+                    phase_c_ledger.primary_collision_solid_cells = Some(
+                        cmap.data.iter().filter(|&&value| value != 0).count() as u64,
+                    );
+                    primary_scene.collision_map = Some(cmap);
+                    fallbacks.push(note);
+                }
+            }
+        }
+    } else {
+        fallbacks.push(
+            "Fase C: collision_map nao derivado (cena primaria sem tilemap anchor)."
+                .into(),
+        );
+    }
+
+    if let Some(sid) = primary_sprite_ids.first() {
+        if let Some(ent) = primary_scene
+            .entities
+            .iter()
+            .find(|entity| &entity.entity_id == sid)
+        {
+            if let Some(sprite) = ent.components.sprite.as_ref() {
+                phase_c_ledger.primary_sprite_animation_rows = Some(sprite.animations.len() as u32);
+                phase_c_ledger.primary_sprite_animation_names =
+                    sprite.animations.keys().cloned().collect();
+            }
+        }
+    }
+
+    save_scene(project_dir, DEFAULT_ENTRY_SCENE, &primary_scene)?;
+
+    // -- cenas adicionais: cada tilemap anchor extra vira sua propria cena canonica
+    let mut additional_scene_descriptors: Vec<SgdkImportedSceneDescriptor> = Vec::new();
+    let mut additional_ledger_entries: Vec<SgdkImportLedgerScene> = Vec::new();
+    let mut used_slugs: HashSet<String> = HashSet::new();
+    used_slugs.insert(DEFAULT_SCENE_ID.to_string());
+
+    for slot in extra_tilemaps {
+        let base_slug = sgdk_scene_slug_from_display(&slot.display_name);
+        let mut scene_id = base_slug.clone();
+        let mut disambiguator = 2u32;
+        while !used_slugs.insert(scene_id.clone()) {
+            scene_id = format!("{}_{}", base_slug, disambiguator);
+            disambiguator += 1;
+        }
+        let scene_path = format!("scenes/{}.json", scene_id);
+        let mut extra_scene = canonical_scene(
+            &scene_id,
+            Some(format!("{} (SGDK)", slot.display_name)),
+        );
+        let tilemap_ids = vec![slot.entity_id.clone()];
+        let extra_collision = slot.entity.components.tilemap.as_ref().and_then(|tm| {
+            if tm.cells.is_empty() {
+                None
+            } else {
+                derive_sgdk_scene_collision_map_from_tile_cells(&tm.cells, tm.map_width, tm.map_height)
+            }
+        });
+        extra_scene.entities.push(slot.entity);
+        if let Some((cmap, note)) = extra_collision {
+            extra_scene.collision_map = Some(cmap);
+            fallbacks.push(format!("Fase C [{}]: {}", scene_id, note));
+        }
+        extra_scene.layers =
+            derive_sgdk_scene_layers(&tilemap_ids, &[], &[], &[]);
+        save_scene(project_dir, &scene_path, &extra_scene)?;
+
+        let descriptor = SgdkImportedSceneDescriptor {
+            scene_id: scene_id.clone(),
+            display_name: slot.display_name.clone(),
+            scene_path: scene_path.clone(),
+            entity_count: extra_scene.entities.len(),
+            tilemap_cells: slot.cells_count,
+            tilemap_unique_tiles: slot.unique_tiles,
+        };
+        additional_ledger_entries.push(SgdkImportLedgerScene {
+            scene_id,
+            display_name: slot.display_name,
+            scene_path,
+            role: "secondary_tilemap".to_string(),
+            entity_count: extra_scene.entities.len(),
+            tilemap_cells: slot.cells_count,
+            tilemap_unique_tiles: slot.unique_tiles,
+        });
+        additional_scene_descriptors.push(descriptor);
+    }
+
+    let manifest_paths = find_sgdk_manifest_paths(sgdk_path).unwrap_or_default();
+    let manifests_relative: Vec<String> = manifest_paths
+        .iter()
+        .map(|path| {
+            path.strip_prefix(sgdk_path)
+                .ok()
+                .map(normalize_relative_path)
+                .unwrap_or_else(|| path.display().to_string())
+        })
+        .collect();
+    let fingerprint = compute_sgdk_donor_fingerprint(sgdk_path, &manifest_paths);
+    let resources_total = resources.len();
+    let resources_accepted = mappings.len();
+    let resources_skipped = skipped_sources.len();
+
+    let source_summary = SgdkSourceSummary {
+        donor_root: sgdk_path.to_string_lossy().to_string(),
+        manifests: manifests_relative.clone(),
+        resources_total,
+        resources_accepted,
+        resources_skipped,
+        fingerprint: fingerprint.clone(),
+    };
+
+    let primary_cells_count = primary_tilemap_stats.map(|(count, _, _)| count).unwrap_or(0);
+    let primary_unique_tiles = primary_tilemap_stats
+        .map(|(_, unique, _)| unique)
+        .unwrap_or(0);
+    let primary_had_cells = primary_tilemap_stats
+        .map(|(_, _, had)| had)
+        .unwrap_or(false);
+    if primary_had_cells {
+        // emitido apenas como nota informativa em warnings? Nao — sucesso fica implicito.
+    }
+
+    let primary_ledger_entry = SgdkImportLedgerScene {
+        scene_id: primary_scene.scene_id.clone(),
+        display_name: primary_scene
+            .display_name
+            .clone()
+            .unwrap_or_else(|| scene_name.to_string()),
+        scene_path: DEFAULT_ENTRY_SCENE.to_string(),
+        role: "primary".to_string(),
+        entity_count: primary_scene.entities.len(),
+        tilemap_cells: primary_cells_count,
+        tilemap_unique_tiles: primary_unique_tiles,
+    };
+    let mut ledger_scenes: Vec<SgdkImportLedgerScene> = Vec::with_capacity(1 + additional_ledger_entries.len());
+    ledger_scenes.push(primary_ledger_entry);
+    ledger_scenes.extend(additional_ledger_entries);
+
+    let manifest_path = write_sgdk_import_ledger(
+        project_dir,
+        sgdk_path,
+        &primary_scene.scene_id,
+        &fingerprint,
+        &manifests_relative,
+        &mappings,
+        &skipped_sources,
+        &warnings,
+        &fallbacks,
+        &ledger_scenes,
+        &phase_c_ledger,
+        &phase_d_ledger,
+    )?;
+
+    let imported_scenes = 1 + additional_scene_descriptors.len();
+
+    Ok(SgdkImportReport {
+        primary_scene,
+        imported_scenes,
+        skipped_sources,
+        warnings,
+        fallbacks,
+        source_summary,
+        manifest_path: Some(manifest_path),
+        primary_scene_path: DEFAULT_ENTRY_SCENE.to_string(),
+        additional_scenes: additional_scene_descriptors,
+    })
+}
+
+fn sgdk_donor_slug(donor_path: &Path) -> String {
+    let raw = donor_path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "donor".to_string());
+    let mut slug = String::new();
+    for character in raw.chars() {
+        if character.is_ascii_alphanumeric() {
+            slug.push(character.to_ascii_lowercase());
+        } else {
+            slug.push('_');
+        }
+    }
+    let trimmed = slug.trim_matches('_').to_string();
+    if trimmed.is_empty() {
+        "donor".to_string()
+    } else {
+        trimmed
+    }
+}
+
+fn compute_sgdk_donor_fingerprint(donor_path: &Path, manifest_paths: &[PathBuf]) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+
+    let mut entries: Vec<(String, u64, u128)> = Vec::new();
+    for path in manifest_paths {
+        let rel = path
+            .strip_prefix(donor_path)
+            .ok()
+            .map(normalize_relative_path)
+            .unwrap_or_else(|| path.display().to_string());
+        let (size, mtime_ms) = match fs::metadata(path) {
+            Ok(metadata) => {
+                let size = metadata.len();
+                let mtime = metadata
+                    .modified()
+                    .ok()
+                    .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                    .map(|duration| duration.as_millis())
+                    .unwrap_or(0);
+                (size, mtime)
+            }
+            Err(_) => (0, 0),
+        };
+        entries.push((rel, size, mtime_ms));
+    }
+    entries.sort();
+
+    for (rel, size, mtime_ms) in entries {
+        rel.hash(&mut hasher);
+        size.hash(&mut hasher);
+        mtime_ms.hash(&mut hasher);
+    }
+
+    format!("{:016x}", hasher.finish())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_sgdk_import_ledger(
+    project_dir: &Path,
+    donor_path: &Path,
+    scene_id: &str,
+    fingerprint: &str,
+    manifests: &[String],
+    mappings: &[SgdkImportMapping],
+    skipped_sources: &[SgdkSkippedSource],
+    warnings: &[String],
+    fallbacks: &[String],
+    scenes: &[SgdkImportLedgerScene],
+    phase_c: &SgdkImportLedgerPhaseC,
+    phase_d: &SgdkImportLedgerPhaseD,
+) -> Result<String, LoadError> {
+    let ledger_dir = project_dir.join(SGDK_IMPORT_LEDGER_DIR);
+    fs::create_dir_all(&ledger_dir).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel criar diretorio de ledger SGDK '{}': {}",
+            ledger_dir.display(),
+            error
+        ))
+    })?;
+
+    let donor_basename = donor_path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| "donor".to_string());
+    let slug = sgdk_donor_slug(donor_path);
+    let file_name = format!("{}.json", slug);
+    let ledger_path = ledger_dir.join(&file_name);
+    let relative = format!("{}/{}", SGDK_IMPORT_LEDGER_DIR, file_name);
+
+    let now_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
+
+    let mut history: Vec<SgdkImportLedgerHistoryEntry> = Vec::new();
+    if ledger_path.is_file() {
+        if let Ok(existing) = fs::read_to_string(&ledger_path) {
+            if let Ok(prev) = serde_json::from_str::<SgdkImportLedger>(&existing) {
+                history = prev.history.clone();
+                // Preserva a fotografia anterior se o fingerprint mudou.
+                if prev.fingerprint != fingerprint
+                    && !history
+                        .iter()
+                        .any(|entry| entry.fingerprint == prev.fingerprint)
+                {
+                    history.push(SgdkImportLedgerHistoryEntry {
+                        timestamp_unix: prev.last_imported_at_unix,
+                        fingerprint: prev.fingerprint.clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    let ledger = SgdkImportLedger {
+        schema_version: SGDK_IMPORT_LEDGER_SCHEMA.to_string(),
+        scene_id: scene_id.to_string(),
+        donor_root: donor_path.to_string_lossy().to_string(),
+        donor_basename,
+        fingerprint: fingerprint.to_string(),
+        last_imported_at_unix: now_unix,
+        manifests: manifests.to_vec(),
+        mappings: mappings.to_vec(),
+        skipped_sources: skipped_sources.to_vec(),
+        warnings: warnings.to_vec(),
+        fallbacks: fallbacks.to_vec(),
+        history,
+        scenes: scenes.to_vec(),
+        phase_c: phase_c.clone(),
+        phase_d: phase_d.clone(),
+    };
+
+    let serialized = serde_json::to_string_pretty(&ledger).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel serializar ledger SGDK '{}': {}",
+            ledger_path.display(),
+            error
+        ))
+    })?;
+    fs::write(&ledger_path, serialized).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel salvar ledger SGDK '{}': {}",
+            ledger_path.display(),
+            error
+        ))
+    })?;
+
+    Ok(relative)
 }
 
 fn materialize_sgdk_asset(
@@ -1718,6 +3442,7 @@ fn platformer_player_prefab_with_dims(
                 graph: None,
                 graph_ref: Some("graphs/platformer_player_logic.json".to_string()),
                 logic_hints: Vec::new(),
+                external_source_refs: Vec::new(),
                 variables: HashMap::new(),
             }),
             ..Components::default()
@@ -1755,6 +3480,7 @@ fn platformer_tilemap_prefab_with_dims(map_width: u32, map_height: u32) -> Entit
                 map_height,
                 scroll_x: 0,
                 scroll_y: 0,
+                cells: Vec::new(),
             }),
             ..Components::default()
         },
@@ -3716,10 +5442,16 @@ pub fn import_external_project(
     }
 
     match profile.id {
-        "sgdk" => import_sgdk_project(project_dir, source_path).map(|scene| ExternalImportReport {
-            primary_scene: scene,
-            imported_scenes: 1,
-            skipped_sources: Vec::new(),
+        "sgdk" => import_sgdk_project(project_dir, source_path).map(|report| ExternalImportReport {
+            primary_scene: report.primary_scene,
+            imported_scenes: report.imported_scenes,
+            skipped_sources: report
+                .skipped_sources
+                .into_iter()
+                .map(|skipped| {
+                    format!("[{}] {}: {}", skipped.reason, skipped.source, skipped.detail)
+                })
+                .collect(),
         }),
         "mugen" | "ikemen_go" => {
             let report = import_mugen_project(project_dir, source_path)?;
@@ -5794,6 +7526,7 @@ fn imported_logic_component(graph: Option<String>, logic_hints: Vec<String>) -> 
         graph,
         graph_ref: None,
         logic_hints,
+        external_source_refs: Vec::new(),
         variables: HashMap::new(),
     }
 }
@@ -5880,6 +7613,7 @@ fn imported_tilemap_entity(
                 map_height,
                 scroll_x: 0,
                 scroll_y: 0,
+                cells: Vec::new(),
             }),
             ..Components::default()
         },
@@ -6498,6 +8232,7 @@ fn starter_scene(scene_id: &str, display_name: String, _target: &str) -> Scene {
                 graph: Some(logic_graph),
                 graph_ref: None,
                 logic_hints: Vec::new(),
+                external_source_refs: Vec::new(),
                 variables: HashMap::new(),
             }),
             ..Components::default()
@@ -7768,9 +9503,24 @@ mod tests {
         fs::create_dir_all(dir.join("inc")).expect("create donor inc dir");
         fs::create_dir_all(dir.join("boot")).expect("create donor boot dir");
 
-        image::RgbaImage::from_pixel(32, 32, image::Rgba([0, 220, 120, 255]))
+        let mut hero_sheet = image::RgbaImage::new(64, 16);
+        for frame in 0u32..4 {
+            let r = 40 + frame * 45;
+            let g = 120 - frame * 20;
+            let b = 200u32;
+            for y in 0u32..16 {
+                for x in 0u32..16 {
+                    hero_sheet.put_pixel(
+                        frame * 16 + x,
+                        y,
+                        image::Rgba([r as u8, g as u8, b as u8, 255]),
+                    );
+                }
+            }
+        }
+        hero_sheet
             .save(dir.join("res").join("images").join("hero.png"))
-            .expect("write hero sprite");
+            .expect("write hero sprite sheet");
         image::RgbaImage::from_pixel(128, 128, image::Rgba([32, 64, 180, 255]))
             .save(dir.join("res").join("maps").join("stage.png"))
             .expect("write stage image");
@@ -7785,10 +9535,14 @@ mod tests {
             b"vgm-data",
         )
         .expect("write vgm");
+        image::RgbaImage::from_pixel(16, 16, image::Rgba([200, 50, 50, 255]))
+            .save(dir.join("res").join("images").join("foe.png"))
+            .expect("write foe sprite");
         fs::write(
             dir.join("res").join("resources.res"),
             [
-                "SPRITE hero images/hero.png 4 4 FAST 0",
+                "SPRITE hero images/hero.png 2 2 FAST 5",
+                "SPRITE foe images/foe.png 2 2 NONE 4",
                 "IMAGE stage maps/stage.png NONE",
                 "WAV jump sound/jump.wav 22050",
                 "XGM theme sound/theme.xgm",
@@ -7798,10 +9552,70 @@ mod tests {
         )
         .expect("write resources.res");
         fs::write(dir.join("out").join("rom.bin"), b"forbidden-rom").expect("write rom");
-        fs::write(dir.join("src").join("main.c"), b"int main(void){return 0;}")
-            .expect("write main");
+        fs::write(
+            dir.join("src").join("main.c"),
+            b"#include <genesis.h>\nint main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n        MAP_scrollH(BG_B, 1);\n        SPR_update();\n        SYS_doVBlankProcess();\n    }\n    return 0;\n}\n",
+        )
+        .expect("write main");
         fs::write(dir.join("inc").join("game.h"), b"void game(void);").expect("write header");
         fs::write(dir.join("boot").join("startup.s"), b"boot").expect("write boot");
+    }
+
+    /// Doador com `main.c` + `player_control.c`: sinais run-and-gun repartidos (MAP_scrollH no main; JOY/SPR_* no .c satelite).
+    fn write_sgdk_multifile_run_and_gun_donor(dir: &Path) {
+        write_generic_sgdk_donor_fixture(dir);
+        fs::write(
+            dir.join("src").join("main.c"),
+            b"#include <genesis.h>\n#include \"player_control.h\"\n\
+int main(void) {\n    while (1) {\n        MAP_scrollH(BG_B, 1);\n        player_tick();\n        SYS_doVBlankProcess();\n    }\n    return 0;\n}\n",
+        )
+        .expect("write main multifile rg");
+        fs::write(
+            dir.join("src").join("player_control.h"),
+            b"#ifndef PLAYER_CONTROL_H\n#define PLAYER_CONTROL_H\nvoid player_tick(void);\n#endif\n",
+        )
+        .expect("player_control.h");
+        fs::write(
+            dir.join("src").join("player_control.c"),
+            b"#include <genesis.h>\n#include \"player_control.h\"\n\
+void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n    /* Fixture RDS: SPR_* na mesma linha que identificador do recurso secundario 'foe'. */\n\
+    (void)SPR_addSprite(&foe_palette, &foe, 32, 32, TILE_ATTR(PAL0, 0, FALSE, FALSE));\n\
+    SPR_update();\n}\n",
+        )
+        .expect("player_control.c");
+    }
+
+    /// Doador com scroll vertical no main e entrada/tiro em ficheiros incluidos (shmup vertical).
+    fn write_sgdk_multifile_shmup_donor(dir: &Path) {
+        write_generic_sgdk_donor_fixture(dir);
+        fs::write(
+            dir.join("src").join("main.c"),
+            b"#include <genesis.h>\n#include \"input_sys.h\"\n#include \"weapons.h\"\n\
+int main(void) {\n    SPR_init();\n    while (1) {\n        MAP_scrollV(BG_A, 1);\n        input_poll();\n        weapons_tick();\n        SYS_doVBlankProcess();\n    }\n    return 0;\n}\n",
+        )
+        .expect("write main shmup");
+        fs::write(
+            dir.join("src").join("input_sys.h"),
+            b"#ifndef INPUT_SYS_H\n#define INPUT_SYS_H\nvoid input_poll(void);\n#endif\n",
+        )
+        .expect("input_sys.h");
+        fs::write(
+            dir.join("src").join("input_sys.c"),
+            b"#include <genesis.h>\n#include \"input_sys.h\"\n\
+void input_poll(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n}\n",
+        )
+        .expect("input_sys.c");
+        fs::write(
+            dir.join("src").join("weapons.h"),
+            b"#ifndef WEAPONS_H\n#define WEAPONS_H\nvoid weapons_tick(void);\n#endif\n",
+        )
+        .expect("weapons.h");
+        fs::write(
+            dir.join("src").join("weapons.c"),
+            b"#include <genesis.h>\n#include \"weapons.h\"\n\
+void weapons_tick(void) {\n    SPR_addSprite(&spr_shot, FIX16(10), FIX16(20), TILE_ATTR(PAL0, 0, 0, 0));\n}\n",
+        )
+        .expect("weapons.c");
     }
 
     fn read_legacy_index(overlay_dir: &Path) -> LegacySgdkIndex {
@@ -8251,6 +10065,7 @@ mod tests {
                         graph: None,
                         graph_ref: Some("graphs/player_logic.json".to_string()),
                         logic_hints: Vec::new(),
+                        external_source_refs: Vec::new(),
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -8295,6 +10110,7 @@ mod tests {
                         graph: Some("{\"stale\":true}".to_string()),
                         graph_ref: Some("graphs/player_logic.json".to_string()),
                         logic_hints: Vec::new(),
+                        external_source_refs: Vec::new(),
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -8316,6 +10132,7 @@ mod tests {
                         graph: Some(platformer_logic_graph()),
                         graph_ref: Some("graphs/player_logic.json".to_string()),
                         logic_hints: Vec::new(),
+                        external_source_refs: Vec::new(),
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -8380,12 +10197,19 @@ mod tests {
             .expect("create project skeleton");
         write_generic_sgdk_donor_fixture(&donor_dir);
 
-        let scene = import_sgdk_project(&project_dir, &donor_dir).expect("import sgdk project");
+        let report =
+            import_sgdk_project(&project_dir, &donor_dir).expect("import sgdk project");
+        let scene = &report.primary_scene;
 
         assert!(project_dir
             .join("assets")
             .join("sprites")
             .join("hero.png")
+            .is_file());
+        assert!(project_dir
+            .join("assets")
+            .join("sprites")
+            .join("foe.png")
             .is_file());
         assert!(project_dir
             .join("assets")
@@ -8410,7 +10234,8 @@ mod tests {
         assert!(!project_dir.join("src").exists());
         assert!(!project_dir.join("inc").exists());
         assert!(!project_dir.join("out").exists());
-        assert_eq!(scene.entities.len(), 4);
+        assert_eq!(report.imported_scenes, 1);
+        assert_eq!(scene.entities.len(), 5);
         assert!(scene.entities.iter().any(|entity| entity
             .components
             .sprite
@@ -8438,12 +10263,23 @@ mod tests {
             .iter()
             .find(|entity| entity.entity_id == "hero")
             .expect("primary sprite");
-        assert!(primary_sprite
-            .components
-            .logic
-            .as_ref()
-            .and_then(|logic| logic.graph.as_deref())
-            .is_some_and(|graph| graph.contains("\"event_start\"")));
+        assert_eq!(
+            primary_sprite.components.logic.as_ref().and_then(|l| l.graph_ref.as_deref()),
+            Some("graphs/sgdk_import_hero.json")
+        );
+        let hero_graph = fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
+            .expect("hero graph file");
+        assert!(hero_graph.contains("\"event_start\""));
+        let foe = scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "foe")
+            .expect("foe sprite");
+        assert_eq!(
+            foe.components.logic.as_ref().and_then(|l| l.graph_ref.as_deref()),
+            Some("graphs/sgdk_import_foe.json")
+        );
+        assert!(project_dir.join("graphs").join("sgdk_import_foe.json").is_file());
 
         let _ = fs::remove_dir_all(donor_dir);
         let _ = fs::remove_dir_all(project_dir);
@@ -8458,8 +10294,9 @@ mod tests {
         write_split_sgdk_donor_fixture(&donor_dir);
 
         validate_sgdk_project_path(&donor_dir).expect("validate split sgdk donor");
-        let scene =
+        let report =
             import_sgdk_project(&project_dir, &donor_dir).expect("import split sgdk project");
+        let scene = &report.primary_scene;
 
         assert!(project_dir
             .join("assets")
@@ -8505,12 +10342,13 @@ mod tests {
             .iter()
             .find(|entity| entity.entity_id == "hero")
             .expect("imported hero");
-        assert!(hero
-            .components
-            .logic
-            .as_ref()
-            .and_then(|logic| logic.graph.as_deref())
-            .is_some_and(|graph| graph.contains("\"sprite_move\"")));
+        assert_eq!(
+            hero.components.logic.as_ref().and_then(|l| l.graph_ref.as_deref()),
+            Some("graphs/sgdk_import_hero.json")
+        );
+        let hero_graph = fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
+            .expect("hero graph");
+        assert!(hero_graph.contains("\"sprite_move\""));
         assert!(scene.entities.iter().any(|entity| {
             entity
                 .components
@@ -8518,6 +10356,430 @@ mod tests {
                 .as_ref()
                 .is_some_and(|audio| audio.bgm.as_deref() == Some("assets/audio/theme.xgm2"))
         }));
+
+        let _ = fs::remove_dir_all(donor_dir);
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn import_sgdk_project_report_exposes_rich_fields_and_persists_ledger() {
+        let donor_dir = temp_dir("sgdk-report-donor");
+        let project_dir = temp_dir("sgdk-report-project");
+        create_project_skeleton(&project_dir, "SGDK Report", "megadrive")
+            .expect("create project skeleton");
+        write_generic_sgdk_donor_fixture(&donor_dir);
+
+        let report =
+            import_sgdk_project(&project_dir, &donor_dir).expect("import sgdk report");
+
+        // Relatorio rico: primary_scene + contagens + sumario com fingerprint.
+        assert_eq!(report.imported_scenes, 1);
+        assert!(!report.source_summary.fingerprint.is_empty());
+        assert_eq!(
+            report.source_summary.donor_root,
+            donor_dir.to_string_lossy().to_string()
+        );
+        assert!(report.source_summary.resources_total >= 6);
+        assert!(report.source_summary.resources_accepted >= 5);
+        assert_eq!(
+            report.source_summary.resources_skipped,
+            report.skipped_sources.len()
+        );
+
+        // VGM aparece como skipped explicito rastreavel.
+        assert!(
+            report
+                .skipped_sources
+                .iter()
+                .any(|skipped| skipped.reason == "ForbiddenFormat"
+                    && skipped.source.contains("VGM")),
+            "skipped_sources deve conter VGM como ForbiddenFormat: {:?}",
+            report.skipped_sources
+        );
+
+        // Fase B: tilemap de 128x128 px reconstroi cells[] via deduplicacao 8x8.
+        let primary_tilemap = report
+            .primary_scene
+            .entities
+            .iter()
+            .find_map(|entity| entity.components.tilemap.as_ref())
+            .expect("cena primaria deve ter tilemap");
+        assert!(
+            !primary_tilemap.cells.is_empty(),
+            "Fase B: cells[] do tilemap primario deve ser populado: {:?}",
+            primary_tilemap.cells.len()
+        );
+        assert_eq!(
+            primary_tilemap.cells.len() as u32,
+            primary_tilemap.map_width * primary_tilemap.map_height,
+            "cells[] deve ter map_width * map_height entradas"
+        );
+        // Fase B: nenhum fallback 'cells[] vazio' quando reconstrucao teve sucesso.
+        assert!(
+            !report
+                .fallbacks
+                .iter()
+                .any(|fallback| fallback.contains("cells[] vazio")),
+            "Fase B: fallback 'cells[] vazio' so deve aparecer quando reconstrucao falha, nao para PNG 128x128 valido: {:?}",
+            report.fallbacks
+        );
+        // Fase C: sprite com folha 64x16 e frame 16x16 deve materializar animacao `default`.
+        let hero = report
+            .primary_scene
+            .entities
+            .iter()
+            .find(|e| e.entity_id == "hero")
+            .expect("hero entity");
+        let sprite = hero.components.sprite.as_ref().expect("sprite");
+        assert!(
+            sprite.animations.contains_key("default"),
+            "animacao default esperada: {:?}",
+            sprite.animations.keys().collect::<Vec<_>>()
+        );
+        assert_eq!(sprite.frame_width, 16);
+        assert_eq!(sprite.frame_height, 16);
+        // Fase C: collision_map na cena primaria a partir de cells[].
+        let cmap = report
+            .primary_scene
+            .collision_map
+            .as_ref()
+            .expect("collision_map derivado do tilemap");
+        assert_eq!(cmap.width, primary_tilemap.map_width);
+        assert_eq!(cmap.height, primary_tilemap.map_height);
+        assert!(cmap.data.iter().any(|v| *v != 0));
+        // Fase D: padraio JOY + MAP_scroll no main.c -> input + hints + external ref.
+        let logic = hero.components.logic.as_ref().expect("logic");
+        assert!(
+            logic.external_source_refs.iter().any(|r| r.contains("main.c")),
+            "external_source_refs: {:?}",
+            logic.external_source_refs
+        );
+        assert!(hero.components.input.is_some());
+        assert!(
+            logic
+                .logic_hints
+                .iter()
+                .any(|h| h.contains("JOY_readJoypad") || h.contains("JOY_read")),
+            "hints Fase D: {:?}",
+            logic.logic_hints
+        );
+        assert_eq!(
+            logic.graph_ref.as_deref(),
+            Some("graphs/sgdk_import_hero.json"),
+            "Fase D deve materializar graph_ref canônico por entidade"
+        );
+        assert!(
+            logic.graph.is_none(),
+            "grafo inline deve ficar vazio quando externalizado em graph_ref"
+        );
+        let disk_graph = fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
+            .expect("ler graphs/sgdk_import_hero.json");
+        assert!(
+            disk_graph.contains("scroll_tilemap"),
+            "grafo em disco deve encadear scroll_tilemap quando MAP_scroll* detectado"
+        );
+        assert!(
+            disk_graph.contains("action_sound") && disk_graph.contains("fire_hint"),
+            "run-and-gun de alta confianca deve materializar stencil de disparo (action_sound): {}",
+            disk_graph
+        );
+        assert!(
+            logic.logic_hints.iter().any(|h| h.contains("laco infinito") || h.contains("while(1)")),
+            "hints devem mencionar loop de gameplay observado: {:?}",
+            logic.logic_hints
+        );
+        assert!(
+            logic.logic_hints.iter().any(|h| h.contains("SPR_")),
+            "hints devem mencionar API SPR_*: {:?}",
+            logic.logic_hints
+        );
+        // Fase B: SceneLayer coerentes derivadas das entidades presentes.
+        let layers = report
+            .primary_scene
+            .layers
+            .as_ref()
+            .expect("cena primaria deve ter layers canonicos");
+        assert!(
+            layers.iter().any(|l| l.kind == "tile"),
+            "layer de background/tile esperado: {:?}",
+            layers
+        );
+        assert!(
+            layers.iter().any(|l| l.kind == "sprite"),
+            "layer de gameplay/sprite esperado: {:?}",
+            layers
+        );
+
+        // Manifesto persistido em .rds/imports/sgdk/<slug>.json.
+        let manifest_rel = report
+            .manifest_path
+            .as_deref()
+            .expect("manifest_path presente no relatorio");
+        assert!(manifest_rel.starts_with(".rds/imports/sgdk/"));
+        let manifest_abs = project_dir.join(manifest_rel);
+        assert!(
+            manifest_abs.is_file(),
+            "ledger SGDK deve existir em disco: {}",
+            manifest_abs.display()
+        );
+
+        let raw = fs::read_to_string(&manifest_abs).expect("read ledger");
+        let ledger: SgdkImportLedger =
+            serde_json::from_str(&raw).expect("parse ledger json");
+        assert_eq!(ledger.schema_version, SGDK_IMPORT_LEDGER_SCHEMA);
+        assert_eq!(ledger.fingerprint, report.source_summary.fingerprint);
+        assert_eq!(ledger.scene_id, report.primary_scene.scene_id);
+        assert!(!ledger.mappings.is_empty());
+        assert!(ledger
+            .mappings
+            .iter()
+            .any(|mapping| mapping.destination == "assets/sprites/hero.png"));
+        assert!(ledger
+            .mappings
+            .iter()
+            .any(|mapping| mapping.destination == "assets/sprites/foe.png"));
+        assert!(ledger
+            .mappings
+            .iter()
+            .any(|mapping| mapping.resource_kind == "XGM"
+                || mapping.resource_kind == "XGM2"));
+        assert!(
+            ledger
+                .skipped_sources
+                .iter()
+                .any(|skipped| skipped.reason == "ForbiddenFormat"),
+            "ledger deve preservar skipped_sources"
+        );
+        assert!(ledger.history.is_empty());
+        assert!(ledger.phase_d.detected_main_c_token_groups.contains(&"joy_read".to_string()));
+        assert!(ledger
+            .phase_d
+            .logic_graph_refs
+            .contains(&"graphs/sgdk_import_hero.json".to_string()));
+        assert!(ledger
+            .phase_d
+            .logic_graph_refs
+            .contains(&"graphs/sgdk_import_foe.json".to_string()));
+        assert_eq!(
+            ledger.phase_d.heuristic_gameplay_class.as_deref(),
+            Some("run_and_gun_horizontal_signals")
+        );
+        assert_eq!(
+            ledger.phase_d.donor_logic_scanned_paths,
+            vec!["src/main.c".to_string()]
+        );
+
+        let _ = fs::remove_dir_all(donor_dir);
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn sgdk_phase_d_multifile_scan_merges_run_and_gun_signals() {
+        let donor_dir = temp_dir("sgdk-mf-rg-donor");
+        let project_dir = temp_dir("sgdk-mf-rg-proj");
+        create_project_skeleton(&project_dir, "SGDK MF RG", "megadrive").expect("skel");
+        write_sgdk_multifile_run_and_gun_donor(&donor_dir);
+        let report = import_sgdk_project(&project_dir, &donor_dir).expect("import");
+        let hero = report
+            .primary_scene
+            .entities
+            .iter()
+            .find(|e| e.entity_id == "hero")
+            .expect("hero");
+        let logic = hero.components.logic.as_ref().expect("logic");
+        assert!(
+            logic.external_source_refs.contains(&"src/main.c".to_string())
+                && logic
+                    .external_source_refs
+                    .contains(&"src/player_control.c".to_string()),
+            "external_source_refs devem listar main + satelite: {:?}",
+            logic.external_source_refs
+        );
+        let manifest_rel = report.manifest_path.as_deref().expect("manifest");
+        let ledger: SgdkImportLedger = serde_json::from_str(
+            &fs::read_to_string(project_dir.join(manifest_rel)).expect("read ledger"),
+        )
+        .expect("parse ledger");
+        assert_eq!(
+            ledger.phase_d.heuristic_gameplay_class.as_deref(),
+            Some("run_and_gun_horizontal_signals")
+        );
+        let disk_graph = fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
+            .expect("read hero graph");
+        assert!(
+            disk_graph.contains("\"dx\":2") || disk_graph.contains("\"dx\": 2"),
+            "run-and-gun horizontal mantem deslocamento no eixo X: {}",
+            disk_graph
+        );
+        assert!(disk_graph.contains("fire_hint"), "{}", disk_graph);
+        assert!(
+            ledger
+                .phase_d
+                .cross_unit_function_refs
+                .iter()
+                .any(|line| line.contains("player_tick")),
+            "ledger.phase_d.cross_unit_function_refs deve registrar chamada player_tick entre TU: {:?}",
+            ledger.phase_d.cross_unit_function_refs
+        );
+        assert!(
+            ledger
+                .phase_d
+                .entity_spr_local_signal_hits
+                .iter()
+                .any(|h| h.starts_with("foe@")),
+            "ledger.phase_d.entity_spr_local_signal_hits deve marcar SPR_* local ao recurso foe: {:?}",
+            ledger.phase_d.entity_spr_local_signal_hits
+        );
+        let foe_graph = fs::read_to_string(project_dir.join("graphs").join("sgdk_import_foe.json"))
+            .expect("read foe graph");
+        assert!(
+            foe_graph.contains("fire_hint"),
+            "sprite secundario com SPR_* local partilha stencil run-and-gun quando a classe global e forte: {}",
+            foe_graph
+        );
+        let _ = fs::remove_dir_all(&donor_dir);
+        let _ = fs::remove_dir_all(&project_dir);
+    }
+
+    /// Doador sem API SPR_* no agregado: JOY + MAP_scrollH (sinal platformer, nao run-and-gun).
+    fn write_sgdk_platformer_horizontal_scan_donor(dir: &Path) {
+        write_generic_sgdk_donor_fixture(dir);
+        fs::write(
+            dir.join("src").join("main.c"),
+            b"#include <genesis.h>\n\
+int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n        (void)joy;\n        MAP_scrollH(BG_B, 1);\n        SYS_doVBlankProcess();\n    }\n    return 0;\n}\n",
+        )
+        .expect("write main platformer scan");
+    }
+
+    #[test]
+    fn sgdk_phase_d_platformer_horizontal_scan_fixture_class() {
+        let donor_dir = temp_dir("sgdk-plat-scan-d");
+        let project_dir = temp_dir("sgdk-plat-scan-p");
+        create_project_skeleton(&project_dir, "SGDK Plat Scan", "megadrive").expect("skel");
+        write_sgdk_platformer_horizontal_scan_donor(&donor_dir);
+        let report = import_sgdk_project(&project_dir, &donor_dir).expect("import");
+        let manifest_abs = project_dir.join(report.manifest_path.as_deref().expect("manifest"));
+        let ledger: SgdkImportLedger =
+            serde_json::from_str(&fs::read_to_string(&manifest_abs).expect("read")).expect("parse");
+        assert_eq!(
+            ledger.phase_d.heuristic_gameplay_class.as_deref(),
+            Some("platformer_horizontal_scroller_signals")
+        );
+        let disk_graph = fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
+            .expect("read graph");
+        assert!(
+            !disk_graph.contains("fire_hint"),
+            "platformer horizontal sem classe alta nao materializa fire_hint: {}",
+            disk_graph
+        );
+        let _ = fs::remove_dir_all(&donor_dir);
+        let _ = fs::remove_dir_all(&project_dir);
+    }
+
+    #[test]
+    fn sgdk_phase_d_resolve_prefabs_hydrates_secondary_graph_ref() {
+        let donor_dir = temp_dir("sgdk-resolve-sec-d");
+        let project_dir = temp_dir("sgdk-resolve-sec-p");
+        create_project_skeleton(&project_dir, "SGDK Resolve Sec", "megadrive").expect("skel");
+        write_sgdk_multifile_run_and_gun_donor(&donor_dir);
+        let report = import_sgdk_project(&project_dir, &donor_dir).expect("import");
+        let resolved = resolve_prefabs(&project_dir, &report.primary_scene).expect("resolve prefabs");
+        let foe = resolved
+            .entities
+            .iter()
+            .find(|e| e.entity_id == "foe")
+            .expect("foe entity");
+        let graph_json = foe
+            .components
+            .logic
+            .as_ref()
+            .and_then(|l| l.graph.as_deref())
+            .expect("grafo resolvido a partir de graph_ref");
+        assert!(
+            graph_json.contains("fire_hint"),
+            "secundario com SPR local deve resolver stencil: {}",
+            graph_json
+        );
+        let _ = fs::remove_dir_all(&donor_dir);
+        let _ = fs::remove_dir_all(&project_dir);
+    }
+
+    #[test]
+    fn sgdk_phase_d_multifile_scan_detects_shmup_vertical_signals() {
+        let donor_dir = temp_dir("sgdk-mf-shmup-d");
+        let project_dir = temp_dir("sgdk-mf-shmup-p");
+        create_project_skeleton(&project_dir, "SGDK MF Shmup", "megadrive").expect("skel");
+        write_sgdk_multifile_shmup_donor(&donor_dir);
+        let report = import_sgdk_project(&project_dir, &donor_dir).expect("import");
+        let manifest_abs = project_dir.join(
+            report
+                .manifest_path
+                .as_deref()
+                .expect("manifest"),
+        );
+        let ledger: SgdkImportLedger =
+            serde_json::from_str(&fs::read_to_string(&manifest_abs).expect("read")).expect("parse");
+        assert_eq!(
+            ledger.phase_d.heuristic_gameplay_class.as_deref(),
+            Some("shmup_vertical_signals")
+        );
+        assert!(ledger.phase_d.donor_logic_scanned_paths.len() >= 3);
+        assert!(ledger
+            .phase_d
+            .donor_logic_scanned_paths
+            .iter()
+            .any(|p| p.contains("input_sys.c")));
+        let disk_graph = fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
+            .expect("read graph");
+        assert!(disk_graph.contains("\"dy\":-2"), "shmup: movimento vertical heuristico: {}", disk_graph);
+        assert!(disk_graph.contains("fire_hint"), "{}", disk_graph);
+        let _ = fs::remove_dir_all(&donor_dir);
+        let _ = fs::remove_dir_all(&project_dir);
+    }
+
+    #[test]
+    fn import_sgdk_project_reimport_keeps_ledger_stable_and_no_history_growth() {
+        let donor_dir = temp_dir("sgdk-reimport-donor");
+        let project_dir = temp_dir("sgdk-reimport-project");
+        create_project_skeleton(&project_dir, "SGDK Reimport", "megadrive")
+            .expect("create project skeleton");
+        write_generic_sgdk_donor_fixture(&donor_dir);
+
+        let first =
+            import_sgdk_project(&project_dir, &donor_dir).expect("import sgdk first pass");
+        let manifest_rel = first
+            .manifest_path
+            .as_deref()
+            .expect("first import emits manifest")
+            .to_string();
+        let manifest_abs = project_dir.join(&manifest_rel);
+        let first_raw = fs::read_to_string(&manifest_abs).expect("read first ledger");
+        let first_ledger: SgdkImportLedger =
+            serde_json::from_str(&first_raw).expect("parse first ledger");
+
+        // Reimport com doador inalterado: fingerprint estavel e history nao cresce.
+        let second =
+            import_sgdk_project(&project_dir, &donor_dir).expect("import sgdk second pass");
+        assert_eq!(
+            second.source_summary.fingerprint,
+            first.source_summary.fingerprint
+        );
+        let second_raw = fs::read_to_string(&manifest_abs).expect("read second ledger");
+        let second_ledger: SgdkImportLedger =
+            serde_json::from_str(&second_raw).expect("parse second ledger");
+        assert_eq!(second_ledger.fingerprint, first_ledger.fingerprint);
+        assert_eq!(
+            second_ledger.history.len(),
+            0,
+            "reimport com fingerprint igual nao deve crescer history: {:?}",
+            second_ledger.history
+        );
+        assert_eq!(
+            second_ledger.mappings.len(),
+            first_ledger.mappings.len(),
+            "mappings estaveis entre runs"
+        );
 
         let _ = fs::remove_dir_all(donor_dir);
         let _ = fs::remove_dir_all(project_dir);
@@ -9259,6 +11521,7 @@ mod tests {
                     ),
                     graph_ref: None,
                     logic_hints: Vec::new(),
+                    external_source_refs: Vec::new(),
                     variables: HashMap::new(),
                 }),
                 ..Components::default()
@@ -9665,5 +11928,1388 @@ mod tests {
         assert_eq!(found, rds_dir);
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn write_construct_fixture(root: &Path) {
+        let layouts = root.join("layouts");
+        let object_types = root.join("objectTypes");
+        fs::create_dir_all(&layouts).expect("create construct layouts dir");
+        fs::create_dir_all(&object_types).expect("create construct objectTypes dir");
+        fs::create_dir_all(root.join("sprites")).expect("create construct sprites dir");
+        fs::write(root.join("project.c3proj"), "{\"name\":\"Construct Fixture\"}")
+            .expect("write project.c3proj");
+        write_test_png(&root.join("sprites").join("hero.png"), 32, 32, [200, 80, 120, 255]);
+        fs::write(
+            object_types.join("hero.json"),
+            "{\"name\":\"Hero\",\"plugin-id\":\"Sprite\",\"image\":\"sprites/hero.png\"}",
+        )
+        .expect("write construct object type");
+        fs::write(
+            layouts.join("main.json"),
+            "{\"name\":\"Main Layout\",\"instances\":[{\"objectName\":\"Hero\",\"x\":48,\"y\":72}]}",
+        )
+        .expect("write construct layout");
+    }
+
+    fn write_rpg_maker_fixture(root: &Path) {
+        let data_dir = root.join("data");
+        let tilesets_dir = root.join("img").join("tilesets");
+        fs::create_dir_all(&data_dir).expect("create rpgmaker data dir");
+        fs::create_dir_all(&tilesets_dir).expect("create rpgmaker tilesets dir");
+        write_test_png(&tilesets_dir.join("Field.png"), 64, 48, [64, 160, 96, 255]);
+        fs::write(
+            data_dir.join("MapInfos.json"),
+            "[{\"id\":1,\"name\":\"Field\",\"parentId\":0}]",
+        )
+        .expect("write rpgmaker MapInfos");
+        fs::write(
+            data_dir.join("Tilesets.json"),
+            "[{\"id\":1,\"tilesetNames\":[\"Field\"]}]",
+        )
+        .expect("write rpgmaker Tilesets");
+        fs::write(
+            data_dir.join("Map001.json"),
+            "{\"tilesetId\":1,\"events\":[]}",
+        )
+        .expect("write rpgmaker Map001");
+    }
+
+    fn write_openbor_fixture(root: &Path) {
+        let chars_dir = root.join("data").join("chars").join("hero");
+        fs::create_dir_all(&chars_dir).expect("create openbor chars dir");
+        fs::create_dir_all(root.join("data").join("levels")).expect("create openbor levels dir");
+        write_test_png(&chars_dir.join("hero.png"), 48, 64, [220, 200, 40, 255]);
+        fs::write(
+            chars_dir.join("hero.txt"),
+            [
+                "name Hero",
+                "type player",
+                "gfxshadow 0",
+                "load hero.png",
+                "anim idle",
+                "  offset 0 0",
+                "  delay 10",
+                "  frame hero.png",
+            ]
+            .join("\n"),
+        )
+        .expect("write openbor model");
+        fs::write(
+            root.join("data").join("levels").join("stage1.txt"),
+            [
+                "name Stage 1",
+                "music data/music/theme.mod",
+                "background data/bgs/stage1.png",
+            ]
+            .join("\n"),
+        )
+        .expect("write openbor level");
+    }
+
+    fn count_files_in(dir: &Path) -> usize {
+        fs::read_dir(dir)
+            .map(|iter| iter.filter_map(|entry| entry.ok()).filter(|entry| entry.path().is_file()).count())
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn smoke_import_construct_project_builds_scene_and_is_idempotent() {
+        let donor = temp_dir("smoke-construct-donor");
+        let project = temp_dir("smoke-construct-project");
+        create_project_skeleton(&project, "Construct Smoke", "megadrive")
+            .expect("create project skeleton");
+        write_construct_fixture(&donor);
+
+        let first = import_construct_project(&project, &donor).expect("import construct first pass");
+        assert!(!first.primary_scene.entities.is_empty(), "construct import produced entities");
+        let sprites_dir = project.join("assets").join("sprites");
+        let first_asset_count = count_files_in(&sprites_dir);
+        assert!(first_asset_count >= 1, "at least one sprite materialized");
+
+        let second = import_construct_project(&project, &donor).expect("import construct second pass");
+        assert_eq!(
+            second.primary_scene.entities.len(),
+            first.primary_scene.entities.len(),
+            "re-import does not duplicate entities"
+        );
+        assert_eq!(
+            count_files_in(&sprites_dir),
+            first_asset_count,
+            "re-import does not duplicate sprite files"
+        );
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn smoke_import_rpg_maker_project_builds_scene_and_is_idempotent() {
+        let donor = temp_dir("smoke-rpgmaker-donor");
+        let project = temp_dir("smoke-rpgmaker-project");
+        create_project_skeleton(&project, "RPG Maker Smoke", "megadrive")
+            .expect("create project skeleton");
+        write_rpg_maker_fixture(&donor);
+
+        let first = import_rpg_maker_project(&project, &donor).expect("import rpg_maker first pass");
+        assert!(
+            !first.primary_scene.entities.is_empty(),
+            "rpg_maker import produced entities from tileset"
+        );
+        let tilesets_dir = project.join("assets").join("tilesets");
+        let first_asset_count = count_files_in(&tilesets_dir);
+        assert!(first_asset_count >= 1, "at least one tileset materialized");
+
+        let second = import_rpg_maker_project(&project, &donor).expect("import rpg_maker second pass");
+        assert_eq!(
+            second.primary_scene.entities.len(),
+            first.primary_scene.entities.len(),
+            "re-import keeps entity count stable"
+        );
+        assert_eq!(
+            count_files_in(&tilesets_dir),
+            first_asset_count,
+            "re-import does not duplicate tileset files"
+        );
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn smoke_import_openbor_project_builds_scene_and_is_idempotent() {
+        let donor = temp_dir("smoke-openbor-donor");
+        let project = temp_dir("smoke-openbor-project");
+        create_project_skeleton(&project, "OpenBOR Smoke", "megadrive")
+            .expect("create project skeleton");
+        write_openbor_fixture(&donor);
+
+        let first = import_openbor_project(&project, &donor).expect("import openbor first pass");
+        assert!(
+            !first.primary_scene.entities.is_empty(),
+            "openbor import produced entities from hero model"
+        );
+        let sprites_dir = project.join("assets").join("sprites");
+        let first_asset_count = count_files_in(&sprites_dir);
+        assert!(first_asset_count >= 1, "at least one sprite materialized");
+
+        let second = import_openbor_project(&project, &donor).expect("import openbor second pass");
+        assert_eq!(
+            second.primary_scene.entities.len(),
+            first.primary_scene.entities.len(),
+            "re-import keeps entity count stable"
+        );
+        assert_eq!(
+            count_files_in(&sprites_dir),
+            first_asset_count,
+            "re-import does not duplicate sprite files"
+        );
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn smoke_import_ikemen_go_reuses_mugen_adapter_without_losing_assets() {
+        let donor = temp_dir("smoke-ikemen-donor");
+        let project = temp_dir("smoke-ikemen-project");
+        create_project_skeleton(&project, "Ikemen Smoke", "megadrive")
+            .expect("create project skeleton");
+        write_mugen_character_fixture(&donor);
+
+        let report = import_mugen_project(&project, &donor).expect("import ikemen via mugen adapter");
+        assert!(
+            report.imported_scenes >= 1,
+            "ikemen_go reuses mugen adapter and produces at least one scene"
+        );
+        assert!(
+            !report.primary_scene.entities.is_empty(),
+            "primary scene has entities from mugen fixture"
+        );
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn smoke_import_sgdk_project_is_idempotent() {
+        let donor = temp_dir("smoke-sgdk-donor");
+        let project = temp_dir("smoke-sgdk-project");
+        create_project_skeleton(&project, "SGDK Smoke", "megadrive")
+            .expect("create project skeleton");
+        write_generic_sgdk_donor_fixture(&donor);
+
+        let first = import_sgdk_project(&project, &donor).expect("import sgdk first pass");
+        let first_len = first.primary_scene.entities.len();
+        let second = import_sgdk_project(&project, &donor).expect("import sgdk second pass");
+        assert_eq!(
+            second.primary_scene.entities.len(),
+            first_len,
+            "sgdk re-import keeps entity count stable"
+        );
+        assert_eq!(
+            first.source_summary.fingerprint, second.source_summary.fingerprint,
+            "sgdk re-import keeps donor fingerprint stable"
+        );
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn smoke_import_mugen_project_is_idempotent() {
+        let donor = temp_dir("smoke-mugen-donor");
+        let project = temp_dir("smoke-mugen-project");
+        create_project_skeleton(&project, "MUGEN Smoke", "megadrive")
+            .expect("create project skeleton");
+        write_mugen_character_fixture(&donor);
+
+        let first = import_mugen_project(&project, &donor).expect("import mugen first pass");
+        let second = import_mugen_project(&project, &donor).expect("import mugen second pass");
+        assert_eq!(
+            second.imported_scenes,
+            first.imported_scenes,
+            "mugen re-import keeps imported_scenes stable"
+        );
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn smoke_import_godot_project_is_idempotent() {
+        let donor = temp_dir("smoke-godot-donor");
+        let project = temp_dir("smoke-godot-project");
+        create_project_skeleton(&project, "Godot Smoke", "megadrive")
+            .expect("create project skeleton");
+        write_godot_fixture(&donor);
+
+        let first = import_godot_project(&project, &donor).expect("import godot first pass");
+        let second = import_godot_project(&project, &donor).expect("import godot second pass");
+        assert_eq!(
+            second.primary_scene.entities.len(),
+            first.primary_scene.entities.len(),
+            "godot re-import keeps entity count stable"
+        );
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    // ============================================================================
+    // Sessao B - Hardening Inicial dos Importadores Preservados
+    //
+    // 18 testes cobrindo tres classes de prova por importador preservado:
+    //   - *_handles_empty_project_dir (7): diretorio donor 100% vazio.
+    //   - *_handles_missing_root_artifact (7): donor com arquivos auxiliares mas
+    //     sem o artefato-raiz que o validador exige.
+    //   - *_handles_lossy_text_or_unicode_paths (4 - godot/construct/rpg_maker/
+    //     openbor): variantes plausiveis em Windows com BOM/CRLF e caminhos
+    //     Unicode reais.
+    //
+    // Nenhum importador e promovido: so aumenta evidencia local. ikemen_go usa
+    // o dispatcher `import_external_project` para preservar a identidade do
+    // perfil mesmo quando o adapter MUGEN eh reaproveitado.
+    // ============================================================================
+
+    fn list_project_artifact_files(project: &Path) -> Vec<PathBuf> {
+        let mut out = Vec::new();
+        for sub in ["scenes", "assets"] {
+            let root = project.join(sub);
+            if !root.is_dir() {
+                continue;
+            }
+            let mut stack = vec![root];
+            while let Some(dir) = stack.pop() {
+                let Ok(iter) = fs::read_dir(&dir) else { continue };
+                for entry in iter.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        stack.push(path);
+                    } else if path.is_file() {
+                        if let Ok(rel) = path.strip_prefix(project) {
+                            out.push(rel.to_path_buf());
+                        }
+                    }
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
+    fn assert_no_import_side_effects(project: &Path, baseline: &[PathBuf], context: &str) {
+        let after = list_project_artifact_files(project);
+        assert_eq!(
+            baseline, after.as_slice(),
+            "{}: failed import must not change scenes/ or assets/",
+            context
+        );
+    }
+
+    // ---- Sessao B: diretorio vazio (7 testes) ----
+
+    #[test]
+    fn sgdk_handles_empty_project_dir() {
+        let donor = temp_dir("session-b-sgdk-empty-donor");
+        let project = temp_dir("session-b-sgdk-empty-project");
+        create_project_skeleton(&project, "SGDK Empty Dir", "megadrive")
+            .expect("create project skeleton");
+        let baseline = list_project_artifact_files(&project);
+
+        let err = import_sgdk_project(&project, &donor).expect_err("empty sgdk donor must fail");
+        assert!(
+            err.0.contains("SGDK") || err.0.contains("sgdk"),
+            "sgdk error should mention SGDK, got: {}",
+            err.0
+        );
+        assert_no_import_side_effects(&project, &baseline, "sgdk empty dir");
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn mugen_handles_empty_project_dir() {
+        let donor = temp_dir("session-b-mugen-empty-donor");
+        let project = temp_dir("session-b-mugen-empty-project");
+        create_project_skeleton(&project, "MUGEN Empty Dir", "megadrive")
+            .expect("create project skeleton");
+        let baseline = list_project_artifact_files(&project);
+
+        let err = import_mugen_project(&project, &donor).expect_err("empty mugen donor must fail");
+        assert!(
+            err.0.to_lowercase().contains("mugen"),
+            "mugen error should mention MUGEN, got: {}",
+            err.0
+        );
+        assert_no_import_side_effects(&project, &baseline, "mugen empty dir");
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn ikemen_go_handles_empty_project_dir_via_dispatcher() {
+        let donor = temp_dir("session-b-ikemen-empty-donor");
+        let project = temp_dir("session-b-ikemen-empty-project");
+        create_project_skeleton(&project, "Ikemen Empty Dir", "megadrive")
+            .expect("create project skeleton");
+        let baseline = list_project_artifact_files(&project);
+
+        // Dispatcher canonico: preserva identidade do perfil ikemen_go.
+        let err = import_external_project(&project, "ikemen_go", &donor)
+            .expect_err("empty ikemen_go donor must fail via dispatcher");
+        assert!(
+            err.0.to_lowercase().contains("mugen"),
+            "ikemen_go falls back to MUGEN adapter message, got: {}",
+            err.0
+        );
+        assert_no_import_side_effects(&project, &baseline, "ikemen_go empty dir");
+
+        // Identidade do perfil permanece intacta apos falha.
+        let profile = external_import_profile_definition("ikemen_go")
+            .expect("ikemen_go profile remains registered");
+        assert_eq!(profile.id, "ikemen_go");
+        assert_eq!(profile.source_engine, "ikemen_go");
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn godot_handles_empty_project_dir() {
+        let donor = temp_dir("session-b-godot-empty-donor");
+        let project = temp_dir("session-b-godot-empty-project");
+        create_project_skeleton(&project, "Godot Empty Dir", "megadrive")
+            .expect("create project skeleton");
+        let baseline = list_project_artifact_files(&project);
+
+        let err = import_godot_project(&project, &donor).expect_err("empty godot donor must fail");
+        assert!(
+            err.0.to_lowercase().contains("godot"),
+            "godot error should mention Godot, got: {}",
+            err.0
+        );
+        assert_no_import_side_effects(&project, &baseline, "godot empty dir");
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn construct_handles_empty_project_dir() {
+        let donor = temp_dir("session-b-construct-empty-donor");
+        let project = temp_dir("session-b-construct-empty-project");
+        create_project_skeleton(&project, "Construct Empty Dir", "megadrive")
+            .expect("create project skeleton");
+        let baseline = list_project_artifact_files(&project);
+
+        let err = import_construct_project(&project, &donor)
+            .expect_err("empty construct donor must fail");
+        assert!(
+            err.0.to_lowercase().contains("construct"),
+            "construct error should mention Construct, got: {}",
+            err.0
+        );
+        assert_no_import_side_effects(&project, &baseline, "construct empty dir");
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn rpg_maker_handles_empty_project_dir() {
+        let donor = temp_dir("session-b-rpgmaker-empty-donor");
+        let project = temp_dir("session-b-rpgmaker-empty-project");
+        create_project_skeleton(&project, "RPG Maker Empty Dir", "megadrive")
+            .expect("create project skeleton");
+        let baseline = list_project_artifact_files(&project);
+
+        let err = import_rpg_maker_project(&project, &donor)
+            .expect_err("empty rpg maker donor must fail");
+        assert!(
+            err.0.to_lowercase().contains("rpg maker")
+                || err.0.to_lowercase().contains("rpgmaker"),
+            "rpg maker error should mention RPG Maker, got: {}",
+            err.0
+        );
+        assert_no_import_side_effects(&project, &baseline, "rpg_maker empty dir");
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn openbor_handles_empty_project_dir() {
+        let donor = temp_dir("session-b-openbor-empty-donor");
+        let project = temp_dir("session-b-openbor-empty-project");
+        create_project_skeleton(&project, "OpenBOR Empty Dir", "megadrive")
+            .expect("create project skeleton");
+        let baseline = list_project_artifact_files(&project);
+
+        let err = import_openbor_project(&project, &donor)
+            .expect_err("empty openbor donor must fail");
+        assert!(
+            err.0.to_lowercase().contains("openbor"),
+            "openbor error should mention OpenBOR, got: {}",
+            err.0
+        );
+        assert_no_import_side_effects(&project, &baseline, "openbor empty dir");
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    // ---- Sessao B: artefato raiz ausente (7 testes) ----
+
+    #[test]
+    fn sgdk_handles_missing_root_artifact() {
+        let donor = temp_dir("session-b-sgdk-missing-donor");
+        let project = temp_dir("session-b-sgdk-missing-project");
+        create_project_skeleton(&project, "SGDK Missing Root", "megadrive")
+            .expect("create project skeleton");
+        // Donor tem arte/audio mas nao tem nenhum manifesto .res na raiz nem em res/.
+        fs::create_dir_all(donor.join("res").join("images")).expect("create res dir");
+        write_test_png(&donor.join("res").join("images").join("hero.png"), 16, 16, [255, 0, 0, 255]);
+        fs::write(donor.join("README.txt"), "legacy project without manifest")
+            .expect("write readme");
+        let baseline = list_project_artifact_files(&project);
+
+        let err = import_sgdk_project(&project, &donor)
+            .expect_err("sgdk donor without .res manifest must fail");
+        assert!(
+            err.0.contains(".res") || err.0.to_lowercase().contains("manifesto"),
+            "sgdk error should mention missing manifest, got: {}",
+            err.0
+        );
+        assert_no_import_side_effects(&project, &baseline, "sgdk missing root");
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn mugen_handles_missing_root_artifact() {
+        let donor = temp_dir("session-b-mugen-missing-donor");
+        let project = temp_dir("session-b-mugen-missing-project");
+        create_project_skeleton(&project, "MUGEN Missing Root", "megadrive")
+            .expect("create project skeleton");
+        // Tem sprite PNG, mas nenhum .def (nem system.def), entao scan_mugen_candidates fica vazio.
+        fs::create_dir_all(donor.join("sprites")).expect("create sprites dir");
+        write_test_png(&donor.join("sprites").join("hero.png"), 16, 16, [0, 255, 0, 255]);
+        let baseline = list_project_artifact_files(&project);
+
+        let err = import_mugen_project(&project, &donor)
+            .expect_err("mugen donor without .def must fail");
+        assert!(
+            err.0.to_lowercase().contains("mugen"),
+            "mugen error should mention MUGEN, got: {}",
+            err.0
+        );
+        assert_no_import_side_effects(&project, &baseline, "mugen missing root");
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn ikemen_go_handles_missing_root_artifact_via_dispatcher() {
+        let donor = temp_dir("session-b-ikemen-missing-donor");
+        let project = temp_dir("session-b-ikemen-missing-project");
+        create_project_skeleton(&project, "Ikemen Missing Root", "megadrive")
+            .expect("create project skeleton");
+        fs::create_dir_all(donor.join("work")).expect("create work dir");
+        write_test_png(&donor.join("work").join("sprite.png"), 16, 16, [0, 0, 255, 255]);
+        let baseline = list_project_artifact_files(&project);
+
+        let err = import_external_project(&project, "ikemen_go", &donor)
+            .expect_err("ikemen_go dispatch without .def must fail");
+        assert!(
+            err.0.to_lowercase().contains("mugen"),
+            "ikemen_go via dispatcher surfaces MUGEN error, got: {}",
+            err.0
+        );
+        assert_no_import_side_effects(&project, &baseline, "ikemen_go missing root");
+
+        let profile = external_import_profile_definition("ikemen_go")
+            .expect("ikemen_go profile intact");
+        assert_eq!(profile.id, "ikemen_go");
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn godot_handles_missing_root_artifact() {
+        let donor = temp_dir("session-b-godot-missing-donor");
+        let project = temp_dir("session-b-godot-missing-project");
+        create_project_skeleton(&project, "Godot Missing Root", "megadrive")
+            .expect("create project skeleton");
+        // Arte presente mas nenhum project.godot nem .tscn.
+        fs::create_dir_all(donor.join("art")).expect("create art dir");
+        write_test_png(&donor.join("art").join("hero.png"), 16, 16, [40, 40, 200, 255]);
+        fs::write(donor.join("README.md"), "No project.godot here").expect("write readme");
+        let baseline = list_project_artifact_files(&project);
+
+        let err = import_godot_project(&project, &donor)
+            .expect_err("godot donor without project.godot/.tscn must fail");
+        assert!(
+            err.0.contains("project.godot") || err.0.contains(".tscn"),
+            "godot error should mention missing project file or .tscn, got: {}",
+            err.0
+        );
+        assert_no_import_side_effects(&project, &baseline, "godot missing root");
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn construct_handles_missing_root_artifact() {
+        let donor = temp_dir("session-b-construct-missing-donor");
+        let project = temp_dir("session-b-construct-missing-project");
+        create_project_skeleton(&project, "Construct Missing Root", "megadrive")
+            .expect("create project skeleton");
+        // Tem pasta sprites/ mas nao tem project.c3proj, layouts/ nem objectTypes/.
+        fs::create_dir_all(donor.join("sprites")).expect("create sprites dir");
+        write_test_png(&donor.join("sprites").join("hero.png"), 16, 16, [200, 40, 40, 255]);
+        let baseline = list_project_artifact_files(&project);
+
+        let err = import_construct_project(&project, &donor)
+            .expect_err("construct donor without project file/layouts/objectTypes must fail");
+        assert!(
+            err.0.to_lowercase().contains("construct"),
+            "construct error should mention Construct, got: {}",
+            err.0
+        );
+        assert_no_import_side_effects(&project, &baseline, "construct missing root");
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn rpg_maker_handles_missing_root_artifact() {
+        let donor = temp_dir("session-b-rpgmaker-missing-donor");
+        let project = temp_dir("session-b-rpgmaker-missing-project");
+        create_project_skeleton(&project, "RPG Maker Missing Root", "megadrive")
+            .expect("create project skeleton");
+        // Tem img/ mas nao tem data/ com JSONs canonicos.
+        fs::create_dir_all(donor.join("img").join("tilesets")).expect("create img dir");
+        write_test_png(&donor.join("img").join("tilesets").join("Field.png"), 32, 32, [16, 180, 32, 255]);
+        let baseline = list_project_artifact_files(&project);
+
+        let err = import_rpg_maker_project(&project, &donor)
+            .expect_err("rpg maker donor without data/*.json must fail");
+        assert!(
+            err.0.to_lowercase().contains("rpg maker")
+                || err.0.to_lowercase().contains("rpgmaker")
+                || err.0.contains("data"),
+            "rpg maker error should mention data folder or RPG Maker, got: {}",
+            err.0
+        );
+        assert_no_import_side_effects(&project, &baseline, "rpg_maker missing root");
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn openbor_handles_missing_root_artifact() {
+        let donor = temp_dir("session-b-openbor-missing-donor");
+        let project = temp_dir("session-b-openbor-missing-project");
+        create_project_skeleton(&project, "OpenBOR Missing Root", "megadrive")
+            .expect("create project skeleton");
+        // Tem algum arquivo, mas nenhum data/chars, data/levels, chars/, levels/,
+        // models.txt nem levels.txt.
+        fs::create_dir_all(donor.join("docs")).expect("create docs dir");
+        fs::write(donor.join("docs").join("notes.txt"), "miscellaneous content")
+            .expect("write notes");
+        let baseline = list_project_artifact_files(&project);
+
+        let err = import_openbor_project(&project, &donor)
+            .expect_err("openbor donor without chars/levels must fail");
+        assert!(
+            err.0.to_lowercase().contains("openbor"),
+            "openbor error should mention OpenBOR, got: {}",
+            err.0
+        );
+        assert_no_import_side_effects(&project, &baseline, "openbor missing root");
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    // ---- Sessao B: leitura tolerante a BOM/CRLF/Unicode (4 testes) ----
+
+    #[test]
+    fn godot_handles_lossy_text_or_unicode_paths() {
+        let donor = temp_dir("session-b-godot-lossy-donor");
+        let project = temp_dir("session-b-godot-lossy-project");
+        create_project_skeleton(&project, "Godot Lossy", "megadrive")
+            .expect("create project skeleton");
+        // Arte sob caminho com caractere Unicode NFC (portatil em NTFS).
+        fs::create_dir_all(donor.join("arte_acao")).expect("create unicode art dir");
+        write_test_png(&donor.join("arte_acao").join("herói.png"), 24, 32, [200, 50, 80, 255]);
+        // project.godot com BOM UTF-8 + CRLF.
+        let mut godot_ini = String::from("\u{FEFF}");
+        godot_ini.push_str(
+            &[
+                "[application]",
+                "config/name=\"Godot Lossy\"",
+                "run/main_scene=\"res://main.tscn\"",
+            ]
+            .join("\r\n"),
+        );
+        fs::write(donor.join("project.godot"), godot_ini).expect("write project.godot with BOM+CRLF");
+        // tscn com CRLF explicito referenciando o asset Unicode.
+        let tscn = [
+            "[gd_scene load_steps=2 format=3]",
+            "[ext_resource type=\"Texture2D\" path=\"res://arte_acao/herói.png\" id=\"1\"]",
+            "[node name=\"Main\" type=\"Node2D\"]",
+            "[node name=\"Heroi\" type=\"Sprite2D\" parent=\".\"]",
+            "position = Vector2(16, 24)",
+            "texture = ExtResource(\"1\")",
+        ]
+        .join("\r\n");
+        fs::write(donor.join("main.tscn"), tscn).expect("write main.tscn with CRLF");
+
+        let report = import_godot_project(&project, &donor)
+            .expect("godot tolerates BOM/CRLF/unicode paths");
+        assert!(
+            !report.primary_scene.entities.is_empty(),
+            "godot scene preserves entities despite lossy text"
+        );
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn construct_handles_lossy_text_or_unicode_paths() {
+        let donor = temp_dir("session-b-construct-lossy-donor");
+        let project = temp_dir("session-b-construct-lossy-project");
+        create_project_skeleton(&project, "Construct Lossy", "megadrive")
+            .expect("create project skeleton");
+        let layouts = donor.join("layouts");
+        let object_types = donor.join("objectTypes");
+        let sprites = donor.join("sprites_acao");
+        fs::create_dir_all(&layouts).expect("create layouts dir");
+        fs::create_dir_all(&object_types).expect("create objectTypes dir");
+        fs::create_dir_all(&sprites).expect("create unicode sprites dir");
+        write_test_png(&sprites.join("herói.png"), 32, 32, [180, 40, 40, 255]);
+        fs::write(donor.join("project.c3proj"), "{\"name\":\"Herói Construct\"}")
+            .expect("write project.c3proj");
+        // JSON com CRLF + nome Unicode em valores (serde_json aceita CRLF como whitespace).
+        fs::write(
+            object_types.join("hero.json"),
+            "{\r\n  \"name\": \"Herói\",\r\n  \"plugin-id\": \"Sprite\",\r\n  \"image\": \"sprites_acao/herói.png\"\r\n}",
+        )
+        .expect("write object type with CRLF");
+        fs::write(
+            layouts.join("main.json"),
+            "{\r\n  \"name\": \"Ação Principal\",\r\n  \"instances\": [\r\n    { \"objectName\": \"Herói\", \"x\": 32, \"y\": 48 }\r\n  ]\r\n}",
+        )
+        .expect("write layout with CRLF");
+
+        let report = import_construct_project(&project, &donor)
+            .expect("construct tolerates CRLF JSON and unicode strings");
+        assert_eq!(report.imported_scenes, 1);
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn rpg_maker_handles_lossy_text_or_unicode_paths() {
+        let donor = temp_dir("session-b-rpgmaker-lossy-donor");
+        let project = temp_dir("session-b-rpgmaker-lossy-project");
+        create_project_skeleton(&project, "RPG Maker Lossy", "megadrive")
+            .expect("create project skeleton");
+        let data_dir = donor.join("data");
+        let tilesets_dir = donor.join("img").join("tilesets_acao");
+        fs::create_dir_all(&data_dir).expect("create data dir");
+        fs::create_dir_all(&tilesets_dir).expect("create unicode tilesets dir");
+        write_test_png(&tilesets_dir.join("Campo_é.png"), 48, 48, [30, 150, 60, 255]);
+        // JSON com CRLF e nomes Unicode no conteudo.
+        fs::write(
+            data_dir.join("MapInfos.json"),
+            "[\r\n  { \"id\": 1, \"name\": \"Vila Ação\", \"parentId\": 0 }\r\n]",
+        )
+        .expect("write MapInfos with CRLF");
+        fs::write(
+            data_dir.join("Tilesets.json"),
+            "[\r\n  { \"id\": 1, \"tilesetNames\": [\"tilesets_acao/Campo_é\"] }\r\n]",
+        )
+        .expect("write Tilesets with CRLF");
+        fs::write(
+            data_dir.join("Map001.json"),
+            "{\r\n  \"tilesetId\": 1,\r\n  \"events\": []\r\n}",
+        )
+        .expect("write Map001 with CRLF");
+
+        let report = import_rpg_maker_project(&project, &donor)
+            .expect("rpg maker tolerates CRLF JSON and unicode strings");
+        assert_eq!(report.imported_scenes, 1);
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn openbor_handles_lossy_text_or_unicode_paths() {
+        let donor = temp_dir("session-b-openbor-lossy-donor");
+        let project = temp_dir("session-b-openbor-lossy-project");
+        create_project_skeleton(&project, "OpenBOR Lossy", "megadrive")
+            .expect("create project skeleton");
+        // Chars dir com nome Unicode.
+        let chars_dir = donor.join("data").join("chars").join("herói");
+        fs::create_dir_all(&chars_dir).expect("create unicode chars dir");
+        fs::create_dir_all(donor.join("data").join("levels")).expect("create levels dir");
+        write_test_png(&chars_dir.join("hero.png"), 32, 48, [240, 200, 30, 255]);
+        // hero.txt com BOM UTF-8 + CRLF + nome Unicode.
+        let mut hero_txt = String::from("\u{FEFF}");
+        hero_txt.push_str(
+            &[
+                "name Herói Ação",
+                "type player",
+                "gfxshadow 0",
+                "load hero.png",
+                "anim idle",
+                "  offset 0 0",
+                "  delay 10",
+                "  frame hero.png",
+            ]
+            .join("\r\n"),
+        );
+        fs::write(chars_dir.join("hero.txt"), hero_txt).expect("write hero.txt BOM+CRLF");
+        // Level com CRLF.
+        fs::write(
+            donor.join("data").join("levels").join("stage_acao.txt"),
+            ["name Fase Ação", "music data/music/tema.mod", "background data/bgs/stage.png"]
+                .join("\r\n"),
+        )
+        .expect("write level with CRLF");
+
+        let report = import_openbor_project(&project, &donor)
+            .expect("openbor tolerates BOM/CRLF and unicode paths");
+        assert_eq!(report.imported_scenes, 1);
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Fase B - SGDK Real-World Import: multi-scene, cells[] real, SceneLayer
+    // ────────────────────────────────────────────────────────────────────────
+
+    /// Pinta um PNG 128x128 com 4 quadrantes de 64x64 de cores distintas.
+    /// Garante reconstrucao de `cells[]` com tiles duplicados (um por quadrante) e
+    /// um dicionario nao-trivial (8 blocos unicos por quadrante repetidos).
+    fn write_diverse_tilemap_png(dir: &Path, filename: &str) -> std::path::PathBuf {
+        fs::create_dir_all(dir).expect("tilemap parent");
+        let path = dir.join(filename);
+        let mut img = image::RgbaImage::new(128, 128);
+        for y in 0..128u32 {
+            for x in 0..128u32 {
+                let qx = x / 64;
+                let qy = y / 64;
+                let base: [u8; 4] = match (qx, qy) {
+                    (0, 0) => [40, 180, 220, 255],
+                    (1, 0) => [220, 80, 60, 255],
+                    (0, 1) => [80, 220, 120, 255],
+                    _ => [200, 180, 40, 255],
+                };
+                // Desenha um grid fino dentro do quadrante para garantir mais de
+                // um tile unico por quadrante durante a dedup 8x8.
+                let in_grid = (x % 8 == 0) || (y % 8 == 0);
+                let rgba = if in_grid {
+                    [base[0] / 2, base[1] / 2, base[2] / 2, 255]
+                } else {
+                    base
+                };
+                img.put_pixel(x, y, image::Rgba(rgba));
+            }
+        }
+        img.save(&path).expect("write diverse tilemap png");
+        path
+    }
+
+    /// Doador SGDK com 3 manifests anchor (tilemap) distintos -> 3 cenas canonicas.
+    fn write_multi_scene_sgdk_donor_fixture(dir: &Path) {
+        fs::create_dir_all(dir.join("res").join("images")).expect("create images dir");
+        fs::create_dir_all(dir.join("res").join("maps")).expect("create maps dir");
+        fs::create_dir_all(dir.join("res").join("sound")).expect("create sound dir");
+
+        // Sprite compartilhado na cena primaria.
+        image::RgbaImage::from_pixel(32, 32, image::Rgba([255, 120, 40, 255]))
+            .save(dir.join("res").join("images").join("hero.png"))
+            .expect("write hero sprite");
+        // 3 tilemaps distintos.
+        write_diverse_tilemap_png(&dir.join("res").join("maps"), "level1.png");
+        write_diverse_tilemap_png(&dir.join("res").join("maps"), "level2.png");
+        write_diverse_tilemap_png(&dir.join("res").join("maps"), "boss_arena.png");
+        // Audio compartilhado.
+        fs::write(
+            dir.join("res").join("sound").join("jump.wav"),
+            minimal_wav_bytes(),
+        )
+        .expect("write wav");
+        fs::write(dir.join("res").join("sound").join("theme.xgm"), b"xgm").expect("write xgm");
+
+        fs::write(
+            dir.join("res").join("resources.res"),
+            [
+                "SPRITE hero images/hero.png 4 4 FAST 0",
+                "MAP Level_1 maps/level1.png NONE",
+                "MAP Level_2 maps/level2.png NONE",
+                "IMAGE boss_arena maps/boss_arena.png NONE",
+                "WAV jump sound/jump.wav 22050",
+                "XGM theme sound/theme.xgm",
+            ]
+            .join("\n"),
+        )
+        .expect("write resources.res");
+    }
+
+    #[test]
+    fn sgdk_phase_b_import_populates_tilemap_cells_from_png() {
+        let donor = temp_dir("sgdk-phaseb-cells-donor");
+        let project = temp_dir("sgdk-phaseb-cells-project");
+        create_project_skeleton(&project, "SGDK Phase B Cells", "megadrive")
+            .expect("create project skeleton");
+        // Reutiliza a fixture generica: stage.png e 128x128 => 16x16 tiles = 256 cells.
+        write_generic_sgdk_donor_fixture(&donor);
+
+        let report =
+            import_sgdk_project(&project, &donor).expect("import sgdk phase b cells");
+
+        let tilemap = report
+            .primary_scene
+            .entities
+            .iter()
+            .find_map(|e| e.components.tilemap.as_ref())
+            .expect("primary scene must contain tilemap entity");
+        assert_eq!(tilemap.map_width, 16);
+        assert_eq!(tilemap.map_height, 16);
+        assert_eq!(tilemap.cells.len(), 16 * 16);
+        assert!(
+            tilemap.cells.iter().any(|cell| *cell > 0),
+            "cells[] deve ter pelo menos um indice > 0 para PNG nao-trivial"
+        );
+        // Como a stage.png e cor solida, apos dedup teremos 1 tile unico
+        // e todos os 256 cells apontando para indice 1.
+        assert!(
+            tilemap.cells.iter().all(|cell| *cell == 0 || *cell == 1),
+            "cells[] deve conter apenas indices validos do dicionario"
+        );
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn sgdk_phase_b_import_builds_multi_scene_when_multiple_tilemap_anchors_exist() {
+        let donor = temp_dir("sgdk-phaseb-multi-donor");
+        let project = temp_dir("sgdk-phaseb-multi-project");
+        create_project_skeleton(&project, "SGDK Phase B Multi", "megadrive")
+            .expect("create project skeleton");
+        write_multi_scene_sgdk_donor_fixture(&donor);
+
+        let report =
+            import_sgdk_project(&project, &donor).expect("import sgdk phase b multi-scene");
+
+        // 3 tilemap anchors => 1 primary + 2 secondary = 3 scenes total.
+        assert_eq!(
+            report.imported_scenes, 3,
+            "doador com 3 tilemap anchors deve gerar 3 cenas ({} primary + {} additional)",
+            1,
+            report.additional_scenes.len()
+        );
+        assert_eq!(report.additional_scenes.len(), 2);
+
+        // A cena primaria nao colapsa tudo em scenes/main.json: agora carrega
+        // apenas o primeiro tilemap + sprites + audio + camera.
+        let tilemap_count_primary = report
+            .primary_scene
+            .entities
+            .iter()
+            .filter(|e| e.components.tilemap.is_some())
+            .count();
+        assert_eq!(
+            tilemap_count_primary, 1,
+            "cena primaria deve ter exatamente 1 tilemap entity apos multi-scene split"
+        );
+
+        // primary_scene_path continua ancorado em scenes/main.json (sem colapso nem
+        // renomeacao silenciosa quando ha varios tilemaps).
+        assert_eq!(
+            report.primary_scene_path, "scenes/main.json",
+            "a cena primaria deve sempre mapear para scenes/main.json"
+        );
+
+        // Cada cena secundaria persistida em scenes/<slug>.json com 1 tilemap.
+        for descriptor in &report.additional_scenes {
+            // Todos os campos do descriptor devem estar preenchidos com dados reais.
+            assert!(
+                !descriptor.scene_id.trim().is_empty(),
+                "descriptor.scene_id vazio para {}",
+                descriptor.display_name
+            );
+            assert!(
+                !descriptor.display_name.trim().is_empty(),
+                "descriptor.display_name vazio para {}",
+                descriptor.scene_id
+            );
+            assert!(descriptor.scene_path.starts_with("scenes/"));
+            assert!(descriptor.scene_path.ends_with(".json"));
+            assert_ne!(
+                descriptor.scene_path, "scenes/main.json",
+                "cena secundaria nao pode colidir com scenes/main.json"
+            );
+            // Uma cena secundaria tem apenas o tilemap entity.
+            assert!(
+                descriptor.entity_count >= 1,
+                "descriptor.entity_count deve contar ao menos o tilemap entity"
+            );
+            // cells[] reais -> tilemap_cells > 0, tilemap_unique_tiles > 0.
+            assert!(
+                descriptor.tilemap_cells > 0,
+                "descriptor.tilemap_cells deve ser > 0 quando PNG permite reconstrucao"
+            );
+            assert!(
+                descriptor.tilemap_unique_tiles > 0,
+                "descriptor.tilemap_unique_tiles deve ser > 0 quando PNG permite reconstrucao"
+            );
+
+            let abs = project.join(&descriptor.scene_path);
+            assert!(
+                abs.is_file(),
+                "cena secundaria deve existir em disco: {}",
+                abs.display()
+            );
+            let secondary: Scene = serde_json::from_str(
+                &fs::read_to_string(&abs).expect("read secondary scene"),
+            )
+            .expect("parse secondary scene");
+            // scene_id do descriptor bate com o arquivo persistido.
+            assert_eq!(secondary.scene_id, descriptor.scene_id);
+            let tilemap_entities: Vec<_> = secondary
+                .entities
+                .iter()
+                .filter(|e| e.components.tilemap.is_some())
+                .collect();
+            assert_eq!(
+                tilemap_entities.len(),
+                1,
+                "cena secundaria deve ter exatamente 1 tilemap"
+            );
+            // Entity count persistido == descriptor.entity_count.
+            assert_eq!(
+                secondary.entities.len(),
+                descriptor.entity_count,
+                "entity_count do descriptor deve bater com a cena secundaria persistida"
+            );
+            // cells[] reconstruidas para cada PNG de 128x128.
+            let tilemap = tilemap_entities[0]
+                .components
+                .tilemap
+                .as_ref()
+                .unwrap();
+            assert_eq!(tilemap.cells.len(), 16 * 16);
+            // tilemap_cells do descriptor deve casar com o numero real de celulas.
+            assert_eq!(
+                descriptor.tilemap_cells, tilemap.cells.len(),
+                "descriptor.tilemap_cells deve casar com cells.len()"
+            );
+            // SceneLayer derivadas em cenas secundarias tambem.
+            let layers = secondary.layers.as_ref().expect("secondary must have layers");
+            assert!(layers.iter().any(|l| l.kind == "tile"));
+            // Secundaria nao tem sprite; portanto nao deve ter layer gameplay.
+            assert!(!layers.iter().any(|l| l.kind == "sprite"));
+        }
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn sgdk_phase_b_import_derives_scene_layers_grouping_entities_coherently() {
+        let donor = temp_dir("sgdk-phaseb-layers-donor");
+        let project = temp_dir("sgdk-phaseb-layers-project");
+        create_project_skeleton(&project, "SGDK Phase B Layers", "megadrive")
+            .expect("create project skeleton");
+        write_generic_sgdk_donor_fixture(&donor);
+
+        let report =
+            import_sgdk_project(&project, &donor).expect("import sgdk phase b layers");
+
+        let layers = report
+            .primary_scene
+            .layers
+            .as_ref()
+            .expect("cena primaria deve ter layers");
+
+        let background = layers
+            .iter()
+            .find(|l| l.kind == "tile")
+            .expect("layer background/tile esperada");
+        assert_eq!(background.id, "layer_background");
+        assert!(background.visible);
+        assert!(!background.locked);
+        // Tilemap entity precisa estar listado aqui.
+        assert!(!background.entity_ids.is_empty());
+
+        let gameplay = layers
+            .iter()
+            .find(|l| l.kind == "sprite")
+            .expect("layer gameplay/sprite esperada");
+        assert_eq!(gameplay.id, "layer_gameplay");
+        // Gameplay contem sprite + camera.
+        assert!(gameplay.entity_ids.iter().any(|id| id == "hero"));
+        assert!(gameplay
+            .entity_ids
+            .iter()
+            .any(|id| id == "main_camera"));
+
+        let audio = layers
+            .iter()
+            .find(|l| l.kind == "object")
+            .expect("layer audio (object) esperada");
+        assert!(audio.locked, "layer audio deve ser locked");
+        assert!(audio.entity_ids.iter().any(|id| id == "audio_bank"));
+
+        // Depth ordering coerente: background < gameplay < audio.
+        assert!(background.depth < gameplay.depth);
+        assert!(gameplay.depth < audio.depth);
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn sgdk_phase_b_import_keeps_explicit_fallback_when_tilemap_source_is_too_small() {
+        let donor = temp_dir("sgdk-phaseb-fallback-donor");
+        let project = temp_dir("sgdk-phaseb-fallback-project");
+        create_project_skeleton(&project, "SGDK Phase B Fallback", "megadrive")
+            .expect("create project skeleton");
+
+        fs::create_dir_all(donor.join("res").join("maps"))
+            .expect("create donor maps dir");
+        // Tilemap com 4x4 px (menos que 8x8) => reconstrucao impossivel.
+        image::RgbaImage::from_pixel(4, 4, image::Rgba([10, 20, 30, 255]))
+            .save(donor.join("res").join("maps").join("tiny.png"))
+            .expect("write tiny png");
+        image::RgbaImage::from_pixel(32, 32, image::Rgba([200, 100, 50, 255]))
+            .save(donor.join("res").join("maps").join("hero.png"))
+            .expect("write hero sprite");
+        fs::write(
+            donor.join("res").join("resources.res"),
+            [
+                "SPRITE hero maps/hero.png 4 4 FAST 0",
+                "IMAGE tiny maps/tiny.png NONE",
+            ]
+            .join("\n"),
+        )
+        .expect("write resources.res");
+
+        let report =
+            import_sgdk_project(&project, &donor).expect("import sgdk phase b fallback");
+
+        // Fallback explicito presente porque PNG < 8x8.
+        assert!(
+            report
+                .fallbacks
+                .iter()
+                .any(|f| f.contains("tilemap 'tiny'") && f.contains("cells[] vazio")),
+            "fallback explicito esperado quando PNG e muito pequeno: {:?}",
+            report.fallbacks
+        );
+
+        let tilemap = report
+            .primary_scene
+            .entities
+            .iter()
+            .find_map(|e| e.components.tilemap.as_ref())
+            .expect("tilemap entity ainda criada com fallback");
+        assert!(
+            tilemap.cells.is_empty(),
+            "cells[] deve permanecer vazio no fallback"
+        );
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn sgdk_phase_b_ledger_persists_scene_inventory_and_bumps_schema_version() {
+        let donor = temp_dir("sgdk-phaseb-ledger-donor");
+        let project = temp_dir("sgdk-phaseb-ledger-project");
+        create_project_skeleton(&project, "SGDK Phase B Ledger", "megadrive")
+            .expect("create project skeleton");
+        write_multi_scene_sgdk_donor_fixture(&donor);
+
+        let report =
+            import_sgdk_project(&project, &donor).expect("import sgdk phase b ledger");
+        let manifest_rel = report
+            .manifest_path
+            .as_deref()
+            .expect("manifest_path presente no relatorio");
+        let manifest_abs = project.join(manifest_rel);
+        let raw = fs::read_to_string(&manifest_abs).expect("read ledger");
+        let ledger: SgdkImportLedger =
+            serde_json::from_str(&raw).expect("parse ledger json");
+
+        assert_eq!(ledger.schema_version, SGDK_IMPORT_LEDGER_SCHEMA);
+        assert_eq!(
+            ledger.scenes.len(),
+            report.imported_scenes,
+            "ledger.scenes deve listar 1 primary + cenas secundarias"
+        );
+        let primary_entry = ledger
+            .scenes
+            .iter()
+            .find(|s| s.role == "primary")
+            .expect("ledger.scenes deve ter entrada primary");
+        assert_eq!(primary_entry.scene_path, "scenes/main.json");
+        assert!(primary_entry.tilemap_cells > 0);
+
+        let secondaries: Vec<_> = ledger
+            .scenes
+            .iter()
+            .filter(|s| s.role == "secondary_tilemap")
+            .collect();
+        assert_eq!(secondaries.len(), 2);
+        for secondary in secondaries {
+            assert!(secondary.scene_path.starts_with("scenes/"));
+            assert_ne!(secondary.scene_path, "scenes/main.json");
+            assert_eq!(secondary.tilemap_cells, 16 * 16);
+        }
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn sgdk_phase_b_reimport_multi_scene_is_idempotent_and_does_not_duplicate_scene_files() {
+        let donor = temp_dir("sgdk-phaseb-reimport-donor");
+        let project = temp_dir("sgdk-phaseb-reimport-project");
+        create_project_skeleton(&project, "SGDK Phase B Reimport", "megadrive")
+            .expect("create project skeleton");
+        write_multi_scene_sgdk_donor_fixture(&donor);
+
+        let first = import_sgdk_project(&project, &donor).expect("import sgdk first pass");
+        let first_scene_files: Vec<_> = fs::read_dir(project.join("scenes"))
+            .expect("list scenes after first pass")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .collect();
+
+        let second = import_sgdk_project(&project, &donor).expect("import sgdk second pass");
+        assert_eq!(first.imported_scenes, second.imported_scenes);
+        assert_eq!(
+            first.additional_scenes.len(),
+            second.additional_scenes.len()
+        );
+
+        let second_scene_files: Vec<_> = fs::read_dir(project.join("scenes"))
+            .expect("list scenes after second pass")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .collect();
+        let mut a = first_scene_files.clone();
+        let mut b = second_scene_files.clone();
+        a.sort();
+        b.sort();
+        assert_eq!(
+            a, b,
+            "reimport nao pode criar arquivos de cena novos ({:?} vs {:?})",
+            a, b
+        );
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn sgdk_phase_c_reimport_preserves_sprite_animations_and_collision_map() {
+        let donor = temp_dir("sgdk-phasec-reimport-donor");
+        let project = temp_dir("sgdk-phasec-reimport-project");
+        create_project_skeleton(&project, "SGDK Phase C Reimport", "megadrive").expect("skel");
+        write_generic_sgdk_donor_fixture(&donor);
+        let first = import_sgdk_project(&project, &donor).expect("first import");
+        let second = import_sgdk_project(&project, &donor).expect("second import");
+        let h1 = first
+            .primary_scene
+            .entities
+            .iter()
+            .find(|e| e.entity_id == "hero")
+            .expect("hero first");
+        let h2 = second
+            .primary_scene
+            .entities
+            .iter()
+            .find(|e| e.entity_id == "hero")
+            .expect("hero second");
+        assert_eq!(
+            h1.components.sprite.as_ref().unwrap().animations,
+            h2.components.sprite.as_ref().unwrap().animations
+        );
+        assert_eq!(
+            first.primary_scene.collision_map,
+            second.primary_scene.collision_map
+        );
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn sgdk_phase_d_main_c_missing_keeps_external_refs_empty_and_emits_hint() {
+        let donor = temp_dir("sgdk-phase-d-nomain");
+        let project = temp_dir("sgdk-phase-d-proj");
+        create_project_skeleton(&project, "SGDK D", "megadrive").expect("skel");
+        fs::create_dir_all(donor.join("res").join("images")).expect("img dir");
+        image::RgbaImage::from_pixel(16, 16, image::Rgba([10, 20, 30, 255]))
+            .save(donor.join("res").join("images").join("hero.png"))
+            .expect("hero png");
+        fs::write(
+            donor.join("res").join("resources.res"),
+            "SPRITE hero images/hero.png 2 2 NONE\n",
+        )
+        .expect("res");
+        let report = import_sgdk_project(&project, &donor).expect("import");
+        let hero = report
+            .primary_scene
+            .entities
+            .iter()
+            .find(|e| e.entity_id == "hero")
+            .expect("hero");
+        let logic = hero.components.logic.as_ref().expect("logic");
+        assert!(logic.external_source_refs.is_empty());
+        assert!(
+            logic
+                .logic_hints
+                .iter()
+                .any(|h| h.contains("nenhum padrao distintivo")),
+            "hints: {:?}",
+            logic.logic_hints
+        );
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn sgdk_phase_e_import_edit_save_reload_and_build_emits_rom_header() {
+        use crate::compiler::build_orch::{run_build_with_environment, BuildEnvironment};
+
+        let donor = temp_dir("sgdk-phasee-d");
+        let project = temp_dir("sgdk-phasee-p");
+        create_project_skeleton(&project, "SGDK E2E", "megadrive").expect("skel");
+        write_generic_sgdk_donor_fixture(&donor);
+        import_sgdk_project(&project, &donor).expect("import");
+
+        let mut scene = load_scene(&project, DEFAULT_ENTRY_SCENE).expect("load");
+        let idx = scene
+            .entities
+            .iter()
+            .position(|e| e.entity_id == "hero")
+            .expect("hero");
+        scene.entities[idx].transform.x += 13;
+        save_scene(&project, DEFAULT_ENTRY_SCENE, &scene).expect("save");
+        let reopen = load_scene(&project, DEFAULT_ENTRY_SCENE).expect("reopen");
+        assert_eq!(reopen.entities[idx].transform.x, scene.entities[idx].transform.x);
+
+        let toolchain = temp_dir("sgdk-fake-tool");
+        let bin = toolchain.join("bin");
+        fs::create_dir_all(&bin).expect("bin");
+        let make = if cfg!(target_os = "windows") {
+            let p = bin.join("fake-make.cmd");
+            fs::write(
+                &p,
+                "@echo off\r\n\
+                 if not exist out mkdir out\r\n\
+                 powershell -NoProfile -Command \"$bytes = New-Object byte[] 512; [System.Text.Encoding]::ASCII.GetBytes('SEGA MEGA DRIVE').CopyTo($bytes, 256); [IO.File]::WriteAllBytes('out\\artifact.md', $bytes)\"\r\n\
+                 exit /b 0\r\n",
+            )
+            .expect("write fake make");
+            p
+        } else {
+            let p = bin.join("fake-make.sh");
+            fs::write(
+                &p,
+                "#!/bin/sh\n\
+                 mkdir -p out\n\
+                 python3 - <<'PY'\n\
+import pathlib\n\
+rom = bytearray(512)\n\
+rom[0x100:0x10F] = b'SEGA MEGA DRIVE'\n\
+pathlib.Path('out/artifact.md').write_bytes(rom)\n\
+PY\n",
+            )
+            .expect("write fake make");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = fs::metadata(&p).unwrap().permissions();
+                perms.set_mode(0o755);
+                fs::set_permissions(&p, perms).unwrap();
+            }
+            p
+        };
+        let environment = BuildEnvironment {
+            sgdk_root: Some(toolchain.clone()),
+            sgdk_make_program: Some(make),
+            ..BuildEnvironment::default()
+        };
+        let result = run_build_with_environment(&project, &environment, |_| {});
+        assert!(result.ok, "build falhou: {:?}", result.log);
+        let rom_bytes = fs::read(&result.rom_path).expect("rom bytes");
+        assert!(
+            rom_bytes.windows(15).any(|w| w == b"SEGA MEGA DRIVE"),
+            "ROM deve conter cabecalho MD minimo do fake toolchain"
+        );
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+        let _ = fs::remove_dir_all(&toolchain);
     }
 }

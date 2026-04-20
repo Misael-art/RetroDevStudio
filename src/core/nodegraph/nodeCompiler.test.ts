@@ -189,7 +189,17 @@ describe("NodeGraph serialization", () => {
 
     expect(serialized).toContain('"type":"event_start"');
     expect(serialized).toContain('"type":"sprite_move"');
-    expect(deserializeNodeGraph(serialized)).toEqual(graph);
+    const restored = deserializeNodeGraph(serialized);
+    expect(restored.edges).toEqual(graph.edges);
+    expect(restored.nodes).toHaveLength(graph.nodes.length);
+    for (let i = 0; i < graph.nodes.length; i++) {
+      expect(restored.nodes[i]).toMatchObject({
+        id: graph.nodes[i].id,
+        type: graph.nodes[i].type,
+        params: graph.nodes[i].params,
+      });
+    }
+    expect(restored.nodes.every((n) => n.outputs.length > 0)).toBe(true);
   });
 
   it("keeps display names separate from serialized technical ids", () => {
@@ -255,6 +265,66 @@ describe("NodeGraph serialization", () => {
     });
     expect(hydrated.nodes[1].inputs.length).toBeGreaterThan(0);
     expect(hydrated.nodes[1].outputs.length).toBeGreaterThan(0);
+  });
+
+  it("SGDK import: portos parciais no JSON fundem-se com NODE_DEFS e arestas invalidas caem fora", () => {
+    const serialized = JSON.stringify({
+      version: 1,
+      nodes: [
+        {
+          id: "start",
+          type: "event_start",
+          label: "On Start",
+          x: 0,
+          y: 0,
+          inputs: [],
+          outputs: [{ id: "exec", label: ">", kind: "exec" }],
+          params: {},
+        },
+        {
+          id: "move_sprite",
+          type: "sprite_move",
+          label: "Move Sprite",
+          x: 0,
+          y: 0,
+          inputs: [{ id: "exec", label: ">", kind: "exec" }],
+          outputs: [{ id: "exec", label: ">", kind: "exec" }],
+          params: { target: "hero", dx: 2, dy: 0 },
+        },
+        {
+          id: "scroll_bg",
+          type: "scroll_tilemap",
+          label: "Scroll",
+          x: 0,
+          y: 0,
+          inputs: [{ id: "exec", label: ">", kind: "exec" }],
+          outputs: [{ id: "exec", label: ">", kind: "exec" }],
+          params: { layer: "BG_A", dx: -1, dy: 0 },
+        },
+      ],
+      edges: [
+        {
+          id: "e_ok",
+          fromNode: "start",
+          fromPort: "exec",
+          toNode: "move_sprite",
+          toPort: "exec",
+        },
+        {
+          id: "e_bad",
+          fromNode: "ghost",
+          fromPort: "exec",
+          toNode: "move_sprite",
+          toPort: "exec",
+        },
+      ],
+    });
+    const g = deserializeNodeGraph(serialized);
+    expect(g.nodes).toHaveLength(3);
+    const move = g.nodes.find((n) => n.id === "move_sprite");
+    expect(move?.inputs.length).toBe(3);
+    expect(g.edges).toHaveLength(1);
+    expect(g.edges[0].id).toBe("e_ok");
   });
 });
 

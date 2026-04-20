@@ -745,3 +745,192 @@ describe("startup messaging", () => {
     expect(startupMessage).not.toContain("MVP completo");
   });
 });
+
+// ── Tilemap cell painting ─────────────────────────────────────────────────────
+
+function makeTilemapEntity(
+  id: string,
+  mapWidth = 4,
+  mapHeight = 3,
+  cells?: number[]
+): Entity {
+  return {
+    entity_id: id,
+    prefab: null,
+    transform: { x: 0, y: 0 },
+    components: {
+      tilemap: {
+        tileset: "assets/tilesets/bg.png",
+        map_width: mapWidth,
+        map_height: mapHeight,
+        scroll_x: 0,
+        scroll_y: 0,
+        ...(cells ? { cells } : {}),
+      },
+    },
+  };
+}
+
+describe("paintTilemapCell", () => {
+  it("materializa cells[] sob demanda e pinta a célula correta (row-major)", () => {
+    const tm = makeTilemapEntity("tm1", 4, 3);
+    useEditorStore.setState({
+      activeScene: { ...EMPTY_SCENE, entities: [tm] },
+      activeSceneSource: { ...EMPTY_SCENE, entities: [tm] },
+    });
+    useEditorStore.getState().paintTilemapCell("tm1", 2, 1, 7);
+    const patched = useEditorStore.getState().activeScene!.entities[0];
+    const cells = patched.components.tilemap!.cells!;
+    expect(cells).toHaveLength(12);
+    // índice row-major: row*width + col = 1*4 + 2 = 6
+    expect(cells[6]).toBe(7);
+    // demais células permanecem 0
+    expect(cells.filter((v) => v !== 0)).toEqual([7]);
+  });
+
+  it("rejeita coordenadas fora da malha sem mutar o estado", () => {
+    const tm = makeTilemapEntity("tm1", 4, 3);
+    useEditorStore.setState({
+      activeScene: { ...EMPTY_SCENE, entities: [tm] },
+      activeSceneSource: { ...EMPTY_SCENE, entities: [tm] },
+    });
+    const revBefore = useEditorStore.getState().sceneRevision;
+    useEditorStore.getState().paintTilemapCell("tm1", 99, 1, 3);
+    useEditorStore.getState().paintTilemapCell("tm1", -1, 0, 3);
+    useEditorStore.getState().paintTilemapCell("tm1", 0, 99, 3);
+    const patched = useEditorStore.getState().activeScene!.entities[0];
+    expect(patched.components.tilemap!.cells ?? []).toEqual([]);
+    expect(useEditorStore.getState().sceneRevision).toBe(revBefore);
+  });
+
+  it("não duplica mutação quando pinta com o mesmo tileIndex já presente", () => {
+    const tm = makeTilemapEntity("tm1", 2, 2, [0, 5, 0, 0]);
+    useEditorStore.setState({
+      activeScene: { ...EMPTY_SCENE, entities: [tm] },
+      activeSceneSource: { ...EMPTY_SCENE, entities: [tm] },
+    });
+    const revBefore = useEditorStore.getState().sceneRevision;
+    useEditorStore.getState().paintTilemapCell("tm1", 1, 0, 5);
+    expect(useEditorStore.getState().sceneRevision).toBe(revBefore);
+  });
+});
+
+describe("fillTilemapRect", () => {
+  it("preenche o retângulo inclusivo e cria uma única entrada de undo", () => {
+    const tm = makeTilemapEntity("tm1", 4, 3);
+    useEditorStore.setState({
+      activeScene: { ...EMPTY_SCENE, entities: [tm] },
+      activeSceneSource: { ...EMPTY_SCENE, entities: [tm] },
+    });
+    const undoLenBefore = useEditorStore.getState().undoStack.length;
+    useEditorStore.getState().fillTilemapRect("tm1", 1, 0, 2, 1, 9);
+    const cells = useEditorStore.getState().activeScene!.entities[0].components.tilemap!.cells!;
+    // retângulo [1..2] × [0..1] → 4 células (row 0: idx 1,2; row 1: idx 5,6)
+    expect(cells[1]).toBe(9);
+    expect(cells[2]).toBe(9);
+    expect(cells[5]).toBe(9);
+    expect(cells[6]).toBe(9);
+    expect(cells.filter((v) => v === 9)).toHaveLength(4);
+    expect(useEditorStore.getState().undoStack.length).toBe(undoLenBefore + 1);
+  });
+
+  it("recorta retângulo fora da malha", () => {
+    const tm = makeTilemapEntity("tm1", 3, 3);
+    useEditorStore.setState({
+      activeScene: { ...EMPTY_SCENE, entities: [tm] },
+      activeSceneSource: { ...EMPTY_SCENE, entities: [tm] },
+    });
+    useEditorStore.getState().fillTilemapRect("tm1", -5, -5, 1, 1, 2);
+    const cells = useEditorStore.getState().activeScene!.entities[0].components.tilemap!.cells!;
+    // recortado para [0..1]×[0..1] → 4 células
+    expect(cells.filter((v) => v === 2)).toHaveLength(4);
+  });
+});
+
+describe("fillTilemapFlood", () => {
+  it("preenche região 4-vizinhança a partir do seed", () => {
+    // Malha 3×3 com ilha de zeros cercada por 1s:
+    // 1 1 1
+    // 1 0 0   → flood em (1,1) com tile 7
+    // 1 0 0
+    const tm = makeTilemapEntity("tm1", 3, 3, [1, 1, 1, 1, 0, 0, 1, 0, 0]);
+    useEditorStore.setState({
+      activeScene: { ...EMPTY_SCENE, entities: [tm] },
+      activeSceneSource: { ...EMPTY_SCENE, entities: [tm] },
+    });
+    useEditorStore.getState().fillTilemapFlood("tm1", 1, 1, 7);
+    const cells = useEditorStore.getState().activeScene!.entities[0].components.tilemap!.cells!;
+    expect(cells).toEqual([1, 1, 1, 1, 7, 7, 1, 7, 7]);
+  });
+
+  it("é no-op quando seed já possui o tileIndex alvo", () => {
+    const tm = makeTilemapEntity("tm1", 2, 2, [3, 3, 3, 3]);
+    useEditorStore.setState({
+      activeScene: { ...EMPTY_SCENE, entities: [tm] },
+      activeSceneSource: { ...EMPTY_SCENE, entities: [tm] },
+    });
+    const revBefore = useEditorStore.getState().sceneRevision;
+    useEditorStore.getState().fillTilemapFlood("tm1", 0, 0, 3);
+    expect(useEditorStore.getState().sceneRevision).toBe(revBefore);
+  });
+});
+
+describe("clearTilemapCells", () => {
+  it("remove cells[] para restaurar o fallback de tileset esticado", () => {
+    const tm = makeTilemapEntity("tm1", 2, 2, [1, 2, 3, 4]);
+    useEditorStore.setState({
+      activeScene: { ...EMPTY_SCENE, entities: [tm] },
+      activeSceneSource: { ...EMPTY_SCENE, entities: [tm] },
+    });
+    useEditorStore.getState().clearTilemapCells("tm1");
+    const patched = useEditorStore.getState().activeScene!.entities[0];
+    expect(patched.components.tilemap!.cells).toBeUndefined();
+    const srcPatched = useEditorStore.getState().activeSceneSource!.entities[0];
+    expect(srcPatched.components.tilemap!.cells).toBeUndefined();
+  });
+
+  it("é no-op quando o tilemap já não possui cells[]", () => {
+    const tm = makeTilemapEntity("tm1", 2, 2);
+    useEditorStore.setState({
+      activeScene: { ...EMPTY_SCENE, entities: [tm] },
+      activeSceneSource: { ...EMPTY_SCENE, entities: [tm] },
+    });
+    const revBefore = useEditorStore.getState().sceneRevision;
+    useEditorStore.getState().clearTilemapCells("tm1");
+    expect(useEditorStore.getState().sceneRevision).toBe(revBefore);
+  });
+});
+
+// ── updateCollisionMap ───────────────────────────────────────────────────────
+
+describe("updateCollisionMap", () => {
+  it("propagates collision edits to activeSceneSource for persistence", () => {
+    const scene = { ...EMPTY_SCENE };
+    useEditorStore.setState({
+      activeScene: structuredClone(scene),
+      activeSceneSource: structuredClone(scene),
+      activeTarget: "megadrive",
+    });
+    useEditorStore.getState().updateCollisionMap(0, 1);
+
+    const state = useEditorStore.getState();
+    expect(state.activeScene?.collision_map).toBeDefined();
+    expect(state.activeScene!.collision_map!.data[0]).toBe(1);
+    expect(state.activeSceneSource?.collision_map).toBeDefined();
+    expect(state.activeSceneSource!.collision_map!.data[0]).toBe(1);
+  });
+
+  it("auto-initializes collision_map with correct dimensions for target", () => {
+    useEditorStore.setState({
+      activeScene: structuredClone(EMPTY_SCENE),
+      activeSceneSource: structuredClone(EMPTY_SCENE),
+      activeTarget: "snes",
+    });
+    useEditorStore.getState().updateCollisionMap(5, 1);
+
+    const map = useEditorStore.getState().activeScene!.collision_map!;
+    expect(map.width).toBe(32);
+    expect(map.height).toBe(28);
+    expect(map.data[5]).toBe(1);
+  });
+});

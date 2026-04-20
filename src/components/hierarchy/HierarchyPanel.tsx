@@ -41,7 +41,7 @@ const GROUP_LABELS: Record<string, string> = {
 
 interface EntityGroup {
   type: string;
-  entities: Array<{ entity_id: string; display_name?: string | null; prefab?: string | null; components?: { sprite?: unknown; collision?: unknown; tilemap?: unknown; camera?: unknown; audio?: unknown } }>;
+  entities: Array<{ entity_id: string; display_name?: string | null; prefab?: string | null; components?: { sprite?: unknown; collision?: unknown; tilemap?: { map_width?: number; map_height?: number; cells?: number[] } | undefined; camera?: unknown; audio?: unknown } }>;
 }
 
 function entityType(entity: { components?: { sprite?: unknown; collision?: unknown; tilemap?: unknown; camera?: unknown; audio?: unknown } }): string {
@@ -50,6 +50,19 @@ function entityType(entity: { components?: { sprite?: unknown; collision?: unkno
   if (entity.components?.sprite) return "sprite";
   if (entity.components?.audio && !entity.components?.sprite) return "audio";
   return "object";
+}
+
+function tilemapPaintInfo(entity: {
+  components?: { tilemap?: { map_width?: number; map_height?: number; cells?: number[] } };
+}): { filled: number; total: number } | null {
+  const tm = entity.components?.tilemap;
+  if (!tm) return null;
+  const total = (tm.map_width ?? 0) * (tm.map_height ?? 0);
+  const filled = (tm.cells ?? []).reduce(
+    (acc, v) => acc + ((v | 0) > 0 ? 1 : 0),
+    0
+  );
+  return { filled, total };
 }
 
 export default function HierarchyPanel() {
@@ -548,7 +561,23 @@ export default function HierarchyPanel() {
                           <span title={entity.prefab ? `Prefab: ${entity.prefab}` : entity.entity_id}>
                             {getEntityDisplayName(entity)}
                           </span>
-                          <span className="ml-auto text-[#45475a]">{type}</span>
+                          {type === "tilemap" && (() => {
+                            const info = tilemapPaintInfo(entity);
+                            if (!info || info.total === 0) return null;
+                            return (
+                              <span
+                                className={`ml-auto rounded px-1 py-0.5 font-mono text-[9px] ${
+                                  info.filled > 0
+                                    ? "bg-[#a6e3a1]/10 text-[#a6e3a1]"
+                                    : "text-[#45475a]"
+                                }`}
+                                title={`${info.filled}/${info.total} células pintadas`}
+                              >
+                                {info.filled}/{info.total}
+                              </span>
+                            );
+                          })()}
+                          {type !== "tilemap" && <span className="ml-auto text-[#45475a]">{type}</span>}
                         </li>
                       );
                     })}

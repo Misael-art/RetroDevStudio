@@ -2101,19 +2101,103 @@ fn import_sgdk_project_at_base_dir(
     project_name: &str,
     sgdk_path: &Path,
 ) -> Result<OpenProjectResult, String> {
-    let (project_dir, notice) = reserve_project_dir(base_dir, project_name)?;
+    let (project_dir, dir_notice) = reserve_project_dir(base_dir, project_name)?;
 
     let project = create_project_skeleton(&project_dir, project_name, "megadrive")
         .map_err(|error| error.to_string())?;
-    import_sgdk_scene(&project_dir, sgdk_path).map_err(|error| error.to_string())?;
+    let report = import_sgdk_scene(&project_dir, sgdk_path).map_err(|error| error.to_string())?;
     stamp_imported_sgdk_metadata(&project_dir, sgdk_path).map_err(|error| error.to_string())?;
+
+    let primary_scene_label = report
+        .primary_scene
+        .display_name
+        .clone()
+        .unwrap_or_else(|| report.primary_scene.scene_id.clone());
+    let manifest_hint = report
+        .manifest_path
+        .as_deref()
+        .map(|path| format!(" Manifesto registrado em {}.", path))
+        .unwrap_or_default();
+    let skipped_hint = if report.skipped_sources.is_empty() {
+        String::new()
+    } else {
+        let summary = report
+            .skipped_sources
+            .iter()
+            .map(|skipped| format!("[{}] {}", skipped.reason, skipped.source))
+            .collect::<Vec<_>>()
+            .join(" | ");
+        format!(
+            " {} origem(ns) ignoradas: {}",
+            report.skipped_sources.len(),
+            summary
+        )
+    };
+    let warnings_hint = if report.warnings.is_empty() {
+        String::new()
+    } else {
+        format!(" {} warning(s).", report.warnings.len())
+    };
+    let fallbacks_hint = if report.fallbacks.is_empty() {
+        String::new()
+    } else {
+        format!(" {} fallback(s) rastreados.", report.fallbacks.len())
+    };
+    let summary_hint = format!(
+        " Doador {} ({} recursos: {} aceitos / {} ignorados, fingerprint {}).",
+        report.source_summary.donor_root,
+        report.source_summary.resources_total,
+        report.source_summary.resources_accepted,
+        report.source_summary.resources_skipped,
+        report.source_summary.fingerprint
+    );
+    // Fase B: multi-scene anchorage -> expor explicitamente o caminho da cena
+    // primaria + inventario de cenas secundarias, para que o frontend possa
+    // navegar/listar sem inferir nomes.
+    let scenes_hint = if report.additional_scenes.is_empty() {
+        format!(" Cena primaria persistida em {}.", report.primary_scene_path)
+    } else {
+        let secondary_summary = report
+            .additional_scenes
+            .iter()
+            .map(|descriptor| {
+                format!(
+                    "{} [id={}, display='{}', {} entities, {} cells, {} tiles unicos]",
+                    descriptor.scene_path,
+                    descriptor.scene_id,
+                    descriptor.display_name,
+                    descriptor.entity_count,
+                    descriptor.tilemap_cells,
+                    descriptor.tilemap_unique_tiles
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" | ");
+        format!(
+            " Cena primaria persistida em {}. {} cena(s) adicional(is): {}.",
+            report.primary_scene_path,
+            report.additional_scenes.len(),
+            secondary_summary
+        )
+    };
+    let import_notice = Some(format!(
+        "Importacao SGDK concluida com {} cena(s) nativa(s). Cena inicial: {}.{}{}{}{}{}{}",
+        report.imported_scenes,
+        primary_scene_label,
+        manifest_hint,
+        skipped_hint,
+        warnings_hint,
+        fallbacks_hint,
+        summary_hint,
+        scenes_hint
+    ));
 
     Ok(OpenProjectResult {
         selected: true,
         path: project_dir.to_string_lossy().to_string(),
         name: project.name,
         base_dir: Some(base_dir.to_string_lossy().to_string()),
-        notice,
+        notice: merge_project_notices(dir_notice, import_notice),
     })
 }
 

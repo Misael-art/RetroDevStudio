@@ -164,7 +164,7 @@ pub struct LogicVariable {
     pub max: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct LogicComponent {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -175,6 +175,10 @@ pub struct LogicComponent {
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub logic_hints: Vec<String>,
+    /// Caminhos relativos ao doador (ex.: `src/main.c`) rastreados sem embedar AST.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub external_source_refs: Vec<String>,
     #[serde(default)]
     pub variables: HashMap<String, LogicVariable>,
 }
@@ -201,6 +205,56 @@ pub struct TilemapComponent {
     pub scroll_x: i32,
     #[serde(default, deserialize_with = "deserialize_f64_to_i32")]
     pub scroll_y: i32,
+    /// Pintura por célula (P30+). Vetor linear row-major de tamanho
+    /// `map_width * map_height`; valor 0 = célula vazia, >0 = índice do tile.
+    /// Omisso/vazio em projetos importados — o renderer honra o fallback
+    /// do tileset esticado enquanto não houver malha materializada.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cells: Vec<u32>,
+}
+
+#[cfg(test)]
+mod tilemap_tests {
+    use super::*;
+
+    #[test]
+    fn tilemap_without_cells_roundtrips_without_field() {
+        let tm = TilemapComponent {
+            tileset: "assets/tilesets/bg.png".into(),
+            map_width: 4,
+            map_height: 2,
+            scroll_x: 0,
+            scroll_y: 0,
+            cells: vec![],
+        };
+        let json = serde_json::to_string(&tm).unwrap();
+        assert!(!json.contains("cells"), "empty cells must not serialize: {json}");
+        let parsed: TilemapComponent = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.cells, Vec::<u32>::new());
+    }
+
+    #[test]
+    fn tilemap_with_cells_roundtrips() {
+        let tm = TilemapComponent {
+            tileset: "assets/tilesets/bg.png".into(),
+            map_width: 3,
+            map_height: 2,
+            scroll_x: 0,
+            scroll_y: 0,
+            cells: vec![0, 1, 2, 3, 0, 5],
+        };
+        let json = serde_json::to_string(&tm).unwrap();
+        assert!(json.contains("\"cells\":[0,1,2,3,0,5]"));
+        let parsed: TilemapComponent = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.cells, vec![0u32, 1, 2, 3, 0, 5]);
+    }
+
+    #[test]
+    fn legacy_tilemap_without_cells_field_parses_empty() {
+        let json = r#"{"tileset":"t.png","map_width":2,"map_height":2}"#;
+        let parsed: TilemapComponent = serde_json::from_str(json).unwrap();
+        assert!(parsed.cells.is_empty());
+    }
 }
 
 // ── Components container ──────────────────────────────────────────────────────

@@ -249,6 +249,71 @@ function drawRepeatedAsset(
   }
 }
 
+// ── Tilemap cells render ─────────────────────────────────────────────────────
+// Calcula quantas colunas de tiles o tileset real expõe. Um tileset com
+// dimensões não-múltiplas do tile (p.ex. palette PNG geradas por ferramentas
+// externas) são tratadas com `Math.floor` — slices fora do atlas são ignoradas.
+function computeTilesetColumns(
+  asset: ViewportAssetCacheEntry,
+  tileSize: number
+): number {
+  if (!asset.width || tileSize <= 0) return 0;
+  return Math.max(0, Math.floor(asset.width / tileSize));
+}
+
+/**
+ * Renderiza a malha pintada (`cells[]`) de um tilemap usando slices reais
+ * do tileset. Desenha célula-a-célula com `drawImage(source, sx, sy, ...)`
+ * garantindo WYSIWYG entre paleta/ghost/viewport.
+ *
+ * - Células vazias (índice 0) são puladas.
+ * - Índices fora do atlas são desenhados como retângulo de aviso (não silencia).
+ * - Scroll inteiro desloca a composição (positivo = puxa para esquerda/topo).
+ */
+function drawTilemapCells(
+  context: CanvasRenderingContext2D,
+  asset: ViewportAssetCacheEntry,
+  originX: number,
+  originY: number,
+  mapWidth: number,
+  mapHeight: number,
+  cells: number[],
+  tileSize: number,
+  scrollX: number,
+  scrollY: number
+): void {
+  if (!asset.source || tileSize <= 0) return;
+  const cols = computeTilesetColumns(asset, tileSize);
+  if (cols <= 0) return;
+  const totalCells = mapWidth * mapHeight;
+  context.save();
+  for (let i = 0; i < Math.min(cells.length, totalCells); i++) {
+    const value = cells[i] | 0;
+    if (value <= 0) continue;
+    const atlasIdx = value - 1;
+    const ax = (atlasIdx % cols) * tileSize;
+    const ay = Math.floor(atlasIdx / cols) * tileSize;
+    if (asset.width && ax + tileSize > asset.width) continue;
+    if (asset.height && ay + tileSize > asset.height) continue;
+    const col = i % mapWidth;
+    const row = (i - col) / mapWidth;
+    const dx = originX + col * tileSize - scrollX;
+    const dy = originY + row * tileSize - scrollY;
+    context.drawImage(
+      asset.source,
+      ax,
+      ay,
+      tileSize,
+      tileSize,
+      dx,
+      dy,
+      tileSize,
+      tileSize
+    );
+  }
+  context.restore();
+}
+
 function getEntityBounds(entity: Entity, target: "megadrive" | "snes"): EntityBounds {
   if (entity.components?.tilemap) {
     return {
@@ -390,6 +455,15 @@ export default function ViewportPanel({
     updateCollisionMap,
     activeLayerId,
     assignEntityToLayer,
+    tilePaintTool,
+    activeTilemapId,
+    tilePaintSize,
+    tilePaintRectPreview,
+    setTilePaintRectPreview,
+    setActiveTilemapId,
+    paintTilemapCell,
+    fillTilemapRect,
+    fillTilemapFlood,
   } = useEditorStore();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -439,6 +513,17 @@ export default function ViewportPanel({
     paintedInDrag: boolean;
     /** 1 = paint solid, 0 = erase */
     value: 0 | 1;
+  } | null>(null);
+  const tileDragRef = useRef<{
+    entityId: string;
+    tool: "pencil" | "eraser" | "rect";
+    /** Para pencil/eraser: último (col,row) pintado — dedup durante drag. */
+    lastCellKey: string | null;
+    /** Para rect: origem do retângulo. */
+    rectOrigin: { col: number; row: number } | null;
+    /** Tile a ser aplicado (0 = apaga). */
+    tileIndex: number;
+    paintedInDrag: boolean;
   } | null>(null);
 
   const [emulatorActive, setEmulatorActive] = useState(false);
@@ -1673,16 +1758,39 @@ export default function ViewportPanel({
           }
 
           const bounds = getEntityBounds(entity, activeTarget);
-          drawRepeatedAsset(
-            context,
-            tilemapAsset,
-            bounds.x,
-            bounds.y,
-            bounds.width,
-            bounds.height,
-            tilemap.scroll_x ?? 0,
-            tilemap.scroll_y ?? 0
-          );
+          const cellsArr = tilemap.cells;
+          const expectedCells = tilemap.map_width * tilemap.map_height;
+          const hasCells =
+            Array.isArray(cellsArr) &&
+            cellsArr.length === expectedCells &&
+            cellsArr.some((v) => (v | 0) > 0);
+          if (hasCells) {
+            // WYSIWYG: desenha cada célula pintada com slice real do tileset.
+            drawTilemapCells(
+              context,
+              tilemapAsset,
+              bounds.x,
+              bounds.y,
+              tilemap.map_width,
+              tilemap.map_height,
+              cellsArr as number[],
+              8,
+              tilemap.scroll_x ?? 0,
+              tilemap.scroll_y ?? 0
+            );
+          } else {
+            // Fallback legado (projetos importados sem `cells[]`): desenho esticado.
+            drawRepeatedAsset(
+              context,
+              tilemapAsset,
+              bounds.x,
+              bounds.y,
+              bounds.width,
+              bounds.height,
+              tilemap.scroll_x ?? 0,
+              tilemap.scroll_y ?? 0
+            );
+          }
         });
     }
 
@@ -1767,9 +1875,34 @@ export default function ViewportPanel({
           isSelected || editorMode === "collision" || editorMode === "paint" || editorMode === "erase";
 
         if (tilemapImageLoaded && tilemapAsset.source) {
+          const cells = tilemap.cells;
+          const expectedCells = tilemap.map_width * tilemap.map_height;
+          const hasCells =
+            Array.isArray(cells) &&
+            cells.length === expectedCells &&
+            cells.some((v) => (v | 0) > 0);
           context.save();
           context.globalAlpha = 0.82;
-          context.drawImage(tilemapAsset.source, x, y, mapWidth, mapHeight);
+          if (hasCells) {
+            // WYSIWYG: renderiza célula-a-célula usando slices reais do tileset.
+            context.fillStyle = "rgba(148,226,213,0.05)";
+            context.fillRect(x, y, mapWidth, mapHeight);
+            drawTilemapCells(
+              context,
+              tilemapAsset,
+              x,
+              y,
+              tilemap.map_width,
+              tilemap.map_height,
+              cells as number[],
+              8,
+              tilemap.scroll_x ?? 0,
+              tilemap.scroll_y ?? 0
+            );
+          } else {
+            // Fallback legado: projetos importados sem cells[] mantêm draw esticado.
+            context.drawImage(tilemapAsset.source, x, y, mapWidth, mapHeight);
+          }
           context.restore();
         } else {
           context.fillStyle = "rgba(148,226,213,0.08)";
@@ -2192,7 +2325,70 @@ export default function ViewportPanel({
       }
     }
 
-    if (editorMode === "paint" && activeBrush && sceneMousePos) {
+    if (editorMode === "paint" && activeBrush?.kind === "tile" && sceneMousePos) {
+      // Ghost tile-sized, alinhado ao tilemap alvo.
+      const tileSize = tilePaintSize > 0 ? tilePaintSize : 8;
+      const target = resolveTilemapTarget(sceneMousePos.x, sceneMousePos.y);
+      if (target) {
+        const bounds = getEntityBounds(target.entity, activeTarget);
+        const ghostX = bounds.x + target.col * tileSize;
+        const ghostY = bounds.y + target.row * tileSize;
+        const screenX = Math.round(ghostX * viewportZoom);
+        const screenY = Math.round(ghostY * viewportZoom);
+        const screenSize = Math.round(tileSize * viewportZoom);
+        const isEraser = tilePaintTool === "eraser";
+        context.save();
+        context.globalAlpha = isEraser ? 0.18 : 0.3;
+        context.fillStyle = isEraser ? "#f38ba8" : "#a6e3a1";
+        context.fillRect(screenX, screenY, screenSize, screenSize);
+        context.globalAlpha = 0.85;
+        context.strokeStyle = isEraser ? "#f38ba8" : "#a6e3a1";
+        context.lineWidth = 1;
+        context.setLineDash([3, 2]);
+        context.strokeRect(screenX + 0.5, screenY + 0.5, screenSize, screenSize);
+        context.setLineDash([]);
+        context.restore();
+      }
+
+      // Rect preview durante drag
+      if (tilePaintRectPreview) {
+        const target = activeTilemapId
+          ? activeScene.entities.find((e) => e.entity_id === activeTilemapId)
+          : null;
+        if (target) {
+          const bounds = getEntityBounds(target, activeTarget);
+          const minC = Math.min(tilePaintRectPreview.c0, tilePaintRectPreview.c1);
+          const maxC = Math.max(tilePaintRectPreview.c0, tilePaintRectPreview.c1);
+          const minR = Math.min(tilePaintRectPreview.r0, tilePaintRectPreview.r1);
+          const maxR = Math.max(tilePaintRectPreview.r0, tilePaintRectPreview.r1);
+          const x0 = bounds.x + minC * tileSize;
+          const y0 = bounds.y + minR * tileSize;
+          const w = (maxC - minC + 1) * tileSize;
+          const h = (maxR - minR + 1) * tileSize;
+          context.save();
+          context.globalAlpha = 0.2;
+          context.fillStyle = "#f9e2af";
+          context.fillRect(
+            Math.round(x0 * viewportZoom),
+            Math.round(y0 * viewportZoom),
+            Math.round(w * viewportZoom),
+            Math.round(h * viewportZoom)
+          );
+          context.globalAlpha = 0.9;
+          context.strokeStyle = "#f9e2af";
+          context.lineWidth = 1.5;
+          context.setLineDash([5, 3]);
+          context.strokeRect(
+            Math.round(x0 * viewportZoom) + 0.5,
+            Math.round(y0 * viewportZoom) + 0.5,
+            Math.round(w * viewportZoom),
+            Math.round(h * viewportZoom)
+          );
+          context.setLineDash([]);
+          context.restore();
+        }
+      }
+    } else if (editorMode === "paint" && activeBrush && sceneMousePos) {
       const ghostSize = constrainSpriteFrameSize(
         activeTarget,
         activeBrush.assetPath ?? activeBrush.id,
@@ -2261,6 +2457,10 @@ export default function ViewportPanel({
     showTilemaps,
     snapPositionToGuides,
     viewportZoom,
+    tilePaintTool,
+    tilePaintSize,
+    tilePaintRectPreview,
+    activeTilemapId,
   ]);
 
   useEffect(() => {
@@ -2448,6 +2648,49 @@ export default function ViewportPanel({
     return matched ? { entity, handle: matched.handle } : null;
   }
 
+  /**
+   * Resolve a tilemap entity alvo de um clique (mx,my) e converte a coordenada
+   * para (col,row) dentro da malha. Usa:
+   *   1) `activeTilemapId` se definido (travado pelo painel contextual),
+   *   2) senão hit-test: primeira entidade-tilemap cujos bounds contêm (mx,my).
+   * Retorna `null` quando o clique cai fora de qualquer tilemap válido.
+   */
+  function resolveTilemapTarget(
+    mx: number,
+    my: number
+  ): { entity: Entity; col: number; row: number } | null {
+    if (!activeScene) return null;
+    const tileSize = tilePaintSize > 0 ? tilePaintSize : 8;
+    const candidates: Entity[] = [];
+    if (activeTilemapId) {
+      const locked = activeScene.entities.find((e) => e.entity_id === activeTilemapId);
+      if (locked && locked.components?.tilemap) candidates.push(locked);
+    }
+    if (candidates.length === 0) {
+      for (let i = activeScene.entities.length - 1; i >= 0; i--) {
+        const e = activeScene.entities[i];
+        if (e.components?.tilemap) candidates.push(e);
+      }
+    }
+    for (const entity of candidates) {
+      const bounds = getEntityBounds(entity, activeTarget);
+      if (
+        mx < bounds.x ||
+        my < bounds.y ||
+        mx >= bounds.x + bounds.width ||
+        my >= bounds.y + bounds.height
+      ) {
+        continue;
+      }
+      const col = Math.floor((mx - bounds.x) / tileSize);
+      const row = Math.floor((my - bounds.y) / tileSize);
+      const tm = entity.components.tilemap!;
+      if (col < 0 || row < 0 || col >= tm.map_width || row >= tm.map_height) continue;
+      return { entity, col, row };
+    }
+    return null;
+  }
+
   function handleMouseDown(event: React.MouseEvent<HTMLCanvasElement>) {
     const isPanIntent =
       event.button === 1 || (event.button === 0 && spacePressed);
@@ -2480,6 +2723,79 @@ export default function ViewportPanel({
         position: guideHit.position,
         creating: false,
       });
+      return;
+    }
+
+    // Tile paint: pencil/eraser/picker/rect/fill sobre entidade-tilemap.
+    // Acionado por `editorMode === "paint"` + `activeBrush.kind === "tile"`.
+    // Sem brush tile ou sem tilemap alvo → cai para o fluxo de sprite paint.
+    if (editorMode === "paint" && activeBrush?.kind === "tile") {
+      const target = resolveTilemapTarget(mx, my);
+      if (!target) {
+        return;
+      }
+      const tileIndex = activeBrush.tileIndex ?? 0;
+
+      if (tilePaintTool === "picker") {
+        const tm = target.entity.components.tilemap!;
+        const cellsArr = tm.cells ?? [];
+        const idx = target.row * tm.map_width + target.col;
+        const picked = cellsArr[idx] ?? 0;
+        setActiveBrush({
+          ...activeBrush,
+          tileIndex: picked,
+        });
+        logMessage("info", `[Tile] Picker: tile #${picked}.`);
+        return;
+      }
+
+      if (tilePaintTool === "fill") {
+        fillTilemapFlood(target.entity.entity_id, target.col, target.row, tileIndex);
+        void (async () => {
+          const { activeProjectDir: projectDir } = useEditorStore.getState();
+          if (projectDir) {
+            try {
+              await persistActiveScene(projectDir, "Viewport", "Fill tilemap aplicado.");
+            } catch (error: unknown) {
+              logMessage("error", `[Viewport] Falha ao salvar fill: ${describeError(error)}`);
+            }
+          }
+        })();
+        return;
+      }
+
+      if (tilePaintTool === "rect") {
+        tileDragRef.current = {
+          entityId: target.entity.entity_id,
+          tool: "rect",
+          lastCellKey: null,
+          rectOrigin: { col: target.col, row: target.row },
+          tileIndex,
+          paintedInDrag: false,
+        };
+        setTilePaintRectPreview({
+          c0: target.col,
+          r0: target.row,
+          c1: target.col,
+          r1: target.row,
+        });
+        setActiveTilemapId(target.entity.entity_id);
+        return;
+      }
+
+      // pencil / eraser (eraser = tileIndex 0)
+      const effectiveIndex = tilePaintTool === "eraser" ? 0 : tileIndex;
+      beginHistoryCapture();
+      paintTilemapCell(target.entity.entity_id, target.col, target.row, effectiveIndex);
+      tileDragRef.current = {
+        entityId: target.entity.entity_id,
+        tool: tilePaintTool === "eraser" ? "eraser" : "pencil",
+        lastCellKey: `${target.col},${target.row}`,
+        rectOrigin: null,
+        tileIndex: effectiveIndex,
+        paintedInDrag: true,
+      };
+      setActiveTilemapId(target.entity.entity_id);
       return;
     }
 
@@ -2612,6 +2928,36 @@ export default function ViewportPanel({
       setSceneMousePos({ x: mx, y: my });
     } else if (sceneMousePos) {
       setSceneMousePos(null);
+    }
+
+    // Tile paint drag — pencil/eraser pinta célula-a-célula; rect atualiza preview.
+    if (
+      editorMode === "paint" &&
+      activeBrush?.kind === "tile" &&
+      tileDragRef.current &&
+      event.buttons === 1
+    ) {
+      const drag = tileDragRef.current;
+      const target = resolveTilemapTarget(mx, my);
+      if (!target || target.entity.entity_id !== drag.entityId) {
+        return;
+      }
+      if (drag.tool === "rect" && drag.rectOrigin) {
+        setTilePaintRectPreview({
+          c0: drag.rectOrigin.col,
+          r0: drag.rectOrigin.row,
+          c1: target.col,
+          r1: target.row,
+        });
+        return;
+      }
+      const cellKey = `${target.col},${target.row}`;
+      if (cellKey !== drag.lastCellKey) {
+        paintTilemapCell(drag.entityId, target.col, target.row, drag.tileIndex);
+        drag.lastCellKey = cellKey;
+        drag.paintedInDrag = true;
+      }
+      return;
     }
 
     // Paint drag — stamp entities along mouse path with grid-cell dedup
@@ -2795,6 +3141,43 @@ export default function ViewportPanel({
           }
         }
       } else {
+        cancelHistoryCapture();
+      }
+      return;
+    }
+
+    // Tile paint drag commit — encerra pencil/eraser OR aplica rect ao soltar
+    const tileDrag = tileDragRef.current;
+    if (tileDrag) {
+      tileDragRef.current = null;
+      if (tileDrag.tool === "rect" && tileDrag.rectOrigin) {
+        const preview = useEditorStore.getState().tilePaintRectPreview;
+        setTilePaintRectPreview(null);
+        if (preview) {
+          fillTilemapRect(
+            tileDrag.entityId,
+            preview.c0,
+            preview.r0,
+            preview.c1,
+            preview.r1,
+            tileDrag.tileIndex
+          );
+          tileDrag.paintedInDrag = true;
+        }
+      }
+      if (tileDrag.paintedInDrag) {
+        if (tileDrag.tool !== "rect") {
+          commitHistoryCapture();
+        }
+        const { activeProjectDir: projectDir } = useEditorStore.getState();
+        if (projectDir) {
+          try {
+            await persistActiveScene(projectDir, "Viewport", "Tiles pintados.");
+          } catch (error: unknown) {
+            logMessage("error", `[Viewport] Falha ao salvar apos pintar tiles: ${describeError(error)}`);
+          }
+        }
+      } else if (tileDrag.tool !== "rect") {
         cancelHistoryCapture();
       }
       return;
@@ -3088,7 +3471,11 @@ export default function ViewportPanel({
                     ? "border-[#f38ba8] bg-[#f38ba8]/15 text-[#f38ba8]"
                     : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
                 }`}
-                title="Mostrar overlay de colisao"
+                title={
+                  activeScene?.collision_map
+                    ? `Overlay de colisão (${activeScene.collision_map.width}×${activeScene.collision_map.height} tiles importados/cena)`
+                    : "Mostrar overlay de colisao (sem collision_map na cena)"
+                }
               >
                 Col
               </button>

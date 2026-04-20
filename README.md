@@ -81,7 +81,7 @@ flowchart LR
 ### Core ja integrado ao fluxo principal
 
 - Menu inicial / criacao e abertura de projetos `.rds`
-- Scene workspace com `Hierarchy`, `Layers` e `Inspector`
+- Scene workspace com `Hierarchy`, `Layers`, `Inspector` e pintura real de tilemap (pencil/eraser/picker/rect/fill) com WYSIWYG do atlas
 - Game workspace com `Build & Run` e emulador integrado
 - Explorer workspace
 - Logic workspace / NodeGraph canonico (certificacao local, sem prova institucional dedicada ainda)
