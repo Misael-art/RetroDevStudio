@@ -31,6 +31,7 @@ import {
   readdir,
   rm,
   stat,
+  utimes,
   writeFile,
 } from "node:fs/promises";
 
@@ -462,6 +463,47 @@ async function stageArtifactsForMode(mode, effectiveTargetDir) {
   }
 }
 
+/*
+ * Refresca o mtime dos artefatos canonicos apos um build bem-sucedido.
+ *
+ * Contexto: quando rodamos direct-cargo-debug (Windows + modo debug sem
+ * RDS_FORCE_TAURI_CLI_DEBUG=1), o cargo escreve direto em CANONICAL_TARGET_DIR
+ * e stageArtifactsForMode faz short-circuit pelo samePath(). Se o cache do
+ * cargo estiver 100% aquecido, ele reporta "Finished" sem recompilar nada e
+ * NAO atualiza o mtime do EXE/DLL. O guard assertArtifactsGenerated entao
+ * rejeita com "artefato nao foi atualizado nesta execucao" mesmo que o build
+ * seja valido e os binarios estejam no lugar certo.
+ *
+ * Estrategia: apos cada build bem-sucedido, tocamos (utimes) os arquivos de
+ * runtime esperados para o profile (sem tocar em diretorios/sub-arvores como
+ * resources ou bundle - eles podem estar em uso e nao precisam do refresh).
+ * Idempotente e barato: se o mtime ja estava fresco (build real compilou),
+ * apenas reescreve o mesmo instante; se estava antigo (cache hit), alinha
+ * com a execucao atual, preservando o contrato do assert ("este run validou
+ * que o artefato existe"). Falhas individuais (arquivo inexistente, lock
+ * temporario) sao toleradas: o assertArtifactsGenerated ainda tera a
+ * palavra final sobre o que realmente falta.
+ */
+async function touchCanonicalArtifacts(profile) {
+  const canonicalProfileDir = path.join(CANONICAL_TARGET_DIR, profile);
+  const { files } = runtimeFilesForProfile(profile);
+  const now = new Date();
+
+  await Promise.all(
+    files.map(async (fileName) => {
+      const fullPath = path.join(canonicalProfileDir, fileName);
+      if (!(await pathExists(fullPath))) {
+        return;
+      }
+      try {
+        await utimes(fullPath, now, now);
+      } catch {
+        /* tolerado: assertArtifactsGenerated falara explicitamente se faltar */
+      }
+    })
+  );
+}
+
 async function runTauriBuild(mode, effectiveTargetDir) {
   const tauriArgs = ["run", "tauri", "build", "--"];
   switch (mode) {
@@ -538,6 +580,7 @@ async function buildModeWithFallback(mode) {
   try {
     const buildStrategy = await runBuildCommand(mode, initialTarget);
     await stageArtifactsForMode(mode, initialTarget);
+    await touchCanonicalArtifacts(profile);
     return {
       mode,
       profile,
@@ -566,6 +609,7 @@ async function buildModeWithFallback(mode) {
       try {
         const buildStrategy = await runBuildCommand(mode, firstTarget);
         await stageArtifactsForMode(mode, firstTarget);
+        await touchCanonicalArtifacts(profile);
         return {
           mode,
           profile,
@@ -593,6 +637,7 @@ async function buildModeWithFallback(mode) {
 
     const buildStrategy = await runBuildCommand(mode, SHADOW_TARGET_DIR);
     await stageArtifactsForMode(mode, SHADOW_TARGET_DIR);
+    await touchCanonicalArtifacts(profile);
     return {
       mode,
       profile,

@@ -220,6 +220,10 @@ struct SgdkImportLedgerPhaseD {
     /// Sprites com linha SPR_* no mesmo texto que o identificador do recurso (`entity_id@rel`).
     #[serde(default)]
     entity_spr_local_signal_hits: Vec<String>,
+    /// Familias de playback de audio detectadas no scan textual (`audio_xgm`, `audio_snd_xgm`,
+    /// `audio_snd_pcm`, `audio_psg`). Heuristica textual, nao substitui analise semantica.
+    #[serde(default)]
+    detected_audio_apis: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -930,6 +934,14 @@ struct SgdkDonorLogicScan {
     busy_loop_detected: bool,
     vblank_sync_detected: bool,
     spr_engine_detected: bool,
+    /// Chamadas de playback XGM (`XGM_startPlay`/`XGM_setLoopNumber`/`XGM2_startPlay`).
+    audio_xgm_detected: bool,
+    /// Chamadas de playback PCM via SND_* (`SND_startPlay_PCM`/`SND_PCM_startPlay`/`SND_startPlay_4PCM`).
+    audio_snd_pcm_detected: bool,
+    /// Chamadas de bridge SND para XGM (`SND_startPlay_XGM`/`SND_PAL_startPlay_XGM`).
+    audio_snd_xgm_detected: bool,
+    /// Chamadas diretas ao gerador PSG (`PSG_setEnvelope`/`PSG_setFrequency`).
+    audio_psg_detected: bool,
     /// Paths relativos ao root do doador (ex.: `src/main.c`, `src/player_control.c`).
     donor_logic_scanned_paths: Vec<String>,
     /// Texto fonte por path relativo (apenas ficheiros efetivamente visitados pelo scan).
@@ -967,7 +979,37 @@ impl SgdkDonorLogicScan {
         if self.spr_engine_detected {
             v.push("spr_engine".to_string());
         }
+        for family in self.detected_audio_apis() {
+            v.push(family);
+        }
         v
+    }
+
+    /// Familias de audio materializadas no scan textual (ordenadas, deduplicadas).
+    /// Usado tanto em `ledger_token_groups` como em `phase_d.detected_audio_apis`.
+    fn detected_audio_apis(&self) -> Vec<String> {
+        let mut v = Vec::new();
+        if self.audio_xgm_detected {
+            v.push("audio_xgm".to_string());
+        }
+        if self.audio_snd_xgm_detected {
+            v.push("audio_snd_xgm".to_string());
+        }
+        if self.audio_snd_pcm_detected {
+            v.push("audio_snd_pcm".to_string());
+        }
+        if self.audio_psg_detected {
+            v.push("audio_psg".to_string());
+        }
+        v
+    }
+
+    /// Existe qualquer sinal textual de playback de audio no agregado do doador?
+    fn audio_playback_any(&self) -> bool {
+        self.audio_xgm_detected
+            || self.audio_snd_xgm_detected
+            || self.audio_snd_pcm_detected
+            || self.audio_psg_detected
     }
 
     fn merge_tokens_from_collapsed_source(&mut self, collapsed: &str) {
@@ -998,6 +1040,36 @@ impl SgdkDonorLogicScan {
             || collapsed.contains("SPR_init(")
         {
             self.spr_engine_detected = true;
+        }
+        // Playback XGM direto (driver XGM/XGM2).
+        if collapsed.contains("XGM_startPlay(")
+            || collapsed.contains("XGM_setLoopNumber(")
+            || collapsed.contains("XGM2_startPlay(")
+            || collapsed.contains("XGM2_setLoopNumber(")
+        {
+            self.audio_xgm_detected = true;
+        }
+        // Bridge SND -> XGM (`SND_startPlay_XGM` / `SND_PAL_startPlay_XGM`).
+        if collapsed.contains("SND_startPlay_XGM(")
+            || collapsed.contains("SND_PAL_startPlay_XGM(")
+            || collapsed.contains("SND_NTSC_startPlay_XGM(")
+        {
+            self.audio_snd_xgm_detected = true;
+        }
+        // Playback PCM via SND_* (PCM1/PCM2/4PCM).
+        if collapsed.contains("SND_startPlay_PCM(")
+            || collapsed.contains("SND_PCM_startPlay(")
+            || collapsed.contains("SND_startPlay_4PCM(")
+            || collapsed.contains("SND_startPlay_2ADPCM(")
+        {
+            self.audio_snd_pcm_detected = true;
+        }
+        // PSG direto (envelope/frequencia) — evidencia de uso low-level.
+        if collapsed.contains("PSG_setEnvelope(")
+            || collapsed.contains("PSG_setFrequency(")
+            || collapsed.contains("PSG_setTone(")
+        {
+            self.audio_psg_detected = true;
         }
     }
 
@@ -1767,6 +1839,24 @@ fn apply_sgdk_phase_d_to_sprite_entity(
             logic.logic_hints.push(
                 "Fase D: heuristica de alta confianca — stencil extra (movimento + action_sound 'fire') materializado no grafo do sprite primario.".into(),
             );
+            if scan.audio_playback_any() {
+                let families = scan.detected_audio_apis().join(", ");
+                logic.logic_hints.push(format!(
+                    "Fase D: stencil 'fire_hint' tem apoio textual — familia(s) de audio detectada(s) no doador: {}. Evidencia heuristica, nao e decodificacao semantica.",
+                    families
+                ));
+            } else {
+                logic.logic_hints.push(
+                    "Fase D: stencil 'fire_hint' materializado sem evidencia textual de playback (nenhuma chamada XGM_*/SND_*/PSG_* no agregado do doador) — marcar como hipotese no editor canonico."
+                        .into(),
+                );
+            }
+        } else if scan.audio_playback_any() {
+            let families = scan.detected_audio_apis().join(", ");
+            logic.logic_hints.push(format!(
+                "Fase D: familia(s) de audio detectada(s) no doador sem classe de gameplay de alta confianca: {}. Sinal registrado no ledger sem materializar stencil extra.",
+                families
+            ));
         }
         logic.logic_hints.push(
             "Fase D: codigo SGDK original permanece em C externo; graph canônico nao e round-trip textual."
@@ -2289,6 +2379,7 @@ fn import_sgdk_resources_into_scene(
         logic_graph_refs: Vec::new(),
         cross_unit_function_refs: donor_logic_scan.cross_unit_function_refs.clone(),
         entity_spr_local_signal_hits: Vec::new(),
+        detected_audio_apis: donor_logic_scan.detected_audio_apis(),
     };
     for ent in &sprite_entities {
         let resource_name = ent
@@ -13311,5 +13402,237 @@ PY\n",
         let _ = fs::remove_dir_all(&donor);
         let _ = fs::remove_dir_all(&project);
         let _ = fs::remove_dir_all(&toolchain);
+    }
+
+    /// Rodada 9 — Fase D expandida: quando o doador NAO exibe chamadas `XGM_*`/`SND_*`/`PSG_*`,
+    /// o stencil `fire_hint` precisa ser marcado explicitamente como hipotese no `logic_hints`
+    /// e o ledger nao pode publicar familias de audio que nao foram observadas textualmente.
+    #[test]
+    fn sgdk_phase_d_donor_without_audio_playback_flags_fire_hint_as_unbacked_hypothesis() {
+        let donor = temp_dir("sgdk-phase-d-rg-noaudio-d");
+        let project = temp_dir("sgdk-phase-d-rg-noaudio-p");
+        create_project_skeleton(&project, "SGDK D RG NoAudio", "megadrive").expect("skel");
+        // Fixture run-and-gun classica: JOY_readJoypad + MAP_scrollH + SPR_* sem playback de audio.
+        write_sgdk_multifile_run_and_gun_donor(&donor);
+
+        let report = import_sgdk_project(&project, &donor).expect("import");
+        let hero = report
+            .primary_scene
+            .entities
+            .iter()
+            .find(|e| e.entity_id == "hero")
+            .expect("hero primario");
+        let logic = hero.components.logic.as_ref().expect("logic hero");
+
+        // A classe run-and-gun materializa fire_hint; sem XGM/SND/PSG o hint precisa registrar a hipotese.
+        let has_unbacked_hint = logic
+            .logic_hints
+            .iter()
+            .any(|h| h.contains("stencil 'fire_hint' materializado sem evidencia textual de playback"));
+        assert!(
+            has_unbacked_hint,
+            "sem audio: logic_hints deve registrar fire_hint como hipotese — hints: {:?}",
+            logic.logic_hints
+        );
+
+        // Nenhuma menção a familia de audio quando nada foi detectado.
+        let has_backed_hint = logic
+            .logic_hints
+            .iter()
+            .any(|h| h.contains("familia(s) de audio detectada(s)"));
+        assert!(
+            !has_backed_hint,
+            "sem audio: logic_hints NAO pode afirmar deteccao — hints: {:?}",
+            logic.logic_hints
+        );
+
+        // Ledger precisa refletir a ausencia.
+        let manifest_rel = report
+            .manifest_path
+            .as_deref()
+            .expect("manifest_path presente no relatorio");
+        let ledger_json = fs::read_to_string(project.join(manifest_rel)).expect("ledger file");
+        let ledger: SgdkImportLedger =
+            serde_json::from_str(&ledger_json).expect("deserializar ledger");
+        assert!(
+            ledger.phase_d.detected_audio_apis.is_empty(),
+            "ledger.phase_d.detected_audio_apis deve estar vazio sem chamadas de audio: {:?}",
+            ledger.phase_d.detected_audio_apis
+        );
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    /// Rodada 9 — Fase D expandida: quando o doador EXIBE `XGM_startPlay` e `SND_startPlay_PCM`
+    /// alem dos sinais de classe alta, o stencil `fire_hint` precisa reportar a evidencia textual
+    /// e o ledger precisa listar `audio_xgm` + `audio_snd_pcm` em `detected_audio_apis`.
+    #[test]
+    fn sgdk_phase_d_donor_with_xgm_and_snd_pcm_playback_tags_fire_hint_as_audio_backed() {
+        let donor = temp_dir("sgdk-phase-d-rg-audio-d");
+        let project = temp_dir("sgdk-phase-d-rg-audio-p");
+        create_project_skeleton(&project, "SGDK D RG Audio", "megadrive").expect("skel");
+        write_sgdk_multifile_run_and_gun_donor(&donor);
+        // Sobrescreve `weapons_tick`-equivalente no `player_control.c` com playback textual.
+        fs::write(
+            donor.join("src").join("player_control.c"),
+            b"#include <genesis.h>\n#include \"player_control.h\"\n\
+void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n    /* Fixture RDS rodada 9: playback XGM + SND_PCM no agregado do doador. */\n\
+    XGM_startPlay(bgm_theme);\n    SND_startPlay_PCM(sfx_fire, 22050, SOUND_PCM_CH_AUTO);\n\
+    (void)SPR_addSprite(&foe_palette, &foe, 32, 32, TILE_ATTR(PAL0, 0, FALSE, FALSE));\n\
+    SPR_update();\n}\n",
+        )
+        .expect("rewrite player_control.c with audio calls");
+
+        let report = import_sgdk_project(&project, &donor).expect("import");
+        let hero = report
+            .primary_scene
+            .entities
+            .iter()
+            .find(|e| e.entity_id == "hero")
+            .expect("hero primario");
+        let logic = hero.components.logic.as_ref().expect("logic hero");
+
+        let backed_hint = logic
+            .logic_hints
+            .iter()
+            .find(|h| h.contains("stencil 'fire_hint' tem apoio textual"))
+            .cloned();
+        assert!(
+            backed_hint.is_some(),
+            "com XGM+SND_PCM: hint de apoio textual precisa existir — hints: {:?}",
+            logic.logic_hints
+        );
+        let backed_hint = backed_hint.unwrap();
+        assert!(
+            backed_hint.contains("audio_xgm"),
+            "hint de apoio textual precisa citar audio_xgm: '{}'",
+            backed_hint
+        );
+        assert!(
+            backed_hint.contains("audio_snd_pcm"),
+            "hint de apoio textual precisa citar audio_snd_pcm: '{}'",
+            backed_hint
+        );
+
+        let unbacked_hint = logic
+            .logic_hints
+            .iter()
+            .any(|h| h.contains("stencil 'fire_hint' materializado sem evidencia textual"));
+        assert!(
+            !unbacked_hint,
+            "com audio: hint de hipotese NAO deve existir — hints: {:?}",
+            logic.logic_hints
+        );
+
+        let manifest_rel = report
+            .manifest_path
+            .as_deref()
+            .expect("manifest_path presente no relatorio");
+        let ledger_json = fs::read_to_string(project.join(manifest_rel)).expect("ledger file");
+        let ledger: SgdkImportLedger =
+            serde_json::from_str(&ledger_json).expect("deserializar ledger");
+        assert!(
+            ledger
+                .phase_d
+                .detected_audio_apis
+                .iter()
+                .any(|f| f == "audio_xgm"),
+            "ledger.phase_d.detected_audio_apis deve listar audio_xgm: {:?}",
+            ledger.phase_d.detected_audio_apis
+        );
+        assert!(
+            ledger
+                .phase_d
+                .detected_audio_apis
+                .iter()
+                .any(|f| f == "audio_snd_pcm"),
+            "ledger.phase_d.detected_audio_apis deve listar audio_snd_pcm: {:?}",
+            ledger.phase_d.detected_audio_apis
+        );
+        assert!(
+            ledger
+                .phase_d
+                .detected_main_c_token_groups
+                .iter()
+                .any(|t| t == "audio_xgm"),
+            "detected_main_c_token_groups deve espelhar a familia audio_xgm: {:?}",
+            ledger.phase_d.detected_main_c_token_groups
+        );
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    /// Rodada 9 — Fase D expandida: quando existe playback mas NAO ha classe de gameplay de alta
+    /// confianca (ex.: apenas XGM_startPlay num doador sem JOY/SPR/MAP_scroll), o ledger ainda
+    /// registra a familia e o grafo do primario ganha um hint informativo sem materializar stencil.
+    #[test]
+    fn sgdk_phase_d_audio_without_high_confidence_class_records_family_in_ledger_only() {
+        let donor = temp_dir("sgdk-phase-d-audioonly-d");
+        let project = temp_dir("sgdk-phase-d-audioonly-p");
+        create_project_skeleton(&project, "SGDK D Audio Only", "megadrive").expect("skel");
+        fs::create_dir_all(donor.join("res").join("images")).expect("img dir");
+        fs::create_dir_all(donor.join("src")).expect("src dir");
+        image::RgbaImage::from_pixel(16, 16, image::Rgba([10, 20, 30, 255]))
+            .save(donor.join("res").join("images").join("hero.png"))
+            .expect("hero png");
+        fs::write(
+            donor.join("res").join("resources.res"),
+            "SPRITE hero images/hero.png 2 2 NONE\n",
+        )
+        .expect("res");
+        // main.c sem JOY/SPR/MAP_scroll — apenas playback XGM textual.
+        fs::write(
+            donor.join("src").join("main.c"),
+            b"#include <genesis.h>\nint main(void) {\n    XGM_startPlay(bgm_theme);\n    return 0;\n}\n",
+        )
+        .expect("write main");
+
+        let report = import_sgdk_project(&project, &donor).expect("import");
+        let hero = report
+            .primary_scene
+            .entities
+            .iter()
+            .find(|e| e.entity_id == "hero")
+            .expect("hero");
+        let logic = hero.components.logic.as_ref().expect("logic");
+
+        // Sem classe: o fire_hint NAO e materializado, mas o hint informativo e emitido.
+        let informative = logic
+            .logic_hints
+            .iter()
+            .any(|h| h.contains("familia(s) de audio detectada(s) no doador sem classe de gameplay"));
+        assert!(
+            informative,
+            "audio sem classe: deve existir hint informativo — hints: {:?}",
+            logic.logic_hints
+        );
+        let unbacked = logic
+            .logic_hints
+            .iter()
+            .any(|h| h.contains("stencil 'fire_hint' materializado sem evidencia textual"));
+        assert!(
+            !unbacked,
+            "audio sem classe: NAO deve existir hint de stencil nao apoiado (o stencil nao foi materializado): {:?}",
+            logic.logic_hints
+        );
+
+        let manifest_rel = report
+            .manifest_path
+            .as_deref()
+            .expect("manifest_path presente no relatorio");
+        let ledger_json = fs::read_to_string(project.join(manifest_rel)).expect("ledger file");
+        let ledger: SgdkImportLedger =
+            serde_json::from_str(&ledger_json).expect("deserializar ledger");
+        assert_eq!(ledger.phase_d.detected_audio_apis, vec!["audio_xgm".to_string()]);
+        assert!(
+            ledger.phase_d.heuristic_gameplay_class.is_none(),
+            "audio sem classe: heuristic_gameplay_class deve ser None: {:?}",
+            ledger.phase_d.heuristic_gameplay_class
+        );
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
     }
 }

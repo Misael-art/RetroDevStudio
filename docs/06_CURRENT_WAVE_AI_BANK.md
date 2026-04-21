@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-04-20 (rodada 9)
+**Ultima Atualizacao:** 2026-04-21 (rodada 10)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -20,6 +20,12 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+* **O que acabou de acontecer (2026-04-21 rodada 10 - Consolidacao SGDK no host real: build.mjs validado, QA-RC reprovado/recuperado):**
+  - **Prova operacional da rodada:** `npm run preflight:sgdk-e2e` verde; `npm run build:debug` verde; `npm run test:e2e:desktop:qa-rc` reprovou no primeiro run com `webdriverTitle="localhost"` e `ERR_CONNECTION_REFUSED`, depois passou A-G no mesmo host.
+  - **Gargalo real identificado e corrigido:** no `qa-rc`, quando o build debug usa direct-cargo, o app abre como `localhost` no WebDriver e o shell Tauri nao hidrata. Fix no caminho canonico: `scripts/e2e-tauri-build-run.mjs` forca `RDS_FORCE_TAURI_CLI_DEBUG=1` para o cenario `qa-rc`.
+  - **Validacao de `scripts/build.mjs`:** diff aberto (touch de artefatos canonicos via `utimes`) permanece valido no host e nao gerou falso-negativo de "artefato nao atualizado" nos runs desta consolidacao.
+  - **Validacao de `src-tauri/src/core/project_mgr.rs`:** heuristicas de audio da Fase D validadas por `cargo test --manifest-path src-tauri/Cargo.toml --lib -- sgdk_phase_d_ -- --nocapture --test-threads=1` (8/8) e por suite Rust completa sem regressao.
+  - **Estado honesto:** Fase E provada localmente neste host; SGDK continua `Experimental`; promocao institucional segue bloqueada por repeticao CI/host limpo e Fase D ainda heuristica (sem AST).
 * **O que acabou de acontecer (2026-04-20 rodada 9 - Programa SGDK: Fase E fechada com prova pratica real no host):**
   - **Fase E (fechada com evidencia):** Desktop E2E `qa-rc` blocos A-G passaram no host local. Fluxo real provado: SGDK import -> colisao -> persistir -> reabrir -> Build & Run -> ROM com header `SEGA` verificado em disco -> emulador ativo via Libretro.
   - **Bug critico corrigido:** `updateCollisionMap` em `editorStore.ts` nao propagava `collision_map` para `activeSceneSource`, causando perda de colisao na persistencia. Fix: propagar `updatedCollisionMap` para ambos `activeScene` e `activeSceneSource`. Testes novos: `propagates collision edits to activeSceneSource for persistence` e `auto-initializes collision_map with correct dimensions for target`.
@@ -1045,3 +1051,4 @@ Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as 
   - **Stage mais legivel:** o canvas de runtime agora fica dentro de um palco dedicado com moldura, sombra e badge `320x224 @ Nx`, melhorando leitura espacial e sensacao de ferramenta final.
   - **Cobertura adicionada:** `src/App.test.tsx` agora valida o helper puro `getGameViewportScale` para garantir que a escala sempre caia em inteiros seguros.
   - **Validacao focada reexecutada no workspace atual:** `npx tsc --noEmit` OK, `npx eslint src/components/viewport/ViewportPanel.tsx src/App.test.tsx` OK e `npx vitest run src/App.test.tsx` OK (33 testes).
+

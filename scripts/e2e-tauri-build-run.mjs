@@ -1729,6 +1729,12 @@ async function main() {
   }
 
   if (!options.skipBuild) {
+    if (options.scenario === "qa-rc" && !process.env.RDS_FORCE_TAURI_CLI_DEBUG) {
+      // No host atual, direct-cargo-debug abre localhost no WebDriver em vez da janela Tauri.
+      // Forca o caminho Tauri CLI no build de QA RC para preservar o fluxo canonico desktop E2E.
+      process.env.RDS_FORCE_TAURI_CLI_DEBUG = "1";
+      console.log("[qa-rc] RDS_FORCE_TAURI_CLI_DEBUG=1 para build desktop canônico.");
+    }
     console.log("== Building debug Tauri app ==");
     await spawnLogged(npmCommand(), ["run", "build:debug"]);
     if (!options.appExplicitlyProvided) {
