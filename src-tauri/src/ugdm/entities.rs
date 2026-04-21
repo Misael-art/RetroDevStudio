@@ -94,7 +94,9 @@ pub struct RetroFXConfig {
 /// Mapa de colisão baseado em grid de tiles.
 /// Cada byte em `data` é 0 (livre) ou 1 (sólido).
 /// Índice = tile_y * width + tile_x.
-/// Limites: MD = 40x28 tiles (320x224 @ 8x8), SNES = 32x28 tiles (256x224 @ 8x8).
+/// Mapas podem ser **maiores que a viewport** (scroll / plataforma); o perfil de hardware
+/// valida tile alinhado, `data.len()` vs `width*height`, limites de memoria e emite aviso
+/// quando o mundo em pixels excede a resolucao visivel (nao fatal).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CollisionMap {
     /// Tamanho do tile em pixels (horizontal). Deve ser múltiplo de 8.

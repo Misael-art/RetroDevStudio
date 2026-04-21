@@ -14,6 +14,12 @@ pub const SNES_DMA_VBLANK_BYTES: u32 = 8_192;
 pub const SNES_RESOLUTION_W: u32 = 256;
 #[allow(dead_code)]
 pub const SNES_RESOLUTION_H: u32 = 224;
+
+/// Limite de tiles por eixo para `CollisionMap` em nivel de mundo (scroll/plataforma).
+pub const SNES_COLLISION_MAP_MAX_TILES_PER_AXIS: u32 = 4096;
+/// Teto de memoria para `collision_map.data` (integridade / DoS guard no host do editor).
+pub const SNES_COLLISION_MAP_MAX_DATA_BYTES: u64 = 16 * 1024 * 1024;
+
 pub const SNES_BG_LAYERS_MAX: u32 = 4;
 
 #[derive(Debug)]
@@ -267,28 +273,74 @@ pub fn validate_scene_with_source_kind(
     }
 
     // ── CollisionMap constraint (schema 1.4.0+) ──────────────────────────────
+    // Mapas "world-sized" (maior que 256x224 px) sao validos para scroll/plataforma;
+    // validamos tile, grid, integridade de `data` e teto de memoria plausivel.
     if let Some(cmap) = &scene.collision_map {
-        let pixel_width = cmap.width * cmap.tile_width as u32;
-        let pixel_height = cmap.height * cmap.tile_height as u32;
-        if pixel_width > SNES_RESOLUTION_W {
+        if cmap.tile_width == 0 || cmap.tile_height == 0 {
+            errors.push(ValidationError::fatal(
+                "CollisionMap: tile_width/tile_height nao podem ser zero.".to_string(),
+            ));
+        } else if cmap.tile_width % 8 != 0 || cmap.tile_height % 8 != 0 {
             errors.push(ValidationError::fatal(format!(
-                "CollisionMap: largura em pixels ({} tiles * {} px = {} px) excede a resolucao horizontal do SNES ({} px).",
-                cmap.width, cmap.tile_width, pixel_width, SNES_RESOLUTION_W
+                "CollisionMap: tile_width={} tile_height={} devem ser multiplos de 8 (alinhamento SNES).",
+                cmap.tile_width, cmap.tile_height
+            )));
+        } else if cmap.tile_width > 64 || cmap.tile_height > 64 {
+            errors.push(ValidationError::fatal(format!(
+                "CollisionMap: tile_width={} tile_height={} excedem limite conservador (64 px).",
+                cmap.tile_width, cmap.tile_height
             )));
         }
-        if pixel_height > SNES_RESOLUTION_H {
+
+        if cmap.width == 0 || cmap.height == 0 {
+            errors.push(ValidationError::fatal(
+                "CollisionMap: width/height em tiles nao podem ser zero.".to_string(),
+            ));
+        } else if cmap.width > SNES_COLLISION_MAP_MAX_TILES_PER_AXIS
+            || cmap.height > SNES_COLLISION_MAP_MAX_TILES_PER_AXIS
+        {
             errors.push(ValidationError::fatal(format!(
-                "CollisionMap: altura em pixels ({} tiles * {} px = {} px) excede a resolucao vertical do SNES ({} px).",
-                cmap.height, cmap.tile_height, pixel_height, SNES_RESOLUTION_H
+                "CollisionMap: grid {}x{} tiles excede limite conservador {}x{} tiles.",
+                cmap.width,
+                cmap.height,
+                SNES_COLLISION_MAP_MAX_TILES_PER_AXIS,
+                SNES_COLLISION_MAP_MAX_TILES_PER_AXIS
             )));
         }
-        let expected_len = (cmap.width * cmap.height) as usize;
-        if cmap.data.len() != expected_len {
-            errors.push(ValidationError::warning(format!(
-                "CollisionMap: data.len()={} mas width*height={}. O mapa pode estar corrompido.",
-                cmap.data.len(),
-                expected_len
-            )));
+
+        let pixel_width_opt = cmap.width.checked_mul(cmap.tile_width as u32);
+        let pixel_height_opt = cmap.height.checked_mul(cmap.tile_height as u32);
+        let tile_cells_opt = cmap.width.checked_mul(cmap.height);
+
+        match (pixel_width_opt, pixel_height_opt, tile_cells_opt) {
+            (Some(pixel_width), Some(pixel_height), Some(tile_cells)) => {
+                let expected_len = tile_cells as usize;
+                if cmap.data.len() != expected_len {
+                    errors.push(ValidationError::warning(format!(
+                        "CollisionMap: data.len()={} mas width*height={}. O mapa pode estar corrompido.",
+                        cmap.data.len(),
+                        expected_len
+                    )));
+                }
+                let data_bytes = cmap.data.len() as u64;
+                if data_bytes > SNES_COLLISION_MAP_MAX_DATA_BYTES {
+                    errors.push(ValidationError::fatal(format!(
+                        "CollisionMap: data ocupa {} bytes (limite conservador {} bytes).",
+                        data_bytes, SNES_COLLISION_MAP_MAX_DATA_BYTES
+                    )));
+                }
+
+                if pixel_width > SNES_RESOLUTION_W || pixel_height > SNES_RESOLUTION_H {
+                    errors.push(ValidationError::warning(format!(
+                        "CollisionMap: mapa de mundo {}x{} px excede viewport SNES {}x{} px; exige scroll/camera no runtime (nao bloqueia build).",
+                        pixel_width, pixel_height, SNES_RESOLUTION_W, SNES_RESOLUTION_H
+                    )));
+                }
+            }
+            _ => errors.push(ValidationError::fatal(
+                "CollisionMap: overflow ao calcular dimensoes em pixels ou numero de tiles."
+                    .to_string(),
+            )),
         }
     }
 
@@ -359,7 +411,7 @@ pub fn hw_status_with_source_kind(scene: &Scene, source_kind: Option<&str>) -> H
 mod tests {
     use super::*;
     use crate::ugdm::components::{Components, SpriteComponent};
-    use crate::ugdm::entities::{BackgroundLayer, Entity, Scene, Transform};
+    use crate::ugdm::entities::{BackgroundLayer, CollisionMap, Entity, Scene, Transform};
 
     fn sprite_entity(id: &str, frame_width: u32, frame_height: u32, palette_slot: u8) -> Entity {
         Entity {
@@ -395,6 +447,34 @@ mod tests {
             collision_map: None,
             layers: None,
         }
+    }
+
+    #[test]
+    fn collision_map_wider_than_viewport_is_non_fatal_with_warning() {
+        let mut scene = empty_scene();
+        scene.collision_map = Some(CollisionMap {
+            tile_width: 8,
+            tile_height: 8,
+            width: 64,
+            height: 28,
+            data: vec![0u8; (64 * 28) as usize],
+        });
+        let errors = validate_scene(&scene);
+        assert!(
+            !errors.iter().any(|e| e.is_fatal && e.message.contains("CollisionMap")),
+            "world-sized collision must not be fatal: {:?}",
+            errors
+        );
+        assert!(
+            errors.iter().any(|e| {
+                !e.is_fatal
+                    && e.message.contains("mapa de mundo")
+                    && e.message.contains("512")
+                    && e.message.contains("256")
+            }),
+            "expected viewport exceed warning for 64x8-wide map: {:?}",
+            errors
+        );
     }
 
     #[test]

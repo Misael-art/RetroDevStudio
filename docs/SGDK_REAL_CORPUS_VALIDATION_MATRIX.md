@@ -49,12 +49,22 @@ Para cada linha, ao executar no editor: import SGDK -> relatorio/ledger -> cenas
 
 | # | Pasta do corpus | Genero / nota | Import | Report/Ledger | Cenas | Tilemaps | Anim. | Collision | graph_ref | Salvar/Reabrir | Build/ROM | Resultado | Blocker / evidencia |
 |---|------------------|---------------|--------|---------------|-------|----------|-------|-----------|-----------|----------------|-----------|-----------|---------------------|
-| 1 | `Platformer 2 [VER.001] [SGDK 211] [GEN] [ESTUDO] [PLATAFORMA]` | Plataforma | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | **Pendente** | Executar checklist manual ou automatizar via `__RDS_E2E__` / IPC conforme roteiro QA. |
+| 1 | `Platformer 2 [VER.001] [SGDK 211] [GEN] [ESTUDO] [PLATAFORMA]` | Plataforma | Passou | Passou | Passou | Passou | Passou | Parcial | Passou | Passou | Passou | **Parcial** | Evidencia: `cargo test sgdk_matrix_corpus_platformer_2_partial_flow_documents_build_blocker --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` (2026-04-21, host Windows, doador em `F:\\Projects\\MegaDrive_DEV\\SGDK_Engines\\...`). Import OK; ledger JSON OK; `imported_scenes=2`; `scenes/*.json` presentes; tilemap com `cells[]` nao vazio; sprite com animacoes; `collision_map` presente; `graph_ref` nao vazio; `save_scene`/`load_scene` round-trip num sprite. **Build/ROM:** ROM com marca `SEGA` neste run (`MATRIX_P2 build: mode=sgdk_detect rom_sega=true`) apos correcao conservadora em `md_profile.rs`/`snes_profile.rs` (mapas `CollisionMap` world-sized ja nao bloqueiam por exceder viewport). **Resultado Parcial:** criterio institucional da matriz (seis titulos) ainda nao satisfeito; linhas 2-6 Pendente. Sem doador e com `--ignored`, o teste **panic** salvo `RDS_SGDK_MATRIX_CORPUS_SKIP=1`. SGDK continua Experimental. |
 | 2 | `PlatformerEngine [VER.1.0] [SGDK 211] [GEN] [ENGINE] [PLATAFORMA]` | Engine plataforma | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | **Pendente** | Idem. |
 | 3 | `Shadow Dancer Revisitado [VER.001] [SGDK 211] [GEN] [ESTUDO] [PLATAFORMA]` | Plataforma | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | **Pendente** | Idem. |
 | 4 | `Metal Slug Warfare Demo [VER.001] [SGDK 211] [GEN] [ESTUDO] [RUN AND GUN]` | Run and gun | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | **Pendente** | Idem. |
 | 5 | `Mortal Kombat Plus [VER.001] [SGDK 211] [GEN] [ENGINE] [LUTA]` | Luta | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | **Pendente** | Idem. |
 | 6 | `NEXZR MD [VER.001] [SGDK 211] [GEN] [GAME] [SHMUP]` | Shmup | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | Pendente | **Pendente** | Idem. |
+
+### Linha 1 - como repetir a prova (Platformer 2)
+
+Teste Rust ignorado no suite normal (nao corre em CI sem `--ignored`):
+
+```text
+cargo test sgdk_matrix_corpus_platformer_2_partial_flow_documents_build_blocker --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1
+```
+
+Requer o doador no caminho absoluto acima (ou `RDS_SGDK_MATRIX_CORPUS_SKIP=1` para saltar explicitamente sem corpus). Saida util: linhas `MATRIX_P2 signals:` e `MATRIX_P2 build:` no stdout.
 
 ---
 

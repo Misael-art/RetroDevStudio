@@ -14164,4 +14164,210 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         let _ = fs::remove_dir_all(&donor);
         let _ = fs::remove_dir_all(&project);
     }
+
+    /// Matriz SGDK corpus real: `Platformer 2 [...]` em `F:\\Projects\\MegaDrive_DEV\\SGDK_Engines\\`.
+    /// Ignorado no `cargo test` normal (evita I/O pesado em CI). Documenta fluxo **parcial** ate ROM;
+    /// nao implica "full flow" institucional (SGDK real pode falhar; fake prova pipeline).
+    ///
+    /// Com `--ignored`, **falha em panic** se o doador nao existir (evita sucesso silencioso).
+    /// Para saltar explicitamente (ex.: CI sem disco `F:`), defina `RDS_SGDK_MATRIX_CORPUS_SKIP=1`.
+    ///
+    /// Rodar no host com corpus:
+    /// `cargo test sgdk_matrix_corpus_platformer_2_partial_flow_documents_build_blocker --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1`
+    #[ignore]
+    #[test]
+    fn sgdk_matrix_corpus_platformer_2_partial_flow_documents_build_blocker() {
+        use crate::compiler::build_orch::{run_build_with_environment, BuildEnvironment};
+
+        let donor = Path::new(
+            r"F:\Projects\MegaDrive_DEV\SGDK_Engines\Platformer 2 [VER.001] [SGDK 211] [GEN] [ESTUDO] [PLATAFORMA]",
+        );
+        if !donor.is_dir() {
+            if std::env::var("RDS_SGDK_MATRIX_CORPUS_SKIP")
+                .map(|v| v == "1")
+                .unwrap_or(false)
+            {
+                eprintln!(
+                    "SKIP (RDS_SGDK_MATRIX_CORPUS_SKIP=1): donor ausente em {}",
+                    donor.display()
+                );
+                return;
+            }
+            panic!(
+                "sgdk_matrix_corpus_platformer_2_partial_flow_documents_build_blocker: doador SGDK ausente em {}. \
+                 Monte o corpus neste caminho ou defina RDS_SGDK_MATRIX_CORPUS_SKIP=1 para saltar explicitamente. \
+                 Nao retornar Ok silencioso quando o teste e executado com --ignored.",
+                donor.display()
+            );
+        }
+
+        let project = temp_dir("sgdk-matrix-p2");
+        create_project_skeleton(&project, "Matrix Platformer2 Corpus", "megadrive").expect("skel");
+        let report = import_sgdk_project(&project, donor).expect("import SGDK corpus");
+
+        let manifest_rel = report
+            .manifest_path
+            .as_deref()
+            .expect("report.manifest_path (ledger .rds/imports/sgdk)");
+        let ledger_path = project.join(manifest_rel);
+        assert!(ledger_path.is_file(), "ledger em {}", ledger_path.display());
+        let ledger_json = fs::read_to_string(&ledger_path).expect("read ledger");
+        let _ledger: SgdkImportLedger =
+            serde_json::from_str(&ledger_json).expect("ledger JSON valido");
+
+        assert_eq!(report.primary_scene_path.as_str(), DEFAULT_ENTRY_SCENE);
+        assert!(
+            project.join(&report.primary_scene_path).is_file(),
+            "cena primaria persistida"
+        );
+        let scene_files: Vec<_> = fs::read_dir(project.join("scenes"))
+            .expect("list scenes")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("json"))
+            .collect();
+        assert!(
+            !scene_files.is_empty(),
+            "esperado >=1 ficheiro scenes/*.json, tem {}",
+            scene_files.len()
+        );
+
+        let tilemap_cells_nonempty = report.primary_scene.entities.iter().any(|e| {
+            e.components
+                .tilemap
+                .as_ref()
+                .map(|t| !t.cells.is_empty())
+                .unwrap_or(false)
+        });
+        let sprite_anim_nonempty = report.primary_scene.entities.iter().any(|e| {
+            e.components
+                .sprite
+                .as_ref()
+                .map(|s| !s.animations.is_empty())
+                .unwrap_or(false)
+        });
+        let collision_present = report.primary_scene.collision_map.is_some();
+        let graph_ref_nonempty = report.primary_scene.entities.iter().any(|e| {
+            e.components
+                .logic
+                .as_ref()
+                .and_then(|l| l.graph_ref.as_ref())
+                .map(|g| !g.trim().is_empty())
+                .unwrap_or(false)
+        });
+        eprintln!(
+            "MATRIX_P2 signals: tilemap_cells_nonempty={tilemap_cells_nonempty} sprite_anim_nonempty={sprite_anim_nonempty} collision_present={collision_present} graph_ref_nonempty={graph_ref_nonempty} imported_scenes={} warnings={}",
+            report.imported_scenes,
+            report.warnings.len()
+        );
+
+        let mut scene = load_scene(&project, DEFAULT_ENTRY_SCENE).expect("load pos-import");
+        if let Some(idx) = scene
+            .entities
+            .iter()
+            .position(|e| e.components.sprite.is_some())
+        {
+            scene.entities[idx].transform.x += 7;
+            save_scene(&project, DEFAULT_ENTRY_SCENE, &scene).expect("save");
+            let reopen = load_scene(&project, DEFAULT_ENTRY_SCENE).expect("reopen");
+            assert_eq!(
+                reopen.entities[idx].transform.x, scene.entities[idx].transform.x,
+                "persistencia/reopen"
+            );
+        }
+
+        let mut rom_has_sega = false;
+        let mut build_mode = "none";
+        let env = BuildEnvironment::detect();
+        if env.sgdk_root.as_ref().is_some_and(|r| r.join("makefile.gen").is_file())
+            && env.sgdk_make_program.is_some()
+        {
+            build_mode = "sgdk_detect";
+            let result = run_build_with_environment(&project, &env, |_| {});
+            if result.ok && !result.rom_path.is_empty() {
+                let rom_full = project.join(&result.rom_path);
+                if rom_full.is_file() {
+                    if let Ok(bytes) = fs::read(&rom_full) {
+                        rom_has_sega = bytes.windows(4).any(|w| w == b"SEGA");
+                    }
+                }
+            }
+            if !rom_has_sega {
+                eprintln!(
+                    "MATRIX_P2: build SGDK real nao produziu ROM SEGA neste run (toolchain presente mas projeto/doacao pode falhar no make); log entries={}",
+                    env.sgdk_make_program.is_some()
+                );
+            }
+        }
+        if !rom_has_sega {
+            build_mode = "fake_toolchain";
+            let toolchain = temp_dir("sgdk-matrix-p2-fake-sgdk");
+            let bin = toolchain.join("bin");
+            fs::create_dir_all(&bin).expect("fake bin");
+            let make = if cfg!(target_os = "windows") {
+                let p = bin.join("fake-make.cmd");
+                fs::write(
+                    &p,
+                    "@echo off\r\n\
+                     if not exist out mkdir out\r\n\
+                     powershell -NoProfile -Command \"$bytes = New-Object byte[] 512; [System.Text.Encoding]::ASCII.GetBytes('SEGA MEGA DRIVE').CopyTo($bytes, 256); [IO.File]::WriteAllBytes('out\\artifact.md', $bytes)\"\r\n\
+                     exit /b 0\r\n",
+                )
+                .expect("write fake make");
+                p
+            } else {
+                let p = bin.join("fake-make.sh");
+                fs::write(
+                    &p,
+                    "#!/bin/sh\n\
+                     mkdir -p out\n\
+                     python3 - <<'PY'\n\
+import pathlib\n\
+rom = bytearray(512)\n\
+rom[0x100:0x10F] = b'SEGA MEGA DRIVE'\n\
+pathlib.Path('out/artifact.md').write_bytes(rom)\n\
+PY\n",
+                )
+                .expect("write fake make");
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mut perms = fs::metadata(&p).unwrap().permissions();
+                    perms.set_mode(0o755);
+                    fs::set_permissions(&p, perms).unwrap();
+                }
+                p
+            };
+            let fake_env = BuildEnvironment {
+                sgdk_root: Some(toolchain.clone()),
+                sgdk_make_program: Some(make),
+                disable_auto_detect: true,
+                ..BuildEnvironment::default()
+            };
+            let result = run_build_with_environment(&project, &fake_env, |_| {});
+            if result.ok && !result.rom_path.is_empty() {
+                let rom_full = project.join(&result.rom_path);
+                if let Ok(rom_bytes) = fs::read(&rom_full) {
+                    rom_has_sega = rom_bytes.windows(15).any(|w| w == b"SEGA MEGA DRIVE")
+                        || rom_bytes.windows(4).any(|w| w == b"SEGA");
+                }
+            } else {
+                eprintln!(
+                    "MATRIX_P2: build fake tambem falhou (ex.: constraints de hardware no projeto importado): {:?}",
+                    result.log
+                );
+            }
+            let _ = fs::remove_dir_all(&toolchain);
+        }
+        eprintln!(
+            "MATRIX_P2 build: mode={build_mode} rom_sega={rom_has_sega}"
+        );
+
+        assert!(
+            rom_has_sega,
+            "MATRIX_P2: esperado ROM com marca SEGA apos build (toolchain SGDK real ou fake de prova). \
+             Se falhar apenas com SGDK real, o fake make deve completar; verifique constraints de hardware no projeto importado."
+        );
+
+        let _ = fs::remove_dir_all(&project);
+    }
 }
