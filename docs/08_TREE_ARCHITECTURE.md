@@ -46,7 +46,8 @@ RetroDevStudio/
 |   |-- 07_TEST_AND_COMPLIANCE.md
 |   |-- 08_TREE_ARCHITECTURE.md
 |   |-- 09_AGENT_DEV_MODE.md
-|   `-- 10_QA_ROTEIRO_RC.md
+|   |-- 10_QA_ROTEIRO_RC.md
+|   `-- SGDK_REAL_CORPUS_VALIDATION_MATRIX.md
 |
 |-- src/
 |   |-- App.tsx

@@ -1,7 +1,7 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-04-20
+**Ultima revisao canonica:** 2026-04-21
 **Fase ativa real:** Release candidate / beta tecnica em hardening
 
 > **DIRETRIZ PARA AGENTES E HUMANOS**
@@ -115,7 +115,7 @@ Capacidades nao visuais, importadores e itens legados continuam nas secoes propr
 
 | Item             | Escopo         | Implementacao | Certificacao | Evidencia atual                                                                                                                                                                                                                         | Bloqueador para subir                                                                                                         | Conta para fechamento do MVP? |
 | ---------------- | -------------- | ------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| `sgdk`           | Experimental   | Em codigo     | Em hardening | Fase E provada: desktop E2E `qa-rc` A-G verde (import -> colisao -> persistir -> reabrir -> Build & Run -> ROM `SEGA` verificada). Preflight operacional, fixture `sgdk_e2e_donor` alinhada, smoke idempotente e cobertura de Fases B-E | Fase D parcial (heuristica sem AST); QA manual com projetos legados reais continua obrigatoria; repeticao em CI para promocao | Nao                           |
+| `sgdk`           | Experimental   | Em codigo     | Em hardening | Fase E provada: desktop E2E `qa-rc` A-G verde (import -> colisao -> persistir -> reabrir -> Build & Run -> ROM `SEGA` verificada). Preflight operacional, fixture `sgdk_e2e_donor` alinhada, smoke idempotente e cobertura de Fases B-E. **Rodada 11:** matriz de corpus real (`docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md`) com seis titulos SGDK 2.11 referenciados; gates do repo verdes em 2026-04-21; linhas por titulo ainda **Pendente** ate import manual titulo-a-titulo | Fase D parcial (heuristica sem AST); fechar as seis linhas da matriz de corpus com Passou/Parcial/Falhou + blocker; repeticao em CI para promocao | Nao                           |
 | `mugen`          | Experimental   | Em codigo     | Local        | `import_mugen_project`, wizard dedicado e smoke idempotente em `smoke_import_mugen_project_is_idempotent`                                                                                                                               | Falta prova institucional alem da rodada local                                                                                | Nao                           |
 | `ikemen_go`      | Experimental   | Em codigo     | Local        | Perfil proprio no registry, roteado pelo adapter MUGEN, smoke dedicado em `smoke_import_ikemen_go_reuses_mugen_adapter_without_losing_assets`                                                                                           | Falta evidencia institucional dedicada e validacao de metadata propria                                                        | Nao                           |
 | `godot`          | Experimental   | Em codigo     | Local        | `import_godot_project`, smoke idempotente em `smoke_import_godot_project_is_idempotent`                                                                                                                                                 | Falta prova institucional alem da rodada local                                                                                | Nao                           |
@@ -163,7 +163,7 @@ Capacidades nao visuais, importadores e itens legados continuam nas secoes propr
 
 ## Iniciativa de Hardening de Importadores (Sessoes A-E)
 
-**Contexto:** pedido operacional de `2026-04-18` para elevar os 7 importadores preservados (`sgdk`, `mugen`, `ikemen_go`, `godot`, `construct`, `rpg_maker`, `openbor`) de `Experimental` para `Completo e totalmente funcional resiliente a diferentes tipos de projetos`. Em vez de flipar labels, o trabalho foi segmentado em 5 sessoes com evidencia real a cada passo ‚Äî aderente a governanca deste roadmap (`Experimental nao significa inexistente; significa nao elegivel para claim plena`).
+**Contexto:** pedido operacional de `2026-04-18` para elevar os 7 importadores preservados (`sgdk`, `mugen`, `ikemen_go`, `godot`, `construct`, `rpg_maker`, `openbor`) de `Experimental` para `Completo e totalmente funcional resiliente a diferentes tipos de projetos`. Em vez de flipar labels, o trabalho foi segmentado em 5 sessoes com evidencia real a cada passo ? aderente a governanca deste roadmap (`Experimental nao significa inexistente; significa nao elegivel para claim plena`).
 
 ### Sessao A - Fundacao transversal (concluida em 2026-04-18)
 
@@ -180,11 +180,11 @@ Objetivo: estabelecer o minimo canonico para que qualquer importador possa ter e
 
 
 **Gate local:** 262 cargo test --lib verdes (incluindo os 7 smoke novos), 232 vitest verdes, clippy clean, Vite build OK.
-**Gate institucional:** adiado ‚Äî `tauri-driver` ausente no host; `cargo install tauri-driver --locked` continua como pre-requisito para `qa-rc`/`e2e-tauri-build-run`.
+**Gate institucional:** adiado ? `tauri-driver` ausente no host; `cargo install tauri-driver --locked` continua como pre-requisito para `qa-rc`/`e2e-tauri-build-run`.
 
 ### Sessao B - Hardening por importador, camada 1 (concluida em 2026-04-18)
 
-Objetivo: cobrir cenarios minimos de resiliencia por importador ‚Äî diretorio donor vazio, artefato-raiz ausente e leitura tolerante a BOM/CRLF/caminhos Unicode em host Windows.
+Objetivo: cobrir cenarios minimos de resiliencia por importador ? diretorio donor vazio, artefato-raiz ausente e leitura tolerante a BOM/CRLF/caminhos Unicode em host Windows.
 
 
 | Entrega                                                                                                                                                | Status    | Evidencia                                       |
@@ -277,17 +277,25 @@ Matriz de capacidades avaliada por classe de projeto, sem claim inflado.
 | Animacoes editaveis em `SpriteComponent.animations`                                                            | C         | Local (2026-04-19 rodada 5)          | `derive_sgdk_sprite_sheet_from_rescomp_png` materializa animacoes a partir da grelha rescomp (SGDK `bin/rescomp.txt` SPRITE); timer SGDK=0 gera aviso + fps=8 so para preview no editor; fallback explicito se PNG/parametros nao alinharem                                                                                                                                                              |
 | Colisao canonica (`CollisionMap`)                                                                              | C         | Local (2026-04-19 rodada 5)          | `derive_sgdk_scene_collision_map_from_tile_cells`: solido onde indice de tile != 0 (indice 0 = tile totalmente transparente do dedupe 8x8); mensagem rastreavel no report/ledger; cenas secundarias com cells recebem o mesmo                                                                                                                                                                            |
 | Logica importavel (`graph_ref` + `logic_hints` + `external_source_ref`)                                        | D         | Parcial, Local (2026-04-19 rodada 8) | Rodada 7 + `phase_d.cross_unit_function_refs` / `entity_spr_local_signal_hits`; stencil shmup/run-and-gun em secundario quando SPR_* + identificador do recurso na mesma linha; `deserializeNodeGraph` alinha portos ao editor e filtra arestas quebradas; testes `sgdk_phase_d_platformer_horizontal_scan_fixture_class`, `sgdk_phase_d_resolve_prefabs_hydrates_secondary_graph_ref`; sem AST completo |
-| Build funcional (import -> salvar -> reabrir -> ROM funcional) | E | Local (2026-04-21 rodada 10) | Preflight verde no host; `qa-rc` A-G reprovado e recuperado no mesmo host; fix canÙnico no runner para forÁar build debug via Tauri CLI em `qa-rc` (evita bootstrap `localhost` do direct-cargo); cadeia SGDK confirmada com evidencias (`manual-qa-status.json` + screenshot bloco G). Sem promocao institucional e sem mudar `support_status` |
+| Build funcional (import -> salvar -> reabrir -> ROM funcional) | E | Local (2026-04-21 rodada 10) | Preflight verde no host; `qa-rc` A-G reprovado e recuperado no mesmo host; fix canonico no runner para forcar build debug via Tauri CLI em `qa-rc` (evita bootstrap `localhost` do direct-cargo); cadeia SGDK confirmada com evidencias (`manual-qa-status.json` + screenshot bloco G). Sem promocao institucional e sem mudar `support_status` |
 | Reimport controlado / idempotente                                                                              | A         | Em codigo, Local                     | Smoke idempotente cobre assets/scene; manifesto agora cobre ledger                                                                                                                                                                                                                                                                                                                                       |
+
+### Rodada 11 - Corpus real SGDK (matriz por titulo)
+
+Checklist operacional para sair de fixture/E2E controlado e registrar compatibilidade por projeto real (import -> report/ledger -> cenas -> tilemaps -> animacoes -> collision map -> `graph_ref` -> salvar/reabrir -> build/ROM), com resultado **Passou** / **Parcial** / **Falhou** e blocker concreto.
+
+- **Documento vivo:** `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md` (seis pastas sob `F:\Projects\MegaDrive_DEV\SGDK_Engines`, existencia verificada no host desta rodada).
+- **Gates do repositorio (2026-04-21 neste host):** `check:tree`, `lint`, `tsc --noEmit`, `npm test`, `cargo clippy -D warnings`, `cargo test --lib --test-threads=1`, `npm run preflight:sgdk-e2e`, `npm run test:e2e:desktop:qa-rc` - todos verdes na mesma sessao.
+- **Estado honesto:** SGDK permanece **Experimental**; a matriz por titulo esta criada, mas as linhas de resultado por jogo continuam **Pendente** ate execucao manual (ou automacao dedicada) titulo a titulo. Nenhuma promocao de `support_status`.
 
 
 ### Fases
 
 - **Fase A - Importador estrutural.** Projeto SGDK grande abre sem colapsar em cena opaca; gera manifesto `.rds/imports/sgdk/*.json`; reimport idempotente e auditavel; `SgdkImportReport` rico.
 - **Fase B - Cena e assets. (concluida em 2026-04-18 rodada 4.)** Tilemaps relevantes viram `cells[]` (dedupe 8x8, indices 1-based, fallback explicito preservado quando reconstrucao impossivel); multiplas cenas e `SceneLayer` coerentes aparecem na Hierarchy via `listScenes`/`switchScene` (sem mudanca de frontend). Evidencia: inventario `scenes[]` por role no ledger SGDK (introduzido como `sgdk-import/v2` na rodada 4; o repo hoje persiste `sgdk-import/v4` como superset retrocompativel com `phase_c` + `phase_d`); `SgdkImportReport` ganhou `primary_scene_path` + `additional_scenes`; +6 testes Fase B (`sgdk_phase_b_import_populates_tilemap_cells_from_png`, `*_builds_multi_scene_when_multiple_tilemap_anchors_exist`, `*_derives_scene_layers_grouping_entities_coherently`, `*_keeps_explicit_fallback_when_tilemap_source_is_too_small`, `*_ledger_persists_scene_inventory_and_bumps_schema_version`, `*_reimport_multi_scene_is_idempotent_and_does_not_duplicate_scene_files`); teste existente `*_exposes_rich_fields_and_persists_ledger` reescrito para assertar ausencia do fallback "cells[] vazio" quando PNG permite reconstrucao. Gates locais da rodada 4: `cargo test --lib` 295/0/3 (+8), `cargo clippy -- -D warnings` clean, 232 vitest, check:tree/lint/tsc OK. SGDK continua `Experimental`; promocao continua bloqueada por Fases C+D+E.
-- **Fase C - Animacao e colisao. (concluida no caminho can√¥nico + fixtures em 2026-04-19 rodada 5.)** `SpriteComponent.animations` derivados da folha PNG alinhada ao SPRITE rescomp; `CollisionMap` na `Scene` quando `cells[]` existe; ledger `sgdk-import/v4` inclui bloco `phase_c`; reimport idempotente coberto (`sgdk_phase_c_reimport_preserves_sprite_animations_and_collision_map`). Barra ‚Äúclasse real plataforma+luta‚Äù continua em QA manual fora do CI.
+- **Fase C - Animacao e colisao. (concluida no caminho canonico + fixtures em 2026-04-19 rodada 5.)** `SpriteComponent.animations` derivados da folha PNG alinhada ao SPRITE rescomp; `CollisionMap` na `Scene` quando `cells[]` existe; ledger `sgdk-import/v4` inclui bloco `phase_c`; reimport idempotente coberto (`sgdk_phase_c_reimport_preserves_sprite_animations_and_collision_map`). Barra (classe real plataforma+luta) continua em QA manual fora do CI.
 - **Fase D - Logica jogavel. (parcial; hardening multi-ficheiro + auditoria TU em 2026-04-19 rodada 8.)** Rodada 7 + evidencia `func(` entre ficheiros escaneados (`cross_unit_function_refs`) e toques SPR locais por recurso (`entity_spr_local_signal_hits`); materializacao de classe alta tambem em sprite secundario quando ha prova textual SPR+identificador; editor hidrata `graph_ref` com portos canonicos; testes `sgdk_phase_d_platformer_horizontal_scan_fixture_class`, `sgdk_phase_d_resolve_prefabs_hydrates_secondary_graph_ref` e multificheiro RG estendido; sem AST completo.
-- **Fase E - Build funcional. (provada localmente no host em 2026-04-21 rodada 10.)** Preflight explicito de `toolchains/sgdk`, `tauri-driver` e msedgedriver segue ativo; `qa-rc` A-G foi reprovado e recuperado no host real, com correÁ„o canÙnica no runner para forÁar build debug via Tauri CLI no cen·rio `qa-rc` (evita bootstrap `localhost` observado com direct-cargo). Mantem-se sem claim institucional: exige repeticao em host limpo/CI e SGDK segue `Experimental`.
+- **Fase E - Build funcional. (provada localmente no host em 2026-04-21 rodada 10.)** Preflight explicito de `toolchains/sgdk`, `tauri-driver` e msedgedriver segue ativo; `qa-rc` A-G foi reprovado e recuperado no host real, com correcao canonica no runner para forcar build debug via Tauri CLI no cenario `qa-rc` (evita bootstrap `localhost` observado com direct-cargo). Mantem-se sem claim institucional: exige repeticao em host limpo/CI e SGDK segue `Experimental`.
 
 ### Gates por rodada
 
@@ -297,14 +305,16 @@ Adicionais aos gates gerais deste roadmap, aplicados sempre que o programa avanc
 - `npm run lint`
 - `npx tsc --noEmit`
 - `npm test`
-- `cargo clippy -- -D warnings`
-- `cargo test --lib -- --nocapture`
+- `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --test-threads=1`
+- `npm run preflight:sgdk-e2e`
+- `npm run test:e2e:desktop:qa-rc`
 
 ### Nao confundir
 
 - Esta frente **nao** e reescrita textual do C doador; o objetivo e migrar para o modelo canonico.
 - Compatibilidade "totalmente funcional" se obtem por classe de projeto, nao em um salto unico.
-- Os seis projetos listados sao referencia; o CI continua protegido por fixtures minimas e smoke.
+- Os seis titulos do corpus real estao na matriz `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md`; o CI continua protegido por fixtures minimas e smoke ate a matriz fechar com **Passou** repetivel por titulo.
 
 ---
 

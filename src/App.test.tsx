@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { getGameViewportScale } from "./components/viewport/gameViewportScale";
 import { useEditorStore } from "./core/store/editorStore";
+import { LIVE_VALIDATION_DEBOUNCE_MS } from "./core/validation/liveValidationController";
 
 const mocks = vi.hoisted(() => ({
   buildProject: vi.fn(),
@@ -2476,11 +2477,37 @@ describe("App build flow", () => {
   });
 
   it("shows explicit live error detail without blocking Build & Run", async () => {
+    const errMsg = "Falha de comunicacao com validate_scene_draft";
+    mocks.validateSceneDraft.mockResolvedValueOnce({
+      ok: false,
+      error: errMsg,
+      hw_status: {
+        vram_used: 0,
+        vram_limit: 65536,
+        sprite_count: 0,
+        sprite_limit: 80,
+        scanline_sprite_peak: 0,
+        scanline_sprite_limit: 20,
+        dma_used: 0,
+        dma_limit: 7372,
+        palette_banks_used: 0,
+        palette_banks_limit: 4,
+        bg_layers: 0,
+        bg_layers_limit: 4,
+        errors: [],
+        warnings: [],
+      },
+    });
+
     await act(async () => {
-      useEditorStore.setState({
-        hwValidationState: "error",
-        hwValidationError: "Falha de comunicacao com validate_scene_draft",
-      });
+      useEditorStore.getState().requestHwValidationRefresh();
+      await flush();
+    });
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, LIVE_VALIDATION_DEBOUNCE_MS + 50));
+    });
+    await act(async () => {
       await flush();
     });
 
@@ -2490,9 +2517,7 @@ describe("App build flow", () => {
 
     expect(buildButton.disabled).toBe(false);
     expect(liveState?.textContent).toContain("ERRO LIVE");
-    expect(errorSummary?.textContent).toContain(
-      "Live com falha: Falha de comunicacao com validate_scene_draft"
-    );
+    expect(errorSummary?.textContent).toContain(`Live com falha: ${errMsg}`);
     expect(container.querySelector("[data-testid='build-warning-summary']")).toBeNull();
     expect(container.querySelector("[data-testid='build-disabled-reason']")).toBeNull();
 
