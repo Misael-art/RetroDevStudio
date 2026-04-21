@@ -788,6 +788,12 @@ type AutomationApi = {
     showAdvanced?: boolean
   ) => boolean;
   selectWorkspace: (workspace: EditorWorkspace) => boolean;
+  setEntityLogicGraph: (entityId: string, graphJson: string) => boolean;
+  getEntityLogicState: (entityId: string) => {
+    entityId: string;
+    source: { graph_ref: string | null; graph_origin: string | null; has_graph: boolean } | null;
+    resolved: { graph_ref: string | null; graph_origin: string | null; has_graph: boolean } | null;
+  } | null;
   getState: () => AutomationState;
 };
 
@@ -2390,6 +2396,55 @@ export default function App() {
       selectWorkspace: (workspace: EditorWorkspace) => {
         handleWorkspaceSelect(workspace);
         return true;
+      },
+      setEntityLogicGraph: (entityId: string, graphJson: string) => {
+        const state = useEditorStore.getState();
+        const entity = state.activeScene?.entities.find((candidate) => candidate.entity_id === entityId);
+        if (!entity) {
+          throw new Error(`Entidade '${entityId}' nao encontrada para atualizar graph.`);
+        }
+        state.updateEntity(entityId, {
+          components: {
+            ...entity.components,
+            logic: {
+              ...(entity.components.logic ?? {}),
+              graph: graphJson,
+              graph_origin: entity.components.logic?.graph_ref
+                ? "user_edited_ref"
+                : entity.components.logic?.graph_origin,
+            },
+          },
+        });
+        return true;
+      },
+      getEntityLogicState: (entityId: string) => {
+        const state = useEditorStore.getState();
+        const sourceEntity = state.activeSceneSource?.entities.find(
+          (candidate) => candidate.entity_id === entityId
+        );
+        const resolvedEntity = state.activeScene?.entities.find(
+          (candidate) => candidate.entity_id === entityId
+        );
+        if (!sourceEntity && !resolvedEntity) {
+          return null;
+        }
+        return {
+          entityId,
+          source: sourceEntity
+            ? {
+                graph_ref: sourceEntity.components.logic?.graph_ref ?? null,
+                graph_origin: sourceEntity.components.logic?.graph_origin ?? null,
+                has_graph: Boolean(sourceEntity.components.logic?.graph?.trim()),
+              }
+            : null,
+          resolved: resolvedEntity
+            ? {
+                graph_ref: resolvedEntity.components.logic?.graph_ref ?? null,
+                graph_origin: resolvedEntity.components.logic?.graph_origin ?? null,
+                has_graph: Boolean(resolvedEntity.components.logic?.graph?.trim()),
+              }
+            : null,
+        };
       },
       getState: () => {
         const state = useEditorStore.getState();

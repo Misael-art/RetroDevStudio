@@ -2549,7 +2549,7 @@ async function main() {
           sgdkBaseDir,
           sgdkDonorFixture,
         ]);
-        await waitFor(
+        const importedSgdkState = await waitFor(
           async () => {
             const state = await readAutomationState(sessionId);
             return state?.activeProjectDir === sgdkProjectDir && state?.activeScene?.entityCount >= 1
@@ -2560,6 +2560,53 @@ async function main() {
           "Importacao SGDK via automacao nao hidratou o projeto nativo.",
           500
         );
+        const sgdkLogicEntityId =
+          importedSgdkState?.activeScene?.entities?.find((entity) => entity.type === "sprite")?.id ??
+          importedSgdkState?.activeScene?.entities?.[0]?.id;
+        if (!sgdkLogicEntityId) {
+          fail("Bloco G: nenhuma entidade alvo encontrada para validar graph_ref no projeto SGDK.");
+        }
+        const initialLogicState = await callAutomationApi(sessionId, "getEntityLogicState", [sgdkLogicEntityId]);
+        if (!initialLogicState?.source?.graph_ref) {
+          fail(
+            `Bloco G: entidade '${sgdkLogicEntityId}' sem graph_ref no source ao abrir projeto SGDK importado.`
+          );
+        }
+        const editedGraphJson = JSON.stringify({
+          version: 1,
+          nodes: [
+            {
+              id: "node_start",
+              type: "event_start",
+              label: "On Start",
+              x: 64,
+              y: 64,
+              inputs: [],
+              outputs: [{ id: "exec", label: ">", kind: "exec" }],
+              params: {},
+            },
+            {
+              id: "node_edited_move",
+              type: "sprite_move",
+              label: "Move Sprite",
+              x: 224,
+              y: 64,
+              inputs: [{ id: "exec", label: ">", kind: "exec" }],
+              outputs: [{ id: "exec", label: ">", kind: "exec" }],
+              params: { target: sgdkLogicEntityId, dx: 3, dy: 0 },
+            },
+          ],
+          edges: [
+            {
+              id: "edge_start_move",
+              fromNode: "node_start",
+              fromPort: "exec",
+              toNode: "node_edited_move",
+              toPort: "exec",
+            },
+          ],
+        });
+        await callAutomationApi(sessionId, "setEntityLogicGraph", [sgdkLogicEntityId, editedGraphJson]);
 
         await callAutomationApi(sessionId, "selectWorkspace", ["scene"]);
         await pressKey(sessionId, "c", { code: "KeyC" });
@@ -2615,6 +2662,25 @@ async function main() {
           "Projeto SGDK nao reabriu com colisao editada.",
           250
         );
+        const reopenedLogicState = await callAutomationApi(sessionId, "getEntityLogicState", [sgdkLogicEntityId]);
+        if (!reopenedLogicState?.source?.graph_ref) {
+          fail(
+            `Bloco G: graph_ref da entidade '${sgdkLogicEntityId}' perdeu referencia apos reopen do SGDK.`
+          );
+        }
+        if (reopenedLogicState?.source?.graph_origin !== "user_edited_ref") {
+          fail(
+            `Bloco G: graph_origin esperado 'user_edited_ref' apos editar e salvar; recebido '${reopenedLogicState?.source?.graph_origin ?? "null"}'.`
+          );
+        }
+        const graphRefRelative = String(reopenedLogicState.source.graph_ref).replace(/^graphs[\\/]/i, "");
+        const graphRefAbs = path.join(sgdkProjectDir, "graphs", graphRefRelative);
+        const graphRefContent = await readFile(graphRefAbs, "utf8");
+        if (!graphRefContent.includes("node_edited_move")) {
+          fail(
+            `Bloco G: graph_ref '${reopenedLogicState.source.graph_ref}' nao contem o no editado esperado apos reopen.`
+          );
+        }
 
         try {
           await waitForBuildRunReady(sessionId, liveValidationTimeoutMs);
@@ -2678,7 +2744,8 @@ async function main() {
           "G",
           "passed",
           [
-            `Import SGDK -> colisao -> persistir -> reabrir -> Build & Run -> ROM '${romName}' com cabecalho SEGA verificado em disco.`,
+            `Import SGDK -> editar graph_ref da entidade '${sgdkLogicEntityId}' -> colisao -> persistir -> reabrir -> Build & Run -> ROM '${romName}' com cabecalho SEGA verificado em disco.`,
+            `graph_ref '${reopenedLogicState.source.graph_ref}' preservado com graph_origin='${reopenedLogicState.source.graph_origin}' e no 'node_edited_move' confirmado em disco.`,
             `Projeto: ${sgdkProjectDir}`,
             `Evidencia: ${path.basename(sgdkChainShot)}.`,
           ].join(" ")
