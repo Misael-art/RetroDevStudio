@@ -173,6 +173,9 @@ pub struct LogicComponent {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub graph_ref: Option<String>,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph_origin: Option<String>,
+    #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub logic_hints: Vec<String>,
     /// Caminhos relativos ao doador (ex.: `src/main.c`) rastreados sem embedar AST.

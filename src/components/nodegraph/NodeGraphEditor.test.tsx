@@ -10,13 +10,25 @@ import NodeGraphEditor, {
   type NodeGraph,
 } from "./NodeGraphEditor";
 import { useEditorStore } from "../../core/store/editorStore";
+import type { Entity } from "../../core/ipc/sceneService";
 
 const mocks = vi.hoisted(() => ({
   persistActiveScene: vi.fn(),
+  resolveScenePrefabs: vi.fn(),
 }));
 
 vi.mock("../../core/scenePersistence", () => ({
   persistActiveScene: mocks.persistActiveScene,
+}));
+
+vi.mock("../../core/ipc/sceneService", () => ({
+  resolveScenePrefabs: mocks.resolveScenePrefabs,
+  parseSceneJson: (sceneJson?: string | null) => {
+    if (!sceneJson) {
+      return null;
+    }
+    return JSON.parse(sceneJson);
+  },
 }));
 
 function flush() {
@@ -25,7 +37,7 @@ function flush() {
   });
 }
 
-function buildLogicEntity(entityId: string, displayName: string, graph: NodeGraph) {
+function buildLogicEntity(entityId: string, displayName: string, graph: NodeGraph): Entity {
   return {
     entity_id: entityId,
     display_name: displayName,
@@ -122,7 +134,7 @@ const GRAPH_WITHOUT_ENTRY: NodeGraph = {
 
 function buildSceneWithGraph(
   graph: NodeGraph,
-  entities = [buildLogicEntity("hero", "Hero", graph)]
+  entities: Entity[] = [buildLogicEntity("hero", "Hero", graph)]
 ) {
   return {
     scene_id: "main_scene",
@@ -159,6 +171,11 @@ describe("NodeGraphEditor", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     mocks.persistActiveScene.mockResolvedValue(true);
+    mocks.resolveScenePrefabs.mockResolvedValue({
+      ok: false,
+      error: "not-needed",
+      scene_json: "",
+    });
 
     useEditorStore.setState({
       activeProjectDir: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
@@ -274,6 +291,56 @@ describe("NodeGraphEditor", () => {
     expect(useEditorStore.getState().activeScene?.entities[0].components.logic?.graph).toBe(
       serializeNodeGraph(EMPTY_GRAPH)
     );
+  });
+
+  it("hydrates graph from graph_ref via resolve_scene_prefabs and exposes imported origin", async () => {
+    const sourceScene = buildSceneWithGraph(EMPTY_GRAPH, [
+      {
+        entity_id: "hero",
+        display_name: "Hero",
+        prefab: null,
+        transform: { x: 16, y: 24 },
+        components: {
+          logic: {
+            graph_ref: "graphs/sgdk_import_hero.json",
+            graph_origin: "imported_ref",
+          },
+        },
+      },
+    ]);
+    const resolvedScene = buildSceneWithGraph(GRAPH_FIXTURE, [
+      {
+        entity_id: "hero",
+        display_name: "Hero",
+        prefab: null,
+        transform: { x: 16, y: 24 },
+        components: {
+          logic: {
+            graph: serializeNodeGraph(GRAPH_FIXTURE),
+            graph_ref: "graphs/sgdk_import_hero.json",
+            graph_origin: "imported_ref",
+          },
+        },
+      },
+    ]);
+    mocks.resolveScenePrefabs.mockResolvedValue({
+      ok: true,
+      error: "",
+      scene_json: JSON.stringify(resolvedScene),
+    });
+
+    await act(async () => {
+      useEditorStore.setState({
+        activeScene: sourceScene,
+        activeSceneSource: sourceScene,
+      });
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.resolveScenePrefabs).toHaveBeenCalled();
+    expect(container.querySelector("[data-testid='node-card-entry_node']")).toBeInstanceOf(HTMLDivElement);
+    expect(container.textContent).toContain("Origem do grafo: importado do graph_ref");
   });
 
   it("adds an entry node from the overview when the graph has no event node yet", async () => {

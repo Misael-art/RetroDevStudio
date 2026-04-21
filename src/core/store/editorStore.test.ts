@@ -560,6 +560,7 @@ describe("undo/redo", () => {
     const persistedLogic = useEditorStore.getState().activeSceneSource?.entities[0]?.components.logic;
     expect(persistedLogic?.graph_ref).toBe("graphs/platformer_player_logic.json");
     expect(persistedLogic?.graph).toContain("\"sprite_move\"");
+    expect(persistedLogic?.graph_origin).toBe("user_edited_ref");
   });
 });
 

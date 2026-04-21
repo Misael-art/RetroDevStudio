@@ -78,6 +78,7 @@ export interface LogicVariable {
 export interface LogicComponent {
   graph?: string;
   graph_ref?: string | null;
+  graph_origin?: "imported_ref" | "user_edited_ref" | null;
   logic_hints?: string[];
   /** Caminhos no doador (ex. C) rastreados sem carregar AST no frontend. */
   external_source_refs?: string[];

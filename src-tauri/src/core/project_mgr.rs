@@ -224,6 +224,29 @@ struct SgdkImportLedgerPhaseD {
     /// `audio_snd_pcm`, `audio_psg`). Heuristica textual, nao substitui analise semantica.
     #[serde(default)]
     detected_audio_apis: Vec<String>,
+    #[serde(default)]
+    entity_trace: Vec<SgdkImportLedgerPhaseDEntityTrace>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+struct SgdkSourceEvidence {
+    rel_path: String,
+    line: usize,
+    kind: String,
+    subject: String,
+    snippet: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+struct SgdkImportLedgerPhaseDEntityTrace {
+    entity_id: String,
+    graph_ref: String,
+    #[serde(default)]
+    source_refs: Vec<SgdkSourceEvidence>,
+    confidence: String,
+    applied_class: String,
+    #[serde(default)]
+    rules_hit: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -946,12 +969,28 @@ struct SgdkDonorLogicScan {
     donor_logic_scanned_paths: Vec<String>,
     /// Texto fonte por path relativo (apenas ficheiros efetivamente visitados pelo scan).
     source_text_by_rel: HashMap<String, String>,
-    /// Versao colapsada (sem whitespace) por path relativo.
-    collapsed_by_rel: HashMap<String, String>,
-    /// Nomes de funcoes observados por ficheiro (heuristica linha-a-linha; nao e AST completo).
-    function_defs_by_rel: HashMap<String, HashSet<String>>,
-    /// Chamadas `ident(` entre TU distintos com definicao textual observada doutro ficheiro.
+    function_symbols: Vec<SgdkCLiteFunctionSymbol>,
+    function_calls: Vec<SgdkCLiteFunctionCall>,
+    source_evidence: Vec<SgdkSourceEvidence>,
     cross_unit_function_refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SgdkCLiteFunctionSymbol {
+    name: String,
+    rel_path: String,
+    start_line: usize,
+    end_line: usize,
+    is_prototype: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SgdkCLiteFunctionCall {
+    caller: Option<String>,
+    callee: String,
+    rel_path: String,
+    line: usize,
+    snippet: String,
 }
 
 impl SgdkDonorLogicScan {
@@ -1012,65 +1051,76 @@ impl SgdkDonorLogicScan {
             || self.audio_psg_detected
     }
 
-    fn merge_tokens_from_collapsed_source(&mut self, collapsed: &str) {
-        if collapsed.contains("JOY_readJoypad(") || collapsed.contains("JOY_read(") {
+    fn register_function_symbol(&mut self, symbol: SgdkCLiteFunctionSymbol, snippet: &str) {
+        self.source_evidence.push(SgdkSourceEvidence {
+            rel_path: symbol.rel_path.clone(),
+            line: symbol.start_line,
+            kind: "function_def".to_string(),
+            subject: symbol.name.clone(),
+            snippet: normalize_source_snippet(snippet),
+        });
+        self.function_symbols.push(symbol);
+    }
+
+    fn register_callsite(&mut self, call: SgdkCLiteFunctionCall) {
+        if call.callee == "JOY_readJoypad" || call.callee == "JOY_read" {
             self.joy_read_detected = true;
         }
-        if collapsed.contains("MAP_scrollH(") {
+        if call.callee == "MAP_scrollH" {
             self.map_scroll_h_detected = true;
         }
-        if collapsed.contains("MAP_scrollV(") {
+        if call.callee == "MAP_scrollV" {
             self.map_scroll_v_detected = true;
         }
-        if collapsed.contains("while(1)")
-            || collapsed.contains("while(true")
-            || collapsed.contains("for(;;)")
-        {
-            self.busy_loop_detected = true;
-        }
-        if collapsed.contains("SYS_doVBlankProcess(")
-            || collapsed.contains("VDP_waitVSync(")
-            || collapsed.contains("VDP_waitDMACompletion(")
+        if call.callee == "SYS_doVBlankProcess"
+            || call.callee == "VDP_waitVSync"
+            || call.callee == "VDP_waitDMACompletion"
         {
             self.vblank_sync_detected = true;
         }
-        if collapsed.contains("SPR_addSprite(")
-            || collapsed.contains("SPR_setPosition(")
-            || collapsed.contains("SPR_update(")
-            || collapsed.contains("SPR_init(")
+        if call.callee == "SPR_addSprite"
+            || call.callee == "SPR_setPosition"
+            || call.callee == "SPR_update"
+            || call.callee == "SPR_init"
         {
             self.spr_engine_detected = true;
         }
-        // Playback XGM direto (driver XGM/XGM2).
-        if collapsed.contains("XGM_startPlay(")
-            || collapsed.contains("XGM_setLoopNumber(")
-            || collapsed.contains("XGM2_startPlay(")
-            || collapsed.contains("XGM2_setLoopNumber(")
-        {
+        if call.callee.starts_with("XGM_") || call.callee.starts_with("XGM2_") {
             self.audio_xgm_detected = true;
         }
-        // Bridge SND -> XGM (`SND_startPlay_XGM` / `SND_PAL_startPlay_XGM`).
-        if collapsed.contains("SND_startPlay_XGM(")
-            || collapsed.contains("SND_PAL_startPlay_XGM(")
-            || collapsed.contains("SND_NTSC_startPlay_XGM(")
+        if call.callee == "SND_startPlay_XGM"
+            || call.callee == "SND_PAL_startPlay_XGM"
+            || call.callee == "SND_NTSC_startPlay_XGM"
         {
             self.audio_snd_xgm_detected = true;
         }
-        // Playback PCM via SND_* (PCM1/PCM2/4PCM).
-        if collapsed.contains("SND_startPlay_PCM(")
-            || collapsed.contains("SND_PCM_startPlay(")
-            || collapsed.contains("SND_startPlay_4PCM(")
-            || collapsed.contains("SND_startPlay_2ADPCM(")
+        if call.callee == "SND_startPlay_PCM"
+            || call.callee == "SND_PCM_startPlay"
+            || call.callee == "SND_startPlay_4PCM"
+            || call.callee == "SND_startPlay_2ADPCM"
         {
             self.audio_snd_pcm_detected = true;
         }
-        // PSG direto (envelope/frequencia) — evidencia de uso low-level.
-        if collapsed.contains("PSG_setEnvelope(")
-            || collapsed.contains("PSG_setFrequency(")
-            || collapsed.contains("PSG_setTone(")
-        {
+        if call.callee.starts_with("PSG_") {
             self.audio_psg_detected = true;
         }
+        let is_sgdk_api = looks_like_sgdk_macro_api_identifier(&call.callee)
+            || call.callee.starts_with("XGM_")
+            || call.callee.starts_with("XGM2_")
+            || call.callee.starts_with("SND_")
+            || call.callee.starts_with("PSG_");
+        self.source_evidence.push(SgdkSourceEvidence {
+            rel_path: call.rel_path.clone(),
+            line: call.line,
+            kind: if is_sgdk_api {
+                "sgdk_api_call".to_string()
+            } else {
+                "function_call".to_string()
+            },
+            subject: call.callee.clone(),
+            snippet: normalize_source_snippet(&call.snippet),
+        });
+        self.function_calls.push(call);
     }
 
     /// Heuristica agregada em todos os ficheiros visitados (ordem: casos mais especificos primeiro).
@@ -1090,11 +1140,11 @@ impl SgdkDonorLogicScan {
         None
     }
 
-    /// Materializa stencil extra no grafo do sprite primario apenas para classes com sinal forte.
     fn primary_graph_materialization_class(&self) -> Option<&'static str> {
         match self.heuristic_gameplay_class().as_deref() {
             Some("shmup_vertical_signals") => Some("shmup_vertical_signals"),
             Some("run_and_gun_horizontal_signals") => Some("run_and_gun_horizontal_signals"),
+            Some("platformer_horizontal_scroller_signals") => Some("platformer_horizontal_scroller_signals"),
             _ => None,
         }
     }
@@ -1114,73 +1164,105 @@ impl SgdkDonorLogicScan {
 
     fn compute_cross_unit_function_refs(&mut self) {
         let mut def_site: HashMap<String, String> = HashMap::new();
-        let mut rel_keys: Vec<String> = self.function_defs_by_rel.keys().cloned().collect();
-        rel_keys.sort();
-        for rel in rel_keys {
-            if let Some(set) = self.function_defs_by_rel.get(&rel) {
-                for n in set {
-                    def_site.entry(n.clone()).or_insert_with(|| rel.clone());
-                }
+        let mut proto_site: HashMap<String, String> = HashMap::new();
+        for symbol in &self.function_symbols {
+            if symbol.is_prototype {
+                proto_site
+                    .entry(symbol.name.clone())
+                    .or_insert_with(|| symbol.rel_path.clone());
+            } else {
+                def_site
+                    .entry(symbol.name.clone())
+                    .or_insert_with(|| symbol.rel_path.clone());
             }
         }
         let mut seen = HashSet::new();
         let mut refs = Vec::new();
-        let mut collapsed_rels: Vec<String> = self.collapsed_by_rel.keys().cloned().collect();
-        collapsed_rels.sort();
-        for rel in collapsed_rels {
-            let Some(collapsed) = self.collapsed_by_rel.get(&rel) else {
+        for call in &self.function_calls {
+            let def_rel = def_site
+                .get(&call.callee)
+                .or_else(|| proto_site.get(&call.callee));
+            let Some(def_rel) = def_rel else {
                 continue;
             };
-            for (fname, def_rel) in &def_site {
-                if def_rel == &rel {
-                    continue;
-                }
-                if fname.len() < 2 || is_sgdk_c_keyword(fname) {
-                    continue;
-                }
-                let needle = format!("{fname}(");
-                if !collapsed.contains(&needle) {
-                    continue;
-                }
-                let line = format!(
-                    "chamada_textual `{}(` em '{}' — definicao heuristica em '{}'",
-                    fname, rel, def_rel
-                );
-                if seen.insert(line.clone()) {
-                    refs.push(line);
-                }
+            if *def_rel == call.rel_path {
+                continue;
+            }
+            let line = format!(
+                "call `{}(` em '{}' linha {} (caller={}) -> definicao textual em '{}'",
+                call.callee,
+                call.rel_path,
+                call.line,
+                call.caller.as_deref().unwrap_or("global"),
+                def_rel
+            );
+            if seen.insert(line.clone()) {
+                refs.push(line);
             }
         }
         refs.sort();
         self.cross_unit_function_refs = refs;
     }
 
-    /// Linha com SPR_addSprite / SPR_setPosition no mesmo texto que o identificador canonico do recurso.
     fn entity_resource_spr_touch_rel(&self, resource_name: &str) -> Option<String> {
+        self.entity_resource_source_refs(resource_name)
+            .into_iter()
+            .map(|ev| ev.rel_path)
+            .next()
+    }
+
+    fn entity_resource_source_refs(&self, resource_name: &str) -> Vec<SgdkSourceEvidence> {
         let entity_id = sgdk_entity_id(resource_name);
         if entity_id.len() < 2 {
-            return None;
+            return Vec::new();
         }
+        let mut refs = Vec::new();
         let mut rel_keys: Vec<String> = self.source_text_by_rel.keys().cloned().collect();
         rel_keys.sort();
         for rel in rel_keys {
             let Some(src) = self.source_text_by_rel.get(&rel) else {
                 continue;
             };
-            for raw_line in src.lines() {
+            for (line_idx, raw_line) in src.lines().enumerate() {
                 let line = strip_cpp_line_comment(raw_line).trim();
                 if line.is_empty() || line.starts_with('#') {
                     continue;
                 }
-                if !line.contains("SPR_addSprite") && !line.contains("SPR_setPosition") {
+                let has_spr_api = line.contains("SPR_addSprite")
+                    || line.contains("SPR_setPosition")
+                    || line.contains("SPR_update")
+                    || line.contains("SPR_init");
+                if !has_spr_api {
                     continue;
                 }
                 if c_token_boundary_substring(line, &entity_id) {
-                    return Some(rel);
+                    refs.push(SgdkSourceEvidence {
+                        rel_path: rel.clone(),
+                        line: line_idx + 1,
+                        kind: "entity_bind".to_string(),
+                        subject: entity_id.clone(),
+                        snippet: normalize_source_snippet(line),
+                    });
                 }
             }
         }
-        None
+        refs.sort_by(|a, b| {
+            a.rel_path
+                .cmp(&b.rel_path)
+                .then_with(|| a.line.cmp(&b.line))
+        });
+        refs
+    }
+
+    fn generic_phase_d_evidence(&self, limit: usize) -> Vec<SgdkSourceEvidence> {
+        let mut list = self.source_evidence.clone();
+        list.sort_by(|a, b| {
+            a.rel_path
+                .cmp(&b.rel_path)
+                .then_with(|| a.line.cmp(&b.line))
+                .then_with(|| a.kind.cmp(&b.kind))
+        });
+        list.into_iter().take(limit).collect()
     }
 }
 
@@ -1219,16 +1301,200 @@ fn c_token_boundary_substring(haystack: &str, needle: &str) -> bool {
     false
 }
 
-fn collect_sgdk_c_function_names_for_audit(source: &str, into: &mut HashSet<String>) {
-    for raw in source.lines() {
-        let line = strip_cpp_line_comment(raw).trim();
-        if line.is_empty() || line.starts_with('#') {
+fn normalize_source_snippet(raw_line: &str) -> String {
+    let mut snippet = raw_line.trim().replace('\t', " ");
+    if snippet.len() > 140 {
+        snippet.truncate(140);
+    }
+    snippet
+}
+
+fn sanitize_c_source_for_scan(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let chars: Vec<char> = source.chars().collect();
+    let mut idx = 0usize;
+    let mut in_line_comment = false;
+    let mut in_block_comment = false;
+    let mut in_string = false;
+    let mut in_char = false;
+    while idx < chars.len() {
+        let ch = chars[idx];
+        let next = chars.get(idx + 1).copied();
+        if in_line_comment {
+            if ch == '\n' {
+                in_line_comment = false;
+                out.push('\n');
+            } else {
+                out.push(' ');
+            }
+            idx += 1;
             continue;
         }
-        if let Some(name) = extract_sgdk_line_function_def_name(line) {
-            into.insert(name);
+        if in_block_comment {
+            if ch == '*' && next == Some('/') {
+                out.push(' ');
+                out.push(' ');
+                in_block_comment = false;
+                idx += 2;
+                continue;
+            }
+            if ch == '\n' {
+                out.push('\n');
+            } else {
+                out.push(' ');
+            }
+            idx += 1;
+            continue;
+        }
+        if in_string {
+            if ch == '\\' {
+                out.push(' ');
+                if next.is_some() {
+                    out.push(' ');
+                    idx += 2;
+                } else {
+                    idx += 1;
+                }
+                continue;
+            }
+            if ch == '"' {
+                in_string = false;
+            }
+            out.push(if ch == '\n' { '\n' } else { ' ' });
+            idx += 1;
+            continue;
+        }
+        if in_char {
+            if ch == '\\' {
+                out.push(' ');
+                if next.is_some() {
+                    out.push(' ');
+                    idx += 2;
+                } else {
+                    idx += 1;
+                }
+                continue;
+            }
+            if ch == '\'' {
+                in_char = false;
+            }
+            out.push(if ch == '\n' { '\n' } else { ' ' });
+            idx += 1;
+            continue;
+        }
+        if ch == '/' && next == Some('/') {
+            in_line_comment = true;
+            out.push(' ');
+            out.push(' ');
+            idx += 2;
+            continue;
+        }
+        if ch == '/' && next == Some('*') {
+            in_block_comment = true;
+            out.push(' ');
+            out.push(' ');
+            idx += 2;
+            continue;
+        }
+        if ch == '"' {
+            in_string = true;
+            out.push(' ');
+            idx += 1;
+            continue;
+        }
+        if ch == '\'' {
+            in_char = true;
+            out.push(' ');
+            idx += 1;
+            continue;
+        }
+        out.push(ch);
+        idx += 1;
+    }
+    out
+}
+
+fn collect_c_line_function_calls(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let bytes = line.as_bytes();
+    let mut idx = 0usize;
+    while idx < bytes.len() {
+        let ch = bytes[idx] as char;
+        if !(ch.is_ascii_alphabetic() || ch == '_') {
+            idx += 1;
+            continue;
+        }
+        let start = idx;
+        idx += 1;
+        while idx < bytes.len() {
+            let c = bytes[idx] as char;
+            if c.is_ascii_alphanumeric() || c == '_' {
+                idx += 1;
+            } else {
+                break;
+            }
+        }
+        let ident = &line[start..idx];
+        let mut look = idx;
+        while look < bytes.len() && (bytes[look] as char).is_ascii_whitespace() {
+            look += 1;
+        }
+        if look < bytes.len() && bytes[look] as char == '(' && !is_sgdk_c_keyword(ident) {
+            out.push(ident.to_string());
         }
     }
+    out
+}
+
+fn collect_sgdk_c_function_symbols(rel_path: &str, source: &str) -> Vec<SgdkCLiteFunctionSymbol> {
+    let mut symbols = Vec::new();
+    let lines: Vec<&str> = source.lines().collect();
+    let mut line_idx = 0usize;
+    while line_idx < lines.len() {
+        let line = lines[line_idx].trim();
+        if line.is_empty() || line.starts_with('#') {
+            line_idx += 1;
+            continue;
+        }
+        let Some(name) = extract_sgdk_line_function_def_name(line) else {
+            line_idx += 1;
+            continue;
+        };
+        let is_prototype = line.trim_end().ends_with(';');
+        let mut end_line = line_idx + 1;
+        if !is_prototype && line.contains('{') {
+            let mut depth = 0i32;
+            let mut cursor = line_idx;
+            let mut found_open = false;
+            while cursor < lines.len() {
+                for ch in lines[cursor].chars() {
+                    if ch == '{' {
+                        depth += 1;
+                        found_open = true;
+                    } else if ch == '}' && found_open {
+                        depth -= 1;
+                        if depth <= 0 {
+                            end_line = cursor + 1;
+                            break;
+                        }
+                    }
+                }
+                if found_open && depth <= 0 {
+                    break;
+                }
+                cursor += 1;
+            }
+        }
+        symbols.push(SgdkCLiteFunctionSymbol {
+            name,
+            rel_path: rel_path.to_string(),
+            start_line: line_idx + 1,
+            end_line,
+            is_prototype,
+        });
+        line_idx += 1;
+    }
+    symbols
 }
 
 /// Extrai nome de funcao apenas quando a linha parece definicao/prototipo (heuristica conservadora).
@@ -1349,16 +1615,53 @@ fn scan_sgdk_donor_logic_scan(sgdk_path: &Path) -> SgdkDonorLogicScan {
         let Ok(text) = fs::read_to_string(&abs_path) else {
             continue;
         };
-        let collapsed: String = text.chars().filter(|c| !c.is_whitespace()).collect();
-        scan.merge_tokens_from_collapsed_source(&collapsed);
+        let sanitized = sanitize_c_source_for_scan(&text);
         if let Some(rel) = sgdk_donor_rel_path(sgdk_path, &abs_path) {
             scan.donor_logic_scanned_paths.push(rel.clone());
             scan
                 .source_text_by_rel
                 .insert(rel.clone(), text.clone());
-            scan.collapsed_by_rel.insert(rel.clone(), collapsed.clone());
-            let bucket = scan.function_defs_by_rel.entry(rel).or_default();
-            collect_sgdk_c_function_names_for_audit(&text, bucket);
+            if sanitized.contains("while(1)")
+                || sanitized.contains("while (1)")
+                || sanitized.contains("while(true)")
+                || sanitized.contains("while (true)")
+                || sanitized.contains("for(;;)")
+                || sanitized.contains("for (;;)")
+            {
+                scan.busy_loop_detected = true;
+            }
+            let symbols = collect_sgdk_c_function_symbols(&rel, &sanitized);
+            for symbol in symbols {
+                let source_line = text
+                    .lines()
+                    .nth(symbol.start_line.saturating_sub(1))
+                    .unwrap_or_default();
+                scan.register_function_symbol(symbol, source_line);
+            }
+            let source_lines: Vec<&str> = text.lines().collect();
+            let sanitized_lines: Vec<&str> = sanitized.lines().collect();
+            for (line_idx, sanitized_line) in sanitized_lines.iter().enumerate() {
+                let source_line = source_lines.get(line_idx).copied().unwrap_or_default();
+                for callee in collect_c_line_function_calls(sanitized_line) {
+                    let caller = scan
+                        .function_symbols
+                        .iter()
+                        .find(|sym| {
+                            !sym.is_prototype
+                                && sym.rel_path == rel
+                                && (line_idx + 1) >= sym.start_line
+                                && (line_idx + 1) <= sym.end_line
+                        })
+                        .map(|sym| sym.name.clone());
+                    scan.register_callsite(SgdkCLiteFunctionCall {
+                        caller,
+                        callee,
+                        rel_path: rel.clone(),
+                        line: line_idx + 1,
+                        snippet: source_line.to_string(),
+                    });
+                }
+            }
         }
 
         for inc in extract_sgdk_quoted_includes(&text) {
@@ -1398,6 +1701,20 @@ fn scan_sgdk_donor_logic_scan(sgdk_path: &Path) -> SgdkDonorLogicScan {
     scan.donor_logic_scanned_paths.sort();
     scan.donor_logic_scanned_paths.dedup();
     scan.compute_cross_unit_function_refs();
+    scan.source_evidence.sort_by(|a, b| {
+        a.rel_path
+            .cmp(&b.rel_path)
+            .then_with(|| a.line.cmp(&b.line))
+            .then_with(|| a.kind.cmp(&b.kind))
+            .then_with(|| a.subject.cmp(&b.subject))
+    });
+    scan.source_evidence.dedup_by(|a, b| {
+        a.rel_path == b.rel_path
+            && a.line == b.line
+            && a.kind == b.kind
+            && a.subject == b.subject
+            && a.snippet == b.snippet
+    });
     scan
 }
 
@@ -1649,6 +1966,10 @@ fn imported_sprite_logic_graph_phase_d(
     let target = sgdk_entity_id(resource_name);
     let mat_class =
         scan.graph_materialization_class_for_sprite_role(is_primary_sprite, secondary_local_spr);
+    let materialize_fire = matches!(
+        mat_class,
+        Some("shmup_vertical_signals") | Some("run_and_gun_horizontal_signals")
+    );
     let (mv_dx, mv_dy) = match mat_class {
         Some("shmup_vertical_signals") => (0, -2),
         _ => (2, 0),
@@ -1682,7 +2003,7 @@ fn imported_sprite_logic_graph_phase_d(
         "toPort": "exec"
     })];
     let mut tail_node = "move_sprite";
-    if mat_class.is_some() {
+    if materialize_fire {
         let sfx_label = match mat_class {
             Some("shmup_vertical_signals") => "Disparo (heuristica shmup)",
             Some("run_and_gun_horizontal_signals") => "Disparo (heuristica run-and-gun)",
@@ -1742,6 +2063,15 @@ fn imported_sprite_logic_graph_phase_d(
     .to_string()
 }
 
+#[derive(Debug, Clone, Default)]
+struct SgdkPhaseDEntityResult {
+    graph_ref: String,
+    source_refs: Vec<SgdkSourceEvidence>,
+    confidence: String,
+    applied_class: String,
+    rules_hit: Vec<String>,
+}
+
 fn apply_sgdk_phase_d_to_sprite_entity(
     project_dir: &Path,
     entity: &mut Entity,
@@ -1749,9 +2079,10 @@ fn apply_sgdk_phase_d_to_sprite_entity(
     scan: &SgdkDonorLogicScan,
     is_primary_sprite: bool,
     secondary_local_spr: bool,
-) -> Result<String, LoadError> {
+) -> Result<SgdkPhaseDEntityResult, LoadError> {
+    let mut phase_d_result = SgdkPhaseDEntityResult::default();
     let Some(logic) = entity.components.logic.as_mut() else {
-        return Ok(String::new());
+        return Ok(phase_d_result);
     };
     let graph_ref = sgdk_import_sprite_logic_graph_ref(&entity.entity_id);
     let graph_json = imported_sprite_logic_graph_phase_d(
@@ -1778,11 +2109,23 @@ fn apply_sgdk_phase_d_to_sprite_entity(
     })?;
     logic.graph = None;
     logic.graph_ref = Some(graph_ref.clone());
+    logic.graph_origin = Some("imported_ref".to_string());
     for rel in &scan.donor_logic_scanned_paths {
         logic.external_source_refs.push(rel.clone());
     }
     logic.external_source_refs.sort();
     logic.external_source_refs.dedup();
+    let mat_class = scan.graph_materialization_class_for_sprite_role(is_primary_sprite, secondary_local_spr);
+    let mut evidence_refs = scan.entity_resource_source_refs(resource_name);
+    if evidence_refs.is_empty() {
+        evidence_refs = scan.generic_phase_d_evidence(8);
+    }
+    for ev in evidence_refs.iter().take(4) {
+        logic.logic_hints.push(format!(
+            "Fase D evid: {}:{} {} {} | {}",
+            ev.rel_path, ev.line, ev.kind, ev.subject, ev.snippet
+        ));
+    }
     if is_primary_sprite {
         let scan_src_hint = if scan.donor_logic_scanned_paths.len() > 1 {
             format!(
@@ -1835,7 +2178,10 @@ fn apply_sgdk_phase_d_to_sprite_entity(
                 "Fase D: nenhum padrao distintivo (JOY_* / MAP_scroll*) no agregado do doador; grafo base mantido.".into(),
             );
         }
-        if scan.primary_graph_materialization_class().is_some() {
+        if matches!(
+            scan.primary_graph_materialization_class(),
+            Some("run_and_gun_horizontal_signals") | Some("shmup_vertical_signals")
+        ) {
             logic.logic_hints.push(
                 "Fase D: heuristica de alta confianca — stencil extra (movimento + action_sound 'fire') materializado no grafo do sprite primario.".into(),
             );
@@ -1894,7 +2240,49 @@ fn apply_sgdk_phase_d_to_sprite_entity(
             }
         }
     }
-    Ok(graph_ref)
+    let mut rules_hit = Vec::new();
+    if scan.joy_read_detected {
+        rules_hit.push("joy_read".to_string());
+    }
+    if scan.map_scroll_h_detected {
+        rules_hit.push("map_scroll_h".to_string());
+    }
+    if scan.map_scroll_v_detected {
+        rules_hit.push("map_scroll_v".to_string());
+    }
+    if scan.spr_engine_detected {
+        rules_hit.push("spr_engine".to_string());
+    }
+    if secondary_local_spr {
+        rules_hit.push("secondary_local_spr_signal".to_string());
+    }
+    if is_primary_sprite {
+        rules_hit.push("primary_sprite".to_string());
+    }
+    let confidence = if matches!(
+        mat_class,
+        Some("run_and_gun_horizontal_signals") | Some("shmup_vertical_signals")
+    ) {
+        "high"
+    } else if mat_class == Some("platformer_horizontal_scroller_signals") || secondary_local_spr {
+        "medium"
+    } else {
+        "low"
+    };
+    phase_d_result.graph_ref = graph_ref;
+    phase_d_result.source_refs = evidence_refs;
+    phase_d_result.confidence = confidence.to_string();
+    phase_d_result.applied_class = mat_class
+        .map(|c| match c {
+            "run_and_gun_horizontal_signals" => "run_and_gun",
+            "shmup_vertical_signals" => "shmup",
+            "platformer_horizontal_scroller_signals" => "platformer",
+            _ => "none",
+        })
+        .unwrap_or("none")
+        .to_string();
+    phase_d_result.rules_hit = rules_hit;
+    Ok(phase_d_result)
 }
 
 /// Agrupamento canonico de camadas de editor para cenas importadas do SGDK.
@@ -2325,6 +2713,7 @@ fn import_sgdk_resources_into_scene(
                         logic: Some(LogicComponent {
                             graph: Some(imported_sprite_logic_graph(&resource.name)),
                             graph_ref: None,
+                            graph_origin: None,
                             logic_hints: Vec::new(),
                             external_source_refs: Vec::new(),
                             variables: HashMap::new(),
@@ -2380,6 +2769,7 @@ fn import_sgdk_resources_into_scene(
         cross_unit_function_refs: donor_logic_scan.cross_unit_function_refs.clone(),
         entity_spr_local_signal_hits: Vec::new(),
         detected_audio_apis: donor_logic_scan.detected_audio_apis(),
+        entity_trace: Vec::new(),
     };
     for ent in &sprite_entities {
         let resource_name = ent
@@ -2402,7 +2792,7 @@ fn import_sgdk_resources_into_scene(
             .unwrap_or_else(|| ent.entity_id.clone());
         let secondary_local_spr =
             idx != 0 && donor_logic_scan.entity_resource_spr_touch_rel(&resource_name).is_some();
-        let graph_ref = apply_sgdk_phase_d_to_sprite_entity(
+        let phase_d_entity = apply_sgdk_phase_d_to_sprite_entity(
             project_dir,
             ent,
             &resource_name,
@@ -2410,12 +2800,25 @@ fn import_sgdk_resources_into_scene(
             idx == 0,
             secondary_local_spr,
         )?;
-        if !graph_ref.is_empty() {
-            phase_d_ledger.logic_graph_refs.push(graph_ref);
+        if !phase_d_entity.graph_ref.is_empty() {
+            phase_d_ledger
+                .logic_graph_refs
+                .push(phase_d_entity.graph_ref.clone());
+            phase_d_ledger.entity_trace.push(SgdkImportLedgerPhaseDEntityTrace {
+                entity_id: ent.entity_id.clone(),
+                graph_ref: phase_d_entity.graph_ref,
+                source_refs: phase_d_entity.source_refs,
+                confidence: phase_d_entity.confidence,
+                applied_class: phase_d_entity.applied_class,
+                rules_hit: phase_d_entity.rules_hit,
+            });
         }
     }
     phase_d_ledger.logic_graph_refs.sort();
     phase_d_ledger.logic_graph_refs.dedup();
+    phase_d_ledger
+        .entity_trace
+        .sort_by(|a, b| a.entity_id.cmp(&b.entity_id));
 
     // -- cena primaria: primeiro tilemap + todos os sprites + audio + camera
     let mut primary_scene = canonical_scene(DEFAULT_SCENE_ID, Some(scene_name.to_string()));
@@ -3532,6 +3935,7 @@ fn platformer_player_prefab_with_dims(
             logic: Some(LogicComponent {
                 graph: None,
                 graph_ref: Some("graphs/platformer_player_logic.json".to_string()),
+                graph_origin: None,
                 logic_hints: Vec::new(),
                 external_source_refs: Vec::new(),
                 variables: HashMap::new(),
@@ -7616,6 +8020,7 @@ fn imported_logic_component(graph: Option<String>, logic_hints: Vec<String>) -> 
     LogicComponent {
         graph,
         graph_ref: None,
+        graph_origin: None,
         logic_hints,
         external_source_refs: Vec::new(),
         variables: HashMap::new(),
@@ -8189,6 +8594,7 @@ pub fn sync_external_graph_refs(
             ))
         })?;
         source_logic.graph = None;
+        source_logic.graph_origin = Some("user_edited_ref".to_string());
     }
 
     Ok(())
@@ -8322,6 +8728,7 @@ fn starter_scene(scene_id: &str, display_name: String, _target: &str) -> Scene {
             logic: Some(LogicComponent {
                 graph: Some(logic_graph),
                 graph_ref: None,
+                graph_origin: None,
                 logic_hints: Vec::new(),
                 external_source_refs: Vec::new(),
                 variables: HashMap::new(),
@@ -9142,6 +9549,9 @@ fn resolve_entity_logic_graph(project_dir: &Path, entity: &Entity) -> Result<Ent
     let mut resolved_entity = entity.clone();
     if let Some(resolved_logic) = resolved_entity.components.logic.as_mut() {
         resolved_logic.graph = Some(content);
+        if resolved_logic.graph_origin.is_none() {
+            resolved_logic.graph_origin = Some("imported_ref".to_string());
+        }
     }
 
     Ok(resolved_entity)
@@ -9709,6 +10119,41 @@ void weapons_tick(void) {\n    SPR_addSprite(&spr_shot, FIX16(10), FIX16(20), TI
         .expect("weapons.c");
     }
 
+    fn write_sgdk_semantic_scan_noise_donor(dir: &Path) {
+        write_generic_sgdk_donor_fixture(dir);
+        fs::write(
+            dir.join("src").join("main.c"),
+            b"#include <genesis.h>\n#include \"player_tick.h\"\n\
+int main(void) {\n\
+    const char* fake = \"SPR_addSprite(ignored) MAP_scrollV(ignored)\";\n\
+    (void)fake;\n\
+    // JOY_readJoypad(JOY_1) em comentario nao deve virar sinal real.\n\
+    while (1) {\n\
+        MAP_scrollH(BG_A, 1);\n\
+        tick_player();\n\
+        SYS_doVBlankProcess();\n\
+    }\n\
+    return 0;\n\
+}\n",
+        )
+        .expect("write noise main");
+        fs::write(
+            dir.join("src").join("player_tick.h"),
+            b"#ifndef PLAYER_TICK_H\n#define PLAYER_TICK_H\nvoid tick_player(void);\n#endif\n",
+        )
+        .expect("player_tick.h");
+        fs::write(
+            dir.join("src").join("player_tick.c"),
+            b"#include <genesis.h>\n#include \"player_tick.h\"\n\
+void tick_player(void) {\n\
+    u16 joy = JOY_readJoypad(JOY_1);\n\
+    (void)joy;\n\
+    SPR_setPosition(&hero, 10, 20);\n\
+}\n",
+        )
+        .expect("player_tick.c");
+    }
+
     fn read_legacy_index(overlay_dir: &Path) -> LegacySgdkIndex {
         let raw = fs::read_to_string(overlay_dir.join("legacy_sgdk_index.json"))
             .expect("read legacy index");
@@ -10155,6 +10600,7 @@ void weapons_tick(void) {\n    SPR_addSprite(&spr_shot, FIX16(10), FIX16(20), TI
                     logic: Some(LogicComponent {
                         graph: None,
                         graph_ref: Some("graphs/player_logic.json".to_string()),
+                        graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         variables: HashMap::new(),
@@ -10200,6 +10646,7 @@ void weapons_tick(void) {\n    SPR_addSprite(&spr_shot, FIX16(10), FIX16(20), TI
                     logic: Some(LogicComponent {
                         graph: Some("{\"stale\":true}".to_string()),
                         graph_ref: Some("graphs/player_logic.json".to_string()),
+                        graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         variables: HashMap::new(),
@@ -10222,6 +10669,7 @@ void weapons_tick(void) {\n    SPR_addSprite(&spr_shot, FIX16(10), FIX16(20), TI
                     logic: Some(LogicComponent {
                         graph: Some(platformer_logic_graph()),
                         graph_ref: Some("graphs/player_logic.json".to_string()),
+                        graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         variables: HashMap::new(),
@@ -10659,6 +11107,27 @@ void weapons_tick(void) {\n    SPR_addSprite(&spr_shot, FIX16(10), FIX16(20), TI
             ledger.phase_d.donor_logic_scanned_paths,
             vec!["src/main.c".to_string()]
         );
+        let hero_trace = ledger
+            .phase_d
+            .entity_trace
+            .iter()
+            .find(|trace| trace.entity_id == "hero")
+            .expect("entity trace hero");
+        assert_eq!(hero_trace.graph_ref, "graphs/sgdk_import_hero.json");
+        assert_eq!(hero_trace.applied_class, "run_and_gun");
+        assert_eq!(hero_trace.confidence, "high");
+        assert!(
+            !hero_trace.source_refs.is_empty(),
+            "entity trace precisa registrar evidencias por entidade"
+        );
+        assert!(
+            hero_trace
+                .source_refs
+                .iter()
+                .all(|ev| !ev.rel_path.is_empty() && ev.line >= 1 && !ev.kind.is_empty()),
+            "source_refs precisam manter rel_path/line/kind preenchidos: {:?}",
+            hero_trace.source_refs
+        );
 
         let _ = fs::remove_dir_all(donor_dir);
         let _ = fs::remove_dir_all(project_dir);
@@ -10732,6 +11201,57 @@ void weapons_tick(void) {\n    SPR_addSprite(&spr_shot, FIX16(10), FIX16(20), TI
         let _ = fs::remove_dir_all(&project_dir);
     }
 
+    #[test]
+    fn sgdk_phase_d_semantic_scan_ignores_comments_and_strings_and_tracks_cross_tu_calls() {
+        let donor_dir = temp_dir("sgdk-semantic-noise-d");
+        let project_dir = temp_dir("sgdk-semantic-noise-p");
+        create_project_skeleton(&project_dir, "SGDK Semantic Noise", "megadrive").expect("skel");
+        write_sgdk_semantic_scan_noise_donor(&donor_dir);
+
+        let report = import_sgdk_project(&project_dir, &donor_dir).expect("import");
+        let manifest_rel = report.manifest_path.as_deref().expect("manifest");
+        let ledger: SgdkImportLedger = serde_json::from_str(
+            &fs::read_to_string(project_dir.join(manifest_rel)).expect("read ledger"),
+        )
+        .expect("parse ledger");
+
+        assert!(
+            !ledger
+                .phase_d
+                .detected_main_c_token_groups
+                .iter()
+                .any(|token| token == "map_scroll_v"),
+            "map_scroll_v nao pode ser inferido a partir de string literal: {:?}",
+            ledger.phase_d.detected_main_c_token_groups
+        );
+        assert!(
+            ledger
+                .phase_d
+                .cross_unit_function_refs
+                .iter()
+                .any(|line| line.contains("tick_player")),
+            "cross TU deve rastrear tick_player entre TUs: {:?}",
+            ledger.phase_d.cross_unit_function_refs
+        );
+        let hero_trace = ledger
+            .phase_d
+            .entity_trace
+            .iter()
+            .find(|trace| trace.entity_id == "hero")
+            .expect("hero trace");
+        assert!(
+            hero_trace
+                .source_refs
+                .iter()
+                .any(|ev| ev.kind == "entity_bind" || ev.kind == "function_call" || ev.kind == "sgdk_api_call"),
+            "entity trace precisa carregar evidencias semanticas: {:?}",
+            hero_trace.source_refs
+        );
+
+        let _ = fs::remove_dir_all(&donor_dir);
+        let _ = fs::remove_dir_all(&project_dir);
+    }
+
     /// Doador sem API SPR_* no agregado: JOY + MAP_scrollH (sinal platformer, nao run-and-gun).
     fn write_sgdk_platformer_horizontal_scan_donor(dir: &Path) {
         write_generic_sgdk_donor_fixture(dir);
@@ -10757,6 +11277,14 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             ledger.phase_d.heuristic_gameplay_class.as_deref(),
             Some("platformer_horizontal_scroller_signals")
         );
+        let hero_trace = ledger
+            .phase_d
+            .entity_trace
+            .iter()
+            .find(|trace| trace.entity_id == "hero")
+            .expect("hero trace");
+        assert_eq!(hero_trace.applied_class, "platformer");
+        assert_eq!(hero_trace.confidence, "medium");
         let disk_graph = fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
             .expect("read graph");
         assert!(
@@ -11611,6 +12139,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                         .to_string(),
                     ),
                     graph_ref: None,
+                    graph_origin: None,
                     logic_hints: Vec::new(),
                     external_source_refs: Vec::new(),
                     variables: HashMap::new(),

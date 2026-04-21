@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { persistActiveScene } from "../../core/scenePersistence";
+import { parseSceneJson, resolveScenePrefabs } from "../../core/ipc/sceneService";
 import { useEditorStore } from "../../core/store/editorStore";
 import { getEntityDisplayName } from "../../core/entityDisplay";
 
@@ -1003,6 +1004,7 @@ function EmptyStateOverlay({
 export default function NodeGraphEditor() {
   const activeProjectDir = useEditorStore((state) => state.activeProjectDir);
   const activeScene = useEditorStore((state) => state.activeScene);
+  const activeSceneSource = useEditorStore((state) => state.activeSceneSource);
   const selectedEntityId = useEditorStore((state) => state.selectedEntityId);
   const updateEntity = useEditorStore((state) => state.updateEntity);
   const logMessage = useEditorStore((state) => state.logMessage);
@@ -1026,16 +1028,55 @@ export default function NodeGraphEditor() {
   const lastPersistedGraphRef = useRef(serializeNodeGraph(INITIAL_GRAPH));
 
   useEffect(() => {
-    const nextGraph = deserializeNodeGraph(selectedEntity?.components.logic?.graph);
-    hydratingGraphRef.current = true;
-    setGraph(nextGraph);
-    setSelectedId(null);
-    setDragging(null);
-    setPendingEdge(null);
-    setViewOffset({ x: 0, y: 0 });
-    setGuidedCommentary(null);
-    lastPersistedGraphRef.current = serializeNodeGraph(nextGraph);
-  }, [selectedEntity]);
+    let cancelled = false;
+    const resetFromGraph = (nextGraph: NodeGraph) => {
+      if (cancelled) {
+        return;
+      }
+      hydratingGraphRef.current = true;
+      setGraph(nextGraph);
+      setSelectedId(null);
+      setDragging(null);
+      setPendingEdge(null);
+      setViewOffset({ x: 0, y: 0 });
+      setGuidedCommentary(null);
+      lastPersistedGraphRef.current = serializeNodeGraph(nextGraph);
+    };
+    const entityGraph = selectedEntity?.components.logic?.graph;
+    const parsedGraph = deserializeNodeGraph(entityGraph);
+    if (parsedGraph.nodes.length > 0 || !selectedEntity?.components.logic?.graph_ref) {
+      resetFromGraph(parsedGraph);
+      return () => {
+        cancelled = true;
+      };
+    }
+    if (!activeProjectDir || !activeSceneSource) {
+      resetFromGraph(parsedGraph);
+      return () => {
+        cancelled = true;
+      };
+    }
+    void (async () => {
+      try {
+        const resolved = await resolveScenePrefabs(activeProjectDir, activeSceneSource);
+        if (!resolved.ok) {
+          resetFromGraph(parsedGraph);
+          return;
+        }
+        const resolvedScene = parseSceneJson(resolved.scene_json);
+        const resolvedEntity = resolvedScene?.entities.find(
+          (entity) => entity.entity_id === selectedEntity.entity_id
+        );
+        const hydrated = deserializeNodeGraph(resolvedEntity?.components.logic?.graph);
+        resetFromGraph(hydrated);
+      } catch {
+        resetFromGraph(parsedGraph);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProjectDir, activeSceneSource, selectedEntity]);
 
   useEffect(() => {
     function measureCanvas() {
@@ -1085,6 +1126,7 @@ export default function NodeGraphEditor() {
           logic: {
             ...(entity.components.logic ?? {}),
             graph: serializedGraph,
+            graph_origin: entity.components.logic?.graph_ref ? "user_edited_ref" : entity.components.logic?.graph_origin,
           },
         },
       });
@@ -1171,6 +1213,7 @@ export default function NodeGraphEditor() {
         activeScene?.entities.find((entity) => entity.entity_id !== selectedEntityIdValue)?.entity_id ?? null,
     };
   }, [activeScene, selectedEntity]);
+  const graphOriginLabel = selectedEntity?.components.logic?.graph_origin;
 
   // ── Add node from palette ──────────────────────────────────────────────────
   const addNode = useCallback((type: NodeType) => {
@@ -1392,14 +1435,18 @@ export default function NodeGraphEditor() {
           <p className="select-none px-1 text-[10px] text-[#45475a]">
             {selectedEntity ? "Autosave 600ms no LogicComponent.graph" : "Selecione uma entidade para editar"}
           </p>
+          {selectedEntity?.components.logic?.graph_ref ? (
+            <p className="mt-1 select-none px-1 text-[10px] text-[#45475a]">
+              Origem do grafo: {graphOriginLabel === "user_edited_ref" ? "editado no editor" : "importado do graph_ref"}
+            </p>
+          ) : null}
           <p className="mt-1 select-none px-1 text-[10px] text-[#45475a]">
             Dica: arraste da saída para a entrada para conectar.
           </p>
           <p className="select-none px-1 text-[10px] text-[#45475a]">Del = remover nó</p>
           {selectedEntity?.components.logic?.graph_ref && graph.nodes.length === 0 ? (
             <p className="mt-1 px-1 text-[9px] leading-snug text-[#f9e2af]">
-              graph_ref {selectedEntity.components.logic.graph_ref}: grafo vazio na cena em memória; o build resolve o
-              ficheiro em disco. Edite aqui para materializar `graph` inline ou reabra a cena após import.
+              graph_ref {selectedEntity.components.logic.graph_ref}: grafo indisponivel para hidratacao.
             </p>
           ) : null}
         </div>

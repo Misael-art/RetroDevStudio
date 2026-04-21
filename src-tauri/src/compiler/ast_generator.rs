@@ -3009,6 +3009,7 @@ mod tests {
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
                         graph_ref: None,
+                        graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         variables: HashMap::new(),
@@ -3138,6 +3139,7 @@ mod tests {
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
                         graph_ref: None,
+                        graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         variables: HashMap::new(),
@@ -3248,6 +3250,7 @@ mod tests {
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
                         graph_ref: None,
+                        graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         variables: HashMap::new(),
@@ -3354,6 +3357,7 @@ mod tests {
                         logic: Some(crate::ugdm::components::LogicComponent {
                             graph: Some(logic_graph.to_string()),
                             graph_ref: None,
+                            graph_origin: None,
                             logic_hints: Vec::new(),
                             external_source_refs: Vec::new(),
                             variables: HashMap::new(),
@@ -3512,6 +3516,7 @@ mod tests {
                         logic: Some(crate::ugdm::components::LogicComponent {
                             graph: Some(logic_graph.to_string()),
                             graph_ref: None,
+                            graph_origin: None,
                             logic_hints: Vec::new(),
                             external_source_refs: Vec::new(),
                             variables: HashMap::new(),
@@ -3737,6 +3742,7 @@ mod tests {
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
                         graph_ref: None,
+                        graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         variables: HashMap::new(),
@@ -3863,6 +3869,7 @@ mod tests {
                         logic: Some(crate::ugdm::components::LogicComponent {
                             graph: Some(graph.to_string()),
                             graph_ref: None,
+                            graph_origin: None,
                             logic_hints: Vec::new(),
                             external_source_refs: Vec::new(),
                             variables: HashMap::new(),
@@ -4003,6 +4010,7 @@ mod tests {
                         logic: Some(crate::ugdm::components::LogicComponent {
                             graph: Some(logic_graph),
                             graph_ref: None,
+                            graph_origin: None,
                             logic_hints: Vec::new(),
                             external_source_refs: Vec::new(),
                             variables: HashMap::new(),
@@ -4166,6 +4174,7 @@ mod tests {
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
                         graph_ref: None,
+                        graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         variables: HashMap::new(),
@@ -4271,6 +4280,7 @@ mod tests {
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
                         graph_ref: None,
+                        graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         variables: HashMap::new(),
@@ -4353,6 +4363,7 @@ mod tests {
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
                         graph_ref: None,
+                        graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         variables: HashMap::new(),
@@ -4446,6 +4457,7 @@ mod tests {
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
                         graph_ref: None,
+                        graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
                         variables: HashMap::new(),

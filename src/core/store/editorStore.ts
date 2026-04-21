@@ -295,6 +295,9 @@ function preserveInheritedGraphRef(
     ? { ...(nextComponents.logic as Record<string, unknown>) }
     : {};
   nextLogic.graph_ref = resolvedGraphRef;
+  if (!Object.prototype.hasOwnProperty.call(nextLogic, "graph_origin")) {
+    nextLogic.graph_origin = "user_edited_ref";
+  }
   nextComponents.logic = nextLogic;
   nextPatch.components = nextComponents;
   return nextPatch;
