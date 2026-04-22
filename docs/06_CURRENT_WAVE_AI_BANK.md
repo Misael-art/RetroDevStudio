@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-04-21 (rodada 11+)
+**Ultima Atualizacao:** 2026-04-22 (rodada 12)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -21,18 +21,24 @@
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
 * **O que acabou de acontecer (2026-04-21 rodada 11 - Corpus SGDK real: matriz + gates, sem promover support):**
-  - **Matriz:** `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md` com seis pastas do host `F:\\Projects\\MegaDrive_DEV\\SGDK_Engines` (existencia OK); **linha 1 (Platformer 2) documentada como Parcial** (teste `sgdk_matrix_corpus_platformer_2_partial_flow_documents_build_blocker` com `--ignored`); linhas 2-6 permanecem **Pendente** ate execucao por titulo.
+  - **Matriz:** `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md` com seis pastas do host `F:\\Projects\\MegaDrive_DEV\\SGDK_Engines` (existencia OK); naquele checkpoint inicial apenas a linha 1 estava documentada com evidência.
   - **Arvore:** `target-test-corrupt-salvage` removido da raiz apos realocacao previa para `F:\\Projects\\_RetroDevStudio_corrupt_salvage_relocated\\`; `npm run check:tree` verde.
   - **Vitest:** `App.test.tsx` ("ERRO LIVE") passa a usar `requestHwValidationRefresh` + `validateSceneDraft` mock `ok:false` + espera > debounce live, eliminando corrida com `useLiveValidationController`.
   - **Gates (ordem operacional):** `check:tree`, `lint`, `tsc --noEmit`, `npm test`, `cargo clippy -D warnings`, `cargo test --lib --test-threads=1`, `preflight:sgdk-e2e`, `test:e2e:desktop:qa-rc` verdes nesta sessao.
   - **Roadmap:** `docs/03_ROADMAP_MVP.md` atualizado (rodada 11, gates SGDK alinhados ao comando real de clippy/test, importador `sgdk` com bloqueador explicito da matriz de corpus).
   - **Honestidade:** SGDK continua `Experimental`; criterio "seis titulos Passou" da matriz **nao** foi satisfeito nesta rodada (apenas estrutura + gates).
 
+* **O que acabou de acontecer (2026-04-22 rodada 12 - prova SGDK corpus com source_kind correto):**
+  - **Contrato de prova corrigido:** helper `run_sgdk_matrix_corpus_partial_flow_documents_build_blocker` passou a executar `stamp_imported_sgdk_metadata(&project, donor)` apos `import_sgdk_project`, recarrega `project.rds` e asserta `template_metadata.source_kind == "imported_sgdk"` antes do Build/ROM; logs `MATRIX_*` agora incluem `source_kind=...`.
+  - **Build orchestrator:** `src-tauri/src/compiler/build_orch.rs` passou a encaminhar `project.template_metadata.source_kind` para `md_profile::validate_scene_with_source_kind` e `snes_profile::validate_scene_with_source_kind` (mantem fatal para nativo e warning auditavel para SGDK gerenciado).
+  - **Regressao nova:** `sgdk_managed_vram_overflow_warns_but_native_still_aborts` prova: overflow VRAM em nativo continua abortando; mesmo overflow em `imported_sgdk` nao aborta apenas por VRAM.
+  - **Matriz revalidada (suite `sgdk_matrix_corpus_`):** linhas 1/3/4/5/6 com Build/ROM `SEGA`; linha 2 (`PlatformerEngine`) falhou no import por manifesto `.res` ausente. SGDK permanece `Experimental` sem mudanca de `support_status`.
+
 * **O que acabou de acontecer (2026-04-21 rodada 11+ - CollisionMap world-sized + teste matriz):**
   - **`md_profile.rs` / `snes_profile.rs`:** validacao de `CollisionMap` deixa de rejeitar mapas maiores que a viewport; mantem tile multiplo de 8, limites de grid/tamanho de `data`, integridade `data.len()` vs `width*height`, aviso (nao fatal) quando o mundo em pixels excede a resolucao visivel.
   - **Teste matriz Platformer 2:** renomeado para `sgdk_matrix_corpus_platformer_2_partial_flow_documents_build_blocker`; com `--ignored`, ausencia do doador **panic** salvo `RDS_SGDK_MATRIX_CORPUS_SKIP=1`; assert final exige ROM com marca `SEGA` (real ou fake); leitura da ROM do build fake usa `project.join(rom_path)`. Run `--ignored` neste host: `MATRIX_P2 build: mode=sgdk_detect rom_sega=true`.
   - **Regressao:** testes `collision_map_wider_than_viewport_is_non_fatal_with_warning` em `md_profile` e `snes_profile`.
-  - **Docs:** `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md` linha 1 e comandos alinhados ao novo nome; `06_AI_MEMORY_BANK` / `06_CURRENT_WAVE` reflectem linha 1 Parcial vs linhas 2-6 Pendente.
+  - **Docs:** `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md` linha 1 e comandos alinhados ao novo nome.
 
 * **O que acabou de acontecer (2026-04-21 rodada 10 - Consolidacao SGDK no host real: build.mjs validado, QA-RC reprovado/recuperado):**
   - **Prova operacional da rodada:** `npm run preflight:sgdk-e2e` verde; `npm run build:debug` verde; `npm run test:e2e:desktop:qa-rc` reprovou no primeiro run com `webdriverTitle="localhost"` e `ERR_CONNECTION_REFUSED`, depois passou A-G no mesmo host.

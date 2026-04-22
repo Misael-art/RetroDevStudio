@@ -86,6 +86,7 @@ fn estimate_max_scanline_sprites(scene: &Scene) -> u32 {
     max_scanline_sprites.max(0) as u32
 }
 
+#[allow(dead_code)]
 pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
     validate_scene_with_source_kind(scene, None)
 }

@@ -459,12 +459,16 @@ where
         }
     };
 
+    let source_kind = project
+        .template_metadata
+        .as_ref()
+        .map(|metadata| metadata.source_kind.as_str());
     let hw_errors = match target.target {
-        "megadrive" => md_profile::validate_scene(&resolved_scene)
+        "megadrive" => md_profile::validate_scene_with_source_kind(&resolved_scene, source_kind)
             .into_iter()
             .map(|error| (error.message, error.is_fatal))
             .collect::<Vec<_>>(),
-        "snes" => snes_profile::validate_scene(&resolved_scene)
+        "snes" => snes_profile::validate_scene_with_source_kind(&resolved_scene, source_kind)
             .into_iter()
             .map(|error| (error.message, error.is_fatal))
             .collect::<Vec<_>>(),
@@ -1966,6 +1970,77 @@ mod tests {
             .expect("write megadrive sprite scene fixture");
     }
 
+    fn install_megadrive_vram_overflow_fixture(project_dir: &Path) {
+        let sprite_asset = project_dir
+            .join("assets")
+            .join("sprites")
+            .join("vram_stress.ppm");
+        fs::create_dir_all(
+            sprite_asset
+                .parent()
+                .expect("sprite asset should have parent directory"),
+        )
+        .expect("create megadrive vram stress sprite dir");
+        fs::copy(
+            fixture_dir("snes_dummy")
+                .join("assets")
+                .join("sprites")
+                .join("hero.ppm"),
+            &sprite_asset,
+        )
+        .expect("copy megadrive vram stress sprite");
+
+        let frames_csv = (0..600)
+            .map(|idx| idx.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let scene_json = format!(
+            r#"{{
+  "scene_id": "main",
+  "display_name": "Main Scene",
+  "background_layers": [],
+  "entities": [
+    {{
+      "entity_id": "vram_stress",
+      "prefab": null,
+      "transform": {{
+        "x": 48,
+        "y": 64
+      }},
+      "components": {{
+        "sprite": {{
+          "asset": "assets/sprites/vram_stress.ppm",
+          "frame_width": 16,
+          "frame_height": 16,
+          "pivot": null,
+          "palette_slot": 0,
+          "animations": {{
+            "idle": {{
+              "frames": [{frames_csv}],
+              "fps": 12,
+              "loop": true
+            }}
+          }},
+          "priority": "foreground",
+          "meta_sprite": false
+        }},
+        "collision": null,
+        "input": null,
+        "physics": null,
+        "audio": null,
+        "logic": null,
+        "camera": null,
+        "tilemap": null
+      }}
+    }}
+  ],
+  "palettes": []
+}}"#
+        );
+        fs::write(project_dir.join("scenes").join("main.json"), scene_json)
+            .expect("write megadrive vram overflow scene fixture");
+    }
+
     fn write_artstudio_source_png(path: &Path) {
         let image = ImageBuffer::from_fn(32, 16, |x, y| {
             if (2..14).contains(&x) && (2..14).contains(&y) {
@@ -2260,6 +2335,68 @@ mod tests {
             .contains("SPRITE player \"assets/sprites/onboarding_player.bmp\" 2 2 NONE 4"));
 
         let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn sgdk_managed_vram_overflow_warns_but_native_still_aborts() {
+        let _serial = test_serial_guard();
+        let native_dir = workspace_copy("megadrive_dummy");
+        let imported_dir = workspace_copy("megadrive_dummy");
+        install_megadrive_vram_overflow_fixture(&native_dir);
+        install_megadrive_vram_overflow_fixture(&imported_dir);
+
+        let mut imported_project = load_project(&imported_dir).expect("load imported project");
+        imported_project.template_metadata = Some(crate::ugdm::entities::TemplateMetadata {
+            template_id: "sgdk_import".to_string(),
+            template_version: "1.0.0".to_string(),
+            source_kind: "imported_sgdk".to_string(),
+            source_path: r"F:\Projects\MegaDrive_DEV\SGDK_Engines\NEXZR MD [VER.001] [SGDK 211] [GEN] [GAME] [SHMUP]".to_string(),
+            source_engine: Some("sgdk".to_string()),
+            import_profile: Some("sgdk".to_string()),
+            imported_at_ms: 0,
+        });
+        write_project_fixture(&imported_dir, &imported_project);
+
+        let (sgdk_root, make_program) = fake_toolchain("sgdk-vram-source-kind", "md");
+        let environment = BuildEnvironment {
+            sgdk_root: Some(sgdk_root.clone()),
+            sgdk_make_program: Some(make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let native_result = run_build_with_environment(&native_dir, &environment, |_| {});
+        assert!(!native_result.ok, "native deve abortar; log: {:?}", native_result.log);
+        assert!(native_result.log.iter().any(|entry| {
+            entry.level == "error" && entry.message.contains("VRAM Overflow")
+        }));
+        assert!(native_result.log.iter().any(|entry| {
+            entry.level == "error" && entry.message.contains("Build abortado: erros de hardware constraints")
+        }));
+
+        let imported_result = run_build_with_environment(&imported_dir, &environment, |_| {});
+        assert!(
+            imported_result.ok,
+            "imported_sgdk nao deve abortar apenas por VRAM; log: {:?}",
+            imported_result.log
+        );
+        assert!(imported_result.log.iter().any(|entry| {
+            entry.level == "warn"
+                && entry.message.contains("VRAM Overflow")
+                && entry.message.contains("[SGDK Gerenciado]")
+        }));
+        assert!(
+            !imported_result.log.iter().any(|entry| {
+                entry.level == "error"
+                    && entry.message.contains("Build abortado: erros de hardware constraints")
+            }),
+            "imported_sgdk nao deve abortar por overflow de VRAM; log: {:?}",
+            imported_result.log
+        );
+
+        let _ = fs::remove_dir_all(native_dir);
+        let _ = fs::remove_dir_all(imported_dir);
+        let _ = fs::remove_dir_all(sgdk_root);
     }
 
     /// Quando `SGDK_ROOT` ou `toolchains/sgdk` apontam para uma instalação real com `makefile.gen`

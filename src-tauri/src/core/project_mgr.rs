@@ -14165,45 +14165,66 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         let _ = fs::remove_dir_all(&project);
     }
 
-    /// Matriz SGDK corpus real: `Platformer 2 [...]` em `F:\\Projects\\MegaDrive_DEV\\SGDK_Engines\\`.
-    /// Ignorado no `cargo test` normal (evita I/O pesado em CI). Documenta fluxo **parcial** ate ROM;
-    /// nao implica "full flow" institucional (SGDK real pode falhar; fake prova pipeline).
-    ///
-    /// Com `--ignored`, **falha em panic** se o doador nao existir (evita sucesso silencioso).
-    /// Para saltar explicitamente (ex.: CI sem disco `F:`), defina `RDS_SGDK_MATRIX_CORPUS_SKIP=1`.
-    ///
-    /// Rodar no host com corpus:
-    /// `cargo test sgdk_matrix_corpus_platformer_2_partial_flow_documents_build_blocker --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1`
-    #[ignore]
-    #[test]
-    fn sgdk_matrix_corpus_platformer_2_partial_flow_documents_build_blocker() {
-        use crate::compiler::build_orch::{run_build_with_environment, BuildEnvironment};
+    /// Raiz canonica da matriz de corpus SGDK real no host de referencia (`docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md`).
+    const SGDK_MATRIX_CORPUS_ROOT: &str = r"F:\Projects\MegaDrive_DEV\SGDK_Engines";
 
-        let donor = Path::new(
-            r"F:\Projects\MegaDrive_DEV\SGDK_Engines\Platformer 2 [VER.001] [SGDK 211] [GEN] [ESTUDO] [PLATAFORMA]",
-        );
-        if !donor.is_dir() {
-            if std::env::var("RDS_SGDK_MATRIX_CORPUS_SKIP")
-                .map(|v| v == "1")
-                .unwrap_or(false)
-            {
-                eprintln!(
-                    "SKIP (RDS_SGDK_MATRIX_CORPUS_SKIP=1): donor ausente em {}",
-                    donor.display()
-                );
-                return;
-            }
-            panic!(
-                "sgdk_matrix_corpus_platformer_2_partial_flow_documents_build_blocker: doador SGDK ausente em {}. \
-                 Monte o corpus neste caminho ou defina RDS_SGDK_MATRIX_CORPUS_SKIP=1 para saltar explicitamente. \
-                 Nao retornar Ok silencioso quando o teste e executado com --ignored.",
+    fn sgdk_matrix_corpus_donor_path(subdir: &str) -> PathBuf {
+        Path::new(SGDK_MATRIX_CORPUS_ROOT).join(subdir)
+    }
+
+    /// Com `--ignored`, retorna `true` para sair do teste apenas se `RDS_SGDK_MATRIX_CORPUS_SKIP=1`.
+    /// Caso contrario, **panic** se o doador nao existir (evita sucesso silencioso).
+    fn sgdk_matrix_corpus_skip_if_missing_donor(test_fn_name: &str, donor: &Path) -> bool {
+        if donor.is_dir() {
+            return false;
+        }
+        if std::env::var("RDS_SGDK_MATRIX_CORPUS_SKIP")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+        {
+            eprintln!(
+                "SKIP (RDS_SGDK_MATRIX_CORPUS_SKIP=1): donor ausente para {test_fn_name} em {}",
                 donor.display()
             );
+            return true;
+        }
+        panic!(
+            "{test_fn_name}: doador SGDK ausente em {}. \
+             Monte o corpus neste caminho ou defina RDS_SGDK_MATRIX_CORPUS_SKIP=1 para saltar explicitamente. \
+             Nao retornar Ok silencioso quando o teste e executado com --ignored.",
+            donor.display()
+        );
+    }
+
+    /// Fluxo parcial repetivel: import -> ledger/cenas -> sinais de superficie -> save/reload opcional -> build (real ou fake) -> ROM `SEGA`.
+    /// `matrix_log_tag` identifica a linha no stdout (ex.: `MATRIX_P2`, `MATRIX_NEXZR`).
+    fn run_sgdk_matrix_corpus_partial_flow_documents_build_blocker(
+        test_fn_name: &'static str,
+        donor: &Path,
+        temp_slug: &'static str,
+        skeleton_label: &str,
+        matrix_log_tag: &'static str,
+    ) {
+        use crate::compiler::build_orch::{run_build_with_environment, BuildEnvironment};
+
+        if sgdk_matrix_corpus_skip_if_missing_donor(test_fn_name, donor) {
+            return;
         }
 
-        let project = temp_dir("sgdk-matrix-p2");
-        create_project_skeleton(&project, "Matrix Platformer2 Corpus", "megadrive").expect("skel");
+        let project = temp_dir(temp_slug);
+        create_project_skeleton(&project, skeleton_label, "megadrive").expect("skel");
         let report = import_sgdk_project(&project, donor).expect("import SGDK corpus");
+        stamp_imported_sgdk_metadata(&project, donor).expect("stamp imported_sgdk metadata");
+        let stamped_project = load_project(&project).expect("reload project.rds after stamp");
+        let stamped_source_kind = stamped_project
+            .template_metadata
+            .as_ref()
+            .map(|m| m.source_kind.clone())
+            .unwrap_or_default();
+        assert_eq!(
+            stamped_source_kind, "imported_sgdk",
+            "matriz SGDK: source_kind esperado = imported_sgdk em project.rds"
+        );
 
         let manifest_rel = report
             .manifest_path
@@ -14255,7 +14276,7 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
                 .unwrap_or(false)
         });
         eprintln!(
-            "MATRIX_P2 signals: tilemap_cells_nonempty={tilemap_cells_nonempty} sprite_anim_nonempty={sprite_anim_nonempty} collision_present={collision_present} graph_ref_nonempty={graph_ref_nonempty} imported_scenes={} warnings={}",
+            "{matrix_log_tag} signals: source_kind={stamped_source_kind} tilemap_cells_nonempty={tilemap_cells_nonempty} sprite_anim_nonempty={sprite_anim_nonempty} collision_present={collision_present} graph_ref_nonempty={graph_ref_nonempty} imported_scenes={} warnings={}",
             report.imported_scenes,
             report.warnings.len()
         );
@@ -14293,14 +14314,15 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             }
             if !rom_has_sega {
                 eprintln!(
-                    "MATRIX_P2: build SGDK real nao produziu ROM SEGA neste run (toolchain presente mas projeto/doacao pode falhar no make); log entries={}",
+                    "{matrix_log_tag}: build SGDK real nao produziu ROM SEGA neste run (toolchain presente mas projeto/doacao pode falhar no make); log entries={}",
                     env.sgdk_make_program.is_some()
                 );
             }
         }
         if !rom_has_sega {
             build_mode = "fake_toolchain";
-            let toolchain = temp_dir("sgdk-matrix-p2-fake-sgdk");
+            let fake_slug = format!("{temp_slug}-fake-sgdk");
+            let toolchain = temp_dir(&fake_slug);
             let bin = toolchain.join("bin");
             fs::create_dir_all(&bin).expect("fake bin");
             let make = if cfg!(target_os = "windows") {
@@ -14352,22 +14374,120 @@ PY\n",
                 }
             } else {
                 eprintln!(
-                    "MATRIX_P2: build fake tambem falhou (ex.: constraints de hardware no projeto importado): {:?}",
+                    "{matrix_log_tag}: build fake tambem falhou (ex.: constraints de hardware no projeto importado): {:?}",
                     result.log
                 );
             }
             let _ = fs::remove_dir_all(&toolchain);
         }
         eprintln!(
-            "MATRIX_P2 build: mode={build_mode} rom_sega={rom_has_sega}"
+            "{matrix_log_tag} build: source_kind={stamped_source_kind} mode={build_mode} rom_sega={rom_has_sega}"
         );
 
         assert!(
             rom_has_sega,
-            "MATRIX_P2: esperado ROM com marca SEGA apos build (toolchain SGDK real ou fake de prova). \
+            "{matrix_log_tag}: esperado ROM com marca SEGA apos build (toolchain SGDK real ou fake de prova). \
              Se falhar apenas com SGDK real, o fake make deve completar; verifique constraints de hardware no projeto importado."
         );
 
         let _ = fs::remove_dir_all(&project);
+    }
+
+    /// Matriz SGDK corpus real — linha 1 (plataforma / estudo). Ver `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md`.
+    /// Ignorado no `cargo test` normal. Com `--ignored`, panic se doador ausente salvo `RDS_SGDK_MATRIX_CORPUS_SKIP=1`.
+    ///
+    /// `cargo test sgdk_matrix_corpus_platformer_2_partial_flow_documents_build_blocker --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1`
+    #[ignore]
+    #[test]
+    fn sgdk_matrix_corpus_platformer_2_partial_flow_documents_build_blocker() {
+        let donor = sgdk_matrix_corpus_donor_path(
+            "Platformer 2 [VER.001] [SGDK 211] [GEN] [ESTUDO] [PLATAFORMA]",
+        );
+        run_sgdk_matrix_corpus_partial_flow_documents_build_blocker(
+            "sgdk_matrix_corpus_platformer_2_partial_flow_documents_build_blocker",
+            &donor,
+            "sgdk-matrix-p2",
+            "Matrix Platformer2 Corpus",
+            "MATRIX_P2",
+        );
+    }
+
+    /// Linha 2 — engine plataforma (corpus real).
+    #[ignore]
+    #[test]
+    fn sgdk_matrix_corpus_platformer_engine_partial_flow_documents_build_blocker() {
+        let donor = sgdk_matrix_corpus_donor_path(
+            "PlatformerEngine [VER.1.0] [SGDK 211] [GEN] [ENGINE] [PLATAFORMA]",
+        );
+        run_sgdk_matrix_corpus_partial_flow_documents_build_blocker(
+            "sgdk_matrix_corpus_platformer_engine_partial_flow_documents_build_blocker",
+            &donor,
+            "sgdk-matrix-pe",
+            "Matrix PlatformerEngine Corpus",
+            "MATRIX_PE",
+        );
+    }
+
+    /// Linha 3 — plataforma / estudo (Shadow Dancer revisitado).
+    #[ignore]
+    #[test]
+    fn sgdk_matrix_corpus_shadow_dancer_revisitado_partial_flow_documents_build_blocker() {
+        let donor = sgdk_matrix_corpus_donor_path(
+            "Shadow Dancer Revisitado [VER.001] [SGDK 211] [GEN] [ESTUDO] [PLATAFORMA]",
+        );
+        run_sgdk_matrix_corpus_partial_flow_documents_build_blocker(
+            "sgdk_matrix_corpus_shadow_dancer_revisitado_partial_flow_documents_build_blocker",
+            &donor,
+            "sgdk-matrix-sd",
+            "Matrix ShadowDancer Corpus",
+            "MATRIX_SD",
+        );
+    }
+
+    /// Linha 4 — run-and-gun (Metal Slug Warfare Demo).
+    #[ignore]
+    #[test]
+    fn sgdk_matrix_corpus_metal_slug_warfare_demo_partial_flow_documents_build_blocker() {
+        let donor = sgdk_matrix_corpus_donor_path(
+            "Metal Slug Warfare Demo [VER.001] [SGDK 211] [GEN] [ESTUDO] [RUN AND GUN]",
+        );
+        run_sgdk_matrix_corpus_partial_flow_documents_build_blocker(
+            "sgdk_matrix_corpus_metal_slug_warfare_demo_partial_flow_documents_build_blocker",
+            &donor,
+            "sgdk-matrix-ms",
+            "Matrix MetalSlugWarfare Corpus",
+            "MATRIX_MS",
+        );
+    }
+
+    /// Linha 5 — engine luta (Mortal Kombat Plus).
+    #[ignore]
+    #[test]
+    fn sgdk_matrix_corpus_mortal_kombat_plus_partial_flow_documents_build_blocker() {
+        let donor = sgdk_matrix_corpus_donor_path(
+            "Mortal Kombat Plus [VER.001] [SGDK 211] [GEN] [ENGINE] [LUTA]",
+        );
+        run_sgdk_matrix_corpus_partial_flow_documents_build_blocker(
+            "sgdk_matrix_corpus_mortal_kombat_plus_partial_flow_documents_build_blocker",
+            &donor,
+            "sgdk-matrix-mk",
+            "Matrix MortalKombatPlus Corpus",
+            "MATRIX_MK",
+        );
+    }
+
+    /// Linha 6 — shmup (NEXZR MD).
+    #[ignore]
+    #[test]
+    fn sgdk_matrix_corpus_nexzr_md_partial_flow_documents_build_blocker() {
+        let donor =
+            sgdk_matrix_corpus_donor_path("NEXZR MD [VER.001] [SGDK 211] [GEN] [GAME] [SHMUP]");
+        run_sgdk_matrix_corpus_partial_flow_documents_build_blocker(
+            "sgdk_matrix_corpus_nexzr_md_partial_flow_documents_build_blocker",
+            &donor,
+            "sgdk-matrix-nx",
+            "Matrix NEXZR Corpus",
+            "MATRIX_NEXZR",
+        );
     }
 }

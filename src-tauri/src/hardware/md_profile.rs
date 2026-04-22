@@ -88,6 +88,7 @@ fn estimate_max_scanline_sprites(scene: &Scene) -> u32 {
 
 /// Valida uma Scene contra as hardware constraints do Mega Drive.
 /// Retorna lista de erros/avisos. Erros fatais bloqueiam o build.
+#[allow(dead_code)]
 pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
     validate_scene_with_source_kind(scene, None)
 }
