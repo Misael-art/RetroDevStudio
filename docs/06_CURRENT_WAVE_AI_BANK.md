@@ -38,6 +38,7 @@
   - **`resolve_sgdk_import_root`:** candidatos apenas de metadados/caminhos declarados (`.mddev` `sgdk_root`, `notes` e `README.md` entre backticks), ate dois saltos de wrapper; `REFERENCE` / `build_policy=disabled` nao contam como raiz buildavel direta; um unico candidato com `.res` importavel resolve com warning auditavel (`mddev_reference_redirect` ou `mddev_sgdk_root`); zero ou varios candidatos geram `LoadError` com lista concreta (sem escolha silenciosa).
   - **Import/ledger:** `SgdkImportReport.source_summary` e ledger `sgdk-import/v4` guardam `donor_root` (path pedido) e `effective_root` (leitura de manifests/assets); `stamp_imported_sgdk_metadata` mantem `source_path` do pedido do utilizador.
   - **Matriz corpus:** `cargo test sgdk_matrix_corpus_ ... --ignored --test-threads=1` => **6/6** neste host; `MATRIX_PE` com `resolution_kind=mddev_reference_redirect` e `rom_sega=true`. Documentacao: `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md`, `docs/06_AI_MEMORY_BANK.md`.
+  - **Desktop E2E pos-commit (`d24cf14`):** `npm run preflight:sgdk-e2e` e `npm run test:e2e:desktop:qa-rc` passaram nesta rodada, reforcando a evidência operacional do fluxo canonico.
   - **SGDK:** continua **Experimental**; nenhuma promocao de `support_status`.
 
 * **O que acabou de acontecer (2026-04-21 rodada 11+ - CollisionMap world-sized + teste matriz):**

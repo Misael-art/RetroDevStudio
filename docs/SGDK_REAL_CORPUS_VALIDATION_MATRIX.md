@@ -31,7 +31,7 @@ npm run preflight:sgdk-e2e
 npm run test:e2e:desktop:qa-rc
 ```
 
-**Ultima barra verde registrada nesta sessao (2026-04-23, rodada 13):** `check:tree`, `lint`, `tsc --noEmit`, `npm test`, `cargo clippy -D warnings`, `cargo test --lib --test-threads=1` e `cargo test sgdk_matrix_corpus_ ... --ignored --test-threads=1` (6/6) verdes neste host; `qa-rc` / preflight SGDK nao foram rerodados nesta rodada documental.
+**Ultima barra verde registrada nesta sessao (2026-04-23, rodada 13):** `check:tree`, `lint`, `tsc --noEmit`, `npm test`, `cargo clippy -D warnings`, `cargo test --lib --test-threads=1`, `cargo test sgdk_matrix_corpus_ ... --ignored --test-threads=1` (6/6), `npm run preflight:sgdk-e2e` e `npm run test:e2e:desktop:qa-rc` verdes neste host apos `d24cf14`.
 
 ---
 
@@ -103,7 +103,7 @@ So considerar SGDK fora de **Experimental** quando **os seis** fluxos acima fore
 - **Rodada 9** (ja descrita em `docs/06_CURRENT_WAVE_AI_BANK.md`): Fase E com prova `qa-rc` A-G no host.  
 - **Rodada 11 (esta matriz):** formaliza o **programa de corpus real** e os gates; nao altera promocao de `support_status`.
 - **Rodada 12 (2026-04-22):** reexecucao da suite com `stamp_imported_sgdk_metadata` + assert de `source_kind`; cinco linhas com Build/ROM `SEGA` ate resolver wrappers (linha 2 bloqueava por `.res` apenas no alias).
-- **Rodada 13 (2026-04-23):** resolucao auditavel de raiz SGDK; suite `cargo test sgdk_matrix_corpus_ ... --ignored` **6/6** com `rom_sega=true` no host de referencia. SGDK continua **Experimental**.
+- **Rodada 13 (2026-04-23):** resolucao auditavel de raiz SGDK; suite `cargo test sgdk_matrix_corpus_ ... --ignored` **6/6** com `rom_sega=true` no host de referencia; `npm run preflight:sgdk-e2e` e `npm run test:e2e:desktop:qa-rc` rerodados com sucesso apos `d24cf14`. SGDK continua **Experimental**.
 
 ### Resolver de raiz SGDK (import canonico)
 
