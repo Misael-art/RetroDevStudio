@@ -1,6 +1,6 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Status:** ENTRADA CANONICA
-**Ultima Atualizacao:** 2026-04-22 (rodada 12 - prova SGDK corpus com source_kind correto + gates)
+**Ultima Atualizacao:** 2026-04-23 (rodada 13 - resolver SGDK `.mddev` + matriz corpus 6/6)
 
 ## ATENCAO PARA AGENTES DE IA
 
@@ -12,7 +12,7 @@
 | `docs/06_AI_MEMORY_BANK_WAVE_A_R.md` | Historico arquivado das waves A-R |
 
 **Fluxo canonico:** leia este arquivo primeiro e siga imediatamente para `docs/06_CURRENT_WAVE_AI_BANK.md`.
-**Atualizacao ativa mais recente:** em `2026-04-22 (rodada 12)`, prova da matriz de corpus real SGDK em `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md` foi corrigida para usar o mesmo contrato do wizard/IPC: helper de teste stampeia `template_metadata.source_kind=imported_sgdk` e valida explicitamente `project.rds` antes do Build/ROM. Reexecucao `cargo test sgdk_matrix_corpus_ --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1`: linhas **1, 3, 4, 5, 6** com `rom_sega=true`; linha **2** falhou no import por ausencia de manifesto `.res` (`PlatformerEngine`). Build tambem passou a encaminhar `source_kind` para `validate_scene_with_source_kind` (MD/SNES), preservando fatal em projeto nativo e warning auditavel em `imported_sgdk`. SGDK segue `Experimental` sem promocao de `support_status`.
+**Atualizacao ativa mais recente:** em `2026-04-23 (rodada 13)`, `project_mgr.rs` ganhou resolucao canonica `resolve_sgdk_import_root` para pastas **REFERENCE** / `build_policy=disabled` que delegam SGDK real via `.mddev` + `README.md` (candidatos explicitos, maximo 2 saltos, escolha automatica apenas com exatamente um candidato buildavel e warning). Matriz `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md`: suite `cargo test sgdk_matrix_corpus_ ... --ignored` **6/6** com `rom_sega=true` no host com corpus; linha 2 (`PlatformerEngine`) usa `mddev_reference_redirect`. `stamp_imported_sgdk_metadata` mantem `source_path` do pedido do utilizador; ledger/report carregam `effective_root`. SGDK segue **Experimental**; `support_status` inalterado.
 
 Em caso de conflito documental, a hierarquia continua sendo:
 `docs/06_AI_MEMORY_BANK.md` -> `docs/03_ROADMAP_MVP.md` -> `docs/09_AGENT_DEV_MODE.md`.
@@ -31,8 +31,13 @@ Em caso de conflito documental, a hierarquia continua sendo:
 
 ### CHECKPOINT operacional (2026-04-22 — rodada 12)
 
-- **Build/constraints:** `build_orch.rs` agora passa `project.template_metadata.source_kind` para `md_profile::validate_scene_with_source_kind` e `snes_profile::validate_scene_with_source_kind`.
-- **Regressao:** teste `sgdk_managed_vram_overflow_warns_but_native_still_aborts` prova que overflow VRAM continua fatal em nativo e vira warning auditavel em `imported_sgdk`.
-- **Corpus matriz:** helper `run_sgdk_matrix_corpus_partial_flow_documents_build_blocker` stampeia `stamp_imported_sgdk_metadata(&project, donor)`, asserta `source_kind=imported_sgdk` em `project.rds` e loga `source_kind` nos prefixos `MATRIX_*`.
-- **Resultado rodada 12:** P2/SD/MS/MK/NEXZR com Build/ROM `SEGA`; `PlatformerEngine` falhou no import (`.res` ausente). Sem claim de suporte completo.
+- **Build/constraints:** `build_orch.rs` passa `project.template_metadata.source_kind` para `validate_scene_with_source_kind` (MD/SNES).
+- **Regressao:** `sgdk_managed_vram_overflow_warns_but_native_still_aborts`.
+- **Corpus matriz:** helper com `stamp_imported_sgdk_metadata` + assert `source_kind=imported_sgdk`.
+
+### CHECKPOINT operacional (2026-04-23 — rodada 13)
+
+- **Resolver SGDK:** `resolve_sgdk_import_root` + integracao em `import_sgdk_project`; testes `sgdk_resolver_*`; ambiguidade multi-candidato falha com mensagem e lista de roots.
+- **Matriz corpus:** `cargo test sgdk_matrix_corpus_ ... --ignored --test-threads=1` => **6/6** no host; linha 2 `MATRIX_PE` com `resolution_kind=mddev_reference_redirect`.
+- **Gates locais desta rodada:** `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo clippy -D warnings`, `cargo test --lib --test-threads=1`.
 

@@ -1,7 +1,7 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-04-21
+**Ultima revisao canonica:** 2026-04-23
 **Fase ativa real:** Release candidate / beta tecnica em hardening
 
 > **DIRETRIZ PARA AGENTES E HUMANOS**
@@ -115,7 +115,7 @@ Capacidades nao visuais, importadores e itens legados continuam nas secoes propr
 
 | Item             | Escopo         | Implementacao | Certificacao | Evidencia atual                                                                                                                                                                                                                         | Bloqueador para subir                                                                                                         | Conta para fechamento do MVP? |
 | ---------------- | -------------- | ------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| `sgdk`           | Experimental   | Em codigo     | Em hardening | Fase E provada: desktop E2E `qa-rc` A-G verde (import -> colisao -> persistir -> reabrir -> Build & Run -> ROM `SEGA` verificada). Preflight operacional, fixture `sgdk_e2e_donor` alinhada, smoke idempotente e cobertura de Fases B-E. **Rodada 12:** matriz de corpus real (`docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md`) revalidada com contrato correto (`source_kind=imported_sgdk`): linhas 1/3/4/5/6 com Build/ROM `SEGA`; linha 2 falhou no import por `.res` ausente (`PlatformerEngine`) | Fase D parcial (heuristica sem AST); resolver blocker real da linha 2 e repetir evidencia institucional/CI para promocao | Nao                           |
+| `sgdk`           | Experimental   | Em codigo     | Em hardening | Fase E provada: desktop E2E `qa-rc` A-G verde (import -> colisao -> persistir -> reabrir -> Build & Run -> ROM `SEGA` verificada). Preflight, fixture `sgdk_e2e_donor`, smoke idempotente, Fases B-E. **Rodada 13:** matriz de corpus real com `resolve_sgdk_import_root` (wrappers `.mddev` / README): **seis** linhas com Build/ROM `SEGA` no host de referencia (`cargo test sgdk_matrix_corpus_ ... --ignored` 6/6); import de alias `REFERENCE` resolve para upstream com `mddev_reference_redirect` auditavel | Fase D parcial (heuristica sem AST); criterio explicito para sair de **Experimental** continua em `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md` (sem promocao automatica de `support_status`) | Nao                           |
 | `mugen`          | Experimental   | Em codigo     | Local        | `import_mugen_project`, wizard dedicado e smoke idempotente em `smoke_import_mugen_project_is_idempotent`                                                                                                                               | Falta prova institucional alem da rodada local                                                                                | Nao                           |
 | `ikemen_go`      | Experimental   | Em codigo     | Local        | Perfil proprio no registry, roteado pelo adapter MUGEN, smoke dedicado em `smoke_import_ikemen_go_reuses_mugen_adapter_without_losing_assets`                                                                                           | Falta evidencia institucional dedicada e validacao de metadata propria                                                        | Nao                           |
 | `godot`          | Experimental   | Em codigo     | Local        | `import_godot_project`, smoke idempotente em `smoke_import_godot_project_is_idempotent`                                                                                                                                                 | Falta prova institucional alem da rodada local                                                                                | Nao                           |
@@ -285,8 +285,14 @@ Matriz de capacidades avaliada por classe de projeto, sem claim inflado.
 Checklist operacional para sair de fixture/E2E controlado e registrar compatibilidade por projeto real (import -> report/ledger -> cenas -> tilemaps -> animacoes -> collision map -> `graph_ref` -> salvar/reabrir -> build/ROM), com resultado **Passou** / **Parcial** / **Falhou** e blocker concreto.
 
 - **Documento vivo:** `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md` (seis pastas sob `F:\Projects\MegaDrive_DEV\SGDK_Engines`, existencia verificada no host desta rodada).
-- **Gates do repositorio (rodada 12):** `check:tree`, `tsc --noEmit`, `npm test`, `cargo clippy -D warnings`, `cargo test --lib --test-threads=1` verdes; suite `cargo test sgdk_matrix_corpus_ ... --ignored` executada e falha apenas na linha 2 por blocker real de import.
-- **Estado honesto:** SGDK permanece **Experimental**; matriz por titulo ja tem resultados reais (1/3/4/5/6 com Build/ROM `SEGA`, 2 com falha de import `.res`). Nenhuma promocao de `support_status`.
+- **Gates do repositorio (rodada 12):** `check:tree`, `tsc --noEmit`, `npm test`, `cargo clippy -D warnings`, `cargo test --lib --test-threads=1` verdes; suite `cargo test sgdk_matrix_corpus_ ... --ignored` com contrato `stamp_imported_sgdk_metadata` + `source_kind`.
+
+### Rodada 13 - Resolver de raiz SGDK e matriz 6/6
+
+- **Codigo:** `resolve_sgdk_import_root` em `src-tauri/src/core/project_mgr.rs` (BFS limitada, candidatos explicitos, sem mascarar doador invalido como raiz direta).
+- **Matriz:** seis titulos com fluxo parcial completo ate ROM `SEGA` no host de referencia; linha 2 documentada com `mddev_reference_redirect`.
+- **Gates (rodada 13, host local):** `check:tree`, `lint`, `tsc --noEmit`, `npm test`, `cargo clippy -D warnings`, `cargo test --lib --test-threads=1`, `cargo test sgdk_matrix_corpus_ ... --ignored --test-threads=1` (6/6).
+- **Estado honesto:** SGDK permanece **Experimental**; criterio de suporte completo na matriz ainda exige leitura governada por colunas (ex.: Collision **Parcial** em varias linhas) e decisao explicita futura sobre `support_status`.
 
 
 ### Fases

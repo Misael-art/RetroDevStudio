@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-04-22 (rodada 12)
+**Ultima Atualizacao:** 2026-04-23 (rodada 13)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -33,6 +33,12 @@
   - **Build orchestrator:** `src-tauri/src/compiler/build_orch.rs` passou a encaminhar `project.template_metadata.source_kind` para `md_profile::validate_scene_with_source_kind` e `snes_profile::validate_scene_with_source_kind` (mantem fatal para nativo e warning auditavel para SGDK gerenciado).
   - **Regressao nova:** `sgdk_managed_vram_overflow_warns_but_native_still_aborts` prova: overflow VRAM em nativo continua abortando; mesmo overflow em `imported_sgdk` nao aborta apenas por VRAM.
   - **Matriz revalidada (suite `sgdk_matrix_corpus_`):** linhas 1/3/4/5/6 com Build/ROM `SEGA`; linha 2 (`PlatformerEngine`) falhou no import por manifesto `.res` ausente. SGDK permanece `Experimental` sem mudanca de `support_status`.
+
+* **O que acabou de acontecer (2026-04-23 rodada 13 - resolver de raiz SGDK + matriz 6/6):**
+  - **`resolve_sgdk_import_root`:** candidatos apenas de metadados/caminhos declarados (`.mddev` `sgdk_root`, `notes` e `README.md` entre backticks), ate dois saltos de wrapper; `REFERENCE` / `build_policy=disabled` nao contam como raiz buildavel direta; um unico candidato com `.res` importavel resolve com warning auditavel (`mddev_reference_redirect` ou `mddev_sgdk_root`); zero ou varios candidatos geram `LoadError` com lista concreta (sem escolha silenciosa).
+  - **Import/ledger:** `SgdkImportReport.source_summary` e ledger `sgdk-import/v4` guardam `donor_root` (path pedido) e `effective_root` (leitura de manifests/assets); `stamp_imported_sgdk_metadata` mantem `source_path` do pedido do utilizador.
+  - **Matriz corpus:** `cargo test sgdk_matrix_corpus_ ... --ignored --test-threads=1` => **6/6** neste host; `MATRIX_PE` com `resolution_kind=mddev_reference_redirect` e `rom_sega=true`. Documentacao: `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md`, `docs/06_AI_MEMORY_BANK.md`.
+  - **SGDK:** continua **Experimental**; nenhuma promocao de `support_status`.
 
 * **O que acabou de acontecer (2026-04-21 rodada 11+ - CollisionMap world-sized + teste matriz):**
   - **`md_profile.rs` / `snes_profile.rs`:** validacao de `CollisionMap` deixa de rejeitar mapas maiores que a viewport; mantem tile multiplo de 8, limites de grid/tamanho de `data`, integridade `data.len()` vs `width*height`, aviso (nao fatal) quando o mundo em pixels excede a resolucao visivel.

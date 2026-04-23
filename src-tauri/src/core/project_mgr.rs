@@ -126,7 +126,14 @@ pub struct SgdkImportMapping {
 /// Sumario das origens do doador SGDK consumidas nesta importacao.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default, PartialEq, Eq)]
 pub struct SgdkSourceSummary {
+    /// Caminho solicitado pelo utilizador/wizard para o donor SGDK.
     pub donor_root: String,
+    /// Caminho efetivo usado para ler manifests/assets apos resolver wrappers `.mddev`.
+    pub effective_root: String,
+    /// `direct` | `mddev_sgdk_root` | `mddev_reference_redirect`.
+    pub resolution_kind: String,
+    pub resolution_warnings: Vec<String>,
+    pub resolution_suggestions: Vec<String>,
     pub manifests: Vec<String>,
     pub resources_total: usize,
     pub resources_accepted: usize,
@@ -254,6 +261,10 @@ struct SgdkImportLedger {
     schema_version: String,
     scene_id: String,
     donor_root: String,
+    #[serde(default)]
+    effective_root: String,
+    #[serde(default)]
+    resolution_kind: String,
     donor_basename: String,
     fingerprint: String,
     last_imported_at_unix: u64,
@@ -273,6 +284,27 @@ struct SgdkImportLedger {
 
 const SGDK_IMPORT_LEDGER_SCHEMA: &str = "sgdk-import/v4";
 const SGDK_IMPORT_LEDGER_DIR: &str = ".rds/imports/sgdk";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SgdkResolvedImportRoot {
+    requested_root: PathBuf,
+    effective_root: PathBuf,
+    resolution_kind: String,
+    warnings: Vec<String>,
+    suggestions: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize, Default)]
+struct MddevProjectMeta {
+    #[serde(default)]
+    sgdk_root: Option<String>,
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    build_policy: Option<String>,
+    #[serde(default)]
+    notes: Option<String>,
+}
 
 /// `graph_ref` estável por entidade: um ficheiro JSON por `entity_id` (slug SGDK).
 fn sgdk_import_sprite_logic_graph_ref(entity_id: &str) -> String {
@@ -2451,11 +2483,13 @@ pub fn import_sgdk_project(
     project_dir: &Path,
     sgdk_path: &Path,
 ) -> Result<SgdkImportReport, LoadError> {
-    validate_sgdk_project_path(sgdk_path)?;
-    let resources = load_sgdk_resources(sgdk_path)?;
+    let resolved_root = resolve_sgdk_import_root(sgdk_path)?;
+    validate_sgdk_project_path(&resolved_root.effective_root)?;
+    let resources = load_sgdk_resources(&resolved_root.effective_root)?;
     import_sgdk_resources_into_scene(
         project_dir,
         sgdk_path,
+        &resolved_root,
         &resources,
         SgdkAssetMaterialization::Copy,
         "Imported SGDK Project",
@@ -2492,9 +2526,17 @@ pub fn import_legacy_sgdk_project(
         .iter()
         .any(|resource| sgdk_asset_destination(&resource.kind, &resource.asset_path).is_some())
     {
+        let legacy_resolved_root = SgdkResolvedImportRoot {
+            requested_root: sgdk_root.to_path_buf(),
+            effective_root: sgdk_root.to_path_buf(),
+            resolution_kind: "direct".to_string(),
+            warnings: Vec::new(),
+            suggestions: Vec::new(),
+        };
         import_sgdk_resources_into_scene(
             &overlay_dir,
             sgdk_root,
+            &legacy_resolved_root,
             &resources,
             SgdkAssetMaterialization::LinkOrCopy,
             "Legacy SGDK Overlay",
@@ -2600,11 +2642,13 @@ fn sgdk_scene_slug_from_display(display: &str) -> String {
 
 fn import_sgdk_resources_into_scene(
     project_dir: &Path,
-    sgdk_path: &Path,
+    requested_sgdk_path: &Path,
+    resolved_root: &SgdkResolvedImportRoot,
     resources: &[SgdkResourceEntry],
     materialization: SgdkAssetMaterialization,
     scene_name: &str,
 ) -> Result<SgdkImportReport, LoadError> {
+    let sgdk_path = resolved_root.effective_root.as_path();
     let mut imported_tilemaps: HashSet<String> = HashSet::new();
     let mut audio_sfx: HashMap<String, String> = HashMap::new();
     let mut audio_bgm: Option<String> = None;
@@ -2613,7 +2657,7 @@ fn import_sgdk_resources_into_scene(
     let mut sprite_entities: Vec<Entity> = Vec::new();
 
     let mut skipped_sources: Vec<SgdkSkippedSource> = Vec::new();
-    let mut warnings: Vec<String> = Vec::new();
+    let mut warnings: Vec<String> = resolved_root.warnings.clone();
     let mut fallbacks: Vec<String> = Vec::new();
     let mut mappings: Vec<SgdkImportMapping> = Vec::new();
 
@@ -3011,7 +3055,11 @@ fn import_sgdk_resources_into_scene(
     let resources_skipped = skipped_sources.len();
 
     let source_summary = SgdkSourceSummary {
-        donor_root: sgdk_path.to_string_lossy().to_string(),
+        donor_root: requested_sgdk_path.to_string_lossy().to_string(),
+        effective_root: sgdk_path.to_string_lossy().to_string(),
+        resolution_kind: resolved_root.resolution_kind.clone(),
+        resolution_warnings: resolved_root.warnings.clone(),
+        resolution_suggestions: resolved_root.suggestions.clone(),
         manifests: manifests_relative.clone(),
         resources_total,
         resources_accepted,
@@ -3048,7 +3096,9 @@ fn import_sgdk_resources_into_scene(
 
     let manifest_path = write_sgdk_import_ledger(
         project_dir,
+        requested_sgdk_path,
         sgdk_path,
+        &resolved_root.resolution_kind,
         &primary_scene.scene_id,
         &fingerprint,
         &manifests_relative,
@@ -3138,6 +3188,8 @@ fn compute_sgdk_donor_fingerprint(donor_path: &Path, manifest_paths: &[PathBuf])
 fn write_sgdk_import_ledger(
     project_dir: &Path,
     donor_path: &Path,
+    effective_root: &Path,
+    resolution_kind: &str,
     scene_id: &str,
     fingerprint: &str,
     manifests: &[String],
@@ -3196,6 +3248,8 @@ fn write_sgdk_import_ledger(
         schema_version: SGDK_IMPORT_LEDGER_SCHEMA.to_string(),
         scene_id: scene_id.to_string(),
         donor_root: donor_path.to_string_lossy().to_string(),
+        effective_root: effective_root.to_string_lossy().to_string(),
+        resolution_kind: resolution_kind.to_string(),
         donor_basename,
         fingerprint: fingerprint.to_string(),
         last_imported_at_unix: now_unix,
@@ -3666,6 +3720,273 @@ fn parse_sgdk_manifest(manifest: &str) -> Vec<SgdkResourceEntry> {
             })
         })
         .collect()
+}
+
+fn sgdk_root_has_manifest(path: &Path) -> bool {
+    let direct = path.join("resources.res");
+    if direct.is_file() {
+        return true;
+    }
+    let canonical = path.join("res").join("resources.res");
+    if canonical.is_file() {
+        return true;
+    }
+    let res_dir = path.join("res");
+    if !res_dir.is_dir() {
+        return false;
+    }
+    let Ok(entries) = fs::read_dir(res_dir) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let p = entry.path();
+        p.is_file()
+            && p
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("res"))
+    })
+}
+
+fn extract_backticked_segments(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut inside = false;
+    for ch in text.chars() {
+        if ch == '`' {
+            if inside {
+                let trimmed = current.trim();
+                if !trimmed.is_empty() {
+                    out.push(trimmed.to_string());
+                }
+                current.clear();
+                inside = false;
+            } else {
+                inside = true;
+            }
+            continue;
+        }
+        if inside {
+            current.push(ch);
+        }
+    }
+    out
+}
+
+fn normalize_declared_path_token(token: &str) -> Option<String> {
+    // Nao remover `(` `)` `[` `]` dos extremos: pastas do corpus (e Windows) podem
+    // incluir marcadores tipo `[PLATAFORMA]` no nome; trim_matches com `]` corromperia
+    // o token (ex.: perdia o `]` final e o path deixava de existir).
+    let trimmed = token
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim_matches('`')
+        .trim_matches(|c: char| matches!(c, ',' | ';' | ':'));
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') || trimmed.starts_with('.') {
+        return Some(trimmed.to_string());
+    }
+    None
+}
+
+fn collect_declared_wrapper_paths(mddev: &MddevProjectMeta, root: &Path) -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    let mut seen = HashSet::new();
+    let mut declared: Vec<String> = Vec::new();
+
+    if let Some(value) = mddev.sgdk_root.as_ref() {
+        declared.push(value.clone());
+    }
+
+    // Apenas `sgdk_root` e segmentos entre backticks em `notes` (sem split por whitespace:
+    // caminhos Windows com espacos quebrariam em tokens invalidos como `../PlatformerEngine`).
+    if let Some(notes) = mddev.notes.as_ref() {
+        declared.extend(extract_backticked_segments(notes));
+    }
+
+    let readme_path = root.join("README.md");
+    if let Ok(readme) = fs::read_to_string(&readme_path) {
+        declared.extend(extract_backticked_segments(&readme));
+    }
+
+    for raw in declared {
+        let Some(token) = normalize_declared_path_token(&raw) else {
+            continue;
+        };
+        let path = {
+            let p = PathBuf::from(&token);
+            if p.is_absolute() { p } else { root.join(p) }
+        };
+        let key = path.to_string_lossy().to_string();
+        if seen.insert(key) {
+            candidates.push(path);
+        }
+    }
+
+    candidates
+}
+
+fn canonicalize_existing_path(path: &Path) -> PathBuf {
+    fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn load_mddev_project_meta(root: &Path) -> Result<Option<MddevProjectMeta>, LoadError> {
+    let mddev_path = root.join(".mddev").join("project.json");
+    if !mddev_path.is_file() {
+        return Ok(None);
+    }
+    let content = fs::read_to_string(&mddev_path).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel ler metadata .mddev em '{}': {}",
+            mddev_path.display(),
+            error
+        ))
+    })?;
+    let parsed = serde_json::from_str::<MddevProjectMeta>(&content).map_err(|error| {
+        LoadError(format!(
+            "Metadata .mddev invalida em '{}': {}",
+            mddev_path.display(),
+            error
+        ))
+    })?;
+    Ok(Some(parsed))
+}
+
+fn resolve_sgdk_import_root(requested_root: &Path) -> Result<SgdkResolvedImportRoot, LoadError> {
+    let requested_root = requested_root.to_path_buf();
+    let requested_canonical = canonicalize_existing_path(&requested_root);
+    let mut queue: VecDeque<(PathBuf, usize, bool)> = VecDeque::new();
+    let mut visited: HashSet<String> = HashSet::new();
+    let mut buildable_candidates: Vec<PathBuf> = Vec::new();
+    let mut suggestions: Vec<String> = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
+
+    queue.push_back((requested_root.clone(), 0, false));
+
+    while let Some((current, depth, inherited_reference)) = queue.pop_front() {
+        if depth > 2 {
+            continue;
+        }
+        let current = canonicalize_existing_path(&current);
+        let current_key = current.to_string_lossy().to_string();
+        if !visited.insert(current_key) {
+            continue;
+        }
+        if !current.is_dir() {
+            continue;
+        }
+
+        let mddev = load_mddev_project_meta(&current)?;
+        let is_reference_wrapper = mddev
+            .as_ref()
+            .map(|meta| {
+                let is_reference = meta
+                    .kind
+                    .as_deref()
+                    .map(|kind| kind.eq_ignore_ascii_case("REFERENCE"))
+                    .unwrap_or(false);
+                let disabled = meta
+                    .build_policy
+                    .as_deref()
+                    .map(|policy| policy.eq_ignore_ascii_case("disabled"))
+                    .unwrap_or(false);
+                is_reference || disabled
+            })
+            .unwrap_or(false);
+        let has_manifest = sgdk_root_has_manifest(&current);
+
+        if has_manifest && !is_reference_wrapper {
+            buildable_candidates.push(current.clone());
+            continue;
+        }
+
+        let mut declared_paths = Vec::new();
+        if let Some(meta) = mddev.as_ref() {
+            declared_paths = collect_declared_wrapper_paths(meta, &current);
+        }
+        for candidate in declared_paths {
+            let candidate = canonicalize_existing_path(&candidate);
+            suggestions.push(candidate.to_string_lossy().to_string());
+            if sgdk_root_has_manifest(&candidate) {
+                buildable_candidates.push(candidate);
+            } else if depth < 2 && candidate.is_dir() {
+                queue.push_back((candidate, depth + 1, inherited_reference || is_reference_wrapper));
+            }
+        }
+    }
+
+    buildable_candidates.sort();
+    buildable_candidates.dedup();
+    suggestions.sort();
+    suggestions.dedup();
+
+    if buildable_candidates.len() == 1 {
+        let effective_root = buildable_candidates[0].clone();
+        let resolution_kind = if effective_root == requested_canonical {
+            "direct"
+        } else {
+            let requested_meta = load_mddev_project_meta(&requested_root)?;
+            let requested_is_reference = requested_meta
+                .as_ref()
+                .map(|meta| {
+                    meta.kind
+                        .as_deref()
+                        .map(|kind| kind.eq_ignore_ascii_case("REFERENCE"))
+                        .unwrap_or(false)
+                        || meta
+                            .build_policy
+                            .as_deref()
+                            .map(|policy| policy.eq_ignore_ascii_case("disabled"))
+                            .unwrap_or(false)
+                })
+                .unwrap_or(false);
+            if requested_is_reference {
+                "mddev_reference_redirect"
+            } else {
+                "mddev_sgdk_root"
+            }
+        };
+        if resolution_kind != "direct" {
+            warnings.push(format!(
+                "SGDK root resolvido de '{}' para '{}' via {}.",
+                requested_root.display(),
+                effective_root.display(),
+                resolution_kind
+            ));
+        }
+        return Ok(SgdkResolvedImportRoot {
+            requested_root,
+            effective_root,
+            resolution_kind: resolution_kind.to_string(),
+            warnings,
+            suggestions,
+        });
+    }
+
+    if buildable_candidates.is_empty() {
+        let suggestion_text = if suggestions.is_empty() {
+            "Sem candidatos declarados em .mddev/README.".to_string()
+        } else {
+            format!("Sugestoes declaradas: {}", suggestions.join(" ; "))
+        };
+        return Err(LoadError(format!(
+            "Projeto SGDK invalido: nenhum manifesto .res foi encontrado em '{}' nem nos caminhos declarados por wrappers (.mddev/README). {}",
+            requested_root.display(),
+            suggestion_text
+        )));
+    }
+
+    Err(LoadError(format!(
+        "Projeto SGDK ambiguo: multiplos candidatos buildaveis foram encontrados a partir de '{}'. Escolha explicitamente uma raiz SGDK com .res. Candidatos: {}",
+        requested_root.display(),
+        buildable_candidates
+            .iter()
+            .map(|p| p.display().to_string())
+            .collect::<Vec<_>>()
+            .join(" | ")
+    )))
 }
 
 fn find_sgdk_manifest_paths(sgdk_path: &Path) -> Result<Vec<PathBuf>, LoadError> {
@@ -10233,6 +10554,26 @@ void tick_player(void) {\n\
             .expect("write png");
     }
 
+    fn write_mddev_project_json(
+        root: &Path,
+        kind: &str,
+        build_policy: &str,
+        sgdk_root: Option<&str>,
+        notes: Option<&str>,
+    ) {
+        fs::create_dir_all(root.join(".mddev")).expect("create .mddev dir");
+        let sgdk_root_line = sgdk_root
+            .map(|value| format!(",\n  \"sgdk_root\": \"{}\"", value.replace('\\', "\\\\")))
+            .unwrap_or_default();
+        let notes_line = notes
+            .map(|value| format!(",\n  \"notes\": \"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"")))
+            .unwrap_or_default();
+        let content = format!(
+            "{{\n  \"schema_version\": 1,\n  \"display_name\": \"Fixture\",\n  \"project_root\": \".\",\n  \"layout\": \"flat\",\n  \"platform\": \"GEN\",\n  \"kind\": \"{kind}\",\n  \"build_policy\": \"{build_policy}\"{sgdk_root_line}{notes_line}\n}}\n"
+        );
+        fs::write(root.join(".mddev").join("project.json"), content).expect("write .mddev/project.json");
+    }
+
     fn write_godot_fixture(root: &Path) {
         fs::create_dir_all(root.join("art")).expect("create godot art dir");
         fs::create_dir_all(root.join("audio")).expect("create godot audio dir");
@@ -13049,6 +13390,125 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
     }
 
     #[test]
+    fn sgdk_resolver_follows_mddev_reference_chain_to_upstream_root() {
+        let donor = temp_dir("sgdk-resolve-wrapper-chain");
+        let project = temp_dir("sgdk-resolve-wrapper-project");
+        create_project_skeleton(&project, "SGDK Resolve Wrapper", "megadrive").expect("skel");
+
+        let alias_root = donor.join("PlatformerEngineAlias");
+        let toolkit_root = donor.join("PlatformerEngine Toolkit");
+        let variant_root = toolkit_root.join("variants").join("PlatformerEngine Core");
+        let upstream_root = toolkit_root.join("upstream").join("PlatformerEngine");
+
+        write_generic_sgdk_donor_fixture(&upstream_root);
+        write_mddev_project_json(
+            &variant_root,
+            "ENGINE",
+            "enabled",
+            Some("../../upstream/PlatformerEngine"),
+            Some("Variant wrapper SGDK root"),
+        );
+        fs::write(
+            variant_root.join("README.md"),
+            "Wrapper de variante: upstream em `../../upstream/PlatformerEngine`.",
+        )
+        .expect("write variant README");
+
+        write_mddev_project_json(
+            &alias_root,
+            "REFERENCE",
+            "disabled",
+            None,
+            Some("Use `../PlatformerEngine Toolkit/variants/PlatformerEngine Core`."),
+        );
+        fs::write(
+            alias_root.join("README.md"),
+            "Alias legado. Use `../PlatformerEngine Toolkit/variants/PlatformerEngine Core`.",
+        )
+        .expect("write alias README");
+
+        let resolved = resolve_sgdk_import_root(&alias_root).expect("resolve wrapper chain");
+        assert_eq!(resolved.resolution_kind, "mddev_reference_redirect");
+        assert_eq!(
+            resolved.effective_root,
+            canonicalize_existing_path(&upstream_root)
+        );
+
+        let report = import_sgdk_project(&project, &alias_root).expect("import via wrapper chain");
+        assert_eq!(
+            report.source_summary.resolution_kind,
+            "mddev_reference_redirect"
+        );
+        assert_eq!(
+            canonicalize_existing_path(Path::new(&report.source_summary.effective_root)),
+            canonicalize_existing_path(&upstream_root)
+        );
+        assert_eq!(
+            report.source_summary.donor_root,
+            alias_root.to_string_lossy().to_string()
+        );
+        assert!(report.imported_scenes >= 1);
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn sgdk_resolver_fails_when_reference_declares_multiple_buildable_candidates() {
+        let donor = temp_dir("sgdk-resolve-ambiguous");
+        let project = temp_dir("sgdk-resolve-ambiguous-project");
+        create_project_skeleton(&project, "SGDK Resolve Ambiguous", "megadrive").expect("skel");
+
+        let alias_root = donor.join("Alias");
+        let candidate_a = donor.join("candidate_a");
+        let candidate_b = donor.join("candidate_b");
+
+        write_generic_sgdk_donor_fixture(&candidate_a);
+        write_generic_sgdk_donor_fixture(&candidate_b);
+
+        write_mddev_project_json(
+            &alias_root,
+            "REFERENCE",
+            "disabled",
+            None,
+            Some("Candidatos: `../candidate_a` e `../candidate_b`."),
+        );
+        fs::write(
+            alias_root.join("README.md"),
+            "Escolha manualmente: `../candidate_a` ou `../candidate_b`.",
+        )
+        .expect("write alias README");
+
+        let err = import_sgdk_project(&project, &alias_root)
+            .expect_err("ambiguous wrapper must not auto-select");
+        assert!(
+            err.0.to_lowercase().contains("ambiguo")
+                || err.0.to_lowercase().contains("multiplos candidatos"),
+            "error must explain ambiguity: {}",
+            err.0
+        );
+        assert!(
+            err.0.contains("candidate_a") && err.0.contains("candidate_b"),
+            "error must list concrete suggestions/candidates: {}",
+            err.0
+        );
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn sgdk_normalize_declared_path_preserves_brackets_in_corpus_style_names() {
+        let raw = "../PlatformerEngine Toolkit [VER.1.0] [SGDK 211] [GEN] [COLLECTION] [PLATAFORMA]";
+        let normalized = normalize_declared_path_token(raw).expect("token");
+        assert!(
+            normalized.ends_with("[PLATAFORMA]"),
+            "path token must keep trailing bracket segment: {}",
+            normalized
+        );
+    }
+
+    #[test]
     fn mugen_handles_missing_root_artifact() {
         let donor = temp_dir("session-b-mugen-missing-donor");
         let project = temp_dir("session-b-mugen-missing-project");
@@ -14267,6 +14727,8 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
                 .unwrap_or(false)
         });
         let collision_present = report.primary_scene.collision_map.is_some();
+        let resolution_kind = report.source_summary.resolution_kind.as_str();
+        let redirected = resolution_kind == "mddev_reference_redirect";
         let graph_ref_nonempty = report.primary_scene.entities.iter().any(|e| {
             e.components
                 .logic
@@ -14276,7 +14738,8 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
                 .unwrap_or(false)
         });
         eprintln!(
-            "{matrix_log_tag} signals: source_kind={stamped_source_kind} tilemap_cells_nonempty={tilemap_cells_nonempty} sprite_anim_nonempty={sprite_anim_nonempty} collision_present={collision_present} graph_ref_nonempty={graph_ref_nonempty} imported_scenes={} warnings={}",
+            "{matrix_log_tag} signals: source_kind={stamped_source_kind} resolution_kind={resolution_kind} redirected={redirected} effective_root={} tilemap_cells_nonempty={tilemap_cells_nonempty} sprite_anim_nonempty={sprite_anim_nonempty} collision_present={collision_present} graph_ref_nonempty={graph_ref_nonempty} imported_scenes={} warnings={}",
+            report.source_summary.effective_root,
             report.imported_scenes,
             report.warnings.len()
         );
@@ -14381,7 +14844,7 @@ PY\n",
             let _ = fs::remove_dir_all(&toolchain);
         }
         eprintln!(
-            "{matrix_log_tag} build: source_kind={stamped_source_kind} mode={build_mode} rom_sega={rom_has_sega}"
+            "{matrix_log_tag} build: source_kind={stamped_source_kind} resolution_kind={resolution_kind} redirected={redirected} mode={build_mode} rom_sega={rom_has_sega}"
         );
 
         assert!(
