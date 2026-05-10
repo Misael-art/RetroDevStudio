@@ -618,6 +618,31 @@ function classifyReadiness({
 
   if (!upstreamReport?.success) {
     blockers.push("Validacao upstream oficial nao comprovada no report atual.");
+    const upstreamCodes = Array.isArray(upstreamReport?.blocking_status_codes)
+      ? upstreamReport.blocking_status_codes
+      : [];
+    if (upstreamCodes.length > 0) {
+      blockers.push(
+        `Upstream report sinalizou status codes bloqueantes: ${upstreamCodes.join(", ")}`
+      );
+    }
+  } else {
+    const observationalCodes = Array.isArray(upstreamReport?.blocking_status_codes)
+      ? upstreamReport.blocking_status_codes
+      : [];
+    if (observationalCodes.includes("host_wmi_unavailable")) {
+      warnings.push(
+        "Upstream verde com degradacao de host (WMI/CIM indisponivel); validar estabilidade do host antes de promover."
+      );
+    }
+    const wrapperReports = Array.isArray(upstreamReport?.wrapper_reports)
+      ? upstreamReport.wrapper_reports
+      : [];
+    if (wrapperReports.length > 0) {
+      warnings.push(
+        `Upstream wrapper reports: ${wrapperReports.join(" | ")}`
+      );
+    }
   }
 
   if (auxiliary.build?.status === "failed") {

@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef } from "react";
+
 import {
-  resolveAbsoluteAssetPreviewSrc,
-  resolveProjectAssetPreviewSrc,
-} from "../../core/pathUtils";
+  type AssetVisualLoadStatus,
+  type ProjectAssetVisualState,
+} from "../../core/assetVisualState";
+import { useProjectAssetVisualState } from "../../core/useProjectAssetVisualState";
+
+export type AssetPreviewLoadStatus = AssetVisualLoadStatus;
 
 type AssetPreviewProps = {
   alt: string;
@@ -15,6 +19,10 @@ type AssetPreviewProps = {
   pixelated?: boolean;
   testId?: string;
   fallbackTestId?: string;
+  legacyFallback?: boolean;
+  legacyFallbackDetail?: string | null;
+  onStatusChange?: (status: AssetPreviewLoadStatus) => void;
+  onVisualStateChange?: (state: ProjectAssetVisualState) => void;
 };
 
 export default function AssetPreview({
@@ -24,53 +32,83 @@ export default function AssetPreview({
   relativePath,
   imageClassName,
   fallbackClassName,
-  fallbackLabel = "Preview indisponivel",
+  fallbackLabel,
   pixelated = false,
   testId,
   fallbackTestId,
+  legacyFallback = false,
+  legacyFallbackDetail = null,
+  onStatusChange,
+  onVisualStateChange,
 }: AssetPreviewProps) {
-  const src = useMemo(() => {
-    const absoluteCandidate = String(absolutePath ?? "").trim();
-    if (absoluteCandidate) {
-      return resolveAbsoluteAssetPreviewSrc(absoluteCandidate);
-    }
-
-    const projectCandidate = String(projectDir ?? "").trim();
-    const relativeCandidate = String(relativePath ?? "").trim();
-    if (projectCandidate && relativeCandidate) {
-      return resolveProjectAssetPreviewSrc(projectCandidate, relativeCandidate);
-    }
-
-    return null;
-  }, [absolutePath, projectDir, relativePath]);
-
-  const [loadFailed, setLoadFailed] = useState(!src);
+  const statusCallbackRef = useRef<AssetPreviewProps["onStatusChange"]>(onStatusChange);
+  const visualStateCallbackRef = useRef<AssetPreviewProps["onVisualStateChange"]>(onVisualStateChange);
 
   useEffect(() => {
-    setLoadFailed(!src);
-  }, [src]);
+    statusCallbackRef.current = onStatusChange;
+  }, [onStatusChange]);
 
-  if (!src || loadFailed) {
+  useEffect(() => {
+    visualStateCallbackRef.current = onVisualStateChange;
+  }, [onVisualStateChange]);
+
+  const {
+    src,
+    previewStatus,
+    visualState,
+    setLoaded,
+    setFailed,
+  } = useProjectAssetVisualState({
+    absolutePath,
+    projectDir,
+    relativePath,
+    legacyFallback,
+    legacyFallbackDetail,
+  });
+
+  useEffect(() => {
+    statusCallbackRef.current?.(previewStatus);
+  }, [previewStatus]);
+
+  useEffect(() => {
+    visualStateCallbackRef.current?.(visualState);
+  }, [visualState]);
+
+  const effectiveFallbackLabel = fallbackLabel ?? visualState.title;
+
+  if (!src || visualState.kind === "idle" || visualState.kind === "missing" || visualState.kind === "failed") {
     return (
       <div
         data-testid={fallbackTestId}
         className={fallbackClassName}
+        title={visualState.detail}
       >
-        {fallbackLabel}
+        {effectiveFallbackLabel}
       </div>
     );
   }
 
   return (
-    <img
-      data-testid={testId}
-      src={src}
-      alt={alt}
-      loading="lazy"
-      draggable={false}
-      onError={() => setLoadFailed(true)}
-      className={imageClassName}
-      style={pixelated ? { imageRendering: "pixelated" } : undefined}
-    />
+    <div className="relative inline-flex max-w-full flex-col items-center justify-center">
+      {previewStatus === "loading" ? (
+        <div
+          className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center rounded bg-black/25 text-[9px] font-semibold uppercase tracking-wide text-[#a6adc8]"
+          aria-live="polite"
+        >
+          Carregando…
+        </div>
+      ) : null}
+      <img
+        data-testid={testId}
+        src={src}
+        alt={alt}
+        loading="lazy"
+        draggable={false}
+        onLoad={setLoaded}
+        onError={setFailed}
+        className={`${imageClassName} ${previewStatus === "loading" ? "opacity-25" : ""}`}
+        style={pixelated ? { imageRendering: "pixelated" } : undefined}
+      />
+    </div>
   );
 }

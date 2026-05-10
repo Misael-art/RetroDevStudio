@@ -411,6 +411,9 @@ where
             }
         };
 
+        if let Err(error) = validate_rom_signature(&rom_path, target) {
+            emit!("warn", error);
+        }
         emit!("success", format!("ROM gerada: {}", rom_path.display()));
 
         return BuildResult {
@@ -463,6 +466,39 @@ where
         .template_metadata
         .as_ref()
         .map(|metadata| metadata.source_kind.as_str());
+    if target.target == "megadrive" {
+        let md_status = md_profile::hw_status_with_source_kind(&resolved_scene, source_kind);
+        let managed_tail = if md_status.analysis_mode == "sgdk_managed" {
+            format!(
+                " banks={}/{} cells={}/{}",
+                md_status.managed_concurrent_sprite_banks,
+                md_profile::MD_MANAGED_MAX_CONCURRENT_BANKS,
+                md_status.managed_sprite_cells_used,
+                md_profile::MD_MANAGED_SPRITE_CELL_BUDGET
+            )
+        } else {
+            String::new()
+        };
+        emit!(
+            "info",
+            format!(
+                "MD VRAM analysis: mode={} total={}KB resident={}KB spr_res={}KB tile={}KB hud={}KB strm_spr={}KB anim_sw={}KB streamable={}KB dma/frame={}KB{} (limits: vram={}KB dma={}KB).",
+                md_status.analysis_mode,
+                md_status.project_asset_bytes / 1024,
+                md_status.resident_vram_bytes / 1024,
+                md_status.sprite_resident_bytes / 1024,
+                md_status.tilemap_resident_bytes / 1024,
+                md_status.hud_resident_bytes / 1024,
+                md_status.streamable_sprite_bytes / 1024,
+                md_status.animated_swap_bytes / 1024,
+                md_status.streamable_vram_bytes / 1024,
+                md_status.dma_frame_bytes / 1024,
+                managed_tail,
+                md_status.vram_limit / 1024,
+                md_status.dma_limit / 1024
+            )
+        );
+    }
     let hw_errors = match target.target {
         "megadrive" => md_profile::validate_scene_with_source_kind(&resolved_scene, source_kind)
             .into_iter()
@@ -601,6 +637,9 @@ where
         }
     };
 
+    if let Err(error) = validate_rom_signature(&rom_path, target) {
+        emit!("warn", error);
+    }
     emit!("success", format!("ROM gerada: {}", rom_path.display()));
 
     BuildResult {
@@ -1397,6 +1436,9 @@ where
     } else {
         let mut command = Command::new(&toolchain.make_program);
         command.current_dir(&workspace.root);
+        if cfg!(target_os = "windows") {
+            command.env("OS", "Windows_NT");
+        }
         match target.target {
             "snes" => {
                 if cfg!(target_os = "windows") {
@@ -1441,12 +1483,53 @@ where
     }
 
     if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let classified = classify_make_failure(stderr.as_ref());
         return Err(format!(
-            "Build externo falhou com codigo {:?}.",
+            "[{}] Build externo falhou com codigo {:?}.",
+            classified,
             output.status.code()
         ));
     }
 
+    Ok(())
+}
+
+fn classify_make_failure(stderr: &str) -> &'static str {
+    let lower = stderr.to_ascii_lowercase();
+    if lower.contains("resources.res") || lower.contains("rescomp") {
+        return "emitter_resources_failed";
+    }
+    if lower.contains("java") && (lower.contains("not found") || lower.contains("nao encontrado")) {
+        return "java_missing";
+    }
+    if lower.contains("make") && (lower.contains("not found") || lower.contains("nao reconhecido")) {
+        return "toolchain_missing";
+    }
+    if lower.contains("asset referenciado nao encontrado") {
+        return "asset_staging_failed";
+    }
+    "build_failed"
+}
+
+fn validate_rom_signature(rom_path: &Path, target: TargetSpec) -> Result<(), String> {
+    if target.target != "megadrive" {
+        return Ok(());
+    }
+    let bytes = fs::read(rom_path).map_err(|error| {
+        format!(
+            "Falha ao ler ROM gerada para validar assinatura '{}': {}",
+            rom_path.display(),
+            error
+        )
+    })?;
+    let has_sega = bytes.windows(4).any(|window| window == b"SEGA");
+    if !has_sega {
+        return Err(format!(
+            "[rom_signature_missing] ROM Mega Drive sem assinatura 'SEGA': '{}'.",
+            rom_path.display()
+        ));
+    }
     Ok(())
 }
 
@@ -2338,6 +2421,54 @@ mod tests {
     }
 
     #[test]
+    fn megadrive_build_forces_windows_os_env_for_sgdk_make() {
+        if !cfg!(target_os = "windows") {
+            return;
+        }
+
+        let _serial = test_serial_guard();
+        let project_dir = workspace_copy("megadrive_dummy");
+        install_megadrive_sprite_fixture(&project_dir);
+
+        let root = temp_dir("sgdk-windows-os-env");
+        let bin_dir = root.join("bin");
+        fs::create_dir_all(&bin_dir).expect("create fake toolchain bin");
+        let make_program = bin_dir.join("capture-os.cmd");
+        fs::write(
+            &make_program,
+            "@echo off\r\n\
+             if not exist out mkdir out\r\n\
+             echo %OS%> out\\os-env.txt\r\n\
+             echo ROM> out\\artifact.md\r\n\
+             exit /b 0\r\n",
+        )
+        .expect("write os capture make");
+
+        let environment = BuildEnvironment {
+            sgdk_root: Some(root.clone()),
+            sgdk_make_program: Some(make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_with_environment(&project_dir, &environment, |_| {});
+
+        assert!(result.ok, "build log: {:?}", result.log);
+        let recorded = fs::read_to_string(
+            project_dir
+                .join("build")
+                .join("megadrive")
+                .join("out")
+                .join("os-env.txt"),
+        )
+        .expect("read recorded os env");
+        assert_eq!(recorded.trim(), "Windows_NT");
+
+        let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
     fn sgdk_managed_vram_overflow_warns_but_native_still_aborts() {
         let _serial = test_serial_guard();
         let native_dir = workspace_copy("megadrive_dummy");
@@ -2382,8 +2513,15 @@ mod tests {
         );
         assert!(imported_result.log.iter().any(|entry| {
             entry.level == "warn"
-                && entry.message.contains("VRAM Overflow")
+                && entry.message.contains("Asset total acima da VRAM")
                 && entry.message.contains("[SGDK Gerenciado]")
+        }));
+        assert!(imported_result.log.iter().any(|entry| {
+            entry.level == "info"
+                && entry.message.contains("MD VRAM analysis: mode=sgdk_managed")
+                && entry.message.contains("spr_res=")
+                && entry.message.contains("strm_spr=")
+                && entry.message.contains("anim_sw=")
         }));
         assert!(
             !imported_result.log.iter().any(|entry| {

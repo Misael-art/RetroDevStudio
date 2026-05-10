@@ -27,6 +27,8 @@ import {
 import type { AnimationDef } from "../../core/ipc/sceneService";
 import { constrainSpriteFrameSize } from "../../core/sceneConstraints";
 import { useSpriteAnimator } from "./useSpriteAnimator";
+import { getEntityDisplayName } from "../../core/entityDisplay";
+import { buildTilemapAuthoringBrush, resolvePrimaryAuthoringSurface } from "../../core/entityAuthoring";
 
 const ARTSTUDIO_SUPPORTED_FORMATS_LABEL = "PNG, BMP, JPG/JPEG, GIF, WebP e PPM";
 const ARTSTUDIO_CANVAS_MIN_ZOOM = 0.2;
@@ -1273,6 +1275,12 @@ export default function ArtStudioPanel() {
     selectedEntityId,
     addEntity,
     updateEntity,
+    setEditorMode,
+    setActiveWorkspace,
+    setActiveViewportTab,
+    setSelectedEntityId,
+    setActiveTilemapId,
+    setActiveBrush,
   } = useEditorStore();
 
   const [state, dispatch] = useReducer(artStudioReducer, INITIAL_STATE);
@@ -1281,6 +1289,7 @@ export default function ArtStudioPanel() {
   const stageScrollRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const processingRequestIdRef = useRef(0);
+  const autoHydratedSpriteRef = useRef<string | null>(null);
   const saveFeedbackTimeoutRef = useRef<number | null>(null);
   const panStateRef = useRef<{
     startX: number;
@@ -1297,6 +1306,40 @@ export default function ArtStudioPanel() {
   const selectedEntity = activeScene?.entities.find((entity) => entity.entity_id === selectedEntityId);
   const selectedEntitySprite = selectedEntity?.components?.sprite;
   const canUpdateEntity = Boolean(selectedEntitySprite);
+  const returnToSceneWithSelectedContext = useCallback(() => {
+    setActiveWorkspace("scene");
+    setActiveViewportTab("scene");
+    if (selectedEntity) {
+      setSelectedEntityId(selectedEntity.entity_id);
+      const preferredSurface = resolvePrimaryAuthoringSurface(selectedEntity);
+      if (preferredSurface === "tilemap") {
+        setEditorMode("paint");
+        setActiveTilemapId(selectedEntity.entity_id);
+        setActiveBrush(buildTilemapAuthoringBrush(selectedEntity));
+        logMessage(
+          "info",
+          `[ArtStudio] Retorno para Cena com contexto de tilemap: ${getEntityDisplayName(selectedEntity)}.`
+        );
+        return;
+      }
+    }
+    setEditorMode("select");
+    logMessage(
+      "info",
+      selectedEntity
+        ? `[ArtStudio] Retorno para Cena com foco em ${getEntityDisplayName(selectedEntity)}.`
+        : "[ArtStudio] Retorno ao Scene workspace."
+    );
+  }, [
+    logMessage,
+    selectedEntity,
+    setActiveBrush,
+    setActiveTilemapId,
+    setActiveViewportTab,
+    setActiveWorkspace,
+    setEditorMode,
+    setSelectedEntityId,
+  ]);
 
   const totalGridColumns =
     state.spriteSheetSize && state.frameWidth > 0
@@ -1551,6 +1594,51 @@ export default function ArtStudioPanel() {
       logMessage("error", `[ArtStudio] ${message}`);
     }
   }, [ingestSpriteSheet, logMessage]);
+
+  useEffect(() => {
+    if (!activeProjectDir || !selectedEntitySprite?.asset) {
+      return;
+    }
+    const spriteAsset = selectedEntitySprite.asset.trim();
+    if (!spriteAsset) {
+      return;
+    }
+    if (
+      autoHydratedSpriteRef.current === spriteAsset &&
+      (state.spritePath === spriteAsset || state.spriteSourceAssetPath === spriteAsset)
+    ) {
+      return;
+    }
+    autoHydratedSpriteRef.current = spriteAsset;
+    const absolutePath = normalizeFsPath(`${activeProjectDir}/${spriteAsset}`);
+    void ingestSpriteSheet({
+      sourcePath: absolutePath,
+    }).then(() => {
+      dispatch({
+        type: "SET_IMPORTED_ASSET",
+        path: spriteAsset,
+        name: basenameWithoutExtension(spriteAsset),
+        width: selectedEntitySprite.frame_width,
+        height: selectedEntitySprite.frame_height,
+      });
+      logMessage(
+        "info",
+        `[ArtStudio] Entidade selecionada sincronizada automaticamente: ${spriteAsset}.`
+      );
+    }).catch((error) => {
+      logMessage(
+        "warn",
+        `[ArtStudio] Nao foi possivel sincronizar sprite da entidade selecionada: ${describeError(error)}`
+      );
+    });
+  }, [
+    activeProjectDir,
+    ingestSpriteSheet,
+    logMessage,
+    selectedEntitySprite,
+    state.spritePath,
+    state.spriteSourceAssetPath,
+  ]);
 
   const handleDrop = useCallback(
     async (event: DragEvent<HTMLDivElement>) => {
@@ -2168,6 +2256,64 @@ export default function ArtStudioPanel() {
           </span>
         </div>
       </div>
+
+      {selectedEntity && selectedEntitySprite ? (
+        <div
+          data-testid="artstudio-scene-context-bridge"
+          className="mx-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#89b4fa]/35 bg-[#89b4fa]/10 px-3 py-2 text-[11px] text-[#cdd6f4]"
+        >
+          <div className="min-w-0 flex-1">
+            <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-[#89b4fa]">
+              Scene -&gt; Art
+            </p>
+            <p className="mt-1 truncate">
+              <span className="font-semibold text-[#fff]">{getEntityDisplayName(selectedEntity)}</span>
+              <span className="text-[#6c7086]"> · </span>
+              <span className="font-mono text-[#94a3b8]">{selectedEntity.entity_id}</span>
+              <span className="text-[#6c7086]"> · </span>
+              <span className="font-mono text-[#a6e3a1]">{selectedEntitySprite.asset}</span>
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={returnToSceneWithSelectedContext}
+              className="rounded-lg border border-[#94e2d5]/45 bg-[#94e2d5]/12 px-3 py-1.5 text-[10px] font-semibold text-[#94e2d5] transition-colors hover:bg-[#94e2d5]/22"
+            >
+              Voltar para Cena
+            </button>
+            <button
+              type="button"
+              onClick={handleApplyToScene}
+              disabled={!canApplyToScene}
+              className="rounded-lg border border-[#a6e3a1]/45 bg-[#a6e3a1]/12 px-3 py-1.5 text-[10px] font-semibold text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/22 disabled:cursor-not-allowed disabled:opacity-40"
+              title={canApplyToScene ? "Aplicar sprite/animacoes na entidade selecionada" : applyNextStepLabel}
+            >
+              Aplicar nesta entidade
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {selectedEntity && !selectedEntitySprite ? (
+        <div
+          data-testid="artstudio-no-sprite-context"
+          className="mx-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#fab387]/40 bg-[#fab387]/10 px-3 py-2 text-[11px] text-[#fde68a]"
+        >
+          <p className="min-w-0 flex-1">
+            A entidade <span className="font-semibold text-[#fff]">{getEntityDisplayName(selectedEntity)}</span> nao
+            tem <span className="font-mono">sprite</span>. O Art Studio trabalha com folhas de sprite; selecione um
+            sprite na Hierarchy ou volte à cena para escolher outra entidade.
+          </p>
+          <button
+            type="button"
+            onClick={returnToSceneWithSelectedContext}
+            className="shrink-0 rounded-lg border border-[#94e2d5]/50 bg-[#94e2d5]/15 px-3 py-1.5 text-[10px] font-semibold text-[#94e2d5] hover:bg-[#94e2d5]/25"
+          >
+            Ir para Cena
+          </button>
+        </div>
+      ) : null}
 
       <div className="grid min-h-0 flex-1 gap-3 px-3 pb-3 xl:grid-cols-[minmax(0,1fr)_360px]">
         <Group

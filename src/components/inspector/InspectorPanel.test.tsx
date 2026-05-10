@@ -21,6 +21,9 @@ vi.mock("./HardwareLimitsPanel", () => ({
   default: () => <div data-testid="hardware-limits" />,
 }));
 
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
+  true;
+
 function flush() {
   return new Promise((resolve) => {
     setTimeout(resolve, 0);
@@ -93,6 +96,24 @@ function spriteFixtureEntity(
         palette_slot: 0,
         animations: {},
         ...overrides,
+      },
+    },
+  };
+}
+
+function tilemapFixtureEntity(withCells: boolean): Entity {
+  return {
+    entity_id: "stage_tilemap",
+    prefab: null,
+    transform: { x: 0, y: 0 },
+    components: {
+      tilemap: {
+        tileset: "assets/tilesets/stage.png",
+        map_width: 4,
+        map_height: 4,
+        scroll_x: 0,
+        scroll_y: 0,
+        cells: withCells ? [1, 1, 0, 0, 0, 2, 0, 0, 3, 0, 0, 0, 0, 0, 4, 0] : [],
       },
     },
   };
@@ -246,6 +267,42 @@ describe("InspectorPanel", () => {
     expect(container.textContent).toContain("Herdado");
   });
 
+  it("explicits tilemap fallback when cells[] are missing", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeScene: {
+          ...EMPTY_SCENE,
+          entities: [tilemapFixtureEntity(false)],
+        },
+        activeSceneSource: {
+          ...EMPTY_SCENE,
+          entities: [tilemapFixtureEntity(false)],
+        },
+        selectedEntityId: "stage_tilemap",
+        sceneRevision: 2,
+      });
+      await flush();
+    });
+
+    await act(async () => {
+      root.render(<InspectorPanel />);
+      await flush();
+    });
+
+    const preview = container.querySelector(
+      "[data-testid='inspector-tilemap-preview']"
+    ) as HTMLImageElement | null;
+
+    await act(async () => {
+      preview?.dispatchEvent(new Event("load"));
+      await flush();
+    });
+
+    expect(
+      container.querySelector("[data-testid='inspector-tilemap-legacy-fallback']")?.textContent ?? ""
+    ).toContain("fallback explícito");
+  });
+
   it("shows target and layer context for the selected entity", async () => {
     await act(async () => {
       useEditorStore.setState({
@@ -365,5 +422,58 @@ describe("InspectorPanel", () => {
     expect(updatedEntity?.components.sprite?.frame_width).toBe(32);
     expect(updatedEntity?.components.sprite?.frame_height).toBe(16);
     expect(updatedEntity?.components.sprite?.palette_slot).toBe(3);
+  });
+
+  it("shows imported role, confidence and source context for Phase D entities", async () => {
+    const importedEntity = spriteFixtureEntity();
+    importedEntity.entity_id = "hero";
+    importedEntity.display_name = "Hero";
+    importedEntity.components.logic = {
+      graph_ref: "graphs/sgdk_import_hero.json",
+      graph_origin: "imported_ref",
+      external_source_refs: ["src/main.c", "src/player.c"],
+      logic_hints: ["Fase D: papel importado desta entidade: 'player_avatar'."],
+      imported_semantics: {
+        source: "sgdk_phase_d",
+        entity_role: "player_avatar",
+        gameplay_class: "platformer_horizontal_scroller_signals",
+        confidence: "medium",
+        role_reason: "sprite primario com leitura JOY_* no agregado",
+        driver_functions: ["player_tick", "main"],
+        source_paths: ["src/player.c", "src/main.c"],
+        audit_flags: ["primary_sprite"],
+      },
+    };
+
+    await act(async () => {
+      useEditorStore.setState({
+        activeScene: {
+          ...EMPTY_SCENE,
+          entities: [importedEntity],
+        },
+        activeSceneSource: {
+          ...EMPTY_SCENE,
+          entities: [importedEntity],
+        },
+        selectedEntityId: "hero",
+      });
+      await flush();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='inspector-imported-context']")?.textContent).toContain(
+      "Jogador"
+    );
+    expect(container.querySelector("[data-testid='inspector-imported-context']")?.textContent).toContain(
+      "Platformer"
+    );
+    expect(container.querySelector("[data-testid='inspector-imported-context']")?.textContent).toContain(
+      "Confianca moderada"
+    );
+    expect(container.querySelector("[data-testid='inspector-imported-audit-flags']")?.textContent).toContain(
+      "primary_sprite"
+    );
+    expect(container.textContent).toContain("Imported");
+    expect(container.textContent).toContain("sprite primario com leitura JOY_* no agregado");
   });
 });

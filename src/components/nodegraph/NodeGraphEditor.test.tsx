@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import NodeGraphEditor, {
   EMPTY_GRAPH,
+  appendExecChainEdgesFromLayout,
+  appendQuickActionGraph,
   buildNodeMiniMap,
   serializeNodeGraph,
   summarizeNodeGraph,
@@ -15,10 +17,15 @@ import type { Entity } from "../../core/ipc/sceneService";
 const mocks = vi.hoisted(() => ({
   persistActiveScene: vi.fn(),
   resolveScenePrefabs: vi.fn(),
+  openProjectSourcePath: vi.fn(),
 }));
 
 vi.mock("../../core/scenePersistence", () => ({
   persistActiveScene: mocks.persistActiveScene,
+}));
+
+vi.mock("../../core/ipc/projectService", () => ({
+  openProjectSourcePath: mocks.openProjectSourcePath,
 }));
 
 vi.mock("../../core/ipc/sceneService", () => ({
@@ -162,6 +169,67 @@ describe("NodeGraphEditor helpers", () => {
     expect(nodes.every((node) => node.x >= 10 && node.x <= 166)).toBe(true);
     expect(nodes.every((node) => node.y >= 10 && node.y <= 102)).toBe(true);
   });
+
+  it("appendExecChainEdgesFromLayout adds a single exec edge ordered by layout when missing", () => {
+    const next = appendExecChainEdgesFromLayout(GRAPH_WITHOUT_ENTRY);
+    expect(next.edges).toHaveLength(1);
+    expect(next.edges[0]?.fromNode).toBe("move_only");
+    expect(next.edges[0]?.toNode).toBe("sound_only");
+    expect(next.edges[0]?.fromPort).toBe("exec");
+    expect(next.edges[0]?.toPort).toBe("exec");
+    const again = appendExecChainEdgesFromLayout(next);
+    expect(again.edges).toHaveLength(1);
+  });
+
+  it("appendQuickActionGraph keeps the existing graph and offsets the new block for continued authoring", () => {
+    const quickAction: NodeGraph = {
+      nodes: [
+        {
+          id: "qa_start",
+          type: "event_start",
+          label: "On Start",
+          x: 120,
+          y: 80,
+          inputs: [],
+          outputs: [{ id: "exec", label: "▶", kind: "exec" }],
+          params: {},
+        },
+        {
+          id: "qa_move",
+          type: "sprite_move",
+          label: "Move Sprite",
+          x: 360,
+          y: 96,
+          inputs: [
+            { id: "exec", label: "▶", kind: "exec" },
+            { id: "dx", label: "dx", kind: "data", dataType: "int" },
+            { id: "dy", label: "dy", kind: "data", dataType: "int" },
+          ],
+          outputs: [{ id: "exec", label: "▶", kind: "exec" }],
+          params: { target: "player", dx: 2, dy: 0 },
+        },
+      ],
+      edges: [
+        {
+          id: "qa_edge",
+          fromNode: "qa_start",
+          fromPort: "exec",
+          toNode: "qa_move",
+          toPort: "exec",
+        },
+      ],
+    };
+
+    const appended = appendQuickActionGraph(GRAPH_FIXTURE, quickAction, 160);
+
+    expect(appended.graph.nodes).toHaveLength(5);
+    expect(appended.graph.edges).toHaveLength(2);
+    expect(appended.appendedNodeIds).toHaveLength(2);
+    expect(appended.appendedNodeIds.every((id) => !["qa_start", "qa_move"].includes(id))).toBe(true);
+
+    const appendedNodes = appended.graph.nodes.filter((node) => appended.appendedNodeIds.includes(node.id));
+    expect(appendedNodes.every((node) => node.x > 1840)).toBe(true);
+  });
 });
 
 describe("NodeGraphEditor", () => {
@@ -175,6 +243,11 @@ describe("NodeGraphEditor", () => {
       ok: false,
       error: "not-needed",
       scene_json: "",
+    });
+    mocks.openProjectSourcePath.mockResolvedValue({
+      ok: true,
+      message: "opened",
+      absolute_path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy/src/hero.c",
     });
 
     useEditorStore.setState({
@@ -257,6 +330,22 @@ describe("NodeGraphEditor", () => {
     expect(useEditorStore.getState().activeScene?.entities[0].components.logic?.graph).toBe(
       serializeNodeGraph(GRAPH_FIXTURE)
     );
+  });
+
+  it("keeps a visible Scene bridge for the selected logic entity", async () => {
+    const bridge = container.querySelector("[data-testid='nodegraph-scene-bridge']");
+    expect(bridge?.textContent).toContain("Hero");
+    expect(bridge?.textContent).toContain("Logic -> Scene");
+
+    await act(async () => {
+      (container.querySelector("[data-testid='nodegraph-bridge-back-scene']") as HTMLButtonElement).click();
+      await flush();
+    });
+
+    const state = useEditorStore.getState();
+    expect(state.activeWorkspace).toBe("scene");
+    expect(state.activeViewportTab).toBe("scene");
+    expect(state.selectedEntityId).toBe("hero");
   });
 
   it("shows a guided empty state and hydrates a quick action without changing the graph schema", async () => {
@@ -463,5 +552,135 @@ describe("NodeGraphEditor", () => {
 
     expect(nodeCardTexts.some((text) => text.includes("hero_player"))).toBe(true);
     expect(nodeCardTexts.some((text) => text.includes("sentinel_enemy"))).toBe(true);
+  });
+
+  it("navigates from a selected node target back to the matching scene entity", async () => {
+    const playerEntity: Entity = {
+      entity_id: "player",
+      display_name: "Player",
+      prefab: null,
+      transform: { x: 80, y: 48 },
+      components: {
+        sprite: {
+          asset: "assets/sprites/player.png",
+          frame_width: 16,
+          frame_height: 16,
+          palette_slot: 0,
+          animations: {},
+        },
+      },
+    };
+
+    await act(async () => {
+      useEditorStore.setState({
+        activeScene: buildSceneWithGraph(GRAPH_FIXTURE, [
+          buildLogicEntity("hero", "Hero", GRAPH_FIXTURE),
+          playerEntity,
+        ]),
+        activeSceneSource: buildSceneWithGraph(GRAPH_FIXTURE, [
+          buildLogicEntity("hero", "Hero", GRAPH_FIXTURE),
+          playerEntity,
+        ]),
+        selectedEntityId: "hero",
+        activeViewportTab: "logic",
+      });
+      await flush();
+      await flush();
+    });
+
+    const moveNodeCard = container.querySelector("[data-testid='node-card-move_node']");
+    if (!(moveNodeCard instanceof HTMLDivElement)) {
+      throw new Error("Move node card not found");
+    }
+
+    await act(async () => {
+      moveNodeCard.dispatchEvent(
+        new MouseEvent("mousedown", { bubbles: true, clientX: 12, clientY: 12 })
+      );
+      await flush();
+    });
+
+    const targetButton = container.querySelector(
+      "[data-testid='nodegraph-focus-node-target']"
+    ) as HTMLButtonElement | null;
+
+    expect(targetButton?.disabled).toBe(false);
+
+    await act(async () => {
+      targetButton?.click();
+      await flush();
+    });
+
+    expect(useEditorStore.getState().selectedEntityId).toBe("player");
+    expect(useEditorStore.getState().activeViewportTab).toBe("scene");
+  });
+
+  it("surfaces multiple source paths and opens the requested real source", async () => {
+    const sourceRichEntity: Entity = {
+      entity_id: "hero",
+      display_name: "Hero",
+      prefab: null,
+      transform: { x: 16, y: 24 },
+      components: {
+        logic: {
+          graph: serializeNodeGraph(GRAPH_FIXTURE),
+          imported_semantics: {
+            source: "sgdk_phase_d",
+            entity_role: "player_avatar",
+            confidence: "medium",
+            role_reason: "driver principal",
+            driver_functions: ["hero_tick", "hero_anim"],
+            source_paths: ["src/hero.c", "src/player_shared.c"],
+            audit_flags: ["primary_sprite"],
+          },
+          external_source_refs: ["src/player_shared.c", "src/hero_debug.c"],
+        },
+      },
+    };
+
+    await act(async () => {
+      useEditorStore.setState({
+        activeScene: buildSceneWithGraph(GRAPH_FIXTURE, [sourceRichEntity]),
+        activeSceneSource: buildSceneWithGraph(GRAPH_FIXTURE, [sourceRichEntity]),
+        selectedEntityId: "hero",
+      });
+      await flush();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("Drivers:");
+    expect(container.querySelector("[data-testid='nodegraph-open-primary-source']")).toBeTruthy();
+    expect(container.querySelector("[data-testid='nodegraph-open-source-1']")).toBeTruthy();
+    expect(container.querySelector("[data-testid='nodegraph-open-source-2']")).toBeTruthy();
+
+    await act(async () => {
+      (container.querySelector("[data-testid='nodegraph-open-source-2']") as HTMLButtonElement).click();
+      await flush();
+    });
+
+    expect(mocks.openProjectSourcePath).toHaveBeenCalledWith(
+      "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      "src/hero_debug.c"
+    );
+  });
+
+  it("appends a guided block to the current graph without replacing the existing nodes", async () => {
+    const beforeCount = container.querySelectorAll("[data-testid^='node-card-']").length;
+
+    await act(async () => {
+      (container.querySelector(
+        "[data-testid='nodegraph-append-template-player_controller']"
+      ) as HTMLButtonElement).click();
+      await flush();
+      await flush();
+    });
+
+    expect(container.querySelectorAll("[data-testid^='node-card-']").length).toBeGreaterThan(beforeCount);
+    expect(container.querySelector("[data-testid='nodegraph-guided-commentary']")?.textContent).toContain(
+      "(anexado)"
+    );
+    expect(container.querySelector("[data-testid='nodegraph-overview']")?.textContent).toContain(
+      "Atalhos construtivos"
+    );
   });
 });

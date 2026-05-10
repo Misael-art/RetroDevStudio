@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { useEditorStore } from "../../core/store/editorStore";
 import { listProjectAssets, type ProjectAssetEntry } from "../../core/ipc/toolsService";
+import { resolveProjectAssetPath } from "../../core/pathUtils";
 import type { ActiveBrush, EditorMode, TilePaintTool } from "../../core/store/editorStore";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -119,12 +120,15 @@ const TILE_TOOL_META: Record<TilePaintTool, { label: string; icon: string; hint:
 
 const TILE_TOOL_ORDER: TilePaintTool[] = ["pencil", "eraser", "picker", "rect", "fill"];
 
-function TilePalette({
+export function TilePalette({
   tilesetAbsolutePath,
+  tilesetRelativePath,
   tileSize,
   tilemapEntityId,
 }: {
   tilesetAbsolutePath: string;
+  /** Caminho relativo ao projeto (gravado no tilemap) — repassado ao brush para tracabilidade. */
+  tilesetRelativePath: string;
   tileSize: number;
   tilemapEntityId: string;
 }) {
@@ -159,6 +163,7 @@ function TilePalette({
     setActiveBrush({
       kind: "tile",
       id: `tile:${tileIndex}`,
+      assetPath: tilesetRelativePath,
       tileIndex,
     });
     setEditorMode("paint");
@@ -345,6 +350,17 @@ export default function ContextualPalette() {
     return assets.find((a) => a.relative_path === selectedTilemap.tileset) ?? null;
   }, [assets, selectedTilemap]);
 
+  const resolvedTilesetAbsolutePath = useMemo(() => {
+    if (!selectedTilemap) return "";
+    if (selectedTilesetAsset?.absolute_path) {
+      return selectedTilesetAsset.absolute_path;
+    }
+    if (!activeProjectDir) {
+      return "";
+    }
+    return resolveProjectAssetPath(activeProjectDir, selectedTilemap.tileset);
+  }, [activeProjectDir, selectedTilemap, selectedTilesetAsset]);
+
   const groupedItems = useMemo(() => {
     const groups = new Map<PaletteCategory, PaletteCategoryItem[]>();
 
@@ -428,9 +444,10 @@ export default function ContextualPalette() {
       </div>
 
       {/* ── Tile palette (tilemap selecionado) ─────────────────────── */}
-      {selectedTilemap && selectedTilesetAsset && (
+      {selectedTilemap && resolvedTilesetAbsolutePath.length > 0 && (
         <TilePalette
-          tilesetAbsolutePath={selectedTilesetAsset.absolute_path}
+          tilesetAbsolutePath={resolvedTilesetAbsolutePath}
+          tilesetRelativePath={selectedTilemap.tileset}
           tileSize={tilePaintSize > 0 ? tilePaintSize : 8}
           tilemapEntityId={selectedTilemap.entity.entity_id}
         />

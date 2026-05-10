@@ -99,12 +99,8 @@ function profileForMode(mode) {
   return mode === "debug" ? "debug" : "release";
 }
 
-function shouldUseDirectCargoDebug(mode) {
-  return (
-    process.platform === "win32" &&
-    mode === "debug" &&
-    process.env.RDS_FORCE_TAURI_CLI_DEBUG !== "1"
-  );
+function shouldUseDirectCargoDebug(_mode) {
+  return false;
 }
 
 function runtimeFilesForProfile(profile) {
@@ -174,6 +170,23 @@ function buildReportTemplate() {
     executedModes: [],
     modes: {},
   };
+}
+
+function classifyBuildFailure(message) {
+  const normalized = String(message ?? "").toLowerCase();
+  if (normalized.includes("applocker") || normalized.includes("4551")) {
+    return "host_policy_block";
+  }
+  if (normalized.includes("tauri") && normalized.includes("build")) {
+    return "tauri_build_failed";
+  }
+  if (normalized.includes("cargo")) {
+    return "cargo_build_failed";
+  }
+  if (normalized.includes("artefato")) {
+    return "artifact_missing";
+  }
+  return "build_failed";
 }
 
 function spawnLogged(command, args, options = {}) {
@@ -521,14 +534,31 @@ async function runTauriBuild(mode, effectiveTargetDir) {
 
   console.log(`\n[Build] Compilando Tauri (modo: ${mode})...\n`);
   console.log(`[Build] Cargo target efetivo: ${effectiveTargetDir}`);
+  if (process.env.RDS_E2E_QA_RC_MEMORY_SAFE === "1" && mode === "debug") {
+    console.log(
+      "[Build] Modo memoria-segura QA-RC ativo: jobs=1, incremental=off, profile.dev.debug=0, profile.dev.codegen-units=1."
+    );
+  }
   await spawnLogged(npmCommand(), tauriArgs, {
-    env: { ...process.env, CARGO_TARGET_DIR: effectiveTargetDir },
+    env: buildCommandEnvironment(effectiveTargetDir),
   });
 }
 
 async function runFrontendBuild() {
   console.log("\n[Build] Gerando frontend via npm run build antes do cargo build...\n");
   await spawnLogged(npmCommand(), ["run", "build"]);
+}
+
+function buildCommandEnvironment(effectiveTargetDir) {
+  const env = { ...process.env, CARGO_TARGET_DIR: effectiveTargetDir };
+  if (process.env.RDS_E2E_QA_RC_MEMORY_SAFE === "1") {
+    env.CARGO_BUILD_JOBS ??= "1";
+    env.CARGO_INCREMENTAL ??= "0";
+    env.CARGO_PROFILE_DEV_INCREMENTAL ??= "false";
+    env.CARGO_PROFILE_DEV_DEBUG ??= "0";
+    env.CARGO_PROFILE_DEV_CODEGEN_UNITS ??= "1";
+  }
+  return env;
 }
 
 async function runCargoBuild(mode, effectiveTargetDir) {
@@ -545,8 +575,13 @@ async function runCargoBuild(mode, effectiveTargetDir) {
 
   console.log(`\n[Build] Compilando via cargo direto (modo: ${mode})...\n`);
   console.log(`[Build] Cargo target efetivo: ${effectiveTargetDir}`);
+  if (process.env.RDS_E2E_QA_RC_MEMORY_SAFE === "1" && mode === "debug") {
+    console.log(
+      "[Build] Modo memoria-segura QA-RC ativo: jobs=1, incremental=off, profile.dev.debug=0, profile.dev.codegen-units=1."
+    );
+  }
   await spawnLogged(cargoCommand(), cargoArgs, {
-    env: { ...process.env, CARGO_TARGET_DIR: effectiveTargetDir },
+    env: buildCommandEnvironment(effectiveTargetDir),
   });
 }
 
@@ -675,6 +710,20 @@ async function writeBuildReport(buildResults) {
   if (BUILD_REPORT_PATH !== LEGACY_BUILD_REPORT_PATH) {
     await rm(LEGACY_BUILD_REPORT_PATH, { force: true });
   }
+}
+
+async function writeFailedBuildReport(mode, error, buildResults = []) {
+  const report = buildReportTemplate();
+  report.executedModes = buildResults.map((result) => result.mode);
+  report.failure = {
+    status: "failed",
+    requestedMode: mode,
+    statusCode: classifyBuildFailure(error instanceof Error ? error.message : String(error)),
+    message: error instanceof Error ? error.message : String(error),
+    generatedAt: new Date().toISOString(),
+  };
+  await mkdir(VALIDATION_DIR, { recursive: true });
+  await writeFile(BUILD_REPORT_PATH, `${JSON.stringify(report, null, 2)}\n`, "utf8");
 }
 
 async function openDirectory(dirPath) {
@@ -824,6 +873,7 @@ async function main() {
     await maybeOpenArtifactDirectories(artifacts, openDirEnabled);
     process.exit(0);
   } catch (error) {
+    await writeFailedBuildReport(mode, error);
     console.error("\n[ERRO]", error instanceof Error ? error.message : String(error));
     process.exit(1);
   }

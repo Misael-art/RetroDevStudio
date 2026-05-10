@@ -157,3 +157,42 @@ export function createSpriteEntityFromAsset(options: {
     },
   };
 }
+
+export function createTilemapEntityFromAsset(options: {
+  assetPath: string;
+  existingEntityIds: Iterable<string>;
+  suggestedName?: string;
+  x?: number;
+  y?: number;
+  mapWidth?: number;
+  mapHeight?: number;
+}): Entity {
+  const {
+    assetPath,
+    existingEntityIds,
+    suggestedName,
+    x = 0,
+    y = 0,
+    mapWidth = 40,
+    mapHeight = 28,
+  } = options;
+  const entityBaseId = `${slugifyEntityId(suggestedName ?? assetPath)}_tilemap`;
+  const entityId = ensureUniqueEntityId(entityBaseId, existingEntityIds);
+
+  return {
+    entity_id: entityId,
+    display_name: displayNameFromAsset(suggestedName ?? assetPath),
+    prefab: null,
+    transform: { x, y },
+    components: {
+      tilemap: {
+        tileset: assetPath,
+        map_width: mapWidth,
+        map_height: mapHeight,
+        scroll_x: 0,
+        scroll_y: 0,
+        cells: [],
+      },
+    },
+  };
+}

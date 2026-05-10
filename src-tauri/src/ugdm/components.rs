@@ -164,6 +164,34 @@ pub struct LogicVariable {
     pub max: Option<i64>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ImportedLogicSemantics {
+    #[serde(default)]
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub source: String,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub gameplay_class: String,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub entity_role: String,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub confidence: String,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub role_reason: String,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub driver_functions: Vec<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub source_paths: Vec<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub audit_flags: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct LogicComponent {
     #[serde(default)]
@@ -182,6 +210,9 @@ pub struct LogicComponent {
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub external_source_refs: Vec<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub imported_semantics: Option<ImportedLogicSemantics>,
     #[serde(default)]
     pub variables: HashMap<String, LogicVariable>,
 }

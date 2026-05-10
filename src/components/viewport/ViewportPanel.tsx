@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import Tabs from "../common/Tabs";
 import { useEditorStore } from "../../core/store/editorStore";
@@ -22,9 +22,35 @@ import { listenToProjectAssetChanges } from "../../core/ipc/projectWatcherServic
 import type { Entity } from "../../core/ipc/sceneService";
 import { persistActiveScene } from "../../core/scenePersistence";
 import { constrainSpriteFrameSize, ONBOARDING_SPRITE_SIZE } from "../../core/sceneConstraints";
+import {
+  DEFAULT_TILEMAP_LEGACY_FALLBACK_DETAIL,
+  hasCanonicalTilemapCells,
+  type AssetVisualLoadStatus,
+} from "../../core/assetVisualState";
 import { createSpriteEntityFromAsset } from "../../core/editorEntityFactory";
 import { getEntityDisplayName } from "../../core/entityDisplay";
+import { resolveImportedEntityContext } from "../../core/importedEntityContext";
 import { resolveProjectAssetPath } from "../../core/pathUtils";
+import { summarizeSceneAssetHealth } from "../../core/sceneAssetHealth";
+import { resolveSceneWorkspaceContext } from "../../core/sceneWorkspaceContext";
+import {
+  buildTilemapAuthoringBrush,
+  entityHasLogicWorkspace,
+  resolveEntitySourceRefs,
+} from "../../core/entityAuthoring";
+import {
+  buildCreatorWorkflowContext,
+  resolveEntityFocusTreatment,
+} from "../../core/creatorWorkflow";
+import { openProjectSourcePath } from "../../core/ipc/projectService";
+import {
+  clampViewportPan,
+  getSceneEntityBounds,
+  getViewportPanForWorldPoint,
+  resolveSceneWorldMetrics,
+} from "../../core/sceneWorldModel";
+import SceneAssetHealthBadge from "./SceneAssetHealthBadge";
+import { TilePalette } from "../tools/ContextualPalette";
 import { getGameViewportScale } from "./gameViewportScale";
 
 const VIEWPORT_TABS = [
@@ -71,10 +97,11 @@ type QueuedAudioChunk = {
 };
 
 type ViewportAssetCacheEntry = {
-  status: "loading" | "loaded" | "error";
+  status: "loading" | "loaded" | "missing" | "error";
   source?: CanvasImageSource;
   width?: number;
   height?: number;
+  errorMessage?: string;
 };
 
 type SceneGuide = {
@@ -92,6 +119,22 @@ type GuideDragState = {
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function toAssetVisualLoadStatus(entry?: ViewportAssetCacheEntry): AssetVisualLoadStatus {
+  if (!entry) {
+    return "loading";
+  }
+  if (entry.status === "loaded") {
+    return "loaded";
+  }
+  if (entry.status === "loading") {
+    return "loading";
+  }
+  if (entry.status === "missing") {
+    return "missing";
+  }
+  return "failed";
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -114,13 +157,6 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 function snapToGrid(value: number, step: number): number {
   return Math.round(value / step) * step;
-}
-
-function getSceneDimensions(target: "megadrive" | "snes") {
-  return {
-    width: target === "snes" ? 256 : MD_WIDTH,
-    height: MD_HEIGHT,
-  };
 }
 
 function getGuideStorageKey(projectDir: string, scenePath: string | null | undefined): string | null {
@@ -221,6 +257,23 @@ function getRulerStep(zoom: number) {
   return options.find((step) => step * zoom >= 48) ?? 256;
 }
 
+function buildSceneDensityStatus(scene: { entities: Entity[] } | null) {
+  const sprites = (scene?.entities ?? []).filter((entity) => Boolean(entity.components?.sprite));
+  const counts = new Map<string, number>();
+  for (const entity of sprites) {
+    const key = `${entity.transform.x}:${entity.transform.y}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const maxStack = Math.max(0, ...Array.from(counts.values()));
+  const overlaps = Array.from(counts.values()).filter((value) => value >= 3).length;
+  return {
+    spriteCount: sprites.length,
+    maxStack,
+    overlaps,
+    shouldSuggestStaging: sprites.length >= 10 && (maxStack >= 3 || overlaps >= 2),
+  };
+}
+
 function drawRepeatedAsset(
   context: CanvasRenderingContext2D,
   asset: ViewportAssetCacheEntry,
@@ -314,34 +367,12 @@ function drawTilemapCells(
   context.restore();
 }
 
-function getEntityBounds(entity: Entity, target: "megadrive" | "snes"): EntityBounds {
-  if (entity.components?.tilemap) {
-    return {
-      x: entity.transform.x,
-      y: entity.transform.y,
-      width: entity.components.tilemap.map_width * 8,
-      height: entity.components.tilemap.map_height * 8,
-      resizable: false,
-    };
-  }
-
-  if (entity.components?.camera) {
-    return {
-      x: entity.transform.x + (entity.components.camera.offset_x ?? 0),
-      y: entity.transform.y + (entity.components.camera.offset_y ?? 0),
-      width: target === "snes" ? 256 : 320,
-      height: 224,
-      resizable: false,
-    };
-  }
-
-  return {
-    x: entity.transform.x,
-    y: entity.transform.y,
-    width: entity.components?.sprite?.frame_width ?? 32,
-    height: entity.components?.sprite?.frame_height ?? 32,
-    resizable: Boolean(entity.components?.sprite),
-  };
+function getEntityBounds(
+  entity: Entity,
+  target: "megadrive" | "snes",
+  entities: Entity[] = []
+): EntityBounds {
+  return getSceneEntityBounds(entity, target, entities);
 }
 
 function entityDisplayLabel(entity: Entity): string {
@@ -427,6 +458,7 @@ export default function ViewportPanel({
   const {
     activeViewportTab,
     setActiveViewportTab,
+    setActiveWorkspace,
     logMessage,
     activeScene,
     activeScenePath,
@@ -468,10 +500,14 @@ export default function ViewportPanel({
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const gameViewportStageRef = useRef<HTMLDivElement>(null);
+  const sceneStageRef = useRef<HTMLDivElement>(null);
   const sceneCanvasRef = useRef<HTMLCanvasElement>(null);
   const sceneOverlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  /** Ciclo Alt+clique em sprites sobrepostos (cena densa). */
+  const densePickRef = useRef<{ mx: number; my: number; ids: string[]; idx: number } | null>(null);
   const sceneRulerTopRef = useRef<HTMLCanvasElement>(null);
   const sceneRulerLeftRef = useRef<HTMLCanvasElement>(null);
+  const [sceneStageSize, setSceneStageSize] = useState({ width: 0, height: 0 });
   const stopLoopRef = useRef<(() => void) | null>(null);
   const loopStartingRef = useRef(false);
   const loopTokenRef = useRef(0);
@@ -554,6 +590,7 @@ export default function ViewportPanel({
   const [assetCacheVersion, setAssetCacheVersion] = useState(0);
   const [sceneMousePos, setSceneMousePos] = useState<{ x: number; y: number } | null>(null);
   const [viewportPan, setViewportPan] = useState({ x: 0, y: 0 });
+  const [clampViewportToWorld, setClampViewportToWorld] = useState(true);
   const [spacePressed, setSpacePressed] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
   const panDragRef = useRef<{ startX: number; startY: number; startPanX: number; startPanY: number } | null>(null);
@@ -563,19 +600,82 @@ export default function ViewportPanel({
   const projectSourceKind = useEditorStore((state) => state.projectSourceKind);
   const isSgdkProject = projectSourceKind === "external_sgdk" || projectSourceKind === "imported_sgdk";
   const hasEmulatorSession = emulatorLoaded || emulatorActive;
-  const showSgdkOnboarding = isSgdkProject && !sgdkOnboardingDismissed;
+  const importedSceneHasAuthoringContent = Boolean(
+    activeScene &&
+      (activeScene.entities.length > 0 ||
+        activeScene.background_layers.length > 0 ||
+        (activeScene.layers?.some((layer) => layer.entity_ids.length > 0) ?? false))
+  );
+  const showSgdkOnboarding =
+    isSgdkProject && !sgdkOnboardingDismissed && !importedSceneHasAuthoringContent;
   const sgdkOnboarding = getSgdkOnboardingContent(projectSourceKind);
+  const sceneContext = resolveSceneWorkspaceContext({
+    scene: activeScene,
+    scenePath: activeScenePath,
+    projectSourceKind,
+  });
+  const selectedEntity =
+    selectedEntityId && !selectedEntityId.startsWith("layer::")
+      ? activeScene?.entities.find((entity) => entity.entity_id === selectedEntityId) ?? null
+      : null;
+  const sceneWorld = resolveSceneWorldMetrics(activeScene, activeTarget);
+  const selectedImportedContext = selectedEntity
+    ? resolveImportedEntityContext(selectedEntity)
+    : null;
+  const selectedEntitySourceRefs = selectedEntity ? resolveEntitySourceRefs(selectedEntity) : [];
   const hotReloadNoticeTimerRef = useRef<number | null>(null);
+  const assetIssueLogRef = useRef<Set<string>>(new Set());
   const [shortcutHint, setShortcutHint] = useState<{ key: string; label: string } | null>(null);
   const shortcutHintTimerRef = useRef<number | null>(null);
+  /** Lista contextual de entidades sob o ponteiro (Shift+clique em pilha densa). */
+  const [denseStackPicker, setDenseStackPicker] = useState<{
+    clientX: number;
+    clientY: number;
+    stack: Entity[];
+  } | null>(null);
+  const [denseStackFilter, setDenseStackFilter] = useState<"all" | "sprite" | "tilemap" | "camera" | "imported">(
+    "all"
+  );
+  const [denseStackSpotlight, setDenseStackSpotlight] = useState(false);
+  const [denseStackPickerIndex, setDenseStackPickerIndex] = useState(0);
+  const [denseStackPreviewEntityId, setDenseStackPreviewEntityId] = useState<string | null>(null);
+  const [soloEntityId, setSoloEntityId] = useState<string | null>(null);
   const lastOverlayHwStatusRef = useRef(hwStatus);
   const frameTimingRef = useRef<{ lastFrameAt: number; fps: number }>({
     lastFrameAt: 0,
     fps: 0,
   });
-  const sceneDimensions = getSceneDimensions(activeTarget);
-  const sceneWidth = sceneDimensions.width;
-  const sceneHeight = sceneDimensions.height;
+  const sceneWidth = sceneWorld.worldWidth;
+  const sceneHeight = sceneWorld.worldHeight;
+  const sceneFrameWidth = sceneWorld.frame.width;
+  const sceneFrameHeight = sceneWorld.frame.height;
+  const creatorWorkflow = useMemo(
+    () =>
+      buildCreatorWorkflowContext({
+        scene: activeScene,
+        target: activeTarget,
+        selectedEntityId,
+        activeTilemapId,
+        editorMode,
+        activeBrushTileIndex: activeBrush?.kind === "tile" ? activeBrush.tileIndex ?? 0 : null,
+        tilePaintTool,
+        soloEntityId,
+      }),
+    [
+      activeBrush,
+      activeScene,
+      activeTarget,
+      activeTilemapId,
+      editorMode,
+      selectedEntityId,
+      soloEntityId,
+      tilePaintTool,
+    ]
+  );
+  const sceneWorldMinX = sceneWorld.bounds.minX;
+  const sceneWorldMinY = sceneWorld.bounds.minY;
+  const sceneWorldMaxX = sceneWorld.bounds.maxX;
+  const sceneWorldMaxY = sceneWorld.bounds.maxY;
   const sceneScaleWidth = Math.round(sceneWidth * viewportZoom);
   const sceneScaleHeight = Math.round(sceneHeight * viewportZoom);
   const sceneChromeOffset = gameViewLight ? 0 : SCENE_RULER_SIZE;
@@ -583,6 +683,449 @@ export default function ViewportPanel({
     activeProjectDir,
     activeScenePath || activeScene?.scene_id || null
   );
+  const sceneDensityStatus = useMemo(() => buildSceneDensityStatus(activeScene), [activeScene]);
+  const activeTilemapEntityForPalette = useMemo(() => {
+    if (!activeScene) {
+      return null;
+    }
+    const id =
+      activeTilemapId ??
+      (selectedEntity?.components?.tilemap ? selectedEntity.entity_id : null);
+    if (!id) {
+      return null;
+    }
+    return activeScene.entities.find((e) => e.entity_id === id && e.components.tilemap) ?? null;
+  }, [activeScene, activeTilemapId, selectedEntity]);
+  const worldToSceneCanvasX = useCallback(
+    (worldX: number) => Math.round((worldX - sceneWorldMinX) * viewportZoom),
+    [sceneWorldMinX, viewportZoom]
+  );
+  const worldToSceneCanvasY = useCallback(
+    (worldY: number) => Math.round((worldY - sceneWorldMinY) * viewportZoom),
+    [sceneWorldMinY, viewportZoom]
+  );
+  const scaleSceneDimension = useCallback(
+    (worldValue: number) => Math.round(worldValue * viewportZoom),
+    [viewportZoom]
+  );
+
+  useEffect(() => {
+    if (!denseStackPicker) {
+      setDenseStackFilter("all");
+      setDenseStackSpotlight(false);
+      setDenseStackPickerIndex(0);
+      setDenseStackPreviewEntityId(null);
+      return;
+    }
+    function handleDocPointerDown(ev: PointerEvent) {
+      const root = document.querySelector('[data-testid="viewport-dense-stack-picker"]');
+      if (root instanceof HTMLElement && !root.contains(ev.target as Node)) {
+        setDenseStackPicker(null);
+      }
+    }
+    document.addEventListener("pointerdown", handleDocPointerDown, true);
+    return () => document.removeEventListener("pointerdown", handleDocPointerDown, true);
+  }, [denseStackPicker]);
+  const denseStackFiltered = useMemo(() => {
+    if (!denseStackPicker) {
+      return [] as Entity[];
+    }
+    return denseStackPicker.stack.filter((entity) => {
+      if (denseStackFilter === "all") {
+        return true;
+      }
+      if (denseStackFilter === "sprite") {
+        return Boolean(entity.components?.sprite);
+      }
+      if (denseStackFilter === "tilemap") {
+        return Boolean(entity.components?.tilemap);
+      }
+      if (denseStackFilter === "camera") {
+        return Boolean(entity.components?.camera);
+      }
+      return resolveImportedEntityContext(entity).isImported;
+    });
+  }, [denseStackFilter, denseStackPicker]);
+  useEffect(() => {
+    if (!soloEntityId) {
+      return;
+    }
+    if (!activeScene?.entities.some((entity) => entity.entity_id === soloEntityId)) {
+      setSoloEntityId(null);
+    }
+  }, [activeScene?.entities, soloEntityId]);
+  useEffect(() => {
+    if (!denseStackPicker) {
+      return;
+    }
+    const safeIndex = clamp(denseStackPickerIndex, 0, Math.max(0, denseStackFiltered.length - 1));
+    if (safeIndex !== denseStackPickerIndex) {
+      setDenseStackPickerIndex(safeIndex);
+      return;
+    }
+    const previewEntityId = denseStackFiltered[safeIndex]?.entity_id ?? null;
+    if (previewEntityId !== denseStackPreviewEntityId) {
+      setDenseStackPreviewEntityId(previewEntityId);
+    }
+  }, [denseStackFiltered, denseStackPicker, denseStackPickerIndex, denseStackPreviewEntityId]);
+  useEffect(() => {
+    if (!denseStackPicker) {
+      return;
+    }
+    const picker = denseStackFiltered;
+    function handleDensePickerKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setDenseStackPicker(null);
+        return;
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setDenseStackPickerIndex((current) =>
+          picker.length > 0 ? (current + 1) % picker.length : 0
+        );
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setDenseStackPickerIndex((current) =>
+          picker.length > 0
+            ? (current - 1 + picker.length) % picker.length
+            : 0
+        );
+        return;
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const candidate = picker[denseStackPickerIndex];
+        if (!candidate) {
+          return;
+        }
+        setSelectedEntityId(candidate.entity_id);
+        setDenseStackPicker(null);
+        logMessage("info", `[Viewport] Selecionado da pilha: ${getEntityDisplayName(candidate)}.`);
+      }
+    }
+    window.addEventListener("keydown", handleDensePickerKeyDown);
+    return () => window.removeEventListener("keydown", handleDensePickerKeyDown);
+  }, [denseStackFiltered, denseStackPicker, denseStackPickerIndex, logMessage, setSelectedEntityId]);
+  const collisionOversizedForConsole = useMemo(() => {
+    const sz = sceneWorld.collisionWorldSize;
+    if (!sz) {
+      return false;
+    }
+    return sz.width > sceneFrameWidth || sz.height > sceneFrameHeight;
+  }, [sceneFrameHeight, sceneFrameWidth, sceneWorld.collisionWorldSize]);
+  const collisionAuthoringWarnings = useMemo(() => {
+    const lines = hwStatus?.warnings ?? [];
+    return lines.filter((w) => /collision|colis|mapa/i.test(w)).slice(0, 3);
+  }, [hwStatus?.warnings]);
+  const showWorldAuthoringStrip =
+    activeViewportTab === "scene" &&
+    !gameViewLight &&
+    Boolean(activeScene) &&
+    (sceneWorld.largeWorld || collisionOversizedForConsole);
+  const visibleWorldRect = useMemo(() => {
+    if (sceneStageSize.width <= 0 || sceneStageSize.height <= 0 || viewportZoom <= 0) {
+      return null;
+    }
+    const contentWidth = sceneScaleWidth + sceneChromeOffset;
+    const contentHeight = sceneScaleHeight + sceneChromeOffset;
+    const contentLeft =
+      sceneStageSize.width / 2 - contentWidth / 2 + viewportPan.x + sceneChromeOffset;
+    const contentTop =
+      sceneStageSize.height / 2 - contentHeight / 2 + viewportPan.y + sceneChromeOffset;
+    const minX = sceneWorld.bounds.minX + (0 - contentLeft) / viewportZoom;
+    const minY = sceneWorld.bounds.minY + (0 - contentTop) / viewportZoom;
+    const maxX = sceneWorld.bounds.minX + (sceneStageSize.width - contentLeft) / viewportZoom;
+    const maxY = sceneWorld.bounds.minY + (sceneStageSize.height - contentTop) / viewportZoom;
+    return {
+      x: Math.max(sceneWorld.bounds.minX, minX),
+      y: Math.max(sceneWorld.bounds.minY, minY),
+      width: Math.min(sceneWorld.bounds.maxX, maxX) - Math.max(sceneWorld.bounds.minX, minX),
+      height: Math.min(sceneWorld.bounds.maxY, maxY) - Math.max(sceneWorld.bounds.minY, minY),
+    };
+  }, [
+    sceneChromeOffset,
+    sceneScaleHeight,
+    sceneScaleWidth,
+    sceneStageSize.height,
+    sceneStageSize.width,
+    sceneWorld.bounds.maxX,
+    sceneWorld.bounds.maxY,
+    sceneWorld.bounds.minX,
+    sceneWorld.bounds.minY,
+    viewportPan.x,
+    viewportPan.y,
+    viewportZoom,
+  ]);
+  const cameraWindowRect = useMemo(() => {
+    const cameraX = sceneWorld.camera?.x ?? Math.round(sceneWorld.centerX - sceneFrameWidth / 2);
+    const cameraY = sceneWorld.camera?.y ?? Math.round(sceneWorld.centerY - sceneFrameHeight / 2);
+    return {
+      left: (cameraX - sceneWorld.bounds.minX) * viewportZoom + sceneChromeOffset,
+      top: (cameraY - sceneWorld.bounds.minY) * viewportZoom + sceneChromeOffset,
+      width: sceneFrameWidth * viewportZoom,
+      height: sceneFrameHeight * viewportZoom,
+    };
+  }, [
+    sceneChromeOffset,
+    sceneFrameHeight,
+    sceneFrameWidth,
+    sceneWorld.bounds.minX,
+    sceneWorld.bounds.minY,
+    sceneWorld.camera?.x,
+    sceneWorld.camera?.y,
+    sceneWorld.centerX,
+    sceneWorld.centerY,
+    viewportZoom,
+  ]);
+  const clampPanToStage = useCallback(
+    (pan: { x: number; y: number }, zoom = viewportZoom) => {
+      const stageRect = sceneStageRef.current?.getBoundingClientRect();
+      if (!stageRect) {
+        return pan;
+      }
+      return clampViewportPan({
+        enabled: clampViewportToWorld,
+        pan,
+        stageWidth: stageRect.width,
+        stageHeight: stageRect.height,
+        contentWidth: Math.round(sceneWidth * zoom) + sceneChromeOffset,
+        contentHeight: Math.round(sceneHeight * zoom) + sceneChromeOffset,
+      });
+    },
+    [clampViewportToWorld, sceneChromeOffset, sceneHeight, sceneWidth, viewportZoom]
+  );
+  const focusWorldPoint = useCallback(
+    (pointX: number, pointY: number, nextZoom = viewportZoom) => {
+      const nextPan = getViewportPanForWorldPoint({
+        pointX,
+        pointY,
+        zoom: nextZoom,
+        worldBounds: sceneWorld.bounds,
+        worldWidth: sceneWidth,
+        worldHeight: sceneHeight,
+        contentOffset: sceneChromeOffset,
+      });
+      setViewportPan(clampPanToStage(nextPan, nextZoom));
+    },
+    [clampPanToStage, sceneChromeOffset, sceneHeight, sceneWidth, sceneWorld.bounds, viewportZoom]
+  );
+  const focusEntityInViewport = useCallback(
+    (entity: Entity) => {
+      const bounds = getEntityBounds(entity, activeTarget, activeScene?.entities ?? []);
+      focusWorldPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
+    },
+    [activeScene?.entities, activeTarget, focusWorldPoint]
+  );
+  const focusSelectedEntity = useCallback(() => {
+    if (!selectedEntity) {
+      return;
+    }
+    focusEntityInViewport(selectedEntity);
+  }, [focusEntityInViewport, selectedEntity]);
+  const focusActiveTilemapEntity = useCallback(() => {
+    if (!activeTilemapEntityForPalette) {
+      logMessage("warn", "[Viewport] Nenhum tilemap ativo para focar.");
+      return;
+    }
+    focusEntityInViewport(activeTilemapEntityForPalette);
+    logMessage(
+      "info",
+      `[Viewport] Tilemap ativo focado: ${getEntityDisplayName(activeTilemapEntityForPalette)}.`
+    );
+  }, [activeTilemapEntityForPalette, focusEntityInViewport, logMessage]);
+  const selectDenseStackEntity = useCallback(
+    (entity: Entity, options: { focus?: boolean; solo?: boolean } = {}) => {
+      setSelectedEntityId(entity.entity_id);
+      if (options.solo) {
+        setSoloEntityId(entity.entity_id);
+      }
+      if (options.focus) {
+        focusEntityInViewport(entity);
+      }
+      setDenseStackPicker(null);
+      logMessage(
+        "info",
+        `[Viewport] Selecionado da pilha: ${getEntityDisplayName(entity)}${options.solo ? " (solo ativo)" : ""}.`
+      );
+    },
+    [focusEntityInViewport, logMessage, setSelectedEntityId]
+  );
+  const toggleSelectedEntitySolo = useCallback(() => {
+    if (!selectedEntity) {
+      return;
+    }
+    setSoloEntityId((current) => {
+      const next = current === selectedEntity.entity_id ? null : selectedEntity.entity_id;
+      logMessage(
+        "info",
+        next
+          ? `[Viewport] Solo temporario ligado para '${getEntityDisplayName(selectedEntity)}'.`
+          : "[Viewport] Solo temporario desligado."
+      );
+      return next;
+    });
+  }, [logMessage, selectedEntity]);
+  const openSelectedEntityLogic = useCallback(() => {
+    if (!selectedEntity || !entityHasLogicWorkspace(selectedEntity)) {
+      return;
+    }
+    setActiveWorkspace("logic");
+    setActiveViewportTab("logic");
+    setSelectedEntityId(selectedEntity.entity_id);
+    logMessage(
+      "info",
+      `[Viewport] Navegando para Logic Workspace: ${getEntityDisplayName(selectedEntity)}.`
+    );
+  }, [logMessage, selectedEntity, setActiveViewportTab, setActiveWorkspace, setSelectedEntityId]);
+  const openSelectedEntityArt = useCallback(() => {
+    if (!selectedEntity?.components.sprite) {
+      return;
+    }
+    setActiveWorkspace("artstudio");
+    setActiveViewportTab("artstudio");
+    setSelectedEntityId(selectedEntity.entity_id);
+    logMessage(
+      "info",
+      `[Viewport] Navegando para Art Workspace: ${getEntityDisplayName(selectedEntity)}.`
+    );
+  }, [logMessage, selectedEntity, setActiveViewportTab, setActiveWorkspace, setSelectedEntityId]);
+  const openSelectedEntityTilemap = useCallback(() => {
+    if (!selectedEntity?.components.tilemap) {
+      return;
+    }
+    setActiveWorkspace("scene");
+    setActiveViewportTab("scene");
+    setSelectedEntityId(selectedEntity.entity_id);
+    setActiveTilemapId(selectedEntity.entity_id);
+    setEditorMode("paint");
+    const brush = buildTilemapAuthoringBrush(selectedEntity);
+    if (brush) {
+      setActiveBrush(brush);
+    }
+    logMessage(
+      "info",
+      `[Viewport] Tilemap '${getEntityDisplayName(selectedEntity)}' travado para pintura no stage.`
+    );
+  }, [
+    logMessage,
+    selectedEntity,
+    setActiveBrush,
+    setActiveTilemapId,
+    setActiveViewportTab,
+    setActiveWorkspace,
+    setEditorMode,
+    setSelectedEntityId,
+  ]);
+  const openSelectedEntityPrimarySource = useCallback(async () => {
+    if (!activeProjectDir) {
+      logMessage("warn", "[Viewport] Abra um projeto antes de abrir a fonte real.");
+      return;
+    }
+    const primarySourceRef = selectedEntitySourceRefs[0]?.trim();
+    if (!primarySourceRef) {
+      logMessage("warn", "[Viewport] Nenhuma fonte rastreavel para a entidade selecionada.");
+      return;
+    }
+    try {
+      const result = await openProjectSourcePath(activeProjectDir, primarySourceRef);
+      if (!result?.ok) {
+        throw new Error(result?.message ?? "Falha ao abrir a fonte no host.");
+      }
+      logMessage("info", `[Viewport] Fonte aberta: ${primarySourceRef}`);
+    } catch (error) {
+      logMessage(
+        "error",
+        `[Viewport] Falha ao abrir '${primarySourceRef}': ${describeError(error)}`
+      );
+    }
+  }, [activeProjectDir, logMessage, selectedEntitySourceRefs]);
+  const centerViewportOnCamera = useCallback(() => {
+    focusWorldPoint(sceneWorld.centerX, sceneWorld.centerY);
+  }, [focusWorldPoint, sceneWorld.centerX, sceneWorld.centerY]);
+  const resetSceneView = useCallback(() => {
+    resetViewportZoom();
+    window.setTimeout(() => {
+      focusWorldPoint(sceneWorld.centerX, sceneWorld.centerY, 1);
+    }, 0);
+  }, [focusWorldPoint, resetViewportZoom, sceneWorld.centerX, sceneWorld.centerY]);
+  const focusCollisionMapCenter = useCallback(() => {
+    const sz = sceneWorld.collisionWorldSize;
+    if (sz) {
+      focusWorldPoint(sz.width / 2, sz.height / 2);
+      logMessage(
+        "info",
+        "[Viewport] Centro do mapa de colisao focado (ferramenta de autoria: mundo maior que a janela MD)."
+      );
+    } else {
+      focusWorldPoint(sceneWorld.centerX, sceneWorld.centerY);
+      logMessage("info", "[Viewport] Sem collision_map dimensionado; foco no centro do mundo.");
+    }
+  }, [focusWorldPoint, logMessage, sceneWorld.centerX, sceneWorld.centerY, sceneWorld.collisionWorldSize]);
+  const applyAuthoringStagingLayout = useCallback(() => {
+    if (!activeScene) {
+      return;
+    }
+    const spriteEntities = activeScene.entities.filter((entity) => entity.components?.sprite);
+    if (spriteEntities.length < 2) {
+      logMessage("info", "[Viewport] Cena sem densidade suficiente para staging de autoria.");
+      return;
+    }
+    beginHistoryCapture();
+    try {
+      spriteEntities.forEach((entity, index) => {
+        const row = Math.floor(index / 8);
+        const col = index % 8;
+        const nextX = sceneWorld.bounds.minX + 40 + col * 56;
+        const nextY = sceneWorld.bounds.minY + 48 + row * 56;
+        const semantics = entity.components.logic?.imported_semantics;
+        const auditFlags = Array.from(
+          new Set([...(semantics?.audit_flags ?? []), "position:staging_layout"])
+        );
+        updateEntity(
+          entity.entity_id,
+          {
+            transform: {
+              ...entity.transform,
+              x: nextX,
+              y: nextY,
+            },
+            components: {
+              ...entity.components,
+              logic: entity.components.logic
+                ? {
+                    ...entity.components.logic,
+                    imported_semantics: semantics
+                      ? { ...semantics, audit_flags: auditFlags }
+                      : entity.components.logic.imported_semantics,
+                  }
+                : entity.components.logic,
+            },
+          },
+          { recordHistory: false }
+        );
+      });
+      commitHistoryCapture();
+      logMessage(
+        "info",
+        `[Viewport] Staging de autoria aplicado em ${spriteEntities.length} sprite(s) para remover sobreposicao densa.`
+      );
+    } catch (error) {
+      cancelHistoryCapture();
+      logMessage("error", `[Viewport] Falha ao aplicar staging de autoria: ${describeError(error)}`);
+    }
+  }, [
+    activeScene,
+    beginHistoryCapture,
+    cancelHistoryCapture,
+    commitHistoryCapture,
+    logMessage,
+    sceneWorld.bounds.minX,
+    sceneWorld.bounds.minY,
+    updateEntity,
+  ]);
 
   activeTabRef.current = activeViewportTab;
   pausedRef.current = emulPaused;
@@ -602,6 +1145,45 @@ export default function ViewportPanel({
       setIsPanning(false);
     }
   }, [activeViewportTab]);
+
+  useEffect(() => {
+    if (activeViewportTab !== "scene") {
+      return;
+    }
+    const stage = sceneStageRef.current;
+    if (!stage) {
+      return;
+    }
+    const syncSize = () => {
+      const rect = stage.getBoundingClientRect();
+      setSceneStageSize({ width: rect.width, height: rect.height });
+    };
+    syncSize();
+    const observer = new ResizeObserver(syncSize);
+    observer.observe(stage);
+    window.addEventListener("resize", syncSize);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", syncSize);
+    };
+  }, [activeViewportTab]);
+
+  useEffect(() => {
+    setViewportPan((current) => {
+      const next = clampPanToStage(current);
+      return next.x === current.x && next.y === current.y ? current : next;
+    });
+  }, [clampPanToStage]);
+
+  useEffect(() => {
+    if (activeViewportTab !== "scene" || !activeScene?.scene_id) {
+      return;
+    }
+    const rafId = window.requestAnimationFrame(() => {
+      centerViewportOnCamera();
+    });
+    return () => window.cancelAnimationFrame(rafId);
+  }, [activeScene?.scene_id, activeScenePath, activeViewportTab, centerViewportOnCamera]);
 
   useEffect(() => {
     setSceneGuides(loadSceneGuides(sceneGuideStorageKey));
@@ -656,14 +1238,18 @@ export default function ViewportPanel({
         });
         setAssetCacheVersion((current) => current + 1);
       };
-      const markError = () => {
-        console.warn(
-          "[Viewport] Falha ao carregar asset:",
-          absolutePath,
-          "| assetUrl:",
-          assetUrl
-        );
-        assetCacheRef.current.set(absolutePath, { status: "error" });
+      const markFailure = (status: "missing" | "error", detail?: string) => {
+        const issueKey = `${absolutePath}::${status}`;
+        const message =
+          status === "missing"
+            ? `[Viewport] Asset ausente: '${relativePath}' (${absolutePath}).`
+            : `[Viewport] Falha ao carregar asset: '${relativePath}' (${absolutePath}).`;
+        const fullMessage = detail ? `${message} ${detail}` : message;
+        if (!assetIssueLogRef.current.has(issueKey)) {
+          assetIssueLogRef.current.add(issueKey);
+          logMessage(status === "missing" ? "warn" : "error", fullMessage);
+        }
+        assetCacheRef.current.set(absolutePath, { status, errorMessage: fullMessage });
         setAssetCacheVersion((current) => current + 1);
       };
       const loadImageElement = (imageSrc: string, options?: { revokeOnLoad?: boolean; fallbackToAssetUrl?: boolean }) => {
@@ -682,7 +1268,7 @@ export default function ViewportPanel({
             loadImageElement(assetUrl);
             return;
           }
-          markError();
+          markFailure("error", "Decode/draw Image falhou no WebView.");
         };
         image.src = imageSrc;
       };
@@ -713,8 +1299,9 @@ export default function ViewportPanel({
             markLoaded(canvas, canvas.width, canvas.height);
           })
           .catch((err) => {
-            console.warn("[Viewport] PPM fetch falhou:", absolutePath, err);
-            markError();
+            const detail = describeError(err);
+            const status = detail.includes("HTTP 404") ? "missing" : "error";
+            markFailure(status, `PPM fetch falhou: ${detail}`);
           });
 
         return cacheEntry;
@@ -745,12 +1332,20 @@ export default function ViewportPanel({
           loadImageElement(assetUrl);
         })
         .catch((err) => {
-          console.warn("[Viewport] Asset fetch falhou:", absolutePath, err);
+          const detail = describeError(err);
+          if (detail.includes("HTTP 404")) {
+            markFailure("missing", `fetch retornou 404 para ${assetUrl}.`);
+            return;
+          }
+          logMessage(
+            "warn",
+            `[Viewport] fetch do asset '${relativePath}' falhou (${detail}); tentando fallback Image().`
+          );
           loadImageElement(assetUrl);
         });
       return cacheEntry;
     },
-    [activeProjectDir]
+    [activeProjectDir, logMessage]
   );
 
   // Pré-carregamento de assets da cena para garantir WYSIWYG no primeiro frame
@@ -816,11 +1411,66 @@ export default function ViewportPanel({
       }
 
       return {
-        x: clamp(((clientX - rect.left) / rect.width) * sceneWidth, 0, sceneWidth),
-        y: clamp(((clientY - rect.top) / rect.height) * sceneHeight, 0, sceneHeight),
+        x: sceneWorldMinX + clamp(((clientX - rect.left) / rect.width) * sceneWidth, 0, sceneWidth),
+        y: sceneWorldMinY + clamp(((clientY - rect.top) / rect.height) * sceneHeight, 0, sceneHeight),
       };
     },
-    [sceneHeight, sceneWidth]
+    [sceneHeight, sceneWidth, sceneWorldMinX, sceneWorldMinY]
+  );
+
+  const handleSceneStageWheel = useCallback(
+    (event: React.WheelEvent<HTMLDivElement>) => {
+      if (activeViewportTab !== "scene") {
+        return;
+      }
+
+      if (event.ctrlKey || event.metaKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        const nextZoom = clamp(
+          viewportZoom + (event.deltaY < 0 ? ZOOM_STEP : -ZOOM_STEP),
+          ZOOM_MIN,
+          ZOOM_MAX
+        );
+        if (nextZoom === viewportZoom) {
+          return;
+        }
+        const worldPoint = getSceneCoordsFromClient(event.clientX, event.clientY);
+        setViewportZoom(nextZoom);
+        if (worldPoint) {
+          window.requestAnimationFrame(() => {
+            focusWorldPoint(worldPoint.x, worldPoint.y, nextZoom);
+          });
+        }
+        return;
+      }
+
+      if (!sceneWorld.largeWorld && clampViewportToWorld) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      setViewportPan((current) =>
+        clampPanToStage(
+          {
+            x: current.x - event.deltaX,
+            y: current.y - event.deltaY,
+          },
+          viewportZoom
+        )
+      );
+    },
+    [
+      activeViewportTab,
+      clampPanToStage,
+      clampViewportToWorld,
+      focusWorldPoint,
+      getSceneCoordsFromClient,
+      sceneWorld.largeWorld,
+      setViewportZoom,
+      viewportZoom,
+    ]
   );
 
   const startGuideDrag = useCallback(
@@ -1691,6 +2341,9 @@ export default function ViewportPanel({
       return;
     }
 
+    context.save();
+    context.translate(-sceneWorldMinX, -sceneWorldMinY);
+
     const compositionHiddenByLayer = new Set<string>();
     const compositionLayerDepthByEntityId = new Map<string, number>();
     for (const sceneLayer of activeScene.layers ?? []) {
@@ -1757,7 +2410,7 @@ export default function ViewportPanel({
             return;
           }
 
-          const bounds = getEntityBounds(entity, activeTarget);
+          const bounds = getEntityBounds(entity, activeTarget, activeScene.entities);
           const cellsArr = tilemap.cells;
           const expectedCells = tilemap.map_width * tilemap.map_height;
           const hasCells =
@@ -1804,7 +2457,7 @@ export default function ViewportPanel({
             return;
           }
 
-          const bounds = getEntityBounds(entity, activeTarget);
+          const bounds = getEntityBounds(entity, activeTarget, activeScene.entities);
           const sourceWidth = Math.min(sprite.frame_width, spriteAsset.width ?? sprite.frame_width);
           const sourceHeight = Math.min(sprite.frame_height, spriteAsset.height ?? sprite.frame_height);
           context.drawImage(
@@ -1821,6 +2474,7 @@ export default function ViewportPanel({
         });
     }
 
+    context.restore();
     return;
 
     /*
@@ -1857,7 +2511,7 @@ export default function ViewportPanel({
     activeScene.entities.forEach((entity: Entity, index: number) => {
       if (hiddenByLayer.has(entity.entity_id)) return;
 
-      const bounds = getEntityBounds(entity, activeTarget);
+      const bounds = getEntityBounds(entity, activeTarget, activeScene.entities);
       const x = bounds.x;
       const y = bounds.y;
       const width = bounds.width;
@@ -2086,6 +2740,8 @@ export default function ViewportPanel({
     getViewportAsset,
     sceneHeight,
     sceneWidth,
+    sceneWorldMinX,
+    sceneWorldMinY,
     showBackground,
     showSprites,
     showTilemaps,
@@ -2107,7 +2763,7 @@ export default function ViewportPanel({
     context.imageSmoothingEnabled = true;
 
     const drawVerticalLine = (position: number, color: string, width = 1) => {
-      const x = Math.round(position * viewportZoom) + 0.5;
+      const x = worldToSceneCanvasX(position) + 0.5;
       context.strokeStyle = color;
       context.lineWidth = width;
       context.beginPath();
@@ -2117,7 +2773,7 @@ export default function ViewportPanel({
     };
 
     const drawHorizontalLine = (position: number, color: string, width = 1) => {
-      const y = Math.round(position * viewportZoom) + 0.5;
+      const y = worldToSceneCanvasY(position) + 0.5;
       context.strokeStyle = color;
       context.lineWidth = width;
       context.beginPath();
@@ -2174,22 +2830,26 @@ export default function ViewportPanel({
       const showMinorGrid = showSubGrid && SUB_GRID_SIZE * viewportZoom >= 6;
       const minorAlpha = clamp(0.03 + (viewportZoom - 0.25) * 0.03, 0.03, 0.1);
       const majorAlpha = clamp(0.09 + viewportZoom * 0.04, 0.09, 0.24);
+      const worldGridStartX = Math.floor(sceneWorldMinX / SUB_GRID_SIZE) * SUB_GRID_SIZE;
+      const worldGridStartY = Math.floor(sceneWorldMinY / SUB_GRID_SIZE) * SUB_GRID_SIZE;
+      const worldMajorGridStartX = Math.floor(sceneWorldMinX / GRID_SNAP_SIZE) * GRID_SNAP_SIZE;
+      const worldMajorGridStartY = Math.floor(sceneWorldMinY / GRID_SNAP_SIZE) * GRID_SNAP_SIZE;
 
       if (showMinorGrid) {
-        for (let x = 0; x <= sceneWidth; x += SUB_GRID_SIZE) {
+        for (let x = worldGridStartX; x <= sceneWorldMaxX; x += SUB_GRID_SIZE) {
           if (x % GRID_SNAP_SIZE === 0) continue;
           drawVerticalLine(x, `rgba(137,180,250,${minorAlpha.toFixed(3)})`);
         }
-        for (let y = 0; y <= sceneHeight; y += SUB_GRID_SIZE) {
+        for (let y = worldGridStartY; y <= sceneWorldMaxY; y += SUB_GRID_SIZE) {
           if (y % GRID_SNAP_SIZE === 0) continue;
           drawHorizontalLine(y, `rgba(137,180,250,${minorAlpha.toFixed(3)})`);
         }
       }
 
-      for (let x = 0; x <= sceneWidth; x += GRID_SNAP_SIZE) {
+      for (let x = worldMajorGridStartX; x <= sceneWorldMaxX; x += GRID_SNAP_SIZE) {
         drawVerticalLine(x, `rgba(180,190,254,${majorAlpha.toFixed(3)})`);
       }
-      for (let y = 0; y <= sceneHeight; y += GRID_SNAP_SIZE) {
+      for (let y = worldMajorGridStartY; y <= sceneWorldMaxY; y += GRID_SNAP_SIZE) {
         drawHorizontalLine(y, `rgba(180,190,254,${majorAlpha.toFixed(3)})`);
       }
     }
@@ -2202,13 +2862,13 @@ export default function ViewportPanel({
       context.fillStyle = "rgba(243,139,168,0.28)";
       for (let tileIndex = 0; tileIndex < collisionMap.data.length; tileIndex += 1) {
         if (collisionMap.data[tileIndex] !== 1) continue;
-        const tileX = (tileIndex % collisionMap.width) * tileWidth * viewportZoom;
-        const tileY = Math.floor(tileIndex / collisionMap.width) * tileHeight * viewportZoom;
+        const tileX = worldToSceneCanvasX((tileIndex % collisionMap.width) * tileWidth);
+        const tileY = worldToSceneCanvasY(Math.floor(tileIndex / collisionMap.width) * tileHeight);
         context.fillRect(
-          Math.round(tileX),
-          Math.round(tileY),
-          Math.round(tileWidth * viewportZoom),
-          Math.round(tileHeight * viewportZoom)
+          tileX,
+          tileY,
+          scaleSceneDimension(tileWidth),
+          scaleSceneDimension(tileHeight)
         );
       }
       context.restore();
@@ -2222,12 +2882,19 @@ export default function ViewportPanel({
     }
 
     orderedEntities.forEach(({ entity, index }) => {
-      const bounds = getEntityBounds(entity, activeTarget);
-      const x = Math.round(bounds.x * viewportZoom);
-      const y = Math.round(bounds.y * viewportZoom);
-      const width = Math.round(bounds.width * viewportZoom);
-      const height = Math.round(bounds.height * viewportZoom);
+      const bounds = getEntityBounds(entity, activeTarget, activeScene.entities);
+      const x = worldToSceneCanvasX(bounds.x);
+      const y = worldToSceneCanvasY(bounds.y);
+      const width = scaleSceneDimension(bounds.width);
+      const height = scaleSceneDimension(bounds.height);
       const isSelected = entity.entity_id === selectedEntityId;
+      const focusTreatment = resolveEntityFocusTreatment(entity.entity_id, {
+        soloEntityId,
+        densePreviewEntityId: denseStackPreviewEntityId,
+        denseSpotlight: denseStackSpotlight,
+      });
+      const isDensePreview = focusTreatment === "preview" && !isSelected;
+      const isSoloFocus = focusTreatment === "solo";
       const color = entity.components?.tilemap
         ? "#94e2d5"
         : entity.components?.camera
@@ -2237,11 +2904,17 @@ export default function ViewportPanel({
       if (entity.components?.camera) {
         context.save();
         context.setLineDash([6, 4]);
-        context.strokeStyle = isSelected ? "#f9e2af" : "rgba(249,226,175,0.58)";
-        context.lineWidth = isSelected ? 2 : 1;
+        context.strokeStyle = isSelected
+          ? "#f9e2af"
+          : isSoloFocus
+            ? "#f9e2af"
+          : isDensePreview
+            ? "#fde68a"
+            : "rgba(249,226,175,0.58)";
+        context.lineWidth = isSelected || isDensePreview || isSoloFocus ? 2 : 1;
         context.strokeRect(x + 0.5, y + 0.5, width, height);
         context.setLineDash([]);
-        context.fillStyle = isSelected ? "#f9e2af" : "rgba(249,226,175,0.8)";
+        context.fillStyle = isSelected || isDensePreview ? "#f9e2af" : "rgba(249,226,175,0.8)";
         context.font = "10px monospace";
         context.fillText(`CAM ${entityDisplayLabel(entity)}`.slice(0, 22), x + 6, y + 14);
         context.restore();
@@ -2250,13 +2923,19 @@ export default function ViewportPanel({
 
       if (entity.components?.tilemap) {
         if (!showTilemaps) return;
-        context.strokeStyle = isSelected ? "#94e2d5" : "rgba(148,226,213,0.58)";
-        context.lineWidth = isSelected ? 2 : 1;
+        context.strokeStyle = isSelected
+          ? "#94e2d5"
+          : isSoloFocus
+            ? "#f9e2af"
+          : isDensePreview
+            ? "#67e8f9"
+            : "rgba(148,226,213,0.58)";
+        context.lineWidth = isSelected || isDensePreview || isSoloFocus ? 2 : 1;
         context.strokeRect(x + 0.5, y + 0.5, width, height);
         context.fillStyle = "#94e2d5";
         context.font = "10px monospace";
         context.fillText(`TM ${entityDisplayLabel(entity)}`.slice(0, 22), x + 6, y + 14);
-        if (isSelected) {
+        if (isSelected || isDensePreview || isSoloFocus) {
           context.fillStyle = "rgba(148,226,213,0.16)";
           context.fillRect(x, y, width, height);
         }
@@ -2265,12 +2944,40 @@ export default function ViewportPanel({
 
       if (entity.components?.sprite) {
         if (!showSprites) return;
-        context.strokeStyle = isSelected ? "#ffffff" : color;
-        context.lineWidth = isSelected ? 2 : 1;
+        context.strokeStyle = isSelected || isSoloFocus ? "#ffffff" : isDensePreview ? "#f9e2af" : color;
+        context.lineWidth = isSelected || isDensePreview || isSoloFocus ? 2 : 1;
         context.strokeRect(x + 0.5, y + 0.5, width, height);
-        context.fillStyle = isSelected ? "#ffffff" : color;
+        context.fillStyle = isSelected || isSoloFocus ? "#ffffff" : isDensePreview ? "#f9e2af" : color;
         context.font = "10px monospace";
         context.fillText(entityDisplayLabel(entity).slice(0, 22), x + 6, y + 14);
+        const posCtx = resolveImportedEntityContext(entity);
+        if (posCtx.positionMode) {
+          const tag =
+            posCtx.positionMode === "donor"
+              ? "DOADOR"
+              : posCtx.positionMode === "staging"
+                ? "STAGING"
+                : "INFERIDA";
+          const pillBg =
+            posCtx.positionMode === "donor"
+              ? "rgba(166,227,161,0.92)"
+              : posCtx.positionMode === "staging"
+                ? "rgba(250,179,135,0.95)"
+                : "rgba(137,180,250,0.92)";
+          context.font = "bold 8px monospace";
+          const tw = context.measureText(tag).width;
+          const px = x + 6;
+          const py = y + 18;
+          context.fillStyle = pillBg;
+          context.fillRect(px, py, tw + 8, 12);
+          context.strokeStyle = "rgba(17,17,27,0.55)";
+          context.lineWidth = 1;
+          context.strokeRect(px + 0.5, py + 0.5, tw + 8, 12);
+          context.fillStyle = "#11111b";
+          context.textAlign = "left";
+          context.fillText(tag, px + 4, py + 9);
+          context.textAlign = "left";
+        }
         if (isSelected) {
           context.save();
           context.strokeStyle = "#f9e2af";
@@ -2296,6 +3003,73 @@ export default function ViewportPanel({
       context.fillText(entityDisplayLabel(entity).slice(0, 22), x + 6, y + 14);
     });
 
+    const spotlightEntityId = soloEntityId ?? (denseStackSpotlight ? denseStackPreviewEntityId : null);
+    if (spotlightEntityId) {
+      const spotlightEntity = activeScene.entities.find((entity) => entity.entity_id === spotlightEntityId);
+      if (spotlightEntity) {
+        const sb = getEntityBounds(spotlightEntity, activeTarget, activeScene.entities);
+        const sx = worldToSceneCanvasX(sb.x);
+        const sy = worldToSceneCanvasY(sb.y);
+        const sw = scaleSceneDimension(sb.width);
+        const sh = scaleSceneDimension(sb.height);
+        context.save();
+        context.fillStyle = soloEntityId ? "rgba(0,0,0,0.48)" : "rgba(0,0,0,0.35)";
+        context.fillRect(0, 0, sceneScaleWidth, sceneScaleHeight);
+        context.globalCompositeOperation = "destination-out";
+        context.fillRect(Math.max(0, sx - 6), Math.max(0, sy - 6), Math.max(1, sw + 12), Math.max(1, sh + 12));
+        context.globalCompositeOperation = "source-over";
+        context.strokeStyle = "#f9e2af";
+        context.lineWidth = 2;
+        context.setLineDash([6, 4]);
+        context.strokeRect(sx - 2.5, sy - 2.5, sw + 4, sh + 4);
+        context.setLineDash([]);
+        if (soloEntityId) {
+          context.font = "bold 10px monospace";
+          context.fillStyle = "#f9e2af";
+          context.fillText("SOLO", sx + 4, Math.max(12, sy - 8));
+        }
+        context.restore();
+      }
+    }
+
+    // Prateleira visual quando varios sprites importados estao em staging (cena densa / beat'em up).
+    const stagingSprites = activeScene.entities.filter(
+      (candidate) =>
+        candidate.components?.sprite &&
+        resolveImportedEntityContext(candidate).positionMode === "staging"
+    );
+    if (stagingSprites.length >= 2) {
+      let minX = Number.POSITIVE_INFINITY;
+      let minY = Number.POSITIVE_INFINITY;
+      let maxX = Number.NEGATIVE_INFINITY;
+      let maxY = Number.NEGATIVE_INFINITY;
+      for (const ent of stagingSprites) {
+        const b = getEntityBounds(ent, activeTarget, activeScene.entities);
+        minX = Math.min(minX, b.x);
+        minY = Math.min(minY, b.y);
+        maxX = Math.max(maxX, b.x + b.width);
+        maxY = Math.max(maxY, b.y + b.height);
+      }
+      const pad = 12;
+      const sx = worldToSceneCanvasX(minX - pad);
+      const sy = worldToSceneCanvasY(minY - pad);
+      const sw = scaleSceneDimension(maxX - minX + pad * 2);
+      const sh = scaleSceneDimension(maxY - minY + pad * 2);
+      context.save();
+      context.fillStyle = "rgba(250,179,135,0.08)";
+      context.fillRect(sx, sy, sw, sh);
+      context.setLineDash([8, 5]);
+      context.strokeStyle = "rgba(250,179,135,0.55)";
+      context.lineWidth = 1.5;
+      context.strokeRect(sx + 0.5, sy + 0.5, sw, sh);
+      context.setLineDash([]);
+      context.fillStyle = "rgba(250,179,135,0.98)";
+      context.font = "10px monospace";
+      context.textAlign = "left";
+      context.fillText("Prateleira / staging (autoria)", sx + 6, Math.min(sy + 14, sy + sh - 4));
+      context.restore();
+    }
+
     if (editorMode === "collision" && sceneMousePos) {
       const collisionMap = activeScene.collision_map;
       const tileWidth = collisionMap?.tile_width ?? GRID_SNAP_SIZE;
@@ -2305,22 +3079,22 @@ export default function ViewportPanel({
       const tileX = Math.floor(sceneMousePos.x / tileWidth);
       const tileY = Math.floor(sceneMousePos.y / tileHeight);
       if (tileX >= 0 && tileX < mapWidth && tileY >= 0 && tileY < mapHeight) {
-        const screenX = Math.round(tileX * tileWidth * viewportZoom);
-        const screenY = Math.round(tileY * tileHeight * viewportZoom);
+        const screenX = worldToSceneCanvasX(tileX * tileWidth);
+        const screenY = worldToSceneCanvasY(tileY * tileHeight);
         context.fillStyle = "rgba(243,139,168,0.55)";
         context.fillRect(
           screenX,
           screenY,
-          Math.round(tileWidth * viewportZoom),
-          Math.round(tileHeight * viewportZoom)
+          scaleSceneDimension(tileWidth),
+          scaleSceneDimension(tileHeight)
         );
         context.strokeStyle = "#f38ba8";
         context.lineWidth = 1;
         context.strokeRect(
           screenX + 0.5,
           screenY + 0.5,
-          Math.round(tileWidth * viewportZoom),
-          Math.round(tileHeight * viewportZoom)
+          scaleSceneDimension(tileWidth),
+          scaleSceneDimension(tileHeight)
         );
       }
     }
@@ -2330,12 +3104,12 @@ export default function ViewportPanel({
       const tileSize = tilePaintSize > 0 ? tilePaintSize : 8;
       const target = resolveTilemapTarget(sceneMousePos.x, sceneMousePos.y);
       if (target) {
-        const bounds = getEntityBounds(target.entity, activeTarget);
+        const bounds = getEntityBounds(target.entity, activeTarget, activeScene.entities);
         const ghostX = bounds.x + target.col * tileSize;
         const ghostY = bounds.y + target.row * tileSize;
-        const screenX = Math.round(ghostX * viewportZoom);
-        const screenY = Math.round(ghostY * viewportZoom);
-        const screenSize = Math.round(tileSize * viewportZoom);
+        const screenX = worldToSceneCanvasX(ghostX);
+        const screenY = worldToSceneCanvasY(ghostY);
+        const screenSize = scaleSceneDimension(tileSize);
         const isEraser = tilePaintTool === "eraser";
         context.save();
         context.globalAlpha = isEraser ? 0.18 : 0.3;
@@ -2356,7 +3130,7 @@ export default function ViewportPanel({
           ? activeScene.entities.find((e) => e.entity_id === activeTilemapId)
           : null;
         if (target) {
-          const bounds = getEntityBounds(target, activeTarget);
+          const bounds = getEntityBounds(target, activeTarget, activeScene.entities);
           const minC = Math.min(tilePaintRectPreview.c0, tilePaintRectPreview.c1);
           const maxC = Math.max(tilePaintRectPreview.c0, tilePaintRectPreview.c1);
           const minR = Math.min(tilePaintRectPreview.r0, tilePaintRectPreview.r1);
@@ -2369,20 +3143,20 @@ export default function ViewportPanel({
           context.globalAlpha = 0.2;
           context.fillStyle = "#f9e2af";
           context.fillRect(
-            Math.round(x0 * viewportZoom),
-            Math.round(y0 * viewportZoom),
-            Math.round(w * viewportZoom),
-            Math.round(h * viewportZoom)
+            worldToSceneCanvasX(x0),
+            worldToSceneCanvasY(y0),
+            scaleSceneDimension(w),
+            scaleSceneDimension(h)
           );
           context.globalAlpha = 0.9;
           context.strokeStyle = "#f9e2af";
           context.lineWidth = 1.5;
           context.setLineDash([5, 3]);
           context.strokeRect(
-            Math.round(x0 * viewportZoom) + 0.5,
-            Math.round(y0 * viewportZoom) + 0.5,
-            Math.round(w * viewportZoom),
-            Math.round(h * viewportZoom)
+            worldToSceneCanvasX(x0) + 0.5,
+            worldToSceneCanvasY(y0) + 0.5,
+            scaleSceneDimension(w),
+            scaleSceneDimension(h)
           );
           context.setLineDash([]);
           context.restore();
@@ -2399,10 +3173,10 @@ export default function ViewportPanel({
       let ghostY = gridSnap ? snapToGrid(sceneMousePos.y, GRID_SNAP_SIZE) : Math.round(sceneMousePos.y);
       ghostX = snapPositionToGuides(ghostX, "vertical");
       ghostY = snapPositionToGuides(ghostY, "horizontal");
-      const screenX = Math.round(ghostX * viewportZoom);
-      const screenY = Math.round(ghostY * viewportZoom);
-      const screenWidth = Math.round(ghostSize.frameWidth * viewportZoom);
-      const screenHeight = Math.round(ghostSize.frameHeight * viewportZoom);
+      const screenX = worldToSceneCanvasX(ghostX);
+      const screenY = worldToSceneCanvasY(ghostY);
+      const screenWidth = scaleSceneDimension(ghostSize.frameWidth);
+      const screenHeight = scaleSceneDimension(ghostSize.frameHeight);
       context.save();
       context.globalAlpha = 0.25;
       context.fillStyle = "#89b4fa";
@@ -2426,12 +3200,12 @@ export default function ViewportPanel({
         drawVerticalLine(guide.position, guideColor, isActiveGuide ? 2 : 1);
         context.fillStyle = guideColor;
         context.font = "10px monospace";
-        context.fillText(`${guide.position}px`, Math.round(guide.position * viewportZoom) + 4, 12);
+        context.fillText(`${guide.position}px`, worldToSceneCanvasX(guide.position) + 4, 12);
       } else {
         drawHorizontalLine(guide.position, guideColor, isActiveGuide ? 2 : 1);
         context.fillStyle = guideColor;
         context.font = "10px monospace";
-        context.fillText(`${guide.position}px`, 6, Math.round(guide.position * viewportZoom) - 4);
+        context.fillText(`${guide.position}px`, 6, worldToSceneCanvasY(guide.position) - 4);
       }
     });
   }, [
@@ -2449,18 +3223,27 @@ export default function ViewportPanel({
     sceneScaleHeight,
     sceneScaleWidth,
     sceneWidth,
+    sceneWorldMinX,
+    sceneWorldMinY,
     selectedEntityId,
+    denseStackPicker,
+    denseStackSpotlight,
+    denseStackPreviewEntityId,
+    soloEntityId,
     showCollisionOverlay,
     showGrid,
     showSprites,
     showSubGrid,
     showTilemaps,
     snapPositionToGuides,
+    scaleSceneDimension,
     viewportZoom,
     tilePaintTool,
     tilePaintSize,
     tilePaintRectPreview,
     activeTilemapId,
+    worldToSceneCanvasX,
+    worldToSceneCanvasY,
   ]);
 
   useEffect(() => {
@@ -2496,8 +3279,11 @@ export default function ViewportPanel({
     topContext.fillStyle = "#6c7086";
     topContext.font = "10px monospace";
 
-    for (let pixel = 0; pixel <= sceneWidth; pixel += rulerStep) {
-      const x = Math.round(pixel * viewportZoom) + 0.5;
+    const rulerStartX = Math.floor(sceneWorldMinX / rulerStep) * rulerStep;
+    const rulerStartY = Math.floor(sceneWorldMinY / rulerStep) * rulerStep;
+
+    for (let pixel = rulerStartX; pixel <= sceneWorldMaxX; pixel += rulerStep) {
+      const x = worldToSceneCanvasX(pixel) + 0.5;
       topContext.strokeStyle = "rgba(108,112,134,0.85)";
       topContext.beginPath();
       topContext.moveTo(x, SCENE_RULER_SIZE);
@@ -2513,8 +3299,8 @@ export default function ViewportPanel({
     leftContext.fillStyle = "#6c7086";
     leftContext.font = "10px monospace";
 
-    for (let pixel = 0; pixel <= sceneHeight; pixel += rulerStep) {
-      const y = Math.round(pixel * viewportZoom) + 0.5;
+    for (let pixel = rulerStartY; pixel <= sceneWorldMaxY; pixel += rulerStep) {
+      const y = worldToSceneCanvasY(pixel) + 0.5;
       leftContext.strokeStyle = "rgba(108,112,134,0.85)";
       leftContext.beginPath();
       leftContext.moveTo(SCENE_RULER_SIZE, y);
@@ -2525,11 +3311,11 @@ export default function ViewportPanel({
 
     guideMarkers.forEach((guide) => {
       if (guide.orientation === "vertical") {
-        const x = Math.round(guide.position * viewportZoom);
+        const x = worldToSceneCanvasX(guide.position);
         topContext.fillStyle = "#89dceb";
         topContext.fillRect(Math.max(0, x - 1), 0, 3, SCENE_RULER_SIZE);
       } else {
-        const y = Math.round(guide.position * viewportZoom);
+        const y = worldToSceneCanvasY(guide.position);
         leftContext.fillStyle = "#89dceb";
         leftContext.fillRect(0, Math.max(0, y - 1), SCENE_RULER_SIZE, 3);
       }
@@ -2543,7 +3329,13 @@ export default function ViewportPanel({
     sceneScaleHeight,
     sceneScaleWidth,
     sceneWidth,
+    sceneWorldMaxX,
+    sceneWorldMaxY,
+    sceneWorldMinX,
+    sceneWorldMinY,
     viewportZoom,
+    worldToSceneCanvasX,
+    worldToSceneCanvasY,
   ]);
 
   useEffect(() => {
@@ -2577,13 +3369,15 @@ export default function ViewportPanel({
     const scaleX = sceneWidth / Math.max(rect.width, 1);
     const scaleY = sceneHeight / Math.max(rect.height, 1);
     return {
-      mx: (event.clientX - rect.left) * scaleX,
-      my: (event.clientY - rect.top) * scaleY,
+      mx: sceneWorldMinX + (event.clientX - rect.left) * scaleX,
+      my: sceneWorldMinY + (event.clientY - rect.top) * scaleY,
     };
   }
 
-  function hitTest(mx: number, my: number) {
-    if (!activeScene) return null;
+  function collectEntitiesUnderPoint(mx: number, my: number): Entity[] {
+    if (!activeScene) {
+      return [];
+    }
 
     const hiddenByLayer = new Set<string>();
     for (const sceneLayer of activeScene.layers ?? []) {
@@ -2594,6 +3388,7 @@ export default function ViewportPanel({
       }
     }
 
+    const stack: Entity[] = [];
     for (let index = activeScene.entities.length - 1; index >= 0; index -= 1) {
       const entity = activeScene.entities[index];
       if (hiddenByLayer.has(entity.entity_id)) {
@@ -2605,18 +3400,22 @@ export default function ViewportPanel({
       if (entity.components?.sprite && !showSprites) {
         continue;
       }
-      const bounds = getEntityBounds(entity, activeTarget);
+      const bounds = getEntityBounds(entity, activeTarget, activeScene.entities);
       if (
         mx >= bounds.x &&
         mx <= bounds.x + bounds.width &&
         my >= bounds.y &&
         my <= bounds.y + bounds.height
       ) {
-        return entity;
+        stack.push(entity);
       }
     }
 
-    return null;
+    return stack;
+  }
+
+  function hitTest(mx: number, my: number) {
+    return collectEntitiesUnderPoint(mx, my)[0] ?? null;
   }
 
   function hitTestResizeHandle(mx: number, my: number): { entity: Entity; handle: ResizeHandle } | null {
@@ -2629,7 +3428,7 @@ export default function ViewportPanel({
       return null;
     }
 
-    const bounds = getEntityBounds(entity, activeTarget);
+    const bounds = getEntityBounds(entity, activeTarget, activeScene.entities);
     if (!bounds.resizable) {
       return null;
     }
@@ -2673,7 +3472,7 @@ export default function ViewportPanel({
       }
     }
     for (const entity of candidates) {
-      const bounds = getEntityBounds(entity, activeTarget);
+      const bounds = getEntityBounds(entity, activeTarget, activeScene.entities);
       if (
         mx < bounds.x ||
         my < bounds.y ||
@@ -2864,9 +3663,26 @@ export default function ViewportPanel({
       return;
     }
 
+    if (editorMode === "select" && event.shiftKey && event.button === 0) {
+      const pickStack = collectEntitiesUnderPoint(mx, my);
+      if (pickStack.length > 1) {
+        setDenseStackPicker({ clientX: event.clientX, clientY: event.clientY, stack: pickStack });
+        setDenseStackFilter("all");
+        setDenseStackSpotlight(false);
+        setDenseStackPickerIndex(0);
+        setDenseStackPreviewEntityId(pickStack[0]?.entity_id ?? null);
+        densePickRef.current = null;
+        logMessage(
+          "info",
+          `[Viewport] ${pickStack.length} entidades sobrepostas — escolha na lista (Shift+clique).`
+        );
+        return;
+      }
+    }
+
     const resizeTarget = hitTestResizeHandle(mx, my);
     if (resizeTarget) {
-      const bounds = getEntityBounds(resizeTarget.entity, activeTarget);
+      const bounds = getEntityBounds(resizeTarget.entity, activeTarget, activeScene.entities);
       setSelectedEntityId(resizeTarget.entity.entity_id);
       dragRef.current = {
         mode: "resize",
@@ -2889,13 +3705,37 @@ export default function ViewportPanel({
       return;
     }
 
-    const entity = hitTest(mx, my);
-    if (!entity) {
+    const stack = collectEntitiesUnderPoint(mx, my);
+    if (stack.length === 0) {
+      densePickRef.current = null;
       setSelectedEntityId(null);
       return;
     }
 
-    const bounds = getEntityBounds(entity, activeTarget);
+    let entity: Entity;
+    if (event.altKey && stack.length > 1) {
+      const prev = densePickRef.current;
+      const nearby =
+        prev &&
+        Math.abs(prev.mx - mx) < 4 &&
+        Math.abs(prev.my - my) < 4 &&
+        prev.ids.length === stack.length &&
+        prev.ids.every((id, i) => stack[i]?.entity_id === id);
+      const nextIdx = nearby ? (prev.idx + 1) % stack.length : 0;
+      densePickRef.current = { mx, my, ids: stack.map((e) => e.entity_id), idx: nextIdx };
+      entity = stack[nextIdx]!;
+      setSelectedEntityId(entity.entity_id);
+      logMessage(
+        "info",
+        `[Viewport] Cena densa: ${nextIdx + 1}/${stack.length} — ${getEntityDisplayName(entity)} (Alt+clique para proxima sobreposicao).`
+      );
+      return;
+    }
+
+    densePickRef.current = null;
+    entity = stack[0]!;
+
+    const bounds = getEntityBounds(entity, activeTarget, activeScene.entities);
     setSelectedEntityId(entity.entity_id);
     dragRef.current = {
       mode: "move",
@@ -3256,11 +4096,52 @@ export default function ViewportPanel({
 
     const { mx, my } = canvasCoords(event);
     const guideHit = getGuideHit(mx, my);
-    if (!guideHit) {
+    if (guideHit) {
+      setSceneGuides((current) => current.filter((guide) => guide.id !== guideHit.id));
       return;
     }
 
-    setSceneGuides((current) => current.filter((guide) => guide.id !== guideHit.id));
+    const picked = hitTest(mx, my);
+    if (picked?.components?.tilemap) {
+      setActiveWorkspace("scene");
+      setActiveViewportTab("scene");
+      setSelectedEntityId(picked.entity_id);
+      setActiveTilemapId(picked.entity_id);
+      setEditorMode("paint");
+      const brush = buildTilemapAuthoringBrush(picked);
+      if (brush) {
+        setActiveBrush(brush);
+      }
+      logMessage(
+        "info",
+        `[Viewport] Duplo-clique: tilemap '${getEntityDisplayName(picked)}' — modo pintura; paleta embutida no topo do stage (ou Tools > Paleta Contextual).`
+      );
+      return;
+    }
+
+    const logic = picked?.components?.logic;
+    const graphInline = logic?.graph?.trim() ?? "";
+    const hasInlineGraph = graphInline.length > 2;
+    if (picked && (logic?.graph_ref || hasInlineGraph)) {
+      setActiveWorkspace("logic");
+      setActiveViewportTab("logic");
+      setSelectedEntityId(picked.entity_id);
+      logMessage(
+        "info",
+        `[Viewport] Duplo-clique: abrindo Logic Workspace para '${getEntityDisplayName(picked)}' (graph_ref ou grafo embutido).`
+      );
+      return;
+    }
+
+    if (picked?.components?.sprite) {
+      setActiveWorkspace("artstudio");
+      setActiveViewportTab("artstudio");
+      setSelectedEntityId(picked.entity_id);
+      logMessage(
+        "info",
+        `[Viewport] Duplo-clique: abrindo Art Workspace para '${getEntityDisplayName(picked)}'.`
+      );
+    }
   }
 
   function handleRulerMouseDown(
@@ -3308,15 +4189,187 @@ export default function ViewportPanel({
   );
   const overlayFps = frameTimingRef.current.fps > 0 ? frameTimingRef.current.fps.toFixed(1) : "0.0";
   const overlaySpriteCount = overlayHwStatus?.sprite_count ?? activeScene?.entities.length ?? 0;
+  const sceneAssetHealth = (() => {
+    if (!activeScene || !activeProjectDir) {
+      return summarizeSceneAssetHealth([]);
+    }
+    const referenced = new Set<string>();
+    const fallbackByPath = new Map<string, boolean>();
+    for (const entity of activeScene.entities) {
+      const spriteAsset = entity.components?.sprite?.asset?.trim();
+      if (spriteAsset) referenced.add(spriteAsset);
+      const tilemap = entity.components?.tilemap;
+      const tilemapAsset = tilemap?.tileset?.trim();
+      if (tilemapAsset) {
+        referenced.add(tilemapAsset);
+        if (!hasCanonicalTilemapCells(tilemap)) {
+          fallbackByPath.set(tilemapAsset, true);
+        }
+      }
+    }
+    for (const layer of activeScene.background_layers) {
+      const layerAsset = (layer.tilemap ?? layer.tileset)?.trim();
+      if (layerAsset) referenced.add(layerAsset);
+    }
+    const refs = [];
+    for (const relativePath of referenced) {
+      const absolutePath = resolveProjectAssetPath(activeProjectDir, relativePath);
+      const entry = assetCacheRef.current.get(absolutePath);
+      refs.push({
+        relativePath,
+        loadStatus: toAssetVisualLoadStatus(entry),
+        legacyFallback: fallbackByPath.get(relativePath) ?? false,
+        legacyFallbackDetail: DEFAULT_TILEMAP_LEGACY_FALLBACK_DETAIL,
+      });
+    }
+    return summarizeSceneAssetHealth(refs);
+  })();
 
   const isSnes = activeTarget === "snes";
   const targetLabel = isSnes ? "SNES" : "Mega Drive";
   const resolution = isSnes ? "256x224" : "320x224";
   const spriteLimit = isSnes ? 128 : 80;
   const bgLayerLimit = 4;
+  const overlayInteractionBusy =
+    activeViewportTab === "scene" && (isDragging || isPanning || Boolean(paintDragRef.current) || Boolean(eraseDragRef.current) || Boolean(collisionDragRef.current));
+  const overlayAuthoringMode =
+    activeViewportTab === "scene" &&
+    (editorMode === "paint" || editorMode === "erase" || editorMode === "collision");
+  const showNonCriticalSceneOverlays = !gameViewLight && !overlayInteractionBusy && !overlayAuthoringMode;
+  const showWorldAuthoringOverlay = showWorldAuthoringStrip && !overlayInteractionBusy;
 
   return (
     <div className="flex h-full flex-col bg-[#1e1e2e]">
+      {denseStackPicker && activeViewportTab === "scene" ? (
+        <div
+          data-testid="viewport-dense-stack-picker"
+          className="fixed z-[120] max-h-[min(70vh,420px)] w-[min(22rem,calc(100vw-1.5rem))] overflow-y-auto rounded-xl border border-[#89b4fa]/40 bg-[#11111b]/98 p-2 text-[11px] shadow-2xl backdrop-blur-md"
+          style={{
+            left: Math.min(
+              typeof window !== "undefined" ? window.innerWidth - 280 : 12,
+              Math.max(12, denseStackPicker.clientX - 8)
+            ),
+            top: Math.min(
+              typeof window !== "undefined" ? window.innerHeight - 120 : 12,
+              denseStackPicker.clientY + 12
+            ),
+          }}
+        >
+          <p className="border-b border-[#313244] px-1 pb-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#89b4fa]">
+            Entidades sob o ponteiro ({denseStackFiltered.length}/{denseStackPicker.stack.length})
+          </p>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {(
+              [
+                ["all", "Todas"],
+                ["sprite", "Sprites"],
+                ["tilemap", "Tilemaps"],
+                ["camera", "Cameras"],
+                ["imported", "Importadas"],
+              ] as const
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => {
+                  setDenseStackFilter(value);
+                  setDenseStackPickerIndex(0);
+                }}
+                className={`rounded border px-1.5 py-0.5 text-[9px] transition-colors ${
+                  denseStackFilter === value
+                    ? "border-[#89b4fa]/70 bg-[#89b4fa]/15 text-[#89b4fa]"
+                    : "border-[#313244] bg-[#181825] text-[#a6adc8] hover:border-[#89b4fa]/50"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => setDenseStackSpotlight((current) => !current)}
+              className={`rounded border px-1.5 py-0.5 text-[9px] transition-colors ${
+                denseStackSpotlight
+                  ? "border-[#f9e2af]/70 bg-[#f9e2af]/15 text-[#f9e2af]"
+                  : "border-[#313244] bg-[#181825] text-[#a6adc8] hover:border-[#f9e2af]/50"
+              }`}
+              title="Escurece o resto da cena para focar o preview atual da pilha."
+            >
+              Spotlight {denseStackSpotlight ? "ON" : "OFF"}
+            </button>
+          </div>
+          <ul className="mt-2 flex flex-col gap-1" role="listbox" aria-label="Entidades sob o ponteiro">
+            {denseStackFiltered.map((ent, index) => {
+              const ctx = resolveImportedEntityContext(ent);
+              const isActive = index === denseStackPickerIndex;
+              return (
+                <li key={ent.entity_id}>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={isActive}
+                    onMouseEnter={() => {
+                      setDenseStackPickerIndex(index);
+                      setDenseStackPreviewEntityId(ent.entity_id);
+                    }}
+                    onFocus={() => {
+                      setDenseStackPickerIndex(index);
+                      setDenseStackPreviewEntityId(ent.entity_id);
+                    }}
+                    onClick={() => {
+                      selectDenseStackEntity(ent);
+                    }}
+                    className={`flex w-full flex-col items-start rounded border px-2 py-1.5 text-left transition-colors ${
+                      isActive
+                        ? "border-[#89b4fa] bg-[#1e1e2e] ring-1 ring-[#89b4fa]/35"
+                        : "border-[#313244] bg-[#181825] hover:border-[#89b4fa]/60 hover:bg-[#1e1e2e]"
+                    }`}
+                  >
+                    <span className="font-semibold text-[#cdd6f4]">
+                      {index + 1}. {getEntityDisplayName(ent)}
+                    </span>
+                    <span className="font-mono text-[9px] text-[#6c7086]">{ent.entity_id}</span>
+                    {ctx.badgeLabel ? (
+                      <span className="mt-0.5 rounded bg-[#313244]/80 px-1.5 py-0.5 text-[8px] text-[#a6adc8]">
+                        {ctx.badgeLabel}
+                      </span>
+                    ) : null}
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          {denseStackFiltered.length === 0 ? (
+            <p className="mt-2 rounded border border-[#313244] bg-[#181825] px-2 py-1 text-[9px] text-[#6c7086]">
+              Nenhuma entidade para o filtro atual. Troque o filtro para ver a pilha completa.
+            </p>
+          ) : null}
+          {denseStackFiltered[denseStackPickerIndex] ? (
+            <div className="mt-2 flex flex-wrap gap-1 border-t border-[#313244] px-1 pt-2">
+              <button
+                type="button"
+                data-testid="viewport-dense-stack-focus-preview"
+                onClick={() => selectDenseStackEntity(denseStackFiltered[denseStackPickerIndex], { focus: true })}
+                className="rounded border border-[#89b4fa]/40 bg-[#89b4fa]/10 px-2 py-1 text-[9px] font-semibold text-[#89b4fa] hover:bg-[#89b4fa]/20"
+              >
+                Selecionar + foco
+              </button>
+              <button
+                type="button"
+                data-testid="viewport-dense-stack-solo-preview"
+                onClick={() =>
+                  selectDenseStackEntity(denseStackFiltered[denseStackPickerIndex], { focus: true, solo: true })
+                }
+                className="rounded border border-[#f9e2af]/40 bg-[#f9e2af]/10 px-2 py-1 text-[9px] font-semibold text-[#f9e2af] hover:bg-[#f9e2af]/20"
+              >
+                Isolar alvo
+              </button>
+            </div>
+          ) : null}
+          <p className="mt-2 border-t border-[#313244] px-1 pt-2 text-[9px] text-[#6c7086]">
+            ↑/↓ navega · Enter seleciona · Esc fecha · Alt+clique ainda cicla sem abrir a lista.
+          </p>
+        </div>
+      ) : null}
       {(showWorkspaceTabs || activeViewportTab === "game") && (
         <div className="flex items-center justify-between border-b border-[#313244] bg-[#181825] pr-3">
           {showWorkspaceTabs ? (
@@ -3494,6 +4547,74 @@ export default function ViewportPanel({
               <div className="mx-1 w-px bg-[#313244] self-stretch" />
               <button
                 type="button"
+                onClick={focusSelectedEntity}
+                disabled={!selectedEntity}
+                className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[10px] font-semibold text-[#cdd6f4] transition-colors hover:border-[#89b4fa] hover:text-[#89b4fa] disabled:cursor-not-allowed disabled:opacity-40"
+                title="Centralizar entidade selecionada"
+              >
+                Foco
+              </button>
+              <button
+                type="button"
+                data-testid="viewport-entity-solo-toggle"
+                onClick={toggleSelectedEntitySolo}
+                disabled={!selectedEntity}
+                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                  selectedEntity && soloEntityId === selectedEntity.entity_id
+                    ? "border-[#f9e2af] bg-[#f9e2af]/15 text-[#f9e2af]"
+                    : "border-[#313244] bg-[#11111b] text-[#a6adc8] hover:border-[#f9e2af] hover:text-[#f9e2af]"
+                }`}
+                title="Isolar visualmente a entidade selecionada sem alterar a cena"
+              >
+                Solo
+              </button>
+              <button
+                type="button"
+                onClick={centerViewportOnCamera}
+                className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[10px] font-semibold text-[#f9e2af] transition-colors hover:border-[#f9e2af]"
+                title="Centralizar camera/janela MD visivel"
+              >
+                Camera
+              </button>
+              <button
+                type="button"
+                onClick={resetSceneView}
+                className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[10px] font-semibold text-[#a6adc8] transition-colors hover:text-[#cdd6f4]"
+                title="Resetar vista (zoom + pan)"
+              >
+                Reset View
+              </button>
+              <button
+                type="button"
+                onClick={() => setClampViewportToWorld((current) => !current)}
+                className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
+                  clampViewportToWorld
+                    ? "border-[#a6e3a1]/40 bg-[#a6e3a1]/10 text-[#a6e3a1]"
+                    : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
+                }`}
+                title="Travar pan nos limites do mundo"
+              >
+                Clamp
+              </button>
+              {sceneDensityStatus.shouldSuggestStaging ? (
+                <button
+                  type="button"
+                  onClick={applyAuthoringStagingLayout}
+                  className="rounded border border-[#fab387]/35 bg-[#fab387]/10 px-2 py-1 text-[10px] font-semibold text-[#fab387] transition-colors hover:bg-[#fab387]/20"
+                  title="Distribuir cena densa em staging de autoria sem perder auditabilidade"
+                >
+                  Normalizar Cena
+                </button>
+              ) : null}
+              <span
+                className="hidden max-w-[10rem] truncate text-[9px] text-[#6c7086] xl:inline"
+                title="Shift+clique na pilha abre lista; Alt+clique cicla"
+              >
+                Shift=lista · Alt=ciclo
+              </span>
+              <div className="mx-1 w-px bg-[#313244] self-stretch" />
+              <button
+                type="button"
                 onClick={() => setViewportZoom(Math.max(ZOOM_MIN, viewportZoom - ZOOM_STEP))}
                 className="rounded border border-[#313244] bg-[#11111b] px-1.5 py-0.5 text-[10px] font-semibold text-[#6c7086] transition-colors hover:text-[#a6adc8] disabled:opacity-30"
                 disabled={viewportZoom <= ZOOM_MIN}
@@ -3521,7 +4642,12 @@ export default function ViewportPanel({
             </div>
 
             {/* Área de canvas com overflow para mais espaço */}
-            <div className="relative flex-1 overflow-hidden min-h-0">
+            <div
+              ref={sceneStageRef}
+              className="relative flex-1 overflow-hidden min-h-0"
+              onWheel={handleSceneStageWheel}
+              data-testid="viewport-scene-stage"
+            >
             {showSgdkOnboarding && (
               <div
                 data-testid="viewport-sgdk-onboarding"
@@ -3610,6 +4736,74 @@ export default function ViewportPanel({
                 }}
                 title="Clique para selecionar. Arraste para mover. Espaço+arraste ou botão do meio: pan. Ctrl+Scroll: zoom."
               />
+              {editorMode === "paint" && activeBrush?.kind === "tile" && activeScene ? (
+                <div
+                  data-testid="viewport-tile-paint-flow-strip"
+                  className="absolute z-[6] flex max-h-[min(42vh,340px)] w-full max-w-full flex-col overflow-hidden rounded border border-[#313244] bg-[#11111b]/96 shadow-lg"
+                  style={{
+                    left: sceneChromeOffset,
+                    top: sceneChromeOffset,
+                    width: sceneScaleWidth,
+                  }}
+                >
+                  <div className="flex flex-wrap items-center gap-2 border-b border-[#313244] px-2 py-1 text-[10px] text-[#cdd6f4]">
+                    <span className="font-semibold uppercase tracking-wide text-[#89b4fa]">Fluxo tilemap</span>
+                    <span className="text-[#a6adc8]">
+                      Alvo:{" "}
+                      <span className="font-mono text-[#f9e2af]">
+                        {creatorWorkflow.tilemapTargetLabel}
+                      </span>
+                    </span>
+                    <span className="text-[#6c7086]">|</span>
+                    <span>
+                      <span className="font-semibold text-[#cba6f7]">{creatorWorkflow.tileBrushLabel}</span>
+                    </span>
+                    <span className="text-[#6c7086]">|</span>
+                    <span className="text-[#94e2d5]">Shift: lista pilha · Alt: ciclo · Duplo-clique tilemap</span>
+                    <div className="ml-auto flex flex-wrap gap-1">
+                      <button
+                        type="button"
+                        data-testid="viewport-tile-flow-focus-target"
+                        onClick={focusActiveTilemapEntity}
+                        disabled={!activeTilemapEntityForPalette}
+                        className="rounded border border-[#94e2d5]/35 bg-[#94e2d5]/10 px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#94e2d5] transition-colors hover:bg-[#94e2d5]/20 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Focar alvo
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="viewport-tile-flow-exit-paint"
+                        onClick={() => {
+                          setEditorMode("select");
+                          setActiveTilemapId(null);
+                          logMessage("info", "[Viewport] Fluxo tilemap encerrado; retorno para selecao.");
+                        }}
+                        className="rounded border border-[#313244] bg-[#181825] px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#cdd6f4] transition-colors hover:border-[#89b4fa]"
+                      >
+                        Voltar select
+                      </button>
+                    </div>
+                  </div>
+                  {activeProjectDir && activeTilemapEntityForPalette?.components.tilemap ? (
+                    <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden bg-[#0b0f19]">
+                      <TilePalette
+                        tilesetAbsolutePath={resolveProjectAssetPath(
+                          activeProjectDir,
+                          activeTilemapEntityForPalette.components.tilemap.tileset
+                        )}
+                        tilesetRelativePath={activeTilemapEntityForPalette.components.tilemap.tileset}
+                        tileSize={tilePaintSize > 0 ? tilePaintSize : 8}
+                        tilemapEntityId={activeTilemapEntityForPalette.entity_id}
+                      />
+                    </div>
+                  ) : (
+                    <p className="pointer-events-none px-2 py-2 text-[9px] text-[#6c7086]">
+                      Selecione um tilemap na cena ou abra um projeto para carregar a paleta embutida (fluxo central
+                      sem depender só de Tools).
+                    </p>
+                  )}
+                </div>
+              ) : null}
               <canvas
                 ref={sceneOverlayCanvasRef}
                 data-testid="viewport-scene-overlay"
@@ -3643,8 +4837,20 @@ export default function ViewportPanel({
                               ? "grab"
                               : "crosshair",
                 }}
-                title="Cena WYSIWYG. Arraste para editar; espaco+arraste ou botao do meio para pan; duplo clique em uma guia para remover."
+                title="Cena: selecionar/arrastar. Espaco+arraste ou botao do meio = pan. Shift+clique com pilha = lista. Alt+clique = proxima sobreposicao. Duplo-clique: guia remove | tilemap pintura | grafo abre Logic. Ctrl+scroll = zoom."
               />
+              {!gameViewLight && (
+                <div
+                  className="pointer-events-none absolute border-2 border-[#f9e2af]/80 bg-[#f9e2af]/8"
+                  style={{
+                    left: cameraWindowRect.left,
+                    top: cameraWindowRect.top,
+                    width: cameraWindowRect.width,
+                    height: cameraWindowRect.height,
+                  }}
+                  title="Janela visivel Mega Drive (320x224)"
+                />
+              )}
               {shortcutHint && (
                 <div
                   key={shortcutHint.key}
@@ -3659,16 +4865,276 @@ export default function ViewportPanel({
                   </kbd>
                 </div>
               )}
+              {showNonCriticalSceneOverlays ? (
+                <div className="pointer-events-none absolute left-2 top-2 z-20 rounded border border-[#313244] bg-[#11111b]/85 px-2 py-1 text-[9px] text-[#a6adc8]">
+                  <p className="font-semibold text-[#cdd6f4]">
+                    Janela MD visivel: {sceneFrameWidth}x{sceneFrameHeight}
+                  </p>
+                  <p>
+                    Mundo: {sceneWidth}x{sceneHeight} px
+                  </p>
+                  <p>
+                    Tilemap:{" "}
+                    {sceneWorld.tilemapWorldSize
+                      ? `${sceneWorld.tilemapWorldSize.width}x${sceneWorld.tilemapWorldSize.height}`
+                      : "n/a"}
+                  </p>
+                  <p>
+                    Collision:{" "}
+                    {sceneWorld.collisionWorldSize
+                      ? `${sceneWorld.collisionWorldSize.width}x${sceneWorld.collisionWorldSize.height}`
+                      : "n/a"}
+                  </p>
+                </div>
+              ) : null}
+              {overlayInteractionBusy || overlayAuthoringMode ? (
+                <div
+                  data-testid="viewport-overlay-lane-status"
+                  className="pointer-events-none absolute left-2 top-2 z-20 rounded border border-[#313244] bg-[#11111b]/88 px-2 py-1 text-[9px] font-semibold text-[#94e2d5]"
+                >
+                  Overlays essenciais
+                </div>
+              ) : null}
+              {selectedEntity ? (
+                <div
+                  data-testid="viewport-creator-command-dock"
+                  className="absolute right-2 top-2 z-20 max-w-[340px] rounded border border-[#313244] bg-[#11111b]/94 px-3 py-2 text-[9px] text-[#a6adc8] shadow-lg"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#89b4fa]">
+                        Mesa de composicao
+                      </p>
+                      <p className="truncate text-[11px] font-semibold text-[#cdd6f4]">
+                        {creatorWorkflow.selectedLabel}
+                      </p>
+                      <p className="truncate font-mono text-[#6c7086]">
+                        {selectedEntity.entity_id} · {creatorWorkflow.selectedBoundsLabel}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 flex-col gap-1">
+                      <button
+                        type="button"
+                        onClick={focusSelectedEntity}
+                        className="rounded border border-[#313244] bg-[#181825] px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#cdd6f4] transition-colors hover:border-[#89b4fa] hover:text-[#89b4fa]"
+                      >
+                        Centralizar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={toggleSelectedEntitySolo}
+                        className={`rounded border px-2 py-1 text-[8px] font-semibold uppercase tracking-wide transition-colors ${
+                          soloEntityId === selectedEntity.entity_id
+                            ? "border-[#f9e2af] bg-[#f9e2af]/15 text-[#f9e2af]"
+                            : "border-[#313244] bg-[#181825] text-[#cdd6f4] hover:border-[#f9e2af] hover:text-[#f9e2af]"
+                        }`}
+                      >
+                        {soloEntityId === selectedEntity.entity_id ? "Solo on" : "Solo"}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-2 grid gap-1 rounded border border-[#313244] bg-[#0b1020]/70 p-2 font-mono text-[8px] text-[#94a3b8]">
+                    <span>{creatorWorkflow.frameLabel}</span>
+                    <span>{creatorWorkflow.worldLabel}</span>
+                    <span>{creatorWorkflow.cameraLabel}</span>
+                    <span className="font-sans text-[9px] text-[#6c7086]">
+                      {creatorWorkflow.editableRegionLabel}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {selectedImportedContext?.roleLabel ? (
+                      <span className="rounded-full border border-[#89b4fa]/35 bg-[#89b4fa]/10 px-2 py-0.5 text-[#89b4fa]">
+                        {selectedImportedContext.roleLabel}
+                      </span>
+                    ) : null}
+                    {selectedImportedContext?.positionLabel ? (
+                      <span
+                        className={`rounded-full border px-2 py-0.5 ${
+                          selectedImportedContext.positionMode === "donor"
+                            ? "border-[#a6e3a1]/40 bg-[#a6e3a1]/10 text-[#a6e3a1]"
+                            : selectedImportedContext.positionMode === "staging"
+                              ? "border-[#fab387]/40 bg-[#fab387]/10 text-[#fab387]"
+                              : "border-[#89b4fa]/40 bg-[#89b4fa]/10 text-[#89b4fa]"
+                        }`}
+                        title={selectedImportedContext.positionDetail ?? undefined}
+                      >
+                        {selectedImportedContext.positionLabel}
+                      </span>
+                    ) : null}
+                    {selectedEntitySourceRefs.length > 0 ? (
+                      <span className="rounded-full border border-[#f9e2af]/35 bg-[#f9e2af]/10 px-2 py-0.5 text-[#f9e2af]">
+                        {creatorWorkflow.sourceCountLabel}
+                      </span>
+                    ) : null}
+                    <span className="rounded-full border border-[#313244] bg-[#181825] px-2 py-0.5 text-[#a6adc8]">
+                      {creatorWorkflow.soloLabel}
+                    </span>
+                  </div>
+                  {selectedImportedContext?.summary ? (
+                    <p className="mt-2 leading-relaxed text-[#94a3b8]">
+                      {selectedImportedContext.summary}
+                    </p>
+                  ) : null}
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {selectedEntity.components.tilemap ? (
+                      <button
+                        type="button"
+                        onClick={openSelectedEntityTilemap}
+                        className="rounded border border-[#94e2d5]/35 bg-[#94e2d5]/10 px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#94e2d5] transition-colors hover:bg-[#94e2d5]/20"
+                      >
+                        Tilemap
+                      </button>
+                    ) : null}
+                    {entityHasLogicWorkspace(selectedEntity) ? (
+                      <button
+                        type="button"
+                        onClick={openSelectedEntityLogic}
+                        className="rounded border border-[#89b4fa]/35 bg-[#89b4fa]/10 px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20"
+                      >
+                        Objeto -&gt; Logica
+                      </button>
+                    ) : null}
+                    {selectedEntity.components.sprite ? (
+                      <button
+                        type="button"
+                        onClick={openSelectedEntityArt}
+                        className="rounded border border-[#a6e3a1]/35 bg-[#a6e3a1]/10 px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/20"
+                      >
+                        Objeto -&gt; Art
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => void openSelectedEntityPrimarySource()}
+                      disabled={selectedEntitySourceRefs.length === 0}
+                      className="rounded border border-[#f9e2af]/35 bg-[#f9e2af]/10 px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/20 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Fonte real
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+              {showWorldAuthoringOverlay ? (
+                <div
+                  data-testid="viewport-world-authoring-strip"
+                  className="pointer-events-auto absolute left-2 top-24 z-20 max-w-[280px] rounded border border-[#fab387]/45 bg-[#11111b]/95 px-2 py-2 text-[9px] text-[#cdd6f4] shadow-lg"
+                >
+                  <p className="font-semibold text-[#fab387]">Autoria: mundo vs janela MD</p>
+                  <p className="mt-1 leading-relaxed text-[#a6adc8]">
+                    O mundo util ou o mapa de colisao excede a area visivel ({sceneFrameWidth}×{sceneFrameHeight}).
+                    Use as acoes abaixo em vez de depender apenas de avisos no log de hardware.
+                  </p>
+                  {collisionAuthoringWarnings.length > 0 ? (
+                    <ul className="mt-1 list-inside list-disc font-mono text-[8px] text-[#94e2d5]/90">
+                      {collisionAuthoringWarnings.map((w) => (
+                        <li key={w} className="truncate" title={w}>
+                          {w}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    <button
+                      type="button"
+                      onClick={() => void focusCollisionMapCenter()}
+                      className="rounded border border-[#89b4fa]/40 bg-[#89b4fa]/15 px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#89b4fa] hover:bg-[#89b4fa]/25"
+                    >
+                      Centro colisao
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditorMode("collision");
+                        logMessage("info", "[Viewport] Modo colisao ativado (ferramenta de autoria).");
+                      }}
+                      className="rounded border border-[#f38ba8]/40 bg-[#f38ba8]/12 px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#f38ba8] hover:bg-[#f38ba8]/22"
+                    >
+                      Modo colisao
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setClampViewportToWorld(false);
+                        logMessage("info", "[Viewport] Clamp ao mundo desligado — pan livre para navegar fora da moldura.");
+                      }}
+                      className="rounded border border-[#a6e3a1]/35 bg-[#a6e3a1]/10 px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#a6e3a1] hover:bg-[#a6e3a1]/18"
+                    >
+                      Pan livre
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setClampViewportToWorld(true);
+                        logMessage("info", "[Viewport] Clamp ao mundo ligado.");
+                      }}
+                      className="rounded border border-[#313244] bg-[#181825] px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#cdd6f4] hover:border-[#45475a]"
+                    >
+                      Clamp on
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+              {showNonCriticalSceneOverlays ? (
+                <div className="absolute bottom-2 right-2 z-20 rounded border border-[#313244] bg-[#11111b]/92 p-2 text-[9px] text-[#a6adc8] shadow-lg">
+                <p className="mb-1 font-semibold uppercase tracking-[0.14em] text-[#94a3b8]">Navegador do Mundo</p>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    const target = event.currentTarget.getBoundingClientRect();
+                    const ratioX = (event.clientX - target.left) / Math.max(target.width, 1);
+                    const ratioY = (event.clientY - target.top) / Math.max(target.height, 1);
+                    const worldX = sceneWorld.bounds.minX + ratioX * sceneWorld.worldWidth;
+                    const worldY = sceneWorld.bounds.minY + ratioY * sceneWorld.worldHeight;
+                    focusWorldPoint(worldX, worldY);
+                  }}
+                  className="relative block h-24 w-36 rounded border border-[#313244] bg-[#0b1020]"
+                  title="Mapa de navegacao: clique para centrar o pan no ponto. Moldura azul = area visivel no stage; amarelo = janela MD/camera quando definida."
+                >
+                  <div className="absolute inset-0 border border-[#6c7086]/40" />
+                  {visibleWorldRect ? (
+                    <div
+                      className="absolute border border-[#89b4fa] bg-[#89b4fa]/20"
+                      style={{
+                        left: `${((visibleWorldRect.x - sceneWorld.bounds.minX) / Math.max(sceneWorld.worldWidth, 1)) * 100}%`,
+                        top: `${((visibleWorldRect.y - sceneWorld.bounds.minY) / Math.max(sceneWorld.worldHeight, 1)) * 100}%`,
+                        width: `${(visibleWorldRect.width / Math.max(sceneWorld.worldWidth, 1)) * 100}%`,
+                        height: `${(visibleWorldRect.height / Math.max(sceneWorld.worldHeight, 1)) * 100}%`,
+                      }}
+                    />
+                  ) : null}
+                  {sceneWorld.camera ? (
+                    <div
+                      className="absolute border border-[#f9e2af]/80"
+                      style={{
+                        left: `${((sceneWorld.camera.x - sceneWorld.bounds.minX) / Math.max(sceneWorld.worldWidth, 1)) * 100}%`,
+                        top: `${((sceneWorld.camera.y - sceneWorld.bounds.minY) / Math.max(sceneWorld.worldHeight, 1)) * 100}%`,
+                        width: `${(sceneWorld.camera.width / Math.max(sceneWorld.worldWidth, 1)) * 100}%`,
+                        height: `${(sceneWorld.camera.height / Math.max(sceneWorld.worldHeight, 1)) * 100}%`,
+                      }}
+                    />
+                  ) : null}
+                </button>
+                <p className="mt-1 text-[#6c7086]">
+                  Denso: {sceneDensityStatus.spriteCount} sprites | max stack {sceneDensityStatus.maxStack}
+                </p>
+                </div>
+              ) : null}
             </div>
             {activeScene &&
               activeScene.entities.length === 0 &&
               activeScene.background_layers.length === 0 && (
-                <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 max-w-[320px] rounded border border-[#89b4fa]/30 bg-[#89b4fa]/8 px-3 py-2 text-center text-[10px] leading-relaxed text-[#89b4fa]">
-                  Cena vazia. Use <span className="font-semibold">Hierarchy &gt; Sprite Inicial</span> ou{" "}
-                  <span className="font-semibold">Tools &gt; Asset Browser &gt; Instanciar</span> para
-                  comecar a montar a cena.
+                <div className="absolute left-1/2 top-1/2 z-10 max-w-[340px] -translate-x-1/2 -translate-y-1/2 rounded border border-[#89b4fa]/30 bg-[#89b4fa]/8 px-3 py-2 text-center text-[10px] leading-relaxed text-[#89b4fa]">
+                  <p className="font-semibold">
+                    {sceneContext.isImportedProject ? "Cena importada sem alvo visual pronto" : "Cena vazia"}
+                  </p>
+                  <p className="mt-1">
+                    Use <span className="font-semibold">Hierarchy &gt; Sprite Inicial</span> ou{" "}
+                    <span className="font-semibold">Tools &gt; Asset Browser &gt; Instanciar</span>{" "}
+                    para comecar a montar a cena.
+                  </p>
                 </div>
               )}
+            {activeScene && sceneAssetHealth.referenced > 0 && <SceneAssetHealthBadge health={sceneAssetHealth} />}
             <div className="absolute bottom-0 left-0 right-0 shrink-0 border-t border-[#313244] bg-[#181825]/90 px-2 py-1">
             <span className="select-none text-[10px] text-[#6c7086]">
               {activeScene
@@ -3892,7 +5358,13 @@ export default function ViewportPanel({
               const selectedEntity = activeScene?.entities.find(
                 (entity) => entity.entity_id === selectedEntityId
               );
-              return selectedEntity ? getEntityDisplayName(selectedEntity) : selectedEntityId;
+              if (!selectedEntity) {
+                return selectedEntityId;
+              }
+              const importedContext = resolveImportedEntityContext(selectedEntity);
+              return importedContext.roleLabel
+                ? `${getEntityDisplayName(selectedEntity)} · ${importedContext.roleLabel}`
+                : getEntityDisplayName(selectedEntity);
             })()}
           </span>
         )}

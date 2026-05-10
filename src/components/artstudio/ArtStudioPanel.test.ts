@@ -444,7 +444,7 @@ describe("ArtStudioPanel import flow", () => {
     expect(container.textContent).toContain("Sprite simples");
 
     await act(async () => {
-      findButton(container, "Trazer para assets/sprites").click();
+      findButton(container, /Trazer para assets\/sprites|Regerar asset canonico/).click();
       await flush();
       await flush();
     });
@@ -534,7 +534,7 @@ describe("ArtStudioPanel import flow", () => {
     });
 
     await act(async () => {
-      findButton(container, "Trazer para assets/sprites").click();
+      findButton(container, /Trazer para assets\/sprites|Regerar asset canonico/).click();
       await flush();
       await flush();
     });
@@ -545,6 +545,56 @@ describe("ArtStudioPanel import flow", () => {
     expect(container.querySelector("[data-testid='artstudio-apply-plan']")?.textContent).toContain(
       "Pronto para atualizar hero_existing na cena atual."
     );
+  });
+
+  it("keeps a visible Scene bridge when editing a selected sprite entity", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        selectedEntityId: "hero_existing",
+        activeWorkspace: "artstudio",
+        activeViewportTab: "artstudio",
+        activeScene: {
+          scene_id: "main",
+          display_name: "Main",
+          entities: [
+            {
+              entity_id: "hero_existing",
+              display_name: "Hero Existing",
+              prefab: null,
+              transform: { x: 32, y: 48 },
+              components: {
+                sprite: {
+                  asset: "assets/sprites/hero_old.png",
+                  frame_width: 32,
+                  frame_height: 32,
+                  palette_slot: 0,
+                  priority: "foreground",
+                  animations: {},
+                },
+              },
+            },
+          ],
+          background_layers: [],
+          palettes: [],
+        },
+      });
+      await flush();
+    });
+
+    const bridge = container.querySelector("[data-testid='artstudio-scene-context-bridge']");
+    expect(bridge?.textContent).toContain("Hero Existing");
+    expect(bridge?.textContent).toContain("assets/sprites/hero_old.png");
+
+    await act(async () => {
+      findButton(container, "Voltar para Cena").click();
+      await flush();
+    });
+
+    const state = useEditorStore.getState();
+    expect(state.activeWorkspace).toBe("scene");
+    expect(state.activeViewportTab).toBe("scene");
+    expect(state.selectedEntityId).toBe("hero_existing");
+    expect(state.editorMode).toBe("select");
   });
 
   it("surfaces backend processing errors with actionable feedback", async () => {
@@ -581,5 +631,55 @@ describe("ArtStudioPanel import flow", () => {
 
     expect(container.textContent).toContain("Falha ao decodificar imagem");
     expect(findButton(container, /Aplicar/).disabled).toBe(true);
+  });
+
+  it("returns from no-sprite context to Scene preserving tilemap authoring focus", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        selectedEntityId: "tilemap_focus",
+        activeScene: {
+          scene_id: "main",
+          display_name: "Main",
+          entities: [
+            {
+              entity_id: "tilemap_focus",
+              display_name: "Tilemap Focus",
+              prefab: null,
+              transform: { x: 0, y: 0 },
+              components: {
+                tilemap: {
+                  tileset: "assets/tilesets/stage.png",
+                  map_width: 40,
+                  map_height: 28,
+                  scroll_x: 0,
+                  scroll_y: 0,
+                  cells: new Array(40 * 28).fill(1),
+                },
+              },
+            },
+          ],
+          background_layers: [],
+          palettes: [],
+        },
+      });
+      await flush();
+    });
+
+    const notice = container.querySelector("[data-testid='artstudio-no-sprite-context']");
+    expect(notice).not.toBeNull();
+
+    await act(async () => {
+      findButton(container, "Ir para Cena").click();
+      await flush();
+    });
+
+    const state = useEditorStore.getState();
+    expect(state.activeWorkspace).toBe("scene");
+    expect(state.activeViewportTab).toBe("scene");
+    expect(state.selectedEntityId).toBe("tilemap_focus");
+    expect(state.editorMode).toBe("paint");
+    expect(state.activeTilemapId).toBe("tilemap_focus");
+    expect(state.activeBrush?.kind).toBe("tile");
+    expect(state.activeBrush?.assetPath).toBe("assets/tilesets/stage.png");
   });
 });

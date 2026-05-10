@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   buildMultiTarget: vi.fn(),
   persistActiveScene: vi.fn(),
   listenToProjectAssetChanges: vi.fn(),
+  openProjectSourcePath: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
@@ -44,6 +45,10 @@ vi.mock("../../core/scenePersistence", () => ({
 
 vi.mock("../../core/ipc/projectWatcherService", () => ({
   listenToProjectAssetChanges: mocks.listenToProjectAssetChanges,
+}));
+
+vi.mock("../../core/ipc/projectService", () => ({
+  openProjectSourcePath: mocks.openProjectSourcePath,
 }));
 
 vi.mock("../../core/ipc/buildService", () => ({
@@ -162,6 +167,11 @@ describe("ToolsPanel Asset Browser", () => {
         absolute_path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy/assets/sprites/onboarding_player.ppm",
         kind: "image",
       },
+      {
+        relative_path: "assets/tilesets/stage_tiles.ppm",
+        absolute_path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy/assets/tilesets/stage_tiles.ppm",
+        kind: "image",
+      },
     ]);
     mocks.readLegacyProjectFile.mockResolvedValue({
       relative_path: "src/main.c",
@@ -264,6 +274,11 @@ describe("ToolsPanel Asset Browser", () => {
     });
     mocks.persistActiveScene.mockResolvedValue(true);
     mocks.listenToProjectAssetChanges.mockResolvedValue(vi.fn());
+    mocks.openProjectSourcePath.mockResolvedValue({
+      ok: true,
+      message: "opened",
+      absolute_path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy/src/player.c",
+    });
 
     container = document.createElement("div");
     document.body.appendChild(container);
@@ -362,6 +377,12 @@ describe("ToolsPanel Asset Browser", () => {
     expect(
       container.querySelector("[data-testid='asset-browser-reference-summary']")?.textContent
     ).toContain("Ainda nao referenciado pela cena ativa.");
+    expect(
+      container.querySelector("[data-testid='asset-browser-instantiation-notice']")?.textContent
+    ).toContain("Instanciar como sprite");
+    expect(
+      container.querySelector("[data-testid='asset-browser-instantiation-notice']")?.textContent
+    ).toContain("padrao-sprite-sem-sinais-de-tilemap");
   });
 
   it("shows the current scene references for the selected asset", async () => {
@@ -382,6 +403,18 @@ describe("ToolsPanel Asset Browser", () => {
                   frame_height: 16,
                   palette_slot: 0,
                   animations: {},
+                },
+                logic: {
+                  imported_semantics: {
+                    source: "sgdk_phase_d",
+                    entity_role: "player_avatar",
+                    gameplay_class: "platformer_horizontal_scroller_signals",
+                    confidence: "medium",
+                    role_reason: "sprite primario com leitura JOY_* no agregado",
+                    driver_functions: ["player_tick"],
+                    source_paths: ["src/player.c"],
+                    audit_flags: ["primary_sprite"],
+                  },
                 },
               },
             },
@@ -426,6 +459,202 @@ describe("ToolsPanel Asset Browser", () => {
     expect(
       container.querySelector("[data-testid='asset-browser-reference-summary']")?.textContent
     ).toContain("Sprite · hero");
+    expect(
+      container.querySelector("[data-testid='asset-browser-reference-summary']")?.textContent
+    ).toContain("Jogador");
+    expect(
+      container.querySelector("[data-testid='asset-browser-reference-summary']")?.textContent
+    ).toContain("Guia");
+  });
+
+  it("opens the referenced tilemap directly in the painting workflow from the asset browser", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeViewportTab: "scene",
+        activeScene: {
+          scene_id: "main",
+          display_name: "Main",
+          entities: [
+            {
+              entity_id: "stage_tilemap",
+              display_name: "Stage Tilemap",
+              prefab: null,
+              transform: { x: 0, y: 0 },
+              components: {
+                tilemap: {
+                  tileset: "assets/tilesets/stage_tiles.ppm",
+                  map_width: 64,
+                  map_height: 32,
+                  scroll_x: 0,
+                  scroll_y: 0,
+                  cells: [],
+                },
+                logic: {
+                  imported_semantics: {
+                    source: "sgdk_phase_d",
+                    entity_role: "support_actor",
+                    confidence: "medium",
+                    role_reason: "stage world",
+                    driver_functions: ["stage_tick"],
+                    source_paths: ["src/stage.c"],
+                    audit_flags: ["position:staging_layout"],
+                  },
+                },
+              },
+            },
+          ],
+          background_layers: [],
+          palettes: [],
+        },
+      });
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, "Avancado OFF").click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Experimental/).click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Asset Browser/).click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      const fileBtn = Array.from(container.querySelectorAll("button")).find((element) =>
+        element.textContent?.includes("stage_tiles.ppm")
+      );
+      fileBtn?.click();
+      await flush();
+      await flush();
+    });
+
+    expect(
+      container.querySelector("[data-testid='asset-browser-reference-summary']")?.textContent
+    ).toContain("Staging");
+
+    await act(async () => {
+      (
+        container.querySelector(
+          "[data-testid='asset-browser-open-authoring-target']"
+        ) as HTMLButtonElement
+      ).click();
+      await flush();
+      await flush();
+    });
+
+    const state = useEditorStore.getState();
+    expect(state.activeViewportTab).toBe("scene");
+    expect(state.editorMode).toBe("paint");
+    expect(state.activeTilemapId).toBe("stage_tilemap");
+    expect(state.activeBrush?.kind).toBe("tile");
+    expect(state.activeBrush?.assetPath).toBe("assets/tilesets/stage_tiles.ppm");
+  });
+
+  it("opens logic and source directly from the referenced asset card", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeViewportTab: "scene",
+        activeScene: {
+          scene_id: "main",
+          display_name: "Main",
+          entities: [
+            {
+              entity_id: "hero",
+              prefab: null,
+              transform: { x: 16, y: 24 },
+              components: {
+                sprite: {
+                  asset: "assets/sprites/onboarding_player.ppm",
+                  frame_width: 16,
+                  frame_height: 16,
+                  palette_slot: 0,
+                  animations: {},
+                },
+                logic: {
+                  graph_ref: "graphs/hero_logic.json",
+                  imported_semantics: {
+                    source: "sgdk_phase_d",
+                    entity_role: "player_avatar",
+                    gameplay_class: "platformer_horizontal_scroller_signals",
+                    confidence: "medium",
+                    role_reason: "sprite primario com leitura JOY_* no agregado",
+                    driver_functions: ["player_tick"],
+                    source_paths: ["src/player.c"],
+                    audit_flags: ["primary_sprite"],
+                  },
+                  external_source_refs: ["src/player_debug.c"],
+                },
+              },
+            },
+          ],
+          background_layers: [],
+          palettes: [],
+        },
+      });
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, "Avancado OFF").click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Experimental/).click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Asset Browser/).click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      const fileBtn = Array.from(container.querySelectorAll("button")).find((element) =>
+        element.textContent?.includes("onboarding_player.ppm")
+      );
+      fileBtn?.click();
+      await flush();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='asset-browser-open-source']")).toBeTruthy();
+
+    await act(async () => {
+      (
+        container.querySelector(
+          "[data-testid='asset-browser-open-authoring-target']"
+        ) as HTMLButtonElement
+      ).click();
+      await flush();
+      await flush();
+    });
+
+    expect(useEditorStore.getState().activeViewportTab).toBe("logic");
+
+    await act(async () => {
+      (container.querySelector("[data-testid='asset-browser-open-source']") as HTMLButtonElement).click();
+      await flush();
+    });
+
+    expect(mocks.openProjectSourcePath).toHaveBeenCalledWith(
+      "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      "src/player.c"
+    );
   });
 
   it("shows the adopted SGDK host summary in runtime setup", async () => {

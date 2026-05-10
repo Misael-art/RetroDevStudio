@@ -90,6 +90,8 @@ describe("HierarchyPanel", () => {
       emulPaused: false,
       consoleEntries: [],
       consoleVisible: true,
+      projectSourceKind: "imported_sgdk",
+      projectLegacyIndex: null,
     });
 
     mocks.listScenes.mockResolvedValue([
@@ -156,6 +158,9 @@ describe("HierarchyPanel", () => {
   });
 
   it("creates a starter sprite from the empty-scene CTA", async () => {
+    expect(container.querySelector("[data-testid='hierarchy-scene-notice']")?.textContent).toContain(
+      "Cena importada"
+    );
     expect(container.querySelector("[data-testid='hierarchy-scene-summary']")?.textContent).toContain(
       "Cenas: 1"
     );
@@ -212,5 +217,155 @@ describe("HierarchyPanel", () => {
     });
 
     expect(container.textContent).toContain('Nenhum item corresponde a "inexistente" na cena ativa.');
+  });
+
+  it("surfaces imported roles and keeps the guide focus on the authored entry entity", async () => {
+    await act(async () => {
+      const scene = {
+        scene_id: "main",
+        display_name: "Main",
+        entities: [
+          {
+            entity_id: "stage_tilemap",
+            display_name: "Stage Tilemap",
+            prefab: null,
+            transform: { x: 0, y: 0 },
+            components: {
+              tilemap: {
+                tileset: "assets/tilesets/stage.png",
+                map_width: 4,
+                map_height: 4,
+                scroll_x: 0,
+                scroll_y: 0,
+                cells: [],
+              },
+            },
+          },
+          {
+            entity_id: "hero",
+            display_name: "Hero",
+            prefab: null,
+            transform: { x: 16, y: 24 },
+            components: {
+              sprite: {
+                asset: "assets/sprites/hero.png",
+                frame_width: 16,
+                frame_height: 16,
+                palette_slot: 0,
+                animations: {},
+              },
+              logic: {
+                imported_semantics: {
+                  source: "sgdk_phase_d",
+                  entity_role: "player_avatar",
+                  gameplay_class: "platformer_horizontal_scroller_signals",
+                  confidence: "medium",
+                  role_reason: "sprite primario com leitura JOY_* no agregado",
+                  driver_functions: ["player_tick"],
+                  source_paths: ["src/player.c"],
+                  audit_flags: ["primary_sprite"],
+                },
+              },
+            },
+          },
+        ],
+        background_layers: [],
+        layers: [],
+        palettes: [],
+      };
+
+      useEditorStore.setState({
+        activeScene: scene,
+        activeSceneSource: scene,
+      });
+      await flush();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='hierarchy-imported-role-hero']")?.textContent).toBe(
+      "Jogador"
+    );
+    expect(container.textContent).toContain("Entrada");
+    expect(container.textContent).toContain("Hero");
+  });
+
+  it("opens the tilemap row editing CTA as a painting workflow and exposes staging provenance", async () => {
+    await act(async () => {
+      const scene = {
+        scene_id: "main",
+        display_name: "Main",
+        entities: [
+          {
+            entity_id: "stage_tilemap",
+            display_name: "Stage Tilemap",
+            prefab: null,
+            transform: { x: 0, y: 0 },
+            components: {
+              tilemap: {
+                tileset: "assets/tilesets/stage.png",
+                map_width: 8,
+                map_height: 4,
+                scroll_x: 0,
+                scroll_y: 0,
+                cells: [],
+              },
+              logic: {
+                imported_semantics: {
+                  source: "sgdk_phase_d",
+                  entity_role: "support_actor",
+                  confidence: "medium",
+                  role_reason: "stage helper",
+                  audit_flags: ["position:staging_layout"],
+                },
+              },
+            },
+          },
+        ],
+        background_layers: [],
+        layers: [],
+        palettes: [],
+      };
+
+      useEditorStore.setState({
+        activeScene: scene,
+        activeSceneSource: scene,
+        selectedEntityId: null,
+      });
+      await flush();
+      await flush();
+    });
+
+    const tilemapRow = Array.from(container.querySelectorAll("li")).find((element) =>
+      element.textContent?.includes("Stage Tilemap")
+    );
+
+    if (!(tilemapRow instanceof HTMLLIElement)) {
+      throw new Error("Tilemap row not found");
+    }
+
+    expect(tilemapRow.textContent).toContain("Staging");
+
+    const editButton = Array.from(tilemapRow.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Editar"
+    );
+
+    if (!(editButton instanceof HTMLButtonElement)) {
+      throw new Error("Tilemap edit button not found");
+    }
+
+    await act(async () => {
+      editButton.click();
+      await flush();
+    });
+
+    const state = useEditorStore.getState();
+    expect(state.activeViewportTab).toBe("scene");
+    expect(state.editorMode).toBe("paint");
+    expect(state.activeTilemapId).toBe("stage_tilemap");
+    expect(state.activeBrush).toMatchObject({
+      kind: "tile",
+      assetPath: "assets/tilesets/stage.png",
+      tileIndex: 1,
+    });
   });
 });

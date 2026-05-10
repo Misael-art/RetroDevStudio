@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import Panel from "../common/Panel";
+import SceneWorkspaceNotice from "../common/SceneWorkspaceNotice";
 import { useEditorStore } from "../../core/store/editorStore";
 import {
   createScene,
@@ -15,6 +16,16 @@ import {
   pickDefaultSpriteAsset,
 } from "../../core/editorEntityFactory";
 import { getEntityDisplayName } from "../../core/entityDisplay";
+import { resolveImportedEntityContext } from "../../core/importedEntityContext";
+import {
+  getWorkspaceEntityRole,
+  resolveSceneWorkspaceContext,
+} from "../../core/sceneWorkspaceContext";
+import {
+  buildTilemapAuthoringBrush,
+  resolvePrimaryAuthoringSurface,
+} from "../../core/entityAuthoring";
+import type { Entity } from "../../core/ipc/sceneService";
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -44,14 +55,6 @@ interface EntityGroup {
   entities: Array<{ entity_id: string; display_name?: string | null; prefab?: string | null; components?: { sprite?: unknown; collision?: unknown; tilemap?: { map_width?: number; map_height?: number; cells?: number[] } | undefined; camera?: unknown; audio?: unknown } }>;
 }
 
-function entityType(entity: { components?: { sprite?: unknown; collision?: unknown; tilemap?: unknown; camera?: unknown; audio?: unknown } }): string {
-  if (entity.components?.camera) return "camera";
-  if (entity.components?.tilemap) return "tilemap";
-  if (entity.components?.sprite) return "sprite";
-  if (entity.components?.audio && !entity.components?.sprite) return "audio";
-  return "object";
-}
-
 function tilemapPaintInfo(entity: {
   components?: { tilemap?: { map_width?: number; map_height?: number; cells?: number[] } };
 }): { filled: number; total: number } | null {
@@ -65,6 +68,32 @@ function tilemapPaintInfo(entity: {
   return { filled, total };
 }
 
+function importedRoleBadgeClass(roleLabel: string | null): string {
+  switch (roleLabel) {
+    case "Jogador":
+      return "border-[#89b4fa]/35 bg-[#89b4fa]/10 text-[#89b4fa]";
+    case "Inimigo":
+    case "Lutador":
+    case "Projetil":
+      return "border-[#f38ba8]/35 bg-[#f38ba8]/10 text-[#f38ba8]";
+    case "Apoio":
+    case "HUD / UI":
+      return "border-[#a6e3a1]/35 bg-[#a6e3a1]/10 text-[#a6e3a1]";
+    default:
+      return "border-[#313244] bg-[#11111b] text-[#cdd6f4]";
+  }
+}
+
+function importedEntityKindChip(entityType: string, roleLabel: string | null): string | null {
+  if (entityType === "tilemap") return "Tilemap";
+  if (entityType === "camera") return "Entrada";
+  if (roleLabel === "Jogador") return "Driver";
+  if (roleLabel === "Inimigo" || roleLabel === "Lutador" || roleLabel === "Projetil") return "Actor";
+  if (roleLabel === "Apoio") return "Suporte";
+  if (roleLabel === "HUD / UI") return "HUD";
+  return null;
+}
+
 export default function HierarchyPanel() {
   const {
     selectedEntityId, setSelectedEntityId,
@@ -73,8 +102,15 @@ export default function HierarchyPanel() {
     activeScenePath,
     activeScene, setActiveScene,
     setActiveScenePath,
+    projectSourceKind,
+    projectLegacyIndex,
     addEntity, removeEntity,
     logMessage,
+    setActiveWorkspace,
+    setActiveViewportTab,
+    setActiveTilemapId,
+    setEditorMode,
+    setActiveBrush,
   } = useEditorStore();
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newName, setNewName] = useState("Entity");
@@ -196,6 +232,16 @@ export default function HierarchyPanel() {
     )
     : bgLayers;
   const filteredItemCount = filteredEntities.length + filteredLayers.length;
+  const sceneContext = useMemo(
+    () =>
+      resolveSceneWorkspaceContext({
+        scene: activeScene,
+        scenePath: activeScenePath,
+        projectSourceKind,
+        projectLegacyIndex,
+      }),
+    [activeScene, activeScenePath, projectLegacyIndex, projectSourceKind]
+  );
 
   const entityGroups: EntityGroup[] = useMemo(() => {
     const grouped = new Map<string, EntityGroup>();
@@ -203,7 +249,7 @@ export default function HierarchyPanel() {
       grouped.set(type, { type, entities: [] });
     }
     for (const entity of filteredEntities) {
-      const type = entityType(entity);
+      const type = getWorkspaceEntityRole(entity);
       const group = grouped.get(type);
       if (group) {
         group.entities.push(entity);
@@ -216,6 +262,50 @@ export default function HierarchyPanel() {
       (group) => group.entities.length > 0
     );
   }, [filteredEntities]);
+
+  function openEntityAuthoringSurface(entity: Entity) {
+    const surface = resolvePrimaryAuthoringSurface(entity);
+    setSelectedEntityId(entity.entity_id);
+
+    if (surface === "tilemap") {
+      setActiveWorkspace("scene");
+      setActiveViewportTab("scene");
+      setActiveTilemapId(entity.entity_id);
+      setEditorMode("paint");
+      const brush = buildTilemapAuthoringBrush(entity);
+      if (brush) {
+        setActiveBrush(brush);
+      }
+      logMessage(
+        "info",
+        `[Hierarchy] Tilemap '${getEntityDisplayName(entity)}' aberto para pintura no viewport.`
+      );
+      return;
+    }
+
+    if (surface === "logic") {
+      setActiveWorkspace("logic");
+      setActiveViewportTab("logic");
+      logMessage(
+        "info",
+        `[Hierarchy] Navegando para Logic Workspace: ${getEntityDisplayName(entity)}.`
+      );
+      return;
+    }
+
+    if (surface === "artstudio") {
+      setActiveWorkspace("artstudio");
+      setActiveViewportTab("artstudio");
+      logMessage(
+        "info",
+        `[Hierarchy] Navegando para Art Workspace: ${getEntityDisplayName(entity)}.`
+      );
+      return;
+    }
+
+    setActiveWorkspace("scene");
+    setActiveViewportTab("scene");
+  }
 
   function toggleGroup(type: string) {
     setCollapsedGroups((prev) => {
@@ -461,6 +551,25 @@ export default function HierarchyPanel() {
           <p className="mt-1 truncate text-[10px] text-[#45475a]">
             {activeSceneSelectValue || "Nenhuma cena ativa"}
           </p>
+          {activeProjectDir ? (
+            <div className="mt-2">
+              <SceneWorkspaceNotice
+                context={sceneContext}
+                testId="hierarchy-scene-notice"
+                actions={
+                  sceneContext.focusEntityId ? (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedEntityId(sceneContext.focusEntityId)}
+                      className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[10px] font-semibold text-[#cdd6f4] transition-colors hover:border-[#89b4fa] hover:text-[#89b4fa]"
+                    >
+                      Focar entidade guia
+                    </button>
+                  ) : undefined
+                }
+              />
+            </div>
+          ) : null}
           <div
             data-testid="hierarchy-scene-summary"
             className="mt-2 flex flex-wrap gap-1.5 text-[9px] text-[#7f849c]"
@@ -545,36 +654,131 @@ export default function HierarchyPanel() {
                   <ul>
                     {group.entities.map((entity) => {
                       const isSelected = entity.entity_id === selectedEntityId;
-                      const type = entityType(entity);
+                      const type = getWorkspaceEntityRole(entity);
+                      const isFocusEntity = entity.entity_id === sceneContext.focusEntityId;
+                      const importedContext = resolveImportedEntityContext(entity);
+                      const importedKindChip = importedEntityKindChip(type, importedContext.roleLabel);
                       return (
                         <li
                           key={entity.entity_id}
                           onClick={() => setSelectedEntityId(entity.entity_id)}
+                          onDoubleClick={() => openEntityAuthoringSurface(entity as Entity)}
                           className={[
                             "flex items-center gap-2 pl-6 pr-3 py-1 cursor-pointer select-none text-xs transition-colors",
                             isSelected
                               ? "bg-[#313244] text-[#cdd6f4]"
-                              : "text-[#a6adc8] hover:bg-[#24243a] hover:text-[#cdd6f4]",
+                              : isFocusEntity
+                                ? "bg-[#89b4fa]/8 text-[#dbeafe] hover:bg-[#89b4fa]/12"
+                                : "text-[#a6adc8] hover:bg-[#24243a] hover:text-[#cdd6f4]",
                           ].join(" ")}
                         >
                           <span className="text-[#7f849c]">{TYPE_ICON[type] ?? "○"}</span>
                           <span title={entity.prefab ? `Prefab: ${entity.prefab}` : entity.entity_id}>
                             {getEntityDisplayName(entity)}
                           </span>
+                          {importedContext.roleLabel ? (
+                            <span
+                              data-testid={`hierarchy-imported-role-${entity.entity_id}`}
+                              className={`rounded-full border px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.12em] ${importedRoleBadgeClass(importedContext.roleLabel)}`}
+                              title={importedContext.detail ?? importedContext.summary ?? undefined}
+                            >
+                              {importedContext.roleLabel}
+                            </span>
+                          ) : null}
+                          {importedContext.confidenceLabel ? (
+                            <span
+                              className="rounded-full border border-[#313244] bg-[#11111b] px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.12em] text-[#94a3b8]"
+                              title={importedContext.reason ?? undefined}
+                            >
+                              {importedContext.confidenceLabel}
+                            </span>
+                          ) : null}
+                          {importedKindChip ? (
+                            <span className="rounded-full border border-[#313244] bg-[#11111b] px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.12em] text-[#cdd6f4]">
+                              {importedKindChip}
+                            </span>
+                          ) : null}
+                          {importedContext.positionLabel ? (
+                            <span
+                              className={`rounded-full border px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.12em] ${
+                                importedContext.positionMode === "donor"
+                                  ? "border-[#a6e3a1]/35 bg-[#a6e3a1]/10 text-[#a6e3a1]"
+                                  : importedContext.positionMode === "staging"
+                                    ? "border-[#fab387]/35 bg-[#fab387]/10 text-[#fab387]"
+                                    : "border-[#89b4fa]/35 bg-[#89b4fa]/10 text-[#89b4fa]"
+                              }`}
+                              title={importedContext.positionDetail ?? undefined}
+                            >
+                              {importedContext.positionMode === "donor"
+                                ? "Pos real"
+                                : importedContext.positionMode === "staging"
+                                  ? "Staging"
+                                  : "Pos inferida"}
+                            </span>
+                          ) : null}
+                          {isFocusEntity ? (
+                            <span className="rounded-full border border-[#89b4fa]/35 bg-[#89b4fa]/10 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.14em] text-[#89b4fa]">
+                              Entrada
+                            </span>
+                          ) : null}
                           {type === "tilemap" && (() => {
                             const info = tilemapPaintInfo(entity);
                             if (!info || info.total === 0) return null;
                             return (
-                              <span
-                                className={`ml-auto rounded px-1 py-0.5 font-mono text-[9px] ${
-                                  info.filled > 0
-                                    ? "bg-[#a6e3a1]/10 text-[#a6e3a1]"
-                                    : "text-[#45475a]"
-                                }`}
-                                title={`${info.filled}/${info.total} células pintadas`}
-                              >
-                                {info.filled}/{info.total}
-                              </span>
+                              <div className="ml-auto flex items-center gap-1">
+                                {importedContext.auditFlags.length > 0 ? (
+                                  <span
+                                    className="rounded px-1 py-0.5 text-[8px] font-semibold uppercase tracking-[0.14em] text-[#89b4fa]"
+                                    title={`Audit flags: ${importedContext.auditFlags.join(", ")}`}
+                                  >
+                                    {importedContext.auditFlags.length} flags
+                                  </span>
+                                ) : null}
+                                {info.filled === 0 ? (
+                                  <span
+                                    className="rounded px-1 py-0.5 text-[8px] font-semibold uppercase tracking-[0.14em] text-[#fab387]"
+                                    title="Tilemap em fallback visual ate materializar cells[]"
+                                  >
+                                    fallback
+                                  </span>
+                                ) : null}
+                                <span
+                                  className={`rounded px-1 py-0.5 font-mono text-[9px] ${
+                                    info.filled > 0
+                                      ? "bg-[#a6e3a1]/10 text-[#a6e3a1]"
+                                      : "text-[#45475a]"
+                                  }`}
+                                  title={`${info.filled}/${info.total} células pintadas`}
+                                >
+                                  {info.filled}/{info.total}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setSelectedEntityId(entity.entity_id);
+                                    setActiveWorkspace("scene");
+                                    setActiveViewportTab("scene");
+                                    setActiveTilemapId(entity.entity_id);
+                                    setEditorMode("paint");
+                                    const full = entities.find((e) => e.entity_id === entity.entity_id) as
+                                      | Entity
+                                      | undefined;
+                                    const brush = full ? buildTilemapAuthoringBrush(full) : null;
+                                    if (brush) {
+                                      setActiveBrush(brush);
+                                    }
+                                    logMessage(
+                                      "info",
+                                      `[Hierarchy] Tilemap '${getEntityDisplayName(entity)}' focado para pintura (brush tile #${brush?.tileIndex ?? 1}). Paleta: Tools > Paleta Contextual.`
+                                    );
+                                  }}
+                                  className="rounded border border-[#94e2d5]/35 bg-[#94e2d5]/10 px-1 py-0.5 text-[8px] font-semibold uppercase tracking-[0.12em] text-[#94e2d5] transition-colors hover:bg-[#94e2d5]/20"
+                                  title="Editar tilemap no viewport"
+                                >
+                                  Editar
+                                </button>
+                              </div>
                             );
                           })()}
                           {type !== "tilemap" && <span className="ml-auto text-[#45475a]">{type}</span>}
@@ -597,7 +801,11 @@ export default function HierarchyPanel() {
             <li className="px-3 pt-4">
               <div className="flex flex-col gap-2">
                 <p className="text-xs italic text-[#45475a]">
-                  Cena vazia. Crie um sprite inicial ou adicione uma entidade manualmente.
+                  {sceneContext.isImportedProject
+                    ? "Cena importada sem alvo visual claro. Crie um sprite inicial ou use o Asset Browser para continuar a autoria."
+                    : sceneContext.isLegacyOverlayProject
+                      ? "Overlay SGDK aberto sem entidade visual. Crie um sprite inicial ou use o Asset Browser para ancorar a cena no editor."
+                      : "Cena vazia. Crie um sprite inicial ou adicione uma entidade manualmente."}
                 </p>
                 <div className="flex gap-2">
                   <button

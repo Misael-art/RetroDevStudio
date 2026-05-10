@@ -1,5 +1,5 @@
 use crate::hardware::HwStatus;
-use crate::ugdm::entities::Scene;
+use crate::ugdm::entities::{Entity, Scene};
 
 // Mega Drive Hardware Constraints (doc 04 — imutavel)
 // Constantes marcadas como allow(dead_code) sao specs de hardware documentais;
@@ -15,6 +15,12 @@ pub const MD_PALETTE_COLORS: u8 = 16;
 pub const MD_TILE_BYTES: u32 = 32; // 8x8 @ 4bpp
 #[allow(dead_code)]
 pub const MD_DMA_VBLANK_BYTES: u32 = 7_372; // ~7.2 KB/frame (H40 NTSC)
+/// Heurística SGDK-managed: no pico, consideramos no máximo 8 bancos de sprite
+/// relevantes simultaneamente.
+pub const MD_MANAGED_MAX_CONCURRENT_BANKS: u32 = 8;
+/// Heurística SGDK-managed: orçamento de células de sprite 32x32 simultâneas
+/// para estimar residência em cena ativa.
+pub const MD_MANAGED_SPRITE_CELL_BUDGET: u32 = 32;
 #[allow(dead_code)]
 pub const MD_RESOLUTION_W: u32 = 320;
 #[allow(dead_code)]
@@ -86,6 +92,303 @@ fn estimate_max_scanline_sprites(scene: &Scene) -> u32 {
     max_scanline_sprites.max(0) as u32
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MdVramAnalysisMode {
+    NativeStatic,
+    SgdkManaged,
+}
+
+impl MdVramAnalysisMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::NativeStatic => "native_static",
+            Self::SgdkManaged => "sgdk_managed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MdVramAnalysis {
+    mode: MdVramAnalysisMode,
+    project_asset_bytes: u32,
+    resident_vram_bytes: u32,
+    streamable_vram_bytes: u32,
+    dma_frame_bytes: u32,
+    sprite_resident_bytes: u32,
+    tilemap_resident_bytes: u32,
+    hud_resident_bytes: u32,
+    streamable_sprite_bytes: u32,
+    animated_swap_bytes: u32,
+    managed_concurrent_sprite_banks: u32,
+    managed_sprite_cells_used: u32,
+}
+
+fn is_sgdk_managed_source(source_kind: Option<&str>) -> bool {
+    matches!(source_kind, Some("external_sgdk") | Some("imported_sgdk"))
+}
+
+fn sprite_total_frames(sprite: &crate::ugdm::components::SpriteComponent) -> u32 {
+    let total_frames = sprite
+        .animations
+        .values()
+        .flat_map(|animation| animation.frames.iter())
+        .count() as u32;
+    total_frames.max(1)
+}
+
+/// Prioriza sinais canônicos do importador (`logic_hints`) para HUD/overlay.
+/// Em ausência de metadata explícita, aplica fallback conservador por prioridade/nome.
+fn md_entity_hud_overlay_hint(entity: &Entity) -> bool {
+    if entity
+        .components
+        .logic
+        .as_ref()
+        .map(|logic| {
+            logic.logic_hints
+                .iter()
+                .any(|hint| {
+                    let normalized = hint.trim().to_ascii_lowercase();
+                    normalized == "sgdk_import:hud_overlay"
+                        || normalized == "sgdk_import:canonical_hud_signal"
+                        || normalized == "import:hud_overlay"
+                })
+        })
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    if entity
+        .components
+        .sprite
+        .as_ref()
+        .map(|sprite| {
+            sprite.priority.eq_ignore_ascii_case("ui_overlay")
+                || sprite.priority.eq_ignore_ascii_case("hud_overlay")
+        })
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    let id = entity.entity_id.to_lowercase();
+    if id.contains("hud")
+        || id.contains("status_bar")
+        || id.contains("statusbar")
+        || id.contains("ui_overlay")
+        || id.contains("overlay_ui")
+    {
+        return true;
+    }
+    if let Some(name) = &entity.display_name {
+        let n = name.to_lowercase();
+        if n.contains("hud")
+            || n.contains("status")
+            || n.contains("overlay")
+            || n.contains("health bar")
+        {
+            return true;
+        }
+    }
+    if let Some(sprite) = &entity.components.sprite {
+        let p = sprite.priority.to_lowercase();
+        if p.contains("hud")
+            || p.contains("overlay")
+            || p.contains("window")
+            || p == "ui"
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn tilemap_entity_resident_bytes(entity: &Entity) -> u32 {
+    let Some(tilemap) = entity.components.tilemap.as_ref() else {
+        return 0;
+    };
+
+    let map_bytes = tilemap
+        .map_width
+        .saturating_mul(tilemap.map_height)
+        .saturating_mul(2);
+    let map_bytes_capped = map_bytes.min(32 * 1024);
+
+    let tileset_bytes = if tilemap.cells.is_empty() {
+        0
+    } else {
+        let mut unique_nonzero = std::collections::HashSet::new();
+        for &cell in &tilemap.cells {
+            if cell > 0 {
+                unique_nonzero.insert(cell);
+            }
+        }
+        (unique_nonzero.len() as u32).saturating_mul(MD_TILE_BYTES)
+    };
+
+    map_bytes_capped.saturating_add(tileset_bytes)
+}
+
+/// Retorna `(total_tilemap_resident, hud_tilemap_resident)` com HUD derivado de `md_entity_hud_overlay_hint`.
+fn estimate_tilemap_resident_bytes_split(scene: &Scene) -> (u32, u32) {
+    let mut total: u32 = 0;
+    let mut hud: u32 = 0;
+    for entity in &scene.entities {
+        let bytes = tilemap_entity_resident_bytes(entity);
+        if bytes == 0 {
+            continue;
+        }
+        total = total.saturating_add(bytes);
+        if md_entity_hud_overlay_hint(entity) {
+            hud = hud.saturating_add(bytes);
+        }
+    }
+    (total, hud)
+}
+
+fn analyze_md_vram(scene: &Scene, source_kind: Option<&str>) -> MdVramAnalysis {
+    #[derive(Debug, Clone, Copy)]
+    struct SpriteBankCandidate {
+        project_bytes: u32,
+        resident_bytes: u32,
+        frame_bytes: u32,
+        cell_cost: u32,
+        animated: bool,
+        hud_hint: bool,
+    }
+
+    let mode = if is_sgdk_managed_source(source_kind) {
+        MdVramAnalysisMode::SgdkManaged
+    } else {
+        MdVramAnalysisMode::NativeStatic
+    };
+
+    let mut project_sprite_bytes: u32 = 0;
+    let mut resident_sprite_bytes: u32 = 0;
+    let mut streamable_sprite_bytes: u32 = 0;
+    let mut animated_swap_bytes: u32 = 0;
+    let mut hud_sprite_resident_bytes: u32 = 0;
+    let mut managed_candidates: Vec<SpriteBankCandidate> = Vec::new();
+
+    for entity in &scene.entities {
+        let Some(sprite) = entity.components.sprite.as_ref() else {
+            continue;
+        };
+        if sprite.frame_width == 0 || sprite.frame_height == 0 {
+            continue;
+        }
+
+        let tiles_w = (sprite.frame_width / 8).max(1);
+        let tiles_h = (sprite.frame_height / 8).max(1);
+        let frame_bytes = tiles_w.saturating_mul(tiles_h).saturating_mul(MD_TILE_BYTES);
+        let total_frames = sprite_total_frames(sprite);
+
+        let sprite_project = frame_bytes.saturating_mul(total_frames);
+        project_sprite_bytes = project_sprite_bytes.saturating_add(sprite_project);
+        let hud_hint = md_entity_hud_overlay_hint(entity);
+
+        match mode {
+            MdVramAnalysisMode::NativeStatic => {
+                resident_sprite_bytes = resident_sprite_bytes.saturating_add(sprite_project);
+                animated_swap_bytes = animated_swap_bytes.saturating_add(sprite_project);
+                if hud_hint {
+                    hud_sprite_resident_bytes =
+                        hud_sprite_resident_bytes.saturating_add(sprite_project);
+                }
+            }
+            MdVramAnalysisMode::SgdkManaged => {
+                let resident_frames = if total_frames <= 1 {
+                    1
+                } else {
+                    2.min(total_frames)
+                };
+                let sprite_resident = frame_bytes.saturating_mul(resident_frames);
+                let cell_cost = (sprite.frame_width.saturating_add(31) / 32)
+                    .max(1)
+                    .saturating_mul((sprite.frame_height.saturating_add(31) / 32).max(1));
+                managed_candidates.push(SpriteBankCandidate {
+                    project_bytes: sprite_project,
+                    resident_bytes: sprite_resident,
+                    frame_bytes,
+                    cell_cost: cell_cost.max(1),
+                    animated: total_frames > 1,
+                    hud_hint,
+                });
+            }
+        }
+    }
+
+    let mut managed_concurrent_sprite_banks: u32 = 0;
+    let mut managed_sprite_cells_used: u32 = 0;
+
+    if mode == MdVramAnalysisMode::SgdkManaged {
+        // Conservador sem ser mágico: seleciona um conjunto concorrente plausível
+        // de bancos de sprite sob orçamento de células e quantidade de bancos.
+        managed_candidates.sort_by(|a, b| {
+            b.resident_bytes
+                .cmp(&a.resident_bytes)
+                .then_with(|| b.cell_cost.cmp(&a.cell_cost))
+        });
+        let mut cells_used: u32 = 0;
+        let mut banks_used: u32 = 0;
+        for candidate in managed_candidates {
+            if banks_used >= MD_MANAGED_MAX_CONCURRENT_BANKS {
+                streamable_sprite_bytes = streamable_sprite_bytes.saturating_add(candidate.project_bytes);
+                continue;
+            }
+            let can_fit_cells = cells_used.saturating_add(candidate.cell_cost) <= MD_MANAGED_SPRITE_CELL_BUDGET;
+            if banks_used == 0 || can_fit_cells {
+                resident_sprite_bytes = resident_sprite_bytes.saturating_add(candidate.resident_bytes);
+                if candidate.hud_hint {
+                    hud_sprite_resident_bytes = hud_sprite_resident_bytes
+                        .saturating_add(candidate.resident_bytes);
+                }
+                if candidate.animated {
+                    animated_swap_bytes = animated_swap_bytes.saturating_add(candidate.frame_bytes);
+                }
+                streamable_sprite_bytes = streamable_sprite_bytes
+                    .saturating_add(candidate.project_bytes.saturating_sub(candidate.resident_bytes));
+                cells_used = cells_used.saturating_add(candidate.cell_cost);
+                banks_used = banks_used.saturating_add(1);
+            } else {
+                streamable_sprite_bytes = streamable_sprite_bytes.saturating_add(candidate.project_bytes);
+            }
+        }
+        managed_concurrent_sprite_banks = banks_used;
+        managed_sprite_cells_used = cells_used;
+    }
+
+    let (tilemap_resident_bytes, hud_tilemap_resident_bytes) =
+        estimate_tilemap_resident_bytes_split(scene);
+    let hud_resident_bytes = hud_sprite_resident_bytes.saturating_add(hud_tilemap_resident_bytes);
+    let project_asset_bytes = project_sprite_bytes.saturating_add(tilemap_resident_bytes);
+    let resident_vram_bytes = resident_sprite_bytes.saturating_add(tilemap_resident_bytes);
+    let streamable_vram_bytes = streamable_sprite_bytes;
+    let dma_frame_bytes = match mode {
+        MdVramAnalysisMode::NativeStatic => resident_vram_bytes,
+        MdVramAnalysisMode::SgdkManaged => {
+            let stream_step = streamable_vram_bytes / 4;
+            let tilemap_step = tilemap_resident_bytes.min(1024);
+            animated_swap_bytes
+                .saturating_add(stream_step)
+                .saturating_add(tilemap_step)
+        }
+    };
+
+    MdVramAnalysis {
+        mode,
+        project_asset_bytes,
+        resident_vram_bytes,
+        streamable_vram_bytes,
+        dma_frame_bytes,
+        sprite_resident_bytes: resident_sprite_bytes,
+        tilemap_resident_bytes,
+        hud_resident_bytes,
+        streamable_sprite_bytes,
+        animated_swap_bytes,
+        managed_concurrent_sprite_banks,
+        managed_sprite_cells_used,
+    }
+}
+
 /// Valida uma Scene contra as hardware constraints do Mega Drive.
 /// Retorna lista de erros/avisos. Erros fatais bloqueiam o build.
 #[allow(dead_code)]
@@ -94,15 +397,15 @@ pub fn validate_scene(scene: &Scene) -> Vec<ValidationError> {
 }
 
 /// Valida uma Scene com contexto de `source_kind`.
-/// Quando `source_kind` é `Some("external_sgdk")`, VRAM overflow e DMA budget
-/// são reclassificados como warnings (não fatais), pois o SGDK gerencia esses
-/// recursos internamente.
+/// Para `imported_sgdk`/`external_sgdk`, aplica análise de residência/streaming:
+/// - overflow de conjunto **residente** continua fatal;
+/// - excesso apenas no volume total streamável vira warning auditável.
 pub fn validate_scene_with_source_kind(
     scene: &Scene,
     source_kind: Option<&str>,
 ) -> Vec<ValidationError> {
     let mut errors: Vec<ValidationError> = Vec::new();
-    let is_sgdk = matches!(source_kind, Some("external_sgdk") | Some("imported_sgdk"));
+    let is_sgdk = is_sgdk_managed_source(source_kind);
 
     let sprite_count = scene
         .entities
@@ -170,57 +473,84 @@ pub fn validate_scene_with_source_kind(
         )));
     }
 
-    let mut vram_used: u32 = 0;
-    for entity in &scene.entities {
-        if let Some(sprite) = &entity.components.sprite {
-            // Skip VRAM calc for 0×0 sprites (camera/audio entities with empty sprite stub)
-            if sprite.frame_width == 0 || sprite.frame_height == 0 {
-                continue;
-            }
-            let tiles_w = sprite.frame_width / 8;
-            let tiles_h = sprite.frame_height / 8;
-            let total_frames = sprite
-                .animations
-                .values()
-                .flat_map(|animation| animation.frames.iter())
-                .count() as u32;
-            let unique_frames = total_frames.max(1);
-            vram_used += tiles_w * tiles_h * unique_frames * MD_TILE_BYTES;
-        }
-    }
-
-    if vram_used > MD_VRAM_BYTES {
-        let prefix = if is_sgdk { "[SGDK Gerenciado] " } else { "" };
-        if is_sgdk {
-            errors.push(ValidationError::warning(format!(
-                "{}VRAM Overflow: a cena consome {}KB de sprites. Limite do Mega Drive: 64KB.",
-                prefix,
-                vram_used / 1024
-            )));
-        } else {
-            errors.push(ValidationError::fatal(format!(
-                "VRAM Overflow: a cena consome {}KB de sprites. Limite do Mega Drive: 64KB.",
-                vram_used / 1024
-            )));
-        }
-    } else if vram_used > (MD_VRAM_BYTES * 80 / 100) {
-        let prefix = if is_sgdk { "[SGDK Gerenciado] " } else { "" };
+    let analysis = analyze_md_vram(scene, source_kind);
+    if is_sgdk {
         errors.push(ValidationError::warning(format!(
-            "{}VRAM Warning: uso de VRAM estimado em {}KB ({}% do limite de 64KB). Pouco espaco para tiles de background.",
-            prefix, vram_used / 1024,
-            vram_used * 100 / MD_VRAM_BYTES
+            "[SGDK Gerenciado] VRAM Analysis: mode={} asset_total={}KB resident={}KB streamable={}KB dma_est/frame={}KB | spr_res={}KB tile={}KB hud={}KB strm_spr={}KB anim_sw={}KB | banks={}/{} cells={}/{} (limites: vram={}KB dma={}KB).",
+            analysis.mode.as_str(),
+            analysis.project_asset_bytes / 1024,
+            analysis.resident_vram_bytes / 1024,
+            analysis.streamable_vram_bytes / 1024,
+            analysis.dma_frame_bytes / 1024,
+            analysis.sprite_resident_bytes / 1024,
+            analysis.tilemap_resident_bytes / 1024,
+            analysis.hud_resident_bytes / 1024,
+            analysis.streamable_sprite_bytes / 1024,
+            analysis.animated_swap_bytes / 1024,
+            analysis.managed_concurrent_sprite_banks,
+            MD_MANAGED_MAX_CONCURRENT_BANKS,
+            analysis.managed_sprite_cells_used,
+            MD_MANAGED_SPRITE_CELL_BUDGET,
+            MD_VRAM_BYTES / 1024,
+            MD_DMA_VBLANK_BYTES / 1024
         )));
     }
 
-    let dma_used = vram_used;
-    if dma_used > (MD_DMA_VBLANK_BYTES * 80 / 100) {
+    if analysis.resident_vram_bytes > MD_VRAM_BYTES {
+        errors.push(ValidationError::fatal(format!(
+            "{}VRAM Overflow (resident): conjunto residente estimado em {}KB. Limite do Mega Drive: 64KB.",
+            if is_sgdk { "[SGDK Gerenciado] " } else { "" },
+            analysis.resident_vram_bytes / 1024
+        )));
+    } else if analysis.resident_vram_bytes > (MD_VRAM_BYTES * 80 / 100) {
         let prefix = if is_sgdk { "[SGDK Gerenciado] " } else { "" };
         errors.push(ValidationError::warning(format!(
-            "{}DMA Warning: upload estimado em {}KB por frame ({}% do budget de {}KB no VBlank).",
+            "{}VRAM Warning (resident): {}KB ({}% do limite de 64KB).",
+            prefix,
+            analysis.resident_vram_bytes / 1024,
+            analysis.resident_vram_bytes * 100 / MD_VRAM_BYTES
+        )));
+    }
+
+    if is_sgdk
+        && analysis.project_asset_bytes > MD_VRAM_BYTES
+        && analysis.resident_vram_bytes <= MD_VRAM_BYTES
+    {
+        errors.push(ValidationError::warning(format!(
+            "[SGDK Gerenciado] Asset total acima da VRAM fisica ({}KB), mas residencia simultanea estimada em {}KB. Build segue com streaming gerenciado; valide transicoes/latencia de carga.",
+            analysis.project_asset_bytes / 1024,
+            analysis.resident_vram_bytes / 1024
+        )));
+    }
+
+    let dma_used = analysis.dma_frame_bytes;
+    if dma_used > (MD_DMA_VBLANK_BYTES * 80 / 100) {
+        let prefix = if is_sgdk { "[SGDK Gerenciado] " } else { "" };
+        let dma_ctx = if is_sgdk {
+            format!(
+                " spr_res={}KB anim_sw={}KB strm_spr={}KB tile={}KB | banks={}/{} cells={}/{}.",
+                analysis.sprite_resident_bytes / 1024,
+                analysis.animated_swap_bytes / 1024,
+                analysis.streamable_sprite_bytes / 1024,
+                analysis.tilemap_resident_bytes / 1024,
+                analysis.managed_concurrent_sprite_banks,
+                MD_MANAGED_MAX_CONCURRENT_BANKS,
+                analysis.managed_sprite_cells_used,
+                MD_MANAGED_SPRITE_CELL_BUDGET
+            )
+        } else {
+            String::new()
+        };
+        errors.push(ValidationError::warning(format!(
+            "{}DMA Warning: upload estimado em {}KB por frame ({}% do budget de {}KB no VBlank). Total={}KB / Residente={}KB / Streamable={}KB.{}",
             prefix,
             dma_used / 1024,
             dma_used * 100 / MD_DMA_VBLANK_BYTES,
-            MD_DMA_VBLANK_BYTES / 1024
+            MD_DMA_VBLANK_BYTES / 1024,
+            analysis.project_asset_bytes / 1024,
+            analysis.resident_vram_bytes / 1024,
+            analysis.streamable_vram_bytes / 1024,
+            dma_ctx
         )));
     }
 
@@ -338,24 +668,7 @@ pub fn hw_status_with_source_kind(scene: &Scene, source_kind: Option<&str>) -> H
         .filter(|entity| entity.components.sprite.is_some())
         .count() as u32;
 
-    let mut vram_used: u32 = 0;
-    for entity in &scene.entities {
-        if let Some(sprite) = &entity.components.sprite {
-            // Skip VRAM calc for 0×0 sprites (camera/audio entities)
-            if sprite.frame_width == 0 || sprite.frame_height == 0 {
-                continue;
-            }
-            let tiles_w = (sprite.frame_width / 8).max(1);
-            let tiles_h = (sprite.frame_height / 8).max(1);
-            let total_frames = sprite
-                .animations
-                .values()
-                .flat_map(|animation| animation.frames.iter())
-                .count() as u32;
-            let unique_frames = total_frames.max(1);
-            vram_used += tiles_w * tiles_h * unique_frames * MD_TILE_BYTES;
-        }
-    }
+    let analysis = analyze_md_vram(scene, source_kind);
 
     let validation = validate_scene_with_source_kind(scene, source_kind);
     let errors: Vec<String> = validation
@@ -370,13 +683,27 @@ pub fn hw_status_with_source_kind(scene: &Scene, source_kind: Option<&str>) -> H
         .collect();
 
     HwStatus {
-        vram_used,
+        vram_used: analysis.resident_vram_bytes,
         vram_limit: MD_VRAM_BYTES,
+        analysis_mode: analysis.mode.as_str().to_string(),
+        project_asset_bytes: analysis.project_asset_bytes,
+        resident_vram_bytes: analysis.resident_vram_bytes,
+        streamable_vram_bytes: analysis.streamable_vram_bytes,
+        dma_frame_bytes: analysis.dma_frame_bytes,
+        sprite_resident_bytes: analysis.sprite_resident_bytes,
+        tilemap_resident_bytes: analysis.tilemap_resident_bytes,
+        hud_resident_bytes: analysis.hud_resident_bytes,
+        streamable_sprite_bytes: analysis.streamable_sprite_bytes,
+        animated_swap_bytes: analysis.animated_swap_bytes,
+        managed_concurrent_sprite_banks: analysis.managed_concurrent_sprite_banks,
+        managed_sprite_cells_used: analysis.managed_sprite_cells_used,
+        managed_sprite_banks_limit: MD_MANAGED_MAX_CONCURRENT_BANKS,
+        managed_sprite_cells_budget: MD_MANAGED_SPRITE_CELL_BUDGET,
         sprite_count,
         sprite_limit: MD_SPRITES_PER_SCREEN,
         scanline_sprite_peak: estimate_max_scanline_sprites(scene),
         scanline_sprite_limit: MD_SPRITES_PER_SCANLINE,
-        dma_used: vram_used,
+        dma_used: analysis.dma_frame_bytes,
         dma_limit: MD_DMA_VBLANK_BYTES,
         palette_banks_used: count_palette_banks_used(scene),
         palette_banks_limit: MD_PALETTE_SLOTS as u32,
@@ -390,7 +717,7 @@ pub fn hw_status_with_source_kind(scene: &Scene, source_kind: Option<&str>) -> H
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ugdm::components::{Components, SpriteComponent};
+    use crate::ugdm::components::{AnimationDef, Components, SpriteComponent};
     use crate::ugdm::entities::{CollisionMap, Entity, PaletteEntry, Scene, Transform};
 
     fn sprite_entity(id: &str, frame_width: u32, frame_height: u32, palette_slot: u8) -> Entity {
@@ -435,6 +762,30 @@ mod tests {
                 ..Default::default()
             },
         }
+    }
+
+    fn animated_meta_sprite_entity(
+        id: &str,
+        frame_width: u32,
+        frame_height: u32,
+        frames: u32,
+    ) -> Entity {
+        let mut entity = meta_sprite_entity(id, frame_width, frame_height);
+        let frame_list: Vec<u32> = (0..frames).collect();
+        if let Some(sprite) = entity.components.sprite.as_mut() {
+            sprite.animations.insert(
+                "run".to_string(),
+                AnimationDef {
+                    frames: frame_list,
+                    fps: 12,
+                    looping: true,
+                    frame_durations: None,
+                    loop_start: None,
+                    mugen_frames: None,
+                },
+            );
+        }
+        entity
     }
 
     fn camera_entity(id: &str) -> Entity {
@@ -492,6 +843,33 @@ mod tests {
                     && e.message.contains("320")
             }),
             "expected viewport exceed warning for 128x8-wide map: {:?}",
+            errors
+        );
+    }
+
+    #[test]
+    fn collision_map_with_invalid_data_len_keeps_fatal_guardrails() {
+        let mut scene = empty_scene();
+        scene.collision_map = Some(CollisionMap {
+            tile_width: 8,
+            tile_height: 8,
+            width: 32,
+            height: 32,
+            data: vec![0u8; ((32 * 32) - 7) as usize],
+        });
+        let errors = validate_scene(&scene);
+        assert!(
+            errors
+                .iter()
+                .any(|e| !e.is_fatal && e.message.contains("data.len()")),
+            "data.len inconsistente deve continuar sinalizado: {:?}",
+            errors
+        );
+        assert!(
+            errors
+                .iter()
+                .all(|e| !e.is_fatal || !e.message.contains("mapa de mundo")),
+            "overflow de viewport nao pode virar fatal por regressao: {:?}",
             errors
         );
     }
@@ -576,6 +954,8 @@ mod tests {
         assert_eq!(status.scanline_sprite_peak, 1);
         assert_eq!(status.scanline_sprite_limit, MD_SPRITES_PER_SCANLINE);
         assert_eq!(status.dma_limit, MD_DMA_VBLANK_BYTES);
+        assert_eq!(status.analysis_mode, "native_static");
+        assert_eq!(status.project_asset_bytes, status.resident_vram_bytes);
         assert_eq!(status.palette_banks_used, 1);
         assert_eq!(status.palette_banks_limit, MD_PALETTE_SLOTS as u32);
         assert_eq!(status.bg_layers_limit, 3);
@@ -650,72 +1030,187 @@ mod tests {
     // ── PROMPT 4: SGDK source_kind reclassifies VRAM overflow ──
 
     #[test]
-    fn sgdk_project_vram_overflow_is_warning_not_error() {
+    fn sgdk_project_asset_total_can_exceed_limit_without_resident_overflow() {
         let mut scene = empty_scene();
-        // 10 × 128x128 meta-sprites = 10 × 8,192 B = 80 KB > 64 KB VRAM limit.
-        // Keeps sprite count below the 80 sprites per screen constraint.
-        for i in 0..10 {
+        // 6 × (64x64 with 6 frames) => total > 64KB, resident (2 frames/sprite) < 64KB.
+        for i in 0..6 {
             scene
                 .entities
-                .push(meta_sprite_entity(&format!("spr_{i}"), 128, 128));
+                .push(animated_meta_sprite_entity(&format!("spr_{i}"), 64, 64, 6));
         }
 
         let errors_native = validate_scene_with_source_kind(&scene, None);
         let errors_sgdk = validate_scene_with_source_kind(&scene, Some("external_sgdk"));
 
-        // Native project: VRAM overflow is fatal
+        // Native project: all frames are considered resident -> fatal overflow.
         assert!(
             errors_native
                 .iter()
-                .any(|error| error.is_fatal && error.message.contains("VRAM Overflow")),
+                .any(|error| error.is_fatal && error.message.contains("VRAM Overflow (resident)")),
             "Native project should have fatal VRAM overflow"
         );
 
-        // SGDK project: VRAM overflow is warning (not fatal)
+        // SGDK managed: resident stays below limit; asset total overflow is warning.
         assert!(
             !errors_sgdk
                 .iter()
                 .any(|error| error.is_fatal && error.message.contains("VRAM Overflow")),
-            "SGDK project should not have fatal VRAM overflow: {:?}",
+            "SGDK project should not have fatal overflow for total-only excess: {:?}",
             errors_sgdk
         );
         assert!(
             errors_sgdk
                 .iter()
-                .any(|error| !error.is_fatal && error.message.contains("VRAM Overflow")),
-            "SGDK project should have VRAM overflow as warning"
+                .any(|error| !error.is_fatal && error.message.contains("Asset total acima da VRAM")),
+            "SGDK project should warn about total vs resident split"
         );
         assert!(
             errors_sgdk
                 .iter()
-                .any(|error| error.message.contains("SGDK Gerenciado")),
-            "SGDK warning should have [SGDK Gerenciado] prefix"
+                .any(|error| error.message.contains("VRAM Analysis: mode=sgdk_managed")),
+            "SGDK warning should expose residency breakdown"
         );
     }
 
     #[test]
-    fn imported_sgdk_project_vram_overflow_is_also_warning() {
+    fn hw_status_residency_breakdown_sums_to_resident_vram() {
         let mut scene = empty_scene();
-        for i in 0..10 {
+        scene.entities.push(sprite_entity("player", 16, 16, 0));
+        scene.entities.push(sprite_entity("hud_bar", 8, 8, 0));
+
+        let status = hw_status(&scene);
+        assert_eq!(
+            status.sprite_resident_bytes.saturating_add(status.tilemap_resident_bytes),
+            status.resident_vram_bytes,
+            "sprite + tilemap deve fechar o residente total"
+        );
+        assert!(
+            status.hud_resident_bytes > 0,
+            "entidade com id contendo hud deve contribuir para hud_resident_bytes"
+        );
+        assert!(
+            status.hud_resident_bytes <= status.sprite_resident_bytes,
+            "hud_resident_bytes e subconjunto auditavel do sprite residente"
+        );
+        assert_eq!(status.managed_sprite_banks_limit, MD_MANAGED_MAX_CONCURRENT_BANKS);
+        assert_eq!(status.managed_sprite_cells_budget, MD_MANAGED_SPRITE_CELL_BUDGET);
+    }
+
+    #[test]
+    fn imported_hud_hint_token_takes_precedence_over_name_heuristic() {
+        let mut scene = empty_scene();
+        let mut entity = sprite_entity("gameplay_actor", 16, 16, 0);
+        if let Some(sprite) = entity.components.sprite.as_mut() {
+            sprite.priority = "ui_overlay".to_string();
+        }
+        entity.display_name = Some("Combat actor".to_string());
+        if let Some(logic) = entity.components.logic.as_mut() {
+            logic.logic_hints.push("sgdk_import:hud_overlay".to_string());
+        } else {
+            entity.components.logic = Some(crate::ugdm::components::LogicComponent {
+                graph: None,
+                graph_ref: None,
+                graph_origin: None,
+                logic_hints: vec!["sgdk_import:hud_overlay".to_string()],
+                external_source_refs: Vec::new(),
+                imported_semantics: None,
+                variables: std::collections::HashMap::new(),
+            });
+        }
+        scene.entities.push(entity);
+
+        let status = hw_status(&scene);
+        assert!(
+            status.hud_resident_bytes > 0,
+            "token canônico do importador SGDK deve marcar HUD mesmo sem nome/prioridade heurística textual"
+        );
+    }
+
+    #[test]
+    fn imported_tilemap_hud_hint_from_logic_metadata_is_accounted() {
+        let mut scene = empty_scene();
+        let mut entity = Entity {
+            entity_id: "tilemap_playfield".to_string(),
+            display_name: Some("Arena Main".to_string()),
+            prefab: None,
+            transform: Transform { x: 0, y: 0 },
+            components: Components {
+                tilemap: Some(crate::ugdm::components::TilemapComponent {
+                    tileset: "assets/tilesets/hud.png".to_string(),
+                    map_width: 8,
+                    map_height: 8,
+                    scroll_x: 0,
+                    scroll_y: 0,
+                    cells: vec![1; 64],
+                }),
+                ..Default::default()
+            },
+        };
+        entity.components.logic = Some(crate::ugdm::components::LogicComponent {
+            graph: None,
+            graph_ref: None,
+            graph_origin: None,
+            logic_hints: vec!["sgdk_import:canonical_hud_signal".to_string()],
+            external_source_refs: Vec::new(),
+            imported_semantics: None,
+            variables: std::collections::HashMap::new(),
+        });
+        scene.entities.push(entity);
+
+        let status = hw_status(&scene);
+        assert!(
+            status.hud_resident_bytes > 0,
+            "metadata explícita do importador deve marcar tilemap HUD sem depender de heurística por nome"
+        );
+        assert!(
+            status.hud_resident_bytes <= status.tilemap_resident_bytes,
+            "HUD de tilemap precisa ser subconjunto auditável do residente em tilemap"
+        );
+    }
+
+    #[test]
+    fn sgdk_managed_warning_includes_residency_category_tokens() {
+        let mut scene = empty_scene();
+        for i in 0..6 {
             scene
                 .entities
-                .push(meta_sprite_entity(&format!("spr_{i}"), 128, 128));
+                .push(animated_meta_sprite_entity(&format!("spr_{i}"), 64, 64, 6));
         }
+        let warnings: Vec<_> = validate_scene_with_source_kind(&scene, Some("external_sgdk"))
+            .into_iter()
+            .filter(|e| !e.is_fatal)
+            .collect();
+        let joined: String = warnings.iter().map(|w| w.message.as_str()).collect::<Vec<_>>().join(" ");
+        assert!(
+            joined.contains("spr_res=") && joined.contains("tile=") && joined.contains("strm_spr="),
+            "avisos SGDK devem listar categorias auditaveis: {}",
+            joined
+        );
+        assert!(joined.contains("banks=") && joined.contains("cells="));
+    }
+
+    #[test]
+    fn imported_sgdk_project_still_fails_when_resident_overflows() {
+        let mut scene = empty_scene();
+        // Um único banco residente gigante já ultrapassa o limite físico de VRAM.
+        scene
+            .entities
+            .push(meta_sprite_entity("spr_huge", 512, 512));
 
         let errors = validate_scene_with_source_kind(&scene, Some("imported_sgdk"));
 
         assert!(
-            !errors
+            errors
                 .iter()
-                .any(|error| error.is_fatal && error.message.contains("VRAM Overflow")),
-            "imported_sgdk should not have fatal VRAM overflow: {:?}",
+                .any(|error| error.is_fatal && error.message.contains("VRAM Overflow (resident)")),
+            "imported_sgdk must stay fatal when resident set really overflows: {:?}",
             errors
         );
         assert!(
             errors
                 .iter()
-                .any(|error| !error.is_fatal && error.message.contains("SGDK Gerenciado")),
-            "imported_sgdk should produce [SGDK Gerenciado] warning"
+                .any(|error| !error.is_fatal && error.message.contains("VRAM Analysis")),
+            "imported_sgdk should expose analysis breakdown"
         );
     }
 }

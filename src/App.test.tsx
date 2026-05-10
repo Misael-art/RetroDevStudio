@@ -1219,6 +1219,11 @@ describe("App build flow", () => {
       __TAURI_INTERNALS__?: unknown;
       __RDS_E2E__?: {
         openProject: (projectDir: string) => Promise<boolean>;
+        importSgdkProject: (
+          projectName: string,
+          baseDir: string,
+          sgdkDonorPath: string
+        ) => Promise<string>;
       };
     };
     automationWindow.__TAURI_INTERNALS__ = {};
@@ -1227,6 +1232,7 @@ describe("App build flow", () => {
       selected: true,
       path: "F:/Projects/RetroDevStudio/src-tauri/tests/fixtures/projects/snes_dummy",
       name: "SNES Dummy",
+      preferred_scene_path: "scenes/level1.json",
     });
     mocks.getHwStatus.mockResolvedValue({
       vram_used: 1024,
@@ -1326,6 +1332,10 @@ describe("App build flow", () => {
     expect(mocks.openProjectPath).toHaveBeenCalledWith(
       "F:/Projects/RetroDevStudio/src-tauri/tests/fixtures/projects/snes_dummy"
     );
+    expect(mocks.getSceneData).toHaveBeenCalledWith(
+      "F:/Projects/RetroDevStudio/src-tauri/tests/fixtures/projects/snes_dummy",
+      "scenes/level1.json"
+    );
 
     const state = useEditorStore.getState();
     expect(state.activeProjectDir).toBe(
@@ -1341,6 +1351,233 @@ describe("App build flow", () => {
     );
 
     delete automationWindow.__RDS_E2E__;
+    delete automationWindow.__TAURI_INTERNALS__;
+  });
+
+  it("opens the preferred imported SGDK scene through the automation bridge", async () => {
+    const automationWindow = window as Window & {
+      __TAURI_INTERNALS__?: unknown;
+      __RDS_E2E__?: {
+        importSgdkProject: (
+          projectName: string,
+          baseDir: string,
+          sgdkDonorPath: string
+        ) => Promise<string>;
+      };
+    };
+    automationWindow.__TAURI_INTERNALS__ = {};
+    mocks.importSgdkProject.mockResolvedValue({
+      selected: true,
+      path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      name: "Importado SGDK",
+      preferred_scene_path: "scenes/phase_b.json",
+      imported_scene_paths: ["scenes/main.json", "scenes/phase_b.json"],
+    });
+    mocks.getSceneData.mockResolvedValue({
+      ok: true,
+      error: "",
+      scene_json: JSON.stringify({
+        scene_id: "phase_b",
+        display_name: "Phase B",
+        entities: [],
+        background_layers: [],
+      }),
+      project_name: "Importado SGDK",
+      target: "megadrive",
+      scene_path: "scenes/phase_b.json",
+      source_kind: "imported_sgdk",
+      legacy_sgdk_index: null,
+    });
+    mocks.hydrateSceneResult.mockResolvedValue({
+      sourceScene: {
+        scene_id: "phase_b",
+        display_name: "Phase B",
+        entities: [],
+        background_layers: [],
+      },
+      resolvedScene: {
+        scene_id: "phase_b",
+        display_name: "Phase B",
+        entities: [],
+        background_layers: [],
+      },
+    });
+
+    await act(async () => {
+      root.unmount();
+      await flush();
+      root = createRoot(container);
+      root.render(<App />);
+      await flush();
+      await flush();
+    });
+
+    expect(typeof automationWindow.__RDS_E2E__?.importSgdkProject).toBe("function");
+
+    await act(async () => {
+      await automationWindow.__RDS_E2E__!.importSgdkProject(
+        "Importado SGDK",
+        "F:/Projects/RetroDevStudio/tests/fixtures/projects",
+        "F:/Projects/MegaDrive_DEV/Donor"
+      );
+      await flush();
+    });
+
+    expect(mocks.getSceneData).toHaveBeenCalledWith(
+      "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      "scenes/phase_b.json"
+    );
+    expect(useEditorStore.getState().activeScenePath).toBe("scenes/phase_b.json");
+    delete automationWindow.__TAURI_INTERNALS__;
+  });
+
+  it("guides the imported flow into the scene workspace and focuses the first visual entity", async () => {
+    const automationWindow = window as Window & {
+      __TAURI_INTERNALS__?: unknown;
+      __RDS_E2E__?: {
+        importSgdkProject: (
+          projectName: string,
+          baseDir: string,
+          sgdkDonorPath: string
+        ) => Promise<string>;
+      };
+    };
+
+    automationWindow.__TAURI_INTERNALS__ = {};
+    mocks.importSgdkProject.mockResolvedValue({
+      selected: true,
+      path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      name: "Importado SGDK",
+      preferred_scene_path: "scenes/phase_b.json",
+      imported_scene_paths: ["scenes/main.json", "scenes/phase_b.json"],
+    });
+    mocks.getSceneData.mockResolvedValue({
+      ok: true,
+      error: "",
+      scene_json: JSON.stringify({
+        scene_id: "phase_b",
+        display_name: "Phase B",
+        entities: [
+          {
+            entity_id: "stage_tilemap",
+            display_name: "Stage Tilemap",
+            transform: { x: 0, y: 0 },
+            components: {
+              tilemap: {
+                tileset: "assets/tilesets/stage.png",
+                map_width: 4,
+                map_height: 4,
+                scroll_x: 0,
+                scroll_y: 0,
+                cells: [],
+              },
+            },
+          },
+          {
+            entity_id: "hero",
+            display_name: "Hero",
+            transform: { x: 24, y: 32 },
+            components: {
+              sprite: {
+                asset: "assets/sprites/hero.png",
+                frame_width: 16,
+                frame_height: 16,
+                palette_slot: 0,
+                animations: {},
+              },
+            },
+          },
+        ],
+        background_layers: [],
+      }),
+      project_name: "Importado SGDK",
+      target: "megadrive",
+      scene_path: "scenes/phase_b.json",
+      source_kind: "imported_sgdk",
+      legacy_sgdk_index: null,
+    });
+    mocks.hydrateSceneResult.mockResolvedValue({
+      sourceScene: {
+        scene_id: "phase_b",
+        display_name: "Phase B",
+        entities: [
+          {
+            entity_id: "stage_tilemap",
+            display_name: "Stage Tilemap",
+            transform: { x: 0, y: 0 },
+            components: {
+              tilemap: {
+                tileset: "assets/tilesets/stage.png",
+                map_width: 4,
+                map_height: 4,
+                scroll_x: 0,
+                scroll_y: 0,
+                cells: [],
+              },
+            },
+          },
+        ],
+        background_layers: [],
+      },
+      resolvedScene: {
+        scene_id: "phase_b",
+        display_name: "Phase B",
+        entities: [
+          {
+            entity_id: "stage_tilemap",
+            display_name: "Stage Tilemap",
+            transform: { x: 0, y: 0 },
+            components: {
+              tilemap: {
+                tileset: "assets/tilesets/stage.png",
+                map_width: 4,
+                map_height: 4,
+                scroll_x: 0,
+                scroll_y: 0,
+                cells: [],
+              },
+            },
+          },
+          {
+            entity_id: "hero",
+            display_name: "Hero",
+            transform: { x: 24, y: 32 },
+            components: {
+              sprite: {
+                asset: "assets/sprites/hero.png",
+                frame_width: 16,
+                frame_height: 16,
+                palette_slot: 0,
+                animations: {},
+              },
+            },
+          },
+        ],
+        background_layers: [],
+      },
+    });
+
+    await act(async () => {
+      await automationWindow.__RDS_E2E__!.importSgdkProject(
+        "Importado SGDK",
+        "F:/Projects/RetroDevStudio/tests/fixtures/projects",
+        "F:/Projects/MegaDrive_DEV/Donor"
+      );
+      await flush();
+      await flush();
+    });
+
+    const state = useEditorStore.getState();
+    expect(state.activeWorkspace).toBe("scene");
+    expect(state.activeViewportTab).toBe("scene");
+    expect(state.selectedEntityId).toBe("hero");
+    expect(state.consoleEntries.some((entry) => entry.message.includes("Cena aberta: 'scenes/phase_b.json'"))).toBe(
+      true
+    );
+    expect(state.consoleEntries.some((entry) => entry.message.includes("Foco inicial em 'Hero'"))).toBe(
+      true
+    );
+
     delete automationWindow.__TAURI_INTERNALS__;
   });
 
@@ -1562,6 +1799,13 @@ describe("App build flow", () => {
     expect(container.textContent).toContain("Abrir importador");
     expect(container.textContent).not.toContain("Importando...");
     expect(container.querySelector("[data-testid='project-wizard-body']")).toBeInstanceOf(HTMLDivElement);
+    const recommendedStart = container.querySelector("[data-testid='wizard-recommended-start']");
+    const importAdvanced = container.querySelector("[data-testid='wizard-import-advanced']");
+    expect(recommendedStart?.textContent).toContain("Projeto Vazio");
+    expect(recommendedStart?.textContent).toContain("Primeiro Projeto");
+    expect(recommendedStart?.textContent).not.toContain("Plataforma");
+    expect(importAdvanced?.textContent).toContain("Plataforma");
+    expect(importAdvanced?.textContent).toContain("Experimental");
     const wizardActions = container.querySelector("[data-testid='project-wizard-actions']");
     expect(wizardActions).toBeInstanceOf(HTMLDivElement);
     expect(wizardActions?.textContent).toContain("Criar Projeto");
@@ -1578,10 +1822,10 @@ describe("App build flow", () => {
   it("shows a contextual guide in the scene workspace and opens the asset browser from it", async () => {
     const guide = container.querySelector("[data-testid='workspace-guide']");
 
-    expect(guide?.textContent).toContain("Scene Editor");
-    expect(guide?.textContent).toContain("Hierarchy, viewport e painel direito");
-    expect(guide?.textContent).toContain("Hierarchy: selecao e cenas");
-    expect(guide?.textContent).toContain("Build & Run: validacao rapida");
+    expect(guide?.textContent).toContain("Overlay SGDK");
+    expect(guide?.textContent).toContain("overlay legado");
+    expect(guide?.textContent).toContain("Host SGDK em overlay");
+    expect(guide?.textContent).toContain("Sem entidade foco");
 
     await act(async () => {
       findButton(guide as HTMLElement, "Abrir Asset Browser").click();
@@ -1593,6 +1837,34 @@ describe("App build flow", () => {
     expect(toolsPanel?.getAttribute("data-active")).toBe("assets");
     expect(toolsPanel?.getAttribute("data-workspace")).toBe("editing");
     expect(toolsPanel?.getAttribute("data-advanced")).toBe("false");
+  });
+
+  it("compacts the contextual guide to one primary action and restores the full guide on demand", async () => {
+    const guide = container.querySelector("[data-testid='workspace-guide']");
+    expect(guide?.textContent).toContain("Focar Entidade Guia");
+    expect(guide?.textContent).toContain("Abrir Inspector");
+
+    await act(async () => {
+      findButton(guide as HTMLElement, "Compactar guia").click();
+      await flush();
+    });
+
+    const compactGuide = container.querySelector("[data-testid='workspace-guide']");
+    expect(compactGuide?.getAttribute("data-expanded")).toBe("false");
+    expect(compactGuide?.textContent).toContain("Abrir Asset Browser");
+    expect(compactGuide?.textContent).not.toContain("Focar Entidade Guia");
+    expect(compactGuide?.textContent).not.toContain("Abrir Inspector");
+    expect(localStorage.getItem("retrodev-workspace-guide-expanded")).toBe("false");
+
+    await act(async () => {
+      findButton(compactGuide as HTMLElement, "Expandir guia").click();
+      await flush();
+    });
+
+    const expandedGuide = container.querySelector("[data-testid='workspace-guide']");
+    expect(expandedGuide?.getAttribute("data-expanded")).toBe("true");
+    expect(expandedGuide?.textContent).toContain("Focar Entidade Guia");
+    expect(expandedGuide?.textContent).toContain("Abrir Inspector");
   });
 
   it("opens the unified top bar menu and reaches the About dialog", async () => {
@@ -1676,6 +1948,39 @@ describe("App build flow", () => {
     expect(container.querySelector("[data-testid='workspace-guide']")?.textContent).toContain(
       "Art Workspace"
     );
+  });
+
+  it("shows build phases as safe-to-continue guidance when validation has warnings only", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        hwValidationState: "fresh",
+        hwStatus: {
+          vram_used: 4096,
+          vram_limit: 65536,
+          sprite_count: 7,
+          sprite_limit: 80,
+          scanline_sprite_peak: 3,
+          scanline_sprite_limit: 20,
+          dma_used: 1024,
+          dma_limit: 7372,
+          palette_banks_used: 1,
+          palette_banks_limit: 4,
+          bg_layers: 0,
+          bg_layers_limit: 4,
+          errors: [],
+          warnings: ["[SGDK Gerenciado] VRAM Analysis: mode=sgdk_managed asset_total=4KB."],
+        },
+      });
+      await flush();
+    });
+
+    const phasePanel = container.querySelector("[data-testid='build-phase-panel']");
+    expect(phasePanel?.textContent).toContain("Seguro continuar");
+    expect(phasePanel?.textContent).toContain("Validando");
+    expect(phasePanel?.textContent).toContain("Compilando");
+    expect(phasePanel?.textContent).toContain("Gerando ROM");
+    expect(phasePanel?.textContent).toContain("Carregando emulador");
+    expect(container.querySelector("[data-testid='build-disabled-reason']")).toBeNull();
   });
 
   it("renders the explorer workspace from the activity bar with synthesized project data", async () => {

@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-04-23 (rodada 13)
+**Ultima Atualizacao:** 2026-05-10 (rodada 31 - host Windows preparado, gates verdes, corpus/QA/packaging revalidados; branch `feat/sgdk-vram-residency-streaming-r14`)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,103 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-10 rodada 31 - host preparado e barra tecnica verde):**
+  - **Branch:** `feat/sgdk-vram-residency-streaming-r14` (sem upstream proprio; ainda +200 vs `origin/main` antes da consolidacao Git).
+  - **Host preparado:** Rust MSVC `1.95.0`, Visual Studio Build Tools 2022/VC Tools, `cargo-clippy`, `tauri-driver v2.0.6` e WiX 3.14 cacheado em `%LOCALAPPDATA%\tauri\WixTools314`. O PATH de usuario ja contem `C:\Users\misae\.cargo\bin`; nesta sessao do Codex foi necessario prefixar PATH por o processo pai estar com ambiente antigo.
+  - **Baseline verde:** `check:tree` OK; `lint` OK; `tsc --noEmit` OK; `npm test` **290** passed; `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK via wrapper MSVC; `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` **325** passed / **10** ignored.
+  - **Corpus e toolchains oficiais:** `cargo test sgdk_matrix_corpus_ ... --ignored` **7/7**; `BLAZE_ENGINE` permanece blocker legitimo auditavel; `validate-upstream-windows.ps1 -SkipRustTests` OK com `upstream-validation.json success=true`.
+  - **Desktop/QA:** `preflight:sgdk-e2e` OK (`Ready: SIM`); `test:e2e:desktop:qa-rc` OK, gerando `manual-qa-status.json` em `2026-05-10T19:51:16.583Z`, blocos A-G `passed`, evidencias `qa-rc-2026-05-10T19-50-53-457Z-*` e prova Build & Run/ROM `SEGA` no bloco G.
+  - **Packaging:** `build:portable` gerou o release EXE canonico; `build:msi` gerou `src-tauri/target-test/release/bundle/msi/RetroDev Studio_0.1.0_x64_en-US.msi`. O MSI primeiro falhou por timeout do download WiX do `tauri-bundler`; foi retomado cacheando `wix314-binaries.zip` com hash esperado e rerodando o comando canonico.
+  - **Readiness:** `release:readiness:baseline` passou os gates tecnicos, mas a promocao continua **NAO** por governanca (branch candidata +200 vs `origin/main` e worktree amplo a consolidar/PR). `release:readiness` sem `--manual-qa-json` nao consome o report QA e por isso mostra A-F pendente nessa fotografia simples.
+  - **Governanca/status:** SGDK continua **Experimental**; `support_status` inalterado; Fase D segue heuristica sem AST C completo. `Rascunho.txt` permanece rascunho operacional solto e nao deve ser versionado sem curadoria.
+
+* **O que acabou de acontecer (2026-05-10 rodada 30 - inspeccao de readiness sem promocao):**
+  - **Branch:** `feat/sgdk-vram-residency-streaming-r14` (sem upstream proprio; `origin/main...HEAD = 0/200`; worktree sujo amplo).
+  - **Readiness:** `npm run release:readiness` gerou `Pronto para promocao: NAO`. Bloqueadores atuais: baseline institucional nao executada pelo agregador, mudancas locais fora do report canonico, branch +200 vs `origin/main`, portable/release EXE ausente, MSI ausente e QA manual A-F pendente na fotografia atual.
+  - **Baseline local possivel:** `npm run check:tree` OK; `npm run lint` OK; `npx tsc --noEmit` OK; `npm test` OK (**290** testes). Teste focado `npx vitest run src/core/validateUpstreamWindows.test.ts` OK.
+  - **Bloqueio Rust/MSVC:** `cargo` nao esta no PATH; `scripts\run-cargo-msvc.cmd clippy ...` e `scripts\run-cargo-msvc.cmd test ...` falharam por `vswhere.exe not found at "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"`. Sem Rust/MSVC, nao ha baseline Rust completa nesta rodada.
+  - **Desktop E2E:** `npm run preflight:sgdk-e2e` falhou com `tauri-driver: FALTA`; `toolchains/sgdk` OK e `toolchains/webdriver/msedgedriver.exe` OK. `scripts\diagnose-desktop-e2e.ps1` foi corrigido e agora confirma o bloqueio sem crash.
+  - **Upstream oficial:** foi corrigido falso positivo em `scripts\validate-upstream-windows.ps1 -SkipRustTests`: o wrapper `.cmd` agora propaga exit code real quando falha sob captura stdout/stderr, e a ausencia de `vswhere`/Visual Studio/cargo e classificada como `toolchain_missing`. Report fresco: `success=false`, `blocking_status_codes=["toolchain_missing"]`.
+  - **Governanca:** `Rascunho.txt` existe na raiz como rascunho operacional solto; nao versionar sem curadoria. SGDK continua **Experimental**; `support_status` inalterado; `qa-rc` de 2026-05-02 segue evidencia historica, nao fotografia fresca desta rodada.
+
+* **O que acabou de acontecer (2026-05-02 rodada 29 - maturidade real de IDE para criador):**
+  - **Branch:** `feat/sgdk-vram-residency-streaming-r14` (sem commit/push).
+  - **Baseline observado antes da mudanca:** `qa-rc` A-G passava, mas o uso real ainda tinha atrito: composicao de cena com muitos sinais concorrendo com canvas, tilemap dependente de estado espalhado, pilhas densas sem solo persistente, e Logic/Art ainda parecendo workspaces separados do objeto.
+  - **Viewport / composicao:** o stage ganhou uma **mesa de composicao** com leitura unificada de mundo, janela MD 320x224, camera, regiao editavel, entidade selecionada, bounds, role e fontes. Acoes de foco/centralizacao/solo ficaram junto ao alvo em vez de virarem apenas texto.
+  - **Cena densa:** o picker por Shift+clique agora permite `Selecionar + foco` e `Isolar alvo`; o canvas aplica solo/spotlight para editar a entidade correta em pilhas beat'em up/shmup sem tentativa-e-erro.
+  - **Tilemap / tileset:** o fluxo de pintura no viewport passou a declarar tilemap ativo, brush/tile ativo, ferramenta e alvo de aplicacao no proprio stage, com `Focar alvo` e `Voltar select`.
+  - **Objeto -> Logic -> fonte:** Inspector e Logic ficaram alinhados por pontes explicitas; Logic mostra `Logic -> Scene`, source refs multiplos, fallback honesto e retorno ao objeto. A abertura de fonte no `qa-rc` ficou protegida por timeout local do runner para nao transformar editor externo lento em falso WebDriver error.
+  - **Logic Workspace:** quick actions/imported semantics continuam assistivos e mais uteis como ponto de partida, mas sem claim de AST; o empty/overview agora se ancora melhor no objeto selecionado.
+  - **Art Workspace:** Art mostra `Scene -> Art` com entidade, id e asset selecionado; retorno para Scene preserva selecao e, para tilemap, volta ao modo certo. Isso reduz reset mental ao alternar Art/Scene.
+  - **Provas no app real:** `manual-qa-status.json` final (`2026-05-02T05:14:55.164Z`) tem A-G passed e evidencias `qa-rc-2026-05-02T05-14-22-572Z-*`: `G-scene-authoring`, `G-dense-solo-authoring`, `G-tilemap-authoring`, `G-logic-authoring`, `G-art-workspace`, `G-sgdk-chain`.
+  - **Gates rodada 29 (host, resultado exacto):** `check:tree` OK; `lint` OK; `tsc --noEmit` OK; `npm test` **288** passed; `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK; `cargo test --lib --test-threads=1` **325** passed / **10** ignored; `cargo test sgdk_matrix_corpus_ ... --ignored` **7** passed; `validate-upstream-windows.ps1 -SkipRustTests` **exit 0**; `preflight:sgdk-e2e` **Ready: SIM**; `test:e2e:desktop:qa-rc` **OK**.
+  - **Governanca:** SGDK **Experimental**; `support_status` inalterado; Fase D segue heuristica, sem AST C completo.
+
+* **O que acabou de acontecer (2026-04-30 rodada 28 - selecao densa menos caotica):**
+  - **Branch:** `feat/sgdk-vram-residency-streaming-r14` (sem commit/push).
+  - **Cena densa (B):** picker denso ganhou **filtro por contexto** (`Todas`, `Sprites`, `Tilemaps`, `Cameras`, `Importadas`) e modo **Spotlight ON/OFF** para escurecer a cena e destacar apenas o alvo em preview, reduzindo caça visual em pilhas grandes.
+  - **Preview operacional:** highlight por hover/focus manteve-se, agora combinado com spotlight e contagem `filtradas/total` no proprio picker.
+  - **UX (G):** estado vazio do filtro explica a acao seguinte ("troque o filtro"), mantendo fluxo sem depender de console.
+  - **Gates rodada 28 (host, resultado exacto):** `check:tree` OK; `lint` OK; `tsc --noEmit` OK; `npm test` **277** passed; `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK; `cargo test --lib --test-threads=1` **325** passed / **10** ignored; `cargo test sgdk_matrix_corpus_ ... --ignored` **7** passed; `validate-upstream-windows.ps1 -SkipRustTests` **exit 0**; `preflight:sgdk-e2e` **Ready: SIM**; `test:e2e:desktop:qa-rc` **OK** (evidencias `qa-rc-2026-04-30T09-26-03-255Z-*`).
+  - **Governanca:** SGDK **Experimental**; `support_status` inalterado.
+
+* **O que acabou de acontecer (2026-04-30 rodada 27 - continuidade de autoria real):**
+  - **Branch:** `feat/sgdk-vram-residency-streaming-r14` (sem commit/push).
+  - **Cena densa (B):** picker contextual ganhou navegacao por **teclado** (`↑/↓`, `Enter`, `Esc`) e estado ativo por item; **hover/focus** no picker agora projeta preview visual da entidade no viewport (outline de pre-selecao) antes do commit da selecao.
+  - **Art Workspace (F):** no estado `artstudio-no-sprite-context`, o botao **Ir para Cena** preserva foco da entidade e, quando o alvo for tilemap, retorna direto para **paint** com `activeTilemapId` e brush canonico (`buildTilemapAuthoringBrush`) em vez de reset seco.
+  - **Prova adicional:** `ArtStudioPanel.test.ts` cobre o retorno `Art -> Cena` com contexto tilemap preservado.
+  - **Gates rodada 27 (host, resultado exacto):** `check:tree` OK; `lint` OK; `tsc --noEmit` OK; `npm test` **277** passed; `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK; `cargo test --lib --test-threads=1` **325** passed / **10** ignored; `cargo test sgdk_matrix_corpus_ ... --ignored` **7** passed; `validate-upstream-windows.ps1 -SkipRustTests` **exit 0**; `preflight:sgdk-e2e` **Ready: SIM**; `test:e2e:desktop:qa-rc` **OK** (evidencias `qa-rc-2026-04-30T08-32-55-700Z-*`).
+  - **Governanca:** SGDK **Experimental**; `support_status` inalterado.
+
+* **O que acabou de acontecer (2026-04-30 rodada 26 - maturidade de autoria no shell):**
+  - **Branch:** `feat/sgdk-vram-residency-streaming-r14` (sem commit/push).
+  - **Viewport / cena densa (B):** **Shift+clique** com pilha sob o ponteiro abre **lista contextual** de entidades (`viewport-dense-stack-picker`); dica **Shift=lista · Alt=ciclo** na barra de ferramentas; mensagens de duplo-clique tilemap apontam **paleta embutida** no stage.
+  - **Tilemap como fluxo central (C):** faixa de fluxo no viewport ja embute **`TilePalette`** quando ha projeto + tilemap ativo (menos dependencia exclusiva de Tools > Paleta Contextual).
+  - **Logic Workspace (E):** botao **Encadear exec (layout)** — arestas `exec`→`exec` na ordem visual (y, x), com log acionavel; **cinco quick actions** novas (projetil, camera+parallax, lutador, apoio, HUD VBlank) + **ordenacao** dos cartoes no empty state pelo `entity_role` importado (heuristica); funcao exportada `appendExecChainEdgesFromLayout` com teste Vitest.
+  - **Objeto → fonte (D):** **Inspector** — um botao **Abrir fonte** por caminho unico (`source_paths` ∪ `external_source_refs`), rotulos `(1)(2)` quando ha varios; log ao focar tilemap menciona paleta no viewport.
+  - **Gates rodada 26 (host, resultado exacto):** `check:tree` OK; `lint` OK; `tsc --noEmit` OK; `npm test` **276** passed; `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK; `cargo test --lib --test-threads=1` **325** passed / **10** ignored; `cargo test sgdk_matrix_corpus_ ... --ignored` **7** passed; `validate-upstream-windows.ps1 -SkipRustTests` **exit 0**; `preflight:sgdk-e2e` **Ready: SIM**; `test:e2e:desktop:qa-rc` **OK** (evidencias `qa-rc-2026-04-30T02-28-49-421Z-*`).
+  - **Governanca:** SGDK **Experimental**; `support_status` inalterado.
+
+* **O que acabou de acontecer (2026-04-30 rodada 25 - vertical de produto: denso + tilemap + graph + Art):**
+  - **Branch:** `feat/sgdk-vram-residency-streaming-r14` (sem commit/push).
+  - **Viewport:** `collectEntitiesUnderPoint` + **Alt+clique** para ciclar sprites/tilemaps sobrepostos (cena densa); **duplo-clique** no tilemap entra direto em modo pintura com brush; duplo-clique em entidade com `graph_ref` ou grafo JSON abre **Logic Workspace**; faixa **Fluxo tilemap** no stage em pintura com alvo/brush/ferramenta; tooltips do overlay e do Navegador do Mundo reforcam mundo vs janela visivel.
+  - **Logic Workspace:** cartao **Inferencia importada** (papel, confianca, motivo) + botao **Abrir fonte principal** via `openProjectSourcePath` (primeiro `source_paths` ou `external_source_refs`); fallback honesto no log.
+  - **Art Workspace:** se a entidade selecionada nao tem `sprite`, banner claro + **Ir para Cena** (evita ilha vazia sem explicacao).
+  - **Gates rodada 25:** `check:tree`, `lint`, `tsc --noEmit`, `npm test` **275**; `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`; `cargo test --lib --test-threads=1` **325** passed / **10** ignored; `cargo test sgdk_matrix_corpus_ ... --ignored` **7** passed; `validate-upstream-windows.ps1 -SkipRustTests` **exit 0**; `preflight:sgdk-e2e` **Ready: SIM**; `test:e2e:desktop:qa-rc` **OK** (`qa-rc-2026-04-30T01-16-50-322Z-*`).
+  - **Governanca:** SGDK **Experimental**; `support_status` inalterado.
+
+* **O que acabou de acontecer (2026-04-30 rodada 24 - viewport como ferramenta de autoria + HUD no grafo importado):**
+  - **Branch:** `feat/sgdk-vram-residency-streaming-r14` (sem commit/push por ordem de sprint).
+  - **Viewport:** faixa `viewport-world-authoring-strip` quando o mundo ou a colisao excedem a janela MD 320x224 — avisos tipo colisao maior que viewport deixam de ser so texto: **Centro colisao**, **Modo colisao**, **Pan livre** / **Clamp on** com leitura clara mundo vs janela visivel (continua a valer minimapa, metricas e fluxos da rodada 23).
+  - **Phase D / papel HUD:** `project_mgr.rs` ganhou deteccao lexical **`hud_actor`** e no **`role_hud_scroll_tick`**; `importedEntityContext` + `HierarchyPanel` exibem **HUD / UI** de forma coerente com chips existentes.
+  - **Gates rodada 24 (host, resultado exacto):** `check:tree` OK; `lint` OK; `tsc --noEmit` OK; `npm test` **275** passed; `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK (workspace); `cargo test --lib --test-threads=1` **325** passed / **10** ignored (evidencia da continuacao imediata da sprint); `cargo test sgdk_matrix_corpus_ ... --ignored` **7** passed; `validate-upstream-windows.ps1 -SkipRustTests` **exit 0** (~171s, `processSweep.strategy=cim`); `preflight:sgdk-e2e` **Ready: SIM**; `test:e2e:desktop:qa-rc` **OK** (`OK: Desktop Tauri QA RC A-G passou`, evidencias `qa-rc-2026-04-30T00-28-55-771Z-*`, `manual-qa-status.json` sob `src-tauri/target-test/validation/`).
+  - **Governanca:** SGDK **Experimental**; `support_status` inalterado.
+
+* **O que acabou de acontecer (2026-04-29 rodada 23 - salto de produto no fluxo de autoria):**
+  - **Viewport operacional de mundo/camera:** `ViewportPanel` ganhou leitura permanente da janela MD visivel (320x224), painel de mundo com metricas de tilemap/collision, controles de foco/camera/reset/clamp e minimapa navegavel com recorte de area visivel e frame da camera.
+  - **Cena densa importada com acao direta:** adicionada acao de **Normalizar Cena** no viewport para staging de autoria quando ha concentracao nao operacional de sprites; backend (`project_mgr.rs`) ampliou deteccao de densidade para acionar staging mesmo sem stack exato em um unico ponto.
+  - **Fluxo tilemap real:** `HierarchyPanel` e `InspectorPanel` agora levam direto para pintura no viewport (`scene + tilemap ativo + editorMode=paint`) com feedback de log.
+  - **Navegacao profissional objeto -> logica -> objeto -> fonte:** `InspectorPanel` ganhou acoes diretas para abrir Logic Workspace, Art Workspace e abrir fonte real rastreavel (`open_project_source_path`); `NodeGraphEditor` ganhou retorno direto para foco de objeto na cena.
+  - **Art Workspace conectado ao contexto da cena:** `ArtStudioPanel` passou a sincronizar automaticamente o sprite da entidade selecionada, evitando cair em editor vazio quando ja existe material relevante.
+  - **Gates da rodada 23:** `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`, `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --test-threads=1`, `cargo test sgdk_matrix_corpus_ --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1`, `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\validate-upstream-windows.ps1 -SkipRustTests`, `npm run preflight:sgdk-e2e`, `npm run test:e2e:desktop:qa-rc` **verdes** no host.
+  - **Governanca:** SGDK continua **Experimental**; `support_status` nao mudou; sem commit/push.
+
+* **O que acabou de acontecer (2026-04-29 rodada 22 - fechamento do blocker operacional de OOM no qa-rc):**
+  - **Causa operacional auditada:** o `qa-rc` acionava `npm run build:debug` -> `scripts/build.mjs` -> `tauri build --debug`, e o host estourava memoria no `rustc/LLVM` durante dependencias pesadas (ex.: `tauri-utils`) no perfil `dev`.
+  - **Mitigacao minima aplicada (sem feature nova):** `scripts/e2e-tauri-build-run.mjs` passou a injetar apenas para `--scenario qa-rc` os overrides `CARGO_BUILD_JOBS=1`, `CARGO_INCREMENTAL=0`, `CARGO_PROFILE_DEV_INCREMENTAL=false`, `CARGO_PROFILE_DEV_DEBUG=0`, `CARGO_PROFILE_DEV_CODEGEN_UNITS=1`; `scripts/build.mjs` passou a consumir esses envs no spawn do build e registrar o modo memoria-segura ativo.
+  - **Resultado real no host canônico:** `npm run test:e2e:desktop:qa-rc` voltou a passar (build Tauri debug completo + blocos A-G aprovados, com evidencias/snapshots e `manual-qa-status.json` atualizado).
+  - **Revalidacao da barra pedida:** `validate-upstream-windows -SkipRustTests` verde, `preflight:sgdk-e2e` verde e `npm run lint` verde apos a mitigacao.
+  - **Governanca:** sem mudanca de `support_status`; SGDK continua **Experimental**; sem claim de promocao.
+
+* **O que acabou de acontecer (2026-04-28 rodada 21 - revalidacao integral de gates com blocker explicito de host no qa-rc):**
+  - **Gates Rust/base revalidados:** `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` verde; `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --test-threads=1` verde (`325 passed / 0 failed / 10 ignored`).
+  - **Corpus SGDK:** `cargo test sgdk_matrix_corpus_ --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` verde (`7/7`), mantendo o `BLAZE_ENGINE` como blocker legitimo auditavel (nao falso verde).
+  - **Gate oficial Windows:** `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\validate-upstream-windows.ps1 -SkipRustTests` verde (exit `0`), com smoke upstream completo e report canônico atualizado.
+  - **Preflight host:** `npm run preflight:sgdk-e2e` verde (`Ready: SIM`).
+  - **Blocker real desta rodada:** `npm run test:e2e:desktop:qa-rc` falhou no build desktop por esgotamento de memoria (`rustc-LLVM ERROR: out of memory`, falha em `tauri-utils`), inclusive apos retry de target no `scripts/build.mjs`. Resultado foi mantido como **falha real de host**.
+  - **Readiness consolidado:** `npm run release:readiness` gerou `ready_for_promotion = NAO` e manteve bloqueadores explicitos (baseline nao fechado nesta rodada de readiness, pendencia de QA manual A-G por causa do `qa-rc` e gap de governanca com `origin/main`).
+  - **Governanca:** SGDK segue **Experimental**; `support_status` permanece inalterado.
 
 * **O que acabou de acontecer (2026-04-21 rodada 11 - Corpus SGDK real: matriz + gates, sem promover support):**
   - **Matriz:** `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md` com seis pastas do host `F:\\Projects\\MegaDrive_DEV\\SGDK_Engines` (existencia OK); naquele checkpoint inicial apenas a linha 1 estava documentada com evidência.
@@ -40,6 +137,62 @@
   - **Matriz corpus:** `cargo test sgdk_matrix_corpus_ ... --ignored --test-threads=1` => **6/6** neste host; `MATRIX_PE` com `resolution_kind=mddev_reference_redirect` e `rom_sega=true`. Documentacao: `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md`, `docs/06_AI_MEMORY_BANK.md`.
   - **Desktop E2E pos-commit (`d24cf14`):** `npm run preflight:sgdk-e2e` e `npm run test:e2e:desktop:qa-rc` passaram nesta rodada, reforcando a evidência operacional do fluxo canonico.
   - **SGDK:** continua **Experimental**; nenhuma promocao de `support_status`.
+
+* **O que acabou de acontecer (2026-04-23 rodada 14 - VRAM residency/streaming no caminho canonico MD):**
+  - **Modelo novo de orçamento:** `HwStatus` e validação MD agora distinguem `analysis_mode`, `project_asset_bytes`, `resident_vram_bytes`, `streamable_vram_bytes`, `dma_frame_bytes`. `vram_used`/`dma_used` passam a refletir residente e DMA por frame para manter compatibilidade com o frontend.
+  - **Regra de negocio aplicada:** `native_static` continua conservador; `imported_sgdk`/`external_sgdk` usam `sgdk_managed`; somente overflow de **resident_vram_bytes** bloqueia por VRAM. Excesso em `asset_total` vira warning explicativo (sem mascarar blocker real).
+  - **Build auditavel:** `build_orch` emite `MD VRAM analysis: mode=... total=... resident=... streamable=... dma/frame=...` antes dos erros/warnings de constraints.
+  - **Corpus real (rodada 14):** `Metal Slug` e `Mortal Kombat` voltaram a passar com ROM `SEGA` e breakdown honesto (residente baixo, streamable alto); `BLAZE_ENGINE` adicionado como estresse e mantido como falha legitima por blocker fatal de hardware (`Sprite overflow`) com análise explícita.
+  - **Gates completos da rodada:** `check:tree`, `lint`, `tsc`, `npm test`, `clippy`, `cargo test --lib`, `cargo test sgdk_matrix_corpus_ --ignored` (7/7), `validate-upstream-windows -SkipRustTests`, `preflight:sgdk-e2e`, `qa-rc` verdes.
+  - **SGDK:** permanece **Experimental**; sem mudança de `support_status`.
+
+* **O que acabou de acontecer (2026-04-24 rodada 15 - breakdown de residência VRAM por categoria, QA):**
+  - **`HwStatus` / `md_profile`:** campos `sprite_resident_bytes`, `tilemap_resident_bytes`, `hud_resident_bytes` (sinais leves em nomes/prioridade), `streamable_sprite_bytes`, `animated_swap_bytes`, `managed_concurrent_sprite_banks`, `managed_sprite_cells_used`, limites `managed_sprite_banks_limit`, `managed_sprite_cells_budget`; SNES preenche zeros.
+  - **Logs:** `build_orch` e avisos `[SGDK Gerenciado]` listam categorias + `banks`/`cells`; `project_mgr` (`MATRIX_* hw`) espelha `spr_res_kb`, `tile_kb`, `hud_kb`, etc.
+  - **UI:** `HardwareLimitsPanel` linha `QA:` (somente `activeTarget === "megadrive"`).
+  - **Testes:** regressoes em `md_profile` + assert de log em `sgdk_managed_vram_overflow_warns_but_native_still_aborts` e teste `BLAZE` para `banks=` no build log.
+  - **SGDK:** continua **Experimental**; sem mudança de `support_status`.
+
+* **O que acabou de acontecer (2026-04-26 rodada 20 - semantica importada mais forte + continuidade real de autoria na IDE):**
+  - **Produto/CX:** o shell agora usa o mesmo contexto importado entre `App.tsx`, `HierarchyPanel.tsx`, `InspectorPanel.tsx`, `ToolsPanel.tsx` e `ViewportPanel.tsx`. Entraram chips de papel importado na Hierarchy, cartao de contexto importado no Inspector, `SceneWorkspaceNotice` consistente entre superficies e o `Asset Browser` passou a mostrar referencias de cena com papel/foco (`Guia`) e a mesma explicacao de instancia que o resto da IDE usa.
+  - **Desacoplamento estrutural:** `importedEntityContext.ts`, `sceneWorkspaceContext.ts`, `sceneAssetHealth.ts`, `assetVisualState.ts`, `useProjectAssetVisualState.ts`, `assetBrowserModel.ts`, `useAssetBrowserState.ts`, `AssetBrowserSelectionCard.tsx` e `SceneAssetHealthBadge.tsx` reduziram a duplicacao de logica entre `App.tsx`, `ToolsPanel.tsx`, `InspectorPanel.tsx` e `ViewportPanel.tsx`. O diff desta rodada deixou a escolha de foco, o estado visual e a leitura do browser mais auditaveis e menos acidentais.
+  - **Fase D materialmente mais forte:** o UGDM ganhou `ImportedLogicSemantics`; `project_mgr.rs` passou a derivar perfis semanticos por entidade com `entity_role`, `role_reason`, `driver_functions`, `source_paths` e `audit_flags`; o scan agora reconhece `beat_em_up_close_range_signals`, carrega papeis jogaveis/hostis/projeteis/apoio e materializa `graph_ref`/rotulos/movimento em funcao disso, sem esconder a heuristica. Ledger/report continuam a expor a trilha textual do porque.
+  - **Cobertura e provas novas:** testes frontend novos/expandidos para `importedEntityContext`, `sceneWorkspaceContext`, `HierarchyPanel`, `InspectorPanel`, `ToolsPanel`, `assetVisualState` e `validateUpstreamWindows`; testes Rust novos para o perfil semantico run-and-gun e beat'em up/luta. A prova desktop `qa-rc` desta rodada voltou a fechar A-G com o bloco G validando `entry_scene`, `projectSourceKind=imported_sgdk`, `viewport asset health`, preview/fallback do Inspector, instancia `stage=tilemap` + `hero=sprite`, persistencia, reopen e ROM `SEGA`.
+  - **Gates desta rodada no host:** `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test` (`27` ficheiros / `272` testes), `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`, `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --test-threads=1` (`320 passed / 0 failed / 10 ignored`), `cargo test sgdk_matrix_corpus_ --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` (`7 passed / 0 failed`), `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\\\validate-upstream-windows.ps1 -SkipRustTests` (`success=true`, `processSweep.strategy=get-process`, `primaryError='Tempo limite expirou'` para CIM/WMI), `npm run preflight:sgdk-e2e` (`Ready: SIM`) e `npm run test:e2e:desktop:qa-rc` (`code=0`, `manual-qa-status.json` em `2026-04-26T05:19:54.185Z`, blocos A-G `passed`).
+  - **Honestidade / limite residual:** SGDK continua **Experimental**; `support_status` nao mudou. A Fase D ficou mais util e menos rasa, mas ainda nao virou parser/AST C completo; a heuristica continua explicita e auditavel em vez de “magica”.
+
+* **O que acabou de acontecer (2026-04-25 rodada 19 - IDE mais produto + gate Windows endurecido de ponta a ponta):**
+  - **Produto/CX:** `sceneWorkspaceContext.ts` virou o contrato de contexto de cena/importacao usado por `App.tsx`, `HierarchyPanel.tsx`, `InspectorPanel.tsx` e `ToolsPanel.tsx`. A IDE agora mostra de forma consistente cena importada ativa, entidade guia, contexto de overlay/importado e empty states menos ambiguos. O `ViewportPanel.tsx` trocou o texto tecnico cru por `SceneAssetHealthBadge.tsx`; o `HierarchyPanel.tsx` passou a marcar `Entrada` e `fallback`; o `InspectorPanel.tsx` ganhou chips de contexto/fallback; o `Asset Browser` ganhou `AssetBrowserSelectionCard.tsx` com preview, referencias de cena e decisao de instancia visivel.
+  - **Desacoplamento estrutural:** `sceneAssetHealth.ts`, `assetBrowserModel.ts`, `useAssetBrowserState.ts` e `SceneWorkspaceNotice.tsx` tiraram logica real de `ViewportPanel.tsx` e `ToolsPanel.tsx`. `assetInstantiation.ts` manteve `reason` auditavel e passou a expor `title/detail/entityLabel/nextStep` para produto.
+  - **Operacional Windows:** alem do fallback `CIM -> Get-Process`, `scripts/validate-upstream-windows.ps1` agora detecta Windows mesmo sem `%OS%`, e `src-tauri/src/compiler/build_orch.rs` injeta `OS=Windows_NT` antes do make SGDK no Windows. Isto evita o falso ramo Linux em `toolchains/sgdk/common.mk` (`m68k-elf-gcc`) e devolve o caminho canonico do gate oficial.
+  - **Cobertura nova:** `src/core/validateUpstreamWindows.test.ts` ganhou o smoke `still detects Windows when the OS env var is missing`; `src-tauri/src/compiler/build_orch.rs` ganhou `megadrive_build_forces_windows_os_env_for_sgdk_make`.
+  - **Gates desta rodada no host:** `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test` (`267` testes), `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`, `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --test-threads=1` (`319` passed / `0` failed / `10` ignored), `cargo test sgdk_matrix_corpus_ --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` (`7` passed / `0` failed), `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\validate-upstream-windows.ps1 -SkipRustTests`, `npm run preflight:sgdk-e2e` e `npm run test:e2e:desktop:qa-rc` verdes. `upstream-validation.json` ficou com `success=true`; `manual-qa-status.json` de `2026-04-25T18:43:11.668Z` voltou com blocos A-G `passed`.
+  - **Governanca:** SGDK continua **Experimental**; `support_status` nao mudou; sem commit/push.
+
+* **O que acabou de acontecer (2026-04-25 rodada 18 - gate Windows resiliente + fecho canonico do fluxo importado SGDK):**
+  - **Gate oficial Windows corrigido no proprio entrypoint institucional:** `scripts/validate-upstream-windows.ps1` agora separa sweep de processos (`Resolve-StaleTargetProcesses`) do resto do gate, tenta `Get-CimInstance Win32_Process` com timeout e degrada para `Get-Process` quando CIM/WMI falha, sem travar silenciosamente. `Invoke-CargoCaptured` passou a materializar `ExitCode` apos `WaitForExit()`/`Refresh()` e a falhar com erro tipado de wrapper quando nao consegue ler esse codigo.
+  - **Cobertura minima auditavel do fallback:** `src/core/validateUpstreamWindows.test.ts` roda `-SelfTestProcessSweep` com `RDS_VALIDATE_FORCE_CIM_FAILURE=1` e valida `processSweep.strategy = \"get-process\"` no report. `upstream-validation.json` da rodada real ficou com `success=true`, `skipRustTests=true`, `processSweep.strategy=\"cim\"` neste host, sem `usedCanonicalRetry`.
+  - **Contrato frontend unificado:** `src/core/assetVisualState.ts` + `src/core/useProjectAssetVisualState.ts` centralizam `idle/loading/loaded/missing/failed/legacy_fallback`; `AssetPreview`, `ViewportPanel` e `InspectorPanel` usam o mesmo contrato. O Inspector passou a expor preview real, caminho, `Estado visual` e fallback explicito para tilemap sem `cells[]`; o Viewport consolidou o contador de asset health com o mesmo vocabulário.
+  - **Fluxo importado/CX:** `App.tsx` agora leva projetos importados para a cena preferida, seleciona a primeira entidade visual relevante e regista o motivo no log. `scripts/e2e-tauri-build-run.mjs` bloco G foi alinhado aos sinais novos do Inspector (`Estado visual` + preview/fallback testids), o que devolveu a prova desktop do fluxo importado (`manual-qa-status.json` em `2026-04-25T11:18:10.213Z`, blocos A-G todos `passed`).
+  - **Gates desta rodada no host:** `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test` (`256` testes, exit 0), `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`, `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --test-threads=1`, `cargo test sgdk_matrix_corpus_ --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1`, `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\validate-upstream-windows.ps1 -SkipRustTests`, `npm run preflight:sgdk-e2e` e `npm run test:e2e:desktop:qa-rc` verdes.
+  - **Governanca:** SGDK continua **Experimental**; `support_status` nao mudou; nao houve commit/push.
+
+* **O que acabou de acontecer (2026-04-25 rodada 17 - IDE: fluxo import→cena→arte→persist→reopen com prova E2E):**
+  - **`classifyImageAssetInstantiation`:** motivo auditável (`reason`); pastas `maps/` e `res/maps/` tratadas como tilemap em projetos SGDK-like; `ToolsPanel` regista modo+motivo no console.
+  - **`ViewportPanel`:** onboarding SGDK só quando a cena não tem conteúdo de autoria; HUD `viewport-asset-health` inclui `tm-fallback N` (contagem de tilemaps sem malha pintada canónica, independente do load do tileset).
+  - **`App.tsx` / E2E:** `getState().projectSourceKind`; `instantiateBrowserImageAsset` espelha a regra do Asset Browser; `scripts/e2e-tauri-build-run.mjs` bloco G valida `entry_scene` vs `activeScenePath`, ausência de onboarding, `instantiateBrowserImageAsset` (tilemap+sprite), persistência de `entityCount` após reopen, Inspector com `data-testid` de fallback tilemap.
+  - **Gates nesta rodada:** `check:tree`, `lint`, `tsc`, `npm test` (246), `cargo clippy -D warnings`, `cargo test --lib --test-threads=1`, `cargo test sgdk_matrix_corpus_ --ignored --test-threads=1` (7/7), `preflight:sgdk-e2e`, `npm run test:e2e:desktop:qa-rc` **verde**.
+  - **`scripts/validate-upstream-windows.ps1 -SkipRustTests`:** falhou neste host com `Get-CimInstance Win32_Process` / WMI `0x80041033` (“Desligando” / recurso indisponível) — **não** contado como gate verde; exige repetir em host WMI saudável ou endurecer o script para fallback sem CIM.
+  - **HUD / banks (pedido G/H):** sem alteração de código adicional nesta sprint; modelo MD e testes `md_profile` já cobrem hints/metadata vs heurística; heurística `banks/cells` mantida com evidência da matriz corpus (7/7).
+  - **SGDK:** continua **Experimental**; sem `support_status`; sem commit/push.
+
+* **O que acabou de acontecer (2026-04-25 rodada 16 - IDE: preview auditavel + instancia tilemap canónica):**
+  - **`src/core/assetInstantiation.ts`:** `shouldInstantiateImageAsTilemapEntity` — prioridade: cena já referencia o path como `tilemap.tileset` → tilemap; como `sprite.asset` → sprite; projeto SGDK-like + pastas `tilesets/`/`tilemaps/` (ou sufixos `_tilemap`/`_tileset`) → tilemap; caso contrário sprite. Testes: `src/core/assetInstantiation.test.ts`.
+  - **`AssetPreview.tsx`:** estados explícitos `loading` / `loaded` / `failed` / `missing` (via `onStatusChange`); overlay “Carregando…” enquanto a imagem não dispara `onLoad`.
+  - **`InspectorPanel.tsx`:** mensagens humanas para estado do preview + caminho relativo do asset (sprite e tileset).
+  - **`ToolsPanel.tsx` (Asset Browser):** instanciação deixa de depender só de heurística de path; usa `projectSourceKind` + referências da cena.
+  - **Gates nesta continuacao:** `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, vitest (`assetInstantiation.test.ts`, `InspectorPanel.test.ts`) verdes; **nao** rerodou suite completa `npm test` / cargo / e2e nesta mensagem.
+  - **SGDK:** continua **Experimental**; sem mudança de `support_status`; sem commit/push nesta sessao.
 
 * **O que acabou de acontecer (2026-04-21 rodada 11+ - CollisionMap world-sized + teste matriz):**
   - **`md_profile.rs` / `snes_profile.rs`:** validacao de `CollisionMap` deixa de rejeitar mapas maiores que a viewport; mantem tile multiplo de 8, limites de grid/tamanho de `data`, integridade `data.len()` vs `width*height`, aviso (nao fatal) quando o mundo em pixels excede a resolucao visivel.
@@ -614,7 +767,7 @@
   - **Overlay seguro por padrao:** a adocao legada passou a usar `rds/project.rds`, `rds/scenes/main.json`, `rds/assets/...` com projecao canonica dos assets suportados e `rds/legacy_sgdk_index.json` com o mapa dos arquivos host (`.c`, `.h`, `.res`, `res/`, `out/`). O `build/` canonico permanece isolado no overlay para nao arriscar limpar o `out/` original do projeto host.
   - **Indice legado agora hidrata o editor:** `get_scene_data` passou a devolver `legacy_sgdk_index` quando o projeto aberto veio de um overlay `rds/`, e o frontend grava esse payload no store junto de `source_kind` para que a arvore SGDK host exista como estado consultavel do editor, nao apenas como sidecar em disco.
   - **Resumo visivel no workspace canonico:** `Tools -> Runtime Setup` agora exibe um card discreto de `SGDK legado` com host root, overlay `rds/`, contagens por bucket (`.c`, `.h`, manifests, recursos, `out/`) e detalhes sob demanda via `Ver indice`, reduzindo a necessidade de inspecionar o sidecar manualmente.
-  - **Cena opcional, metadata obrigatoria:** quando o legado possui manifests `.res`, o overlay gera a cena importada a partir deles usando o mesmo mapeamento canÃ´nico do importador SGDK; quando o host tem apenas `main.c`/headers, o workspace ainda nasce valido com cena vazia e `template_metadata.source_kind = "external_sgdk"`.
+  - **Cena opcional, metadata obrigatoria:** quando o legado possui manifests `.res`, o overlay gera a cena importada a partir deles usando o mesmo mapeamento canonico do importador SGDK; quando o host tem apenas `main.c`/headers, o workspace ainda nasce valido com cena vazia e `template_metadata.source_kind = "external_sgdk"`.
   - **Cobertura nova:** `project_mgr.rs` ganhou testes para wrapper de pasta com `main.c` apenas e para overlay com manifests/assets reais; `lib.rs` agora cobre `open_project_path` adotando legado in-place, o fallback de pasta automatica e o comando de importacao legada sem copia de codigo. `App.test.tsx` cobre criacao sem pasta base explicita e importacao SGDK via wrapper.
   - **Logs de validacao desta rodada:** `cargo test --lib import_legacy_sgdk_project_creates_overlay_for_main_c_only_workspace -- --nocapture --test-threads=1` OK com log `[legacy-main-c] overlay=...\\rds`; `cargo test --lib open_project_path_wraps_legacy_sgdk_directory_in_place -- --nocapture --test-threads=1` OK com log `[open-legacy] ...\\rds`; `cargo test --lib import_legacy_sgdk_project_command_wraps_directory_without_copying_code -- --nocapture --test-threads=1` OK com log `[legacy-import-command] ...\\rds`; `cargo test --lib resolve_project_base_dir_with_candidates_falls_back_and_creates_directory -- --nocapture --test-threads=1` OK com log `[fallback-base-dir] requested='...\\not-a-directory' resolved='...\\RetroDevProjects'`; `cargo test --lib get_scene_data_exposes_legacy_sgdk_index_for_overlay_projects -- --nocapture --test-threads=1` OK com log `[scene-data-legacy-index] overlay='...\\rds' c_files=2 manifests=1`.
   - **Barra verde reexecutada:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` OK (171 testes), `cargo clippy -- -D warnings` OK e `cargo test --lib -- --nocapture --test-threads=1` OK (193 aprovados / 0 falhas / 2 ignorados).
@@ -956,7 +1109,10 @@ As seguintes decisoes ja foram debatidas e sao finais:
 ## 4. PROXIMO PASSO IMEDIATO (PARA A IA EXECUTAR QUANDO SOLICITADA)
 
 **Tarefa:**
-Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as superficies `Experimental` que consigam provar valor no caminho canônico atual. O proximo alvo imediato desta wave passou a ser rerodar o `Desktop E2E` no GitHub/Windows com o bootstrap endurecido, capturar o resultado verdadeiro do branch candidato e so depois regenerar a fotografia institucional de promocao em worktree limpo; qualquer trabalho adicional de UX/shell continua secundario frente a esse gate.
+Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as superficies `Experimental` que consigam provar valor no caminho canônico atual. A rodada 29 melhorou materialmente a autoria local da IDE, mas o proximo alvo imediato continua ser transformar essa evidencia local em fotografia institucional: rerodar o `Desktop E2E` no GitHub/Windows, capturar o resultado verdadeiro do branch candidato e so depois regenerar a fotografia de promocao em worktree limpo. Qualquer nova UX deve atacar lacunas restantes de workflow real (nao mais sinais cosmeticos).
+
+**Tarefa atualizada pela rodada 30 (2026-05-10):**
+Antes de transformar a evidencia local de 2026-05-02 em fotografia institucional, recuperar o ambiente Rust/MSVC e `tauri-driver` neste host ou em host institucional equivalente. Nesta rodada, `cargo`/`vswhere` estavam ausentes, `preflight:sgdk-e2e` falhou por `tauri-driver` ausente e `validate-upstream-windows.ps1 -SkipRustTests` agora falha honestamente como `toolchain_missing`.
 
 **Pre-requisitos operacionais:**
 * Manter os 6 gates canonicos verdes em toda alteracao relevante.
@@ -966,11 +1122,19 @@ Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as 
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
 **Sequencia de acoes recomendada:**
-1. Conter regressao de bundle no shell e em `ToolsPanel`, medindo impacto real de cada rodada com `npm run build` antes de abrir novas superfícies ou aprofundar `Reverse Workspace`.
-2. So reabrir `Reverse Workspace` para claims mais fortes quando continuar cabendo no budget atual de UI e sem criar promessa falsa de projeção `.rds` automática.
-3. So reabrir `ArtStudio` ou `RetroFX` para claim maior quando houver prova institucional adicional chegando ao runtime real; por enquanto, ambas as superficies continuam `Experimental` apesar do caminho local ate build estar mais claro.
+1. Rerodar `Desktop E2E` no GitHub/Windows e comparar evidencias com `qa-rc-2026-05-02T05-14-22-572Z-*`.
+2. Manter SGDK **Experimental** ate a matriz cumprir a barra de suporte; nao transformar heuristicas de `entity_role`/Phase D em claim de AST.
+3. Se houver nova rodada de UX, atacar lacunas de workflow: edicao mais profunda de camera como entidade, graph mais construtivo sem inflar inferencia, e ArtStudio chegando ao runtime real.
 4. Repetir bundle MSI apenas quando o escopo tocar release/packaging (`scripts/run-in-msvc.cmd npm run build:msi`).
 5. Manter `validate-upstream-windows` e `release:readiness:baseline` como fotografia institucional sempre que alteracoes futuras tocarem build, emulacao, onboarding ou toolchains.
+
+**Sequencia atualizada pela rodada 30 (2026-05-10):**
+1. Provisionar/confirmar Rust + Visual Studio Build Tools/Installer com VC tools (`vswhere.exe`) e `tauri-driver`; rerodar `cargo clippy`, `cargo test --lib`, `npm run preflight:sgdk-e2e` e `npm run test:e2e:desktop:qa-rc`.
+2. Rerodar `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests` e exigir `success=true` real, sem falso positivo de wrapper.
+3. Rerodar `npm run release:readiness:baseline`; se o objetivo for promocao, usar `npm run release:readiness:promotion` em worktree curado/limpo.
+4. Rerodar `Desktop E2E` no GitHub/Windows e comparar evidencias com `qa-rc-2026-05-02T05-14-22-572Z-*`.
+5. Manter SGDK **Experimental** ate a matriz cumprir a barra de suporte; nao transformar heuristicas de `entity_role`/Phase D em claim de AST.
+6. Repetir bundle MSI apenas quando o escopo tocar release/packaging (`scripts/run-in-msvc.cmd npm run build:msi`).
 
 **Validacao minima obrigatoria antes de marcar qualquer item como concluido:**
 * `npm run check:tree`

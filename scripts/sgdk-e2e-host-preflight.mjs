@@ -91,6 +91,10 @@ export async function logPreflightSummary(options, root = repoRoot) {
   const nativeDriverOk = Boolean(nativeDriverPath);
 
   const allReady = sgdkDirOk && tauriDriverOk && nativeDriverOk;
+  const blockingStatusCodes = [];
+  if (!sgdkDirOk) blockingStatusCodes.push("toolchain_missing");
+  if (!tauriDriverOk) blockingStatusCodes.push("tauri_driver_missing");
+  if (!nativeDriverOk) blockingStatusCodes.push("webdriver_missing");
   const record = {
     repoRoot: root,
     sgdkDir,
@@ -101,6 +105,21 @@ export async function logPreflightSummary(options, root = repoRoot) {
     nativeDriverPath: nativeDriverPath || null,
     externalDriver: Boolean(options?.externalDriver),
     ready: allReady,
+    blocking_status_codes: blockingStatusCodes,
+    checks: {
+      sgdk: {
+        exists: sgdkDirExists,
+        gcc: sgdkGcc,
+        makefileGen: sgdkMakefile,
+      },
+      tauriDriver: {
+        ok: tauriDriverOk,
+        externalDriver: Boolean(options?.externalDriver),
+      },
+      webdriver: {
+        ok: nativeDriverOk,
+      },
+    },
   };
 
   const sgdkDetail = sgdkDirOk

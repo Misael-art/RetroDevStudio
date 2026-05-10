@@ -48,6 +48,24 @@ function Read-BuildReport([string]$ReportPath) {
   }
 }
 
+function Get-BuildReportMode($BuildReport, [string]$Mode) {
+  if (!$BuildReport) {
+    return $null
+  }
+
+  $modesProperty = $BuildReport.PSObject.Properties["modes"]
+  if ($null -eq $modesProperty -or $null -eq $modesProperty.Value) {
+    return $null
+  }
+
+  $modeProperty = $modesProperty.Value.PSObject.Properties[$Mode]
+  if ($null -eq $modeProperty) {
+    return $null
+  }
+
+  return $modeProperty.Value
+}
+
 function Invoke-WebDriverSessionProbe([string]$AppPath, [string]$DriverPath) {
   Write-Step "WebDriver Session Probe"
 
@@ -138,13 +156,13 @@ $buildReportPath = Join-Path $RepoRoot "src-tauri\\target-test\\validation\\buil
 $buildReport = Read-BuildReport $buildReportPath
 $reportedReleasePath = $null
 $reportedDebugPath = $null
-if ($buildReport -and $buildReport.modes) {
-  if ($buildReport.modes.portable) {
-    $reportedReleasePath = $buildReport.modes.portable.canonicalExe
-  }
-  if ($buildReport.modes.debug) {
-    $reportedDebugPath = $buildReport.modes.debug.canonicalExe
-  }
+$portableReport = Get-BuildReportMode $buildReport "portable"
+$debugReport = Get-BuildReportMode $buildReport "debug"
+if ($portableReport) {
+  $reportedReleasePath = $portableReport.canonicalExe
+}
+if ($debugReport) {
+  $reportedDebugPath = $debugReport.canonicalExe
 }
 $appPath =
   if (Test-Path $releaseAppPath) {
@@ -169,13 +187,13 @@ Write-Sub "Build report" $(if (Test-Path $buildReportPath) { $buildReportPath } 
 if ($buildReport) {
   Write-Sub "Build report generatedAt" $buildReport.generatedAt
   Write-Sub "Build report requestedTargetDir" $buildReport.requestedTargetDir
-  if ($buildReport.modes.portable) {
-    Write-Sub "Portable effectiveTargetDir" $buildReport.modes.portable.effectiveTargetDir
-    Write-Sub "Portable shadow fallback" ([string]$buildReport.modes.portable.usedShadowFallback)
+  if ($portableReport) {
+    Write-Sub "Portable effectiveTargetDir" $portableReport.effectiveTargetDir
+    Write-Sub "Portable shadow fallback" ([string]$portableReport.usedShadowFallback)
   }
-  if ($buildReport.modes.debug) {
-    Write-Sub "Debug effectiveTargetDir" $buildReport.modes.debug.effectiveTargetDir
-    Write-Sub "Debug shadow fallback" ([string]$buildReport.modes.debug.usedShadowFallback)
+  if ($debugReport) {
+    Write-Sub "Debug effectiveTargetDir" $debugReport.effectiveTargetDir
+    Write-Sub "Debug shadow fallback" ([string]$debugReport.usedShadowFallback)
   }
 }
 Write-Sub "Node available" ((Test-Command "node").ToString())

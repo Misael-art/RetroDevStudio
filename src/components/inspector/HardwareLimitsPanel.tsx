@@ -102,6 +102,7 @@ export default function HardwareLimitsPanel() {
     hwValidationState,
     hwValidatedRevision,
     sceneRevision,
+    activeTarget,
   } = useEditorStore();
 
   const status: HwStatus = hwStatus ?? {
@@ -176,7 +177,7 @@ export default function HardwareLimitsPanel() {
       </div>
 
       <GaugeRow
-        label="VRAM (sprites)"
+        label="VRAM (residente)"
         used={status.vram_used}
         limit={status.vram_limit}
         unit="KB"
@@ -197,6 +198,40 @@ export default function HardwareLimitsPanel() {
         limit={status.dma_limit}
         unit="KB"
       />
+      <div className="border-b border-[#313244] px-3 py-1 text-[10px] text-[#7f849c]">
+        <span className="font-semibold text-[#bac2de]">
+          Mode: {status.analysis_mode ?? "native_static"}
+        </span>
+        <span className="ml-2">
+          total {Math.floor((status.project_asset_bytes ?? status.vram_used) / 1024)}KB
+        </span>
+        <span className="ml-2">
+          resident {Math.floor((status.resident_vram_bytes ?? status.vram_used) / 1024)}KB
+        </span>
+        <span className="ml-2">
+          streamable {Math.floor((status.streamable_vram_bytes ?? 0) / 1024)}KB
+        </span>
+      </div>
+      {activeTarget === "megadrive" && (
+        <div
+          className="border-b border-[#313244] px-3 py-1 font-mono text-[9px] leading-snug text-[#7f849c]"
+          data-testid="hardware-md-residency-breakdown"
+        >
+          QA: spr {Math.floor((status.sprite_resident_bytes ?? 0) / 1024)}KB | tile{" "}
+          {Math.floor((status.tilemap_resident_bytes ?? 0) / 1024)}KB | hud{" "}
+          {Math.floor((status.hud_resident_bytes ?? 0) / 1024)}KB | strm_spr{" "}
+          {Math.floor((status.streamable_sprite_bytes ?? 0) / 1024)}KB | anim_sw{" "}
+          {Math.floor((status.animated_swap_bytes ?? 0) / 1024)}KB
+          {status.analysis_mode === "sgdk_managed" ? (
+            <>
+              {" "}
+              | banks {status.managed_concurrent_sprite_banks ?? 0}/
+              {status.managed_sprite_banks_limit ?? 0} cells {status.managed_sprite_cells_used ?? 0}/
+              {status.managed_sprite_cells_budget ?? 0}
+            </>
+          ) : null}
+        </div>
+      )}
       <GaugeRow
         label="Palette Banks"
         used={status.palette_banks_used}

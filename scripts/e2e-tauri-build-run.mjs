@@ -48,8 +48,44 @@ const manualQaStatusPath = path.join(
 );
 let currentE2eRunContext = null;
 
-function fail(message) {
-  throw new Error(message);
+class E2EFailure extends Error {
+  constructor(message, metadata = {}) {
+    super(message);
+    this.name = "E2EFailure";
+    this.statusCode = metadata.statusCode ?? "e2e_unknown";
+    this.errorCategory = metadata.errorCategory ?? "app_failure";
+    this.details = metadata.details ?? null;
+  }
+}
+
+function fail(message, metadata = {}) {
+  throw new E2EFailure(message, metadata);
+}
+
+function classifyFailureMetadata(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof E2EFailure) {
+    return {
+      statusCode: error.statusCode,
+      errorCategory: error.errorCategory,
+      details: error.details ?? null,
+      message,
+    };
+  }
+  const lower = message.toLowerCase();
+  if (lower.includes("webdriver") || lower.includes("msedgedriver")) {
+    return { statusCode: "webdriver_error", errorCategory: "webdriver_failure", details: null, message };
+  }
+  if (lower.includes("timeout") || lower.includes("excedeu")) {
+    return { statusCode: "timeout_wait_condition", errorCategory: "timeout", details: null, message };
+  }
+  if (lower.includes("build") || lower.includes("rom")) {
+    return { statusCode: "build_failed", errorCategory: "build_failure", details: null, message };
+  }
+  if (lower.includes("toolchains") || lower.includes("preflight") || lower.includes("host")) {
+    return { statusCode: "host_issue", errorCategory: "host_failure", details: null, message };
+  }
+  return { statusCode: "app_failure", errorCategory: "app_failure", details: null, message };
 }
 
 function parsePositiveInteger(rawValue, fallback) {
@@ -638,9 +674,17 @@ async function waitFor(predicate, timeoutMs, label, intervalMs = 500) {
   }
 
   if (lastError instanceof Error) {
-    throw new Error(`${label}: ${lastError.message}`);
+    fail(`${label}: ${lastError.message}`, {
+      statusCode: "timeout_wait_condition",
+      errorCategory: "timeout",
+      details: { timeoutMs, label },
+    });
   }
-  throw new Error(label);
+  fail(label, {
+    statusCode: "timeout_wait_condition",
+    errorCategory: "timeout",
+    details: { timeoutMs, label },
+  });
 }
 
 async function webdriverRequest(method, route, body) {
@@ -747,6 +791,47 @@ async function callAutomationApi(sessionId, methodName, args = []) {
   return result.value;
 }
 
+async function tryAutomationApi(sessionId, methodName, args = [], timeoutMs = 8000) {
+  return executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const api = window.__RDS_E2E__;
+      const methodName = arguments[0];
+      const methodArgs = Array.isArray(arguments[1]) ? arguments[1] : [];
+      const timeoutMs = Number(arguments[2]) || 8000;
+      if (!api || typeof api[methodName] !== "function") {
+        done({ ok: false, reason: "Metodo de automacao indisponivel: " + methodName });
+        return;
+      }
+
+      let settled = false;
+      const finish = (payload) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        done(payload);
+      };
+      const timer = setTimeout(
+        () => finish({ ok: false, timedOut: true, reason: methodName + " excedeu " + timeoutMs + "ms" }),
+        timeoutMs
+      );
+
+      Promise.resolve(api[methodName](...methodArgs))
+        .then((value) => {
+          clearTimeout(timer);
+          finish({ ok: true, value });
+        })
+        .catch((error) => {
+          clearTimeout(timer);
+          finish({ ok: false, reason: String(error) });
+        });
+    `,
+    [methodName, args, timeoutMs]
+  );
+}
+
 function createManualQaReport() {
   return {
     generatedAt: null,
@@ -755,14 +840,18 @@ function createManualQaReport() {
     projectDir: "",
     app: "",
     artifacts: [],
+    metadata: {
+      startedAt: new Date().toISOString(),
+      finishedAt: null,
+    },
     blocks: {
-      A: { status: "pending", note: null },
-      B: { status: "pending", note: null },
-      C: { status: "pending", note: null },
-      D: { status: "pending", note: null },
-      E: { status: "pending", note: null },
-      F: { status: "pending", note: null },
-      G: { status: "pending", note: null },
+      A: { status: "pending", note: null, status_code: null, error_category: null, started_at: null, finished_at: null, duration_ms: null },
+      B: { status: "pending", note: null, status_code: null, error_category: null, started_at: null, finished_at: null, duration_ms: null },
+      C: { status: "pending", note: null, status_code: null, error_category: null, started_at: null, finished_at: null, duration_ms: null },
+      D: { status: "pending", note: null, status_code: null, error_category: null, started_at: null, finished_at: null, duration_ms: null },
+      E: { status: "pending", note: null, status_code: null, error_category: null, started_at: null, finished_at: null, duration_ms: null },
+      F: { status: "pending", note: null, status_code: null, error_category: null, started_at: null, finished_at: null, duration_ms: null },
+      G: { status: "pending", note: null, status_code: null, error_category: null, started_at: null, finished_at: null, duration_ms: null },
     },
   };
 }
@@ -770,6 +859,9 @@ function createManualQaReport() {
 async function writeManualQaReport(report) {
   await ensureValidationDir();
   report.generatedAt = new Date().toISOString();
+  if (report.metadata) {
+    report.metadata.finishedAt = report.generatedAt;
+  }
   await writeFile(manualQaStatusPath, `${JSON.stringify(report, null, 2)}\n`);
 }
 
@@ -780,10 +872,20 @@ function registerArtifact(report, filePath, label) {
   });
 }
 
-async function markManualQaBlock(report, blockId, status, note) {
+async function markManualQaBlock(report, blockId, status, note, metadata = {}) {
+  const nowIso = new Date().toISOString();
+  const current = report.blocks[blockId] ?? {};
+  const startedAt = metadata.startedAt ?? current.started_at ?? nowIso;
+  const finishedAt = metadata.finishedAt ?? nowIso;
+  const durationMs = Math.max(0, Date.parse(finishedAt) - Date.parse(startedAt));
   report.blocks[blockId] = {
     status,
     note,
+    status_code: metadata.statusCode ?? current.status_code ?? null,
+    error_category: metadata.errorCategory ?? current.error_category ?? null,
+    started_at: startedAt,
+    finished_at: finishedAt,
+    duration_ms: Number.isFinite(durationMs) ? durationMs : null,
   };
   await writeManualQaReport(report);
 }
@@ -1010,7 +1112,7 @@ async function toggleLayerVisibility(sessionId, layerName) {
   }
 }
 
-async function sceneOverlayPointerAction(sessionId, x, y, button = 0) {
+async function sceneOverlayPointerAction(sessionId, x, y, button = 0, modifiers = {}) {
   const result = await executeScript(
     sessionId,
     `
@@ -1022,12 +1124,16 @@ async function sceneOverlayPointerAction(sessionId, x, y, button = 0) {
       const clientX = rect.left + Number(arguments[0]);
       const clientY = rect.top + Number(arguments[1]);
       const button = Number(arguments[2]);
+      const modifiers = arguments[3] ?? {};
       const buttons = button === 2 ? 2 : 1;
       const eventInit = {
         bubbles: true,
         cancelable: true,
         button,
         buttons,
+        shiftKey: Boolean(modifiers.shiftKey),
+        altKey: Boolean(modifiers.altKey),
+        ctrlKey: Boolean(modifiers.ctrlKey),
         clientX,
         clientY,
       };
@@ -1040,7 +1146,7 @@ async function sceneOverlayPointerAction(sessionId, x, y, button = 0) {
       }
       return true;
     `,
-    [x, y, button]
+    [x, y, button, modifiers]
   );
 
   if (!result) {
@@ -1109,29 +1215,6 @@ async function updateInspectorIntField(sessionId, label, value) {
 
   if (!updated) {
     fail(`Falha ao atualizar campo do Inspector: ${label}`);
-  }
-}
-
-async function clickButtonByText(sessionId, label) {
-  const result = await executeScript(
-    sessionId,
-    `
-      const normalizedLabel = String(arguments[0]).trim();
-      const button = Array.from(document.querySelectorAll("button")).find((candidate) => {
-        const text = candidate.textContent?.replace(/\\s+/g, " ").trim() ?? "";
-        return text === normalizedLabel;
-      });
-      if (!(button instanceof HTMLButtonElement) || button.disabled) {
-        return false;
-      }
-      button.click();
-      return true;
-    `,
-    [label]
-  );
-
-  if (!result) {
-    fail(`Botao nao encontrado ou desabilitado: ${label}`);
   }
 }
 
@@ -1319,6 +1402,54 @@ async function findElement(sessionId, selector) {
 
 async function clickElement(sessionId, elementId) {
   await webdriverRequest("POST", `/session/${sessionId}/element/${elementId}/click`, {});
+}
+
+async function clickButtonByText(sessionId, expectedText, mode = "contains") {
+  const clicked = await executeScript(
+    sessionId,
+    `
+      const expectedText = String(arguments[0] ?? "").trim();
+      const mode = String(arguments[1] ?? "contains");
+      const normalize = (value) => String(value ?? "").replace(/\\s+/g, " ").trim();
+      const button = Array.from(document.querySelectorAll("button")).find((candidate) => {
+        if (!(candidate instanceof HTMLButtonElement) || candidate.disabled) {
+          return false;
+        }
+        const text = normalize(candidate.textContent);
+        return mode === "exact" ? text === expectedText : text.includes(expectedText);
+      });
+      if (!(button instanceof HTMLButtonElement)) {
+        return false;
+      }
+      button.click();
+      return true;
+    `,
+    [expectedText, mode]
+  );
+
+  if (!clicked) {
+    fail(`Botao nao encontrado para clique: '${expectedText}'.`);
+  }
+}
+
+async function clickButtonByTestId(sessionId, testId) {
+  const clicked = await executeScript(
+    sessionId,
+    `
+      const testId = String(arguments[0] ?? "").trim();
+      const button = document.querySelector('[data-testid="' + testId + '"]');
+      if (!(button instanceof HTMLButtonElement) || button.disabled) {
+        return false;
+      }
+      button.click();
+      return true;
+    `,
+    [testId]
+  );
+
+  if (!clicked) {
+    fail(`Botao nao encontrado ou desabilitado: ${testId}`);
+  }
 }
 
 async function waitForBuildRunReady(sessionId, timeoutMs) {
@@ -1734,6 +1865,23 @@ async function main() {
       // Forca o caminho Tauri CLI no build de QA RC para preservar o fluxo canonico desktop E2E.
       process.env.RDS_FORCE_TAURI_CLI_DEBUG = "1";
       console.log("[qa-rc] RDS_FORCE_TAURI_CLI_DEBUG=1 para build desktop canônico.");
+    }
+
+    if (options.scenario === "qa-rc") {
+      // Mitigacao auditavel do blocker operacional:
+      // Em alguns hosts, o build desktop do QA RC falha por esgotamento de memoria do rustc
+      // (ex.: "rustc-LLVM ERROR: out of memory" compilando dependencias como tauri-utils).
+      // Para preservar o fluxo canonico do gate (sem maquiar resultado), reduzimos paralelismo
+      // e o custo do perfil dev apenas no cenario qa-rc.
+      process.env.RDS_E2E_QA_RC_MEMORY_SAFE = "1";
+      process.env.CARGO_BUILD_JOBS = "1";
+      process.env.CARGO_INCREMENTAL = "0";
+      process.env.CARGO_PROFILE_DEV_INCREMENTAL = "false";
+      process.env.CARGO_PROFILE_DEV_DEBUG = "0";
+      process.env.CARGO_PROFILE_DEV_CODEGEN_UNITS = "1";
+      console.log(
+        "[qa-rc] Mitigacao memoria ativa no build: CARGO_BUILD_JOBS=1, CARGO_INCREMENTAL=0, CARGO_PROFILE_DEV_DEBUG=0, CARGO_PROFILE_DEV_CODEGEN_UNITS=1."
+      );
     }
     console.log("== Building debug Tauri app ==");
     await spawnLogged(npmCommand(), ["run", "build:debug"]);
@@ -2560,12 +2708,347 @@ async function main() {
           "Importacao SGDK via automacao nao hidratou o projeto nativo.",
           500
         );
+        const normScenePath = (value) => String(value ?? "").replace(/\\/g, "/").replace(/\/+/g, "/");
+        const projectRdsParsed = JSON.parse(
+          await readFile(path.join(sgdkProjectDir, "project.rds"), "utf8")
+        );
+        const entrySceneExpected = normScenePath(projectRdsParsed.entry_scene);
+        if (!entrySceneExpected) {
+          fail("Bloco G: project.rds sem entry_scene apos import SGDK.");
+        }
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state && normScenePath(state.activeScenePath) === entrySceneExpected ? state : false;
+          },
+          20000,
+          `Bloco G: IDE abriu cena errada (esperado entry_scene='${entrySceneExpected}', recebido estado activo).`,
+          250
+        );
+        if (String(importedSgdkState.projectSourceKind ?? "") !== "imported_sgdk") {
+          fail(
+            `Bloco G: projectSourceKind esperado 'imported_sgdk', recebido '${importedSgdkState.projectSourceKind ?? ""}'.`
+          );
+        }
+        const onboardingBlocksImportedScene = await executeScript(
+          sessionId,
+          "return Boolean(document.querySelector('[data-testid=\"viewport-sgdk-onboarding\"]'));"
+        );
+        if (onboardingBlocksImportedScene) {
+          fail("Bloco G: onboarding SGDK nao deve cobrir a cena quando o import trouxe entidades/camadas.");
+        }
+        await waitFor(
+          async () => {
+            const text = await executeScript(
+              sessionId,
+              "return document.querySelector('[data-testid=\"viewport-asset-health\"]')?.textContent ?? '';"
+            );
+            return /assets\s+\d+\/\d+/.test(String(text));
+          },
+          25000,
+          "Projeto SGDK importado nao exibiu estado auditavel de assets no viewport.",
+          250
+        );
+        const importedTilemapEntities =
+          importedSgdkState.activeScene?.entities?.filter((entity) => entity.type === "tilemap").length ?? 0;
+        if (importedTilemapEntities < 1) {
+          fail(
+            `Bloco G: cena importada devia expor >=1 tilemap auditavel; encontrado ${importedTilemapEntities}.`
+          );
+        }
+        const baseEntityCount = importedSgdkState.activeSceneEntityCount;
+        const stageInst = await callAutomationApi(sessionId, "instantiateBrowserImageAsset", [
+          "assets/tilesets/stage.png",
+        ]);
+        if (stageInst.kind !== "tilemap") {
+          fail(
+            `Bloco G: instantiateBrowserImageAsset(stage) devia ser tilemap; recebido '${stageInst.kind}' (${stageInst.reason}).`
+          );
+        }
+        const heroInst = await callAutomationApi(sessionId, "instantiateBrowserImageAsset", [
+          "assets/sprites/hero.png",
+        ]);
+        if (heroInst.kind !== "sprite") {
+          fail(
+            `Bloco G: instantiateBrowserImageAsset(hero) devia ser sprite; recebido '${heroInst.kind}' (${heroInst.reason}).`
+          );
+        }
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state && state.activeSceneEntityCount >= baseEntityCount + 2 ? state : false;
+          },
+          20000,
+          "Bloco G: instanciacoes canonicas via automacao nao aumentaram entityCount como esperado.",
+          250
+        );
+        await callAutomationApi(sessionId, "setRightPanelMode", ["inspector"]);
+        const importedEntityId =
+          importedSgdkState?.activeScene?.entities?.find((entity) => entity.type === "tilemap")?.id ??
+          importedSgdkState?.activeScene?.entities?.find((entity) => entity.type === "sprite")?.id ??
+          importedSgdkState?.activeScene?.entities?.[0]?.id;
+        if (importedEntityId) {
+          await callAutomationApi(sessionId, "setSelectedEntityId", [importedEntityId]);
+          await waitFor(
+            async () => {
+              return executeScript(
+                sessionId,
+                `return Boolean(
+                  document.querySelector('[data-testid="inspector-tilemap-legacy-fallback"]') ||
+                  document.querySelector('[data-testid="inspector-asset-preview"]') ||
+                  document.querySelector('[data-testid="inspector-asset-preview-fallback"]') ||
+                  document.querySelector('[data-testid="inspector-tilemap-preview"]') ||
+                  document.querySelector('[data-testid="inspector-tilemap-preview-fallback"]')
+                ) ||
+                  (document.body.textContent || '').includes('Estado visual:') ||
+                  (document.body.textContent || '').includes('Estado visual (tileset):');`
+              );
+            },
+            25000,
+            "Inspector nao exibiu preview/fallback auditavel para entidade importada SGDK.",
+            250
+          );
+        }
+        const importedSpriteEntities =
+          importedSgdkState?.activeScene?.entities?.filter((entity) => entity.type === "sprite") ?? [];
+        const uniqueSpritePositions = new Set(
+          importedSpriteEntities.map((entity) => `${entity.x}:${entity.y}`)
+        );
+        const denseSceneNote =
+          importedSpriteEntities.length > 0
+            ? `Cena densa: ${importedSpriteEntities.length} sprite(s) importado(s) com ${uniqueSpritePositions.size} posicao(oes) distintas no bootstrap da cena.`
+            : "Cena densa: fixture sem sprite importado suficiente para aferir distribuicao.";
+        const importedSceneScreenshot = await captureScreenshot(
+          sessionId,
+          `${artifactPrefix}-G-scene-authoring.png`
+        );
+        registerArtifact(manualQaReport, importedSceneScreenshot, "G - imported scene authoring");
+        let denseWorkflowNote = "Cena densa: fixture sem sprites suficientes para provar picker/solo.";
+        if (importedSpriteEntities.length >= 2) {
+          const stackX = 72;
+          const stackY = 72;
+          const firstStackEntity = importedSpriteEntities[0];
+          const secondStackEntity = importedSpriteEntities[1];
+          await callAutomationApi(sessionId, "selectWorkspace", ["scene"]);
+          await callAutomationApi(sessionId, "setEditorMode", ["select"]);
+          await callAutomationApi(sessionId, "setEntityTransform", [firstStackEntity.id, stackX, stackY]);
+          await callAutomationApi(sessionId, "setEntityTransform", [secondStackEntity.id, stackX, stackY]);
+          const stackedState = await waitFor(
+            async () => {
+              const state = await readAutomationState(sessionId);
+              const stackedEntities = state?.activeScene?.entities?.filter(
+                (entity) =>
+                  (entity.id === firstStackEntity.id || entity.id === secondStackEntity.id) &&
+                  entity.x === stackX &&
+                  entity.y === stackY
+              );
+              return stackedEntities?.length === 2 && state?.editorMode === "select" ? state : false;
+            },
+            10000,
+            "Bloco G: empilhamento de entidades densas nao apareceu no estado ativo.",
+            100
+          );
+          const worldBounds = stackedState.activeScene?.worldBounds ?? { minX: 0, minY: 0 };
+          await sceneOverlayPointerAction(
+            sessionId,
+            stackX - worldBounds.minX + 12,
+            stackY - worldBounds.minY + 12,
+            0,
+            { shiftKey: true }
+          );
+          await waitFor(
+            async () =>
+              executeScript(
+                sessionId,
+                "return Boolean(document.querySelector('[data-testid=\"viewport-dense-stack-picker\"]'));"
+              ),
+            15000,
+            "Bloco G: Shift+clique em pilha densa nao abriu o picker contextual.",
+            250
+          );
+          await executeScript(
+            sessionId,
+            `
+              const button = document.querySelector('[data-testid="viewport-dense-stack-solo-preview"]');
+              if (!(button instanceof HTMLButtonElement)) {
+                return false;
+              }
+              button.click();
+              return true;
+            `
+          );
+          await waitFor(
+            async () => {
+              const state = await readAutomationState(sessionId);
+              const dockText = await executeScript(
+                sessionId,
+                "return document.querySelector('[data-testid=\"viewport-creator-command-dock\"]')?.textContent ?? '';"
+              );
+              return state?.selectedEntityId && String(dockText).includes("Solo:") ? { state, dockText } : false;
+            },
+            15000,
+            "Bloco G: picker denso nao selecionou/focou com solo ativo.",
+            250
+          );
+          const denseSoloScreenshot = await captureScreenshot(
+            sessionId,
+            `${artifactPrefix}-G-dense-solo-authoring.png`
+          );
+          registerArtifact(manualQaReport, denseSoloScreenshot, "G - dense selection solo");
+          denseWorkflowNote = [
+            `Cena densa: '${firstStackEntity.id}' e '${secondStackEntity.id}' empilhados em ${stackX},${stackY}; Shift+clique abriu picker e 'Isolar alvo' ativou solo/foco.`,
+            `Evidencia: ${path.basename(denseSoloScreenshot)}.`,
+          ].join(" ");
+        }
+        const importedTilemapEntityId =
+          importedSgdkState?.activeScene?.entities?.find((entity) => entity.type === "tilemap")?.id ??
+          null;
         const sgdkLogicEntityId =
           importedSgdkState?.activeScene?.entities?.find((entity) => entity.type === "sprite")?.id ??
           importedSgdkState?.activeScene?.entities?.[0]?.id;
         if (!sgdkLogicEntityId) {
           fail("Bloco G: nenhuma entidade alvo encontrada para validar graph_ref no projeto SGDK.");
         }
+        let tilemapWorkflowNote = "Tilemap workflow: sem tilemap importado selecionavel para prova adicional.";
+        if (importedTilemapEntityId) {
+          await callAutomationApi(sessionId, "setRightPanelMode", ["inspector"]);
+          await callAutomationApi(sessionId, "setSelectedEntityId", [importedTilemapEntityId]);
+          await clickButtonByText(sessionId, "Editar tilemap no viewport");
+          const tilemapEditingState = await waitFor(
+            async () => {
+              const state = await readAutomationState(sessionId);
+              return state?.activeWorkspace === "scene" &&
+                state?.activeViewportTab === "scene" &&
+                state?.editorMode === "paint" &&
+                state?.activeTilemapId === importedTilemapEntityId
+                ? state
+                : false;
+            },
+            15000,
+            "Bloco G: tilemap importado nao entrou no fluxo de pintura canonico.",
+            250
+          );
+          const worldStripText = await executeScript(
+            sessionId,
+            "return document.querySelector('[data-testid=\"viewport-world-authoring-strip\"]')?.textContent ?? '';"
+          );
+          const tilemapScreenshot = await captureScreenshot(
+            sessionId,
+            `${artifactPrefix}-G-tilemap-authoring.png`
+          );
+          registerArtifact(manualQaReport, tilemapScreenshot, "G - tilemap authoring");
+          tilemapWorkflowNote = [
+            `Tilemap workflow: '${importedTilemapEntityId}' entrou em editorMode='${tilemapEditingState.editorMode}' com activeTilemapId='${tilemapEditingState.activeTilemapId}'.`,
+            worldStripText
+              ? `Faixa mundo/camera visivel: ${String(worldStripText).replace(/\s+/g, " ").trim()}.`
+              : "Faixa mundo/camera nao apareceu para esta fixture (registrado sem maquiar).",
+            `Evidencia: ${path.basename(tilemapScreenshot)}.`,
+          ].join(" ");
+        }
+        await callAutomationApi(sessionId, "setRightPanelMode", ["inspector"]);
+        await callAutomationApi(sessionId, "setSelectedEntityId", [sgdkLogicEntityId]);
+        await waitFor(
+          async () =>
+            executeScript(
+              sessionId,
+              `const button = document.querySelector('[data-testid="inspector-open-logic-workspace"]');
+               return button instanceof HTMLButtonElement && !button.disabled;`
+            ),
+          15000,
+          "Bloco G: botao Objeto -> Logica nao ficou disponivel no Inspector.",
+          250
+        );
+        await clickButtonByTestId(sessionId, "inspector-open-logic-workspace");
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.activeWorkspace === "logic" && state?.activeViewportTab === "logic"
+              ? state
+              : false;
+          },
+          15000,
+          "Bloco G: navegacao objeto -> logica nao ativou o Logic Workspace.",
+          250
+        );
+        const navigationLogicState = await callAutomationApi(sessionId, "getEntityLogicState", [sgdkLogicEntityId]);
+        const primarySourceRef =
+          navigationLogicState?.source?.source_paths?.[0] ??
+          navigationLogicState?.source?.external_source_refs?.[0] ??
+          null;
+        if (!primarySourceRef) {
+          fail(`Bloco G: entidade '${sgdkLogicEntityId}' sem source_paths/external_source_refs navegaveis.`);
+        }
+        const openedSourceAttempt = await tryAutomationApi(
+          sessionId,
+          "openEntitySourcePath",
+          [sgdkLogicEntityId, primarySourceRef],
+          8000
+        );
+        const logicScreenshot = await captureScreenshot(
+          sessionId,
+          `${artifactPrefix}-G-logic-authoring.png`
+        );
+        registerArtifact(manualQaReport, logicScreenshot, "G - logic authoring");
+        const sourceNavigationSummary = openedSourceAttempt?.ok
+          ? `fonte '${openedSourceAttempt.value?.relative_path ?? primarySourceRef}' acionada no host`
+          : `fallback honesto para '${primarySourceRef}': ${openedSourceAttempt?.reason ?? "sem retorno do host"}`;
+        const logicSourceNote = [
+          `Objeto -> logica -> fonte: entidade '${sgdkLogicEntityId}' abriu Logic Workspace; ${sourceNavigationSummary}.`,
+          `Evidencia: ${path.basename(logicScreenshot)}.`,
+        ].join(" ");
+        await callAutomationApi(sessionId, "setRightPanelMode", ["inspector"]);
+        await callAutomationApi(sessionId, "setSelectedEntityId", [sgdkLogicEntityId]);
+        await waitFor(
+          async () =>
+            executeScript(
+              sessionId,
+              `const button = document.querySelector('[data-testid="inspector-open-art-workspace"]');
+               return button instanceof HTMLButtonElement && !button.disabled;`
+            ),
+          15000,
+          "Bloco G: botao Objeto -> Art nao ficou disponivel no Inspector.",
+          250
+        );
+        await clickButtonByTestId(sessionId, "inspector-open-art-workspace");
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            const hasArtSurface = await executeScript(
+              sessionId,
+              "return Boolean(document.querySelector('[data-testid=\"artstudio-main-stage\"]') && document.querySelector('[data-testid=\"artstudio-scene-context-bridge\"]'));"
+            );
+            return state?.activeWorkspace === "artstudio" &&
+              state?.activeViewportTab === "artstudio" &&
+              state?.selectedEntityId === sgdkLogicEntityId &&
+              hasArtSurface
+              ? state
+              : false;
+          },
+          15000,
+          "Bloco G: navegacao objeto -> art nao abriu o Art Workspace integrado.",
+          250
+        );
+        const artScreenshot = await captureScreenshot(
+          sessionId,
+          `${artifactPrefix}-G-art-workspace.png`
+        );
+        registerArtifact(manualQaReport, artScreenshot, "G - art workspace");
+        await callAutomationApi(sessionId, "selectWorkspace", ["scene"]);
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.activeWorkspace === "scene" && state?.selectedEntityId === sgdkLogicEntityId
+              ? state
+              : false;
+          },
+          15000,
+          "Bloco G: retorno Art -> Scene perdeu contexto da entidade selecionada.",
+          250
+        );
+        const artWorkspaceNote = [
+          `Art integrado: '${sgdkLogicEntityId}' abriu Art Workspace com stage/plano de apply e retornou ao Scene sem perder selectedEntityId.`,
+          `Evidencia: ${path.basename(artScreenshot)}.`,
+        ].join(" ");
         const initialLogicState = await callAutomationApi(sessionId, "getEntityLogicState", [sgdkLogicEntityId]);
         if (!initialLogicState?.source?.graph_ref) {
           fail(
@@ -2662,6 +3145,36 @@ async function main() {
           "Projeto SGDK nao reabriu com colisao editada.",
           250
         );
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state && normScenePath(state.activeScenePath) === entrySceneExpected ? state : false;
+          },
+          15000,
+          `Bloco G reopen: cena activa diferente de entry_scene ('${entrySceneExpected}').`,
+          250
+        );
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state && state.activeSceneEntityCount >= baseEntityCount + 2 ? state : false;
+          },
+          20000,
+          "Bloco G reopen: entidades instanciadas nao foram persistidas/rehidratadas.",
+          250
+        );
+        await waitFor(
+          async () => {
+            const text = await executeScript(
+              sessionId,
+              "return document.querySelector('[data-testid=\"viewport-asset-health\"]')?.textContent ?? '';"
+            );
+            return /assets\s+\d+\/\d+/.test(String(text));
+          },
+          25000,
+          "Projeto SGDK reaberto sem estado auditavel de assets no viewport.",
+          250
+        );
         const reopenedLogicState = await callAutomationApi(sessionId, "getEntityLogicState", [sgdkLogicEntityId]);
         if (!reopenedLogicState?.source?.graph_ref) {
           fail(
@@ -2744,7 +3257,12 @@ async function main() {
           "G",
           "passed",
           [
-            `Import SGDK -> editar graph_ref da entidade '${sgdkLogicEntityId}' -> colisao -> persistir -> reabrir -> Build & Run -> ROM '${romName}' com cabecalho SEGA verificado em disco.`,
+            `Import SGDK -> cena activa == entry_scene ('${entrySceneExpected}') -> projectSourceKind=imported_sgdk -> onboarding nao bloqueia -> viewport asset health -> Inspector preview -> instantiateBrowserImageAsset(stage)=tilemap(${stageInst.reason}) + hero=sprite(${heroInst.reason}) -> persistencias -> reopen mantem cena/entidades -> editar graph_ref '${sgdkLogicEntityId}' -> colisao -> persistir -> reabrir -> Build & Run -> ROM '${romName}' SEGA.`,
+            denseSceneNote,
+            denseWorkflowNote,
+            tilemapWorkflowNote,
+            logicSourceNote,
+            artWorkspaceNote,
             `graph_ref '${reopenedLogicState.source.graph_ref}' preservado com graph_origin='${reopenedLogicState.source.graph_origin}' e no 'node_edited_move' confirmado em disco.`,
             `Projeto: ${sgdkProjectDir}`,
             `Evidencia: ${path.basename(sgdkChainShot)}.`,
@@ -2761,12 +3279,16 @@ async function main() {
         }
         return;
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const failure = classifyFailureMetadata(error);
         await markManualQaBlock(
           manualQaReport,
           currentBlock,
           "failed",
-          `Falha no bloco ${currentBlock}: ${message}`
+          `Falha no bloco ${currentBlock}: ${failure.message}`,
+          {
+            statusCode: failure.statusCode,
+            errorCategory: failure.errorCategory,
+          }
         );
         throw error;
       }

@@ -835,7 +835,7 @@ fn register_input_nodes(
         });
 
     let mut mappings = input.mapping.iter().collect::<Vec<_>>();
-    mappings.sort_by(|(left_action, _), (right_action, _)| left_action.cmp(right_action));
+    mappings.sort_by_key(|(action_name, _)| *action_name);
 
     for (action_name, button) in mappings {
         input_actions.push(InputActionBinding {
@@ -3012,6 +3012,7 @@ mod tests {
                         graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
+                        imported_semantics: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -3142,6 +3143,7 @@ mod tests {
                         graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
+                        imported_semantics: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -3253,6 +3255,7 @@ mod tests {
                         graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
+                        imported_semantics: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -3360,6 +3363,7 @@ mod tests {
                             graph_origin: None,
                             logic_hints: Vec::new(),
                             external_source_refs: Vec::new(),
+                            imported_semantics: None,
                             variables: HashMap::new(),
                         }),
                         ..Components::default()
@@ -3519,6 +3523,7 @@ mod tests {
                             graph_origin: None,
                             logic_hints: Vec::new(),
                             external_source_refs: Vec::new(),
+                            imported_semantics: None,
                             variables: HashMap::new(),
                         }),
                         ..Components::default()
@@ -3745,6 +3750,7 @@ mod tests {
                         graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
+                        imported_semantics: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -3872,6 +3878,7 @@ mod tests {
                             graph_origin: None,
                             logic_hints: Vec::new(),
                             external_source_refs: Vec::new(),
+                            imported_semantics: None,
                             variables: HashMap::new(),
                         }),
                         ..Components::default()
@@ -4013,6 +4020,7 @@ mod tests {
                             graph_origin: None,
                             logic_hints: Vec::new(),
                             external_source_refs: Vec::new(),
+                            imported_semantics: None,
                             variables: HashMap::new(),
                         }),
                         ..Components::default()
@@ -4177,6 +4185,7 @@ mod tests {
                         graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
+                        imported_semantics: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -4283,6 +4292,7 @@ mod tests {
                         graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
+                        imported_semantics: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -4366,6 +4376,7 @@ mod tests {
                         graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
+                        imported_semantics: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -4460,6 +4471,7 @@ mod tests {
                         graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
+                        imported_semantics: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()

@@ -1,8 +1,24 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-04-23
+**Ultima revisao canonica:** 2026-05-10 (rodada 31)
 **Fase ativa real:** Release candidate / beta tecnica em hardening
+
+**Nota 2026-05-10 (rodada 31, branch `feat/sgdk-vram-residency-streaming-r14`):** host Windows preparado e barra tecnica local revalidada: baseline frontend/Rust verde, corpus SGDK real `7/7`, upstream oficial `success=true`, `qa-rc` A-G fresco (`qa-rc-2026-05-10T19-50-53-457Z-*`), portable/release EXE e MSI canonicos gerados. Isso melhora a fotografia de hardening, mas **nao** promove o MVP publicamente: a branch continua +200 vs `origin/main` e a promocao institucional ainda depende de governanca Git/PR limpa. SGDK segue **Experimental**; Fase D segue heuristica.
+
+**Nota 2026-05-02 (rodada 29, branch `feat/sgdk-vram-residency-streaming-r14`):** sprint de maturidade de IDE reforcou o fluxo real de criador: viewport como mesa de composicao (mundo/janela/camera/regiao editavel), selecao densa com picker+solo, tilemap/brush junto ao stage, objeto -> Logic -> fonte com retorno para objeto e Art -> Scene com contexto preservado. O `qa-rc` final tem evidencias dedicadas `qa-rc-2026-05-02T05-14-22-572Z-*` e gates completos verdes. Mantem-se heuristico onde nao ha AST completo; SGDK **Experimental**; `support_status` inalterado.
+
+**Nota 2026-04-30 (rodada 28, branch `feat/sgdk-vram-residency-streaming-r14`):** picker denso evoluiu de lista para fluxo de selecao mais robusto com **filtro por tipo/contexto** e **spotlight** de isolamento visual no stage. Mantem-se heuristico onde nao ha AST completo; SGDK **Experimental**; `support_status` inalterado; gates verdes — ver `docs/06_AI_MEMORY_BANK.md` checkpoint rodada 28.
+
+**Nota 2026-04-30 (rodada 27, branch `feat/sgdk-vram-residency-streaming-r14`):** picker denso evoluiu para interacao de editor (teclado + preview de hover no viewport), e o retorno **Art -> Scene** passou a preservar contexto operacional (foco de entidade + reentrada em paint quando o alvo e tilemap). Continua **heuristico** onde nao ha AST completo; SGDK **Experimental**; `support_status` inalterado; gates verdes — ver `docs/06_AI_MEMORY_BANK.md` checkpoint rodada 27.
+
+**Nota 2026-04-30 (rodada 26, branch `feat/sgdk-vram-residency-streaming-r14`):** **Shift+clique** com pilha densa abre **lista de escolha** de entidades; faixa tilemap no viewport embute **paleta**; **Logic** com encadeamento **exec** por layout e quick actions extra por **papel importado**; **Inspector** com **multiplas** acoes **Abrir fonte** quando ha varios caminhos. Continua **heuristico** (Fase D, atalhos de graph); SGDK **Experimental**; `support_status` inalterado; gates verdes — ver `docs/06_AI_MEMORY_BANK.md` checkpoint rodada 26.
+
+**Nota 2026-04-30 (rodada 25, branch `feat/sgdk-vram-residency-streaming-r14`):** reforco da **vertical IDE** em cenas importadas: **Alt+clique** no viewport para selecionar entidades empilhadas; **duplo-clique** (tilemap -> pintura; entidade com grafo -> Logic); **faixa de estado** do fluxo tilemap no stage; **Node Graph** com inferencia importada visivel + abertura de **fonte principal**; **Art** com caminho de volta quando nao ha sprite. Continua **heuristico** onde nao ha AST (Fase D); SGDK **Experimental**; `support_status` inalterado; gates verdes — ver `docs/06_AI_MEMORY_BANK.md` checkpoint rodada 25.
+
+**Nota 2026-04-30 (rodada 24, branch `feat/sgdk-vram-residency-streaming-r14`):** acrescenta-se a faixa de **autoria no viewport** quando colisao/mundo excedem 320x224 (atalhos para centro colisao, modo colisao, pan livre vs clamp) e o papel importado **HUD / UI** no grafo Phase D + Hierarchy. O restante da rodada 23 (mundo/camera, cena densa, tilemap, objeto->no->fonte, Art Workspace) mantem-se como workflow **real** mas ainda parcialmente **heuristico** onde nao ha AST. Gates canonicos verdes no host (detalhe numerico em `docs/06_AI_MEMORY_BANK.md` checkpoint rodada 24). SGDK continua **Experimental**; `support_status` inalterado.
+
+**Nota 2026-04-29 (rodada 23):** apos fechar o blocker de OOM do `qa-rc`, a sprint elevou o editor para uso mais operacional em cenas importadas: viewport com mundo/camera e minimapa navegavel, acao explicita para normalizar cena densa, fluxo tilemap -> pintura direto por Hierarchy/Inspector, navegacao objeto->logica->objeto e abertura de fonte real no Inspector, alem da sincronizacao automatica do sprite selecionado no Art Workspace. SGDK continua **Experimental** e `support_status` permanece inalterado; ver `docs/06_CURRENT_WAVE_AI_BANK.md`.
 
 > **DIRETRIZ PARA AGENTES E HUMANOS**
 > Este roadmap e a matriz central de maturidade do produto.
@@ -17,6 +33,7 @@
 `docs/06_AI_MEMORY_BANK.md` -> `docs/03_ROADMAP_MVP.md` -> `docs/09_AGENT_DEV_MODE.md`.
 - `docs/06_CURRENT_WAVE_AI_BANK.md` guarda cronologia da wave, evidencias recentes e proximo passo.
 - Este arquivo guarda a fotografia permanente de escopo e maturidade do produto.
+- **Codificacao:** este roadmap e os docs canonicos associados sao mantidos em **UTF-8**; evitar texto com sequencias tipo `canÃ´nico` (mojibake de Latin-1 sobre UTF-8) ao editar.
 
 ### Eixos canonicos de leitura
 
@@ -41,11 +58,11 @@
 
 ## Estado Executivo Atual
 
-- Data de referencia: `2026-04-16`.
+- Data de referencia: `2026-05-10`.
 - Leitura honesta: o projeto ja tem produto real, mas ainda esta em `release candidate / beta tecnica em hardening`.
 - O core canonico `Projeto -> Editor -> Build -> ROM -> Emulacao` existe e ja foi provado para `Mega Drive` e `SNES`.
 - `Desktop E2E` remoto ficou verde no GitHub/Windows em `2026-04-16` (runs #143/#144, commit `c1a7870`, todos os 16 cenarios confirmados no ledger).
-- O gargalo principal agora e regenerar a fotografia institucional de promocao, fechar o gap de governanca com `origin/main` e revalidar MSI/portable.
+- O gargalo principal agora e consolidar a governanca Git/PR da branch candidata e rerodar a fotografia institucional no destino de promocao; MSI/portable foram revalidados localmente em `2026-05-10`.
 - Superficies `Experimental` reais continuam visiveis, mas nao podem contaminar a leitura do fechamento do MVP.
 
 ---
@@ -53,9 +70,9 @@
 ## Bloqueadores Reais
 
 - ~~`Desktop E2E` remoto ainda precisa ficar verde de forma repetivel no runner GitHub/Windows.~~ **Resolvido em 2026-04-16:** runs #143/#144 passaram com 16/16 cenarios.
-- A fotografia institucional de promocao precisa ser regenerada em worktree limpo com snapshot fresco que inclua o `Desktop E2E` verde.
-- MSI/portable precisam continuar sendo revalidados quando o fluxo `Menu inicial -> Criar Projeto` mudar.
-- A trilha publica ainda precisa refletir o estado real da wave candidata; branch 191 commits a frente de `origin/main` continua sendo bloqueio de governanca.
+- A fotografia institucional de promocao precisa ser regenerada em worktree limpo/PR ou no destino de promocao com snapshot fresco que inclua o `Desktop E2E` verde.
+- MSI/portable foram revalidados localmente em `2026-05-10`; precisam continuar sendo revalidados quando o fluxo `Menu inicial -> Criar Projeto` ou packaging mudar.
+- A trilha publica ainda precisa refletir o estado real da wave candidata; branch `feat/sgdk-vram-residency-streaming-r14` continua +200 commits a frente de `origin/main`, bloqueio de governanca ate PR/merge.
 - Readiness e onboarding publico devem ser sincronizados apos o merge para `main`.
 
 ---
@@ -87,21 +104,21 @@ Capacidades nao visuais, importadores e itens legados continuam nas secoes propr
 | Item                                   | Escopo       | Implementacao | Certificacao  | Evidencia atual                                                                                                                                                                            | Bloqueador para subir                                                                   | Conta para fechamento do MVP? |
 | -------------------------------------- | ------------ | ------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- | ----------------------------- |
 | Menu inicial / Criacao de projeto      | Core MVP     | Em codigo     | Em hardening  | Wizard endurecido, `manual-qa-status.json` A/F passed e packaging rebuildado em `2026-04-15`                                                                                               | Revalidar MSI/portable e rerodar `qa-rc` sempre que onboarding/wizard mudar             | Sim                           |
-| Scene workspace                        | Core MVP     | Em codigo     | Em hardening  | `manual-qa-status.json` A-C/F passed; viewport editavel, pintura e persistencia reais                                                                                                      | Manter shell desktop, persistencia e `Desktop E2E` verdes apos mudancas sensiveis       | Sim                           |
+| Scene workspace                        | Core MVP     | Em codigo     | Em hardening  | `manual-qa-status.json` A-C/F passed; rodada 29 adiciona evidencias `G-scene-authoring`, `G-dense-solo-authoring` e `G-tilemap-authoring` para composicao, selecao densa e pintura no stage | Manter shell desktop, persistencia e `Desktop E2E` verdes apos mudancas sensiveis       | Sim                           |
 | Hierarchy panel                        | Core MVP     | Em codigo     | Local         | Painel dedicado no shell, integracao real em `App.tsx` e cobertura em `HierarchyPanel.test.tsx`                                                                                            | Falta prova institucional dedicada alem da rodada geral do editor                       | Sim                           |
 | Layer panel                            | Core MVP     | Em codigo     | Em hardening  | `manual-qa-status.json` A-B/F passed valida LayerPanel, visibilidade, renome e vinculacao                                                                                                  | Rerodar `qa-rc` sempre que fluxo de camadas mudar                                       | Sim                           |
 | Inspector panel                        | Core MVP     | Em codigo     | Em hardening  | `manual-qa-status.json` E/F passed prova selecao, edicao de `Pos X` e persistencia no reopen                                                                                               | Repetir prova institucional apos mudancas de selecao/props                              | Sim                           |
 | Game workspace / Build & Run           | Core MVP     | Em codigo     | Institucional | `manual-qa-status.json` D passed, `build-report.json` de `2026-04-15`, pipelines MD/SNES provados em Windows e `Desktop E2E` remoto verde em `2026-04-16` (runs #143/#144, 16/16 cenarios) | Rerodar readiness limpo e revalidar MSI/portable quando build/shell mudar               | Sim                           |
 | Explorer workspace                     | Core MVP     | Em codigo     | Local         | Workspace real na rail, lazy-load no shell e cobertura em `ExplorerWorkspace.test.tsx`                                                                                                     | Falta prova institucional dedicada no fluxo de projeto                                  | Nao                           |
-| Logic workspace / NodeGraph canonico   | Core MVP     | Em codigo     | Local         | `NodeGraphEditor.test.tsx`, `nodeCompiler.test.ts` e emissao SGDK/SNES reais                                                                                                               | Falta rodada institucional dedicada e refinamento continuo de UX do canvas              | Nao                           |
-| ArtStudio workspace                    | Experimental | Em codigo     | Local         | `ArtStudioPanel.test.ts`, backend `photo2sgdk` e prova local de runtime em `build_orch.rs`                                                                                                 | Falta prova institucional `ArtStudio -> build -> runtime`                               | Nao                           |
+| Logic workspace / NodeGraph canonico   | Core MVP     | Em codigo     | Em hardening  | `NodeGraphEditor.test.tsx`, `nodeCompiler.test.ts`, emissao SGDK/SNES reais e prova `qa-rc` rodada 29 `G-logic-authoring` (objeto -> Logic -> fonte/retorno)                               | Refinamento continuo de UX do canvas; sem vender heuristica Phase D como AST completo  | Nao                           |
+| ArtStudio workspace                    | Experimental | Em codigo     | Em hardening  | `ArtStudioPanel.test.ts`, backend `photo2sgdk`, prova local de runtime em `build_orch.rs` e prova `qa-rc` rodada 29 `G-art-workspace` com ponte Scene -> Art -> Scene                       | Falta prova institucional `ArtStudio -> build -> runtime`; segue Experimental           | Nao                           |
 | RetroFX workspace                      | Experimental | Em codigo     | Local         | `RetroFXDesigner.test.tsx`, persistencia em `scene JSON` e emissao MD/SNES provadas localmente                                                                                             | Falta prova institucional `RetroFX -> build -> runtime`                                 | Nao                           |
 | Debug workspace (casca de ferramentas) | Core MVP     | Em codigo     | Local         | Workspace real na rail, alternancia `Tools/Inspector` no shell e cobertura base em `ToolsPanel.test.tsx`                                                                                   | Falta rodada institucional dedicada para a casca completa do workspace                  | Nao                           |
 | Paleta Contextual                      | Core MVP     | Em codigo     | Local         | Aba real do `Debug workspace`, descoberta guiada em `App.test.tsx` e suporte a autoria contextual                                                                                          | Falta prova institucional dedicada de authoring pelo painel                             | Nao                           |
 | Runtime Setup                          | Core MVP     | Em codigo     | Local         | Aba real do shell, `dependency_manager` ativo no Rust e testes de status/instalacao em `src-tauri/src/lib.rs`                                                                              | Falta rodada institucional dedicada em host Windows limpo apos alteracoes de toolchain  | Sim                           |
 | Patch Studio                           | Core MVP     | Em codigo     | Local         | `patch_studio.rs` real e roundtrip BPS coberto em `src-tauri/src/lib.rs`                                                                                                                   | Falta prova institucional dedicada quando UI/export/apply mudar                         | Nao                           |
 | Deep Profiler                          | Core MVP     | Em codigo     | Local         | `deep_profiler.rs` ativo, testes de profile e superficie visivel no `Debug workspace`                                                                                                      | Falta prova institucional dedicada em rodada de playtest/debug                          | Nao                           |
-| Asset Browser                          | Experimental | Em codigo     | Em hardening  | `manual-qa-status.json` E passed instancia asset real e preserva selecao no Inspector; a UI ainda o marca como `experimental`                                                              | Alinhar UI/readiness/docs e repetir QA institucional sempre que o fluxo de assets mudar | Nao                           |
+| Asset Browser                          | Experimental | Em codigo     | Em hardening  | `manual-qa-status.json` E passed instancia asset real e preserva selecao no Inspector; rotulo `experimental` na UI alinhado ao roadmap (nao e drift de readiness); fluxo de duplo clique/lista continua coberto em testes de shell onde aplicavel | Manter rotulo e docs sincronizados; QA institucional quando o fluxo de assets mudar     | Nao                           |
 | Asset Extractor                        | Experimental | Em codigo     | Local         | Aba real do shell, IPC/backend existentes e cobertura base em `ToolsPanel.test.tsx`                                                                                                        | Falta prova ponta a ponta com ROM real e rodada institucional dedicada                  | Nao                           |
 | Memory Viewer                          | Experimental | Em codigo     | Local         | Aba real do shell, leitura de memoria via IPC e cobertura base em `ToolsPanel.test.tsx`                                                                                                    | Falta prova institucional com emulador ativo e ROM real                                 | Nao                           |
 | VRAM Viewer                            | Experimental | Em codigo     | Local         | Ferramenta real visivel no shell e integrada ao core ativo                                                                                                                                 | Falta rodada institucional dedicada com ROM/emulador reais                              | Nao                           |
@@ -115,7 +132,7 @@ Capacidades nao visuais, importadores e itens legados continuam nas secoes propr
 
 | Item             | Escopo         | Implementacao | Certificacao | Evidencia atual                                                                                                                                                                                                                         | Bloqueador para subir                                                                                                         | Conta para fechamento do MVP? |
 | ---------------- | -------------- | ------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| `sgdk`           | Experimental   | Em codigo     | Em hardening | Fase E provada: desktop E2E `qa-rc` A-G verde (import -> colisao -> persistir -> reabrir -> Build & Run -> ROM `SEGA` verificada). Preflight, fixture `sgdk_e2e_donor`, smoke idempotente, Fases B-E. **Rodada 13:** matriz de corpus real com `resolve_sgdk_import_root` (wrappers `.mddev` / README): **seis** linhas com Build/ROM `SEGA` no host de referencia (`cargo test sgdk_matrix_corpus_ ... --ignored` 6/6); import de alias `REFERENCE` resolve para upstream com `mddev_reference_redirect` auditavel; `preflight:sgdk-e2e` + `test:e2e:desktop:qa-rc` rerodados verdes apos `d24cf14` | Fase D parcial (heuristica sem AST); criterio explicito para sair de **Experimental** continua em `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md` (sem promocao automatica de `support_status`) | Nao                           |
+| `sgdk`           | Experimental   | Em codigo     | Em hardening | Fase E provada: desktop E2E `qa-rc` A-G verde (import -> colisao -> persistir -> reabrir -> Build & Run -> ROM `SEGA` verificada). Rodada 19: Scene/Hierarchy/Inspector/Tools passaram a compartilhar contexto de cena/importacao e decisao de instancia auditavel; o gate oficial Windows voltou a fechar no comando canonico mesmo quando `%OS%` nao vem herdado, porque `validate-upstream-windows.ps1` e o launcher do make SGDK em `build_orch.rs` ficaram mais robustos. Preflight, fixture `sgdk_e2e_donor`, smoke idempotente, Fases B-E. **Rodada 14:** caminho MD ganhou analise de residencia/streaming (`analysis_mode`, `asset_total`, `resident`, `streamable`, `dma/frame`) para SGDK gerenciado; matriz de corpus ampliada para estresse (`BLAZE_ENGINE`) com 6 fluxos base + 1 blocker legitimo auditavel. | Fase D parcial (heuristica sem AST); criterio explicito para sair de **Experimental** continua em `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md` (sem promocao automatica de `support_status`) | Nao                           |
 | `mugen`          | Experimental   | Em codigo     | Local        | `import_mugen_project`, wizard dedicado e smoke idempotente em `smoke_import_mugen_project_is_idempotent`                                                                                                                               | Falta prova institucional alem da rodada local                                                                                | Nao                           |
 | `ikemen_go`      | Experimental   | Em codigo     | Local        | Perfil proprio no registry, roteado pelo adapter MUGEN, smoke dedicado em `smoke_import_ikemen_go_reuses_mugen_adapter_without_losing_assets`                                                                                           | Falta evidencia institucional dedicada e validacao de metadata propria                                                        | Nao                           |
 | `godot`          | Experimental   | Em codigo     | Local        | `import_godot_project`, smoke idempotente em `smoke_import_godot_project_is_idempotent`                                                                                                                                                 | Falta prova institucional alem da rodada local                                                                                | Nao                           |
@@ -163,7 +180,7 @@ Capacidades nao visuais, importadores e itens legados continuam nas secoes propr
 
 ## Iniciativa de Hardening de Importadores (Sessoes A-E)
 
-**Contexto:** pedido operacional de `2026-04-18` para elevar os 7 importadores preservados (`sgdk`, `mugen`, `ikemen_go`, `godot`, `construct`, `rpg_maker`, `openbor`) de `Experimental` para `Completo e totalmente funcional resiliente a diferentes tipos de projetos`. Em vez de flipar labels, o trabalho foi segmentado em 5 sessoes com evidencia real a cada passo ? aderente a governanca deste roadmap (`Experimental nao significa inexistente; significa nao elegivel para claim plena`).
+**Contexto:** pedido operacional de `2026-04-18` para elevar os 7 importadores preservados (`sgdk`, `mugen`, `ikemen_go`, `godot`, `construct`, `rpg_maker`, `openbor`) de `Experimental` para `Completo e totalmente funcional resiliente a diferentes tipos de projetos`. Em vez de flipar labels, o trabalho foi segmentado em 5 sessoes com evidencia real a cada passo, aderente a governanca deste roadmap (`Experimental nao significa inexistente; significa nao elegivel para claim plena`).
 
 ### Sessao A - Fundacao transversal (concluida em 2026-04-18)
 
@@ -180,11 +197,11 @@ Objetivo: estabelecer o minimo canonico para que qualquer importador possa ter e
 
 
 **Gate local:** 262 cargo test --lib verdes (incluindo os 7 smoke novos), 232 vitest verdes, clippy clean, Vite build OK.
-**Gate institucional:** adiado ? `tauri-driver` ausente no host; `cargo install tauri-driver --locked` continua como pre-requisito para `qa-rc`/`e2e-tauri-build-run`.
+**Gate institucional:** adiado: `tauri-driver` ausente no host; `cargo install tauri-driver --locked` continua como pre-requisito para `qa-rc`/`e2e-tauri-build-run`.
 
 ### Sessao B - Hardening por importador, camada 1 (concluida em 2026-04-18)
 
-Objetivo: cobrir cenarios minimos de resiliencia por importador ? diretorio donor vazio, artefato-raiz ausente e leitura tolerante a BOM/CRLF/caminhos Unicode em host Windows.
+Objetivo: cobrir cenarios minimos de resiliencia por importador: diretorio donor vazio, artefato-raiz ausente e leitura tolerante a BOM/CRLF/caminhos Unicode em host Windows.
 
 
 | Entrega                                                                                                                                                | Status    | Evidencia                                       |
@@ -294,6 +311,20 @@ Checklist operacional para sair de fixture/E2E controlado e registrar compatibil
 - **Gates (rodada 13, host local):** `check:tree`, `lint`, `tsc --noEmit`, `npm test`, `cargo clippy -D warnings`, `cargo test --lib --test-threads=1`, `cargo test sgdk_matrix_corpus_ ... --ignored --test-threads=1` (6/6), `npm run preflight:sgdk-e2e`, `npm run test:e2e:desktop:qa-rc`.
 - **Estado honesto:** SGDK permanece **Experimental**; criterio de suporte completo na matriz ainda exige leitura governada por colunas (ex.: Collision **Parcial** em varias linhas) e decisao explicita futura sobre `support_status`.
 
+### Rodada 14 - VRAM residency / streaming (Mega Drive)
+
+- **Codigo canonico:** `md_profile.rs` agora separa volume total de assets e conjunto residente simultaneo, com modo `native_static` vs `sgdk_managed`.
+- **Regra aplicada:** em SGDK gerenciado, excesso apenas no total streamavel não bloqueia sozinho; overflow de residente continua fatal; warnings distinguem `total`, `resident`, `streamable` e `dma/frame`.
+- **Auditoria de build:** `build_orch.rs` emite linha `MD VRAM analysis` no log para rastreabilidade de QA.
+- **Corpus:** `Metal Slug` e `Mortal Kombat` passam com ROM `SEGA` e budget auditável; `BLAZE_ENGINE` adicionado como estresse com bloqueador fatal legítimo (sem promoção de status).
+- **Estado honesto:** SGDK segue **Experimental**.
+
+### Rodada 15 - Breakdown de residência VRAM (Mega Drive / QA)
+
+- **Modelo:** `HwStatus` e `md_profile` expõem composição por categoria (`sprite_resident_bytes`, `tilemap_resident_bytes`, `hud_resident_bytes`, `streamable_sprite_bytes`, `animated_swap_bytes`, `dma_frame_bytes`) mais contadores `banks`/`cells` da heurística `sgdk_managed`.
+- **Build / validação:** logs e avisos `[SGDK Gerenciado]` incluem os mesmos eixos para responder "o que está residente e por quê" sem alterar a regra de fatalidade (overflow residente real, sprite overflow real).
+- **UI:** `HardwareLimitsPanel` mostra linha compacta de QA (somente target Mega Drive).
+- **Estado honesto:** SGDK segue **Experimental**; sem mudança de `support_status`.
 
 ### Fases
 
@@ -332,4 +363,3 @@ Adicionais aos gates gerais deste roadmap, aplicados sempre que o programa avanc
 - Um item nao pode continuar descrito como `planejamento` se o codigo o marcar como `importable: true`.
 - Um item nao pode sair de `Experimental` sem evidencia institucional e sem alinhamento de UI, docs e backend.
 - `README.md` nao deve manter claims de readiness mais especificas ou mais otimistas do que este arquivo.
-

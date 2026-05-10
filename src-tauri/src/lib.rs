@@ -11,6 +11,7 @@ pub use tools::reverse::trace::{CpuState, ExecutionTraceLog};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::process::Command;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -37,7 +38,7 @@ use core::project_mgr::{
     stamp_imported_external_profile_metadata, stamp_imported_mugen_metadata,
     stamp_imported_sgdk_metadata, stamp_project_template_metadata, sync_external_graph_refs,
     update_project_target, ExternalImportProfileSummary, LegacySgdkIndex, ProjectTemplateSummary,
-    SceneInfo,
+    SceneInfo, DEFAULT_ENTRY_SCENE,
 };
 use emulator::frame_buffer::framebuffer_to_rgba;
 use emulator::libretro_ffi::{EmulatorCore, JoypadState, ReplayCapture, RuntimeExecutionTraceCapture};
@@ -118,6 +119,13 @@ pub struct LegacyProjectFilePreview {
     pub previewable: bool,
     pub readonly: bool,
     pub note: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct OpenProjectSourceResult {
+    pub ok: bool,
+    pub message: String,
+    pub absolute_path: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -1109,6 +1117,67 @@ fn load_legacy_host_root(project_dir: &Path) -> Result<PathBuf, String> {
     Ok(PathBuf::from(source_path))
 }
 
+fn load_project_source_root(project_dir: &Path) -> Result<PathBuf, String> {
+    let project = load_project(project_dir).map_err(|error| error.to_string())?;
+    let metadata = project
+        .template_metadata
+        .as_ref()
+        .ok_or_else(|| "Projeto atual nao possui metadata de origem rastreavel.".to_string())?;
+
+    match metadata.source_kind.as_str() {
+        "external_sgdk" | "imported_sgdk" => {
+            let source_path = metadata.source_path.trim();
+            if source_path.is_empty() {
+                return Err("Projeto atual nao possui source_path rastreavel para abrir fonte real.".to_string());
+            }
+            Ok(PathBuf::from(source_path))
+        }
+        other => Err(format!(
+            "Projeto atual nao possui doador navegavel para abrir codigo-fonte (source_kind='{}').",
+            other
+        )),
+    }
+}
+
+fn open_path_with_system_default(path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let display_path = path.to_string_lossy().to_string();
+        let status = Command::new("cmd")
+            .args(["/C", "start", "", &display_path])
+            .status()
+            .map_err(|error| format!("Falha ao acionar editor externo no host Windows: {}", error))?;
+        if status.success() {
+            return Ok(());
+        }
+        Err("O host recusou abrir a fonte real pelo editor associado.".to_string())
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let status = Command::new("open")
+            .arg(path)
+            .status()
+            .map_err(|error| format!("Falha ao acionar editor externo no macOS: {}", error))?;
+        if status.success() {
+            return Ok(());
+        }
+        Err("O host recusou abrir a fonte real pelo editor associado.".to_string())
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let status = Command::new("xdg-open")
+            .arg(path)
+            .status()
+            .map_err(|error| format!("Falha ao acionar editor externo no host Unix: {}", error))?;
+        if status.success() {
+            return Ok(());
+        }
+        Err("O host recusou abrir a fonte real pelo editor associado.".to_string())
+    }
+}
+
 #[tauri::command]
 fn read_legacy_project_file(
     project_dir: String,
@@ -1181,6 +1250,113 @@ fn read_legacy_project_file(
         readonly: true,
         note,
     })
+}
+
+#[tauri::command]
+fn open_project_source_path(project_dir: String, relative_path: String) -> OpenProjectSourceResult {
+    let trimmed_project_dir = project_dir.trim();
+    let trimmed_relative_path = relative_path.trim();
+    if trimmed_project_dir.is_empty() {
+        return OpenProjectSourceResult {
+            ok: false,
+            message: "Abra um projeto antes de abrir a fonte real.".to_string(),
+            absolute_path: None,
+        };
+    }
+    if trimmed_relative_path.is_empty() {
+        return OpenProjectSourceResult {
+            ok: false,
+            message: "Caminho fonte vazio; nao ha arquivo para abrir.".to_string(),
+            absolute_path: None,
+        };
+    }
+
+    let overlay_dir = PathBuf::from(trimmed_project_dir);
+    let source_root = match load_project_source_root(&overlay_dir) {
+        Ok(root) => root,
+        Err(message) => {
+            return OpenProjectSourceResult {
+                ok: false,
+                message,
+                absolute_path: None,
+            };
+        }
+    };
+    let normalized_relative = match normalize_legacy_relative_path(trimmed_relative_path) {
+        Ok(path) => path,
+        Err(message) => {
+            return OpenProjectSourceResult {
+                ok: false,
+                message,
+                absolute_path: None,
+            };
+        }
+    };
+    let requested_path = source_root.join(&normalized_relative);
+    if !requested_path.is_file() {
+        return OpenProjectSourceResult {
+            ok: false,
+            message: format!(
+                "Fonte real '{}' nao foi localizada em '{}'.",
+                normalized_relative.display(),
+                source_root.display()
+            ),
+            absolute_path: Some(requested_path.to_string_lossy().to_string()),
+        };
+    }
+
+    let canonical_root = match fs::canonicalize(&source_root) {
+        Ok(value) => value,
+        Err(error) => {
+            return OpenProjectSourceResult {
+                ok: false,
+                message: format!(
+                    "Nao foi possivel resolver a raiz do doador '{}' de forma canonica: {}",
+                    source_root.display(),
+                    error
+                ),
+                absolute_path: None,
+            };
+        }
+    };
+    let canonical_path = match fs::canonicalize(&requested_path) {
+        Ok(value) => value,
+        Err(error) => {
+            return OpenProjectSourceResult {
+                ok: false,
+                message: format!(
+                    "Nao foi possivel resolver a fonte '{}' de forma canonica: {}",
+                    requested_path.display(),
+                    error
+                ),
+                absolute_path: Some(requested_path.to_string_lossy().to_string()),
+            };
+        }
+    };
+
+    if !canonical_path.starts_with(&canonical_root) {
+        return OpenProjectSourceResult {
+            ok: false,
+            message: format!(
+                "Fonte '{}' escapou da raiz auditavel do doador; abertura cancelada.",
+                canonical_path.display()
+            ),
+            absolute_path: Some(canonical_path.to_string_lossy().to_string()),
+        };
+    }
+
+    match open_path_with_system_default(&canonical_path) {
+        Ok(()) => OpenProjectSourceResult {
+            ok: true,
+            message: format!("Abrindo fonte real '{}'.", normalized_relative.display()),
+            absolute_path: Some(canonical_path.to_string_lossy().to_string()),
+        },
+        Err(message) => OpenProjectSourceResult {
+            ok: false,
+            message,
+            absolute_path: Some(canonical_path.to_string_lossy().to_string()),
+        },
+    }
 }
 
 fn collect_project_assets(
@@ -1678,6 +1854,10 @@ pub struct OpenProjectResult {
     pub base_dir: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notice: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preferred_scene_path: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub imported_scene_paths: Vec<String>,
 }
 
 #[derive(Debug, serde::Serialize, Clone, Copy, PartialEq, Eq)]
@@ -1780,6 +1960,8 @@ fn empty_open_project_result() -> OpenProjectResult {
         name: String::new(),
         base_dir: None,
         notice: None,
+        preferred_scene_path: None,
+        imported_scene_paths: Vec::new(),
     }
 }
 
@@ -2068,6 +2250,8 @@ fn create_onboarding_project_at_base_dir(
         name: project.name,
         base_dir: Some(base_dir.to_string_lossy().to_string()),
         notice,
+        preferred_scene_path: Some(DEFAULT_ENTRY_SCENE.to_string()),
+        imported_scene_paths: vec![DEFAULT_ENTRY_SCENE.to_string()],
     })
 }
 
@@ -2093,6 +2277,8 @@ fn create_project_from_template_at_base_dir(
         name: project.name,
         base_dir: Some(base_dir.to_string_lossy().to_string()),
         notice,
+        preferred_scene_path: Some(DEFAULT_ENTRY_SCENE.to_string()),
+        imported_scene_paths: vec![DEFAULT_ENTRY_SCENE.to_string()],
     })
 }
 
@@ -2198,6 +2384,10 @@ fn import_sgdk_project_at_base_dir(
         name: project.name,
         base_dir: Some(base_dir.to_string_lossy().to_string()),
         notice: merge_project_notices(dir_notice, import_notice),
+        preferred_scene_path: Some(report.primary_scene_path.clone()),
+        imported_scene_paths: std::iter::once(report.primary_scene_path.clone())
+            .chain(report.additional_scenes.iter().map(|scene| scene.scene_path.clone()))
+            .collect(),
     })
 }
 
@@ -2239,6 +2429,8 @@ fn import_mugen_project_at_base_dir(
         name: project.name,
         base_dir: Some(base_dir.to_string_lossy().to_string()),
         notice: merge_project_notices(dir_notice, notice),
+        preferred_scene_path: Some(DEFAULT_ENTRY_SCENE.to_string()),
+        imported_scene_paths: vec![DEFAULT_ENTRY_SCENE.to_string()],
     })
 }
 
@@ -2294,6 +2486,8 @@ fn import_external_project_at_base_dir(
         name: project.name,
         base_dir: Some(base_dir.to_string_lossy().to_string()),
         notice: merge_project_notices(dir_notice, external_import_notice(&profile, &report)),
+        preferred_scene_path: Some(DEFAULT_ENTRY_SCENE.to_string()),
+        imported_scene_paths: vec![DEFAULT_ENTRY_SCENE.to_string()],
     })
 }
 
@@ -2307,15 +2501,17 @@ fn resolve_or_wrap_project_dir(
         .unwrap_or_else(|| "Projeto".to_string());
 
     if let Ok(project_dir) = discover_project_rds(selected_dir) {
-        let project_name = load_project(&project_dir)
-            .map(|p| p.name)
-            .unwrap_or(fallback_name);
+        let (project_name, preferred_scene_path) = load_project(&project_dir)
+            .map(|p| (p.name, p.entry_scene))
+            .unwrap_or((fallback_name, DEFAULT_ENTRY_SCENE.to_string()));
         return Ok(OpenProjectResult {
             selected: true,
             path: project_dir.to_string_lossy().to_string(),
             name: project_name,
             base_dir: None,
             notice: None,
+            preferred_scene_path: Some(preferred_scene_path.clone()),
+            imported_scene_paths: vec![preferred_scene_path],
         });
     }
 
@@ -2331,6 +2527,8 @@ fn resolve_or_wrap_project_dir(
             "Projeto SGDK legado adotado em modo nao-destrutivo via overlay 'rds/' em '{}'.",
             overlay_dir.display()
         )),
+        preferred_scene_path: Some(project.entry_scene.clone()),
+        imported_scene_paths: vec![project.entry_scene],
     })
 }
 
@@ -2614,6 +2812,7 @@ pub fn run() {
             rom_extract_audio,
             rom_save_annotations,
             list_project_assets,
+            open_project_source_path,
             read_legacy_project_file,
             third_party_get_status,
             third_party_install,
@@ -3873,6 +4072,31 @@ pub extern "C" fn retro_run() {
         assert!(result.selected);
         assert_eq!(result.path, project_dir.to_string_lossy());
         assert!(!result.name.trim().is_empty());
+    }
+
+    #[test]
+    fn open_project_path_preserves_project_entry_scene_as_preferred_scene() {
+        let project_dir = temp_dir("open-project-preserves-entry-scene");
+        create_project_skeleton(&project_dir, "Entry Scene Test", "megadrive")
+            .expect("create project skeleton");
+        let custom_scene_path = "scenes/phase_b.json";
+        let mut scene =
+            load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load default entry scene");
+        scene.scene_id = "phase_b".to_string();
+        scene.display_name = Some("Phase B".to_string());
+        save_scene(&project_dir, custom_scene_path, &scene).expect("save custom scene");
+        set_entry_scene(&project_dir, custom_scene_path).expect("set entry scene");
+
+        let result = open_project_path(project_dir.to_string_lossy().to_string());
+        assert!(result.selected);
+        assert_eq!(
+            result.preferred_scene_path.as_deref(),
+            Some(custom_scene_path),
+            "open_project_path must point the IDE to the persisted project entry_scene"
+        );
+        assert_eq!(result.imported_scene_paths, vec![custom_scene_path.to_string()]);
+
+        let _ = fs::remove_dir_all(project_dir);
     }
 
     #[test]

@@ -1,8 +1,10 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { persistActiveScene } from "../../core/scenePersistence";
+import { openProjectSourcePath } from "../../core/ipc/projectService";
 import { parseSceneJson, resolveScenePrefabs } from "../../core/ipc/sceneService";
 import { useEditorStore } from "../../core/store/editorStore";
 import { getEntityDisplayName } from "../../core/entityDisplay";
+import { resolveEntitySourceRefs } from "../../core/entityAuthoring";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -103,7 +105,15 @@ type QuickActionContext = {
 };
 
 type QuickActionTemplate = GuidedFlowCommentary & {
-  id: "player_controller" | "enemy_logic" | "timer_event";
+  id:
+    | "player_controller"
+    | "enemy_logic"
+    | "timer_event"
+    | "projectile_motion"
+    | "camera_rig"
+    | "fighter_combat"
+    | "support_state_tick"
+    | "hud_vblank_tick";
   actionLabel: string;
   buildGraph: (context: QuickActionContext) => NodeGraph;
 };
@@ -126,6 +136,14 @@ const EVENT_NODE_TYPES: NodeType[] = [
   "event_hblank",
   "event_dma_done",
 ];
+
+function normalizeGraphEntityKey(value: string | number | null | undefined): string {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
 
 function cloneGraph(graph: NodeGraph): NodeGraph {
   return structuredClone(graph);
@@ -696,6 +714,125 @@ function makeEdge(
   };
 }
 
+function nodeHasPrimaryExecOut(node: GraphNode): boolean {
+  return node.outputs.some((port) => port.id === "exec" && port.kind === "exec");
+}
+
+function nodeHasPrimaryExecIn(node: GraphNode): boolean {
+  return node.inputs.some((port) => port.id === "exec" && port.kind === "exec");
+}
+
+function execEdgeExists(graph: NodeGraph, fromNode: string, toNode: string): boolean {
+  return graph.edges.some(
+    (edge) =>
+      edge.fromNode === fromNode &&
+      edge.toNode === toNode &&
+      edge.fromPort === "exec" &&
+      edge.toPort === "exec"
+  );
+}
+
+/**
+ * Cria arestas exec→exec entre nos consecutivos na ordem de layout (y, depois x).
+ * Atalho de autoracao: revisar ramos condicionais e nos sem porta `exec` padrao.
+ */
+export function appendExecChainEdgesFromLayout(graph: NodeGraph): NodeGraph {
+  if (graph.nodes.length < 2) {
+    return graph;
+  }
+
+  const sorted = [...graph.nodes].sort((a, b) => {
+    if (a.y !== b.y) {
+      return a.y - b.y;
+    }
+    if (a.x !== b.x) {
+      return a.x - b.x;
+    }
+    return a.id.localeCompare(b.id);
+  });
+
+  const newEdges: NodeEdge[] = [];
+  for (let i = 0; i < sorted.length - 1; i += 1) {
+    const fromNode = sorted[i];
+    const toNode = sorted[i + 1];
+    if (!nodeHasPrimaryExecOut(fromNode) || !nodeHasPrimaryExecIn(toNode)) {
+      continue;
+    }
+    if (execEdgeExists(graph, fromNode.id, toNode.id)) {
+      continue;
+    }
+    if (newEdges.some((e) => e.fromNode === fromNode.id && e.toNode === toNode.id)) {
+      continue;
+    }
+    newEdges.push(makeEdge(fromNode, "exec", toNode, "exec"));
+  }
+
+  if (newEdges.length === 0) {
+    return graph;
+  }
+
+  return { ...graph, edges: [...graph.edges, ...newEdges] };
+}
+
+export function appendQuickActionGraph(
+  baseGraph: NodeGraph,
+  quickGraph: NodeGraph,
+  spacing = 220
+): { graph: NodeGraph; appendedNodeIds: string[] } {
+  if (quickGraph.nodes.length === 0) {
+    return { graph: cloneGraph(baseGraph), appendedNodeIds: [] };
+  }
+  if (baseGraph.nodes.length === 0) {
+    return {
+      graph: cloneGraph(quickGraph),
+      appendedNodeIds: quickGraph.nodes.map((node) => node.id),
+    };
+  }
+
+  const baseBounds = getNodeGraphBounds(baseGraph);
+  const quickBounds = getNodeGraphBounds(quickGraph);
+  if (!baseBounds || !quickBounds) {
+    return { graph: cloneGraph(baseGraph), appendedNodeIds: [] };
+  }
+
+  const offsetX = baseBounds.maxX - quickBounds.minX + spacing;
+  const offsetY = Math.max(0, baseBounds.minY - quickBounds.minY);
+  const nodeIdMap = new Map<string, string>();
+  const appendedNodes = quickGraph.nodes.map((node) => {
+    const nextId = newNodeId();
+    nodeIdMap.set(node.id, nextId);
+    return {
+      ...structuredClone(node),
+      id: nextId,
+      x: node.x + offsetX,
+      y: node.y + offsetY,
+    };
+  });
+  const appendedEdges = quickGraph.edges.flatMap((edge) => {
+    const fromNode = nodeIdMap.get(edge.fromNode);
+    const toNode = nodeIdMap.get(edge.toNode);
+    if (!fromNode || !toNode) {
+      return [];
+    }
+    return [
+      {
+        ...structuredClone(edge),
+        id: newEdgeId(),
+        fromNode,
+        toNode,
+      },
+    ];
+  });
+
+  return {
+    graph: {
+      nodes: [...baseGraph.nodes, ...appendedNodes],
+      edges: [...baseGraph.edges, ...appendedEdges],
+    },
+    appendedNodeIds: appendedNodes.map((node) => node.id),
+  };
+}
+
 function resolveQuickActionPrimaryTarget(
   context: QuickActionContext,
   fallbackTarget: string
@@ -782,6 +919,80 @@ function buildTimerQuickActionGraph(context: QuickActionContext): NodeGraph {
   };
 }
 
+function buildProjectileMotionQuickActionGraph(context: QuickActionContext): NodeGraph {
+  const start = makeNode("event_start", 140, 168);
+  const move = makeNode("sprite_move", 400, 164);
+  const target = resolveQuickActionPrimaryTarget(context, "player");
+  move.params = { ...move.params, target, dx: 6, dy: -1 };
+
+  return {
+    nodes: [start, move],
+    edges: [makeEdge(start, "exec", move, "exec")],
+  };
+}
+
+function buildCameraRigQuickActionGraph(context: QuickActionContext): NodeGraph {
+  void context;
+  const start = makeNode("event_start", 120, 150);
+  const cam = makeNode("move_camera", 360, 146);
+  const parallax = makeNode("effect_parallax", 620, 146);
+  cam.params = { ...cam.params, target: "cam", x: 0, y: 0 };
+  parallax.params = { ...parallax.params, layer: "BG1", speed_x: 1, speed_y: 0 };
+
+  return {
+    nodes: [start, cam, parallax],
+    edges: [makeEdge(start, "exec", cam, "exec"), makeEdge(cam, "exec", parallax, "exec")],
+  };
+}
+
+function buildFighterCombatQuickActionGraph(context: QuickActionContext): NodeGraph {
+  const start = makeNode("event_start", 140, 120);
+  const stance = makeNode("sprite_anim", 380, 116);
+  const overlap = makeNode("condition_overlap", 140, 296);
+  const hitSound = makeNode("action_sound", 380, 296);
+  const fighter = resolveQuickActionPrimaryTarget(context, "player");
+  const other = resolveQuickActionSecondaryTarget(context, fighter, "enemy");
+
+  stance.params = { ...stance.params, target: fighter, anim: "fight_idle" };
+  overlap.params = { ...overlap.params, a: fighter, b: other };
+  hitSound.params = { ...hitSound.params, sfx: "hit" };
+
+  return {
+    nodes: [start, stance, overlap, hitSound],
+    edges: [
+      makeEdge(start, "exec", stance, "exec"),
+      makeEdge(overlap, "true", hitSound, "exec"),
+    ],
+  };
+}
+
+function buildSupportStateTickQuickActionGraph(context: QuickActionContext): NodeGraph {
+  const start = makeNode("event_start", 140, 160);
+  const lane = makeNode("var_set", 380, 156);
+  const anim = makeNode("sprite_anim", 640, 156);
+  const target = resolveQuickActionPrimaryTarget(context, "player");
+
+  lane.params = { ...lane.params, var_name: "support_lane", value: 1 };
+  anim.params = { ...anim.params, target, anim: "buff_idle" };
+
+  return {
+    nodes: [start, lane, anim],
+    edges: [makeEdge(start, "exec", lane, "exec"), makeEdge(lane, "exec", anim, "exec")],
+  };
+}
+
+function buildHudVblankTickQuickActionGraph(context: QuickActionContext): NodeGraph {
+  void context;
+  const vb = makeNode("event_vblank", 140, 176);
+  const tick = makeNode("var_set", 400, 172);
+  tick.params = { ...tick.params, var_name: "hud_frame", value: 1 };
+
+  return {
+    nodes: [vb, tick],
+    edges: [makeEdge(vb, "exec", tick, "exec")],
+  };
+}
+
 const QUICK_ACTION_TEMPLATES: QuickActionTemplate[] = [
   {
     id: "player_controller",
@@ -827,7 +1038,93 @@ const QUICK_ACTION_TEMPLATES: QuickActionTemplate[] = [
       "A timeline usa delays discretos por frame, o que combina melhor com o runtime retro do que tempos soltos em milissegundos.",
     buildGraph: buildTimerQuickActionGraph,
   },
+  {
+    id: "projectile_motion",
+    actionLabel: "Movimento de projetil (linear)",
+    title: "Projetil em linha",
+    summary: "Arranque simples com movimento por frame para alvo inferido ou escolhido.",
+    comments: [
+      "Ao Iniciar liga diretamente ao Move Sprite para nao exigir wiring manual no primeiro teste.",
+      "Velocidade inicial conservadora; ajuste dx/dy no cartao do no quando o playtest pedir.",
+      "Use ramos de colisao depois, a partir da paleta, sem misturar overlap automatico neste atalho.",
+    ],
+    hardwareNote:
+      "Mantem somente nos suportados pelo compilador atual; nao promete destruicao ou spawn fora do schema.",
+    limitation:
+      "Colisao e dano nao entram neste esqueleto para evitar prometer fluxos que o pipeline ainda nao fecha.",
+    buildGraph: buildProjectileMotionQuickActionGraph,
+  },
+  {
+    id: "camera_rig",
+    actionLabel: "Camera + parallax basico",
+    title: "Camera e parallax",
+    summary: "Encadeia Move Camera com Parallax para um rig inicial de cena larga.",
+    comments: [
+      "Ao Iniciar aciona Move Camera com offsets neutros, prontos para amarrar a um alvo depois.",
+      "Parallax Scroll vem logo apos para reforcar leitura de profundidade sem exigir eventos extra.",
+      "Parametros de layer e velocidade sao conservadores para Mega Drive / SNES.",
+    ],
+    hardwareNote:
+      "Scroll e camera respeitam o modelo atual de comentarios e chamadas no compilador de nos.",
+    buildGraph: buildCameraRigQuickActionGraph,
+  },
+  {
+    id: "fighter_combat",
+    actionLabel: "Lutador: stance + contato",
+    title: "Lutador (stance / hit)",
+    summary: "Animacao de combate inicial com ramo de overlap para feedback sonoro.",
+    comments: [
+      "Ao Iniciar define uma animacao de stance para o lutador principal inferido.",
+      "Overlap separa o momento de contato entre o lutador e o oponente mais proximo na cena.",
+      "Som de hit fecha o loop de feedback enquanto acoes destrutivas continuam fora do atalho.",
+    ],
+    hardwareNote:
+      "Overlap usa o mesmo schema de entidades ja suportado; nao inventa eventos de round.",
+    limitation:
+      "Nao inclui FSM completa de rounds: apenas bootstrap de leitura e feedback.",
+    buildGraph: buildFighterCombatQuickActionGraph,
+  },
+  {
+    id: "support_state_tick",
+    actionLabel: "Apoio: estado + anim",
+    title: "Apoio (estado)",
+    summary: "Escreve um slot de estado simples e liga animacao de apoio ao mesmo encadeamento.",
+    comments: [
+      "Set Variable reserva um nome explicito para o autor trocar quando integrar HUD ou lanes.",
+      "Animar Sprite usa alvo principal da selecao para manter coerencia com o resto dos atalhos.",
+      "Encadeamento linear deixa claro a ordem mental: estado antes da apresentacao visual.",
+    ],
+    hardwareNote:
+      "Variaveis sao placeholders de inteiros; o autor deve alinhar nomes com o codigo gerado.",
+    buildGraph: buildSupportStateTickQuickActionGraph,
+  },
+  {
+    id: "hud_vblank_tick",
+    actionLabel: "HUD: tick por VBlank",
+    title: "HUD (VBlank)",
+    summary: "Gancho de frame com escrita de variavel para contadores de HUD discretos.",
+    comments: [
+      "On VBlank e o ponto natural para atualizar contadores sem bloquear o fluxo principal.",
+      "Set Variable mantem um contador simples que o autor pode renomear para score, timer, etc.",
+      "Mantenha o corpo enxuto: ramificacoes de UI entram depois via paleta.",
+    ],
+    hardwareNote:
+      "VBlank e variaveis inteiras alinham-se ao modelo de frame fixo do alvo retro.",
+    limitation:
+      "Nao inclui desenho de tiles ou sprites de HUD: apenas o gancho logico inicial.",
+    buildGraph: buildHudVblankTickQuickActionGraph,
+  },
 ];
+
+/** Prioriza quick actions alinhadas ao `entity_role` importado (heuristica). */
+const QUICK_ACTION_PREF_BY_ENTITY_ROLE: Partial<Record<string, QuickActionTemplate["id"]>> = {
+  player_avatar: "player_controller",
+  enemy_actor: "enemy_logic",
+  fighter_actor: "fighter_combat",
+  projectile_actor: "projectile_motion",
+  support_actor: "support_state_tick",
+  hud_actor: "hud_vblank_tick",
+};
 
 // ── Initial graph (demo) ──────────────────────────────────────────────────────
 
@@ -940,18 +1237,22 @@ function NodeCard({
 interface EmptyStateOverlayProps {
   onApplyTemplate: (template: QuickActionTemplate) => void;
   selectedEntityLabel?: string | null;
+  templates: QuickActionTemplate[];
+  roleHint?: string | null;
 }
 
 function EmptyStateOverlay({
   onApplyTemplate,
   selectedEntityLabel,
+  templates,
+  roleHint,
 }: EmptyStateOverlayProps) {
   return (
     <div
       data-testid="nodegraph-empty-overlay"
       className="absolute inset-0 z-10 flex items-center justify-center bg-[#11111b]/60 px-6 py-8"
     >
-      <div className="w-full max-w-4xl rounded-2xl border border-dashed border-[#45475a] bg-[#181825]/95 p-6 shadow-2xl backdrop-blur-sm">
+      <div className="w-full max-w-6xl rounded-2xl border border-dashed border-[#45475a] bg-[#181825]/95 p-6 shadow-2xl backdrop-blur-sm">
         <div className="mb-5 flex flex-col gap-2">
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#89b4fa]">
             Guided Empty State
@@ -969,10 +1270,16 @@ function EmptyStateOverlay({
               alvo principal quando fizer sentido para o fluxo.
             </p>
           )}
+          {roleHint ? (
+            <p className="max-w-3xl text-[10px] text-[#94e2d5]" data-testid="nodegraph-empty-role-order-hint">
+              Ordenacao por papel importado: <span className="font-mono font-semibold">{roleHint}</span> (heuristica
+              — revise o primeiro cartao sugerido antes de aplicar).
+            </p>
+          ) : null}
         </div>
 
-        <div className="grid gap-3 lg:grid-cols-3">
-          {QUICK_ACTION_TEMPLATES.map((template) => (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {templates.map((template) => (
             <button
               key={template.id}
               type="button"
@@ -1006,6 +1313,9 @@ export default function NodeGraphEditor() {
   const activeScene = useEditorStore((state) => state.activeScene);
   const activeSceneSource = useEditorStore((state) => state.activeSceneSource);
   const selectedEntityId = useEditorStore((state) => state.selectedEntityId);
+  const setSelectedEntityId = useEditorStore((state) => state.setSelectedEntityId);
+  const setActiveWorkspace = useEditorStore((state) => state.setActiveWorkspace);
+  const setActiveViewportTab = useEditorStore((state) => state.setActiveViewportTab);
   const updateEntity = useEditorStore((state) => state.updateEntity);
   const logMessage = useEditorStore((state) => state.logMessage);
   const selectedEntity =
@@ -1204,6 +1514,40 @@ export default function NodeGraphEditor() {
     logMessage("info", `Conexão criada: ${edge.fromNode}:${edge.fromPort} → ${edge.toNode}:${edge.toPort}`);
   }, [pendingEdge, logMessage]);
 
+  const selectedNode = graph.nodes.find((node) => node.id === selectedId) ?? null;
+  const selectedEntitySourceRefs = useMemo(
+    () => resolveEntitySourceRefs(selectedEntity),
+    [selectedEntity]
+  );
+  const selectedNodeTargetEntity = useMemo(() => {
+    if (!selectedNode || !activeScene?.entities.length) {
+      return null;
+    }
+
+    const candidateKeys = Array.from(
+      new Set(
+        Object.values(selectedNode.params)
+          .filter((value): value is string | number => typeof value === "string" || typeof value === "number")
+          .map((value) => normalizeGraphEntityKey(value))
+          .filter((value) => value.length > 0)
+      )
+    );
+    if (candidateKeys.length === 0) {
+      return null;
+    }
+
+    return (
+      activeScene.entities.find((entity) => {
+        const keys = [
+          normalizeGraphEntityKey(entity.entity_id),
+          normalizeGraphEntityKey(getEntityDisplayName(entity)),
+          normalizeGraphEntityKey(entity.display_name ?? ""),
+        ];
+        return candidateKeys.some((candidate) => keys.includes(candidate));
+      }) ?? null
+    );
+  }, [activeScene?.entities, selectedNode]);
+
   const quickActionContext = useMemo<QuickActionContext>(() => {
     const selectedEntityIdValue = selectedEntity?.entity_id ?? null;
     return {
@@ -1214,6 +1558,86 @@ export default function NodeGraphEditor() {
     };
   }, [activeScene, selectedEntity]);
   const graphOriginLabel = selectedEntity?.components.logic?.graph_origin;
+  const importedSemantics = selectedEntity?.components.logic?.imported_semantics;
+
+  const orderedQuickActionTemplates = useMemo(() => {
+    const role = importedSemantics?.entity_role?.trim();
+    const pref = role ? QUICK_ACTION_PREF_BY_ENTITY_ROLE[role] : undefined;
+    const list = [...QUICK_ACTION_TEMPLATES];
+    if (pref) {
+      list.sort((a, b) => {
+        if (a.id === pref) {
+          return -1;
+        }
+        if (b.id === pref) {
+          return 1;
+        }
+        return 0;
+      });
+    }
+    return list;
+  }, [importedSemantics?.entity_role]);
+
+  const handleOpenSourcePath = useCallback(async (relativePath: string | null | undefined) => {
+    if (!activeProjectDir) {
+      logMessage("warn", "[NodeGraph] Abra um projeto antes de abrir a fonte.");
+      return;
+    }
+    const normalizedPath = relativePath?.trim() ?? "";
+    if (!normalizedPath) {
+      logMessage("warn", "[NodeGraph] Nenhum source_paths / external_source_refs disponivel para esta entidade.");
+      return;
+    }
+    try {
+      const result = await openProjectSourcePath(activeProjectDir, normalizedPath);
+      if (!result?.ok) {
+        throw new Error(
+          result?.message ??
+            "Falha ao abrir no editor externo. Configure um editor de texto nas preferencias do host ou abra o ficheiro manualmente."
+        );
+      }
+      logMessage("info", `[NodeGraph] Fonte aberta: ${normalizedPath}`);
+    } catch (error) {
+      logMessage(
+        "error",
+        `[NodeGraph] Nao foi possivel abrir '${normalizedPath}': ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }, [activeProjectDir, logMessage]);
+  const handleFocusSelectedEntityInScene = useCallback(() => {
+    if (!selectedEntity) {
+      return;
+    }
+    setSelectedEntityId(selectedEntity.entity_id);
+    setActiveWorkspace("scene");
+    setActiveViewportTab("scene");
+    logMessage("info", `[NodeGraph] Foco retornado para a cena: ${getEntityDisplayName(selectedEntity)}.`);
+  }, [
+    logMessage,
+    selectedEntity,
+    setActiveViewportTab,
+    setActiveWorkspace,
+    setSelectedEntityId,
+  ]);
+  const handleFocusSelectedNodeTarget = useCallback(() => {
+    if (!selectedNodeTargetEntity) {
+      logMessage("warn", "[NodeGraph] O no atual nao aponta para uma entidade rastreavel na cena.");
+      return;
+    }
+    setSelectedEntityId(selectedNodeTargetEntity.entity_id);
+    setActiveWorkspace("scene");
+    setActiveViewportTab("scene");
+    logMessage(
+      "info",
+      `[NodeGraph] No atual focado na cena: ${getEntityDisplayName(selectedNodeTargetEntity)}.`
+    );
+  }, [
+    logMessage,
+    selectedNodeTargetEntity,
+    setActiveViewportTab,
+    setActiveWorkspace,
+    setSelectedEntityId,
+  ]);
 
   // ── Add node from palette ──────────────────────────────────────────────────
   const addNode = useCallback((type: NodeType) => {
@@ -1241,6 +1665,68 @@ export default function NodeGraphEditor() {
       : "";
     logMessage("info", `Fluxo guiado aplicado: ${template.title}${contextSuffix}`);
   }, [logMessage, quickActionContext]);
+  const appendQuickActionTemplate = useCallback((template: QuickActionTemplate) => {
+    const quickGraph = template.buildGraph(quickActionContext);
+    const result = appendQuickActionGraph(graph, quickGraph);
+    const firstNewNodeId = result.appendedNodeIds[0] ?? quickGraph.nodes[0]?.id ?? null;
+    const firstNewNode =
+      (firstNewNodeId
+        ? result.graph.nodes.find((node) => node.id === firstNewNodeId)
+        : null) ?? null;
+
+    setGraph(result.graph);
+    setSelectedId(firstNewNodeId);
+    setDragging(null);
+    setPendingEdge(null);
+    if (firstNewNode) {
+      const rect = canvasRef.current?.getBoundingClientRect();
+      const width = rect?.width ?? canvasSize.width;
+      const height = rect?.height ?? canvasSize.height;
+      const desiredX = Math.max(FOCUS_PADDING, width / 2 - NODE_CARD_WIDTH / 2);
+      const desiredY = Math.max(FOCUS_PADDING, height / 2 - NODE_CARD_HEIGHT / 2);
+      setViewOffset({
+        x: desiredX - firstNewNode.x,
+        y: desiredY - firstNewNode.y,
+      });
+    }
+    setGuidedCommentary({
+      title: `${template.title} (anexado)`,
+      summary: template.summary,
+      comments: [
+        "O bloco foi anexado ao grafo atual sem substituir o fluxo existente.",
+        ...template.comments,
+      ],
+      hardwareNote: template.hardwareNote,
+      limitation: template.limitation,
+    });
+    const contextSuffix = quickActionContext.selectedEntityLabel
+      ? ` para ${quickActionContext.selectedEntityLabel}`
+      : "";
+    logMessage(
+      "info",
+      `[NodeGraph] Bloco guiado anexado: ${template.title}${contextSuffix}. Use 'Encadear exec (layout)' ou conecte manualmente se quiser ligar o fluxo novo ao existente.`
+    );
+  }, [canvasSize.height, canvasSize.width, graph, logMessage, quickActionContext]);
+
+  const applyExecChainFromLayout = useCallback(() => {
+    setGraph((current) => {
+      const before = current.edges.length;
+      const next = appendExecChainEdgesFromLayout(current);
+      const added = next.edges.length - before;
+      if (added === 0) {
+        logMessage(
+          "warn",
+          "[NodeGraph] Encadeamento layout: nenhuma aresta nova (portas exec padrao ausentes, grafo pequeno ou ligacoes ja existentes)."
+        );
+        return current;
+      }
+      logMessage(
+        "info",
+        `[NodeGraph] Encadeamento layout: ${added} aresta(s) exec na ordem y→x. Revise fluxos condicionais e nos sem entrada exec.`
+      );
+      return next;
+    });
+  }, [logMessage]);
 
   // ── Delete selected node ───────────────────────────────────────────────────
   useEffect(() => {
@@ -1299,8 +1785,6 @@ export default function NodeGraphEditor() {
       height: viewportHeight,
     };
   }, [canvasSize.height, canvasSize.width, graphBounds, viewOffset.x, viewOffset.y]);
-
-  const selectedNode = graph.nodes.find((node) => node.id === selectedId) ?? null;
 
   const focusNode = useCallback((nodeId: string) => {
     const targetNode = graph.nodes.find((node) => node.id === nodeId);
@@ -1507,6 +1991,36 @@ export default function NodeGraphEditor() {
               </span>
             </div>
 
+            <div
+              data-testid="nodegraph-scene-bridge"
+              className="rounded border border-[#89b4fa]/35 bg-[#89b4fa]/10 px-2 py-1.5 text-[10px] leading-snug text-[#cdd6f4]"
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#89b4fa]">
+                    Logic -&gt; Scene
+                  </p>
+                  <p className="mt-1 truncate">
+                    {getEntityDisplayName(selectedEntity)} ·{" "}
+                    <span className="font-mono text-[#6c7086]">{selectedEntity.entity_id}</span>
+                  </p>
+                  <p className="mt-1 text-[#7f849c]">
+                    {selectedEntitySourceRefs.length > 0
+                      ? `${selectedEntitySourceRefs.length} fonte(s) rastreavel(eis)`
+                      : "Sem fonte rastreavel: navegue pelo Inspector se houver contexto externo."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  data-testid="nodegraph-bridge-back-scene"
+                  onClick={handleFocusSelectedEntityInScene}
+                  className="shrink-0 rounded border border-[#94e2d5]/40 bg-[#94e2d5]/10 px-2 py-1 text-[9px] font-semibold text-[#94e2d5] transition-colors hover:bg-[#94e2d5]/20"
+                >
+                  Focar objeto
+                </button>
+              </div>
+            </div>
+
             {graphSummary.totalNodes > 0 && graphSummary.entryNodeIds.length === 0 && (
               <p className="text-[#fab387]">
                 Grafo sem evento de entrada: adicione um no de evento para iniciar o fluxo.
@@ -1517,6 +2031,83 @@ export default function NodeGraphEditor() {
                 {graphSummary.disconnectedNodeIds.length} no(s) ainda sem conexao no fluxo atual.
               </p>
             )}
+
+            {importedSemantics ? (
+              <div className="rounded border border-[#45475a] bg-[#11111b] px-2 py-1.5 text-[10px] leading-snug text-[#bac2de]">
+                <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#94e2d5]">
+                  Inferencia importada (heuristica)
+                </p>
+                <p className="mt-1">
+                  Papel: <span className="font-mono text-[#f9e2af]">{importedSemantics.entity_role ?? "—"}</span>
+                  {" · "}
+                  Confianca:{" "}
+                  <span className="font-mono text-[#cba6f7]">{importedSemantics.confidence ?? "—"}</span>
+                </p>
+                {importedSemantics.role_reason ? (
+                  <p className="mt-1 line-clamp-2 text-[#6c7086]" title={importedSemantics.role_reason}>
+                    Motivo: {importedSemantics.role_reason}
+                  </p>
+                ) : null}
+                {importedSemantics.driver_functions?.length ? (
+                  <p className="mt-1 text-[9px] text-[#7f849c]">
+                    Drivers:{" "}
+                    <span className="font-mono text-[#cdd6f4]">
+                      {importedSemantics.driver_functions.join(", ")}
+                    </span>
+                  </p>
+                ) : null}
+                {selectedEntitySourceRefs.length > 0 ? (
+                  <div className="mt-2 flex flex-col gap-1">
+                    {selectedEntitySourceRefs.map((relativePath, index) => (
+                      <button
+                        key={`${relativePath}-${index}`}
+                        type="button"
+                        data-testid={
+                          index === 0
+                            ? "nodegraph-open-primary-source"
+                            : `nodegraph-open-source-${index}`
+                        }
+                        onClick={() => void handleOpenSourcePath(relativePath)}
+                        className="w-full rounded border border-[#89b4fa]/40 bg-[#89b4fa]/10 px-2 py-1 text-left font-semibold text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20"
+                      >
+                        Abrir fonte{selectedEntitySourceRefs.length > 1 ? ` (${index + 1})` : ""}
+                        <span className="mt-0.5 block truncate font-mono text-[9px] font-normal text-[#6c7086]">
+                          {relativePath}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-[9px] text-[#6c7086]">
+                    Sem caminho de fonte rastreavel: use o Inspector ou o doador para localizar o TU manualmente.
+                  </p>
+                )}
+              </div>
+            ) : null}
+            {graph.nodes.length > 0 ? (
+              <div className="rounded border border-[#313244] bg-[#11111b] px-2 py-1.5 text-[10px] leading-snug text-[#bac2de]">
+                <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#a6e3a1]">
+                  Atalhos construtivos
+                </p>
+                <p className="mt-1 text-[#94a3b8]">
+                  Anexe um bloco coerente com o papel atual sem substituir o grafo que ja esta em edicao.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {orderedQuickActionTemplates.slice(0, 3).map((template) => (
+                    <button
+                      key={template.id}
+                      type="button"
+                      data-testid={`nodegraph-append-template-${template.id}`}
+                      onClick={() => appendQuickActionTemplate(template)}
+                      className="rounded border border-[#a6e3a1]/40 bg-[#a6e3a1]/10 px-2 py-1 font-semibold text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/20"
+                      title={template.summary}
+                    >
+                      + {template.actionLabel}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
 
             <div className="flex flex-wrap gap-1.5">
               <button
@@ -1554,6 +2145,32 @@ export default function NodeGraphEditor() {
                 className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 font-semibold text-[#a6adc8] transition-colors hover:text-[#cdd6f4]"
               >
                 Resetar Vista
+              </button>
+              <button
+                type="button"
+                data-testid="nodegraph-chain-exec-layout"
+                onClick={applyExecChainFromLayout}
+                disabled={graph.nodes.length < 2}
+                title="Liga saida exec padrao para entrada exec do proximo no na ordem de layout (y, depois x). Atalho de autoracao — revise ramos condicionais."
+                className="rounded border border-[#a6e3a1]/40 bg-[#a6e3a1]/10 px-2 py-1 font-semibold text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Encadear exec (layout)
+              </button>
+              <button
+                type="button"
+                onClick={handleFocusSelectedEntityInScene}
+                className="rounded border border-[#94e2d5]/40 bg-[#94e2d5]/10 px-2 py-1 font-semibold text-[#94e2d5] transition-colors hover:bg-[#94e2d5]/20"
+              >
+                Logica -&gt; Objeto
+              </button>
+              <button
+                type="button"
+                data-testid="nodegraph-focus-node-target"
+                onClick={handleFocusSelectedNodeTarget}
+                disabled={!selectedNodeTargetEntity}
+                className="rounded border border-[#f9e2af]/40 bg-[#f9e2af]/10 px-2 py-1 font-semibold text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/20 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                No -&gt; Objeto alvo
               </button>
               {graphSummary.disconnectedNodeIds.length > 0 && graphSummary.totalNodes > 1 && (
                 <button
@@ -1699,6 +2316,8 @@ export default function NodeGraphEditor() {
           <EmptyStateOverlay
             onApplyTemplate={applyQuickActionTemplate}
             selectedEntityLabel={quickActionContext.selectedEntityLabel}
+            templates={orderedQuickActionTemplates}
+            roleHint={importedSemantics?.entity_role?.trim() || null}
           />
         )}
         {!selectedEntity && graph.nodes.length === 0 && (

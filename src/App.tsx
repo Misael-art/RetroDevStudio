@@ -25,6 +25,7 @@ import {
   listProjectTemplates,
   openProjectDialog,
   openProjectPath,
+  openProjectSourcePath,
   previewProjectDestination,
   suggestProjectBaseDir,
   type ExternalImportProfileSummary,
@@ -59,7 +60,17 @@ import {
   getLiveBuildWarningSummary,
   useLiveValidationController,
 } from "./core/validation/liveValidationController";
+import { classifyImageAssetInstantiation } from "./core/assetInstantiation";
+import {
+  createSpriteEntityFromAsset,
+  createTilemapEntityFromAsset,
+} from "./core/editorEntityFactory";
 import { getEntityDisplayName } from "./core/entityDisplay";
+import {
+  getPreferredSceneEntity,
+  resolveSceneWorkspaceContext,
+} from "./core/sceneWorkspaceContext";
+import { resolveSceneWorldMetrics } from "./core/sceneWorldModel";
 
 const ExplorerWorkspace = lazy(() => import("./components/explorer/ExplorerWorkspace"));
 const InspectorPanel = lazy(() => import("./components/inspector/InspectorPanel"));
@@ -115,6 +126,7 @@ type LayoutMap = {
 };
 
 const LAYOUT_STORAGE_KEY = "retrodev-shell-saved-layout";
+const WORKSPACE_GUIDE_STORAGE_KEY = "retrodev-workspace-guide-expanded";
 
 const WORKSPACE_ITEMS: {
   id: EditorWorkspace;
@@ -416,7 +428,15 @@ type WorkspaceGuide = {
   actions: WorkspaceGuideAction[];
 };
 
+function getInitialWorkspaceGuideExpanded() {
+  if (typeof localStorage === "undefined") {
+    return true;
+  }
+  return localStorage.getItem(WORKSPACE_GUIDE_STORAGE_KEY) !== "false";
+}
+
 function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
+  const [expanded, setExpanded] = useState(getInitialWorkspaceGuideExpanded);
   const signalToneClass =
     guide.signal?.tone === "error"
       ? "border-[#f38ba8]/35 bg-[#f38ba8]/10 text-[#f38ba8]"
@@ -425,22 +445,37 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
         : guide.signal?.tone === "success"
           ? "border-[#a6e3a1]/35 bg-[#a6e3a1]/10 text-[#a6e3a1]"
           : "border-[#89b4fa]/35 bg-[#89b4fa]/10 text-[#89b4fa]";
-  const primaryActions = guide.actions.slice(0, 2);
-  const secondaryActions = guide.actions.slice(2);
+  const primaryActions = guide.actions.slice(0, expanded ? 2 : 1);
+  const secondaryActions = expanded ? guide.actions.slice(2) : [];
+
+  function toggleExpanded() {
+    setExpanded((current) => {
+      const next = !current;
+      localStorage.setItem(WORKSPACE_GUIDE_STORAGE_KEY, String(next));
+      return next;
+    });
+  }
 
   return (
     <section
       data-testid="workspace-guide"
-      className="mx-4 mt-3 rounded-2xl border border-[#313244] bg-[linear-gradient(135deg,#0b1020,#111827_55%,#0f172a)] px-4 py-3 shadow-[0_16px_32px_rgba(0,0,0,0.18)]"
+      data-expanded={expanded ? "true" : "false"}
+      className={`mx-4 mt-3 rounded-2xl border border-[#313244] bg-[linear-gradient(135deg,#0b1020,#111827_55%,#0f172a)] px-4 shadow-[0_16px_32px_rgba(0,0,0,0.18)] ${
+        expanded ? "py-3" : "py-2"
+      }`}
     >
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0 flex-1">
           <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#89b4fa]">
             {guide.eyebrow}
           </p>
-          <h2 className="mt-1 text-sm font-semibold text-[#e2e8f0]">{guide.title}</h2>
-          <p className="mt-1 text-[11px] leading-5 text-[#cbd5e1]">{guide.summary}</p>
-          {guide.checkpoints?.length ? (
+          <h2 className={expanded ? "mt-1 text-sm font-semibold text-[#e2e8f0]" : "mt-0.5 truncate text-xs font-semibold text-[#e2e8f0]"}>
+            {guide.title}
+          </h2>
+          {expanded ? (
+            <p className="mt-1 text-[11px] leading-5 text-[#cbd5e1]">{guide.summary}</p>
+          ) : null}
+          {expanded && guide.checkpoints?.length ? (
             <div className="mt-2 flex flex-wrap gap-1.5" data-testid="workspace-guide-checkpoints">
               {guide.checkpoints.map((checkpoint) => (
                 <span
@@ -461,7 +496,7 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
             </div>
           ) : null}
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2 lg:max-w-[18rem] lg:justify-end">
+        <div className="flex shrink-0 flex-wrap gap-2 lg:max-w-[20rem] lg:justify-end">
           {primaryActions.map((action) => (
             <ToolbarButton
               key={action.label}
@@ -472,8 +507,16 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
               title={action.title}
             />
           ))}
+          <button
+            type="button"
+            onClick={toggleExpanded}
+            className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-xs font-semibold text-[#a6adc8] transition-colors hover:border-[#89b4fa] hover:text-[#89b4fa]"
+          >
+            {expanded ? "Compactar guia" : "Expandir guia"}
+          </button>
         </div>
       </div>
+      {expanded ? (
       <details className="mt-2 rounded-xl border border-[#1f2937] bg-black/10 px-3 py-2">
         <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-[0.16em] text-[#7f849c]">
           Contexto e atalhos
@@ -510,6 +553,7 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
           </div>
         ) : null}
       </details>
+      ) : null}
     </section>
   );
 }
@@ -592,6 +636,42 @@ function WorkspacePanelPlaceholder({ label }: { label: string }) {
   return (
     <div className="flex h-full min-h-0 items-center justify-center bg-[#09090b] px-4 text-center text-[11px] text-[#64748b]">
       {label}
+    </div>
+  );
+}
+
+function BuildPhasePanel({
+  active,
+  blocked,
+  warning,
+}: {
+  active: boolean;
+  blocked: boolean;
+  warning: boolean;
+}) {
+  if (!active) {
+    return null;
+  }
+
+  const statusLabel = blocked ? "Acao necessaria" : warning ? "Seguro continuar" : "Pronto para build";
+  const statusClass = blocked
+    ? "border-[#f38ba8]/35 bg-[#f38ba8]/10 text-[#f38ba8]"
+    : warning
+      ? "border-[#fab387]/35 bg-[#fab387]/10 text-[#fab387]"
+      : "border-[#a6e3a1]/30 bg-[#a6e3a1]/10 text-[#a6e3a1]";
+
+  return (
+    <div
+      data-testid="build-phase-panel"
+      className="hidden max-w-[21rem] items-center gap-2 rounded border border-[#313244] bg-[#0b1020] px-2 py-1 text-[9px] xl:flex"
+      title="Fases do fluxo canonico Build -> ROM -> Emulacao."
+    >
+      <span className={`shrink-0 rounded-full border px-2 py-0.5 font-semibold ${statusClass}`}>
+        {statusLabel}
+      </span>
+      <span className="truncate text-[#94a3b8]">
+        Validando -&gt; Compilando -&gt; Gerando ROM -&gt; Carregando emulador
+      </span>
     </div>
   );
 }
@@ -764,6 +844,7 @@ type AutomationState = {
     level: "info" | "warn" | "error" | "success";
     message: string;
   }>;
+  projectSourceKind: string;
 };
 
 type AutomationApi = {
@@ -789,11 +870,34 @@ type AutomationApi = {
   ) => boolean;
   selectWorkspace: (workspace: EditorWorkspace) => boolean;
   setEntityLogicGraph: (entityId: string, graphJson: string) => boolean;
+  setEntityTransform: (entityId: string, x: number, y: number) => boolean;
+  /** Instancia asset de imagem na cena ativa (mesma regra canónica do Asset Browser). E2E / QA. */
+  instantiateBrowserImageAsset: (relativePath: string) => Promise<{
+    entityId: string;
+    kind: "sprite" | "tilemap";
+    reason: string;
+  }>;
   getEntityLogicState: (entityId: string) => {
     entityId: string;
-    source: { graph_ref: string | null; graph_origin: string | null; has_graph: boolean } | null;
-    resolved: { graph_ref: string | null; graph_origin: string | null; has_graph: boolean } | null;
+    source: {
+      graph_ref: string | null;
+      graph_origin: string | null;
+      has_graph: boolean;
+      source_paths: string[];
+      external_source_refs: string[];
+    } | null;
+    resolved: {
+      graph_ref: string | null;
+      graph_origin: string | null;
+      has_graph: boolean;
+      source_paths: string[];
+      external_source_refs: string[];
+    } | null;
   } | null;
+  openEntitySourcePath: (
+    entityId: string,
+    relativePath?: string | null
+  ) => Promise<{ ok: boolean; absolute_path: string | null; relative_path: string | null }>;
   getState: () => AutomationState;
 };
 
@@ -812,6 +916,7 @@ export default function App() {
     hwValidationState,
     activeProjectDir,
     activeProjectName,
+    activeScene,
     activeScenePath,
     setActiveProject,
     activeTarget,
@@ -832,6 +937,8 @@ export default function App() {
     resetHwValidation,
     undo,
     redo,
+    projectSourceKind,
+    projectLegacyIndex,
     setProjectSourceKind,
     setProjectLegacyIndex,
     consoleVisible,
@@ -895,6 +1002,12 @@ export default function App() {
 
   const selectedTemplate =
     projectTemplates.find((template) => template.id === selectedTemplateId) ?? null;
+  const recommendedProjectTemplates = projectTemplates.filter(
+    (template) => template.source_kind === "builtin" && !template.experimental
+  );
+  const importAdvancedProjectTemplates = projectTemplates.filter(
+    (template) => template.source_kind !== "builtin" || template.experimental
+  );
   const selectedTemplateMegadriveOnly = selectedTemplate?.source_kind === "external_sgdk";
   const selectedTemplateAvailability = selectedTemplate
     ? templateAvailability(selectedTemplate)
@@ -1424,10 +1537,25 @@ export default function App() {
     }
   }
 
-  async function hydrateProjectState(projectDir: string, projectName: string, scope: string) {
+  async function hydrateProjectState(
+    projectDir: string,
+    projectName: string,
+    scope: string,
+    preferredScenePath?: string | null
+  ) {
     await resetEmulatorSession(true);
     const hw = await getHwStatus(projectDir);
-    const sceneData = await getSceneData(projectDir);
+    const normalizedPreferredScene = preferredScenePath?.trim() || null;
+    let sceneData = normalizedPreferredScene
+      ? await getSceneData(projectDir, normalizedPreferredScene)
+      : await getSceneData(projectDir);
+    if (!sceneData.ok && normalizedPreferredScene) {
+      logMessage(
+        "warn",
+        `[${scope}] Cena preferida '${normalizedPreferredScene}' indisponivel; fallback para entry_scene canonica.`
+      );
+      sceneData = await getSceneData(projectDir);
+    }
     if (!sceneData.ok) {
       setActiveProject(projectDir, projectName);
       setSelectedEntityId(null);
@@ -1462,6 +1590,32 @@ export default function App() {
     setProjectLegacyIndex(sceneData.legacy_sgdk_index ?? null);
     if (sceneData.target === "megadrive" || sceneData.target === "snes") {
       setActiveTarget(sceneData.target);
+    }
+    setActiveWorkspace("scene");
+    setActiveViewportTab("scene");
+    setRightPanelMode("inspector");
+
+    const focusedEntity = getPreferredSceneEntity(hydrated.resolvedScene);
+    setSelectedEntityId(focusedEntity?.entity_id ?? null);
+
+    const openReason =
+      normalizedPreferredScene && sceneData.scene_path === normalizedPreferredScene
+        ? `cena preferida '${normalizedPreferredScene}'`
+        : "entry_scene canonica";
+    logMessage(
+      "info",
+      `[${scope}] Cena aberta: '${sceneData.scene_path}' (${openReason}). Workspace reposicionada para Cena.`
+    );
+    if (focusedEntity) {
+      logMessage(
+        "info",
+        `[${scope}] Foco inicial em '${getEntityDisplayName(focusedEntity)}' para evitar onboarding/UI vazia apos a abertura.`
+      );
+    } else {
+      logMessage(
+        "info",
+        `[${scope}] Cena aberta sem entidade visual inicial; selecao permaneceu vazia por nao haver alvo relevante.`
+      );
     }
 
     return true;
@@ -1513,7 +1667,12 @@ export default function App() {
     try {
       const result = await openProjectDialog();
       if (!result.selected) return;
-      const hydrated = await hydrateProjectState(result.path, result.name, "Projeto");
+      const hydrated = await hydrateProjectState(
+        result.path,
+        result.name,
+        "Projeto",
+        result.preferred_scene_path
+      );
       if (hydrated) {
         logMessage("success", `Projeto aberto: ${result.name} (${result.path})`);
         if (result.notice) {
@@ -1532,7 +1691,12 @@ export default function App() {
     if (!result.selected) {
       throw new Error(`Projeto invalido ou incompleto: ${projectDir}`);
     }
-    const hydrated = await hydrateProjectState(result.path, result.name, scope);
+    const hydrated = await hydrateProjectState(
+      result.path,
+      result.name,
+      scope,
+      result.preferred_scene_path
+    );
     if (!hydrated) {
       throw new Error(`Falha ao hidratar o projeto: ${result.path}`);
     }
@@ -1714,7 +1878,12 @@ export default function App() {
         selectedTemplate.id,
         donorPath
       );
-      const hydrated = await hydrateProjectState(result.path, result.name, "Projeto");
+      const hydrated = await hydrateProjectState(
+        result.path,
+        result.name,
+        "Projeto",
+        result.preferred_scene_path
+      );
       if (hydrated) {
         logMessage(
           "success",
@@ -1769,7 +1938,12 @@ export default function App() {
         selectedExternalImportProfile.id,
         projectPath
       );
-      const hydrated = await hydrateProjectState(result.path, result.name, "Projeto");
+      const hydrated = await hydrateProjectState(
+        result.path,
+        result.name,
+        "Projeto",
+        result.preferred_scene_path
+      );
       if (hydrated) {
         logMessage(
           "success",
@@ -2287,24 +2461,30 @@ export default function App() {
           } satisfies WorkspaceGuide;
         }
 
+        const sceneContext = resolveSceneWorkspaceContext({
+          scene: activeScene,
+          scenePath: activeScenePath,
+          projectSourceKind,
+          projectLegacyIndex,
+        });
+
         return {
-          eyebrow: "Scene Editor",
-          title: "Monte a cena e valide a selecao sem sair do canvas.",
-          summary:
-            "Hierarchy, viewport e painel direito ficam alinhados para editar, inspecionar e rodar com menos troca de contexto.",
-          checkpoints: [
-            "Hierarchy: selecao e cenas",
-            "Inspector/Tools: propriedades e utilitarios",
-            "Build & Run: validacao rapida",
-          ],
-          detail:
-            "Abra o Asset Browser para instanciar recursos canonicos, revise a entidade ativa no Inspector e rode no emulador assim que a cena estiver pronta.",
+          eyebrow: sceneContext.eyebrow,
+          title: sceneContext.title,
+          summary: sceneContext.summary,
+          checkpoints: sceneContext.checkpoints,
+          detail: sceneContext.detail,
           signal: sharedSignal,
           actions: [
             {
               label: "Abrir Asset Browser",
               onClick: () => openToolsWorkspace("assets", "editing"),
               accent: "primary",
+            },
+            {
+              label: "Focar Entidade Guia",
+              onClick: () => setSelectedEntityId(sceneContext.focusEntityId),
+              disabled: !sceneContext.focusEntityId,
             },
             {
               label: "Abrir Inspector",
@@ -2322,6 +2502,106 @@ export default function App() {
       })()
     : null;
 
+  function renderProjectTemplateCard(template: ProjectTemplateSummary) {
+    const availability = templateAvailability(template);
+    const isSelected = template.id === selectedTemplateId;
+    const donorPath = templateDonorPaths[template.id] || template.default_donor_path || "";
+    const isExternalSgdk = template.source_kind === "external_sgdk";
+
+    return (
+      <div
+        key={template.id}
+        className={`overflow-hidden rounded border ${
+          isSelected
+            ? "border-[#cba6f7] bg-[#1e1e2e]"
+            : "border-[#313244] bg-[#11111b]"
+        }`}
+      >
+        <button
+          type="button"
+          data-testid={`template-card-${template.id}`}
+          disabled={!availability.available}
+          onClick={() => {
+            setSelectedTemplateId(template.id);
+            if (template.source_kind === "external_sgdk") {
+              setNewProjTarget("megadrive");
+            }
+          }}
+          className="flex w-full flex-col gap-2 p-3 text-left disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <h3 className="text-sm font-semibold text-[#cdd6f4]">{template.name}</h3>
+              <p className="text-[10px] uppercase tracking-wide text-[#7f849c]">
+                {template.genre}
+              </p>
+            </div>
+            {template.experimental ? (
+              <span className="rounded border border-[#fab387] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[#fab387]">
+                Experimental
+              </span>
+            ) : null}
+          </div>
+          <p className="min-h-[3rem] text-[11px] leading-5 text-[#a6adc8]">
+            {template.description}
+          </p>
+          <div className="flex flex-wrap gap-1">
+            <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[10px] text-[#cdd6f4]">
+              {template.difficulty}
+            </span>
+            <span
+              className={`rounded px-1.5 py-0.5 text-[10px] ${
+                availability.tone === "success"
+                  ? "bg-[#a6e3a1]/15 text-[#a6e3a1]"
+                  : availability.tone === "warn"
+                    ? "bg-[#fab387]/15 text-[#fab387]"
+                    : "bg-[#f38ba8]/15 text-[#f38ba8]"
+              }`}
+            >
+              {availability.statusLabel}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {template.features.length > 0 ? (
+              template.features.map((feature) => (
+                <span
+                  key={feature}
+                  className="rounded bg-[#181825] px-1.5 py-0.5 text-[10px] text-[#7f849c]"
+                >
+                  {feature}
+                </span>
+              ))
+            ) : (
+              <span className="text-[10px] text-[#6c7086]">Sem presets iniciais.</span>
+            )}
+          </div>
+        </button>
+
+        {isExternalSgdk ? (
+          <div className="border-t border-[#313244] p-3 text-[10px] text-[#7f849c]">
+            <div className="mb-2">
+              <p className="text-[#a6adc8]">Template doador</p>
+              <p className="truncate font-mono text-[#cdd6f4]">
+                {donorPath || "(selecione uma pasta doadora)"}
+              </p>
+            </div>
+            {availability.reason ? (
+              <p className="mb-2 text-[#fab387]">{availability.reason}</p>
+            ) : (
+              <p className="mb-2 text-[#7f849c]">
+                Usa assets limpos do template SGDK externo sem copiar ROM, VGM ou artefatos.
+              </p>
+            )}
+            <ToolbarButton
+              label="Escolher pasta..."
+              onClick={() => void chooseTemplateDonorPath(template.id)}
+            />
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
   useEffect(() => {
     if (!automationEnabled) {
       delete window.__RDS_E2E__;
@@ -2332,7 +2612,15 @@ export default function App() {
       openProject: (projectDir: string) => openProjectAtPath(projectDir, "E2E"),
       importSgdkProject: async (projectName: string, baseDir: string, sgdkDonorPath: string) => {
         const result = await importSgdkProject(projectName, baseDir, sgdkDonorPath);
-        await openProjectAtPath(result.path, "E2E SGDK");
+        const hydrated = await hydrateProjectState(
+          result.path,
+          result.name,
+          "E2E SGDK",
+          result.preferred_scene_path
+        );
+        if (!hydrated) {
+          throw new Error(`Falha ao hidratar importacao SGDK em ${result.path}`);
+        }
         return result.path;
       },
       closeProject: () => handleCloseProject(),
@@ -2417,6 +2705,60 @@ export default function App() {
         });
         return true;
       },
+      setEntityTransform: (entityId: string, x: number, y: number) => {
+        const state = useEditorStore.getState();
+        const entity = state.activeScene?.entities.find((candidate) => candidate.entity_id === entityId);
+        if (!entity) {
+          throw new Error(`Entidade '${entityId}' nao encontrada para mover no E2E.`);
+        }
+        state.updateEntity(entityId, {
+          transform: {
+            ...entity.transform,
+            x,
+            y,
+          },
+        });
+        return true;
+      },
+      instantiateBrowserImageAsset: async (relativePath: string) => {
+        const trimmed = String(relativePath ?? "").trim();
+        if (!trimmed) {
+          throw new Error("instantiateBrowserImageAsset: relativePath vazio.");
+        }
+        const state = useEditorStore.getState();
+        if (!state.activeProjectDir || !state.activeScene) {
+          throw new Error("instantiateBrowserImageAsset: projeto ou cena ativa ausente.");
+        }
+        const asset = { kind: "image" as const, relative_path: trimmed };
+        const decision = classifyImageAssetInstantiation({
+          asset,
+          projectSourceKind: state.projectSourceKind,
+          sceneEntities: state.activeScene.entities,
+        });
+        const existingEntityIds = state.activeScene.entities.map((candidate) => candidate.entity_id);
+        const entity =
+          decision.kind === "tilemap"
+            ? createTilemapEntityFromAsset({
+                assetPath: trimmed,
+                existingEntityIds,
+              })
+            : createSpriteEntityFromAsset({
+                assetPath: trimmed,
+                target: state.activeTarget,
+                existingEntityIds,
+                includeStarterLogic: false,
+              });
+        state.addEntity(entity);
+        const saved = await persistActiveScene(
+          state.activeProjectDir,
+          "E2E instantiateBrowserImageAsset",
+          `[E2E] Instanciado ${decision.kind} a partir de '${trimmed}' (${decision.reason}).`
+        );
+        if (!saved) {
+          throw new Error("instantiateBrowserImageAsset: persistActiveScene falhou.");
+        }
+        return { entityId: entity.entity_id, kind: decision.kind, reason: decision.reason };
+      },
       getEntityLogicState: (entityId: string) => {
         const state = useEditorStore.getState();
         const sourceEntity = state.activeSceneSource?.entities.find(
@@ -2435,6 +2777,8 @@ export default function App() {
                 graph_ref: sourceEntity.components.logic?.graph_ref ?? null,
                 graph_origin: sourceEntity.components.logic?.graph_origin ?? null,
                 has_graph: Boolean(sourceEntity.components.logic?.graph?.trim()),
+                source_paths: [...(sourceEntity.components.logic?.imported_semantics?.source_paths ?? [])],
+                external_source_refs: [...(sourceEntity.components.logic?.external_source_refs ?? [])],
               }
             : null,
           resolved: resolvedEntity
@@ -2442,12 +2786,42 @@ export default function App() {
                 graph_ref: resolvedEntity.components.logic?.graph_ref ?? null,
                 graph_origin: resolvedEntity.components.logic?.graph_origin ?? null,
                 has_graph: Boolean(resolvedEntity.components.logic?.graph?.trim()),
+                source_paths: [...(resolvedEntity.components.logic?.imported_semantics?.source_paths ?? [])],
+                external_source_refs: [...(resolvedEntity.components.logic?.external_source_refs ?? [])],
               }
             : null,
         };
       },
+      openEntitySourcePath: async (entityId: string, relativePath?: string | null) => {
+        const state = useEditorStore.getState();
+        if (!state.activeProjectDir) {
+          throw new Error("Nenhum projeto aberto para abrir fonte real.");
+        }
+        const entity =
+          state.activeScene?.entities.find((candidate) => candidate.entity_id === entityId) ??
+          state.activeSceneSource?.entities.find((candidate) => candidate.entity_id === entityId) ??
+          null;
+        const fallbackPath =
+          entity?.components.logic?.imported_semantics?.source_paths?.[0] ??
+          entity?.components.logic?.external_source_refs?.[0] ??
+          null;
+        const nextRelativePath = String(relativePath ?? fallbackPath ?? "").trim();
+        if (!nextRelativePath) {
+          throw new Error(`Entidade '${entityId}' sem source_paths/external_source_refs rastreaveis.`);
+        }
+        const result = await openProjectSourcePath(state.activeProjectDir, nextRelativePath);
+        if (!result.ok) {
+          throw new Error(result.message || "Falha ao abrir fonte real no host.");
+        }
+        return {
+          ok: true,
+          absolute_path: result.absolute_path ?? null,
+          relative_path: nextRelativePath,
+        };
+      },
       getState: () => {
         const state = useEditorStore.getState();
+        const sceneWorldMetrics = resolveSceneWorldMetrics(state.activeScene, state.activeTarget);
         const currentLiveBuildBlocked =
           state.hwValidationState === "fresh" &&
           Boolean(state.hwStatus && state.hwStatus.errors.length > 0);
@@ -2503,6 +2877,7 @@ export default function App() {
           selectedEntityId: state.selectedEntityId,
           activeLayerId: state.activeLayerId,
           editorMode: state.editorMode,
+          activeTilemapId: state.activeTilemapId,
           rightPanelMode,
           hwValidationState: state.hwValidationState,
           hwValidatedRevision: state.hwValidatedRevision,
@@ -2520,6 +2895,8 @@ export default function App() {
                 sceneId: state.activeScene.scene_id,
                 displayName: state.activeScene.display_name ?? state.activeScene.scene_id,
                 entityCount: state.activeScene.entities.length,
+                worldBounds: sceneWorldMetrics.bounds,
+                viewportFrame: sceneWorldMetrics.frame,
                 backgroundLayerCount: state.activeScene.background_layers.length,
                 editorLayerCount: state.activeScene.layers?.length ?? 0,
                 collisionSolidCount:
@@ -2591,6 +2968,7 @@ export default function App() {
             hasStaleRevalidateButton: currentLiveState === "DESATUAL.",
           },
           consoleEntries: state.consoleEntries.map(({ level, message }) => ({ level, message })),
+          projectSourceKind: state.projectSourceKind,
         };
       },
     };
@@ -2619,13 +2997,16 @@ export default function App() {
               data-testid="project-wizard-body"
               className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1"
             >
-              <div className="grid gap-3 md:grid-cols-3">
+              <div data-testid="wizard-recommended-start" className="grid gap-3 md:grid-cols-2">
+                <p className="col-span-full text-[9px] font-semibold uppercase tracking-[0.14em] text-[#a6e3a1]">
+                  Primeiro Projeto
+                </p>
               {templatesLoading ? (
                 <div className="col-span-full rounded border border-[#313244] bg-[#11111b] p-4 text-xs text-[#7f849c]">
                   Carregando galeria de templates...
                 </div>
               ) : (
-                projectTemplates.map((template) => {
+                recommendedProjectTemplates.map((template) => {
                   const availability = templateAvailability(template);
                   const isSelected = template.id === selectedTemplateId;
                   const donorPath =
@@ -2727,6 +3108,30 @@ export default function App() {
                 })
               )}
             </div>
+
+            {!templatesLoading && importAdvancedProjectTemplates.length > 0 ? (
+              <section
+                data-testid="wizard-import-advanced"
+                className="rounded border border-[#313244] bg-[#11111b]/70 p-3"
+              >
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#fab387]">
+                      Importar / Avancado
+                    </p>
+                    <p className="mt-1 text-[10px] leading-5 text-[#94a3b8]">
+                      Templates doadores e experimentais ficam fora do primeiro caminho para manter o fluxo MVP claro.
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded-full border border-[#fab387]/35 bg-[#fab387]/10 px-2 py-1 text-[9px] font-semibold text-[#fab387]">
+                    Experimental
+                  </span>
+                </div>
+                <div className="grid gap-3 md:grid-cols-2">
+                  {importAdvancedProjectTemplates.map(renderProjectTemplateCard)}
+                </div>
+              </section>
+            ) : null}
 
             <div className="grid gap-3">
               <div className="rounded border border-[#313244] bg-[#11111b] p-3 text-[10px] text-[#7f849c]">
@@ -3198,6 +3603,11 @@ export default function App() {
                 />
               </>
             )}
+            <BuildPhasePanel
+              active={Boolean(activeProjectDir)}
+              blocked={liveBuildBlocked}
+              warning={Boolean(buildWarningSummary)}
+            />
           </>
         }
         rightContent={

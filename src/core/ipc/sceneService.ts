@@ -75,6 +75,17 @@ export interface LogicVariable {
   max?: number;
 }
 
+export interface ImportedLogicSemantics {
+  source?: string;
+  gameplay_class?: string;
+  entity_role?: string;
+  confidence?: string;
+  role_reason?: string;
+  driver_functions?: string[];
+  source_paths?: string[];
+  audit_flags?: string[];
+}
+
 export interface LogicComponent {
   graph?: string;
   graph_ref?: string | null;
@@ -82,6 +93,7 @@ export interface LogicComponent {
   logic_hints?: string[];
   /** Caminhos no doador (ex. C) rastreados sem carregar AST no frontend. */
   external_source_refs?: string[];
+  imported_semantics?: ImportedLogicSemantics | null;
   variables?: Record<string, LogicVariable>;
 }
 

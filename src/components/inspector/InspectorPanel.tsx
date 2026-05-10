@@ -1,5 +1,12 @@
 import { type ChangeEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import AssetPreview from "../common/AssetPreview";
+import {
+  DEFAULT_TILEMAP_LEGACY_FALLBACK_DETAIL,
+  hasCanonicalTilemapCells,
+  resolveProjectAssetVisualState,
+  type ProjectAssetVisualState,
+} from "../../core/assetVisualState";
+import { resolveImportedEntityContext } from "../../core/importedEntityContext";
 import Panel from "../common/Panel";
 import HardwareLimitsPanel from "./HardwareLimitsPanel";
 import { useEditorStore } from "../../core/store/editorStore";
@@ -11,6 +18,9 @@ import {
 } from "../../core/sceneConstraints";
 import { deserializeNodeGraph, serializeNodeGraph } from "../nodegraph/NodeGraphEditor";
 import { getEntityDisplayName } from "../../core/entityDisplay";
+import { resolveSceneWorkspaceContext } from "../../core/sceneWorkspaceContext";
+import { buildTilemapAuthoringBrush } from "../../core/entityAuthoring";
+import { openProjectSourcePath } from "../../core/ipc/projectService";
 import knowledgeBase from "./knowledgeBase.json";
 
 type KnowledgeSectionId =
@@ -31,6 +41,10 @@ type KnowledgeEntry = {
 };
 
 const INSPECTOR_KNOWLEDGE = knowledgeBase as Record<KnowledgeSectionId, KnowledgeEntry>;
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 interface PropRowProps {
   label: string;
@@ -565,6 +579,23 @@ function targetDisplayName(target: "megadrive" | "snes"): string {
   return target === "megadrive" ? "Mega Drive" : "SNES";
 }
 
+function isStableAssetVisualState(visualState: ProjectAssetVisualState): boolean {
+  return visualState.kind !== "loading";
+}
+
+function importedToneClass(tone: "primary" | "accent" | "support" | "neutral"): string {
+  switch (tone) {
+    case "primary":
+      return "border-[#89b4fa]/35 bg-[#89b4fa]/10 text-[#89b4fa]";
+    case "accent":
+      return "border-[#f38ba8]/35 bg-[#f38ba8]/10 text-[#f38ba8]";
+    case "support":
+      return "border-[#a6e3a1]/35 bg-[#a6e3a1]/10 text-[#a6e3a1]";
+    default:
+      return "border-[#313244] bg-[#11111b] text-[#cdd6f4]";
+  }
+}
+
 // ── LogicVariable Slider ─────────────────────────────────────────────────────
 
 interface LogicVariableSliderProps {
@@ -629,16 +660,26 @@ export default function InspectorPanel() {
     activeProjectDir,
     activeScene,
     activeSceneSource,
+    activeScenePath,
     activeTarget,
     logMessage,
+    projectSourceKind,
+    projectLegacyIndex,
     selectedEntityId,
+    setSelectedEntityId,
     updateBackgroundLayer,
     updateEntity,
     clearTilemapCells,
     activeBrush,
+    setActiveWorkspace,
+    setActiveViewportTab,
+    setActiveTilemapId,
+    setEditorMode,
+    setActiveBrush,
   } = useEditorStore();
 
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "error">("idle");
+  const [assetPreviewStates, setAssetPreviewStates] = useState<Record<string, ProjectAssetVisualState>>({});
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(
@@ -680,6 +721,7 @@ export default function InspectorPanel() {
       ) ?? [],
     [entity]
   );
+  const importedEntityContext = useMemo(() => resolveImportedEntityContext(entity), [entity]);
   const entityAssignedLayers = useMemo(() => {
     if (!entity || !activeScene?.layers) {
       return [];
@@ -690,6 +732,75 @@ export default function InspectorPanel() {
       .map((sceneLayer) => sceneLayer.name);
   }, [activeScene?.layers, entity]);
   const sections = useMemo(() => (entity ? entityPropSections(entity) : []), [entity]);
+  const sceneContext = useMemo(
+    () =>
+      resolveSceneWorkspaceContext({
+        scene: activeScene,
+        scenePath: activeScenePath,
+        projectSourceKind,
+        projectLegacyIndex,
+      }),
+    [activeScene, activeScenePath, projectLegacyIndex, projectSourceKind]
+  );
+  const tilemapUsesLegacyFallback = Boolean(
+    entity?.components.tilemap && !hasCanonicalTilemapCells(entity.components.tilemap)
+  );
+
+  async function handleOpenImportedSourcePath(relativePath: string) {
+    if (!activeProjectDir) {
+      logMessage("warn", "[Inspector] Abra um projeto antes de abrir a fonte associada.");
+      return;
+    }
+    try {
+      const result = await openProjectSourcePath(activeProjectDir, relativePath);
+      if (!result?.ok) {
+        throw new Error(result?.message ?? "Falha ao abrir fonte no host.");
+      }
+      logMessage("info", `[Inspector] Fonte aberta: ${relativePath}`);
+    } catch (error) {
+      logMessage("error", `[Inspector] Falha ao abrir fonte '${relativePath}': ${describeError(error)}`);
+    }
+  }
+
+  function handleOpenLogicWorkspace() {
+    if (!entity) {
+      return;
+    }
+    setActiveWorkspace("logic");
+    setActiveViewportTab("logic");
+    setSelectedEntityId(entity.entity_id);
+    logMessage("info", `[Inspector] Navegando para Logic Workspace: ${getEntityDisplayName(entity)}.`);
+  }
+
+  function handleOpenArtWorkspace() {
+    if (!entity?.components.sprite) {
+      logMessage("warn", "[Inspector] A entidade selecionada nao possui sprite para abrir no Art Workspace.");
+      return;
+    }
+    setActiveWorkspace("artstudio");
+    setActiveViewportTab("artstudio");
+    setSelectedEntityId(entity.entity_id);
+    logMessage("info", `[Inspector] Navegando para Art Workspace: ${getEntityDisplayName(entity)}.`);
+  }
+
+  function handleFocusTilemapInViewport() {
+    if (!entity?.components.tilemap) {
+      return;
+    }
+    setActiveWorkspace("scene");
+    setActiveViewportTab("scene");
+    setSelectedEntityId(entity.entity_id);
+    setActiveTilemapId(entity.entity_id);
+    setEditorMode("paint");
+    const brush = buildTilemapAuthoringBrush(entity);
+    if (brush) {
+      setActiveBrush(brush);
+    }
+    logMessage(
+      "info",
+      `[Inspector] Tilemap '${getEntityDisplayName(entity)}' focado: modo pintura, brush tile #${brush?.tileIndex ?? 1} e tilemap travado. Paleta embutida no viewport (ou Tools > Paleta Contextual).`
+    );
+  }
 
   async function saveScene() {
     const { activeProjectDir } = useEditorStore.getState();
@@ -927,6 +1038,41 @@ export default function InspectorPanel() {
                       {entityAssignedLayers.length > 0 ? entityAssignedLayers.join(", ") : "nenhuma"}
                     </span>
                   </span>
+                  <span
+                    data-testid="inspector-scene-context"
+                    className="rounded-full border border-[#313244] bg-[#11111b] px-2 py-0.5"
+                  >
+                    Cena:{" "}
+                    <span className="font-semibold text-[#cdd6f4]">{sceneContext.sourceBadgeLabel}</span>
+                  </span>
+                  {sceneContext.focusEntityId === entity.entity_id ? (
+                    <span className="rounded-full border border-[#89b4fa]/35 bg-[#89b4fa]/10 px-2 py-0.5 text-[#89b4fa]">
+                      Entidade guia
+                    </span>
+                  ) : null}
+                  {tilemapUsesLegacyFallback ? (
+                    <span
+                      data-testid="inspector-tilemap-fallback-chip"
+                      className="rounded-full border border-[#fab387]/35 bg-[#fab387]/10 px-2 py-0.5 text-[#fab387]"
+                    >
+                      Fallback legado
+                    </span>
+                  ) : null}
+                  {importedEntityContext.positionLabel ? (
+                    <span
+                      data-testid="inspector-position-provenance-chip"
+                      className={`rounded-full border px-2 py-0.5 font-semibold ${
+                        importedEntityContext.positionMode === "donor"
+                          ? "border-[#a6e3a1]/40 bg-[#a6e3a1]/12 text-[#a6e3a1]"
+                          : importedEntityContext.positionMode === "staging"
+                            ? "border-[#fab387]/40 bg-[#fab387]/12 text-[#fab387]"
+                            : "border-[#89b4fa]/35 bg-[#89b4fa]/10 text-[#89b4fa]"
+                      }`}
+                      title={importedEntityContext.positionDetail ?? undefined}
+                    >
+                      Pos: {importedEntityContext.positionLabel}
+                    </span>
+                  ) : null}
                 </div>
               </div>
               <div className="flex shrink-0 flex-col items-end gap-0.5 text-[8px] text-[#45475a]">
@@ -934,6 +1080,133 @@ export default function InspectorPanel() {
                 <span>({entity.transform.x}, {entity.transform.y})</span>
               </div>
             </div>
+            {importedEntityContext.isImported ? (
+              <div className="border-b border-[#313244] bg-[#11111b]/40 px-3 py-2">
+                <div
+                  data-testid="inspector-imported-context"
+                  className="rounded border border-[#313244] bg-[#0f172a]/40 p-2"
+                >
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#7f849c]">
+                      Contexto importado
+                    </p>
+                    {importedEntityContext.badgeLabel ? (
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-[9px] font-semibold ${importedToneClass(importedEntityContext.tone)}`}
+                      >
+                        {importedEntityContext.badgeLabel}
+                      </span>
+                    ) : null}
+                    {importedEntityContext.gameplayLabel ? (
+                      <span className="rounded-full border border-[#313244] bg-[#181825] px-2 py-0.5 text-[9px] text-[#cdd6f4]">
+                        {importedEntityContext.gameplayLabel}
+                      </span>
+                    ) : null}
+                    {importedEntityContext.confidenceLabel ? (
+                      <span className="rounded-full border border-[#313244] bg-[#181825] px-2 py-0.5 text-[9px] text-[#94a3b8]">
+                        {importedEntityContext.confidenceLabel}
+                      </span>
+                    ) : null}
+                  </div>
+                  {importedEntityContext.summary ? (
+                    <p className="mt-1 text-[10px] font-semibold text-[#cdd6f4]">
+                      {importedEntityContext.summary}
+                    </p>
+                  ) : null}
+                  {importedEntityContext.detail ? (
+                    <p className="mt-1 text-[10px] leading-relaxed text-[#94a3b8]">
+                      {importedEntityContext.detail}
+                    </p>
+                  ) : null}
+                  {importedEntityContext.driverFunctions.length > 0 ? (
+                    <p className="mt-2 text-[9px] text-[#7f849c]">
+                      Funcoes-chave:{" "}
+                      <span className="font-mono text-[#cdd6f4]">
+                        {importedEntityContext.driverFunctions.join(", ")}
+                      </span>
+                    </p>
+                  ) : null}
+                  {importedEntityContext.sourcePaths.length > 0 ? (
+                    <p className="mt-1 text-[9px] text-[#7f849c]">
+                      Fontes diretas:{" "}
+                      <span className="font-mono text-[#cdd6f4]">
+                        {importedEntityContext.sourcePaths.join(", ")}
+                      </span>
+                    </p>
+                  ) : null}
+                  {importedEntityContext.auditFlags.length > 0 ? (
+                    <div
+                      data-testid="inspector-imported-audit-flags"
+                      className="mt-2 flex flex-wrap gap-1"
+                    >
+                      {importedEntityContext.auditFlags.map((flag) => (
+                        <span
+                          key={flag}
+                          className="rounded-full border border-[#89b4fa]/30 bg-[#89b4fa]/10 px-2 py-0.5 font-mono text-[8px] text-[#89b4fa]"
+                        >
+                          {flag}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      data-testid="inspector-open-logic-workspace"
+                      onClick={handleOpenLogicWorkspace}
+                      className="rounded border border-[#89b4fa]/35 bg-[#89b4fa]/10 px-2 py-1 text-[9px] font-semibold text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20"
+                    >
+                      Objeto -&gt; Logica
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="inspector-open-art-workspace"
+                      onClick={handleOpenArtWorkspace}
+                      disabled={!entity?.components.sprite}
+                      className="rounded border border-[#a6e3a1]/35 bg-[#a6e3a1]/10 px-2 py-1 text-[9px] font-semibold text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/20 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Objeto -&gt; Art
+                    </button>
+                    {(() => {
+                      const pathsFromSemantics = importedEntityContext.sourcePaths;
+                      const refs =
+                        entity?.components.logic?.external_source_refs?.filter(
+                          (p): p is string => typeof p === "string" && p.trim().length > 0
+                        ) ?? [];
+                      const uniquePaths = Array.from(
+                        new Set(
+                          [...pathsFromSemantics, ...refs].map((p) => p.trim()).filter((p) => p.length > 0)
+                        )
+                      );
+                      if (uniquePaths.length === 0) {
+                        return (
+                          <span className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[9px] text-[#6c7086]">
+                            Fonte real indisponivel
+                          </span>
+                        );
+                      }
+                      return uniquePaths.map((relativePath, index) => (
+                        <button
+                          key={`${relativePath}-${index}`}
+                          type="button"
+                          data-testid={
+                            index === 0 ? "inspector-open-imported-source-primary" : `inspector-open-imported-source-${index}`
+                          }
+                          onClick={() => void handleOpenImportedSourcePath(relativePath)}
+                          className="max-w-[11rem] truncate rounded border border-[#f9e2af]/35 bg-[#f9e2af]/10 px-2 py-1 text-left text-[9px] font-semibold text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/20"
+                          title={relativePath}
+                        >
+                          Abrir fonte{uniquePaths.length > 1 ? ` (${index + 1})` : ""}
+                          <span className="mt-0.5 block truncate font-mono text-[8px] font-normal text-[#6c7086]">
+                            {relativePath}
+                          </span>
+                        </button>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              </div>
+            ) : null}
             {sections.map((section) => (
               <InspectorSection
                 key={section.id}
@@ -942,21 +1215,53 @@ export default function InspectorPanel() {
               >
                 {section.id === "sprite" &&
                   entity.components.sprite?.asset &&
-                  activeProjectDir && (
-                    <div className="mb-3 flex items-center justify-center overflow-hidden rounded border border-[#313244] bg-[#11111b] p-2">
-                      <AssetPreview
-                        testId="inspector-asset-preview"
-                        fallbackTestId="inspector-asset-preview-fallback"
-                        projectDir={activeProjectDir}
-                        relativePath={entity.components.sprite!.asset}
-                        alt={entity.components.sprite!.asset}
-                        imageClassName="max-h-24 max-w-full object-contain"
-                        fallbackClassName="flex h-24 w-full items-center justify-center text-[10px] font-semibold uppercase tracking-[0.12em] text-[#7f849c]"
-                        fallbackLabel="Preview indisponivel"
-                        pixelated
-                      />
-                    </div>
-                  )}
+                  activeProjectDir &&
+                  (() => {
+                    const spriteAssetPath = entity.components.sprite!.asset;
+                    const spriteVisualState =
+                      assetPreviewStates[spriteAssetPath]
+                      ?? resolveProjectAssetVisualState({ relativePath: spriteAssetPath });
+                    return (
+                      <div className="mb-3 flex items-center justify-center overflow-hidden rounded border border-[#313244] bg-[#11111b] p-2">
+                        <div className="w-full">
+                          <AssetPreview
+                            testId="inspector-asset-preview"
+                            fallbackTestId="inspector-asset-preview-fallback"
+                            projectDir={activeProjectDir}
+                            relativePath={spriteAssetPath}
+                            alt={spriteAssetPath}
+                            imageClassName="max-h-24 max-w-full object-contain"
+                            fallbackClassName="flex h-24 w-full items-center justify-center text-[10px] font-semibold uppercase tracking-[0.12em] text-[#7f849c]"
+                            fallbackLabel="Preview indisponivel"
+                            pixelated
+                            onVisualStateChange={(visualState) => {
+                              if (!isStableAssetVisualState(visualState)) {
+                                return;
+                              }
+                              setAssetPreviewStates((current) => ({
+                                ...current,
+                                [spriteAssetPath]: visualState,
+                              }));
+                            }}
+                          />
+                          <p
+                            className="mt-0.5 truncate font-mono text-[8px] text-[#45475a]"
+                            title={spriteAssetPath}
+                          >
+                            {spriteAssetPath}
+                          </p>
+                          <p className="mt-1 text-[9px] text-[#7f849c]">
+                            Estado visual:{" "}
+                            <span className="font-mono text-[#cdd6f4]">{spriteVisualState.title}</span>
+                            <span className="ml-1 font-mono text-[#45475a]">({spriteVisualState.kind})</span>
+                          </p>
+                          <p className="mt-1 text-[9px] leading-relaxed text-[#6c7086]">
+                            {spriteVisualState.detail}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 <table className="w-full text-xs">
                   <tbody>
                     {section.defs.map((def) => (
@@ -1052,10 +1357,54 @@ export default function InspectorPanel() {
                     0
                   );
                   const percent = total > 0 ? Math.round((filled / total) * 100) : 0;
+                  const hasCanonicalPaintedCells = hasCanonicalTilemapCells(tm);
+                  const tilemapVisualState =
+                    assetPreviewStates[tm.tileset]
+                    ?? resolveProjectAssetVisualState({
+                      relativePath: tm.tileset,
+                      legacyFallback: !hasCanonicalPaintedCells,
+                      legacyFallbackDetail: DEFAULT_TILEMAP_LEGACY_FALLBACK_DETAIL,
+                    });
                   const brushTileIndex =
                     activeBrush?.kind === "tile" ? activeBrush.tileIndex ?? 0 : null;
                   return (
                     <div className="mt-3 border-t border-[#313244] pt-3">
+                      {activeProjectDir && tm.tileset ? (
+                        <div className="mb-3 overflow-hidden rounded border border-[#313244] bg-[#11111b] p-2">
+                          <AssetPreview
+                            testId="inspector-tilemap-preview"
+                            fallbackTestId="inspector-tilemap-preview-fallback"
+                            projectDir={activeProjectDir}
+                            relativePath={tm.tileset}
+                            alt={tm.tileset}
+                            imageClassName="max-h-24 max-w-full object-contain"
+                            fallbackClassName="flex h-24 w-full items-center justify-center text-[10px] font-semibold uppercase tracking-[0.12em] text-[#7f849c]"
+                            pixelated
+                            legacyFallback={!hasCanonicalPaintedCells}
+                            legacyFallbackDetail={DEFAULT_TILEMAP_LEGACY_FALLBACK_DETAIL}
+                            onVisualStateChange={(visualState) => {
+                              if (!isStableAssetVisualState(visualState)) {
+                                return;
+                              }
+                              setAssetPreviewStates((current) => ({
+                                ...current,
+                                [tm.tileset]: visualState,
+                              }));
+                            }}
+                          />
+                          <p className="mt-0.5 truncate font-mono text-[8px] text-[#45475a]" title={tm.tileset}>
+                            {tm.tileset}
+                          </p>
+                          <p className="mt-1 text-[9px] text-[#7f849c]">
+                            Estado visual (tileset):{" "}
+                            <span className="font-mono text-[#cdd6f4]">{tilemapVisualState.title}</span>
+                            <span className="ml-1 font-mono text-[#45475a]">({tilemapVisualState.kind})</span>
+                          </p>
+                          <p className="mt-1 text-[9px] leading-relaxed text-[#6c7086]">
+                            {tilemapVisualState.detail}
+                          </p>
+                        </div>
+                      ) : null}
                       <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.15em] text-[#45475a]">
                         Pintura de Células
                       </p>
@@ -1073,6 +1422,32 @@ export default function InspectorPanel() {
                             #{brushTileIndex ?? "—"}
                           </span>
                         </span>
+                      </div>
+                      <p
+                        className="mb-2 text-[10px] text-[#7f849c]"
+                        data-testid={
+                          hasCanonicalPaintedCells
+                            ? "inspector-tilemap-cells-canonical"
+                            : "inspector-tilemap-legacy-fallback"
+                        }
+                      >
+                        {hasCanonicalPaintedCells
+                          ? "Tilemap com cells[] canônico: render célula-a-célula no viewport."
+                          : "Tilemap em fallback explícito: tileset existe, mas cells[] ainda nao foram materializados."}
+                      </p>
+                      {!hasCanonicalPaintedCells ? (
+                        <p className="mb-2 text-[10px] leading-relaxed text-[#f9e2af]">
+                          Pinte/importe a malha cells[] para sair do fallback legado e ver o tilemap canônico no viewport.
+                        </p>
+                      ) : null}
+                      <div className="mb-2 flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          onClick={handleFocusTilemapInViewport}
+                          className="rounded border border-[#94e2d5]/35 bg-[#94e2d5]/10 px-2 py-1 text-[9px] font-semibold text-[#94e2d5] transition-colors hover:bg-[#94e2d5]/20"
+                        >
+                          Editar tilemap no viewport
+                        </button>
                       </div>
                       <div className="flex flex-col gap-2">
                         <button
@@ -1140,6 +1515,19 @@ export default function InspectorPanel() {
                           <span className="font-mono text-[#cdd6f4]">
                             {entity.components.logic.graph_ref}
                           </span>
+                        </td>
+                      </tr>
+                    ) : null}
+                    {importedEntityContext.isImported && importedEntityContext.summary ? (
+                      <tr className="group border-b border-[#313244] last:border-0">
+                        <td className="w-24 min-w-24 align-top select-none px-2 py-1 text-xs text-[#7f849c]">
+                          Imported
+                        </td>
+                        <td className="px-2 py-1 text-xs">
+                          <p className="text-[#cdd6f4]">{importedEntityContext.summary}</p>
+                          {importedEntityContext.reason ? (
+                            <p className="mt-1 text-[#7f849c]">{importedEntityContext.reason}</p>
+                          ) : null}
                         </td>
                       </tr>
                     ) : null}

@@ -6,6 +6,14 @@ export interface OpenProjectResult {
   name: string;
   base_dir?: string | null;
   notice?: string | null;
+  preferred_scene_path?: string | null;
+  imported_scene_paths?: string[];
+}
+
+export interface OpenProjectSourceResult {
+  ok: boolean;
+  message: string;
+  absolute_path?: string | null;
 }
 
 export type ProjectDestinationCollisionStatus =
@@ -162,4 +170,11 @@ export function setProjectTarget(
   target: "megadrive" | "snes"
 ): Promise<{ ok: boolean; message: string }> {
   return invoke("set_project_target", { projectDir, target });
+}
+
+export function openProjectSourcePath(
+  projectDir: string,
+  relativePath: string
+): Promise<OpenProjectSourceResult> {
+  return invoke("open_project_source_path", { projectDir, relativePath });
 }

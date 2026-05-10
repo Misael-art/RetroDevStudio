@@ -10,8 +10,8 @@ use image::{ImageBuffer, Rgba, RgbaImage};
 
 use crate::ugdm::components::{
     AnimationDef, AudioComponent, CameraComponent, CollisionComponent, CollisionOffset, Components,
-    InputComponent, LogicComponent, MugenAnimationFrame, MugenCollisionBox, PhysicsComponent, Pivot,
-    SpriteComponent, TilemapComponent, Velocity,
+    ImportedLogicSemantics, InputComponent, LogicComponent, MugenAnimationFrame,
+    MugenCollisionBox, PhysicsComponent, Pivot, SpriteComponent, TilemapComponent, Velocity,
 };
 use crate::ugdm::entities::{
     BuildConfig, CollisionMap, Entity, PaletteEntry, PatchAuditEntry, Project, Resolution, Scene,
@@ -252,6 +252,14 @@ struct SgdkImportLedgerPhaseDEntityTrace {
     source_refs: Vec<SgdkSourceEvidence>,
     confidence: String,
     applied_class: String,
+    #[serde(default)]
+    entity_role: String,
+    #[serde(default)]
+    role_reason: String,
+    #[serde(default)]
+    driver_functions: Vec<String>,
+    #[serde(default)]
+    source_paths: Vec<String>,
     #[serde(default)]
     rules_hit: Vec<String>,
 }
@@ -1157,11 +1165,25 @@ impl SgdkDonorLogicScan {
 
     /// Heuristica agregada em todos os ficheiros visitados (ordem: casos mais especificos primeiro).
     fn heuristic_gameplay_class(&self) -> Option<String> {
+        if self.joy_read_detected
+            && self.spr_engine_detected
+            && self.map_scroll_any()
+            && self.close_range_combat_signal_detected()
+        {
+            return Some("hybrid_action_scroll_signals".to_string());
+        }
         if self.map_scroll_v_detected && self.joy_read_detected && self.spr_engine_detected {
             return Some("shmup_vertical_signals".to_string());
         }
         if self.joy_read_detected && self.spr_engine_detected && self.map_scroll_h_detected {
             return Some("run_and_gun_horizontal_signals".to_string());
+        }
+        if self.joy_read_detected
+            && self.spr_engine_detected
+            && !self.map_scroll_any()
+            && self.close_range_combat_signal_detected()
+        {
+            return Some("beat_em_up_close_range_signals".to_string());
         }
         if self.map_scroll_v_detected && !self.map_scroll_h_detected && !self.joy_read_detected {
             return Some("vertical_scroller_signals".to_string());
@@ -1174,8 +1196,10 @@ impl SgdkDonorLogicScan {
 
     fn primary_graph_materialization_class(&self) -> Option<&'static str> {
         match self.heuristic_gameplay_class().as_deref() {
+            Some("hybrid_action_scroll_signals") => Some("hybrid_action_scroll_signals"),
             Some("shmup_vertical_signals") => Some("shmup_vertical_signals"),
             Some("run_and_gun_horizontal_signals") => Some("run_and_gun_horizontal_signals"),
+            Some("beat_em_up_close_range_signals") => Some("beat_em_up_close_range_signals"),
             Some("platformer_horizontal_scroller_signals") => Some("platformer_horizontal_scroller_signals"),
             _ => None,
         }
@@ -1191,6 +1215,257 @@ impl SgdkDonorLogicScan {
             self.primary_graph_materialization_class()
         } else {
             None
+        }
+    }
+
+    fn close_range_combat_signal_detected(&self) -> bool {
+        const CLOSE_RANGE_KEYWORDS: [&str; 8] = [
+            "punch", "kick", "combo", "guard", "melee", "fight", "combat", "round",
+        ];
+        let mut corpus: Vec<String> = self
+            .function_symbols
+            .iter()
+            .map(|symbol| symbol.name.to_ascii_lowercase())
+            .collect();
+        for call in &self.function_calls {
+            if let Some(caller) = &call.caller {
+                corpus.push(caller.to_ascii_lowercase());
+            }
+            corpus.push(call.callee.to_ascii_lowercase());
+            corpus.push(call.snippet.to_ascii_lowercase());
+        }
+        corpus.extend(
+            self.source_evidence
+                .iter()
+                .map(|evidence| evidence.snippet.to_ascii_lowercase()),
+        );
+        corpus
+            .into_iter()
+            .any(|text| CLOSE_RANGE_KEYWORDS.iter().any(|keyword| text.contains(keyword)))
+    }
+
+    fn function_symbol_for_line(
+        &self,
+        rel_path: &str,
+        line: usize,
+    ) -> Option<&SgdkCLiteFunctionSymbol> {
+        self.function_symbols.iter().find(|symbol| {
+            !symbol.is_prototype
+                && symbol.rel_path == rel_path
+                && line >= symbol.start_line
+                && line <= symbol.end_line
+        })
+    }
+
+    fn entity_driver_functions(&self, resource_name: &str, is_primary_sprite: bool) -> Vec<String> {
+        let direct_refs = self.entity_resource_source_refs(resource_name);
+        let mut names: Vec<String> = direct_refs
+            .iter()
+            .filter_map(|evidence| {
+                self.function_symbol_for_line(&evidence.rel_path, evidence.line)
+                    .map(|symbol| symbol.name.clone())
+            })
+            .collect();
+        if names.is_empty()
+            && is_primary_sprite
+            && self
+                .function_symbols
+                .iter()
+                .any(|symbol| !symbol.is_prototype && symbol.name == "main")
+        {
+            names.push("main".to_string());
+        }
+
+        let mut expanded = names.clone();
+        for name in &names {
+            for call in &self.function_calls {
+                if call.callee == *name {
+                    if let Some(caller) = call.caller.as_deref() {
+                        expanded.push(caller.to_string());
+                    }
+                }
+            }
+        }
+        if is_primary_sprite {
+            for call in &self.function_calls {
+                let is_driver_call = matches!(
+                    call.callee.as_str(),
+                    "JOY_readJoypad"
+                        | "JOY_read"
+                        | "MAP_scrollH"
+                        | "MAP_scrollV"
+                        | "SPR_update"
+                        | "SPR_init"
+                );
+                if is_driver_call {
+                    if let Some(caller) = call.caller.as_deref() {
+                        expanded.push(caller.to_string());
+                    }
+                }
+            }
+        }
+
+        expanded.retain(|name| !name.is_empty());
+        expanded.sort();
+        expanded.dedup();
+        expanded
+    }
+
+    fn source_paths_for_functions(&self, function_names: &[String]) -> Vec<String> {
+        let function_name_set: HashSet<&str> = function_names.iter().map(|name| name.as_str()).collect();
+        let mut paths: Vec<String> = self
+            .function_symbols
+            .iter()
+            .filter(|symbol| !symbol.is_prototype && function_name_set.contains(symbol.name.as_str()))
+            .map(|symbol| symbol.rel_path.clone())
+            .collect();
+        for call in &self.function_calls {
+            if function_name_set.contains(call.callee.as_str())
+                || call
+                    .caller
+                    .as_deref()
+                    .is_some_and(|caller| function_name_set.contains(caller))
+            {
+                paths.push(call.rel_path.clone());
+            }
+        }
+        paths.sort();
+        paths.dedup();
+        paths
+    }
+
+    fn entity_semantic_profile(
+        &self,
+        resource_name: &str,
+        is_primary_sprite: bool,
+        secondary_local_spr: bool,
+    ) -> SgdkPhaseDEntitySemanticProfile {
+        let direct_refs = self.entity_resource_source_refs(resource_name);
+        let driver_functions = self.entity_driver_functions(resource_name, is_primary_sprite);
+        let mut source_paths: Vec<String> = direct_refs.iter().map(|evidence| evidence.rel_path.clone()).collect();
+        source_paths.extend(self.source_paths_for_functions(&driver_functions));
+        if source_paths.is_empty() && is_primary_sprite {
+            source_paths.extend(self.donor_logic_scanned_paths.clone());
+        }
+        source_paths.sort();
+        source_paths.dedup();
+
+        let entity_id = sgdk_entity_id(resource_name).to_ascii_lowercase();
+        let resource_corpus = vec![resource_name.to_ascii_lowercase(), entity_id];
+        let mut corpus = resource_corpus.clone();
+        corpus.extend(driver_functions.iter().map(|name| name.to_ascii_lowercase()));
+        corpus.extend(direct_refs.iter().map(|evidence| {
+            format!(
+                "{} {} {}",
+                evidence.subject.to_ascii_lowercase(),
+                evidence.kind.to_ascii_lowercase(),
+                evidence.snippet.to_ascii_lowercase()
+            )
+        }));
+        let has_keywords = |keywords: &[&str]| {
+            corpus
+                .iter()
+                .any(|text| keywords.iter().any(|keyword| text.contains(keyword)))
+        };
+        let resource_has_keywords = |keywords: &[&str]| {
+            resource_corpus
+                .iter()
+                .any(|text| keywords.iter().any(|keyword| text.contains(keyword)))
+        };
+
+        let mut audit_flags = Vec::new();
+        let gameplay_class = self.heuristic_gameplay_class();
+        let (entity_role, role_reason) = if is_primary_sprite && self.joy_read_detected {
+            audit_flags.push("primary_sprite".to_string());
+            audit_flags.push("joy_input_anchor".to_string());
+            (
+                "player_avatar".to_string(),
+                "sprite primario com leitura JOY_* no agregado do doador".to_string(),
+            )
+        } else if resource_has_keywords(&["foe", "enemy", "boss", "guard", "opponent", "rival"]) {
+            audit_flags.push("enemy_resource_signal".to_string());
+            (
+                "enemy_actor".to_string(),
+                "nome do recurso/entidade sugere papel de oponente mesmo quando a funcao condutora e compartilhada".to_string(),
+            )
+        } else if resource_has_keywords(&["player", "hero", "protagon", "avatar"]) {
+            audit_flags.push("player_resource_signal".to_string());
+            (
+                "player_avatar".to_string(),
+                "nome do recurso/entidade sugere papel de jogador".to_string(),
+            )
+        } else if has_keywords(&["foe", "enemy", "boss", "guard", "opponent", "rival"]) {
+            audit_flags.push("enemy_name_signal".to_string());
+            (
+                "enemy_actor".to_string(),
+                "recurso associado a sinais lexicais de oponente/inimigo".to_string(),
+            )
+        } else if has_keywords(&["player", "hero", "protagon", "avatar"]) {
+            audit_flags.push("player_name_signal".to_string());
+            (
+                "player_avatar".to_string(),
+                "nome do recurso ou das funcoes sugere papel de jogador".to_string(),
+            )
+        } else if has_keywords(&["shot", "bullet", "projectile", "laser", "missile", "weapon"]) {
+            audit_flags.push("projectile_signal".to_string());
+            if matches!(
+                gameplay_class.as_deref(),
+                Some("shmup_vertical_signals")
+                    | Some("run_and_gun_horizontal_signals")
+                    | Some("hybrid_action_scroll_signals")
+            ) {
+                audit_flags.push("projectile_gameplay_fit".to_string());
+            }
+            (
+                "projectile_actor".to_string(),
+                "recurso associado a sinais lexicais de tiro/projetil".to_string(),
+            )
+        } else if has_keywords(&["punch", "kick", "combo", "fight", "combat", "fighter"]) {
+            audit_flags.push("close_range_signal".to_string());
+            if matches!(
+                gameplay_class.as_deref(),
+                Some("beat_em_up_close_range_signals") | Some("hybrid_action_scroll_signals")
+            ) {
+                audit_flags.push("close_range_gameplay_fit".to_string());
+            }
+            (
+                "fighter_actor".to_string(),
+                "texto escaneado sugere combate corpo-a-corpo ligado a esta entidade".to_string(),
+            )
+        } else if resource_has_keywords(&["hud", "score", "health", "lifebar", "gauge", "font", "ui_"]) {
+            audit_flags.push("hud_resource_signal".to_string());
+            (
+                "hud_actor".to_string(),
+                "nome do recurso ou corpus sugere HUD/interface (heuristica lexical)".to_string(),
+            )
+        } else if secondary_local_spr {
+            audit_flags.push("secondary_local_spr_signal".to_string());
+            (
+                "support_actor".to_string(),
+                "sprite secundario com linha SPR_* local ao recurso".to_string(),
+            )
+        } else {
+            (
+                "generic_imported_sprite".to_string(),
+                "sem sinal lexical forte alem do scan agregado; sprite mantido como importado generico"
+                    .to_string(),
+            )
+        };
+        if !direct_refs.is_empty() {
+            audit_flags.push("direct_entity_bind".to_string());
+        }
+        if driver_functions.len() > 1 {
+            audit_flags.push("multi_function_driver".to_string());
+        }
+        audit_flags.sort();
+        audit_flags.dedup();
+
+        SgdkPhaseDEntitySemanticProfile {
+            entity_role,
+            role_reason,
+            driver_functions,
+            source_paths,
+            audit_flags,
         }
     }
 
@@ -1994,6 +2269,7 @@ fn imported_sprite_logic_graph_phase_d(
     scan: &SgdkDonorLogicScan,
     is_primary_sprite: bool,
     secondary_local_spr: bool,
+    semantic_profile: &SgdkPhaseDEntitySemanticProfile,
 ) -> String {
     let target = sgdk_entity_id(resource_name);
     let mat_class =
@@ -2002,8 +2278,23 @@ fn imported_sprite_logic_graph_phase_d(
         mat_class,
         Some("shmup_vertical_signals") | Some("run_and_gun_horizontal_signals")
     );
-    let (mv_dx, mv_dy) = match mat_class {
-        Some("shmup_vertical_signals") => (0, -2),
+    let move_label = match semantic_profile.entity_role.as_str() {
+        "player_avatar" => "Move Player",
+        "enemy_actor" => "Advance Enemy",
+        "projectile_actor" => "Move Projectile",
+        "support_actor" => "Move Support",
+        "fighter_actor" => "Step Fighter",
+        _ => "Move Sprite",
+    };
+    let (mv_dx, mv_dy) = match (mat_class, semantic_profile.entity_role.as_str()) {
+        (Some("shmup_vertical_signals"), "enemy_actor") => (0, 2),
+        (Some("shmup_vertical_signals"), "projectile_actor") => (0, -4),
+        (Some("shmup_vertical_signals"), _) => (0, -2),
+        (Some("beat_em_up_close_range_signals"), "enemy_actor") => (-1, 0),
+        (Some("beat_em_up_close_range_signals"), "projectile_actor") => (3, 0),
+        (Some("beat_em_up_close_range_signals"), _) => (1, 0),
+        (_, "enemy_actor") => (-1, 0),
+        (_, "projectile_actor") => (4, 0),
         _ => (2, 0),
     };
     let start = serde_json::json!({
@@ -2019,7 +2310,7 @@ fn imported_sprite_logic_graph_phase_d(
     let move_sprite = serde_json::json!({
         "id": "move_sprite",
         "type": "sprite_move",
-        "label": "Move Sprite",
+        "label": move_label,
         "x": 228,
         "y": 48,
         "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
@@ -2036,9 +2327,14 @@ fn imported_sprite_logic_graph_phase_d(
     })];
     let mut tail_node = "move_sprite";
     if materialize_fire {
-        let sfx_label = match mat_class {
-            Some("shmup_vertical_signals") => "Disparo (heuristica shmup)",
-            Some("run_and_gun_horizontal_signals") => "Disparo (heuristica run-and-gun)",
+        let sfx_label = match (mat_class, semantic_profile.entity_role.as_str()) {
+            (Some("shmup_vertical_signals"), "enemy_actor") => "Disparo inimigo (heuristica shmup)",
+            (Some("shmup_vertical_signals"), _) => "Disparo (heuristica shmup)",
+            (Some("run_and_gun_horizontal_signals"), "enemy_actor") => {
+                "Cobertura inimiga (heuristica run-and-gun)"
+            }
+            (Some("run_and_gun_horizontal_signals"), _) => "Disparo (heuristica run-and-gun)",
+            (_, "projectile_actor") => "Tiro materializado (heuristica)",
             _ => "Disparo (heuristica)",
         };
         nodes.push(serde_json::json!({
@@ -2086,7 +2382,113 @@ fn imported_sprite_logic_graph_phase_d(
             "toNode": "scroll_bg",
             "toPort": "exec"
         }));
+        tail_node = "scroll_bg";
     }
+
+    // Bloco E (sprint): padroes uteis adicionais por *papel* da entidade — o grafo inicial deixa de ser apenas
+    // start -> move (+ fire opcional) + scroll; cada role recebe um no terminal encadeado com semantica propria.
+    let (role_node_id, role_node) = match semantic_profile.entity_role.as_str() {
+        "player_avatar" => (
+            "role_player_idle_anim",
+            serde_json::json!({
+                "id": "role_player_idle_anim",
+                "type": "sprite_anim",
+                "label": "Anim jogador (idle/walk — heuristica de papel)",
+                "x": 588,
+                "y": 168,
+                "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "params": { "target": target, "anim": "idle" }
+            }),
+        ),
+        "enemy_actor" => (
+            "role_enemy_threat_sound",
+            serde_json::json!({
+                "id": "role_enemy_threat_sound",
+                "type": "action_sound",
+                "label": "Zona de perigo / contato (inimigo)",
+                "x": 588,
+                "y": 168,
+                "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "params": { "sfx": "hit" }
+            }),
+        ),
+        "support_actor" => (
+            "role_support_parallax_hint",
+            serde_json::json!({
+                "id": "role_support_parallax_hint",
+                "type": "effect_parallax",
+                "label": "Parallax de cenario (apoio / vfx leve)",
+                "x": 588,
+                "y": 168,
+                "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "params": { "layer": "BG_A", "speed_x": 1, "speed_y": 0 }
+            }),
+        ),
+        "fighter_actor" => (
+            "role_fighter_melee_sound",
+            serde_json::json!({
+                "id": "role_fighter_melee_sound",
+                "type": "action_sound",
+                "label": "Impacto corpo-a-corpo (lutador)",
+                "x": 588,
+                "y": 168,
+                "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "params": { "sfx": "hit" }
+            }),
+        ),
+        "projectile_actor" => (
+            "role_projectile_trail_anim",
+            serde_json::json!({
+                "id": "role_projectile_trail_anim",
+                "type": "sprite_anim",
+                "label": "Anim projetil (trajetoria — heuristica)",
+                "x": 588,
+                "y": 168,
+                "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "params": { "target": target, "anim": "fly" }
+            }),
+        ),
+        "hud_actor" => (
+            "role_hud_scroll_tick",
+            serde_json::json!({
+                "id": "role_hud_scroll_tick",
+                "type": "scroll_tilemap",
+                "label": "Scroll leve sincronizado com HUD (heuristica)",
+                "x": 588,
+                "y": 168,
+                "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "params": { "layer": "BG_A", "dx": 0, "dy": -1 }
+            }),
+        ),
+        _ => (
+            "role_generic_import_marker",
+            serde_json::json!({
+                "id": "role_generic_import_marker",
+                "type": "var_set",
+                "label": "Marcador de import generico (sprite)",
+                "x": 588,
+                "y": 168,
+                "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "params": { "var_name": "imported_sprite_flag", "value": 1 }
+            }),
+        ),
+    };
+    nodes.push(role_node);
+    edges.push(serde_json::json!({
+        "id": "edge_tail_role_pattern",
+        "fromNode": tail_node,
+        "fromPort": "exec",
+        "toNode": role_node_id,
+        "toPort": "exec"
+    }));
+
     serde_json::json!({
         "version": 1,
         "nodes": nodes,
@@ -2101,7 +2503,158 @@ struct SgdkPhaseDEntityResult {
     source_refs: Vec<SgdkSourceEvidence>,
     confidence: String,
     applied_class: String,
+    entity_role: String,
+    role_reason: String,
+    driver_functions: Vec<String>,
+    source_paths: Vec<String>,
     rules_hit: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SgdkPhaseDEntitySemanticProfile {
+    entity_role: String,
+    role_reason: String,
+    driver_functions: Vec<String>,
+    source_paths: Vec<String>,
+    audit_flags: Vec<String>,
+}
+
+fn append_position_audit(entity: &mut Entity, flag: &str, detail: &str) {
+    let Some(logic) = entity.components.logic.as_mut() else {
+        return;
+    };
+    if let Some(semantics) = logic.imported_semantics.as_mut() {
+        if !semantics.audit_flags.iter().any(|item| item == flag) {
+            semantics.audit_flags.push(flag.to_string());
+            semantics.audit_flags.sort();
+            semantics.audit_flags.dedup();
+        }
+    }
+    if !logic.logic_hints.iter().any(|hint| hint == detail) {
+        logic.logic_hints.push(detail.to_string());
+    }
+}
+
+fn sprite_role_priority(entity: &Entity) -> i32 {
+    let role = entity
+        .components
+        .logic
+        .as_ref()
+        .and_then(|logic| logic.imported_semantics.as_ref())
+        .map(|semantics| semantics.entity_role.as_str())
+        .unwrap_or("");
+    match role {
+        "player_avatar" => 0,
+        "fighter_actor" => 1,
+        "enemy_actor" => 2,
+        "hud_actor" => 3,
+        "support_actor" => 4,
+        "projectile_actor" => 5,
+        _ => 6,
+    }
+}
+
+fn needs_sgdk_authoring_staging_layout(sprite_entities: &[Entity]) -> bool {
+    if sprite_entities.len() <= 1 {
+        return false;
+    }
+    let mut counts: HashMap<(i32, i32), usize> = HashMap::new();
+    let mut min_x = i32::MAX;
+    let mut min_y = i32::MAX;
+    let mut max_x = i32::MIN;
+    let mut max_y = i32::MIN;
+    for entity in sprite_entities {
+        *counts
+            .entry((entity.transform.x, entity.transform.y))
+            .or_insert(0) += 1;
+        min_x = min_x.min(entity.transform.x);
+        min_y = min_y.min(entity.transform.y);
+        max_x = max_x.max(entity.transform.x);
+        max_y = max_y.max(entity.transform.y);
+    }
+    let unique_positions = counts.len();
+    let max_stack = counts.values().copied().max().unwrap_or(0);
+    if (unique_positions == 1 && max_stack > 1) || max_stack >= 4 {
+        return true;
+    }
+
+    // Cenas densas podem chegar com múltiplas coordenadas, mas ainda assim
+    // concentradas demais para autoria (ex.: variações mínimas em torno de 32,32).
+    // Tratamos como não-operacional quando muitos sprites ocupam uma área reduzida.
+    let dense_count = sprite_entities.len();
+    let spread_w = (max_x - min_x).abs().max(1);
+    let spread_h = (max_y - min_y).abs().max(1);
+    let area = spread_w.saturating_mul(spread_h);
+    dense_count >= 10 && area <= (320 * 224 / 3)
+}
+
+fn sgdk_role_lane_base_y(entity: &Entity) -> i32 {
+    let role = entity
+        .components
+        .logic
+        .as_ref()
+        .and_then(|logic| logic.imported_semantics.as_ref())
+        .map(|semantics| semantics.entity_role.as_str())
+        .unwrap_or("");
+    match role {
+        "player_avatar" => 88,
+        "fighter_actor" => 120,
+        "enemy_actor" => 152,
+        "hud_actor" => 200,
+        "support_actor" => 48,
+        "projectile_actor" => 32,
+        _ => 176,
+    }
+}
+
+fn apply_sgdk_authoring_staging_layout(sprite_entities: &mut [Entity]) -> usize {
+    if !needs_sgdk_authoring_staging_layout(sprite_entities) {
+        for entity in sprite_entities.iter_mut() {
+            append_position_audit(
+                entity,
+                "position:inferred",
+                "Fase D: posicao mantida como inferencia de importacao; o donor SGDK nao forneceu coordenadas confiaveis de cena para esta entidade.",
+            );
+        }
+        return 0;
+    }
+
+    sprite_entities.sort_by(|left, right| {
+        sprite_role_priority(left)
+            .cmp(&sprite_role_priority(right))
+            .then_with(|| {
+                left.display_name
+                    .as_deref()
+                    .unwrap_or(left.entity_id.as_str())
+                    .cmp(
+                        right
+                            .display_name
+                            .as_deref()
+                            .unwrap_or(right.entity_id.as_str()),
+                    )
+            })
+    });
+
+    let mut staged = 0usize;
+    let slots_per_page = 4usize;
+    let lanes_per_page = 2usize;
+    let lane_gap = 28i32;
+    for (index, entity) in sprite_entities.iter_mut().enumerate() {
+        let page = index / (slots_per_page * lanes_per_page);
+        let page_slot = index % (slots_per_page * lanes_per_page);
+        let column = page_slot % slots_per_page;
+        let lane = page_slot / slots_per_page;
+        entity.transform.x = 48 + (column as i32 * 64) + (page as i32 * 320);
+        entity.transform.y = sgdk_role_lane_base_y(entity) + (lane as i32 * lane_gap);
+        append_position_audit(
+            entity,
+            "position:staging_layout",
+            "Fase D: cena importada abriu em staging de autoria porque o donor SGDK nao oferece coordenadas de cena confiaveis; reposicione a entidade quando quiser consolidar o layout real.",
+        );
+        staged += 1;
+    }
+
+    staged
 }
 
 fn apply_sgdk_phase_d_to_sprite_entity(
@@ -2116,12 +2669,15 @@ fn apply_sgdk_phase_d_to_sprite_entity(
     let Some(logic) = entity.components.logic.as_mut() else {
         return Ok(phase_d_result);
     };
+    let semantic_profile =
+        scan.entity_semantic_profile(resource_name, is_primary_sprite, secondary_local_spr);
     let graph_ref = sgdk_import_sprite_logic_graph_ref(&entity.entity_id);
     let graph_json = imported_sprite_logic_graph_phase_d(
         resource_name,
         scan,
         is_primary_sprite,
         secondary_local_spr,
+        &semantic_profile,
     );
     let graph_path = graph_write_path(project_dir, &graph_ref)?;
     if let Some(parent) = graph_path.parent() {
@@ -2142,12 +2698,45 @@ fn apply_sgdk_phase_d_to_sprite_entity(
     logic.graph = None;
     logic.graph_ref = Some(graph_ref.clone());
     logic.graph_origin = Some("imported_ref".to_string());
-    for rel in &scan.donor_logic_scanned_paths {
-        logic.external_source_refs.push(rel.clone());
+    let mat_class = scan.graph_materialization_class_for_sprite_role(is_primary_sprite, secondary_local_spr);
+    let confidence = if matches!(
+        mat_class,
+        Some("run_and_gun_horizontal_signals")
+            | Some("shmup_vertical_signals")
+            | Some("hybrid_action_scroll_signals")
+    ) {
+        "high"
+    } else if matches!(
+        mat_class,
+        Some("platformer_horizontal_scroller_signals") | Some("beat_em_up_close_range_signals")
+    ) || secondary_local_spr
+    {
+        "medium"
+    } else {
+        "low"
+    };
+    let mut external_source_refs = semantic_profile.source_paths.clone();
+    if is_primary_sprite {
+        external_source_refs.extend(scan.donor_logic_scanned_paths.clone());
+    }
+    if external_source_refs.is_empty() {
+        external_source_refs.extend(scan.donor_logic_scanned_paths.clone());
+    }
+    for rel in external_source_refs {
+        logic.external_source_refs.push(rel);
     }
     logic.external_source_refs.sort();
     logic.external_source_refs.dedup();
-    let mat_class = scan.graph_materialization_class_for_sprite_role(is_primary_sprite, secondary_local_spr);
+    logic.imported_semantics = Some(ImportedLogicSemantics {
+        source: "sgdk_phase_d".to_string(),
+        gameplay_class: mat_class.unwrap_or("").to_string(),
+        entity_role: semantic_profile.entity_role.clone(),
+        confidence: confidence.to_string(),
+        role_reason: semantic_profile.role_reason.clone(),
+        driver_functions: semantic_profile.driver_functions.clone(),
+        source_paths: semantic_profile.source_paths.clone(),
+        audit_flags: semantic_profile.audit_flags.clone(),
+    });
     let mut evidence_refs = scan.entity_resource_source_refs(resource_name);
     if evidence_refs.is_empty() {
         evidence_refs = scan.generic_phase_d_evidence(8);
@@ -2156,6 +2745,22 @@ fn apply_sgdk_phase_d_to_sprite_entity(
         logic.logic_hints.push(format!(
             "Fase D evid: {}:{} {} {} | {}",
             ev.rel_path, ev.line, ev.kind, ev.subject, ev.snippet
+        ));
+    }
+    logic.logic_hints.push(format!(
+        "Fase D: papel importado desta entidade: '{}' ({})",
+        semantic_profile.entity_role, semantic_profile.role_reason
+    ));
+    if !semantic_profile.driver_functions.is_empty() {
+        logic.logic_hints.push(format!(
+            "Fase D: funcoes condutoras inferidas para esta entidade: {}.",
+            semantic_profile.driver_functions.join(", ")
+        ));
+    }
+    if !semantic_profile.source_paths.is_empty() {
+        logic.logic_hints.push(format!(
+            "Fase D: external_source_refs prioriza caminho(s) com sinal direto desta entidade: {}.",
+            semantic_profile.source_paths.join(", ")
         ));
     }
     if is_primary_sprite {
@@ -2212,7 +2817,9 @@ fn apply_sgdk_phase_d_to_sprite_entity(
         }
         if matches!(
             scan.primary_graph_materialization_class(),
-            Some("run_and_gun_horizontal_signals") | Some("shmup_vertical_signals")
+            Some("run_and_gun_horizontal_signals")
+                | Some("shmup_vertical_signals")
+                | Some("hybrid_action_scroll_signals")
         ) {
             logic.logic_hints.push(
                 "Fase D: heuristica de alta confianca — stencil extra (movimento + action_sound 'fire') materializado no grafo do sprite primario.".into(),
@@ -2291,28 +2898,27 @@ fn apply_sgdk_phase_d_to_sprite_entity(
     if is_primary_sprite {
         rules_hit.push("primary_sprite".to_string());
     }
-    let confidence = if matches!(
-        mat_class,
-        Some("run_and_gun_horizontal_signals") | Some("shmup_vertical_signals")
-    ) {
-        "high"
-    } else if mat_class == Some("platformer_horizontal_scroller_signals") || secondary_local_spr {
-        "medium"
-    } else {
-        "low"
+    if !semantic_profile.entity_role.is_empty() {
+        rules_hit.push(format!("entity_role:{}", semantic_profile.entity_role));
     };
     phase_d_result.graph_ref = graph_ref;
     phase_d_result.source_refs = evidence_refs;
     phase_d_result.confidence = confidence.to_string();
     phase_d_result.applied_class = mat_class
         .map(|c| match c {
+            "hybrid_action_scroll_signals" => "hybrid_action",
             "run_and_gun_horizontal_signals" => "run_and_gun",
             "shmup_vertical_signals" => "shmup",
+            "beat_em_up_close_range_signals" => "beat_em_up",
             "platformer_horizontal_scroller_signals" => "platformer",
             _ => "none",
         })
         .unwrap_or("none")
         .to_string();
+    phase_d_result.entity_role = semantic_profile.entity_role;
+    phase_d_result.role_reason = semantic_profile.role_reason;
+    phase_d_result.driver_functions = semantic_profile.driver_functions;
+    phase_d_result.source_paths = semantic_profile.source_paths.clone();
     phase_d_result.rules_hit = rules_hit;
     Ok(phase_d_result)
 }
@@ -2572,7 +3178,13 @@ fn build_sgdk_tilemap_entity(
     source_path: &Path,
     fallbacks: &mut Vec<String>,
 ) -> SgdkTilemapMaterialization {
-    let entity_id = format!("{}_tilemap", sgdk_entity_id(&resource.name));
+    let hud_overlay_hint = sgdk_resource_hud_overlay_hint(resource);
+    let base_entity_id = format!("{}_tilemap", sgdk_entity_id(&resource.name));
+    let entity_id = if hud_overlay_hint {
+        format!("hud_{}", base_entity_id)
+    } else {
+        base_entity_id
+    };
     let display_name = resource.name.clone();
 
     let (map_width, map_height, cells, unique_tiles, had_cells) =
@@ -2609,6 +3221,19 @@ fn build_sgdk_tilemap_entity(
                 scroll_y: 0,
                 cells,
             }),
+            logic: if hud_overlay_hint {
+                Some(LogicComponent {
+                    graph: None,
+                    graph_ref: None,
+                    graph_origin: None,
+                    logic_hints: vec!["sgdk_import:hud_overlay".to_string()],
+                    external_source_refs: Vec::new(),
+                    imported_semantics: None,
+                    variables: HashMap::new(),
+                })
+            } else {
+                None
+            },
             ..Components::default()
         },
     };
@@ -2738,6 +3363,7 @@ fn import_sgdk_resources_into_scene(
                     ));
                 }
                 let is_meta = derived.frame_width > 32 || derived.frame_height > 32;
+                let hud_overlay_hint = sgdk_resource_hud_overlay_hint(resource);
                 sprite_entities.push(Entity {
                     entity_id,
                     display_name: Some(resource.name.clone()),
@@ -2751,15 +3377,27 @@ fn import_sgdk_resources_into_scene(
                             pivot: None,
                             palette_slot: 0,
                             animations: derived.animations,
-                            priority: "foreground".to_string(),
+                            priority: if hud_overlay_hint {
+                                "ui_overlay".to_string()
+                            } else {
+                                "foreground".to_string()
+                            },
                             meta_sprite: is_meta,
                         }),
                         logic: Some(LogicComponent {
                             graph: Some(imported_sprite_logic_graph(&resource.name)),
                             graph_ref: None,
                             graph_origin: None,
-                            logic_hints: Vec::new(),
+                            logic_hints: if hud_overlay_hint {
+                                vec![
+                                    "sgdk_import:hud_overlay".to_string(),
+                                    "sgdk_import:canonical_hud_signal".to_string(),
+                                ]
+                            } else {
+                                Vec::new()
+                            },
                             external_source_refs: Vec::new(),
+                            imported_semantics: None,
                             variables: HashMap::new(),
                         }),
                         ..Components::default()
@@ -2854,6 +3492,10 @@ fn import_sgdk_resources_into_scene(
                 source_refs: phase_d_entity.source_refs,
                 confidence: phase_d_entity.confidence,
                 applied_class: phase_d_entity.applied_class,
+                entity_role: phase_d_entity.entity_role,
+                role_reason: phase_d_entity.role_reason,
+                driver_functions: phase_d_entity.driver_functions,
+                source_paths: phase_d_entity.source_paths,
                 rules_hit: phase_d_entity.rules_hit,
             });
         }
@@ -2863,6 +3505,18 @@ fn import_sgdk_resources_into_scene(
     phase_d_ledger
         .entity_trace
         .sort_by(|a, b| a.entity_id.cmp(&b.entity_id));
+    let staged_sprite_count = apply_sgdk_authoring_staging_layout(&mut sprite_entities);
+    if staged_sprite_count > 0 {
+        fallbacks.push(format!(
+            "authoring_staging: {} sprite(s) redistribuidos em shelf/lane de autoria porque o donor SGDK nao forneceu coordenadas confiaveis de cena; cada entidade foi marcada com audit_flag 'position:staging_layout'.",
+            staged_sprite_count
+        ));
+    } else if !sprite_entities.is_empty() {
+        fallbacks.push(
+            "authoring_position: importacao SGDK manteve posicoes inferidas do bootstrap atual; entidades permanecem marcadas com audit_flag 'position:inferred' enquanto nao houver coordenadas reais do donor."
+                .to_string(),
+        );
+    }
 
     // -- cena primaria: primeiro tilemap + todos os sprites + audio + camera
     let mut primary_scene = canonical_scene(DEFAULT_SCENE_ID, Some(scene_name.to_string()));
@@ -4134,6 +4788,22 @@ fn sgdk_entity_id(name: &str) -> String {
     }
 }
 
+fn sgdk_resource_hud_overlay_hint(resource: &SgdkResourceEntry) -> bool {
+    let mut signal = String::new();
+    signal.push_str(&resource.name.to_lowercase());
+    signal.push(' ');
+    signal.push_str(&resource.asset_path.to_lowercase());
+    signal.push(' ');
+    signal.push_str(&resource.kind.to_lowercase());
+    signal.push(' ');
+    signal.push_str(&resource.params.join(" ").to_lowercase());
+    signal.contains("hud")
+        || signal.contains("ui_")
+        || signal.contains("ui/")
+        || signal.contains("overlay")
+        || signal.contains("status")
+}
+
 fn save_prefab_entity(
     project_dir: &Path,
     prefab_name: &str,
@@ -4259,6 +4929,7 @@ fn platformer_player_prefab_with_dims(
                 graph_origin: None,
                 logic_hints: Vec::new(),
                 external_source_refs: Vec::new(),
+                imported_semantics: None,
                 variables: HashMap::new(),
             }),
             ..Components::default()
@@ -4749,7 +5420,7 @@ fn detect_mugen_candidates_in_root(root: &Path) -> Result<Vec<MugenCandidate>, L
         return Ok(Vec::new());
     }
 
-    character_candidates.sort_by(|left, right| right.0.cmp(&left.0));
+    character_candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.0));
     Ok(vec![character_candidates.remove(0).1])
 }
 
@@ -5990,7 +6661,7 @@ fn mugen_requested_sprite_paths(
             matches.push(((group, image), path));
         }
     }
-    matches.sort_by(|left, right| left.0.cmp(&right.0));
+    matches.sort_by_key(|candidate| candidate.0);
     Ok(matches)
 }
 
@@ -8344,6 +9015,7 @@ fn imported_logic_component(graph: Option<String>, logic_hints: Vec<String>) -> 
         graph_origin: None,
         logic_hints,
         external_source_refs: Vec::new(),
+        imported_semantics: None,
         variables: HashMap::new(),
     }
 }
@@ -9052,6 +9724,7 @@ fn starter_scene(scene_id: &str, display_name: String, _target: &str) -> Scene {
                 graph_origin: None,
                 logic_hints: Vec::new(),
                 external_source_refs: Vec::new(),
+                imported_semantics: None,
                 variables: HashMap::new(),
             }),
             ..Components::default()
@@ -10440,6 +11113,61 @@ void weapons_tick(void) {\n    SPR_addSprite(&spr_shot, FIX16(10), FIX16(20), TI
         .expect("weapons.c");
     }
 
+    /// Doador de combate proximo: JOY + SPR_* sem scroll, com funcs nomeadas por punch/combo.
+    fn write_sgdk_beatemup_close_range_donor(dir: &Path) {
+        write_generic_sgdk_donor_fixture(dir);
+        fs::write(
+            dir.join("src").join("main.c"),
+            b"#include <genesis.h>\n#include \"combat.h\"\n#include \"enemy_ai.h\"\n\
+int main(void) {\n    SPR_init();\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n        (void)joy;\n        player_punch_tick();\n        enemy_combo_tick();\n        SPR_update();\n        SYS_doVBlankProcess();\n    }\n    return 0;\n}\n",
+        )
+        .expect("write beatemup main");
+        fs::write(
+            dir.join("src").join("combat.h"),
+            b"#ifndef COMBAT_H\n#define COMBAT_H\nvoid player_punch_tick(void);\n#endif\n",
+        )
+        .expect("combat.h");
+        fs::write(
+            dir.join("src").join("combat.c"),
+            b"#include <genesis.h>\n#include \"combat.h\"\n\
+void player_punch_tick(void) {\n    SPR_setPosition(&hero, 48, 40);\n}\n",
+        )
+        .expect("combat.c");
+        fs::write(
+            dir.join("src").join("enemy_ai.h"),
+            b"#ifndef ENEMY_AI_H\n#define ENEMY_AI_H\nvoid enemy_combo_tick(void);\n#endif\n",
+        )
+        .expect("enemy_ai.h");
+        fs::write(
+            dir.join("src").join("enemy_ai.c"),
+            b"#include <genesis.h>\n#include \"enemy_ai.h\"\n\
+void enemy_combo_tick(void) {\n    SPR_setPosition(&foe, 80, 40);\n}\n",
+        )
+        .expect("enemy_ai.c");
+    }
+
+    /// Doador hibrido: JOY + SPR + scroll H/V + sinais de combate proximo.
+    fn write_sgdk_multifile_hybrid_action_scroll_donor(dir: &Path) {
+        write_generic_sgdk_donor_fixture(dir);
+        fs::write(
+            dir.join("src").join("main.c"),
+            b"#include <genesis.h>\n#include \"hybrid_combat.h\"\n\
+int main(void) {\n    SPR_init();\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n        (void)joy;\n        MAP_scrollH(BG_B, 1);\n        MAP_scrollV(BG_A, 1);\n        hybrid_combo_tick();\n        SPR_update();\n        SYS_doVBlankProcess();\n    }\n    return 0;\n}\n",
+        )
+        .expect("write hybrid main");
+        fs::write(
+            dir.join("src").join("hybrid_combat.h"),
+            b"#ifndef HYBRID_COMBAT_H\n#define HYBRID_COMBAT_H\nvoid hybrid_combo_tick(void);\n#endif\n",
+        )
+        .expect("hybrid_combat.h");
+        fs::write(
+            dir.join("src").join("hybrid_combat.c"),
+            b"#include <genesis.h>\n#include \"hybrid_combat.h\"\n\
+void hybrid_combo_tick(void) {\n    SPR_setPosition(&hero, 48, 40);\n    SPR_setPosition(&foe, 88, 40);\n    /* close-range cues */\n    (void)\"punch\";\n    (void)\"combo\";\n}\n",
+        )
+        .expect("hybrid_combat.c");
+    }
+
     fn write_sgdk_semantic_scan_noise_donor(dir: &Path) {
         write_generic_sgdk_donor_fixture(dir);
         fs::write(
@@ -10858,6 +11586,27 @@ void tick_player(void) {\n\
     }
 
     #[test]
+    fn stamp_project_template_metadata_marks_external_sgdk_source_kind_even_without_donor() {
+        let project = temp_dir("stamp-template-metadata-external-sgdk");
+        create_project_skeleton(&project, "Stamp Template Metadata", "megadrive").expect("skeleton");
+
+        let stamped = stamp_project_template_metadata(&project, "platformer_seed", None)
+            .expect("stamp project template metadata");
+        let metadata = stamped
+            .template_metadata
+            .as_ref()
+            .expect("template metadata after stamp");
+
+        assert_eq!(metadata.source_kind, "external_sgdk");
+        assert_eq!(
+            metadata.source_path, "builtin",
+            "sem donor/default_donor_path, source_path deve ser 'builtin'"
+        );
+
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
     fn seed_platformer_template_copies_only_allowed_assets() {
         let donor_dir = temp_dir("platformer-donor");
         let project_dir = temp_dir("platformer-project");
@@ -10944,6 +11693,7 @@ void tick_player(void) {\n\
                         graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
+                        imported_semantics: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -10990,6 +11740,7 @@ void tick_player(void) {\n\
                         graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
+                        imported_semantics: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -11013,6 +11764,7 @@ void tick_player(void) {\n\
                         graph_origin: None,
                         logic_hints: Vec::new(),
                         external_source_refs: Vec::new(),
+                        imported_semantics: None,
                         variables: HashMap::new(),
                     }),
                     ..Components::default()
@@ -11487,6 +12239,12 @@ void tick_player(void) {\n\
             .iter()
             .find(|e| e.entity_id == "hero")
             .expect("hero");
+        let foe = report
+            .primary_scene
+            .entities
+            .iter()
+            .find(|e| e.entity_id == "foe")
+            .expect("foe");
         let logic = hero.components.logic.as_ref().expect("logic");
         assert!(
             logic.external_source_refs.contains(&"src/main.c".to_string())
@@ -11496,6 +12254,27 @@ void tick_player(void) {\n\
             "external_source_refs devem listar main + satelite: {:?}",
             logic.external_source_refs
         );
+        let hero_semantics = logic
+            .imported_semantics
+            .as_ref()
+            .expect("hero imported_semantics");
+        assert_eq!(hero_semantics.source, "sgdk_phase_d");
+        assert_eq!(hero_semantics.entity_role, "player_avatar");
+        assert!(
+            hero_semantics
+                .driver_functions
+                .iter()
+                .any(|driver| driver == "player_tick"),
+            "driver_functions hero precisam mencionar player_tick: {:?}",
+            hero_semantics.driver_functions
+        );
+        let foe_semantics = foe
+            .components
+            .logic
+            .as_ref()
+            .and_then(|logic| logic.imported_semantics.as_ref())
+            .expect("foe imported_semantics");
+        assert_eq!(foe_semantics.entity_role, "enemy_actor");
         let manifest_rel = report.manifest_path.as_deref().expect("manifest");
         let ledger: SgdkImportLedger = serde_json::from_str(
             &fs::read_to_string(project_dir.join(manifest_rel)).expect("read ledger"),
@@ -11513,6 +12292,21 @@ void tick_player(void) {\n\
             disk_graph
         );
         assert!(disk_graph.contains("fire_hint"), "{}", disk_graph);
+        let hero_trace = ledger
+            .phase_d
+            .entity_trace
+            .iter()
+            .find(|trace| trace.entity_id == "hero")
+            .expect("hero trace");
+        assert_eq!(hero_trace.entity_role, "player_avatar");
+        assert!(
+            hero_trace
+                .driver_functions
+                .iter()
+                .any(|driver| driver == "player_tick"),
+            "trace hero precisa registrar funcoes condutoras: {:?}",
+            hero_trace.driver_functions
+        );
         assert!(
             ledger
                 .phase_d
@@ -11638,6 +12432,151 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
     }
 
     #[test]
+    fn sgdk_phase_d_beatemup_close_range_fixture_assigns_roles() {
+        let donor_dir = temp_dir("sgdk-beat-d");
+        let project_dir = temp_dir("sgdk-beat-p");
+        create_project_skeleton(&project_dir, "SGDK Beat", "megadrive").expect("skel");
+        write_sgdk_beatemup_close_range_donor(&donor_dir);
+        let report = import_sgdk_project(&project_dir, &donor_dir).expect("import");
+        let manifest_abs = project_dir.join(report.manifest_path.as_deref().expect("manifest"));
+        let ledger: SgdkImportLedger =
+            serde_json::from_str(&fs::read_to_string(&manifest_abs).expect("read")).expect("parse");
+        assert_eq!(
+            ledger.phase_d.heuristic_gameplay_class.as_deref(),
+            Some("beat_em_up_close_range_signals")
+        );
+        let hero = report
+            .primary_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "hero")
+            .expect("hero");
+        let foe = report
+            .primary_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "foe")
+            .expect("foe");
+        let hero_semantics = hero
+            .components
+            .logic
+            .as_ref()
+            .and_then(|logic| logic.imported_semantics.as_ref())
+            .expect("hero imported_semantics");
+        assert_eq!(hero_semantics.entity_role, "player_avatar");
+        assert_eq!(hero_semantics.gameplay_class, "beat_em_up_close_range_signals");
+        assert!(
+            hero_semantics
+                .audit_flags
+                .iter()
+                .any(|flag| flag == "position:staging_layout"),
+            "hero precisa marcar staging de autoria quando a cena abre sem coordenadas confiaveis: {:?}",
+            hero_semantics.audit_flags
+        );
+        let foe_semantics = foe
+            .components
+            .logic
+            .as_ref()
+            .and_then(|logic| logic.imported_semantics.as_ref())
+            .expect("foe imported_semantics");
+        assert_eq!(foe_semantics.entity_role, "enemy_actor");
+        assert_ne!(
+            (hero.transform.x, hero.transform.y),
+            (foe.transform.x, foe.transform.y),
+            "staging de autoria nao pode manter sprites densos empilhados"
+        );
+        let hero_trace = ledger
+            .phase_d
+            .entity_trace
+            .iter()
+            .find(|trace| trace.entity_id == "hero")
+            .expect("hero trace");
+        assert_eq!(hero_trace.applied_class, "beat_em_up");
+        assert_eq!(hero_trace.entity_role, "player_avatar");
+        assert!(
+            hero_trace
+                .driver_functions
+                .iter()
+                .any(|driver| driver == "player_punch_tick"),
+            "hero trace precisa registrar player_punch_tick: {:?}",
+            hero_trace.driver_functions
+        );
+        let foe_trace = ledger
+            .phase_d
+            .entity_trace
+            .iter()
+            .find(|trace| trace.entity_id == "foe")
+            .expect("foe trace");
+        assert_eq!(foe_trace.applied_class, "beat_em_up");
+        assert_eq!(foe_trace.entity_role, "enemy_actor");
+        let hero_graph = fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
+            .expect("read hero graph");
+        assert!(
+            hero_graph.contains("Move Player"),
+            "grafo do heroi deve deixar o papel explicito: {}",
+            hero_graph
+        );
+        assert!(
+            !hero_graph.contains("fire_hint"),
+            "combate proximo nao deve materializar fire_hint por padrao: {}",
+            hero_graph
+        );
+        let foe_graph = fs::read_to_string(project_dir.join("graphs").join("sgdk_import_foe.json"))
+            .expect("read foe graph");
+        assert!(
+            foe_graph.contains("\"dx\":-1") || foe_graph.contains("\"dx\": -1"),
+            "inimigo de combate proximo deve materializar deslocamento proprio: {}",
+            foe_graph
+        );
+        assert!(
+            hero_graph.contains("role_player_idle_anim"),
+            "grafo do jogador deve encadear no especifico de papel (sprite_anim): {}",
+            hero_graph
+        );
+        assert!(
+            foe_graph.contains("role_enemy_threat_sound"),
+            "grafo do inimigo deve encadear no especifico de papel (acao/zona): {}",
+            foe_graph
+        );
+        let _ = fs::remove_dir_all(&donor_dir);
+        let _ = fs::remove_dir_all(&project_dir);
+    }
+
+    #[test]
+    fn sgdk_phase_d_hybrid_action_scroll_fixture_materializes_hybrid_class() {
+        let donor_dir = temp_dir("sgdk-hybrid-d");
+        let project_dir = temp_dir("sgdk-hybrid-p");
+        create_project_skeleton(&project_dir, "SGDK Hybrid", "megadrive").expect("skel");
+        write_sgdk_multifile_hybrid_action_scroll_donor(&donor_dir);
+        let report = import_sgdk_project(&project_dir, &donor_dir).expect("import");
+        let manifest_abs = project_dir.join(report.manifest_path.as_deref().expect("manifest"));
+        let ledger: SgdkImportLedger =
+            serde_json::from_str(&fs::read_to_string(&manifest_abs).expect("read")).expect("parse");
+        assert_eq!(
+            ledger.phase_d.heuristic_gameplay_class.as_deref(),
+            Some("hybrid_action_scroll_signals")
+        );
+        let hero_trace = ledger
+            .phase_d
+            .entity_trace
+            .iter()
+            .find(|trace| trace.entity_id == "hero")
+            .expect("hero trace");
+        assert_eq!(hero_trace.applied_class, "hybrid_action");
+        assert!(
+            hero_trace
+                .source_paths
+                .iter()
+                .any(|path| path.contains("hybrid_combat.c")),
+            "hybrid trace deve manter source_paths diretos: {:?}",
+            hero_trace.source_paths
+        );
+
+        let _ = fs::remove_dir_all(&donor_dir);
+        let _ = fs::remove_dir_all(&project_dir);
+    }
+
+    #[test]
     fn sgdk_phase_d_resolve_prefabs_hydrates_secondary_graph_ref() {
         let donor_dir = temp_dir("sgdk-resolve-sec-d");
         let project_dir = temp_dir("sgdk-resolve-sec-p");
@@ -11694,6 +12633,11 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .expect("read graph");
         assert!(disk_graph.contains("\"dy\":-2"), "shmup: movimento vertical heuristico: {}", disk_graph);
         assert!(disk_graph.contains("fire_hint"), "{}", disk_graph);
+        assert!(
+            disk_graph.contains("role_player_idle_anim"),
+            "shmup: jogador deve receber no de papel encadeado: {}",
+            disk_graph
+        );
         let _ = fs::remove_dir_all(&donor_dir);
         let _ = fs::remove_dir_all(&project_dir);
     }
@@ -12483,6 +13427,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                     graph_origin: None,
                     logic_hints: Vec::new(),
                     external_source_refs: Vec::new(),
+                    imported_semantics: None,
                     variables: HashMap::new(),
                 }),
                 ..Components::default()
@@ -14656,6 +15601,46 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         );
     }
 
+    #[test]
+    fn sgdk_matrix_corpus_skip_requires_explicit_env_flag_when_donor_missing() {
+        let donor = temp_dir("sgdk-matrix-missing-donor-no-skip");
+        let _ = fs::remove_dir_all(&donor);
+        unsafe {
+            std::env::remove_var("RDS_SGDK_MATRIX_CORPUS_SKIP");
+        }
+
+        let panic_result = std::panic::catch_unwind(|| {
+            sgdk_matrix_corpus_skip_if_missing_donor(
+                "sgdk_matrix_corpus_skip_requires_explicit_env_flag_when_donor_missing",
+                &donor,
+            )
+        });
+        assert!(
+            panic_result.is_err(),
+            "missing donor sem env de skip deve panic para evitar falso verde"
+        );
+    }
+
+    #[test]
+    fn sgdk_matrix_corpus_skip_honors_explicit_env_flag_when_donor_missing() {
+        let donor = temp_dir("sgdk-matrix-missing-donor-with-skip");
+        let _ = fs::remove_dir_all(&donor);
+        unsafe {
+            std::env::set_var("RDS_SGDK_MATRIX_CORPUS_SKIP", "1");
+        }
+        let skipped = sgdk_matrix_corpus_skip_if_missing_donor(
+            "sgdk_matrix_corpus_skip_honors_explicit_env_flag_when_donor_missing",
+            &donor,
+        );
+        unsafe {
+            std::env::remove_var("RDS_SGDK_MATRIX_CORPUS_SKIP");
+        }
+        assert!(
+            skipped,
+            "com env explicito, helper deve diferenciar skip autorizado de sucesso de execucao"
+        );
+    }
+
     /// Fluxo parcial repetivel: import -> ledger/cenas -> sinais de superficie -> save/reload opcional -> build (real ou fake) -> ROM `SEGA`.
     /// `matrix_log_tag` identifica a linha no stdout (ex.: `MATRIX_P2`, `MATRIX_NEXZR`).
     fn run_sgdk_matrix_corpus_partial_flow_documents_build_blocker(
@@ -14737,11 +15722,38 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
                 .map(|g| !g.trim().is_empty())
                 .unwrap_or(false)
         });
+        let md_hw = crate::hardware::md_profile::hw_status_with_source_kind(
+            &report.primary_scene,
+            Some("imported_sgdk"),
+        );
+        assert_eq!(
+            md_hw.analysis_mode, "sgdk_managed",
+            "matriz SGDK: hw status deve usar modo gerenciado para imported_sgdk"
+        );
         eprintln!(
             "{matrix_log_tag} signals: source_kind={stamped_source_kind} resolution_kind={resolution_kind} redirected={redirected} effective_root={} tilemap_cells_nonempty={tilemap_cells_nonempty} sprite_anim_nonempty={sprite_anim_nonempty} collision_present={collision_present} graph_ref_nonempty={graph_ref_nonempty} imported_scenes={} warnings={}",
             report.source_summary.effective_root,
             report.imported_scenes,
             report.warnings.len()
+        );
+        eprintln!(
+            "{matrix_log_tag} hw: mode={} total_kb={} resident_kb={} spr_res_kb={} tile_kb={} hud_kb={} strm_spr_kb={} anim_sw_kb={} streamable_kb={} dma_frame_kb={} banks={}/{} cells={}/{} fatal={} warn={}",
+            md_hw.analysis_mode,
+            md_hw.project_asset_bytes / 1024,
+            md_hw.resident_vram_bytes / 1024,
+            md_hw.sprite_resident_bytes / 1024,
+            md_hw.tilemap_resident_bytes / 1024,
+            md_hw.hud_resident_bytes / 1024,
+            md_hw.streamable_sprite_bytes / 1024,
+            md_hw.animated_swap_bytes / 1024,
+            md_hw.streamable_vram_bytes / 1024,
+            md_hw.dma_frame_bytes / 1024,
+            md_hw.managed_concurrent_sprite_banks,
+            crate::hardware::md_profile::MD_MANAGED_MAX_CONCURRENT_BANKS,
+            md_hw.managed_sprite_cells_used,
+            crate::hardware::md_profile::MD_MANAGED_SPRITE_CELL_BUDGET,
+            md_hw.errors.len(),
+            md_hw.warnings.len()
         );
 
         let mut scene = load_scene(&project, DEFAULT_ENTRY_SCENE).expect("load pos-import");
@@ -14952,5 +15964,102 @@ PY\n",
             "Matrix NEXZR Corpus",
             "MATRIX_NEXZR",
         );
+    }
+
+    /// Linha 7 (rodada 14) — engine beat 'em up / briga de rua (BLAZE_ENGINE).
+    #[ignore]
+    #[test]
+    fn sgdk_matrix_corpus_blaze_engine_partial_flow_documents_build_blocker() {
+        use crate::compiler::build_orch::{run_build_with_environment, BuildEnvironment};
+
+        let donor = sgdk_matrix_corpus_donor_path(
+            "BLAZE_ENGINE [VER.001] [SGDK 211] [GEN] [ENGINE] [BRIGA DE RUA]",
+        );
+        if sgdk_matrix_corpus_skip_if_missing_donor(
+            "sgdk_matrix_corpus_blaze_engine_partial_flow_documents_build_blocker",
+            &donor,
+        ) {
+            return;
+        }
+
+        let project = temp_dir("sgdk-matrix-blaze");
+        create_project_skeleton(&project, "Matrix BLAZE Engine Corpus", "megadrive").expect("skel");
+        let report = import_sgdk_project(&project, &donor).expect("import SGDK corpus blaze");
+        stamp_imported_sgdk_metadata(&project, &donor).expect("stamp imported_sgdk metadata");
+
+        let md_hw = crate::hardware::md_profile::hw_status_with_source_kind(
+            &report.primary_scene,
+            Some("imported_sgdk"),
+        );
+        eprintln!(
+            "MATRIX_BLAZE hw: mode={} total_kb={} resident_kb={} spr_res_kb={} tile_kb={} hud_kb={} strm_spr_kb={} anim_sw_kb={} streamable_kb={} dma_frame_kb={} banks={}/{} cells={}/{} fatal={} warn={}",
+            md_hw.analysis_mode,
+            md_hw.project_asset_bytes / 1024,
+            md_hw.resident_vram_bytes / 1024,
+            md_hw.sprite_resident_bytes / 1024,
+            md_hw.tilemap_resident_bytes / 1024,
+            md_hw.hud_resident_bytes / 1024,
+            md_hw.streamable_sprite_bytes / 1024,
+            md_hw.animated_swap_bytes / 1024,
+            md_hw.streamable_vram_bytes / 1024,
+            md_hw.dma_frame_bytes / 1024,
+            md_hw.managed_concurrent_sprite_banks,
+            crate::hardware::md_profile::MD_MANAGED_MAX_CONCURRENT_BANKS,
+            md_hw.managed_sprite_cells_used,
+            crate::hardware::md_profile::MD_MANAGED_SPRITE_CELL_BUDGET,
+            md_hw.errors.len(),
+            md_hw.warnings.len()
+        );
+        assert_eq!(md_hw.analysis_mode, "sgdk_managed");
+        assert!(
+            md_hw.project_asset_bytes > md_hw.resident_vram_bytes,
+            "BLAZE deve expor diferenca entre total e residente"
+        );
+        assert!(
+            !md_hw.errors.is_empty(),
+            "BLAZE deve manter ao menos um blocker legitimo de hardware"
+        );
+        assert!(
+            md_hw.resident_vram_bytes > crate::hardware::md_profile::MD_VRAM_BYTES
+                || md_hw
+                    .errors
+                    .iter()
+                    .any(|e| e.contains("Sprite overflow")),
+            "BLAZE deve bloquear por residencia real ou por limite de sprites"
+        );
+
+        let env = BuildEnvironment {
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+        let result = run_build_with_environment(&project, &env, |_| {});
+        assert!(!result.ok, "BLAZE deve falhar por blocker legitimo de hardware");
+        assert!(
+            result
+                .log
+                .iter()
+                .any(|entry| entry.level == "info"
+                    && entry.message.contains("MD VRAM analysis: mode=sgdk_managed")
+                    && entry.message.contains("spr_res=")
+                    && entry.message.contains("banks=")),
+            "log deve expor breakdown de VRAM/residencia por categoria e uso de banks/cells"
+        );
+        assert!(
+            result
+                .log
+                .iter()
+                .any(|entry| entry.level == "error" && entry.message.contains("Sprite overflow")),
+            "blocker principal de BLAZE deve permanecer explicito"
+        );
+        assert!(
+            result.log.iter().any(|entry| {
+                entry.level == "error"
+                    && (entry.message.contains("VRAM Overflow (resident)")
+                        || entry.message.contains("Sprite overflow"))
+            }),
+            "BLAZE deve expor blocker fatal explicito (residencia ou sprites)"
+        );
+
+        let _ = fs::remove_dir_all(&project);
     }
 }

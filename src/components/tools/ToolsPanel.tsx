@@ -1,15 +1,22 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import AssetPreview from "../common/AssetPreview";
 import Panel from "../common/Panel";
+import SceneWorkspaceNotice from "../common/SceneWorkspaceNotice";
 import { useEditorStore } from "../../core/store/editorStore";
 import ContextualPalette from "./ContextualPalette";
 import ToolPathField from "./ToolPathField";
 import { getEntityDisplayName } from "../../core/entityDisplay";
+import { buildTilemapAuthoringBrush } from "../../core/entityAuthoring";
+import { openProjectSourcePath } from "../../core/ipc/projectService";
 import { persistActiveScene } from "../../core/scenePersistence";
-import { listenToProjectAssetChanges } from "../../core/ipc/projectWatcherService";
+import { resolveSceneWorkspaceContext } from "../../core/sceneWorkspaceContext";
 import { ExperimentalNotice, HeuristicNotice } from "./ToolNotices";
-import type { LegacySgdkIndex, Scene } from "../../core/ipc/sceneService";
-import { createSpriteEntityFromAsset } from "../../core/editorEntityFactory";
+import type { LegacySgdkIndex } from "../../core/ipc/sceneService";
+import {
+  createSpriteEntityFromAsset,
+  createTilemapEntityFromAsset,
+} from "../../core/editorEntityFactory";
+import { classifyImageAssetInstantiation } from "../../core/assetInstantiation";
 import {
   buildMultiTarget,
   type BuildLogLine,
@@ -24,17 +31,22 @@ import {
   assetsExtract,
   getThirdPartyStatus,
   installThirdPartyDependency,
-  listProjectAssets,
-  readLegacyProjectFile,
   type ProfileReport,
   type ProfileIssue,
   type DependencyStatus,
   type DependencyLogLine,
   type ThirdPartyDependencyId,
   type AssetExtractorBppMode,
-  type LegacyProjectFilePreview,
   type ProjectAssetEntry,
 } from "../../core/ipc/toolsService";
+import AssetBrowserSelectionCard from "./AssetBrowserSelectionCard";
+import {
+  buildAssetTree,
+  collectAssetReferences,
+  type AssetReference,
+  type AssetTreeNode,
+} from "./assetBrowserModel";
+import { useAssetBrowserState } from "./useAssetBrowserState";
 
 const LazyReverseWorkspace = lazy(() => import("./ReverseWorkspace"));
 
@@ -543,134 +555,6 @@ interface AssetBrowserProps {
   onRequestInspector?: () => void;
 }
 
-interface AssetReference {
-  entityId: string;
-  label: string;
-}
-
-function collectAssetReferences(scene: Scene | null): Map<string, AssetReference[]> {
-  const references = new Map<string, AssetReference[]>();
-  if (!scene) {
-    return references;
-  }
-
-  const pushReference = (assetPath: string | undefined, entityId: string, label: string) => {
-    const normalized = String(assetPath ?? "").trim();
-    if (!normalized) {
-      return;
-    }
-    const bucket = references.get(normalized) ?? [];
-    bucket.push({ entityId, label });
-    references.set(normalized, bucket);
-  };
-
-  for (const entity of scene.entities) {
-    pushReference(
-      entity.components.sprite?.asset,
-      entity.entity_id,
-      `Sprite · ${getEntityDisplayName(entity)}`
-    );
-    pushReference(
-      entity.components.tilemap?.tileset,
-      entity.entity_id,
-      `Tilemap · ${getEntityDisplayName(entity)}`
-    );
-
-    const audio = entity.components.audio;
-    if (audio?.bgm) {
-      pushReference(audio.bgm, entity.entity_id, `BGM · ${getEntityDisplayName(entity)}`);
-    }
-    for (const [action, assetPath] of Object.entries(audio?.sfx ?? {})) {
-      pushReference(assetPath, entity.entity_id, `SFX ${action} · ${getEntityDisplayName(entity)}`);
-    }
-  }
-
-  for (const layer of scene.background_layers) {
-    pushReference(layer.tileset, `layer::${layer.layer_id}`, `Tileset · ${layer.layer_id}`);
-    pushReference(layer.tilemap, `layer::${layer.layer_id}`, `Layer map · ${layer.layer_id}`);
-  }
-
-  return references;
-}
-
-interface LegacyIndexSection {
-  id: string;
-  label: string;
-  files: string[];
-}
-
-function buildLegacyIndexSections(index: LegacySgdkIndex | null): LegacyIndexSection[] {
-  if (!index) {
-    return [];
-  }
-
-  return [
-    { id: "source", label: "src/", files: index.source_files },
-    { id: "headers", label: "inc/", files: index.header_files },
-    { id: "manifests", label: "res/", files: index.manifest_files },
-    { id: "resources", label: "assets host", files: index.resource_files },
-    { id: "output", label: "out/", files: index.output_files },
-  ].filter((section) => section.files.length > 0);
-}
-
-interface AssetTreeNode {
-  name: string;
-  path: string;
-  isDir: boolean;
-  children: AssetTreeNode[];
-  asset?: ProjectAssetEntry;
-  fileCount: number;
-}
-
-function buildAssetTree(assets: ProjectAssetEntry[]): AssetTreeNode {
-  const root: AssetTreeNode = { name: "", path: "", isDir: true, children: [], fileCount: 0 };
-
-  for (const asset of assets) {
-    const segments = asset.relative_path.replace(/\\/g, "/").split("/");
-    let current = root;
-    for (let index = 0; index < segments.length; index += 1) {
-      const segment = segments[index];
-      const isLast = index === segments.length - 1;
-      if (isLast) {
-        current.children.push({
-          name: segment,
-          path: asset.relative_path,
-          isDir: false,
-          children: [],
-          asset,
-          fileCount: 0,
-        });
-      } else {
-        let dir = current.children.find((child) => child.isDir && child.name === segment);
-        if (!dir) {
-          dir = {
-            name: segment,
-            path: segments.slice(0, index + 1).join("/"),
-            isDir: true,
-            children: [],
-            fileCount: 0,
-          };
-          current.children.push(dir);
-        }
-        current = dir;
-      }
-    }
-  }
-
-  function countFiles(node: AssetTreeNode): number {
-    if (!node.isDir) return 1;
-    let total = 0;
-    for (const child of node.children) {
-      total += countFiles(child);
-    }
-    node.fileCount = total;
-    return total;
-  }
-  countFiles(root);
-
-  return root;
-}
-
 function AssetTreeView({
   node,
   collapsed,
@@ -753,24 +637,41 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
     activeProjectDir,
     activeTarget,
     activeScene,
+    activeScenePath,
     projectSourceKind,
     projectLegacyIndex,
     addEntity,
+    setActiveBrush,
+    setActiveTilemapId,
+    setActiveWorkspace,
+    setEditorMode,
     setSelectedEntityId,
     setActiveViewportTab,
     logMessage,
   } = useEditorStore();
-  const [assets, setAssets] = useState<ProjectAssetEntry[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [instantiatingAssetPath, setInstantiatingAssetPath] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<"grid" | "tree">("tree");
-  const [treeCollapsed, setTreeCollapsed] = useState<Set<string>>(new Set());
-  const [selectedTreeAsset, setSelectedTreeAsset] = useState<ProjectAssetEntry | null>(null);
-  const [selectedLegacyFile, setSelectedLegacyFile] = useState<string | null>(null);
-  const [legacyPreview, setLegacyPreview] = useState<LegacyProjectFilePreview | null>(null);
-  const [legacyPreviewBusy, setLegacyPreviewBusy] = useState(false);
-  const [legacyPreviewError, setLegacyPreviewError] = useState<string | null>(null);
+  const {
+    assets,
+    busy,
+    error,
+    viewMode,
+    treeCollapsed,
+    selectedTreeAsset,
+    selectedLegacyFile,
+    legacyPreview,
+    legacyPreviewBusy,
+    legacyPreviewError,
+    legacySections,
+    setViewMode,
+    toggleTreeNode,
+    selectTreeAsset,
+    clearLegacyPreview,
+    selectLegacyFile,
+  } = useAssetBrowserState({
+    activeProjectDir,
+    projectSourceKind,
+    projectLegacyIndex,
+  });
 
   const references = useMemo(() => collectAssetReferences(activeScene), [activeScene]);
   const assetTree = useMemo(() => buildAssetTree(assets), [assets]);
@@ -778,113 +679,129 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
     () => (selectedTreeAsset ? references.get(selectedTreeAsset.relative_path) ?? [] : []),
     [references, selectedTreeAsset]
   );
-  const legacySections = useMemo(
+  const sceneContext = useMemo(
     () =>
-      projectSourceKind === "external_sgdk" ? buildLegacyIndexSections(projectLegacyIndex) : [],
-    [projectLegacyIndex, projectSourceKind]
+      resolveSceneWorkspaceContext({
+        scene: activeScene,
+        scenePath: activeScenePath,
+        projectSourceKind,
+        projectLegacyIndex,
+      }),
+    [activeScene, activeScenePath, projectLegacyIndex, projectSourceKind]
   );
-
-  useEffect(() => {
-    if (!activeProjectDir) {
-      setAssets([]);
-      setError(null);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadAssets() {
-      setBusy(true);
-      try {
-        const result = await listProjectAssets(activeProjectDir);
-        if (!cancelled) {
-          setAssets(result);
-          setError(null);
-        }
-      } catch (loadError) {
-        if (!cancelled) {
-          setError(describeError(loadError));
-        }
-      } finally {
-        if (!cancelled) {
-          setBusy(false);
-        }
-      }
-    }
-
-    void loadAssets();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeProjectDir]);
-
-  useEffect(() => {
-    let cancelled = false;
-    let unlisten: (() => void) | null = null;
-
-    void listenToProjectAssetChanges((payload) => {
-      if (cancelled || payload.project_dir !== activeProjectDir) {
-        return;
-      }
-
-      setBusy(true);
-      void listProjectAssets(activeProjectDir)
-        .then((result) => {
-          if (cancelled) {
-            return;
-          }
-          setAssets(result);
-          setError(null);
-        })
-        .catch((loadError) => {
-          if (!cancelled) {
-            setError(describeError(loadError));
-          }
-        })
-        .finally(() => {
-          if (!cancelled) {
-            setBusy(false);
-          }
-        });
-    }).then((stop) => {
-      if (cancelled) {
-        stop();
-        return;
-      }
-      unlisten = stop;
-    }).catch(() => {});
-
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, [activeProjectDir]);
-
-  useEffect(() => {
-    if (projectSourceKind === "external_sgdk" && projectLegacyIndex) {
-      return;
-    }
-
-    setSelectedLegacyFile(null);
-    setLegacyPreview(null);
-    setLegacyPreviewError(null);
-    setLegacyPreviewBusy(false);
-  }, [projectLegacyIndex, projectSourceKind]);
+  const hostItemCount = useMemo(
+    () => legacySections.reduce((count, section) => count + section.files.length, 0),
+    [legacySections]
+  );
 
   function handleFocusReferencedAsset(asset: ProjectAssetEntry) {
     const matches = references.get(asset.relative_path) ?? [];
     if (matches.length === 0) {
+      const currentScene = useEditorStore.getState().activeScene;
+      const decision =
+        asset.kind === "image" && currentScene
+          ? classifyImageAssetInstantiation({
+              asset,
+              projectSourceKind,
+              sceneEntities: currentScene.entities,
+            })
+          : null;
       logMessage(
         "info",
-        `[Assets] '${asset.relative_path}' ainda nao esta referenciado pela cena ativa. Use Instanciar para criar um sprite.`
+        `[Assets] '${asset.relative_path}' ainda nao esta na cena ativa.${decision ? ` Use Instanciar para criar ${decision.entityLabel.toLowerCase()} (motivo: ${decision.reason}).` : ""}`
       );
       return;
     }
 
     setSelectedEntityId(matches[0].entityId);
+    setActiveViewportTab("scene");
     onRequestInspector?.();
     logMessage("info", `[Assets] Selecionado no Inspector: ${matches[0].label}`);
+  }
+
+  function handleOpenReferenceAuthoringTarget(match: AssetReference) {
+    const currentScene = useEditorStore.getState().activeScene;
+    const entity = currentScene?.entities.find((candidate) => candidate.entity_id === match.entityId) ?? null;
+    if (!entity) {
+      logMessage("warn", `[Assets] Referencia '${match.label}' nao possui entidade carregada para abrir a autoria.`);
+      return;
+    }
+
+    setSelectedEntityId(entity.entity_id);
+    onRequestInspector?.();
+
+    if (match.authoringSurface === "tilemap" && entity.components.tilemap) {
+      setActiveWorkspace("scene");
+      setActiveViewportTab("scene");
+      setEditorMode("paint");
+      setActiveTilemapId(entity.entity_id);
+      const brush = buildTilemapAuthoringBrush(entity);
+      if (brush) {
+        setActiveBrush(brush);
+      }
+      logMessage(
+        "info",
+        `[Assets] Tilemap '${getEntityDisplayName(entity)}' aberto no fluxo de pintura da cena.`
+      );
+      return;
+    }
+
+    if (match.authoringSurface === "logic") {
+      setActiveWorkspace("logic");
+      setActiveViewportTab("logic");
+      logMessage(
+        "info",
+        `[Assets] Navegando do Asset Browser para Logic Workspace: ${getEntityDisplayName(entity)}.`
+      );
+      return;
+    }
+
+    if (match.authoringSurface === "artstudio" && entity.components.sprite) {
+      setActiveWorkspace("artstudio");
+      setActiveViewportTab("artstudio");
+      logMessage(
+        "info",
+        `[Assets] Navegando do Asset Browser para Art Workspace: ${getEntityDisplayName(entity)}.`
+      );
+      return;
+    }
+
+    setActiveWorkspace("scene");
+    setActiveViewportTab("scene");
+    logMessage("info", `[Assets] Referencia aberta na cena: ${match.label}.`);
+  }
+
+  async function handleOpenReferenceSource(match: AssetReference) {
+    const relativePath = match.sourcePaths[0]?.trim();
+    if (!activeProjectDir || !relativePath) {
+      logMessage("warn", `[Assets] Fonte real indisponivel para '${match.label}'.`);
+      return;
+    }
+
+    try {
+      const result = await openProjectSourcePath(activeProjectDir, relativePath);
+      if (!result.ok) {
+        throw new Error(result.message || "Falha ao abrir fonte no host.");
+      }
+      logMessage("info", `[Assets] Fonte aberta a partir do Asset Browser: ${relativePath}`);
+    } catch (error) {
+      logMessage("error", `[Assets] Falha ao abrir fonte '${relativePath}': ${describeError(error)}`);
+    }
+  }
+
+  function handleFocusSceneEntryPoint() {
+    if (!sceneContext.focusEntityId) {
+      logMessage("info", "[Assets] A cena ativa ainda nao possui entidade visual principal para focar.");
+      return;
+    }
+
+    setSelectedEntityId(sceneContext.focusEntityId);
+    setActiveViewportTab("scene");
+    onRequestInspector?.();
+    logMessage(
+      "info",
+      `[Assets] Contexto ativo reposicionado para '${sceneContext.focusEntityLabel ?? sceneContext.focusEntityId}'.`
+    );
   }
 
   async function handleInstantiateAsset(asset: ProjectAssetEntry) {
@@ -902,61 +819,50 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
 
     setInstantiatingAssetPath(asset.relative_path);
     try {
-      const entity = createSpriteEntityFromAsset({
-        assetPath: asset.relative_path,
-        target: activeTarget,
-        existingEntityIds: currentScene.entities.map((candidate) => candidate.entity_id),
-        includeStarterLogic:
-          currentScene.entities.length === 0 && currentScene.background_layers.length === 0,
+      const decision = classifyImageAssetInstantiation({
+        asset,
+        projectSourceKind,
+        sceneEntities: currentScene.entities,
       });
+      const shouldInstantiateAsTilemap = decision.kind === "tilemap";
+      logMessage(
+        "info",
+        `[Assets] Instanciacao '${asset.relative_path}': modo=${shouldInstantiateAsTilemap ? "tilemap" : "sprite"} (motivo: ${decision.reason}).`
+      );
+      const entity = shouldInstantiateAsTilemap
+        ? createTilemapEntityFromAsset({
+            assetPath: asset.relative_path,
+            existingEntityIds: currentScene.entities.map((candidate) => candidate.entity_id),
+          })
+        : createSpriteEntityFromAsset({
+            assetPath: asset.relative_path,
+            target: activeTarget,
+            existingEntityIds: currentScene.entities.map((candidate) => candidate.entity_id),
+            includeStarterLogic:
+              currentScene.entities.length === 0 && currentScene.background_layers.length === 0,
+          });
 
       addEntity(entity);
       setSelectedEntityId(entity.entity_id);
       setActiveViewportTab("scene");
+      onRequestInspector?.();
 
       const saved = await persistActiveScene(
         activeProjectDir,
         "Assets",
-        `Sprite '${getEntityDisplayName(entity)}' instanciado a partir de '${asset.relative_path}'.`
+        `${decision.entityLabel} '${getEntityDisplayName(entity)}' instanciado a partir de '${asset.relative_path}'.`
       );
       if (!saved) {
         return;
       }
+      logMessage(
+        "info",
+        `[Assets] '${asset.relative_path}' -> ${decision.entityLabel}. ${decision.nextStep} (motivo: ${decision.reason}).`
+      );
     } catch (instantiationError) {
       logMessage("error", `[Assets] Falha ao instanciar '${asset.relative_path}': ${describeError(instantiationError)}`);
     } finally {
       setInstantiatingAssetPath(null);
-    }
-  }
-
-  function toggleTreeNode(path: string) {
-    setTreeCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
-      }
-      return next;
-    });
-  }
-
-  async function handleSelectLegacyFile(relativePath: string) {
-    if (!activeProjectDir) {
-      return;
-    }
-
-    setSelectedLegacyFile(relativePath);
-    setLegacyPreviewBusy(true);
-    setLegacyPreviewError(null);
-    try {
-      const result = await readLegacyProjectFile(activeProjectDir, relativePath);
-      setLegacyPreview(result);
-    } catch (previewError) {
-      setLegacyPreview(null);
-      setLegacyPreviewError(describeError(previewError));
-    } finally {
-      setLegacyPreviewBusy(false);
     }
   }
 
@@ -967,22 +873,44 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
         summary="Catalogo visual dos assets. Duplo clique foca referencias ou instancia imagens na cena."
       />
 
+      <SceneWorkspaceNotice
+        context={sceneContext}
+        testId="asset-browser-scene-notice"
+        actions={
+          <>
+            <button
+              type="button"
+              onClick={handleFocusSceneEntryPoint}
+              disabled={!sceneContext.focusEntityId}
+              className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[10px] font-semibold text-[#cdd6f4] transition-colors hover:border-[#89b4fa] hover:text-[#89b4fa] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Focar entidade guia
+            </button>
+            <button
+              type="button"
+              onClick={() => onRequestInspector?.()}
+              className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[10px] font-semibold text-[#cdd6f4] transition-colors hover:border-[#cba6f7] hover:text-[#cba6f7]"
+            >
+              Abrir Inspector
+            </button>
+          </>
+        }
+      />
+
       <div className="flex shrink-0 items-center justify-between gap-2 overflow-hidden rounded bg-[#1e1e2e] px-3 py-2">
-        <span className="min-w-0 truncate text-[10px] text-[#7f849c]" title={activeProjectDir || "(nenhum)"}>
-          Projeto: <span className="font-mono text-[#cdd6f4]">{activeProjectDir || "(nenhum)"}</span>
-        </span>
+        <div className="min-w-0">
+          <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#7f849c]">
+            Catalogo do projeto
+          </p>
+          <p className="truncate text-[10px] text-[#cdd6f4]" title={activeProjectDir || "(nenhum)"}>
+            {assets.length} asset(s) canonico(s)
+            {hostItemCount > 0 ? ` + ${hostItemCount} arquivo(s) host` : ""}
+          </p>
+          <p className="truncate text-[10px] text-[#6c7086]" title={activeProjectDir || "(nenhum)"}>
+            {activeProjectDir || "(nenhum)"}
+          </p>
+        </div>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-[#7f849c]">
-            Assets: <span className="font-mono text-[#cdd6f4]">{assets.length}</span>
-          </span>
-          {legacySections.length > 0 && (
-            <span className="text-[10px] text-[#7f849c]">
-              Host SGDK:{" "}
-              <span className="font-mono text-[#cdd6f4]">
-                {legacySections.reduce((count, section) => count + section.files.length, 0)}
-              </span>
-            </span>
-          )}
           <div className="flex gap-0.5">
             {(["tree", "grid"] as const).map((mode) => (
               <button
@@ -1021,10 +949,7 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
                 collapsed={treeCollapsed}
                 onToggle={toggleTreeNode}
                 onSelect={(asset) => {
-                  setSelectedTreeAsset(asset);
-                  setSelectedLegacyFile(null);
-                  setLegacyPreview(null);
-                  setLegacyPreviewError(null);
+                  selectTreeAsset(asset);
                   const matches = references.get(asset.relative_path) ?? [];
                   if (matches.length > 0) {
                     setSelectedEntityId(matches[0].entityId);
@@ -1063,7 +988,7 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
                       <button
                         key={file}
                         type="button"
-                        onClick={() => void handleSelectLegacyFile(file)}
+                        onClick={() => void selectLegacyFile(file)}
                         className={`rounded px-2 py-1 text-left font-mono text-[10px] transition-colors ${
                           selectedLegacyFile === file
                             ? "bg-[#f9e2af]/10 text-[#f9e2af]"
@@ -1083,76 +1008,19 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
       )}
 
       {viewMode === "tree" && selectedTreeAsset && (
-        <div className="flex flex-col gap-2 rounded border border-[#cba6f7]/30 bg-[#1e1e2e] p-3">
-          {selectedTreeAsset.kind === "image" && (
-            <div className="flex h-24 w-full items-center justify-center overflow-hidden rounded bg-black/20">
-              <AssetPreview
-                testId="asset-browser-selected-preview"
-                fallbackTestId="asset-browser-selected-preview-fallback"
-                absolutePath={selectedTreeAsset.absolute_path}
-                alt={selectedTreeAsset.relative_path}
-                imageClassName="h-full w-full max-h-24 max-w-full object-contain"
-                fallbackClassName="flex h-full w-full items-center justify-center text-[10px] font-semibold uppercase tracking-[0.12em] text-[#7f849c]"
-                fallbackLabel="Preview indisponivel"
-                pixelated
-              />
-            </div>
-          )}
-          <p className="min-w-0 truncate font-mono text-[10px] text-[#cdd6f4]" title={selectedTreeAsset.relative_path}>
-            {selectedTreeAsset.relative_path}
-          </p>
-          <div
-            data-testid="asset-browser-reference-summary"
-            className="rounded border border-[#313244] bg-[#11111b] px-2.5 py-2 text-[10px] text-[#94a3b8]"
-          >
-            {selectedAssetMatches.length > 0 ? (
-              <div className="flex flex-col gap-1.5">
-                <p>
-                  Referenciado por{" "}
-                  <span className="font-semibold text-[#cdd6f4]">
-                    {selectedAssetMatches.length} item(ns)
-                  </span>{" "}
-                  na cena ativa.
-                </p>
-                <div className="flex flex-wrap gap-1">
-                  {selectedAssetMatches.map((match) => (
-                    <span
-                      key={`${match.entityId}-${match.label}`}
-                      className="rounded-full border border-[#313244] bg-[#181825] px-2 py-0.5 text-[9px] text-[#cdd6f4]"
-                    >
-                      {match.label}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <p>
-                Ainda nao referenciado pela cena ativa. Use{" "}
-                <span className="font-semibold text-[#89b4fa]">Instanciar</span> para criar um
-                sprite ou deixe este asset reservado para uma etapa futura.
-              </p>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => handleFocusReferencedAsset(selectedTreeAsset)}
-              className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[10px] font-semibold text-[#cdd6f4] transition-colors hover:border-[#cba6f7] hover:text-[#cba6f7]"
-            >
-              Focar
-            </button>
-            {selectedTreeAsset.kind === "image" && (
-              <button
-                type="button"
-                onClick={() => void handleInstantiateAsset(selectedTreeAsset)}
-                disabled={!activeProjectDir || !activeScene || instantiatingAssetPath === selectedTreeAsset.relative_path}
-                className="rounded border border-[#89b4fa]/40 bg-[#89b4fa]/10 px-2 py-1 text-[10px] font-semibold text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {instantiatingAssetPath === selectedTreeAsset.relative_path ? "Criando..." : "Instanciar"}
-              </button>
-            )}
-          </div>
-        </div>
+        <AssetBrowserSelectionCard
+          activeProjectDir={activeProjectDir}
+          asset={selectedTreeAsset}
+          matches={selectedAssetMatches}
+          projectSourceKind={projectSourceKind}
+          sceneEntities={activeScene?.entities ?? []}
+          canInstantiate={Boolean(activeProjectDir && activeScene)}
+          instantiating={instantiatingAssetPath === selectedTreeAsset.relative_path}
+          onFocus={() => handleFocusReferencedAsset(selectedTreeAsset)}
+          onOpenAuthoringTarget={handleOpenReferenceAuthoringTarget}
+          onOpenSource={(match) => void handleOpenReferenceSource(match)}
+          onInstantiate={() => void handleInstantiateAsset(selectedTreeAsset)}
+        />
       )}
 
       {viewMode === "tree" && selectedLegacyFile && (
@@ -1172,9 +1040,18 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
                 Arquivo legado do host SGDK. Visualizacao somente leitura.
               </p>
             </div>
-            <span className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#f9e2af]">
-              Read-only
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={clearLegacyPreview}
+                className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#a6adc8] transition-colors hover:text-[#cdd6f4]"
+              >
+                Fechar
+              </button>
+              <span className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#f9e2af]">
+                Read-only
+              </span>
+            </div>
           </div>
 
           {legacyPreviewBusy && (
@@ -1214,6 +1091,10 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
               onDoubleClick={() => {
                 if (asset.kind === "image" && matches.length === 0) {
                   void handleInstantiateAsset(asset);
+                  return;
+                }
+                if (matches[0]?.authoringSurface) {
+                  handleOpenReferenceAuthoringTarget(matches[0]);
                   return;
                 }
                 handleFocusReferencedAsset(asset);
@@ -1258,20 +1139,20 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
                 </button>
                 {asset.kind === "image" && (
                   <button
-                    type="button"
-                    onClick={() => void handleInstantiateAsset(asset)}
-                    onDoubleClick={(event) => event.stopPropagation()}
-                    disabled={!canInstantiate || isInstantiating}
-                    className="rounded border border-[#89b4fa]/40 bg-[#89b4fa]/10 px-2 py-1 text-[10px] font-semibold text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20 disabled:cursor-not-allowed disabled:opacity-40"
-                    title={
-                      canInstantiate
-                        ? "Criar um sprite na cena ativa usando este asset."
-                        : "Abra uma cena ativa para instanciar sprites."
-                    }
-                  >
-                    {isInstantiating ? "Criando..." : "Instanciar"}
-                  </button>
-                )}
+                  type="button"
+                  onClick={() => void handleInstantiateAsset(asset)}
+                  onDoubleClick={(event) => event.stopPropagation()}
+                  disabled={!canInstantiate || isInstantiating}
+                  className="rounded border border-[#89b4fa]/40 bg-[#89b4fa]/10 px-2 py-1 text-[10px] font-semibold text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20 disabled:cursor-not-allowed disabled:opacity-40"
+                  title={
+                    canInstantiate
+                      ? "Criar um sprite ou tilemap na cena ativa usando a regra canonica do editor."
+                      : "Abra uma cena ativa para instanciar assets."
+                  }
+                >
+                  {isInstantiating ? "Criando..." : "Instanciar"}
+                </button>
+              )}
               </div>
             </div>
           );

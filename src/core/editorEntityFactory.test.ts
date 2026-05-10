@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createSpriteEntityFromAsset,
+  createTilemapEntityFromAsset,
   createStarterLogicGraph,
   pickDefaultSpriteAsset,
 } from "./editorEntityFactory";
@@ -79,6 +80,26 @@ describe("editorEntityFactory", () => {
           loop: true,
         },
       },
+    });
+  });
+
+  it("creates a tilemap entity with explicit fallback cells[]", () => {
+    const entity = createTilemapEntityFromAsset({
+      assetPath: "assets/tilesets/phase_a.png",
+      existingEntityIds: ["phase_a_tilemap"],
+      suggestedName: "Phase A",
+      mapWidth: 64,
+      mapHeight: 32,
+    });
+
+    expect(entity.entity_id).toBe("phase_a_tilemap_2");
+    expect(entity.components.tilemap).toMatchObject({
+      tileset: "assets/tilesets/phase_a.png",
+      map_width: 64,
+      map_height: 32,
+      scroll_x: 0,
+      scroll_y: 0,
+      cells: [],
     });
   });
 });

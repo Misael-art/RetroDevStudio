@@ -14,6 +14,21 @@ const UNDO_STACK_LIMIT = 50;
 export interface HwStatus {
   vram_used: number;
   vram_limit: number;
+  analysis_mode?: "native_static" | "sgdk_managed" | string;
+  project_asset_bytes?: number;
+  resident_vram_bytes?: number;
+  streamable_vram_bytes?: number;
+  dma_frame_bytes?: number;
+  /** Mega Drive residency audit (bytes); SNES envia zeros. */
+  sprite_resident_bytes?: number;
+  tilemap_resident_bytes?: number;
+  hud_resident_bytes?: number;
+  streamable_sprite_bytes?: number;
+  animated_swap_bytes?: number;
+  managed_concurrent_sprite_banks?: number;
+  managed_sprite_cells_used?: number;
+  managed_sprite_banks_limit?: number;
+  managed_sprite_cells_budget?: number;
   sprite_count: number;
   sprite_limit: number;
   scanline_sprite_peak: number;
