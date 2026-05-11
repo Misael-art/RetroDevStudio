@@ -243,6 +243,42 @@ describe("setActiveScene", () => {
     expect(useEditorStore.getState().sceneRevision).toBe(8);
   });
 
+  it("marca a validacao live como stale assim que uma cena fresca muda", () => {
+    useEditorStore.setState({
+      activeScene: { ...EMPTY_SCENE },
+      sceneRevision: 4,
+      hwStatus: {
+        vram_used: 0,
+        vram_limit: 65536,
+        sprite_count: 0,
+        sprite_limit: 80,
+        scanline_sprite_peak: 0,
+        scanline_sprite_limit: 20,
+        dma_used: 0,
+        dma_limit: 7372,
+        palette_banks_used: 0,
+        palette_banks_limit: 4,
+        bg_layers: 0,
+        bg_layers_limit: 4,
+        errors: [],
+        warnings: [],
+      },
+      hwValidationState: "fresh",
+      hwValidatedRevision: 4,
+      hwValidationError: null,
+    });
+
+    useEditorStore.getState().setActiveScene({
+      ...EMPTY_SCENE,
+      scene_id: "scene_changed",
+      entities: [makeEntity("hero")],
+    });
+
+    expect(useEditorStore.getState().sceneRevision).toBe(5);
+    expect(useEditorStore.getState().hwValidationState).toBe("stale");
+    expect(useEditorStore.getState().hwValidationError).toBeNull();
+  });
+
   it("seleciona automaticamente a primeira entidade da cena carregada", () => {
     useEditorStore.setState({ selectedEntityId: null });
     useEditorStore.getState().setActiveScene({

@@ -469,16 +469,32 @@ export const useEditorStore = create<EditorState>((set) => ({
   activeScene: null,
   activeSceneSource: null,
   setActiveScene: (scene, sourceScene = scene) =>
-    set((state) => ({
-      activeScene: scene,
-      activeSceneSource: sourceScene,
-      selectedEntityId: resolveSceneSelection(scene, state.selectedEntityId),
-      sceneRevision: scene ? state.sceneRevision + 1 : 0,
-      undoStack: [],
-      redoStack: [],
-      pendingHistorySnapshot: null,
-      ...(scene ? {} : INITIAL_VALIDATION_STATE),
-    })),
+    set((state) => {
+      const nextRevision = scene ? state.sceneRevision + 1 : 0;
+      const nextValidationState =
+        scene &&
+        state.hwValidatedRevision > 0 &&
+        state.hwValidatedRevision < nextRevision &&
+        state.hwStatus
+          ? {
+              hwValidationState: "stale" as HwValidationState,
+              hwValidationError: null,
+            }
+          : scene
+            ? {}
+            : INITIAL_VALIDATION_STATE;
+
+      return {
+        activeScene: scene,
+        activeSceneSource: sourceScene,
+        selectedEntityId: resolveSceneSelection(scene, state.selectedEntityId),
+        sceneRevision: nextRevision,
+        undoStack: [],
+        redoStack: [],
+        pendingHistorySnapshot: null,
+        ...nextValidationState,
+      };
+    }),
   beginHistoryCapture: () =>
     set((state) => {
       if (!state.activeScene || state.pendingHistorySnapshot) {

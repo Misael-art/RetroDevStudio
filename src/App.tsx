@@ -697,7 +697,7 @@ function ToolbarVramBudget({
   return (
     <div
       data-testid="toolbar-vram-budget"
-      className="flex min-w-[9rem] flex-col gap-1 rounded border border-[#313244] bg-[#11111b] px-2 py-1"
+      className="pointer-events-none flex min-w-[9rem] shrink-0 flex-col gap-1 rounded border border-[#313244] bg-[#11111b] px-2 py-1"
       title={`VRAM ${Math.round(used / 1024)}KB / ${Math.round(limit / 1024)}KB (${percent}%)`}
     >
       <div className="flex items-center justify-between text-[10px]">
@@ -735,7 +735,7 @@ function ToolbarScanlineBudget({
   return (
     <div
       data-testid="toolbar-scanline-budget"
-      className="flex min-w-[8rem] flex-col gap-1 rounded border border-[#313244] bg-[#11111b] px-2 py-1"
+      className="pointer-events-none hidden min-w-[8rem] shrink-0 flex-col gap-1 rounded border border-[#313244] bg-[#11111b] px-2 py-1 2xl:flex"
       title={`Sprites por scanline ${peak} / ${limit} (${percent}%)`}
     >
       <div className="flex items-center justify-between text-[10px]">
@@ -773,7 +773,7 @@ function ToolbarPaletteBudget({
   return (
     <div
       data-testid="toolbar-palette-budget"
-      className="flex min-w-[7rem] flex-col gap-1 rounded border border-[#313244] bg-[#11111b] px-2 py-1"
+      className="pointer-events-none hidden min-w-[7rem] shrink-0 flex-col gap-1 rounded border border-[#313244] bg-[#11111b] px-2 py-1 2xl:flex"
       title={`Bancos de paleta ${used} / ${limit} (${percent}%)`}
     >
       <div className="flex items-center justify-between text-[10px]">
@@ -2964,7 +2964,7 @@ export default function App() {
               : "OK",
             warning: state.hwStatus?.warnings[0] ?? "",
             error: state.hwStatus?.errors[0] ?? "",
-            staleHint: currentLiveState === "DESATUAL." ? currentLiveStateDetail : "",
+            staleHint: currentLiveState === "DESATUAL." ? "Edite a cena para revalidar" : "",
             hasStaleRevalidateButton: currentLiveState === "DESATUAL.",
           },
           consoleEntries: state.consoleEntries.map(({ level, message }) => ({ level, message })),

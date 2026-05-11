@@ -147,8 +147,8 @@ export default function UnifiedTopBar({
         <div className="flex min-w-0 items-center justify-center gap-2">{centerContent}</div>
       </div>
 
-      <div className="flex min-w-0 flex-1 items-center justify-end">
-        <div className="flex min-w-0 items-center justify-end gap-2">{rightContent}</div>
+      <div className="flex min-w-0 flex-1 items-center justify-end overflow-hidden">
+        <div className="flex min-w-0 items-center justify-end gap-2 overflow-hidden">{rightContent}</div>
       </div>
     </header>
   );

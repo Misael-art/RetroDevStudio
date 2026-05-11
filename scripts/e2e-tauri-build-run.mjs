@@ -1329,7 +1329,7 @@ async function readLiveStatus(sessionId) {
             : "OK",
           warning: hwStatus?.firstWarning ?? "",
           error: hwStatus?.firstError ?? "",
-          staleHint: liveState === "DESATUAL." ? liveStateDetail : "",
+          staleHint: liveState === "DESATUAL." ? "Edite a cena para revalidar" : "",
           hasStaleRevalidateButton: liveState === "DESATUAL.",
         };
       }
@@ -1760,7 +1760,7 @@ function deriveLiveStatusFromDiagnostics(diagnostics) {
       : "OK",
     warning: hwStatus?.firstWarning ?? "",
     error: hwStatus?.firstError ?? "",
-    staleHint: liveState === "DESATUAL." ? liveStateDetail : "",
+    staleHint: liveState === "DESATUAL." ? "Edite a cena para revalidar" : "",
     hasStaleRevalidateButton: liveState === "DESATUAL.",
   };
 }
@@ -3626,18 +3626,25 @@ async function main() {
         fail("Botao Revalidar agora nao ficou disponivel no estado DESATUAL.");
       }
 
-      const pendingStatus = await waitFor(
+      const validationStatus = await waitFor(
         async () => {
           const status = await readLiveStatus(sessionId);
-          return status.liveState === "ANALISANDO" &&
-            !status.disabled &&
-            !status.reason &&
+          if (status.disabled || status.reason) {
+            return false;
+          }
+          if (
+            status.liveState === "ANALISANDO" &&
             status.pendingSummary.includes("Live em analise")
-            ? status
-            : false;
+          ) {
+            return status;
+          }
+          if (status.liveState === "LIVE" && status.liveStateDetail.includes("Preview live sincronizado")) {
+            return status;
+          }
+          return false;
         },
         liveValidationTimeoutMs,
-        "UI live nao refletiu ANALISANDO apos revalidacao manual",
+        "UI live nao refletiu ANALISANDO ou LIVE apos revalidacao manual",
         50
       );
 
@@ -3671,7 +3678,11 @@ async function main() {
       console.log(`Projeto: ${options.project}`);
       console.log(`Target: ${projectMetadata.target}`);
       console.log(`Estado stale: ${staleStatus.liveState} | Hint: ${staleStatus.staleHint}`);
-      console.log(`Estado apos revalidar: ${pendingStatus.liveState} | Resumo: ${pendingStatus.pendingSummary}`);
+      console.log(
+        `Estado apos revalidar: ${validationStatus.liveState} | Resumo: ${
+          validationStatus.pendingSummary || validationStatus.liveStateDetail
+        }`
+      );
       return;
     }
 
