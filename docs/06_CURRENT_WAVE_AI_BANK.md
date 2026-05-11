@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-11 (rodada 33 - hotfix CI desktop remoto verde; PR #2 draft; promocao bloqueada por merge/main)
+**Ultima Atualizacao:** 2026-05-11 (rodada 34 - hardening CI rate-limit para Runtime Setup/SGDK; promocao bloqueada por merge/main)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-11 rodada 34 - CI desktop rate-limit hardening):**
+  - **Falha remota isolada:** apos o commit documental, o `desktop-smoke` do PR encontrou um bloqueio novo e externo ao fluxo de produto: a instalacao automatica do SGDK consultou `https://api.github.com/repos/Stephane-D/SGDK/releases/latest` sem autenticacao e recebeu `403 rate limit exceeded`.
+  - **Correcao aplicada:** `src-tauri/src/tools/dependency_manager.rs` agora usa `RDS_GITHUB_TOKEN`/`GITHUB_TOKEN` somente para requests a `https://api.github.com/`, sem enviar token para APIs externas como Adoptium. `.github/workflows/desktop-e2e.yml` passa o `github.token` read-only como `RDS_GITHUB_TOKEN` para o desktop smoke.
+  - **Cobertura nova:** `github_api_get_uses_ci_token_only_for_github_api` prova que o header `Authorization: Bearer ...` aparece para GitHub API e nao aparece para API externa.
+  - **Baseline local pos-correcao:** `check:tree` OK; `lint` OK; `tsc --noEmit` OK; `npm test` **291** passed; `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK; `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` **326** passed / **10** ignored.
+  - **Fluxo real/QA/corpus/packaging:** `validate-upstream-windows.ps1 -SkipRustTests` OK (`upstream-validation.json` `success=true`, `2026-05-11T18:14:21-03:00`); `preflight:sgdk-e2e` OK; `sgdk_matrix_corpus_ --ignored` **7/7**; `test:e2e:desktop:qa-rc` OK A-G com evidencias `qa-rc-2026-05-11T21-20-39-556Z-*`; `build:debug`, `build:portable` e `build:msi` OK apos a mudanca. Artefatos verificados: Debug EXE 36,062,208 bytes (`2026-05-11 18:23:36`), Portable EXE 20,574,208 bytes (`2026-05-11 18:34:08`) e MSI 7,323,648 bytes (`2026-05-11 18:33:52`).
+  - **Status honesto:** isto endurece o runner e nao altera maturidade de produto. PR #2 continua sendo a trilha de promocao; merge/main + `release:readiness:promotion` no destino seguem obrigatorios. SGDK continua **Experimental**; Phase D segue heuristica sem AST C completo.
 
 * **O que acabou de acontecer (2026-05-11 rodada 33 - PR/CI remoto verde, sem merge):**
   - **Branch/PR:** `feat/sgdk-vram-residency-streaming-r14` foi pushada em `7bf026bc17e841d7053fa208585ba32cc6205610` (`fix(e2e): harden live stale and toolbar overflow`). O PR publico existente e [#2](https://github.com/Misael-art/RetroDevStudio/pull/2), ainda `draft/open` por governanca humana; `gh` nao existe neste host, entao a verificacao remota foi feita via API publica do GitHub.

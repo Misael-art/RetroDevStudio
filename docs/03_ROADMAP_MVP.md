@@ -1,8 +1,10 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-05-11 (rodada 33)
+**Ultima revisao canonica:** 2026-05-11 (rodada 34)
 **Fase ativa real:** Release candidate / beta tecnica em hardening
+
+**Nota 2026-05-11 (rodada 34, branch `feat/sgdk-vram-residency-streaming-r14`):** hardening de CI/setup sem mudanca de maturidade: o `desktop-smoke` remoto bateu rate limit em `api.github.com` ao consultar a release oficial do SGDK sem token. O Runtime Setup agora usa `RDS_GITHUB_TOKEN`/`GITHUB_TOKEN` somente para GitHub API, e o workflow `desktop-e2e.yml` injeta o `github.token` read-only como `RDS_GITHUB_TOKEN`. Gates locais pos-correcao reexecutados e verdes, incluindo upstream oficial, `qa-rc` A-G fresco (`qa-rc-2026-05-11T21-20-39-556Z-*`), corpus SGDK `7/7` e Debug/Portable/MSI regenerados. A leitura continua: PR #2 e trilha de promocao; merge para `main` e `release:readiness:promotion` no destino ainda obrigatorios. SGDK segue **Experimental**; Fase D segue heuristica.
 
 **Nota 2026-05-11 (rodada 33, branch `feat/sgdk-vram-residency-streaming-r14`):** PR #2 existe e o SHA `7bf026b` foi pushado com hotfix para `Desktop E2E` remoto (`live-stale` e overflow/interceptacao da topbar). A barra local pos-hotfix ficou verde (`npm test` 291, Rust baseline, upstream oficial, matriz desktop local 16/16, `qa-rc` A-G fresco `qa-rc-2026-05-11T18-14-46-427Z-*`, corpus SGDK `7/7`, Debug/Portable/MSI regenerados). GitHub Actions ficou verde em `push` e `pull_request` para `CI` e `Desktop E2E` (runs `25689348726`, `25689348725`, `25689350772`, `25689350771`). `release:readiness:promotion` foi reexecutado em worktree limpo e falhou apenas por governanca: branch muitos commits a frente de `origin/main`, PR ainda `draft/open`, sem merge para `main`. Isso mantem a leitura de PR pronto para promocao, nao MVP fechado. SGDK segue **Experimental**; Fase D segue heuristica.
 
