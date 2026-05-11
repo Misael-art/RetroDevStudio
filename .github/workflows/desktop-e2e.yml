@@ -64,6 +64,7 @@ jobs:
       RDS_E2E_RUN_TIMEOUT_MS: 300000
       RDS_FORCE_TAURI_CLI_DEBUG: "1"
       RDS_E2E_TARGET: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || github.event_name == 'workflow_call' && inputs.target || 'all' }}
+      RDS_GITHUB_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

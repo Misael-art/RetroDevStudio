@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use reqwest::blocking::Client;
+use reqwest::blocking::{Client, RequestBuilder};
+use reqwest::header::{HeaderValue, AUTHORIZATION};
 use serde::{Deserialize, Serialize};
 use zip::ZipArchive;
 
@@ -805,13 +806,36 @@ where
 }
 
 fn fetch_latest_release(client: &Client, url: &str) -> Result<GithubRelease, String> {
-    client
-        .get(url)
+    github_api_get(client, url)
         .send()
         .and_then(reqwest::blocking::Response::error_for_status)
         .map_err(|e| format!("Falha ao consultar release oficial: {}", e))?
         .json::<GithubRelease>()
         .map_err(|e| format!("Falha ao ler metadata de release oficial: {}", e))
+}
+
+fn github_api_get(client: &Client, url: &str) -> RequestBuilder {
+    let request = client.get(url);
+    if !url.starts_with("https://api.github.com/") {
+        return request;
+    }
+
+    let Some(token) = github_api_token() else {
+        return request;
+    };
+    let auth_value = format!("Bearer {}", token);
+    match HeaderValue::from_str(&auth_value) {
+        Ok(value) => request.header(AUTHORIZATION, value),
+        Err(_) => request,
+    }
+}
+
+fn github_api_token() -> Option<String> {
+    std::env::var("RDS_GITHUB_TOKEN")
+        .ok()
+        .or_else(|| std::env::var("GITHUB_TOKEN").ok())
+        .map(|token| token.trim().to_string())
+        .filter(|token| !token.is_empty())
 }
 
 fn fetch_latest_temurin_lts_package(client: &Client) -> Result<(String, String, String), String> {
@@ -1339,6 +1363,47 @@ mod tests {
         ));
         fs::create_dir_all(&path).expect("create temp test dir");
         path
+    }
+
+    #[test]
+    fn github_api_get_uses_ci_token_only_for_github_api() {
+        let _serial = test_serial_guard();
+        let previous_rds_token = std::env::var_os("RDS_GITHUB_TOKEN");
+        let previous_github_token = std::env::var_os("GITHUB_TOKEN");
+        unsafe {
+            std::env::set_var("RDS_GITHUB_TOKEN", "test-token");
+            std::env::remove_var("GITHUB_TOKEN");
+        }
+
+        let client = Client::builder()
+            .user_agent("RetroDevStudioTest")
+            .build()
+            .expect("build test client");
+        let github_request = github_api_get(
+            &client,
+            "https://api.github.com/repos/Stephane-D/SGDK/releases/latest",
+        )
+        .build()
+        .expect("build github request");
+        assert_eq!(
+            github_request
+                .headers()
+                .get(AUTHORIZATION)
+                .and_then(|value| value.to_str().ok()),
+            Some("Bearer test-token")
+        );
+
+        let non_github_request =
+            github_api_get(&client, "https://api.adoptium.net/v3/info/available_releases")
+                .build()
+                .expect("build non github request");
+        assert!(
+            non_github_request.headers().get(AUTHORIZATION).is_none(),
+            "GitHub token must not be sent to non-GitHub APIs"
+        );
+
+        restore_env_var("RDS_GITHUB_TOKEN", previous_rds_token);
+        restore_env_var("GITHUB_TOKEN", previous_github_token);
     }
 
     #[test]
