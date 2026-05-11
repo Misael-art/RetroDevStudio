@@ -4,7 +4,7 @@
 **Ultima revisao canonica:** 2026-05-11 (rodada 32)
 **Fase ativa real:** Release candidate / beta tecnica em hardening
 
-**Nota 2026-05-11 (rodada 32, branch `feat/sgdk-vram-residency-streaming-r14`):** host Windows rechecado e barra tecnica local renovada: baseline frontend/Rust verde, corpus SGDK real `7/7`, upstream oficial `success=true`, `qa-rc` A-G fresco (`qa-rc-2026-05-11T11-53-47-951Z-*`), portable/release EXE e MSI canonicos gerados. `release:readiness:promotion` rodou em modo estrito e falhou apenas por governanca: branch +201 vs `origin/main`. Isso mantem a leitura de hardening e **nao** promove o MVP publicamente. SGDK segue **Experimental**; Fase D segue heuristica.
+**Nota 2026-05-11 (rodada 32, branch `feat/sgdk-vram-residency-streaming-r14`):** host Windows rechecado e barra tecnica local renovada: baseline frontend/Rust verde, corpus SGDK real `7/7`, upstream oficial `success=true`, `qa-rc` A-G fresco (`qa-rc-2026-05-11T11-53-47-951Z-*`), portable/release EXE e MSI canonicos gerados. `release:readiness:promotion` rodou em modo estrito e falhou apenas por governanca contra `origin/main` (201 commits a frente no snapshot pre-commit documental). Isso mantem a leitura de hardening e **nao** promove o MVP publicamente. SGDK segue **Experimental**; Fase D segue heuristica.
 
 **Nota 2026-05-10 (rodada 31, branch `feat/sgdk-vram-residency-streaming-r14`):** host Windows preparado e barra tecnica local revalidada: baseline frontend/Rust verde, corpus SGDK real `7/7`, upstream oficial `success=true`, `qa-rc` A-G fresco (`qa-rc-2026-05-10T19-50-53-457Z-*`), portable/release EXE e MSI canonicos gerados. Isso melhora a fotografia de hardening, mas **nao** promove o MVP publicamente: a branch continua +200 vs `origin/main` e a promocao institucional ainda depende de governanca Git/PR limpa. SGDK segue **Experimental**; Fase D segue heuristica.
 
@@ -74,7 +74,7 @@
 - ~~`Desktop E2E` remoto ainda precisa ficar verde de forma repetivel no runner GitHub/Windows.~~ **Resolvido em 2026-04-16:** runs #143/#144 passaram com 16/16 cenarios.
 - A fotografia institucional de promocao precisa ser regenerada em worktree limpo/PR ou no destino de promocao com snapshot fresco que inclua o `Desktop E2E` verde.
 - MSI/portable foram revalidados localmente em `2026-05-11`; precisam continuar sendo revalidados quando o fluxo `Menu inicial -> Criar Projeto` ou packaging mudar.
-- A trilha publica ainda precisa refletir o estado real da wave candidata; branch `feat/sgdk-vram-residency-streaming-r14` continua +201 commits a frente de `origin/main`, bloqueio de governanca ate PR/merge.
+- A trilha publica ainda precisa refletir o estado real da wave candidata; branch `feat/sgdk-vram-residency-streaming-r14` continua muitos commits a frente de `origin/main`, bloqueio de governanca ate PR/merge.
 - Readiness e onboarding publico devem ser sincronizados apos o merge para `main`.
 
 ---
