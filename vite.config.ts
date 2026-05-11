@@ -1,4 +1,4 @@
-import { defineConfig } from "vite";
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -35,5 +35,21 @@ export default defineConfig({
         : "safari13",
     minify: !process.env.TAURI_ENV_DEBUG ? "esbuild" : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
+  },
+
+  test: {
+    globals: true,
+    environment: "jsdom",
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    setupFiles: ["src/test/setup.ts"],
+    // Forks + single worker is the conservative baseline for this Windows host.
+    // It preserves file isolation without the intermittent bootstrap timeouts
+    // we are seeing again with thread workers on heavier suites.
+    pool: "forks",
+    isolate: true,
+    fileParallelism: false,
+    maxWorkers: 1,
+    testTimeout: 30000,
+    hookTimeout: 30000,
   },
 });

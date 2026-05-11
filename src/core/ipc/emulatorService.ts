@@ -8,11 +8,31 @@ export interface EmulatorCommandResult {
   message: string;
 }
 
+export interface EmulatorMemoryResult {
+  ok: boolean;
+  data: number[];
+  total_size: number;
+}
+
+export interface ReplayCommandResult {
+  ok: boolean;
+  message: string;
+  replay_path: string;
+  frames_recorded: number;
+  framebuffer_match: boolean | null;
+}
+
 /** Payload do evento `emulator://frame` — pixels RGBA prontos para ImageData */
 export interface FramePayload {
   width: number;
   height: number;
   rgba: number[]; // Uint8Array serializado como array JSON
+}
+
+/** Payload do evento `emulator://audio` — amostras PCM i16 stereo */
+export interface AudioPayload {
+  sample_rate: number;
+  samples: number[];
 }
 
 export interface JoypadState {
@@ -46,6 +66,38 @@ export function emulatorRunFrame(): Promise<EmulatorCommandResult> {
   return invoke<EmulatorCommandResult>("emulator_run_frame");
 }
 
+export function emulatorSaveState(): Promise<EmulatorCommandResult> {
+  return invoke<EmulatorCommandResult>("emulator_save_state");
+}
+
+export function emulatorLoadState(): Promise<EmulatorCommandResult> {
+  return invoke<EmulatorCommandResult>("emulator_load_state");
+}
+
+export function emulatorRewindStep(): Promise<EmulatorCommandResult> {
+  return invoke<EmulatorCommandResult>("emulator_rewind_step");
+}
+
+export function emulatorStartRecording(): Promise<ReplayCommandResult> {
+  return invoke<ReplayCommandResult>("emulator_start_recording");
+}
+
+export function emulatorStopRecording(projectDir: string): Promise<ReplayCommandResult> {
+  return invoke<ReplayCommandResult>("emulator_stop_recording", { projectDir });
+}
+
+export function emulatorPlayReplay(replayPath: string): Promise<ReplayCommandResult> {
+  return invoke<ReplayCommandResult>("emulator_play_replay", { replayPath });
+}
+
+export function emulatorReadMemory(
+  region: number,
+  offset: number,
+  length: number
+): Promise<EmulatorMemoryResult> {
+  return invoke<EmulatorMemoryResult>("emulator_read_memory", { region, offset, length });
+}
+
 export function emulatorSendInput(joypad: JoypadState): Promise<EmulatorCommandResult> {
   return invoke<EmulatorCommandResult>("emulator_send_input", { joypad });
 }
@@ -62,7 +114,8 @@ export function emulatorStop(): Promise<EmulatorCommandResult> {
  * @returns função para parar o loop (chame ao desmontar o componente)
  */
 export async function startFrameLoop(
-  onFrame: (payload: FramePayload) => void
+  onFrame: (payload: FramePayload) => void,
+  onError?: (message: string) => void
 ): Promise<() => void> {
   let running = true;
   let unlisten: UnlistenFn | null = null;
@@ -71,19 +124,48 @@ export async function startFrameLoop(
     onFrame(event.payload);
   });
 
+  function stop() {
+    running = false;
+    if (unlisten) {
+      unlisten();
+      unlisten = null;
+    }
+  }
+
+  function fail(error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    stop();
+    onError?.(message);
+  }
+
   // Loop a ~60fps usando requestAnimationFrame via setTimeout
   async function tick() {
     if (!running) return;
-    await emulatorRunFrame();
+    try {
+      const result = await emulatorRunFrame();
+      if (!running) return;
+      if (!result.ok) {
+        fail(result.message || "Falha ao executar frame do emulador.");
+        return;
+      }
+    } catch (error) {
+      fail(error);
+      return;
+    }
     setTimeout(tick, 16); // ~60fps
   }
 
   tick();
 
-  return () => {
-    running = false;
-    if (unlisten) unlisten();
-  };
+  return stop;
+}
+
+export async function listenToAudioStream(
+  onAudio: (payload: AudioPayload) => void
+): Promise<UnlistenFn> {
+  return listen<AudioPayload>("emulator://audio", (event) => {
+    onAudio(event.payload);
+  });
 }
 
 // ── Keyboard → JoypadState mapping ───────────────────────────────────────────

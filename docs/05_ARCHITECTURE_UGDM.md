@@ -126,7 +126,12 @@ Uma cena e a unidade basica de jogo (fase, menu, cutscene).
   ],
   "palettes": [
     { "slot": 0, "colors": ["#000000", "#2244AA", "#44AAFF", "#FFFFFF", "#000000", "#000000", "#000000", "#000000", "#000000", "#000000", "#000000", "#000000", "#000000", "#000000", "#000000", "#000000"] }
-  ]
+  ],
+  "collision_map": {
+    "width": 40,
+    "height": 28,
+    "data": [0, 0, 1, 1, 0]
+  }
 }
 ```
 
@@ -138,6 +143,75 @@ Uma cena e a unidade basica de jogo (fase, menu, cutscene).
 | Max background_layers | MD: 2 scroll + 1 window, SNES: varia por mode | Erro de build |
 | Palette slots | MD: 4 slots de 16 cores, SNES: 16 slots de 16 | Erro se exceder |
 | VRAM total | Soma de todos tiles carregados <= 64KB | Erro de build |
+| CollisionMap dimensoes | MD: 40×28, SNES: 32×28 (em tiles de 8px) | Erro de build |
+| CollisionMap data length | `data.len()` deve ser igual a `width * height` | Erro de build |
+
+### 4.1 CollisionMap (campo opcional na Scene)
+
+O `collision_map` e um mapa tile-a-tile de solideidade da cena, pintado diretamente no Viewport Editor. E opcional — sua ausencia e tratada como mapa vazio pelo codegen.
+
+```json
+{
+  "collision_map": {
+    "width": 40,
+    "height": 28,
+    "data": [0, 1, 1, 0]
+  }
+}
+```
+
+| Campo | Tipo | Descricao |
+|-------|------|-----------|
+| `width` | integer | Largura em tiles (MD: 40, SNES: 32) |
+| `height` | integer | Altura em tiles (MD: 28, SNES: 28) |
+| `data` | array de 0/1 | Flat array row-major. `0` = livre, `1` = solido |
+
+**Regra:** `data.len()` DEVE ser exatamente `width * height`. O backend Rust valida e rejeita com erro antes do codegen.
+**Codegen:** O emitter SGDK emite `static const u8 rds_collision_map[]` antes de `int main()`. O emitter SNES faz o mesmo. Tiles nao declarados (mapa ausente) sao tratados como `0` (livre).
+**Editor:** Atalho `C` ativa o modo `collision` no Viewport. Clique esquerdo = solido (1), clique direito = livre (0). Overlay semi-transparente vermelho indica tiles solidos.
+
+### 4.2 SceneLayer (campo opcional na Scene — schema 1.5.0+)
+
+O `layers` e um array de camadas de editor que agrupa entidades por visibilidade e lock. E opcional e invisivel ao codegen — sua ausencia e equivalente a `layers: []`.
+
+```json
+{
+  "layers": [
+    {
+      "id": "layer_background",
+      "name": "Background",
+      "kind": "tile",
+      "visible": true,
+      "locked": false,
+      "depth": 0,
+      "entity_ids": ["tilemap_bg"]
+    },
+    {
+      "id": "layer_sprites",
+      "name": "Sprites",
+      "kind": "sprite",
+      "visible": true,
+      "locked": false,
+      "depth": 1,
+      "entity_ids": ["player_1", "enemy_01"]
+    }
+  ]
+}
+```
+
+| Campo | Tipo | Descricao |
+|-------|------|-----------|
+| `id` | string | Identificador unico da camada (slug gerado pelo editor). |
+| `name` | string | Nome exibido no LayerPanel. |
+| `kind` | string | Tipo semantico: `"sprite"`, `"tile"`, `"background"`, `"object"`. |
+| `visible` | boolean | Se `false`, entidades desta camada sao omitidas do Viewport Editor. Nao afeta o codegen. |
+| `locked` | boolean | Se `true`, bloqueia edicao de entidades desta camada no Viewport Editor. |
+| `depth` | integer | Ordem visual no LayerPanel (menor = mais atras). |
+| `entity_ids` | array de string | IDs das entidades atribuidas a esta camada. Uma entidade pode estar em no maximo uma camada. |
+
+**Regra:** `entity_ids` referencia IDs de entidades existentes em `scene.entities`. O backend nao valida a consistencia dos ids — e responsabilidade do editor manter a sincronia ao criar/deletar entidades.
+**Codegen:** O campo `layers` e ignorado pelos emitters SGDK e SNES. Nao tem efeito sobre a ROM gerada.
+**Editor:** O `LayerPanel` (tab `Camadas` no aside esquerdo) gerencia criacao/remocao/renomeacao/visibilidade/lock. O `ViewportPanel` omite entidades em camadas com `visible=false` do canvas de cena.
 
 ---
 
@@ -204,8 +278,9 @@ Uma entidade e qualquer "coisa" na cena: jogador, inimigo, item, trigger, HUD el
 | `palette_slot` | integer | Nao | Indice da paleta (0-3 MD, 0-15 SNES). Default: 0 |
 | `animations` | object | Nao | Mapa nome->animacao |
 | `priority` | string | Nao | `"foreground"` ou `"background"`. Default: `"foreground"` |
+| `meta_sprite` | boolean | Nao | Se `true`, indica que o sprite sera fatiado em meta-sprite composto pelo runtime SGDK. O validador de hardware ignora o limite simples de frame (32×32 MD / 64×64 SNES) para meta-sprites, mas continua contabilizando VRAM. Default: `false`. Setado automaticamente pelo importador SGDK para sprites >32px. |
 
-**Regra para IA:** `frame_width` e `frame_height` DEVEM ser multiplos de 8. Se o usuario especificar 17x25, o build DEVE falhar com: `"Sprite dimensions must be multiples of 8 (tile-aligned). Got 17x25."`
+**Regra para IA:** `frame_width` e `frame_height` DEVEM ser multiplos de 8.
 
 ### 6.2 Collision Component
 
@@ -332,6 +407,8 @@ Antes de gerar codigo C a partir de um UGDM, o backend Rust DEVE executar estas 
 | 8 | Variaveis de logica usam tipos validos | Este doc (secao 6.6) | Erro fatal |
 | 9 | Background layers nao excedem limites do target | `04_HARDWARE_SPECS.md` | Erro fatal |
 | 10 | DMA bandwidth por frame estimada | `04_HARDWARE_SPECS.md` | Warning |
+| 11 | `collision_map.data.len()` == `width * height` | Este doc (secao 4.1) | Erro fatal |
+| 12 | `collision_map` dimensoes dentro dos limites do target | Este doc (secao 4.1) | Erro fatal |
 
 ---
 
@@ -357,6 +434,50 @@ Antes de gerar codigo C a partir de um UGDM, o backend Rust DEVE executar estas 
 ```
 
 **Regra para IA:** Este fluxo e sequencial e determinisitco. Nenhuma etapa pode ser pulada. Se a validacao (passo 3) falhar, o compilador NAO deve ser invocado.
+
+---
+
+## 10. RDS OVERLAY PARA PROJETOS EXTERNOS
+
+Projetos SGDK desenvolvidos fora do RetroDevStudio podem ser abertos sem alterar sua estrutura original atraves de um **overlay `rds/`**: um subdiretorio fino que contem o `project.rds`, cenas e links para os assets reais.
+
+### 10.1 Estrutura do Overlay
+
+```text
+ProjetoSGDK/
+  src/              # Codigo C original (intocado)
+  res/              # Resources SGDK originais (intocado)
+  out/              # Build output original (intocado)
+  rds/              # <-- Overlay RetroDevStudio
+    project.rds     # Manifesto RDS canonico
+    scenes/
+      main.json     # Cena gerada a partir dos .res
+    graphs/         # Node graphs (vazio se nao houver)
+    prefabs/        # Prefabs (vazio se nao houver)
+    assets/         # Junctions NTFS para os assets reais
+      sprites/  --> ../../res/sprite/
+      tilesets/ --> ../../res/stages/
+      audio/   --> ../../res/sound/
+      gfx/     --> ../../res/gfx/
+    build/      --> ../../out/
+```
+
+### 10.2 Regras
+
+1. **Zero duplicacao:** Os subdiretorios de `rds/assets/` e `rds/build/` sao NTFS Junctions (Windows) ou symlinks (Unix) apontando para os diretorios originais. Nenhum asset e copiado.
+2. **Projeto original intocado:** O overlay nunca modifica, move ou remove arquivos do projeto SGDK host.
+3. **Custo minimo:** Apenas `project.rds` e `scenes/*.json` sao arquivos reais dentro de `rds/`. O overhead tipico e menor que 10KB.
+4. **Mapeamento de recursos:** Cada tipo de recurso SGDK (`.res`) e mapeado para entidades RDS na cena importada, seguindo as mesmas regras do importador generico (`import_sgdk_project`).
+
+### 10.3 Discovery por Subdiretorio
+
+Quando `project.rds` nao e encontrado na raiz do diretorio selecionado, o backend busca automaticamente em subdiretorios de primeiro nivel, com prioridade para `rds/project.rds`. A ordem de busca e:
+
+1. `<dir>/project.rds` (caminho canonico padrao)
+2. `<dir>/rds/project.rds` (overlay preferencial)
+3. Qualquer `<dir>/<subdir>/project.rds` encontrado em subdiretorios imediatos
+
+O `project_dir` retornado ao frontend aponta para o diretorio que contem o `project.rds` encontrado, garantindo que paths relativos internos (`entry_scene`, `assets/`) resolvam corretamente.
 
 ---
 

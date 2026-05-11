@@ -11,7 +11,7 @@ export default function Panel({ title, children, className = "", headerActions }
   return (
     <div className={`flex flex-col bg-[#1e1e2e] border border-[#313244] overflow-hidden ${className}`}>
       {/* Panel header */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-[#181825] border-b border-[#313244] shrink-0">
+      <div className="flex items-center justify-between px-3 py-1 bg-[#181825] border-b border-[#313244] shrink-0">
         <span className="text-xs font-semibold text-[#cdd6f4] uppercase tracking-wider select-none">
           {title}
         </span>
@@ -20,7 +20,7 @@ export default function Panel({ title, children, className = "", headerActions }
         )}
       </div>
       {/* Panel content */}
-      <div className="flex-1 overflow-auto">{children}</div>
+      <div className="scrollbar-thin flex-1 overflow-auto overflow-x-hidden">{children}</div>
     </div>
   );
 }

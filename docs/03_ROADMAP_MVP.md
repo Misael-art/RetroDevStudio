@@ -1,150 +1,371 @@
 # 03 - ROADMAP MACRO & MVP TATICO
-**Status:** Documento Vivo (Atualizado a cada final de Sprint)
-**Fase Atual Ativa:** Fase 0 (Fundacao) — INCOMPLETA
 
-> **ATENCAO AGENTES DE IA (DIRETRIZ DE FOCO OBRIGATORIA):**
-> O seu escopo de trabalho esta restrito **APENAS a Fase e Sprint marcados como "EM ANDAMENTO"**.
-> E estritamente proibido escrever codigo, propor arquiteturas ou importar bibliotecas para recursos de Fases futuras.
-> Se o usuario pedir algo fora do escopo atual, alerte-o gentilmente sobre o Roadmap.
->
-> **REGRA DE PROGRESSAO:** Uma Fase so pode ser iniciada quando TODOS os checkboxes da Fase anterior estiverem marcados `[x]`. Nao existe "pular para a Fase 1" com a Fase 0 incompleta.
+**Status:** Documento vivo
+**Ultima revisao canonica:** 2026-05-11 (rodada 34)
+**Fase ativa real:** Release candidate / beta tecnica em hardening
 
----
+**Nota 2026-05-11 (rodada 34, branch `feat/sgdk-vram-residency-streaming-r14`):** hardening de CI/setup sem mudanca de maturidade: o `desktop-smoke` remoto bateu rate limit em `api.github.com` ao consultar a release oficial do SGDK sem token. O Runtime Setup agora usa `RDS_GITHUB_TOKEN`/`GITHUB_TOKEN` somente para GitHub API, e o workflow `desktop-e2e.yml` injeta o `github.token` read-only como `RDS_GITHUB_TOKEN`. Gates locais pos-correcao reexecutados e verdes, incluindo upstream oficial, `qa-rc` A-G fresco (`qa-rc-2026-05-11T21-20-39-556Z-*`), corpus SGDK `7/7` e Debug/Portable/MSI regenerados. A leitura continua: PR #2 e trilha de promocao; merge para `main` e `release:readiness:promotion` no destino ainda obrigatorios. SGDK segue **Experimental**; Fase D segue heuristica.
 
-## A ESTRATEGIA DO MVP (Minimum Viable Product)
+**Nota 2026-05-11 (rodada 33, branch `feat/sgdk-vram-residency-streaming-r14`):** PR #2 existe e o SHA `7bf026b` foi pushado com hotfix para `Desktop E2E` remoto (`live-stale` e overflow/interceptacao da topbar). A barra local pos-hotfix ficou verde (`npm test` 291, Rust baseline, upstream oficial, matriz desktop local 16/16, `qa-rc` A-G fresco `qa-rc-2026-05-11T18-14-46-427Z-*`, corpus SGDK `7/7`, Debug/Portable/MSI regenerados). GitHub Actions ficou verde em `push` e `pull_request` para `CI` e `Desktop E2E` (runs `25689348726`, `25689348725`, `25689350772`, `25689350771`). `release:readiness:promotion` foi reexecutado em worktree limpo e falhou apenas por governanca: branch muitos commits a frente de `origin/main`, PR ainda `draft/open`, sem merge para `main`. Isso mantem a leitura de PR pronto para promocao, nao MVP fechado. SGDK segue **Experimental**; Fase D segue heuristica.
 
-Para provar que o **RetroDev Studio** e viavel, nao vamos construir tudo de uma vez. O MVP deve provar **uma unica jornada de ponta a ponta**:
+**Nota 2026-05-11 (rodada 32, branch `feat/sgdk-vram-residency-streaming-r14`):** host Windows rechecado e barra tecnica local renovada: baseline frontend/Rust verde, corpus SGDK real `7/7`, upstream oficial `success=true`, `qa-rc` A-G fresco (`qa-rc-2026-05-11T11-53-47-951Z-*`), portable/release EXE e MSI canonicos gerados. `release:readiness:promotion` rodou em modo estrito e falhou apenas por governanca contra `origin/main` (201 commits a frente no snapshot pre-commit documental). Isso mantem a leitura de hardening e **nao** promove o MVP publicamente. SGDK segue **Experimental**; Fase D segue heuristica.
 
-1. Criar um projeto simples via UI (React).
-2. O Backend (Rust) ler essa cena (UGDM) e traduzir para codigo C (SGDK).
-3. Compilar uma ROM do Mega Drive (`.md`).
-4. Rodar a ROM no emulador embutido na mesma janela.
+**Nota 2026-05-10 (rodada 31, branch `feat/sgdk-vram-residency-streaming-r14`):** host Windows preparado e barra tecnica local revalidada: baseline frontend/Rust verde, corpus SGDK real `7/7`, upstream oficial `success=true`, `qa-rc` A-G fresco (`qa-rc-2026-05-10T19-50-53-457Z-*`), portable/release EXE e MSI canonicos gerados. Isso melhora a fotografia de hardening, mas **nao** promove o MVP publicamente: a branch continua +200 vs `origin/main` e a promocao institucional ainda depende de governanca Git/PR limpa. SGDK segue **Experimental**; Fase D segue heuristica.
 
-**Tudo que nao contribui para esta jornada NAO pertence ao MVP.**
+**Nota 2026-05-02 (rodada 29, branch `feat/sgdk-vram-residency-streaming-r14`):** sprint de maturidade de IDE reforcou o fluxo real de criador: viewport como mesa de composicao (mundo/janela/camera/regiao editavel), selecao densa com picker+solo, tilemap/brush junto ao stage, objeto -> Logic -> fonte com retorno para objeto e Art -> Scene com contexto preservado. O `qa-rc` final tem evidencias dedicadas `qa-rc-2026-05-02T05-14-22-572Z-*` e gates completos verdes. Mantem-se heuristico onde nao ha AST completo; SGDK **Experimental**; `support_status` inalterado.
 
----
+**Nota 2026-04-30 (rodada 28, branch `feat/sgdk-vram-residency-streaming-r14`):** picker denso evoluiu de lista para fluxo de selecao mais robusto com **filtro por tipo/contexto** e **spotlight** de isolamento visual no stage. Mantem-se heuristico onde nao ha AST completo; SGDK **Experimental**; `support_status` inalterado; gates verdes — ver `docs/06_AI_MEMORY_BANK.md` checkpoint rodada 28.
 
-## FASE 0: FUNDACAO (Setup Arquitetural) — CONCLUIDA
+**Nota 2026-04-30 (rodada 27, branch `feat/sgdk-vram-residency-streaming-r14`):** picker denso evoluiu para interacao de editor (teclado + preview de hover no viewport), e o retorno **Art -> Scene** passou a preservar contexto operacional (foco de entidade + reentrada em paint quando o alvo e tilemap). Continua **heuristico** onde nao ha AST completo; SGDK **Experimental**; `support_status` inalterado; gates verdes — ver `docs/06_AI_MEMORY_BANK.md` checkpoint rodada 27.
 
-**Objetivo:** Ter o repositorio base pronto para iniciar a programacao.
-**Pre-requisito:** Nenhum (e a primeira fase).
-**Definition of Done:** Rodar `npm run dev` e ver a janela Tauri abrir com o React em branco.
+**Nota 2026-04-30 (rodada 26, branch `feat/sgdk-vram-residency-streaming-r14`):** **Shift+clique** com pilha densa abre **lista de escolha** de entidades; faixa tilemap no viewport embute **paleta**; **Logic** com encadeamento **exec** por layout e quick actions extra por **papel importado**; **Inspector** com **multiplas** acoes **Abrir fonte** quando ha varios caminhos. Continua **heuristico** (Fase D, atalhos de graph); SGDK **Experimental**; `support_status` inalterado; gates verdes — ver `docs/06_AI_MEMORY_BANK.md` checkpoint rodada 26.
 
-- [x] Criacao do PRD Master e Documentacao Base (Arquitetura de Conhecimento).
-- [x] Especificacao do UGDM (docs/05_ARCHITECTURE_UGDM.md).
-- [x] Inicializacao do projeto **Tauri + React + TypeScript + Vite**.
-- [x] Configuracao do TailwindCSS para o Design System do Editor.
-- [x] Estruturacao das pastas do backend em Rust (`/src-tauri`).
-- [x] Setup do CI/CD basico ou linter (Cargo clippy, ESLint).
-- [x] `.gitignore` configurado para Rust/Node/build artifacts.
+**Nota 2026-04-30 (rodada 25, branch `feat/sgdk-vram-residency-streaming-r14`):** reforco da **vertical IDE** em cenas importadas: **Alt+clique** no viewport para selecionar entidades empilhadas; **duplo-clique** (tilemap -> pintura; entidade com grafo -> Logic); **faixa de estado** do fluxo tilemap no stage; **Node Graph** com inferencia importada visivel + abertura de **fonte principal**; **Art** com caminho de volta quando nao ha sprite. Continua **heuristico** onde nao ha AST (Fase D); SGDK **Experimental**; `support_status` inalterado; gates verdes — ver `docs/06_AI_MEMORY_BANK.md` checkpoint rodada 25.
 
-### Criterios de Saida da Fase 0:
-1. `npm run dev` abre a janela Tauri com React
-2. `cargo clippy` roda sem erros no backend Rust
-3. A estrutura de pastas corresponde ao `08_TREE_ARCHITECTURE.md`
-4. O script `check-tree` passa sem erros
+**Nota 2026-04-30 (rodada 24, branch `feat/sgdk-vram-residency-streaming-r14`):** acrescenta-se a faixa de **autoria no viewport** quando colisao/mundo excedem 320x224 (atalhos para centro colisao, modo colisao, pan livre vs clamp) e o papel importado **HUD / UI** no grafo Phase D + Hierarchy. O restante da rodada 23 (mundo/camera, cena densa, tilemap, objeto->no->fonte, Art Workspace) mantem-se como workflow **real** mas ainda parcialmente **heuristico** onde nao ha AST. Gates canonicos verdes no host (detalhe numerico em `docs/06_AI_MEMORY_BANK.md` checkpoint rodada 24). SGDK continua **Experimental**; `support_status` inalterado.
 
-> **PARE AQUI.** Nao inicie a Fase 1 ate que TODOS os itens acima estejam marcados `[x]`.
+**Nota 2026-04-29 (rodada 23):** apos fechar o blocker de OOM do `qa-rc`, a sprint elevou o editor para uso mais operacional em cenas importadas: viewport com mundo/camera e minimapa navegavel, acao explicita para normalizar cena densa, fluxo tilemap -> pintura direto por Hierarchy/Inspector, navegacao objeto->logica->objeto e abertura de fonte real no Inspector, alem da sincronizacao automatica do sprite selecionado no Art Workspace. SGDK continua **Experimental** e `support_status` permanece inalterado; ver `docs/06_CURRENT_WAVE_AI_BANK.md`.
+
+> **DIRETRIZ PARA AGENTES E HUMANOS**
+> Este roadmap e a matriz central de maturidade do produto.
+> Ele nao substitui o `Memory Bank` como diario operacional, mas passa a ser a referencia permanente para:
+> `fases`, `superficies visiveis`, `importadores`, `escopo do MVP` e `status de maturidade`.
 
 ---
 
-## FASE 1: O "CORE" MEGA DRIVE (MVP)
+## Como Ler
 
-**Objetivo:** Gerar um binario jogavel de Mega Drive a partir do Editor.
-**Pre-requisito:** Fase 0 100% completa.
-**Definition of Done:** Clicar "Build & Run" no editor e ver uma ROM rodando no emulador integrado.
+- Hierarquia de verdade:
+`docs/06_AI_MEMORY_BANK.md` -> `docs/03_ROADMAP_MVP.md` -> `docs/09_AGENT_DEV_MODE.md`.
+- `docs/06_CURRENT_WAVE_AI_BANK.md` guarda cronologia da wave, evidencias recentes e proximo passo.
+- Este arquivo guarda a fotografia permanente de escopo e maturidade do produto.
+- **Codificacao:** este roadmap e os docs canonicos associados sao mantidos em **UTF-8**; evitar texto com sequencias tipo `canÃ´nico` (mojibake de Latin-1 sobre UTF-8) ao editar.
 
-> **STATUS: BLOQUEADA** — Fase 0 ainda incompleta.
+### Eixos canonicos de leitura
 
-### Sprint 1.1: UI Base e Workspace — CONCLUIDA
-**DoD:** O layout principal renderiza com os 3 paineis visiveis.
-- [x] Layout principal do Editor (Docking system: Viewport no centro, Hierarchy na esquerda, Inspector na direita).
-- [x] Sistema de abas generico.
-- [x] Logger/Console integrado no rodape (para ver a saida do compilador C).
 
-### Sprint 1.2: UGDM to C (A Magica da Compilacao) — CONCLUIDA
-**DoD:** Dado um `.rds` com uma entidade simples, o backend gera `main.c` valido para SGDK.
-- [x] Backend Rust: Parser que le o `project.rds` e valida contra o schema UGDM (`05_ARCHITECTURE_UGDM.md`).
-- [x] Backend Rust: AST generator que converte UGDM validado em `main.c` usando funcoes SGDK (`SPR_init()`, `VDP_drawText()`, etc).
-- [x] Gerar arquivo de resources do SGDK (`resources.res`) a partir dos assets listados no JSON.
+| Eixo          | Valores                                             | Uso                                                           |
+| ------------- | --------------------------------------------------- | ------------------------------------------------------------- |
+| Escopo        | `Core MVP`, `Experimental`, `Fora do MVP/Q2`        | Diz se o item conta para o fechamento atual do produto ou nao |
+| Implementacao | `Ausente`, `Parcial`, `Em codigo`                   | Diz se a capacidade existe no repositorio hoje                |
+| Certificacao  | `Nenhuma`, `Local`, `Institucional`, `Em hardening` | Diz quanta prova real existe para o fluxo afetado             |
 
-### Sprint 1.3: Toolchain Orchestrator — CONCLUIDA
-**DoD:** O backend invoca GCC m68k e produz um arquivo `out.md` (ROM) a partir do codigo C gerado.
-- [x] Backend Rust: Funcao para invocar o compilador (GCC via SGDK pre-built ou via Docker container).
-- [x] Capturar stdout/stderr do compilador e enviar via IPC para o Console do React.
-- [x] Gerar o arquivo `out.md` (a ROM compilada) em uma pasta temporaria `/build`.
 
-### Sprint 1.4: Emulador Embutido (Live Viewport) — CONCLUIDA
-**DoD:** A ROM compilada roda dentro da janela do editor a 60fps.
-- [x] Integrar a biblioteca C do Libretro (Genesis Plus GX core) ao backend Rust via FFI.
-- [x] Enviar o Framebuffer do Rust para o Frontend (React) a 60 FPS usando um `<canvas>` (WebGPU/WebGL).
-- [x] Enviar inputs do teclado (React) para o backend (Rust) atualizar o estado do emulador.
+### Vocabulario travado
 
-### Sprint 1.5: Hardware Constraint Engine (V1) — CONCLUIDA
-**DoD:** O build falha se a cena exceder limites de hardware.
-- [x] Rust: Validar VRAM usage antes da compilacao (limite de 64KB).
-- [x] Rust: Validar contagem de sprites (limite de 80 por tela, 20 por scanline).
-- [x] UI: Painel de "Hardware Limits" que fica vermelho ao exceder limites.
+- `Em codigo`: existe no repositorio.
+- `Validado localmente`: ha prova local do fluxo afetado.
+- `Validado institucionalmente`: ha evidencia canonica da rodada/host institucional.
+- `Em hardening`: existe validacao real, mas ainda nao ha barra para chamar de fechado.
+- `Experimental`: superficie visivel, parcial ou fora do criterio de fechamento.
+- `Fora do MVP/Q2`: nao entra no fechamento atual, mesmo que exista algum codigo.
 
 ---
 
-## FASE 2: A ABSTRACAO (Adicionando o SNES) — CONCLUIDA
+## Estado Executivo Atual
 
-> **STATUS: CONCLUIDA** (2026-02-24)
-
-**Objetivo:** Provar que a engine e agnostica.
-**Pre-requisito:** Fase 1 100% completa. ✅
-
-- [x] Integrar PVSnesLib (SDK do SNES) — emitter gerador de main.c + resources.res PVSnesLib.
-- [x] Modificar o conversor UGDM para gerar codigo C do SNES a partir do *mesmo* arquivo JSON.
-- [x] Emulador Libretro core do Snes9x — target "snes" reconhecido; pipeline completo (modo simulado).
-- [x] Hardware Profiles adaptativos (o painel de limites muda de 80 para 128 sprites ao usar target "snes").
+- Data de referencia: `2026-05-11`.
+- Leitura honesta: o projeto ja tem produto real, mas ainda esta em `release candidate / beta tecnica em hardening`.
+- O core canonico `Projeto -> Editor -> Build -> ROM -> Emulacao` existe e ja foi provado para `Mega Drive` e `SNES`.
+- `Desktop E2E` remoto ficou verde no GitHub/Windows em `2026-04-16` (runs #143/#144, commit `c1a7870`) e foi revalidado no PR #2 em `2026-05-11` para o SHA `7bf026b` (`Desktop E2E` push `25689348725`, pull_request `25689350771`).
+- O gargalo principal agora e concluir a governanca Git/PR da branch candidata e rerodar a fotografia institucional no destino de promocao; MSI/portable foram revalidados localmente em `2026-05-11`.
+- Superficies `Experimental` reais continuam visiveis, mas nao podem contaminar a leitura do fechamento do MVP.
 
 ---
 
-## FASE 3: VISUAL LOGIC & RETROFX — CONCLUIDA
+## Bloqueadores Reais
 
-> **STATUS: CONCLUIDA** (2026-02-24)
-
-**Objetivo:** Transformar a ferramenta em uma Engine "No-Code / Low-Code".
-
-- [x] NodeGraph UI (Sistema de Blueprints arrastaveis) — aba "Logic" no Viewport, paleta de 8 tipos de nó, drag, conexão de portas, Delete para remover.
-- [x] RetroFX Designer (Editor visual de Parallax e Raster effects) — aba "RetroFX", sliders int, preview de scanlines, apply → Console.
-- [x] Conversor bidirecional (Node <-> C) — nodeCompiler.ts: compileGraphToC() + parseCToNodes(), suporte MD e SNES.
+- ~~`Desktop E2E` remoto ainda precisa ficar verde de forma repetivel no runner GitHub/Windows.~~ **Resolvido em 2026-04-16:** runs #143/#144 passaram com 16/16 cenarios.
+- A fotografia institucional de promocao precisa ser regenerada no destino de promocao (`main` apos merge). Na branch candidata, `release:readiness:promotion` passa os gates mas falha corretamente pela divergencia governada vs `origin/main`.
+- MSI/portable foram revalidados localmente em `2026-05-11`; precisam continuar sendo revalidados quando o fluxo `Menu inicial -> Criar Projeto` ou packaging mudar.
+- A trilha publica ainda precisa refletir o estado real da wave candidata; PR #2 esta `draft/open` e a branch `feat/sgdk-vram-residency-streaming-r14` continua muitos commits a frente de `origin/main`, bloqueio de governanca ate merge.
+- Readiness e onboarding publico devem ser sincronizados apos o merge para `main`.
 
 ---
 
-## FASE 4: CAMADA PRO (Engenharia Reversa) — CONCLUIDA
+## Fases
 
-> **STATUS: CONCLUIDA** (2026-02-25)
+A coluna `Certificacao` usa exclusivamente o vocabulario travado deste roadmap:
+`Nenhuma`, `Local`, `Institucional`, `Em hardening`.
 
-**Objetivo:** Ferramentas para ROM Hacking e Preservacao.
 
-- [x] ROM Patch Studio (BPS/IPS workflow) — create_ips, apply_ips, create_bps, apply_bps; CRC32 validation; UI com modo criar/aplicar e seletor de formato.
-- [x] Deep Profiler (Scanline, DMA heatmap) — análise estática de ROM MD: heatmaps de DMA e sprites por scanline, detecção de overflow, issues list; UI com barras visuais.
-- [x] Asset Extraction Pipeline — extração de tiles 4bpp + paletas 0BGR→RGB888; escrita PNG sem dependência externa (deflate store); UI com controles de max_tiles e palette_slot.
+| Fase                            | Certificacao  | Leitura objetiva                                                                          |
+| ------------------------------- | ------------- | ----------------------------------------------------------------------------------------- |
+| Fase 0 - Fundacao               | Institucional | Base desktop e estrutura canonica consolidadas                                            |
+| Fase 1 - Core Mega Drive        | Em hardening  | Build real, ROM real e emulacao real provados em Windows; hardening continua              |
+| Fase 2 - SNES                   | Em hardening  | Pipeline oficial e emulacao oficial provados em Windows; hardening continua               |
+| Fase 3 - Visual Logic & RetroFX | Local         | NodeGraph canonico e camada visual existem; superficies ainda heterogeneas                |
+| Fase 4 - Camada Pro             | Local         | Patching, profiling, reverse e utilitarios existem, mas nem tudo e criterio de fechamento |
+| Fase 5 - Release                | Em hardening  | Packaging, onboarding e readiness existem; falta repeticao institucional final            |
 
----
-
-## COMO ATUALIZAR ESTE DOCUMENTO (Para a IA)
-
-1. Ao final de uma sessao de trabalho, se uma tarefa foi concluida com sucesso e testada, a IA deve sugerir a atualizacao deste arquivo marcando o checkbox de `[ ]` para `[x]`.
-2. Nunca avance para a proxima tarefa sem ter garantido que a anterior funciona e esta documentada no `06_AI_MEMORY_BANK.md`.
-3. **Nunca desmarque um checkbox** `[x]` para `[ ]` sem aprovacao do usuario.
-4. **Nunca marque um checkbox** `[x]` sem que o codigo correspondente esteja commitado e funcional.
 
 ---
 
-## DETECTOR DE SCOPE CREEP (Para a IA)
+## Matriz de Superficies
 
-Se voce se pegar fazendo qualquer coisa da lista abaixo enquanto uma Fase anterior nao estiver completa, **PARE**:
+A matriz abaixo espelha as superficies perceptiveis do shell atual em `src/App.tsx`, `src/components/viewport/ViewportPanel.tsx` e `src/components/tools/ToolsPanel.tsx`.
+Capacidades nao visuais, importadores e itens legados continuam nas secoes proprias deste roadmap.
 
-- Escrevendo codigo de NodeGraph (Fase 3)
-- Implementando engenharia reversa ou ROM patching (Fase 4)
-- Integrando SNES/PVSnesLib (Fase 2)
-- Adicionando RetroFX ou raster effects (Fase 3)
-- Criando plugin marketplace ou sistema de plugins (Fase 4+)
-- Implementando features de "Team Collaboration" (Fase 4+)
-- Escrevendo qualquer codigo antes da Fase 0 estar completa
 
-**Em caso de duvida:** se a tarefa nao aparece como `[ ]` na Fase atual, ela nao deve ser feita agora.
+| Item                                   | Escopo       | Implementacao | Certificacao  | Evidencia atual                                                                                                                                                                            | Bloqueador para subir                                                                   | Conta para fechamento do MVP? |
+| -------------------------------------- | ------------ | ------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------- | ----------------------------- |
+| Menu inicial / Criacao de projeto      | Core MVP     | Em codigo     | Em hardening  | Wizard endurecido, `manual-qa-status.json` A/F passed e packaging rebuildado em `2026-04-15`                                                                                               | Revalidar MSI/portable e rerodar `qa-rc` sempre que onboarding/wizard mudar             | Sim                           |
+| Scene workspace                        | Core MVP     | Em codigo     | Em hardening  | `manual-qa-status.json` A-C/F passed; rodada 29 adiciona evidencias `G-scene-authoring`, `G-dense-solo-authoring` e `G-tilemap-authoring` para composicao, selecao densa e pintura no stage | Manter shell desktop, persistencia e `Desktop E2E` verdes apos mudancas sensiveis       | Sim                           |
+| Hierarchy panel                        | Core MVP     | Em codigo     | Local         | Painel dedicado no shell, integracao real em `App.tsx` e cobertura em `HierarchyPanel.test.tsx`                                                                                            | Falta prova institucional dedicada alem da rodada geral do editor                       | Sim                           |
+| Layer panel                            | Core MVP     | Em codigo     | Em hardening  | `manual-qa-status.json` A-B/F passed valida LayerPanel, visibilidade, renome e vinculacao                                                                                                  | Rerodar `qa-rc` sempre que fluxo de camadas mudar                                       | Sim                           |
+| Inspector panel                        | Core MVP     | Em codigo     | Em hardening  | `manual-qa-status.json` E/F passed prova selecao, edicao de `Pos X` e persistencia no reopen                                                                                               | Repetir prova institucional apos mudancas de selecao/props                              | Sim                           |
+| Game workspace / Build & Run           | Core MVP     | Em codigo     | Institucional | `manual-qa-status.json` D passed, `build-report.json` de `2026-04-15`, pipelines MD/SNES provados em Windows e `Desktop E2E` remoto verde em `2026-04-16` (runs #143/#144, 16/16 cenarios) | Rerodar readiness limpo e revalidar MSI/portable quando build/shell mudar               | Sim                           |
+| Explorer workspace                     | Core MVP     | Em codigo     | Local         | Workspace real na rail, lazy-load no shell e cobertura em `ExplorerWorkspace.test.tsx`                                                                                                     | Falta prova institucional dedicada no fluxo de projeto                                  | Nao                           |
+| Logic workspace / NodeGraph canonico   | Core MVP     | Em codigo     | Em hardening  | `NodeGraphEditor.test.tsx`, `nodeCompiler.test.ts`, emissao SGDK/SNES reais e prova `qa-rc` rodada 29 `G-logic-authoring` (objeto -> Logic -> fonte/retorno)                               | Refinamento continuo de UX do canvas; sem vender heuristica Phase D como AST completo  | Nao                           |
+| ArtStudio workspace                    | Experimental | Em codigo     | Em hardening  | `ArtStudioPanel.test.ts`, backend `photo2sgdk`, prova local de runtime em `build_orch.rs` e prova `qa-rc` rodada 29 `G-art-workspace` com ponte Scene -> Art -> Scene                       | Falta prova institucional `ArtStudio -> build -> runtime`; segue Experimental           | Nao                           |
+| RetroFX workspace                      | Experimental | Em codigo     | Local         | `RetroFXDesigner.test.tsx`, persistencia em `scene JSON` e emissao MD/SNES provadas localmente                                                                                             | Falta prova institucional `RetroFX -> build -> runtime`                                 | Nao                           |
+| Debug workspace (casca de ferramentas) | Core MVP     | Em codigo     | Local         | Workspace real na rail, alternancia `Tools/Inspector` no shell e cobertura base em `ToolsPanel.test.tsx`                                                                                   | Falta rodada institucional dedicada para a casca completa do workspace                  | Nao                           |
+| Paleta Contextual                      | Core MVP     | Em codigo     | Local         | Aba real do `Debug workspace`, descoberta guiada em `App.test.tsx` e suporte a autoria contextual                                                                                          | Falta prova institucional dedicada de authoring pelo painel                             | Nao                           |
+| Runtime Setup                          | Core MVP     | Em codigo     | Local         | Aba real do shell, `dependency_manager` ativo no Rust e testes de status/instalacao em `src-tauri/src/lib.rs`                                                                              | Falta rodada institucional dedicada em host Windows limpo apos alteracoes de toolchain  | Sim                           |
+| Patch Studio                           | Core MVP     | Em codigo     | Local         | `patch_studio.rs` real e roundtrip BPS coberto em `src-tauri/src/lib.rs`                                                                                                                   | Falta prova institucional dedicada quando UI/export/apply mudar                         | Nao                           |
+| Deep Profiler                          | Core MVP     | Em codigo     | Local         | `deep_profiler.rs` ativo, testes de profile e superficie visivel no `Debug workspace`                                                                                                      | Falta prova institucional dedicada em rodada de playtest/debug                          | Nao                           |
+| Asset Browser                          | Experimental | Em codigo     | Em hardening  | `manual-qa-status.json` E passed instancia asset real e preserva selecao no Inspector; rotulo `experimental` na UI alinhado ao roadmap (nao e drift de readiness); fluxo de duplo clique/lista continua coberto em testes de shell onde aplicavel | Manter rotulo e docs sincronizados; QA institucional quando o fluxo de assets mudar     | Nao                           |
+| Asset Extractor                        | Experimental | Em codigo     | Local         | Aba real do shell, IPC/backend existentes e cobertura base em `ToolsPanel.test.tsx`                                                                                                        | Falta prova ponta a ponta com ROM real e rodada institucional dedicada                  | Nao                           |
+| Memory Viewer                          | Experimental | Em codigo     | Local         | Aba real do shell, leitura de memoria via IPC e cobertura base em `ToolsPanel.test.tsx`                                                                                                    | Falta prova institucional com emulador ativo e ROM real                                 | Nao                           |
+| VRAM Viewer                            | Experimental | Em codigo     | Local         | Ferramenta real visivel no shell e integrada ao core ativo                                                                                                                                 | Falta rodada institucional dedicada com ROM/emulador reais                              | Nao                           |
+| Reverse Workspace                      | Experimental | Em codigo     | Local         | Aba real do shell, lazy-load provado em `ToolsPanel.test.tsx` e backend de leitura/disassembly/anotacoes existente                                                                         | Falta certificacao de trace/projecao e UX tecnica final                                 | Nao                           |
+
+
+---
+
+## Matriz de Importadores
+
+
+| Item             | Escopo         | Implementacao | Certificacao | Evidencia atual                                                                                                                                                                                                                         | Bloqueador para subir                                                                                                         | Conta para fechamento do MVP? |
+| ---------------- | -------------- | ------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| `sgdk`           | Experimental   | Em codigo     | Em hardening | Fase E provada: desktop E2E `qa-rc` A-G verde (import -> colisao -> persistir -> reabrir -> Build & Run -> ROM `SEGA` verificada). Rodada 19: Scene/Hierarchy/Inspector/Tools passaram a compartilhar contexto de cena/importacao e decisao de instancia auditavel; o gate oficial Windows voltou a fechar no comando canonico mesmo quando `%OS%` nao vem herdado, porque `validate-upstream-windows.ps1` e o launcher do make SGDK em `build_orch.rs` ficaram mais robustos. Preflight, fixture `sgdk_e2e_donor`, smoke idempotente, Fases B-E. **Rodada 14:** caminho MD ganhou analise de residencia/streaming (`analysis_mode`, `asset_total`, `resident`, `streamable`, `dma/frame`) para SGDK gerenciado; matriz de corpus ampliada para estresse (`BLAZE_ENGINE`) com 6 fluxos base + 1 blocker legitimo auditavel. | Fase D parcial (heuristica sem AST); criterio explicito para sair de **Experimental** continua em `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md` (sem promocao automatica de `support_status`) | Nao                           |
+| `mugen`          | Experimental   | Em codigo     | Local        | `import_mugen_project`, wizard dedicado e smoke idempotente em `smoke_import_mugen_project_is_idempotent`                                                                                                                               | Falta prova institucional alem da rodada local                                                                                | Nao                           |
+| `ikemen_go`      | Experimental   | Em codigo     | Local        | Perfil proprio no registry, roteado pelo adapter MUGEN, smoke dedicado em `smoke_import_ikemen_go_reuses_mugen_adapter_without_losing_assets`                                                                                           | Falta evidencia institucional dedicada e validacao de metadata propria                                                        | Nao                           |
+| `godot`          | Experimental   | Em codigo     | Local        | `import_godot_project`, smoke idempotente em `smoke_import_godot_project_is_idempotent`                                                                                                                                                 | Falta prova institucional alem da rodada local                                                                                | Nao                           |
+| `construct`      | Experimental   | Em codigo     | Local        | Registry `importable: true`, `import_construct_project` e smoke idempotente em `smoke_import_construct_project_builds_scene_and_is_idempotent`                                                                                          | Falta prova institucional dedicada e QA manual com projetos Construct reais                                                   | Nao                           |
+| `rpg_maker`      | Experimental   | Em codigo     | Local        | Registry `importable: true`, `import_rpg_maker_project` e smoke idempotente em `smoke_import_rpg_maker_project_builds_scene_and_is_idempotent`                                                                                          | Falta prova institucional dedicada e QA manual com projetos RPG Maker reais                                                   | Nao                           |
+| `openbor`        | Experimental   | Em codigo     | Local        | Registry `importable: true`, `import_openbor_project` e smoke idempotente em `smoke_import_openbor_project_builds_scene_and_is_idempotent`                                                                                              | Falta prova institucional dedicada e QA manual com projetos OpenBOR reais                                                     | Nao                           |
+| `gamemaker`      | Fora do MVP/Q2 | Parcial       | Nenhuma      | Registry com `support_status: Parcial`, ainda nao importavel                                                                                                                                                                            | Falta adapter canonico importavel e escopo aprovado                                                                           | Nao                           |
+| `unity_2d`       | Fora do MVP/Q2 | Ausente       | Nenhuma      | Presente apenas como perfil nao suportado no registry                                                                                                                                                                                   | Falta adapter e escopo aprovado                                                                                               | Nao                           |
+| `paper2d_bridge` | Fora do MVP/Q2 | Ausente       | Nenhuma      | Presente apenas como perfil nao suportado no registry                                                                                                                                                                                   | Falta adapter e escopo aprovado                                                                                               | Nao                           |
+
+
+---
+
+## Nao Confundir
+
+- Checklist operacional nao e a mesma coisa que evidencia institucional.
+- `Em codigo` nao significa `validado`.
+- `Validado localmente` nao significa `pronto para promocao`.
+- `Experimental` nao significa `inexistente`; significa `nao elegivel para claim plena`.
+- `Fora do MVP/Q2` nao significa `nunca`; significa `nao conta para o fechamento atual`.
+- Build por target, importadores, legados e updater continuam relevantes, mas nao entram como linha da matriz de superficies se nao forem perceptiveis como superficie propria no shell.
+
+---
+
+## Roadmap Operacional
+
+### Prioridades imediatas
+
+1. ~~Fechar o `Desktop E2E` remoto no GitHub/Windows e manter o badge honesto.~~ **Resolvido em 2026-04-16.**
+2. Regenerar `release-readiness:promotion` em worktree limpo com os artefatos e QA corretos da propria rodada, incluindo o `Desktop E2E` verde.
+3. Fechar o gap de governanca com `origin/main` (merge do branch `feat/desktop-e2e-workflow`).
+4. Revalidar MSI/portable sempre que onboarding, shell ou wizard mudarem.
+5. Continuar o hardening do shell e do primeiro sucesso sem abrir frentes novas antes da hora.
+6. Manter todas as superficies `Experimental` claramente fora da leitura de fechamento do MVP ate existir prova correspondente.
+
+### Fora do MVP/Q2
+
+- Docking livre completo como default
+- Auto-updater final de producao
+- Conversao ampla de gameplay para MUGEN
+- Promocao institucional de adapters ainda sem prova suficiente
+- Expansoes visuais que concorram com a estabilizacao do fluxo core
+
+---
+
+## Iniciativa de Hardening de Importadores (Sessoes A-E)
+
+**Contexto:** pedido operacional de `2026-04-18` para elevar os 7 importadores preservados (`sgdk`, `mugen`, `ikemen_go`, `godot`, `construct`, `rpg_maker`, `openbor`) de `Experimental` para `Completo e totalmente funcional resiliente a diferentes tipos de projetos`. Em vez de flipar labels, o trabalho foi segmentado em 5 sessoes com evidencia real a cada passo, aderente a governanca deste roadmap (`Experimental nao significa inexistente; significa nao elegivel para claim plena`).
+
+### Sessao A - Fundacao transversal (concluida em 2026-04-18)
+
+Objetivo: estabelecer o minimo canonico para que qualquer importador possa ter evidencia institucional repetivel.
+
+
+| Entrega                                                                                                                                                                                                                                | Status    | Evidencia                                               |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------- | ------------------------------------------------------- |
+| 7 fixtures minimas no arsenal de testes (`write_sgdk_fixture`, `write_mugen_fixture`, `write_godot_fixture`, `write_construct_fixture`, `write_rpg_maker_fixture`, `write_openbor_fixture` + compartilhamento do MUGEN para ikemen_go) | Concluido | `src-tauri/src/core/project_mgr.rs` mod `tests`         |
+| 7 smoke tests de idempotencia (re-import nao duplica scenes/assets)                                                                                                                                                                    | Concluido | `smoke_import_`* (7 testes, todos verdes)               |
+| Helper `count_files_in` para assertions de idempotencia                                                                                                                                                                                | Concluido | `src-tauri/src/core/project_mgr.rs` mod `tests`         |
+| Correcao de 4 initializers faltando `cells` em `TilemapComponent`                                                                                                                                                                      | Concluido | `ast_generator.rs:2367`, `project_mgr.rs:949,1752,5877` |
+| Normalizacao da coluna `Certificacao` em 4 valores canonicos                                                                                                                                                                           | Concluido | Este arquivo (Matriz de Superficies/Importadores)       |
+
+
+**Gate local:** 262 cargo test --lib verdes (incluindo os 7 smoke novos), 232 vitest verdes, clippy clean, Vite build OK.
+**Gate institucional:** adiado: `tauri-driver` ausente no host; `cargo install tauri-driver --locked` continua como pre-requisito para `qa-rc`/`e2e-tauri-build-run`.
+
+### Sessao B - Hardening por importador, camada 1 (concluida em 2026-04-18)
+
+Objetivo: cobrir cenarios minimos de resiliencia por importador: diretorio donor vazio, artefato-raiz ausente e leitura tolerante a BOM/CRLF/caminhos Unicode em host Windows.
+
+
+| Entrega                                                                                                                                                | Status    | Evidencia                                       |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------ | --------- | ----------------------------------------------- |
+| 7 testes `*_handles_empty_project_dir` (sgdk, mugen, ikemen_go via dispatcher, godot, construct, rpg_maker, openbor)                                   | Concluido | `src-tauri/src/core/project_mgr.rs` mod `tests` |
+| 7 testes `*_handles_missing_root_artifact` (donor tem arquivos auxiliares mas falta manifesto/ponto-de-entrada canonico)                               | Concluido | `src-tauri/src/core/project_mgr.rs` mod `tests` |
+| 4 testes `*_handles_lossy_text_or_unicode_paths` (godot, construct, rpg_maker, openbor) cobrem BOM UTF-8, CRLF e nomes Unicode NFC plausiveis em NTFS  | Concluido | `src-tauri/src/core/project_mgr.rs` mod `tests` |
+| Helpers `list_project_artifact_files` + `assert_no_import_side_effects` provam que falha nao escreve em `scenes/` ou `assets/`                         | Concluido | `src-tauri/src/core/project_mgr.rs` mod `tests` |
+| ikemen_go validado via `import_external_project("ikemen_go", ...)` preservando `profile.id == "ikemen_go"` e `source_engine == "ikemen_go"` apos falha | Concluido | `ikemen_go_handles_*_via_dispatcher`            |
+
+
+**Gate local:** `cargo test --lib --test-threads=1` 287/0/3, `cargo clippy -- -D warnings` clean, 232 vitest verde, `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK.
+**Escopo respeitado:** nenhum importador foi promovido; `support_status` do registry permanece `Experimental`/`Parcial` exatamente como estava. Non-UTF8 raw filename (nao-Windows) nao foi incluido nesta sessao por nao ser portavel em NTFS; fica opcional sob `#[cfg(unix)]` em futuras rodadas.
+
+### Sessao C - Hardening por importador, camada 2 (pendente)
+
+Objetivo: cobrir variantes reais de projetos encontradas no selvagem.
+
+- `sgdk`: projeto com overlay parcial, projeto sem `rescomp.txt`, projeto multi-scene
+- `mugen`/`ikemen_go`: charset `.def` com caracteres acentuados, stage com BG/ANIM multi-frame, DEF faltando assets
+- `godot`: projetos Godot 3 (ausencia de `[gd_scene format=3]`), tscn com recursos binarios aninhados, project.godot mal formado
+- `construct`: `.c3p` zipado vs `.c3proj` descompactado, plugins customizados nao-Sprite
+- `rpg_maker`: MV vs MZ (`.rmmz` vs `.rpgproject`), tilesets com autotile, MapInfos encadeado
+- `openbor`: levels com herdado `@import`, chars com frame-offset negativo, stages sem `music`
+
+### Sessao D - Unificacao de `ImportReport` e degradacao graciosa (pendente)
+
+Objetivo: remover assimetria entre `import_sgdk_project` (retorna `Scene` direto) e os demais (`ExternalImportReport`/`MugenImportReport`). Todos os importadores devem expor o mesmo contrato de `ImportReport { primary_scene, imported_scenes, skipped_sources, warnings }`.
+
+- Refatorar `import_sgdk_project` para retornar `SgdkImportReport`
+- Introduzir trait `ImportAdapter` com metodo unificado
+- Promover `skipped_sources` a cidadao primeiro: cada skip precisa ser rastreavel com motivo (`ParseError`, `UnsupportedVariant`, `MissingAsset`)
+- Adicionar log persistido por import em `<projeto>/.rds/import-log-<timestamp>.jsonl`
+
+### Sessao E - QA institucional e promocao controlada (pendente)
+
+Objetivo: transformar evidencia local em evidencia institucional, importador por importador.
+
+- Criar `scripts/qa-import-<target>.ps1` por importador com projeto real anonimizado
+- Rodar em host Windows limpo com `tauri-driver` instalado
+- Atualizar `manual-qa-status.json` com resultado por importador
+- Promover somente os importadores com prova institucional repetivel de `Experimental` para o proximo nivel
+- Nunca flipar label sem evidencia correspondente
+
+### Barra de promocao
+
+Um importador **so** pode sair de `Experimental` para uma categoria superior (`Importador Completo`) quando satisfazer, em ordem:
+
+1. Smoke tests canonicos (Sessao A)
+2. Testes de resiliencia minima (Sessao B)
+3. Testes de variantes reais (Sessao C)
+4. `ImportReport` unificado e log persistido (Sessao D)
+5. Evidencia institucional em host Windows limpo (Sessao E)
+
+Saltar etapas e explicitamente proibido por governanca deste roadmap.
+
+---
+
+## Programa SGDK Real-World Import
+
+**Contexto:** pedido operacional de `2026-04-18` para levar o importador SGDK de "gera recursos e cena base" para "materializa projeto canonico editavel, preserva rastreabilidade ao doador SGDK, recompila ROM funcional e permite evolucao visual/logica no editor". O programa e SGDK-first e **nao** faz round-trip textual do C legado: migra para o modelo canonico do RetroDevStudio.
+
+Nenhum importador e promovido por esta frente; a barra de promocao continua sendo a "Barra de promocao" acima. O programa existe para encerrar, por classe de projeto, o gap entre importar e `recompilar ROM funcional editavel`.
+
+### Referencias de classe (nao corpus obrigatorio de CI)
+
+Os projetos usados como referencia entram apenas como classes, nao como fixtures promovidas:
+
+- plataforma (estudo)
+- platformer engine
+- run and gun
+- luta / engine
+- shmup
+- plataforma (extra)
+
+### Matriz de compatibilidade SGDK por capacidade
+
+Matriz de capacidades avaliada por classe de projeto, sem claim inflado.
+
+
+| Capacidade                                                                                                     | Fase dona | Certificacao atual                   | Observacao                                                                                                                                                                                                                                                                                                                                                                                               |
+| -------------------------------------------------------------------------------------------------------------- | --------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Descoberta de projeto (index de manifests/roots/recursos)                                                      | A         | Em codigo, Local                     | `scan_legacy_sgdk_project` + `find_sgdk_manifest_paths` existem                                                                                                                                                                                                                                                                                                                                          |
+| Ingestao de assets (SPRITE/IMAGE/TILESET/MAP/WAV/XGM)                                                          | A         | Em codigo, Local                     | `import_sgdk_resources_into_scene` com idempotencia validada                                                                                                                                                                                                                                                                                                                                             |
+| `SgdkImportReport` rico (primary_scene, imported_scenes, skipped_sources, warnings, fallbacks, source_summary) | A         | Em codigo, Local                     | Retorna relatorio estruturado e paridade com demais adapters                                                                                                                                                                                                                                                                                                                                             |
+| Manifesto de import `.rds/imports/sgdk/*.json`                                                                 | A         | Em codigo, Local                     | Fingerprint do doador + mapeamento recurso->asset gravado                                                                                                                                                                                                                                                                                                                                                |
+| Sintese de cenas (multiplas cenas / niveis)                                                                    | B         | Local (2026-04-18 rodada 4)          | Cada tilemap anchor IMAGE/TILESET/TILEMAP/MAP vira cena propria em `scenes/<slug>.json`; primaria mantem sprites+audio+camera em `scenes/main.json`                                                                                                                                                                                                                                                      |
+| Tilemap real com `cells[]` a partir do doador                                                                  | B         | Local (2026-04-18 rodada 4)          | `extract_sgdk_tilemap_cells` faz dedupe 8x8 via HashMap<[u8;256], u32> com fallback explicito preservado quando PNG indisponivel/<8x8/totalmente transparente                                                                                                                                                                                                                                            |
+| `SceneLayer` coerente (cenario, gameplay, HUD, parallax)                                                       | B         | Local (2026-04-18 rodada 4)          | `derive_sgdk_scene_layers` emite `layer_background` (tile, depth 0), `layer_gameplay` (sprite, depth 10), `layer_audio_objects` (object, depth 20, locked=true); HUD/parallax nao inventados                                                                                                                                                                                                             |
+| Animacoes editaveis em `SpriteComponent.animations`                                                            | C         | Local (2026-04-19 rodada 5)          | `derive_sgdk_sprite_sheet_from_rescomp_png` materializa animacoes a partir da grelha rescomp (SGDK `bin/rescomp.txt` SPRITE); timer SGDK=0 gera aviso + fps=8 so para preview no editor; fallback explicito se PNG/parametros nao alinharem                                                                                                                                                              |
+| Colisao canonica (`CollisionMap`)                                                                              | C         | Local (2026-04-19 rodada 5)          | `derive_sgdk_scene_collision_map_from_tile_cells`: solido onde indice de tile != 0 (indice 0 = tile totalmente transparente do dedupe 8x8); mensagem rastreavel no report/ledger; cenas secundarias com cells recebem o mesmo                                                                                                                                                                            |
+| Logica importavel (`graph_ref` + `logic_hints` + `external_source_ref`)                                        | D         | Parcial, Local (2026-04-19 rodada 8) | Rodada 7 + `phase_d.cross_unit_function_refs` / `entity_spr_local_signal_hits`; stencil shmup/run-and-gun em secundario quando SPR_* + identificador do recurso na mesma linha; `deserializeNodeGraph` alinha portos ao editor e filtra arestas quebradas; testes `sgdk_phase_d_platformer_horizontal_scan_fixture_class`, `sgdk_phase_d_resolve_prefabs_hydrates_secondary_graph_ref`; sem AST completo |
+| Build funcional (import -> salvar -> reabrir -> ROM funcional) | E | Local (2026-04-21 rodada 10) | Preflight verde no host; `qa-rc` A-G reprovado e recuperado no mesmo host; fix canonico no runner para forcar build debug via Tauri CLI em `qa-rc` (evita bootstrap `localhost` do direct-cargo); cadeia SGDK confirmada com evidencias (`manual-qa-status.json` + screenshot bloco G). Sem promocao institucional e sem mudar `support_status` |
+| Reimport controlado / idempotente                                                                              | A         | Em codigo, Local                     | Smoke idempotente cobre assets/scene; manifesto agora cobre ledger                                                                                                                                                                                                                                                                                                                                       |
+
+### Rodada 12 - Corpus real SGDK (matriz por titulo)
+
+Checklist operacional para sair de fixture/E2E controlado e registrar compatibilidade por projeto real (import -> report/ledger -> cenas -> tilemaps -> animacoes -> collision map -> `graph_ref` -> salvar/reabrir -> build/ROM), com resultado **Passou** / **Parcial** / **Falhou** e blocker concreto.
+
+- **Documento vivo:** `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md` (seis pastas sob `F:\Projects\MegaDrive_DEV\SGDK_Engines`, existencia verificada no host desta rodada).
+- **Gates do repositorio (rodada 12):** `check:tree`, `tsc --noEmit`, `npm test`, `cargo clippy -D warnings`, `cargo test --lib --test-threads=1` verdes; suite `cargo test sgdk_matrix_corpus_ ... --ignored` com contrato `stamp_imported_sgdk_metadata` + `source_kind`.
+
+### Rodada 13 - Resolver de raiz SGDK e matriz 6/6
+
+- **Codigo:** `resolve_sgdk_import_root` em `src-tauri/src/core/project_mgr.rs` (BFS limitada, candidatos explicitos, sem mascarar doador invalido como raiz direta).
+- **Matriz:** seis titulos com fluxo parcial completo ate ROM `SEGA` no host de referencia; linha 2 documentada com `mddev_reference_redirect`.
+- **Gates (rodada 13, host local):** `check:tree`, `lint`, `tsc --noEmit`, `npm test`, `cargo clippy -D warnings`, `cargo test --lib --test-threads=1`, `cargo test sgdk_matrix_corpus_ ... --ignored --test-threads=1` (6/6), `npm run preflight:sgdk-e2e`, `npm run test:e2e:desktop:qa-rc`.
+- **Estado honesto:** SGDK permanece **Experimental**; criterio de suporte completo na matriz ainda exige leitura governada por colunas (ex.: Collision **Parcial** em varias linhas) e decisao explicita futura sobre `support_status`.
+
+### Rodada 14 - VRAM residency / streaming (Mega Drive)
+
+- **Codigo canonico:** `md_profile.rs` agora separa volume total de assets e conjunto residente simultaneo, com modo `native_static` vs `sgdk_managed`.
+- **Regra aplicada:** em SGDK gerenciado, excesso apenas no total streamavel não bloqueia sozinho; overflow de residente continua fatal; warnings distinguem `total`, `resident`, `streamable` e `dma/frame`.
+- **Auditoria de build:** `build_orch.rs` emite linha `MD VRAM analysis` no log para rastreabilidade de QA.
+- **Corpus:** `Metal Slug` e `Mortal Kombat` passam com ROM `SEGA` e budget auditável; `BLAZE_ENGINE` adicionado como estresse com bloqueador fatal legítimo (sem promoção de status).
+- **Estado honesto:** SGDK segue **Experimental**.
+
+### Rodada 15 - Breakdown de residência VRAM (Mega Drive / QA)
+
+- **Modelo:** `HwStatus` e `md_profile` expõem composição por categoria (`sprite_resident_bytes`, `tilemap_resident_bytes`, `hud_resident_bytes`, `streamable_sprite_bytes`, `animated_swap_bytes`, `dma_frame_bytes`) mais contadores `banks`/`cells` da heurística `sgdk_managed`.
+- **Build / validação:** logs e avisos `[SGDK Gerenciado]` incluem os mesmos eixos para responder "o que está residente e por quê" sem alterar a regra de fatalidade (overflow residente real, sprite overflow real).
+- **UI:** `HardwareLimitsPanel` mostra linha compacta de QA (somente target Mega Drive).
+- **Estado honesto:** SGDK segue **Experimental**; sem mudança de `support_status`.
+
+### Fases
+
+- **Fase A - Importador estrutural.** Projeto SGDK grande abre sem colapsar em cena opaca; gera manifesto `.rds/imports/sgdk/*.json`; reimport idempotente e auditavel; `SgdkImportReport` rico.
+- **Fase B - Cena e assets. (concluida em 2026-04-18 rodada 4.)** Tilemaps relevantes viram `cells[]` (dedupe 8x8, indices 1-based, fallback explicito preservado quando reconstrucao impossivel); multiplas cenas e `SceneLayer` coerentes aparecem na Hierarchy via `listScenes`/`switchScene` (sem mudanca de frontend). Evidencia: inventario `scenes[]` por role no ledger SGDK (introduzido como `sgdk-import/v2` na rodada 4; o repo hoje persiste `sgdk-import/v4` como superset retrocompativel com `phase_c` + `phase_d`); `SgdkImportReport` ganhou `primary_scene_path` + `additional_scenes`; +6 testes Fase B (`sgdk_phase_b_import_populates_tilemap_cells_from_png`, `*_builds_multi_scene_when_multiple_tilemap_anchors_exist`, `*_derives_scene_layers_grouping_entities_coherently`, `*_keeps_explicit_fallback_when_tilemap_source_is_too_small`, `*_ledger_persists_scene_inventory_and_bumps_schema_version`, `*_reimport_multi_scene_is_idempotent_and_does_not_duplicate_scene_files`); teste existente `*_exposes_rich_fields_and_persists_ledger` reescrito para assertar ausencia do fallback "cells[] vazio" quando PNG permite reconstrucao. Gates locais da rodada 4: `cargo test --lib` 295/0/3 (+8), `cargo clippy -- -D warnings` clean, 232 vitest, check:tree/lint/tsc OK. SGDK continua `Experimental`; promocao continua bloqueada por Fases C+D+E.
+- **Fase C - Animacao e colisao. (concluida no caminho canonico + fixtures em 2026-04-19 rodada 5.)** `SpriteComponent.animations` derivados da folha PNG alinhada ao SPRITE rescomp; `CollisionMap` na `Scene` quando `cells[]` existe; ledger `sgdk-import/v4` inclui bloco `phase_c`; reimport idempotente coberto (`sgdk_phase_c_reimport_preserves_sprite_animations_and_collision_map`). Barra (classe real plataforma+luta) continua em QA manual fora do CI.
+- **Fase D - Logica jogavel. (parcial; hardening multi-ficheiro + auditoria TU em 2026-04-19 rodada 8.)** Rodada 7 + evidencia `func(` entre ficheiros escaneados (`cross_unit_function_refs`) e toques SPR locais por recurso (`entity_spr_local_signal_hits`); materializacao de classe alta tambem em sprite secundario quando ha prova textual SPR+identificador; editor hidrata `graph_ref` com portos canonicos; testes `sgdk_phase_d_platformer_horizontal_scan_fixture_class`, `sgdk_phase_d_resolve_prefabs_hydrates_secondary_graph_ref` e multificheiro RG estendido; sem AST completo.
+- **Fase E - Build funcional. (provada localmente no host em 2026-04-21 e rerodada em 2026-04-23 pos `d24cf14`.)** Preflight explicito de `toolchains/sgdk`, `tauri-driver` e msedgedriver segue ativo; `qa-rc` A-G foi reprovado e recuperado no host real, com correcao canonica no runner para forcar build debug via Tauri CLI no cenario `qa-rc` (evita bootstrap `localhost` observado com direct-cargo). Mantem-se sem claim institucional: exige repeticao em host limpo/CI e SGDK segue `Experimental`.
+
+### Gates por rodada
+
+Adicionais aos gates gerais deste roadmap, aplicados sempre que o programa avancar:
+
+- `npm run check:tree`
+- `npm run lint`
+- `npx tsc --noEmit`
+- `npm test`
+- `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --test-threads=1`
+- `npm run preflight:sgdk-e2e`
+- `npm run test:e2e:desktop:qa-rc`
+
+### Nao confundir
+
+- Esta frente **nao** e reescrita textual do C doador; o objetivo e migrar para o modelo canonico.
+- Compatibilidade "totalmente funcional" se obtem por classe de projeto, nao em um salto unico.
+- Os seis titulos do corpus real estao na matriz `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md`; o CI continua protegido por fixtures minimas e smoke ate a matriz fechar com **Passou** repetivel por titulo.
+
+---
+
+## Regra de Atualizacao
+
+- Atualize este roadmap quando mudar o estado real de uma fase, superficie visivel ou importador.
+- Nova superficie visivel no produto exige linha nova na `Matriz de Superficies` antes de qualquer claim de entrega.
+- Novo importador no registry exige linha nova na `Matriz de Importadores` antes de qualquer claim de entrega.
+- Um item nao pode continuar descrito como `planejamento` se o codigo o marcar como `importable: true`.
+- Um item nao pode sair de `Experimental` sem evidencia institucional e sem alinhamento de UI, docs e backend.
+- `README.md` nao deve manter claims de readiness mais especificas ou mais otimistas do que este arquivo.

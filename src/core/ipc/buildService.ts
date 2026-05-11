@@ -14,6 +14,21 @@ export interface BuildResult {
   log: BuildLogLine[];
 }
 
+export interface MultiTargetBuildEntry {
+  target: string;
+  ok: boolean;
+  rom_path: string;
+  rom_size_bytes: number;
+  warnings: string[];
+  errors: string[];
+  log: BuildLogLine[];
+}
+
+export interface MultiTargetBuildResult {
+  ok: boolean;
+  results: MultiTargetBuildEntry[];
+}
+
 export interface ValidationResult {
   ok: boolean;
   errors: string[];
@@ -58,9 +73,7 @@ export async function buildProject(
   onLog: (line: BuildLogLine) => void
 ): Promise<BuildResult> {
   // Escuta eventos de streaming antes de invocar o comando
-  let unlisten: UnlistenFn | null = null;
-
-  unlisten = await listen<BuildLogLine>("build://log", (event) => {
+  const unlisten: UnlistenFn = await listen<BuildLogLine>("build://log", (event) => {
     onLog(event.payload);
   });
 
@@ -68,6 +81,22 @@ export async function buildProject(
     const result = await invoke<BuildResult>("build_project", { projectDir });
     return result;
   } finally {
-    if (unlisten) unlisten();
+    unlisten();
+  }
+}
+
+export async function buildMultiTarget(
+  projectDir: string,
+  targets: string[],
+  onLog: (line: BuildLogLine) => void
+): Promise<MultiTargetBuildResult> {
+  const unlisten: UnlistenFn = await listen<BuildLogLine>("build://log", (event) => {
+    onLog(event.payload);
+  });
+
+  try {
+    return await invoke<MultiTargetBuildResult>("build_multi_target", { projectDir, targets });
+  } finally {
+    unlisten();
   }
 }

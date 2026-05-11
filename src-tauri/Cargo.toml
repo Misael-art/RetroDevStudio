@@ -13,8 +13,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+base64 = "0.22"
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+libloading = "0.8"
+image = { version = "0.25", default-features = false, features = ["bmp", "png", "pnm", "jpeg", "gif", "webp"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+sevenz-rust2 = { version = "0.16", features = ["util"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }

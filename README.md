@@ -1,137 +1,135 @@
 # RetroDev Studio
 
-> **A plataforma definitiva para desenvolvimento, preservacao e engenharia reversa de jogos 16-bits.**
+> Plataforma desktop para desenvolvimento, preservacao e engenharia reversa de jogos 16-bit, com foco atual em Mega Drive e SNES.
 
-![Versao](https://img.shields.io/badge/Versao-4.0_Blueprint-blue.svg)
-![Status](https://img.shields.io/badge/Status-Fase_0_(Fundacao)-orange.svg)
+![Status](https://img.shields.io/badge/Status-Beta_Tecnica_%2F_Hardening-orange.svg)
+![Targets](https://img.shields.io/badge/Targets-Mega_Drive_%2B_SNES-blue.svg)
+![Desktop](https://img.shields.io/badge/Desktop-Tauri_2-0ea5e9.svg)
+![Pipeline](https://img.shields.io/badge/Pipeline-Build_%E2%86%92_ROM_%E2%86%92_Emulacao-green.svg)
 ![Licenca](https://img.shields.io/badge/Licenca-Proprietaria-red.svg)
-![AI Ready](https://img.shields.io/badge/AI_Agents-Supported-brightgreen.svg)
 
 ---
 
-## Sobre o Projeto
+## Estado Atual
 
-O **RetroDev Studio** e uma infraestrutura completa para desenvolvimento retro moderno. A missao e democratizar a criacao de jogos para consoles de 16-bits (Mega Drive, SNES), trazendo a produtividade de engines modernas (Unity, Godot) para as restricoes do hardware original.
+- Fase ativa real: `release candidate / beta tecnica em hardening`.
+- O foco atual nao e abrir escopo novo; e manter o fluxo canonico `Build -> ROM -> Emulacao` repetivel e documentado com honestidade.
+- O estado operacional canonico fica em [docs/06_AI_MEMORY_BANK.md](./docs/06_AI_MEMORY_BANK.md).
+- A matriz permanente de fases, superficies e importadores fica em [docs/03_ROADMAP_MVP.md](./docs/03_ROADMAP_MVP.md).
+- As regras de processo e sincronizacao documental ficam em [docs/09_AGENT_DEV_MODE.md](./docs/09_AGENT_DEV_MODE.md).
 
-**Os 4 Pilares:**
-
-1. **Criacao Moderna:** Editor visual, Nodes logicos e Hot-Reload.
-2. **Precisao de Hardware:** Constraint Engine que impede voce de quebrar os limites reais do console.
-3. **Engenharia Reversa:** Ferramentas limpas para estudo e modificacao de jogos classicos.
-4. **Compliance Legal:** Workflow baseado em patches (sem distribuicao de ROMs comerciais).
-
----
-
-## Arquitetura de Alto Nivel
-
-```mermaid
-graph TD
-    subgraph CAMADA CORE - Criacao
-        E[Editor Runtime] --> U[Universal Game Data Model - UGDM]
-        U --> RRC[Retro Runtime Core]
-    end
-
-    subgraph HARDWARE ENGINES
-        RRC --> HC[Hardware Constraint Engine]
-        RRC --> HP[Hardware Profile Engine]
-    end
-
-    subgraph TARGETS
-        HP --> MD[Mega Drive / Genesis - SGDK]
-        HP --> SNES[SNES - PVSnesLib]
-    end
-
-    HC -.->|Valida limites de VRAM, DMA, CPU| E
-```
-
-**Componentes Chave:**
-
-- **UGDM (Universal Game Data Model):** Representacao agnostica do jogo em JSON. Nao pertence a nenhum console — pertence a matematica do RetroDev.
-- **Hardware Constraint Engine:** Se voce colocar 81 sprites na tela do Mega Drive (que so suporta 80), o editor avisa em tempo real.
-- **Hardware Profile Engine:** Traduz o UGDM agnostico para o codigo nativo de cada console.
+Se este `README` divergir do estado real, prevalecem:
+`docs/06_AI_MEMORY_BANK.md` -> `docs/03_ROADMAP_MVP.md` -> `docs/09_AGENT_DEV_MODE.md`.
 
 ---
 
-## Estrutura do Projeto
+## O Produto Hoje
+
+RetroDev Studio ja passou de prototipo. O produto hoje consegue:
+
+- criar e abrir projetos `.rds`
+- editar cena e ativos
+- compilar ROM para `Mega Drive` e `SNES`
+- carregar ROM no emulador integrado
+- validar o caminho principal por gates locais, readiness e smoke desktop
+
+O produto ainda nao deve ser descrito como engine totalmente pronta para producao comercial. A prioridade atual e consistencia, ergonomia e repetibilidade dos fluxos certificados.
+
+---
+
+## Fluxo Canonico
 
 ```text
-RetroDev_Studio/
-├── .cursorrules               # Regras comportamentais para IA (Cursor)
-├── CLAUDE.md                  # Regras comportamentais para IA (Claude Code)
-├── README.md                  # Este arquivo
-├── docs/                      # Base de Conhecimento (LEITURA OBRIGATORIA)
-│   ├── 00_AI_DIRECTIVES.md    # Ponto de entrada para QUALQUER IA
-│   ├── 01_PRD_MASTER.md       # Visao Definitiva do Produto
-│   ├── 02_TECH_STACK.md       # Tecnologias escolhidas e restricoes
-│   ├── 03_ROADMAP_MVP.md      # Fases de desenvolvimento e Sprint atual
-│   ├── 04_HARDWARE_SPECS.md   # Limites matematicos dos consoles (imutavel)
-│   ├── 05_ARCHITECTURE_UGDM.md# Especificacao do formato de dados universal
-│   ├── 06_AI_MEMORY_BANK.md   # Diario de bordo — estado atual do projeto
-│   ├── 07_TEST_AND_COMPLIANCE.md # Regras legais e de testes
-│   └── 08_TREE_ARCHITECTURE.md   # Mapa de diretorios (onde colocar cada arquivo)
-├── scripts/                   # Scripts de validacao
-│   ├── check-tree.ps1         # Valida arvore (PowerShell)
-│   └── check-tree.js          # Valida arvore (Node.js)
-├── src/                       # Frontend (React/TypeScript) — a ser criado
-└── src-tauri/                 # Backend (Rust/Tauri) — a ser criado
+Projeto (.rds / UGDM)
+    -> editor desktop
+    -> validacao por hardware profile
+    -> build workspace por target
+    -> ROM
+    -> emulacao Libretro
 ```
 
----
-
-## Orientacao para Agentes de IA
-
-> **Cursor, Codex, Claude, Trae, Bonsai, e qualquer outro agente:**
-> Este repositorio e editado por multiplas IAs e por humanos.
-> O ponto de entrada unico e `docs/00_AI_DIRECTIVES.md`. Leia-o antes de qualquer acao.
-
-**Prompt de Inicializacao (copie e cole ao iniciar uma sessao):**
-
-```
-Iniciando nova sessao no RetroDev Studio. Leia primeiro docs/00_AI_DIRECTIVES.md.
-Depois: docs/06_AI_MEMORY_BANK.md, docs/03_ROADMAP_MVP.md, docs/08_TREE_ARCHITECTURE.md.
-Responda com "[Contexto Carregado]" e proponha o plano de acao.
+```mermaid
+flowchart LR
+    A["Projeto UGDM (.rds)"] --> B["Editor Desktop"]
+    B --> C["Validacao por hardware profile"]
+    C --> D["Workspace por target"]
+    D --> E["ROM"]
+    E --> F["Emulacao Libretro"]
 ```
 
----
+### Targets atuais
 
-## Roadmap de Desenvolvimento
+- `megadrive` -> `SGDK`
+- `snes` -> `PVSnesLib`
 
-| Fase | Objetivo | Status |
-|------|---------|--------|
-| **Fase 0: Fundacao** | Setup Tauri + React + Rust | EM ANDAMENTO |
-| **Fase 1: Core Mega Drive** | Gerar ROM jogavel a partir do editor | Bloqueada |
-| **Fase 2: Abstracao (SNES)** | Provar engine agnostica | Bloqueada |
-| **Fase 3: Visual Logic** | NodeGraph e RetroFX | Bloqueada |
-| **Fase 4: Camada Pro** | Engenharia Reversa e Profiler | Bloqueada |
-
-Para detalhes de cada Sprint, consulte `docs/03_ROADMAP_MVP.md`.
-
----
-
-## Tech Stack
+### Stack principal
 
 | Camada | Tecnologia |
-|--------|-----------|
-| Desktop Framework | Tauri (Rust + WebView nativo) |
-| Frontend | React + TypeScript + Vite + TailwindCSS |
-| Backend / Core | Rust |
-| Emulacao | Libretro API (Genesis Plus GX, Snes9x) via FFI |
-| Mega Drive SDK | SGDK (GCC m68k-elf) |
-| SNES SDK | PVSnesLib (WLA-DX) |
-| Formato de Dados | JSON (.rds) — UGDM |
-
-Para detalhes e restricoes, consulte `docs/02_TECH_STACK.md`.
+|--------|------------|
+| Desktop | Tauri 2 |
+| Frontend | React + TypeScript + Vite + TailwindCSS + Zustand |
+| Backend | Rust |
+| Emulacao | Libretro via FFI |
+| Mega Drive SDK | SGDK |
+| SNES SDK | PVSnesLib |
+| Modelo de dados | UGDM JSON (`.rds`, `scenes/*.json`) |
 
 ---
 
-## Aviso Legal & Compliance
+## Superficies Visiveis
 
-- Nenhum asset ou ROM com direitos autorais esta incluido neste software.
-- A Camada de Engenharia Reversa opera estritamente atraves de patches binarios (IPS/BPS).
-- Esta e uma ferramenta educacional, de preservacao historica e para criacao de jogos independentes (Homebrews).
+### Core ja integrado ao fluxo principal
 
-Para detalhes completos, consulte `docs/07_TEST_AND_COMPLIANCE.md`.
+- Menu inicial / criacao e abertura de projetos `.rds`
+- Scene workspace com `Hierarchy`, `Layers`, `Inspector` e pintura real de tilemap (pencil/eraser/picker/rect/fill) com WYSIWYG do atlas
+- Game workspace com `Build & Run` e emulador integrado
+- Explorer workspace
+- Logic workspace / NodeGraph canonico (certificacao local, sem prova institucional dedicada ainda)
+- Debug workspace com `Runtime Setup`, `Patch Studio`, `Paleta Contextual` e `Deep Profiler`
+
+### Ainda marcadas como `Experimental`
+
+- Asset Browser
+- ArtStudio
+- RetroFX
+- Reverse Workspace
+- Asset Extractor
+- Memory Viewer
+- VRAM Viewer
+- Importadores externos fora do eixo principal do MVP
+
+Essas superficies existem de verdade no produto, mas continuam com rotulo de maturidade controlado para nao prometer mais do que o fluxo atual entrega. A lista canonica e mais detalhada fica no roadmap central.
 
 ---
 
-Feito com cafe e paixao pela era dos 16-bits.
+## Windows Limpo
+
+Para subir o projeto de forma conservadora em um host Windows novo:
+
+1. `npm ci`
+2. `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\bootstrap.ps1`
+3. `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests`
+
+O bootstrap atual nao cria scaffold, nao reescreve arquivos do repositorio e pode opcionalmente rodar o baseline completo do projeto.
+
+Para uma fotografia consolidada de readiness no Windows:
+
+1. `npm run release:readiness:baseline`
+2. inspecionar `src-tauri/target-test/validation/release-readiness.md`
+
+Para a rodada institucional de promocao RC:
+
+1. `npm run test:e2e:desktop:qa-rc`
+2. `npm run release:readiness:promotion`
+3. inspecionar `src-tauri/target-test/validation/manual-qa-status.json`
+4. inspecionar `src-tauri/target-test/validation/release-readiness.md`
+
+---
+
+## Documentos De Verdade
+
+- [docs/06_AI_MEMORY_BANK.md](./docs/06_AI_MEMORY_BANK.md): estado operacional real, prioridade imediata e entrada canonica.
+- [docs/03_ROADMAP_MVP.md](./docs/03_ROADMAP_MVP.md): fases, superficies e importadores com matriz central de maturidade.
+- [docs/09_AGENT_DEV_MODE.md](./docs/09_AGENT_DEV_MODE.md): regras de processo, sincronizacao documental e gates.
+- [docs/07_TEST_AND_COMPLIANCE.md](./docs/07_TEST_AND_COMPLIANCE.md): compliance, readiness e validacao oficial.
+- [docs/08_TREE_ARCHITECTURE.md](./docs/08_TREE_ARCHITECTURE.md): organizacao canonica de arquivos.

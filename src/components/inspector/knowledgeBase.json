@@ -1,0 +1,75 @@
+{
+  "transform": {
+    "summary": "Define identidade e posicionamento base da entidade na cena.",
+    "details": [
+      "ID e Prefab ajudam a rastrear origem e reaproveitamento da entidade.",
+      "Pos X e Pos Y controlam a posicao em pixels no editor e no build."
+    ]
+  },
+  "sprite": {
+    "summary": "Configura como a entidade ocupa VRAM e aparece no renderer do hardware alvo.",
+    "details": [
+      "Asset aponta para o arquivo grafico usado no staging do build.",
+      "Frame W e Frame H definem o tamanho de cada frame para animacao e colisao visual.",
+      "Palette Slot e Priority influenciam composicao, camadas e custo visual."
+    ]
+  },
+  "collision": {
+    "summary": "Descreve a area de colisao e como a entidade interage com o mundo.",
+    "details": [
+      "Shape, Width e Height moldam o AABB usado pelo pipeline atual.",
+      "Solid indica se a entidade deve bloquear ou apenas detectar contato."
+    ]
+  },
+  "physics": {
+    "summary": "Controla gravidade, atrito, bounce e limites de velocidade da entidade.",
+    "details": [
+      "Gravity e Grav. Strength definem a aceleracao vertical aplicada por frame.",
+      "Max Vel X/Y evitam que o objeto ultrapasse o envelope previsto para o target.",
+      "Friction e Bounce ajustam desaceleracao e resposta basica a impacto."
+    ]
+  },
+  "audio": {
+    "summary": "Agrupa musica e efeitos que a entidade pode disparar via runtime ou NodeGraph.",
+    "details": [
+      "BGM referencia a trilha principal usada por esta entidade ou cena.",
+      "Audio SFX mapeia acoes para arquivos de efeito reutilizaveis no build."
+    ]
+  },
+  "input": {
+    "summary": "Relaciona acoes logicas com botoes ou direcoes lidas no hardware real.",
+    "details": [
+      "Device seleciona a origem do input, como joypad1.",
+      "Input Mapping conecta acoes do jogo aos nomes de botoes entendidos pelo runtime."
+    ]
+  },
+  "camera": {
+    "summary": "Permite usar a entidade como ancora de viewport ou alvo de seguimento.",
+    "details": [
+      "Follow aponta para a entidade que deve ser acompanhada.",
+      "Offset X/Y ajustam o enquadramento final sem alterar a logica de mundo."
+    ]
+  },
+  "tilemap": {
+    "summary": "Representa um plano de tiles e seus parametros basicos de scroll.",
+    "details": [
+      "Tileset define o recurso base usado no mapa.",
+      "TM Width e TM Height determinam a area total em tiles.",
+      "Scroll X/Y servem como estado inicial para camera, parallax ou runtime."
+    ]
+  },
+  "logic": {
+    "summary": "Resume o grafo persistido da entidade e os parametros editaveis dos nos.",
+    "details": [
+      "Graph mostra o volume de nos e conexoes salvo em LogicComponent.graph.",
+      "Os parametros abaixo refletem configuracoes editaveis do NodeGraph sem sair do Inspector."
+    ]
+  },
+  "background_layer": {
+    "summary": "Configura uma layer de fundo da cena e sua ordem de desenho.",
+    "details": [
+      "Depth afeta prioridade de exibicao entre planos.",
+      "Tileset referencia o recurso grafico associado a esta layer."
+    ]
+  }
+}

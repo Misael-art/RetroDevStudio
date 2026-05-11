@@ -1,0 +1,29 @@
+{
+  "scene_id": "main",
+  "schema_version": "1.0.0",
+  "display_name": "Prefab Scene",
+  "background_layers": [],
+  "entities": [
+    {
+      "entity_id": "hero_instance",
+      "prefab": "hero.json",
+      "transform": {
+        "x": 48,
+        "y": 80
+      },
+      "components": {
+        "physics": {
+          "gravity": false,
+          "gravity_strength": 3,
+          "max_velocity": {
+            "x": 64,
+            "y": 32
+          },
+          "friction": 4,
+          "bounce": 0
+        }
+      }
+    }
+  ],
+  "palettes": []
+}

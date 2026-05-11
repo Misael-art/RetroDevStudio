@@ -6,10 +6,18 @@
 node_modules/
 dist/
 *.local
+tsconfig.tsbuildinfo
+*.tsbuildinfo
 
 # --- Rust / Backend ---
 target/
+src-tauri/target-test/
+src-tauri/target-sprint*/
+whitelist_target/
 Cargo.lock
+*.pdb
+*.ilk
+*.idb
 
 # --- Tauri ---
 WixTools/
@@ -18,10 +26,17 @@ WixTools/
 *.deb
 *.rpm
 *.AppImage
+*.app/
+*.exe
 
 # --- Toolchains (binarios pesados, baixar separadamente) ---
 toolchains/sgdk/
 toolchains/pvsneslib/
+toolchains/jdk/
+toolchains/env/
+toolchains/webdriver/
+toolchains/libretro/cores/
+toolchains/libretro/.retrodev-install-*.json
 !toolchains/sgdk/.gitkeep
 !toolchains/pvsneslib/.gitkeep
 
@@ -35,6 +50,10 @@ build/
 # --- IDE ---
 .vscode/
 .cursor/
+.claude/settings.local.json
+.claude/worktrees/
+.claude/workspaces/
+.claude/scheduled_tasks.lock
 .idea/
 *.swp
 *.swo
@@ -55,3 +74,11 @@ bootstrap.log
 # --- Temp scripts ---
 scripts/setup-rust.ps1
 scripts/run-bootstrap.ps1
+
+# --- Tauri signing (private key must never be committed) ---
+scripts/_tauri_signing
+scripts/_tauri_signing.pub
+
+# --- Local diagnostics ---
+vitest-err.txt
+vitest-output.txt
