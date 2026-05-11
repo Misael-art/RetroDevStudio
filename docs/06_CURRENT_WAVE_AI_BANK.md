@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-11 (rodada 34 - hardening CI rate-limit para Runtime Setup/SGDK; promocao bloqueada por merge/main)
+**Ultima Atualizacao:** 2026-05-11 (rodada 35 - PR #2 mergeado; readiness de promocao verde em main)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,13 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-11 rodada 35 - PR #2 promovido para main):**
+  - **GitHub CLI:** `gh` nao existia no host; `winget install --id GitHub.cli -e --accept-package-agreements --accept-source-agreements` instalou `gh 2.92.0` em `C:\Program Files\GitHub CLI\gh.exe`. A sessao local de `gh` nao estava autenticada e nao havia `GH_TOKEN`/`GITHUB_TOKEN`, entao as operacoes de PR foram feitas pelo conector GitHub autenticado da sessao.
+  - **PR/merge:** o conector GitHub confirmou PR #2 em `head_sha=3b2b33e15f688939f7cca038be00ab3c1b8ad0b5`, `draft=true`, `mergeable=true`, com `CI` e `Desktop E2E` de pull_request verdes (`25698765825`, `25698765818`). O PR foi marcado como ready e mergeado em `main` por merge commit `35ab81ff63628ad50d4f5afff289f32013171c99`.
+  - **Main/readiness:** `main` local foi atualizado para `35ab81ff63628ad50d4f5afff289f32013171c99`, com o SHA do PR confirmado como ancestral. `npm run release:readiness:promotion` rodou em `main` e retornou codigo 0 com `Pronto para promocao: SIM`; report em `src-tauri/target-test/validation/release-readiness.md`.
+  - **Gates consumidos pelo readiness:** `check:tree`, `lint`, `tsc --noEmit`, `npm test` **291** passed, `cargo clippy`, `cargo test --lib` **326** passed / **10** ignored, `build:debug`, `validate-upstream-windows`, `desktop-e2e` e QA A-G fresco `qa-rc-2026-05-11T21-20-39-556Z-*`.
+  - **Status honesto:** a governanca tecnica de promocao do core MVP esta verde em `main`. SGDK continua **Experimental**, `support_status` inalterado; Node/Phase D continua sem AST C completo e nao e Stable; `BLAZE_ENGINE` permanece blocker/stress corpus legitimo.
 
 * **O que acabou de acontecer (2026-05-11 rodada 34 - CI desktop rate-limit hardening):**
   - **Falha remota isolada:** apos o commit documental, o `desktop-smoke` do PR encontrou um bloqueio novo e externo ao fluxo de produto: a instalacao automatica do SGDK consultou `https://api.github.com/repos/Stephane-D/SGDK/releases/latest` sem autenticacao e recebeu `403 rate limit exceeded`.
@@ -1137,10 +1144,7 @@ As seguintes decisoes ja foram debatidas e sao finais:
 ## 4. PROXIMO PASSO IMEDIATO (PARA A IA EXECUTAR QUANDO SOLICITADA)
 
 **Tarefa:**
-Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as superficies `Experimental` que consigam provar valor no caminho canônico atual. A rodada 29 melhorou materialmente a autoria local da IDE, mas o proximo alvo imediato continua ser transformar essa evidencia local em fotografia institucional: rerodar o `Desktop E2E` no GitHub/Windows, capturar o resultado verdadeiro do branch candidato e so depois regenerar a fotografia de promocao em worktree limpo. Qualquer nova UX deve atacar lacunas restantes de workflow real (nao mais sinais cosmeticos).
-
-**Tarefa atualizada pela rodada 33 (2026-05-11):**
-O host local executou a barra completa, o hotfix de `live-stale`/topbar foi pushado e o CI remoto do novo SHA ficou verde em `push` e `pull_request`. O bloqueio dominante agora e externo/governado: PR #2 esta `draft/open`, a branch segue muitos commits a frente de `origin/main`, e `release:readiness:promotion` falha estritamente por governanca quando rodado fora do destino de promocao. A proxima acao humana inevitavel e marcar/mesclar o PR para `main`; depois disso, rerodar `npm run release:readiness:promotion` em `main` antes de qualquer claim de MVP fechado, sem promover SGDK nem Phase D.
+Preservar o core MVP promovido em `main` e avancar apenas incrementos que mantenham a barra verde. A governanca do PR #2 foi fechada na rodada 35: PR ready/merged, `main` em `35ab81ff63628ad50d4f5afff289f32013171c99`, e `npm run release:readiness:promotion` verde no destino. O proximo trabalho nao deve reabrir a linha de release sem necessidade; deve atacar robustez de produto, Node Engine e SGDK em unidades pequenas, com SGDK/Node ainda marcados como `Experimental` ate corpus/round-trip/jogo por nodes provarem o contrario.
 
 **Pre-requisitos operacionais:**
 * Manter os 6 gates canonicos verdes em toda alteracao relevante.
@@ -1149,13 +1153,13 @@ O host local executou a barra completa, o hotfix de `live-stale`/topbar foi push
 * Reexecutar bundle MSI e smoke desktop em host Windows institucional sempre que a mudanca tocar packaging, emulacao, build orchestration, onboarding ou fluxo de projeto.
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
-**Sequencia de acoes recomendada (rodada 33):**
-1. Tirar o PR #2 do draft/mesclar para `main` quando a revisao humana permitir; nao criar tag antes disso.
-2. Apos merge, atualizar `main`, rerodar `npm run release:readiness:promotion` no destino de promocao e registrar o resultado.
-3. Se houver nova alteracao de codigo, repetir os 6 gates canonicos, `validate-upstream-windows.ps1 -SkipRustTests`, `preflight:sgdk-e2e` e `test:e2e:desktop:qa-rc` quando o escopo tocar shell/build/emulacao/toolchains.
-4. Repetir `build:portable` e `build:msi` sempre que packaging, onboarding ou fluxo de projeto mudar; nao reutilizar artefato antigo como evidencia fresca.
-5. Manter SGDK **Experimental** ate a matriz cumprir a barra de suporte e houver decisao explicita; nao transformar heuristicas de `entity_role`/Phase D em claim de AST.
-6. Atualizar README/onboarding somente apos a trilha publica refletir a branch candidata, sem anunciar maturidade maior que Memory Bank/Roadmap.
+**Sequencia de acoes recomendada (rodada 35):**
+1. Criar nova branch `codex/...` a partir de `main` para qualquer codigo pos-promocao; nao misturar novas features direto no merge commit de release.
+2. Implementar primeiro robustez pequena e auditavel: cache/retry/backoff/mensagens do Runtime Setup, logs diagnosticos ou gates SGDK claros, com testes focados.
+3. Para Node Engine, adicionar semantica/validacao/codegen em fatias pequenas e provar determinismo antes de qualquer claim de jogo completo por nodes.
+4. Para SGDK_Engines, catalogar/cobrir buracos semanticos e round-trip por projeto real sem chamar heuristica de AST.
+5. Repetir os 6 gates canonicos em toda alteracao; adicionar `validate-upstream-windows.ps1 -SkipRustTests`, `preflight:sgdk-e2e`, `qa-rc`, corpus SGDK e packaging quando o escopo tocar build/toolchain/emulacao/release.
+6. Manter SGDK **Experimental** e Node Engine **Experimental/Parcial** ate haver corpus/round-trip e jogo criado por nodes com ROM buildada/rodando.
 
 **Validacao minima obrigatoria antes de marcar qualquer item como concluido:**
 * `npm run check:tree`

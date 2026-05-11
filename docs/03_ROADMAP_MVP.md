@@ -1,8 +1,10 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-05-11 (rodada 34)
-**Fase ativa real:** Release candidate / beta tecnica em hardening
+**Ultima revisao canonica:** 2026-05-11 (rodada 35)
+**Fase ativa real:** Core MVP promovido tecnicamente em main; hardening continua nas superficies experimentais
+
+**Nota 2026-05-11 (rodada 35, main):** PR #2 foi tirado de draft e mergeado em `main` por merge commit `35ab81ff63628ad50d4f5afff289f32013171c99`, apos checks remotos verdes no SHA `3b2b33e15f688939f7cca038be00ab3c1b8ad0b5` (`CI` pull_request `25698765825`, `Desktop E2E` pull_request `25698765818`). Em `main`, `npm run release:readiness:promotion` passou com `Pronto para promocao: SIM` no commit `35ab81f`, consumindo baseline, upstream, desktop smoke e QA A-G fresco `qa-rc-2026-05-11T21-20-39-556Z-*`. Isto promove tecnicamente o core MVP no destino canonico; SGDK segue **Experimental**, `support_status` inalterado, Node/Phase D segue heuristica sem AST C completo, e `BLAZE_ENGINE` permanece stress/blocker legitimo.
 
 **Nota 2026-05-11 (rodada 34, branch `feat/sgdk-vram-residency-streaming-r14`):** hardening de CI/setup sem mudanca de maturidade: o `desktop-smoke` remoto bateu rate limit em `api.github.com` ao consultar a release oficial do SGDK sem token. O Runtime Setup agora usa `RDS_GITHUB_TOKEN`/`GITHUB_TOKEN` somente para GitHub API, e o workflow `desktop-e2e.yml` injeta o `github.token` read-only como `RDS_GITHUB_TOKEN`. Gates locais pos-correcao reexecutados e verdes, incluindo upstream oficial, `qa-rc` A-G fresco (`qa-rc-2026-05-11T21-20-39-556Z-*`), corpus SGDK `7/7` e Debug/Portable/MSI regenerados. A leitura continua: PR #2 e trilha de promocao; merge para `main` e `release:readiness:promotion` no destino ainda obrigatorios. SGDK segue **Experimental**; Fase D segue heuristica.
 
@@ -65,10 +67,10 @@
 ## Estado Executivo Atual
 
 - Data de referencia: `2026-05-11`.
-- Leitura honesta: o projeto ja tem produto real, mas ainda esta em `release candidate / beta tecnica em hardening`.
+- Leitura honesta: o core MVP esta tecnicamente promovido em `main`, mas o produto amplo continua em hardening nas superficies experimentais.
 - O core canonico `Projeto -> Editor -> Build -> ROM -> Emulacao` existe e ja foi provado para `Mega Drive` e `SNES`.
-- `Desktop E2E` remoto ficou verde no GitHub/Windows em `2026-04-16` (runs #143/#144, commit `c1a7870`) e foi revalidado no PR #2 em `2026-05-11` para o SHA `7bf026b` (`Desktop E2E` push `25689348725`, pull_request `25689350771`).
-- O gargalo principal agora e concluir a governanca Git/PR da branch candidata e rerodar a fotografia institucional no destino de promocao; MSI/portable foram revalidados localmente em `2026-05-11`.
+- `Desktop E2E` remoto ficou verde no GitHub/Windows em `2026-04-16` (runs #143/#144, commit `c1a7870`) e foi revalidado no PR #2 em `2026-05-11` para o SHA `3b2b33e` (`Desktop E2E` pull_request `25698765818`).
+- `release:readiness:promotion` foi reexecutado em `main` no commit `35ab81ff63628ad50d4f5afff289f32013171c99` e retornou `Pronto para promocao: SIM`.
 - Superficies `Experimental` reais continuam visiveis, mas nao podem contaminar a leitura do fechamento do MVP.
 
 ---
@@ -76,10 +78,10 @@
 ## Bloqueadores Reais
 
 - ~~`Desktop E2E` remoto ainda precisa ficar verde de forma repetivel no runner GitHub/Windows.~~ **Resolvido em 2026-04-16:** runs #143/#144 passaram com 16/16 cenarios.
-- A fotografia institucional de promocao precisa ser regenerada no destino de promocao (`main` apos merge). Na branch candidata, `release:readiness:promotion` passa os gates mas falha corretamente pela divergencia governada vs `origin/main`.
+- ~~A fotografia institucional de promocao precisa ser regenerada no destino de promocao (`main` apos merge).~~ **Resolvido em 2026-05-11 rodada 35:** PR #2 mergeado e `release:readiness:promotion` passou em `main` com `Pronto para promocao: SIM`.
 - MSI/portable foram revalidados localmente em `2026-05-11`; precisam continuar sendo revalidados quando o fluxo `Menu inicial -> Criar Projeto` ou packaging mudar.
-- A trilha publica ainda precisa refletir o estado real da wave candidata; PR #2 esta `draft/open` e a branch `feat/sgdk-vram-residency-streaming-r14` continua muitos commits a frente de `origin/main`, bloqueio de governanca ate merge.
-- Readiness e onboarding publico devem ser sincronizados apos o merge para `main`.
+- ~~A trilha publica ainda precisa refletir o estado real da wave candidata; PR #2 esta `draft/open` e a branch `feat/sgdk-vram-residency-streaming-r14` continua muitos commits a frente de `origin/main`, bloqueio de governanca ate merge.~~ **Resolvido em 2026-05-11 rodada 35:** PR #2 saiu de draft e foi mergeado em `main`.
+- Permanecem bloqueios de maturidade para labels **Stable**: SGDK requer corpus/round-trip completo e BLAZE classificado/resolvido; Node Engine requer jogo criado por nodes, build e smoke de emulacao sem edicao manual de codigo.
 
 ---
 
@@ -96,7 +98,7 @@ A coluna `Certificacao` usa exclusivamente o vocabulario travado deste roadmap:
 | Fase 2 - SNES                   | Em hardening  | Pipeline oficial e emulacao oficial provados em Windows; hardening continua               |
 | Fase 3 - Visual Logic & RetroFX | Local         | NodeGraph canonico e camada visual existem; superficies ainda heterogeneas                |
 | Fase 4 - Camada Pro             | Local         | Patching, profiling, reverse e utilitarios existem, mas nem tudo e criterio de fechamento |
-| Fase 5 - Release                | Em hardening  | Packaging, onboarding e readiness existem; falta repeticao institucional final            |
+| Fase 5 - Release                | Institucional | PR #2 mergeado e readiness de promocao verde em `main`; repetir quando escopo mudar       |
 
 
 ---
