@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-10 (rodada 31 - host Windows preparado, gates verdes, corpus/QA/packaging revalidados; branch `feat/sgdk-vram-residency-streaming-r14`)
+**Ultima Atualizacao:** 2026-05-11 (rodada 32 - host rechecado, gates tecnicos/QA/corpus/packaging frescos; promocao bloqueada por governanca Git)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,16 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-11 rodada 32 - rechecagem local completa sem promocao):**
+  - **Branch:** `feat/sgdk-vram-residency-streaming-r14`, rastreando `origin/feat/sgdk-vram-residency-streaming-r14`; `origin/main...HEAD = 0/201`.
+  - **Host/script resiliente:** os comandos canonicos rodaram sem prefixo manual de PATH nesta sessao. `preflight:sgdk-e2e` encontrou SGDK, `tauri-driver` em `C:\Users\misae\.cargo\bin\tauri-driver.exe` e `toolchains/webdriver/msedgedriver.exe`; o build continuou usando shadow target preventivo em `%LOCALAPPDATA%\RetroDevStudio\cargo-target-shadow`.
+  - **Baseline local:** `check:tree` OK; `lint` OK; `tsc --noEmit` OK; `npm test` **290** passed; `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK; `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` **325** passed / **10** ignored.
+  - **Readiness/desktop:** `release:readiness:baseline` rodou baseline + auxiliares; `preflight:sgdk-e2e` OK (`Ready: SIM`); `test:e2e:desktop:qa-rc` OK com `manual-qa-status.json` em `2026-05-11T11:54:18.251Z`, blocos A-G `passed`, evidencias `qa-rc-2026-05-11T11-53-47-951Z-*` e ROM `SEGA` no bloco G.
+  - **Toolchains oficiais/corpus:** `validate-upstream-windows.ps1 -SkipRustTests` OK (`upstream-validation.json success=true`); `cargo test sgdk_matrix_corpus_ ... --ignored` **7/7**. `BLAZE_ENGINE` segue blocker legitimo auditavel.
+  - **Packaging:** `build:portable` regenerou `src-tauri/target-test/release/retro-dev-studio.exe`; `build:msi` regenerou `src-tauri/target-test/release/bundle/msi/RetroDev Studio_0.1.0_x64_en-US.msi`; o EXE debug foi renovado pelos fluxos `qa-rc`/readiness.
+  - **Readiness de promocao:** `release:readiness:promotion` rodou em modo estrito e falhou com codigo 1 somente por governanca: branch +201 vs `origin/main`. Isto impede claim de fechamento/promocao nesta revisao, apesar dos gates tecnicos locais verdes.
+  - **Governanca/status:** worktree versionavel estava limpo antes das atualizacoes documentais; `Rascunho.txt` permanece ignorado via `.git/info/exclude`. SGDK continua **Experimental**; `support_status` inalterado; Phase D segue heuristica sem AST C completo.
 
 * **O que acabou de acontecer (2026-05-10 rodada 31 - host preparado e barra tecnica verde):**
   - **Branch:** `feat/sgdk-vram-residency-streaming-r14` (sem upstream proprio; ainda +200 vs `origin/main` antes da consolidacao Git).
@@ -1111,8 +1121,8 @@ As seguintes decisoes ja foram debatidas e sao finais:
 **Tarefa:**
 Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as superficies `Experimental` que consigam provar valor no caminho canônico atual. A rodada 29 melhorou materialmente a autoria local da IDE, mas o proximo alvo imediato continua ser transformar essa evidencia local em fotografia institucional: rerodar o `Desktop E2E` no GitHub/Windows, capturar o resultado verdadeiro do branch candidato e so depois regenerar a fotografia de promocao em worktree limpo. Qualquer nova UX deve atacar lacunas restantes de workflow real (nao mais sinais cosmeticos).
 
-**Tarefa atualizada pela rodada 30 (2026-05-10):**
-Antes de transformar a evidencia local de 2026-05-02 em fotografia institucional, recuperar o ambiente Rust/MSVC e `tauri-driver` neste host ou em host institucional equivalente. Nesta rodada, `cargo`/`vswhere` estavam ausentes, `preflight:sgdk-e2e` falhou por `tauri-driver` ausente e `validate-upstream-windows.ps1 -SkipRustTests` agora falha honestamente como `toolchain_missing`.
+**Tarefa atualizada pela rodada 32 (2026-05-11):**
+O host local ja executa a barra completa e os scripts canonicos encontraram as ferramentas sem workaround manual nesta sessao. O bloqueio dominante deixou de ser ambiente e passou a ser governanca Git: a branch candidata esta +201 commits contra `origin/main` e `release:readiness:promotion` falha estritamente por isso. A proxima rodada deve consolidar a trilha de PR/merge ou rerodar a fotografia no destino de promocao, sem promover SGDK nem Phase D.
 
 **Pre-requisitos operacionais:**
 * Manter os 6 gates canonicos verdes em toda alteracao relevante.
@@ -1121,20 +1131,12 @@ Antes de transformar a evidencia local de 2026-05-02 em fotografia institucional
 * Reexecutar bundle MSI e smoke desktop em host Windows institucional sempre que a mudanca tocar packaging, emulacao, build orchestration, onboarding ou fluxo de projeto.
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
-**Sequencia de acoes recomendada:**
-1. Rerodar `Desktop E2E` no GitHub/Windows e comparar evidencias com `qa-rc-2026-05-02T05-14-22-572Z-*`.
-2. Manter SGDK **Experimental** ate a matriz cumprir a barra de suporte; nao transformar heuristicas de `entity_role`/Phase D em claim de AST.
-3. Se houver nova rodada de UX, atacar lacunas de workflow: edicao mais profunda de camera como entidade, graph mais construtivo sem inflar inferencia, e ArtStudio chegando ao runtime real.
-4. Repetir bundle MSI apenas quando o escopo tocar release/packaging (`scripts/run-in-msvc.cmd npm run build:msi`).
-5. Manter `validate-upstream-windows` e `release:readiness:baseline` como fotografia institucional sempre que alteracoes futuras tocarem build, emulacao, onboarding ou toolchains.
-
-**Sequencia atualizada pela rodada 30 (2026-05-10):**
-1. Provisionar/confirmar Rust + Visual Studio Build Tools/Installer com VC tools (`vswhere.exe`) e `tauri-driver`; rerodar `cargo clippy`, `cargo test --lib`, `npm run preflight:sgdk-e2e` e `npm run test:e2e:desktop:qa-rc`.
-2. Rerodar `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests` e exigir `success=true` real, sem falso positivo de wrapper.
-3. Rerodar `npm run release:readiness:baseline`; se o objetivo for promocao, usar `npm run release:readiness:promotion` em worktree curado/limpo.
-4. Rerodar `Desktop E2E` no GitHub/Windows e comparar evidencias com `qa-rc-2026-05-02T05-14-22-572Z-*`.
-5. Manter SGDK **Experimental** ate a matriz cumprir a barra de suporte; nao transformar heuristicas de `entity_role`/Phase D em claim de AST.
-6. Repetir bundle MSI apenas quando o escopo tocar release/packaging (`scripts/run-in-msvc.cmd npm run build:msi`).
+**Sequencia de acoes recomendada (rodada 32):**
+1. Manter o PR/branch candidato como trilha de governanca ou mesclar para o destino apropriado; depois rerodar `npm run release:readiness:promotion` no destino de promocao.
+2. Se houver nova alteracao de codigo, repetir os 6 gates canonicos, `validate-upstream-windows.ps1 -SkipRustTests`, `preflight:sgdk-e2e` e `test:e2e:desktop:qa-rc` quando o escopo tocar shell/build/emulacao/toolchains.
+3. Repetir `build:portable` e `build:msi` sempre que packaging, onboarding ou fluxo de projeto mudar; nao reutilizar artefato antigo como evidencia fresca.
+4. Manter SGDK **Experimental** ate a matriz cumprir a barra de suporte e houver decisao explicita; nao transformar heuristicas de `entity_role`/Phase D em claim de AST.
+5. Atualizar README/onboarding somente apos a trilha publica refletir a branch candidata, sem anunciar maturidade maior que Memory Bank/Roadmap.
 
 **Validacao minima obrigatoria antes de marcar qualquer item como concluido:**
 * `npm run check:tree`
