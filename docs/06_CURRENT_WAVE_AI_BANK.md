@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-11 (rodada 32 - host rechecado, gates tecnicos/QA/corpus/packaging frescos; promocao bloqueada por governanca Git)
+**Ultima Atualizacao:** 2026-05-11 (rodada 33 - hotfix CI desktop remoto verde; PR #2 draft; promocao bloqueada por merge/main)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,16 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-11 rodada 33 - PR/CI remoto verde, sem merge):**
+  - **Branch/PR:** `feat/sgdk-vram-residency-streaming-r14` foi pushada em `7bf026bc17e841d7053fa208585ba32cc6205610` (`fix(e2e): harden live stale and toolbar overflow`). O PR publico existente e [#2](https://github.com/Misael-art/RetroDevStudio/pull/2), ainda `draft/open` por governanca humana; `gh` nao existe neste host, entao a verificacao remota foi feita via API publica do GitHub.
+  - **Hotfix aplicado:** `editorStore` marca `hwValidationState = stale` imediatamente quando uma cena previamente validada muda; o runner desktop aceita revalidacao que completa rapido (`ANALISANDO` ou `LIVE`); a topbar passou a impedir que widgets informativos de budget interceptem os controles centrais em largura menor.
+  - **Baseline local pos-hotfix:** `check:tree` OK; `lint` OK; `tsc --noEmit` OK; `npm test` **291** passed; `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK; `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` **325** passed / **10** ignored.
+  - **Fluxo real/QA:** `validate-upstream-windows.ps1 -SkipRustTests` OK; `preflight:sgdk-e2e` OK (`Ready: SIM`); matriz desktop local com 16 cenarios MD/SNES OK (`smoke`, `live-ok`, `live-error`, `live-stale`, `live-overflow`, `live-overflow-vram`, `live-warning-vram`, `live-warning-sprites`); `test:e2e:desktop:qa-rc` OK com `manual-qa-status.json` em `2026-05-11T18:15:08.061Z`, blocos A-G `passed`, evidencias `qa-rc-2026-05-11T18-14-46-427Z-*` e ROM `SEGA` no bloco G.
+  - **Corpus/packaging:** `cargo test sgdk_matrix_corpus_ ... --ignored` **7/7**; `build:debug`, `build:portable` e `build:msi` regeneraram artefatos canonicos. Timestamps locais: Debug EXE `2026-05-11 15:50:56`, Release EXE `2026-05-11 15:27:21`, MSI `2026-05-11 15:27:05`.
+  - **CI remoto:** o blocker remoto anterior (`Desktop E2E` run `25670163191`, falhas `smoke_snes`/`live_stale_*`) foi corrigido. No SHA `7bf026b`, GitHub Actions passou em quatro execucoes: `CI` push `25689348726`, `Desktop E2E` push `25689348725`, `CI` pull_request `25689350772`, `Desktop E2E` pull_request `25689350771`.
+  - **Readiness de promocao:** `npm run release:readiness:promotion` foi reexecutado em worktree limpo apos push; baseline, upstream, desktop smoke, QA consumido e artefatos passaram, mas o modo estrito saiu com codigo 1 porque a branch esta **204 commits a frente de `origin/main`**. Isto e bloqueio de governanca/destino, nao falha tecnica. Sem merge para `main`, nao declarar MVP fechado.
+  - **Status honesto:** SGDK continua **Experimental**; `support_status` inalterado; Phase D segue heuristica sem AST C completo; ArtStudio/RetroFX/Reverse/Asset Extractor/Memory/VRAM continuam experimentais salvo prova dedicada futura.
 
 * **O que acabou de acontecer (2026-05-11 rodada 32 - rechecagem local completa sem promocao):**
   - **Branch:** `feat/sgdk-vram-residency-streaming-r14`, rastreando `origin/feat/sgdk-vram-residency-streaming-r14`; o snapshot pre-commit documental era `origin/main...HEAD = 0/201`, e commits documentais posteriores mantem o mesmo bloqueio de governanca.
@@ -1121,8 +1131,8 @@ As seguintes decisoes ja foram debatidas e sao finais:
 **Tarefa:**
 Fechar o MVP do desktop Tauri preservando a baseline verde e elevando apenas as superficies `Experimental` que consigam provar valor no caminho canônico atual. A rodada 29 melhorou materialmente a autoria local da IDE, mas o proximo alvo imediato continua ser transformar essa evidencia local em fotografia institucional: rerodar o `Desktop E2E` no GitHub/Windows, capturar o resultado verdadeiro do branch candidato e so depois regenerar a fotografia de promocao em worktree limpo. Qualquer nova UX deve atacar lacunas restantes de workflow real (nao mais sinais cosmeticos).
 
-**Tarefa atualizada pela rodada 32 (2026-05-11):**
-O host local ja executa a barra completa e os scripts canonicos encontraram as ferramentas sem workaround manual nesta sessao. O bloqueio dominante deixou de ser ambiente e passou a ser governanca Git: a branch candidata permanece muitos commits a frente de `origin/main` e `release:readiness:promotion` falha estritamente por isso. A proxima rodada deve consolidar a trilha de PR/merge ou rerodar a fotografia no destino de promocao, sem promover SGDK nem Phase D.
+**Tarefa atualizada pela rodada 33 (2026-05-11):**
+O host local executou a barra completa, o hotfix de `live-stale`/topbar foi pushado e o CI remoto do novo SHA ficou verde em `push` e `pull_request`. O bloqueio dominante agora e externo/governado: PR #2 esta `draft/open`, a branch segue muitos commits a frente de `origin/main`, e `release:readiness:promotion` falha estritamente por governanca quando rodado fora do destino de promocao. A proxima acao humana inevitavel e marcar/mesclar o PR para `main`; depois disso, rerodar `npm run release:readiness:promotion` em `main` antes de qualquer claim de MVP fechado, sem promover SGDK nem Phase D.
 
 **Pre-requisitos operacionais:**
 * Manter os 6 gates canonicos verdes em toda alteracao relevante.
@@ -1131,12 +1141,13 @@ O host local ja executa a barra completa e os scripts canonicos encontraram as f
 * Reexecutar bundle MSI e smoke desktop em host Windows institucional sempre que a mudanca tocar packaging, emulacao, build orchestration, onboarding ou fluxo de projeto.
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
-**Sequencia de acoes recomendada (rodada 32):**
-1. Manter o PR/branch candidato como trilha de governanca ou mesclar para o destino apropriado; depois rerodar `npm run release:readiness:promotion` no destino de promocao.
-2. Se houver nova alteracao de codigo, repetir os 6 gates canonicos, `validate-upstream-windows.ps1 -SkipRustTests`, `preflight:sgdk-e2e` e `test:e2e:desktop:qa-rc` quando o escopo tocar shell/build/emulacao/toolchains.
-3. Repetir `build:portable` e `build:msi` sempre que packaging, onboarding ou fluxo de projeto mudar; nao reutilizar artefato antigo como evidencia fresca.
-4. Manter SGDK **Experimental** ate a matriz cumprir a barra de suporte e houver decisao explicita; nao transformar heuristicas de `entity_role`/Phase D em claim de AST.
-5. Atualizar README/onboarding somente apos a trilha publica refletir a branch candidata, sem anunciar maturidade maior que Memory Bank/Roadmap.
+**Sequencia de acoes recomendada (rodada 33):**
+1. Tirar o PR #2 do draft/mesclar para `main` quando a revisao humana permitir; nao criar tag antes disso.
+2. Apos merge, atualizar `main`, rerodar `npm run release:readiness:promotion` no destino de promocao e registrar o resultado.
+3. Se houver nova alteracao de codigo, repetir os 6 gates canonicos, `validate-upstream-windows.ps1 -SkipRustTests`, `preflight:sgdk-e2e` e `test:e2e:desktop:qa-rc` quando o escopo tocar shell/build/emulacao/toolchains.
+4. Repetir `build:portable` e `build:msi` sempre que packaging, onboarding ou fluxo de projeto mudar; nao reutilizar artefato antigo como evidencia fresca.
+5. Manter SGDK **Experimental** ate a matriz cumprir a barra de suporte e houver decisao explicita; nao transformar heuristicas de `entity_role`/Phase D em claim de AST.
+6. Atualizar README/onboarding somente apos a trilha publica refletir a branch candidata, sem anunciar maturidade maior que Memory Bank/Roadmap.
 
 **Validacao minima obrigatoria antes de marcar qualquer item como concluido:**
 * `npm run check:tree`

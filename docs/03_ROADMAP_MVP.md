@@ -1,8 +1,10 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-05-11 (rodada 32)
+**Ultima revisao canonica:** 2026-05-11 (rodada 33)
 **Fase ativa real:** Release candidate / beta tecnica em hardening
+
+**Nota 2026-05-11 (rodada 33, branch `feat/sgdk-vram-residency-streaming-r14`):** PR #2 existe e o SHA `7bf026b` foi pushado com hotfix para `Desktop E2E` remoto (`live-stale` e overflow/interceptacao da topbar). A barra local pos-hotfix ficou verde (`npm test` 291, Rust baseline, upstream oficial, matriz desktop local 16/16, `qa-rc` A-G fresco `qa-rc-2026-05-11T18-14-46-427Z-*`, corpus SGDK `7/7`, Debug/Portable/MSI regenerados). GitHub Actions ficou verde em `push` e `pull_request` para `CI` e `Desktop E2E` (runs `25689348726`, `25689348725`, `25689350772`, `25689350771`). `release:readiness:promotion` foi reexecutado em worktree limpo e falhou apenas por governanca: branch +204 vs `origin/main`, PR ainda `draft/open`, sem merge para `main`. Isso mantem a leitura de PR pronto para promocao, nao MVP fechado. SGDK segue **Experimental**; Fase D segue heuristica.
 
 **Nota 2026-05-11 (rodada 32, branch `feat/sgdk-vram-residency-streaming-r14`):** host Windows rechecado e barra tecnica local renovada: baseline frontend/Rust verde, corpus SGDK real `7/7`, upstream oficial `success=true`, `qa-rc` A-G fresco (`qa-rc-2026-05-11T11-53-47-951Z-*`), portable/release EXE e MSI canonicos gerados. `release:readiness:promotion` rodou em modo estrito e falhou apenas por governanca contra `origin/main` (201 commits a frente no snapshot pre-commit documental). Isso mantem a leitura de hardening e **nao** promove o MVP publicamente. SGDK segue **Experimental**; Fase D segue heuristica.
 
@@ -63,8 +65,8 @@
 - Data de referencia: `2026-05-11`.
 - Leitura honesta: o projeto ja tem produto real, mas ainda esta em `release candidate / beta tecnica em hardening`.
 - O core canonico `Projeto -> Editor -> Build -> ROM -> Emulacao` existe e ja foi provado para `Mega Drive` e `SNES`.
-- `Desktop E2E` remoto ficou verde no GitHub/Windows em `2026-04-16` (runs #143/#144, commit `c1a7870`, todos os 16 cenarios confirmados no ledger).
-- O gargalo principal agora e consolidar a governanca Git/PR da branch candidata e rerodar a fotografia institucional no destino de promocao; MSI/portable foram revalidados localmente em `2026-05-11`.
+- `Desktop E2E` remoto ficou verde no GitHub/Windows em `2026-04-16` (runs #143/#144, commit `c1a7870`) e foi revalidado no PR #2 em `2026-05-11` para o SHA `7bf026b` (`Desktop E2E` push `25689348725`, pull_request `25689350771`).
+- O gargalo principal agora e concluir a governanca Git/PR da branch candidata e rerodar a fotografia institucional no destino de promocao; MSI/portable foram revalidados localmente em `2026-05-11`.
 - Superficies `Experimental` reais continuam visiveis, mas nao podem contaminar a leitura do fechamento do MVP.
 
 ---
@@ -72,9 +74,9 @@
 ## Bloqueadores Reais
 
 - ~~`Desktop E2E` remoto ainda precisa ficar verde de forma repetivel no runner GitHub/Windows.~~ **Resolvido em 2026-04-16:** runs #143/#144 passaram com 16/16 cenarios.
-- A fotografia institucional de promocao precisa ser regenerada em worktree limpo/PR ou no destino de promocao com snapshot fresco que inclua o `Desktop E2E` verde.
+- A fotografia institucional de promocao precisa ser regenerada no destino de promocao (`main` apos merge). Na branch candidata, `release:readiness:promotion` passa os gates mas falha corretamente por `+204` vs `origin/main`.
 - MSI/portable foram revalidados localmente em `2026-05-11`; precisam continuar sendo revalidados quando o fluxo `Menu inicial -> Criar Projeto` ou packaging mudar.
-- A trilha publica ainda precisa refletir o estado real da wave candidata; branch `feat/sgdk-vram-residency-streaming-r14` continua muitos commits a frente de `origin/main`, bloqueio de governanca ate PR/merge.
+- A trilha publica ainda precisa refletir o estado real da wave candidata; PR #2 esta `draft/open` e a branch `feat/sgdk-vram-residency-streaming-r14` continua muitos commits a frente de `origin/main`, bloqueio de governanca ate merge.
 - Readiness e onboarding publico devem ser sincronizados apos o merge para `main`.
 
 ---
