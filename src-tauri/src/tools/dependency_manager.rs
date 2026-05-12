@@ -3,16 +3,18 @@ use std::fs::{self, File};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use reqwest::blocking::{Client, RequestBuilder};
+use reqwest::blocking::{Client, RequestBuilder, Response};
 use reqwest::header::{HeaderValue, AUTHORIZATION};
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use zip::ZipArchive;
 
 const INSTALL_MANIFEST_PREFIX: &str = ".retrodev-install-";
 const MEGADRIVE_CORE_CANDIDATES: &[&str] = &["genesis_plus_gx_libretro", "picodrive_libretro"];
 const SNES_CORE_CANDIDATES: &[&str] = &["snes9x_libretro", "bsnes_libretro"];
+const HTTP_RETRY_ATTEMPTS: usize = 3;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DependencyLogLine {
@@ -620,6 +622,7 @@ where
     let release = fetch_latest_release(
         client,
         "https://api.github.com/repos/Stephane-D/SGDK/releases/latest",
+        logger,
     )?;
     let asset = release
         .assets
@@ -682,6 +685,7 @@ where
     let release = fetch_latest_release(
         client,
         "https://api.github.com/repos/alekmaul/pvsneslib/releases/latest",
+        logger,
     )?;
     let asset = release
         .assets
@@ -752,6 +756,7 @@ where
     let release = fetch_latest_release(
         client,
         "https://api.github.com/repos/libretro/RetroArch/releases/latest",
+        logger,
     )?;
     let version = release.tag_name.trim_start_matches('v');
     let download_url = format!(
@@ -805,13 +810,52 @@ where
     Ok(message)
 }
 
-fn fetch_latest_release(client: &Client, url: &str) -> Result<GithubRelease, String> {
-    github_api_get(client, url)
-        .send()
-        .and_then(reqwest::blocking::Response::error_for_status)
-        .map_err(|e| format!("Falha ao consultar release oficial: {}", e))?
-        .json::<GithubRelease>()
-        .map_err(|e| format!("Falha ao ler metadata de release oficial: {}", e))
+fn fetch_latest_release<F>(
+    client: &Client,
+    url: &str,
+    logger: &mut InstallLogger<F>,
+) -> Result<GithubRelease, String>
+where
+    F: Fn(DependencyLogLine),
+{
+    let cache_path = github_release_cache_path(url);
+    match send_request_with_retry(|| github_api_get(client, url)) {
+        Ok(response) => {
+            let raw = response
+                .text()
+                .map_err(|e| format!("Falha ao ler metadata de release oficial: {}", e))?;
+            if let Some(path) = cache_path.as_ref() {
+                if let Err(error) = write_github_release_cache(path, &raw) {
+                    logger.emit("warn", error);
+                }
+            }
+            parse_github_release_json(&raw)
+                .map_err(|e| format!("Falha ao ler metadata de release oficial: {}", e))
+        }
+        Err(error) => {
+            if let Some(path) = cache_path.as_ref() {
+                if let Ok(raw) = fs::read_to_string(path) {
+                    logger.emit(
+                        "warn",
+                        format!(
+                            "{} Usando metadata cacheada em '{}'.",
+                            github_release_error_message(url, &error),
+                            path.display()
+                        ),
+                    );
+                    return parse_github_release_json(&raw).map_err(|parse_error| {
+                        format!(
+                            "Falha ao ler metadata cacheada de release oficial em '{}': {}. Apague o cache e tente novamente.",
+                            path.display(),
+                            parse_error
+                        )
+                    });
+                }
+            }
+
+            Err(github_release_error_message(url, &error))
+        }
+    }
 }
 
 fn github_api_get(client: &Client, url: &str) -> RequestBuilder {
@@ -838,31 +882,125 @@ fn github_api_token() -> Option<String> {
         .filter(|token| !token.is_empty())
 }
 
+fn github_release_cache_path(url: &str) -> Option<PathBuf> {
+    let repo = url
+        .strip_prefix("https://api.github.com/repos/")?
+        .strip_suffix("/releases/latest")?;
+    let filename = repo.replace(['/', '\\'], "__");
+    Some(
+        repo_root()
+            .join("toolchains")
+            .join(".cache")
+            .join("github-releases")
+            .join(format!("{}__latest.json", filename)),
+    )
+}
+
+fn write_github_release_cache(path: &Path, raw: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "Falha ao preparar cache de metadata GitHub em '{}': {}",
+                parent.display(),
+                e
+            )
+        })?;
+    }
+    fs::write(path, raw).map_err(|e| {
+        format!(
+            "Falha ao gravar cache de metadata GitHub em '{}': {}",
+            path.display(),
+            e
+        )
+    })
+}
+
+fn parse_github_release_json(raw: &str) -> Result<GithubRelease, serde_json::Error> {
+    serde_json::from_str::<GithubRelease>(raw)
+}
+
+fn github_release_error_message(url: &str, error: &reqwest::Error) -> String {
+    let mut message = format!(
+        "Falha ao consultar release oficial em '{}': {}.",
+        url, error
+    );
+    if let Some(status) = error.status().and_then(github_api_status_hint) {
+        message.push(' ');
+        message.push_str(status);
+    }
+    message
+}
+
+fn github_api_status_hint(status: StatusCode) -> Option<&'static str> {
+    match status {
+        StatusCode::FORBIDDEN | StatusCode::TOO_MANY_REQUESTS => Some(
+            "A API do GitHub limitou a requisicao. Configure RDS_GITHUB_TOKEN ou GITHUB_TOKEN para aumentar o limite, ou tente novamente mais tarde.",
+        ),
+        status if status.is_server_error() => Some(
+            "O servidor remoto respondeu com erro temporario; o Runtime Setup tentou novamente com backoff antes de falhar.",
+        ),
+        _ => None,
+    }
+}
+
+fn send_request_with_retry<F>(mut build_request: F) -> Result<Response, reqwest::Error>
+where
+    F: FnMut() -> RequestBuilder,
+{
+    for attempt in 0..HTTP_RETRY_ATTEMPTS {
+        match build_request()
+            .send()
+            .and_then(reqwest::blocking::Response::error_for_status)
+        {
+            Ok(response) => return Ok(response),
+            Err(error) if attempt + 1 < HTTP_RETRY_ATTEMPTS && is_retryable_http_error(&error) => {
+                std::thread::sleep(http_retry_delay(attempt));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    unreachable!("HTTP retry loop must return on success or final error")
+}
+
+fn is_retryable_http_error(error: &reqwest::Error) -> bool {
+    error.is_timeout() || error.is_connect() || error.status().is_some_and(is_retryable_http_status)
+}
+
+fn is_retryable_http_status(status: StatusCode) -> bool {
+    matches!(
+        status,
+        StatusCode::TOO_MANY_REQUESTS
+            | StatusCode::BAD_GATEWAY
+            | StatusCode::SERVICE_UNAVAILABLE
+            | StatusCode::GATEWAY_TIMEOUT
+    ) || status.is_server_error()
+}
+
+fn http_retry_delay(attempt: usize) -> Duration {
+    Duration::from_millis(350 * (attempt as u64 + 1))
+}
+
 fn fetch_latest_temurin_lts_package(client: &Client) -> Result<(String, String, String), String> {
-    let available = client
-        .get("https://api.adoptium.net/v3/info/available_releases")
-        .send()
-        .and_then(reqwest::blocking::Response::error_for_status)
-        .map_err(|e| format!("Falha ao consultar releases LTS do Temurin: {}", e))?
-        .json::<AdoptiumAvailableReleases>()
-        .map_err(|e| format!("Falha ao ler releases LTS do Temurin: {}", e))?;
+    let available = send_request_with_retry(|| {
+        client.get("https://api.adoptium.net/v3/info/available_releases")
+    })
+    .map_err(|e| format!("Falha ao consultar releases LTS do Temurin: {}", e))?
+    .json::<AdoptiumAvailableReleases>()
+    .map_err(|e| format!("Falha ao ler releases LTS do Temurin: {}", e))?;
 
     let releases_url = format!(
         "https://api.adoptium.net/v3/assets/latest/{}/hotspot?os=windows&architecture=x64&image_type=jdk&jvm_impl=hotspot&heap_size=normal&vendor=eclipse",
         available.most_recent_lts
     );
-    let mut releases = client
-        .get(&releases_url)
-        .send()
-        .and_then(reqwest::blocking::Response::error_for_status)
+    let mut releases = send_request_with_retry(|| client.get(&releases_url))
         .map_err(|e| format!("Falha ao consultar pacote Temurin LTS: {}", e))?
         .json::<Vec<AdoptiumRelease>>()
         .map_err(|e| format!("Falha ao ler metadata do pacote Temurin LTS: {}", e))?;
 
-    let release = releases
-        .drain(..)
-        .next()
-        .ok_or_else(|| "A API oficial do Temurin nao retornou um pacote JDK LTS para Windows x64.".to_string())?;
+    let release = releases.drain(..).next().ok_or_else(|| {
+        "A API oficial do Temurin nao retornou um pacote JDK LTS para Windows x64.".to_string()
+    })?;
 
     Ok((
         release.release_name,
@@ -891,10 +1029,7 @@ where
     }
 
     logger.emit("info", format!("Baixando: {}", url));
-    let mut response = client
-        .get(url)
-        .send()
-        .and_then(reqwest::blocking::Response::error_for_status)
+    let mut response = send_request_with_retry(|| client.get(url))
         .map_err(|e| format!("Falha no download '{}': {}", url, e))?;
 
     if let Some(length) = response.content_length() {
@@ -1404,6 +1539,41 @@ mod tests {
 
         restore_env_var("RDS_GITHUB_TOKEN", previous_rds_token);
         restore_env_var("GITHUB_TOKEN", previous_github_token);
+    }
+
+    #[test]
+    fn github_release_cache_path_is_stable_and_local() {
+        let path = github_release_cache_path(
+            "https://api.github.com/repos/Stephane-D/SGDK/releases/latest",
+        )
+        .expect("github release cache path");
+
+        assert!(path.ends_with(
+            Path::new("toolchains")
+                .join(".cache")
+                .join("github-releases")
+                .join("Stephane-D__SGDK__latest.json")
+        ));
+        assert!(github_release_cache_path("https://example.com/releases/latest").is_none());
+    }
+
+    #[test]
+    fn github_rate_limit_hint_is_actionable_without_secret_values() {
+        let hint = github_api_status_hint(StatusCode::TOO_MANY_REQUESTS).expect("rate limit hint");
+
+        assert!(hint.contains("RDS_GITHUB_TOKEN"));
+        assert!(hint.contains("GITHUB_TOKEN"));
+        assert!(!hint.contains("Bearer"));
+    }
+
+    #[test]
+    fn retry_policy_only_retries_transient_http_statuses() {
+        assert!(is_retryable_http_status(StatusCode::TOO_MANY_REQUESTS));
+        assert!(is_retryable_http_status(StatusCode::BAD_GATEWAY));
+        assert!(is_retryable_http_status(StatusCode::SERVICE_UNAVAILABLE));
+        assert!(is_retryable_http_status(StatusCode::INTERNAL_SERVER_ERROR));
+        assert!(!is_retryable_http_status(StatusCode::FORBIDDEN));
+        assert!(!is_retryable_http_status(StatusCode::NOT_FOUND));
     }
 
     #[test]

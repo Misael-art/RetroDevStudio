@@ -35,6 +35,7 @@ toolchains/pvsneslib/
 toolchains/jdk/
 toolchains/env/
 toolchains/webdriver/
+toolchains/.cache/
 toolchains/libretro/cores/
 toolchains/libretro/.retrodev-install-*.json
 !toolchains/sgdk/.gitkeep

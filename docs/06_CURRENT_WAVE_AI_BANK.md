@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-11 (rodada 35 - PR #2 mergeado; readiness de promocao verde em main)
+**Ultima Atualizacao:** 2026-05-11 (rodada 36 - hardening Runtime Setup + NodeGraph em branch nova)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,15 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-11 rodada 36 - hardening Runtime Setup + NodeGraph):**
+  - **Branch:** `codex/product-hardening-runtime-setup`, criada a partir de `main` apos PR #2 ter sido mergeado e readiness em main ter passado.
+  - **Runtime Setup:** `dependency_manager.rs` ganhou retry/backoff para requests/downloads oficiais, cache local de metadata de GitHub Releases em `toolchains/.cache/github-releases/`, fallback controlado para cache quando a API falha e mensagens acionaveis para rate limit/erro remoto sem expor tokens. `.gitignore` ignora `toolchains/.cache/`.
+  - **NodeGraph:** `NodeGraphEditor.tsx` exporta `validateNodeGraph` e mostra no painel contagem/preview de erros e avisos para refs/portas quebradas, mismatch de porta/tipo, ciclos `exec`, entrada ausente e nos soltos. Isto e incremento de validacao; Phase D continua parcial.
+  - **Cobertura nova:** testes Rust para cache/rate-limit/retry em `dependency_manager` e teste Vitest para `validateNodeGraph` cobrindo refs quebradas, portas incompativeis e ciclo `exec`.
+  - **Gates desta branch:** `check:tree` OK; `lint` OK; `tsc --noEmit` OK; `npm test` **292** passed; `cargo clippy --manifest-path src-tauri\Cargo.toml -- -D warnings` OK; `cargo test --manifest-path src-tauri\Cargo.toml --lib -- --nocapture --test-threads=1` **329** passed / **10** ignored; `validate-upstream-windows.ps1 -SkipRustTests` `success=true`; `preflight:sgdk-e2e` `Ready: SIM`; `test:e2e:desktop:qa-rc` A-G OK (`qa-rc-2026-05-11T23-49-20-465Z-*`); `sgdk_matrix_corpus_ --ignored` **7/7**; `build:debug`, `build:portable`, `build:msi` OK.
+  - **Artefatos verificados:** Debug EXE `36,087,808` bytes (`2026-05-11 20:53:36`), Portable EXE `20,592,640` bytes (`2026-05-11 21:01:20`), MSI `7,331,840` bytes (`2026-05-11 21:01:05`).
+  - **Status honesto:** core MVP segue tecnicamente promovido em `main` pela rodada 35. Esta branch nao altera `support_status`: SGDK segue **Experimental**, Node Engine segue **Experimental/Parcial**, `BLAZE_ENGINE` segue blocker/stress corpus legitimo.
 
 * **O que acabou de acontecer (2026-05-11 rodada 35 - PR #2 promovido para main):**
   - **GitHub CLI:** `gh` nao existia no host; `winget install --id GitHub.cli -e --accept-package-agreements --accept-source-agreements` instalou `gh 2.92.0` em `C:\Program Files\GitHub CLI\gh.exe`. A sessao local de `gh` nao estava autenticada e nao havia `GH_TOKEN`/`GITHUB_TOKEN`, entao as operacoes de PR foram feitas pelo conector GitHub autenticado da sessao.

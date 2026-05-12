@@ -9,6 +9,7 @@ import NodeGraphEditor, {
   buildNodeMiniMap,
   serializeNodeGraph,
   summarizeNodeGraph,
+  validateNodeGraph,
   type NodeGraph,
 } from "./NodeGraphEditor";
 import { useEditorStore } from "../../core/store/editorStore";
@@ -229,6 +230,56 @@ describe("NodeGraphEditor helpers", () => {
 
     const appendedNodes = appended.graph.nodes.filter((node) => appended.appendedNodeIds.includes(node.id));
     expect(appendedNodes.every((node) => node.x > 1840)).toBe(true);
+  });
+
+  it("validates broken refs, incompatible ports and exec cycles", () => {
+    const invalidGraph: NodeGraph = {
+      nodes: [
+        GRAPH_FIXTURE.nodes[0],
+        GRAPH_FIXTURE.nodes[1],
+        {
+          id: "condition",
+          type: "condition_compare",
+          label: "Compare",
+          x: 1720,
+          y: 760,
+          inputs: [
+            { id: "exec", label: "exec", kind: "exec" },
+            { id: "a", label: "A", kind: "data", dataType: "int" },
+          ],
+          outputs: [{ id: "true", label: "True", kind: "exec" }],
+          params: {},
+        },
+        {
+          id: "logic_and",
+          type: "logic_and",
+          label: "AND",
+          x: 1960,
+          y: 760,
+          inputs: [
+            { id: "a", label: "A", kind: "data", dataType: "bool" },
+            { id: "b", label: "B", kind: "data", dataType: "bool" },
+          ],
+          outputs: [{ id: "out", label: "Out", kind: "data", dataType: "bool" }],
+          params: {},
+        },
+      ],
+      edges: [
+        { id: "missing_node", fromNode: "entry_node", fromPort: "exec", toNode: "ghost", toPort: "exec" },
+        { id: "kind_mismatch", fromNode: "entry_node", fromPort: "exec", toNode: "condition", toPort: "a" },
+        { id: "type_mismatch", fromNode: "logic_and", fromPort: "out", toNode: "move_node", toPort: "dx" },
+        { id: "cycle_a", fromNode: "entry_node", fromPort: "exec", toNode: "move_node", toPort: "exec" },
+        { id: "cycle_b", fromNode: "move_node", fromPort: "exec", toNode: "condition", toPort: "exec" },
+        { id: "cycle_c", fromNode: "condition", fromPort: "true", toNode: "move_node", toPort: "exec" },
+      ],
+    };
+
+    const validation = validateNodeGraph(invalidGraph);
+
+    expect(validation.errors.map((issue) => issue.code)).toEqual(
+      expect.arrayContaining(["broken_node_ref", "port_kind_mismatch", "data_type_mismatch", "exec_cycle"])
+    );
+    expect(validation.warnings).toHaveLength(0);
   });
 });
 
