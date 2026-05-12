@@ -142,6 +142,8 @@ RetroDevStudio/
 |   `-- validate-upstream-windows.ps1
 |
 `-- toolchains/
+    |-- .cache/
+    |   `-- github-releases/
     |-- sgdk/
     |-- pvsneslib/
     |-- webdriver/
@@ -160,6 +162,7 @@ RetroDevStudio/
 - IPC de frontend fica em `src/core/ipc/`.
 - Fixtures backend ficam em `src-tauri/tests/fixtures/`.
 - Dependencias de terceiros instaladas sob demanda vivem em `toolchains/` e nao devem ser versionadas no Git.
+- Metadata cacheada de releases oficiais vive em `toolchains/.cache/` e tambem nao deve ser versionada no Git.
 - Drivers locais de validacao desktop, como `msedgedriver.exe`, devem ficar em `toolchains/webdriver/`, nunca soltos na raiz do repositorio.
 
 ---
