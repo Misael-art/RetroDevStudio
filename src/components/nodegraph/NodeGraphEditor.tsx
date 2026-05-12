@@ -83,6 +83,26 @@ type NodeGraphSummary = {
   disconnectedNodeIds: string[];
 };
 
+export type NodeGraphValidationIssue = {
+  severity: "error" | "warning";
+  code:
+    | "broken_node_ref"
+    | "broken_port_ref"
+    | "port_kind_mismatch"
+    | "data_type_mismatch"
+    | "exec_cycle"
+    | "missing_entry"
+    | "disconnected_node";
+  message: string;
+  nodeId?: string;
+  edgeId?: string;
+};
+
+export type NodeGraphValidation = {
+  errors: NodeGraphValidationIssue[];
+  warnings: NodeGraphValidationIssue[];
+};
+
 type MiniMapNode = {
   id: string;
   type: NodeType;
@@ -181,6 +201,151 @@ export function summarizeNodeGraph(graph: NodeGraph): NodeGraphSummary {
     disconnectedNodeIds: graph.nodes
       .filter((node) => !connectedNodeIds.has(node.id))
       .map((node) => node.id),
+  };
+}
+
+function findPort(node: GraphNode, portId: string, direction: "input" | "output"): NodePort | undefined {
+  const ports = direction === "input" ? node.inputs : node.outputs;
+  return ports.find((port) => port.id === portId);
+}
+
+function collectExecCycles(graph: NodeGraph, nodeById: Map<string, GraphNode>): string[][] {
+  const adjacency = new Map<string, string[]>();
+  for (const edge of graph.edges) {
+    const fromNode = nodeById.get(edge.fromNode);
+    const toNode = nodeById.get(edge.toNode);
+    if (!fromNode || !toNode) {
+      continue;
+    }
+    const fromPort = findPort(fromNode, edge.fromPort, "output");
+    const toPort = findPort(toNode, edge.toPort, "input");
+    if (fromPort?.kind !== "exec" || toPort?.kind !== "exec") {
+      continue;
+    }
+    adjacency.set(edge.fromNode, [...(adjacency.get(edge.fromNode) ?? []), edge.toNode]);
+  }
+
+  const cycles: string[][] = [];
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const stack: string[] = [];
+
+  const visit = (nodeId: string) => {
+    if (visiting.has(nodeId)) {
+      const cycleStart = stack.indexOf(nodeId);
+      cycles.push(cycleStart >= 0 ? stack.slice(cycleStart).concat(nodeId) : [nodeId]);
+      return;
+    }
+    if (visited.has(nodeId)) {
+      return;
+    }
+
+    visiting.add(nodeId);
+    stack.push(nodeId);
+    for (const next of adjacency.get(nodeId) ?? []) {
+      visit(next);
+    }
+    stack.pop();
+    visiting.delete(nodeId);
+    visited.add(nodeId);
+  };
+
+  for (const node of graph.nodes) {
+    visit(node.id);
+  }
+
+  return cycles;
+}
+
+export function validateNodeGraph(graph: NodeGraph): NodeGraphValidation {
+  const issues: NodeGraphValidationIssue[] = [];
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const connectedNodeIds = new Set<string>();
+
+  for (const edge of graph.edges) {
+    const fromNode = nodeById.get(edge.fromNode);
+    const toNode = nodeById.get(edge.toNode);
+    if (!fromNode || !toNode) {
+      issues.push({
+        severity: "error",
+        code: "broken_node_ref",
+        edgeId: edge.id,
+        message: `Aresta '${edge.id}' aponta para no inexistente.`,
+      });
+      continue;
+    }
+
+    const fromPort = findPort(fromNode, edge.fromPort, "output");
+    const toPort = findPort(toNode, edge.toPort, "input");
+    if (!fromPort || !toPort) {
+      issues.push({
+        severity: "error",
+        code: "broken_port_ref",
+        edgeId: edge.id,
+        message: `Aresta '${edge.id}' aponta para porta inexistente.`,
+      });
+      continue;
+    }
+
+    connectedNodeIds.add(edge.fromNode);
+    connectedNodeIds.add(edge.toNode);
+
+    if (fromPort.kind !== toPort.kind) {
+      issues.push({
+        severity: "error",
+        code: "port_kind_mismatch",
+        edgeId: edge.id,
+        message: `Aresta '${edge.id}' liga porta ${fromPort.kind} em porta ${toPort.kind}.`,
+      });
+    }
+
+    if (
+      fromPort.kind === "data" &&
+      toPort.kind === "data" &&
+      fromPort.dataType &&
+      toPort.dataType &&
+      fromPort.dataType !== toPort.dataType
+    ) {
+      issues.push({
+        severity: "error",
+        code: "data_type_mismatch",
+        edgeId: edge.id,
+        message: `Aresta '${edge.id}' liga dado ${fromPort.dataType} em dado ${toPort.dataType}.`,
+      });
+    }
+  }
+
+  if (graph.nodes.length > 0 && graph.nodes.every((node) => !EVENT_NODE_TYPES.includes(node.type))) {
+    issues.push({
+      severity: "warning",
+      code: "missing_entry",
+      message: "Grafo sem evento de entrada.",
+    });
+  }
+
+  for (const node of graph.nodes) {
+    if (!connectedNodeIds.has(node.id)) {
+      issues.push({
+        severity: "warning",
+        code: "disconnected_node",
+        nodeId: node.id,
+        message: `No '${node.label}' ainda esta solto no fluxo.`,
+      });
+    }
+  }
+
+  for (const cycle of collectExecCycles(graph, nodeById)) {
+    issues.push({
+      severity: "error",
+      code: "exec_cycle",
+      nodeId: cycle[0],
+      message: `Ciclo exec detectado: ${cycle.join(" -> ")}.`,
+    });
+  }
+
+  return {
+    errors: issues.filter((issue) => issue.severity === "error"),
+    warnings: issues.filter((issue) => issue.severity === "warning"),
   };
 }
 
@@ -1755,6 +1920,8 @@ export default function NodeGraphEditor() {
   }
 
   const graphSummary = useMemo(() => summarizeNodeGraph(graph), [graph]);
+  const graphValidation = useMemo(() => validateNodeGraph(graph), [graph]);
+  const graphValidationPreview = [...graphValidation.errors, ...graphValidation.warnings].slice(0, 3);
   const miniMapNodes = useMemo(
     () => buildNodeMiniMap(graph, MINIMAP_WIDTH, MINIMAP_HEIGHT, MINIMAP_PADDING),
     [graph]
@@ -1989,6 +2156,14 @@ export default function NodeGraphEditor() {
               <span className="rounded bg-[#11111b] px-2 py-1 text-[#a6adc8]">
                 Soltos: <span className="font-semibold text-[#cdd6f4]">{graphSummary.disconnectedNodeIds.length}</span>
               </span>
+              <span className="rounded bg-[#11111b] px-2 py-1 text-[#a6adc8]">
+                Validacao:{" "}
+                <span className={graphValidation.errors.length ? "font-semibold text-[#f38ba8]" : "font-semibold text-[#a6e3a1]"}>
+                  {graphValidation.errors.length}
+                </span>
+                <span className="text-[#6c7086]">/</span>
+                <span className="font-semibold text-[#f9e2af]">{graphValidation.warnings.length}</span>
+              </span>
             </div>
 
             <div
@@ -2030,6 +2205,26 @@ export default function NodeGraphEditor() {
               <p className="text-[#f9e2af]">
                 {graphSummary.disconnectedNodeIds.length} no(s) ainda sem conexao no fluxo atual.
               </p>
+            )}
+            {graphValidationPreview.length > 0 && (
+              <div
+                data-testid="nodegraph-validation-preview"
+                className="rounded border border-[#45475a] bg-[#11111b] px-2 py-1.5 text-[10px] leading-snug"
+              >
+                <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#f9e2af]">
+                  Validador do grafo
+                </p>
+                <ul className="mt-1 space-y-1">
+                  {graphValidationPreview.map((issue) => (
+                    <li
+                      key={`${issue.code}-${issue.edgeId ?? issue.nodeId ?? issue.message}`}
+                      className={issue.severity === "error" ? "text-[#f38ba8]" : "text-[#f9e2af]"}
+                    >
+                      {issue.message}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
 
             {importedSemantics ? (
