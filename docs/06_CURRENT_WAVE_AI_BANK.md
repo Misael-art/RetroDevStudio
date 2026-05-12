@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-11 (rodada 36 - hardening Runtime Setup + NodeGraph em branch nova)
+**Ultima Atualizacao:** 2026-05-11 (rodada 37 - PR #3 mergeado; readiness verde em main)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,12 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-11 rodada 37 - PR #3 integrado em main):**
+  - **PR/CI remoto:** PR #3 (`https://github.com/Misael-art/RetroDevStudio/pull/3`) foi verificado no SHA `d2fec08eba2ec68d31714439bd92e8637d423114` com `CI` run `25704763249` e `Desktop E2E` run `25704763247` verdes. O Desktop E2E remoto concluiu build debug e todos os cenarios MD/SNES, overflow, warning, healthy, error e stale.
+  - **Merge:** PR #3 foi mergeado em `main` por merge commit `76ccd7d978ea741771478d89053818285213d32e`; o checkout local de `main` avancou por fast-forward.
+  - **Readiness main:** `npm run release:readiness:promotion` passou em `main` no commit `76ccd7d978ea741771478d89053818285213d32e` com `Pronto para promocao: SIM`, divergencia `+0 / -0`, baseline, upstream oficial, build debug e desktop E2E simples verdes.
+  - **Estado resultante:** Runtime Setup com retry/cache/fallback e NodeGraph validator estao integrados em `main`. Core MVP segue tecnicamente promovivel; SGDK segue **Experimental**, Node Engine segue **Experimental/Parcial**, e `BLAZE_ENGINE` segue blocker/stress corpus legitimo.
 
 * **O que acabou de acontecer (2026-05-11 rodada 36 - hardening Runtime Setup + NodeGraph):**
   - **Branch:** `codex/product-hardening-runtime-setup`, criada a partir de `main` apos PR #2 ter sido mergeado e readiness em main ter passado.

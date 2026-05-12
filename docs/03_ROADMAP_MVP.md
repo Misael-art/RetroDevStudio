@@ -1,8 +1,10 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-05-11 (rodada 36)
+**Ultima revisao canonica:** 2026-05-11 (rodada 37)
 **Fase ativa real:** Core MVP promovido tecnicamente em main; hardening continua nas superficies experimentais
+
+**Nota 2026-05-11 (rodada 37, main):** PR #3 (`codex/product-hardening-runtime-setup`) foi mergeado em `main` por merge commit `76ccd7d978ea741771478d89053818285213d32e` apos checks remotos verdes no SHA `d2fec08eba2ec68d31714439bd92e8637d423114` (`CI` run `25704763249`, `Desktop E2E` run `25704763247`). Em `main`, `npm run release:readiness:promotion` passou novamente com `Pronto para promocao: SIM`, divergencia `+0 / -0`, baseline, upstream oficial e desktop E2E simples verdes. O core MVP continua promovivel; SGDK continua **Experimental**, Node/Phase D continua **Experimental/Parcial** sem jogo completo por nodes e sem AST C completo.
 
 **Nota 2026-05-11 (rodada 36, branch `codex/product-hardening-runtime-setup`):** apos a promocao de PR #2, foi iniciado hardening incremental em branch nova. Runtime Setup agora tem retry/backoff para requests oficiais, cache local de metadata GitHub Releases (`toolchains/.cache/github-releases/`) e fallback controlado para cache com mensagens acionaveis de rate limit/erro remoto sem vazar token. NodeGraph ganhou validador exportado e preview no painel para refs/portas quebradas, mismatch de tipo/kind, ciclos `exec`, entrada ausente e nos soltos. Barra local e fluxos reais foram rerodados: `npm test` **292**, `cargo test --lib` **329/10 ignored**, upstream oficial `success=true`, `qa-rc` A-G fresco (`qa-rc-2026-05-11T23-49-20-465Z-*`), corpus SGDK **7/7** e Debug/Portable/MSI gerados. Isto nao promove SGDK nem Node Engine: SGDK continua **Experimental**, Node/Phase D continua **Experimental/Parcial** sem jogo completo por nodes e sem AST C completo, `BLAZE_ENGINE` continua stress/blocker legitimo.
 
@@ -72,7 +74,7 @@
 - Leitura honesta: o core MVP esta tecnicamente promovido em `main`, mas o produto amplo continua em hardening nas superficies experimentais.
 - O core canonico `Projeto -> Editor -> Build -> ROM -> Emulacao` existe e ja foi provado para `Mega Drive` e `SNES`.
 - `Desktop E2E` remoto ficou verde no GitHub/Windows em `2026-04-16` (runs #143/#144, commit `c1a7870`) e foi revalidado no PR #2 em `2026-05-11` para o SHA `3b2b33e` (`Desktop E2E` pull_request `25698765818`).
-- `release:readiness:promotion` foi reexecutado em `main` no commit `35ab81ff63628ad50d4f5afff289f32013171c99` e retornou `Pronto para promocao: SIM`.
+- `release:readiness:promotion` foi reexecutado em `main` no commit `76ccd7d978ea741771478d89053818285213d32e` e retornou `Pronto para promocao: SIM`.
 - Superficies `Experimental` reais continuam visiveis, mas nao podem contaminar a leitura do fechamento do MVP.
 
 ---
