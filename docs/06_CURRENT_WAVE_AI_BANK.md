@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-11 (rodada 37 - PR #3 mergeado; readiness verde em main)
+**Ultima Atualizacao:** 2026-05-12 (rodada 38 - inventario estrutural SGDK_Engines 122 projetos + verificacao local)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,17 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-12 rodada 38 - inventario estrutural SGDK_Engines):**
+  - **Branch/base:** `codex/sgdk-nocode-engine-hardening`, criada a partir de `origin/main` em `4bf4db585b0091e0a8c0460450832067bcf6c05c`.
+  - **Baseline inicial:** `check:tree` OK; `lint` OK; `tsc --noEmit` OK; `npm test` **292/292**; `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK; `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` OK (**329 passed / 10 ignored**). O primeiro `cargo test` estourou timeout local de 10 min; repetido com timeout maior, fechou verde.
+  - **Codigo:** novo modulo `src-tauri/src/core/sgdk_corpus_inventory.rs` cataloga projetos SGDK com leitura C-lite/RES/assets, source mapping e semantic gaps rastreaveis. O backend expõe comandos IPC `inspect_sgdk_project_inventory` e `inspect_sgdk_corpus_inventory` para projeto individual/corpus com report opcional.
+  - **Regressoes:** testes Rust cobrem extracao estrutural (C/H/RES/assets/funcoes/includes/defines/macros/globais/arrays/calls SGDK/callbacks/update/main loop), determinismo do report e fallback para fonte nao UTF-8 (`lossy_source_encoding` em vez de abortar).
+  - **Corpus real:** `cargo test sgdk_corpus_inventory_real_corpus_report --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` passou e gerou `src-tauri/target-test/validation/sgdk-corpus-inventory.json` (**20,817,228 bytes**) para `F:\Projects\MegaDrive_DEV\SGDK_Engines`: **122 projetos**, `project_details` completo por projeto e resumo agregado.
+  - **Gaps agregados do corpus:** `preprocessor_condition=1471`, `function_like_macro=484`, `unsupported_resource_kind=236`, `assembly_source=150`, `multiline_macro=90`, `inline_assembly=47`, `lossy_source_encoding=33`. Leitura operacional: o corpus ampliado esta catalogado, mas ainda ha gaps semanticos reais e muitos projetos sem source/resources na raiz esperada.
+  - **Verificacao pos-implementacao:** passaram `check:tree`, `lint`, `tsc --noEmit`, `npm test` **292/292**, `cargo clippy`, `cargo test --lib` **332 passed / 11 ignored**, `cargo test sgdk_corpus_inventory`, `cargo test sgdk_corpus_inventory_real_corpus_report --ignored`, `cargo test sgdk_matrix_corpus_ --ignored` **7/7**, `preflight:sgdk-e2e`, `test:e2e:desktop:qa-rc` A-G, `build:debug`, `build:portable`, `build:msi` e `validate-upstream-windows.ps1 -SkipRustTests`.
+  - **Readiness:** `npm run release:readiness:promotion` executou baseline, build debug, upstream oficial e desktop E2E com status interno verde, mas o resumo final ficou `Pronto para promocao: NAO` porque havia mudancas locais da propria branch antes de commit. Isto deve ser tratado como bloqueio de governanca pre-merge/pre-main, nao como autorizacao para promover SGDK/Node Engine.
+  - **Status honesto:** isto nao promove `support_status`; SGDK segue **Experimental**, Node Engine segue **Experimental/Parcial**, sem AST C completo, sem round-trip completo dos 122 projetos e sem jogo 100% por nodes comprovado.
 
 * **O que acabou de acontecer (2026-05-11 rodada 37 - PR #3 integrado em main):**
   - **PR/CI remoto:** PR #3 (`https://github.com/Misael-art/RetroDevStudio/pull/3`) foi verificado no SHA `d2fec08eba2ec68d31714439bd92e8637d423114` com `CI` run `25704763249` e `Desktop E2E` run `25704763247` verdes. O Desktop E2E remoto concluiu build debug e todos os cenarios MD/SNES, overflow, warning, healthy, error e stale.
