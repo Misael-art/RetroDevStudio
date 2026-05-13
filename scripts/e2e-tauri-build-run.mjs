@@ -718,6 +718,15 @@ async function isDriverOnline() {
   }
 }
 
+async function waitForDriverOffline(timeoutMs, label) {
+  return waitFor(
+    async () => !(await isDriverOnline()),
+    timeoutMs,
+    label,
+    250
+  );
+}
+
 async function createSession(applicationPath) {
   const payload = {
     capabilities: {
@@ -1625,6 +1634,33 @@ function summarizeDriverLogs(logs) {
   return logs.slice(-20).join("\n");
 }
 
+function waitForProcessExit(processHandle, timeoutMs) {
+  return new Promise((resolve) => {
+    if (!processHandle || processHandle.exitCode !== null || processHandle.signalCode !== null) {
+      resolve(true);
+      return;
+    }
+
+    let settled = false;
+    const finish = (exited) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timeout);
+      processHandle.off("exit", onExit);
+      processHandle.off("error", onError);
+      resolve(exited);
+    };
+    const onExit = () => finish(true);
+    const onError = () => finish(true);
+    const timeout = setTimeout(() => finish(false), timeoutMs);
+
+    processHandle.once("exit", onExit);
+    processHandle.once("error", onError);
+  });
+}
+
 function isSessionBootstrapFailure(details) {
   const normalized = details.toLowerCase();
   return (
@@ -1902,12 +1938,19 @@ async function main() {
   let driverExitCode = null;
   if (!options.externalDriver) {
     if (await isDriverOnline()) {
-      fail(
-        [
-          `Ja existe um tauri-driver respondendo em ${driverServerUrl}.`,
-          "Finalize o processo existente ou execute o runner com --external-driver.",
-        ].join(" ")
-      );
+      try {
+        await waitForDriverOffline(
+          10000,
+          `tauri-driver anterior ainda respondia em ${driverServerUrl}`
+        );
+      } catch {
+        fail(
+          [
+            `Ja existe um tauri-driver respondendo em ${driverServerUrl}.`,
+            "Finalize o processo existente ou execute o runner com --external-driver.",
+          ].join(" ")
+        );
+      }
     }
 
     try {
@@ -3789,7 +3832,21 @@ async function main() {
       await deleteSession(sessionId);
     }
     if (driverProcess) {
-      driverProcess.kill();
+      if (!driverExited) {
+        driverProcess.kill();
+      }
+      const processExited = await waitForProcessExit(driverProcess, 10000);
+      if (!processExited) {
+        console.warn("[cleanup] tauri-driver nao confirmou encerramento em ate 10s.");
+      }
+      try {
+        await waitForDriverOffline(
+          10000,
+          `tauri-driver nao liberou ${driverServerUrl} apos encerramento do cenario`
+        );
+      } catch {
+        console.warn(`[cleanup] tauri-driver ainda responde em ${driverServerUrl} apos cleanup.`);
+      }
     }
     if (temporaryProjectDir) {
       const cleaned = await cleanupTemporaryProject(temporaryProjectDir);
