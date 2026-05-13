@@ -13,6 +13,7 @@
 ## Estado Atual
 
 - Fase ativa real: `release candidate / beta tecnica em hardening`.
+- Fotografia atual em `main`: PR #4 mergeado em `91bb8eb354389e370bb59d6a5ae84c21b4a1429f`; `npm run release:readiness:promotion` passou com `Pronto para promocao: SIM`.
 - O foco atual nao e abrir escopo novo; e manter o fluxo canonico `Build -> ROM -> Emulacao` repetivel e documentado com honestidade.
 - O estado operacional canonico fica em [docs/06_AI_MEMORY_BANK.md](./docs/06_AI_MEMORY_BANK.md).
 - A matriz permanente de fases, superficies e importadores fica em [docs/03_ROADMAP_MVP.md](./docs/03_ROADMAP_MVP.md).
@@ -35,7 +36,7 @@ RetroDev Studio ja passou de prototipo. O produto hoje consegue:
 
 O produto ainda nao deve ser descrito como engine totalmente pronta para producao comercial. A prioridade atual e consistencia, ergonomia e repetibilidade dos fluxos certificados.
 
-Na frente SGDK/no-code, o editor ja possui UI mais compacta, NodeGraph com vocabulario de autoria, geracao C deterministica em testes e inventario de corpus com gaps acionaveis. Isso continua marcado como `Experimental` ate existir prova completa de AST/round-trip/build/emulacao por corpus e jogo no-code com ROM validada.
+Na frente SGDK/no-code, o editor ja possui UI mais compacta, NodeGraph com vocabulario de autoria, geracao C deterministica em testes e inventario de corpus com gaps acionaveis integrados em `main`. Isso continua marcado como `Experimental`: SGDK Stable e Node Engine Stable continuam **NAO** ate existir prova completa de AST/round-trip/build/emulacao por corpus e jogo no-code com ROM validada.
 
 ---
 

@@ -1,8 +1,10 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-05-13 (rodada 40)
+**Ultima revisao canonica:** 2026-05-13 (rodada 41)
 **Fase ativa real:** Core MVP promovido tecnicamente em main; hardening continua nas superficies experimentais
+
+**Nota 2026-05-13 (rodada 41, main):** PR #4 (`codex/sgdk-nocode-production-ui`) foi mergeado em `main` por merge commit `91bb8eb354389e370bb59d6a5ae84c21b4a1429f`, contendo o head `d21939ce83f360072a64637170922c78e2dd149d`. Os checks remotos de `pull_request` passaram no SHA do PR: `CI` run `25788180025` e `Desktop E2E` run `25788180007`; um run separado de `Desktop E2E` no evento `push` falhou no mesmo SHA e nao foi tratado como gate de PR. Em `main`, `npm run release:readiness:promotion` passou com `Pronto para promocao: SIM`, divergencia `+0 / -0`, baseline, build debug, upstream oficial, desktop E2E simples e QA RC A-F consumido das evidencias `qa-rc-2026-05-13T01-31-23-216Z-*`. UI/CX production hardening esta integrado em `main`. Isto nao promove SGDK nem Node Engine: SGDK continua **Experimental**, Node/Phase D continua **Experimental/Parcial**, `BLAZE_ENGINE` continua stress/blocker legitimo, e ainda faltam AST C completo, round-trip/build/emulacao dos 122 projetos e ROM/emulacao institucional de jogo no-code.
 
 **Nota 2026-05-13 (rodada 40, branch `codex/sgdk-nocode-production-ui`):** a frente SGDK/no-code avancou sem promocao de maturidade e foi estabilizada para fechamento de branch. A UI principal ficou mais compacta e produtiva (topbar com warnings sob popover, status bar inferior, viewport com toggles pequenos, Inspector com diagnostico importado colapsado e Hierarchy com badges compactos). A cor-chave magenta agora e tratada no preview por flood fill a partir da borda, sem mutar assets, com toggle de debug e preservando magenta legitimo isolado no interior do sprite. O NodeGraph declara o vocabulario no-code obrigatorio e tem auto-layout por sistema; o compilador experimental prova C deterministico para um jogo Mega Drive 100% por nodes em teste unitario. O inventario SGDK agora gera gaps acionaveis e `node_candidates`; no corpus real seguem **122 projetos**, **32.251 candidatos de nodes** em **100 projetos**, e os gaps agregados seguem inalterados (`preprocessor_condition=1471`, `function_like_macro=484`, `unsupported_resource_kind=236`, `assembly_source=150`, `multiline_macro=90`, `inline_assembly=47`, `lossy_source_encoding=33`). Gates locais frescos: `check:tree`, `lint`, `tsc`, `npm test` **301/301**, `cargo clippy`, `cargo test --lib` **333/11 ignored**, corpus inventory real, matriz SGDK **7/7**, preflight SGDK, upstream oficial, QA RC A-G com evidencias `qa-rc-2026-05-13T01-31-23-216Z-*`, Debug/Portable/MSI. `release:readiness:promotion` continua sendo gate de governanca para destino `main`; fora de `main`, nao autoriza promocao. SGDK continua **Experimental** e Node/Phase D continua **Experimental/Parcial** porque ainda faltam AST C completo, round-trip/build/emulacao por projeto para os 122 e ROM/emulacao institucional de jogo no-code.
 
@@ -74,11 +76,11 @@
 
 ## Estado Executivo Atual
 
-- Data de referencia: `2026-05-11`.
+- Data de referencia: `2026-05-13`.
 - Leitura honesta: o core MVP esta tecnicamente promovido em `main`, mas o produto amplo continua em hardening nas superficies experimentais.
 - O core canonico `Projeto -> Editor -> Build -> ROM -> Emulacao` existe e ja foi provado para `Mega Drive` e `SNES`.
-- `Desktop E2E` remoto ficou verde no GitHub/Windows em `2026-04-16` (runs #143/#144, commit `c1a7870`) e foi revalidado no PR #2 em `2026-05-11` para o SHA `3b2b33e` (`Desktop E2E` pull_request `25698765818`).
-- `release:readiness:promotion` foi reexecutado em `main` no commit `76ccd7d978ea741771478d89053818285213d32e` e retornou `Pronto para promocao: SIM`.
+- `Desktop E2E` remoto ficou verde no GitHub/Windows em `2026-04-16` (runs #143/#144, commit `c1a7870`) e foi revalidado no PR #4 em `2026-05-13` para o SHA `d21939c` (`Desktop E2E` pull_request `25788180007`).
+- `release:readiness:promotion` foi reexecutado em `main` no commit `91bb8eb354389e370bb59d6a5ae84c21b4a1429f` e retornou `Pronto para promocao: SIM`.
 - Superficies `Experimental` reais continuam visiveis, mas nao podem contaminar a leitura do fechamento do MVP.
 
 ---
@@ -86,7 +88,7 @@
 ## Bloqueadores Reais
 
 - ~~`Desktop E2E` remoto ainda precisa ficar verde de forma repetivel no runner GitHub/Windows.~~ **Resolvido em 2026-04-16:** runs #143/#144 passaram com 16/16 cenarios.
-- ~~A fotografia institucional de promocao precisa ser regenerada no destino de promocao (`main` apos merge).~~ **Resolvido em 2026-05-11 rodada 35:** PR #2 mergeado e `release:readiness:promotion` passou em `main` com `Pronto para promocao: SIM`.
+- ~~A fotografia institucional de promocao precisa ser regenerada no destino de promocao (`main` apos merge).~~ **Revalidado em 2026-05-13 rodada 41:** PR #4 mergeado e `release:readiness:promotion` passou em `main` com `Pronto para promocao: SIM`.
 - MSI/portable foram revalidados localmente em `2026-05-11`; precisam continuar sendo revalidados quando o fluxo `Menu inicial -> Criar Projeto` ou packaging mudar.
 - ~~A trilha publica ainda precisa refletir o estado real da wave candidata; PR #2 esta `draft/open` e a branch `feat/sgdk-vram-residency-streaming-r14` continua muitos commits a frente de `origin/main`, bloqueio de governanca ate merge.~~ **Resolvido em 2026-05-11 rodada 35:** PR #2 saiu de draft e foi mergeado em `main`.
 - Permanecem bloqueios de maturidade para labels **Stable**: SGDK requer corpus/round-trip completo e BLAZE classificado/resolvido; Node Engine requer jogo criado por nodes, build e smoke de emulacao sem edicao manual de codigo.

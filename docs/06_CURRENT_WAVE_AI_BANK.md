@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-13 (rodada 40 - fechamento branch SGDK/no-code production-ui)
+**Ultima Atualizacao:** 2026-05-13 (rodada 41 - PR #4 promovido em main)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-13 rodada 41 - PR #4 promovido em main):**
+  - **PR/merge:** PR #4 (`https://github.com/Misael-art/RetroDevStudio/pull/4`) esta `closed/merged`, `draft=false`, base `main`, head `codex/sgdk-nocode-production-ui`, head SHA `d21939ce83f360072a64637170922c78e2dd149d`. Merge realizado no GitHub por `Misael-art` em `2026-05-13T14:26:20Z`, merge commit `91bb8eb354389e370bb59d6a5ae84c21b4a1429f`.
+  - **Checks remotos:** no evento `pull_request`, `CI` run `25788180025` e `Desktop E2E` run `25788180007` passaram no SHA `d21939c`. A consulta de check-runs tambem mostrou um `Desktop E2E` de evento `push` com falha no mesmo SHA; ele nao foi o gate de PR consumido para merge.
+  - **Main local:** `git checkout main` + `git pull --ff-only origin main` atualizaram o workspace para `91bb8eb354389e370bb59d6a5ae84c21b4a1429f`, com `origin/main` no mesmo SHA e worktree limpo. `git merge-base --is-ancestor d21939ce83f360072a64637170922c78e2dd149d HEAD` confirmou o head do PR em `main`.
+  - **Readiness em main:** `npm run release:readiness:promotion` passou em `main` com `Pronto para promocao: SIM`, divergencia `+0 / -0`, report `src-tauri/target-test/validation/release-readiness.md` gerado em `2026-05-13T15:22:26.595Z`.
+  - **Gates consumidos pelo readiness:** `check:tree`, `lint`, `tsc --noEmit`, `npm test` **301/301**, `cargo clippy`, `cargo test --lib`, `build:debug`, `validate-upstream-windows.ps1 -SkipRustTests` e desktop E2E simples. QA RC A-F foi consumido das evidencias `qa-rc-2026-05-13T01-31-23-216Z-*`.
+  - **Estado resultante:** UI/CX production hardening esta integrado em `main`; core MVP segue promovivel em `main`. SGDK Stable: **NAO**. Node Engine Stable: **NAO**. A frente SGDK/no-code continua **Experimental/Parcial** sem AST C completo, round-trip/build/emulacao dos 122 projetos, reducao governada dos gaps agregados ou ROM/emulacao institucional de jogo 100% no-code. `BLAZE_ENGINE` permanece blocker/stress corpus legitimo.
 
 * **O que acabou de acontecer (2026-05-13 rodada 40 - fechamento branch SGDK/no-code production-ui):**
   - **Branch/base:** `codex/sgdk-nocode-production-ui`, criada a partir do hardening SGDK anterior e estabilizada nesta rodada para commit/push sem perder o diff local existente.
@@ -1181,7 +1189,7 @@ As seguintes decisoes ja foram debatidas e sao finais:
 ## 4. PROXIMO PASSO IMEDIATO (PARA A IA EXECUTAR QUANDO SOLICITADA)
 
 **Tarefa:**
-Preservar o core MVP promovido em `main` e avancar apenas incrementos que mantenham a barra verde. A governanca do PR #2 foi fechada na rodada 35: PR ready/merged, `main` em `35ab81ff63628ad50d4f5afff289f32013171c99`, e `npm run release:readiness:promotion` verde no destino. O proximo trabalho nao deve reabrir a linha de release sem necessidade; deve atacar robustez de produto, Node Engine e SGDK em unidades pequenas, com SGDK/Node ainda marcados como `Experimental` ate corpus/round-trip/jogo por nodes provarem o contrario.
+Preservar o core MVP promovido em `main` e avancar apenas incrementos que mantenham a barra verde. A governanca do PR #4 foi fechada na rodada 41: PR merged, `main` em `91bb8eb354389e370bb59d6a5ae84c21b4a1429f`, checks remotos de `pull_request` verdes e `npm run release:readiness:promotion` verde no destino. O proximo trabalho nao deve reabrir a linha de release sem necessidade; deve atacar robustez de produto, Node Engine e SGDK em unidades pequenas, com SGDK/Node ainda marcados como `Experimental` ate corpus/round-trip/jogo por nodes provarem o contrario.
 
 **Pre-requisitos operacionais:**
 * Manter os 6 gates canonicos verdes em toda alteracao relevante.
@@ -1190,7 +1198,7 @@ Preservar o core MVP promovido em `main` e avancar apenas incrementos que manten
 * Reexecutar bundle MSI e smoke desktop em host Windows institucional sempre que a mudanca tocar packaging, emulacao, build orchestration, onboarding ou fluxo de projeto.
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
-**Sequencia de acoes recomendada (rodada 35):**
+**Sequencia de acoes recomendada (rodada 41):**
 1. Criar nova branch `codex/...` a partir de `main` para qualquer codigo pos-promocao; nao misturar novas features direto no merge commit de release.
 2. Implementar primeiro robustez pequena e auditavel: cache/retry/backoff/mensagens do Runtime Setup, logs diagnosticos ou gates SGDK claros, com testes focados.
 3. Para Node Engine, adicionar semantica/validacao/codegen em fatias pequenas e provar determinismo antes de qualquer claim de jogo completo por nodes.
