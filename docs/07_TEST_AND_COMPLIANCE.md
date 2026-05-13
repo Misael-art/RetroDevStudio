@@ -39,6 +39,8 @@
 - Backend: `cargo test --lib -- --nocapture --test-threads=1`.
 - Cobrir parser/schema, hardware profiles, framebuffer, dependency manager e fluxos de editor sensiveis.
 - Cobrir inventario SGDK/no-code quando a mudanca tocar importador SGDK, source mapping ou semantic gaps; o gate local externo e `cargo test sgdk_corpus_inventory_real_corpus_report --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` em host com `F:\Projects\MegaDrive_DEV\SGDK_Engines`.
+- Mudancas de UI/CX SGDK/no-code devem cobrir topbar/status bar compactas, Inspector com diagnostico colapsado, Hierarchy compacta, viewport sem overlays invasivos, key color transparency e NodeGraph layout/vocabulario.
+- Mudancas de NodeGraph/no-code devem cobrir validacao, serializacao, geracao deterministica de C e pelo menos um fluxo de jogo 100% por nodes em teste unitario; isso nao substitui prova institucional de ROM/emulacao.
 
 ### 2.3 Integracao
 - O pipeline de build deve ser testado por target.

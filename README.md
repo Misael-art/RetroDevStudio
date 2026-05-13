@@ -35,6 +35,8 @@ RetroDev Studio ja passou de prototipo. O produto hoje consegue:
 
 O produto ainda nao deve ser descrito como engine totalmente pronta para producao comercial. A prioridade atual e consistencia, ergonomia e repetibilidade dos fluxos certificados.
 
+Na frente SGDK/no-code, o editor ja possui UI mais compacta, NodeGraph com vocabulario de autoria, geracao C deterministica em testes e inventario de corpus com gaps acionaveis. Isso continua marcado como `Experimental` ate existir prova completa de AST/round-trip/build/emulacao por corpus e jogo no-code com ROM validada.
+
 ---
 
 ## Fluxo Canonico

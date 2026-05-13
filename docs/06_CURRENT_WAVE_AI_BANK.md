@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-12 (rodada 38 - inventario estrutural SGDK_Engines 122 projetos + verificacao local)
+**Ultima Atualizacao:** 2026-05-13 (rodada 40 - fechamento branch SGDK/no-code production-ui)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,17 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-13 rodada 40 - fechamento branch SGDK/no-code production-ui):**
+  - **Branch/base:** `codex/sgdk-nocode-production-ui`, criada a partir do hardening SGDK anterior e estabilizada nesta rodada para commit/push sem perder o diff local existente.
+  - **UI/CX:** topbar compacta com `Build`, `Play`, `Stop`, `Pause/Resume`, budgets e badge/popover de warnings; status bar inferior para build/import/emulacao/hardware; viewport com toggles pequenos para camera, bounds, labels, staging, warnings, command dock e key color; Inspector prioriza `Transform`/campos editaveis antes de contexto importado; Hierarchy troca tags longas por badges compactos com tooltip.
+  - **Sprites/key color:** `src/core/keyColorTransparency.ts` detecta magenta de borda como cor-chave, usa flood fill da borda para tornar transparente somente o fundo conectado, nao muta os dados originais e preserva magenta legitimo isolado no interior; o viewport adiciona toggle de debug para mostrar a cor-chave.
+  - **NodeGraph/no-code:** `NodeGraphEditor.tsx` declara o vocabulario no-code obrigatorio e expõe `autoLayoutNodeGraph` por sistemas para evitar grafos importados caoticos. `nodeCompiler.ts` cobre esse vocabulario no compilador experimental e prova C deterministico de um jogo Mega Drive 100% por nodes em teste unitario (controle, animacao, tile, camera, som e budget).
+  - **SGDK corpus:** `sgdk_corpus_inventory.rs` agora emite semantic gaps acionaveis com impacto, severidade, sugestao e flags `blocks_nocode`/`blocks_build`/`blocks_round_trip`, alem de `node_candidates` para input, sprite, tilemap, audio, hardware e bridges. O corpus real permanece **122 projetos**; o report regenerado tem **32.251 candidatos de nodes** em **100 projetos**. Gaps agregados seguem: `preprocessor_condition=1471`, `function_like_macro=484`, `unsupported_resource_kind=236`, `assembly_source=150`, `multiline_macro=90`, `inline_assembly=47`, `lossy_source_encoding=33`.
+  - **Gates frescos executados:** `npm run check:tree` OK, `npm run lint` OK, `npx tsc --noEmit` OK, `npm test` **301/301**, `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK, `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` **333 passed / 11 ignored**, `cargo test sgdk_corpus_inventory` **4 passed / 1 ignored**, `cargo test sgdk_corpus_inventory_real_corpus_report --ignored` OK, `cargo test sgdk_matrix_corpus_ --ignored` **7/7**, `npm run preflight:sgdk-e2e` OK, `validate-upstream-windows.ps1 -SkipRustTests` OK, `npm run test:e2e:desktop:qa-rc` A-G OK, `build:debug`, `build:portable` e `build:msi` OK.
+  - **Evidencia visual/desktop:** QA RC gerou screenshots frescos `qa-rc-2026-05-13T01-31-23-216Z-*`, incluindo `G-dense-solo-authoring`, `G-tilemap-authoring`, `G-logic-authoring`, `G-art-workspace` e `G-sgdk-chain`.
+  - **Readiness:** a promocao final continua governada por branch/PR/main; `release:readiness:promotion` so pode virar promocao institucional apos worktree limpo, push/PR e rerun no destino canonico.
+  - **Status honesto:** UI/CX melhorou materialmente e tem evidencia QA RC fresca, mas SGDK segue **Experimental**: nao ha AST C completo, build/ROM/emulacao por projeto para os 122, nem reducao dos gaps agregados. Node Engine segue **Experimental/Parcial**: ha prova deterministica por teste unitario, mas nao ROM/emulacao institucional de jogo 100% no-code.
 
 * **O que acabou de acontecer (2026-05-12 rodada 38 - inventario estrutural SGDK_Engines):**
   - **Branch/base:** `codex/sgdk-nocode-engine-hardening`, criada a partir de `origin/main` em `4bf4db585b0091e0a8c0460450832067bcf6c05c`.
