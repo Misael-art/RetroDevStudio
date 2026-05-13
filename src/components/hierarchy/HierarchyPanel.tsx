@@ -84,6 +84,25 @@ function importedRoleBadgeClass(roleLabel: string | null): string {
   }
 }
 
+function importedRoleShortLabel(roleLabel: string | null): string {
+  switch (roleLabel) {
+    case "Jogador":
+      return "PLR";
+    case "Inimigo":
+      return "ENM";
+    case "Lutador":
+      return "FGT";
+    case "Projetil":
+      return "PRJ";
+    case "Apoio":
+      return "SUP";
+    case "HUD / UI":
+      return "HUD";
+    default:
+      return "IMP";
+  }
+}
+
 function importedEntityKindChip(entityType: string, roleLabel: string | null): string | null {
   if (entityType === "tilemap") return "Tilemap";
   if (entityType === "camera") return "Entrada";
@@ -680,9 +699,14 @@ export default function HierarchyPanel() {
                             <span
                               data-testid={`hierarchy-imported-role-${entity.entity_id}`}
                               className={`rounded-full border px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.12em] ${importedRoleBadgeClass(importedContext.roleLabel)}`}
-                              title={importedContext.detail ?? importedContext.summary ?? undefined}
+                              title={[
+                                importedContext.roleLabel,
+                                importedContext.detail ?? importedContext.summary,
+                              ]
+                                .filter(Boolean)
+                                .join(" - ")}
                             >
-                              {importedContext.roleLabel}
+                              {importedRoleShortLabel(importedContext.roleLabel)}
                             </span>
                           ) : null}
                           {importedContext.confidenceLabel ? (
