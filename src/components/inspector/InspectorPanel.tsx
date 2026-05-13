@@ -206,7 +206,10 @@ function InspectorSection({
   children: ReactNode;
 }) {
   return (
-    <div className="border-t border-[#313244] px-3 py-2 first:border-t-0">
+    <div
+      data-testid={`inspector-section-${sectionId}`}
+      className="border-t border-[#313244] px-3 py-2 first:border-t-0"
+    >
       <div className="mb-1.5">
         <KnowledgeTooltipLabel sectionId={sectionId} title={title} />
       </div>
@@ -1080,7 +1083,7 @@ export default function InspectorPanel() {
                 <span>({entity.transform.x}, {entity.transform.y})</span>
               </div>
             </div>
-            {importedEntityContext.isImported ? (
+            {importedEntityContext.isImported && sections.length === 0 ? (
               <div className="border-b border-[#313244] bg-[#11111b]/40 px-3 py-2">
                 <div
                   data-testid="inspector-imported-context"
@@ -1488,6 +1491,128 @@ export default function InspectorPanel() {
                 })()}
               </InspectorSection>
             ))}
+            {importedEntityContext.isImported && sections.length > 0 ? (
+              <details
+                data-testid="inspector-imported-context"
+                className="border-t border-[#313244] bg-[#11111b]/35 px-3 py-2 text-[10px] text-[#94a3b8]"
+              >
+                <summary className="flex cursor-pointer list-none items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.16em] text-[#7f849c]">
+                  <span>Contexto importado</span>
+                  {importedEntityContext.badgeLabel ? (
+                    <span
+                      className={`rounded-full border px-1.5 py-0.5 text-[8px] ${importedToneClass(importedEntityContext.tone)}`}
+                    >
+                      {importedEntityContext.badgeLabel}
+                    </span>
+                  ) : null}
+                  {importedEntityContext.confidenceLabel ? (
+                    <span className="rounded-full border border-[#313244] bg-[#181825] px-1.5 py-0.5 text-[8px] text-[#94a3b8]">
+                      {importedEntityContext.confidenceLabel}
+                    </span>
+                  ) : null}
+                  {importedEntityContext.auditFlags.length > 0 ? (
+                    <span className="ml-auto rounded-full border border-[#fab387]/35 bg-[#fab387]/10 px-1.5 py-0.5 text-[8px] text-[#fab387]">
+                      {importedEntityContext.auditFlags.length} avisos
+                    </span>
+                  ) : null}
+                </summary>
+                <div className="mt-2 rounded border border-[#313244] bg-[#0f172a]/40 p-2">
+                  {importedEntityContext.summary ? (
+                    <p className="font-semibold text-[#cdd6f4]">{importedEntityContext.summary}</p>
+                  ) : null}
+                  {importedEntityContext.detail ? (
+                    <p className="mt-1 leading-relaxed">{importedEntityContext.detail}</p>
+                  ) : null}
+                  {importedEntityContext.driverFunctions.length > 0 ? (
+                    <p className="mt-2 text-[9px] text-[#7f849c]">
+                      Funcoes-chave:{" "}
+                      <span className="font-mono text-[#cdd6f4]">
+                        {importedEntityContext.driverFunctions.join(", ")}
+                      </span>
+                    </p>
+                  ) : null}
+                  {importedEntityContext.sourcePaths.length > 0 ? (
+                    <p className="mt-1 text-[9px] text-[#7f849c]">
+                      Fontes diretas:{" "}
+                      <span className="font-mono text-[#cdd6f4]">
+                        {importedEntityContext.sourcePaths.join(", ")}
+                      </span>
+                    </p>
+                  ) : null}
+                  {importedEntityContext.auditFlags.length > 0 ? (
+                    <div
+                      data-testid="inspector-imported-audit-flags"
+                      className="mt-2 flex flex-wrap gap-1"
+                    >
+                      {importedEntityContext.auditFlags.map((flag) => (
+                        <span
+                          key={flag}
+                          className="rounded-full border border-[#89b4fa]/30 bg-[#89b4fa]/10 px-2 py-0.5 font-mono text-[8px] text-[#89b4fa]"
+                        >
+                          {flag}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      data-testid="inspector-open-logic-workspace"
+                      onClick={handleOpenLogicWorkspace}
+                      className="rounded border border-[#89b4fa]/35 bg-[#89b4fa]/10 px-2 py-1 text-[9px] font-semibold text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20"
+                    >
+                      Objeto -&gt; Logica
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="inspector-open-art-workspace"
+                      onClick={handleOpenArtWorkspace}
+                      disabled={!entity?.components.sprite}
+                      className="rounded border border-[#a6e3a1]/35 bg-[#a6e3a1]/10 px-2 py-1 text-[9px] font-semibold text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/20 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      Objeto -&gt; Art
+                    </button>
+                    {(() => {
+                      const refs =
+                        entity?.components.logic?.external_source_refs?.filter(
+                          (p): p is string => typeof p === "string" && p.trim().length > 0
+                        ) ?? [];
+                      const uniquePaths = Array.from(
+                        new Set(
+                          [...importedEntityContext.sourcePaths, ...refs]
+                            .map((p) => p.trim())
+                            .filter((p) => p.length > 0)
+                        )
+                      );
+                      if (uniquePaths.length === 0) {
+                        return (
+                          <span className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[9px] text-[#6c7086]">
+                            Fonte real indisponivel
+                          </span>
+                        );
+                      }
+                      return uniquePaths.map((relativePath, index) => (
+                        <button
+                          key={`${relativePath}-${index}`}
+                          type="button"
+                          data-testid={
+                            index === 0 ? "inspector-open-imported-source-primary" : `inspector-open-imported-source-${index}`
+                          }
+                          onClick={() => void handleOpenImportedSourcePath(relativePath)}
+                          className="max-w-[11rem] truncate rounded border border-[#f9e2af]/35 bg-[#f9e2af]/10 px-2 py-1 text-left text-[9px] font-semibold text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/20"
+                          title={relativePath}
+                        >
+                          Abrir fonte{uniquePaths.length > 1 ? ` (${index + 1})` : ""}
+                          <span className="mt-0.5 block truncate font-mono text-[8px] font-normal text-[#6c7086]">
+                            {relativePath}
+                          </span>
+                        </button>
+                      ));
+                    })()}
+                  </div>
+                </div>
+              </details>
+            ) : null}
             {entity.components.logic ? (
               <InspectorSection sectionId="logic" title="Logic">
                 <table className="w-full text-xs">

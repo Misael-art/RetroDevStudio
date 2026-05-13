@@ -172,6 +172,35 @@ const GRAPH_HARDWARE_EVENTS: NodeGraph = {
   ],
 };
 
+const GRAPH_NOCODE_MD_GAME: NodeGraph = {
+  nodes: [
+    node("start", "event_start"),
+    node("spawn_player", "spawn_entity", { prefab: "player", x: 40, y: 96 }),
+    node("paint_floor", "set_tile", { layer: "BG_A", tile: 12, x: 1, y: 14 }),
+    node("camera_bounds", "camera_bounds", { min_x: 0, min_y: 0, max_x: 640, max_y: 224 }),
+    node("update", "event_update"),
+    node("right", "input_held", { pad: "JOY_1", button: "BUTTON_RIGHT" }),
+    node("velocity", "set_velocity", { target: "player", vx: 2, vy: 0 }),
+    node("position", "set_position", { target: "player", x: 40, y: 96 }),
+    node("run_anim", "set_animation_state", { target: "player", state: "run" }),
+    node("camera_follow", "camera_follow", { target: "player", damping: 0 }),
+    node("budget", "hardware_budget_check", { vram_kb: 64, sprites: 80, scanline_sprites: 20 }),
+    node("step_sfx", "action_sound", { sfx: "step" }),
+  ],
+  edges: [
+    edge("g1", "start", "spawn_player"),
+    edge("g2", "spawn_player", "paint_floor"),
+    edge("g3", "paint_floor", "camera_bounds"),
+    edge("g4", "update", "right"),
+    edge("g5", "right", "velocity"),
+    edge("g6", "velocity", "position"),
+    edge("g7", "position", "run_anim"),
+    edge("g8", "run_anim", "camera_follow"),
+    edge("g9", "camera_follow", "budget"),
+    { id: "g10", fromNode: "budget", fromPort: "ok", toNode: "step_sfx", toPort: "exec" },
+  ],
+};
+
 // ── compileGraphToC ───────────────────────────────────────────────────────────
 
 describe("NodeGraph serialization", () => {
@@ -464,6 +493,22 @@ describe("compileGraphToC — SNES", () => {
     expect(snesCode).toContain("nmiSet(retro_on_vblank);");
     expect(snesCode).toContain("irqInit(); irqSet(IRQ_HBLANK, retro_on_hblank);");
     expect(snesCode).toContain("dmaSetCallback(retro_on_dma_done);");
+  });
+
+  it("gera C deterministico para um jogo Mega Drive criado 100% por nodes", () => {
+    const code = compileGraphToC(GRAPH_NOCODE_MD_GAME, "NoCodePlatformer", "megadrive");
+    const secondPass = compileGraphToC(GRAPH_NOCODE_MD_GAME, "NoCodePlatformer", "megadrive");
+
+    expect(secondPass).toBe(code);
+    expect(code).toContain("SPR_addSprite(&player, 40, 96");
+    expect(code).toContain("VDP_setTileMapXY(BG_A");
+    expect(code).toContain("JOY_readJoypad(JOY_1) & BUTTON_RIGHT");
+    expect(code).toContain("logic_var_player_vx = 2");
+    expect(code).toContain("SPR_setPosition(spr_player, 40, 96)");
+    expect(code).toContain("SPR_setAnim(spr_player, ANIM_RUN)");
+    expect(code).toContain("VDP_setHorizontalScroll(BG_A, SPR_getX(spr_player) - 160)");
+    expect(code).toContain("Hardware budget check: VRAM 64KB, sprites 80, sprites/scanline 20");
+    expect(code).toContain("SND_startPlayPCM(SFX_STEP");
   });
 });
 

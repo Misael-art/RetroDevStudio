@@ -1983,6 +1983,60 @@ describe("App build flow", () => {
     expect(container.querySelector("[data-testid='build-disabled-reason']")).toBeNull();
   });
 
+  it("keeps the production shell compact and opens warning details on demand", async () => {
+    const warning =
+      "[SGDK Gerenciado] VRAM Analysis: mode=sgdk_managed asset_total=4KB resident=2KB.";
+
+    await act(async () => {
+      useEditorStore.setState({
+        hwValidationState: "fresh",
+        hwStatus: {
+          vram_used: 4096,
+          vram_limit: 65536,
+          sprite_count: 7,
+          sprite_limit: 80,
+          scanline_sprite_peak: 3,
+          scanline_sprite_limit: 20,
+          dma_used: 1024,
+          dma_limit: 7372,
+          palette_banks_used: 1,
+          palette_banks_limit: 4,
+          bg_layers: 0,
+          bg_layers_limit: 4,
+          errors: [],
+          warnings: [warning],
+        },
+      });
+      useEditorStore.getState().logMessage("warn", warning);
+      await flush();
+    });
+
+    const topbar = container.querySelector("[data-testid='unified-topbar']");
+    const statusBar = container.querySelector("[data-testid='production-status-bar']");
+    const warningBadge = container.querySelector("[data-testid='toolbar-warning-badge']");
+
+    expect(topbar).toBeInstanceOf(HTMLElement);
+    expect(statusBar).toBeInstanceOf(HTMLElement);
+    expect(warningBadge).toBeInstanceOf(HTMLButtonElement);
+    expect(topbar?.textContent).toContain("Build");
+    expect(topbar?.textContent).toContain("Play");
+    expect(topbar?.textContent).toContain("Stop");
+    expect(topbar?.textContent).toContain("Pause");
+    expect(topbar?.textContent).not.toContain(warning);
+    expect(statusBar?.textContent).toContain("Build: warn");
+    expect(statusBar?.textContent).toContain("Emulacao: idle");
+    expect(statusBar?.textContent).toContain("sprites 7/80");
+
+    await act(async () => {
+      (warningBadge as HTMLButtonElement).click();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='toolbar-warning-popover']")?.textContent).toContain(
+      warning
+    );
+  });
+
   it("renders the explorer workspace from the activity bar with synthesized project data", async () => {
     const explorerButton = container.querySelector(
       "[data-testid='workspace-rail-explorer']"

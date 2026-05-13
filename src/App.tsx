@@ -697,16 +697,14 @@ function ToolbarVramBudget({
   return (
     <div
       data-testid="toolbar-vram-budget"
-      className="pointer-events-none flex min-w-[9rem] shrink-0 flex-col gap-1 rounded border border-[#313244] bg-[#11111b] px-2 py-1"
+      className="pointer-events-none flex h-7 min-w-[6.5rem] shrink-0 items-center gap-1 rounded border border-[#313244] bg-[#11111b] px-2"
       title={`VRAM ${Math.round(used / 1024)}KB / ${Math.round(limit / 1024)}KB (${percent}%)`}
     >
-      <div className="flex items-center justify-between text-[10px]">
-        <span className="text-[#7f849c]">VRAM</span>
+      <span className="text-[10px] text-[#7f849c]">VRAM</span>
         <span data-testid="toolbar-vram-budget-label" className="font-mono text-[#cdd6f4]">
           {Math.round(used / 1024)} / {Math.round(limit / 1024)} KB
         </span>
-      </div>
-      <div className="h-1.5 overflow-hidden rounded bg-[#313244]">
+      <div className="h-1 w-9 overflow-hidden rounded bg-[#313244]">
         <div
           data-testid="toolbar-vram-budget-bar"
           className={`h-full ${toneClass}`}
@@ -735,16 +733,14 @@ function ToolbarScanlineBudget({
   return (
     <div
       data-testid="toolbar-scanline-budget"
-      className="pointer-events-none hidden min-w-[8rem] shrink-0 flex-col gap-1 rounded border border-[#313244] bg-[#11111b] px-2 py-1 2xl:flex"
+      className="pointer-events-none hidden h-7 min-w-[5rem] shrink-0 items-center gap-1 rounded border border-[#313244] bg-[#11111b] px-2 2xl:flex"
       title={`Sprites por scanline ${peak} / ${limit} (${percent}%)`}
     >
-      <div className="flex items-center justify-between text-[10px]">
-        <span className="text-[#7f849c]">Scanline</span>
+      <span className="text-[10px] text-[#7f849c]">SL</span>
         <span data-testid="toolbar-scanline-budget-label" className="font-mono text-[#cdd6f4]">
           {peak} / {limit}
         </span>
-      </div>
-      <div className="h-1.5 overflow-hidden rounded bg-[#313244]">
+      <div className="h-1 w-7 overflow-hidden rounded bg-[#313244]">
         <div
           data-testid="toolbar-scanline-budget-bar"
           className={`h-full ${toneClass}`}
@@ -773,22 +769,102 @@ function ToolbarPaletteBudget({
   return (
     <div
       data-testid="toolbar-palette-budget"
-      className="pointer-events-none hidden min-w-[7rem] shrink-0 flex-col gap-1 rounded border border-[#313244] bg-[#11111b] px-2 py-1 2xl:flex"
+      className="pointer-events-none hidden h-7 min-w-[4.5rem] shrink-0 items-center gap-1 rounded border border-[#313244] bg-[#11111b] px-2 2xl:flex"
       title={`Bancos de paleta ${used} / ${limit} (${percent}%)`}
     >
-      <div className="flex items-center justify-between text-[10px]">
-        <span className="text-[#7f849c]">Paleta</span>
+      <span className="text-[10px] text-[#7f849c]">PAL</span>
         <span data-testid="toolbar-palette-budget-label" className="font-mono text-[#cdd6f4]">
           {used} / {limit}
         </span>
-      </div>
-      <div className="h-1.5 overflow-hidden rounded bg-[#313244]">
+      <div className="h-1 w-7 overflow-hidden rounded bg-[#313244]">
         <div
           data-testid="toolbar-palette-budget-bar"
           className={`h-full ${toneClass}`}
           style={{ width: `${percent}%` }}
         />
       </div>
+    </div>
+  );
+}
+
+function ToolbarWarningBadge({
+  issues,
+}: {
+  issues: string[];
+}) {
+  const [open, setOpen] = useState(false);
+
+  if (issues.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        data-testid="toolbar-warning-badge"
+        onClick={() => setOpen((current) => !current)}
+        className="relative flex h-7 min-w-7 items-center justify-center rounded border border-[#fab387]/45 bg-[#fab387]/14 px-2 text-[10px] font-bold text-[#fab387] shadow-[0_0_0_1px_rgba(250,179,135,0.08)]"
+        title={`${issues.length} warning(s) / erro(s). Clique para detalhes.`}
+      >
+        !
+        <span className="ml-1 font-mono">{issues.length}</span>
+      </button>
+      {open ? (
+        <div
+          data-testid="toolbar-warning-popover"
+          className="absolute right-0 top-[calc(100%+8px)] z-30 w-80 rounded border border-[#313244] bg-[#0b1120] p-3 text-[11px] text-[#cbd5e1] shadow-[0_24px_60px_rgba(0,0,0,0.45)]"
+        >
+          <p className="text-[10px] font-semibold uppercase text-[#fab387]">
+            Diagnostico
+          </p>
+          <ul className="mt-2 max-h-52 space-y-2 overflow-y-auto">
+            {issues.map((issue, index) => (
+              <li key={`${issue}-${index}`} className="rounded border border-[#313244] bg-[#111827] px-2 py-1.5">
+                {issue}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ProductionStatusBar({
+  buildStatus,
+  importStatus,
+  emulationStatus,
+  hardwareSummary,
+  lastMessage,
+  onOpenDetails,
+}: {
+  buildStatus: string;
+  importStatus: string;
+  emulationStatus: string;
+  hardwareSummary: string;
+  lastMessage: string;
+  onOpenDetails: () => void;
+}) {
+  return (
+    <div
+      data-testid="production-status-bar"
+      className="flex h-7 shrink-0 items-center gap-3 border-t border-[#27272a] bg-[#0b1020] px-3 text-[10px] text-[#94a3b8]"
+    >
+      <span className="min-w-0 flex-1 truncate" title={lastMessage}>
+        {lastMessage || "Sem alertas recentes"}
+      </span>
+      <span className="hidden font-mono text-[#cdd6f4] sm:inline">Build: {buildStatus}</span>
+      <span className="hidden font-mono text-[#cdd6f4] md:inline">Import: {importStatus}</span>
+      <span className="hidden font-mono text-[#cdd6f4] md:inline">Emulacao: {emulationStatus}</span>
+      <span className="hidden font-mono text-[#cdd6f4] lg:inline">{hardwareSummary}</span>
+      <button
+        type="button"
+        onClick={onOpenDetails}
+        className="rounded border border-[#313244] bg-[#111827] px-2 py-0.5 text-[10px] font-semibold text-[#cdd6f4] transition-colors hover:border-[#89b4fa] hover:text-[#89b4fa]"
+      >
+        Details
+      </button>
     </div>
   );
 }
@@ -941,6 +1017,7 @@ export default function App() {
     projectLegacyIndex,
     setProjectSourceKind,
     setProjectLegacyIndex,
+    consoleEntries,
     consoleVisible,
     toggleConsole,
   } = useEditorStore();
@@ -1434,6 +1511,31 @@ export default function App() {
     buildLiveIndicator?.label === "ERRO LIVE" ? buildLiveIndicator.detail : null;
   const liveBuildBlocked =
     hwValidationState === "fresh" && Boolean(hwStatus && hwStatus.errors.length > 0);
+  const toolbarIssues = [
+    ...(liveBuildBlocked && buildDisabledReason ? [buildDisabledReason] : []),
+    ...(!liveBuildBlocked && buildWarningSummary ? [buildWarningSummary] : []),
+    ...(!liveBuildBlocked && liveBuildErrorSummary ? [`Live: ${liveBuildErrorSummary}`] : []),
+    ...(hwStatus?.warnings ?? []),
+  ].filter((issue, index, all) => issue && all.indexOf(issue) === index);
+  const buildStatus = building
+    ? "building"
+    : liveBuildBlocked
+      ? "blocked"
+      : buildWarningSummary
+        ? "warn"
+        : buildLiveIndicator?.label === "DESATUAL."
+          ? "stale"
+          : activeProjectDir
+            ? "ready"
+            : "idle";
+  const importStatus = projectSourceKind || "builtin";
+  const emulationStatus = emulatorLoaded ? (emulPaused ? "paused" : "loaded") : "idle";
+  const hardwareSummary = hwStatus
+    ? `VRAM ${Math.round(hwStatus.vram_used / 1024)}/${Math.round(hwStatus.vram_limit / 1024)}KB sprites ${hwStatus.sprite_count}/${hwStatus.sprite_limit}`
+    : "hardware n/a";
+  const lastConsoleMessage =
+    [...consoleEntries].reverse().find((entry) => entry.level === "error" || entry.level === "warn")
+      ?.message ?? consoleEntries[consoleEntries.length - 1]?.message ?? "";
   const breadcrumbItems = [
     activeProjectName || "Sem projeto",
     activeWorkspace === "explorer"
@@ -3526,6 +3628,11 @@ export default function App() {
               disabled={!emulatorLoaded}
               accent="danger"
             />
+            <ToolbarButton
+              label={emulPaused ? "Resume" : "Pause"}
+              onClick={handleEmulatorPause}
+              disabled={!emulatorLoaded}
+            />
             {buildLiveIndicator && (
               <span
                 data-testid="build-live-state"
@@ -3548,32 +3655,13 @@ export default function App() {
                 id="build-disabled-reason"
                 data-testid="build-disabled-reason"
                 aria-live="polite"
-                className="max-w-52 truncate text-[10px] text-[#f38ba8]"
+                className="sr-only"
                 title={buildDisabledReason}
               >
                 {buildDisabledReason}
               </span>
             )}
-            {!liveBuildBlocked && buildWarningSummary && (
-              <span
-                data-testid="build-warning-summary"
-                aria-live="polite"
-                className="max-w-52 truncate text-[10px] text-[#fab387]"
-                title={buildWarningSummary}
-              >
-                {buildWarningSummary}
-              </span>
-            )}
-            {!liveBuildBlocked && liveBuildErrorSummary && (
-              <span
-                data-testid="build-live-error-summary"
-                aria-live="polite"
-                className="max-w-52 truncate text-[10px] text-[#f38ba8]"
-                title={liveBuildErrorSummary}
-              >
-                Live com falha: {liveBuildErrorSummary}
-              </span>
-            )}
+            <ToolbarWarningBadge issues={toolbarIssues} />
             {!liveBuildBlocked &&
               !buildWarningSummary &&
               !liveBuildErrorSummary &&
@@ -3640,6 +3728,17 @@ export default function App() {
           </>
         }
       />
+
+      {!liveBuildBlocked && buildWarningSummary ? (
+        <span data-testid="build-warning-summary" className="sr-only">
+          {buildWarningSummary}
+        </span>
+      ) : null}
+      {!liveBuildBlocked && liveBuildErrorSummary ? (
+        <span data-testid="build-live-error-summary" className="sr-only">
+          Live com falha: {liveBuildErrorSummary}
+        </span>
+      ) : null}
 
       {!showProjectWizard && !focusedShell && workspaceGuide && (
         <WorkspaceGuideCard key={workspaceMeta.id} guide={workspaceGuide} />
@@ -3834,6 +3933,18 @@ export default function App() {
         </Group>
       </div>
 
+      <ProductionStatusBar
+        buildStatus={buildStatus}
+        importStatus={importStatus}
+        emulationStatus={emulationStatus}
+        hardwareSummary={hardwareSummary}
+        lastMessage={lastConsoleMessage}
+        onOpenDetails={() => {
+          if (!consoleVisible) {
+            toggleConsole();
+          }
+        }}
+      />
       <Console />
     </div>
   );

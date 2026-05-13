@@ -40,6 +40,10 @@ use core::project_mgr::{
     update_project_target, ExternalImportProfileSummary, LegacySgdkIndex, ProjectTemplateSummary,
     SceneInfo, DEFAULT_ENTRY_SCENE,
 };
+use core::sgdk_corpus_inventory::{
+    inspect_sgdk_corpus_for_nocode_inventory, inspect_sgdk_project_for_nocode_inventory,
+    write_sgdk_corpus_inventory_report, SgdkCorpusInventoryReport, SgdkProjectInventory,
+};
 use emulator::frame_buffer::framebuffer_to_rgba;
 use emulator::libretro_ffi::{EmulatorCore, JoypadState, ReplayCapture, RuntimeExecutionTraceCapture};
 use hardware::constraint_engine;
@@ -2687,6 +2691,35 @@ fn import_sgdk_project(
 }
 
 #[tauri::command]
+fn inspect_sgdk_project_inventory(sgdk_path: String) -> Result<SgdkProjectInventory, String> {
+    let trimmed = sgdk_path.trim();
+    if trimmed.is_empty() {
+        return Err("Caminho SGDK e obrigatorio para inventario.".into());
+    }
+    inspect_sgdk_project_for_nocode_inventory(Path::new(trimmed))
+}
+
+#[tauri::command]
+fn inspect_sgdk_corpus_inventory(
+    corpus_root: String,
+    report_path: Option<String>,
+) -> Result<SgdkCorpusInventoryReport, String> {
+    let trimmed_root = corpus_root.trim();
+    if trimmed_root.is_empty() {
+        return Err("Raiz do corpus SGDK e obrigatoria para inventario.".into());
+    }
+    let root = Path::new(trimmed_root);
+    match report_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    {
+        Some(path) => write_sgdk_corpus_inventory_report(root, Path::new(path)),
+        None => inspect_sgdk_corpus_for_nocode_inventory(root),
+    }
+}
+
+#[tauri::command]
 fn import_mugen_project(
     project_name: String,
     base_dir: String,
@@ -2792,6 +2825,8 @@ pub fn run() {
             create_project_from_template,
             import_external_project,
             import_sgdk_project,
+            inspect_sgdk_project_inventory,
+            inspect_sgdk_corpus_inventory,
             import_mugen_project,
             import_legacy_sgdk_project,
             // Fase 4: Tools

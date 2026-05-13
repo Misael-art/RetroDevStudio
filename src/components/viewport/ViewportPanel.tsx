@@ -42,6 +42,7 @@ import {
   buildCreatorWorkflowContext,
   resolveEntityFocusTreatment,
 } from "../../core/creatorWorkflow";
+import { applyKeyColorTransparency } from "../../core/keyColorTransparency";
 import { openProjectSourcePath } from "../../core/ipc/projectService";
 import {
   clampViewportPan,
@@ -570,7 +571,15 @@ export default function ViewportPanel({
   const [showBackground, setShowBackground] = useState(true);
   const [showTilemaps, setShowTilemaps] = useState(true);
   const [showSprites, setShowSprites] = useState(true);
-  const [showCollisionOverlay, setShowCollisionOverlay] = useState(true);
+  const [showCollisionOverlay, setShowCollisionOverlay] = useState(false);
+  const [showCameraOverlay, setShowCameraOverlay] = useState(true);
+  const [showEntityBounds, setShowEntityBounds] = useState(true);
+  const [showEntityLabels, setShowEntityLabels] = useState(true);
+  const [showStagingOverlay, setShowStagingOverlay] = useState(false);
+  const [showViewportWarnings, setShowViewportWarnings] = useState(false);
+  const [showSceneNavigator, setShowSceneNavigator] = useState(false);
+  const [showCommandDock, setShowCommandDock] = useState(true);
+  const [showKeyColor, setShowKeyColor] = useState(false);
   const [guideSnap, setGuideSnap] = useState(true);
   const [gameViewLight, setGameViewLight] = useState(false);
   const [sceneGuides, setSceneGuides] = useState<SceneGuide[]>([]);
@@ -1214,6 +1223,14 @@ export default function ViewportPanel({
     }
   }, [gameViewLight]);
 
+  useEffect(() => {
+    for (const entry of assetCacheRef.current.values()) {
+      releaseViewportAsset(entry);
+    }
+    assetCacheRef.current.clear();
+    setAssetCacheVersion((current) => current + 1);
+  }, [showKeyColor]);
+
   const getViewportAsset = useCallback(
     (relativePath?: string | null): ViewportAssetCacheEntry | null => {
       if (!activeProjectDir || !relativePath) {
@@ -1286,15 +1303,16 @@ export default function ViewportPanel({
             if (!imageData) {
               throw new Error("PPM P3 invalido");
             }
+            const processed = applyKeyColorTransparency(imageData, { showKeyColor }).imageData;
 
             const canvas = document.createElement("canvas");
-            canvas.width = imageData.width;
-            canvas.height = imageData.height;
+            canvas.width = processed.width;
+            canvas.height = processed.height;
             const context = canvas.getContext("2d");
             if (!context) {
               throw new Error("Canvas indisponivel");
             }
-            context.putImageData(imageData, 0, 0);
+            context.putImageData(processed, 0, 0);
 
             markLoaded(canvas, canvas.width, canvas.height);
           })
@@ -1317,7 +1335,24 @@ export default function ViewportPanel({
         .then((blob) => {
           if (typeof createImageBitmap === "function") {
             return createImageBitmap(blob).then((bitmap) => {
-              markLoaded(bitmap, bitmap.width, bitmap.height);
+              const canvas = document.createElement("canvas");
+              canvas.width = bitmap.width;
+              canvas.height = bitmap.height;
+              const context = canvas.getContext("2d");
+              if (!context) {
+                markLoaded(bitmap, bitmap.width, bitmap.height);
+                return;
+              }
+              context.drawImage(bitmap, 0, 0);
+              const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+              const processed = applyKeyColorTransparency(imageData, { showKeyColor });
+              if (!processed.detected) {
+                markLoaded(bitmap, bitmap.width, bitmap.height);
+                return;
+              }
+              context.putImageData(processed.imageData, 0, 0);
+              bitmap.close?.();
+              markLoaded(canvas, canvas.width, canvas.height);
             });
           }
 
@@ -1345,7 +1380,7 @@ export default function ViewportPanel({
         });
       return cacheEntry;
     },
-    [activeProjectDir, logMessage]
+    [activeProjectDir, logMessage, showKeyColor]
   );
 
   // Pré-carregamento de assets da cena para garantir WYSIWYG no primeiro frame
@@ -2902,6 +2937,7 @@ export default function ViewportPanel({
           : ["#cba6f7", "#89b4fa", "#a6e3a1", "#fab387", "#f38ba8", "#94e2d5"][index % 6];
 
       if (entity.components?.camera) {
+        if (!showCameraOverlay) return;
         context.save();
         context.setLineDash([6, 4]);
         context.strokeStyle = isSelected
@@ -2916,7 +2952,9 @@ export default function ViewportPanel({
         context.setLineDash([]);
         context.fillStyle = isSelected || isDensePreview ? "#f9e2af" : "rgba(249,226,175,0.8)";
         context.font = "10px monospace";
-        context.fillText(`CAM ${entityDisplayLabel(entity)}`.slice(0, 22), x + 6, y + 14);
+        if (showEntityLabels) {
+          context.fillText(`CAM ${entityDisplayLabel(entity)}`.slice(0, 22), x + 6, y + 14);
+        }
         context.restore();
         return;
       }
@@ -2931,10 +2969,14 @@ export default function ViewportPanel({
             ? "#67e8f9"
             : "rgba(148,226,213,0.58)";
         context.lineWidth = isSelected || isDensePreview || isSoloFocus ? 2 : 1;
-        context.strokeRect(x + 0.5, y + 0.5, width, height);
-        context.fillStyle = "#94e2d5";
-        context.font = "10px monospace";
-        context.fillText(`TM ${entityDisplayLabel(entity)}`.slice(0, 22), x + 6, y + 14);
+        if (showEntityBounds || isSelected || isDensePreview || isSoloFocus) {
+          context.strokeRect(x + 0.5, y + 0.5, width, height);
+        }
+        if (showEntityLabels) {
+          context.fillStyle = "#94e2d5";
+          context.font = "10px monospace";
+          context.fillText(`TM ${entityDisplayLabel(entity)}`.slice(0, 22), x + 6, y + 14);
+        }
         if (isSelected || isDensePreview || isSoloFocus) {
           context.fillStyle = "rgba(148,226,213,0.16)";
           context.fillRect(x, y, width, height);
@@ -2946,12 +2988,16 @@ export default function ViewportPanel({
         if (!showSprites) return;
         context.strokeStyle = isSelected || isSoloFocus ? "#ffffff" : isDensePreview ? "#f9e2af" : color;
         context.lineWidth = isSelected || isDensePreview || isSoloFocus ? 2 : 1;
-        context.strokeRect(x + 0.5, y + 0.5, width, height);
-        context.fillStyle = isSelected || isSoloFocus ? "#ffffff" : isDensePreview ? "#f9e2af" : color;
-        context.font = "10px monospace";
-        context.fillText(entityDisplayLabel(entity).slice(0, 22), x + 6, y + 14);
+        if (showEntityBounds || isSelected || isDensePreview || isSoloFocus) {
+          context.strokeRect(x + 0.5, y + 0.5, width, height);
+        }
+        if (showEntityLabels) {
+          context.fillStyle = isSelected || isSoloFocus ? "#ffffff" : isDensePreview ? "#f9e2af" : color;
+          context.font = "10px monospace";
+          context.fillText(entityDisplayLabel(entity).slice(0, 22), x + 6, y + 14);
+        }
         const posCtx = resolveImportedEntityContext(entity);
-        if (posCtx.positionMode) {
+        if (showEntityLabels && posCtx.positionMode) {
           const tag =
             posCtx.positionMode === "donor"
               ? "DOADOR"
@@ -2996,11 +3042,15 @@ export default function ViewportPanel({
         return;
       }
 
-      context.strokeStyle = "rgba(205,214,244,0.55)";
-      context.strokeRect(x + 0.5, y + 0.5, width, height);
-      context.fillStyle = "#cdd6f4";
-      context.font = "10px monospace";
-      context.fillText(entityDisplayLabel(entity).slice(0, 22), x + 6, y + 14);
+      if (showEntityBounds || isSelected || isDensePreview || isSoloFocus) {
+        context.strokeStyle = "rgba(205,214,244,0.55)";
+        context.strokeRect(x + 0.5, y + 0.5, width, height);
+      }
+      if (showEntityLabels) {
+        context.fillStyle = "#cdd6f4";
+        context.font = "10px monospace";
+        context.fillText(entityDisplayLabel(entity).slice(0, 22), x + 6, y + 14);
+      }
     });
 
     const spotlightEntityId = soloEntityId ?? (denseStackSpotlight ? denseStackPreviewEntityId : null);
@@ -3038,7 +3088,7 @@ export default function ViewportPanel({
         candidate.components?.sprite &&
         resolveImportedEntityContext(candidate).positionMode === "staging"
     );
-    if (stagingSprites.length >= 2) {
+    if (showStagingOverlay && stagingSprites.length >= 2) {
       let minX = Number.POSITIVE_INFINITY;
       let minY = Number.POSITIVE_INFINITY;
       let maxX = Number.NEGATIVE_INFINITY;
@@ -3231,7 +3281,11 @@ export default function ViewportPanel({
     denseStackPreviewEntityId,
     soloEntityId,
     showCollisionOverlay,
+    showCameraOverlay,
+    showEntityBounds,
+    showEntityLabels,
     showGrid,
+    showStagingOverlay,
     showSprites,
     showSubGrid,
     showTilemaps,
@@ -4235,8 +4289,10 @@ export default function ViewportPanel({
   const overlayAuthoringMode =
     activeViewportTab === "scene" &&
     (editorMode === "paint" || editorMode === "erase" || editorMode === "collision");
-  const showNonCriticalSceneOverlays = !gameViewLight && !overlayInteractionBusy && !overlayAuthoringMode;
-  const showWorldAuthoringOverlay = showWorldAuthoringStrip && !overlayInteractionBusy;
+  const showNonCriticalSceneOverlays =
+    showSceneNavigator && !gameViewLight && !overlayInteractionBusy && !overlayAuthoringMode;
+  const showWorldAuthoringOverlay =
+    showViewportWarnings && showWorldAuthoringStrip && !overlayInteractionBusy;
 
   return (
     <div className="flex h-full flex-col bg-[#1e1e2e]">
@@ -4532,6 +4588,31 @@ export default function ViewportPanel({
               >
                 Col
               </button>
+              {([
+                ["Cam", showCameraOverlay, setShowCameraOverlay, "Mostrar camera e janela MD"],
+                ["Bnd", showEntityBounds, setShowEntityBounds, "Mostrar bounds das entidades"],
+                ["Lbl", showEntityLabels, setShowEntityLabels, "Mostrar labels das entidades"],
+                ["Stg", showStagingOverlay, setShowStagingOverlay, "Mostrar staging importado"],
+                ["Warn", showViewportWarnings, setShowViewportWarnings, "Mostrar avisos de autoria no viewport"],
+                ["Nav", showSceneNavigator, setShowSceneNavigator, "Mostrar navegador do mundo"],
+                ["Key", showKeyColor, setShowKeyColor, "Mostrar cor-chave magenta para debug"],
+                ["Dock", showCommandDock, setShowCommandDock, "Mostrar dock do objeto selecionado"],
+              ] as const).map(([label, active, setter, title]) => (
+                <button
+                  key={label}
+                  type="button"
+                  data-testid={`viewport-toggle-${label.toLowerCase()}`}
+                  onClick={() => setter((current) => !current)}
+                  className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
+                    active
+                      ? "border-[#89dceb] bg-[#89dceb]/15 text-[#89dceb]"
+                      : "border-[#313244] bg-[#11111b] text-[#6c7086] hover:text-[#a6adc8]"
+                  }`}
+                  title={title}
+                >
+                  {label}
+                </button>
+              ))}
               <button
                 type="button"
                 onClick={() => setGameViewLight((current) => !current)}
@@ -4681,7 +4762,7 @@ export default function ViewportPanel({
                 height: sceneScaleHeight + sceneChromeOffset,
               }}
             >
-              {!gameViewLight && (
+              {!gameViewLight && showCameraOverlay && (
                 <div
                   className="absolute left-0 top-0 border border-[#313244] bg-[#181825]"
                   style={{ width: SCENE_RULER_SIZE, height: SCENE_RULER_SIZE }}
@@ -4895,7 +4976,7 @@ export default function ViewportPanel({
                   Overlays essenciais
                 </div>
               ) : null}
-              {selectedEntity ? (
+              {selectedEntity && showCommandDock ? (
                 <div
                   data-testid="viewport-creator-command-dock"
                   className="absolute right-2 top-2 z-20 max-w-[340px] rounded border border-[#313244] bg-[#11111b]/94 px-3 py-2 text-[9px] text-[#a6adc8] shadow-lg"

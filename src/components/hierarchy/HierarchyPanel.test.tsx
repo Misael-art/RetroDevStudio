@@ -282,9 +282,9 @@ describe("HierarchyPanel", () => {
       await flush();
     });
 
-    expect(container.querySelector("[data-testid='hierarchy-imported-role-hero']")?.textContent).toBe(
-      "Jogador"
-    );
+    const roleChip = container.querySelector("[data-testid='hierarchy-imported-role-hero']");
+    expect(roleChip?.textContent).toBe("PLR");
+    expect(roleChip?.getAttribute("title")).toContain("Jogador");
     expect(container.textContent).toContain("Entrada");
     expect(container.textContent).toContain("Hero");
   });

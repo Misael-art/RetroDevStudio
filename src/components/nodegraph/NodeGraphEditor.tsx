@@ -10,14 +10,27 @@ import { resolveEntitySourceRefs } from "../../core/entityAuthoring";
 
 export type NodeType =
   | "event_start"
+  | "event_update"
+  | "input_pressed"
+  | "input_held"
   | "sprite_move"
+  | "set_velocity"
+  | "set_position"
+  | "spawn_entity"
+  | "destroy_entity"
   | "sprite_anim"
+  | "set_animation_state"
   | "condition_overlap"
+  | "camera_follow"
+  | "camera_bounds"
+  | "timer"
+  | "set_tile"
   | "effect_parallax"
   | "effect_raster"
   | "logic_and"
   | "action_sound"
   | "scroll_tilemap"
+  | "load_scene"
   | "move_camera"
   | "var_set"
   | "var_get"
@@ -29,6 +42,8 @@ export type NodeType =
   | "flow_while"
   | "flow_for"
   | "timeline_sequence"
+  | "hardware_budget_check"
+  | "bridge_unconverted_source"
   | "event_vblank"
   | "event_hblank"
   | "event_dma_done";
@@ -152,9 +167,42 @@ const MINIMAP_PADDING = 10;
 
 const EVENT_NODE_TYPES: NodeType[] = [
   "event_start",
+  "event_update",
+  "input_pressed",
+  "input_held",
+  "condition_overlap",
   "event_vblank",
   "event_hblank",
   "event_dma_done",
+];
+
+export const REQUIRED_NOCODE_NODE_TYPES: NodeType[] = [
+  "event_start",
+  "event_update",
+  "input_pressed",
+  "input_held",
+  "condition_overlap",
+  "sprite_move",
+  "set_velocity",
+  "set_position",
+  "spawn_entity",
+  "destroy_entity",
+  "sprite_anim",
+  "set_animation_state",
+  "camera_follow",
+  "camera_bounds",
+  "timer",
+  "var_get",
+  "var_set",
+  "flow_if",
+  "condition_compare",
+  "fsm_state",
+  "fsm_transition",
+  "action_sound",
+  "set_tile",
+  "scroll_tilemap",
+  "load_scene",
+  "hardware_budget_check",
 ];
 
 function normalizeGraphEntityKey(value: string | number | null | undefined): string {
@@ -394,14 +442,27 @@ function isNodePort(value: unknown): value is NodePort {
 function isNodeType(value: unknown): value is NodeType {
   return (
     value === "event_start" ||
+    value === "event_update" ||
+    value === "input_pressed" ||
+    value === "input_held" ||
     value === "sprite_move" ||
+    value === "set_velocity" ||
+    value === "set_position" ||
+    value === "spawn_entity" ||
+    value === "destroy_entity" ||
     value === "sprite_anim" ||
+    value === "set_animation_state" ||
     value === "condition_overlap" ||
+    value === "camera_follow" ||
+    value === "camera_bounds" ||
+    value === "timer" ||
+    value === "set_tile" ||
     value === "effect_parallax" ||
     value === "effect_raster" ||
     value === "logic_and" ||
     value === "action_sound" ||
     value === "scroll_tilemap" ||
+    value === "load_scene" ||
     value === "move_camera" ||
     value === "var_set" ||
     value === "var_get" ||
@@ -413,6 +474,8 @@ function isNodeType(value: unknown): value is NodeType {
     value === "flow_while" ||
     value === "flow_for" ||
     value === "timeline_sequence" ||
+    value === "hardware_budget_check" ||
+    value === "bridge_unconverted_source" ||
     value === "event_vblank" ||
     value === "event_hblank" ||
     value === "event_dma_done"
@@ -496,6 +559,24 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     outputs: [{ id: "exec", label: "▶", kind: "exec" }],
     params: {},
   },
+  event_update: {
+    type: "event_update", label: "On Update",
+    inputs: [],
+    outputs: [{ id: "exec", label: ">", kind: "exec" }],
+    params: { rate: "frame" },
+  },
+  input_pressed: {
+    type: "input_pressed", label: "On Input Pressed",
+    inputs: [],
+    outputs: [{ id: "exec", label: ">", kind: "exec" }],
+    params: { pad: "JOY_1", button: "BUTTON_A" },
+  },
+  input_held: {
+    type: "input_held", label: "On Input Held",
+    inputs: [],
+    outputs: [{ id: "exec", label: ">", kind: "exec" }],
+    params: { pad: "JOY_1", button: "BUTTON_RIGHT" },
+  },
   sprite_move: {
     type: "sprite_move", label: "Move Sprite",
     inputs: [
@@ -506,11 +587,49 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     outputs: [{ id: "exec", label: "▶", kind: "exec" }],
     params: { target: "player", dx: 0, dy: 0 },
   },
+  set_velocity: {
+    type: "set_velocity", label: "Set Velocity",
+    inputs: [
+      { id: "exec", label: ">", kind: "exec" },
+      { id: "vx", label: "vx", kind: "data", dataType: "int" },
+      { id: "vy", label: "vy", kind: "data", dataType: "int" },
+    ],
+    outputs: [{ id: "exec", label: ">", kind: "exec" }],
+    params: { target: "player", vx: 0, vy: 0 },
+  },
+  set_position: {
+    type: "set_position", label: "Set Position",
+    inputs: [
+      { id: "exec", label: ">", kind: "exec" },
+      { id: "x", label: "x", kind: "data", dataType: "int" },
+      { id: "y", label: "y", kind: "data", dataType: "int" },
+    ],
+    outputs: [{ id: "exec", label: ">", kind: "exec" }],
+    params: { target: "player", x: 0, y: 0 },
+  },
+  spawn_entity: {
+    type: "spawn_entity", label: "Spawn",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
+    outputs: [{ id: "exec", label: ">", kind: "exec" }],
+    params: { prefab: "enemy", x: 0, y: 0 },
+  },
+  destroy_entity: {
+    type: "destroy_entity", label: "Destroy",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
+    outputs: [{ id: "exec", label: ">", kind: "exec" }],
+    params: { target: "self" },
+  },
   sprite_anim: {
     type: "sprite_anim", label: "Set Animation",
     inputs: [{ id: "exec", label: "▶", kind: "exec" }],
     outputs: [{ id: "exec", label: "▶", kind: "exec" }],
     params: { target: "player", anim: "idle" },
+  },
+  set_animation_state: {
+    type: "set_animation_state", label: "Set Anim State",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
+    outputs: [{ id: "exec", label: ">", kind: "exec" }],
+    params: { target: "player", state: "idle" },
   },
   condition_overlap: {
     type: "condition_overlap", label: "On Overlap",
@@ -520,6 +639,37 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
       { id: "false", label: "False ▶", kind: "exec" },
     ],
     params: { a: "player", b: "enemy" },
+  },
+  camera_follow: {
+    type: "camera_follow", label: "Camera Follow",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
+    outputs: [{ id: "exec", label: ">", kind: "exec" }],
+    params: { target: "player", damping: 0 },
+  },
+  camera_bounds: {
+    type: "camera_bounds", label: "Camera Bounds",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
+    outputs: [{ id: "exec", label: ">", kind: "exec" }],
+    params: { min_x: 0, min_y: 0, max_x: 320, max_y: 224 },
+  },
+  timer: {
+    type: "timer", label: "Timer",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
+    outputs: [
+      { id: "tick", label: "Tick >", kind: "exec" },
+      { id: "done", label: "Done >", kind: "exec" },
+    ],
+    params: { frames: 60, repeat: 0 },
+  },
+  set_tile: {
+    type: "set_tile", label: "Set Tile",
+    inputs: [
+      { id: "exec", label: ">", kind: "exec" },
+      { id: "x", label: "x", kind: "data", dataType: "int" },
+      { id: "y", label: "y", kind: "data", dataType: "int" },
+    ],
+    outputs: [{ id: "exec", label: ">", kind: "exec" }],
+    params: { layer: "BG_A", tile: 1, x: 0, y: 0 },
   },
   effect_parallax: {
     type: "effect_parallax", label: "Parallax Scroll",
@@ -557,6 +707,12 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     ],
     outputs: [{ id: "exec", label: "▶", kind: "exec" }],
     params: { layer: "BG_A", dx: 1, dy: 0 },
+  },
+  load_scene: {
+    type: "load_scene", label: "Load Scene",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
+    outputs: [{ id: "exec", label: ">", kind: "exec" }],
+    params: { scene: "main" },
   },
   move_camera: {
     type: "move_camera", label: "Move Camera",
@@ -677,6 +833,21 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
       slot_2_delay: 90,
     },
   },
+  hardware_budget_check: {
+    type: "hardware_budget_check", label: "Budget Check",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
+    outputs: [
+      { id: "ok", label: "OK >", kind: "exec" },
+      { id: "warn", label: "Warn >", kind: "exec" },
+    ],
+    params: { vram_kb: 64, sprites: 80, scanline_sprites: 20 },
+  },
+  bridge_unconverted_source: {
+    type: "bridge_unconverted_source", label: "Source Bridge",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
+    outputs: [{ id: "exec", label: ">", kind: "exec" }],
+    params: { gap: "semantic_gap", source: "" },
+  },
   event_vblank: {
     type: "event_vblank", label: "On VBlank",
     inputs: [],
@@ -699,14 +870,27 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
 
 export const NODE_DISPLAY_NAMES: Record<NodeType, string> = {
   event_start: "Ao Iniciar",
+  event_update: "A Cada Frame",
+  input_pressed: "Input Pressionado",
+  input_held: "Input Segurado",
   sprite_move: "Mover Sprite",
+  set_velocity: "Definir Velocidade",
+  set_position: "Definir Posicao",
+  spawn_entity: "Criar Entidade",
+  destroy_entity: "Destruir Entidade",
   sprite_anim: "Animar Sprite",
+  set_animation_state: "Estado de Animacao",
   condition_overlap: "Colisao (Overlap)",
+  camera_follow: "Camera Segue",
+  camera_bounds: "Limites da Camera",
+  timer: "Timer",
+  set_tile: "Definir Tile",
   effect_parallax: "Parallax",
   effect_raster: "Efeito Raster",
   logic_and: "E (And)",
   action_sound: "Tocar Som",
   scroll_tilemap: "Rolar Cenario",
+  load_scene: "Carregar Cena",
   move_camera: "Mover Camera",
   var_set: "Definir Variavel",
   var_get: "Ler Variavel",
@@ -718,6 +902,8 @@ export const NODE_DISPLAY_NAMES: Record<NodeType, string> = {
   flow_while: "Enquanto (While)",
   flow_for: "Repetir (For)",
   timeline_sequence: "Sequencia (Timeline)",
+  hardware_budget_check: "Checar Budget",
+  bridge_unconverted_source: "Bridge de Fonte",
   event_vblank: "Evento VBlank",
   event_hblank: "Evento HBlank",
   event_dma_done: "Evento DMA",
@@ -729,34 +915,57 @@ const NODE_PARAM_DISPLAY_NAMES: Record<string, string> = {
   b: "B",
   condition: "Condicao",
   count: "Contagem",
+  button: "Botao",
   dx: "Delta X",
   dy: "Delta Y",
+  frames: "Frames",
+  gap: "Gap",
+  max_x: "Max X",
+  max_y: "Max Y",
+  min_x: "Min X",
+  min_y: "Min Y",
   layer: "Camada",
   offset_x: "Offset X",
   operator: "Operador",
+  pad: "Controle",
+  prefab: "Prefab",
+  rate: "Ritmo",
+  repeat: "Repetir",
   scanline: "Scanline",
+  scanline_sprites: "Sprites/linha",
+  scene: "Cena",
   sfx: "Som",
+  source: "Fonte",
   speed_x: "Velocidade X",
   speed_y: "Velocidade Y",
+  sprites: "Sprites",
+  state: "Estado",
   state_name: "Estado",
   target: "Alvo",
   target_state: "Proximo Estado",
+  tile: "Tile",
   timeline_name: "Timeline",
   value: "Valor",
   var_name: "Variavel",
+  vram_kb: "VRAM KB",
+  vx: "Velocidade X",
+  vy: "Velocidade Y",
   x: "X",
   y: "Y",
 };
 
 const NODE_PALETTE_GROUPS: Array<{ label: string; icon: string; types: NodeType[] }> = [
-  { label: "Eventos", icon: "\u26a1", types: ["event_start", "event_vblank", "event_hblank", "event_dma_done"] },
-  { label: "Movimento", icon: "\ud83c\udfc3", types: ["sprite_move", "sprite_anim", "scroll_tilemap", "move_camera"] },
+  { label: "Eventos", icon: "\u26a1", types: ["event_start", "event_update", "input_pressed", "input_held", "event_vblank", "event_hblank", "event_dma_done"] },
+  { label: "Movimento", icon: "\ud83c\udfc3", types: ["sprite_move", "set_velocity", "set_position", "spawn_entity", "destroy_entity", "sprite_anim", "set_animation_state", "scroll_tilemap", "move_camera"] },
   { label: "Condicoes", icon: "?", types: ["condition_overlap", "condition_compare", "logic_and"] },
+  { label: "Camera", icon: "\u25a3", types: ["camera_follow", "camera_bounds"] },
+  { label: "Tilemap", icon: "#", types: ["set_tile", "load_scene"] },
   { label: "Som", icon: "\ud83d\udd0a", types: ["action_sound"] },
   { label: "Variaveis", icon: "\ud83d\udcca", types: ["var_set", "var_get", "logic_math"] },
-  { label: "Fluxo", icon: "\u2937", types: ["flow_if", "flow_while", "flow_for"] },
+  { label: "Fluxo", icon: "\u2937", types: ["flow_if", "flow_while", "flow_for", "timer"] },
   { label: "Estados", icon: "\u2690\ufe0f", types: ["fsm_state", "fsm_transition", "timeline_sequence"] },
   { label: "Efeitos", icon: "\u2728", types: ["effect_parallax", "effect_raster"] },
+  { label: "Hardware", icon: "!", types: ["hardware_budget_check", "bridge_unconverted_source"] },
 ];
 
 /** Header background por categoria (Blueprints-style) */
@@ -764,16 +973,87 @@ const GROUP_HEADER_BG: Record<string, string> = {
   Eventos: "bg-[#722f37]",
   Movimento: "bg-[#1e3a5f]",
   Condicoes: "bg-[#4a4a3a]",
+  Camera: "bg-[#1e4f4f]",
+  Tilemap: "bg-[#284f35]",
   Som: "bg-[#6b5b2a]",
   Variaveis: "bg-[#4a4a3a]",
   Fluxo: "bg-[#6b5b2a]",
   Estados: "bg-[#5c4a7a]",
   Efeitos: "bg-[#5c4a7a]",
+  Hardware: "bg-[#5f2f2f]",
 };
 
 function getGroupForType(type: NodeType): string {
   const group = NODE_PALETTE_GROUPS.find((g) => g.types.includes(type));
   return group?.label ?? "Outros";
+}
+
+const AUTO_LAYOUT_GROUP_ORDER = [
+  "Eventos",
+  "Movimento",
+  "Condicoes",
+  "Camera",
+  "Tilemap",
+  "Som",
+  "Variaveis",
+  "Fluxo",
+  "Estados",
+  "Efeitos",
+  "Hardware",
+  "Outros",
+];
+
+const AUTO_LAYOUT_TYPE_SEQUENCE: NodeType[] = [
+  ...REQUIRED_NOCODE_NODE_TYPES,
+  "sprite_anim",
+  "move_camera",
+  "logic_math",
+  "logic_and",
+  "flow_while",
+  "flow_for",
+  "timeline_sequence",
+  "effect_parallax",
+  "effect_raster",
+  "bridge_unconverted_source",
+  "event_vblank",
+  "event_hblank",
+  "event_dma_done",
+];
+
+const AUTO_LAYOUT_TYPE_ORDER = new Map<NodeType, number>(
+  AUTO_LAYOUT_TYPE_SEQUENCE.map((type, index) => [type, index])
+);
+
+export function autoLayoutNodeGraph(graph: NodeGraph): NodeGraph {
+  const groupCounts = new Map<string, number>();
+  const orderedNodes = [...graph.nodes].sort((a, b) => {
+    const groupA = AUTO_LAYOUT_GROUP_ORDER.indexOf(getGroupForType(a.type));
+    const groupB = AUTO_LAYOUT_GROUP_ORDER.indexOf(getGroupForType(b.type));
+    const typeA = AUTO_LAYOUT_TYPE_ORDER.get(a.type) ?? Number.MAX_SAFE_INTEGER;
+    const typeB = AUTO_LAYOUT_TYPE_ORDER.get(b.type) ?? Number.MAX_SAFE_INTEGER;
+    return (
+      groupA - groupB ||
+      typeA - typeB ||
+      a.label.localeCompare(b.label) ||
+      a.id.localeCompare(b.id)
+    );
+  });
+
+  return {
+    ...graph,
+    nodes: orderedNodes.map((node, index) => {
+      const group = getGroupForType(node.type);
+      const groupIndex = Math.max(0, AUTO_LAYOUT_GROUP_ORDER.indexOf(group));
+      const countInGroup = groupCounts.get(group) ?? 0;
+      groupCounts.set(group, countInGroup + 1);
+
+      return {
+        ...node,
+        x: 80 + Math.min(index, 4) * 220,
+        y: 80 + groupIndex * 140 + countInGroup * 86,
+      };
+    }),
+  };
 }
 
 export function getNodeDisplayName(type: NodeType): string {

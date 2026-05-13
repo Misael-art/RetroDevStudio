@@ -106,6 +106,10 @@ function buildBooleanExpression(
   visited.add(node.id);
 
   switch (node.type) {
+    case "input_pressed":
+    case "input_held":
+      return buildInputExpression(node, target);
+
     case "logic_and": {
       const left = resolveBooleanInput(graph, node.id, "a", target, visited);
       const right = resolveBooleanInput(graph, node.id, "b", target, visited);
@@ -136,6 +140,15 @@ function buildBooleanExpression(
     default:
       return "0";
   }
+}
+
+function buildInputExpression(node: GraphNode, target: "megadrive" | "snes"): string {
+  const pad = String(node.params.pad ?? "JOY_1");
+  const button = String(node.params.button ?? "BUTTON_A");
+  if (target === "snes") {
+    return `(padsCurrent(0) & ${button})`;
+  }
+  return `(JOY_readJoypad(${pad}) & ${button})`;
 }
 
 function resolveBooleanInput(
@@ -179,6 +192,14 @@ function collectLogicVariables(graph: NodeGraph): string[] {
       const timelineName = sanitizeIdentifier(String(node.params.timeline_name ?? node.id));
       vars.add(`timeline_${timelineName}`);
     }
+    if (node.type === "timer") {
+      vars.add(`timer_${sanitizeIdentifier(node.id)}`);
+    }
+    if (node.type === "set_velocity") {
+      const target = sanitizeIdentifier(String(node.params.target ?? "entity"));
+      vars.add(`${target}_vx`);
+      vars.add(`${target}_vy`);
+    }
   }
 
   return [...vars];
@@ -191,17 +212,49 @@ function emitLinearNodeC(node: GraphNode, graph: NodeGraph, target: "megadrive" 
     case "event_start":
       return "    // [On Start]\n";
 
+    case "event_update":
+      return "    // [On Update]\n";
+
     case "sprite_move":
       if (target === "snes") {
         return `    // Move ${p.target}: oamSet with dx=${p.dx}, dy=${p.dy} (update OAM manually)\n`;
       }
       return `    SPR_setPosition(spr_${p.target}, SPR_getX(spr_${p.target}) + ${p.dx}, SPR_getY(spr_${p.target}) + ${p.dy});\n`;
 
+    case "set_velocity": {
+      const targetName = sanitizeIdentifier(String(p.target ?? "entity"));
+      return `    logic_var_${targetName}_vx = ${resolveMathInput(graph, node.id, "vx")};\n    logic_var_${targetName}_vy = ${resolveMathInput(graph, node.id, "vy")};\n`;
+    }
+
+    case "set_position":
+      if (target === "snes") {
+        return `    // Set position for ${p.target}: oamSet(${p.x}, ${p.y}) in the sprite upload pass\n`;
+      }
+      return `    SPR_setPosition(spr_${p.target}, ${resolveMathInput(graph, node.id, "x")}, ${resolveMathInput(graph, node.id, "y")});\n`;
+
+    case "spawn_entity":
+      if (target === "snes") {
+        return `    // Spawn ${p.prefab} at (${p.x}, ${p.y}) in OAM staging\n`;
+      }
+      return `    spr_${p.prefab} = SPR_addSprite(&${p.prefab}, ${p.x}, ${p.y}, TILE_ATTR(PAL0, FALSE, FALSE, FALSE));\n`;
+
+    case "destroy_entity":
+      if (target === "snes") {
+        return `    // Destroy ${p.target}: clear OAM slot\n`;
+      }
+      return `    SPR_releaseSprite(spr_${p.target});\n`;
+
     case "sprite_anim":
       if (target === "snes") {
         return `    // Set anim '${p.anim}' on ${p.target} (update tile index manually)\n`;
       }
       return `    SPR_setAnim(spr_${p.target}, ANIM_${String(p.anim).toUpperCase()});\n`;
+
+    case "set_animation_state":
+      if (target === "snes") {
+        return `    // Set animation state '${p.state}' on ${p.target}\n`;
+      }
+      return `    SPR_setAnim(spr_${p.target}, ANIM_${String(p.state).toUpperCase()});\n`;
 
     case "condition_overlap":
       return `    if (SPR_overlaps(spr_${p.a}, spr_${p.b})) {\n        // [overlap branch]\n    }\n`;
@@ -240,6 +293,15 @@ function emitLinearNodeC(node: GraphNode, graph: NodeGraph, target: "megadrive" 
       // SGDK: VDP_setHorizontalScroll / VDP_setVerticalScroll — layer como enum BG_A/BG_B
       return `    tm_scroll_x_${p.layer} += ${p.dx}; VDP_setHorizontalScroll(${p.layer}, tm_scroll_x_${p.layer});\n    tm_scroll_y_${p.layer} += ${p.dy}; VDP_setVerticalScroll(${p.layer}, tm_scroll_y_${p.layer});\n`;
 
+    case "set_tile":
+      if (target === "snes") {
+        return `    // Set tile ${p.tile} at ${p.x},${p.y} on BG ${p.layer}\n`;
+      }
+      return `    VDP_setTileMapXY(${p.layer}, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, ${p.tile}), ${resolveMathInput(graph, node.id, "x")}, ${resolveMathInput(graph, node.id, "y")});\n`;
+
+    case "load_scene":
+      return `    // Load scene: ${p.scene}\n`;
+
     case "move_camera":
       if (target === "snes") {
         // PVSnesLib: sem API de câmera nativa — ajusta scroll dos layers diretamente
@@ -247,6 +309,15 @@ function emitLinearNodeC(node: GraphNode, graph: NodeGraph, target: "megadrive" 
       }
       // SGDK: câmera via scroll horizontal + vertical do BG_A
       return `    VDP_setHorizontalScroll(BG_A, ${p.x}); VDP_setVerticalScroll(BG_A, ${p.y}); // camera: ${p.target}\n`;
+
+    case "camera_follow":
+      if (target === "snes") {
+        return `    // Camera follows ${p.target} with damping ${p.damping}\n`;
+      }
+      return `    VDP_setHorizontalScroll(BG_A, SPR_getX(spr_${p.target}) - 160); VDP_setVerticalScroll(BG_A, SPR_getY(spr_${p.target}) - 112);\n`;
+
+    case "camera_bounds":
+      return `    // Camera bounds: ${p.min_x},${p.min_y} -> ${p.max_x},${p.max_y}\n`;
 
     case "var_set":
       return `    logic_var_${p.var_name} = ${resolveMathInput(graph, node.id, "value")};\n`;
@@ -263,6 +334,12 @@ function emitLinearNodeC(node: GraphNode, graph: NodeGraph, target: "megadrive" 
     case "fsm_state":
     case "fsm_transition":
       return "";
+
+    case "hardware_budget_check":
+      return `    // Hardware budget check: VRAM ${p.vram_kb}KB, sprites ${p.sprites}, sprites/scanline ${p.scanline_sprites}\n`;
+
+    case "bridge_unconverted_source":
+      return `    // Source bridge '${p.gap}': ${p.source}\n`;
 
     default:
       return `    // [unknown node: ${node.type}]\n`;
@@ -433,6 +510,54 @@ function emitExecChainFromNode(
     return nextNode ? emitExecChainFromNode(graph, nextNode, target, visited, indent) : "";
   }
 
+  if (node.type === "input_pressed" || node.type === "input_held") {
+    const nextEdge = findOutgoingExecEdge(graph, node.id, "exec");
+    const nextNode = nextEdge ? findNode(graph, nextEdge.toNode) : undefined;
+    let out = `${indentStr}if (${buildInputExpression(node, target)}) {\n`;
+    out += nextNode
+      ? emitExecChainFromNode(graph, nextNode, target, new Set(visited), indent + 4)
+      : `${" ".repeat(indent + 4)}// [input branch]\n`;
+    out += `${indentStr}}\n`;
+    return out;
+  }
+
+  if (node.type === "timer") {
+    const timerName = `logic_var_timer_${sanitizeIdentifier(node.id)}`;
+    const tickEdge = findOutgoingExecEdge(graph, node.id, "tick");
+    const doneEdge = findOutgoingExecEdge(graph, node.id, "done");
+    const tickNode = tickEdge ? findNode(graph, tickEdge.toNode) : undefined;
+    const doneNode = doneEdge ? findNode(graph, doneEdge.toNode) : undefined;
+    let out = `${indentStr}${timerName}++;\n`;
+    if (tickNode) {
+      out += emitExecChainFromNode(graph, tickNode, target, new Set(visited), indent);
+    }
+    out += `${indentStr}if (${timerName} >= ${Number(node.params.frames ?? 60)}) {\n`;
+    if (doneNode) {
+      out += emitExecChainFromNode(graph, doneNode, target, new Set(visited), indent + 4);
+    }
+    if (isTruthyParam(node.params.repeat)) {
+      out += `${" ".repeat(indent + 4)}${timerName} = 0;\n`;
+    }
+    out += `${indentStr}}\n`;
+    return out;
+  }
+
+  if (node.type === "hardware_budget_check") {
+    const okEdge = findOutgoingExecEdge(graph, node.id, "ok");
+    const warnEdge = findOutgoingExecEdge(graph, node.id, "warn");
+    const okNode = okEdge ? findNode(graph, okEdge.toNode) : undefined;
+    const warnNode = warnEdge ? findNode(graph, warnEdge.toNode) : undefined;
+    let out = emitLinearNodeC(node, graph, target);
+    if (okNode) {
+      out += emitExecChainFromNode(graph, okNode, target, new Set(visited), indent);
+    }
+    if (warnNode) {
+      out += `${indentStr}// [budget warning branch]\n`;
+      out += emitExecChainFromNode(graph, warnNode, target, new Set(visited), indent);
+    }
+    return out;
+  }
+
   if (node.type === "condition_compare") {
     const compareExpr = buildBooleanExpression(graph, node, target);
     const guardExpr = resolveBooleanInput(graph, node.id, "guard", target);
@@ -588,20 +713,31 @@ export function compileGraphToC(
   let out = `// Generated by RetroDev Studio NodeGraph — DO NOT EDIT\n// Project: ${projectName}\n\n${include}\n#include "resources.h"\n\n`;
 
   const startNodes = graph.nodes.filter((n: GraphNode) => n.type === "event_start");
+  const updateNodes = graph.nodes.filter((n: GraphNode) => n.type === "event_update");
   const fsmStates = collectFsmStates(graph);
   const hardwareEvents = collectHardwareEventNodes(graph);
 
-  if (startNodes.length === 0 && hardwareEvents.length === 0) {
+  if (startNodes.length === 0 && updateNodes.length === 0 && hardwareEvents.length === 0) {
     return out + "// No event_start node found in graph.\n";
   }
 
   // Collect sprite var declarations
   const spriteNodes = graph.nodes.filter(
-    (n: GraphNode) => n.type === "sprite_move" || n.type === "sprite_anim"
+    (n: GraphNode) =>
+      n.type === "sprite_move" ||
+      n.type === "sprite_anim" ||
+      n.type === "set_position" ||
+      n.type === "set_velocity" ||
+      n.type === "set_animation_state" ||
+      n.type === "camera_follow" ||
+      n.type === "destroy_entity"
   );
-  const spriteVars = new Set<string>(
+  const spriteVars = new Set<string | number>(
     spriteNodes.map((n: GraphNode) => String(n.params.target))
   );
+  graph.nodes
+    .filter((n: GraphNode) => n.type === "spawn_entity")
+    .forEach((n: GraphNode) => spriteVars.add(String(n.params.prefab)));
 
   if (target === "megadrive") {
     spriteVars.forEach((v) => { out += `static Sprite* spr_${v};\n`; });
@@ -650,9 +786,17 @@ export function compileGraphToC(
   }
 
   if (target === "snes") {
-    out += "\n    while (true) {\n        oamUpdate();\n        WaitForVBlank();\n    }\n";
+    out += "\n    while (true) {\n";
+    for (const updateNode of updateNodes) {
+      out += emitExecChainFromNode(graph, updateNode, target);
+    }
+    out += "        oamUpdate();\n        WaitForVBlank();\n    }\n";
   } else {
-    out += "\n    while (TRUE) {\n        SPR_update();\n        SYS_doVBlankProcess();\n    }\n";
+    out += "\n    while (TRUE) {\n";
+    for (const updateNode of updateNodes) {
+      out += emitExecChainFromNode(graph, updateNode, target);
+    }
+    out += "        SPR_update();\n        SYS_doVBlankProcess();\n    }\n";
   }
 
   out += "\n    return 0;\n}\n";

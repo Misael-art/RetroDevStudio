@@ -65,27 +65,30 @@ export default function UnifiedTopBar({
   }, [menuOpen]);
 
   return (
-    <header className="relative z-20 flex shrink-0 items-stretch gap-3 border-b border-[#27272a] bg-[linear-gradient(180deg,#18181b,#0f172a)] px-3 py-2.5">
-      <div className="flex min-w-0 flex-1 items-center gap-3">
+    <header
+      data-testid="unified-topbar"
+      className="relative z-20 flex min-h-[42px] shrink-0 items-center gap-2 border-b border-[#27272a] bg-[#10131d] px-2 py-1"
+    >
+      <div className="flex min-w-0 flex-1 items-center gap-2">
         <div ref={menuRef} className="relative shrink-0">
           <button
             type="button"
             data-testid="unified-topbar-menu-trigger"
             onClick={() => setMenuOpen((current) => !current)}
-            className="flex h-10 items-center justify-center rounded-xl border border-[#3f3f46] bg-[#111827] px-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#e2e8f0] transition-colors hover:border-[#6366f1]/30 hover:bg-[#1f2937]"
+            className="flex h-8 items-center justify-center rounded border border-[#3f3f46] bg-[#111827] px-2 text-[10px] font-semibold uppercase text-[#e2e8f0] transition-colors hover:border-[#6366f1]/30 hover:bg-[#1f2937]"
           >
             Menu
           </button>
 
           {menuOpen && (
-            <div className="absolute left-0 top-[calc(100%+10px)] w-72 overflow-hidden rounded-2xl border border-[#313244] bg-[#0b1120] shadow-[0_24px_60px_rgba(0,0,0,0.45)]">
+            <div className="absolute left-0 top-[calc(100%+8px)] w-72 overflow-hidden rounded border border-[#313244] bg-[#0b1120] shadow-[0_24px_60px_rgba(0,0,0,0.45)]">
               {menuSections.map((section, sectionIndex) => (
                 <div
                   key={`${section.title ?? "section"}-${sectionIndex}`}
                   className={sectionIndex > 0 ? "border-t border-[#1f2937]" : undefined}
                 >
                   {section.title && (
-                    <div className="px-4 py-3 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
+                    <div className="px-3 py-2 text-[10px] font-semibold uppercase text-[#7dd3fc]">
                       {section.title}
                     </div>
                   )}
@@ -101,7 +104,7 @@ export default function UnifiedTopBar({
                           setMenuOpen(false);
                           action.onClick();
                         }}
-                        className={`flex items-center justify-between rounded-xl border px-3 py-2 text-left text-[12px] font-medium transition-colors ${menuActionTone(action.accent)} disabled:cursor-not-allowed disabled:opacity-40`}
+                        className={`flex items-center justify-between rounded border px-3 py-2 text-left text-[12px] font-medium transition-colors ${menuActionTone(action.accent)} disabled:cursor-not-allowed disabled:opacity-40`}
                       >
                         <span>{action.label}</span>
                       </button>
@@ -114,18 +117,18 @@ export default function UnifiedTopBar({
         </div>
 
         <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#cba6f7]">
+          <div className="text-[10px] font-semibold uppercase text-[#cba6f7]">
             {appName}
           </div>
           {appTagline ? (
-            <div className="mt-1 text-[11px] text-[#64748b]">{appTagline}</div>
+            <div className="sr-only">{appTagline}</div>
           ) : null}
         </div>
 
         <nav
           aria-label="Breadcrumb"
           data-testid="unified-topbar-breadcrumbs"
-          className="min-w-0 flex-1 overflow-hidden rounded-2xl border border-[#27272a] bg-[#0b1220]/80 px-3 py-2"
+          className="min-w-0 flex-1 overflow-hidden rounded border border-[#27272a] bg-[#0b1220]/80 px-2 py-1"
         >
           <div className="flex min-w-0 items-center gap-2 overflow-hidden whitespace-nowrap text-[11px] text-[#94a3b8]">
             {breadcrumbs.map((crumb, index) => (
