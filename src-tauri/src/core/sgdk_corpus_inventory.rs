@@ -62,6 +62,28 @@ pub struct SgdkSemanticGap {
     pub subject: String,
     pub detail: String,
     pub source: Option<SourceLocation>,
+    #[serde(default)]
+    pub impact: String,
+    #[serde(default)]
+    pub severity: String,
+    #[serde(default)]
+    pub suggestion: String,
+    #[serde(default)]
+    pub blocks_nocode: bool,
+    #[serde(default)]
+    pub blocks_build: bool,
+    #[serde(default)]
+    pub blocks_round_trip: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+pub struct SgdkNodeCandidate {
+    pub node_type: String,
+    pub label: String,
+    pub system: String,
+    pub source: Option<SourceLocation>,
+    #[serde(default)]
+    pub blocked_by_gap: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
@@ -92,6 +114,8 @@ pub struct SgdkProjectInventory {
     pub resources: Vec<SgdkResourceInventory>,
     pub code: SgdkCodeInventory,
     pub semantic_gaps: Vec<SgdkSemanticGap>,
+    #[serde(default)]
+    pub node_candidates: Vec<SgdkNodeCandidate>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
@@ -147,17 +171,15 @@ pub fn inspect_sgdk_project_for_nocode_inventory(
             Some("h") => header_files.push(rel.clone()),
             Some("s") | Some("asm") => {
                 source_files.push(rel.clone());
-                semantic_gaps.push(SgdkSemanticGap {
-                    kind: "assembly_source".to_string(),
-                    subject: rel.clone(),
-                    detail:
-                        "Assembly source is indexed but not represented as editable no-code nodes."
-                            .to_string(),
-                    source: Some(SourceLocation {
+                semantic_gaps.push(make_semantic_gap(
+                    "assembly_source",
+                    rel.clone(),
+                    "Assembly source is indexed but not represented as editable no-code nodes.",
+                    Some(SourceLocation {
                         file: rel.clone(),
                         line: 1,
                     }),
-                });
+                ));
             }
             Some("res") => resource_manifests.push(rel.clone()),
             _ => {}
@@ -189,15 +211,15 @@ pub fn inspect_sgdk_project_for_nocode_inventory(
             .unwrap_or_default();
         for parsed in parse_resource_manifest(rel, &content) {
             if !is_supported_resource_kind(&parsed.kind) {
-                semantic_gaps.push(SgdkSemanticGap {
-                    kind: "unsupported_resource_kind".to_string(),
-                    subject: parsed.kind.clone(),
-                    detail: format!(
+                semantic_gaps.push(make_semantic_gap(
+                    "unsupported_resource_kind",
+                    parsed.kind.clone(),
+                    format!(
                         "Resource '{}' uses SGDK kind '{}' without a canonical no-code mapping.",
                         parsed.name, parsed.kind
                     ),
-                    source: Some(parsed.source.clone()),
-                });
+                    Some(parsed.source.clone()),
+                ));
             }
             let asset_rel = normalize_joined_rel_path(&manifest_dir, &parsed.asset_path);
             resources.push(SgdkResourceInventory {
@@ -223,6 +245,8 @@ pub fn inspect_sgdk_project_for_nocode_inventory(
         parse_code_file(rel, &content, &mut code, &mut semantic_gaps);
     }
 
+    let mut node_candidates = derive_sgdk_node_candidates(&resources, &code, &semantic_gaps);
+
     sort_project_inventory(
         &mut source_files,
         &mut header_files,
@@ -232,6 +256,7 @@ pub fn inspect_sgdk_project_for_nocode_inventory(
         &mut code,
         &mut semantic_gaps,
     );
+    sort_node_candidates(&mut node_candidates);
 
     Ok(SgdkProjectInventory {
         project_name: root
@@ -246,6 +271,7 @@ pub fn inspect_sgdk_project_for_nocode_inventory(
         resources,
         code,
         semantic_gaps,
+        node_candidates,
     })
 }
 
@@ -449,6 +475,81 @@ fn classify_asset_extension(extension: Option<&str>) -> Option<&'static str> {
     }
 }
 
+fn classify_semantic_gap(kind: &str) -> (&'static str, &'static str, &'static str, bool, bool, bool) {
+    match kind {
+        "preprocessor_condition" => (
+            "Conditional branch changes the SGDK source shape and needs branch-aware source mapping.",
+            "warning",
+            "Create a Source Bridge node for the inactive/ambiguous branch until branch-specific AST is available.",
+            true,
+            false,
+            true,
+        ),
+        "function_like_macro" | "multiline_macro" => (
+            "Macro expansion may hide editable behavior from the no-code graph.",
+            "warning",
+            "Create a typed macro Bridge node or replace with an explicit SGDK node template.",
+            true,
+            false,
+            true,
+        ),
+        "unsupported_resource_kind" => (
+            "Resource can stay buildable, but the editor cannot expose a canonical authoring surface.",
+            "warning",
+            "Route the declaration through a Source Bridge node and add a resource mapper before promoting compatibility.",
+            true,
+            false,
+            true,
+        ),
+        "assembly_source" | "inline_assembly" => (
+            "Assembly is preserved as source but cannot be edited safely as no-code logic.",
+            "warning",
+            "Keep assembly behind a Source Bridge node and mark generated output as non-round-trippable.",
+            true,
+            false,
+            true,
+        ),
+        "lossy_source_encoding" | "lossy_resource_encoding" => (
+            "Source offsets may be approximate after UTF-8 replacement decoding.",
+            "warning",
+            "Normalize file encoding before relying on precise source mapping.",
+            false,
+            false,
+            true,
+        ),
+        _ => (
+            "SGDK construct is indexed but not fully represented in the canonical no-code model.",
+            "warning",
+            "Track this construct through a Source Bridge node and keep build output conservative.",
+            true,
+            false,
+            true,
+        ),
+    }
+}
+
+fn make_semantic_gap(
+    kind: &str,
+    subject: impl Into<String>,
+    detail: impl Into<String>,
+    source: Option<SourceLocation>,
+) -> SgdkSemanticGap {
+    let (impact, severity, suggestion, blocks_nocode, blocks_build, blocks_round_trip) =
+        classify_semantic_gap(kind);
+    SgdkSemanticGap {
+        kind: kind.to_string(),
+        subject: subject.into(),
+        detail: detail.into(),
+        source,
+        impact: impact.to_string(),
+        severity: severity.to_string(),
+        suggestion: suggestion.to_string(),
+        blocks_nocode,
+        blocks_build,
+        blocks_round_trip,
+    }
+}
+
 fn read_text_lossy_with_gap(
     path: &Path,
     relative_path: &str,
@@ -465,16 +566,15 @@ fn read_text_lossy_with_gap(
     match String::from_utf8(bytes) {
         Ok(text) => Ok(text),
         Err(error) => {
-            gaps.push(SgdkSemanticGap {
-                kind: gap_kind.to_string(),
-                subject: relative_path.to_string(),
-                detail: "File was decoded with UTF-8 replacement characters; source mapping remains approximate."
-                    .to_string(),
-                source: Some(SourceLocation {
+            gaps.push(make_semantic_gap(
+                gap_kind,
+                relative_path.to_string(),
+                "File was decoded with UTF-8 replacement characters; source mapping remains approximate.",
+                Some(SourceLocation {
                     file: relative_path.to_string(),
                     line: 1,
                 }),
-            });
+            ));
             Ok(String::from_utf8_lossy(error.as_bytes()).to_string())
         }
     }
@@ -694,29 +794,25 @@ fn parse_preprocessor(
             };
             if function_like {
                 code.macros.push(item.clone());
-                gaps.push(SgdkSemanticGap {
-                    kind: "function_like_macro".to_string(),
-                    subject: name,
-                    detail:
-                        "Function-like macro requires explicit no-code bridge or typed expansion."
-                            .to_string(),
-                    source: Some(location),
-                });
+                gaps.push(make_semantic_gap(
+                    "function_like_macro",
+                    name,
+                    "Function-like macro requires explicit no-code bridge or typed expansion.",
+                    Some(location),
+                ));
             } else {
                 code.defines.push(item);
             }
             if trimmed.ends_with('\\') {
-                gaps.push(SgdkSemanticGap {
-                    kind: "multiline_macro".to_string(),
-                    subject: rest.to_string(),
-                    detail:
-                        "Multiline macro cannot be safely round-tripped by the C-lite inventory."
-                            .to_string(),
-                    source: Some(SourceLocation {
+                gaps.push(make_semantic_gap(
+                    "multiline_macro",
+                    rest.to_string(),
+                    "Multiline macro cannot be safely round-tripped by the C-lite inventory.",
+                    Some(SourceLocation {
                         file: file.to_string(),
                         line: index + 1,
                     }),
-                });
+                ));
             }
             continue;
         }
@@ -725,13 +821,12 @@ fn parse_preprocessor(
             || trimmed.starts_with("#ifndef")
             || trimmed.starts_with("#elif")
         {
-            gaps.push(SgdkSemanticGap {
-                kind: "preprocessor_condition".to_string(),
-                subject: trimmed.to_string(),
-                detail: "Conditional compilation is indexed as a semantic gap until branch-specific AST is available."
-                    .to_string(),
-                source: Some(location),
-            });
+            gaps.push(make_semantic_gap(
+                "preprocessor_condition",
+                trimmed.to_string(),
+                "Conditional compilation is indexed as a semantic gap until branch-specific AST is available.",
+                Some(location),
+            ));
         }
     }
 }
@@ -802,17 +897,15 @@ fn parse_symbols(
                 }
             } else if let Some(name) = parse_global_name(trimmed) {
                 if trimmed.contains("(*") {
-                    gaps.push(SgdkSemanticGap {
-                        kind: "function_pointer".to_string(),
-                        subject: name.clone(),
-                        detail:
-                            "Function pointer declarations need an explicit callback/bridge node."
-                                .to_string(),
-                        source: Some(SourceLocation {
+                    gaps.push(make_semantic_gap(
+                        "function_pointer",
+                        name.clone(),
+                        "Function pointer declarations need an explicit callback/bridge node.",
+                        Some(SourceLocation {
                             file: file.to_string(),
                             line: line_no,
                         }),
-                    });
+                    ));
                 }
                 let item = SgdkNamedSourceItem {
                     name: name.clone(),
@@ -952,16 +1045,15 @@ fn parse_calls_and_control_flow(
             continue;
         }
         if trimmed.contains("__asm") || trimmed.contains(" asm(") || trimmed.starts_with("asm(") {
-            gaps.push(SgdkSemanticGap {
-                kind: "inline_assembly".to_string(),
-                subject: file.to_string(),
-                detail: "Inline assembly cannot be represented as editable no-code nodes."
-                    .to_string(),
-                source: Some(SourceLocation {
+            gaps.push(make_semantic_gap(
+                "inline_assembly",
+                file.to_string(),
+                "Inline assembly cannot be represented as editable no-code nodes.",
+                Some(SourceLocation {
                     file: file.to_string(),
                     line: line_no,
                 }),
-            });
+            ));
         }
         let caller = definitions
             .iter()
@@ -1074,6 +1166,227 @@ fn is_callback_registration(name: &str) -> bool {
         || name.contains("setVIntCallback")
         || name.contains("setHIntCallback")
         || name.contains("setCallback")
+}
+
+fn push_node_candidate(
+    candidates: &mut Vec<SgdkNodeCandidate>,
+    seen: &mut BTreeSet<String>,
+    node_type: &str,
+    label: impl Into<String>,
+    system: &str,
+    source: Option<SourceLocation>,
+    blocked_by_gap: Option<String>,
+) {
+    let source_key = source
+        .as_ref()
+        .map(|location| format!("{}:{}", location.file, location.line))
+        .unwrap_or_else(|| "global".to_string());
+    let blocked_key = blocked_by_gap.as_deref().unwrap_or("");
+    let key = format!("{node_type}:{system}:{source_key}:{blocked_key}");
+    if !seen.insert(key) {
+        return;
+    }
+    candidates.push(SgdkNodeCandidate {
+        node_type: node_type.to_string(),
+        label: label.into(),
+        system: system.to_string(),
+        source,
+        blocked_by_gap,
+    });
+}
+
+fn derive_sgdk_node_candidates(
+    resources: &[SgdkResourceInventory],
+    code: &SgdkCodeInventory,
+    gaps: &[SgdkSemanticGap],
+) -> Vec<SgdkNodeCandidate> {
+    let mut candidates = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    if code
+        .functions
+        .iter()
+        .any(|function| function.name == "main" && function.is_definition)
+    {
+        push_node_candidate(
+            &mut candidates,
+            &mut seen,
+            "event_start",
+            "main entrypoint",
+            "event",
+            code.functions
+                .iter()
+                .find(|function| function.name == "main")
+                .map(|function| function.source.clone()),
+            None,
+        );
+    }
+
+    for item in &code.main_loops {
+        push_node_candidate(
+            &mut candidates,
+            &mut seen,
+            "event_update",
+            format!("update loop: {}", item.name),
+            "event",
+            Some(item.source.clone()),
+            None,
+        );
+    }
+
+    for function in &code.update_functions {
+        push_node_candidate(
+            &mut candidates,
+            &mut seen,
+            "event_update",
+            format!("update function: {}", function.name),
+            "event",
+            Some(function.source.clone()),
+            None,
+        );
+    }
+
+    for resource in resources {
+        match resource.kind.as_str() {
+            "SPRITE" => {
+                push_node_candidate(
+                    &mut candidates,
+                    &mut seen,
+                    "spawn_entity",
+                    format!("sprite resource: {}", resource.name),
+                    "sprite",
+                    Some(resource.source.clone()),
+                    None,
+                );
+                push_node_candidate(
+                    &mut candidates,
+                    &mut seen,
+                    "sprite_anim",
+                    format!("sprite animation resource: {}", resource.name),
+                    "sprite",
+                    Some(resource.source.clone()),
+                    None,
+                );
+            }
+            "TILEMAP" | "MAP" | "IMAGE" | "TILESET" | "BITMAP" => {
+                push_node_candidate(
+                    &mut candidates,
+                    &mut seen,
+                    "scroll_tilemap",
+                    format!("tilemap resource: {}", resource.name),
+                    "tilemap",
+                    Some(resource.source.clone()),
+                    None,
+                );
+            }
+            "WAV" | "XGM" | "XGM2" | "PCM" => {
+                push_node_candidate(
+                    &mut candidates,
+                    &mut seen,
+                    "action_sound",
+                    format!("audio resource: {}", resource.name),
+                    "audio",
+                    Some(resource.source.clone()),
+                    None,
+                );
+            }
+            _ => {
+                push_node_candidate(
+                    &mut candidates,
+                    &mut seen,
+                    "bridge_unconverted_source",
+                    format!("resource bridge: {}", resource.name),
+                    "bridge",
+                    Some(resource.source.clone()),
+                    Some("unsupported_resource_kind".to_string()),
+                );
+            }
+        }
+    }
+
+    for call in &code.calls {
+        match call.family.as_str() {
+            "input" => push_node_candidate(
+                &mut candidates,
+                &mut seen,
+                "input_held",
+                format!("input call: {}", call.name),
+                "input",
+                Some(call.source.clone()),
+                None,
+            ),
+            "sprite" => {
+                let node_type = if call.name.contains("Anim") || call.name.contains("Frame") {
+                    "sprite_anim"
+                } else {
+                    "sprite_move"
+                };
+                push_node_candidate(
+                    &mut candidates,
+                    &mut seen,
+                    node_type,
+                    format!("sprite call: {}", call.name),
+                    "sprite",
+                    Some(call.source.clone()),
+                    None,
+                );
+            }
+            "tilemap" => push_node_candidate(
+                &mut candidates,
+                &mut seen,
+                "scroll_tilemap",
+                format!("tilemap call: {}", call.name),
+                "tilemap",
+                Some(call.source.clone()),
+                None,
+            ),
+            "audio" => push_node_candidate(
+                &mut candidates,
+                &mut seen,
+                "action_sound",
+                format!("audio call: {}", call.name),
+                "audio",
+                Some(call.source.clone()),
+                None,
+            ),
+            "dma" | "vdp" => push_node_candidate(
+                &mut candidates,
+                &mut seen,
+                "hardware_budget_check",
+                format!("hardware call: {}", call.name),
+                "hardware",
+                Some(call.source.clone()),
+                None,
+            ),
+            _ => {}
+        }
+    }
+
+    if !resources.is_empty() || code.calls.iter().any(|call| call.family != "project") {
+        push_node_candidate(
+            &mut candidates,
+            &mut seen,
+            "hardware_budget_check",
+            "project hardware budget",
+            "hardware",
+            None,
+            None,
+        );
+    }
+
+    for gap in gaps.iter().filter(|gap| gap.blocks_nocode || gap.blocks_round_trip) {
+        push_node_candidate(
+            &mut candidates,
+            &mut seen,
+            "bridge_unconverted_source",
+            format!("bridge: {}", gap.subject),
+            "bridge",
+            gap.source.clone(),
+            Some(gap.kind.clone()),
+        );
+    }
+
+    candidates
 }
 
 fn brace_delta(line: &str) -> i32 {
@@ -1252,6 +1565,25 @@ fn sort_project_inventory(
                 b.subject.as_str(),
                 b.source.as_ref().map(|s| s.file.as_str()).unwrap_or(""),
                 b.source.as_ref().map(|s| s.line).unwrap_or(0),
+            ))
+    });
+}
+
+fn sort_node_candidates(node_candidates: &mut [SgdkNodeCandidate]) {
+    node_candidates.sort_by(|a, b| {
+        (
+            a.system.as_str(),
+            a.node_type.as_str(),
+            a.source.as_ref().map(|s| s.file.as_str()).unwrap_or(""),
+            a.source.as_ref().map(|s| s.line).unwrap_or(0),
+            a.label.as_str(),
+        )
+            .cmp(&(
+                b.system.as_str(),
+                b.node_type.as_str(),
+                b.source.as_ref().map(|s| s.file.as_str()).unwrap_or(""),
+                b.source.as_ref().map(|s| s.line).unwrap_or(0),
+                b.label.as_str(),
             ))
     });
 }
@@ -1444,6 +1776,68 @@ void stream_tiles(void) {
             .semantic_gaps
             .iter()
             .any(|gap| gap.kind == "function_like_macro"));
+    }
+
+    #[test]
+    fn sgdk_inventory_emits_actionable_gaps_and_node_candidates() {
+        let root = temp_inventory_dir("actionable");
+        write_file(
+            &root.join("res/resources.res"),
+            r#"
+SPRITE hero "sprites/hero.png" 4 4 FAST 0
+TILEMAP level_map "maps/level.bin" level_tiles BEST
+"#,
+        );
+        write_file(&root.join("res/sprites/hero.png"), "fake png");
+        write_file(&root.join("res/maps/level.bin"), "fake map");
+        write_file(
+            &root.join("src/main.c"),
+            r#"
+#include <genesis.h>
+#define MOVE_BY(dx, dy) SPR_setPosition(player, dx, dy)
+#ifdef ENABLE_DEMO
+void update_player(void) {
+    u16 joy = JOY_readJoypad(JOY_1);
+    if (joy & BUTTON_RIGHT) SPR_setPosition(player, 16, 0);
+    MAP_scrollTo(level_map, 1, 0);
+    XGM_startPlayPCM(jump_sfx, 1, SOUND_PCM_CH2);
+}
+#endif
+"#,
+        );
+
+        let inventory = inspect_sgdk_project_for_nocode_inventory(&root).expect("inventory");
+
+        let macro_gap = inventory
+            .semantic_gaps
+            .iter()
+            .find(|gap| gap.kind == "function_like_macro")
+            .expect("function-like macro gap");
+        assert_eq!(macro_gap.severity, "warning");
+        assert!(macro_gap.blocks_round_trip);
+        assert!(!macro_gap.blocks_build);
+        assert!(macro_gap.suggestion.contains("Bridge"));
+
+        let preprocessor_gap = inventory
+            .semantic_gaps
+            .iter()
+            .find(|gap| gap.kind == "preprocessor_condition")
+            .expect("preprocessor gap");
+        assert!(preprocessor_gap.blocks_nocode);
+        assert!(preprocessor_gap.impact.contains("branch"));
+
+        assert!(inventory.node_candidates.iter().any(|node| {
+            node.node_type == "input_held" && node.system == "input"
+        }));
+        assert!(inventory.node_candidates.iter().any(|node| {
+            node.node_type == "sprite_move" && node.system == "sprite"
+        }));
+        assert!(inventory.node_candidates.iter().any(|node| {
+            node.node_type == "scroll_tilemap" && node.system == "tilemap"
+        }));
+        assert!(inventory.node_candidates.iter().any(|node| {
+            node.node_type == "hardware_budget_check" && node.system == "hardware"
+        }));
     }
 
     #[test]

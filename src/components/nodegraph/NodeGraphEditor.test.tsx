@@ -4,8 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import NodeGraphEditor, {
   EMPTY_GRAPH,
+  REQUIRED_NOCODE_NODE_TYPES,
   appendExecChainEdgesFromLayout,
   appendQuickActionGraph,
+  autoLayoutNodeGraph,
   buildNodeMiniMap,
   serializeNodeGraph,
   summarizeNodeGraph,
@@ -230,6 +232,71 @@ describe("NodeGraphEditor helpers", () => {
 
     const appendedNodes = appended.graph.nodes.filter((node) => appended.appendedNodeIds.includes(node.id));
     expect(appendedNodes.every((node) => node.x > 1840)).toBe(true);
+  });
+
+  it("auto-layout groups imported graphs into readable system lanes", () => {
+    const chaotic: NodeGraph = {
+      nodes: [
+        { ...GRAPH_FIXTURE.nodes[2], id: "sound", type: "action_sound", x: 8, y: 8 },
+        { ...GRAPH_FIXTURE.nodes[1], id: "move", type: "sprite_move", x: 7, y: 9 },
+        { ...GRAPH_FIXTURE.nodes[0], id: "entry", type: "event_start", x: 6, y: 7 },
+        {
+          id: "budget",
+          type: "hardware_budget_check",
+          label: "Hardware Budget",
+          x: 5,
+          y: 6,
+          inputs: [{ id: "exec", label: "exec", kind: "exec" }],
+          outputs: [{ id: "exec", label: "exec", kind: "exec" }],
+          params: { budget: "sprite_scanline" },
+        },
+      ],
+      edges: [],
+    };
+
+    const arranged = autoLayoutNodeGraph(chaotic);
+    const entry = arranged.nodes.find((node) => node.id === "entry")!;
+    const move = arranged.nodes.find((node) => node.id === "move")!;
+    const sound = arranged.nodes.find((node) => node.id === "sound")!;
+    const budget = arranged.nodes.find((node) => node.id === "budget")!;
+
+    expect(entry.x).toBeLessThan(move.x);
+    expect(move.y).toBeLessThan(sound.y);
+    expect(budget.y).toBeGreaterThan(sound.y);
+    expect(arranged.nodes.map((node) => node.id)).toEqual(["entry", "move", "sound", "budget"]);
+  });
+
+  it("declares the no-code production node vocabulary in the editor", () => {
+    expect(REQUIRED_NOCODE_NODE_TYPES).toEqual(
+      expect.arrayContaining([
+        "event_start",
+        "event_update",
+        "input_pressed",
+        "input_held",
+        "condition_overlap",
+        "sprite_move",
+        "set_velocity",
+        "set_position",
+        "spawn_entity",
+        "destroy_entity",
+        "sprite_anim",
+        "set_animation_state",
+        "camera_follow",
+        "camera_bounds",
+        "timer",
+        "var_get",
+        "var_set",
+        "flow_if",
+        "condition_compare",
+        "fsm_state",
+        "fsm_transition",
+        "action_sound",
+        "set_tile",
+        "scroll_tilemap",
+        "load_scene",
+        "hardware_budget_check",
+      ])
+    );
   });
 
   it("validates broken refs, incompatible ports and exec cycles", () => {
