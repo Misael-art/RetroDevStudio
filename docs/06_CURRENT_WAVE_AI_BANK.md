@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-13 (rodada 41 - PR #4 promovido em main)
+**Ultima Atualizacao:** 2026-05-14 (rodada 42 - SGDK/no-code backend e BLAZE compat em branch)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,15 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-14 rodada 42 - branch `codex/sgdk-stable-node-engine-blaze`):**
+  - **Base/branch:** criada a partir de `main` atualizado em `3ab8e7d5889a01cad690f9b4cc257dc05ae6ff13`; checkpoint tecnico `50ea123507cec44c3467b82134e6a578d7969770` foi commitado e pushado para `origin/codex/sgdk-stable-node-engine-blaze`.
+  - **SGDK corpus/modelo:** `sgdk_corpus_inventory.rs` agora persiste modelo canonico `sgdk-canonical/v1` por projeto com Project/Scene/Entity/Component, Sprite, Animation, Tilemap, Collision, Input, Camera, Audio, State Machine, Timer, Variables, Hardware Budget, Source Mapping e `CompatibilityBridge`. Os gaps conhecidos continuam contados, mas foram resolvidos por bridge formal nao bloqueante para no-code/build/round-trip.
+  - **Inventario real:** `cargo test sgdk_corpus_inventory_real_corpus_report --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` passou no corpus `F:\Projects\MegaDrive_DEV\SGDK_Engines`; o report `src-tauri/target-test/validation/sgdk-corpus-inventory.json` cobre **122 projetos**, **2.511 semantic gaps** e **0 blockers** (`assembly_source=150`, `lossy_source_encoding=33`, `preprocessor_condition=1471`, `unsupported_resource_kind=236`, `function_like_macro=484`, `multiline_macro=90`, `inline_assembly=47`).
+  - **Node Engine/backend SGDK:** o caminho Rust oficial (`ast_generator` -> `sgdk_emitter` -> `build_orch`) passou a compilar `event_update`, `input_held`, `input_pressed`, `set_velocity`, `set_position`, `set_animation_state`, `camera_follow`, `set_tile`, `hardware_budget_check`, `spawn_entity`, `destroy_entity` e som em SGDK C deterministico. Nova prova `build_generates_rom_from_stable_nocode_sgdk_game_nodes` cria um projeto Mega Drive por `LogicComponent.graph`, gera `main.c`/`resources.res`, produz ROM `.md` com assinatura `SEGA` via fake SGDK e confirma determinismo de `main.c` em segunda geracao.
+  - **BLAZE_ENGINE:** deixou de ser apenas blocker sem saida tecnica. O build para source_kind SGDK agora tenta perfil de compatibilidade conservador quando a cena importada excede hardware: culling deterministico de sprites ativos, plano de multiplex/streaming, revalidacao de budget e AST gerado a partir da cena transformada sem sobrescrever o projeto. O teste `sgdk_matrix_corpus_blaze_engine_partial_flow_documents_build_blocker --ignored` passou e exige log `SGDK compatibility profile` com `sprite culling` + `multiplex` e ROM com assinatura `SEGA`; o blocker original de hardware continua visivel antes da transformacao.
+  - **Gates focados ja executados nesta rodada:** `cargo test generate_ast_compiles_stable_nocode_game_nodes_to_sgdk_c`, `cargo test compiler::ast_generator`, `cargo test compiler::sgdk_emitter`, `cargo test compiler::snes_emitter`, `cargo test compiler::build_orch`, `cargo test sgdk_corpus_inventory`, `cargo test sgdk_corpus_inventory_real_corpus_report --ignored` e `cargo test sgdk_matrix_corpus_ --ignored` verdes.
+  - **Status honesto:** SGDK Stable: **NAO** ate a barra completa, PR/merge e evidencia de build/ROM/emulacao por corpus inteiro fecharem. Node Engine Stable: **NAO** ate a prova desktop/emulador institucional substituir o fake SGDK no jogo no-code. BLAZE status: **compat profile implementado e testado**, nao mais "falhou legitimo" sem tentativa tecnica.
 
 * **O que acabou de acontecer (2026-05-13 rodada 41 - PR #4 promovido em main):**
   - **PR/merge:** PR #4 (`https://github.com/Misael-art/RetroDevStudio/pull/4`) esta `closed/merged`, `draft=false`, base `main`, head `codex/sgdk-nocode-production-ui`, head SHA `d21939ce83f360072a64637170922c78e2dd149d`. Merge realizado no GitHub por `Misael-art` em `2026-05-13T14:26:20Z`, merge commit `91bb8eb354389e370bb59d6a5ae84c21b4a1429f`.
