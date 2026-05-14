@@ -700,7 +700,8 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
 }
 
 fn sanitize_identifier(id: &str) -> String {
-    id.chars()
+    let sanitized = id
+        .chars()
         .map(|character| {
             if character.is_alphanumeric() || character == '_' {
                 character
@@ -709,7 +710,18 @@ fn sanitize_identifier(id: &str) -> String {
             }
         })
         .collect::<String>()
-        .to_lowercase()
+        .to_lowercase();
+    if sanitized
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+    {
+        sanitized
+    } else if sanitized.is_empty() {
+        "_resource".to_string()
+    } else {
+        format!("r_{sanitized}")
+    }
 }
 
 fn count_unique_frames(sprite: &SpriteComponent) -> u32 {
@@ -4355,7 +4367,7 @@ mod tests {
     }
 
     #[test]
-    fn generate_ast_compiles_stable_nocode_game_nodes_to_sgdk_c() {
+    fn generate_ast_compiles_nocode_game_nodes_to_sgdk_c_without_stable_claim() {
         let project = Project {
             rds_version: "1.0".to_string(),
             schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),

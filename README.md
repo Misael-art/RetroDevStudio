@@ -36,7 +36,7 @@ RetroDev Studio ja passou de prototipo. O produto hoje consegue:
 
 O produto ainda nao deve ser descrito como engine totalmente pronta para producao comercial. A prioridade atual e consistencia, ergonomia e repetibilidade dos fluxos certificados.
 
-Na frente SGDK/no-code, o editor ja possui UI mais compacta, NodeGraph com vocabulario de autoria, geracao C deterministica em testes e inventario de corpus com gaps acionaveis integrados em `main`. A branch `codex/sgdk-stable-node-engine-blaze` adiciona modelo canonico/bridges para o corpus real, backend Rust de nodes -> SGDK C, prova de build/ROM smoke para jogo no-code e perfil conservador para `BLAZE_ENGINE`. Isso ainda continua marcado como `Experimental`: SGDK Stable e Node Engine Stable continuam **NAO** ate existir prova completa de round-trip/build/emulacao por corpus, PR/merge e jogo no-code validado com toolchain/emulador reais.
+Na frente SGDK/no-code, a branch `codex/sgdk-stable-node-engine-blaze` removeu fake da prova Stable. O jogo no-code real e gerado 100% por nodes, compila com SGDK oficial, gera ROM persistente e roda no Genesis Plus GX; o corpus real cobre 122 projetos, com 68 builds/ROMs/emulacoes reais e 54 bridges formais; `BLAZE_ENGINE` tem modo compativel real com build, ROM e emulacao. SGDK Stable e Node Engine Stable estao **SIM localmente nessa branch**; a promocao publica ainda depende de PR/checks remotos, merge para `main` e readiness no destino.
 
 ---
 

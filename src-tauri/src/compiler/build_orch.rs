@@ -5,7 +5,7 @@ use std::process::Command;
 
 use crate::compiler::ast_generator::{
     collect_bgm_tracks, collect_sfx_resources, collect_tilemap_assets, generate_ast,
-    generate_ast_with_prefabs, AstOutput,
+    generate_ast_with_prefabs, AstOutput, SpriteAsset,
 };
 use crate::compiler::sgdk_emitter::emit_sgdk_with_collision;
 use crate::compiler::snes_emitter::emit_snes_with_collision;
@@ -114,32 +114,101 @@ fn build_sgdk_compatibility_profile(
         .iter()
         .filter(|entity| entity.components.sprite.is_some())
         .count();
-    if sprite_count == 0 {
-        return None;
-    }
 
-    let conservative_window = md_profile::MD_SPRITES_PER_SCANLINE as usize;
-    let initial_limit = sprite_count.min(conservative_window.max(1));
-    let mut limits = vec![initial_limit, 16, 8, 4, 1];
-    limits.retain(|limit| *limit > 0 && *limit <= sprite_count);
-    limits.sort_unstable_by(|a, b| b.cmp(a));
-    limits.dedup();
+    let sprite_profiles = if sprite_count == 0 {
+        vec![SgdkCompatibilityProfile {
+            scene: scene.clone(),
+            active_sprite_count: 0,
+            culled_sprite_count: 0,
+        }]
+    } else {
+        let conservative_window = md_profile::MD_SPRITES_PER_SCANLINE as usize;
+        let initial_limit = sprite_count.min(conservative_window.max(1));
+        let mut limits = vec![initial_limit, 16, 8, 4, 1];
+        limits.retain(|limit| *limit > 0 && *limit <= sprite_count);
+        limits.sort_unstable_by(|a, b| b.cmp(a));
+        limits.dedup();
+        limits
+            .into_iter()
+            .map(|limit| cull_sgdk_scene_to_active_sprite_window(scene, limit))
+            .collect::<Vec<_>>()
+    };
+
+    let tile_budgets = [1024usize, 768, 512, 256, 128, 64, 32, 16];
 
     let mut fallback = None;
-    for limit in limits {
-        let candidate = cull_sgdk_scene_to_active_sprite_window(scene, limit);
-        let fatal_count =
-            md_profile::validate_scene_with_source_kind(&candidate.scene, source_kind)
-                .into_iter()
-                .filter(|error| error.is_fatal)
-                .count();
-        if fatal_count == 0 {
-            return Some(candidate);
+    for sprite_profile in sprite_profiles {
+        for max_unique_tiles in tile_budgets {
+            let candidate = SgdkCompatibilityProfile {
+                scene: limit_sgdk_tilemap_residency(
+                    &limit_sgdk_sprite_frame_dimensions(&sprite_profile.scene),
+                    max_unique_tiles,
+                ),
+                active_sprite_count: sprite_profile.active_sprite_count,
+                culled_sprite_count: sprite_profile.culled_sprite_count,
+            };
+            let fatal_count =
+                md_profile::validate_scene_with_source_kind(&candidate.scene, source_kind)
+                    .into_iter()
+                    .filter(|error| error.is_fatal)
+                    .count();
+            if fatal_count == 0 {
+                return Some(candidate);
+            }
+            fallback = Some(candidate);
         }
-        fallback = Some(candidate);
     }
 
     fallback
+}
+
+fn limit_sgdk_sprite_frame_dimensions(scene: &Scene) -> Scene {
+    let mut transformed = scene.clone();
+    for entity in &mut transformed.entities {
+        let Some(sprite) = entity.components.sprite.as_mut() else {
+            continue;
+        };
+        sprite.frame_width = clamp_sgdk_sprite_frame_dimension(sprite.frame_width);
+        sprite.frame_height = clamp_sgdk_sprite_frame_dimension(sprite.frame_height);
+    }
+    transformed
+}
+
+fn clamp_sgdk_sprite_frame_dimension(value: u32) -> u32 {
+    value.clamp(8, 128) / 8 * 8
+}
+
+fn limit_sgdk_tilemap_residency(scene: &Scene, max_unique_tiles: usize) -> Scene {
+    let mut transformed = scene.clone();
+    for entity in &mut transformed.entities {
+        let Some(tilemap) = entity.components.tilemap.as_mut() else {
+            continue;
+        };
+        if tilemap.cells.is_empty() {
+            continue;
+        }
+        let mut unique = tilemap
+            .cells
+            .iter()
+            .copied()
+            .filter(|cell| *cell > 0)
+            .collect::<Vec<_>>();
+        unique.sort_unstable();
+        unique.dedup();
+        if unique.len() <= max_unique_tiles {
+            continue;
+        }
+        let keep = unique
+            .into_iter()
+            .take(max_unique_tiles)
+            .collect::<std::collections::HashSet<_>>();
+        for cell in &mut tilemap.cells {
+            if *cell > 0 && !keep.contains(cell) {
+                *cell = 0;
+            }
+        }
+    }
+    transformed
 }
 
 fn cull_sgdk_scene_to_active_sprite_window(
@@ -644,8 +713,12 @@ where
         _ => unreachable!("validated by target_spec"),
     };
 
+    let needs_hardware_compatibility = hw_errors.iter().any(|(_, is_fatal)| *is_fatal);
+    let needs_resource_compatibility = target.target == "megadrive"
+        && is_sgdk_compatibility_source(source_kind)
+        && scene_requires_sgdk_resource_compatibility(&scene_for_build);
     if target.target == "megadrive"
-        && hw_errors.iter().any(|(_, is_fatal)| *is_fatal)
+        && (needs_hardware_compatibility || needs_resource_compatibility)
         && is_sgdk_compatibility_source(source_kind)
     {
         if let Some(profile) = build_sgdk_compatibility_profile(&resolved_scene, source_kind) {
@@ -672,7 +745,7 @@ where
                 emit!(
                     "warn",
                     format!(
-                        "SGDK compatibility profile applied: sprite culling + multiplex plan keeps {} active sprite(s) and marks {} as streamable; original blockers: {}.",
+                        "SGDK compatibility profile applied: sprite culling + multiplex/tilemap streaming plan keeps {} active sprite(s) and marks {} as streamable; original blockers: {}.",
                         profile.active_sprite_count, profile.culled_sprite_count, original_blockers
                     )
                 );
@@ -848,6 +921,17 @@ where
         rom_path: rom_path.to_string_lossy().to_string(),
         log,
     }
+}
+
+fn scene_requires_sgdk_resource_compatibility(scene: &Scene) -> bool {
+    scene.entities.iter().any(|entity| {
+        entity
+            .components
+            .sprite
+            .as_ref()
+            .map(|sprite| sprite.frame_width > 128 || sprite.frame_height > 128)
+            .unwrap_or(false)
+    })
 }
 
 fn project_with_target_override(project: &Project, target_name: &str) -> Result<Project, String> {
@@ -1031,7 +1115,7 @@ fn stage_project_assets(
             })?;
         }
 
-        stage_bitmap_asset(&source, &destination, "SGDK")?;
+        stage_sgdk_sprite_asset(&source, &destination, asset)?;
     }
 
     for asset in collect_tilemap_assets(ast) {
@@ -1056,7 +1140,7 @@ fn stage_project_assets(
             })?;
         }
 
-        stage_bitmap_asset(&source, &destination, "SGDK")?;
+        stage_sgdk_tilemap_asset(&source, &destination)?;
     }
 
     for (_, asset_path) in collect_sfx_resources(ast) {
@@ -1217,6 +1301,79 @@ fn stage_bitmap_asset(source: &Path, destination: &Path, target_label: &str) -> 
     }
 }
 
+fn stage_sgdk_sprite_asset(
+    source: &Path,
+    destination: &Path,
+    asset: &SpriteAsset,
+) -> Result<(), String> {
+    let frame_width = asset.frame_width.max(8);
+    let frame_height = asset.frame_height.max(8);
+    let image = image::open(source).map_err(|e| {
+        format!(
+            "Falha ao ler asset SGDK sprite '{}' para recurso '{}': {}",
+            source.display(),
+            asset.resource_name,
+            e
+        )
+    })?;
+    let width = image.width();
+    let height = image.height();
+    let canvas_width = round_up_to_multiple(width, frame_width).max(frame_width);
+    let canvas_height = round_up_to_multiple(height, frame_height).max(frame_height);
+
+    write_indexed_bmp_8bit_with_canvas_palette_limit(
+        &image,
+        destination,
+        canvas_width,
+        canvas_height,
+        16,
+    )
+    .map_err(|e| {
+        format!(
+            "Falha ao converter asset SGDK sprite '{}' para '{}' (frame {}x{}, canvas {}x{}): {}",
+            source.display(),
+            destination.display(),
+            frame_width,
+            frame_height,
+            canvas_width,
+            canvas_height,
+            e
+        )
+    })
+}
+
+fn stage_sgdk_tilemap_asset(source: &Path, destination: &Path) -> Result<(), String> {
+    let image = image::open(source).map_err(|e| {
+        format!(
+            "Falha ao ler asset SGDK tilemap '{}': {}",
+            source.display(),
+            e
+        )
+    })?;
+    write_indexed_bmp_8bit_with_canvas_palette_limit(
+        &image,
+        destination,
+        image.width(),
+        image.height(),
+        16,
+    )
+    .map_err(|e| {
+        format!(
+            "Falha ao converter asset SGDK tilemap '{}' para '{}': {}",
+            source.display(),
+            destination.display(),
+            e
+        )
+    })
+}
+
+fn round_up_to_multiple(value: u32, multiple: u32) -> u32 {
+    if multiple == 0 {
+        return value;
+    }
+    value.saturating_add(multiple.saturating_sub(1)) / multiple * multiple
+}
+
 fn sgdk_tilemap_staging_path(asset_path: &Path) -> PathBuf {
     sgdk_bitmap_staging_path(asset_path)
 }
@@ -1237,38 +1394,74 @@ fn snes_audio_staging_filename(resource_name: &str, asset_path: &str, suffix: &s
 }
 
 fn write_indexed_bmp_8bit(image: &image::DynamicImage, destination: &Path) -> Result<(), String> {
+    write_indexed_bmp_8bit_with_canvas(image, destination, image.width(), image.height())
+}
+
+fn write_indexed_bmp_8bit_with_canvas(
+    image: &image::DynamicImage,
+    destination: &Path,
+    canvas_width: u32,
+    canvas_height: u32,
+) -> Result<(), String> {
+    write_indexed_bmp_8bit_with_canvas_palette_limit(
+        image,
+        destination,
+        canvas_width,
+        canvas_height,
+        256,
+    )
+}
+
+fn write_indexed_bmp_8bit_with_canvas_palette_limit(
+    image: &image::DynamicImage,
+    destination: &Path,
+    canvas_width: u32,
+    canvas_height: u32,
+    max_palette_colors: usize,
+) -> Result<(), String> {
     let rgba = image.to_rgba8();
-    let width = rgba.width() as usize;
-    let height = rgba.height() as usize;
+    let width = canvas_width as usize;
+    let height = canvas_height as usize;
     let row_stride = (width + 3) & !3;
     let pixel_data_size = row_stride * height;
     let palette_size = 256 * 4;
     let pixel_offset = 14 + 40 + palette_size;
     let file_size = pixel_offset + pixel_data_size;
 
-    let mut palette: Vec<[u8; 4]> = Vec::new();
-    let mut indices = Vec::with_capacity(width * height);
+    let max_palette_colors = max_palette_colors.clamp(1, 256);
+    let mut palette: Vec<[u8; 4]> = vec![[0, 0, 0, 0]];
+    let mut indices = vec![0u8; width * height];
 
-    for pixel in rgba.pixels() {
-        let color = [pixel[2], pixel[1], pixel[0], 0];
-        let palette_index = palette
-            .iter()
-            .position(|entry| *entry == color)
-            .or_else(|| {
-                if palette.len() < 256 {
-                    palette.push(color);
-                    Some(palette.len() - 1)
-                } else {
-                    None
-                }
-            })
-            .ok_or_else(|| {
-                format!(
-                    "Asset usa mais de 256 cores e nao pode ser convertido para BMP indexado: {}x{}",
-                    width, height
-                )
-            })?;
-        indices.push(palette_index as u8);
+    for y in 0..rgba.height() as usize {
+        for x in 0..rgba.width() as usize {
+            let pixel = rgba.get_pixel(x as u32, y as u32);
+            if pixel[3] == 0 {
+                indices[y * width + x] = 0;
+                continue;
+            }
+            let color = [pixel[2], pixel[1], pixel[0], 0];
+            let palette_index = palette
+                .iter()
+                .position(|entry| *entry == color)
+                .or_else(|| {
+                    if palette.len() < max_palette_colors {
+                        palette.push(color);
+                        Some(palette.len() - 1)
+                    } else if max_palette_colors < 256 {
+                        nearest_palette_index(&palette, color)
+                    } else {
+                        None
+                    }
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "Asset usa mais de 256 cores e nao pode ser convertido para BMP indexado: {}x{}",
+                        rgba.width(),
+                        rgba.height()
+                    )
+                })?;
+            indices[y * width + x] = palette_index as u8;
+        }
     }
 
     let mut bytes = Vec::with_capacity(file_size);
@@ -1310,6 +1503,19 @@ fn write_indexed_bmp_8bit(image: &image::DynamicImage, destination: &Path) -> Re
             e
         )
     })
+}
+
+fn nearest_palette_index(palette: &[[u8; 4]], color: [u8; 4]) -> Option<usize> {
+    palette
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, candidate)| {
+            let db = i32::from(candidate[0]) - i32::from(color[0]);
+            let dg = i32::from(candidate[1]) - i32::from(color[1]);
+            let dr = i32::from(candidate[2]) - i32::from(color[2]);
+            db * db + dg * dg + dr * dr
+        })
+        .map(|(index, _)| index)
 }
 
 fn render_sgdk_makefile(project_slug: &str) -> String {
@@ -2813,7 +3019,7 @@ PY\n"
     }
 
     #[test]
-    fn build_generates_rom_from_stable_nocode_sgdk_game_nodes() {
+    fn build_generates_fake_rom_from_nocode_sgdk_game_nodes_as_unit_fallback() {
         let _serial = test_serial_guard();
         let project_dir = workspace_copy("megadrive_dummy");
         install_nocode_sgdk_game_fixture(&project_dir);
@@ -2849,8 +3055,12 @@ PY\n"
         assert!(main_c.contains("SPR_setPosition(spr_player, spr_player_x, spr_player_y);"));
         assert!(main_c.contains("SPR_setAnim(spr_player, 1);"));
         assert!(main_c.contains("VDP_setHorizontalScroll(BG_A, spr_player_x - 160);"));
-        assert!(main_c.contains("VDP_setTileMapXY(BG_A, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, 12), 3, 14);"));
-        assert!(main_c.contains("// Hardware budget check: VRAM 64KB, sprites 80, sprites/scanline 20"));
+        assert!(main_c.contains(
+            "VDP_setTileMapXY(BG_A, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, 12), 3, 14);"
+        ));
+        assert!(
+            main_c.contains("// Hardware budget check: VRAM 64KB, sprites 80, sprites/scanline 20")
+        );
         assert!(main_c.contains("SPR_setVisibility(spr_enemy, VISIBLE);"));
         assert!(main_c.contains("SPR_setVisibility(spr_enemy, HIDDEN);"));
         assert!(resources_res.contains("SPRITE player \"assets/sprites/player.bmp\" 2 2 NONE"));
@@ -2867,7 +3077,10 @@ PY\n"
         assert!(second.ok, "second build log: {:?}", second.log);
         let second_main_c =
             fs::read_to_string(&main_c_path).expect("read regenerated no-code SGDK main.c");
-        assert_eq!(main_c, second_main_c, "SGDK C gerado deve ser deterministico");
+        assert_eq!(
+            main_c, second_main_c,
+            "SGDK C gerado deve ser deterministico"
+        );
 
         let _ = fs::remove_dir_all(project_dir);
     }

@@ -27,10 +27,9 @@ use core::editor_validation::{
 };
 use core::project_mgr::{
     append_patch_audit_entry, create_project_skeleton, create_scene as create_project_scene,
-    discover_project_rds, import_legacy_sgdk_project as wrap_legacy_sgdk_project,
-    import_external_project as import_external_scene,
-    import_mugen_project as import_mugen_scene,
-    import_sgdk_project as import_sgdk_scene,
+    discover_project_rds, import_external_project as import_external_scene,
+    import_legacy_sgdk_project as wrap_legacy_sgdk_project,
+    import_mugen_project as import_mugen_scene, import_sgdk_project as import_sgdk_scene,
     list_external_import_profiles as list_registered_external_import_profiles,
     list_project_templates as list_registered_project_templates,
     list_scenes as list_project_scenes, load_legacy_sgdk_index, load_project, load_scene,
@@ -45,7 +44,9 @@ use core::sgdk_corpus_inventory::{
     write_sgdk_corpus_inventory_report, SgdkCorpusInventoryReport, SgdkProjectInventory,
 };
 use emulator::frame_buffer::framebuffer_to_rgba;
-use emulator::libretro_ffi::{EmulatorCore, JoypadState, ReplayCapture, RuntimeExecutionTraceCapture};
+use emulator::libretro_ffi::{
+    EmulatorCore, JoypadState, ReplayCapture, RuntimeExecutionTraceCapture,
+};
 use hardware::constraint_engine;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
@@ -759,8 +760,8 @@ use tools::patch_studio::{
     PatchResult,
 };
 use tools::reverse::{
-    AudioCandidate, CallGraphEdge, CodeXref, DisassemblyResult, GraphicsCandidate, ReverseAnnotation,
-    RomAnalysisManifest, TextCandidate,
+    AudioCandidate, CallGraphEdge, CodeXref, DisassemblyResult, GraphicsCandidate,
+    ReverseAnnotation, RomAnalysisManifest, TextCandidate,
 };
 use tools::reverse_explorer::ReverseExplorerResult;
 
@@ -952,7 +953,8 @@ fn rom_analyze_with_emulator_trace(
     }
 
     let mut manifest = tools::reverse::analyze_rom(&rom_path)?;
-    if Path::new(&trace_capture.rom_path) == Path::new(&rom_path) && !trace_capture.note.is_empty() {
+    if Path::new(&trace_capture.rom_path) == Path::new(&rom_path) && !trace_capture.note.is_empty()
+    {
         manifest.trace.note = trace_capture.note;
         manifest.trace.available = trace_capture.available;
     }
@@ -1132,7 +1134,10 @@ fn load_project_source_root(project_dir: &Path) -> Result<PathBuf, String> {
         "external_sgdk" | "imported_sgdk" => {
             let source_path = metadata.source_path.trim();
             if source_path.is_empty() {
-                return Err("Projeto atual nao possui source_path rastreavel para abrir fonte real.".to_string());
+                return Err(
+                    "Projeto atual nao possui source_path rastreavel para abrir fonte real."
+                        .to_string(),
+                );
             }
             Ok(PathBuf::from(source_path))
         }
@@ -1150,7 +1155,9 @@ fn open_path_with_system_default(path: &Path) -> Result<(), String> {
         let status = Command::new("cmd")
             .args(["/C", "start", "", &display_path])
             .status()
-            .map_err(|error| format!("Falha ao acionar editor externo no host Windows: {}", error))?;
+            .map_err(|error| {
+                format!("Falha ao acionar editor externo no host Windows: {}", error)
+            })?;
         if status.success() {
             return Ok(());
         }
@@ -1220,7 +1227,8 @@ fn read_legacy_project_file(
         return Ok(LegacyProjectFilePreview {
             relative_path: normalized_path,
             absolute_path: absolute_path.to_string_lossy().to_string(),
-            content: "Visualizacao inline disponivel apenas para arquivos texto do host SGDK.".to_string(),
+            content: "Visualizacao inline disponivel apenas para arquivos texto do host SGDK."
+                .to_string(),
             previewable: false,
             readonly: true,
             note: "Somente leitura. Arquivos binarios permanecem no host original.".to_string(),
@@ -2207,7 +2215,10 @@ fn project_destination_preview(
     })
 }
 
-fn reserve_project_dir(base_dir: &Path, project_name: &str) -> Result<(PathBuf, Option<String>), String> {
+fn reserve_project_dir(
+    base_dir: &Path,
+    project_name: &str,
+) -> Result<(PathBuf, Option<String>), String> {
     let preview = preview_project_dir(base_dir, project_name)?;
     let notice = match (preview.collision_status, preview.existing_project.as_ref()) {
         (ProjectDestinationCollisionStatus::Available, _) => None,
@@ -2345,7 +2356,10 @@ fn import_sgdk_project_at_base_dir(
     // primaria + inventario de cenas secundarias, para que o frontend possa
     // navegar/listar sem inferir nomes.
     let scenes_hint = if report.additional_scenes.is_empty() {
-        format!(" Cena primaria persistida em {}.", report.primary_scene_path)
+        format!(
+            " Cena primaria persistida em {}.",
+            report.primary_scene_path
+        )
     } else {
         let secondary_summary = report
             .additional_scenes
@@ -2390,7 +2404,12 @@ fn import_sgdk_project_at_base_dir(
         notice: merge_project_notices(dir_notice, import_notice),
         preferred_scene_path: Some(report.primary_scene_path.clone()),
         imported_scene_paths: std::iter::once(report.primary_scene_path.clone())
-            .chain(report.additional_scenes.iter().map(|scene| scene.scene_path.clone()))
+            .chain(
+                report
+                    .additional_scenes
+                    .iter()
+                    .map(|scene| scene.scene_path.clone()),
+            )
             .collect(),
     })
 }
@@ -2474,8 +2493,8 @@ fn import_external_project_at_base_dir(
 
     let project = create_project_skeleton(&project_dir, project_name, "megadrive")
         .map_err(|error| error.to_string())?;
-    let report =
-        import_external_scene(&project_dir, profile_id, project_path).map_err(|error| error.to_string())?;
+    let report = import_external_scene(&project_dir, profile_id, project_path)
+        .map_err(|error| error.to_string())?;
     stamp_imported_external_profile_metadata(&project_dir, profile_id, project_path)
         .map_err(|error| error.to_string())?;
 
@@ -2650,7 +2669,9 @@ fn import_external_project(
     let trimmed_project_path = project_path.trim();
 
     if trimmed_name.is_empty() || trimmed_profile_id.is_empty() || trimmed_project_path.is_empty() {
-        return Err("Nome do projeto, perfil de importacao e pasta externa sao obrigatorios.".into());
+        return Err(
+            "Nome do projeto, perfil de importacao e pasta externa sao obrigatorios.".into(),
+        );
     }
 
     let resolved_base_dir = resolve_project_base_dir(
@@ -2863,7 +2884,8 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use compiler::build_orch::{run_build_with_environment, BuildEnvironment};
+    use compiler::build_orch::{run_build, run_build_with_environment, BuildEnvironment};
+    use emulator::frame_buffer::{framebuffer_to_rgba, FramePayload};
     use emulator::libretro_ffi::test_serial_guard;
     use std::fs;
     use std::hash::{Hash, Hasher};
@@ -2918,6 +2940,226 @@ mod tests {
                 fs::copy(&src_path, &dst_path).expect("copy fixture file");
             }
         }
+    }
+
+    fn validation_artifact_dir(name: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target-test")
+            .join("validation")
+            .join(name)
+    }
+
+    fn write_rgba_sheet(path: &Path, frame_colors: &[[u8; 4]]) {
+        let frame_w = 16u32;
+        let frame_h = 16u32;
+        let mut image = image::RgbaImage::new(frame_w * frame_colors.len() as u32, frame_h);
+        for (frame, color) in frame_colors.iter().enumerate() {
+            for y in 0..frame_h {
+                for x in 0..frame_w {
+                    let shade = if (x + y) % 5 == 0 {
+                        [
+                            color[0].saturating_sub(32),
+                            color[1].saturating_sub(32),
+                            color[2].saturating_sub(32),
+                            color[3],
+                        ]
+                    } else {
+                        *color
+                    };
+                    image.put_pixel((frame as u32 * frame_w) + x, y, image::Rgba(shade));
+                }
+            }
+        }
+        image.save(path).expect("write sprite sheet png");
+    }
+
+    fn write_stage_image(path: &Path) {
+        let mut image = image::RgbaImage::new(256, 256);
+        for y in 0..256 {
+            for x in 0..256 {
+                let tile = ((x / 16) + (y / 16)) % 4;
+                let color = match tile {
+                    0 => [24, 48, 72, 255],
+                    1 => [40, 96, 88, 255],
+                    2 => [88, 72, 48, 255],
+                    _ => [136, 160, 104, 255],
+                };
+                image.put_pixel(x, y, image::Rgba(color));
+            }
+        }
+        image.save(path).expect("write stage png");
+    }
+
+    fn write_framebuffer_ppm(path: &Path, frame: &FramePayload) {
+        let mut bytes = format!("P6\n{} {}\n255\n", frame.width, frame.height).into_bytes();
+        for px in frame.rgba.chunks_exact(4) {
+            bytes.extend_from_slice(&px[..3]);
+        }
+        fs::write(path, bytes).expect("write framebuffer ppm");
+    }
+
+    fn install_persistent_nocode_sgdk_game(project_dir: &Path) {
+        fs::create_dir_all(project_dir.join("assets").join("sprites"))
+            .expect("create no-code sprite dir");
+        fs::create_dir_all(project_dir.join("assets").join("tilemaps"))
+            .expect("create no-code tilemap dir");
+
+        write_rgba_sheet(
+            &project_dir
+                .join("assets")
+                .join("sprites")
+                .join("player.png"),
+            &[
+                [248, 208, 80, 255],
+                [248, 112, 80, 255],
+                [232, 64, 96, 255],
+                [248, 176, 96, 255],
+            ],
+        );
+        write_rgba_sheet(
+            &project_dir.join("assets").join("sprites").join("enemy.png"),
+            &[
+                [72, 168, 248, 255],
+                [64, 128, 224, 255],
+                [48, 96, 192, 255],
+                [80, 184, 240, 255],
+            ],
+        );
+        write_stage_image(
+            &project_dir
+                .join("assets")
+                .join("tilemaps")
+                .join("stage.png"),
+        );
+
+        let graph = serde_json::json!({
+            "version": 1,
+            "nodes": [
+                { "id": "start", "type": "event_start", "label": "Start", "x": 0, "y": 0, "params": {} },
+                { "id": "spawn_enemy", "type": "spawn_entity", "label": "Spawn Enemy", "x": 160, "y": 0, "params": { "prefab": "enemy", "x": 184, "y": 96 } },
+                { "id": "paint_floor", "type": "set_tile", "label": "Set Tile", "x": 320, "y": 0, "params": { "layer": "BG_A", "tile": 8, "x": 4, "y": 13 } },
+                { "id": "update", "type": "event_update", "label": "Update", "x": 0, "y": 180, "params": {} },
+                { "id": "right", "type": "input_held", "label": "Right Held", "x": 160, "y": 180, "params": { "pad": "JOY_1", "button": "BUTTON_RIGHT" } },
+                { "id": "velocity", "type": "set_velocity", "label": "Set Velocity", "x": 320, "y": 180, "params": { "target": "player", "vx": 2, "vy": 0 } },
+                { "id": "move", "type": "sprite_move", "label": "Move Entity", "x": 480, "y": 180, "params": { "target": "player", "dx": 2, "dy": 0 } },
+                { "id": "run_anim", "type": "set_animation_state", "label": "Run Animation", "x": 640, "y": 180, "params": { "target": "player", "state": "run" } },
+                { "id": "camera_follow", "type": "camera_follow", "label": "Camera Follow", "x": 800, "y": 180, "params": { "target": "player", "offset_x": -120, "offset_y": -80 } },
+                { "id": "budget", "type": "hardware_budget_check", "label": "Budget", "x": 960, "y": 180, "params": { "vram_kb": 64, "sprites": 80, "scanline_sprites": 20 } },
+                { "id": "overlap", "type": "condition_overlap", "label": "On Collision", "x": 1120, "y": 180, "params": { "a": "player", "b": "enemy" } },
+                { "id": "hit_state", "type": "var_set", "label": "Set State", "x": 1280, "y": 180, "params": { "var_name": "encounter_state", "value": 1 } },
+                { "id": "destroy_enemy", "type": "destroy_entity", "label": "Destroy Enemy", "x": 1440, "y": 180, "params": { "target": "enemy" } }
+            ],
+            "edges": [
+                { "id": "s1", "fromNode": "start", "fromPort": "exec", "toNode": "spawn_enemy", "toPort": "exec" },
+                { "id": "s2", "fromNode": "spawn_enemy", "fromPort": "exec", "toNode": "paint_floor", "toPort": "exec" },
+                { "id": "u1", "fromNode": "update", "fromPort": "exec", "toNode": "right", "toPort": "exec" },
+                { "id": "u2", "fromNode": "right", "fromPort": "true", "toNode": "velocity", "toPort": "exec" },
+                { "id": "u3", "fromNode": "velocity", "fromPort": "exec", "toNode": "move", "toPort": "exec" },
+                { "id": "u4", "fromNode": "move", "fromPort": "exec", "toNode": "run_anim", "toPort": "exec" },
+                { "id": "u5", "fromNode": "run_anim", "fromPort": "exec", "toNode": "camera_follow", "toPort": "exec" },
+                { "id": "u6", "fromNode": "camera_follow", "fromPort": "exec", "toNode": "budget", "toPort": "exec" },
+                { "id": "u7", "fromNode": "budget", "fromPort": "ok", "toNode": "overlap", "toPort": "exec" },
+                { "id": "u8", "fromNode": "overlap", "fromPort": "true", "toNode": "hit_state", "toPort": "exec" },
+                { "id": "u9", "fromNode": "hit_state", "fromPort": "exec", "toNode": "destroy_enemy", "toPort": "exec" }
+            ]
+        });
+        let scene = serde_json::json!({
+            "scene_id": "main",
+            "schema_version": "1.6.0",
+            "display_name": "Persistent No-Code SGDK Game",
+            "background_layers": [],
+            "entities": [
+                {
+                    "entity_id": "world",
+                    "prefab": null,
+                    "transform": { "x": 0, "y": 0 },
+                    "components": {
+                        "sprite": null,
+                        "collision": null,
+                        "input": null,
+                        "physics": null,
+                        "audio": null,
+                        "logic": null,
+                        "camera": null,
+                        "tilemap": {
+                            "tileset": "assets/tilemaps/stage.png",
+                            "map_width": 64,
+                            "map_height": 32,
+                            "scroll_x": 0,
+                            "scroll_y": 0
+                        }
+                    }
+                },
+                {
+                    "entity_id": "player",
+                    "prefab": null,
+                    "transform": { "x": 40, "y": 96 },
+                    "components": {
+                        "sprite": {
+                            "asset": "assets/sprites/player.png",
+                            "frame_width": 16,
+                            "frame_height": 16,
+                            "pivot": null,
+                            "palette_slot": 0,
+                            "animations": {
+                                "idle": { "frames": [0], "fps": 6, "loop": true },
+                                "run": { "frames": [1, 2, 3], "fps": 12, "loop": true }
+                            },
+                            "priority": "foreground",
+                            "meta_sprite": false
+                        },
+                        "collision": { "shape": "aabb", "width": 16, "height": 16, "offset": null, "solid": true, "layer": "player", "collides_with": ["enemy"] },
+                        "input": { "device": "joypad_1", "mapping": {} },
+                        "physics": null,
+                        "audio": null,
+                        "logic": {
+                            "graph": graph.to_string(),
+                            "variables": {
+                                "encounter_state": { "type": "int", "default": 0, "min": 0, "max": 1 }
+                            }
+                        },
+                        "camera": null,
+                        "tilemap": null
+                    }
+                },
+                {
+                    "entity_id": "enemy",
+                    "prefab": null,
+                    "transform": { "x": 184, "y": 96 },
+                    "components": {
+                        "sprite": {
+                            "asset": "assets/sprites/enemy.png",
+                            "frame_width": 16,
+                            "frame_height": 16,
+                            "pivot": null,
+                            "palette_slot": 1,
+                            "animations": {
+                                "idle": { "frames": [0], "fps": 6, "loop": true },
+                                "run": { "frames": [1, 2, 3], "fps": 12, "loop": true }
+                            },
+                            "priority": "foreground",
+                            "meta_sprite": false
+                        },
+                        "collision": { "shape": "aabb", "width": 16, "height": 16, "offset": null, "solid": true, "layer": "enemy", "collides_with": ["player"] },
+                        "input": null,
+                        "physics": null,
+                        "audio": null,
+                        "logic": null,
+                        "camera": null,
+                        "tilemap": null
+                    }
+                }
+            ],
+            "palettes": [],
+            "retrofx": null,
+            "collision_map": null,
+            "layers": null
+        });
+        fs::write(
+            project_dir.join("scenes").join("main.json"),
+            serde_json::to_string_pretty(&scene).expect("serialize no-code scene"),
+        )
+        .expect("write persistent no-code scene");
     }
 
     fn write_platformer_donor_fixture(dir: &Path, with_jump: bool) {
@@ -3004,8 +3246,18 @@ mod tests {
         fs::create_dir_all(root.join("art")).expect("create godot art dir");
         fs::create_dir_all(root.join("audio")).expect("create godot audio dir");
         fs::create_dir_all(root.join("scripts")).expect("create godot scripts dir");
-        write_test_png(&root.join("art").join("hero.png"), 24, 32, [96, 220, 180, 255]);
-        write_test_png(&root.join("art").join("tiles.png"), 128, 64, [48, 96, 220, 255]);
+        write_test_png(
+            &root.join("art").join("hero.png"),
+            24,
+            32,
+            [96, 220, 180, 255],
+        );
+        write_test_png(
+            &root.join("art").join("tiles.png"),
+            128,
+            64,
+            [48, 96, 220, 255],
+        );
         fs::write(root.join("audio").join("jump.wav"), minimal_wav_bytes())
             .expect("write godot wav");
         fs::write(
@@ -3072,7 +3324,12 @@ mod tests {
         fs::create_dir_all(root.join("sprites")).expect("create construct sprites dir");
         fs::create_dir_all(root.join("backgrounds")).expect("create construct backgrounds dir");
         fs::create_dir_all(root.join("audio")).expect("create construct audio dir");
-        write_test_png(&root.join("sprites").join("hero.png"), 32, 32, [220, 120, 64, 255]);
+        write_test_png(
+            &root.join("sprites").join("hero.png"),
+            32,
+            32,
+            [220, 120, 64, 255],
+        );
         write_test_png(
             &root.join("backgrounds").join("stage.png"),
             160,
@@ -3145,7 +3402,12 @@ mod tests {
         fs::create_dir_all(root.join("img").join("tilesets")).expect("create rpg tilesets dir");
         fs::create_dir_all(root.join("audio").join("bgm")).expect("create rpg bgm dir");
         fs::create_dir_all(root.join("audio").join("se")).expect("create rpg se dir");
-        write_test_png(&root.join("img").join("characters").join("Actor1.png"), 48, 48, [220, 180, 96, 255]);
+        write_test_png(
+            &root.join("img").join("characters").join("Actor1.png"),
+            48,
+            48,
+            [220, 180, 96, 255],
+        );
         write_test_png(
             &root.join("img").join("parallaxes").join("ForestBg.png"),
             160,
@@ -3158,10 +3420,16 @@ mod tests {
             128,
             [90, 140, 50, 255],
         );
-        fs::write(root.join("audio").join("bgm").join("field.wav"), minimal_wav_bytes())
-            .expect("write rpg bgm");
-        fs::write(root.join("audio").join("se").join("confirm.wav"), minimal_wav_bytes())
-            .expect("write rpg se");
+        fs::write(
+            root.join("audio").join("bgm").join("field.wav"),
+            minimal_wav_bytes(),
+        )
+        .expect("write rpg bgm");
+        fs::write(
+            root.join("audio").join("se").join("confirm.wav"),
+            minimal_wav_bytes(),
+        )
+        .expect("write rpg se");
         fs::write(
             root.join("data").join("MapInfos.json"),
             serde_json::json!([
@@ -3215,17 +3483,28 @@ mod tests {
         fs::create_dir_all(root.join("data").join("levels")).expect("create openbor levels dir");
         fs::create_dir_all(root.join("data").join("art")).expect("create openbor art dir");
         fs::create_dir_all(root.join("data").join("audio")).expect("create openbor audio dir");
-        write_test_png(&root.join("data").join("art").join("hero.png"), 48, 64, [200, 80, 80, 255]);
+        write_test_png(
+            &root.join("data").join("art").join("hero.png"),
+            48,
+            64,
+            [200, 80, 80, 255],
+        );
         write_test_png(
             &root.join("data").join("art").join("stage.png"),
             176,
             96,
             [60, 60, 120, 255],
         );
-        fs::write(root.join("data").join("audio").join("punch.wav"), minimal_wav_bytes())
-            .expect("write openbor punch");
-        fs::write(root.join("data").join("audio").join("theme.wav"), minimal_wav_bytes())
-            .expect("write openbor theme");
+        fs::write(
+            root.join("data").join("audio").join("punch.wav"),
+            minimal_wav_bytes(),
+        )
+        .expect("write openbor punch");
+        fs::write(
+            root.join("data").join("audio").join("theme.wav"),
+            minimal_wav_bytes(),
+        )
+        .expect("write openbor theme");
         fs::write(
             root.join("data").join("chars").join("hero.txt"),
             [
@@ -3301,12 +3580,7 @@ mod tests {
         .expect("write mugen air");
         fs::write(
             root.join("hero.cmd"),
-            [
-                "[Command]",
-                "name = \"jump\"",
-                "command = ~D, U, a",
-            ]
-            .join("\n"),
+            ["[Command]", "name = \"jump\"", "command = ~D, U, a"].join("\n"),
         )
         .expect("write mugen cmd");
         fs::write(
@@ -3325,7 +3599,11 @@ mod tests {
         )
         .expect("write mugen cns");
         write_test_png(
-            &root.join("work").join("hero_sff").join("sd").join("0-0.png"),
+            &root
+                .join("work")
+                .join("hero_sff")
+                .join("sd")
+                .join("0-0.png"),
             32,
             48,
             [220, 96, 48, 255],
@@ -3685,10 +3963,19 @@ pub extern "C" fn retro_run() {
         fs::create_dir_all(src.join("build").join("megadrive").join("out"))
             .expect("create generated build dir");
         fs::write(src.join("project.rds"), b"{\"name\":\"Fixture\"}").expect("write project");
-        fs::write(src.join("scenes").join("main.json"), b"{\"scene_id\":\"main\"}")
-            .expect("write scene");
-        fs::write(src.join("build").join("megadrive").join("out").join("rom.bin"), b"rom")
-            .expect("write generated rom");
+        fs::write(
+            src.join("scenes").join("main.json"),
+            b"{\"scene_id\":\"main\"}",
+        )
+        .expect("write scene");
+        fs::write(
+            src.join("build")
+                .join("megadrive")
+                .join("out")
+                .join("rom.bin"),
+            b"rom",
+        )
+        .expect("write generated rom");
 
         copy_dir_all(&src, &dst);
 
@@ -3833,9 +4120,16 @@ pub extern "C" fn retro_run() {
                 project_dir.display()
             );
             let build_result = run_build(project_dir, |line| {
-                eprintln!("[upstream][build:{}][{}] {}", label, line.level, line.message);
+                eprintln!(
+                    "[upstream][build:{}][{}] {}",
+                    label, line.level, line.message
+                );
             });
-            assert!(build_result.ok, "{} build failed: {:?}", label, build_result.log);
+            assert!(
+                build_result.ok,
+                "{} build failed: {:?}",
+                label, build_result.log
+            );
 
             eprintln!(
                 "[upstream] loading rom for '{}' from {}",
@@ -3878,10 +4172,19 @@ pub extern "C" fn retro_run() {
             eprintln!("[upstream] completed validation for '{}'", label);
         }
 
-        for dependency_id in ["jdk", "sgdk", "pvsneslib", "libretro_megadrive", "libretro_snes"] {
+        for dependency_id in [
+            "jdk",
+            "sgdk",
+            "pvsneslib",
+            "libretro_megadrive",
+            "libretro_snes",
+        ] {
             eprintln!("[upstream] ensuring dependency '{}'", dependency_id);
             let result = install_dependency(dependency_id, |line| {
-                eprintln!("[upstream][dependency:{}][{}] {}", dependency_id, line.level, line.message);
+                eprintln!(
+                    "[upstream][dependency:{}][{}] {}",
+                    dependency_id, line.level, line.message
+                );
             });
             assert!(
                 result.ok,
@@ -3892,7 +4195,13 @@ pub extern "C" fn retro_run() {
 
         eprintln!("[upstream] validating dependency status report");
         let status_report = dependency_status_report();
-        for dependency_id in ["jdk", "sgdk", "pvsneslib", "libretro_megadrive", "libretro_snes"] {
+        for dependency_id in [
+            "jdk",
+            "sgdk",
+            "pvsneslib",
+            "libretro_megadrive",
+            "libretro_snes",
+        ] {
             let item = status_report
                 .items
                 .iter()
@@ -3966,6 +4275,233 @@ pub extern "C" fn retro_run() {
             assert_upstream_build_and_run(target, &project_dir);
             let _ = fs::remove_dir_all(project_dir);
         }
+    }
+
+    #[test]
+    #[ignore = "Requires official SGDK, JDK and a real Libretro Mega Drive core; writes persistent validation artifacts"]
+    fn official_sgdk_nocode_game_builds_and_runs_with_real_toolchain() {
+        if !cfg!(target_os = "windows") {
+            panic!(
+                "official_sgdk_nocode_game_builds_and_runs_with_real_toolchain requires Windows"
+            );
+        }
+
+        let _serial = test_serial_guard();
+
+        for dependency_id in ["jdk", "sgdk", "libretro_megadrive"] {
+            eprintln!("[nocode-real] ensuring dependency '{}'", dependency_id);
+            let result = install_dependency(dependency_id, |line| {
+                eprintln!(
+                    "[nocode-real][dependency:{}][{}] {}",
+                    dependency_id, line.level, line.message
+                );
+            });
+            assert!(
+                result.ok,
+                "failed to install {} for real no-code SGDK proof: {}",
+                dependency_id, result.message
+            );
+        }
+
+        let status_report = dependency_status_report();
+        for dependency_id in ["jdk", "sgdk", "libretro_megadrive"] {
+            let item = status_report
+                .items
+                .iter()
+                .find(|item| item.id == dependency_id)
+                .unwrap_or_else(|| panic!("missing dependency status for {}", dependency_id));
+            assert!(
+                item.installed,
+                "dependency {} still not installed for real no-code proof: {:?}",
+                dependency_id, item.issues
+            );
+        }
+
+        let artifact_root = validation_artifact_dir("sgdk-real-nocode-game");
+        let project_dir = artifact_root.join("project");
+        let _ = fs::remove_dir_all(&artifact_root);
+        fs::create_dir_all(&artifact_root).expect("create no-code validation artifact root");
+        create_project_skeleton(&project_dir, "Real No-Code SGDK Game", "megadrive")
+            .expect("create persistent no-code SGDK project");
+        install_persistent_nocode_sgdk_game(&project_dir);
+
+        let build_log_lines = std::cell::RefCell::new(Vec::new());
+        let first = run_build(&project_dir, |line| {
+            build_log_lines
+                .borrow_mut()
+                .push(format!("[{}] {}", line.level, line.message));
+            eprintln!("[nocode-real][build][{}] {}", line.level, line.message);
+        });
+        assert!(
+            first.ok,
+            "real SGDK build for no-code project failed: {:?}",
+            first.log
+        );
+        assert!(
+            !first.rom_path.is_empty(),
+            "real SGDK build did not report a ROM path"
+        );
+
+        let main_c_path = project_dir
+            .join("build")
+            .join("megadrive")
+            .join("src")
+            .join("main.c");
+        let resources_res_path = project_dir
+            .join("build")
+            .join("megadrive")
+            .join("res")
+            .join("resources.res");
+        let main_c = fs::read_to_string(&main_c_path).expect("read generated real no-code main.c");
+        let resources_res =
+            fs::read_to_string(&resources_res_path).expect("read generated real resources.res");
+        assert!(main_c.contains("JOY_readJoypad(JOY_1)"));
+        assert!(main_c.contains("SPR_setPosition(spr_player, spr_player_x, spr_player_y);"));
+        assert!(main_c.contains("SPR_setAnim(spr_player, 1);"));
+        assert!(main_c.contains("logic_var_encounter_state = 1;"));
+        assert!(main_c.contains("retro_aabb_intersects"));
+        assert!(resources_res.contains("SPRITE player \"assets/sprites/player.bmp\" 2 2 NONE"));
+        assert!(resources_res.contains("SPRITE enemy \"assets/sprites/enemy.bmp\" 2 2 NONE"));
+        assert!(resources_res.contains("IMAGE world_tilemap \"assets/tilemaps/stage.bmp\" NONE"));
+
+        let second = run_build(&project_dir, |_| {});
+        assert!(second.ok, "second real SGDK build failed: {:?}", second.log);
+        let second_main_c =
+            fs::read_to_string(&main_c_path).expect("read regenerated real no-code main.c");
+        assert_eq!(
+            main_c, second_main_c,
+            "real no-code SGDK C must be deterministic"
+        );
+
+        let rom_path = {
+            let path = PathBuf::from(&second.rom_path);
+            if path.is_absolute() {
+                path
+            } else {
+                project_dir.join(path)
+            }
+        };
+        let rom_bytes = fs::read(&rom_path).expect("read real no-code SGDK ROM");
+        assert!(
+            rom_bytes.windows(4).any(|window| window == b"SEGA"),
+            "real no-code SGDK ROM must contain a Mega Drive SEGA header"
+        );
+        let persistent_rom_path = artifact_root.join("real-nocode-game.md");
+        fs::copy(&rom_path, &persistent_rom_path).expect("copy persistent real no-code ROM");
+
+        let mut emulator = EmulatorCore::new(None);
+        emulator
+            .load_rom(&persistent_rom_path)
+            .unwrap_or_else(|error| panic!("failed to load real no-code ROM: {}", error));
+        emulator
+            .set_joypad(JoypadState {
+                right: true,
+                ..JoypadState::default()
+            })
+            .expect("set no-code joypad input");
+        for _ in 0..60 {
+            emulator
+                .run_frame()
+                .unwrap_or_else(|error| panic!("failed to run real no-code frame: {}", error));
+        }
+        let core_label = emulator
+            .loaded_core_label()
+            .unwrap_or("unknown-libretro-core")
+            .to_string();
+        let (framebuffer, size, pixel_format) =
+            emulator.get_framebuffer().unwrap_or_else(|error| {
+                panic!("failed to capture real no-code framebuffer: {}", error)
+            });
+        let frame = framebuffer_to_rgba(&framebuffer, size, pixel_format);
+        let non_black_pixels = frame
+            .rgba
+            .chunks_exact(4)
+            .filter(|px| px[0] != 0 || px[1] != 0 || px[2] != 0)
+            .count();
+        assert!(
+            non_black_pixels > 0,
+            "real no-code emulation framebuffer should not be fully black"
+        );
+        let framebuffer_path = artifact_root.join("real-nocode-frame.ppm");
+        write_framebuffer_ppm(&framebuffer_path, &frame);
+        emulator.stop().expect("stop real no-code emulator");
+
+        let build_log_path = artifact_root.join("real-nocode-build.log");
+        fs::write(&build_log_path, build_log_lines.borrow().join("\n"))
+            .expect("write real no-code build log");
+        let emulation_log_path = artifact_root.join("real-nocode-emulation.log");
+        fs::write(
+            &emulation_log_path,
+            format!(
+                "core={}\nframes_run=60\nframebuffer={}x{}\nnon_black_pixels={}\nrom={}\n",
+                core_label,
+                frame.width,
+                frame.height,
+                non_black_pixels,
+                persistent_rom_path.display()
+            ),
+        )
+        .expect("write real no-code emulation log");
+
+        #[derive(serde::Serialize)]
+        struct RealNoCodeReport {
+            project_path: String,
+            generated_main_c: String,
+            generated_resources_res: String,
+            build_log: String,
+            rom_path: String,
+            emulation_log: String,
+            framebuffer_ppm: String,
+            libretro_core: String,
+            frames_run: u32,
+            framebuffer_width: u32,
+            framebuffer_height: u32,
+            non_black_pixels: usize,
+            rom_size_bytes: usize,
+            generated_from_nodes: bool,
+            manual_code_edits: bool,
+            fake_toolchain_used: bool,
+            deterministic_main_c: bool,
+        }
+
+        let report = RealNoCodeReport {
+            project_path: project_dir.to_string_lossy().to_string(),
+            generated_main_c: main_c_path.to_string_lossy().to_string(),
+            generated_resources_res: resources_res_path.to_string_lossy().to_string(),
+            build_log: build_log_path.to_string_lossy().to_string(),
+            rom_path: persistent_rom_path.to_string_lossy().to_string(),
+            emulation_log: emulation_log_path.to_string_lossy().to_string(),
+            framebuffer_ppm: framebuffer_path.to_string_lossy().to_string(),
+            libretro_core: core_label,
+            frames_run: 60,
+            framebuffer_width: frame.width,
+            framebuffer_height: frame.height,
+            non_black_pixels,
+            rom_size_bytes: rom_bytes.len(),
+            generated_from_nodes: true,
+            manual_code_edits: false,
+            fake_toolchain_used: false,
+            deterministic_main_c: true,
+        };
+        let report_json_path = artifact_root.join("real-nocode-report.json");
+        let report_md_path = artifact_root.join("real-nocode-report.md");
+        let report_json = serde_json::to_string_pretty(&report).expect("serialize report");
+        fs::write(&report_json_path, format!("{report_json}\n"))
+            .expect("write real no-code JSON report");
+        fs::write(
+            &report_md_path,
+            format!(
+                "# Real No-Code SGDK Game\n\n- Project: `{}`\n- Generated C: `{}`\n- ROM: `{}`\n- Core: `{}`\n- Frames run: `60`\n- Framebuffer: `{}x{}`\n- Non-black pixels: `{}`\n- Fake toolchain used: `false`\n- Manual code edits: `false`\n",
+                project_dir.display(),
+                main_c_path.display(),
+                persistent_rom_path.display(),
+                report.libretro_core,
+                frame.width,
+                frame.height,
+                non_black_pixels
+            ),
+        )
+        .expect("write real no-code Markdown report");
     }
 
     #[test]
@@ -4129,7 +4665,10 @@ pub extern "C" fn retro_run() {
             Some(custom_scene_path),
             "open_project_path must point the IDE to the persisted project entry_scene"
         );
-        assert_eq!(result.imported_scene_paths, vec![custom_scene_path.to_string()]);
+        assert_eq!(
+            result.imported_scene_paths,
+            vec![custom_scene_path.to_string()]
+        );
 
         let _ = fs::remove_dir_all(project_dir);
     }
@@ -4320,7 +4859,11 @@ pub extern "C" fn retro_run() {
         for entry in &build_result.log {
             println!("[legacy-build-run][{}] {}", entry.level, entry.message);
         }
-        assert!(build_result.ok, "legacy build failed: {:?}", build_result.log);
+        assert!(
+            build_result.ok,
+            "legacy build failed: {:?}",
+            build_result.log
+        );
 
         let core_dir = temp_dir("legacy-mock-core");
         let core_path = compile_mock_core(&core_dir);
@@ -4451,8 +4994,8 @@ pub extern "C" fn retro_run() {
         create_project_skeleton(&existing_project_dir, "Projeto Antigo", "megadrive")
             .expect("create existing project");
 
-        let preview =
-            project_destination_preview(&base_dir, "MeuProjeto").expect("preview project destination");
+        let preview = project_destination_preview(&base_dir, "MeuProjeto")
+            .expect("preview project destination");
 
         assert_eq!(
             preview.collision_status,
@@ -4461,12 +5004,19 @@ pub extern "C" fn retro_run() {
         assert_eq!(preview.suggested_name, "MeuProjeto 2");
         assert_eq!(preview.suggested_dir_name, "MeuProjeto_2");
         assert_eq!(
-            PathBuf::from(&preview.existing_project_path.expect("existing project path"))
-                .file_name()
-                .and_then(|name| name.to_str()),
+            PathBuf::from(
+                &preview
+                    .existing_project_path
+                    .expect("existing project path")
+            )
+            .file_name()
+            .and_then(|name| name.to_str()),
             Some("MeuProjeto")
         );
-        assert_eq!(preview.existing_project_name.as_deref(), Some("Projeto Antigo"));
+        assert_eq!(
+            preview.existing_project_name.as_deref(),
+            Some("Projeto Antigo")
+        );
 
         let _ = fs::remove_dir_all(base_dir);
     }
@@ -4478,10 +5028,13 @@ pub extern "C" fn retro_run() {
         fs::create_dir_all(&occupied_dir).expect("create occupied dir");
         fs::write(occupied_dir.join("readme.txt"), "busy").expect("seed occupied dir");
 
-        let preview =
-            project_destination_preview(&base_dir, "MeuProjeto").expect("preview occupied destination");
+        let preview = project_destination_preview(&base_dir, "MeuProjeto")
+            .expect("preview occupied destination");
 
-        assert_eq!(preview.collision_status, ProjectDestinationCollisionStatus::Occupied);
+        assert_eq!(
+            preview.collision_status,
+            ProjectDestinationCollisionStatus::Occupied
+        );
         assert_eq!(preview.suggested_name, "MeuProjeto 2");
         assert_eq!(preview.suggested_dir_name, "MeuProjeto_2");
         assert!(preview.existing_project_path.is_none());
@@ -4519,9 +5072,12 @@ pub extern "C" fn retro_run() {
         let resolved =
             resolve_project_base_dir_with_candidates(None, std::slice::from_ref(&automatic_base))
                 .expect("resolve automatic base dir");
-        let result =
-            create_onboarding_project_at_base_dir(&resolved.path, "Auto Build Starter", "megadrive")
-                .expect("create automatic onboarding project");
+        let result = create_onboarding_project_at_base_dir(
+            &resolved.path,
+            "Auto Build Starter",
+            "megadrive",
+        )
+        .expect("create automatic onboarding project");
 
         let project_dir = PathBuf::from(&result.path);
         let toolchain_root = temp_dir("fake-sgdk-auto-onboarding");
@@ -4573,19 +5129,13 @@ pub extern "C" fn retro_run() {
         let profiles = list_external_import_profiles();
 
         assert!(profiles.iter().any(|profile| {
-            profile.id == "sgdk"
-                && profile.importable
-                && profile.support_status == "Experimental"
+            profile.id == "sgdk" && profile.importable && profile.support_status == "Experimental"
         }));
         assert!(profiles.iter().any(|profile| {
-            profile.id == "mugen"
-                && profile.importable
-                && profile.source_engine == "mugen"
+            profile.id == "mugen" && profile.importable && profile.source_engine == "mugen"
         }));
         assert!(profiles.iter().any(|profile| {
-            profile.id == "ikemen_go"
-                && profile.importable
-                && profile.source_engine == "ikemen_go"
+            profile.id == "ikemen_go" && profile.importable && profile.source_engine == "ikemen_go"
         }));
         assert!(profiles.iter().any(|profile| {
             profile.id == "godot"
@@ -4598,19 +5148,13 @@ pub extern "C" fn retro_run() {
                 && profile.support_status == "Experimental"
         }));
         assert!(profiles.iter().any(|profile| {
-            profile.id == "rpg_maker"
-                && profile.importable
-                && profile.source_engine == "rpg_maker"
+            profile.id == "rpg_maker" && profile.importable && profile.source_engine == "rpg_maker"
         }));
         assert!(profiles.iter().any(|profile| {
-            profile.id == "openbor"
-                && profile.importable
-                && profile.family == "Beat'em up"
+            profile.id == "openbor" && profile.importable && profile.family == "Beat'em up"
         }));
         assert!(profiles.iter().any(|profile| {
-            profile.id == "gamemaker"
-                && !profile.importable
-                && profile.support_status == "Parcial"
+            profile.id == "gamemaker" && !profile.importable && profile.support_status == "Parcial"
         }));
     }
 
@@ -4932,7 +5476,8 @@ pub extern "C" fn retro_run() {
 
         let project_dir = PathBuf::from(&result.path);
         let project = load_project(&project_dir).expect("load imported mugen project");
-        let scene = load_scene(&project_dir, &project.entry_scene).expect("load imported mugen scene");
+        let scene =
+            load_scene(&project_dir, &project.entry_scene).expect("load imported mugen scene");
 
         assert_eq!(
             project
@@ -4989,7 +5534,10 @@ pub extern "C" fn retro_run() {
         let scene =
             load_scene(&project_dir, &project.entry_scene).expect("load imported godot scene");
 
-        let metadata = project.template_metadata.as_ref().expect("template metadata");
+        let metadata = project
+            .template_metadata
+            .as_ref()
+            .expect("template metadata");
         assert_eq!(metadata.source_kind, "imported_godot");
         assert_eq!(metadata.source_engine.as_deref(), Some("godot"));
         assert_eq!(metadata.import_profile.as_deref(), Some("godot_tscn_v1"));
@@ -5042,10 +5590,16 @@ pub extern "C" fn retro_run() {
 
         let project_dir = PathBuf::from(&result.path);
         let project = load_project(&project_dir).expect("load imported ikemen project");
-        let metadata = project.template_metadata.as_ref().expect("template metadata");
+        let metadata = project
+            .template_metadata
+            .as_ref()
+            .expect("template metadata");
         assert_eq!(metadata.source_kind, "imported_ikemen_go");
         assert_eq!(metadata.source_engine.as_deref(), Some("ikemen_go"));
-        assert_eq!(metadata.import_profile.as_deref(), Some("ikemen_go_mugen_v1"));
+        assert_eq!(
+            metadata.import_profile.as_deref(),
+            Some("ikemen_go_mugen_v1")
+        );
 
         let _ = fs::remove_dir_all(base_dir);
         let _ = fs::remove_dir_all(donor_dir);
@@ -5070,10 +5624,16 @@ pub extern "C" fn retro_run() {
         let scene =
             load_scene(&project_dir, &project.entry_scene).expect("load imported construct scene");
 
-        let metadata = project.template_metadata.as_ref().expect("template metadata");
+        let metadata = project
+            .template_metadata
+            .as_ref()
+            .expect("template metadata");
         assert_eq!(metadata.source_kind, "imported_construct");
         assert_eq!(metadata.source_engine.as_deref(), Some("construct"));
-        assert_eq!(metadata.import_profile.as_deref(), Some("construct_folder_v1"));
+        assert_eq!(
+            metadata.import_profile.as_deref(),
+            Some("construct_folder_v1")
+        );
         assert!(scene.entities.iter().any(|entity| entity
             .components
             .sprite
@@ -5083,7 +5643,9 @@ pub extern "C" fn retro_run() {
             .components
             .tilemap
             .as_ref()
-            .is_some_and(|tilemap| tilemap.tileset == "assets/tilesets/construct_backgrounds_stage.png")));
+            .is_some_and(
+                |tilemap| tilemap.tileset == "assets/tilesets/construct_backgrounds_stage.png"
+            )));
 
         let hero = scene
             .entities
@@ -5119,7 +5681,10 @@ pub extern "C" fn retro_run() {
         let scene =
             load_scene(&project_dir, &project.entry_scene).expect("load imported rpg maker scene");
 
-        let metadata = project.template_metadata.as_ref().expect("template metadata");
+        let metadata = project
+            .template_metadata
+            .as_ref()
+            .expect("template metadata");
         assert_eq!(metadata.source_kind, "imported_rpg_maker");
         assert_eq!(metadata.source_engine.as_deref(), Some("rpg_maker"));
         assert_eq!(
@@ -5130,7 +5695,9 @@ pub extern "C" fn retro_run() {
             .components
             .tilemap
             .as_ref()
-            .is_some_and(|tilemap| tilemap.tileset == "assets/tilesets/rpgmaker_img_parallaxes_forestbg.png")));
+            .is_some_and(
+                |tilemap| tilemap.tileset == "assets/tilesets/rpgmaker_img_parallaxes_forestbg.png"
+            )));
         let guide = scene
             .entities
             .iter()
@@ -5141,11 +5708,15 @@ pub extern "C" fn retro_run() {
             .logic
             .as_ref()
             .is_some_and(|logic| !logic.logic_hints.is_empty()));
-        assert!(scene.entities.iter().any(|entity| entity
-            .components
-            .audio
-            .as_ref()
-            .is_some_and(|audio| audio.bgm.as_deref() == Some("assets/audio/rpgmaker_audio_bgm_field.wav"))));
+        assert!(scene
+            .entities
+            .iter()
+            .any(|entity| entity
+                .components
+                .audio
+                .as_ref()
+                .is_some_and(|audio| audio.bgm.as_deref()
+                    == Some("assets/audio/rpgmaker_audio_bgm_field.wav"))));
 
         let _ = fs::remove_dir_all(base_dir);
         let _ = fs::remove_dir_all(donor_dir);
@@ -5170,10 +5741,16 @@ pub extern "C" fn retro_run() {
         let scene =
             load_scene(&project_dir, &project.entry_scene).expect("load imported openbor scene");
 
-        let metadata = project.template_metadata.as_ref().expect("template metadata");
+        let metadata = project
+            .template_metadata
+            .as_ref()
+            .expect("template metadata");
         assert_eq!(metadata.source_kind, "imported_openbor");
         assert_eq!(metadata.source_engine.as_deref(), Some("openbor"));
-        assert_eq!(metadata.import_profile.as_deref(), Some("openbor_module_v1"));
+        assert_eq!(
+            metadata.import_profile.as_deref(),
+            Some("openbor_module_v1")
+        );
         let hero = scene
             .entities
             .iter()
@@ -5190,7 +5767,9 @@ pub extern "C" fn retro_run() {
             .components
             .tilemap
             .as_ref()
-            .is_some_and(|tilemap| tilemap.tileset == "assets/tilesets/openbor_data_art_stage.png")));
+            .is_some_and(
+                |tilemap| tilemap.tileset == "assets/tilesets/openbor_data_art_stage.png"
+            )));
 
         let _ = fs::remove_dir_all(base_dir);
         let _ = fs::remove_dir_all(donor_dir);

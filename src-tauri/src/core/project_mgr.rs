@@ -10,8 +10,8 @@ use image::{ImageBuffer, Rgba, RgbaImage};
 
 use crate::ugdm::components::{
     AnimationDef, AudioComponent, CameraComponent, CollisionComponent, CollisionOffset, Components,
-    ImportedLogicSemantics, InputComponent, LogicComponent, MugenAnimationFrame,
-    MugenCollisionBox, PhysicsComponent, Pivot, SpriteComponent, TilemapComponent, Velocity,
+    ImportedLogicSemantics, InputComponent, LogicComponent, MugenAnimationFrame, MugenCollisionBox,
+    PhysicsComponent, Pivot, SpriteComponent, TilemapComponent, Velocity,
 };
 use crate::ugdm::entities::{
     BuildConfig, CollisionMap, Entity, PaletteEntry, PatchAuditEntry, Project, Resolution, Scene,
@@ -1200,7 +1200,9 @@ impl SgdkDonorLogicScan {
             Some("shmup_vertical_signals") => Some("shmup_vertical_signals"),
             Some("run_and_gun_horizontal_signals") => Some("run_and_gun_horizontal_signals"),
             Some("beat_em_up_close_range_signals") => Some("beat_em_up_close_range_signals"),
-            Some("platformer_horizontal_scroller_signals") => Some("platformer_horizontal_scroller_signals"),
+            Some("platformer_horizontal_scroller_signals") => {
+                Some("platformer_horizontal_scroller_signals")
+            }
             _ => None,
         }
     }
@@ -1239,9 +1241,11 @@ impl SgdkDonorLogicScan {
                 .iter()
                 .map(|evidence| evidence.snippet.to_ascii_lowercase()),
         );
-        corpus
-            .into_iter()
-            .any(|text| CLOSE_RANGE_KEYWORDS.iter().any(|keyword| text.contains(keyword)))
+        corpus.into_iter().any(|text| {
+            CLOSE_RANGE_KEYWORDS
+                .iter()
+                .any(|keyword| text.contains(keyword))
+        })
     }
 
     fn function_symbol_for_line(
@@ -1312,11 +1316,14 @@ impl SgdkDonorLogicScan {
     }
 
     fn source_paths_for_functions(&self, function_names: &[String]) -> Vec<String> {
-        let function_name_set: HashSet<&str> = function_names.iter().map(|name| name.as_str()).collect();
+        let function_name_set: HashSet<&str> =
+            function_names.iter().map(|name| name.as_str()).collect();
         let mut paths: Vec<String> = self
             .function_symbols
             .iter()
-            .filter(|symbol| !symbol.is_prototype && function_name_set.contains(symbol.name.as_str()))
+            .filter(|symbol| {
+                !symbol.is_prototype && function_name_set.contains(symbol.name.as_str())
+            })
             .map(|symbol| symbol.rel_path.clone())
             .collect();
         for call in &self.function_calls {
@@ -1342,7 +1349,10 @@ impl SgdkDonorLogicScan {
     ) -> SgdkPhaseDEntitySemanticProfile {
         let direct_refs = self.entity_resource_source_refs(resource_name);
         let driver_functions = self.entity_driver_functions(resource_name, is_primary_sprite);
-        let mut source_paths: Vec<String> = direct_refs.iter().map(|evidence| evidence.rel_path.clone()).collect();
+        let mut source_paths: Vec<String> = direct_refs
+            .iter()
+            .map(|evidence| evidence.rel_path.clone())
+            .collect();
         source_paths.extend(self.source_paths_for_functions(&driver_functions));
         if source_paths.is_empty() && is_primary_sprite {
             source_paths.extend(self.donor_logic_scanned_paths.clone());
@@ -1353,7 +1363,11 @@ impl SgdkDonorLogicScan {
         let entity_id = sgdk_entity_id(resource_name).to_ascii_lowercase();
         let resource_corpus = vec![resource_name.to_ascii_lowercase(), entity_id];
         let mut corpus = resource_corpus.clone();
-        corpus.extend(driver_functions.iter().map(|name| name.to_ascii_lowercase()));
+        corpus.extend(
+            driver_functions
+                .iter()
+                .map(|name| name.to_ascii_lowercase()),
+        );
         corpus.extend(direct_refs.iter().map(|evidence| {
             format!(
                 "{} {} {}",
@@ -1432,7 +1446,9 @@ impl SgdkDonorLogicScan {
                 "fighter_actor".to_string(),
                 "texto escaneado sugere combate corpo-a-corpo ligado a esta entidade".to_string(),
             )
-        } else if resource_has_keywords(&["hud", "score", "health", "lifebar", "gauge", "font", "ui_"]) {
+        } else if resource_has_keywords(&[
+            "hud", "score", "health", "lifebar", "gauge", "font", "ui_",
+        ]) {
             audit_flags.push("hud_resource_signal".to_string());
             (
                 "hud_actor".to_string(),
@@ -1580,7 +1596,16 @@ fn strip_cpp_line_comment(line: &str) -> &str {
 fn is_sgdk_c_keyword(name: &str) -> bool {
     matches!(
         name,
-        "if" | "while" | "for" | "switch" | "return" | "case" | "else" | "do" | "sizeof" | "break" | "continue"
+        "if" | "while"
+            | "for"
+            | "switch"
+            | "return"
+            | "case"
+            | "else"
+            | "do"
+            | "sizeof"
+            | "break"
+            | "continue"
     )
 }
 
@@ -1822,17 +1847,11 @@ fn extract_sgdk_line_function_def_name(line: &str) -> Option<String> {
     if tokens.len() < 2 {
         return None;
     }
-    let name = tokens
-        .last()?
-        .trim_start_matches('*')
-        .to_string();
+    let name = tokens.last()?.trim_start_matches('*').to_string();
     if name.is_empty() {
         return None;
     }
-    if !name
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_')
-    {
+    if !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         return None;
     }
     if is_sgdk_c_keyword(&name) {
@@ -1885,7 +1904,11 @@ fn extract_sgdk_quoted_includes(source: &str) -> Vec<String> {
     out
 }
 
-fn resolve_sgdk_quoted_include_path(sgdk_root: &Path, from_file: &Path, include_lit: &str) -> Option<PathBuf> {
+fn resolve_sgdk_quoted_include_path(
+    sgdk_root: &Path,
+    from_file: &Path,
+    include_lit: &str,
+) -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Some(parent) = from_file.parent() {
         candidates.push(parent.join(include_lit));
@@ -1925,9 +1948,7 @@ fn scan_sgdk_donor_logic_scan(sgdk_path: &Path) -> SgdkDonorLogicScan {
         let sanitized = sanitize_c_source_for_scan(&text);
         if let Some(rel) = sgdk_donor_rel_path(sgdk_path, &abs_path) {
             scan.donor_logic_scanned_paths.push(rel.clone());
-            scan
-                .source_text_by_rel
-                .insert(rel.clone(), text.clone());
+            scan.source_text_by_rel.insert(rel.clone(), text.clone());
             if sanitized.contains("while(1)")
                 || sanitized.contains("while (1)")
                 || sanitized.contains("while(true)")
@@ -2246,7 +2267,10 @@ fn derive_sgdk_scene_collision_map_from_tile_cells(
     if cells.len() != expected || expected == 0 {
         return None;
     }
-    let data: Vec<u8> = cells.iter().map(|c| if *c == 0 { 0u8 } else { 1u8 }).collect();
+    let data: Vec<u8> = cells
+        .iter()
+        .map(|c| if *c == 0 { 0u8 } else { 1u8 })
+        .collect();
     let solid = data.iter().filter(|&&v| v != 0).count() as u64;
     let note = format!(
         "Fase C: collision_map derivado por regra rastreavel: solido onde indice de tile != 0, livre onde == 0 (indice 0 = tile totalmente transparente em extract_sgdk_tilemap_cells); grade {}x{} tiles, {} celulas solidas.",
@@ -2698,7 +2722,8 @@ fn apply_sgdk_phase_d_to_sprite_entity(
     logic.graph = None;
     logic.graph_ref = Some(graph_ref.clone());
     logic.graph_origin = Some("imported_ref".to_string());
-    let mat_class = scan.graph_materialization_class_for_sprite_role(is_primary_sprite, secondary_local_spr);
+    let mat_class =
+        scan.graph_materialization_class_for_sprite_role(is_primary_sprite, secondary_local_spr);
     let confidence = if matches!(
         mat_class,
         Some("run_and_gun_horizontal_signals")
@@ -2771,7 +2796,8 @@ fn apply_sgdk_phase_d_to_sprite_entity(
                 scan.donor_logic_scanned_paths.join(", ")
             )
         } else {
-            "Fase D: scan textual limitado ao(s) ficheiro(s) listado(s) em external_source_refs.".into()
+            "Fase D: scan textual limitado ao(s) ficheiro(s) listado(s) em external_source_refs."
+                .into()
         };
         logic.logic_hints.push(scan_src_hint);
         if scan.joy_read_detected {
@@ -3187,24 +3213,25 @@ fn build_sgdk_tilemap_entity(
     };
     let display_name = resource.name.clone();
 
-    let (map_width, map_height, cells, unique_tiles, had_cells) =
-        match extract_sgdk_tilemap_cells(source_path) {
-            Some(extracted) => (
-                extracted.map_width,
-                extracted.map_height,
-                extracted.cells,
-                extracted.unique_tiles,
-                true,
-            ),
-            None => {
-                let (mw, mh) = tilemap_dims_from_source(source_path);
-                fallbacks.push(format!(
-                    "tilemap '{}': cells[] vazio (PNG indisponivel, <8x8 ou totalmente transparente).",
-                    resource.name
-                ));
-                (mw, mh, Vec::new(), 0, false)
-            }
-        };
+    let (map_width, map_height, cells, unique_tiles, had_cells) = match extract_sgdk_tilemap_cells(
+        source_path,
+    ) {
+        Some(extracted) => (
+            extracted.map_width,
+            extracted.map_height,
+            extracted.cells,
+            extracted.unique_tiles,
+            true,
+        ),
+        None => {
+            let (mw, mh) = tilemap_dims_from_source(source_path);
+            fallbacks.push(format!(
+                "tilemap '{}': cells[] vazio (PNG indisponivel, <8x8 ou totalmente transparente).",
+                resource.name
+            ));
+            (mw, mh, Vec::new(), 0, false)
+        }
+    };
     let cells_count = cells.len();
 
     let entity = Entity {
@@ -3463,17 +3490,17 @@ fn import_sgdk_resources_into_scene(
             phase_d_ledger.entity_spr_local_signal_hits.push(hit);
         }
     }
-    phase_d_ledger
-        .entity_spr_local_signal_hits
-        .sort();
+    phase_d_ledger.entity_spr_local_signal_hits.sort();
     phase_d_ledger.entity_spr_local_signal_hits.dedup();
     for (idx, ent) in sprite_entities.iter_mut().enumerate() {
         let resource_name = ent
             .display_name
             .clone()
             .unwrap_or_else(|| ent.entity_id.clone());
-        let secondary_local_spr =
-            idx != 0 && donor_logic_scan.entity_resource_spr_touch_rel(&resource_name).is_some();
+        let secondary_local_spr = idx != 0
+            && donor_logic_scan
+                .entity_resource_spr_touch_rel(&resource_name)
+                .is_some();
         let phase_d_entity = apply_sgdk_phase_d_to_sprite_entity(
             project_dir,
             ent,
@@ -3486,18 +3513,20 @@ fn import_sgdk_resources_into_scene(
             phase_d_ledger
                 .logic_graph_refs
                 .push(phase_d_entity.graph_ref.clone());
-            phase_d_ledger.entity_trace.push(SgdkImportLedgerPhaseDEntityTrace {
-                entity_id: ent.entity_id.clone(),
-                graph_ref: phase_d_entity.graph_ref,
-                source_refs: phase_d_entity.source_refs,
-                confidence: phase_d_entity.confidence,
-                applied_class: phase_d_entity.applied_class,
-                entity_role: phase_d_entity.entity_role,
-                role_reason: phase_d_entity.role_reason,
-                driver_functions: phase_d_entity.driver_functions,
-                source_paths: phase_d_entity.source_paths,
-                rules_hit: phase_d_entity.rules_hit,
-            });
+            phase_d_ledger
+                .entity_trace
+                .push(SgdkImportLedgerPhaseDEntityTrace {
+                    entity_id: ent.entity_id.clone(),
+                    graph_ref: phase_d_entity.graph_ref,
+                    source_refs: phase_d_entity.source_refs,
+                    confidence: phase_d_entity.confidence,
+                    applied_class: phase_d_entity.applied_class,
+                    entity_role: phase_d_entity.entity_role,
+                    role_reason: phase_d_entity.role_reason,
+                    driver_functions: phase_d_entity.driver_functions,
+                    source_paths: phase_d_entity.source_paths,
+                    rules_hit: phase_d_entity.rules_hit,
+                });
         }
     }
     phase_d_ledger.logic_graph_refs.sort();
@@ -3606,19 +3635,16 @@ fn import_sgdk_resources_into_scene(
                     tm.map_height,
                 ) {
                     phase_c_ledger.collision_derivation_rule = Some("nonzero_tile_index".into());
-                    phase_c_ledger.primary_collision_solid_cells = Some(
-                        cmap.data.iter().filter(|&&value| value != 0).count() as u64,
-                    );
+                    phase_c_ledger.primary_collision_solid_cells =
+                        Some(cmap.data.iter().filter(|&&value| value != 0).count() as u64);
                     primary_scene.collision_map = Some(cmap);
                     fallbacks.push(note);
                 }
             }
         }
     } else {
-        fallbacks.push(
-            "Fase C: collision_map nao derivado (cena primaria sem tilemap anchor)."
-                .into(),
-        );
+        fallbacks
+            .push("Fase C: collision_map nao derivado (cena primaria sem tilemap anchor).".into());
     }
 
     if let Some(sid) = primary_sprite_ids.first() {
@@ -3652,16 +3678,18 @@ fn import_sgdk_resources_into_scene(
             disambiguator += 1;
         }
         let scene_path = format!("scenes/{}.json", scene_id);
-        let mut extra_scene = canonical_scene(
-            &scene_id,
-            Some(format!("{} (SGDK)", slot.display_name)),
-        );
+        let mut extra_scene =
+            canonical_scene(&scene_id, Some(format!("{} (SGDK)", slot.display_name)));
         let tilemap_ids = vec![slot.entity_id.clone()];
         let extra_collision = slot.entity.components.tilemap.as_ref().and_then(|tm| {
             if tm.cells.is_empty() {
                 None
             } else {
-                derive_sgdk_scene_collision_map_from_tile_cells(&tm.cells, tm.map_width, tm.map_height)
+                derive_sgdk_scene_collision_map_from_tile_cells(
+                    &tm.cells,
+                    tm.map_width,
+                    tm.map_height,
+                )
             }
         });
         extra_scene.entities.push(slot.entity);
@@ -3669,8 +3697,7 @@ fn import_sgdk_resources_into_scene(
             extra_scene.collision_map = Some(cmap);
             fallbacks.push(format!("Fase C [{}]: {}", scene_id, note));
         }
-        extra_scene.layers =
-            derive_sgdk_scene_layers(&tilemap_ids, &[], &[], &[]);
+        extra_scene.layers = derive_sgdk_scene_layers(&tilemap_ids, &[], &[], &[]);
         save_scene(project_dir, &scene_path, &extra_scene)?;
 
         let descriptor = SgdkImportedSceneDescriptor {
@@ -3721,7 +3748,9 @@ fn import_sgdk_resources_into_scene(
         fingerprint: fingerprint.clone(),
     };
 
-    let primary_cells_count = primary_tilemap_stats.map(|(count, _, _)| count).unwrap_or(0);
+    let primary_cells_count = primary_tilemap_stats
+        .map(|(count, _, _)| count)
+        .unwrap_or(0);
     let primary_unique_tiles = primary_tilemap_stats
         .map(|(_, unique, _)| unique)
         .unwrap_or(0);
@@ -3744,7 +3773,8 @@ fn import_sgdk_resources_into_scene(
         tilemap_cells: primary_cells_count,
         tilemap_unique_tiles: primary_unique_tiles,
     };
-    let mut ledger_scenes: Vec<SgdkImportLedgerScene> = Vec::with_capacity(1 + additional_ledger_entries.len());
+    let mut ledger_scenes: Vec<SgdkImportLedgerScene> =
+        Vec::with_capacity(1 + additional_ledger_entries.len());
     ledger_scenes.push(primary_ledger_entry);
     ledger_scenes.extend(additional_ledger_entries);
 
@@ -4395,8 +4425,7 @@ fn sgdk_root_has_manifest(path: &Path) -> bool {
     entries.flatten().any(|entry| {
         let p = entry.path();
         p.is_file()
-            && p
-                .extension()
+            && p.extension()
                 .is_some_and(|extension| extension.eq_ignore_ascii_case("res"))
     })
 }
@@ -4471,7 +4500,11 @@ fn collect_declared_wrapper_paths(mddev: &MddevProjectMeta, root: &Path) -> Vec<
         };
         let path = {
             let p = PathBuf::from(&token);
-            if p.is_absolute() { p } else { root.join(p) }
+            if p.is_absolute() {
+                p
+            } else {
+                root.join(p)
+            }
         };
         let key = path.to_string_lossy().to_string();
         if seen.insert(key) {
@@ -4551,7 +4584,7 @@ fn resolve_sgdk_import_root(requested_root: &Path) -> Result<SgdkResolvedImportR
             .unwrap_or(false);
         let has_manifest = sgdk_root_has_manifest(&current);
 
-        if has_manifest && !is_reference_wrapper {
+        if has_manifest && (!is_reference_wrapper || current == requested_canonical) {
             buildable_candidates.push(current.clone());
             continue;
         }
@@ -4566,7 +4599,11 @@ fn resolve_sgdk_import_root(requested_root: &Path) -> Result<SgdkResolvedImportR
             if sgdk_root_has_manifest(&candidate) {
                 buildable_candidates.push(candidate);
             } else if depth < 2 && candidate.is_dir() {
-                queue.push_back((candidate, depth + 1, inherited_reference || is_reference_wrapper));
+                queue.push_back((
+                    candidate,
+                    depth + 1,
+                    inherited_reference || is_reference_wrapper,
+                ));
             }
         }
     }
@@ -5307,12 +5344,17 @@ pub fn import_mugen_project(
     })
 }
 
-fn import_mugen_candidate(project_dir: &Path, candidate: &MugenCandidate) -> Result<Vec<Scene>, LoadError> {
+fn import_mugen_candidate(
+    project_dir: &Path,
+    candidate: &MugenCandidate,
+) -> Result<Vec<Scene>, LoadError> {
     match candidate.kind {
-        MugenCandidateKind::Character => import_mugen_character_candidate(project_dir, candidate)
-            .map(|scene| vec![scene]),
-        MugenCandidateKind::Stage => import_mugen_stage_candidate(project_dir, candidate)
-            .map(|scene| vec![scene]),
+        MugenCandidateKind::Character => {
+            import_mugen_character_candidate(project_dir, candidate).map(|scene| vec![scene])
+        }
+        MugenCandidateKind::Stage => {
+            import_mugen_stage_candidate(project_dir, candidate).map(|scene| vec![scene])
+        }
         MugenCandidateKind::Screenpack => import_mugen_screenpack_candidate(project_dir, candidate),
     }
 }
@@ -5374,7 +5416,11 @@ fn detect_mugen_candidates_in_root(root: &Path) -> Result<Vec<MugenCandidate>, L
         let lowered = content.to_ascii_lowercase();
         if lowered.contains("[bgdef]") || lowered.contains("[stageinfo]") {
             let display_name = mugen_info_name(&content)
-                .or_else(|| def_path.file_stem().map(|value| value.to_string_lossy().to_string()))
+                .or_else(|| {
+                    def_path
+                        .file_stem()
+                        .map(|value| value.to_string_lossy().to_string())
+                })
                 .unwrap_or_else(|| "Stage".to_string());
             stage_candidates.push(MugenCandidate {
                 kind: MugenCandidateKind::Stage,
@@ -5389,7 +5435,9 @@ fn detect_mugen_candidates_in_root(root: &Path) -> Result<Vec<MugenCandidate>, L
         let Some(files_section) = find_section(&sections, "files") else {
             continue;
         };
-        if files_section.entries.contains_key("sprite") && files_section.entries.contains_key("anim") {
+        if files_section.entries.contains_key("sprite")
+            && files_section.entries.contains_key("anim")
+        {
             let folder_name = root
                 .file_name()
                 .map(|value| value.to_string_lossy().trim().to_string())
@@ -5403,12 +5451,15 @@ fn detect_mugen_candidates_in_root(root: &Path) -> Result<Vec<MugenCandidate>, L
                 .or(folder_name.clone())
                 .unwrap_or_else(|| stem.clone());
             let score = mugen_character_def_score(&stem, folder_name.as_deref());
-            character_candidates.push((score, MugenCandidate {
-                kind: MugenCandidateKind::Character,
-                root_dir: root.to_path_buf(),
-                def_path,
-                display_name,
-            }));
+            character_candidates.push((
+                score,
+                MugenCandidate {
+                    kind: MugenCandidateKind::Character,
+                    root_dir: root.to_path_buf(),
+                    def_path,
+                    display_name,
+                },
+            ));
         }
     }
 
@@ -5497,7 +5548,11 @@ fn find_section<'a>(sections: &'a [MugenIniSection], name: &str) -> Option<&'a M
 }
 
 fn strip_mugen_comment(line: &str) -> String {
-    line.split(';').next().unwrap_or_default().trim().to_string()
+    line.split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_string()
 }
 
 fn mugen_info_name(content: &str) -> Option<String> {
@@ -5876,7 +5931,9 @@ fn import_mugen_character_candidate(
         .transpose()?
         .unwrap_or_default();
     if !audio_sfx.is_empty() {
-        scene.entities.push(mugen_audio_bank_entity("audio_bank", audio_sfx, None));
+        scene
+            .entities
+            .push(mugen_audio_bank_entity("audio_bank", audio_sfx, None));
     }
 
     scene.entities.push(Entity {
@@ -5906,7 +5963,9 @@ fn import_mugen_stage_candidate(
     let stage_slug = sgdk_entity_id(&candidate.display_name);
     let mut scene = canonical_scene(&stage_slug, Some(candidate.display_name.clone()));
 
-    if let Some(loose_background) = discover_loose_background_image(&candidate.root_dir, &candidate.def_path) {
+    if let Some(loose_background) =
+        discover_loose_background_image(&candidate.root_dir, &candidate.def_path)
+    {
         let asset_rel = format!(
             "assets/tilesets/{}_bg{}",
             stage_slug,
@@ -6098,7 +6157,10 @@ fn build_mugen_visual_scene(
     music_path: Option<&PathBuf>,
     asset_prefix: &str,
 ) -> Result<Scene, LoadError> {
-    let mut scene = canonical_scene(&sgdk_entity_id(display_name), Some(display_name.to_string()));
+    let mut scene = canonical_scene(
+        &sgdk_entity_id(display_name),
+        Some(display_name.to_string()),
+    );
     let scene_slug = sgdk_entity_id(display_name);
 
     for (index, section) in sections.iter().enumerate() {
@@ -6227,7 +6289,11 @@ fn mugen_actions_to_animation_defs(
             .iter()
             .map(|frame| frame.duration.max(1))
             .collect::<Vec<_>>();
-        let positive = durations.iter().copied().filter(|value| *value > 0).collect::<Vec<_>>();
+        let positive = durations
+            .iter()
+            .copied()
+            .filter(|value| *value > 0)
+            .collect::<Vec<_>>();
         let avg = if positive.is_empty() {
             1.0
         } else {
@@ -6265,7 +6331,9 @@ fn mugen_actions_to_animation_defs(
     animations
 }
 
-fn mugen_collision_component_from_actions(actions: &[MugenAirAction]) -> Option<CollisionComponent> {
+fn mugen_collision_component_from_actions(
+    actions: &[MugenAirAction],
+) -> Option<CollisionComponent> {
     let boxes = actions
         .iter()
         .find(|action| action.action_no == 0)
@@ -6352,12 +6420,26 @@ fn compose_mugen_character_atlas(
             .then(left.image.cmp(&right.image))
     });
 
-    let anchor_x = ordered.iter().map(|sprite| sprite.axis.x).max().unwrap_or(0).max(0) as u32;
-    let anchor_y = ordered.iter().map(|sprite| sprite.axis.y).max().unwrap_or(0).max(0) as u32;
+    let anchor_x = ordered
+        .iter()
+        .map(|sprite| sprite.axis.x)
+        .max()
+        .unwrap_or(0)
+        .max(0) as u32;
+    let anchor_y = ordered
+        .iter()
+        .map(|sprite| sprite.axis.y)
+        .max()
+        .unwrap_or(0)
+        .max(0) as u32;
     let cell_width = ordered
         .iter()
         .map(|sprite| {
-            anchor_x + sprite.pixels.width().saturating_sub(sprite.axis.x.max(0) as u32)
+            anchor_x
+                + sprite
+                    .pixels
+                    .width()
+                    .saturating_sub(sprite.axis.x.max(0) as u32)
         })
         .max()
         .unwrap_or(32)
@@ -6365,7 +6447,11 @@ fn compose_mugen_character_atlas(
     let cell_height = ordered
         .iter()
         .map(|sprite| {
-            anchor_y + sprite.pixels.height().saturating_sub(sprite.axis.y.max(0) as u32)
+            anchor_y
+                + sprite
+                    .pixels
+                    .height()
+                    .saturating_sub(sprite.axis.y.max(0) as u32)
         })
         .max()
         .unwrap_or(32)
@@ -6373,7 +6459,8 @@ fn compose_mugen_character_atlas(
     let count = ordered.len() as f32;
     let cols = count.sqrt().ceil().max(1.0) as u32;
     let rows = (ordered.len() as u32).div_ceil(cols);
-    let mut atlas = ImageBuffer::from_pixel(cols * cell_width, rows * cell_height, Rgba([0, 0, 0, 0]));
+    let mut atlas =
+        ImageBuffer::from_pixel(cols * cell_width, rows * cell_height, Rgba([0, 0, 0, 0]));
     let mut frame_indices = HashMap::new();
 
     for (index, sprite) in ordered.iter().enumerate() {
@@ -6458,7 +6545,11 @@ fn stage_section_sprite_ref(
     if let Some(spriteno) = section.entries.get("spriteno") {
         return parse_pair_i32(Some(spriteno));
     }
-    if let Some(actionno) = section.entries.get("actionno").and_then(|value| value.parse::<i32>().ok()) {
+    if let Some(actionno) = section
+        .entries
+        .get("actionno")
+        .and_then(|value| value.parse::<i32>().ok())
+    {
         return actions
             .iter()
             .find(|action| action.action_no == actionno)
@@ -6513,10 +6604,7 @@ fn save_mugen_sounds(
                 error
             ))
         })?;
-        mapping.insert(
-            format!("snd_{}_{}", sound.group, sound.sound_no),
-            asset_rel,
-        );
+        mapping.insert(format!("snd_{}_{}", sound.group, sound.sound_no), asset_rel);
     }
     Ok(mapping)
 }
@@ -6565,8 +6653,7 @@ fn mugen_sff_is_v1(path: &Path) -> Result<bool, LoadError> {
             error
         ))
     })?;
-    Ok(bytes.starts_with(b"ElecbyteSpr")
-        && read_le_u8(&bytes, 15).unwrap_or_default() == 1)
+    Ok(bytes.starts_with(b"ElecbyteSpr") && read_le_u8(&bytes, 15).unwrap_or_default() == 1)
 }
 
 fn load_mugen_sprite_assets(
@@ -6668,7 +6755,10 @@ fn mugen_requested_sprite_paths(
 fn parse_mugen_sprite_file_stem(stem: &str) -> Option<(i32, i32)> {
     let normalized = stem.replace('_', "-");
     let (group, image) = normalized.split_once('-')?;
-    Some((group.trim().parse::<i32>().ok()?, image.trim().parse::<i32>().ok()?))
+    Some((
+        group.trim().parse::<i32>().ok()?,
+        image.trim().parse::<i32>().ok()?,
+    ))
 }
 
 fn mugen_work_sprite_directories(archive_path: &Path) -> Vec<PathBuf> {
@@ -6929,17 +7019,22 @@ pub fn import_external_project(
     }
 
     match profile.id {
-        "sgdk" => import_sgdk_project(project_dir, source_path).map(|report| ExternalImportReport {
-            primary_scene: report.primary_scene,
-            imported_scenes: report.imported_scenes,
-            skipped_sources: report
-                .skipped_sources
-                .into_iter()
-                .map(|skipped| {
-                    format!("[{}] {}: {}", skipped.reason, skipped.source, skipped.detail)
-                })
-                .collect(),
-        }),
+        "sgdk" => {
+            import_sgdk_project(project_dir, source_path).map(|report| ExternalImportReport {
+                primary_scene: report.primary_scene,
+                imported_scenes: report.imported_scenes,
+                skipped_sources: report
+                    .skipped_sources
+                    .into_iter()
+                    .map(|skipped| {
+                        format!(
+                            "[{}] {}: {}",
+                            skipped.reason, skipped.source, skipped.detail
+                        )
+                    })
+                    .collect(),
+            })
+        }
         "mugen" | "ikemen_go" => {
             let report = import_mugen_project(project_dir, source_path)?;
             Ok(ExternalImportReport {
@@ -7067,7 +7162,10 @@ pub fn import_godot_project(
             .ok()
             .map(normalize_relative_path)
             .unwrap_or_else(|| script_path.display().to_string());
-        hints.insert(0, format!("Script Godot preservado como hint: {}.", script_label));
+        hints.insert(
+            0,
+            format!("Script Godot preservado como hint: {}.", script_label),
+        );
         node_logic.insert(node.name.clone(), (hints, input, physics));
     }
 
@@ -7106,7 +7204,9 @@ pub fn import_godot_project(
                         skipped.push(format!("{}: Sprite2D sem textura.", node.name));
                         continue;
                     }
-                } else if let Some(asset) = godot_node_visual_asset_path(godot_path, &node, &ext_resources) {
+                } else if let Some(asset) =
+                    godot_node_visual_asset_path(godot_path, &node, &ext_resources)
+                {
                     asset
                 } else {
                     skipped.push(format!(
@@ -7146,17 +7246,19 @@ pub fn import_godot_project(
                             .to_string(),
                     );
                 }
-                scene.entities.push(imported_sprite_entity(ImportedSpriteEntitySpec {
-                    entity_id,
-                    display_name: node.name.clone(),
-                    asset,
-                    source_path: texture_source,
-                    x,
-                    y,
-                    input,
-                    physics,
-                    logic_hints,
-                }));
+                scene
+                    .entities
+                    .push(imported_sprite_entity(ImportedSpriteEntitySpec {
+                        entity_id,
+                        display_name: node.name.clone(),
+                        asset,
+                        source_path: texture_source,
+                        x,
+                        y,
+                        input,
+                        physics,
+                        logic_hints,
+                    }));
             }
             "Camera2D" => {
                 let entity_id = unique_entity_id(&mut entity_ids, &node.name, "camera");
@@ -7164,7 +7266,9 @@ pub fn import_godot_project(
                 pending_cameras.push((entity_id, node.name, x, y));
             }
             "TileMap" | "TileMapLayer" => {
-                let Some(tileset_source) = godot_node_visual_asset_path(godot_path, &node, &ext_resources) else {
+                let Some(tileset_source) =
+                    godot_node_visual_asset_path(godot_path, &node, &ext_resources)
+                else {
                     skipped.push(format!(
                         "{}: {} sem tileset visual importavel nesta wave.",
                         node.name, node.node_type
@@ -7196,7 +7300,10 @@ pub fn import_godot_project(
                     continue;
                 };
                 let Some(stream_id) = godot_ext_resource_id(stream_ref) else {
-                    skipped.push(format!("{}: referencia de audio Godot nao suportada.", node.name));
+                    skipped.push(format!(
+                        "{}: referencia de audio Godot nao suportada.",
+                        node.name
+                    ));
                     continue;
                 };
                 let Some(stream_resource) = ext_resources.get(&stream_id) else {
@@ -7283,8 +7390,11 @@ fn validate_godot_project_path(godot_path: &Path) -> Result<(), LoadError> {
         return Ok(());
     }
 
-    let scenes =
-        collect_recursive_files_by_extension(godot_path, &["tscn"], &[".godot", "addons", "import", "rds"])?;
+    let scenes = collect_recursive_files_by_extension(
+        godot_path,
+        &["tscn"],
+        &[".godot", "addons", "import", "rds"],
+    )?;
     if scenes.is_empty() {
         return Err(LoadError(format!(
             "Projeto Godot invalido: nenhum arquivo 'project.godot' ou '.tscn' encontrado em '{}'.",
@@ -7307,8 +7417,11 @@ fn detect_godot_primary_scene_path(godot_path: &Path) -> Result<PathBuf, LoadErr
         }
     }
 
-    let mut scenes =
-        collect_recursive_files_by_extension(godot_path, &["tscn"], &[".godot", "addons", "import", "rds"])?;
+    let mut scenes = collect_recursive_files_by_extension(
+        godot_path,
+        &["tscn"],
+        &[".godot", "addons", "import", "rds"],
+    )?;
     scenes.sort();
     let first_scene = scenes.into_iter().next().ok_or_else(|| {
         LoadError(format!(
@@ -7347,51 +7460,50 @@ fn parse_godot_scene(content: &str) -> Result<GodotSceneParse, LoadError> {
     let mut current_attrs = HashMap::new();
     let mut current_props = HashMap::new();
 
-    let flush_section =
-        |kind: &Option<String>,
-         attrs: &HashMap<String, String>,
-         props: &HashMap<String, String>,
-         ext_resources: &mut HashMap<String, GodotExtResource>,
-         nodes: &mut Vec<GodotNode>| {
-            let Some(kind) = kind.as_deref() else {
-                return;
-            };
-            match kind {
-                "ext_resource" => {
-                    let Some(id) = attrs.get("id").cloned() else {
-                        return;
-                    };
-                    let Some(path) = attrs.get("path").cloned() else {
-                        return;
-                    };
-                    ext_resources.insert(
-                        id,
-                        GodotExtResource {
-                            _resource_type: attrs.get("type").cloned().unwrap_or_default(),
-                            path,
-                        },
-                    );
-                }
-                "node" => {
-                    let Some(name) = attrs.get("name").cloned() else {
-                        return;
-                    };
-                    let Some(node_type) = attrs.get("type").cloned() else {
-                        return;
-                    };
-                    nodes.push(GodotNode {
-                        name,
-                        node_type,
-                        _parent: attrs
-                            .get("parent")
-                            .cloned()
-                            .unwrap_or_else(|| ".".to_string()),
-                        properties: props.clone(),
-                    });
-                }
-                _ => {}
-            }
+    let flush_section = |kind: &Option<String>,
+                         attrs: &HashMap<String, String>,
+                         props: &HashMap<String, String>,
+                         ext_resources: &mut HashMap<String, GodotExtResource>,
+                         nodes: &mut Vec<GodotNode>| {
+        let Some(kind) = kind.as_deref() else {
+            return;
         };
+        match kind {
+            "ext_resource" => {
+                let Some(id) = attrs.get("id").cloned() else {
+                    return;
+                };
+                let Some(path) = attrs.get("path").cloned() else {
+                    return;
+                };
+                ext_resources.insert(
+                    id,
+                    GodotExtResource {
+                        _resource_type: attrs.get("type").cloned().unwrap_or_default(),
+                        path,
+                    },
+                );
+            }
+            "node" => {
+                let Some(name) = attrs.get("name").cloned() else {
+                    return;
+                };
+                let Some(node_type) = attrs.get("type").cloned() else {
+                    return;
+                };
+                nodes.push(GodotNode {
+                    name,
+                    node_type,
+                    _parent: attrs
+                        .get("parent")
+                        .cloned()
+                        .unwrap_or_else(|| ".".to_string()),
+                    properties: props.clone(),
+                });
+            }
+            _ => {}
+        }
+    };
 
     for raw_line in content.lines() {
         let trimmed = raw_line.trim();
@@ -7604,7 +7716,13 @@ fn godot_node_visual_asset_path(
     })
 }
 
-fn analyze_godot_script(script: &str) -> (Vec<String>, Option<InputComponent>, Option<PhysicsComponent>) {
+fn analyze_godot_script(
+    script: &str,
+) -> (
+    Vec<String>,
+    Option<InputComponent>,
+    Option<PhysicsComponent>,
+) {
     let lowered = script.to_ascii_lowercase();
     let mut hints = Vec::new();
     let mut mapping = HashMap::new();
@@ -7725,7 +7843,9 @@ fn detect_construct_primary_layout_path(construct_path: &Path) -> Result<PathBuf
             construct_path.display()
         ))
     })?;
-    Ok(construct_path.join("layouts").join(first.replace('/', "\\")))
+    Ok(construct_path
+        .join("layouts")
+        .join(first.replace('/', "\\")))
 }
 
 fn parse_construct_object_type(root: &Path, path: &Path) -> Result<ConstructObjectType, LoadError> {
@@ -7790,28 +7910,26 @@ fn construct_collect_layout_instances(
                 .and_then(serde_json::Value::as_str)
                 .or_else(|| entries.get("type").and_then(serde_json::Value::as_str))
                 .or_else(|| entries.get("name").and_then(serde_json::Value::as_str))
-                .or_else(|| entries.get("objectType").and_then(serde_json::Value::as_str))
+                .or_else(|| {
+                    entries
+                        .get("objectType")
+                        .and_then(serde_json::Value::as_str)
+                })
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .map(str::to_string);
-            let x = entries
-                .get("x")
-                .and_then(json_value_to_i32)
-                .or_else(|| {
-                    entries
-                        .get("worldInfo")
-                        .and_then(|info| info.get("x"))
-                        .and_then(json_value_to_i32)
-                });
-            let y = entries
-                .get("y")
-                .and_then(json_value_to_i32)
-                .or_else(|| {
-                    entries
-                        .get("worldInfo")
-                        .and_then(|info| info.get("y"))
-                        .and_then(json_value_to_i32)
-                });
+            let x = entries.get("x").and_then(json_value_to_i32).or_else(|| {
+                entries
+                    .get("worldInfo")
+                    .and_then(|info| info.get("x"))
+                    .and_then(json_value_to_i32)
+            });
+            let y = entries.get("y").and_then(json_value_to_i32).or_else(|| {
+                entries
+                    .get("worldInfo")
+                    .and_then(|info| info.get("y"))
+                    .and_then(json_value_to_i32)
+            });
             if let (Some(object_name), Some(x), Some(y)) = (object_name, x, y) {
                 sink.push(ConstructLayoutInstance { object_name, x, y });
             }
@@ -7938,17 +8056,19 @@ pub fn import_construct_project(
         if first_sprite_id.is_none() {
             first_sprite_id = Some(entity_id.clone());
         }
-        scene.entities.push(imported_sprite_entity(ImportedSpriteEntitySpec {
-            entity_id,
-            display_name: object_type.name.clone(),
-            asset,
-            source_path: display_asset.clone(),
-            x: instance.x,
-            y: instance.y,
-            input: None,
-            physics: None,
-            logic_hints,
-        }));
+        scene
+            .entities
+            .push(imported_sprite_entity(ImportedSpriteEntitySpec {
+                entity_id,
+                display_name: object_type.name.clone(),
+                asset,
+                source_path: display_asset.clone(),
+                x: instance.x,
+                y: instance.y,
+                input: None,
+                physics: None,
+                logic_hints,
+            }));
     }
 
     if first_sprite_id.is_none() {
@@ -7974,17 +8094,19 @@ pub fn import_construct_project(
             if first_sprite_id.is_none() {
                 first_sprite_id = Some(entity_id.clone());
             }
-            scene.entities.push(imported_sprite_entity(ImportedSpriteEntitySpec {
-                entity_id,
-                display_name: object_type.name.clone(),
-                asset,
-                source_path: display_asset.clone(),
-                x: fallback_x,
-                y: 96,
-                input: None,
-                physics: None,
-                logic_hints,
-            }));
+            scene
+                .entities
+                .push(imported_sprite_entity(ImportedSpriteEntitySpec {
+                    entity_id,
+                    display_name: object_type.name.clone(),
+                    asset,
+                    source_path: display_asset.clone(),
+                    x: fallback_x,
+                    y: 96,
+                    input: None,
+                    physics: None,
+                    logic_hints,
+                }));
             fallback_x += 48;
         }
     }
@@ -8046,7 +8168,9 @@ pub fn import_construct_project(
             Some(follow_entity),
         ));
     } else if scene.entities.is_empty() {
-        skipped.push("Nenhum sprite/layout visual foi materializado do projeto Construct.".to_string());
+        skipped.push(
+            "Nenhum sprite/layout visual foi materializado do projeto Construct.".to_string(),
+        );
     }
 
     save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
@@ -8214,15 +8338,16 @@ pub fn import_rpg_maker_project(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    let mut tilemap_source = parallax_name
-        .as_deref()
-        .and_then(|name| resolve_named_asset(rpg_path, &["img/parallaxes"], name, &["png", "bmp", "jpg"]));
+    let mut tilemap_source = parallax_name.as_deref().and_then(|name| {
+        resolve_named_asset(rpg_path, &["img/parallaxes"], name, &["png", "bmp", "jpg"])
+    });
     if tilemap_source.is_none() {
         let tileset_name = map_json
             .get("tilesetId")
             .and_then(json_value_to_i32)
             .and_then(|tileset_id| {
-                let tilesets = read_json_lossy(&rpg_path.join("data").join("Tilesets.json")).ok()?;
+                let tilesets =
+                    read_json_lossy(&rpg_path.join("data").join("Tilesets.json")).ok()?;
                 tilesets
                     .as_array()
                     .and_then(|items| {
@@ -8237,9 +8362,9 @@ pub fn import_rpg_maker_project(
                             .map(str::to_string)
                     })
             });
-        tilemap_source = tileset_name
-            .as_deref()
-            .and_then(|name| resolve_named_asset(rpg_path, &["img/tilesets"], name, &["png", "bmp", "jpg"]));
+        tilemap_source = tileset_name.as_deref().and_then(|name| {
+            resolve_named_asset(rpg_path, &["img/tilesets"], name, &["png", "bmp", "jpg"])
+        });
     }
     if let Some(source) = tilemap_source {
         let asset = materialize_external_file(
@@ -8276,8 +8401,16 @@ pub fn import_rpg_maker_project(
             .filter(|value| !value.is_empty())
             .unwrap_or("RPG Event")
             .to_string();
-        let event_x = event_object.get("x").and_then(json_value_to_i32).unwrap_or(0) * 32;
-        let event_y = event_object.get("y").and_then(json_value_to_i32).unwrap_or(0) * 32;
+        let event_x = event_object
+            .get("x")
+            .and_then(json_value_to_i32)
+            .unwrap_or(0)
+            * 32;
+        let event_y = event_object
+            .get("y")
+            .and_then(json_value_to_i32)
+            .unwrap_or(0)
+            * 32;
         let pages = event_object
             .get("pages")
             .and_then(serde_json::Value::as_array)
@@ -8324,7 +8457,9 @@ pub fn import_rpg_maker_project(
         )];
         let commands = pages
             .iter()
-            .flat_map(|page| parse_rpg_maker_event_commands(page.get("list").unwrap_or(&serde_json::Value::Null)))
+            .flat_map(|page| {
+                parse_rpg_maker_event_commands(page.get("list").unwrap_or(&serde_json::Value::Null))
+            })
             .collect::<Vec<_>>();
         for command in &commands {
             if let Some(hint) = rpg_maker_command_hint(command) {
@@ -8334,17 +8469,19 @@ pub fn import_rpg_maker_project(
                 break;
             }
         }
-        scene.entities.push(imported_sprite_entity(ImportedSpriteEntitySpec {
-            entity_id,
-            display_name: event_name,
-            asset,
-            source_path: source,
-            x: event_x,
-            y: event_y,
-            input: None,
-            physics: None,
-            logic_hints,
-        }));
+        scene
+            .entities
+            .push(imported_sprite_entity(ImportedSpriteEntitySpec {
+                entity_id,
+                display_name: event_name,
+                asset,
+                source_path: source,
+                x: event_x,
+                y: event_y,
+                input: None,
+                physics: None,
+                logic_hints,
+            }));
     }
 
     if first_sprite_id.is_none() {
@@ -8369,20 +8506,22 @@ pub fn import_rpg_maker_project(
             )?;
             let entity_id = unique_entity_id(&mut entity_ids, "player", "sprite");
             first_sprite_id = Some(entity_id.clone());
-            scene.entities.push(imported_sprite_entity(ImportedSpriteEntitySpec {
-                entity_id,
-                display_name: "Player".to_string(),
-                asset,
-                source_path: source,
-                x: 64,
-                y: 96,
-                input: None,
-                physics: None,
-                logic_hints: vec![
-                    "Sprite RPG Maker importado sem eventos; comandos permanecem externos."
-                        .to_string(),
-                ],
-            }));
+            scene
+                .entities
+                .push(imported_sprite_entity(ImportedSpriteEntitySpec {
+                    entity_id,
+                    display_name: "Player".to_string(),
+                    asset,
+                    source_path: source,
+                    x: 64,
+                    y: 96,
+                    input: None,
+                    physics: None,
+                    logic_hints: vec![
+                        "Sprite RPG Maker importado sem eventos; comandos permanecem externos."
+                            .to_string(),
+                    ],
+                }));
         }
     }
 
@@ -8393,9 +8532,14 @@ pub fn import_rpg_maker_project(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string);
-    let mut bgm_asset = map_bgm
-        .as_deref()
-        .and_then(|name| resolve_named_asset(rpg_path, &["audio/bgm"], name, &["ogg", "m4a", "mp3", "wav"]));
+    let mut bgm_asset = map_bgm.as_deref().and_then(|name| {
+        resolve_named_asset(
+            rpg_path,
+            &["audio/bgm"],
+            name,
+            &["ogg", "m4a", "mp3", "wav"],
+        )
+    });
     if bgm_asset.is_none() {
         let mut bgm_files = collect_recursive_files_by_extension(
             &rpg_path.join("audio").join("bgm"),
@@ -8403,10 +8547,12 @@ pub fn import_rpg_maker_project(
             &[],
         )?;
         bgm_files.sort();
-        bgm_asset = bgm_files
-            .into_iter()
-            .next()
-            .map(|relative| rpg_path.join("audio").join("bgm").join(relative.replace('/', "\\")));
+        bgm_asset = bgm_files.into_iter().next().map(|relative| {
+            rpg_path
+                .join("audio")
+                .join("bgm")
+                .join(relative.replace('/', "\\"))
+        });
     }
     let mut sfx = HashMap::new();
     let bgm = if let Some(source) = bgm_asset {
@@ -8520,7 +8666,8 @@ fn parse_openbor_model_file(root: &Path, path: &Path) -> Result<OpenBorModelAsse
         }
         for token in &parts[1..] {
             if display_asset.is_none() && string_looks_like_visual_asset(token) {
-                display_asset = resolve_external_asset_candidate(root, path.parent().unwrap_or(root), token);
+                display_asset =
+                    resolve_external_asset_candidate(root, path.parent().unwrap_or(root), token);
             }
             if string_looks_like_audio_asset(token) {
                 if let Some(audio_asset) =
@@ -8530,7 +8677,15 @@ fn parse_openbor_model_file(root: &Path, path: &Path) -> Result<OpenBorModelAsse
                 }
             }
         }
-        for keyword in ["anim", "attack", "jump", "spawnframe", "followanim", "combostep", "sound"] {
+        for keyword in [
+            "anim",
+            "attack",
+            "jump",
+            "spawnframe",
+            "followanim",
+            "combostep",
+            "sound",
+        ] {
             if lowered.starts_with(keyword) {
                 logic_hints.push(format!("Modelo OpenBOR usa comando '{}'.", keyword));
                 break;
@@ -8557,7 +8712,10 @@ fn parse_openbor_model_file(root: &Path, path: &Path) -> Result<OpenBorModelAsse
 
 fn load_openbor_model_assets(openbor_path: &Path) -> Result<Vec<OpenBorModelAsset>, LoadError> {
     let mut model_paths = Vec::new();
-    for directory in [openbor_path.join("data").join("chars"), openbor_path.join("chars")] {
+    for directory in [
+        openbor_path.join("data").join("chars"),
+        openbor_path.join("chars"),
+    ] {
         for relative in collect_recursive_files_by_extension(&directory, &["txt"], &[])? {
             model_paths.push(directory.join(relative.replace('/', "\\")));
         }
@@ -8766,31 +8924,33 @@ pub fn import_openbor_project(
         if let Some(level) = levels.first() {
             logic_hints.extend(level.logic_hints.clone());
         }
-        scene.entities.push(imported_sprite_entity(ImportedSpriteEntitySpec {
-            entity_id,
-            display_name: model.name.clone(),
-            asset,
-            source_path: display_asset.clone(),
-            x: sprite_x,
-            y: 112,
-            input: Some(InputComponent {
-                device: "joypad1".to_string(),
-                mapping: HashMap::from([
-                    ("move_left".to_string(), "DPAD_LEFT".to_string()),
-                    ("move_right".to_string(), "DPAD_RIGHT".to_string()),
-                    ("attack".to_string(), "BUTTON_B".to_string()),
-                    ("jump".to_string(), "BUTTON_A".to_string()),
-                ]),
-            }),
-            physics: Some(PhysicsComponent {
-                gravity: true,
-                gravity_strength: 6,
-                max_velocity: Some(Velocity { x: 32, y: 96 }),
-                friction: 1,
-                bounce: 0,
-            }),
-            logic_hints,
-        }));
+        scene
+            .entities
+            .push(imported_sprite_entity(ImportedSpriteEntitySpec {
+                entity_id,
+                display_name: model.name.clone(),
+                asset,
+                source_path: display_asset.clone(),
+                x: sprite_x,
+                y: 112,
+                input: Some(InputComponent {
+                    device: "joypad1".to_string(),
+                    mapping: HashMap::from([
+                        ("move_left".to_string(), "DPAD_LEFT".to_string()),
+                        ("move_right".to_string(), "DPAD_RIGHT".to_string()),
+                        ("attack".to_string(), "BUTTON_B".to_string()),
+                        ("jump".to_string(), "BUTTON_A".to_string()),
+                    ]),
+                }),
+                physics: Some(PhysicsComponent {
+                    gravity: true,
+                    gravity_strength: 6,
+                    max_velocity: Some(Velocity { x: 32, y: 96 }),
+                    friction: 1,
+                    bounce: 0,
+                }),
+                logic_hints,
+            }));
         sprite_x += 56;
 
         for source in &model.audio_assets {
@@ -8885,13 +9045,8 @@ fn unique_entity_id(existing: &mut HashSet<String>, seed: &str, fallback_prefix:
 
 fn read_json_lossy(path: &Path) -> Result<serde_json::Value, LoadError> {
     let content = read_text_lossy(path)?;
-    serde_json::from_str(&content).map_err(|error| {
-        LoadError(format!(
-            "JSON invalido em '{}': {}",
-            path.display(),
-            error
-        ))
-    })
+    serde_json::from_str(&content)
+        .map_err(|error| LoadError(format!("JSON invalido em '{}': {}", path.display(), error)))
 }
 
 fn collect_json_strings(value: &serde_json::Value, sink: &mut Vec<String>) {
@@ -8917,10 +9072,7 @@ fn json_strings(value: &serde_json::Value) -> Vec<String> {
     strings
 }
 
-fn find_first_json_string_for_keys(
-    value: &serde_json::Value,
-    keys: &[&str],
-) -> Option<String> {
+fn find_first_json_string_for_keys(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
     match value {
         serde_json::Value::Object(entries) => {
             for key in keys {
@@ -8991,9 +9143,7 @@ fn resolve_external_asset_candidate(root: &Path, current_dir: &Path, raw: &str) 
         root.join("img").join(&relative),
     ];
 
-    candidates
-        .into_iter()
-        .find(|candidate| candidate.is_file())
+    candidates.into_iter().find(|candidate| candidate.is_file())
 }
 
 fn dedupe_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
@@ -9109,7 +9259,11 @@ fn imported_tilemap_entity(
     }
 }
 
-fn imported_camera_entity(entity_id: String, display_name: String, follow_entity: Option<String>) -> Entity {
+fn imported_camera_entity(
+    entity_id: String,
+    display_name: String,
+    follow_entity: Option<String>,
+) -> Entity {
     Entity {
         entity_id,
         display_name: Some(display_name),
@@ -9129,7 +9283,11 @@ fn imported_camera_entity(entity_id: String, display_name: String, follow_entity
 fn json_value_to_i32(value: &serde_json::Value) -> Option<i32> {
     match value {
         serde_json::Value::Number(number) => number.as_f64().map(|value| value.round() as i32),
-        serde_json::Value::String(text) => text.trim().parse::<f32>().ok().map(|value| value.round() as i32),
+        serde_json::Value::String(text) => text
+            .trim()
+            .parse::<f32>()
+            .ok()
+            .map(|value| value.round() as i32),
         _ => None,
     }
 }
@@ -9153,7 +9311,8 @@ fn resolve_named_asset(
         .iter()
         .flat_map(|directory| {
             extensions.iter().map(move |extension| {
-                root.join(directory).join(format!("{}.{}", trimmed, extension))
+                root.join(directory)
+                    .join(format!("{}.{}", trimmed, extension))
             })
         })
         .find(|candidate| candidate.is_file())
@@ -10948,6 +11107,21 @@ mod tests {
         path
     }
 
+    fn validation_artifact_dir(name: &str) -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target-test")
+            .join("validation")
+            .join(name)
+    }
+
+    fn write_rgba_ppm(path: &Path, width: u32, height: u32, rgba: &[u8]) {
+        let mut bytes = format!("P6\n{} {}\n255\n", width, height).into_bytes();
+        for px in rgba.chunks_exact(4) {
+            bytes.extend_from_slice(&px[..3]);
+        }
+        fs::write(path, bytes).expect("write ppm artifact");
+    }
+
     fn write_platformer_donor_fixture(dir: &Path, with_jump: bool) {
         fs::create_dir_all(dir.join("res").join("images")).expect("create donor image dir");
         fs::create_dir_all(dir.join("res").join("sound")).expect("create donor sound dir");
@@ -11294,18 +11468,29 @@ void tick_player(void) {\n\
             .map(|value| format!(",\n  \"sgdk_root\": \"{}\"", value.replace('\\', "\\\\")))
             .unwrap_or_default();
         let notes_line = notes
-            .map(|value| format!(",\n  \"notes\": \"{}\"", value.replace('\\', "\\\\").replace('"', "\\\"")))
+            .map(|value| {
+                format!(
+                    ",\n  \"notes\": \"{}\"",
+                    value.replace('\\', "\\\\").replace('"', "\\\"")
+                )
+            })
             .unwrap_or_default();
         let content = format!(
             "{{\n  \"schema_version\": 1,\n  \"display_name\": \"Fixture\",\n  \"project_root\": \".\",\n  \"layout\": \"flat\",\n  \"platform\": \"GEN\",\n  \"kind\": \"{kind}\",\n  \"build_policy\": \"{build_policy}\"{sgdk_root_line}{notes_line}\n}}\n"
         );
-        fs::write(root.join(".mddev").join("project.json"), content).expect("write .mddev/project.json");
+        fs::write(root.join(".mddev").join("project.json"), content)
+            .expect("write .mddev/project.json");
     }
 
     fn write_godot_fixture(root: &Path) {
         fs::create_dir_all(root.join("art")).expect("create godot art dir");
         fs::create_dir_all(root.join("audio")).expect("create godot audio dir");
-        write_test_png(&root.join("art").join("hero.png"), 24, 32, [96, 220, 180, 255]);
+        write_test_png(
+            &root.join("art").join("hero.png"),
+            24,
+            32,
+            [96, 220, 180, 255],
+        );
         fs::write(root.join("audio").join("jump.wav"), minimal_wav_bytes())
             .expect("write godot wav");
         fs::write(
@@ -11371,7 +11556,11 @@ void tick_player(void) {\n\
         )
         .expect("write mugen air");
         write_test_png(
-            &root.join("work").join("hero_sff").join("sd").join("0-0.png"),
+            &root
+                .join("work")
+                .join("hero_sff")
+                .join("sd")
+                .join("0-0.png"),
             32,
             48,
             [240, 120, 32, 255],
@@ -11543,19 +11732,13 @@ void tick_player(void) {\n\
         let profiles = list_external_import_profiles();
 
         assert!(profiles.iter().any(|profile| {
-            profile.id == "sgdk"
-                && profile.importable
-                && profile.support_status == "Experimental"
+            profile.id == "sgdk" && profile.importable && profile.support_status == "Experimental"
         }));
         assert!(profiles.iter().any(|profile| {
-            profile.id == "mugen"
-                && profile.importable
-                && profile.source_engine == "mugen"
+            profile.id == "mugen" && profile.importable && profile.source_engine == "mugen"
         }));
         assert!(profiles.iter().any(|profile| {
-            profile.id == "ikemen_go"
-                && profile.importable
-                && profile.source_engine == "ikemen_go"
+            profile.id == "ikemen_go" && profile.importable && profile.source_engine == "ikemen_go"
         }));
         assert!(profiles.iter().any(|profile| {
             profile.id == "godot"
@@ -11563,9 +11746,7 @@ void tick_player(void) {\n\
                 && profile.supported_levels == vec!["L1", "L2", "L3"]
         }));
         assert!(profiles.iter().any(|profile| {
-            profile.id == "gamemaker"
-                && !profile.importable
-                && profile.support_status == "Parcial"
+            profile.id == "gamemaker" && !profile.importable && profile.support_status == "Parcial"
         }));
     }
 
@@ -11588,7 +11769,8 @@ void tick_player(void) {\n\
     #[test]
     fn stamp_project_template_metadata_marks_external_sgdk_source_kind_even_without_donor() {
         let project = temp_dir("stamp-template-metadata-external-sgdk");
-        create_project_skeleton(&project, "Stamp Template Metadata", "megadrive").expect("skeleton");
+        create_project_skeleton(&project, "Stamp Template Metadata", "megadrive")
+            .expect("skeleton");
 
         let stamped = stamp_project_template_metadata(&project, "platformer_seed", None)
             .expect("stamp project template metadata");
@@ -11829,8 +12011,7 @@ void tick_player(void) {\n\
             .expect("create project skeleton");
         write_generic_sgdk_donor_fixture(&donor_dir);
 
-        let report =
-            import_sgdk_project(&project_dir, &donor_dir).expect("import sgdk project");
+        let report = import_sgdk_project(&project_dir, &donor_dir).expect("import sgdk project");
         let scene = &report.primary_scene;
 
         assert!(project_dir
@@ -11896,11 +12077,16 @@ void tick_player(void) {\n\
             .find(|entity| entity.entity_id == "hero")
             .expect("primary sprite");
         assert_eq!(
-            primary_sprite.components.logic.as_ref().and_then(|l| l.graph_ref.as_deref()),
+            primary_sprite
+                .components
+                .logic
+                .as_ref()
+                .and_then(|l| l.graph_ref.as_deref()),
             Some("graphs/sgdk_import_hero.json")
         );
-        let hero_graph = fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
-            .expect("hero graph file");
+        let hero_graph =
+            fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
+                .expect("hero graph file");
         assert!(hero_graph.contains("\"event_start\""));
         let foe = scene
             .entities
@@ -11908,10 +12094,16 @@ void tick_player(void) {\n\
             .find(|entity| entity.entity_id == "foe")
             .expect("foe sprite");
         assert_eq!(
-            foe.components.logic.as_ref().and_then(|l| l.graph_ref.as_deref()),
+            foe.components
+                .logic
+                .as_ref()
+                .and_then(|l| l.graph_ref.as_deref()),
             Some("graphs/sgdk_import_foe.json")
         );
-        assert!(project_dir.join("graphs").join("sgdk_import_foe.json").is_file());
+        assert!(project_dir
+            .join("graphs")
+            .join("sgdk_import_foe.json")
+            .is_file());
 
         let _ = fs::remove_dir_all(donor_dir);
         let _ = fs::remove_dir_all(project_dir);
@@ -11975,11 +12167,15 @@ void tick_player(void) {\n\
             .find(|entity| entity.entity_id == "hero")
             .expect("imported hero");
         assert_eq!(
-            hero.components.logic.as_ref().and_then(|l| l.graph_ref.as_deref()),
+            hero.components
+                .logic
+                .as_ref()
+                .and_then(|l| l.graph_ref.as_deref()),
             Some("graphs/sgdk_import_hero.json")
         );
-        let hero_graph = fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
-            .expect("hero graph");
+        let hero_graph =
+            fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
+                .expect("hero graph");
         assert!(hero_graph.contains("\"sprite_move\""));
         assert!(scene.entities.iter().any(|entity| {
             entity
@@ -12001,8 +12197,7 @@ void tick_player(void) {\n\
             .expect("create project skeleton");
         write_generic_sgdk_donor_fixture(&donor_dir);
 
-        let report =
-            import_sgdk_project(&project_dir, &donor_dir).expect("import sgdk report");
+        let report = import_sgdk_project(&project_dir, &donor_dir).expect("import sgdk report");
 
         // Relatorio rico: primary_scene + contagens + sumario com fingerprint.
         assert_eq!(report.imported_scenes, 1);
@@ -12020,11 +12215,9 @@ void tick_player(void) {\n\
 
         // VGM aparece como skipped explicito rastreavel.
         assert!(
-            report
-                .skipped_sources
-                .iter()
-                .any(|skipped| skipped.reason == "ForbiddenFormat"
-                    && skipped.source.contains("VGM")),
+            report.skipped_sources.iter().any(
+                |skipped| skipped.reason == "ForbiddenFormat" && skipped.source.contains("VGM")
+            ),
             "skipped_sources deve conter VGM como ForbiddenFormat: {:?}",
             report.skipped_sources
         );
@@ -12082,7 +12275,10 @@ void tick_player(void) {\n\
         // Fase D: padraio JOY + MAP_scroll no main.c -> input + hints + external ref.
         let logic = hero.components.logic.as_ref().expect("logic");
         assert!(
-            logic.external_source_refs.iter().any(|r| r.contains("main.c")),
+            logic
+                .external_source_refs
+                .iter()
+                .any(|r| r.contains("main.c")),
             "external_source_refs: {:?}",
             logic.external_source_refs
         );
@@ -12104,8 +12300,9 @@ void tick_player(void) {\n\
             logic.graph.is_none(),
             "grafo inline deve ficar vazio quando externalizado em graph_ref"
         );
-        let disk_graph = fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
-            .expect("ler graphs/sgdk_import_hero.json");
+        let disk_graph =
+            fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
+                .expect("ler graphs/sgdk_import_hero.json");
         assert!(
             disk_graph.contains("scroll_tilemap"),
             "grafo em disco deve encadear scroll_tilemap quando MAP_scroll* detectado"
@@ -12116,7 +12313,10 @@ void tick_player(void) {\n\
             disk_graph
         );
         assert!(
-            logic.logic_hints.iter().any(|h| h.contains("laco infinito") || h.contains("while(1)")),
+            logic
+                .logic_hints
+                .iter()
+                .any(|h| h.contains("laco infinito") || h.contains("while(1)")),
             "hints devem mencionar loop de gameplay observado: {:?}",
             logic.logic_hints
         );
@@ -12156,8 +12356,7 @@ void tick_player(void) {\n\
         );
 
         let raw = fs::read_to_string(&manifest_abs).expect("read ledger");
-        let ledger: SgdkImportLedger =
-            serde_json::from_str(&raw).expect("parse ledger json");
+        let ledger: SgdkImportLedger = serde_json::from_str(&raw).expect("parse ledger json");
         assert_eq!(ledger.schema_version, SGDK_IMPORT_LEDGER_SCHEMA);
         assert_eq!(ledger.fingerprint, report.source_summary.fingerprint);
         assert_eq!(ledger.scene_id, report.primary_scene.scene_id);
@@ -12173,8 +12372,7 @@ void tick_player(void) {\n\
         assert!(ledger
             .mappings
             .iter()
-            .any(|mapping| mapping.resource_kind == "XGM"
-                || mapping.resource_kind == "XGM2"));
+            .any(|mapping| mapping.resource_kind == "XGM" || mapping.resource_kind == "XGM2"));
         assert!(
             ledger
                 .skipped_sources
@@ -12183,7 +12381,10 @@ void tick_player(void) {\n\
             "ledger deve preservar skipped_sources"
         );
         assert!(ledger.history.is_empty());
-        assert!(ledger.phase_d.detected_main_c_token_groups.contains(&"joy_read".to_string()));
+        assert!(ledger
+            .phase_d
+            .detected_main_c_token_groups
+            .contains(&"joy_read".to_string()));
         assert!(ledger
             .phase_d
             .logic_graph_refs
@@ -12247,7 +12448,9 @@ void tick_player(void) {\n\
             .expect("foe");
         let logic = hero.components.logic.as_ref().expect("logic");
         assert!(
-            logic.external_source_refs.contains(&"src/main.c".to_string())
+            logic
+                .external_source_refs
+                .contains(&"src/main.c".to_string())
                 && logic
                     .external_source_refs
                     .contains(&"src/player_control.c".to_string()),
@@ -12284,8 +12487,9 @@ void tick_player(void) {\n\
             ledger.phase_d.heuristic_gameplay_class.as_deref(),
             Some("run_and_gun_horizontal_signals")
         );
-        let disk_graph = fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
-            .expect("read hero graph");
+        let disk_graph =
+            fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
+                .expect("read hero graph");
         assert!(
             disk_graph.contains("\"dx\":2") || disk_graph.contains("\"dx\": 2"),
             "run-and-gun horizontal mantem deslocamento no eixo X: {}",
@@ -12378,7 +12582,9 @@ void tick_player(void) {\n\
             hero_trace
                 .source_refs
                 .iter()
-                .any(|ev| ev.kind == "entity_bind" || ev.kind == "function_call" || ev.kind == "sgdk_api_call"),
+                .any(|ev| ev.kind == "entity_bind"
+                    || ev.kind == "function_call"
+                    || ev.kind == "sgdk_api_call"),
             "entity trace precisa carregar evidencias semanticas: {:?}",
             hero_trace.source_refs
         );
@@ -12420,8 +12626,9 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .expect("hero trace");
         assert_eq!(hero_trace.applied_class, "platformer");
         assert_eq!(hero_trace.confidence, "medium");
-        let disk_graph = fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
-            .expect("read graph");
+        let disk_graph =
+            fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
+                .expect("read graph");
         assert!(
             !disk_graph.contains("fire_hint"),
             "platformer horizontal sem classe alta nao materializa fire_hint: {}",
@@ -12464,7 +12671,10 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .and_then(|logic| logic.imported_semantics.as_ref())
             .expect("hero imported_semantics");
         assert_eq!(hero_semantics.entity_role, "player_avatar");
-        assert_eq!(hero_semantics.gameplay_class, "beat_em_up_close_range_signals");
+        assert_eq!(
+            hero_semantics.gameplay_class,
+            "beat_em_up_close_range_signals"
+        );
         assert!(
             hero_semantics
                 .audit_flags
@@ -12509,8 +12719,9 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .expect("foe trace");
         assert_eq!(foe_trace.applied_class, "beat_em_up");
         assert_eq!(foe_trace.entity_role, "enemy_actor");
-        let hero_graph = fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
-            .expect("read hero graph");
+        let hero_graph =
+            fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
+                .expect("read hero graph");
         assert!(
             hero_graph.contains("Move Player"),
             "grafo do heroi deve deixar o papel explicito: {}",
@@ -12583,7 +12794,8 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         create_project_skeleton(&project_dir, "SGDK Resolve Sec", "megadrive").expect("skel");
         write_sgdk_multifile_run_and_gun_donor(&donor_dir);
         let report = import_sgdk_project(&project_dir, &donor_dir).expect("import");
-        let resolved = resolve_prefabs(&project_dir, &report.primary_scene).expect("resolve prefabs");
+        let resolved =
+            resolve_prefabs(&project_dir, &report.primary_scene).expect("resolve prefabs");
         let foe = resolved
             .entities
             .iter()
@@ -12611,12 +12823,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         create_project_skeleton(&project_dir, "SGDK MF Shmup", "megadrive").expect("skel");
         write_sgdk_multifile_shmup_donor(&donor_dir);
         let report = import_sgdk_project(&project_dir, &donor_dir).expect("import");
-        let manifest_abs = project_dir.join(
-            report
-                .manifest_path
-                .as_deref()
-                .expect("manifest"),
-        );
+        let manifest_abs = project_dir.join(report.manifest_path.as_deref().expect("manifest"));
         let ledger: SgdkImportLedger =
             serde_json::from_str(&fs::read_to_string(&manifest_abs).expect("read")).expect("parse");
         assert_eq!(
@@ -12629,9 +12836,14 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .donor_logic_scanned_paths
             .iter()
             .any(|p| p.contains("input_sys.c")));
-        let disk_graph = fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
-            .expect("read graph");
-        assert!(disk_graph.contains("\"dy\":-2"), "shmup: movimento vertical heuristico: {}", disk_graph);
+        let disk_graph =
+            fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
+                .expect("read graph");
+        assert!(
+            disk_graph.contains("\"dy\":-2"),
+            "shmup: movimento vertical heuristico: {}",
+            disk_graph
+        );
         assert!(disk_graph.contains("fire_hint"), "{}", disk_graph);
         assert!(
             disk_graph.contains("role_player_idle_anim"),
@@ -12650,8 +12862,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .expect("create project skeleton");
         write_generic_sgdk_donor_fixture(&donor_dir);
 
-        let first =
-            import_sgdk_project(&project_dir, &donor_dir).expect("import sgdk first pass");
+        let first = import_sgdk_project(&project_dir, &donor_dir).expect("import sgdk first pass");
         let manifest_rel = first
             .manifest_path
             .as_deref()
@@ -12751,7 +12962,9 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .components
             .audio
             .as_ref()
-            .is_some_and(|audio| audio.bgm.as_deref() == Some("assets/audio/downtownstage_bgm.mp3"))));
+            .is_some_and(
+                |audio| audio.bgm.as_deref() == Some("assets/audio/downtownstage_bgm.mp3")
+            )));
 
         let title_scene = loaded_scenes
             .iter()
@@ -12786,7 +12999,8 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         write_godot_fixture(&donor_root);
 
         let report = import_godot_project(&project_dir, &donor_root).expect("import godot project");
-        let scene = load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load imported godot scene");
+        let scene =
+            load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load imported godot scene");
 
         assert_eq!(report.imported_scenes, 1);
         assert!(report
@@ -12801,16 +13015,12 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                 .is_some_and(|sprite| sprite.asset == "assets/sprites/godot_art_hero.png")
         }));
         assert!(scene.entities.iter().any(|entity| {
-            entity
-                .components
-                .audio
-                .as_ref()
-                .is_some_and(|audio| {
-                    audio
-                        .sfx
-                        .values()
-                        .any(|asset| asset == "assets/audio/godot_audio_jump.wav")
-                })
+            entity.components.audio.as_ref().is_some_and(|audio| {
+                audio
+                    .sfx
+                    .values()
+                    .any(|asset| asset == "assets/audio/godot_audio_jump.wav")
+            })
         }));
         assert!(scene.entities.iter().any(|entity| {
             entity.components.camera.as_ref().is_some_and(|camera| {
@@ -13842,9 +14052,17 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         fs::create_dir_all(&layouts).expect("create construct layouts dir");
         fs::create_dir_all(&object_types).expect("create construct objectTypes dir");
         fs::create_dir_all(root.join("sprites")).expect("create construct sprites dir");
-        fs::write(root.join("project.c3proj"), "{\"name\":\"Construct Fixture\"}")
-            .expect("write project.c3proj");
-        write_test_png(&root.join("sprites").join("hero.png"), 32, 32, [200, 80, 120, 255]);
+        fs::write(
+            root.join("project.c3proj"),
+            "{\"name\":\"Construct Fixture\"}",
+        )
+        .expect("write project.c3proj");
+        write_test_png(
+            &root.join("sprites").join("hero.png"),
+            32,
+            32,
+            [200, 80, 120, 255],
+        );
         fs::write(
             object_types.join("hero.json"),
             "{\"name\":\"Hero\",\"plugin-id\":\"Sprite\",\"image\":\"sprites/hero.png\"}",
@@ -13914,7 +14132,11 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
 
     fn count_files_in(dir: &Path) -> usize {
         fs::read_dir(dir)
-            .map(|iter| iter.filter_map(|entry| entry.ok()).filter(|entry| entry.path().is_file()).count())
+            .map(|iter| {
+                iter.filter_map(|entry| entry.ok())
+                    .filter(|entry| entry.path().is_file())
+                    .count()
+            })
             .unwrap_or(0)
     }
 
@@ -13926,13 +14148,18 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .expect("create project skeleton");
         write_construct_fixture(&donor);
 
-        let first = import_construct_project(&project, &donor).expect("import construct first pass");
-        assert!(!first.primary_scene.entities.is_empty(), "construct import produced entities");
+        let first =
+            import_construct_project(&project, &donor).expect("import construct first pass");
+        assert!(
+            !first.primary_scene.entities.is_empty(),
+            "construct import produced entities"
+        );
         let sprites_dir = project.join("assets").join("sprites");
         let first_asset_count = count_files_in(&sprites_dir);
         assert!(first_asset_count >= 1, "at least one sprite materialized");
 
-        let second = import_construct_project(&project, &donor).expect("import construct second pass");
+        let second =
+            import_construct_project(&project, &donor).expect("import construct second pass");
         assert_eq!(
             second.primary_scene.entities.len(),
             first.primary_scene.entities.len(),
@@ -13956,7 +14183,8 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .expect("create project skeleton");
         write_rpg_maker_fixture(&donor);
 
-        let first = import_rpg_maker_project(&project, &donor).expect("import rpg_maker first pass");
+        let first =
+            import_rpg_maker_project(&project, &donor).expect("import rpg_maker first pass");
         assert!(
             !first.primary_scene.entities.is_empty(),
             "rpg_maker import produced entities from tileset"
@@ -13965,7 +14193,8 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         let first_asset_count = count_files_in(&tilesets_dir);
         assert!(first_asset_count >= 1, "at least one tileset materialized");
 
-        let second = import_rpg_maker_project(&project, &donor).expect("import rpg_maker second pass");
+        let second =
+            import_rpg_maker_project(&project, &donor).expect("import rpg_maker second pass");
         assert_eq!(
             second.primary_scene.entities.len(),
             first.primary_scene.entities.len(),
@@ -14022,7 +14251,8 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .expect("create project skeleton");
         write_mugen_character_fixture(&donor);
 
-        let report = import_mugen_project(&project, &donor).expect("import ikemen via mugen adapter");
+        let report =
+            import_mugen_project(&project, &donor).expect("import ikemen via mugen adapter");
         assert!(
             report.imported_scenes >= 1,
             "ikemen_go reuses mugen adapter and produces at least one scene"
@@ -14072,8 +14302,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         let first = import_mugen_project(&project, &donor).expect("import mugen first pass");
         let second = import_mugen_project(&project, &donor).expect("import mugen second pass");
         assert_eq!(
-            second.imported_scenes,
-            first.imported_scenes,
+            second.imported_scenes, first.imported_scenes,
             "mugen re-import keeps imported_scenes stable"
         );
 
@@ -14126,7 +14355,9 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             }
             let mut stack = vec![root];
             while let Some(dir) = stack.pop() {
-                let Ok(iter) = fs::read_dir(&dir) else { continue };
+                let Ok(iter) = fs::read_dir(&dir) else {
+                    continue;
+                };
                 for entry in iter.flatten() {
                     let path = entry.path();
                     if path.is_dir() {
@@ -14146,7 +14377,8 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
     fn assert_no_import_side_effects(project: &Path, baseline: &[PathBuf], context: &str) {
         let after = list_project_artifact_files(project);
         assert_eq!(
-            baseline, after.as_slice(),
+            baseline,
+            after.as_slice(),
             "{}: failed import must not change scenes/ or assets/",
             context
         );
@@ -14274,8 +14506,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         let err = import_rpg_maker_project(&project, &donor)
             .expect_err("empty rpg maker donor must fail");
         assert!(
-            err.0.to_lowercase().contains("rpg maker")
-                || err.0.to_lowercase().contains("rpgmaker"),
+            err.0.to_lowercase().contains("rpg maker") || err.0.to_lowercase().contains("rpgmaker"),
             "rpg maker error should mention RPG Maker, got: {}",
             err.0
         );
@@ -14293,8 +14524,8 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .expect("create project skeleton");
         let baseline = list_project_artifact_files(&project);
 
-        let err = import_openbor_project(&project, &donor)
-            .expect_err("empty openbor donor must fail");
+        let err =
+            import_openbor_project(&project, &donor).expect_err("empty openbor donor must fail");
         assert!(
             err.0.to_lowercase().contains("openbor"),
             "openbor error should mention OpenBOR, got: {}",
@@ -14316,7 +14547,12 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .expect("create project skeleton");
         // Donor tem arte/audio mas nao tem nenhum manifesto .res na raiz nem em res/.
         fs::create_dir_all(donor.join("res").join("images")).expect("create res dir");
-        write_test_png(&donor.join("res").join("images").join("hero.png"), 16, 16, [255, 0, 0, 255]);
+        write_test_png(
+            &donor.join("res").join("images").join("hero.png"),
+            16,
+            16,
+            [255, 0, 0, 255],
+        );
         fs::write(donor.join("README.txt"), "legacy project without manifest")
             .expect("write readme");
         let baseline = list_project_artifact_files(&project);
@@ -14443,8 +14679,28 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
     }
 
     #[test]
+    fn sgdk_resolver_prefers_requested_disabled_root_when_it_has_manifest() {
+        let donor = temp_dir("sgdk-resolve-disabled-local-root");
+        write_generic_sgdk_donor_fixture(&donor);
+        write_mddev_project_json(
+            &donor,
+            "ESTUDO",
+            "disabled",
+            Some("."),
+            Some("Build original disabled, but RDS can import the local canonical root."),
+        );
+
+        let resolved = resolve_sgdk_import_root(&donor).expect("resolve disabled local root");
+        assert_eq!(resolved.resolution_kind, "direct");
+        assert_eq!(resolved.effective_root, canonicalize_existing_path(&donor));
+
+        let _ = fs::remove_dir_all(&donor);
+    }
+
+    #[test]
     fn sgdk_normalize_declared_path_preserves_brackets_in_corpus_style_names() {
-        let raw = "../PlatformerEngine Toolkit [VER.1.0] [SGDK 211] [GEN] [COLLECTION] [PLATAFORMA]";
+        let raw =
+            "../PlatformerEngine Toolkit [VER.1.0] [SGDK 211] [GEN] [COLLECTION] [PLATAFORMA]";
         let normalized = normalize_declared_path_token(raw).expect("token");
         assert!(
             normalized.ends_with("[PLATAFORMA]"),
@@ -14461,11 +14717,16 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .expect("create project skeleton");
         // Tem sprite PNG, mas nenhum .def (nem system.def), entao scan_mugen_candidates fica vazio.
         fs::create_dir_all(donor.join("sprites")).expect("create sprites dir");
-        write_test_png(&donor.join("sprites").join("hero.png"), 16, 16, [0, 255, 0, 255]);
+        write_test_png(
+            &donor.join("sprites").join("hero.png"),
+            16,
+            16,
+            [0, 255, 0, 255],
+        );
         let baseline = list_project_artifact_files(&project);
 
-        let err = import_mugen_project(&project, &donor)
-            .expect_err("mugen donor without .def must fail");
+        let err =
+            import_mugen_project(&project, &donor).expect_err("mugen donor without .def must fail");
         assert!(
             err.0.to_lowercase().contains("mugen"),
             "mugen error should mention MUGEN, got: {}",
@@ -14484,7 +14745,12 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         create_project_skeleton(&project, "Ikemen Missing Root", "megadrive")
             .expect("create project skeleton");
         fs::create_dir_all(donor.join("work")).expect("create work dir");
-        write_test_png(&donor.join("work").join("sprite.png"), 16, 16, [0, 0, 255, 255]);
+        write_test_png(
+            &donor.join("work").join("sprite.png"),
+            16,
+            16,
+            [0, 0, 255, 255],
+        );
         let baseline = list_project_artifact_files(&project);
 
         let err = import_external_project(&project, "ikemen_go", &donor)
@@ -14496,8 +14762,8 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         );
         assert_no_import_side_effects(&project, &baseline, "ikemen_go missing root");
 
-        let profile = external_import_profile_definition("ikemen_go")
-            .expect("ikemen_go profile intact");
+        let profile =
+            external_import_profile_definition("ikemen_go").expect("ikemen_go profile intact");
         assert_eq!(profile.id, "ikemen_go");
 
         let _ = fs::remove_dir_all(&donor);
@@ -14512,7 +14778,12 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .expect("create project skeleton");
         // Arte presente mas nenhum project.godot nem .tscn.
         fs::create_dir_all(donor.join("art")).expect("create art dir");
-        write_test_png(&donor.join("art").join("hero.png"), 16, 16, [40, 40, 200, 255]);
+        write_test_png(
+            &donor.join("art").join("hero.png"),
+            16,
+            16,
+            [40, 40, 200, 255],
+        );
         fs::write(donor.join("README.md"), "No project.godot here").expect("write readme");
         let baseline = list_project_artifact_files(&project);
 
@@ -14537,7 +14808,12 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .expect("create project skeleton");
         // Tem pasta sprites/ mas nao tem project.c3proj, layouts/ nem objectTypes/.
         fs::create_dir_all(donor.join("sprites")).expect("create sprites dir");
-        write_test_png(&donor.join("sprites").join("hero.png"), 16, 16, [200, 40, 40, 255]);
+        write_test_png(
+            &donor.join("sprites").join("hero.png"),
+            16,
+            16,
+            [200, 40, 40, 255],
+        );
         let baseline = list_project_artifact_files(&project);
 
         let err = import_construct_project(&project, &donor)
@@ -14561,7 +14837,12 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .expect("create project skeleton");
         // Tem img/ mas nao tem data/ com JSONs canonicos.
         fs::create_dir_all(donor.join("img").join("tilesets")).expect("create img dir");
-        write_test_png(&donor.join("img").join("tilesets").join("Field.png"), 32, 32, [16, 180, 32, 255]);
+        write_test_png(
+            &donor.join("img").join("tilesets").join("Field.png"),
+            32,
+            32,
+            [16, 180, 32, 255],
+        );
         let baseline = list_project_artifact_files(&project);
 
         let err = import_rpg_maker_project(&project, &donor)
@@ -14588,8 +14869,11 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         // Tem algum arquivo, mas nenhum data/chars, data/levels, chars/, levels/,
         // models.txt nem levels.txt.
         fs::create_dir_all(donor.join("docs")).expect("create docs dir");
-        fs::write(donor.join("docs").join("notes.txt"), "miscellaneous content")
-            .expect("write notes");
+        fs::write(
+            donor.join("docs").join("notes.txt"),
+            "miscellaneous content",
+        )
+        .expect("write notes");
         let baseline = list_project_artifact_files(&project);
 
         let err = import_openbor_project(&project, &donor)
@@ -14615,7 +14899,12 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .expect("create project skeleton");
         // Arte sob caminho com caractere Unicode NFC (portatil em NTFS).
         fs::create_dir_all(donor.join("arte_acao")).expect("create unicode art dir");
-        write_test_png(&donor.join("arte_acao").join("herói.png"), 24, 32, [200, 50, 80, 255]);
+        write_test_png(
+            &donor.join("arte_acao").join("herói.png"),
+            24,
+            32,
+            [200, 50, 80, 255],
+        );
         // project.godot com BOM UTF-8 + CRLF.
         let mut godot_ini = String::from("\u{FEFF}");
         godot_ini.push_str(
@@ -14626,7 +14915,8 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             ]
             .join("\r\n"),
         );
-        fs::write(donor.join("project.godot"), godot_ini).expect("write project.godot with BOM+CRLF");
+        fs::write(donor.join("project.godot"), godot_ini)
+            .expect("write project.godot with BOM+CRLF");
         // tscn com CRLF explicito referenciando o asset Unicode.
         let tscn = [
             "[gd_scene load_steps=2 format=3]",
@@ -14639,8 +14929,8 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         .join("\r\n");
         fs::write(donor.join("main.tscn"), tscn).expect("write main.tscn with CRLF");
 
-        let report = import_godot_project(&project, &donor)
-            .expect("godot tolerates BOM/CRLF/unicode paths");
+        let report =
+            import_godot_project(&project, &donor).expect("godot tolerates BOM/CRLF/unicode paths");
         assert!(
             !report.primary_scene.entities.is_empty(),
             "godot scene preserves entities despite lossy text"
@@ -14663,8 +14953,11 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         fs::create_dir_all(&object_types).expect("create objectTypes dir");
         fs::create_dir_all(&sprites).expect("create unicode sprites dir");
         write_test_png(&sprites.join("herói.png"), 32, 32, [180, 40, 40, 255]);
-        fs::write(donor.join("project.c3proj"), "{\"name\":\"Herói Construct\"}")
-            .expect("write project.c3proj");
+        fs::write(
+            donor.join("project.c3proj"),
+            "{\"name\":\"Herói Construct\"}",
+        )
+        .expect("write project.c3proj");
         // JSON com CRLF + nome Unicode em valores (serde_json aceita CRLF como whitespace).
         fs::write(
             object_types.join("hero.json"),
@@ -14695,7 +14988,12 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         let tilesets_dir = donor.join("img").join("tilesets_acao");
         fs::create_dir_all(&data_dir).expect("create data dir");
         fs::create_dir_all(&tilesets_dir).expect("create unicode tilesets dir");
-        write_test_png(&tilesets_dir.join("Campo_é.png"), 48, 48, [30, 150, 60, 255]);
+        write_test_png(
+            &tilesets_dir.join("Campo_é.png"),
+            48,
+            48,
+            [30, 150, 60, 255],
+        );
         // JSON com CRLF e nomes Unicode no conteudo.
         fs::write(
             data_dir.join("MapInfos.json"),
@@ -14751,8 +15049,12 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         // Level com CRLF.
         fs::write(
             donor.join("data").join("levels").join("stage_acao.txt"),
-            ["name Fase Ação", "music data/music/tema.mod", "background data/bgs/stage.png"]
-                .join("\r\n"),
+            [
+                "name Fase Ação",
+                "music data/music/tema.mod",
+                "background data/bgs/stage.png",
+            ]
+            .join("\r\n"),
         )
         .expect("write level with CRLF");
 
@@ -14846,8 +15148,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         // Reutiliza a fixture generica: stage.png e 128x128 => 16x16 tiles = 256 cells.
         write_generic_sgdk_donor_fixture(&donor);
 
-        let report =
-            import_sgdk_project(&project, &donor).expect("import sgdk phase b cells");
+        let report = import_sgdk_project(&project, &donor).expect("import sgdk phase b cells");
 
         let tilemap = report
             .primary_scene
@@ -14886,7 +15187,8 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
 
         // 3 tilemap anchors => 1 primary + 2 secondary = 3 scenes total.
         assert_eq!(
-            report.imported_scenes, 3,
+            report.imported_scenes,
+            3,
             "doador com 3 tilemap anchors deve gerar 3 cenas ({} primary + {} additional)",
             1,
             report.additional_scenes.len()
@@ -14953,10 +15255,9 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                 "cena secundaria deve existir em disco: {}",
                 abs.display()
             );
-            let secondary: Scene = serde_json::from_str(
-                &fs::read_to_string(&abs).expect("read secondary scene"),
-            )
-            .expect("parse secondary scene");
+            let secondary: Scene =
+                serde_json::from_str(&fs::read_to_string(&abs).expect("read secondary scene"))
+                    .expect("parse secondary scene");
             // scene_id do descriptor bate com o arquivo persistido.
             assert_eq!(secondary.scene_id, descriptor.scene_id);
             let tilemap_entities: Vec<_> = secondary
@@ -14976,19 +15277,19 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                 "entity_count do descriptor deve bater com a cena secundaria persistida"
             );
             // cells[] reconstruidas para cada PNG de 128x128.
-            let tilemap = tilemap_entities[0]
-                .components
-                .tilemap
-                .as_ref()
-                .unwrap();
+            let tilemap = tilemap_entities[0].components.tilemap.as_ref().unwrap();
             assert_eq!(tilemap.cells.len(), 16 * 16);
             // tilemap_cells do descriptor deve casar com o numero real de celulas.
             assert_eq!(
-                descriptor.tilemap_cells, tilemap.cells.len(),
+                descriptor.tilemap_cells,
+                tilemap.cells.len(),
                 "descriptor.tilemap_cells deve casar com cells.len()"
             );
             // SceneLayer derivadas em cenas secundarias tambem.
-            let layers = secondary.layers.as_ref().expect("secondary must have layers");
+            let layers = secondary
+                .layers
+                .as_ref()
+                .expect("secondary must have layers");
             assert!(layers.iter().any(|l| l.kind == "tile"));
             // Secundaria nao tem sprite; portanto nao deve ter layer gameplay.
             assert!(!layers.iter().any(|l| l.kind == "sprite"));
@@ -15006,8 +15307,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .expect("create project skeleton");
         write_generic_sgdk_donor_fixture(&donor);
 
-        let report =
-            import_sgdk_project(&project, &donor).expect("import sgdk phase b layers");
+        let report = import_sgdk_project(&project, &donor).expect("import sgdk phase b layers");
 
         let layers = report
             .primary_scene
@@ -15032,10 +15332,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         assert_eq!(gameplay.id, "layer_gameplay");
         // Gameplay contem sprite + camera.
         assert!(gameplay.entity_ids.iter().any(|id| id == "hero"));
-        assert!(gameplay
-            .entity_ids
-            .iter()
-            .any(|id| id == "main_camera"));
+        assert!(gameplay.entity_ids.iter().any(|id| id == "main_camera"));
 
         let audio = layers
             .iter()
@@ -15059,8 +15356,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         create_project_skeleton(&project, "SGDK Phase B Fallback", "megadrive")
             .expect("create project skeleton");
 
-        fs::create_dir_all(donor.join("res").join("maps"))
-            .expect("create donor maps dir");
+        fs::create_dir_all(donor.join("res").join("maps")).expect("create donor maps dir");
         // Tilemap com 4x4 px (menos que 8x8) => reconstrucao impossivel.
         image::RgbaImage::from_pixel(4, 4, image::Rgba([10, 20, 30, 255]))
             .save(donor.join("res").join("maps").join("tiny.png"))
@@ -15078,8 +15374,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         )
         .expect("write resources.res");
 
-        let report =
-            import_sgdk_project(&project, &donor).expect("import sgdk phase b fallback");
+        let report = import_sgdk_project(&project, &donor).expect("import sgdk phase b fallback");
 
         // Fallback explicito presente porque PNG < 8x8.
         assert!(
@@ -15114,16 +15409,14 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .expect("create project skeleton");
         write_multi_scene_sgdk_donor_fixture(&donor);
 
-        let report =
-            import_sgdk_project(&project, &donor).expect("import sgdk phase b ledger");
+        let report = import_sgdk_project(&project, &donor).expect("import sgdk phase b ledger");
         let manifest_rel = report
             .manifest_path
             .as_deref()
             .expect("manifest_path presente no relatorio");
         let manifest_abs = project.join(manifest_rel);
         let raw = fs::read_to_string(&manifest_abs).expect("read ledger");
-        let ledger: SgdkImportLedger =
-            serde_json::from_str(&raw).expect("parse ledger json");
+        let ledger: SgdkImportLedger = serde_json::from_str(&raw).expect("parse ledger json");
 
         assert_eq!(ledger.schema_version, SGDK_IMPORT_LEDGER_SCHEMA);
         assert_eq!(
@@ -15282,7 +15575,10 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         scene.entities[idx].transform.x += 13;
         save_scene(&project, DEFAULT_ENTRY_SCENE, &scene).expect("save");
         let reopen = load_scene(&project, DEFAULT_ENTRY_SCENE).expect("reopen");
-        assert_eq!(reopen.entities[idx].transform.x, scene.entities[idx].transform.x);
+        assert_eq!(
+            reopen.entities[idx].transform.x,
+            scene.entities[idx].transform.x
+        );
 
         let toolchain = temp_dir("sgdk-fake-tool");
         let bin = toolchain.join("bin");
@@ -15359,10 +15655,9 @@ PY\n",
         let logic = hero.components.logic.as_ref().expect("logic hero");
 
         // A classe run-and-gun materializa fire_hint; sem XGM/SND/PSG o hint precisa registrar a hipotese.
-        let has_unbacked_hint = logic
-            .logic_hints
-            .iter()
-            .any(|h| h.contains("stencil 'fire_hint' materializado sem evidencia textual de playback"));
+        let has_unbacked_hint = logic.logic_hints.iter().any(|h| {
+            h.contains("stencil 'fire_hint' materializado sem evidencia textual de playback")
+        });
         assert!(
             has_unbacked_hint,
             "sem audio: logic_hints deve registrar fire_hint como hipotese — hints: {:?}",
@@ -15533,10 +15828,9 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         let logic = hero.components.logic.as_ref().expect("logic");
 
         // Sem classe: o fire_hint NAO e materializado, mas o hint informativo e emitido.
-        let informative = logic
-            .logic_hints
-            .iter()
-            .any(|h| h.contains("familia(s) de audio detectada(s) no doador sem classe de gameplay"));
+        let informative = logic.logic_hints.iter().any(|h| {
+            h.contains("familia(s) de audio detectada(s) no doador sem classe de gameplay")
+        });
         assert!(
             informative,
             "audio sem classe: deve existir hint informativo — hints: {:?}",
@@ -15559,7 +15853,10 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         let ledger_json = fs::read_to_string(project.join(manifest_rel)).expect("ledger file");
         let ledger: SgdkImportLedger =
             serde_json::from_str(&ledger_json).expect("deserializar ledger");
-        assert_eq!(ledger.phase_d.detected_audio_apis, vec!["audio_xgm".to_string()]);
+        assert_eq!(
+            ledger.phase_d.detected_audio_apis,
+            vec!["audio_xgm".to_string()]
+        );
         assert!(
             ledger.phase_d.heuristic_gameplay_class.is_none(),
             "audio sem classe: heuristic_gameplay_class deve ser None: {:?}",
@@ -15641,7 +15938,7 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         );
     }
 
-    /// Fluxo parcial repetivel: import -> ledger/cenas -> sinais de superficie -> save/reload opcional -> build (real ou fake) -> ROM `SEGA`.
+    /// Fluxo parcial repetivel: import -> ledger/cenas -> sinais de superficie -> save/reload opcional -> build SGDK real -> ROM `SEGA`.
     /// `matrix_log_tag` identifica a linha no stdout (ex.: `MATRIX_P2`, `MATRIX_NEXZR`).
     fn run_sgdk_matrix_corpus_partial_flow_documents_build_blocker(
         test_fn_name: &'static str,
@@ -15771,98 +16068,46 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             );
         }
 
-        let mut rom_has_sega = false;
-        let mut build_mode = "none";
         let env = BuildEnvironment::detect();
-        if env.sgdk_root.as_ref().is_some_and(|r| r.join("makefile.gen").is_file())
-            && env.sgdk_make_program.is_some()
-        {
-            build_mode = "sgdk_detect";
-            let result = run_build_with_environment(&project, &env, |_| {});
-            if result.ok && !result.rom_path.is_empty() {
-                let rom_full = project.join(&result.rom_path);
-                if rom_full.is_file() {
-                    if let Ok(bytes) = fs::read(&rom_full) {
-                        rom_has_sega = bytes.windows(4).any(|w| w == b"SEGA");
-                    }
-                }
-            }
-            if !rom_has_sega {
-                eprintln!(
-                    "{matrix_log_tag}: build SGDK real nao produziu ROM SEGA neste run (toolchain presente mas projeto/doacao pode falhar no make); log entries={}",
-                    env.sgdk_make_program.is_some()
-                );
-            }
-        }
-        if !rom_has_sega {
-            build_mode = "fake_toolchain";
-            let fake_slug = format!("{temp_slug}-fake-sgdk");
-            let toolchain = temp_dir(&fake_slug);
-            let bin = toolchain.join("bin");
-            fs::create_dir_all(&bin).expect("fake bin");
-            let make = if cfg!(target_os = "windows") {
-                let p = bin.join("fake-make.cmd");
-                fs::write(
-                    &p,
-                    "@echo off\r\n\
-                     if not exist out mkdir out\r\n\
-                     powershell -NoProfile -Command \"$bytes = New-Object byte[] 512; [System.Text.Encoding]::ASCII.GetBytes('SEGA MEGA DRIVE').CopyTo($bytes, 256); [IO.File]::WriteAllBytes('out\\artifact.md', $bytes)\"\r\n\
-                     exit /b 0\r\n",
-                )
-                .expect("write fake make");
-                p
+        assert!(
+            env.sgdk_root.as_ref().is_some_and(|r| r.join("makefile.gen").is_file())
+                && env.sgdk_make_program.is_some(),
+            "{matrix_log_tag}: SGDK real nao detectado; fake toolchain nao e aceito como prova de matriz"
+        );
+        let result = run_build_with_environment(&project, &env, |_| {});
+        assert!(
+            result.ok,
+            "{matrix_log_tag}: build SGDK real falhou: {:?}",
+            result.log
+        );
+        assert!(
+            !result.rom_path.is_empty(),
+            "{matrix_log_tag}: build SGDK real nao reportou ROM"
+        );
+        let rom_full = {
+            let path = PathBuf::from(&result.rom_path);
+            if path.is_absolute() {
+                path
             } else {
-                let p = bin.join("fake-make.sh");
-                fs::write(
-                    &p,
-                    "#!/bin/sh\n\
-                     mkdir -p out\n\
-                     python3 - <<'PY'\n\
-import pathlib\n\
-rom = bytearray(512)\n\
-rom[0x100:0x10F] = b'SEGA MEGA DRIVE'\n\
-pathlib.Path('out/artifact.md').write_bytes(rom)\n\
-PY\n",
-                )
-                .expect("write fake make");
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let mut perms = fs::metadata(&p).unwrap().permissions();
-                    perms.set_mode(0o755);
-                    fs::set_permissions(&p, perms).unwrap();
-                }
-                p
-            };
-            let fake_env = BuildEnvironment {
-                sgdk_root: Some(toolchain.clone()),
-                sgdk_make_program: Some(make),
-                disable_auto_detect: true,
-                ..BuildEnvironment::default()
-            };
-            let result = run_build_with_environment(&project, &fake_env, |_| {});
-            if result.ok && !result.rom_path.is_empty() {
-                let rom_full = project.join(&result.rom_path);
-                if let Ok(rom_bytes) = fs::read(&rom_full) {
-                    rom_has_sega = rom_bytes.windows(15).any(|w| w == b"SEGA MEGA DRIVE")
-                        || rom_bytes.windows(4).any(|w| w == b"SEGA");
-                }
-            } else {
-                eprintln!(
-                    "{matrix_log_tag}: build fake tambem falhou (ex.: constraints de hardware no projeto importado): {:?}",
-                    result.log
-                );
+                project.join(path)
             }
-            let _ = fs::remove_dir_all(&toolchain);
-        }
+        };
+        let rom_bytes = fs::read(&rom_full).unwrap_or_else(|error| {
+            panic!(
+                "{matrix_log_tag}: falha ao ler ROM SGDK real '{}': {}",
+                rom_full.display(),
+                error
+            )
+        });
+        let rom_has_sega = rom_bytes.windows(4).any(|w| w == b"SEGA");
         eprintln!(
-            "{matrix_log_tag} build: source_kind={stamped_source_kind} resolution_kind={resolution_kind} redirected={redirected} mode={build_mode} rom_sega={rom_has_sega}"
+            "{matrix_log_tag} build: source_kind={stamped_source_kind} resolution_kind={resolution_kind} redirected={redirected} mode=sgdk_detect_real rom_sega={rom_has_sega} rom={}",
+            rom_full.display()
         );
 
         assert!(
             rom_has_sega,
-            "{matrix_log_tag}: esperado ROM com marca SEGA apos build (toolchain SGDK real ou fake de prova). \
-             Se falhar apenas com SGDK real, o fake make deve completar; verifique constraints de hardware no projeto importado."
+            "{matrix_log_tag}: esperado ROM com marca SEGA apos build SGDK real"
         );
 
         let _ = fs::remove_dir_all(&project);
@@ -15971,6 +16216,8 @@ PY\n",
     #[test]
     fn sgdk_matrix_corpus_blaze_engine_partial_flow_documents_build_blocker() {
         use crate::compiler::build_orch::{run_build_with_environment, BuildEnvironment};
+        use crate::emulator::frame_buffer::framebuffer_to_rgba;
+        use crate::emulator::libretro_ffi::{EmulatorCore, JoypadState};
 
         let donor = sgdk_matrix_corpus_donor_path(
             "BLAZE_ENGINE [VER.001] [SGDK 211] [GEN] [ENGINE] [BRIGA DE RUA]",
@@ -15982,7 +16229,10 @@ PY\n",
             return;
         }
 
-        let project = temp_dir("sgdk-matrix-blaze");
+        let artifact_root = validation_artifact_dir("sgdk-blaze-compatible-real");
+        let project = artifact_root.join("project");
+        let _ = fs::remove_dir_all(&artifact_root);
+        fs::create_dir_all(&artifact_root).expect("create BLAZE validation artifact dir");
         create_project_skeleton(&project, "Matrix BLAZE Engine Corpus", "megadrive").expect("skel");
         let report = import_sgdk_project(&project, &donor).expect("import SGDK corpus blaze");
         stamp_imported_sgdk_metadata(&project, &donor).expect("stamp imported_sgdk metadata");
@@ -16021,70 +16271,31 @@ PY\n",
         );
         assert!(
             md_hw.resident_vram_bytes > crate::hardware::md_profile::MD_VRAM_BYTES
-                || md_hw
-                    .errors
-                    .iter()
-                    .any(|e| e.contains("Sprite overflow")),
+                || md_hw.errors.iter().any(|e| e.contains("Sprite overflow")),
             "BLAZE deve bloquear por residencia real ou por limite de sprites"
         );
 
-        let toolchain = temp_dir("sgdk-matrix-blaze-compatible-fake-sgdk");
-        let bin = toolchain.join("bin");
-        fs::create_dir_all(&bin).expect("fake bin");
-        let make = if cfg!(target_os = "windows") {
-            let p = bin.join("fake-make.cmd");
-            fs::write(
-                &p,
-                "@echo off\r\n\
-                 if not exist out mkdir out\r\n\
-                 powershell -NoProfile -Command \"$bytes = New-Object byte[] 512; [System.Text.Encoding]::ASCII.GetBytes('SEGA MEGA DRIVE').CopyTo($bytes, 256); [IO.File]::WriteAllBytes('out\\artifact.md', $bytes)\"\r\n\
-                 exit /b 0\r\n",
-            )
-            .expect("write fake make");
-            p
-        } else {
-            let p = bin.join("fake-make.sh");
-            fs::write(
-                &p,
-                "#!/bin/sh\n\
-                 mkdir -p out\n\
-                 python3 - <<'PY'\n\
-import pathlib\n\
-rom = bytearray(512)\n\
-rom[0x100:0x10F] = b'SEGA MEGA DRIVE'\n\
-pathlib.Path('out/artifact.md').write_bytes(rom)\n\
-PY\n",
-            )
-            .expect("write fake make");
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let mut perms = fs::metadata(&p).unwrap().permissions();
-                perms.set_mode(0o755);
-                fs::set_permissions(&p, perms).unwrap();
-            }
-            p
-        };
-        let env = BuildEnvironment {
-            sgdk_root: Some(toolchain.clone()),
-            sgdk_make_program: Some(make),
-            disable_auto_detect: true,
-            ..BuildEnvironment::default()
-        };
+        let env = BuildEnvironment::detect();
+        assert!(
+            env.sgdk_root
+                .as_ref()
+                .is_some_and(|r| r.join("makefile.gen").is_file())
+                && env.sgdk_make_program.is_some(),
+            "BLAZE compat real exige SGDK real detectado; fake toolchain nao e prova valida"
+        );
         let result = run_build_with_environment(&project, &env, |_| {});
         assert!(
             result.ok,
-            "BLAZE deve gerar build com perfil de compatibilidade conservador: {:?}",
+            "BLAZE deve gerar build SGDK real com perfil de compatibilidade conservador: {:?}",
             result.log
         );
         assert!(
-            result
-                .log
-                .iter()
-                .any(|entry| entry.level == "info"
-                    && entry.message.contains("MD VRAM analysis: mode=sgdk_managed")
-                    && entry.message.contains("spr_res=")
-                    && entry.message.contains("banks=")),
+            result.log.iter().any(|entry| entry.level == "info"
+                && entry
+                    .message
+                    .contains("MD VRAM analysis: mode=sgdk_managed")
+                && entry.message.contains("spr_res=")
+                && entry.message.contains("banks=")),
             "log deve expor breakdown de VRAM/residencia por categoria e uso de banks/cells"
         );
         assert!(
@@ -16096,14 +16307,566 @@ PY\n",
             }),
             "BLAZE deve documentar transformacao conservadora de sprite culling/multiplex no build"
         );
-        let rom_full = project.join(&result.rom_path);
+        let compat_budget_line = result
+            .log
+            .iter()
+            .find(|entry| {
+                entry.level == "info"
+                    && entry.message.contains("MD VRAM compatibility:")
+                    && entry.message.contains("banks=")
+            })
+            .map(|entry| entry.message.clone())
+            .expect("BLAZE compat log deve incluir budget depois da transformacao");
+        let rom_full = {
+            let path = PathBuf::from(&result.rom_path);
+            if path.is_absolute() {
+                path
+            } else {
+                project.join(path)
+            }
+        };
         let rom_bytes = fs::read(&rom_full).expect("read compatible BLAZE ROM");
         assert!(
             rom_bytes.windows(4).any(|w| w == b"SEGA"),
-            "BLAZE compat deve gerar ROM com assinatura SEGA"
+            "BLAZE compat SGDK real deve gerar ROM com assinatura SEGA"
+        );
+        let persistent_rom_path = artifact_root.join("blaze-compatible-real.md");
+        fs::copy(&rom_full, &persistent_rom_path).expect("copy persistent BLAZE ROM");
+
+        let mut emulator = EmulatorCore::new(None);
+        emulator
+            .load_rom(&persistent_rom_path)
+            .unwrap_or_else(|error| {
+                panic!("BLAZE compat ROM real nao carregou no Libretro: {}", error)
+            });
+        emulator
+            .set_joypad(JoypadState {
+                right: true,
+                ..JoypadState::default()
+            })
+            .expect("set BLAZE compat joypad input");
+        for _ in 0..60 {
+            emulator
+                .run_frame()
+                .unwrap_or_else(|error| panic!("BLAZE compat frame falhou: {}", error));
+        }
+        let core_label = emulator
+            .loaded_core_label()
+            .unwrap_or("unknown-libretro-core")
+            .to_string();
+        let (framebuffer, frame_size, pixel_format) = emulator
+            .get_framebuffer()
+            .unwrap_or_else(|error| panic!("BLAZE compat framebuffer falhou: {}", error));
+        let frame = framebuffer_to_rgba(&framebuffer, frame_size, pixel_format);
+        let non_black_pixels = frame
+            .rgba
+            .chunks_exact(4)
+            .filter(|px| px[0] != 0 || px[1] != 0 || px[2] != 0)
+            .count();
+        assert!(
+            non_black_pixels > 0,
+            "BLAZE compat emulation framebuffer should not be fully black"
+        );
+        let framebuffer_path = artifact_root.join("blaze-compatible-frame.ppm");
+        write_rgba_ppm(&framebuffer_path, frame.width, frame.height, &frame.rgba);
+        emulator.stop().expect("stop BLAZE emulator");
+
+        let build_log_path = artifact_root.join("blaze-compatible-build.log");
+        fs::write(
+            &build_log_path,
+            result
+                .log
+                .iter()
+                .map(|entry| format!("[{}] {}", entry.level, entry.message))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        )
+        .expect("write BLAZE build log");
+        let report_path = artifact_root.join("blaze-compatible-report.json");
+        let report_md_path = artifact_root.join("blaze-compatible-report.md");
+        let report_json = serde_json::json!({
+            "donor": donor.to_string_lossy(),
+            "project_path": project.to_string_lossy(),
+            "rom_path": persistent_rom_path.to_string_lossy(),
+            "build_log": build_log_path.to_string_lossy(),
+            "framebuffer_ppm": framebuffer_path.to_string_lossy(),
+            "libretro_core": core_label,
+            "frames_run": 60,
+            "framebuffer_width": frame.width,
+            "framebuffer_height": frame.height,
+            "non_black_pixels": non_black_pixels,
+            "fake_toolchain_used": false,
+            "original_budget": {
+                "mode": md_hw.analysis_mode,
+                "total_kb": md_hw.project_asset_bytes / 1024,
+                "resident_kb": md_hw.resident_vram_bytes / 1024,
+                "sprite_resident_kb": md_hw.sprite_resident_bytes / 1024,
+                "streamable_kb": md_hw.streamable_vram_bytes / 1024,
+                "dma_frame_kb": md_hw.dma_frame_bytes / 1024,
+                "banks_used": md_hw.managed_concurrent_sprite_banks,
+                "banks_limit": crate::hardware::md_profile::MD_MANAGED_MAX_CONCURRENT_BANKS,
+                "cells_used": md_hw.managed_sprite_cells_used,
+                "cells_limit": crate::hardware::md_profile::MD_MANAGED_SPRITE_CELL_BUDGET,
+                "fatal_count": md_hw.errors.len(),
+                "warning_count": md_hw.warnings.len()
+            },
+            "compat_budget_log": compat_budget_line,
+            "tradeoffs": [
+                "sprite culling deterministico",
+                "multiplex plan para sprites fora da janela ativa",
+                "streaming conservador para assets nao residentes"
+            ]
+        });
+        fs::write(
+            &report_path,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&report_json).expect("serialize BLAZE report")
+            ),
+        )
+        .expect("write BLAZE JSON report");
+        fs::write(
+            &report_md_path,
+            format!(
+                "# BLAZE_ENGINE Compatibility Build\n\n- Donor: `{}`\n- ROM: `{}`\n- Core: `{}`\n- Frames run: `60`\n- Non-black pixels: `{}`\n- Fake toolchain used: `false`\n- Original budget: mode `{}`, total `{}KB`, resident `{}KB`, dma/frame `{}KB`, fatal `{}`\n- Compatibility budget: `{}`\n",
+                donor.display(),
+                persistent_rom_path.display(),
+                report_json["libretro_core"].as_str().unwrap_or("unknown-libretro-core"),
+                non_black_pixels,
+                md_hw.analysis_mode,
+                md_hw.project_asset_bytes / 1024,
+                md_hw.resident_vram_bytes / 1024,
+                md_hw.dma_frame_bytes / 1024,
+                md_hw.errors.len(),
+                report_json["compat_budget_log"].as_str().unwrap_or("")
+            ),
+        )
+        .expect("write BLAZE Markdown report");
+    }
+
+    #[derive(Debug, serde::Serialize, Clone)]
+    struct SgdkCorpusRealBuildEntry {
+        project_name: String,
+        donor_path: String,
+        project_path: String,
+        import_ok: bool,
+        imported_scenes: usize,
+        bridge_nodes: usize,
+        build_real_ok: bool,
+        rom_real_ok: bool,
+        emulation_real_ok: bool,
+        rom_path: Option<String>,
+        framebuffer_ppm: Option<String>,
+        libretro_core: Option<String>,
+        frames_run: u32,
+        framebuffer_width: u32,
+        framebuffer_height: u32,
+        non_black_pixels: usize,
+        original_budget_total_kb: u64,
+        original_budget_resident_kb: u64,
+        original_budget_dma_frame_kb: u64,
+        original_budget_fatal_count: usize,
+        fake_toolchain_used: bool,
+        bridge_only: bool,
+        failure_reason: Option<String>,
+    }
+
+    fn sgdk_real_corpus_slug(name: &str, index: usize) -> String {
+        let slug: String = name
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() {
+                    ch.to_ascii_lowercase()
+                } else {
+                    '-'
+                }
+            })
+            .collect::<String>()
+            .split('-')
+            .filter(|part| !part.is_empty())
+            .take(8)
+            .collect::<Vec<_>>()
+            .join("-");
+        if slug.is_empty() {
+            format!("project-{index:03}")
+        } else {
+            format!("{index:03}-{slug}")
+        }
+    }
+
+    fn write_sgdk_corpus_real_build_report(
+        artifact_root: &Path,
+        entries: &[SgdkCorpusRealBuildEntry],
+        total_projects: usize,
+    ) {
+        let build_real_ok = entries.iter().filter(|entry| entry.build_real_ok).count();
+        let rom_real_ok = entries.iter().filter(|entry| entry.rom_real_ok).count();
+        let emulation_real_ok = entries
+            .iter()
+            .filter(|entry| entry.emulation_real_ok)
+            .count();
+        let bridge_only = entries.iter().filter(|entry| entry.bridge_only).count();
+        let failed = entries
+            .iter()
+            .filter(|entry| entry.failure_reason.is_some())
+            .count();
+        let stable_candidate = entries.len() == total_projects
+            && total_projects > 0
+            && entries.iter().all(|entry| {
+                entry.import_ok
+                    && entry.failure_reason.is_none()
+                    && !entry.fake_toolchain_used
+                    && (entry.bridge_only
+                        || (entry.build_real_ok && entry.rom_real_ok && entry.emulation_real_ok))
+            });
+        let summary = serde_json::json!({
+            "total_projects": total_projects,
+            "processed": entries.len(),
+            "build_real_ok": build_real_ok,
+            "rom_real_ok": rom_real_ok,
+            "emulation_real_ok": emulation_real_ok,
+            "bridge_only": bridge_only,
+            "failed": failed,
+            "stable_candidate": stable_candidate,
+            "fake_toolchain_used": false,
+            "entries": entries,
+        });
+        let json_path = artifact_root.join("sgdk-corpus-real-build-report.json");
+        fs::write(
+            &json_path,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&summary)
+                    .expect("serialize SGDK real corpus build report")
+            ),
+        )
+        .expect("write SGDK real corpus JSON report");
+
+        let failed_lines = entries
+            .iter()
+            .filter_map(|entry| {
+                entry.failure_reason.as_ref().map(|reason| {
+                    format!(
+                        "- `{}`: {} (build={}, rom={}, emu={})",
+                        entry.project_name,
+                        reason,
+                        entry.build_real_ok,
+                        entry.rom_real_ok,
+                        entry.emulation_real_ok
+                    )
+                })
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let md_path = artifact_root.join("sgdk-corpus-real-build-report.md");
+        fs::write(
+            &md_path,
+            format!(
+                "# SGDK Corpus Real Build Report\n\n- Total projects: `{}`\n- Processed: `{}`\n- Build real OK: `{}`\n- ROM real OK: `{}`\n- Emulation real OK: `{}`\n- Bridge only: `{}`\n- Failed: `{}`\n- Stable candidate: `{}`\n- Fake toolchain used: `false`\n\n## Failures\n{}\n",
+                total_projects,
+                entries.len(),
+                build_real_ok,
+                rom_real_ok,
+                emulation_real_ok,
+                bridge_only,
+                failed,
+                stable_candidate,
+                if failed_lines.is_empty() {
+                    "- none".to_string()
+                } else {
+                    failed_lines
+                }
+            ),
+        )
+        .expect("write SGDK real corpus Markdown report");
+    }
+
+    #[ignore = "requires local SGDK_Engines corpus, official SGDK and a real Libretro Mega Drive core; writes persistent validation artifacts"]
+    #[test]
+    fn sgdk_corpus_real_build_rom_emulation_report() {
+        use crate::compiler::build_orch::{run_build_with_environment, BuildEnvironment};
+        use crate::core::sgdk_corpus_inventory::inspect_sgdk_project_for_nocode_inventory;
+        use crate::emulator::frame_buffer::framebuffer_to_rgba;
+        use crate::emulator::libretro_ffi::{EmulatorCore, JoypadState};
+
+        let corpus_root = std::env::var("RDS_SGDK_CORPUS_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(SGDK_MATRIX_CORPUS_ROOT));
+        assert!(
+            corpus_root.is_dir(),
+            "SGDK corpus root ausente: {}",
+            corpus_root.display()
+        );
+        let mut donors = fs::read_dir(&corpus_root)
+            .expect("list SGDK corpus root")
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.path().is_dir())
+            .map(|entry| {
+                (
+                    entry.file_name().to_string_lossy().to_string(),
+                    entry.path(),
+                )
+            })
+            .collect::<Vec<_>>();
+        donors.sort_by(|left, right| left.0.cmp(&right.0));
+        assert!(
+            !donors.is_empty(),
+            "SGDK real corpus runner precisa de pelo menos um projeto"
         );
 
-        let _ = fs::remove_dir_all(&toolchain);
-        let _ = fs::remove_dir_all(&project);
+        let env = BuildEnvironment::detect();
+        assert!(
+            env.sgdk_root
+                .as_ref()
+                .is_some_and(|r| r.join("makefile.gen").is_file())
+                && env.sgdk_make_program.is_some(),
+            "SGDK real nao detectado; fake toolchain nao e aceito no corpus real"
+        );
+
+        let artifact_root = validation_artifact_dir("sgdk-corpus-real-build");
+        let resume = std::env::var("RDS_SGDK_REAL_CORPUS_RESUME")
+            .map(|value| value == "1")
+            .unwrap_or(false);
+        if !resume {
+            let _ = fs::remove_dir_all(&artifact_root);
+        }
+        fs::create_dir_all(artifact_root.join("projects")).expect("create corpus projects dir");
+        fs::create_dir_all(artifact_root.join("roms")).expect("create corpus roms dir");
+        fs::create_dir_all(artifact_root.join("frames")).expect("create corpus frames dir");
+
+        let mut entries = Vec::new();
+        let max_projects = std::env::var("RDS_SGDK_REAL_CORPUS_MAX")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(donors.len());
+
+        for (index, (project_name, donor)) in donors.iter().take(max_projects).enumerate() {
+            let slug = sgdk_real_corpus_slug(project_name, index + 1);
+            let project_dir = artifact_root.join("projects").join(&slug);
+            let mut entry = SgdkCorpusRealBuildEntry {
+                project_name: project_name.clone(),
+                donor_path: donor.to_string_lossy().to_string(),
+                project_path: project_dir.to_string_lossy().to_string(),
+                import_ok: false,
+                imported_scenes: 0,
+                bridge_nodes: 0,
+                build_real_ok: false,
+                rom_real_ok: false,
+                emulation_real_ok: false,
+                rom_path: None,
+                framebuffer_ppm: None,
+                libretro_core: None,
+                frames_run: 0,
+                framebuffer_width: 0,
+                framebuffer_height: 0,
+                non_black_pixels: 0,
+                original_budget_total_kb: 0,
+                original_budget_resident_kb: 0,
+                original_budget_dma_frame_kb: 0,
+                original_budget_fatal_count: 0,
+                fake_toolchain_used: false,
+                bridge_only: false,
+                failure_reason: None,
+            };
+
+            let project_result: Result<(), String> = (|| {
+                if project_dir.exists() {
+                    fs::remove_dir_all(&project_dir).map_err(|error| {
+                        format!(
+                            "falha ao limpar projeto persistente '{}': {}",
+                            project_dir.display(),
+                            error
+                        )
+                    })?;
+                }
+                create_project_skeleton(&project_dir, project_name, "megadrive")
+                    .map_err(|error| format!("create_project_skeleton: {error}"))?;
+                let report = match import_sgdk_project(&project_dir, donor) {
+                    Ok(report) => report,
+                    Err(error)
+                        if error.0.contains("nenhum manifesto .res foi encontrado")
+                            || error.0.contains("nenhum manifesto .res")
+                            || error.0.contains("asset inexistente")
+                            || error.0.contains("nao possuem recursos suportados") =>
+                    {
+                        let inventory = inspect_sgdk_project_for_nocode_inventory(donor).map_err(
+                            |inventory_error| {
+                                format!(
+                                    "import_sgdk_project: {}; bridge inventory failed: {}",
+                                    error.0, inventory_error
+                                )
+                            },
+                        )?;
+                        let bridge_dir = project_dir.join(".rds").join("imports").join("sgdk");
+                        fs::create_dir_all(&bridge_dir).map_err(|create_error| {
+                            format!(
+                                "create SGDK bridge inventory dir '{}': {}",
+                                bridge_dir.display(),
+                                create_error
+                            )
+                        })?;
+                        let bridge_path = bridge_dir.join("source-bridge-inventory.json");
+                        fs::write(
+                            &bridge_path,
+                            format!(
+                                "{}\n",
+                                serde_json::to_string_pretty(&inventory).map_err(
+                                    |serialize_error| {
+                                        format!("serialize bridge inventory: {serialize_error}")
+                                    }
+                                )?
+                            ),
+                        )
+                        .map_err(|write_error| {
+                            format!(
+                                "write SGDK bridge inventory '{}': {}",
+                                bridge_path.display(),
+                                write_error
+                            )
+                        })?;
+                        stamp_imported_sgdk_metadata(&project_dir, donor).map_err(
+                            |stamp_error| format!("stamp_imported_sgdk_metadata: {stamp_error}"),
+                        )?;
+                        entry.import_ok = true;
+                        entry.imported_scenes = 1;
+                        entry.bridge_nodes = inventory.node_candidates.len();
+                        entry.bridge_only = true;
+                        return Ok(());
+                    }
+                    Err(error) => return Err(format!("import_sgdk_project: {}", error.0)),
+                };
+                stamp_imported_sgdk_metadata(&project_dir, donor)
+                    .map_err(|error| format!("stamp_imported_sgdk_metadata: {error}"))?;
+                entry.import_ok = true;
+                entry.imported_scenes = report.imported_scenes;
+                entry.bridge_nodes = report
+                    .primary_scene
+                    .entities
+                    .iter()
+                    .filter(|entity| {
+                        entity
+                            .components
+                            .logic
+                            .as_ref()
+                            .and_then(|logic| logic.graph_ref.as_ref())
+                            .is_some()
+                    })
+                    .count();
+                let md_hw = crate::hardware::md_profile::hw_status_with_source_kind(
+                    &report.primary_scene,
+                    Some("imported_sgdk"),
+                );
+                entry.original_budget_total_kb = u64::from(md_hw.project_asset_bytes / 1024);
+                entry.original_budget_resident_kb = u64::from(md_hw.resident_vram_bytes / 1024);
+                entry.original_budget_dma_frame_kb = u64::from(md_hw.dma_frame_bytes / 1024);
+                entry.original_budget_fatal_count = md_hw.errors.len();
+
+                let build = run_build_with_environment(&project_dir, &env, |_| {});
+                if !build.ok {
+                    let tail = build
+                        .log
+                        .iter()
+                        .rev()
+                        .take(8)
+                        .map(|line| format!("[{}] {}", line.level, line.message))
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect::<Vec<_>>()
+                        .join(" | ");
+                    return Err(format!("real SGDK build failed: {tail}"));
+                }
+                entry.build_real_ok = true;
+                if build.rom_path.trim().is_empty() {
+                    return Err("real SGDK build did not report a ROM path".to_string());
+                }
+                let rom_full = {
+                    let path = PathBuf::from(&build.rom_path);
+                    if path.is_absolute() {
+                        path
+                    } else {
+                        project_dir.join(path)
+                    }
+                };
+                let rom_bytes = fs::read(&rom_full)
+                    .map_err(|error| format!("read real ROM '{}': {error}", rom_full.display()))?;
+                if !rom_bytes.windows(4).any(|window| window == b"SEGA") {
+                    return Err(format!(
+                        "real ROM '{}' lacks Mega Drive SEGA header",
+                        rom_full.display()
+                    ));
+                }
+                entry.rom_real_ok = true;
+                let persistent_rom = artifact_root.join("roms").join(format!("{slug}.md"));
+                fs::copy(&rom_full, &persistent_rom).map_err(|error| {
+                    format!(
+                        "copy real ROM '{}' to '{}': {}",
+                        rom_full.display(),
+                        persistent_rom.display(),
+                        error
+                    )
+                })?;
+                entry.rom_path = Some(persistent_rom.to_string_lossy().to_string());
+
+                let mut emulator = EmulatorCore::new(None);
+                emulator
+                    .load_rom(&persistent_rom)
+                    .map_err(|error| format!("load real ROM in Libretro: {error}"))?;
+                emulator
+                    .set_joypad(JoypadState {
+                        right: true,
+                        ..JoypadState::default()
+                    })
+                    .map_err(|error| format!("set joypad: {error}"))?;
+                for _ in 0..30 {
+                    emulator
+                        .run_frame()
+                        .map_err(|error| format!("run Libretro frame: {error}"))?;
+                }
+                let core_label = emulator.loaded_core_label().map(str::to_string);
+                let (framebuffer, frame_size, pixel_format) = emulator
+                    .get_framebuffer()
+                    .map_err(|error| format!("capture Libretro framebuffer: {error}"))?;
+                let frame = framebuffer_to_rgba(&framebuffer, frame_size, pixel_format);
+                if frame.width == 0 || frame.height == 0 || frame.rgba.is_empty() {
+                    return Err("Libretro framebuffer is empty".to_string());
+                }
+                let non_black_pixels = frame
+                    .rgba
+                    .chunks_exact(4)
+                    .filter(|px| px[0] != 0 || px[1] != 0 || px[2] != 0)
+                    .count();
+                let frame_path = artifact_root.join("frames").join(format!("{slug}.ppm"));
+                write_rgba_ppm(&frame_path, frame.width, frame.height, &frame.rgba);
+                emulator
+                    .stop()
+                    .map_err(|error| format!("stop Libretro core: {error}"))?;
+                entry.emulation_real_ok = true;
+                entry.libretro_core = core_label;
+                entry.frames_run = 30;
+                entry.framebuffer_width = frame.width;
+                entry.framebuffer_height = frame.height;
+                entry.non_black_pixels = non_black_pixels;
+                entry.framebuffer_ppm = Some(frame_path.to_string_lossy().to_string());
+                Ok(())
+            })();
+
+            if let Err(error) = project_result {
+                entry.bridge_only = entry.import_ok && !entry.build_real_ok;
+                entry.failure_reason = Some(error);
+            }
+            entries.push(entry);
+            write_sgdk_corpus_real_build_report(&artifact_root, &entries, donors.len());
+        }
+
+        assert_eq!(
+            entries.len(),
+            max_projects.min(donors.len()),
+            "runner real do corpus deve registrar todos os projetos selecionados"
+        );
+        assert!(
+            entries.iter().all(|entry| !entry.fake_toolchain_used),
+            "nenhuma entrada do corpus real pode usar fake toolchain"
+        );
     }
 }
