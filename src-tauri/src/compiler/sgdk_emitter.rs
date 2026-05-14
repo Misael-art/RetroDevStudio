@@ -575,6 +575,14 @@ fn render_move_camera(out: &mut String, target: &str, x: i32, y: i32, planes: &[
     }
 }
 
+fn camera_axis_expr(target: &str, axis: &str, offset: i32) -> String {
+    match offset.cmp(&0) {
+        std::cmp::Ordering::Less => format!("{}_{} - {}", target, axis, -offset),
+        std::cmp::Ordering::Greater => format!("{}_{} + {}", target, axis, offset),
+        std::cmp::Ordering::Equal => format!("{}_{}", target, axis),
+    }
+}
+
 fn render_logic_scripts(out: &mut String, scripts: &[LogicScript], indent: usize) {
     for script in scripts {
         if matches!(script.ops.first(), Some(LogicOp::HardwareEvent { .. })) {
@@ -642,6 +650,103 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                 ));
                 out.push_str(&format!(
                     "{indent}SPR_setPosition({target}, {target}_x, {target}_y);\n",
+                    indent = indent_str,
+                    target = target_var
+                ));
+            }
+            LogicOp::SetSpritePosition { target_var, x, y } => {
+                let x_expr = render_math_expr(x);
+                let y_expr = render_math_expr(y);
+                out.push_str(&format!(
+                    "{indent}{target}_x = {x_expr};\n",
+                    indent = indent_str,
+                    target = target_var,
+                    x_expr = x_expr
+                ));
+                out.push_str(&format!(
+                    "{indent}{target}_y = {y_expr};\n",
+                    indent = indent_str,
+                    target = target_var,
+                    y_expr = y_expr
+                ));
+                out.push_str(&format!(
+                    "{indent}SPR_setPosition({target}, {target}_x, {target}_y);\n",
+                    indent = indent_str,
+                    target = target_var
+                ));
+            }
+            LogicOp::SetVelocity {
+                target_name,
+                vx,
+                vy,
+            } => {
+                out.push_str(&format!(
+                    "{indent}logic_var_{target}_vx = {vx};\n",
+                    indent = indent_str,
+                    target = target_name,
+                    vx = render_math_expr(vx)
+                ));
+                out.push_str(&format!(
+                    "{indent}logic_var_{target}_vy = {vy};\n",
+                    indent = indent_str,
+                    target = target_name,
+                    vy = render_math_expr(vy)
+                ));
+            }
+            LogicOp::SetAnimationState {
+                target_var,
+                anim_index,
+            } => {
+                out.push_str(&format!(
+                    "{indent}SPR_setAnim({target}, {anim_index});\n",
+                    indent = indent_str,
+                    target = target_var,
+                    anim_index = anim_index
+                ));
+            }
+            LogicOp::SetTile { layer, tile, x, y } => {
+                out.push_str(&format!(
+                    "{indent}VDP_setTileMapXY({layer}, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, {tile}), {x}, {y});\n",
+                    indent = indent_str,
+                    layer = sgdk_scroll_plane(layer),
+                    tile = render_math_expr(tile),
+                    x = render_math_expr(x),
+                    y = render_math_expr(y)
+                ));
+            }
+            LogicOp::CameraFollow {
+                target_var,
+                offset_x,
+                offset_y,
+            } => {
+                out.push_str(&format!(
+                    "{indent}VDP_setHorizontalScroll(BG_A, {});\n",
+                    camera_axis_expr(target_var, "x", *offset_x),
+                    indent = indent_str
+                ));
+                out.push_str(&format!(
+                    "{indent}VDP_setVerticalScroll(BG_A, {});\n",
+                    camera_axis_expr(target_var, "y", *offset_y),
+                    indent = indent_str
+                ));
+            }
+            LogicOp::ShowSprite { target_var, x, y } => {
+                out.push_str(&format!(
+                    "{indent}SPR_setPosition({target}, {x}, {y});\n",
+                    indent = indent_str,
+                    target = target_var,
+                    x = render_math_expr(x),
+                    y = render_math_expr(y)
+                ));
+                out.push_str(&format!(
+                    "{indent}SPR_setVisibility({target}, VISIBLE);\n",
+                    indent = indent_str,
+                    target = target_var
+                ));
+            }
+            LogicOp::HideSprite { target_var } => {
+                out.push_str(&format!(
+                    "{indent}SPR_setVisibility({target}, HIDDEN);\n",
                     indent = indent_str,
                     target = target_var
                 ));
@@ -743,6 +848,29 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
             }
             LogicOp::TimelineSequence { counter_var, slots } => {
                 render_timeline_sequence(out, counter_var, slots, indent);
+            }
+            LogicOp::HardwareBudgetCheck {
+                vram_kb,
+                sprites,
+                scanline_sprites,
+                if_ok,
+                if_warn,
+            } => {
+                out.push_str(&format!(
+                    "{indent}// Hardware budget check: VRAM {vram_kb}KB, sprites {sprites}, sprites/scanline {scanline_sprites}\n",
+                    indent = indent_str,
+                    vram_kb = vram_kb,
+                    sprites = sprites,
+                    scanline_sprites = scanline_sprites
+                ));
+                render_logic_ops(out, if_ok, indent);
+                if !if_warn.is_empty() {
+                    out.push_str(&format!(
+                        "{indent}// Hardware budget warning branch\n",
+                        indent = indent_str
+                    ));
+                    render_logic_ops(out, if_warn, indent);
+                }
             }
             LogicOp::HardwareEvent { ops, .. } => {
                 render_logic_ops(out, ops, indent);
@@ -851,6 +979,10 @@ fn render_bool_expr(out: &mut String, expr: &LogicBoolExpr, indent: usize) -> St
     match expr {
         LogicBoolExpr::Literal(value) => {
             if *value { "TRUE".to_string() } else { "FALSE".to_string() }
+        }
+        LogicBoolExpr::Input { pad, button, .. } => {
+            let button_mask = sgdk_button_mask(button).unwrap_or("BUTTON_A");
+            format!("(JOY_readJoypad({}) & {})", sgdk_joypad_port(pad), button_mask)
         }
         LogicBoolExpr::Overlap { left, right } => format!(
             "retro_aabb_intersects({left_x}, {left_y}, {left_w}, {left_h}, {right_x}, {right_y}, {right_w}, {right_h})",
@@ -1026,6 +1158,28 @@ fn collect_logic_var_names(ast: &AstOutput) -> std::collections::BTreeSet<String
 
 fn extract_vars_from_op(op: &LogicOp, vars: &mut std::collections::BTreeSet<String>) {
     match op {
+        LogicOp::SetSpritePosition { x, y, .. } | LogicOp::ShowSprite { x, y, .. } => {
+            extract_vars_from_math(x, vars);
+            extract_vars_from_math(y, vars);
+        }
+        LogicOp::SetVelocity {
+            target_name,
+            vx,
+            vy,
+        } => {
+            vars.insert(format!("{}_vx", target_name));
+            vars.insert(format!("{}_vy", target_name));
+            extract_vars_from_math(vx, vars);
+            extract_vars_from_math(vy, vars);
+        }
+        LogicOp::SetTile { tile, x, y, .. } => {
+            extract_vars_from_math(tile, vars);
+            extract_vars_from_math(x, vars);
+            extract_vars_from_math(y, vars);
+        }
+        LogicOp::SetAnimationState { .. }
+        | LogicOp::CameraFollow { .. }
+        | LogicOp::HideSprite { .. } => {}
         LogicOp::SetVar { var_name, value } => {
             vars.insert(var_name.clone());
             extract_vars_from_math(value, vars);
@@ -1089,6 +1243,14 @@ fn extract_vars_from_op(op: &LogicOp, vars: &mut std::collections::BTreeSet<Stri
                 }
             }
         }
+        LogicOp::HardwareBudgetCheck { if_ok, if_warn, .. } => {
+            for sub_op in if_ok {
+                extract_vars_from_op(sub_op, vars);
+            }
+            for sub_op in if_warn {
+                extract_vars_from_op(sub_op, vars);
+            }
+        }
         LogicOp::HardwareEvent { ops, .. } => {
             for sub_op in ops {
                 extract_vars_from_op(sub_op, vars);
@@ -1129,6 +1291,7 @@ fn extract_vars_from_bool(expr: &LogicBoolExpr, vars: &mut std::collections::BTr
             extract_vars_from_bool(left, vars);
             extract_vars_from_bool(right, vars);
         }
+        LogicBoolExpr::Input { .. } => {}
         _ => {}
     }
 }
@@ -1183,6 +1346,9 @@ fn op_uses_overlap(op: &LogicOp) -> bool {
                 || if_true.iter().any(op_uses_overlap)
                 || if_false.iter().any(op_uses_overlap)
         }
+        LogicOp::HardwareBudgetCheck { if_ok, if_warn, .. } => {
+            if_ok.iter().any(op_uses_overlap) || if_warn.iter().any(op_uses_overlap)
+        }
         LogicOp::HardwareEvent { ops, .. } => ops.iter().any(op_uses_overlap),
         _ => false,
     }
@@ -1191,6 +1357,7 @@ fn op_uses_overlap(op: &LogicOp) -> bool {
 fn bool_expr_uses_overlap(expr: &LogicBoolExpr) -> bool {
     match expr {
         LogicBoolExpr::Literal(_) => false,
+        LogicBoolExpr::Input { .. } => false,
         LogicBoolExpr::Overlap { .. } => true,
         LogicBoolExpr::Compare { .. } => false,
         LogicBoolExpr::Not(value) => bool_expr_uses_overlap(value),
@@ -1249,19 +1416,19 @@ fn render_input_binding(
 
 fn sgdk_joypad_port(device: &str) -> &'static str {
     match device {
-        "joypad_2" => "JOY_2",
-        "joypad_3" => "JOY_3",
-        "joypad_4" => "JOY_4",
+        "joypad_2" | "JOY_2" => "JOY_2",
+        "joypad_3" | "JOY_3" => "JOY_3",
+        "joypad_4" | "JOY_4" => "JOY_4",
         _ => "JOY_1",
     }
 }
 
 fn sgdk_button_mask(button: &str) -> Option<&'static str> {
     match button {
-        "DPAD_UP" => Some("BUTTON_UP"),
-        "DPAD_DOWN" => Some("BUTTON_DOWN"),
-        "DPAD_LEFT" => Some("BUTTON_LEFT"),
-        "DPAD_RIGHT" => Some("BUTTON_RIGHT"),
+        "DPAD_UP" | "BUTTON_UP" => Some("BUTTON_UP"),
+        "DPAD_DOWN" | "BUTTON_DOWN" => Some("BUTTON_DOWN"),
+        "DPAD_LEFT" | "BUTTON_LEFT" => Some("BUTTON_LEFT"),
+        "DPAD_RIGHT" | "BUTTON_RIGHT" => Some("BUTTON_RIGHT"),
         "BUTTON_A" => Some("BUTTON_A"),
         "BUTTON_B" => Some("BUTTON_B"),
         "BUTTON_C" => Some("BUTTON_C"),
@@ -1335,7 +1502,12 @@ fn collect_sprite_position_vars(ast: &AstOutput) -> Vec<(String, i32, i32)> {
 fn collect_sprite_vars_from_ops(ops: &[LogicOp], out: &mut std::collections::BTreeSet<String>) {
     for op in ops {
         match op {
-            LogicOp::MoveSprite { target_var, .. } => {
+            LogicOp::MoveSprite { target_var, .. }
+            | LogicOp::SetSpritePosition { target_var, .. }
+            | LogicOp::SetAnimationState { target_var, .. }
+            | LogicOp::CameraFollow { target_var, .. }
+            | LogicOp::ShowSprite { target_var, .. }
+            | LogicOp::HideSprite { target_var } => {
                 out.insert(target_var.clone());
             }
             LogicOp::ConditionOverlap { left, right, .. } => {
@@ -1374,6 +1546,10 @@ fn collect_sprite_vars_from_ops(ops: &[LogicOp], out: &mut std::collections::BTr
                 for slot in slots {
                     collect_sprite_vars_from_ops(&slot.actions, out);
                 }
+            }
+            LogicOp::HardwareBudgetCheck { if_ok, if_warn, .. } => {
+                collect_sprite_vars_from_ops(if_ok, out);
+                collect_sprite_vars_from_ops(if_warn, out);
             }
             _ => {}
         }

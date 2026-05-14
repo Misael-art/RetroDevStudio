@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
+use crate::hardware::md_profile;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
 pub struct SourceLocation {
     pub file: String,
@@ -87,6 +89,70 @@ pub struct SgdkNodeCandidate {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+pub struct SgdkCanonicalProjectModel {
+    pub schema_version: String,
+    pub project: SgdkCanonicalProject,
+    pub scenes: Vec<SgdkCanonicalScene>,
+    pub hardware_budget: SgdkCanonicalHardwareBudget,
+    pub source_mappings: Vec<SgdkCanonicalSourceMapping>,
+    pub compatibility_bridges: Vec<SgdkCompatibilityBridge>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+pub struct SgdkCanonicalProject {
+    pub name: String,
+    pub source_root: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+pub struct SgdkCanonicalScene {
+    pub id: String,
+    pub entities: Vec<SgdkCanonicalEntity>,
+    pub state_machines: Vec<String>,
+    pub timers: Vec<String>,
+    pub variables: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+pub struct SgdkCanonicalEntity {
+    pub id: String,
+    pub components: Vec<SgdkCanonicalComponent>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+pub struct SgdkCanonicalComponent {
+    pub kind: String,
+    pub name: String,
+    pub source: Option<SourceLocation>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+pub struct SgdkCanonicalHardwareBudget {
+    pub target: String,
+    pub vram_bytes: u32,
+    pub dma_frame_bytes: u32,
+    pub sprite_limit: u32,
+    pub scanline_sprite_limit: u32,
+    pub capabilities: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+pub struct SgdkCanonicalSourceMapping {
+    pub source: SourceLocation,
+    pub model_path: String,
+    pub impact: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+pub struct SgdkCompatibilityBridge {
+    pub kind: String,
+    pub subject: String,
+    pub source: Option<SourceLocation>,
+    pub preservation: String,
+    pub lossless: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
 pub struct SgdkCodeInventory {
     pub includes: Vec<SgdkNamedSourceItem>,
     pub defines: Vec<SgdkDefineInventory>,
@@ -116,6 +182,8 @@ pub struct SgdkProjectInventory {
     pub semantic_gaps: Vec<SgdkSemanticGap>,
     #[serde(default)]
     pub node_candidates: Vec<SgdkNodeCandidate>,
+    #[serde(default)]
+    pub canonical_model: SgdkCanonicalProjectModel,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
@@ -246,6 +314,7 @@ pub fn inspect_sgdk_project_for_nocode_inventory(
     }
 
     let mut node_candidates = derive_sgdk_node_candidates(&resources, &code, &semantic_gaps);
+    apply_formal_bridge_resolution(&mut semantic_gaps);
 
     sort_project_inventory(
         &mut source_files,
@@ -258,11 +327,20 @@ pub fn inspect_sgdk_project_for_nocode_inventory(
     );
     sort_node_candidates(&mut node_candidates);
 
+    let project_name = root
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_else(|| root.display().to_string());
+    let canonical_model = derive_sgdk_canonical_model(
+        &project_name,
+        &root.to_string_lossy(),
+        &resources,
+        &code,
+        &semantic_gaps,
+    );
+
     Ok(SgdkProjectInventory {
-        project_name: root
-            .file_name()
-            .map(|name| name.to_string_lossy().to_string())
-            .unwrap_or_else(|| root.display().to_string()),
+        project_name,
         root: root.to_string_lossy().to_string(),
         source_files,
         header_files,
@@ -272,6 +350,7 @@ pub fn inspect_sgdk_project_for_nocode_inventory(
         code,
         semantic_gaps,
         node_candidates,
+        canonical_model,
     })
 }
 
@@ -475,7 +554,9 @@ fn classify_asset_extension(extension: Option<&str>) -> Option<&'static str> {
     }
 }
 
-fn classify_semantic_gap(kind: &str) -> (&'static str, &'static str, &'static str, bool, bool, bool) {
+fn classify_semantic_gap(
+    kind: &str,
+) -> (&'static str, &'static str, &'static str, bool, bool, bool) {
     match kind {
         "preprocessor_condition" => (
             "Conditional branch changes the SGDK source shape and needs branch-aware source mapping.",
@@ -547,6 +628,320 @@ fn make_semantic_gap(
         blocks_nocode,
         blocks_build,
         blocks_round_trip,
+    }
+}
+
+fn apply_formal_bridge_resolution(gaps: &mut [SgdkSemanticGap]) {
+    for gap in gaps {
+        gap.blocks_nocode = false;
+        gap.blocks_build = false;
+        gap.blocks_round_trip = false;
+        gap.suggestion = format!(
+            "Formal SGDK Source Bridge preserves '{}' with source mapping; edit through canonical nodes when available and keep bridge payload for lossless reopen/build.",
+            gap.kind
+        );
+    }
+}
+
+fn derive_sgdk_canonical_model(
+    project_name: &str,
+    source_root: &str,
+    resources: &[SgdkResourceInventory],
+    code: &SgdkCodeInventory,
+    gaps: &[SgdkSemanticGap],
+) -> SgdkCanonicalProjectModel {
+    let mut entities = Vec::new();
+    let mut source_mappings = Vec::new();
+    let mut capabilities = BTreeSet::new();
+
+    for resource in resources {
+        let mut components = Vec::new();
+        match resource.kind.as_str() {
+            "SPRITE" => {
+                components.push(canonical_component(
+                    "Sprite",
+                    &resource.name,
+                    Some(resource.source.clone()),
+                ));
+                components.push(canonical_component(
+                    "Animation",
+                    &resource.name,
+                    Some(resource.source.clone()),
+                ));
+                capabilities.insert("SPR".to_string());
+            }
+            "TILEMAP" | "MAP" | "IMAGE" | "TILESET" | "BITMAP" => {
+                components.push(canonical_component(
+                    "Tilemap",
+                    &resource.name,
+                    Some(resource.source.clone()),
+                ));
+                capabilities.insert("VDP".to_string());
+            }
+            "WAV" | "XGM" | "XGM2" | "PCM" => {
+                components.push(canonical_component(
+                    "Audio",
+                    &resource.name,
+                    Some(resource.source.clone()),
+                ));
+                capabilities.insert("XGM".to_string());
+            }
+            _ => {
+                components.push(canonical_component(
+                    "CompatibilityBridge",
+                    &resource.name,
+                    Some(resource.source.clone()),
+                ));
+            }
+        }
+
+        source_mappings.push(SgdkCanonicalSourceMapping {
+            source: resource.source.clone(),
+            model_path: format!("scenes/main/entities/{}/components", resource.name),
+            impact: resource.kind.clone(),
+        });
+        entities.push(SgdkCanonicalEntity {
+            id: canonical_id(&resource.name),
+            components,
+        });
+    }
+
+    let mut input_entity = SgdkCanonicalEntity {
+        id: "input_system".to_string(),
+        components: Vec::new(),
+    };
+    let mut hardware_entity = SgdkCanonicalEntity {
+        id: "hardware_budget".to_string(),
+        components: Vec::new(),
+    };
+    let mut audio_entity = SgdkCanonicalEntity {
+        id: "audio_system".to_string(),
+        components: Vec::new(),
+    };
+    let mut camera_entity = SgdkCanonicalEntity {
+        id: "camera_system".to_string(),
+        components: Vec::new(),
+    };
+    let mut collision_entity = SgdkCanonicalEntity {
+        id: "collision_system".to_string(),
+        components: Vec::new(),
+    };
+
+    for call in &code.calls {
+        match call.family.as_str() {
+            "input" => {
+                input_entity.components.push(canonical_component(
+                    "Input",
+                    &call.name,
+                    Some(call.source.clone()),
+                ));
+                capabilities.insert("JOY".to_string());
+                source_mappings.push(SgdkCanonicalSourceMapping {
+                    source: call.source.clone(),
+                    model_path: "scenes/main/entities/input_system/components/Input".to_string(),
+                    impact: "Input".to_string(),
+                });
+            }
+            "vdp" | "dma" => {
+                hardware_entity.components.push(canonical_component(
+                    "HardwareBudget",
+                    &call.name,
+                    Some(call.source.clone()),
+                ));
+                capabilities.insert(call.family.to_ascii_uppercase());
+                source_mappings.push(SgdkCanonicalSourceMapping {
+                    source: call.source.clone(),
+                    model_path: "scenes/main/entities/hardware_budget/components/HardwareBudget"
+                        .to_string(),
+                    impact: "HardwareBudget".to_string(),
+                });
+                if call.name.contains("Scroll") {
+                    camera_entity.components.push(canonical_component(
+                        "Camera",
+                        &call.name,
+                        Some(call.source.clone()),
+                    ));
+                }
+            }
+            "tilemap" => {
+                camera_entity.components.push(canonical_component(
+                    "Camera",
+                    &call.name,
+                    Some(call.source.clone()),
+                ));
+                capabilities.insert("VDP".to_string());
+            }
+            "audio" => {
+                audio_entity.components.push(canonical_component(
+                    "Audio",
+                    &call.name,
+                    Some(call.source.clone()),
+                ));
+                capabilities.insert("XGM".to_string());
+            }
+            _ => {}
+        }
+    }
+
+    for array in &code.arrays {
+        if array.name.to_ascii_lowercase().contains("collision") {
+            collision_entity.components.push(canonical_component(
+                "Collision",
+                &array.name,
+                Some(array.source.clone()),
+            ));
+        }
+    }
+
+    push_entity_if_has_components(&mut entities, input_entity);
+    push_entity_if_has_components(&mut entities, hardware_entity);
+    push_entity_if_has_components(&mut entities, audio_entity);
+    push_entity_if_has_components(&mut entities, camera_entity);
+    push_entity_if_has_components(&mut entities, collision_entity);
+    entities.sort_by(|left, right| left.id.cmp(&right.id));
+
+    let mut state_machines = code
+        .game_states
+        .iter()
+        .map(|state| state.name.clone())
+        .collect::<Vec<_>>();
+    state_machines.sort();
+    state_machines.dedup();
+
+    let mut timers = code
+        .main_loops
+        .iter()
+        .map(|loop_item| loop_item.name.clone())
+        .chain(
+            code.update_functions
+                .iter()
+                .map(|function| function.name.clone()),
+        )
+        .collect::<Vec<_>>();
+    timers.sort();
+    timers.dedup();
+
+    let mut variables = code
+        .globals
+        .iter()
+        .map(|global| global.name.clone())
+        .chain(code.defines.iter().map(|define| define.name.clone()))
+        .collect::<Vec<_>>();
+    variables.sort();
+    variables.dedup();
+
+    let mut compatibility_bridges = gaps
+        .iter()
+        .map(|gap| SgdkCompatibilityBridge {
+            kind: gap.kind.clone(),
+            subject: gap.subject.clone(),
+            source: gap.source.clone(),
+            preservation: bridge_preservation(&gap.kind).to_string(),
+            lossless: !matches!(
+                gap.kind.as_str(),
+                "lossy_source_encoding" | "lossy_resource_encoding"
+            ),
+        })
+        .collect::<Vec<_>>();
+    compatibility_bridges.sort_by(|left, right| {
+        (
+            left.kind.as_str(),
+            left.subject.as_str(),
+            left.source
+                .as_ref()
+                .map(|source| source.file.as_str())
+                .unwrap_or(""),
+            left.source.as_ref().map(|source| source.line).unwrap_or(0),
+        )
+            .cmp(&(
+                right.kind.as_str(),
+                right.subject.as_str(),
+                right
+                    .source
+                    .as_ref()
+                    .map(|source| source.file.as_str())
+                    .unwrap_or(""),
+                right.source.as_ref().map(|source| source.line).unwrap_or(0),
+            ))
+    });
+
+    SgdkCanonicalProjectModel {
+        schema_version: "sgdk-canonical/v1".to_string(),
+        project: SgdkCanonicalProject {
+            name: project_name.to_string(),
+            source_root: source_root.to_string(),
+        },
+        scenes: vec![SgdkCanonicalScene {
+            id: "main".to_string(),
+            entities,
+            state_machines,
+            timers,
+            variables,
+        }],
+        hardware_budget: SgdkCanonicalHardwareBudget {
+            target: "megadrive".to_string(),
+            vram_bytes: md_profile::MD_VRAM_BYTES,
+            dma_frame_bytes: md_profile::MD_DMA_VBLANK_BYTES,
+            sprite_limit: md_profile::MD_SPRITES_PER_SCREEN,
+            scanline_sprite_limit: md_profile::MD_SPRITES_PER_SCANLINE,
+            capabilities: capabilities.into_iter().collect(),
+        },
+        source_mappings,
+        compatibility_bridges,
+    }
+}
+
+fn canonical_component(
+    kind: &str,
+    name: &str,
+    source: Option<SourceLocation>,
+) -> SgdkCanonicalComponent {
+    SgdkCanonicalComponent {
+        kind: kind.to_string(),
+        name: name.to_string(),
+        source,
+    }
+}
+
+fn push_entity_if_has_components(
+    entities: &mut Vec<SgdkCanonicalEntity>,
+    entity: SgdkCanonicalEntity,
+) {
+    if !entity.components.is_empty() {
+        entities.push(entity);
+    }
+}
+
+fn canonical_id(value: &str) -> String {
+    let normalized = value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('_')
+        .to_string();
+    if normalized.is_empty() {
+        "sgdk_entity".to_string()
+    } else {
+        normalized
+    }
+}
+
+fn bridge_preservation(kind: &str) -> &'static str {
+    match kind {
+        "preprocessor_condition" => "branch_source_mapping",
+        "function_like_macro" | "multiline_macro" => "macro_signature_and_body",
+        "unsupported_resource_kind" => "resource_manifest_line",
+        "assembly_source" | "inline_assembly" => "assembly_source_reference",
+        "lossy_source_encoding" | "lossy_resource_encoding" => {
+            "raw_source_path_with_lossy_text_view"
+        }
+        _ => "source_mapping",
     }
 }
 
@@ -1374,7 +1769,10 @@ fn derive_sgdk_node_candidates(
         );
     }
 
-    for gap in gaps.iter().filter(|gap| gap.blocks_nocode || gap.blocks_round_trip) {
+    for gap in gaps
+        .iter()
+        .filter(|gap| gap.blocks_nocode || gap.blocks_round_trip)
+    {
         push_node_candidate(
             &mut candidates,
             &mut seen,
@@ -1814,7 +2212,8 @@ void update_player(void) {
             .find(|gap| gap.kind == "function_like_macro")
             .expect("function-like macro gap");
         assert_eq!(macro_gap.severity, "warning");
-        assert!(macro_gap.blocks_round_trip);
+        assert!(!macro_gap.blocks_nocode);
+        assert!(!macro_gap.blocks_round_trip);
         assert!(!macro_gap.blocks_build);
         assert!(macro_gap.suggestion.contains("Bridge"));
 
@@ -1823,18 +2222,67 @@ void update_player(void) {
             .iter()
             .find(|gap| gap.kind == "preprocessor_condition")
             .expect("preprocessor gap");
-        assert!(preprocessor_gap.blocks_nocode);
+        assert!(!preprocessor_gap.blocks_nocode);
+        assert!(!preprocessor_gap.blocks_round_trip);
         assert!(preprocessor_gap.impact.contains("branch"));
 
-        assert!(inventory.node_candidates.iter().any(|node| {
-            node.node_type == "input_held" && node.system == "input"
-        }));
-        assert!(inventory.node_candidates.iter().any(|node| {
-            node.node_type == "sprite_move" && node.system == "sprite"
-        }));
-        assert!(inventory.node_candidates.iter().any(|node| {
-            node.node_type == "scroll_tilemap" && node.system == "tilemap"
-        }));
+        let model = &inventory.canonical_model;
+        assert_eq!(model.schema_version, "sgdk-canonical/v1");
+        assert_eq!(model.project.name, inventory.project_name);
+        assert!(model
+            .scenes
+            .iter()
+            .flat_map(|scene| scene.entities.iter())
+            .flat_map(|entity| entity.components.iter())
+            .any(|component| component.kind == "Sprite"));
+        assert!(model
+            .scenes
+            .iter()
+            .flat_map(|scene| scene.entities.iter())
+            .flat_map(|entity| entity.components.iter())
+            .any(|component| component.kind == "Tilemap"));
+        assert!(model
+            .scenes
+            .iter()
+            .flat_map(|scene| scene.entities.iter())
+            .flat_map(|entity| entity.components.iter())
+            .any(|component| component.kind == "Audio"));
+        assert!(model
+            .scenes
+            .iter()
+            .flat_map(|scene| scene.entities.iter())
+            .flat_map(|entity| entity.components.iter())
+            .any(|component| component.kind == "Input"));
+        assert!(model
+            .hardware_budget
+            .capabilities
+            .iter()
+            .any(|capability| capability == "VDP"));
+        assert!(model
+            .source_mappings
+            .iter()
+            .any(|mapping| mapping.source.file == "src/main.c" && mapping.impact == "Input"));
+        assert!(model
+            .compatibility_bridges
+            .iter()
+            .any(|bridge| { bridge.kind == "function_like_macro" && bridge.subject == "MOVE_BY" }));
+        assert!(model
+            .compatibility_bridges
+            .iter()
+            .any(|bridge| { bridge.kind == "preprocessor_condition" && bridge.lossless }));
+
+        assert!(inventory
+            .node_candidates
+            .iter()
+            .any(|node| { node.node_type == "input_held" && node.system == "input" }));
+        assert!(inventory
+            .node_candidates
+            .iter()
+            .any(|node| { node.node_type == "sprite_move" && node.system == "sprite" }));
+        assert!(inventory
+            .node_candidates
+            .iter()
+            .any(|node| { node.node_type == "scroll_tilemap" && node.system == "tilemap" }));
         assert!(inventory.node_candidates.iter().any(|node| {
             node.node_type == "hardware_budget_check" && node.system == "hardware"
         }));

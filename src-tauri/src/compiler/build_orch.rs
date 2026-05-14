@@ -4,8 +4,8 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use crate::compiler::ast_generator::{
-    collect_bgm_tracks, collect_sfx_resources, collect_tilemap_assets, generate_ast_with_prefabs,
-    AstOutput,
+    collect_bgm_tracks, collect_sfx_resources, collect_tilemap_assets, generate_ast,
+    generate_ast_with_prefabs, AstOutput,
 };
 use crate::compiler::sgdk_emitter::emit_sgdk_with_collision;
 use crate::compiler::snes_emitter::emit_snes_with_collision;
@@ -14,7 +14,7 @@ use crate::core::project_mgr::{
 };
 use crate::hardware::md_profile;
 use crate::hardware::snes_profile;
-use crate::ugdm::entities::Project;
+use crate::ugdm::entities::{Entity, Project, Scene};
 
 #[derive(Debug, serde::Serialize, Clone)]
 pub struct BuildLogLine {
@@ -88,6 +88,137 @@ struct Toolchain {
     root: PathBuf,
     make_program: PathBuf,
     bash_program: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+struct SgdkCompatibilityProfile {
+    scene: Scene,
+    active_sprite_count: usize,
+    culled_sprite_count: usize,
+}
+
+fn is_sgdk_compatibility_source(source_kind: Option<&str>) -> bool {
+    matches!(source_kind, Some("external_sgdk") | Some("imported_sgdk"))
+}
+
+fn build_sgdk_compatibility_profile(
+    scene: &Scene,
+    source_kind: Option<&str>,
+) -> Option<SgdkCompatibilityProfile> {
+    if !is_sgdk_compatibility_source(source_kind) {
+        return None;
+    }
+
+    let sprite_count = scene
+        .entities
+        .iter()
+        .filter(|entity| entity.components.sprite.is_some())
+        .count();
+    if sprite_count == 0 {
+        return None;
+    }
+
+    let conservative_window = md_profile::MD_SPRITES_PER_SCANLINE as usize;
+    let initial_limit = sprite_count.min(conservative_window.max(1));
+    let mut limits = vec![initial_limit, 16, 8, 4, 1];
+    limits.retain(|limit| *limit > 0 && *limit <= sprite_count);
+    limits.sort_unstable_by(|a, b| b.cmp(a));
+    limits.dedup();
+
+    let mut fallback = None;
+    for limit in limits {
+        let candidate = cull_sgdk_scene_to_active_sprite_window(scene, limit);
+        let fatal_count =
+            md_profile::validate_scene_with_source_kind(&candidate.scene, source_kind)
+                .into_iter()
+                .filter(|error| error.is_fatal)
+                .count();
+        if fatal_count == 0 {
+            return Some(candidate);
+        }
+        fallback = Some(candidate);
+    }
+
+    fallback
+}
+
+fn cull_sgdk_scene_to_active_sprite_window(
+    scene: &Scene,
+    active_limit: usize,
+) -> SgdkCompatibilityProfile {
+    let mut ranked = scene
+        .entities
+        .iter()
+        .enumerate()
+        .filter(|(_, entity)| entity.components.sprite.is_some())
+        .map(|(index, entity)| (index, sgdk_compatibility_sprite_score(index, entity)))
+        .collect::<Vec<_>>();
+    ranked.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+
+    let mut kept_indices = ranked
+        .iter()
+        .take(active_limit)
+        .map(|(index, _)| *index)
+        .collect::<Vec<_>>();
+    kept_indices.sort_unstable();
+
+    let mut transformed = scene.clone();
+    transformed.entities = scene
+        .entities
+        .iter()
+        .enumerate()
+        .filter(|(index, entity)| {
+            entity.components.sprite.is_none() || kept_indices.binary_search(index).is_ok()
+        })
+        .map(|(_, entity)| entity.clone())
+        .collect();
+
+    SgdkCompatibilityProfile {
+        scene: transformed,
+        active_sprite_count: kept_indices.len(),
+        culled_sprite_count: ranked.len().saturating_sub(kept_indices.len()),
+    }
+}
+
+fn sgdk_compatibility_sprite_score(index: usize, entity: &Entity) -> i32 {
+    let mut score = 10_000i32.saturating_sub(index as i32);
+    let id = entity.entity_id.to_ascii_lowercase();
+    let name = entity
+        .display_name
+        .as_deref()
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    if entity.components.input.is_some() {
+        score += 5_000;
+    }
+    if id.contains("player") || id.contains("hero") || name.contains("player") {
+        score += 4_000;
+    }
+    if entity.components.logic.is_some() {
+        score += 2_000;
+    }
+    if entity.components.collision.is_some() {
+        score += 1_000;
+    }
+    if let Some(sprite) = entity.components.sprite.as_ref() {
+        let priority = sprite.priority.to_ascii_lowercase();
+        if priority.contains("hud") || priority.contains("ui") || priority.contains("overlay") {
+            score += 1_500;
+        }
+        if priority == "foreground" {
+            score += 750;
+        }
+    }
+    if entity.transform.x >= -32
+        && entity.transform.x <= md_profile::MD_RESOLUTION_W as i32
+        && entity.transform.y >= -32
+        && entity.transform.y <= md_profile::MD_RESOLUTION_H as i32
+    {
+        score += 500;
+    }
+
+    score
 }
 
 pub fn run_build<F>(project_dir: &Path, on_log: F) -> BuildResult
@@ -499,8 +630,10 @@ where
             )
         );
     }
-    let hw_errors = match target.target {
-        "megadrive" => md_profile::validate_scene_with_source_kind(&resolved_scene, source_kind)
+    let mut scene_for_build = resolved_scene.clone();
+    let mut compatibility_profile_applied = false;
+    let mut hw_errors = match target.target {
+        "megadrive" => md_profile::validate_scene_with_source_kind(&scene_for_build, source_kind)
             .into_iter()
             .map(|error| (error.message, error.is_fatal))
             .collect::<Vec<_>>(),
@@ -510,6 +643,67 @@ where
             .collect::<Vec<_>>(),
         _ => unreachable!("validated by target_spec"),
     };
+
+    if target.target == "megadrive"
+        && hw_errors.iter().any(|(_, is_fatal)| *is_fatal)
+        && is_sgdk_compatibility_source(source_kind)
+    {
+        if let Some(profile) = build_sgdk_compatibility_profile(&resolved_scene, source_kind) {
+            let compat_errors =
+                md_profile::validate_scene_with_source_kind(&profile.scene, source_kind)
+                    .into_iter()
+                    .map(|error| (error.message, error.is_fatal))
+                    .collect::<Vec<_>>();
+            if compat_errors.iter().any(|(_, is_fatal)| *is_fatal) {
+                emit!(
+                    "warn",
+                    format!(
+                        "SGDK compatibility profile could not clear fatal hardware blockers; original scene remains blocked. attempted active_sprites={} culled_sprites={}.",
+                        profile.active_sprite_count, profile.culled_sprite_count
+                    )
+                );
+            } else {
+                let original_blockers = hw_errors
+                    .iter()
+                    .filter(|(_, is_fatal)| *is_fatal)
+                    .map(|(message, _)| message.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" | ");
+                emit!(
+                    "warn",
+                    format!(
+                        "SGDK compatibility profile applied: sprite culling + multiplex plan keeps {} active sprite(s) and marks {} as streamable; original blockers: {}.",
+                        profile.active_sprite_count, profile.culled_sprite_count, original_blockers
+                    )
+                );
+                let compat_status =
+                    md_profile::hw_status_with_source_kind(&profile.scene, source_kind);
+                emit!(
+                    "info",
+                    format!(
+                        "MD VRAM compatibility: mode={} total={}KB resident={}KB spr_res={}KB tile={}KB hud={}KB strm_spr={}KB anim_sw={}KB streamable={}KB dma/frame={}KB banks={}/{} cells={}/{}.",
+                        compat_status.analysis_mode,
+                        compat_status.project_asset_bytes / 1024,
+                        compat_status.resident_vram_bytes / 1024,
+                        compat_status.sprite_resident_bytes / 1024,
+                        compat_status.tilemap_resident_bytes / 1024,
+                        compat_status.hud_resident_bytes / 1024,
+                        compat_status.streamable_sprite_bytes / 1024,
+                        compat_status.animated_swap_bytes / 1024,
+                        compat_status.streamable_vram_bytes / 1024,
+                        compat_status.dma_frame_bytes / 1024,
+                        compat_status.managed_concurrent_sprite_banks,
+                        md_profile::MD_MANAGED_MAX_CONCURRENT_BANKS,
+                        compat_status.managed_sprite_cells_used,
+                        md_profile::MD_MANAGED_SPRITE_CELL_BUDGET
+                    )
+                );
+                scene_for_build = profile.scene;
+                compatibility_profile_applied = true;
+                hw_errors = compat_errors;
+            }
+        }
+    }
 
     for (message, is_fatal) in &hw_errors {
         emit!(if *is_fatal { "error" } else { "warn" }, message);
@@ -528,22 +722,29 @@ where
         "info",
         "Gerando codigo C e manifestos a partir do modelo canónico RDS (cena + project.rds); nao le o C do doador SGDK em runtime."
     );
-    let ast = match generate_ast_with_prefabs(project_dir, project, &scene) {
-        Ok(ast) => ast,
-        Err(error) => {
-            emit!(
-                "error",
-                format!("Falha ao gerar AST com prefabs: {}", error)
-            );
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+    let ast = if !compatibility_profile_applied {
+        match generate_ast_with_prefabs(project_dir, project, &scene) {
+            Ok(ast) => ast,
+            Err(error) => {
+                emit!(
+                    "error",
+                    format!("Falha ao gerar AST com prefabs: {}", error)
+                );
+                return BuildResult {
+                    ok: false,
+                    rom_path: String::new(),
+                    log,
+                };
+            }
         }
+    } else {
+        generate_ast(project, &scene_for_build)
     };
     // Normalise collision map data before passing to emitter (handles null and length mismatches)
-    let collision_data = resolved_scene.collision_map.as_ref().map(|m| m.normalize());
+    let collision_data = scene_for_build
+        .collision_map
+        .as_ref()
+        .map(|m| m.normalize());
     let collision_slice = collision_data.as_deref();
     let artifacts = match target.target {
         "snes" => {
@@ -1503,7 +1704,8 @@ fn classify_make_failure(stderr: &str) -> &'static str {
     if lower.contains("java") && (lower.contains("not found") || lower.contains("nao encontrado")) {
         return "java_missing";
     }
-    if lower.contains("make") && (lower.contains("not found") || lower.contains("nao reconhecido")) {
+    if lower.contains("make") && (lower.contains("not found") || lower.contains("nao reconhecido"))
+    {
         return "toolchain_missing";
     }
     if lower.contains("asset referenciado nao encontrado") {
@@ -1937,6 +2139,196 @@ mod tests {
         fs::create_dir_all(&bin_dir).expect("create fake toolchain bin");
         let make_program = fake_make_script(&bin_dir, extension);
         (root, make_program)
+    }
+
+    fn fake_toolchain_with_sega_rom(root_name: &str, extension: &str) -> (PathBuf, PathBuf) {
+        let root = temp_dir(root_name);
+        let bin_dir = root.join("bin");
+        fs::create_dir_all(&bin_dir).expect("create fake toolchain bin");
+        let make_program = if cfg!(target_os = "windows") {
+            let path = bin_dir.join("fake-make.cmd");
+            fs::write(
+                &path,
+                format!(
+                    "@echo off\r\n\
+                     if not exist out mkdir out\r\n\
+                     powershell -NoProfile -Command \"$bytes = New-Object byte[] 512; [System.Text.Encoding]::ASCII.GetBytes('SEGA MEGA DRIVE').CopyTo($bytes, 256); [IO.File]::WriteAllBytes('out\\artifact.{extension}', $bytes)\"\r\n\
+                     exit /b 0\r\n"
+                ),
+            )
+            .expect("write fake sega make script");
+            path
+        } else {
+            let path = bin_dir.join("fake-make.sh");
+            fs::write(
+                &path,
+                format!(
+                    "#!/bin/sh\n\
+                     mkdir -p out\n\
+                     python3 - <<'PY'\n\
+import pathlib\n\
+rom = bytearray(512)\n\
+rom[0x100:0x10F] = b'SEGA MEGA DRIVE'\n\
+pathlib.Path('out/artifact.{extension}').write_bytes(rom)\n\
+PY\n"
+                ),
+            )
+            .expect("write fake sega make script");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut permissions = fs::metadata(&path).expect("stat fake make").permissions();
+                permissions.set_mode(0o755);
+                fs::set_permissions(&path, permissions).expect("chmod fake make");
+            }
+            path
+        };
+        (root, make_program)
+    }
+
+    fn install_nocode_sgdk_game_fixture(project_dir: &Path) {
+        let sprite_dir = project_dir.join("assets").join("sprites");
+        let tilemap_dir = project_dir.join("assets").join("tilemaps");
+        let audio_dir = project_dir.join("assets").join("audio");
+        fs::create_dir_all(&sprite_dir).expect("create sprite dir");
+        fs::create_dir_all(&tilemap_dir).expect("create tilemap dir");
+        fs::create_dir_all(&audio_dir).expect("create audio dir");
+        let source_sprite = fixture_dir("snes_dummy")
+            .join("assets")
+            .join("sprites")
+            .join("hero.ppm");
+        fs::copy(&source_sprite, sprite_dir.join("player.ppm")).expect("copy player sprite");
+        fs::copy(&source_sprite, sprite_dir.join("enemy.ppm")).expect("copy enemy sprite");
+        fs::copy(&source_sprite, tilemap_dir.join("stage.ppm")).expect("copy stage tilemap");
+        fs::write(audio_dir.join("step.wav"), b"RIFFstep").expect("write step sfx");
+        fs::write(audio_dir.join("fire.wav"), b"RIFFfire").expect("write fire sfx");
+
+        let graph = serde_json::json!({
+            "version": 1,
+            "nodes": [
+                { "id": "start", "type": "event_start", "label": "Start", "x": 0, "y": 0, "params": {} },
+                { "id": "spawn_enemy", "type": "spawn_entity", "label": "Spawn", "x": 140, "y": 0, "params": { "prefab": "enemy", "x": 200, "y": 96 } },
+                { "id": "paint_floor", "type": "set_tile", "label": "Set Tile", "x": 280, "y": 0, "params": { "layer": "BG_A", "tile": 12, "x": 3, "y": 14 } },
+                { "id": "update", "type": "event_update", "label": "Update", "x": 0, "y": 160, "params": {} },
+                { "id": "right", "type": "input_held", "label": "Right", "x": 140, "y": 160, "params": { "pad": "JOY_1", "button": "BUTTON_RIGHT" } },
+                { "id": "velocity", "type": "set_velocity", "label": "Velocity", "x": 280, "y": 160, "params": { "target": "player", "vx": 2, "vy": 0 } },
+                { "id": "position", "type": "set_position", "label": "Position", "x": 420, "y": 160, "params": { "target": "player", "x": 72, "y": 96 } },
+                { "id": "run_anim", "type": "set_animation_state", "label": "Animation", "x": 560, "y": 160, "params": { "target": "player", "state": "run" } },
+                { "id": "camera_follow", "type": "camera_follow", "label": "Camera", "x": 700, "y": 160, "params": { "target": "player", "damping": 0 } },
+                { "id": "budget", "type": "hardware_budget_check", "label": "Budget", "x": 840, "y": 160, "params": { "vram_kb": 64, "sprites": 80, "scanline_sprites": 20 } },
+                { "id": "step_sfx", "type": "action_sound", "label": "Step", "x": 980, "y": 160, "params": { "sfx": "step" } },
+                { "id": "destroy_enemy", "type": "destroy_entity", "label": "Destroy", "x": 1120, "y": 160, "params": { "target": "enemy" } },
+                { "id": "update_fire", "type": "event_update", "label": "Update Fire", "x": 0, "y": 320, "params": {} },
+                { "id": "fire", "type": "input_pressed", "label": "Fire", "x": 140, "y": 320, "params": { "pad": "JOY_1", "button": "BUTTON_A" } },
+                { "id": "fire_sfx", "type": "action_sound", "label": "Fire SFX", "x": 280, "y": 320, "params": { "sfx": "fire" } }
+            ],
+            "edges": [
+                { "id": "s1", "fromNode": "start", "fromPort": "exec", "toNode": "spawn_enemy", "toPort": "exec" },
+                { "id": "s2", "fromNode": "spawn_enemy", "fromPort": "exec", "toNode": "paint_floor", "toPort": "exec" },
+                { "id": "u1", "fromNode": "update", "fromPort": "exec", "toNode": "right", "toPort": "exec" },
+                { "id": "u2", "fromNode": "right", "fromPort": "true", "toNode": "velocity", "toPort": "exec" },
+                { "id": "u3", "fromNode": "velocity", "fromPort": "exec", "toNode": "position", "toPort": "exec" },
+                { "id": "u4", "fromNode": "position", "fromPort": "exec", "toNode": "run_anim", "toPort": "exec" },
+                { "id": "u5", "fromNode": "run_anim", "fromPort": "exec", "toNode": "camera_follow", "toPort": "exec" },
+                { "id": "u6", "fromNode": "camera_follow", "fromPort": "exec", "toNode": "budget", "toPort": "exec" },
+                { "id": "u7", "fromNode": "budget", "fromPort": "ok", "toNode": "step_sfx", "toPort": "exec" },
+                { "id": "u8", "fromNode": "step_sfx", "fromPort": "exec", "toNode": "destroy_enemy", "toPort": "exec" },
+                { "id": "f1", "fromNode": "update_fire", "fromPort": "exec", "toNode": "fire", "toPort": "exec" },
+                { "id": "f2", "fromNode": "fire", "fromPort": "true", "toNode": "fire_sfx", "toPort": "exec" }
+            ]
+        });
+        let scene = serde_json::json!({
+            "scene_id": "main",
+            "schema_version": "1.6.0",
+            "display_name": "No-Code SGDK Game",
+            "background_layers": [],
+            "entities": [
+                {
+                    "entity_id": "world",
+                    "prefab": null,
+                    "transform": { "x": 0, "y": 0 },
+                    "components": {
+                        "sprite": null,
+                        "collision": null,
+                        "input": null,
+                        "physics": null,
+                        "audio": null,
+                        "logic": null,
+                        "camera": null,
+                        "tilemap": {
+                            "tileset": "assets/tilemaps/stage.ppm",
+                            "map_width": 64,
+                            "map_height": 32,
+                            "scroll_x": 0,
+                            "scroll_y": 0
+                        }
+                    }
+                },
+                {
+                    "entity_id": "player",
+                    "prefab": null,
+                    "transform": { "x": 40, "y": 96 },
+                    "components": {
+                        "sprite": {
+                            "asset": "assets/sprites/player.ppm",
+                            "frame_width": 16,
+                            "frame_height": 16,
+                            "pivot": null,
+                            "palette_slot": 0,
+                            "animations": {
+                                "idle": { "frames": [0], "fps": 6, "loop": true },
+                                "run": { "frames": [1, 2, 3], "fps": 12, "loop": true }
+                            },
+                            "priority": "foreground",
+                            "meta_sprite": false
+                        },
+                        "collision": { "shape": "aabb", "width": 16, "height": 16, "offset": null, "solid": true, "layer": "player", "collides_with": ["enemy"] },
+                        "input": { "device": "joypad_1", "mapping": {} },
+                        "physics": null,
+                        "audio": { "sfx": { "step": "assets/audio/step.wav", "fire": "assets/audio/fire.wav" }, "bgm": null },
+                        "logic": { "graph": graph.to_string(), "variables": {} },
+                        "camera": null,
+                        "tilemap": null
+                    }
+                },
+                {
+                    "entity_id": "enemy",
+                    "prefab": null,
+                    "transform": { "x": 160, "y": 96 },
+                    "components": {
+                        "sprite": {
+                            "asset": "assets/sprites/enemy.ppm",
+                            "frame_width": 16,
+                            "frame_height": 16,
+                            "pivot": null,
+                            "palette_slot": 1,
+                            "animations": {
+                                "idle": { "frames": [0], "fps": 6, "loop": true },
+                                "run": { "frames": [1, 2, 3], "fps": 12, "loop": true }
+                            },
+                            "priority": "foreground",
+                            "meta_sprite": false
+                        },
+                        "collision": { "shape": "aabb", "width": 16, "height": 16, "offset": null, "solid": true, "layer": "enemy", "collides_with": ["player"] },
+                        "input": null,
+                        "physics": null,
+                        "audio": null,
+                        "logic": null,
+                        "camera": null,
+                        "tilemap": null
+                    }
+                }
+            ],
+            "palettes": [],
+            "retrofx": null,
+            "collision_map": null,
+            "layers": null
+        });
+        fs::write(
+            project_dir.join("scenes").join("main.json"),
+            serde_json::to_string_pretty(&scene).expect("serialize no-code scene"),
+        )
+        .expect("write no-code scene");
     }
 
     fn install_tilemap_fixture(project_dir: &Path) {
@@ -2421,6 +2813,66 @@ mod tests {
     }
 
     #[test]
+    fn build_generates_rom_from_stable_nocode_sgdk_game_nodes() {
+        let _serial = test_serial_guard();
+        let project_dir = workspace_copy("megadrive_dummy");
+        install_nocode_sgdk_game_fixture(&project_dir);
+        let (sgdk_root, make_program) = fake_toolchain_with_sega_rom("sgdk-nocode-game", "md");
+        let environment = BuildEnvironment {
+            sgdk_root: Some(sgdk_root),
+            sgdk_make_program: Some(make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let first = run_build_with_environment(&project_dir, &environment, |_| {});
+
+        assert!(first.ok, "build log: {:?}", first.log);
+        assert!(first.rom_path.ends_with(".md"));
+        let main_c_path = project_dir
+            .join("build")
+            .join("megadrive")
+            .join("src")
+            .join("main.c");
+        let resources_res_path = project_dir
+            .join("build")
+            .join("megadrive")
+            .join("res")
+            .join("resources.res");
+        let main_c = fs::read_to_string(&main_c_path).expect("read no-code SGDK main.c");
+        let resources_res =
+            fs::read_to_string(&resources_res_path).expect("read no-code SGDK resources.res");
+        let rom = fs::read(project_dir.join(&first.rom_path)).expect("read no-code SGDK ROM");
+
+        assert!(main_c.contains("if ((JOY_readJoypad(JOY_1) & BUTTON_RIGHT)) {"));
+        assert!(main_c.contains("logic_var_player_vx = 2;"));
+        assert!(main_c.contains("SPR_setPosition(spr_player, spr_player_x, spr_player_y);"));
+        assert!(main_c.contains("SPR_setAnim(spr_player, 1);"));
+        assert!(main_c.contains("VDP_setHorizontalScroll(BG_A, spr_player_x - 160);"));
+        assert!(main_c.contains("VDP_setTileMapXY(BG_A, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, 12), 3, 14);"));
+        assert!(main_c.contains("// Hardware budget check: VRAM 64KB, sprites 80, sprites/scanline 20"));
+        assert!(main_c.contains("SPR_setVisibility(spr_enemy, VISIBLE);"));
+        assert!(main_c.contains("SPR_setVisibility(spr_enemy, HIDDEN);"));
+        assert!(resources_res.contains("SPRITE player \"assets/sprites/player.bmp\" 2 2 NONE"));
+        assert!(resources_res.contains("SPRITE enemy \"assets/sprites/enemy.bmp\" 2 2 NONE"));
+        assert!(resources_res.contains("IMAGE world_tilemap \"assets/tilemaps/stage.bmp\" NONE"));
+        assert!(resources_res.contains("WAV step \"assets/audio/step.wav\" XGM"));
+        assert!(resources_res.contains("WAV fire \"assets/audio/fire.wav\" XGM"));
+        assert!(
+            rom.windows(4).any(|window| window == b"SEGA"),
+            "ROM deve conter assinatura SEGA para smoke de emulacao/build"
+        );
+
+        let second = run_build_with_environment(&project_dir, &environment, |_| {});
+        assert!(second.ok, "second build log: {:?}", second.log);
+        let second_main_c =
+            fs::read_to_string(&main_c_path).expect("read regenerated no-code SGDK main.c");
+        assert_eq!(main_c, second_main_c, "SGDK C gerado deve ser deterministico");
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
     fn megadrive_build_forces_windows_os_env_for_sgdk_make() {
         if !cfg!(target_os = "windows") {
             return;
@@ -2497,12 +2949,20 @@ mod tests {
         };
 
         let native_result = run_build_with_environment(&native_dir, &environment, |_| {});
-        assert!(!native_result.ok, "native deve abortar; log: {:?}", native_result.log);
+        assert!(
+            !native_result.ok,
+            "native deve abortar; log: {:?}",
+            native_result.log
+        );
+        assert!(native_result
+            .log
+            .iter()
+            .any(|entry| { entry.level == "error" && entry.message.contains("VRAM Overflow") }));
         assert!(native_result.log.iter().any(|entry| {
-            entry.level == "error" && entry.message.contains("VRAM Overflow")
-        }));
-        assert!(native_result.log.iter().any(|entry| {
-            entry.level == "error" && entry.message.contains("Build abortado: erros de hardware constraints")
+            entry.level == "error"
+                && entry
+                    .message
+                    .contains("Build abortado: erros de hardware constraints")
         }));
 
         let imported_result = run_build_with_environment(&imported_dir, &environment, |_| {});
@@ -2518,7 +2978,9 @@ mod tests {
         }));
         assert!(imported_result.log.iter().any(|entry| {
             entry.level == "info"
-                && entry.message.contains("MD VRAM analysis: mode=sgdk_managed")
+                && entry
+                    .message
+                    .contains("MD VRAM analysis: mode=sgdk_managed")
                 && entry.message.contains("spr_res=")
                 && entry.message.contains("strm_spr=")
                 && entry.message.contains("anim_sw=")
@@ -2526,7 +2988,9 @@ mod tests {
         assert!(
             !imported_result.log.iter().any(|entry| {
                 entry.level == "error"
-                    && entry.message.contains("Build abortado: erros de hardware constraints")
+                    && entry
+                        .message
+                        .contains("Build abortado: erros de hardware constraints")
             }),
             "imported_sgdk nao deve abortar por overflow de VRAM; log: {:?}",
             imported_result.log
@@ -3048,8 +3512,11 @@ mod tests {
         let host_dir = temp_dir("legacy-host-build");
         fs::create_dir_all(host_dir.join("src")).expect("create legacy src");
         fs::create_dir_all(host_dir.join("inc")).expect("create legacy inc");
-        fs::write(host_dir.join("src").join("main.c"), b"int main(void){return 0;}")
-            .expect("write legacy main.c");
+        fs::write(
+            host_dir.join("src").join("main.c"),
+            b"int main(void){return 0;}",
+        )
+        .expect("write legacy main.c");
         fs::write(host_dir.join("inc").join("game.h"), b"void game(void);")
             .expect("write legacy header");
         fs::write(host_dir.join("Makefile"), "PROJECT_NAME := legacy_host\n")
@@ -3080,7 +3547,10 @@ mod tests {
         assert!(host_dir.join("out").join("artifact.md").is_file());
         assert!(PathBuf::from(&result.rom_path).starts_with(host_dir.join("out")));
         assert!(!overlay_dir.join("build").join("megadrive").exists());
-        assert!(result.log.iter().any(|line| line.message.contains("Delegando build para host")));
+        assert!(result
+            .log
+            .iter()
+            .any(|line| line.message.contains("Delegando build para host")));
 
         let _ = fs::remove_dir_all(host_dir);
     }
@@ -3091,8 +3561,11 @@ mod tests {
         let host_dir = temp_dir("legacy-host-multi-target");
         fs::create_dir_all(host_dir.join("src")).expect("create legacy src");
         fs::create_dir_all(host_dir.join("inc")).expect("create legacy inc");
-        fs::write(host_dir.join("src").join("main.c"), b"int main(void){return 0;}")
-            .expect("write legacy main.c");
+        fs::write(
+            host_dir.join("src").join("main.c"),
+            b"int main(void){return 0;}",
+        )
+        .expect("write legacy main.c");
         fs::write(host_dir.join("inc").join("game.h"), b"void game(void);")
             .expect("write legacy header");
         fs::write(host_dir.join("Makefile"), "PROJECT_NAME := legacy_host\n")
@@ -3120,7 +3593,11 @@ mod tests {
 
         assert!(!result.ok);
         assert_eq!(result.results.len(), 2);
-        assert!(result.results[0].ok, "legacy megadrive log: {:?}", result.results[0].log);
+        assert!(
+            result.results[0].ok,
+            "legacy megadrive log: {:?}",
+            result.results[0].log
+        );
         assert!(!result.results[1].ok);
         assert!(result.results[1]
             .errors
@@ -3496,7 +3973,9 @@ mod tests {
 
         // SNES RetroFX uses HDMA parallax (HDMATable16 / setParallaxScrolling)
         assert!(
-            main_c.contains("HDMATable16") || main_c.contains("setParallaxScrolling") || main_c.contains("retro_parallax"),
+            main_c.contains("HDMATable16")
+                || main_c.contains("setParallaxScrolling")
+                || main_c.contains("retro_parallax"),
             "snes main.c should contain HDMA parallax setup: {}",
             main_c
         );

@@ -16017,7 +16017,7 @@ PY\n",
         );
         assert!(
             !md_hw.errors.is_empty(),
-            "BLAZE deve manter ao menos um blocker legitimo de hardware"
+            "BLAZE original deve continuar expondo blocker legitimo de hardware antes da transformacao"
         );
         assert!(
             md_hw.resident_vram_bytes > crate::hardware::md_profile::MD_VRAM_BYTES
@@ -16028,12 +16028,55 @@ PY\n",
             "BLAZE deve bloquear por residencia real ou por limite de sprites"
         );
 
+        let toolchain = temp_dir("sgdk-matrix-blaze-compatible-fake-sgdk");
+        let bin = toolchain.join("bin");
+        fs::create_dir_all(&bin).expect("fake bin");
+        let make = if cfg!(target_os = "windows") {
+            let p = bin.join("fake-make.cmd");
+            fs::write(
+                &p,
+                "@echo off\r\n\
+                 if not exist out mkdir out\r\n\
+                 powershell -NoProfile -Command \"$bytes = New-Object byte[] 512; [System.Text.Encoding]::ASCII.GetBytes('SEGA MEGA DRIVE').CopyTo($bytes, 256); [IO.File]::WriteAllBytes('out\\artifact.md', $bytes)\"\r\n\
+                 exit /b 0\r\n",
+            )
+            .expect("write fake make");
+            p
+        } else {
+            let p = bin.join("fake-make.sh");
+            fs::write(
+                &p,
+                "#!/bin/sh\n\
+                 mkdir -p out\n\
+                 python3 - <<'PY'\n\
+import pathlib\n\
+rom = bytearray(512)\n\
+rom[0x100:0x10F] = b'SEGA MEGA DRIVE'\n\
+pathlib.Path('out/artifact.md').write_bytes(rom)\n\
+PY\n",
+            )
+            .expect("write fake make");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut perms = fs::metadata(&p).unwrap().permissions();
+                perms.set_mode(0o755);
+                fs::set_permissions(&p, perms).unwrap();
+            }
+            p
+        };
         let env = BuildEnvironment {
+            sgdk_root: Some(toolchain.clone()),
+            sgdk_make_program: Some(make),
             disable_auto_detect: true,
             ..BuildEnvironment::default()
         };
         let result = run_build_with_environment(&project, &env, |_| {});
-        assert!(!result.ok, "BLAZE deve falhar por blocker legitimo de hardware");
+        assert!(
+            result.ok,
+            "BLAZE deve gerar build com perfil de compatibilidade conservador: {:?}",
+            result.log
+        );
         assert!(
             result
                 .log
@@ -16045,21 +16088,22 @@ PY\n",
             "log deve expor breakdown de VRAM/residencia por categoria e uso de banks/cells"
         );
         assert!(
-            result
-                .log
-                .iter()
-                .any(|entry| entry.level == "error" && entry.message.contains("Sprite overflow")),
-            "blocker principal de BLAZE deve permanecer explicito"
-        );
-        assert!(
             result.log.iter().any(|entry| {
-                entry.level == "error"
-                    && (entry.message.contains("VRAM Overflow (resident)")
-                        || entry.message.contains("Sprite overflow"))
+                entry.level == "warn"
+                    && entry.message.contains("SGDK compatibility profile")
+                    && entry.message.contains("sprite culling")
+                    && entry.message.contains("multiplex")
             }),
-            "BLAZE deve expor blocker fatal explicito (residencia ou sprites)"
+            "BLAZE deve documentar transformacao conservadora de sprite culling/multiplex no build"
+        );
+        let rom_full = project.join(&result.rom_path);
+        let rom_bytes = fs::read(&rom_full).expect("read compatible BLAZE ROM");
+        assert!(
+            rom_bytes.windows(4).any(|w| w == b"SEGA"),
+            "BLAZE compat deve gerar ROM com assinatura SEGA"
         );
 
+        let _ = fs::remove_dir_all(&toolchain);
         let _ = fs::remove_dir_all(&project);
     }
 }
