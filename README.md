@@ -13,7 +13,7 @@
 ## Estado Atual
 
 - Fase ativa real: `release candidate / beta tecnica em hardening`.
-- Fotografia atual em `main`: PR #4 mergeado em `91bb8eb354389e370bb59d6a5ae84c21b4a1429f`; `npm run release:readiness:promotion` passou com `Pronto para promocao: SIM`.
+- Fotografia atual em `main`: PR #5 mergeado em `a31357072c93431ce441ff51a88a51004365ca88`; `npm run release:readiness:promotion` passou com `Pronto para promocao: SIM`.
 - O foco atual nao e abrir escopo novo; e manter o fluxo canonico `Build -> ROM -> Emulacao` repetivel e documentado com honestidade.
 - O estado operacional canonico fica em [docs/06_AI_MEMORY_BANK.md](./docs/06_AI_MEMORY_BANK.md).
 - A matriz permanente de fases, superficies e importadores fica em [docs/03_ROADMAP_MVP.md](./docs/03_ROADMAP_MVP.md).
@@ -36,7 +36,7 @@ RetroDev Studio ja passou de prototipo. O produto hoje consegue:
 
 O produto ainda nao deve ser descrito como engine totalmente pronta para producao comercial. A prioridade atual e consistencia, ergonomia e repetibilidade dos fluxos certificados.
 
-Na frente SGDK/no-code, a branch `codex/sgdk-stable-node-engine-blaze` removeu fake da prova Stable. O jogo no-code real e gerado 100% por nodes, compila com SGDK oficial, gera ROM persistente e roda no Genesis Plus GX; o corpus real cobre 122 projetos, com 68 builds/ROMs/emulacoes reais e 54 bridges formais; `BLAZE_ENGINE` tem modo compativel real com build, ROM e emulacao. SGDK Stable e Node Engine Stable estao **SIM localmente nessa branch**; a promocao publica ainda depende de PR/checks remotos, merge para `main` e readiness no destino.
+Na frente SGDK/no-code, o PR #5 removeu fake da prova Stable e foi integrado em `main`. O jogo no-code real e gerado 100% por nodes, compila com SGDK oficial, gera ROM persistente e roda no Genesis Plus GX; o corpus real cobre 122 projetos, com 68 builds/ROMs/emulacoes reais e 54 bridges formais; `BLAZE_ENGINE` tem modo compativel real com build, ROM e emulacao. A exposicao publica de maturidade ainda deve seguir o roadmap e as badges reais da UI, sem promocao automatica de superficies experimentais.
 
 ---
 

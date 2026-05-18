@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-17 (rodada 44 - corpus visible framebuffer + PR merge)
+**Ultima Atualizacao:** 2026-05-18 (rodada 45 - PR #5 integrado + atalhos centrais)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,16 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-18 rodada 45 - PR #5 integrado + branch `codex/product-professionalization-wave`):**
+  - **Fechamento SGDK/Node/BLAZE:** PR #5 (`https://github.com/Misael-art/RetroDevStudio/pull/5`) integrou `codex/sgdk-stable-node-engine-blaze` em `main` por merge commit `a31357072c93431ce441ff51a88a51004365ca88`, com head `7768f4bcc3c2109eac4ec2531bd8078a8dfeba81`.
+  - **Checks/remoto:** `CI` e `CodeRabbit` passaram no PR; o `Desktop E2E` teve uma falha inicial em `live_overflow_snes` no run `26010576737`, foi rerodado sem alteracao de codigo e passou no run #180, cobrindo os 16 passos do smoke e ledger final.
+  - **Main/readiness:** `git checkout main` + `git pull --ff-only origin main` atualizaram o destino para `a313570`; `npm run release:readiness:promotion` passou em `main` com `Pronto para promocao: SIM`, incluindo baseline, build debug, upstream oficial, desktop E2E simples e QA consumido.
+  - **Nova branch:** `codex/product-professionalization-wave` foi criada a partir de `main` verde para avancar produto em ciclos pequenos, sem reabrir o core `Build -> ROM -> Emulacao`.
+  - **Primeira fatia UX/CX:** `src/core/shortcuts.ts` centraliza atalhos de projeto/build/edicao/layout/viewport/nodegraph/emulador, normaliza chords, agrupa por area, detecta conflitos e oferece matching de evento. `UnifiedTopBar` aceita `shortcut`, mostra `kbd` nos menus e tooltips recebem `Atalho: ...`.
+  - **Mapa central de atalhos:** `App.tsx` substituiu a lista fixa por um modal `shortcut-map` agrupado, com status de conflito. `Ctrl+/` abre o mapa; `Ctrl+Alt+F`, `Ctrl+Alt+S` e `Ctrl+Alt+R` acionam foco/layout salvo/restaurado pelo registro central. O atalho de `Build & Run` aparece no tooltip/menu, mas o disparo global de build foi mantido fora desta fatia para evitar acionamento acidental.
+  - **Cobertura:** `src/core/shortcuts.test.ts` cobre registro, formatacao, normalizacao, conflitos e matching; `src/App.test.tsx` cobre menu + `Ctrl+/`. Gates executados nesta fatia: `npx vitest run src/core/shortcuts.test.ts`, `npx vitest run src/App.test.tsx --testNamePattern "central shortcut"`, `npx vitest run src/core/shortcuts.test.ts src/App.test.tsx --testNamePattern "shortcut|central shortcut"`, `npm run check:tree`, `git diff --check`, `npm run lint`, `npx tsc --noEmit`, `npm test` (**307/307**), `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` e `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` (**336 passed / 15 ignored**).
+  - **Status honesto:** isto nao fecha command palette, editor de shortcuts, debugger/profiler, ArtStudio, importadores, SNES parity ou exemplos oficiais. Essas frentes seguem pendentes/Experimentais ate prova dedicada e QA institucional.
 
 * **O que acabou de acontecer (2026-05-17 rodada 44 - branch `codex/sgdk-stable-node-engine-blaze`):**
   - **Criterio rigoroso preservado:** `corpus_libretro_visible_smoke` exige Libretro real, framebuffer capturado e `non_black_pixels > 0`. Fake/toolchain fake nao contam como prova Stable.

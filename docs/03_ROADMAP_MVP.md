@@ -1,8 +1,10 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-05-17 (rodada 44)
+**Ultima revisao canonica:** 2026-05-18 (rodada 45)
 **Fase ativa real:** Core MVP promovido tecnicamente em main; hardening continua nas superficies experimentais
+
+**Nota 2026-05-18 (rodada 45, main + branch `codex/product-professionalization-wave`):** PR #5 (`codex/sgdk-stable-node-engine-blaze`) foi mergeado em `main` por `a31357072c93431ce441ff51a88a51004365ca88`; `npm run release:readiness:promotion` passou no destino com `Pronto para promocao: SIM`. A nova branch de profissionalizacao iniciou uma fatia pequena de UX/CX: mapa central de atalhos, deteccao de conflitos, `Ctrl+/` para abrir atalhos e hints de atalho em menus/topbar. Gates locais verdes nesta fatia: `check:tree`, `diff --check`, `lint`, `tsc`, `npm test` **307/307**, `cargo clippy` e `cargo test --lib` **336/15 ignored**. Isto nao fecha command palette, editor de shortcuts nem depuracao/profiling; superficies experimentais permanecem sem promocao automatica.
 
 **Nota 2026-05-17 (rodada 44, branch `codex/sgdk-stable-node-engine-blaze`):** corpus real fechou **122/122** com criterio rigoroso de framebuffer visivel (`emulation_visible_ok=68`, `bridge_only=54`, `failed=0`, `stable_candidate=true`). Breakout e Procedural Animation deixaram de falhar com framebuffer preto apos supressao honesta de `XGM_startPlay` no modo `-DRDS_CORPUS_VISIBLE_SMOKE`. SGDK Stable local: **SIM**; Node Engine Stable local: **SIM**; merge/PR/main pendentes de governanca.
 

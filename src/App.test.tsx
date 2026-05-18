@@ -1887,6 +1887,44 @@ describe("App build flow", () => {
     expect(container.textContent).toContain("Tauri 2 · React 19 · Rust");
   });
 
+  it("opens the central shortcut map from the menu and Ctrl+/", async () => {
+    await act(async () => {
+      findButton(container, "Menu").click();
+      await flush();
+    });
+
+    const shortcutMenuButton = container.querySelector("[data-testid='menu-action-shortcuts']");
+    expect(shortcutMenuButton).toBeInstanceOf(HTMLButtonElement);
+    expect(shortcutMenuButton?.textContent).toContain("Ctrl+/");
+    expect(shortcutMenuButton?.getAttribute("title")).toContain("Ctrl+/");
+
+    await act(async () => {
+      (shortcutMenuButton as HTMLButtonElement).click();
+      await flush();
+    });
+
+    const shortcutMap = container.querySelector("[data-testid='shortcut-map']");
+    expect(shortcutMap).toBeInstanceOf(HTMLDivElement);
+    expect(shortcutMap?.textContent).toContain("Build & Run");
+    expect(shortcutMap?.textContent).toContain("Ctrl+B");
+    expect(shortcutMap?.textContent).toContain("Sem conflitos ativos");
+
+    await act(async () => {
+      findButton(container, "Fechar").click();
+      await flush();
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "/",
+          ctrlKey: true,
+          bubbles: true,
+        })
+      );
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='shortcut-map']")).toBeInstanceOf(HTMLDivElement);
+  });
+
   it("updates the contextual guide for the logic workspace and opens the contextual palette", async () => {
     await act(async () => {
       useEditorStore.getState().setActiveViewportTab("logic");
