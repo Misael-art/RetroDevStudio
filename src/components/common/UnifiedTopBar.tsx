@@ -6,6 +6,7 @@ export interface UnifiedTopBarAction {
   disabled?: boolean;
   accent?: "default" | "primary" | "success" | "danger";
   title?: string;
+  shortcut?: string;
   testId?: string;
 }
 
@@ -107,6 +108,11 @@ export default function UnifiedTopBar({
                         className={`flex items-center justify-between rounded border px-3 py-2 text-left text-[12px] font-medium transition-colors ${menuActionTone(action.accent)} disabled:cursor-not-allowed disabled:opacity-40`}
                       >
                         <span>{action.label}</span>
+                        {action.shortcut ? (
+                          <kbd className="ml-3 rounded border border-[#334155] bg-[#020617] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#94a3b8]">
+                            {action.shortcut}
+                          </kbd>
+                        ) : null}
                       </button>
                     ))}
                   </div>

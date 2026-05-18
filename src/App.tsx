@@ -71,6 +71,15 @@ import {
   resolveSceneWorkspaceContext,
 } from "./core/sceneWorkspaceContext";
 import { resolveSceneWorldMetrics } from "./core/sceneWorldModel";
+import {
+  DEFAULT_SHORTCUTS,
+  eventMatchesShortcut,
+  findShortcutConflicts,
+  formatShortcutKeys,
+  getShortcutLabel,
+  getShortcutTitle,
+  groupShortcutsByGroup,
+} from "./core/shortcuts";
 
 const ExplorerWorkspace = lazy(() => import("./components/explorer/ExplorerWorkspace"));
 const InspectorPanel = lazy(() => import("./components/inspector/InspectorPanel"));
@@ -127,6 +136,8 @@ type LayoutMap = {
 
 const LAYOUT_STORAGE_KEY = "retrodev-shell-saved-layout";
 const WORKSPACE_GUIDE_STORAGE_KEY = "retrodev-workspace-guide-expanded";
+const SHORTCUT_GROUPS = groupShortcutsByGroup(DEFAULT_SHORTCUTS);
+const SHORTCUT_CONFLICTS = findShortcutConflicts(DEFAULT_SHORTCUTS);
 
 const WORKSPACE_ITEMS: {
   id: EditorWorkspace;
@@ -883,6 +894,10 @@ function isEditableTarget(target: EventTarget | null): boolean {
   );
 }
 
+function getShortcutConflictForCommand(commandId: string) {
+  return SHORTCUT_CONFLICTS.find((conflict) => conflict.commandIds.includes(commandId));
+}
+
 type AutomationState = {
   activeProjectDir: string;
   activeProjectName: string;
@@ -1457,23 +1472,43 @@ export default function App() {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (!(event.ctrlKey || event.metaKey) || event.altKey || isEditableTarget(event.target)) {
+      if (isEditableTarget(event.target)) {
         return;
       }
 
-      if (event.key.toLowerCase() === "z") {
+      if (eventMatchesShortcut(event, "shortcuts.show")) {
         event.preventDefault();
-        if (event.shiftKey) {
-          redo();
-        } else {
-          undo();
-        }
+        setShowShortcuts(true);
         return;
       }
 
-      if (event.key.toLowerCase() === "y" && !event.shiftKey) {
+      if (eventMatchesShortcut(event, "layout.focus")) {
+        event.preventDefault();
+        toggleFocusMode();
+        return;
+      }
+
+      if (eventMatchesShortcut(event, "layout.save")) {
+        event.preventDefault();
+        saveCurrentLayout();
+        return;
+      }
+
+      if (eventMatchesShortcut(event, "layout.restore")) {
+        event.preventDefault();
+        restoreSavedLayout();
+        return;
+      }
+
+      if (eventMatchesShortcut(event, "edit.redo")) {
         event.preventDefault();
         redo();
+        return;
+      }
+
+      if (eventMatchesShortcut(event, "edit.undo")) {
+        event.preventDefault();
+        undo();
       }
     }
 
@@ -1481,7 +1516,7 @@ export default function App() {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [redo, undo]);
+  }, [redo, restoreSavedLayout, saveCurrentLayout, toggleFocusMode, undo]);
 
   function describeError(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
@@ -1551,10 +1586,14 @@ export default function App() {
           label: "Novo",
           onClick: () => setShowProjectWizard(true),
           accent: "primary",
+          shortcut: getShortcutLabel("project.new"),
+          title: getShortcutTitle("project.new", "Criar novo projeto"),
         },
         {
           label: "Abrir",
           onClick: () => void handleOpenProject(),
+          shortcut: getShortcutLabel("project.open"),
+          title: getShortcutTitle("project.open", "Abrir projeto existente"),
         },
         {
           label: creatingProject ? "Importando..." : "Importar Externo",
@@ -1565,6 +1604,8 @@ export default function App() {
           label: "Salvar",
           onClick: () => void handleSaveScene(),
           disabled: !activeProjectDir,
+          shortcut: getShortcutLabel("scene.save"),
+          title: getShortcutTitle("scene.save", "Salvar cena ativa"),
         },
         {
           label: "Fechar",
@@ -1581,21 +1622,29 @@ export default function App() {
           label: "Validar",
           onClick: () => void handleValidate(),
           disabled: !activeProjectDir,
+          shortcut: getShortcutLabel("build.validate"),
+          title: getShortcutTitle("build.validate", "Validar projeto ativo"),
         },
         {
           label: "Gerar C",
           onClick: () => void handleGenerateC(),
           disabled: !activeProjectDir,
+          shortcut: getShortcutLabel("code.generate"),
+          title: getShortcutTitle("code.generate", "Gerar codigo C para a cena ativa"),
         },
         {
           label: "Copiar",
           onClick: handleCopyEntity,
           disabled: !selectedEntityId || selectedEntityId.startsWith("layer::"),
+          shortcut: getShortcutLabel("entity.copy"),
+          title: getShortcutTitle("entity.copy", "Copiar entidade selecionada"),
         },
         {
           label: "Colar",
           onClick: () => void handlePasteEntity(),
           disabled: !copiedEntity || !activeProjectDir,
+          shortcut: getShortcutLabel("entity.paste"),
+          title: getShortcutTitle("entity.paste", "Colar entidade copiada"),
         },
       ],
     },
@@ -1605,14 +1654,21 @@ export default function App() {
         {
           label: "Salvar layout",
           onClick: saveCurrentLayout,
+          shortcut: getShortcutLabel("layout.save"),
+          title: getShortcutTitle("layout.save", "Salvar layout local do workspace"),
         },
         {
           label: "Restaurar layout",
           onClick: restoreSavedLayout,
+          shortcut: getShortcutLabel("layout.restore"),
+          title: getShortcutTitle("layout.restore", "Restaurar layout salvo neste host"),
         },
         {
           label: "Atalhos",
           onClick: () => setShowShortcuts(true),
+          shortcut: getShortcutLabel("shortcuts.show"),
+          title: getShortcutTitle("shortcuts.show", "Abrir mapa central de atalhos"),
+          testId: "menu-action-shortcuts",
         },
         {
           label: "Sobre",
@@ -3559,26 +3615,80 @@ export default function App() {
 
       {showShortcuts && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="flex w-80 flex-col gap-3 rounded-lg border border-[#313244] bg-[#181825] p-5 shadow-2xl">
-            <h2 className="text-sm font-bold text-[#cba6f7]">Atalhos</h2>
-            <table className="w-full text-xs">
-              <tbody className="divide-y divide-[#313244]">
-                {[
-                  ["Ctrl+C", "Copiar entidade"],
-                  ["Ctrl+V", "Colar entidade"],
-                  ["Ctrl+Z", "Desfazer"],
-                  ["Ctrl+Shift+Z / Ctrl+Y", "Refazer"],
-                  ["Delete", "Remover no no NodeGraph"],
-                  ["Z / X / Enter / Setas", "Controles do emulador"],
-                ].map(([key, value]) => (
-                  <tr key={key}>
-                    <td className="py-1.5 pr-4 font-mono text-[#f9e2af]">{key}</td>
-                    <td className="py-1.5 text-[#a6adc8]">{value}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <ToolbarButton label="Fechar" onClick={() => setShowShortcuts(false)} />
+          <div
+            data-testid="shortcut-map"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="shortcut-map-title"
+            className="flex max-h-[82vh] w-[min(760px,calc(100vw-32px))] flex-col gap-4 rounded border border-[#313244] bg-[#181825] p-5 shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <h2 id="shortcut-map-title" className="text-sm font-bold text-[#cba6f7]">
+                  Atalhos
+                </h2>
+                <p className="mt-1 text-[10px] uppercase tracking-[0.14em] text-[#7f849c]">
+                  Mapa central
+                </p>
+              </div>
+              <div
+                data-testid="shortcut-conflicts"
+                className={`rounded border px-2.5 py-1 text-[10px] font-semibold ${
+                  SHORTCUT_CONFLICTS.length > 0
+                    ? "border-[#f38ba8]/40 bg-[#f38ba8]/10 text-[#f38ba8]"
+                    : "border-[#a6e3a1]/30 bg-[#a6e3a1]/10 text-[#a6e3a1]"
+                }`}
+              >
+                {SHORTCUT_CONFLICTS.length > 0
+                  ? `${SHORTCUT_CONFLICTS.length} conflito(s)`
+                  : "Sem conflitos ativos"}
+              </div>
+            </div>
+
+            <div className="grid min-h-0 gap-3 overflow-y-auto pr-1 md:grid-cols-2">
+              {SHORTCUT_GROUPS.map((group) => (
+                <section
+                  key={group.group}
+                  className="rounded border border-[#313244] bg-[#0f172a]/70"
+                >
+                  <h3 className="border-b border-[#1f2937] px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-[#7dd3fc]">
+                    {group.group}
+                  </h3>
+                  <div className="divide-y divide-[#1f2937]">
+                    {group.shortcuts.map((shortcut) => {
+                      const conflict = getShortcutConflictForCommand(shortcut.id);
+                      return (
+                        <div
+                          key={shortcut.id}
+                          className="grid grid-cols-[minmax(92px,auto)_1fr] items-center gap-3 px-3 py-2 text-xs"
+                        >
+                          <kbd className="rounded border border-[#334155] bg-[#020617] px-2 py-1 font-mono text-[10px] font-semibold text-[#f9e2af]">
+                            {formatShortcutKeys(shortcut.keys)}
+                          </kbd>
+                          <div className="min-w-0">
+                            <div className="truncate text-[#cdd6f4]" title={shortcut.label}>
+                              {shortcut.label}
+                            </div>
+                            {conflict ? (
+                              <div
+                                className="mt-0.5 truncate text-[10px] text-[#f38ba8]"
+                                title={conflict.labels.join(", ")}
+                              >
+                                Conflito: {conflict.displayKey}
+                              </div>
+                            ) : null}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              ))}
+            </div>
+
+            <div className="flex justify-end">
+              <ToolbarButton label="Fechar" onClick={() => setShowShortcuts(false)} />
+            </div>
           </div>
         </div>
       )}
@@ -3614,7 +3724,10 @@ export default function App() {
               disabled={building || !activeProjectDir || liveBuildBlocked}
               accent="success"
               testId="toolbar-build-run"
-              title={liveBuildBlocked ? buildDisabledReason ?? undefined : buildWarningSummary ?? undefined}
+              title={getShortcutTitle(
+                "build.run",
+                liveBuildBlocked ? buildDisabledReason ?? undefined : buildWarningSummary ?? undefined
+              )}
               describedBy={liveBuildBlocked ? "build-disabled-reason" : undefined}
             />
             <ToolbarButton
@@ -3723,6 +3836,7 @@ export default function App() {
             <ToolbarButton
               label={focusedShell ? "Sair do foco" : "Focus"}
               onClick={toggleFocusMode}
+              title={getShortcutTitle("layout.focus", "Maximizar ou restaurar a area central")}
             />
             <ToolbarButton label="Console" onClick={toggleConsole} />
           </>
