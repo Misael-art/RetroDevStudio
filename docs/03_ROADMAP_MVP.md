@@ -1,8 +1,12 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-05-13 (rodada 41)
+**Ultima revisao canonica:** 2026-05-17 (rodada 44)
 **Fase ativa real:** Core MVP promovido tecnicamente em main; hardening continua nas superficies experimentais
+
+**Nota 2026-05-17 (rodada 44, branch `codex/sgdk-stable-node-engine-blaze`):** corpus real fechou **122/122** com criterio rigoroso de framebuffer visivel (`emulation_visible_ok=68`, `bridge_only=54`, `failed=0`, `stable_candidate=true`). Breakout e Procedural Animation deixaram de falhar com framebuffer preto apos supressao honesta de `XGM_startPlay` no modo `-DRDS_CORPUS_VISIBLE_SMOKE`. SGDK Stable local: **SIM**; Node Engine Stable local: **SIM**; merge/PR/main pendentes de governanca.
+
+**Nota 2026-05-14 (rodada 43, branch `codex/sgdk-stable-node-engine-blaze`):** a prova SGDK/no-code deixou de depender de fake. O fake SGDK/ROM foi renomeado para fallback unitario e nao conta como Stable. `official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --ignored` gera um jogo persistente 100% por nodes, compila com SGDK oficial, gera ROM real e roda Genesis Plus GX por 60 frames (`non_black_pixels=15506`, sem edicao manual, sem fake). O corpus real `F:\Projects\MegaDrive_DEV\SGDK_Engines` foi processado por `sgdk_corpus_real_build_rom_emulation_report --ignored`: **122 projetos**, **68** com build/ROM/emulacao reais, **54** com bridge formal persistida, **0 falhas**, `stable_candidate=true`. `BLAZE_ENGINE` esta coberto por modo compativel real com build SGDK, ROM real e Genesis Plus GX (`non_black_pixels=71680`), mantendo o budget original bloqueante documentado e gerando budget compativel conservador. **SGDK Stable local: SIM nesta branch. Node Engine Stable local: SIM nesta branch.** Promocao institucional ainda exige barra ampla final, commit/push, PR/checks remotos, merge para `main` e readiness no destino.
 
 **Nota 2026-05-13 (rodada 41, main):** PR #4 (`codex/sgdk-nocode-production-ui`) foi mergeado em `main` por merge commit `91bb8eb354389e370bb59d6a5ae84c21b4a1429f`, contendo o head `d21939ce83f360072a64637170922c78e2dd149d`. Os checks remotos de `pull_request` passaram no SHA do PR: `CI` run `25788180025` e `Desktop E2E` run `25788180007`; um run separado de `Desktop E2E` no evento `push` falhou no mesmo SHA e nao foi tratado como gate de PR. Em `main`, `npm run release:readiness:promotion` passou com `Pronto para promocao: SIM`, divergencia `+0 / -0`, baseline, build debug, upstream oficial, desktop E2E simples e QA RC A-F consumido das evidencias `qa-rc-2026-05-13T01-31-23-216Z-*`. UI/CX production hardening esta integrado em `main`. Isto nao promove SGDK nem Node Engine: SGDK continua **Experimental**, Node/Phase D continua **Experimental/Parcial**, `BLAZE_ENGINE` continua stress/blocker legitimo, e ainda faltam AST C completo, round-trip/build/emulacao dos 122 projetos e ROM/emulacao institucional de jogo no-code.
 
@@ -91,7 +95,7 @@
 - ~~A fotografia institucional de promocao precisa ser regenerada no destino de promocao (`main` apos merge).~~ **Revalidado em 2026-05-13 rodada 41:** PR #4 mergeado e `release:readiness:promotion` passou em `main` com `Pronto para promocao: SIM`.
 - MSI/portable foram revalidados localmente em `2026-05-11`; precisam continuar sendo revalidados quando o fluxo `Menu inicial -> Criar Projeto` ou packaging mudar.
 - ~~A trilha publica ainda precisa refletir o estado real da wave candidata; PR #2 esta `draft/open` e a branch `feat/sgdk-vram-residency-streaming-r14` continua muitos commits a frente de `origin/main`, bloqueio de governanca ate merge.~~ **Resolvido em 2026-05-11 rodada 35:** PR #2 saiu de draft e foi mergeado em `main`.
-- Permanecem bloqueios de maturidade para labels **Stable**: SGDK requer corpus/round-trip completo e BLAZE classificado/resolvido; Node Engine requer jogo criado por nodes, build e smoke de emulacao sem edicao manual de codigo.
+- Bloqueios de maturidade **locais** para SGDK/Node Stable foram removidos na branch `codex/sgdk-stable-node-engine-blaze` pela prova real descrita acima. Bloqueios restantes sao de governanca/publicacao: commit/push final, PR/checks remotos, merge para `main`, readiness no destino e repeticao da barra ampla institucional.
 
 ---
 

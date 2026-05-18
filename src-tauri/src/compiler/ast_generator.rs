@@ -219,6 +219,39 @@ pub enum LogicOp {
         dx: i32,
         dy: i32,
     },
+    SetSpritePosition {
+        target_var: String,
+        x: LogicMathExpr,
+        y: LogicMathExpr,
+    },
+    SetVelocity {
+        target_name: String,
+        vx: LogicMathExpr,
+        vy: LogicMathExpr,
+    },
+    SetAnimationState {
+        target_var: String,
+        anim_index: u32,
+    },
+    SetTile {
+        layer: String,
+        tile: LogicMathExpr,
+        x: LogicMathExpr,
+        y: LogicMathExpr,
+    },
+    CameraFollow {
+        target_var: String,
+        offset_x: i32,
+        offset_y: i32,
+    },
+    ShowSprite {
+        target_var: String,
+        x: LogicMathExpr,
+        y: LogicMathExpr,
+    },
+    HideSprite {
+        target_var: String,
+    },
     ConditionOverlap {
         left: LogicCollisionTarget,
         right: LogicCollisionTarget,
@@ -251,6 +284,13 @@ pub enum LogicOp {
     TimelineSequence {
         counter_var: String,
         slots: Vec<LogicTimelineSlot>,
+    },
+    HardwareBudgetCheck {
+        vram_kb: i32,
+        sprites: i32,
+        scanline_sprites: i32,
+        if_ok: Vec<LogicOp>,
+        if_warn: Vec<LogicOp>,
     },
     HardwareEvent {
         event: HardwareEventKind,
@@ -305,6 +345,11 @@ pub enum LogicMathExpr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LogicBoolExpr {
     Literal(bool),
+    Input {
+        pad: String,
+        button: String,
+        pressed: bool,
+    },
     Overlap {
         left: LogicCollisionTarget,
         right: LogicCollisionTarget,
@@ -655,7 +700,8 @@ pub fn generate_ast(project: &Project, scene: &Scene) -> AstOutput {
 }
 
 fn sanitize_identifier(id: &str) -> String {
-    id.chars()
+    let sanitized = id
+        .chars()
         .map(|character| {
             if character.is_alphanumeric() || character == '_' {
                 character
@@ -664,7 +710,18 @@ fn sanitize_identifier(id: &str) -> String {
             }
         })
         .collect::<String>()
-        .to_lowercase()
+        .to_lowercase();
+    if sanitized
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_')
+    {
+        sanitized
+    } else if sanitized.is_empty() {
+        "_resource".to_string()
+    } else {
+        format!("r_{sanitized}")
+    }
 }
 
 fn count_unique_frames(sprite: &SpriteComponent) -> u32 {
@@ -1073,7 +1130,7 @@ fn compile_logic_graph(
         graph
             .nodes
             .iter()
-            .filter(|node| node.node_type == "event_start")
+            .filter(|node| matches!(node.node_type.as_str(), "event_start" | "event_update"))
             .filter_map(|start_node| {
                 let mut visited = std::collections::HashSet::new();
                 let ops = compile_logic_chain(
@@ -1390,6 +1447,160 @@ fn compile_logic_node(
                 target_var: var_name.clone(),
                 dx: param_i32(node, "dx", 0),
                 dy: param_i32(node, "dy", 0),
+            }))
+        }
+        "input_held" | "input_pressed" => {
+            let mut true_visited = visited.clone();
+            let mut false_visited = visited.clone();
+            let mut if_true = compile_logic_chain(
+                graph,
+                &node.id,
+                "true",
+                runtime_entities,
+                &mut true_visited,
+                setup_nodes,
+                runtime_nodes,
+                parallax_layers,
+                raster_lines,
+            );
+            if if_true.is_empty() {
+                let mut exec_visited = visited.clone();
+                if_true = compile_logic_chain(
+                    graph,
+                    &node.id,
+                    "exec",
+                    runtime_entities,
+                    &mut exec_visited,
+                    setup_nodes,
+                    runtime_nodes,
+                    parallax_layers,
+                    raster_lines,
+                );
+            }
+            let if_false = compile_logic_chain(
+                graph,
+                &node.id,
+                "false",
+                runtime_entities,
+                &mut false_visited,
+                setup_nodes,
+                runtime_nodes,
+                parallax_layers,
+                raster_lines,
+            );
+            Some(CompiledLogicNode::Terminal(LogicOp::ConditionBool {
+                condition: LogicBoolExpr::Input {
+                    pad: param_string(node, "pad")
+                        .or_else(|| param_string(node, "device"))
+                        .unwrap_or_else(|| "JOY_1".to_string()),
+                    button: param_string(node, "button").unwrap_or_else(|| "BUTTON_A".to_string()),
+                    pressed: node.node_type == "input_pressed",
+                },
+                if_true,
+                if_false,
+            }))
+        }
+        "set_velocity" => {
+            let target_name = sanitize_identifier(
+                &param_string(node, "target").unwrap_or_else(|| "entity".to_string()),
+            );
+            Some(CompiledLogicNode::Linear(LogicOp::SetVelocity {
+                target_name,
+                vx: resolve_math_expr_from_input(graph, &node.id, "vx")
+                    .unwrap_or_else(|| LogicMathExpr::Literal(param_i32(node, "vx", 0))),
+                vy: resolve_math_expr_from_input(graph, &node.id, "vy")
+                    .unwrap_or_else(|| LogicMathExpr::Literal(param_i32(node, "vy", 0))),
+            }))
+        }
+        "set_position" => {
+            let target = param_string(node, "target")?;
+            let runtime = runtime_entities.get(&target)?;
+            let Some(sprite) = &runtime.sprite else {
+                return Some(CompiledLogicNode::NoOp);
+            };
+            Some(CompiledLogicNode::Linear(LogicOp::SetSpritePosition {
+                target_var: sprite.var_name.clone(),
+                x: resolve_math_expr_from_input(graph, &node.id, "x")
+                    .unwrap_or_else(|| LogicMathExpr::Literal(param_i32(node, "x", 0))),
+                y: resolve_math_expr_from_input(graph, &node.id, "y")
+                    .unwrap_or_else(|| LogicMathExpr::Literal(param_i32(node, "y", 0))),
+            }))
+        }
+        "set_animation_state" => {
+            let target = param_string(node, "target")?;
+            let state_name = param_string(node, "state").unwrap_or_else(|| "idle".to_string());
+            let runtime = runtime_entities.get(&target)?;
+            let Some(sprite) = &runtime.sprite else {
+                return Some(CompiledLogicNode::NoOp);
+            };
+            let anim_index = state_name
+                .parse::<u32>()
+                .ok()
+                .or_else(|| {
+                    sprite
+                        .animations
+                        .iter()
+                        .enumerate()
+                        .find(|(_, animation)| {
+                            animation.name == state_name
+                                || sanitize_identifier(&animation.name)
+                                    == sanitize_identifier(&state_name)
+                        })
+                        .map(|(index, _)| index as u32)
+                })
+                .unwrap_or(0);
+            Some(CompiledLogicNode::Linear(LogicOp::SetAnimationState {
+                target_var: sprite.var_name.clone(),
+                anim_index,
+            }))
+        }
+        "set_tile" => Some(CompiledLogicNode::Linear(LogicOp::SetTile {
+            layer: normalize_scroll_layer(
+                &param_string(node, "layer").unwrap_or_else(|| "BG_A".to_string()),
+            ),
+            tile: resolve_math_expr_from_input(graph, &node.id, "tile")
+                .unwrap_or_else(|| LogicMathExpr::Literal(param_i32(node, "tile", 0))),
+            x: resolve_math_expr_from_input(graph, &node.id, "x")
+                .unwrap_or_else(|| LogicMathExpr::Literal(param_i32(node, "x", 0))),
+            y: resolve_math_expr_from_input(graph, &node.id, "y")
+                .unwrap_or_else(|| LogicMathExpr::Literal(param_i32(node, "y", 0))),
+        })),
+        "camera_follow" => {
+            let target = param_string(node, "target").unwrap_or_else(|| "camera".to_string());
+            let runtime = runtime_entities.get(&target)?;
+            let Some(sprite) = &runtime.sprite else {
+                return Some(CompiledLogicNode::NoOp);
+            };
+            Some(CompiledLogicNode::Linear(LogicOp::CameraFollow {
+                target_var: sprite.var_name.clone(),
+                offset_x: param_i32(node, "offset_x", -160),
+                offset_y: param_i32(node, "offset_y", -112),
+            }))
+        }
+        "spawn_entity" => {
+            let target = param_string(node, "prefab")
+                .or_else(|| param_string(node, "target"))
+                .unwrap_or_else(|| "entity".to_string());
+            let runtime = runtime_entities.get(&target)?;
+            let Some(sprite) = &runtime.sprite else {
+                return Some(CompiledLogicNode::NoOp);
+            };
+            Some(CompiledLogicNode::Linear(LogicOp::ShowSprite {
+                target_var: sprite.var_name.clone(),
+                x: resolve_math_expr_from_input(graph, &node.id, "x")
+                    .unwrap_or_else(|| LogicMathExpr::Literal(param_i32(node, "x", 0))),
+                y: resolve_math_expr_from_input(graph, &node.id, "y")
+                    .unwrap_or_else(|| LogicMathExpr::Literal(param_i32(node, "y", 0))),
+            }))
+        }
+        "destroy_entity" => {
+            let target = param_string(node, "target").unwrap_or_else(|| "entity".to_string());
+            let runtime = runtime_entities.get(&target)?;
+            let Some(sprite) = &runtime.sprite else {
+                return Some(CompiledLogicNode::NoOp);
+            };
+            Some(CompiledLogicNode::Linear(LogicOp::HideSprite {
+                target_var: sprite.var_name.clone(),
             }))
         }
         "condition_overlap" => {
@@ -1737,6 +1948,39 @@ fn compile_logic_node(
                 done,
             }))
         }
+        "hardware_budget_check" => {
+            let mut ok_visited = visited.clone();
+            let mut warn_visited = visited.clone();
+            let if_ok = compile_logic_chain(
+                graph,
+                &node.id,
+                "ok",
+                runtime_entities,
+                &mut ok_visited,
+                setup_nodes,
+                runtime_nodes,
+                parallax_layers,
+                raster_lines,
+            );
+            let if_warn = compile_logic_chain(
+                graph,
+                &node.id,
+                "warn",
+                runtime_entities,
+                &mut warn_visited,
+                setup_nodes,
+                runtime_nodes,
+                parallax_layers,
+                raster_lines,
+            );
+            Some(CompiledLogicNode::Terminal(LogicOp::HardwareBudgetCheck {
+                vram_kb: param_i32(node, "vram_kb", 64),
+                sprites: param_i32(node, "sprites", 80),
+                scanline_sprites: param_i32(node, "scanline_sprites", 20),
+                if_ok,
+                if_warn,
+            }))
+        }
         "timeline_sequence" => {
             let counter_var = format!(
                 "timeline_{}",
@@ -1841,6 +2085,13 @@ fn build_bool_expr_from_node(
     }
 
     let expression = match node.node_type.as_str() {
+        "input_held" | "input_pressed" => Some(LogicBoolExpr::Input {
+            pad: param_string(node, "pad")
+                .or_else(|| param_string(node, "device"))
+                .unwrap_or_else(|| "JOY_1".to_string()),
+            button: param_string(node, "button").unwrap_or_else(|| "BUTTON_A".to_string()),
+            pressed: node.node_type == "input_pressed",
+        }),
         "condition_overlap" => {
             let left = runtime_entities
                 .get(&param_string(node, "a")?)?
@@ -2098,7 +2349,14 @@ fn collect_logic_sound_names_from_ops(
             LogicOp::PlaySound { sfx } => {
                 sound_names.insert(sfx.clone());
             }
-            LogicOp::SetVar { .. } => {}
+            LogicOp::SetVar { .. }
+            | LogicOp::SetSpritePosition { .. }
+            | LogicOp::SetVelocity { .. }
+            | LogicOp::SetAnimationState { .. }
+            | LogicOp::SetTile { .. }
+            | LogicOp::CameraFollow { .. }
+            | LogicOp::ShowSprite { .. }
+            | LogicOp::HideSprite { .. } => {}
             LogicOp::ConditionOverlap {
                 if_true, if_false, ..
             } => {
@@ -2119,6 +2377,10 @@ fn collect_logic_sound_names_from_ops(
                 for slot in slots {
                     collect_logic_sound_names_from_ops(&slot.actions, sound_names);
                 }
+            }
+            LogicOp::HardwareBudgetCheck { if_ok, if_warn, .. } => {
+                collect_logic_sound_names_from_ops(if_ok, sound_names);
+                collect_logic_sound_names_from_ops(if_warn, sound_names);
             }
             LogicOp::HardwareEvent { ops, .. } => {
                 collect_logic_sound_names_from_ops(ops, sound_names);
@@ -4102,6 +4364,215 @@ mod tests {
             }]
         );
         assert!(if_false.is_empty());
+    }
+
+    #[test]
+    fn generate_ast_compiles_nocode_game_nodes_to_sgdk_c_without_stable_claim() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
+            name: "No Code SGDK".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+            template_metadata: None,
+        };
+        let mut animations = HashMap::new();
+        animations.insert(
+            "idle".to_string(),
+            AnimationDef {
+                frames: vec![0],
+                fps: 6,
+                looping: true,
+                frame_durations: None,
+                loop_start: None,
+                mugen_frames: None,
+            },
+        );
+        animations.insert(
+            "run".to_string(),
+            AnimationDef {
+                frames: vec![1, 2, 3],
+                fps: 12,
+                looping: true,
+                frame_durations: None,
+                loop_start: None,
+                mugen_frames: None,
+            },
+        );
+        let mut sfx = HashMap::new();
+        sfx.insert("step".to_string(), "assets/audio/step.wav".to_string());
+        sfx.insert("fire".to_string(), "assets/audio/fire.wav".to_string());
+        let logic_graph = json!({
+            "version": 1,
+            "nodes": [
+                { "id": "start", "type": "event_start", "label": "Start", "x": 0, "y": 0, "params": {} },
+                { "id": "spawn_enemy", "type": "spawn_entity", "label": "Spawn", "x": 140, "y": 0, "params": { "prefab": "enemy", "x": 200, "y": 96 } },
+                { "id": "paint_floor", "type": "set_tile", "label": "Set Tile", "x": 280, "y": 0, "params": { "layer": "BG_A", "tile": 12, "x": 3, "y": 14 } },
+                { "id": "update", "type": "event_update", "label": "Update", "x": 0, "y": 160, "params": {} },
+                { "id": "right", "type": "input_held", "label": "Right", "x": 140, "y": 160, "params": { "pad": "JOY_1", "button": "BUTTON_RIGHT" } },
+                { "id": "velocity", "type": "set_velocity", "label": "Velocity", "x": 280, "y": 160, "params": { "target": "player", "vx": 2, "vy": 0 } },
+                { "id": "position", "type": "set_position", "label": "Position", "x": 420, "y": 160, "params": { "target": "player", "x": 72, "y": 96 } },
+                { "id": "run_anim", "type": "set_animation_state", "label": "Animation", "x": 560, "y": 160, "params": { "target": "player", "state": "run" } },
+                { "id": "camera_follow", "type": "camera_follow", "label": "Camera", "x": 700, "y": 160, "params": { "target": "player", "damping": 0 } },
+                { "id": "budget", "type": "hardware_budget_check", "label": "Budget", "x": 840, "y": 160, "params": { "vram_kb": 64, "sprites": 80, "scanline_sprites": 20 } },
+                { "id": "step_sfx", "type": "action_sound", "label": "Step", "x": 980, "y": 160, "params": { "sfx": "step" } },
+                { "id": "destroy_enemy", "type": "destroy_entity", "label": "Destroy", "x": 1120, "y": 160, "params": { "target": "enemy" } },
+                { "id": "update_fire", "type": "event_update", "label": "Update Fire", "x": 0, "y": 320, "params": {} },
+                { "id": "fire", "type": "input_pressed", "label": "Fire", "x": 140, "y": 320, "params": { "pad": "JOY_1", "button": "BUTTON_A" } },
+                { "id": "fire_sfx", "type": "action_sound", "label": "Fire SFX", "x": 280, "y": 320, "params": { "sfx": "fire" } }
+            ],
+            "edges": [
+                { "id": "s1", "fromNode": "start", "fromPort": "exec", "toNode": "spawn_enemy", "toPort": "exec" },
+                { "id": "s2", "fromNode": "spawn_enemy", "fromPort": "exec", "toNode": "paint_floor", "toPort": "exec" },
+                { "id": "u1", "fromNode": "update", "fromPort": "exec", "toNode": "right", "toPort": "exec" },
+                { "id": "u2", "fromNode": "right", "fromPort": "true", "toNode": "velocity", "toPort": "exec" },
+                { "id": "u3", "fromNode": "velocity", "fromPort": "exec", "toNode": "position", "toPort": "exec" },
+                { "id": "u4", "fromNode": "position", "fromPort": "exec", "toNode": "run_anim", "toPort": "exec" },
+                { "id": "u5", "fromNode": "run_anim", "fromPort": "exec", "toNode": "camera_follow", "toPort": "exec" },
+                { "id": "u6", "fromNode": "camera_follow", "fromPort": "exec", "toNode": "budget", "toPort": "exec" },
+                { "id": "u7", "fromNode": "budget", "fromPort": "ok", "toNode": "step_sfx", "toPort": "exec" },
+                { "id": "u8", "fromNode": "step_sfx", "fromPort": "exec", "toNode": "destroy_enemy", "toPort": "exec" },
+                { "id": "f1", "fromNode": "update_fire", "fromPort": "exec", "toNode": "fire", "toPort": "exec" },
+                { "id": "f2", "fromNode": "fire", "fromPort": "true", "toNode": "fire_sfx", "toPort": "exec" }
+            ]
+        });
+
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![
+                Entity {
+                    entity_id: "world".to_string(),
+                    display_name: None,
+                    prefab: None,
+                    transform: Transform { x: 0, y: 0 },
+                    components: Components {
+                        tilemap: Some(crate::ugdm::components::TilemapComponent {
+                            tileset: "assets/tilemaps/stage.png".to_string(),
+                            map_width: 64,
+                            map_height: 32,
+                            scroll_x: 0,
+                            scroll_y: 0,
+                            cells: Vec::new(),
+                        }),
+                        ..Components::default()
+                    },
+                },
+                Entity {
+                    entity_id: "player".to_string(),
+                    display_name: None,
+                    prefab: None,
+                    transform: Transform { x: 40, y: 96 },
+                    components: Components {
+                        sprite: Some(SpriteComponent {
+                            asset: "assets/sprites/player.png".to_string(),
+                            frame_width: 16,
+                            frame_height: 16,
+                            pivot: None,
+                            palette_slot: 0,
+                            animations: animations.clone(),
+                            priority: "foreground".to_string(),
+                            meta_sprite: false,
+                        }),
+                        input: Some(crate::ugdm::components::InputComponent {
+                            device: "joypad_1".to_string(),
+                            mapping: HashMap::new(),
+                        }),
+                        audio: Some(crate::ugdm::components::AudioComponent { sfx, bgm: None }),
+                        logic: Some(crate::ugdm::components::LogicComponent {
+                            graph: Some(logic_graph.to_string()),
+                            graph_ref: None,
+                            graph_origin: None,
+                            logic_hints: Vec::new(),
+                            external_source_refs: Vec::new(),
+                            imported_semantics: None,
+                            variables: HashMap::new(),
+                        }),
+                        ..Components::default()
+                    },
+                },
+                Entity {
+                    entity_id: "enemy".to_string(),
+                    display_name: None,
+                    prefab: None,
+                    transform: Transform { x: 160, y: 96 },
+                    components: Components {
+                        sprite: Some(SpriteComponent {
+                            asset: "assets/sprites/enemy.png".to_string(),
+                            frame_width: 16,
+                            frame_height: 16,
+                            pivot: None,
+                            palette_slot: 1,
+                            animations,
+                            priority: "foreground".to_string(),
+                            meta_sprite: false,
+                        }),
+                        ..Components::default()
+                    },
+                },
+            ],
+            palettes: Vec::new(),
+            retrofx: None,
+            collision_map: None,
+            layers: None,
+        };
+
+        let ast = generate_ast(&project, &scene);
+        let emitted = crate::compiler::sgdk_emitter::emit_sgdk(&ast, &project.name);
+
+        assert!(emitted
+            .main_c
+            .contains("if ((JOY_readJoypad(JOY_1) & BUTTON_RIGHT)) {"));
+        assert!(emitted
+            .main_c
+            .contains("if ((JOY_readJoypad(JOY_1) & BUTTON_A)) {"));
+        assert!(emitted.main_c.contains("logic_var_player_vx = 2;"));
+        assert!(emitted.main_c.contains("logic_var_player_vy = 0;"));
+        assert!(emitted.main_c.contains("spr_player_x = 72;"));
+        assert!(emitted.main_c.contains("spr_player_y = 96;"));
+        assert!(emitted
+            .main_c
+            .contains("SPR_setPosition(spr_player, spr_player_x, spr_player_y);"));
+        assert!(emitted.main_c.contains("SPR_setAnim(spr_player, 1);"));
+        assert!(emitted
+            .main_c
+            .contains("VDP_setHorizontalScroll(BG_A, spr_player_x - 160);"));
+        assert!(emitted.main_c.contains(
+            "VDP_setTileMapXY(BG_A, TILE_ATTR_FULL(PAL0, FALSE, FALSE, FALSE, 12), 3, 14);"
+        ));
+        assert!(emitted
+            .main_c
+            .contains("// Hardware budget check: VRAM 64KB, sprites 80, sprites/scanline 20"));
+        assert!(emitted
+            .main_c
+            .contains("SPR_setPosition(spr_enemy, 200, 96);"));
+        assert!(emitted
+            .main_c
+            .contains("SPR_setVisibility(spr_enemy, VISIBLE);"));
+        assert!(emitted
+            .main_c
+            .contains("XGM_startPlayPCM(SFX_STEP, 1, SOUND_PCM_CH_AUTO);"));
+        assert!(emitted
+            .main_c
+            .contains("XGM_startPlayPCM(SFX_FIRE, 1, SOUND_PCM_CH_AUTO);"));
+        assert!(emitted
+            .main_c
+            .contains("SPR_setVisibility(spr_enemy, HIDDEN);"));
+        assert!(emitted
+            .resources_res
+            .contains("WAV step \"assets/audio/step.wav\" XGM"));
+        assert!(emitted
+            .resources_res
+            .contains("WAV fire \"assets/audio/fire.wav\" XGM"));
     }
 
     #[test]

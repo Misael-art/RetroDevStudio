@@ -40,7 +40,7 @@
 - Cobrir parser/schema, hardware profiles, framebuffer, dependency manager e fluxos de editor sensiveis.
 - Cobrir inventario SGDK/no-code quando a mudanca tocar importador SGDK, source mapping ou semantic gaps; o gate local externo e `cargo test sgdk_corpus_inventory_real_corpus_report --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` em host com `F:\Projects\MegaDrive_DEV\SGDK_Engines`.
 - Mudancas de UI/CX SGDK/no-code devem cobrir topbar/status bar compactas, Inspector com diagnostico colapsado, Hierarchy compacta, viewport sem overlays invasivos, key color transparency e NodeGraph layout/vocabulario.
-- Mudancas de NodeGraph/no-code devem cobrir validacao, serializacao, geracao deterministica de C e pelo menos um fluxo de jogo 100% por nodes em teste unitario; isso nao substitui prova institucional de ROM/emulacao.
+- Mudancas de NodeGraph/no-code devem cobrir validacao, serializacao, geracao deterministica de C e pelo menos um fluxo de jogo 100% por nodes. Fake SGDK/ROM so pode existir como fallback unitario explicitamente nomeado (`build_generates_fake_rom_from_nocode_sgdk_game_nodes_as_unit_fallback`). Prova Stable exige SGDK oficial + Libretro real, atualmente coberta por `official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --ignored`.
 
 ### 2.3 Integracao
 - O pipeline de build deve ser testado por target.
@@ -71,10 +71,13 @@
 8. `node scripts/e2e-tauri-build-run.mjs --skip-build --native-driver .\toolchains\webdriver\msedgedriver.exe` quando a mudanca tocar o fluxo publico `Build -> Load ROM -> Run frames`
 9. `npm run test:e2e:desktop:qa-rc` quando a mudanca tocar onboarding, shell principal, camadas, viewport editavel, inspector, persistencia ou o fluxo desktop `Build & Run`
 10. `cargo test sgdk_corpus_inventory_real_corpus_report --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar inventario SGDK/no-code, source mapping ou semantic gaps do corpus externo.
-11. `npm run release:readiness:promotion` na rodada institucional que pretende promover o RC, anexando o report de QA `A-F`
-12. Em host Windows com policy que bloqueia bootstrap interno do driver, usar fallback `--external-driver` com `tauri-driver` iniciado fora do processo Node.
-13. Se a sessao WebDriver falhar em `DevToolsActivePort`/`chrome not reachable`, executar `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-desktop-e2e.ps1 -SessionProbe` e registrar o resultado.
-14. Atualizacao de `docs/03_ROADMAP_MVP.md` e `docs/06_AI_MEMORY_BANK.md` quando o estado do produto mudar
+11. `cargo test sgdk_matrix_corpus_ --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar import/build SGDK, hardware budget ou `BLAZE_ENGINE`.
+12. `cargo test official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar codegen backend de NodeGraph SGDK ou a declaracao de Node Engine Stable.
+13. `cargo test sgdk_corpus_real_build_rom_emulation_report --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar a declaracao de SGDK Stable, corpus completo ou bridge formal.
+14. `npm run release:readiness:promotion` na rodada institucional que pretende promover o RC, anexando o report de QA `A-F`
+15. Em host Windows com policy que bloqueia bootstrap interno do driver, usar fallback `--external-driver` com `tauri-driver` iniciado fora do processo Node.
+16. Se a sessao WebDriver falhar em `DevToolsActivePort`/`chrome not reachable`, executar `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-desktop-e2e.ps1 -SessionProbe` e registrar o resultado.
+17. Atualizacao de `docs/03_ROADMAP_MVP.md` e `docs/06_AI_MEMORY_BANK.md` quando o estado do produto mudar
 
 ### 3.1 Agregacao canonica de readiness
 - `node scripts/release-readiness.mjs` gera um snapshot objetivo do estado de release em `src-tauri/target-test/validation/release-readiness.json` e `release-readiness.md`.
