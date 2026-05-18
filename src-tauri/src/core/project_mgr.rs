@@ -392,6 +392,58 @@ struct GodotSceneParse {
 }
 
 #[derive(Debug, Clone)]
+struct GameMakerResolvedRoot {
+    effective_root: PathBuf,
+    temp_root: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+struct GameMakerSpriteResource {
+    source_path: PathBuf,
+    width: u32,
+    height: u32,
+    xorigin: i32,
+    yorigin: i32,
+}
+
+#[derive(Debug, Clone)]
+struct GameMakerEvent {
+    label: String,
+    code: String,
+}
+
+#[derive(Debug, Clone)]
+struct GameMakerObjectResource {
+    name: String,
+    sprite_name: Option<String>,
+    solid: bool,
+    source_path: PathBuf,
+    events: Vec<GameMakerEvent>,
+}
+
+#[derive(Debug, Clone)]
+struct GameMakerRoomInstance {
+    object_name: String,
+    name: String,
+    x: i32,
+    y: i32,
+    code: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct GameMakerRoomView {
+    object_name: String,
+    visible: bool,
+}
+
+#[derive(Debug, Clone)]
+struct GameMakerRoomResource {
+    display_name: String,
+    instances: Vec<GameMakerRoomInstance>,
+    views: Vec<GameMakerRoomView>,
+}
+
+#[derive(Debug, Clone)]
 struct ConstructObjectType {
     name: String,
     plugin_id: String,
@@ -557,15 +609,15 @@ const EXTERNAL_IMPORT_PROFILES: &[ExternalImportProfileDefinition] = &[
     },
     ExternalImportProfileDefinition {
         id: "gamemaker",
-        name: "GameMaker Studio 2",
+        name: "GameMaker",
         family: "2D room-based",
-        description: "Roadmap: rooms, sprites e sounds em formato .yyp/.yy.",
+        description: "Importa GMX/GMZ/GMEZ com rooms, sprites, objetos e eventos GML preservados como bridge semantica editavel.",
         source_engine: "gamemaker",
-        support_status: "Parcial",
-        supported_levels: &["L1"],
+        support_status: "Experimental",
+        supported_levels: &["L1", "L2"],
         recommended_target: "megadrive",
         experimental: true,
-        importable: false,
+        importable: true,
         mega_drive_only: true,
     },
     ExternalImportProfileDefinition {
@@ -3213,25 +3265,24 @@ fn build_sgdk_tilemap_entity(
     };
     let display_name = resource.name.clone();
 
-    let (map_width, map_height, cells, unique_tiles, had_cells) = match extract_sgdk_tilemap_cells(
-        source_path,
-    ) {
-        Some(extracted) => (
-            extracted.map_width,
-            extracted.map_height,
-            extracted.cells,
-            extracted.unique_tiles,
-            true,
-        ),
-        None => {
-            let (mw, mh) = tilemap_dims_from_source(source_path);
-            fallbacks.push(format!(
+    let (map_width, map_height, cells, unique_tiles, had_cells) =
+        match extract_sgdk_tilemap_cells(source_path) {
+            Some(extracted) => (
+                extracted.map_width,
+                extracted.map_height,
+                extracted.cells,
+                extracted.unique_tiles,
+                true,
+            ),
+            None => {
+                let (mw, mh) = tilemap_dims_from_source(source_path);
+                fallbacks.push(format!(
                 "tilemap '{}': cells[] vazio (PNG indisponivel, <8x8 ou totalmente transparente).",
                 resource.name
             ));
-            (mw, mh, Vec::new(), 0, false)
-        }
-    };
+                (mw, mh, Vec::new(), 0, false)
+            }
+        };
     let cells_count = cells.len();
 
     let entity = Entity {
@@ -7044,6 +7095,7 @@ pub fn import_external_project(
             })
         }
         "godot" => import_godot_project(project_dir, source_path),
+        "gamemaker" => import_gamemaker_project(project_dir, source_path),
         "construct" => import_construct_project(project_dir, source_path),
         "rpg_maker" => import_rpg_maker_project(project_dir, source_path),
         "openbor" => import_openbor_project(project_dir, source_path),
@@ -7085,6 +7137,12 @@ pub fn stamp_imported_external_profile_metadata(
             "imported_godot".to_string(),
             "godot_tscn_v1".to_string(),
         ),
+        "gamemaker" => (
+            "imported_gamemaker".to_string(),
+            "1.0.0".to_string(),
+            "imported_gamemaker".to_string(),
+            "gamemaker_gmx_v1".to_string(),
+        ),
         "construct" => (
             "imported_construct".to_string(),
             "1.0.0".to_string(),
@@ -7120,6 +7178,768 @@ pub fn stamp_imported_external_profile_metadata(
         import_profile,
         source_path,
     )
+}
+
+pub fn import_gamemaker_project(
+    project_dir: &Path,
+    source_path: &Path,
+) -> Result<ExternalImportReport, LoadError> {
+    let resolved = resolve_gamemaker_source_root(source_path)?;
+    let gm_root = resolved.effective_root;
+    let sprites = load_gamemaker_sprites(&gm_root)?;
+    let objects = load_gamemaker_objects(&gm_root)?;
+    let room = load_gamemaker_primary_room(&gm_root)?;
+
+    let mut scene = canonical_scene(DEFAULT_SCENE_ID, Some(room.display_name.clone()));
+    scene.layers = Some(vec![
+        SceneLayer {
+            id: "layer_background".to_string(),
+            name: "BACKGROUND".to_string(),
+            kind: "background".to_string(),
+            visible: true,
+            locked: false,
+            depth: 0,
+            entity_ids: Vec::new(),
+        },
+        SceneLayer {
+            id: "layer_instances".to_string(),
+            name: "INSTANCES".to_string(),
+            kind: "sprite".to_string(),
+            visible: true,
+            locked: false,
+            depth: 1,
+            entity_ids: Vec::new(),
+        },
+        SceneLayer {
+            id: "layer_collisions".to_string(),
+            name: "COLLISIONS".to_string(),
+            kind: "object".to_string(),
+            visible: true,
+            locked: false,
+            depth: 2,
+            entity_ids: Vec::new(),
+        },
+    ]);
+
+    let mut entity_ids = HashSet::new();
+    let mut asset_cache = HashMap::new();
+    let mut skipped = Vec::new();
+    let mut first_sprite_id: Option<String> = None;
+    let mut first_entity_for_object: HashMap<String, String> = HashMap::new();
+
+    for instance in &room.instances {
+        let Some(object) = objects.get(&instance.object_name) else {
+            skipped.push(format!(
+                "GameMaker object '{}' referenciado por '{}' nao encontrado.",
+                instance.object_name, instance.name
+            ));
+            continue;
+        };
+
+        let entity_id = unique_entity_id(&mut entity_ids, &instance.name, &object.name);
+        first_entity_for_object
+            .entry(object.name.clone())
+            .or_insert_with(|| entity_id.clone());
+
+        let sprite = object
+            .sprite_name
+            .as_ref()
+            .and_then(|sprite_name| sprites.get(sprite_name));
+        let asset = if let Some(sprite) = sprite {
+            Some(materialize_external_file(
+                project_dir,
+                &gm_root,
+                &sprite.source_path,
+                "sprites",
+                "gamemaker",
+                &mut asset_cache,
+            )?)
+        } else {
+            skipped.push(format!(
+                "{}: objeto GameMaker sem sprite importavel; preservado como entidade logica.",
+                object.name
+            ));
+            None
+        };
+
+        let mut logic_hints = Vec::new();
+        for event in &object.events {
+            logic_hints.push(format!(
+                "GameMaker {} GML preservado como bridge semantica: {}",
+                event.label,
+                compact_gml_snippet(&event.code)
+            ));
+        }
+        if let Some(code) = instance
+            .code
+            .as_ref()
+            .filter(|value| !value.trim().is_empty())
+        {
+            logic_hints.push(format!(
+                "GameMaker Instance Creation Code preservado como bridge semantica: {}",
+                compact_gml_snippet(code)
+            ));
+        }
+
+        let has_logic = !logic_hints.is_empty();
+        let role = gamemaker_entity_role(&object.name, &logic_hints);
+        let source_ref = object
+            .source_path
+            .strip_prefix(&gm_root)
+            .ok()
+            .map(normalize_relative_path)
+            .unwrap_or_else(|| object.source_path.display().to_string());
+        let entity = Entity {
+            entity_id: entity_id.clone(),
+            display_name: Some(object.name.clone()),
+            prefab: None,
+            transform: crate::ugdm::entities::Transform {
+                x: instance.x,
+                y: instance.y,
+            },
+            components: Components {
+                sprite: sprite.zip(asset).map(|(sprite, asset)| SpriteComponent {
+                    asset,
+                    frame_width: sprite.width.max(1),
+                    frame_height: sprite.height.max(1),
+                    pivot: Some(Pivot {
+                        x: sprite.xorigin,
+                        y: sprite.yorigin,
+                    }),
+                    palette_slot: 0,
+                    animations: HashMap::new(),
+                    priority: "foreground".to_string(),
+                    meta_sprite: sprite.width > 32 || sprite.height > 32,
+                }),
+                collision: gamemaker_collision_component(object, sprite),
+                input: gamemaker_input_component(&logic_hints),
+                physics: gamemaker_physics_component(&logic_hints),
+                logic: has_logic.then(|| LogicComponent {
+                    graph: Some(imported_sprite_logic_graph(&entity_id)),
+                    graph_ref: None,
+                    graph_origin: Some("gamemaker_gmx".to_string()),
+                    logic_hints,
+                    external_source_refs: vec![source_ref],
+                    imported_semantics: Some(ImportedLogicSemantics {
+                        source: "gamemaker_gmx".to_string(),
+                        gameplay_class: "room_based_2d".to_string(),
+                        entity_role: role,
+                        confidence: "bridge".to_string(),
+                        role_reason:
+                            "GML preservado como bridge semantica editavel; codegen nativo ainda parcial."
+                                .to_string(),
+                        driver_functions: Vec::new(),
+                        source_paths: Vec::new(),
+                        audit_flags: vec!["gml_bridge_preserved".to_string()],
+                    }),
+                    variables: HashMap::new(),
+                }),
+                ..Components::default()
+            },
+        };
+        if entity.components.sprite.is_some() && first_sprite_id.is_none() {
+            first_sprite_id = Some(entity.entity_id.clone());
+        }
+        scene.entities.push(entity);
+    }
+
+    if let Some(view) = room.views.iter().find(|view| view.visible) {
+        let follow = first_entity_for_object
+            .get(&view.object_name)
+            .cloned()
+            .or_else(|| first_sprite_id.clone());
+        scene.entities.push(imported_camera_entity(
+            unique_entity_id(&mut entity_ids, "gamemaker_camera", "camera"),
+            "GameMaker Camera".to_string(),
+            follow,
+        ));
+    }
+
+    if first_sprite_id.is_some()
+        && !scene
+            .entities
+            .iter()
+            .any(|entity| entity.components.camera.is_some())
+    {
+        scene.entities.push(imported_camera_entity(
+            unique_entity_id(&mut entity_ids, "main_camera", "camera"),
+            "Main Camera".to_string(),
+            first_sprite_id,
+        ));
+    }
+
+    skipped.push(
+        "GML preservado como bridge semantica; conversao nativa completa de GML permanece Experimental."
+            .to_string(),
+    );
+    save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
+
+    if let Some(temp_root) = resolved.temp_root {
+        let _ = fs::remove_dir_all(temp_root);
+    }
+
+    Ok(ExternalImportReport {
+        primary_scene: scene,
+        imported_scenes: 1,
+        skipped_sources: skipped,
+    })
+}
+
+fn resolve_gamemaker_source_root(source_path: &Path) -> Result<GameMakerResolvedRoot, LoadError> {
+    if source_path.is_dir() {
+        return Ok(GameMakerResolvedRoot {
+            effective_root: find_gamemaker_project_root(source_path)?,
+            temp_root: None,
+        });
+    }
+
+    let extension = source_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if !["gmez", "gmz", "gmx"].contains(&extension.as_str()) {
+        return Err(LoadError(format!(
+            "Projeto GameMaker invalido: '{}' nao e diretorio GMX nem pacote GMZ/GMEZ.",
+            source_path.display()
+        )));
+    }
+
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let temp_root = std::env::temp_dir().join(format!(
+        "retro-dev-studio-gamemaker-import-{}-{}",
+        std::process::id(),
+        nonce
+    ));
+    fs::create_dir_all(&temp_root).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel criar temp para pacote GameMaker '{}': {}",
+            temp_root.display(),
+            error
+        ))
+    })?;
+    sevenz_rust2::decompress_file(source_path, &temp_root).map_err(|error| {
+        let _ = fs::remove_dir_all(&temp_root);
+        LoadError(format!(
+            "Nao foi possivel extrair pacote GameMaker '{}': {}",
+            source_path.display(),
+            error
+        ))
+    })?;
+    let effective_root = find_gamemaker_project_root(&temp_root)?;
+    Ok(GameMakerResolvedRoot {
+        effective_root,
+        temp_root: Some(temp_root),
+    })
+}
+
+fn find_gamemaker_project_root(root: &Path) -> Result<PathBuf, LoadError> {
+    for candidate in [root.to_path_buf(), root.join("src")] {
+        if is_gamemaker_project_root(&candidate) {
+            return Ok(candidate);
+        }
+    }
+
+    let gmx_files = collect_recursive_files_by_extension(root, &["gmx"], &["rds"])?;
+    for rel in &gmx_files {
+        let path = root.join(PathBuf::from(rel.replace('/', "\\")));
+        if path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .is_some_and(|name| name.ends_with(".project.gmx"))
+        {
+            if let Some(parent) = path.parent() {
+                return Ok(parent.to_path_buf());
+            }
+        }
+    }
+    for rel in &gmx_files {
+        if !rel.ends_with(".room.gmx") {
+            continue;
+        }
+        let path = root.join(PathBuf::from(rel.replace('/', "\\")));
+        if let Some(candidate) = path
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::parent)
+            .filter(|candidate| is_gamemaker_project_root(candidate))
+        {
+            return Ok(candidate.to_path_buf());
+        }
+    }
+
+    Err(LoadError(format!(
+        "Projeto GameMaker invalido: nenhum root GMX com objects/rooms/sprites encontrado em '{}'.",
+        root.display()
+    )))
+}
+
+fn is_gamemaker_project_root(path: &Path) -> bool {
+    path.is_dir()
+        && gamemaker_asset_dir(path, "objects").is_some()
+        && gamemaker_asset_dir(path, "rooms").is_some()
+        && gamemaker_asset_dir(path, "sprites").is_some()
+}
+
+fn gamemaker_asset_dir(root: &Path, kind: &str) -> Option<PathBuf> {
+    let direct = root.join(kind);
+    if direct.is_dir() {
+        return Some(direct);
+    }
+    let title = match kind {
+        "objects" => "Objects",
+        "rooms" => "Rooms",
+        "sprites" => "Sprites",
+        "backgrounds" => "Backgrounds",
+        other => other,
+    };
+    let assets = root.join("Assets").join(title);
+    if assets.is_dir() {
+        return Some(assets);
+    }
+    None
+}
+
+fn load_gamemaker_sprites(
+    gm_root: &Path,
+) -> Result<HashMap<String, GameMakerSpriteResource>, LoadError> {
+    let mut sprites = HashMap::new();
+    let sprites_dir = gamemaker_asset_dir(gm_root, "sprites").ok_or_else(|| {
+        LoadError(format!(
+            "Projeto GameMaker invalido: diretorio de sprites ausente em '{}'.",
+            gm_root.display()
+        ))
+    })?;
+    let files = collect_recursive_files_by_extension(&sprites_dir, &["gmx"], &["rds"])?;
+    for rel in files {
+        if !rel.ends_with(".sprite.gmx") {
+            continue;
+        }
+        let path = sprites_dir.join(PathBuf::from(rel.replace('/', "\\")));
+        let content = read_text_lossy(&path)?;
+        let Some(frame) = first_xml_tag_text(&content, "frame") else {
+            continue;
+        };
+        let source_path = path
+            .parent()
+            .unwrap_or(gm_root)
+            .join(PathBuf::from(frame.replace('/', "\\")));
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("sprite.sprite.gmx")
+            .trim_end_matches(".sprite.gmx")
+            .to_string();
+        let width = first_xml_tag_text(&content, "width")
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or_else(|| {
+                image::image_dimensions(&source_path)
+                    .map(|dims| dims.0)
+                    .unwrap_or(32)
+            });
+        let height = first_xml_tag_text(&content, "height")
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or_else(|| {
+                image::image_dimensions(&source_path)
+                    .map(|dims| dims.1)
+                    .unwrap_or(32)
+            });
+        let xorigin = first_xml_tag_text(&content, "xorig")
+            .and_then(|value| value.parse::<i32>().ok())
+            .unwrap_or(0);
+        let yorigin = first_xml_tag_text(&content, "yorigin")
+            .and_then(|value| value.parse::<i32>().ok())
+            .unwrap_or(0);
+        sprites.insert(
+            name,
+            GameMakerSpriteResource {
+                source_path,
+                width,
+                height,
+                xorigin,
+                yorigin,
+            },
+        );
+    }
+    Ok(sprites)
+}
+
+fn load_gamemaker_objects(
+    gm_root: &Path,
+) -> Result<HashMap<String, GameMakerObjectResource>, LoadError> {
+    let mut objects = HashMap::new();
+    let objects_dir = gamemaker_asset_dir(gm_root, "objects").ok_or_else(|| {
+        LoadError(format!(
+            "Projeto GameMaker invalido: diretorio de objetos ausente em '{}'.",
+            gm_root.display()
+        ))
+    })?;
+    let files = collect_recursive_files_by_extension(&objects_dir, &["gmx"], &["rds"])?;
+    for rel in files {
+        if !rel.ends_with(".object.gmx") {
+            continue;
+        }
+        let path = objects_dir.join(PathBuf::from(rel.replace('/', "\\")));
+        let content = read_text_lossy(&path)?;
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("object.object.gmx")
+            .trim_end_matches(".object.gmx")
+            .to_string();
+        let sprite_name = first_xml_tag_text(&content, "spriteName")
+            .filter(|value| !value.eq_ignore_ascii_case("<undefined>") && !value.is_empty());
+        let solid = first_xml_tag_text(&content, "solid").as_deref() == Some("-1");
+        let events = parse_gamemaker_events(&content);
+        objects.insert(
+            name.clone(),
+            GameMakerObjectResource {
+                name,
+                sprite_name,
+                solid,
+                source_path: path,
+                events,
+            },
+        );
+    }
+    Ok(objects)
+}
+
+fn load_gamemaker_primary_room(gm_root: &Path) -> Result<GameMakerRoomResource, LoadError> {
+    let rooms_dir = gamemaker_asset_dir(gm_root, "rooms").ok_or_else(|| {
+        LoadError(format!(
+            "Projeto GameMaker invalido: diretorio de rooms ausente em '{}'.",
+            gm_root.display()
+        ))
+    })?;
+    let mut rooms = collect_recursive_files_by_extension(&rooms_dir, &["gmx"], &["rds"])?;
+    rooms.retain(|rel| rel.ends_with(".room.gmx"));
+    rooms.sort();
+    let rel = rooms.into_iter().next().ok_or_else(|| {
+        LoadError(format!(
+            "Projeto GameMaker invalido: nenhum '.room.gmx' encontrado em '{}'.",
+            gm_root.display()
+        ))
+    })?;
+    let path = rooms_dir.join(PathBuf::from(rel.replace('/', "\\")));
+    let content = read_text_lossy(&path)?;
+    let display_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("room.room.gmx")
+        .trim_end_matches(".room.gmx")
+        .to_string();
+    let instances = collect_xml_start_tags(&content, "instance")
+        .into_iter()
+        .filter_map(|tag| {
+            let attrs = parse_xml_attributes(&tag);
+            let object_name = attrs.get("objName")?.trim().to_string();
+            Some(GameMakerRoomInstance {
+                object_name,
+                name: attrs
+                    .get("name")
+                    .cloned()
+                    .unwrap_or_else(|| "instance".to_string()),
+                x: attrs
+                    .get("x")
+                    .and_then(|value| value.parse::<i32>().ok())
+                    .unwrap_or(0),
+                y: attrs
+                    .get("y")
+                    .and_then(|value| value.parse::<i32>().ok())
+                    .unwrap_or(0),
+                code: attrs.get("code").cloned(),
+            })
+        })
+        .collect();
+    let views = collect_xml_start_tags(&content, "view")
+        .into_iter()
+        .filter_map(|tag| {
+            let attrs = parse_xml_attributes(&tag);
+            let object_name = attrs.get("objName")?.trim().to_string();
+            Some(GameMakerRoomView {
+                object_name,
+                visible: attrs.get("visible").is_some_and(|value| value == "-1"),
+            })
+        })
+        .collect();
+    Ok(GameMakerRoomResource {
+        display_name,
+        instances,
+        views,
+    })
+}
+
+fn parse_gamemaker_events(content: &str) -> Vec<GameMakerEvent> {
+    let mut events = Vec::new();
+    let mut search_at = 0usize;
+    while let Some(relative_start) = content[search_at..].find("<event") {
+        let start = search_at + relative_start;
+        let after = content[start + "<event".len()..].chars().next();
+        if !matches!(after, Some(' ' | '\t' | '\r' | '\n' | '>' | '/')) {
+            search_at = start + "<event".len();
+            continue;
+        }
+        let Some(tag_end_relative) = content[start..].find('>') else {
+            break;
+        };
+        let tag_end = start + tag_end_relative;
+        let Some(end_relative) = content[tag_end..].find("</event>") else {
+            break;
+        };
+        let end = tag_end + end_relative + "</event>".len();
+        let attrs = parse_xml_attributes(&content[start..=tag_end]);
+        let body = &content[tag_end + 1..tag_end + end_relative];
+        let label = gamemaker_event_label(&attrs);
+        let code = all_xml_tag_text(body, "string")
+            .join("\n")
+            .trim()
+            .to_string();
+        if !code.is_empty() {
+            events.push(GameMakerEvent { label, code });
+        }
+        search_at = end;
+    }
+    events
+}
+
+fn gamemaker_event_label(attrs: &HashMap<String, String>) -> String {
+    match attrs.get("eventtype").map(String::as_str) {
+        Some("0") => "Create".to_string(),
+        Some("2") => format!("Alarm {}", attrs.get("enumb").cloned().unwrap_or_default()),
+        Some("3") => "Step".to_string(),
+        Some("4") => format!(
+            "Collision {}",
+            attrs
+                .get("ename")
+                .cloned()
+                .unwrap_or_else(|| attrs.get("enumb").cloned().unwrap_or_default())
+        ),
+        Some("5") => format!(
+            "Keyboard {}",
+            attrs.get("enumb").cloned().unwrap_or_default()
+        ),
+        Some("6") => format!("Mouse {}", attrs.get("enumb").cloned().unwrap_or_default()),
+        Some("7") => "Other".to_string(),
+        Some("8") => "Draw".to_string(),
+        Some("9") => format!(
+            "Key Press {}",
+            attrs.get("enumb").cloned().unwrap_or_default()
+        ),
+        Some("10") => format!(
+            "Key Release {}",
+            attrs.get("enumb").cloned().unwrap_or_default()
+        ),
+        Some(other) => format!("Event {}", other),
+        None => "Event".to_string(),
+    }
+}
+
+fn gamemaker_collision_component(
+    object: &GameMakerObjectResource,
+    sprite: Option<&GameMakerSpriteResource>,
+) -> Option<CollisionComponent> {
+    let collision_name = object.name.to_ascii_lowercase();
+    let has_collision = object.solid
+        || collision_name.contains("solid")
+        || collision_name.contains("block")
+        || collision_name.contains("plat");
+    if !has_collision {
+        return None;
+    }
+    let width = sprite.map(|sprite| sprite.width).unwrap_or(32).max(1);
+    let height = sprite.map(|sprite| sprite.height).unwrap_or(32).max(1);
+    Some(CollisionComponent {
+        shape: "aabb".to_string(),
+        width,
+        height,
+        offset: None,
+        solid: true,
+        layer: Some(if collision_name.contains("player") {
+            "player".to_string()
+        } else {
+            "world".to_string()
+        }),
+        collides_with: if collision_name.contains("player") {
+            vec!["world".to_string(), "enemy".to_string()]
+        } else {
+            Vec::new()
+        },
+    })
+}
+
+fn gamemaker_input_component(logic_hints: &[String]) -> Option<InputComponent> {
+    let joined = logic_hints.join("\n").to_ascii_lowercase();
+    if !(joined.contains("keyboard_check") || joined.contains("input_check")) {
+        return None;
+    }
+    Some(InputComponent {
+        device: "joypad1".to_string(),
+        mapping: HashMap::from([
+            ("move_left".to_string(), "DPAD_LEFT".to_string()),
+            ("move_right".to_string(), "DPAD_RIGHT".to_string()),
+            ("jump".to_string(), "BUTTON_A".to_string()),
+            ("attack".to_string(), "BUTTON_B".to_string()),
+            ("start".to_string(), "START".to_string()),
+        ]),
+    })
+}
+
+fn gamemaker_physics_component(logic_hints: &[String]) -> Option<PhysicsComponent> {
+    let joined = logic_hints.join("\n").to_ascii_lowercase();
+    if !(joined.contains("vsp")
+        || joined.contains("vspeed")
+        || joined.contains("gravity")
+        || joined.contains("place_free")
+        || joined.contains("collision_"))
+    {
+        return None;
+    }
+    Some(PhysicsComponent {
+        gravity: joined.contains("gravity") || joined.contains("vsp") || joined.contains("vspeed"),
+        gravity_strength: 6,
+        max_velocity: Some(Velocity { x: 64, y: 96 }),
+        friction: if joined.contains("fric") { 1 } else { 0 },
+        bounce: 0,
+    })
+}
+
+fn gamemaker_entity_role(object_name: &str, logic_hints: &[String]) -> String {
+    let text = format!("{}\n{}", object_name, logic_hints.join("\n")).to_ascii_lowercase();
+    if text.contains("player") || text.contains("keyboard_check") || text.contains("input_check") {
+        "player_avatar".to_string()
+    } else if text.contains("enemy") || text.contains("boss") {
+        "enemy_actor".to_string()
+    } else if text.contains("coin") || text.contains("item") || text.contains("pickup") {
+        "collectible".to_string()
+    } else if text.contains("camera") || text.contains("view") {
+        "camera_anchor".to_string()
+    } else {
+        "room_instance".to_string()
+    }
+}
+
+fn compact_gml_snippet(code: &str) -> String {
+    let compact = code.split_whitespace().collect::<Vec<_>>().join(" ");
+    const MAX_LEN: usize = 220;
+    if compact.len() > MAX_LEN {
+        format!("{}...", &compact[..MAX_LEN])
+    } else {
+        compact
+    }
+}
+
+fn first_xml_tag_text(content: &str, tag: &str) -> Option<String> {
+    all_xml_tag_text(content, tag).into_iter().next()
+}
+
+fn all_xml_tag_text(content: &str, tag: &str) -> Vec<String> {
+    let open = format!("<{tag}");
+    let close = format!("</{tag}>");
+    let mut values = Vec::new();
+    let mut search_at = 0usize;
+    while let Some(relative_start) = content[search_at..].find(&open) {
+        let start = search_at + relative_start;
+        let after = content[start + open.len()..].chars().next();
+        if !matches!(after, Some(' ' | '\t' | '\r' | '\n' | '>' | '/')) {
+            search_at = start + open.len();
+            continue;
+        }
+        let Some(open_end_relative) = content[start..].find('>') else {
+            break;
+        };
+        let text_start = start + open_end_relative + 1;
+        let Some(close_relative) = content[text_start..].find(&close) else {
+            break;
+        };
+        let text_end = text_start + close_relative;
+        values.push(xml_unescape(content[text_start..text_end].trim()));
+        search_at = text_end + close.len();
+    }
+    values
+}
+
+fn collect_xml_start_tags(content: &str, tag: &str) -> Vec<String> {
+    let needle = format!("<{tag}");
+    let mut tags = Vec::new();
+    let mut search_at = 0usize;
+    while let Some(relative_start) = content[search_at..].find(&needle) {
+        let start = search_at + relative_start;
+        let after = content[start + needle.len()..].chars().next();
+        if !matches!(after, Some(' ' | '\t' | '\r' | '\n' | '>' | '/')) {
+            search_at = start + needle.len();
+            continue;
+        }
+        if start > 0 && content[..start].ends_with("</") {
+            search_at = start + needle.len();
+            continue;
+        }
+        let Some(end_relative) = content[start..].find('>') else {
+            break;
+        };
+        let end = start + end_relative + 1;
+        tags.push(content[start..end].to_string());
+        search_at = end;
+    }
+    tags
+}
+
+fn parse_xml_attributes(tag: &str) -> HashMap<String, String> {
+    let mut attrs = HashMap::new();
+    let mut index = 0usize;
+    let bytes = tag.as_bytes();
+    while index < bytes.len() {
+        while index < bytes.len() && !bytes[index].is_ascii_alphabetic() && bytes[index] != b'_' {
+            index += 1;
+        }
+        let key_start = index;
+        while index < bytes.len()
+            && (bytes[index].is_ascii_alphanumeric() || matches!(bytes[index], b'_' | b'-'))
+        {
+            index += 1;
+        }
+        if key_start == index {
+            break;
+        }
+        let key = &tag[key_start..index];
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        if index >= bytes.len() || bytes[index] != b'=' {
+            continue;
+        }
+        index += 1;
+        while index < bytes.len() && bytes[index].is_ascii_whitespace() {
+            index += 1;
+        }
+        if index >= bytes.len() || bytes[index] != b'"' {
+            continue;
+        }
+        index += 1;
+        let value_start = index;
+        while index < bytes.len() && bytes[index] != b'"' {
+            index += 1;
+        }
+        if index <= bytes.len() {
+            attrs.insert(key.to_string(), xml_unescape(&tag[value_start..index]));
+        }
+        index = index.saturating_add(1);
+    }
+    attrs
+}
+
+fn xml_unescape(value: &str) -> String {
+    value
+        .replace("&#xA;", "\n")
+        .replace("&#10;", "\n")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
 }
 
 pub fn import_godot_project(
@@ -11525,6 +12345,89 @@ void tick_player(void) {\n\
         .expect("write main.tscn");
     }
 
+    fn write_gamemaker_gmx_fixture(root: &Path) {
+        fs::create_dir_all(root.join("sprites").join("images")).expect("create gm sprites");
+        fs::create_dir_all(root.join("objects")).expect("create gm objects");
+        fs::create_dir_all(root.join("rooms")).expect("create gm rooms");
+        write_test_png(
+            &root.join("sprites").join("images").join("spr_player_0.png"),
+            24,
+            32,
+            [255, 196, 0, 255],
+        );
+        fs::write(
+            root.join("Platformer.project.gmx"),
+            [
+                "<assets>",
+                "  <sprites name=\"sprites\">",
+                "    <sprite>sprites\\spr_player</sprite>",
+                "  </sprites>",
+                "  <objects name=\"objects\">",
+                "    <object>objects\\obj_player</object>",
+                "  </objects>",
+                "  <rooms name=\"rooms\">",
+                "    <room>rooms\\rm_stage</room>",
+                "  </rooms>",
+                "</assets>",
+            ]
+            .join("\n"),
+        )
+        .expect("write gmx project");
+        fs::write(
+            root.join("sprites").join("spr_player.sprite.gmx"),
+            [
+                "<sprite>",
+                "  <xorig>12</xorig>",
+                "  <yorigin>28</yorigin>",
+                "  <width>24</width>",
+                "  <height>32</height>",
+                "  <frames>",
+                "    <frame index=\"0\">images\\spr_player_0.png</frame>",
+                "  </frames>",
+                "</sprite>",
+            ]
+            .join("\n"),
+        )
+        .expect("write gm sprite");
+        fs::write(
+            root.join("objects").join("obj_player.object.gmx"),
+            [
+                "<object>",
+                "  <spriteName>spr_player</spriteName>",
+                "  <solid>-1</solid>",
+                "  <events>",
+                "    <event eventtype=\"0\" enumb=\"0\">",
+                "      <action><arguments><argument><kind>1</kind><string>hsp = 0; vsp = 0;</string></argument></arguments></action>",
+                "    </event>",
+                "    <event eventtype=\"3\" enumb=\"0\">",
+                "      <action><arguments><argument><kind>1</kind><string>if (keyboard_check(vk_right)) { x += 2; }</string></argument></arguments></action>",
+                "    </event>",
+                "  </events>",
+                "</object>",
+            ]
+            .join("\n"),
+        )
+        .expect("write gm object");
+        fs::write(
+            root.join("rooms").join("rm_stage.room.gmx"),
+            [
+                "<room>",
+                "  <width>640</width>",
+                "  <height>224</height>",
+                "  <speed>60</speed>",
+                "  <views>",
+                "    <view visible=\"-1\" objName=\"obj_player\" xview=\"0\" yview=\"0\" wview=\"320\" hview=\"224\" xport=\"0\" yport=\"0\" wport=\"320\" hport=\"224\" hborder=\"80\" vborder=\"40\" hspeed=\"-1\" vspeed=\"-1\"/>",
+                "  </views>",
+                "  <instances>",
+                "    <instance objName=\"obj_player\" x=\"48\" y=\"120\" name=\"inst_player\" locked=\"0\" code=\"state = &quot;start&quot;;\" scaleX=\"1\" scaleY=\"1\" colour=\"4294967295\" rotation=\"0\"/>",
+                "  </instances>",
+                "</room>",
+            ]
+            .join("\n"),
+        )
+        .expect("write gm room");
+    }
+
     fn write_mugen_character_fixture(root: &Path) {
         fs::create_dir_all(root.join("work").join("hero_sff").join("sd"))
             .expect("create mugen character work dir");
@@ -11746,7 +12649,9 @@ void tick_player(void) {\n\
                 && profile.supported_levels == vec!["L1", "L2", "L3"]
         }));
         assert!(profiles.iter().any(|profile| {
-            profile.id == "gamemaker" && !profile.importable && profile.support_status == "Parcial"
+            profile.id == "gamemaker"
+                && profile.importable
+                && profile.support_status == "Experimental"
         }));
     }
 
@@ -13050,6 +13955,125 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
 
         let _ = fs::remove_dir_all(project_dir);
         let _ = fs::remove_dir_all(donor_root);
+    }
+
+    #[test]
+    fn import_gamemaker_gmx_project_creates_editable_scene_with_preserved_gml_bridge() {
+        let donor_root = temp_dir("gamemaker-gmx-import-root");
+        let project_dir = temp_dir("gamemaker-gmx-import-project");
+        create_project_skeleton(&project_dir, "Imported GameMaker", "megadrive")
+            .expect("create project skeleton");
+        write_gamemaker_gmx_fixture(&donor_root);
+
+        let report = import_external_project(&project_dir, "gamemaker", &donor_root)
+            .expect("import gamemaker gmx project");
+        let scene =
+            load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load imported gamemaker scene");
+
+        assert_eq!(report.imported_scenes, 1);
+        assert!(report
+            .skipped_sources
+            .iter()
+            .any(|entry| entry.contains("GML preservado")));
+        let player = scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "inst_player")
+            .expect("player instance entity");
+        assert_eq!(player.transform.x, 48);
+        assert_eq!(player.transform.y, 120);
+        assert!(player.components.sprite.as_ref().is_some_and(|sprite| {
+            sprite.asset == "assets/sprites/gamemaker_sprites_images_spr_player_0.png"
+                && sprite.frame_width == 24
+                && sprite.frame_height == 32
+        }));
+        assert!(player.components.collision.is_some());
+        let logic = player
+            .components
+            .logic
+            .as_ref()
+            .expect("preserved gml logic");
+        assert!(logic
+            .logic_hints
+            .iter()
+            .any(|hint| hint.contains("Create") && hint.contains("hsp = 0")));
+        assert!(logic
+            .logic_hints
+            .iter()
+            .any(|hint| hint.contains("Step") && hint.contains("keyboard_check")));
+        assert_eq!(
+            logic
+                .imported_semantics
+                .as_ref()
+                .map(|semantics| semantics.source.as_str()),
+            Some("gamemaker_gmx")
+        );
+        assert!(scene.entities.iter().any(|entity| {
+            entity
+                .components
+                .camera
+                .as_ref()
+                .is_some_and(|camera| camera.follow_entity.as_deref() == Some("inst_player"))
+        }));
+
+        let project =
+            stamp_imported_external_profile_metadata(&project_dir, "gamemaker", &donor_root)
+                .expect("stamp gamemaker metadata");
+        let metadata = project.template_metadata.expect("template metadata");
+        assert_eq!(metadata.source_kind, "imported_gamemaker");
+        assert_eq!(metadata.import_profile.as_deref(), Some("gamemaker_gmx_v1"));
+
+        let _ = fs::remove_dir_all(project_dir);
+        let _ = fs::remove_dir_all(donor_root);
+    }
+
+    #[test]
+    #[ignore = "host-local validation against F:\\Projects GameMaker/GMX samples"]
+    fn import_gamemaker_real_host_samples_when_present() {
+        let sample_roots = [
+            PathBuf::from("F:\\Projects\\Game Maker\\Basic_platform_game_example.gmez"),
+            PathBuf::from("F:\\Projects\\Godot\\Super Bowsette Source Code Beta 0.1\\src"),
+        ];
+
+        for sample_root in sample_roots {
+            if !sample_root.exists() {
+                eprintln!("[gamemaker-real-skip] {}", sample_root.display());
+                continue;
+            }
+            let project_dir = temp_dir("gamemaker-real-host-project");
+            create_project_skeleton(&project_dir, "Real GameMaker Sample", "megadrive")
+                .expect("create real gamemaker project skeleton");
+
+            let report = import_external_project(&project_dir, "gamemaker", &sample_root)
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "real GameMaker sample '{}' must import without fake fallback: {}",
+                        sample_root.display(),
+                        error
+                    )
+                });
+            let scene = load_scene(&project_dir, DEFAULT_ENTRY_SCENE)
+                .expect("load real gamemaker imported scene");
+            assert_eq!(report.imported_scenes, 1);
+            assert!(
+                scene
+                    .entities
+                    .iter()
+                    .any(|entity| entity.components.sprite.is_some()),
+                "real GameMaker sample '{}' must produce visible sprite entities",
+                sample_root.display()
+            );
+            assert!(
+                report
+                    .skipped_sources
+                    .iter()
+                    .any(|entry| entry.contains("GML preservado")),
+                "real GameMaker sample '{}' must expose preserved GML bridge status",
+                sample_root.display()
+            );
+
+            let _ = fs::remove_dir_all(project_dir);
+        }
     }
 
     #[test]
@@ -16572,7 +17596,14 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
 
         let (width, height, rgba) = best_frame
             .ok_or_else(|| "Libretro visible smoke missing framebuffer payload".to_string())?;
-        Ok((best_non_black, core_label, total_frames, width, height, rgba))
+        Ok((
+            best_non_black,
+            core_label,
+            total_frames,
+            width,
+            height,
+            rgba,
+        ))
     }
 
     fn sgdk_real_corpus_slug(name: &str, index: usize) -> String {
@@ -16985,10 +18016,9 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             "nenhuma entrada do corpus real pode usar fake toolchain"
         );
 
-        let report_json = fs::read_to_string(
-            artifact_root.join("sgdk-corpus-real-build-report.json"),
-        )
-        .expect("read SGDK real corpus JSON report");
+        let report_json =
+            fs::read_to_string(artifact_root.join("sgdk-corpus-real-build-report.json"))
+                .expect("read SGDK real corpus JSON report");
         let report: serde_json::Value =
             serde_json::from_str(&report_json).expect("parse SGDK real corpus JSON report");
         assert_eq!(
@@ -17011,9 +18041,7 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             Some(false),
             "corpus real runner must not use fake toolchain"
         );
-        let emulation_visible_ok = report["emulation_visible_ok"]
-            .as_u64()
-            .unwrap_or(0);
+        let emulation_visible_ok = report["emulation_visible_ok"].as_u64().unwrap_or(0);
         let build_real_ok = report["build_real_ok"].as_u64().unwrap_or(0);
         eprintln!(
             "SGDK corpus real visible emulation: {}/{} builds with non-black framebuffer (processed {}/{})",

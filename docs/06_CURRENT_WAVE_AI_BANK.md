@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-18 (rodada 45 - PR #5 integrado + atalhos centrais)
+**Ultima Atualizacao:** 2026-05-18 (rodada 46 - GameMaker GMX/GMEZ experimental)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-18 rodada 46 - branch `codex/product-compatibility-wave`):**
+  - **Base protegida:** antes de mexer em feature, `main` estava alinhado com `origin/main` em `a0fe109` e `npm run release:readiness:promotion` passou com `Pronto para promocao: SIM`.
+  - **Auditoria externa:** `F:\Projects\MegaDrive_DEV\SGDK_Engines` contem 122 diretórios; `F:\Projects\Game Maker` contem `Basic_platform_game_example.gmez` (7z); `F:\Projects\Godot` contem um pacote de assets `Pixel Adventure 1`, um export binario `Super Bowsette Beta 2.1` e uma arvore GMX em `Super Bowsette Source Code Beta 0.1\src`.
+  - **GameMaker Experimental/importavel:** `src-tauri/src/core/project_mgr.rs` agora registra `gamemaker` como `Experimental` e `importable: true`, sem claim Stable. O adapter `import_gamemaker_project` detecta GMX em pasta ou pacotes GMZ/GMEZ 7z, aceita layouts `sprites/objects/rooms` e `Assets/Sprites/Objects/Rooms`, importa rooms/instances/sprites/objetos, cria entidades editaveis e cameras por views.
+  - **Sem perda silenciosa:** GML de eventos e instance creation code e preservado como bridge semantica visivel em `logic_hints`, `graph_origin=gamemaker_gmx` e `imported_semantics.source=gamemaker_gmx`; o report inclui "GML preservado..." para deixar claro que codegen nativo completo de GML ainda e Experimental.
+  - **Cobertura focada:** passaram `cargo test --manifest-path src-tauri/Cargo.toml --lib import_gamemaker_gmx_project_creates_editable_scene_with_preserved_gml_bridge -- --nocapture --test-threads=1`, `cargo test --manifest-path src-tauri/Cargo.toml --lib list_external_import_profiles_exposes_support_matrix -- --nocapture --test-threads=1` e `cargo test --manifest-path src-tauri/Cargo.toml --lib import_gamemaker_real_host_samples_when_present -- --ignored --nocapture --test-threads=1`, este ultimo contra o `.gmez` real e a arvore GMX real local.
+  - **Status honesto:** isto nao fecha conversao GameMaker->SGDK C->ROM->emulacao, nao cobre `.yyp/.yy` modernos e nao altera SGDK/Node/BLAZE. Proximo bloqueador tecnico da frente GameMaker e provar build SGDK/ROM/emulacao a partir de import real, com relatorio de equivalencia e gaps acionaveis.
 
 * **O que acabou de acontecer (2026-05-18 rodada 45 - PR #5 integrado + branch `codex/product-professionalization-wave`):**
   - **Fechamento SGDK/Node/BLAZE:** PR #5 (`https://github.com/Misael-art/RetroDevStudio/pull/5`) integrou `codex/sgdk-stable-node-engine-blaze` em `main` por merge commit `a31357072c93431ce441ff51a88a51004365ca88`, com head `7768f4bcc3c2109eac4ec2531bd8078a8dfeba81`.
