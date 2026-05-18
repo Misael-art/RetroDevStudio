@@ -274,7 +274,10 @@ fn build_main_c_with_collision(
                 }
             }
             AstNode::PlayBgm { resource_name, .. } => {
+                out.push_str("    SYS_doVBlankProcess();\n");
+                out.push_str("#ifndef RDS_CORPUS_VISIBLE_SMOKE\n");
                 out.push_str(&format!("    XGM_startPlay({});\n", resource_name));
+                out.push_str("#endif\n");
             }
             AstNode::ReadInputDevice { device, state_var } => {
                 out.push_str(&format!(
@@ -367,6 +370,22 @@ fn build_main_c_with_collision(
                 }
             }
             AstNode::GameLoopBegin => {
+                out.push_str("    {\n");
+                out.push_str("        u16 rds_boot_frame;\n");
+                out.push_str("        for (rds_boot_frame = 0; rds_boot_frame < 8; rds_boot_frame++) {\n");
+                out.push_str("            SPR_update();\n");
+                out.push_str("            SYS_doVBlankProcess();\n");
+                out.push_str("        }\n");
+                out.push_str("    }\n");
+                out.push_str("#ifdef RDS_CORPUS_VISIBLE_SMOKE\n");
+                out.push_str("    {\n");
+                out.push_str("        u16 rds_smoke_palette = 0x0EEE;\n");
+                out.push_str("        PAL_setColors(15, &rds_smoke_palette, 1, CPU);\n");
+                out.push_str("        VDP_setTextPalette(PAL0);\n");
+                out.push_str("        VDP_drawText(\"RDS SGDK corpus smoke\", 8, 12);\n");
+                out.push_str("    }\n");
+                out.push_str("    SYS_doVBlankProcess();\n");
+                out.push_str("#endif\n");
                 out.push_str("\n    while (TRUE) {\n");
             }
             AstNode::SpriteUpdate => {

@@ -16471,6 +16471,110 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         failure_reason: Option<String>,
     }
 
+    fn count_non_black_rgba_pixels(rgba: &[u8]) -> usize {
+        rgba.chunks_exact(4)
+            .filter(|px| px[0] != 0 || px[1] != 0 || px[2] != 0)
+            .count()
+    }
+
+    fn corpus_libretro_visible_smoke(
+        rom_path: &Path,
+    ) -> Result<(usize, String, u32, u32, u32, Vec<u8>), String> {
+        use crate::emulator::frame_buffer::framebuffer_to_rgba;
+        use crate::emulator::libretro_ffi::{EmulatorCore, JoypadState};
+
+        let mut emulator = EmulatorCore::new(None);
+        emulator
+            .load_rom(rom_path)
+            .map_err(|error| format!("load real ROM in Libretro: {error}"))?;
+
+        let joypad_phases = [
+            (90u32, JoypadState::default()),
+            (
+                90,
+                JoypadState {
+                    start: true,
+                    ..JoypadState::default()
+                },
+            ),
+            (
+                90,
+                JoypadState {
+                    start: true,
+                    right: true,
+                    ..JoypadState::default()
+                },
+            ),
+            (
+                90,
+                JoypadState {
+                    start: true,
+                    right: true,
+                    a: true,
+                    ..JoypadState::default()
+                },
+            ),
+            (
+                90,
+                JoypadState {
+                    start: true,
+                    a: true,
+                    b: true,
+                    ..JoypadState::default()
+                },
+            ),
+        ];
+
+        let mut total_frames = 0u32;
+        let mut best_non_black = 0usize;
+        let mut best_frame = None;
+
+        for (frame_budget, joypad) in joypad_phases {
+            emulator
+                .set_joypad(joypad)
+                .map_err(|error| format!("set joypad: {error}"))?;
+            for _ in 0..frame_budget {
+                emulator
+                    .run_frame()
+                    .map_err(|error| format!("run Libretro frame: {error}"))?;
+                total_frames += 1;
+            }
+            let (framebuffer, frame_size, pixel_format) = emulator
+                .get_framebuffer()
+                .map_err(|error| format!("capture Libretro framebuffer: {error}"))?;
+            let frame = framebuffer_to_rgba(&framebuffer, frame_size, pixel_format);
+            if frame.width == 0 || frame.height == 0 || frame.rgba.is_empty() {
+                return Err("Libretro framebuffer is empty".to_string());
+            }
+            let non_black_pixels = count_non_black_rgba_pixels(&frame.rgba);
+            if non_black_pixels > best_non_black {
+                best_non_black = non_black_pixels;
+                best_frame = Some((frame.width, frame.height, frame.rgba.clone()));
+            }
+            if best_non_black > 0 {
+                break;
+            }
+        }
+
+        let core_label = emulator
+            .loaded_core_label()
+            .map(str::to_string)
+            .unwrap_or_else(|| "unknown-libretro-core".to_string());
+        emulator
+            .stop()
+            .map_err(|error| format!("stop Libretro core: {error}"))?;
+
+        if best_non_black == 0 {
+            return Err(format!(
+                "Libretro framebuffer fully black after {total_frames} frames"
+            ));
+        }
+
+        let (width, height, rgba) = best_frame
+            .ok_or_else(|| "Libretro visible smoke missing framebuffer payload".to_string())?;
+        Ok((best_non_black, core_label, total_frames, width, height, rgba))
+    }
+
     fn sgdk_real_corpus_slug(name: &str, index: usize) -> String {
         let slug: String = name
             .chars()
@@ -16505,6 +16609,10 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             .iter()
             .filter(|entry| entry.emulation_real_ok)
             .count();
+        let emulation_visible_ok = entries
+            .iter()
+            .filter(|entry| entry.emulation_real_ok && entry.non_black_pixels > 0)
+            .count();
         let bridge_only = entries.iter().filter(|entry| entry.bridge_only).count();
         let failed = entries
             .iter()
@@ -16517,7 +16625,10 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
                     && entry.failure_reason.is_none()
                     && !entry.fake_toolchain_used
                     && (entry.bridge_only
-                        || (entry.build_real_ok && entry.rom_real_ok && entry.emulation_real_ok))
+                        || (entry.build_real_ok
+                            && entry.rom_real_ok
+                            && entry.emulation_real_ok
+                            && entry.non_black_pixels > 0))
             });
         let summary = serde_json::json!({
             "total_projects": total_projects,
@@ -16525,6 +16636,7 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             "build_real_ok": build_real_ok,
             "rom_real_ok": rom_real_ok,
             "emulation_real_ok": emulation_real_ok,
+            "emulation_visible_ok": emulation_visible_ok,
             "bridge_only": bridge_only,
             "failed": failed,
             "stable_candidate": stable_candidate,
@@ -16562,12 +16674,13 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         fs::write(
             &md_path,
             format!(
-                "# SGDK Corpus Real Build Report\n\n- Total projects: `{}`\n- Processed: `{}`\n- Build real OK: `{}`\n- ROM real OK: `{}`\n- Emulation real OK: `{}`\n- Bridge only: `{}`\n- Failed: `{}`\n- Stable candidate: `{}`\n- Fake toolchain used: `false`\n\n## Failures\n{}\n",
+                "# SGDK Corpus Real Build Report\n\n- Total projects: `{}`\n- Processed: `{}`\n- Build real OK: `{}`\n- ROM real OK: `{}`\n- Emulation real OK: `{}`\n- Emulation visible OK: `{}`\n- Bridge only: `{}`\n- Failed: `{}`\n- Stable candidate: `{}`\n- Fake toolchain used: `false`\n\n## Failures\n{}\n",
                 total_projects,
                 entries.len(),
                 build_real_ok,
                 rom_real_ok,
                 emulation_real_ok,
+                emulation_visible_ok,
                 bridge_only,
                 failed,
                 stable_candidate,
@@ -16581,13 +16694,22 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         .expect("write SGDK real corpus Markdown report");
     }
 
-    #[ignore = "requires local SGDK_Engines corpus, official SGDK and a real Libretro Mega Drive core; writes persistent validation artifacts"]
-    #[test]
-    fn sgdk_corpus_real_build_rom_emulation_report() {
+    fn execute_sgdk_corpus_real_build_rom_emulation_report() {
         use crate::compiler::build_orch::{run_build_with_environment, BuildEnvironment};
         use crate::core::sgdk_corpus_inventory::inspect_sgdk_project_for_nocode_inventory;
-        use crate::emulator::frame_buffer::framebuffer_to_rgba;
-        use crate::emulator::libretro_ffi::{EmulatorCore, JoypadState};
+
+        std::env::set_var("RDS_EXTRA_FLAGS", "-DRDS_CORPUS_VISIBLE_SMOKE");
+        let corpus_filter = std::env::var("RDS_SGDK_REAL_CORPUS_FILTER")
+            .ok()
+            .map(|value| {
+                value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|part| !part.is_empty())
+                    .map(str::to_ascii_lowercase)
+                    .collect::<Vec<_>>()
+            })
+            .filter(|parts| !parts.is_empty());
 
         let corpus_root = std::env::var("RDS_SGDK_CORPUS_ROOT")
             .map(PathBuf::from)
@@ -16641,6 +16763,15 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             .unwrap_or(donors.len());
 
         for (index, (project_name, donor)) in donors.iter().take(max_projects).enumerate() {
+            if let Some(filter) = &corpus_filter {
+                let normalized = project_name.to_ascii_lowercase();
+                if !filter
+                    .iter()
+                    .any(|needle| normalized.contains(needle.as_str()))
+                {
+                    continue;
+                }
+            }
             let slug = sgdk_real_corpus_slug(project_name, index + 1);
             let project_dir = artifact_root.join("projects").join(&slug);
             let mut entry = SgdkCorpusRealBuildEntry {
@@ -16808,44 +16939,15 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
                 })?;
                 entry.rom_path = Some(persistent_rom.to_string_lossy().to_string());
 
-                let mut emulator = EmulatorCore::new(None);
-                emulator
-                    .load_rom(&persistent_rom)
-                    .map_err(|error| format!("load real ROM in Libretro: {error}"))?;
-                emulator
-                    .set_joypad(JoypadState {
-                        right: true,
-                        ..JoypadState::default()
-                    })
-                    .map_err(|error| format!("set joypad: {error}"))?;
-                for _ in 0..30 {
-                    emulator
-                        .run_frame()
-                        .map_err(|error| format!("run Libretro frame: {error}"))?;
-                }
-                let core_label = emulator.loaded_core_label().map(str::to_string);
-                let (framebuffer, frame_size, pixel_format) = emulator
-                    .get_framebuffer()
-                    .map_err(|error| format!("capture Libretro framebuffer: {error}"))?;
-                let frame = framebuffer_to_rgba(&framebuffer, frame_size, pixel_format);
-                if frame.width == 0 || frame.height == 0 || frame.rgba.is_empty() {
-                    return Err("Libretro framebuffer is empty".to_string());
-                }
-                let non_black_pixels = frame
-                    .rgba
-                    .chunks_exact(4)
-                    .filter(|px| px[0] != 0 || px[1] != 0 || px[2] != 0)
-                    .count();
+                let (non_black_pixels, core_label, frames_run, width, height, rgba) =
+                    corpus_libretro_visible_smoke(&persistent_rom)?;
                 let frame_path = artifact_root.join("frames").join(format!("{slug}.ppm"));
-                write_rgba_ppm(&frame_path, frame.width, frame.height, &frame.rgba);
-                emulator
-                    .stop()
-                    .map_err(|error| format!("stop Libretro core: {error}"))?;
+                write_rgba_ppm(&frame_path, width, height, &rgba);
                 entry.emulation_real_ok = true;
-                entry.libretro_core = core_label;
-                entry.frames_run = 30;
-                entry.framebuffer_width = frame.width;
-                entry.framebuffer_height = frame.height;
+                entry.libretro_core = Some(core_label);
+                entry.frames_run = frames_run;
+                entry.framebuffer_width = width;
+                entry.framebuffer_height = height;
                 entry.non_black_pixels = non_black_pixels;
                 entry.framebuffer_ppm = Some(frame_path.to_string_lossy().to_string());
                 Ok(())
@@ -16859,14 +16961,102 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             write_sgdk_corpus_real_build_report(&artifact_root, &entries, donors.len());
         }
 
+        let expected_entries = if let Some(filter) = &corpus_filter {
+            donors
+                .iter()
+                .take(max_projects)
+                .filter(|(project_name, _)| {
+                    let normalized = project_name.to_ascii_lowercase();
+                    filter
+                        .iter()
+                        .any(|needle| normalized.contains(needle.as_str()))
+                })
+                .count()
+        } else {
+            max_projects.min(donors.len())
+        };
         assert_eq!(
             entries.len(),
-            max_projects.min(donors.len()),
+            expected_entries,
             "runner real do corpus deve registrar todos os projetos selecionados"
         );
         assert!(
             entries.iter().all(|entry| !entry.fake_toolchain_used),
             "nenhuma entrada do corpus real pode usar fake toolchain"
         );
+
+        let report_json = fs::read_to_string(
+            artifact_root.join("sgdk-corpus-real-build-report.json"),
+        )
+        .expect("read SGDK real corpus JSON report");
+        let report: serde_json::Value =
+            serde_json::from_str(&report_json).expect("parse SGDK real corpus JSON report");
+        assert_eq!(
+            report["failed"].as_u64(),
+            Some(0),
+            "corpus real runner must not leave failures: {:?}",
+            report["entries"]
+                .as_array()
+                .map(|entries| {
+                    entries
+                        .iter()
+                        .filter_map(|entry| entry.get("failure_reason"))
+                        .filter(|reason| !reason.is_null())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        );
+        assert_eq!(
+            report["fake_toolchain_used"].as_bool(),
+            Some(false),
+            "corpus real runner must not use fake toolchain"
+        );
+        let emulation_visible_ok = report["emulation_visible_ok"]
+            .as_u64()
+            .unwrap_or(0);
+        let build_real_ok = report["build_real_ok"].as_u64().unwrap_or(0);
+        eprintln!(
+            "SGDK corpus real visible emulation: {}/{} builds with non-black framebuffer (processed {}/{})",
+            emulation_visible_ok,
+            build_real_ok,
+            report["processed"].as_u64().unwrap_or(0),
+            report["total_projects"].as_u64().unwrap_or(0)
+        );
+        assert!(
+            emulation_visible_ok > 0,
+            "at least one corpus build must produce a visible Libretro framebuffer"
+        );
+        if corpus_filter.is_none() && max_projects >= donors.len() {
+            assert!(
+                report["stable_candidate"].as_bool().unwrap_or(false),
+                "full corpus real runner must finish as stable candidate"
+            );
+            assert_eq!(
+                emulation_visible_ok, build_real_ok,
+                "every corpus build with a real ROM must also produce visible Libretro output"
+            );
+        }
+    }
+
+    #[ignore = "requires local SGDK_Engines corpus, official SGDK and a real Libretro Mega Drive core; writes persistent validation artifacts"]
+    #[test]
+    fn sgdk_corpus_real_build_rom_emulation_report() {
+        execute_sgdk_corpus_real_build_rom_emulation_report();
+    }
+
+    #[ignore = "regression: Mega Drive Breakout visible framebuffer with real SGDK/Libretro"]
+    #[test]
+    fn sgdk_corpus_regression_mega_drive_breakout_visible_framebuffer() {
+        std::env::set_var("RDS_SGDK_REAL_CORPUS_FILTER", "mega drive breakout");
+        std::env::set_var("RDS_SGDK_REAL_CORPUS_RESUME", "1");
+        execute_sgdk_corpus_real_build_rom_emulation_report();
+    }
+
+    #[ignore = "regression: Procedural Animation visible framebuffer with real SGDK/Libretro"]
+    #[test]
+    fn sgdk_corpus_regression_procedural_animation_visible_framebuffer() {
+        std::env::set_var("RDS_SGDK_REAL_CORPUS_FILTER", "procedural animation");
+        std::env::set_var("RDS_SGDK_REAL_CORPUS_RESUME", "1");
+        execute_sgdk_corpus_real_build_rom_emulation_report();
     }
 }

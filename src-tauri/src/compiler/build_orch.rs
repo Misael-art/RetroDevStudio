@@ -1861,6 +1861,12 @@ where
             _ => {
                 command.env("SGDK", &toolchain.root);
                 configure_java_for_sgdk(&mut command);
+                if let Ok(extra_flags) = std::env::var("RDS_EXTRA_FLAGS") {
+                    let extra_flags = extra_flags.trim();
+                    if !extra_flags.is_empty() {
+                        command.env("EXTRA_FLAGS", extra_flags);
+                    }
+                }
             }
         }
         command.output().map_err(|e| {

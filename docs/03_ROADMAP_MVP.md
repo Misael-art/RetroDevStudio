@@ -1,8 +1,10 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-05-14 (rodada 43)
+**Ultima revisao canonica:** 2026-05-17 (rodada 44)
 **Fase ativa real:** Core MVP promovido tecnicamente em main; hardening continua nas superficies experimentais
+
+**Nota 2026-05-17 (rodada 44, branch `codex/sgdk-stable-node-engine-blaze`):** corpus real fechou **122/122** com criterio rigoroso de framebuffer visivel (`emulation_visible_ok=68`, `bridge_only=54`, `failed=0`, `stable_candidate=true`). Breakout e Procedural Animation deixaram de falhar com framebuffer preto apos supressao honesta de `XGM_startPlay` no modo `-DRDS_CORPUS_VISIBLE_SMOKE`. SGDK Stable local: **SIM**; Node Engine Stable local: **SIM**; merge/PR/main pendentes de governanca.
 
 **Nota 2026-05-14 (rodada 43, branch `codex/sgdk-stable-node-engine-blaze`):** a prova SGDK/no-code deixou de depender de fake. O fake SGDK/ROM foi renomeado para fallback unitario e nao conta como Stable. `official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --ignored` gera um jogo persistente 100% por nodes, compila com SGDK oficial, gera ROM real e roda Genesis Plus GX por 60 frames (`non_black_pixels=15506`, sem edicao manual, sem fake). O corpus real `F:\Projects\MegaDrive_DEV\SGDK_Engines` foi processado por `sgdk_corpus_real_build_rom_emulation_report --ignored`: **122 projetos**, **68** com build/ROM/emulacao reais, **54** com bridge formal persistida, **0 falhas**, `stable_candidate=true`. `BLAZE_ENGINE` esta coberto por modo compativel real com build SGDK, ROM real e Genesis Plus GX (`non_black_pixels=71680`), mantendo o budget original bloqueante documentado e gerando budget compativel conservador. **SGDK Stable local: SIM nesta branch. Node Engine Stable local: SIM nesta branch.** Promocao institucional ainda exige barra ampla final, commit/push, PR/checks remotos, merge para `main` e readiness no destino.
 

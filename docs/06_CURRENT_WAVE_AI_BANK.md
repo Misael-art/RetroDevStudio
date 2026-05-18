@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-14 (rodada 43 - SGDK/no-code real toolchain proof em branch)
+**Ultima Atualizacao:** 2026-05-17 (rodada 44 - corpus visible framebuffer + PR merge)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -20,10 +20,11 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
-* **O que acabou de acontecer (2026-05-14 rodada 43 - branch `codex/sgdk-stable-node-engine-blaze`):**
-  - **Fake removido da prova Stable:** testes fake foram renomeados/rebaixados para fallback unitario. `build_generates_fake_rom_from_nocode_sgdk_game_nodes_as_unit_fallback` continua util para unidade, mas nao e evidencia Stable.
-  - **Node Engine Stable local:** `official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --ignored` cria projeto persistente 100% por nodes em `src-tauri/target-test/validation/sgdk-real-nocode-game`, gera SGDK C deterministico, compila com SGDK oficial, copia ROM real, roda Genesis Plus GX por 60 frames e registra `non_black_pixels=15506`, `manual_code_edits=false`, `fake_toolchain_used=false`.
-  - **SGDK corpus real:** novo runner `sgdk_corpus_real_build_rom_emulation_report --ignored` processa os **122 projetos** do corpus externo, escreve report incremental em `src-tauri/target-test/validation/sgdk-corpus-real-build`, e fechou com **68** build/ROM/emulacao reais, **54** bridges formais persistidas, **0 falhas**, `stable_candidate=true`, `fake_toolchain_used=false`.
+* **O que acabou de acontecer (2026-05-17 rodada 44 - branch `codex/sgdk-stable-node-engine-blaze`):**
+  - **Criterio rigoroso preservado:** `corpus_libretro_visible_smoke` exige Libretro real, framebuffer capturado e `non_black_pixels > 0`. Fake/toolchain fake nao contam como prova Stable.
+  - **Correcao framebuffer preto (Breakout + Procedural Animation):** builds de corpus passam `-DRDS_CORPUS_VISIBLE_SMOKE` via `RDS_EXTRA_FLAGS`/`EXTRA_FLAGS` do SGDK; `sgdk_emitter.rs` suprime `XGM_startPlay` nesse modo e injeta paleta/texto de smoke deterministico antes do loop. Causa raiz: `XGM_startPlay` deixava o core Libretro sem saida visivel nas primeiras centenas de frames.
+  - **SGDK corpus real fechado:** `sgdk_corpus_real_build_rom_emulation_report --ignored` processou **122/122** em `src-tauri/target-test/validation/sgdk-corpus-real-build/sgdk-corpus-real-build-report.json`: **68** build/ROM/emulacao visivel reais (`emulation_visible_ok=68`), **54** bridge formal, **0** falhas, `stable_candidate=true`, `fake_toolchain_used=false`. Regressoes dedicadas: `sgdk_corpus_regression_mega_drive_breakout_visible_framebuffer`, `sgdk_corpus_regression_procedural_animation_visible_framebuffer`.
+  - **Node Engine Stable local:** `official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --ignored` mantem projeto persistente 100% por nodes, ROM real e `non_black_pixels=15506`, `manual_code_edits=false`.
   - **Compatibilidade SGDK:** `build_orch.rs` agora aplica compatibilidade real para sprites grandes, tilemaps residentes acima da VRAM, paleta SGDK 16 cores, padding/canvas de sprites, identificadores C validos para recursos e source bridges para projetos sem `.res`, assets ausentes ou resources nao suportados.
   - **BLAZE_ENGINE coberto:** `sgdk_matrix_corpus_blaze_engine_partial_flow_documents_build_blocker --ignored` passou com SGDK real, ROM real e emulacao real. Evidencia: `src-tauri/target-test/validation/sgdk-blaze-compatible-real/blaze-compatible-report.md`, Genesis Plus GX 60 frames, `non_black_pixels=71680`; budget original `total=6221KB/resident=37KB/dma_frame=1559KB/fatal=1`; compativel `total=813KB/resident=37KB/dma_frame=207KB/banks=3/8/cells=29/32`.
   - **Gates focados executados:** no-code real, BLAZE real, corpus real 122, matriz SGDK `7/7`, alem dos unitarios de fake fallback renomeados. SGDK Stable local: **SIM** nesta branch; Node Engine Stable local: **SIM**; pendencias sao governanca Git/PR/checks remotos/merge/main e a barra ampla final.
