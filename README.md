@@ -38,6 +38,8 @@ O produto ainda nao deve ser descrito como engine totalmente pronta para produca
 
 Na frente SGDK/no-code, o PR #5 removeu fake da prova Stable e foi integrado em `main`. O jogo no-code real e gerado 100% por nodes, compila com SGDK oficial, gera ROM persistente e roda no Genesis Plus GX; o corpus real cobre 122 projetos, com 68 builds/ROMs/emulacoes reais e 54 bridges formais; `BLAZE_ENGINE` tem modo compativel real com build, ROM e emulacao. A exposicao publica de maturidade ainda deve seguir o roadmap e as badges reais da UI, sem promocao automatica de superficies experimentais.
 
+GameMaker agora tem adapter **Experimental** importavel para GMX/GMZ/GMEZ: rooms, instances, sprites e objetos viram cena UGDM editavel, e GML fica preservado como bridge semantica visivel. Isto ainda nao significa conversao GameMaker completa para SGDK/ROM; essa promocao exige build SGDK, ROM, emulacao e relatorio de equivalencia dedicados.
+
 ---
 
 ## Fluxo Canonico
@@ -100,6 +102,7 @@ flowchart LR
 - Memory Viewer
 - VRAM Viewer
 - Importadores externos fora do eixo principal do MVP
+  - GameMaker GMX/GMZ/GMEZ: Experimental/importavel, com GML preservado como bridge
 
 Essas superficies existem de verdade no produto, mas continuam com rotulo de maturidade controlado para nao prometer mais do que o fluxo atual entrega. A lista canonica e mais detalhada fica no roadmap central.
 

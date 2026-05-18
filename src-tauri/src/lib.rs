@@ -5154,7 +5154,9 @@ pub extern "C" fn retro_run() {
             profile.id == "openbor" && profile.importable && profile.family == "Beat'em up"
         }));
         assert!(profiles.iter().any(|profile| {
-            profile.id == "gamemaker" && !profile.importable && profile.support_status == "Parcial"
+            profile.id == "gamemaker"
+                && profile.importable
+                && profile.support_status == "Experimental"
         }));
     }
 

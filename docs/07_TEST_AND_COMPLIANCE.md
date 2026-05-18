@@ -41,6 +41,7 @@
 - Cobrir inventario SGDK/no-code quando a mudanca tocar importador SGDK, source mapping ou semantic gaps; o gate local externo e `cargo test sgdk_corpus_inventory_real_corpus_report --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` em host com `F:\Projects\MegaDrive_DEV\SGDK_Engines`.
 - Mudancas de UI/CX SGDK/no-code devem cobrir topbar/status bar compactas, Inspector com diagnostico colapsado, Hierarchy compacta, viewport sem overlays invasivos, key color transparency e NodeGraph layout/vocabulario.
 - Mudancas no shell de atalhos/layout devem cobrir o registro central, normalizacao de chords, deteccao de conflitos e pelo menos um fluxo real de abertura/uso pela UI.
+- Mudancas em importadores GameMaker devem cobrir fixture GMX, matriz de perfil importavel e, quando o host tiver amostras reais, `cargo test import_gamemaker_real_host_samples_when_present --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1`. Enquanto o adapter preservar GML como bridge, o status deve permanecer `Experimental`.
 - Mudancas de NodeGraph/no-code devem cobrir validacao, serializacao, geracao deterministica de C e pelo menos um fluxo de jogo 100% por nodes. Fake SGDK/ROM so pode existir como fallback unitario explicitamente nomeado (`build_generates_fake_rom_from_nocode_sgdk_game_nodes_as_unit_fallback`). Prova Stable exige SGDK oficial + Libretro real, atualmente coberta por `official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --ignored`.
 
 ### 2.3 Integracao
