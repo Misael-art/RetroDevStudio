@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-18 (rodada 46 - GameMaker GMX/GMEZ experimental)
+**Ultima Atualizacao:** 2026-05-19 (rodada 47 - command.dat visual/no-code experimental)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,17 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-19 rodada 47 - branch `codex/command-dat-artstudio-node-runtime`):**
+  - **Worktree paralelo isolado:** frente criada em `F:\Projects\RetroDevStudio-command-dat` a partir de `origin/main`, sem tocar na branch/worktree GameMaker vertical que estava suja em `project_mgr.rs`.
+  - **command.dat local/BYOR:** novo parser canonico `src-tauri/src/core/input_commands.rs` e espelho frontend `src/core/inputCommands.ts` leem apenas arquivo local `command.dat`; SuperCombo/Dustloop/Mizuumi ficam como inspiracao de taxonomia, sem scraping, download ou dados embutidos. O subset suportado cobre `[Command]`, `name`, `command`, `time`, direcoes `_1.._9`, aliases `D/F/B/U/DF/DB/UF/UB`, botoes `_P/_K`, botoes MUGEN `a,b,c,x,y,z`, simultaneo `+`, sequencia por virgula e janela por frames.
+  - **Bloqueio honesto de dialetos fora do subset:** tokens nao suportados entram em `unsupported_tokens` e bloqueiam runtime/codegen via `#error` acionavel no C gerado; nao sao tratados como warning cosmetico.
+  - **Ponte ArtStudio -> Sprite metadata -> NodeGraph:** `SpriteComponent.commands` persiste bindings experimentais (`id`, `display_name`, `notation`, `source`, `target_animation`, `max_frames`, `button_profile`, `unsupported_tokens`, `steps`). O ArtStudio ganhou painel `Comandos`, importacao local de `command.dat`, chips visuais por perfil Mega Drive/SNES/teclado/mouse, associacao de comando a sequencia ativa e criacao de sequencia a partir de comando.
+  - **NodeGraph/runtime:** novo node oficial `input_command`, quick action `Criar comando de luta`, auto-layout dentro dos eventos/input e codegen experimental frontend com ring buffer. O backend canonico AST/emitters SGDK e SNES tambem emitem matcher por ring buffer e mapeiam `_P` para `BUTTON_A`/`KEY_Y` no subset suportado.
+  - **Prova real SGDK/Libretro:** o teste institucional ignorado `official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --ignored` passou nesta rodada com JDK, SGDK v2.11 e Genesis Plus GX reais; o projeto persistente no-code agora inclui `input_command` Hadouken, `SpriteComponent.commands`, C gerado com `rds_input_match_command`, ROM real e framebuffer visivel em 60 frames (`src-tauri/target-test/validation/sgdk-real-nocode-game/`).
+  - **Alinhamento Tauri:** `@tauri-apps/api`, `@tauri-apps/plugin-dialog` e `@tauri-apps/cli` foram alinhados ao backend Tauri 2.11.x para remover mismatch que bloqueava `npm run build:debug`; schemas Tauri gerados foram atualizados pelo build canonico.
+  - **Gates verdes da branch:** `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test` (**315/315**), `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`, `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` (**344 passed / 16 ignored**), `cargo test --manifest-path src-tauri/Cargo.toml official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --lib -- --ignored --nocapture --test-threads=1`, `npm run preflight:sgdk-e2e`, `npm run build:debug` e `npm run test:e2e:desktop:qa-rc` A-G (`qa-rc-2026-05-19T08-45-34-399Z-*`).
+  - **Status honesto:** superficie permanece **Experimental**. Esta rodada entrega runtime completo para o subset suportado e prova real de build/emulacao, mas nao promete compatibilidade total com todos os dialetos de `command.dat`, nao faz scraping de wikis e nao promove ArtStudio/Node Engine para Stable sem QA institucional ampla e cobertura de casos reais variados.
 
 * **O que acabou de acontecer (2026-05-18 rodada 46 - branch `codex/product-compatibility-wave`):**
   - **Base protegida:** antes de mexer em feature, `main` estava alinhado com `origin/main` em `a0fe109` e `npm run release:readiness:promotion` passou com `Pronto para promocao: SIM`.

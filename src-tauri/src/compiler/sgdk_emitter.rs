@@ -7,11 +7,21 @@ use crate::compiler::ast_generator::{
     LogicTimelineSlot, ParallaxLayerConfig, PhysicsApplication, RasterLineConfig, SpriteAsset,
     TilemapAsset,
 };
+use crate::core::input_commands::parse_command_notation;
+use std::collections::BTreeMap;
 
 #[derive(Debug)]
 pub struct EmitOutput {
     pub main_c: String,
     pub resources_res: String,
+}
+
+#[derive(Debug, Clone)]
+struct InputCommandSpec {
+    id: String,
+    notation: String,
+    pad: String,
+    unsupported_tokens: Vec<String>,
 }
 
 #[allow(dead_code)] // Used in tests; production code uses emit_sgdk_with_collision
@@ -46,6 +56,7 @@ fn build_main_c_with_collision(
     let scroll_tilemap_layers = collect_scroll_tilemap_layers(ast);
     let logic_vars = collect_logic_var_names(ast);
     let has_logic_overlap = ast.logic_scripts.iter().any(script_uses_overlap);
+    let input_commands = collect_input_commands(ast);
     let hardware_event_scripts = collect_hardware_event_scripts(ast);
     let sfx_resources = collect_sfx_resources(ast);
     let bgm_tracks = collect_bgm_tracks(ast);
@@ -109,6 +120,10 @@ fn build_main_c_with_collision(
     }
     if !collision_checks.is_empty() || has_logic_overlap {
         out.push_str(render_aabb_helper());
+        out.push('\n');
+    }
+    if !input_commands.is_empty() {
+        render_input_command_runtime(&mut out, &input_commands);
         out.push('\n');
     }
     if !hardware_event_scripts.is_empty() {
@@ -389,6 +404,17 @@ fn build_main_c_with_collision(
                 out.push_str("\n    while (TRUE) {\n");
             }
             AstNode::SpriteUpdate => {
+                if !input_commands.is_empty() {
+                    let pad = input_commands
+                        .values()
+                        .next()
+                        .map(|spec| sgdk_joypad_port(&spec.pad))
+                        .unwrap_or("JOY_1");
+                    out.push_str(&format!(
+                        "        rds_input_push_frame(JOY_readJoypad({}));\n",
+                        pad
+                    ));
+                }
                 render_logic_scripts(&mut out, &ast.logic_scripts, 8);
                 render_retrofx_frame(&mut out, &parallax_layers, &raster_lines, 8);
                 out.push_str("        SPR_update();\n");
@@ -599,6 +625,192 @@ fn camera_axis_expr(target: &str, axis: &str, offset: i32) -> String {
         std::cmp::Ordering::Less => format!("{}_{} - {}", target, axis, -offset),
         std::cmp::Ordering::Greater => format!("{}_{} + {}", target, axis, offset),
         std::cmp::Ordering::Equal => format!("{}_{}", target, axis),
+    }
+}
+
+fn sanitize_command_identifier(value: &str) -> String {
+    let mut out = String::new();
+    let mut previous_separator = false;
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            previous_separator = false;
+        } else if !previous_separator {
+            out.push('_');
+            previous_separator = true;
+        }
+    }
+    let sanitized = out.trim_matches('_').to_string();
+    if sanitized.is_empty() {
+        "command".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn collect_input_commands(ast: &AstOutput) -> BTreeMap<String, InputCommandSpec> {
+    let mut commands = BTreeMap::new();
+    for script in &ast.logic_scripts {
+        collect_input_commands_from_ops(&script.ops, &mut commands);
+    }
+    commands
+}
+
+fn collect_input_commands_from_ops(ops: &[LogicOp], commands: &mut BTreeMap<String, InputCommandSpec>) {
+    for op in ops {
+        match op {
+            LogicOp::ConditionBool { condition, if_true, if_false } => {
+                collect_input_command_from_bool(condition, commands);
+                collect_input_commands_from_ops(if_true, commands);
+                collect_input_commands_from_ops(if_false, commands);
+            }
+            LogicOp::WhileLoop { condition, body, done } => {
+                collect_input_command_from_bool(condition, commands);
+                collect_input_commands_from_ops(body, commands);
+                collect_input_commands_from_ops(done, commands);
+            }
+            LogicOp::ConditionOverlap { if_true, if_false, .. } => {
+                collect_input_commands_from_ops(if_true, commands);
+                collect_input_commands_from_ops(if_false, commands);
+            }
+            LogicOp::ForLoop { body, done, .. } => {
+                collect_input_commands_from_ops(body, commands);
+                collect_input_commands_from_ops(done, commands);
+            }
+            LogicOp::TimelineSequence { slots, .. } => {
+                for slot in slots {
+                    collect_input_commands_from_ops(&slot.actions, commands);
+                }
+            }
+            LogicOp::HardwareBudgetCheck { if_ok, if_warn, .. } => {
+                collect_input_commands_from_ops(if_ok, commands);
+                collect_input_commands_from_ops(if_warn, commands);
+            }
+            LogicOp::StateMachine { states, .. } => {
+                for state in states {
+                    collect_input_commands_from_ops(&state.body, commands);
+                    for transition in &state.transitions {
+                        collect_input_command_from_bool(&transition.condition, commands);
+                        collect_input_commands_from_ops(&transition.if_matched, commands);
+                        collect_input_commands_from_ops(&transition.if_unmatched, commands);
+                    }
+                }
+            }
+            LogicOp::HardwareEvent { ops, .. } => {
+                collect_input_commands_from_ops(ops, commands);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn collect_input_command_from_bool(expr: &LogicBoolExpr, commands: &mut BTreeMap<String, InputCommandSpec>) {
+    match expr {
+        LogicBoolExpr::InputCommand {
+            command_id,
+            notation,
+            pad,
+            unsupported_tokens,
+            ..
+        } => {
+            commands.entry(command_id.clone()).or_insert_with(|| InputCommandSpec {
+                id: command_id.clone(),
+                notation: notation.clone(),
+                pad: pad.clone(),
+                unsupported_tokens: unsupported_tokens.clone(),
+            });
+        }
+        LogicBoolExpr::Not(value) => collect_input_command_from_bool(value, commands),
+        LogicBoolExpr::And { left, right, .. } => {
+            collect_input_command_from_bool(left, commands);
+            collect_input_command_from_bool(right, commands);
+        }
+        _ => {}
+    }
+}
+
+fn render_input_command_runtime(out: &mut String, commands: &BTreeMap<String, InputCommandSpec>) {
+    out.push_str(
+        "typedef struct { u8 direction; u16 buttons; } RdsInputCommandStep;\n\
+         #define RDS_INPUT_HISTORY 32\n\
+         static u8 rds_input_directions[RDS_INPUT_HISTORY];\n\
+         static u16 rds_input_buttons[RDS_INPUT_HISTORY];\n\
+         static u8 rds_input_cursor = 0;\n\
+         static u8 rds_input_direction_from_buttons(u16 buttons) {\n\
+             u8 left = (buttons & BUTTON_LEFT) != 0;\n\
+             u8 right = (buttons & BUTTON_RIGHT) != 0;\n\
+             u8 up = (buttons & BUTTON_UP) != 0;\n\
+             u8 down = (buttons & BUTTON_DOWN) != 0;\n\
+             if (down && left) return 1;\n\
+             if (down && right) return 3;\n\
+             if (up && left) return 7;\n\
+             if (up && right) return 9;\n\
+             if (down) return 2;\n\
+             if (left) return 4;\n\
+             if (right) return 6;\n\
+             if (up) return 8;\n\
+             return 5;\n\
+         }\n\
+         static void rds_input_push_frame(u16 buttons) {\n\
+             rds_input_directions[rds_input_cursor] = rds_input_direction_from_buttons(buttons);\n\
+             rds_input_buttons[rds_input_cursor] = buttons;\n\
+             rds_input_cursor = (rds_input_cursor + 1) % RDS_INPUT_HISTORY;\n\
+         }\n\
+         static u8 rds_input_step_matches(const RdsInputCommandStep* step, u8 index) {\n\
+             u8 direction_ok = (step->direction == 0) || (step->direction == rds_input_directions[index]);\n\
+             u8 buttons_ok = (step->buttons == 0) || ((rds_input_buttons[index] & step->buttons) == step->buttons);\n\
+             return direction_ok && buttons_ok;\n\
+         }\n\
+         static u8 rds_input_match_command(const RdsInputCommandStep* steps, u8 step_count, u8 max_frames) {\n\
+             u8 matched = step_count;\n\
+             u8 scanned = 0;\n\
+             u8 cursor = rds_input_cursor;\n\
+             if (step_count == 0) return FALSE;\n\
+             while ((scanned < max_frames) && (scanned < RDS_INPUT_HISTORY) && (matched > 0)) {\n\
+                 cursor = (cursor + RDS_INPUT_HISTORY - 1) % RDS_INPUT_HISTORY;\n\
+                 if (rds_input_step_matches(&steps[matched - 1], cursor)) matched--;\n\
+                 scanned++;\n\
+             }\n\
+             return matched == 0;\n\
+         }\n"
+    );
+
+    for spec in commands.values() {
+        let parsed = parse_command_notation(&spec.notation);
+        let unsupported = if spec.unsupported_tokens.is_empty() {
+            parsed.unsupported_tokens
+        } else {
+            spec.unsupported_tokens.clone()
+        };
+        if !unsupported.is_empty() {
+            out.push_str(&format!(
+                "#error \"Unsupported input_command tokens for {}: {}\"\n",
+                spec.id,
+                unsupported.join(", ")
+            ));
+            continue;
+        }
+        out.push_str(&format!(
+            "static const RdsInputCommandStep rds_cmd_{}_steps[] = {{\n",
+            sanitize_command_identifier(&spec.id)
+        ));
+        for step in parsed.steps {
+            let button_mask = if step.buttons.is_empty() {
+                "0".to_string()
+            } else {
+                step.buttons
+                    .iter()
+                    .map(|button| sgdk_button_mask(button).unwrap_or("BUTTON_A").to_string())
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            };
+            out.push_str(&format!(
+                "    {{ {}, {} }},\n",
+                step.direction.unwrap_or(0),
+                button_mask
+            ));
+        }
+        out.push_str("};\n");
     }
 }
 
@@ -1003,6 +1215,36 @@ fn render_bool_expr(out: &mut String, expr: &LogicBoolExpr, indent: usize) -> St
             let button_mask = sgdk_button_mask(button).unwrap_or("BUTTON_A");
             format!("(JOY_readJoypad({}) & {})", sgdk_joypad_port(pad), button_mask)
         }
+        LogicBoolExpr::InputCommand {
+            command_id,
+            notation,
+            max_frames,
+            unsupported_tokens,
+            ..
+        } => {
+            let parsed = parse_command_notation(notation);
+            let unsupported = if unsupported_tokens.is_empty() {
+                parsed.unsupported_tokens
+            } else {
+                unsupported_tokens.clone()
+            };
+            if !unsupported.is_empty() {
+                out.push_str(&format!(
+                    "{}#error \"Unsupported input_command tokens for {}: {}\"\n",
+                    " ".repeat(indent),
+                    command_id,
+                    unsupported.join(", ")
+                ));
+                "FALSE".to_string()
+            } else {
+                format!(
+                    "rds_input_match_command(rds_cmd_{}_steps, {}, {})",
+                    sanitize_command_identifier(command_id),
+                    parsed.steps.len(),
+                    max_frames
+                )
+            }
+        }
         LogicBoolExpr::Overlap { left, right } => format!(
             "retro_aabb_intersects({left_x}, {left_y}, {left_w}, {left_h}, {right_x}, {right_y}, {right_w}, {right_h})",
             left_x = logic_x_expr(left),
@@ -1310,7 +1552,7 @@ fn extract_vars_from_bool(expr: &LogicBoolExpr, vars: &mut std::collections::BTr
             extract_vars_from_bool(left, vars);
             extract_vars_from_bool(right, vars);
         }
-        LogicBoolExpr::Input { .. } => {}
+        LogicBoolExpr::Input { .. } | LogicBoolExpr::InputCommand { .. } => {}
         _ => {}
     }
 }
@@ -1376,7 +1618,7 @@ fn op_uses_overlap(op: &LogicOp) -> bool {
 fn bool_expr_uses_overlap(expr: &LogicBoolExpr) -> bool {
     match expr {
         LogicBoolExpr::Literal(_) => false,
-        LogicBoolExpr::Input { .. } => false,
+        LogicBoolExpr::Input { .. } | LogicBoolExpr::InputCommand { .. } => false,
         LogicBoolExpr::Overlap { .. } => true,
         LogicBoolExpr::Compare { .. } => false,
         LogicBoolExpr::Not(value) => bool_expr_uses_overlap(value),
@@ -1448,12 +1690,12 @@ fn sgdk_button_mask(button: &str) -> Option<&'static str> {
         "DPAD_DOWN" | "BUTTON_DOWN" => Some("BUTTON_DOWN"),
         "DPAD_LEFT" | "BUTTON_LEFT" => Some("BUTTON_LEFT"),
         "DPAD_RIGHT" | "BUTTON_RIGHT" => Some("BUTTON_RIGHT"),
-        "BUTTON_A" => Some("BUTTON_A"),
-        "BUTTON_B" => Some("BUTTON_B"),
-        "BUTTON_C" => Some("BUTTON_C"),
-        "BUTTON_X" => Some("BUTTON_X"),
-        "BUTTON_Y" => Some("BUTTON_Y"),
-        "BUTTON_Z" => Some("BUTTON_Z"),
+        "_P" | "P" | "_A" | "A" | "BUTTON_A" => Some("BUTTON_A"),
+        "_K" | "K" | "_B" | "B" | "BUTTON_B" => Some("BUTTON_B"),
+        "_C" | "C" | "BUTTON_C" => Some("BUTTON_C"),
+        "_X" | "X" | "BUTTON_X" => Some("BUTTON_X"),
+        "_Y" | "Y" | "BUTTON_Y" => Some("BUTTON_Y"),
+        "_Z" | "Z" | "BUTTON_Z" => Some("BUTTON_Z"),
         "START" => Some("BUTTON_START"),
         _ => None,
     }
@@ -1693,7 +1935,8 @@ fn palette_const(slot: u8) -> String {
 mod tests {
     use super::*;
     use crate::compiler::ast_generator::{
-        LogicCollisionTarget, LogicOp, LogicPositionSource, LogicScript, SpriteAnimation,
+        LogicBoolExpr, LogicCollisionTarget, LogicMathExpr, LogicOp, LogicPositionSource,
+        LogicScript, SpriteAnimation,
     };
 
     fn sprite_asset_with_animation(frame_time: u32, looping: bool) -> SpriteAsset {
@@ -1859,6 +2102,74 @@ mod tests {
         assert!(output
             .resources_res
             .contains("XGM stage_theme \"assets/audio/stage_theme.xgm\""));
+    }
+
+    #[test]
+    fn main_c_emits_ring_buffer_matcher_for_input_command() {
+        let ast = AstOutput {
+            nodes: vec![AstNode::GameLoopBegin, AstNode::SpriteUpdate, AstNode::VSync, AstNode::GameLoopEnd],
+            sprite_assets: Vec::new(),
+            logic_scripts: vec![LogicScript {
+                ops: vec![LogicOp::ConditionBool {
+                    condition: LogicBoolExpr::InputCommand {
+                        command_id: "hadouken".to_string(),
+                        notation: "_2,_3,_6,_P".to_string(),
+                        max_frames: 15,
+                        pad: "JOY_1".to_string(),
+                        button_profile: "megadrive".to_string(),
+                        unsupported_tokens: Vec::new(),
+                    },
+                    if_true: vec![LogicOp::SetVar {
+                        var_name: "fireball".to_string(),
+                        value: LogicMathExpr::Literal(1),
+                    }],
+                    if_false: Vec::new(),
+                }],
+            }],
+        };
+
+        let output = emit_sgdk(&ast, "Command Demo");
+
+        assert!(output.main_c.contains("rds_input_push_frame(JOY_readJoypad(JOY_1));"));
+        assert!(output
+            .main_c
+            .contains("static const RdsInputCommandStep rds_cmd_hadouken_steps[]"));
+        assert!(output.main_c.contains("{ 2, 0 }"));
+        assert!(output.main_c.contains("{ 3, 0 }"));
+        assert!(output.main_c.contains("{ 6, 0 }"));
+        assert!(output.main_c.contains("{ 0, BUTTON_A }"));
+        assert!(output
+            .main_c
+            .contains("if (rds_input_match_command(rds_cmd_hadouken_steps, 4, 15))"));
+        assert!(output.main_c.contains("logic_var_fireball = 1;"));
+    }
+
+    #[test]
+    fn main_c_blocks_unsupported_input_command_tokens() {
+        let ast = AstOutput {
+            nodes: vec![AstNode::GameLoopBegin, AstNode::SpriteUpdate, AstNode::VSync, AstNode::GameLoopEnd],
+            sprite_assets: Vec::new(),
+            logic_scripts: vec![LogicScript {
+                ops: vec![LogicOp::ConditionBool {
+                    condition: LogicBoolExpr::InputCommand {
+                        command_id: "broken".to_string(),
+                        notation: "~30,_6,_P".to_string(),
+                        max_frames: 18,
+                        pad: "JOY_1".to_string(),
+                        button_profile: "megadrive".to_string(),
+                        unsupported_tokens: vec!["~30".to_string()],
+                    },
+                    if_true: Vec::new(),
+                    if_false: Vec::new(),
+                }],
+            }],
+        };
+
+        let output = emit_sgdk(&ast, "Command Demo");
+
+        assert!(output
+            .main_c
+            .contains("#error \"Unsupported input_command tokens for broken: ~30\""));
     }
 
     #[test]

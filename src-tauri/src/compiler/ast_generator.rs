@@ -350,6 +350,14 @@ pub enum LogicBoolExpr {
         button: String,
         pressed: bool,
     },
+    InputCommand {
+        command_id: String,
+        notation: String,
+        max_frames: u32,
+        pad: String,
+        button_profile: String,
+        unsupported_tokens: Vec<String>,
+    },
     Overlap {
         left: LogicCollisionTarget,
         right: LogicCollisionTarget,
@@ -1449,7 +1457,7 @@ fn compile_logic_node(
                 dy: param_i32(node, "dy", 0),
             }))
         }
-        "input_held" | "input_pressed" => {
+        "input_held" | "input_pressed" | "input_command" => {
             let mut true_visited = visited.clone();
             let mut false_visited = visited.clone();
             let mut if_true = compile_logic_chain(
@@ -1488,14 +1496,32 @@ fn compile_logic_node(
                 parallax_layers,
                 raster_lines,
             );
-            Some(CompiledLogicNode::Terminal(LogicOp::ConditionBool {
-                condition: LogicBoolExpr::Input {
+            let condition = if node.node_type == "input_command" {
+                let notation = param_string(node, "notation").unwrap_or_default();
+                let parsed = crate::core::input_commands::parse_command_notation(&notation);
+                LogicBoolExpr::InputCommand {
+                    command_id: param_string(node, "command_id")
+                        .unwrap_or_else(|| sanitize_identifier(&node.id)),
+                    notation,
+                    max_frames: param_i32(node, "max_frames", 20).max(1) as u32,
+                    pad: param_string(node, "pad")
+                        .or_else(|| param_string(node, "device"))
+                        .unwrap_or_else(|| "JOY_1".to_string()),
+                    button_profile: param_string(node, "button_profile")
+                        .unwrap_or_else(|| "megadrive".to_string()),
+                    unsupported_tokens: parsed.unsupported_tokens,
+                }
+            } else {
+                LogicBoolExpr::Input {
                     pad: param_string(node, "pad")
                         .or_else(|| param_string(node, "device"))
                         .unwrap_or_else(|| "JOY_1".to_string()),
                     button: param_string(node, "button").unwrap_or_else(|| "BUTTON_A".to_string()),
                     pressed: node.node_type == "input_pressed",
-                },
+                }
+            };
+            Some(CompiledLogicNode::Terminal(LogicOp::ConditionBool {
+                condition,
                 if_true,
                 if_false,
             }))
@@ -2092,6 +2118,22 @@ fn build_bool_expr_from_node(
             button: param_string(node, "button").unwrap_or_else(|| "BUTTON_A".to_string()),
             pressed: node.node_type == "input_pressed",
         }),
+        "input_command" => {
+            let notation = param_string(node, "notation").unwrap_or_default();
+            let parsed = crate::core::input_commands::parse_command_notation(&notation);
+            Some(LogicBoolExpr::InputCommand {
+                command_id: param_string(node, "command_id")
+                    .unwrap_or_else(|| sanitize_identifier(&node.id)),
+                notation,
+                max_frames: param_i32(node, "max_frames", 20).max(1) as u32,
+                pad: param_string(node, "pad")
+                    .or_else(|| param_string(node, "device"))
+                    .unwrap_or_else(|| "JOY_1".to_string()),
+                button_profile: param_string(node, "button_profile")
+                    .unwrap_or_else(|| "megadrive".to_string()),
+                unsupported_tokens: parsed.unsupported_tokens,
+            })
+        }
         "condition_overlap" => {
             let left = runtime_entities
                 .get(&param_string(node, "a")?)?
@@ -2548,6 +2590,7 @@ mod tests {
                         animations,
                         priority: "foreground".to_string(),
                         meta_sprite: false,
+                        commands: Vec::new(),
                     }),
                     ..Components::default()
                 },
@@ -2954,6 +2997,7 @@ mod tests {
                         animations: HashMap::new(),
                         priority: "foreground".to_string(),
                         meta_sprite: false,
+                        commands: Vec::new(),
                     }),
                     physics: Some(crate::ugdm::components::PhysicsComponent {
                         gravity: true,
@@ -3398,6 +3442,7 @@ mod tests {
                         animations,
                         priority: "foreground".to_string(),
                         meta_sprite: false,
+                        commands: Vec::new(),
                     }),
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
@@ -3604,6 +3649,7 @@ mod tests {
                             animations: HashMap::new(),
                             priority: "foreground".to_string(),
                             meta_sprite: false,
+                            commands: Vec::new(),
                         }),
                         ..Components::default()
                     },
@@ -3769,6 +3815,7 @@ mod tests {
                             animations: HashMap::new(),
                             priority: "foreground".to_string(),
                             meta_sprite: false,
+                            commands: Vec::new(),
                         }),
                         collision: Some(crate::ugdm::components::CollisionComponent {
                             shape: "aabb".to_string(),
@@ -3806,6 +3853,7 @@ mod tests {
                             animations: HashMap::new(),
                             priority: "foreground".to_string(),
                             meta_sprite: false,
+                            commands: Vec::new(),
                         }),
                         collision: Some(crate::ugdm::components::CollisionComponent {
                             shape: "aabb".to_string(),
@@ -3834,6 +3882,7 @@ mod tests {
                             animations: HashMap::new(),
                             priority: "foreground".to_string(),
                             meta_sprite: false,
+                            commands: Vec::new(),
                         }),
                         collision: Some(crate::ugdm::components::CollisionComponent {
                             shape: "aabb".to_string(),
@@ -4266,6 +4315,7 @@ mod tests {
                             animations: HashMap::new(),
                             priority: "foreground".to_string(),
                             meta_sprite: false,
+                            commands: Vec::new(),
                         }),
                         collision: Some(crate::ugdm::components::CollisionComponent {
                             shape: "aabb".to_string(),
@@ -4303,6 +4353,7 @@ mod tests {
                             animations: HashMap::new(),
                             priority: "foreground".to_string(),
                             meta_sprite: false,
+                            commands: Vec::new(),
                         }),
                         collision: Some(crate::ugdm::components::CollisionComponent {
                             shape: "aabb".to_string(),
@@ -4482,6 +4533,7 @@ mod tests {
                             animations: animations.clone(),
                             priority: "foreground".to_string(),
                             meta_sprite: false,
+                            commands: Vec::new(),
                         }),
                         input: Some(crate::ugdm::components::InputComponent {
                             device: "joypad_1".to_string(),
@@ -4515,6 +4567,7 @@ mod tests {
                             animations,
                             priority: "foreground".to_string(),
                             meta_sprite: false,
+                            commands: Vec::new(),
                         }),
                         ..Components::default()
                     },
@@ -4649,6 +4702,7 @@ mod tests {
                         animations: HashMap::new(),
                         priority: "foreground".to_string(),
                         meta_sprite: false,
+                        commands: Vec::new(),
                     }),
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
@@ -4756,6 +4810,7 @@ mod tests {
                         animations: HashMap::new(),
                         priority: "foreground".to_string(),
                         meta_sprite: false,
+                        commands: Vec::new(),
                     }),
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
@@ -4840,6 +4895,7 @@ mod tests {
                         animations: HashMap::new(),
                         priority: "foreground".to_string(),
                         meta_sprite: false,
+                        commands: Vec::new(),
                     }),
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
@@ -4935,6 +4991,7 @@ mod tests {
                         animations: HashMap::new(),
                         priority: "foreground".to_string(),
                         meta_sprite: false,
+                        commands: Vec::new(),
                     }),
                     logic: Some(crate::ugdm::components::LogicComponent {
                         graph: Some(logic_graph.to_string()),
@@ -5042,6 +5099,7 @@ mod tests {
                         animations,
                         priority: "foreground".to_string(),
                         meta_sprite: false,
+                        commands: Vec::new(),
                     }),
                     collision: None,
                     input: None,

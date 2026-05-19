@@ -13,6 +13,7 @@ export type NodeType =
   | "event_update"
   | "input_pressed"
   | "input_held"
+  | "input_command"
   | "sprite_move"
   | "set_velocity"
   | "set_position"
@@ -147,6 +148,7 @@ type QuickActionTemplate = GuidedFlowCommentary & {
     | "projectile_motion"
     | "camera_rig"
     | "fighter_combat"
+    | "fighter_command"
     | "support_state_tick"
     | "hud_vblank_tick";
   actionLabel: string;
@@ -170,6 +172,7 @@ const EVENT_NODE_TYPES: NodeType[] = [
   "event_update",
   "input_pressed",
   "input_held",
+  "input_command",
   "condition_overlap",
   "event_vblank",
   "event_hblank",
@@ -181,6 +184,7 @@ export const REQUIRED_NOCODE_NODE_TYPES: NodeType[] = [
   "event_update",
   "input_pressed",
   "input_held",
+  "input_command",
   "condition_overlap",
   "sprite_move",
   "set_velocity",
@@ -577,6 +581,23 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     outputs: [{ id: "exec", label: ">", kind: "exec" }],
     params: { pad: "JOY_1", button: "BUTTON_RIGHT" },
   },
+  input_command: {
+    type: "input_command", label: "Input Command",
+    inputs: [],
+    outputs: [
+      { id: "exec", label: ">", kind: "exec" },
+      { id: "false", label: "False >", kind: "exec" },
+    ],
+    params: {
+      command_id: "hadouken",
+      display_name: "Hadouken",
+      notation: "_2,_3,_6,_P",
+      max_frames: 15,
+      pad: "JOY_1",
+      button_profile: "megadrive",
+      target: "player",
+    },
+  },
   sprite_move: {
     type: "sprite_move", label: "Move Sprite",
     inputs: [
@@ -873,6 +894,7 @@ export const NODE_DISPLAY_NAMES: Record<NodeType, string> = {
   event_update: "A Cada Frame",
   input_pressed: "Input Pressionado",
   input_held: "Input Segurado",
+  input_command: "Comando de Input",
   sprite_move: "Mover Sprite",
   set_velocity: "Definir Velocidade",
   set_position: "Definir Posicao",
@@ -916,10 +938,14 @@ const NODE_PARAM_DISPLAY_NAMES: Record<string, string> = {
   condition: "Condicao",
   count: "Contagem",
   button: "Botao",
+  button_profile: "Perfil",
+  command_id: "Comando",
+  display_name: "Nome",
   dx: "Delta X",
   dy: "Delta Y",
   frames: "Frames",
   gap: "Gap",
+  max_frames: "Janela",
   max_x: "Max X",
   max_y: "Max Y",
   min_x: "Min X",
@@ -927,6 +953,7 @@ const NODE_PARAM_DISPLAY_NAMES: Record<string, string> = {
   layer: "Camada",
   offset_x: "Offset X",
   operator: "Operador",
+  notation: "Notacao",
   pad: "Controle",
   prefab: "Prefab",
   rate: "Ritmo",
@@ -955,7 +982,7 @@ const NODE_PARAM_DISPLAY_NAMES: Record<string, string> = {
 };
 
 const NODE_PALETTE_GROUPS: Array<{ label: string; icon: string; types: NodeType[] }> = [
-  { label: "Eventos", icon: "\u26a1", types: ["event_start", "event_update", "input_pressed", "input_held", "event_vblank", "event_hblank", "event_dma_done"] },
+  { label: "Eventos", icon: "\u26a1", types: ["event_start", "event_update", "input_pressed", "input_held", "input_command", "event_vblank", "event_hblank", "event_dma_done"] },
   { label: "Movimento", icon: "\ud83c\udfc3", types: ["sprite_move", "set_velocity", "set_position", "spawn_entity", "destroy_entity", "sprite_anim", "set_animation_state", "scroll_tilemap", "move_camera"] },
   { label: "Condicoes", icon: "?", types: ["condition_overlap", "condition_compare", "logic_and"] },
   { label: "Camera", icon: "\u25a3", types: ["camera_follow", "camera_bounds"] },
@@ -1411,6 +1438,33 @@ function buildFighterCombatQuickActionGraph(context: QuickActionContext): NodeGr
   };
 }
 
+function buildFighterCommandQuickActionGraph(context: QuickActionContext): NodeGraph {
+  const update = makeNode("event_update", 140, 160);
+  const command = makeNode("input_command", 380, 150);
+  const anim = makeNode("set_animation_state", 680, 156);
+  const fighter = resolveQuickActionPrimaryTarget(context, "player");
+
+  command.params = {
+    ...command.params,
+    command_id: "hadouken",
+    display_name: "Hadouken",
+    notation: "_2,_3,_6,_P",
+    max_frames: 15,
+    pad: "JOY_1",
+    button_profile: "megadrive",
+    target: fighter,
+  };
+  anim.params = { ...anim.params, target: fighter, state: "fireball" };
+
+  return {
+    nodes: [update, command, anim],
+    edges: [
+      makeEdge(update, "exec", command, "exec"),
+      makeEdge(command, "exec", anim, "exec"),
+    ],
+  };
+}
+
 function buildSupportStateTickQuickActionGraph(context: QuickActionContext): NodeGraph {
   const start = makeNode("event_start", 140, 160);
   const lane = makeNode("var_set", 380, 156);
@@ -1528,6 +1582,22 @@ const QUICK_ACTION_TEMPLATES: QuickActionTemplate[] = [
     limitation:
       "Nao inclui FSM completa de rounds: apenas bootstrap de leitura e feedback.",
     buildGraph: buildFighterCombatQuickActionGraph,
+  },
+  {
+    id: "fighter_command",
+    actionLabel: "Criar comando de luta",
+    title: "Comando de luta",
+    summary: "Adiciona input_command com quarto de lua e liga a animacao de ataque no alvo selecionado.",
+    comments: [
+      "On Update alimenta o matcher por frame, alinhado ao runtime retro.",
+      "Comando de Input guarda a notacao fonte, janela em frames e perfil de botoes.",
+      "Estado de Animacao mostra onde conectar o golpe detectado sem escrever codigo manual.",
+    ],
+    hardwareNote:
+      "Runtime experimental: tokens fora do subset suportado bloqueiam codegen em vez de virar warning cosmetico.",
+    limitation:
+      "Use command.dat local para substituir Hadouken por comandos reais da sua biblioteca.",
+    buildGraph: buildFighterCommandQuickActionGraph,
   },
   {
     id: "support_state_tick",

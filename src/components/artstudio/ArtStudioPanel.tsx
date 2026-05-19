@@ -24,7 +24,13 @@ import {
   importArtAsset,
   type ArtSuggestedFrame,
 } from "../../core/ipc/artStudioService";
-import type { AnimationDef } from "../../core/ipc/sceneService";
+import { parseInputCommandFile } from "../../core/ipc/inputCommandService";
+import type { AnimationDef, SpriteCommandBinding } from "../../core/ipc/sceneService";
+import {
+  formatInputCommandSequence,
+  type CommandButtonProfile,
+  type ParsedInputCommand,
+} from "../../core/inputCommands";
 import { constrainSpriteFrameSize } from "../../core/sceneConstraints";
 import { useSpriteAnimator } from "./useSpriteAnimator";
 import { getEntityDisplayName } from "../../core/entityDisplay";
@@ -362,12 +368,36 @@ export function buildArtStudioAnimations(
   return { animations, error: null };
 }
 
+export function buildArtStudioCommandBindings(
+  sequences: SpriteSequence[],
+  buttonProfile: CommandButtonProfile
+): SpriteCommandBinding[] {
+  return sequences
+    .filter((sequence) => sequence.command && sequence.frames.length > 0)
+    .map((sequence) => {
+      const command = sequence.command!;
+      return {
+        id: command.id,
+        display_name: command.display_name,
+        notation: command.notation,
+        source: command.source,
+        target_animation: sanitizeAnimationKey(sequence.name),
+        max_frames: command.max_frames,
+        button_profile: buttonProfile,
+        unsupported_tokens: command.unsupported_tokens,
+        steps: command.steps,
+      };
+    })
+    .filter((binding) => binding.target_animation.length > 0);
+}
+
 export interface SpriteSequence {
   id: string;
   name: string;
   frames: number[];
   fps: number;
   loop: boolean;
+  command?: ParsedInputCommand;
 }
 
 interface ArtStudioState {
@@ -393,6 +423,9 @@ interface ArtStudioState {
   frameWidth: number;
   frameHeight: number;
   sequences: SpriteSequence[];
+  commandLibrary: ParsedInputCommand[];
+  commandImportSource: string;
+  commandButtonProfile: CommandButtonProfile;
   activeSequenceId: string | null;
   playing: boolean;
   compression: string;
@@ -457,6 +490,11 @@ type ArtStudioAction =
   | { type: "TOGGLE_FRAME"; cellIndex: number }
   | { type: "SET_SEQUENCE_FPS"; id: string; fps: number }
   | { type: "SET_SEQUENCE_LOOP"; id: string; loop: boolean }
+  | { type: "SET_COMMAND_LIBRARY"; source: string; commands: ParsedInputCommand[] }
+  | { type: "SET_COMMAND_PROFILE"; profile: CommandButtonProfile }
+  | { type: "ASSIGN_COMMAND_TO_SEQUENCE"; sequenceId: string; command: ParsedInputCommand }
+  | { type: "CREATE_SEQUENCE_FROM_COMMAND"; id: string; command: ParsedInputCommand }
+  | { type: "CLEAR_SEQUENCE_COMMAND"; sequenceId: string }
   | { type: "SET_PLAYING"; playing: boolean }
   | { type: "SET_COMPRESSION"; value: string }
   | { type: "SHOW_SAVE_FEEDBACK" }
@@ -622,6 +660,55 @@ function artStudioReducer(state: ArtStudioState, action: ArtStudioAction): ArtSt
           sequence.id === action.id ? { ...sequence, loop: action.loop } : sequence
         ),
       };
+    case "SET_COMMAND_LIBRARY":
+      return {
+        ...state,
+        commandLibrary: action.commands,
+        commandImportSource: action.source,
+        validationError: null,
+      };
+    case "SET_COMMAND_PROFILE":
+      return {
+        ...state,
+        commandButtonProfile: action.profile,
+      };
+    case "ASSIGN_COMMAND_TO_SEQUENCE":
+      return {
+        ...state,
+        sequences: state.sequences.map((sequence) =>
+          sequence.id === action.sequenceId ? { ...sequence, command: action.command } : sequence
+        ),
+        activeSequenceId: action.sequenceId,
+        validationError: null,
+      };
+    case "CREATE_SEQUENCE_FROM_COMMAND": {
+      const seq: SpriteSequence = {
+        id: action.id,
+        name: action.command.display_name,
+        frames: [],
+        fps: 12,
+        loop: false,
+        command: action.command,
+      };
+      return {
+        ...state,
+        sequences: [...state.sequences, seq],
+        activeSequenceId: action.id,
+        validationError: null,
+      };
+    }
+    case "CLEAR_SEQUENCE_COMMAND":
+      return {
+        ...state,
+        sequences: state.sequences.map((sequence) => {
+          if (sequence.id !== action.sequenceId) {
+            return sequence;
+          }
+          const nextSequence = { ...sequence };
+          delete nextSequence.command;
+          return nextSequence;
+        }),
+      };
     case "SET_PLAYING":
       return { ...state, playing: action.playing };
     case "SET_COMPRESSION":
@@ -664,6 +751,9 @@ const INITIAL_STATE: ArtStudioState = {
     { id: "seq_run", name: "RUN", frames: [], fps: 12, loop: true },
     { id: "seq_jump", name: "JUMP", frames: [], fps: 8, loop: false },
   ],
+  commandLibrary: [],
+  commandImportSource: "",
+  commandButtonProfile: "megadrive",
   activeSequenceId: null,
   playing: false,
   compression: "NONE",
@@ -749,6 +839,7 @@ interface ArtStudioContextValue {
   previewCanvasRef: MutableRefObject<HTMLCanvasElement | null>;
   handleAddSequence: () => void;
   applyConstrainedFrameSize: (nextWidth: number, nextHeight: number) => void;
+  handleImportCommandDat: () => Promise<void>;
   handleImportToProject: () => Promise<void>;
   handleApplyToScene: () => void;
 }
@@ -869,9 +960,113 @@ function ArtStudioTimelineSection() {
                       ? `Frames selecionados: ${sequence.frames.join(", ")}`
                       : "Sem frames ainda"}
                   </div>
+                  {sequence.command ? (
+                    <div className="rounded-xl border border-[#94e2d5]/35 bg-[#94e2d5]/10 px-2.5 py-2 text-[11px] text-[#ccfbf1]">
+                      Comando: {sequence.command.display_name}
+                    </div>
+                  ) : null}
                 </div>
               );
             })}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-3" data-testid="artstudio-command-panel">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#94e2d5]">
+                Comandos
+              </p>
+              <p className="mt-1 text-[11px] text-[#94a3b8]">
+                {state.commandLibrary.length > 0
+                  ? `${state.commandLibrary.length} comando(s) de ${state.commandImportSource || "command.dat"}`
+                  : "Importe command.dat para associar movimentos a animacoes."}
+              </p>
+            </div>
+            <select
+              value={state.commandButtonProfile}
+              onChange={(event) =>
+                dispatch({
+                  type: "SET_COMMAND_PROFILE",
+                  profile: event.target.value as CommandButtonProfile,
+                })
+              }
+              className="rounded-lg border border-[#313244] bg-[#111827] px-2 py-1 text-[11px] text-[#cdd6f4]"
+              aria-label="Perfil de botoes"
+            >
+              <option value="megadrive">Mega Drive</option>
+              <option value="snes">SNES</option>
+              <option value="keyboard">Teclado</option>
+              <option value="mouse">Mouse</option>
+            </select>
+          </div>
+
+          <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+            {state.commandLibrary.length === 0 ? (
+              <span className="rounded-xl border border-dashed border-[#334155] px-3 py-2 text-[11px] text-[#64748b]">
+                Nenhum comando carregado
+              </span>
+            ) : (
+              state.commandLibrary.map((command) => {
+                const canAssign = Boolean(state.activeSequenceId);
+                return (
+                  <div
+                    key={command.id}
+                    className="min-w-[210px] rounded-xl border border-[#1f2937] bg-[#111827] p-3 text-left"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate text-[12px] font-semibold text-[#e2e8f0]">
+                          {command.display_name}
+                        </p>
+                        <p className="mt-1 text-[13px] font-semibold text-[#f9e2af]">
+                          {formatInputCommandSequence(command, state.commandButtonProfile)}
+                        </p>
+                      </div>
+                      {command.unsupported_tokens.length > 0 ? (
+                        <span className="rounded-full border border-[#f38ba8]/35 bg-[#f38ba8]/10 px-2 py-0.5 text-[9px] font-semibold text-[#f38ba8]">
+                          bloqueia
+                        </span>
+                      ) : (
+                        <span className="rounded-full border border-[#a6e3a1]/35 bg-[#a6e3a1]/10 px-2 py-0.5 text-[9px] font-semibold text-[#a6e3a1]">
+                          runtime
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        disabled={!canAssign}
+                        onClick={() =>
+                          state.activeSequenceId &&
+                          dispatch({
+                            type: "ASSIGN_COMMAND_TO_SEQUENCE",
+                            sequenceId: state.activeSequenceId,
+                            command,
+                          })
+                        }
+                        className="rounded-lg border border-[#94e2d5]/40 bg-[#94e2d5]/10 px-2 py-1 text-[10px] font-semibold text-[#94e2d5] disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        Associar {command.display_name}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          dispatch({
+                            type: "CREATE_SEQUENCE_FROM_COMMAND",
+                            id: `seq_cmd_${command.id}_${Date.now()}`,
+                            command,
+                          })
+                        }
+                        className="rounded-lg border border-[#cba6f7]/35 bg-[#cba6f7]/10 px-2 py-1 text-[10px] font-semibold text-[#e9d5ff]"
+                      >
+                        Criar sequencia
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
       </div>
@@ -1595,6 +1790,33 @@ export default function ArtStudioPanel() {
     }
   }, [ingestSpriteSheet, logMessage]);
 
+  const handleImportCommandDat = useCallback(async () => {
+    try {
+      const selected = await open({
+        title: "Importar command.dat",
+        filters: [{ name: "Command DAT", extensions: ["dat", "txt"] }],
+      });
+      if (!selected) {
+        return;
+      }
+      const commandPath = typeof selected === "string" ? selected : selected[0];
+      if (!commandPath) {
+        return;
+      }
+
+      const commands = await parseInputCommandFile(commandPath);
+      dispatch({ type: "SET_COMMAND_LIBRARY", source: commandPath, commands });
+      logMessage(
+        commands.some((command) => command.unsupported_tokens.length > 0) ? "warn" : "success",
+        `[ArtStudio] command.dat importado: ${commands.length} comando(s) de ${basenameWithExtension(commandPath)}.`
+      );
+    } catch (error) {
+      const message = `Falha ao importar command.dat: ${describeError(error)}`;
+      dispatch({ type: "SET_VALIDATION_ERROR", message });
+      logMessage("error", `[ArtStudio] ${message}`);
+    }
+  }, [logMessage]);
+
   useEffect(() => {
     if (!activeProjectDir || !selectedEntitySprite?.asset) {
       return;
@@ -1896,6 +2118,20 @@ export default function ArtStudioPanel() {
       dispatch({ type: "SET_VALIDATION_ERROR", message: error });
       return;
     }
+    const commandBindings = buildArtStudioCommandBindings(
+      state.sequences,
+      state.commandButtonProfile
+    );
+    const unsupportedCommand = commandBindings.find(
+      (binding) => (binding.unsupported_tokens ?? []).length > 0
+    );
+    if (unsupportedCommand) {
+      dispatch({
+        type: "SET_VALIDATION_ERROR",
+        message: `O comando '${unsupportedCommand.display_name}' tem tokens ainda nao suportados para runtime: ${(unsupportedCommand.unsupported_tokens ?? []).join(", ")}.`,
+      });
+      return;
+    }
 
     dispatch({ type: "SET_VALIDATION_ERROR", message: null });
     if (
@@ -1923,6 +2159,7 @@ export default function ArtStudioPanel() {
             frame_width: constrainedFrame.frameWidth,
             frame_height: constrainedFrame.frameHeight,
             animations,
+            ...(commandBindings.length > 0 ? { commands: commandBindings } : {}),
           },
         },
       });
@@ -1936,6 +2173,7 @@ export default function ArtStudioPanel() {
         frameWidth: constrainedFrame.frameWidth,
         frameHeight: constrainedFrame.frameHeight,
         animations,
+        commands: commandBindings,
       });
       addEntity(entity);
       logMessage("success", `[ArtStudio] Entidade '${entity.entity_id}' criada na cena.`);
@@ -1956,6 +2194,7 @@ export default function ArtStudioPanel() {
     state.frameHeight,
     state.spriteName,
     state.spriteSheetSize,
+    state.commandButtonProfile,
     canUpdateEntity,
     selectedEntityId,
     selectedEntity,
@@ -2201,6 +2440,7 @@ export default function ArtStudioPanel() {
       previewCanvasRef,
       handleAddSequence,
       applyConstrainedFrameSize,
+      handleImportCommandDat,
       handleImportToProject,
       handleApplyToScene,
     }),
@@ -2222,6 +2462,7 @@ export default function ArtStudioPanel() {
       applyNextStepLabel,
       handleAddSequence,
       applyConstrainedFrameSize,
+      handleImportCommandDat,
       handleImportToProject,
       handleApplyToScene,
     ]
@@ -2333,13 +2574,22 @@ export default function ArtStudioPanel() {
                 </p>
                 <h3 className="mt-1 text-sm font-semibold text-[#e2e8f0]">Canvas de origem</h3>
               </div>
-              <button
-                type="button"
-                onClick={handleLoadSpriteSheet}
-                className="rounded-xl border border-[#f9e2af]/50 bg-[#f9e2af]/14 px-4 py-2 text-xs font-semibold text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/22"
-              >
-                Importar imagem
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleImportCommandDat}
+                  className="rounded-xl border border-[#94e2d5]/45 bg-[#94e2d5]/12 px-3 py-2 text-xs font-semibold text-[#94e2d5] transition-colors hover:bg-[#94e2d5]/22"
+                >
+                  Importar command.dat
+                </button>
+                <button
+                  type="button"
+                  onClick={handleLoadSpriteSheet}
+                  className="rounded-xl border border-[#f9e2af]/50 bg-[#f9e2af]/14 px-4 py-2 text-xs font-semibold text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/22"
+                >
+                  Importar imagem
+                </button>
+              </div>
             </div>
           </div>
 

@@ -3461,6 +3461,7 @@ fn import_sgdk_resources_into_scene(
                                 "foreground".to_string()
                             },
                             meta_sprite: is_meta,
+                            commands: Vec::new(),
                         }),
                         logic: Some(LogicComponent {
                             graph: Some(imported_sprite_logic_graph(&resource.name)),
@@ -4978,6 +4979,7 @@ fn platformer_player_prefab_with_dims(
                 animations: HashMap::new(),
                 priority: "foreground".to_string(),
                 meta_sprite: false,
+                commands: Vec::new(),
             }),
             collision: Some(CollisionComponent {
                 shape: "aabb".to_string(),
@@ -5962,6 +5964,7 @@ fn import_mugen_character_candidate(
                 animations,
                 priority: "foreground".to_string(),
                 meta_sprite: atlas.cell_width > 32 || atlas.cell_height > 32,
+                commands: Vec::new(),
             }),
             collision: mugen_collision_component_from_actions(&actions),
             logic: Some(imported_logic_component(
@@ -6291,6 +6294,7 @@ fn static_mugen_sprite_entity(
                 animations: HashMap::new(),
                 priority: "background".to_string(),
                 meta_sprite: width > 32 || height > 32,
+                commands: Vec::new(),
             }),
             ..Components::default()
         },
@@ -7310,6 +7314,7 @@ pub fn import_gamemaker_project(
                     animations: HashMap::new(),
                     priority: "foreground".to_string(),
                     meta_sprite: sprite.width > 32 || sprite.height > 32,
+                    commands: Vec::new(),
                 }),
                 collision: gamemaker_collision_component(object, sprite),
                 input: gamemaker_input_component(&logic_hints),
@@ -10042,6 +10047,7 @@ fn imported_sprite_entity(spec: ImportedSpriteEntitySpec) -> Entity {
                 animations: HashMap::new(),
                 priority: "foreground".to_string(),
                 meta_sprite: frame_width > 32 || frame_height > 32,
+                commands: Vec::new(),
             }),
             input,
             physics,
@@ -10696,6 +10702,7 @@ fn starter_scene(scene_id: &str, display_name: String, _target: &str) -> Scene {
                 animations: HashMap::new(),
                 priority: "foreground".to_string(),
                 meta_sprite: false,
+                commands: Vec::new(),
             }),
             logic: Some(LogicComponent {
                 graph: Some(logic_graph),
@@ -14640,6 +14647,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                     animations: HashMap::new(),
                     priority: "foreground".to_string(),
                     meta_sprite: false,
+                    commands: Vec::new(),
                 }),
                 logic: Some(LogicComponent {
                     graph: Some(
@@ -14886,6 +14894,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                     ]),
                     priority: "foreground".to_string(),
                     meta_sprite: false,
+                    commands: Vec::new(),
                 }),
                 ..Components::default()
             },
