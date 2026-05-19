@@ -1823,12 +1823,20 @@ describe("App build flow", () => {
     const guide = container.querySelector("[data-testid='workspace-guide']");
 
     expect(guide?.textContent).toContain("Overlay SGDK");
-    expect(guide?.textContent).toContain("overlay legado");
-    expect(guide?.textContent).toContain("Host SGDK em overlay");
-    expect(guide?.textContent).toContain("Sem entidade foco");
+    expect(guide?.getAttribute("data-expanded")).toBe("false");
 
     await act(async () => {
-      findButton(guide as HTMLElement, "Abrir Asset Browser").click();
+      findButton(guide as HTMLElement, "Expandir guia").click();
+      await flush();
+    });
+
+    const expandedGuide = container.querySelector("[data-testid='workspace-guide']");
+    expect(expandedGuide?.textContent).toContain("overlay legado");
+    expect(expandedGuide?.textContent).toContain("Host SGDK em overlay");
+    expect(expandedGuide?.textContent).toContain("Sem entidade foco");
+
+    await act(async () => {
+      findButton(expandedGuide as HTMLElement, "Abrir Asset Browser").click();
       await flush();
     });
 
@@ -1841,11 +1849,23 @@ describe("App build flow", () => {
 
   it("compacts the contextual guide to one primary action and restores the full guide on demand", async () => {
     const guide = container.querySelector("[data-testid='workspace-guide']");
-    expect(guide?.textContent).toContain("Focar Entidade Guia");
-    expect(guide?.textContent).toContain("Abrir Inspector");
+    expect(guide?.getAttribute("data-expanded")).toBe("false");
+    expect(guide?.textContent).toContain("Abrir Asset Browser");
+    expect(guide?.textContent).not.toContain("Focar Entidade Guia");
 
     await act(async () => {
-      findButton(guide as HTMLElement, "Compactar guia").click();
+      findButton(guide as HTMLElement, "Expandir guia").click();
+      await flush();
+    });
+
+    const expandedGuide = container.querySelector("[data-testid='workspace-guide']");
+    expect(expandedGuide?.getAttribute("data-expanded")).toBe("true");
+    expect(expandedGuide?.textContent).toContain("Focar Entidade Guia");
+    expect(expandedGuide?.textContent).toContain("Abrir Inspector");
+    expect(localStorage.getItem("retrodev-workspace-guide-expanded")).toBe("true");
+
+    await act(async () => {
+      findButton(expandedGuide as HTMLElement, "Compactar guia").click();
       await flush();
     });
 
@@ -1855,16 +1875,6 @@ describe("App build flow", () => {
     expect(compactGuide?.textContent).not.toContain("Focar Entidade Guia");
     expect(compactGuide?.textContent).not.toContain("Abrir Inspector");
     expect(localStorage.getItem("retrodev-workspace-guide-expanded")).toBe("false");
-
-    await act(async () => {
-      findButton(compactGuide as HTMLElement, "Expandir guia").click();
-      await flush();
-    });
-
-    const expandedGuide = container.querySelector("[data-testid='workspace-guide']");
-    expect(expandedGuide?.getAttribute("data-expanded")).toBe("true");
-    expect(expandedGuide?.textContent).toContain("Focar Entidade Guia");
-    expect(expandedGuide?.textContent).toContain("Abrir Inspector");
   });
 
   it("opens the unified top bar menu and reaches the About dialog", async () => {
@@ -1986,6 +1996,21 @@ describe("App build flow", () => {
     expect(container.querySelector("[data-testid='workspace-guide']")?.textContent).toContain(
       "Art Workspace"
     );
+    expect(container.querySelector("[data-testid='inspector']")).toBeNull();
+  });
+
+  it("hides the global inspector shell in game playtest layout", async () => {
+    const gameButton = container.querySelector(
+      "[data-testid='workspace-rail-game']"
+    ) as HTMLButtonElement | null;
+
+    await act(async () => {
+      gameButton?.click();
+      await flush();
+    });
+
+    expect(useEditorStore.getState().activeWorkspace).toBe("game");
+    expect(container.querySelector("[data-testid='inspector']")).toBeNull();
   });
 
   it("shows build phases as safe-to-continue guidance when validation has warnings only", async () => {
@@ -3379,7 +3404,7 @@ describe("App build flow", () => {
     expect(container.querySelector("[data-testid='inspector']")).toBeNull();
 
     await act(async () => {
-      findButton(container, "Inspector").click();
+      findButton(container, "Insp").click();
       await flush();
     });
 

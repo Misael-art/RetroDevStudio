@@ -2561,7 +2561,7 @@ export default function ArtStudioPanel() {
           orientation="vertical"
           className="min-h-0"
         >
-          <Panel minSize={42} defaultSize={68}>
+          <Panel minSize={48} defaultSize={78}>
             <section
           data-testid="artstudio-main-stage"
           className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-[#313244] bg-[linear-gradient(180deg,#111827,#0f172a)] shadow-[0_18px_50px_rgba(0,0,0,0.28)]"
@@ -2722,7 +2722,7 @@ export default function ArtStudioPanel() {
         </section>
           </Panel>
           <LayoutSplitter orientation="vertical" />
-          <Panel minSize={18} defaultSize={32}>
+          <Panel minSize={12} defaultSize={22}>
             <ArtStudioTimelineSection />
           </Panel>
         </Group>

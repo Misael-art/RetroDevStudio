@@ -1,6 +1,6 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Status:** ENTRADA CANONICA
-**Ultima Atualizacao:** 2026-05-19 (rodada 48 - consolidacao GameMaker + command.dat)
+**Ultima Atualizacao:** 2026-05-19 (rodada 49 - workspace shell Option B)
 
 ## ATENCAO PARA AGENTES DE IA
 
@@ -12,7 +12,9 @@
 | `docs/06_AI_MEMORY_BANK_WAVE_A_R.md` | Historico arquivado das waves A-R |
 
 **Fluxo canonico:** leia este arquivo primeiro e siga imediatamente para `docs/06_CURRENT_WAVE_AI_BANK.md`.
-**Atualizacao ativa mais recente:** em `2026-05-19 (rodada 48)`, a branch `codex/project-cohesion-full-build` consolidou `main` (GameMaker vertical via PR #8) com `codex/command-dat-artstudio-node-runtime`: coexistem `compatibility_harness`/`gml_to_nodes` e `input_commands`/`input_command`/ArtStudio Comandos. GameMaker e command.dat permanecem **Experimental**; SGDK/Node Engine sem promocao Stable institucional nesta rodada.
+**Atualizacao ativa mais recente:** em `2026-05-19 (rodada 49)`, a branch `codex/product-ui-workspace-redesign` iniciou o redesign Option B por workspace via `src/core/workspaceLayout.ts` (presets `authoring/art/logic/playtest/debug`), guia contextual compacto por padrao, ArtStudio sem inspector global duplicado, Game em layout playtest full-width e Logic com tools/palette no painel direito. Gates locais: `check:tree`, `lint`, `tsc`, `npm test` **322/322**, `cargo clippy`, `cargo test --lib` **347/17 ignored**, `preflight:sgdk-e2e`, `test:e2e:desktop:qa-rc` A-G (`qa-rc-2026-05-19T21-06-34-338Z-*`), `build:debug`. UI production hardening **NAO** fechado — falta polimento profundo Scene/NodeGraph/Debug e capturas multi-resolucao. SGDK/Node Engine sem promocao Stable.
+
+**Atualizacao ativa anterior:** em `2026-05-19 (rodada 48)`, a branch `codex/project-cohesion-full-build` consolidou `main` (GameMaker vertical via PR #8) com `codex/command-dat-artstudio-node-runtime`: coexistem `compatibility_harness`/`gml_to_nodes` e `input_commands`/`input_command`/ArtStudio Comandos. GameMaker e command.dat permanecem **Experimental**; SGDK/Node Engine sem promocao Stable institucional nesta rodada.
 
 **Atualizacao ativa anterior:** em `2026-05-19 (rodada 47)`, a branch `codex/command-dat-artstudio-node-runtime` fechou uma frente paralela em worktree isolada (`F:\Projects\RetroDevStudio-command-dat`) para transformar `command.dat` local/BYOR em comandos visuais e nodes executaveis. O parser canonico Rust (`src-tauri/src/core/input_commands.rs`) e o espelho frontend (`src/core/inputCommands.ts`) suportam o subset `[Command]`, `name`, `command`, `time`, direcoes `_1.._9`, aliases `D/F/B/U/DF/DB/UF/UB`, `_P/_K`, botoes MUGEN `a,b,c,x,y,z`, simultaneo `+`, sequencias por virgula e janela por frames. `SpriteComponent.commands` persiste bindings experimentais; ArtStudio importa arquivo local, mostra chips visuais por perfil Mega Drive/SNES/teclado/mouse e associa comandos a sequencias; NodeGraph ganhou `input_command`, quick action e codegen SGDK/SNES com matcher por ring buffer. Tokens fora do subset geram `unsupported_tokens` e bloqueiam C via `#error` acionavel. A prova real `official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --ignored` passou com SGDK v2.11/Libretro reais e o projeto no-code persistente inclui Hadouken por `input_command`, ROM real e framebuffer visivel. Gates finais verdes: `check:tree`, `lint`, `tsc`, `npm test` **315/315**, `cargo clippy`, `cargo test --lib` **344/16 ignored**, preflight SGDK/E2E, `build:debug` e QA RC A-G. Superficie segue **Experimental**, sem scraping de wikis e sem claim de compatibilidade total de todos os dialetos.
 

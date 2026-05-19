@@ -80,6 +80,12 @@ import {
   getShortcutTitle,
   groupShortcutsByGroup,
 } from "./core/shortcuts";
+import {
+  getPresetLayout,
+  resolveWorkspaceShellConfig,
+  type LayoutMap,
+  type LayoutPresetId,
+} from "./core/workspaceLayout";
 
 const ExplorerWorkspace = lazy(() => import("./components/explorer/ExplorerWorkspace"));
 const InspectorPanel = lazy(() => import("./components/inspector/InspectorPanel"));
@@ -126,13 +132,7 @@ function ToolbarButton({
   );
 }
 
-type LayoutPresetId = "artist" | "logic" | "debug" | "playtest";
 type WorkspaceGroupId = "core" | "authoring" | "advanced";
-type LayoutMap = {
-  left: number;
-  center: number;
-  right: number;
-};
 
 const LAYOUT_STORAGE_KEY = "retrodev-shell-saved-layout";
 const WORKSPACE_GUIDE_STORAGE_KEY = "retrodev-workspace-guide-expanded";
@@ -332,43 +332,6 @@ function getTemplateFirstSuccessSteps({
   return steps;
 }
 
-function getPresetLayout(preset: LayoutPresetId, width: number): LayoutMap {
-  const compact = width < 1180;
-  const narrow = width < 960;
-
-  if (preset === "playtest") {
-    return { left: 0, center: 100, right: 0 };
-  }
-
-  if (preset === "debug") {
-    if (narrow) {
-      return { left: 0, center: 54, right: 46 };
-    }
-    if (compact) {
-      return { left: 10, center: 50, right: 40 };
-    }
-    return { left: 14, center: 50, right: 36 };
-  }
-
-  if (preset === "logic") {
-    if (narrow) {
-      return { left: 0, center: 68, right: 32 };
-    }
-    if (compact) {
-      return { left: 14, center: 62, right: 24 };
-    }
-    return { left: 15, center: 60, right: 25 };
-  }
-
-  if (narrow) {
-    return { left: 0, center: 72, right: 28 };
-  }
-  if (compact) {
-    return { left: 16, center: 64, right: 20 };
-  }
-  return { left: 18, center: 60, right: 22 };
-}
-
 function WorkspaceRailButton({
   icon,
   label,
@@ -441,9 +404,9 @@ type WorkspaceGuide = {
 
 function getInitialWorkspaceGuideExpanded() {
   if (typeof localStorage === "undefined") {
-    return true;
+    return false;
   }
-  return localStorage.getItem(WORKSPACE_GUIDE_STORAGE_KEY) !== "false";
+  return localStorage.getItem(WORKSPACE_GUIDE_STORAGE_KEY) === "true";
 }
 
 function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
@@ -1044,7 +1007,7 @@ export default function App() {
   const [toolPanelShowAdvanced, setToolPanelShowAdvanced] = useState(false);
   const [leftPanelTab, setLeftPanelTab] = useState<"scene" | "layers">("scene");
   const [focusedShell, setFocusedShell] = useState(false);
-  const [layoutPreset, setLayoutPreset] = useState<LayoutPresetId>("artist");
+  const [layoutPreset, setLayoutPreset] = useState<LayoutPresetId>("authoring");
   const [shellWidth, setShellWidth] = useState(
     typeof window !== "undefined" ? window.innerWidth : 1440
   );
@@ -1138,6 +1101,7 @@ export default function App() {
         : null;
   const workspaceMeta =
     WORKSPACE_ITEMS.find((workspace) => workspace.id === activeWorkspace) ?? WORKSPACE_ITEMS[0];
+  const shellConfig = resolveWorkspaceShellConfig(activeWorkspace, shellWidth);
 
   useLiveValidationController();
 
@@ -1241,31 +1205,23 @@ export default function App() {
       return;
     }
 
-    applyShellLayout(getPresetLayout(layoutPreset, shellWidth));
-  }, [layoutPreset, shellWidth]);
+    const config = resolveWorkspaceShellConfig(activeWorkspace, shellWidth);
+    setLayoutPreset(config.preset);
+    applyShellLayout(config.panels);
+  }, [activeWorkspace, shellWidth, focusedShell]);
 
   useEffect(() => {
     if (focusedShell) {
       return;
     }
 
-    if (activeWorkspace === "debug") {
-      setLayoutPreset("debug");
-      return;
+    const config = resolveWorkspaceShellConfig(activeWorkspace, shellWidth);
+    if (config.defaultRightMode === "tools") {
+      setRightPanelMode("tools");
+    } else if (config.defaultRightMode === "inspector") {
+      setRightPanelMode("inspector");
     }
-
-    if (activeWorkspace === "logic") {
-      setLayoutPreset("logic");
-      return;
-    }
-
-    if (activeWorkspace === "game") {
-      setLayoutPreset("playtest");
-      return;
-    }
-
-    setLayoutPreset("artist");
-  }, [activeWorkspace, focusedShell]);
+  }, [activeWorkspace, focusedShell, shellWidth]);
 
   useEffect(() => {
     if (activeWorkspace === "debug" || activeWorkspace === "explorer") {
@@ -2408,13 +2364,24 @@ export default function App() {
 
   function handleWorkspaceSelect(workspace: EditorWorkspace) {
     setActiveWorkspace(workspace);
+    const config = resolveWorkspaceShellConfig(workspace, shellWidth);
 
     if (workspace === "debug") {
       openToolsWorkspace("profiler", "debug", true);
+      setActiveViewportTab("scene");
       return;
     }
 
-    setRightPanelMode("inspector");
+    if (config.defaultRightMode === "tools") {
+      openToolsWorkspace(
+        workspace === "logic" ? "palette" : toolPanelActive,
+        "editing",
+        false
+      );
+    } else if (config.defaultRightMode === "inspector") {
+      setRightPanelMode("inspector");
+    }
+
     if (workspace === "explorer") {
       setActiveViewportTab("scene");
       return;
@@ -2565,11 +2532,11 @@ export default function App() {
         if (activeWorkspace === "artstudio") {
           return {
             eyebrow: "Art Workspace",
-            title: "Prepare sprites e sequencias antes de voltar para a cena.",
+            title: "Sprites, timeline e inspector integrados neste workspace.",
             summary:
-              "ArtStudio agora organiza stage, timeline e inspector no proprio workspace, enquanto o Asset Browser continua sendo o ponto de entrada para os assets canonicos do projeto.",
+              "O canvas de origem e preview dominam a area central; timeline compacta abaixo; inspector contextual fica no proprio ArtStudio.",
             detail:
-              "Abra o Asset Browser para escolher a origem certa, revise a sequencia no inspector contextual do workspace e rode no emulador quando quiser checar o resultado.",
+              "Abra o Asset Browser para escolher a origem, use fit/zoom/pan no stage e exporte quando a sequencia estiver pronta.",
             signal: sharedSignal,
             actions: [
               {
@@ -2578,8 +2545,8 @@ export default function App() {
                 accent: "primary",
               },
               {
-                label: "Abrir Inspector",
-                onClick: () => setRightPanelMode("inspector"),
+                label: "Ir para Cena",
+                onClick: () => handleWorkspaceSelect("scene"),
               },
               {
                 label: "Rodar no Emulador",
@@ -3915,25 +3882,12 @@ export default function App() {
         >
           <Panel
             id="left"
-            defaultSize={15}
-            minSize={0}
+            defaultSize={shellConfig.panels.left}
+            minSize={shellConfig.showLeft ? 12 : 0}
+            collapsible
             className="flex flex-col overflow-hidden border-r border-[#313244]"
           >
-            {activeWorkspace === "explorer" ? (
-              <div className="flex h-full min-h-0 flex-col bg-[#0b1120]">
-                <div className="border-b border-[#313244] px-3 py-2">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#7dd3fc]">
-                    Explorer
-                  </div>
-                  <div className="mt-1 text-[11px] text-[#64748b]">
-                    Estrutura sintetizada no stage central.
-                  </div>
-                </div>
-                <div className="min-h-0 flex-1 px-3 py-4 text-[12px] leading-6 text-[#94a3b8]">
-                  Use o workspace central para navegar por cenas, assets canonicos e arquivos do host legado sem mudar contratos de IPC.
-                </div>
-              </div>
-            ) : (
+            {shellConfig.showLeft ? (
               <>
                 <div className="flex shrink-0 border-b border-[#313244] bg-[#11111b]">
                   <button
@@ -3944,7 +3898,7 @@ export default function App() {
                         : "text-[#45475a] hover:text-[#a6adc8]"
                     }`}
                   >
-                    Cena
+                    {activeWorkspace === "logic" ? "Contexto" : "Cena"}
                   </button>
                   <button
                     onClick={() => setLeftPanelTab("layers")}
@@ -3961,7 +3915,7 @@ export default function App() {
                   {leftPanelTab === "layers" ? <LayerPanel /> : <HierarchyPanel />}
                 </div>
               </>
-            )}
+            ) : null}
           </Panel>
           <LayoutSplitter />
           <Panel id="center" minSize={20} className="overflow-hidden">
@@ -3981,31 +3935,32 @@ export default function App() {
           <LayoutSplitter />
           <Panel
             id="right"
-            defaultSize={20}
-            minSize={0}
+            defaultSize={shellConfig.panels.right}
+            minSize={shellConfig.showRight ? 16 : 0}
+            collapsible
             className="overflow-hidden border-l border-[#313244]"
           >
+            {shellConfig.showRight ? (
             <div className="flex h-full min-h-0 flex-col bg-[#09090b]">
-              <div className="flex items-center justify-between border-b border-[#27272a] bg-[#111827] px-3 py-2">
-                <div>
+              <div className="flex items-center justify-between border-b border-[#27272a] bg-[#111827] px-3 py-1.5">
+                <div className="min-w-0">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#94a3b8]">
-                    {rightPanelMode === "tools" ? "Tools" : "Inspector"}
-                  </div>
-                  <div className="mt-1 text-[11px] text-[#64748b]">
-                    Painel contextual do workspace ativo
+                    {rightPanelMode === "tools" ? shellConfig.rightLabel : shellConfig.rightLabel}
                   </div>
                 </div>
-                <div className="flex items-center gap-1 rounded-full border border-[#313244] bg-[#09090b] p-1">
+                {shellConfig.defaultRightMode !== "hidden" ? (
+                <div className="flex shrink-0 items-center gap-1 rounded-full border border-[#313244] bg-[#09090b] p-0.5">
                   <button
                     type="button"
                     onClick={() => setRightPanelMode("inspector")}
-                    className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors ${
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors ${
                       rightPanelMode === "inspector"
                         ? "bg-[#cba6f7] text-[#111827]"
                         : "text-[#94a3b8] hover:bg-[#1f2937] hover:text-[#e5e7eb]"
                     }`}
+                    title="Inspector de entidade"
                   >
-                    Inspector
+                    Insp
                   </button>
                   <button
                     type="button"
@@ -4016,15 +3971,17 @@ export default function App() {
                         activeWorkspace === "debug" || toolPanelShowAdvanced
                       )
                     }
-                    className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors ${
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors ${
                       rightPanelMode === "tools"
                         ? "bg-[#cba6f7] text-[#111827]"
                         : "text-[#94a3b8] hover:bg-[#1f2937] hover:text-[#e5e7eb]"
                     }`}
+                    title="Ferramentas contextuais"
                   >
                     Tools
                   </button>
                 </div>
+                ) : null}
               </div>
               <div className="min-h-0 flex-1 overflow-hidden">
                 {rightPanelMode === "tools" ? (
@@ -4043,6 +4000,7 @@ export default function App() {
                 )}
               </div>
             </div>
+            ) : null}
           </Panel>
         </Group>
       </div>

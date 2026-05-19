@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-19 (rodada 48 - consolidacao GameMaker + command.dat)
+**Ultima Atualizacao:** 2026-05-19 (rodada 49 - workspace shell Option B)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,17 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-19 rodada 49 - branch `codex/product-ui-workspace-redesign`):**
+  - **Shell Option B:** novo modulo `src/core/workspaceLayout.ts` centraliza presets `authoring`, `art`, `logic`, `playtest`, `debug` e `resolveWorkspaceShellConfig()` por workspace.
+  - **Scene:** Hierarchy/Inspector laterais com preset authoring; guia contextual compacto por padrao (`retrodev-workspace-guide-expanded` so expande com opt-in).
+  - **ArtStudio:** painel direito global oculto (sem inspector duplicado); stage 78% / timeline 22% no workspace interno.
+  - **Game:** layout playtest sem paineis laterais — emulador ocupa o centro.
+  - **Logic:** palette/tools no painel direito por padrao ao entrar no workspace.
+  - **Debug/Explorer:** tools/inspector contextuais conforme tarefa.
+  - **Testes:** `workspaceLayout.test.ts` + regressoes em `App.test.tsx` (guia compacto, ArtStudio sem inspector global, game playtest).
+  - **Gates locais:** `check:tree`, `lint`, `tsc`, `npm test` **322/322**, `cargo clippy`, `cargo test --lib` **347/17 ignored**, `preflight:sgdk-e2e`, `test:e2e:desktop:qa-rc` A-G (`qa-rc-2026-05-19T21-06-34-338Z-*`), `build:debug`.
+  - **Status honesto:** UI production hardening **NAO** fechado — falta polimento profundo de Scene/NodeGraph/Debug, capturas em 1366/1920/2560 e QA RC fresco. SGDK Stable **sem promocao**; Node Engine **sem promocao**; superficies Experimentais inalteradas.
 
 * **O que acabou de acontecer (2026-05-19 rodada 48 - branch `codex/project-cohesion-full-build`):**
   - **Consolidacao:** `origin/main` (ja com GameMaker vertical via PR #8) + `origin/codex/command-dat-artstudio-node-runtime` integrados em uma unica branch coesa.
