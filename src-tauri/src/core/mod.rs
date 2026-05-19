@@ -1,4 +1,7 @@
+#[allow(dead_code)] // IPC + testes de validacao host-local
+pub mod compatibility_harness;
 pub mod editor_validation;
+pub mod gml_to_nodes;
 pub mod memory_pool;
 pub mod project_mgr;
 pub mod sgdk_corpus_inventory;
