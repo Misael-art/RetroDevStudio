@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-18 (rodada 46 - GameMaker GMX/GMEZ experimental)
+**Ultima Atualizacao:** 2026-05-19 (rodada 47 - GameMaker vertical harness)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,13 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-19 rodada 47 - branch `codex/compatibility-harness-gamemaker-vertical`):**
+  - **Harness canonico:** `src-tauri/src/core/compatibility_harness.rs` executa matriz auditavel (import, nodes, gaps, SGDK, ROM, Libretro, `non_black_pixels`, `fake_toolchain_used`) e grava `src-tauri/target-test/validation/gamemaker-vertical/gamemaker-basic-platform-report.{json,md}`.
+  - **GML -> nodes oficiais (subset):** `src-tauri/src/core/gml_to_nodes.rs` converte `oPlayer` (input, movimento, pulo, gravidade, animacao, camera) para grafo nativo com auto-layout por sistema; GML generico permanece bridge estruturada com gaps explicitos (`place_free`, `repeat`, `sprite_index`, etc.).
+  - **Import GameMaker real endurecido:** `import_gamemaker_project` agrega `oWall` em `collision_map`, materializa sprites alinhados a 8px, limita sprites MD ao player + background reduzido (budget), persiste `graphs/gamemaker_<entity>.json` e mantem metadados de origem.
+  - **Prova vertical host-local:** `cargo test --lib gamemaker_vertical_compatibility_harness_basic_platform -- --ignored --nocapture --test-threads=1` passou contra `F:\Projects\Game Maker\Basic_platform_game_example.gmez` com `generated_sgdk_status=ok`, `rom_status=ok_sega_header`, `emulator_status=ok:Genesis Plus GX`, `non_black_pixels=3793`, `fake_toolchain_used=false`, ROM `gamemaker-basic-platform.bin` e frame `gamemaker-basic-platform-frame.ppm`.
+  - **Status honesto:** GameMaker continua **Experimental/importavel** (nao Stable geral); `.yyp/.yy` modernos seguem pendentes; GML completo segue pendente; props decorativos (spinners, keys, doors) podem importar logica/grafo sem sprite MD nesta wave.
 
 * **O que acabou de acontecer (2026-05-18 rodada 46 - branch `codex/product-compatibility-wave`):**
   - **Base protegida:** antes de mexer em feature, `main` estava alinhado com `origin/main` em `a0fe109` e `npm run release:readiness:promotion` passou com `Pronto para promocao: SIM`.

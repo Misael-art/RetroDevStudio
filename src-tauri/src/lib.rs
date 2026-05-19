@@ -39,6 +39,9 @@ use core::project_mgr::{
     update_project_target, ExternalImportProfileSummary, LegacySgdkIndex, ProjectTemplateSummary,
     SceneInfo, DEFAULT_ENTRY_SCENE,
 };
+use core::compatibility_harness::{
+    run_gamemaker_compatibility_harness, validation_report_dir, CompatibilityHarnessReport,
+};
 use core::sgdk_corpus_inventory::{
     inspect_sgdk_corpus_for_nocode_inventory, inspect_sgdk_project_for_nocode_inventory,
     write_sgdk_corpus_inventory_report, SgdkCorpusInventoryReport, SgdkProjectInventory,
@@ -2741,6 +2744,30 @@ fn inspect_sgdk_corpus_inventory(
 }
 
 #[tauri::command]
+fn run_gamemaker_compatibility_harness_cmd(
+    source_path: String,
+    report_stem: Option<String>,
+    artifact_dir: Option<String>,
+) -> Result<CompatibilityHarnessReport, String> {
+    let trimmed_source = source_path.trim();
+    if trimmed_source.is_empty() {
+        return Err("Caminho do projeto GameMaker e obrigatorio.".into());
+    }
+    let artifact_root = artifact_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| validation_report_dir("gamemaker-vertical"));
+    let stem = report_stem
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("gamemaker-basic-platform");
+    run_gamemaker_compatibility_harness(Path::new(trimmed_source), &artifact_root, stem)
+}
+
+#[tauri::command]
 fn import_mugen_project(
     project_name: String,
     base_dir: String,
@@ -2848,6 +2875,7 @@ pub fn run() {
             import_sgdk_project,
             inspect_sgdk_project_inventory,
             inspect_sgdk_corpus_inventory,
+            run_gamemaker_compatibility_harness_cmd,
             import_mugen_project,
             import_legacy_sgdk_project,
             // Fase 4: Tools

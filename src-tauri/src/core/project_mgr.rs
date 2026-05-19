@@ -437,10 +437,19 @@ struct GameMakerRoomView {
 }
 
 #[derive(Debug, Clone)]
+struct GameMakerRoomBackground {
+    name: String,
+    visible: bool,
+}
+
+#[derive(Debug, Clone)]
 struct GameMakerRoomResource {
     display_name: String,
+    width: i32,
+    height: i32,
     instances: Vec<GameMakerRoomInstance>,
     views: Vec<GameMakerRoomView>,
+    backgrounds: Vec<GameMakerRoomBackground>,
 }
 
 #[derive(Debug, Clone)]
@@ -7187,6 +7196,7 @@ pub fn import_gamemaker_project(
     let resolved = resolve_gamemaker_source_root(source_path)?;
     let gm_root = resolved.effective_root;
     let sprites = load_gamemaker_sprites(&gm_root)?;
+    let backgrounds = load_gamemaker_backgrounds(&gm_root)?;
     let objects = load_gamemaker_objects(&gm_root)?;
     let room = load_gamemaker_primary_room(&gm_root)?;
 
@@ -7222,12 +7232,47 @@ pub fn import_gamemaker_project(
     ]);
 
     let mut entity_ids = HashSet::new();
-    let mut asset_cache = HashMap::new();
+    let mut asset_cache: HashMap<PathBuf, String> = HashMap::new();
     let mut skipped = Vec::new();
     let mut first_sprite_id: Option<String> = None;
     let mut first_entity_for_object: HashMap<String, String> = HashMap::new();
+    let mut total_nodes_generated = 0usize;
+    let mut native_graph_entities = 0usize;
+    let mut blocking_gaps = 0usize;
+
+    if let Some(background_entity) = import_gamemaker_background_entity(
+        project_dir,
+        &gm_root,
+        &backgrounds,
+        &room,
+        &mut entity_ids,
+        &mut asset_cache,
+    )? {
+        scene.entities.push(background_entity);
+    }
+
+    let wall_sprite = objects
+        .get("oWall")
+        .and_then(|object| object.sprite_name.as_ref())
+        .and_then(|sprite_name| sprites.get(sprite_name));
+    let wall_instances = room
+        .instances
+        .iter()
+        .filter(|instance| is_gamemaker_static_collision_object(&instance.object_name))
+        .cloned()
+        .collect::<Vec<_>>();
+    scene.collision_map = Some(build_gamemaker_collision_map(
+        &wall_instances,
+        wall_sprite,
+        room.width,
+        room.height,
+    ));
 
     for instance in &room.instances {
+        if is_gamemaker_static_collision_object(&instance.object_name) {
+            continue;
+        }
+
         let Some(object) = objects.get(&instance.object_name) else {
             skipped.push(format!(
                 "GameMaker object '{}' referenciado por '{}' nao encontrado.",
@@ -7245,29 +7290,26 @@ pub fn import_gamemaker_project(
             .sprite_name
             .as_ref()
             .and_then(|sprite_name| sprites.get(sprite_name));
-        let asset = if let Some(sprite) = sprite {
-            Some(materialize_external_file(
-                project_dir,
-                &gm_root,
-                &sprite.source_path,
-                "sprites",
-                "gamemaker",
-                &mut asset_cache,
-            )?)
-        } else {
-            skipped.push(format!(
-                "{}: objeto GameMaker sem sprite importavel; preservado como entidade logica.",
-                object.name
-            ));
-            None
-        };
+
+        let event_pairs = object
+            .events
+            .iter()
+            .map(|event| (event.label.clone(), event.code.clone()))
+            .collect::<Vec<_>>();
+        let conversion = crate::core::gml_to_nodes::convert_gamemaker_object_to_graph(
+            &entity_id,
+            &object.name,
+            &event_pairs,
+        );
+        total_nodes_generated += conversion.nodes_generated;
+        blocking_gaps += conversion.blocking_gaps;
+        let graph_ref = persist_gamemaker_conversion_graph(project_dir, &entity_id, &conversion)?;
 
         let mut logic_hints = Vec::new();
-        for event in &object.events {
+        for gap in &conversion.gaps {
             logic_hints.push(format!(
-                "GameMaker {} GML preservado como bridge semantica: {}",
-                event.label,
-                compact_gml_snippet(&event.code)
+                "Gap GameMaker [{}] {}: {}",
+                gap.severity, gap.source_event, gap.reason
             ));
         }
         if let Some(code) = instance
@@ -7276,63 +7318,144 @@ pub fn import_gamemaker_project(
             .filter(|value| !value.trim().is_empty())
         {
             logic_hints.push(format!(
-                "GameMaker Instance Creation Code preservado como bridge semantica: {}",
+                "GameMaker Instance Creation Code referenciado: {}",
                 compact_gml_snippet(code)
             ));
         }
 
-        let has_logic = !logic_hints.is_empty();
         let role = gamemaker_entity_role(&object.name, &logic_hints);
+        let (asset, materialized_sprite_dims) = if gamemaker_should_attach_md_sprite(&role, &object.name) {
+            if let Some(sprite) = sprite {
+                let (asset_path, width, height) = materialize_gamemaker_rgba_asset(
+                    project_dir,
+                    &gm_root,
+                    &sprite.source_path,
+                    "sprites",
+                    "gamemaker",
+                    &mut asset_cache,
+                    None,
+                )?;
+                (Some(asset_path), Some((width, height)))
+            } else {
+                skipped.push(format!(
+                    "{}: objeto GameMaker sem sprite importavel; preservado como entidade logica.",
+                    object.name
+                ));
+                (None, None)
+            }
+        } else {
+            if sprite.is_some() {
+                skipped.push(format!(
+                    "{}: sprite GameMaker omitido no budget MD desta wave; grafo/logica preservados.",
+                    object.name
+                ));
+            }
+            (None, None)
+        };
         let source_ref = object
             .source_path
             .strip_prefix(&gm_root)
             .ok()
             .map(normalize_relative_path)
             .unwrap_or_else(|| object.source_path.display().to_string());
+        let native_graph = conversion.blocking_gaps == 0
+            && conversion.native_constructs.iter().any(|value| {
+                value == "event_update" || value == "input_held" || value == "camera_follow"
+            });
+        if native_graph {
+            native_graph_entities += 1;
+        }
+
+        let frame_count = sprite
+            .map(|sprite| count_gamemaker_sprite_frames(&sprite.source_path))
+            .unwrap_or(1);
         let entity = Entity {
             entity_id: entity_id.clone(),
             display_name: Some(object.name.clone()),
             prefab: None,
             transform: crate::ugdm::entities::Transform {
-                x: instance.x,
-                y: instance.y,
+                x: gamemaker_coord_to_md_x(instance.x, room.width),
+                y: gamemaker_coord_to_md_y(instance.y, room.height),
             },
             components: Components {
                 sprite: sprite.zip(asset).map(|(sprite, asset)| SpriteComponent {
                     asset,
-                    frame_width: sprite.width.max(1),
-                    frame_height: sprite.height.max(1),
+                    frame_width: materialized_sprite_dims
+                        .map(|(width, _)| width)
+                        .unwrap_or_else(|| md_align_dimension(sprite.width.max(1))),
+                    frame_height: materialized_sprite_dims
+                        .map(|(_, height)| height)
+                        .unwrap_or_else(|| md_align_dimension(sprite.height.max(1))),
                     pivot: Some(Pivot {
                         x: sprite.xorigin,
                         y: sprite.yorigin,
                     }),
                     palette_slot: 0,
-                    animations: HashMap::new(),
-                    priority: "foreground".to_string(),
+                    animations: gamemaker_player_animations(frame_count),
+                    priority: if role == "player_avatar" {
+                        "foreground".to_string()
+                    } else {
+                        "midground".to_string()
+                    },
                     meta_sprite: sprite.width > 32 || sprite.height > 32,
                 }),
                 collision: gamemaker_collision_component(object, sprite),
                 input: gamemaker_input_component(&logic_hints),
                 physics: gamemaker_physics_component(&logic_hints),
-                logic: has_logic.then(|| LogicComponent {
-                    graph: Some(imported_sprite_logic_graph(&entity_id)),
-                    graph_ref: None,
-                    graph_origin: Some("gamemaker_gmx".to_string()),
+                logic: Some(LogicComponent {
+                    graph: None,
+                    graph_ref: Some(graph_ref),
+                    graph_origin: Some(if native_graph {
+                        "gamemaker_gmx_native".to_string()
+                    } else {
+                        "gamemaker_gmx".to_string()
+                    }),
                     logic_hints,
                     external_source_refs: vec![source_ref],
                     imported_semantics: Some(ImportedLogicSemantics {
                         source: "gamemaker_gmx".to_string(),
                         gameplay_class: "room_based_2d".to_string(),
                         entity_role: role,
-                        confidence: "bridge".to_string(),
-                        role_reason:
-                            "GML preservado como bridge semantica editavel; codegen nativo ainda parcial."
-                                .to_string(),
-                        driver_functions: Vec::new(),
+                        confidence: if native_graph {
+                            "native_subset".to_string()
+                        } else {
+                            "bridge".to_string()
+                        },
+                        role_reason: if native_graph {
+                            "GML convertido para nodes oficiais com auto-layout por sistema."
+                                .to_string()
+                        } else {
+                            "GML parcialmente convertido; bridge estruturada permanece visivel."
+                                .to_string()
+                        },
+                        driver_functions: conversion.native_constructs.clone(),
                         source_paths: Vec::new(),
-                        audit_flags: vec!["gml_bridge_preserved".to_string()],
+                        audit_flags: if native_graph {
+                            vec!["gml_native_subset".to_string()]
+                        } else {
+                            vec!["gml_bridge_preserved".to_string()]
+                        },
                     }),
-                    variables: HashMap::new(),
+                    variables: HashMap::from([
+                        (
+                            "vertical_speed".to_string(),
+                            crate::ugdm::components::LogicVariable {
+                                var_type: "int".to_string(),
+                                default: serde_json::json!(0),
+                                min: None,
+                                max: None,
+                            },
+                        ),
+                        (
+                            "climbing".to_string(),
+                            crate::ugdm::components::LogicVariable {
+                                var_type: "int".to_string(),
+                                default: serde_json::json!(0),
+                                min: Some(0),
+                                max: Some(1),
+                            },
+                        ),
+                    ]),
                 }),
                 ..Components::default()
             },
@@ -7368,10 +7491,13 @@ pub fn import_gamemaker_project(
         ));
     }
 
-    skipped.push(
-        "GML preservado como bridge semantica; conversao nativa completa de GML permanece Experimental."
-            .to_string(),
-    );
+    skipped.push(format!(
+        "GameMaker import: {} entidades com grafo nativo/bridge, {} nodes gerados, {} gaps bloqueantes, {} paredes agregadas em collision_map.",
+        native_graph_entities,
+        total_nodes_generated,
+        blocking_gaps,
+        wall_instances.len()
+    ));
     save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
 
     if let Some(temp_root) = resolved.temp_root {
@@ -7632,6 +7758,12 @@ fn load_gamemaker_primary_room(gm_root: &Path) -> Result<GameMakerRoomResource, 
         .unwrap_or("room.room.gmx")
         .trim_end_matches(".room.gmx")
         .to_string();
+    let width = first_xml_tag_text(&content, "width")
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(1000);
+    let height = first_xml_tag_text(&content, "height")
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(750);
     let instances = collect_xml_start_tags(&content, "instance")
         .into_iter()
         .filter_map(|tag| {
@@ -7666,11 +7798,244 @@ fn load_gamemaker_primary_room(gm_root: &Path) -> Result<GameMakerRoomResource, 
             })
         })
         .collect();
+    let backgrounds = collect_xml_start_tags(&content, "background")
+        .into_iter()
+        .filter_map(|tag| {
+            let attrs = parse_xml_attributes(&tag);
+            let name = attrs.get("name")?.trim().to_string();
+            if name.is_empty() || name.eq_ignore_ascii_case("<undefined>") {
+                return None;
+            }
+            Some(GameMakerRoomBackground {
+                name,
+                visible: attrs.get("visible").is_some_and(|value| value == "-1"),
+            })
+        })
+        .collect();
     Ok(GameMakerRoomResource {
         display_name,
+        width,
+        height,
         instances,
         views,
+        backgrounds,
     })
+}
+
+fn load_gamemaker_backgrounds(
+    gm_root: &Path,
+) -> Result<HashMap<String, GameMakerSpriteResource>, LoadError> {
+    let mut backgrounds = HashMap::new();
+    let Some(backgrounds_dir) = gamemaker_asset_dir(gm_root, "backgrounds") else {
+        return Ok(backgrounds);
+    };
+    let files = collect_recursive_files_by_extension(&backgrounds_dir, &["gmx"], &["rds"])?;
+    for rel in files {
+        if !rel.ends_with(".background.gmx") {
+            continue;
+        }
+        let path = backgrounds_dir.join(PathBuf::from(rel.replace('/', "\\")));
+        let content = read_text_lossy(&path)?;
+        let Some(frame) = first_xml_tag_text(&content, "data") else {
+            continue;
+        };
+        let source_path = path
+            .parent()
+            .unwrap_or(gm_root)
+            .join(PathBuf::from(frame.replace('/', "\\")));
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("background.background.gmx")
+            .trim_end_matches(".background.gmx")
+            .to_string();
+        let (width, height) = image::image_dimensions(&source_path).unwrap_or((320, 224));
+        backgrounds.insert(
+            name,
+            GameMakerSpriteResource {
+                source_path,
+                width,
+                height,
+                xorigin: 0,
+                yorigin: 0,
+            },
+        );
+    }
+    Ok(backgrounds)
+}
+
+fn gamemaker_import_graph_ref(entity_id: &str) -> String {
+    format!("graphs/gamemaker_{}.json", sgdk_entity_id(entity_id))
+}
+
+fn gamemaker_coord_to_md_x(gm_x: i32, room_width: i32) -> i32 {
+    ((gm_x as i64 * 320) / room_width.max(1) as i64) as i32
+}
+
+fn gamemaker_coord_to_md_y(gm_y: i32, room_height: i32) -> i32 {
+    ((gm_y as i64 * 224) / room_height.max(1) as i64) as i32
+}
+
+fn is_gamemaker_static_collision_object(object_name: &str) -> bool {
+    let lowered = object_name.to_ascii_lowercase();
+    lowered.contains("wall")
+}
+
+fn build_gamemaker_collision_map(
+    wall_instances: &[GameMakerRoomInstance],
+    wall_sprite: Option<&GameMakerSpriteResource>,
+    room_width: i32,
+    room_height: i32,
+) -> CollisionMap {
+    let width = 40u32;
+    let height = 28u32;
+    let mut data = vec![0u8; (width * height) as usize];
+    let tile_w = wall_sprite.map(|sprite| sprite.width.max(8) / 8).unwrap_or(1);
+    let tile_h = wall_sprite.map(|sprite| sprite.height.max(8) / 8).unwrap_or(1);
+
+    for instance in wall_instances {
+        let md_x = gamemaker_coord_to_md_x(instance.x, room_width);
+        let md_y = gamemaker_coord_to_md_y(instance.y, room_height);
+        let tile_x = (md_x / 8).clamp(0, width as i32 - 1) as u32;
+        let tile_y = (md_y / 8).clamp(0, height as i32 - 1) as u32;
+        for dy in 0..tile_h {
+            for dx in 0..tile_w {
+                let x = tile_x + dx;
+                let y = tile_y + dy;
+                if x < width && y < height {
+                    data[(y * width + x) as usize] = 1;
+                }
+            }
+        }
+    }
+
+    // Ground safety row for platformer proof when donor walls are sparse in MD space.
+    for x in 0..width {
+        data[((height - 1) * width + x) as usize] = 1;
+        data[((height - 2) * width + x) as usize] = 1;
+    }
+
+    CollisionMap {
+        tile_width: 8,
+        tile_height: 8,
+        width,
+        height,
+        data,
+    }
+}
+
+fn gamemaker_player_animations(frame_count: u32) -> HashMap<String, AnimationDef> {
+    let mut animations = HashMap::new();
+    animations.insert(
+        "idle".to_string(),
+        AnimationDef {
+            frames: vec![0],
+            fps: 6,
+            looping: true,
+            frame_durations: None,
+            loop_start: None,
+            mugen_frames: None,
+        },
+    );
+    if frame_count > 1 {
+        let walk_frames = (1..frame_count).collect::<Vec<_>>();
+        animations.insert(
+            "walk".to_string(),
+            AnimationDef {
+                frames: walk_frames,
+                fps: 10,
+                looping: true,
+                frame_durations: None,
+                loop_start: None,
+                mugen_frames: None,
+            },
+        );
+    }
+    animations
+}
+
+fn count_gamemaker_sprite_frames(sprite_path: &Path) -> u32 {
+    let Some(parent) = sprite_path.parent() else {
+        return 1;
+    };
+    let Some(stem) = sprite_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .map(str::to_string)
+    else {
+        return 1;
+    };
+    let prefix = stem.trim_end_matches('_').to_string();
+    let mut count = 0u32;
+    if let Ok(entries) = fs::read_dir(parent) {
+        for entry in entries.flatten() {
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            if file_name.starts_with(&prefix) && file_name.ends_with(".png") {
+                count += 1;
+            }
+        }
+    }
+    count.max(1)
+}
+
+fn persist_gamemaker_conversion_graph(
+    project_dir: &Path,
+    entity_id: &str,
+    conversion: &crate::core::gml_to_nodes::GmlConversionResult,
+) -> Result<String, LoadError> {
+    let graph_ref = gamemaker_import_graph_ref(entity_id);
+    save_graph_asset(project_dir, &graph_ref, &conversion.graph_json)?;
+    Ok(graph_ref)
+}
+
+fn import_gamemaker_background_entity(
+    project_dir: &Path,
+    gm_root: &Path,
+    backgrounds: &HashMap<String, GameMakerSpriteResource>,
+    room: &GameMakerRoomResource,
+    entity_ids: &mut HashSet<String>,
+    asset_cache: &mut HashMap<PathBuf, String>,
+) -> Result<Option<Entity>, LoadError> {
+    let Some(visible) = room
+        .backgrounds
+        .iter()
+        .find(|background| background.visible)
+        .or_else(|| room.backgrounds.first())
+    else {
+        return Ok(None);
+    };
+    let Some(background) = backgrounds.get(&visible.name) else {
+        return Ok(None);
+    };
+    let (asset, frame_width, frame_height) = materialize_gamemaker_rgba_asset(
+        project_dir,
+        gm_root,
+        &background.source_path,
+        "backgrounds",
+        "gamemaker",
+        asset_cache,
+        Some((64, 32)),
+    )?;
+    let entity_id = unique_entity_id(entity_ids, "background", &visible.name);
+    Ok(Some(Entity {
+        entity_id,
+        display_name: Some(format!("Background {}", visible.name)),
+        prefab: None,
+        transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+        components: Components {
+            sprite: Some(SpriteComponent {
+                asset,
+                frame_width,
+                frame_height,
+                pivot: Some(Pivot { x: 0, y: 0 }),
+                palette_slot: 0,
+                animations: HashMap::new(),
+                priority: "background".to_string(),
+                meta_sprite: frame_width > 32 || frame_height > 32,
+            }),
+            ..Components::default()
+        },
+    }))
 }
 
 fn parse_gamemaker_events(content: &str) -> Vec<GameMakerEvent> {
@@ -9814,6 +10179,98 @@ pub fn import_openbor_project(
         imported_scenes: 1,
         skipped_sources: skipped,
     })
+}
+
+#[allow(clippy::manual_div_ceil)]
+fn md_align_dimension(value: u32) -> u32 {
+    ((value.max(1) + 7) / 8) * 8
+}
+
+fn gamemaker_should_attach_md_sprite(role: &str, object_name: &str) -> bool {
+    if role == "player_avatar" {
+        return true;
+    }
+    object_name.to_ascii_lowercase().contains("player")
+}
+
+fn materialize_gamemaker_rgba_asset(
+    project_dir: &Path,
+    source_root: &Path,
+    source_path: &Path,
+    bucket: &str,
+    prefix: &str,
+    cache: &mut HashMap<PathBuf, String>,
+    max_dimensions: Option<(u32, u32)>,
+) -> Result<(String, u32, u32), LoadError> {
+    if let Some(destination) = cache.get(source_path) {
+        let abs = project_dir.join(destination);
+        let (width, height) = image::image_dimensions(&abs).unwrap_or((32, 32));
+        return Ok((destination.clone(), width, height));
+    }
+
+    let relative = source_path.strip_prefix(source_root).unwrap_or(source_path);
+    let mut relative_without_ext = collapse_relative_components(relative);
+    relative_without_ext.set_extension("");
+    let slug = slugify_scene_id(&normalize_relative_path(&relative_without_ext));
+    let destination = format!("assets/{}/{}_{}.png", bucket, prefix, slug);
+    let destination_abs = project_dir.join(&destination);
+
+    let img = image::open(source_path).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel abrir sprite GameMaker '{}': {}",
+            source_path.display(),
+            error
+        ))
+    })?;
+    let mut rgba = img.to_rgba8();
+    if let Some((max_w, max_h)) = max_dimensions {
+        let (w, h) = (rgba.width(), rgba.height());
+        if w > max_w || h > max_h {
+            let scale_w = max_w as f32 / w as f32;
+            let scale_h = max_h as f32 / h as f32;
+            let scale = scale_w.min(scale_h);
+            let target_w = ((w as f32 * scale).round() as u32).max(8);
+            let target_h = ((h as f32 * scale).round() as u32).max(8);
+            rgba = image::imageops::resize(
+                &rgba,
+                target_w,
+                target_h,
+                image::imageops::FilterType::Triangle,
+            );
+        }
+    }
+
+    let aligned_w = md_align_dimension(rgba.width());
+    let aligned_h = md_align_dimension(rgba.height());
+    if aligned_w != rgba.width() || aligned_h != rgba.height() {
+        let mut padded = RgbaImage::new(aligned_w, aligned_h);
+        image::imageops::overlay(&mut padded, &rgba, 0, 0);
+        rgba = padded;
+    }
+
+    let parent = destination_abs.parent().ok_or_else(|| {
+        LoadError(format!(
+            "Destino de asset '{}' nao possui diretorio pai valido.",
+            destination_abs.display()
+        ))
+    })?;
+    fs::create_dir_all(parent).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel criar o diretorio '{}' para importar assets: {}",
+            parent.display(),
+            error
+        ))
+    })?;
+    rgba.save(&destination_abs).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel gravar sprite GameMaker alinhado em '{}': {}",
+            destination_abs.display(),
+            error
+        ))
+    })?;
+
+    cache.insert(source_path.to_path_buf(), destination.clone());
+    Ok((destination, aligned_w, aligned_h))
 }
 
 fn materialize_external_file(
@@ -13958,7 +14415,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
     }
 
     #[test]
-    fn import_gamemaker_gmx_project_creates_editable_scene_with_preserved_gml_bridge() {
+    fn import_gamemaker_gmx_project_creates_editable_scene_with_native_node_graph() {
         let donor_root = temp_dir("gamemaker-gmx-import-root");
         let project_dir = temp_dir("gamemaker-gmx-import-project");
         create_project_skeleton(&project_dir, "Imported GameMaker", "megadrive")
@@ -13971,16 +14428,16 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load imported gamemaker scene");
 
         assert_eq!(report.imported_scenes, 1);
-        assert!(report
-            .skipped_sources
-            .iter()
-            .any(|entry| entry.contains("GML preservado")));
+        assert!(report.skipped_sources.iter().any(|entry| {
+            entry.contains("GameMaker import:")
+                && entry.contains("nodes gerados")
+        }));
         let player = scene
             .entities
             .iter()
             .find(|entity| entity.entity_id == "inst_player")
             .expect("player instance entity");
-        assert_eq!(player.transform.x, 48);
+        assert_eq!(player.transform.x, 24);
         assert_eq!(player.transform.y, 120);
         assert!(player.components.sprite.as_ref().is_some_and(|sprite| {
             sprite.asset == "assets/sprites/gamemaker_sprites_images_spr_player_0.png"
@@ -13992,15 +14449,27 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .components
             .logic
             .as_ref()
-            .expect("preserved gml logic");
-        assert!(logic
-            .logic_hints
-            .iter()
-            .any(|hint| hint.contains("Create") && hint.contains("hsp = 0")));
-        assert!(logic
-            .logic_hints
-            .iter()
-            .any(|hint| hint.contains("Step") && hint.contains("keyboard_check")));
+            .expect("native gml graph logic");
+        assert_eq!(
+            logic.graph_ref.as_deref(),
+            Some("graphs/gamemaker_inst_player.json")
+        );
+        assert_eq!(logic.graph_origin.as_deref(), Some("gamemaker_gmx_native"));
+        assert_eq!(
+            logic
+                .imported_semantics
+                .as_ref()
+                .map(|semantics| semantics.confidence.as_str()),
+            Some("native_subset")
+        );
+        assert!(
+            logic
+                .imported_semantics
+                .as_ref()
+                .is_some_and(|semantics| semantics
+                    .audit_flags
+                    .contains(&"gml_native_subset".to_string()))
+        );
         assert_eq!(
             logic
                 .imported_semantics
@@ -14023,6 +14492,24 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         assert_eq!(metadata.source_kind, "imported_gamemaker");
         assert_eq!(metadata.import_profile.as_deref(), Some("gamemaker_gmx_v1"));
 
+        let _ = fs::remove_dir_all(project_dir);
+        let _ = fs::remove_dir_all(donor_root);
+    }
+
+    #[test]
+    fn gamemaker_import_summary_reports_generated_nodes() {
+        let donor_root = temp_dir("gamemaker-summary-root");
+        let project_dir = temp_dir("gamemaker-summary-project");
+        create_project_skeleton(&project_dir, "Summary GameMaker", "megadrive")
+            .expect("create project skeleton");
+        write_gamemaker_gmx_fixture(&donor_root);
+        let report = import_external_project(&project_dir, "gamemaker", &donor_root)
+            .expect("import");
+        assert!(report.skipped_sources.iter().any(|entry| {
+            entry.contains("nodes gerados") && entry.contains("grafo nativo")
+        }));
+        let graph_path = project_dir.join("graphs").join("gamemaker_inst_player.json");
+        assert!(graph_path.is_file(), "graph asset must be persisted");
         let _ = fs::remove_dir_all(project_dir);
         let _ = fs::remove_dir_all(donor_root);
     }
@@ -14064,13 +14551,27 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                 sample_root.display()
             );
             assert!(
-                report
-                    .skipped_sources
-                    .iter()
-                    .any(|entry| entry.contains("GML preservado")),
-                "real GameMaker sample '{}' must expose preserved GML bridge status",
+                report.skipped_sources.iter().any(|entry| {
+                    entry.contains("GameMaker import:") && entry.contains("nodes gerados")
+                }),
+                "real GameMaker sample '{}' must expose native import summary",
                 sample_root.display()
             );
+            if sample_root.extension().is_some_and(|ext| {
+                ext.eq_ignore_ascii_case("gmez") || ext.eq_ignore_ascii_case("gmz")
+            }) {
+                assert!(
+                    scene.entities.iter().any(|entity| {
+                        entity
+                            .components
+                            .logic
+                            .as_ref()
+                            .is_some_and(|logic| logic.graph_ref.is_some())
+                    }),
+                    "real GameMaker archive '{}' must persist node graphs",
+                    sample_root.display()
+                );
+            }
 
             let _ = fs::remove_dir_all(project_dir);
         }
