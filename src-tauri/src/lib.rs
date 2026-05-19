@@ -25,6 +25,7 @@ use core::editor_validation::{
     authoritative_hw_status, validate_scene_draft as validate_scene_draft_impl,
     DraftValidationResult,
 };
+use core::input_commands::{parse_command_dat, InputCommandDefinition};
 use core::project_mgr::{
     append_patch_audit_entry, create_project_skeleton, create_scene as create_project_scene,
     discover_project_rds, import_external_project as import_external_scene,
@@ -2820,6 +2821,17 @@ fn open_project_path(project_dir: String) -> OpenProjectResult {
         .unwrap_or_else(|_| empty_open_project_result())
 }
 
+#[tauri::command]
+fn parse_input_command_file(path: String) -> Result<Vec<InputCommandDefinition>, String> {
+    let source_path = PathBuf::from(path.trim());
+    if path.trim().is_empty() {
+        return Err("Informe um caminho local para command.dat.".to_string());
+    }
+    let content = fs::read_to_string(&source_path)
+        .map_err(|error| format!("Falha ao ler command.dat '{}': {}", source_path.display(), error))?;
+    Ok(parse_command_dat(&content, &source_path.display().to_string()))
+}
+
 // ── App Builder ───────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -2878,6 +2890,7 @@ pub fn run() {
             run_gamemaker_compatibility_harness_cmd,
             import_mugen_project,
             import_legacy_sgdk_project,
+            parse_input_command_file,
             // Fase 4: Tools
             patch_create_ips,
             patch_apply_ips,
@@ -3066,6 +3079,9 @@ mod tests {
                 { "id": "start", "type": "event_start", "label": "Start", "x": 0, "y": 0, "params": {} },
                 { "id": "spawn_enemy", "type": "spawn_entity", "label": "Spawn Enemy", "x": 160, "y": 0, "params": { "prefab": "enemy", "x": 184, "y": 96 } },
                 { "id": "paint_floor", "type": "set_tile", "label": "Set Tile", "x": 320, "y": 0, "params": { "layer": "BG_A", "tile": 8, "x": 4, "y": 13 } },
+                { "id": "update_command", "type": "event_update", "label": "Update Command", "x": 0, "y": 80, "params": {} },
+                { "id": "hadouken", "type": "input_command", "label": "Hadouken", "x": 160, "y": 80, "params": { "command_id": "hadouken", "display_name": "Hadouken", "notation": "_2, _3, _6, _P", "max_frames": 20, "pad": "JOY_1", "button_profile": "megadrive", "target": "player" } },
+                { "id": "attack_anim", "type": "set_animation_state", "label": "Attack Animation", "x": 320, "y": 80, "params": { "target": "player", "state": "run" } },
                 { "id": "update", "type": "event_update", "label": "Update", "x": 0, "y": 180, "params": {} },
                 { "id": "right", "type": "input_held", "label": "Right Held", "x": 160, "y": 180, "params": { "pad": "JOY_1", "button": "BUTTON_RIGHT" } },
                 { "id": "velocity", "type": "set_velocity", "label": "Set Velocity", "x": 320, "y": 180, "params": { "target": "player", "vx": 2, "vy": 0 } },
@@ -3080,6 +3096,8 @@ mod tests {
             "edges": [
                 { "id": "s1", "fromNode": "start", "fromPort": "exec", "toNode": "spawn_enemy", "toPort": "exec" },
                 { "id": "s2", "fromNode": "spawn_enemy", "fromPort": "exec", "toNode": "paint_floor", "toPort": "exec" },
+                { "id": "c1", "fromNode": "update_command", "fromPort": "exec", "toNode": "hadouken", "toPort": "exec" },
+                { "id": "c2", "fromNode": "hadouken", "fromPort": "true", "toNode": "attack_anim", "toPort": "exec" },
                 { "id": "u1", "fromNode": "update", "fromPort": "exec", "toNode": "right", "toPort": "exec" },
                 { "id": "u2", "fromNode": "right", "fromPort": "true", "toNode": "velocity", "toPort": "exec" },
                 { "id": "u3", "fromNode": "velocity", "fromPort": "exec", "toNode": "move", "toPort": "exec" },
@@ -3134,7 +3152,25 @@ mod tests {
                                 "run": { "frames": [1, 2, 3], "fps": 12, "loop": true }
                             },
                             "priority": "foreground",
-                            "meta_sprite": false
+                            "meta_sprite": false,
+                            "commands": [
+                                {
+                                    "id": "hadouken",
+                                    "display_name": "Hadouken",
+                                    "notation": "_2, _3, _6, _P",
+                                    "source": "local-command.dat",
+                                    "target_animation": "run",
+                                    "max_frames": 20,
+                                    "button_profile": "megadrive",
+                                    "unsupported_tokens": [],
+                                    "steps": [
+                                        { "tokens": ["_2"], "display": ["↓"] },
+                                        { "tokens": ["_3"], "display": ["↘"] },
+                                        { "tokens": ["_6"], "display": ["→"] },
+                                        { "tokens": ["_P"], "display": ["A"] }
+                                    ]
+                                }
+                            ]
                         },
                         "collision": { "shape": "aabb", "width": 16, "height": 16, "offset": null, "solid": true, "layer": "player", "collides_with": ["enemy"] },
                         "input": { "device": "joypad_1", "mapping": {} },
@@ -4384,6 +4420,8 @@ pub extern "C" fn retro_run() {
         let resources_res =
             fs::read_to_string(&resources_res_path).expect("read generated real resources.res");
         assert!(main_c.contains("JOY_readJoypad(JOY_1)"));
+        assert!(main_c.contains("rds_input_match_command"));
+        assert!(main_c.contains("rds_cmd_hadouken_steps"));
         assert!(main_c.contains("SPR_setPosition(spr_player, spr_player_x, spr_player_y);"));
         assert!(main_c.contains("SPR_setAnim(spr_player, 1);"));
         assert!(main_c.contains("logic_var_encounter_state = 1;"));

@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-19 (rodada 47 - GameMaker vertical harness)
+**Ultima Atualizacao:** 2026-05-19 (rodada 48 - consolidacao GameMaker + command.dat)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -20,12 +20,24 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
-* **O que acabou de acontecer (2026-05-19 rodada 47 - branch `codex/compatibility-harness-gamemaker-vertical`):**
+* **O que acabou de acontecer (2026-05-19 rodada 48 - branch `codex/project-cohesion-full-build`):**
+  - **Consolidacao:** `origin/main` (ja com GameMaker vertical via PR #8) + `origin/codex/command-dat-artstudio-node-runtime` integrados em uma unica branch coesa.
+  - **GameMaker vertical (preservado):** `compatibility_harness.rs`, `gml_to_nodes.rs`, import endurecido, harness host-local com `non_black_pixels=3793` contra `Basic_platform_game_example.gmez`.
+  - **command.dat (preservado):** `input_commands.rs`, `inputCommands.ts`, `SpriteComponent.commands`, painel ArtStudio `Comandos`, node `input_command`, codegen SGDK/SNES com ring buffer; tokens fora do subset bloqueiam com `#error` acionavel.
+  - **Status honesto:** GameMaker e command.dat permanecem **Experimental**; SGDK/Node Engine nao recebem promocao Stable nesta consolidacao.
+
+* **O que acabou de acontecer (2026-05-19 rodada 47 - branch `codex/compatibility-harness-gamemaker-vertical`, integrado em main via PR #8):**
   - **Harness canonico:** `src-tauri/src/core/compatibility_harness.rs` executa matriz auditavel (import, nodes, gaps, SGDK, ROM, Libretro, `non_black_pixels`, `fake_toolchain_used`) e grava `src-tauri/target-test/validation/gamemaker-vertical/gamemaker-basic-platform-report.{json,md}`.
   - **GML -> nodes oficiais (subset):** `src-tauri/src/core/gml_to_nodes.rs` converte `oPlayer` (input, movimento, pulo, gravidade, animacao, camera) para grafo nativo com auto-layout por sistema; GML generico permanece bridge estruturada com gaps explicitos (`place_free`, `repeat`, `sprite_index`, etc.).
   - **Import GameMaker real endurecido:** `import_gamemaker_project` agrega `oWall` em `collision_map`, materializa sprites alinhados a 8px, limita sprites MD ao player + background reduzido (budget), persiste `graphs/gamemaker_<entity>.json` e mantem metadados de origem.
-  - **Prova vertical host-local:** `cargo test --lib gamemaker_vertical_compatibility_harness_basic_platform -- --ignored --nocapture --test-threads=1` passou contra `F:\Projects\Game Maker\Basic_platform_game_example.gmez` com `generated_sgdk_status=ok`, `rom_status=ok_sega_header`, `emulator_status=ok:Genesis Plus GX`, `non_black_pixels=3793`, `fake_toolchain_used=false`, ROM `gamemaker-basic-platform.bin` e frame `gamemaker-basic-platform-frame.ppm`.
-  - **Status honesto:** GameMaker continua **Experimental/importavel** (nao Stable geral); `.yyp/.yy` modernos seguem pendentes; GML completo segue pendente; props decorativos (spinners, keys, doors) podem importar logica/grafo sem sprite MD nesta wave.
+  - **Prova vertical host-local:** `cargo test --lib gamemaker_vertical_compatibility_harness_basic_platform -- --ignored --nocapture --test-threads=1` passou contra `F:\Projects\Game Maker\Basic_platform_game_example.gmez` com `generated_sgdk_status=ok`, `rom_status=ok_sega_header`, `emulator_status=ok:Genesis Plus GX`, `non_black_pixels=3793`, `fake_toolchain_used=false`.
+  - **Status honesto:** GameMaker continua **Experimental/importavel** (nao Stable geral); `.yyp/.yy` modernos seguem pendentes; GML completo segue pendente.
+
+* **O que acabou de acontecer (2026-05-19 rodada 47 - branch `codex/command-dat-artstudio-node-runtime`):**
+  - **command.dat local/BYOR:** parser canonico `src-tauri/src/core/input_commands.rs` e espelho frontend `src/core/inputCommands.ts` leem apenas arquivo local `command.dat`; sem scraping nem dados embutidos.
+  - **Ponte ArtStudio -> Sprite metadata -> NodeGraph:** `SpriteComponent.commands`, painel `Comandos`, node `input_command`, codegen SGDK/SNES com ring buffer.
+  - **Prova real SGDK/Libretro:** `official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --ignored` com ROM real e framebuffer visivel.
+  - **Status honesto:** superficie **Experimental**; sem compatibilidade total com todos os dialetos de `command.dat`.
 
 * **O que acabou de acontecer (2026-05-18 rodada 46 - branch `codex/product-compatibility-wave`):**
   - **Base protegida:** antes de mexer em feature, `main` estava alinhado com `origin/main` em `a0fe109` e `npm run release:readiness:promotion` passou com `Pronto para promocao: SIM`.

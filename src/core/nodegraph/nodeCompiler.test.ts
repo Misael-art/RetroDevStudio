@@ -201,6 +201,26 @@ const GRAPH_NOCODE_MD_GAME: NodeGraph = {
   ],
 };
 
+const GRAPH_INPUT_COMMAND: NodeGraph = {
+  nodes: [
+    node("update", "event_update"),
+    node("hadouken", "input_command", {
+      command_id: "hadouken",
+      display_name: "Hadouken",
+      notation: "_2,_3,_6,_P",
+      max_frames: 15,
+      pad: "JOY_1",
+      button_profile: "megadrive",
+      target: "player",
+    }),
+    node("fireball", "set_animation_state", { target: "player", state: "fireball" }),
+  ],
+  edges: [
+    edge("c1", "update", "hadouken"),
+    edge("c2", "hadouken", "fireball"),
+  ],
+};
+
 // ── compileGraphToC ───────────────────────────────────────────────────────────
 
 describe("NodeGraph serialization", () => {
@@ -509,6 +529,41 @@ describe("compileGraphToC — SNES", () => {
     expect(code).toContain("VDP_setHorizontalScroll(BG_A, SPR_getX(spr_player) - 160)");
     expect(code).toContain("Hardware budget check: VRAM 64KB, sprites 80, sprites/scanline 20");
     expect(code).toContain("SND_startPlayPCM(SFX_STEP");
+  });
+
+  it("emite matcher deterministico por ring buffer para input_command no Mega Drive", () => {
+    const code = compileGraphToC(GRAPH_INPUT_COMMAND, "FightDemo", "megadrive");
+
+    expect(code).toContain("rds_input_push_frame");
+    expect(code).toContain("static const RdsInputCommandStep rds_cmd_hadouken_steps[]");
+    expect(code).toContain("{ 2, 0 }");
+    expect(code).toContain("{ 3, 0 }");
+    expect(code).toContain("{ 6, 0 }");
+    expect(code).toContain("{ 0, BUTTON_A }");
+    expect(code).toContain("if (rds_input_match_command(rds_cmd_hadouken_steps, 4, 15))");
+    expect(code).toContain("SPR_setAnim(spr_player, ANIM_FIREBALL)");
+  });
+
+  it("marca tokens nao suportados como erro de compilacao acionavel", () => {
+    const graph: NodeGraph = {
+      nodes: [
+        node("update", "event_update"),
+        node("broken", "input_command", {
+          command_id: "broken",
+          display_name: "Broken",
+          notation: "~30,_6,_P",
+          max_frames: 18,
+          pad: "JOY_1",
+          button_profile: "megadrive",
+          target: "player",
+        }),
+      ],
+      edges: [edge("broken_edge", "update", "broken")],
+    };
+
+    const code = compileGraphToC(graph, "BrokenCommand", "megadrive");
+
+    expect(code).toContain('#error "Unsupported input_command tokens for broken: ~30"');
   });
 });
 

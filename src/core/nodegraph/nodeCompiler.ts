@@ -109,6 +109,8 @@ function buildBooleanExpression(
     case "input_pressed":
     case "input_held":
       return buildInputExpression(node, target);
+    case "input_command":
+      return buildInputCommandExpression(node);
 
     case "logic_and": {
       const left = resolveBooleanInput(graph, node.id, "a", target, visited);
@@ -149,6 +151,194 @@ function buildInputExpression(node: GraphNode, target: "megadrive" | "snes"): st
     return `(padsCurrent(0) & ${button})`;
   }
   return `(JOY_readJoypad(${pad}) & ${button})`;
+}
+
+type CompiledInputCommandStep = {
+  direction: number;
+  buttonMask: string;
+};
+
+function normalizeCommandToken(token: string): string {
+  return token.trim();
+}
+
+function inputCommandTokenKey(token: string): string {
+  return token.trim().replace(/^_/, "").toUpperCase();
+}
+
+function inputCommandButtonMask(token: string, target: "megadrive" | "snes"): string | null {
+  const raw = token.trim();
+  const key = inputCommandTokenKey(raw);
+  const isLowercaseMugenButton = /^[abcxyz]$/.test(raw);
+  if (target === "snes") {
+    if (key === "P") return "KEY_Y";
+    if (key === "K") return "KEY_B";
+    if (isLowercaseMugenButton || /^[ABCXYZ]$/.test(key)) {
+      return {
+        A: "KEY_B",
+        B: "KEY_Y",
+        C: "KEY_X",
+        X: "KEY_A",
+        Y: "KEY_L",
+        Z: "KEY_R",
+      }[key] ?? null;
+    }
+    return null;
+  }
+  if (key === "P") return "BUTTON_A";
+  if (key === "K") return "BUTTON_B";
+  if (isLowercaseMugenButton || /^[ABCXYZ]$/.test(key)) {
+    return `BUTTON_${key}`;
+  }
+  return null;
+}
+
+function inputCommandDirection(token: string): number | null {
+  const raw = token.trim();
+  const key = inputCommandTokenKey(raw);
+  if (/^[1-9]$/.test(key)) {
+    return Number(key);
+  }
+  if (/^[abcxyz]$/.test(raw)) {
+    return null;
+  }
+  const aliases: Record<string, number> = { D: 2, F: 6, B: 4, U: 8, DF: 3, DB: 1, UF: 9, UB: 7 };
+  return aliases[key] ?? null;
+}
+
+function compileInputCommandSteps(
+  node: GraphNode,
+  target: "megadrive" | "snes"
+): { steps: CompiledInputCommandStep[]; unsupported: string[] } {
+  const unsupported = new Set<string>();
+  const steps = String(node.params.notation ?? "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      let direction = 0;
+      const masks: string[] = [];
+      for (const token of part.split("+").map(normalizeCommandToken).filter(Boolean)) {
+        const dir = inputCommandDirection(token);
+        const mask = inputCommandButtonMask(token, target);
+        if (dir !== null) {
+          direction = dir;
+        } else if (mask) {
+          masks.push(mask);
+        } else {
+          unsupported.add(token);
+        }
+      }
+      return {
+        direction,
+        buttonMask: masks.length > 0 ? masks.join(" | ") : "0",
+      };
+    });
+
+  return { steps, unsupported: [...unsupported] };
+}
+
+function inputCommandFunctionName(node: GraphNode): string {
+  return `rds_cmd_${sanitizeIdentifier(String(node.params.command_id ?? node.id))}`;
+}
+
+function buildInputCommandExpression(node: GraphNode): string {
+  const stepCount = String(node.params.notation ?? "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean).length;
+  return `rds_input_match_command(${inputCommandFunctionName(node)}_steps, ${stepCount}, ${Number(node.params.max_frames ?? 20)})`;
+}
+
+function collectInputCommandNodes(graph: NodeGraph): GraphNode[] {
+  return graph.nodes.filter((node) => node.type === "input_command");
+}
+
+function emitInputCommandRuntime(graph: NodeGraph, target: "megadrive" | "snes"): string {
+  const commandNodes = collectInputCommandNodes(graph);
+  if (commandNodes.length === 0) {
+    return "";
+  }
+
+  let out = `
+typedef struct {
+    u8 direction;
+    u16 buttons;
+} RdsInputCommandStep;
+
+#define RDS_INPUT_HISTORY 32
+static u8 rds_input_directions[RDS_INPUT_HISTORY];
+static u16 rds_input_buttons[RDS_INPUT_HISTORY];
+static u8 rds_input_cursor;
+
+static u8 rds_input_direction_from_buttons(u16 buttons) {
+    const bool left = (buttons & ${target === "snes" ? "KEY_LEFT" : "BUTTON_LEFT"}) != 0;
+    const bool right = (buttons & ${target === "snes" ? "KEY_RIGHT" : "BUTTON_RIGHT"}) != 0;
+    const bool up = (buttons & ${target === "snes" ? "KEY_UP" : "BUTTON_UP"}) != 0;
+    const bool down = (buttons & ${target === "snes" ? "KEY_DOWN" : "BUTTON_DOWN"}) != 0;
+    if (down && left) return 1;
+    if (down && right) return 3;
+    if (up && left) return 7;
+    if (up && right) return 9;
+    if (down) return 2;
+    if (left) return 4;
+    if (right) return 6;
+    if (up) return 8;
+    return 5;
+}
+
+static void rds_input_push_frame(u16 buttons) {
+    rds_input_directions[rds_input_cursor] = rds_input_direction_from_buttons(buttons);
+    rds_input_buttons[rds_input_cursor] = buttons;
+    rds_input_cursor = (rds_input_cursor + 1) % RDS_INPUT_HISTORY;
+}
+
+static bool rds_input_step_matches(const RdsInputCommandStep* step, u8 index) {
+    const u8 direction = rds_input_directions[index];
+    const u16 buttons = rds_input_buttons[index];
+    const bool direction_ok = step->direction == 0 || step->direction == direction;
+    const bool buttons_ok = step->buttons == 0 || ((buttons & step->buttons) == step->buttons);
+    return direction_ok && buttons_ok;
+}
+
+static bool rds_input_match_command(const RdsInputCommandStep* steps, u8 step_count, u8 max_frames) {
+    if (step_count == 0) return FALSE;
+    u8 matched = step_count;
+    u8 scanned = 0;
+    u8 cursor = rds_input_cursor;
+    while (scanned < max_frames && scanned < RDS_INPUT_HISTORY && matched > 0) {
+        cursor = (cursor + RDS_INPUT_HISTORY - 1) % RDS_INPUT_HISTORY;
+        if (rds_input_step_matches(&steps[matched - 1], cursor)) {
+            matched--;
+        }
+        scanned++;
+    }
+    return matched == 0;
+}
+`;
+
+  for (const node of commandNodes) {
+    const { steps, unsupported } = compileInputCommandSteps(node, target);
+    const fn = inputCommandFunctionName(node);
+    if (unsupported.length > 0) {
+      out += `#error "Unsupported input_command tokens for ${String(node.params.command_id ?? node.id)}: ${unsupported.join(", ")}"\n`;
+      continue;
+    }
+    out += `static const RdsInputCommandStep ${fn}_steps[] = {\n`;
+    for (const step of steps) {
+      out += `    { ${step.direction}, ${step.buttonMask} },\n`;
+    }
+    out += `};\n`;
+    out += `static const u8 ${fn}_count = ${steps.length};\n`;
+  }
+
+  return out;
+}
+
+function emitInputCommandFrameCapture(target: "megadrive" | "snes"): string {
+  return target === "snes"
+    ? "        rds_input_push_frame(padsCurrent(0));\n"
+    : "        rds_input_push_frame(JOY_readJoypad(JOY_1));\n";
 }
 
 function resolveBooleanInput(
@@ -510,14 +700,24 @@ function emitExecChainFromNode(
     return nextNode ? emitExecChainFromNode(graph, nextNode, target, visited, indent) : "";
   }
 
-  if (node.type === "input_pressed" || node.type === "input_held") {
+  if (node.type === "input_pressed" || node.type === "input_held" || node.type === "input_command") {
     const nextEdge = findOutgoingExecEdge(graph, node.id, "exec");
+    const falseEdge = findOutgoingExecEdge(graph, node.id, "false");
     const nextNode = nextEdge ? findNode(graph, nextEdge.toNode) : undefined;
-    let out = `${indentStr}if (${buildInputExpression(node, target)}) {\n`;
+    const falseNode = falseEdge ? findNode(graph, falseEdge.toNode) : undefined;
+    const expression =
+      node.type === "input_command" ? buildInputCommandExpression(node) : buildInputExpression(node, target);
+    let out = `${indentStr}if (${expression}) {\n`;
     out += nextNode
       ? emitExecChainFromNode(graph, nextNode, target, new Set(visited), indent + 4)
       : `${" ".repeat(indent + 4)}// [input branch]\n`;
-    out += `${indentStr}}\n`;
+    if (falseNode) {
+      out += `${indentStr}} else {\n`;
+      out += emitExecChainFromNode(graph, falseNode, target, new Set(visited), indent + 4);
+      out += `${indentStr}}\n`;
+    } else {
+      out += `${indentStr}}\n`;
+    }
     return out;
   }
 
@@ -716,6 +916,7 @@ export function compileGraphToC(
   const updateNodes = graph.nodes.filter((n: GraphNode) => n.type === "event_update");
   const fsmStates = collectFsmStates(graph);
   const hardwareEvents = collectHardwareEventNodes(graph);
+  const inputCommandNodes = collectInputCommandNodes(graph);
 
   if (startNodes.length === 0 && updateNodes.length === 0 && hardwareEvents.length === 0) {
     return out + "// No event_start node found in graph.\n";
@@ -773,6 +974,8 @@ export function compileGraphToC(
     }
   }
 
+  out += emitInputCommandRuntime(graph, target);
+
   out += "\nint main() {\n";
   for (const eventNode of hardwareEvents) {
     out += emitHardwareEventRegistration(target, eventNode.type);
@@ -787,12 +990,18 @@ export function compileGraphToC(
 
   if (target === "snes") {
     out += "\n    while (true) {\n";
+    if (inputCommandNodes.length > 0) {
+      out += emitInputCommandFrameCapture(target);
+    }
     for (const updateNode of updateNodes) {
       out += emitExecChainFromNode(graph, updateNode, target);
     }
     out += "        oamUpdate();\n        WaitForVBlank();\n    }\n";
   } else {
     out += "\n    while (TRUE) {\n";
+    if (inputCommandNodes.length > 0) {
+      out += emitInputCommandFrameCapture(target);
+    }
     for (const updateNode of updateNodes) {
       out += emitExecChainFromNode(graph, updateNode, target);
     }

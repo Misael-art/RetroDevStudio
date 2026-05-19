@@ -239,6 +239,24 @@ describe("NodeGraphEditor helpers", () => {
       nodes: [
         { ...GRAPH_FIXTURE.nodes[2], id: "sound", type: "action_sound", x: 8, y: 8 },
         { ...GRAPH_FIXTURE.nodes[1], id: "move", type: "sprite_move", x: 7, y: 9 },
+        {
+          id: "hadouken",
+          type: "input_command",
+          label: "Input Command",
+          x: 4,
+          y: 5,
+          inputs: [],
+          outputs: [{ id: "exec", label: "exec", kind: "exec" }],
+          params: {
+            command_id: "hadouken",
+            display_name: "Hadouken",
+            notation: "_2,_3,_6,_P",
+            max_frames: 15,
+            pad: "JOY_1",
+            button_profile: "megadrive",
+            target: "player",
+          },
+        },
         { ...GRAPH_FIXTURE.nodes[0], id: "entry", type: "event_start", x: 6, y: 7 },
         {
           id: "budget",
@@ -256,14 +274,17 @@ describe("NodeGraphEditor helpers", () => {
 
     const arranged = autoLayoutNodeGraph(chaotic);
     const entry = arranged.nodes.find((node) => node.id === "entry")!;
+    const hadouken = arranged.nodes.find((node) => node.id === "hadouken")!;
     const move = arranged.nodes.find((node) => node.id === "move")!;
     const sound = arranged.nodes.find((node) => node.id === "sound")!;
     const budget = arranged.nodes.find((node) => node.id === "budget")!;
 
     expect(entry.x).toBeLessThan(move.x);
+    expect(entry.x).toBeLessThan(hadouken.x);
+    expect(hadouken.x).toBeLessThan(move.x);
     expect(move.y).toBeLessThan(sound.y);
     expect(budget.y).toBeGreaterThan(sound.y);
-    expect(arranged.nodes.map((node) => node.id)).toEqual(["entry", "move", "sound", "budget"]);
+    expect(arranged.nodes.map((node) => node.id)).toEqual(["entry", "hadouken", "move", "sound", "budget"]);
   });
 
   it("declares the no-code production node vocabulary in the editor", () => {
@@ -273,6 +294,7 @@ describe("NodeGraphEditor helpers", () => {
         "event_update",
         "input_pressed",
         "input_held",
+        "input_command",
         "condition_overlap",
         "sprite_move",
         "set_velocity",

@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ArtStudioPanel, {
+  buildArtStudioCommandBindings,
   buildArtStudioAnimations,
   describeArtStudioLoadFailure,
   getArtStudioImageFormatLabel,
@@ -13,11 +14,13 @@ import ArtStudioPanel, {
   type SpriteSequence,
 } from "./ArtStudioPanel";
 import { useEditorStore } from "../../core/store/editorStore";
+import type { ParsedInputCommand } from "../../core/inputCommands";
 
 const mocks = vi.hoisted(() => ({
   open: vi.fn(),
   artProcessPalette: vi.fn(),
   importArtAsset: vi.fn(),
+  parseInputCommandFile: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
@@ -27,6 +30,10 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 vi.mock("../../core/ipc/artStudioService", () => ({
   artProcessPalette: mocks.artProcessPalette,
   importArtAsset: mocks.importArtAsset,
+}));
+
+vi.mock("../../core/ipc/inputCommandService", () => ({
+  parseInputCommandFile: mocks.parseInputCommandFile,
 }));
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -122,6 +129,63 @@ describe("ArtStudioPanel helpers", () => {
         loop: true,
       },
     });
+  });
+
+  it("builds sprite command bindings against animation keys without dropping unsupported tokens", () => {
+    const hadouken: ParsedInputCommand = {
+      id: "hadouken",
+      display_name: "Hadouken",
+      notation: "_2, _3, _6, _P",
+      source: "local-command.dat",
+      max_frames: 15,
+      steps: [
+        { tokens: ["_2"], display: ["↓"] },
+        { tokens: ["_3"], display: ["↘"] },
+        { tokens: ["_6"], display: ["→"] },
+        { tokens: ["_P"], display: ["P"] },
+      ],
+      unsupported_tokens: [],
+    };
+    const weird: ParsedInputCommand = {
+      ...hadouken,
+      id: "weird",
+      display_name: "Weird",
+      notation: "~30,_P",
+      unsupported_tokens: ["~30"],
+    };
+
+    expect(
+      buildArtStudioCommandBindings(
+        [
+          { id: "seq_fireball", name: "Fireball", frames: [0, 1], fps: 12, loop: false, command: hadouken },
+          { id: "seq_weird", name: "Weird Move", frames: [2], fps: 12, loop: false, command: weird },
+        ],
+        "megadrive"
+      )
+    ).toEqual([
+      {
+        id: "hadouken",
+        display_name: "Hadouken",
+        notation: "_2, _3, _6, _P",
+        source: "local-command.dat",
+        target_animation: "fireball",
+        max_frames: 15,
+        button_profile: "megadrive",
+        unsupported_tokens: [],
+        steps: hadouken.steps,
+      },
+      {
+        id: "weird",
+        display_name: "Weird",
+        notation: "~30,_P",
+        source: "local-command.dat",
+        target_animation: "weird_move",
+        max_frames: 15,
+        button_profile: "megadrive",
+        unsupported_tokens: ["~30"],
+        steps: weird.steps,
+      },
+    ]);
   });
 
   it("maps canvas client coordinates back to the correct suggested frame", () => {
@@ -255,6 +319,22 @@ describe("ArtStudioPanel import flow", () => {
       generated_width: 64,
       generated_height: 32,
     });
+    mocks.parseInputCommandFile.mockResolvedValue([
+      {
+        id: "hadouken",
+        display_name: "Hadouken",
+        notation: "_2, _3, _6, _P",
+        source: "D:/Commands/command.dat",
+        max_frames: 15,
+        steps: [
+          { tokens: ["_2"], display: ["↓"] },
+          { tokens: ["_3"], display: ["↘"] },
+          { tokens: ["_6"], display: ["→"] },
+          { tokens: ["_P"], display: ["P"] },
+        ],
+        unsupported_tokens: [],
+      },
+    ]);
 
     useEditorStore.setState({
       activeProjectDir: "F:/Projects/RetroDevStudio/demo",
@@ -490,6 +570,65 @@ describe("ArtStudioPanel import flow", () => {
         },
       },
     });
+  });
+
+  it("imports local command.dat, binds a visual command to the active sequence and persists it on the sprite", async () => {
+    mocks.open
+      .mockResolvedValueOnce("D:/Commands/command.dat")
+      .mockResolvedValueOnce("F:/Projects/RetroDevStudio/demo/assets/sprites/hero/run.png");
+
+    await act(async () => {
+      findButton(container, "Importar command.dat").click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.parseInputCommandFile).toHaveBeenCalledWith("D:/Commands/command.dat");
+    expect(container.textContent).toContain("Hadouken");
+    expect(container.textContent).toContain("↓ ↘ → A");
+
+    await act(async () => {
+      (
+        container.querySelector("[data-testid='artstudio-sequence-card-seq_idle']") as HTMLElement
+      )?.click();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Associar Hadouken/).click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("Comando: Hadouken");
+
+    await act(async () => {
+      findButton(container, "Importar imagem").click();
+      await flush();
+      await flush();
+    });
+    await act(async () => {
+      findButton(container, /Trazer para assets\/sprites|Regerar asset canonico/).click();
+      await flush();
+      await flush();
+    });
+    await act(async () => {
+      findButton(container, /Aplicar/).click();
+      await flush();
+    });
+
+    const appliedEntity = useEditorStore
+      .getState()
+      .activeScene?.entities.find((entity) => entity.entity_id === "hero_sheet");
+    expect(appliedEntity?.components.sprite?.commands).toEqual([
+      expect.objectContaining({
+        id: "hadouken",
+        display_name: "Hadouken",
+        notation: "_2, _3, _6, _P",
+        target_animation: "idle",
+        button_profile: "megadrive",
+        unsupported_tokens: [],
+      }),
+    ]);
   });
 
   it("explains when apply will update the selected sprite entity instead of creating a new one", async () => {
