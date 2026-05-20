@@ -84,11 +84,22 @@ vi.mock("./components/tools/ToolsPanel", () => ({
 }));
 
 vi.mock("./components/nodegraph/NodeGraphEditor", () => ({
-  default: () => <div data-testid="nodegraph" />,
+  default: () => (
+    <div data-testid="nodegraph">
+      <aside data-testid="nodegraph-side-rail">
+        <div data-testid="nodegraph-overview" />
+      </aside>
+      <input placeholder="Buscar nó..." readOnly />
+    </div>
+  ),
 }));
 
 vi.mock("./components/retrofx/RetroFXDesigner", () => ({
   default: () => <div data-testid="retrofx" />,
+}));
+
+vi.mock("./components/artstudio/ArtStudioPanel", () => ({
+  default: () => <div data-testid="artstudio" />,
 }));
 
 vi.mock("./components/viewport/ViewportPanel", () => ({
@@ -500,6 +511,16 @@ vi.mock("./components/viewport/ViewportPanel", () => ({
             ) : null}
           </div>
         )}
+
+        {activeViewportTab === "logic" && (
+          <div data-testid="nodegraph">
+            <aside data-testid="nodegraph-side-rail">
+              <div data-testid="nodegraph-overview" />
+            </aside>
+            <input placeholder="Buscar nó..." readOnly />
+          </div>
+        )}
+        {activeViewportTab === "artstudio" && <div data-testid="artstudio" />}
       </div>
     );
   },
@@ -841,6 +862,14 @@ function findButton(container: HTMLElement, label: string): HTMLButtonElement {
     throw new Error(`Button not found: ${label}`);
   }
 
+  return button;
+}
+
+function findBuildRunButton(container: HTMLElement): HTMLButtonElement {
+  const button = container.querySelector('[data-testid="toolbar-build-run"]');
+  if (!(button instanceof HTMLButtonElement)) {
+    throw new Error("Button not found: toolbar-build-run");
+  }
   return button;
 }
 
@@ -1583,7 +1612,7 @@ describe("App build flow", () => {
 
   it("builds, loads the ROM, and starts the emulator frame loop", async () => {
     await act(async () => {
-      findButton(container, "Build & Run").click();
+      findBuildRunButton(container).click();
       await flush();
     });
 
@@ -1635,7 +1664,7 @@ describe("App build flow", () => {
     });
 
     await act(async () => {
-      findButton(container, "Build & Run").click();
+      findBuildRunButton(container).click();
       await flush();
       await flush();
     });
@@ -1663,7 +1692,7 @@ describe("App build flow", () => {
     );
 
     await act(async () => {
-      findButton(container, "Build & Run").click();
+      findBuildRunButton(container).click();
       await flush();
       await flush();
     });
@@ -1683,7 +1712,7 @@ describe("App build flow", () => {
 
   it("does not stop the emulator session when switching away from the game tab", async () => {
     await act(async () => {
-      findButton(container, "Build & Run").click();
+      findBuildRunButton(container).click();
       await flush();
       await flush();
     });
@@ -1717,7 +1746,7 @@ describe("App build flow", () => {
     );
 
     await act(async () => {
-      const buildButton = findButton(container, "Build & Run");
+      const buildButton = findBuildRunButton(container);
       buildButton.click();
       buildButton.click();
       buildButton.click();
@@ -1758,7 +1787,7 @@ describe("App build flow", () => {
       await flush();
     });
 
-    const buildButton = findButton(container, "Build & Run");
+    const buildButton = findBuildRunButton(container);
     const reason = container.querySelector("[data-testid='build-disabled-reason']");
     const liveState = container.querySelector("[data-testid='build-live-state']");
 
@@ -1948,15 +1977,22 @@ describe("App build flow", () => {
     expect(guide?.textContent).toContain("Paleta Contextual");
 
     await act(async () => {
+      useEditorStore.getState().setSelectedEntityId("hero");
+      await flush();
+    });
+
+    await act(async () => {
       findButton(guide as HTMLElement, "Abrir Paleta Contextual").click();
       await flush();
     });
 
-    const toolsPanel = container.querySelector("[data-testid='tools']");
-    expect(toolsPanel).toBeInstanceOf(HTMLDivElement);
-    expect(toolsPanel?.getAttribute("data-active")).toBe("palette");
-    expect(toolsPanel?.getAttribute("data-workspace")).toBe("editing");
-    expect(toolsPanel?.getAttribute("data-advanced")).toBe("false");
+    expect(container.querySelector("[data-testid='tools']")).toBeNull();
+    expect(container.querySelector("[data-testid='nodegraph-side-rail']")).toBeInstanceOf(
+      HTMLElement
+    );
+    expect(
+      container.querySelector("input[placeholder='Buscar nó...']")
+    ).toBeInstanceOf(HTMLInputElement);
   });
 
   it("switches workspaces from the activity bar and updates shell routing", async () => {
@@ -1993,10 +2029,9 @@ describe("App build flow", () => {
 
     expect(useEditorStore.getState().activeWorkspace).toBe("artstudio");
     expect(useEditorStore.getState().activeViewportTab).toBe("artstudio");
-    expect(container.querySelector("[data-testid='workspace-guide']")?.textContent).toContain(
-      "Art Workspace"
-    );
+    expect(container.querySelector("[data-testid='workspace-guide']")).toBeNull();
     expect(container.querySelector("[data-testid='inspector']")).toBeNull();
+    expect(container.querySelector("[data-testid='artstudio']")).toBeInstanceOf(HTMLElement);
   });
 
   it("hides the global inspector shell in game playtest layout", async () => {
@@ -2167,7 +2202,7 @@ describe("App build flow", () => {
     ) as HTMLButtonElement | null;
 
     await act(async () => {
-      findButton(container, "Build & Run").click();
+      findBuildRunButton(container).click();
       await flush();
       await flush();
     });
@@ -2747,7 +2782,7 @@ describe("App build flow", () => {
       await flush();
     });
 
-    const buildButton = findButton(container, "Build & Run");
+    const buildButton = findBuildRunButton(container);
     const revalidateButton = container.querySelector(
       "[data-testid='build-stale-revalidate']"
     ) as HTMLButtonElement | null;
@@ -2831,7 +2866,7 @@ describe("App build flow", () => {
       await flush();
     });
 
-    const buildButton = findButton(container, "Build & Run");
+    const buildButton = findBuildRunButton(container);
     const warning = container.querySelector("[data-testid='build-warning-summary']");
     const liveState = container.querySelector("[data-testid='build-live-state']");
 
@@ -2876,7 +2911,7 @@ describe("App build flow", () => {
       await flush();
     });
 
-    const buildButton = findButton(container, "Build & Run");
+    const buildButton = findBuildRunButton(container);
     const liveState = container.querySelector("[data-testid='build-live-state']");
 
     expect(buildButton.disabled).toBe(false);
@@ -2933,7 +2968,7 @@ describe("App build flow", () => {
       await flush();
     });
 
-    const buildButton = findButton(container, "Build & Run");
+    const buildButton = findBuildRunButton(container);
     const liveState = container.querySelector("[data-testid='build-live-state']");
     const errorSummary = container.querySelector("[data-testid='build-live-error-summary']");
 
@@ -2991,7 +3026,7 @@ describe("App build flow", () => {
       await flush();
     });
 
-    const buildButton = findButton(container, "Build & Run");
+    const buildButton = findBuildRunButton(container);
     const liveState = container.querySelector("[data-testid='build-live-state']");
     const pendingSummary = container.querySelector("[data-testid='build-live-pending-summary']");
 
@@ -3044,7 +3079,7 @@ describe("App build flow", () => {
 
   it("supports single-frame step and resume from the game viewport while paused", async () => {
     await act(async () => {
-      findButton(container, "Build & Run").click();
+      findBuildRunButton(container).click();
       await flush();
       await flush();
     });
@@ -3088,7 +3123,7 @@ describe("App build flow", () => {
 
   it("triggers rewind from the game viewport controls and keyboard shortcut while paused", async () => {
     await act(async () => {
-      findButton(container, "Build & Run").click();
+      findBuildRunButton(container).click();
       await flush();
       await flush();
     });

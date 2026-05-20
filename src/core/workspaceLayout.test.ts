@@ -33,11 +33,12 @@ describe("workspaceLayout", () => {
     expect(config.preset).toBe("playtest");
   });
 
-  it("opens logic workspace with tools on the right by default", () => {
+  it("keeps logic workspace full-width; palette and rail live inside NodeGraphEditor", () => {
     const config = resolveWorkspaceShellConfig("logic", 1920);
-    expect(config.showLeft).toBe(true);
-    expect(config.showRight).toBe(true);
-    expect(config.defaultRightMode).toBe("tools");
+    expect(config.showLeft).toBe(false);
+    expect(config.showRight).toBe(false);
+    expect(config.defaultRightMode).toBe("hidden");
+    expect(config.panels).toEqual({ left: 0, center: 100, right: 0 });
   });
 
   it("adapts authoring layout on narrow widths without negative sizes", () => {

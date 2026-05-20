@@ -152,8 +152,10 @@ export default function UnifiedTopBar({
         </nav>
       </div>
 
-      <div className="flex min-w-0 flex-[0_1_520px] items-center justify-center">
-        <div className="flex min-w-0 items-center justify-center gap-2">{centerContent}</div>
+      <div className="flex min-w-0 flex-[0_1_520px] items-center justify-center overflow-x-auto overflow-y-visible">
+        <div className="relative z-[5] flex min-w-0 flex-nowrap items-center justify-center gap-1.5 px-0.5">
+          {centerContent}
+        </div>
       </div>
 
       <div className="flex min-w-0 flex-1 items-center justify-end overflow-hidden">

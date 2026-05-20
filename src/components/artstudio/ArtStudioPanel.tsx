@@ -227,7 +227,11 @@ export function getArtStudioWheelZoomState({
 }
 
 function getInitialSourceZoom(size: { width: number; height: number }): number {
-  const fitZoom = Math.min(1.5, 640 / Math.max(size.width, 1), 420 / Math.max(size.height, 1));
+  const fitZoom = Math.min(
+    2,
+    900 / Math.max(size.width, 1),
+    560 / Math.max(size.height, 1)
+  );
   return clampZoom(fitZoom);
 }
 
@@ -1234,12 +1238,12 @@ function ArtStudioInspectorSection() {
           </div>
         )}
 
-        <div className="rounded-2xl border border-[#1f2937] bg-[#0f172a] p-4">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
-            Diagnostico
-          </div>
+        <details className="rounded-2xl border border-[#1f2937] bg-[#0f172a] p-3">
+          <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
+            Diagnostico ({state.spriteSheetWarnings.length})
+          </summary>
           <p className="mt-3 text-[12px] leading-5 text-[#cbd5e1]">{loadStatusText}</p>
-          {state.spriteSheetWarnings.length > 0 && (
+          {state.spriteSheetWarnings.length > 0 ? (
             <ul className="mt-3 space-y-2 text-[11px] leading-5 text-[#f9e2af]">
               {state.spriteSheetWarnings.map((warning) => (
                 <li
@@ -1250,8 +1254,8 @@ function ArtStudioInspectorSection() {
                 </li>
               ))}
             </ul>
-          )}
-        </div>
+          ) : null}
+        </details>
 
         <div
           data-testid="artstudio-apply-plan"
@@ -2471,31 +2475,17 @@ export default function ArtStudioPanel() {
   return (
     <ArtStudioContext.Provider value={contextValue}>
       <div className="flex h-full flex-col gap-2 bg-[#0b0f19]">
-      <div className="mx-3 mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#313244] bg-[linear-gradient(135deg,#111827,#0f172a_58%,#172554)] px-4 py-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="rounded-full border border-[#fab387]/35 bg-[#fab387]/12 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#fab387]">
-              Experimental
-            </span>
-            <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#7dd3fc]">
-              Art Studio
-            </span>
-          </div>
-          <p className="mt-2 text-[12px] text-[#cbd5e1]">
-            Workspace de ingestao, slicing e animacao de sprites.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 text-[10px] text-[#94a3b8]">
-          <span className="rounded-full border border-[#1f2937] bg-[#0b1120] px-2.5 py-1">
-            {ARTSTUDIO_SUPPORTED_FORMATS_LABEL}
+      <div className="mx-3 mt-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#313244]/80 bg-[#111827]/90 px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="rounded-full border border-[#fab387]/35 bg-[#fab387]/12 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.14em] text-[#fab387]">
+            Experimental
           </span>
-          <span className="rounded-full border border-[#1f2937] bg-[#0b1120] px-2.5 py-1">
-            Zoom wheel
-          </span>
-          <span className="rounded-full border border-[#1f2937] bg-[#0b1120] px-2.5 py-1">
-            Space + drag
+          <span className="truncate text-[11px] font-semibold text-[#e2e8f0]">Art Studio</span>
+          <span className="hidden text-[10px] text-[#94a3b8] sm:inline">
+            ingestao · slicing · animacao
           </span>
         </div>
+        <span className="text-[10px] text-[#6c7086]">{ARTSTUDIO_SUPPORTED_FORMATS_LABEL}</span>
       </div>
 
       {selectedEntity && selectedEntitySprite ? (
@@ -2561,7 +2551,7 @@ export default function ArtStudioPanel() {
           orientation="vertical"
           className="min-h-0"
         >
-          <Panel minSize={48} defaultSize={78}>
+          <Panel minSize={44} defaultSize={84}>
             <section
           data-testid="artstudio-main-stage"
           className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-[#313244] bg-[linear-gradient(180deg,#111827,#0f172a)] shadow-[0_18px_50px_rgba(0,0,0,0.28)]"
@@ -2722,7 +2712,7 @@ export default function ArtStudioPanel() {
         </section>
           </Panel>
           <LayoutSplitter orientation="vertical" />
-          <Panel minSize={12} defaultSize={22}>
+          <Panel minSize={10} defaultSize={16}>
             <ArtStudioTimelineSection />
           </Panel>
         </Group>

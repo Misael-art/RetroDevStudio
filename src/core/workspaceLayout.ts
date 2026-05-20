@@ -141,12 +141,12 @@ export function resolveWorkspaceShellConfig(
     case "logic":
       return {
         preset,
-        panels,
-        showLeft: true,
-        showRight: true,
-        defaultRightMode: "tools",
-        leftLabel: "Nodes",
-        rightLabel: "Palette",
+        panels: { left: 0, center: 100, right: 0 },
+        showLeft: false,
+        showRight: false,
+        defaultRightMode: "hidden",
+        leftLabel: "Palette",
+        rightLabel: "Propriedades",
         focusLayout: { left: 0, center: 100, right: 0 },
       };
     case "debug":

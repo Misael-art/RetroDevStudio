@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-19 (rodada 49 - workspace shell Option B)
+**Ultima Atualizacao:** 2026-05-20 (rodada 50 - QA RC bloco H + E2E shell)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-20 rodada 50 - branch `codex/product-ui-workspace-redesign`):**
+  - **Bloco H (QA RC):** `assertUiLayoutHealth()` no `scripts/e2e-tauri-build-run.mjs` valida topbar (overflow, colunas, botao Build compacto), painel central, guia, paineis laterais por workspace, console drawer vs status bar, NodeGraph side rail vs canvas/minimap/toolbar, e sobreposicao de botoes com limiar conservador.
+  - **E2E resiliente:** `clickByTestId()` (scroll + `HTMLElement.click`) para Build/Pause/Resume; onboarding RC forca `setSessionWindowRect(1920,1080)` antes do wizard; Bloco G volta a `scene` antes de esperar `inspector-open-art-workspace` (Logic com `showRight=false` desmontava o Inspector); Bloco H espera `nodegraph-side-rail` + canvas apos `selectWorkspace("logic")` (lazy `Suspense`); timeout default do tauri-driver em `qa-rc` sobe para 120s se `RDS_E2E_DRIVER_TIMEOUT_MS` nao estiver definido.
+  - **Topbar:** coluna central com `overflow-x-auto` e stack `z-[5]` para o centro nao ser interceptado por hit-tests da casca.
+  - **Evidencias:** QA RC A-H verde com prefixo `qa-rc-2026-05-20T07-45-07-583Z-*` (12 PNGs `H-ui-layout-{1366x768|1920x1080|2560x1080}-{scene|logic|game|debug}.png` em `src-tauri/target-test/validation/`).
+  - **Gates locais (rodada 50):** `check:tree`, `lint`, `tsc --noEmit`, `npm test` **322/322**, `cargo clippy -D warnings`, `cargo test --lib` (347 passed / 17 ignored), `preflight:sgdk-e2e`, `validate-upstream-windows.ps1 -SkipRustTests`, `npm run build:debug`, `npm run build:portable`, `npm run build:msi`, `node scripts/e2e-tauri-build-run.mjs --scenario qa-rc --skip-build` (iteracao pos-alteracoes ao script; o alvo `npm run test:e2e:desktop:qa-rc` e o mesmo binario quando o build ja esta fresco).
+  - **Status honesto:** UI hardening **SIM para a fatia coberta pelo bloco H** (shell + asserts + 12 capturas); continuam possiveis refinamentos visuais fora do oraculo (ex.: conteudo interno de paineis, tipografia longa). SGDK Stable / Node Engine **sem promocao**.
 
 * **O que acabou de acontecer (2026-05-19 rodada 49 - branch `codex/product-ui-workspace-redesign`):**
   - **Shell Option B:** novo modulo `src/core/workspaceLayout.ts` centraliza presets `authoring`, `art`, `logic`, `playtest`, `debug` e `resolveWorkspaceShellConfig()` por workspace.

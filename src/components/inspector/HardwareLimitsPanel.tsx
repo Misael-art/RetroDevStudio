@@ -95,7 +95,7 @@ function getValidationMessage({
   return "Sem preview ativo.";
 }
 
-export default function HardwareLimitsPanel() {
+export default function HardwareLimitsPanel({ compact = false }: { compact?: boolean }) {
   const {
     hwStatus,
     hwValidationError,
@@ -131,6 +131,53 @@ export default function HardwareLimitsPanel() {
     hwValidationState,
     sceneRevision,
   });
+
+  if (compact) {
+    return (
+      <details
+        data-testid="hardware-limits-compact"
+        className="border-t border-[#313244] bg-[#11111b]/60"
+      >
+        <summary
+          className={`flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-1.5 text-[10px] select-none ${
+            hasErrors
+              ? "text-[#f38ba8]"
+              : hasWarnings
+                ? "text-[#fab387]"
+                : "text-[#a6adc8]"
+          }`}
+        >
+          <span className="font-semibold uppercase tracking-[0.14em]">Hardware</span>
+          <span className="flex items-center gap-1.5">
+            <span data-testid="hardware-validation-state" className={liveBadge.className}>
+              {liveBadge.label}
+            </span>
+            <span
+              data-testid="hardware-limits-severity"
+              className="rounded border border-current/25 px-1.5 py-0.5 text-[9px] font-bold"
+            >
+              {hasErrors ? "OVERFLOW" : hasWarnings ? "WARN" : "OK"}
+            </span>
+          </span>
+        </summary>
+        <div className="border-t border-[#313244]">
+          <p className="px-3 py-1 text-[9px] text-[#6c7086]" title={liveMessage}>
+            {liveMessage}
+          </p>
+          <GaugeRow label="VRAM" used={status.vram_used} limit={status.vram_limit} unit="KB" />
+          <GaugeRow label="Sprites" used={status.sprite_count} limit={status.sprite_limit} />
+          {(status.errors[0] || status.warnings[0]) && (
+            <p
+              className="px-3 pb-2 text-[9px] text-[#fab387]"
+              title={[...status.errors, ...status.warnings].join(" · ")}
+            >
+              {[...status.errors, ...status.warnings].slice(0, 2).join(" · ")}
+            </p>
+          )}
+        </div>
+      </details>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-0">

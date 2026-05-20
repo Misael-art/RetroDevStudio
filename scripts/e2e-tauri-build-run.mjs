@@ -861,6 +861,7 @@ function createManualQaReport() {
       E: { status: "pending", note: null, status_code: null, error_category: null, started_at: null, finished_at: null, duration_ms: null },
       F: { status: "pending", note: null, status_code: null, error_category: null, started_at: null, finished_at: null, duration_ms: null },
       G: { status: "pending", note: null, status_code: null, error_category: null, started_at: null, finished_at: null, duration_ms: null },
+      H: { status: "pending", note: null, status_code: null, error_category: null, started_at: null, finished_at: null, duration_ms: null },
     },
   };
 }
@@ -1227,6 +1228,245 @@ async function updateInspectorIntField(sessionId, label, value) {
   }
 }
 
+const UI_LAYOUT_CAPTURE_RESOLUTIONS = [
+  { width: 1366, height: 768, tag: "1366x768" },
+  { width: 1920, height: 1080, tag: "1920x1080" },
+  { width: 2560, height: 1080, tag: "2560x1080" },
+];
+
+async function setSessionWindowRect(sessionId, width, height) {
+  await webdriverRequest("POST", `/session/${sessionId}/window/rect`, {
+    x: 0,
+    y: 0,
+    width: Number(width),
+    height: Number(height),
+  });
+  await new Promise((resolve) => setTimeout(resolve, 800));
+}
+
+const UI_LAYOUT_SHELL_EXPECTATIONS = {
+  scene: { showLeft: true, showRight: true },
+  logic: { showLeft: false, showRight: false },
+  game: { showLeft: false, showRight: false },
+  debug: { showLeft: false, showRight: true },
+};
+
+async function assertUiLayoutHealth(sessionId, workspaceId, resolutionTag) {
+  const result = await executeScript(
+    sessionId,
+    `
+      const workspace = arguments[0];
+      const resolutionTag = arguments[1];
+      const issues = [];
+      const metrics = {};
+
+      function panelVisible(panel) {
+        if (!panel) return false;
+        const rect = panel.getBoundingClientRect();
+        return rect.width > 10 && rect.height > 10;
+      }
+
+      function rectsOverlap(a, b) {
+        if (!a || !b) return false;
+        const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+        const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+        return overlapX > 2 && overlapY > 2;
+      }
+
+      /** Topbar: ignorar sobreposicoes <6px (anti-aliasing / bordas partilhadas entre chips adjacentes). */
+      function rectsOverlapTopbarControls(a, b) {
+        if (!a || !b) return false;
+        const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+        const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+        return overlapX > 6 && overlapY > 6;
+      }
+
+      const topbar = document.querySelector('[data-testid="unified-topbar"]');
+      if (topbar) {
+        metrics.topbarScrollWidth = topbar.scrollWidth;
+        metrics.topbarClientWidth = topbar.clientWidth;
+        if (topbar.scrollWidth > topbar.clientWidth + 2) {
+          issues.push("topbar overflow horizontal");
+        }
+        const topbarCols = Array.from(topbar.children).filter(
+          (node) => node instanceof HTMLElement
+        );
+        if (topbarCols.length >= 3) {
+          const leftRect = topbarCols[0].getBoundingClientRect();
+          const centerRect = topbarCols[1].getBoundingClientRect();
+          const rightRect = topbarCols[2].getBoundingClientRect();
+          if (centerRect.left < leftRect.right - 2) {
+            issues.push("topbar: coluna central sobrepoe a esquerda (texto/comandos)");
+          }
+          if (centerRect.right > rightRect.left + 2) {
+            issues.push("topbar: coluna central sobrepoe a direita (texto/comandos)");
+          }
+        }
+        const topbarRect = topbar.getBoundingClientRect();
+        metrics.topbarHeight = Math.round(topbarRect.height);
+        const buildBtn = document.querySelector('[data-testid="toolbar-build-run"]');
+        if (buildBtn) {
+          const buildRect = buildBtn.getBoundingClientRect();
+          metrics.buildButtonHeight = Math.round(buildRect.height);
+          const buildStyle = window.getComputedStyle(buildBtn);
+          if (Number.parseFloat(buildStyle.lineHeight) > topbarRect.height + 2) {
+            issues.push("botao Build aumenta altura da topbar");
+          }
+          if (buildBtn.scrollHeight > buildBtn.clientHeight + 2) {
+            issues.push("botao Build com quebra de linha");
+          }
+          if (buildRect.height > topbarRect.height + 2) {
+            issues.push("botao Build mais alto que a topbar");
+          }
+        }
+      }
+
+      const centerPanel =
+        document.querySelector('[data-panel-id="center"]') ??
+        document.getElementById("center");
+      if (centerPanel) {
+        const centerRect = centerPanel.getBoundingClientRect();
+        metrics.centerWidth = Math.round(centerRect.width);
+        metrics.centerHeight = Math.round(centerRect.height);
+        const minCenterWidth =
+          resolutionTag === "1366x768" ? 520 : resolutionTag === "1920x1080" ? 720 : 900;
+        const minCenterHeight = 280;
+        if (centerRect.width < minCenterWidth) {
+          issues.push(
+            "painel central estreito demais (" + Math.round(centerRect.width) + "px)"
+          );
+        }
+        if (centerRect.height < minCenterHeight) {
+          issues.push(
+            "painel central baixo demais (" + Math.round(centerRect.height) + "px)"
+          );
+        }
+      } else {
+        issues.push("painel central nao encontrado");
+      }
+
+      const guide = document.querySelector('[data-testid="workspace-guide"]');
+      if (guide) {
+        const guideRect = guide.getBoundingClientRect();
+        metrics.guideHeight = Math.round(guideRect.height);
+        const maxGuideHeight = window.innerHeight * 0.14;
+        if (guideRect.height > maxGuideHeight) {
+          issues.push(
+            "workspace guide alto demais (" + Math.round(guideRect.height) + "px)"
+          );
+        }
+      }
+
+      const shellExpectations = {
+        scene: { showLeft: true, showRight: true },
+        logic: { showLeft: false, showRight: false },
+        game: { showLeft: false, showRight: false },
+        debug: { showLeft: false, showRight: true },
+      };
+      const expected = shellExpectations[workspace] ?? { showLeft: true, showRight: true };
+      const leftPanel =
+        document.querySelector('[data-panel-id="left"]') ?? document.getElementById("left");
+      const rightPanel =
+        document.querySelector('[data-panel-id="right"]') ?? document.getElementById("right");
+      if (!expected.showLeft && panelVisible(leftPanel)) {
+        issues.push("painel esquerdo visivel com showLeft=false");
+      }
+      if (!expected.showRight && panelVisible(rightPanel)) {
+        issues.push("painel direito visivel com showRight=false");
+      }
+
+      const consoleDrawer = document.querySelector('[data-testid="console-drawer"]');
+      if (consoleDrawer?.getAttribute("data-visible") === "true") {
+        issues.push("console drawer aberto por padrao");
+      }
+      const statusBar = document.querySelector('[data-testid="production-status-bar"]');
+      if (consoleDrawer && statusBar && consoleDrawer.getAttribute("data-visible") === "true") {
+        const consoleRect = consoleDrawer.getBoundingClientRect();
+        const statusRect = statusBar.getBoundingClientRect();
+        if (consoleRect.bottom > statusRect.top + 1) {
+          issues.push("console drawer cobre a status bar");
+        }
+      }
+
+      if (workspace === "logic") {
+        const rail = document.querySelector('[data-testid="nodegraph-side-rail"]');
+        const canvas = document.querySelector('[data-testid="nodegraph-canvas"]');
+        if (!rail) {
+          issues.push("nodegraph side rail ausente");
+        }
+        if (rail && canvas) {
+          const railRect = rail.getBoundingClientRect();
+          const canvasRect = canvas.getBoundingClientRect();
+          if (railRect.left < canvasRect.right - 4) {
+            issues.push("nodegraph side rail sobrepoe o canvas");
+          }
+          const minimap = document.querySelector('[data-testid="nodegraph-minimap"]');
+          if (minimap && rectsOverlap(minimap.getBoundingClientRect(), railRect)) {
+            issues.push("minimap sobrepoe o side rail");
+          }
+          const toolbar = document.querySelector('[data-testid="nodegraph-canvas-toolbar"]');
+          if (toolbar && rectsOverlap(toolbar.getBoundingClientRect(), railRect)) {
+            issues.push("toolbar do canvas sobrepoe o side rail");
+          }
+          const nodeCards = Array.from(
+            document.querySelectorAll('[data-testid^="node-card-"]')
+          ).slice(0, 6);
+          for (const card of nodeCards) {
+            if (rectsOverlap(card.getBoundingClientRect(), railRect)) {
+              issues.push("node card sobrepoe o side rail");
+              break;
+            }
+          }
+        }
+      }
+
+      const toolbarButtons = Array.from(
+        document.querySelectorAll('[data-testid="unified-topbar"] button')
+      ).filter((button) => {
+        const rect = button.getBoundingClientRect();
+        if (rect.width < 4 || rect.height < 4 || rect.top >= 120) {
+          return false;
+        }
+        let node = button.parentElement;
+        while (node && node !== topbar) {
+          if (node instanceof HTMLElement) {
+            const cls = node.getAttribute("class") ?? "";
+            if (cls.includes("sr-only") || cls.includes("hidden")) {
+              return false;
+            }
+          }
+          node = node.parentElement;
+        }
+        return true;
+      });
+      for (let index = 0; index < toolbarButtons.length; index += 1) {
+        for (let other = index + 1; other < toolbarButtons.length; other += 1) {
+          if (
+            rectsOverlapTopbarControls(
+              toolbarButtons[index].getBoundingClientRect(),
+              toolbarButtons[other].getBoundingClientRect()
+            )
+          ) {
+            issues.push("controles da topbar sobrepostos");
+            index = toolbarButtons.length;
+            break;
+          }
+        }
+      }
+
+      return { ok: issues.length === 0, issues, metrics };
+    `,
+    [workspaceId, resolutionTag]
+  );
+
+  if (!result?.ok) {
+    const metricsText = result?.metrics ? JSON.stringify(result.metrics) : "{}";
+    fail(
+      `Bloco H layout ${resolutionTag}/${workspaceId}: ${(result?.issues ?? ["sem diagnostico"]).join("; ")} | metrics=${metricsText}`
+    );
+  }
+}
+
 async function captureScreenshot(sessionId, filename) {
   await ensureValidationDir();
   const response = await webdriverRequest("GET", `/session/${sessionId}/screenshot`);
@@ -1411,6 +1651,31 @@ async function findElement(sessionId, selector) {
 
 async function clickElement(sessionId, elementId) {
   await webdriverRequest("POST", `/session/${sessionId}/element/${elementId}/click`, {});
+}
+
+async function clickByTestId(sessionId, testId) {
+  const result = await executeScript(
+    sessionId,
+    `
+      const testId = String(arguments[0] ?? "");
+      const element = document.querySelector('[data-testid="' + testId + '"]');
+      if (!(element instanceof HTMLElement)) {
+        return { ok: false, reason: "elemento nao encontrado" };
+      }
+      if (element instanceof HTMLButtonElement && element.disabled) {
+        return { ok: false, reason: "botao desabilitado" };
+      }
+      element.scrollIntoView({ block: "center", inline: "center" });
+      element.click();
+      return { ok: true };
+    `,
+    [testId]
+  );
+  if (!result?.ok) {
+    throw new Error(
+      `Nao foi possivel clicar [data-testid='${testId}']: ${result?.reason ?? "falha desconhecida"}`
+    );
+  }
 }
 
 async function clickButtonByText(sessionId, expectedText, mode = "contains") {
@@ -1843,7 +2108,8 @@ async function main() {
   await clearDesktopFailureReport(options.scenario);
   const driverStartupTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_DRIVER_TIMEOUT_MS,
-    30000
+    // QA RC faz build pesado antes do driver; em hosts lentos 30s falha com portas ocupadas.
+    options.scenario === "qa-rc" ? 120000 : 30000
   );
   const uiBootstrapTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_UI_TIMEOUT_MS,
@@ -2136,6 +2402,7 @@ async function main() {
       let currentBlock = "A";
 
       try {
+        await setSessionWindowRect(sessionId, 1920, 1080);
         await waitForOnboardingWizard(sessionId);
         const wizardScreenshot = await captureScreenshot(
           sessionId,
@@ -2481,8 +2748,7 @@ async function main() {
           fail(diagnostics ? `${details}\n${diagnostics}` : details);
         }
 
-        const buildRunButton = await findElement(sessionId, "[data-testid='toolbar-build-run']");
-        await clickElement(sessionId, buildRunButton);
+        await clickByTestId(sessionId, "toolbar-build-run");
         await waitFor(
           async () => {
             const status = await executeScript(
@@ -2514,8 +2780,7 @@ async function main() {
         );
         registerArtifact(manualQaReport, gameScreenshot, "D - game view");
 
-        const pauseButton = await findElement(sessionId, "[data-testid='viewport-pause']");
-        await clickElement(sessionId, pauseButton);
+        await clickByTestId(sessionId, "viewport-pause");
         await waitFor(
           async () => {
             const state = await readAutomationState(sessionId);
@@ -2526,8 +2791,7 @@ async function main() {
           100
         );
 
-        const resumeButton = await findElement(sessionId, "[data-testid='viewport-resume']");
-        await clickElement(sessionId, resumeButton);
+        await clickByTestId(sessionId, "viewport-resume");
         await waitFor(
           async () => {
             const state = await readAutomationState(sessionId);
@@ -3039,6 +3303,8 @@ async function main() {
           `Objeto -> logica -> fonte: entidade '${sgdkLogicEntityId}' abriu Logic Workspace; ${sourceNavigationSummary}.`,
           `Evidencia: ${path.basename(logicScreenshot)}.`,
         ].join(" ");
+        // Com Option B, Logic oculta o painel direito global; o Inspector so volta a montar em Scene/Debug.
+        await callAutomationApi(sessionId, "selectWorkspace", ["scene"]);
         await callAutomationApi(sessionId, "setRightPanelMode", ["inspector"]);
         await callAutomationApi(sessionId, "setSelectedEntityId", [sgdkLogicEntityId]);
         await waitFor(
@@ -3245,8 +3511,7 @@ async function main() {
           const details = error instanceof Error ? error.message : String(error);
           fail(diagnostics ? `${details}\n${diagnostics}` : details);
         }
-        const buildRunSgdk = await findElement(sessionId, "[data-testid='toolbar-build-run']");
-        await clickElement(sessionId, buildRunSgdk);
+        await clickByTestId(sessionId, "toolbar-build-run");
         try {
           await waitFor(
             async () => {
@@ -3295,6 +3560,62 @@ async function main() {
         );
         registerArtifact(manualQaReport, sgdkChainShot, "G - sgdk import reopen build rom");
 
+        currentBlock = "H";
+        await callAutomationApi(sessionId, "setConsoleVisible", [false]);
+        const layoutWorkspaceIds = ["scene", "logic", "game", "debug"];
+        const layoutShotNames = [];
+        const layoutValidationNotes = [];
+        for (const resolution of UI_LAYOUT_CAPTURE_RESOLUTIONS) {
+          await setSessionWindowRect(sessionId, resolution.width, resolution.height);
+          for (const workspaceId of layoutWorkspaceIds) {
+            await callAutomationApi(sessionId, "selectWorkspace", [workspaceId]);
+            await waitFor(
+              async () => {
+                const state = await readAutomationState(sessionId);
+                if (!state || state.activeWorkspace !== workspaceId) {
+                  return false;
+                }
+                if (workspaceId === "logic") {
+                  const ready = await executeScript(
+                    sessionId,
+                    `return Boolean(
+                      document.querySelector('[data-testid="nodegraph-side-rail"]') &&
+                      document.querySelector('[data-testid="nodegraph-canvas"]')
+                    );`
+                  );
+                  return ready ? state : false;
+                }
+                return state;
+              },
+              workspaceId === "logic" ? 25000 : 15000,
+              `Bloco H: workspace '${workspaceId}' nao ativou em ${resolution.tag}.`,
+              250
+            );
+            await assertUiLayoutHealth(sessionId, workspaceId, resolution.tag);
+            layoutValidationNotes.push(`${resolution.tag}/${workspaceId}:ok`);
+            const layoutShot = await captureScreenshot(
+              sessionId,
+              `${artifactPrefix}-H-ui-layout-${resolution.tag}-${workspaceId}.png`
+            );
+            registerArtifact(
+              manualQaReport,
+              layoutShot,
+              `H - ui layout ${resolution.tag} ${workspaceId}`
+            );
+            layoutShotNames.push(path.basename(layoutShot));
+          }
+        }
+        await markManualQaBlock(
+          manualQaReport,
+          "H",
+          "passed",
+          [
+            `QA visual de layout: ${UI_LAYOUT_CAPTURE_RESOLUTIONS.length} resolucoes x ${layoutWorkspaceIds.length} workspaces (Scene, Logic, Game, Debug) com validacao automatica de shell (topbar, paineis, console, nodegraph).`,
+            `Validacoes: ${layoutValidationNotes.join(", ")}.`,
+            `Evidencias: ${layoutShotNames.join(", ")}.`,
+          ].join(" ")
+        );
+
         await markManualQaBlock(
           manualQaReport,
           "G",
@@ -3313,7 +3634,7 @@ async function main() {
         );
 
         await writeManualQaReport(manualQaReport);
-        console.log("OK: Desktop Tauri QA RC A-G passou.");
+        console.log("OK: Desktop Tauri QA RC A-H passou.");
         console.log(`Projeto criado: ${generatedProjectName}`);
         console.log(`Diretorio temporario: ${temporaryProjectDir}`);
         console.log(`Relatorio QA: ${manualQaStatusPath}`);
@@ -3737,8 +4058,7 @@ async function main() {
       fail(diagnostics ? `${details}\n${diagnostics}` : details);
     }
 
-    const buildRunButton = await findElement(sessionId, "[data-testid='toolbar-build-run']");
-    await clickElement(sessionId, buildRunButton);
+    await clickByTestId(sessionId, "toolbar-build-run");
 
     try {
       await waitFor(

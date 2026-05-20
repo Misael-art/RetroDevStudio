@@ -1,8 +1,10 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-05-19 (rodada 47)
+**Ultima revisao canonica:** 2026-05-20 (rodada 50)
 **Fase ativa real:** Core MVP promovido tecnicamente em main; hardening continua nas superficies experimentais
+
+**Nota 2026-05-20 (rodada 50, branch `codex/product-ui-workspace-redesign`):** fechamento institucional do **QA RC bloco H** com asserts automaticos de shell (topbar, paineis por workspace, console drawer, NodeGraph rail) e **12 screenshots** multi-resolucao em `src-tauri/target-test/validation/`. A matriz tatica de workspaces (Scene/Logic/Game/Debug/Art) deve ser lida com `manual-qa-status.json` e o prefixo de artefactos mais recente; Logic com `showRight=false` exige fluxo E2E que volte a **Scene** antes de acionar botoes do Inspector global. Isto **nao** promove SGDK nem Node Engine.
 
 **Nota 2026-05-19 (rodada 48, branch `codex/project-cohesion-full-build`):** consolidacao de `main` (GameMaker vertical, PR #8) + `command.dat` (ArtStudio/NodeGraph/runtime). Ambas as frentes coexistem: harness GameMaker + `gml_to_nodes` + prova vertical (`non_black_pixels=3793`); parser `input_commands` + `SpriteComponent.commands` + node `input_command` + codegen SGDK/SNES. Status: GameMaker e command.dat permanecem **Experimental**; sem promocao Stable institucional.
 

@@ -125,7 +125,7 @@ function ToolbarButton({
       data-testid={testId}
       title={title}
       aria-describedby={describedBy}
-      className={`rounded px-2 py-1 text-xs font-semibold transition-colors ${palette} disabled:cursor-not-allowed disabled:opacity-40`}
+      className={`shrink-0 whitespace-nowrap rounded px-2 py-1 text-xs font-semibold leading-none transition-colors ${palette} disabled:cursor-not-allowed disabled:opacity-40`}
     >
       {label}
     </button>
@@ -434,8 +434,8 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
     <section
       data-testid="workspace-guide"
       data-expanded={expanded ? "true" : "false"}
-      className={`mx-4 mt-3 rounded-2xl border border-[#313244] bg-[linear-gradient(135deg,#0b1020,#111827_55%,#0f172a)] px-4 shadow-[0_16px_32px_rgba(0,0,0,0.18)] ${
-        expanded ? "py-3" : "py-2"
+      className={`mx-4 mt-2 rounded-xl border border-[#313244] bg-[linear-gradient(135deg,#0b1020,#111827_55%,#0f172a)] px-3 shadow-[0_12px_24px_rgba(0,0,0,0.16)] ${
+        expanded ? "py-2.5" : "py-1.5"
       }`}
     >
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -923,6 +923,7 @@ type AutomationApi = {
     showAdvanced?: boolean
   ) => boolean;
   selectWorkspace: (workspace: EditorWorkspace) => boolean;
+  setConsoleVisible: (visible: boolean) => boolean;
   setEntityLogicGraph: (entityId: string, graphJson: string) => boolean;
   setEntityTransform: (entityId: string, x: number, y: number) => boolean;
   /** Instancia asset de imagem na cena ativa (mesma regra canónica do Asset Browser). E2E / QA. */
@@ -2380,6 +2381,8 @@ export default function App() {
       );
     } else if (config.defaultRightMode === "inspector") {
       setRightPanelMode("inspector");
+    } else if (config.defaultRightMode === "hidden") {
+      setRightPanelMode("inspector");
     }
 
     if (workspace === "explorer") {
@@ -2448,14 +2451,20 @@ export default function App() {
             eyebrow: "Logic Workspace",
             title: "Edite a logica visual da cena sem perder o contexto do projeto.",
             summary:
-              "O NodeGraph fica no canvas central, enquanto o painel direito pode alternar entre a Paleta Contextual e o Inspector.",
+              "Palette a esquerda, validacao e propriedades a direita no NodeGraph; o shell global nao abre Tools neste workspace.",
             detail:
-              "Abra a paleta quando quiser descobrir blocos disponiveis, valide o projeto antes de compilar e use o Inspector para revisar a entidade selecionada.",
+              "Selecione uma entidade na hierarquia, monte o fluxo no canvas e use o painel direito para validacao, contexto importado e atalhos de navegacao.",
             signal: sharedSignal,
             actions: [
               {
                 label: "Abrir Paleta Contextual",
-                onClick: () => openToolsWorkspace("palette", "editing"),
+                onClick: () => {
+                  setActiveViewportTab("logic");
+                  logMessage(
+                    "info",
+                    "Paleta de nos na barra esquerda do NodeGraph; validacao no painel direito fixo."
+                  );
+                },
                 accent: "primary",
               },
               {
@@ -2808,6 +2817,10 @@ export default function App() {
       },
       selectWorkspace: (workspace: EditorWorkspace) => {
         handleWorkspaceSelect(workspace);
+        return true;
+      },
+      setConsoleVisible: (visible: boolean) => {
+        useEditorStore.setState({ consoleVisible: Boolean(visible) });
         return true;
       },
       setEntityLogicGraph: (entityId: string, graphJson: string) => {
@@ -3686,14 +3699,16 @@ export default function App() {
               ))}
             </div>
             <ToolbarButton
-              label="Build & Run"
+              label="Build ▶"
               onClick={() => void handleBuildAndRun()}
               disabled={building || !activeProjectDir || liveBuildBlocked}
               accent="success"
               testId="toolbar-build-run"
               title={getShortcutTitle(
                 "build.run",
-                liveBuildBlocked ? buildDisabledReason ?? undefined : buildWarningSummary ?? undefined
+                liveBuildBlocked
+                  ? buildDisabledReason ?? "Build & Run"
+                  : buildWarningSummary ?? "Build & Run"
               )}
               describedBy={liveBuildBlocked ? "build-disabled-reason" : undefined}
             />
@@ -3821,7 +3836,11 @@ export default function App() {
         </span>
       ) : null}
 
-      {!showProjectWizard && !focusedShell && workspaceGuide && (
+      {!showProjectWizard &&
+        !focusedShell &&
+        workspaceGuide &&
+        activeWorkspace !== "artstudio" &&
+        activeWorkspace !== "retrofx" && (
         <WorkspaceGuideCard key={workspaceMeta.id} guide={workspaceGuide} />
       )}
 
@@ -4017,7 +4036,7 @@ export default function App() {
           }
         }}
       />
-      <Console />
+      <Console variant="drawer" />
     </div>
   );
 }

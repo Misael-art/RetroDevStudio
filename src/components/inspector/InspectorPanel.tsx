@@ -1084,11 +1084,19 @@ export default function InspectorPanel() {
               </div>
             </div>
             {importedEntityContext.isImported && sections.length === 0 ? (
-              <div className="border-b border-[#313244] bg-[#11111b]/40 px-3 py-2">
-                <div
-                  data-testid="inspector-imported-context"
-                  className="rounded border border-[#313244] bg-[#0f172a]/40 p-2"
-                >
+              <details
+                data-testid="inspector-imported-context"
+                className="border-b border-[#313244] bg-[#11111b]/40 px-3 py-2"
+              >
+                <summary className="flex cursor-pointer list-none items-center gap-2 px-1 py-1 text-[9px] font-semibold uppercase tracking-[0.16em] text-[#7f849c]">
+                  <span>Diagnostico importado</span>
+                  {importedEntityContext.auditFlags.length > 0 ? (
+                    <span className="rounded-full border border-[#fab387]/35 bg-[#fab387]/10 px-1.5 py-0.5 text-[8px] text-[#fab387]">
+                      {importedEntityContext.auditFlags.length}
+                    </span>
+                  ) : null}
+                </summary>
+                <div className="mt-2 rounded border border-[#313244] bg-[#0f172a]/40 p-2">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#7f849c]">
                       Contexto importado
@@ -1208,7 +1216,7 @@ export default function InspectorPanel() {
                     })()}
                   </div>
                 </div>
-              </div>
+              </details>
             ) : null}
             {sections.map((section) => (
               <InspectorSection
@@ -1846,7 +1854,7 @@ export default function InspectorPanel() {
       </div>
 
       <div className="shrink-0 border-t border-[#313244]">
-        <HardwareLimitsPanel />
+        <HardwareLimitsPanel compact />
       </div>
     </Panel>
   );
