@@ -2591,6 +2591,104 @@ describe("App build flow", () => {
     );
   });
 
+  it("shows SGDK capabilities as an explicit matrix instead of a single support chip", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "",
+        activeProjectName: "",
+        activeScenePath: "",
+        activeScene: null,
+        activeSceneSource: null,
+        hwStatus: null,
+      });
+      await flush();
+      await flush();
+    });
+
+    const importToggle = container.querySelector(
+      "[data-testid='wizard-external-import-toggle']"
+    ) as HTMLButtonElement | null;
+
+    await act(async () => {
+      importToggle?.click();
+      await flush();
+    });
+
+    const matrix = container.querySelector("[data-testid='sgdk-capability-matrix']");
+
+    expect(matrix?.textContent).toContain("Assets");
+    expect(matrix?.textContent).toContain("Build/ROM");
+    expect(matrix?.textContent).toContain("Emulacao");
+    expect(matrix?.textContent).toContain("Cena/entidades");
+    expect(matrix?.textContent).toContain("Logica por nodes");
+    expect(matrix?.textContent).toContain("FSM/Estados");
+    expect(matrix?.textContent).toContain("Round-trip");
+    expect(matrix?.textContent).toContain("Equivalencia gameplay");
+    expect(matrix?.textContent).toContain("Nao certificada");
+    expect(matrix?.textContent).not.toContain("SGDK suportado");
+  });
+
+  it("shows a post-import SGDK logic summary with converted nodes, bridges and blocking gaps", async () => {
+    mocks.importExternalProject.mockResolvedValueOnce({
+      selected: true,
+      path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      name: "Importado SGDK",
+      notice: "Importacao SGDK concluida com 1 cena nativa.",
+      import_summary: {
+        states_detected: 3,
+        transitions_detected: 4,
+        nodes_generated: 9,
+        bridges_created: 2,
+        blocking_gaps: ["inline assembly branch blocks equivalence"],
+        mapped_source_files: ["src/main.c", "src/player.c"],
+        semantic_model_kind: "fsm",
+      },
+    });
+
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "",
+        activeProjectName: "",
+        activeScenePath: "",
+        activeScene: null,
+        activeSceneSource: null,
+        hwStatus: null,
+      });
+      await flush();
+      await flush();
+    });
+
+    const importToggle = container.querySelector(
+      "[data-testid='wizard-external-import-toggle']"
+    ) as HTMLButtonElement | null;
+
+    await act(async () => {
+      importToggle?.click();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, "Importar Externo").click();
+      await flush();
+      await flush();
+    });
+
+    const summary = container.querySelector("[data-testid='sgdk-import-summary']");
+
+    expect(summary?.textContent).toContain("FSM extraida");
+    expect(summary?.textContent).toContain("estados detectados");
+    expect(summary?.textContent).toContain("3");
+    expect(summary?.textContent).toContain("transicoes detectadas");
+    expect(summary?.textContent).toContain("4");
+    expect(summary?.textContent).toContain("nodes gerados");
+    expect(summary?.textContent).toContain("9");
+    expect(summary?.textContent).toContain("bridges criadas");
+    expect(summary?.textContent).toContain("2");
+    expect(summary?.textContent).toContain("inline assembly branch blocks equivalence");
+    expect(summary?.textContent).toContain("src/main.c");
+    expect(summary?.textContent).toContain("src/player.c");
+  });
+
   it("imports an arbitrary external project with the selected profile", async () => {
     await act(async () => {
       useEditorStore.setState({

@@ -21,6 +21,9 @@ use compiler::build_orch::{
 };
 use compiler::sgdk_emitter::emit_sgdk_with_collision;
 use compiler::snes_emitter::emit_snes_with_collision;
+use core::compatibility_harness::{
+    run_gamemaker_compatibility_harness, validation_report_dir, CompatibilityHarnessReport,
+};
 use core::editor_validation::{
     authoritative_hw_status, validate_scene_draft as validate_scene_draft_impl,
     DraftValidationResult,
@@ -40,9 +43,6 @@ use core::project_mgr::{
     update_project_target, ExternalImportProfileSummary, LegacySgdkIndex, ProjectTemplateSummary,
     SceneInfo, DEFAULT_ENTRY_SCENE,
 };
-use core::compatibility_harness::{
-    run_gamemaker_compatibility_harness, validation_report_dir, CompatibilityHarnessReport,
-};
 use core::sgdk_corpus_inventory::{
     inspect_sgdk_corpus_for_nocode_inventory, inspect_sgdk_project_for_nocode_inventory,
     write_sgdk_corpus_inventory_report, SgdkCorpusInventoryReport, SgdkProjectInventory,
@@ -54,7 +54,7 @@ use emulator::libretro_ffi::{
 use hardware::constraint_engine;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
-use ugdm::entities::PatchAuditEntry;
+use ugdm::entities::{PatchAuditEntry, Scene};
 
 // HwStatus canônico definido em hardware::mod
 use hardware::HwStatus;
@@ -1874,6 +1874,21 @@ pub struct OpenProjectResult {
     pub preferred_scene_path: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub imported_scene_paths: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub import_summary: Option<SgdkLogicImportSummary>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, PartialEq, Eq)]
+pub struct SgdkLogicImportSummary {
+    pub states_detected: u32,
+    pub transitions_detected: u32,
+    pub nodes_generated: u32,
+    pub bridges_created: u32,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub blocking_gaps: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub mapped_source_files: Vec<String>,
+    pub semantic_model_kind: String,
 }
 
 #[derive(Debug, serde::Serialize, Clone, Copy, PartialEq, Eq)]
@@ -1969,6 +1984,283 @@ fn suggested_project_name_with_suffix(project_name: &str, suffix: Option<usize>)
     }
 }
 
+fn push_unique_trimmed(values: &mut Vec<String>, value: impl AsRef<str>) {
+    let trimmed = value.as_ref().trim();
+    if !trimmed.is_empty() && !values.iter().any(|item| item == trimmed) {
+        values.push(trimmed.to_string());
+    }
+}
+
+fn json_string_value(value: Option<&serde_json::Value>) -> Option<String> {
+    match value? {
+        serde_json::Value::String(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        serde_json::Value::Number(value) => Some(value.to_string()),
+        serde_json::Value::Bool(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn json_boolish(value: Option<&serde_json::Value>) -> bool {
+    match value {
+        Some(serde_json::Value::Bool(value)) => *value,
+        Some(serde_json::Value::Number(value)) => value
+            .as_i64()
+            .map(|number| number != 0)
+            .or_else(|| value.as_u64().map(|number| number != 0))
+            .or_else(|| value.as_f64().map(|number| number != 0.0))
+            .unwrap_or(false),
+        Some(serde_json::Value::String(value)) => matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "true" | "1" | "yes" | "bridge"
+        ),
+        _ => false,
+    }
+}
+
+fn push_source_mapping_from_json_object(
+    summary: &mut SgdkLogicImportSummary,
+    object: &serde_json::Map<String, serde_json::Value>,
+) {
+    if let Some(source_file) = json_string_value(object.get("source_file"))
+        .or_else(|| json_string_value(object.get("source_path")))
+        .or_else(|| json_string_value(object.get("source")))
+        .or_else(|| json_string_value(object.get("file")))
+        .or_else(|| json_string_value(object.get("path")))
+    {
+        push_unique_trimmed(&mut summary.mapped_source_files, source_file);
+    }
+}
+
+fn parse_sgdk_logic_graph_summary(
+    graph_json: &str,
+    summary: &mut SgdkLogicImportSummary,
+) -> (u32, u32, u32, u32) {
+    let Ok(graph) = serde_json::from_str::<serde_json::Value>(graph_json) else {
+        return (0, 0, 0, 0);
+    };
+    let Some(nodes) = graph.get("nodes").and_then(serde_json::Value::as_array) else {
+        return (0, 0, 0, 0);
+    };
+
+    let mut node_count = 0;
+    let mut bridge_count = 0;
+    let mut state_count = 0;
+    let mut transition_count = 0;
+
+    for node in nodes {
+        node_count += 1;
+        let node_id = json_string_value(node.get("id")).unwrap_or_else(|| "node".to_string());
+        let node_type = json_string_value(node.get("type")).unwrap_or_default();
+        let params = node.get("params").and_then(serde_json::Value::as_object);
+
+        if node_type.starts_with("fsm_") {
+            summary.semantic_model_kind = "fsm".to_string();
+        }
+        if node_type == "fsm_state" {
+            state_count += 1;
+        }
+        if node_type == "fsm_transition" {
+            transition_count += 1;
+        }
+
+        if let Some(params) = params {
+            push_source_mapping_from_json_object(summary, params);
+            let import_status = json_string_value(params.get("import_status"))
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let is_bridge = node_type == "bridge_unconverted_source"
+                || import_status == "bridge"
+                || json_boolish(params.get("bridge"));
+            if is_bridge {
+                bridge_count += 1;
+            }
+
+            let gap_label = json_string_value(params.get("gap"))
+                .or_else(|| json_string_value(params.get("gap_id")))
+                .or_else(|| {
+                    if is_bridge {
+                        Some("bridge para trecho nao convertido".to_string())
+                    } else {
+                        None
+                    }
+                });
+            if let Some(gap_label) = gap_label {
+                push_unique_trimmed(
+                    &mut summary.blocking_gaps,
+                    format!("{}: {}", node_id, gap_label),
+                );
+            }
+        }
+
+        for mapping_key in ["source_mapping", "sourceMapping"] {
+            if let Some(mapping) = node.get(mapping_key).and_then(serde_json::Value::as_object) {
+                push_source_mapping_from_json_object(summary, mapping);
+            }
+        }
+    }
+
+    (node_count, bridge_count, state_count, transition_count)
+}
+
+fn normalize_sgdk_logic_graph_ref(graph_ref: &str) -> Option<PathBuf> {
+    let trimmed = graph_ref.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let relative = PathBuf::from(trimmed);
+    if relative.is_absolute()
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return None;
+    }
+
+    if let Ok(stripped) = relative.strip_prefix("graphs") {
+        if stripped.as_os_str().is_empty() {
+            return None;
+        }
+        return Some(stripped.to_path_buf());
+    }
+
+    Some(relative)
+}
+
+fn read_sgdk_logic_graph_ref_summary(
+    project_dir: &Path,
+    entity_id: &str,
+    graph_ref: &str,
+    summary: &mut SgdkLogicImportSummary,
+) -> (u32, u32, u32, u32) {
+    let Some(relative) = normalize_sgdk_logic_graph_ref(graph_ref) else {
+        push_unique_trimmed(
+            &mut summary.blocking_gaps,
+            format!("{entity_id}: graph_ref '{graph_ref}' invalido para resumo SGDK Logic"),
+        );
+        return (0, 0, 0, 0);
+    };
+    let graph_path = project_dir.join("graphs").join(relative);
+    match fs::read_to_string(&graph_path) {
+        Ok(graph_json) => parse_sgdk_logic_graph_summary(&graph_json, summary),
+        Err(error) => {
+            push_unique_trimmed(
+                &mut summary.blocking_gaps,
+                format!(
+                    "{entity_id}: graph_ref '{graph_ref}' nao lido para resumo SGDK Logic: {error}"
+                ),
+            );
+            (0, 0, 0, 0)
+        }
+    }
+}
+
+fn sgdk_logic_import_summary_from_scene_with_project<I, S>(
+    project_dir: Option<&Path>,
+    scene: &Scene,
+    skipped_sources: I,
+) -> SgdkLogicImportSummary
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut summary = SgdkLogicImportSummary {
+        semantic_model_kind: "heuristic".to_string(),
+        ..SgdkLogicImportSummary::default()
+    };
+
+    for skipped_source in skipped_sources {
+        push_unique_trimmed(&mut summary.blocking_gaps, skipped_source.as_ref());
+    }
+
+    for entity in &scene.entities {
+        let Some(logic) = entity.components.logic.as_ref() else {
+            continue;
+        };
+
+        for source_ref in &logic.external_source_refs {
+            push_unique_trimmed(&mut summary.mapped_source_files, source_ref);
+        }
+
+        let mut semantic_nodes = 0;
+        let mut semantic_bridges = 0;
+        let mut semantic_states = 0;
+        let mut semantic_transitions = 0;
+
+        if let Some(semantics) = logic.imported_semantics.as_ref() {
+            semantic_nodes = semantics.converted_nodes_count + semantics.bridge_count;
+            semantic_bridges = semantics.bridge_count;
+            semantic_states = semantics.states_detected;
+            semantic_transitions = semantics.transitions_detected;
+
+            let extraction_kind = semantics.extraction_kind.to_ascii_lowercase();
+            let source = semantics.source.to_ascii_lowercase();
+            if extraction_kind == "fsm"
+                || source.contains("semantic_extractor")
+                || source.contains("semantic extractor")
+                || semantic_states > 0
+                || semantic_transitions > 0
+            {
+                summary.semantic_model_kind = "fsm".to_string();
+            }
+
+            for source_path in &semantics.source_paths {
+                push_unique_trimmed(&mut summary.mapped_source_files, source_path);
+            }
+            for gap in &semantics.blocking_gaps {
+                push_unique_trimmed(&mut summary.blocking_gaps, gap);
+            }
+            if semantics.gap_count > 0 && semantics.blocking_gaps.is_empty() {
+                push_unique_trimmed(
+                    &mut summary.blocking_gaps,
+                    format!(
+                        "{}: {} gap(s) importado(s) sem detalhe; revisar source mapping",
+                        entity.entity_id, semantics.gap_count
+                    ),
+                );
+            }
+        }
+
+        let (graph_nodes, graph_bridges, graph_states, graph_transitions) = logic
+            .graph
+            .as_deref()
+            .filter(|graph| !graph.trim().is_empty())
+            .map(|graph| parse_sgdk_logic_graph_summary(graph, &mut summary))
+            .or_else(|| {
+                let project_dir = project_dir?;
+                let graph_ref = logic
+                    .graph_ref
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())?;
+                Some(read_sgdk_logic_graph_ref_summary(
+                    project_dir,
+                    &entity.entity_id,
+                    graph_ref,
+                    &mut summary,
+                ))
+            })
+            .unwrap_or((0, 0, 0, 0));
+
+        summary.nodes_generated += graph_nodes.max(semantic_nodes);
+        summary.bridges_created += graph_bridges.max(semantic_bridges);
+        summary.states_detected += graph_states.max(semantic_states);
+        summary.transitions_detected += graph_transitions.max(semantic_transitions);
+    }
+
+    summary
+}
+
 fn empty_open_project_result() -> OpenProjectResult {
     OpenProjectResult {
         selected: false,
@@ -1978,6 +2270,7 @@ fn empty_open_project_result() -> OpenProjectResult {
         notice: None,
         preferred_scene_path: None,
         imported_scene_paths: Vec::new(),
+        import_summary: None,
     }
 }
 
@@ -2271,6 +2564,7 @@ fn create_onboarding_project_at_base_dir(
         notice,
         preferred_scene_path: Some(DEFAULT_ENTRY_SCENE.to_string()),
         imported_scene_paths: vec![DEFAULT_ENTRY_SCENE.to_string()],
+        import_summary: None,
     })
 }
 
@@ -2298,6 +2592,7 @@ fn create_project_from_template_at_base_dir(
         notice,
         preferred_scene_path: Some(DEFAULT_ENTRY_SCENE.to_string()),
         imported_scene_paths: vec![DEFAULT_ENTRY_SCENE.to_string()],
+        import_summary: None,
     })
 }
 
@@ -2399,6 +2694,20 @@ fn import_sgdk_project_at_base_dir(
         summary_hint,
         scenes_hint
     ));
+    let import_summary = sgdk_logic_import_summary_from_scene_with_project(
+        Some(&project_dir),
+        &report.primary_scene,
+        report.skipped_sources.iter().map(|skipped| {
+            if skipped.detail.trim().is_empty() {
+                format!("[{}] {}", skipped.reason, skipped.source)
+            } else {
+                format!(
+                    "[{}] {}: {}",
+                    skipped.reason, skipped.source, skipped.detail
+                )
+            }
+        }),
+    );
 
     Ok(OpenProjectResult {
         selected: true,
@@ -2415,6 +2724,7 @@ fn import_sgdk_project_at_base_dir(
                     .map(|scene| scene.scene_path.clone()),
             )
             .collect(),
+        import_summary: Some(import_summary),
     })
 }
 
@@ -2458,6 +2768,7 @@ fn import_mugen_project_at_base_dir(
         notice: merge_project_notices(dir_notice, notice),
         preferred_scene_path: Some(DEFAULT_ENTRY_SCENE.to_string()),
         imported_scene_paths: vec![DEFAULT_ENTRY_SCENE.to_string()],
+        import_summary: None,
     })
 }
 
@@ -2506,6 +2817,15 @@ fn import_external_project_at_base_dir(
         .into_iter()
         .find(|candidate| candidate.id == profile_id)
         .ok_or_else(|| format!("Perfil externo '{}' nao encontrado.", profile_id))?;
+    let import_summary = if profile.id == "sgdk" {
+        Some(sgdk_logic_import_summary_from_scene_with_project(
+            Some(&project_dir),
+            &report.primary_scene,
+            report.skipped_sources.iter().map(String::as_str),
+        ))
+    } else {
+        None
+    };
 
     Ok(OpenProjectResult {
         selected: true,
@@ -2515,6 +2835,7 @@ fn import_external_project_at_base_dir(
         notice: merge_project_notices(dir_notice, external_import_notice(&profile, &report)),
         preferred_scene_path: Some(DEFAULT_ENTRY_SCENE.to_string()),
         imported_scene_paths: vec![DEFAULT_ENTRY_SCENE.to_string()],
+        import_summary,
     })
 }
 
@@ -2539,6 +2860,7 @@ fn resolve_or_wrap_project_dir(
             notice: None,
             preferred_scene_path: Some(preferred_scene_path.clone()),
             imported_scene_paths: vec![preferred_scene_path],
+            import_summary: None,
         });
     }
 
@@ -2556,6 +2878,7 @@ fn resolve_or_wrap_project_dir(
         )),
         preferred_scene_path: Some(project.entry_scene.clone()),
         imported_scene_paths: vec![project.entry_scene],
+        import_summary: None,
     })
 }
 
@@ -2827,9 +3150,17 @@ fn parse_input_command_file(path: String) -> Result<Vec<InputCommandDefinition>,
     if path.trim().is_empty() {
         return Err("Informe um caminho local para command.dat.".to_string());
     }
-    let content = fs::read_to_string(&source_path)
-        .map_err(|error| format!("Falha ao ler command.dat '{}': {}", source_path.display(), error))?;
-    Ok(parse_command_dat(&content, &source_path.display().to_string()))
+    let content = fs::read_to_string(&source_path).map_err(|error| {
+        format!(
+            "Falha ao ler command.dat '{}': {}",
+            source_path.display(),
+            error
+        )
+    })?;
+    Ok(parse_command_dat(
+        &content,
+        &source_path.display().to_string(),
+    ))
 }
 
 // ── App Builder ───────────────────────────────────────────────────────────────
@@ -2964,6 +3295,246 @@ mod tests {
             .join("fixtures")
             .join("projects")
             .join(name)
+    }
+
+    #[test]
+    fn sgdk_logic_import_summary_preserves_fsm_bridge_mapping_truth() {
+        use ugdm::components::{Components, ImportedLogicSemantics, LogicComponent};
+        use ugdm::entities::{Entity, Transform};
+
+        let graph = serde_json::json!({
+            "version": 1,
+            "nodes": [
+                {
+                    "id": "idle",
+                    "type": "fsm_state",
+                    "label": "Idle",
+                    "x": 0,
+                    "y": 0,
+                    "params": {
+                        "import_status": "converted",
+                        "source_file": "src/player.c",
+                        "source_line": 42
+                    }
+                },
+                {
+                    "id": "raw_ai",
+                    "type": "bridge_unconverted_source",
+                    "label": "Raw AI",
+                    "x": 180,
+                    "y": 0,
+                    "params": {
+                        "gap": "AI branch uses inline assembly",
+                        "source_path": "src/enemy.c",
+                        "line": 88
+                    }
+                }
+            ],
+            "edges": []
+        })
+        .to_string();
+        let scene = Scene {
+            scene_id: "scene-main".to_string(),
+            schema_version: None,
+            display_name: None,
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "player".to_string(),
+                display_name: None,
+                prefab: None,
+                transform: Transform::default(),
+                components: Components {
+                    logic: Some(LogicComponent {
+                        graph: Some(graph),
+                        graph_ref: Some("graphs/sgdk_import_player.json".to_string()),
+                        external_source_refs: vec!["src/main.c".to_string()],
+                        imported_semantics: Some(ImportedLogicSemantics {
+                            source: "sgdk_semantic_extractor".to_string(),
+                            extraction_kind: "fsm".to_string(),
+                            confidence: "high".to_string(),
+                            converted_nodes_count: 1,
+                            bridge_count: 1,
+                            states_detected: 1,
+                            blocking_gaps: vec!["input branch unresolved".to_string()],
+                            source_paths: vec!["src/player.c".to_string()],
+                            ..ImportedLogicSemantics::default()
+                        }),
+                        ..LogicComponent::default()
+                    }),
+                    ..Components::default()
+                },
+            }],
+            palettes: Vec::new(),
+            retrofx: None,
+            collision_map: None,
+            layers: None,
+        };
+
+        let summary = sgdk_logic_import_summary_from_scene_with_project(
+            None,
+            &scene,
+            ["[UnsupportedKind] src/asm.s: inline assembly"],
+        );
+
+        assert_eq!(summary.semantic_model_kind, "fsm");
+        assert_eq!(summary.states_detected, 1);
+        assert_eq!(summary.nodes_generated, 2);
+        assert_eq!(summary.bridges_created, 1);
+        assert!(summary
+            .mapped_source_files
+            .iter()
+            .any(|path| path == "src/player.c"));
+        assert!(summary
+            .mapped_source_files
+            .iter()
+            .any(|path| path == "src/enemy.c"));
+        assert!(summary
+            .blocking_gaps
+            .iter()
+            .any(|gap| gap.contains("raw_ai: AI branch uses inline assembly")));
+        assert!(summary
+            .blocking_gaps
+            .iter()
+            .any(|gap| gap.contains("[UnsupportedKind] src/asm.s")));
+    }
+
+    #[test]
+    fn sgdk_logic_import_summary_keeps_phase_d_heuristic_until_extractor_proves_fsm() {
+        use ugdm::components::{Components, ImportedLogicSemantics, LogicComponent};
+        use ugdm::entities::{Entity, Transform};
+
+        let scene = Scene {
+            scene_id: "scene-main".to_string(),
+            schema_version: None,
+            display_name: None,
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "enemy".to_string(),
+                display_name: None,
+                prefab: None,
+                transform: Transform::default(),
+                components: Components {
+                    logic: Some(LogicComponent {
+                        external_source_refs: vec!["src/main.c".to_string()],
+                        imported_semantics: Some(ImportedLogicSemantics {
+                            source: "sgdk_phase_d".to_string(),
+                            confidence: "low".to_string(),
+                            source_paths: vec!["src/main.c".to_string()],
+                            ..ImportedLogicSemantics::default()
+                        }),
+                        ..LogicComponent::default()
+                    }),
+                    ..Components::default()
+                },
+            }],
+            palettes: Vec::new(),
+            retrofx: None,
+            collision_map: None,
+            layers: None,
+        };
+
+        let summary = sgdk_logic_import_summary_from_scene_with_project(
+            None,
+            &scene,
+            std::iter::empty::<String>(),
+        );
+
+        assert_eq!(summary.semantic_model_kind, "heuristic");
+        assert_eq!(summary.states_detected, 0);
+        assert_eq!(summary.transitions_detected, 0);
+        assert_eq!(summary.nodes_generated, 0);
+    }
+
+    #[test]
+    fn sgdk_logic_import_summary_reads_external_graph_ref_without_promoting_heuristic() {
+        use ugdm::components::{Components, ImportedLogicSemantics, LogicComponent};
+        use ugdm::entities::{Entity, Transform};
+
+        let project_dir = temp_dir("sgdk-summary-graph-ref");
+        fs::create_dir_all(project_dir.join("graphs")).expect("create graph dir");
+        fs::write(
+            project_dir.join("graphs").join("sgdk_import_hero.json"),
+            serde_json::json!({
+                "version": 1,
+                "nodes": [
+                    {
+                        "id": "move_probe",
+                        "type": "logic_hint",
+                        "label": "Movement probe",
+                        "x": 0,
+                        "y": 0,
+                        "params": {
+                            "import_status": "converted",
+                            "source_file": "src/player.c",
+                            "source_line": 17
+                        }
+                    },
+                    {
+                        "id": "raw_input",
+                        "type": "bridge_unconverted_source",
+                        "label": "Raw input",
+                        "x": 160,
+                        "y": 0,
+                        "params": {
+                            "gap": "input macro requires manual bridge",
+                            "source_file": "src/input.c",
+                            "source_line": 33
+                        }
+                    }
+                ],
+                "edges": []
+            })
+            .to_string(),
+        )
+        .expect("write graph ref");
+        let scene = Scene {
+            scene_id: "scene-main".to_string(),
+            schema_version: None,
+            display_name: None,
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "hero".to_string(),
+                display_name: None,
+                prefab: None,
+                transform: Transform::default(),
+                components: Components {
+                    logic: Some(LogicComponent {
+                        graph_ref: Some("graphs/sgdk_import_hero.json".to_string()),
+                        external_source_refs: vec!["src/player.c".to_string()],
+                        imported_semantics: Some(ImportedLogicSemantics {
+                            source: "sgdk_phase_d".to_string(),
+                            confidence: "medium".to_string(),
+                            source_paths: vec!["src/player.c".to_string()],
+                            ..ImportedLogicSemantics::default()
+                        }),
+                        ..LogicComponent::default()
+                    }),
+                    ..Components::default()
+                },
+            }],
+            palettes: Vec::new(),
+            retrofx: None,
+            collision_map: None,
+            layers: None,
+        };
+
+        let summary = sgdk_logic_import_summary_from_scene_with_project(
+            Some(&project_dir),
+            &scene,
+            std::iter::empty::<String>(),
+        );
+
+        assert_eq!(summary.semantic_model_kind, "heuristic");
+        assert_eq!(summary.nodes_generated, 2);
+        assert_eq!(summary.bridges_created, 1);
+        assert!(summary
+            .mapped_source_files
+            .iter()
+            .any(|path| path == "src/input.c"));
+        assert!(summary
+            .blocking_gaps
+            .iter()
+            .any(|gap| gap.contains("raw_input: input macro requires manual bridge")));
     }
 
     fn copy_dir_all(src: &Path, dst: &Path) {

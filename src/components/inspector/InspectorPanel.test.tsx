@@ -522,4 +522,62 @@ describe("InspectorPanel", () => {
     expect((imported as HTMLDetailsElement).open).toBe(false);
     expect(transform!.compareDocumentPosition(imported!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
+
+  it("shows entity-level SGDK logic import truth without expanding long diagnostics", async () => {
+    const importedEntity = spriteFixtureEntity();
+    importedEntity.entity_id = "hero";
+    importedEntity.display_name = "Hero";
+    importedEntity.components.logic = {
+      graph_ref: "graphs/sgdk_import_hero.json",
+      graph_origin: "imported_ref",
+      external_source_refs: ["src/main.c"],
+      logic_hints: ["Fase D: papel importado desta entidade: 'player_avatar'."],
+      imported_semantics: {
+        source: "sgdk_semantic_extractor",
+        gameplay_class: "platformer_horizontal_scroller_signals",
+        entity_role: "player_avatar",
+        confidence: "high",
+        role_reason: "FSM extraida de subset suportado; gaps preservados como bridge.",
+        driver_functions: ["player_tick"],
+        source_paths: ["src/player.c"],
+        audit_flags: ["primary_sprite"],
+        extraction_kind: "fsm",
+        converted_nodes_count: 5,
+        bridge_count: 1,
+        gap_count: 1,
+        status: "partial",
+        states_detected: 2,
+        transitions_detected: 3,
+        blocking_gaps: ["AI helper remains bridge"],
+      } as unknown as NonNullable<Entity["components"]["logic"]>["imported_semantics"],
+    };
+
+    await act(async () => {
+      useEditorStore.setState({
+        activeScene: {
+          ...EMPTY_SCENE,
+          entities: [importedEntity],
+        },
+        activeSceneSource: {
+          ...EMPTY_SCENE,
+          entities: [importedEntity],
+        },
+        selectedEntityId: "hero",
+      });
+      await flush();
+      await flush();
+    });
+
+    const truth = container.querySelector("[data-testid='inspector-logic-import-truth']");
+    const imported = container.querySelector("[data-testid='inspector-imported-context']");
+
+    expect(truth?.textContent).toContain("Logic: FSM parcial");
+    expect(truth?.textContent).toContain("graph_ref: graphs/sgdk_import_hero.json");
+    expect(truth?.textContent).toContain("confidence: high");
+    expect(truth?.textContent).toContain("converted_nodes_count: 5");
+    expect(truth?.textContent).toContain("bridge_count: 1");
+    expect(truth?.textContent).toContain("source mapping: src/player.c, src/main.c");
+    expect(imported).toBeInstanceOf(HTMLDetailsElement);
+    expect((imported as HTMLDetailsElement).open).toBe(false);
+  });
 });

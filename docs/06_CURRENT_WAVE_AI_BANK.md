@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-19 (rodada 48 - consolidacao GameMaker + command.dat)
+**Ultima Atualizacao:** 2026-05-20 (rodada 49 - SGDK Logic truth UX/QA)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,17 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-20 rodada 49 - branch `codex/sgdk-logic-truth-product-qa`):**
+  - **Worktree isolado:** trabalho executado em `F:\Projects\RetroDevStudio-sgdk-logic-truth-qa`, a partir de `origin/codex/project-cohesion-full-build` porque `origin/main` ainda nao continha a consolidacao GameMaker + command.dat. Branches dos agentes SGDK/nodes A/B/C nao foram editadas.
+  - **Produto mostra a verdade:** a UI deixou de depender de leitura unica tipo "SGDK suportado" e passou a expor matriz de capacidades: Assets, Build/ROM e Emulacao como `Suportado / Parcial` com detalhe de subset; Cena/entidades parcial; Logica por nodes parcial/experimental; FSM/Estados suportado no subset/experimental; Round-trip bridge/parcial; Equivalencia gameplay nao certificada sem harness especifico.
+  - **Resumo pos-import SGDK:** `OpenProjectResult.import_summary` e o card `Resumo SGDK Logic` expõem estados/transicoes detectadas, nodes gerados, bridges criadas, gaps bloqueantes e arquivos fonte mapeados. O backend agrega esses dados sem promover a Fase D: `semantic_model_kind` fica `heuristic` ate o grafo/modelo declarar FSM real.
+  - **Entidade/Inspector/Hierarchy:** entidades com logica importada mostram sinal compacto (`Logic: FSM parcial`, `Logic: Bridge`, `Logic: parcial`), `graph_ref`, source mapping, confidence, `converted_nodes_count`, `bridge_count` e diagnostico longo colapsado.
+  - **NodeGraph:** nodes importados mostram badges `Converted`, `Bridge`, `Gap` e `Source mapped`; o painel `Source Mapping` cai para source refs da entidade quando o node ainda nao trouxe linha propria; `Import Gaps` fica filtravel e cria gap bloqueante honesto quando o grafo e heuristico sem AST/FSM real. Saida do Semantic Extractor com `extraction_kind=fsm`/nodes `fsm_*` aparece como `FSM extraida`; caso contrario o aviso forte permanece `grafo heuristico`.
+  - **QA RC ampliado:** o bloco G do `scripts/e2e-tauri-build-run.mjs` agora valida import SGDK + Logic, NodeGraph visivel, nodes sem sobreposicao grosseira, Source Mapping, painel de gaps/bridges, shell principal sem overlap textual e screenshots dedicadas: `G-scene-import-summary`, `G-logic-fsm-graph`, `G-node-source-mapping`, `G-gap-bridge-panel`, alem de `G-sgdk-chain` para build/ROM/emulacao.
+  - **Evidencia fresca:** `npm run test:e2e:desktop:qa-rc` passou A-G com `manual-qa-status.json` em `2026-05-20T17:49:35.309Z` e evidencias `src-tauri/target-test/validation/qa-rc-2026-05-20T17-49-07-349Z-*`. O bloco G registrou import summary, grafo heuristico com gap bloqueante de AST/FSM ausente, source mapping `src/main.c`, gap/bridge panel e ROM `rom.bin` SEGA apos Build & Run.
+  - **Corpus e gates finais:** a barra local desta branch passou `check:tree`, `lint`, `tsc`, `npm test` **325/325**, `cargo clippy`, `cargo test --lib` **351 passed / 17 ignored**, `sgdk_matrix_corpus_ --ignored` **7/7**, `sgdk_corpus_real_build_rom_emulation_report --ignored` **122/122** processados com **68** build/ROM/emulacao visivel e **54** bridge-only, `official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --ignored`, `preflight:sgdk-e2e`, `qa-rc`, `build:debug`, `build:portable`, `build:msi` e `validate-upstream-windows.ps1 -SkipRustTests`.
+  - **Status honesto:** SGDK Build/ROM/Emulacao mantem a certificacao existente; SGDK Logic Nodes **nao** sobe para "subset funcional validado" ate A+B+C passarem integrados. Nao usar `Stable` para logica importada. `BLAZE_ENGINE` permanece compat/bridge quando necessario, sem equivalencia 1:1.
 
 * **O que acabou de acontecer (2026-05-19 rodada 48 - branch `codex/project-cohesion-full-build`):**
   - **Consolidacao:** `origin/main` (ja com GameMaker vertical via PR #8) + `origin/codex/command-dat-artstudio-node-runtime` integrados em uma unica branch coesa.

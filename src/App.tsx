@@ -80,6 +80,12 @@ import {
   getShortcutTitle,
   groupShortcutsByGroup,
 } from "./core/shortcuts";
+import {
+  buildSgdkCapabilityMatrix,
+  formatSgdkImportSummaryKind,
+  type CapabilityTone,
+  type SgdkImportSummary,
+} from "./core/sgdkLogicDiagnostics";
 
 const ExplorerWorkspace = lazy(() => import("./components/explorer/ExplorerWorkspace"));
 const InspectorPanel = lazy(() => import("./components/inspector/InspectorPanel"));
@@ -643,6 +649,101 @@ function TemplateFirstSuccessCard({
   );
 }
 
+function sgdkCapabilityToneClass(tone: CapabilityTone): string {
+  switch (tone) {
+    case "supported":
+      return "border-[#a6e3a1]/30 bg-[#a6e3a1]/10 text-[#a6e3a1]";
+    case "bridge":
+      return "border-[#f9e2af]/30 bg-[#f9e2af]/10 text-[#f9e2af]";
+    case "blocked":
+      return "border-[#f38ba8]/30 bg-[#f38ba8]/10 text-[#f38ba8]";
+    case "experimental":
+      return "border-[#cba6f7]/30 bg-[#cba6f7]/10 text-[#cba6f7]";
+    case "partial":
+    default:
+      return "border-[#89b4fa]/30 bg-[#89b4fa]/10 text-[#89b4fa]";
+  }
+}
+
+function SgdkCapabilityMatrix({ profile }: { profile: ExternalImportProfileSummary }) {
+  const items = buildSgdkCapabilityMatrix(profile);
+  return (
+    <div
+      data-testid="sgdk-capability-matrix"
+      className="mt-3 rounded border border-[#313244] bg-[#0b1020] p-3 text-[10px] text-[#94a3b8]"
+    >
+      <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#89b4fa]">
+        Matriz de capacidades SGDK
+      </p>
+      <div className="mt-2 grid gap-2 md:grid-cols-2">
+        {items.map((item) => (
+          <div key={item.id} className="rounded border border-[#313244] bg-[#11111b] px-2 py-1.5">
+            <div className="flex items-start justify-between gap-2">
+              <span className="font-semibold text-[#cdd6f4]">{item.label}</span>
+              <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[8px] font-semibold ${sgdkCapabilityToneClass(item.tone)}`}>
+                {item.statusLabel}
+              </span>
+            </div>
+            <p className="mt-1 leading-5 text-[#7f849c]">{item.detail}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SgdkImportSummaryCard({ summary }: { summary: SgdkImportSummary }) {
+  const rows = [
+    ["estados detectados", summary.states_detected ?? 0],
+    ["transicoes detectadas", summary.transitions_detected ?? 0],
+    ["nodes gerados", summary.nodes_generated ?? 0],
+    ["bridges criadas", summary.bridges_created ?? 0],
+  ] as const;
+  return (
+    <section
+      data-testid="sgdk-import-summary"
+      className="mx-3 mt-3 rounded border border-[#89b4fa]/30 bg-[#0b1020] p-3 text-[10px] text-[#94a3b8]"
+    >
+      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#89b4fa]">
+            Resumo SGDK Logic
+          </p>
+          <p className="mt-1 text-[#cdd6f4]">
+            {formatSgdkImportSummaryKind(summary)}. Nodes funcionais, bridges e gaps ficam separados.
+          </p>
+        </div>
+        <span className="rounded-full border border-[#f9e2af]/35 bg-[#f9e2af]/10 px-2 py-0.5 text-[8px] font-semibold uppercase tracking-[0.14em] text-[#f9e2af]">
+          Equivalencia gameplay nao certificada
+        </span>
+      </div>
+      <div className="mt-2 grid gap-2 md:grid-cols-4">
+        {rows.map(([label, value]) => (
+          <div key={label} className="rounded border border-[#313244] bg-[#11111b] px-2 py-1.5">
+            <p className="text-[#7f849c]">{label}</p>
+            <p className="mt-1 font-mono text-sm text-[#cdd6f4]">{value}</p>
+          </div>
+        ))}
+      </div>
+      {summary.blocking_gaps?.length ? (
+        <div className="mt-2 rounded border border-[#f38ba8]/30 bg-[#f38ba8]/10 px-2 py-1.5">
+          <p className="font-semibold text-[#f38ba8]">gaps bloqueantes</p>
+          <ul className="mt-1 list-inside list-disc text-[#f9e2af]">
+            {summary.blocking_gaps.map((gap) => (
+              <li key={gap}>{gap}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {summary.mapped_source_files?.length ? (
+        <p className="mt-2 font-mono text-[9px] text-[#7f849c]">
+          arquivos fonte mapeados: {summary.mapped_source_files.join(", ")}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 function WorkspacePanelPlaceholder({ label }: { label: string }) {
   return (
     <div className="flex h-full min-h-0 items-center justify-center bg-[#09090b] px-4 text-center text-[11px] text-[#64748b]">
@@ -1066,6 +1167,7 @@ export default function App() {
   const [selectedExternalImportProfileId, setSelectedExternalImportProfileId] = useState("");
   const [showExternalImportSection, setShowExternalImportSection] = useState(false);
   const [templateDonorPaths, setTemplateDonorPaths] = useState<Record<string, string>>({});
+  const [lastSgdkImportSummary, setLastSgdkImportSummary] = useState<SgdkImportSummary | null>(null);
   const [showProjectWizard, setShowProjectWizard] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
@@ -1831,6 +1933,7 @@ export default function App() {
         "Projeto",
         result.preferred_scene_path
       );
+      setLastSgdkImportSummary(result.import_summary ?? null);
       if (hydrated) {
         logMessage("success", `Projeto aberto: ${result.name} (${result.path})`);
         if (result.notice) {
@@ -1855,6 +1958,7 @@ export default function App() {
       scope,
       result.preferred_scene_path
     );
+    setLastSgdkImportSummary(result.import_summary ?? null);
     if (!hydrated) {
       throw new Error(`Falha ao hidratar o projeto: ${result.path}`);
     }
@@ -2036,6 +2140,11 @@ export default function App() {
         selectedTemplate.id,
         donorPath
       );
+      setLastSgdkImportSummary(
+        selectedTemplate.source_kind === "external_sgdk"
+          ? result.import_summary ?? null
+          : null
+      );
       const hydrated = await hydrateProjectState(
         result.path,
         result.name,
@@ -2095,6 +2204,9 @@ export default function App() {
         newProjBaseDir.trim(),
         selectedExternalImportProfile.id,
         projectPath
+      );
+      setLastSgdkImportSummary(
+        selectedExternalImportProfile.id === "sgdk" ? result.import_summary ?? null : null
       );
       const hydrated = await hydrateProjectState(
         result.path,
@@ -2403,6 +2515,7 @@ export default function App() {
     setHwStatus(null);
     resetHwValidation();
     setSelectedEntityId(null);
+    setLastSgdkImportSummary(null);
     logMessage("info", "Projeto fechado.");
   }
 
@@ -2779,6 +2892,7 @@ export default function App() {
         if (!hydrated) {
           throw new Error(`Falha ao hidratar importacao SGDK em ${result.path}`);
         }
+        setLastSgdkImportSummary(result.import_summary ?? null);
         return result.path;
       },
       closeProject: () => handleCloseProject(),
@@ -3415,6 +3529,9 @@ export default function App() {
                         ? "Esta wave de importacao externa continua Mega Drive only para manter o caminho canonico enxuto."
                         : "Perfil externo compativel com o fluxo atual do wizard."}
                     </p>
+                    {selectedExternalImportProfile?.id === "sgdk" ? (
+                      <SgdkCapabilityMatrix profile={selectedExternalImportProfile} />
+                    ) : null}
                     <div className="mt-3 flex justify-end">
                       <ToolbarButton
                         label={creatingProject ? "Importando..." : "Importar Externo"}
@@ -3852,6 +3969,10 @@ export default function App() {
         <span data-testid="build-live-error-summary" className="sr-only">
           Live com falha: {liveBuildErrorSummary}
         </span>
+      ) : null}
+
+      {lastSgdkImportSummary ? (
+        <SgdkImportSummaryCard summary={lastSgdkImportSummary} />
       ) : null}
 
       {!showProjectWizard && !focusedShell && workspaceGuide && (

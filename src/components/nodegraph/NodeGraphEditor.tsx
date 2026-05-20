@@ -5,6 +5,14 @@ import { parseSceneJson, resolveScenePrefabs } from "../../core/ipc/sceneService
 import { useEditorStore } from "../../core/store/editorStore";
 import { getEntityDisplayName } from "../../core/entityDisplay";
 import { resolveEntitySourceRefs } from "../../core/entityAuthoring";
+import {
+  collectGraphImportGaps,
+  filterGraphImportGaps,
+  formatImportedSemanticsKind,
+  getGraphNodeImportBadges,
+  getGraphNodeSourceMapping,
+  type CapabilityTone,
+} from "../../core/sgdkLogicDiagnostics";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -91,6 +99,19 @@ type GraphBounds = {
   maxX: number;
   maxY: number;
 };
+
+const IMPORT_PARAM_KEYS = new Set([
+  "import_status",
+  "converted",
+  "bridge",
+  "gap",
+  "gap_id",
+  "source",
+  "source_file",
+  "source_path",
+  "source_line",
+  "line",
+]);
 
 type NodeGraphSummary = {
   totalNodes: number;
@@ -1678,6 +1699,8 @@ function NodeCard({
 }: NodeCardProps) {
   const group = getGroupForType(node.type);
   const headerBg = GROUP_HEADER_BG[group] ?? "bg-[#4a4a3a]";
+  const importBadges = getGraphNodeImportBadges(node);
+  const visibleParams = Object.entries(node.params).filter(([key]) => !IMPORT_PARAM_KEYS.has(key));
 
   return (
     <div
@@ -1694,6 +1717,22 @@ function NodeCard({
       >
         {getNodeDisplayName(node.type)}
       </div>
+
+      {importBadges.length > 0 ? (
+        <div className="flex flex-wrap gap-1 border-b border-slate-700/50 px-3 py-1.5">
+          {importBadges.map((badge) => (
+            <span
+              key={badge.label}
+              className={[
+                "rounded-full border px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em]",
+                importBadgeClass(badge.tone),
+              ].join(" ")}
+            >
+              {badge.label}
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       {/* Ports */}
       <div className="flex gap-2 px-3 py-2">
@@ -1735,9 +1774,9 @@ function NodeCard({
       </div>
 
       {/* Params */}
-      {Object.keys(node.params).length > 0 && (
+      {visibleParams.length > 0 && (
         <div className="flex flex-col gap-0.5 border-t border-slate-700/50 px-3 pb-2 pt-1.5">
-          {Object.entries(node.params).map(([k, v]) => (
+          {visibleParams.map(([k, v]) => (
             <div key={k} className="flex justify-between text-[10px]">
               <span className="text-[#6c7086]">{getNodeParamDisplayName(k)}</span>
               <span className="font-mono text-[#cdd6f4]">{String(v)}</span>
@@ -1747,6 +1786,22 @@ function NodeCard({
       )}
     </div>
   );
+}
+
+function importBadgeClass(tone: CapabilityTone): string {
+  switch (tone) {
+    case "supported":
+      return "border-[#a6e3a1]/35 bg-[#a6e3a1]/10 text-[#a6e3a1]";
+    case "bridge":
+      return "border-[#f9e2af]/35 bg-[#f9e2af]/10 text-[#f9e2af]";
+    case "blocked":
+      return "border-[#f38ba8]/35 bg-[#f38ba8]/10 text-[#f38ba8]";
+    case "experimental":
+      return "border-[#cba6f7]/35 bg-[#cba6f7]/10 text-[#cba6f7]";
+    case "partial":
+    default:
+      return "border-[#89b4fa]/35 bg-[#89b4fa]/10 text-[#89b4fa]";
+  }
 }
 
 interface EmptyStateOverlayProps {
@@ -1846,6 +1901,7 @@ export default function NodeGraphEditor() {
   const [viewOffset, setViewOffset] = useState<ViewOffset>({ x: 0, y: 0 });
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const [guidedCommentary, setGuidedCommentary] = useState<GuidedFlowCommentary | null>(null);
+  const [gapFilter, setGapFilter] = useState("");
   const svgRef = useRef<SVGSVGElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const saveTimerRef = useRef<number | null>(null);
@@ -1865,6 +1921,7 @@ export default function NodeGraphEditor() {
       setPendingEdge(null);
       setViewOffset({ x: 0, y: 0 });
       setGuidedCommentary(null);
+      setGapFilter("");
       lastPersistedGraphRef.current = serializeNodeGraph(nextGraph);
     };
     const entityGraph = selectedEntity?.components.logic?.graph;
@@ -2074,6 +2131,25 @@ export default function NodeGraphEditor() {
   }, [activeScene, selectedEntity]);
   const graphOriginLabel = selectedEntity?.components.logic?.graph_origin;
   const importedSemantics = selectedEntity?.components.logic?.imported_semantics;
+  const importedSemanticsKind = formatImportedSemanticsKind(importedSemantics);
+  const sourceMappedNode = useMemo(
+    () =>
+      selectedNode && getGraphNodeSourceMapping(selectedNode)
+        ? selectedNode
+        : graph.nodes.find((node) => getGraphNodeSourceMapping(node)) ?? null,
+    [graph.nodes, selectedNode]
+  );
+  const selectedSourceMapping =
+    (sourceMappedNode ? getGraphNodeSourceMapping(sourceMappedNode) : null) ??
+    (selectedEntitySourceRefs[0] ? { file: selectedEntitySourceRefs[0] } : null);
+  const importGaps = useMemo(
+    () => collectGraphImportGaps(graph, importedSemantics),
+    [graph, importedSemantics]
+  );
+  const visibleImportGaps = useMemo(
+    () => filterGraphImportGaps(importGaps, gapFilter),
+    [gapFilter, importGaps]
+  );
 
   const orderedQuickActionTemplates = useMemo(() => {
     const role = importedSemantics?.entity_role?.trim();
@@ -2546,6 +2622,104 @@ export default function NodeGraphEditor() {
               </div>
             </div>
 
+            {importedSemantics ? (
+              <div
+                data-testid="nodegraph-import-provenance"
+                className={[
+                  "rounded border px-2 py-1.5 text-[10px] leading-snug",
+                  importedSemanticsKind === "FSM extraida"
+                    ? "border-[#a6e3a1]/35 bg-[#a6e3a1]/10 text-[#d9f99d]"
+                    : "border-[#f9e2af]/35 bg-[#f9e2af]/10 text-[#f9e2af]",
+                ].join(" ")}
+              >
+                <p className="text-[9px] font-semibold uppercase tracking-[0.14em]">
+                  {importedSemanticsKind}
+                </p>
+                <p className="mt-1">
+                  {importedSemanticsKind === "FSM extraida"
+                    ? "FSM extraida do modelo semantico; bridges e gaps continuam visiveis abaixo."
+                    : "Aviso: grafo heuristico. Ele ajuda autoria, mas nao representa AST/FSM real do jogo donor."}
+                </p>
+              </div>
+            ) : null}
+
+            {selectedSourceMapping ? (
+              <div
+                data-testid="nodegraph-source-mapping"
+                className="rounded border border-[#89b4fa]/35 bg-[#89b4fa]/10 px-2 py-1.5 text-[10px] leading-snug text-[#cdd6f4]"
+              >
+                <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#89b4fa]">
+                  Source Mapping
+                </p>
+                <p className="mt-1 font-mono text-[#cdd6f4]">
+                  {selectedSourceMapping.file}
+                  {selectedSourceMapping.line ? `:${selectedSourceMapping.line}` : ""}
+                </p>
+                {sourceMappedNode ? (
+                  <p className="mt-1 text-[#7f849c]">
+                    node: <span className="font-mono">{sourceMappedNode.id}</span>
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
+            {importGaps.length > 0 ? (
+              <div
+                data-testid="nodegraph-import-gaps"
+                className="rounded border border-[#f38ba8]/35 bg-[#f38ba8]/10 px-2 py-1.5 text-[10px] leading-snug text-[#f9e2af]"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#f38ba8]">
+                    Import Gaps
+                  </p>
+                  <span className="font-mono text-[9px] text-[#f9e2af]">
+                    {visibleImportGaps.length}/{importGaps.length}
+                  </span>
+                </div>
+                <input
+                  data-testid="nodegraph-gap-filter"
+                  value={gapFilter}
+                  onChange={(event) => setGapFilter(event.target.value)}
+                  className="mt-1 w-full rounded border border-[#45475a] bg-[#11111b] px-2 py-1 text-[10px] text-[#cdd6f4] outline-none focus:border-[#f38ba8]"
+                  placeholder="Filtrar gaps..."
+                />
+                <ul className="mt-1 max-h-24 space-y-1 overflow-auto">
+                  {visibleImportGaps.map((gap) => (
+                    <li
+                      key={gap.id}
+                      className="rounded border border-[#313244] bg-[#181825] px-1.5 py-1"
+                    >
+                      <div className="flex items-start gap-1.5">
+                        <span
+                          className={[
+                            "shrink-0 rounded border px-1 py-0.5 text-[8px] font-semibold leading-none",
+                            gap.severity === "blocking"
+                              ? "border-[#f38ba8]/40 bg-[#f38ba8]/10 text-[#f38ba8]"
+                              : "border-[#f9e2af]/40 bg-[#f9e2af]/10 text-[#f9e2af]",
+                          ].join(" ")}
+                        >
+                          {gap.severity === "blocking" ? "Bloqueante" : "Bridge"}
+                        </span>
+                        <span className={gap.severity === "blocking" ? "min-w-0 text-[#f38ba8]" : "min-w-0 text-[#f9e2af]"}>
+                          {gap.nodeId ? (
+                            <span className="block truncate font-mono text-[9px]" title={gap.nodeId}>
+                              {gap.nodeId}
+                            </span>
+                          ) : null}
+                          <span className="block break-words">{gap.label}</span>
+                          {gap.source ? (
+                            <span className="block truncate font-mono text-[9px] text-[#7f849c]" title={gap.source}>
+                              {gap.source}
+                            </span>
+                          ) : null}
+                        </span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
             {graphSummary.totalNodes > 0 && graphSummary.entryNodeIds.length === 0 && (
               <p className="text-[#fab387]">
                 Grafo sem evento de entrada: adicione um no de evento para iniciar o fluxo.
@@ -2580,7 +2754,7 @@ export default function NodeGraphEditor() {
             {importedSemantics ? (
               <div className="rounded border border-[#45475a] bg-[#11111b] px-2 py-1.5 text-[10px] leading-snug text-[#bac2de]">
                 <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#94e2d5]">
-                  Inferencia importada (heuristica)
+                  Inferencia importada ({importedSemanticsKind})
                 </p>
                 <p className="mt-1">
                   Papel: <span className="font-mono text-[#f9e2af]">{importedSemantics.entity_role ?? "—"}</span>

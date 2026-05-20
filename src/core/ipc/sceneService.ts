@@ -103,6 +103,14 @@ export interface ImportedLogicSemantics {
   driver_functions?: string[];
   source_paths?: string[];
   audit_flags?: string[];
+  extraction_kind?: string;
+  converted_nodes_count?: number;
+  bridge_count?: number;
+  gap_count?: number;
+  status?: string;
+  states_detected?: number;
+  transitions_detected?: number;
+  blocking_gaps?: string[];
 }
 
 export interface LogicComponent {

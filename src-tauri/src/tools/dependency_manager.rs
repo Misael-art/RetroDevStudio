@@ -205,7 +205,9 @@ impl DependencyKind {
         match self {
             Self::Jdk => detect_java_program().is_some(),
             Self::Sgdk => {
-                let root = self.install_dir();
+                let Some(root) = detect_dependency_root("SGDK_ROOT", "sgdk") else {
+                    return false;
+                };
                 root.join("makefile.gen").exists()
                     || (root.join("bin").exists() && root.join("inc").exists())
             }
@@ -227,6 +229,9 @@ impl DependencyKind {
     fn status(self) -> DependencyStatus {
         let install_dir = match self {
             Self::Jdk => detect_java_install_dir(),
+            Self::Sgdk => {
+                detect_dependency_root("SGDK_ROOT", "sgdk").unwrap_or_else(|| self.install_dir())
+            }
             _ => self.install_dir(),
         };
         let manifest = read_manifest(self.manifest_dir(), manifest_file_name(self));
@@ -365,20 +370,10 @@ fn ensure_sgdk_boot_templates(install_dir: &Path) -> Result<(), String> {
         )
     })?;
 
-    fs::copy(&fallback_sega, &sega_source).map_err(|e| {
-        format!(
-            "Falha ao restaurar '{}': {}",
-            sega_source.display(),
-            e
-        )
-    })?;
-    fs::copy(&fallback_rom_head, &rom_head_source).map_err(|e| {
-        format!(
-            "Falha ao restaurar '{}': {}",
-            rom_head_source.display(),
-            e
-        )
-    })?;
+    fs::copy(&fallback_sega, &sega_source)
+        .map_err(|e| format!("Falha ao restaurar '{}': {}", sega_source.display(), e))?;
+    fs::copy(&fallback_rom_head, &rom_head_source)
+        .map_err(|e| format!("Falha ao restaurar '{}': {}", rom_head_source.display(), e))?;
 
     Ok(())
 }
@@ -451,7 +446,8 @@ where
 
     if current_status.installed {
         if matches!(dependency, DependencyKind::Sgdk) {
-            if let Err(error) = ensure_sgdk_boot_templates(&dependency.install_dir()) {
+            let sgdk_dir = PathBuf::from(&current_status.install_dir);
+            if let Err(error) = ensure_sgdk_boot_templates(&sgdk_dir) {
                 logger.emit("error", &error);
                 return DependencyInstallResult {
                     ok: false,
@@ -1349,9 +1345,19 @@ fn repo_root() -> PathBuf {
 }
 
 fn detect_dependency_root(env_var: &str, local_dir_name: &str) -> Option<PathBuf> {
-    std::env::var_os(env_var)
-        .map(PathBuf::from)
-        .filter(|path| path.exists())
+    let env_vars = if local_dir_name == "sgdk" {
+        vec![env_var, "GDK", "GDK_WIN"]
+    } else {
+        vec![env_var]
+    };
+
+    env_vars
+        .into_iter()
+        .find_map(|candidate_env_var| {
+            std::env::var_os(candidate_env_var)
+                .map(PathBuf::from)
+                .filter(|path| path.exists())
+        })
         .or_else(|| {
             let local = repo_root().join("toolchains").join(local_dir_name);
             local.exists().then_some(local)
@@ -1399,8 +1405,12 @@ fn detect_java_program() -> Option<PathBuf> {
 fn detect_java_install_dir() -> PathBuf {
     detect_java_home()
         .or_else(|| {
-            detect_java_program()
-                .and_then(|program| program.parent().and_then(Path::parent).map(Path::to_path_buf))
+            detect_java_program().and_then(|program| {
+                program
+                    .parent()
+                    .and_then(Path::parent)
+                    .map(Path::to_path_buf)
+            })
         })
         .unwrap_or_else(|| DependencyKind::Jdk.install_dir())
 }
@@ -1528,10 +1538,12 @@ mod tests {
             Some("Bearer test-token")
         );
 
-        let non_github_request =
-            github_api_get(&client, "https://api.adoptium.net/v3/info/available_releases")
-                .build()
-                .expect("build non github request");
+        let non_github_request = github_api_get(
+            &client,
+            "https://api.adoptium.net/v3/info/available_releases",
+        )
+        .build()
+        .expect("build non github request");
         assert!(
             non_github_request.headers().get(AUTHORIZATION).is_none(),
             "GitHub token must not be sent to non-GitHub APIs"
@@ -1665,7 +1677,11 @@ mod tests {
         let status = DependencyKind::Jdk.status();
         assert!(status.installed, "jdk status should detect JAVA_HOME");
         assert_eq!(PathBuf::from(&status.install_dir), java_home);
-        assert!(status.issues.is_empty(), "unexpected issues: {:?}", status.issues);
+        assert!(
+            status.issues.is_empty(),
+            "unexpected issues: {:?}",
+            status.issues
+        );
 
         restore_env_var("JAVA_HOME", previous_java_home);
         let _ = fs::remove_dir_all(status.install_dir);

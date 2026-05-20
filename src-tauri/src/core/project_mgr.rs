@@ -2382,12 +2382,14 @@ fn imported_sprite_logic_graph_phase_d(
         (_, "projectile_actor") => (4, 0),
         _ => (2, 0),
     };
+    let lane_y = 64;
+    let mut next_node_x = 528;
     let start = serde_json::json!({
         "id": "start",
         "type": "event_start",
         "label": "On Start",
         "x": 48,
-        "y": 48,
+        "y": lane_y,
         "inputs": [],
         "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
         "params": {}
@@ -2396,8 +2398,8 @@ fn imported_sprite_logic_graph_phase_d(
         "id": "move_sprite",
         "type": "sprite_move",
         "label": move_label,
-        "x": 228,
-        "y": 48,
+        "x": 288,
+        "y": lane_y,
         "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
         "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
         "params": { "target": target, "dx": mv_dx, "dy": mv_dy }
@@ -2422,12 +2424,14 @@ fn imported_sprite_logic_graph_phase_d(
             (_, "projectile_actor") => "Tiro materializado (heuristica)",
             _ => "Disparo (heuristica)",
         };
+        let fire_x = next_node_x;
+        next_node_x += 240;
         nodes.push(serde_json::json!({
             "id": "fire_hint",
             "type": "action_sound",
             "label": sfx_label,
-            "x": 228,
-            "y": 168,
+            "x": fire_x,
+            "y": lane_y,
             "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
             "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
             "params": { "sfx": "fire" }
@@ -2450,12 +2454,14 @@ fn imported_sprite_logic_graph_phase_d(
             (-1, -1, "MAP_scrollH+V")
         };
         let scroll_label = format!("Scroll Tilemap ({label_suffix})");
+        let scroll_x = next_node_x;
+        next_node_x += 240;
         nodes.push(serde_json::json!({
             "id": "scroll_bg",
             "type": "scroll_tilemap",
             "label": scroll_label,
-            "x": 408,
-            "y": 48,
+            "x": scroll_x,
+            "y": lane_y,
             "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
             "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
             "params": { "layer": "BG_A", "dx": dx, "dy": dy }
@@ -2472,6 +2478,7 @@ fn imported_sprite_logic_graph_phase_d(
 
     // Bloco E (sprint): padroes uteis adicionais por *papel* da entidade — o grafo inicial deixa de ser apenas
     // start -> move (+ fire opcional) + scroll; cada role recebe um no terminal encadeado com semantica propria.
+    let role_x = next_node_x;
     let (role_node_id, role_node) = match semantic_profile.entity_role.as_str() {
         "player_avatar" => (
             "role_player_idle_anim",
@@ -2479,8 +2486,8 @@ fn imported_sprite_logic_graph_phase_d(
                 "id": "role_player_idle_anim",
                 "type": "sprite_anim",
                 "label": "Anim jogador (idle/walk — heuristica de papel)",
-                "x": 588,
-                "y": 168,
+                "x": role_x,
+                "y": lane_y,
                 "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "params": { "target": target, "anim": "idle" }
@@ -2492,8 +2499,8 @@ fn imported_sprite_logic_graph_phase_d(
                 "id": "role_enemy_threat_sound",
                 "type": "action_sound",
                 "label": "Zona de perigo / contato (inimigo)",
-                "x": 588,
-                "y": 168,
+                "x": role_x,
+                "y": lane_y,
                 "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "params": { "sfx": "hit" }
@@ -2505,8 +2512,8 @@ fn imported_sprite_logic_graph_phase_d(
                 "id": "role_support_parallax_hint",
                 "type": "effect_parallax",
                 "label": "Parallax de cenario (apoio / vfx leve)",
-                "x": 588,
-                "y": 168,
+                "x": role_x,
+                "y": lane_y,
                 "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "params": { "layer": "BG_A", "speed_x": 1, "speed_y": 0 }
@@ -2518,8 +2525,8 @@ fn imported_sprite_logic_graph_phase_d(
                 "id": "role_fighter_melee_sound",
                 "type": "action_sound",
                 "label": "Impacto corpo-a-corpo (lutador)",
-                "x": 588,
-                "y": 168,
+                "x": role_x,
+                "y": lane_y,
                 "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "params": { "sfx": "hit" }
@@ -2531,8 +2538,8 @@ fn imported_sprite_logic_graph_phase_d(
                 "id": "role_projectile_trail_anim",
                 "type": "sprite_anim",
                 "label": "Anim projetil (trajetoria — heuristica)",
-                "x": 588,
-                "y": 168,
+                "x": role_x,
+                "y": lane_y,
                 "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "params": { "target": target, "anim": "fly" }
@@ -2544,8 +2551,8 @@ fn imported_sprite_logic_graph_phase_d(
                 "id": "role_hud_scroll_tick",
                 "type": "scroll_tilemap",
                 "label": "Scroll leve sincronizado com HUD (heuristica)",
-                "x": 588,
-                "y": 168,
+                "x": role_x,
+                "y": lane_y,
                 "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "params": { "layer": "BG_A", "dx": 0, "dy": -1 }
@@ -2557,8 +2564,8 @@ fn imported_sprite_logic_graph_phase_d(
                 "id": "role_generic_import_marker",
                 "type": "var_set",
                 "label": "Marcador de import generico (sprite)",
-                "x": 588,
-                "y": 168,
+                "x": role_x,
+                "y": lane_y,
                 "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "params": { "var_name": "imported_sprite_flag", "value": 1 }
@@ -2822,6 +2829,7 @@ fn apply_sgdk_phase_d_to_sprite_entity(
         driver_functions: semantic_profile.driver_functions.clone(),
         source_paths: semantic_profile.source_paths.clone(),
         audit_flags: semantic_profile.audit_flags.clone(),
+        ..ImportedLogicSemantics::default()
     });
     let mut evidence_refs = scan.entity_resource_source_refs(resource_name);
     if evidence_refs.is_empty() {
@@ -7328,7 +7336,10 @@ pub fn import_gamemaker_project(
         }
 
         let role = gamemaker_entity_role(&object.name, &logic_hints);
-        let (asset, materialized_sprite_dims) = if gamemaker_should_attach_md_sprite(&role, &object.name) {
+        let (asset, materialized_sprite_dims) = if gamemaker_should_attach_md_sprite(
+            &role,
+            &object.name,
+        ) {
             if let Some(sprite) = sprite {
                 let (asset_path, width, height) = materialize_gamemaker_rgba_asset(
                     project_dir,
@@ -7440,6 +7451,7 @@ pub fn import_gamemaker_project(
                         } else {
                             vec!["gml_bridge_preserved".to_string()]
                         },
+                        ..ImportedLogicSemantics::default()
                     }),
                     variables: HashMap::from([
                         (
@@ -7895,8 +7907,12 @@ fn build_gamemaker_collision_map(
     let width = 40u32;
     let height = 28u32;
     let mut data = vec![0u8; (width * height) as usize];
-    let tile_w = wall_sprite.map(|sprite| sprite.width.max(8) / 8).unwrap_or(1);
-    let tile_h = wall_sprite.map(|sprite| sprite.height.max(8) / 8).unwrap_or(1);
+    let tile_w = wall_sprite
+        .map(|sprite| sprite.width.max(8) / 8)
+        .unwrap_or(1);
+    let tile_h = wall_sprite
+        .map(|sprite| sprite.height.max(8) / 8)
+        .unwrap_or(1);
 
     for instance in wall_instances {
         let md_x = gamemaker_coord_to_md_x(instance.x, room_width);
@@ -14220,6 +14236,22 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             "shmup: jogador deve receber no de papel encadeado: {}",
             disk_graph
         );
+        let graph_json: serde_json::Value =
+            serde_json::from_str(&disk_graph).expect("parse graph json");
+        let mut x_positions = graph_json
+            .get("nodes")
+            .and_then(serde_json::Value::as_array)
+            .expect("nodes")
+            .iter()
+            .filter_map(|node| node.get("x").and_then(serde_json::Value::as_i64))
+            .collect::<Vec<_>>();
+        x_positions.sort_unstable();
+        assert!(
+            x_positions.windows(2).all(|pair| pair[1] - pair[0] >= 200),
+            "Phase D deve abrir graph_ref com cards organizados; x_positions={:?}, graph={}",
+            x_positions,
+            disk_graph
+        );
         let _ = fs::remove_dir_all(&donor_dir);
         let _ = fs::remove_dir_all(&project_dir);
     }
@@ -14437,8 +14469,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
 
         assert_eq!(report.imported_scenes, 1);
         assert!(report.skipped_sources.iter().any(|entry| {
-            entry.contains("GameMaker import:")
-                && entry.contains("nodes gerados")
+            entry.contains("GameMaker import:") && entry.contains("nodes gerados")
         }));
         let player = scene
             .entities
@@ -14470,14 +14501,12 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                 .map(|semantics| semantics.confidence.as_str()),
             Some("native_subset")
         );
-        assert!(
-            logic
-                .imported_semantics
-                .as_ref()
-                .is_some_and(|semantics| semantics
-                    .audit_flags
-                    .contains(&"gml_native_subset".to_string()))
-        );
+        assert!(logic
+            .imported_semantics
+            .as_ref()
+            .is_some_and(|semantics| semantics
+                .audit_flags
+                .contains(&"gml_native_subset".to_string())));
         assert_eq!(
             logic
                 .imported_semantics
@@ -14511,12 +14540,15 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         create_project_skeleton(&project_dir, "Summary GameMaker", "megadrive")
             .expect("create project skeleton");
         write_gamemaker_gmx_fixture(&donor_root);
-        let report = import_external_project(&project_dir, "gamemaker", &donor_root)
-            .expect("import");
-        assert!(report.skipped_sources.iter().any(|entry| {
-            entry.contains("nodes gerados") && entry.contains("grafo nativo")
-        }));
-        let graph_path = project_dir.join("graphs").join("gamemaker_inst_player.json");
+        let report =
+            import_external_project(&project_dir, "gamemaker", &donor_root).expect("import");
+        assert!(report
+            .skipped_sources
+            .iter()
+            .any(|entry| { entry.contains("nodes gerados") && entry.contains("grafo nativo") }));
+        let graph_path = project_dir
+            .join("graphs")
+            .join("gamemaker_inst_player.json");
         assert!(graph_path.is_file(), "graph asset must be persisted");
         let _ = fs::remove_dir_all(project_dir);
         let _ = fs::remove_dir_all(donor_root);
