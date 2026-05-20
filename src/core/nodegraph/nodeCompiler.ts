@@ -148,9 +148,32 @@ function buildInputExpression(node: GraphNode, target: "megadrive" | "snes"): st
   const pad = String(node.params.pad ?? "JOY_1");
   const button = String(node.params.button ?? "BUTTON_A");
   if (target === "snes") {
-    return `(padsCurrent(0) & ${button})`;
+    return `(padsCurrent(0) & ${snesButtonMask(button)})`;
   }
   return `(JOY_readJoypad(${pad}) & ${button})`;
+}
+
+function snesButtonMask(button: string): string {
+  const normalized = button.trim().toUpperCase().replace(/^BUTTON_/, "");
+  const aliases: Record<string, string> = {
+    A: "KEY_A",
+    B: "KEY_B",
+    X: "KEY_X",
+    Y: "KEY_Y",
+    L: "KEY_L",
+    R: "KEY_R",
+    LEFT: "KEY_LEFT",
+    RIGHT: "KEY_RIGHT",
+    UP: "KEY_UP",
+    DOWN: "KEY_DOWN",
+    DPAD_LEFT: "KEY_LEFT",
+    DPAD_RIGHT: "KEY_RIGHT",
+    DPAD_UP: "KEY_UP",
+    DPAD_DOWN: "KEY_DOWN",
+    START: "KEY_START",
+    SELECT: "KEY_SELECT",
+  };
+  return aliases[normalized] ?? button;
 }
 
 type CompiledInputCommandStep = {
@@ -701,7 +724,8 @@ function emitExecChainFromNode(
   }
 
   if (node.type === "input_pressed" || node.type === "input_held" || node.type === "input_command") {
-    const nextEdge = findOutgoingExecEdge(graph, node.id, "exec");
+    const nextEdge =
+      findOutgoingExecEdge(graph, node.id, "true") ?? findOutgoingExecEdge(graph, node.id, "exec");
     const falseEdge = findOutgoingExecEdge(graph, node.id, "false");
     const nextNode = nextEdge ? findNode(graph, nextEdge.toNode) : undefined;
     const falseNode = falseEdge ? findNode(graph, falseEdge.toNode) : undefined;

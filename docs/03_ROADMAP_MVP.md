@@ -1,8 +1,10 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-05-20 (rodada 50)
+**Ultima revisao canonica:** 2026-05-20 (rodada 51)
 **Fase ativa real:** Core MVP promovido tecnicamente em main; hardening continua nas superficies experimentais
+
+**Nota 2026-05-20 (rodada 51, branch `codex/snes-pvsneslib-parity-g`):** SNES avancou para **hardening/paridade do subset no-code** com prova vertical real: projeto SNES persistente, staging PVSnesLib (`hdr.asm`, `data.asm`, sprites, palettes, tilemaps e `gfx4snes`), nodes SNES de input/movimento/animacao/tilemap/camera/audio/FSM/timer/variaveis, build ROM real e Libretro SNES com framebuffer visivel. Evidencia: `src-tauri/target-test/validation/snes-real-nocode-game/real-nocode-report.{json,md}`, ROM `real-nocode-game.sfc` de **262144 bytes**, core `Snes9x 1.63 5a40cd5`, framebuffer **256x224**, `non_black_pixels=39184`, `fake_toolchain_used=false`. Status permanece **Em hardening**; isto nao e SNES Stable amplo e nao altera importadores externos.
 
 **Nota 2026-05-20 (rodada 50, branch `codex/product-ui-workspace-redesign`):** fechamento institucional do **QA RC bloco H** com asserts automaticos de shell (topbar, paineis por workspace, console drawer, NodeGraph rail) e **12 screenshots** multi-resolucao em `src-tauri/target-test/validation/`. A matriz tatica de workspaces (Scene/Logic/Game/Debug/Art) deve ser lida com `manual-qa-status.json` e o prefixo de artefactos mais recente; Logic com `showRight=false` exige fluxo E2E que volte a **Scene** antes de acionar botoes do Inspector global. Isto **nao** promove SGDK nem Node Engine.
 
@@ -92,9 +94,9 @@
 
 ## Estado Executivo Atual
 
-- Data de referencia: `2026-05-13`.
+- Data de referencia: `2026-05-20`.
 - Leitura honesta: o core MVP esta tecnicamente promovido em `main`, mas o produto amplo continua em hardening nas superficies experimentais.
-- O core canonico `Projeto -> Editor -> Build -> ROM -> Emulacao` existe e ja foi provado para `Mega Drive` e `SNES`.
+- O core canonico `Projeto -> Editor -> Build -> ROM -> Emulacao` existe e ja foi provado para `Mega Drive` e `SNES`; em `2026-05-20`, SNES recebeu prova adicional de paridade do subset no-code com PVSnesLib/Libretro reais e framebuffer visivel.
 - `Desktop E2E` remoto ficou verde no GitHub/Windows em `2026-04-16` (runs #143/#144, commit `c1a7870`) e foi revalidado no PR #4 em `2026-05-13` para o SHA `d21939c` (`Desktop E2E` pull_request `25788180007`).
 - `release:readiness:promotion` foi reexecutado em `main` no commit `91bb8eb354389e370bb59d6a5ae84c21b4a1429f` e retornou `Pronto para promocao: SIM`.
 - Superficies `Experimental` reais continuam visiveis, mas nao podem contaminar a leitura do fechamento do MVP.

@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-20 (rodada 50 - QA RC bloco H + E2E shell)
+**Ultima Atualizacao:** 2026-05-20 (rodada 51 - SNES no-code parity hardening)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,15 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-20 rodada 51 - branch `codex/snes-pvsneslib-parity-g`):**
+  - **Vertical SNES no-code:** o pipeline PVSnesLib agora cobre staging real (`hdr.asm`, `data.asm`, sprites, palettes, tilemaps e alvos `gfx4snes` quando aplicavel), codegen SNES para input (`input_pressed`, `input_held`, `input_command`), movimento/posicao/velocidade, animacao, scroll/camera, audio seguro, FSM, timer e variaveis, alem de budgets SNES corretos na UI.
+  - **Runtime real:** o harness persistente `official_snes_nocode_game_builds_and_runs_with_real_toolchain --ignored` criou projeto SNES, gerou C/ASM PVSnesLib sem edicao manual, compilou ROM real e rodou Libretro SNES exigindo framebuffer visivel.
+  - **Evidencias:** report em `src-tauri/target-test/validation/snes-real-nocode-game/real-nocode-report.{json,md}`; ROM `real-nocode-game.sfc` com **262144 bytes**; core `Snes9x 1.63 5a40cd5`; framebuffer **256x224**; `non_black_pixels=39184`; `fake_toolchain_used=false`; `manual_code_edits=false`; `generated_from_nodes=true`.
+  - **Windows/toolchain:** builds SNES/PVSnesLib no Windows passam a exigir Git Bash/MSYS2 real; shim WSL nao e aceito como shell suportado.
+  - **Gates locais:** suite SNES focada, `npx vitest run src/core/nodegraph/nodeCompiler.test.ts`, `npm run preflight:sgdk-e2e`, `validate-upstream-windows.ps1 -SkipRustTests`, `npm run build:debug`, `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo clippy`, `cargo test --lib` e `git diff --check`.
+  - **Status honesto:** SNES esta em **hardening/paridade do subset no-code** com Mega Drive para a vertical validada; isto **nao** declara SNES Stable amplo, nao mexe em importadores externos e nao antecipa fases futuras.
+  - **Proximo passo imediato:** abrir PR/checks remotos desta branch e manter qualquer nova expansao SNES condicionada a repetir ROM real + Libretro visivel + report `fake_toolchain_used=false`.
 
 * **O que acabou de acontecer (2026-05-20 rodada 50 - branch `codex/product-ui-workspace-redesign`):**
   - **Bloco H (QA RC):** `assertUiLayoutHealth()` no `scripts/e2e-tauri-build-run.mjs` valida topbar (overflow, colunas, botao Build compacto), painel central, guia, paineis laterais por workspace, console drawer vs status bar, NodeGraph side rail vs canvas/minimap/toolbar, e sobreposicao de botoes com limiar conservador.

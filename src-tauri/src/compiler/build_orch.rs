@@ -879,9 +879,14 @@ where
 
     if target.target == "snes" && cfg!(target_os = "windows") && toolchain.bash_program.is_none() {
         emit!(
-            "warn",
-            "Git Bash/MSYS2 nao encontrado. Tentando build SNES com make direto; o snes_rules pode exigir shell Unix-like no Windows."
+            "error",
+            "Git Bash/MSYS2 real e obrigatorio para builds SNES/PVSnesLib no Windows. Instale Git Bash ou MSYS2; o shim WSL nao e suportado."
         );
+        return BuildResult {
+            ok: false,
+            rom_path: String::new(),
+            log,
+        };
     }
 
     if let Err(error) = invoke_make(&toolchain, &workspace, target, &mut log, &on_log) {
@@ -1551,22 +1556,36 @@ fn render_pvsneslib_makefile(project_slug: &str, ast: &AstOutput) -> String {
     out.push_str("\t@if [ -f $(ROMNAME).sym ]; then cp $(ROMNAME).sym out/$(ROMNAME).sym; fi\n\n");
     out.push_str("clean: cleanBuildRes cleanRom cleanGfx\n\n");
 
-    let mut pic_targets = Vec::new();
+    let mut bitmap_targets = Vec::new();
     for asset in &tilemap_assets {
         let pic_target = format!("src/{}.pic", asset.resource_name);
+        let map_target = format!("src/{}.map", asset.resource_name);
+        let pal_target = format!("src/{}.pal", asset.resource_name);
         let bmp_target = format!("src/{}.bmp", asset.resource_name);
-        pic_targets.push(pic_target.clone());
-        out.push_str(&format!("{}: {}\n", pic_target, bmp_target));
+        bitmap_targets.push(pic_target.clone());
+        bitmap_targets.push(map_target.clone());
+        bitmap_targets.push(pal_target.clone());
+        out.push_str(&format!(
+            "{} {} {}: {}\n",
+            pic_target, map_target, pal_target, bmp_target
+        ));
         out.push_str("\t@echo convert bitmap ... $(notdir $<)\n");
         out.push_str("\t$(GFXCONV) -s 8 -o 16 -u 16 -e 0 -p -m -t bmp -i $<\n\n");
     }
 
     for asset in &ast.sprite_assets {
         let pic_target = format!("src/{}.pic", asset.resource_name);
+        let pal_target = format!("src/{}.pal", asset.resource_name);
+        let data_target = format!("src/{}_data.as", asset.resource_name);
         let bmp_target = format!("src/{}.bmp", asset.resource_name);
         let sprite_size = asset.frame_width.max(asset.frame_height);
-        pic_targets.push(pic_target.clone());
-        out.push_str(&format!("{}: {}\n", pic_target, bmp_target));
+        bitmap_targets.push(pic_target.clone());
+        bitmap_targets.push(pal_target.clone());
+        bitmap_targets.push(data_target.clone());
+        out.push_str(&format!(
+            "{} {} {}: {}\n",
+            pic_target, pal_target, data_target, bmp_target
+        ));
         out.push_str("\t@echo convert bitmap ... $(notdir $<)\n");
         out.push_str(&format!(
             "\t$(GFXCONV) -s {} -o 16 -u 16 -p -t bmp -i $<\n\n",
@@ -1574,10 +1593,10 @@ fn render_pvsneslib_makefile(project_slug: &str, ast: &AstOutput) -> String {
         ));
     }
 
-    if pic_targets.is_empty() {
+    if bitmap_targets.is_empty() {
         out.push_str("bitmaps:\n\t@echo no sprite assets to convert for SNES\n");
     } else {
-        out.push_str(&format!("bitmaps: {}\n", pic_targets.join(" ")));
+        out.push_str(&format!("bitmaps: {}\n", bitmap_targets.join(" ")));
     }
     out.push('\n');
     out
@@ -2351,6 +2370,31 @@ mod tests {
         fs::create_dir_all(&bin_dir).expect("create fake toolchain bin");
         let make_program = fake_make_script(&bin_dir, extension);
         (root, make_program)
+    }
+
+    fn fake_bash_program() -> PathBuf {
+        let root = temp_dir("fake-git-bash");
+        let bin_dir = root.join("bin");
+        fs::create_dir_all(&bin_dir).expect("create fake bash bin");
+        let path = if cfg!(target_os = "windows") {
+            bin_dir.join("bash.cmd")
+        } else {
+            bin_dir.join("bash")
+        };
+        let content = if cfg!(target_os = "windows") {
+            "@echo off\r\nexit /b 0\r\n"
+        } else {
+            "#!/bin/sh\nexit 0\n"
+        };
+        fs::write(&path, content).expect("write fake bash");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&path).expect("stat fake bash").permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&path, permissions).expect("chmod fake bash");
+        }
+        path
     }
 
     fn fake_toolchain_with_sega_rom(root_name: &str, extension: &str) -> (PathBuf, PathBuf) {
@@ -3403,6 +3447,7 @@ PY\n"
         let environment = BuildEnvironment {
             pvsneslib_root: Some(pvsneslib_root),
             pvsneslib_make_program: Some(make_program),
+            pvsneslib_bash_program: Some(fake_bash_program()),
             disable_auto_detect: true,
             ..BuildEnvironment::default()
         };
@@ -3444,6 +3489,52 @@ PY\n"
         let data_asm = fs::read_to_string(&data_path).expect("read snes data asm");
         assert!(data_asm.contains(".include \"hdr.asm\""));
         assert!(data_asm.contains(".include \"src/controller_root_data.as\""));
+        let makefile = fs::read_to_string(project_dir.join("build").join("snes").join("Makefile"))
+            .expect("read SNES makefile");
+        assert!(makefile.contains(
+            "bitmaps: src/controller_root.pic src/controller_root.pal src/controller_root_data.as"
+        ));
+        assert!(makefile.contains("src/controller_root.pic src/controller_root.pal src/controller_root_data.as: src/controller_root.bmp"));
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn snes_windows_build_requires_git_bash_or_msys2() {
+        if !cfg!(target_os = "windows") {
+            return;
+        }
+
+        let _serial = test_serial_guard();
+        let project_dir = workspace_copy("snes_dummy");
+        let (pvsneslib_root, make_program) = fake_toolchain("pvsneslib-no-bash", "sfc");
+        fs::create_dir_all(pvsneslib_root.join("devkitsnes")).expect("create fake devkitsnes");
+        fs::write(
+            pvsneslib_root.join("devkitsnes").join("snes_rules"),
+            "dummy rules",
+        )
+        .expect("write fake snes_rules");
+        let environment = BuildEnvironment {
+            pvsneslib_root: Some(pvsneslib_root),
+            pvsneslib_make_program: Some(make_program),
+            pvsneslib_bash_program: None,
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_with_environment(&project_dir, &environment, |_| {});
+
+        assert!(
+            !result.ok,
+            "SNES build must not continue without Git Bash/MSYS2"
+        );
+        assert!(
+            result.log.iter().any(|line| line.level == "error"
+                && line.message.contains("Git Bash/MSYS2")
+                && line.message.contains("SNES")),
+            "expected actionable Git Bash/MSYS2 error, got {:?}",
+            result.log
+        );
 
         let _ = fs::remove_dir_all(project_dir);
     }
@@ -3511,6 +3602,7 @@ PY\n"
         let environment = BuildEnvironment {
             pvsneslib_root: Some(pvsneslib_root),
             pvsneslib_make_program: Some(make_program),
+            pvsneslib_bash_program: Some(fake_bash_program()),
             disable_auto_detect: true,
             ..BuildEnvironment::default()
         };
@@ -3531,6 +3623,21 @@ PY\n"
         let makefile = fs::read_to_string(project_dir.join("build").join("snes").join("Makefile"))
             .expect("read SNES makefile");
         assert!(makefile.contains("$(GFXCONV) -s 8 -o 16 -u 16 -e 0 -p -m -t bmp -i $<"));
+        let bitmaps_line = makefile
+            .lines()
+            .find(|line| line.starts_with("bitmaps:"))
+            .expect("SNES Makefile must expose a bitmaps target");
+        for expected in [
+            "src/background_tilemap.pic",
+            "src/background_tilemap.map",
+            "src/background_tilemap.pal",
+        ] {
+            assert!(
+                bitmaps_line.contains(expected),
+                "SNES bitmaps target missing {expected}: {bitmaps_line}"
+            );
+        }
+        assert!(makefile.contains("src/background_tilemap.pic src/background_tilemap.map src/background_tilemap.pal: src/background_tilemap.bmp"));
         let main_c = fs::read_to_string(
             project_dir
                 .join("build")
@@ -3605,6 +3712,7 @@ PY\n"
         let environment = BuildEnvironment {
             pvsneslib_root: Some(pvsneslib_root),
             pvsneslib_make_program: Some(make_program),
+            pvsneslib_bash_program: Some(fake_bash_program()),
             disable_auto_detect: true,
             ..BuildEnvironment::default()
         };
@@ -3638,7 +3746,9 @@ PY\n"
                 .join("main.c"),
         )
         .expect("read SNES audio main.c");
-        assert!(main_c.contains("spcSetSoundEntry(SFX_JUMP, 8, 0, (u8*)&jump_sfx);"));
+        assert!(main_c.contains(
+            "spcSetSoundEntry(15, 8, 6, (&jump_sfxend - &jump_sfx), (u8*)&jump_sfx, &jump_sfx_sample);"
+        ));
         assert!(main_c.contains("spcLoad((u8*)&stage_theme_bgm);"));
 
         let _ = fs::remove_dir_all(project_dir);
@@ -3661,6 +3771,7 @@ PY\n"
             sgdk_make_program: Some(sgdk_make_program),
             pvsneslib_root: Some(pvsneslib_root),
             pvsneslib_make_program: Some(pvsneslib_make_program),
+            pvsneslib_bash_program: Some(fake_bash_program()),
             disable_auto_detect: true,
             ..BuildEnvironment::default()
         };
@@ -4174,6 +4285,7 @@ PY\n"
         let environment = BuildEnvironment {
             pvsneslib_root: Some(pvsneslib_root),
             pvsneslib_make_program: Some(make_program),
+            pvsneslib_bash_program: Some(fake_bash_program()),
             disable_auto_detect: true,
             ..BuildEnvironment::default()
         };
