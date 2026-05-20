@@ -1,8 +1,10 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-05-19 (rodada 47)
+**Ultima revisao canonica:** 2026-05-20 (rodada 49)
 **Fase ativa real:** Core MVP promovido tecnicamente em main; hardening continua nas superficies experimentais
+
+**Nota 2026-05-20 (rodada 49, branch `codex/sgdk-semantic-nodegraph-delivery`):** adiciona conversor `SgdkProjectInventory -> NodeGraph` com nodes reais para subset SGDK reconhecido e bridges `bridge_unconverted_source` com source mapping/gap acionavel. Codegen TS/Rust bloqueia bridge nao aceita com `#error`. Isto endurece NodeGraph SGDK, mas **nao** promove SGDK/Node Engine: cargo/SGDK/Libretro reais nao fecharam nesta rodada e nao ha claim novo sobre 122/122.
 
 **Nota 2026-05-19 (rodada 48, branch `codex/project-cohesion-full-build`):** consolidacao de `main` (GameMaker vertical, PR #8) + `command.dat` (ArtStudio/NodeGraph/runtime). Ambas as frentes coexistem: harness GameMaker + `gml_to_nodes` + prova vertical (`non_black_pixels=3793`); parser `input_commands` + `SpriteComponent.commands` + node `input_command` + codegen SGDK/SNES. Status: GameMaker e command.dat permanecem **Experimental**; sem promocao Stable institucional.
 
