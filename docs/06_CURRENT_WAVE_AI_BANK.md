@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-20 (rodada 50 - QA RC bloco H + E2E shell)
+**Ultima Atualizacao:** 2026-05-20 (rodada 51 - OpenBOR beat'em up subset)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-20 rodada 51 - branch `codex/openbor-beatemup-import-h`):**
+  - **OpenBOR Experimental/subset funcional:** `import_openbor_project` deixou de ser smoke local simples e passou a ler `models.txt`, `levels.txt`, character model files e level files, cobrindo comandos comuns `anim`, `offset`, `bbox`, `attack`, `delay`, `loop`, `jumpframe`, `landframe`, `spawn`, `at`, `music`, `panel`, `background` e scroll.
+  - **Autoria beat'em up auditavel:** anim blocks viram `SpriteComponent.animations`; `bbox`/`attack` viram collision metadata e `mugen_frames` auditaveis; `spawn`/`at` viram timeline `spawn_entity`; atores recebem nodes `set_velocity`, `set_animation_state`, input/attack/jump, camera follow e collision layers `player`/`enemy`; stage controller recebe `timeline_sequence`, `scroll_tilemap`, `move_camera` e bridges visiveis para scripts OpenBOR nao suportados.
+  - **Harness OpenBOR:** `run_openbor_compatibility_harness` cria projeto canonico, importa OpenBOR, conta sprites/stages/nodes/bridges, gera build SGDK, copia ROM, roda Libretro e grava report. A fixture BYOR-safe ignorada passou com SGDK/JDK/Libretro oficiais apontados explicitamente: `sgdk=ok`, `rom=ok_sega_header`, `emu=ok:Genesis Plus GX v1.7.4 46a5521:90frames`, `non_black_pixels=28407`, `fake=false`.
+  - **Cobertura:** novos testes provam anim -> animation, bbox/attack -> collision/hitbox metadata, level spawn/music/background -> nodes/bridge, unsupported script -> bridge, reimport idempotente e host-local ignored que pula honestamente quando nao ha sample extraido com manifests.
+  - **Gates locais:** `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test` **322/322**, `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`, `cargo test --manifest-path src-tauri/Cargo.toml --lib openbor -- --nocapture --test-threads=1` **8 passed / 3 ignored**, `cargo test --manifest-path src-tauri/Cargo.toml --lib smoke_import_openbor_project_builds_scene_and_is_idempotent -- --nocapture --test-threads=1`, `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` **350 passed / 20 ignored**. Host-local OpenBOR ignored executado e pulou por ausencia de manifests em `F:\Projects\Engine Template`.
+  - **Status honesto:** OpenBOR continua **Experimental**. O subset e funcional para beat'em up vertical autoravel, mas nao declara compatibilidade total de dialetos OpenBOR nem promocao Stable; falta corpus OpenBOR real/BYOR institucional e repeticao de QA manual ampla.
 
 * **O que acabou de acontecer (2026-05-20 rodada 50 - branch `codex/product-ui-workspace-redesign`):**
   - **Bloco H (QA RC):** `assertUiLayoutHealth()` no `scripts/e2e-tauri-build-run.mjs` valida topbar (overflow, colunas, botao Build compacto), painel central, guia, paineis laterais por workspace, console drawer vs status bar, NodeGraph side rail vs canvas/minimap/toolbar, e sobreposicao de botoes com limiar conservador.
