@@ -36,7 +36,7 @@ RetroDev Studio ja passou de prototipo. O produto hoje consegue:
 
 O produto ainda nao deve ser descrito como engine totalmente pronta para producao comercial. A prioridade atual e consistencia, ergonomia e repetibilidade dos fluxos certificados.
 
-Na frente SGDK/no-code, o PR #5 removeu fake da prova Stable e foi integrado em `main`. O jogo no-code real e gerado 100% por nodes, compila com SGDK oficial, gera ROM persistente e roda no Genesis Plus GX; o corpus real cobre 122 projetos, com 68 builds/ROMs/emulacoes reais e 54 bridges formais; `BLAZE_ENGINE` tem modo compativel real com build, ROM e emulacao. A exposicao publica de maturidade ainda deve seguir o roadmap e as badges reais da UI, sem promocao automatica de superficies experimentais.
+Na frente SGDK/no-code, o PR #5 removeu fake da prova Stable e foi integrado em `main`. O jogo no-code real e gerado 100% por nodes, compila com SGDK oficial, gera ROM persistente e roda no Genesis Plus GX; o corpus real cobre 122 projetos, com 68 builds/ROMs/emulacoes reais e 54 bridges formais; `BLAZE_ENGINE` tem modo compativel real com build, ROM e emulacao. A camada semantica SGDK agora tambem expoe `canonical_model.logic_systems` para funcoes, FSMs, transicoes, acoes, source mappings e bridges formais. A exposicao publica de maturidade ainda deve seguir o roadmap e as badges reais da UI, sem promocao automatica de superficies experimentais.
 
 GameMaker agora tem adapter **Experimental** importavel para GMX/GMZ/GMEZ: rooms, instances, sprites e objetos viram cena UGDM editavel, e GML fica preservado como bridge semantica visivel. Isto ainda nao significa conversao GameMaker completa para SGDK/ROM; essa promocao exige build SGDK, ROM, emulacao e relatorio de equivalencia dedicados.
 

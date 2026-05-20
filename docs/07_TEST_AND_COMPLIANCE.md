@@ -39,6 +39,7 @@
 - Backend: `cargo test --lib -- --nocapture --test-threads=1`.
 - Cobrir parser/schema, hardware profiles, framebuffer, dependency manager e fluxos de editor sensiveis.
 - Cobrir inventario SGDK/no-code quando a mudanca tocar importador SGDK, source mapping ou semantic gaps; o gate local externo e `cargo test sgdk_corpus_inventory_real_corpus_report --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` em host com `F:\Projects\MegaDrive_DEV\SGDK_Engines`.
+- Mudancas no extrator semantico SGDK devem cobrir `cargo test sgdk_logic --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` e, quando houver corpus local, `cargo test sgdk_logic_real_corpus_vertical_reports --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1`. O relatorio esperado fica em `src-tauri/target-test/validation/sgdk-logic-extractor-v1/` e deve registrar FSMs, estados, transicoes, acoes convertiveis, bridges e gaps bloqueantes por projeto vertical.
 - Mudancas de UI/CX SGDK/no-code devem cobrir topbar/status bar compactas, Inspector com diagnostico colapsado, Hierarchy compacta, viewport sem overlays invasivos, key color transparency e NodeGraph layout/vocabulario.
 - Mudancas no shell de atalhos/layout devem cobrir o registro central, normalizacao de chords, deteccao de conflitos e pelo menos um fluxo real de abertura/uso pela UI.
 - Mudancas em importadores GameMaker devem cobrir fixture GMX (`import_gamemaker_gmx_project_creates_editable_scene_with_native_node_graph`), matriz de perfil importavel, conversao GML subset (`gml_to_nodes` tests) e, quando o host tiver amostras reais, `cargo test import_gamemaker_real_host_samples_when_present --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1`. A prova vertical canonica host-local e `cargo test --lib gamemaker_vertical_compatibility_harness_basic_platform -- --ignored --nocapture --test-threads=1` (exige `F:\Projects\Game Maker\Basic_platform_game_example.gmez`, SGDK oficial e core Libretro). Enquanto GML completo ou formatos modernos nao estiverem cobertos, o status deve permanecer `Experimental`.
@@ -74,13 +75,15 @@
 8. `node scripts/e2e-tauri-build-run.mjs --skip-build --native-driver .\toolchains\webdriver\msedgedriver.exe` quando a mudanca tocar o fluxo publico `Build -> Load ROM -> Run frames`
 9. `npm run test:e2e:desktop:qa-rc` quando a mudanca tocar onboarding, shell principal, camadas, viewport editavel, inspector, persistencia ou o fluxo desktop `Build & Run`
 10. `cargo test sgdk_corpus_inventory_real_corpus_report --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar inventario SGDK/no-code, source mapping ou semantic gaps do corpus externo.
-11. `cargo test sgdk_matrix_corpus_ --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar import/build SGDK, hardware budget ou `BLAZE_ENGINE`.
-12. `cargo test official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar codegen backend de NodeGraph SGDK ou a declaracao de Node Engine Stable.
-13. `cargo test sgdk_corpus_real_build_rom_emulation_report --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar a declaracao de SGDK Stable, corpus completo ou bridge formal.
-14. `npm run release:readiness:promotion` na rodada institucional que pretende promover o RC, anexando o report de QA `A-F`
-15. Em host Windows com policy que bloqueia bootstrap interno do driver, usar fallback `--external-driver` com `tauri-driver` iniciado fora do processo Node.
-16. Se a sessao WebDriver falhar em `DevToolsActivePort`/`chrome not reachable`, executar `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-desktop-e2e.ps1 -SessionProbe` e registrar o resultado.
-17. Atualizacao de `docs/03_ROADMAP_MVP.md` e `docs/06_AI_MEMORY_BANK.md` quando o estado do produto mudar
+11. `cargo test sgdk_logic --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` quando a mudanca tocar extracao semantica SGDK, modelo intermediario `logic_systems`, FSMs, source mappings ou bridges de logica.
+12. `cargo test sgdk_logic_real_corpus_vertical_reports --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando houver corpus local e a mudanca tocar o extrator SGDK; exige pelo menos Platformer 2, NEXZR MD e BLAZE_ENGINE quando presentes.
+13. `cargo test sgdk_matrix_corpus_ --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar import/build SGDK, hardware budget ou `BLAZE_ENGINE`.
+14. `cargo test official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar codegen backend de NodeGraph SGDK ou a declaracao de Node Engine Stable.
+15. `cargo test sgdk_corpus_real_build_rom_emulation_report --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar a declaracao de SGDK Stable, corpus completo ou bridge formal.
+16. `npm run release:readiness:promotion` na rodada institucional que pretende promover o RC, anexando o report de QA `A-F`
+17. Em host Windows com policy que bloqueia bootstrap interno do driver, usar fallback `--external-driver` com `tauri-driver` iniciado fora do processo Node.
+18. Se a sessao WebDriver falhar em `DevToolsActivePort`/`chrome not reachable`, executar `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-desktop-e2e.ps1 -SessionProbe` e registrar o resultado.
+19. Atualizacao de `docs/03_ROADMAP_MVP.md` e `docs/06_AI_MEMORY_BANK.md` quando o estado do produto mudar
 
 ### 3.1 Agregacao canonica de readiness
 - `node scripts/release-readiness.mjs` gera um snapshot objetivo do estado de release em `src-tauri/target-test/validation/release-readiness.json` e `release-readiness.md`.

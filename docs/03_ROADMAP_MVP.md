@@ -1,8 +1,10 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-05-19 (rodada 47)
+**Ultima revisao canonica:** 2026-05-20 (rodada 49)
 **Fase ativa real:** Core MVP promovido tecnicamente em main; hardening continua nas superficies experimentais
+
+**Nota 2026-05-20 (rodada 49, branch `codex/sgdk-real-proof-integration`):** SGDK Logic Extractor v1 foi incorporado ao inventario canonico, nao como formato paralelo. `canonical_model.logic_systems` passa a expor funcoes, chamadas, FSMs, estados, transicoes, condicoes, acoes, refs de entidades/pools, source mappings, semantic gaps/bridges e confidence para os geradores de nodes. Fixtures cobrem enum/switch, `#define STATE_*`, input SGDK, animacao, transicoes diretas, macro complexa como bridge e padrao BLAZE-like. Relatorios host-local de Platformer 2, NEXZR MD e BLAZE_ENGINE foram gerados em `src-tauri/target-test/validation/sgdk-logic-extractor-v1/`, todos com `blocking_gaps=0`. A matriz SGDK real segue verde **7/7** quando `SGDK_ROOT` e o core Genesis Plus GX reais sao explicitados no host. Isto fortalece a ponte SGDK -> modelo intermediario, mas nao altera por si so badges/UI nem declara nova promocao de NodeGraph visual.
 
 **Nota 2026-05-19 (rodada 48, branch `codex/project-cohesion-full-build`):** consolidacao de `main` (GameMaker vertical, PR #8) + `command.dat` (ArtStudio/NodeGraph/runtime). Ambas as frentes coexistem: harness GameMaker + `gml_to_nodes` + prova vertical (`non_black_pixels=3793`); parser `input_commands` + `SpriteComponent.commands` + node `input_command` + codegen SGDK/SNES. Status: GameMaker e command.dat permanecem **Experimental**; sem promocao Stable institucional.
 
