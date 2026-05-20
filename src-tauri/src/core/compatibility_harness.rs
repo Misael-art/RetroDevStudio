@@ -3,8 +3,8 @@
 use crate::compiler::build_orch::{run_build_with_environment, BuildEnvironment};
 use crate::core::gml_to_nodes::GmlConversionResult;
 use crate::core::project_mgr::{
-    create_project_skeleton, import_external_project, load_scene, stamp_imported_external_profile_metadata,
-    DEFAULT_ENTRY_SCENE,
+    create_project_skeleton, import_external_project, load_scene,
+    stamp_imported_external_profile_metadata, DEFAULT_ENTRY_SCENE,
 };
 use crate::emulator::frame_buffer::framebuffer_to_rgba;
 use crate::emulator::libretro_ffi::{EmulatorCore, JoypadState};
@@ -47,6 +47,20 @@ pub fn validation_report_dir(name: &str) -> PathBuf {
 
 pub fn detect_source_format(source_path: &Path) -> String {
     if source_path.is_dir() {
+        let has_yyp = fs::read_dir(source_path)
+            .ok()
+            .into_iter()
+            .flat_map(|entries| entries.flatten())
+            .any(|entry| {
+                entry
+                    .path()
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("yyp"))
+            });
+        if has_yyp {
+            return "yyp_folder".to_string();
+        }
         return "gmx_folder".to_string();
     }
     source_path
@@ -168,9 +182,7 @@ pub fn run_gamemaker_compatibility_harness(
             log.push(format!("[{}] {}", line.level, line.message));
         }
     });
-    let build_log = build_log
-        .into_inner()
-        .unwrap_or_default();
+    let build_log = build_log.into_inner().unwrap_or_default();
     fs::write(&build_log_path, build_log.join("\n")).map_err(|error| {
         format!(
             "Nao foi possivel escrever build log '{}': {}",
@@ -208,8 +220,8 @@ pub fn run_gamemaker_compatibility_harness(
             }
         };
         if rom_path.is_file() {
-            let rom_bytes = fs::read(&rom_path)
-                .map_err(|error| format!("leitura ROM falhou: {error}"))?;
+            let rom_bytes =
+                fs::read(&rom_path).map_err(|error| format!("leitura ROM falhou: {error}"))?;
             if rom_bytes.windows(4).any(|window| window == b"SEGA") {
                 rom_status = "ok_sega_header".to_string();
             } else {
@@ -240,8 +252,10 @@ pub fn run_gamemaker_compatibility_harness(
         }
     }
 
-    let (json_path, _md_path) =
-        write_compatibility_report(artifact_root, report_stem, &CompatibilityHarnessReport {
+    let (json_path, _md_path) = write_compatibility_report(
+        artifact_root,
+        report_stem,
+        &CompatibilityHarnessReport {
             source_path: source_path.display().to_string(),
             source_engine: "gamemaker".to_string(),
             source_format: detect_source_format(source_path),
@@ -262,11 +276,14 @@ pub fn run_gamemaker_compatibility_harness(
             fake_toolchain_used,
             report_path: String::new(),
             screenshot_path: screenshot_path.clone(),
-            rom_path: persistent_rom_path.as_ref().map(|path| path.display().to_string()),
+            rom_path: persistent_rom_path
+                .as_ref()
+                .map(|path| path.display().to_string()),
             build_log_path: Some(build_log_path.display().to_string()),
-        })?;
+        },
+    )?;
 
-    let stable_candidate = !fake_toolchain_used
+    let pipeline_green = !fake_toolchain_used
         && build_result.ok
         && non_black_pixels > 0
         && inventory.blocking_gaps.is_empty()
@@ -293,7 +310,7 @@ pub fn run_gamemaker_compatibility_harness(
         rom_status,
         emulator_status,
         non_black_pixels,
-        stable_candidate,
+        stable_candidate: false,
         fake_toolchain_used,
         report_path: json_path.display().to_string(),
         screenshot_path,
@@ -302,6 +319,11 @@ pub fn run_gamemaker_compatibility_harness(
     };
 
     let _ = write_compatibility_report(artifact_root, report_stem, &final_report)?;
+    if pipeline_green {
+        eprintln!(
+            "GameMaker harness pipeline verde; status do engine permanece Experimental/subset."
+        );
+    }
     Ok(final_report)
 }
 
@@ -359,7 +381,9 @@ fn analyze_imported_gamemaker_scene(
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("gap")
                                     .to_string();
-                                inventory.unsupported_semantics.push(format!("{id}: {reason}"));
+                                inventory
+                                    .unsupported_semantics
+                                    .push(format!("{id}: {reason}"));
                                 if gap
                                     .get("blocks_build")
                                     .and_then(|v| v.as_bool())
@@ -451,7 +475,14 @@ fn run_libretro_visible_smoke(rom_path: &Path) -> Result<LibretroVisibleSmokeRes
     let Some((width, height, rgba)) = best_frame else {
         return Err("empty framebuffer".to_string());
     };
-    Ok((best_non_black, rgba, width, height, core_label, total_frames))
+    Ok((
+        best_non_black,
+        rgba,
+        width,
+        height,
+        core_label,
+        total_frames,
+    ))
 }
 
 fn write_rgba_ppm(path: &Path, width: u32, height: u32, rgba: &[u8]) -> Result<(), String> {
@@ -466,7 +497,9 @@ pub fn merge_gml_conversion_into_report(
     report: &mut CompatibilityHarnessReport,
     conversion: &GmlConversionResult,
 ) {
-    report.nodes_generated = report.nodes_generated.saturating_add(conversion.nodes_generated);
+    report.nodes_generated = report
+        .nodes_generated
+        .saturating_add(conversion.nodes_generated);
     for gap in &conversion.gaps {
         report
             .unsupported_semantics
@@ -485,11 +518,26 @@ mod tests {
     #[test]
     #[ignore = "host-local vertical: GameMaker .gmez -> ROM -> Libretro framebuffer"]
     fn gamemaker_vertical_compatibility_harness_basic_platform() {
-        let source = PathBuf::from(
-            "F:\\Projects\\Game Maker\\Basic_platform_game_example.gmez",
-        );
+        let candidates = [
+            PathBuf::from("F:\\Projects\\Game Maker\\Basic_platform_game_example.gmez"),
+            PathBuf::from(
+                "F:\\Projects\\Engine Template\\Game Maker\\Basic_platform_game_example.gmez",
+            ),
+        ];
+        let source = candidates
+            .iter()
+            .find(|candidate| candidate.is_file())
+            .cloned()
+            .unwrap_or_else(|| candidates[0].clone());
         if !source.is_file() {
-            eprintln!("[skip] GameMaker sample ausente: {}", source.display());
+            eprintln!(
+                "[skip] GameMaker sample ausente. Candidatos: {}",
+                candidates
+                    .iter()
+                    .map(|candidate| candidate.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            );
             return;
         }
         let artifact_root = validation_report_dir("gamemaker-vertical");
