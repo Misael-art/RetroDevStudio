@@ -50,6 +50,7 @@ async function recordE2eLedgerSuccess(options, projectMetadata) {
   }
 
   await appendFile(ledgerPath, `${marker}\n`, "utf8");
+  console.log(`[ledger] ${marker} -> ${ledgerPath}`);
 }
 const driverServerUrl = process.env.RDS_E2E_DRIVER_URL ?? "http://127.0.0.1:4444";
 const defaultDebugAppPath = path.join(

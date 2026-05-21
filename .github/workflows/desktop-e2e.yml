@@ -64,6 +64,7 @@ jobs:
       RDS_E2E_RUN_TIMEOUT_MS: 300000
       RDS_FORCE_TAURI_CLI_DEBUG: "1"
       RDS_E2E_TARGET: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || github.event_name == 'workflow_call' && inputs.target || 'all' }}
+      RDS_E2E_LEDGER: ${{ runner.temp }}/desktop-e2e-passed.txt
       RDS_GITHUB_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout
@@ -113,12 +114,10 @@ jobs:
 
       - name: Initialize desktop E2E pass ledger
         run: |
-          $ledgerPath = Join-Path $env:RUNNER_TEMP 'desktop-e2e-passed.txt'
-          if (Test-Path $ledgerPath) {
-            Remove-Item -Path $ledgerPath -Force
+          if (Test-Path $env:RDS_E2E_LEDGER) {
+            Remove-Item -Path $env:RDS_E2E_LEDGER -Force
           }
-          New-Item -ItemType File -Path $ledgerPath -Force | Out-Null
-          "RDS_E2E_LEDGER=$ledgerPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          New-Item -ItemType File -Path $env:RDS_E2E_LEDGER -Force | Out-Null
 
       - name: Run Mega Drive desktop smoke
         id: smoke_md
@@ -127,7 +126,6 @@ jobs:
         run: |
           npm run test:e2e:desktop:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Add-Content -Path $env:RDS_E2E_LEDGER -Encoding utf8NoBOM -Value 'smoke_md' -Encoding utf8NoBOM
 
       - name: Run SNES desktop smoke
         id: smoke_snes
@@ -136,7 +134,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Add-Content -Path $env:RDS_E2E_LEDGER -Encoding utf8NoBOM -Value 'smoke_snes'
+
 
       - name: Run Mega Drive live overflow desktop E2E
         id: live_overflow_md
@@ -145,7 +143,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-overflow:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Add-Content -Path $env:RDS_E2E_LEDGER -Encoding utf8NoBOM -Value 'live_overflow_md'
+
 
       - name: Run SNES live overflow desktop E2E
         id: live_overflow_snes
@@ -154,7 +152,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-overflow:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Add-Content -Path $env:RDS_E2E_LEDGER -Encoding utf8NoBOM -Value 'live_overflow_snes'
+
 
       - name: Run Mega Drive live VRAM overflow desktop E2E
         id: live_vram_overflow_md
@@ -163,7 +161,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-overflow-vram:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Add-Content -Path $env:RDS_E2E_LEDGER -Encoding utf8NoBOM -Value 'live_vram_overflow_md'
+
 
       - name: Run SNES live VRAM overflow desktop E2E
         id: live_vram_overflow_snes
@@ -172,7 +170,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-overflow-vram:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Add-Content -Path $env:RDS_E2E_LEDGER -Encoding utf8NoBOM -Value 'live_vram_overflow_snes'
+
 
       - name: Run Mega Drive live VRAM warning desktop E2E
         id: live_vram_warning_md
@@ -181,7 +179,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-warning-vram:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Add-Content -Path $env:RDS_E2E_LEDGER -Encoding utf8NoBOM -Value 'live_vram_warning_md'
+
 
       - name: Run SNES live VRAM warning desktop E2E
         id: live_vram_warning_snes
@@ -190,7 +188,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-warning-vram:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Add-Content -Path $env:RDS_E2E_LEDGER -Encoding utf8NoBOM -Value 'live_vram_warning_snes'
+
 
       - name: Run Mega Drive live sprite warning desktop E2E
         id: live_sprite_warning_md
@@ -199,7 +197,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-warning-sprites:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Add-Content -Path $env:RDS_E2E_LEDGER -Encoding utf8NoBOM -Value 'live_sprite_warning_md'
+
 
       - name: Run SNES live sprite warning desktop E2E
         id: live_sprite_warning_snes
@@ -208,7 +206,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-warning-sprites:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Add-Content -Path $env:RDS_E2E_LEDGER -Encoding utf8NoBOM -Value 'live_sprite_warning_snes'
+
 
       - name: Run Mega Drive live healthy desktop E2E
         id: live_ok_md
@@ -217,7 +215,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-ok:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Add-Content -Path $env:RDS_E2E_LEDGER -Encoding utf8NoBOM -Value 'live_ok_md'
+
 
       - name: Run SNES live healthy desktop E2E
         id: live_ok_snes
@@ -226,7 +224,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-ok:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Add-Content -Path $env:RDS_E2E_LEDGER -Encoding utf8NoBOM -Value 'live_ok_snes'
+
 
       - name: Run Mega Drive live error desktop E2E
         id: live_error_md
@@ -235,7 +233,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-error:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Add-Content -Path $env:RDS_E2E_LEDGER -Encoding utf8NoBOM -Value 'live_error_md'
+
 
       - name: Run SNES live error desktop E2E
         id: live_error_snes
@@ -244,7 +242,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-error:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Add-Content -Path $env:RDS_E2E_LEDGER -Encoding utf8NoBOM -Value 'live_error_snes'
+
 
       - name: Run Mega Drive live stale desktop E2E
         id: live_stale_md
@@ -253,7 +251,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-stale:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Add-Content -Path $env:RDS_E2E_LEDGER -Encoding utf8NoBOM -Value 'live_stale_md'
+
 
       - name: Run SNES live stale desktop E2E
         id: live_stale_snes
@@ -262,7 +260,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-stale:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          Add-Content -Path $env:RDS_E2E_LEDGER -Encoding utf8NoBOM -Value 'live_stale_snes'
+
 
       - name: Report step outcomes before verification
         if: always()
