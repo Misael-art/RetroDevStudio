@@ -331,9 +331,11 @@ jobs:
             'snes' { $expectedSnes }
             default { @($expectedMd + $expectedSnes) }
           }
-          $executed = Get-Content -Path $env:RDS_E2E_LEDGER | ForEach-Object { $_.Trim() } | Where-Object {
-            -not [string]::IsNullOrWhiteSpace($_)
-          }
+          $executed = @(
+            Get-Content -Path $env:RDS_E2E_LEDGER | ForEach-Object { $_.Trim() } | Where-Object {
+              -not [string]::IsNullOrWhiteSpace($_)
+            }
+          )
 
           Write-Host "Expected ($($expected.Count)): $($expected -join ', ')"
           Write-Host "Executed ($(@($executed).Count)): $(@($executed) -join ', ')"

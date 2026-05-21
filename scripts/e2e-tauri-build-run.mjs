@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { access, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, appendFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -17,6 +17,40 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
+
+function resolveLedgerMarker(options, projectMetadata) {
+  const suffix = projectMetadata.target === "snes" ? "snes" : "md";
+  switch (options.scenario ?? "build-run") {
+    case "build-run":
+      return `smoke_${suffix}`;
+    case "live-overflow":
+      return `live_overflow_${suffix}`;
+    case "live-overflow-vram":
+      return `live_vram_overflow_${suffix}`;
+    case "live-warning-vram":
+      return `live_vram_warning_${suffix}`;
+    case "live-warning-sprites":
+      return `live_sprite_warning_${suffix}`;
+    case "live-ok":
+      return `live_ok_${suffix}`;
+    case "live-error":
+      return `live_error_${suffix}`;
+    case "live-stale":
+      return `live_stale_${suffix}`;
+    default:
+      return null;
+  }
+}
+
+async function recordE2eLedgerSuccess(options, projectMetadata) {
+  const marker = resolveLedgerMarker(options, projectMetadata);
+  const ledgerPath = process.env.RDS_E2E_LEDGER;
+  if (!marker || !ledgerPath) {
+    return;
+  }
+
+  await appendFile(ledgerPath, `${marker}\n`, "utf8");
+}
 const driverServerUrl = process.env.RDS_E2E_DRIVER_URL ?? "http://127.0.0.1:4444";
 const defaultDebugAppPath = path.join(
   repoRoot,
@@ -4029,6 +4063,7 @@ async function main() {
       console.log(`Projeto: ${options.project}`);
       console.log(`Target: ${projectMetadata.target}`);
       console.log(`Estado: ${liveStatus.liveState}`);
+      await recordE2eLedgerSuccess(options, projectMetadata);
       return;
     }
 
@@ -4113,6 +4148,7 @@ async function main() {
                 ? `Erro visual: ${liveStatus.errorSummary}`
                 : `Warning visual: ${liveStatus.summary}`
           );
+          await recordE2eLedgerSuccess(options, projectMetadata);
           return;
         }
 
@@ -4195,6 +4231,7 @@ async function main() {
             ? `Erro visual: ${liveStatus.errorSummary}`
           : `Warning visual: ${liveStatus.summary}`
       );
+      await recordE2eLedgerSuccess(options, projectMetadata);
       return;
     }
 
@@ -4301,6 +4338,7 @@ async function main() {
           validationStatus.pendingSummary || validationStatus.liveStateDetail
         }`
       );
+      await recordE2eLedgerSuccess(options, projectMetadata);
       return;
     }
 
@@ -4393,6 +4431,7 @@ async function main() {
     console.log(`Projeto: ${options.project}`);
     console.log(`Target: ${projectMetadata.target}`);
     console.log(`Canvas: ${framebuffer.width}x${framebuffer.height}, pixels nao pretos: ${framebuffer.nonBlackPixels}`);
+    await recordE2eLedgerSuccess(options, projectMetadata);
   } catch (error) {
     const details = error instanceof Error ? error.message : String(error);
     const driverSummary = summarizeDriverLogs(driverLogs);
