@@ -184,6 +184,9 @@ pub struct SgdkProjectInventory {
     pub node_candidates: Vec<SgdkNodeCandidate>,
     #[serde(default)]
     pub canonical_model: SgdkCanonicalProjectModel,
+    /// Grafo semantico NodeGraph serializado (JSON) derivado do inventario.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub semantic_node_graph_json: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
@@ -339,7 +342,7 @@ pub fn inspect_sgdk_project_for_nocode_inventory(
         &semantic_gaps,
     );
 
-    Ok(SgdkProjectInventory {
+    let inventory = SgdkProjectInventory {
         project_name,
         root: root.to_string_lossy().to_string(),
         source_files,
@@ -351,6 +354,14 @@ pub fn inspect_sgdk_project_for_nocode_inventory(
         semantic_gaps,
         node_candidates,
         canonical_model,
+        semantic_node_graph_json: String::new(),
+    };
+    let semantic_node_graph_json =
+        crate::core::sgdk_semantic_graph::convert_sgdk_inventory_to_node_graph(&inventory);
+
+    Ok(SgdkProjectInventory {
+        semantic_node_graph_json,
+        ..inventory
     })
 }
 

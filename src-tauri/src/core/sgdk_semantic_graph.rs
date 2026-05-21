@@ -782,6 +782,7 @@ mod tests {
             }],
             node_candidates: Vec::new(),
             canonical_model: SgdkCanonicalProjectModel::default(),
+            semantic_node_graph_json: String::new(),
         }
     }
 
