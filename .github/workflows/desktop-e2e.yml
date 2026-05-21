@@ -289,18 +289,24 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          if (-not (Test-Path $env:RDS_E2E_LEDGER)) {
-            throw "Ledger de cenarios E2E nao encontrado em $env:RDS_E2E_LEDGER"
+          $ledgerPath = if ($env:RDS_E2E_LEDGER) {
+            $env:RDS_E2E_LEDGER
+          } else {
+            Join-Path $env:RUNNER_TEMP 'desktop-e2e-passed.txt'
+          }
+
+          if (-not (Test-Path $ledgerPath)) {
+            throw "Ledger de cenarios E2E nao encontrado em $ledgerPath"
           }
 
           Write-Host "--- Ledger diagnostics ---"
-          Write-Host "Ledger path: $env:RDS_E2E_LEDGER"
-          $rawBytes = [System.IO.File]::ReadAllBytes($env:RDS_E2E_LEDGER)
+          Write-Host "Ledger path: $ledgerPath"
+          $rawBytes = [System.IO.File]::ReadAllBytes($ledgerPath)
           Write-Host "Ledger size: $($rawBytes.Length) bytes"
           if ($rawBytes.Length -gt 0) {
             Write-Host "First 10 bytes: $($rawBytes[0..[Math]::Min(9,$rawBytes.Length-1)] -join ',')"
           }
-          $rawText = [System.IO.File]::ReadAllText($env:RDS_E2E_LEDGER)
+          $rawText = [System.IO.File]::ReadAllText($ledgerPath)
           if ($rawText.Length -gt 0 -and [int][char]$rawText[0] -eq 0xfeff) {
             $rawText = $rawText.Substring(1)
           }

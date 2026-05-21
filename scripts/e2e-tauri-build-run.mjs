@@ -42,9 +42,21 @@ function resolveLedgerMarker(options, projectMetadata) {
   }
 }
 
+function resolveE2eLedgerPath() {
+  if (process.env.RDS_E2E_LEDGER) {
+    return process.env.RDS_E2E_LEDGER;
+  }
+
+  if (process.env.RUNNER_TEMP) {
+    return path.join(process.env.RUNNER_TEMP, "desktop-e2e-passed.txt");
+  }
+
+  return null;
+}
+
 async function recordE2eLedgerSuccess(options, projectMetadata) {
   const marker = resolveLedgerMarker(options, projectMetadata);
-  const ledgerPath = process.env.RDS_E2E_LEDGER;
+  const ledgerPath = resolveE2eLedgerPath();
   if (!marker || !ledgerPath) {
     return;
   }
