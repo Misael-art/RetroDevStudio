@@ -43,12 +43,12 @@ function resolveLedgerMarker(options, projectMetadata) {
 }
 
 function resolveE2eLedgerPath() {
-  if (process.env.RDS_E2E_LEDGER) {
-    return process.env.RDS_E2E_LEDGER;
-  }
-
   if (process.env.RUNNER_TEMP) {
     return path.join(process.env.RUNNER_TEMP, "desktop-e2e-passed.txt");
+  }
+
+  if (process.env.RDS_E2E_LEDGER) {
+    return process.env.RDS_E2E_LEDGER;
   }
 
   return null;

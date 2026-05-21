@@ -118,7 +118,6 @@ jobs:
             Remove-Item -Path $ledgerPath -Force
           }
           New-Item -ItemType File -Path $ledgerPath -Force | Out-Null
-          "RDS_E2E_LEDGER=$ledgerPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8NoBOM -Append
 
       - name: Run Mega Drive desktop smoke
         id: smoke_md
@@ -289,11 +288,7 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          $ledgerPath = if ($env:RDS_E2E_LEDGER) {
-            $env:RDS_E2E_LEDGER
-          } else {
-            Join-Path $env:RUNNER_TEMP 'desktop-e2e-passed.txt'
-          }
+          $ledgerPath = Join-Path $env:RUNNER_TEMP 'desktop-e2e-passed.txt'
 
           if (-not (Test-Path $ledgerPath)) {
             throw "Ledger de cenarios E2E nao encontrado em $ledgerPath"
