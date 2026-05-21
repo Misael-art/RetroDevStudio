@@ -783,6 +783,18 @@ async function readAutomationState(sessionId) {
   );
 }
 
+async function waitForLiveValidationFresh(sessionId, timeoutMs) {
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      return state?.hwValidationState === "fresh" ? state : false;
+    },
+    timeoutMs,
+    "Validacao live nao ficou fresh apos injetar draft.",
+    250
+  );
+}
+
 async function callAutomationApi(sessionId, methodName, args = []) {
   const result = await executeAsyncScript(
     sessionId,
@@ -4029,6 +4041,7 @@ async function main() {
     ) {
       const overflowScenario = buildLiveOverflowScenario(projectMetadata.target, options.scenario);
       await setSceneDraft(sessionId, overflowScenario.draft);
+      await waitForLiveValidationFresh(sessionId, liveValidationTimeoutMs);
 
       let lastLiveStatus = null;
       let liveStatus;

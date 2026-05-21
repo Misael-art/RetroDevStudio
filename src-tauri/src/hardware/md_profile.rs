@@ -766,6 +766,30 @@ mod tests {
         }
     }
 
+    fn animated_sprite_entity(
+        id: &str,
+        frame_width: u32,
+        frame_height: u32,
+        frames: u32,
+    ) -> Entity {
+        let mut entity = sprite_entity(id, frame_width, frame_height, 0);
+        let frame_list: Vec<u32> = (0..frames).collect();
+        if let Some(sprite) = entity.components.sprite.as_mut() {
+            sprite.animations.insert(
+                "stress".to_string(),
+                AnimationDef {
+                    frames: frame_list,
+                    fps: 12,
+                    looping: true,
+                    frame_durations: None,
+                    loop_start: None,
+                    mugen_frames: None,
+                },
+            );
+        }
+        entity
+    }
+
     fn animated_meta_sprite_entity(
         id: &str,
         frame_width: u32,
@@ -902,6 +926,29 @@ mod tests {
         assert!(errors
             .iter()
             .any(|error| !error.is_fatal && error.message.contains("Sprite Warning")));
+        assert!(!errors.iter().any(|error| error.is_fatal));
+    }
+
+    #[test]
+    fn live_vram_warning_draft_matches_desktop_e2e_fixture() {
+        let mut scene = empty_scene();
+        scene
+            .entities
+            .push(animated_sprite_entity("warning_vram_entity", 32, 32, 112));
+
+        let errors = validate_scene(&scene);
+        let warnings: Vec<&str> = errors
+            .iter()
+            .filter(|error| !error.is_fatal)
+            .map(|error| error.message.as_str())
+            .collect();
+
+        assert!(
+            warnings
+                .iter()
+                .any(|message| message.contains("VRAM Warning (resident)")),
+            "expected resident VRAM warning for 112-frame stress draft: {warnings:?}"
+        );
         assert!(!errors.iter().any(|error| error.is_fatal));
     }
 
