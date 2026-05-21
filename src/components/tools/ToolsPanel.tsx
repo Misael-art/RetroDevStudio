@@ -1316,9 +1316,9 @@ function RuntimeSetup() {
   }
 
   return (
-    <div className="flex flex-col gap-3 p-3">
+    <div data-testid="runtime-setup-panel" className="flex min-h-full min-w-0 flex-col gap-3 overflow-x-hidden p-3">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex flex-col gap-1">
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="text-xs font-semibold text-[#cdd6f4]">Runtime Setup</span>
           <p className="text-[10px] leading-tight text-[#7f849c]">
             Instala sob demanda JDK (Temurin LTS), SGDK, PVSnesLib e cores Libretro oficiais sem versionar binarios no repositorio.
@@ -1327,7 +1327,7 @@ function RuntimeSetup() {
         <button
           onClick={() => void refreshStatus()}
           disabled={loading || busyId !== null}
-          className="rounded bg-[#313244] px-2 py-1 text-[10px] text-[#a6adc8] hover:bg-[#45475a] disabled:cursor-not-allowed disabled:opacity-40"
+          className="shrink-0 rounded bg-[#313244] px-2 py-1 text-[10px] text-[#a6adc8] hover:bg-[#45475a] disabled:cursor-not-allowed disabled:opacity-40"
         >
           {loading ? "Atualizando..." : "Atualizar"}
         </button>
@@ -1413,8 +1413,11 @@ function RuntimeSetup() {
           </button>
         </div>
 
-        <p className="text-[10px] text-[#45475a]">
-          Projeto ativo: <span className="font-mono text-[#cdd6f4]">{activeProjectDir || "(nenhum)"}</span>
+        <p className="min-w-0 break-all text-[10px] text-[#45475a]" title={`Projeto ativo: ${activeProjectDir || "(nenhum)"}`}>
+          Projeto ativo:{" "}
+          <span className="font-mono text-[#cdd6f4]" title={activeProjectDir || "(nenhum)"}>
+            {activeProjectDir || "(nenhum)"}
+          </span>
         </p>
 
         {multiBuildReport && (

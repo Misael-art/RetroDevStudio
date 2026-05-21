@@ -68,7 +68,7 @@ export default function UnifiedTopBar({
   return (
     <header
       data-testid="unified-topbar"
-      className="relative z-20 flex min-h-[42px] shrink-0 items-center gap-2 border-b border-[#27272a] bg-[#10131d] px-2 py-1"
+      className="relative z-20 flex min-h-[42px] shrink-0 items-center gap-2 overflow-hidden border-b border-[#27272a] bg-[#10131d] px-2 py-1"
     >
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <div ref={menuRef} className="relative shrink-0">
@@ -152,7 +152,10 @@ export default function UnifiedTopBar({
         </nav>
       </div>
 
-      <div className="flex min-w-0 flex-[0_1_520px] items-center justify-center overflow-x-auto overflow-y-visible">
+      <div
+        data-testid="unified-topbar-center"
+        className="flex min-w-0 flex-[0_1_520px] items-center justify-center overflow-x-auto overflow-y-visible [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
         <div className="relative z-[5] flex min-w-0 flex-nowrap items-center justify-center gap-1.5 px-0.5">
           {centerContent}
         </div>

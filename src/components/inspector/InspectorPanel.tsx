@@ -140,7 +140,7 @@ function PropRow({ label, value, type, sourceState = null, onChange }: PropRowPr
             data-testid={`${testIdBase}-value`}
             className="cursor-pointer font-mono text-[#cdd6f4] transition-colors hover:text-[#cba6f7]"
             onClick={() => setEditing(true)}
-            title="Clique para editar"
+            title={`Clique para editar: ${String(value)}`}
           >
             {String(value)}
           </span>
@@ -979,7 +979,7 @@ export default function InspectorPanel() {
 
   return (
     <Panel title="Inspector" className="flex h-full flex-col">
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-x-hidden overflow-y-auto">
         {!selectedEntityId ? (
           <div className="px-3 py-4 text-xs text-[#45475a]">
             <p className="italic">Selecione uma entidade na Hierarchy.</p>
@@ -1154,6 +1154,7 @@ export default function InspectorPanel() {
                         <span
                           key={flag}
                           className="rounded-full border border-[#89b4fa]/30 bg-[#89b4fa]/10 px-2 py-0.5 font-mono text-[8px] text-[#89b4fa]"
+                          title={flag}
                         >
                           {flag}
                         </span>
@@ -1556,6 +1557,7 @@ export default function InspectorPanel() {
                         <span
                           key={flag}
                           className="rounded-full border border-[#89b4fa]/30 bg-[#89b4fa]/10 px-2 py-0.5 font-mono text-[8px] text-[#89b4fa]"
+                          title={flag}
                         >
                           {flag}
                         </span>
@@ -1623,21 +1625,28 @@ export default function InspectorPanel() {
             ) : null}
             {entity.components.logic ? (
               <InspectorSection sectionId="logic" title="Logic">
-                <table className="w-full text-xs">
+                <table className="w-full table-fixed text-xs">
                   <tbody>
                     {entityLogicSummary ? (
                       <tr className="group border-b border-[#313244] last:border-0">
                         <td className="w-24 min-w-24 select-none px-2 py-1 text-xs text-[#7f849c]">Graph</td>
-                        <td className="px-2 py-1 text-xs">
-                          <span className="font-mono text-[#cdd6f4]">{entityLogicSummary}</span>
+                        <td className="min-w-0 px-2 py-1 text-xs">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span
+                              className="min-w-0 flex-1 break-all font-mono text-[#cdd6f4]"
+                              title={entityLogicSummary}
+                            >
+                              {entityLogicSummary}
+                            </span>
                           <button
                             type="button"
-                            className="ml-2 text-[10px] text-[#89b4fa] transition-colors hover:text-[#b4befe]"
+                            className="shrink-0 text-[10px] text-[#89b4fa] transition-colors hover:text-[#b4befe]"
                             onClick={() => useEditorStore.getState().setActiveViewportTab("logic")}
                             title="Editar grafo no NodeGraph"
                           >
                             Edit
                           </button>
+                          </div>
                         </td>
                       </tr>
                     ) : null}
@@ -1687,7 +1696,7 @@ export default function InspectorPanel() {
                         <td className="px-2 py-1 text-xs">
                           <div className="flex flex-col gap-1">
                             {entityLogicHints.map((hint, index) => (
-                              <span key={`${index}-${hint}`} className="text-[#cdd6f4]">
+                              <span key={`${index}-${hint}`} className="text-[#cdd6f4]" title={hint}>
                                 {hint}
                               </span>
                             ))}

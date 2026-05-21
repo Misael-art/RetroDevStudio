@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-20 (rodada 50 - QA RC bloco H + E2E shell)
+**Ultima Atualizacao:** 2026-05-21 (rodada 51 - oraculo visual reutilizavel)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-21 rodada 51 - branch `codex/ui-layout-visual-oracle-k`):**
+  - **Bloco H virou gate visual reutilizavel:** `scripts/ui-layout-oracle.mjs` centraliza resolucoes/alvos e avaliacao DOM/BoundingClientRect; `scripts/e2e-tauri-build-run.mjs` coleta snapshots reais da janela Tauri, salva screenshots com prefixo `H-ui-oracle-*` e escreve `src-tauri/target-test/validation/ui-layout-oracle.json`.
+  - **Cobertura do oraculo:** 4 resolucoes obrigatorias (`1366x768`, `1600x900`, `1920x1080`, `2560x1080`) x 8 alvos (`Import Wizard`, `Scene`, `Art`, `Logic`, `NodeGraph`, `Game`, `Debug`, `Runtime Setup`), total 32 checks automaticos para overflow/clickables fora da viewport, sobreposicao de controles, texto critico truncado sem tooltip, visual principal pequeno/cortado, side rail invadindo canvas e scroll horizontal indevido.
+  - **Ajustes pequenos de layout:** topbar compactada sem remover informacao tecnica; toolbar Scene com overflow controlado; Inspector/Art timeline/Runtime Setup endurecidos contra texto longo e scroll horizontal; tooltips preservam valores tecnicos truncados.
+  - **Evidencias:** `ui-layout-oracle.json` com `status=passed`, `total=32`, `passed=32`, `failed=0`, prefixo `qa-rc-2026-05-21T00-01-22-454Z`; screenshots correspondentes em `src-tauri/target-test/validation/`.
+  - **Gates locais (rodada 51):** `npm run test:e2e:desktop:qa-rc`, `npm run build:debug`, `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test` **325/325**, `cargo clippy -- -D warnings`, `cargo test --lib -- --nocapture` (**347 passed / 17 ignored**).
+  - **Status honesto:** UI oracle automatizado **SIM para os alvos/resolucoes acima**. Isto nao promove SGDK Stable, Node Engine Stable ou novas superficies; o escopo foi QA visual/layout e pequenos ajustes conservadores.
 
 * **O que acabou de acontecer (2026-05-20 rodada 50 - branch `codex/product-ui-workspace-redesign`):**
   - **Bloco H (QA RC):** `assertUiLayoutHealth()` no `scripts/e2e-tauri-build-run.mjs` valida topbar (overflow, colunas, botao Build compacto), painel central, guia, paineis laterais por workspace, console drawer vs status bar, NodeGraph side rail vs canvas/minimap/toolbar, e sobreposicao de botoes com limiar conservador.

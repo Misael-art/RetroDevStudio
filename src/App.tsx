@@ -637,7 +637,7 @@ function BuildPhasePanel({
   return (
     <div
       data-testid="build-phase-panel"
-      className="hidden max-w-[21rem] items-center gap-2 rounded border border-[#313244] bg-[#0b1020] px-2 py-1 text-[9px] xl:flex"
+      className="hidden max-w-[21rem] items-center gap-2 rounded border border-[#313244] bg-[#0b1020] px-2 py-1 text-[9px] 2xl:flex"
       title="Fases do fluxo canonico Build -> ROM -> Emulacao."
     >
       <span className={`shrink-0 rounded-full border px-2 py-0.5 font-semibold ${statusClass}`}>
@@ -3680,24 +3680,21 @@ export default function App() {
         menuSections={topBarMenuSections}
         centerContent={
           <>
-            <div className="flex overflow-hidden rounded-full border border-[#313244] bg-[#0b1020]">
-              {(["megadrive", "snes"] as const).map((target) => (
-                <button
-                  key={target}
-                  onClick={() => void handleSwitchTarget(target)}
-                  disabled={!activeProjectDir || activeTarget === target}
-                  className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] transition-colors ${
-                    activeTarget === target
-                      ? target === "megadrive"
-                        ? "bg-[#a6e3a1] text-[#1e1e2e]"
-                        : "bg-[#89b4fa] text-[#1e1e2e]"
-                      : "text-[#7f849c] hover:bg-[#111827] disabled:cursor-not-allowed"
-                  }`}
-                >
-                  {target === "megadrive" ? "MD" : "SNES"}
-                </button>
-              ))}
-            </div>
+            <select
+              aria-label="Target de build"
+              title={`Target atual: ${getTargetLabel(activeTarget)}`}
+              value={activeTarget}
+              disabled={!activeProjectDir}
+              onChange={(event) => void handleSwitchTarget(event.target.value as "megadrive" | "snes")}
+              className={`h-7 shrink-0 rounded-full border px-2 text-[10px] font-bold uppercase transition-colors ${
+                activeTarget === "megadrive"
+                  ? "border-[#a6e3a1]/40 bg-[#a6e3a1] text-[#1e1e2e]"
+                  : "border-[#89b4fa]/40 bg-[#89b4fa] text-[#1e1e2e]"
+              } disabled:cursor-not-allowed disabled:opacity-40`}
+            >
+              <option value="megadrive">MD</option>
+              <option value="snes">SNES</option>
+            </select>
             <ToolbarButton
               label="Build ▶"
               onClick={() => void handleBuildAndRun()}
@@ -3849,16 +3846,19 @@ export default function App() {
           data-testid="workspace-activity-bar"
           className="flex w-[56px] shrink-0 flex-col border-r border-[#27272a] bg-[#09090b]"
         >
-          <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-1.5 py-3">
+          <div className="flex flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto px-1.5 py-3">
             {WORKSPACE_GROUPS.map((group) => {
               const groupItems = WORKSPACE_ITEMS.filter((workspace) => workspace.group === group.id);
               return (
                 <div
                   key={group.id}
                   data-testid={`workspace-rail-group-${group.id}`}
-                  className="rounded-2xl border border-[#18181b] bg-[#0b1120] px-1 py-1.5"
+                  className="overflow-hidden rounded-2xl border border-[#18181b] bg-[#0b1120] px-1 py-1.5"
                 >
-                  <p className="px-1 text-center text-[8px] font-semibold uppercase tracking-[0.18em] text-[#475569]">
+                  <p
+                    className="truncate px-1 text-center text-[8px] font-semibold uppercase text-[#475569]"
+                    title={group.label}
+                  >
                     {group.label}
                   </p>
                   <div className="mt-1 flex flex-col items-center gap-2">

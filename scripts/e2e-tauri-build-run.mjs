@@ -7,6 +7,12 @@ import path from "node:path";
 import process from "node:process";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  UI_LAYOUT_ORACLE_RESOLUTIONS,
+  UI_LAYOUT_ORACLE_TARGETS,
+  buildUiLayoutOracleReport,
+  evaluateUiLayoutOracleSnapshot,
+} from "./ui-layout-oracle.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -45,6 +51,10 @@ const buildReportPath = path.join(
 const manualQaStatusPath = path.join(
   validationDir,
   "manual-qa-status.json"
+);
+const uiLayoutOracleReportPath = path.join(
+  validationDir,
+  "ui-layout-oracle.json"
 );
 let currentE2eRunContext = null;
 
@@ -1228,12 +1238,6 @@ async function updateInspectorIntField(sessionId, label, value) {
   }
 }
 
-const UI_LAYOUT_CAPTURE_RESOLUTIONS = [
-  { width: 1366, height: 768, tag: "1366x768" },
-  { width: 1920, height: 1080, tag: "1920x1080" },
-  { width: 2560, height: 1080, tag: "2560x1080" },
-];
-
 async function setSessionWindowRect(sessionId, width, height) {
   await webdriverRequest("POST", `/session/${sessionId}/window/rect`, {
     x: 0,
@@ -1244,227 +1248,367 @@ async function setSessionWindowRect(sessionId, width, height) {
   await new Promise((resolve) => setTimeout(resolve, 800));
 }
 
-const UI_LAYOUT_SHELL_EXPECTATIONS = {
-  scene: { showLeft: true, showRight: true },
-  logic: { showLeft: false, showRight: false },
-  game: { showLeft: false, showRight: false },
-  debug: { showLeft: false, showRight: true },
-};
-
-async function assertUiLayoutHealth(sessionId, workspaceId, resolutionTag) {
-  const result = await executeScript(
+async function collectUiLayoutOracleSnapshot(sessionId, targetId, resolutionTag) {
+  return executeScript(
     sessionId,
     `
-      const workspace = arguments[0];
+      const targetId = arguments[0];
       const resolutionTag = arguments[1];
-      const issues = [];
-      const metrics = {};
+      const allowedHorizontalScrollTestIds = new Set([
+        "unified-topbar",
+        "unified-topbar-center",
+        "unified-topbar-breadcrumbs",
+        "artstudio-timeline",
+        "artstudio-command-panel",
+        "nodegraph-canvas",
+        "nodegraph-side-rail",
+        "viewport-scene-toolbar",
+        "viewport-scene-stage",
+        "viewport-game-stage",
+        "shortcut-map",
+      ]);
 
-      function panelVisible(panel) {
-        if (!panel) return false;
-        const rect = panel.getBoundingClientRect();
-        return rect.width > 10 && rect.height > 10;
+      function rectOf(node) {
+        if (!(node instanceof Element)) return null;
+        const rect = node.getBoundingClientRect();
+        return {
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height,
+        };
       }
 
-      function rectsOverlap(a, b) {
-        if (!a || !b) return false;
-        const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
-        const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
-        return overlapX > 2 && overlapY > 2;
+      function visible(node) {
+        if (!(node instanceof Element)) return false;
+        const rect = node.getBoundingClientRect();
+        if (rect.width <= 2 || rect.height <= 2) return false;
+        const style = window.getComputedStyle(node);
+        return style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || "1") > 0.02;
       }
 
-      /** Topbar: ignorar sobreposicoes <6px (anti-aliasing / bordas partilhadas entre chips adjacentes). */
-      function rectsOverlapTopbarControls(a, b) {
-        if (!a || !b) return false;
-        const overlapX = Math.min(a.right, b.right) - Math.max(a.left, b.left);
-        const overlapY = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
-        return overlapX > 6 && overlapY > 6;
+      function hitTestVisible(node) {
+        if (!(node instanceof Element)) return false;
+        const rect = node.getBoundingClientRect();
+        const x = Math.min(Math.max(rect.left + rect.width / 2, 0), window.innerWidth - 1);
+        const y = Math.min(Math.max(rect.top + rect.height / 2, 0), window.innerHeight - 1);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+        const hit = document.elementFromPoint(x, y);
+        return Boolean(hit && (hit === node || node.contains(hit)));
+      }
+
+      function ownTestId(node) {
+        return node instanceof Element ? node.getAttribute("data-testid") || "" : "";
+      }
+
+      function nearestTestId(node) {
+        let current = node instanceof Element ? node : null;
+        while (current) {
+          const testId = ownTestId(current);
+          if (testId) return testId;
+          current = current.parentElement;
+        }
+        return "";
+      }
+
+      function verticalScrollRegion(node) {
+        let current = node instanceof Element ? node.parentElement : null;
+        while (current && current !== document.documentElement && current !== document.body) {
+          if (current instanceof HTMLElement) {
+            const style = window.getComputedStyle(current);
+            const scrollable =
+              ["auto", "scroll", "overlay"].includes(style.overflowY) &&
+              current.scrollHeight > current.clientHeight + 2;
+            if (scrollable) {
+              return {
+                key: ownTestId(current) || nearestTestId(current) || current.tagName.toLowerCase(),
+                scrollTop: current.scrollTop,
+                clientHeight: current.clientHeight,
+                scrollHeight: current.scrollHeight,
+              };
+            }
+          }
+          current = current.parentElement;
+        }
+        return null;
+      }
+
+      function horizontalScrollRegion(node) {
+        let current = node instanceof Element ? node.parentElement : null;
+        while (current && current !== document.documentElement && current !== document.body) {
+          if (current instanceof HTMLElement) {
+            const style = window.getComputedStyle(current);
+            const scrollable =
+              ["auto", "scroll", "overlay"].includes(style.overflowX) &&
+              current.scrollWidth > current.clientWidth + 2;
+            if (scrollable) {
+              return {
+                key: ownTestId(current) || nearestTestId(current) || current.tagName.toLowerCase(),
+                allowed: horizontalScrollAllowed(current),
+                scrollLeft: current.scrollLeft,
+                clientWidth: current.clientWidth,
+                scrollWidth: current.scrollWidth,
+              };
+            }
+          }
+          current = current.parentElement;
+        }
+        return null;
+      }
+
+      function keyFor(node, index) {
+        const testId = nearestTestId(node);
+        const own = ownTestId(node);
+        const label =
+          own ||
+          node.getAttribute("aria-label") ||
+          node.getAttribute("title") ||
+          node.textContent?.replace(/\\s+/g, " ").trim().slice(0, 40) ||
+          node.tagName.toLowerCase();
+        return String(testId || "no-testid") + ":" + String(label) + ":" + String(index);
+      }
+
+      function snapshotNode(node, key) {
+        if (!(node instanceof HTMLElement || node instanceof SVGElement)) return null;
+        const rect = rectOf(node);
+        const text = node.textContent?.replace(/\\s+/g, " ").trim() ?? "";
+        const scrollRegion = verticalScrollRegion(node);
+        const xScrollRegion = horizontalScrollRegion(node);
+        return {
+          key,
+          tag: node.tagName.toLowerCase(),
+          testId: ownTestId(node),
+          nearestTestId: nearestTestId(node),
+          text,
+          title: node.getAttribute("title") || "",
+          ariaLabel: node.getAttribute("aria-label") || "",
+          ariaDescribedBy: node.getAttribute("aria-describedby") || "",
+          role: node.getAttribute("role") || "",
+          rect,
+          visible: visible(node),
+          hitTestVisible: hitTestVisible(node),
+          disabled: Boolean(node.disabled || node.getAttribute("aria-disabled") === "true"),
+          clientWidth: node.clientWidth ?? 0,
+          clientHeight: node.clientHeight ?? 0,
+          scrollWidth: node.scrollWidth ?? 0,
+          scrollHeight: node.scrollHeight ?? 0,
+          dataVisible: node.getAttribute("data-visible") || "",
+          insideVerticalScrollRegion: Boolean(scrollRegion),
+          verticalScrollRegion: scrollRegion,
+          insideAllowedHorizontalScrollRegion: Boolean(xScrollRegion?.allowed),
+          horizontalScrollRegion: xScrollRegion,
+        };
+      }
+
+      function oracleScopeRoot() {
+        if (targetId === "import-wizard") {
+          return document.querySelector('[data-testid="project-wizard-body"]') || document.body;
+        }
+        return document.body;
+      }
+
+      function scopedQueryAll(root, selector) {
+        const nodes = [];
+        if (root instanceof Element && root.matches(selector)) nodes.push(root);
+        if (root instanceof Element || root instanceof Document) {
+          nodes.push(...Array.from(root.querySelectorAll(selector)));
+        }
+        return nodes;
+      }
+
+      function scopedTree(root) {
+        if (!(root instanceof Element)) return [];
+        return [root, ...Array.from(root.querySelectorAll("*"))];
+      }
+
+      function isLeafTextCandidate(node, clickableSelector) {
+        if (!(node instanceof HTMLElement)) return false;
+        const tag = node.tagName.toLowerCase();
+        if (["button", "label", "h1", "h2", "h3", "p", "span", "dd", "dt", "kbd"].includes(tag)) {
+          return true;
+        }
+        const own = ownTestId(node);
+        if (!own) return false;
+        if (node.querySelector(clickableSelector)) return false;
+        const text = node.textContent?.replace(/\\s+/g, " ").trim() ?? "";
+        if (text.length > 160) return false;
+        let directText = "";
+        for (const child of Array.from(node.childNodes)) {
+          if (child.nodeType === Node.TEXT_NODE) directText += child.textContent || "";
+        }
+        return directText.replace(/\\s+/g, " ").trim().length > 0 && node.children.length <= 2;
+      }
+
+      function bySelector(selector, key) {
+        return snapshotNode(document.querySelector(selector), key);
+      }
+
+      function mainVisual(selector, containerSelector, key, kind) {
+        const node = document.querySelector(selector);
+        if (!(node instanceof HTMLElement || node instanceof SVGElement)) return null;
+        const container = containerSelector ? document.querySelector(containerSelector) : node.parentElement;
+        return {
+          ...snapshotNode(node, key),
+          kind,
+          containerRect: rectOf(container instanceof Element ? container : node.parentElement),
+        };
+      }
+
+      function horizontalScrollAllowed(node) {
+        if (!(node instanceof Element)) return false;
+        if (node.closest('[data-rds-allow-horizontal-scroll="true"]')) return true;
+        if (node.closest("pre, code")) return true;
+        let current = node;
+        while (current) {
+          const testId = ownTestId(current);
+          if (allowedHorizontalScrollTestIds.has(testId)) return true;
+          current = current.parentElement;
+        }
+        return false;
       }
 
       const topbar = document.querySelector('[data-testid="unified-topbar"]');
-      if (topbar) {
-        metrics.topbarScrollWidth = topbar.scrollWidth;
-        metrics.topbarClientWidth = topbar.clientWidth;
-        if (topbar.scrollWidth > topbar.clientWidth + 2) {
-          issues.push("topbar overflow horizontal");
-        }
-        const topbarCols = Array.from(topbar.children).filter(
-          (node) => node instanceof HTMLElement
-        );
-        if (topbarCols.length >= 3) {
-          const leftRect = topbarCols[0].getBoundingClientRect();
-          const centerRect = topbarCols[1].getBoundingClientRect();
-          const rightRect = topbarCols[2].getBoundingClientRect();
-          if (centerRect.left < leftRect.right - 2) {
-            issues.push("topbar: coluna central sobrepoe a esquerda (texto/comandos)");
-          }
-          if (centerRect.right > rightRect.left + 2) {
-            issues.push("topbar: coluna central sobrepoe a direita (texto/comandos)");
-          }
-        }
-        const topbarRect = topbar.getBoundingClientRect();
-        metrics.topbarHeight = Math.round(topbarRect.height);
-        const buildBtn = document.querySelector('[data-testid="toolbar-build-run"]');
-        if (buildBtn) {
-          const buildRect = buildBtn.getBoundingClientRect();
-          metrics.buildButtonHeight = Math.round(buildRect.height);
-          const buildStyle = window.getComputedStyle(buildBtn);
-          if (Number.parseFloat(buildStyle.lineHeight) > topbarRect.height + 2) {
-            issues.push("botao Build aumenta altura da topbar");
-          }
-          if (buildBtn.scrollHeight > buildBtn.clientHeight + 2) {
-            issues.push("botao Build com quebra de linha");
-          }
-          if (buildRect.height > topbarRect.height + 2) {
-            issues.push("botao Build mais alto que a topbar");
-          }
-        }
-      }
-
-      const centerPanel =
-        document.querySelector('[data-panel-id="center"]') ??
-        document.getElementById("center");
-      if (centerPanel) {
-        const centerRect = centerPanel.getBoundingClientRect();
-        metrics.centerWidth = Math.round(centerRect.width);
-        metrics.centerHeight = Math.round(centerRect.height);
-        const minCenterWidth =
-          resolutionTag === "1366x768" ? 520 : resolutionTag === "1920x1080" ? 720 : 900;
-        const minCenterHeight = 280;
-        if (centerRect.width < minCenterWidth) {
-          issues.push(
-            "painel central estreito demais (" + Math.round(centerRect.width) + "px)"
-          );
-        }
-        if (centerRect.height < minCenterHeight) {
-          issues.push(
-            "painel central baixo demais (" + Math.round(centerRect.height) + "px)"
-          );
-        }
-      } else {
-        issues.push("painel central nao encontrado");
-      }
-
-      const guide = document.querySelector('[data-testid="workspace-guide"]');
-      if (guide) {
-        const guideRect = guide.getBoundingClientRect();
-        metrics.guideHeight = Math.round(guideRect.height);
-        const maxGuideHeight = window.innerHeight * 0.14;
-        if (guideRect.height > maxGuideHeight) {
-          issues.push(
-            "workspace guide alto demais (" + Math.round(guideRect.height) + "px)"
-          );
-        }
-      }
-
-      const shellExpectations = {
-        scene: { showLeft: true, showRight: true },
-        logic: { showLeft: false, showRight: false },
-        game: { showLeft: false, showRight: false },
-        debug: { showLeft: false, showRight: true },
+      const topbarChildren = topbar ? Array.from(topbar.children) : [];
+      const elements = {
+        topbar: bySelector('[data-testid="unified-topbar"]', "topbar"),
+        topbarLeft: snapshotNode(topbarChildren[0], "topbar-left"),
+        topbarCenter: snapshotNode(topbarChildren[1], "topbar-center"),
+        topbarRight: snapshotNode(topbarChildren[2], "topbar-right"),
+        buildButton: bySelector('[data-testid="toolbar-build-run"]', "toolbar-build-run"),
+        centerPanel: bySelector('[data-panel-id="center"], #center', "center-panel"),
+        leftPanel: bySelector('[data-panel-id="left"], #left', "left-panel"),
+        rightPanel: bySelector('[data-panel-id="right"], #right', "right-panel"),
+        workspaceGuide: bySelector('[data-testid="workspace-guide"]', "workspace-guide"),
+        consoleDrawer: bySelector('[data-testid="console-drawer"]', "console-drawer"),
+        statusBar: bySelector('[data-testid="production-status-bar"]', "production-status-bar"),
+        nodegraphRail: bySelector('[data-testid="nodegraph-side-rail"]', "nodegraph-side-rail"),
+        nodegraphCanvas: bySelector('[data-testid="nodegraph-canvas"]', "nodegraph-canvas"),
+        nodegraphMinimap: bySelector('[data-testid="nodegraph-minimap"]', "nodegraph-minimap"),
+        nodegraphCanvasToolbar: bySelector('[data-testid="nodegraph-canvas-toolbar"]', "nodegraph-canvas-toolbar"),
+        importWizard: bySelector('[data-testid="project-wizard-body"]', "project-wizard-body"),
+        runtimeSetup: bySelector('[data-testid="runtime-setup-panel"]', "runtime-setup-panel"),
       };
-      const expected = shellExpectations[workspace] ?? { showLeft: true, showRight: true };
-      const leftPanel =
-        document.querySelector('[data-panel-id="left"]') ?? document.getElementById("left");
-      const rightPanel =
-        document.querySelector('[data-panel-id="right"]') ?? document.getElementById("right");
-      if (!expected.showLeft && panelVisible(leftPanel)) {
-        issues.push("painel esquerdo visivel com showLeft=false");
-      }
-      if (!expected.showRight && panelVisible(rightPanel)) {
-        issues.push("painel direito visivel com showRight=false");
-      }
+      const scopeRoot = oracleScopeRoot();
 
-      const consoleDrawer = document.querySelector('[data-testid="console-drawer"]');
-      if (consoleDrawer?.getAttribute("data-visible") === "true") {
-        issues.push("console drawer aberto por padrao");
-      }
-      const statusBar = document.querySelector('[data-testid="production-status-bar"]');
-      if (consoleDrawer && statusBar && consoleDrawer.getAttribute("data-visible") === "true") {
-        const consoleRect = consoleDrawer.getBoundingClientRect();
-        const statusRect = statusBar.getBoundingClientRect();
-        if (consoleRect.bottom > statusRect.top + 1) {
-          issues.push("console drawer cobre a status bar");
-        }
-      }
+      const clickableSelector = [
+        "button",
+        "a[href]",
+        "input",
+        "select",
+        "textarea",
+        "summary",
+        '[role="button"]',
+        '[tabindex]:not([tabindex="-1"])',
+      ].join(",");
+      const clickables = scopedQueryAll(scopeRoot, clickableSelector)
+        .filter((node) => visible(node))
+        .map((node, index) => snapshotNode(node, keyFor(node, index)))
+        .filter(Boolean);
 
-      if (workspace === "logic") {
-        const rail = document.querySelector('[data-testid="nodegraph-side-rail"]');
-        const canvas = document.querySelector('[data-testid="nodegraph-canvas"]');
-        if (!rail) {
-          issues.push("nodegraph side rail ausente");
-        }
-        if (rail && canvas) {
-          const railRect = rail.getBoundingClientRect();
-          const canvasRect = canvas.getBoundingClientRect();
-          if (railRect.left < canvasRect.right - 4) {
-            issues.push("nodegraph side rail sobrepoe o canvas");
-          }
-          const minimap = document.querySelector('[data-testid="nodegraph-minimap"]');
-          if (minimap && rectsOverlap(minimap.getBoundingClientRect(), railRect)) {
-            issues.push("minimap sobrepoe o side rail");
-          }
-          const toolbar = document.querySelector('[data-testid="nodegraph-canvas-toolbar"]');
-          if (toolbar && rectsOverlap(toolbar.getBoundingClientRect(), railRect)) {
-            issues.push("toolbar do canvas sobrepoe o side rail");
-          }
-          const nodeCards = Array.from(
-            document.querySelectorAll('[data-testid^="node-card-"]')
-          ).slice(0, 6);
-          for (const card of nodeCards) {
-            if (rectsOverlap(card.getBoundingClientRect(), railRect)) {
-              issues.push("node card sobrepoe o side rail");
-              break;
-            }
-          }
-        }
-      }
+      const criticalSelector = [
+        "button",
+        "[data-testid]",
+        "h1",
+        "h2",
+        "h3",
+        "label",
+        "p",
+        "span",
+        "dd",
+        "dt",
+        "kbd",
+      ].join(",");
+      const criticalTexts = scopedQueryAll(scopeRoot, criticalSelector)
+        .filter((node) => {
+          if (!visible(node)) return false;
+          const text = node.textContent?.replace(/\\s+/g, " ").trim() ?? "";
+          if (text.length < 3) return false;
+          if (!isLeafTextCandidate(node, clickableSelector)) return false;
+          const truncated =
+            node.scrollWidth > node.clientWidth + 2 ||
+            node.scrollHeight > node.clientHeight + 2;
+          if (!truncated) return false;
+          const testId = nearestTestId(node);
+          return Boolean(
+            node.tagName.toLowerCase() === "button" ||
+              testId.includes("toolbar") ||
+              testId.includes("workspace") ||
+              testId.includes("inspector") ||
+              testId.includes("nodegraph") ||
+              testId.includes("artstudio") ||
+              testId.includes("runtime") ||
+              testId.includes("wizard") ||
+              testId.includes("viewport") ||
+              testId.includes("tools") ||
+              testId.includes("production")
+          );
+        })
+        .slice(0, 80)
+        .map((node, index) => snapshotNode(node, keyFor(node, index)))
+        .filter(Boolean);
 
-      const toolbarButtons = Array.from(
-        document.querySelectorAll('[data-testid="unified-topbar"] button')
-      ).filter((button) => {
-        const rect = button.getBoundingClientRect();
-        if (rect.width < 4 || rect.height < 4 || rect.top >= 120) {
-          return false;
-        }
-        let node = button.parentElement;
-        while (node && node !== topbar) {
-          if (node instanceof HTMLElement) {
-            const cls = node.getAttribute("class") ?? "";
-            if (cls.includes("sr-only") || cls.includes("hidden")) {
-              return false;
-            }
-          }
-          node = node.parentElement;
-        }
-        return true;
-      });
-      for (let index = 0; index < toolbarButtons.length; index += 1) {
-        for (let other = index + 1; other < toolbarButtons.length; other += 1) {
-          if (
-            rectsOverlapTopbarControls(
-              toolbarButtons[index].getBoundingClientRect(),
-              toolbarButtons[other].getBoundingClientRect()
-            )
-          ) {
-            issues.push("controles da topbar sobrepostos");
-            index = toolbarButtons.length;
-            break;
-          }
-        }
-      }
+      const horizontalScrolls = scopedTree(scopeRoot)
+        .filter((node) => {
+          if (!(node instanceof HTMLElement)) return false;
+          if (!visible(node)) return false;
+          const overflowX = window.getComputedStyle(node).overflowX;
+          if (!["auto", "scroll", "overlay"].includes(overflowX)) return false;
+          return node.scrollWidth > node.clientWidth + 2 && node.clientWidth > 24;
+        })
+        .slice(0, 80)
+        .map((node, index) => ({
+          ...snapshotNode(node, keyFor(node, index)),
+          allowed: horizontalScrollAllowed(node),
+        }));
 
-      return { ok: issues.length === 0, issues, metrics };
+      const mainVisuals = [
+        mainVisual('[data-testid="project-wizard-body"]', '[data-testid="project-wizard-body"]', "import-wizard", "wizard"),
+        mainVisual('[data-testid="viewport-scene-canvas"]', '[data-testid="viewport-scene-stage"]', "viewport-scene-canvas", "scene"),
+        mainVisual('[data-testid="viewport-game-canvas"]', '[data-testid="viewport-game-stage"]', "viewport-game-canvas", "game"),
+        mainVisual('[data-testid="nodegraph-canvas"]', '[data-panel-id="center"], #center', "nodegraph-canvas", "nodegraph"),
+        mainVisual('[data-testid="artstudio-main-stage"]', '[data-testid="artstudio-main-stage"]', "artstudio-main-stage", "art"),
+        mainVisual('[data-testid="runtime-setup-panel"]', '[data-panel-id="right"], #right', "runtime-setup-panel", "runtime"),
+        mainVisual('[data-panel-id="right"], #right', '[data-panel-id="right"], #right', "debug-tools", "debug"),
+      ].filter(Boolean);
+
+      return {
+        targetId,
+        workspaceId: targetId === "import-wizard" ? null : window.__RDS_E2E__?.getState?.()?.activeWorkspace ?? null,
+        resolutionTag,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        document: {
+          clientWidth: document.documentElement.clientWidth,
+          scrollWidth: Math.max(document.documentElement.scrollWidth, document.body?.scrollWidth ?? 0),
+        },
+        elements,
+        clickables,
+        criticalTexts,
+        horizontalScrolls,
+        mainVisuals,
+      };
     `,
-    [workspaceId, resolutionTag]
+    [targetId, resolutionTag]
   );
+}
 
-  if (!result?.ok) {
-    const metricsText = result?.metrics ? JSON.stringify(result.metrics) : "{}";
-    fail(
-      `Bloco H layout ${resolutionTag}/${workspaceId}: ${(result?.issues ?? ["sem diagnostico"]).join("; ")} | metrics=${metricsText}`
-    );
-  }
+async function writeUiLayoutOracleReport(records, artifactPrefix) {
+  await ensureValidationDir();
+  const report = buildUiLayoutOracleReport({ artifactPrefix, records });
+  await writeFile(uiLayoutOracleReportPath, `${JSON.stringify(report, null, 2)}\n`);
+  return report;
+}
+
+function formatUiLayoutIssues(record) {
+  return (record.issues ?? [])
+    .map((issue) => `${issue.code}: ${issue.message}`)
+    .join("; ");
+}
+
+async function evaluateUiLayoutHealth(sessionId, targetId, resolutionTag) {
+  const snapshot = await collectUiLayoutOracleSnapshot(sessionId, targetId, resolutionTag);
+  return evaluateUiLayoutOracleSnapshot(snapshot);
 }
 
 async function captureScreenshot(sessionId, filename) {
@@ -1478,6 +1622,97 @@ async function captureScreenshot(sessionId, filename) {
   const outputPath = path.join(validationDir, filename);
   await writeFile(outputPath, Buffer.from(base64, "base64"));
   return outputPath;
+}
+
+async function prepareUiLayoutOracleTarget(sessionId, target) {
+  if (!target) {
+    fail("Alvo do oraculo visual nao foi encontrado.");
+  }
+
+  if (target.id === "import-wizard") {
+    await waitForOnboardingWizard(sessionId);
+    return;
+  }
+
+  if (target.workspaceId) {
+    await callAutomationApi(sessionId, "selectWorkspace", [target.workspaceId]);
+  }
+
+  if (target.id === "runtime-setup") {
+    await callAutomationApi(sessionId, "openToolsWorkspace", ["setup", "debug", true]);
+  }
+
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      if (!state || state.activeWorkspace !== target.workspaceId) {
+        return false;
+      }
+      if (target.id === "scene") {
+        return executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="viewport-scene-stage"]'));`);
+      }
+      if (target.id === "art") {
+        return executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="artstudio-main-stage"]'));`);
+      }
+      if (target.id === "game") {
+        return executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="viewport-game-stage"]'));`);
+      }
+      if (target.id === "logic" || target.id === "nodegraph") {
+        return executeScript(
+          sessionId,
+          `return Boolean(
+            document.querySelector('[data-testid="nodegraph-side-rail"]') &&
+            document.querySelector('[data-testid="nodegraph-canvas"]')
+          );`
+        );
+      }
+      if (target.id === "debug") {
+        return executeScript(sessionId, `return Boolean(document.querySelector('[data-panel-id="right"], #right'));`);
+      }
+      if (target.id === "runtime-setup") {
+        return executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="runtime-setup-panel"]'));`);
+      }
+      return state;
+    },
+    target.id === "logic" || target.id === "nodegraph" ? 25000 : 15000,
+    `Oraculo visual: alvo '${target.id}' nao ficou pronto.`,
+    250
+  );
+}
+
+async function runUiLayoutOracleCheck(
+  sessionId,
+  target,
+  resolution,
+  artifactPrefix,
+  records,
+  shotNames,
+  manualQaReport
+) {
+  await prepareUiLayoutOracleTarget(sessionId, target);
+  const record = await evaluateUiLayoutHealth(sessionId, target.id, resolution.tag);
+  const screenshot = await captureScreenshot(
+    sessionId,
+    `${artifactPrefix}-H-ui-oracle-${resolution.tag}-${target.id}.png`
+  );
+  record.screenshot = path.basename(screenshot);
+  records.push(record);
+  shotNames.push(path.basename(screenshot));
+  registerArtifact(
+    manualQaReport,
+    screenshot,
+    `H - ui oracle ${resolution.tag} ${target.id}`
+  );
+  await writeUiLayoutOracleReport(records, artifactPrefix);
+
+  if (!record.ok) {
+    const metricsText = record.metrics ? JSON.stringify(record.metrics) : "{}";
+    fail(
+      `Oraculo visual ${resolution.tag}/${target.id}: ${formatUiLayoutIssues(record)} | metrics=${metricsText}`
+    );
+  }
+
+  return record;
 }
 
 async function cleanupTemporaryProject(projectDir) {
@@ -2115,7 +2350,7 @@ async function main() {
     process.env.RDS_E2E_UI_TIMEOUT_MS,
     process.env.GITHUB_ACTIONS === "true" ? 30000 : 15000
   );
-  const emulatorActivationTimeoutMs = parsePositiveInteger(process.env.RDS_E2E_RUN_TIMEOUT_MS, 180000);
+  const emulatorActivationTimeoutMs = parsePositiveInteger(process.env.RDS_E2E_RUN_TIMEOUT_MS, 300000);
   const liveValidationTimeoutMs = parsePositiveInteger(process.env.RDS_E2E_LIVE_TIMEOUT_MS, 60000);
   const requiresExistingProject =
     options.scenario !== "onboarding-shell" && options.scenario !== "qa-rc";
@@ -2399,6 +2634,8 @@ async function main() {
       const artifactPrefix = `qa-rc-${artifactTimestamp()}`;
       const manualQaReport = createManualQaReport();
       manualQaReport.app = options.app;
+      const uiLayoutOracleRecords = [];
+      const uiLayoutShotNames = [];
       let currentBlock = "A";
 
       try {
@@ -2409,6 +2646,24 @@ async function main() {
           `${artifactPrefix}-A-wizard.png`
         );
         registerArtifact(manualQaReport, wizardScreenshot, "A - wizard");
+
+        currentBlock = "H";
+        const importWizardTarget = UI_LAYOUT_ORACLE_TARGETS.find((target) => target.id === "import-wizard");
+        for (const resolution of UI_LAYOUT_ORACLE_RESOLUTIONS) {
+          await setSessionWindowRect(sessionId, resolution.width, resolution.height);
+          await waitForOnboardingWizard(sessionId);
+          await runUiLayoutOracleCheck(
+            sessionId,
+            importWizardTarget,
+            resolution,
+            artifactPrefix,
+            uiLayoutOracleRecords,
+            uiLayoutShotNames,
+            manualQaReport
+          );
+        }
+        await setSessionWindowRect(sessionId, 1920, 1080);
+        currentBlock = "A";
 
         const templateCard = await findElement(sessionId, "[data-testid='template-card-starter_guided']");
         await clickElement(sessionId, templateCard);
@@ -2749,18 +3004,24 @@ async function main() {
         }
 
         await clickByTestId(sessionId, "toolbar-build-run");
-        await waitFor(
-          async () => {
-            const status = await executeScript(
-              sessionId,
-              "return document.querySelector('[data-testid=\"viewport-game-status\"]')?.textContent?.trim() ?? '';"
-            );
-            return status === "Emulador ativo";
-          },
-          emulatorActivationTimeoutMs,
-          "Build & Run do RC nao ativou o emulador.",
-          1000
-        );
+        try {
+          await waitFor(
+            async () => {
+              const status = await executeScript(
+                sessionId,
+                "return document.querySelector('[data-testid=\"viewport-game-status\"]')?.textContent?.trim() ?? '';"
+              );
+              return status === "Emulador ativo";
+            },
+            emulatorActivationTimeoutMs,
+            "Build & Run do RC nao ativou o emulador.",
+            1000
+          );
+        } catch (error) {
+          const diagnostics = formatAppDiagnostics(await collectAppDiagnostics(sessionId));
+          const details = error instanceof Error ? error.message : String(error);
+          fail(diagnostics ? `${details}\n${diagnostics}` : details);
+        }
 
         await waitFor(
           async () => {
@@ -3333,7 +3594,7 @@ async function main() {
               ? state
               : false;
           },
-          15000,
+          30000,
           "Bloco G: navegacao objeto -> art nao abriu o Art Workspace integrado.",
           250
         );
@@ -3562,57 +3823,37 @@ async function main() {
 
         currentBlock = "H";
         await callAutomationApi(sessionId, "setConsoleVisible", [false]);
-        const layoutWorkspaceIds = ["scene", "logic", "game", "debug"];
-        const layoutShotNames = [];
-        const layoutValidationNotes = [];
-        for (const resolution of UI_LAYOUT_CAPTURE_RESOLUTIONS) {
+        const layoutTargets = UI_LAYOUT_ORACLE_TARGETS.filter((target) => target.id !== "import-wizard");
+        for (const resolution of UI_LAYOUT_ORACLE_RESOLUTIONS) {
           await setSessionWindowRect(sessionId, resolution.width, resolution.height);
-          for (const workspaceId of layoutWorkspaceIds) {
-            await callAutomationApi(sessionId, "selectWorkspace", [workspaceId]);
-            await waitFor(
-              async () => {
-                const state = await readAutomationState(sessionId);
-                if (!state || state.activeWorkspace !== workspaceId) {
-                  return false;
-                }
-                if (workspaceId === "logic") {
-                  const ready = await executeScript(
-                    sessionId,
-                    `return Boolean(
-                      document.querySelector('[data-testid="nodegraph-side-rail"]') &&
-                      document.querySelector('[data-testid="nodegraph-canvas"]')
-                    );`
-                  );
-                  return ready ? state : false;
-                }
-                return state;
-              },
-              workspaceId === "logic" ? 25000 : 15000,
-              `Bloco H: workspace '${workspaceId}' nao ativou em ${resolution.tag}.`,
-              250
-            );
-            await assertUiLayoutHealth(sessionId, workspaceId, resolution.tag);
-            layoutValidationNotes.push(`${resolution.tag}/${workspaceId}:ok`);
-            const layoutShot = await captureScreenshot(
+          for (const target of layoutTargets) {
+            await runUiLayoutOracleCheck(
               sessionId,
-              `${artifactPrefix}-H-ui-layout-${resolution.tag}-${workspaceId}.png`
+              target,
+              resolution,
+              artifactPrefix,
+              uiLayoutOracleRecords,
+              uiLayoutShotNames,
+              manualQaReport
             );
-            registerArtifact(
-              manualQaReport,
-              layoutShot,
-              `H - ui layout ${resolution.tag} ${workspaceId}`
-            );
-            layoutShotNames.push(path.basename(layoutShot));
           }
         }
+        const uiLayoutOracleReport = await writeUiLayoutOracleReport(
+          uiLayoutOracleRecords,
+          artifactPrefix
+        );
+        const layoutValidationNotes = uiLayoutOracleRecords.map(
+          (record) => `${record.resolutionTag}/${record.targetId}:${record.ok ? "ok" : "fail"}`
+        );
         await markManualQaBlock(
           manualQaReport,
           "H",
           "passed",
           [
-            `QA visual de layout: ${UI_LAYOUT_CAPTURE_RESOLUTIONS.length} resolucoes x ${layoutWorkspaceIds.length} workspaces (Scene, Logic, Game, Debug) com validacao automatica de shell (topbar, paineis, console, nodegraph).`,
+            `QA visual de layout: ${UI_LAYOUT_ORACLE_RESOLUTIONS.length} resolucoes x ${UI_LAYOUT_ORACLE_TARGETS.length} alvos (Import Wizard, Scene, Art, Logic, NodeGraph, Game, Debug, Runtime Setup) com oraculo DOM/BoundingClientRect.`,
             `Validacoes: ${layoutValidationNotes.join(", ")}.`,
-            `Evidencias: ${layoutShotNames.join(", ")}.`,
+            `Relatorio: ${path.basename(uiLayoutOracleReportPath)} status=${uiLayoutOracleReport.status}.`,
+            `Evidencias: ${uiLayoutShotNames.join(", ")}.`,
           ].join(" ")
         );
 

@@ -875,7 +875,7 @@ function ArtStudioTimelineSection() {
         </h3>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="rounded-full border border-[#313244] bg-[#0b1220] px-2.5 py-1 text-[10px] font-semibold text-[#94a3b8]">
@@ -1217,7 +1217,9 @@ function ArtStudioInspectorSection() {
             </div>
             <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-[12px]">
               <dt className="text-[#64748b]">Arquivo</dt>
-              <dd className="truncate font-medium text-[#e2e8f0]">{state.spriteSheetDisplayName || "Nenhum"}</dd>
+              <dd className="truncate font-medium text-[#e2e8f0]" title={state.spriteSheetDisplayName || "Nenhum"}>
+                {state.spriteSheetDisplayName || "Nenhum"}
+              </dd>
               <dt className="text-[#64748b]">Formato</dt>
               <dd className="font-medium text-[#e2e8f0]">{state.spriteSheetFormat ?? "-"}</dd>
               <dt className="text-[#64748b]">Resolucao</dt>
@@ -1231,7 +1233,7 @@ function ArtStudioInspectorSection() {
                 {state.spriteSheetFrameCount ?? (totalFrameSlots > 0 ? totalFrameSlots : "-")}
               </dd>
               <dt className="text-[#64748b]">Asset</dt>
-              <dd className="truncate font-medium text-[#e2e8f0]">
+              <dd className="truncate font-medium text-[#e2e8f0]" title={state.spritePath || "Pendente de importacao canonica"}>
                 {state.spritePath || "Pendente de importacao canonica"}
               </dd>
             </dl>
@@ -1268,7 +1270,9 @@ function ArtStudioInspectorSection() {
             <dt className="text-[#64748b]">Destino</dt>
             <dd className="font-medium text-[#e2e8f0]">{applyPlanLabel}</dd>
             <dt className="text-[#64748b]">Build</dt>
-            <dd className="truncate font-medium text-[#e2e8f0]">{buildReadinessLabel}</dd>
+            <dd className="truncate font-medium text-[#e2e8f0]" title={buildReadinessLabel}>
+              {buildReadinessLabel}
+            </dd>
             <dt className="text-[#64748b]">Frames</dt>
             <dd className="font-medium text-[#e2e8f0]">
               {usedFrameCount > 0
@@ -1286,7 +1290,9 @@ function ArtStudioInspectorSection() {
           </div>
           <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-[12px]">
             <dt className="text-[#64748b]">Arquivo</dt>
-            <dd className="truncate font-medium text-[#e2e8f0]">{state.spriteSheetDisplayName || "Nenhum"}</dd>
+            <dd className="truncate font-medium text-[#e2e8f0]" title={state.spriteSheetDisplayName || "Nenhum"}>
+              {state.spriteSheetDisplayName || "Nenhum"}
+            </dd>
             <dt className="text-[#64748b]">Formato</dt>
             <dd className="font-medium text-[#e2e8f0]">{state.spriteSheetFormat ?? "-"}</dd>
             <dt className="text-[#64748b]">Resolucao</dt>
@@ -1322,11 +1328,11 @@ function ArtStudioInspectorSection() {
               {state.spriteSheetMetaSpriteCandidate ? "Meta-sprite" : "Sprite simples"}
             </dd>
             <dt className="text-[#64748b]">Fonte</dt>
-            <dd className="truncate font-medium text-[#e2e8f0]">
+            <dd className="truncate font-medium text-[#e2e8f0]" title={state.spriteSheetSourcePath || "-"}>
               {state.spriteSheetSourcePath || "-"}
             </dd>
             <dt className="text-[#64748b]">Asset</dt>
-            <dd className="truncate font-medium text-[#e2e8f0]">
+            <dd className="truncate font-medium text-[#e2e8f0]" title={state.spritePath || "Pendente de importacao canonica"}>
               {state.spritePath || "Pendente de importacao canonica"}
             </dd>
           </dl>
