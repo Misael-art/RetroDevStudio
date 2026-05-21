@@ -64,7 +64,6 @@ jobs:
       RDS_E2E_RUN_TIMEOUT_MS: 300000
       RDS_FORCE_TAURI_CLI_DEBUG: "1"
       RDS_E2E_TARGET: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.target || github.event_name == 'workflow_call' && inputs.target || 'all' }}
-      RDS_E2E_LEDGER: ${{ runner.temp }}/desktop-e2e-passed.txt
       RDS_GITHUB_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout
@@ -114,10 +113,12 @@ jobs:
 
       - name: Initialize desktop E2E pass ledger
         run: |
-          if (Test-Path $env:RDS_E2E_LEDGER) {
-            Remove-Item -Path $env:RDS_E2E_LEDGER -Force
+          $ledgerPath = Join-Path $env:RUNNER_TEMP 'desktop-e2e-passed.txt'
+          if (Test-Path $ledgerPath) {
+            Remove-Item -Path $ledgerPath -Force
           }
-          New-Item -ItemType File -Path $env:RDS_E2E_LEDGER -Force | Out-Null
+          New-Item -ItemType File -Path $ledgerPath -Force | Out-Null
+          "RDS_E2E_LEDGER=$ledgerPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8NoBOM -Append
 
       - name: Run Mega Drive desktop smoke
         id: smoke_md
