@@ -10,6 +10,7 @@ permissions:
 jobs:
   validate:
     runs-on: windows-latest
+    timeout-minutes: 90
     defaults:
       run:
         shell: pwsh
@@ -55,9 +56,10 @@ jobs:
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
 
+      # threads evita bootstrap infinito do pool forks no windows-latest (validate cancelava aqui).
       - name: Frontend tests
         id: frontend_tests
-        run: npm test
+        run: npx vitest run --pool=threads --maxWorkers=1
 
       - name: TypeScript check
         id: tsc_check
