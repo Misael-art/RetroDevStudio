@@ -291,27 +291,27 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          $scenarioOutcomes = [ordered]@{
-            smoke_md = '${{ steps.smoke_md.outcome }}'
-            smoke_snes = '${{ steps.smoke_snes.outcome }}'
-            live_overflow_md = '${{ steps.live_overflow_md.outcome }}'
-            live_overflow_snes = '${{ steps.live_overflow_snes.outcome }}'
-            live_vram_overflow_md = '${{ steps.live_vram_overflow_md.outcome }}'
-            live_vram_overflow_snes = '${{ steps.live_vram_overflow_snes.outcome }}'
-            live_vram_warning_md = '${{ steps.live_vram_warning_md.outcome }}'
-            live_vram_warning_snes = '${{ steps.live_vram_warning_snes.outcome }}'
-            live_sprite_warning_md = '${{ steps.live_sprite_warning_md.outcome }}'
-            live_sprite_warning_snes = '${{ steps.live_sprite_warning_snes.outcome }}'
-            live_ok_md = '${{ steps.live_ok_md.outcome }}'
-            live_ok_snes = '${{ steps.live_ok_snes.outcome }}'
-            live_error_md = '${{ steps.live_error_md.outcome }}'
-            live_error_snes = '${{ steps.live_error_snes.outcome }}'
-            live_stale_md = '${{ steps.live_stale_md.outcome }}'
-            live_stale_snes = '${{ steps.live_stale_snes.outcome }}'
+          $scenarioConclusions = [ordered]@{
+            smoke_md = '${{ steps.smoke_md.conclusion }}'
+            smoke_snes = '${{ steps.smoke_snes.conclusion }}'
+            live_overflow_md = '${{ steps.live_overflow_md.conclusion }}'
+            live_overflow_snes = '${{ steps.live_overflow_snes.conclusion }}'
+            live_vram_overflow_md = '${{ steps.live_vram_overflow_md.conclusion }}'
+            live_vram_overflow_snes = '${{ steps.live_vram_overflow_snes.conclusion }}'
+            live_vram_warning_md = '${{ steps.live_vram_warning_md.conclusion }}'
+            live_vram_warning_snes = '${{ steps.live_vram_warning_snes.conclusion }}'
+            live_sprite_warning_md = '${{ steps.live_sprite_warning_md.conclusion }}'
+            live_sprite_warning_snes = '${{ steps.live_sprite_warning_snes.conclusion }}'
+            live_ok_md = '${{ steps.live_ok_md.conclusion }}'
+            live_ok_snes = '${{ steps.live_ok_snes.conclusion }}'
+            live_error_md = '${{ steps.live_error_md.conclusion }}'
+            live_error_snes = '${{ steps.live_error_snes.conclusion }}'
+            live_stale_md = '${{ steps.live_stale_md.conclusion }}'
+            live_stale_snes = '${{ steps.live_stale_snes.conclusion }}'
           }
 
           $failed = @(
-            $scenarioOutcomes.GetEnumerator() | Where-Object {
+            $scenarioConclusions.GetEnumerator() | Where-Object {
               $_.Value -ne 'success' -and $_.Value -ne 'skipped'
             }
           )
