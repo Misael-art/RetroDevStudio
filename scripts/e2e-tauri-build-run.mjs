@@ -4099,7 +4099,19 @@ async function main() {
     ) {
       const overflowScenario = buildLiveOverflowScenario(projectMetadata.target, options.scenario);
       await setSceneDraft(sessionId, overflowScenario.draft);
-      await waitForLiveValidationFresh(sessionId, liveValidationTimeoutMs);
+      if (options.scenario === "live-error") {
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.hwValidationState === "error" ? state : false;
+          },
+          liveValidationTimeoutMs,
+          "Validacao live nao entrou em error apos draft invalido.",
+          250
+        );
+      } else {
+        await waitForLiveValidationFresh(sessionId, liveValidationTimeoutMs);
+      }
 
       let lastLiveStatus = null;
       let liveStatus;
