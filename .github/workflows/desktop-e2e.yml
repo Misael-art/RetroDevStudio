@@ -124,7 +124,6 @@ jobs:
       - name: Run Mega Drive desktop smoke
         id: smoke_md
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
-        continue-on-error: true
         run: |
           npm run test:e2e:desktop:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -133,7 +132,6 @@ jobs:
       - name: Run SNES desktop smoke
         id: smoke_snes
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
-        continue-on-error: true
         run: |
           npm run test:e2e:desktop:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -142,7 +140,6 @@ jobs:
       - name: Run Mega Drive live overflow desktop E2E
         id: live_overflow_md
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
-        continue-on-error: true
         run: |
           npm run test:e2e:desktop:live-overflow:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -151,7 +148,6 @@ jobs:
       - name: Run SNES live overflow desktop E2E
         id: live_overflow_snes
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
-        continue-on-error: true
         run: |
           npm run test:e2e:desktop:live-overflow:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -160,7 +156,6 @@ jobs:
       - name: Run Mega Drive live VRAM overflow desktop E2E
         id: live_vram_overflow_md
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
-        continue-on-error: true
         run: |
           npm run test:e2e:desktop:live-overflow-vram:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -169,7 +164,6 @@ jobs:
       - name: Run SNES live VRAM overflow desktop E2E
         id: live_vram_overflow_snes
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
-        continue-on-error: true
         run: |
           npm run test:e2e:desktop:live-overflow-vram:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -178,7 +172,6 @@ jobs:
       - name: Run Mega Drive live VRAM warning desktop E2E
         id: live_vram_warning_md
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
-        continue-on-error: true
         run: |
           npm run test:e2e:desktop:live-warning-vram:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -187,7 +180,6 @@ jobs:
       - name: Run SNES live VRAM warning desktop E2E
         id: live_vram_warning_snes
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
-        continue-on-error: true
         run: |
           npm run test:e2e:desktop:live-warning-vram:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -196,7 +188,6 @@ jobs:
       - name: Run Mega Drive live sprite warning desktop E2E
         id: live_sprite_warning_md
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
-        continue-on-error: true
         run: |
           npm run test:e2e:desktop:live-warning-sprites:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -205,7 +196,6 @@ jobs:
       - name: Run SNES live sprite warning desktop E2E
         id: live_sprite_warning_snes
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
-        continue-on-error: true
         run: |
           npm run test:e2e:desktop:live-warning-sprites:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -214,7 +204,6 @@ jobs:
       - name: Run Mega Drive live healthy desktop E2E
         id: live_ok_md
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
-        continue-on-error: true
         run: |
           npm run test:e2e:desktop:live-ok:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -223,7 +212,6 @@ jobs:
       - name: Run SNES live healthy desktop E2E
         id: live_ok_snes
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
-        continue-on-error: true
         run: |
           npm run test:e2e:desktop:live-ok:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -232,7 +220,6 @@ jobs:
       - name: Run Mega Drive live error desktop E2E
         id: live_error_md
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
-        continue-on-error: true
         run: |
           npm run test:e2e:desktop:live-error:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -241,7 +228,6 @@ jobs:
       - name: Run SNES live error desktop E2E
         id: live_error_snes
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
-        continue-on-error: true
         run: |
           npm run test:e2e:desktop:live-error:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -250,7 +236,6 @@ jobs:
       - name: Run Mega Drive live stale desktop E2E
         id: live_stale_md
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'megadrive' }}
-        continue-on-error: true
         run: |
           npm run test:e2e:desktop:live-stale:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -259,7 +244,6 @@ jobs:
       - name: Run SNES live stale desktop E2E
         id: live_stale_snes
         if: ${{ env.RDS_E2E_TARGET == 'all' || env.RDS_E2E_TARGET == 'snes' }}
-        continue-on-error: true
         run: |
           npm run test:e2e:desktop:live-stale:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -291,27 +275,27 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          $scenarioConclusions = [ordered]@{
-            smoke_md = '${{ steps.smoke_md.conclusion }}'
-            smoke_snes = '${{ steps.smoke_snes.conclusion }}'
-            live_overflow_md = '${{ steps.live_overflow_md.conclusion }}'
-            live_overflow_snes = '${{ steps.live_overflow_snes.conclusion }}'
-            live_vram_overflow_md = '${{ steps.live_vram_overflow_md.conclusion }}'
-            live_vram_overflow_snes = '${{ steps.live_vram_overflow_snes.conclusion }}'
-            live_vram_warning_md = '${{ steps.live_vram_warning_md.conclusion }}'
-            live_vram_warning_snes = '${{ steps.live_vram_warning_snes.conclusion }}'
-            live_sprite_warning_md = '${{ steps.live_sprite_warning_md.conclusion }}'
-            live_sprite_warning_snes = '${{ steps.live_sprite_warning_snes.conclusion }}'
-            live_ok_md = '${{ steps.live_ok_md.conclusion }}'
-            live_ok_snes = '${{ steps.live_ok_snes.conclusion }}'
-            live_error_md = '${{ steps.live_error_md.conclusion }}'
-            live_error_snes = '${{ steps.live_error_snes.conclusion }}'
-            live_stale_md = '${{ steps.live_stale_md.conclusion }}'
-            live_stale_snes = '${{ steps.live_stale_snes.conclusion }}'
+          $scenarioOutcomes = [ordered]@{
+            smoke_md = '${{ steps.smoke_md.outcome }}'
+            smoke_snes = '${{ steps.smoke_snes.outcome }}'
+            live_overflow_md = '${{ steps.live_overflow_md.outcome }}'
+            live_overflow_snes = '${{ steps.live_overflow_snes.outcome }}'
+            live_vram_overflow_md = '${{ steps.live_vram_overflow_md.outcome }}'
+            live_vram_overflow_snes = '${{ steps.live_vram_overflow_snes.outcome }}'
+            live_vram_warning_md = '${{ steps.live_vram_warning_md.outcome }}'
+            live_vram_warning_snes = '${{ steps.live_vram_warning_snes.outcome }}'
+            live_sprite_warning_md = '${{ steps.live_sprite_warning_md.outcome }}'
+            live_sprite_warning_snes = '${{ steps.live_sprite_warning_snes.outcome }}'
+            live_ok_md = '${{ steps.live_ok_md.outcome }}'
+            live_ok_snes = '${{ steps.live_ok_snes.outcome }}'
+            live_error_md = '${{ steps.live_error_md.outcome }}'
+            live_error_snes = '${{ steps.live_error_snes.outcome }}'
+            live_stale_md = '${{ steps.live_stale_md.outcome }}'
+            live_stale_snes = '${{ steps.live_stale_snes.outcome }}'
           }
 
           $failed = @(
-            $scenarioConclusions.GetEnumerator() | Where-Object {
+            $scenarioOutcomes.GetEnumerator() | Where-Object {
               $_.Value -ne 'success' -and $_.Value -ne 'skipped'
             }
           )
