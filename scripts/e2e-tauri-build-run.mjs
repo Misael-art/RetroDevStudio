@@ -57,6 +57,12 @@ function resolveE2eLedgerPath() {
 }
 
 async function recordE2eLedgerSuccess(options, projectMetadata) {
+  // No CI o workflow desktop-e2e grava marcadores via Add-Content (pwsh).
+  // Evita corrida/ path divergente quando npm nao herda RDS_E2E_LEDGER no Windows.
+  if (process.env.GITHUB_ACTIONS) {
+    return;
+  }
+
   const marker = resolveLedgerMarker(options, projectMetadata);
   const ledgerPath = resolveE2eLedgerPath();
   if (!marker || !ledgerPath) {
