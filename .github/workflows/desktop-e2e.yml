@@ -98,7 +98,7 @@ jobs:
           if (!(Test-Path $driverPath)) {
             throw "msedgedriver.exe nao foi provisionado em $driverDir"
           }
-          "RDS_EDGE_DRIVER_PATH=$driverPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "RDS_EDGE_DRIVER_PATH=$driverPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8NoBOM -Append
 
       - name: Build debug desktop app (canonical script)
         id: build_debug
@@ -307,7 +307,9 @@ jobs:
         if: always()
         shell: pwsh
         run: |
-          if (-not $env:RDS_E2E_LEDGER) {
+          if ($env:RDS_E2E_LEDGER) {
+            $env:RDS_E2E_LEDGER = $env:RDS_E2E_LEDGER.Trim().TrimStart([char]0xFEFF)
+          } else {
             $env:RDS_E2E_LEDGER = Join-Path $env:RUNNER_TEMP 'desktop-e2e-passed.txt'
           }
 
