@@ -354,6 +354,11 @@ describe("ArtStudioPanel import flow", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    mocks.open.mockReset();
+    mocks.open.mockResolvedValue(null);
+    mocks.artProcessPalette.mockReset();
+    mocks.importArtAsset.mockReset();
+    mocks.parseInputCommandFile.mockReset();
     mocks.artProcessPalette.mockResolvedValue({
       ok: true,
       processed_base64: "ZmFrZS1wbmctcHJldmlldw==",
@@ -520,6 +525,10 @@ describe("ArtStudioPanel import flow", () => {
       await flush();
     });
     container.remove();
+    mocks.open.mockReset();
+    mocks.artProcessPalette.mockReset();
+    mocks.importArtAsset.mockReset();
+    mocks.parseInputCommandFile.mockReset();
 
     globalThis.Image = originalImage;
     if (originalCreateObjectUrl) {

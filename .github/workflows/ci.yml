@@ -10,7 +10,7 @@ permissions:
 jobs:
   validate:
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     defaults:
       run:
         shell: pwsh
@@ -56,10 +56,11 @@ jobs:
         env:
           CARGO_TARGET_DIR: ${{ github.workspace }}/src-tauri/target
 
-      # threads evita bootstrap infinito do pool forks no windows-latest (validate cancelava aqui).
+      # Alinhado com vite.config.ts (pool=threads). Step timeout evita cancel silencioso do job inteiro.
       - name: Frontend tests
         id: frontend_tests
-        run: npx vitest run --pool=threads --maxWorkers=1
+        timeout-minutes: 45
+        run: npm test
 
       - name: TypeScript check
         id: tsc_check

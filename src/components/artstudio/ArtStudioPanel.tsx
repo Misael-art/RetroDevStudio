@@ -2110,7 +2110,7 @@ export default function ArtStudioPanel() {
       type: "HYDRATE_SPRITE_METADATA",
       sequences: buildArtStudioSequencesFromSpriteMetadata(selectedEntitySprite),
     });
-  }, [selectedEntitySprite, state.commandLibrary.length, state.sequences]);
+  }, [selectedEntitySprite, state.commandLibrary.length, state.sequences.length]);
 
   useEffect(() => {
     if (!activeProjectDir || !selectedEntitySprite?.asset) {
@@ -2737,8 +2737,8 @@ export default function ArtStudioPanel() {
     importCommandDatFromPath,
     ingestSpriteSheet,
     applyConstrainedFrameSize,
-    state.commandLibrary,
-    state.sequences,
+    state.commandLibrary.length,
+    state.sequences.length,
     state.spritePath,
     state.validationError,
   ]);

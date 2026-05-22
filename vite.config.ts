@@ -42,10 +42,8 @@ export default defineConfig({
     environment: "jsdom",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
     setupFiles: ["src/test/setup.ts"],
-    // Forks + single worker is the conservative baseline for this Windows host.
-    // It preserves file isolation without the intermittent bootstrap timeouts
-    // we are seeing again with thread workers on heavier suites.
-    pool: "forks",
+    // threads: forks trava no step Frontend tests do CI (job cancelado por timeout de 90 min).
+    pool: "threads",
     isolate: true,
     fileParallelism: false,
     maxWorkers: 1,
