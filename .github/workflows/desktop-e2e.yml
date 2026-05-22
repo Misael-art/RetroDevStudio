@@ -118,7 +118,7 @@ jobs:
             Remove-Item -Path $ledgerPath -Force
           }
           New-Item -ItemType File -Path $ledgerPath -Force | Out-Null
-          "RDS_E2E_LEDGER=$ledgerPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "RDS_E2E_LEDGER=$ledgerPath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8NoBOM -Append
 
       - name: Run Mega Drive desktop smoke
         id: smoke_md
@@ -127,6 +127,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'smoke_md'
 
       - name: Run SNES desktop smoke
         id: smoke_snes
@@ -135,6 +136,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'smoke_snes'
 
 
       - name: Run Mega Drive live overflow desktop E2E
@@ -144,6 +146,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-overflow:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_overflow_md'
 
 
       - name: Run SNES live overflow desktop E2E
@@ -153,6 +156,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-overflow:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_overflow_snes'
 
 
       - name: Run Mega Drive live VRAM overflow desktop E2E
@@ -162,6 +166,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-overflow-vram:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_vram_overflow_md'
 
 
       - name: Run SNES live VRAM overflow desktop E2E
@@ -171,6 +176,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-overflow-vram:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_vram_overflow_snes'
 
 
       - name: Run Mega Drive live VRAM warning desktop E2E
@@ -180,6 +186,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-warning-vram:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_vram_warning_md'
 
 
       - name: Run SNES live VRAM warning desktop E2E
@@ -189,6 +196,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-warning-vram:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_vram_warning_snes'
 
 
       - name: Run Mega Drive live sprite warning desktop E2E
@@ -198,6 +206,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-warning-sprites:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_sprite_warning_md'
 
 
       - name: Run SNES live sprite warning desktop E2E
@@ -207,6 +216,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-warning-sprites:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_sprite_warning_snes'
 
 
       - name: Run Mega Drive live healthy desktop E2E
@@ -216,6 +226,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-ok:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_ok_md'
 
 
       - name: Run SNES live healthy desktop E2E
@@ -225,6 +236,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-ok:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_ok_snes'
 
 
       - name: Run Mega Drive live error desktop E2E
@@ -234,6 +246,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-error:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_error_md'
 
 
       - name: Run SNES live error desktop E2E
@@ -243,6 +256,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-error:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_error_snes'
 
 
       - name: Run Mega Drive live stale desktop E2E
@@ -252,6 +266,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-stale:md -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_stale_md'
 
 
       - name: Run SNES live stale desktop E2E
@@ -261,6 +276,7 @@ jobs:
         run: |
           npm run test:e2e:desktop:live-stale:snes -- --skip-build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Add-Content -Path $env:RDS_E2E_LEDGER -Value 'live_stale_snes'
 
 
       - name: Report step outcomes before verification
