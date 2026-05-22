@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-20 (rodada 50 - QA RC bloco H + E2E shell)
+**Ultima Atualizacao:** 2026-05-20 (rodada 51 - first-run Runtime Setup hardening)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,16 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-20 rodada 51 - branch `codex/clean-machine-runtime-setup-j`):**
+  - **Runtime Setup first-run:** `dependency_manager.rs` agora emite diagnostico consolidado para JDK, SGDK, PVSnesLib, cores Libretro MD/SNES, MSVC Build Tools, Git Bash/MSYS2, Edge WebDriver e `tauri-driver`, com `status_code/status_label/severity`, cache, configuracao manual pendente e mensagem acionavel.
+  - **Relatorio canonico:** `dependency_status_report()` grava `src-tauri/target-test/validation/runtime-dependency-diagnostics.json` com resumo agregado; evidencia local desta rodada: 9 dependencias, 8 instaladas, 1 bloqueio manual (`msedgedriver` ausente), cache GitHub disponivel para toolchains oficiais.
+  - **UI Debug/Runtime Setup:** painel mostra resumo compacto, cards por dependencia, estados `INSTALADO`, `AUSENTE`, `VERSAO INCOMPATIVEL`, `DOWNLOAD FALHOU`, `CACHE DISPONIVEL`, `CONFIGURACAO MANUAL`, chips de cache/manual e botao seguro `Revalidar`.
+  - **Erros acionaveis:** build/emulacao abrem Runtime Setup quando a falha parece dependencia/toolchain; preflight/QA RC desktop agora orientam Edge WebDriver oficial, `toolchains/webdriver/msedgedriver.exe`, `--native-driver`, `RDS_EDGE_DRIVER_PATH` ou `PATH`.
+  - **Cobertura:** testes Rust focados para toolchain ausente, cache, rate limit, versao detectada e JSON; Vitest para resumo/revalidacao e mensagens de build/emulacao; QA RC bloco H passa a abrir Runtime Setup no workspace Debug e exigir diagnostico compacto.
+  - **Gates locais:** `check:tree` OK; `lint` OK; `tsc --noEmit` OK; `npm test` **325/325** OK; `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK; `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` **352 passed / 17 ignored**; `validate-upstream-windows.ps1 -SkipRustTests` OK com toolchains oficiais; `build:debug` OK.
+  - **Bloqueio honesto:** `preflight:sgdk-e2e` e `test:e2e:desktop:qa-rc` falham no host atual por `msedgedriver` ausente. A falha agora e guiada/recuperavel, mas nao permite declarar QA RC desktop verde nem "distribuicao publica pronta".
+  - **Status honesto:** first-run hardening validado para diagnostico, relatorio, UI, mensagens e upstream oficial; distribuicao publica segue **NAO pronta** sem WebDriver no host, QA RC desktop verde, assinatura e strategy de update.
 
 * **O que acabou de acontecer (2026-05-20 rodada 50 - branch `codex/product-ui-workspace-redesign`):**
   - **Bloco H (QA RC):** `assertUiLayoutHealth()` no `scripts/e2e-tauri-build-run.mjs` valida topbar (overflow, colunas, botao Build compacto), painel central, guia, paineis laterais por workspace, console drawer vs status bar, NodeGraph side rail vs canvas/minimap/toolbar, e sobreposicao de botoes com limiar conservador.

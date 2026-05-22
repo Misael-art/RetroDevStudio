@@ -133,7 +133,11 @@ export async function logPreflightSummary(options, root = repoRoot) {
     options?.externalDriver
       ? "  tauri-driver: omitido (externalDriver)"
       : `  tauri-driver: ${tauriDriverOk ? `OK (${tauriDriverPath})` : "FALTA — cargo install tauri-driver --locked"}`,
-    `  Edge WebDriver (msedgedriver): ${nativeDriverOk ? `OK (${nativeDriverPath})` : "FALTA — --native-driver ou RDS_EDGE_DRIVER_PATH"}`,
+    `  Edge WebDriver (msedgedriver): ${
+      nativeDriverOk
+        ? `OK (${nativeDriverPath})`
+        : "FALTA — baixe do Microsoft Edge WebDriver oficial e configure toolchains/webdriver/msedgedriver.exe, --native-driver, RDS_EDGE_DRIVER_PATH ou PATH"
+    }`,
     `  Ready: ${allReady ? "SIM" : "NAO"}`,
   ];
   console.log(lines.join("\n"));

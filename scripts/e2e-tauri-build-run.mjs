@@ -2152,8 +2152,10 @@ async function main() {
       fail(
         [
           "msedgedriver nao encontrado.",
-          "Instale um driver compativel com o Edge do sistema, por exemplo com o utilitario oficial:",
-          "cargo install --git https://github.com/chippers/msedgedriver-tool",
+          "Baixe o Microsoft Edge WebDriver oficial compativel com o Edge instalado:",
+          "https://developer.microsoft.com/microsoft-edge/tools/webdriver/",
+          "Depois coloque msedgedriver.exe em toolchains/webdriver, passe --native-driver, defina RDS_EDGE_DRIVER_PATH ou deixe msedgedriver no PATH.",
+          "Abra Debug > Runtime Setup e clique Revalidar antes de rodar o QA RC novamente.",
         ].join(" ")
       );
     }
@@ -3591,6 +3593,25 @@ async function main() {
               `Bloco H: workspace '${workspaceId}' nao ativou em ${resolution.tag}.`,
               250
             );
+            if (workspaceId === "debug") {
+              await callAutomationApi(sessionId, "openToolsWorkspace", ["setup", "debug", true]);
+              await waitFor(
+                async () => {
+                  const ready = await executeScript(
+                    sessionId,
+                    `return Boolean(
+                      document.querySelector('[data-testid="runtime-diagnostics-summary"]') &&
+                      document.querySelector('[data-testid="runtime-diagnostic-grid"]') &&
+                      document.querySelector('[data-testid="runtime-setup-revalidate"]')
+                    );`
+                  );
+                  return ready ? true : false;
+                },
+                15000,
+                `Bloco H: Runtime Setup nao exibiu diagnostico compacto em ${resolution.tag}.`,
+                250
+              );
+            }
             await assertUiLayoutHealth(sessionId, workspaceId, resolution.tag);
             layoutValidationNotes.push(`${resolution.tag}/${workspaceId}:ok`);
             const layoutShot = await captureScreenshot(
