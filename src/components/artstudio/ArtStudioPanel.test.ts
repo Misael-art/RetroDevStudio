@@ -5,9 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ArtStudioPanel, {
   buildArtStudioCommandBindings,
   buildArtStudioAnimations,
+  buildArtStudioSequencesFromSpriteMetadata,
   describeArtStudioLoadFailure,
   getArtStudioImageFormatLabel,
   getArtStudioPanOffsets,
+  summarizeArtStudioHardwareBudget,
   getArtStudioWheelZoomState,
   getSuggestedFrameIndex,
   resolveArtStudioSpriteAssetPath,
@@ -186,6 +188,78 @@ describe("ArtStudioPanel helpers", () => {
         steps: weird.steps,
       },
     ]);
+  });
+
+  it("hydrates editable sequences and command chips from an existing SpriteComponent", () => {
+    const sequences = buildArtStudioSequencesFromSpriteMetadata({
+      animations: {
+        idle: { frames: [0], fps: 6, loop: true },
+        attack: { frames: [3, 4, 5], fps: 14, loop: false },
+      },
+      commands: [
+        {
+          id: "slash",
+          display_name: "Slash",
+          notation: "_6, _P",
+          source: "entity.sprite.commands",
+          target_animation: "attack",
+          max_frames: 10,
+          button_profile: "megadrive",
+          unsupported_tokens: [],
+          steps: [
+            { tokens: ["_6"], display: ["→"] },
+            { tokens: ["_P"], display: ["P"] },
+          ],
+        },
+      ],
+    });
+
+    expect(sequences).toEqual([
+      { id: "seq_idle", name: "Idle", frames: [0], fps: 6, loop: true },
+      {
+        id: "seq_attack",
+        name: "Attack",
+        frames: [3, 4, 5],
+        fps: 14,
+        loop: false,
+        command: expect.objectContaining({
+          id: "slash",
+          display_name: "Slash",
+          notation: "_6, _P",
+        }),
+      },
+    ]);
+  });
+
+  it("summarizes hardware budget warnings compactly for the ArtStudio apply panel", () => {
+    const summary = summarizeArtStudioHardwareBudget({
+      vram_used: 62000,
+      vram_limit: 65536,
+      sprite_count: 68,
+      sprite_limit: 80,
+      scanline_sprite_peak: 18,
+      scanline_sprite_limit: 20,
+      dma_used: 12000,
+      dma_limit: 16000,
+      palette_banks_used: 4,
+      palette_banks_limit: 4,
+      bg_layers: 2,
+      bg_layers_limit: 2,
+      errors: [],
+      warnings: [
+        "VRAM Warning: sprite residency near limit",
+        "Sprite Warning: scanline peak near limit",
+        "DMA Warning: transfer budget near limit",
+      ],
+    });
+
+    expect(summary.tone).toBe("warn");
+    expect(summary.label).toBe("3 alertas de hardware");
+    expect(summary.items).toEqual([
+      "VRAM Warning: sprite residency near limit",
+      "Sprite Warning: scanline peak near limit",
+    ]);
+    expect(summary.overflowCount).toBe(1);
   });
 
   it("maps canvas client coordinates back to the correct suggested frame", () => {
@@ -493,6 +567,17 @@ describe("ArtStudioPanel import flow", () => {
         ) as HTMLInputElement | null
       )?.value
     ).toBe("JUMP");
+    expect(
+      (
+        container.querySelector(
+          "[data-testid='artstudio-sequence-card-seq_attack'] input"
+        ) as HTMLInputElement | null
+      )?.value
+    ).toBe("ATTACK");
+    expect(container.querySelector("[data-testid='artstudio-command-panel']")?.tagName).toBe(
+      "DETAILS"
+    );
+    expect(container.textContent).toContain("Key color: transparente");
     expect(container.textContent).toContain("Metadados");
     expect(container.textContent).not.toContain("Sequencia ativa");
 
@@ -684,6 +769,80 @@ describe("ArtStudioPanel import flow", () => {
     expect(container.querySelector("[data-testid='artstudio-apply-plan']")?.textContent).toContain(
       "Pronto para atualizar hero_existing na cena atual."
     );
+    expect(findButton(container, "Aplicar nesta entidade").disabled).toBe(false);
+  });
+
+  it("shows persisted SpriteComponent.commands as visual bindings while editing an entity", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        selectedEntityId: "hero_existing",
+        activeScene: {
+          scene_id: "main",
+          display_name: "Main",
+          entities: [
+            {
+              entity_id: "hero_existing",
+              display_name: "Hero Existing",
+              prefab: null,
+              transform: { x: 32, y: 48 },
+              components: {
+                sprite: {
+                  asset: "assets/sprites/hero_old.png",
+                  frame_width: 32,
+                  frame_height: 32,
+                  palette_slot: 0,
+                  priority: "foreground",
+                  animations: {
+                    attack: { frames: [1, 2], fps: 10, loop: false },
+                  },
+                  commands: [
+                    {
+                      id: "slash",
+                      display_name: "Slash",
+                      notation: "_6, _P",
+                      source: "entity.sprite.commands",
+                      target_animation: "attack",
+                      max_frames: 10,
+                      button_profile: "megadrive",
+                      unsupported_tokens: [],
+                      steps: [
+                        { tokens: ["_6"], display: ["→"] },
+                        { tokens: ["_P"], display: ["P"] },
+                      ],
+                    },
+                  ],
+                },
+              },
+            },
+          ],
+          background_layers: [],
+          palettes: [],
+        },
+      });
+      await flush();
+    });
+
+    const attackInput = container.querySelector(
+      "[data-testid='artstudio-sequence-card-seq_attack'] input"
+    ) as HTMLInputElement | null;
+    expect(attackInput?.value).toBe("Attack");
+    expect(container.textContent).toContain("Comando: Slash");
+  });
+
+  it("exposes an automation hook for the desktop ArtStudio vertical without file dialogs", async () => {
+    expect(window.__RDS_ARTSTUDIO_E2E__).toBeDefined();
+
+    await act(async () => {
+      window.__RDS_ARTSTUDIO_E2E__?.renameSequence("seq_attack", "Slash");
+      window.__RDS_ARTSTUDIO_E2E__?.setSequenceFrames("seq_attack", [1]);
+      await flush();
+    });
+
+    const attackInput = container.querySelector(
+      "[data-testid='artstudio-sequence-card-seq_attack'] input"
+    ) as HTMLInputElement | null;
+    expect(attackInput?.value).toBe("Slash");
+    expect(container.textContent).toContain("Frames selecionados: 1");
   });
 
   it("keeps a visible Scene bridge when editing a selected sprite entity", async () => {

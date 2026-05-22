@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-20 (rodada 50 - QA RC bloco H + E2E shell)
+**Ultima Atualizacao:** 2026-05-20 (rodada 51 - ArtStudio vertical produtiva, sem promocao ampla)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-20 rodada 51 - branch `codex/artstudio-production-vertical-m`):**
+  - **ArtStudio vertical produtiva:** o painel agora cobre a trilha real de autoria local: importar sprite sheet, detectar/ajustar slicing, manter presets Idle/Run/Jump/Attack como sugestoes editaveis, associar `command.dat` a animacoes quando existir `SpriteComponent.commands`, aplicar explicitamente na entidade selecionada e preservar `animations` + `commands` no UGDM.
+  - **UX de hardening:** timeline com area rolavel para nao cortar imagem, preview com checkerboard e badge de key color transparente, painel de comandos colapsavel, resumo compacto do budget Mega Drive/SNES e CTA claro `Aplicar nesta entidade`.
+  - **E2E preparado:** `scripts/e2e-tauri-build-run.mjs` ganhou fixtures BYOR locais (`.rds/e2e-artstudio`), API de automacao `window.__RDS_ARTSTUDIO_E2E__` e etapa no bloco G para importar sheet, criar Idle/Run/Jump/Attack, importar/associar `command.dat`, aplicar na entidade SGDK, persistir cena e seguir para Build & Run/framebuffer do QA RC.
+  - **Cobertura local verde:** `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test` **326/326**, `npx vitest run src/components/artstudio/ArtStudioPanel.test.ts --pool=forks --maxWorkers=1 --no-file-parallelism` **20/20**, `cargo clippy -- -D warnings`, `cargo test --lib -- --nocapture --test-threads=1` **347/17 ignored** e `npm run build:debug` passaram. O teste UGDM de persistencia foi estendido em `project_mgr.rs` para `SpriteComponent.commands` + animacao.
+  - **Bloqueios honestos desta rodada:** `npm run preflight:sgdk-e2e` e `npm run test:e2e:desktop:qa-rc` falharam no host por `toolchains/sgdk` ausente e `msedgedriver` ausente (`tauri-driver` OK). A vertical E2E esta implementada no bloco G, mas nao foi provada com framebuffer visivel nesta maquina.
+  - **Status honesto:** ArtStudio ainda **nao** sobe para Stable amplo. Pode ser tratado como candidato a **Em hardening** somente quando `preflight:sgdk-e2e` e QA RC com framebuffer visivel passarem em host preparado.
 
 * **O que acabou de acontecer (2026-05-20 rodada 50 - branch `codex/product-ui-workspace-redesign`):**
   - **Bloco H (QA RC):** `assertUiLayoutHealth()` no `scripts/e2e-tauri-build-run.mjs` valida topbar (overflow, colunas, botao Build compacto), painel central, guia, paineis laterais por workspace, console drawer vs status bar, NodeGraph side rail vs canvas/minimap/toolbar, e sobreposicao de botoes com limiar conservador.

@@ -390,6 +390,59 @@ function buildLiveOkScenario(target) {
   };
 }
 
+async function writeArtStudioVerticalFixtures(projectDir) {
+  const fixtureDir = path.join(projectDir, ".rds", "e2e-artstudio");
+  await mkdir(fixtureDir, { recursive: true });
+
+  const width = 64;
+  const height = 64;
+  const pixels = Buffer.alloc(width * height * 3);
+  const colors = [
+    [244, 80, 80],
+    [80, 220, 120],
+    [80, 140, 255],
+    [250, 220, 80],
+  ];
+  const keyColor = [255, 0, 255];
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const quadrant = (x >= 32 ? 1 : 0) + (y >= 32 ? 2 : 0);
+      const localX = x % 32;
+      const localY = y % 32;
+      const color =
+        localX >= 4 && localX < 28 && localY >= 4 && localY < 28
+          ? colors[quadrant]
+          : keyColor;
+      const offset = (y * width + x) * 3;
+      pixels[offset] = color[0];
+      pixels[offset + 1] = color[1];
+      pixels[offset + 2] = color[2];
+    }
+  }
+
+  const spritePath = path.join(fixtureDir, "artstudio-hero-sheet.ppm");
+  await writeFile(
+    spritePath,
+    Buffer.concat([Buffer.from(`P6\n${width} ${height}\n255\n`, "ascii"), pixels])
+  );
+
+  const commandPath = path.join(fixtureDir, "command.dat");
+  await writeFile(
+    commandPath,
+    [
+      "[Command]",
+      "name = Slash",
+      "command = _6, _P",
+      "time = 10",
+      "",
+    ].join("\n"),
+    "utf8"
+  );
+
+  return { spritePath, commandPath };
+}
+
 function buildLiveOverflowScenario(target, scenario) {
   if (scenario === "live-overflow-vram") {
     return {
@@ -798,6 +851,40 @@ async function callAutomationApi(sessionId, methodName, args = []) {
   }
 
   return result.value;
+}
+
+async function callArtStudioApi(sessionId, methodName, args = []) {
+  const result = await executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const api = window.__RDS_ARTSTUDIO_E2E__;
+      const methodName = arguments[0];
+      const methodArgs = Array.isArray(arguments[1]) ? arguments[1] : [];
+      if (!api || typeof api[methodName] !== "function") {
+        done({ ok: false, error: "Metodo ArtStudio E2E indisponivel: " + methodName });
+        return;
+      }
+
+      Promise.resolve(api[methodName](...methodArgs))
+        .then((value) => done({ ok: true, value }))
+        .catch((error) => done({ ok: false, error: String(error) }));
+    `,
+    [methodName, args]
+  );
+
+  if (!result?.ok) {
+    fail(`Falha na API ArtStudio E2E (${methodName}): ${result?.error ?? "sem diagnostico"}`);
+  }
+
+  return result.value;
+}
+
+async function readArtStudioState(sessionId) {
+  return executeScript(
+    sessionId,
+    "return window.__RDS_ARTSTUDIO_E2E__?.getState?.() ?? null;"
+  );
 }
 
 async function tryAutomationApi(sessionId, methodName, args = [], timeoutMs = 8000) {
@@ -3337,6 +3424,125 @@ async function main() {
           "Bloco G: navegacao objeto -> art nao abriu o Art Workspace integrado.",
           250
         );
+        const artStudioFixtures = await writeArtStudioVerticalFixtures(sgdkProjectDir);
+        await callArtStudioApi(sessionId, "loadImage", [artStudioFixtures.spritePath]);
+        await waitFor(
+          async () => {
+            const bodyText = await executeScript(
+              sessionId,
+              "return document.body?.textContent?.replace(/\\s+/g, ' ').trim() ?? '';"
+            );
+            return bodyText.includes("Imagem pronta") && bodyText.includes("Key color: transparente")
+              ? bodyText
+              : false;
+          },
+          25000,
+          "Bloco G: ArtStudio nao processou a imagem E2E com preview/key color.",
+          250
+        );
+        await callArtStudioApi(sessionId, "setFrameSize", [32, 32]);
+        await callArtStudioApi(sessionId, "renameSequence", ["seq_idle", "Idle"]);
+        await callArtStudioApi(sessionId, "renameSequence", ["seq_run", "Run"]);
+        await callArtStudioApi(sessionId, "renameSequence", ["seq_jump", "Jump"]);
+        await callArtStudioApi(sessionId, "renameSequence", ["seq_attack", "Attack"]);
+        await callArtStudioApi(sessionId, "setSequenceFrames", ["seq_idle", [0]]);
+        await callArtStudioApi(sessionId, "setSequenceFrames", ["seq_run", [0, 1]]);
+        await callArtStudioApi(sessionId, "setSequenceFrames", ["seq_jump", [2]]);
+        await callArtStudioApi(sessionId, "setSequenceFrames", ["seq_attack", [3]]);
+        const commandCount = await callArtStudioApi(sessionId, "importCommandDat", [
+          artStudioFixtures.commandPath,
+        ]);
+        if (commandCount < 1) {
+          fail("Bloco G: command.dat E2E nao retornou comandos importaveis.");
+        }
+        const commandAssigned = await callArtStudioApi(sessionId, "assignCommand", [
+          "seq_attack",
+          "slash",
+        ]);
+        if (!commandAssigned) {
+          fail("Bloco G: ArtStudio nao associou o comando Slash a animacao Attack.");
+        }
+        await callArtStudioApi(sessionId, "importToProject");
+        await executeScript(
+          sessionId,
+          "return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));"
+        );
+        const artImportedState = await waitFor(
+          async () => {
+            const state = await readArtStudioState(sessionId);
+            return state?.spritePath?.startsWith("assets/sprites/") ? state : false;
+          },
+          30000,
+          "Bloco G: ArtStudio nao gerou asset canonico em assets/sprites.",
+          250
+        );
+        // Reaplica authoring apos import canonico para evitar reset de metadata da entidade SGDK.
+        await callArtStudioApi(sessionId, "renameSequence", ["seq_idle", "Idle"]);
+        await callArtStudioApi(sessionId, "renameSequence", ["seq_run", "Run"]);
+        await callArtStudioApi(sessionId, "renameSequence", ["seq_jump", "Jump"]);
+        await callArtStudioApi(sessionId, "renameSequence", ["seq_attack", "Attack"]);
+        await callArtStudioApi(sessionId, "setSequenceFrames", ["seq_idle", [0]]);
+        await callArtStudioApi(sessionId, "setSequenceFrames", ["seq_run", [0, 1]]);
+        await callArtStudioApi(sessionId, "setSequenceFrames", ["seq_jump", [2]]);
+        await callArtStudioApi(sessionId, "setSequenceFrames", ["seq_attack", [3]]);
+        const commandRebound = await callArtStudioApi(sessionId, "assignCommand", [
+          "seq_attack",
+          "slash",
+        ]);
+        if (!commandRebound) {
+          fail("Bloco G: ArtStudio perdeu o binding Slash apos import canonico.");
+        }
+        await callAutomationApi(sessionId, "setSelectedEntityId", [sgdkLogicEntityId]);
+        const artApplied = await callArtStudioApi(sessionId, "applyToScene", [sgdkLogicEntityId]);
+        if (!artApplied) {
+          const artStudioDiag = await readArtStudioState(sessionId);
+          const automationDiag = await readAutomationState(sessionId);
+          const entityDiag = automationDiag?.activeScene?.entities?.find(
+            (candidate) => candidate.id === sgdkLogicEntityId
+          );
+          fail(
+            [
+              "Bloco G: ArtStudio applyToScene retornou falso",
+              `(${artStudioDiag?.validationError ?? "sem diagnostico de validacao"})`,
+              entityDiag
+                ? `entidade=${sgdkLogicEntityId} spriteAsset=${entityDiag.spriteAsset ?? "null"} animations=${(entityDiag.animationNames ?? []).join("|") || "none"} commands=${entityDiag.commandCount ?? 0}`
+                : `entidade=${sgdkLogicEntityId} ausente no estado de automacao`,
+              artStudioDiag?.spritePath
+                ? `artStudio.spritePath=${artStudioDiag.spritePath}`
+                : "artStudio.spritePath=ausente",
+            ].join(" ")
+          );
+        }
+        const normalizeAssetPath = (value) => String(value ?? "").replace(/\\/g, "/");
+        const importedSpritePath = normalizeAssetPath(artImportedState.spritePath);
+        const artAppliedState = await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            const entity = state?.activeScene?.entities?.find(
+              (candidate) => candidate.id === sgdkLogicEntityId
+            );
+            return entity &&
+              normalizeAssetPath(entity.spriteAsset) === importedSpritePath &&
+              entity.animationNames?.includes("attack") &&
+              entity.commandCount >= 1
+              ? state
+              : false;
+          },
+          15000,
+          "Bloco G: ArtStudio nao aplicou sprite, animacoes e command binding na entidade.",
+          250
+        );
+        const artAppliedEntity = artAppliedState.activeScene.entities.find(
+          (candidate) => candidate.id === sgdkLogicEntityId
+        );
+        await callAutomationApi(
+          sessionId,
+          "persistScene",
+          [
+            "E2E ArtStudio vertical",
+            `[E2E] ArtStudio aplicou '${artImportedState.spritePath}' com animacoes ${artAppliedEntity.animationNames.join(", ")} e command.dat na entidade '${sgdkLogicEntityId}'.`,
+          ]
+        );
         const artScreenshot = await captureScreenshot(
           sessionId,
           `${artifactPrefix}-G-art-workspace.png`
@@ -3355,7 +3561,7 @@ async function main() {
           250
         );
         const artWorkspaceNote = [
-          `Art integrado: '${sgdkLogicEntityId}' abriu Art Workspace com stage/plano de apply e retornou ao Scene sem perder selectedEntityId.`,
+          `Art integrado: '${sgdkLogicEntityId}' importou sheet, criou Idle/Run/Jump/Attack, associou command.dat, aplicou '${artImportedState.spritePath}' na entidade e retornou ao Scene sem perder selectedEntityId.`,
           `Evidencia: ${path.basename(artScreenshot)}.`,
         ].join(" ");
         const initialLogicState = await callAutomationApi(sessionId, "getEntityLogicState", [sgdkLogicEntityId]);

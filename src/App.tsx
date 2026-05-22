@@ -3054,6 +3054,8 @@ export default function App() {
                         : entity.components.audio && !entity.components.sprite
                           ? "audio"
                           : "object",
+                  animationNames: Object.keys(entity.components.sprite?.animations ?? {}),
+                  commandCount: entity.components.sprite?.commands?.length ?? 0,
                 })),
                 layers: (state.activeScene.layers ?? []).map((layer) => ({
                   id: layer.id,

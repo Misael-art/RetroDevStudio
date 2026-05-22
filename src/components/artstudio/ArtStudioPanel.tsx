@@ -13,10 +13,11 @@ import {
   type MutableRefObject,
   type WheelEvent as ReactWheelEvent,
 } from "react";
+import { flushSync } from "react-dom";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Group, Panel } from "react-resizable-panels";
 import LayoutSplitter from "../common/LayoutSplitter";
-import { useEditorStore } from "../../core/store/editorStore";
+import { useEditorStore, type HwStatus } from "../../core/store/editorStore";
 import { createSpriteEntityFromAsset } from "../../core/editorEntityFactory";
 import {
   artProcessPalette,
@@ -25,7 +26,7 @@ import {
   type ArtSuggestedFrame,
 } from "../../core/ipc/artStudioService";
 import { parseInputCommandFile } from "../../core/ipc/inputCommandService";
-import type { AnimationDef, SpriteCommandBinding } from "../../core/ipc/sceneService";
+import type { AnimationDef, SpriteCommandBinding, SpriteComponent } from "../../core/ipc/sceneService";
 import {
   formatInputCommandSequence,
   type CommandButtonProfile,
@@ -35,6 +36,28 @@ import { constrainSpriteFrameSize } from "../../core/sceneConstraints";
 import { useSpriteAnimator } from "./useSpriteAnimator";
 import { getEntityDisplayName } from "../../core/entityDisplay";
 import { buildTilemapAuthoringBrush, resolvePrimaryAuthoringSurface } from "../../core/entityAuthoring";
+
+declare global {
+  interface Window {
+    __RDS_ARTSTUDIO_E2E__?: {
+      loadImage: (sourcePath: string) => Promise<boolean>;
+      importToProject: () => Promise<boolean>;
+      importCommandDat: (commandPath: string) => Promise<number>;
+      selectSequence: (sequenceId: string | null) => boolean;
+      renameSequence: (sequenceId: string, name: string) => boolean;
+      setFrameSize: (width: number, height: number) => boolean;
+      setSequenceFrames: (sequenceId: string, frames: number[]) => boolean;
+      assignCommand: (sequenceId: string, commandId: string) => boolean;
+      applyToScene: (entityId?: string) => boolean;
+      getState: () => {
+        spritePath: string;
+        sequences: SpriteSequence[];
+        canApplyToScene: boolean;
+        validationError: string | null;
+      };
+    };
+  }
+}
 
 const ARTSTUDIO_SUPPORTED_FORMATS_LABEL = "PNG, BMP, JPG/JPEG, GIF, WebP e PPM";
 const ARTSTUDIO_CANVAS_MIN_ZOOM = 0.2;
@@ -404,6 +427,112 @@ export interface SpriteSequence {
   command?: ParsedInputCommand;
 }
 
+const DEFAULT_ARTSTUDIO_SEQUENCES: SpriteSequence[] = [
+  { id: "seq_idle", name: "IDLE", frames: [0], fps: 1, loop: true },
+  { id: "seq_run", name: "RUN", frames: [], fps: 12, loop: true },
+  { id: "seq_jump", name: "JUMP", frames: [], fps: 8, loop: false },
+  { id: "seq_attack", name: "ATTACK", frames: [], fps: 12, loop: false },
+];
+
+function cloneDefaultArtStudioSequences(): SpriteSequence[] {
+  return DEFAULT_ARTSTUDIO_SEQUENCES.map((sequence) => ({
+    ...sequence,
+    frames: [...sequence.frames],
+  }));
+}
+
+function titleCaseAnimationKey(value: string): string {
+  const words = value
+    .trim()
+    .split(/[_\s-]+/)
+    .filter(Boolean);
+  if (words.length === 0) {
+    return "Animacao";
+  }
+  return words.map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`).join(" ");
+}
+
+function spriteCommandBindingToParsedCommand(binding: SpriteCommandBinding): ParsedInputCommand {
+  return {
+    id: binding.id,
+    display_name: binding.display_name,
+    notation: binding.notation,
+    source: binding.source,
+    max_frames: binding.max_frames,
+    unsupported_tokens: binding.unsupported_tokens ?? [],
+    steps: binding.steps ?? [],
+  };
+}
+
+export function buildArtStudioSequencesFromSpriteMetadata(
+  sprite: Pick<SpriteComponent, "animations" | "commands"> | null | undefined
+): SpriteSequence[] {
+  const animations = sprite?.animations ?? {};
+  const animationEntries = Object.entries(animations);
+  if (animationEntries.length === 0) {
+    return cloneDefaultArtStudioSequences();
+  }
+
+  const commandsByAnimation = new Map(
+    (sprite?.commands ?? []).map((binding) => [
+      sanitizeAnimationKey(binding.target_animation),
+      spriteCommandBindingToParsedCommand(binding),
+    ])
+  );
+
+  return animationEntries.map(([key, animation]) => {
+    const normalizedKey = sanitizeAnimationKey(key) || "animation";
+    const command = commandsByAnimation.get(normalizedKey);
+    return {
+      id: `seq_${normalizedKey}`,
+      name: titleCaseAnimationKey(key),
+      frames: [...animation.frames],
+      fps: animation.fps,
+      loop: animation.loop,
+      ...(command ? { command } : {}),
+    };
+  });
+}
+
+export interface ArtStudioHardwareBudgetSummary {
+  tone: "idle" | "ok" | "warn" | "error";
+  label: string;
+  items: string[];
+  overflowCount: number;
+}
+
+export function summarizeArtStudioHardwareBudget(
+  hwStatus: HwStatus | null | undefined,
+  maxItems = 2
+): ArtStudioHardwareBudgetSummary {
+  if (!hwStatus) {
+    return {
+      tone: "idle",
+      label: "Orcamento aguardando validacao",
+      items: [],
+      overflowCount: 0,
+    };
+  }
+
+  const issues = hwStatus.errors.length > 0 ? hwStatus.errors : hwStatus.warnings;
+  const tone =
+    hwStatus.errors.length > 0 ? "error" : hwStatus.warnings.length > 0 ? "warn" : "ok";
+  const issueCount = issues.length;
+  const label =
+    tone === "error"
+      ? `${issueCount} bloqueio${issueCount === 1 ? "" : "s"} de hardware`
+      : tone === "warn"
+        ? `${issueCount} alerta${issueCount === 1 ? "" : "s"} de hardware`
+        : `Budget OK: sprites ${hwStatus.sprite_count}/${hwStatus.sprite_limit}, VRAM ${hwStatus.vram_used}/${hwStatus.vram_limit}`;
+
+  return {
+    tone,
+    label,
+    items: issues.slice(0, maxItems),
+    overflowCount: Math.max(0, issueCount - maxItems),
+  };
+}
+
 interface ArtStudioState {
   spriteSheetUrl: string | null;
   spriteSheetSize: { width: number; height: number } | null;
@@ -492,6 +621,7 @@ type ArtStudioAction =
   | { type: "RENAME_SEQUENCE"; id: string; name: string }
   | { type: "SELECT_SEQUENCE"; id: string | null }
   | { type: "TOGGLE_FRAME"; cellIndex: number }
+  | { type: "SET_SEQUENCE_FRAMES"; id: string; frames: number[] }
   | { type: "SET_SEQUENCE_FPS"; id: string; fps: number }
   | { type: "SET_SEQUENCE_LOOP"; id: string; loop: boolean }
   | { type: "SET_COMMAND_LIBRARY"; source: string; commands: ParsedInputCommand[] }
@@ -499,6 +629,7 @@ type ArtStudioAction =
   | { type: "ASSIGN_COMMAND_TO_SEQUENCE"; sequenceId: string; command: ParsedInputCommand }
   | { type: "CREATE_SEQUENCE_FROM_COMMAND"; id: string; command: ParsedInputCommand }
   | { type: "CLEAR_SEQUENCE_COMMAND"; sequenceId: string }
+  | { type: "HYDRATE_SPRITE_METADATA"; sequences: SpriteSequence[] }
   | { type: "SET_PLAYING"; playing: boolean }
   | { type: "SET_COMPRESSION"; value: string }
   | { type: "SHOW_SAVE_FEEDBACK" }
@@ -650,6 +781,22 @@ function artStudioReducer(state: ArtStudioState, action: ArtStudioAction): ArtSt
         ),
       };
     }
+    case "SET_SEQUENCE_FRAMES":
+      return {
+        ...state,
+        sequences: state.sequences.map((sequence) =>
+          sequence.id === action.id
+            ? {
+                ...sequence,
+                frames: Array.from(
+                  new Set(
+                    action.frames.filter((frame) => Number.isInteger(frame) && frame >= 0)
+                  )
+                ).sort((left, right) => left - right),
+              }
+            : sequence
+        ),
+      };
     case "SET_SEQUENCE_FPS":
       return {
         ...state,
@@ -713,6 +860,13 @@ function artStudioReducer(state: ArtStudioState, action: ArtStudioAction): ArtSt
           return nextSequence;
         }),
       };
+    case "HYDRATE_SPRITE_METADATA":
+      return {
+        ...state,
+        sequences: action.sequences,
+        activeSequenceId: null,
+        validationError: null,
+      };
     case "SET_PLAYING":
       return { ...state, playing: action.playing };
     case "SET_COMPRESSION":
@@ -750,11 +904,7 @@ const INITIAL_STATE: ArtStudioState = {
   sourceZoom: 1,
   frameWidth: 32,
   frameHeight: 32,
-  sequences: [
-    { id: "seq_idle", name: "IDLE", frames: [0], fps: 1, loop: true },
-    { id: "seq_run", name: "RUN", frames: [], fps: 12, loop: true },
-    { id: "seq_jump", name: "JUMP", frames: [], fps: 8, loop: false },
-  ],
+  sequences: cloneDefaultArtStudioSequences(),
   commandLibrary: [],
   commandImportSource: "",
   commandButtonProfile: "megadrive",
@@ -832,6 +982,7 @@ interface ArtStudioContextValue {
   canApplyToScene: boolean;
   totalFrameSlots: number;
   usedFrameCount: number;
+  hardwareBudgetSummary: ArtStudioHardwareBudgetSummary;
   externalSourceLoaded: boolean;
   loadStatusText: string;
   sourceOriginLabel: string;
@@ -875,7 +1026,7 @@ function ArtStudioTimelineSection() {
         </h3>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="rounded-full border border-[#313244] bg-[#0b1220] px-2.5 py-1 text-[10px] font-semibold text-[#94a3b8]">
@@ -975,8 +1126,12 @@ function ArtStudioTimelineSection() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-3" data-testid="artstudio-command-panel">
-          <div className="flex flex-wrap items-center justify-between gap-2">
+        <details
+          open
+          className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-3"
+          data-testid="artstudio-command-panel"
+        >
+          <summary className="cursor-pointer list-none">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#94e2d5]">
                 Comandos
@@ -987,6 +1142,11 @@ function ArtStudioTimelineSection() {
                   : "Importe command.dat para associar movimentos a animacoes."}
               </p>
             </div>
+          </summary>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <span className="rounded-full border border-[#334155] bg-[#111827] px-2 py-1 text-[10px] font-semibold text-[#94a3b8]">
+              Painel colapsavel
+            </span>
             <select
               value={state.commandButtonProfile}
               onChange={(event) =>
@@ -1072,7 +1232,7 @@ function ArtStudioTimelineSection() {
               })
             )}
           </div>
-        </div>
+        </details>
       </div>
     </section>
   );
@@ -1088,6 +1248,7 @@ function ArtStudioInspectorSection() {
       canApplyToScene,
       totalFrameSlots,
       usedFrameCount,
+      hardwareBudgetSummary,
       externalSourceLoaded,
       loadStatusText,
       sourceOriginLabel,
@@ -1101,6 +1262,19 @@ function ArtStudioInspectorSection() {
     handleApplyToScene,
     applyConstrainedFrameSize,
   } = useArtStudioContext();
+  const keyColorLabel =
+    state.spriteSheetLoadStatus === "loaded" &&
+    (state.spriteSheetTransparentPixels || displayPalette[0] === "transparent")
+      ? "Key color: transparente"
+      : "Key color: nao detectada";
+  const budgetToneClass =
+    hardwareBudgetSummary.tone === "error"
+      ? "border-[#f38ba8]/35 bg-[#f38ba8]/10 text-[#fecdd3]"
+      : hardwareBudgetSummary.tone === "warn"
+        ? "border-[#f9e2af]/35 bg-[#f9e2af]/10 text-[#fef3c7]"
+        : hardwareBudgetSummary.tone === "ok"
+          ? "border-[#a6e3a1]/35 bg-[#a6e3a1]/10 text-[#bbf7d0]"
+          : "border-[#334155] bg-[#111827] text-[#94a3b8]";
 
   return (
     <section
@@ -1130,7 +1304,24 @@ function ArtStudioInspectorSection() {
               <div>{activeSequence?.frames.length ?? 0} frame(s)</div>
             </div>
           </div>
-          <div className="relative mt-4 flex min-h-[260px] items-center justify-center overflow-hidden rounded-2xl border border-[#1f2937] bg-[radial-gradient(circle_at_top,#0f172a,#030712_72%)]">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-[#94e2d5]/30 bg-[#94e2d5]/10 px-2.5 py-1 text-[10px] font-semibold text-[#ccfbf1]">
+              {keyColorLabel}
+            </span>
+            <span className="rounded-full border border-[#1f2937] bg-[#111827] px-2.5 py-1 text-[10px] font-semibold text-[#94a3b8]">
+              Preview usa PNG quantizado do backend
+            </span>
+          </div>
+          <div
+            className="relative mt-4 flex min-h-[260px] items-center justify-center overflow-hidden rounded-2xl border border-[#1f2937]"
+            style={{
+              backgroundColor: "#030712",
+              backgroundImage:
+                "linear-gradient(45deg, rgba(148,163,184,0.16) 25%, transparent 25%), linear-gradient(-45deg, rgba(148,163,184,0.16) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, rgba(148,163,184,0.16) 75%), linear-gradient(-45deg, transparent 75%, rgba(148,163,184,0.16) 75%)",
+              backgroundPosition: "0 0, 0 8px, 8px -8px, -8px 0",
+              backgroundSize: "16px 16px",
+            }}
+          >
             <canvas
               ref={previewCanvasRef}
               width={260}
@@ -1269,6 +1460,29 @@ function ArtStudioInspectorSection() {
             <dd className="font-medium text-[#e2e8f0]">{applyPlanLabel}</dd>
             <dt className="text-[#64748b]">Build</dt>
             <dd className="truncate font-medium text-[#e2e8f0]">{buildReadinessLabel}</dd>
+            <dt className="text-[#64748b]">Budget</dt>
+            <dd>
+              <div
+                data-testid="artstudio-hardware-budget"
+                className={`flex min-w-0 flex-wrap items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[11px] font-medium ${budgetToneClass}`}
+              >
+                <span className="truncate">{hardwareBudgetSummary.label}</span>
+                {hardwareBudgetSummary.items.map((item) => (
+                  <span
+                    key={item}
+                    className="max-w-full truncate rounded-full border border-current/20 px-2 py-0.5"
+                    title={item}
+                  >
+                    {item}
+                  </span>
+                ))}
+                {hardwareBudgetSummary.overflowCount > 0 ? (
+                  <span className="rounded-full border border-current/20 px-2 py-0.5">
+                    +{hardwareBudgetSummary.overflowCount}
+                  </span>
+                ) : null}
+              </div>
+            </dd>
             <dt className="text-[#64748b]">Frames</dt>
             <dd className="font-medium text-[#e2e8f0]">
               {usedFrameCount > 0
@@ -1446,7 +1660,9 @@ function ArtStudioInspectorSection() {
 
         <button
           type="button"
-          onClick={handleApplyToScene}
+          onClick={() => {
+            handleApplyToScene();
+          }}
           disabled={!canApplyToScene}
           className={`rounded-2xl px-4 py-3 text-sm font-semibold transition-colors ${
             state.saveFeedback
@@ -1457,7 +1673,7 @@ function ArtStudioInspectorSection() {
           {state.saveFeedback
             ? "Aplicado com sucesso"
             : canUpdateEntity
-              ? "Atualizar entidade selecionada"
+              ? "Aplicar nesta entidade"
               : "Aplicar e criar entidade na cena"}
         </button>
       </div>
@@ -1471,6 +1687,7 @@ export default function ArtStudioPanel() {
     activeScene,
     activeProjectDir,
     activeTarget,
+    hwStatus,
     selectedEntityId,
     addEntity,
     updateEntity,
@@ -1483,6 +1700,8 @@ export default function ArtStudioPanel() {
   } = useEditorStore();
 
   const [state, dispatch] = useReducer(artStudioReducer, INITIAL_STATE);
+  const artStudioStateRef = useRef(state);
+  artStudioStateRef.current = state;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const stageScrollRef = useRef<HTMLDivElement>(null);
@@ -1551,6 +1770,7 @@ export default function ArtStudioPanel() {
   const totalFrameSlots =
     state.suggestedFrames.length > 0 ? state.suggestedFrames.length : totalGridColumns * totalGridRows;
   const usedFrameCount = new Set(state.sequences.flatMap((sequence) => sequence.frames)).size;
+  const hardwareBudgetSummary = summarizeArtStudioHardwareBudget(hwStatus);
   const hasValidAnimationFrames = state.sequences.some((sequence) => sequence.frames.length > 0);
   const externalSourceLoaded =
     state.spriteSheetLoadStatus === "loaded" && state.spriteSheetScope === "external";
@@ -1794,6 +2014,16 @@ export default function ArtStudioPanel() {
     }
   }, [ingestSpriteSheet, logMessage]);
 
+  const importCommandDatFromPath = useCallback(async (commandPath: string): Promise<number> => {
+    const commands = await parseInputCommandFile(commandPath);
+    dispatch({ type: "SET_COMMAND_LIBRARY", source: commandPath, commands });
+    logMessage(
+      commands.some((command) => command.unsupported_tokens.length > 0) ? "warn" : "success",
+      `[ArtStudio] command.dat importado: ${commands.length} comando(s) de ${basenameWithExtension(commandPath)}.`
+    );
+    return commands.length;
+  }, [logMessage]);
+
   const handleImportCommandDat = useCallback(async () => {
     try {
       const selected = await open({
@@ -1808,18 +2038,40 @@ export default function ArtStudioPanel() {
         return;
       }
 
-      const commands = await parseInputCommandFile(commandPath);
-      dispatch({ type: "SET_COMMAND_LIBRARY", source: commandPath, commands });
-      logMessage(
-        commands.some((command) => command.unsupported_tokens.length > 0) ? "warn" : "success",
-        `[ArtStudio] command.dat importado: ${commands.length} comando(s) de ${basenameWithExtension(commandPath)}.`
-      );
+      await importCommandDatFromPath(commandPath);
     } catch (error) {
       const message = `Falha ao importar command.dat: ${describeError(error)}`;
       dispatch({ type: "SET_VALIDATION_ERROR", message });
       logMessage("error", `[ArtStudio] ${message}`);
     }
-  }, [logMessage]);
+  }, [importCommandDatFromPath, logMessage]);
+
+  useEffect(() => {
+    if (!selectedEntitySprite) {
+      return;
+    }
+    const hasManualSequenceEdits = state.sequences.some((sequence) => {
+      const defaults = DEFAULT_ARTSTUDIO_SEQUENCES.find((candidate) => candidate.id === sequence.id);
+      if (!defaults) {
+        return sequence.frames.length > 0;
+      }
+      return (
+        sequence.frames.length > 0 &&
+        (sequence.name !== defaults.name ||
+          sequence.fps !== defaults.fps ||
+          sequence.loop !== defaults.loop)
+      );
+    });
+    const hasManualAuthoring =
+      state.commandLibrary.length > 0 || hasManualSequenceEdits;
+    if (hasManualAuthoring) {
+      return;
+    }
+    dispatch({
+      type: "HYDRATE_SPRITE_METADATA",
+      sequences: buildArtStudioSequencesFromSpriteMetadata(selectedEntitySprite),
+    });
+  }, [selectedEntitySprite, state.commandLibrary.length, state.sequences]);
 
   useEffect(() => {
     if (!activeProjectDir || !selectedEntitySprite?.asset) {
@@ -2061,70 +2313,91 @@ export default function ArtStudioPanel() {
     [activeTarget, refreshSlicingSuggestions, state.spritePath, state.spriteSheetSourcePath, state.spriteSourceAssetPath]
   );
 
-  const handleApplyToScene = useCallback(() => {
-    if (!activeProjectDir || !activeScene) {
+  const handleApplyToScene = useCallback((forcedEntityId?: string): boolean => {
+    const artState = artStudioStateRef.current;
+    const editorState = useEditorStore.getState();
+    const scene = editorState.activeScene;
+    const targetEntityId = forcedEntityId ?? editorState.selectedEntityId ?? selectedEntityId;
+    const targetEntity =
+      scene?.entities.find((entity) => entity.entity_id === targetEntityId) ?? null;
+    const targetSprite = targetEntity?.components?.sprite;
+    const canUpdateTarget = Boolean(targetSprite);
+
+    if (forcedEntityId && editorState.selectedEntityId !== forcedEntityId) {
+      setSelectedEntityId(forcedEntityId);
+    }
+
+    if (forcedEntityId && !targetEntity) {
+      dispatch({
+        type: "SET_VALIDATION_ERROR",
+        message: `Entidade '${forcedEntityId}' nao encontrada na cena ativa para aplicar o ArtStudio.`,
+      });
+      return false;
+    }
+
+    if (!activeProjectDir || !scene) {
       dispatch({
         type: "SET_VALIDATION_ERROR",
         message: "Abra um projeto e uma cena antes de aplicar dados do ArtStudio.",
       });
-      return;
+      return false;
     }
-    if (!state.spriteSheetUrl) {
+    if (!artState.spriteSheetUrl) {
       dispatch({
         type: "SET_VALIDATION_ERROR",
         message: "Carregue uma imagem antes de criar ou atualizar uma entidade.",
       });
-      return;
+      return false;
     }
-    if (!state.spritePath) {
+    if (!artState.spritePath) {
       dispatch({
         type: "SET_VALIDATION_ERROR",
         message:
           "Gere primeiro o asset canonico em assets/sprites para alinhar os frames com o pipeline oficial antes de aplicar na cena.",
       });
-      return;
+      return false;
     }
-    if (state.sequences.length === 0) {
+    if (artState.sequences.length === 0) {
       dispatch({
         type: "SET_VALIDATION_ERROR",
         message: "Adicione pelo menos uma sequencia antes de aplicar na cena.",
       });
-      return;
+      return false;
     }
-    const hasValidFrames = state.sequences.some((sequence) => sequence.frames.length > 0);
+    const hasValidFrames = artState.sequences.some((sequence) => sequence.frames.length > 0);
     if (!hasValidFrames) {
       dispatch({
         type: "SET_VALIDATION_ERROR",
         message: "Cada sequencia precisa ter pelo menos um frame selecionado.",
       });
-      return;
+      return false;
     }
 
     const constrainedFrame = constrainSpriteFrameSize(
       activeTarget,
-      state.spritePath,
-      state.frameWidth,
-      state.frameHeight
+      artState.spritePath,
+      artState.frameWidth,
+      artState.frameHeight
     );
     if (
-      constrainedFrame.frameWidth > (state.spriteSheetSize?.width ?? 0) ||
-      constrainedFrame.frameHeight > (state.spriteSheetSize?.height ?? 0)
+      constrainedFrame.frameWidth > (artState.spriteSheetSize?.width ?? 0) ||
+      constrainedFrame.frameHeight > (artState.spriteSheetSize?.height ?? 0)
     ) {
       dispatch({
         type: "SET_VALIDATION_ERROR",
         message: "O frame precisa caber dentro do sprite sheet selecionado.",
       });
-      return;
+      return false;
     }
 
-    const { animations, error } = buildArtStudioAnimations(state.sequences);
+    const { animations, error } = buildArtStudioAnimations(artState.sequences);
     if (error) {
       dispatch({ type: "SET_VALIDATION_ERROR", message: error });
-      return;
+      return false;
     }
     const commandBindings = buildArtStudioCommandBindings(
-      state.sequences,
-      state.commandButtonProfile
+      artState.sequences,
+      artState.commandButtonProfile
     );
     const unsupportedCommand = commandBindings.find(
       (binding) => (binding.unsupported_tokens ?? []).length > 0
@@ -2134,13 +2407,13 @@ export default function ArtStudioPanel() {
         type: "SET_VALIDATION_ERROR",
         message: `O comando '${unsupportedCommand.display_name}' tem tokens ainda nao suportados para runtime: ${(unsupportedCommand.unsupported_tokens ?? []).join(", ")}.`,
       });
-      return;
+      return false;
     }
 
     dispatch({ type: "SET_VALIDATION_ERROR", message: null });
     if (
-      constrainedFrame.frameWidth !== state.frameWidth ||
-      constrainedFrame.frameHeight !== state.frameHeight
+      constrainedFrame.frameWidth !== artState.frameWidth ||
+      constrainedFrame.frameHeight !== artState.frameHeight
     ) {
       dispatch({
         type: "SET_FRAME_SIZE",
@@ -2153,27 +2426,84 @@ export default function ArtStudioPanel() {
       );
     }
 
-    if (canUpdateEntity && selectedEntityId) {
-      updateEntity(selectedEntityId, {
-        components: {
-          ...selectedEntity!.components,
-          sprite: {
-            ...selectedEntitySprite!,
-            asset: state.spritePath,
-            frame_width: constrainedFrame.frameWidth,
-            frame_height: constrainedFrame.frameHeight,
-            animations,
-            ...(commandBindings.length > 0 ? { commands: commandBindings } : {}),
+    if (canUpdateTarget && targetEntityId && targetEntity) {
+      const nextSprite = {
+        ...targetSprite!,
+        asset: artState.spritePath,
+        frame_width: constrainedFrame.frameWidth,
+        frame_height: constrainedFrame.frameHeight,
+        animations,
+        commands: commandBindings,
+      };
+      updateEntity(
+        targetEntityId,
+        {
+          components: {
+            sprite: nextSprite,
           },
         },
-      });
+        { recordHistory: false }
+      );
+
+      const postUpdateSprite = useEditorStore
+        .getState()
+        .activeScene?.entities.find((entity) => entity.entity_id === targetEntityId)
+        ?.components?.sprite;
+      const attackApplied = Boolean(
+        postUpdateSprite &&
+          Object.prototype.hasOwnProperty.call(postUpdateSprite.animations ?? {}, "attack")
+      );
+      const commandsApplied = (postUpdateSprite?.commands?.length ?? 0) > 0;
+      const assetApplied = postUpdateSprite?.asset === artState.spritePath;
+
+      if (!attackApplied || !commandsApplied || !assetApplied) {
+        useEditorStore.setState((store) => {
+          if (!store.activeScene) {
+            return {};
+          }
+
+          const patchEntity = (entity: (typeof store.activeScene.entities)[number]) =>
+            entity.entity_id === targetEntityId
+              ? {
+                  ...entity,
+                  components: {
+                    ...entity.components,
+                    sprite: nextSprite,
+                  },
+                }
+              : entity;
+
+          return {
+            activeScene: {
+              ...store.activeScene,
+              entities: store.activeScene.entities.map(patchEntity),
+            },
+            ...(store.activeSceneSource
+              ? {
+                  activeSceneSource: {
+                    ...store.activeSceneSource,
+                    entities: store.activeSceneSource.entities.map(patchEntity),
+                  },
+                }
+              : {}),
+            sceneRevision: store.sceneRevision + 1,
+          };
+        });
+      }
+
       logMessage("success", "[ArtStudio] Entidade atualizada com animacoes.");
+    } else if (forcedEntityId) {
+      dispatch({
+        type: "SET_VALIDATION_ERROR",
+        message: `Entidade '${forcedEntityId}' nao possui componente sprite para receber o fluxo ArtStudio.`,
+      });
+      return false;
     } else {
       const entity = createSpriteEntityFromAsset({
-        assetPath: state.spritePath,
+        assetPath: artState.spritePath,
         target: activeTarget,
-        existingEntityIds: activeScene.entities.map((entity) => entity.entity_id),
-        suggestedName: state.spriteName,
+        existingEntityIds: scene.entities.map((entity) => entity.entity_id),
+        suggestedName: artState.spriteName,
         frameWidth: constrainedFrame.frameWidth,
         frameHeight: constrainedFrame.frameHeight,
         animations,
@@ -2190,6 +2520,7 @@ export default function ArtStudioPanel() {
     saveFeedbackTimeoutRef.current = window.setTimeout(() => {
       dispatch({ type: "HIDE_SAVE_FEEDBACK" });
     }, 2000);
+    return true;
   }, [
     state.sequences,
     state.spritePath,
@@ -2199,11 +2530,7 @@ export default function ArtStudioPanel() {
     state.spriteName,
     state.spriteSheetSize,
     state.commandButtonProfile,
-    canUpdateEntity,
     selectedEntityId,
-    selectedEntity,
-    selectedEntitySprite,
-    activeScene,
     activeProjectDir,
     activeTarget,
     addEntity,
@@ -2268,6 +2595,111 @@ export default function ArtStudioPanel() {
     state.slicingMode,
     state.spriteName,
     state.spriteSheetSourcePath,
+  ]);
+
+  useEffect(() => {
+    window.__RDS_ARTSTUDIO_E2E__ = {
+      loadImage: async (sourcePath: string) => {
+        await ingestSpriteSheet({ sourcePath });
+        return true;
+      },
+      importToProject: async () => {
+        await handleImportToProject();
+        return Boolean(
+          artStudioStateRef.current.spritePath?.startsWith("assets/sprites/")
+        );
+      },
+      importCommandDat: importCommandDatFromPath,
+      selectSequence: (sequenceId: string | null) => {
+        dispatch({ type: "SELECT_SEQUENCE", id: sequenceId });
+        return true;
+      },
+      renameSequence: (sequenceId: string, name: string) => {
+        dispatch({ type: "RENAME_SEQUENCE", id: sequenceId, name });
+        return true;
+      },
+      setFrameSize: (width: number, height: number) => {
+        applyConstrainedFrameSize(width, height);
+        return true;
+      },
+      setSequenceFrames: (sequenceId: string, frames: number[]) => {
+        dispatch({ type: "SET_SEQUENCE_FRAMES", id: sequenceId, frames });
+        return true;
+      },
+      assignCommand: (sequenceId: string, commandId: string) => {
+        const command = artStudioStateRef.current.commandLibrary.find(
+          (candidate) => candidate.id === commandId
+        );
+        if (!command) {
+          return false;
+        }
+        dispatch({ type: "ASSIGN_COMMAND_TO_SEQUENCE", sequenceId, command });
+        return true;
+      },
+      applyToScene: (entityId?: string) => {
+        if (entityId) {
+          setSelectedEntityId(entityId);
+        }
+
+        let applied = false;
+        flushSync(() => {
+          applied = handleApplyToScene(entityId);
+        });
+        if (!applied) {
+          return false;
+        }
+
+        const editor = useEditorStore.getState();
+        const targetEntityId = entityId ?? editor.selectedEntityId;
+        if (!targetEntityId || !editor.activeScene) {
+          return false;
+        }
+
+        const entity = editor.activeScene.entities.find(
+          (candidate) => candidate.entity_id === targetEntityId
+        );
+        const sprite = entity?.components?.sprite;
+        const latestArtState = artStudioStateRef.current;
+        if (!sprite || sprite.asset !== latestArtState.spritePath) {
+          return false;
+        }
+        if (!Object.prototype.hasOwnProperty.call(sprite.animations ?? {}, "attack")) {
+          return false;
+        }
+        if ((sprite.commands?.length ?? 0) < 1) {
+          return false;
+        }
+
+        return true;
+      },
+      getState: () => {
+        const latest = artStudioStateRef.current;
+        return {
+          spritePath: latest.spritePath,
+          sequences: latest.sequences.map((sequence) => ({
+            ...sequence,
+            frames: [...sequence.frames],
+          })),
+          canApplyToScene,
+          validationError: latest.validationError,
+        };
+      },
+    };
+
+    return () => {
+      delete window.__RDS_ARTSTUDIO_E2E__;
+    };
+  }, [
+    canApplyToScene,
+    handleApplyToScene,
+    handleImportToProject,
+    importCommandDatFromPath,
+    ingestSpriteSheet,
+    applyConstrainedFrameSize,
+    state.commandLibrary,
+    state.sequences,
+    state.spritePath,
+    state.validationError,
   ]);
 
   useEffect(() => {
@@ -2433,6 +2865,7 @@ export default function ArtStudioPanel() {
       canApplyToScene,
       totalFrameSlots,
       usedFrameCount,
+      hardwareBudgetSummary,
       externalSourceLoaded,
       loadStatusText,
       sourceOriginLabel,
@@ -2456,6 +2889,7 @@ export default function ArtStudioPanel() {
       canApplyToScene,
       totalFrameSlots,
       usedFrameCount,
+      hardwareBudgetSummary,
       externalSourceLoaded,
       loadStatusText,
       sourceOriginLabel,
@@ -2515,7 +2949,9 @@ export default function ArtStudioPanel() {
             </button>
             <button
               type="button"
-              onClick={handleApplyToScene}
+              onClick={() => {
+            handleApplyToScene();
+          }}
               disabled={!canApplyToScene}
               className="rounded-lg border border-[#a6e3a1]/45 bg-[#a6e3a1]/12 px-3 py-1.5 text-[10px] font-semibold text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/22 disabled:cursor-not-allowed disabled:opacity-40"
               title={canApplyToScene ? "Aplicar sprite/animacoes na entidade selecionada" : applyNextStepLabel}
@@ -2551,7 +2987,7 @@ export default function ArtStudioPanel() {
           orientation="vertical"
           className="min-h-0"
         >
-          <Panel minSize={44} defaultSize={84}>
+          <Panel minSize={52} defaultSize={78}>
             <section
           data-testid="artstudio-main-stage"
           className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-[#313244] bg-[linear-gradient(180deg,#111827,#0f172a)] shadow-[0_18px_50px_rgba(0,0,0,0.28)]"
@@ -2712,7 +3148,7 @@ export default function ArtStudioPanel() {
         </section>
           </Panel>
           <LayoutSplitter orientation="vertical" />
-          <Panel minSize={10} defaultSize={16}>
+          <Panel minSize={18} defaultSize={22}>
             <ArtStudioTimelineSection />
           </Panel>
         </Group>

@@ -523,14 +523,15 @@ export const useEditorStore = create<EditorState>((set) => ({
       if (!state.activeScene) return {};
       const recordHistory = options?.recordHistory ?? true;
       const resolvedEntity = state.activeScene.entities.find((entity) => entity.entity_id === entityId);
+      if (!resolvedEntity) {
+        return {};
+      }
       const preferredSourceScene = state.activeSceneSource ?? state.activeScene;
       const sourceScene = preferredSourceScene.entities.some((entity) => entity.entity_id === entityId)
         ? preferredSourceScene
         : state.activeScene;
-      const sourceEntity = sourceScene.entities.find((entity) => entity.entity_id === entityId);
-      if (!resolvedEntity || !sourceEntity) {
-        return {};
-      }
+      const sourceEntity =
+        sourceScene.entities.find((entity) => entity.entity_id === entityId) ?? resolvedEntity;
 
       const sourcePatch = preserveInheritedGraphRef(
         prunePatchAgainstBase(patch, resolvedEntity),
