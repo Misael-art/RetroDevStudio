@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { access, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -187,6 +187,7 @@ function parseArgs(argv) {
           "live-warning-sprites",
           "live-error",
           "live-stale",
+          "build-blocked-diagnostic",
           "onboarding-shell",
           "qa-rc",
         ].includes(
@@ -387,6 +388,34 @@ function buildLiveOkScenario(target) {
     draft: buildLiveHealthyScene(target, "live_ok", 8),
     expectedToolbarState: "LIVE",
     expectedDetailFragment: "Preview live sincronizado.",
+  };
+}
+
+function buildMissingAssetScene(target) {
+  return {
+    scene_id: "build_blocked_diagnostic",
+    display_name: "Build Blocked Diagnostic",
+    background_layers: [],
+    palettes: [],
+    entities: [
+      {
+        entity_id: "missing_asset_sprite",
+        transform: { x: 16, y: 16 },
+        components: {
+          sprite: {
+            asset:
+              target === "snes"
+                ? "assets/sprites/missing_build_diagnostic.ppm"
+                : "assets/sprites/missing_build_diagnostic.png",
+            frame_width: 8,
+            frame_height: 8,
+            palette_slot: 0,
+            animations: {},
+            priority: "foreground",
+          },
+        },
+      },
+    ],
   };
 }
 
@@ -3658,6 +3687,17 @@ async function main() {
       }
     }
 
+    if (options.scenario === "build-blocked-diagnostic") {
+      const tempRoot = await mkdtemp(path.join(os.tmpdir(), "rds-build-blocked-diagnostic-"));
+      const copiedProject = path.join(tempRoot, path.basename(options.project));
+      await cp(options.project, copiedProject, { recursive: true });
+      options.project = copiedProject;
+      temporaryProjectDir = tempRoot;
+      if (currentE2eRunContext) {
+        currentE2eRunContext.project = copiedProject;
+      }
+    }
+
     const openResult = await executeAsyncScript(
       sessionId,
       `
@@ -4047,6 +4087,101 @@ async function main() {
           validationStatus.pendingSummary || validationStatus.liveStateDetail
         }`
       );
+      return;
+    }
+
+    if (options.scenario === "build-blocked-diagnostic") {
+      await setSceneDraft(sessionId, buildMissingAssetScene(projectMetadata.target));
+
+      try {
+        await waitForBuildRunReady(sessionId, liveValidationTimeoutMs);
+      } catch (error) {
+        const diagnostics = formatAppDiagnostics(await collectAppDiagnostics(sessionId));
+        const details = error instanceof Error ? error.message : String(error);
+        fail(diagnostics ? `${details}\n${diagnostics}` : details);
+      }
+
+      await clickByTestId(sessionId, "toolbar-build-run");
+
+      const diagnosticState = await waitFor(
+        async () => {
+          const state = await executeScript(
+            sessionId,
+            "return window.__RDS_E2E__?.getState() ?? null;"
+          );
+          if (!state?.consoleEntries?.length) {
+            return false;
+          }
+          const actionable = state.consoleEntries.find(
+            (entry) =>
+              entry.diagnostic?.area === "build_sgdk" ||
+              entry.diagnostic?.area === "build_snes"
+          );
+          return actionable?.message?.includes("Build falhou porque") ? state : false;
+        },
+        emulatorActivationTimeoutMs,
+        "Build bloqueado nao exibiu diagnostico acionavel.",
+        500
+      );
+
+      const actionableEntry = diagnosticState.consoleEntries.find(
+        (entry) =>
+          entry.diagnostic?.area === "build_sgdk" ||
+          entry.diagnostic?.area === "build_snes"
+      );
+      if (!actionableEntry) {
+        fail("Console nao registrou diagnostico de build estruturado.");
+      }
+
+      if (actionableEntry.message.includes("Build failed")) {
+        fail(`Console exibiu erro generico em vez de diagnostico acionavel: ${actionableEntry.message}`);
+      }
+
+      if (!actionableEntry.message.includes("Acao recomendada")) {
+        fail(`Diagnostico nao incluiu acao recomendada: ${actionableEntry.message}`);
+      }
+
+      const drawerState = await executeScript(
+        sessionId,
+        `
+          const drawer = document.querySelector('[data-testid="console-drawer"]');
+          const details = document.querySelector('[data-testid="console-details"]');
+          const technical = document.querySelector('[data-testid="console-details-technical"]');
+          const copy = document.querySelector('[data-testid="console-copy-diagnostic"]');
+          const evidence = document.querySelector('[data-testid="console-evidence-link"]');
+          return {
+            drawerText: drawer?.textContent ?? "",
+            detailsText: details?.textContent ?? "",
+            technicalClosed: technical ? !technical.open : false,
+            hasCopy: Boolean(copy),
+            hasEvidence: Boolean(evidence),
+          };
+        `
+      );
+
+      if (!drawerState?.drawerText?.includes("Build falhou porque")) {
+        fail("Console drawer nao exibiu a mensagem acionavel do build bloqueado.");
+      }
+      if (!drawerState.detailsText.includes("Acao Recomendada")) {
+        fail("Painel Details nao exibiu a acao recomendada.");
+      }
+      if (!drawerState.detailsText.includes("Detalhe Tecnico")) {
+        fail("Painel Details nao expos a secao tecnica colapsada.");
+      }
+      if (!drawerState.technicalClosed) {
+        fail("Detalhe tecnico deveria iniciar colapsado para nao poluir a viewport.");
+      }
+      if (!drawerState.hasCopy) {
+        fail("Painel Details nao exibiu acao de copiar erro.");
+      }
+      if (!drawerState.hasEvidence) {
+        fail("Painel Details nao exibiu link de artefato/log.");
+      }
+
+      console.log("OK: Desktop Tauri build blocked diagnostic E2E passou.");
+      console.log(`Projeto: ${options.project}`);
+      console.log(`Target: ${projectMetadata.target}`);
+      console.log(`Diagnostico: ${actionableEntry.message}`);
       return;
     }
 

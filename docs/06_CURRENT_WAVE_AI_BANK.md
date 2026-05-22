@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-20 (rodada 50 - QA RC bloco H + E2E shell)
+**Ultima Atualizacao:** 2026-05-21 (rodada 51 - diagnosticos acionaveis)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,15 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-21 rodada 51 - branch `codex/actionable-diagnostics-l`):**
+  - **Diagnostico comum:** adicionado contrato `ActionableDiagnostic` em Rust/TypeScript com `severity`, `area`, `source_path`, `line/column`, `user_message`, `technical_detail`, `suggested_action`, `blocking` e `evidence_path`.
+  - **Build SGDK/SNES:** `build_orch.rs` agora retorna `diagnostics` em `BuildResult`/`MultiTargetBuildEntry`; falhas deixam de depender de "Build failed" generico e passam a explicar causa, evidencia e acao (ex.: asset ausente -> restaurar arquivo ou apontar para asset existente).
+  - **Import/runtime/emulacao/UI:** frontend normaliza falhas de import SGDK/GameMaker/MUGEN/Ikemen/OpenBOR, Runtime Setup, Libretro/emulacao, hardware e fallback de build; Console drawer ganhou filtros por area/severity, painel `Details`, copia do erro, link de evidencia/log e detalhe tecnico/stack trace colapsado.
+  - **E2E negativo:** novo cenario `test:e2e:desktop:build-blocked-diagnostic` copia fixture para `%TEMP%`, injeta asset ausente, roda Build & Run e valida mensagem acionavel, painel Details, stack trace colapsado, botao copiar e link de evidencia sem sujar fixture versionada.
+  - **Gates locais:** `npm run check:tree` OK; `npm run lint` OK; `npx tsc --noEmit` OK; `npm test` **326/326**; `cargo test --manifest-path src-tauri/Cargo.toml --lib actionable_diagnostic -- --nocapture --test-threads=1` **2/2**; `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK; `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` **349 passed / 17 ignored**; `npm run build:debug` OK; `npm run test:e2e:desktop:qa-rc` OK A-H com evidencias `qa-rc-2026-05-21T00-17-38-364Z-*`; `npm run test:e2e:desktop:build-blocked-diagnostic` OK.
+  - **Status honesto:** isto endurece a camada de explicacao/QA do MVP e nao promove importadores, SGDK, SNES, Node Engine ou superficies Experimentais. Para E2E neste worktree foi usado junction local `toolchains -> F:\Projects\RetroDevStudio\toolchains` para reaproveitar dependencias oficiais existentes, sem nova dependencia de runtime.
+  - **Proximo passo imediato:** consumir esta camada em qualquer nova falha real de import/build/emulacao antes de criar novas features; se houver PR, manter o foco em regressao de UX/QA e evitar inflar maturidade das superficies experimentais.
 
 * **O que acabou de acontecer (2026-05-20 rodada 50 - branch `codex/product-ui-workspace-redesign`):**
   - **Bloco H (QA RC):** `assertUiLayoutHealth()` no `scripts/e2e-tauri-build-run.mjs` valida topbar (overflow, colunas, botao Build compacto), painel central, guia, paineis laterais por workspace, console drawer vs status bar, NodeGraph side rail vs canvas/minimap/toolbar, e sobreposicao de botoes com limiar conservador.

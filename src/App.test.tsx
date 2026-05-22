@@ -1637,6 +1637,50 @@ describe("App build flow", () => {
     expect(putImageDataSpy).toHaveBeenCalled();
   });
 
+  it("logs an actionable diagnostic instead of a generic build failure", async () => {
+    mocks.buildProject.mockImplementationOnce(
+      async (_projectDir: string, onLog: (line: { level: string; message: string }) => void) => {
+        const technical =
+          "Asset referenciado nao encontrado: 'F:/Temp/Demo/assets/sprites/missing.png'.";
+        onLog({ level: "error", message: technical });
+        return {
+          ok: false,
+          rom_path: "",
+          log: [{ level: "error", message: technical }],
+          diagnostics: [
+            {
+              severity: "error",
+              area: "build_sgdk",
+              source_path: "F:/Temp/Demo/assets/sprites/missing.png",
+              line: null,
+              column: null,
+              user_message:
+                "Build falhou porque o asset assets/sprites/missing.png nao foi encontrado.",
+              technical_detail: technical,
+              suggested_action:
+                "Restaure o arquivo ausente ou atualize a entidade para apontar para um asset existente.",
+              blocking: true,
+              evidence_path: "F:/Temp/Demo/build/megadrive",
+            },
+          ],
+        };
+      }
+    );
+
+    await act(async () => {
+      findBuildRunButton(container).click();
+      await flush();
+      await flush();
+    });
+
+    const messages = useEditorStore.getState().consoleEntries.map((entry) => entry.message);
+    expect(messages).toContain(
+      "Build falhou porque o asset assets/sprites/missing.png nao foi encontrado. Acao recomendada: Restaure o arquivo ausente ou atualize a entidade para apontar para um asset existente."
+    );
+    expect(messages.some((message) => message === "Build failed")).toBe(false);
+    expect(mocks.emulatorLoadRom).not.toHaveBeenCalled();
+  });
+
   it("installs the missing JDK before Build & Run on Mega Drive", async () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
 

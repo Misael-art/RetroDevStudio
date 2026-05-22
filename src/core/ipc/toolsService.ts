@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
+import type { ActionableDiagnostic } from "../diagnostics";
 
 // ── Types (mirror do Rust) ────────────────────────────────────────────────────
 
@@ -85,6 +86,7 @@ export interface DependencyInstallResult {
   message: string;
   status: DependencyStatus;
   log: DependencyLogLine[];
+  diagnostics?: ActionableDiagnostic[];
 }
 
 export interface RomDependencyResult {

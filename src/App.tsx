@@ -60,6 +60,13 @@ import {
   getLiveBuildWarningSummary,
   useLiveValidationController,
 } from "./core/validation/liveValidationController";
+import {
+  buildAreaForTarget,
+  createFallbackDiagnostic,
+  importAreaForProfile,
+  normalizeBuildDiagnostics,
+  type ActionableDiagnostic,
+} from "./core/diagnostics";
 import { classifyImageAssetInstantiation } from "./core/assetInstantiation";
 import {
   createSpriteEntityFromAsset,
@@ -897,6 +904,7 @@ type AutomationState = {
   consoleEntries: Array<{
     level: "info" | "warn" | "error" | "success";
     message: string;
+    diagnostic: ActionableDiagnostic | null;
   }>;
   projectSourceKind: string;
 };
@@ -999,6 +1007,7 @@ export default function App() {
     consoleEntries,
     consoleVisible,
     toggleConsole,
+    logDiagnostic,
   } = useEditorStore();
 
   const [building, setBuilding] = useState(false);
@@ -1479,6 +1488,10 @@ export default function App() {
     return error instanceof Error ? error.message : String(error);
   }
 
+  function reportDiagnostic(diagnostic: ActionableDiagnostic) {
+    logDiagnostic(diagnostic);
+  }
+
   const buildDisabledReason = getLiveBuildBlockReason({
     activeProjectDir,
     building,
@@ -1766,14 +1779,27 @@ export default function App() {
           logMessage(line.level, `[Setup] ${line.message}`);
         });
         if (!result.ok) {
-          logMessage("error", `[Setup] ${result.message}`);
+          reportDiagnostic(
+            result.diagnostics?.[0] ??
+              createFallbackDiagnostic({
+                area: "runtime_setup",
+                technicalDetail: result.message,
+                sourcePath: item.install_dir || null,
+                evidencePath: item.install_dir || null,
+              })
+          );
           return false;
         }
       }
 
       return true;
     } catch (error) {
-      logMessage("error", `[Setup] ${describeError(error)}`);
+      reportDiagnostic(
+        createFallbackDiagnostic({
+          area: "runtime_setup",
+          technicalDetail: describeError(error),
+        })
+      );
       return false;
     }
   }
@@ -1979,6 +2005,7 @@ export default function App() {
     }
 
     setCreatingProject(true);
+    let donorPathForDiagnostic: string | undefined;
     try {
       const donorPath =
         selectedTemplate.source_kind === "external_sgdk"
@@ -1986,6 +2013,7 @@ export default function App() {
             selectedTemplate.default_donor_path ||
             undefined
           : undefined;
+      donorPathForDiagnostic = donorPath;
       const result = await createProjectFromTemplate(
         newProjName.trim(),
         newProjTarget,
@@ -2011,7 +2039,17 @@ export default function App() {
         logMessage("warn", `[Projeto] Projeto criado, mas a cena inicial nao foi hidratada: ${result.name}`);
       }
     } catch (error) {
-      logMessage("error", `[Projeto] Falha ao criar projeto: ${describeError(error)}`);
+      if (selectedTemplate.source_kind === "external_sgdk") {
+        reportDiagnostic(
+          createFallbackDiagnostic({
+            area: "import_sgdk",
+            sourcePath: donorPathForDiagnostic ?? null,
+            technicalDetail: describeError(error),
+          })
+        );
+      } else {
+        logMessage("error", `[Projeto] Falha ao criar projeto: ${describeError(error)}`);
+      }
     } finally {
       setCreatingProject(false);
     }
@@ -2040,8 +2078,9 @@ export default function App() {
       );
     }
 
+    let projectPath: string | null = null;
     try {
-      const projectPath = await chooseExternalProjectPath(selectedExternalImportProfile);
+      projectPath = await chooseExternalProjectPath(selectedExternalImportProfile);
       if (!projectPath) {
         return;
       }
@@ -2074,9 +2113,12 @@ export default function App() {
         );
       }
     } catch (error) {
-      logMessage(
-        "error",
-        `[Projeto] Falha ao importar projeto ${selectedExternalImportProfile.name}: ${describeError(error)}`
+      reportDiagnostic(
+        createFallbackDiagnostic({
+          area: importAreaForProfile(selectedExternalImportProfile.id),
+          sourcePath: projectPath,
+          technicalDetail: describeError(error),
+        })
       );
     } finally {
       setCreatingProject(false);
@@ -2107,7 +2149,14 @@ export default function App() {
         if (result.message.includes("Nenhum core Libretro")) {
           openToolsWorkspace("setup", "editing");
         }
-        logMessage("error", `[Emulador] ${result.message}`);
+        reportDiagnostic(
+          result.diagnostics?.[0] ??
+            createFallbackDiagnostic({
+              area: "libretro_emulation",
+              sourcePath: romPath,
+              technicalDetail: result.message,
+            })
+        );
         return;
       }
 
@@ -2116,7 +2165,12 @@ export default function App() {
       setActiveViewportTab("game");
       setEmulPaused(false);
     } catch (error) {
-      logMessage("error", `[Emulador] Falha ao carregar ROM: ${describeError(error)}`);
+      reportDiagnostic(
+        createFallbackDiagnostic({
+          area: "libretro_emulation",
+          technicalDetail: describeError(error),
+        })
+      );
     }
   }
 
@@ -2270,8 +2324,16 @@ export default function App() {
         state.hwStatus &&
         state.hwStatus.errors.length > 0
       ) {
-        state.hwStatus.errors.forEach((error) => logMessage("error", `[HW] ${error}`));
-        logMessage("warn", buildDisabledReason ?? "Build bloqueado pelo preview de hardware.");
+        state.hwStatus.errors.forEach((error) =>
+          reportDiagnostic(
+            createFallbackDiagnostic({
+              area: "hardware",
+              technicalDetail: error,
+              suggestedAction:
+                "Reduza os recursos marcados como fatais no painel de hardware e rode a validacao novamente.",
+            })
+          )
+        );
         return;
       }
 
@@ -2296,8 +2358,17 @@ export default function App() {
       const hwStatus = await getHwStatus(activeProjectDir);
       setHwStatus(hwStatus);
       if (hwStatus.errors.length > 0) {
-        hwStatus.errors.forEach((error) => logMessage("error", `[HW] ${error}`));
-        logMessage("error", "Build bloqueado: violacoes de hardware.");
+        hwStatus.errors.forEach((error) =>
+          reportDiagnostic(
+            createFallbackDiagnostic({
+              area: "hardware",
+              technicalDetail: error,
+              evidencePath: activeProjectDir,
+              suggestedAction:
+                "Reduza os recursos marcados como fatais no painel de hardware e rode a validacao novamente.",
+            })
+          )
+        );
         return;
       }
       hwStatus.warnings.forEach((warning) => logMessage("warn", `[HW] ${warning}`));
@@ -2306,17 +2377,7 @@ export default function App() {
         logMessage(line.level, line.message);
       });
       if (!result.ok) {
-        const errorLines = result.log
-          .filter((line) => line.level === "error")
-          .map((line) => line.message.trim())
-          .filter((msg) => msg.length > 0);
-        const tail = errorLines.slice(-6).join(" | ");
-        logMessage(
-          "error",
-          tail.length > 0
-            ? `Build falhou (toolchain / makefile / emissao). Resumo: ${tail}`
-            : "Build falhou sem linhas de erro estruturadas no log; verifique o Console para o historico completo."
-        );
+        normalizeBuildDiagnostics(result, activeTarget, activeProjectDir).forEach(reportDiagnostic);
         return;
       }
 
@@ -2327,7 +2388,14 @@ export default function App() {
         if (loadResult.message.includes("Nenhum core Libretro")) {
           openToolsWorkspace("setup", "editing");
         }
-        logMessage("error", `[Emulador] ${loadResult.message}`);
+        reportDiagnostic(
+          loadResult.diagnostics?.[0] ??
+            createFallbackDiagnostic({
+              area: "libretro_emulation",
+              sourcePath: result.rom_path,
+              technicalDetail: loadResult.message,
+            })
+        );
         return;
       }
 
@@ -2337,7 +2405,13 @@ export default function App() {
       setActiveViewportTab("game");
       setActiveWorkspace("game");
     } catch (error) {
-      logMessage("error", `[Build] Falha inesperada: ${describeError(error)}`);
+      reportDiagnostic(
+        createFallbackDiagnostic({
+          area: buildAreaForTarget(activeTarget),
+          technicalDetail: describeError(error),
+          evidencePath: activeProjectDir ? `${activeProjectDir}/build/${activeTarget === "snes" ? "snes" : "megadrive"}` : null,
+        })
+      );
     } finally {
       buildInFlightRef.current = false;
       setBuilding(false);
@@ -3105,7 +3179,11 @@ export default function App() {
             staleHint: currentLiveState === "DESATUAL." ? "Edite a cena para revalidar" : "",
             hasStaleRevalidateButton: currentLiveState === "DESATUAL.",
           },
-          consoleEntries: state.consoleEntries.map(({ level, message }) => ({ level, message })),
+          consoleEntries: state.consoleEntries.map(({ level, message, diagnostic }) => ({
+            level,
+            message,
+            diagnostic: diagnostic ?? null,
+          })),
           projectSourceKind: state.projectSourceKind,
         };
       },
