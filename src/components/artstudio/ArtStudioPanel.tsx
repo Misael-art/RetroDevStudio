@@ -464,6 +464,30 @@ function spriteCommandBindingToParsedCommand(binding: SpriteCommandBinding): Par
   };
 }
 
+function resolveArtStudioSequenceIdForAnimationKey(
+  animationKey: string,
+  usedCanonicalIds: Set<string>
+): string {
+  const normalizedKey = sanitizeAnimationKey(animationKey) || "animation";
+  const canonicalByKey = DEFAULT_ARTSTUDIO_SEQUENCES.find(
+    (sequence) =>
+      sequence.id === `seq_${normalizedKey}` ||
+      sanitizeAnimationKey(sequence.name) === normalizedKey
+  );
+  if (canonicalByKey && !usedCanonicalIds.has(canonicalByKey.id)) {
+    return canonicalByKey.id;
+  }
+
+  const freeCanonical = DEFAULT_ARTSTUDIO_SEQUENCES.find(
+    (sequence) => !usedCanonicalIds.has(sequence.id)
+  );
+  if (freeCanonical) {
+    return freeCanonical.id;
+  }
+
+  return `seq_${normalizedKey}`;
+}
+
 export function buildArtStudioSequencesFromSpriteMetadata(
   sprite: Pick<SpriteComponent, "animations" | "commands"> | null | undefined
 ): SpriteSequence[] {
@@ -480,18 +504,33 @@ export function buildArtStudioSequencesFromSpriteMetadata(
     ])
   );
 
-  return animationEntries.map(([key, animation]) => {
+  const base = cloneDefaultArtStudioSequences();
+  const usedCanonicalIds = new Set<string>();
+
+  for (const [key, animation] of animationEntries) {
     const normalizedKey = sanitizeAnimationKey(key) || "animation";
+    const sequenceId = resolveArtStudioSequenceIdForAnimationKey(key, usedCanonicalIds);
+    usedCanonicalIds.add(sequenceId);
     const command = commandsByAnimation.get(normalizedKey);
-    return {
-      id: `seq_${normalizedKey}`,
+    const slotIndex = base.findIndex((sequence) => sequence.id === sequenceId);
+    const hydratedSequence: SpriteSequence = {
+      id: sequenceId,
       name: titleCaseAnimationKey(key),
       frames: [...animation.frames],
       fps: animation.fps,
       loop: animation.loop,
       ...(command ? { command } : {}),
     };
-  });
+
+    if (slotIndex >= 0) {
+      base[slotIndex] = hydratedSequence;
+      continue;
+    }
+
+    base.push(hydratedSequence);
+  }
+
+  return base;
 }
 
 export interface ArtStudioHardwareBudgetSummary {
@@ -2627,10 +2666,12 @@ export default function ArtStudioPanel() {
         return true;
       },
       assignCommand: (sequenceId: string, commandId: string) => {
-        const command = artStudioStateRef.current.commandLibrary.find(
-          (candidate) => candidate.id === commandId
-        );
+        const latest = artStudioStateRef.current;
+        const command = latest.commandLibrary.find((candidate) => candidate.id === commandId);
         if (!command) {
+          return false;
+        }
+        if (!latest.sequences.some((sequence) => sequence.id === sequenceId)) {
           return false;
         }
         dispatch({ type: "ASSIGN_COMMAND_TO_SEQUENCE", sequenceId, command });

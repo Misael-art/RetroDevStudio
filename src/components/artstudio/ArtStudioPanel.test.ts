@@ -190,6 +190,25 @@ describe("ArtStudioPanel helpers", () => {
     ]);
   });
 
+  it("maps imported SGDK sheet_row animations onto canonical sequence ids for automation", () => {
+    const sequences = buildArtStudioSequencesFromSpriteMetadata({
+      animations: {
+        sheet_row_0: { frames: [0], fps: 8, loop: true },
+        sheet_row_1: { frames: [1], fps: 8, loop: true },
+      },
+      commands: [],
+    });
+
+    expect(sequences.map((sequence) => sequence.id)).toEqual([
+      "seq_idle",
+      "seq_run",
+      "seq_jump",
+      "seq_attack",
+    ]);
+    expect(sequences[0]?.frames).toEqual([0]);
+    expect(sequences[1]?.frames).toEqual([1]);
+  });
+
   it("hydrates editable sequences and command chips from an existing SpriteComponent", () => {
     const sequences = buildArtStudioSequencesFromSpriteMetadata({
       animations: {
@@ -216,6 +235,8 @@ describe("ArtStudioPanel helpers", () => {
 
     expect(sequences).toEqual([
       { id: "seq_idle", name: "Idle", frames: [0], fps: 6, loop: true },
+      { id: "seq_run", name: "RUN", frames: [], fps: 12, loop: true },
+      { id: "seq_jump", name: "JUMP", frames: [], fps: 8, loop: false },
       {
         id: "seq_attack",
         name: "Attack",
