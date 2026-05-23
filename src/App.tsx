@@ -99,6 +99,42 @@ const InspectorPanel = lazy(() => import("./components/inspector/InspectorPanel"
 const ToolsPanel = lazy(() => import("./components/tools/ToolsPanel"));
 const ViewportPanel = lazy(() => import("./components/viewport/ViewportPanel"));
 
+function looksLikeRuntimeDependencyFailure(message: string): boolean {
+  const lower = message.toLowerCase();
+  return [
+    "toolchain",
+    "sgdk",
+    "pvsneslib",
+    "java",
+    "jdk",
+    "libretro",
+    "make",
+    "bash",
+    "msvc",
+    "cl.exe",
+    "webdriver",
+    "tauri-driver",
+  ].some((token) => lower.includes(token));
+}
+
+function formatBuildFailureSummary(errorLines: string[]): string {
+  const tail = errorLines.slice(-6).join(" | ");
+  if (tail.length === 0) {
+    return "Build falhou sem linhas de erro estruturadas no log; abra Debug > Runtime Setup, clique Revalidar e confira o Console para o historico completo.";
+  }
+  const setupHint = looksLikeRuntimeDependencyFailure(tail)
+    ? " Abra Debug > Runtime Setup, clique Revalidar e corrija a dependencia indicada antes de tentar novamente."
+    : "";
+  return `Build falhou (toolchain / makefile / emissao). Resumo: ${tail}.${setupHint}`;
+}
+
+function formatEmulatorFailureMessage(message: string): string {
+  if (looksLikeRuntimeDependencyFailure(message)) {
+    return `[Emulador] ${message} Abra Debug > Runtime Setup, clique Revalidar e confirme o core Libretro/WebDriver antes de carregar a ROM novamente.`;
+  }
+  return `[Emulador] ${message}`;
+}
+
 function ToolbarButton({
   label,
   onClick,
@@ -1135,6 +1171,12 @@ export default function App() {
     setToolPanelActive(activeTool);
     setToolPanelWorkspace(workspace);
     setToolPanelShowAdvanced(showAdvanced);
+  }
+
+  function openRuntimeSetupForIssue() {
+    setActiveWorkspace("debug");
+    setActiveViewportTab("scene");
+    openToolsWorkspace("setup", "debug", true);
   }
 
   function applyShellLayout(nextLayout: LayoutMap) {
@@ -2377,7 +2419,17 @@ export default function App() {
         logMessage(line.level, line.message);
       });
       if (!result.ok) {
+        const errorLines = result.log
+          .filter((line) => line.level === "error")
+          .map((line) => line.message.trim())
+          .filter((msg) => msg.length > 0);
+        if (errorLines.some(looksLikeRuntimeDependencyFailure)) {
+          openRuntimeSetupForIssue();
+        }
         normalizeBuildDiagnostics(result, activeTarget, activeProjectDir).forEach(reportDiagnostic);
+        if (!result.diagnostics?.length && errorLines.length > 0) {
+          logMessage("error", formatBuildFailureSummary(errorLines));
+        }
         return;
       }
 
@@ -2386,7 +2438,7 @@ export default function App() {
       if (!loadResult.ok) {
         setEmulatorLoaded(false);
         if (loadResult.message.includes("Nenhum core Libretro")) {
-          openToolsWorkspace("setup", "editing");
+          openRuntimeSetupForIssue();
         }
         reportDiagnostic(
           loadResult.diagnostics?.[0] ??

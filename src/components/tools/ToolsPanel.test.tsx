@@ -113,6 +113,12 @@ function createDependencyStatus(id: string, overrides: Partial<Record<string, un
     installed: true,
     version: "test-version",
     install_dir: `F:/Toolchains/${id}`,
+    status_code: "installed",
+    status_label: "INSTALADO",
+    severity: "ok",
+    cache_available: false,
+    manual_configuration_required: false,
+    actionable_message: "Dependencia detectada.",
     notes: [],
     issues: [],
     source_url: `https://example.invalid/${id}`,
@@ -690,6 +696,98 @@ describe("ToolsPanel Asset Browser", () => {
     expect(card?.textContent).toContain("src/main.c");
     expect(card?.textContent).toContain("res/resources.res");
     expect(card?.textContent).toContain("out/rom.bin");
+  });
+
+  it("shows compact actionable runtime diagnostics and revalidates safely", async () => {
+    mocks.getThirdPartyStatus.mockClear();
+    mocks.getThirdPartyStatus.mockResolvedValueOnce({
+      generated_at_unix: 123,
+      report_path:
+        "F:/Projects/RetroDevStudio-agent-j-runtime-setup/src-tauri/target-test/validation/runtime-dependency-diagnostics.json",
+      summary: {
+        total: 3,
+        installed: 1,
+        blocking: 2,
+        warnings: 0,
+        manual_required: 1,
+        cache_available: 1,
+        download_failed: 0,
+      },
+      items: [
+        createDependencyStatus("jdk", {
+          label: "JDK (Temurin LTS)",
+          version: "21.0.7",
+          actionable_message: "JDK detectada e pronta para SGDK.",
+        }),
+        createDependencyStatus("sgdk", {
+          installed: false,
+          version: null,
+          status_code: "cache_available",
+          status_label: "CACHE DISPONIVEL",
+          severity: "warning",
+          cache_available: true,
+          issues: ["Nao instalado em 'toolchains/sgdk'."],
+          actionable_message:
+            "Metadata de release oficial em cache; use Instalar / Reinstalar quando a rede voltar para baixar o pacote.",
+        }),
+        createDependencyStatus("tauri_driver", {
+          label: "tauri-driver",
+          installed: false,
+          version: null,
+          status_code: "manual_configuration_required",
+          status_label: "CONFIGURACAO MANUAL",
+          severity: "blocking",
+          manual_configuration_required: true,
+          auto_install_supported: false,
+          issues: ["tauri-driver nao encontrado no PATH."],
+          actionable_message:
+            "Instale com cargo install tauri-driver --locked e revalide o Runtime Setup.",
+        }),
+      ],
+    });
+
+    await act(async () => {
+      findButton(container, "Revalidar").click();
+      await flush();
+      await flush();
+    });
+
+    const summary = container.querySelector("[data-testid='runtime-diagnostics-summary']");
+    expect(summary?.textContent).toContain("3 dependencias");
+    expect(summary?.textContent).toContain("2 bloqueio");
+    expect(summary?.textContent).toContain("1 manual");
+
+    const sgdkStatus = container.querySelector("[data-testid='runtime-diagnostic-status-sgdk']");
+    expect(sgdkStatus?.textContent).toContain("CACHE DISPONIVEL");
+    expect(container.querySelector("[data-testid='runtime-diagnostic-action-sgdk']")?.textContent).toContain(
+      "Instalar / Reinstalar"
+    );
+    expect(
+      container.querySelector("[data-testid='runtime-diagnostic-status-tauri_driver']")?.textContent
+    ).toContain("CONFIGURACAO MANUAL");
+
+    mocks.getThirdPartyStatus.mockResolvedValueOnce({
+      generated_at_unix: 124,
+      report_path: "runtime-dependency-diagnostics.json",
+      summary: {
+        total: 1,
+        installed: 1,
+        blocking: 0,
+        warnings: 0,
+        manual_required: 0,
+        cache_available: 0,
+        download_failed: 0,
+      },
+      items: [createDependencyStatus("jdk")],
+    });
+
+    await act(async () => {
+      findButton(container, "Revalidar").click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.getThirdPartyStatus).toHaveBeenCalledTimes(2);
   });
 
   it("installs missing toolchains before Build All Targets", async () => {

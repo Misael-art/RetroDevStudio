@@ -643,6 +643,12 @@ function createDependencyStatus(id: string) {
     installed: true,
     version: "test",
     install_dir: "F:/deps",
+    status_code: "installed",
+    status_label: "INSTALADO",
+    severity: "ok",
+    cache_available: false,
+    manual_configuration_required: false,
+    actionable_message: "Dependencia detectada.",
     source_url: "https://example.invalid",
     auto_install_supported: true,
     notes: [],
@@ -1679,6 +1685,50 @@ describe("App build flow", () => {
     );
     expect(messages.some((message) => message === "Build failed")).toBe(false);
     expect(mocks.emulatorLoadRom).not.toHaveBeenCalled();
+  });
+
+  it("turns toolchain build failures into Runtime Setup guidance", async () => {
+    mocks.buildProject.mockResolvedValueOnce({
+      ok: false,
+      rom_path: "",
+      log: [
+        {
+          level: "error",
+          message:
+            "Toolchain SGDK nao encontrada. Configure SGDK_ROOT ou instale em toolchains/sgdk/.",
+        },
+      ],
+    });
+
+    await act(async () => {
+      findBuildRunButton(container).click();
+      await flush();
+      await flush();
+    });
+
+    const messages = useEditorStore.getState().consoleEntries.map((entry) => entry.message);
+    expect(messages.some((message) => message.includes("Runtime Setup"))).toBe(true);
+    expect(messages.some((message) => message.includes("Revalidar"))).toBe(true);
+    expect(messages.some((message) => message.includes("SGDK"))).toBe(true);
+  });
+
+  it("turns missing emulator cores into actionable setup guidance", async () => {
+    mocks.emulatorLoadRom.mockResolvedValueOnce({
+      ok: false,
+      message:
+        "Nenhum core Libretro para Mega Drive foi encontrado. Configure RETRODEV_LIBRETRO_CORE.",
+    });
+
+    await act(async () => {
+      findBuildRunButton(container).click();
+      await flush();
+      await flush();
+    });
+
+    const messages = useEditorStore.getState().consoleEntries.map((entry) => entry.message);
+    expect(messages.some((message) => message.includes("Runtime Setup"))).toBe(true);
+    expect(messages.some((message) => message.includes("Libretro"))).toBe(true);
+    expect(useEditorStore.getState().activeWorkspace).toBe("debug");
   });
 
   it("installs the missing JDK before Build & Run on Mega Drive", async () => {
