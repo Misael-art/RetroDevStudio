@@ -1,5 +1,6 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
 **Ultima Atualizacao:** 2026-05-22 (integracao full-product-cohesion)
+* **Integrado (artstudio M):** slots canonicos seq_idle..seq_attack, pplyToScene E2E, vitest threads, mockReset nos testes.
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -35,6 +36,7 @@
   - **Diagnostico comum:** contrato `ActionableDiagnostic` em Rust/TypeScript; build/import/runtime/emulacao com mensagens acionaveis.
   - **E2E negativo:** `test:e2e:desktop:build-blocked-diagnostic` valida asset ausente, Details, copia e link de evidencia.
   - **Gates locais:** `npm test` **326/326**, `cargo test --lib` **349 passed / 17 ignored**, QA RC A-H e build-blocked-diagnostic verdes.
+* **Integrado (artstudio M):** slots canonicos seq_idle..seq_attack, pplyToScene E2E, vitest threads, mockReset nos testes.
 
 * **O que acabou de acontecer (2026-05-20 rodada 50 - branch `codex/product-ui-workspace-redesign`):**
   - **Bloco H (QA RC):** `assertUiLayoutHealth()` no `scripts/e2e-tauri-build-run.mjs` valida topbar (overflow, colunas, botao Build compacto), painel central, guia, paineis laterais por workspace, console drawer vs status bar, NodeGraph side rail vs canvas/minimap/toolbar, e sobreposicao de botoes com limiar conservador.

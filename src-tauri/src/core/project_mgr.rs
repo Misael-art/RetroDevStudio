@@ -15396,7 +15396,26 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                     ]),
                     priority: "foreground".to_string(),
                     meta_sprite: false,
-                    commands: Vec::new(),
+                    commands: vec![crate::ugdm::components::SpriteCommandBinding {
+                        id: "hadouken".to_string(),
+                        display_name: "Hadouken".to_string(),
+                        notation: "_2, _3, _6, _P".to_string(),
+                        source: "local-command.dat".to_string(),
+                        target_animation: "run".to_string(),
+                        max_frames: 15,
+                        button_profile: "megadrive".to_string(),
+                        unsupported_tokens: Vec::new(),
+                        steps: vec![
+                            crate::ugdm::components::SpriteCommandStep {
+                                tokens: vec!["_2".to_string()],
+                                display: vec!["down".to_string()],
+                            },
+                            crate::ugdm::components::SpriteCommandStep {
+                                tokens: vec!["_P".to_string()],
+                                display: vec!["P".to_string()],
+                            },
+                        ],
+                    }],
                 }),
                 ..Components::default()
             },
@@ -15436,6 +15455,10 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                 mugen_frames: None,
             })
         );
+        assert_eq!(sprite.commands.len(), 1);
+        assert_eq!(sprite.commands[0].id, "hadouken");
+        assert_eq!(sprite.commands[0].target_animation, "run");
+        assert_eq!(sprite.commands[0].steps[1].tokens, vec!["_P"]);
 
         let _ = fs::remove_dir_all(project_dir);
     }
