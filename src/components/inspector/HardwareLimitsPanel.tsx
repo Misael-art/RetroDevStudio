@@ -95,6 +95,26 @@ function getValidationMessage({
   return "Sem preview ativo.";
 }
 
+function fallbackHwStatus(target: "megadrive" | "snes"): HwStatus {
+  const snes = target === "snes";
+  return {
+    vram_used: 0,
+    vram_limit: 65536,
+    sprite_count: 0,
+    sprite_limit: snes ? 128 : 80,
+    scanline_sprite_peak: 0,
+    scanline_sprite_limit: snes ? 32 : 20,
+    dma_used: 0,
+    dma_limit: snes ? 8192 : 7372,
+    palette_banks_used: 0,
+    palette_banks_limit: snes ? 8 : 4,
+    bg_layers: 0,
+    bg_layers_limit: snes ? 4 : 3,
+    errors: [],
+    warnings: [],
+  };
+}
+
 export default function HardwareLimitsPanel({ compact = false }: { compact?: boolean }) {
   const {
     hwStatus,
@@ -105,22 +125,7 @@ export default function HardwareLimitsPanel({ compact = false }: { compact?: boo
     activeTarget,
   } = useEditorStore();
 
-  const status: HwStatus = hwStatus ?? {
-    vram_used: 0,
-    vram_limit: 65536,
-    sprite_count: 0,
-    sprite_limit: 80,
-    scanline_sprite_peak: 0,
-    scanline_sprite_limit: 20,
-    dma_used: 0,
-    dma_limit: 7372,
-    palette_banks_used: 0,
-    palette_banks_limit: 4,
-    bg_layers: 0,
-    bg_layers_limit: 3,
-    errors: [],
-    warnings: [],
-  };
+  const status: HwStatus = hwStatus ?? fallbackHwStatus(activeTarget);
 
   const hasErrors = status.errors.length > 0;
   const hasWarnings = status.warnings.length > 0;

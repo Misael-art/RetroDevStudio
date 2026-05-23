@@ -467,6 +467,34 @@ describe("compileGraphToC — SNES", () => {
     expect(code).toContain("WaitForVBlank()");
   });
 
+  it("gera SNES C consistente para input_held, movimento e FSM", () => {
+    const graph: NodeGraph = {
+      nodes: [
+        node("update", "event_update"),
+        node("right", "input_held", { pad: "JOY_1", button: "BUTTON_RIGHT" }),
+        node("move", "sprite_move", { target: "player", dx: 2, dy: 0 }),
+        node("idle", "fsm_state", { state_name: "idle", initial: 1 }),
+        node("run", "fsm_state", { state_name: "run", initial: 0 }),
+        node("idle_to_run", "fsm_transition", { target_state: "run" }),
+      ],
+      edges: [
+        edge("e1", "update", "right"),
+        { id: "e2", fromNode: "right", fromPort: "true", toNode: "move", toPort: "exec" },
+        { id: "e3", fromNode: "idle", fromPort: "transitions", toNode: "idle_to_run", toPort: "exec" },
+        { id: "e4", fromNode: "right", fromPort: "true", toNode: "idle_to_run", toPort: "condition" },
+      ],
+    };
+
+    const code = compileGraphToC(graph, "SnesInputMoveFsm", "snes");
+
+    expect(code).toContain("if ((padsCurrent(0) & KEY_RIGHT))");
+    expect(code).not.toContain("BUTTON_RIGHT");
+    expect(code).toContain("oamSet");
+    expect(code).toContain("FSM_STATE_IDLE = 0");
+    expect(code).toContain("FSM_STATE_RUN = 1");
+    expect(code).toContain("logic_var_fsm_state = FSM_STATE_RUN;");
+  });
+
   it("emite if-chain de FSM com estados nomeados e transicoes", () => {
     const code = compileGraphToC(GRAPH_FSM, "FsmDemo", "megadrive");
 

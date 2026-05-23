@@ -334,10 +334,11 @@ fn build_main_c_with_collision(
             AstNode::InitAudio { sfx_resources } => {
                 out.push_str("    spcBoot();\n");
                 for (resource_name, _) in sfx_resources {
+                    let symbol = snes_sfx_symbol(resource_name);
                     out.push_str(&format!(
-                        "    spcSetSoundEntry(SFX_{sound_id}, 8, 0, (u8*)&{symbol});\n",
-                        sound_id = resource_name.to_uppercase(),
-                        symbol = snes_sfx_symbol(resource_name)
+                        "    spcSetSoundEntry(15, 8, 6, (&{symbol}end - &{symbol}), (u8*)&{symbol}, &{sample});\n",
+                        symbol = symbol,
+                        sample = snes_sfx_sample_symbol(resource_name)
                     ));
                 }
             }
@@ -796,20 +797,33 @@ fn collect_input_commands(ast: &AstOutput) -> BTreeMap<String, InputCommandSpec>
     commands
 }
 
-fn collect_input_commands_from_ops(ops: &[LogicOp], commands: &mut BTreeMap<String, InputCommandSpec>) {
+fn collect_input_commands_from_ops(
+    ops: &[LogicOp],
+    commands: &mut BTreeMap<String, InputCommandSpec>,
+) {
     for op in ops {
         match op {
-            LogicOp::ConditionBool { condition, if_true, if_false } => {
+            LogicOp::ConditionBool {
+                condition,
+                if_true,
+                if_false,
+            } => {
                 collect_input_command_from_bool(condition, commands);
                 collect_input_commands_from_ops(if_true, commands);
                 collect_input_commands_from_ops(if_false, commands);
             }
-            LogicOp::WhileLoop { condition, body, done } => {
+            LogicOp::WhileLoop {
+                condition,
+                body,
+                done,
+            } => {
                 collect_input_command_from_bool(condition, commands);
                 collect_input_commands_from_ops(body, commands);
                 collect_input_commands_from_ops(done, commands);
             }
-            LogicOp::ConditionOverlap { if_true, if_false, .. } => {
+            LogicOp::ConditionOverlap {
+                if_true, if_false, ..
+            } => {
                 collect_input_commands_from_ops(if_true, commands);
                 collect_input_commands_from_ops(if_false, commands);
             }
@@ -842,7 +856,10 @@ fn collect_input_commands_from_ops(ops: &[LogicOp], commands: &mut BTreeMap<Stri
     }
 }
 
-fn collect_input_command_from_bool(expr: &LogicBoolExpr, commands: &mut BTreeMap<String, InputCommandSpec>) {
+fn collect_input_command_from_bool(
+    expr: &LogicBoolExpr,
+    commands: &mut BTreeMap<String, InputCommandSpec>,
+) {
     match expr {
         LogicBoolExpr::InputCommand {
             command_id,
@@ -850,11 +867,13 @@ fn collect_input_command_from_bool(expr: &LogicBoolExpr, commands: &mut BTreeMap
             unsupported_tokens,
             ..
         } => {
-            commands.entry(command_id.clone()).or_insert_with(|| InputCommandSpec {
-                id: command_id.clone(),
-                notation: notation.clone(),
-                unsupported_tokens: unsupported_tokens.clone(),
-            });
+            commands
+                .entry(command_id.clone())
+                .or_insert_with(|| InputCommandSpec {
+                    id: command_id.clone(),
+                    notation: notation.clone(),
+                    unsupported_tokens: unsupported_tokens.clone(),
+                });
         }
         LogicBoolExpr::Not(value) => collect_input_command_from_bool(value, commands),
         LogicBoolExpr::And { left, right, .. } => {
@@ -1365,7 +1384,10 @@ fn render_bool_expr(out: &mut String, expr: &LogicBoolExpr, indent: usize) -> St
         LogicBoolExpr::Literal(value) => {
             if *value { "1".to_string() } else { "0".to_string() }
         }
-        LogicBoolExpr::Input { button, .. } => format!("(padsCurrent(0) & {})", button),
+        LogicBoolExpr::Input { button, .. } => format!(
+            "(padsCurrent(0) & {})",
+            snes_button_mask(button).unwrap_or(button.as_str())
+        ),
         LogicBoolExpr::InputCommand {
             command_id,
             notation,
@@ -1590,9 +1612,12 @@ fn render_audio_externs(
     }
 
     for (resource_name, _) in sfx_resources {
+        let symbol = snes_sfx_symbol(resource_name);
+        out.push_str(&format!("extern char {};\n", symbol));
+        out.push_str(&format!("extern char {}end;\n", symbol));
         out.push_str(&format!(
-            "extern char {};\n",
-            snes_sfx_symbol(resource_name)
+            "static brrsamples {};\n",
+            snes_sfx_sample_symbol(resource_name)
         ));
     }
     for (resource_name, _) in bgm_tracks {
@@ -1785,6 +1810,10 @@ fn snes_sfx_symbol(resource_name: &str) -> String {
     format!("{}_sfx", resource_name)
 }
 
+fn snes_sfx_sample_symbol(resource_name: &str) -> String {
+    format!("{}_sample", snes_sfx_symbol(resource_name))
+}
+
 fn snes_bgm_symbol(resource_name: &str) -> String {
     format!("{}_bgm", resource_name)
 }
@@ -1933,6 +1962,10 @@ fn snes_button_mask(button: &str) -> Option<&'static str> {
         "DPAD_DOWN" => Some("KEY_DOWN"),
         "DPAD_LEFT" => Some("KEY_LEFT"),
         "DPAD_RIGHT" => Some("KEY_RIGHT"),
+        "BUTTON_UP" => Some("KEY_UP"),
+        "BUTTON_DOWN" => Some("KEY_DOWN"),
+        "BUTTON_LEFT" => Some("KEY_LEFT"),
+        "BUTTON_RIGHT" => Some("KEY_RIGHT"),
         "_P" | "P" | "_B" | "B" | "BUTTON_Y" => Some("KEY_Y"),
         "_K" | "K" | "_A" | "A" | "BUTTON_B" => Some("KEY_B"),
         "_C" | "C" | "BUTTON_X" => Some("KEY_X"),
@@ -2403,11 +2436,13 @@ mod tests {
 
         assert!(output.main_c.contains("#define SFX_JUMP 0"));
         assert!(output.main_c.contains("extern char jump_sfx;"));
+        assert!(output.main_c.contains("extern char jump_sfxend;"));
+        assert!(output.main_c.contains("static brrsamples jump_sfx_sample;"));
         assert!(output.main_c.contains("extern char stage_theme_bgm;"));
         assert!(output.main_c.contains("spcBoot();"));
-        assert!(output
-            .main_c
-            .contains("spcSetSoundEntry(SFX_JUMP, 8, 0, (u8*)&jump_sfx);"));
+        assert!(output.main_c.contains(
+            "spcSetSoundEntry(15, 8, 6, (&jump_sfxend - &jump_sfx), (u8*)&jump_sfx, &jump_sfx_sample);"
+        ));
         assert!(output.main_c.contains("spcLoad((u8*)&stage_theme_bgm);"));
         assert!(output
             .resources_res
@@ -2420,7 +2455,12 @@ mod tests {
     #[test]
     fn snes_emitter_emits_ring_buffer_matcher_for_input_command() {
         let ast = AstOutput {
-            nodes: vec![AstNode::GameLoopBegin, AstNode::SpriteUpdate, AstNode::VSync, AstNode::GameLoopEnd],
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
             sprite_assets: Vec::new(),
             logic_scripts: vec![LogicScript {
                 ops: vec![LogicOp::ConditionBool {
@@ -2443,7 +2483,9 @@ mod tests {
 
         let output = emit_snes(&ast, "Command Demo");
 
-        assert!(output.main_c.contains("rds_input_push_frame(padsCurrent(0));"));
+        assert!(output
+            .main_c
+            .contains("rds_input_push_frame(padsCurrent(0));"));
         assert!(output
             .main_c
             .contains("static const RdsInputCommandStep rds_cmd_hadouken_steps[]"));
@@ -2455,6 +2497,38 @@ mod tests {
             .main_c
             .contains("if (rds_input_match_command(rds_cmd_hadouken_steps, 4, 15))"));
         assert!(output.main_c.contains("logic_var_fireball = 1;"));
+    }
+
+    #[test]
+    fn snes_emitter_maps_button_aliases_inside_logic_conditions() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: vec![LogicScript {
+                ops: vec![LogicOp::ConditionBool {
+                    condition: LogicBoolExpr::Input {
+                        pad: "JOY_1".to_string(),
+                        button: "BUTTON_RIGHT".to_string(),
+                        pressed: false,
+                    },
+                    if_true: vec![LogicOp::SetVar {
+                        var_name: "moved".to_string(),
+                        value: LogicMathExpr::Literal(1),
+                    }],
+                    if_false: Vec::new(),
+                }],
+            }],
+        };
+
+        let output = emit_snes(&ast, "Input Alias Demo");
+
+        assert!(output.main_c.contains("if ((padsCurrent(0) & KEY_RIGHT))"));
+        assert!(!output.main_c.contains("BUTTON_RIGHT"));
     }
 
     #[test]

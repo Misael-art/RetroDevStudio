@@ -21,6 +21,9 @@ use compiler::build_orch::{
 };
 use compiler::sgdk_emitter::emit_sgdk_with_collision;
 use compiler::snes_emitter::emit_snes_with_collision;
+use core::compatibility_harness::{
+    run_gamemaker_compatibility_harness, validation_report_dir, CompatibilityHarnessReport,
+};
 use core::editor_validation::{
     authoritative_hw_status, validate_scene_draft as validate_scene_draft_impl,
     DraftValidationResult,
@@ -39,9 +42,6 @@ use core::project_mgr::{
     stamp_imported_sgdk_metadata, stamp_project_template_metadata, sync_external_graph_refs,
     update_project_target, ExternalImportProfileSummary, LegacySgdkIndex, ProjectTemplateSummary,
     SceneInfo, DEFAULT_ENTRY_SCENE,
-};
-use core::compatibility_harness::{
-    run_gamemaker_compatibility_harness, validation_report_dir, CompatibilityHarnessReport,
 };
 use core::sgdk_corpus_inventory::{
     inspect_sgdk_corpus_for_nocode_inventory, inspect_sgdk_project_for_nocode_inventory,
@@ -2827,9 +2827,17 @@ fn parse_input_command_file(path: String) -> Result<Vec<InputCommandDefinition>,
     if path.trim().is_empty() {
         return Err("Informe um caminho local para command.dat.".to_string());
     }
-    let content = fs::read_to_string(&source_path)
-        .map_err(|error| format!("Falha ao ler command.dat '{}': {}", source_path.display(), error))?;
-    Ok(parse_command_dat(&content, &source_path.display().to_string()))
+    let content = fs::read_to_string(&source_path).map_err(|error| {
+        format!(
+            "Falha ao ler command.dat '{}': {}",
+            source_path.display(),
+            error
+        )
+    })?;
+    Ok(parse_command_dat(
+        &content,
+        &source_path.display().to_string(),
+    ))
 }
 
 // ── App Builder ───────────────────────────────────────────────────────────────
@@ -3224,6 +3232,237 @@ mod tests {
             serde_json::to_string_pretty(&scene).expect("serialize no-code scene"),
         )
         .expect("write persistent no-code scene");
+    }
+
+    fn install_persistent_nocode_snes_game(project_dir: &Path) {
+        fs::create_dir_all(project_dir.join("assets").join("sprites"))
+            .expect("create SNES no-code sprite dir");
+        fs::create_dir_all(project_dir.join("assets").join("tilemaps"))
+            .expect("create SNES no-code tilemap dir");
+        fs::create_dir_all(project_dir.join("assets").join("audio"))
+            .expect("create SNES no-code audio dir");
+
+        write_rgba_sheet(
+            &project_dir
+                .join("assets")
+                .join("sprites")
+                .join("player.png"),
+            &[
+                [248, 208, 80, 255],
+                [248, 112, 80, 255],
+                [232, 64, 96, 255],
+                [248, 176, 96, 255],
+            ],
+        );
+        write_rgba_sheet(
+            &project_dir.join("assets").join("sprites").join("enemy.png"),
+            &[
+                [72, 168, 248, 255],
+                [64, 128, 224, 255],
+                [48, 96, 192, 255],
+                [80, 184, 240, 255],
+            ],
+        );
+        write_stage_image(
+            &project_dir
+                .join("assets")
+                .join("tilemaps")
+                .join("stage.png"),
+        );
+        fs::write(
+            project_dir.join("assets").join("audio").join("jump.brr"),
+            b"BRRretro",
+        )
+        .expect("write SNES no-code sfx");
+
+        let graph = serde_json::json!({
+            "version": 1,
+            "nodes": [
+                { "id": "start", "type": "event_start", "label": "Start", "x": 0, "y": 0, "params": {} },
+                { "id": "spawn_enemy", "type": "spawn_entity", "label": "Spawn Enemy", "x": 160, "y": 0, "params": { "prefab": "enemy", "x": 184, "y": 96 } },
+                { "id": "paint_floor", "type": "set_tile", "label": "Set Tile", "x": 320, "y": 0, "params": { "layer": "BG_A", "tile": 8, "x": 4, "y": 13 } },
+                { "id": "update_command", "type": "event_update", "label": "Update Command", "x": 0, "y": 80, "params": {} },
+                { "id": "hadouken", "type": "input_command", "label": "Command", "x": 160, "y": 80, "params": { "command_id": "hadouken", "display_name": "Hadouken", "notation": "_2, _3, _6, _P", "max_frames": 20, "pad": "JOY_1", "button_profile": "snes", "target": "player" } },
+                { "id": "attack_anim", "type": "set_animation_state", "label": "Attack Animation", "x": 320, "y": 80, "params": { "target": "player", "state": "run" } },
+                { "id": "update", "type": "event_update", "label": "Update", "x": 0, "y": 180, "params": {} },
+                { "id": "right", "type": "input_held", "label": "Right Held", "x": 160, "y": 180, "params": { "pad": "JOY_1", "button": "BUTTON_RIGHT" } },
+                { "id": "velocity", "type": "set_velocity", "label": "Set Velocity", "x": 320, "y": 180, "params": { "target": "player", "vx": 2, "vy": 0 } },
+                { "id": "move", "type": "sprite_move", "label": "Move Entity", "x": 480, "y": 180, "params": { "target": "player", "dx": 2, "dy": 0 } },
+                { "id": "position", "type": "set_position", "label": "Set Position", "x": 640, "y": 180, "params": { "target": "player", "x": 72, "y": 96 } },
+                { "id": "run_anim", "type": "set_animation_state", "label": "Run Animation", "x": 800, "y": 180, "params": { "target": "player", "state": "run" } },
+                { "id": "scroll_bg", "type": "scroll_tilemap", "label": "Scroll BG", "x": 960, "y": 180, "params": { "layer": "BG_A", "dx": 1, "dy": 0 } },
+                { "id": "camera_move", "type": "move_camera", "label": "Move Camera", "x": 1120, "y": 180, "params": { "target": "player", "x": -120, "y": -80 } },
+                { "id": "budget", "type": "hardware_budget_check", "label": "Budget", "x": 1280, "y": 180, "params": { "vram_kb": 64, "sprites": 128, "scanline_sprites": 32 } },
+                { "id": "overlap", "type": "condition_overlap", "label": "On Collision", "x": 1440, "y": 180, "params": { "a": "player", "b": "enemy" } },
+                { "id": "hit_state", "type": "var_set", "label": "Set State", "x": 1600, "y": 180, "params": { "var_name": "encounter_state", "value": 1 } },
+                { "id": "update_fire", "type": "event_update", "label": "Update Fire", "x": 0, "y": 320, "params": {} },
+                { "id": "fire", "type": "input_pressed", "label": "Fire", "x": 160, "y": 320, "params": { "pad": "JOY_1", "button": "BUTTON_A" } },
+                { "id": "jump_sfx", "type": "action_sound", "label": "Jump SFX", "x": 320, "y": 320, "params": { "sfx": "jump" } },
+                { "id": "idle", "type": "fsm_state", "label": "Idle", "x": 0, "y": 480, "params": { "state_name": "idle", "initial": 1 } },
+                { "id": "run", "type": "fsm_state", "label": "Run", "x": 240, "y": 480, "params": { "state_name": "run", "initial": 0 } },
+                { "id": "speed", "type": "var_get", "label": "Speed", "x": 80, "y": 620, "params": { "var_name": "speed" } },
+                { "id": "idle_to_run", "type": "fsm_transition", "label": "Go Run", "x": 120, "y": 480, "params": { "target_state": "run" } },
+                { "id": "run_to_idle", "type": "fsm_transition", "label": "Go Idle", "x": 360, "y": 480, "params": { "target_state": "idle" } },
+                { "id": "fsm_move", "type": "sprite_move", "label": "FSM Move", "x": 480, "y": 480, "params": { "target": "player", "dx": 1, "dy": 0 } }
+            ],
+            "edges": [
+                { "id": "s1", "fromNode": "start", "fromPort": "exec", "toNode": "spawn_enemy", "toPort": "exec" },
+                { "id": "s2", "fromNode": "spawn_enemy", "fromPort": "exec", "toNode": "paint_floor", "toPort": "exec" },
+                { "id": "c1", "fromNode": "update_command", "fromPort": "exec", "toNode": "hadouken", "toPort": "exec" },
+                { "id": "c2", "fromNode": "hadouken", "fromPort": "true", "toNode": "attack_anim", "toPort": "exec" },
+                { "id": "u1", "fromNode": "update", "fromPort": "exec", "toNode": "right", "toPort": "exec" },
+                { "id": "u2", "fromNode": "right", "fromPort": "true", "toNode": "velocity", "toPort": "exec" },
+                { "id": "u3", "fromNode": "velocity", "fromPort": "exec", "toNode": "move", "toPort": "exec" },
+                { "id": "u4", "fromNode": "move", "fromPort": "exec", "toNode": "position", "toPort": "exec" },
+                { "id": "u5", "fromNode": "position", "fromPort": "exec", "toNode": "run_anim", "toPort": "exec" },
+                { "id": "u6", "fromNode": "run_anim", "fromPort": "exec", "toNode": "scroll_bg", "toPort": "exec" },
+                { "id": "u7", "fromNode": "scroll_bg", "fromPort": "exec", "toNode": "camera_move", "toPort": "exec" },
+                { "id": "u8", "fromNode": "camera_move", "fromPort": "exec", "toNode": "budget", "toPort": "exec" },
+                { "id": "u9", "fromNode": "budget", "fromPort": "ok", "toNode": "overlap", "toPort": "exec" },
+                { "id": "u10", "fromNode": "overlap", "fromPort": "true", "toNode": "hit_state", "toPort": "exec" },
+                { "id": "f1", "fromNode": "update_fire", "fromPort": "exec", "toNode": "fire", "toPort": "exec" },
+                { "id": "f2", "fromNode": "fire", "fromPort": "true", "toNode": "jump_sfx", "toPort": "exec" },
+                { "id": "fsm1", "fromNode": "idle", "fromPort": "transitions", "toNode": "idle_to_run", "toPort": "exec" },
+                { "id": "fsm2", "fromNode": "speed", "fromPort": "value", "toNode": "idle_to_run", "toPort": "condition" },
+                { "id": "fsm3", "fromNode": "run", "fromPort": "exec", "toNode": "fsm_move", "toPort": "exec" },
+                { "id": "fsm4", "fromNode": "run", "fromPort": "transitions", "toNode": "run_to_idle", "toPort": "exec" },
+                { "id": "fsm5", "fromNode": "speed", "fromPort": "value", "toNode": "run_to_idle", "toPort": "condition" }
+            ]
+        });
+        let scene = serde_json::json!({
+            "scene_id": "main",
+            "schema_version": "1.6.0",
+            "display_name": "Persistent No-Code SNES Game",
+            "background_layers": [],
+            "entities": [
+                {
+                    "entity_id": "world",
+                    "prefab": null,
+                    "transform": { "x": 0, "y": 0 },
+                    "components": {
+                        "sprite": null,
+                        "collision": null,
+                        "input": null,
+                        "physics": null,
+                        "audio": null,
+                        "logic": null,
+                        "camera": null,
+                        "tilemap": {
+                            "tileset": "assets/tilemaps/stage.png",
+                            "map_width": 32,
+                            "map_height": 32,
+                            "scroll_x": 0,
+                            "scroll_y": 0
+                        }
+                    }
+                },
+                {
+                    "entity_id": "player",
+                    "prefab": null,
+                    "transform": { "x": 40, "y": 96 },
+                    "components": {
+                        "sprite": {
+                            "asset": "assets/sprites/player.png",
+                            "frame_width": 16,
+                            "frame_height": 16,
+                            "pivot": null,
+                            "palette_slot": 0,
+                            "animations": {
+                                "idle": { "frames": [0], "fps": 6, "loop": true },
+                                "run": { "frames": [1, 2, 3], "fps": 12, "loop": true }
+                            },
+                            "priority": "foreground",
+                            "meta_sprite": false,
+                            "commands": [
+                                {
+                                    "id": "hadouken",
+                                    "display_name": "Hadouken",
+                                    "notation": "_2, _3, _6, _P",
+                                    "source": "local-command.dat",
+                                    "target_animation": "run",
+                                    "max_frames": 20,
+                                    "button_profile": "snes",
+                                    "unsupported_tokens": [],
+                                    "steps": [
+                                        { "tokens": ["_2"], "display": ["down"] },
+                                        { "tokens": ["_3"], "display": ["down-forward"] },
+                                        { "tokens": ["_6"], "display": ["forward"] },
+                                        { "tokens": ["_P"], "display": ["Y"] }
+                                    ]
+                                }
+                            ]
+                        },
+                        "collision": { "shape": "aabb", "width": 16, "height": 16, "offset": null, "solid": true, "layer": "player", "collides_with": ["enemy"] },
+                        "input": { "device": "joypad_1", "mapping": {} },
+                        "physics": null,
+                        "audio": null,
+                        "logic": {
+                            "graph": graph.to_string(),
+                            "variables": {
+                                "encounter_state": { "type": "int", "default": 0, "min": 0, "max": 1 },
+                                "speed": { "type": "int", "default": 1, "min": 0, "max": 4 }
+                            }
+                        },
+                        "camera": null,
+                        "tilemap": null
+                    }
+                },
+                {
+                    "entity_id": "enemy",
+                    "prefab": null,
+                    "transform": { "x": 184, "y": 96 },
+                    "components": {
+                        "sprite": {
+                            "asset": "assets/sprites/enemy.png",
+                            "frame_width": 16,
+                            "frame_height": 16,
+                            "pivot": null,
+                            "palette_slot": 1,
+                            "animations": {
+                                "idle": { "frames": [0], "fps": 6, "loop": true },
+                                "run": { "frames": [1, 2, 3], "fps": 12, "loop": true }
+                            },
+                            "priority": "foreground",
+                            "meta_sprite": false
+                        },
+                        "collision": { "shape": "aabb", "width": 16, "height": 16, "offset": null, "solid": true, "layer": "enemy", "collides_with": ["player"] },
+                        "input": null,
+                        "physics": null,
+                        "audio": null,
+                        "logic": null,
+                        "camera": null,
+                        "tilemap": null
+                    }
+                },
+                {
+                    "entity_id": "audio_driver",
+                    "prefab": null,
+                    "transform": { "x": 0, "y": 0 },
+                    "components": {
+                        "sprite": null,
+                        "collision": null,
+                        "input": null,
+                        "physics": null,
+                        "audio": {
+                            "sfx": { "jump": "assets/audio/jump.brr" },
+                            "bgm": null
+                        },
+                        "logic": null,
+                        "camera": null,
+                        "tilemap": null
+                    }
+                }
+            ],
+            "palettes": [],
+            "retrofx": null,
+            "collision_map": null,
+            "layers": null
+        });
+        fs::write(
+            project_dir.join("scenes").join("main.json"),
+            serde_json::to_string_pretty(&scene).expect("serialize SNES no-code scene"),
+        )
+        .expect("write persistent SNES no-code scene");
     }
 
     fn write_platformer_donor_fixture(dir: &Path, with_jump: bool) {
@@ -4568,6 +4807,233 @@ pub extern "C" fn retro_run() {
             ),
         )
         .expect("write real no-code Markdown report");
+    }
+
+    #[test]
+    #[ignore = "Requires official PVSnesLib, Git Bash/MSYS2 and a real Libretro SNES core; writes persistent validation artifacts"]
+    fn official_snes_nocode_game_builds_and_runs_with_real_toolchain() {
+        if !cfg!(target_os = "windows") {
+            panic!(
+                "official_snes_nocode_game_builds_and_runs_with_real_toolchain requires Windows"
+            );
+        }
+
+        let _serial = test_serial_guard();
+
+        for dependency_id in ["pvsneslib", "libretro_snes"] {
+            eprintln!("[snes-real] ensuring dependency '{}'", dependency_id);
+            let result = install_dependency(dependency_id, |line| {
+                eprintln!(
+                    "[snes-real][dependency:{}][{}] {}",
+                    dependency_id, line.level, line.message
+                );
+            });
+            assert!(
+                result.ok,
+                "failed to install {} for real no-code SNES proof: {}",
+                dependency_id, result.message
+            );
+        }
+
+        let status_report = dependency_status_report();
+        for dependency_id in ["pvsneslib", "libretro_snes"] {
+            let item = status_report
+                .items
+                .iter()
+                .find(|item| item.id == dependency_id)
+                .unwrap_or_else(|| panic!("missing dependency status for {}", dependency_id));
+            assert!(
+                item.installed,
+                "dependency {} still not installed for real SNES proof: {:?}",
+                dependency_id, item.issues
+            );
+        }
+
+        let artifact_root = validation_artifact_dir("snes-real-nocode-game");
+        let project_dir = artifact_root.join("project");
+        let _ = fs::remove_dir_all(&artifact_root);
+        fs::create_dir_all(&artifact_root).expect("create SNES validation artifact root");
+        create_project_skeleton(&project_dir, "Real No-Code SNES Game", "snes")
+            .expect("create persistent no-code SNES project");
+        install_persistent_nocode_snes_game(&project_dir);
+
+        let build_log_lines = std::cell::RefCell::new(Vec::new());
+        let first = run_build(&project_dir, |line| {
+            build_log_lines
+                .borrow_mut()
+                .push(format!("[{}] {}", line.level, line.message));
+            eprintln!("[snes-real][build][{}] {}", line.level, line.message);
+        });
+        assert!(first.ok, "real SNES build failed: {:?}", first.log);
+        assert!(
+            !first.rom_path.is_empty(),
+            "real SNES build did not report a ROM path"
+        );
+
+        let main_c_path = project_dir
+            .join("build")
+            .join("snes")
+            .join("src")
+            .join("main.c");
+        let data_asm_path = project_dir.join("build").join("snes").join("data.asm");
+        let hdr_asm_path = project_dir.join("build").join("snes").join("hdr.asm");
+        let makefile_path = project_dir.join("build").join("snes").join("Makefile");
+        let main_c = fs::read_to_string(&main_c_path).expect("read generated SNES main.c");
+        let data_asm = fs::read_to_string(&data_asm_path).expect("read generated SNES data.asm");
+        let makefile = fs::read_to_string(&makefile_path).expect("read generated SNES Makefile");
+        assert!(
+            hdr_asm_path.is_file(),
+            "SNES hdr.asm must be staged at workspace root"
+        );
+        assert!(main_c.contains("padsCurrent(0)"));
+        assert!(main_c.contains("rds_input_match_command"));
+        assert!(main_c.contains("oamSet(0, spr_player_x, spr_player_y"));
+        assert!(main_c.contains("bgInitTileSet(0, &world_tilemap_til"));
+        assert!(data_asm.contains(".include \"hdr.asm\""));
+        assert!(data_asm.contains(".include \"src/player_data.as\""));
+        assert!(data_asm.contains("world_tilemap_pal:"));
+        assert!(makefile.contains("$(GFXCONV)"));
+
+        let second = run_build(&project_dir, |_| {});
+        assert!(second.ok, "second real SNES build failed: {:?}", second.log);
+        let second_main_c = fs::read_to_string(&main_c_path).expect("read regenerated SNES main.c");
+        assert_eq!(
+            main_c, second_main_c,
+            "real no-code SNES C must be deterministic"
+        );
+
+        let rom_path = {
+            let path = PathBuf::from(&second.rom_path);
+            if path.is_absolute() {
+                path
+            } else {
+                project_dir.join(path)
+            }
+        };
+        let rom_bytes = fs::read(&rom_path).expect("read real no-code SNES ROM");
+        assert!(
+            rom_bytes.len() > 1024,
+            "real SNES ROM should not be a fake tiny artifact"
+        );
+        let persistent_rom_path = artifact_root.join("real-nocode-game.sfc");
+        fs::copy(&rom_path, &persistent_rom_path).expect("copy persistent real SNES ROM");
+
+        let mut emulator = EmulatorCore::new(None);
+        emulator
+            .load_rom(&persistent_rom_path)
+            .unwrap_or_else(|error| panic!("failed to load real SNES ROM: {}", error));
+        emulator
+            .set_joypad(JoypadState {
+                right: true,
+                ..JoypadState::default()
+            })
+            .expect("set SNES no-code joypad input");
+        for _ in 0..90 {
+            emulator
+                .run_frame()
+                .unwrap_or_else(|error| panic!("failed to run real SNES frame: {}", error));
+        }
+        let core_label = emulator
+            .loaded_core_label()
+            .unwrap_or("unknown-libretro-core")
+            .to_string();
+        let (framebuffer, size, pixel_format) = emulator
+            .get_framebuffer()
+            .unwrap_or_else(|error| panic!("failed to capture real SNES framebuffer: {}", error));
+        let frame = framebuffer_to_rgba(&framebuffer, size, pixel_format);
+        let non_black_pixels = frame
+            .rgba
+            .chunks_exact(4)
+            .filter(|px| px[0] != 0 || px[1] != 0 || px[2] != 0)
+            .count();
+        assert!(
+            non_black_pixels > 0,
+            "real SNES framebuffer should not be fully black"
+        );
+        let framebuffer_path = artifact_root.join("real-nocode-frame.ppm");
+        write_framebuffer_ppm(&framebuffer_path, &frame);
+        emulator.stop().expect("stop real SNES emulator");
+
+        let build_log_path = artifact_root.join("real-nocode-build.log");
+        fs::write(&build_log_path, build_log_lines.borrow().join("\n"))
+            .expect("write real SNES build log");
+        let emulation_log_path = artifact_root.join("real-nocode-emulation.log");
+        fs::write(
+            &emulation_log_path,
+            format!(
+                "core={}\nframes_run=90\nframebuffer={}x{}\nnon_black_pixels={}\nrom={}\n",
+                core_label,
+                frame.width,
+                frame.height,
+                non_black_pixels,
+                persistent_rom_path.display()
+            ),
+        )
+        .expect("write real SNES emulation log");
+
+        #[derive(serde::Serialize)]
+        struct RealSnesNoCodeReport {
+            project_path: String,
+            generated_main_c: String,
+            generated_data_asm: String,
+            generated_hdr_asm: String,
+            build_log: String,
+            rom_path: String,
+            emulation_log: String,
+            framebuffer_ppm: String,
+            libretro_core: String,
+            frames_run: u32,
+            framebuffer_width: u32,
+            framebuffer_height: u32,
+            non_black_pixels: usize,
+            rom_size_bytes: usize,
+            generated_from_nodes: bool,
+            manual_code_edits: bool,
+            fake_toolchain_used: bool,
+            deterministic_main_c: bool,
+        }
+
+        let report = RealSnesNoCodeReport {
+            project_path: project_dir.to_string_lossy().to_string(),
+            generated_main_c: main_c_path.to_string_lossy().to_string(),
+            generated_data_asm: data_asm_path.to_string_lossy().to_string(),
+            generated_hdr_asm: hdr_asm_path.to_string_lossy().to_string(),
+            build_log: build_log_path.to_string_lossy().to_string(),
+            rom_path: persistent_rom_path.to_string_lossy().to_string(),
+            emulation_log: emulation_log_path.to_string_lossy().to_string(),
+            framebuffer_ppm: framebuffer_path.to_string_lossy().to_string(),
+            libretro_core: core_label,
+            frames_run: 90,
+            framebuffer_width: frame.width,
+            framebuffer_height: frame.height,
+            non_black_pixels,
+            rom_size_bytes: rom_bytes.len(),
+            generated_from_nodes: true,
+            manual_code_edits: false,
+            fake_toolchain_used: false,
+            deterministic_main_c: true,
+        };
+        let report_json_path = artifact_root.join("real-nocode-report.json");
+        let report_md_path = artifact_root.join("real-nocode-report.md");
+        let report_json = serde_json::to_string_pretty(&report).expect("serialize SNES report");
+        fs::write(&report_json_path, format!("{report_json}\n"))
+            .expect("write real SNES JSON report");
+        fs::write(
+            &report_md_path,
+            format!(
+                "# Real No-Code SNES Game\n\n- Project: `{}`\n- Generated C: `{}`\n- Data ASM: `{}`\n- Header ASM: `{}`\n- ROM: `{}`\n- Core: `{}`\n- Frames run: `90`\n- Framebuffer: `{}x{}`\n- Non-black pixels: `{}`\n- Fake toolchain used: `false`\n- Manual code edits: `false`\n",
+                project_dir.display(),
+                main_c_path.display(),
+                data_asm_path.display(),
+                hdr_asm_path.display(),
+                persistent_rom_path.display(),
+                report.libretro_core,
+                frame.width,
+                frame.height,
+                non_black_pixels
+            ),
+        )
+        .expect("write real SNES Markdown report");
     }
 
     #[test]
