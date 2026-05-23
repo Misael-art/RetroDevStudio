@@ -1,13 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
 **Ultima Atualizacao:** 2026-05-22 (integracao full-product-cohesion)
-* **Integrado (artstudio M):** slots canonicos seq_idle..seq_attack, pplyToScene E2E, vitest threads, mockReset nos testes.
-**Ultima Atualizacao:** 2026-05-20 (rodada 51 - SNES no-code parity hardening)
-**Ultima Atualizacao:** 2026-05-20 (rodada 48 - GameMaker YY/GML subset experimental)
-**Ultima Atualizacao:** 2026-05-20 (rodada 51 - MUGEN/Ikemen fighting subset Experimental)
-**Ultima Atualizacao:** 2026-05-20 (rodada 51 - OpenBOR beat'em up subset)
-**Ultima Atualizacao:** 2026-05-20 (rodada 49 - SGDK Logic Extractor v1)
-**Ultima Atualizacao:** 2026-05-20 (rodada 49 - SGDK semantic NodeGraph bridge/codegen)
-**Ultima Atualizacao:** 2026-05-20 (rodada 49 - SGDK Logic truth UX/QA)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -28,11 +20,13 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
-* **O que acabou de acontecer (2026-05-22 - integracao `codex/full-product-cohesion-integration`, blocos 1-4):**
-  - **Consolidados ate aqui:** `project-cohesion-full-build`, `product-ui-workspace-redesign`, `ui-layout-visual-oracle-k` e `actionable-diagnostics-l` (merge em andamento).
-  - **UI oracle (`codex/ui-layout-visual-oracle-k`):** `scripts/ui-layout-oracle.mjs` + bloco H com 32 checks (`1366/1600/1920/2560` x 8 alvos), screenshots `H-ui-oracle-*`, `ui-layout-oracle.json`.
-  - **Diagnosticos acionaveis (`codex/actionable-diagnostics-l`):** `ActionableDiagnostic` em Rust/TS, `build_orch.rs` com diagnosticos, Console drawer com filtros/Details/copia/link, cenario `test:e2e:desktop:build-blocked-diagnostic`.
-  - **Proximo passo imediato:** concluir merges 5-13, resolver conflitos centrais sem perder entregas, rodar gates finais e abrir PR.
+* **O que acabou de acontecer (2026-05-22 - integracao `codex/full-product-cohesion-integration`, HEAD `ee5618f`):**
+  - **13 branches integradas** na ordem pedida: `project-cohesion-full-build`, `product-ui-workspace-redesign`, `ui-layout-visual-oracle-k`, `actionable-diagnostics-l`, `clean-machine-runtime-setup-j`, `artstudio-production-vertical-m`, `snes-pvsneslib-parity-g`, `gamemaker-modern-gml-runtime-d`, `mugen-ikemen-fighting-import-f`, `openbor-beatemup-import-h`, `sgdk-real-proof-integration`, `sgdk-semantic-nodegraph-delivery`, `sgdk-logic-truth-product-qa`.
+  - **Correcoes pos-merge:** marcadores `<<<<<<<` removidos; `App.tsx` unifica `workspaceLayout` + `sgdkLogicDiagnostics` + guia excluindo Art/RetroFX; `NodeGraphEditor.tsx` da trilha logic-truth; `build_orch.rs`/`project_mgr.rs` com campos merge faltantes; Vitest `pool=forks` + `maxWorkers=1`; emulador volta a logar Runtime Setup no console.
+  - **Gates verdes locais:** `check:tree`, `lint`, `tsc`, `npm test` **350/350**, `cargo clippy`, `cargo test --lib` **382 passed / 22 ignored**, `build:debug`, `build:portable`, `build:msi`, `git diff --check`.
+  - **Gates pendentes no host:** `preflight:sgdk-e2e` (falta `msedgedriver` canonico), `validate-upstream-windows.ps1 -SkipRustTests` (SGDK nao em `toolchains/sgdk/` neste host), `test:e2e:desktop:qa-rc` (nao rerodado — depende de WebDriver + build fresco).
+  - **Excluida:** Godot (fora do escopo / sem branch verde).
+  - **Proximo passo imediato:** PR/compare, CI remoto no SHA `ee5618f`, rerodar QA RC + upstream com SGDK/WebDriver oficiais no runner ou host preparado; **nao** rodar `release:readiness:promotion` fora de `main`.
 
 * **O que acabou de acontecer (2026-05-21 rodada 51 - branch `codex/ui-layout-visual-oracle-k`):**
   - **Bloco H virou gate visual reutilizavel:** `scripts/ui-layout-oracle.mjs` centraliza resolucoes/alvos e avaliacao DOM/BoundingClientRect; `scripts/e2e-tauri-build-run.mjs` coleta snapshots reais da janela Tauri, salva screenshots com prefixo `H-ui-oracle-*` e escreve `src-tauri/target-test/validation/ui-layout-oracle.json`.
@@ -43,30 +37,6 @@
   - **Diagnostico comum:** contrato `ActionableDiagnostic` em Rust/TypeScript; build/import/runtime/emulacao com mensagens acionaveis.
   - **E2E negativo:** `test:e2e:desktop:build-blocked-diagnostic` valida asset ausente, Details, copia e link de evidencia.
   - **Gates locais:** `npm test` **326/326**, `cargo test --lib` **349 passed / 17 ignored**, QA RC A-H e build-blocked-diagnostic verdes.
-* **Integrado (artstudio M):** slots canonicos seq_idle..seq_attack, pplyToScene E2E, vitest threads, mockReset nos testes.
-* **O que acabou de acontecer (2026-05-20 rodada 51 - branch `codex/snes-pvsneslib-parity-g`):**
-  - **Vertical SNES no-code:** o pipeline PVSnesLib agora cobre staging real (`hdr.asm`, `data.asm`, sprites, palettes, tilemaps e alvos `gfx4snes` quando aplicavel), codegen SNES para input (`input_pressed`, `input_held`, `input_command`), movimento/posicao/velocidade, animacao, scroll/camera, audio seguro, FSM, timer e variaveis, alem de budgets SNES corretos na UI.
-  - **Runtime real:** o harness persistente `official_snes_nocode_game_builds_and_runs_with_real_toolchain --ignored` criou projeto SNES, gerou C/ASM PVSnesLib sem edicao manual, compilou ROM real e rodou Libretro SNES exigindo framebuffer visivel.
-  - **Evidencias:** report em `src-tauri/target-test/validation/snes-real-nocode-game/real-nocode-report.{json,md}`; ROM `real-nocode-game.sfc` com **262144 bytes**; core `Snes9x 1.63 5a40cd5`; framebuffer **256x224**; `non_black_pixels=39184`; `fake_toolchain_used=false`; `manual_code_edits=false`; `generated_from_nodes=true`.
-  - **Windows/toolchain:** builds SNES/PVSnesLib no Windows passam a exigir Git Bash/MSYS2 real; shim WSL nao e aceito como shell suportado.
-  - **Gates locais:** suite SNES focada, `npx vitest run src/core/nodegraph/nodeCompiler.test.ts`, `npm run preflight:sgdk-e2e`, `validate-upstream-windows.ps1 -SkipRustTests`, `npm run build:debug`, `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo clippy`, `cargo test --lib` e `git diff --check`.
-  - **Status honesto:** SNES esta em **hardening/paridade do subset no-code** com Mega Drive para a vertical validada; isto **nao** declara SNES Stable amplo, nao mexe em importadores externos e nao antecipa fases futuras.
-  - **Proximo passo imediato:** abrir PR/checks remotos desta branch e manter qualquer nova expansao SNES condicionada a repetir ROM real + Libretro visivel + report `fake_toolchain_used=false`.
-* **O que acabou de acontecer (2026-05-20 rodada 51 - branch `codex/mugen-ikemen-fighting-import-f`):**
-  - **MUGEN/Ikemen-GO Experimental endurecido:** o adapter MUGEN agora coleta `.cmd`, `.cns`, `.st`, `stcommon`/`st*` a partir do `.def`, mantendo o fluxo Project Manager/UGDM e preservando `source_engine` quando a entrada vem pelo perfil `ikemen_go`.
-  - **Nodes editaveis de luta 2D:** CMD gera `SpriteComponent.commands` e nodes `input_command`; CNS/ST geram `fsm_state`, `fsm_transition` para `ChangeState`, `set_velocity` para `VelSet`/`VelAdd`, `set_position` para `PosSet`/`PosAdd`, `action_sound` para `PlaySnd`; AIR continua materializando animacoes e agora a fixture prova `CLSN1/CLSN2` em frames de ataque.
-  - **Bridges explicitas, sem perda silenciosa:** `HitDef` fica como `bridge_unconverted_source` com gap `mugen_hitdef`; controllers nao suportados/IKEMEN extensions, como `AssertSpecial`, ficam como bridge `mugen_unsupported_controller`. Isto evita claim falsa de compatibilidade total e deixa o que falta editavel/auditavel.
-  - **Stages/screenpacks:** backgrounds importados ganham `TilemapComponent`, `background_layers.scroll_speed` e `retrofx.parallax_layers` a partir de `delta`, preservando parallax basico e assets visuais.
-  - **Harness/fixtures:** a fixture BYOR-safe cobre idle, walk, jump, punch, comando estilo hadouken, hitbox/hurtbox, audio, velocidade/posicao e extensao Ikemen preservada como bridge. O teste ignorado de samples procura roots locais/repo quando existirem, pulando apenas roots Ikemen nao robustos.
-  - **Gates executados:** `check:tree`, `lint`, `tsc --noEmit`, `npm test` **322/322**, `cargo test --lib mugen`, `cargo test --lib ikemen`, `cargo test --lib import_mugen_project_supports_repo_sample_roots_when_present -- --ignored`, `cargo clippy -D warnings` e `cargo test --lib --test-threads=1` **351 passed / 17 ignored**. Os roots Ikemen locais encontrados nao eram samples robustos e ficaram como skip explicito.
-  - **Status honesto:** MUGEN e Ikemen-GO seguem **Experimental/importaveis**. O subset funcional aumenta a superficie real, mas nao declara paridade MUGEN/Ikemen completa; build ROM/Libretro so conta quando o grafo importado cair no subset de nodes/SGDK suportado.
-* **O que acabou de acontecer (2026-05-20 rodada 51 - branch `codex/openbor-beatemup-import-h`):**
-  - **OpenBOR Experimental/subset funcional:** `import_openbor_project` deixou de ser smoke local simples e passou a ler `models.txt`, `levels.txt`, character model files e level files, cobrindo comandos comuns `anim`, `offset`, `bbox`, `attack`, `delay`, `loop`, `jumpframe`, `landframe`, `spawn`, `at`, `music`, `panel`, `background` e scroll.
-  - **Autoria beat'em up auditavel:** anim blocks viram `SpriteComponent.animations`; `bbox`/`attack` viram collision metadata e `mugen_frames` auditaveis; `spawn`/`at` viram timeline `spawn_entity`; atores recebem nodes `set_velocity`, `set_animation_state`, input/attack/jump, camera follow e collision layers `player`/`enemy`; stage controller recebe `timeline_sequence`, `scroll_tilemap`, `move_camera` e bridges visiveis para scripts OpenBOR nao suportados.
-  - **Harness OpenBOR:** `run_openbor_compatibility_harness` cria projeto canonico, importa OpenBOR, conta sprites/stages/nodes/bridges, gera build SGDK, copia ROM, roda Libretro e grava report. A fixture BYOR-safe ignorada passou com SGDK/JDK/Libretro oficiais apontados explicitamente: `sgdk=ok`, `rom=ok_sega_header`, `emu=ok:Genesis Plus GX v1.7.4 46a5521:90frames`, `non_black_pixels=28407`, `fake=false`.
-  - **Cobertura:** novos testes provam anim -> animation, bbox/attack -> collision/hitbox metadata, level spawn/music/background -> nodes/bridge, unsupported script -> bridge, reimport idempotente e host-local ignored que pula honestamente quando nao ha sample extraido com manifests.
-  - **Gates locais:** `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test` **322/322**, `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`, `cargo test --manifest-path src-tauri/Cargo.toml --lib openbor -- --nocapture --test-threads=1` **8 passed / 3 ignored**, `cargo test --manifest-path src-tauri/Cargo.toml --lib smoke_import_openbor_project_builds_scene_and_is_idempotent -- --nocapture --test-threads=1`, `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` **350 passed / 20 ignored**. Host-local OpenBOR ignored executado e pulou por ausencia de manifests em `F:\Projects\Engine Template`.
-  - **Status honesto:** OpenBOR continua **Experimental**. O subset e funcional para beat'em up vertical autoravel, mas nao declara compatibilidade total de dialetos OpenBOR nem promocao Stable; falta corpus OpenBOR real/BYOR institucional e repeticao de QA manual ampla.
 
 * **O que acabou de acontecer (2026-05-20 rodada 50 - branch `codex/product-ui-workspace-redesign`):**
   - **Bloco H (QA RC):** `assertUiLayoutHealth()` no `scripts/e2e-tauri-build-run.mjs` valida topbar (overflow, colunas, botao Build compacto), painel central, guia, paineis laterais por workspace, console drawer vs status bar, NodeGraph side rail vs canvas/minimap/toolbar, e sobreposicao de botoes com limiar conservador.
@@ -86,30 +56,6 @@
   - **Testes:** `workspaceLayout.test.ts` + regressoes em `App.test.tsx` (guia compacto, ArtStudio sem inspector global, game playtest).
   - **Gates locais:** `check:tree`, `lint`, `tsc`, `npm test` **322/322**, `cargo clippy`, `cargo test --lib` **347/17 ignored**, `preflight:sgdk-e2e`, `test:e2e:desktop:qa-rc` A-G (`qa-rc-2026-05-19T21-06-34-338Z-*`), `build:debug`.
   - **Status honesto:** UI production hardening **NAO** fechado — falta polimento profundo de Scene/NodeGraph/Debug, capturas em 1366/1920/2560 e QA RC fresco. SGDK Stable **sem promocao**; Node Engine **sem promocao**; superficies Experimentais inalteradas.
-* **O que acabou de acontecer (2026-05-20 rodada 49 - branch `codex/sgdk-real-proof-integration`):**
-  - **Worktree isolado:** trabalho feito em `F:\Projects\RetroDevStudio-sgdk-real-proof`, baseado em `origin/codex/project-cohesion-full-build`; branches dos agentes SGDK/nodes A/B/C nao foram tocadas.
-  - **SGDK Logic Extractor v1:** `src-tauri/src/core/sgdk_corpus_inventory.rs` agora preenche `canonical_model.logic_systems` com modelo serializavel de funcoes, chamadas, FSMs, estados, transicoes, condicoes, acoes SGDK/input/movimento, refs de entidades/pools, source mappings, semantic gaps/bridges e confidence.
-  - **Conversao honesta:** enum e `#define STATE_*`/`PLAYER_*`/`GAME_*`/`SCENE_*`, variaveis `gameState`/`playerState`/`currentState`/`state`/`mode`/`scene`/`phase`, `switch`/`case`, `if (state == X)`, `state = X`, `JOY_readJoypad`/`BUTTON_*`, acoes `SPR_*`, `VDP_*`, `MAP_*`, `XGM_*`, main loop/vblank, movimento `x +=`/`velX` e pools `enemy[i]`/`MAX_ENEMIES` entram como semantica convertivel quando simples. Macros complexas, preprocessor ambiguo, assembly, callbacks indiretos, encoding lossy e expressoes C complexas continuam bridge formal com mapping e gap acionavel.
-  - **Relatorio vertical host-local:** `cargo test ... sgdk_logic_real_corpus_vertical_reports --ignored` gerou `src-tauri/target-test/validation/sgdk-logic-extractor-v1/{platformer_2,nexzr_md,blaze_engine}.{json,md}`. Resultados: Platformer 2 `FSMs=0/states=1/transitions=0/actions=49/bridges=9/blocking_gaps=0`; NEXZR MD `FSMs=1/states=220/transitions=1/actions=92/bridges=465/blocking_gaps=0`; BLAZE_ENGINE `FSMs=2/states=3/transitions=2/actions=591/bridges=10/blocking_gaps=0`.
-  - **Gates verdes:** `npm run check:tree`; `npm run lint`; `npx tsc --noEmit`; `npm test` **315/315**; `cargo test --lib sgdk_logic` **7/1 ignored**; `sgdk_logic_real_corpus_vertical_reports --ignored` **1/1**; `sgdk_corpus_inventory` **11/2 ignored**; `sgdk_corpus_inventory_real_corpus_report --ignored` **122 projetos**; `sgdk_matrix_corpus_ --ignored` **7/7** com `SGDK_ROOT=F:\Projects\MegaDrive_DEV\sdk\sgdk-2.11` e `RETRODEV_LIBRETRO_CORE_MEGADRIVE=F:\Projects\RetroDevStudio\toolchains\libretro\cores\genesis_plus_gx_libretro.dll`; `cargo clippy -D warnings`; `cargo test --lib` **354/18 ignored**.
-  - **Status honesto:** esta fatia nao mexe na UI principal nem no NodeGraph visual e nao declara nova promocao Stable. Ela entrega a camada semantica SGDK -> modelo intermediario que o gerador de nodes pode consumir, preservando como bridge tudo que o v1 ainda nao converte com confianca.
-* **O que acabou de acontecer (2026-05-20 rodada 49 - branch `codex/sgdk-semantic-nodegraph-delivery`):**
-  - **Worktree isolado:** trabalho feito em `F:\Projects\RetroDevStudio-sgdk-semantic-nodegraph`, criado a partir de `origin/codex/project-cohesion-full-build` porque `origin/main` ainda nao continha `command.dat`.
-  - **SGDK SemanticModel -> NodeGraph:** novo modulo `src-tauri/src/core/sgdk_semantic_graph.rs` converte `SgdkProjectInventory` em JSON de NodeGraph com grupos `Input`, `Player FSM`, `Camera`, `Animation`, `Collision`, `Audio` e `Bridges`, criando nodes reais para input, FSM states/transitions, sprite anim/pos/move, scroll, audio, timers, colisao simples e spawn/destroy quando ha subset reconhecido.
-  - **Bridges explicitas:** gaps bloqueantes viram `bridge_unconverted_source` com `source_file`, `source_line`, `source_mapping`, detalhe acionavel, `blocking` e `allow_bridge_mode=0`; codegen TS/Rust emite `#error "Source Bridge blocks codegen..."` quando o usuario tenta gerar C sem aceitar bridge/compat mode.
-  - **Cobertura focada:** `nodeCompiler.test.ts` cobre bridge bloqueante; o novo modulo Rust cobre snapshot minimo FSM IDLE/RUN/JUMP, auto-layout sem sobrepor grupos principais e round-trip JSON preservando source mapping.
-  - **Gates locais executados:** `npm run check:tree` OK; `npm run lint` OK; `npx tsc --noEmit` OK; `npx vitest run src/core/nodegraph/nodeCompiler.test.ts` OK via `--pool=vmThreads`; `npx vitest run src/components/nodegraph/NodeGraphEditor.test.tsx` OK via `--pool=vmThreads`; `npm test -- --pool=vmThreads --isolate=true` OK (**316/316**).
-  - **Bloqueio honesto:** `cargo test ... sgdk_semantic_graph`, `cargo check`, e o wrapper `scripts/run-cargo-msvc.cmd` nao retornaram diagnostico Rust utilizavel neste host durante a rodada: execucoes longas ficaram presas/saindo codigo 1 sem stderr depois de compilar dependencias pesadas e concorrencia de varios `cargo`/`rustc` em outros worktrees. Nao houve prova Rust/SGDK/Libretro completa nesta rodada, portanto SGDK/Node Engine seguem sem promocao Stable por esta branch.
-* **O que acabou de acontecer (2026-05-20 rodada 49 - branch `codex/sgdk-logic-truth-product-qa`):**
-  - **Worktree isolado:** trabalho executado em `F:\Projects\RetroDevStudio-sgdk-logic-truth-qa`, a partir de `origin/codex/project-cohesion-full-build` porque `origin/main` ainda nao continha a consolidacao GameMaker + command.dat. Branches dos agentes SGDK/nodes A/B/C nao foram editadas.
-  - **Produto mostra a verdade:** a UI deixou de depender de leitura unica tipo "SGDK suportado" e passou a expor matriz de capacidades: Assets, Build/ROM e Emulacao como `Suportado / Parcial` com detalhe de subset; Cena/entidades parcial; Logica por nodes parcial/experimental; FSM/Estados suportado no subset/experimental; Round-trip bridge/parcial; Equivalencia gameplay nao certificada sem harness especifico.
-  - **Resumo pos-import SGDK:** `OpenProjectResult.import_summary` e o card `Resumo SGDK Logic` expõem estados/transicoes detectadas, nodes gerados, bridges criadas, gaps bloqueantes e arquivos fonte mapeados. O backend agrega esses dados sem promover a Fase D: `semantic_model_kind` fica `heuristic` ate o grafo/modelo declarar FSM real.
-  - **Entidade/Inspector/Hierarchy:** entidades com logica importada mostram sinal compacto (`Logic: FSM parcial`, `Logic: Bridge`, `Logic: parcial`), `graph_ref`, source mapping, confidence, `converted_nodes_count`, `bridge_count` e diagnostico longo colapsado.
-  - **NodeGraph:** nodes importados mostram badges `Converted`, `Bridge`, `Gap` e `Source mapped`; o painel `Source Mapping` cai para source refs da entidade quando o node ainda nao trouxe linha propria; `Import Gaps` fica filtravel e cria gap bloqueante honesto quando o grafo e heuristico sem AST/FSM real. Saida do Semantic Extractor com `extraction_kind=fsm`/nodes `fsm_*` aparece como `FSM extraida`; caso contrario o aviso forte permanece `grafo heuristico`.
-  - **QA RC ampliado:** o bloco G do `scripts/e2e-tauri-build-run.mjs` agora valida import SGDK + Logic, NodeGraph visivel, nodes sem sobreposicao grosseira, Source Mapping, painel de gaps/bridges, shell principal sem overlap textual e screenshots dedicadas: `G-scene-import-summary`, `G-logic-fsm-graph`, `G-node-source-mapping`, `G-gap-bridge-panel`, alem de `G-sgdk-chain` para build/ROM/emulacao.
-  - **Evidencia fresca:** `npm run test:e2e:desktop:qa-rc` passou A-G com `manual-qa-status.json` em `2026-05-20T17:49:35.309Z` e evidencias `src-tauri/target-test/validation/qa-rc-2026-05-20T17-49-07-349Z-*`. O bloco G registrou import summary, grafo heuristico com gap bloqueante de AST/FSM ausente, source mapping `src/main.c`, gap/bridge panel e ROM `rom.bin` SEGA apos Build & Run.
-  - **Corpus e gates finais:** a barra local desta branch passou `check:tree`, `lint`, `tsc`, `npm test` **325/325**, `cargo clippy`, `cargo test --lib` **351 passed / 17 ignored**, `sgdk_matrix_corpus_ --ignored` **7/7**, `sgdk_corpus_real_build_rom_emulation_report --ignored` **122/122** processados com **68** build/ROM/emulacao visivel e **54** bridge-only, `official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --ignored`, `preflight:sgdk-e2e`, `qa-rc`, `build:debug`, `build:portable`, `build:msi` e `validate-upstream-windows.ps1 -SkipRustTests`.
-  - **Status honesto:** SGDK Build/ROM/Emulacao mantem a certificacao existente; SGDK Logic Nodes **nao** sobe para "subset funcional validado" ate A+B+C passarem integrados. Nao usar `Stable` para logica importada. `BLAZE_ENGINE` permanece compat/bridge quando necessario, sem equivalencia 1:1.
 
 * **O que acabou de acontecer (2026-05-19 rodada 48 - branch `codex/project-cohesion-full-build`):**
   - **Consolidacao:** `origin/main` (ja com GameMaker vertical via PR #8) + `origin/codex/command-dat-artstudio-node-runtime` integrados em uma unica branch coesa.
@@ -118,15 +64,6 @@
   - **Status honesto:** GameMaker e command.dat permanecem **Experimental**; SGDK/Node Engine nao recebem promocao Stable nesta consolidacao.
 
 * **O que acabou de acontecer (2026-05-19 rodada 47 - branch `codex/compatibility-harness-gamemaker-vertical`, integrado em main via PR #8):**
-* **O que acabou de acontecer (2026-05-20 rodada 48 - branch `codex/gamemaker-modern-gml-runtime-d`):**
-  - **GameMaker moderno ainda Experimental:** a frente GameMaker avancou de vertical experimental para subset amplo funcional/auditavel, mas permanece **Experimental/importavel** e nao Stable geral.
-  - **Formatos detectados:** `import_gamemaker_project` cobre `.gmx` arquivo/root, `.gmz`, `.gmez`, `.yyp` e `.yy`, preservando GMX/GMZ/GMEZ existentes e adicionando projeto moderno YY/YYP.
-  - **YY/YYP importado:** sprites, objetos, rooms, instances, views/cameras, tile layers, collision masks e eventos Create/Step/Draw/Collision/Alarm entram no modelo UGDM com refs de fonte, tilemap entity, collision_map e grafo persistido.
-  - **GML -> nodes ampliado:** `gml_to_nodes.rs` converte input teclado/gamepad basico, movimento horizontal, pulo/gravidade, colisao por `place_free`/`place_meeting`, `sprite_index`, `image_xscale`, `image_speed`, `alarm[]`, `instance_create`, `instance_destroy`, room transition simples e variaveis para nodes oficiais (`condition_overlap`, `set_animation_state`, `timer`, `spawn_entity`, `destroy_entity`, `load_scene`, `var_set`, etc.).
-  - **Bridges auditaveis:** scripts complexos, shaders, surfaces, ds_* complexos, physics Box2D, particulas e extensoes nativas continuam bridges estruturadas com arquivo fonte, linha aproximada, motivo, impacto e sugestao; bridges nao contam como conversao nativa completa.
-  - **Harness host-local:** `gamemaker_vertical_compatibility_harness_basic_platform` continua exigindo SGDK oficial, ROM real, Libretro real e `non_black_pixels > 0`; nesta rodada ele tambem procura `F:\Projects\Engine Template\Game Maker\Basic_platform_game_example.gmez` quando `F:\Projects\Game Maker\Basic_platform_game_example.gmez` nao existe. Nao havia `.yyp` em `F:\Projects\Game Maker` neste host.
-
-* **O que acabou de acontecer (2026-05-19 rodada 47 - branch `codex/compatibility-harness-gamemaker-vertical`):**
   - **Harness canonico:** `src-tauri/src/core/compatibility_harness.rs` executa matriz auditavel (import, nodes, gaps, SGDK, ROM, Libretro, `non_black_pixels`, `fake_toolchain_used`) e grava `src-tauri/target-test/validation/gamemaker-vertical/gamemaker-basic-platform-report.{json,md}`.
   - **GML -> nodes oficiais (subset):** `src-tauri/src/core/gml_to_nodes.rs` converte `oPlayer` (input, movimento, pulo, gravidade, animacao, camera) para grafo nativo com auto-layout por sistema; GML generico permanece bridge estruturada com gaps explicitos (`place_free`, `repeat`, `sprite_index`, etc.).
   - **Import GameMaker real endurecido:** `import_gamemaker_project` agrega `oWall` em `collision_map`, materializa sprites alinhados a 8px, limita sprites MD ao player + background reduzido (budget), persiste `graphs/gamemaker_<entity>.json` e mantem metadados de origem.
@@ -1335,7 +1272,7 @@ As seguintes decisoes ja foram debatidas e sao finais:
 ## 4. PROXIMO PASSO IMEDIATO (PARA A IA EXECUTAR QUANDO SOLICITADA)
 
 **Tarefa:**
-Preservar o core MVP promovido em `main` e avancar incrementos que mantenham a barra verde. A consolidacao de `origin/codex/project-cohesion-full-build` reuniu GameMaker vertical e `command.dat`; a rodada 49 adicionou a camada semantica SGDK -> modelo intermediario. O proximo trabalho deve consumir `canonical_model.logic_systems` para gerar nodes reais/bridge nodes, sem voltar a heuristica rasa e sem chamar bridge de node editavel.
+Preservar o core MVP promovido em `main` e avancar apenas incrementos que mantenham a barra verde. A governanca do PR #4 foi fechada na rodada 41: PR merged, `main` em `91bb8eb354389e370bb59d6a5ae84c21b4a1429f`, checks remotos de `pull_request` verdes e `npm run release:readiness:promotion` verde no destino. O proximo trabalho nao deve reabrir a linha de release sem necessidade; deve atacar robustez de produto, Node Engine e SGDK em unidades pequenas, com SGDK/Node ainda marcados como `Experimental` ate corpus/round-trip/jogo por nodes provarem o contrario.
 
 **Pre-requisitos operacionais:**
 * Manter os 6 gates canonicos verdes em toda alteracao relevante.
@@ -1344,12 +1281,13 @@ Preservar o core MVP promovido em `main` e avancar incrementos que mantenham a b
 * Reexecutar bundle MSI e smoke desktop em host Windows institucional sempre que a mudanca tocar packaging, emulacao, build orchestration, onboarding ou fluxo de projeto.
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
-**Sequencia de acoes recomendada (rodada 49):**
-1. Integrar o SGDK Logic Extractor v1 ao gerador de nodes em branch propria, consumindo `logic_systems` e preservando `semantic_gaps` como SGDK Bridge Node quando a conversao nao for segura.
-2. Criar testes de modelo -> nodes para as fixtures novas: enum/switch, `#define STATE_*`, input, animacao, transicao direta, macro complexa e BLAZE-like pools.
-3. Manter a UI principal fora do escopo ate o contrato de nodes estar verde; se precisar expor dados, usar exports pequenos e persistentes.
-4. Repetir `sgdk_logic`, `sgdk_corpus_inventory`, `sgdk_logic_real_corpus_vertical_reports --ignored` e matriz SGDK real quando a mudanca tocar corpus/BLAZE.
-5. Para qualquer claim de Stable, anexar SGDK oficial, ROM real, Libretro real e framebuffer visivel; fake continua somente fallback unitario nomeado.
+**Sequencia de acoes recomendada (rodada 41):**
+1. Criar nova branch `codex/...` a partir de `main` para qualquer codigo pos-promocao; nao misturar novas features direto no merge commit de release.
+2. Implementar primeiro robustez pequena e auditavel: cache/retry/backoff/mensagens do Runtime Setup, logs diagnosticos ou gates SGDK claros, com testes focados.
+3. Para Node Engine, adicionar semantica/validacao/codegen em fatias pequenas e provar determinismo antes de qualquer claim de jogo completo por nodes.
+4. Para SGDK_Engines, catalogar/cobrir buracos semanticos e round-trip por projeto real sem chamar heuristica de AST.
+5. Repetir os 6 gates canonicos em toda alteracao; adicionar `validate-upstream-windows.ps1 -SkipRustTests`, `preflight:sgdk-e2e`, `qa-rc`, corpus SGDK e packaging quando o escopo tocar build/toolchain/emulacao/release.
+6. Manter SGDK **Experimental** e Node Engine **Experimental/Parcial** ate haver corpus/round-trip e jogo criado por nodes com ROM buildada/rodando.
 
 **Validacao minima obrigatoria antes de marcar qualquer item como concluido:**
 * `npm run check:tree`

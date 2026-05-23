@@ -35,7 +35,7 @@
 - `cargo clippy -- -D warnings` protege o baseline de qualidade do backend Rust.
 
 ### 2.2 Unitarios
-- Frontend: Vitest.
+- Frontend: Vitest (`vite.config.ts`: `pool=forks`, `maxWorkers=1`, `fileParallelism=false`, timeouts 120s). Evita esgotamento de workers `threads` apos suites pesadas (`App.test.tsx`, `ArtStudioPanel`, `NodeGraphEditor`). Baseline pos-integracao `codex/full-product-cohesion-integration`: **350** testes.
 - Backend: `cargo test --lib -- --nocapture --test-threads=1`.
 - Cobrir parser/schema, hardware profiles, framebuffer, dependency manager e fluxos de editor sensiveis.
 - Cobrir inventario SGDK/no-code quando a mudanca tocar importador SGDK, source mapping ou semantic gaps; o gate local externo e `cargo test sgdk_corpus_inventory_real_corpus_report --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` em host com `F:\Projects\MegaDrive_DEV\SGDK_Engines`.
