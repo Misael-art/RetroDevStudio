@@ -1112,6 +1112,15 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
             } => {
                 render_fsm_states(out, machine_var, states, indent);
             }
+            LogicOp::SourceBridgeError {
+                gap,
+                source_file,
+                source_line,
+            } => {
+                out.push_str(&format!(
+                    "#error \"Source Bridge blocks codegen: {gap} at {source_file}:{source_line}. Enable bridge compatibility mode or replace with native nodes.\"\n",
+                ));
+            }
         }
     }
 }

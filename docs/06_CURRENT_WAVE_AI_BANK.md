@@ -6,6 +6,7 @@
 **Ultima Atualizacao:** 2026-05-20 (rodada 51 - MUGEN/Ikemen fighting subset Experimental)
 **Ultima Atualizacao:** 2026-05-20 (rodada 51 - OpenBOR beat'em up subset)
 **Ultima Atualizacao:** 2026-05-20 (rodada 49 - SGDK Logic Extractor v1)
+**Ultima Atualizacao:** 2026-05-20 (rodada 49 - SGDK semantic NodeGraph bridge/codegen)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -91,6 +92,13 @@
   - **Relatorio vertical host-local:** `cargo test ... sgdk_logic_real_corpus_vertical_reports --ignored` gerou `src-tauri/target-test/validation/sgdk-logic-extractor-v1/{platformer_2,nexzr_md,blaze_engine}.{json,md}`. Resultados: Platformer 2 `FSMs=0/states=1/transitions=0/actions=49/bridges=9/blocking_gaps=0`; NEXZR MD `FSMs=1/states=220/transitions=1/actions=92/bridges=465/blocking_gaps=0`; BLAZE_ENGINE `FSMs=2/states=3/transitions=2/actions=591/bridges=10/blocking_gaps=0`.
   - **Gates verdes:** `npm run check:tree`; `npm run lint`; `npx tsc --noEmit`; `npm test` **315/315**; `cargo test --lib sgdk_logic` **7/1 ignored**; `sgdk_logic_real_corpus_vertical_reports --ignored` **1/1**; `sgdk_corpus_inventory` **11/2 ignored**; `sgdk_corpus_inventory_real_corpus_report --ignored` **122 projetos**; `sgdk_matrix_corpus_ --ignored` **7/7** com `SGDK_ROOT=F:\Projects\MegaDrive_DEV\sdk\sgdk-2.11` e `RETRODEV_LIBRETRO_CORE_MEGADRIVE=F:\Projects\RetroDevStudio\toolchains\libretro\cores\genesis_plus_gx_libretro.dll`; `cargo clippy -D warnings`; `cargo test --lib` **354/18 ignored**.
   - **Status honesto:** esta fatia nao mexe na UI principal nem no NodeGraph visual e nao declara nova promocao Stable. Ela entrega a camada semantica SGDK -> modelo intermediario que o gerador de nodes pode consumir, preservando como bridge tudo que o v1 ainda nao converte com confianca.
+* **O que acabou de acontecer (2026-05-20 rodada 49 - branch `codex/sgdk-semantic-nodegraph-delivery`):**
+  - **Worktree isolado:** trabalho feito em `F:\Projects\RetroDevStudio-sgdk-semantic-nodegraph`, criado a partir de `origin/codex/project-cohesion-full-build` porque `origin/main` ainda nao continha `command.dat`.
+  - **SGDK SemanticModel -> NodeGraph:** novo modulo `src-tauri/src/core/sgdk_semantic_graph.rs` converte `SgdkProjectInventory` em JSON de NodeGraph com grupos `Input`, `Player FSM`, `Camera`, `Animation`, `Collision`, `Audio` e `Bridges`, criando nodes reais para input, FSM states/transitions, sprite anim/pos/move, scroll, audio, timers, colisao simples e spawn/destroy quando ha subset reconhecido.
+  - **Bridges explicitas:** gaps bloqueantes viram `bridge_unconverted_source` com `source_file`, `source_line`, `source_mapping`, detalhe acionavel, `blocking` e `allow_bridge_mode=0`; codegen TS/Rust emite `#error "Source Bridge blocks codegen..."` quando o usuario tenta gerar C sem aceitar bridge/compat mode.
+  - **Cobertura focada:** `nodeCompiler.test.ts` cobre bridge bloqueante; o novo modulo Rust cobre snapshot minimo FSM IDLE/RUN/JUMP, auto-layout sem sobrepor grupos principais e round-trip JSON preservando source mapping.
+  - **Gates locais executados:** `npm run check:tree` OK; `npm run lint` OK; `npx tsc --noEmit` OK; `npx vitest run src/core/nodegraph/nodeCompiler.test.ts` OK via `--pool=vmThreads`; `npx vitest run src/components/nodegraph/NodeGraphEditor.test.tsx` OK via `--pool=vmThreads`; `npm test -- --pool=vmThreads --isolate=true` OK (**316/316**).
+  - **Bloqueio honesto:** `cargo test ... sgdk_semantic_graph`, `cargo check`, e o wrapper `scripts/run-cargo-msvc.cmd` nao retornaram diagnostico Rust utilizavel neste host durante a rodada: execucoes longas ficaram presas/saindo codigo 1 sem stderr depois de compilar dependencias pesadas e concorrencia de varios `cargo`/`rustc` em outros worktrees. Nao houve prova Rust/SGDK/Libretro completa nesta rodada, portanto SGDK/Node Engine seguem sem promocao Stable por esta branch.
 
 * **O que acabou de acontecer (2026-05-19 rodada 48 - branch `codex/project-cohesion-full-build`):**
   - **Consolidacao:** `origin/main` (ja com GameMaker vertical via PR #8) + `origin/codex/command-dat-artstudio-node-runtime` integrados em uma unica branch coesa.

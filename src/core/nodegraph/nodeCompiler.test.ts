@@ -593,6 +593,28 @@ describe("compileGraphToC — SNES", () => {
 
     expect(code).toContain('#error "Unsupported input_command tokens for broken: ~30"');
   });
+
+  it("bloqueia bridge_unconverted_source quando o grafo nao aceitou modo bridge", () => {
+    const graph: NodeGraph = {
+      nodes: [
+        node("update", "event_update"),
+        node("asm_bridge", "bridge_unconverted_source", {
+          gap: "inline_assembly",
+          source_file: "src/player.c",
+          source_line: 42,
+          blocking: 1,
+          allow_bridge_mode: 0,
+        }),
+      ],
+      edges: [edge("bridge_edge", "update", "asm_bridge")],
+    };
+
+    const code = compileGraphToC(graph, "BridgeDemo", "megadrive");
+
+    expect(code).toContain(
+      '#error "Source Bridge blocks codegen: inline_assembly at src/player.c:42. Enable bridge compatibility mode or replace with native nodes."'
+    );
+  });
 });
 
 describe("compileGraphToC — valores negativos (regressão bug regex)", () => {

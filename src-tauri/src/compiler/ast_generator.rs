@@ -300,6 +300,11 @@ pub enum LogicOp {
         machine_var: String,
         states: Vec<LogicFsmState>,
     },
+    SourceBridgeError {
+        gap: String,
+        source_file: String,
+        source_line: i32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1526,6 +1531,21 @@ fn compile_logic_node(
                 if_false,
             }))
         }
+        "bridge_unconverted_source" => {
+            if param_bool(node, "blocking", false) && !param_bool(node, "allow_bridge_mode", false)
+            {
+                Some(CompiledLogicNode::Linear(LogicOp::SourceBridgeError {
+                    gap: param_string(node, "gap")
+                        .unwrap_or_else(|| "unconverted_source".to_string()),
+                    source_file: param_string(node, "source_file")
+                        .or_else(|| param_string(node, "source"))
+                        .unwrap_or_else(|| "unknown source".to_string()),
+                    source_line: param_i32(node, "source_line", 0),
+                }))
+            } else {
+                Some(CompiledLogicNode::NoOp)
+            }
+        }
         "set_velocity" => {
             let target_name = sanitize_identifier(
                 &param_string(node, "target").unwrap_or_else(|| "entity".to_string()),
@@ -2437,6 +2457,7 @@ fn collect_logic_sound_names_from_ops(
                 }
             }
             LogicOp::MoveSprite { .. } => {}
+            LogicOp::SourceBridgeError { .. } => {}
         }
     }
 }

@@ -552,6 +552,12 @@ function emitLinearNodeC(node: GraphNode, graph: NodeGraph, target: "megadrive" 
       return `    // Hardware budget check: VRAM ${p.vram_kb}KB, sprites ${p.sprites}, sprites/scanline ${p.scanline_sprites}\n`;
 
     case "bridge_unconverted_source":
+      if (isTruthyParam(p.blocking) && !isTruthyParam(p.allow_bridge_mode)) {
+        const gap = String(p.gap ?? "unconverted_source");
+        const sourceFile = String(p.source_file ?? p.source ?? "unknown source");
+        const sourceLine = String(p.source_line ?? "?");
+        return `#error "Source Bridge blocks codegen: ${gap} at ${sourceFile}:${sourceLine}. Enable bridge compatibility mode or replace with native nodes."\n`;
+      }
       return `    // Source bridge '${p.gap}': ${p.source}\n`;
 
     default:
