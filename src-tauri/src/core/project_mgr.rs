@@ -11,14 +11,16 @@ use image::{ImageBuffer, Rgba, RgbaImage};
 use crate::ugdm::components::{
     AnimationDef, AudioComponent, CameraComponent, CollisionComponent, CollisionOffset, Components,
     ImportedLogicSemantics, InputComponent, LogicComponent, MugenAnimationFrame, MugenCollisionBox,
-    PhysicsComponent, Pivot, SpriteComponent, TilemapComponent, Velocity,
-};
-use crate::ugdm::entities::{
-    BuildConfig, CollisionMap, Entity, PaletteEntry, PatchAuditEntry, Project, Resolution, Scene,
-    SceneLayer, TemplateMetadata, CURRENT_SCHEMA_VERSION,
+    PhysicsComponent, Pivot, SpriteCommandBinding, SpriteCommandStep, SpriteComponent,
+    TilemapComponent, Velocity,
 };
 #[cfg(test)]
-use crate::ugdm::entities::{RetroFXConfig, RetroFXParallaxLayer, RetroFXRasterLine};
+use crate::ugdm::entities::RetroFXRasterLine;
+use crate::ugdm::entities::{
+    BackgroundLayer, BuildConfig, CollisionMap, Entity, PaletteEntry, PatchAuditEntry, Project,
+    Resolution, RetroFXConfig, RetroFXParallaxLayer, Scene, SceneLayer, ScrollSpeed,
+    TemplateMetadata, CURRENT_SCHEMA_VERSION,
+};
 
 pub const UGDM_VERSION: &str = "1.0.0";
 pub const LEGACY_SCHEMA_VERSION: &str = "1.0.0";
@@ -368,6 +370,31 @@ struct MugenCharacterAtlas {
     pivot: Pivot,
 }
 
+#[derive(Debug, Clone, Default)]
+struct MugenFightingModel {
+    commands: Vec<crate::core::input_commands::InputCommandDefinition>,
+    states: Vec<MugenStateDef>,
+    controllers: Vec<MugenStateController>,
+    source_refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct MugenStateDef {
+    state_no: i32,
+    params: HashMap<String, String>,
+    source_ref: String,
+}
+
+#[derive(Debug, Clone, Default)]
+struct MugenStateController {
+    state_no: Option<i32>,
+    name: String,
+    controller_type: String,
+    params: HashMap<String, String>,
+    source_ref: String,
+    raw_lines: Vec<String>,
+}
+
 type MugenSpriteKey = (i32, i32);
 type MugenSpritePathMatch = (MugenSpriteKey, PathBuf);
 
@@ -603,7 +630,7 @@ const EXTERNAL_IMPORT_PROFILES: &[ExternalImportProfileDefinition] = &[
         id: "mugen",
         name: "MUGEN",
         family: "Fighting",
-        description: "Importa personagem, stage e screenpack via DEF/AIR com assets visuais e sonoros reais.",
+        description: "Importa personagem, stage e screenpack via DEF/AIR/CMD/CNS/ST como subset experimental de luta 2D.",
         source_engine: "mugen",
         support_status: "Experimental",
         supported_levels: &["L1", "L2", "L3"],
@@ -5374,6 +5401,14 @@ pub fn import_mugen_project(
     project_dir: &Path,
     mugen_path: &Path,
 ) -> Result<MugenImportReport, LoadError> {
+    import_mugen_project_with_engine(project_dir, mugen_path, "mugen")
+}
+
+fn import_mugen_project_with_engine(
+    project_dir: &Path,
+    mugen_path: &Path,
+    source_engine: &str,
+) -> Result<MugenImportReport, LoadError> {
     if !mugen_path.exists() {
         return Err(LoadError(format!(
             "Projeto MUGEN indisponivel: '{}' nao existe.",
@@ -5393,7 +5428,7 @@ pub fn import_mugen_project(
     let mut skipped = Vec::new();
 
     for candidate in candidates {
-        match import_mugen_candidate(project_dir, &candidate) {
+        match import_mugen_candidate(project_dir, &candidate, source_engine) {
             Ok(mut scenes) => imported.append(&mut scenes),
             Err(error) => skipped.push(format!("{}: {}", candidate.display_name, error)),
         }
@@ -5431,10 +5466,12 @@ pub fn import_mugen_project(
 fn import_mugen_candidate(
     project_dir: &Path,
     candidate: &MugenCandidate,
+    source_engine: &str,
 ) -> Result<Vec<Scene>, LoadError> {
     match candidate.kind {
         MugenCandidateKind::Character => {
-            import_mugen_character_candidate(project_dir, candidate).map(|scene| vec![scene])
+            import_mugen_character_candidate(project_dir, candidate, source_engine)
+                .map(|scene| vec![scene])
         }
         MugenCandidateKind::Stage => {
             import_mugen_stage_candidate(project_dir, candidate).map(|scene| vec![scene])
@@ -5920,9 +5957,646 @@ fn collect_mugen_character_logic_hints(
     Ok(hints)
 }
 
+fn collect_mugen_character_fighting_model(
+    root_dir: &Path,
+    files: &MugenIniSection,
+) -> Result<MugenFightingModel, LoadError> {
+    let mut model = MugenFightingModel::default();
+    let mut seen_paths = HashSet::new();
+    let mut logic_files = files
+        .entries
+        .iter()
+        .filter_map(|(key, relative)| {
+            let lowered_key = key.to_ascii_lowercase();
+            let priority = mugen_logic_file_priority(&lowered_key)?;
+            Some((priority, lowered_key, relative))
+        })
+        .collect::<Vec<_>>();
+    logic_files.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then(left.1.cmp(&right.1))
+            .then(left.2.cmp(right.2))
+    });
+
+    for (_, lowered_key, relative) in logic_files {
+        let path = root_dir.join(relative);
+        if !path.is_file() {
+            continue;
+        }
+        let normalized_path = path.to_string_lossy().to_string();
+        if !seen_paths.insert(normalized_path) {
+            continue;
+        }
+
+        let content = read_text_lossy(&path)?;
+        let relative_label = path
+            .strip_prefix(root_dir)
+            .ok()
+            .map(normalize_relative_path)
+            .unwrap_or_else(|| path.display().to_string());
+        model.source_refs.push(relative_label.clone());
+
+        if lowered_key == "cmd" {
+            model
+                .commands
+                .extend(crate::core::input_commands::parse_command_dat(
+                    &content,
+                    &relative_label,
+                ));
+        }
+
+        let parsed = parse_mugen_state_logic_file(&content, &relative_label);
+        model.states.extend(parsed.states);
+        model.controllers.extend(parsed.controllers);
+    }
+
+    model.source_refs.sort();
+    model.source_refs.dedup();
+    model.states.sort_by_key(|state| state.state_no);
+    model.states.dedup_by_key(|state| state.state_no);
+    Ok(model)
+}
+
+fn mugen_logic_file_priority(lowered_key: &str) -> Option<u8> {
+    if lowered_key == "cmd" {
+        Some(0)
+    } else if lowered_key == "cns" {
+        Some(1)
+    } else if matches!(lowered_key, "st" | "stcommon" | "state") || lowered_key.starts_with("st") {
+        Some(2)
+    } else {
+        None
+    }
+}
+
+fn parse_mugen_state_logic_file(content: &str, source_ref: &str) -> MugenFightingModel {
+    let mut model = MugenFightingModel::default();
+    let mut current_state: Option<MugenStateDef> = None;
+    let mut current_controller: Option<MugenStateController> = None;
+    let mut active_state_no: Option<i32> = None;
+
+    fn flush_controller(
+        model: &mut MugenFightingModel,
+        controller: &mut Option<MugenStateController>,
+    ) {
+        if let Some(controller) = controller.take() {
+            if !controller.controller_type.trim().is_empty() {
+                model.controllers.push(controller);
+            }
+        }
+    }
+
+    fn flush_state(model: &mut MugenFightingModel, state: &mut Option<MugenStateDef>) {
+        if let Some(state) = state.take() {
+            model.states.push(state);
+        }
+    }
+
+    for raw_line in content.lines() {
+        let trimmed = strip_mugen_comment(raw_line);
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            flush_controller(&mut model, &mut current_controller);
+            let section_name = trimmed[1..trimmed.len() - 1].trim();
+            if let Some(state_no) = parse_mugen_statedef_section(section_name) {
+                flush_state(&mut model, &mut current_state);
+                active_state_no = Some(state_no);
+                current_state = Some(MugenStateDef {
+                    state_no,
+                    params: HashMap::new(),
+                    source_ref: source_ref.to_string(),
+                });
+                continue;
+            }
+            if let Some((state_no, name)) = parse_mugen_state_controller_section(section_name) {
+                current_controller = Some(MugenStateController {
+                    state_no: state_no.or(active_state_no),
+                    name,
+                    controller_type: String::new(),
+                    params: HashMap::new(),
+                    source_ref: source_ref.to_string(),
+                    raw_lines: vec![trimmed],
+                });
+                continue;
+            }
+        }
+
+        if let Some(controller) = current_controller.as_mut() {
+            controller.raw_lines.push(trimmed.clone());
+            if let Some((key, value)) = trimmed.split_once('=') {
+                let normalized_key = key.trim().to_ascii_lowercase();
+                let normalized_value = value.trim().trim_matches('"').trim().to_string();
+                if normalized_key == "type" {
+                    controller.controller_type = normalized_value.clone();
+                }
+                controller.params.insert(normalized_key, normalized_value);
+            }
+            continue;
+        }
+
+        if let Some(state) = current_state.as_mut() {
+            if let Some((key, value)) = trimmed.split_once('=') {
+                state.params.insert(
+                    key.trim().to_ascii_lowercase(),
+                    value.trim().trim_matches('"').trim().to_string(),
+                );
+            }
+        }
+    }
+
+    flush_controller(&mut model, &mut current_controller);
+    flush_state(&mut model, &mut current_state);
+    model
+}
+
+fn parse_mugen_statedef_section(section_name: &str) -> Option<i32> {
+    let mut parts = section_name.split_whitespace();
+    let head = parts.next()?;
+    if !head.eq_ignore_ascii_case("statedef") {
+        return None;
+    }
+    parts.next()?.trim().parse::<i32>().ok()
+}
+
+fn parse_mugen_state_controller_section(section_name: &str) -> Option<(Option<i32>, String)> {
+    let lowered = section_name.to_ascii_lowercase();
+    if !lowered.starts_with("state ") {
+        return None;
+    }
+    let inner = section_name[5..].trim();
+    let mut parts = inner.splitn(2, ',');
+    let state_no = parts
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(|value| value.parse::<i32>().ok());
+    let name = parts
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("controller")
+        .to_string();
+    Some((state_no, name))
+}
+
+fn mugen_graph_ref(entity_id: &str) -> String {
+    format!("graphs/mugen_{}.json", sgdk_entity_id(entity_id))
+}
+
+fn mugen_command_bindings(
+    model: &MugenFightingModel,
+    animations: &HashMap<String, AnimationDef>,
+) -> Vec<SpriteCommandBinding> {
+    let command_state_targets = mugen_command_state_targets(model);
+    model
+        .commands
+        .iter()
+        .map(|command| {
+            let target_animation = command_state_targets
+                .get(&command.id)
+                .and_then(|state_no| mugen_state_anim(model, *state_no))
+                .map(|anim| format!("action_{anim}"))
+                .filter(|anim| animations.contains_key(anim))
+                .or_else(|| {
+                    let by_id = format!("action_{}", command.id);
+                    animations.contains_key(&by_id).then_some(by_id)
+                })
+                .or_else(|| {
+                    animations
+                        .contains_key("idle")
+                        .then_some("idle".to_string())
+                })
+                .unwrap_or_else(|| "action_0".to_string());
+
+            SpriteCommandBinding {
+                id: command.id.clone(),
+                display_name: command.display_name.clone(),
+                notation: command.notation.clone(),
+                source: command.source.clone(),
+                target_animation,
+                max_frames: command.max_frames,
+                button_profile: "megadrive".to_string(),
+                unsupported_tokens: command.unsupported_tokens.clone(),
+                steps: command
+                    .steps
+                    .iter()
+                    .map(|step| SpriteCommandStep {
+                        tokens: step.tokens.clone(),
+                        display: step.display.clone(),
+                    })
+                    .collect(),
+            }
+        })
+        .collect()
+}
+
+fn mugen_command_state_targets(model: &MugenFightingModel) -> HashMap<String, i32> {
+    let mut targets = HashMap::new();
+    for controller in &model.controllers {
+        if !controller
+            .controller_type
+            .eq_ignore_ascii_case("changestate")
+        {
+            continue;
+        }
+        let Some(target_state) = mugen_controller_i32(controller, "value") else {
+            continue;
+        };
+        for value in controller.params.values() {
+            if let Some(command_name) = mugen_trigger_command_name(value) {
+                targets.insert(sgdk_entity_id(&command_name), target_state);
+            }
+        }
+    }
+    targets
+}
+
+fn mugen_trigger_command_name(value: &str) -> Option<String> {
+    let lowered = value.to_ascii_lowercase();
+    if !lowered.contains("command") {
+        return None;
+    }
+    if let Some(start) = value.find('"') {
+        let rest = &value[start + 1..];
+        if let Some(end) = rest.find('"') {
+            return Some(rest[..end].trim().to_string());
+        }
+    }
+    value
+        .split('=')
+        .nth(1)
+        .map(str::trim)
+        .map(|value| value.trim_matches('"').to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn mugen_state_anim(model: &MugenFightingModel, state_no: i32) -> Option<i32> {
+    model
+        .states
+        .iter()
+        .find(|state| state.state_no == state_no)
+        .and_then(|state| state.params.get("anim"))
+        .and_then(|value| value.parse::<i32>().ok())
+}
+
+fn mugen_controller_i32(controller: &MugenStateController, key: &str) -> Option<i32> {
+    controller
+        .params
+        .get(&key.to_ascii_lowercase())
+        .and_then(|value| parse_mugen_number_i32(value))
+}
+
+fn parse_mugen_number_i32(value: &str) -> Option<i32> {
+    let first = value.split(',').next()?.trim();
+    first
+        .parse::<i32>()
+        .ok()
+        .or_else(|| first.parse::<f32>().ok().map(|value| value.round() as i32))
+}
+
+fn parse_mugen_pair_numbers(value: Option<&str>) -> Option<(i32, i32)> {
+    let value = value?;
+    let numbers = value
+        .split(',')
+        .filter_map(|entry| {
+            let trimmed = entry.trim();
+            trimmed.parse::<i32>().ok().or_else(|| {
+                trimmed
+                    .parse::<f32>()
+                    .ok()
+                    .map(|value| value.round() as i32)
+            })
+        })
+        .collect::<Vec<_>>();
+    (numbers.len() >= 2).then_some((numbers[0], numbers[1]))
+}
+
+fn imported_mugen_fighting_logic_graph(entity_id: &str, model: &MugenFightingModel) -> String {
+    let mut nodes = Vec::<serde_json::Value>::new();
+    let mut edges = Vec::<serde_json::Value>::new();
+    nodes.push(mugen_node(
+        "start",
+        "event_start",
+        "On Start",
+        40,
+        80,
+        serde_json::json!({}),
+    ));
+    nodes.push(mugen_node(
+        "idle_anim",
+        "sprite_anim",
+        "Idle Animation",
+        260,
+        80,
+        serde_json::json!({ "target": entity_id, "anim": "idle" }),
+    ));
+    edges.push(mugen_edge(
+        "edge_start_idle",
+        "start",
+        "exec",
+        "idle_anim",
+        "exec",
+    ));
+
+    for (index, command) in model.commands.iter().enumerate() {
+        nodes.push(mugen_node(
+            &format!("cmd_{}", command.id),
+            "input_command",
+            &command.display_name,
+            40,
+            220 + index as i32 * 92,
+            serde_json::json!({
+                "command_id": command.id.clone(),
+                "display_name": command.display_name.clone(),
+                "notation": command.notation.clone(),
+                "max_frames": command.max_frames,
+                "pad": "JOY_1",
+                "button_profile": "megadrive",
+                "target": entity_id
+            }),
+        ));
+    }
+
+    for (index, state) in model.states.iter().enumerate() {
+        nodes.push(mugen_node(
+            &format!("fsm_state_{}", state.state_no),
+            "fsm_state",
+            &format!("State {}", state.state_no),
+            420,
+            80 + index as i32 * 92,
+            serde_json::json!({
+                "state_name": format!("state_{}", state.state_no),
+                "state_no": state.state_no,
+                "anim": state.params.get("anim").cloned().unwrap_or_default(),
+                "source": state.source_ref.clone(),
+                "initial": if state.state_no == 0 { 1 } else { 0 }
+            }),
+        ));
+    }
+
+    for (index, controller) in model.controllers.iter().enumerate() {
+        let x = 760 + (index as i32 % 2) * 220;
+        let y = 80 + (index as i32 / 2) * 96;
+        let id = format!(
+            "mugen_{}_{}",
+            sgdk_entity_id(&controller.controller_type),
+            index
+        );
+        match controller.controller_type.to_ascii_lowercase().as_str() {
+            "changestate" => {
+                let target_state = mugen_controller_i32(controller, "value").unwrap_or(0);
+                nodes.push(mugen_node(
+                    &id,
+                    "fsm_transition",
+                    &format!("ChangeState {}", target_state),
+                    x,
+                    y,
+                    serde_json::json!({
+                        "target_state": format!("state_{}", target_state),
+                        "source_state": controller.state_no.map(|value| format!("state_{value}")).unwrap_or_default(),
+                        "trigger": mugen_controller_trigger_summary(controller),
+                        "source": controller.source_ref.clone()
+                    }),
+                ));
+            }
+            "velset" | "veladd" => {
+                nodes.push(mugen_node(
+                    &id,
+                    "set_velocity",
+                    &controller.controller_type,
+                    x,
+                    y,
+                    serde_json::json!({
+                        "target": entity_id,
+                        "vx": mugen_controller_i32(controller, "x").unwrap_or(0),
+                        "vy": mugen_controller_i32(controller, "y").unwrap_or(0),
+                        "mode": if controller.controller_type.eq_ignore_ascii_case("VelAdd") { "add" } else { "set" },
+                        "source_state": controller.state_no.map(|value| format!("state_{value}")).unwrap_or_default(),
+                        "source": controller.source_ref.clone()
+                    }),
+                ));
+            }
+            "posset" | "posadd" => {
+                nodes.push(mugen_node(
+                    &id,
+                    "set_position",
+                    &controller.controller_type,
+                    x,
+                    y,
+                    serde_json::json!({
+                        "target": entity_id,
+                        "x": mugen_controller_i32(controller, "x").unwrap_or(0),
+                        "y": mugen_controller_i32(controller, "y").unwrap_or(0),
+                        "mode": if controller.controller_type.eq_ignore_ascii_case("PosAdd") { "add" } else { "set" },
+                        "source_state": controller.state_no.map(|value| format!("state_{value}")).unwrap_or_default(),
+                        "source": controller.source_ref.clone()
+                    }),
+                ));
+            }
+            "playsnd" => {
+                let sfx = controller
+                    .params
+                    .get("value")
+                    .and_then(|value| parse_pair_i32(Some(value)))
+                    .map(|(group, sound)| format!("snd_{}_{}", group, sound))
+                    .unwrap_or_else(|| "mugen_sound".to_string());
+                nodes.push(mugen_node(
+                    &id,
+                    "action_sound",
+                    "PlaySnd",
+                    x,
+                    y,
+                    serde_json::json!({
+                        "sfx": sfx,
+                        "source_state": controller.state_no.map(|value| format!("state_{value}")).unwrap_or_default(),
+                        "source": controller.source_ref.clone()
+                    }),
+                ));
+            }
+            "hitdef" => {
+                nodes.push(mugen_node(
+                    &id,
+                    "bridge_unconverted_source",
+                    "HitDef Bridge",
+                    x,
+                    y,
+                    serde_json::json!({
+                        "gap": "mugen_hitdef",
+                        "source": controller.raw_lines.join("\\n"),
+                        "state": controller.state_no.map(|value| format!("state_{value}")).unwrap_or_default(),
+                        "attr": controller.params.get("attr").cloned().unwrap_or_default(),
+                        "damage": controller.params.get("damage").cloned().unwrap_or_default()
+                    }),
+                ));
+            }
+            "" => {}
+            _ => {
+                nodes.push(mugen_node(
+                    &id,
+                    "bridge_unconverted_source",
+                    "MUGEN Extension Bridge",
+                    x,
+                    y,
+                    serde_json::json!({
+                        "gap": "mugen_unsupported_controller",
+                        "controller": controller.controller_type.clone(),
+                        "name": controller.name.clone(),
+                        "source": controller.raw_lines.join("\\n"),
+                        "state": controller.state_no.map(|value| format!("state_{value}")).unwrap_or_default()
+                    }),
+                ));
+            }
+        }
+    }
+
+    serde_json::json!({
+        "version": 1,
+        "nodes": nodes,
+        "edges": edges,
+        "gaps": mugen_graph_gaps(model)
+    })
+    .to_string()
+}
+
+fn mugen_node(
+    id: &str,
+    node_type: &str,
+    label: &str,
+    x: i32,
+    y: i32,
+    params: serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "type": node_type,
+        "label": label,
+        "x": x,
+        "y": y,
+        "inputs": mugen_node_inputs(node_type),
+        "outputs": mugen_node_outputs(node_type),
+        "params": params
+    })
+}
+
+fn mugen_node_inputs(node_type: &str) -> serde_json::Value {
+    match node_type {
+        "event_start" | "input_command" | "fsm_state" => serde_json::json!([]),
+        "fsm_transition" => serde_json::json!([
+            { "id": "exec", "label": ">", "kind": "exec" },
+            { "id": "condition", "label": "Condition", "kind": "data", "dataType": "bool" }
+        ]),
+        _ => serde_json::json!([{ "id": "exec", "label": ">", "kind": "exec" }]),
+    }
+}
+
+fn mugen_node_outputs(node_type: &str) -> serde_json::Value {
+    match node_type {
+        "input_command" => serde_json::json!([
+            { "id": "exec", "label": ">", "kind": "exec" },
+            { "id": "false", "label": "False >", "kind": "exec" }
+        ]),
+        "fsm_state" => serde_json::json!([
+            { "id": "exec", "label": "Body >", "kind": "exec" },
+            { "id": "transitions", "label": "Transitions >", "kind": "exec" }
+        ]),
+        "fsm_transition" => serde_json::json!([
+            { "id": "matched", "label": "Matched >", "kind": "exec" },
+            { "id": "next", "label": "Next >", "kind": "exec" }
+        ]),
+        _ => serde_json::json!([{ "id": "exec", "label": ">", "kind": "exec" }]),
+    }
+}
+
+fn mugen_edge(
+    id: &str,
+    from_node: &str,
+    from_port: &str,
+    to_node: &str,
+    to_port: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "fromNode": from_node,
+        "fromPort": from_port,
+        "toNode": to_node,
+        "toPort": to_port
+    })
+}
+
+fn mugen_controller_trigger_summary(controller: &MugenStateController) -> String {
+    let mut triggers = controller
+        .params
+        .iter()
+        .filter(|(key, _)| key.starts_with("trigger"))
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>();
+    triggers.sort();
+    triggers.join("; ")
+}
+
+fn mugen_graph_gaps(model: &MugenFightingModel) -> Vec<serde_json::Value> {
+    model
+        .controllers
+        .iter()
+        .filter_map(|controller| {
+            let lowered = controller.controller_type.to_ascii_lowercase();
+            if lowered == "hitdef" {
+                Some(serde_json::json!({
+                    "id": "mugen_hitdef",
+                    "reason": "HitDef preservado como bridge ate existir node de ataque nativo completo.",
+                    "blocks_build": false
+                }))
+            } else if !matches!(
+                lowered.as_str(),
+                "changestate" | "velset" | "veladd" | "posset" | "posadd" | "playsnd" | ""
+            ) {
+                Some(serde_json::json!({
+                    "id": format!("mugen_{}", sgdk_entity_id(&controller.controller_type)),
+                    "reason": format!("Controller MUGEN/Ikemen '{}' preservado como bridge.", controller.controller_type),
+                    "blocks_build": false
+                }))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn mugen_import_audit_flags(model: &MugenFightingModel) -> Vec<String> {
+    let mut flags = Vec::new();
+    if !model.commands.is_empty() {
+        flags.push("mugen:cmd_input_commands".to_string());
+    }
+    if !model.states.is_empty() {
+        flags.push("mugen:state_machine".to_string());
+    }
+    if model
+        .controllers
+        .iter()
+        .any(|controller| controller.controller_type.eq_ignore_ascii_case("HitDef"))
+    {
+        flags.push("mugen:hitdef_bridge".to_string());
+    }
+    if model.controllers.iter().any(|controller| {
+        let lowered = controller.controller_type.to_ascii_lowercase();
+        !matches!(
+            lowered.as_str(),
+            "changestate" | "velset" | "veladd" | "posset" | "posadd" | "playsnd" | "hitdef" | ""
+        )
+    }) {
+        flags.push("mugen:unsupported_bridge".to_string());
+    }
+    flags
+}
+
 fn import_mugen_character_candidate(
     project_dir: &Path,
     candidate: &MugenCandidate,
+    source_engine: &str,
 ) -> Result<Scene, LoadError> {
     let def_content = read_text_lossy(&candidate.def_path)?;
     let sections = parse_mugen_ini(&def_content);
@@ -5966,6 +6640,7 @@ fn import_mugen_character_candidate(
 
     let atlas = compose_mugen_character_atlas(&extracted_sprites)?;
     let character_slug = sgdk_entity_id(&candidate.display_name);
+    let entity_id = sgdk_entity_id(&candidate.display_name);
     let atlas_asset = format!("assets/sprites/mugen_{}_atlas.png", character_slug);
     save_rgba_image(&project_dir.join(&atlas_asset), &atlas.image)?;
 
@@ -5973,13 +6648,54 @@ fn import_mugen_character_candidate(
     if let Some(idle) = animations.get("action_0").cloned() {
         animations.insert("idle".to_string(), idle);
     }
+    let fighting_model = collect_mugen_character_fighting_model(&candidate.root_dir, files)?;
+    let has_fighting_logic = !fighting_model.commands.is_empty()
+        || !fighting_model.states.is_empty()
+        || !fighting_model.controllers.is_empty();
+    let command_bindings = mugen_command_bindings(&fighting_model, &animations);
+    let graph = if has_fighting_logic {
+        imported_mugen_fighting_logic_graph(&entity_id, &fighting_model)
+    } else {
+        imported_mugen_idle_logic_graph(&entity_id)
+    };
+    let graph_ref = mugen_graph_ref(&entity_id);
+    save_graph_asset(project_dir, &graph_ref, &graph)?;
 
     let mut scene = canonical_scene(
         &sgdk_entity_id(&candidate.display_name),
         Some(candidate.display_name.clone()),
     );
-    let entity_id = sgdk_entity_id(&candidate.display_name);
     let logic_hints = collect_mugen_character_logic_hints(&candidate.root_dir, files)?;
+    let mut logic = imported_logic_component(Some(graph), logic_hints);
+    logic.graph_ref = Some(graph_ref);
+    logic.graph_origin = Some(
+        if has_fighting_logic {
+            "mugen_fighting_import"
+        } else {
+            "mugen_def_air_import"
+        }
+        .to_string(),
+    );
+    logic.external_source_refs = fighting_model.source_refs.clone();
+    logic.imported_semantics = Some(ImportedLogicSemantics {
+        source: source_engine.to_string(),
+        gameplay_class: "fighting_2d".to_string(),
+        entity_role: "fighter_actor".to_string(),
+        confidence: if fighting_model.controllers.is_empty() {
+            "low".to_string()
+        } else {
+            "medium".to_string()
+        },
+        role_reason: "DEF/AIR/CMD/CNS/ST importado como subset editavel de luta 2D.".to_string(),
+        driver_functions: fighting_model
+            .controllers
+            .iter()
+            .map(|controller| controller.controller_type.clone())
+            .filter(|value| !value.is_empty())
+            .collect(),
+        source_paths: fighting_model.source_refs.clone(),
+        audit_flags: mugen_import_audit_flags(&fighting_model),
+    });
     scene.entities.push(Entity {
         entity_id: entity_id.clone(),
         display_name: Some(candidate.display_name.clone()),
@@ -5995,13 +6711,10 @@ fn import_mugen_character_candidate(
                 animations,
                 priority: "foreground".to_string(),
                 meta_sprite: atlas.cell_width > 32 || atlas.cell_height > 32,
-                commands: Vec::new(),
+                commands: command_bindings,
             }),
             collision: mugen_collision_component_from_actions(&actions),
-            logic: Some(imported_logic_component(
-                Some(imported_mugen_idle_logic_graph(&entity_id)),
-                logic_hints,
-            )),
+            logic: Some(logic),
             ..Components::default()
         },
     });
@@ -6061,6 +6774,14 @@ fn import_mugen_stage_candidate(
                 .unwrap_or_else(|| ".png".to_string())
         );
         copy_template_asset(&loose_background, &project_dir.join(&asset_rel))?;
+        push_mugen_background_metadata(
+            &mut scene,
+            "bg_0",
+            candidate.display_name.as_str(),
+            &asset_rel,
+            0,
+            (1, 1),
+        );
         scene.entities.push(static_mugen_sprite_entity(
             "bg_0",
             candidate.display_name.as_str(),
@@ -6105,8 +6826,20 @@ fn import_mugen_stage_candidate(
                 save_rgba_image(&project_dir.join(&asset_rel), &sprite.pixels)?;
                 let (x, y) = parse_pair_i32(section.entries.get("start").map(String::as_str))
                     .unwrap_or((0, 0));
+                let entity_id = format!("bg_{}", index);
+                let delta =
+                    parse_mugen_pair_numbers(section.entries.get("delta").map(String::as_str))
+                        .unwrap_or((1, 1));
+                push_mugen_background_metadata(
+                    &mut scene,
+                    &entity_id,
+                    section.name.as_str(),
+                    &asset_rel,
+                    index as u32,
+                    delta,
+                );
                 scene.entities.push(static_mugen_sprite_entity(
-                    &format!("bg_{}", index),
+                    &entity_id,
                     section.name.as_str(),
                     &asset_rel,
                     &project_dir.join(&asset_rel),
@@ -6260,8 +6993,19 @@ fn build_mugen_visual_scene(
             save_rgba_image(&project_dir.join(&asset_rel), &sprite.pixels)?;
             let (x, y) =
                 parse_pair_i32(section.entries.get("start").map(String::as_str)).unwrap_or((0, 0));
+            let entity_id = format!("{}_{}", asset_prefix, index);
+            let delta = parse_mugen_pair_numbers(section.entries.get("delta").map(String::as_str))
+                .unwrap_or((1, 1));
+            push_mugen_background_metadata(
+                &mut scene,
+                &entity_id,
+                section.name.as_str(),
+                &asset_rel,
+                index as u32,
+                delta,
+            );
             scene.entities.push(static_mugen_sprite_entity(
-                &format!("{}_{}", asset_prefix, index),
+                &entity_id,
                 section.name.as_str(),
                 &asset_rel,
                 &project_dir.join(&asset_rel),
@@ -6301,6 +7045,41 @@ fn build_mugen_visual_scene(
     Ok(scene)
 }
 
+fn push_mugen_background_metadata(
+    scene: &mut Scene,
+    layer_id: &str,
+    name: &str,
+    asset_rel: &str,
+    depth: u32,
+    delta: (i32, i32),
+) {
+    scene.background_layers.push(BackgroundLayer {
+        layer_id: layer_id.to_string(),
+        depth,
+        tileset: asset_rel.to_string(),
+        scroll_speed: Some(ScrollSpeed {
+            x: delta.0,
+            y: delta.1,
+        }),
+        tilemap: None,
+    });
+
+    let retrofx = scene.retrofx.get_or_insert_with(RetroFXConfig::default);
+    if !retrofx
+        .parallax_layers
+        .iter()
+        .any(|layer| layer.id == layer_id)
+    {
+        retrofx.parallax_layers.push(RetroFXParallaxLayer {
+            id: layer_id.to_string(),
+            name: name.to_string(),
+            speed_x: delta.0,
+            speed_y: delta.1,
+            enabled: true,
+        });
+    }
+}
+
 fn static_mugen_sprite_entity(
     entity_id: &str,
     display_name: &str,
@@ -6310,6 +7089,8 @@ fn static_mugen_sprite_entity(
     y: i32,
 ) -> Result<Entity, LoadError> {
     let (width, height) = image::image_dimensions(asset_abs).unwrap_or((32, 32));
+    let map_width = width.div_ceil(8).max(1);
+    let map_height = height.div_ceil(8).max(1);
     Ok(Entity {
         entity_id: entity_id.to_string(),
         display_name: Some(display_name.to_string()),
@@ -6326,6 +7107,14 @@ fn static_mugen_sprite_entity(
                 priority: "background".to_string(),
                 meta_sprite: width > 32 || height > 32,
                 commands: Vec::new(),
+            }),
+            tilemap: Some(TilemapComponent {
+                tileset: asset_rel.to_string(),
+                map_width,
+                map_height,
+                scroll_x: 0,
+                scroll_y: 0,
+                cells: Vec::new(),
             }),
             ..Components::default()
         },
@@ -7122,7 +7911,8 @@ pub fn import_external_project(
             })
         }
         "mugen" | "ikemen_go" => {
-            let report = import_mugen_project(project_dir, source_path)?;
+            let report =
+                import_mugen_project_with_engine(project_dir, source_path, profile.source_engine)?;
             Ok(ExternalImportReport {
                 primary_scene: report.primary_scene,
                 imported_scenes: report.imported_scenes,
@@ -7158,7 +7948,7 @@ pub fn stamp_imported_external_profile_metadata(
             "imported_mugen".to_string(),
             "1.0.0".to_string(),
             "imported_mugen".to_string(),
-            "mugen_def_air_v1".to_string(),
+            "mugen_fighting_subset_v1".to_string(),
         ),
         "ikemen_go" => (
             "imported_ikemen_go".to_string(),
@@ -11483,7 +12273,7 @@ pub fn stamp_imported_mugen_metadata(
         "1.0.0".to_string(),
         "imported_mugen".to_string(),
         "mugen".to_string(),
-        "mugen_def_air_v1".to_string(),
+        "mugen_fighting_subset_v1".to_string(),
         source_path,
     )
 }
@@ -13811,6 +14601,9 @@ void tick_player(void) {\n\
                 "[Files]",
                 "anim = hero.air",
                 "sprite = hero.sff",
+                "cmd = hero.cmd",
+                "cns = hero.cns",
+                "st = specials.st",
                 "",
             ]
             .join("\n"),
@@ -13825,10 +14618,184 @@ void tick_player(void) {\n\
                 "0, 0, 0, 0, 4",
                 "Loopstart",
                 "0, 0, 0, 0, 4",
+                "",
+                "[Begin Action 20]",
+                "Clsn2: 1",
+                "Clsn2[0] = -8, -20, 8, 0",
+                "0, 0, 0, 0, 3",
+                "0, 0, 2, 0, 3",
+                "",
+                "[Begin Action 40]",
+                "Clsn2: 1",
+                "Clsn2[0] = -8, -20, 8, 0",
+                "0, 0, 0, -4, 5",
+                "",
+                "[Begin Action 200]",
+                "Clsn1: 1",
+                "Clsn1[0] = 4, -18, 24, -6",
+                "Clsn2: 1",
+                "Clsn2[0] = -8, -20, 12, 0",
+                "0, 0, 0, 0, 3",
+                "",
+                "[Begin Action 220]",
+                "Clsn1: 1",
+                "Clsn1[0] = 8, -18, 30, -4",
+                "Clsn2: 1",
+                "Clsn2[0] = -8, -20, 12, 0",
+                "0, 0, 0, 0, 3",
             ]
             .join("\n"),
         )
         .expect("write mugen air");
+        fs::write(
+            root.join("hero.cmd"),
+            [
+                "[Command]",
+                "name = \"hadouken\"",
+                "command = _2, _3, _6, _P",
+                "time = 18",
+                "",
+                "[Command]",
+                "name = \"punch\"",
+                "command = _P",
+                "time = 5",
+                "",
+                "[Statedef -1]",
+                "[State -1, Hadouken]",
+                "type = ChangeState",
+                "triggerall = command = \"hadouken\"",
+                "value = 220",
+                "",
+                "[State -1, Punch]",
+                "type = ChangeState",
+                "triggerall = command = \"punch\"",
+                "value = 200",
+            ]
+            .join("\n"),
+        )
+        .expect("write mugen cmd");
+        fs::write(
+            root.join("hero.cns"),
+            [
+                "[Statedef 0]",
+                "type = S",
+                "physics = S",
+                "anim = 0",
+                "",
+                "[Statedef 20]",
+                "type = S",
+                "physics = S",
+                "anim = 20",
+                "",
+                "[State 20, Walk]",
+                "type = VelSet",
+                "trigger1 = Time = 0",
+                "x = 1",
+                "y = 0",
+                "",
+                "[Statedef 40]",
+                "type = A",
+                "physics = N",
+                "anim = 40",
+                "",
+                "[State 40, Jump]",
+                "type = VelSet",
+                "trigger1 = Time = 0",
+                "x = 0",
+                "y = -5",
+                "",
+                "[Statedef 200]",
+                "type = S",
+                "movetype = A",
+                "physics = S",
+                "anim = 200",
+                "",
+                "[State 200, VelSet]",
+                "type = VelSet",
+                "trigger1 = Time = 0",
+                "x = 0",
+                "y = 0",
+                "",
+                "[State 200, HitDef]",
+                "type = HitDef",
+                "trigger1 = AnimElem = 1",
+                "attr = S, NA",
+                "damage = 30, 4",
+                "pausetime = 8, 8",
+                "sparkno = 2",
+                "",
+                "[State 200, Snd]",
+                "type = PlaySnd",
+                "trigger1 = Time = 1",
+                "value = 0, 1",
+                "",
+                "[State 200, End]",
+                "type = ChangeState",
+                "trigger1 = AnimTime = 0",
+                "value = 0",
+                "",
+                "[Statedef 220]",
+                "type = S",
+                "movetype = A",
+                "physics = S",
+                "anim = 220",
+                "",
+                "[State 220, VelSet]",
+                "type = VelSet",
+                "trigger1 = Time = 0",
+                "x = 3",
+                "y = 0",
+                "",
+                "[State 220, HitDef]",
+                "type = HitDef",
+                "trigger1 = AnimElem = 1",
+                "attr = S, SP",
+                "damage = 45, 6",
+                "pausetime = 6, 6",
+                "sparkno = 3",
+                "",
+                "[State 220, Snd]",
+                "type = PlaySnd",
+                "trigger1 = Time = 1",
+                "value = 0, 1",
+                "",
+                "[State 220, End]",
+                "type = ChangeState",
+                "trigger1 = AnimTime = 0",
+                "value = 0",
+            ]
+            .join("\n"),
+        )
+        .expect("write mugen cns");
+        fs::write(
+            root.join("specials.st"),
+            [
+                "[Statedef 210]",
+                "type = A",
+                "movetype = A",
+                "physics = N",
+                "anim = 20",
+                "",
+                "[State 210, VelAdd]",
+                "type = VelAdd",
+                "trigger1 = Time > 0",
+                "x = -1",
+                "y = 2",
+                "",
+                "[State 210, PosAdd]",
+                "type = PosAdd",
+                "trigger1 = Time = 0",
+                "x = 4",
+                "y = -2",
+                "",
+                "[State 210, Ikemen extension]",
+                "type = AssertSpecial",
+                "trigger1 = !AILevel",
+                "flag = invisible",
+            ]
+            .join("\n"),
+        )
+        .expect("write mugen st");
         write_test_png(
             &root
                 .join("work")
@@ -13865,6 +14832,42 @@ void tick_player(void) {\n\
         .expect("write mugen stage def");
         write_test_png(&root.join("stage.png"), 160, 96, [32, 96, 200, 255]);
         fs::write(root.join("theme.mp3"), b"fake-mp3").expect("write mugen stage music");
+    }
+
+    fn write_mugen_stage_parallax_fixture(root: &Path) {
+        fs::create_dir_all(root.join("work").join("stage_sff").join("sd"))
+            .expect("create mugen parallax stage work dir");
+        fs::write(
+            root.join("stage.def"),
+            [
+                "[Info]",
+                "name = \"Parallax Stage\"",
+                "",
+                "[StageInfo]",
+                "zoffset = 190",
+                "",
+                "[BGdef]",
+                "spr = stage.sff",
+                "",
+                "[BG 0]",
+                "type = normal",
+                "spriteno = 0,0",
+                "start = 8, 16",
+                "delta = 2, 1",
+            ]
+            .join("\n"),
+        )
+        .expect("write parallax stage def");
+        write_test_png(
+            &root
+                .join("work")
+                .join("stage_sff")
+                .join("sd")
+                .join("0-0.png"),
+            128,
+            64,
+            [32, 96, 200, 255],
+        );
     }
 
     fn write_mugen_screenpack_fixture(root: &Path) {
@@ -15267,6 +16270,284 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
     }
 
     #[test]
+    fn import_mugen_character_converts_cmd_air_cns_st_to_fighting_nodes() {
+        let donor_root = temp_dir("mugen-fighting-donor");
+        let project_dir = temp_dir("mugen-fighting-project");
+        create_project_skeleton(&project_dir, "Imported MUGEN Fighter", "megadrive")
+            .expect("create project skeleton");
+        write_mugen_character_fixture(&donor_root);
+
+        import_mugen_project(&project_dir, &donor_root).expect("import mugen fighter");
+        let scene =
+            load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load imported fighter scene");
+        let fighter = scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "heromugen")
+            .expect("fighter entity");
+        let sprite = fighter.components.sprite.as_ref().expect("fighter sprite");
+
+        let hadouken = sprite
+            .commands
+            .iter()
+            .find(|command| command.id == "hadouken")
+            .expect("hadouken command binding");
+        assert_eq!(hadouken.notation, "_2, _3, _6, _P");
+        assert_eq!(hadouken.max_frames, 18);
+        assert_eq!(hadouken.button_profile, "megadrive");
+        assert_eq!(hadouken.target_animation, "action_220");
+        assert!(sprite.commands.iter().any(|command| command.id == "punch"));
+        for expected in ["idle", "action_20", "action_40", "action_200", "action_220"] {
+            assert!(
+                sprite.animations.contains_key(expected),
+                "BYOR fixture should expose {expected}"
+            );
+        }
+
+        let attack_anim = sprite
+            .animations
+            .get("action_220")
+            .expect("hadouken attack animation from AIR");
+        let first_mugen_frame = attack_anim
+            .mugen_frames
+            .as_ref()
+            .and_then(|frames| frames.first())
+            .expect("AIR metadata frame");
+        assert_eq!(first_mugen_frame.duration, 3);
+        assert!(
+            !first_mugen_frame.clsn1.is_empty(),
+            "CLSN1 hitboxes imported"
+        );
+        assert!(
+            !first_mugen_frame.clsn2.is_empty(),
+            "CLSN2 hurtboxes imported"
+        );
+
+        let logic = fighter.components.logic.as_ref().expect("fighter logic");
+        assert_eq!(logic.graph_origin.as_deref(), Some("mugen_fighting_import"));
+        assert_eq!(
+            logic
+                .imported_semantics
+                .as_ref()
+                .map(|semantics| semantics.gameplay_class.as_str()),
+            Some("fighting_2d")
+        );
+        assert!(logic
+            .external_source_refs
+            .iter()
+            .any(|path| path.ends_with("hero.cmd")));
+        assert!(logic
+            .external_source_refs
+            .iter()
+            .any(|path| path.ends_with("hero.cns")));
+        assert!(logic
+            .external_source_refs
+            .iter()
+            .any(|path| path.ends_with("specials.st")));
+
+        let graph_ref = logic.graph_ref.as_deref().expect("external graph ref");
+        let graph_raw = fs::read_to_string(project_dir.join(graph_ref)).expect("read graph ref");
+        let graph: serde_json::Value = serde_json::from_str(&graph_raw).expect("parse graph json");
+        let nodes = graph
+            .get("nodes")
+            .and_then(|nodes| nodes.as_array())
+            .expect("graph nodes");
+        let node_types = nodes
+            .iter()
+            .filter_map(|node| node.get("type").and_then(|value| value.as_str()))
+            .collect::<Vec<_>>();
+
+        assert!(node_types.contains(&"input_command"));
+        assert!(node_types.contains(&"fsm_state"));
+        assert!(node_types.contains(&"fsm_transition"));
+        assert!(
+            nodes.iter().any(|node| {
+                node.get("type").and_then(|value| value.as_str()) == Some("set_velocity")
+                    && node
+                        .get("params")
+                        .and_then(|params| params.get("mode"))
+                        .and_then(|value| value.as_str())
+                        == Some("set")
+            }),
+            "VelSet must materialize as set_velocity mode=set"
+        );
+        assert!(
+            nodes.iter().any(|node| {
+                node.get("type").and_then(|value| value.as_str()) == Some("set_velocity")
+                    && node
+                        .get("params")
+                        .and_then(|params| params.get("mode"))
+                        .and_then(|value| value.as_str())
+                        == Some("add")
+            }),
+            "VelAdd must materialize as set_velocity mode=add"
+        );
+        assert!(
+            node_types.contains(&"set_position"),
+            "PosAdd/PosSet nodes expected"
+        );
+        assert!(
+            node_types.contains(&"action_sound"),
+            "PlaySnd node expected"
+        );
+        assert!(
+            nodes.iter().any(|node| {
+                node.get("type").and_then(|value| value.as_str())
+                    == Some("bridge_unconverted_source")
+                    && node
+                        .get("params")
+                        .and_then(|params| params.get("gap"))
+                        .and_then(|value| value.as_str())
+                        == Some("mugen_hitdef")
+            }),
+            "HitDef must be an explicit bridge while native attack node is absent"
+        );
+
+        let _ = fs::remove_dir_all(project_dir);
+        let _ = fs::remove_dir_all(donor_root);
+    }
+
+    #[test]
+    fn import_mugen_stage_background_materializes_tilemap_and_parallax_metadata() {
+        let donor_root = temp_dir("mugen-stage-parallax-donor");
+        let project_dir = temp_dir("mugen-stage-parallax-project");
+        create_project_skeleton(&project_dir, "Imported MUGEN Stage", "megadrive")
+            .expect("create project skeleton");
+        write_mugen_stage_parallax_fixture(&donor_root);
+
+        import_mugen_project(&project_dir, &donor_root).expect("import mugen stage");
+        let scene =
+            load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load imported stage scene");
+        let bg = scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "bg_0")
+            .expect("stage background entity");
+        assert!(
+            bg.components.tilemap.is_some(),
+            "stage BG should be editable as tilemap metadata"
+        );
+        assert!(
+            scene.background_layers.iter().any(|layer| {
+                layer.layer_id == "bg_0"
+                    && layer.tileset.contains("parallaxstage_bg_0_0_0.png")
+                    && layer
+                        .scroll_speed
+                        .as_ref()
+                        .is_some_and(|speed| speed.x == 2 && speed.y == 1)
+            }),
+            "stage delta should be preserved as parallax background layer"
+        );
+        assert!(
+            scene
+                .retrofx
+                .as_ref()
+                .is_some_and(|retrofx| retrofx.parallax_layers.iter().any(|layer| {
+                    layer.id == "bg_0" && layer.speed_x == 2 && layer.speed_y == 1
+                })),
+            "stage delta should be visible in RetroFX parallax metadata"
+        );
+
+        let _ = fs::remove_dir_all(project_dir);
+        let _ = fs::remove_dir_all(donor_root);
+    }
+
+    #[test]
+    fn import_ikemen_go_preserves_profile_and_bridges_unsupported_extensions() {
+        let donor_root = temp_dir("ikemen-fighting-donor");
+        let project_dir = temp_dir("ikemen-fighting-project");
+        create_project_skeleton(&project_dir, "Imported IKEMEN", "megadrive")
+            .expect("create project skeleton");
+        write_mugen_character_fixture(&donor_root);
+
+        import_external_project(&project_dir, "ikemen_go", &donor_root)
+            .expect("import ikemen through mugen adapter");
+        let project =
+            stamp_imported_external_profile_metadata(&project_dir, "ikemen_go", &donor_root)
+                .expect("stamp ikemen metadata");
+        let metadata = project.template_metadata.expect("template metadata");
+        assert_eq!(metadata.source_kind, "imported_ikemen_go");
+        assert_eq!(metadata.source_engine.as_deref(), Some("ikemen_go"));
+        assert_eq!(
+            metadata.import_profile.as_deref(),
+            Some("ikemen_go_mugen_v1")
+        );
+
+        let scene =
+            load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load imported ikemen scene");
+        let fighter = scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "heromugen")
+            .expect("fighter entity");
+        let logic = fighter.components.logic.as_ref().expect("fighter logic");
+        let graph_ref = logic.graph_ref.as_deref().expect("external graph ref");
+        let graph_raw = fs::read_to_string(project_dir.join(graph_ref)).expect("read graph ref");
+        assert!(
+            graph_raw.contains("\"bridge_unconverted_source\"")
+                && graph_raw.contains("AssertSpecial"),
+            "Ikemen/MUGEN extensions must become explicit bridges instead of disappearing"
+        );
+
+        let _ = fs::remove_dir_all(project_dir);
+        let _ = fs::remove_dir_all(donor_root);
+    }
+
+    #[test]
+    fn import_mugen_reimport_keeps_commands_and_graph_idempotent() {
+        let donor_root = temp_dir("mugen-reimport-fighting-donor");
+        let project_dir = temp_dir("mugen-reimport-fighting-project");
+        create_project_skeleton(&project_dir, "Imported MUGEN Reimport", "megadrive")
+            .expect("create project skeleton");
+        write_mugen_character_fixture(&donor_root);
+
+        import_mugen_project(&project_dir, &donor_root).expect("first import");
+        let first_scene = load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load first scene");
+        let first_logic = first_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "heromugen")
+            .and_then(|entity| entity.components.logic.as_ref())
+            .expect("first logic");
+        let graph_ref = first_logic
+            .graph_ref
+            .as_deref()
+            .expect("first graph ref")
+            .to_string();
+        let first_graph = fs::read_to_string(project_dir.join(&graph_ref)).expect("first graph");
+
+        import_mugen_project(&project_dir, &donor_root).expect("second import");
+        let second_scene =
+            load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load second scene");
+        let second_fighter = second_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "heromugen")
+            .expect("second fighter");
+        let second_sprite = second_fighter
+            .components
+            .sprite
+            .as_ref()
+            .expect("second sprite");
+        let second_logic = second_fighter
+            .components
+            .logic
+            .as_ref()
+            .expect("second logic");
+        let second_graph = fs::read_to_string(
+            project_dir.join(second_logic.graph_ref.as_deref().expect("second graph ref")),
+        )
+        .expect("second graph");
+
+        assert_eq!(second_sprite.commands.len(), 2);
+        assert_eq!(first_graph, second_graph);
+        assert_eq!(second_logic.graph_ref.as_deref(), Some(graph_ref.as_str()));
+
+        let _ = fs::remove_dir_all(project_dir);
+        let _ = fs::remove_dir_all(donor_root);
+    }
+
+    #[test]
     fn import_godot_project_creates_native_scene_with_sprite_audio_camera_and_skips() {
         let donor_root = temp_dir("godot-import-root");
         let project_dir = temp_dir("godot-import-project");
@@ -15670,13 +16951,27 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .parent()
             .expect("workspace root")
             .to_path_buf();
-        let sample_roots = [
-            repo_root.join("data").join("character air"),
-            repo_root.join("data").join("background air"),
-            repo_root.join("data").join("screenpack air"),
+        let mut sample_roots = vec![
+            ("mugen", repo_root.join("data").join("character air")),
+            ("mugen", repo_root.join("data").join("background air")),
+            ("mugen", repo_root.join("data").join("screenpack air")),
         ];
+        sample_roots.extend([
+            (
+                "ikemen_go",
+                PathBuf::from(
+                    "F:\\Projects\\Engine Template\\Games Engines\\Ikemen-GO\\Screenpacks",
+                ),
+            ),
+            (
+                "ikemen_go",
+                PathBuf::from(
+                    "F:\\Projects\\Engine Template\\Games Engines\\Ikemen-GO\\Modules\\Engine-Modules\\repo\\external\\mods\\ratio\\ikemen1",
+                ),
+            ),
+        ]);
 
-        for sample_root in sample_roots {
+        for (profile, sample_root) in sample_roots {
             if !sample_root.is_dir() {
                 eprintln!("[mugen-sample-skip] {}", sample_root.display());
                 continue;
@@ -15686,9 +16981,29 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             create_project_skeleton(&project_dir, "Repo Sample MUGEN", "megadrive")
                 .expect("create sample project skeleton");
 
-            let report =
-                import_mugen_project(&project_dir, &sample_root).expect("import repo sample root");
+            let report = match import_external_project(&project_dir, profile, &sample_root) {
+                Ok(report) => report,
+                Err(error) if profile == "ikemen_go" => {
+                    eprintln!("[mugen-sample-skip] {}: {}", sample_root.display(), error);
+                    let _ = fs::remove_dir_all(project_dir);
+                    continue;
+                }
+                Err(error) => panic!(
+                    "import repo sample root '{}': {}",
+                    sample_root.display(),
+                    error
+                ),
+            };
             assert!(report.imported_scenes > 0, "{}", sample_root.display());
+            assert!(
+                report.primary_scene.entities.iter().any(|entity| {
+                    entity.components.sprite.is_some()
+                        || entity.components.tilemap.is_some()
+                        || entity.components.logic.is_some()
+                }),
+                "{} must produce editable imported nodes/assets",
+                sample_root.display()
+            );
 
             let _ = fs::remove_dir_all(project_dir);
         }

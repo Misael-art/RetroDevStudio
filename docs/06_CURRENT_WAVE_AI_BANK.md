@@ -3,6 +3,7 @@
 * **Integrado (artstudio M):** slots canonicos seq_idle..seq_attack, pplyToScene E2E, vitest threads, mockReset nos testes.
 **Ultima Atualizacao:** 2026-05-20 (rodada 51 - SNES no-code parity hardening)
 **Ultima Atualizacao:** 2026-05-20 (rodada 48 - GameMaker YY/GML subset experimental)
+**Ultima Atualizacao:** 2026-05-20 (rodada 51 - MUGEN/Ikemen fighting subset Experimental)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -47,6 +48,14 @@
   - **Gates locais:** suite SNES focada, `npx vitest run src/core/nodegraph/nodeCompiler.test.ts`, `npm run preflight:sgdk-e2e`, `validate-upstream-windows.ps1 -SkipRustTests`, `npm run build:debug`, `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo clippy`, `cargo test --lib` e `git diff --check`.
   - **Status honesto:** SNES esta em **hardening/paridade do subset no-code** com Mega Drive para a vertical validada; isto **nao** declara SNES Stable amplo, nao mexe em importadores externos e nao antecipa fases futuras.
   - **Proximo passo imediato:** abrir PR/checks remotos desta branch e manter qualquer nova expansao SNES condicionada a repetir ROM real + Libretro visivel + report `fake_toolchain_used=false`.
+* **O que acabou de acontecer (2026-05-20 rodada 51 - branch `codex/mugen-ikemen-fighting-import-f`):**
+  - **MUGEN/Ikemen-GO Experimental endurecido:** o adapter MUGEN agora coleta `.cmd`, `.cns`, `.st`, `stcommon`/`st*` a partir do `.def`, mantendo o fluxo Project Manager/UGDM e preservando `source_engine` quando a entrada vem pelo perfil `ikemen_go`.
+  - **Nodes editaveis de luta 2D:** CMD gera `SpriteComponent.commands` e nodes `input_command`; CNS/ST geram `fsm_state`, `fsm_transition` para `ChangeState`, `set_velocity` para `VelSet`/`VelAdd`, `set_position` para `PosSet`/`PosAdd`, `action_sound` para `PlaySnd`; AIR continua materializando animacoes e agora a fixture prova `CLSN1/CLSN2` em frames de ataque.
+  - **Bridges explicitas, sem perda silenciosa:** `HitDef` fica como `bridge_unconverted_source` com gap `mugen_hitdef`; controllers nao suportados/IKEMEN extensions, como `AssertSpecial`, ficam como bridge `mugen_unsupported_controller`. Isto evita claim falsa de compatibilidade total e deixa o que falta editavel/auditavel.
+  - **Stages/screenpacks:** backgrounds importados ganham `TilemapComponent`, `background_layers.scroll_speed` e `retrofx.parallax_layers` a partir de `delta`, preservando parallax basico e assets visuais.
+  - **Harness/fixtures:** a fixture BYOR-safe cobre idle, walk, jump, punch, comando estilo hadouken, hitbox/hurtbox, audio, velocidade/posicao e extensao Ikemen preservada como bridge. O teste ignorado de samples procura roots locais/repo quando existirem, pulando apenas roots Ikemen nao robustos.
+  - **Gates executados:** `check:tree`, `lint`, `tsc --noEmit`, `npm test` **322/322**, `cargo test --lib mugen`, `cargo test --lib ikemen`, `cargo test --lib import_mugen_project_supports_repo_sample_roots_when_present -- --ignored`, `cargo clippy -D warnings` e `cargo test --lib --test-threads=1` **351 passed / 17 ignored**. Os roots Ikemen locais encontrados nao eram samples robustos e ficaram como skip explicito.
+  - **Status honesto:** MUGEN e Ikemen-GO seguem **Experimental/importaveis**. O subset funcional aumenta a superficie real, mas nao declara paridade MUGEN/Ikemen completa; build ROM/Libretro so conta quando o grafo importado cair no subset de nodes/SGDK suportado.
 
 * **O que acabou de acontecer (2026-05-20 rodada 50 - branch `codex/product-ui-workspace-redesign`):**
   - **Bloco H (QA RC):** `assertUiLayoutHealth()` no `scripts/e2e-tauri-build-run.mjs` valida topbar (overflow, colunas, botao Build compacto), painel central, guia, paineis laterais por workspace, console drawer vs status bar, NodeGraph side rail vs canvas/minimap/toolbar, e sobreposicao de botoes com limiar conservador.

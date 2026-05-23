@@ -769,7 +769,7 @@ function defaultExternalImportProfiles() {
       id: "mugen",
       name: "MUGEN",
       family: "Fighting",
-      description: "Importa personagem, stage e screenpack via DEF/AIR com assets visuais e sonoros reais.",
+      description: "Importa personagem, stage e screenpack via DEF/AIR/CMD/CNS/ST como subset experimental de luta 2D.",
       source_engine: "mugen",
       support_status: "Experimental",
       supported_levels: ["L1", "L2", "L3"],
