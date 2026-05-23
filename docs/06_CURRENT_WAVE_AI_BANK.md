@@ -5,6 +5,7 @@
 **Ultima Atualizacao:** 2026-05-20 (rodada 48 - GameMaker YY/GML subset experimental)
 **Ultima Atualizacao:** 2026-05-20 (rodada 51 - MUGEN/Ikemen fighting subset Experimental)
 **Ultima Atualizacao:** 2026-05-20 (rodada 51 - OpenBOR beat'em up subset)
+**Ultima Atualizacao:** 2026-05-20 (rodada 49 - SGDK Logic Extractor v1)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -83,6 +84,13 @@
   - **Testes:** `workspaceLayout.test.ts` + regressoes em `App.test.tsx` (guia compacto, ArtStudio sem inspector global, game playtest).
   - **Gates locais:** `check:tree`, `lint`, `tsc`, `npm test` **322/322**, `cargo clippy`, `cargo test --lib` **347/17 ignored**, `preflight:sgdk-e2e`, `test:e2e:desktop:qa-rc` A-G (`qa-rc-2026-05-19T21-06-34-338Z-*`), `build:debug`.
   - **Status honesto:** UI production hardening **NAO** fechado — falta polimento profundo de Scene/NodeGraph/Debug, capturas em 1366/1920/2560 e QA RC fresco. SGDK Stable **sem promocao**; Node Engine **sem promocao**; superficies Experimentais inalteradas.
+* **O que acabou de acontecer (2026-05-20 rodada 49 - branch `codex/sgdk-real-proof-integration`):**
+  - **Worktree isolado:** trabalho feito em `F:\Projects\RetroDevStudio-sgdk-real-proof`, baseado em `origin/codex/project-cohesion-full-build`; branches dos agentes SGDK/nodes A/B/C nao foram tocadas.
+  - **SGDK Logic Extractor v1:** `src-tauri/src/core/sgdk_corpus_inventory.rs` agora preenche `canonical_model.logic_systems` com modelo serializavel de funcoes, chamadas, FSMs, estados, transicoes, condicoes, acoes SGDK/input/movimento, refs de entidades/pools, source mappings, semantic gaps/bridges e confidence.
+  - **Conversao honesta:** enum e `#define STATE_*`/`PLAYER_*`/`GAME_*`/`SCENE_*`, variaveis `gameState`/`playerState`/`currentState`/`state`/`mode`/`scene`/`phase`, `switch`/`case`, `if (state == X)`, `state = X`, `JOY_readJoypad`/`BUTTON_*`, acoes `SPR_*`, `VDP_*`, `MAP_*`, `XGM_*`, main loop/vblank, movimento `x +=`/`velX` e pools `enemy[i]`/`MAX_ENEMIES` entram como semantica convertivel quando simples. Macros complexas, preprocessor ambiguo, assembly, callbacks indiretos, encoding lossy e expressoes C complexas continuam bridge formal com mapping e gap acionavel.
+  - **Relatorio vertical host-local:** `cargo test ... sgdk_logic_real_corpus_vertical_reports --ignored` gerou `src-tauri/target-test/validation/sgdk-logic-extractor-v1/{platformer_2,nexzr_md,blaze_engine}.{json,md}`. Resultados: Platformer 2 `FSMs=0/states=1/transitions=0/actions=49/bridges=9/blocking_gaps=0`; NEXZR MD `FSMs=1/states=220/transitions=1/actions=92/bridges=465/blocking_gaps=0`; BLAZE_ENGINE `FSMs=2/states=3/transitions=2/actions=591/bridges=10/blocking_gaps=0`.
+  - **Gates verdes:** `npm run check:tree`; `npm run lint`; `npx tsc --noEmit`; `npm test` **315/315**; `cargo test --lib sgdk_logic` **7/1 ignored**; `sgdk_logic_real_corpus_vertical_reports --ignored` **1/1**; `sgdk_corpus_inventory` **11/2 ignored**; `sgdk_corpus_inventory_real_corpus_report --ignored` **122 projetos**; `sgdk_matrix_corpus_ --ignored` **7/7** com `SGDK_ROOT=F:\Projects\MegaDrive_DEV\sdk\sgdk-2.11` e `RETRODEV_LIBRETRO_CORE_MEGADRIVE=F:\Projects\RetroDevStudio\toolchains\libretro\cores\genesis_plus_gx_libretro.dll`; `cargo clippy -D warnings`; `cargo test --lib` **354/18 ignored**.
+  - **Status honesto:** esta fatia nao mexe na UI principal nem no NodeGraph visual e nao declara nova promocao Stable. Ela entrega a camada semantica SGDK -> modelo intermediario que o gerador de nodes pode consumir, preservando como bridge tudo que o v1 ainda nao converte com confianca.
 
 * **O que acabou de acontecer (2026-05-19 rodada 48 - branch `codex/project-cohesion-full-build`):**
   - **Consolidacao:** `origin/main` (ja com GameMaker vertical via PR #8) + `origin/codex/command-dat-artstudio-node-runtime` integrados em uma unica branch coesa.
@@ -1308,7 +1316,7 @@ As seguintes decisoes ja foram debatidas e sao finais:
 ## 4. PROXIMO PASSO IMEDIATO (PARA A IA EXECUTAR QUANDO SOLICITADA)
 
 **Tarefa:**
-Preservar o core MVP promovido em `main` e avancar apenas incrementos que mantenham a barra verde. A governanca do PR #4 foi fechada na rodada 41: PR merged, `main` em `91bb8eb354389e370bb59d6a5ae84c21b4a1429f`, checks remotos de `pull_request` verdes e `npm run release:readiness:promotion` verde no destino. O proximo trabalho nao deve reabrir a linha de release sem necessidade; deve atacar robustez de produto, Node Engine e SGDK em unidades pequenas, com SGDK/Node ainda marcados como `Experimental` ate corpus/round-trip/jogo por nodes provarem o contrario.
+Preservar o core MVP promovido em `main` e avancar incrementos que mantenham a barra verde. A consolidacao de `origin/codex/project-cohesion-full-build` reuniu GameMaker vertical e `command.dat`; a rodada 49 adicionou a camada semantica SGDK -> modelo intermediario. O proximo trabalho deve consumir `canonical_model.logic_systems` para gerar nodes reais/bridge nodes, sem voltar a heuristica rasa e sem chamar bridge de node editavel.
 
 **Pre-requisitos operacionais:**
 * Manter os 6 gates canonicos verdes em toda alteracao relevante.
@@ -1317,13 +1325,12 @@ Preservar o core MVP promovido em `main` e avancar apenas incrementos que manten
 * Reexecutar bundle MSI e smoke desktop em host Windows institucional sempre que a mudanca tocar packaging, emulacao, build orchestration, onboarding ou fluxo de projeto.
 * Se alterar emulacao ou build, consultar `docs/02_TECH_STACK.md`, `docs/07_TEST_AND_COMPLIANCE.md` e as fontes oficiais ja validadas para Libretro, SGDK e PVSnesLib.
 
-**Sequencia de acoes recomendada (rodada 41):**
-1. Criar nova branch `codex/...` a partir de `main` para qualquer codigo pos-promocao; nao misturar novas features direto no merge commit de release.
-2. Implementar primeiro robustez pequena e auditavel: cache/retry/backoff/mensagens do Runtime Setup, logs diagnosticos ou gates SGDK claros, com testes focados.
-3. Para Node Engine, adicionar semantica/validacao/codegen em fatias pequenas e provar determinismo antes de qualquer claim de jogo completo por nodes.
-4. Para SGDK_Engines, catalogar/cobrir buracos semanticos e round-trip por projeto real sem chamar heuristica de AST.
-5. Repetir os 6 gates canonicos em toda alteracao; adicionar `validate-upstream-windows.ps1 -SkipRustTests`, `preflight:sgdk-e2e`, `qa-rc`, corpus SGDK e packaging quando o escopo tocar build/toolchain/emulacao/release.
-6. Manter SGDK **Experimental** e Node Engine **Experimental/Parcial** ate haver corpus/round-trip e jogo criado por nodes com ROM buildada/rodando.
+**Sequencia de acoes recomendada (rodada 49):**
+1. Integrar o SGDK Logic Extractor v1 ao gerador de nodes em branch propria, consumindo `logic_systems` e preservando `semantic_gaps` como SGDK Bridge Node quando a conversao nao for segura.
+2. Criar testes de modelo -> nodes para as fixtures novas: enum/switch, `#define STATE_*`, input, animacao, transicao direta, macro complexa e BLAZE-like pools.
+3. Manter a UI principal fora do escopo ate o contrato de nodes estar verde; se precisar expor dados, usar exports pequenos e persistentes.
+4. Repetir `sgdk_logic`, `sgdk_corpus_inventory`, `sgdk_logic_real_corpus_vertical_reports --ignored` e matriz SGDK real quando a mudanca tocar corpus/BLAZE.
+5. Para qualquer claim de Stable, anexar SGDK oficial, ROM real, Libretro real e framebuffer visivel; fake continua somente fallback unitario nomeado.
 
 **Validacao minima obrigatoria antes de marcar qualquer item como concluido:**
 * `npm run check:tree`
