@@ -868,11 +868,7 @@ where
             "error",
             "Git Bash/MSYS2 real e obrigatorio para builds SNES/PVSnesLib no Windows. Instale Git Bash ou MSYS2; o shim WSL nao e suportado."
         );
-        return BuildResult {
-            ok: false,
-            rom_path: String::new(),
-            log,
-        };
+        return failed_build_result(target.target, log, Some(&workspace.root));
     }
 
     if let Err(error) = invoke_make(&toolchain, &workspace, target, &mut log, &on_log) {
@@ -2070,17 +2066,10 @@ fn sanitize_build_output_dir(output_dir: &str) -> Result<PathBuf, String> {
 }
 
 fn detect_root(env_var: &str, local_dir_name: &str) -> Option<PathBuf> {
-    let env_vars = if local_dir_name == "sgdk" {
-        vec![env_var, "GDK", "GDK_WIN"]
-    } else {
-        vec![env_var]
-    };
-    for candidate_env_var in env_vars {
-        if let Ok(path) = std::env::var(candidate_env_var) {
-            let path = PathBuf::from(path);
-            if path.exists() {
-                return Some(path);
-            }
+    if let Ok(path) = std::env::var(env_var) {
+        let path = PathBuf::from(path);
+        if path.exists() {
+            return Some(path);
         }
     }
 
@@ -2256,13 +2245,6 @@ mod tests {
             .get_or_init(|| Mutex::new(()))
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-    }
-
-    fn restore_env_var(name: &str, value: Option<OsString>) {
-        match value {
-            Some(value) => unsafe { std::env::set_var(name, value) },
-            None => unsafe { std::env::remove_var(name) },
-        }
     }
 
     fn temp_dir(prefix: &str) -> PathBuf {
@@ -3327,39 +3309,7 @@ PY\n"
         let _ = fs::remove_dir_all(sgdk_root);
     }
 
-    #[test]
-    fn sgdk_detection_accepts_gdk_env_alias() {
-        let _serial = test_serial_guard();
-        let root = temp_dir("gdk-env-alias");
-        fs::create_dir_all(root.join("bin")).expect("create sgdk bin");
-        fs::create_dir_all(root.join("inc")).expect("create sgdk inc");
-        fs::write(root.join("makefile.gen"), "# sgdk\n").expect("write makefile.gen");
-        fs::write(root.join("bin").join(platform_make_name()), "@echo off\n").expect("write make");
-
-        let previous_sgdk_root = std::env::var_os("SGDK_ROOT");
-        let previous_gdk = std::env::var_os("GDK");
-        let previous_gdk_win = std::env::var_os("GDK_WIN");
-        unsafe {
-            std::env::remove_var("SGDK_ROOT");
-            std::env::set_var("GDK", &root);
-            std::env::remove_var("GDK_WIN");
-        }
-
-        let detected = BuildEnvironment::detect();
-
-        restore_env_var("SGDK_ROOT", previous_sgdk_root);
-        restore_env_var("GDK", previous_gdk);
-        restore_env_var("GDK_WIN", previous_gdk_win);
-        let _ = fs::remove_dir_all(&root);
-
-        assert_eq!(detected.sgdk_root.as_deref(), Some(root.as_path()));
-        assert_eq!(
-            detected.sgdk_make_program.as_deref(),
-            Some(root.join("bin").join(platform_make_name()).as_path())
-        );
-    }
-
-    /// Quando `SGDK_ROOT`, `GDK`, `GDK_WIN` ou `toolchains/sgdk` apontam para uma instalação real com `makefile.gen`
+    /// Quando `SGDK_ROOT` ou `toolchains/sgdk` apontam para uma instalação real com `makefile.gen`
     /// e `make` funcional, prova build canónico sem fake-make. Em hosts sem toolchain, retorna cedo.
     #[test]
     fn megadrive_build_runs_with_detected_sgdk_toolchain_when_present() {

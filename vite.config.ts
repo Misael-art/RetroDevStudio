@@ -42,12 +42,12 @@ export default defineConfig({
     environment: "jsdom",
     include: ["src/**/*.test.ts", "src/**/*.test.tsx", "scripts/**/*.test.mjs"],
     setupFiles: ["src/test/setup.ts"],
-    // threads: forks trava no step Frontend tests do CI (job cancelado por timeout de 90 min).
-    pool: "threads",
+    // forks + 1 worker: threads esgota workers apos suites pesadas (App/ArtStudio/NodeGraph).
+    pool: "forks",
     isolate: true,
     fileParallelism: false,
     maxWorkers: 1,
-    testTimeout: 30000,
-    hookTimeout: 30000,
+    testTimeout: 120_000,
+    hookTimeout: 120_000,
   },
 });

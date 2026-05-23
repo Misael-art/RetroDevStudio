@@ -2300,15 +2300,17 @@ export default function App() {
       const result = await emulatorLoadRom(romPath);
       if (!result.ok) {
         setEmulatorLoaded(false);
+        const failureMessage = formatEmulatorFailureMessage(result.message);
+        logMessage("error", failureMessage);
         if (result.message.includes("Nenhum core Libretro")) {
-          openToolsWorkspace("setup", "editing");
+          openRuntimeSetupForIssue();
         }
         reportDiagnostic(
           result.diagnostics?.[0] ??
             createFallbackDiagnostic({
               area: "libretro_emulation",
               sourcePath: romPath,
-              technicalDetail: formatEmulatorFailureMessage(result.message),
+              technicalDetail: failureMessage,
             })
         );
         return;
@@ -2549,6 +2551,8 @@ export default function App() {
       const loadResult = await emulatorLoadRom(result.rom_path);
       if (!loadResult.ok) {
         setEmulatorLoaded(false);
+        const failureMessage = formatEmulatorFailureMessage(loadResult.message);
+        logMessage("error", failureMessage);
         if (loadResult.message.includes("Nenhum core Libretro")) {
           openRuntimeSetupForIssue();
         }
@@ -2557,7 +2561,7 @@ export default function App() {
             createFallbackDiagnostic({
               area: "libretro_emulation",
               sourcePath: result.rom_path,
-              technicalDetail: formatEmulatorFailureMessage(loadResult.message),
+              technicalDetail: failureMessage,
             })
         );
         return;

@@ -6761,6 +6761,7 @@ fn import_mugen_character_candidate(
             .collect(),
         source_paths: fighting_model.source_refs.clone(),
         audit_flags: mugen_import_audit_flags(&fighting_model),
+        ..ImportedLogicSemantics::default()
     });
     scene.entities.push(Entity {
         entity_id: entity_id.clone(),
@@ -12084,6 +12085,7 @@ fn openbor_logic_semantics(
         ],
         source_paths: vec![openbor_source_ref(root, source_file)],
         audit_flags: vec!["experimental_openbor_subset".to_string()],
+        ..ImportedLogicSemantics::default()
     }
 }
 
