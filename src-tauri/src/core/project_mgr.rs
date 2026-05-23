@@ -525,17 +525,75 @@ struct RpgMakerEventCommand {
 #[derive(Debug, Clone)]
 struct OpenBorModelAsset {
     name: String,
+    model_type: String,
+    source_file: PathBuf,
     display_asset: Option<PathBuf>,
     audio_assets: Vec<PathBuf>,
+    animations: HashMap<String, AnimationDef>,
+    collision_box: Option<OpenBorBox>,
+    attack_boxes: Vec<OpenBorAttackBox>,
+    movement_speed: i32,
+    facing: i32,
     logic_hints: Vec<String>,
+    unsupported_commands: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 struct OpenBorLevelAsset {
     name: String,
+    source_file: PathBuf,
     background_asset: Option<PathBuf>,
+    panel_assets: Vec<PathBuf>,
     music_asset: Option<PathBuf>,
+    spawns: Vec<OpenBorSpawn>,
+    scroll_dx: i32,
+    scroll_dy: i32,
     logic_hints: Vec<String>,
+    unsupported_scripts: Vec<OpenBorScriptBridge>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OpenBorBox {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OpenBorAttackBox {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    damage: i32,
+}
+
+#[derive(Debug, Clone)]
+struct OpenBorAnimationBlock {
+    name: String,
+    frames: Vec<PathBuf>,
+    delay: u32,
+    looping: bool,
+    loop_start: Option<u32>,
+    offset: Option<Pivot>,
+    bbox: Option<OpenBorBox>,
+    attacks: Vec<OpenBorAttackBox>,
+    notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OpenBorSpawn {
+    model_name: String,
+    x: i32,
+    y: i32,
+    order: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OpenBorScriptBridge {
+    label: String,
+    body: String,
 }
 
 struct ImportedSpriteEntitySpec {
@@ -11322,6 +11380,201 @@ fn validate_openbor_project_path(openbor_path: &Path) -> Result<(), LoadError> {
     )))
 }
 
+fn openbor_tokens(line: &str) -> Vec<String> {
+    line.split_whitespace()
+        .map(|token| {
+            token
+                .trim_matches(',')
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_string()
+        })
+        .filter(|token| !token.is_empty())
+        .collect()
+}
+
+fn openbor_command(tokens: &[String]) -> String {
+    tokens
+        .first()
+        .map(|token| token.trim_start_matches('@').to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+fn openbor_parse_i32(token: &str) -> Option<i32> {
+    token
+        .trim_matches(',')
+        .parse::<f32>()
+        .ok()
+        .map(|value| value.round() as i32)
+}
+
+fn openbor_parse_box(tokens: &[String]) -> Option<OpenBorBox> {
+    if tokens.len() < 5 {
+        return None;
+    }
+    let x = openbor_parse_i32(&tokens[1])?;
+    let y = openbor_parse_i32(&tokens[2])?;
+    let width = openbor_parse_i32(&tokens[3])?.unsigned_abs().max(1);
+    let height = openbor_parse_i32(&tokens[4])?.unsigned_abs().max(1);
+    Some(OpenBorBox {
+        x,
+        y,
+        width,
+        height,
+    })
+}
+
+fn openbor_parse_attack_box(tokens: &[String]) -> Option<OpenBorAttackBox> {
+    let body = openbor_parse_box(tokens)?;
+    let damage = tokens
+        .get(5)
+        .and_then(|value| openbor_parse_i32(value))
+        .unwrap_or(1);
+    Some(OpenBorAttackBox {
+        x: body.x,
+        y: body.y,
+        width: body.width,
+        height: body.height,
+        damage,
+    })
+}
+
+fn openbor_box_to_mugen_collision_box(bbox: &OpenBorBox) -> MugenCollisionBox {
+    MugenCollisionBox {
+        x1: bbox.x,
+        y1: bbox.y,
+        x2: bbox.x.saturating_add(bbox.width as i32),
+        y2: bbox.y.saturating_add(bbox.height as i32),
+    }
+}
+
+fn openbor_attack_to_mugen_collision_box(attack: &OpenBorAttackBox) -> MugenCollisionBox {
+    MugenCollisionBox {
+        x1: attack.x,
+        y1: attack.y,
+        x2: attack.x.saturating_add(attack.width as i32),
+        y2: attack.y.saturating_add(attack.height as i32),
+    }
+}
+
+fn openbor_start_animation(name: String) -> OpenBorAnimationBlock {
+    OpenBorAnimationBlock {
+        name,
+        frames: Vec::new(),
+        delay: 8,
+        looping: false,
+        loop_start: None,
+        offset: None,
+        bbox: None,
+        attacks: Vec::new(),
+        notes: Vec::new(),
+    }
+}
+
+fn openbor_animation_to_def(block: &OpenBorAnimationBlock) -> AnimationDef {
+    let frame_count = block.frames.len().max(1);
+    let frames = (0..frame_count as u32).collect::<Vec<_>>();
+    let fps = (60 / block.delay.max(1)).max(1);
+    let frame_durations = Some(vec![block.delay as i32; frame_count]);
+    let has_boxes = block.bbox.is_some() || !block.attacks.is_empty() || block.offset.is_some();
+    let mugen_frames = has_boxes.then(|| {
+        let mut flags = block.notes.clone();
+        flags.extend(
+            block
+                .attacks
+                .iter()
+                .map(|attack| format!("openbor_attack_damage:{}", attack.damage)),
+        );
+        (0..frame_count)
+            .map(|index| MugenAnimationFrame {
+                group: 0,
+                image: index as i32,
+                axis: block.offset.clone(),
+                duration: block.delay as i32,
+                flags: flags.clone(),
+                clsn1: block
+                    .attacks
+                    .iter()
+                    .map(openbor_attack_to_mugen_collision_box)
+                    .collect(),
+                clsn2: block
+                    .bbox
+                    .as_ref()
+                    .map(openbor_box_to_mugen_collision_box)
+                    .into_iter()
+                    .collect(),
+            })
+            .collect()
+    });
+
+    AnimationDef {
+        frames,
+        fps,
+        looping: block.looping,
+        frame_durations,
+        loop_start: block.loop_start,
+        mugen_frames,
+    }
+}
+
+fn openbor_push_animation(
+    animations: &mut HashMap<String, AnimationDef>,
+    logic_hints: &mut Vec<String>,
+    collision_box: &mut Option<OpenBorBox>,
+    attack_boxes: &mut Vec<OpenBorAttackBox>,
+    current: Option<OpenBorAnimationBlock>,
+) {
+    let Some(block) = current else {
+        return;
+    };
+    if collision_box.is_none() {
+        *collision_box = block.bbox.clone();
+    }
+    attack_boxes.extend(block.attacks.clone());
+    if !block.attacks.is_empty() {
+        logic_hints.push(format!(
+            "OpenBOR anim '{}' exportou {} attack/hitbox(es).",
+            block.name,
+            block.attacks.len()
+        ));
+    }
+    if block.bbox.is_some() {
+        logic_hints.push(format!(
+            "OpenBOR anim '{}' exportou bbox de colisao.",
+            block.name
+        ));
+    }
+    animations.insert(block.name.clone(), openbor_animation_to_def(&block));
+}
+
+fn openbor_manifest_candidates(line: &str) -> Vec<String> {
+    let tokens = openbor_tokens(line);
+    if tokens.is_empty() {
+        return Vec::new();
+    }
+    let command = openbor_command(&tokens);
+    let mut candidates = Vec::new();
+    for token in tokens.iter().skip(usize::from(matches!(
+        command.as_str(),
+        "load" | "know" | "model" | "file" | "level"
+    ))) {
+        if token.to_ascii_lowercase().ends_with(".txt") {
+            candidates.push(token.clone());
+        }
+    }
+    if candidates.is_empty() && tokens[0].to_ascii_lowercase().ends_with(".txt") {
+        candidates.push(tokens[0].clone());
+    }
+    candidates
+}
+
+fn openbor_source_ref(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .ok()
+        .map(normalize_relative_path)
+        .unwrap_or_else(|| path.to_string_lossy().to_string())
+}
+
 fn parse_openbor_model_file(root: &Path, path: &Path) -> Result<OpenBorModelAsset, LoadError> {
     let content = read_text_lossy(path)?;
     let mut name = path
@@ -11329,9 +11582,17 @@ fn parse_openbor_model_file(root: &Path, path: &Path) -> Result<OpenBorModelAsse
         .map(|stem| stem.to_string_lossy().trim().to_string())
         .filter(|stem| !stem.is_empty())
         .unwrap_or_else(|| "openbor_model".to_string());
+    let mut model_type = "enemy".to_string();
     let mut display_asset = None;
     let mut audio_assets = Vec::new();
     let mut logic_hints = Vec::new();
+    let mut animations = HashMap::new();
+    let mut collision_box = None;
+    let mut attack_boxes = Vec::new();
+    let mut movement_speed = 2;
+    let mut facing = 1;
+    let mut unsupported_commands = Vec::new();
+    let mut current_anim: Option<OpenBorAnimationBlock> = None;
 
     for line in content.lines() {
         let trimmed = line.trim();
@@ -11339,10 +11600,103 @@ fn parse_openbor_model_file(root: &Path, path: &Path) -> Result<OpenBorModelAsse
             continue;
         }
         let lowered = trimmed.to_ascii_lowercase();
-        let parts = trimmed.split_whitespace().collect::<Vec<_>>();
-        if parts.len() >= 2 && parts[0].eq_ignore_ascii_case("name") {
+        let parts = openbor_tokens(trimmed);
+        let command = openbor_command(&parts);
+        if parts.len() >= 2 && command == "name" {
             name = parts[1..].join(" ");
         }
+        if parts.len() >= 2 && command == "type" {
+            model_type = parts[1].to_ascii_lowercase();
+        }
+        if parts.len() >= 2 && matches!(command.as_str(), "speed" | "runspeed") {
+            if let Some(value) = openbor_parse_i32(&parts[1]) {
+                movement_speed = value.abs().max(1);
+            }
+        }
+        if parts.len() >= 2 && command == "facing" {
+            if let Some(value) = openbor_parse_i32(&parts[1]) {
+                facing = if value < 0 { -1 } else { 1 };
+            }
+        }
+
+        if command == "anim" && parts.len() >= 2 {
+            openbor_push_animation(
+                &mut animations,
+                &mut logic_hints,
+                &mut collision_box,
+                &mut attack_boxes,
+                current_anim.take(),
+            );
+            current_anim = Some(openbor_start_animation(parts[1..].join("_")));
+            logic_hints.push(format!(
+                "Modelo OpenBOR usa bloco anim '{}'.",
+                parts[1..].join(" ")
+            ));
+            continue;
+        }
+
+        if let Some(anim) = current_anim.as_mut() {
+            match command.as_str() {
+                "delay" => {
+                    if let Some(value) = parts.get(1).and_then(|value| openbor_parse_i32(value)) {
+                        anim.delay = value.max(1) as u32;
+                    }
+                }
+                "loop" => {
+                    let enabled = parts
+                        .get(1)
+                        .and_then(|value| openbor_parse_i32(value))
+                        .map(|value| value != 0)
+                        .unwrap_or(true);
+                    anim.looping = enabled;
+                    anim.loop_start = enabled.then_some(0);
+                }
+                "offset" if parts.len() >= 3 => {
+                    if let (Some(x), Some(y)) =
+                        (openbor_parse_i32(&parts[1]), openbor_parse_i32(&parts[2]))
+                    {
+                        anim.offset = Some(Pivot { x, y });
+                    }
+                }
+                "bbox" => {
+                    if let Some(bbox) = openbor_parse_box(&parts) {
+                        anim.bbox = Some(bbox);
+                    }
+                }
+                command if command.starts_with("attack") => {
+                    if let Some(attack) = openbor_parse_attack_box(&parts) {
+                        anim.attacks.push(attack);
+                    }
+                }
+                "jumpframe" | "landframe" => {
+                    anim.notes
+                        .push(format!("openbor_{}:{}", command, parts[1..].join(" ")));
+                    logic_hints.push(format!(
+                        "Modelo OpenBOR usa comando '{}' em anim '{}'.",
+                        command, anim.name
+                    ));
+                }
+                "frame" => {
+                    for token in &parts[1..] {
+                        if string_looks_like_visual_asset(token) {
+                            if let Some(asset) = resolve_external_asset_candidate(
+                                root,
+                                path.parent().unwrap_or(root),
+                                token,
+                            ) {
+                                if display_asset.is_none() {
+                                    display_asset = Some(asset.clone());
+                                }
+                                anim.frames.push(asset);
+                                break;
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
         for token in &parts[1..] {
             if display_asset.is_none() && string_looks_like_visual_asset(token) {
                 display_asset =
@@ -11358,19 +11712,36 @@ fn parse_openbor_model_file(root: &Path, path: &Path) -> Result<OpenBorModelAsse
         }
         for keyword in [
             "anim",
+            "bbox",
             "attack",
             "jump",
             "spawnframe",
             "followanim",
             "combostep",
             "sound",
+            "speed",
+            "facing",
         ] {
             if lowered.starts_with(keyword) {
                 logic_hints.push(format!("Modelo OpenBOR usa comando '{}'.", keyword));
                 break;
             }
         }
+        if command.contains("script") || trimmed.starts_with('@') {
+            unsupported_commands.push(trimmed.to_string());
+            logic_hints.push(format!(
+                "Modelo OpenBOR preservou comando/script nao convertido: {}",
+                command
+            ));
+        }
     }
+    openbor_push_animation(
+        &mut animations,
+        &mut logic_hints,
+        &mut collision_box,
+        &mut attack_boxes,
+        current_anim.take(),
+    );
 
     if display_asset.is_none() {
         display_asset = resolve_named_asset(
@@ -11383,9 +11754,17 @@ fn parse_openbor_model_file(root: &Path, path: &Path) -> Result<OpenBorModelAsse
 
     Ok(OpenBorModelAsset {
         name,
+        model_type,
+        source_file: path.to_path_buf(),
         display_asset,
         audio_assets: dedupe_paths(audio_assets),
+        animations,
+        collision_box,
+        attack_boxes,
+        movement_speed,
+        facing,
         logic_hints,
+        unsupported_commands,
     })
 }
 
@@ -11412,12 +11791,14 @@ fn load_openbor_model_assets(openbor_path: &Path) -> Result<Vec<OpenBorModelAsse
             if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
                 continue;
             }
-            if let Some(candidate) = resolve_external_asset_candidate(
-                openbor_path,
-                manifest.parent().unwrap_or(openbor_path),
-                trimmed,
-            ) {
-                model_paths.push(candidate);
+            for candidate_text in openbor_manifest_candidates(trimmed) {
+                if let Some(candidate) = resolve_external_asset_candidate(
+                    openbor_path,
+                    manifest.parent().unwrap_or(openbor_path),
+                    &candidate_text,
+                ) {
+                    model_paths.push(candidate);
+                }
             }
         }
     }
@@ -11443,21 +11824,87 @@ fn parse_openbor_level_file(root: &Path, path: &Path) -> Result<OpenBorLevelAsse
         .filter(|stem| !stem.is_empty())
         .unwrap_or_else(|| "openbor_level".to_string());
     let mut background_asset = None;
+    let mut panel_assets = Vec::new();
     let mut music_asset = None;
     let mut logic_hints = Vec::new();
+    let mut spawns = Vec::new();
+    let mut scroll_dx = 0;
+    let mut scroll_dy = 0;
+    let mut unsupported_scripts = Vec::new();
+    let mut active_script: Option<(String, Vec<String>)> = None;
 
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
             continue;
         }
+        if let Some((label, lines)) = active_script.as_mut() {
+            let command = openbor_command(&openbor_tokens(trimmed));
+            if command == "end_script" || command == "endscript" {
+                unsupported_scripts.push(OpenBorScriptBridge {
+                    label: label.clone(),
+                    body: lines.join("\n"),
+                });
+                active_script = None;
+            } else {
+                lines.push(trimmed.to_string());
+            }
+            continue;
+        }
         let lowered = trimmed.to_ascii_lowercase();
-        let parts = trimmed.split_whitespace().collect::<Vec<_>>();
-        if parts.len() >= 2 && parts[0].eq_ignore_ascii_case("name") {
+        let parts = openbor_tokens(trimmed);
+        let command = openbor_command(&parts);
+        if parts.len() >= 2 && command == "name" {
             name = parts[1..].join(" ");
         }
+        if command.contains("script") || trimmed.starts_with('@') {
+            active_script = Some((command.clone(), Vec::new()));
+            logic_hints.push(format!(
+                "Estagio OpenBOR preservou script nao convertido '{}'.",
+                command
+            ));
+            continue;
+        }
+        if parts.len() >= 2 && command == "spawn" {
+            let model_name = parts[1].clone();
+            spawns.push(OpenBorSpawn {
+                model_name,
+                x: 64,
+                y: 112,
+                order: spawns.len(),
+            });
+        }
+        if parts.len() >= 2 && command == "at" {
+            let numbers = parts[1..]
+                .iter()
+                .filter_map(|token| openbor_parse_i32(token))
+                .collect::<Vec<_>>();
+            if let Some(last) = spawns.last_mut() {
+                if let Some(x) = numbers.first() {
+                    last.x = *x;
+                }
+                if numbers.len() >= 3 {
+                    last.y = numbers[2];
+                } else if numbers.len() >= 2 {
+                    last.y = numbers[1];
+                }
+            }
+        }
+        if parts.len() >= 2 && matches!(command.as_str(), "scrollspeed" | "scroll") {
+            scroll_dx = openbor_parse_i32(&parts[1]).unwrap_or(scroll_dx);
+            scroll_dy = parts
+                .get(2)
+                .and_then(|value| openbor_parse_i32(value))
+                .unwrap_or(scroll_dy);
+        }
         for token in &parts[1..] {
-            if background_asset.is_none() && string_looks_like_visual_asset(token) {
+            if command == "panel" && string_looks_like_visual_asset(token) {
+                if let Some(panel) =
+                    resolve_external_asset_candidate(root, path.parent().unwrap_or(root), token)
+                {
+                    panel_assets.push(panel);
+                }
+            } else if background_asset.is_none() && string_looks_like_visual_asset(token) {
                 background_asset =
                     resolve_external_asset_candidate(root, path.parent().unwrap_or(root), token);
             }
@@ -11472,13 +11919,34 @@ fn parse_openbor_level_file(root: &Path, path: &Path) -> Result<OpenBorLevelAsse
                 break;
             }
         }
+        if matches!(
+            command.as_str(),
+            "panel" | "background" | "scrollspeed" | "at"
+        ) {
+            logic_hints.push(format!("Estagio OpenBOR usa comando '{}'.", command));
+        }
+    }
+    if let Some((label, lines)) = active_script.take() {
+        unsupported_scripts.push(OpenBorScriptBridge {
+            label,
+            body: lines.join("\n"),
+        });
+    }
+    if background_asset.is_none() {
+        background_asset = panel_assets.first().cloned();
     }
 
     Ok(OpenBorLevelAsset {
         name,
+        source_file: path.to_path_buf(),
         background_asset,
+        panel_assets: dedupe_paths(panel_assets),
         music_asset,
+        spawns,
+        scroll_dx,
+        scroll_dy,
         logic_hints,
+        unsupported_scripts,
     })
 }
 
@@ -11505,12 +11973,14 @@ fn load_openbor_level_assets(openbor_path: &Path) -> Result<Vec<OpenBorLevelAsse
             if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
                 continue;
             }
-            if let Some(candidate) = resolve_external_asset_candidate(
-                openbor_path,
-                manifest.parent().unwrap_or(openbor_path),
-                trimmed,
-            ) {
-                level_paths.push(candidate);
+            for candidate_text in openbor_manifest_candidates(trimmed) {
+                if let Some(candidate) = resolve_external_asset_candidate(
+                    openbor_path,
+                    manifest.parent().unwrap_or(openbor_path),
+                    &candidate_text,
+                ) {
+                    level_paths.push(candidate);
+                }
             }
         }
     }
@@ -11526,6 +11996,583 @@ fn load_openbor_level_assets(openbor_path: &Path) -> Result<Vec<OpenBorLevelAsse
         }
     }
     Ok(levels)
+}
+
+fn openbor_entity_role(model: &OpenBorModelAsset, is_first: bool) -> &'static str {
+    let text = format!("{} {}", model.name, model.model_type).to_ascii_lowercase();
+    if text.contains("player") || text.contains("hero") || is_first {
+        "player_avatar"
+    } else {
+        "enemy_actor"
+    }
+}
+
+fn openbor_collision_component(
+    model: &OpenBorModelAsset,
+    role: &str,
+) -> Option<CollisionComponent> {
+    let bbox = model.collision_box.as_ref()?;
+    let (layer, collides_with) = if role == "player_avatar" {
+        ("player".to_string(), vec!["enemy".to_string()])
+    } else {
+        ("enemy".to_string(), vec!["player".to_string()])
+    };
+    Some(CollisionComponent {
+        shape: "aabb".to_string(),
+        width: bbox.width,
+        height: bbox.height,
+        offset: Some(CollisionOffset {
+            x: bbox.x,
+            y: bbox.y,
+        }),
+        solid: true,
+        layer: Some(layer),
+        collides_with,
+    })
+}
+
+fn openbor_adjust_sprite_frame_size(entity: &mut Entity, source_path: &Path) {
+    let Some(sprite) = entity.components.sprite.as_mut() else {
+        return;
+    };
+    let max_frames = sprite
+        .animations
+        .values()
+        .map(|animation| animation.frames.len())
+        .max()
+        .unwrap_or(1)
+        .max(1) as u32;
+    if max_frames <= 1 {
+        return;
+    }
+    let Ok((width, height)) = image::image_dimensions(source_path) else {
+        return;
+    };
+    if width >= max_frames && width % max_frames == 0 {
+        sprite.frame_width = (width / max_frames).max(1);
+        sprite.frame_height = height.max(1);
+    }
+}
+
+fn openbor_logic_semantics(
+    root: &Path,
+    source_file: &Path,
+    role: &str,
+    confidence: &str,
+    reason: &str,
+) -> ImportedLogicSemantics {
+    ImportedLogicSemantics {
+        source: "openbor".to_string(),
+        gameplay_class: "beat_em_up_close_range_signals".to_string(),
+        entity_role: role.to_string(),
+        confidence: confidence.to_string(),
+        role_reason: reason.to_string(),
+        driver_functions: vec![
+            "anim".to_string(),
+            "bbox".to_string(),
+            "attack".to_string(),
+            "spawn".to_string(),
+        ],
+        source_paths: vec![openbor_source_ref(root, source_file)],
+        audit_flags: vec!["experimental_openbor_subset".to_string()],
+    }
+}
+
+fn openbor_exec_in() -> serde_json::Value {
+    serde_json::json!({"id":"exec","label":">","kind":"exec"})
+}
+
+fn openbor_exec_out() -> serde_json::Value {
+    serde_json::json!({"id":"exec","label":">","kind":"exec"})
+}
+
+fn openbor_bool_out(id: &str) -> serde_json::Value {
+    serde_json::json!({"id":id,"label":id,"kind":"data","dataType":"bool"})
+}
+
+#[allow(clippy::too_many_arguments)]
+fn openbor_graph_node(
+    id: &str,
+    node_type: &str,
+    label: &str,
+    group: &str,
+    lane: i32,
+    row: i32,
+    params: serde_json::Value,
+    inputs: Vec<serde_json::Value>,
+    outputs: Vec<serde_json::Value>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "type": node_type,
+        "label": label,
+        "group": group,
+        "origin": "openbor_beatemup_subset",
+        "source_reference": format!("openbor:{id}"),
+        "x": 80 + lane * 220,
+        "y": 80 + row * 140,
+        "inputs": inputs,
+        "outputs": outputs,
+        "params": params,
+    })
+}
+
+fn openbor_graph_edge(
+    id: &str,
+    from_node: &str,
+    from_port: &str,
+    to_node: &str,
+    to_port: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "fromNode": from_node,
+        "fromPort": from_port,
+        "toNode": to_node,
+        "toPort": to_port,
+    })
+}
+
+fn openbor_actor_graph(entity_id: &str, model: &OpenBorModelAsset, role: &str) -> String {
+    let has_walk = model.animations.contains_key("walk");
+    let has_attack = model.animations.contains_key("attack");
+    let speed = model.movement_speed.max(1);
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+
+    nodes.push(openbor_graph_node(
+        "ob_update",
+        "event_update",
+        "OpenBOR Tick",
+        "Game State",
+        0,
+        0,
+        serde_json::json!({}),
+        vec![],
+        vec![openbor_exec_out()],
+    ));
+
+    if role == "player_avatar" {
+        nodes.push(openbor_graph_node(
+            "ob_right",
+            "input_held",
+            "Walk Right",
+            "Input",
+            1,
+            0,
+            serde_json::json!({"pad":"JOY_1","button":"BUTTON_RIGHT"}),
+            vec![openbor_exec_in()],
+            vec![
+                openbor_exec_out(),
+                openbor_bool_out("true"),
+                openbor_bool_out("false"),
+            ],
+        ));
+        nodes.push(openbor_graph_node(
+            "ob_walk_velocity",
+            "set_velocity",
+            "Apply OpenBOR Speed",
+            "Physics",
+            2,
+            0,
+            serde_json::json!({"target":entity_id,"vx":speed,"vy":0,"facing":model.facing}),
+            vec![openbor_exec_in()],
+            vec![openbor_exec_out()],
+        ));
+        nodes.push(openbor_graph_node(
+            "ob_walk_anim",
+            "set_animation_state",
+            "Walk Animation",
+            "Animation",
+            3,
+            0,
+            serde_json::json!({"target":entity_id,"state": if has_walk { "walk" } else { "idle" }}),
+            vec![openbor_exec_in()],
+            vec![openbor_exec_out()],
+        ));
+        nodes.push(openbor_graph_node(
+            "ob_attack",
+            "input_pressed",
+            "Attack",
+            "Input",
+            4,
+            0,
+            serde_json::json!({"pad":"JOY_1","button":"BUTTON_B"}),
+            vec![openbor_exec_in()],
+            vec![
+                openbor_exec_out(),
+                openbor_bool_out("true"),
+                openbor_bool_out("false"),
+            ],
+        ));
+        nodes.push(openbor_graph_node(
+            "ob_attack_anim",
+            "set_animation_state",
+            "Attack Animation",
+            "Animation",
+            5,
+            0,
+            serde_json::json!({"target":entity_id,"state": if has_attack { "attack" } else { "idle" }}),
+            vec![openbor_exec_in()],
+            vec![openbor_exec_out()],
+        ));
+        nodes.push(openbor_graph_node(
+            "ob_camera_follow",
+            "camera_follow",
+            "Camera Follow",
+            "Camera",
+            6,
+            0,
+            serde_json::json!({"target":entity_id,"offset_x":-160,"offset_y":-112,"damping":0}),
+            vec![openbor_exec_in()],
+            vec![openbor_exec_out()],
+        ));
+        edges.extend([
+            openbor_graph_edge("ob_e_update_right", "ob_update", "exec", "ob_right", "exec"),
+            openbor_graph_edge(
+                "ob_e_right_velocity",
+                "ob_right",
+                "true",
+                "ob_walk_velocity",
+                "exec",
+            ),
+            openbor_graph_edge(
+                "ob_e_velocity_anim",
+                "ob_walk_velocity",
+                "exec",
+                "ob_walk_anim",
+                "exec",
+            ),
+            openbor_graph_edge(
+                "ob_e_anim_attack",
+                "ob_walk_anim",
+                "exec",
+                "ob_attack",
+                "exec",
+            ),
+            openbor_graph_edge(
+                "ob_e_right_false_attack",
+                "ob_right",
+                "false",
+                "ob_attack",
+                "exec",
+            ),
+            openbor_graph_edge(
+                "ob_e_attack_anim",
+                "ob_attack",
+                "true",
+                "ob_attack_anim",
+                "exec",
+            ),
+            openbor_graph_edge(
+                "ob_e_attack_anim_camera",
+                "ob_attack_anim",
+                "exec",
+                "ob_camera_follow",
+                "exec",
+            ),
+            openbor_graph_edge(
+                "ob_e_attack_false_camera",
+                "ob_attack",
+                "false",
+                "ob_camera_follow",
+                "exec",
+            ),
+        ]);
+    } else {
+        nodes.push(openbor_graph_node(
+            "ob_enemy_velocity",
+            "set_velocity",
+            "Enemy OpenBOR Speed",
+            "Physics",
+            1,
+            0,
+            serde_json::json!({"target":entity_id,"vx":model.facing * speed,"vy":0,"facing":model.facing}),
+            vec![openbor_exec_in()],
+            vec![openbor_exec_out()],
+        ));
+        nodes.push(openbor_graph_node(
+            "ob_enemy_anim",
+            "set_animation_state",
+            "Enemy Walk Animation",
+            "Animation",
+            2,
+            0,
+            serde_json::json!({"target":entity_id,"state": if has_walk { "walk" } else { "idle" }}),
+            vec![openbor_exec_in()],
+            vec![openbor_exec_out()],
+        ));
+        edges.extend([
+            openbor_graph_edge(
+                "ob_e_update_enemy_velocity",
+                "ob_update",
+                "exec",
+                "ob_enemy_velocity",
+                "exec",
+            ),
+            openbor_graph_edge(
+                "ob_e_enemy_velocity_anim",
+                "ob_enemy_velocity",
+                "exec",
+                "ob_enemy_anim",
+                "exec",
+            ),
+        ]);
+    }
+
+    serde_json::json!({
+        "version": 1,
+        "origin": "openbor_beatemup_subset",
+        "source_model": model.name,
+        "source_entity": entity_id,
+        "native_constructs": ["event_update", "set_velocity", "set_animation_state", "camera_follow"],
+        "nodes": nodes,
+        "edges": edges,
+    })
+    .to_string()
+}
+
+fn openbor_stage_controller_graph(
+    level: &OpenBorLevelAsset,
+    model_entity_ids: &HashMap<String, String>,
+    camera_entity_id: Option<&str>,
+) -> String {
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    nodes.push(openbor_graph_node(
+        "ob_stage_start",
+        "event_start",
+        "Stage Start",
+        "Game State",
+        0,
+        0,
+        serde_json::json!({}),
+        vec![],
+        vec![openbor_exec_out()],
+    ));
+    nodes.push(openbor_graph_node(
+        "ob_spawn_timeline",
+        "timeline_sequence",
+        "Spawn Timeline",
+        "Spawn/Room",
+        1,
+        0,
+        serde_json::json!({
+            "timeline_name": "openbor_spawns",
+            "slot_0_delay": 0,
+            "slot_1_delay": 30,
+            "slot_2_delay": 60,
+        }),
+        vec![openbor_exec_in()],
+        vec![
+            openbor_exec_out(),
+            serde_json::json!({"id":"slot_0","label":"0f","kind":"exec"}),
+            serde_json::json!({"id":"slot_1","label":"30f","kind":"exec"}),
+            serde_json::json!({"id":"slot_2","label":"60f","kind":"exec"}),
+        ],
+    ));
+    edges.push(openbor_graph_edge(
+        "ob_e_start_timeline",
+        "ob_stage_start",
+        "exec",
+        "ob_spawn_timeline",
+        "exec",
+    ));
+
+    for (index, spawn) in level.spawns.iter().take(3).enumerate() {
+        let key = slugify_scene_id(&spawn.model_name);
+        let prefab = model_entity_ids
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| key.clone());
+        let node_id = format!("ob_spawn_{}", index);
+        nodes.push(openbor_graph_node(
+            &node_id,
+            "spawn_entity",
+            &format!("Spawn {}", spawn.model_name),
+            "Spawn/Room",
+            2 + index as i32,
+            0,
+            serde_json::json!({"prefab":prefab,"x":spawn.x,"y":spawn.y,"source_order":spawn.order}),
+            vec![openbor_exec_in()],
+            vec![openbor_exec_out()],
+        ));
+        edges.push(openbor_graph_edge(
+            &format!("ob_e_timeline_spawn_{index}"),
+            "ob_spawn_timeline",
+            &format!("slot_{index}"),
+            &node_id,
+            "exec",
+        ));
+    }
+
+    nodes.push(openbor_graph_node(
+        "ob_stage_update",
+        "event_update",
+        "Stage Scroll Tick",
+        "Camera",
+        0,
+        1,
+        serde_json::json!({}),
+        vec![],
+        vec![openbor_exec_out()],
+    ));
+    nodes.push(openbor_graph_node(
+        "ob_scroll",
+        "scroll_tilemap",
+        "OpenBOR Level Scroll",
+        "Camera",
+        1,
+        1,
+        serde_json::json!({"layer":"BG_A","dx":level.scroll_dx,"dy":level.scroll_dy}),
+        vec![openbor_exec_in()],
+        vec![openbor_exec_out()],
+    ));
+    nodes.push(openbor_graph_node(
+        "ob_camera",
+        "move_camera",
+        "Camera Bounds/Scroll",
+        "Camera",
+        2,
+        1,
+        serde_json::json!({"target":camera_entity_id.unwrap_or("main_camera"),"x":0,"y":0}),
+        vec![openbor_exec_in()],
+        vec![openbor_exec_out()],
+    ));
+    edges.extend([
+        openbor_graph_edge(
+            "ob_e_stage_update_scroll",
+            "ob_stage_update",
+            "exec",
+            "ob_scroll",
+            "exec",
+        ),
+        openbor_graph_edge(
+            "ob_e_scroll_camera",
+            "ob_scroll",
+            "exec",
+            "ob_camera",
+            "exec",
+        ),
+    ]);
+
+    let mut tail = "ob_spawn_timeline".to_string();
+    for (index, bridge) in level.unsupported_scripts.iter().enumerate() {
+        let node_id = format!("ob_bridge_{index}");
+        nodes.push(openbor_graph_node(
+            &node_id,
+            "bridge_unconverted_source",
+            &format!("OpenBOR Script Bridge {}", index + 1),
+            "Game State",
+            3 + index as i32,
+            2,
+            serde_json::json!({
+                "source": format!("openbor:{}", bridge.label),
+                "label": bridge.body.chars().take(180).collect::<String>(),
+                "gap": "unsupported_openbor_script",
+            }),
+            vec![openbor_exec_in()],
+            vec![openbor_exec_out()],
+        ));
+        edges.push(openbor_graph_edge(
+            &format!("ob_e_bridge_{index}"),
+            &tail,
+            "exec",
+            &node_id,
+            "exec",
+        ));
+        tail = node_id;
+    }
+
+    serde_json::json!({
+        "version": 1,
+        "origin": "openbor_beatemup_stage_subset",
+        "source_level": level.name,
+        "native_constructs": ["event_start", "timeline_sequence", "spawn_entity", "scroll_tilemap", "move_camera", "bridge_unconverted_source"],
+        "nodes": nodes,
+        "edges": edges,
+    })
+    .to_string()
+}
+
+fn openbor_stage_controller_entity(
+    root: &Path,
+    level: &OpenBorLevelAsset,
+    model_entity_ids: &HashMap<String, String>,
+    camera_entity_id: Option<&str>,
+) -> Entity {
+    Entity {
+        entity_id: "openbor_stage_controller".to_string(),
+        display_name: Some("OpenBOR Stage Controller".to_string()),
+        prefab: None,
+        transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+        components: Components {
+            logic: Some(LogicComponent {
+                graph: Some(openbor_stage_controller_graph(
+                    level,
+                    model_entity_ids,
+                    camera_entity_id,
+                )),
+                graph_ref: None,
+                graph_origin: Some("openbor_beatemup_stage_subset".to_string()),
+                logic_hints: level.logic_hints.clone(),
+                external_source_refs: vec![openbor_source_ref(root, &level.source_file)],
+                imported_semantics: Some(openbor_logic_semantics(
+                    root,
+                    &level.source_file,
+                    "stage_controller",
+                    "medium",
+                    "OpenBOR level commands converted into spawn timeline, camera scroll and script bridges.",
+                )),
+                variables: HashMap::new(),
+            }),
+            ..Components::default()
+        },
+    }
+}
+
+fn derive_openbor_scene_layers(scene: &Scene) -> Vec<SceneLayer> {
+    let mut backgrounds = Vec::new();
+    let mut actors = Vec::new();
+    let mut systems = Vec::new();
+    for entity in &scene.entities {
+        if entity.components.tilemap.is_some() {
+            backgrounds.push(entity.entity_id.clone());
+        } else if entity.components.sprite.is_some() {
+            actors.push(entity.entity_id.clone());
+        } else {
+            systems.push(entity.entity_id.clone());
+        }
+    }
+    vec![
+        SceneLayer {
+            id: "layer_stage".to_string(),
+            name: "STAGE".to_string(),
+            kind: "background".to_string(),
+            visible: true,
+            locked: false,
+            depth: 0,
+            entity_ids: backgrounds,
+        },
+        SceneLayer {
+            id: "layer_actors".to_string(),
+            name: "ACTORS".to_string(),
+            kind: "sprite".to_string(),
+            visible: true,
+            locked: false,
+            depth: 10,
+            entity_ids: actors,
+        },
+        SceneLayer {
+            id: "layer_openbor_bridges".to_string(),
+            name: "OPENBOR BRIDGES".to_string(),
+            kind: "object".to_string(),
+            visible: true,
+            locked: false,
+            depth: 20,
+            entity_ids: systems,
+        },
+    ]
 }
 
 pub fn import_openbor_project(
@@ -11546,6 +12593,7 @@ pub fn import_openbor_project(
     let mut first_sprite_id: Option<String> = None;
     let mut audio_sfx = HashMap::new();
     let mut bgm = None;
+    let mut model_entity_ids: HashMap<String, String> = HashMap::new();
 
     if let Some(level) = levels.first() {
         if let Some(background) = &level.background_asset {
@@ -11566,6 +12614,31 @@ pub fn import_openbor_project(
                 0,
             ));
         }
+        for (index, panel) in level.panel_assets.iter().enumerate().take(2) {
+            if Some(panel) == level.background_asset.as_ref() {
+                continue;
+            }
+            let asset = materialize_external_file(
+                project_dir,
+                openbor_path,
+                panel,
+                "tilesets",
+                "openbor",
+                &mut asset_cache,
+            )?;
+            scene.entities.push(imported_tilemap_entity(
+                unique_entity_id(
+                    &mut entity_ids,
+                    &format!("stage_panel_{}", index + 1),
+                    "tilemap",
+                ),
+                format!("{} Panel {}", level.name, index + 1),
+                asset,
+                panel,
+                index as i32 * 128,
+                0,
+            ));
+        }
         if let Some(music) = &level.music_asset {
             bgm = Some(materialize_external_file(
                 project_dir,
@@ -11579,7 +12652,7 @@ pub fn import_openbor_project(
     }
 
     let mut sprite_x = 64;
-    for model in &models {
+    for (model_index, model) in models.iter().enumerate() {
         let Some(display_asset) = model.display_asset.as_ref() else {
             skipped.push(format!(
                 "{}: modelo OpenBOR sem asset visual resolvido.",
@@ -11596,6 +12669,8 @@ pub fn import_openbor_project(
             &mut asset_cache,
         )?;
         let entity_id = unique_entity_id(&mut entity_ids, &model.name, "fighter");
+        let role = openbor_entity_role(model, model_index == 0);
+        model_entity_ids.insert(slugify_scene_id(&model.name), entity_id.clone());
         if first_sprite_id.is_none() {
             first_sprite_id = Some(entity_id.clone());
         }
@@ -11603,33 +12678,84 @@ pub fn import_openbor_project(
         if let Some(level) = levels.first() {
             logic_hints.extend(level.logic_hints.clone());
         }
-        scene
-            .entities
-            .push(imported_sprite_entity(ImportedSpriteEntitySpec {
-                entity_id,
-                display_name: model.name.clone(),
-                asset,
-                source_path: display_asset.clone(),
-                x: sprite_x,
-                y: 112,
-                input: Some(InputComponent {
-                    device: "joypad1".to_string(),
-                    mapping: HashMap::from([
-                        ("move_left".to_string(), "DPAD_LEFT".to_string()),
-                        ("move_right".to_string(), "DPAD_RIGHT".to_string()),
-                        ("attack".to_string(), "BUTTON_B".to_string()),
-                        ("jump".to_string(), "BUTTON_A".to_string()),
-                    ]),
+        for command in &model.unsupported_commands {
+            skipped.push(format!(
+                "{}: comando/script OpenBOR preservado como bridge: {}",
+                model.name, command
+            ));
+        }
+        let spawn_position = levels.first().and_then(|level| {
+            level
+                .spawns
+                .iter()
+                .find(|spawn| slugify_scene_id(&spawn.model_name) == slugify_scene_id(&model.name))
+        });
+        let x = spawn_position.map(|spawn| spawn.x).unwrap_or(sprite_x);
+        let y = spawn_position.map(|spawn| spawn.y).unwrap_or(112);
+        let input = (role == "player_avatar").then(|| InputComponent {
+            device: "joypad1".to_string(),
+            mapping: HashMap::from([
+                ("move_left".to_string(), "DPAD_LEFT".to_string()),
+                ("move_right".to_string(), "DPAD_RIGHT".to_string()),
+                ("attack".to_string(), "BUTTON_B".to_string()),
+                ("jump".to_string(), "BUTTON_A".to_string()),
+            ]),
+        });
+        let mut entity = imported_sprite_entity(ImportedSpriteEntitySpec {
+            entity_id: entity_id.clone(),
+            display_name: model.name.clone(),
+            asset,
+            source_path: display_asset.clone(),
+            x,
+            y,
+            input,
+            physics: Some(PhysicsComponent {
+                gravity: false,
+                gravity_strength: 0,
+                max_velocity: Some(Velocity {
+                    x: model.movement_speed.max(1) * 16,
+                    y: 32,
                 }),
-                physics: Some(PhysicsComponent {
-                    gravity: true,
-                    gravity_strength: 6,
-                    max_velocity: Some(Velocity { x: 32, y: 96 }),
-                    friction: 1,
-                    bounce: 0,
-                }),
-                logic_hints,
-            }));
+                friction: 1,
+                bounce: 0,
+            }),
+            logic_hints,
+        });
+        if let Some(sprite) = entity.components.sprite.as_mut() {
+            sprite.animations = model.animations.clone();
+            sprite.pivot = model.animations.values().find_map(|animation| {
+                animation
+                    .mugen_frames
+                    .as_ref()
+                    .and_then(|frames| frames.first())
+                    .and_then(|frame| frame.axis.clone())
+            });
+        }
+        openbor_adjust_sprite_frame_size(&mut entity, display_asset);
+        entity.components.collision = openbor_collision_component(model, role);
+        if let Some(logic) = entity.components.logic.as_mut() {
+            logic.graph = Some(openbor_actor_graph(&entity_id, model, role));
+            logic.graph_origin = Some("openbor_beatemup_subset".to_string());
+            logic.external_source_refs = vec![openbor_source_ref(openbor_path, &model.source_file)];
+            logic.imported_semantics = Some(openbor_logic_semantics(
+                openbor_path,
+                &model.source_file,
+                role,
+                "medium",
+                if role == "player_avatar" {
+                    "OpenBOR type/player ou primeiro modelo do manifest."
+                } else {
+                    "OpenBOR type/enemy ou modelo nao-player do manifest."
+                },
+            ));
+            if !model.attack_boxes.is_empty() {
+                logic.logic_hints.push(format!(
+                    "OpenBOR exportou {} attack/hitbox(es) para metadados da animacao.",
+                    model.attack_boxes.len()
+                ));
+            }
+        }
+        scene.entities.push(entity);
         sprite_x += 56;
 
         for source in &model.audio_assets {
@@ -11649,6 +12775,15 @@ pub fn import_openbor_project(
         }
     }
 
+    if let Some(level) = levels.first() {
+        for bridge in &level.unsupported_scripts {
+            skipped.push(format!(
+                "{}: script OpenBOR preservado como bridge '{}'.",
+                level.name, bridge.label
+            ));
+        }
+    }
+
     if !audio_sfx.is_empty() || bgm.is_some() {
         let audio_id = unique_entity_id(&mut entity_ids, "audio_bank", "audio");
         scene.entities.push(external_audio_bank_entity(
@@ -11659,18 +12794,31 @@ pub fn import_openbor_project(
         ));
     }
 
+    let mut camera_entity_id = None;
     if let Some(follow_entity) = first_sprite_id {
+        let id = unique_entity_id(&mut entity_ids, "main_camera", "camera");
+        camera_entity_id = Some(id.clone());
         scene.entities.push(imported_camera_entity(
-            unique_entity_id(&mut entity_ids, "main_camera", "camera"),
+            id,
             "Main Camera".to_string(),
             Some(follow_entity),
         ));
     }
 
+    if let Some(level) = levels.first() {
+        scene.entities.push(openbor_stage_controller_entity(
+            openbor_path,
+            level,
+            &model_entity_ids,
+            camera_entity_id.as_deref(),
+        ));
+    }
+    scene.layers = Some(derive_openbor_scene_layers(&scene));
+
     save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
     Ok(ExternalImportReport {
         primary_scene: scene,
-        imported_scenes: 1,
+        imported_scenes: levels.len().max(1),
         skipped_sources: skipped,
     })
 }
@@ -18081,6 +19229,142 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         .expect("write openbor level");
     }
 
+    fn write_openbor_beatemup_fixture(root: &Path) {
+        let hero_dir = root.join("data").join("chars").join("hero");
+        let enemy_dir = root.join("data").join("chars").join("punk");
+        let level_dir = root.join("data").join("levels");
+        fs::create_dir_all(&hero_dir).expect("create openbor hero dir");
+        fs::create_dir_all(&enemy_dir).expect("create openbor enemy dir");
+        fs::create_dir_all(&level_dir).expect("create openbor levels dir");
+        fs::create_dir_all(root.join("data").join("bgs")).expect("create openbor bgs dir");
+        fs::create_dir_all(root.join("data").join("music")).expect("create openbor music dir");
+
+        write_test_png(
+            &hero_dir.join("hero_sheet.png"),
+            96,
+            64,
+            [220, 200, 40, 255],
+        );
+        write_test_png(
+            &enemy_dir.join("punk_sheet.png"),
+            64,
+            64,
+            [200, 80, 80, 255],
+        );
+        write_test_png(
+            &root.join("data").join("bgs").join("stage.png"),
+            320,
+            128,
+            [40, 90, 130, 255],
+        );
+        write_test_png(
+            &root.join("data").join("bgs").join("panel.png"),
+            128,
+            128,
+            [80, 120, 80, 255],
+        );
+        fs::write(
+            root.join("data").join("music").join("theme.wav"),
+            minimal_wav_bytes(),
+        )
+        .expect("write openbor bgm");
+
+        fs::write(
+            root.join("data").join("models.txt"),
+            [
+                "load Hero data/chars/hero/hero.txt",
+                "load Punk data/chars/punk/punk.txt",
+            ]
+            .join("\n"),
+        )
+        .expect("write openbor models manifest");
+        fs::write(
+            root.join("data").join("levels.txt"),
+            ["file data/levels/stage1.txt"].join("\n"),
+        )
+        .expect("write openbor levels manifest");
+
+        fs::write(
+            hero_dir.join("hero.txt"),
+            [
+                "name Hero",
+                "type player",
+                "speed 3",
+                "facing 1",
+                "load hero_sheet.png",
+                "anim idle",
+                "  delay 10",
+                "  loop 1",
+                "  offset 24 56",
+                "  bbox 8 12 20 42",
+                "  frame hero_sheet.png",
+                "anim walk",
+                "  delay 5",
+                "  loop 1",
+                "  offset 24 56",
+                "  bbox 8 12 20 42",
+                "  attack 28 18 18 12 6",
+                "  frame hero_sheet.png",
+                "  frame hero_sheet.png",
+                "anim attack",
+                "  delay 4",
+                "  loop 0",
+                "  bbox 8 12 20 42",
+                "  attack 32 18 22 14 9",
+                "  jumpframe 1 0 -3",
+                "  landframe 2",
+                "  frame hero_sheet.png",
+            ]
+            .join("\n"),
+        )
+        .expect("write openbor hero model");
+
+        fs::write(
+            enemy_dir.join("punk.txt"),
+            [
+                "name Punk",
+                "type enemy",
+                "speed 2",
+                "facing -1",
+                "load punk_sheet.png",
+                "anim idle",
+                "  delay 8",
+                "  loop 1",
+                "  bbox 6 10 22 44",
+                "  frame punk_sheet.png",
+                "anim walk",
+                "  delay 6",
+                "  loop 1",
+                "  bbox 6 10 22 44",
+                "  attack 4 18 18 12 4",
+                "  frame punk_sheet.png",
+                "  frame punk_sheet.png",
+            ]
+            .join("\n"),
+        )
+        .expect("write openbor enemy model");
+
+        fs::write(
+            level_dir.join("stage1.txt"),
+            [
+                "name Downtown",
+                "music data/music/theme.wav",
+                "background data/bgs/stage.png",
+                "panel data/bgs/panel.png",
+                "scrollspeed 2 0",
+                "spawn Punk",
+                "at 160 0 112",
+                "spawn Hero",
+                "at 40 0 112",
+                "@script",
+                "void main(){ changeopenborvariant(); }",
+                "@end_script",
+            ]
+            .join("\n"),
+        )
+        .expect("write openbor level");
+    }
+
     fn count_files_in(dir: &Path) -> usize {
         fs::read_dir(dir)
             .map(|iter| {
@@ -18191,6 +19475,242 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         );
 
         let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn openbor_model_anim_blocks_to_animation_and_hitbox_metadata() {
+        let donor = temp_dir("openbor-anim-donor");
+        let project = temp_dir("openbor-anim-project");
+        create_project_skeleton(&project, "OpenBOR Anim", "megadrive")
+            .expect("create project skeleton");
+        write_openbor_beatemup_fixture(&donor);
+
+        let report = import_openbor_project(&project, &donor).expect("import openbor");
+        let hero = report
+            .primary_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "hero")
+            .expect("hero entity");
+        let sprite = hero.components.sprite.as_ref().expect("hero sprite");
+        assert!(sprite.animations.contains_key("idle"));
+        let walk = sprite.animations.get("walk").expect("walk animation");
+        assert_eq!(walk.frames, vec![0, 1]);
+        assert_eq!(walk.fps, 12);
+        assert!(walk.looping);
+        let attack = sprite.animations.get("attack").expect("attack animation");
+        let hitbox_frame = attack
+            .mugen_frames
+            .as_ref()
+            .and_then(|frames| frames.first())
+            .expect("OpenBOR attack metadata serialized as frame hitbox metadata");
+        assert_eq!(hitbox_frame.clsn1[0].x1, 32);
+        assert_eq!(hitbox_frame.clsn1[0].x2, 54);
+        assert_eq!(hitbox_frame.clsn2[0].x1, 8);
+        assert_eq!(hitbox_frame.clsn2[0].y2, 54);
+
+        let collision = hero.components.collision.as_ref().expect("bbox collision");
+        assert_eq!(collision.shape, "aabb");
+        assert_eq!(collision.width, 20);
+        assert_eq!(collision.height, 42);
+        assert_eq!(
+            collision.offset.as_ref().map(|offset| (offset.x, offset.y)),
+            Some((8, 12))
+        );
+        assert_eq!(collision.layer.as_deref(), Some("player"));
+        assert!(collision.collides_with.iter().any(|layer| layer == "enemy"));
+
+        let logic = hero.components.logic.as_ref().expect("hero logic");
+        let semantics = logic
+            .imported_semantics
+            .as_ref()
+            .expect("OpenBOR imported semantics");
+        assert_eq!(semantics.source, "openbor");
+        assert_eq!(semantics.gameplay_class, "beat_em_up_close_range_signals");
+        assert_eq!(semantics.entity_role, "player_avatar");
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn openbor_level_spawn_music_background_to_nodes_and_bridge() {
+        let donor = temp_dir("openbor-level-donor");
+        let project = temp_dir("openbor-level-project");
+        create_project_skeleton(&project, "OpenBOR Level", "megadrive")
+            .expect("create project skeleton");
+        write_openbor_beatemup_fixture(&donor);
+
+        let report = import_openbor_project(&project, &donor).expect("import openbor");
+        assert!(report.primary_scene.entities.iter().any(|entity| entity
+            .components
+            .tilemap
+            .as_ref()
+            .is_some_and(
+                |tilemap| tilemap.tileset == "assets/tilesets/openbor_data_bgs_stage.png"
+            )));
+        assert!(report.primary_scene.entities.iter().any(|entity| entity
+            .components
+            .audio
+            .as_ref()
+            .is_some_and(
+                |audio| audio.bgm.as_deref() == Some("assets/audio/openbor_data_music_theme.wav")
+            )));
+
+        let camera = report
+            .primary_scene
+            .entities
+            .iter()
+            .find(|entity| entity.components.camera.is_some())
+            .expect("camera entity");
+        assert_eq!(
+            camera
+                .components
+                .camera
+                .as_ref()
+                .and_then(|camera| camera.follow_entity.as_deref()),
+            Some("hero")
+        );
+
+        let controller = report
+            .primary_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "openbor_stage_controller")
+            .expect("OpenBOR stage controller");
+        let graph = controller
+            .components
+            .logic
+            .as_ref()
+            .and_then(|logic| logic.graph.as_deref())
+            .expect("stage controller graph");
+        let graph_json: serde_json::Value = serde_json::from_str(graph).expect("graph json");
+        let nodes = graph_json
+            .get("nodes")
+            .and_then(|nodes| nodes.as_array())
+            .expect("graph nodes");
+        assert!(nodes
+            .iter()
+            .any(
+                |node| node.get("type").and_then(|value| value.as_str()) == Some("spawn_entity")
+                    && node
+                        .get("params")
+                        .and_then(|params| params.get("prefab"))
+                        .and_then(|value| value.as_str())
+                        == Some("punk")
+                    && node
+                        .get("params")
+                        .and_then(|params| params.get("x"))
+                        .and_then(|value| value.as_i64())
+                        == Some(160)
+            ));
+        assert!(nodes.iter().any(
+            |node| node.get("type").and_then(|value| value.as_str()) == Some("scroll_tilemap")
+        ));
+        assert!(nodes
+            .iter()
+            .any(|node| node.get("type").and_then(|value| value.as_str()) == Some("move_camera")));
+        assert!(nodes
+            .iter()
+            .any(|node| node.get("type").and_then(|value| value.as_str())
+                == Some("bridge_unconverted_source")));
+        assert!(report
+            .skipped_sources
+            .iter()
+            .any(|entry| entry.contains("script OpenBOR preservado como bridge")));
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn openbor_reimport_beatemup_scene_is_idempotent() {
+        let donor = temp_dir("openbor-reimport-donor");
+        let project = temp_dir("openbor-reimport-project");
+        create_project_skeleton(&project, "OpenBOR Reimport", "megadrive")
+            .expect("create project skeleton");
+        write_openbor_beatemup_fixture(&donor);
+
+        let first = import_openbor_project(&project, &donor).expect("first openbor import");
+        let sprites_dir = project.join("assets").join("sprites");
+        let tilesets_dir = project.join("assets").join("tilesets");
+        let audio_dir = project.join("assets").join("audio");
+        let first_sprites = count_files_in(&sprites_dir);
+        let first_tilesets = count_files_in(&tilesets_dir);
+        let first_audio = count_files_in(&audio_dir);
+        let first_controller_graph = first
+            .primary_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "openbor_stage_controller")
+            .and_then(|entity| entity.components.logic.as_ref())
+            .and_then(|logic| logic.graph.as_deref())
+            .expect("first controller graph")
+            .to_string();
+
+        let second = import_openbor_project(&project, &donor).expect("second openbor import");
+        assert_eq!(
+            second.primary_scene.entities.len(),
+            first.primary_scene.entities.len(),
+            "reimport keeps entity count stable"
+        );
+        assert_eq!(count_files_in(&sprites_dir), first_sprites);
+        assert_eq!(count_files_in(&tilesets_dir), first_tilesets);
+        assert_eq!(count_files_in(&audio_dir), first_audio);
+        let second_controller_graph = second
+            .primary_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "openbor_stage_controller")
+            .and_then(|entity| entity.components.logic.as_ref())
+            .and_then(|logic| logic.graph.as_deref())
+            .expect("second controller graph");
+        assert_eq!(second_controller_graph, first_controller_graph);
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    #[ignore = "host-local OpenBOR sample import; requires an extracted BYOR-safe module with data/models.txt or data/levels.txt"]
+    fn openbor_host_local_samples_when_present() {
+        let candidates = [
+            PathBuf::from(
+                r"F:\Projects\Engine Template\Games Engines\OpenBOR\Projects\Real-Bout-Pro-Wrestling",
+            ),
+            PathBuf::from(
+                r"F:\Projects\Engine Template\Games Engines\OpenBOR\Projects\Super-Final-Fight-Gold",
+            ),
+            PathBuf::from(
+                r"F:\Projects\Engine Template\Games Engines\OpenBOR\Projects\World-Heroes-Supreme-Justice",
+            ),
+            PathBuf::from(
+                r"F:\Projects\Engine Template\Games Engines\OpenBOR\Templates\Aki-Shiki-Character-Template",
+            ),
+        ];
+        let source = candidates.into_iter().find(|candidate| {
+            candidate.join("data").join("models.txt").is_file()
+                || candidate.join("models.txt").is_file()
+                || candidate.join("data").join("levels.txt").is_file()
+                || candidate.join("levels.txt").is_file()
+        });
+        let Some(source) = source else {
+            eprintln!("[skip] nenhum sample OpenBOR extraido com manifests encontrado.");
+            return;
+        };
+        let project = temp_dir("openbor-host-local-project");
+        create_project_skeleton(&project, "OpenBOR Host Local", "megadrive")
+            .expect("create project skeleton");
+        let report = import_openbor_project(&project, &source).expect("import host-local openbor");
+        assert!(!report.primary_scene.entities.is_empty());
+        assert!(report.primary_scene.entities.iter().any(|entity| entity
+            .components
+            .logic
+            .as_ref()
+            .is_some_and(|logic| logic.graph.is_some()
+                || !logic.logic_hints.is_empty()
+                || logic.graph_origin.as_deref() == Some("openbor_bridge"))));
         let _ = fs::remove_dir_all(&project);
     }
 
