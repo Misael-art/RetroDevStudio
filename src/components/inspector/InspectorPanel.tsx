@@ -21,6 +21,7 @@ import { getEntityDisplayName } from "../../core/entityDisplay";
 import { resolveSceneWorkspaceContext } from "../../core/sceneWorkspaceContext";
 import { buildTilemapAuthoringBrush } from "../../core/entityAuthoring";
 import { openProjectSourcePath } from "../../core/ipc/projectService";
+import { getEntityLogicImportSignal } from "../../core/sgdkLogicDiagnostics";
 import knowledgeBase from "./knowledgeBase.json";
 
 type KnowledgeSectionId =
@@ -724,6 +725,7 @@ export default function InspectorPanel() {
       ) ?? [],
     [entity]
   );
+  const entityLogicImportSignal = useMemo(() => getEntityLogicImportSignal(entity), [entity]);
   const importedEntityContext = useMemo(() => resolveImportedEntityContext(entity), [entity]);
   const entityAssignedLayers = useMemo(() => {
     if (!entity || !activeScene?.layers) {
@@ -1627,6 +1629,58 @@ export default function InspectorPanel() {
               <InspectorSection sectionId="logic" title="Logic">
                 <table className="w-full table-fixed text-xs">
                   <tbody>
+                    {entityLogicImportSignal.status !== "none" ? (
+                      <tr className="group border-b border-[#313244] last:border-0">
+                        <td className="w-24 min-w-24 align-top select-none px-2 py-1 text-xs text-[#7f849c]">
+                          Import
+                        </td>
+                        <td className="px-2 py-1 text-xs">
+                          <div
+                            data-testid="inspector-logic-import-truth"
+                            className="grid gap-1 rounded border border-[#313244] bg-[#11111b]/70 px-2 py-1.5 text-[10px] leading-snug text-[#cdd6f4]"
+                          >
+                            <span
+                              className={[
+                                "w-fit rounded-full border px-1.5 py-0.5 text-[8px] font-semibold",
+                                entityLogicImportSignal.status === "functional"
+                                  ? "border-[#a6e3a1]/35 bg-[#a6e3a1]/10 text-[#a6e3a1]"
+                                  : entityLogicImportSignal.status === "bridge_only"
+                                    ? "border-[#f9e2af]/35 bg-[#f9e2af]/10 text-[#f9e2af]"
+                                    : "border-[#89b4fa]/35 bg-[#89b4fa]/10 text-[#89b4fa]",
+                              ].join(" ")}
+                            >
+                              {entityLogicImportSignal.label}
+                            </span>
+                            <div className="grid grid-cols-1 gap-1 xl:grid-cols-2">
+                              {entityLogicImportSignal.graphRef ? (
+                                <span className="min-w-0 truncate font-mono" title={entityLogicImportSignal.graphRef}>
+                                  graph_ref: {entityLogicImportSignal.graphRef}
+                                </span>
+                              ) : null}
+                              {entityLogicImportSignal.confidence ? (
+                                <span className="min-w-0 truncate font-mono">
+                                  confidence: {entityLogicImportSignal.confidence}
+                                </span>
+                              ) : null}
+                              <span className="min-w-0 truncate font-mono">
+                                converted_nodes_count: {entityLogicImportSignal.convertedNodesCount}
+                              </span>
+                              <span className="min-w-0 truncate font-mono">
+                                bridge_count: {entityLogicImportSignal.bridgeCount}
+                              </span>
+                              {entityLogicImportSignal.sourcePaths.length > 0 ? (
+                                <span
+                                  className="min-w-0 truncate font-mono xl:col-span-2"
+                                  title={entityLogicImportSignal.sourcePaths.join(", ")}
+                                >
+                                  source mapping: {entityLogicImportSignal.sourcePaths.join(", ")}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
                     {entityLogicSummary ? (
                       <tr className="group border-b border-[#313244] last:border-0">
                         <td className="w-24 min-w-24 select-none px-2 py-1 text-xs text-[#7f849c]">Graph</td>

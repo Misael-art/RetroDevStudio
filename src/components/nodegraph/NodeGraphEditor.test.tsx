@@ -804,6 +804,196 @@ describe("NodeGraphEditor", () => {
     );
   });
 
+  it("shows SGDK import badges, source mapping and filterable gap details for imported graphs", async () => {
+    const importedGraph: NodeGraph = {
+      nodes: [
+        {
+          id: "idle",
+          type: "fsm_state",
+          label: "Idle",
+          x: 120,
+          y: 80,
+          inputs: [],
+          outputs: [{ id: "exec", label: ">", kind: "exec" }],
+          params: {
+            state_name: "idle",
+            import_status: "converted",
+            source_file: "src/player.c",
+            source_line: 42,
+          },
+        },
+        {
+          id: "idle_to_run",
+          type: "fsm_transition",
+          label: "Idle -> Run",
+          x: 360,
+          y: 80,
+          inputs: [{ id: "exec", label: ">", kind: "exec" }],
+          outputs: [{ id: "exec", label: ">", kind: "exec" }],
+          params: {
+            target_state: "run",
+            import_status: "converted",
+            source_file: "src/player.c",
+            source_line: 58,
+          },
+        },
+        {
+          id: "raw_ai",
+          type: "bridge_unconverted_source",
+          label: "AI bridge",
+          x: 600,
+          y: 80,
+          inputs: [{ id: "exec", label: ">", kind: "exec" }],
+          outputs: [{ id: "exec", label: ">", kind: "exec" }],
+          params: {
+            gap: "AI helper remains bridge",
+            source_path: "src/enemy.c",
+            line: 88,
+          },
+        },
+      ],
+      edges: [
+        {
+          id: "edge_idle_transition",
+          fromNode: "idle",
+          fromPort: "exec",
+          toNode: "idle_to_run",
+          toPort: "exec",
+        },
+      ],
+    };
+    const importedEntity: Entity = {
+      entity_id: "hero",
+      display_name: "Hero",
+      prefab: null,
+      transform: { x: 16, y: 24 },
+      components: {
+        logic: {
+          graph: serializeNodeGraph(importedGraph),
+          graph_ref: "graphs/sgdk_import_hero.json",
+          graph_origin: "imported_ref",
+          imported_semantics: {
+            source: "sgdk_semantic_extractor",
+            confidence: "high",
+            source_paths: ["src/player.c"],
+            extraction_kind: "fsm",
+            converted_nodes_count: 2,
+            bridge_count: 1,
+            gap_count: 1,
+            status: "partial",
+            states_detected: 1,
+            transitions_detected: 1,
+            blocking_gaps: ["inline assembly branch blocks equivalence"],
+          } as unknown as NonNullable<Entity["components"]["logic"]>["imported_semantics"],
+        },
+      },
+    };
+
+    await act(async () => {
+      useEditorStore.setState({
+        activeScene: buildSceneWithGraph(importedGraph, [importedEntity]),
+        activeSceneSource: buildSceneWithGraph(importedGraph, [importedEntity]),
+        selectedEntityId: "hero",
+      });
+      await flush();
+      await flush();
+    });
+
+    const idleCard = container.querySelector("[data-testid='node-card-idle']");
+    const bridgeCard = container.querySelector("[data-testid='node-card-raw_ai']");
+
+    expect(idleCard?.textContent).toContain("Converted");
+    expect(idleCard?.textContent).toContain("Source mapped");
+    expect(bridgeCard?.textContent).toContain("Bridge");
+    expect(bridgeCard?.textContent).toContain("Gap");
+    expect(container.querySelector("[data-testid='nodegraph-import-provenance']")?.textContent).toContain(
+      "FSM extraida"
+    );
+    expect(container.querySelector("[data-testid='nodegraph-source-mapping']")?.textContent).toContain(
+      "src/player.c:42"
+    );
+    expect(container.querySelector("[data-testid='nodegraph-import-gaps']")?.textContent).toContain(
+      "AI helper remains bridge"
+    );
+    expect(container.querySelector("[data-testid='nodegraph-import-gaps']")?.textContent).toContain(
+      "inline assembly branch blocks equivalence"
+    );
+
+    const filter = container.querySelector("[data-testid='nodegraph-gap-filter']") as HTMLInputElement | null;
+    expect(filter).toBeInstanceOf(HTMLInputElement);
+
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      valueSetter?.call(filter, "assembly");
+      filter!.dispatchEvent(new Event("input", { bubbles: true }));
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='nodegraph-import-gaps']")?.textContent).toContain(
+      "inline assembly branch blocks equivalence"
+    );
+    expect(container.querySelector("[data-testid='nodegraph-import-gaps']")?.textContent).not.toContain(
+      "AI helper remains bridge"
+    );
+  });
+
+  it("falls back to entity source mapping and a heuristic gap when imported nodes are not source-mapped", async () => {
+    const heuristicGraph: NodeGraph = {
+      nodes: [
+        {
+          id: "phase_d_move",
+          type: "sprite_move",
+          label: "Move",
+          x: 120,
+          y: 80,
+          inputs: [],
+          outputs: [{ id: "exec", label: ">", kind: "exec" }],
+          params: { target: "hero", dx: 1, dy: 0 },
+        },
+      ],
+      edges: [],
+    };
+    const importedEntity: Entity = {
+      entity_id: "hero",
+      display_name: "Hero",
+      prefab: null,
+      transform: { x: 16, y: 24 },
+      components: {
+        logic: {
+          graph: serializeNodeGraph(heuristicGraph),
+          graph_ref: "graphs/sgdk_phase_d_hero.json",
+          graph_origin: "imported_ref",
+          external_source_refs: ["src/main.c"],
+          imported_semantics: {
+            source: "sgdk_phase_d",
+            confidence: "low",
+            source_paths: ["src/player.c"],
+          } as unknown as NonNullable<Entity["components"]["logic"]>["imported_semantics"],
+        },
+      },
+    };
+
+    await act(async () => {
+      useEditorStore.setState({
+        activeScene: buildSceneWithGraph(heuristicGraph, [importedEntity]),
+        activeSceneSource: buildSceneWithGraph(heuristicGraph, [importedEntity]),
+        selectedEntityId: "hero",
+      });
+      await flush();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='nodegraph-import-provenance']")?.textContent).toContain(
+      "Heuristica"
+    );
+    expect(container.querySelector("[data-testid='nodegraph-source-mapping']")?.textContent).toContain(
+      "src/player.c"
+    );
+    expect(container.querySelector("[data-testid='nodegraph-import-gaps']")?.textContent).toContain(
+      "AST/FSM real nao extraido"
+    );
+  });
+
   it("appends a guided block to the current graph without replacing the existing nodes", async () => {
     const beforeCount = container.querySelectorAll("[data-testid^='node-card-']").length;
 

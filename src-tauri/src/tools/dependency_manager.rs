@@ -272,7 +272,9 @@ impl DependencyKind {
         match self {
             Self::Jdk => detect_java_program().is_some(),
             Self::Sgdk => {
-                let root = self.install_dir();
+                let Some(root) = detect_dependency_root("SGDK_ROOT", "sgdk") else {
+                    return false;
+                };
                 root.join("makefile.gen").exists()
                     || (root.join("bin").exists() && root.join("inc").exists())
             }
@@ -314,6 +316,9 @@ impl DependencyKind {
     fn status_with_failure(self, last_error: Option<&str>) -> DependencyStatus {
         let install_dir = match self {
             Self::Jdk => detect_java_install_dir(),
+            Self::Sgdk => {
+                detect_dependency_root("SGDK_ROOT", "sgdk").unwrap_or_else(|| self.install_dir())
+            }
             _ => self.install_dir(),
         };
         let manifest = read_manifest(self.manifest_dir(), manifest_file_name(self));
@@ -867,7 +872,8 @@ where
 
     if current_status.installed {
         if matches!(dependency, DependencyKind::Sgdk) {
-            if let Err(error) = ensure_sgdk_boot_templates(&dependency.install_dir()) {
+            let sgdk_dir = PathBuf::from(&current_status.install_dir);
+            if let Err(error) = ensure_sgdk_boot_templates(&sgdk_dir) {
                 logger.emit("error", &error);
                 return DependencyInstallResult {
                     ok: false,
@@ -1806,9 +1812,19 @@ fn repo_root() -> PathBuf {
 }
 
 fn detect_dependency_root(env_var: &str, local_dir_name: &str) -> Option<PathBuf> {
-    std::env::var_os(env_var)
-        .map(PathBuf::from)
-        .filter(|path| path.exists())
+    let env_vars = if local_dir_name == "sgdk" {
+        vec![env_var, "GDK", "GDK_WIN"]
+    } else {
+        vec![env_var]
+    };
+
+    env_vars
+        .into_iter()
+        .find_map(|candidate_env_var| {
+            std::env::var_os(candidate_env_var)
+                .map(PathBuf::from)
+                .filter(|path| path.exists())
+        })
         .or_else(|| {
             let local = repo_root().join("toolchains").join(local_dir_name);
             local.exists().then_some(local)

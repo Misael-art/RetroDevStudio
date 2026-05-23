@@ -1819,6 +1819,7 @@ async function captureScreenshot(sessionId, filename) {
   return outputPath;
 }
 
+<<<<<<< HEAD
 async function prepareUiLayoutOracleTarget(sessionId, target) {
   if (!target) {
     fail("Alvo do oraculo visual nao foi encontrado.");
@@ -1908,6 +1909,173 @@ async function runUiLayoutOracleCheck(
   }
 
   return record;
+=======
+async function readNodeGraphUiDiagnostics(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const textOf = (selector) =>
+        document.querySelector(selector)?.textContent?.replace(/\\s+/g, " ").trim() ?? "";
+      const cards = Array.from(document.querySelectorAll('[data-testid^="node-card-"]'))
+        .filter((node) => node instanceof HTMLElement);
+      const rects = cards.map((card) => {
+        const rect = card.getBoundingClientRect();
+        return {
+          id: card.getAttribute("data-testid") ?? "",
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height,
+          text: card.textContent?.replace(/\\s+/g, " ").trim() ?? "",
+        };
+      });
+      const overlaps = [];
+      for (let i = 0; i < rects.length; i += 1) {
+        for (let j = i + 1; j < rects.length; j += 1) {
+          const a = rects[i];
+          const b = rects[j];
+          const overlapW = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
+          const overlapH = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+          const overlapArea = overlapW * overlapH;
+          const smallerArea = Math.max(1, Math.min(a.width * a.height, b.width * b.height));
+          if (overlapW > 18 && overlapH > 18 && overlapArea / smallerArea > 0.18) {
+            overlaps.push({ a: a.id, b: b.id, overlapW, overlapH });
+          }
+        }
+      }
+      const sourceMappingText = textOf('[data-testid="nodegraph-source-mapping"]');
+      const gapPanelText = textOf('[data-testid="nodegraph-import-gaps"]');
+      const provenanceText = textOf('[data-testid="nodegraph-import-provenance"]');
+      return {
+        hasCanvas: Boolean(document.querySelector('[data-testid="nodegraph-canvas"]')),
+        hasOverview: Boolean(document.querySelector('[data-testid="nodegraph-overview"]')),
+        cardCount: cards.length,
+        fsmCardCount: rects.filter((card) => /FSM|Estado FSM|Transicao FSM|Transition/i.test(card.text)).length,
+        convertedBadgeCount: rects.filter((card) => card.text.includes("Converted")).length,
+        bridgeBadgeCount: rects.filter((card) => card.text.includes("Bridge")).length,
+        gapBadgeCount: rects.filter((card) => card.text.includes("Gap")).length,
+        sourceMappedBadgeCount: rects.filter((card) => card.text.includes("Source mapped")).length,
+        sourceMappingVisible: sourceMappingText.length > 0,
+        sourceMappingText,
+        gapPanelVisible: gapPanelText.length > 0,
+        gapPanelText,
+        provenanceVisible: provenanceText.length > 0,
+        provenanceText,
+        overlaps,
+      };
+    `
+  );
+}
+
+async function assertNodeGraphUiDiagnostics(sessionId, options = {}) {
+  const diagnostics = await readNodeGraphUiDiagnostics(sessionId);
+  if (!diagnostics?.hasCanvas || !diagnostics?.hasOverview || diagnostics.cardCount < 1) {
+    fail(
+      `Bloco G: NodeGraph nao ficou visivel com nodes renderizados (canvas=${diagnostics?.hasCanvas}, overview=${diagnostics?.hasOverview}, nodes=${diagnostics?.cardCount ?? 0}).`
+    );
+  }
+  if (diagnostics.overlaps?.length) {
+    fail(
+      `Bloco G: nodes do NodeGraph sobrepostos grosseiramente: ${JSON.stringify(diagnostics.overlaps.slice(0, 3))}.`
+    );
+  }
+  if (!diagnostics.sourceMappingVisible) {
+    fail("Bloco G: painel Source Mapping nao ficou visivel no Logic Workspace.");
+  }
+  if (!diagnostics.gapPanelVisible) {
+    fail("Bloco G: painel Import Gaps nao ficou acessivel no Logic Workspace.");
+  }
+  if (!diagnostics.provenanceVisible) {
+    fail("Bloco G: aviso de proveniencia SGDK Logic nao ficou visivel no Logic Workspace.");
+  }
+  if (options.expectFsm) {
+    if (diagnostics.fsmCardCount < 1) {
+      fail("Bloco G: grafo SGDK declarou FSM, mas nenhum node FSM foi renderizado.");
+    }
+    if (!/FSM extraida/i.test(diagnostics.provenanceText)) {
+      fail(`Bloco G: grafo FSM nao foi identificado como 'FSM extraida' (texto: ${diagnostics.provenanceText}).`);
+    }
+  } else if (!/heur/i.test(diagnostics.provenanceText) && !/grafo heuristico/i.test(diagnostics.provenanceText)) {
+    fail(`Bloco G: grafo SGDK sem FSM real nao exibiu aviso heuristico forte (texto: ${diagnostics.provenanceText}).`);
+  }
+  return diagnostics;
+}
+
+async function assertNoGrossMainShellTextOverlap(sessionId) {
+  const overlaps = await executeScript(
+    sessionId,
+    `
+      const directText = (element) => Array.from(element.childNodes)
+        .filter((node) => node.nodeType === Node.TEXT_NODE)
+        .map((node) => node.textContent ?? "")
+        .join(" ")
+        .replace(/\\s+/g, " ")
+        .trim();
+      const isVisible = (element) => {
+        if (!(element instanceof HTMLElement)) {
+          return false;
+        }
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.visibility !== "hidden" &&
+          style.display !== "none" &&
+          Number(style.opacity || "1") > 0.05 &&
+          rect.width > 8 &&
+          rect.height > 8;
+      };
+      const scopeSelectors = [
+        '[data-testid="workspace-activity-bar"] button',
+        '[data-testid="sgdk-import-summary"] p',
+        '[data-testid="sgdk-import-summary"] span',
+        '[data-testid="sgdk-import-summary"] li',
+        '[data-testid="nodegraph-overview"] p',
+        '[data-testid="nodegraph-overview"] span',
+        '[data-testid="nodegraph-overview"] button',
+        '[data-testid="nodegraph-overview"] input',
+        '[data-testid="inspector-logic-import-truth"] span',
+        '[data-testid="inspector-logic-import-truth"] p'
+      ];
+      const elements = Array.from(document.querySelectorAll(scopeSelectors.join(",")))
+        .filter(isVisible)
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          const text = (directText(element) || element.getAttribute("aria-label") || element.getAttribute("title") || element.textContent || "")
+            .replace(/\\s+/g, " ")
+            .trim();
+          return { element, rect, text };
+        })
+        .filter((item) => item.text.length > 0 && item.text.length < 220);
+      const overlaps = [];
+      for (let i = 0; i < elements.length; i += 1) {
+        for (let j = i + 1; j < elements.length; j += 1) {
+          const a = elements[i];
+          const b = elements[j];
+          if (a.element.contains(b.element) || b.element.contains(a.element)) {
+            continue;
+          }
+          const overlapW = Math.max(0, Math.min(a.rect.right, b.rect.right) - Math.max(a.rect.left, b.rect.left));
+          const overlapH = Math.max(0, Math.min(a.rect.bottom, b.rect.bottom) - Math.max(a.rect.top, b.rect.top));
+          const overlapArea = overlapW * overlapH;
+          const smallerArea = Math.max(1, Math.min(a.rect.width * a.rect.height, b.rect.width * b.rect.height));
+          if (overlapW > 10 && overlapH > 8 && overlapArea / smallerArea > 0.32) {
+            overlaps.push({
+              a: a.text.slice(0, 80),
+              b: b.text.slice(0, 80),
+              overlapW: Math.round(overlapW),
+              overlapH: Math.round(overlapH),
+            });
+          }
+        }
+      }
+      return overlaps.slice(0, 6);
+    `
+  );
+  if (Array.isArray(overlaps) && overlaps.length > 0) {
+    fail(`Bloco G: texto sobreposto no shell principal: ${JSON.stringify(overlaps)}.`);
+  }
+>>>>>>> origin/codex/sgdk-logic-truth-product-qa
 }
 
 async function cleanupTemporaryProject(projectDir) {
@@ -3512,6 +3680,30 @@ async function main() {
           "Projeto SGDK importado nao exibiu estado auditavel de assets no viewport.",
           250
         );
+        const importSummaryText = await waitFor(
+          async () => {
+            const text = await executeScript(
+              sessionId,
+              "return document.querySelector('[data-testid=\"sgdk-import-summary\"]')?.textContent?.replace(/\\s+/g, ' ').trim() ?? '';"
+            );
+            return /Resumo SGDK Logic/.test(String(text)) &&
+              /estados detectados/.test(String(text)) &&
+              /transicoes detectadas/.test(String(text)) &&
+              /nodes gerados/.test(String(text)) &&
+              /bridges criadas/.test(String(text)) &&
+              /Equivalencia gameplay nao certificada/.test(String(text))
+              ? String(text)
+              : false;
+          },
+          20000,
+          "Bloco G: resumo pos-import SGDK Logic nao ficou visivel com contadores honestos.",
+          250
+        );
+        const importSummaryScreenshot = await captureScreenshot(
+          sessionId,
+          `${artifactPrefix}-G-scene-import-summary.png`
+        );
+        registerArtifact(manualQaReport, importSummaryScreenshot, "G - scene import summary");
         const importedTilemapEntities =
           importedSgdkState.activeScene?.entities?.filter((entity) => entity.type === "tilemap").length ?? 0;
         if (importedTilemapEntities < 1) {
@@ -3741,23 +3933,111 @@ async function main() {
         if (!primarySourceRef) {
           fail(`Bloco G: entidade '${sgdkLogicEntityId}' sem source_paths/external_source_refs navegaveis.`);
         }
+        const initialGraphRef =
+          navigationLogicState?.source?.graph_ref ?? navigationLogicState?.resolved?.graph_ref ?? null;
+        let initialGraphNodeCount = 0;
+        let initialGraphHasFsm = false;
+        let initialGraphHasBridge = false;
+        let initialGraphHasMappedNode = false;
+        if (initialGraphRef) {
+          const initialGraphRefRelative = String(initialGraphRef).replace(/^graphs[\\/]/i, "");
+          const initialGraphAbs = path.join(sgdkProjectDir, "graphs", initialGraphRefRelative);
+          if (await pathExists(initialGraphAbs)) {
+            const initialGraphContent = await readFile(initialGraphAbs, "utf8");
+            const initialGraphParsed = JSON.parse(initialGraphContent);
+            const initialGraphNodes = Array.isArray(initialGraphParsed.nodes) ? initialGraphParsed.nodes : [];
+            initialGraphNodeCount = initialGraphNodes.length;
+            initialGraphHasFsm = initialGraphNodes.some((node) =>
+              String(node?.type ?? "").toLowerCase().startsWith("fsm_")
+            );
+            initialGraphHasBridge = initialGraphNodes.some((node) => {
+              const type = String(node?.type ?? "");
+              const params = node?.params ?? {};
+              return type === "bridge_unconverted_source" ||
+                String(params.import_status ?? "").toLowerCase() === "bridge" ||
+                Boolean(params.bridge) ||
+                Boolean(params.gap || params.gap_id);
+            });
+            initialGraphHasMappedNode = initialGraphNodes.some((node) => {
+              const params = node?.params ?? {};
+              return Boolean(params.source_file || params.source_path || params.source);
+            });
+          }
+        }
+        await waitFor(
+          async () => {
+            const diagnostics = await readNodeGraphUiDiagnostics(sessionId);
+            return diagnostics?.hasCanvas && diagnostics?.hasOverview && diagnostics.cardCount >= 1
+              ? diagnostics
+              : false;
+          },
+          20000,
+          "Bloco G: NodeGraph nao renderizou nodes apos abrir Logic Workspace.",
+          250
+        );
+        const graphDiagnostics = await assertNodeGraphUiDiagnostics(sessionId, {
+          expectFsm: initialGraphHasFsm,
+        });
+        if (initialGraphHasMappedNode && graphDiagnostics.sourceMappedBadgeCount < 1) {
+          fail("Bloco G: grafo importado tinha source mapping por node, mas badge 'Source mapped' nao apareceu.");
+        }
+        if (initialGraphHasBridge && graphDiagnostics.bridgeBadgeCount < 1 && graphDiagnostics.gapBadgeCount < 1) {
+          fail("Bloco G: grafo importado tinha bridge/gap, mas nenhum badge Bridge/Gap apareceu.");
+        }
+        await assertNoGrossMainShellTextOverlap(sessionId);
+        const logicGraphScreenshot = await captureScreenshot(
+          sessionId,
+          `${artifactPrefix}-G-logic-fsm-graph.png`
+        );
+        registerArtifact(manualQaReport, logicGraphScreenshot, "G - logic graph FSM/heuristic truth");
+        const sourceMappingScreenshot = await captureScreenshot(
+          sessionId,
+          `${artifactPrefix}-G-node-source-mapping.png`
+        );
+        registerArtifact(manualQaReport, sourceMappingScreenshot, "G - node source mapping");
+        const gapFilterNeedle = graphDiagnostics.gapPanelText.includes("AST/FSM")
+          ? "AST"
+          : graphDiagnostics.gapPanelText.includes("Bridge")
+            ? "Bridge"
+            : "";
+        if (gapFilterNeedle) {
+          const gapFilterApplied = await executeScript(
+            sessionId,
+            `
+              const input = document.querySelector('[data-testid="nodegraph-gap-filter"]');
+              if (!(input instanceof HTMLInputElement)) {
+                return false;
+              }
+              const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+              descriptor?.set?.call(input, arguments[0]);
+              input.dispatchEvent(new Event("input", { bubbles: true }));
+              return true;
+            `,
+            [gapFilterNeedle]
+          );
+          if (!gapFilterApplied) {
+            fail("Bloco G: painel Import Gaps nao aceitou filtro.");
+          }
+        }
+        const gapBridgeScreenshot = await captureScreenshot(
+          sessionId,
+          `${artifactPrefix}-G-gap-bridge-panel.png`
+        );
+        registerArtifact(manualQaReport, gapBridgeScreenshot, "G - gap bridge panel");
         const openedSourceAttempt = await tryAutomationApi(
           sessionId,
           "openEntitySourcePath",
           [sgdkLogicEntityId, primarySourceRef],
           8000
         );
-        const logicScreenshot = await captureScreenshot(
-          sessionId,
-          `${artifactPrefix}-G-logic-authoring.png`
-        );
-        registerArtifact(manualQaReport, logicScreenshot, "G - logic authoring");
         const sourceNavigationSummary = openedSourceAttempt?.ok
           ? `fonte '${openedSourceAttempt.value?.relative_path ?? primarySourceRef}' acionada no host`
           : `fallback honesto para '${primarySourceRef}': ${openedSourceAttempt?.reason ?? "sem retorno do host"}`;
         const logicSourceNote = [
-          `Objeto -> logica -> fonte: entidade '${sgdkLogicEntityId}' abriu Logic Workspace; ${sourceNavigationSummary}.`,
-          `Evidencia: ${path.basename(logicScreenshot)}.`,
+          `Objeto -> logica -> fonte: entidade '${sgdkLogicEntityId}' abriu Logic Workspace com ${graphDiagnostics.cardCount} node(s) renderizado(s), graph_ref='${initialGraphRef ?? "inline"}', FSM=${initialGraphHasFsm ? "sim" : "nao/heuristico"}, bridge/gap=${initialGraphHasBridge || graphDiagnostics.gapPanelVisible ? "visivel" : "ausente"}. ${sourceNavigationSummary}.`,
+          `Source Mapping: ${graphDiagnostics.sourceMappingText}.`,
+          `Gaps: ${graphDiagnostics.gapPanelText}.`,
+          `Evidencias: ${path.basename(logicGraphScreenshot)}, ${path.basename(sourceMappingScreenshot)}, ${path.basename(gapBridgeScreenshot)}.`,
         ].join(" ");
         // Com Option B, Logic oculta o painel direito global; o Inspector so volta a montar em Scene/Debug.
         await callAutomationApi(sessionId, "selectWorkspace", ["scene"]);
@@ -4177,6 +4457,7 @@ async function main() {
           "passed",
           [
             `Import SGDK -> cena activa == entry_scene ('${entrySceneExpected}') -> projectSourceKind=imported_sgdk -> onboarding nao bloqueia -> viewport asset health -> Inspector preview -> instantiateBrowserImageAsset(stage)=tilemap(${stageInst.reason}) + hero=sprite(${heroInst.reason}) -> persistencias -> reopen mantem cena/entidades -> editar graph_ref '${sgdkLogicEntityId}' -> colisao -> persistir -> reabrir -> Build & Run -> ROM '${romName}' SEGA.`,
+            `Resumo pos-import: ${importSummaryText}. Evidencia: ${path.basename(importSummaryScreenshot)}.`,
             denseSceneNote,
             denseWorkflowNote,
             tilemapWorkflowNote,

@@ -25,6 +25,7 @@ import {
   buildTilemapAuthoringBrush,
   resolvePrimaryAuthoringSurface,
 } from "../../core/entityAuthoring";
+import { getEntityLogicImportSignal } from "../../core/sgdkLogicDiagnostics";
 import type { Entity } from "../../core/ipc/sceneService";
 
 function describeError(error: unknown): string {
@@ -52,7 +53,7 @@ const GROUP_LABELS: Record<string, string> = {
 
 interface EntityGroup {
   type: string;
-  entities: Array<{ entity_id: string; display_name?: string | null; prefab?: string | null; components?: { sprite?: unknown; collision?: unknown; tilemap?: { map_width?: number; map_height?: number; cells?: number[] } | undefined; camera?: unknown; audio?: unknown } }>;
+  entities: Entity[];
 }
 
 function tilemapPaintInfo(entity: {
@@ -677,6 +678,7 @@ export default function HierarchyPanel() {
                       const isFocusEntity = entity.entity_id === sceneContext.focusEntityId;
                       const importedContext = resolveImportedEntityContext(entity);
                       const importedKindChip = importedEntityKindChip(type, importedContext.roleLabel);
+                      const logicImportSignal = getEntityLogicImportSignal(entity);
                       return (
                         <li
                           key={entity.entity_id}
@@ -720,6 +722,22 @@ export default function HierarchyPanel() {
                           {importedKindChip ? (
                             <span className="rounded-full border border-[#313244] bg-[#11111b] px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.12em] text-[#cdd6f4]">
                               {importedKindChip}
+                            </span>
+                          ) : null}
+                          {logicImportSignal.status !== "none" ? (
+                            <span
+                              data-testid={`hierarchy-logic-signal-${entity.entity_id}`}
+                              className={[
+                                "rounded-full border px-1.5 py-0.5 text-[8px] font-semibold",
+                                logicImportSignal.status === "functional"
+                                  ? "border-[#a6e3a1]/35 bg-[#a6e3a1]/10 text-[#a6e3a1]"
+                                  : logicImportSignal.status === "bridge_only"
+                                    ? "border-[#f9e2af]/35 bg-[#f9e2af]/10 text-[#f9e2af]"
+                                    : "border-[#89b4fa]/35 bg-[#89b4fa]/10 text-[#89b4fa]",
+                              ].join(" ")}
+                              title={logicImportSignal.title}
+                            >
+                              {logicImportSignal.label}
                             </span>
                           ) : null}
                           {importedContext.positionLabel ? (

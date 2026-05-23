@@ -46,6 +46,7 @@
 - Mudancas de `command.dat`/input commands devem cobrir parser Rust (`input_commands` tests), espelho frontend (`inputCommands.test.ts`), node `input_command` no compilador (`nodeCompiler`/`input_command` tests) e, quando tocar runtime real, `cargo test official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1`. Tokens fora do subset devem permanecer bloqueantes (`unsupported_tokens` + `#error` no C gerado). Status: **Experimental**.
 - Mudancas em importadores GameMaker devem cobrir fixture GMX (`import_gamemaker_gmx_project_creates_editable_scene_with_native_node_graph`), fixture YYP/YY moderna (`import_gamemaker_yyp_project_creates_scene_with_yy_assets_nodes_and_tile_layer` e import direto de `.yy`), deteccao de arquivo `.gmx`, matriz de perfil importavel, conversao GML subset (`gml_to_nodes` tests) e, quando o host tiver amostras reais, `cargo test import_gamemaker_real_host_samples_when_present --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1`. A prova vertical canonica host-local e `cargo test --lib gamemaker_vertical_compatibility_harness_basic_platform -- --ignored --nocapture --test-threads=1` (exige SGDK oficial, core Libretro e `F:\Projects\Game Maker\Basic_platform_game_example.gmez`; neste host tambem aceita fallback em `F:\Projects\Engine Template\Game Maker\Basic_platform_game_example.gmez`). Mesmo com GMX/GMZ/GMEZ/YYP/YY e subset amplo de GML cobertos, o status deve permanecer `Experimental` ate haver paridade real e promocao governada.
 - Mudancas de NodeGraph/no-code devem cobrir validacao, serializacao, geracao deterministica de C e pelo menos um fluxo de jogo 100% por nodes. Fake SGDK/ROM so pode existir como fallback unitario explicitamente nomeado (`build_generates_fake_rom_from_nocode_sgdk_game_nodes_as_unit_fallback`). Prova Stable exige SGDK oficial + Libretro real, atualmente coberta por `official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --ignored`.
+- Mudancas em SGDK Logic importado devem cobrir matriz de capacidades, resumo pos-import, sinais compactos em Inspector/Hierarchy, badges NodeGraph (`Converted`, `Bridge`, `Gap`, `Source mapped`), painel `Source Mapping`, painel `Import Gaps` filtravel e aviso forte quando o grafo for heuristico. `FSM extraida` so pode aparecer quando o Semantic Extractor/modelo/grafo trouxer FSM real; equivalencia gameplay continua "nao certificada" sem harness especifico.
 
 ### 2.3 Integracao
 - O pipeline de build deve ser testado por target.
@@ -57,7 +58,8 @@
 - Fixtures canonicas devem permanecer `BYOR-safe`: sem ROM comercial, sem depender de corpus local solto e sem versionar artefatos gerados em `build/`.
 - O backend deve conseguir `Build -> Load ROM -> Run frame` em modo headless.
 - O app desktop deve conseguir `Build -> Load ROM -> Run frames` via Tauri/WebDriver no runner canonico `scripts/e2e-tauri-build-run.mjs`.
-- O cenario `qa-rc` do runner canonico deve conseguir reproduzir o roteiro RC `A-F` e gerar `src-tauri/target-test/validation/manual-qa-status.json` com screenshots anexas da propria rodada.
+- O cenario `qa-rc` do runner canonico deve conseguir reproduzir o roteiro RC `A-G` e gerar `src-tauri/target-test/validation/manual-qa-status.json` com screenshots anexas da propria rodada. O bloco G deve incluir SGDK Logic: import summary, Logic graph, Source Mapping, Gap/Bridge panel e jogo rodando apos Build & Run quando o host/toolchain permitir.
+- Evidencia SGDK Logic fresca (rodada 49, 2026-05-20): `manual-qa-status.json` gerado em `2026-05-20T17:49:35.309Z` com screenshots `qa-rc-2026-05-20T17-49-07-349Z-G-scene-import-summary.png`, `G-logic-fsm-graph.png`, `G-node-source-mapping.png`, `G-gap-bridge-panel.png` e `G-sgdk-chain.png`. O bloco G deve continuar tratando grafo heuristico sem AST/FSM real como gap bloqueante e nunca como equivalencia gameplay certificada.
 - O workflow dedicado `.github/workflows/desktop-e2e.yml` e o entrypoint institucional para repetir esse smoke em Windows, com `workflow_dispatch`, `workflow_call` e gatilhos `push`/`pull_request` filtrados por caminho, ja validado em runner GitHub/Windows real.
 - Mudancas no pipeline que alterem esse comportamento precisam atualizar teste, fixture e memoria do projeto.
 
@@ -85,25 +87,33 @@
 17. Em host Windows com policy que bloqueia bootstrap interno do driver, usar fallback `--external-driver` com `tauri-driver` iniciado fora do processo Node.
 18. Se a sessao WebDriver falhar em `DevToolsActivePort`/`chrome not reachable`, executar `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-desktop-e2e.ps1 -SessionProbe` e registrar o resultado.
 19. Atualizacao de `docs/03_ROADMAP_MVP.md` e `docs/06_AI_MEMORY_BANK.md` quando o estado do produto mudar
+11. `cargo test sgdk_matrix_corpus_ --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar import/build SGDK, hardware budget ou `BLAZE_ENGINE`.
+12. `cargo test official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar codegen backend de NodeGraph SGDK ou a declaracao de Node Engine Stable.
+13. `cargo test sgdk_corpus_real_build_rom_emulation_report --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar a declaracao de SGDK Stable, corpus completo ou bridge formal.
+14. `npm run release:readiness:promotion` na rodada institucional que pretende promover o RC, anexando o report de QA `A-G` quando o escopo tocar SGDK/desktop e no minimo `A-F` para mudancas sem bloco G relevante.
+15. Em host Windows com policy que bloqueia bootstrap interno do driver, usar fallback `--external-driver` com `tauri-driver` iniciado fora do processo Node.
+16. Se a sessao WebDriver falhar em `DevToolsActivePort`/`chrome not reachable`, executar `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-desktop-e2e.ps1 -SessionProbe` e registrar o resultado.
+17. Atualizacao de `docs/03_ROADMAP_MVP.md` e `docs/06_AI_MEMORY_BANK.md` quando o estado do produto mudar
 
 ### 3.1 Agregacao canonica de readiness
 - `node scripts/release-readiness.mjs` gera um snapshot objetivo do estado de release em `src-tauri/target-test/validation/release-readiness.json` e `release-readiness.md`.
 - `npm run release:readiness:baseline` reexecuta os 6 gates locais e, em Windows, tambem dispara automaticamente `build:debug` e `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests`; se `toolchains/webdriver/msedgedriver.exe` estiver disponivel, o agregador tambem executa o `desktop E2E` canonico com `--skip-build`.
-- `npm run release:readiness:promotion` e a fotografia institucional conservadora para RC -> beta/producao: ele reexecuta a baseline, consome `src-tauri/target-test/validation/manual-qa-status.json` e falha em modo `strict` se qualquer bloco `A-F` continuar pendente.
+- `npm run release:readiness:promotion` e a fotografia institucional conservadora para RC -> beta/producao: ele reexecuta a baseline, consome `src-tauri/target-test/validation/manual-qa-status.json` e falha em modo `strict` se qualquer bloco `A-G` aplicavel continuar pendente (`A-F` continua sendo o minimo para escopos sem SGDK/desktop).
 - Em Windows, o report so deve ficar verde quando `build-report.json`, `upstream-validation.json` e o executavel debug canonico tiverem timestamps frescos da propria rodada.
 - `src-tauri/target-test/validation/build-report.json` deve ser tratado como artefato `fresh-only`: cada execucao registra apenas os modos realmente rodados naquela rodada, sem herdar secoes antigas de `portable`, `msi` ou outros perfis.
-- `src-tauri/target-test/validation/manual-qa-status.json` deve ser tratado como evidencia canonica do roteiro `A-F`; screenshots `qa-rc-*.png` da mesma rodada devem acompanhar esse report sempre que a promocao institucional depender do smoke de shell.
+- `src-tauri/target-test/validation/manual-qa-status.json` deve ser tratado como evidencia canonica do roteiro `A-G` quando o escopo tocar SGDK/desktop (`A-F` nos demais casos); screenshots `qa-rc-*.png` da mesma rodada devem acompanhar esse report sempre que a promocao institucional depender do smoke de shell.
 - Em Windows, os gates Rust da baseline de readiness devem rodar pelo wrapper canonico `scripts/run-cargo-msvc.cmd --manifest-path .\\src-tauri\\Cargo.toml`, e nao por `cargo` cru nem forçando `CARGO_TARGET_DIR=cargo-target-shadow` para esses dois gates.
 - O report deve ser tratado como a fotografia canonica da promocao RC -> beta/producao: artefatos, dirty worktree, baseline, upstream report, QA manual pendente e bloqueadores explicitos.
 - O agregador nao substitui a validacao manual nem o smoke institutional em Windows; ele reduz falso positivo e centraliza evidencias.
 
 ### 3.2 Criterios de aceite para rodada institucional de beta
 - `npm run release:readiness:promotion` deve fechar verde na propria rodada de promocao.
-- `src-tauri/target-test/validation/manual-qa-status.json` deve registrar os blocos `A-F` como `passed`, com screenshots `qa-rc-*.png` da mesma rodada.
+- `src-tauri/target-test/validation/manual-qa-status.json` deve registrar os blocos `A-G` aplicaveis como `passed` (`A-F` minimo fora de SGDK/desktop), com screenshots `qa-rc-*.png` da mesma rodada.
 - Em Windows, `build-report.json`, `upstream-validation.json` e o executavel debug canonico devem ter timestamps frescos da mesma execucao institucional.
 - O worktree deve estar limpo no momento do snapshot que sera usado como evidencia de promocao.
 - Se o escopo tocar build Mega Drive/SGDK real, a evidencia institucional deve cobrir onboarding, `platformer_seed`, pelo menos um projeto SGDK importado e as fixtures canonicas do smoke upstream oficial.
 - Nenhuma superficie `Experimental` pode ser promovida documentalmente para `pronta` sem mudar o badge na UI, a documentacao e a cobertura do fluxo afetado.
+- SGDK Logic Nodes so pode subir para "subset funcional validado" depois de Semantic Extractor, NodeGraph/codegen, UX/QA e corpus/harness especifico passarem juntos. Build/ROM/Emulacao SGDK pode manter certificacao existente, mas ela nao certifica equivalencia gameplay da logica importada.
 
 ### 3.3 Riscos residuais que precisam acompanhar notas de beta
 - O shell principal melhorou materialmente de bundle, mas ainda segue em hardening e nao deve ser descrito como totalmente otimizado.

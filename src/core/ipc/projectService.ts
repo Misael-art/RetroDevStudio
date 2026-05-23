@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { SgdkImportSummary } from "../sgdkLogicDiagnostics";
 
 export interface OpenProjectResult {
   selected: boolean;
@@ -8,6 +9,7 @@ export interface OpenProjectResult {
   notice?: string | null;
   preferred_scene_path?: string | null;
   imported_scene_paths?: string[];
+  import_summary?: SgdkImportSummary | null;
 }
 
 export interface OpenProjectSourceResult {
