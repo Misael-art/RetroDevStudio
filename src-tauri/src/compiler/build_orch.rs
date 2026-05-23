@@ -9,6 +9,7 @@ use crate::compiler::ast_generator::{
 };
 use crate::compiler::sgdk_emitter::emit_sgdk_with_collision;
 use crate::compiler::snes_emitter::emit_snes_with_collision;
+use crate::core::diagnostics::{build_diagnostics_from_log, ActionableDiagnostic};
 use crate::core::project_mgr::{
     load_project, load_scene, resolve_prefabs, target_spec, TargetSpec,
 };
@@ -27,6 +28,7 @@ pub struct BuildResult {
     pub ok: bool,
     pub rom_path: String,
     pub log: Vec<BuildLogLine>,
+    pub diagnostics: Vec<ActionableDiagnostic>,
 }
 
 #[derive(Debug, serde::Serialize, Clone)]
@@ -38,6 +40,7 @@ pub struct MultiTargetBuildEntry {
     pub warnings: Vec<String>,
     pub errors: Vec<String>,
     pub log: Vec<BuildLogLine>,
+    pub diagnostics: Vec<ActionableDiagnostic>,
 }
 
 #[derive(Debug, serde::Serialize, Clone)]
@@ -95,6 +98,44 @@ struct SgdkCompatibilityProfile {
     scene: Scene,
     active_sprite_count: usize,
     culled_sprite_count: usize,
+}
+
+fn failed_build_result(
+    target: &str,
+    log: Vec<BuildLogLine>,
+    evidence_path: Option<&Path>,
+) -> BuildResult {
+    let diagnostics = build_diagnostics_from_log(target, &log, evidence_path);
+    BuildResult {
+        ok: false,
+        rom_path: String::new(),
+        log,
+        diagnostics,
+    }
+}
+
+fn successful_build_result(rom_path: PathBuf, log: Vec<BuildLogLine>) -> BuildResult {
+    BuildResult {
+        ok: true,
+        rom_path: rom_path.to_string_lossy().to_string(),
+        log,
+        diagnostics: Vec::new(),
+    }
+}
+
+fn build_evidence_path(
+    project_dir: &Path,
+    project: &Project,
+    target: TargetSpec,
+) -> Option<PathBuf> {
+    let output_root = project
+        .build
+        .as_ref()
+        .map(|build| build.output_dir.as_str())
+        .unwrap_or("build/");
+    sanitize_build_output_dir(output_root)
+        .ok()
+        .map(|root| project_dir.join(root).join(target.target))
 }
 
 fn is_sgdk_compatibility_source(source_kind: Option<&str>) -> bool {
@@ -328,11 +369,7 @@ where
         Ok(project) => project,
         Err(error) => {
             emit!("error", format!("Falha ao carregar project.rds: {}", error));
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result("project", log, Some(project_dir));
         }
     };
 
@@ -387,6 +424,7 @@ where
         Ok(project) => project,
         Err(error) => {
             emit!("error", format!("Falha ao carregar project.rds: {}", error));
+            let diagnostics = build_diagnostics_from_log("project", &log, Some(project_dir));
             return MultiTargetBuildResult {
                 ok: false,
                 results: vec![MultiTargetBuildEntry {
@@ -397,6 +435,7 @@ where
                     warnings: Vec::new(),
                     errors: vec![format!("Falha ao carregar project.rds: {}", error)],
                     log,
+                    diagnostics,
                 }],
             };
         }
@@ -426,18 +465,24 @@ where
 
                 build_entry_from_result(target_name, prefixed_result)
             }
-            Err(error) => MultiTargetBuildEntry {
-                target: target_name.clone(),
-                ok: false,
-                rom_path: String::new(),
-                rom_size_bytes: 0,
-                warnings: Vec::new(),
-                errors: vec![error],
-                log: vec![BuildLogLine {
+            Err(error) => {
+                let entry_log = vec![BuildLogLine {
                     level: "error".to_string(),
-                    message: format!("[{}] target override invalido", target_name),
-                }],
-            },
+                    message: format!("[{}] target override invalido: {}", target_name, error),
+                }];
+                let diagnostics =
+                    build_diagnostics_from_log(target_name, &entry_log, Some(project_dir));
+                MultiTargetBuildEntry {
+                    target: target_name.clone(),
+                    ok: false,
+                    rom_path: String::new(),
+                    rom_size_bytes: 0,
+                    warnings: Vec::new(),
+                    errors: vec![error],
+                    log: entry_log,
+                    diagnostics,
+                }
+            }
         };
 
         results.push(entry);
@@ -475,11 +520,7 @@ where
         Ok(target) => target,
         Err(error) => {
             emit!("error", error.to_string());
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result(&project.target, log, Some(project_dir));
         }
     };
 
@@ -495,11 +536,7 @@ where
         Ok(root) => root,
         Err(error) => {
             emit!("error", error);
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result(target.target, log, Some(project_dir));
         }
     };
 
@@ -509,11 +546,7 @@ where
                 "error",
                 "Projetos SGDK legados em modo overlay suportam apenas build Mega Drive."
             );
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result(target.target, log, Some(project_dir));
         }
 
         if !host_root.is_dir() {
@@ -524,11 +557,7 @@ where
                     host_root.display()
                 )
             );
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result(target.target, log, Some(&host_root));
         }
 
         let Some(makefile_path) = find_makefile(&host_root) else {
@@ -539,11 +568,7 @@ where
                     host_root.display()
                 )
             );
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result(target.target, log, Some(&host_root));
         };
 
         emit!(
@@ -562,11 +587,7 @@ where
             Ok(toolchain) => toolchain,
             Err(error) => {
                 emit!("error", error);
-                return BuildResult {
-                    ok: false,
-                    rom_path: String::new(),
-                    log,
-                };
+                return failed_build_result(target.target, log, Some(&host_root));
             }
         };
 
@@ -586,11 +607,7 @@ where
 
         if let Err(error) = invoke_make(&toolchain, &workspace, target, &mut log, &on_log) {
             emit!("error", error);
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result(target.target, log, Some(&workspace.root));
         }
 
         let rom_path = match detect_rom_artifact(&workspace, target) {
@@ -603,11 +620,7 @@ where
                         host_root.display()
                     )
                 );
-                return BuildResult {
-                    ok: false,
-                    rom_path: String::new(),
-                    log,
-                };
+                return failed_build_result(target.target, log, Some(&workspace.root));
             }
         };
 
@@ -616,11 +629,7 @@ where
         }
         emit!("success", format!("ROM gerada: {}", rom_path.display()));
 
-        return BuildResult {
-            ok: true,
-            rom_path: rom_path.to_string_lossy().to_string(),
-            log,
-        };
+        return successful_build_result(rom_path, log);
     }
 
     let scene = match load_scene(project_dir, &project.entry_scene) {
@@ -633,11 +642,7 @@ where
                     project.entry_scene, error
                 )
             );
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result(target.target, log, Some(project_dir));
         }
     };
 
@@ -654,11 +659,7 @@ where
         Ok(scene) => scene,
         Err(error) => {
             emit!("error", format!("Falha ao resolver prefabs: {}", error));
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result(target.target, log, Some(project_dir));
         }
     };
 
@@ -784,11 +785,7 @@ where
 
     if hw_errors.iter().any(|(_, is_fatal)| *is_fatal) {
         emit!("error", "Build abortado: erros de hardware constraints.");
-        return BuildResult {
-            ok: false,
-            rom_path: String::new(),
-            log,
-        };
+        return failed_build_result(target.target, log, Some(project_dir));
     }
 
     emit!(
@@ -803,11 +800,7 @@ where
                     "error",
                     format!("Falha ao gerar AST com prefabs: {}", error)
                 );
-                return BuildResult {
-                    ok: false,
-                    rom_path: String::new(),
-                    log,
-                };
+                return failed_build_result(target.target, log, Some(project_dir));
             }
         }
     } else {
@@ -840,11 +833,8 @@ where
         Ok(workspace) => workspace,
         Err(error) => {
             emit!("error", error);
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            let evidence_path = build_evidence_path(project_dir, project, target);
+            return failed_build_result(target.target, log, evidence_path.as_deref());
         }
     };
 
@@ -860,11 +850,7 @@ where
         Ok(toolchain) => toolchain,
         Err(error) => {
             emit!("error", error);
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result(target.target, log, Some(&workspace.root));
         }
     };
 
@@ -886,11 +872,7 @@ where
 
     if let Err(error) = invoke_make(&toolchain, &workspace, target, &mut log, &on_log) {
         emit!("error", error);
-        return BuildResult {
-            ok: false,
-            rom_path: String::new(),
-            log,
-        };
+        return failed_build_result(target.target, log, Some(&workspace.root));
     }
 
     let rom_path = match detect_rom_artifact(&workspace, target) {
@@ -903,11 +885,7 @@ where
                     workspace.root.display()
                 )
             );
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result(target.target, log, Some(&workspace.root));
         }
     };
 
@@ -916,11 +894,7 @@ where
     }
     emit!("success", format!("ROM gerada: {}", rom_path.display()));
 
-    BuildResult {
-        ok: true,
-        rom_path: rom_path.to_string_lossy().to_string(),
-        log,
-    }
+    successful_build_result(rom_path, log)
 }
 
 fn scene_requires_sgdk_resource_compatibility(scene: &Scene) -> bool {
@@ -972,6 +946,7 @@ fn build_entry_from_result(target: &str, result: BuildResult) -> MultiTargetBuil
         warnings,
         errors,
         log: result.log,
+        diagnostics: result.diagnostics,
     }
 }
 
@@ -2243,6 +2218,7 @@ fn repo_root() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::diagnostics::{ActionableDiagnostic, DiagnosticArea, DiagnosticSeverity};
     use crate::tools::photo2sgdk::import_art_asset_internal;
     use image::{ImageBuffer, Rgba};
     use std::sync::{Mutex, OnceLock};
@@ -2351,6 +2327,79 @@ mod tests {
         fs::create_dir_all(&bin_dir).expect("create fake toolchain bin");
         let make_program = fake_make_script(&bin_dir, extension);
         (root, make_program)
+    }
+
+    #[test]
+    fn actionable_diagnostic_serializes_common_contract() {
+        let diagnostic = ActionableDiagnostic {
+            severity: DiagnosticSeverity::Error,
+            area: DiagnosticArea::BuildSgdk,
+            source_path: Some("F:/Games/Demo/src/main.c".to_string()),
+            line: Some(42),
+            column: Some(7),
+            user_message: "Build falhou porque o compilador SGDK encontrou um erro em main.c:42.".to_string(),
+            technical_detail: "src/main.c:42:7: error: expected ';' before '}' token".to_string(),
+            suggested_action: "Abra F:/Games/Demo/src/main.c na linha 42 e corrija a sintaxe indicada pelo compilador.".to_string(),
+            blocking: true,
+            evidence_path: Some("F:/Games/Demo/build/megadrive".to_string()),
+        };
+
+        let value = serde_json::to_value(&diagnostic).expect("serialize diagnostic");
+
+        assert_eq!(value["severity"], "error");
+        assert_eq!(value["area"], "build_sgdk");
+        assert_eq!(value["source_path"], "F:/Games/Demo/src/main.c");
+        assert_eq!(value["line"], 42);
+        assert_eq!(value["column"], 7);
+        assert_eq!(value["blocking"], true);
+        assert_eq!(value["evidence_path"], "F:/Games/Demo/build/megadrive");
+    }
+
+    #[test]
+    fn missing_asset_build_returns_actionable_diagnostic() {
+        let _serial = test_serial_guard();
+        let project_dir = workspace_copy("megadrive_dummy");
+        install_megadrive_sprite_fixture(&project_dir);
+        let missing_asset = project_dir
+            .join("assets")
+            .join("sprites")
+            .join("onboarding_player.ppm");
+        fs::remove_file(&missing_asset).expect("remove sprite fixture");
+
+        let (sgdk_root, make_program) = fake_toolchain("sgdk-missing-asset", "md");
+        let environment = BuildEnvironment {
+            sgdk_root: Some(sgdk_root),
+            sgdk_make_program: Some(make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_with_environment(&project_dir, &environment, |_| {});
+
+        assert!(!result.ok);
+        let diagnostic = result
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.area == DiagnosticArea::BuildSgdk)
+            .expect("build diagnostic");
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
+        let missing_asset_label = missing_asset.to_string_lossy().replace('\\', "/");
+        assert_eq!(
+            diagnostic
+                .source_path
+                .as_deref()
+                .map(|path| path.replace('\\', "/")),
+            Some(missing_asset_label)
+        );
+        assert!(diagnostic.user_message.contains("Build falhou porque"));
+        assert!(diagnostic.user_message.contains("asset"));
+        assert!(diagnostic.suggested_action.contains("Restaure"));
+        assert!(diagnostic.blocking);
+        assert!(diagnostic.evidence_path.as_deref().is_some_and(|path| path
+            .ends_with("build\\megadrive")
+            || path.ends_with("build/megadrive")));
+
+        let _ = fs::remove_dir_all(project_dir);
     }
 
     fn fake_toolchain_with_sega_rom(root_name: &str, extension: &str) -> (PathBuf, PathBuf) {

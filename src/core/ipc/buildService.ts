@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
+import type { ActionableDiagnostic } from "../diagnostics";
 
 // ── Types (mirror do Rust) ────────────────────────────────────────────────────
 
@@ -12,6 +13,7 @@ export interface BuildResult {
   ok: boolean;
   rom_path: string;
   log: BuildLogLine[];
+  diagnostics?: ActionableDiagnostic[];
 }
 
 export interface MultiTargetBuildEntry {
@@ -22,6 +24,7 @@ export interface MultiTargetBuildEntry {
   warnings: string[];
   errors: string[];
   log: BuildLogLine[];
+  diagnostics?: ActionableDiagnostic[];
 }
 
 export interface MultiTargetBuildResult {
