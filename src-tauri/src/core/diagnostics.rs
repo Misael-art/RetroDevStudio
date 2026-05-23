@@ -34,6 +34,16 @@ pub enum DiagnosticArea {
     Project,
     #[serde(rename = "codegen")]
     Codegen,
+    #[serde(rename = "project_capability")]
+    ProjectCapability,
+    #[serde(rename = "rom_mastering")]
+    RomMastering,
+    #[serde(rename = "runtime_contracts")]
+    RuntimeContracts,
+    #[serde(rename = "asset_quality")]
+    AssetQuality,
+    #[serde(rename = "audio_pipeline")]
+    AudioPipeline,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

@@ -21,6 +21,12 @@ use compiler::build_orch::{
 };
 use compiler::sgdk_emitter::emit_sgdk_with_collision;
 use compiler::snes_emitter::emit_snes_with_collision;
+use core::asset_quality::{
+    inspect_asset_quality as inspect_asset_quality_impl, AssetQualityReport,
+};
+use core::audio_pipeline::{
+    inspect_audio_pipeline as inspect_audio_pipeline_impl, AudioPipelineReport,
+};
 use core::compatibility_harness::{
     run_gamemaker_compatibility_harness, run_openbor_compatibility_harness, validation_report_dir,
     CompatibilityHarnessReport,
@@ -30,6 +36,9 @@ use core::editor_validation::{
     DraftValidationResult,
 };
 use core::input_commands::{parse_command_dat, InputCommandDefinition};
+use core::project_capability::{
+    inspect_project_capability as inspect_project_capability_impl, ProjectCapabilityReport,
+};
 use core::project_mgr::{
     append_patch_audit_entry, create_project_skeleton, create_scene as create_project_scene,
     discover_project_rds, import_external_project as import_external_scene,
@@ -44,9 +53,18 @@ use core::project_mgr::{
     update_project_target, ExternalImportProfileSummary, LegacySgdkIndex, ProjectTemplateSummary,
     SceneInfo, DEFAULT_ENTRY_SCENE,
 };
+use core::rom_mastering::{
+    inspect_rom_mastering as inspect_rom_mastering_impl, RomMasteringReport,
+};
+use core::runtime_contracts::{
+    inspect_runtime_contracts as inspect_runtime_contracts_impl, RuntimeContractsReport,
+};
 use core::sgdk_corpus_inventory::{
     inspect_sgdk_corpus_for_nocode_inventory, inspect_sgdk_project_for_nocode_inventory,
     write_sgdk_corpus_inventory_report, SgdkCorpusInventoryReport, SgdkProjectInventory,
+};
+use core::sgdk_pattern_templates::{
+    list_sgdk_pattern_templates as list_sgdk_pattern_templates_impl, SgdkPatternTemplate,
 };
 use emulator::frame_buffer::framebuffer_to_rgba;
 use emulator::libretro_ffi::{
@@ -3069,6 +3087,65 @@ fn inspect_sgdk_corpus_inventory(
 }
 
 #[tauri::command]
+fn inspect_project_capability(project_dir: String) -> Result<ProjectCapabilityReport, String> {
+    let trimmed = project_dir.trim();
+    if trimmed.is_empty() {
+        return Err("O que quebrou: project_dir vazio. Por que importa: capability diagnostics precisa de um projeto real. Onde corrigir: chamada IPC inspect_project_capability. Proxima acao: abra um projeto antes de inspecionar.".to_string());
+    }
+    inspect_project_capability_impl(Path::new(trimmed))
+}
+
+#[tauri::command]
+fn inspect_rom_mastering(rom_path: String) -> Result<RomMasteringReport, String> {
+    let trimmed = rom_path.trim();
+    if trimmed.is_empty() {
+        return Err("O que quebrou: rom_path vazio. Por que importa: ROM Mastering so inspeciona artefato real. Onde corrigir: chamada IPC inspect_rom_mastering. Proxima acao: selecione a ROM gerada pelo build.".to_string());
+    }
+    inspect_rom_mastering_impl(Path::new(trimmed))
+}
+
+#[tauri::command]
+fn inspect_runtime_contracts(project_dir: String) -> Result<RuntimeContractsReport, String> {
+    let trimmed = project_dir.trim();
+    if trimmed.is_empty() {
+        return Err("O que quebrou: project_dir vazio. Por que importa: contratos runtime dependem de project.rds e scene ativa. Onde corrigir: chamada IPC inspect_runtime_contracts. Proxima acao: abra um projeto antes de inspecionar.".to_string());
+    }
+    inspect_runtime_contracts_impl(Path::new(trimmed))
+}
+
+#[tauri::command]
+fn inspect_audio_pipeline(project_dir: String) -> Result<AudioPipelineReport, String> {
+    let trimmed = project_dir.trim();
+    if trimmed.is_empty() {
+        return Err("O que quebrou: project_dir vazio. Por que importa: audio diagnostics precisa resolver assets/audio. Onde corrigir: chamada IPC inspect_audio_pipeline. Proxima acao: abra um projeto antes de inspecionar.".to_string());
+    }
+    inspect_audio_pipeline_impl(Path::new(trimmed))
+}
+
+#[tauri::command]
+fn list_sgdk_pattern_templates() -> Vec<SgdkPatternTemplate> {
+    list_sgdk_pattern_templates_impl()
+}
+
+#[tauri::command]
+fn inspect_asset_quality(
+    project_dir: String,
+    asset_id_or_path: Option<String>,
+) -> Result<AssetQualityReport, String> {
+    let trimmed = project_dir.trim();
+    if trimmed.is_empty() {
+        return Err("O que quebrou: project_dir vazio. Por que importa: Qualidade ROM precisa resolver o asset dentro do projeto. Onde corrigir: chamada IPC inspect_asset_quality. Proxima acao: abra um projeto e selecione um asset.".to_string());
+    }
+    inspect_asset_quality_impl(
+        Path::new(trimmed),
+        asset_id_or_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty()),
+    )
+}
+
+#[tauri::command]
 fn run_gamemaker_compatibility_harness_cmd(
     source_path: String,
     report_stem: Option<String>,
@@ -3243,6 +3320,12 @@ pub fn run() {
             import_sgdk_project,
             inspect_sgdk_project_inventory,
             inspect_sgdk_corpus_inventory,
+            inspect_project_capability,
+            inspect_rom_mastering,
+            inspect_runtime_contracts,
+            inspect_audio_pipeline,
+            list_sgdk_pattern_templates,
+            inspect_asset_quality,
             run_gamemaker_compatibility_harness_cmd,
             run_openbor_compatibility_harness_cmd,
             import_mugen_project,

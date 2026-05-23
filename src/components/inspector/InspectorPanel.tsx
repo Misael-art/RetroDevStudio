@@ -9,6 +9,7 @@ import {
 import { resolveImportedEntityContext } from "../../core/importedEntityContext";
 import Panel from "../common/Panel";
 import HardwareLimitsPanel from "./HardwareLimitsPanel";
+import RuntimeContractsPanel from "./RuntimeContractsPanel";
 import { useEditorStore } from "../../core/store/editorStore";
 import type { BackgroundLayer, Entity } from "../../core/ipc/sceneService";
 import { persistActiveScene } from "../../core/scenePersistence";
@@ -1001,6 +1002,9 @@ export default function InspectorPanel() {
                 </p>
               </div>
             ) : null}
+            <div className="mt-3">
+              <RuntimeContractsPanel compact />
+            </div>
           </div>
         ) : entity ? (
           <>
@@ -1084,6 +1088,9 @@ export default function InspectorPanel() {
                 <span>{Object.values(entity.components).filter(Boolean).length} comp.</span>
                 <span>({entity.transform.x}, {entity.transform.y})</span>
               </div>
+            </div>
+            <div className="border-b border-[#313244] bg-[#11111b]/40 px-3 py-2">
+              <RuntimeContractsPanel compact />
             </div>
             {importedEntityContext.isImported && sections.length === 0 ? (
               <details

@@ -14,7 +14,12 @@ export type DiagnosticArea =
   | "runtime_setup"
   | "hardware"
   | "project"
-  | "codegen";
+  | "codegen"
+  | "project_capability"
+  | "rom_mastering"
+  | "runtime_contracts"
+  | "asset_quality"
+  | "audio_pipeline";
 
 export interface ActionableDiagnostic {
   severity: DiagnosticSeverity;
@@ -42,6 +47,11 @@ export const DIAGNOSTIC_AREA_LABELS: Record<DiagnosticArea, string> = {
   hardware: "Hardware",
   project: "Projeto",
   codegen: "CodeGen",
+  project_capability: "Capability",
+  rom_mastering: "ROM Mastering",
+  runtime_contracts: "Runtime Contracts",
+  asset_quality: "Asset Quality",
+  audio_pipeline: "Audio Pipeline",
 };
 
 export const DIAGNOSTIC_SEVERITY_LABELS: Record<DiagnosticSeverity, string> = {
