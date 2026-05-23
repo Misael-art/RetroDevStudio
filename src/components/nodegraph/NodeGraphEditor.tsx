@@ -2460,7 +2460,10 @@ export default function NodeGraphEditor() {
     <div className="flex h-full w-full overflow-hidden bg-[#11111b]">
 
       {/* ── Palette sidebar ── */}
-      <div className="flex w-40 shrink-0 flex-col overflow-x-hidden border-r border-[#313244] bg-[#181825]">
+      <div
+        data-testid="nodegraph-side-rail"
+        className="flex w-40 shrink-0 flex-col overflow-x-hidden border-r border-[#313244] bg-[#181825]"
+      >
         <div className="shrink-0 border-b border-[#313244] p-2">
           <div className="relative">
             <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-[#6c7086]">
@@ -2555,7 +2558,7 @@ export default function NodeGraphEditor() {
         {selectedEntity && (
           <div
             data-testid="nodegraph-overview"
-            className="absolute left-3 top-3 z-10 flex max-w-[19rem] flex-col gap-2 rounded-xl border border-[#313244] bg-[#181825]/95 px-3 py-2 text-[10px] shadow-lg backdrop-blur-sm"
+            className="absolute left-3 top-3 z-10 flex max-h-[calc(100%-1.5rem)] max-w-[19rem] flex-col gap-2 overflow-x-hidden overflow-y-auto rounded-xl border border-[#313244] bg-[#181825]/95 px-3 py-2 text-[10px] shadow-lg backdrop-blur-sm scrollbar-thin"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">

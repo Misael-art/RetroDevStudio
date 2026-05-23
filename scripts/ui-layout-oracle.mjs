@@ -290,6 +290,7 @@ export function evaluateUiLayoutOracleSnapshot(snapshot) {
   for (const clickable of visibleClickables) {
     const rect = normalizeRect(clickable.rect);
     if (rectOutsideViewport(rect, viewport)) {
+      if (clickable.hitTestVisible === false) continue;
       if (isAllowedScrollableOverflow(clickable, rect, viewport)) continue;
       pushIssue(issues, "clickable-outside-viewport", "elemento clicavel fora da viewport", {
         key: clickable.key,
