@@ -1496,6 +1496,8 @@ async function collectUiLayoutOracleSnapshot(sessionId, targetId, resolutionTag)
         "unified-topbar-breadcrumbs",
         "artstudio-timeline",
         "artstudio-command-panel",
+        "artstudio-main-stage",
+        "artstudio-inspector",
         "nodegraph-canvas",
         "nodegraph-side-rail",
         "viewport-scene-toolbar",
