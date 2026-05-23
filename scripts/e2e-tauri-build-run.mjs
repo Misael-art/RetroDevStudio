@@ -1819,7 +1819,6 @@ async function captureScreenshot(sessionId, filename) {
   return outputPath;
 }
 
-<<<<<<< HEAD
 async function prepareUiLayoutOracleTarget(sessionId, target) {
   if (!target) {
     fail("Alvo do oraculo visual nao foi encontrado.");
@@ -1909,7 +1908,8 @@ async function runUiLayoutOracleCheck(
   }
 
   return record;
-=======
+}
+
 async function readNodeGraphUiDiagnostics(sessionId) {
   return executeScript(
     sessionId,
@@ -2075,7 +2075,6 @@ async function assertNoGrossMainShellTextOverlap(sessionId) {
   if (Array.isArray(overlaps) && overlaps.length > 0) {
     fail(`Bloco G: texto sobreposto no shell principal: ${JSON.stringify(overlaps)}.`);
   }
->>>>>>> origin/codex/sgdk-logic-truth-product-qa
 }
 
 async function cleanupTemporaryProject(projectDir) {

@@ -88,19 +88,17 @@ import {
   groupShortcutsByGroup,
 } from "./core/shortcuts";
 import {
-<<<<<<< HEAD
   getPresetLayout,
   resolveWorkspaceShellConfig,
   type LayoutMap,
   type LayoutPresetId,
 } from "./core/workspaceLayout";
-=======
+import {
   buildSgdkCapabilityMatrix,
   formatSgdkImportSummaryKind,
   type CapabilityTone,
   type SgdkImportSummary,
 } from "./core/sgdkLogicDiagnostics";
->>>>>>> origin/codex/sgdk-logic-truth-product-qa
 
 const ExplorerWorkspace = lazy(() => import("./components/explorer/ExplorerWorkspace"));
 const InspectorPanel = lazy(() => import("./components/inspector/InspectorPanel"));
@@ -2310,7 +2308,7 @@ export default function App() {
             createFallbackDiagnostic({
               area: "libretro_emulation",
               sourcePath: romPath,
-              technicalDetail: result.message,
+              technicalDetail: formatEmulatorFailureMessage(result.message),
             })
         );
         return;
@@ -2324,7 +2322,7 @@ export default function App() {
       reportDiagnostic(
         createFallbackDiagnostic({
           area: "libretro_emulation",
-          technicalDetail: describeError(error),
+          technicalDetail: formatEmulatorFailureMessage(describeError(error)),
         })
       );
     }
@@ -2559,7 +2557,7 @@ export default function App() {
             createFallbackDiagnostic({
               area: "libretro_emulation",
               sourcePath: result.rom_path,
-              technicalDetail: loadResult.message,
+              technicalDetail: formatEmulatorFailureMessage(loadResult.message),
             })
         );
         return;
@@ -4084,19 +4082,15 @@ export default function App() {
         </span>
       ) : null}
 
-<<<<<<< HEAD
+      {lastSgdkImportSummary ? (
+        <SgdkImportSummaryCard summary={lastSgdkImportSummary} />
+      ) : null}
+
       {!showProjectWizard &&
         !focusedShell &&
         workspaceGuide &&
         activeWorkspace !== "artstudio" &&
         activeWorkspace !== "retrofx" && (
-=======
-      {lastSgdkImportSummary ? (
-        <SgdkImportSummaryCard summary={lastSgdkImportSummary} />
-      ) : null}
-
-      {!showProjectWizard && !focusedShell && workspaceGuide && (
->>>>>>> origin/codex/sgdk-logic-truth-product-qa
         <WorkspaceGuideCard key={workspaceMeta.id} guide={workspaceGuide} />
       )}
 

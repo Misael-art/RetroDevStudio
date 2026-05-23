@@ -1,10 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { persistActiveScene } from "../../core/scenePersistence";
 import { openProjectSourcePath } from "../../core/ipc/projectService";
-import {
-  parseSceneJson,
-  resolveScenePrefabs,
-} from "../../core/ipc/sceneService";
+import { parseSceneJson, resolveScenePrefabs } from "../../core/ipc/sceneService";
 import { useEditorStore } from "../../core/store/editorStore";
 import { getEntityDisplayName } from "../../core/entityDisplay";
 import { resolveEntitySourceRefs } from "../../core/entityAuthoring";
@@ -233,9 +230,7 @@ export const REQUIRED_NOCODE_NODE_TYPES: NodeType[] = [
   "hardware_budget_check",
 ];
 
-function normalizeGraphEntityKey(
-  value: string | number | null | undefined,
-): string {
+function normalizeGraphEntityKey(value: string | number | null | undefined): string {
   return String(value ?? "")
     .trim()
     .toLowerCase()
@@ -282,19 +277,12 @@ export function summarizeNodeGraph(graph: NodeGraph): NodeGraphSummary {
   };
 }
 
-function findPort(
-  node: GraphNode,
-  portId: string,
-  direction: "input" | "output",
-): NodePort | undefined {
+function findPort(node: GraphNode, portId: string, direction: "input" | "output"): NodePort | undefined {
   const ports = direction === "input" ? node.inputs : node.outputs;
   return ports.find((port) => port.id === portId);
 }
 
-function collectExecCycles(
-  graph: NodeGraph,
-  nodeById: Map<string, GraphNode>,
-): string[][] {
+function collectExecCycles(graph: NodeGraph, nodeById: Map<string, GraphNode>): string[][] {
   const adjacency = new Map<string, string[]>();
   for (const edge of graph.edges) {
     const fromNode = nodeById.get(edge.fromNode);
@@ -307,10 +295,7 @@ function collectExecCycles(
     if (fromPort?.kind !== "exec" || toPort?.kind !== "exec") {
       continue;
     }
-    adjacency.set(edge.fromNode, [
-      ...(adjacency.get(edge.fromNode) ?? []),
-      edge.toNode,
-    ]);
+    adjacency.set(edge.fromNode, [...(adjacency.get(edge.fromNode) ?? []), edge.toNode]);
   }
 
   const cycles: string[][] = [];
@@ -321,9 +306,7 @@ function collectExecCycles(
   const visit = (nodeId: string) => {
     if (visiting.has(nodeId)) {
       const cycleStart = stack.indexOf(nodeId);
-      cycles.push(
-        cycleStart >= 0 ? stack.slice(cycleStart).concat(nodeId) : [nodeId],
-      );
+      cycles.push(cycleStart >= 0 ? stack.slice(cycleStart).concat(nodeId) : [nodeId]);
       return;
     }
     if (visited.has(nodeId)) {
@@ -405,10 +388,7 @@ export function validateNodeGraph(graph: NodeGraph): NodeGraphValidation {
     }
   }
 
-  if (
-    graph.nodes.length > 0 &&
-    graph.nodes.every((node) => !EVENT_NODE_TYPES.includes(node.type))
-  ) {
+  if (graph.nodes.length > 0 && graph.nodes.every((node) => !EVENT_NODE_TYPES.includes(node.type))) {
     issues.push({
       severity: "warning",
       code: "missing_entry",
@@ -446,7 +426,7 @@ export function buildNodeMiniMap(
   graph: NodeGraph,
   width = MINIMAP_WIDTH,
   height = MINIMAP_HEIGHT,
-  padding = MINIMAP_PADDING,
+  padding = MINIMAP_PADDING
 ): MiniMapNode[] {
   const bounds = getNodeGraphBounds(graph);
   if (!bounds) {
@@ -548,7 +528,7 @@ export function serializeNodeGraph(graph: NodeGraph): string {
 
 function edgeConnectsValidPorts(
   edge: NodeEdge,
-  nodeById: Map<string, GraphNode>,
+  nodeById: Map<string, GraphNode>
 ): boolean {
   const fromNode = nodeById.get(edge.fromNode);
   const toNode = nodeById.get(edge.toNode);
@@ -587,9 +567,7 @@ export function deserializeNodeGraph(serialized?: string | null): NodeGraph {
     }
 
     const nodeById = new Map(hydratedNodes.map((node) => [node.id, node]));
-    const validEdges = rawEdges.filter((edge) =>
-      edgeConnectsValidPorts(edge, nodeById),
-    );
+    const validEdges = rawEdges.filter((edge) => edgeConnectsValidPorts(edge, nodeById));
 
     return cloneGraph({ nodes: hydratedNodes, edges: validEdges });
   } catch {
@@ -601,36 +579,31 @@ export function deserializeNodeGraph(serialized?: string | null): NodeGraph {
 
 const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
   event_start: {
-    type: "event_start",
-    label: "On Start",
+    type: "event_start", label: "On Start",
     inputs: [],
     outputs: [{ id: "exec", label: "▶", kind: "exec" }],
     params: {},
   },
   event_update: {
-    type: "event_update",
-    label: "On Update",
+    type: "event_update", label: "On Update",
     inputs: [],
     outputs: [{ id: "exec", label: ">", kind: "exec" }],
     params: { rate: "frame" },
   },
   input_pressed: {
-    type: "input_pressed",
-    label: "On Input Pressed",
+    type: "input_pressed", label: "On Input Pressed",
     inputs: [],
     outputs: [{ id: "exec", label: ">", kind: "exec" }],
     params: { pad: "JOY_1", button: "BUTTON_A" },
   },
   input_held: {
-    type: "input_held",
-    label: "On Input Held",
+    type: "input_held", label: "On Input Held",
     inputs: [],
     outputs: [{ id: "exec", label: ">", kind: "exec" }],
     params: { pad: "JOY_1", button: "BUTTON_RIGHT" },
   },
   input_command: {
-    type: "input_command",
-    label: "Input Command",
+    type: "input_command", label: "Input Command",
     inputs: [],
     outputs: [
       { id: "exec", label: ">", kind: "exec" },
@@ -647,19 +620,17 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     },
   },
   sprite_move: {
-    type: "sprite_move",
-    label: "Move Sprite",
+    type: "sprite_move", label: "Move Sprite",
     inputs: [
-      { id: "exec", label: "▶", kind: "exec" },
-      { id: "dx", label: "dx", kind: "data", dataType: "int" },
-      { id: "dy", label: "dy", kind: "data", dataType: "int" },
+      { id: "exec",   label: "▶", kind: "exec" },
+      { id: "dx",     label: "dx", kind: "data", dataType: "int" },
+      { id: "dy",     label: "dy", kind: "data", dataType: "int" },
     ],
     outputs: [{ id: "exec", label: "▶", kind: "exec" }],
     params: { target: "player", dx: 0, dy: 0 },
   },
   set_velocity: {
-    type: "set_velocity",
-    label: "Set Velocity",
+    type: "set_velocity", label: "Set Velocity",
     inputs: [
       { id: "exec", label: ">", kind: "exec" },
       { id: "vx", label: "vx", kind: "data", dataType: "int" },
@@ -669,8 +640,7 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     params: { target: "player", vx: 0, vy: 0 },
   },
   set_position: {
-    type: "set_position",
-    label: "Set Position",
+    type: "set_position", label: "Set Position",
     inputs: [
       { id: "exec", label: ">", kind: "exec" },
       { id: "x", label: "x", kind: "data", dataType: "int" },
@@ -680,60 +650,52 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     params: { target: "player", x: 0, y: 0 },
   },
   spawn_entity: {
-    type: "spawn_entity",
-    label: "Spawn",
+    type: "spawn_entity", label: "Spawn",
     inputs: [{ id: "exec", label: ">", kind: "exec" }],
     outputs: [{ id: "exec", label: ">", kind: "exec" }],
     params: { prefab: "enemy", x: 0, y: 0 },
   },
   destroy_entity: {
-    type: "destroy_entity",
-    label: "Destroy",
+    type: "destroy_entity", label: "Destroy",
     inputs: [{ id: "exec", label: ">", kind: "exec" }],
     outputs: [{ id: "exec", label: ">", kind: "exec" }],
     params: { target: "self" },
   },
   sprite_anim: {
-    type: "sprite_anim",
-    label: "Set Animation",
+    type: "sprite_anim", label: "Set Animation",
     inputs: [{ id: "exec", label: "▶", kind: "exec" }],
     outputs: [{ id: "exec", label: "▶", kind: "exec" }],
     params: { target: "player", anim: "idle" },
   },
   set_animation_state: {
-    type: "set_animation_state",
-    label: "Set Anim State",
+    type: "set_animation_state", label: "Set Anim State",
     inputs: [{ id: "exec", label: ">", kind: "exec" }],
     outputs: [{ id: "exec", label: ">", kind: "exec" }],
     params: { target: "player", state: "idle" },
   },
   condition_overlap: {
-    type: "condition_overlap",
-    label: "On Overlap",
+    type: "condition_overlap", label: "On Overlap",
     inputs: [],
     outputs: [
-      { id: "true", label: "True ▶", kind: "exec" },
+      { id: "true",  label: "True ▶",  kind: "exec" },
       { id: "false", label: "False ▶", kind: "exec" },
     ],
     params: { a: "player", b: "enemy" },
   },
   camera_follow: {
-    type: "camera_follow",
-    label: "Camera Follow",
+    type: "camera_follow", label: "Camera Follow",
     inputs: [{ id: "exec", label: ">", kind: "exec" }],
     outputs: [{ id: "exec", label: ">", kind: "exec" }],
     params: { target: "player", damping: 0 },
   },
   camera_bounds: {
-    type: "camera_bounds",
-    label: "Camera Bounds",
+    type: "camera_bounds", label: "Camera Bounds",
     inputs: [{ id: "exec", label: ">", kind: "exec" }],
     outputs: [{ id: "exec", label: ">", kind: "exec" }],
     params: { min_x: 0, min_y: 0, max_x: 320, max_y: 224 },
   },
   timer: {
-    type: "timer",
-    label: "Timer",
+    type: "timer", label: "Timer",
     inputs: [{ id: "exec", label: ">", kind: "exec" }],
     outputs: [
       { id: "tick", label: "Tick >", kind: "exec" },
@@ -742,8 +704,7 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     params: { frames: 60, repeat: 0 },
   },
   set_tile: {
-    type: "set_tile",
-    label: "Set Tile",
+    type: "set_tile", label: "Set Tile",
     inputs: [
       { id: "exec", label: ">", kind: "exec" },
       { id: "x", label: "x", kind: "data", dataType: "int" },
@@ -753,22 +714,19 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     params: { layer: "BG_A", tile: 1, x: 0, y: 0 },
   },
   effect_parallax: {
-    type: "effect_parallax",
-    label: "Parallax Scroll",
+    type: "effect_parallax", label: "Parallax Scroll",
     inputs: [{ id: "exec", label: "▶", kind: "exec" }],
     outputs: [{ id: "exec", label: "▶", kind: "exec" }],
     params: { layer: "BG1", speed_x: 1, speed_y: 0 },
   },
   effect_raster: {
-    type: "effect_raster",
-    label: "Raster Effect",
+    type: "effect_raster", label: "Raster Effect",
     inputs: [{ id: "exec", label: "▶", kind: "exec" }],
     outputs: [{ id: "exec", label: "▶", kind: "exec" }],
     params: { scanline: 128, offset_x: 4 },
   },
   logic_and: {
-    type: "logic_and",
-    label: "AND",
+    type: "logic_and", label: "AND",
     inputs: [
       { id: "a", label: "A", kind: "data", dataType: "bool" },
       { id: "b", label: "B", kind: "data", dataType: "bool" },
@@ -777,85 +735,76 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     params: {},
   },
   action_sound: {
-    type: "action_sound",
-    label: "Play Sound",
+    type: "action_sound", label: "Play Sound",
     inputs: [{ id: "exec", label: "▶", kind: "exec" }],
     outputs: [{ id: "exec", label: "▶", kind: "exec" }],
     params: { sfx: "jump" },
   },
   scroll_tilemap: {
-    type: "scroll_tilemap",
-    label: "Scroll Tilemap",
+    type: "scroll_tilemap", label: "Scroll Tilemap",
     inputs: [
       { id: "exec", label: "▶", kind: "exec" },
-      { id: "dx", label: "dx", kind: "data", dataType: "int" },
-      { id: "dy", label: "dy", kind: "data", dataType: "int" },
+      { id: "dx",   label: "dx", kind: "data", dataType: "int" },
+      { id: "dy",   label: "dy", kind: "data", dataType: "int" },
     ],
     outputs: [{ id: "exec", label: "▶", kind: "exec" }],
     params: { layer: "BG_A", dx: 1, dy: 0 },
   },
   load_scene: {
-    type: "load_scene",
-    label: "Load Scene",
+    type: "load_scene", label: "Load Scene",
     inputs: [{ id: "exec", label: ">", kind: "exec" }],
     outputs: [{ id: "exec", label: ">", kind: "exec" }],
     params: { scene: "main" },
   },
   move_camera: {
-    type: "move_camera",
-    label: "Move Camera",
+    type: "move_camera", label: "Move Camera",
     inputs: [
       { id: "exec", label: "▶", kind: "exec" },
-      { id: "x", label: "x", kind: "data", dataType: "int" },
-      { id: "y", label: "y", kind: "data", dataType: "int" },
+      { id: "x",    label: "x",  kind: "data", dataType: "int" },
+      { id: "y",    label: "y",  kind: "data", dataType: "int" },
     ],
     outputs: [{ id: "exec", label: "▶", kind: "exec" }],
     params: { target: "cam", x: 0, y: 0 },
   },
   var_set: {
-    type: "var_set",
-    label: "Set Variable",
+    type: "var_set", label: "Set Variable",
     inputs: [
       { id: "exec", label: "▶", kind: "exec" },
-      { id: "value", label: "Value", kind: "data", dataType: "int" },
+      { id: "value", label: "Value", kind: "data", dataType: "int" }
     ],
     outputs: [{ id: "exec", label: "▶", kind: "exec" }],
     params: { var_name: "temp_var", value: 0 },
   },
   var_get: {
-    type: "var_get",
-    label: "Get Variable",
+    type: "var_get", label: "Get Variable",
     inputs: [],
     outputs: [{ id: "value", label: "Value", kind: "data", dataType: "int" }],
     params: { var_name: "temp_var" },
   },
   logic_math: {
-    type: "logic_math",
-    label: "Math Exp",
+    type: "logic_math", label: "Math Exp",
     inputs: [
       { id: "a", label: "A", kind: "data", dataType: "int" },
-      { id: "b", label: "B", kind: "data", dataType: "int" },
+      { id: "b", label: "B", kind: "data", dataType: "int" }
     ],
     outputs: [{ id: "value", label: "Value", kind: "data", dataType: "int" }],
     params: { operator: "+" },
   },
   condition_compare: {
-    type: "condition_compare",
-    label: "Compare",
+    type: "condition_compare", label: "Compare",
     inputs: [
       { id: "exec", label: "▶", kind: "exec" },
       { id: "a", label: "A", kind: "data", dataType: "int" },
-      { id: "b", label: "B", kind: "data", dataType: "int" },
+      { id: "b", label: "B", kind: "data", dataType: "int" }
     ],
     outputs: [
       { id: "true", label: "True ▶", kind: "exec" },
-      { id: "false", label: "False ▶", kind: "exec" },
+      { id: "false", label: "False ▶", kind: "exec" }
     ],
     params: { operator: "==" },
   },
   fsm_state: {
-    type: "fsm_state",
-    label: "FSM State",
+    type: "fsm_state", label: "FSM State",
     inputs: [{ id: "exec", label: "Enter", kind: "exec" }],
     outputs: [
       { id: "exec", label: "Body ▶", kind: "exec" },
@@ -864,8 +813,7 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     params: { state_name: "idle", initial: 0 },
   },
   fsm_transition: {
-    type: "fsm_transition",
-    label: "FSM Transition",
+    type: "fsm_transition", label: "FSM Transition",
     inputs: [
       { id: "exec", label: "▶", kind: "exec" },
       { id: "condition", label: "Condition", kind: "data", dataType: "bool" },
@@ -877,8 +825,7 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     params: { target_state: "idle" },
   },
   flow_if: {
-    type: "flow_if",
-    label: "If",
+    type: "flow_if", label: "If",
     inputs: [
       { id: "exec", label: "▶", kind: "exec" },
       { id: "condition", label: "Condition", kind: "data", dataType: "bool" },
@@ -890,8 +837,7 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     params: {},
   },
   flow_while: {
-    type: "flow_while",
-    label: "While",
+    type: "flow_while", label: "While",
     inputs: [
       { id: "exec", label: "▶", kind: "exec" },
       { id: "condition", label: "Condition", kind: "data", dataType: "bool" },
@@ -903,8 +849,7 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     params: {},
   },
   flow_for: {
-    type: "flow_for",
-    label: "For",
+    type: "flow_for", label: "For",
     inputs: [
       { id: "exec", label: "▶", kind: "exec" },
       { id: "count", label: "Count", kind: "data", dataType: "int" },
@@ -916,8 +861,7 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     params: { var_name: "i", count: 4 },
   },
   timeline_sequence: {
-    type: "timeline_sequence",
-    label: "Timeline",
+    type: "timeline_sequence", label: "Timeline",
     inputs: [{ id: "exec", label: "▶", kind: "exec" }],
     outputs: [
       { id: "slot_0", label: "Slot 1 ▶", kind: "exec" },
@@ -932,8 +876,7 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     },
   },
   hardware_budget_check: {
-    type: "hardware_budget_check",
-    label: "Budget Check",
+    type: "hardware_budget_check", label: "Budget Check",
     inputs: [{ id: "exec", label: ">", kind: "exec" }],
     outputs: [
       { id: "ok", label: "OK >", kind: "exec" },
@@ -942,29 +885,25 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     params: { vram_kb: 64, sprites: 80, scanline_sprites: 20 },
   },
   bridge_unconverted_source: {
-    type: "bridge_unconverted_source",
-    label: "Source Bridge",
+    type: "bridge_unconverted_source", label: "Source Bridge",
     inputs: [{ id: "exec", label: ">", kind: "exec" }],
     outputs: [{ id: "exec", label: ">", kind: "exec" }],
     params: { gap: "semantic_gap", source: "" },
   },
   event_vblank: {
-    type: "event_vblank",
-    label: "On VBlank",
+    type: "event_vblank", label: "On VBlank",
     inputs: [],
     outputs: [{ id: "exec", label: "▶", kind: "exec" }],
     params: {},
   },
   event_hblank: {
-    type: "event_hblank",
-    label: "On HBlank",
+    type: "event_hblank", label: "On HBlank",
     inputs: [],
     outputs: [{ id: "exec", label: "▶", kind: "exec" }],
     params: {},
   },
   event_dma_done: {
-    type: "event_dma_done",
-    label: "On DMA Done",
+    type: "event_dma_done", label: "On DMA Done",
     inputs: [],
     outputs: [{ id: "exec", label: "▶", kind: "exec" }],
     params: {},
@@ -1063,77 +1002,18 @@ const NODE_PARAM_DISPLAY_NAMES: Record<string, string> = {
   y: "Y",
 };
 
-const NODE_PALETTE_GROUPS: Array<{
-  label: string;
-  icon: string;
-  types: NodeType[];
-}> = [
-  {
-    label: "Eventos",
-    icon: "\u26a1",
-    types: [
-      "event_start",
-      "event_update",
-      "input_pressed",
-      "input_held",
-      "input_command",
-      "event_vblank",
-      "event_hblank",
-      "event_dma_done",
-    ],
-  },
-  {
-    label: "Movimento",
-    icon: "\ud83c\udfc3",
-    types: [
-      "sprite_move",
-      "set_velocity",
-      "set_position",
-      "spawn_entity",
-      "destroy_entity",
-      "sprite_anim",
-      "set_animation_state",
-      "scroll_tilemap",
-      "move_camera",
-    ],
-  },
-  {
-    label: "Condicoes",
-    icon: "?",
-    types: ["condition_overlap", "condition_compare", "logic_and"],
-  },
-  {
-    label: "Camera",
-    icon: "\u25a3",
-    types: ["camera_follow", "camera_bounds"],
-  },
+const NODE_PALETTE_GROUPS: Array<{ label: string; icon: string; types: NodeType[] }> = [
+  { label: "Eventos", icon: "\u26a1", types: ["event_start", "event_update", "input_pressed", "input_held", "input_command", "event_vblank", "event_hblank", "event_dma_done"] },
+  { label: "Movimento", icon: "\ud83c\udfc3", types: ["sprite_move", "set_velocity", "set_position", "spawn_entity", "destroy_entity", "sprite_anim", "set_animation_state", "scroll_tilemap", "move_camera"] },
+  { label: "Condicoes", icon: "?", types: ["condition_overlap", "condition_compare", "logic_and"] },
+  { label: "Camera", icon: "\u25a3", types: ["camera_follow", "camera_bounds"] },
   { label: "Tilemap", icon: "#", types: ["set_tile", "load_scene"] },
   { label: "Som", icon: "\ud83d\udd0a", types: ["action_sound"] },
-  {
-    label: "Variaveis",
-    icon: "\ud83d\udcca",
-    types: ["var_set", "var_get", "logic_math"],
-  },
-  {
-    label: "Fluxo",
-    icon: "\u2937",
-    types: ["flow_if", "flow_while", "flow_for", "timer"],
-  },
-  {
-    label: "Estados",
-    icon: "\u2690\ufe0f",
-    types: ["fsm_state", "fsm_transition", "timeline_sequence"],
-  },
-  {
-    label: "Efeitos",
-    icon: "\u2728",
-    types: ["effect_parallax", "effect_raster"],
-  },
-  {
-    label: "Hardware",
-    icon: "!",
-    types: ["hardware_budget_check", "bridge_unconverted_source"],
-  },
+  { label: "Variaveis", icon: "\ud83d\udcca", types: ["var_set", "var_get", "logic_math"] },
+  { label: "Fluxo", icon: "\u2937", types: ["flow_if", "flow_while", "flow_for", "timer"] },
+  { label: "Estados", icon: "\u2690\ufe0f", types: ["fsm_state", "fsm_transition", "timeline_sequence"] },
+  { label: "Efeitos", icon: "\u2728", types: ["effect_parallax", "effect_raster"] },
+  { label: "Hardware", icon: "!", types: ["hardware_budget_check", "bridge_unconverted_source"] },
 ];
 
 /** Header background por categoria (Blueprints-style) */
@@ -1189,7 +1069,7 @@ const AUTO_LAYOUT_TYPE_SEQUENCE: NodeType[] = [
 ];
 
 const AUTO_LAYOUT_TYPE_ORDER = new Map<NodeType, number>(
-  AUTO_LAYOUT_TYPE_SEQUENCE.map((type, index) => [type, index]),
+  AUTO_LAYOUT_TYPE_SEQUENCE.map((type, index) => [type, index])
 );
 
 export function autoLayoutNodeGraph(graph: NodeGraph): NodeGraph {
@@ -1240,7 +1120,7 @@ function clonePorts(ports: NodePort[]): NodePort[] {
 /** Junta portos do JSON importado com os portos canónicos do editor (mesmo id conserva label/kind do ficheiro). */
 function mergePortsWithDefinition(
   defaults: NodePort[],
-  incoming: unknown,
+  incoming: unknown
 ): NodePort[] {
   if (!Array.isArray(incoming)) {
     return clonePorts(defaults);
@@ -1257,10 +1137,7 @@ function isGraphParamValue(value: unknown): value is string | number {
   return typeof value === "string" || typeof value === "number";
 }
 
-function coerceNodeParams(
-  type: NodeType,
-  params: unknown,
-): Record<string, string | number> {
+function coerceNodeParams(type: NodeType, params: unknown): Record<string, string | number> {
   const defaults = { ...NODE_DEFS[type].params };
   if (!isRecord(params)) {
     return defaults;
@@ -1276,11 +1153,7 @@ function coerceNodeParams(
 }
 
 function hydrateGraphNode(value: unknown, index: number): GraphNode | null {
-  if (
-    !isRecord(value) ||
-    typeof value.id !== "string" ||
-    !isNodeType(value.type)
-  ) {
+  if (!isRecord(value) || typeof value.id !== "string" || !isNodeType(value.type)) {
     return null;
   }
 
@@ -1303,12 +1176,8 @@ function hydrateGraphNode(value: unknown, index: number): GraphNode | null {
 let _nodeCounter = 0;
 let _edgeCounter = 0;
 
-function newNodeId() {
-  return `node_${++_nodeCounter}`;
-}
-function newEdgeId() {
-  return `edge_${++_edgeCounter}`;
-}
+function newNodeId() { return `node_${++_nodeCounter}`; }
+function newEdgeId() { return `edge_${++_edgeCounter}`; }
 
 function makeNode(type: NodeType, x: number, y: number): GraphNode {
   const def = NODE_DEFS[type];
@@ -1327,7 +1196,7 @@ function makeEdge(
   fromNode: GraphNode,
   fromPort: string,
   toNode: GraphNode,
-  toPort: string,
+  toPort: string
 ): NodeEdge {
   return {
     id: newEdgeId(),
@@ -1339,26 +1208,20 @@ function makeEdge(
 }
 
 function nodeHasPrimaryExecOut(node: GraphNode): boolean {
-  return node.outputs.some(
-    (port) => port.id === "exec" && port.kind === "exec",
-  );
+  return node.outputs.some((port) => port.id === "exec" && port.kind === "exec");
 }
 
 function nodeHasPrimaryExecIn(node: GraphNode): boolean {
   return node.inputs.some((port) => port.id === "exec" && port.kind === "exec");
 }
 
-function execEdgeExists(
-  graph: NodeGraph,
-  fromNode: string,
-  toNode: string,
-): boolean {
+function execEdgeExists(graph: NodeGraph, fromNode: string, toNode: string): boolean {
   return graph.edges.some(
     (edge) =>
       edge.fromNode === fromNode &&
       edge.toNode === toNode &&
       edge.fromPort === "exec" &&
-      edge.toPort === "exec",
+      edge.toPort === "exec"
   );
 }
 
@@ -1391,9 +1254,7 @@ export function appendExecChainEdgesFromLayout(graph: NodeGraph): NodeGraph {
     if (execEdgeExists(graph, fromNode.id, toNode.id)) {
       continue;
     }
-    if (
-      newEdges.some((e) => e.fromNode === fromNode.id && e.toNode === toNode.id)
-    ) {
+    if (newEdges.some((e) => e.fromNode === fromNode.id && e.toNode === toNode.id)) {
       continue;
     }
     newEdges.push(makeEdge(fromNode, "exec", toNode, "exec"));
@@ -1409,7 +1270,7 @@ export function appendExecChainEdgesFromLayout(graph: NodeGraph): NodeGraph {
 export function appendQuickActionGraph(
   baseGraph: NodeGraph,
   quickGraph: NodeGraph,
-  spacing = 220,
+  spacing = 220
 ): { graph: NodeGraph; appendedNodeIds: string[] } {
   if (quickGraph.nodes.length === 0) {
     return { graph: cloneGraph(baseGraph), appendedNodeIds: [] };
@@ -1467,17 +1328,15 @@ export function appendQuickActionGraph(
 
 function resolveQuickActionPrimaryTarget(
   context: QuickActionContext,
-  fallbackTarget: string,
+  fallbackTarget: string
 ): string {
-  return context.selectedEntityId?.trim()
-    ? context.selectedEntityId
-    : fallbackTarget;
+  return context.selectedEntityId?.trim() ? context.selectedEntityId : fallbackTarget;
 }
 
 function resolveQuickActionSecondaryTarget(
   context: QuickActionContext,
   primaryTarget: string,
-  fallbackTarget: string,
+  fallbackTarget: string
 ): string {
   if (context.otherEntityId && context.otherEntityId !== primaryTarget) {
     return context.otherEntityId;
@@ -1490,9 +1349,7 @@ function resolveQuickActionSecondaryTarget(
   return primaryTarget === "player" ? "enemy" : "player";
 }
 
-function buildPlayerControllerQuickActionGraph(
-  context: QuickActionContext,
-): NodeGraph {
+function buildPlayerControllerQuickActionGraph(context: QuickActionContext): NodeGraph {
   const start = makeNode("event_start", 140, 160);
   const move = makeNode("sprite_move", 380, 156);
   const anim = makeNode("sprite_anim", 620, 156);
@@ -1510,25 +1367,15 @@ function buildPlayerControllerQuickActionGraph(
   };
 }
 
-function buildEnemyLogicQuickActionGraph(
-  context: QuickActionContext,
-): NodeGraph {
+function buildEnemyLogicQuickActionGraph(context: QuickActionContext): NodeGraph {
   const patrolStart = makeNode("event_start", 140, 120);
   const patrolAnim = makeNode("sprite_anim", 380, 116);
   const overlap = makeNode("condition_overlap", 140, 296);
   const hitSound = makeNode("action_sound", 380, 296);
   const enemyTarget = resolveQuickActionPrimaryTarget(context, "enemy");
-  const playerTarget = resolveQuickActionSecondaryTarget(
-    context,
-    enemyTarget,
-    "player",
-  );
+  const playerTarget = resolveQuickActionSecondaryTarget(context, enemyTarget, "player");
 
-  patrolAnim.params = {
-    ...patrolAnim.params,
-    target: enemyTarget,
-    anim: "patrol",
-  };
+  patrolAnim.params = { ...patrolAnim.params, target: enemyTarget, anim: "patrol" };
   overlap.params = { ...overlap.params, a: playerTarget, b: enemyTarget };
   hitSound.params = { ...hitSound.params, sfx: "hit" };
 
@@ -1565,9 +1412,7 @@ function buildTimerQuickActionGraph(context: QuickActionContext): NodeGraph {
   };
 }
 
-function buildProjectileMotionQuickActionGraph(
-  context: QuickActionContext,
-): NodeGraph {
+function buildProjectileMotionQuickActionGraph(context: QuickActionContext): NodeGraph {
   const start = makeNode("event_start", 140, 168);
   const move = makeNode("sprite_move", 400, 164);
   const target = resolveQuickActionPrimaryTarget(context, "player");
@@ -1579,33 +1424,21 @@ function buildProjectileMotionQuickActionGraph(
   };
 }
 
-function buildCameraRigQuickActionGraph(
-  context: QuickActionContext,
-): NodeGraph {
+function buildCameraRigQuickActionGraph(context: QuickActionContext): NodeGraph {
   void context;
   const start = makeNode("event_start", 120, 150);
   const cam = makeNode("move_camera", 360, 146);
   const parallax = makeNode("effect_parallax", 620, 146);
   cam.params = { ...cam.params, target: "cam", x: 0, y: 0 };
-  parallax.params = {
-    ...parallax.params,
-    layer: "BG1",
-    speed_x: 1,
-    speed_y: 0,
-  };
+  parallax.params = { ...parallax.params, layer: "BG1", speed_x: 1, speed_y: 0 };
 
   return {
     nodes: [start, cam, parallax],
-    edges: [
-      makeEdge(start, "exec", cam, "exec"),
-      makeEdge(cam, "exec", parallax, "exec"),
-    ],
+    edges: [makeEdge(start, "exec", cam, "exec"), makeEdge(cam, "exec", parallax, "exec")],
   };
 }
 
-function buildFighterCombatQuickActionGraph(
-  context: QuickActionContext,
-): NodeGraph {
+function buildFighterCombatQuickActionGraph(context: QuickActionContext): NodeGraph {
   const start = makeNode("event_start", 140, 120);
   const stance = makeNode("sprite_anim", 380, 116);
   const overlap = makeNode("condition_overlap", 140, 296);
@@ -1626,9 +1459,7 @@ function buildFighterCombatQuickActionGraph(
   };
 }
 
-function buildFighterCommandQuickActionGraph(
-  context: QuickActionContext,
-): NodeGraph {
+function buildFighterCommandQuickActionGraph(context: QuickActionContext): NodeGraph {
   const update = makeNode("event_update", 140, 160);
   const command = makeNode("input_command", 380, 150);
   const anim = makeNode("set_animation_state", 680, 156);
@@ -1655,9 +1486,7 @@ function buildFighterCommandQuickActionGraph(
   };
 }
 
-function buildSupportStateTickQuickActionGraph(
-  context: QuickActionContext,
-): NodeGraph {
+function buildSupportStateTickQuickActionGraph(context: QuickActionContext): NodeGraph {
   const start = makeNode("event_start", 140, 160);
   const lane = makeNode("var_set", 380, 156);
   const anim = makeNode("sprite_anim", 640, 156);
@@ -1668,16 +1497,11 @@ function buildSupportStateTickQuickActionGraph(
 
   return {
     nodes: [start, lane, anim],
-    edges: [
-      makeEdge(start, "exec", lane, "exec"),
-      makeEdge(lane, "exec", anim, "exec"),
-    ],
+    edges: [makeEdge(start, "exec", lane, "exec"), makeEdge(lane, "exec", anim, "exec")],
   };
 }
 
-function buildHudVblankTickQuickActionGraph(
-  context: QuickActionContext,
-): NodeGraph {
+function buildHudVblankTickQuickActionGraph(context: QuickActionContext): NodeGraph {
   void context;
   const vb = makeNode("event_vblank", 140, 176);
   const tick = makeNode("var_set", 400, 172);
@@ -1694,8 +1518,7 @@ const QUICK_ACTION_TEMPLATES: QuickActionTemplate[] = [
     id: "player_controller",
     actionLabel: "Criar Player Controller Basico",
     title: "Player Controller Basico",
-    summary:
-      "Monta um fluxo inicial de movimento do player com animacao ligada ao mesmo encadeamento.",
+    summary: "Monta um fluxo inicial de movimento do player com animacao ligada ao mesmo encadeamento.",
     comments: [
       "Ao Iniciar prepara o fluxo principal sem depender de wiring manual no primeiro minuto.",
       "Mover Sprite usa deltas pequenos, compativeis com logica de 16-bits e tuning posterior no Inspector.",
@@ -1709,8 +1532,7 @@ const QUICK_ACTION_TEMPLATES: QuickActionTemplate[] = [
     id: "enemy_logic",
     actionLabel: "Logica de Inimigo Simples",
     title: "Logica de Inimigo Simples",
-    summary:
-      "Combina um estado inicial de patrulha com um gatilho de overlap para feedback imediato.",
+    summary: "Combina um estado inicial de patrulha com um gatilho de overlap para feedback imediato.",
     comments: [
       "Ao Iniciar coloca o inimigo em uma animacao base de patrulha para o grafo nao nascer parado.",
       "Colisao (Overlap) separa o ramo de contato entre player e enemy sem inventar eventos fora do schema atual.",
@@ -1726,8 +1548,7 @@ const QUICK_ACTION_TEMPLATES: QuickActionTemplate[] = [
     id: "timer_event",
     actionLabel: "Timer Event",
     title: "Timer Event",
-    summary:
-      "Cria uma sequencia de tempo fixa e hardware-friendly para disparos por frame.",
+    summary: "Cria uma sequencia de tempo fixa e hardware-friendly para disparos por frame.",
     comments: [
       "Ao Iniciar aciona a timeline sem exigir no auxiliar extra para o primeiro teste.",
       "Sequencia (Timeline) usa 60 frames como marco canônico, facil de mapear para um segundo em 60 Hz.",
@@ -1741,8 +1562,7 @@ const QUICK_ACTION_TEMPLATES: QuickActionTemplate[] = [
     id: "projectile_motion",
     actionLabel: "Movimento de projetil (linear)",
     title: "Projetil em linha",
-    summary:
-      "Arranque simples com movimento por frame para alvo inferido ou escolhido.",
+    summary: "Arranque simples com movimento por frame para alvo inferido ou escolhido.",
     comments: [
       "Ao Iniciar liga diretamente ao Move Sprite para nao exigir wiring manual no primeiro teste.",
       "Velocidade inicial conservadora; ajuste dx/dy no cartao do no quando o playtest pedir.",
@@ -1758,8 +1578,7 @@ const QUICK_ACTION_TEMPLATES: QuickActionTemplate[] = [
     id: "camera_rig",
     actionLabel: "Camera + parallax basico",
     title: "Camera e parallax",
-    summary:
-      "Encadeia Move Camera com Parallax para um rig inicial de cena larga.",
+    summary: "Encadeia Move Camera com Parallax para um rig inicial de cena larga.",
     comments: [
       "Ao Iniciar aciona Move Camera com offsets neutros, prontos para amarrar a um alvo depois.",
       "Parallax Scroll vem logo apos para reforcar leitura de profundidade sem exigir eventos extra.",
@@ -1773,8 +1592,7 @@ const QUICK_ACTION_TEMPLATES: QuickActionTemplate[] = [
     id: "fighter_combat",
     actionLabel: "Lutador: stance + contato",
     title: "Lutador (stance / hit)",
-    summary:
-      "Animacao de combate inicial com ramo de overlap para feedback sonoro.",
+    summary: "Animacao de combate inicial com ramo de overlap para feedback sonoro.",
     comments: [
       "Ao Iniciar define uma animacao de stance para o lutador principal inferido.",
       "Overlap separa o momento de contato entre o lutador e o oponente mais proximo na cena.",
@@ -1790,8 +1608,7 @@ const QUICK_ACTION_TEMPLATES: QuickActionTemplate[] = [
     id: "fighter_command",
     actionLabel: "Criar comando de luta",
     title: "Comando de luta",
-    summary:
-      "Adiciona input_command com quarto de lua e liga a animacao de ataque no alvo selecionado.",
+    summary: "Adiciona input_command com quarto de lua e liga a animacao de ataque no alvo selecionado.",
     comments: [
       "On Update alimenta o matcher por frame, alinhado ao runtime retro.",
       "Comando de Input guarda a notacao fonte, janela em frames e perfil de botoes.",
@@ -1807,8 +1624,7 @@ const QUICK_ACTION_TEMPLATES: QuickActionTemplate[] = [
     id: "support_state_tick",
     actionLabel: "Apoio: estado + anim",
     title: "Apoio (estado)",
-    summary:
-      "Escreve um slot de estado simples e liga animacao de apoio ao mesmo encadeamento.",
+    summary: "Escreve um slot de estado simples e liga animacao de apoio ao mesmo encadeamento.",
     comments: [
       "Set Variable reserva um nome explicito para o autor trocar quando integrar HUD ou lanes.",
       "Animar Sprite usa alvo principal da selecao para manter coerencia com o resto dos atalhos.",
@@ -1822,8 +1638,7 @@ const QUICK_ACTION_TEMPLATES: QuickActionTemplate[] = [
     id: "hud_vblank_tick",
     actionLabel: "HUD: tick por VBlank",
     title: "HUD (VBlank)",
-    summary:
-      "Gancho de frame com escrita de variavel para contadores de HUD discretos.",
+    summary: "Gancho de frame com escrita de variavel para contadores de HUD discretos.",
     comments: [
       "On VBlank e o ponto natural para atualizar contadores sem bloquear o fluxo principal.",
       "Set Variable mantem um contador simples que o autor pode renomear para score, timer, etc.",
@@ -1838,9 +1653,7 @@ const QUICK_ACTION_TEMPLATES: QuickActionTemplate[] = [
 ];
 
 /** Prioriza quick actions alinhadas ao `entity_role` importado (heuristica). */
-const QUICK_ACTION_PREF_BY_ENTITY_ROLE: Partial<
-  Record<string, QuickActionTemplate["id"]>
-> = {
+const QUICK_ACTION_PREF_BY_ENTITY_ROLE: Partial<Record<string, QuickActionTemplate["id"]>> = {
   player_avatar: "player_controller",
   enemy_actor: "enemy_logic",
   fighter_actor: "fighter_combat",
@@ -1853,49 +1666,13 @@ const QUICK_ACTION_PREF_BY_ENTITY_ROLE: Partial<
 
 const INITIAL_GRAPH: NodeGraph = {
   nodes: [
-    {
-      ...NODE_DEFS.event_start,
-      id: "n0",
-      x: 40,
-      y: 80,
-      inputs: [],
-      outputs: [{ id: "exec", label: "▶", kind: "exec" }],
-      params: {},
-    },
-    {
-      ...NODE_DEFS.sprite_move,
-      id: "n1",
-      x: 240,
-      y: 80,
-      inputs: [...NODE_DEFS.sprite_move.inputs.map((p) => ({ ...p }))],
-      outputs: [...NODE_DEFS.sprite_move.outputs.map((p) => ({ ...p }))],
-      params: { target: "player", dx: 2, dy: 0 },
-    },
-    {
-      ...NODE_DEFS.effect_parallax,
-      id: "n2",
-      x: 440,
-      y: 80,
-      inputs: [...NODE_DEFS.effect_parallax.inputs.map((p) => ({ ...p }))],
-      outputs: [...NODE_DEFS.effect_parallax.outputs.map((p) => ({ ...p }))],
-      params: { layer: "BG1", speed_x: 1, speed_y: 0 },
-    },
+    { ...NODE_DEFS.event_start,    id: "n0", x: 40,  y: 80,  inputs: [], outputs: [{ id: "exec", label: "▶", kind: "exec" }], params: {} },
+    { ...NODE_DEFS.sprite_move,    id: "n1", x: 240, y: 80,  inputs: [...NODE_DEFS.sprite_move.inputs.map(p=>({...p}))], outputs: [...NODE_DEFS.sprite_move.outputs.map(p=>({...p}))], params: { target: "player", dx: 2, dy: 0 } },
+    { ...NODE_DEFS.effect_parallax,id: "n2", x: 440, y: 80,  inputs: [...NODE_DEFS.effect_parallax.inputs.map(p=>({...p}))], outputs: [...NODE_DEFS.effect_parallax.outputs.map(p=>({...p}))], params: { layer: "BG1", speed_x: 1, speed_y: 0 } },
   ],
   edges: [
-    {
-      id: "e0",
-      fromNode: "n0",
-      fromPort: "exec",
-      toNode: "n1",
-      toPort: "exec",
-    },
-    {
-      id: "e1",
-      fromNode: "n1",
-      fromPort: "exec",
-      toNode: "n2",
-      toPort: "exec",
-    },
+    { id: "e0", fromNode: "n0", fromPort: "exec", toNode: "n1", toPort: "exec" },
+    { id: "e1", fromNode: "n1", fromPort: "exec", toNode: "n2", toPort: "exec" },
   ],
 };
 
@@ -1907,16 +1684,8 @@ interface NodeCardProps {
   screenY: number;
   selected: boolean;
   onMouseDown: (e: React.MouseEvent) => void;
-  onPortMouseDown: (
-    e: React.MouseEvent,
-    portId: string,
-    isOutput: boolean,
-  ) => void;
-  onPortMouseUp: (
-    e: React.MouseEvent,
-    portId: string,
-    isOutput: boolean,
-  ) => void;
+  onPortMouseDown: (e: React.MouseEvent, portId: string, isOutput: boolean) => void;
+  onPortMouseUp: (e: React.MouseEvent, portId: string, isOutput: boolean) => void;
 }
 
 function NodeCard({
@@ -2009,9 +1778,7 @@ function NodeCard({
         <div className="flex flex-col gap-0.5 border-t border-slate-700/50 px-3 pb-2 pt-1.5">
           {visibleParams.map(([k, v]) => (
             <div key={k} className="flex justify-between text-[10px]">
-              <span className="text-[#6c7086]">
-                {getNodeParamDisplayName(k)}
-              </span>
+              <span className="text-[#6c7086]">{getNodeParamDisplayName(k)}</span>
               <span className="font-mono text-[#cdd6f4]">{String(v)}</span>
             </div>
           ))}
@@ -2064,30 +1831,19 @@ function EmptyStateOverlay({
             Comece o primeiro fluxo sem precisar descobrir a paleta inteira
           </h2>
           <p className="max-w-3xl text-sm text-[#a6adc8]">
-            Escolha um atalho para gerar um grafo base com nos ja conectados.
-            Depois voce pode ajustar os parametros, trocar nos e expandir o
-            fluxo pela paleta lateral.
+            Escolha um atalho para gerar um grafo base com nos ja conectados. Depois voce pode ajustar os parametros,
+            trocar nos e expandir o fluxo pela paleta lateral.
           </p>
           {selectedEntityLabel && (
-            <p
-              className="max-w-3xl text-xs text-[#89b4fa]"
-              data-testid="nodegraph-empty-target-hint"
-            >
-              Os atalhos vao usar{" "}
-              <span className="font-semibold text-[#cdd6f4]">
-                {selectedEntityLabel}
-              </span>{" "}
-              como alvo principal quando fizer sentido para o fluxo.
+            <p className="max-w-3xl text-xs text-[#89b4fa]" data-testid="nodegraph-empty-target-hint">
+              Os atalhos vao usar <span className="font-semibold text-[#cdd6f4]">{selectedEntityLabel}</span> como
+              alvo principal quando fizer sentido para o fluxo.
             </p>
           )}
           {roleHint ? (
-            <p
-              className="max-w-3xl text-[10px] text-[#94e2d5]"
-              data-testid="nodegraph-empty-role-order-hint"
-            >
-              Ordenacao por papel importado:{" "}
-              <span className="font-mono font-semibold">{roleHint}</span>{" "}
-              (heuristica — revise o primeiro cartao sugerido antes de aplicar).
+            <p className="max-w-3xl text-[10px] text-[#94e2d5]" data-testid="nodegraph-empty-role-order-hint">
+              Ordenacao por papel importado: <span className="font-mono font-semibold">{roleHint}</span> (heuristica
+              — revise o primeiro cartao sugerido antes de aplicar).
             </p>
           ) : null}
         </div>
@@ -2104,22 +1860,16 @@ function EmptyStateOverlay({
               <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#89b4fa]">
                 Quick Action
               </span>
-              <span className="mt-2 text-sm font-semibold text-[#cdd6f4]">
-                {template.actionLabel}
-              </span>
-              <span className="mt-2 text-xs leading-5 text-[#a6adc8]">
-                {template.summary}
-              </span>
-              <span className="mt-3 text-[10px] leading-4 text-[#6c7086]">
-                {template.hardwareNote}
-              </span>
+              <span className="mt-2 text-sm font-semibold text-[#cdd6f4]">{template.actionLabel}</span>
+              <span className="mt-2 text-xs leading-5 text-[#a6adc8]">{template.summary}</span>
+              <span className="mt-3 text-[10px] leading-4 text-[#6c7086]">{template.hardwareNote}</span>
             </button>
           ))}
         </div>
 
         <p className="mt-4 text-[11px] text-[#6c7086]">
-          Esses atalhos usam somente nos ja suportados no pipeline atual. O
-          objetivo aqui e acelerar descoberta, nao criar um fluxo paralelo.
+          Esses atalhos usam somente nos ja suportados no pipeline atual. O objetivo aqui e acelerar descoberta, nao
+          criar um fluxo paralelo.
         </p>
       </div>
     </div>
@@ -2133,49 +1883,25 @@ export default function NodeGraphEditor() {
   const activeScene = useEditorStore((state) => state.activeScene);
   const activeSceneSource = useEditorStore((state) => state.activeSceneSource);
   const selectedEntityId = useEditorStore((state) => state.selectedEntityId);
-  const setSelectedEntityId = useEditorStore(
-    (state) => state.setSelectedEntityId,
-  );
-  const setActiveWorkspace = useEditorStore(
-    (state) => state.setActiveWorkspace,
-  );
-  const setActiveViewportTab = useEditorStore(
-    (state) => state.setActiveViewportTab,
-  );
+  const setSelectedEntityId = useEditorStore((state) => state.setSelectedEntityId);
+  const setActiveWorkspace = useEditorStore((state) => state.setActiveWorkspace);
+  const setActiveViewportTab = useEditorStore((state) => state.setActiveViewportTab);
   const updateEntity = useEditorStore((state) => state.updateEntity);
   const logMessage = useEditorStore((state) => state.logMessage);
   const selectedEntity =
     selectedEntityId && !selectedEntityId.startsWith("layer::")
-      ? (activeScene?.entities.find(
-          (entity) => entity.entity_id === selectedEntityId,
-        ) ?? null)
+      ? activeScene?.entities.find((entity) => entity.entity_id === selectedEntityId) ?? null
       : null;
   const [graph, setGraph] = useState<NodeGraph>(() => cloneGraph(EMPTY_GRAPH));
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [dragging, setDragging] = useState<{
-    nodeId: string;
-    offsetX: number;
-    offsetY: number;
-  } | null>(null);
-  const [pendingEdge, setPendingEdge] = useState<{
-    fromNode: string;
-    fromPort: string;
-    x: number;
-    y: number;
-  } | null>(null);
+  const [dragging, setDragging] = useState<{ nodeId: string; offsetX: number; offsetY: number } | null>(null);
+  const [pendingEdge, setPendingEdge] = useState<{ fromNode: string; fromPort: string; x: number; y: number } | null>(null);
   const [paletteSearch, setPaletteSearch] = useState("");
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
-    new Set(),
-  );
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [viewOffset, setViewOffset] = useState<ViewOffset>({ x: 0, y: 0 });
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
-<<<<<<< HEAD
-  const [guidedCommentary, setGuidedCommentary] =
-    useState<GuidedFlowCommentary | null>(null);
-=======
   const [guidedCommentary, setGuidedCommentary] = useState<GuidedFlowCommentary | null>(null);
   const [gapFilter, setGapFilter] = useState("");
->>>>>>> origin/codex/sgdk-logic-truth-product-qa
   const svgRef = useRef<SVGSVGElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const saveTimerRef = useRef<number | null>(null);
@@ -2200,10 +1926,7 @@ export default function NodeGraphEditor() {
     };
     const entityGraph = selectedEntity?.components.logic?.graph;
     const parsedGraph = deserializeNodeGraph(entityGraph);
-    if (
-      parsedGraph.nodes.length > 0 ||
-      !selectedEntity?.components.logic?.graph_ref
-    ) {
+    if (parsedGraph.nodes.length > 0 || !selectedEntity?.components.logic?.graph_ref) {
       resetFromGraph(parsedGraph);
       return () => {
         cancelled = true;
@@ -2217,21 +1940,16 @@ export default function NodeGraphEditor() {
     }
     void (async () => {
       try {
-        const resolved = await resolveScenePrefabs(
-          activeProjectDir,
-          activeSceneSource,
-        );
+        const resolved = await resolveScenePrefabs(activeProjectDir, activeSceneSource);
         if (!resolved.ok) {
           resetFromGraph(parsedGraph);
           return;
         }
         const resolvedScene = parseSceneJson(resolved.scene_json);
         const resolvedEntity = resolvedScene?.entities.find(
-          (entity) => entity.entity_id === selectedEntity.entity_id,
+          (entity) => entity.entity_id === selectedEntity.entity_id
         );
-        const hydrated = deserializeNodeGraph(
-          resolvedEntity?.components.logic?.graph,
-        );
+        const hydrated = deserializeNodeGraph(resolvedEntity?.components.logic?.graph);
         resetFromGraph(hydrated);
       } catch {
         resetFromGraph(parsedGraph);
@@ -2278,7 +1996,7 @@ export default function NodeGraphEditor() {
     saveTimerRef.current = window.setTimeout(() => {
       const latestState = useEditorStore.getState();
       const entity = latestState.activeScene?.entities.find(
-        (item) => item.entity_id === selectedEntity.entity_id,
+        (item) => item.entity_id === selectedEntity.entity_id
       );
       if (!entity) {
         return;
@@ -2290,9 +2008,7 @@ export default function NodeGraphEditor() {
           logic: {
             ...(entity.components.logic ?? {}),
             graph: serializedGraph,
-            graph_origin: entity.components.logic?.graph_ref
-              ? "user_edited_ref"
-              : entity.components.logic?.graph_origin,
+            graph_origin: entity.components.logic?.graph_ref ? "user_edited_ref" : entity.components.logic?.graph_origin,
           },
         },
       });
@@ -2309,46 +2025,37 @@ export default function NodeGraphEditor() {
   }, [activeProjectDir, graph, selectedEntity, updateEntity]);
 
   // ── Drag node ──────────────────────────────────────────────────────────────
-  const onNodeMouseDown = useCallback(
-    (e: React.MouseEvent, nodeId: string) => {
-      e.stopPropagation();
-      if ((e.target as HTMLElement).classList.contains("cursor-crosshair"))
-        return;
-      setSelectedId(nodeId);
-      const node = graph.nodes.find((n) => n.id === nodeId)!;
-      setDragging({
-        nodeId,
-        offsetX: e.clientX - (node.x + viewOffset.x),
-        offsetY: e.clientY - (node.y + viewOffset.y),
-      });
-    },
-    [graph.nodes, viewOffset.x, viewOffset.y],
-  );
+  const onNodeMouseDown = useCallback((e: React.MouseEvent, nodeId: string) => {
+    e.stopPropagation();
+    if ((e.target as HTMLElement).classList.contains("cursor-crosshair")) return;
+    setSelectedId(nodeId);
+    const node = graph.nodes.find((n) => n.id === nodeId)!;
+    setDragging({
+      nodeId,
+      offsetX: e.clientX - (node.x + viewOffset.x),
+      offsetY: e.clientY - (node.y + viewOffset.y),
+    });
+  }, [graph.nodes, viewOffset.x, viewOffset.y]);
 
-  const onMouseMove = useCallback(
-    (e: React.MouseEvent) => {
-      if (dragging) {
-        setGraph((g) => ({
-          ...g,
-          nodes: g.nodes.map((n) =>
-            n.id === dragging.nodeId
-              ? {
-                  ...n,
-                  x: e.clientX - viewOffset.x - dragging.offsetX,
-                  y: e.clientY - viewOffset.y - dragging.offsetY,
-                }
-              : n,
-          ),
-        }));
-      }
-      if (pendingEdge) {
-        setPendingEdge((p) =>
-          p ? { ...p, x: e.clientX, y: e.clientY } : null,
-        );
-      }
-    },
-    [dragging, pendingEdge, viewOffset.x, viewOffset.y],
-  );
+  const onMouseMove = useCallback((e: React.MouseEvent) => {
+    if (dragging) {
+      setGraph((g) => ({
+        ...g,
+        nodes: g.nodes.map((n) =>
+          n.id === dragging.nodeId
+            ? {
+                ...n,
+                x: e.clientX - viewOffset.x - dragging.offsetX,
+                y: e.clientY - viewOffset.y - dragging.offsetY,
+              }
+            : n
+        ),
+      }));
+    }
+    if (pendingEdge) {
+      setPendingEdge((p) => p ? { ...p, x: e.clientX, y: e.clientY } : null);
+    }
+  }, [dragging, pendingEdge, viewOffset.x, viewOffset.y]);
 
   const onMouseUp = useCallback(() => {
     setDragging(null);
@@ -2356,58 +2063,33 @@ export default function NodeGraphEditor() {
   }, []);
 
   // ── Connect ports ──────────────────────────────────────────────────────────
-  const onPortMouseDown = useCallback(
-    (
-      e: React.MouseEvent,
-      nodeId: string,
-      portId: string,
-      isOutput: boolean,
-    ) => {
-      e.stopPropagation();
-      if (isOutput) {
-        setPendingEdge({
-          fromNode: nodeId,
-          fromPort: portId,
-          x: e.clientX,
-          y: e.clientY,
-        });
-      }
-    },
-    [],
-  );
+  const onPortMouseDown = useCallback((e: React.MouseEvent, nodeId: string, portId: string, isOutput: boolean) => {
+    e.stopPropagation();
+    if (isOutput) {
+      setPendingEdge({ fromNode: nodeId, fromPort: portId, x: e.clientX, y: e.clientY });
+    }
+  }, []);
 
-  const onPortMouseUp = useCallback(
-    (
-      e: React.MouseEvent,
-      nodeId: string,
-      portId: string,
-      isOutput: boolean,
-    ) => {
-      e.stopPropagation();
-      if (!pendingEdge || isOutput) return;
-      if (pendingEdge.fromNode === nodeId) return; // no self-loop
-      const edge: NodeEdge = {
-        id: newEdgeId(),
-        fromNode: pendingEdge.fromNode,
-        fromPort: pendingEdge.fromPort,
-        toNode: nodeId,
-        toPort: portId,
-      };
-      setGraph((g) => ({ ...g, edges: [...g.edges, edge] }));
-      setPendingEdge(null);
-      logMessage(
-        "info",
-        `Conexão criada: ${edge.fromNode}:${edge.fromPort} → ${edge.toNode}:${edge.toPort}`,
-      );
-    },
-    [pendingEdge, logMessage],
-  );
+  const onPortMouseUp = useCallback((e: React.MouseEvent, nodeId: string, portId: string, isOutput: boolean) => {
+    e.stopPropagation();
+    if (!pendingEdge || isOutput) return;
+    if (pendingEdge.fromNode === nodeId) return; // no self-loop
+    const edge: NodeEdge = {
+      id: newEdgeId(),
+      fromNode: pendingEdge.fromNode,
+      fromPort: pendingEdge.fromPort,
+      toNode: nodeId,
+      toPort: portId,
+    };
+    setGraph((g) => ({ ...g, edges: [...g.edges, edge] }));
+    setPendingEdge(null);
+    logMessage("info", `Conexão criada: ${edge.fromNode}:${edge.fromPort} → ${edge.toNode}:${edge.toPort}`);
+  }, [pendingEdge, logMessage]);
 
-  const selectedNode =
-    graph.nodes.find((node) => node.id === selectedId) ?? null;
+  const selectedNode = graph.nodes.find((node) => node.id === selectedId) ?? null;
   const selectedEntitySourceRefs = useMemo(
     () => resolveEntitySourceRefs(selectedEntity),
-    [selectedEntity],
+    [selectedEntity]
   );
   const selectedNodeTargetEntity = useMemo(() => {
     if (!selectedNode || !activeScene?.entities.length) {
@@ -2417,13 +2099,10 @@ export default function NodeGraphEditor() {
     const candidateKeys = Array.from(
       new Set(
         Object.values(selectedNode.params)
-          .filter(
-            (value): value is string | number =>
-              typeof value === "string" || typeof value === "number",
-          )
+          .filter((value): value is string | number => typeof value === "string" || typeof value === "number")
           .map((value) => normalizeGraphEntityKey(value))
-          .filter((value) => value.length > 0),
-      ),
+          .filter((value) => value.length > 0)
+      )
     );
     if (candidateKeys.length === 0) {
       return null;
@@ -2445,20 +2124,12 @@ export default function NodeGraphEditor() {
     const selectedEntityIdValue = selectedEntity?.entity_id ?? null;
     return {
       selectedEntityId: selectedEntityIdValue,
-      selectedEntityLabel: selectedEntity
-        ? getEntityDisplayName(selectedEntity)
-        : null,
+      selectedEntityLabel: selectedEntity ? getEntityDisplayName(selectedEntity) : null,
       otherEntityId:
-        activeScene?.entities.find(
-          (entity) => entity.entity_id !== selectedEntityIdValue,
-        )?.entity_id ?? null,
+        activeScene?.entities.find((entity) => entity.entity_id !== selectedEntityIdValue)?.entity_id ?? null,
     };
   }, [activeScene, selectedEntity]);
   const graphOriginLabel = selectedEntity?.components.logic?.graph_origin;
-<<<<<<< HEAD
-  const importedSemantics =
-    selectedEntity?.components.logic?.imported_semantics;
-=======
   const importedSemantics = selectedEntity?.components.logic?.imported_semantics;
   const importedSemanticsKind = formatImportedSemanticsKind(importedSemantics);
   const sourceMappedNode = useMemo(
@@ -2479,7 +2150,6 @@ export default function NodeGraphEditor() {
     () => filterGraphImportGaps(importGaps, gapFilter),
     [gapFilter, importGaps]
   );
->>>>>>> origin/codex/sgdk-logic-truth-product-qa
 
   const orderedQuickActionTemplates = useMemo(() => {
     const role = importedSemantics?.entity_role?.trim();
@@ -2499,44 +2169,32 @@ export default function NodeGraphEditor() {
     return list;
   }, [importedSemantics?.entity_role]);
 
-  const handleOpenSourcePath = useCallback(
-    async (relativePath: string | null | undefined) => {
-      if (!activeProjectDir) {
-        logMessage(
-          "warn",
-          "[NodeGraph] Abra um projeto antes de abrir a fonte.",
-        );
-        return;
-      }
-      const normalizedPath = relativePath?.trim() ?? "";
-      if (!normalizedPath) {
-        logMessage(
-          "warn",
-          "[NodeGraph] Nenhum source_paths / external_source_refs disponivel para esta entidade.",
-        );
-        return;
-      }
-      try {
-        const result = await openProjectSourcePath(
-          activeProjectDir,
-          normalizedPath,
-        );
-        if (!result?.ok) {
-          throw new Error(
-            result?.message ??
-              "Falha ao abrir no editor externo. Configure um editor de texto nas preferencias do host ou abra o ficheiro manualmente.",
-          );
-        }
-        logMessage("info", `[NodeGraph] Fonte aberta: ${normalizedPath}`);
-      } catch (error) {
-        logMessage(
-          "error",
-          `[NodeGraph] Nao foi possivel abrir '${normalizedPath}': ${error instanceof Error ? error.message : String(error)}`,
+  const handleOpenSourcePath = useCallback(async (relativePath: string | null | undefined) => {
+    if (!activeProjectDir) {
+      logMessage("warn", "[NodeGraph] Abra um projeto antes de abrir a fonte.");
+      return;
+    }
+    const normalizedPath = relativePath?.trim() ?? "";
+    if (!normalizedPath) {
+      logMessage("warn", "[NodeGraph] Nenhum source_paths / external_source_refs disponivel para esta entidade.");
+      return;
+    }
+    try {
+      const result = await openProjectSourcePath(activeProjectDir, normalizedPath);
+      if (!result?.ok) {
+        throw new Error(
+          result?.message ??
+            "Falha ao abrir no editor externo. Configure um editor de texto nas preferencias do host ou abra o ficheiro manualmente."
         );
       }
-    },
-    [activeProjectDir, logMessage],
-  );
+      logMessage("info", `[NodeGraph] Fonte aberta: ${normalizedPath}`);
+    } catch (error) {
+      logMessage(
+        "error",
+        `[NodeGraph] Nao foi possivel abrir '${normalizedPath}': ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }, [activeProjectDir, logMessage]);
   const handleFocusSelectedEntityInScene = useCallback(() => {
     if (!selectedEntity) {
       return;
@@ -2544,10 +2202,7 @@ export default function NodeGraphEditor() {
     setSelectedEntityId(selectedEntity.entity_id);
     setActiveWorkspace("scene");
     setActiveViewportTab("scene");
-    logMessage(
-      "info",
-      `[NodeGraph] Foco retornado para a cena: ${getEntityDisplayName(selectedEntity)}.`,
-    );
+    logMessage("info", `[NodeGraph] Foco retornado para a cena: ${getEntityDisplayName(selectedEntity)}.`);
   }, [
     logMessage,
     selectedEntity,
@@ -2557,10 +2212,7 @@ export default function NodeGraphEditor() {
   ]);
   const handleFocusSelectedNodeTarget = useCallback(() => {
     if (!selectedNodeTargetEntity) {
-      logMessage(
-        "warn",
-        "[NodeGraph] O no atual nao aponta para uma entidade rastreavel na cena.",
-      );
+      logMessage("warn", "[NodeGraph] O no atual nao aponta para uma entidade rastreavel na cena.");
       return;
     }
     setSelectedEntityId(selectedNodeTargetEntity.entity_id);
@@ -2568,7 +2220,7 @@ export default function NodeGraphEditor() {
     setActiveViewportTab("scene");
     logMessage(
       "info",
-      `[NodeGraph] No atual focado na cena: ${getEntityDisplayName(selectedNodeTargetEntity)}.`,
+      `[NodeGraph] No atual focado na cena: ${getEntityDisplayName(selectedNodeTargetEntity)}.`
     );
   }, [
     logMessage,
@@ -2579,98 +2231,73 @@ export default function NodeGraphEditor() {
   ]);
 
   // ── Add node from palette ──────────────────────────────────────────────────
-  const addNode = useCallback(
-    (type: NodeType) => {
-      const node = makeNode(type, 200, 200);
-      setGraph((g) => ({ ...g, nodes: [...g.nodes, node] }));
-      logMessage("info", `No adicionado: ${getNodeDisplayName(type)}`);
-    },
-    [logMessage],
-  );
+  const addNode = useCallback((type: NodeType) => {
+    const node = makeNode(type, 200, 200);
+    setGraph((g) => ({ ...g, nodes: [...g.nodes, node] }));
+    logMessage("info", `No adicionado: ${getNodeDisplayName(type)}`);
+  }, [logMessage]);
 
-  const applyQuickActionTemplate = useCallback(
-    (template: QuickActionTemplate) => {
-      const nextGraph = template.buildGraph(quickActionContext);
-      setGraph(nextGraph);
-      setSelectedId(nextGraph.nodes[0]?.id ?? null);
-      setDragging(null);
-      setPendingEdge(null);
-      setViewOffset({ x: 0, y: 0 });
-      setGuidedCommentary({
-        title: template.title,
-        summary: template.summary,
-        comments: template.comments,
-        hardwareNote: template.hardwareNote,
-        limitation: template.limitation,
-      });
-      const contextSuffix = quickActionContext.selectedEntityLabel
-        ? ` para ${quickActionContext.selectedEntityLabel}`
-        : "";
-      logMessage(
-        "info",
-        `Fluxo guiado aplicado: ${template.title}${contextSuffix}`,
-      );
-    },
-    [logMessage, quickActionContext],
-  );
-  const appendQuickActionTemplate = useCallback(
-    (template: QuickActionTemplate) => {
-      const quickGraph = template.buildGraph(quickActionContext);
-      const result = appendQuickActionGraph(graph, quickGraph);
-      const firstNewNodeId =
-        result.appendedNodeIds[0] ?? quickGraph.nodes[0]?.id ?? null;
-      const firstNewNode =
-        (firstNewNodeId
-          ? result.graph.nodes.find((node) => node.id === firstNewNodeId)
-          : null) ?? null;
+  const applyQuickActionTemplate = useCallback((template: QuickActionTemplate) => {
+    const nextGraph = template.buildGraph(quickActionContext);
+    setGraph(nextGraph);
+    setSelectedId(nextGraph.nodes[0]?.id ?? null);
+    setDragging(null);
+    setPendingEdge(null);
+    setViewOffset({ x: 0, y: 0 });
+    setGuidedCommentary({
+      title: template.title,
+      summary: template.summary,
+      comments: template.comments,
+      hardwareNote: template.hardwareNote,
+      limitation: template.limitation,
+    });
+    const contextSuffix = quickActionContext.selectedEntityLabel
+      ? ` para ${quickActionContext.selectedEntityLabel}`
+      : "";
+    logMessage("info", `Fluxo guiado aplicado: ${template.title}${contextSuffix}`);
+  }, [logMessage, quickActionContext]);
+  const appendQuickActionTemplate = useCallback((template: QuickActionTemplate) => {
+    const quickGraph = template.buildGraph(quickActionContext);
+    const result = appendQuickActionGraph(graph, quickGraph);
+    const firstNewNodeId = result.appendedNodeIds[0] ?? quickGraph.nodes[0]?.id ?? null;
+    const firstNewNode =
+      (firstNewNodeId
+        ? result.graph.nodes.find((node) => node.id === firstNewNodeId)
+        : null) ?? null;
 
-      setGraph(result.graph);
-      setSelectedId(firstNewNodeId);
-      setDragging(null);
-      setPendingEdge(null);
-      if (firstNewNode) {
-        const rect = canvasRef.current?.getBoundingClientRect();
-        const width = rect?.width ?? canvasSize.width;
-        const height = rect?.height ?? canvasSize.height;
-        const desiredX = Math.max(
-          FOCUS_PADDING,
-          width / 2 - NODE_CARD_WIDTH / 2,
-        );
-        const desiredY = Math.max(
-          FOCUS_PADDING,
-          height / 2 - NODE_CARD_HEIGHT / 2,
-        );
-        setViewOffset({
-          x: desiredX - firstNewNode.x,
-          y: desiredY - firstNewNode.y,
-        });
-      }
-      setGuidedCommentary({
-        title: `${template.title} (anexado)`,
-        summary: template.summary,
-        comments: [
-          "O bloco foi anexado ao grafo atual sem substituir o fluxo existente.",
-          ...template.comments,
-        ],
-        hardwareNote: template.hardwareNote,
-        limitation: template.limitation,
+    setGraph(result.graph);
+    setSelectedId(firstNewNodeId);
+    setDragging(null);
+    setPendingEdge(null);
+    if (firstNewNode) {
+      const rect = canvasRef.current?.getBoundingClientRect();
+      const width = rect?.width ?? canvasSize.width;
+      const height = rect?.height ?? canvasSize.height;
+      const desiredX = Math.max(FOCUS_PADDING, width / 2 - NODE_CARD_WIDTH / 2);
+      const desiredY = Math.max(FOCUS_PADDING, height / 2 - NODE_CARD_HEIGHT / 2);
+      setViewOffset({
+        x: desiredX - firstNewNode.x,
+        y: desiredY - firstNewNode.y,
       });
-      const contextSuffix = quickActionContext.selectedEntityLabel
-        ? ` para ${quickActionContext.selectedEntityLabel}`
-        : "";
-      logMessage(
-        "info",
-        `[NodeGraph] Bloco guiado anexado: ${template.title}${contextSuffix}. Use 'Encadear exec (layout)' ou conecte manualmente se quiser ligar o fluxo novo ao existente.`,
-      );
-    },
-    [
-      canvasSize.height,
-      canvasSize.width,
-      graph,
-      logMessage,
-      quickActionContext,
-    ],
-  );
+    }
+    setGuidedCommentary({
+      title: `${template.title} (anexado)`,
+      summary: template.summary,
+      comments: [
+        "O bloco foi anexado ao grafo atual sem substituir o fluxo existente.",
+        ...template.comments,
+      ],
+      hardwareNote: template.hardwareNote,
+      limitation: template.limitation,
+    });
+    const contextSuffix = quickActionContext.selectedEntityLabel
+      ? ` para ${quickActionContext.selectedEntityLabel}`
+      : "";
+    logMessage(
+      "info",
+      `[NodeGraph] Bloco guiado anexado: ${template.title}${contextSuffix}. Use 'Encadear exec (layout)' ou conecte manualmente se quiser ligar o fluxo novo ao existente.`
+    );
+  }, [canvasSize.height, canvasSize.width, graph, logMessage, quickActionContext]);
 
   const applyExecChainFromLayout = useCallback(() => {
     setGraph((current) => {
@@ -2680,13 +2307,13 @@ export default function NodeGraphEditor() {
       if (added === 0) {
         logMessage(
           "warn",
-          "[NodeGraph] Encadeamento layout: nenhuma aresta nova (portas exec padrao ausentes, grafo pequeno ou ligacoes ja existentes).",
+          "[NodeGraph] Encadeamento layout: nenhuma aresta nova (portas exec padrao ausentes, grafo pequeno ou ligacoes ja existentes)."
         );
         return current;
       }
       logMessage(
         "info",
-        `[NodeGraph] Encadeamento layout: ${added} aresta(s) exec na ordem y→x. Revise fluxos condicionais e nos sem entrada exec.`,
+        `[NodeGraph] Encadeamento layout: ${added} aresta(s) exec na ordem y→x. Revise fluxos condicionais e nos sem entrada exec.`
       );
       return next;
     });
@@ -2698,9 +2325,7 @@ export default function NodeGraphEditor() {
       if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
         setGraph((g) => ({
           nodes: g.nodes.filter((n) => n.id !== selectedId),
-          edges: g.edges.filter(
-            (e) => e.fromNode !== selectedId && e.toNode !== selectedId,
-          ),
+          edges: g.edges.filter((e) => e.fromNode !== selectedId && e.toNode !== selectedId),
         }));
         setSelectedId(null);
       }
@@ -2714,7 +2339,7 @@ export default function NodeGraphEditor() {
   function edgePath(fromNode: GraphNode, toNode: GraphNode): string {
     const x1 = fromNode.x + viewOffset.x + NODE_CARD_WIDTH; // right edge
     const y1 = fromNode.y + viewOffset.y + 24;
-    const x2 = toNode.x + viewOffset.x; // left edge
+    const x2 = toNode.x + viewOffset.x;                     // left edge
     const y2 = toNode.y + viewOffset.y + 24;
     const cx = (x1 + x2) / 2;
     return `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`;
@@ -2722,14 +2347,10 @@ export default function NodeGraphEditor() {
 
   const graphSummary = useMemo(() => summarizeNodeGraph(graph), [graph]);
   const graphValidation = useMemo(() => validateNodeGraph(graph), [graph]);
-  const graphValidationPreview = [
-    ...graphValidation.errors,
-    ...graphValidation.warnings,
-  ].slice(0, 3);
+  const graphValidationPreview = [...graphValidation.errors, ...graphValidation.warnings].slice(0, 3);
   const miniMapNodes = useMemo(
-    () =>
-      buildNodeMiniMap(graph, MINIMAP_WIDTH, MINIMAP_HEIGHT, MINIMAP_PADDING),
-    [graph],
+    () => buildNodeMiniMap(graph, MINIMAP_WIDTH, MINIMAP_HEIGHT, MINIMAP_PADDING),
+    [graph]
   );
 
   const graphBounds = useMemo(() => getNodeGraphBounds(graph), [graph]);
@@ -2745,18 +2366,10 @@ export default function NodeGraphEditor() {
     const graphHeight = Math.max(1, graphBounds.maxY - graphBounds.minY);
     const scale = Math.min(innerWidth / graphWidth, innerHeight / graphHeight);
 
-    const viewportLeft =
-      MINIMAP_PADDING + Math.max(0, -viewOffset.x - graphBounds.minX) * scale;
-    const viewportTop =
-      MINIMAP_PADDING + Math.max(0, -viewOffset.y - graphBounds.minY) * scale;
-    const viewportWidth = Math.min(
-      innerWidth,
-      Math.max(28, canvasSize.width * scale),
-    );
-    const viewportHeight = Math.min(
-      innerHeight,
-      Math.max(20, canvasSize.height * scale),
-    );
+    const viewportLeft = MINIMAP_PADDING + Math.max(0, -viewOffset.x - graphBounds.minX) * scale;
+    const viewportTop = MINIMAP_PADDING + Math.max(0, -viewOffset.y - graphBounds.minY) * scale;
+    const viewportWidth = Math.min(innerWidth, Math.max(28, canvasSize.width * scale));
+    const viewportHeight = Math.min(innerHeight, Math.max(20, canvasSize.height * scale));
 
     return {
       left: viewportLeft,
@@ -2764,39 +2377,27 @@ export default function NodeGraphEditor() {
       width: viewportWidth,
       height: viewportHeight,
     };
-  }, [
-    canvasSize.height,
-    canvasSize.width,
-    graphBounds,
-    viewOffset.x,
-    viewOffset.y,
-  ]);
+  }, [canvasSize.height, canvasSize.width, graphBounds, viewOffset.x, viewOffset.y]);
 
-  const focusNode = useCallback(
-    (nodeId: string) => {
-      const targetNode = graph.nodes.find((node) => node.id === nodeId);
-      if (!targetNode) {
-        return;
-      }
+  const focusNode = useCallback((nodeId: string) => {
+    const targetNode = graph.nodes.find((node) => node.id === nodeId);
+    if (!targetNode) {
+      return;
+    }
 
-      const rect = canvasRef.current?.getBoundingClientRect();
-      const width = rect?.width ?? canvasSize.width;
-      const height = rect?.height ?? canvasSize.height;
+    const rect = canvasRef.current?.getBoundingClientRect();
+    const width = rect?.width ?? canvasSize.width;
+    const height = rect?.height ?? canvasSize.height;
 
-      const desiredX = Math.max(FOCUS_PADDING, width / 2 - NODE_CARD_WIDTH / 2);
-      const desiredY = Math.max(
-        FOCUS_PADDING,
-        height / 2 - NODE_CARD_HEIGHT / 2,
-      );
+    const desiredX = Math.max(FOCUS_PADDING, width / 2 - NODE_CARD_WIDTH / 2);
+    const desiredY = Math.max(FOCUS_PADDING, height / 2 - NODE_CARD_HEIGHT / 2);
 
-      setViewOffset({
-        x: desiredX - targetNode.x,
-        y: desiredY - targetNode.y,
-      });
-      setSelectedId(nodeId);
-    },
-    [canvasSize.height, canvasSize.width, graph.nodes],
-  );
+    setViewOffset({
+      x: desiredX - targetNode.x,
+      y: desiredY - targetNode.y,
+    });
+    setSelectedId(nodeId);
+  }, [canvasSize.height, canvasSize.width, graph.nodes]);
 
   const focusEntryNode = useCallback(() => {
     const firstEntryNode = graphSummary.entryNodeIds[0];
@@ -2823,7 +2424,7 @@ export default function NodeGraphEditor() {
     const startNode = makeNode(
       "event_start",
       anchorNode ? Math.max(40, anchorNode.x - 220) : 140,
-      anchorNode ? anchorNode.y : 160,
+      anchorNode ? anchorNode.y : 160
     );
 
     setGraph((currentGraph) => ({
@@ -2841,7 +2442,7 @@ export default function NodeGraphEditor() {
         types: g.types.filter(
           (t) =>
             getNodeDisplayName(t).toLowerCase().includes(searchLower) ||
-            t.toLowerCase().includes(searchLower),
+            t.toLowerCase().includes(searchLower)
         ),
       })).filter((g) => g.types.length > 0)
     : NODE_PALETTE_GROUPS;
@@ -2857,6 +2458,7 @@ export default function NodeGraphEditor() {
 
   return (
     <div className="flex h-full w-full overflow-hidden bg-[#11111b]">
+
       {/* ── Palette sidebar ── */}
       <div className="flex w-40 shrink-0 flex-col overflow-x-hidden border-r border-[#313244] bg-[#181825]">
         <div className="shrink-0 border-b border-[#313244] p-2">
@@ -2874,9 +2476,7 @@ export default function NodeGraphEditor() {
           </div>
         </div>
         <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
-          <p className="mb-1 select-none px-1 text-[10px] text-[#45475a]">
-            NÓS
-          </p>
+          <p className="mb-1 select-none px-1 text-[10px] text-[#45475a]">NÓS</p>
           {filteredGroups.map((group) => {
             const isCollapsed = collapsedGroups.has(group.label);
             return (
@@ -2886,9 +2486,7 @@ export default function NodeGraphEditor() {
                   onClick={() => toggleGroup(group.label)}
                   className="flex w-full items-center gap-1.5 px-1 py-1 text-left text-[10px] font-semibold uppercase tracking-wide text-[#6c7086] transition-colors hover:text-[#a6adc8]"
                 >
-                  <span className="text-[9px]">
-                    {isCollapsed ? "\u25b8" : "\u25be"}
-                  </span>
+                  <span className="text-[9px]">{isCollapsed ? "\u25b8" : "\u25be"}</span>
                   <span>{group.icon}</span>
                   <span>{group.label}</span>
                 </button>
@@ -2901,12 +2499,9 @@ export default function NodeGraphEditor() {
                       disabled={!selectedEntity}
                     >
                       <span className="text-[12px] opacity-80">
-                        {NODE_PALETTE_GROUPS.find((g) => g.types.includes(type))
-                          ?.icon ?? "\u2699\ufe0f"}
+                        {NODE_PALETTE_GROUPS.find((g) => g.types.includes(type))?.icon ?? "\u2699\ufe0f"}
                       </span>
-                      <span className="min-w-0 truncate">
-                        {getNodeDisplayName(type)}
-                      </span>
+                      <span className="min-w-0 truncate">{getNodeDisplayName(type)}</span>
                     </button>
                   ))}
               </div>
@@ -2915,29 +2510,20 @@ export default function NodeGraphEditor() {
         </div>
         <div className="mt-auto shrink-0 border-t border-[#313244] p-2">
           <p className="select-none px-1 text-[10px] text-[#45475a]">
-            {selectedEntity
-              ? "Autosave 600ms no LogicComponent.graph"
-              : "Selecione uma entidade para editar"}
+            {selectedEntity ? "Autosave 600ms no LogicComponent.graph" : "Selecione uma entidade para editar"}
           </p>
           {selectedEntity?.components.logic?.graph_ref ? (
             <p className="mt-1 select-none px-1 text-[10px] text-[#45475a]">
-              Origem do grafo:{" "}
-              {graphOriginLabel === "user_edited_ref"
-                ? "editado no editor"
-                : "importado do graph_ref"}
+              Origem do grafo: {graphOriginLabel === "user_edited_ref" ? "editado no editor" : "importado do graph_ref"}
             </p>
           ) : null}
           <p className="mt-1 select-none px-1 text-[10px] text-[#45475a]">
             Dica: arraste da saída para a entrada para conectar.
           </p>
-          <p className="select-none px-1 text-[10px] text-[#45475a]">
-            Del = remover nó
-          </p>
-          {selectedEntity?.components.logic?.graph_ref &&
-          graph.nodes.length === 0 ? (
+          <p className="select-none px-1 text-[10px] text-[#45475a]">Del = remover nó</p>
+          {selectedEntity?.components.logic?.graph_ref && graph.nodes.length === 0 ? (
             <p className="mt-1 px-1 text-[9px] leading-snug text-[#f9e2af]">
-              graph_ref {selectedEntity.components.logic.graph_ref}: grafo
-              indisponivel para hidratacao.
+              graph_ref {selectedEntity.components.logic.graph_ref}: grafo indisponivel para hidratacao.
             </p>
           ) : null}
         </div>
@@ -2961,35 +2547,55 @@ export default function NodeGraphEditor() {
         {!selectedEntity && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#11111b]/80">
             <p className="max-w-xs text-center text-xs text-[#6c7086]">
-              Selecione uma entidade na hierarquia para carregar ou criar o
-              `LogicComponent.graph`.
+              Selecione uma entidade na hierarquia para carregar ou criar o `LogicComponent.graph`.
             </p>
           </div>
         )}
 
         {selectedEntity && (
           <div
-            data-testid="nodegraph-canvas-toolbar"
-            className="absolute left-3 top-3 z-10 flex max-w-[calc(100%-12rem)] flex-wrap items-center gap-1.5 rounded-lg border border-[#313244]/80 bg-[#181825]/90 px-2 py-1 text-[10px] shadow backdrop-blur-sm"
+            data-testid="nodegraph-overview"
+            className="absolute left-3 top-3 z-10 flex max-w-[19rem] flex-col gap-2 rounded-xl border border-[#313244] bg-[#181825]/95 px-3 py-2 text-[10px] shadow-lg backdrop-blur-sm"
           >
-            <span className="truncate font-semibold text-[#cdd6f4]">
-              {getEntityDisplayName(selectedEntity)}
-            </span>
-            <span className="rounded bg-[#11111b] px-1.5 py-0.5 text-[#a6adc8]">
-              {graphSummary.totalNodes}n · {graphSummary.totalEdges}e
-            </span>
-            <span
-              className={`rounded px-1.5 py-0.5 ${
-                graphValidation.errors.length
-                  ? "text-[#f38ba8]"
-                  : "text-[#a6e3a1]"
-              }`}
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#89b4fa]">
+                  Logic Context
+                </p>
+                <p className="truncate text-[11px] font-semibold text-[#cdd6f4]">
+                  {getEntityDisplayName(selectedEntity)}
+                </p>
+                <p className="truncate text-[#6c7086]">entity_id: {selectedEntity.entity_id}</p>
+              </div>
+              <span className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-[#a6adc8]">
+                {graphSummary.totalNodes} nos
+              </span>
+            </div>
+
+            <div className="flex flex-wrap gap-1.5">
+              <span className="rounded bg-[#11111b] px-2 py-1 text-[#a6adc8]">
+                Conexoes: <span className="font-semibold text-[#cdd6f4]">{graphSummary.totalEdges}</span>
+              </span>
+              <span className="rounded bg-[#11111b] px-2 py-1 text-[#a6adc8]">
+                Eventos: <span className="font-semibold text-[#cdd6f4]">{graphSummary.entryNodeIds.length}</span>
+              </span>
+              <span className="rounded bg-[#11111b] px-2 py-1 text-[#a6adc8]">
+                Soltos: <span className="font-semibold text-[#cdd6f4]">{graphSummary.disconnectedNodeIds.length}</span>
+              </span>
+              <span className="rounded bg-[#11111b] px-2 py-1 text-[#a6adc8]">
+                Validacao:{" "}
+                <span className={graphValidation.errors.length ? "font-semibold text-[#f38ba8]" : "font-semibold text-[#a6e3a1]"}>
+                  {graphValidation.errors.length}
+                </span>
+                <span className="text-[#6c7086]">/</span>
+                <span className="font-semibold text-[#f9e2af]">{graphValidation.warnings.length}</span>
+              </span>
+            </div>
+
+            <div
+              data-testid="nodegraph-scene-bridge"
+              className="rounded border border-[#89b4fa]/35 bg-[#89b4fa]/10 px-2 py-1.5 text-[10px] leading-snug text-[#cdd6f4]"
             >
-<<<<<<< HEAD
-              val {graphValidation.errors.length}/
-              {graphValidation.warnings.length}
-            </span>
-=======
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#89b4fa]">
@@ -3296,7 +2902,6 @@ export default function NodeGraphEditor() {
                 </button>
               )}
             </div>
->>>>>>> origin/codex/sgdk-logic-truth-product-qa
           </div>
         )}
 
@@ -3307,7 +2912,7 @@ export default function NodeGraphEditor() {
         >
           {graph.edges.map((edge) => {
             const from = graph.nodes.find((n) => n.id === edge.fromNode);
-            const to = graph.nodes.find((n) => n.id === edge.toNode);
+            const to   = graph.nodes.find((n) => n.id === edge.toNode);
             if (!from || !to) return null;
             return (
               <path
@@ -3321,27 +2926,24 @@ export default function NodeGraphEditor() {
             );
           })}
           {/* Pending edge preview */}
-          {pendingEdge &&
-            (() => {
-              const from = graph.nodes.find(
-                (n) => n.id === pendingEdge.fromNode,
-              );
-              if (!from) return null;
-              const rect = canvasRef.current?.getBoundingClientRect();
-              const ox = rect ? pendingEdge.x - rect.left : pendingEdge.x;
-              const oy = rect ? pendingEdge.y - rect.top : pendingEdge.y;
-              const x1 = from.x + viewOffset.x + NODE_CARD_WIDTH;
-              const y1 = from.y + viewOffset.y + 24;
-              return (
-                <path
-                  d={`M ${x1} ${y1} C ${(x1 + ox) / 2} ${y1}, ${(x1 + ox) / 2} ${oy}, ${ox} ${oy}`}
-                  fill="none"
-                  stroke="#cba6f7"
-                  strokeWidth={1.5}
-                  strokeDasharray="4 3"
-                />
-              );
-            })()}
+          {pendingEdge && (() => {
+            const from = graph.nodes.find((n) => n.id === pendingEdge.fromNode);
+            if (!from) return null;
+            const rect = canvasRef.current?.getBoundingClientRect();
+            const ox = rect ? pendingEdge.x - rect.left : pendingEdge.x;
+            const oy = rect ? pendingEdge.y - rect.top  : pendingEdge.y;
+            const x1 = from.x + viewOffset.x + NODE_CARD_WIDTH;
+            const y1 = from.y + viewOffset.y + 24;
+            return (
+              <path
+                d={`M ${x1} ${y1} C ${(x1+ox)/2} ${y1}, ${(x1+ox)/2} ${oy}, ${ox} ${oy}`}
+                fill="none"
+                stroke="#cba6f7"
+                strokeWidth={1.5}
+                strokeDasharray="4 3"
+              />
+            );
+          })()}
         </svg>
 
         {/* Nodes */}
@@ -3353,12 +2955,8 @@ export default function NodeGraphEditor() {
             screenY={node.y + viewOffset.y}
             selected={node.id === selectedId}
             onMouseDown={(e) => onNodeMouseDown(e, node.id)}
-            onPortMouseDown={(e, portId, isOutput) =>
-              onPortMouseDown(e, node.id, portId, isOutput)
-            }
-            onPortMouseUp={(e, portId, isOutput) =>
-              onPortMouseUp(e, node.id, portId, isOutput)
-            }
+            onPortMouseDown={(e, portId, isOutput) => onPortMouseDown(e, node.id, portId, isOutput)}
+            onPortMouseUp={(e, portId, isOutput) => onPortMouseUp(e, node.id, portId, isOutput)}
           />
         ))}
 
@@ -3418,22 +3016,16 @@ export default function NodeGraphEditor() {
             <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#89b4fa]">
               Guided Commentary
             </p>
-            <p className="mt-1 text-sm font-semibold text-[#cdd6f4]">
-              {guidedCommentary.title}
-            </p>
+            <p className="mt-1 text-sm font-semibold text-[#cdd6f4]">{guidedCommentary.title}</p>
             <p className="mt-1 text-[#a6adc8]">{guidedCommentary.summary}</p>
             <ul className="mt-3 list-disc space-y-1 pl-4 text-[#bac2de]">
               {guidedCommentary.comments.map((comment) => (
                 <li key={comment}>{comment}</li>
               ))}
             </ul>
-            <p className="mt-3 text-[10px] text-[#6c7086]">
-              {guidedCommentary.hardwareNote}
-            </p>
+            <p className="mt-3 text-[10px] text-[#6c7086]">{guidedCommentary.hardwareNote}</p>
             {guidedCommentary.limitation && (
-              <p className="mt-2 text-[10px] text-[#fab387]">
-                {guidedCommentary.limitation}
-              </p>
+              <p className="mt-2 text-[10px] text-[#fab387]">{guidedCommentary.limitation}</p>
             )}
           </div>
         )}
@@ -3454,352 +3046,12 @@ export default function NodeGraphEditor() {
             </p>
           </div>
         )}
-        {selectedEntity &&
-          graph.nodes.length > 1 &&
-          graph.edges.length === 0 && (
-            <div className="absolute bottom-14 right-56 rounded border border-[#fab387]/40 bg-[#181825]/95 px-3 py-2 text-[10px] text-[#fab387] shadow-lg">
-              Grafo sem conexoes: arraste de uma saida para uma entrada para
-              ligar o fluxo.
-            </div>
-          )}
+        {selectedEntity && graph.nodes.length > 1 && graph.edges.length === 0 && (
+          <div className="absolute bottom-3 right-3 rounded border border-[#fab387]/40 bg-[#181825]/95 px-3 py-2 text-[10px] text-[#fab387] shadow-lg">
+            Grafo sem conexoes: arraste de uma saida para uma entrada para ligar o fluxo.
+          </div>
+        )}
       </div>
-
-      <aside
-        data-testid="nodegraph-side-rail"
-        className="flex w-52 shrink-0 flex-col overflow-hidden border-l border-[#313244] bg-[#181825]"
-      >
-        <div
-          data-testid="nodegraph-overview"
-          className="scrollbar-thin min-h-0 flex-1 space-y-2 overflow-y-auto p-2 text-[10px]"
-        >
-          {!selectedEntity ? (
-            <p className="text-[#6c7086]">
-              Selecione uma entidade na hierarquia para validacao, contexto importado e
-              propriedades do grafo.
-            </p>
-          ) : (
-            <>
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#89b4fa]">
-                Logic Context
-              </p>
-
-              <p className="truncate text-[11px] font-semibold text-[#cdd6f4]">
-                {getEntityDisplayName(selectedEntity)}
-              </p>
-
-              <p className="truncate text-[#6c7086]">
-                entity_id: {selectedEntity.entity_id}
-              </p>
-            </div>
-
-            <span className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-[#a6adc8]">
-              {graphSummary.totalNodes} nos
-            </span>
-          </div>
-
-          <div className="flex flex-wrap gap-1.5">
-            <span className="rounded bg-[#11111b] px-2 py-1 text-[#a6adc8]">
-              Conexoes:{" "}
-              <span className="font-semibold text-[#cdd6f4]">
-                {graphSummary.totalEdges}
-              </span>
-            </span>
-
-            <span className="rounded bg-[#11111b] px-2 py-1 text-[#a6adc8]">
-              Eventos:{" "}
-              <span className="font-semibold text-[#cdd6f4]">
-                {graphSummary.entryNodeIds.length}
-              </span>
-            </span>
-
-            <span className="rounded bg-[#11111b] px-2 py-1 text-[#a6adc8]">
-              Soltos:{" "}
-              <span className="font-semibold text-[#cdd6f4]">
-                {graphSummary.disconnectedNodeIds.length}
-              </span>
-            </span>
-
-            <span className="rounded bg-[#11111b] px-2 py-1 text-[#a6adc8]">
-              Validacao:{" "}
-              <span
-                className={
-                  graphValidation.errors.length
-                    ? "font-semibold text-[#f38ba8]"
-                    : "font-semibold text-[#a6e3a1]"
-                }
-              >
-                {graphValidation.errors.length}
-              </span>
-              <span className="text-[#6c7086]">/</span>
-              <span className="font-semibold text-[#f9e2af]">
-                {graphValidation.warnings.length}
-              </span>
-            </span>
-          </div>
-
-          <div
-            data-testid="nodegraph-scene-bridge"
-            className="rounded border border-[#89b4fa]/35 bg-[#89b4fa]/10 px-2 py-1.5 text-[10px] leading-snug text-[#cdd6f4]"
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#89b4fa]">
-                  Logic -&gt; Scene
-                </p>
-
-                <p className="mt-1 truncate">
-                  {getEntityDisplayName(selectedEntity)} ·{" "}
-                  <span className="font-mono text-[#6c7086]">
-                    {selectedEntity.entity_id}
-                  </span>
-                </p>
-
-                <p className="mt-1 text-[#7f849c]">
-                  {selectedEntitySourceRefs.length > 0
-                    ? `${selectedEntitySourceRefs.length} fonte(s) rastreavel(eis)`
-                    : "Sem fonte rastreavel: navegue pelo Inspector se houver contexto externo."}
-                </p>
-              </div>
-
-              <button
-                type="button"
-                data-testid="nodegraph-bridge-back-scene"
-                onClick={handleFocusSelectedEntityInScene}
-                className="shrink-0 rounded border border-[#94e2d5]/40 bg-[#94e2d5]/10 px-2 py-1 text-[9px] font-semibold text-[#94e2d5] transition-colors hover:bg-[#94e2d5]/20"
-              >
-                Focar objeto
-              </button>
-            </div>
-          </div>
-
-          {graphSummary.totalNodes > 0 &&
-            graphSummary.entryNodeIds.length === 0 && (
-              <p className="text-[#fab387]">
-                Grafo sem evento de entrada: adicione um no de evento para
-                iniciar o fluxo.
-              </p>
-            )}
-
-          {graphSummary.disconnectedNodeIds.length > 0 &&
-            graphSummary.totalNodes > 1 && (
-              <p className="text-[#f9e2af]">
-                {graphSummary.disconnectedNodeIds.length} no(s) ainda sem
-                conexao no fluxo atual.
-              </p>
-            )}
-
-          {graphValidationPreview.length > 0 && (
-            <div
-              data-testid="nodegraph-validation-preview"
-              className="rounded border border-[#45475a] bg-[#11111b] px-2 py-1.5 text-[10px] leading-snug"
-            >
-              <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#f9e2af]">
-                Validador do grafo
-              </p>
-
-              <ul className="mt-1 space-y-1">
-                {graphValidationPreview.map((issue) => (
-                  <li
-                    key={`${issue.code}-${issue.edgeId ?? issue.nodeId ?? issue.message}`}
-                    className={
-                      issue.severity === "error"
-                        ? "text-[#f38ba8]"
-                        : "text-[#f9e2af]"
-                    }
-                  >
-                    {issue.message}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {importedSemantics ? (
-            <div className="rounded border border-[#45475a] bg-[#11111b] px-2 py-1.5 text-[10px] leading-snug text-[#bac2de]">
-              <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#94e2d5]">
-                Inferencia importada (heuristica)
-              </p>
-
-              <p className="mt-1">
-                Papel:{" "}
-                <span className="font-mono text-[#f9e2af]">
-                  {importedSemantics.entity_role ?? "—"}
-                </span>
-                {" · "}
-                Confianca:{" "}
-                <span className="font-mono text-[#cba6f7]">
-                  {importedSemantics.confidence ?? "—"}
-                </span>
-              </p>
-
-              {importedSemantics.role_reason ? (
-                <p
-                  className="mt-1 line-clamp-2 text-[#6c7086]"
-                  title={importedSemantics.role_reason}
-                >
-                  Motivo: {importedSemantics.role_reason}
-                </p>
-              ) : null}
-
-              {importedSemantics.driver_functions?.length ? (
-                <p className="mt-1 text-[9px] text-[#7f849c]">
-                  Drivers:{" "}
-                  <span className="font-mono text-[#cdd6f4]">
-                    {importedSemantics.driver_functions.join(", ")}
-                  </span>
-                </p>
-              ) : null}
-
-              {selectedEntitySourceRefs.length > 0 ? (
-                <div className="mt-2 flex flex-col gap-1">
-                  {selectedEntitySourceRefs.map((relativePath, index) => (
-                    <button
-                      key={`${relativePath}-${index}`}
-                      type="button"
-                      data-testid={
-                        index === 0
-                          ? "nodegraph-open-primary-source"
-                          : `nodegraph-open-source-${index}`
-                      }
-                      onClick={() => void handleOpenSourcePath(relativePath)}
-                      className="w-full rounded border border-[#89b4fa]/40 bg-[#89b4fa]/10 px-2 py-1 text-left font-semibold text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20"
-                    >
-                      Abrir fonte
-                      {selectedEntitySourceRefs.length > 1
-                        ? ` (${index + 1})`
-                        : ""}
-                      <span className="mt-0.5 block truncate font-mono text-[9px] font-normal text-[#6c7086]">
-                        {relativePath}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-2 text-[9px] text-[#6c7086]">
-                  Sem caminho de fonte rastreavel: use o Inspector ou o doador
-                  para localizar o TU manualmente.
-                </p>
-              )}
-            </div>
-          ) : null}
-
-          {graph.nodes.length > 0 ? (
-            <div className="rounded border border-[#313244] bg-[#11111b] px-2 py-1.5 text-[10px] leading-snug text-[#bac2de]">
-              <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#a6e3a1]">
-                Atalhos construtivos
-              </p>
-
-              <p className="mt-1 text-[#94a3b8]">
-                Anexe um bloco coerente com o papel atual sem substituir o grafo
-                que ja esta em edicao.
-              </p>
-
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {orderedQuickActionTemplates.slice(0, 3).map((template) => (
-                  <button
-                    key={template.id}
-                    type="button"
-                    data-testid={`nodegraph-append-template-${template.id}`}
-                    onClick={() => appendQuickActionTemplate(template)}
-                    className="rounded border border-[#a6e3a1]/40 bg-[#a6e3a1]/10 px-2 py-1 font-semibold text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/20"
-                    title={template.summary}
-                  >
-                    + {template.actionLabel}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          <div className="flex flex-wrap gap-1.5">
-            <button
-              type="button"
-              data-testid="nodegraph-focus-entry"
-              onClick={focusEntryNode}
-              disabled={graphSummary.entryNodeIds.length === 0}
-              className="rounded border border-[#89b4fa]/40 bg-[#89b4fa]/10 px-2 py-1 font-semibold text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Ir para Inicio
-            </button>
-
-            {graphSummary.entryNodeIds.length === 0 &&
-              graphSummary.totalNodes > 0 && (
-                <button
-                  type="button"
-                  data-testid="nodegraph-add-entry"
-                  onClick={addEntryNode}
-                  className="rounded border border-[#fab387]/40 bg-[#fab387]/10 px-2 py-1 font-semibold text-[#fab387] transition-colors hover:bg-[#fab387]/20"
-                >
-                  Adicionar Inicio
-                </button>
-              )}
-
-            <button
-              type="button"
-              data-testid="nodegraph-focus-selected"
-              onClick={() => selectedNode && focusNode(selectedNode.id)}
-              disabled={!selectedNode}
-              className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 font-semibold text-[#cdd6f4] transition-colors hover:border-[#cba6f7] hover:text-[#cba6f7] disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Centralizar Selecao
-            </button>
-
-            <button
-              type="button"
-              data-testid="nodegraph-reset-view"
-              onClick={() => setViewOffset({ x: 0, y: 0 })}
-              className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 font-semibold text-[#a6adc8] transition-colors hover:text-[#cdd6f4]"
-            >
-              Resetar Vista
-            </button>
-
-            <button
-              type="button"
-              data-testid="nodegraph-chain-exec-layout"
-              onClick={applyExecChainFromLayout}
-              disabled={graph.nodes.length < 2}
-              title="Liga saida exec padrao para entrada exec do proximo no na ordem de layout (y, depois x). Atalho de autoracao — revise ramos condicionais."
-              className="rounded border border-[#a6e3a1]/40 bg-[#a6e3a1]/10 px-2 py-1 font-semibold text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/20 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              Encadear exec (layout)
-            </button>
-
-            <button
-              type="button"
-              onClick={handleFocusSelectedEntityInScene}
-              className="rounded border border-[#94e2d5]/40 bg-[#94e2d5]/10 px-2 py-1 font-semibold text-[#94e2d5] transition-colors hover:bg-[#94e2d5]/20"
-            >
-              Logica -&gt; Objeto
-            </button>
-
-            <button
-              type="button"
-              data-testid="nodegraph-focus-node-target"
-              onClick={handleFocusSelectedNodeTarget}
-              disabled={!selectedNodeTargetEntity}
-              className="rounded border border-[#f9e2af]/40 bg-[#f9e2af]/10 px-2 py-1 font-semibold text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/20 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              No -&gt; Objeto alvo
-            </button>
-
-            {graphSummary.disconnectedNodeIds.length > 0 &&
-              graphSummary.totalNodes > 1 && (
-                <button
-                  type="button"
-                  data-testid="nodegraph-focus-disconnected"
-                  onClick={focusFirstDisconnectedNode}
-                  className="rounded border border-[#f9e2af]/40 bg-[#f9e2af]/10 px-2 py-1 font-semibold text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/20"
-                >
-                  Ir para No Solto
-                </button>
-              )}
-          </div>
-            </>
-          )}
-        </div>
-      </aside>
     </div>
   );
 }

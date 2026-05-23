@@ -22,16 +22,8 @@ use compiler::build_orch::{
 use compiler::sgdk_emitter::emit_sgdk_with_collision;
 use compiler::snes_emitter::emit_snes_with_collision;
 use core::compatibility_harness::{
-<<<<<<< HEAD
-<<<<<<< HEAD
-    run_gamemaker_compatibility_harness, validation_report_dir, CompatibilityHarnessReport,
-=======
     run_gamemaker_compatibility_harness, run_openbor_compatibility_harness, validation_report_dir,
     CompatibilityHarnessReport,
->>>>>>> origin/codex/openbor-beatemup-import-h
-=======
-    run_gamemaker_compatibility_harness, validation_report_dir, CompatibilityHarnessReport,
->>>>>>> origin/codex/sgdk-logic-truth-product-qa
 };
 use core::editor_validation::{
     authoritative_hw_status, validate_scene_draft as validate_scene_draft_impl,

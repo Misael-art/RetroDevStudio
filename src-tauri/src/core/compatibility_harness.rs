@@ -858,7 +858,6 @@ mod tests {
     #[test]
     #[ignore = "host-local vertical: GameMaker .gmez -> ROM -> Libretro framebuffer"]
     fn gamemaker_vertical_compatibility_harness_basic_platform() {
-<<<<<<< HEAD
         let candidates = [
             PathBuf::from("F:\\Projects\\Game Maker\\Basic_platform_game_example.gmez"),
             PathBuf::from(
@@ -870,9 +869,6 @@ mod tests {
             .find(|candidate| candidate.is_file())
             .cloned()
             .unwrap_or_else(|| candidates[0].clone());
-=======
-        let source = PathBuf::from("F:\\Projects\\Game Maker\\Basic_platform_game_example.gmez");
->>>>>>> origin/codex/openbor-beatemup-import-h
         if !source.is_file() {
             eprintln!(
                 "[skip] GameMaker sample ausente. Candidatos: {}",
