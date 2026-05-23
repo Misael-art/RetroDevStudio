@@ -395,6 +395,7 @@ struct GodotSceneParse {
 struct GameMakerResolvedRoot {
     effective_root: PathBuf,
     temp_root: Option<PathBuf>,
+    source_format: String,
 }
 
 #[derive(Debug, Clone)]
@@ -404,12 +405,18 @@ struct GameMakerSpriteResource {
     height: u32,
     xorigin: i32,
     yorigin: i32,
+    mask_left: i32,
+    mask_top: i32,
+    mask_right: i32,
+    mask_bottom: i32,
 }
 
 #[derive(Debug, Clone)]
 struct GameMakerEvent {
     label: String,
     code: String,
+    source_path: PathBuf,
+    line_approx: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -443,6 +450,15 @@ struct GameMakerRoomBackground {
 }
 
 #[derive(Debug, Clone)]
+struct GameMakerTileLayer {
+    name: String,
+    tileset_name: String,
+    map_width: u32,
+    map_height: u32,
+    cells: Vec<u32>,
+}
+
+#[derive(Debug, Clone)]
 struct GameMakerRoomResource {
     display_name: String,
     width: i32,
@@ -450,6 +466,12 @@ struct GameMakerRoomResource {
     instances: Vec<GameMakerRoomInstance>,
     views: Vec<GameMakerRoomView>,
     backgrounds: Vec<GameMakerRoomBackground>,
+    tile_layers: Vec<GameMakerTileLayer>,
+}
+
+#[derive(Debug, Clone)]
+struct GameMakerTilesetResource {
+    sprite_name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -7199,7 +7221,14 @@ pub fn import_gamemaker_project(
 ) -> Result<ExternalImportReport, LoadError> {
     let resolved = resolve_gamemaker_source_root(source_path)?;
     let gm_root = resolved.effective_root;
+    let source_format = resolved.source_format.clone();
+    let source_semantics = if source_format == "yyp" || source_format == "yy" {
+        "gamemaker_yy"
+    } else {
+        "gamemaker_gmx"
+    };
     let sprites = load_gamemaker_sprites(&gm_root)?;
+    let tilesets = load_gamemaker_tilesets(&gm_root)?;
     let backgrounds = load_gamemaker_backgrounds(&gm_root)?;
     let objects = load_gamemaker_objects(&gm_root)?;
     let room = load_gamemaker_primary_room(&gm_root)?;
@@ -7216,12 +7245,21 @@ pub fn import_gamemaker_project(
             entity_ids: Vec::new(),
         },
         SceneLayer {
+            id: "layer_tiles".to_string(),
+            name: "TILES".to_string(),
+            kind: "tile".to_string(),
+            visible: true,
+            locked: false,
+            depth: 1,
+            entity_ids: Vec::new(),
+        },
+        SceneLayer {
             id: "layer_instances".to_string(),
             name: "INSTANCES".to_string(),
             kind: "sprite".to_string(),
             visible: true,
             locked: false,
-            depth: 1,
+            depth: 2,
             entity_ids: Vec::new(),
         },
         SceneLayer {
@@ -7230,7 +7268,7 @@ pub fn import_gamemaker_project(
             kind: "object".to_string(),
             visible: true,
             locked: false,
-            depth: 2,
+            depth: 3,
             entity_ids: Vec::new(),
         },
     ]);
@@ -7255,8 +7293,27 @@ pub fn import_gamemaker_project(
         scene.entities.push(background_entity);
     }
 
+    let tile_entities = import_gamemaker_tile_layer_entities(
+        project_dir,
+        &gm_root,
+        &room.tile_layers,
+        &tilesets,
+        &sprites,
+        &mut entity_ids,
+        &mut asset_cache,
+    )?;
+    for entity in tile_entities {
+        if let Some(layers) = scene.layers.as_mut() {
+            if let Some(layer) = layers.iter_mut().find(|layer| layer.id == "layer_tiles") {
+                layer.entity_ids.push(entity.entity_id.clone());
+            }
+        }
+        scene.entities.push(entity);
+    }
+
     let wall_sprite = objects
-        .get("oWall")
+        .values()
+        .find(|object| is_gamemaker_static_collision_object(&object.name))
         .and_then(|object| object.sprite_name.as_ref())
         .and_then(|sprite_name| sprites.get(sprite_name));
     let wall_instances = room
@@ -7298,9 +7355,19 @@ pub fn import_gamemaker_project(
         let event_pairs = object
             .events
             .iter()
-            .map(|event| (event.label.clone(), event.code.clone()))
+            .map(|event| crate::core::gml_to_nodes::GmlEventInput {
+                label: event.label.clone(),
+                code: event.code.clone(),
+                source_file: event
+                    .source_path
+                    .strip_prefix(&gm_root)
+                    .ok()
+                    .map(normalize_relative_path)
+                    .unwrap_or_else(|| event.source_path.display().to_string()),
+                line_approx: event.line_approx,
+            })
             .collect::<Vec<_>>();
-        let conversion = crate::core::gml_to_nodes::convert_gamemaker_object_to_graph(
+        let conversion = crate::core::gml_to_nodes::convert_gamemaker_object_events_to_graph(
             &entity_id,
             &object.name,
             &event_pairs,
@@ -7310,10 +7377,22 @@ pub fn import_gamemaker_project(
         let graph_ref = persist_gamemaker_conversion_graph(project_dir, &entity_id, &conversion)?;
 
         let mut logic_hints = Vec::new();
+        for event in &object.events {
+            logic_hints.push(format!(
+                "GameMaker {} GML: {}",
+                event.label,
+                compact_gml_snippet(&event.code)
+            ));
+        }
         for gap in &conversion.gaps {
             logic_hints.push(format!(
-                "Gap GameMaker [{}] {}: {}",
-                gap.severity, gap.source_event, gap.reason
+                "Gap GameMaker [{}] {}:{} {}: impacto={} sugestao={}",
+                gap.severity,
+                gap.source_file,
+                gap.line_approx,
+                gap.reason,
+                gap.impact,
+                gap.suggestion
             ));
         }
         if let Some(code) = instance
@@ -7328,7 +7407,10 @@ pub fn import_gamemaker_project(
         }
 
         let role = gamemaker_entity_role(&object.name, &logic_hints);
-        let (asset, materialized_sprite_dims) = if gamemaker_should_attach_md_sprite(&role, &object.name) {
+        let (asset, materialized_sprite_dims) = if gamemaker_should_attach_md_sprite(
+            &role,
+            &object.name,
+        ) {
             if let Some(sprite) = sprite {
                 let (asset_path, width, height) = materialize_gamemaker_rgba_asset(
                     project_dir,
@@ -7362,6 +7444,18 @@ pub fn import_gamemaker_project(
             .ok()
             .map(normalize_relative_path)
             .unwrap_or_else(|| object.source_path.display().to_string());
+        let mut source_refs = vec![source_ref];
+        for event in &object.events {
+            let event_ref = event
+                .source_path
+                .strip_prefix(&gm_root)
+                .ok()
+                .map(normalize_relative_path)
+                .unwrap_or_else(|| event.source_path.display().to_string());
+            if !source_refs.contains(&event_ref) {
+                source_refs.push(event_ref);
+            }
+        }
         let native_graph = conversion.blocking_gaps == 0
             && conversion.native_constructs.iter().any(|value| {
                 value == "event_update" || value == "input_held" || value == "camera_follow"
@@ -7411,14 +7505,14 @@ pub fn import_gamemaker_project(
                     graph: None,
                     graph_ref: Some(graph_ref),
                     graph_origin: Some(if native_graph {
-                        "gamemaker_gmx_native".to_string()
+                        format!("{source_semantics}_native")
                     } else {
-                        "gamemaker_gmx".to_string()
+                        source_semantics.to_string()
                     }),
                     logic_hints,
-                    external_source_refs: vec![source_ref],
+                    external_source_refs: source_refs.clone(),
                     imported_semantics: Some(ImportedLogicSemantics {
-                        source: "gamemaker_gmx".to_string(),
+                        source: source_semantics.to_string(),
                         gameplay_class: "room_based_2d".to_string(),
                         entity_role: role,
                         confidence: if native_graph {
@@ -7434,7 +7528,7 @@ pub fn import_gamemaker_project(
                                 .to_string()
                         },
                         driver_functions: conversion.native_constructs.clone(),
-                        source_paths: Vec::new(),
+                        source_paths: source_refs,
                         audit_flags: if native_graph {
                             vec!["gml_native_subset".to_string()]
                         } else {
@@ -7497,7 +7591,8 @@ pub fn import_gamemaker_project(
     }
 
     skipped.push(format!(
-        "GameMaker import: {} entidades com grafo nativo/bridge, {} nodes gerados, {} gaps bloqueantes, {} paredes agregadas em collision_map.",
+        "GameMaker import: formato={}, {} entidades com grafo nativo/bridge, {} nodes gerados, {} gaps bloqueantes, {} paredes agregadas em collision_map.",
+        source_format,
         native_graph_entities,
         total_nodes_generated,
         blocking_gaps,
@@ -7518,9 +7613,12 @@ pub fn import_gamemaker_project(
 
 fn resolve_gamemaker_source_root(source_path: &Path) -> Result<GameMakerResolvedRoot, LoadError> {
     if source_path.is_dir() {
+        let effective_root = find_gamemaker_project_root(source_path)?;
+        let source_format = detect_gamemaker_project_format(&effective_root, source_path);
         return Ok(GameMakerResolvedRoot {
-            effective_root: find_gamemaker_project_root(source_path)?,
+            effective_root,
             temp_root: None,
+            source_format,
         });
     }
 
@@ -7529,9 +7627,25 @@ fn resolve_gamemaker_source_root(source_path: &Path) -> Result<GameMakerResolved
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
+    if extension == "yyp" || extension == "yy" {
+        let effective_root = find_gamemaker_project_root(source_path)?;
+        return Ok(GameMakerResolvedRoot {
+            effective_root,
+            temp_root: None,
+            source_format: extension,
+        });
+    }
+    if extension == "gmx" {
+        let effective_root = find_gamemaker_project_root(source_path)?;
+        return Ok(GameMakerResolvedRoot {
+            effective_root,
+            temp_root: None,
+            source_format: extension,
+        });
+    }
     if !["gmez", "gmz", "gmx"].contains(&extension.as_str()) {
         return Err(LoadError(format!(
-            "Projeto GameMaker invalido: '{}' nao e diretorio GMX nem pacote GMZ/GMEZ.",
+            "Projeto GameMaker invalido: '{}' nao e diretorio/projeto GMX, pacote GMZ/GMEZ, ou manifesto YYP/YY.",
             source_path.display()
         )));
     }
@@ -7561,13 +7675,56 @@ fn resolve_gamemaker_source_root(source_path: &Path) -> Result<GameMakerResolved
         ))
     })?;
     let effective_root = find_gamemaker_project_root(&temp_root)?;
+    let source_format = detect_gamemaker_project_format(&effective_root, source_path);
     Ok(GameMakerResolvedRoot {
         effective_root,
         temp_root: Some(temp_root),
+        source_format,
     })
 }
 
 fn find_gamemaker_project_root(root: &Path) -> Result<PathBuf, LoadError> {
+    if root.is_file() {
+        let extension = root
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
+        if extension.eq_ignore_ascii_case("yyp") {
+            return root.parent().map(Path::to_path_buf).ok_or_else(|| {
+                LoadError(format!(
+                    "Projeto GameMaker invalido: manifesto YYP '{}' sem diretorio pai.",
+                    root.display()
+                ))
+            });
+        }
+        if extension.eq_ignore_ascii_case("yy") {
+            for candidate in root.ancestors().skip(1) {
+                if is_gamemaker_project_root(candidate) {
+                    return Ok(candidate.to_path_buf());
+                }
+            }
+        }
+        if extension.eq_ignore_ascii_case("gmx") {
+            if root
+                .file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|name| name.ends_with(".project.gmx"))
+            {
+                return root.parent().map(Path::to_path_buf).ok_or_else(|| {
+                    LoadError(format!(
+                        "Projeto GameMaker invalido: manifesto GMX '{}' sem diretorio pai.",
+                        root.display()
+                    ))
+                });
+            }
+            for candidate in root.ancestors().skip(1) {
+                if is_gamemaker_project_root(candidate) {
+                    return Ok(candidate.to_path_buf());
+                }
+            }
+        }
+    }
+
     for candidate in [root.to_path_buf(), root.join("src")] {
         if is_gamemaker_project_root(&candidate) {
             return Ok(candidate);
@@ -7603,16 +7760,33 @@ fn find_gamemaker_project_root(root: &Path) -> Result<PathBuf, LoadError> {
     }
 
     Err(LoadError(format!(
-        "Projeto GameMaker invalido: nenhum root GMX com objects/rooms/sprites encontrado em '{}'.",
+        "Projeto GameMaker invalido: nenhum root GMX/YY com objects/rooms/sprites encontrado em '{}'.",
         root.display()
     )))
 }
 
 fn is_gamemaker_project_root(path: &Path) -> bool {
-    path.is_dir()
-        && gamemaker_asset_dir(path, "objects").is_some()
+    if !path.is_dir() {
+        return false;
+    }
+    let has_asset_dirs = gamemaker_asset_dir(path, "objects").is_some()
         && gamemaker_asset_dir(path, "rooms").is_some()
-        && gamemaker_asset_dir(path, "sprites").is_some()
+        && gamemaker_asset_dir(path, "sprites").is_some();
+    if !has_asset_dirs {
+        return false;
+    }
+    let has_yyp = fs::read_dir(path)
+        .ok()
+        .into_iter()
+        .flat_map(|entries| entries.flatten())
+        .any(|entry| {
+            entry
+                .path()
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("yyp"))
+        });
+    has_yyp || has_gamemaker_files(path, "gmx") || has_gamemaker_files(path, "yy")
 }
 
 fn gamemaker_asset_dir(root: &Path, kind: &str) -> Option<PathBuf> {
@@ -7625,6 +7799,7 @@ fn gamemaker_asset_dir(root: &Path, kind: &str) -> Option<PathBuf> {
         "rooms" => "Rooms",
         "sprites" => "Sprites",
         "backgrounds" => "Backgrounds",
+        "tilesets" => "Tilesets",
         other => other,
     };
     let assets = root.join("Assets").join(title);
@@ -7632,6 +7807,119 @@ fn gamemaker_asset_dir(root: &Path, kind: &str) -> Option<PathBuf> {
         return Some(assets);
     }
     None
+}
+
+fn has_gamemaker_files(root: &Path, extension: &str) -> bool {
+    ["sprites", "objects", "rooms"]
+        .iter()
+        .filter_map(|kind| gamemaker_asset_dir(root, kind))
+        .any(|dir| {
+            collect_recursive_files_by_extension(&dir, &[extension], &["rds"])
+                .map(|files| !files.is_empty())
+                .unwrap_or(false)
+        })
+}
+
+fn detect_gamemaker_project_format(effective_root: &Path, source_path: &Path) -> String {
+    let source_ext = source_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if source_ext == "yyp" || source_ext == "yy" {
+        return source_ext;
+    }
+    let has_yyp = fs::read_dir(effective_root)
+        .ok()
+        .into_iter()
+        .flat_map(|entries| entries.flatten())
+        .any(|entry| {
+            entry
+                .path()
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("yyp"))
+        });
+    if has_yyp || has_gamemaker_files(effective_root, "yy") {
+        "yyp".to_string()
+    } else if source_ext.is_empty() {
+        "gmx_folder".to_string()
+    } else {
+        source_ext
+    }
+}
+
+fn is_gamemaker_yy_project(root: &Path) -> bool {
+    detect_gamemaker_project_format(root, root) == "yyp"
+}
+
+fn gamemaker_json_name(value: &serde_json::Value) -> Option<String> {
+    json_string(value, &["%Name", "name", "Name"])
+}
+
+fn json_string(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        value
+            .get(*key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_string)
+    })
+}
+
+fn json_nested_name(value: &serde_json::Value, key: &str) -> Option<String> {
+    value.get(key).and_then(gamemaker_json_name)
+}
+
+fn json_bool(value: &serde_json::Value, keys: &[&str]) -> Option<bool> {
+    keys.iter().find_map(|key| match value.get(*key)? {
+        serde_json::Value::Bool(flag) => Some(*flag),
+        serde_json::Value::Number(number) => number.as_i64().map(|value| value != 0),
+        serde_json::Value::String(text) => match text.trim().to_ascii_lowercase().as_str() {
+            "true" | "1" | "-1" => Some(true),
+            "false" | "0" => Some(false),
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
+fn json_i32(value: &serde_json::Value, keys: &[&str]) -> Option<i32> {
+    keys.iter().find_map(|key| {
+        value.get(*key).and_then(|entry| match entry {
+            serde_json::Value::Number(number) => number.as_f64().map(|value| value.round() as i32),
+            serde_json::Value::String(text) => text
+                .trim()
+                .parse::<f32>()
+                .ok()
+                .map(|value| value.round() as i32),
+            _ => None,
+        })
+    })
+}
+
+fn json_u32(value: &serde_json::Value, keys: &[&str]) -> Option<u32> {
+    json_i32(value, keys).map(|value| value.max(0) as u32)
+}
+
+fn gamemaker_first_png_in_dir(dir: &Path) -> Option<PathBuf> {
+    let mut files = collect_recursive_files_by_extension(dir, &["png"], &["rds"]).ok()?;
+    files.sort();
+    files
+        .iter()
+        .find(|rel| rel.ends_with("_0.png"))
+        .cloned()
+        .or_else(|| files.into_iter().next())
+        .map(|rel| dir.join(PathBuf::from(rel.replace('/', "\\"))))
+}
+
+fn line_number_for_offset(content: &str, offset: usize) -> usize {
+    content[..offset.min(content.len())]
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count()
+        + 1
 }
 
 fn load_gamemaker_sprites(
@@ -7644,6 +7932,67 @@ fn load_gamemaker_sprites(
             gm_root.display()
         ))
     })?;
+    if is_gamemaker_yy_project(gm_root) {
+        let files = collect_recursive_files_by_extension(&sprites_dir, &["yy"], &["rds"])?;
+        for rel in files {
+            let path = sprites_dir.join(PathBuf::from(rel.replace('/', "\\")));
+            let content = read_text_lossy(&path)?;
+            let value: serde_json::Value = serde_json::from_str(&content).map_err(|error| {
+                LoadError(format!(
+                    "Nao foi possivel parsear sprite YY '{}': {}",
+                    path.display(),
+                    error
+                ))
+            })?;
+            let name = gamemaker_json_name(&value).unwrap_or_else(|| {
+                path.file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("sprite")
+                    .to_string()
+            });
+            let source_path = gamemaker_first_png_in_dir(path.parent().unwrap_or(&sprites_dir))
+                .ok_or_else(|| {
+                    LoadError(format!(
+                        "Sprite GameMaker YY '{}' sem PNG rastreavel no diretorio.",
+                        path.display()
+                    ))
+                })?;
+            let width = json_u32(&value, &["width", "Width"]).unwrap_or_else(|| {
+                image::image_dimensions(&source_path)
+                    .map(|dims| dims.0)
+                    .unwrap_or(32)
+            });
+            let height = json_u32(&value, &["height", "Height"]).unwrap_or_else(|| {
+                image::image_dimensions(&source_path)
+                    .map(|dims| dims.1)
+                    .unwrap_or(32)
+            });
+            let xorigin = json_i32(&value, &["xorigin", "originX"]).unwrap_or(0);
+            let yorigin = json_i32(&value, &["yorigin", "originY"]).unwrap_or(0);
+            let mask_left = json_i32(&value, &["bbox_left", "bboxLeft"]).unwrap_or(0);
+            let mask_top = json_i32(&value, &["bbox_top", "bboxTop"]).unwrap_or(0);
+            let mask_right = json_i32(&value, &["bbox_right", "bboxRight"])
+                .unwrap_or_else(|| width.saturating_sub(1) as i32);
+            let mask_bottom = json_i32(&value, &["bbox_bottom", "bboxBottom"])
+                .unwrap_or_else(|| height.saturating_sub(1) as i32);
+            sprites.insert(
+                name,
+                GameMakerSpriteResource {
+                    source_path,
+                    width,
+                    height,
+                    xorigin,
+                    yorigin,
+                    mask_left,
+                    mask_top,
+                    mask_right,
+                    mask_bottom,
+                },
+            );
+        }
+        return Ok(sprites);
+    }
+
     let files = collect_recursive_files_by_extension(&sprites_dir, &["gmx"], &["rds"])?;
     for rel in files {
         if !rel.ends_with(".sprite.gmx") {
@@ -7692,10 +8041,48 @@ fn load_gamemaker_sprites(
                 height,
                 xorigin,
                 yorigin,
+                mask_left: 0,
+                mask_top: 0,
+                mask_right: width.saturating_sub(1) as i32,
+                mask_bottom: height.saturating_sub(1) as i32,
             },
         );
     }
     Ok(sprites)
+}
+
+fn load_gamemaker_tilesets(
+    gm_root: &Path,
+) -> Result<HashMap<String, GameMakerTilesetResource>, LoadError> {
+    let mut tilesets = HashMap::new();
+    if !is_gamemaker_yy_project(gm_root) {
+        return Ok(tilesets);
+    }
+    let Some(tilesets_dir) = gamemaker_asset_dir(gm_root, "tilesets") else {
+        return Ok(tilesets);
+    };
+    let files = collect_recursive_files_by_extension(&tilesets_dir, &["yy"], &["rds"])?;
+    for rel in files {
+        let path = tilesets_dir.join(PathBuf::from(rel.replace('/', "\\")));
+        let content = read_text_lossy(&path)?;
+        let value: serde_json::Value = serde_json::from_str(&content).map_err(|error| {
+            LoadError(format!(
+                "Nao foi possivel parsear tileset YY '{}': {}",
+                path.display(),
+                error
+            ))
+        })?;
+        let name = gamemaker_json_name(&value).unwrap_or_else(|| {
+            path.file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("tileset")
+                .to_string()
+        });
+        if let Some(sprite_name) = json_nested_name(&value, "spriteId") {
+            tilesets.insert(name, GameMakerTilesetResource { sprite_name });
+        }
+    }
+    Ok(tilesets)
 }
 
 fn load_gamemaker_objects(
@@ -7708,6 +8095,42 @@ fn load_gamemaker_objects(
             gm_root.display()
         ))
     })?;
+    if is_gamemaker_yy_project(gm_root) {
+        let files = collect_recursive_files_by_extension(&objects_dir, &["yy"], &["rds"])?;
+        for rel in files {
+            let path = objects_dir.join(PathBuf::from(rel.replace('/', "\\")));
+            let content = read_text_lossy(&path)?;
+            let value: serde_json::Value = serde_json::from_str(&content).map_err(|error| {
+                LoadError(format!(
+                    "Nao foi possivel parsear objeto YY '{}': {}",
+                    path.display(),
+                    error
+                ))
+            })?;
+            let name = gamemaker_json_name(&value).unwrap_or_else(|| {
+                path.file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("object")
+                    .to_string()
+            });
+            let sprite_name = json_nested_name(&value, "spriteId")
+                .filter(|value| !value.eq_ignore_ascii_case("<undefined>") && !value.is_empty());
+            let solid = json_bool(&value, &["solid", "Solid"]).unwrap_or(false);
+            let events = load_gamemaker_yy_events(&path, &value)?;
+            objects.insert(
+                name.clone(),
+                GameMakerObjectResource {
+                    name,
+                    sprite_name,
+                    solid,
+                    source_path: path,
+                    events,
+                },
+            );
+        }
+        return Ok(objects);
+    }
+
     let files = collect_recursive_files_by_extension(&objects_dir, &["gmx"], &["rds"])?;
     for rel in files {
         if !rel.ends_with(".object.gmx") {
@@ -7724,7 +8147,7 @@ fn load_gamemaker_objects(
         let sprite_name = first_xml_tag_text(&content, "spriteName")
             .filter(|value| !value.eq_ignore_ascii_case("<undefined>") && !value.is_empty());
         let solid = first_xml_tag_text(&content, "solid").as_deref() == Some("-1");
-        let events = parse_gamemaker_events(&content);
+        let events = parse_gamemaker_events(&content, &path);
         objects.insert(
             name.clone(),
             GameMakerObjectResource {
@@ -7746,6 +8169,120 @@ fn load_gamemaker_primary_room(gm_root: &Path) -> Result<GameMakerRoomResource, 
             gm_root.display()
         ))
     })?;
+    if is_gamemaker_yy_project(gm_root) {
+        let mut rooms = collect_recursive_files_by_extension(&rooms_dir, &["yy"], &["rds"])?;
+        rooms.sort();
+        let rel = rooms.into_iter().next().ok_or_else(|| {
+            LoadError(format!(
+                "Projeto GameMaker invalido: nenhum '.yy' de room encontrado em '{}'.",
+                rooms_dir.display()
+            ))
+        })?;
+        let path = rooms_dir.join(PathBuf::from(rel.replace('/', "\\")));
+        let content = read_text_lossy(&path)?;
+        let value: serde_json::Value = serde_json::from_str(&content).map_err(|error| {
+            LoadError(format!(
+                "Nao foi possivel parsear room YY '{}': {}",
+                path.display(),
+                error
+            ))
+        })?;
+        let display_name = gamemaker_json_name(&value).unwrap_or_else(|| {
+            path.file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("room")
+                .to_string()
+        });
+        let width = value
+            .get("roomSettings")
+            .and_then(|settings| json_u32(settings, &["Width", "width"]))
+            .unwrap_or_else(|| json_u32(&value, &["width", "Width"]).unwrap_or(1000))
+            as i32;
+        let height = value
+            .get("roomSettings")
+            .and_then(|settings| json_u32(settings, &["Height", "height"]))
+            .unwrap_or_else(|| json_u32(&value, &["height", "Height"]).unwrap_or(750))
+            as i32;
+        let mut instances = Vec::new();
+        let mut tile_layers = Vec::new();
+        if let Some(layers) = value.get("layers").and_then(serde_json::Value::as_array) {
+            for layer in layers {
+                if let Some(layer_instances) =
+                    layer.get("instances").and_then(serde_json::Value::as_array)
+                {
+                    for instance in layer_instances {
+                        let Some(object_name) = json_nested_name(instance, "objectId") else {
+                            continue;
+                        };
+                        instances.push(GameMakerRoomInstance {
+                            object_name,
+                            name: json_string(instance, &["name", "%Name"])
+                                .unwrap_or_else(|| "instance".to_string()),
+                            x: json_i32(instance, &["x", "X"]).unwrap_or(0),
+                            y: json_i32(instance, &["y", "Y"]).unwrap_or(0),
+                            code: json_string(instance, &["code", "creationCode"]),
+                        });
+                    }
+                }
+                if let Some(tiles) = layer.get("tiles") {
+                    if let Some(tileset_name) = json_nested_name(layer, "tilesetId") {
+                        let map_width =
+                            json_u32(tiles, &["SerialiseWidth", "serializeWidth", "width"])
+                                .unwrap_or(0);
+                        let map_height =
+                            json_u32(tiles, &["SerialiseHeight", "serializeHeight", "height"])
+                                .unwrap_or(0);
+                        let cells = tiles
+                            .get("TileSerialiseData")
+                            .or_else(|| tiles.get("tileSerialiseData"))
+                            .and_then(serde_json::Value::as_array)
+                            .map(|values| {
+                                values
+                                    .iter()
+                                    .map(|value| value.as_u64().unwrap_or(0) as u32)
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default();
+                        if map_width > 0 && map_height > 0 {
+                            tile_layers.push(GameMakerTileLayer {
+                                name: json_string(layer, &["%Name", "name"])
+                                    .unwrap_or_else(|| "Tile Layer".to_string()),
+                                tileset_name,
+                                map_width,
+                                map_height,
+                                cells,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        let views = value
+            .get("views")
+            .and_then(serde_json::Value::as_array)
+            .map(|views| {
+                views
+                    .iter()
+                    .filter_map(|view| {
+                        Some(GameMakerRoomView {
+                            object_name: json_nested_name(view, "objectId")?,
+                            visible: json_bool(view, &["visible", "Visible"]).unwrap_or(false),
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        return Ok(GameMakerRoomResource {
+            display_name,
+            width,
+            height,
+            instances,
+            views,
+            backgrounds: Vec::new(),
+            tile_layers,
+        });
+    }
+
     let mut rooms = collect_recursive_files_by_extension(&rooms_dir, &["gmx"], &["rds"])?;
     rooms.retain(|rel| rel.ends_with(".room.gmx"));
     rooms.sort();
@@ -7824,6 +8361,7 @@ fn load_gamemaker_primary_room(gm_root: &Path) -> Result<GameMakerRoomResource, 
         instances,
         views,
         backgrounds,
+        tile_layers: Vec::new(),
     })
 }
 
@@ -7863,6 +8401,10 @@ fn load_gamemaker_backgrounds(
                 height,
                 xorigin: 0,
                 yorigin: 0,
+                mask_left: 0,
+                mask_top: 0,
+                mask_right: width.saturating_sub(1) as i32,
+                mask_bottom: height.saturating_sub(1) as i32,
             },
         );
     }
@@ -7895,8 +8437,12 @@ fn build_gamemaker_collision_map(
     let width = 40u32;
     let height = 28u32;
     let mut data = vec![0u8; (width * height) as usize];
-    let tile_w = wall_sprite.map(|sprite| sprite.width.max(8) / 8).unwrap_or(1);
-    let tile_h = wall_sprite.map(|sprite| sprite.height.max(8) / 8).unwrap_or(1);
+    let tile_w = wall_sprite
+        .map(|sprite| sprite.width.max(8) / 8)
+        .unwrap_or(1);
+    let tile_h = wall_sprite
+        .map(|sprite| sprite.height.max(8) / 8)
+        .unwrap_or(1);
 
     for instance in wall_instances {
         let md_x = gamemaker_coord_to_md_x(instance.x, room_width);
@@ -8044,7 +8590,134 @@ fn import_gamemaker_background_entity(
     }))
 }
 
-fn parse_gamemaker_events(content: &str) -> Vec<GameMakerEvent> {
+fn import_gamemaker_tile_layer_entities(
+    project_dir: &Path,
+    gm_root: &Path,
+    tile_layers: &[GameMakerTileLayer],
+    tilesets: &HashMap<String, GameMakerTilesetResource>,
+    sprites: &HashMap<String, GameMakerSpriteResource>,
+    entity_ids: &mut HashSet<String>,
+    asset_cache: &mut HashMap<PathBuf, String>,
+) -> Result<Vec<Entity>, LoadError> {
+    let mut entities = Vec::new();
+    for layer in tile_layers {
+        let Some(tileset) = tilesets.get(&layer.tileset_name) else {
+            continue;
+        };
+        let Some(sprite) = sprites.get(&tileset.sprite_name) else {
+            continue;
+        };
+        let (asset, _, _) = materialize_gamemaker_rgba_asset(
+            project_dir,
+            gm_root,
+            &sprite.source_path,
+            "tilesets",
+            "gamemaker",
+            asset_cache,
+            None,
+        )?;
+        let expected = (layer.map_width * layer.map_height) as usize;
+        let mut cells = layer.cells.clone();
+        cells.resize(expected, 0);
+        entities.push(Entity {
+            entity_id: unique_entity_id(entity_ids, &layer.name, "tilemap"),
+            display_name: Some(layer.name.clone()),
+            prefab: None,
+            transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+            components: Components {
+                tilemap: Some(TilemapComponent {
+                    tileset: asset,
+                    map_width: layer.map_width,
+                    map_height: layer.map_height,
+                    scroll_x: 0,
+                    scroll_y: 0,
+                    cells,
+                }),
+                ..Components::default()
+            },
+        });
+    }
+    Ok(entities)
+}
+
+fn load_gamemaker_yy_events(
+    object_path: &Path,
+    object_json: &serde_json::Value,
+) -> Result<Vec<GameMakerEvent>, LoadError> {
+    let parent = object_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut events = Vec::new();
+    let files = collect_recursive_files_by_extension(parent, &["gml"], &["rds"])?;
+    for rel in files {
+        let path = parent.join(PathBuf::from(rel.replace('/', "\\")));
+        let code = read_text_lossy(&path)?.trim().to_string();
+        if code.is_empty() {
+            continue;
+        }
+        events.push(GameMakerEvent {
+            label: gamemaker_yy_event_label_from_path(&path),
+            code,
+            source_path: path,
+            line_approx: 1,
+        });
+    }
+    if events.is_empty() {
+        if let Some(event_list) = object_json
+            .get("eventList")
+            .and_then(serde_json::Value::as_array)
+        {
+            for event in event_list {
+                let label = gamemaker_yy_event_label(event);
+                events.push(GameMakerEvent {
+                    label,
+                    code: String::new(),
+                    source_path: object_path.to_path_buf(),
+                    line_approx: 1,
+                });
+            }
+        }
+    }
+    events.sort_by(|left, right| left.label.cmp(&right.label));
+    Ok(events)
+}
+
+fn gamemaker_yy_event_label(event: &serde_json::Value) -> String {
+    let event_type = json_i32(event, &["eventType", "eventtype"]).unwrap_or(-1);
+    let event_num = json_i32(event, &["eventNum", "enumb"]).unwrap_or(0);
+    match event_type {
+        0 => "Create".to_string(),
+        2 => format!("Alarm {event_num}"),
+        3 => "Step".to_string(),
+        4 => format!(
+            "Collision {}",
+            json_nested_name(event, "collisionObjectId").unwrap_or_else(|| event_num.to_string())
+        ),
+        8 => "Draw".to_string(),
+        other => format!("Event {other}"),
+    }
+}
+
+fn gamemaker_yy_event_label_from_path(path: &Path) -> String {
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    let lowered = stem.to_ascii_lowercase();
+    if lowered.starts_with("create") {
+        "Create".to_string()
+    } else if lowered.starts_with("step") {
+        "Step".to_string()
+    } else if lowered.starts_with("draw") {
+        "Draw".to_string()
+    } else if let Some(rest) = stem.strip_prefix("Alarm_") {
+        format!("Alarm {rest}")
+    } else if let Some(rest) = stem.strip_prefix("Collision_") {
+        format!("Collision {rest}")
+    } else {
+        stem.replace('_', " ")
+    }
+}
+
+fn parse_gamemaker_events(content: &str, source_path: &Path) -> Vec<GameMakerEvent> {
     let mut events = Vec::new();
     let mut search_at = 0usize;
     while let Some(relative_start) = content[search_at..].find("<event") {
@@ -8070,7 +8743,12 @@ fn parse_gamemaker_events(content: &str) -> Vec<GameMakerEvent> {
             .trim()
             .to_string();
         if !code.is_empty() {
-            events.push(GameMakerEvent { label, code });
+            events.push(GameMakerEvent {
+                label,
+                code,
+                source_path: source_path.to_path_buf(),
+                line_approx: line_number_for_offset(content, start),
+            });
         }
         search_at = end;
     }
@@ -8117,17 +8795,37 @@ fn gamemaker_collision_component(
     let has_collision = object.solid
         || collision_name.contains("solid")
         || collision_name.contains("block")
-        || collision_name.contains("plat");
+        || collision_name.contains("plat")
+        || sprite.is_some();
     if !has_collision {
         return None;
     }
-    let width = sprite.map(|sprite| sprite.width).unwrap_or(32).max(1);
-    let height = sprite.map(|sprite| sprite.height).unwrap_or(32).max(1);
+    let width = sprite
+        .map(|sprite| {
+            (sprite.mask_right - sprite.mask_left + 1)
+                .max(1)
+                .try_into()
+                .unwrap_or(sprite.width)
+        })
+        .unwrap_or(32);
+    let height = sprite
+        .map(|sprite| {
+            (sprite.mask_bottom - sprite.mask_top + 1)
+                .max(1)
+                .try_into()
+                .unwrap_or(sprite.height)
+        })
+        .unwrap_or(32);
     Some(CollisionComponent {
         shape: "aabb".to_string(),
         width,
         height,
-        offset: None,
+        offset: sprite.and_then(|sprite| {
+            (sprite.mask_left != 0 || sprite.mask_top != 0).then_some(CollisionOffset {
+                x: sprite.mask_left,
+                y: sprite.mask_top,
+            })
+        }),
         solid: true,
         layer: Some(if collision_name.contains("player") {
             "player".to_string()
@@ -12893,6 +13591,214 @@ void tick_player(void) {\n\
         .expect("write gm room");
     }
 
+    fn write_gamemaker_yyp_fixture(root: &Path) {
+        fs::create_dir_all(root.join("sprites").join("spr_player")).expect("create yy sprite");
+        fs::create_dir_all(root.join("sprites").join("spr_wall")).expect("create yy wall sprite");
+        fs::create_dir_all(root.join("sprites").join("spr_tiles")).expect("create yy tile sprite");
+        fs::create_dir_all(root.join("objects").join("obj_player")).expect("create yy player");
+        fs::create_dir_all(root.join("objects").join("obj_wall")).expect("create yy wall");
+        fs::create_dir_all(root.join("objects").join("obj_enemy")).expect("create yy enemy");
+        fs::create_dir_all(root.join("rooms").join("rm_stage")).expect("create yy room");
+        fs::create_dir_all(root.join("tilesets").join("ts_solid")).expect("create yy tileset");
+
+        write_test_png(
+            &root
+                .join("sprites")
+                .join("spr_player")
+                .join("spr_player_0.png"),
+            24,
+            32,
+            [255, 196, 0, 255],
+        );
+        write_test_png(
+            &root.join("sprites").join("spr_wall").join("spr_wall_0.png"),
+            16,
+            16,
+            [64, 64, 64, 255],
+        );
+        write_test_png(
+            &root
+                .join("sprites")
+                .join("spr_tiles")
+                .join("spr_tiles_0.png"),
+            16,
+            16,
+            [96, 160, 96, 255],
+        );
+
+        fs::write(
+            root.join("ModernPlatform.yyp"),
+            r#"{
+  "resources": [
+    {"id": {"name": "spr_player", "path": "sprites/spr_player/spr_player.yy"}},
+    {"id": {"name": "spr_wall", "path": "sprites/spr_wall/spr_wall.yy"}},
+    {"id": {"name": "spr_tiles", "path": "sprites/spr_tiles/spr_tiles.yy"}},
+    {"id": {"name": "obj_player", "path": "objects/obj_player/obj_player.yy"}},
+    {"id": {"name": "obj_wall", "path": "objects/obj_wall/obj_wall.yy"}},
+    {"id": {"name": "obj_enemy", "path": "objects/obj_enemy/obj_enemy.yy"}},
+    {"id": {"name": "ts_solid", "path": "tilesets/ts_solid/ts_solid.yy"}},
+    {"id": {"name": "rm_stage", "path": "rooms/rm_stage/rm_stage.yy"}}
+  ]
+}"#,
+        )
+        .expect("write yyp");
+
+        fs::write(
+            root.join("sprites")
+                .join("spr_player")
+                .join("spr_player.yy"),
+            r#"{
+  "%Name": "spr_player",
+  "width": 24,
+  "height": 32,
+  "bbox_left": 2,
+  "bbox_top": 4,
+  "bbox_right": 21,
+  "bbox_bottom": 31,
+  "xorigin": 12,
+  "yorigin": 28
+}"#,
+        )
+        .expect("write player yy");
+        fs::write(
+            root.join("sprites").join("spr_wall").join("spr_wall.yy"),
+            r#"{
+  "%Name": "spr_wall",
+  "width": 16,
+  "height": 16,
+  "bbox_left": 0,
+  "bbox_top": 0,
+  "bbox_right": 15,
+  "bbox_bottom": 15
+}"#,
+        )
+        .expect("write wall yy");
+        fs::write(
+            root.join("sprites").join("spr_tiles").join("spr_tiles.yy"),
+            r#"{"%Name": "spr_tiles", "width": 16, "height": 16}"#,
+        )
+        .expect("write tiles sprite yy");
+        fs::write(
+            root.join("tilesets").join("ts_solid").join("ts_solid.yy"),
+            r#"{
+  "%Name": "ts_solid",
+  "spriteId": {"name": "spr_tiles", "path": "sprites/spr_tiles/spr_tiles.yy"},
+  "tileWidth": 8,
+  "tileHeight": 8
+}"#,
+        )
+        .expect("write tileset yy");
+
+        fs::write(
+            root.join("objects").join("obj_player").join("obj_player.yy"),
+            r#"{
+  "%Name": "obj_player",
+  "spriteId": {"name": "spr_player", "path": "sprites/spr_player/spr_player.yy"},
+  "solid": false,
+  "eventList": [
+    {"eventType": 0, "eventNum": 0},
+    {"eventType": 3, "eventNum": 0},
+    {"eventType": 2, "eventNum": 0},
+    {"eventType": 4, "eventNum": 0, "collisionObjectId": {"name": "obj_enemy", "path": "objects/obj_enemy/obj_enemy.yy"}},
+    {"eventType": 8, "eventNum": 0}
+  ]
+}"#,
+        )
+        .expect("write player object yy");
+        fs::write(
+            root.join("objects").join("obj_player").join("Create_0.gml"),
+            "moving_speed = 4; gravity_force = 1; jumping_speed = 9; alarm[0] = 45; hp = 3;",
+        )
+        .expect("write create gml");
+        fs::write(
+            root.join("objects").join("obj_player").join("Step_0.gml"),
+            [
+                "var hmove = keyboard_check(vk_right) - keyboard_check(vk_left);",
+                "if (keyboard_check_pressed(vk_space) && !place_free(x, y + 1)) { vsp = -jumping_speed; }",
+                "if (!place_free(x + hmove, y)) { hmove = 0; }",
+                "if (place_meeting(x, y + 1, obj_wall)) { vsp = 0; }",
+                "sprite_index = spr_player;",
+                "image_xscale = -1;",
+                "image_speed = 0.25;",
+                "instance_create(x + 12, y, obj_enemy);",
+                "if (hp <= 0) { instance_destroy(); }",
+                "room_goto_next();",
+            ]
+            .join("\n"),
+        )
+        .expect("write step gml");
+        fs::write(
+            root.join("objects").join("obj_player").join("Alarm_0.gml"),
+            "instance_create(x, y - 8, obj_enemy);",
+        )
+        .expect("write alarm gml");
+        fs::write(
+            root.join("objects")
+                .join("obj_player")
+                .join("Collision_obj_enemy.gml"),
+            "if (place_meeting(x, y, obj_enemy)) { instance_destroy(); }",
+        )
+        .expect("write collision gml");
+        fs::write(
+            root.join("objects").join("obj_player").join("Draw_0.gml"),
+            "draw_self();",
+        )
+        .expect("write draw gml");
+
+        fs::write(
+            root.join("objects").join("obj_wall").join("obj_wall.yy"),
+            r#"{
+  "%Name": "obj_wall",
+  "spriteId": {"name": "spr_wall", "path": "sprites/spr_wall/spr_wall.yy"},
+  "solid": true,
+  "eventList": []
+}"#,
+        )
+        .expect("write wall object yy");
+        fs::write(
+            root.join("objects").join("obj_enemy").join("obj_enemy.yy"),
+            r#"{
+  "%Name": "obj_enemy",
+  "spriteId": {"name": "spr_player", "path": "sprites/spr_player/spr_player.yy"},
+  "solid": false,
+  "eventList": []
+}"#,
+        )
+        .expect("write enemy object yy");
+
+        fs::write(
+            root.join("rooms").join("rm_stage").join("rm_stage.yy"),
+            r#"{
+  "%Name": "rm_stage",
+  "roomSettings": {"Width": 640, "Height": 224},
+  "views": [
+    {"visible": true, "objectId": {"name": "obj_player", "path": "objects/obj_player/obj_player.yy"}}
+  ],
+  "layers": [
+    {
+      "$GMRInstanceLayer": "",
+      "%Name": "Instances",
+      "instances": [
+        {"name": "inst_player", "objectId": {"name": "obj_player", "path": "objects/obj_player/obj_player.yy"}, "x": 48, "y": 120},
+        {"name": "inst_wall", "objectId": {"name": "obj_wall", "path": "objects/obj_wall/obj_wall.yy"}, "x": 0, "y": 200}
+      ]
+    },
+    {
+      "$GMRTileLayer": "",
+      "%Name": "GroundTiles",
+      "tilesetId": {"name": "ts_solid", "path": "tilesets/ts_solid/ts_solid.yy"},
+      "tiles": {
+        "SerialiseWidth": 4,
+        "SerialiseHeight": 2,
+        "TileSerialiseData": [1, 1, 1, 1, 0, 0, 1, 1]
+      }
+    }
+  ]
+}"#,
+        )
+        .expect("write room yy");
+    }
+
     fn write_mugen_character_fixture(root: &Path) {
         fs::create_dir_all(root.join("work").join("hero_sff").join("sd"))
             .expect("create mugen character work dir");
@@ -14437,8 +15343,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
 
         assert_eq!(report.imported_scenes, 1);
         assert!(report.skipped_sources.iter().any(|entry| {
-            entry.contains("GameMaker import:")
-                && entry.contains("nodes gerados")
+            entry.contains("GameMaker import:") && entry.contains("nodes gerados")
         }));
         let player = scene
             .entities
@@ -14470,14 +15375,12 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                 .map(|semantics| semantics.confidence.as_str()),
             Some("native_subset")
         );
-        assert!(
-            logic
-                .imported_semantics
-                .as_ref()
-                .is_some_and(|semantics| semantics
-                    .audit_flags
-                    .contains(&"gml_native_subset".to_string()))
-        );
+        assert!(logic
+            .imported_semantics
+            .as_ref()
+            .is_some_and(|semantics| semantics
+                .audit_flags
+                .contains(&"gml_native_subset".to_string())));
         assert_eq!(
             logic
                 .imported_semantics
@@ -14505,18 +15408,193 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
     }
 
     #[test]
+    fn import_gamemaker_yyp_project_creates_scene_with_yy_assets_nodes_and_tile_layer() {
+        let donor_root = temp_dir("gamemaker-yyp-import-root");
+        let project_dir = temp_dir("gamemaker-yyp-import-project");
+        create_project_skeleton(&project_dir, "Imported Modern GameMaker", "megadrive")
+            .expect("create project skeleton");
+        write_gamemaker_yyp_fixture(&donor_root);
+
+        let yyp = donor_root.join("ModernPlatform.yyp");
+        let report = import_external_project(&project_dir, "gamemaker", &yyp)
+            .expect("import gamemaker yyp project");
+        let scene =
+            load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load imported gamemaker scene");
+
+        assert_eq!(report.imported_scenes, 1);
+        assert!(report.skipped_sources.iter().any(|entry| {
+            entry.contains("GameMaker import:")
+                && entry.contains("nodes gerados")
+                && entry.contains("formato=yyp")
+        }));
+        assert!(scene.entities.iter().any(|entity| {
+            entity.components.tilemap.as_ref().is_some_and(|tilemap| {
+                tilemap
+                    .tileset
+                    .ends_with("gamemaker_sprites_spr_tiles_spr_tiles_0.png")
+                    && tilemap.map_width == 4
+                    && tilemap.map_height == 2
+                    && tilemap.cells == vec![1, 1, 1, 1, 0, 0, 1, 1]
+            })
+        }));
+        assert!(scene
+            .layers
+            .as_ref()
+            .is_some_and(|layers| layers.iter().any(|layer| layer.kind == "tile")));
+        assert!(scene.collision_map.as_ref().is_some_and(|map| {
+            map.width == 40 && map.height == 28 && map.data.iter().any(|cell| *cell == 1)
+        }));
+
+        let player = scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "inst_player")
+            .expect("player instance entity");
+        assert!(player.components.sprite.as_ref().is_some_and(|sprite| {
+            sprite.asset == "assets/sprites/gamemaker_sprites_spr_player_spr_player_0.png"
+                && sprite.frame_width == 24
+                && sprite.frame_height == 32
+        }));
+        assert!(player
+            .components
+            .collision
+            .as_ref()
+            .is_some_and(|collision| {
+                collision.width == 20
+                    && collision.height == 28
+                    && collision
+                        .offset
+                        .as_ref()
+                        .is_some_and(|offset| offset.x == 2 && offset.y == 4)
+            }));
+        let logic = player.components.logic.as_ref().expect("logic");
+        assert_eq!(logic.graph_origin.as_deref(), Some("gamemaker_yy_native"));
+        assert!(logic.external_source_refs.iter().any(|path| {
+            path.ends_with("objects/obj_player/Step_0.gml")
+                || path.ends_with("objects\\obj_player\\Step_0.gml")
+        }));
+        assert_eq!(
+            logic
+                .imported_semantics
+                .as_ref()
+                .map(|semantics| semantics.source.as_str()),
+            Some("gamemaker_yy")
+        );
+
+        let graph = fs::read_to_string(
+            project_dir
+                .join("graphs")
+                .join("gamemaker_inst_player.json"),
+        )
+        .expect("read graph");
+        for expected in [
+            "\"type\":\"condition_overlap\"",
+            "\"type\":\"timer\"",
+            "\"type\":\"set_animation_state\"",
+            "\"type\":\"spawn_entity\"",
+            "\"type\":\"destroy_entity\"",
+            "\"type\":\"load_scene\"",
+        ] {
+            assert!(
+                graph.contains(expected),
+                "graph missing {expected}: {graph}"
+            );
+        }
+
+        let second = import_external_project(&project_dir, "gamemaker", &yyp)
+            .expect("reimport gamemaker yyp project");
+        let reopened =
+            load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("reload imported gamemaker scene");
+        assert_eq!(second.imported_scenes, 1);
+        assert_eq!(reopened.entities.len(), scene.entities.len());
+        assert_eq!(
+            fs::read_to_string(
+                project_dir
+                    .join("graphs")
+                    .join("gamemaker_inst_player.json")
+            )
+            .expect("read graph after reimport"),
+            graph,
+            "reimport should keep generated graph stable"
+        );
+
+        let _ = fs::remove_dir_all(project_dir);
+        let _ = fs::remove_dir_all(donor_root);
+    }
+
+    #[test]
+    fn import_gamemaker_project_gmx_file_detects_legacy_project_root() {
+        let donor_root = temp_dir("gamemaker-gmx-file-root");
+        let project_dir = temp_dir("gamemaker-gmx-file-project");
+        create_project_skeleton(&project_dir, "Imported GMX File", "megadrive")
+            .expect("create project skeleton");
+        write_gamemaker_gmx_fixture(&donor_root);
+
+        let project_gmx = donor_root.join("Platformer.project.gmx");
+        let report = import_external_project(&project_dir, "gamemaker", &project_gmx)
+            .expect("import gamemaker project gmx file");
+        let scene = load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load scene");
+
+        assert_eq!(report.imported_scenes, 1);
+        assert!(report
+            .skipped_sources
+            .iter()
+            .any(|entry| entry.contains("formato=gmx")));
+        assert!(scene
+            .entities
+            .iter()
+            .any(|entity| entity.entity_id == "inst_player"));
+
+        let _ = fs::remove_dir_all(project_dir);
+        let _ = fs::remove_dir_all(donor_root);
+    }
+
+    #[test]
+    fn import_gamemaker_room_yy_path_detects_modern_project_root() {
+        let donor_root = temp_dir("gamemaker-yy-path-root");
+        let project_dir = temp_dir("gamemaker-yy-path-project");
+        create_project_skeleton(&project_dir, "Imported Room YY", "megadrive")
+            .expect("create project skeleton");
+        write_gamemaker_yyp_fixture(&donor_root);
+
+        let room_yy = donor_root
+            .join("rooms")
+            .join("rm_stage")
+            .join("rm_stage.yy");
+        let report = import_external_project(&project_dir, "gamemaker", &room_yy)
+            .expect("import gamemaker room yy path");
+        let scene = load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load scene");
+
+        assert_eq!(report.imported_scenes, 1);
+        assert!(scene
+            .entities
+            .iter()
+            .any(|entity| entity.entity_id == "inst_player"));
+        assert!(scene
+            .entities
+            .iter()
+            .any(|entity| entity.components.tilemap.is_some()));
+
+        let _ = fs::remove_dir_all(project_dir);
+        let _ = fs::remove_dir_all(donor_root);
+    }
+
+    #[test]
     fn gamemaker_import_summary_reports_generated_nodes() {
         let donor_root = temp_dir("gamemaker-summary-root");
         let project_dir = temp_dir("gamemaker-summary-project");
         create_project_skeleton(&project_dir, "Summary GameMaker", "megadrive")
             .expect("create project skeleton");
         write_gamemaker_gmx_fixture(&donor_root);
-        let report = import_external_project(&project_dir, "gamemaker", &donor_root)
-            .expect("import");
-        assert!(report.skipped_sources.iter().any(|entry| {
-            entry.contains("nodes gerados") && entry.contains("grafo nativo")
-        }));
-        let graph_path = project_dir.join("graphs").join("gamemaker_inst_player.json");
+        let report =
+            import_external_project(&project_dir, "gamemaker", &donor_root).expect("import");
+        assert!(report
+            .skipped_sources
+            .iter()
+            .any(|entry| { entry.contains("nodes gerados") && entry.contains("grafo nativo") }));
+        let graph_path = project_dir
+            .join("graphs")
+            .join("gamemaker_inst_player.json");
         assert!(graph_path.is_file(), "graph asset must be persisted");
         let _ = fs::remove_dir_all(project_dir);
         let _ = fs::remove_dir_all(donor_root);

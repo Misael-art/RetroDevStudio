@@ -2,6 +2,7 @@
 **Ultima Atualizacao:** 2026-05-22 (integracao full-product-cohesion)
 * **Integrado (artstudio M):** slots canonicos seq_idle..seq_attack, pplyToScene E2E, vitest threads, mockReset nos testes.
 **Ultima Atualizacao:** 2026-05-20 (rodada 51 - SNES no-code parity hardening)
+**Ultima Atualizacao:** 2026-05-20 (rodada 48 - GameMaker YY/GML subset experimental)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -73,6 +74,15 @@
   - **Status honesto:** GameMaker e command.dat permanecem **Experimental**; SGDK/Node Engine nao recebem promocao Stable nesta consolidacao.
 
 * **O que acabou de acontecer (2026-05-19 rodada 47 - branch `codex/compatibility-harness-gamemaker-vertical`, integrado em main via PR #8):**
+* **O que acabou de acontecer (2026-05-20 rodada 48 - branch `codex/gamemaker-modern-gml-runtime-d`):**
+  - **GameMaker moderno ainda Experimental:** a frente GameMaker avancou de vertical experimental para subset amplo funcional/auditavel, mas permanece **Experimental/importavel** e nao Stable geral.
+  - **Formatos detectados:** `import_gamemaker_project` cobre `.gmx` arquivo/root, `.gmz`, `.gmez`, `.yyp` e `.yy`, preservando GMX/GMZ/GMEZ existentes e adicionando projeto moderno YY/YYP.
+  - **YY/YYP importado:** sprites, objetos, rooms, instances, views/cameras, tile layers, collision masks e eventos Create/Step/Draw/Collision/Alarm entram no modelo UGDM com refs de fonte, tilemap entity, collision_map e grafo persistido.
+  - **GML -> nodes ampliado:** `gml_to_nodes.rs` converte input teclado/gamepad basico, movimento horizontal, pulo/gravidade, colisao por `place_free`/`place_meeting`, `sprite_index`, `image_xscale`, `image_speed`, `alarm[]`, `instance_create`, `instance_destroy`, room transition simples e variaveis para nodes oficiais (`condition_overlap`, `set_animation_state`, `timer`, `spawn_entity`, `destroy_entity`, `load_scene`, `var_set`, etc.).
+  - **Bridges auditaveis:** scripts complexos, shaders, surfaces, ds_* complexos, physics Box2D, particulas e extensoes nativas continuam bridges estruturadas com arquivo fonte, linha aproximada, motivo, impacto e sugestao; bridges nao contam como conversao nativa completa.
+  - **Harness host-local:** `gamemaker_vertical_compatibility_harness_basic_platform` continua exigindo SGDK oficial, ROM real, Libretro real e `non_black_pixels > 0`; nesta rodada ele tambem procura `F:\Projects\Engine Template\Game Maker\Basic_platform_game_example.gmez` quando `F:\Projects\Game Maker\Basic_platform_game_example.gmez` nao existe. Nao havia `.yyp` em `F:\Projects\Game Maker` neste host.
+
+* **O que acabou de acontecer (2026-05-19 rodada 47 - branch `codex/compatibility-harness-gamemaker-vertical`):**
   - **Harness canonico:** `src-tauri/src/core/compatibility_harness.rs` executa matriz auditavel (import, nodes, gaps, SGDK, ROM, Libretro, `non_black_pixels`, `fake_toolchain_used`) e grava `src-tauri/target-test/validation/gamemaker-vertical/gamemaker-basic-platform-report.{json,md}`.
   - **GML -> nodes oficiais (subset):** `src-tauri/src/core/gml_to_nodes.rs` converte `oPlayer` (input, movimento, pulo, gravidade, animacao, camera) para grafo nativo com auto-layout por sistema; GML generico permanece bridge estruturada com gaps explicitos (`place_free`, `repeat`, `sprite_index`, etc.).
   - **Import GameMaker real endurecido:** `import_gamemaker_project` agrega `oWall` em `collision_map`, materializa sprites alinhados a 8px, limita sprites MD ao player + background reduzido (budget), persiste `graphs/gamemaker_<entity>.json` e mantem metadados de origem.
