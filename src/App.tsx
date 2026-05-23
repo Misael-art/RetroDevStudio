@@ -408,21 +408,28 @@ function WorkspaceRailButton({
   return (
     <button
       type="button"
+      aria-label={`${label}: ${title}`}
       title={title}
       data-testid={testId}
       onClick={onClick}
-      className={`group flex w-full flex-col items-center gap-1 rounded-2xl border px-2 py-2 text-center transition-colors ${
+      className={`group flex w-full shrink-0 flex-col items-center gap-1 rounded-2xl border px-2 py-1.5 text-center transition-colors ${
         active
           ? activeTone
           : "border-transparent text-[#7f849c] hover:border-[#313244] hover:bg-[#11111b] hover:text-[#e5e7eb]"
       }`}
     >
-      <span className="rounded-xl border border-current/20 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]">
+      <span
+        aria-hidden="true"
+        className="rounded-xl border border-current/20 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]"
+      >
         {icon}
       </span>
-      <span className="text-[10px] font-semibold text-current">{label}</span>
+      <span className="sr-only">{label}</span>
       {badge ? (
-        <span className="text-[8px] font-semibold uppercase tracking-[0.18em] text-[#fab387]">
+        <span
+          aria-hidden="true"
+          className="text-[8px] font-semibold uppercase tracking-[0.18em] text-[#fab387]"
+        >
           {badge}
         </span>
       ) : null}
@@ -483,6 +490,7 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
     <section
       data-testid="workspace-guide"
       data-expanded={expanded ? "true" : "false"}
+      title={`${guide.title} — ${guide.summary}`}
       className={`mx-4 mt-2 rounded-xl border border-[#313244] bg-[linear-gradient(135deg,#0b1020,#111827_55%,#0f172a)] px-3 shadow-[0_12px_24px_rgba(0,0,0,0.16)] ${
         expanded ? "py-2.5" : "py-1.5"
       }`}
@@ -492,7 +500,10 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
           <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#89b4fa]">
             {guide.eyebrow}
           </p>
-          <h2 className={expanded ? "mt-1 text-sm font-semibold text-[#e2e8f0]" : "mt-0.5 truncate text-xs font-semibold text-[#e2e8f0]"}>
+          <h2
+            title={guide.title}
+            className={expanded ? "mt-1 text-sm font-semibold text-[#e2e8f0]" : "mt-0.5 truncate text-xs font-semibold text-[#e2e8f0]"}
+          >
             {guide.title}
           </h2>
           {expanded ? (
@@ -503,6 +514,7 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
               {guide.checkpoints.map((checkpoint) => (
                 <span
                   key={checkpoint}
+                  title={checkpoint}
                   className="inline-flex items-center rounded-full border border-[#313244] bg-black/15 px-2 py-1 text-[10px] font-medium text-[#bac2de]"
                 >
                   {checkpoint}
@@ -708,6 +720,7 @@ function SgdkImportSummaryCard({ summary }: { summary: SgdkImportSummary }) {
   return (
     <section
       data-testid="sgdk-import-summary"
+      title={`Resumo SGDK Logic — ${formatSgdkImportSummaryKind(summary)}`}
       className="mx-3 mt-3 rounded border border-[#89b4fa]/30 bg-[#0b1020] p-3 text-[10px] text-[#94a3b8]"
     >
       <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
@@ -4103,7 +4116,7 @@ export default function App() {
           data-testid="workspace-activity-bar"
           className="flex w-[56px] shrink-0 flex-col border-r border-[#27272a] bg-[#09090b]"
         >
-          <div className="flex flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto px-1.5 py-3">
+          <div className="flex flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-1.5 py-3">
             {WORKSPACE_GROUPS.map((group) => {
               const groupItems = WORKSPACE_ITEMS.filter((workspace) => workspace.group === group.id);
               return (
@@ -4118,7 +4131,7 @@ export default function App() {
                   >
                     {group.label}
                   </p>
-                  <div className="mt-1 flex flex-col items-center gap-2">
+                  <div className="mt-1 flex flex-col items-center gap-2.5">
                     {groupItems.map((workspace) => (
                       <WorkspaceRailButton
                         key={workspace.id}

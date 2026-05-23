@@ -1,6 +1,6 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Status:** ENTRADA CANONICA
-**Ultima Atualizacao:** 2026-05-22 (integracao full-product-cohesion concluida — HEAD `ee5618f`, 13 branches)
+**Ultima Atualizacao:** 2026-05-22 (integracao full-product-cohesion — 13 branches; ver HEAD remoto da branch)
 
 ## ATENCAO PARA AGENTES DE IA
 
@@ -12,7 +12,7 @@
 | `docs/06_AI_MEMORY_BANK_WAVE_A_R.md` | Historico arquivado das waves A-R |
 
 **Fluxo canonico:** leia este arquivo primeiro e siga imediatamente para `docs/06_CURRENT_WAVE_AI_BANK.md`.
-**Atualizacao ativa mais recente (integracao concluida):** branch `codex/full-product-cohesion-integration` (`ee5618f`) consolida 13 branches validadas (cohesion, UI redesign, oracle H, diagnostics L, runtime setup J, ArtStudio M, SNES parity G, GameMaker D, MUGEN F, OpenBOR H, SGDK real proof, semantic nodegraph, logic-truth QA). Gates locais: baseline **350/350** Vitest (forks), **382** testes Rust lib, builds debug/portable/msi OK. Pendente no host integrador: `preflight` (Edge WebDriver), `validate-upstream` (SGDK em `toolchains/sgdk/`), QA RC E2E. Godot excluido. Sem promocao SGDK/Node Engine Stable institucional nesta entrega.
+**Atualizacao ativa mais recente (promocao governada):** branch `codex/full-product-cohesion-integration` integra **13 branches** validadas. Referencias: consolidacao tecnica ate `ee5618f`; documentacao inicial `b31db0d`; commits de promocao posteriores no **HEAD remoto** (consultar `origin/codex/full-product-cohesion-integration`). CI remoto em `b31db0d`: `validate` + `desktop-smoke` **success**. Host local com junction `toolchains/sgdk` + `toolchains/webdriver`: `preflight` **Ready: SIM**, `validate-upstream` **success**. `qa-rc` local rerodando apos hardening de resize WebDriver + oraculo visual (truncamento em topbar/guide/rail). Baseline pos-promocao: **350/350** Vitest, clippy verde. Merge/readiness em `main` pendem PR + `release:readiness:promotion` no destino. Godot excluido. Sem promocao SGDK/Node Engine Stable institucional.
 
 **Atualizacao ativa anterior:** em `2026-05-20 (rodada 50)`, a branch `codex/product-ui-workspace-redesign` fechou o **bloco H** do QA RC com asserts automaticos em `scripts/e2e-tauri-build-run.mjs` e **12 screenshots** (`H-ui-layout-*`) para 1366x768, 1920x1080 e 2560x1080 sobre Scene/Logic/Game/Debug. E2E: `clickByTestId`, retorno a Scene antes do botao Objeto->Art pos-Logic (Inspector desmontado com `showRight=false`), espera do side rail do NodeGraph apos lazy-load, timeout de arranque do driver em `qa-rc`, janela 1920 no onboarding RC. Topbar: scroll horizontal no bloco central. Gates: `check:tree`, `lint`, `tsc`, `npm test` **322/322**, `cargo clippy`, `cargo test --lib`, `preflight:sgdk-e2e`, `validate-upstream-windows.ps1 -SkipRustTests`, `build:debug`/`portable`/`msi`, QA RC A-H verde (`qa-rc-2026-05-20T07-45-07-583Z-*`). UI hardening **SIM para a fatia H**; promocoes SGDK/Node Engine inalteradas (**sem** promocao Stable institucional).
 

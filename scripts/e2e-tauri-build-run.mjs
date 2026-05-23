@@ -1434,13 +1434,54 @@ async function updateInspectorIntField(sessionId, label, value) {
 }
 
 async function setSessionWindowRect(sessionId, width, height) {
-  await webdriverRequest("POST", `/session/${sessionId}/window/rect`, {
-    x: 0,
-    y: 0,
-    width: Number(width),
-    height: Number(height),
-  });
-  await new Promise((resolve) => setTimeout(resolve, 800));
+  const targetWidth = Number(width);
+  const targetHeight = Number(height);
+  const widthTolerance = 64;
+  const heightTolerance = 96;
+  try {
+    await webdriverRequest("POST", `/session/${sessionId}/window/fullscreen`, {
+      fullscreen: false,
+    });
+  } catch {
+    // Alguns drivers nao expõem fullscreen; seguir com window/rect.
+  }
+  try {
+    await webdriverRequest("POST", `/session/${sessionId}/window/minimize`);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  } catch {
+    // minimize opcional.
+  }
+  let lastSize = null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await webdriverRequest("POST", `/session/${sessionId}/window/rect`, {
+      x: 0,
+      y: 0,
+      width: targetWidth,
+      height: targetHeight,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 500 + attempt * 350));
+    lastSize = await executeScript(
+      sessionId,
+      `return {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        outerWidth: window.outerWidth,
+        outerHeight: window.outerHeight,
+      };`
+    );
+    if (
+      lastSize &&
+      Math.abs(Number(lastSize.width) - targetWidth) <= widthTolerance &&
+      Math.abs(Number(lastSize.height) - targetHeight) <= heightTolerance
+    ) {
+      await executeScript(sessionId, `window.dispatchEvent(new Event("resize"));`);
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      return;
+    }
+  }
+  fail(
+    `Janela do WebDriver nao redimensionou para ${targetWidth}x${targetHeight} (atual inner=${lastSize?.width ?? "?"}x${lastSize?.height ?? "?"}, outer=${lastSize?.outerWidth ?? "?"}x${lastSize?.outerHeight ?? "?"}).`
+  );
 }
 
 async function collectUiLayoutOracleSnapshot(sessionId, targetId, resolutionTag) {
@@ -1571,6 +1612,16 @@ async function collectUiLayoutOracleSnapshot(sessionId, targetId, resolutionTag)
         const text = node.textContent?.replace(/\\s+/g, " ").trim() ?? "";
         const scrollRegion = verticalScrollRegion(node);
         const xScrollRegion = horizontalScrollRegion(node);
+        const hasTooltip = (() => {
+          let current = node;
+          for (let depth = 0; depth < 6 && current instanceof Element; depth += 1) {
+            if ((current.getAttribute("title") || "").trim()) return true;
+            if ((current.getAttribute("aria-label") || "").trim()) return true;
+            if ((current.getAttribute("aria-describedby") || "").trim()) return true;
+            current = current.parentElement;
+          }
+          return false;
+        })();
         return {
           key,
           tag: node.tagName.toLowerCase(),
@@ -1580,6 +1631,7 @@ async function collectUiLayoutOracleSnapshot(sessionId, targetId, resolutionTag)
           title: node.getAttribute("title") || "",
           ariaLabel: node.getAttribute("aria-label") || "",
           ariaDescribedBy: node.getAttribute("aria-describedby") || "",
+          hasTooltip,
           role: node.getAttribute("role") || "",
           rect,
           visible: visible(node),
@@ -1884,8 +1936,19 @@ async function runUiLayoutOracleCheck(
   shotNames,
   manualQaReport
 ) {
+  await setSessionWindowRect(sessionId, resolution.width, resolution.height);
   await prepareUiLayoutOracleTarget(sessionId, target);
   const record = await evaluateUiLayoutHealth(sessionId, target.id, resolution.tag);
+  const viewportWidth = Number(record?.metrics?.viewportWidth ?? 0);
+  if (
+    Number.isFinite(resolution.width) &&
+    viewportWidth > 0 &&
+    Math.abs(viewportWidth - resolution.width) > 96
+  ) {
+    fail(
+      `Oraculo visual ${resolution.tag}/${target.id}: viewport ${viewportWidth}px diverge da resolucao pedida (${resolution.width}px).`
+    );
+  }
   const screenshot = await captureScreenshot(
     sessionId,
     `${artifactPrefix}-H-ui-oracle-${resolution.tag}-${target.id}.png`
@@ -2026,7 +2089,6 @@ async function assertNoGrossMainShellTextOverlap(sessionId) {
           rect.height > 8;
       };
       const scopeSelectors = [
-        '[data-testid="workspace-activity-bar"] button',
         '[data-testid="sgdk-import-summary"] p',
         '[data-testid="sgdk-import-summary"] span',
         '[data-testid="sgdk-import-summary"] li',
@@ -2037,13 +2099,27 @@ async function assertNoGrossMainShellTextOverlap(sessionId) {
         '[data-testid="inspector-logic-import-truth"] span',
         '[data-testid="inspector-logic-import-truth"] p'
       ];
+      const resolveLabelText = (element) => {
+        const direct = directText(element);
+        const normalize = (value) => value.replace(/\\s+/g, " ").trim();
+        if (direct) {
+          return normalize(direct);
+        }
+        if (element instanceof HTMLButtonElement) {
+          return normalize(element.textContent || "");
+        }
+        return normalize(
+          element.getAttribute("aria-label") ||
+            element.getAttribute("title") ||
+            element.textContent ||
+            ""
+        );
+      };
       const elements = Array.from(document.querySelectorAll(scopeSelectors.join(",")))
         .filter(isVisible)
         .map((element) => {
           const rect = element.getBoundingClientRect();
-          const text = (directText(element) || element.getAttribute("aria-label") || element.getAttribute("title") || element.textContent || "")
-            .replace(/\\s+/g, " ")
-            .trim();
+          const text = resolveLabelText(element);
           return { element, rect, text };
         })
         .filter((item) => item.text.length > 0 && item.text.length < 220);

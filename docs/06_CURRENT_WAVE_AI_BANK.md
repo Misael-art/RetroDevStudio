@@ -20,13 +20,15 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
-* **O que acabou de acontecer (2026-05-22 - integracao `codex/full-product-cohesion-integration`, HEAD `ee5618f`):**
+* **O que acabou de acontecer (2026-05-22 - integracao `codex/full-product-cohesion-integration`):**
   - **13 branches integradas** na ordem pedida: `project-cohesion-full-build`, `product-ui-workspace-redesign`, `ui-layout-visual-oracle-k`, `actionable-diagnostics-l`, `clean-machine-runtime-setup-j`, `artstudio-production-vertical-m`, `snes-pvsneslib-parity-g`, `gamemaker-modern-gml-runtime-d`, `mugen-ikemen-fighting-import-f`, `openbor-beatemup-import-h`, `sgdk-real-proof-integration`, `sgdk-semantic-nodegraph-delivery`, `sgdk-logic-truth-product-qa`.
   - **Correcoes pos-merge:** marcadores `<<<<<<<` removidos; `App.tsx` unifica `workspaceLayout` + `sgdkLogicDiagnostics` + guia excluindo Art/RetroFX; `NodeGraphEditor.tsx` da trilha logic-truth; `build_orch.rs`/`project_mgr.rs` com campos merge faltantes; Vitest `pool=forks` + `maxWorkers=1`; emulador volta a logar Runtime Setup no console.
-  - **Gates verdes locais:** `check:tree`, `lint`, `tsc`, `npm test` **350/350**, `cargo clippy`, `cargo test --lib` **382 passed / 22 ignored**, `build:debug`, `build:portable`, `build:msi`, `git diff --check`.
-  - **Gates pendentes no host:** `preflight:sgdk-e2e` (falta `msedgedriver` canonico), `validate-upstream-windows.ps1 -SkipRustTests` (SGDK nao em `toolchains/sgdk/` neste host), `test:e2e:desktop:qa-rc` (nao rerodado — depende de WebDriver + build fresco).
+  - **Referencias de commit:** consolidacao tecnica ate `ee5618f`; documentacao inicial em `b31db0d`; promocao governada no **HEAD remoto** atual da branch (consultar `git rev-parse origin/codex/full-product-cohesion-integration`).
+  - **CI remoto (`b31db0d`):** `validate` + `desktop-smoke` **success**.
+  - **Gates verdes locais (baseline):** `check:tree`, `lint`, `tsc`, `npm test` **350/350**, `cargo clippy`, `cargo test --lib` **382/22 ignored**, `build:debug`/`portable`/`msi`, `git diff --check`.
+  - **Gates de host (promocao, worktree com junction para `toolchains/sgdk` + `toolchains/webdriver`):** `preflight:sgdk-e2e` **Ready: SIM**; `validate-upstream-windows.ps1 -SkipRustTests` **success**; `test:e2e:desktop:qa-rc` rerodando apos correcoes de oraculo (resize WebDriver + overlap rail/Bloco G).
   - **Excluida:** Godot (fora do escopo / sem branch verde).
-  - **Proximo passo imediato:** PR/compare, CI remoto no SHA `ee5618f`, rerodar QA RC + upstream com SGDK/WebDriver oficiais no runner ou host preparado; **nao** rodar `release:readiness:promotion` fora de `main`.
+  - **Proximo passo imediato:** fechar QA RC local, commit/push de correcoes de promocao, PR contra `main`, merge apos checks verdes, `release:readiness:promotion` **somente em `main`**.
 
 * **O que acabou de acontecer (2026-05-21 rodada 51 - branch `codex/ui-layout-visual-oracle-k`):**
   - **Bloco H virou gate visual reutilizavel:** `scripts/ui-layout-oracle.mjs` centraliza resolucoes/alvos e avaliacao DOM/BoundingClientRect; `scripts/e2e-tauri-build-run.mjs` coleta snapshots reais da janela Tauri, salva screenshots com prefixo `H-ui-oracle-*` e escreve `src-tauri/target-test/validation/ui-layout-oracle.json`.
