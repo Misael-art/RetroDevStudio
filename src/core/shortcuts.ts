@@ -644,11 +644,12 @@ export function resolveShortcutCommand(
 }
 
 function parseShortcutKeys(value: string | readonly string[]): string[] {
-  const parts: string[] = Array.isArray(value)
-    ? value.map((part) => part.trim())
-    : value
-        .split(/\s+\/\s+|,/g)
-        .map((part: string) => part.trim());
+  const parts =
+    typeof value === "string"
+      ? value
+          .split(/\s+\/\s+|,/g)
+          .map((part) => part.trim())
+      : value.map((part) => part.trim());
 
   return parts
     .map((part) => normalizeShortcutChord(part))
