@@ -653,7 +653,7 @@ fn dependency_actionable_message(
                 "Instale pelo Runtime Setup ou configure JAVA_HOME apontando para um JDK 17+; o build SGDK usa Java em ferramentas oficiais.".to_string()
             }
             DependencyKind::Sgdk => {
-                "Instale pelo Runtime Setup ou configure SGDK_ROOT para uma instalacao oficial do SGDK antes de Build & Run no Mega Drive.".to_string()
+                "Instale pelo Runtime Setup ou configure SGDK_ROOT/GDK para uma instalacao oficial do SGDK antes de Build & Run no Mega Drive.".to_string()
             }
             DependencyKind::PvsnesLib => {
                 "Instale pelo Runtime Setup ou configure PVSNESLIB_HOME; em Windows tambem confirme Git Bash/MSYS2 para o snes_rules.".to_string()

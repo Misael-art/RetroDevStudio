@@ -1689,7 +1689,7 @@ fn resolve_toolchain(
                 .clone()
                 .or_else(|| (!environment.disable_auto_detect).then(|| detect_root("SGDK_ROOT", "sgdk")).flatten())
                 .ok_or_else(|| {
-                    "Toolchain SGDK nao encontrada. Configure SGDK_ROOT ou instale em toolchains/sgdk/."
+                    "Toolchain SGDK nao encontrada. Configure SGDK_ROOT/GDK ou instale em toolchains/sgdk/."
                         .to_string()
                 })?;
             let make_program = environment
@@ -2066,10 +2066,18 @@ fn sanitize_build_output_dir(output_dir: &str) -> Result<PathBuf, String> {
 }
 
 fn detect_root(env_var: &str, local_dir_name: &str) -> Option<PathBuf> {
-    if let Ok(path) = std::env::var(env_var) {
-        let path = PathBuf::from(path);
-        if path.exists() {
-            return Some(path);
+    let env_vars = if local_dir_name == "sgdk" {
+        vec![env_var, "GDK", "GDK_WIN"]
+    } else {
+        vec![env_var]
+    };
+
+    for candidate_env_var in env_vars {
+        if let Ok(path) = std::env::var(candidate_env_var) {
+            let path = PathBuf::from(path);
+            if path.exists() {
+                return Some(path);
+            }
         }
     }
 
@@ -2247,6 +2255,35 @@ mod tests {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn remove(key: &'static str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
+
+        fn set_path(key: &'static str, value: &Path) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
     fn temp_dir(prefix: &str) -> PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -2342,6 +2379,24 @@ mod tests {
         fs::create_dir_all(&bin_dir).expect("create fake toolchain bin");
         let make_program = fake_make_script(&bin_dir, extension);
         (root, make_program)
+    }
+
+    #[test]
+    fn build_environment_detects_sgdk_from_gdk_env_alias() {
+        let _serial = test_serial_guard();
+        let (sgdk_root, make_program) = fake_toolchain("sgdk-gdk-env-alias", "md");
+        let detected_make = sgdk_root.join("bin").join(platform_make_name());
+        fs::copy(&make_program, &detected_make).expect("copy fake make to canonical name");
+        let _sgdk_root_env = EnvVarGuard::remove("SGDK_ROOT");
+        let _gdk_win_env = EnvVarGuard::remove("GDK_WIN");
+        let _gdk_env = EnvVarGuard::set_path("GDK", &sgdk_root);
+
+        let env = BuildEnvironment::detect();
+
+        assert_eq!(env.sgdk_root.as_deref(), Some(sgdk_root.as_path()));
+        assert_eq!(env.sgdk_make_program.as_deref(), Some(detected_make.as_path()));
+
+        let _ = fs::remove_dir_all(sgdk_root);
     }
 
     #[test]
@@ -3309,7 +3364,7 @@ PY\n"
         let _ = fs::remove_dir_all(sgdk_root);
     }
 
-    /// Quando `SGDK_ROOT` ou `toolchains/sgdk` apontam para uma instalação real com `makefile.gen`
+    /// Quando `SGDK_ROOT`/`GDK` ou `toolchains/sgdk` apontam para uma instalação real com `makefile.gen`
     /// e `make` funcional, prova build canónico sem fake-make. Em hosts sem toolchain, retorna cedo.
     #[test]
     fn megadrive_build_runs_with_detected_sgdk_toolchain_when_present() {

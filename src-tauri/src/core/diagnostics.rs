@@ -161,7 +161,7 @@ pub fn build_failure_diagnostic(
     } else if lower.contains("toolchain sgdk nao encontrada") {
         (
             "Build falhou porque a toolchain SGDK nao esta disponivel.".to_string(),
-            "Abra Runtime Setup e instale SGDK oficial, ou configure SGDK_ROOT para a pasta correta.".to_string(),
+            "Abra Runtime Setup e instale SGDK oficial, ou configure SGDK_ROOT/GDK para a pasta correta.".to_string(),
         )
     } else if lower.contains("toolchain pvsneslib nao encontrada") {
         (
