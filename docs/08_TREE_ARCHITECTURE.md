@@ -178,6 +178,7 @@ RetroDevStudio/
 - O caminho SNES real usa staging de asset no workspace e gera `hdr.asm`, `data.asm` e regras `gfx4snes`.
 - `scripts/build.mjs` e o script canonico de compilacao: gera MSI, EXE Debug e EXE Portable. Uso: `node scripts/build.mjs <debug|msi|portable|all> [--open-dir]`. Scripts npm: `build:debug`, `build:debug:open`, `build:msi`, `build:msi:open`, `build:portable`, `build:portable:open`, `build:all`. O `build-test.bat` e um wrapper legado que chama `build.mjs debug`.
 - `scripts/release-readiness.mjs` e o agregador canonico de readiness para promocao RC -> beta/producao: consolida baseline, artefatos, dirty worktree, reports de build/upstream e checklist manual em `src-tauri/target-test/validation/release-readiness.{json,md}`. Scripts npm: `release:readiness`, `release:readiness:baseline`.
+- `scripts/release-manifest.mjs` e o gerador canonico do manifesto de distribuicao interna em `src-tauri/target-test/validation/release-manifest.json`, com SHA256/tamanho dos EXEs/MSI e limites explicitos de signing/updater/producao publica. Script npm: `release:manifest`.
 - `scripts/run-in-msvc.cmd` e o wrapper canonico para executar comandos Node/npm em ambiente MSVC preparado no Windows institucional; usar junto de `build.mjs` quando o host exigir `vcvars64.bat`.
 - `scripts/run-cargo-msvc.cmd` e o wrapper canonico para comandos `cargo` em ambiente MSVC preparado no Windows institucional.
 - `scripts/e2e-tauri-build-run.mjs` e o runner canonico de regressao desktop/Tauri para `Build -> Load ROM -> Run frames`.

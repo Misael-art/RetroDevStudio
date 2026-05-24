@@ -13,6 +13,7 @@
     "build:portable": "node scripts/build.mjs portable",
     "build:portable:open": "node scripts/build.mjs portable --open-dir",
     "build:all": "node scripts/build.mjs all",
+    "release:manifest": "node scripts/release-manifest.mjs",
     "release:readiness": "node scripts/release-readiness.mjs",
     "release:readiness:baseline": "node scripts/release-readiness.mjs --run-baseline",
     "lint": "eslint src vite.config.ts --max-warnings=0",

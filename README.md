@@ -130,6 +130,21 @@ Para a rodada institucional de promocao RC:
 3. inspecionar `src-tauri/target-test/validation/manual-qa-status.json`
 4. inspecionar `src-tauri/target-test/validation/release-readiness.md`
 
+Para distribuicao interna auditavel de artefatos ja gerados:
+
+1. `npm run build:debug`
+2. `npm run build:portable`
+3. `npm run build:msi`
+4. `npm run release:readiness`
+5. `npm run release:manifest`
+6. inspecionar `src-tauri/target-test/validation/release-manifest.json`
+
+Esse manifesto registra versao, commit, branch, hashes SHA256, tamanhos, readiness,
+toolchains, CI quando disponivel, signing e updater. Ele nao transforma a rodada
+em producao publica: publicacao publica exige certificado real, etapa de signing
+verificavel e estrategia/canal de updater definidos. Sem certificado real, o
+manifesto permanece explicitamente `unsigned`.
+
 ---
 
 ## Documentos De Verdade

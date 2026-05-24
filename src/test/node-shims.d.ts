@@ -2,7 +2,7 @@ declare module "node:child_process" {
   export interface SpawnSyncOptions {
     cwd?: string;
     encoding?: string;
-    env?: Record<string, string>;
+    env?: Record<string, string | undefined>;
     maxBuffer?: number;
     timeout?: number;
   }
@@ -27,12 +27,24 @@ declare module "node:fs" {
     recursive?: boolean;
   }
 
+  export interface RmSyncOptions {
+    force?: boolean;
+    recursive?: boolean;
+  }
+
+  export interface Stats {
+    size: number;
+  }
+
   export function mkdtempSync(prefix: string): string;
   export function mkdirSync(
     path: string,
     options?: MkdirSyncOptions
   ): string | undefined;
   export function readFileSync(path: string, encoding: string): string;
+  export function rmSync(path: string, options?: RmSyncOptions): void;
+  export function statSync(path: string): Stats;
+  export function writeFileSync(path: string, data: string | Uint8Array): void;
 }
 
 declare module "node:os" {
@@ -54,5 +66,6 @@ declare module "node:url" {
 }
 
 declare const process: {
+  env: Record<string, string | undefined>;
   platform: string;
 };

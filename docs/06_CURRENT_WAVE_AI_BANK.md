@@ -35,6 +35,13 @@
   - **Status honesto:** AAA Capability esta integrada como **Experimental/capability diagnostics**. Isto nao e AAA pronto, nao e Stable e nao promove SGDK, Node Engine, GameMaker, Godot, MUGEN/Ikemen, OpenBOR, SNES ou ArtStudio.
   - **Proximo passo imediato:** triagem governada das branches pendentes por prioridade (`release-manifest-packaging-z`, `asset-browser-production-x`, `nodegraph-execution-inspector-w`, `save-sram-project-settings-u`, `godot-2d-subset-y`, `command-palette-shortcut-editor-r`, `e2e-create-game-from-zero-s`) antes de qualquer limpeza destrutiva.
 
+* **O que acabou de acontecer (2026-05-23 rodada 51 - branch `codex/release-manifest-packaging-z`):**
+  - **Manifesto de distribuicao interna:** `scripts/release-manifest.mjs` gera `src-tauri/target-test/validation/release-manifest.json` com `version`, `commit`, `branch`, `date`, caminhos/hashes SHA256/tamanhos de Debug EXE, Portable EXE e MSI, readiness report, resumo de toolchains, CI quando disponivel, signing e updater.
+  - **Limites de producao preservados:** o manifesto e documentado como distribuicao interna auditavel. Sem certificado real e etapa verificavel de signing, `signingStatus.signed=false` e `status=unsigned`; producao publica segue bloqueada por certificado, assinatura real e estrategia/canal de updater. O updater permanece `deferred`.
+  - **Cobertura:** `src/core/releaseManifest.test.ts` cobre schema minimo, SHA256/tamanhos, erro acionavel para artefato ausente, impossibilidade de declarar assinatura sem certificado real e leitura correta de fases do `upstream-validation.json`.
+  - **Docs:** `README.md`, `docs/07_TEST_AND_COMPLIANCE.md` e `docs/08_TREE_ARCHITECTURE.md` registram o fluxo `build:debug` -> `build:portable` -> `build:msi` -> `release:readiness` -> `release:manifest`, com limites explicitos para producao publica.
+  - **Status historico:** a rodada original tinha `validate-upstream-windows.ps1 -SkipRustTests` falhando com `toolchain_missing` e `release-readiness.md` como `Pronto para promocao: NAO`; apos a promocao AAA, esta branch precisa de gates frescos sobre `origin/main` antes de PR.
+
 * **O que acabou de acontecer (2026-05-24 rodada 54 - branch `codex/aaa-capability-layer-q`):**
   - **Rebase:** branch AAA rebased sobre `origin/main` (`25166c7ff8712dad286e73b41ae5e577029d9e67`); head tecnico validado antes desta nota: `c3bea9799347ed1650fc8544419e551857b586cc`.
   - **Gates frescos pos-rebase:** `npm run check:tree` OK; `npm run lint` OK; `npx tsc --noEmit` OK; `npm test` OK (**357/357**, 42 arquivos); `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK; `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` OK (**398 passed / 22 ignored**); `npm run build:debug` OK; `npm run preflight:sgdk-e2e` OK; `npm run test:e2e:desktop:qa-rc` OK A-H (`qa-rc-2026-05-24T20-49-39-814Z-*`); `powershell -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests` OK; `git diff --check` OK.
@@ -1315,7 +1322,7 @@ As seguintes decisoes ja foram debatidas e sao finais:
 ## 4. PROXIMO PASSO IMEDIATO (PARA A IA EXECUTAR QUANDO SOLICITADA)
 
 **Tarefa:**
-Preservar o core MVP promovido em `main` e avancar apenas incrementos que mantenham a barra verde. A governanca do PR #4 foi fechada na rodada 41: PR merged, `main` em `91bb8eb354389e370bb59d6a5ae84c21b4a1429f`, checks remotos de `pull_request` verdes e `npm run release:readiness:promotion` verde no destino. O proximo trabalho nao deve reabrir a linha de release sem necessidade; deve atacar robustez de produto, Node Engine e SGDK em unidades pequenas, com SGDK/Node ainda marcados como `Experimental` ate corpus/round-trip/jogo por nodes provarem o contrario.
+Preservar o pacote interno auditavel sem inflar status de release publica. A rodada 51 gerou manifesto interno e artefatos, mas `validate-upstream-windows.ps1 -SkipRustTests` ainda falha com `toolchain_missing`; o proximo passo imediato e diagnosticar/provisionar a validacao oficial SGDK em host Windows limpo antes de qualquer promocao. Producao publica segue bloqueada ate haver certificado real, signing verificavel e estrategia/canal de updater aprovados.
 
 **Pre-requisitos operacionais:**
 * Manter os 6 gates canonicos verdes em toda alteracao relevante.
