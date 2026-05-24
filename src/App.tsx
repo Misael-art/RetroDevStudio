@@ -86,7 +86,6 @@ import { resolveSceneWorldMetrics } from "./core/sceneWorldModel";
 import {
   DEFAULT_SHORTCUTS,
   getPaletteCommands,
-  eventMatchesShortcut,
   findShortcutConflicts,
   formatShortcutKeys,
   getShortcutLabel,
@@ -5108,3 +5107,4 @@ export default function App() {
     </div>
   );
 }
+

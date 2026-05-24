@@ -130,7 +130,7 @@ describe("shortcut registry", () => {
           altKey: false,
           shiftKey: false,
         },
-        "shortcuts.show"
+        "shortcuts.edit"
       )
     ).toBe(true);
 
@@ -236,3 +236,4 @@ describe("shortcut registry", () => {
     expect(localStorage.getItem("retrodev-shortcut-customizations-v1")).toBeNull();
   });
 });
+

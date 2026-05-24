@@ -728,3 +728,4 @@ export function resetShortcutCustomizations(
   storage.removeItem(SHORTCUT_CUSTOMIZATIONS_STORAGE_KEY);
   return defaults.map((shortcut) => ({ ...shortcut, keys: [...shortcut.keys] }));
 }
+
