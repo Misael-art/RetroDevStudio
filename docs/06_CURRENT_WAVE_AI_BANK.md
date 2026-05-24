@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-22 (integracao full-product-cohesion)
+**Ultima Atualizacao:** 2026-05-24 (rodada 53 - full cohesion promovida em main)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,15 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-24 rodada 53 - main promovida):**
+  - **PR/merge:** PR #9 (`codex/full-product-cohesion-integration`) foi integrado em `main` por merge commit `b1fa27bced08163f751ab5615332cb0a793fc06a`, contendo o head `b80accca85312e531783caa1d3ec9a58ed4b4101`. A verificacao `git merge-base --is-ancestor b80accca85312e531783caa1d3ec9a58ed4b4101 HEAD` passou no worktree limpo de promocao.
+  - **Hotfix pos-merge:** `f59309c067b467cf21ad48ddc5d6c4415012d78e` foi commitado e pushado em `main` para corrigir divergencia real entre preflight e app: o host tinha SGDK oficial via `GDK`, o preflight aceitava `GDK`, mas `BuildEnvironment::detect()` so aceitava `SGDK_ROOT`/`toolchains/sgdk`. A correcao adiciona `GDK`/`GDK_WIN` ao detector do build e alinha mensagens acionaveis.
+  - **Readiness no destino:** `npm run release:readiness:promotion` passou em `main` no SHA `f59309c067b467cf21ad48ddc5d6c4415012d78e` com `Pronto para promocao: SIM`, consumindo baseline, build debug, upstream oficial e desktop E2E simples. Report atualizado em `src-tauri/target-test/validation/release-readiness.{json,md}`.
+  - **Gates locais executados:** `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test` **350/350**, `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`, `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` **383 passed / 22 ignored**, `npm run build:debug`, `npm run build:portable`, `npm run build:msi`, `npm run preflight:sgdk-e2e`, `npm run test:e2e:desktop:qa-rc` A-H, `powershell -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests`, `npm run release:readiness:promotion` e `git diff --check`.
+  - **Evidencias/artefatos:** QA RC A-H gerou prefixo `qa-rc-2026-05-24T16-02-05-806Z-*`; artefatos canônicos gerados em `src-tauri/target-test/debug/retro-dev-studio.exe`, `src-tauri/target-test/release/retro-dev-studio.exe` e `src-tauri/target-test/release/bundle/msi/RetroDev Studio_0.1.0_x64_en-US.msi`.
+  - **Checks remotos:** PR #9 estava com `validate` e `desktop-smoke` verdes antes do merge. No hotfix `f59309c`, `CI / validate` e `Desktop E2E / desktop-smoke` remotos completaram com `success`.
+  - **Status honesto:** Core MVP esta promovido tecnicamente em `main` com readiness verde. SGDK, Node Engine, GameMaker, Godot, MUGEN/Ikemen, OpenBOR, SNES, ArtStudio e AAA Capability **nao** foram promovidos para Stable/pronto; continuam Experimental/Em hardening conforme a matriz do roadmap. A proxima etapa governada e rebase/validacao de `codex/aaa-capability-layer-q` sobre `origin/main`, mantendo AAA como Experimental ate evidencia institucional completa.
 
 * **O que acabou de acontecer (2026-05-22 - integracao `codex/full-product-cohesion-integration`):**
   - **13 branches integradas** na ordem pedida: `project-cohesion-full-build`, `product-ui-workspace-redesign`, `ui-layout-visual-oracle-k`, `actionable-diagnostics-l`, `clean-machine-runtime-setup-j`, `artstudio-production-vertical-m`, `snes-pvsneslib-parity-g`, `gamemaker-modern-gml-runtime-d`, `mugen-ikemen-fighting-import-f`, `openbor-beatemup-import-h`, `sgdk-real-proof-integration`, `sgdk-semantic-nodegraph-delivery`, `sgdk-logic-truth-product-qa`.

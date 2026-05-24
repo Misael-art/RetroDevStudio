@@ -1,8 +1,10 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-05-20 (rodada 51)
+**Ultima revisao canonica:** 2026-05-24 (rodada 53)
 **Fase ativa real:** Core MVP promovido tecnicamente em main; hardening continua nas superficies experimentais
+
+**Nota 2026-05-24 (rodada 53, main):** PR #9 (`codex/full-product-cohesion-integration`) foi mergeado em `main` por `b1fa27bced08163f751ab5615332cb0a793fc06a`, contendo `b80accca85312e531783caa1d3ec9a58ed4b4101`. O destino recebeu hotfix `f59309c067b467cf21ad48ddc5d6c4415012d78e` para aceitar `GDK`/`GDK_WIN` como aliases oficiais de SGDK no build real, alinhando app e preflight. `npm run release:readiness:promotion` passou em `main` com `Pronto para promocao: SIM`; QA RC A-H fresco (`qa-rc-2026-05-24T16-02-05-806Z-*`), upstream Windows oficial, Debug/Portable/MSI e baseline local ficaram verdes. Isto promove o **Core MVP** no destino canonico, mas **nao** promove SGDK Stable, Node Engine Stable, GameMaker Stable, Godot Stable, MUGEN/Ikemen Stable, OpenBOR Stable, SNES Stable, ArtStudio Stable ou AAA pronto. Essas superficies continuam Experimental/Em hardening ate evidencia institucional propria.
 
 **Nota 2026-05-20 (rodada 51, branch `codex/snes-pvsneslib-parity-g`):** SNES avancou para **hardening/paridade do subset no-code** com prova vertical real: projeto SNES persistente, staging PVSnesLib (`hdr.asm`, `data.asm`, sprites, palettes, tilemaps e `gfx4snes`), nodes SNES de input/movimento/animacao/tilemap/camera/audio/FSM/timer/variaveis, build ROM real e Libretro SNES com framebuffer visivel. Evidencia: `src-tauri/target-test/validation/snes-real-nocode-game/real-nocode-report.{json,md}`, ROM `real-nocode-game.sfc` de **262144 bytes**, core `Snes9x 1.63 5a40cd5`, framebuffer **256x224**, `non_black_pixels=39184`, `fake_toolchain_used=false`. Status permanece **Em hardening**; isto nao e SNES Stable amplo e nao altera importadores externos.
 
