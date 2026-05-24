@@ -68,15 +68,22 @@ function createFixtureRepo() {
 
 function runManifest(
   fixtureRoot: string,
-  extraEnv: Record<string, string> = {}
+  extraEnv: Record<string, string | undefined> = {}
 ) {
+  const env: NodeJS.ProcessEnv = { ...process.env, ...extraEnv };
+  if (!Object.prototype.hasOwnProperty.call(extraEnv, "GITHUB_ACTIONS")) {
+    delete env.GITHUB_ACTIONS;
+    delete env.GITHUB_RUN_ID;
+    delete env.GITHUB_RUN_ATTEMPT;
+    delete env.GITHUB_REF_NAME;
+    delete env.GITHUB_REF;
+    delete env.GITHUB_SHA;
+  }
+
   return spawnSync("node", [manifestScript, "--repo-root", fixtureRoot], {
     cwd: repoRoot,
     encoding: "utf8",
-    env: {
-      ...process.env,
-      ...extraEnv,
-    },
+    env,
     maxBuffer: 1024 * 1024 * 8,
     timeout: 30000,
   });
@@ -93,7 +100,7 @@ function readManifest(validationDir: string) {
     artifacts: Record<string, { path: string; sha256: string; sizeBytes: number }>;
     readinessReport: { path: string; exists: boolean };
     toolchainSummary: { status: string; components: Array<{ id: string; status: string }> };
-    ciStatus: { status: string };
+    ciStatus: { status: string; provider?: string; runId?: string | null };
     signingStatus: { signed: boolean; status: string };
     updaterStatus: { status: string };
   };
@@ -165,6 +172,23 @@ describe("release-manifest.mjs", () => {
     expect(readManifest(validationDir).signingStatus).toEqual({
       signed: false,
       status: "unsigned",
+    });
+  });
+
+  it("marks CI metadata as available when GitHub Actions env is present", () => {
+    const { fixtureRoot, validationDir, gitEnv } = createFixtureRepo();
+
+    const result = runManifest(fixtureRoot, {
+      ...gitEnv,
+      GITHUB_ACTIONS: "true",
+      GITHUB_RUN_ID: "26349808022",
+    });
+
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    expect(readManifest(validationDir).ciStatus).toMatchObject({
+      status: "available",
+      provider: "github_actions",
+      runId: "26349808022",
     });
   });
 
