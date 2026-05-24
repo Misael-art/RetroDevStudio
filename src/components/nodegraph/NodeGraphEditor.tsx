@@ -443,7 +443,7 @@ function commandNodeHasBinding(
     ];
     return (
       (displayName.length > 0 && bindingKeys.includes(displayName)) ||
-      (notation.length > 0 && binding.notation.trim() === notation)
+      (notation.length > 0 && (binding.notation ?? "").trim() === notation)
     );
   });
 }
