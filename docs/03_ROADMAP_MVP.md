@@ -1,8 +1,10 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-05-24 (rodada 53 + AAA capability diagnostics experimental)
+**Ultima revisao canonica:** 2026-05-24 (rodada 54 - AAA capability diagnostics experimental validada em branch)
 **Fase ativa real:** Core MVP promovido tecnicamente em main; hardening continua nas superficies experimentais
+
+**Nota 2026-05-24 (rodada 54, branch `codex/aaa-capability-layer-q`):** AAA Capability Layer foi rebased sobre `origin/main` (`25166c7ff8712dad286e73b41ae5e577029d9e67`) e validada localmente no head tecnico `c3bea9799347ed1650fc8544419e551857b586cc`. Gates frescos pos-rebase: `check:tree`, `lint`, `tsc`, `npm test` **357/357**, `cargo clippy`, `cargo test --lib` **398 passed / 22 ignored**, `build:debug`, `preflight:sgdk-e2e`, `test:e2e:desktop:qa-rc` A-H (`qa-rc-2026-05-24T20-49-39-814Z-*`), `validate-upstream-windows.ps1 -SkipRustTests` e `git diff --check`. A camada segue **Experimental**: nao declara AAA pronto, nao promove SGDK/Node Engine/ArtStudio/SNES/GameMaker/Godot/MUGEN/OpenBOR e depende de PR/checks remotos/merge governado para entrar em `main`.
 
 **Nota 2026-05-24 (rodada 53, main):** PR #9 (`codex/full-product-cohesion-integration`) foi mergeado em `main` por `b1fa27bced08163f751ab5615332cb0a793fc06a`, contendo `b80accca85312e531783caa1d3ec9a58ed4b4101`. O destino recebeu hotfix `f59309c067b467cf21ad48ddc5d6c4415012d78e` para aceitar `GDK`/`GDK_WIN` como aliases oficiais de SGDK no build real, alinhando app e preflight. `npm run release:readiness:promotion` passou em `main` com `Pronto para promocao: SIM`; QA RC A-H fresco (`qa-rc-2026-05-24T16-02-05-806Z-*`), upstream Windows oficial, Debug/Portable/MSI e baseline local ficaram verdes. Isto promove o **Core MVP** no destino canonico, mas **nao** promove SGDK Stable, Node Engine Stable, GameMaker Stable, Godot Stable, MUGEN/Ikemen Stable, OpenBOR Stable, SNES Stable, ArtStudio Stable ou AAA pronto. Essas superficies continuam Experimental/Em hardening ate evidencia institucional propria.
 

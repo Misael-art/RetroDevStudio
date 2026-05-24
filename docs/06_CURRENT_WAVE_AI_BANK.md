@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-24 (rodada 53 - full cohesion promovida em main + AAA capability diagnostics experimental)
+**Ultima Atualizacao:** 2026-05-24 (rodada 54 - AAA capability diagnostics experimental validada em branch)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,13 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-24 rodada 54 - branch `codex/aaa-capability-layer-q`):**
+  - **Rebase:** branch AAA rebased sobre `origin/main` (`25166c7ff8712dad286e73b41ae5e577029d9e67`); head tecnico validado antes desta nota: `c3bea9799347ed1650fc8544419e551857b586cc`.
+  - **Gates frescos pos-rebase:** `npm run check:tree` OK; `npm run lint` OK; `npx tsc --noEmit` OK; `npm test` OK (**357/357**, 42 arquivos); `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK; `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` OK (**398 passed / 22 ignored**); `npm run build:debug` OK; `npm run preflight:sgdk-e2e` OK; `npm run test:e2e:desktop:qa-rc` OK A-H (`qa-rc-2026-05-24T20-49-39-814Z-*`); `powershell -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests` OK; `git diff --check` OK.
+  - **Artefatos/evidencias:** EXE debug gerado em `src-tauri/target-test/debug/retro-dev-studio.exe`; QA RC gerou 48 evidencias com prefixo `qa-rc-2026-05-24T20-49-39-814Z-*`; upstream Windows rodou onboarding, platformer seed e SNES com toolchains oficiais/cache local.
+  - **Governanca GitHub:** `gh auth status` retorna sem login local. Se a autenticacao continuar ausente, a branch deve ficar pushada e o PR/merge dependem de acao humana via compare URL.
+  - **Status honesto:** AAA Capability Layer segue **Experimental**. Nao e AAA pronto, nao e Stable, e nao promove SGDK, Node Engine, GameMaker, Godot, MUGEN/Ikemen, OpenBOR, SNES ou ArtStudio.
 
 * **O que acabou de acontecer (2026-05-24 rodada 53 - main promovida):**
   - **PR/merge:** PR #9 (`codex/full-product-cohesion-integration`) foi integrado em `main` por merge commit `b1fa27bced08163f751ab5615332cb0a793fc06a`, contendo o head `b80accca85312e531783caa1d3ec9a58ed4b4101`. A verificacao `git merge-base --is-ancestor b80accca85312e531783caa1d3ec9a58ed4b4101 HEAD` passou no worktree limpo de promocao.
