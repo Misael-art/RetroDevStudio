@@ -229,6 +229,33 @@ mod tests {
     }
 
     #[test]
+    fn analyze_rom_detects_megadrive_sram_header() {
+        let path = temp_rom_path("md-sram", "bin");
+        let mut rom = build_megadrive_fixture();
+        rom[0x1B0..0x1B2].copy_from_slice(b"RA");
+        rom[0x1B2] = 0xF8;
+        rom[0x1B3] = 0x20;
+        rom[0x1B4..0x1B8].copy_from_slice(&0x0020_0000u32.to_be_bytes());
+        rom[0x1B8..0x1BC].copy_from_slice(&0x0020_7FFFu32.to_be_bytes());
+        fs::write(&path, &rom).expect("write md rom with sram");
+
+        let manifest = analyze_rom(path.to_string_lossy().as_ref()).expect("analyze rom");
+
+        assert_eq!(manifest.save.status, "declared");
+        assert!(manifest.save.declared);
+        assert!(!manifest.save.missing);
+        assert_eq!(manifest.save.size_bytes, Some(32768));
+        assert_eq!(manifest.save.address_start, Some(0x0020_0000));
+        assert_eq!(manifest.save.address_end, Some(0x0020_7FFF));
+        assert!(manifest
+            .save
+            .note
+            .contains("SRAM declarada no header Mega Drive"));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn analyze_rom_builds_canonical_manifest_for_snes() {
         let path = temp_rom_path("snes", "smc");
         let rom = build_snes_fixture();

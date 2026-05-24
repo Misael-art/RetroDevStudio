@@ -1785,6 +1785,30 @@ pub extern "C" fn retro_run() {
     }
 
     #[test]
+    fn runtime_contract_reports_observed_save_ram_from_libretro_memory() {
+        let _serial = test_serial_guard();
+        let dir = temp_dir("save-contract");
+        let core_path = compile_mock_core(&dir);
+        let rom_path = write_test_rom(&dir, "save_contract_test", "gen");
+
+        let mut emulator = EmulatorCore::new(Some(&core_path));
+        emulator
+            .load_rom(&rom_path)
+            .expect("load rom into mock core");
+
+        let trace_capture = emulator.execution_trace_capture();
+        assert_eq!(trace_capture.save.status, "observed");
+        assert!(!trace_capture.save.declared);
+        assert!(trace_capture.save.observed);
+        assert!(!trace_capture.save.missing);
+        assert_eq!(trace_capture.save.observed_size_bytes, Some(32));
+        assert!(trace_capture.save.note.contains("Libretro expos SRAM"));
+
+        emulator.stop().expect("stop emulator");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn audio_sample_batch_callback_buffers_latest_audio_batch() {
         let _serial = test_serial_guard();
         let handle = new_emulator_handle();
