@@ -1,0 +1,6 @@
+; BYOR-safe fixture for unsupported Godot bridge reporting.
+
+[application]
+config/name="RDS Godot Complex Bridge Fixture"
+run/main_scene="res://scenes/main.tscn"
+

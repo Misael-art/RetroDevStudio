@@ -1,0 +1,19 @@
+; BYOR-safe Godot fixture for RetroDev Studio import tests.
+
+[application]
+config/name="RDS Godot 2D Subset Fixture"
+run/main_scene="res://scenes/main.tscn"
+
+[input]
+ui_left={
+"deadzone": 0.5,
+"events": []
+}
+ui_right={
+"deadzone": 0.5,
+"events": []
+}
+ui_accept={
+"deadzone": 0.5,
+"events": []
+}
