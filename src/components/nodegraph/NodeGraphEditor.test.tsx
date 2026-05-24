@@ -15,7 +15,7 @@ import NodeGraphEditor, {
   type NodeGraph,
 } from "./NodeGraphEditor";
 import { useEditorStore } from "../../core/store/editorStore";
-import type { Entity } from "../../core/ipc/sceneService";
+import type { AnimationDef, Entity, SpriteCommandBinding } from "../../core/ipc/sceneService";
 
 const mocks = vi.hoisted(() => ({
   persistActiveScene: vi.fn(),
@@ -56,6 +56,32 @@ function buildLogicEntity(entityId: string, displayName: string, graph: NodeGrap
     components: {
       logic: {
         graph: serializeNodeGraph(graph),
+      },
+    },
+  };
+}
+
+function buildLogicSpriteEntity(
+  entityId: string,
+  displayName: string,
+  graph: NodeGraph,
+  options: {
+    animations?: Record<string, AnimationDef>;
+    commands?: SpriteCommandBinding[];
+  } = {}
+): Entity {
+  return {
+    ...buildLogicEntity(entityId, displayName, graph),
+    components: {
+      logic: {
+        graph: serializeNodeGraph(graph),
+      },
+      sprite: {
+        asset: `assets/sprites/${entityId}.png`,
+        frame_width: 16,
+        frame_height: 16,
+        animations: options.animations ?? {},
+        commands: options.commands,
       },
     },
   };
@@ -138,6 +164,71 @@ const GRAPH_WITHOUT_ENTRY: NodeGraph = {
   ],
   edges: [],
 };
+
+const VALID_EXEC_GRAPH: NodeGraph = {
+  nodes: [
+    {
+      id: "entry",
+      type: "input_command",
+      label: "Hadouken",
+      x: 120,
+      y: 96,
+      inputs: [],
+      outputs: [
+        { id: "exec", label: ">", kind: "exec" },
+        { id: "false", label: "False >", kind: "exec" },
+      ],
+      params: {
+        command_id: "hadouken",
+        display_name: "Hadouken",
+        notation: "_2,_3,_6,_P",
+        max_frames: 15,
+        target: "hero",
+      },
+    },
+    {
+      id: "attack_anim",
+      type: "set_animation_state",
+      label: "Set Attack",
+      x: 620,
+      y: 96,
+      inputs: [{ id: "exec", label: ">", kind: "exec" }],
+      outputs: [{ id: "exec", label: ">", kind: "exec" }],
+      params: { target: "hero", state: "fireball" },
+    },
+    {
+      id: "miss_sound",
+      type: "action_sound",
+      label: "Miss Sound",
+      x: 620,
+      y: 220,
+      inputs: [{ id: "exec", label: ">", kind: "exec" }],
+      outputs: [{ id: "exec", label: ">", kind: "exec" }],
+      params: { sfx: "miss" },
+    },
+  ],
+  edges: [
+    { id: "e_command_true", fromNode: "entry", fromPort: "exec", toNode: "attack_anim", toPort: "exec" },
+    { id: "e_command_false", fromNode: "entry", fromPort: "false", toNode: "miss_sound", toPort: "exec" },
+  ],
+};
+
+const VALID_EXEC_ENTITY = buildLogicSpriteEntity("hero", "Hero", VALID_EXEC_GRAPH, {
+  animations: {
+    fireball: { frames: [0, 1], fps: 12, loop: false },
+  },
+  commands: [
+    {
+      id: "hadouken",
+      display_name: "Hadouken",
+      notation: "_2,_3,_6,_P",
+      source: "command.dat",
+      target_animation: "fireball",
+      max_frames: 15,
+      button_profile: "megadrive",
+    },
+  ],
+});
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
@@ -370,6 +461,72 @@ describe("NodeGraphEditor helpers", () => {
     );
     expect(validation.warnings).toHaveLength(0);
   });
+
+  it("keeps a locally valid executable graph free of execution diagnostics", () => {
+    const validation = validateNodeGraph(VALID_EXEC_GRAPH, {
+      selectedEntity: VALID_EXEC_ENTITY,
+      sceneEntities: [VALID_EXEC_ENTITY],
+    });
+
+    expect(validation.errors).toHaveLength(0);
+    expect(validation.warnings).toHaveLength(0);
+  });
+
+  it("reports execution diagnostics for missing inputs, branches, blocking bridges, commands and animations", () => {
+    const heroWithGaps = buildLogicSpriteEntity("hero", "Hero", VALID_EXEC_GRAPH, {
+      animations: {
+        idle: { frames: [0], fps: 8, loop: true },
+      },
+      commands: VALID_EXEC_ENTITY.components.sprite?.commands,
+    });
+    const graph: NodeGraph = {
+      nodes: [
+        {
+          ...VALID_EXEC_GRAPH.nodes[0],
+          id: "dragon_punch",
+          params: { ...VALID_EXEC_GRAPH.nodes[0].params, command_id: "dragon_punch" },
+        },
+        {
+          ...VALID_EXEC_GRAPH.nodes[1],
+          id: "missing_anim",
+          params: { target: "hero", state: "uppercut" },
+        },
+        {
+          id: "blocking_bridge",
+          type: "bridge_unconverted_source",
+          label: "Source Bridge",
+          x: 880,
+          y: 96,
+          inputs: [{ id: "exec", label: ">", kind: "exec" }],
+          outputs: [{ id: "exec", label: ">", kind: "exec" }],
+          params: { gap: "function_like_macro", source: "legacy.c", blocks_build: "true" },
+        },
+        {
+          ...GRAPH_WITHOUT_ENTRY.nodes[0],
+          id: "orphan_move",
+        },
+      ],
+      edges: [
+        { id: "e_command_true", fromNode: "dragon_punch", fromPort: "exec", toNode: "missing_anim", toPort: "exec" },
+        { id: "e_anim_bridge", fromNode: "missing_anim", fromPort: "exec", toNode: "blocking_bridge", toPort: "exec" },
+      ],
+    };
+
+    const validation = validateNodeGraph(graph, {
+      selectedEntity: heroWithGaps,
+      sceneEntities: [heroWithGaps],
+    });
+
+    const errorCodes = validation.errors.map((issue) => String(issue.code));
+    const warningCodes = validation.warnings.map((issue) => String(issue.code));
+
+    expect(errorCodes).toEqual(
+      expect.arrayContaining(["blocking_bridge", "input_command_unbound", "missing_animation"])
+    );
+    expect(warningCodes).toEqual(
+      expect.arrayContaining(["branch_without_output", "node_without_exec_input"])
+    );
+  });
 });
 
 describe("NodeGraphEditor", () => {
@@ -486,6 +643,43 @@ describe("NodeGraphEditor", () => {
     expect(state.activeWorkspace).toBe("scene");
     expect(state.activeViewportTab).toBe("scene");
     expect(state.selectedEntityId).toBe("hero");
+  });
+
+  it("toggles execution inspection with simulated trace, diagnostics and reachable node highlights", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeScene: buildSceneWithGraph(VALID_EXEC_GRAPH, [VALID_EXEC_ENTITY]),
+        activeSceneSource: buildSceneWithGraph(VALID_EXEC_GRAPH, [VALID_EXEC_ENTITY]),
+        selectedEntityId: "hero",
+      });
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      (container.querySelector("[data-testid='nodegraph-inspect-execution-toggle']") as HTMLButtonElement).click();
+      await flush();
+      await flush();
+    });
+
+    const inspector = container.querySelector("[data-testid='nodegraph-execution-inspector']");
+    expect(inspector).toBeInstanceOf(HTMLDivElement);
+    expect(inspector?.textContent).toContain("simulado / nao instrumentado");
+    expect(inspector?.textContent).toContain("input event");
+    expect(inspector?.textContent).toContain("condition");
+    expect(inspector?.textContent).toContain("action");
+    expect(inspector?.textContent).toContain("output");
+    expect(inspector?.textContent).toContain("Diagnostics");
+    expect(container.querySelector("[data-testid='node-card-entry']")?.getAttribute("data-execution-reachable")).toBe(
+      "true"
+    );
+    expect(
+      container.querySelector("[data-testid='node-card-attack_anim']")?.getAttribute("data-execution-reachable")
+    ).toBe("true");
+    expect(container.querySelector("[data-testid='nodegraph-canvas'] [data-testid='nodegraph-execution-inspector']")).toBeNull();
+    expect(useEditorStore.getState().consoleEntries.some((entry) => entry.message.includes("[NodeGraph Diagnostics]"))).toBe(
+      true
+    );
   });
 
   it("shows a guided empty state and hydrates a quick action without changing the graph schema", async () => {
