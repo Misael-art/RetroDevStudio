@@ -11,14 +11,16 @@ use image::{ImageBuffer, Rgba, RgbaImage};
 use crate::ugdm::components::{
     AnimationDef, AudioComponent, CameraComponent, CollisionComponent, CollisionOffset, Components,
     ImportedLogicSemantics, InputComponent, LogicComponent, MugenAnimationFrame, MugenCollisionBox,
-    PhysicsComponent, Pivot, SpriteComponent, TilemapComponent, Velocity,
-};
-use crate::ugdm::entities::{
-    BuildConfig, CollisionMap, Entity, PaletteEntry, PatchAuditEntry, Project, Resolution, Scene,
-    SceneLayer, TemplateMetadata, CURRENT_SCHEMA_VERSION,
+    PhysicsComponent, Pivot, SpriteCommandBinding, SpriteCommandStep, SpriteComponent,
+    TilemapComponent, Velocity,
 };
 #[cfg(test)]
-use crate::ugdm::entities::{RetroFXConfig, RetroFXParallaxLayer, RetroFXRasterLine};
+use crate::ugdm::entities::RetroFXRasterLine;
+use crate::ugdm::entities::{
+    BackgroundLayer, BuildConfig, CollisionMap, Entity, PaletteEntry, PatchAuditEntry, Project,
+    Resolution, RetroFXConfig, RetroFXParallaxLayer, Scene, SceneLayer, ScrollSpeed,
+    TemplateMetadata, CURRENT_SCHEMA_VERSION,
+};
 
 pub const UGDM_VERSION: &str = "1.0.0";
 pub const LEGACY_SCHEMA_VERSION: &str = "1.0.0";
@@ -368,6 +370,31 @@ struct MugenCharacterAtlas {
     pivot: Pivot,
 }
 
+#[derive(Debug, Clone, Default)]
+struct MugenFightingModel {
+    commands: Vec<crate::core::input_commands::InputCommandDefinition>,
+    states: Vec<MugenStateDef>,
+    controllers: Vec<MugenStateController>,
+    source_refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct MugenStateDef {
+    state_no: i32,
+    params: HashMap<String, String>,
+    source_ref: String,
+}
+
+#[derive(Debug, Clone, Default)]
+struct MugenStateController {
+    state_no: Option<i32>,
+    name: String,
+    controller_type: String,
+    params: HashMap<String, String>,
+    source_ref: String,
+    raw_lines: Vec<String>,
+}
+
 type MugenSpriteKey = (i32, i32);
 type MugenSpritePathMatch = (MugenSpriteKey, PathBuf);
 
@@ -395,6 +422,7 @@ struct GodotSceneParse {
 struct GameMakerResolvedRoot {
     effective_root: PathBuf,
     temp_root: Option<PathBuf>,
+    source_format: String,
 }
 
 #[derive(Debug, Clone)]
@@ -404,12 +432,18 @@ struct GameMakerSpriteResource {
     height: u32,
     xorigin: i32,
     yorigin: i32,
+    mask_left: i32,
+    mask_top: i32,
+    mask_right: i32,
+    mask_bottom: i32,
 }
 
 #[derive(Debug, Clone)]
 struct GameMakerEvent {
     label: String,
     code: String,
+    source_path: PathBuf,
+    line_approx: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -443,6 +477,15 @@ struct GameMakerRoomBackground {
 }
 
 #[derive(Debug, Clone)]
+struct GameMakerTileLayer {
+    name: String,
+    tileset_name: String,
+    map_width: u32,
+    map_height: u32,
+    cells: Vec<u32>,
+}
+
+#[derive(Debug, Clone)]
 struct GameMakerRoomResource {
     display_name: String,
     width: i32,
@@ -450,6 +493,12 @@ struct GameMakerRoomResource {
     instances: Vec<GameMakerRoomInstance>,
     views: Vec<GameMakerRoomView>,
     backgrounds: Vec<GameMakerRoomBackground>,
+    tile_layers: Vec<GameMakerTileLayer>,
+}
+
+#[derive(Debug, Clone)]
+struct GameMakerTilesetResource {
+    sprite_name: String,
 }
 
 #[derive(Debug, Clone)]
@@ -476,17 +525,75 @@ struct RpgMakerEventCommand {
 #[derive(Debug, Clone)]
 struct OpenBorModelAsset {
     name: String,
+    model_type: String,
+    source_file: PathBuf,
     display_asset: Option<PathBuf>,
     audio_assets: Vec<PathBuf>,
+    animations: HashMap<String, AnimationDef>,
+    collision_box: Option<OpenBorBox>,
+    attack_boxes: Vec<OpenBorAttackBox>,
+    movement_speed: i32,
+    facing: i32,
     logic_hints: Vec<String>,
+    unsupported_commands: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 struct OpenBorLevelAsset {
     name: String,
+    source_file: PathBuf,
     background_asset: Option<PathBuf>,
+    panel_assets: Vec<PathBuf>,
     music_asset: Option<PathBuf>,
+    spawns: Vec<OpenBorSpawn>,
+    scroll_dx: i32,
+    scroll_dy: i32,
     logic_hints: Vec<String>,
+    unsupported_scripts: Vec<OpenBorScriptBridge>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OpenBorBox {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OpenBorAttackBox {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+    damage: i32,
+}
+
+#[derive(Debug, Clone)]
+struct OpenBorAnimationBlock {
+    name: String,
+    frames: Vec<PathBuf>,
+    delay: u32,
+    looping: bool,
+    loop_start: Option<u32>,
+    offset: Option<Pivot>,
+    bbox: Option<OpenBorBox>,
+    attacks: Vec<OpenBorAttackBox>,
+    notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OpenBorSpawn {
+    model_name: String,
+    x: i32,
+    y: i32,
+    order: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct OpenBorScriptBridge {
+    label: String,
+    body: String,
 }
 
 struct ImportedSpriteEntitySpec {
@@ -581,7 +688,7 @@ const EXTERNAL_IMPORT_PROFILES: &[ExternalImportProfileDefinition] = &[
         id: "mugen",
         name: "MUGEN",
         family: "Fighting",
-        description: "Importa personagem, stage e screenpack via DEF/AIR com assets visuais e sonoros reais.",
+        description: "Importa personagem, stage e screenpack via DEF/AIR/CMD/CNS/ST como subset experimental de luta 2D.",
         source_engine: "mugen",
         support_status: "Experimental",
         supported_levels: &["L1", "L2", "L3"],
@@ -2382,12 +2489,14 @@ fn imported_sprite_logic_graph_phase_d(
         (_, "projectile_actor") => (4, 0),
         _ => (2, 0),
     };
+    let lane_y = 64;
+    let mut next_node_x = 528;
     let start = serde_json::json!({
         "id": "start",
         "type": "event_start",
         "label": "On Start",
         "x": 48,
-        "y": 48,
+        "y": lane_y,
         "inputs": [],
         "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
         "params": {}
@@ -2396,8 +2505,8 @@ fn imported_sprite_logic_graph_phase_d(
         "id": "move_sprite",
         "type": "sprite_move",
         "label": move_label,
-        "x": 228,
-        "y": 48,
+        "x": 288,
+        "y": lane_y,
         "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
         "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
         "params": { "target": target, "dx": mv_dx, "dy": mv_dy }
@@ -2422,12 +2531,14 @@ fn imported_sprite_logic_graph_phase_d(
             (_, "projectile_actor") => "Tiro materializado (heuristica)",
             _ => "Disparo (heuristica)",
         };
+        let fire_x = next_node_x;
+        next_node_x += 240;
         nodes.push(serde_json::json!({
             "id": "fire_hint",
             "type": "action_sound",
             "label": sfx_label,
-            "x": 228,
-            "y": 168,
+            "x": fire_x,
+            "y": lane_y,
             "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
             "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
             "params": { "sfx": "fire" }
@@ -2450,12 +2561,14 @@ fn imported_sprite_logic_graph_phase_d(
             (-1, -1, "MAP_scrollH+V")
         };
         let scroll_label = format!("Scroll Tilemap ({label_suffix})");
+        let scroll_x = next_node_x;
+        next_node_x += 240;
         nodes.push(serde_json::json!({
             "id": "scroll_bg",
             "type": "scroll_tilemap",
             "label": scroll_label,
-            "x": 408,
-            "y": 48,
+            "x": scroll_x,
+            "y": lane_y,
             "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
             "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
             "params": { "layer": "BG_A", "dx": dx, "dy": dy }
@@ -2472,6 +2585,7 @@ fn imported_sprite_logic_graph_phase_d(
 
     // Bloco E (sprint): padroes uteis adicionais por *papel* da entidade — o grafo inicial deixa de ser apenas
     // start -> move (+ fire opcional) + scroll; cada role recebe um no terminal encadeado com semantica propria.
+    let role_x = next_node_x;
     let (role_node_id, role_node) = match semantic_profile.entity_role.as_str() {
         "player_avatar" => (
             "role_player_idle_anim",
@@ -2479,8 +2593,8 @@ fn imported_sprite_logic_graph_phase_d(
                 "id": "role_player_idle_anim",
                 "type": "sprite_anim",
                 "label": "Anim jogador (idle/walk — heuristica de papel)",
-                "x": 588,
-                "y": 168,
+                "x": role_x,
+                "y": lane_y,
                 "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "params": { "target": target, "anim": "idle" }
@@ -2492,8 +2606,8 @@ fn imported_sprite_logic_graph_phase_d(
                 "id": "role_enemy_threat_sound",
                 "type": "action_sound",
                 "label": "Zona de perigo / contato (inimigo)",
-                "x": 588,
-                "y": 168,
+                "x": role_x,
+                "y": lane_y,
                 "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "params": { "sfx": "hit" }
@@ -2505,8 +2619,8 @@ fn imported_sprite_logic_graph_phase_d(
                 "id": "role_support_parallax_hint",
                 "type": "effect_parallax",
                 "label": "Parallax de cenario (apoio / vfx leve)",
-                "x": 588,
-                "y": 168,
+                "x": role_x,
+                "y": lane_y,
                 "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "params": { "layer": "BG_A", "speed_x": 1, "speed_y": 0 }
@@ -2518,8 +2632,8 @@ fn imported_sprite_logic_graph_phase_d(
                 "id": "role_fighter_melee_sound",
                 "type": "action_sound",
                 "label": "Impacto corpo-a-corpo (lutador)",
-                "x": 588,
-                "y": 168,
+                "x": role_x,
+                "y": lane_y,
                 "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "params": { "sfx": "hit" }
@@ -2531,8 +2645,8 @@ fn imported_sprite_logic_graph_phase_d(
                 "id": "role_projectile_trail_anim",
                 "type": "sprite_anim",
                 "label": "Anim projetil (trajetoria — heuristica)",
-                "x": 588,
-                "y": 168,
+                "x": role_x,
+                "y": lane_y,
                 "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "params": { "target": target, "anim": "fly" }
@@ -2544,8 +2658,8 @@ fn imported_sprite_logic_graph_phase_d(
                 "id": "role_hud_scroll_tick",
                 "type": "scroll_tilemap",
                 "label": "Scroll leve sincronizado com HUD (heuristica)",
-                "x": 588,
-                "y": 168,
+                "x": role_x,
+                "y": lane_y,
                 "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "params": { "layer": "BG_A", "dx": 0, "dy": -1 }
@@ -2557,8 +2671,8 @@ fn imported_sprite_logic_graph_phase_d(
                 "id": "role_generic_import_marker",
                 "type": "var_set",
                 "label": "Marcador de import generico (sprite)",
-                "x": 588,
-                "y": 168,
+                "x": role_x,
+                "y": lane_y,
                 "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
                 "params": { "var_name": "imported_sprite_flag", "value": 1 }
@@ -2822,6 +2936,7 @@ fn apply_sgdk_phase_d_to_sprite_entity(
         driver_functions: semantic_profile.driver_functions.clone(),
         source_paths: semantic_profile.source_paths.clone(),
         audit_flags: semantic_profile.audit_flags.clone(),
+        ..ImportedLogicSemantics::default()
     });
     let mut evidence_refs = scan.entity_resource_source_refs(resource_name);
     if evidence_refs.is_empty() {
@@ -3470,6 +3585,7 @@ fn import_sgdk_resources_into_scene(
                                 "foreground".to_string()
                             },
                             meta_sprite: is_meta,
+                            commands: Vec::new(),
                         }),
                         logic: Some(LogicComponent {
                             graph: Some(imported_sprite_logic_graph(&resource.name)),
@@ -4987,6 +5103,7 @@ fn platformer_player_prefab_with_dims(
                 animations: HashMap::new(),
                 priority: "foreground".to_string(),
                 meta_sprite: false,
+                commands: Vec::new(),
             }),
             collision: Some(CollisionComponent {
                 shape: "aabb".to_string(),
@@ -5350,6 +5467,14 @@ pub fn import_mugen_project(
     project_dir: &Path,
     mugen_path: &Path,
 ) -> Result<MugenImportReport, LoadError> {
+    import_mugen_project_with_engine(project_dir, mugen_path, "mugen")
+}
+
+fn import_mugen_project_with_engine(
+    project_dir: &Path,
+    mugen_path: &Path,
+    source_engine: &str,
+) -> Result<MugenImportReport, LoadError> {
     if !mugen_path.exists() {
         return Err(LoadError(format!(
             "Projeto MUGEN indisponivel: '{}' nao existe.",
@@ -5369,7 +5494,7 @@ pub fn import_mugen_project(
     let mut skipped = Vec::new();
 
     for candidate in candidates {
-        match import_mugen_candidate(project_dir, &candidate) {
+        match import_mugen_candidate(project_dir, &candidate, source_engine) {
             Ok(mut scenes) => imported.append(&mut scenes),
             Err(error) => skipped.push(format!("{}: {}", candidate.display_name, error)),
         }
@@ -5407,10 +5532,12 @@ pub fn import_mugen_project(
 fn import_mugen_candidate(
     project_dir: &Path,
     candidate: &MugenCandidate,
+    source_engine: &str,
 ) -> Result<Vec<Scene>, LoadError> {
     match candidate.kind {
         MugenCandidateKind::Character => {
-            import_mugen_character_candidate(project_dir, candidate).map(|scene| vec![scene])
+            import_mugen_character_candidate(project_dir, candidate, source_engine)
+                .map(|scene| vec![scene])
         }
         MugenCandidateKind::Stage => {
             import_mugen_stage_candidate(project_dir, candidate).map(|scene| vec![scene])
@@ -5896,9 +6023,646 @@ fn collect_mugen_character_logic_hints(
     Ok(hints)
 }
 
+fn collect_mugen_character_fighting_model(
+    root_dir: &Path,
+    files: &MugenIniSection,
+) -> Result<MugenFightingModel, LoadError> {
+    let mut model = MugenFightingModel::default();
+    let mut seen_paths = HashSet::new();
+    let mut logic_files = files
+        .entries
+        .iter()
+        .filter_map(|(key, relative)| {
+            let lowered_key = key.to_ascii_lowercase();
+            let priority = mugen_logic_file_priority(&lowered_key)?;
+            Some((priority, lowered_key, relative))
+        })
+        .collect::<Vec<_>>();
+    logic_files.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then(left.1.cmp(&right.1))
+            .then(left.2.cmp(right.2))
+    });
+
+    for (_, lowered_key, relative) in logic_files {
+        let path = root_dir.join(relative);
+        if !path.is_file() {
+            continue;
+        }
+        let normalized_path = path.to_string_lossy().to_string();
+        if !seen_paths.insert(normalized_path) {
+            continue;
+        }
+
+        let content = read_text_lossy(&path)?;
+        let relative_label = path
+            .strip_prefix(root_dir)
+            .ok()
+            .map(normalize_relative_path)
+            .unwrap_or_else(|| path.display().to_string());
+        model.source_refs.push(relative_label.clone());
+
+        if lowered_key == "cmd" {
+            model
+                .commands
+                .extend(crate::core::input_commands::parse_command_dat(
+                    &content,
+                    &relative_label,
+                ));
+        }
+
+        let parsed = parse_mugen_state_logic_file(&content, &relative_label);
+        model.states.extend(parsed.states);
+        model.controllers.extend(parsed.controllers);
+    }
+
+    model.source_refs.sort();
+    model.source_refs.dedup();
+    model.states.sort_by_key(|state| state.state_no);
+    model.states.dedup_by_key(|state| state.state_no);
+    Ok(model)
+}
+
+fn mugen_logic_file_priority(lowered_key: &str) -> Option<u8> {
+    if lowered_key == "cmd" {
+        Some(0)
+    } else if lowered_key == "cns" {
+        Some(1)
+    } else if matches!(lowered_key, "st" | "stcommon" | "state") || lowered_key.starts_with("st") {
+        Some(2)
+    } else {
+        None
+    }
+}
+
+fn parse_mugen_state_logic_file(content: &str, source_ref: &str) -> MugenFightingModel {
+    let mut model = MugenFightingModel::default();
+    let mut current_state: Option<MugenStateDef> = None;
+    let mut current_controller: Option<MugenStateController> = None;
+    let mut active_state_no: Option<i32> = None;
+
+    fn flush_controller(
+        model: &mut MugenFightingModel,
+        controller: &mut Option<MugenStateController>,
+    ) {
+        if let Some(controller) = controller.take() {
+            if !controller.controller_type.trim().is_empty() {
+                model.controllers.push(controller);
+            }
+        }
+    }
+
+    fn flush_state(model: &mut MugenFightingModel, state: &mut Option<MugenStateDef>) {
+        if let Some(state) = state.take() {
+            model.states.push(state);
+        }
+    }
+
+    for raw_line in content.lines() {
+        let trimmed = strip_mugen_comment(raw_line);
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            flush_controller(&mut model, &mut current_controller);
+            let section_name = trimmed[1..trimmed.len() - 1].trim();
+            if let Some(state_no) = parse_mugen_statedef_section(section_name) {
+                flush_state(&mut model, &mut current_state);
+                active_state_no = Some(state_no);
+                current_state = Some(MugenStateDef {
+                    state_no,
+                    params: HashMap::new(),
+                    source_ref: source_ref.to_string(),
+                });
+                continue;
+            }
+            if let Some((state_no, name)) = parse_mugen_state_controller_section(section_name) {
+                current_controller = Some(MugenStateController {
+                    state_no: state_no.or(active_state_no),
+                    name,
+                    controller_type: String::new(),
+                    params: HashMap::new(),
+                    source_ref: source_ref.to_string(),
+                    raw_lines: vec![trimmed],
+                });
+                continue;
+            }
+        }
+
+        if let Some(controller) = current_controller.as_mut() {
+            controller.raw_lines.push(trimmed.clone());
+            if let Some((key, value)) = trimmed.split_once('=') {
+                let normalized_key = key.trim().to_ascii_lowercase();
+                let normalized_value = value.trim().trim_matches('"').trim().to_string();
+                if normalized_key == "type" {
+                    controller.controller_type = normalized_value.clone();
+                }
+                controller.params.insert(normalized_key, normalized_value);
+            }
+            continue;
+        }
+
+        if let Some(state) = current_state.as_mut() {
+            if let Some((key, value)) = trimmed.split_once('=') {
+                state.params.insert(
+                    key.trim().to_ascii_lowercase(),
+                    value.trim().trim_matches('"').trim().to_string(),
+                );
+            }
+        }
+    }
+
+    flush_controller(&mut model, &mut current_controller);
+    flush_state(&mut model, &mut current_state);
+    model
+}
+
+fn parse_mugen_statedef_section(section_name: &str) -> Option<i32> {
+    let mut parts = section_name.split_whitespace();
+    let head = parts.next()?;
+    if !head.eq_ignore_ascii_case("statedef") {
+        return None;
+    }
+    parts.next()?.trim().parse::<i32>().ok()
+}
+
+fn parse_mugen_state_controller_section(section_name: &str) -> Option<(Option<i32>, String)> {
+    let lowered = section_name.to_ascii_lowercase();
+    if !lowered.starts_with("state ") {
+        return None;
+    }
+    let inner = section_name[5..].trim();
+    let mut parts = inner.splitn(2, ',');
+    let state_no = parts
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .and_then(|value| value.parse::<i32>().ok());
+    let name = parts
+        .next()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("controller")
+        .to_string();
+    Some((state_no, name))
+}
+
+fn mugen_graph_ref(entity_id: &str) -> String {
+    format!("graphs/mugen_{}.json", sgdk_entity_id(entity_id))
+}
+
+fn mugen_command_bindings(
+    model: &MugenFightingModel,
+    animations: &HashMap<String, AnimationDef>,
+) -> Vec<SpriteCommandBinding> {
+    let command_state_targets = mugen_command_state_targets(model);
+    model
+        .commands
+        .iter()
+        .map(|command| {
+            let target_animation = command_state_targets
+                .get(&command.id)
+                .and_then(|state_no| mugen_state_anim(model, *state_no))
+                .map(|anim| format!("action_{anim}"))
+                .filter(|anim| animations.contains_key(anim))
+                .or_else(|| {
+                    let by_id = format!("action_{}", command.id);
+                    animations.contains_key(&by_id).then_some(by_id)
+                })
+                .or_else(|| {
+                    animations
+                        .contains_key("idle")
+                        .then_some("idle".to_string())
+                })
+                .unwrap_or_else(|| "action_0".to_string());
+
+            SpriteCommandBinding {
+                id: command.id.clone(),
+                display_name: command.display_name.clone(),
+                notation: command.notation.clone(),
+                source: command.source.clone(),
+                target_animation,
+                max_frames: command.max_frames,
+                button_profile: "megadrive".to_string(),
+                unsupported_tokens: command.unsupported_tokens.clone(),
+                steps: command
+                    .steps
+                    .iter()
+                    .map(|step| SpriteCommandStep {
+                        tokens: step.tokens.clone(),
+                        display: step.display.clone(),
+                    })
+                    .collect(),
+            }
+        })
+        .collect()
+}
+
+fn mugen_command_state_targets(model: &MugenFightingModel) -> HashMap<String, i32> {
+    let mut targets = HashMap::new();
+    for controller in &model.controllers {
+        if !controller
+            .controller_type
+            .eq_ignore_ascii_case("changestate")
+        {
+            continue;
+        }
+        let Some(target_state) = mugen_controller_i32(controller, "value") else {
+            continue;
+        };
+        for value in controller.params.values() {
+            if let Some(command_name) = mugen_trigger_command_name(value) {
+                targets.insert(sgdk_entity_id(&command_name), target_state);
+            }
+        }
+    }
+    targets
+}
+
+fn mugen_trigger_command_name(value: &str) -> Option<String> {
+    let lowered = value.to_ascii_lowercase();
+    if !lowered.contains("command") {
+        return None;
+    }
+    if let Some(start) = value.find('"') {
+        let rest = &value[start + 1..];
+        if let Some(end) = rest.find('"') {
+            return Some(rest[..end].trim().to_string());
+        }
+    }
+    value
+        .split('=')
+        .nth(1)
+        .map(str::trim)
+        .map(|value| value.trim_matches('"').to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn mugen_state_anim(model: &MugenFightingModel, state_no: i32) -> Option<i32> {
+    model
+        .states
+        .iter()
+        .find(|state| state.state_no == state_no)
+        .and_then(|state| state.params.get("anim"))
+        .and_then(|value| value.parse::<i32>().ok())
+}
+
+fn mugen_controller_i32(controller: &MugenStateController, key: &str) -> Option<i32> {
+    controller
+        .params
+        .get(&key.to_ascii_lowercase())
+        .and_then(|value| parse_mugen_number_i32(value))
+}
+
+fn parse_mugen_number_i32(value: &str) -> Option<i32> {
+    let first = value.split(',').next()?.trim();
+    first
+        .parse::<i32>()
+        .ok()
+        .or_else(|| first.parse::<f32>().ok().map(|value| value.round() as i32))
+}
+
+fn parse_mugen_pair_numbers(value: Option<&str>) -> Option<(i32, i32)> {
+    let value = value?;
+    let numbers = value
+        .split(',')
+        .filter_map(|entry| {
+            let trimmed = entry.trim();
+            trimmed.parse::<i32>().ok().or_else(|| {
+                trimmed
+                    .parse::<f32>()
+                    .ok()
+                    .map(|value| value.round() as i32)
+            })
+        })
+        .collect::<Vec<_>>();
+    (numbers.len() >= 2).then_some((numbers[0], numbers[1]))
+}
+
+fn imported_mugen_fighting_logic_graph(entity_id: &str, model: &MugenFightingModel) -> String {
+    let mut nodes = Vec::<serde_json::Value>::new();
+    let mut edges = Vec::<serde_json::Value>::new();
+    nodes.push(mugen_node(
+        "start",
+        "event_start",
+        "On Start",
+        40,
+        80,
+        serde_json::json!({}),
+    ));
+    nodes.push(mugen_node(
+        "idle_anim",
+        "sprite_anim",
+        "Idle Animation",
+        260,
+        80,
+        serde_json::json!({ "target": entity_id, "anim": "idle" }),
+    ));
+    edges.push(mugen_edge(
+        "edge_start_idle",
+        "start",
+        "exec",
+        "idle_anim",
+        "exec",
+    ));
+
+    for (index, command) in model.commands.iter().enumerate() {
+        nodes.push(mugen_node(
+            &format!("cmd_{}", command.id),
+            "input_command",
+            &command.display_name,
+            40,
+            220 + index as i32 * 92,
+            serde_json::json!({
+                "command_id": command.id.clone(),
+                "display_name": command.display_name.clone(),
+                "notation": command.notation.clone(),
+                "max_frames": command.max_frames,
+                "pad": "JOY_1",
+                "button_profile": "megadrive",
+                "target": entity_id
+            }),
+        ));
+    }
+
+    for (index, state) in model.states.iter().enumerate() {
+        nodes.push(mugen_node(
+            &format!("fsm_state_{}", state.state_no),
+            "fsm_state",
+            &format!("State {}", state.state_no),
+            420,
+            80 + index as i32 * 92,
+            serde_json::json!({
+                "state_name": format!("state_{}", state.state_no),
+                "state_no": state.state_no,
+                "anim": state.params.get("anim").cloned().unwrap_or_default(),
+                "source": state.source_ref.clone(),
+                "initial": if state.state_no == 0 { 1 } else { 0 }
+            }),
+        ));
+    }
+
+    for (index, controller) in model.controllers.iter().enumerate() {
+        let x = 760 + (index as i32 % 2) * 220;
+        let y = 80 + (index as i32 / 2) * 96;
+        let id = format!(
+            "mugen_{}_{}",
+            sgdk_entity_id(&controller.controller_type),
+            index
+        );
+        match controller.controller_type.to_ascii_lowercase().as_str() {
+            "changestate" => {
+                let target_state = mugen_controller_i32(controller, "value").unwrap_or(0);
+                nodes.push(mugen_node(
+                    &id,
+                    "fsm_transition",
+                    &format!("ChangeState {}", target_state),
+                    x,
+                    y,
+                    serde_json::json!({
+                        "target_state": format!("state_{}", target_state),
+                        "source_state": controller.state_no.map(|value| format!("state_{value}")).unwrap_or_default(),
+                        "trigger": mugen_controller_trigger_summary(controller),
+                        "source": controller.source_ref.clone()
+                    }),
+                ));
+            }
+            "velset" | "veladd" => {
+                nodes.push(mugen_node(
+                    &id,
+                    "set_velocity",
+                    &controller.controller_type,
+                    x,
+                    y,
+                    serde_json::json!({
+                        "target": entity_id,
+                        "vx": mugen_controller_i32(controller, "x").unwrap_or(0),
+                        "vy": mugen_controller_i32(controller, "y").unwrap_or(0),
+                        "mode": if controller.controller_type.eq_ignore_ascii_case("VelAdd") { "add" } else { "set" },
+                        "source_state": controller.state_no.map(|value| format!("state_{value}")).unwrap_or_default(),
+                        "source": controller.source_ref.clone()
+                    }),
+                ));
+            }
+            "posset" | "posadd" => {
+                nodes.push(mugen_node(
+                    &id,
+                    "set_position",
+                    &controller.controller_type,
+                    x,
+                    y,
+                    serde_json::json!({
+                        "target": entity_id,
+                        "x": mugen_controller_i32(controller, "x").unwrap_or(0),
+                        "y": mugen_controller_i32(controller, "y").unwrap_or(0),
+                        "mode": if controller.controller_type.eq_ignore_ascii_case("PosAdd") { "add" } else { "set" },
+                        "source_state": controller.state_no.map(|value| format!("state_{value}")).unwrap_or_default(),
+                        "source": controller.source_ref.clone()
+                    }),
+                ));
+            }
+            "playsnd" => {
+                let sfx = controller
+                    .params
+                    .get("value")
+                    .and_then(|value| parse_pair_i32(Some(value)))
+                    .map(|(group, sound)| format!("snd_{}_{}", group, sound))
+                    .unwrap_or_else(|| "mugen_sound".to_string());
+                nodes.push(mugen_node(
+                    &id,
+                    "action_sound",
+                    "PlaySnd",
+                    x,
+                    y,
+                    serde_json::json!({
+                        "sfx": sfx,
+                        "source_state": controller.state_no.map(|value| format!("state_{value}")).unwrap_or_default(),
+                        "source": controller.source_ref.clone()
+                    }),
+                ));
+            }
+            "hitdef" => {
+                nodes.push(mugen_node(
+                    &id,
+                    "bridge_unconverted_source",
+                    "HitDef Bridge",
+                    x,
+                    y,
+                    serde_json::json!({
+                        "gap": "mugen_hitdef",
+                        "source": controller.raw_lines.join("\\n"),
+                        "state": controller.state_no.map(|value| format!("state_{value}")).unwrap_or_default(),
+                        "attr": controller.params.get("attr").cloned().unwrap_or_default(),
+                        "damage": controller.params.get("damage").cloned().unwrap_or_default()
+                    }),
+                ));
+            }
+            "" => {}
+            _ => {
+                nodes.push(mugen_node(
+                    &id,
+                    "bridge_unconverted_source",
+                    "MUGEN Extension Bridge",
+                    x,
+                    y,
+                    serde_json::json!({
+                        "gap": "mugen_unsupported_controller",
+                        "controller": controller.controller_type.clone(),
+                        "name": controller.name.clone(),
+                        "source": controller.raw_lines.join("\\n"),
+                        "state": controller.state_no.map(|value| format!("state_{value}")).unwrap_or_default()
+                    }),
+                ));
+            }
+        }
+    }
+
+    serde_json::json!({
+        "version": 1,
+        "nodes": nodes,
+        "edges": edges,
+        "gaps": mugen_graph_gaps(model)
+    })
+    .to_string()
+}
+
+fn mugen_node(
+    id: &str,
+    node_type: &str,
+    label: &str,
+    x: i32,
+    y: i32,
+    params: serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "type": node_type,
+        "label": label,
+        "x": x,
+        "y": y,
+        "inputs": mugen_node_inputs(node_type),
+        "outputs": mugen_node_outputs(node_type),
+        "params": params
+    })
+}
+
+fn mugen_node_inputs(node_type: &str) -> serde_json::Value {
+    match node_type {
+        "event_start" | "input_command" | "fsm_state" => serde_json::json!([]),
+        "fsm_transition" => serde_json::json!([
+            { "id": "exec", "label": ">", "kind": "exec" },
+            { "id": "condition", "label": "Condition", "kind": "data", "dataType": "bool" }
+        ]),
+        _ => serde_json::json!([{ "id": "exec", "label": ">", "kind": "exec" }]),
+    }
+}
+
+fn mugen_node_outputs(node_type: &str) -> serde_json::Value {
+    match node_type {
+        "input_command" => serde_json::json!([
+            { "id": "exec", "label": ">", "kind": "exec" },
+            { "id": "false", "label": "False >", "kind": "exec" }
+        ]),
+        "fsm_state" => serde_json::json!([
+            { "id": "exec", "label": "Body >", "kind": "exec" },
+            { "id": "transitions", "label": "Transitions >", "kind": "exec" }
+        ]),
+        "fsm_transition" => serde_json::json!([
+            { "id": "matched", "label": "Matched >", "kind": "exec" },
+            { "id": "next", "label": "Next >", "kind": "exec" }
+        ]),
+        _ => serde_json::json!([{ "id": "exec", "label": ">", "kind": "exec" }]),
+    }
+}
+
+fn mugen_edge(
+    id: &str,
+    from_node: &str,
+    from_port: &str,
+    to_node: &str,
+    to_port: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "fromNode": from_node,
+        "fromPort": from_port,
+        "toNode": to_node,
+        "toPort": to_port
+    })
+}
+
+fn mugen_controller_trigger_summary(controller: &MugenStateController) -> String {
+    let mut triggers = controller
+        .params
+        .iter()
+        .filter(|(key, _)| key.starts_with("trigger"))
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>();
+    triggers.sort();
+    triggers.join("; ")
+}
+
+fn mugen_graph_gaps(model: &MugenFightingModel) -> Vec<serde_json::Value> {
+    model
+        .controllers
+        .iter()
+        .filter_map(|controller| {
+            let lowered = controller.controller_type.to_ascii_lowercase();
+            if lowered == "hitdef" {
+                Some(serde_json::json!({
+                    "id": "mugen_hitdef",
+                    "reason": "HitDef preservado como bridge ate existir node de ataque nativo completo.",
+                    "blocks_build": false
+                }))
+            } else if !matches!(
+                lowered.as_str(),
+                "changestate" | "velset" | "veladd" | "posset" | "posadd" | "playsnd" | ""
+            ) {
+                Some(serde_json::json!({
+                    "id": format!("mugen_{}", sgdk_entity_id(&controller.controller_type)),
+                    "reason": format!("Controller MUGEN/Ikemen '{}' preservado como bridge.", controller.controller_type),
+                    "blocks_build": false
+                }))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn mugen_import_audit_flags(model: &MugenFightingModel) -> Vec<String> {
+    let mut flags = Vec::new();
+    if !model.commands.is_empty() {
+        flags.push("mugen:cmd_input_commands".to_string());
+    }
+    if !model.states.is_empty() {
+        flags.push("mugen:state_machine".to_string());
+    }
+    if model
+        .controllers
+        .iter()
+        .any(|controller| controller.controller_type.eq_ignore_ascii_case("HitDef"))
+    {
+        flags.push("mugen:hitdef_bridge".to_string());
+    }
+    if model.controllers.iter().any(|controller| {
+        let lowered = controller.controller_type.to_ascii_lowercase();
+        !matches!(
+            lowered.as_str(),
+            "changestate" | "velset" | "veladd" | "posset" | "posadd" | "playsnd" | "hitdef" | ""
+        )
+    }) {
+        flags.push("mugen:unsupported_bridge".to_string());
+    }
+    flags
+}
+
 fn import_mugen_character_candidate(
     project_dir: &Path,
     candidate: &MugenCandidate,
+    source_engine: &str,
 ) -> Result<Scene, LoadError> {
     let def_content = read_text_lossy(&candidate.def_path)?;
     let sections = parse_mugen_ini(&def_content);
@@ -5942,6 +6706,7 @@ fn import_mugen_character_candidate(
 
     let atlas = compose_mugen_character_atlas(&extracted_sprites)?;
     let character_slug = sgdk_entity_id(&candidate.display_name);
+    let entity_id = sgdk_entity_id(&candidate.display_name);
     let atlas_asset = format!("assets/sprites/mugen_{}_atlas.png", character_slug);
     save_rgba_image(&project_dir.join(&atlas_asset), &atlas.image)?;
 
@@ -5949,13 +6714,55 @@ fn import_mugen_character_candidate(
     if let Some(idle) = animations.get("action_0").cloned() {
         animations.insert("idle".to_string(), idle);
     }
+    let fighting_model = collect_mugen_character_fighting_model(&candidate.root_dir, files)?;
+    let has_fighting_logic = !fighting_model.commands.is_empty()
+        || !fighting_model.states.is_empty()
+        || !fighting_model.controllers.is_empty();
+    let command_bindings = mugen_command_bindings(&fighting_model, &animations);
+    let graph = if has_fighting_logic {
+        imported_mugen_fighting_logic_graph(&entity_id, &fighting_model)
+    } else {
+        imported_mugen_idle_logic_graph(&entity_id)
+    };
+    let graph_ref = mugen_graph_ref(&entity_id);
+    save_graph_asset(project_dir, &graph_ref, &graph)?;
 
     let mut scene = canonical_scene(
         &sgdk_entity_id(&candidate.display_name),
         Some(candidate.display_name.clone()),
     );
-    let entity_id = sgdk_entity_id(&candidate.display_name);
     let logic_hints = collect_mugen_character_logic_hints(&candidate.root_dir, files)?;
+    let mut logic = imported_logic_component(Some(graph), logic_hints);
+    logic.graph_ref = Some(graph_ref);
+    logic.graph_origin = Some(
+        if has_fighting_logic {
+            "mugen_fighting_import"
+        } else {
+            "mugen_def_air_import"
+        }
+        .to_string(),
+    );
+    logic.external_source_refs = fighting_model.source_refs.clone();
+    logic.imported_semantics = Some(ImportedLogicSemantics {
+        source: source_engine.to_string(),
+        gameplay_class: "fighting_2d".to_string(),
+        entity_role: "fighter_actor".to_string(),
+        confidence: if fighting_model.controllers.is_empty() {
+            "low".to_string()
+        } else {
+            "medium".to_string()
+        },
+        role_reason: "DEF/AIR/CMD/CNS/ST importado como subset editavel de luta 2D.".to_string(),
+        driver_functions: fighting_model
+            .controllers
+            .iter()
+            .map(|controller| controller.controller_type.clone())
+            .filter(|value| !value.is_empty())
+            .collect(),
+        source_paths: fighting_model.source_refs.clone(),
+        audit_flags: mugen_import_audit_flags(&fighting_model),
+        ..ImportedLogicSemantics::default()
+    });
     scene.entities.push(Entity {
         entity_id: entity_id.clone(),
         display_name: Some(candidate.display_name.clone()),
@@ -5971,12 +6778,10 @@ fn import_mugen_character_candidate(
                 animations,
                 priority: "foreground".to_string(),
                 meta_sprite: atlas.cell_width > 32 || atlas.cell_height > 32,
+                commands: command_bindings,
             }),
             collision: mugen_collision_component_from_actions(&actions),
-            logic: Some(imported_logic_component(
-                Some(imported_mugen_idle_logic_graph(&entity_id)),
-                logic_hints,
-            )),
+            logic: Some(logic),
             ..Components::default()
         },
     });
@@ -6036,6 +6841,14 @@ fn import_mugen_stage_candidate(
                 .unwrap_or_else(|| ".png".to_string())
         );
         copy_template_asset(&loose_background, &project_dir.join(&asset_rel))?;
+        push_mugen_background_metadata(
+            &mut scene,
+            "bg_0",
+            candidate.display_name.as_str(),
+            &asset_rel,
+            0,
+            (1, 1),
+        );
         scene.entities.push(static_mugen_sprite_entity(
             "bg_0",
             candidate.display_name.as_str(),
@@ -6080,8 +6893,20 @@ fn import_mugen_stage_candidate(
                 save_rgba_image(&project_dir.join(&asset_rel), &sprite.pixels)?;
                 let (x, y) = parse_pair_i32(section.entries.get("start").map(String::as_str))
                     .unwrap_or((0, 0));
+                let entity_id = format!("bg_{}", index);
+                let delta =
+                    parse_mugen_pair_numbers(section.entries.get("delta").map(String::as_str))
+                        .unwrap_or((1, 1));
+                push_mugen_background_metadata(
+                    &mut scene,
+                    &entity_id,
+                    section.name.as_str(),
+                    &asset_rel,
+                    index as u32,
+                    delta,
+                );
                 scene.entities.push(static_mugen_sprite_entity(
-                    &format!("bg_{}", index),
+                    &entity_id,
                     section.name.as_str(),
                     &asset_rel,
                     &project_dir.join(&asset_rel),
@@ -6235,8 +7060,19 @@ fn build_mugen_visual_scene(
             save_rgba_image(&project_dir.join(&asset_rel), &sprite.pixels)?;
             let (x, y) =
                 parse_pair_i32(section.entries.get("start").map(String::as_str)).unwrap_or((0, 0));
+            let entity_id = format!("{}_{}", asset_prefix, index);
+            let delta = parse_mugen_pair_numbers(section.entries.get("delta").map(String::as_str))
+                .unwrap_or((1, 1));
+            push_mugen_background_metadata(
+                &mut scene,
+                &entity_id,
+                section.name.as_str(),
+                &asset_rel,
+                index as u32,
+                delta,
+            );
             scene.entities.push(static_mugen_sprite_entity(
-                &format!("{}_{}", asset_prefix, index),
+                &entity_id,
                 section.name.as_str(),
                 &asset_rel,
                 &project_dir.join(&asset_rel),
@@ -6276,6 +7112,41 @@ fn build_mugen_visual_scene(
     Ok(scene)
 }
 
+fn push_mugen_background_metadata(
+    scene: &mut Scene,
+    layer_id: &str,
+    name: &str,
+    asset_rel: &str,
+    depth: u32,
+    delta: (i32, i32),
+) {
+    scene.background_layers.push(BackgroundLayer {
+        layer_id: layer_id.to_string(),
+        depth,
+        tileset: asset_rel.to_string(),
+        scroll_speed: Some(ScrollSpeed {
+            x: delta.0,
+            y: delta.1,
+        }),
+        tilemap: None,
+    });
+
+    let retrofx = scene.retrofx.get_or_insert_with(RetroFXConfig::default);
+    if !retrofx
+        .parallax_layers
+        .iter()
+        .any(|layer| layer.id == layer_id)
+    {
+        retrofx.parallax_layers.push(RetroFXParallaxLayer {
+            id: layer_id.to_string(),
+            name: name.to_string(),
+            speed_x: delta.0,
+            speed_y: delta.1,
+            enabled: true,
+        });
+    }
+}
+
 fn static_mugen_sprite_entity(
     entity_id: &str,
     display_name: &str,
@@ -6285,6 +7156,8 @@ fn static_mugen_sprite_entity(
     y: i32,
 ) -> Result<Entity, LoadError> {
     let (width, height) = image::image_dimensions(asset_abs).unwrap_or((32, 32));
+    let map_width = width.div_ceil(8).max(1);
+    let map_height = height.div_ceil(8).max(1);
     Ok(Entity {
         entity_id: entity_id.to_string(),
         display_name: Some(display_name.to_string()),
@@ -6300,6 +7173,15 @@ fn static_mugen_sprite_entity(
                 animations: HashMap::new(),
                 priority: "background".to_string(),
                 meta_sprite: width > 32 || height > 32,
+                commands: Vec::new(),
+            }),
+            tilemap: Some(TilemapComponent {
+                tileset: asset_rel.to_string(),
+                map_width,
+                map_height,
+                scroll_x: 0,
+                scroll_y: 0,
+                cells: Vec::new(),
             }),
             ..Components::default()
         },
@@ -7096,7 +7978,8 @@ pub fn import_external_project(
             })
         }
         "mugen" | "ikemen_go" => {
-            let report = import_mugen_project(project_dir, source_path)?;
+            let report =
+                import_mugen_project_with_engine(project_dir, source_path, profile.source_engine)?;
             Ok(ExternalImportReport {
                 primary_scene: report.primary_scene,
                 imported_scenes: report.imported_scenes,
@@ -7132,7 +8015,7 @@ pub fn stamp_imported_external_profile_metadata(
             "imported_mugen".to_string(),
             "1.0.0".to_string(),
             "imported_mugen".to_string(),
-            "mugen_def_air_v1".to_string(),
+            "mugen_fighting_subset_v1".to_string(),
         ),
         "ikemen_go" => (
             "imported_ikemen_go".to_string(),
@@ -7195,7 +8078,14 @@ pub fn import_gamemaker_project(
 ) -> Result<ExternalImportReport, LoadError> {
     let resolved = resolve_gamemaker_source_root(source_path)?;
     let gm_root = resolved.effective_root;
+    let source_format = resolved.source_format.clone();
+    let source_semantics = if source_format == "yyp" || source_format == "yy" {
+        "gamemaker_yy"
+    } else {
+        "gamemaker_gmx"
+    };
     let sprites = load_gamemaker_sprites(&gm_root)?;
+    let tilesets = load_gamemaker_tilesets(&gm_root)?;
     let backgrounds = load_gamemaker_backgrounds(&gm_root)?;
     let objects = load_gamemaker_objects(&gm_root)?;
     let room = load_gamemaker_primary_room(&gm_root)?;
@@ -7212,12 +8102,21 @@ pub fn import_gamemaker_project(
             entity_ids: Vec::new(),
         },
         SceneLayer {
+            id: "layer_tiles".to_string(),
+            name: "TILES".to_string(),
+            kind: "tile".to_string(),
+            visible: true,
+            locked: false,
+            depth: 1,
+            entity_ids: Vec::new(),
+        },
+        SceneLayer {
             id: "layer_instances".to_string(),
             name: "INSTANCES".to_string(),
             kind: "sprite".to_string(),
             visible: true,
             locked: false,
-            depth: 1,
+            depth: 2,
             entity_ids: Vec::new(),
         },
         SceneLayer {
@@ -7226,7 +8125,7 @@ pub fn import_gamemaker_project(
             kind: "object".to_string(),
             visible: true,
             locked: false,
-            depth: 2,
+            depth: 3,
             entity_ids: Vec::new(),
         },
     ]);
@@ -7251,8 +8150,27 @@ pub fn import_gamemaker_project(
         scene.entities.push(background_entity);
     }
 
+    let tile_entities = import_gamemaker_tile_layer_entities(
+        project_dir,
+        &gm_root,
+        &room.tile_layers,
+        &tilesets,
+        &sprites,
+        &mut entity_ids,
+        &mut asset_cache,
+    )?;
+    for entity in tile_entities {
+        if let Some(layers) = scene.layers.as_mut() {
+            if let Some(layer) = layers.iter_mut().find(|layer| layer.id == "layer_tiles") {
+                layer.entity_ids.push(entity.entity_id.clone());
+            }
+        }
+        scene.entities.push(entity);
+    }
+
     let wall_sprite = objects
-        .get("oWall")
+        .values()
+        .find(|object| is_gamemaker_static_collision_object(&object.name))
         .and_then(|object| object.sprite_name.as_ref())
         .and_then(|sprite_name| sprites.get(sprite_name));
     let wall_instances = room
@@ -7294,9 +8212,19 @@ pub fn import_gamemaker_project(
         let event_pairs = object
             .events
             .iter()
-            .map(|event| (event.label.clone(), event.code.clone()))
+            .map(|event| crate::core::gml_to_nodes::GmlEventInput {
+                label: event.label.clone(),
+                code: event.code.clone(),
+                source_file: event
+                    .source_path
+                    .strip_prefix(&gm_root)
+                    .ok()
+                    .map(normalize_relative_path)
+                    .unwrap_or_else(|| event.source_path.display().to_string()),
+                line_approx: event.line_approx,
+            })
             .collect::<Vec<_>>();
-        let conversion = crate::core::gml_to_nodes::convert_gamemaker_object_to_graph(
+        let conversion = crate::core::gml_to_nodes::convert_gamemaker_object_events_to_graph(
             &entity_id,
             &object.name,
             &event_pairs,
@@ -7306,10 +8234,22 @@ pub fn import_gamemaker_project(
         let graph_ref = persist_gamemaker_conversion_graph(project_dir, &entity_id, &conversion)?;
 
         let mut logic_hints = Vec::new();
+        for event in &object.events {
+            logic_hints.push(format!(
+                "GameMaker {} GML: {}",
+                event.label,
+                compact_gml_snippet(&event.code)
+            ));
+        }
         for gap in &conversion.gaps {
             logic_hints.push(format!(
-                "Gap GameMaker [{}] {}: {}",
-                gap.severity, gap.source_event, gap.reason
+                "Gap GameMaker [{}] {}:{} {}: impacto={} sugestao={}",
+                gap.severity,
+                gap.source_file,
+                gap.line_approx,
+                gap.reason,
+                gap.impact,
+                gap.suggestion
             ));
         }
         if let Some(code) = instance
@@ -7324,7 +8264,10 @@ pub fn import_gamemaker_project(
         }
 
         let role = gamemaker_entity_role(&object.name, &logic_hints);
-        let (asset, materialized_sprite_dims) = if gamemaker_should_attach_md_sprite(&role, &object.name) {
+        let (asset, materialized_sprite_dims) = if gamemaker_should_attach_md_sprite(
+            &role,
+            &object.name,
+        ) {
             if let Some(sprite) = sprite {
                 let (asset_path, width, height) = materialize_gamemaker_rgba_asset(
                     project_dir,
@@ -7358,6 +8301,18 @@ pub fn import_gamemaker_project(
             .ok()
             .map(normalize_relative_path)
             .unwrap_or_else(|| object.source_path.display().to_string());
+        let mut source_refs = vec![source_ref];
+        for event in &object.events {
+            let event_ref = event
+                .source_path
+                .strip_prefix(&gm_root)
+                .ok()
+                .map(normalize_relative_path)
+                .unwrap_or_else(|| event.source_path.display().to_string());
+            if !source_refs.contains(&event_ref) {
+                source_refs.push(event_ref);
+            }
+        }
         let native_graph = conversion.blocking_gaps == 0
             && conversion.native_constructs.iter().any(|value| {
                 value == "event_update" || value == "input_held" || value == "camera_follow"
@@ -7398,6 +8353,7 @@ pub fn import_gamemaker_project(
                         "midground".to_string()
                     },
                     meta_sprite: sprite.width > 32 || sprite.height > 32,
+                    commands: Vec::new(),
                 }),
                 collision: gamemaker_collision_component(object, sprite),
                 input: gamemaker_input_component(&logic_hints),
@@ -7406,14 +8362,14 @@ pub fn import_gamemaker_project(
                     graph: None,
                     graph_ref: Some(graph_ref),
                     graph_origin: Some(if native_graph {
-                        "gamemaker_gmx_native".to_string()
+                        format!("{source_semantics}_native")
                     } else {
-                        "gamemaker_gmx".to_string()
+                        source_semantics.to_string()
                     }),
                     logic_hints,
-                    external_source_refs: vec![source_ref],
+                    external_source_refs: source_refs.clone(),
                     imported_semantics: Some(ImportedLogicSemantics {
-                        source: "gamemaker_gmx".to_string(),
+                        source: source_semantics.to_string(),
                         gameplay_class: "room_based_2d".to_string(),
                         entity_role: role,
                         confidence: if native_graph {
@@ -7429,12 +8385,13 @@ pub fn import_gamemaker_project(
                                 .to_string()
                         },
                         driver_functions: conversion.native_constructs.clone(),
-                        source_paths: Vec::new(),
+                        source_paths: source_refs,
                         audit_flags: if native_graph {
                             vec!["gml_native_subset".to_string()]
                         } else {
                             vec!["gml_bridge_preserved".to_string()]
                         },
+                        ..ImportedLogicSemantics::default()
                     }),
                     variables: HashMap::from([
                         (
@@ -7492,7 +8449,8 @@ pub fn import_gamemaker_project(
     }
 
     skipped.push(format!(
-        "GameMaker import: {} entidades com grafo nativo/bridge, {} nodes gerados, {} gaps bloqueantes, {} paredes agregadas em collision_map.",
+        "GameMaker import: formato={}, {} entidades com grafo nativo/bridge, {} nodes gerados, {} gaps bloqueantes, {} paredes agregadas em collision_map.",
+        source_format,
         native_graph_entities,
         total_nodes_generated,
         blocking_gaps,
@@ -7513,9 +8471,12 @@ pub fn import_gamemaker_project(
 
 fn resolve_gamemaker_source_root(source_path: &Path) -> Result<GameMakerResolvedRoot, LoadError> {
     if source_path.is_dir() {
+        let effective_root = find_gamemaker_project_root(source_path)?;
+        let source_format = detect_gamemaker_project_format(&effective_root, source_path);
         return Ok(GameMakerResolvedRoot {
-            effective_root: find_gamemaker_project_root(source_path)?,
+            effective_root,
             temp_root: None,
+            source_format,
         });
     }
 
@@ -7524,9 +8485,25 @@ fn resolve_gamemaker_source_root(source_path: &Path) -> Result<GameMakerResolved
         .and_then(|value| value.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
+    if extension == "yyp" || extension == "yy" {
+        let effective_root = find_gamemaker_project_root(source_path)?;
+        return Ok(GameMakerResolvedRoot {
+            effective_root,
+            temp_root: None,
+            source_format: extension,
+        });
+    }
+    if extension == "gmx" {
+        let effective_root = find_gamemaker_project_root(source_path)?;
+        return Ok(GameMakerResolvedRoot {
+            effective_root,
+            temp_root: None,
+            source_format: extension,
+        });
+    }
     if !["gmez", "gmz", "gmx"].contains(&extension.as_str()) {
         return Err(LoadError(format!(
-            "Projeto GameMaker invalido: '{}' nao e diretorio GMX nem pacote GMZ/GMEZ.",
+            "Projeto GameMaker invalido: '{}' nao e diretorio/projeto GMX, pacote GMZ/GMEZ, ou manifesto YYP/YY.",
             source_path.display()
         )));
     }
@@ -7556,13 +8533,56 @@ fn resolve_gamemaker_source_root(source_path: &Path) -> Result<GameMakerResolved
         ))
     })?;
     let effective_root = find_gamemaker_project_root(&temp_root)?;
+    let source_format = detect_gamemaker_project_format(&effective_root, source_path);
     Ok(GameMakerResolvedRoot {
         effective_root,
         temp_root: Some(temp_root),
+        source_format,
     })
 }
 
 fn find_gamemaker_project_root(root: &Path) -> Result<PathBuf, LoadError> {
+    if root.is_file() {
+        let extension = root
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
+        if extension.eq_ignore_ascii_case("yyp") {
+            return root.parent().map(Path::to_path_buf).ok_or_else(|| {
+                LoadError(format!(
+                    "Projeto GameMaker invalido: manifesto YYP '{}' sem diretorio pai.",
+                    root.display()
+                ))
+            });
+        }
+        if extension.eq_ignore_ascii_case("yy") {
+            for candidate in root.ancestors().skip(1) {
+                if is_gamemaker_project_root(candidate) {
+                    return Ok(candidate.to_path_buf());
+                }
+            }
+        }
+        if extension.eq_ignore_ascii_case("gmx") {
+            if root
+                .file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|name| name.ends_with(".project.gmx"))
+            {
+                return root.parent().map(Path::to_path_buf).ok_or_else(|| {
+                    LoadError(format!(
+                        "Projeto GameMaker invalido: manifesto GMX '{}' sem diretorio pai.",
+                        root.display()
+                    ))
+                });
+            }
+            for candidate in root.ancestors().skip(1) {
+                if is_gamemaker_project_root(candidate) {
+                    return Ok(candidate.to_path_buf());
+                }
+            }
+        }
+    }
+
     for candidate in [root.to_path_buf(), root.join("src")] {
         if is_gamemaker_project_root(&candidate) {
             return Ok(candidate);
@@ -7598,16 +8618,33 @@ fn find_gamemaker_project_root(root: &Path) -> Result<PathBuf, LoadError> {
     }
 
     Err(LoadError(format!(
-        "Projeto GameMaker invalido: nenhum root GMX com objects/rooms/sprites encontrado em '{}'.",
+        "Projeto GameMaker invalido: nenhum root GMX/YY com objects/rooms/sprites encontrado em '{}'.",
         root.display()
     )))
 }
 
 fn is_gamemaker_project_root(path: &Path) -> bool {
-    path.is_dir()
-        && gamemaker_asset_dir(path, "objects").is_some()
+    if !path.is_dir() {
+        return false;
+    }
+    let has_asset_dirs = gamemaker_asset_dir(path, "objects").is_some()
         && gamemaker_asset_dir(path, "rooms").is_some()
-        && gamemaker_asset_dir(path, "sprites").is_some()
+        && gamemaker_asset_dir(path, "sprites").is_some();
+    if !has_asset_dirs {
+        return false;
+    }
+    let has_yyp = fs::read_dir(path)
+        .ok()
+        .into_iter()
+        .flat_map(|entries| entries.flatten())
+        .any(|entry| {
+            entry
+                .path()
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("yyp"))
+        });
+    has_yyp || has_gamemaker_files(path, "gmx") || has_gamemaker_files(path, "yy")
 }
 
 fn gamemaker_asset_dir(root: &Path, kind: &str) -> Option<PathBuf> {
@@ -7620,6 +8657,7 @@ fn gamemaker_asset_dir(root: &Path, kind: &str) -> Option<PathBuf> {
         "rooms" => "Rooms",
         "sprites" => "Sprites",
         "backgrounds" => "Backgrounds",
+        "tilesets" => "Tilesets",
         other => other,
     };
     let assets = root.join("Assets").join(title);
@@ -7627,6 +8665,119 @@ fn gamemaker_asset_dir(root: &Path, kind: &str) -> Option<PathBuf> {
         return Some(assets);
     }
     None
+}
+
+fn has_gamemaker_files(root: &Path, extension: &str) -> bool {
+    ["sprites", "objects", "rooms"]
+        .iter()
+        .filter_map(|kind| gamemaker_asset_dir(root, kind))
+        .any(|dir| {
+            collect_recursive_files_by_extension(&dir, &[extension], &["rds"])
+                .map(|files| !files.is_empty())
+                .unwrap_or(false)
+        })
+}
+
+fn detect_gamemaker_project_format(effective_root: &Path, source_path: &Path) -> String {
+    let source_ext = source_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if source_ext == "yyp" || source_ext == "yy" {
+        return source_ext;
+    }
+    let has_yyp = fs::read_dir(effective_root)
+        .ok()
+        .into_iter()
+        .flat_map(|entries| entries.flatten())
+        .any(|entry| {
+            entry
+                .path()
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("yyp"))
+        });
+    if has_yyp || has_gamemaker_files(effective_root, "yy") {
+        "yyp".to_string()
+    } else if source_ext.is_empty() {
+        "gmx_folder".to_string()
+    } else {
+        source_ext
+    }
+}
+
+fn is_gamemaker_yy_project(root: &Path) -> bool {
+    detect_gamemaker_project_format(root, root) == "yyp"
+}
+
+fn gamemaker_json_name(value: &serde_json::Value) -> Option<String> {
+    json_string(value, &["%Name", "name", "Name"])
+}
+
+fn json_string(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        value
+            .get(*key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_string)
+    })
+}
+
+fn json_nested_name(value: &serde_json::Value, key: &str) -> Option<String> {
+    value.get(key).and_then(gamemaker_json_name)
+}
+
+fn json_bool(value: &serde_json::Value, keys: &[&str]) -> Option<bool> {
+    keys.iter().find_map(|key| match value.get(*key)? {
+        serde_json::Value::Bool(flag) => Some(*flag),
+        serde_json::Value::Number(number) => number.as_i64().map(|value| value != 0),
+        serde_json::Value::String(text) => match text.trim().to_ascii_lowercase().as_str() {
+            "true" | "1" | "-1" => Some(true),
+            "false" | "0" => Some(false),
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
+fn json_i32(value: &serde_json::Value, keys: &[&str]) -> Option<i32> {
+    keys.iter().find_map(|key| {
+        value.get(*key).and_then(|entry| match entry {
+            serde_json::Value::Number(number) => number.as_f64().map(|value| value.round() as i32),
+            serde_json::Value::String(text) => text
+                .trim()
+                .parse::<f32>()
+                .ok()
+                .map(|value| value.round() as i32),
+            _ => None,
+        })
+    })
+}
+
+fn json_u32(value: &serde_json::Value, keys: &[&str]) -> Option<u32> {
+    json_i32(value, keys).map(|value| value.max(0) as u32)
+}
+
+fn gamemaker_first_png_in_dir(dir: &Path) -> Option<PathBuf> {
+    let mut files = collect_recursive_files_by_extension(dir, &["png"], &["rds"]).ok()?;
+    files.sort();
+    files
+        .iter()
+        .find(|rel| rel.ends_with("_0.png"))
+        .cloned()
+        .or_else(|| files.into_iter().next())
+        .map(|rel| dir.join(PathBuf::from(rel.replace('/', "\\"))))
+}
+
+fn line_number_for_offset(content: &str, offset: usize) -> usize {
+    content[..offset.min(content.len())]
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count()
+        + 1
 }
 
 fn load_gamemaker_sprites(
@@ -7639,6 +8790,67 @@ fn load_gamemaker_sprites(
             gm_root.display()
         ))
     })?;
+    if is_gamemaker_yy_project(gm_root) {
+        let files = collect_recursive_files_by_extension(&sprites_dir, &["yy"], &["rds"])?;
+        for rel in files {
+            let path = sprites_dir.join(PathBuf::from(rel.replace('/', "\\")));
+            let content = read_text_lossy(&path)?;
+            let value: serde_json::Value = serde_json::from_str(&content).map_err(|error| {
+                LoadError(format!(
+                    "Nao foi possivel parsear sprite YY '{}': {}",
+                    path.display(),
+                    error
+                ))
+            })?;
+            let name = gamemaker_json_name(&value).unwrap_or_else(|| {
+                path.file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("sprite")
+                    .to_string()
+            });
+            let source_path = gamemaker_first_png_in_dir(path.parent().unwrap_or(&sprites_dir))
+                .ok_or_else(|| {
+                    LoadError(format!(
+                        "Sprite GameMaker YY '{}' sem PNG rastreavel no diretorio.",
+                        path.display()
+                    ))
+                })?;
+            let width = json_u32(&value, &["width", "Width"]).unwrap_or_else(|| {
+                image::image_dimensions(&source_path)
+                    .map(|dims| dims.0)
+                    .unwrap_or(32)
+            });
+            let height = json_u32(&value, &["height", "Height"]).unwrap_or_else(|| {
+                image::image_dimensions(&source_path)
+                    .map(|dims| dims.1)
+                    .unwrap_or(32)
+            });
+            let xorigin = json_i32(&value, &["xorigin", "originX"]).unwrap_or(0);
+            let yorigin = json_i32(&value, &["yorigin", "originY"]).unwrap_or(0);
+            let mask_left = json_i32(&value, &["bbox_left", "bboxLeft"]).unwrap_or(0);
+            let mask_top = json_i32(&value, &["bbox_top", "bboxTop"]).unwrap_or(0);
+            let mask_right = json_i32(&value, &["bbox_right", "bboxRight"])
+                .unwrap_or_else(|| width.saturating_sub(1) as i32);
+            let mask_bottom = json_i32(&value, &["bbox_bottom", "bboxBottom"])
+                .unwrap_or_else(|| height.saturating_sub(1) as i32);
+            sprites.insert(
+                name,
+                GameMakerSpriteResource {
+                    source_path,
+                    width,
+                    height,
+                    xorigin,
+                    yorigin,
+                    mask_left,
+                    mask_top,
+                    mask_right,
+                    mask_bottom,
+                },
+            );
+        }
+        return Ok(sprites);
+    }
+
     let files = collect_recursive_files_by_extension(&sprites_dir, &["gmx"], &["rds"])?;
     for rel in files {
         if !rel.ends_with(".sprite.gmx") {
@@ -7687,10 +8899,48 @@ fn load_gamemaker_sprites(
                 height,
                 xorigin,
                 yorigin,
+                mask_left: 0,
+                mask_top: 0,
+                mask_right: width.saturating_sub(1) as i32,
+                mask_bottom: height.saturating_sub(1) as i32,
             },
         );
     }
     Ok(sprites)
+}
+
+fn load_gamemaker_tilesets(
+    gm_root: &Path,
+) -> Result<HashMap<String, GameMakerTilesetResource>, LoadError> {
+    let mut tilesets = HashMap::new();
+    if !is_gamemaker_yy_project(gm_root) {
+        return Ok(tilesets);
+    }
+    let Some(tilesets_dir) = gamemaker_asset_dir(gm_root, "tilesets") else {
+        return Ok(tilesets);
+    };
+    let files = collect_recursive_files_by_extension(&tilesets_dir, &["yy"], &["rds"])?;
+    for rel in files {
+        let path = tilesets_dir.join(PathBuf::from(rel.replace('/', "\\")));
+        let content = read_text_lossy(&path)?;
+        let value: serde_json::Value = serde_json::from_str(&content).map_err(|error| {
+            LoadError(format!(
+                "Nao foi possivel parsear tileset YY '{}': {}",
+                path.display(),
+                error
+            ))
+        })?;
+        let name = gamemaker_json_name(&value).unwrap_or_else(|| {
+            path.file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("tileset")
+                .to_string()
+        });
+        if let Some(sprite_name) = json_nested_name(&value, "spriteId") {
+            tilesets.insert(name, GameMakerTilesetResource { sprite_name });
+        }
+    }
+    Ok(tilesets)
 }
 
 fn load_gamemaker_objects(
@@ -7703,6 +8953,42 @@ fn load_gamemaker_objects(
             gm_root.display()
         ))
     })?;
+    if is_gamemaker_yy_project(gm_root) {
+        let files = collect_recursive_files_by_extension(&objects_dir, &["yy"], &["rds"])?;
+        for rel in files {
+            let path = objects_dir.join(PathBuf::from(rel.replace('/', "\\")));
+            let content = read_text_lossy(&path)?;
+            let value: serde_json::Value = serde_json::from_str(&content).map_err(|error| {
+                LoadError(format!(
+                    "Nao foi possivel parsear objeto YY '{}': {}",
+                    path.display(),
+                    error
+                ))
+            })?;
+            let name = gamemaker_json_name(&value).unwrap_or_else(|| {
+                path.file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("object")
+                    .to_string()
+            });
+            let sprite_name = json_nested_name(&value, "spriteId")
+                .filter(|value| !value.eq_ignore_ascii_case("<undefined>") && !value.is_empty());
+            let solid = json_bool(&value, &["solid", "Solid"]).unwrap_or(false);
+            let events = load_gamemaker_yy_events(&path, &value)?;
+            objects.insert(
+                name.clone(),
+                GameMakerObjectResource {
+                    name,
+                    sprite_name,
+                    solid,
+                    source_path: path,
+                    events,
+                },
+            );
+        }
+        return Ok(objects);
+    }
+
     let files = collect_recursive_files_by_extension(&objects_dir, &["gmx"], &["rds"])?;
     for rel in files {
         if !rel.ends_with(".object.gmx") {
@@ -7719,7 +9005,7 @@ fn load_gamemaker_objects(
         let sprite_name = first_xml_tag_text(&content, "spriteName")
             .filter(|value| !value.eq_ignore_ascii_case("<undefined>") && !value.is_empty());
         let solid = first_xml_tag_text(&content, "solid").as_deref() == Some("-1");
-        let events = parse_gamemaker_events(&content);
+        let events = parse_gamemaker_events(&content, &path);
         objects.insert(
             name.clone(),
             GameMakerObjectResource {
@@ -7741,6 +9027,120 @@ fn load_gamemaker_primary_room(gm_root: &Path) -> Result<GameMakerRoomResource, 
             gm_root.display()
         ))
     })?;
+    if is_gamemaker_yy_project(gm_root) {
+        let mut rooms = collect_recursive_files_by_extension(&rooms_dir, &["yy"], &["rds"])?;
+        rooms.sort();
+        let rel = rooms.into_iter().next().ok_or_else(|| {
+            LoadError(format!(
+                "Projeto GameMaker invalido: nenhum '.yy' de room encontrado em '{}'.",
+                rooms_dir.display()
+            ))
+        })?;
+        let path = rooms_dir.join(PathBuf::from(rel.replace('/', "\\")));
+        let content = read_text_lossy(&path)?;
+        let value: serde_json::Value = serde_json::from_str(&content).map_err(|error| {
+            LoadError(format!(
+                "Nao foi possivel parsear room YY '{}': {}",
+                path.display(),
+                error
+            ))
+        })?;
+        let display_name = gamemaker_json_name(&value).unwrap_or_else(|| {
+            path.file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("room")
+                .to_string()
+        });
+        let width = value
+            .get("roomSettings")
+            .and_then(|settings| json_u32(settings, &["Width", "width"]))
+            .unwrap_or_else(|| json_u32(&value, &["width", "Width"]).unwrap_or(1000))
+            as i32;
+        let height = value
+            .get("roomSettings")
+            .and_then(|settings| json_u32(settings, &["Height", "height"]))
+            .unwrap_or_else(|| json_u32(&value, &["height", "Height"]).unwrap_or(750))
+            as i32;
+        let mut instances = Vec::new();
+        let mut tile_layers = Vec::new();
+        if let Some(layers) = value.get("layers").and_then(serde_json::Value::as_array) {
+            for layer in layers {
+                if let Some(layer_instances) =
+                    layer.get("instances").and_then(serde_json::Value::as_array)
+                {
+                    for instance in layer_instances {
+                        let Some(object_name) = json_nested_name(instance, "objectId") else {
+                            continue;
+                        };
+                        instances.push(GameMakerRoomInstance {
+                            object_name,
+                            name: json_string(instance, &["name", "%Name"])
+                                .unwrap_or_else(|| "instance".to_string()),
+                            x: json_i32(instance, &["x", "X"]).unwrap_or(0),
+                            y: json_i32(instance, &["y", "Y"]).unwrap_or(0),
+                            code: json_string(instance, &["code", "creationCode"]),
+                        });
+                    }
+                }
+                if let Some(tiles) = layer.get("tiles") {
+                    if let Some(tileset_name) = json_nested_name(layer, "tilesetId") {
+                        let map_width =
+                            json_u32(tiles, &["SerialiseWidth", "serializeWidth", "width"])
+                                .unwrap_or(0);
+                        let map_height =
+                            json_u32(tiles, &["SerialiseHeight", "serializeHeight", "height"])
+                                .unwrap_or(0);
+                        let cells = tiles
+                            .get("TileSerialiseData")
+                            .or_else(|| tiles.get("tileSerialiseData"))
+                            .and_then(serde_json::Value::as_array)
+                            .map(|values| {
+                                values
+                                    .iter()
+                                    .map(|value| value.as_u64().unwrap_or(0) as u32)
+                                    .collect::<Vec<_>>()
+                            })
+                            .unwrap_or_default();
+                        if map_width > 0 && map_height > 0 {
+                            tile_layers.push(GameMakerTileLayer {
+                                name: json_string(layer, &["%Name", "name"])
+                                    .unwrap_or_else(|| "Tile Layer".to_string()),
+                                tileset_name,
+                                map_width,
+                                map_height,
+                                cells,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        let views = value
+            .get("views")
+            .and_then(serde_json::Value::as_array)
+            .map(|views| {
+                views
+                    .iter()
+                    .filter_map(|view| {
+                        Some(GameMakerRoomView {
+                            object_name: json_nested_name(view, "objectId")?,
+                            visible: json_bool(view, &["visible", "Visible"]).unwrap_or(false),
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        return Ok(GameMakerRoomResource {
+            display_name,
+            width,
+            height,
+            instances,
+            views,
+            backgrounds: Vec::new(),
+            tile_layers,
+        });
+    }
+
     let mut rooms = collect_recursive_files_by_extension(&rooms_dir, &["gmx"], &["rds"])?;
     rooms.retain(|rel| rel.ends_with(".room.gmx"));
     rooms.sort();
@@ -7819,6 +9219,7 @@ fn load_gamemaker_primary_room(gm_root: &Path) -> Result<GameMakerRoomResource, 
         instances,
         views,
         backgrounds,
+        tile_layers: Vec::new(),
     })
 }
 
@@ -7858,6 +9259,10 @@ fn load_gamemaker_backgrounds(
                 height,
                 xorigin: 0,
                 yorigin: 0,
+                mask_left: 0,
+                mask_top: 0,
+                mask_right: width.saturating_sub(1) as i32,
+                mask_bottom: height.saturating_sub(1) as i32,
             },
         );
     }
@@ -7890,8 +9295,12 @@ fn build_gamemaker_collision_map(
     let width = 40u32;
     let height = 28u32;
     let mut data = vec![0u8; (width * height) as usize];
-    let tile_w = wall_sprite.map(|sprite| sprite.width.max(8) / 8).unwrap_or(1);
-    let tile_h = wall_sprite.map(|sprite| sprite.height.max(8) / 8).unwrap_or(1);
+    let tile_w = wall_sprite
+        .map(|sprite| sprite.width.max(8) / 8)
+        .unwrap_or(1);
+    let tile_h = wall_sprite
+        .map(|sprite| sprite.height.max(8) / 8)
+        .unwrap_or(1);
 
     for instance in wall_instances {
         let md_x = gamemaker_coord_to_md_x(instance.x, room_width);
@@ -8032,13 +9441,141 @@ fn import_gamemaker_background_entity(
                 animations: HashMap::new(),
                 priority: "background".to_string(),
                 meta_sprite: frame_width > 32 || frame_height > 32,
+                commands: Vec::new(),
             }),
             ..Components::default()
         },
     }))
 }
 
-fn parse_gamemaker_events(content: &str) -> Vec<GameMakerEvent> {
+fn import_gamemaker_tile_layer_entities(
+    project_dir: &Path,
+    gm_root: &Path,
+    tile_layers: &[GameMakerTileLayer],
+    tilesets: &HashMap<String, GameMakerTilesetResource>,
+    sprites: &HashMap<String, GameMakerSpriteResource>,
+    entity_ids: &mut HashSet<String>,
+    asset_cache: &mut HashMap<PathBuf, String>,
+) -> Result<Vec<Entity>, LoadError> {
+    let mut entities = Vec::new();
+    for layer in tile_layers {
+        let Some(tileset) = tilesets.get(&layer.tileset_name) else {
+            continue;
+        };
+        let Some(sprite) = sprites.get(&tileset.sprite_name) else {
+            continue;
+        };
+        let (asset, _, _) = materialize_gamemaker_rgba_asset(
+            project_dir,
+            gm_root,
+            &sprite.source_path,
+            "tilesets",
+            "gamemaker",
+            asset_cache,
+            None,
+        )?;
+        let expected = (layer.map_width * layer.map_height) as usize;
+        let mut cells = layer.cells.clone();
+        cells.resize(expected, 0);
+        entities.push(Entity {
+            entity_id: unique_entity_id(entity_ids, &layer.name, "tilemap"),
+            display_name: Some(layer.name.clone()),
+            prefab: None,
+            transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+            components: Components {
+                tilemap: Some(TilemapComponent {
+                    tileset: asset,
+                    map_width: layer.map_width,
+                    map_height: layer.map_height,
+                    scroll_x: 0,
+                    scroll_y: 0,
+                    cells,
+                }),
+                ..Components::default()
+            },
+        });
+    }
+    Ok(entities)
+}
+
+fn load_gamemaker_yy_events(
+    object_path: &Path,
+    object_json: &serde_json::Value,
+) -> Result<Vec<GameMakerEvent>, LoadError> {
+    let parent = object_path.parent().unwrap_or_else(|| Path::new("."));
+    let mut events = Vec::new();
+    let files = collect_recursive_files_by_extension(parent, &["gml"], &["rds"])?;
+    for rel in files {
+        let path = parent.join(PathBuf::from(rel.replace('/', "\\")));
+        let code = read_text_lossy(&path)?.trim().to_string();
+        if code.is_empty() {
+            continue;
+        }
+        events.push(GameMakerEvent {
+            label: gamemaker_yy_event_label_from_path(&path),
+            code,
+            source_path: path,
+            line_approx: 1,
+        });
+    }
+    if events.is_empty() {
+        if let Some(event_list) = object_json
+            .get("eventList")
+            .and_then(serde_json::Value::as_array)
+        {
+            for event in event_list {
+                let label = gamemaker_yy_event_label(event);
+                events.push(GameMakerEvent {
+                    label,
+                    code: String::new(),
+                    source_path: object_path.to_path_buf(),
+                    line_approx: 1,
+                });
+            }
+        }
+    }
+    events.sort_by(|left, right| left.label.cmp(&right.label));
+    Ok(events)
+}
+
+fn gamemaker_yy_event_label(event: &serde_json::Value) -> String {
+    let event_type = json_i32(event, &["eventType", "eventtype"]).unwrap_or(-1);
+    let event_num = json_i32(event, &["eventNum", "enumb"]).unwrap_or(0);
+    match event_type {
+        0 => "Create".to_string(),
+        2 => format!("Alarm {event_num}"),
+        3 => "Step".to_string(),
+        4 => format!(
+            "Collision {}",
+            json_nested_name(event, "collisionObjectId").unwrap_or_else(|| event_num.to_string())
+        ),
+        8 => "Draw".to_string(),
+        other => format!("Event {other}"),
+    }
+}
+
+fn gamemaker_yy_event_label_from_path(path: &Path) -> String {
+    let stem = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    let lowered = stem.to_ascii_lowercase();
+    if lowered.starts_with("create") {
+        "Create".to_string()
+    } else if lowered.starts_with("step") {
+        "Step".to_string()
+    } else if lowered.starts_with("draw") {
+        "Draw".to_string()
+    } else if let Some(rest) = stem.strip_prefix("Alarm_") {
+        format!("Alarm {rest}")
+    } else if let Some(rest) = stem.strip_prefix("Collision_") {
+        format!("Collision {rest}")
+    } else {
+        stem.replace('_', " ")
+    }
+}
+
+fn parse_gamemaker_events(content: &str, source_path: &Path) -> Vec<GameMakerEvent> {
     let mut events = Vec::new();
     let mut search_at = 0usize;
     while let Some(relative_start) = content[search_at..].find("<event") {
@@ -8064,7 +9601,12 @@ fn parse_gamemaker_events(content: &str) -> Vec<GameMakerEvent> {
             .trim()
             .to_string();
         if !code.is_empty() {
-            events.push(GameMakerEvent { label, code });
+            events.push(GameMakerEvent {
+                label,
+                code,
+                source_path: source_path.to_path_buf(),
+                line_approx: line_number_for_offset(content, start),
+            });
         }
         search_at = end;
     }
@@ -8111,17 +9653,37 @@ fn gamemaker_collision_component(
     let has_collision = object.solid
         || collision_name.contains("solid")
         || collision_name.contains("block")
-        || collision_name.contains("plat");
+        || collision_name.contains("plat")
+        || sprite.is_some();
     if !has_collision {
         return None;
     }
-    let width = sprite.map(|sprite| sprite.width).unwrap_or(32).max(1);
-    let height = sprite.map(|sprite| sprite.height).unwrap_or(32).max(1);
+    let width = sprite
+        .map(|sprite| {
+            (sprite.mask_right - sprite.mask_left + 1)
+                .max(1)
+                .try_into()
+                .unwrap_or(sprite.width)
+        })
+        .unwrap_or(32);
+    let height = sprite
+        .map(|sprite| {
+            (sprite.mask_bottom - sprite.mask_top + 1)
+                .max(1)
+                .try_into()
+                .unwrap_or(sprite.height)
+        })
+        .unwrap_or(32);
     Some(CollisionComponent {
         shape: "aabb".to_string(),
         width,
         height,
-        offset: None,
+        offset: sprite.and_then(|sprite| {
+            (sprite.mask_left != 0 || sprite.mask_top != 0).then_some(CollisionOffset {
+                x: sprite.mask_left,
+                y: sprite.mask_top,
+            })
+        }),
         solid: true,
         layer: Some(if collision_name.contains("player") {
             "player".to_string()
@@ -9828,6 +11390,201 @@ fn validate_openbor_project_path(openbor_path: &Path) -> Result<(), LoadError> {
     )))
 }
 
+fn openbor_tokens(line: &str) -> Vec<String> {
+    line.split_whitespace()
+        .map(|token| {
+            token
+                .trim_matches(',')
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_string()
+        })
+        .filter(|token| !token.is_empty())
+        .collect()
+}
+
+fn openbor_command(tokens: &[String]) -> String {
+    tokens
+        .first()
+        .map(|token| token.trim_start_matches('@').to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+fn openbor_parse_i32(token: &str) -> Option<i32> {
+    token
+        .trim_matches(',')
+        .parse::<f32>()
+        .ok()
+        .map(|value| value.round() as i32)
+}
+
+fn openbor_parse_box(tokens: &[String]) -> Option<OpenBorBox> {
+    if tokens.len() < 5 {
+        return None;
+    }
+    let x = openbor_parse_i32(&tokens[1])?;
+    let y = openbor_parse_i32(&tokens[2])?;
+    let width = openbor_parse_i32(&tokens[3])?.unsigned_abs().max(1);
+    let height = openbor_parse_i32(&tokens[4])?.unsigned_abs().max(1);
+    Some(OpenBorBox {
+        x,
+        y,
+        width,
+        height,
+    })
+}
+
+fn openbor_parse_attack_box(tokens: &[String]) -> Option<OpenBorAttackBox> {
+    let body = openbor_parse_box(tokens)?;
+    let damage = tokens
+        .get(5)
+        .and_then(|value| openbor_parse_i32(value))
+        .unwrap_or(1);
+    Some(OpenBorAttackBox {
+        x: body.x,
+        y: body.y,
+        width: body.width,
+        height: body.height,
+        damage,
+    })
+}
+
+fn openbor_box_to_mugen_collision_box(bbox: &OpenBorBox) -> MugenCollisionBox {
+    MugenCollisionBox {
+        x1: bbox.x,
+        y1: bbox.y,
+        x2: bbox.x.saturating_add(bbox.width as i32),
+        y2: bbox.y.saturating_add(bbox.height as i32),
+    }
+}
+
+fn openbor_attack_to_mugen_collision_box(attack: &OpenBorAttackBox) -> MugenCollisionBox {
+    MugenCollisionBox {
+        x1: attack.x,
+        y1: attack.y,
+        x2: attack.x.saturating_add(attack.width as i32),
+        y2: attack.y.saturating_add(attack.height as i32),
+    }
+}
+
+fn openbor_start_animation(name: String) -> OpenBorAnimationBlock {
+    OpenBorAnimationBlock {
+        name,
+        frames: Vec::new(),
+        delay: 8,
+        looping: false,
+        loop_start: None,
+        offset: None,
+        bbox: None,
+        attacks: Vec::new(),
+        notes: Vec::new(),
+    }
+}
+
+fn openbor_animation_to_def(block: &OpenBorAnimationBlock) -> AnimationDef {
+    let frame_count = block.frames.len().max(1);
+    let frames = (0..frame_count as u32).collect::<Vec<_>>();
+    let fps = (60 / block.delay.max(1)).max(1);
+    let frame_durations = Some(vec![block.delay as i32; frame_count]);
+    let has_boxes = block.bbox.is_some() || !block.attacks.is_empty() || block.offset.is_some();
+    let mugen_frames = has_boxes.then(|| {
+        let mut flags = block.notes.clone();
+        flags.extend(
+            block
+                .attacks
+                .iter()
+                .map(|attack| format!("openbor_attack_damage:{}", attack.damage)),
+        );
+        (0..frame_count)
+            .map(|index| MugenAnimationFrame {
+                group: 0,
+                image: index as i32,
+                axis: block.offset.clone(),
+                duration: block.delay as i32,
+                flags: flags.clone(),
+                clsn1: block
+                    .attacks
+                    .iter()
+                    .map(openbor_attack_to_mugen_collision_box)
+                    .collect(),
+                clsn2: block
+                    .bbox
+                    .as_ref()
+                    .map(openbor_box_to_mugen_collision_box)
+                    .into_iter()
+                    .collect(),
+            })
+            .collect()
+    });
+
+    AnimationDef {
+        frames,
+        fps,
+        looping: block.looping,
+        frame_durations,
+        loop_start: block.loop_start,
+        mugen_frames,
+    }
+}
+
+fn openbor_push_animation(
+    animations: &mut HashMap<String, AnimationDef>,
+    logic_hints: &mut Vec<String>,
+    collision_box: &mut Option<OpenBorBox>,
+    attack_boxes: &mut Vec<OpenBorAttackBox>,
+    current: Option<OpenBorAnimationBlock>,
+) {
+    let Some(block) = current else {
+        return;
+    };
+    if collision_box.is_none() {
+        *collision_box = block.bbox.clone();
+    }
+    attack_boxes.extend(block.attacks.clone());
+    if !block.attacks.is_empty() {
+        logic_hints.push(format!(
+            "OpenBOR anim '{}' exportou {} attack/hitbox(es).",
+            block.name,
+            block.attacks.len()
+        ));
+    }
+    if block.bbox.is_some() {
+        logic_hints.push(format!(
+            "OpenBOR anim '{}' exportou bbox de colisao.",
+            block.name
+        ));
+    }
+    animations.insert(block.name.clone(), openbor_animation_to_def(&block));
+}
+
+fn openbor_manifest_candidates(line: &str) -> Vec<String> {
+    let tokens = openbor_tokens(line);
+    if tokens.is_empty() {
+        return Vec::new();
+    }
+    let command = openbor_command(&tokens);
+    let mut candidates = Vec::new();
+    for token in tokens.iter().skip(usize::from(matches!(
+        command.as_str(),
+        "load" | "know" | "model" | "file" | "level"
+    ))) {
+        if token.to_ascii_lowercase().ends_with(".txt") {
+            candidates.push(token.clone());
+        }
+    }
+    if candidates.is_empty() && tokens[0].to_ascii_lowercase().ends_with(".txt") {
+        candidates.push(tokens[0].clone());
+    }
+    candidates
+}
+
+fn openbor_source_ref(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .ok()
+        .map(normalize_relative_path)
+        .unwrap_or_else(|| path.to_string_lossy().to_string())
+}
+
 fn parse_openbor_model_file(root: &Path, path: &Path) -> Result<OpenBorModelAsset, LoadError> {
     let content = read_text_lossy(path)?;
     let mut name = path
@@ -9835,9 +11592,17 @@ fn parse_openbor_model_file(root: &Path, path: &Path) -> Result<OpenBorModelAsse
         .map(|stem| stem.to_string_lossy().trim().to_string())
         .filter(|stem| !stem.is_empty())
         .unwrap_or_else(|| "openbor_model".to_string());
+    let mut model_type = "enemy".to_string();
     let mut display_asset = None;
     let mut audio_assets = Vec::new();
     let mut logic_hints = Vec::new();
+    let mut animations = HashMap::new();
+    let mut collision_box = None;
+    let mut attack_boxes = Vec::new();
+    let mut movement_speed = 2;
+    let mut facing = 1;
+    let mut unsupported_commands = Vec::new();
+    let mut current_anim: Option<OpenBorAnimationBlock> = None;
 
     for line in content.lines() {
         let trimmed = line.trim();
@@ -9845,10 +11610,103 @@ fn parse_openbor_model_file(root: &Path, path: &Path) -> Result<OpenBorModelAsse
             continue;
         }
         let lowered = trimmed.to_ascii_lowercase();
-        let parts = trimmed.split_whitespace().collect::<Vec<_>>();
-        if parts.len() >= 2 && parts[0].eq_ignore_ascii_case("name") {
+        let parts = openbor_tokens(trimmed);
+        let command = openbor_command(&parts);
+        if parts.len() >= 2 && command == "name" {
             name = parts[1..].join(" ");
         }
+        if parts.len() >= 2 && command == "type" {
+            model_type = parts[1].to_ascii_lowercase();
+        }
+        if parts.len() >= 2 && matches!(command.as_str(), "speed" | "runspeed") {
+            if let Some(value) = openbor_parse_i32(&parts[1]) {
+                movement_speed = value.abs().max(1);
+            }
+        }
+        if parts.len() >= 2 && command == "facing" {
+            if let Some(value) = openbor_parse_i32(&parts[1]) {
+                facing = if value < 0 { -1 } else { 1 };
+            }
+        }
+
+        if command == "anim" && parts.len() >= 2 {
+            openbor_push_animation(
+                &mut animations,
+                &mut logic_hints,
+                &mut collision_box,
+                &mut attack_boxes,
+                current_anim.take(),
+            );
+            current_anim = Some(openbor_start_animation(parts[1..].join("_")));
+            logic_hints.push(format!(
+                "Modelo OpenBOR usa bloco anim '{}'.",
+                parts[1..].join(" ")
+            ));
+            continue;
+        }
+
+        if let Some(anim) = current_anim.as_mut() {
+            match command.as_str() {
+                "delay" => {
+                    if let Some(value) = parts.get(1).and_then(|value| openbor_parse_i32(value)) {
+                        anim.delay = value.max(1) as u32;
+                    }
+                }
+                "loop" => {
+                    let enabled = parts
+                        .get(1)
+                        .and_then(|value| openbor_parse_i32(value))
+                        .map(|value| value != 0)
+                        .unwrap_or(true);
+                    anim.looping = enabled;
+                    anim.loop_start = enabled.then_some(0);
+                }
+                "offset" if parts.len() >= 3 => {
+                    if let (Some(x), Some(y)) =
+                        (openbor_parse_i32(&parts[1]), openbor_parse_i32(&parts[2]))
+                    {
+                        anim.offset = Some(Pivot { x, y });
+                    }
+                }
+                "bbox" => {
+                    if let Some(bbox) = openbor_parse_box(&parts) {
+                        anim.bbox = Some(bbox);
+                    }
+                }
+                command if command.starts_with("attack") => {
+                    if let Some(attack) = openbor_parse_attack_box(&parts) {
+                        anim.attacks.push(attack);
+                    }
+                }
+                "jumpframe" | "landframe" => {
+                    anim.notes
+                        .push(format!("openbor_{}:{}", command, parts[1..].join(" ")));
+                    logic_hints.push(format!(
+                        "Modelo OpenBOR usa comando '{}' em anim '{}'.",
+                        command, anim.name
+                    ));
+                }
+                "frame" => {
+                    for token in &parts[1..] {
+                        if string_looks_like_visual_asset(token) {
+                            if let Some(asset) = resolve_external_asset_candidate(
+                                root,
+                                path.parent().unwrap_or(root),
+                                token,
+                            ) {
+                                if display_asset.is_none() {
+                                    display_asset = Some(asset.clone());
+                                }
+                                anim.frames.push(asset);
+                                break;
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
         for token in &parts[1..] {
             if display_asset.is_none() && string_looks_like_visual_asset(token) {
                 display_asset =
@@ -9864,19 +11722,36 @@ fn parse_openbor_model_file(root: &Path, path: &Path) -> Result<OpenBorModelAsse
         }
         for keyword in [
             "anim",
+            "bbox",
             "attack",
             "jump",
             "spawnframe",
             "followanim",
             "combostep",
             "sound",
+            "speed",
+            "facing",
         ] {
             if lowered.starts_with(keyword) {
                 logic_hints.push(format!("Modelo OpenBOR usa comando '{}'.", keyword));
                 break;
             }
         }
+        if command.contains("script") || trimmed.starts_with('@') {
+            unsupported_commands.push(trimmed.to_string());
+            logic_hints.push(format!(
+                "Modelo OpenBOR preservou comando/script nao convertido: {}",
+                command
+            ));
+        }
     }
+    openbor_push_animation(
+        &mut animations,
+        &mut logic_hints,
+        &mut collision_box,
+        &mut attack_boxes,
+        current_anim.take(),
+    );
 
     if display_asset.is_none() {
         display_asset = resolve_named_asset(
@@ -9889,9 +11764,17 @@ fn parse_openbor_model_file(root: &Path, path: &Path) -> Result<OpenBorModelAsse
 
     Ok(OpenBorModelAsset {
         name,
+        model_type,
+        source_file: path.to_path_buf(),
         display_asset,
         audio_assets: dedupe_paths(audio_assets),
+        animations,
+        collision_box,
+        attack_boxes,
+        movement_speed,
+        facing,
         logic_hints,
+        unsupported_commands,
     })
 }
 
@@ -9918,12 +11801,14 @@ fn load_openbor_model_assets(openbor_path: &Path) -> Result<Vec<OpenBorModelAsse
             if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
                 continue;
             }
-            if let Some(candidate) = resolve_external_asset_candidate(
-                openbor_path,
-                manifest.parent().unwrap_or(openbor_path),
-                trimmed,
-            ) {
-                model_paths.push(candidate);
+            for candidate_text in openbor_manifest_candidates(trimmed) {
+                if let Some(candidate) = resolve_external_asset_candidate(
+                    openbor_path,
+                    manifest.parent().unwrap_or(openbor_path),
+                    &candidate_text,
+                ) {
+                    model_paths.push(candidate);
+                }
             }
         }
     }
@@ -9949,21 +11834,87 @@ fn parse_openbor_level_file(root: &Path, path: &Path) -> Result<OpenBorLevelAsse
         .filter(|stem| !stem.is_empty())
         .unwrap_or_else(|| "openbor_level".to_string());
     let mut background_asset = None;
+    let mut panel_assets = Vec::new();
     let mut music_asset = None;
     let mut logic_hints = Vec::new();
+    let mut spawns = Vec::new();
+    let mut scroll_dx = 0;
+    let mut scroll_dy = 0;
+    let mut unsupported_scripts = Vec::new();
+    let mut active_script: Option<(String, Vec<String>)> = None;
 
     for line in content.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
             continue;
         }
+        if let Some((label, lines)) = active_script.as_mut() {
+            let command = openbor_command(&openbor_tokens(trimmed));
+            if command == "end_script" || command == "endscript" {
+                unsupported_scripts.push(OpenBorScriptBridge {
+                    label: label.clone(),
+                    body: lines.join("\n"),
+                });
+                active_script = None;
+            } else {
+                lines.push(trimmed.to_string());
+            }
+            continue;
+        }
         let lowered = trimmed.to_ascii_lowercase();
-        let parts = trimmed.split_whitespace().collect::<Vec<_>>();
-        if parts.len() >= 2 && parts[0].eq_ignore_ascii_case("name") {
+        let parts = openbor_tokens(trimmed);
+        let command = openbor_command(&parts);
+        if parts.len() >= 2 && command == "name" {
             name = parts[1..].join(" ");
         }
+        if command.contains("script") || trimmed.starts_with('@') {
+            active_script = Some((command.clone(), Vec::new()));
+            logic_hints.push(format!(
+                "Estagio OpenBOR preservou script nao convertido '{}'.",
+                command
+            ));
+            continue;
+        }
+        if parts.len() >= 2 && command == "spawn" {
+            let model_name = parts[1].clone();
+            spawns.push(OpenBorSpawn {
+                model_name,
+                x: 64,
+                y: 112,
+                order: spawns.len(),
+            });
+        }
+        if parts.len() >= 2 && command == "at" {
+            let numbers = parts[1..]
+                .iter()
+                .filter_map(|token| openbor_parse_i32(token))
+                .collect::<Vec<_>>();
+            if let Some(last) = spawns.last_mut() {
+                if let Some(x) = numbers.first() {
+                    last.x = *x;
+                }
+                if numbers.len() >= 3 {
+                    last.y = numbers[2];
+                } else if numbers.len() >= 2 {
+                    last.y = numbers[1];
+                }
+            }
+        }
+        if parts.len() >= 2 && matches!(command.as_str(), "scrollspeed" | "scroll") {
+            scroll_dx = openbor_parse_i32(&parts[1]).unwrap_or(scroll_dx);
+            scroll_dy = parts
+                .get(2)
+                .and_then(|value| openbor_parse_i32(value))
+                .unwrap_or(scroll_dy);
+        }
         for token in &parts[1..] {
-            if background_asset.is_none() && string_looks_like_visual_asset(token) {
+            if command == "panel" && string_looks_like_visual_asset(token) {
+                if let Some(panel) =
+                    resolve_external_asset_candidate(root, path.parent().unwrap_or(root), token)
+                {
+                    panel_assets.push(panel);
+                }
+            } else if background_asset.is_none() && string_looks_like_visual_asset(token) {
                 background_asset =
                     resolve_external_asset_candidate(root, path.parent().unwrap_or(root), token);
             }
@@ -9978,13 +11929,34 @@ fn parse_openbor_level_file(root: &Path, path: &Path) -> Result<OpenBorLevelAsse
                 break;
             }
         }
+        if matches!(
+            command.as_str(),
+            "panel" | "background" | "scrollspeed" | "at"
+        ) {
+            logic_hints.push(format!("Estagio OpenBOR usa comando '{}'.", command));
+        }
+    }
+    if let Some((label, lines)) = active_script.take() {
+        unsupported_scripts.push(OpenBorScriptBridge {
+            label,
+            body: lines.join("\n"),
+        });
+    }
+    if background_asset.is_none() {
+        background_asset = panel_assets.first().cloned();
     }
 
     Ok(OpenBorLevelAsset {
         name,
+        source_file: path.to_path_buf(),
         background_asset,
+        panel_assets: dedupe_paths(panel_assets),
         music_asset,
+        spawns,
+        scroll_dx,
+        scroll_dy,
         logic_hints,
+        unsupported_scripts,
     })
 }
 
@@ -10011,12 +11983,14 @@ fn load_openbor_level_assets(openbor_path: &Path) -> Result<Vec<OpenBorLevelAsse
             if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with(';') {
                 continue;
             }
-            if let Some(candidate) = resolve_external_asset_candidate(
-                openbor_path,
-                manifest.parent().unwrap_or(openbor_path),
-                trimmed,
-            ) {
-                level_paths.push(candidate);
+            for candidate_text in openbor_manifest_candidates(trimmed) {
+                if let Some(candidate) = resolve_external_asset_candidate(
+                    openbor_path,
+                    manifest.parent().unwrap_or(openbor_path),
+                    &candidate_text,
+                ) {
+                    level_paths.push(candidate);
+                }
             }
         }
     }
@@ -10032,6 +12006,584 @@ fn load_openbor_level_assets(openbor_path: &Path) -> Result<Vec<OpenBorLevelAsse
         }
     }
     Ok(levels)
+}
+
+fn openbor_entity_role(model: &OpenBorModelAsset, is_first: bool) -> &'static str {
+    let text = format!("{} {}", model.name, model.model_type).to_ascii_lowercase();
+    if text.contains("player") || text.contains("hero") || is_first {
+        "player_avatar"
+    } else {
+        "enemy_actor"
+    }
+}
+
+fn openbor_collision_component(
+    model: &OpenBorModelAsset,
+    role: &str,
+) -> Option<CollisionComponent> {
+    let bbox = model.collision_box.as_ref()?;
+    let (layer, collides_with) = if role == "player_avatar" {
+        ("player".to_string(), vec!["enemy".to_string()])
+    } else {
+        ("enemy".to_string(), vec!["player".to_string()])
+    };
+    Some(CollisionComponent {
+        shape: "aabb".to_string(),
+        width: bbox.width,
+        height: bbox.height,
+        offset: Some(CollisionOffset {
+            x: bbox.x,
+            y: bbox.y,
+        }),
+        solid: true,
+        layer: Some(layer),
+        collides_with,
+    })
+}
+
+fn openbor_adjust_sprite_frame_size(entity: &mut Entity, source_path: &Path) {
+    let Some(sprite) = entity.components.sprite.as_mut() else {
+        return;
+    };
+    let max_frames = sprite
+        .animations
+        .values()
+        .map(|animation| animation.frames.len())
+        .max()
+        .unwrap_or(1)
+        .max(1) as u32;
+    if max_frames <= 1 {
+        return;
+    }
+    let Ok((width, height)) = image::image_dimensions(source_path) else {
+        return;
+    };
+    if width >= max_frames && width % max_frames == 0 {
+        sprite.frame_width = (width / max_frames).max(1);
+        sprite.frame_height = height.max(1);
+    }
+}
+
+fn openbor_logic_semantics(
+    root: &Path,
+    source_file: &Path,
+    role: &str,
+    confidence: &str,
+    reason: &str,
+) -> ImportedLogicSemantics {
+    ImportedLogicSemantics {
+        source: "openbor".to_string(),
+        gameplay_class: "beat_em_up_close_range_signals".to_string(),
+        entity_role: role.to_string(),
+        confidence: confidence.to_string(),
+        role_reason: reason.to_string(),
+        driver_functions: vec![
+            "anim".to_string(),
+            "bbox".to_string(),
+            "attack".to_string(),
+            "spawn".to_string(),
+        ],
+        source_paths: vec![openbor_source_ref(root, source_file)],
+        audit_flags: vec!["experimental_openbor_subset".to_string()],
+        ..ImportedLogicSemantics::default()
+    }
+}
+
+fn openbor_exec_in() -> serde_json::Value {
+    serde_json::json!({"id":"exec","label":">","kind":"exec"})
+}
+
+fn openbor_exec_out() -> serde_json::Value {
+    serde_json::json!({"id":"exec","label":">","kind":"exec"})
+}
+
+fn openbor_bool_out(id: &str) -> serde_json::Value {
+    serde_json::json!({"id":id,"label":id,"kind":"data","dataType":"bool"})
+}
+
+#[allow(clippy::too_many_arguments)]
+fn openbor_graph_node(
+    id: &str,
+    node_type: &str,
+    label: &str,
+    group: &str,
+    lane: i32,
+    row: i32,
+    params: serde_json::Value,
+    inputs: Vec<serde_json::Value>,
+    outputs: Vec<serde_json::Value>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "type": node_type,
+        "label": label,
+        "group": group,
+        "origin": "openbor_beatemup_subset",
+        "source_reference": format!("openbor:{id}"),
+        "x": 80 + lane * 220,
+        "y": 80 + row * 140,
+        "inputs": inputs,
+        "outputs": outputs,
+        "params": params,
+    })
+}
+
+fn openbor_graph_edge(
+    id: &str,
+    from_node: &str,
+    from_port: &str,
+    to_node: &str,
+    to_port: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "fromNode": from_node,
+        "fromPort": from_port,
+        "toNode": to_node,
+        "toPort": to_port,
+    })
+}
+
+fn openbor_actor_graph(entity_id: &str, model: &OpenBorModelAsset, role: &str) -> String {
+    let has_walk = model.animations.contains_key("walk");
+    let has_attack = model.animations.contains_key("attack");
+    let speed = model.movement_speed.max(1);
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+
+    nodes.push(openbor_graph_node(
+        "ob_update",
+        "event_update",
+        "OpenBOR Tick",
+        "Game State",
+        0,
+        0,
+        serde_json::json!({}),
+        vec![],
+        vec![openbor_exec_out()],
+    ));
+
+    if role == "player_avatar" {
+        nodes.push(openbor_graph_node(
+            "ob_right",
+            "input_held",
+            "Walk Right",
+            "Input",
+            1,
+            0,
+            serde_json::json!({"pad":"JOY_1","button":"BUTTON_RIGHT"}),
+            vec![openbor_exec_in()],
+            vec![
+                openbor_exec_out(),
+                openbor_bool_out("true"),
+                openbor_bool_out("false"),
+            ],
+        ));
+        nodes.push(openbor_graph_node(
+            "ob_walk_velocity",
+            "set_velocity",
+            "Apply OpenBOR Speed",
+            "Physics",
+            2,
+            0,
+            serde_json::json!({"target":entity_id,"vx":speed,"vy":0,"facing":model.facing}),
+            vec![openbor_exec_in()],
+            vec![openbor_exec_out()],
+        ));
+        nodes.push(openbor_graph_node(
+            "ob_walk_anim",
+            "set_animation_state",
+            "Walk Animation",
+            "Animation",
+            3,
+            0,
+            serde_json::json!({"target":entity_id,"state": if has_walk { "walk" } else { "idle" }}),
+            vec![openbor_exec_in()],
+            vec![openbor_exec_out()],
+        ));
+        nodes.push(openbor_graph_node(
+            "ob_attack",
+            "input_pressed",
+            "Attack",
+            "Input",
+            4,
+            0,
+            serde_json::json!({"pad":"JOY_1","button":"BUTTON_B"}),
+            vec![openbor_exec_in()],
+            vec![
+                openbor_exec_out(),
+                openbor_bool_out("true"),
+                openbor_bool_out("false"),
+            ],
+        ));
+        nodes.push(openbor_graph_node(
+            "ob_attack_anim",
+            "set_animation_state",
+            "Attack Animation",
+            "Animation",
+            5,
+            0,
+            serde_json::json!({"target":entity_id,"state": if has_attack { "attack" } else { "idle" }}),
+            vec![openbor_exec_in()],
+            vec![openbor_exec_out()],
+        ));
+        nodes.push(openbor_graph_node(
+            "ob_camera_follow",
+            "camera_follow",
+            "Camera Follow",
+            "Camera",
+            6,
+            0,
+            serde_json::json!({"target":entity_id,"offset_x":-160,"offset_y":-112,"damping":0}),
+            vec![openbor_exec_in()],
+            vec![openbor_exec_out()],
+        ));
+        edges.extend([
+            openbor_graph_edge("ob_e_update_right", "ob_update", "exec", "ob_right", "exec"),
+            openbor_graph_edge(
+                "ob_e_right_velocity",
+                "ob_right",
+                "true",
+                "ob_walk_velocity",
+                "exec",
+            ),
+            openbor_graph_edge(
+                "ob_e_velocity_anim",
+                "ob_walk_velocity",
+                "exec",
+                "ob_walk_anim",
+                "exec",
+            ),
+            openbor_graph_edge(
+                "ob_e_anim_attack",
+                "ob_walk_anim",
+                "exec",
+                "ob_attack",
+                "exec",
+            ),
+            openbor_graph_edge(
+                "ob_e_right_false_attack",
+                "ob_right",
+                "false",
+                "ob_attack",
+                "exec",
+            ),
+            openbor_graph_edge(
+                "ob_e_attack_anim",
+                "ob_attack",
+                "true",
+                "ob_attack_anim",
+                "exec",
+            ),
+            openbor_graph_edge(
+                "ob_e_attack_anim_camera",
+                "ob_attack_anim",
+                "exec",
+                "ob_camera_follow",
+                "exec",
+            ),
+            openbor_graph_edge(
+                "ob_e_attack_false_camera",
+                "ob_attack",
+                "false",
+                "ob_camera_follow",
+                "exec",
+            ),
+        ]);
+    } else {
+        nodes.push(openbor_graph_node(
+            "ob_enemy_velocity",
+            "set_velocity",
+            "Enemy OpenBOR Speed",
+            "Physics",
+            1,
+            0,
+            serde_json::json!({"target":entity_id,"vx":model.facing * speed,"vy":0,"facing":model.facing}),
+            vec![openbor_exec_in()],
+            vec![openbor_exec_out()],
+        ));
+        nodes.push(openbor_graph_node(
+            "ob_enemy_anim",
+            "set_animation_state",
+            "Enemy Walk Animation",
+            "Animation",
+            2,
+            0,
+            serde_json::json!({"target":entity_id,"state": if has_walk { "walk" } else { "idle" }}),
+            vec![openbor_exec_in()],
+            vec![openbor_exec_out()],
+        ));
+        edges.extend([
+            openbor_graph_edge(
+                "ob_e_update_enemy_velocity",
+                "ob_update",
+                "exec",
+                "ob_enemy_velocity",
+                "exec",
+            ),
+            openbor_graph_edge(
+                "ob_e_enemy_velocity_anim",
+                "ob_enemy_velocity",
+                "exec",
+                "ob_enemy_anim",
+                "exec",
+            ),
+        ]);
+    }
+
+    serde_json::json!({
+        "version": 1,
+        "origin": "openbor_beatemup_subset",
+        "source_model": model.name,
+        "source_entity": entity_id,
+        "native_constructs": ["event_update", "set_velocity", "set_animation_state", "camera_follow"],
+        "nodes": nodes,
+        "edges": edges,
+    })
+    .to_string()
+}
+
+fn openbor_stage_controller_graph(
+    level: &OpenBorLevelAsset,
+    model_entity_ids: &HashMap<String, String>,
+    camera_entity_id: Option<&str>,
+) -> String {
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    nodes.push(openbor_graph_node(
+        "ob_stage_start",
+        "event_start",
+        "Stage Start",
+        "Game State",
+        0,
+        0,
+        serde_json::json!({}),
+        vec![],
+        vec![openbor_exec_out()],
+    ));
+    nodes.push(openbor_graph_node(
+        "ob_spawn_timeline",
+        "timeline_sequence",
+        "Spawn Timeline",
+        "Spawn/Room",
+        1,
+        0,
+        serde_json::json!({
+            "timeline_name": "openbor_spawns",
+            "slot_0_delay": 0,
+            "slot_1_delay": 30,
+            "slot_2_delay": 60,
+        }),
+        vec![openbor_exec_in()],
+        vec![
+            openbor_exec_out(),
+            serde_json::json!({"id":"slot_0","label":"0f","kind":"exec"}),
+            serde_json::json!({"id":"slot_1","label":"30f","kind":"exec"}),
+            serde_json::json!({"id":"slot_2","label":"60f","kind":"exec"}),
+        ],
+    ));
+    edges.push(openbor_graph_edge(
+        "ob_e_start_timeline",
+        "ob_stage_start",
+        "exec",
+        "ob_spawn_timeline",
+        "exec",
+    ));
+
+    for (index, spawn) in level.spawns.iter().take(3).enumerate() {
+        let key = slugify_scene_id(&spawn.model_name);
+        let prefab = model_entity_ids
+            .get(&key)
+            .cloned()
+            .unwrap_or_else(|| key.clone());
+        let node_id = format!("ob_spawn_{}", index);
+        nodes.push(openbor_graph_node(
+            &node_id,
+            "spawn_entity",
+            &format!("Spawn {}", spawn.model_name),
+            "Spawn/Room",
+            2 + index as i32,
+            0,
+            serde_json::json!({"prefab":prefab,"x":spawn.x,"y":spawn.y,"source_order":spawn.order}),
+            vec![openbor_exec_in()],
+            vec![openbor_exec_out()],
+        ));
+        edges.push(openbor_graph_edge(
+            &format!("ob_e_timeline_spawn_{index}"),
+            "ob_spawn_timeline",
+            &format!("slot_{index}"),
+            &node_id,
+            "exec",
+        ));
+    }
+
+    nodes.push(openbor_graph_node(
+        "ob_stage_update",
+        "event_update",
+        "Stage Scroll Tick",
+        "Camera",
+        0,
+        1,
+        serde_json::json!({}),
+        vec![],
+        vec![openbor_exec_out()],
+    ));
+    nodes.push(openbor_graph_node(
+        "ob_scroll",
+        "scroll_tilemap",
+        "OpenBOR Level Scroll",
+        "Camera",
+        1,
+        1,
+        serde_json::json!({"layer":"BG_A","dx":level.scroll_dx,"dy":level.scroll_dy}),
+        vec![openbor_exec_in()],
+        vec![openbor_exec_out()],
+    ));
+    nodes.push(openbor_graph_node(
+        "ob_camera",
+        "move_camera",
+        "Camera Bounds/Scroll",
+        "Camera",
+        2,
+        1,
+        serde_json::json!({"target":camera_entity_id.unwrap_or("main_camera"),"x":0,"y":0}),
+        vec![openbor_exec_in()],
+        vec![openbor_exec_out()],
+    ));
+    edges.extend([
+        openbor_graph_edge(
+            "ob_e_stage_update_scroll",
+            "ob_stage_update",
+            "exec",
+            "ob_scroll",
+            "exec",
+        ),
+        openbor_graph_edge(
+            "ob_e_scroll_camera",
+            "ob_scroll",
+            "exec",
+            "ob_camera",
+            "exec",
+        ),
+    ]);
+
+    let mut tail = "ob_spawn_timeline".to_string();
+    for (index, bridge) in level.unsupported_scripts.iter().enumerate() {
+        let node_id = format!("ob_bridge_{index}");
+        nodes.push(openbor_graph_node(
+            &node_id,
+            "bridge_unconverted_source",
+            &format!("OpenBOR Script Bridge {}", index + 1),
+            "Game State",
+            3 + index as i32,
+            2,
+            serde_json::json!({
+                "source": format!("openbor:{}", bridge.label),
+                "label": bridge.body.chars().take(180).collect::<String>(),
+                "gap": "unsupported_openbor_script",
+            }),
+            vec![openbor_exec_in()],
+            vec![openbor_exec_out()],
+        ));
+        edges.push(openbor_graph_edge(
+            &format!("ob_e_bridge_{index}"),
+            &tail,
+            "exec",
+            &node_id,
+            "exec",
+        ));
+        tail = node_id;
+    }
+
+    serde_json::json!({
+        "version": 1,
+        "origin": "openbor_beatemup_stage_subset",
+        "source_level": level.name,
+        "native_constructs": ["event_start", "timeline_sequence", "spawn_entity", "scroll_tilemap", "move_camera", "bridge_unconverted_source"],
+        "nodes": nodes,
+        "edges": edges,
+    })
+    .to_string()
+}
+
+fn openbor_stage_controller_entity(
+    root: &Path,
+    level: &OpenBorLevelAsset,
+    model_entity_ids: &HashMap<String, String>,
+    camera_entity_id: Option<&str>,
+) -> Entity {
+    Entity {
+        entity_id: "openbor_stage_controller".to_string(),
+        display_name: Some("OpenBOR Stage Controller".to_string()),
+        prefab: None,
+        transform: crate::ugdm::entities::Transform { x: 0, y: 0 },
+        components: Components {
+            logic: Some(LogicComponent {
+                graph: Some(openbor_stage_controller_graph(
+                    level,
+                    model_entity_ids,
+                    camera_entity_id,
+                )),
+                graph_ref: None,
+                graph_origin: Some("openbor_beatemup_stage_subset".to_string()),
+                logic_hints: level.logic_hints.clone(),
+                external_source_refs: vec![openbor_source_ref(root, &level.source_file)],
+                imported_semantics: Some(openbor_logic_semantics(
+                    root,
+                    &level.source_file,
+                    "stage_controller",
+                    "medium",
+                    "OpenBOR level commands converted into spawn timeline, camera scroll and script bridges.",
+                )),
+                variables: HashMap::new(),
+            }),
+            ..Components::default()
+        },
+    }
+}
+
+fn derive_openbor_scene_layers(scene: &Scene) -> Vec<SceneLayer> {
+    let mut backgrounds = Vec::new();
+    let mut actors = Vec::new();
+    let mut systems = Vec::new();
+    for entity in &scene.entities {
+        if entity.components.tilemap.is_some() {
+            backgrounds.push(entity.entity_id.clone());
+        } else if entity.components.sprite.is_some() {
+            actors.push(entity.entity_id.clone());
+        } else {
+            systems.push(entity.entity_id.clone());
+        }
+    }
+    vec![
+        SceneLayer {
+            id: "layer_stage".to_string(),
+            name: "STAGE".to_string(),
+            kind: "background".to_string(),
+            visible: true,
+            locked: false,
+            depth: 0,
+            entity_ids: backgrounds,
+        },
+        SceneLayer {
+            id: "layer_actors".to_string(),
+            name: "ACTORS".to_string(),
+            kind: "sprite".to_string(),
+            visible: true,
+            locked: false,
+            depth: 10,
+            entity_ids: actors,
+        },
+        SceneLayer {
+            id: "layer_openbor_bridges".to_string(),
+            name: "OPENBOR BRIDGES".to_string(),
+            kind: "object".to_string(),
+            visible: true,
+            locked: false,
+            depth: 20,
+            entity_ids: systems,
+        },
+    ]
 }
 
 pub fn import_openbor_project(
@@ -10052,6 +12604,7 @@ pub fn import_openbor_project(
     let mut first_sprite_id: Option<String> = None;
     let mut audio_sfx = HashMap::new();
     let mut bgm = None;
+    let mut model_entity_ids: HashMap<String, String> = HashMap::new();
 
     if let Some(level) = levels.first() {
         if let Some(background) = &level.background_asset {
@@ -10072,6 +12625,31 @@ pub fn import_openbor_project(
                 0,
             ));
         }
+        for (index, panel) in level.panel_assets.iter().enumerate().take(2) {
+            if Some(panel) == level.background_asset.as_ref() {
+                continue;
+            }
+            let asset = materialize_external_file(
+                project_dir,
+                openbor_path,
+                panel,
+                "tilesets",
+                "openbor",
+                &mut asset_cache,
+            )?;
+            scene.entities.push(imported_tilemap_entity(
+                unique_entity_id(
+                    &mut entity_ids,
+                    &format!("stage_panel_{}", index + 1),
+                    "tilemap",
+                ),
+                format!("{} Panel {}", level.name, index + 1),
+                asset,
+                panel,
+                index as i32 * 128,
+                0,
+            ));
+        }
         if let Some(music) = &level.music_asset {
             bgm = Some(materialize_external_file(
                 project_dir,
@@ -10085,7 +12663,7 @@ pub fn import_openbor_project(
     }
 
     let mut sprite_x = 64;
-    for model in &models {
+    for (model_index, model) in models.iter().enumerate() {
         let Some(display_asset) = model.display_asset.as_ref() else {
             skipped.push(format!(
                 "{}: modelo OpenBOR sem asset visual resolvido.",
@@ -10102,6 +12680,8 @@ pub fn import_openbor_project(
             &mut asset_cache,
         )?;
         let entity_id = unique_entity_id(&mut entity_ids, &model.name, "fighter");
+        let role = openbor_entity_role(model, model_index == 0);
+        model_entity_ids.insert(slugify_scene_id(&model.name), entity_id.clone());
         if first_sprite_id.is_none() {
             first_sprite_id = Some(entity_id.clone());
         }
@@ -10109,33 +12689,84 @@ pub fn import_openbor_project(
         if let Some(level) = levels.first() {
             logic_hints.extend(level.logic_hints.clone());
         }
-        scene
-            .entities
-            .push(imported_sprite_entity(ImportedSpriteEntitySpec {
-                entity_id,
-                display_name: model.name.clone(),
-                asset,
-                source_path: display_asset.clone(),
-                x: sprite_x,
-                y: 112,
-                input: Some(InputComponent {
-                    device: "joypad1".to_string(),
-                    mapping: HashMap::from([
-                        ("move_left".to_string(), "DPAD_LEFT".to_string()),
-                        ("move_right".to_string(), "DPAD_RIGHT".to_string()),
-                        ("attack".to_string(), "BUTTON_B".to_string()),
-                        ("jump".to_string(), "BUTTON_A".to_string()),
-                    ]),
+        for command in &model.unsupported_commands {
+            skipped.push(format!(
+                "{}: comando/script OpenBOR preservado como bridge: {}",
+                model.name, command
+            ));
+        }
+        let spawn_position = levels.first().and_then(|level| {
+            level
+                .spawns
+                .iter()
+                .find(|spawn| slugify_scene_id(&spawn.model_name) == slugify_scene_id(&model.name))
+        });
+        let x = spawn_position.map(|spawn| spawn.x).unwrap_or(sprite_x);
+        let y = spawn_position.map(|spawn| spawn.y).unwrap_or(112);
+        let input = (role == "player_avatar").then(|| InputComponent {
+            device: "joypad1".to_string(),
+            mapping: HashMap::from([
+                ("move_left".to_string(), "DPAD_LEFT".to_string()),
+                ("move_right".to_string(), "DPAD_RIGHT".to_string()),
+                ("attack".to_string(), "BUTTON_B".to_string()),
+                ("jump".to_string(), "BUTTON_A".to_string()),
+            ]),
+        });
+        let mut entity = imported_sprite_entity(ImportedSpriteEntitySpec {
+            entity_id: entity_id.clone(),
+            display_name: model.name.clone(),
+            asset,
+            source_path: display_asset.clone(),
+            x,
+            y,
+            input,
+            physics: Some(PhysicsComponent {
+                gravity: false,
+                gravity_strength: 0,
+                max_velocity: Some(Velocity {
+                    x: model.movement_speed.max(1) * 16,
+                    y: 32,
                 }),
-                physics: Some(PhysicsComponent {
-                    gravity: true,
-                    gravity_strength: 6,
-                    max_velocity: Some(Velocity { x: 32, y: 96 }),
-                    friction: 1,
-                    bounce: 0,
-                }),
-                logic_hints,
-            }));
+                friction: 1,
+                bounce: 0,
+            }),
+            logic_hints,
+        });
+        if let Some(sprite) = entity.components.sprite.as_mut() {
+            sprite.animations = model.animations.clone();
+            sprite.pivot = model.animations.values().find_map(|animation| {
+                animation
+                    .mugen_frames
+                    .as_ref()
+                    .and_then(|frames| frames.first())
+                    .and_then(|frame| frame.axis.clone())
+            });
+        }
+        openbor_adjust_sprite_frame_size(&mut entity, display_asset);
+        entity.components.collision = openbor_collision_component(model, role);
+        if let Some(logic) = entity.components.logic.as_mut() {
+            logic.graph = Some(openbor_actor_graph(&entity_id, model, role));
+            logic.graph_origin = Some("openbor_beatemup_subset".to_string());
+            logic.external_source_refs = vec![openbor_source_ref(openbor_path, &model.source_file)];
+            logic.imported_semantics = Some(openbor_logic_semantics(
+                openbor_path,
+                &model.source_file,
+                role,
+                "medium",
+                if role == "player_avatar" {
+                    "OpenBOR type/player ou primeiro modelo do manifest."
+                } else {
+                    "OpenBOR type/enemy ou modelo nao-player do manifest."
+                },
+            ));
+            if !model.attack_boxes.is_empty() {
+                logic.logic_hints.push(format!(
+                    "OpenBOR exportou {} attack/hitbox(es) para metadados da animacao.",
+                    model.attack_boxes.len()
+                ));
+            }
+        }
+        scene.entities.push(entity);
         sprite_x += 56;
 
         for source in &model.audio_assets {
@@ -10155,6 +12786,15 @@ pub fn import_openbor_project(
         }
     }
 
+    if let Some(level) = levels.first() {
+        for bridge in &level.unsupported_scripts {
+            skipped.push(format!(
+                "{}: script OpenBOR preservado como bridge '{}'.",
+                level.name, bridge.label
+            ));
+        }
+    }
+
     if !audio_sfx.is_empty() || bgm.is_some() {
         let audio_id = unique_entity_id(&mut entity_ids, "audio_bank", "audio");
         scene.entities.push(external_audio_bank_entity(
@@ -10165,18 +12805,31 @@ pub fn import_openbor_project(
         ));
     }
 
+    let mut camera_entity_id = None;
     if let Some(follow_entity) = first_sprite_id {
+        let id = unique_entity_id(&mut entity_ids, "main_camera", "camera");
+        camera_entity_id = Some(id.clone());
         scene.entities.push(imported_camera_entity(
-            unique_entity_id(&mut entity_ids, "main_camera", "camera"),
+            id,
             "Main Camera".to_string(),
             Some(follow_entity),
         ));
     }
 
+    if let Some(level) = levels.first() {
+        scene.entities.push(openbor_stage_controller_entity(
+            openbor_path,
+            level,
+            &model_entity_ids,
+            camera_entity_id.as_deref(),
+        ));
+    }
+    scene.layers = Some(derive_openbor_scene_layers(&scene));
+
     save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
     Ok(ExternalImportReport {
         primary_scene: scene,
-        imported_scenes: 1,
+        imported_scenes: levels.len().max(1),
         skipped_sources: skipped,
     })
 }
@@ -10499,6 +13152,7 @@ fn imported_sprite_entity(spec: ImportedSpriteEntitySpec) -> Entity {
                 animations: HashMap::new(),
                 priority: "foreground".to_string(),
                 meta_sprite: frame_width > 32 || frame_height > 32,
+                commands: Vec::new(),
             }),
             input,
             physics,
@@ -10778,7 +13432,7 @@ pub fn stamp_imported_mugen_metadata(
         "1.0.0".to_string(),
         "imported_mugen".to_string(),
         "mugen".to_string(),
-        "mugen_def_air_v1".to_string(),
+        "mugen_fighting_subset_v1".to_string(),
         source_path,
     )
 }
@@ -11153,6 +13807,7 @@ fn starter_scene(scene_id: &str, display_name: String, _target: &str) -> Scene {
                 animations: HashMap::new(),
                 priority: "foreground".to_string(),
                 meta_sprite: false,
+                commands: Vec::new(),
             }),
             logic: Some(LogicComponent {
                 graph: Some(logic_graph),
@@ -12885,6 +15540,214 @@ void tick_player(void) {\n\
         .expect("write gm room");
     }
 
+    fn write_gamemaker_yyp_fixture(root: &Path) {
+        fs::create_dir_all(root.join("sprites").join("spr_player")).expect("create yy sprite");
+        fs::create_dir_all(root.join("sprites").join("spr_wall")).expect("create yy wall sprite");
+        fs::create_dir_all(root.join("sprites").join("spr_tiles")).expect("create yy tile sprite");
+        fs::create_dir_all(root.join("objects").join("obj_player")).expect("create yy player");
+        fs::create_dir_all(root.join("objects").join("obj_wall")).expect("create yy wall");
+        fs::create_dir_all(root.join("objects").join("obj_enemy")).expect("create yy enemy");
+        fs::create_dir_all(root.join("rooms").join("rm_stage")).expect("create yy room");
+        fs::create_dir_all(root.join("tilesets").join("ts_solid")).expect("create yy tileset");
+
+        write_test_png(
+            &root
+                .join("sprites")
+                .join("spr_player")
+                .join("spr_player_0.png"),
+            24,
+            32,
+            [255, 196, 0, 255],
+        );
+        write_test_png(
+            &root.join("sprites").join("spr_wall").join("spr_wall_0.png"),
+            16,
+            16,
+            [64, 64, 64, 255],
+        );
+        write_test_png(
+            &root
+                .join("sprites")
+                .join("spr_tiles")
+                .join("spr_tiles_0.png"),
+            16,
+            16,
+            [96, 160, 96, 255],
+        );
+
+        fs::write(
+            root.join("ModernPlatform.yyp"),
+            r#"{
+  "resources": [
+    {"id": {"name": "spr_player", "path": "sprites/spr_player/spr_player.yy"}},
+    {"id": {"name": "spr_wall", "path": "sprites/spr_wall/spr_wall.yy"}},
+    {"id": {"name": "spr_tiles", "path": "sprites/spr_tiles/spr_tiles.yy"}},
+    {"id": {"name": "obj_player", "path": "objects/obj_player/obj_player.yy"}},
+    {"id": {"name": "obj_wall", "path": "objects/obj_wall/obj_wall.yy"}},
+    {"id": {"name": "obj_enemy", "path": "objects/obj_enemy/obj_enemy.yy"}},
+    {"id": {"name": "ts_solid", "path": "tilesets/ts_solid/ts_solid.yy"}},
+    {"id": {"name": "rm_stage", "path": "rooms/rm_stage/rm_stage.yy"}}
+  ]
+}"#,
+        )
+        .expect("write yyp");
+
+        fs::write(
+            root.join("sprites")
+                .join("spr_player")
+                .join("spr_player.yy"),
+            r#"{
+  "%Name": "spr_player",
+  "width": 24,
+  "height": 32,
+  "bbox_left": 2,
+  "bbox_top": 4,
+  "bbox_right": 21,
+  "bbox_bottom": 31,
+  "xorigin": 12,
+  "yorigin": 28
+}"#,
+        )
+        .expect("write player yy");
+        fs::write(
+            root.join("sprites").join("spr_wall").join("spr_wall.yy"),
+            r#"{
+  "%Name": "spr_wall",
+  "width": 16,
+  "height": 16,
+  "bbox_left": 0,
+  "bbox_top": 0,
+  "bbox_right": 15,
+  "bbox_bottom": 15
+}"#,
+        )
+        .expect("write wall yy");
+        fs::write(
+            root.join("sprites").join("spr_tiles").join("spr_tiles.yy"),
+            r#"{"%Name": "spr_tiles", "width": 16, "height": 16}"#,
+        )
+        .expect("write tiles sprite yy");
+        fs::write(
+            root.join("tilesets").join("ts_solid").join("ts_solid.yy"),
+            r#"{
+  "%Name": "ts_solid",
+  "spriteId": {"name": "spr_tiles", "path": "sprites/spr_tiles/spr_tiles.yy"},
+  "tileWidth": 8,
+  "tileHeight": 8
+}"#,
+        )
+        .expect("write tileset yy");
+
+        fs::write(
+            root.join("objects").join("obj_player").join("obj_player.yy"),
+            r#"{
+  "%Name": "obj_player",
+  "spriteId": {"name": "spr_player", "path": "sprites/spr_player/spr_player.yy"},
+  "solid": false,
+  "eventList": [
+    {"eventType": 0, "eventNum": 0},
+    {"eventType": 3, "eventNum": 0},
+    {"eventType": 2, "eventNum": 0},
+    {"eventType": 4, "eventNum": 0, "collisionObjectId": {"name": "obj_enemy", "path": "objects/obj_enemy/obj_enemy.yy"}},
+    {"eventType": 8, "eventNum": 0}
+  ]
+}"#,
+        )
+        .expect("write player object yy");
+        fs::write(
+            root.join("objects").join("obj_player").join("Create_0.gml"),
+            "moving_speed = 4; gravity_force = 1; jumping_speed = 9; alarm[0] = 45; hp = 3;",
+        )
+        .expect("write create gml");
+        fs::write(
+            root.join("objects").join("obj_player").join("Step_0.gml"),
+            [
+                "var hmove = keyboard_check(vk_right) - keyboard_check(vk_left);",
+                "if (keyboard_check_pressed(vk_space) && !place_free(x, y + 1)) { vsp = -jumping_speed; }",
+                "if (!place_free(x + hmove, y)) { hmove = 0; }",
+                "if (place_meeting(x, y + 1, obj_wall)) { vsp = 0; }",
+                "sprite_index = spr_player;",
+                "image_xscale = -1;",
+                "image_speed = 0.25;",
+                "instance_create(x + 12, y, obj_enemy);",
+                "if (hp <= 0) { instance_destroy(); }",
+                "room_goto_next();",
+            ]
+            .join("\n"),
+        )
+        .expect("write step gml");
+        fs::write(
+            root.join("objects").join("obj_player").join("Alarm_0.gml"),
+            "instance_create(x, y - 8, obj_enemy);",
+        )
+        .expect("write alarm gml");
+        fs::write(
+            root.join("objects")
+                .join("obj_player")
+                .join("Collision_obj_enemy.gml"),
+            "if (place_meeting(x, y, obj_enemy)) { instance_destroy(); }",
+        )
+        .expect("write collision gml");
+        fs::write(
+            root.join("objects").join("obj_player").join("Draw_0.gml"),
+            "draw_self();",
+        )
+        .expect("write draw gml");
+
+        fs::write(
+            root.join("objects").join("obj_wall").join("obj_wall.yy"),
+            r#"{
+  "%Name": "obj_wall",
+  "spriteId": {"name": "spr_wall", "path": "sprites/spr_wall/spr_wall.yy"},
+  "solid": true,
+  "eventList": []
+}"#,
+        )
+        .expect("write wall object yy");
+        fs::write(
+            root.join("objects").join("obj_enemy").join("obj_enemy.yy"),
+            r#"{
+  "%Name": "obj_enemy",
+  "spriteId": {"name": "spr_player", "path": "sprites/spr_player/spr_player.yy"},
+  "solid": false,
+  "eventList": []
+}"#,
+        )
+        .expect("write enemy object yy");
+
+        fs::write(
+            root.join("rooms").join("rm_stage").join("rm_stage.yy"),
+            r#"{
+  "%Name": "rm_stage",
+  "roomSettings": {"Width": 640, "Height": 224},
+  "views": [
+    {"visible": true, "objectId": {"name": "obj_player", "path": "objects/obj_player/obj_player.yy"}}
+  ],
+  "layers": [
+    {
+      "$GMRInstanceLayer": "",
+      "%Name": "Instances",
+      "instances": [
+        {"name": "inst_player", "objectId": {"name": "obj_player", "path": "objects/obj_player/obj_player.yy"}, "x": 48, "y": 120},
+        {"name": "inst_wall", "objectId": {"name": "obj_wall", "path": "objects/obj_wall/obj_wall.yy"}, "x": 0, "y": 200}
+      ]
+    },
+    {
+      "$GMRTileLayer": "",
+      "%Name": "GroundTiles",
+      "tilesetId": {"name": "ts_solid", "path": "tilesets/ts_solid/ts_solid.yy"},
+      "tiles": {
+        "SerialiseWidth": 4,
+        "SerialiseHeight": 2,
+        "TileSerialiseData": [1, 1, 1, 1, 0, 0, 1, 1]
+      }
+    }
+  ]
+}"#,
+        )
+        .expect("write room yy");
+    }
+
     fn write_mugen_character_fixture(root: &Path) {
         fs::create_dir_all(root.join("work").join("hero_sff").join("sd"))
             .expect("create mugen character work dir");
@@ -12897,6 +15760,9 @@ void tick_player(void) {\n\
                 "[Files]",
                 "anim = hero.air",
                 "sprite = hero.sff",
+                "cmd = hero.cmd",
+                "cns = hero.cns",
+                "st = specials.st",
                 "",
             ]
             .join("\n"),
@@ -12911,10 +15777,184 @@ void tick_player(void) {\n\
                 "0, 0, 0, 0, 4",
                 "Loopstart",
                 "0, 0, 0, 0, 4",
+                "",
+                "[Begin Action 20]",
+                "Clsn2: 1",
+                "Clsn2[0] = -8, -20, 8, 0",
+                "0, 0, 0, 0, 3",
+                "0, 0, 2, 0, 3",
+                "",
+                "[Begin Action 40]",
+                "Clsn2: 1",
+                "Clsn2[0] = -8, -20, 8, 0",
+                "0, 0, 0, -4, 5",
+                "",
+                "[Begin Action 200]",
+                "Clsn1: 1",
+                "Clsn1[0] = 4, -18, 24, -6",
+                "Clsn2: 1",
+                "Clsn2[0] = -8, -20, 12, 0",
+                "0, 0, 0, 0, 3",
+                "",
+                "[Begin Action 220]",
+                "Clsn1: 1",
+                "Clsn1[0] = 8, -18, 30, -4",
+                "Clsn2: 1",
+                "Clsn2[0] = -8, -20, 12, 0",
+                "0, 0, 0, 0, 3",
             ]
             .join("\n"),
         )
         .expect("write mugen air");
+        fs::write(
+            root.join("hero.cmd"),
+            [
+                "[Command]",
+                "name = \"hadouken\"",
+                "command = _2, _3, _6, _P",
+                "time = 18",
+                "",
+                "[Command]",
+                "name = \"punch\"",
+                "command = _P",
+                "time = 5",
+                "",
+                "[Statedef -1]",
+                "[State -1, Hadouken]",
+                "type = ChangeState",
+                "triggerall = command = \"hadouken\"",
+                "value = 220",
+                "",
+                "[State -1, Punch]",
+                "type = ChangeState",
+                "triggerall = command = \"punch\"",
+                "value = 200",
+            ]
+            .join("\n"),
+        )
+        .expect("write mugen cmd");
+        fs::write(
+            root.join("hero.cns"),
+            [
+                "[Statedef 0]",
+                "type = S",
+                "physics = S",
+                "anim = 0",
+                "",
+                "[Statedef 20]",
+                "type = S",
+                "physics = S",
+                "anim = 20",
+                "",
+                "[State 20, Walk]",
+                "type = VelSet",
+                "trigger1 = Time = 0",
+                "x = 1",
+                "y = 0",
+                "",
+                "[Statedef 40]",
+                "type = A",
+                "physics = N",
+                "anim = 40",
+                "",
+                "[State 40, Jump]",
+                "type = VelSet",
+                "trigger1 = Time = 0",
+                "x = 0",
+                "y = -5",
+                "",
+                "[Statedef 200]",
+                "type = S",
+                "movetype = A",
+                "physics = S",
+                "anim = 200",
+                "",
+                "[State 200, VelSet]",
+                "type = VelSet",
+                "trigger1 = Time = 0",
+                "x = 0",
+                "y = 0",
+                "",
+                "[State 200, HitDef]",
+                "type = HitDef",
+                "trigger1 = AnimElem = 1",
+                "attr = S, NA",
+                "damage = 30, 4",
+                "pausetime = 8, 8",
+                "sparkno = 2",
+                "",
+                "[State 200, Snd]",
+                "type = PlaySnd",
+                "trigger1 = Time = 1",
+                "value = 0, 1",
+                "",
+                "[State 200, End]",
+                "type = ChangeState",
+                "trigger1 = AnimTime = 0",
+                "value = 0",
+                "",
+                "[Statedef 220]",
+                "type = S",
+                "movetype = A",
+                "physics = S",
+                "anim = 220",
+                "",
+                "[State 220, VelSet]",
+                "type = VelSet",
+                "trigger1 = Time = 0",
+                "x = 3",
+                "y = 0",
+                "",
+                "[State 220, HitDef]",
+                "type = HitDef",
+                "trigger1 = AnimElem = 1",
+                "attr = S, SP",
+                "damage = 45, 6",
+                "pausetime = 6, 6",
+                "sparkno = 3",
+                "",
+                "[State 220, Snd]",
+                "type = PlaySnd",
+                "trigger1 = Time = 1",
+                "value = 0, 1",
+                "",
+                "[State 220, End]",
+                "type = ChangeState",
+                "trigger1 = AnimTime = 0",
+                "value = 0",
+            ]
+            .join("\n"),
+        )
+        .expect("write mugen cns");
+        fs::write(
+            root.join("specials.st"),
+            [
+                "[Statedef 210]",
+                "type = A",
+                "movetype = A",
+                "physics = N",
+                "anim = 20",
+                "",
+                "[State 210, VelAdd]",
+                "type = VelAdd",
+                "trigger1 = Time > 0",
+                "x = -1",
+                "y = 2",
+                "",
+                "[State 210, PosAdd]",
+                "type = PosAdd",
+                "trigger1 = Time = 0",
+                "x = 4",
+                "y = -2",
+                "",
+                "[State 210, Ikemen extension]",
+                "type = AssertSpecial",
+                "trigger1 = !AILevel",
+                "flag = invisible",
+            ]
+            .join("\n"),
+        )
+        .expect("write mugen st");
         write_test_png(
             &root
                 .join("work")
@@ -12951,6 +15991,42 @@ void tick_player(void) {\n\
         .expect("write mugen stage def");
         write_test_png(&root.join("stage.png"), 160, 96, [32, 96, 200, 255]);
         fs::write(root.join("theme.mp3"), b"fake-mp3").expect("write mugen stage music");
+    }
+
+    fn write_mugen_stage_parallax_fixture(root: &Path) {
+        fs::create_dir_all(root.join("work").join("stage_sff").join("sd"))
+            .expect("create mugen parallax stage work dir");
+        fs::write(
+            root.join("stage.def"),
+            [
+                "[Info]",
+                "name = \"Parallax Stage\"",
+                "",
+                "[StageInfo]",
+                "zoffset = 190",
+                "",
+                "[BGdef]",
+                "spr = stage.sff",
+                "",
+                "[BG 0]",
+                "type = normal",
+                "spriteno = 0,0",
+                "start = 8, 16",
+                "delta = 2, 1",
+            ]
+            .join("\n"),
+        )
+        .expect("write parallax stage def");
+        write_test_png(
+            &root
+                .join("work")
+                .join("stage_sff")
+                .join("sd")
+                .join("0-0.png"),
+            128,
+            64,
+            [32, 96, 200, 255],
+        );
     }
 
     fn write_mugen_screenpack_fixture(root: &Path) {
@@ -14212,6 +17288,22 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             "shmup: jogador deve receber no de papel encadeado: {}",
             disk_graph
         );
+        let graph_json: serde_json::Value =
+            serde_json::from_str(&disk_graph).expect("parse graph json");
+        let mut x_positions = graph_json
+            .get("nodes")
+            .and_then(serde_json::Value::as_array)
+            .expect("nodes")
+            .iter()
+            .filter_map(|node| node.get("x").and_then(serde_json::Value::as_i64))
+            .collect::<Vec<_>>();
+        x_positions.sort_unstable();
+        assert!(
+            x_positions.windows(2).all(|pair| pair[1] - pair[0] >= 200),
+            "Phase D deve abrir graph_ref com cards organizados; x_positions={:?}, graph={}",
+            x_positions,
+            disk_graph
+        );
         let _ = fs::remove_dir_all(&donor_dir);
         let _ = fs::remove_dir_all(&project_dir);
     }
@@ -14353,6 +17445,284 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
     }
 
     #[test]
+    fn import_mugen_character_converts_cmd_air_cns_st_to_fighting_nodes() {
+        let donor_root = temp_dir("mugen-fighting-donor");
+        let project_dir = temp_dir("mugen-fighting-project");
+        create_project_skeleton(&project_dir, "Imported MUGEN Fighter", "megadrive")
+            .expect("create project skeleton");
+        write_mugen_character_fixture(&donor_root);
+
+        import_mugen_project(&project_dir, &donor_root).expect("import mugen fighter");
+        let scene =
+            load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load imported fighter scene");
+        let fighter = scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "heromugen")
+            .expect("fighter entity");
+        let sprite = fighter.components.sprite.as_ref().expect("fighter sprite");
+
+        let hadouken = sprite
+            .commands
+            .iter()
+            .find(|command| command.id == "hadouken")
+            .expect("hadouken command binding");
+        assert_eq!(hadouken.notation, "_2, _3, _6, _P");
+        assert_eq!(hadouken.max_frames, 18);
+        assert_eq!(hadouken.button_profile, "megadrive");
+        assert_eq!(hadouken.target_animation, "action_220");
+        assert!(sprite.commands.iter().any(|command| command.id == "punch"));
+        for expected in ["idle", "action_20", "action_40", "action_200", "action_220"] {
+            assert!(
+                sprite.animations.contains_key(expected),
+                "BYOR fixture should expose {expected}"
+            );
+        }
+
+        let attack_anim = sprite
+            .animations
+            .get("action_220")
+            .expect("hadouken attack animation from AIR");
+        let first_mugen_frame = attack_anim
+            .mugen_frames
+            .as_ref()
+            .and_then(|frames| frames.first())
+            .expect("AIR metadata frame");
+        assert_eq!(first_mugen_frame.duration, 3);
+        assert!(
+            !first_mugen_frame.clsn1.is_empty(),
+            "CLSN1 hitboxes imported"
+        );
+        assert!(
+            !first_mugen_frame.clsn2.is_empty(),
+            "CLSN2 hurtboxes imported"
+        );
+
+        let logic = fighter.components.logic.as_ref().expect("fighter logic");
+        assert_eq!(logic.graph_origin.as_deref(), Some("mugen_fighting_import"));
+        assert_eq!(
+            logic
+                .imported_semantics
+                .as_ref()
+                .map(|semantics| semantics.gameplay_class.as_str()),
+            Some("fighting_2d")
+        );
+        assert!(logic
+            .external_source_refs
+            .iter()
+            .any(|path| path.ends_with("hero.cmd")));
+        assert!(logic
+            .external_source_refs
+            .iter()
+            .any(|path| path.ends_with("hero.cns")));
+        assert!(logic
+            .external_source_refs
+            .iter()
+            .any(|path| path.ends_with("specials.st")));
+
+        let graph_ref = logic.graph_ref.as_deref().expect("external graph ref");
+        let graph_raw = fs::read_to_string(project_dir.join(graph_ref)).expect("read graph ref");
+        let graph: serde_json::Value = serde_json::from_str(&graph_raw).expect("parse graph json");
+        let nodes = graph
+            .get("nodes")
+            .and_then(|nodes| nodes.as_array())
+            .expect("graph nodes");
+        let node_types = nodes
+            .iter()
+            .filter_map(|node| node.get("type").and_then(|value| value.as_str()))
+            .collect::<Vec<_>>();
+
+        assert!(node_types.contains(&"input_command"));
+        assert!(node_types.contains(&"fsm_state"));
+        assert!(node_types.contains(&"fsm_transition"));
+        assert!(
+            nodes.iter().any(|node| {
+                node.get("type").and_then(|value| value.as_str()) == Some("set_velocity")
+                    && node
+                        .get("params")
+                        .and_then(|params| params.get("mode"))
+                        .and_then(|value| value.as_str())
+                        == Some("set")
+            }),
+            "VelSet must materialize as set_velocity mode=set"
+        );
+        assert!(
+            nodes.iter().any(|node| {
+                node.get("type").and_then(|value| value.as_str()) == Some("set_velocity")
+                    && node
+                        .get("params")
+                        .and_then(|params| params.get("mode"))
+                        .and_then(|value| value.as_str())
+                        == Some("add")
+            }),
+            "VelAdd must materialize as set_velocity mode=add"
+        );
+        assert!(
+            node_types.contains(&"set_position"),
+            "PosAdd/PosSet nodes expected"
+        );
+        assert!(
+            node_types.contains(&"action_sound"),
+            "PlaySnd node expected"
+        );
+        assert!(
+            nodes.iter().any(|node| {
+                node.get("type").and_then(|value| value.as_str())
+                    == Some("bridge_unconverted_source")
+                    && node
+                        .get("params")
+                        .and_then(|params| params.get("gap"))
+                        .and_then(|value| value.as_str())
+                        == Some("mugen_hitdef")
+            }),
+            "HitDef must be an explicit bridge while native attack node is absent"
+        );
+
+        let _ = fs::remove_dir_all(project_dir);
+        let _ = fs::remove_dir_all(donor_root);
+    }
+
+    #[test]
+    fn import_mugen_stage_background_materializes_tilemap_and_parallax_metadata() {
+        let donor_root = temp_dir("mugen-stage-parallax-donor");
+        let project_dir = temp_dir("mugen-stage-parallax-project");
+        create_project_skeleton(&project_dir, "Imported MUGEN Stage", "megadrive")
+            .expect("create project skeleton");
+        write_mugen_stage_parallax_fixture(&donor_root);
+
+        import_mugen_project(&project_dir, &donor_root).expect("import mugen stage");
+        let scene =
+            load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load imported stage scene");
+        let bg = scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "bg_0")
+            .expect("stage background entity");
+        assert!(
+            bg.components.tilemap.is_some(),
+            "stage BG should be editable as tilemap metadata"
+        );
+        assert!(
+            scene.background_layers.iter().any(|layer| {
+                layer.layer_id == "bg_0"
+                    && layer.tileset.contains("parallaxstage_bg_0_0_0.png")
+                    && layer
+                        .scroll_speed
+                        .as_ref()
+                        .is_some_and(|speed| speed.x == 2 && speed.y == 1)
+            }),
+            "stage delta should be preserved as parallax background layer"
+        );
+        assert!(
+            scene
+                .retrofx
+                .as_ref()
+                .is_some_and(|retrofx| retrofx.parallax_layers.iter().any(|layer| {
+                    layer.id == "bg_0" && layer.speed_x == 2 && layer.speed_y == 1
+                })),
+            "stage delta should be visible in RetroFX parallax metadata"
+        );
+
+        let _ = fs::remove_dir_all(project_dir);
+        let _ = fs::remove_dir_all(donor_root);
+    }
+
+    #[test]
+    fn import_ikemen_go_preserves_profile_and_bridges_unsupported_extensions() {
+        let donor_root = temp_dir("ikemen-fighting-donor");
+        let project_dir = temp_dir("ikemen-fighting-project");
+        create_project_skeleton(&project_dir, "Imported IKEMEN", "megadrive")
+            .expect("create project skeleton");
+        write_mugen_character_fixture(&donor_root);
+
+        import_external_project(&project_dir, "ikemen_go", &donor_root)
+            .expect("import ikemen through mugen adapter");
+        let project =
+            stamp_imported_external_profile_metadata(&project_dir, "ikemen_go", &donor_root)
+                .expect("stamp ikemen metadata");
+        let metadata = project.template_metadata.expect("template metadata");
+        assert_eq!(metadata.source_kind, "imported_ikemen_go");
+        assert_eq!(metadata.source_engine.as_deref(), Some("ikemen_go"));
+        assert_eq!(
+            metadata.import_profile.as_deref(),
+            Some("ikemen_go_mugen_v1")
+        );
+
+        let scene =
+            load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load imported ikemen scene");
+        let fighter = scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "heromugen")
+            .expect("fighter entity");
+        let logic = fighter.components.logic.as_ref().expect("fighter logic");
+        let graph_ref = logic.graph_ref.as_deref().expect("external graph ref");
+        let graph_raw = fs::read_to_string(project_dir.join(graph_ref)).expect("read graph ref");
+        assert!(
+            graph_raw.contains("\"bridge_unconverted_source\"")
+                && graph_raw.contains("AssertSpecial"),
+            "Ikemen/MUGEN extensions must become explicit bridges instead of disappearing"
+        );
+
+        let _ = fs::remove_dir_all(project_dir);
+        let _ = fs::remove_dir_all(donor_root);
+    }
+
+    #[test]
+    fn import_mugen_reimport_keeps_commands_and_graph_idempotent() {
+        let donor_root = temp_dir("mugen-reimport-fighting-donor");
+        let project_dir = temp_dir("mugen-reimport-fighting-project");
+        create_project_skeleton(&project_dir, "Imported MUGEN Reimport", "megadrive")
+            .expect("create project skeleton");
+        write_mugen_character_fixture(&donor_root);
+
+        import_mugen_project(&project_dir, &donor_root).expect("first import");
+        let first_scene = load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load first scene");
+        let first_logic = first_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "heromugen")
+            .and_then(|entity| entity.components.logic.as_ref())
+            .expect("first logic");
+        let graph_ref = first_logic
+            .graph_ref
+            .as_deref()
+            .expect("first graph ref")
+            .to_string();
+        let first_graph = fs::read_to_string(project_dir.join(&graph_ref)).expect("first graph");
+
+        import_mugen_project(&project_dir, &donor_root).expect("second import");
+        let second_scene =
+            load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load second scene");
+        let second_fighter = second_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "heromugen")
+            .expect("second fighter");
+        let second_sprite = second_fighter
+            .components
+            .sprite
+            .as_ref()
+            .expect("second sprite");
+        let second_logic = second_fighter
+            .components
+            .logic
+            .as_ref()
+            .expect("second logic");
+        let second_graph = fs::read_to_string(
+            project_dir.join(second_logic.graph_ref.as_deref().expect("second graph ref")),
+        )
+        .expect("second graph");
+
+        assert_eq!(second_sprite.commands.len(), 2);
+        assert_eq!(first_graph, second_graph);
+        assert_eq!(second_logic.graph_ref.as_deref(), Some(graph_ref.as_str()));
+
+        let _ = fs::remove_dir_all(project_dir);
+        let _ = fs::remove_dir_all(donor_root);
+    }
+
+    #[test]
     fn import_godot_project_creates_native_scene_with_sprite_audio_camera_and_skips() {
         let donor_root = temp_dir("godot-import-root");
         let project_dir = temp_dir("godot-import-project");
@@ -14429,8 +17799,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
 
         assert_eq!(report.imported_scenes, 1);
         assert!(report.skipped_sources.iter().any(|entry| {
-            entry.contains("GameMaker import:")
-                && entry.contains("nodes gerados")
+            entry.contains("GameMaker import:") && entry.contains("nodes gerados")
         }));
         let player = scene
             .entities
@@ -14462,14 +17831,12 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                 .map(|semantics| semantics.confidence.as_str()),
             Some("native_subset")
         );
-        assert!(
-            logic
-                .imported_semantics
-                .as_ref()
-                .is_some_and(|semantics| semantics
-                    .audit_flags
-                    .contains(&"gml_native_subset".to_string()))
-        );
+        assert!(logic
+            .imported_semantics
+            .as_ref()
+            .is_some_and(|semantics| semantics
+                .audit_flags
+                .contains(&"gml_native_subset".to_string())));
         assert_eq!(
             logic
                 .imported_semantics
@@ -14497,18 +17864,193 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
     }
 
     #[test]
+    fn import_gamemaker_yyp_project_creates_scene_with_yy_assets_nodes_and_tile_layer() {
+        let donor_root = temp_dir("gamemaker-yyp-import-root");
+        let project_dir = temp_dir("gamemaker-yyp-import-project");
+        create_project_skeleton(&project_dir, "Imported Modern GameMaker", "megadrive")
+            .expect("create project skeleton");
+        write_gamemaker_yyp_fixture(&donor_root);
+
+        let yyp = donor_root.join("ModernPlatform.yyp");
+        let report = import_external_project(&project_dir, "gamemaker", &yyp)
+            .expect("import gamemaker yyp project");
+        let scene =
+            load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load imported gamemaker scene");
+
+        assert_eq!(report.imported_scenes, 1);
+        assert!(report.skipped_sources.iter().any(|entry| {
+            entry.contains("GameMaker import:")
+                && entry.contains("nodes gerados")
+                && entry.contains("formato=yyp")
+        }));
+        assert!(scene.entities.iter().any(|entity| {
+            entity.components.tilemap.as_ref().is_some_and(|tilemap| {
+                tilemap
+                    .tileset
+                    .ends_with("gamemaker_sprites_spr_tiles_spr_tiles_0.png")
+                    && tilemap.map_width == 4
+                    && tilemap.map_height == 2
+                    && tilemap.cells == vec![1, 1, 1, 1, 0, 0, 1, 1]
+            })
+        }));
+        assert!(scene
+            .layers
+            .as_ref()
+            .is_some_and(|layers| layers.iter().any(|layer| layer.kind == "tile")));
+        assert!(scene.collision_map.as_ref().is_some_and(|map| {
+            map.width == 40 && map.height == 28 && map.data.iter().any(|cell| *cell == 1)
+        }));
+
+        let player = scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "inst_player")
+            .expect("player instance entity");
+        assert!(player.components.sprite.as_ref().is_some_and(|sprite| {
+            sprite.asset == "assets/sprites/gamemaker_sprites_spr_player_spr_player_0.png"
+                && sprite.frame_width == 24
+                && sprite.frame_height == 32
+        }));
+        assert!(player
+            .components
+            .collision
+            .as_ref()
+            .is_some_and(|collision| {
+                collision.width == 20
+                    && collision.height == 28
+                    && collision
+                        .offset
+                        .as_ref()
+                        .is_some_and(|offset| offset.x == 2 && offset.y == 4)
+            }));
+        let logic = player.components.logic.as_ref().expect("logic");
+        assert_eq!(logic.graph_origin.as_deref(), Some("gamemaker_yy_native"));
+        assert!(logic.external_source_refs.iter().any(|path| {
+            path.ends_with("objects/obj_player/Step_0.gml")
+                || path.ends_with("objects\\obj_player\\Step_0.gml")
+        }));
+        assert_eq!(
+            logic
+                .imported_semantics
+                .as_ref()
+                .map(|semantics| semantics.source.as_str()),
+            Some("gamemaker_yy")
+        );
+
+        let graph = fs::read_to_string(
+            project_dir
+                .join("graphs")
+                .join("gamemaker_inst_player.json"),
+        )
+        .expect("read graph");
+        for expected in [
+            "\"type\":\"condition_overlap\"",
+            "\"type\":\"timer\"",
+            "\"type\":\"set_animation_state\"",
+            "\"type\":\"spawn_entity\"",
+            "\"type\":\"destroy_entity\"",
+            "\"type\":\"load_scene\"",
+        ] {
+            assert!(
+                graph.contains(expected),
+                "graph missing {expected}: {graph}"
+            );
+        }
+
+        let second = import_external_project(&project_dir, "gamemaker", &yyp)
+            .expect("reimport gamemaker yyp project");
+        let reopened =
+            load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("reload imported gamemaker scene");
+        assert_eq!(second.imported_scenes, 1);
+        assert_eq!(reopened.entities.len(), scene.entities.len());
+        assert_eq!(
+            fs::read_to_string(
+                project_dir
+                    .join("graphs")
+                    .join("gamemaker_inst_player.json")
+            )
+            .expect("read graph after reimport"),
+            graph,
+            "reimport should keep generated graph stable"
+        );
+
+        let _ = fs::remove_dir_all(project_dir);
+        let _ = fs::remove_dir_all(donor_root);
+    }
+
+    #[test]
+    fn import_gamemaker_project_gmx_file_detects_legacy_project_root() {
+        let donor_root = temp_dir("gamemaker-gmx-file-root");
+        let project_dir = temp_dir("gamemaker-gmx-file-project");
+        create_project_skeleton(&project_dir, "Imported GMX File", "megadrive")
+            .expect("create project skeleton");
+        write_gamemaker_gmx_fixture(&donor_root);
+
+        let project_gmx = donor_root.join("Platformer.project.gmx");
+        let report = import_external_project(&project_dir, "gamemaker", &project_gmx)
+            .expect("import gamemaker project gmx file");
+        let scene = load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load scene");
+
+        assert_eq!(report.imported_scenes, 1);
+        assert!(report
+            .skipped_sources
+            .iter()
+            .any(|entry| entry.contains("formato=gmx")));
+        assert!(scene
+            .entities
+            .iter()
+            .any(|entity| entity.entity_id == "inst_player"));
+
+        let _ = fs::remove_dir_all(project_dir);
+        let _ = fs::remove_dir_all(donor_root);
+    }
+
+    #[test]
+    fn import_gamemaker_room_yy_path_detects_modern_project_root() {
+        let donor_root = temp_dir("gamemaker-yy-path-root");
+        let project_dir = temp_dir("gamemaker-yy-path-project");
+        create_project_skeleton(&project_dir, "Imported Room YY", "megadrive")
+            .expect("create project skeleton");
+        write_gamemaker_yyp_fixture(&donor_root);
+
+        let room_yy = donor_root
+            .join("rooms")
+            .join("rm_stage")
+            .join("rm_stage.yy");
+        let report = import_external_project(&project_dir, "gamemaker", &room_yy)
+            .expect("import gamemaker room yy path");
+        let scene = load_scene(&project_dir, DEFAULT_ENTRY_SCENE).expect("load scene");
+
+        assert_eq!(report.imported_scenes, 1);
+        assert!(scene
+            .entities
+            .iter()
+            .any(|entity| entity.entity_id == "inst_player"));
+        assert!(scene
+            .entities
+            .iter()
+            .any(|entity| entity.components.tilemap.is_some()));
+
+        let _ = fs::remove_dir_all(project_dir);
+        let _ = fs::remove_dir_all(donor_root);
+    }
+
+    #[test]
     fn gamemaker_import_summary_reports_generated_nodes() {
         let donor_root = temp_dir("gamemaker-summary-root");
         let project_dir = temp_dir("gamemaker-summary-project");
         create_project_skeleton(&project_dir, "Summary GameMaker", "megadrive")
             .expect("create project skeleton");
         write_gamemaker_gmx_fixture(&donor_root);
-        let report = import_external_project(&project_dir, "gamemaker", &donor_root)
-            .expect("import");
-        assert!(report.skipped_sources.iter().any(|entry| {
-            entry.contains("nodes gerados") && entry.contains("grafo nativo")
-        }));
-        let graph_path = project_dir.join("graphs").join("gamemaker_inst_player.json");
+        let report =
+            import_external_project(&project_dir, "gamemaker", &donor_root).expect("import");
+        assert!(report
+            .skipped_sources
+            .iter()
+            .any(|entry| { entry.contains("nodes gerados") && entry.contains("grafo nativo") }));
+        let graph_path = project_dir
+            .join("graphs")
+            .join("gamemaker_inst_player.json");
         assert!(graph_path.is_file(), "graph asset must be persisted");
         let _ = fs::remove_dir_all(project_dir);
         let _ = fs::remove_dir_all(donor_root);
@@ -14584,13 +18126,27 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .parent()
             .expect("workspace root")
             .to_path_buf();
-        let sample_roots = [
-            repo_root.join("data").join("character air"),
-            repo_root.join("data").join("background air"),
-            repo_root.join("data").join("screenpack air"),
+        let mut sample_roots = vec![
+            ("mugen", repo_root.join("data").join("character air")),
+            ("mugen", repo_root.join("data").join("background air")),
+            ("mugen", repo_root.join("data").join("screenpack air")),
         ];
+        sample_roots.extend([
+            (
+                "ikemen_go",
+                PathBuf::from(
+                    "F:\\Projects\\Engine Template\\Games Engines\\Ikemen-GO\\Screenpacks",
+                ),
+            ),
+            (
+                "ikemen_go",
+                PathBuf::from(
+                    "F:\\Projects\\Engine Template\\Games Engines\\Ikemen-GO\\Modules\\Engine-Modules\\repo\\external\\mods\\ratio\\ikemen1",
+                ),
+            ),
+        ]);
 
-        for sample_root in sample_roots {
+        for (profile, sample_root) in sample_roots {
             if !sample_root.is_dir() {
                 eprintln!("[mugen-sample-skip] {}", sample_root.display());
                 continue;
@@ -14600,9 +18156,29 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             create_project_skeleton(&project_dir, "Repo Sample MUGEN", "megadrive")
                 .expect("create sample project skeleton");
 
-            let report =
-                import_mugen_project(&project_dir, &sample_root).expect("import repo sample root");
+            let report = match import_external_project(&project_dir, profile, &sample_root) {
+                Ok(report) => report,
+                Err(error) if profile == "ikemen_go" => {
+                    eprintln!("[mugen-sample-skip] {}: {}", sample_root.display(), error);
+                    let _ = fs::remove_dir_all(project_dir);
+                    continue;
+                }
+                Err(error) => panic!(
+                    "import repo sample root '{}': {}",
+                    sample_root.display(),
+                    error
+                ),
+            };
             assert!(report.imported_scenes > 0, "{}", sample_root.display());
+            assert!(
+                report.primary_scene.entities.iter().any(|entity| {
+                    entity.components.sprite.is_some()
+                        || entity.components.tilemap.is_some()
+                        || entity.components.logic.is_some()
+                }),
+                "{} must produce editable imported nodes/assets",
+                sample_root.display()
+            );
 
             let _ = fs::remove_dir_all(project_dir);
         }
@@ -15141,6 +18717,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                     animations: HashMap::new(),
                     priority: "foreground".to_string(),
                     meta_sprite: false,
+                    commands: Vec::new(),
                 }),
                 logic: Some(LogicComponent {
                     graph: Some(
@@ -15387,6 +18964,26 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                     ]),
                     priority: "foreground".to_string(),
                     meta_sprite: false,
+                    commands: vec![crate::ugdm::components::SpriteCommandBinding {
+                        id: "hadouken".to_string(),
+                        display_name: "Hadouken".to_string(),
+                        notation: "_2, _3, _6, _P".to_string(),
+                        source: "local-command.dat".to_string(),
+                        target_animation: "run".to_string(),
+                        max_frames: 15,
+                        button_profile: "megadrive".to_string(),
+                        unsupported_tokens: Vec::new(),
+                        steps: vec![
+                            crate::ugdm::components::SpriteCommandStep {
+                                tokens: vec!["_2".to_string()],
+                                display: vec!["down".to_string()],
+                            },
+                            crate::ugdm::components::SpriteCommandStep {
+                                tokens: vec!["_P".to_string()],
+                                display: vec!["P".to_string()],
+                            },
+                        ],
+                    }],
                 }),
                 ..Components::default()
             },
@@ -15426,6 +19023,10 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                 mugen_frames: None,
             })
         );
+        assert_eq!(sprite.commands.len(), 1);
+        assert_eq!(sprite.commands[0].id, "hadouken");
+        assert_eq!(sprite.commands[0].target_animation, "run");
+        assert_eq!(sprite.commands[0].steps[1].tokens, vec!["_P"]);
 
         let _ = fs::remove_dir_all(project_dir);
     }
@@ -15655,6 +19256,142 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         .expect("write openbor level");
     }
 
+    fn write_openbor_beatemup_fixture(root: &Path) {
+        let hero_dir = root.join("data").join("chars").join("hero");
+        let enemy_dir = root.join("data").join("chars").join("punk");
+        let level_dir = root.join("data").join("levels");
+        fs::create_dir_all(&hero_dir).expect("create openbor hero dir");
+        fs::create_dir_all(&enemy_dir).expect("create openbor enemy dir");
+        fs::create_dir_all(&level_dir).expect("create openbor levels dir");
+        fs::create_dir_all(root.join("data").join("bgs")).expect("create openbor bgs dir");
+        fs::create_dir_all(root.join("data").join("music")).expect("create openbor music dir");
+
+        write_test_png(
+            &hero_dir.join("hero_sheet.png"),
+            96,
+            64,
+            [220, 200, 40, 255],
+        );
+        write_test_png(
+            &enemy_dir.join("punk_sheet.png"),
+            64,
+            64,
+            [200, 80, 80, 255],
+        );
+        write_test_png(
+            &root.join("data").join("bgs").join("stage.png"),
+            320,
+            128,
+            [40, 90, 130, 255],
+        );
+        write_test_png(
+            &root.join("data").join("bgs").join("panel.png"),
+            128,
+            128,
+            [80, 120, 80, 255],
+        );
+        fs::write(
+            root.join("data").join("music").join("theme.wav"),
+            minimal_wav_bytes(),
+        )
+        .expect("write openbor bgm");
+
+        fs::write(
+            root.join("data").join("models.txt"),
+            [
+                "load Hero data/chars/hero/hero.txt",
+                "load Punk data/chars/punk/punk.txt",
+            ]
+            .join("\n"),
+        )
+        .expect("write openbor models manifest");
+        fs::write(
+            root.join("data").join("levels.txt"),
+            ["file data/levels/stage1.txt"].join("\n"),
+        )
+        .expect("write openbor levels manifest");
+
+        fs::write(
+            hero_dir.join("hero.txt"),
+            [
+                "name Hero",
+                "type player",
+                "speed 3",
+                "facing 1",
+                "load hero_sheet.png",
+                "anim idle",
+                "  delay 10",
+                "  loop 1",
+                "  offset 24 56",
+                "  bbox 8 12 20 42",
+                "  frame hero_sheet.png",
+                "anim walk",
+                "  delay 5",
+                "  loop 1",
+                "  offset 24 56",
+                "  bbox 8 12 20 42",
+                "  attack 28 18 18 12 6",
+                "  frame hero_sheet.png",
+                "  frame hero_sheet.png",
+                "anim attack",
+                "  delay 4",
+                "  loop 0",
+                "  bbox 8 12 20 42",
+                "  attack 32 18 22 14 9",
+                "  jumpframe 1 0 -3",
+                "  landframe 2",
+                "  frame hero_sheet.png",
+            ]
+            .join("\n"),
+        )
+        .expect("write openbor hero model");
+
+        fs::write(
+            enemy_dir.join("punk.txt"),
+            [
+                "name Punk",
+                "type enemy",
+                "speed 2",
+                "facing -1",
+                "load punk_sheet.png",
+                "anim idle",
+                "  delay 8",
+                "  loop 1",
+                "  bbox 6 10 22 44",
+                "  frame punk_sheet.png",
+                "anim walk",
+                "  delay 6",
+                "  loop 1",
+                "  bbox 6 10 22 44",
+                "  attack 4 18 18 12 4",
+                "  frame punk_sheet.png",
+                "  frame punk_sheet.png",
+            ]
+            .join("\n"),
+        )
+        .expect("write openbor enemy model");
+
+        fs::write(
+            level_dir.join("stage1.txt"),
+            [
+                "name Downtown",
+                "music data/music/theme.wav",
+                "background data/bgs/stage.png",
+                "panel data/bgs/panel.png",
+                "scrollspeed 2 0",
+                "spawn Punk",
+                "at 160 0 112",
+                "spawn Hero",
+                "at 40 0 112",
+                "@script",
+                "void main(){ changeopenborvariant(); }",
+                "@end_script",
+            ]
+            .join("\n"),
+        )
+        .expect("write openbor level");
+    }
+
     fn count_files_in(dir: &Path) -> usize {
         fs::read_dir(dir)
             .map(|iter| {
@@ -15765,6 +19502,242 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         );
 
         let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn openbor_model_anim_blocks_to_animation_and_hitbox_metadata() {
+        let donor = temp_dir("openbor-anim-donor");
+        let project = temp_dir("openbor-anim-project");
+        create_project_skeleton(&project, "OpenBOR Anim", "megadrive")
+            .expect("create project skeleton");
+        write_openbor_beatemup_fixture(&donor);
+
+        let report = import_openbor_project(&project, &donor).expect("import openbor");
+        let hero = report
+            .primary_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "hero")
+            .expect("hero entity");
+        let sprite = hero.components.sprite.as_ref().expect("hero sprite");
+        assert!(sprite.animations.contains_key("idle"));
+        let walk = sprite.animations.get("walk").expect("walk animation");
+        assert_eq!(walk.frames, vec![0, 1]);
+        assert_eq!(walk.fps, 12);
+        assert!(walk.looping);
+        let attack = sprite.animations.get("attack").expect("attack animation");
+        let hitbox_frame = attack
+            .mugen_frames
+            .as_ref()
+            .and_then(|frames| frames.first())
+            .expect("OpenBOR attack metadata serialized as frame hitbox metadata");
+        assert_eq!(hitbox_frame.clsn1[0].x1, 32);
+        assert_eq!(hitbox_frame.clsn1[0].x2, 54);
+        assert_eq!(hitbox_frame.clsn2[0].x1, 8);
+        assert_eq!(hitbox_frame.clsn2[0].y2, 54);
+
+        let collision = hero.components.collision.as_ref().expect("bbox collision");
+        assert_eq!(collision.shape, "aabb");
+        assert_eq!(collision.width, 20);
+        assert_eq!(collision.height, 42);
+        assert_eq!(
+            collision.offset.as_ref().map(|offset| (offset.x, offset.y)),
+            Some((8, 12))
+        );
+        assert_eq!(collision.layer.as_deref(), Some("player"));
+        assert!(collision.collides_with.iter().any(|layer| layer == "enemy"));
+
+        let logic = hero.components.logic.as_ref().expect("hero logic");
+        let semantics = logic
+            .imported_semantics
+            .as_ref()
+            .expect("OpenBOR imported semantics");
+        assert_eq!(semantics.source, "openbor");
+        assert_eq!(semantics.gameplay_class, "beat_em_up_close_range_signals");
+        assert_eq!(semantics.entity_role, "player_avatar");
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn openbor_level_spawn_music_background_to_nodes_and_bridge() {
+        let donor = temp_dir("openbor-level-donor");
+        let project = temp_dir("openbor-level-project");
+        create_project_skeleton(&project, "OpenBOR Level", "megadrive")
+            .expect("create project skeleton");
+        write_openbor_beatemup_fixture(&donor);
+
+        let report = import_openbor_project(&project, &donor).expect("import openbor");
+        assert!(report.primary_scene.entities.iter().any(|entity| entity
+            .components
+            .tilemap
+            .as_ref()
+            .is_some_and(
+                |tilemap| tilemap.tileset == "assets/tilesets/openbor_data_bgs_stage.png"
+            )));
+        assert!(report.primary_scene.entities.iter().any(|entity| entity
+            .components
+            .audio
+            .as_ref()
+            .is_some_and(
+                |audio| audio.bgm.as_deref() == Some("assets/audio/openbor_data_music_theme.wav")
+            )));
+
+        let camera = report
+            .primary_scene
+            .entities
+            .iter()
+            .find(|entity| entity.components.camera.is_some())
+            .expect("camera entity");
+        assert_eq!(
+            camera
+                .components
+                .camera
+                .as_ref()
+                .and_then(|camera| camera.follow_entity.as_deref()),
+            Some("hero")
+        );
+
+        let controller = report
+            .primary_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "openbor_stage_controller")
+            .expect("OpenBOR stage controller");
+        let graph = controller
+            .components
+            .logic
+            .as_ref()
+            .and_then(|logic| logic.graph.as_deref())
+            .expect("stage controller graph");
+        let graph_json: serde_json::Value = serde_json::from_str(graph).expect("graph json");
+        let nodes = graph_json
+            .get("nodes")
+            .and_then(|nodes| nodes.as_array())
+            .expect("graph nodes");
+        assert!(nodes
+            .iter()
+            .any(
+                |node| node.get("type").and_then(|value| value.as_str()) == Some("spawn_entity")
+                    && node
+                        .get("params")
+                        .and_then(|params| params.get("prefab"))
+                        .and_then(|value| value.as_str())
+                        == Some("punk")
+                    && node
+                        .get("params")
+                        .and_then(|params| params.get("x"))
+                        .and_then(|value| value.as_i64())
+                        == Some(160)
+            ));
+        assert!(nodes.iter().any(
+            |node| node.get("type").and_then(|value| value.as_str()) == Some("scroll_tilemap")
+        ));
+        assert!(nodes
+            .iter()
+            .any(|node| node.get("type").and_then(|value| value.as_str()) == Some("move_camera")));
+        assert!(nodes
+            .iter()
+            .any(|node| node.get("type").and_then(|value| value.as_str())
+                == Some("bridge_unconverted_source")));
+        assert!(report
+            .skipped_sources
+            .iter()
+            .any(|entry| entry.contains("script OpenBOR preservado como bridge")));
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn openbor_reimport_beatemup_scene_is_idempotent() {
+        let donor = temp_dir("openbor-reimport-donor");
+        let project = temp_dir("openbor-reimport-project");
+        create_project_skeleton(&project, "OpenBOR Reimport", "megadrive")
+            .expect("create project skeleton");
+        write_openbor_beatemup_fixture(&donor);
+
+        let first = import_openbor_project(&project, &donor).expect("first openbor import");
+        let sprites_dir = project.join("assets").join("sprites");
+        let tilesets_dir = project.join("assets").join("tilesets");
+        let audio_dir = project.join("assets").join("audio");
+        let first_sprites = count_files_in(&sprites_dir);
+        let first_tilesets = count_files_in(&tilesets_dir);
+        let first_audio = count_files_in(&audio_dir);
+        let first_controller_graph = first
+            .primary_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "openbor_stage_controller")
+            .and_then(|entity| entity.components.logic.as_ref())
+            .and_then(|logic| logic.graph.as_deref())
+            .expect("first controller graph")
+            .to_string();
+
+        let second = import_openbor_project(&project, &donor).expect("second openbor import");
+        assert_eq!(
+            second.primary_scene.entities.len(),
+            first.primary_scene.entities.len(),
+            "reimport keeps entity count stable"
+        );
+        assert_eq!(count_files_in(&sprites_dir), first_sprites);
+        assert_eq!(count_files_in(&tilesets_dir), first_tilesets);
+        assert_eq!(count_files_in(&audio_dir), first_audio);
+        let second_controller_graph = second
+            .primary_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "openbor_stage_controller")
+            .and_then(|entity| entity.components.logic.as_ref())
+            .and_then(|logic| logic.graph.as_deref())
+            .expect("second controller graph");
+        assert_eq!(second_controller_graph, first_controller_graph);
+
+        let _ = fs::remove_dir_all(&donor);
+        let _ = fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    #[ignore = "host-local OpenBOR sample import; requires an extracted BYOR-safe module with data/models.txt or data/levels.txt"]
+    fn openbor_host_local_samples_when_present() {
+        let candidates = [
+            PathBuf::from(
+                r"F:\Projects\Engine Template\Games Engines\OpenBOR\Projects\Real-Bout-Pro-Wrestling",
+            ),
+            PathBuf::from(
+                r"F:\Projects\Engine Template\Games Engines\OpenBOR\Projects\Super-Final-Fight-Gold",
+            ),
+            PathBuf::from(
+                r"F:\Projects\Engine Template\Games Engines\OpenBOR\Projects\World-Heroes-Supreme-Justice",
+            ),
+            PathBuf::from(
+                r"F:\Projects\Engine Template\Games Engines\OpenBOR\Templates\Aki-Shiki-Character-Template",
+            ),
+        ];
+        let source = candidates.into_iter().find(|candidate| {
+            candidate.join("data").join("models.txt").is_file()
+                || candidate.join("models.txt").is_file()
+                || candidate.join("data").join("levels.txt").is_file()
+                || candidate.join("levels.txt").is_file()
+        });
+        let Some(source) = source else {
+            eprintln!("[skip] nenhum sample OpenBOR extraido com manifests encontrado.");
+            return;
+        };
+        let project = temp_dir("openbor-host-local-project");
+        create_project_skeleton(&project, "OpenBOR Host Local", "megadrive")
+            .expect("create project skeleton");
+        let report = import_openbor_project(&project, &source).expect("import host-local openbor");
+        assert!(!report.primary_scene.entities.is_empty());
+        assert!(report.primary_scene.entities.iter().any(|entity| entity
+            .components
+            .logic
+            .as_ref()
+            .is_some_and(|logic| logic.graph.is_some()
+                || !logic.logic_hints.is_empty()
+                || logic.graph_origin.as_deref() == Some("openbor_bridge"))));
         let _ = fs::remove_dir_all(&project);
     }
 

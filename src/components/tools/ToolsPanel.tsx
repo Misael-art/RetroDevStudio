@@ -34,6 +34,7 @@ import {
   type ProfileReport,
   type ProfileIssue,
   type DependencyStatus,
+  type DependencyStatusSummary,
   type DependencyLogLine,
   type ThirdPartyDependencyId,
   type AssetExtractorBppMode,
@@ -52,6 +53,44 @@ const LazyReverseWorkspace = lazy(() => import("./ReverseWorkspace"));
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function summarizeDependencyItems(items: DependencyStatus[]): DependencyStatusSummary {
+  return {
+    total: items.length,
+    installed: items.filter((item) => (item.status_code ?? (item.installed ? "installed" : "missing")) === "installed").length,
+    blocking: items.filter((item) => (item.severity ?? (item.installed ? "ok" : "blocking")) === "blocking").length,
+    warnings: items.filter((item) => (item.severity ?? "ok") === "warning").length,
+    manual_required: items.filter((item) => item.status_code === "manual_configuration_required").length,
+    cache_available: items.filter((item) => item.cache_available).length,
+    download_failed: items.filter((item) => item.status_code === "download_failed").length,
+  };
+}
+
+function dependencyStatusTone(item: DependencyStatus) {
+  const severity = item.severity ?? (item.installed ? "ok" : "blocking");
+  if (severity === "ok") {
+    return {
+      border: "border-[#a6e3a1]/30",
+      bg: "bg-[#a6e3a1]/10",
+      text: "text-[#a6e3a1]",
+      pill: "bg-[#a6e3a1]/12 text-[#a6e3a1]",
+    };
+  }
+  if (severity === "warning") {
+    return {
+      border: "border-[#f9e2af]/35",
+      bg: "bg-[#f9e2af]/10",
+      text: "text-[#f9e2af]",
+      pill: "bg-[#f9e2af]/12 text-[#f9e2af]",
+    };
+  }
+  return {
+    border: "border-[#f38ba8]/35",
+    bg: "bg-[#f38ba8]/10",
+    text: "text-[#f38ba8]",
+    pill: "bg-[#f38ba8]/12 text-[#f38ba8]",
+  };
 }
 
 function PatchStudio() {
@@ -1177,6 +1216,8 @@ function RuntimeSetup() {
     logMessage,
   } = useEditorStore();
   const [items, setItems] = useState<DependencyStatus[]>([]);
+  const [summary, setSummary] = useState<DependencyStatusSummary | null>(null);
+  const [reportPath, setReportPath] = useState<string>("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [multiBuildBusy, setMultiBuildBusy] = useState(false);
@@ -1187,6 +1228,8 @@ function RuntimeSetup() {
     try {
       const report = await getThirdPartyStatus();
       setItems(report.items);
+      setSummary(report.summary ?? summarizeDependencyItems(report.items));
+      setReportPath(report.report_path ?? "");
     } catch (error) {
       logMessage("error", `[Setup] Falha ao consultar dependencias: ${describeError(error)}`);
     } finally {
@@ -1233,6 +1276,13 @@ function RuntimeSetup() {
             logMessage(line.level, `[Setup] ${line.message}`);
           });
           if (!result.ok) {
+            setItems((current) => {
+              const next = current.map((candidate) =>
+                candidate.id === item.id ? result.status : candidate
+              );
+              setSummary(summarizeDependencyItems(next));
+              return next;
+            });
             logMessage("error", `${logPrefix} ${result.message}`);
             return false;
           }
@@ -1261,7 +1311,14 @@ function RuntimeSetup() {
         logMessage(line.level, `[Setup] ${line.message}`);
       });
       logMessage(result.ok ? "success" : "error", `[Setup] ${result.message}`);
-      await refreshStatus();
+      setItems((current) => {
+        const next = current.map((item) => (item.id === dependencyId ? result.status : item));
+        setSummary(summarizeDependencyItems(next));
+        return next;
+      });
+      if (result.ok) {
+        await refreshStatus();
+      }
     } catch (error) {
       logMessage("error", `[Setup] Falha inesperada ao instalar ${label}: ${describeError(error)}`);
     } finally {
@@ -1316,21 +1373,59 @@ function RuntimeSetup() {
   }
 
   return (
-    <div className="flex flex-col gap-3 p-3">
+    <div data-testid="runtime-setup-panel" className="flex min-h-full min-w-0 flex-col gap-3 overflow-x-hidden p-3">
       <div className="flex items-start justify-between gap-3">
-        <div className="flex flex-col gap-1">
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="text-xs font-semibold text-[#cdd6f4]">Runtime Setup</span>
           <p className="text-[10px] leading-tight text-[#7f849c]">
             Instala sob demanda JDK (Temurin LTS), SGDK, PVSnesLib e cores Libretro oficiais sem versionar binarios no repositorio.
           </p>
         </div>
         <button
+          data-testid="runtime-setup-revalidate"
           onClick={() => void refreshStatus()}
           disabled={loading || busyId !== null}
-          className="rounded bg-[#313244] px-2 py-1 text-[10px] text-[#a6adc8] hover:bg-[#45475a] disabled:cursor-not-allowed disabled:opacity-40"
+          className="shrink-0 rounded bg-[#313244] px-2 py-1 text-[10px] text-[#a6adc8] hover:bg-[#45475a] disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {loading ? "Atualizando..." : "Atualizar"}
+          {loading ? "Revalidando..." : "Revalidar"}
         </button>
+      </div>
+
+      <div
+        data-testid="runtime-diagnostics-summary"
+        className="grid grid-cols-2 gap-2 rounded border border-[#313244] bg-[#11111b] p-3 md:grid-cols-6"
+      >
+        <div>
+          <div className="text-[9px] uppercase tracking-wide text-[#45475a]">Total</div>
+          <div className="text-sm font-bold text-[#cdd6f4]">
+            {summary?.total ?? items.length} dependencias
+          </div>
+        </div>
+        <div>
+          <div className="text-[9px] uppercase tracking-wide text-[#45475a]">Instalado</div>
+          <div className="text-sm font-bold text-[#a6e3a1]">{summary?.installed ?? 0}</div>
+        </div>
+        <div>
+          <div className="text-[9px] uppercase tracking-wide text-[#45475a]">Bloqueio</div>
+          <div className="text-sm font-bold text-[#f38ba8]">{summary?.blocking ?? 0} bloqueio(s)</div>
+        </div>
+        <div>
+          <div className="text-[9px] uppercase tracking-wide text-[#45475a]">Aviso</div>
+          <div className="text-sm font-bold text-[#f9e2af]">{summary?.warnings ?? 0}</div>
+        </div>
+        <div>
+          <div className="text-[9px] uppercase tracking-wide text-[#45475a]">Manual</div>
+          <div className="text-sm font-bold text-[#fab387]">{summary?.manual_required ?? 0} manual</div>
+        </div>
+        <div>
+          <div className="text-[9px] uppercase tracking-wide text-[#45475a]">Cache</div>
+          <div className="text-sm font-bold text-[#89b4fa]">{summary?.cache_available ?? 0}</div>
+        </div>
+        {reportPath && (
+          <p className="col-span-2 break-all font-mono text-[9px] text-[#6c7086] md:col-span-6">
+            JSON: {reportPath}
+          </p>
+        )}
       </div>
 
       {projectSourceKind === "external_sgdk" && projectLegacyIndex && (
@@ -1341,12 +1436,22 @@ function RuntimeSetup() {
         />
       )}
 
-      <div className="flex flex-col gap-2">
-        {items.map((item) => (
-          <div key={item.id} className="flex flex-col gap-2 rounded border border-[#313244] bg-[#1e1e2e] p-2">
+      <div className="grid grid-cols-1 gap-2 xl:grid-cols-2" data-testid="runtime-diagnostic-grid">
+        {items.map((item) => {
+          const tone = dependencyStatusTone(item);
+          const statusLabel = item.status_label ?? (item.installed ? "INSTALADO" : "AUSENTE");
+          return (
+          <div
+            key={item.id}
+            data-testid={`runtime-diagnostic-${item.id}`}
+            className={`flex flex-col gap-2 rounded border ${tone.border} ${tone.bg} p-2`}
+          >
             <div className="flex items-center gap-2">
-              <span className={`text-[10px] font-bold ${item.installed ? "text-[#a6e3a1]" : "text-[#f9e2af]"}`}>
-                {item.installed ? "INSTALADO" : "PENDENTE"}
+              <span
+                data-testid={`runtime-diagnostic-status-${item.id}`}
+                className={`rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${tone.pill}`}
+              >
+                {statusLabel}
               </span>
               <span className="text-xs text-[#cdd6f4]">{item.label}</span>
               {item.version && <span className="ml-auto font-mono text-[10px] text-[#7f849c]">{item.version}</span>}
@@ -1365,6 +1470,26 @@ function RuntimeSetup() {
                 {issue}
               </p>
             ))}
+
+            <p
+              data-testid={`runtime-diagnostic-action-${item.id}`}
+              className={`text-[10px] leading-tight ${tone.text}`}
+            >
+              {item.actionable_message ?? "Revalide esta dependencia no Runtime Setup."}
+            </p>
+
+            <div className="flex flex-wrap gap-1">
+              {item.cache_available && (
+                <span className="rounded bg-[#89b4fa]/12 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-[#89b4fa]">
+                  Cache disponivel
+                </span>
+              )}
+              {item.manual_configuration_required && (
+                <span className="rounded bg-[#fab387]/12 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-[#fab387]">
+                  Manual
+                </span>
+              )}
+            </div>
 
             <div className="flex items-center justify-between gap-3">
               <a
@@ -1389,7 +1514,8 @@ function RuntimeSetup() {
               </button>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       <div className="flex flex-col gap-3 rounded border border-[#313244] bg-[#11111b] p-3">
@@ -1413,8 +1539,11 @@ function RuntimeSetup() {
           </button>
         </div>
 
-        <p className="text-[10px] text-[#45475a]">
-          Projeto ativo: <span className="font-mono text-[#cdd6f4]">{activeProjectDir || "(nenhum)"}</span>
+        <p className="min-w-0 break-all text-[10px] text-[#45475a]" title={`Projeto ativo: ${activeProjectDir || "(nenhum)"}`}>
+          Projeto ativo:{" "}
+          <span className="font-mono text-[#cdd6f4]" title={activeProjectDir || "(nenhum)"}>
+            {activeProjectDir || "(nenhum)"}
+          </span>
         </p>
 
         {multiBuildReport && (

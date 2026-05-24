@@ -15,6 +15,7 @@ const INSTALL_MANIFEST_PREFIX: &str = ".retrodev-install-";
 const MEGADRIVE_CORE_CANDIDATES: &[&str] = &["genesis_plus_gx_libretro", "picodrive_libretro"];
 const SNES_CORE_CANDIDATES: &[&str] = &["snes9x_libretro", "bsnes_libretro"];
 const HTTP_RETRY_ATTEMPTS: usize = 3;
+const RUNTIME_DIAGNOSTICS_REPORT: &str = "runtime-dependency-diagnostics.json";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DependencyLogLine {
@@ -28,16 +29,36 @@ pub struct DependencyStatus {
     pub label: String,
     pub installed: bool,
     pub version: Option<String>,
+    pub status_code: String,
+    pub status_label: String,
+    pub severity: String,
     pub install_dir: String,
     pub source_url: String,
     pub auto_install_supported: bool,
+    pub cache_available: bool,
+    pub manual_configuration_required: bool,
+    pub actionable_message: String,
     pub notes: Vec<String>,
     pub issues: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DependencyStatusReport {
+    pub generated_at_unix: u64,
+    pub report_path: String,
+    pub summary: DependencyStatusSummary,
     pub items: Vec<DependencyStatus>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DependencyStatusSummary {
+    pub total: usize,
+    pub installed: usize,
+    pub blocking: usize,
+    pub warnings: usize,
+    pub manual_required: usize,
+    pub cache_available: usize,
+    pub download_failed: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -132,9 +153,27 @@ enum DependencyKind {
     PvsnesLib,
     LibretroMegaDriveCore,
     LibretroSnesCore,
+    Msvc,
+    GitBash,
+    WebDriver,
+    TauriDriver,
 }
 
 impl DependencyKind {
+    fn all() -> [Self; 9] {
+        [
+            Self::Jdk,
+            Self::Sgdk,
+            Self::PvsnesLib,
+            Self::LibretroMegaDriveCore,
+            Self::LibretroSnesCore,
+            Self::Msvc,
+            Self::GitBash,
+            Self::WebDriver,
+            Self::TauriDriver,
+        ]
+    }
+
     fn from_id(id: &str) -> Result<Self, String> {
         match id {
             "jdk" => Ok(Self::Jdk),
@@ -142,6 +181,10 @@ impl DependencyKind {
             "pvsneslib" => Ok(Self::PvsnesLib),
             "libretro_megadrive" => Ok(Self::LibretroMegaDriveCore),
             "libretro_snes" => Ok(Self::LibretroSnesCore),
+            "msvc" => Ok(Self::Msvc),
+            "git_bash" => Ok(Self::GitBash),
+            "webdriver" => Ok(Self::WebDriver),
+            "tauri_driver" => Ok(Self::TauriDriver),
             other => Err(format!(
                 "Dependencia de terceiros desconhecida: '{}'.",
                 other
@@ -156,6 +199,10 @@ impl DependencyKind {
             Self::PvsnesLib => "pvsneslib",
             Self::LibretroMegaDriveCore => "libretro_megadrive",
             Self::LibretroSnesCore => "libretro_snes",
+            Self::Msvc => "msvc",
+            Self::GitBash => "git_bash",
+            Self::WebDriver => "webdriver",
+            Self::TauriDriver => "tauri_driver",
         }
     }
 
@@ -166,6 +213,10 @@ impl DependencyKind {
             Self::PvsnesLib => "PVSnesLib",
             Self::LibretroMegaDriveCore => "Libretro Core: Mega Drive",
             Self::LibretroSnesCore => "Libretro Core: SNES",
+            Self::Msvc => "MSVC Build Tools",
+            Self::GitBash => "Git Bash / MSYS2",
+            Self::WebDriver => "Edge WebDriver",
+            Self::TauriDriver => "tauri-driver",
         }
     }
 
@@ -177,6 +228,10 @@ impl DependencyKind {
             Self::LibretroMegaDriveCore | Self::LibretroSnesCore => {
                 "https://buildbot.libretro.com/stable/"
             }
+            Self::Msvc => "https://visualstudio.microsoft.com/visual-cpp-build-tools/",
+            Self::GitBash => "https://git-scm.com/download/win",
+            Self::WebDriver => "https://developer.microsoft.com/microsoft-edge/tools/webdriver/",
+            Self::TauriDriver => "https://v2.tauri.app/reference/webdriver/",
         }
     }
 
@@ -189,6 +244,15 @@ impl DependencyKind {
                 .join("toolchains")
                 .join("libretro")
                 .join("cores"),
+            Self::Msvc => detect_msvc_program()
+                .or_else(detect_msvc_install_dir)
+                .unwrap_or_else(|| PathBuf::from("MSVC Build Tools / cl.exe no PATH")),
+            Self::GitBash => detect_bash_program()
+                .unwrap_or_else(|| PathBuf::from("Git Bash ou MSYS2 bash no PATH")),
+            Self::WebDriver => detect_webdriver_program()
+                .unwrap_or_else(|| repo_root().join("toolchains").join("webdriver")),
+            Self::TauriDriver => detect_tauri_driver_program()
+                .unwrap_or_else(|| PathBuf::from("tauri-driver no PATH")),
         }
     }
 
@@ -196,6 +260,9 @@ impl DependencyKind {
         match self {
             Self::LibretroMegaDriveCore | Self::LibretroSnesCore => {
                 repo_root().join("toolchains").join("libretro")
+            }
+            Self::Msvc | Self::GitBash | Self::WebDriver | Self::TauriDriver => {
+                repo_root().join("toolchains").join(".cache")
             }
             _ => self.install_dir(),
         }
@@ -205,7 +272,9 @@ impl DependencyKind {
         match self {
             Self::Jdk => detect_java_program().is_some(),
             Self::Sgdk => {
-                let root = self.install_dir();
+                let Some(root) = detect_dependency_root("SGDK_ROOT", "sgdk") else {
+                    return false;
+                };
                 root.join("makefile.gen").exists()
                     || (root.join("bin").exists() && root.join("inc").exists())
             }
@@ -221,18 +290,44 @@ impl DependencyKind {
             Self::LibretroSnesCore => {
                 contains_core_candidate(&self.install_dir(), SNES_CORE_CANDIDATES)
             }
+            Self::Msvc => detect_msvc_program().is_some() || detect_msvc_install_dir().is_some(),
+            Self::GitBash => detect_bash_program().is_some(),
+            Self::WebDriver => detect_webdriver_program().is_some(),
+            Self::TauriDriver => detect_tauri_driver_program().is_some(),
         }
     }
 
+    fn auto_install_supported(self) -> bool {
+        cfg!(target_os = "windows")
+            && matches!(
+                self,
+                Self::Jdk
+                    | Self::Sgdk
+                    | Self::PvsnesLib
+                    | Self::LibretroMegaDriveCore
+                    | Self::LibretroSnesCore
+            )
+    }
+
     fn status(self) -> DependencyStatus {
+        self.status_with_failure(None)
+    }
+
+    fn status_with_failure(self, last_error: Option<&str>) -> DependencyStatus {
         let install_dir = match self {
             Self::Jdk => detect_java_install_dir(),
+            Self::Sgdk => {
+                detect_dependency_root("SGDK_ROOT", "sgdk").unwrap_or_else(|| self.install_dir())
+            }
             _ => self.install_dir(),
         };
         let manifest = read_manifest(self.manifest_dir(), manifest_file_name(self));
         let installed = self.is_installed();
         let mut notes = Vec::new();
         let mut issues = Vec::new();
+        let auto_install_supported = self.auto_install_supported();
+        let manual_configuration_required = !installed && !auto_install_supported;
+        let cache_available = self.github_release_cache_available();
 
         match self {
             Self::Jdk => {
@@ -309,6 +404,54 @@ impl DependencyKind {
                         .to_string(),
                 );
             }
+            Self::Msvc => {
+                notes.push(
+                    "Builds Tauri/Rust no Windows exigem MSVC Build Tools ou Developer PowerShell com cl.exe disponivel."
+                        .to_string(),
+                );
+                if !installed {
+                    issues.push(
+                        "MSVC Build Tools/cl.exe nao encontrado. Abra o ambiente Developer PowerShell ou instale Visual Studio Build Tools."
+                            .to_string(),
+                    );
+                }
+            }
+            Self::GitBash => {
+                notes.push(
+                    "O caminho SNES em Windows precisa de Git Bash ou MSYS2 real; o shim WSL nao e aceito."
+                        .to_string(),
+                );
+                if !installed {
+                    issues.push(
+                        "Git Bash/MSYS2 bash nao encontrado. Instale Git for Windows ou MSYS2 e revalide."
+                            .to_string(),
+                    );
+                }
+            }
+            Self::WebDriver => {
+                notes.push(
+                    "O desktop E2E usa msedgedriver em toolchains/webdriver ou RDS_EDGE_DRIVER_PATH."
+                        .to_string(),
+                );
+                if !installed {
+                    issues.push(
+                        "msedgedriver nao encontrado em toolchains/webdriver, RDS_EDGE_DRIVER_PATH ou PATH."
+                            .to_string(),
+                    );
+                }
+            }
+            Self::TauriDriver => {
+                notes.push(
+                    "O desktop E2E usa tauri-driver para abrir a janela Tauri via WebDriver."
+                        .to_string(),
+                );
+                if !installed {
+                    issues.push(
+                        "tauri-driver nao encontrado no PATH. Instale com cargo install tauri-driver --locked."
+                            .to_string(),
+                    );
+                }
+            }
         }
 
         if !installed {
@@ -318,18 +461,227 @@ impl DependencyKind {
             ));
         }
 
-        DependencyStatus {
-            id: self.id().to_string(),
-            label: self.label().to_string(),
-            installed,
-            version: manifest
-                .map(|manifest| manifest.version)
-                .or_else(|| installed.then(|| "externo/manual".to_string())),
-            install_dir: install_dir.to_string_lossy().to_string(),
-            source_url: self.source_url().to_string(),
-            auto_install_supported: cfg!(target_os = "windows"),
-            notes,
-            issues,
+        let version = manifest
+            .map(|manifest| manifest.version)
+            .or_else(|| self.detected_version())
+            .or_else(|| installed.then(|| "externo/manual".to_string()));
+        let version_incompatible = self.version_incompatible(version.as_deref());
+        if version_incompatible {
+            issues.push(format!(
+                "Versao detectada '{}' nao atende ao minimo esperado para este fluxo.",
+                version.as_deref().unwrap_or("desconhecida")
+            ));
+        }
+
+        dependency_status_from_probe(
+            self,
+            DependencyStatusProbe {
+                installed,
+                version,
+                install_dir: install_dir.to_string_lossy().to_string(),
+                source_url: self.source_url().to_string(),
+                auto_install_supported,
+                cache_available,
+                manual_configuration_required,
+                version_incompatible,
+                notes,
+                issues,
+            },
+            last_error,
+        )
+    }
+
+    fn github_release_cache_available(self) -> bool {
+        self.github_release_metadata_url()
+            .and_then(github_release_cache_path)
+            .is_some_and(|path| path.exists())
+    }
+
+    fn github_release_metadata_url(self) -> Option<&'static str> {
+        match self {
+            Self::Sgdk => Some("https://api.github.com/repos/Stephane-D/SGDK/releases/latest"),
+            Self::PvsnesLib => {
+                Some("https://api.github.com/repos/alekmaul/pvsneslib/releases/latest")
+            }
+            Self::LibretroMegaDriveCore | Self::LibretroSnesCore => {
+                Some("https://api.github.com/repos/libretro/RetroArch/releases/latest")
+            }
+            _ => None,
+        }
+    }
+
+    fn detected_version(self) -> Option<String> {
+        match self {
+            Self::Jdk => detect_java_version_string(),
+            Self::Msvc => {
+                detect_msvc_program().and_then(|program| detect_command_version(&program, &[]))
+            }
+            Self::GitBash => detect_bash_program()
+                .and_then(|program| detect_command_version(&program, &["--version"])),
+            Self::WebDriver => detect_webdriver_program()
+                .and_then(|program| detect_command_version(&program, &["--version"])),
+            Self::TauriDriver => detect_tauri_driver_program()
+                .and_then(|program| detect_command_version(&program, &["--version"])),
+            _ => None,
+        }
+    }
+
+    fn version_incompatible(self, version: Option<&str>) -> bool {
+        match self {
+            Self::Jdk => version
+                .and_then(parse_java_major_version)
+                .is_some_and(|major| major < 17),
+            _ => false,
+        }
+    }
+}
+
+struct DependencyStatusProbe {
+    installed: bool,
+    version: Option<String>,
+    install_dir: String,
+    source_url: String,
+    auto_install_supported: bool,
+    cache_available: bool,
+    manual_configuration_required: bool,
+    version_incompatible: bool,
+    notes: Vec<String>,
+    issues: Vec<String>,
+}
+
+fn dependency_status_from_probe(
+    dependency: DependencyKind,
+    probe: DependencyStatusProbe,
+    last_error: Option<&str>,
+) -> DependencyStatus {
+    let status_code = dependency_status_code(&probe, last_error);
+    let (status_label, severity) = dependency_status_presentation(&status_code);
+    let actionable_message =
+        dependency_actionable_message(dependency, &status_code, &probe, last_error);
+
+    DependencyStatus {
+        id: dependency.id().to_string(),
+        label: dependency.label().to_string(),
+        installed: probe.installed,
+        version: probe.version,
+        status_code,
+        status_label,
+        severity,
+        install_dir: probe.install_dir,
+        source_url: probe.source_url,
+        auto_install_supported: probe.auto_install_supported,
+        cache_available: probe.cache_available,
+        manual_configuration_required: probe.manual_configuration_required,
+        actionable_message,
+        notes: probe.notes,
+        issues: probe.issues,
+    }
+}
+
+fn dependency_status_code(probe: &DependencyStatusProbe, last_error: Option<&str>) -> String {
+    if last_error.is_some() {
+        "download_failed".to_string()
+    } else if probe.version_incompatible {
+        "incompatible_version".to_string()
+    } else if probe.installed {
+        "installed".to_string()
+    } else if probe.manual_configuration_required {
+        "manual_configuration_required".to_string()
+    } else if probe.cache_available {
+        "cache_available".to_string()
+    } else {
+        "missing".to_string()
+    }
+}
+
+fn dependency_status_presentation(status_code: &str) -> (String, String) {
+    match status_code {
+        "installed" => ("INSTALADO".to_string(), "ok".to_string()),
+        "cache_available" => ("CACHE DISPONIVEL".to_string(), "warning".to_string()),
+        "manual_configuration_required" => {
+            ("CONFIGURACAO MANUAL".to_string(), "blocking".to_string())
+        }
+        "incompatible_version" => ("VERSAO INCOMPATIVEL".to_string(), "blocking".to_string()),
+        "download_failed" => ("DOWNLOAD FALHOU".to_string(), "blocking".to_string()),
+        _ => ("AUSENTE".to_string(), "blocking".to_string()),
+    }
+}
+
+fn dependency_actionable_message(
+    dependency: DependencyKind,
+    status_code: &str,
+    probe: &DependencyStatusProbe,
+    last_error: Option<&str>,
+) -> String {
+    if let Some(error) = last_error {
+        return format!(
+            "{} {}",
+            network_failure_action_hint(error),
+            match dependency {
+                DependencyKind::Sgdk | DependencyKind::PvsnesLib => {
+                    "Depois revalide pelo Runtime Setup antes de tentar Build & Run."
+                }
+                DependencyKind::LibretroMegaDriveCore | DependencyKind::LibretroSnesCore => {
+                    "Depois revalide pelo Runtime Setup antes de carregar a ROM."
+                }
+                _ => "Depois revalide pelo Runtime Setup.",
+            }
+        );
+    }
+
+    match status_code {
+        "installed" => format!(
+            "{} detectada{}.",
+            dependency.label(),
+            probe
+                .version
+                .as_deref()
+                .map(|version| format!(" na versao {}", version))
+                .unwrap_or_default()
+        ),
+        "cache_available" => format!(
+            "{} ainda nao esta instalada, mas ha metadata de release oficial em cache. Use Instalar / Reinstalar quando houver rede; o cache ajuda a recuperar a metadata, mas o download do pacote oficial ainda precisa concluir.",
+            dependency.label()
+        ),
+        "manual_configuration_required" => manual_dependency_action(dependency),
+        "incompatible_version" => format!(
+            "{} foi detectada em versao incompativel. Atualize para a versao suportada pelo Runtime Setup e revalide antes de Build & Run.",
+            dependency.label()
+        ),
+        _ => match dependency {
+            DependencyKind::Jdk => {
+                "Instale pelo Runtime Setup ou configure JAVA_HOME apontando para um JDK 17+; o build SGDK usa Java em ferramentas oficiais.".to_string()
+            }
+            DependencyKind::Sgdk => {
+                "Instale pelo Runtime Setup ou configure SGDK_ROOT para uma instalacao oficial do SGDK antes de Build & Run no Mega Drive.".to_string()
+            }
+            DependencyKind::PvsnesLib => {
+                "Instale pelo Runtime Setup ou configure PVSNESLIB_HOME; em Windows tambem confirme Git Bash/MSYS2 para o snes_rules.".to_string()
+            }
+            DependencyKind::LibretroMegaDriveCore | DependencyKind::LibretroSnesCore => {
+                "Instale os cores oficiais pelo Runtime Setup ou configure RETRODEV_LIBRETRO_CORE para carregar ROMs no emulador integrado.".to_string()
+            }
+            _ => manual_dependency_action(dependency),
+        },
+    }
+}
+
+fn manual_dependency_action(dependency: DependencyKind) -> String {
+    match dependency {
+        DependencyKind::Msvc => {
+            "Instale Visual Studio Build Tools com workload C++ ou abra um Developer PowerShell com cl.exe no PATH; depois rode Revalidar no Runtime Setup.".to_string()
+        }
+        DependencyKind::GitBash => {
+            "Instale Git for Windows ou MSYS2. O bash do WSL em C:\\Windows\\System32\\bash.exe nao conta para o caminho SNES; depois rode Revalidar.".to_string()
+        }
+        DependencyKind::WebDriver => {
+            "Coloque msedgedriver.exe em toolchains/webdriver, defina RDS_EDGE_DRIVER_PATH ou deixe msedgedriver no PATH; depois rode Revalidar.".to_string()
+        }
+        DependencyKind::TauriDriver => {
+            "Instale com cargo install tauri-driver --locked, confirme que tauri-driver esta no PATH e rode Revalidar no Runtime Setup.".to_string()
+        }
+        _ => {
+            "Configuracao manual necessaria neste host. Ajuste o PATH/variavel indicada e rode Revalidar no Runtime Setup.".to_string()
         }
     }
 }
@@ -365,37 +717,99 @@ fn ensure_sgdk_boot_templates(install_dir: &Path) -> Result<(), String> {
         )
     })?;
 
-    fs::copy(&fallback_sega, &sega_source).map_err(|e| {
-        format!(
-            "Falha ao restaurar '{}': {}",
-            sega_source.display(),
-            e
-        )
-    })?;
-    fs::copy(&fallback_rom_head, &rom_head_source).map_err(|e| {
-        format!(
-            "Falha ao restaurar '{}': {}",
-            rom_head_source.display(),
-            e
-        )
-    })?;
+    fs::copy(&fallback_sega, &sega_source)
+        .map_err(|e| format!("Falha ao restaurar '{}': {}", sega_source.display(), e))?;
+    fs::copy(&fallback_rom_head, &rom_head_source)
+        .map_err(|e| format!("Falha ao restaurar '{}': {}", rom_head_source.display(), e))?;
 
     Ok(())
 }
 
 pub fn dependency_status_report() -> DependencyStatusReport {
-    DependencyStatusReport {
-        items: [
-            DependencyKind::Jdk,
-            DependencyKind::Sgdk,
-            DependencyKind::PvsnesLib,
-            DependencyKind::LibretroMegaDriveCore,
-            DependencyKind::LibretroSnesCore,
-        ]
+    let items: Vec<DependencyStatus> = DependencyKind::all()
         .into_iter()
         .map(DependencyKind::status)
-        .collect(),
+        .collect();
+    let report_path = runtime_diagnostics_report_path();
+    let report = DependencyStatusReport {
+        generated_at_unix: unix_timestamp_now(),
+        report_path: report_path.to_string_lossy().to_string(),
+        summary: summarize_dependency_statuses(&items),
+        items,
+    };
+
+    if let Err(error) = write_dependency_status_report_to_path(&report, &report_path) {
+        eprintln!(
+            "[dependency_manager] falha ao gravar relatorio Runtime Setup: {}",
+            error
+        );
     }
+
+    report
+}
+
+fn summarize_dependency_statuses(items: &[DependencyStatus]) -> DependencyStatusSummary {
+    DependencyStatusSummary {
+        total: items.len(),
+        installed: items
+            .iter()
+            .filter(|item| item.status_code == "installed")
+            .count(),
+        blocking: items
+            .iter()
+            .filter(|item| item.severity == "blocking")
+            .count(),
+        warnings: items
+            .iter()
+            .filter(|item| item.severity == "warning")
+            .count(),
+        manual_required: items
+            .iter()
+            .filter(|item| item.status_code == "manual_configuration_required")
+            .count(),
+        cache_available: items.iter().filter(|item| item.cache_available).count(),
+        download_failed: items
+            .iter()
+            .filter(|item| item.status_code == "download_failed")
+            .count(),
+    }
+}
+
+fn runtime_diagnostics_report_path() -> PathBuf {
+    repo_root()
+        .join("src-tauri")
+        .join("target-test")
+        .join("validation")
+        .join(RUNTIME_DIAGNOSTICS_REPORT)
+}
+
+fn write_dependency_status_report_to_path(
+    report: &DependencyStatusReport,
+    path: &Path,
+) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "Falha ao preparar diretorio do relatorio de dependencias '{}': {}",
+                parent.display(),
+                e
+            )
+        })?;
+    }
+    let json = serde_json::to_vec_pretty(report).map_err(|e| {
+        format!(
+            "Falha ao serializar relatorio de dependencias '{}': {}",
+            path.display(),
+            e
+        )
+    })?;
+    fs::write(path, json).map_err(|e| {
+        format!(
+            "Falha ao gravar relatorio de dependencias '{}': {}",
+            path.display(),
+            e
+        )
+    })
 }
 
 pub fn dependency_for_rom_path(rom_path: &Path) -> Option<&'static str> {
@@ -430,9 +844,16 @@ where
                 label: dependency_id.to_string(),
                 installed: false,
                 version: None,
+                status_code: "missing".to_string(),
+                status_label: "AUSENTE".to_string(),
+                severity: "blocking".to_string(),
                 install_dir: String::new(),
                 source_url: String::new(),
                 auto_install_supported: false,
+                cache_available: false,
+                manual_configuration_required: true,
+                actionable_message:
+                    "Revise o identificador da dependencia e revalide o Runtime Setup.".to_string(),
                 notes: Vec::new(),
                 issues: vec![error.clone()],
             };
@@ -451,7 +872,8 @@ where
 
     if current_status.installed {
         if matches!(dependency, DependencyKind::Sgdk) {
-            if let Err(error) = ensure_sgdk_boot_templates(&dependency.install_dir()) {
+            let sgdk_dir = PathBuf::from(&current_status.install_dir);
+            if let Err(error) = ensure_sgdk_boot_templates(&sgdk_dir) {
                 logger.emit("error", &error);
                 return DependencyInstallResult {
                     ok: false,
@@ -470,6 +892,18 @@ where
         logger.emit("info", &message);
         return DependencyInstallResult {
             ok: true,
+            dependency_id: dependency.id().to_string(),
+            message,
+            status: current_status,
+            log: logger.log,
+        };
+    }
+
+    if !dependency.auto_install_supported() {
+        let message = current_status.actionable_message.clone();
+        logger.emit("error", &message);
+        return DependencyInstallResult {
+            ok: false,
             dependency_id: dependency.id().to_string(),
             message,
             status: current_status,
@@ -515,6 +949,12 @@ where
         DependencyKind::LibretroMegaDriveCore | DependencyKind::LibretroSnesCore => {
             install_libretro_cores(&client, &mut logger)
         }
+        DependencyKind::Msvc
+        | DependencyKind::GitBash
+        | DependencyKind::WebDriver
+        | DependencyKind::TauriDriver => unreachable!(
+            "manual dependencies return before the automatic installer dispatch"
+        ),
     };
 
     match install_result {
@@ -549,8 +989,8 @@ where
             DependencyInstallResult {
                 ok: false,
                 dependency_id: dependency.id().to_string(),
-                message: error,
-                status: dependency.status(),
+                message: error.clone(),
+                status: dependency.status_with_failure(Some(&error)),
                 log: logger.log,
             }
         }
@@ -940,6 +1380,29 @@ fn github_api_status_hint(status: StatusCode) -> Option<&'static str> {
             "O servidor remoto respondeu com erro temporario; o Runtime Setup tentou novamente com backoff antes de falhar.",
         ),
         _ => None,
+    }
+}
+
+fn network_failure_action_hint(error: &str) -> String {
+    let lower = error.to_ascii_lowercase();
+    if lower.contains("429")
+        || lower.contains("too many requests")
+        || lower.contains("rate limit")
+        || lower.contains("forbidden")
+        || lower.contains("403")
+    {
+        "Download/consulta oficial falhou por limite da API do GitHub. Configure RDS_GITHUB_TOKEN ou GITHUB_TOKEN, aguarde a janela de rate limit e tente novamente; o token nunca deve ser colado no log.".to_string()
+    } else if lower.contains("cache") {
+        "Cache offline de metadata encontrado, mas a leitura falhou. Apague toolchains/.cache/github-releases e tente novamente quando houver rede.".to_string()
+    } else if lower.contains("dns")
+        || lower.contains("connect")
+        || lower.contains("timed out")
+        || lower.contains("timeout")
+        || lower.contains("network")
+    {
+        "Falha de rede durante download oficial. Verifique conexao/proxy, mantenha toolchains fora do Git e tente novamente; se houver cache de metadata, ele sera usado apenas para recuperar a lista de assets.".to_string()
+    } else {
+        "Download oficial falhou. Verifique a mensagem do log, confirme a rede e tente novamente pelo botao Revalidar/Instalar do Runtime Setup.".to_string()
     }
 }
 
@@ -1349,9 +1812,19 @@ fn repo_root() -> PathBuf {
 }
 
 fn detect_dependency_root(env_var: &str, local_dir_name: &str) -> Option<PathBuf> {
-    std::env::var_os(env_var)
-        .map(PathBuf::from)
-        .filter(|path| path.exists())
+    let env_vars = if local_dir_name == "sgdk" {
+        vec![env_var, "GDK", "GDK_WIN"]
+    } else {
+        vec![env_var]
+    };
+
+    env_vars
+        .into_iter()
+        .find_map(|candidate_env_var| {
+            std::env::var_os(candidate_env_var)
+                .map(PathBuf::from)
+                .filter(|path| path.exists())
+        })
         .or_else(|| {
             let local = repo_root().join("toolchains").join(local_dir_name);
             local.exists().then_some(local)
@@ -1399,8 +1872,12 @@ fn detect_java_program() -> Option<PathBuf> {
 fn detect_java_install_dir() -> PathBuf {
     detect_java_home()
         .or_else(|| {
-            detect_java_program()
-                .and_then(|program| program.parent().and_then(Path::parent).map(Path::to_path_buf))
+            detect_java_program().and_then(|program| {
+                program
+                    .parent()
+                    .and_then(Path::parent)
+                    .map(Path::to_path_buf)
+            })
         })
         .unwrap_or_else(|| DependencyKind::Jdk.install_dir())
 }
@@ -1455,6 +1932,69 @@ fn detect_bash_program() -> Option<PathBuf> {
     })
 }
 
+fn detect_msvc_program() -> Option<PathBuf> {
+    find_in_path(&["cl"])
+}
+
+fn detect_msvc_install_dir() -> Option<PathBuf> {
+    ["VCINSTALLDIR", "VSINSTALLDIR"]
+        .into_iter()
+        .filter_map(std::env::var_os)
+        .map(PathBuf::from)
+        .find(|path| path.exists())
+}
+
+fn detect_webdriver_program() -> Option<PathBuf> {
+    std::env::var_os("RDS_EDGE_DRIVER_PATH")
+        .or_else(|| std::env::var_os("EDGEWEBDRIVER"))
+        .map(PathBuf::from)
+        .filter(|path| path.exists())
+        .or_else(|| {
+            let local = repo_root().join("toolchains").join("webdriver").join(
+                if cfg!(target_os = "windows") {
+                    "msedgedriver.exe"
+                } else {
+                    "msedgedriver"
+                },
+            );
+            local.exists().then_some(local)
+        })
+        .or_else(|| find_in_path(&["msedgedriver"]))
+}
+
+fn detect_tauri_driver_program() -> Option<PathBuf> {
+    find_in_path(&["tauri-driver"])
+}
+
+fn detect_command_version(program: &Path, args: &[&str]) -> Option<String> {
+    let output = Command::new(program).args(args).output().ok()?;
+    let combined = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    combined
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .map(|line| line.chars().take(120).collect())
+}
+
+fn detect_java_version_string() -> Option<String> {
+    detect_java_program().and_then(|program| detect_command_version(&program, &["-version"]))
+}
+
+fn parse_java_major_version(version: &str) -> Option<u32> {
+    let marker = version.find('"')?;
+    let after_quote = &version[marker + 1..];
+    let end = after_quote.find('"')?;
+    let version_token = &after_quote[..end];
+    if let Some(rest) = version_token.strip_prefix("1.") {
+        return rest.split('.').next()?.parse::<u32>().ok();
+    }
+    version_token.split('.').next()?.parse::<u32>().ok()
+}
+
 fn has_megadrive_header(path: &Path) -> bool {
     let bytes = fs::read(path).ok();
     matches!(
@@ -1500,6 +2040,50 @@ mod tests {
         path
     }
 
+    fn dependency_status_for_test(
+        dependency: DependencyKind,
+        installed: bool,
+        version: Option<&str>,
+        cache_available: bool,
+        last_error: Option<&str>,
+    ) -> DependencyStatus {
+        dependency_status_from_probe(
+            dependency,
+            DependencyStatusProbe {
+                installed,
+                version: version.map(ToString::to_string),
+                install_dir: format!("F:/Toolchains/{}", dependency.id()),
+                source_url: dependency.source_url().to_string(),
+                auto_install_supported: !matches!(
+                    dependency,
+                    DependencyKind::Msvc
+                        | DependencyKind::GitBash
+                        | DependencyKind::WebDriver
+                        | DependencyKind::TauriDriver
+                ),
+                cache_available,
+                manual_configuration_required: matches!(
+                    dependency,
+                    DependencyKind::Msvc
+                        | DependencyKind::GitBash
+                        | DependencyKind::WebDriver
+                        | DependencyKind::TauriDriver
+                ),
+                version_incompatible: false,
+                notes: Vec::new(),
+                issues: if installed {
+                    Vec::new()
+                } else {
+                    vec![format!(
+                        "Nao instalado em 'F:/Toolchains/{}'.",
+                        dependency.id()
+                    )]
+                },
+            },
+            last_error,
+        )
+    }
+
     #[test]
     fn github_api_get_uses_ci_token_only_for_github_api() {
         let _serial = test_serial_guard();
@@ -1528,10 +2112,12 @@ mod tests {
             Some("Bearer test-token")
         );
 
-        let non_github_request =
-            github_api_get(&client, "https://api.adoptium.net/v3/info/available_releases")
-                .build()
-                .expect("build non github request");
+        let non_github_request = github_api_get(
+            &client,
+            "https://api.adoptium.net/v3/info/available_releases",
+        )
+        .build()
+        .expect("build non github request");
         assert!(
             non_github_request.headers().get(AUTHORIZATION).is_none(),
             "GitHub token must not be sent to non-GitHub APIs"
@@ -1665,9 +2251,97 @@ mod tests {
         let status = DependencyKind::Jdk.status();
         assert!(status.installed, "jdk status should detect JAVA_HOME");
         assert_eq!(PathBuf::from(&status.install_dir), java_home);
-        assert!(status.issues.is_empty(), "unexpected issues: {:?}", status.issues);
+        assert!(
+            status.issues.is_empty(),
+            "unexpected issues: {:?}",
+            status.issues
+        );
 
         restore_env_var("JAVA_HOME", previous_java_home);
         let _ = fs::remove_dir_all(status.install_dir);
+    }
+
+    #[test]
+    fn dependency_diagnostic_marks_missing_toolchain_as_actionable() {
+        let status = dependency_status_for_test(DependencyKind::Sgdk, false, None, false, None);
+
+        assert_eq!(status.status_code, "missing");
+        assert!(status.actionable_message.contains("Runtime Setup"));
+        assert!(status.actionable_message.contains("SGDK_ROOT"));
+        assert!(status
+            .issues
+            .iter()
+            .any(|issue| issue.contains("Nao instalado")));
+    }
+
+    #[test]
+    fn dependency_diagnostic_reports_available_github_cache() {
+        let status = dependency_status_for_test(DependencyKind::PvsnesLib, false, None, true, None);
+
+        assert_eq!(status.status_code, "cache_available");
+        assert!(status.cache_available);
+        assert!(status.actionable_message.contains("cache"));
+        assert!(status.actionable_message.contains("download"));
+    }
+
+    #[test]
+    fn dependency_diagnostic_reports_rate_limit_as_download_failure() {
+        let status = dependency_status_for_test(
+            DependencyKind::Sgdk,
+            false,
+            None,
+            false,
+            Some("Falha ao consultar release oficial: HTTP status 429 Too Many Requests"),
+        );
+
+        assert_eq!(status.status_code, "download_failed");
+        assert!(status.actionable_message.contains("RDS_GITHUB_TOKEN"));
+        assert!(status.actionable_message.contains("tente novamente"));
+        assert!(!status.actionable_message.contains("Bearer"));
+    }
+
+    #[test]
+    fn dependency_diagnostic_preserves_detected_version() {
+        let status =
+            dependency_status_for_test(DependencyKind::Sgdk, true, Some("v2.11"), false, None);
+
+        assert_eq!(status.status_code, "installed");
+        assert_eq!(status.version.as_deref(), Some("v2.11"));
+        assert!(status.actionable_message.contains("detectada"));
+    }
+
+    #[test]
+    fn dependency_status_report_writes_canonical_validation_json() {
+        let report = DependencyStatusReport {
+            generated_at_unix: 123,
+            report_path: "runtime-dependency-diagnostics.json".to_string(),
+            summary: DependencyStatusSummary {
+                total: 1,
+                installed: 0,
+                blocking: 1,
+                warnings: 0,
+                manual_required: 0,
+                cache_available: 0,
+                download_failed: 0,
+            },
+            items: vec![dependency_status_for_test(
+                DependencyKind::Sgdk,
+                false,
+                None,
+                false,
+                None,
+            )],
+        };
+        let output_dir = temp_dir("runtime-diagnostics-report");
+        let output_path = output_dir.join("runtime-dependency-diagnostics.json");
+
+        write_dependency_status_report_to_path(&report, &output_path)
+            .expect("write runtime dependency report");
+
+        let raw = fs::read_to_string(&output_path).expect("read runtime dependency report");
+        assert!(raw.contains("\"summary\""));
+        assert!(raw.contains("\"status_code\": \"missing\""));
+
+        let _ = fs::remove_dir_all(output_dir);
     }
 }

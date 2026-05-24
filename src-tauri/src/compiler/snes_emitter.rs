@@ -7,11 +7,20 @@ use crate::compiler::ast_generator::{
     LogicTimelineSlot, ParallaxLayerConfig, PhysicsApplication, RasterLineConfig, SpriteAsset,
     TilemapAsset,
 };
+use crate::core::input_commands::parse_command_notation;
+use std::collections::BTreeMap;
 
 #[derive(Debug)]
 pub struct EmitOutput {
     pub main_c: String,
     pub resources_res: String,
+}
+
+#[derive(Debug, Clone)]
+struct InputCommandSpec {
+    id: String,
+    notation: String,
+    unsupported_tokens: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -95,6 +104,7 @@ fn build_main_c_with_collision(
     let sfx_resources = collect_sfx_resources(ast);
     let bgm_tracks = collect_bgm_tracks(ast);
     let has_logic_overlap = ast.logic_scripts.iter().any(script_uses_overlap);
+    let input_commands = collect_input_commands(ast);
     let hardware_event_scripts = collect_hardware_event_scripts(ast);
     let default_size_config = SpriteSizeConfig {
         oam_size: "OBJ_SIZE16_L32",
@@ -195,6 +205,10 @@ fn build_main_c_with_collision(
     }
     if !collision_checks.is_empty() || has_logic_overlap {
         out.push_str(render_aabb_helper());
+        out.push('\n');
+    }
+    if !input_commands.is_empty() {
+        render_input_command_runtime(&mut out, &input_commands);
         out.push('\n');
     }
     if !hardware_event_scripts.is_empty() {
@@ -320,10 +334,11 @@ fn build_main_c_with_collision(
             AstNode::InitAudio { sfx_resources } => {
                 out.push_str("    spcBoot();\n");
                 for (resource_name, _) in sfx_resources {
+                    let symbol = snes_sfx_symbol(resource_name);
                     out.push_str(&format!(
-                        "    spcSetSoundEntry(SFX_{sound_id}, 8, 0, (u8*)&{symbol});\n",
-                        sound_id = resource_name.to_uppercase(),
-                        symbol = snes_sfx_symbol(resource_name)
+                        "    spcSetSoundEntry(15, 8, 6, (&{symbol}end - &{symbol}), (u8*)&{symbol}, &{sample});\n",
+                        symbol = symbol,
+                        sample = snes_sfx_sample_symbol(resource_name)
                     ));
                 }
             }
@@ -419,6 +434,9 @@ fn build_main_c_with_collision(
                 out.push_str("    while (1)\n    {\n");
             }
             AstNode::SpriteUpdate => {
+                if !input_commands.is_empty() {
+                    out.push_str("        rds_input_push_frame(padsCurrent(0));\n");
+                }
                 render_logic_scripts(&mut out, &ast.logic_scripts, &context, 8);
                 render_retrofx_frame(&mut out, &parallax_layers, &raster_lines, 8);
                 for animation in &context.animations {
@@ -751,6 +769,206 @@ fn render_logic_scripts(
     }
 }
 
+fn sanitize_command_identifier(value: &str) -> String {
+    let mut out = String::new();
+    let mut previous_separator = false;
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            previous_separator = false;
+        } else if !previous_separator {
+            out.push('_');
+            previous_separator = true;
+        }
+    }
+    let sanitized = out.trim_matches('_').to_string();
+    if sanitized.is_empty() {
+        "command".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn collect_input_commands(ast: &AstOutput) -> BTreeMap<String, InputCommandSpec> {
+    let mut commands = BTreeMap::new();
+    for script in &ast.logic_scripts {
+        collect_input_commands_from_ops(&script.ops, &mut commands);
+    }
+    commands
+}
+
+fn collect_input_commands_from_ops(
+    ops: &[LogicOp],
+    commands: &mut BTreeMap<String, InputCommandSpec>,
+) {
+    for op in ops {
+        match op {
+            LogicOp::ConditionBool {
+                condition,
+                if_true,
+                if_false,
+            } => {
+                collect_input_command_from_bool(condition, commands);
+                collect_input_commands_from_ops(if_true, commands);
+                collect_input_commands_from_ops(if_false, commands);
+            }
+            LogicOp::WhileLoop {
+                condition,
+                body,
+                done,
+            } => {
+                collect_input_command_from_bool(condition, commands);
+                collect_input_commands_from_ops(body, commands);
+                collect_input_commands_from_ops(done, commands);
+            }
+            LogicOp::ConditionOverlap {
+                if_true, if_false, ..
+            } => {
+                collect_input_commands_from_ops(if_true, commands);
+                collect_input_commands_from_ops(if_false, commands);
+            }
+            LogicOp::ForLoop { body, done, .. } => {
+                collect_input_commands_from_ops(body, commands);
+                collect_input_commands_from_ops(done, commands);
+            }
+            LogicOp::TimelineSequence { slots, .. } => {
+                for slot in slots {
+                    collect_input_commands_from_ops(&slot.actions, commands);
+                }
+            }
+            LogicOp::HardwareBudgetCheck { if_ok, if_warn, .. } => {
+                collect_input_commands_from_ops(if_ok, commands);
+                collect_input_commands_from_ops(if_warn, commands);
+            }
+            LogicOp::StateMachine { states, .. } => {
+                for state in states {
+                    collect_input_commands_from_ops(&state.body, commands);
+                    for transition in &state.transitions {
+                        collect_input_command_from_bool(&transition.condition, commands);
+                        collect_input_commands_from_ops(&transition.if_matched, commands);
+                        collect_input_commands_from_ops(&transition.if_unmatched, commands);
+                    }
+                }
+            }
+            LogicOp::HardwareEvent { ops, .. } => collect_input_commands_from_ops(ops, commands),
+            _ => {}
+        }
+    }
+}
+
+fn collect_input_command_from_bool(
+    expr: &LogicBoolExpr,
+    commands: &mut BTreeMap<String, InputCommandSpec>,
+) {
+    match expr {
+        LogicBoolExpr::InputCommand {
+            command_id,
+            notation,
+            unsupported_tokens,
+            ..
+        } => {
+            commands
+                .entry(command_id.clone())
+                .or_insert_with(|| InputCommandSpec {
+                    id: command_id.clone(),
+                    notation: notation.clone(),
+                    unsupported_tokens: unsupported_tokens.clone(),
+                });
+        }
+        LogicBoolExpr::Not(value) => collect_input_command_from_bool(value, commands),
+        LogicBoolExpr::And { left, right, .. } => {
+            collect_input_command_from_bool(left, commands);
+            collect_input_command_from_bool(right, commands);
+        }
+        _ => {}
+    }
+}
+
+fn render_input_command_runtime(out: &mut String, commands: &BTreeMap<String, InputCommandSpec>) {
+    out.push_str(
+        "typedef struct { u8 direction; u16 buttons; } RdsInputCommandStep;\n\
+         #define RDS_INPUT_HISTORY 32\n\
+         static u8 rds_input_directions[RDS_INPUT_HISTORY];\n\
+         static u16 rds_input_buttons[RDS_INPUT_HISTORY];\n\
+         static u8 rds_input_cursor = 0;\n\
+         static u8 rds_input_direction_from_buttons(u16 buttons) {\n\
+             u8 left = (buttons & KEY_LEFT) != 0;\n\
+             u8 right = (buttons & KEY_RIGHT) != 0;\n\
+             u8 up = (buttons & KEY_UP) != 0;\n\
+             u8 down = (buttons & KEY_DOWN) != 0;\n\
+             if (down && left) return 1;\n\
+             if (down && right) return 3;\n\
+             if (up && left) return 7;\n\
+             if (up && right) return 9;\n\
+             if (down) return 2;\n\
+             if (left) return 4;\n\
+             if (right) return 6;\n\
+             if (up) return 8;\n\
+             return 5;\n\
+         }\n\
+         static void rds_input_push_frame(u16 buttons) {\n\
+             rds_input_directions[rds_input_cursor] = rds_input_direction_from_buttons(buttons);\n\
+             rds_input_buttons[rds_input_cursor] = buttons;\n\
+             rds_input_cursor = (rds_input_cursor + 1) % RDS_INPUT_HISTORY;\n\
+         }\n\
+         static u8 rds_input_step_matches(const RdsInputCommandStep* step, u8 index) {\n\
+             u8 direction_ok = (step->direction == 0) || (step->direction == rds_input_directions[index]);\n\
+             u8 buttons_ok = (step->buttons == 0) || ((rds_input_buttons[index] & step->buttons) == step->buttons);\n\
+             return direction_ok && buttons_ok;\n\
+         }\n\
+         static u8 rds_input_match_command(const RdsInputCommandStep* steps, u8 step_count, u8 max_frames) {\n\
+             u8 matched = step_count;\n\
+             u8 scanned = 0;\n\
+             u8 cursor = rds_input_cursor;\n\
+             if (step_count == 0) return 0;\n\
+             while ((scanned < max_frames) && (scanned < RDS_INPUT_HISTORY) && (matched > 0)) {\n\
+                 cursor = (cursor + RDS_INPUT_HISTORY - 1) % RDS_INPUT_HISTORY;\n\
+                 if (rds_input_step_matches(&steps[matched - 1], cursor)) matched--;\n\
+                 scanned++;\n\
+             }\n\
+             return matched == 0;\n\
+         }\n"
+    );
+
+    for spec in commands.values() {
+        let parsed = parse_command_notation(&spec.notation);
+        let unsupported = if spec.unsupported_tokens.is_empty() {
+            parsed.unsupported_tokens
+        } else {
+            spec.unsupported_tokens.clone()
+        };
+        if !unsupported.is_empty() {
+            out.push_str(&format!(
+                "#error \"Unsupported input_command tokens for {}: {}\"\n",
+                spec.id,
+                unsupported.join(", ")
+            ));
+            continue;
+        }
+        out.push_str(&format!(
+            "static const RdsInputCommandStep rds_cmd_{}_steps[] = {{\n",
+            sanitize_command_identifier(&spec.id)
+        ));
+        for step in parsed.steps {
+            let button_mask = if step.buttons.is_empty() {
+                "0".to_string()
+            } else {
+                step.buttons
+                    .iter()
+                    .map(|button| snes_button_mask(button).unwrap_or("KEY_Y").to_string())
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            };
+            out.push_str(&format!(
+                "    {{ {}, {} }},\n",
+                step.direction.unwrap_or(0),
+                button_mask
+            ));
+        }
+        out.push_str("};\n");
+    }
+}
+
 fn collect_hardware_event_scripts(ast: &AstOutput) -> Vec<(HardwareEventKind, Vec<LogicOp>)> {
     ast.logic_scripts
         .iter()
@@ -1059,6 +1277,15 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], context: &SnesContext, in
             } => {
                 render_fsm_states(out, context, machine_var, states, indent);
             }
+            LogicOp::SourceBridgeError {
+                gap,
+                source_file,
+                source_line,
+            } => {
+                out.push_str(&format!(
+                    "#error \"Source Bridge blocks codegen: {gap} at {source_file}:{source_line}. Enable bridge compatibility mode or replace with native nodes.\"\n",
+                ));
+            }
         }
     }
 }
@@ -1166,7 +1393,40 @@ fn render_bool_expr(out: &mut String, expr: &LogicBoolExpr, indent: usize) -> St
         LogicBoolExpr::Literal(value) => {
             if *value { "1".to_string() } else { "0".to_string() }
         }
-        LogicBoolExpr::Input { button, .. } => format!("(padsCurrent(0) & {})", button),
+        LogicBoolExpr::Input { button, .. } => format!(
+            "(padsCurrent(0) & {})",
+            snes_button_mask(button).unwrap_or(button.as_str())
+        ),
+        LogicBoolExpr::InputCommand {
+            command_id,
+            notation,
+            max_frames,
+            unsupported_tokens,
+            ..
+        } => {
+            let parsed = parse_command_notation(notation);
+            let unsupported = if unsupported_tokens.is_empty() {
+                parsed.unsupported_tokens
+            } else {
+                unsupported_tokens.clone()
+            };
+            if !unsupported.is_empty() {
+                out.push_str(&format!(
+                    "{}#error \"Unsupported input_command tokens for {}: {}\"\n",
+                    " ".repeat(indent),
+                    command_id,
+                    unsupported.join(", ")
+                ));
+                "0".to_string()
+            } else {
+                format!(
+                    "rds_input_match_command(rds_cmd_{}_steps, {}, {})",
+                    sanitize_command_identifier(command_id),
+                    parsed.steps.len(),
+                    max_frames
+                )
+            }
+        }
         LogicBoolExpr::Overlap { left, right } => format!(
             "retro_aabb_intersects({left_x}, {left_y}, {left_w}, {left_h}, {right_x}, {right_y}, {right_w}, {right_h})",
             left_x = logic_x_expr(left),
@@ -1361,9 +1621,12 @@ fn render_audio_externs(
     }
 
     for (resource_name, _) in sfx_resources {
+        let symbol = snes_sfx_symbol(resource_name);
+        out.push_str(&format!("extern char {};\n", symbol));
+        out.push_str(&format!("extern char {}end;\n", symbol));
         out.push_str(&format!(
-            "extern char {};\n",
-            snes_sfx_symbol(resource_name)
+            "static brrsamples {};\n",
+            snes_sfx_sample_symbol(resource_name)
         ));
     }
     for (resource_name, _) in bgm_tracks {
@@ -1531,7 +1794,7 @@ fn extract_vars_from_bool(expr: &LogicBoolExpr, vars: &mut std::collections::BTr
             extract_vars_from_bool(left, vars);
             extract_vars_from_bool(right, vars);
         }
-        LogicBoolExpr::Input { .. } => {}
+        LogicBoolExpr::Input { .. } | LogicBoolExpr::InputCommand { .. } => {}
         _ => {}
     }
 }
@@ -1554,6 +1817,10 @@ fn extract_vars_from_math(expr: &LogicMathExpr, vars: &mut std::collections::BTr
 
 fn snes_sfx_symbol(resource_name: &str) -> String {
     format!("{}_sfx", resource_name)
+}
+
+fn snes_sfx_sample_symbol(resource_name: &str) -> String {
+    format!("{}_sample", snes_sfx_symbol(resource_name))
 }
 
 fn snes_bgm_symbol(resource_name: &str) -> String {
@@ -1634,7 +1901,7 @@ fn op_uses_overlap(op: &LogicOp) -> bool {
 fn bool_expr_uses_overlap(expr: &LogicBoolExpr) -> bool {
     match expr {
         LogicBoolExpr::Literal(_) => false,
-        LogicBoolExpr::Input { .. } => false,
+        LogicBoolExpr::Input { .. } | LogicBoolExpr::InputCommand { .. } => false,
         LogicBoolExpr::Overlap { .. } => true,
         LogicBoolExpr::Compare { .. } => false,
         LogicBoolExpr::Not(value) => bool_expr_uses_overlap(value),
@@ -1704,10 +1971,16 @@ fn snes_button_mask(button: &str) -> Option<&'static str> {
         "DPAD_DOWN" => Some("KEY_DOWN"),
         "DPAD_LEFT" => Some("KEY_LEFT"),
         "DPAD_RIGHT" => Some("KEY_RIGHT"),
-        "BUTTON_A" => Some("KEY_A"),
-        "BUTTON_B" => Some("KEY_B"),
-        "BUTTON_X" => Some("KEY_X"),
-        "BUTTON_Y" => Some("KEY_Y"),
+        "BUTTON_UP" => Some("KEY_UP"),
+        "BUTTON_DOWN" => Some("KEY_DOWN"),
+        "BUTTON_LEFT" => Some("KEY_LEFT"),
+        "BUTTON_RIGHT" => Some("KEY_RIGHT"),
+        "_P" | "P" | "_B" | "B" | "BUTTON_Y" => Some("KEY_Y"),
+        "_K" | "K" | "_A" | "A" | "BUTTON_B" => Some("KEY_B"),
+        "_C" | "C" | "BUTTON_X" => Some("KEY_X"),
+        "_X" | "X" | "BUTTON_A" => Some("KEY_A"),
+        "_Y" | "Y" => Some("KEY_L"),
+        "_Z" | "Z" => Some("KEY_R"),
         "START" => Some("KEY_START"),
         "SELECT" => Some("KEY_SELECT"),
         _ => None,
@@ -1912,7 +2185,8 @@ fn tilemap_map_address(bg_number: u8) -> u16 {
 mod tests {
     use super::*;
     use crate::compiler::ast_generator::{
-        LogicCollisionTarget, LogicOp, LogicPositionSource, LogicScript, SpriteAnimation,
+        LogicBoolExpr, LogicCollisionTarget, LogicMathExpr, LogicOp, LogicPositionSource,
+        LogicScript, SpriteAnimation,
     };
 
     fn sprite_asset() -> SpriteAsset {
@@ -2171,11 +2445,13 @@ mod tests {
 
         assert!(output.main_c.contains("#define SFX_JUMP 0"));
         assert!(output.main_c.contains("extern char jump_sfx;"));
+        assert!(output.main_c.contains("extern char jump_sfxend;"));
+        assert!(output.main_c.contains("static brrsamples jump_sfx_sample;"));
         assert!(output.main_c.contains("extern char stage_theme_bgm;"));
         assert!(output.main_c.contains("spcBoot();"));
-        assert!(output
-            .main_c
-            .contains("spcSetSoundEntry(SFX_JUMP, 8, 0, (u8*)&jump_sfx);"));
+        assert!(output.main_c.contains(
+            "spcSetSoundEntry(15, 8, 6, (&jump_sfxend - &jump_sfx), (u8*)&jump_sfx, &jump_sfx_sample);"
+        ));
         assert!(output.main_c.contains("spcLoad((u8*)&stage_theme_bgm);"));
         assert!(output
             .resources_res
@@ -2183,6 +2459,85 @@ mod tests {
         assert!(output
             .resources_res
             .contains("BGM stage_theme <- assets/audio/stage_theme.spc"));
+    }
+
+    #[test]
+    fn snes_emitter_emits_ring_buffer_matcher_for_input_command() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: vec![LogicScript {
+                ops: vec![LogicOp::ConditionBool {
+                    condition: LogicBoolExpr::InputCommand {
+                        command_id: "hadouken".to_string(),
+                        notation: "_2,_3,_6,_P".to_string(),
+                        max_frames: 15,
+                        pad: "JOY_1".to_string(),
+                        button_profile: "snes".to_string(),
+                        unsupported_tokens: Vec::new(),
+                    },
+                    if_true: vec![LogicOp::SetVar {
+                        var_name: "fireball".to_string(),
+                        value: LogicMathExpr::Literal(1),
+                    }],
+                    if_false: Vec::new(),
+                }],
+            }],
+        };
+
+        let output = emit_snes(&ast, "Command Demo");
+
+        assert!(output
+            .main_c
+            .contains("rds_input_push_frame(padsCurrent(0));"));
+        assert!(output
+            .main_c
+            .contains("static const RdsInputCommandStep rds_cmd_hadouken_steps[]"));
+        assert!(output.main_c.contains("{ 2, 0 }"));
+        assert!(output.main_c.contains("{ 3, 0 }"));
+        assert!(output.main_c.contains("{ 6, 0 }"));
+        assert!(output.main_c.contains("{ 0, KEY_Y }"));
+        assert!(output
+            .main_c
+            .contains("if (rds_input_match_command(rds_cmd_hadouken_steps, 4, 15))"));
+        assert!(output.main_c.contains("logic_var_fireball = 1;"));
+    }
+
+    #[test]
+    fn snes_emitter_maps_button_aliases_inside_logic_conditions() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: vec![LogicScript {
+                ops: vec![LogicOp::ConditionBool {
+                    condition: LogicBoolExpr::Input {
+                        pad: "JOY_1".to_string(),
+                        button: "BUTTON_RIGHT".to_string(),
+                        pressed: false,
+                    },
+                    if_true: vec![LogicOp::SetVar {
+                        var_name: "moved".to_string(),
+                        value: LogicMathExpr::Literal(1),
+                    }],
+                    if_false: Vec::new(),
+                }],
+            }],
+        };
+
+        let output = emit_snes(&ast, "Input Alias Demo");
+
+        assert!(output.main_c.contains("if ((padsCurrent(0) & KEY_RIGHT))"));
+        assert!(!output.main_c.contains("BUTTON_RIGHT"));
     }
 
     #[test]

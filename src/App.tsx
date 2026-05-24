@@ -60,6 +60,13 @@ import {
   getLiveBuildWarningSummary,
   useLiveValidationController,
 } from "./core/validation/liveValidationController";
+import {
+  buildAreaForTarget,
+  createFallbackDiagnostic,
+  importAreaForProfile,
+  normalizeBuildDiagnostics,
+  type ActionableDiagnostic,
+} from "./core/diagnostics";
 import { classifyImageAssetInstantiation } from "./core/assetInstantiation";
 import {
   createSpriteEntityFromAsset,
@@ -80,11 +87,59 @@ import {
   getShortcutTitle,
   groupShortcutsByGroup,
 } from "./core/shortcuts";
+import {
+  getPresetLayout,
+  resolveWorkspaceShellConfig,
+  type LayoutMap,
+  type LayoutPresetId,
+} from "./core/workspaceLayout";
+import {
+  buildSgdkCapabilityMatrix,
+  formatSgdkImportSummaryKind,
+  type CapabilityTone,
+  type SgdkImportSummary,
+} from "./core/sgdkLogicDiagnostics";
 
 const ExplorerWorkspace = lazy(() => import("./components/explorer/ExplorerWorkspace"));
 const InspectorPanel = lazy(() => import("./components/inspector/InspectorPanel"));
 const ToolsPanel = lazy(() => import("./components/tools/ToolsPanel"));
 const ViewportPanel = lazy(() => import("./components/viewport/ViewportPanel"));
+
+function looksLikeRuntimeDependencyFailure(message: string): boolean {
+  const lower = message.toLowerCase();
+  return [
+    "toolchain",
+    "sgdk",
+    "pvsneslib",
+    "java",
+    "jdk",
+    "libretro",
+    "make",
+    "bash",
+    "msvc",
+    "cl.exe",
+    "webdriver",
+    "tauri-driver",
+  ].some((token) => lower.includes(token));
+}
+
+function formatBuildFailureSummary(errorLines: string[]): string {
+  const tail = errorLines.slice(-6).join(" | ");
+  if (tail.length === 0) {
+    return "Build falhou sem linhas de erro estruturadas no log; abra Debug > Runtime Setup, clique Revalidar e confira o Console para o historico completo.";
+  }
+  const setupHint = looksLikeRuntimeDependencyFailure(tail)
+    ? " Abra Debug > Runtime Setup, clique Revalidar e corrija a dependencia indicada antes de tentar novamente."
+    : "";
+  return `Build falhou (toolchain / makefile / emissao). Resumo: ${tail}.${setupHint}`;
+}
+
+function formatEmulatorFailureMessage(message: string): string {
+  if (looksLikeRuntimeDependencyFailure(message)) {
+    return `[Emulador] ${message} Abra Debug > Runtime Setup, clique Revalidar e confirme o core Libretro/WebDriver antes de carregar a ROM novamente.`;
+  }
+  return `[Emulador] ${message}`;
+}
 
 function ToolbarButton({
   label,
@@ -119,20 +174,14 @@ function ToolbarButton({
       data-testid={testId}
       title={title}
       aria-describedby={describedBy}
-      className={`rounded px-2 py-1 text-xs font-semibold transition-colors ${palette} disabled:cursor-not-allowed disabled:opacity-40`}
+      className={`shrink-0 whitespace-nowrap rounded px-2 py-1 text-xs font-semibold leading-none transition-colors ${palette} disabled:cursor-not-allowed disabled:opacity-40`}
     >
       {label}
     </button>
   );
 }
 
-type LayoutPresetId = "artist" | "logic" | "debug" | "playtest";
 type WorkspaceGroupId = "core" | "authoring" | "advanced";
-type LayoutMap = {
-  left: number;
-  center: number;
-  right: number;
-};
 
 const LAYOUT_STORAGE_KEY = "retrodev-shell-saved-layout";
 const WORKSPACE_GUIDE_STORAGE_KEY = "retrodev-workspace-guide-expanded";
@@ -332,43 +381,6 @@ function getTemplateFirstSuccessSteps({
   return steps;
 }
 
-function getPresetLayout(preset: LayoutPresetId, width: number): LayoutMap {
-  const compact = width < 1180;
-  const narrow = width < 960;
-
-  if (preset === "playtest") {
-    return { left: 0, center: 100, right: 0 };
-  }
-
-  if (preset === "debug") {
-    if (narrow) {
-      return { left: 0, center: 54, right: 46 };
-    }
-    if (compact) {
-      return { left: 10, center: 50, right: 40 };
-    }
-    return { left: 14, center: 50, right: 36 };
-  }
-
-  if (preset === "logic") {
-    if (narrow) {
-      return { left: 0, center: 68, right: 32 };
-    }
-    if (compact) {
-      return { left: 14, center: 62, right: 24 };
-    }
-    return { left: 15, center: 60, right: 25 };
-  }
-
-  if (narrow) {
-    return { left: 0, center: 72, right: 28 };
-  }
-  if (compact) {
-    return { left: 16, center: 64, right: 20 };
-  }
-  return { left: 18, center: 60, right: 22 };
-}
-
 function WorkspaceRailButton({
   icon,
   label,
@@ -396,21 +408,28 @@ function WorkspaceRailButton({
   return (
     <button
       type="button"
+      aria-label={`${label}: ${title}`}
       title={title}
       data-testid={testId}
       onClick={onClick}
-      className={`group flex w-full flex-col items-center gap-1 rounded-2xl border px-2 py-2 text-center transition-colors ${
+      className={`group flex w-full shrink-0 flex-col items-center gap-1 rounded-2xl border px-2 py-1.5 text-center transition-colors ${
         active
           ? activeTone
           : "border-transparent text-[#7f849c] hover:border-[#313244] hover:bg-[#11111b] hover:text-[#e5e7eb]"
       }`}
     >
-      <span className="rounded-xl border border-current/20 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]">
+      <span
+        aria-hidden="true"
+        className="rounded-xl border border-current/20 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]"
+      >
         {icon}
       </span>
-      <span className="text-[10px] font-semibold text-current">{label}</span>
+      <span className="sr-only">{label}</span>
       {badge ? (
-        <span className="text-[8px] font-semibold uppercase tracking-[0.18em] text-[#fab387]">
+        <span
+          aria-hidden="true"
+          className="text-[8px] font-semibold uppercase tracking-[0.18em] text-[#fab387]"
+        >
           {badge}
         </span>
       ) : null}
@@ -441,9 +460,9 @@ type WorkspaceGuide = {
 
 function getInitialWorkspaceGuideExpanded() {
   if (typeof localStorage === "undefined") {
-    return true;
+    return false;
   }
-  return localStorage.getItem(WORKSPACE_GUIDE_STORAGE_KEY) !== "false";
+  return localStorage.getItem(WORKSPACE_GUIDE_STORAGE_KEY) === "true";
 }
 
 function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
@@ -471,8 +490,9 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
     <section
       data-testid="workspace-guide"
       data-expanded={expanded ? "true" : "false"}
-      className={`mx-4 mt-3 rounded-2xl border border-[#313244] bg-[linear-gradient(135deg,#0b1020,#111827_55%,#0f172a)] px-4 shadow-[0_16px_32px_rgba(0,0,0,0.18)] ${
-        expanded ? "py-3" : "py-2"
+      title={`${guide.title} — ${guide.summary}`}
+      className={`mx-4 mt-2 rounded-xl border border-[#313244] bg-[linear-gradient(135deg,#0b1020,#111827_55%,#0f172a)] px-3 shadow-[0_12px_24px_rgba(0,0,0,0.16)] ${
+        expanded ? "py-2.5" : "py-1.5"
       }`}
     >
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -480,7 +500,10 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
           <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-[#89b4fa]">
             {guide.eyebrow}
           </p>
-          <h2 className={expanded ? "mt-1 text-sm font-semibold text-[#e2e8f0]" : "mt-0.5 truncate text-xs font-semibold text-[#e2e8f0]"}>
+          <h2
+            title={guide.title}
+            className={expanded ? "mt-1 text-sm font-semibold text-[#e2e8f0]" : "mt-0.5 truncate text-xs font-semibold text-[#e2e8f0]"}
+          >
             {guide.title}
           </h2>
           {expanded ? (
@@ -491,6 +514,7 @@ function WorkspaceGuideCard({ guide }: { guide: WorkspaceGuide }) {
               {guide.checkpoints.map((checkpoint) => (
                 <span
                   key={checkpoint}
+                  title={checkpoint}
                   className="inline-flex items-center rounded-full border border-[#313244] bg-black/15 px-2 py-1 text-[10px] font-medium text-[#bac2de]"
                 >
                   {checkpoint}
@@ -643,6 +667,102 @@ function TemplateFirstSuccessCard({
   );
 }
 
+function sgdkCapabilityToneClass(tone: CapabilityTone): string {
+  switch (tone) {
+    case "supported":
+      return "border-[#a6e3a1]/30 bg-[#a6e3a1]/10 text-[#a6e3a1]";
+    case "bridge":
+      return "border-[#f9e2af]/30 bg-[#f9e2af]/10 text-[#f9e2af]";
+    case "blocked":
+      return "border-[#f38ba8]/30 bg-[#f38ba8]/10 text-[#f38ba8]";
+    case "experimental":
+      return "border-[#cba6f7]/30 bg-[#cba6f7]/10 text-[#cba6f7]";
+    case "partial":
+    default:
+      return "border-[#89b4fa]/30 bg-[#89b4fa]/10 text-[#89b4fa]";
+  }
+}
+
+function SgdkCapabilityMatrix({ profile }: { profile: ExternalImportProfileSummary }) {
+  const items = buildSgdkCapabilityMatrix(profile);
+  return (
+    <div
+      data-testid="sgdk-capability-matrix"
+      className="mt-3 rounded border border-[#313244] bg-[#0b1020] p-3 text-[10px] text-[#94a3b8]"
+    >
+      <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#89b4fa]">
+        Matriz de capacidades SGDK
+      </p>
+      <div className="mt-2 grid gap-2 md:grid-cols-2">
+        {items.map((item) => (
+          <div key={item.id} className="rounded border border-[#313244] bg-[#11111b] px-2 py-1.5">
+            <div className="flex items-start justify-between gap-2">
+              <span className="font-semibold text-[#cdd6f4]">{item.label}</span>
+              <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[8px] font-semibold ${sgdkCapabilityToneClass(item.tone)}`}>
+                {item.statusLabel}
+              </span>
+            </div>
+            <p className="mt-1 leading-5 text-[#7f849c]">{item.detail}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SgdkImportSummaryCard({ summary }: { summary: SgdkImportSummary }) {
+  const rows = [
+    ["estados detectados", summary.states_detected ?? 0],
+    ["transicoes detectadas", summary.transitions_detected ?? 0],
+    ["nodes gerados", summary.nodes_generated ?? 0],
+    ["bridges criadas", summary.bridges_created ?? 0],
+  ] as const;
+  return (
+    <section
+      data-testid="sgdk-import-summary"
+      title={`Resumo SGDK Logic — ${formatSgdkImportSummaryKind(summary)}`}
+      className="mx-3 mt-3 rounded border border-[#89b4fa]/30 bg-[#0b1020] p-3 text-[10px] text-[#94a3b8]"
+    >
+      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        <div>
+          <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#89b4fa]">
+            Resumo SGDK Logic
+          </p>
+          <p className="mt-1 text-[#cdd6f4]">
+            {formatSgdkImportSummaryKind(summary)}. Nodes funcionais, bridges e gaps ficam separados.
+          </p>
+        </div>
+        <span className="rounded-full border border-[#f9e2af]/35 bg-[#f9e2af]/10 px-2 py-0.5 text-[8px] font-semibold uppercase tracking-[0.14em] text-[#f9e2af]">
+          Equivalencia gameplay nao certificada
+        </span>
+      </div>
+      <div className="mt-2 grid gap-2 md:grid-cols-4">
+        {rows.map(([label, value]) => (
+          <div key={label} className="rounded border border-[#313244] bg-[#11111b] px-2 py-1.5">
+            <p className="text-[#7f849c]">{label}</p>
+            <p className="mt-1 font-mono text-sm text-[#cdd6f4]">{value}</p>
+          </div>
+        ))}
+      </div>
+      {summary.blocking_gaps?.length ? (
+        <div className="mt-2 rounded border border-[#f38ba8]/30 bg-[#f38ba8]/10 px-2 py-1.5">
+          <p className="font-semibold text-[#f38ba8]">gaps bloqueantes</p>
+          <ul className="mt-1 list-inside list-disc text-[#f9e2af]">
+            {summary.blocking_gaps.map((gap) => (
+              <li key={gap}>{gap}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {summary.mapped_source_files?.length ? (
+        <p className="mt-2 font-mono text-[9px] text-[#7f849c]">
+          arquivos fonte mapeados: {summary.mapped_source_files.join(", ")}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 function WorkspacePanelPlaceholder({ label }: { label: string }) {
   return (
     <div className="flex h-full min-h-0 items-center justify-center bg-[#09090b] px-4 text-center text-[11px] text-[#64748b]">
@@ -674,7 +794,7 @@ function BuildPhasePanel({
   return (
     <div
       data-testid="build-phase-panel"
-      className="hidden max-w-[21rem] items-center gap-2 rounded border border-[#313244] bg-[#0b1020] px-2 py-1 text-[9px] xl:flex"
+      className="hidden max-w-[21rem] items-center gap-2 rounded border border-[#313244] bg-[#0b1020] px-2 py-1 text-[9px] 2xl:flex"
       title="Fases do fluxo canonico Build -> ROM -> Emulacao."
     >
       <span className={`shrink-0 rounded-full border px-2 py-0.5 font-semibold ${statusClass}`}>
@@ -934,6 +1054,7 @@ type AutomationState = {
   consoleEntries: Array<{
     level: "info" | "warn" | "error" | "success";
     message: string;
+    diagnostic: ActionableDiagnostic | null;
   }>;
   projectSourceKind: string;
 };
@@ -960,6 +1081,7 @@ type AutomationApi = {
     showAdvanced?: boolean
   ) => boolean;
   selectWorkspace: (workspace: EditorWorkspace) => boolean;
+  setConsoleVisible: (visible: boolean) => boolean;
   setEntityLogicGraph: (entityId: string, graphJson: string) => boolean;
   setEntityTransform: (entityId: string, x: number, y: number) => boolean;
   /** Instancia asset de imagem na cena ativa (mesma regra canónica do Asset Browser). E2E / QA. */
@@ -1035,6 +1157,7 @@ export default function App() {
     consoleEntries,
     consoleVisible,
     toggleConsole,
+    logDiagnostic,
   } = useEditorStore();
 
   const [building, setBuilding] = useState(false);
@@ -1044,7 +1167,7 @@ export default function App() {
   const [toolPanelShowAdvanced, setToolPanelShowAdvanced] = useState(false);
   const [leftPanelTab, setLeftPanelTab] = useState<"scene" | "layers">("scene");
   const [focusedShell, setFocusedShell] = useState(false);
-  const [layoutPreset, setLayoutPreset] = useState<LayoutPresetId>("artist");
+  const [layoutPreset, setLayoutPreset] = useState<LayoutPresetId>("authoring");
   const [shellWidth, setShellWidth] = useState(
     typeof window !== "undefined" ? window.innerWidth : 1440
   );
@@ -1066,6 +1189,7 @@ export default function App() {
   const [selectedExternalImportProfileId, setSelectedExternalImportProfileId] = useState("");
   const [showExternalImportSection, setShowExternalImportSection] = useState(false);
   const [templateDonorPaths, setTemplateDonorPaths] = useState<Record<string, string>>({});
+  const [lastSgdkImportSummary, setLastSgdkImportSummary] = useState<SgdkImportSummary | null>(null);
   const [showProjectWizard, setShowProjectWizard] = useState(false);
   const [creatingProject, setCreatingProject] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
@@ -1138,6 +1262,7 @@ export default function App() {
         : null;
   const workspaceMeta =
     WORKSPACE_ITEMS.find((workspace) => workspace.id === activeWorkspace) ?? WORKSPACE_ITEMS[0];
+  const shellConfig = resolveWorkspaceShellConfig(activeWorkspace, shellWidth);
 
   useLiveValidationController();
 
@@ -1161,6 +1286,12 @@ export default function App() {
     setToolPanelActive(activeTool);
     setToolPanelWorkspace(workspace);
     setToolPanelShowAdvanced(showAdvanced);
+  }
+
+  function openRuntimeSetupForIssue() {
+    setActiveWorkspace("debug");
+    setActiveViewportTab("scene");
+    openToolsWorkspace("setup", "debug", true);
   }
 
   function applyShellLayout(nextLayout: LayoutMap) {
@@ -1241,31 +1372,23 @@ export default function App() {
       return;
     }
 
-    applyShellLayout(getPresetLayout(layoutPreset, shellWidth));
-  }, [layoutPreset, shellWidth]);
+    const config = resolveWorkspaceShellConfig(activeWorkspace, shellWidth);
+    setLayoutPreset(config.preset);
+    applyShellLayout(config.panels);
+  }, [activeWorkspace, shellWidth, focusedShell]);
 
   useEffect(() => {
     if (focusedShell) {
       return;
     }
 
-    if (activeWorkspace === "debug") {
-      setLayoutPreset("debug");
-      return;
+    const config = resolveWorkspaceShellConfig(activeWorkspace, shellWidth);
+    if (config.defaultRightMode === "tools") {
+      setRightPanelMode("tools");
+    } else if (config.defaultRightMode === "inspector") {
+      setRightPanelMode("inspector");
     }
-
-    if (activeWorkspace === "logic") {
-      setLayoutPreset("logic");
-      return;
-    }
-
-    if (activeWorkspace === "game") {
-      setLayoutPreset("playtest");
-      return;
-    }
-
-    setLayoutPreset("artist");
-  }, [activeWorkspace, focusedShell]);
+  }, [activeWorkspace, focusedShell, shellWidth]);
 
   useEffect(() => {
     if (activeWorkspace === "debug" || activeWorkspace === "explorer") {
@@ -1520,6 +1643,10 @@ export default function App() {
 
   function describeError(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+  }
+
+  function reportDiagnostic(diagnostic: ActionableDiagnostic) {
+    logDiagnostic(diagnostic);
   }
 
   const buildDisabledReason = getLiveBuildBlockReason({
@@ -1809,14 +1936,27 @@ export default function App() {
           logMessage(line.level, `[Setup] ${line.message}`);
         });
         if (!result.ok) {
-          logMessage("error", `[Setup] ${result.message}`);
+          reportDiagnostic(
+            result.diagnostics?.[0] ??
+              createFallbackDiagnostic({
+                area: "runtime_setup",
+                technicalDetail: result.message,
+                sourcePath: item.install_dir || null,
+                evidencePath: item.install_dir || null,
+              })
+          );
           return false;
         }
       }
 
       return true;
     } catch (error) {
-      logMessage("error", `[Setup] ${describeError(error)}`);
+      reportDiagnostic(
+        createFallbackDiagnostic({
+          area: "runtime_setup",
+          technicalDetail: describeError(error),
+        })
+      );
       return false;
     }
   }
@@ -1831,6 +1971,7 @@ export default function App() {
         "Projeto",
         result.preferred_scene_path
       );
+      setLastSgdkImportSummary(result.import_summary ?? null);
       if (hydrated) {
         logMessage("success", `Projeto aberto: ${result.name} (${result.path})`);
         if (result.notice) {
@@ -1855,6 +1996,7 @@ export default function App() {
       scope,
       result.preferred_scene_path
     );
+    setLastSgdkImportSummary(result.import_summary ?? null);
     if (!hydrated) {
       throw new Error(`Falha ao hidratar o projeto: ${result.path}`);
     }
@@ -2022,6 +2164,7 @@ export default function App() {
     }
 
     setCreatingProject(true);
+    let donorPathForDiagnostic: string | undefined;
     try {
       const donorPath =
         selectedTemplate.source_kind === "external_sgdk"
@@ -2029,12 +2172,18 @@ export default function App() {
             selectedTemplate.default_donor_path ||
             undefined
           : undefined;
+      donorPathForDiagnostic = donorPath;
       const result = await createProjectFromTemplate(
         newProjName.trim(),
         newProjTarget,
         newProjBaseDir.trim(),
         selectedTemplate.id,
         donorPath
+      );
+      setLastSgdkImportSummary(
+        selectedTemplate.source_kind === "external_sgdk"
+          ? result.import_summary ?? null
+          : null
       );
       const hydrated = await hydrateProjectState(
         result.path,
@@ -2054,7 +2203,17 @@ export default function App() {
         logMessage("warn", `[Projeto] Projeto criado, mas a cena inicial nao foi hidratada: ${result.name}`);
       }
     } catch (error) {
-      logMessage("error", `[Projeto] Falha ao criar projeto: ${describeError(error)}`);
+      if (selectedTemplate.source_kind === "external_sgdk") {
+        reportDiagnostic(
+          createFallbackDiagnostic({
+            area: "import_sgdk",
+            sourcePath: donorPathForDiagnostic ?? null,
+            technicalDetail: describeError(error),
+          })
+        );
+      } else {
+        logMessage("error", `[Projeto] Falha ao criar projeto: ${describeError(error)}`);
+      }
     } finally {
       setCreatingProject(false);
     }
@@ -2083,8 +2242,9 @@ export default function App() {
       );
     }
 
+    let projectPath: string | null = null;
     try {
-      const projectPath = await chooseExternalProjectPath(selectedExternalImportProfile);
+      projectPath = await chooseExternalProjectPath(selectedExternalImportProfile);
       if (!projectPath) {
         return;
       }
@@ -2095,6 +2255,9 @@ export default function App() {
         newProjBaseDir.trim(),
         selectedExternalImportProfile.id,
         projectPath
+      );
+      setLastSgdkImportSummary(
+        selectedExternalImportProfile.id === "sgdk" ? result.import_summary ?? null : null
       );
       const hydrated = await hydrateProjectState(
         result.path,
@@ -2117,9 +2280,12 @@ export default function App() {
         );
       }
     } catch (error) {
-      logMessage(
-        "error",
-        `[Projeto] Falha ao importar projeto ${selectedExternalImportProfile.name}: ${describeError(error)}`
+      reportDiagnostic(
+        createFallbackDiagnostic({
+          area: importAreaForProfile(selectedExternalImportProfile.id),
+          sourcePath: projectPath,
+          technicalDetail: describeError(error),
+        })
       );
     } finally {
       setCreatingProject(false);
@@ -2147,10 +2313,19 @@ export default function App() {
       const result = await emulatorLoadRom(romPath);
       if (!result.ok) {
         setEmulatorLoaded(false);
+        const failureMessage = formatEmulatorFailureMessage(result.message);
+        logMessage("error", failureMessage);
         if (result.message.includes("Nenhum core Libretro")) {
-          openToolsWorkspace("setup", "editing");
+          openRuntimeSetupForIssue();
         }
-        logMessage("error", `[Emulador] ${result.message}`);
+        reportDiagnostic(
+          result.diagnostics?.[0] ??
+            createFallbackDiagnostic({
+              area: "libretro_emulation",
+              sourcePath: romPath,
+              technicalDetail: failureMessage,
+            })
+        );
         return;
       }
 
@@ -2159,7 +2334,12 @@ export default function App() {
       setActiveViewportTab("game");
       setEmulPaused(false);
     } catch (error) {
-      logMessage("error", `[Emulador] Falha ao carregar ROM: ${describeError(error)}`);
+      reportDiagnostic(
+        createFallbackDiagnostic({
+          area: "libretro_emulation",
+          technicalDetail: formatEmulatorFailureMessage(describeError(error)),
+        })
+      );
     }
   }
 
@@ -2313,8 +2493,16 @@ export default function App() {
         state.hwStatus &&
         state.hwStatus.errors.length > 0
       ) {
-        state.hwStatus.errors.forEach((error) => logMessage("error", `[HW] ${error}`));
-        logMessage("warn", buildDisabledReason ?? "Build bloqueado pelo preview de hardware.");
+        state.hwStatus.errors.forEach((error) =>
+          reportDiagnostic(
+            createFallbackDiagnostic({
+              area: "hardware",
+              technicalDetail: error,
+              suggestedAction:
+                "Reduza os recursos marcados como fatais no painel de hardware e rode a validacao novamente.",
+            })
+          )
+        );
         return;
       }
 
@@ -2339,8 +2527,17 @@ export default function App() {
       const hwStatus = await getHwStatus(activeProjectDir);
       setHwStatus(hwStatus);
       if (hwStatus.errors.length > 0) {
-        hwStatus.errors.forEach((error) => logMessage("error", `[HW] ${error}`));
-        logMessage("error", "Build bloqueado: violacoes de hardware.");
+        hwStatus.errors.forEach((error) =>
+          reportDiagnostic(
+            createFallbackDiagnostic({
+              area: "hardware",
+              technicalDetail: error,
+              evidencePath: activeProjectDir,
+              suggestedAction:
+                "Reduza os recursos marcados como fatais no painel de hardware e rode a validacao novamente.",
+            })
+          )
+        );
         return;
       }
       hwStatus.warnings.forEach((warning) => logMessage("warn", `[HW] ${warning}`));
@@ -2353,13 +2550,13 @@ export default function App() {
           .filter((line) => line.level === "error")
           .map((line) => line.message.trim())
           .filter((msg) => msg.length > 0);
-        const tail = errorLines.slice(-6).join(" | ");
-        logMessage(
-          "error",
-          tail.length > 0
-            ? `Build falhou (toolchain / makefile / emissao). Resumo: ${tail}`
-            : "Build falhou sem linhas de erro estruturadas no log; verifique o Console para o historico completo."
-        );
+        if (errorLines.some(looksLikeRuntimeDependencyFailure)) {
+          openRuntimeSetupForIssue();
+        }
+        normalizeBuildDiagnostics(result, activeTarget, activeProjectDir).forEach(reportDiagnostic);
+        if (!result.diagnostics?.length && errorLines.length > 0) {
+          logMessage("error", formatBuildFailureSummary(errorLines));
+        }
         return;
       }
 
@@ -2367,10 +2564,19 @@ export default function App() {
       const loadResult = await emulatorLoadRom(result.rom_path);
       if (!loadResult.ok) {
         setEmulatorLoaded(false);
+        const failureMessage = formatEmulatorFailureMessage(loadResult.message);
+        logMessage("error", failureMessage);
         if (loadResult.message.includes("Nenhum core Libretro")) {
-          openToolsWorkspace("setup", "editing");
+          openRuntimeSetupForIssue();
         }
-        logMessage("error", `[Emulador] ${loadResult.message}`);
+        reportDiagnostic(
+          loadResult.diagnostics?.[0] ??
+            createFallbackDiagnostic({
+              area: "libretro_emulation",
+              sourcePath: result.rom_path,
+              technicalDetail: failureMessage,
+            })
+        );
         return;
       }
 
@@ -2380,7 +2586,13 @@ export default function App() {
       setActiveViewportTab("game");
       setActiveWorkspace("game");
     } catch (error) {
-      logMessage("error", `[Build] Falha inesperada: ${describeError(error)}`);
+      reportDiagnostic(
+        createFallbackDiagnostic({
+          area: buildAreaForTarget(activeTarget),
+          technicalDetail: describeError(error),
+          evidencePath: activeProjectDir ? `${activeProjectDir}/build/${activeTarget === "snes" ? "snes" : "megadrive"}` : null,
+        })
+      );
     } finally {
       buildInFlightRef.current = false;
       setBuilding(false);
@@ -2403,18 +2615,32 @@ export default function App() {
     setHwStatus(null);
     resetHwValidation();
     setSelectedEntityId(null);
+    setLastSgdkImportSummary(null);
     logMessage("info", "Projeto fechado.");
   }
 
   function handleWorkspaceSelect(workspace: EditorWorkspace) {
     setActiveWorkspace(workspace);
+    const config = resolveWorkspaceShellConfig(workspace, shellWidth);
 
     if (workspace === "debug") {
       openToolsWorkspace("profiler", "debug", true);
+      setActiveViewportTab("scene");
       return;
     }
 
-    setRightPanelMode("inspector");
+    if (config.defaultRightMode === "tools") {
+      openToolsWorkspace(
+        workspace === "logic" ? "palette" : toolPanelActive,
+        "editing",
+        false
+      );
+    } else if (config.defaultRightMode === "inspector") {
+      setRightPanelMode("inspector");
+    } else if (config.defaultRightMode === "hidden") {
+      setRightPanelMode("inspector");
+    }
+
     if (workspace === "explorer") {
       setActiveViewportTab("scene");
       return;
@@ -2481,14 +2707,20 @@ export default function App() {
             eyebrow: "Logic Workspace",
             title: "Edite a logica visual da cena sem perder o contexto do projeto.",
             summary:
-              "O NodeGraph fica no canvas central, enquanto o painel direito pode alternar entre a Paleta Contextual e o Inspector.",
+              "Palette a esquerda, validacao e propriedades a direita no NodeGraph; o shell global nao abre Tools neste workspace.",
             detail:
-              "Abra a paleta quando quiser descobrir blocos disponiveis, valide o projeto antes de compilar e use o Inspector para revisar a entidade selecionada.",
+              "Selecione uma entidade na hierarquia, monte o fluxo no canvas e use o painel direito para validacao, contexto importado e atalhos de navegacao.",
             signal: sharedSignal,
             actions: [
               {
                 label: "Abrir Paleta Contextual",
-                onClick: () => openToolsWorkspace("palette", "editing"),
+                onClick: () => {
+                  setActiveViewportTab("logic");
+                  logMessage(
+                    "info",
+                    "Paleta de nos na barra esquerda do NodeGraph; validacao no painel direito fixo."
+                  );
+                },
                 accent: "primary",
               },
               {
@@ -2565,11 +2797,11 @@ export default function App() {
         if (activeWorkspace === "artstudio") {
           return {
             eyebrow: "Art Workspace",
-            title: "Prepare sprites e sequencias antes de voltar para a cena.",
+            title: "Sprites, timeline e inspector integrados neste workspace.",
             summary:
-              "ArtStudio agora organiza stage, timeline e inspector no proprio workspace, enquanto o Asset Browser continua sendo o ponto de entrada para os assets canonicos do projeto.",
+              "O canvas de origem e preview dominam a area central; timeline compacta abaixo; inspector contextual fica no proprio ArtStudio.",
             detail:
-              "Abra o Asset Browser para escolher a origem certa, revise a sequencia no inspector contextual do workspace e rode no emulador quando quiser checar o resultado.",
+              "Abra o Asset Browser para escolher a origem, use fit/zoom/pan no stage e exporte quando a sequencia estiver pronta.",
             signal: sharedSignal,
             actions: [
               {
@@ -2578,8 +2810,8 @@ export default function App() {
                 accent: "primary",
               },
               {
-                label: "Abrir Inspector",
-                onClick: () => setRightPanelMode("inspector"),
+                label: "Ir para Cena",
+                onClick: () => handleWorkspaceSelect("scene"),
               },
               {
                 label: "Rodar no Emulador",
@@ -2779,6 +3011,7 @@ export default function App() {
         if (!hydrated) {
           throw new Error(`Falha ao hidratar importacao SGDK em ${result.path}`);
         }
+        setLastSgdkImportSummary(result.import_summary ?? null);
         return result.path;
       },
       closeProject: () => handleCloseProject(),
@@ -2841,6 +3074,10 @@ export default function App() {
       },
       selectWorkspace: (workspace: EditorWorkspace) => {
         handleWorkspaceSelect(workspace);
+        return true;
+      },
+      setConsoleVisible: (visible: boolean) => {
+        useEditorStore.setState({ consoleVisible: Boolean(visible) });
         return true;
       },
       setEntityLogicGraph: (entityId: string, graphJson: string) => {
@@ -3074,6 +3311,8 @@ export default function App() {
                         : entity.components.audio && !entity.components.sprite
                           ? "audio"
                           : "object",
+                  animationNames: Object.keys(entity.components.sprite?.animations ?? {}),
+                  commandCount: entity.components.sprite?.commands?.length ?? 0,
                 })),
                 layers: (state.activeScene.layers ?? []).map((layer) => ({
                   id: layer.id,
@@ -3125,7 +3364,11 @@ export default function App() {
             staleHint: currentLiveState === "DESATUAL." ? "Edite a cena para revalidar" : "",
             hasStaleRevalidateButton: currentLiveState === "DESATUAL.",
           },
-          consoleEntries: state.consoleEntries.map(({ level, message }) => ({ level, message })),
+          consoleEntries: state.consoleEntries.map(({ level, message, diagnostic }) => ({
+            level,
+            message,
+            diagnostic: diagnostic ?? null,
+          })),
           projectSourceKind: state.projectSourceKind,
         };
       },
@@ -3415,6 +3658,9 @@ export default function App() {
                         ? "Esta wave de importacao externa continua Mega Drive only para manter o caminho canonico enxuto."
                         : "Perfil externo compativel com o fluxo atual do wizard."}
                     </p>
+                    {selectedExternalImportProfile?.id === "sgdk" ? (
+                      <SgdkCapabilityMatrix profile={selectedExternalImportProfile} />
+                    ) : null}
                     <div className="mt-3 flex justify-end">
                       <ToolbarButton
                         label={creatingProject ? "Importando..." : "Importar Externo"}
@@ -3700,33 +3946,32 @@ export default function App() {
         menuSections={topBarMenuSections}
         centerContent={
           <>
-            <div className="flex overflow-hidden rounded-full border border-[#313244] bg-[#0b1020]">
-              {(["megadrive", "snes"] as const).map((target) => (
-                <button
-                  key={target}
-                  onClick={() => void handleSwitchTarget(target)}
-                  disabled={!activeProjectDir || activeTarget === target}
-                  className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.16em] transition-colors ${
-                    activeTarget === target
-                      ? target === "megadrive"
-                        ? "bg-[#a6e3a1] text-[#1e1e2e]"
-                        : "bg-[#89b4fa] text-[#1e1e2e]"
-                      : "text-[#7f849c] hover:bg-[#111827] disabled:cursor-not-allowed"
-                  }`}
-                >
-                  {target === "megadrive" ? "MD" : "SNES"}
-                </button>
-              ))}
-            </div>
+            <select
+              aria-label="Target de build"
+              title={`Target atual: ${getTargetLabel(activeTarget)}`}
+              value={activeTarget}
+              disabled={!activeProjectDir}
+              onChange={(event) => void handleSwitchTarget(event.target.value as "megadrive" | "snes")}
+              className={`h-7 shrink-0 rounded-full border px-2 text-[10px] font-bold uppercase transition-colors ${
+                activeTarget === "megadrive"
+                  ? "border-[#a6e3a1]/40 bg-[#a6e3a1] text-[#1e1e2e]"
+                  : "border-[#89b4fa]/40 bg-[#89b4fa] text-[#1e1e2e]"
+              } disabled:cursor-not-allowed disabled:opacity-40`}
+            >
+              <option value="megadrive">MD</option>
+              <option value="snes">SNES</option>
+            </select>
             <ToolbarButton
-              label="Build & Run"
+              label="Build ▶"
               onClick={() => void handleBuildAndRun()}
               disabled={building || !activeProjectDir || liveBuildBlocked}
               accent="success"
               testId="toolbar-build-run"
               title={getShortcutTitle(
                 "build.run",
-                liveBuildBlocked ? buildDisabledReason ?? undefined : buildWarningSummary ?? undefined
+                liveBuildBlocked
+                  ? buildDisabledReason ?? "Build & Run"
+                  : buildWarningSummary ?? "Build & Run"
               )}
               describedBy={liveBuildBlocked ? "build-disabled-reason" : undefined}
             />
@@ -3854,7 +4099,15 @@ export default function App() {
         </span>
       ) : null}
 
-      {!showProjectWizard && !focusedShell && workspaceGuide && (
+      {lastSgdkImportSummary ? (
+        <SgdkImportSummaryCard summary={lastSgdkImportSummary} />
+      ) : null}
+
+      {!showProjectWizard &&
+        !focusedShell &&
+        workspaceGuide &&
+        activeWorkspace !== "artstudio" &&
+        activeWorkspace !== "retrofx" && (
         <WorkspaceGuideCard key={workspaceMeta.id} guide={workspaceGuide} />
       )}
 
@@ -3863,19 +4116,22 @@ export default function App() {
           data-testid="workspace-activity-bar"
           className="flex w-[56px] shrink-0 flex-col border-r border-[#27272a] bg-[#09090b]"
         >
-          <div className="flex flex-1 flex-col gap-3 overflow-y-auto px-1.5 py-3">
+          <div className="flex flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-1.5 py-3">
             {WORKSPACE_GROUPS.map((group) => {
               const groupItems = WORKSPACE_ITEMS.filter((workspace) => workspace.group === group.id);
               return (
                 <div
                   key={group.id}
                   data-testid={`workspace-rail-group-${group.id}`}
-                  className="rounded-2xl border border-[#18181b] bg-[#0b1120] px-1 py-1.5"
+                  className="overflow-hidden rounded-2xl border border-[#18181b] bg-[#0b1120] px-1 py-1.5"
                 >
-                  <p className="px-1 text-center text-[8px] font-semibold uppercase tracking-[0.18em] text-[#475569]">
+                  <p
+                    className="truncate px-1 text-center text-[8px] font-semibold uppercase text-[#475569]"
+                    title={group.label}
+                  >
                     {group.label}
                   </p>
-                  <div className="mt-1 flex flex-col items-center gap-2">
+                  <div className="mt-1 flex flex-col items-center gap-2.5">
                     {groupItems.map((workspace) => (
                       <WorkspaceRailButton
                         key={workspace.id}
@@ -3915,25 +4171,12 @@ export default function App() {
         >
           <Panel
             id="left"
-            defaultSize={15}
-            minSize={0}
+            defaultSize={shellConfig.panels.left}
+            minSize={shellConfig.showLeft ? 12 : 0}
+            collapsible
             className="flex flex-col overflow-hidden border-r border-[#313244]"
           >
-            {activeWorkspace === "explorer" ? (
-              <div className="flex h-full min-h-0 flex-col bg-[#0b1120]">
-                <div className="border-b border-[#313244] px-3 py-2">
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#7dd3fc]">
-                    Explorer
-                  </div>
-                  <div className="mt-1 text-[11px] text-[#64748b]">
-                    Estrutura sintetizada no stage central.
-                  </div>
-                </div>
-                <div className="min-h-0 flex-1 px-3 py-4 text-[12px] leading-6 text-[#94a3b8]">
-                  Use o workspace central para navegar por cenas, assets canonicos e arquivos do host legado sem mudar contratos de IPC.
-                </div>
-              </div>
-            ) : (
+            {shellConfig.showLeft ? (
               <>
                 <div className="flex shrink-0 border-b border-[#313244] bg-[#11111b]">
                   <button
@@ -3944,7 +4187,7 @@ export default function App() {
                         : "text-[#45475a] hover:text-[#a6adc8]"
                     }`}
                   >
-                    Cena
+                    {activeWorkspace === "logic" ? "Contexto" : "Cena"}
                   </button>
                   <button
                     onClick={() => setLeftPanelTab("layers")}
@@ -3961,7 +4204,7 @@ export default function App() {
                   {leftPanelTab === "layers" ? <LayerPanel /> : <HierarchyPanel />}
                 </div>
               </>
-            )}
+            ) : null}
           </Panel>
           <LayoutSplitter />
           <Panel id="center" minSize={20} className="overflow-hidden">
@@ -3981,31 +4224,32 @@ export default function App() {
           <LayoutSplitter />
           <Panel
             id="right"
-            defaultSize={20}
-            minSize={0}
+            defaultSize={shellConfig.panels.right}
+            minSize={shellConfig.showRight ? 16 : 0}
+            collapsible
             className="overflow-hidden border-l border-[#313244]"
           >
+            {shellConfig.showRight ? (
             <div className="flex h-full min-h-0 flex-col bg-[#09090b]">
-              <div className="flex items-center justify-between border-b border-[#27272a] bg-[#111827] px-3 py-2">
-                <div>
+              <div className="flex items-center justify-between border-b border-[#27272a] bg-[#111827] px-3 py-1.5">
+                <div className="min-w-0">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#94a3b8]">
-                    {rightPanelMode === "tools" ? "Tools" : "Inspector"}
-                  </div>
-                  <div className="mt-1 text-[11px] text-[#64748b]">
-                    Painel contextual do workspace ativo
+                    {rightPanelMode === "tools" ? shellConfig.rightLabel : shellConfig.rightLabel}
                   </div>
                 </div>
-                <div className="flex items-center gap-1 rounded-full border border-[#313244] bg-[#09090b] p-1">
+                {shellConfig.defaultRightMode !== "hidden" ? (
+                <div className="flex shrink-0 items-center gap-1 rounded-full border border-[#313244] bg-[#09090b] p-0.5">
                   <button
                     type="button"
                     onClick={() => setRightPanelMode("inspector")}
-                    className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors ${
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors ${
                       rightPanelMode === "inspector"
                         ? "bg-[#cba6f7] text-[#111827]"
                         : "text-[#94a3b8] hover:bg-[#1f2937] hover:text-[#e5e7eb]"
                     }`}
+                    title="Inspector de entidade"
                   >
-                    Inspector
+                    Insp
                   </button>
                   <button
                     type="button"
@@ -4016,15 +4260,17 @@ export default function App() {
                         activeWorkspace === "debug" || toolPanelShowAdvanced
                       )
                     }
-                    className={`rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors ${
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] transition-colors ${
                       rightPanelMode === "tools"
                         ? "bg-[#cba6f7] text-[#111827]"
                         : "text-[#94a3b8] hover:bg-[#1f2937] hover:text-[#e5e7eb]"
                     }`}
+                    title="Ferramentas contextuais"
                   >
                     Tools
                   </button>
                 </div>
+                ) : null}
               </div>
               <div className="min-h-0 flex-1 overflow-hidden">
                 {rightPanelMode === "tools" ? (
@@ -4043,6 +4289,7 @@ export default function App() {
                 )}
               </div>
             </div>
+            ) : null}
           </Panel>
         </Group>
       </div>
@@ -4059,7 +4306,7 @@ export default function App() {
           }
         }}
       />
-      <Console />
+      <Console variant="drawer" />
     </div>
   );
 }

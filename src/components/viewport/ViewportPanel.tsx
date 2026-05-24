@@ -4466,7 +4466,10 @@ export default function ViewportPanel({
           {activeViewportTab === "scene" && (
             <div className="flex flex-1 flex-col min-h-0">
             {/* Toolbar horizontal dedicada (V, B, E, C, G, Zoom) */}
-            <div className="flex shrink-0 items-center gap-1 border-b border-[#313244] bg-[#181825] px-2 py-1.5">
+            <div
+              data-testid="viewport-scene-toolbar"
+              className="flex min-w-0 shrink-0 items-center gap-1 overflow-x-auto overflow-y-hidden border-b border-[#313244] bg-[#181825] px-2 py-1.5 [scrollbar-width:thin] [&>button]:shrink-0 [&>div]:shrink-0 [&>span]:shrink-0"
+            >
               {([
                 { id: "select" as const, icon: "🖱️", label: "Selecionar (V)", activeColor: "bg-[#89b4fa]" },
                 { id: "paint" as const, icon: "✏️", label: "Pintar (B)", activeColor: "bg-[#89b4fa]" },

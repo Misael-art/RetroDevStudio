@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
+import type { ActionableDiagnostic } from "../diagnostics";
 
 // ── Types (mirror do Rust) ────────────────────────────────────────────────────
 
@@ -68,14 +69,33 @@ export interface DependencyStatus {
   label: string;
   installed: boolean;
   version: string | null;
+  status_code?: string;
+  status_label?: string;
+  severity?: "ok" | "warning" | "blocking" | string;
   install_dir: string;
   source_url: string;
   auto_install_supported: boolean;
+  cache_available?: boolean;
+  manual_configuration_required?: boolean;
+  actionable_message?: string;
   notes: string[];
   issues: string[];
 }
 
+export interface DependencyStatusSummary {
+  total: number;
+  installed: number;
+  blocking: number;
+  warnings: number;
+  manual_required: number;
+  cache_available: number;
+  download_failed: number;
+}
+
 export interface DependencyStatusReport {
+  generated_at_unix?: number;
+  report_path?: string;
+  summary?: DependencyStatusSummary;
   items: DependencyStatus[];
 }
 
@@ -85,6 +105,7 @@ export interface DependencyInstallResult {
   message: string;
   status: DependencyStatus;
   log: DependencyLogLine[];
+  diagnostics?: ActionableDiagnostic[];
 }
 
 export interface RomDependencyResult {

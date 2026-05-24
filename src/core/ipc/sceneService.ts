@@ -18,6 +18,23 @@ export interface Pivot {
   y: number;
 }
 
+export interface SpriteCommandStep {
+  tokens: string[];
+  display: string[];
+}
+
+export interface SpriteCommandBinding {
+  id: string;
+  display_name: string;
+  notation: string;
+  source: string;
+  target_animation: string;
+  max_frames: number;
+  button_profile: string;
+  unsupported_tokens?: string[];
+  steps?: SpriteCommandStep[];
+}
+
 export interface SpriteComponent {
   asset: string;
   frame_width: number;
@@ -28,6 +45,8 @@ export interface SpriteComponent {
   priority?: string;
   /** Experimental: SGDK ResComp decomposes meta-sprites automatically. */
   meta_sprite?: boolean;
+  /** Experimental: command.dat input bindings for ArtStudio/NodeGraph bridge. */
+  commands?: SpriteCommandBinding[];
 }
 
 export interface CollisionOffset {
@@ -84,6 +103,14 @@ export interface ImportedLogicSemantics {
   driver_functions?: string[];
   source_paths?: string[];
   audit_flags?: string[];
+  extraction_kind?: string;
+  converted_nodes_count?: number;
+  bridge_count?: number;
+  gap_count?: number;
+  status?: string;
+  states_detected?: number;
+  transitions_detected?: number;
+  blocking_gaps?: string[];
 }
 
 export interface LogicComponent {

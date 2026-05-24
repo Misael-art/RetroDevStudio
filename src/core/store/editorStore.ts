@@ -1,5 +1,9 @@
 import { create } from "zustand";
 
+import {
+  diagnosticConsoleMessage,
+  type ActionableDiagnostic,
+} from "../diagnostics";
 import type {
   BackgroundLayer,
   CollisionMap,
@@ -50,6 +54,7 @@ export interface ConsoleEntry {
   level: "info" | "warn" | "error" | "success";
   message: string;
   timestamp: string;
+  diagnostic?: ActionableDiagnostic;
 }
 
 export interface Tab {
@@ -155,6 +160,7 @@ export interface StoreActions {
   assignEntityToLayer: (entityId: string, layerId: string | null) => void;
   setActiveViewportTab: (id: string) => void;
   logMessage: (level: ConsoleEntry["level"], message: string) => void;
+  logDiagnostic: (diagnostic: ActionableDiagnostic) => void;
   clearConsole: () => void;
   toggleConsole: () => void;
   setHwStatus: (status: HwStatus | null) => void;
@@ -423,6 +429,28 @@ export const useEditorStore = create<EditorState>((set) => ({
       ],
       consoleVisible: level === "error" ? true : state.consoleVisible,
     })),
+  logDiagnostic: (diagnostic) =>
+    set((state) => {
+      const level: ConsoleEntry["level"] =
+        diagnostic.severity === "error"
+          ? "error"
+          : diagnostic.severity === "warn"
+            ? "warn"
+            : "info";
+      return {
+        consoleEntries: [
+          ...state.consoleEntries,
+          {
+            id: ++_entryCounter,
+            level,
+            message: diagnosticConsoleMessage(diagnostic),
+            timestamp: new Date().toLocaleTimeString(),
+            diagnostic,
+          },
+        ],
+        consoleVisible: level === "error" ? true : state.consoleVisible,
+      };
+    }),
   clearConsole: () => set({ consoleEntries: [] }),
 
   consoleVisible: false,
@@ -523,14 +551,15 @@ export const useEditorStore = create<EditorState>((set) => ({
       if (!state.activeScene) return {};
       const recordHistory = options?.recordHistory ?? true;
       const resolvedEntity = state.activeScene.entities.find((entity) => entity.entity_id === entityId);
+      if (!resolvedEntity) {
+        return {};
+      }
       const preferredSourceScene = state.activeSceneSource ?? state.activeScene;
       const sourceScene = preferredSourceScene.entities.some((entity) => entity.entity_id === entityId)
         ? preferredSourceScene
         : state.activeScene;
-      const sourceEntity = sourceScene.entities.find((entity) => entity.entity_id === entityId);
-      if (!resolvedEntity || !sourceEntity) {
-        return {};
-      }
+      const sourceEntity =
+        sourceScene.entities.find((entity) => entity.entity_id === entityId) ?? resolvedEntity;
 
       const sourcePatch = preserveInheritedGraphRef(
         prunePatchAgainstBase(patch, resolvedEntity),

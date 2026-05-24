@@ -9,6 +9,7 @@ use crate::compiler::ast_generator::{
 };
 use crate::compiler::sgdk_emitter::emit_sgdk_with_collision;
 use crate::compiler::snes_emitter::emit_snes_with_collision;
+use crate::core::diagnostics::{build_diagnostics_from_log, ActionableDiagnostic};
 use crate::core::project_mgr::{
     load_project, load_scene, resolve_prefabs, target_spec, TargetSpec,
 };
@@ -27,6 +28,7 @@ pub struct BuildResult {
     pub ok: bool,
     pub rom_path: String,
     pub log: Vec<BuildLogLine>,
+    pub diagnostics: Vec<ActionableDiagnostic>,
 }
 
 #[derive(Debug, serde::Serialize, Clone)]
@@ -38,6 +40,7 @@ pub struct MultiTargetBuildEntry {
     pub warnings: Vec<String>,
     pub errors: Vec<String>,
     pub log: Vec<BuildLogLine>,
+    pub diagnostics: Vec<ActionableDiagnostic>,
 }
 
 #[derive(Debug, serde::Serialize, Clone)]
@@ -95,6 +98,44 @@ struct SgdkCompatibilityProfile {
     scene: Scene,
     active_sprite_count: usize,
     culled_sprite_count: usize,
+}
+
+fn failed_build_result(
+    target: &str,
+    log: Vec<BuildLogLine>,
+    evidence_path: Option<&Path>,
+) -> BuildResult {
+    let diagnostics = build_diagnostics_from_log(target, &log, evidence_path);
+    BuildResult {
+        ok: false,
+        rom_path: String::new(),
+        log,
+        diagnostics,
+    }
+}
+
+fn successful_build_result(rom_path: PathBuf, log: Vec<BuildLogLine>) -> BuildResult {
+    BuildResult {
+        ok: true,
+        rom_path: rom_path.to_string_lossy().to_string(),
+        log,
+        diagnostics: Vec::new(),
+    }
+}
+
+fn build_evidence_path(
+    project_dir: &Path,
+    project: &Project,
+    target: TargetSpec,
+) -> Option<PathBuf> {
+    let output_root = project
+        .build
+        .as_ref()
+        .map(|build| build.output_dir.as_str())
+        .unwrap_or("build/");
+    sanitize_build_output_dir(output_root)
+        .ok()
+        .map(|root| project_dir.join(root).join(target.target))
 }
 
 fn is_sgdk_compatibility_source(source_kind: Option<&str>) -> bool {
@@ -328,11 +369,7 @@ where
         Ok(project) => project,
         Err(error) => {
             emit!("error", format!("Falha ao carregar project.rds: {}", error));
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result("project", log, Some(project_dir));
         }
     };
 
@@ -387,6 +424,7 @@ where
         Ok(project) => project,
         Err(error) => {
             emit!("error", format!("Falha ao carregar project.rds: {}", error));
+            let diagnostics = build_diagnostics_from_log("project", &log, Some(project_dir));
             return MultiTargetBuildResult {
                 ok: false,
                 results: vec![MultiTargetBuildEntry {
@@ -397,6 +435,7 @@ where
                     warnings: Vec::new(),
                     errors: vec![format!("Falha ao carregar project.rds: {}", error)],
                     log,
+                    diagnostics,
                 }],
             };
         }
@@ -426,18 +465,24 @@ where
 
                 build_entry_from_result(target_name, prefixed_result)
             }
-            Err(error) => MultiTargetBuildEntry {
-                target: target_name.clone(),
-                ok: false,
-                rom_path: String::new(),
-                rom_size_bytes: 0,
-                warnings: Vec::new(),
-                errors: vec![error],
-                log: vec![BuildLogLine {
+            Err(error) => {
+                let entry_log = vec![BuildLogLine {
                     level: "error".to_string(),
-                    message: format!("[{}] target override invalido", target_name),
-                }],
-            },
+                    message: format!("[{}] target override invalido: {}", target_name, error),
+                }];
+                let diagnostics =
+                    build_diagnostics_from_log(target_name, &entry_log, Some(project_dir));
+                MultiTargetBuildEntry {
+                    target: target_name.clone(),
+                    ok: false,
+                    rom_path: String::new(),
+                    rom_size_bytes: 0,
+                    warnings: Vec::new(),
+                    errors: vec![error],
+                    log: entry_log,
+                    diagnostics,
+                }
+            }
         };
 
         results.push(entry);
@@ -475,11 +520,7 @@ where
         Ok(target) => target,
         Err(error) => {
             emit!("error", error.to_string());
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result(&project.target, log, Some(project_dir));
         }
     };
 
@@ -495,11 +536,7 @@ where
         Ok(root) => root,
         Err(error) => {
             emit!("error", error);
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result(target.target, log, Some(project_dir));
         }
     };
 
@@ -509,11 +546,7 @@ where
                 "error",
                 "Projetos SGDK legados em modo overlay suportam apenas build Mega Drive."
             );
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result(target.target, log, Some(project_dir));
         }
 
         if !host_root.is_dir() {
@@ -524,11 +557,7 @@ where
                     host_root.display()
                 )
             );
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result(target.target, log, Some(&host_root));
         }
 
         let Some(makefile_path) = find_makefile(&host_root) else {
@@ -539,11 +568,7 @@ where
                     host_root.display()
                 )
             );
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result(target.target, log, Some(&host_root));
         };
 
         emit!(
@@ -562,11 +587,7 @@ where
             Ok(toolchain) => toolchain,
             Err(error) => {
                 emit!("error", error);
-                return BuildResult {
-                    ok: false,
-                    rom_path: String::new(),
-                    log,
-                };
+                return failed_build_result(target.target, log, Some(&host_root));
             }
         };
 
@@ -586,11 +607,7 @@ where
 
         if let Err(error) = invoke_make(&toolchain, &workspace, target, &mut log, &on_log) {
             emit!("error", error);
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result(target.target, log, Some(&workspace.root));
         }
 
         let rom_path = match detect_rom_artifact(&workspace, target) {
@@ -603,11 +620,7 @@ where
                         host_root.display()
                     )
                 );
-                return BuildResult {
-                    ok: false,
-                    rom_path: String::new(),
-                    log,
-                };
+                return failed_build_result(target.target, log, Some(&workspace.root));
             }
         };
 
@@ -616,11 +629,7 @@ where
         }
         emit!("success", format!("ROM gerada: {}", rom_path.display()));
 
-        return BuildResult {
-            ok: true,
-            rom_path: rom_path.to_string_lossy().to_string(),
-            log,
-        };
+        return successful_build_result(rom_path, log);
     }
 
     let scene = match load_scene(project_dir, &project.entry_scene) {
@@ -633,11 +642,7 @@ where
                     project.entry_scene, error
                 )
             );
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result(target.target, log, Some(project_dir));
         }
     };
 
@@ -654,11 +659,7 @@ where
         Ok(scene) => scene,
         Err(error) => {
             emit!("error", format!("Falha ao resolver prefabs: {}", error));
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result(target.target, log, Some(project_dir));
         }
     };
 
@@ -784,11 +785,7 @@ where
 
     if hw_errors.iter().any(|(_, is_fatal)| *is_fatal) {
         emit!("error", "Build abortado: erros de hardware constraints.");
-        return BuildResult {
-            ok: false,
-            rom_path: String::new(),
-            log,
-        };
+        return failed_build_result(target.target, log, Some(project_dir));
     }
 
     emit!(
@@ -803,11 +800,7 @@ where
                     "error",
                     format!("Falha ao gerar AST com prefabs: {}", error)
                 );
-                return BuildResult {
-                    ok: false,
-                    rom_path: String::new(),
-                    log,
-                };
+                return failed_build_result(target.target, log, Some(project_dir));
             }
         }
     } else {
@@ -840,11 +833,8 @@ where
         Ok(workspace) => workspace,
         Err(error) => {
             emit!("error", error);
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            let evidence_path = build_evidence_path(project_dir, project, target);
+            return failed_build_result(target.target, log, evidence_path.as_deref());
         }
     };
 
@@ -860,11 +850,7 @@ where
         Ok(toolchain) => toolchain,
         Err(error) => {
             emit!("error", error);
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result(target.target, log, Some(&workspace.root));
         }
     };
 
@@ -879,18 +865,15 @@ where
 
     if target.target == "snes" && cfg!(target_os = "windows") && toolchain.bash_program.is_none() {
         emit!(
-            "warn",
-            "Git Bash/MSYS2 nao encontrado. Tentando build SNES com make direto; o snes_rules pode exigir shell Unix-like no Windows."
+            "error",
+            "Git Bash/MSYS2 real e obrigatorio para builds SNES/PVSnesLib no Windows. Instale Git Bash ou MSYS2; o shim WSL nao e suportado."
         );
+        return failed_build_result(target.target, log, Some(&workspace.root));
     }
 
     if let Err(error) = invoke_make(&toolchain, &workspace, target, &mut log, &on_log) {
         emit!("error", error);
-        return BuildResult {
-            ok: false,
-            rom_path: String::new(),
-            log,
-        };
+        return failed_build_result(target.target, log, Some(&workspace.root));
     }
 
     let rom_path = match detect_rom_artifact(&workspace, target) {
@@ -903,11 +886,7 @@ where
                     workspace.root.display()
                 )
             );
-            return BuildResult {
-                ok: false,
-                rom_path: String::new(),
-                log,
-            };
+            return failed_build_result(target.target, log, Some(&workspace.root));
         }
     };
 
@@ -916,11 +895,7 @@ where
     }
     emit!("success", format!("ROM gerada: {}", rom_path.display()));
 
-    BuildResult {
-        ok: true,
-        rom_path: rom_path.to_string_lossy().to_string(),
-        log,
-    }
+    successful_build_result(rom_path, log)
 }
 
 fn scene_requires_sgdk_resource_compatibility(scene: &Scene) -> bool {
@@ -972,6 +947,7 @@ fn build_entry_from_result(target: &str, result: BuildResult) -> MultiTargetBuil
         warnings,
         errors,
         log: result.log,
+        diagnostics: result.diagnostics,
     }
 }
 
@@ -1551,22 +1527,36 @@ fn render_pvsneslib_makefile(project_slug: &str, ast: &AstOutput) -> String {
     out.push_str("\t@if [ -f $(ROMNAME).sym ]; then cp $(ROMNAME).sym out/$(ROMNAME).sym; fi\n\n");
     out.push_str("clean: cleanBuildRes cleanRom cleanGfx\n\n");
 
-    let mut pic_targets = Vec::new();
+    let mut bitmap_targets = Vec::new();
     for asset in &tilemap_assets {
         let pic_target = format!("src/{}.pic", asset.resource_name);
+        let map_target = format!("src/{}.map", asset.resource_name);
+        let pal_target = format!("src/{}.pal", asset.resource_name);
         let bmp_target = format!("src/{}.bmp", asset.resource_name);
-        pic_targets.push(pic_target.clone());
-        out.push_str(&format!("{}: {}\n", pic_target, bmp_target));
+        bitmap_targets.push(pic_target.clone());
+        bitmap_targets.push(map_target.clone());
+        bitmap_targets.push(pal_target.clone());
+        out.push_str(&format!(
+            "{} {} {}: {}\n",
+            pic_target, map_target, pal_target, bmp_target
+        ));
         out.push_str("\t@echo convert bitmap ... $(notdir $<)\n");
         out.push_str("\t$(GFXCONV) -s 8 -o 16 -u 16 -e 0 -p -m -t bmp -i $<\n\n");
     }
 
     for asset in &ast.sprite_assets {
         let pic_target = format!("src/{}.pic", asset.resource_name);
+        let pal_target = format!("src/{}.pal", asset.resource_name);
+        let data_target = format!("src/{}_data.as", asset.resource_name);
         let bmp_target = format!("src/{}.bmp", asset.resource_name);
         let sprite_size = asset.frame_width.max(asset.frame_height);
-        pic_targets.push(pic_target.clone());
-        out.push_str(&format!("{}: {}\n", pic_target, bmp_target));
+        bitmap_targets.push(pic_target.clone());
+        bitmap_targets.push(pal_target.clone());
+        bitmap_targets.push(data_target.clone());
+        out.push_str(&format!(
+            "{} {} {}: {}\n",
+            pic_target, pal_target, data_target, bmp_target
+        ));
         out.push_str("\t@echo convert bitmap ... $(notdir $<)\n");
         out.push_str(&format!(
             "\t$(GFXCONV) -s {} -o 16 -u 16 -p -t bmp -i $<\n\n",
@@ -1574,10 +1564,10 @@ fn render_pvsneslib_makefile(project_slug: &str, ast: &AstOutput) -> String {
         ));
     }
 
-    if pic_targets.is_empty() {
+    if bitmap_targets.is_empty() {
         out.push_str("bitmaps:\n\t@echo no sprite assets to convert for SNES\n");
     } else {
-        out.push_str(&format!("bitmaps: {}\n", pic_targets.join(" ")));
+        out.push_str(&format!("bitmaps: {}\n", bitmap_targets.join(" ")));
     }
     out.push('\n');
     out
@@ -2243,6 +2233,7 @@ fn repo_root() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::diagnostics::{ActionableDiagnostic, DiagnosticArea, DiagnosticSeverity};
     use crate::tools::photo2sgdk::import_art_asset_internal;
     use image::{ImageBuffer, Rgba};
     use std::sync::{Mutex, OnceLock};
@@ -2351,6 +2342,104 @@ mod tests {
         fs::create_dir_all(&bin_dir).expect("create fake toolchain bin");
         let make_program = fake_make_script(&bin_dir, extension);
         (root, make_program)
+    }
+
+    #[test]
+    fn actionable_diagnostic_serializes_common_contract() {
+        let diagnostic = ActionableDiagnostic {
+            severity: DiagnosticSeverity::Error,
+            area: DiagnosticArea::BuildSgdk,
+            source_path: Some("F:/Games/Demo/src/main.c".to_string()),
+            line: Some(42),
+            column: Some(7),
+            user_message: "Build falhou porque o compilador SGDK encontrou um erro em main.c:42.".to_string(),
+            technical_detail: "src/main.c:42:7: error: expected ';' before '}' token".to_string(),
+            suggested_action: "Abra F:/Games/Demo/src/main.c na linha 42 e corrija a sintaxe indicada pelo compilador.".to_string(),
+            blocking: true,
+            evidence_path: Some("F:/Games/Demo/build/megadrive".to_string()),
+        };
+
+        let value = serde_json::to_value(&diagnostic).expect("serialize diagnostic");
+
+        assert_eq!(value["severity"], "error");
+        assert_eq!(value["area"], "build_sgdk");
+        assert_eq!(value["source_path"], "F:/Games/Demo/src/main.c");
+        assert_eq!(value["line"], 42);
+        assert_eq!(value["column"], 7);
+        assert_eq!(value["blocking"], true);
+        assert_eq!(value["evidence_path"], "F:/Games/Demo/build/megadrive");
+    }
+
+    #[test]
+    fn missing_asset_build_returns_actionable_diagnostic() {
+        let _serial = test_serial_guard();
+        let project_dir = workspace_copy("megadrive_dummy");
+        install_megadrive_sprite_fixture(&project_dir);
+        let missing_asset = project_dir
+            .join("assets")
+            .join("sprites")
+            .join("onboarding_player.ppm");
+        fs::remove_file(&missing_asset).expect("remove sprite fixture");
+
+        let (sgdk_root, make_program) = fake_toolchain("sgdk-missing-asset", "md");
+        let environment = BuildEnvironment {
+            sgdk_root: Some(sgdk_root),
+            sgdk_make_program: Some(make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_with_environment(&project_dir, &environment, |_| {});
+
+        assert!(!result.ok);
+        let diagnostic = result
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.area == DiagnosticArea::BuildSgdk)
+            .expect("build diagnostic");
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Error);
+        let missing_asset_label = missing_asset.to_string_lossy().replace('\\', "/");
+        assert_eq!(
+            diagnostic
+                .source_path
+                .as_deref()
+                .map(|path| path.replace('\\', "/")),
+            Some(missing_asset_label)
+        );
+        assert!(diagnostic.user_message.contains("Build falhou porque"));
+        assert!(diagnostic.user_message.contains("asset"));
+        assert!(diagnostic.suggested_action.contains("Restaure"));
+        assert!(diagnostic.blocking);
+        assert!(diagnostic.evidence_path.as_deref().is_some_and(|path| path
+            .ends_with("build\\megadrive")
+            || path.ends_with("build/megadrive")));
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    fn fake_bash_program() -> PathBuf {
+        let root = temp_dir("fake-git-bash");
+        let bin_dir = root.join("bin");
+        fs::create_dir_all(&bin_dir).expect("create fake bash bin");
+        let path = if cfg!(target_os = "windows") {
+            bin_dir.join("bash.cmd")
+        } else {
+            bin_dir.join("bash")
+        };
+        let content = if cfg!(target_os = "windows") {
+            "@echo off\r\nexit /b 0\r\n"
+        } else {
+            "#!/bin/sh\nexit 0\n"
+        };
+        fs::write(&path, content).expect("write fake bash");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&path).expect("stat fake bash").permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&path, permissions).expect("chmod fake bash");
+        }
+        path
     }
 
     fn fake_toolchain_with_sega_rom(root_name: &str, extension: &str) -> (PathBuf, PathBuf) {
@@ -3403,6 +3492,7 @@ PY\n"
         let environment = BuildEnvironment {
             pvsneslib_root: Some(pvsneslib_root),
             pvsneslib_make_program: Some(make_program),
+            pvsneslib_bash_program: Some(fake_bash_program()),
             disable_auto_detect: true,
             ..BuildEnvironment::default()
         };
@@ -3444,6 +3534,52 @@ PY\n"
         let data_asm = fs::read_to_string(&data_path).expect("read snes data asm");
         assert!(data_asm.contains(".include \"hdr.asm\""));
         assert!(data_asm.contains(".include \"src/controller_root_data.as\""));
+        let makefile = fs::read_to_string(project_dir.join("build").join("snes").join("Makefile"))
+            .expect("read SNES makefile");
+        assert!(makefile.contains(
+            "bitmaps: src/controller_root.pic src/controller_root.pal src/controller_root_data.as"
+        ));
+        assert!(makefile.contains("src/controller_root.pic src/controller_root.pal src/controller_root_data.as: src/controller_root.bmp"));
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn snes_windows_build_requires_git_bash_or_msys2() {
+        if !cfg!(target_os = "windows") {
+            return;
+        }
+
+        let _serial = test_serial_guard();
+        let project_dir = workspace_copy("snes_dummy");
+        let (pvsneslib_root, make_program) = fake_toolchain("pvsneslib-no-bash", "sfc");
+        fs::create_dir_all(pvsneslib_root.join("devkitsnes")).expect("create fake devkitsnes");
+        fs::write(
+            pvsneslib_root.join("devkitsnes").join("snes_rules"),
+            "dummy rules",
+        )
+        .expect("write fake snes_rules");
+        let environment = BuildEnvironment {
+            pvsneslib_root: Some(pvsneslib_root),
+            pvsneslib_make_program: Some(make_program),
+            pvsneslib_bash_program: None,
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_with_environment(&project_dir, &environment, |_| {});
+
+        assert!(
+            !result.ok,
+            "SNES build must not continue without Git Bash/MSYS2"
+        );
+        assert!(
+            result.log.iter().any(|line| line.level == "error"
+                && line.message.contains("Git Bash/MSYS2")
+                && line.message.contains("SNES")),
+            "expected actionable Git Bash/MSYS2 error, got {:?}",
+            result.log
+        );
 
         let _ = fs::remove_dir_all(project_dir);
     }
@@ -3511,6 +3647,7 @@ PY\n"
         let environment = BuildEnvironment {
             pvsneslib_root: Some(pvsneslib_root),
             pvsneslib_make_program: Some(make_program),
+            pvsneslib_bash_program: Some(fake_bash_program()),
             disable_auto_detect: true,
             ..BuildEnvironment::default()
         };
@@ -3531,6 +3668,21 @@ PY\n"
         let makefile = fs::read_to_string(project_dir.join("build").join("snes").join("Makefile"))
             .expect("read SNES makefile");
         assert!(makefile.contains("$(GFXCONV) -s 8 -o 16 -u 16 -e 0 -p -m -t bmp -i $<"));
+        let bitmaps_line = makefile
+            .lines()
+            .find(|line| line.starts_with("bitmaps:"))
+            .expect("SNES Makefile must expose a bitmaps target");
+        for expected in [
+            "src/background_tilemap.pic",
+            "src/background_tilemap.map",
+            "src/background_tilemap.pal",
+        ] {
+            assert!(
+                bitmaps_line.contains(expected),
+                "SNES bitmaps target missing {expected}: {bitmaps_line}"
+            );
+        }
+        assert!(makefile.contains("src/background_tilemap.pic src/background_tilemap.map src/background_tilemap.pal: src/background_tilemap.bmp"));
         let main_c = fs::read_to_string(
             project_dir
                 .join("build")
@@ -3605,6 +3757,7 @@ PY\n"
         let environment = BuildEnvironment {
             pvsneslib_root: Some(pvsneslib_root),
             pvsneslib_make_program: Some(make_program),
+            pvsneslib_bash_program: Some(fake_bash_program()),
             disable_auto_detect: true,
             ..BuildEnvironment::default()
         };
@@ -3638,7 +3791,9 @@ PY\n"
                 .join("main.c"),
         )
         .expect("read SNES audio main.c");
-        assert!(main_c.contains("spcSetSoundEntry(SFX_JUMP, 8, 0, (u8*)&jump_sfx);"));
+        assert!(main_c.contains(
+            "spcSetSoundEntry(15, 8, 6, (&jump_sfxend - &jump_sfx), (u8*)&jump_sfx, &jump_sfx_sample);"
+        ));
         assert!(main_c.contains("spcLoad((u8*)&stage_theme_bgm);"));
 
         let _ = fs::remove_dir_all(project_dir);
@@ -3661,6 +3816,7 @@ PY\n"
             sgdk_make_program: Some(sgdk_make_program),
             pvsneslib_root: Some(pvsneslib_root),
             pvsneslib_make_program: Some(pvsneslib_make_program),
+            pvsneslib_bash_program: Some(fake_bash_program()),
             disable_auto_detect: true,
             ..BuildEnvironment::default()
         };
@@ -4174,6 +4330,7 @@ PY\n"
         let environment = BuildEnvironment {
             pvsneslib_root: Some(pvsneslib_root),
             pvsneslib_make_program: Some(make_program),
+            pvsneslib_bash_program: Some(fake_bash_program()),
             disable_auto_detect: true,
             ..BuildEnvironment::default()
         };

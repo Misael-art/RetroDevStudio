@@ -289,6 +289,88 @@ describe("HierarchyPanel", () => {
     expect(container.textContent).toContain("Hero");
   });
 
+  it("shows compact logic import signals without long diagnostic chips", async () => {
+    await act(async () => {
+      const scene = {
+        scene_id: "main",
+        display_name: "Main",
+        entities: [
+          {
+            entity_id: "hero",
+            display_name: "Hero",
+            prefab: null,
+            transform: { x: 16, y: 24 },
+            components: {
+              sprite: {
+                asset: "assets/sprites/hero.png",
+                frame_width: 16,
+                frame_height: 16,
+                palette_slot: 0,
+                animations: {},
+              },
+              logic: {
+                graph_ref: "graphs/sgdk_import_hero.json",
+                imported_semantics: {
+                  source: "sgdk_semantic_extractor",
+                  extraction_kind: "fsm",
+                  confidence: "high",
+                  converted_nodes_count: 4,
+                  bridge_count: 1,
+                  states_detected: 2,
+                  transitions_detected: 3,
+                  source_paths: ["src/player.c"],
+                },
+              },
+            },
+          },
+          {
+            entity_id: "enemy",
+            display_name: "Enemy",
+            prefab: null,
+            transform: { x: 48, y: 24 },
+            components: {
+              sprite: {
+                asset: "assets/sprites/enemy.png",
+                frame_width: 16,
+                frame_height: 16,
+                palette_slot: 0,
+                animations: {},
+              },
+              logic: {
+                graph_ref: "graphs/sgdk_import_enemy.json",
+                imported_semantics: {
+                  source: "sgdk_phase_d",
+                  confidence: "low",
+                  converted_nodes_count: 0,
+                  bridge_count: 2,
+                  status: "bridge_only",
+                },
+              },
+            },
+          },
+        ],
+        background_layers: [],
+        layers: [],
+        palettes: [],
+      };
+
+      useEditorStore.setState({
+        activeScene: scene,
+        activeSceneSource: scene,
+      });
+      await flush();
+      await flush();
+    });
+
+    const heroSignal = container.querySelector("[data-testid='hierarchy-logic-signal-hero']");
+    const enemySignal = container.querySelector("[data-testid='hierarchy-logic-signal-enemy']");
+
+    expect(heroSignal?.textContent).toBe("Logic: FSM parcial");
+    expect(heroSignal?.getAttribute("title")).toContain("graph_ref: graphs/sgdk_import_hero.json");
+    expect(heroSignal?.getAttribute("title")).toContain("converted_nodes_count: 4");
+    expect(enemySignal?.textContent).toBe("Logic: Bridge");
+  });
+
   it("opens the tilemap row editing CTA as a painting workflow and exposes staging provenance", async () => {
     await act(async () => {
       const scene = {

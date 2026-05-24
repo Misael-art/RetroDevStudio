@@ -21,10 +21,15 @@ use compiler::build_orch::{
 };
 use compiler::sgdk_emitter::emit_sgdk_with_collision;
 use compiler::snes_emitter::emit_snes_with_collision;
+use core::compatibility_harness::{
+    run_gamemaker_compatibility_harness, run_openbor_compatibility_harness, validation_report_dir,
+    CompatibilityHarnessReport,
+};
 use core::editor_validation::{
     authoritative_hw_status, validate_scene_draft as validate_scene_draft_impl,
     DraftValidationResult,
 };
+use core::input_commands::{parse_command_dat, InputCommandDefinition};
 use core::project_mgr::{
     append_patch_audit_entry, create_project_skeleton, create_scene as create_project_scene,
     discover_project_rds, import_external_project as import_external_scene,
@@ -39,9 +44,6 @@ use core::project_mgr::{
     update_project_target, ExternalImportProfileSummary, LegacySgdkIndex, ProjectTemplateSummary,
     SceneInfo, DEFAULT_ENTRY_SCENE,
 };
-use core::compatibility_harness::{
-    run_gamemaker_compatibility_harness, validation_report_dir, CompatibilityHarnessReport,
-};
 use core::sgdk_corpus_inventory::{
     inspect_sgdk_corpus_for_nocode_inventory, inspect_sgdk_project_for_nocode_inventory,
     write_sgdk_corpus_inventory_report, SgdkCorpusInventoryReport, SgdkProjectInventory,
@@ -53,7 +55,7 @@ use emulator::libretro_ffi::{
 use hardware::constraint_engine;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
-use ugdm::entities::PatchAuditEntry;
+use ugdm::entities::{PatchAuditEntry, Scene};
 
 // HwStatus canônico definido em hardware::mod
 use hardware::HwStatus;
@@ -1873,6 +1875,21 @@ pub struct OpenProjectResult {
     pub preferred_scene_path: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub imported_scene_paths: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub import_summary: Option<SgdkLogicImportSummary>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, PartialEq, Eq)]
+pub struct SgdkLogicImportSummary {
+    pub states_detected: u32,
+    pub transitions_detected: u32,
+    pub nodes_generated: u32,
+    pub bridges_created: u32,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub blocking_gaps: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub mapped_source_files: Vec<String>,
+    pub semantic_model_kind: String,
 }
 
 #[derive(Debug, serde::Serialize, Clone, Copy, PartialEq, Eq)]
@@ -1968,6 +1985,283 @@ fn suggested_project_name_with_suffix(project_name: &str, suffix: Option<usize>)
     }
 }
 
+fn push_unique_trimmed(values: &mut Vec<String>, value: impl AsRef<str>) {
+    let trimmed = value.as_ref().trim();
+    if !trimmed.is_empty() && !values.iter().any(|item| item == trimmed) {
+        values.push(trimmed.to_string());
+    }
+}
+
+fn json_string_value(value: Option<&serde_json::Value>) -> Option<String> {
+    match value? {
+        serde_json::Value::String(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        }
+        serde_json::Value::Number(value) => Some(value.to_string()),
+        serde_json::Value::Bool(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn json_boolish(value: Option<&serde_json::Value>) -> bool {
+    match value {
+        Some(serde_json::Value::Bool(value)) => *value,
+        Some(serde_json::Value::Number(value)) => value
+            .as_i64()
+            .map(|number| number != 0)
+            .or_else(|| value.as_u64().map(|number| number != 0))
+            .or_else(|| value.as_f64().map(|number| number != 0.0))
+            .unwrap_or(false),
+        Some(serde_json::Value::String(value)) => matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "true" | "1" | "yes" | "bridge"
+        ),
+        _ => false,
+    }
+}
+
+fn push_source_mapping_from_json_object(
+    summary: &mut SgdkLogicImportSummary,
+    object: &serde_json::Map<String, serde_json::Value>,
+) {
+    if let Some(source_file) = json_string_value(object.get("source_file"))
+        .or_else(|| json_string_value(object.get("source_path")))
+        .or_else(|| json_string_value(object.get("source")))
+        .or_else(|| json_string_value(object.get("file")))
+        .or_else(|| json_string_value(object.get("path")))
+    {
+        push_unique_trimmed(&mut summary.mapped_source_files, source_file);
+    }
+}
+
+fn parse_sgdk_logic_graph_summary(
+    graph_json: &str,
+    summary: &mut SgdkLogicImportSummary,
+) -> (u32, u32, u32, u32) {
+    let Ok(graph) = serde_json::from_str::<serde_json::Value>(graph_json) else {
+        return (0, 0, 0, 0);
+    };
+    let Some(nodes) = graph.get("nodes").and_then(serde_json::Value::as_array) else {
+        return (0, 0, 0, 0);
+    };
+
+    let mut node_count = 0;
+    let mut bridge_count = 0;
+    let mut state_count = 0;
+    let mut transition_count = 0;
+
+    for node in nodes {
+        node_count += 1;
+        let node_id = json_string_value(node.get("id")).unwrap_or_else(|| "node".to_string());
+        let node_type = json_string_value(node.get("type")).unwrap_or_default();
+        let params = node.get("params").and_then(serde_json::Value::as_object);
+
+        if node_type.starts_with("fsm_") {
+            summary.semantic_model_kind = "fsm".to_string();
+        }
+        if node_type == "fsm_state" {
+            state_count += 1;
+        }
+        if node_type == "fsm_transition" {
+            transition_count += 1;
+        }
+
+        if let Some(params) = params {
+            push_source_mapping_from_json_object(summary, params);
+            let import_status = json_string_value(params.get("import_status"))
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let is_bridge = node_type == "bridge_unconverted_source"
+                || import_status == "bridge"
+                || json_boolish(params.get("bridge"));
+            if is_bridge {
+                bridge_count += 1;
+            }
+
+            let gap_label = json_string_value(params.get("gap"))
+                .or_else(|| json_string_value(params.get("gap_id")))
+                .or_else(|| {
+                    if is_bridge {
+                        Some("bridge para trecho nao convertido".to_string())
+                    } else {
+                        None
+                    }
+                });
+            if let Some(gap_label) = gap_label {
+                push_unique_trimmed(
+                    &mut summary.blocking_gaps,
+                    format!("{}: {}", node_id, gap_label),
+                );
+            }
+        }
+
+        for mapping_key in ["source_mapping", "sourceMapping"] {
+            if let Some(mapping) = node.get(mapping_key).and_then(serde_json::Value::as_object) {
+                push_source_mapping_from_json_object(summary, mapping);
+            }
+        }
+    }
+
+    (node_count, bridge_count, state_count, transition_count)
+}
+
+fn normalize_sgdk_logic_graph_ref(graph_ref: &str) -> Option<PathBuf> {
+    let trimmed = graph_ref.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let relative = PathBuf::from(trimmed);
+    if relative.is_absolute()
+        || relative.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return None;
+    }
+
+    if let Ok(stripped) = relative.strip_prefix("graphs") {
+        if stripped.as_os_str().is_empty() {
+            return None;
+        }
+        return Some(stripped.to_path_buf());
+    }
+
+    Some(relative)
+}
+
+fn read_sgdk_logic_graph_ref_summary(
+    project_dir: &Path,
+    entity_id: &str,
+    graph_ref: &str,
+    summary: &mut SgdkLogicImportSummary,
+) -> (u32, u32, u32, u32) {
+    let Some(relative) = normalize_sgdk_logic_graph_ref(graph_ref) else {
+        push_unique_trimmed(
+            &mut summary.blocking_gaps,
+            format!("{entity_id}: graph_ref '{graph_ref}' invalido para resumo SGDK Logic"),
+        );
+        return (0, 0, 0, 0);
+    };
+    let graph_path = project_dir.join("graphs").join(relative);
+    match fs::read_to_string(&graph_path) {
+        Ok(graph_json) => parse_sgdk_logic_graph_summary(&graph_json, summary),
+        Err(error) => {
+            push_unique_trimmed(
+                &mut summary.blocking_gaps,
+                format!(
+                    "{entity_id}: graph_ref '{graph_ref}' nao lido para resumo SGDK Logic: {error}"
+                ),
+            );
+            (0, 0, 0, 0)
+        }
+    }
+}
+
+fn sgdk_logic_import_summary_from_scene_with_project<I, S>(
+    project_dir: Option<&Path>,
+    scene: &Scene,
+    skipped_sources: I,
+) -> SgdkLogicImportSummary
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut summary = SgdkLogicImportSummary {
+        semantic_model_kind: "heuristic".to_string(),
+        ..SgdkLogicImportSummary::default()
+    };
+
+    for skipped_source in skipped_sources {
+        push_unique_trimmed(&mut summary.blocking_gaps, skipped_source.as_ref());
+    }
+
+    for entity in &scene.entities {
+        let Some(logic) = entity.components.logic.as_ref() else {
+            continue;
+        };
+
+        for source_ref in &logic.external_source_refs {
+            push_unique_trimmed(&mut summary.mapped_source_files, source_ref);
+        }
+
+        let mut semantic_nodes = 0;
+        let mut semantic_bridges = 0;
+        let mut semantic_states = 0;
+        let mut semantic_transitions = 0;
+
+        if let Some(semantics) = logic.imported_semantics.as_ref() {
+            semantic_nodes = semantics.converted_nodes_count + semantics.bridge_count;
+            semantic_bridges = semantics.bridge_count;
+            semantic_states = semantics.states_detected;
+            semantic_transitions = semantics.transitions_detected;
+
+            let extraction_kind = semantics.extraction_kind.to_ascii_lowercase();
+            let source = semantics.source.to_ascii_lowercase();
+            if extraction_kind == "fsm"
+                || source.contains("semantic_extractor")
+                || source.contains("semantic extractor")
+                || semantic_states > 0
+                || semantic_transitions > 0
+            {
+                summary.semantic_model_kind = "fsm".to_string();
+            }
+
+            for source_path in &semantics.source_paths {
+                push_unique_trimmed(&mut summary.mapped_source_files, source_path);
+            }
+            for gap in &semantics.blocking_gaps {
+                push_unique_trimmed(&mut summary.blocking_gaps, gap);
+            }
+            if semantics.gap_count > 0 && semantics.blocking_gaps.is_empty() {
+                push_unique_trimmed(
+                    &mut summary.blocking_gaps,
+                    format!(
+                        "{}: {} gap(s) importado(s) sem detalhe; revisar source mapping",
+                        entity.entity_id, semantics.gap_count
+                    ),
+                );
+            }
+        }
+
+        let (graph_nodes, graph_bridges, graph_states, graph_transitions) = logic
+            .graph
+            .as_deref()
+            .filter(|graph| !graph.trim().is_empty())
+            .map(|graph| parse_sgdk_logic_graph_summary(graph, &mut summary))
+            .or_else(|| {
+                let project_dir = project_dir?;
+                let graph_ref = logic
+                    .graph_ref
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())?;
+                Some(read_sgdk_logic_graph_ref_summary(
+                    project_dir,
+                    &entity.entity_id,
+                    graph_ref,
+                    &mut summary,
+                ))
+            })
+            .unwrap_or((0, 0, 0, 0));
+
+        summary.nodes_generated += graph_nodes.max(semantic_nodes);
+        summary.bridges_created += graph_bridges.max(semantic_bridges);
+        summary.states_detected += graph_states.max(semantic_states);
+        summary.transitions_detected += graph_transitions.max(semantic_transitions);
+    }
+
+    summary
+}
+
 fn empty_open_project_result() -> OpenProjectResult {
     OpenProjectResult {
         selected: false,
@@ -1977,6 +2271,7 @@ fn empty_open_project_result() -> OpenProjectResult {
         notice: None,
         preferred_scene_path: None,
         imported_scene_paths: Vec::new(),
+        import_summary: None,
     }
 }
 
@@ -2270,6 +2565,7 @@ fn create_onboarding_project_at_base_dir(
         notice,
         preferred_scene_path: Some(DEFAULT_ENTRY_SCENE.to_string()),
         imported_scene_paths: vec![DEFAULT_ENTRY_SCENE.to_string()],
+        import_summary: None,
     })
 }
 
@@ -2297,6 +2593,7 @@ fn create_project_from_template_at_base_dir(
         notice,
         preferred_scene_path: Some(DEFAULT_ENTRY_SCENE.to_string()),
         imported_scene_paths: vec![DEFAULT_ENTRY_SCENE.to_string()],
+        import_summary: None,
     })
 }
 
@@ -2398,6 +2695,20 @@ fn import_sgdk_project_at_base_dir(
         summary_hint,
         scenes_hint
     ));
+    let import_summary = sgdk_logic_import_summary_from_scene_with_project(
+        Some(&project_dir),
+        &report.primary_scene,
+        report.skipped_sources.iter().map(|skipped| {
+            if skipped.detail.trim().is_empty() {
+                format!("[{}] {}", skipped.reason, skipped.source)
+            } else {
+                format!(
+                    "[{}] {}: {}",
+                    skipped.reason, skipped.source, skipped.detail
+                )
+            }
+        }),
+    );
 
     Ok(OpenProjectResult {
         selected: true,
@@ -2414,6 +2725,7 @@ fn import_sgdk_project_at_base_dir(
                     .map(|scene| scene.scene_path.clone()),
             )
             .collect(),
+        import_summary: Some(import_summary),
     })
 }
 
@@ -2457,6 +2769,7 @@ fn import_mugen_project_at_base_dir(
         notice: merge_project_notices(dir_notice, notice),
         preferred_scene_path: Some(DEFAULT_ENTRY_SCENE.to_string()),
         imported_scene_paths: vec![DEFAULT_ENTRY_SCENE.to_string()],
+        import_summary: None,
     })
 }
 
@@ -2505,6 +2818,15 @@ fn import_external_project_at_base_dir(
         .into_iter()
         .find(|candidate| candidate.id == profile_id)
         .ok_or_else(|| format!("Perfil externo '{}' nao encontrado.", profile_id))?;
+    let import_summary = if profile.id == "sgdk" {
+        Some(sgdk_logic_import_summary_from_scene_with_project(
+            Some(&project_dir),
+            &report.primary_scene,
+            report.skipped_sources.iter().map(String::as_str),
+        ))
+    } else {
+        None
+    };
 
     Ok(OpenProjectResult {
         selected: true,
@@ -2514,6 +2836,7 @@ fn import_external_project_at_base_dir(
         notice: merge_project_notices(dir_notice, external_import_notice(&profile, &report)),
         preferred_scene_path: Some(DEFAULT_ENTRY_SCENE.to_string()),
         imported_scene_paths: vec![DEFAULT_ENTRY_SCENE.to_string()],
+        import_summary,
     })
 }
 
@@ -2538,6 +2861,7 @@ fn resolve_or_wrap_project_dir(
             notice: None,
             preferred_scene_path: Some(preferred_scene_path.clone()),
             imported_scene_paths: vec![preferred_scene_path],
+            import_summary: None,
         });
     }
 
@@ -2555,6 +2879,7 @@ fn resolve_or_wrap_project_dir(
         )),
         preferred_scene_path: Some(project.entry_scene.clone()),
         imported_scene_paths: vec![project.entry_scene],
+        import_summary: None,
     })
 }
 
@@ -2768,6 +3093,30 @@ fn run_gamemaker_compatibility_harness_cmd(
 }
 
 #[tauri::command]
+fn run_openbor_compatibility_harness_cmd(
+    source_path: String,
+    report_stem: Option<String>,
+    artifact_dir: Option<String>,
+) -> Result<CompatibilityHarnessReport, String> {
+    let trimmed_source = source_path.trim();
+    if trimmed_source.is_empty() {
+        return Err("Caminho do projeto OpenBOR e obrigatorio.".into());
+    }
+    let artifact_root = artifact_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| validation_report_dir("openbor-vertical"));
+    let stem = report_stem
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("openbor-beatemup");
+    run_openbor_compatibility_harness(Path::new(trimmed_source), &artifact_root, stem)
+}
+
+#[tauri::command]
 fn import_mugen_project(
     project_name: String,
     base_dir: String,
@@ -2818,6 +3167,25 @@ fn open_project_path(project_dir: String) -> OpenProjectResult {
 
     resolve_or_wrap_project_dir(&PathBuf::from(trimmed), None)
         .unwrap_or_else(|_| empty_open_project_result())
+}
+
+#[tauri::command]
+fn parse_input_command_file(path: String) -> Result<Vec<InputCommandDefinition>, String> {
+    let source_path = PathBuf::from(path.trim());
+    if path.trim().is_empty() {
+        return Err("Informe um caminho local para command.dat.".to_string());
+    }
+    let content = fs::read_to_string(&source_path).map_err(|error| {
+        format!(
+            "Falha ao ler command.dat '{}': {}",
+            source_path.display(),
+            error
+        )
+    })?;
+    Ok(parse_command_dat(
+        &content,
+        &source_path.display().to_string(),
+    ))
 }
 
 // ── App Builder ───────────────────────────────────────────────────────────────
@@ -2876,8 +3244,10 @@ pub fn run() {
             inspect_sgdk_project_inventory,
             inspect_sgdk_corpus_inventory,
             run_gamemaker_compatibility_harness_cmd,
+            run_openbor_compatibility_harness_cmd,
             import_mugen_project,
             import_legacy_sgdk_project,
+            parse_input_command_file,
             // Fase 4: Tools
             patch_create_ips,
             patch_apply_ips,
@@ -2951,6 +3321,246 @@ mod tests {
             .join("fixtures")
             .join("projects")
             .join(name)
+    }
+
+    #[test]
+    fn sgdk_logic_import_summary_preserves_fsm_bridge_mapping_truth() {
+        use ugdm::components::{Components, ImportedLogicSemantics, LogicComponent};
+        use ugdm::entities::{Entity, Transform};
+
+        let graph = serde_json::json!({
+            "version": 1,
+            "nodes": [
+                {
+                    "id": "idle",
+                    "type": "fsm_state",
+                    "label": "Idle",
+                    "x": 0,
+                    "y": 0,
+                    "params": {
+                        "import_status": "converted",
+                        "source_file": "src/player.c",
+                        "source_line": 42
+                    }
+                },
+                {
+                    "id": "raw_ai",
+                    "type": "bridge_unconverted_source",
+                    "label": "Raw AI",
+                    "x": 180,
+                    "y": 0,
+                    "params": {
+                        "gap": "AI branch uses inline assembly",
+                        "source_path": "src/enemy.c",
+                        "line": 88
+                    }
+                }
+            ],
+            "edges": []
+        })
+        .to_string();
+        let scene = Scene {
+            scene_id: "scene-main".to_string(),
+            schema_version: None,
+            display_name: None,
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "player".to_string(),
+                display_name: None,
+                prefab: None,
+                transform: Transform::default(),
+                components: Components {
+                    logic: Some(LogicComponent {
+                        graph: Some(graph),
+                        graph_ref: Some("graphs/sgdk_import_player.json".to_string()),
+                        external_source_refs: vec!["src/main.c".to_string()],
+                        imported_semantics: Some(ImportedLogicSemantics {
+                            source: "sgdk_semantic_extractor".to_string(),
+                            extraction_kind: "fsm".to_string(),
+                            confidence: "high".to_string(),
+                            converted_nodes_count: 1,
+                            bridge_count: 1,
+                            states_detected: 1,
+                            blocking_gaps: vec!["input branch unresolved".to_string()],
+                            source_paths: vec!["src/player.c".to_string()],
+                            ..ImportedLogicSemantics::default()
+                        }),
+                        ..LogicComponent::default()
+                    }),
+                    ..Components::default()
+                },
+            }],
+            palettes: Vec::new(),
+            retrofx: None,
+            collision_map: None,
+            layers: None,
+        };
+
+        let summary = sgdk_logic_import_summary_from_scene_with_project(
+            None,
+            &scene,
+            ["[UnsupportedKind] src/asm.s: inline assembly"],
+        );
+
+        assert_eq!(summary.semantic_model_kind, "fsm");
+        assert_eq!(summary.states_detected, 1);
+        assert_eq!(summary.nodes_generated, 2);
+        assert_eq!(summary.bridges_created, 1);
+        assert!(summary
+            .mapped_source_files
+            .iter()
+            .any(|path| path == "src/player.c"));
+        assert!(summary
+            .mapped_source_files
+            .iter()
+            .any(|path| path == "src/enemy.c"));
+        assert!(summary
+            .blocking_gaps
+            .iter()
+            .any(|gap| gap.contains("raw_ai: AI branch uses inline assembly")));
+        assert!(summary
+            .blocking_gaps
+            .iter()
+            .any(|gap| gap.contains("[UnsupportedKind] src/asm.s")));
+    }
+
+    #[test]
+    fn sgdk_logic_import_summary_keeps_phase_d_heuristic_until_extractor_proves_fsm() {
+        use ugdm::components::{Components, ImportedLogicSemantics, LogicComponent};
+        use ugdm::entities::{Entity, Transform};
+
+        let scene = Scene {
+            scene_id: "scene-main".to_string(),
+            schema_version: None,
+            display_name: None,
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "enemy".to_string(),
+                display_name: None,
+                prefab: None,
+                transform: Transform::default(),
+                components: Components {
+                    logic: Some(LogicComponent {
+                        external_source_refs: vec!["src/main.c".to_string()],
+                        imported_semantics: Some(ImportedLogicSemantics {
+                            source: "sgdk_phase_d".to_string(),
+                            confidence: "low".to_string(),
+                            source_paths: vec!["src/main.c".to_string()],
+                            ..ImportedLogicSemantics::default()
+                        }),
+                        ..LogicComponent::default()
+                    }),
+                    ..Components::default()
+                },
+            }],
+            palettes: Vec::new(),
+            retrofx: None,
+            collision_map: None,
+            layers: None,
+        };
+
+        let summary = sgdk_logic_import_summary_from_scene_with_project(
+            None,
+            &scene,
+            std::iter::empty::<String>(),
+        );
+
+        assert_eq!(summary.semantic_model_kind, "heuristic");
+        assert_eq!(summary.states_detected, 0);
+        assert_eq!(summary.transitions_detected, 0);
+        assert_eq!(summary.nodes_generated, 0);
+    }
+
+    #[test]
+    fn sgdk_logic_import_summary_reads_external_graph_ref_without_promoting_heuristic() {
+        use ugdm::components::{Components, ImportedLogicSemantics, LogicComponent};
+        use ugdm::entities::{Entity, Transform};
+
+        let project_dir = temp_dir("sgdk-summary-graph-ref");
+        fs::create_dir_all(project_dir.join("graphs")).expect("create graph dir");
+        fs::write(
+            project_dir.join("graphs").join("sgdk_import_hero.json"),
+            serde_json::json!({
+                "version": 1,
+                "nodes": [
+                    {
+                        "id": "move_probe",
+                        "type": "logic_hint",
+                        "label": "Movement probe",
+                        "x": 0,
+                        "y": 0,
+                        "params": {
+                            "import_status": "converted",
+                            "source_file": "src/player.c",
+                            "source_line": 17
+                        }
+                    },
+                    {
+                        "id": "raw_input",
+                        "type": "bridge_unconverted_source",
+                        "label": "Raw input",
+                        "x": 160,
+                        "y": 0,
+                        "params": {
+                            "gap": "input macro requires manual bridge",
+                            "source_file": "src/input.c",
+                            "source_line": 33
+                        }
+                    }
+                ],
+                "edges": []
+            })
+            .to_string(),
+        )
+        .expect("write graph ref");
+        let scene = Scene {
+            scene_id: "scene-main".to_string(),
+            schema_version: None,
+            display_name: None,
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "hero".to_string(),
+                display_name: None,
+                prefab: None,
+                transform: Transform::default(),
+                components: Components {
+                    logic: Some(LogicComponent {
+                        graph_ref: Some("graphs/sgdk_import_hero.json".to_string()),
+                        external_source_refs: vec!["src/player.c".to_string()],
+                        imported_semantics: Some(ImportedLogicSemantics {
+                            source: "sgdk_phase_d".to_string(),
+                            confidence: "medium".to_string(),
+                            source_paths: vec!["src/player.c".to_string()],
+                            ..ImportedLogicSemantics::default()
+                        }),
+                        ..LogicComponent::default()
+                    }),
+                    ..Components::default()
+                },
+            }],
+            palettes: Vec::new(),
+            retrofx: None,
+            collision_map: None,
+            layers: None,
+        };
+
+        let summary = sgdk_logic_import_summary_from_scene_with_project(
+            Some(&project_dir),
+            &scene,
+            std::iter::empty::<String>(),
+        );
+
+        assert_eq!(summary.semantic_model_kind, "heuristic");
+        assert_eq!(summary.nodes_generated, 2);
+        assert_eq!(summary.bridges_created, 1);
+        assert!(summary
+            .mapped_source_files
+            .iter()
+            .any(|path| path == "src/input.c"));
+        assert!(summary
+            .blocking_gaps
+            .iter()
+            .any(|gap| gap.contains("raw_input: input macro requires manual bridge")));
     }
 
     fn copy_dir_all(src: &Path, dst: &Path) {
@@ -3066,6 +3676,9 @@ mod tests {
                 { "id": "start", "type": "event_start", "label": "Start", "x": 0, "y": 0, "params": {} },
                 { "id": "spawn_enemy", "type": "spawn_entity", "label": "Spawn Enemy", "x": 160, "y": 0, "params": { "prefab": "enemy", "x": 184, "y": 96 } },
                 { "id": "paint_floor", "type": "set_tile", "label": "Set Tile", "x": 320, "y": 0, "params": { "layer": "BG_A", "tile": 8, "x": 4, "y": 13 } },
+                { "id": "update_command", "type": "event_update", "label": "Update Command", "x": 0, "y": 80, "params": {} },
+                { "id": "hadouken", "type": "input_command", "label": "Hadouken", "x": 160, "y": 80, "params": { "command_id": "hadouken", "display_name": "Hadouken", "notation": "_2, _3, _6, _P", "max_frames": 20, "pad": "JOY_1", "button_profile": "megadrive", "target": "player" } },
+                { "id": "attack_anim", "type": "set_animation_state", "label": "Attack Animation", "x": 320, "y": 80, "params": { "target": "player", "state": "run" } },
                 { "id": "update", "type": "event_update", "label": "Update", "x": 0, "y": 180, "params": {} },
                 { "id": "right", "type": "input_held", "label": "Right Held", "x": 160, "y": 180, "params": { "pad": "JOY_1", "button": "BUTTON_RIGHT" } },
                 { "id": "velocity", "type": "set_velocity", "label": "Set Velocity", "x": 320, "y": 180, "params": { "target": "player", "vx": 2, "vy": 0 } },
@@ -3080,6 +3693,8 @@ mod tests {
             "edges": [
                 { "id": "s1", "fromNode": "start", "fromPort": "exec", "toNode": "spawn_enemy", "toPort": "exec" },
                 { "id": "s2", "fromNode": "spawn_enemy", "fromPort": "exec", "toNode": "paint_floor", "toPort": "exec" },
+                { "id": "c1", "fromNode": "update_command", "fromPort": "exec", "toNode": "hadouken", "toPort": "exec" },
+                { "id": "c2", "fromNode": "hadouken", "fromPort": "true", "toNode": "attack_anim", "toPort": "exec" },
                 { "id": "u1", "fromNode": "update", "fromPort": "exec", "toNode": "right", "toPort": "exec" },
                 { "id": "u2", "fromNode": "right", "fromPort": "true", "toNode": "velocity", "toPort": "exec" },
                 { "id": "u3", "fromNode": "velocity", "fromPort": "exec", "toNode": "move", "toPort": "exec" },
@@ -3134,7 +3749,25 @@ mod tests {
                                 "run": { "frames": [1, 2, 3], "fps": 12, "loop": true }
                             },
                             "priority": "foreground",
-                            "meta_sprite": false
+                            "meta_sprite": false,
+                            "commands": [
+                                {
+                                    "id": "hadouken",
+                                    "display_name": "Hadouken",
+                                    "notation": "_2, _3, _6, _P",
+                                    "source": "local-command.dat",
+                                    "target_animation": "run",
+                                    "max_frames": 20,
+                                    "button_profile": "megadrive",
+                                    "unsupported_tokens": [],
+                                    "steps": [
+                                        { "tokens": ["_2"], "display": ["↓"] },
+                                        { "tokens": ["_3"], "display": ["↘"] },
+                                        { "tokens": ["_6"], "display": ["→"] },
+                                        { "tokens": ["_P"], "display": ["A"] }
+                                    ]
+                                }
+                            ]
                         },
                         "collision": { "shape": "aabb", "width": 16, "height": 16, "offset": null, "solid": true, "layer": "player", "collides_with": ["enemy"] },
                         "input": { "device": "joypad_1", "mapping": {} },
@@ -3188,6 +3821,237 @@ mod tests {
             serde_json::to_string_pretty(&scene).expect("serialize no-code scene"),
         )
         .expect("write persistent no-code scene");
+    }
+
+    fn install_persistent_nocode_snes_game(project_dir: &Path) {
+        fs::create_dir_all(project_dir.join("assets").join("sprites"))
+            .expect("create SNES no-code sprite dir");
+        fs::create_dir_all(project_dir.join("assets").join("tilemaps"))
+            .expect("create SNES no-code tilemap dir");
+        fs::create_dir_all(project_dir.join("assets").join("audio"))
+            .expect("create SNES no-code audio dir");
+
+        write_rgba_sheet(
+            &project_dir
+                .join("assets")
+                .join("sprites")
+                .join("player.png"),
+            &[
+                [248, 208, 80, 255],
+                [248, 112, 80, 255],
+                [232, 64, 96, 255],
+                [248, 176, 96, 255],
+            ],
+        );
+        write_rgba_sheet(
+            &project_dir.join("assets").join("sprites").join("enemy.png"),
+            &[
+                [72, 168, 248, 255],
+                [64, 128, 224, 255],
+                [48, 96, 192, 255],
+                [80, 184, 240, 255],
+            ],
+        );
+        write_stage_image(
+            &project_dir
+                .join("assets")
+                .join("tilemaps")
+                .join("stage.png"),
+        );
+        fs::write(
+            project_dir.join("assets").join("audio").join("jump.brr"),
+            b"BRRretro",
+        )
+        .expect("write SNES no-code sfx");
+
+        let graph = serde_json::json!({
+            "version": 1,
+            "nodes": [
+                { "id": "start", "type": "event_start", "label": "Start", "x": 0, "y": 0, "params": {} },
+                { "id": "spawn_enemy", "type": "spawn_entity", "label": "Spawn Enemy", "x": 160, "y": 0, "params": { "prefab": "enemy", "x": 184, "y": 96 } },
+                { "id": "paint_floor", "type": "set_tile", "label": "Set Tile", "x": 320, "y": 0, "params": { "layer": "BG_A", "tile": 8, "x": 4, "y": 13 } },
+                { "id": "update_command", "type": "event_update", "label": "Update Command", "x": 0, "y": 80, "params": {} },
+                { "id": "hadouken", "type": "input_command", "label": "Command", "x": 160, "y": 80, "params": { "command_id": "hadouken", "display_name": "Hadouken", "notation": "_2, _3, _6, _P", "max_frames": 20, "pad": "JOY_1", "button_profile": "snes", "target": "player" } },
+                { "id": "attack_anim", "type": "set_animation_state", "label": "Attack Animation", "x": 320, "y": 80, "params": { "target": "player", "state": "run" } },
+                { "id": "update", "type": "event_update", "label": "Update", "x": 0, "y": 180, "params": {} },
+                { "id": "right", "type": "input_held", "label": "Right Held", "x": 160, "y": 180, "params": { "pad": "JOY_1", "button": "BUTTON_RIGHT" } },
+                { "id": "velocity", "type": "set_velocity", "label": "Set Velocity", "x": 320, "y": 180, "params": { "target": "player", "vx": 2, "vy": 0 } },
+                { "id": "move", "type": "sprite_move", "label": "Move Entity", "x": 480, "y": 180, "params": { "target": "player", "dx": 2, "dy": 0 } },
+                { "id": "position", "type": "set_position", "label": "Set Position", "x": 640, "y": 180, "params": { "target": "player", "x": 72, "y": 96 } },
+                { "id": "run_anim", "type": "set_animation_state", "label": "Run Animation", "x": 800, "y": 180, "params": { "target": "player", "state": "run" } },
+                { "id": "scroll_bg", "type": "scroll_tilemap", "label": "Scroll BG", "x": 960, "y": 180, "params": { "layer": "BG_A", "dx": 1, "dy": 0 } },
+                { "id": "camera_move", "type": "move_camera", "label": "Move Camera", "x": 1120, "y": 180, "params": { "target": "player", "x": -120, "y": -80 } },
+                { "id": "budget", "type": "hardware_budget_check", "label": "Budget", "x": 1280, "y": 180, "params": { "vram_kb": 64, "sprites": 128, "scanline_sprites": 32 } },
+                { "id": "overlap", "type": "condition_overlap", "label": "On Collision", "x": 1440, "y": 180, "params": { "a": "player", "b": "enemy" } },
+                { "id": "hit_state", "type": "var_set", "label": "Set State", "x": 1600, "y": 180, "params": { "var_name": "encounter_state", "value": 1 } },
+                { "id": "update_fire", "type": "event_update", "label": "Update Fire", "x": 0, "y": 320, "params": {} },
+                { "id": "fire", "type": "input_pressed", "label": "Fire", "x": 160, "y": 320, "params": { "pad": "JOY_1", "button": "BUTTON_A" } },
+                { "id": "jump_sfx", "type": "action_sound", "label": "Jump SFX", "x": 320, "y": 320, "params": { "sfx": "jump" } },
+                { "id": "idle", "type": "fsm_state", "label": "Idle", "x": 0, "y": 480, "params": { "state_name": "idle", "initial": 1 } },
+                { "id": "run", "type": "fsm_state", "label": "Run", "x": 240, "y": 480, "params": { "state_name": "run", "initial": 0 } },
+                { "id": "speed", "type": "var_get", "label": "Speed", "x": 80, "y": 620, "params": { "var_name": "speed" } },
+                { "id": "idle_to_run", "type": "fsm_transition", "label": "Go Run", "x": 120, "y": 480, "params": { "target_state": "run" } },
+                { "id": "run_to_idle", "type": "fsm_transition", "label": "Go Idle", "x": 360, "y": 480, "params": { "target_state": "idle" } },
+                { "id": "fsm_move", "type": "sprite_move", "label": "FSM Move", "x": 480, "y": 480, "params": { "target": "player", "dx": 1, "dy": 0 } }
+            ],
+            "edges": [
+                { "id": "s1", "fromNode": "start", "fromPort": "exec", "toNode": "spawn_enemy", "toPort": "exec" },
+                { "id": "s2", "fromNode": "spawn_enemy", "fromPort": "exec", "toNode": "paint_floor", "toPort": "exec" },
+                { "id": "c1", "fromNode": "update_command", "fromPort": "exec", "toNode": "hadouken", "toPort": "exec" },
+                { "id": "c2", "fromNode": "hadouken", "fromPort": "true", "toNode": "attack_anim", "toPort": "exec" },
+                { "id": "u1", "fromNode": "update", "fromPort": "exec", "toNode": "right", "toPort": "exec" },
+                { "id": "u2", "fromNode": "right", "fromPort": "true", "toNode": "velocity", "toPort": "exec" },
+                { "id": "u3", "fromNode": "velocity", "fromPort": "exec", "toNode": "move", "toPort": "exec" },
+                { "id": "u4", "fromNode": "move", "fromPort": "exec", "toNode": "position", "toPort": "exec" },
+                { "id": "u5", "fromNode": "position", "fromPort": "exec", "toNode": "run_anim", "toPort": "exec" },
+                { "id": "u6", "fromNode": "run_anim", "fromPort": "exec", "toNode": "scroll_bg", "toPort": "exec" },
+                { "id": "u7", "fromNode": "scroll_bg", "fromPort": "exec", "toNode": "camera_move", "toPort": "exec" },
+                { "id": "u8", "fromNode": "camera_move", "fromPort": "exec", "toNode": "budget", "toPort": "exec" },
+                { "id": "u9", "fromNode": "budget", "fromPort": "ok", "toNode": "overlap", "toPort": "exec" },
+                { "id": "u10", "fromNode": "overlap", "fromPort": "true", "toNode": "hit_state", "toPort": "exec" },
+                { "id": "f1", "fromNode": "update_fire", "fromPort": "exec", "toNode": "fire", "toPort": "exec" },
+                { "id": "f2", "fromNode": "fire", "fromPort": "true", "toNode": "jump_sfx", "toPort": "exec" },
+                { "id": "fsm1", "fromNode": "idle", "fromPort": "transitions", "toNode": "idle_to_run", "toPort": "exec" },
+                { "id": "fsm2", "fromNode": "speed", "fromPort": "value", "toNode": "idle_to_run", "toPort": "condition" },
+                { "id": "fsm3", "fromNode": "run", "fromPort": "exec", "toNode": "fsm_move", "toPort": "exec" },
+                { "id": "fsm4", "fromNode": "run", "fromPort": "transitions", "toNode": "run_to_idle", "toPort": "exec" },
+                { "id": "fsm5", "fromNode": "speed", "fromPort": "value", "toNode": "run_to_idle", "toPort": "condition" }
+            ]
+        });
+        let scene = serde_json::json!({
+            "scene_id": "main",
+            "schema_version": "1.6.0",
+            "display_name": "Persistent No-Code SNES Game",
+            "background_layers": [],
+            "entities": [
+                {
+                    "entity_id": "world",
+                    "prefab": null,
+                    "transform": { "x": 0, "y": 0 },
+                    "components": {
+                        "sprite": null,
+                        "collision": null,
+                        "input": null,
+                        "physics": null,
+                        "audio": null,
+                        "logic": null,
+                        "camera": null,
+                        "tilemap": {
+                            "tileset": "assets/tilemaps/stage.png",
+                            "map_width": 32,
+                            "map_height": 32,
+                            "scroll_x": 0,
+                            "scroll_y": 0
+                        }
+                    }
+                },
+                {
+                    "entity_id": "player",
+                    "prefab": null,
+                    "transform": { "x": 40, "y": 96 },
+                    "components": {
+                        "sprite": {
+                            "asset": "assets/sprites/player.png",
+                            "frame_width": 16,
+                            "frame_height": 16,
+                            "pivot": null,
+                            "palette_slot": 0,
+                            "animations": {
+                                "idle": { "frames": [0], "fps": 6, "loop": true },
+                                "run": { "frames": [1, 2, 3], "fps": 12, "loop": true }
+                            },
+                            "priority": "foreground",
+                            "meta_sprite": false,
+                            "commands": [
+                                {
+                                    "id": "hadouken",
+                                    "display_name": "Hadouken",
+                                    "notation": "_2, _3, _6, _P",
+                                    "source": "local-command.dat",
+                                    "target_animation": "run",
+                                    "max_frames": 20,
+                                    "button_profile": "snes",
+                                    "unsupported_tokens": [],
+                                    "steps": [
+                                        { "tokens": ["_2"], "display": ["down"] },
+                                        { "tokens": ["_3"], "display": ["down-forward"] },
+                                        { "tokens": ["_6"], "display": ["forward"] },
+                                        { "tokens": ["_P"], "display": ["Y"] }
+                                    ]
+                                }
+                            ]
+                        },
+                        "collision": { "shape": "aabb", "width": 16, "height": 16, "offset": null, "solid": true, "layer": "player", "collides_with": ["enemy"] },
+                        "input": { "device": "joypad_1", "mapping": {} },
+                        "physics": null,
+                        "audio": null,
+                        "logic": {
+                            "graph": graph.to_string(),
+                            "variables": {
+                                "encounter_state": { "type": "int", "default": 0, "min": 0, "max": 1 },
+                                "speed": { "type": "int", "default": 1, "min": 0, "max": 4 }
+                            }
+                        },
+                        "camera": null,
+                        "tilemap": null
+                    }
+                },
+                {
+                    "entity_id": "enemy",
+                    "prefab": null,
+                    "transform": { "x": 184, "y": 96 },
+                    "components": {
+                        "sprite": {
+                            "asset": "assets/sprites/enemy.png",
+                            "frame_width": 16,
+                            "frame_height": 16,
+                            "pivot": null,
+                            "palette_slot": 1,
+                            "animations": {
+                                "idle": { "frames": [0], "fps": 6, "loop": true },
+                                "run": { "frames": [1, 2, 3], "fps": 12, "loop": true }
+                            },
+                            "priority": "foreground",
+                            "meta_sprite": false
+                        },
+                        "collision": { "shape": "aabb", "width": 16, "height": 16, "offset": null, "solid": true, "layer": "enemy", "collides_with": ["player"] },
+                        "input": null,
+                        "physics": null,
+                        "audio": null,
+                        "logic": null,
+                        "camera": null,
+                        "tilemap": null
+                    }
+                },
+                {
+                    "entity_id": "audio_driver",
+                    "prefab": null,
+                    "transform": { "x": 0, "y": 0 },
+                    "components": {
+                        "sprite": null,
+                        "collision": null,
+                        "input": null,
+                        "physics": null,
+                        "audio": {
+                            "sfx": { "jump": "assets/audio/jump.brr" },
+                            "bgm": null
+                        },
+                        "logic": null,
+                        "camera": null,
+                        "tilemap": null
+                    }
+                }
+            ],
+            "palettes": [],
+            "retrofx": null,
+            "collision_map": null,
+            "layers": null
+        });
+        fs::write(
+            project_dir.join("scenes").join("main.json"),
+            serde_json::to_string_pretty(&scene).expect("serialize SNES no-code scene"),
+        )
+        .expect("write persistent SNES no-code scene");
     }
 
     fn write_platformer_donor_fixture(dir: &Path, with_jump: bool) {
@@ -4384,6 +5248,8 @@ pub extern "C" fn retro_run() {
         let resources_res =
             fs::read_to_string(&resources_res_path).expect("read generated real resources.res");
         assert!(main_c.contains("JOY_readJoypad(JOY_1)"));
+        assert!(main_c.contains("rds_input_match_command"));
+        assert!(main_c.contains("rds_cmd_hadouken_steps"));
         assert!(main_c.contains("SPR_setPosition(spr_player, spr_player_x, spr_player_y);"));
         assert!(main_c.contains("SPR_setAnim(spr_player, 1);"));
         assert!(main_c.contains("logic_var_encounter_state = 1;"));
@@ -4530,6 +5396,233 @@ pub extern "C" fn retro_run() {
             ),
         )
         .expect("write real no-code Markdown report");
+    }
+
+    #[test]
+    #[ignore = "Requires official PVSnesLib, Git Bash/MSYS2 and a real Libretro SNES core; writes persistent validation artifacts"]
+    fn official_snes_nocode_game_builds_and_runs_with_real_toolchain() {
+        if !cfg!(target_os = "windows") {
+            panic!(
+                "official_snes_nocode_game_builds_and_runs_with_real_toolchain requires Windows"
+            );
+        }
+
+        let _serial = test_serial_guard();
+
+        for dependency_id in ["pvsneslib", "libretro_snes"] {
+            eprintln!("[snes-real] ensuring dependency '{}'", dependency_id);
+            let result = install_dependency(dependency_id, |line| {
+                eprintln!(
+                    "[snes-real][dependency:{}][{}] {}",
+                    dependency_id, line.level, line.message
+                );
+            });
+            assert!(
+                result.ok,
+                "failed to install {} for real no-code SNES proof: {}",
+                dependency_id, result.message
+            );
+        }
+
+        let status_report = dependency_status_report();
+        for dependency_id in ["pvsneslib", "libretro_snes"] {
+            let item = status_report
+                .items
+                .iter()
+                .find(|item| item.id == dependency_id)
+                .unwrap_or_else(|| panic!("missing dependency status for {}", dependency_id));
+            assert!(
+                item.installed,
+                "dependency {} still not installed for real SNES proof: {:?}",
+                dependency_id, item.issues
+            );
+        }
+
+        let artifact_root = validation_artifact_dir("snes-real-nocode-game");
+        let project_dir = artifact_root.join("project");
+        let _ = fs::remove_dir_all(&artifact_root);
+        fs::create_dir_all(&artifact_root).expect("create SNES validation artifact root");
+        create_project_skeleton(&project_dir, "Real No-Code SNES Game", "snes")
+            .expect("create persistent no-code SNES project");
+        install_persistent_nocode_snes_game(&project_dir);
+
+        let build_log_lines = std::cell::RefCell::new(Vec::new());
+        let first = run_build(&project_dir, |line| {
+            build_log_lines
+                .borrow_mut()
+                .push(format!("[{}] {}", line.level, line.message));
+            eprintln!("[snes-real][build][{}] {}", line.level, line.message);
+        });
+        assert!(first.ok, "real SNES build failed: {:?}", first.log);
+        assert!(
+            !first.rom_path.is_empty(),
+            "real SNES build did not report a ROM path"
+        );
+
+        let main_c_path = project_dir
+            .join("build")
+            .join("snes")
+            .join("src")
+            .join("main.c");
+        let data_asm_path = project_dir.join("build").join("snes").join("data.asm");
+        let hdr_asm_path = project_dir.join("build").join("snes").join("hdr.asm");
+        let makefile_path = project_dir.join("build").join("snes").join("Makefile");
+        let main_c = fs::read_to_string(&main_c_path).expect("read generated SNES main.c");
+        let data_asm = fs::read_to_string(&data_asm_path).expect("read generated SNES data.asm");
+        let makefile = fs::read_to_string(&makefile_path).expect("read generated SNES Makefile");
+        assert!(
+            hdr_asm_path.is_file(),
+            "SNES hdr.asm must be staged at workspace root"
+        );
+        assert!(main_c.contains("padsCurrent(0)"));
+        assert!(main_c.contains("rds_input_match_command"));
+        assert!(main_c.contains("oamSet(0, spr_player_x, spr_player_y"));
+        assert!(main_c.contains("bgInitTileSet(0, &world_tilemap_til"));
+        assert!(data_asm.contains(".include \"hdr.asm\""));
+        assert!(data_asm.contains(".include \"src/player_data.as\""));
+        assert!(data_asm.contains("world_tilemap_pal:"));
+        assert!(makefile.contains("$(GFXCONV)"));
+
+        let second = run_build(&project_dir, |_| {});
+        assert!(second.ok, "second real SNES build failed: {:?}", second.log);
+        let second_main_c = fs::read_to_string(&main_c_path).expect("read regenerated SNES main.c");
+        assert_eq!(
+            main_c, second_main_c,
+            "real no-code SNES C must be deterministic"
+        );
+
+        let rom_path = {
+            let path = PathBuf::from(&second.rom_path);
+            if path.is_absolute() {
+                path
+            } else {
+                project_dir.join(path)
+            }
+        };
+        let rom_bytes = fs::read(&rom_path).expect("read real no-code SNES ROM");
+        assert!(
+            rom_bytes.len() > 1024,
+            "real SNES ROM should not be a fake tiny artifact"
+        );
+        let persistent_rom_path = artifact_root.join("real-nocode-game.sfc");
+        fs::copy(&rom_path, &persistent_rom_path).expect("copy persistent real SNES ROM");
+
+        let mut emulator = EmulatorCore::new(None);
+        emulator
+            .load_rom(&persistent_rom_path)
+            .unwrap_or_else(|error| panic!("failed to load real SNES ROM: {}", error));
+        emulator
+            .set_joypad(JoypadState {
+                right: true,
+                ..JoypadState::default()
+            })
+            .expect("set SNES no-code joypad input");
+        for _ in 0..90 {
+            emulator
+                .run_frame()
+                .unwrap_or_else(|error| panic!("failed to run real SNES frame: {}", error));
+        }
+        let core_label = emulator
+            .loaded_core_label()
+            .unwrap_or("unknown-libretro-core")
+            .to_string();
+        let (framebuffer, size, pixel_format) = emulator
+            .get_framebuffer()
+            .unwrap_or_else(|error| panic!("failed to capture real SNES framebuffer: {}", error));
+        let frame = framebuffer_to_rgba(&framebuffer, size, pixel_format);
+        let non_black_pixels = frame
+            .rgba
+            .chunks_exact(4)
+            .filter(|px| px[0] != 0 || px[1] != 0 || px[2] != 0)
+            .count();
+        assert!(
+            non_black_pixels > 0,
+            "real SNES framebuffer should not be fully black"
+        );
+        let framebuffer_path = artifact_root.join("real-nocode-frame.ppm");
+        write_framebuffer_ppm(&framebuffer_path, &frame);
+        emulator.stop().expect("stop real SNES emulator");
+
+        let build_log_path = artifact_root.join("real-nocode-build.log");
+        fs::write(&build_log_path, build_log_lines.borrow().join("\n"))
+            .expect("write real SNES build log");
+        let emulation_log_path = artifact_root.join("real-nocode-emulation.log");
+        fs::write(
+            &emulation_log_path,
+            format!(
+                "core={}\nframes_run=90\nframebuffer={}x{}\nnon_black_pixels={}\nrom={}\n",
+                core_label,
+                frame.width,
+                frame.height,
+                non_black_pixels,
+                persistent_rom_path.display()
+            ),
+        )
+        .expect("write real SNES emulation log");
+
+        #[derive(serde::Serialize)]
+        struct RealSnesNoCodeReport {
+            project_path: String,
+            generated_main_c: String,
+            generated_data_asm: String,
+            generated_hdr_asm: String,
+            build_log: String,
+            rom_path: String,
+            emulation_log: String,
+            framebuffer_ppm: String,
+            libretro_core: String,
+            frames_run: u32,
+            framebuffer_width: u32,
+            framebuffer_height: u32,
+            non_black_pixels: usize,
+            rom_size_bytes: usize,
+            generated_from_nodes: bool,
+            manual_code_edits: bool,
+            fake_toolchain_used: bool,
+            deterministic_main_c: bool,
+        }
+
+        let report = RealSnesNoCodeReport {
+            project_path: project_dir.to_string_lossy().to_string(),
+            generated_main_c: main_c_path.to_string_lossy().to_string(),
+            generated_data_asm: data_asm_path.to_string_lossy().to_string(),
+            generated_hdr_asm: hdr_asm_path.to_string_lossy().to_string(),
+            build_log: build_log_path.to_string_lossy().to_string(),
+            rom_path: persistent_rom_path.to_string_lossy().to_string(),
+            emulation_log: emulation_log_path.to_string_lossy().to_string(),
+            framebuffer_ppm: framebuffer_path.to_string_lossy().to_string(),
+            libretro_core: core_label,
+            frames_run: 90,
+            framebuffer_width: frame.width,
+            framebuffer_height: frame.height,
+            non_black_pixels,
+            rom_size_bytes: rom_bytes.len(),
+            generated_from_nodes: true,
+            manual_code_edits: false,
+            fake_toolchain_used: false,
+            deterministic_main_c: true,
+        };
+        let report_json_path = artifact_root.join("real-nocode-report.json");
+        let report_md_path = artifact_root.join("real-nocode-report.md");
+        let report_json = serde_json::to_string_pretty(&report).expect("serialize SNES report");
+        fs::write(&report_json_path, format!("{report_json}\n"))
+            .expect("write real SNES JSON report");
+        fs::write(
+            &report_md_path,
+            format!(
+                "# Real No-Code SNES Game\n\n- Project: `{}`\n- Generated C: `{}`\n- Data ASM: `{}`\n- Header ASM: `{}`\n- ROM: `{}`\n- Core: `{}`\n- Frames run: `90`\n- Framebuffer: `{}x{}`\n- Non-black pixels: `{}`\n- Fake toolchain used: `false`\n- Manual code edits: `false`\n",
+                project_dir.display(),
+                main_c_path.display(),
+                data_asm_path.display(),
+                hdr_asm_path.display(),
+                persistent_rom_path.display(),
+                report.libretro_core,
+                frame.width,
+                frame.height,
+                non_black_pixels
+            ),
+        )
+        .expect("write real SNES Markdown report");
     }
 
     #[test]

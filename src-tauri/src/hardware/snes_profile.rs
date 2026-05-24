@@ -444,6 +444,7 @@ mod tests {
                     animations: Default::default(),
                     priority: "foreground".to_string(),
                     meta_sprite: false,
+                    commands: Vec::new(),
                 }),
                 ..Default::default()
             },

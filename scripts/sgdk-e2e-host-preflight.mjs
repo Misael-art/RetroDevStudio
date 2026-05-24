@@ -57,6 +57,42 @@ async function resolveExecutable(explicitPath, names) {
   return "";
 }
 
+async function resolveSgdkRoot(root) {
+  const candidates = [
+    ["SGDK_ROOT", process.env.SGDK_ROOT ?? ""],
+    ["GDK", process.env.GDK ?? ""],
+    ["GDK_WIN", process.env.GDK_WIN ?? ""],
+    ["toolchains/sgdk", path.join(root, "toolchains", "sgdk")],
+  ].filter(([, candidate]) => candidate);
+
+  let firstExisting = null;
+  for (const [source, rawCandidate] of candidates) {
+    const candidate = path.resolve(rawCandidate);
+    const exists = await pathExists(candidate);
+    const gcc = await pathExists(path.join(candidate, "bin", "gcc.exe"));
+    const makefileGen = await pathExists(path.join(candidate, "makefile.gen"));
+    const ok = exists && gcc && makefileGen;
+    const detail = { source, path: candidate, exists, gcc, makefileGen, ok };
+    if (!firstExisting && exists) {
+      firstExisting = detail;
+    }
+    if (ok) {
+      return detail;
+    }
+  }
+
+  return (
+    firstExisting ?? {
+      source: "toolchains/sgdk",
+      path: path.join(root, "toolchains", "sgdk"),
+      exists: false,
+      gcc: false,
+      makefileGen: false,
+      ok: false,
+    }
+  );
+}
+
 /**
  * @param {object} options
  * @param {boolean} [options.externalDriver]
@@ -65,11 +101,12 @@ async function resolveExecutable(explicitPath, names) {
  * @param {string} [root]
  */
 export async function logPreflightSummary(options, root = repoRoot) {
-  const sgdkDir = path.join(root, "toolchains", "sgdk");
-  const sgdkDirExists = await pathExists(sgdkDir);
-  const sgdkGcc = await pathExists(path.join(sgdkDir, "bin", "gcc.exe"));
-  const sgdkMakefile = await pathExists(path.join(sgdkDir, "makefile.gen"));
-  const sgdkDirOk = sgdkDirExists && sgdkGcc && sgdkMakefile;
+  const sgdk = await resolveSgdkRoot(root);
+  const sgdkDir = sgdk.path;
+  const sgdkDirExists = sgdk.exists;
+  const sgdkGcc = sgdk.gcc;
+  const sgdkMakefile = sgdk.makefileGen;
+  const sgdkDirOk = sgdk.ok;
   let tauriDriverPath = "";
   let tauriDriverOk = Boolean(options?.externalDriver);
   if (!options?.externalDriver) {
@@ -98,6 +135,7 @@ export async function logPreflightSummary(options, root = repoRoot) {
   const record = {
     repoRoot: root,
     sgdkDir,
+    sgdkDirSource: sgdk.source,
     sgdkDirOk,
     tauriDriverOk,
     tauriDriverPath: tauriDriverPath || null,
@@ -111,6 +149,7 @@ export async function logPreflightSummary(options, root = repoRoot) {
         exists: sgdkDirExists,
         gcc: sgdkGcc,
         makefileGen: sgdkMakefile,
+        source: sgdk.source,
       },
       tauriDriver: {
         ok: tauriDriverOk,
@@ -123,17 +162,21 @@ export async function logPreflightSummary(options, root = repoRoot) {
   };
 
   const sgdkDetail = sgdkDirOk
-    ? "OK"
+    ? `OK (${sgdkDir} via ${sgdk.source})`
     : !sgdkDirExists
-      ? "FALTA — copie/instale SGDK para toolchains/sgdk"
+      ? "FALTA — configure SGDK_ROOT/GDK/GDK_WIN ou copie/instale SGDK para toolchains/sgdk"
       : `INCOMPLETO (gcc: ${sgdkGcc ? "OK" : "FALTA"}, makefile.gen: ${sgdkMakefile ? "OK" : "FALTA"})`;
   const lines = [
     "[RDS preflight host]",
-    `  toolchains/sgdk: ${sgdkDetail}`,
+    `  SGDK real: ${sgdkDetail}`,
     options?.externalDriver
       ? "  tauri-driver: omitido (externalDriver)"
       : `  tauri-driver: ${tauriDriverOk ? `OK (${tauriDriverPath})` : "FALTA — cargo install tauri-driver --locked"}`,
-    `  Edge WebDriver (msedgedriver): ${nativeDriverOk ? `OK (${nativeDriverPath})` : "FALTA — --native-driver ou RDS_EDGE_DRIVER_PATH"}`,
+    `  Edge WebDriver (msedgedriver): ${
+      nativeDriverOk
+        ? `OK (${nativeDriverPath})`
+        : "FALTA — baixe do Microsoft Edge WebDriver oficial e configure toolchains/webdriver/msedgedriver.exe, --native-driver, RDS_EDGE_DRIVER_PATH ou PATH"
+    }`,
     `  Ready: ${allReady ? "SIM" : "NAO"}`,
   ];
   console.log(lines.join("\n"));

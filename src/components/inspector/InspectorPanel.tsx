@@ -21,6 +21,7 @@ import { getEntityDisplayName } from "../../core/entityDisplay";
 import { resolveSceneWorkspaceContext } from "../../core/sceneWorkspaceContext";
 import { buildTilemapAuthoringBrush } from "../../core/entityAuthoring";
 import { openProjectSourcePath } from "../../core/ipc/projectService";
+import { getEntityLogicImportSignal } from "../../core/sgdkLogicDiagnostics";
 import knowledgeBase from "./knowledgeBase.json";
 
 type KnowledgeSectionId =
@@ -140,7 +141,7 @@ function PropRow({ label, value, type, sourceState = null, onChange }: PropRowPr
             data-testid={`${testIdBase}-value`}
             className="cursor-pointer font-mono text-[#cdd6f4] transition-colors hover:text-[#cba6f7]"
             onClick={() => setEditing(true)}
-            title="Clique para editar"
+            title={`Clique para editar: ${String(value)}`}
           >
             {String(value)}
           </span>
@@ -724,6 +725,7 @@ export default function InspectorPanel() {
       ) ?? [],
     [entity]
   );
+  const entityLogicImportSignal = useMemo(() => getEntityLogicImportSignal(entity), [entity]);
   const importedEntityContext = useMemo(() => resolveImportedEntityContext(entity), [entity]);
   const entityAssignedLayers = useMemo(() => {
     if (!entity || !activeScene?.layers) {
@@ -979,7 +981,7 @@ export default function InspectorPanel() {
 
   return (
     <Panel title="Inspector" className="flex h-full flex-col">
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-x-hidden overflow-y-auto">
         {!selectedEntityId ? (
           <div className="px-3 py-4 text-xs text-[#45475a]">
             <p className="italic">Selecione uma entidade na Hierarchy.</p>
@@ -1084,11 +1086,19 @@ export default function InspectorPanel() {
               </div>
             </div>
             {importedEntityContext.isImported && sections.length === 0 ? (
-              <div className="border-b border-[#313244] bg-[#11111b]/40 px-3 py-2">
-                <div
-                  data-testid="inspector-imported-context"
-                  className="rounded border border-[#313244] bg-[#0f172a]/40 p-2"
-                >
+              <details
+                data-testid="inspector-imported-context"
+                className="border-b border-[#313244] bg-[#11111b]/40 px-3 py-2"
+              >
+                <summary className="flex cursor-pointer list-none items-center gap-2 px-1 py-1 text-[9px] font-semibold uppercase tracking-[0.16em] text-[#7f849c]">
+                  <span>Diagnostico importado</span>
+                  {importedEntityContext.auditFlags.length > 0 ? (
+                    <span className="rounded-full border border-[#fab387]/35 bg-[#fab387]/10 px-1.5 py-0.5 text-[8px] text-[#fab387]">
+                      {importedEntityContext.auditFlags.length}
+                    </span>
+                  ) : null}
+                </summary>
+                <div className="mt-2 rounded border border-[#313244] bg-[#0f172a]/40 p-2">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#7f849c]">
                       Contexto importado
@@ -1146,6 +1156,7 @@ export default function InspectorPanel() {
                         <span
                           key={flag}
                           className="rounded-full border border-[#89b4fa]/30 bg-[#89b4fa]/10 px-2 py-0.5 font-mono text-[8px] text-[#89b4fa]"
+                          title={flag}
                         >
                           {flag}
                         </span>
@@ -1208,7 +1219,7 @@ export default function InspectorPanel() {
                     })()}
                   </div>
                 </div>
-              </div>
+              </details>
             ) : null}
             {sections.map((section) => (
               <InspectorSection
@@ -1548,6 +1559,7 @@ export default function InspectorPanel() {
                         <span
                           key={flag}
                           className="rounded-full border border-[#89b4fa]/30 bg-[#89b4fa]/10 px-2 py-0.5 font-mono text-[8px] text-[#89b4fa]"
+                          title={flag}
                         >
                           {flag}
                         </span>
@@ -1615,21 +1627,80 @@ export default function InspectorPanel() {
             ) : null}
             {entity.components.logic ? (
               <InspectorSection sectionId="logic" title="Logic">
-                <table className="w-full text-xs">
+                <table className="w-full table-fixed text-xs">
                   <tbody>
+                    {entityLogicImportSignal.status !== "none" ? (
+                      <tr className="group border-b border-[#313244] last:border-0">
+                        <td className="w-24 min-w-24 align-top select-none px-2 py-1 text-xs text-[#7f849c]">
+                          Import
+                        </td>
+                        <td className="px-2 py-1 text-xs">
+                          <div
+                            data-testid="inspector-logic-import-truth"
+                            className="grid gap-1 rounded border border-[#313244] bg-[#11111b]/70 px-2 py-1.5 text-[10px] leading-snug text-[#cdd6f4]"
+                          >
+                            <span
+                              className={[
+                                "w-fit rounded-full border px-1.5 py-0.5 text-[8px] font-semibold",
+                                entityLogicImportSignal.status === "functional"
+                                  ? "border-[#a6e3a1]/35 bg-[#a6e3a1]/10 text-[#a6e3a1]"
+                                  : entityLogicImportSignal.status === "bridge_only"
+                                    ? "border-[#f9e2af]/35 bg-[#f9e2af]/10 text-[#f9e2af]"
+                                    : "border-[#89b4fa]/35 bg-[#89b4fa]/10 text-[#89b4fa]",
+                              ].join(" ")}
+                            >
+                              {entityLogicImportSignal.label}
+                            </span>
+                            <div className="grid grid-cols-1 gap-1 xl:grid-cols-2">
+                              {entityLogicImportSignal.graphRef ? (
+                                <span className="min-w-0 truncate font-mono" title={entityLogicImportSignal.graphRef}>
+                                  graph_ref: {entityLogicImportSignal.graphRef}
+                                </span>
+                              ) : null}
+                              {entityLogicImportSignal.confidence ? (
+                                <span className="min-w-0 truncate font-mono">
+                                  confidence: {entityLogicImportSignal.confidence}
+                                </span>
+                              ) : null}
+                              <span className="min-w-0 truncate font-mono">
+                                converted_nodes_count: {entityLogicImportSignal.convertedNodesCount}
+                              </span>
+                              <span className="min-w-0 truncate font-mono">
+                                bridge_count: {entityLogicImportSignal.bridgeCount}
+                              </span>
+                              {entityLogicImportSignal.sourcePaths.length > 0 ? (
+                                <span
+                                  className="min-w-0 truncate font-mono xl:col-span-2"
+                                  title={entityLogicImportSignal.sourcePaths.join(", ")}
+                                >
+                                  source mapping: {entityLogicImportSignal.sourcePaths.join(", ")}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    ) : null}
                     {entityLogicSummary ? (
                       <tr className="group border-b border-[#313244] last:border-0">
                         <td className="w-24 min-w-24 select-none px-2 py-1 text-xs text-[#7f849c]">Graph</td>
-                        <td className="px-2 py-1 text-xs">
-                          <span className="font-mono text-[#cdd6f4]">{entityLogicSummary}</span>
+                        <td className="min-w-0 px-2 py-1 text-xs">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span
+                              className="min-w-0 flex-1 break-all font-mono text-[#cdd6f4]"
+                              title={entityLogicSummary}
+                            >
+                              {entityLogicSummary}
+                            </span>
                           <button
                             type="button"
-                            className="ml-2 text-[10px] text-[#89b4fa] transition-colors hover:text-[#b4befe]"
+                            className="shrink-0 text-[10px] text-[#89b4fa] transition-colors hover:text-[#b4befe]"
                             onClick={() => useEditorStore.getState().setActiveViewportTab("logic")}
                             title="Editar grafo no NodeGraph"
                           >
                             Edit
                           </button>
+                          </div>
                         </td>
                       </tr>
                     ) : null}
@@ -1679,7 +1750,7 @@ export default function InspectorPanel() {
                         <td className="px-2 py-1 text-xs">
                           <div className="flex flex-col gap-1">
                             {entityLogicHints.map((hint, index) => (
-                              <span key={`${index}-${hint}`} className="text-[#cdd6f4]">
+                              <span key={`${index}-${hint}`} className="text-[#cdd6f4]" title={hint}>
                                 {hint}
                               </span>
                             ))}
@@ -1846,7 +1917,7 @@ export default function InspectorPanel() {
       </div>
 
       <div className="shrink-0 border-t border-[#313244]">
-        <HardwareLimitsPanel />
+        <HardwareLimitsPanel compact />
       </div>
     </Panel>
   );

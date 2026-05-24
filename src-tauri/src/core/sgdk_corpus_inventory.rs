@@ -93,6 +93,8 @@ pub struct SgdkCanonicalProjectModel {
     pub schema_version: String,
     pub project: SgdkCanonicalProject,
     pub scenes: Vec<SgdkCanonicalScene>,
+    #[serde(default)]
+    pub logic_systems: Vec<SgdkLogicSystem>,
     pub hardware_budget: SgdkCanonicalHardwareBudget,
     pub source_mappings: Vec<SgdkCanonicalSourceMapping>,
     pub compatibility_bridges: Vec<SgdkCompatibilityBridge>,
@@ -153,6 +155,96 @@ pub struct SgdkCompatibilityBridge {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+pub struct SgdkLogicSystem {
+    pub id: String,
+    pub source_files: Vec<String>,
+    pub functions: Vec<SgdkLogicFunction>,
+    pub state_machines: Vec<SgdkStateMachine>,
+    pub states: Vec<SgdkState>,
+    pub transitions: Vec<SgdkTransition>,
+    pub conditions: Vec<SgdkLogicCondition>,
+    pub actions: Vec<SgdkLogicAction>,
+    pub entities_refs: Vec<SgdkEntityRef>,
+    pub source_mappings: Vec<SgdkCanonicalSourceMapping>,
+    pub semantic_gaps: Vec<SgdkSemanticGap>,
+    pub confidence: u8,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+pub struct SgdkLogicFunction {
+    pub name: String,
+    pub source: SourceLocation,
+    pub end_line: usize,
+    pub calls: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+pub struct SgdkStateMachine {
+    pub id: String,
+    pub variable: String,
+    pub source: Option<SourceLocation>,
+    pub states: Vec<SgdkState>,
+    pub transitions: Vec<SgdkTransition>,
+    pub actions: Vec<SgdkLogicAction>,
+    pub confidence: u8,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+pub struct SgdkState {
+    pub name: String,
+    pub value: Option<String>,
+    pub source: SourceLocation,
+    pub actions: Vec<SgdkLogicAction>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+pub struct SgdkTransition {
+    pub variable: String,
+    pub from: Option<String>,
+    pub to: String,
+    pub condition: Option<SgdkLogicCondition>,
+    pub source: SourceLocation,
+    pub confidence: u8,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+pub struct SgdkLogicCondition {
+    pub kind: String,
+    pub expression: String,
+    pub variable: Option<String>,
+    pub value: Option<String>,
+    pub input: Option<String>,
+    pub source: SourceLocation,
+    pub confidence: u8,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+pub struct SgdkLogicAction {
+    pub kind: String,
+    pub call: Option<String>,
+    pub target: Option<String>,
+    pub args: Vec<String>,
+    pub expression: String,
+    pub state: Option<String>,
+    pub source: SourceLocation,
+    pub confidence: u8,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
+pub struct SgdkEntityRef {
+    pub name: String,
+    pub kind: String,
+    pub source: SourceLocation,
+}
+
+#[derive(Debug, Clone)]
+struct SgdkLogicSourceText {
+    relative_path: String,
+    stripped: String,
+    lossy: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
 pub struct SgdkCodeInventory {
     pub includes: Vec<SgdkNamedSourceItem>,
     pub defines: Vec<SgdkDefineInventory>,
@@ -184,6 +276,9 @@ pub struct SgdkProjectInventory {
     pub node_candidates: Vec<SgdkNodeCandidate>,
     #[serde(default)]
     pub canonical_model: SgdkCanonicalProjectModel,
+    /// Grafo semantico NodeGraph serializado (JSON) derivado do inventario.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub semantic_node_graph_json: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
@@ -230,6 +325,7 @@ pub fn inspect_sgdk_project_for_nocode_inventory(
     let mut resources = Vec::new();
     let mut code = SgdkCodeInventory::default();
     let mut semantic_gaps = Vec::new();
+    let mut logic_sources = Vec::new();
 
     for rel in &files {
         let full_path = root.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
@@ -308,13 +404,23 @@ pub fn inspect_sgdk_project_for_nocode_inventory(
 
     for rel in &code_files {
         let full_path = root.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let gap_count_before_read = semantic_gaps.len();
         let content =
             read_text_lossy_with_gap(&full_path, rel, "lossy_source_encoding", &mut semantic_gaps)?;
+        let lossy = semantic_gaps[gap_count_before_read..]
+            .iter()
+            .any(|gap| gap.kind == "lossy_source_encoding");
+        logic_sources.push(SgdkLogicSourceText {
+            relative_path: rel.clone(),
+            stripped: strip_c_comments_and_strings_preserving_lines(&content),
+            lossy,
+        });
         parse_code_file(rel, &content, &mut code, &mut semantic_gaps);
     }
 
     let mut node_candidates = derive_sgdk_node_candidates(&resources, &code, &semantic_gaps);
     apply_formal_bridge_resolution(&mut semantic_gaps);
+    let logic_systems = derive_sgdk_logic_systems(&logic_sources, &code, &semantic_gaps);
 
     sort_project_inventory(
         &mut source_files,
@@ -337,9 +443,10 @@ pub fn inspect_sgdk_project_for_nocode_inventory(
         &resources,
         &code,
         &semantic_gaps,
+        logic_systems,
     );
 
-    Ok(SgdkProjectInventory {
+    let inventory = SgdkProjectInventory {
         project_name,
         root: root.to_string_lossy().to_string(),
         source_files,
@@ -351,6 +458,14 @@ pub fn inspect_sgdk_project_for_nocode_inventory(
         semantic_gaps,
         node_candidates,
         canonical_model,
+        semantic_node_graph_json: String::new(),
+    };
+    let semantic_node_graph_json =
+        crate::core::sgdk_semantic_graph::convert_sgdk_inventory_to_node_graph(&inventory);
+
+    Ok(SgdkProjectInventory {
+        semantic_node_graph_json,
+        ..inventory
     })
 }
 
@@ -643,12 +758,1084 @@ fn apply_formal_bridge_resolution(gaps: &mut [SgdkSemanticGap]) {
     }
 }
 
+fn derive_sgdk_logic_systems(
+    sources: &[SgdkLogicSourceText],
+    code: &SgdkCodeInventory,
+    gaps: &[SgdkSemanticGap],
+) -> Vec<SgdkLogicSystem> {
+    if sources.is_empty() {
+        return Vec::new();
+    }
+
+    let mut state_variables = derive_state_variables(code, sources);
+    let mut states = BTreeMap::<String, SgdkState>::new();
+    let mut transitions = Vec::new();
+    let mut conditions = Vec::new();
+    let mut actions = Vec::new();
+    let mut entity_refs = BTreeMap::<(String, String, String, usize), SgdkEntityRef>::new();
+    let mut source_mappings = Vec::new();
+    let mut logic_gaps = gaps.to_vec();
+    let mut machine_sources = BTreeMap::<String, SourceLocation>::new();
+
+    for define in &code.defines {
+        if is_logic_state_symbol(&define.name) {
+            insert_logic_state(
+                &mut states,
+                SgdkState {
+                    name: define.name.clone(),
+                    value: empty_to_none(define.value.clone()),
+                    source: define.source.clone(),
+                    actions: Vec::new(),
+                },
+            );
+        }
+        if is_pool_limit_symbol(&define.name) {
+            insert_entity_ref(
+                &mut entity_refs,
+                SgdkEntityRef {
+                    name: pool_name_from_limit(&define.name),
+                    kind: "pool_limit".to_string(),
+                    source: define.source.clone(),
+                },
+            );
+        }
+    }
+
+    for state in &code.game_states {
+        insert_logic_state(
+            &mut states,
+            SgdkState {
+                name: state.name.clone(),
+                value: None,
+                source: state.source.clone(),
+                actions: Vec::new(),
+            },
+        );
+    }
+
+    for array in &code.arrays {
+        if is_logic_pool_name(&array.name) {
+            insert_entity_ref(
+                &mut entity_refs,
+                SgdkEntityRef {
+                    name: array.name.clone(),
+                    kind: "pool".to_string(),
+                    source: array.source.clone(),
+                },
+            );
+        }
+    }
+
+    for source in sources {
+        if source.lossy {
+            logic_gaps.push(make_logic_bridge_gap(
+                "lossy_source_encoding",
+                source.relative_path.clone(),
+                "Lossy source decoding makes SGDK logic source mappings approximate.",
+                Some(SourceLocation {
+                    file: source.relative_path.clone(),
+                    line: 1,
+                }),
+            ));
+        }
+        extract_enum_state_values(source, &mut states);
+
+        let mut active_switch: Option<(String, usize)> = None;
+        let mut active_state: Option<String> = None;
+        let mut active_if_condition: Option<SgdkLogicCondition> = None;
+        let mut brace_depth = 0usize;
+
+        for (index, line) in source.stripped.lines().enumerate() {
+            let line_no = index + 1;
+            let location = SourceLocation {
+                file: source.relative_path.clone(),
+                line: line_no,
+            };
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                brace_depth = update_usize_brace_depth(brace_depth, trimmed);
+                continue;
+            }
+
+            for variable in detect_state_variables_in_line(trimmed) {
+                state_variables.insert(variable);
+            }
+
+            if let Some(variable) = extract_switch_variable(trimmed) {
+                if is_state_variable_like(&variable) || state_variables.contains(&variable) {
+                    state_variables.insert(variable.clone());
+                    machine_sources
+                        .entry(variable.clone())
+                        .or_insert_with(|| location.clone());
+                    active_switch = Some((variable.clone(), brace_depth));
+                    active_state = None;
+                    push_source_mapping(
+                        &mut source_mappings,
+                        location.clone(),
+                        format!("logic_systems/sgdk_logic/state_machines/{variable}"),
+                        "state_machine".to_string(),
+                    );
+                }
+            }
+
+            if let Some(case_state) = extract_case_state(trimmed) {
+                insert_logic_state(
+                    &mut states,
+                    SgdkState {
+                        name: case_state.clone(),
+                        value: None,
+                        source: location.clone(),
+                        actions: Vec::new(),
+                    },
+                );
+                active_state = Some(case_state.clone());
+                push_source_mapping(
+                    &mut source_mappings,
+                    location.clone(),
+                    format!("logic_systems/sgdk_logic/states/{case_state}"),
+                    "state".to_string(),
+                );
+            }
+
+            if let Some(condition) = extract_state_if_condition(trimmed, &location) {
+                if let Some(variable) = &condition.variable {
+                    state_variables.insert(variable.clone());
+                    machine_sources
+                        .entry(variable.clone())
+                        .or_insert_with(|| location.clone());
+                }
+                active_state = condition.value.clone().or(active_state);
+                active_if_condition = Some(condition.clone());
+                conditions.push(condition);
+                push_source_mapping(
+                    &mut source_mappings,
+                    location.clone(),
+                    "logic_systems/sgdk_logic/conditions/state_compare".to_string(),
+                    "condition".to_string(),
+                );
+            }
+
+            for condition in extract_input_conditions(trimmed, &location) {
+                conditions.push(condition);
+                push_source_mapping(
+                    &mut source_mappings,
+                    location.clone(),
+                    "logic_systems/sgdk_logic/conditions/input".to_string(),
+                    "input".to_string(),
+                );
+            }
+
+            for transition in extract_state_transition(
+                trimmed,
+                &location,
+                &state_variables,
+                active_state.as_deref(),
+                active_if_condition.as_ref(),
+            ) {
+                state_variables.insert(transition.variable.clone());
+                machine_sources
+                    .entry(transition.variable.clone())
+                    .or_insert_with(|| location.clone());
+                insert_logic_state(
+                    &mut states,
+                    SgdkState {
+                        name: transition.to.clone(),
+                        value: None,
+                        source: location.clone(),
+                        actions: Vec::new(),
+                    },
+                );
+                push_source_mapping(
+                    &mut source_mappings,
+                    location.clone(),
+                    format!(
+                        "logic_systems/sgdk_logic/transitions/{}",
+                        transition.variable
+                    ),
+                    "transition".to_string(),
+                );
+                transitions.push(transition);
+            }
+
+            if should_bridge_complex_state_expression(trimmed, &state_variables) {
+                logic_gaps.push(make_logic_bridge_gap(
+                    "complex_state_expression",
+                    trimmed.to_string(),
+                    "State update uses an expression outside SGDK Logic Extractor v1; keep it as a formal source bridge.",
+                    Some(location.clone()),
+                ));
+            }
+
+            for action in extract_logic_actions(trimmed, &location, active_state.as_deref()) {
+                if let Some(state_name) = action.state.as_deref() {
+                    if let Some(state) = states.get_mut(state_name) {
+                        state.actions.push(action.clone());
+                    }
+                }
+                push_source_mapping(
+                    &mut source_mappings,
+                    location.clone(),
+                    format!("logic_systems/sgdk_logic/actions/{}", action.kind),
+                    action.kind.clone(),
+                );
+                actions.push(action);
+            }
+
+            for entity_ref in extract_entity_refs(trimmed, &location) {
+                insert_entity_ref(&mut entity_refs, entity_ref);
+            }
+
+            if trimmed.contains("break;") {
+                active_if_condition = None;
+            }
+
+            brace_depth = update_usize_brace_depth(brace_depth, trimmed);
+            if let Some((_, switch_depth)) = active_switch.as_ref() {
+                if brace_depth <= *switch_depth && trimmed.contains('}') {
+                    active_switch = None;
+                    active_state = None;
+                }
+            }
+        }
+    }
+
+    for call in &code.calls {
+        if call.family != "project" {
+            push_source_mapping(
+                &mut source_mappings,
+                call.source.clone(),
+                format!("logic_systems/sgdk_logic/actions/{}", call.name),
+                call.family.clone(),
+            );
+        }
+    }
+
+    sort_logic_states(&mut states);
+    sort_logic_transitions(&mut transitions);
+    sort_logic_conditions(&mut conditions);
+    sort_logic_actions(&mut actions);
+    sort_logic_source_mappings(&mut source_mappings);
+    sort_logic_gaps(&mut logic_gaps);
+
+    let state_values = states.values().cloned().collect::<Vec<_>>();
+    let entity_values = entity_refs.into_values().collect::<Vec<_>>();
+    let machine_variables = state_variables.into_iter().collect::<Vec<_>>();
+    let mut state_machines = Vec::new();
+    for variable in machine_variables {
+        let machine_transitions = transitions
+            .iter()
+            .filter(|transition| transition.variable == variable)
+            .cloned()
+            .collect::<Vec<_>>();
+        let machine_actions = actions
+            .iter()
+            .filter(|action| action.state.is_some())
+            .cloned()
+            .collect::<Vec<_>>();
+        if machine_transitions.is_empty()
+            && machine_actions.is_empty()
+            && !machine_sources.contains_key(&variable)
+        {
+            continue;
+        }
+        state_machines.push(SgdkStateMachine {
+            id: canonical_id(&variable),
+            variable: variable.clone(),
+            source: machine_sources.get(&variable).cloned(),
+            states: state_values.clone(),
+            transitions: machine_transitions,
+            actions: machine_actions,
+            confidence: 82,
+        });
+    }
+    state_machines.sort_by(|left, right| left.variable.cmp(&right.variable));
+
+    let mut source_files = sources
+        .iter()
+        .map(|source| source.relative_path.clone())
+        .collect::<Vec<_>>();
+    source_files.sort();
+    source_files.dedup();
+
+    let mut functions = code
+        .functions
+        .iter()
+        .filter(|function| function.is_definition)
+        .map(|function| SgdkLogicFunction {
+            name: function.name.clone(),
+            source: function.source.clone(),
+            end_line: function.end_line,
+            calls: code
+                .calls
+                .iter()
+                .filter(|call| call.caller.as_deref() == Some(function.name.as_str()))
+                .map(|call| call.name.clone())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect(),
+        })
+        .collect::<Vec<_>>();
+    functions.sort_by(|left, right| {
+        (
+            left.source.file.as_str(),
+            left.source.line,
+            left.name.as_str(),
+        )
+            .cmp(&(
+                right.source.file.as_str(),
+                right.source.line,
+                right.name.as_str(),
+            ))
+    });
+
+    vec![SgdkLogicSystem {
+        id: "sgdk_logic".to_string(),
+        source_files,
+        functions,
+        state_machines,
+        states: state_values,
+        transitions,
+        conditions,
+        actions,
+        entities_refs: entity_values,
+        source_mappings,
+        semantic_gaps: logic_gaps,
+        confidence: 78,
+    }]
+}
+
+fn derive_state_variables(
+    code: &SgdkCodeInventory,
+    sources: &[SgdkLogicSourceText],
+) -> BTreeSet<String> {
+    let mut variables = BTreeSet::new();
+    for global in &code.globals {
+        if is_state_variable_like(&global.name) {
+            variables.insert(global.name.clone());
+        }
+    }
+    for source in sources {
+        for line in source.stripped.lines() {
+            for variable in detect_state_variables_in_line(line) {
+                variables.insert(variable);
+            }
+        }
+    }
+    variables
+}
+
+fn is_logic_state_symbol(name: &str) -> bool {
+    name.starts_with("STATE_")
+        || name.starts_with("PLAYER_")
+        || name.starts_with("GAME_")
+        || name.starts_with("SCENE_")
+        || name.ends_with("_STATE")
+}
+
+fn is_potential_state_value(name: &str) -> bool {
+    is_logic_state_symbol(name)
+        || name == "IDLE"
+        || name == "RUN"
+        || name == "JUMP"
+        || name == "NEXT_STATE"
+        || (name
+            .chars()
+            .all(|ch| ch == '_' || ch.is_ascii_uppercase() || ch.is_ascii_digit())
+            && name.chars().any(|ch| ch.is_ascii_uppercase()))
+}
+
+fn is_state_variable_like(name: &str) -> bool {
+    if is_logic_state_symbol(name) {
+        return false;
+    }
+    let lower = name.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "gamestate"
+            | "playerstate"
+            | "currentstate"
+            | "currentgamestate"
+            | "currentplayerstate"
+            | "currentscene"
+            | "state"
+            | "mode"
+            | "scene"
+            | "phase"
+    ) || lower.ends_with("state")
+        || lower.ends_with("mode")
+        || lower.ends_with("scene")
+        || lower.ends_with("phase")
+}
+
+fn detect_state_variables_in_line(line: &str) -> Vec<String> {
+    tokenize_identifiers(line)
+        .into_iter()
+        .filter(|token| is_state_variable_like(token))
+        .collect()
+}
+
+fn empty_to_none(value: String) -> Option<String> {
+    if value.trim().is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
+fn is_pool_limit_symbol(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    upper.starts_with("MAX_")
+        && (upper.contains("ENEMY")
+            || upper.contains("ENEMIES")
+            || upper.contains("BULLET")
+            || upper.contains("SPRITE")
+            || upper.contains("OBJECT"))
+}
+
+fn pool_name_from_limit(name: &str) -> String {
+    name.trim_start_matches("MAX_").to_ascii_lowercase()
+}
+
+fn is_logic_pool_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.contains("enemy")
+        || lower.contains("enemies")
+        || lower.contains("bullet")
+        || lower.contains("sprite_pool")
+        || lower.contains("object_pool")
+}
+
+fn insert_logic_state(states: &mut BTreeMap<String, SgdkState>, mut state: SgdkState) {
+    let key = state.name.clone();
+    if let Some(existing) = states.get_mut(&key) {
+        if existing.value.is_none() {
+            existing.value = state.value.take();
+        }
+        if state.source.file < existing.source.file
+            || (state.source.file == existing.source.file
+                && state.source.line < existing.source.line)
+        {
+            existing.source = state.source;
+        }
+        existing.actions.append(&mut state.actions);
+        sort_logic_actions(&mut existing.actions);
+    } else {
+        states.insert(key, state);
+    }
+}
+
+fn insert_entity_ref(
+    entity_refs: &mut BTreeMap<(String, String, String, usize), SgdkEntityRef>,
+    entity_ref: SgdkEntityRef,
+) {
+    let key = (
+        entity_ref.name.clone(),
+        entity_ref.kind.clone(),
+        entity_ref.source.file.clone(),
+        entity_ref.source.line,
+    );
+    entity_refs.entry(key).or_insert(entity_ref);
+}
+
+fn extract_enum_state_values(
+    source: &SgdkLogicSourceText,
+    states: &mut BTreeMap<String, SgdkState>,
+) {
+    let mut in_enum = false;
+    for (index, line) in source.stripped.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.contains("enum") {
+            in_enum = true;
+        }
+        if !in_enum {
+            continue;
+        }
+        let location = SourceLocation {
+            file: source.relative_path.clone(),
+            line: index + 1,
+        };
+        for token in tokenize_identifiers(trimmed) {
+            if is_enum_state_value_candidate(&token) {
+                insert_logic_state(
+                    states,
+                    SgdkState {
+                        name: token,
+                        value: None,
+                        source: location.clone(),
+                        actions: Vec::new(),
+                    },
+                );
+            }
+        }
+        if trimmed.contains('}') {
+            in_enum = false;
+        }
+    }
+}
+
+fn is_enum_state_value_candidate(token: &str) -> bool {
+    if matches!(
+        token,
+        "typedef" | "enum" | "struct" | "const" | "static" | "u8" | "u16" | "s16" | "int"
+    ) {
+        return false;
+    }
+    is_potential_state_value(token)
+}
+
+fn update_usize_brace_depth(current: usize, line: &str) -> usize {
+    let delta = brace_delta(line);
+    if delta.is_negative() {
+        current.saturating_sub(delta.unsigned_abs() as usize)
+    } else {
+        current.saturating_add(delta as usize)
+    }
+}
+
+fn extract_switch_variable(line: &str) -> Option<String> {
+    let expression = extract_parenthesized_after(line, "switch")?;
+    let tokens = tokenize_identifiers(&expression);
+    if tokens.len() == 1 {
+        tokens.into_iter().next()
+    } else {
+        None
+    }
+}
+
+fn extract_case_state(line: &str) -> Option<String> {
+    let rest = line.trim_start().strip_prefix("case ")?;
+    let before_colon = rest.split(':').next().unwrap_or(rest).trim();
+    let token = tokenize_identifiers(before_colon).into_iter().next()?;
+    if is_potential_state_value(&token) {
+        Some(token)
+    } else {
+        None
+    }
+}
+
+fn extract_parenthesized_after(line: &str, keyword: &str) -> Option<String> {
+    let keyword_index = line.find(keyword)?;
+    let after_keyword = &line[keyword_index + keyword.len()..];
+    let open_offset = after_keyword.find('(')?;
+    let start = keyword_index + keyword.len() + open_offset + 1;
+    let mut depth = 1i32;
+    for (offset, ch) in line[start..].char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(line[start..start + offset].trim().to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn extract_state_if_condition(line: &str, source: &SourceLocation) -> Option<SgdkLogicCondition> {
+    let expression = extract_parenthesized_after(line, "if")?;
+    for operator in ["==", "!="] {
+        let Some((left, right)) = expression.split_once(operator) else {
+            continue;
+        };
+        let left_token = tokenize_identifiers(left).into_iter().next();
+        let right_token = tokenize_identifiers(right).into_iter().next();
+        match (left_token, right_token) {
+            (Some(variable), Some(value))
+                if is_state_variable_like(&variable) && is_potential_state_value(&value) =>
+            {
+                return Some(SgdkLogicCondition {
+                    kind: "state_compare".to_string(),
+                    expression: expression.clone(),
+                    variable: Some(variable),
+                    value: Some(value),
+                    input: None,
+                    source: source.clone(),
+                    confidence: if operator == "==" { 90 } else { 74 },
+                });
+            }
+            (Some(value), Some(variable))
+                if is_potential_state_value(&value) && is_state_variable_like(&variable) =>
+            {
+                return Some(SgdkLogicCondition {
+                    kind: "state_compare".to_string(),
+                    expression: expression.clone(),
+                    variable: Some(variable),
+                    value: Some(value),
+                    input: None,
+                    source: source.clone(),
+                    confidence: if operator == "==" { 90 } else { 74 },
+                });
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn extract_input_conditions(line: &str, source: &SourceLocation) -> Vec<SgdkLogicCondition> {
+    tokenize_identifiers(line)
+        .into_iter()
+        .filter(|token| token.starts_with("BUTTON_"))
+        .map(|button| SgdkLogicCondition {
+            kind: "input_button".to_string(),
+            expression: line.trim().to_string(),
+            variable: None,
+            value: None,
+            input: Some(button),
+            source: source.clone(),
+            confidence: 88,
+        })
+        .collect()
+}
+
+fn extract_state_transition(
+    line: &str,
+    source: &SourceLocation,
+    state_variables: &BTreeSet<String>,
+    active_state: Option<&str>,
+    active_condition: Option<&SgdkLogicCondition>,
+) -> Vec<SgdkTransition> {
+    let mut transitions = Vec::new();
+    for variable in state_variables {
+        let Some(rhs) = find_assignment_rhs(line, variable) else {
+            continue;
+        };
+        let Some(target) = tokenize_identifiers(rhs).into_iter().next() else {
+            continue;
+        };
+        if !is_potential_state_value(&target) {
+            continue;
+        }
+        transitions.push(SgdkTransition {
+            variable: variable.clone(),
+            from: active_state.map(str::to_string),
+            to: target,
+            condition: active_condition.cloned(),
+            source: source.clone(),
+            confidence: if active_state.is_some() { 90 } else { 78 },
+        });
+    }
+    transitions
+}
+
+fn should_bridge_complex_state_expression(line: &str, state_variables: &BTreeSet<String>) -> bool {
+    for variable in state_variables {
+        let Some(rhs) = find_assignment_rhs(line, variable) else {
+            continue;
+        };
+        let rhs = rhs.trim().trim_end_matches(';').trim();
+        let simple_token = tokenize_identifiers(rhs).into_iter().next();
+        if simple_token
+            .as_deref()
+            .is_some_and(is_potential_state_value)
+            && !rhs.contains('(')
+            && !rhs.contains('?')
+            && !rhs.contains("->")
+        {
+            continue;
+        }
+        if rhs.contains('(') || rhs.contains('?') || rhs.contains("->") || rhs.contains('[') {
+            return true;
+        }
+    }
+    false
+}
+
+fn find_assignment_rhs<'a>(line: &'a str, variable: &str) -> Option<&'a str> {
+    for (index, ch) in line.char_indices() {
+        if ch != '=' {
+            continue;
+        }
+        let previous = line[..index].chars().rev().find(|ch| !ch.is_whitespace());
+        let next = line[index + ch.len_utf8()..]
+            .chars()
+            .find(|ch| !ch.is_whitespace());
+        if matches!(previous, Some('=' | '!' | '<' | '>')) || matches!(next, Some('=')) {
+            continue;
+        }
+        let lhs = line[..index].trim();
+        if trailing_identifier(lhs).as_deref() == Some(variable) {
+            return Some(&line[index + ch.len_utf8()..]);
+        }
+    }
+    None
+}
+
+fn make_logic_bridge_gap(
+    kind: &str,
+    subject: impl Into<String>,
+    detail: impl Into<String>,
+    source: Option<SourceLocation>,
+) -> SgdkSemanticGap {
+    let mut gap = make_semantic_gap(kind, subject, detail, source);
+    gap.suggestion = format!(
+        "Represent '{}' through SGDK Source Bridge until a typed semantic node is available.",
+        gap.kind
+    );
+    gap
+}
+
+fn extract_logic_actions(
+    line: &str,
+    source: &SourceLocation,
+    active_state: Option<&str>,
+) -> Vec<SgdkLogicAction> {
+    let mut actions = Vec::new();
+    let trimmed = line.trim();
+
+    if is_main_loop_line(trimmed) {
+        actions.push(SgdkLogicAction {
+            kind: "main_loop".to_string(),
+            call: None,
+            target: None,
+            args: Vec::new(),
+            expression: trimmed.to_string(),
+            state: active_state.map(str::to_string),
+            source: source.clone(),
+            confidence: 86,
+        });
+    }
+
+    for (call, kind) in common_sgdk_logic_calls() {
+        if let Some(args) = extract_call_args(trimmed, call) {
+            actions.push(SgdkLogicAction {
+                kind: kind.to_string(),
+                call: Some(call.to_string()),
+                target: args.first().cloned(),
+                args,
+                expression: trimmed.to_string(),
+                state: active_state.map(str::to_string),
+                source: source.clone(),
+                confidence: 90,
+            });
+        }
+    }
+
+    if trimmed.contains("JOY_readJoypad") || trimmed.contains("JOY_read(") {
+        actions.push(SgdkLogicAction {
+            kind: "input_read".to_string(),
+            call: extract_call_identifiers(trimmed)
+                .into_iter()
+                .find(|call| call == "JOY_readJoypad" || call == "JOY_read"),
+            target: extract_assignment_lhs(trimmed),
+            args: extract_call_args(trimmed, "JOY_readJoypad")
+                .or_else(|| extract_call_args(trimmed, "JOY_read"))
+                .unwrap_or_default(),
+            expression: trimmed.to_string(),
+            state: active_state.map(str::to_string),
+            source: source.clone(),
+            confidence: 88,
+        });
+    }
+
+    if trimmed.contains("SYS_doVBlankProcess") || trimmed.contains("VDP_waitVSync") {
+        actions.push(SgdkLogicAction {
+            kind: "vblank_wait".to_string(),
+            call: extract_call_identifiers(trimmed).into_iter().next(),
+            target: None,
+            args: Vec::new(),
+            expression: trimmed.to_string(),
+            state: active_state.map(str::to_string),
+            source: source.clone(),
+            confidence: 88,
+        });
+    }
+
+    if let Some(action) = extract_motion_action(trimmed, source, active_state) {
+        actions.push(action);
+    }
+
+    actions
+}
+
+fn common_sgdk_logic_calls() -> &'static [(&'static str, &'static str)] {
+    &[
+        ("SPR_setAnim", "play_animation"),
+        ("SPR_setPosition", "set_position"),
+        ("SPR_setHFlip", "set_hflip"),
+        ("SPR_setVisibility", "set_visibility"),
+        ("VDP_setHorizontalScroll", "scroll_horizontal"),
+        ("VDP_setVerticalScroll", "scroll_vertical"),
+        ("MAP_scrollH", "scroll_tilemap_horizontal"),
+        ("MAP_scrollV", "scroll_tilemap_vertical"),
+        ("MAP_scrollTo", "scroll_tilemap"),
+        ("XGM_startPlayPCM", "play_sound_pcm"),
+        ("XGM_startPlay", "play_music"),
+    ]
+}
+
+fn is_main_loop_line(line: &str) -> bool {
+    let compact = line.replace(' ', "");
+    compact.contains("while(1)") || compact.contains("while(TRUE)")
+}
+
+fn extract_call_args(line: &str, call: &str) -> Option<Vec<String>> {
+    let call_index = line.find(call)?;
+    let after_call = &line[call_index + call.len()..];
+    let open_offset = after_call.find('(')?;
+    let start = call_index + call.len() + open_offset + 1;
+    let mut depth = 1i32;
+    for (offset, ch) in line[start..].char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(split_args(&line[start..start + offset]));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn split_args(args: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut current = String::new();
+    let mut depth = 0i32;
+    for ch in args.chars() {
+        match ch {
+            '(' => {
+                depth += 1;
+                current.push(ch);
+            }
+            ')' => {
+                depth -= 1;
+                current.push(ch);
+            }
+            ',' if depth == 0 => {
+                let value = current.trim();
+                if !value.is_empty() {
+                    result.push(value.to_string());
+                }
+                current.clear();
+            }
+            _ => current.push(ch),
+        }
+    }
+    let value = current.trim();
+    if !value.is_empty() {
+        result.push(value.to_string());
+    }
+    result
+}
+
+fn extract_assignment_lhs(line: &str) -> Option<String> {
+    for (index, ch) in line.char_indices() {
+        if ch != '=' {
+            continue;
+        }
+        let previous = line[..index].chars().rev().find(|ch| !ch.is_whitespace());
+        let next = line[index + ch.len_utf8()..]
+            .chars()
+            .find(|ch| !ch.is_whitespace());
+        if matches!(previous, Some('=' | '!' | '<' | '>')) || matches!(next, Some('=')) {
+            continue;
+        }
+        return trailing_identifier(line[..index].trim());
+    }
+    None
+}
+
+fn extract_motion_action(
+    line: &str,
+    source: &SourceLocation,
+    active_state: Option<&str>,
+) -> Option<SgdkLogicAction> {
+    let operator = if line.contains("+=") {
+        "+="
+    } else if line.contains("-=") {
+        "-="
+    } else {
+        return None;
+    };
+    let (lhs, rhs) = line.split_once(operator)?;
+    let target = trailing_identifier(lhs.trim())?;
+    if !is_position_or_velocity_name(&target) {
+        return None;
+    }
+    Some(SgdkLogicAction {
+        kind: if target.to_ascii_lowercase().contains("vel") {
+            "set_velocity".to_string()
+        } else {
+            "move_entity".to_string()
+        },
+        call: None,
+        target: Some(target),
+        args: vec![
+            operator.to_string(),
+            rhs.trim().trim_end_matches(';').to_string(),
+        ],
+        expression: line.trim().to_string(),
+        state: active_state.map(str::to_string),
+        source: source.clone(),
+        confidence: 78,
+    })
+}
+
+fn is_position_or_velocity_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    matches!(lower.as_str(), "x" | "y" | "dx" | "dy" | "velx" | "vely")
+}
+
+fn extract_entity_refs(line: &str, source: &SourceLocation) -> Vec<SgdkEntityRef> {
+    let mut refs = Vec::new();
+    for token in tokenize_identifiers(line) {
+        if is_pool_limit_symbol(&token) {
+            refs.push(SgdkEntityRef {
+                name: pool_name_from_limit(&token),
+                kind: "pool_limit".to_string(),
+                source: source.clone(),
+            });
+        }
+        if is_logic_pool_name(&token) && line.contains(&format!("{token}[")) {
+            refs.push(SgdkEntityRef {
+                name: token,
+                kind: "pool_ref".to_string(),
+                source: source.clone(),
+            });
+        }
+    }
+    refs
+}
+
+fn push_source_mapping(
+    mappings: &mut Vec<SgdkCanonicalSourceMapping>,
+    source: SourceLocation,
+    model_path: String,
+    impact: String,
+) {
+    mappings.push(SgdkCanonicalSourceMapping {
+        source,
+        model_path,
+        impact,
+    });
+}
+
+fn sort_logic_states(states: &mut BTreeMap<String, SgdkState>) {
+    for state in states.values_mut() {
+        sort_logic_actions(&mut state.actions);
+    }
+}
+
+fn sort_logic_transitions(transitions: &mut Vec<SgdkTransition>) {
+    transitions.sort_by(|left, right| {
+        (
+            left.source.file.as_str(),
+            left.source.line,
+            left.variable.as_str(),
+            left.from.as_deref().unwrap_or(""),
+            left.to.as_str(),
+        )
+            .cmp(&(
+                right.source.file.as_str(),
+                right.source.line,
+                right.variable.as_str(),
+                right.from.as_deref().unwrap_or(""),
+                right.to.as_str(),
+            ))
+    });
+    transitions.dedup();
+}
+
+fn sort_logic_conditions(conditions: &mut Vec<SgdkLogicCondition>) {
+    conditions.sort_by(|left, right| {
+        (
+            left.source.file.as_str(),
+            left.source.line,
+            left.kind.as_str(),
+            left.expression.as_str(),
+            left.input.as_deref().unwrap_or(""),
+        )
+            .cmp(&(
+                right.source.file.as_str(),
+                right.source.line,
+                right.kind.as_str(),
+                right.expression.as_str(),
+                right.input.as_deref().unwrap_or(""),
+            ))
+    });
+    conditions.dedup();
+}
+
+fn sort_logic_actions(actions: &mut Vec<SgdkLogicAction>) {
+    actions.sort_by(|left, right| {
+        (
+            left.source.file.as_str(),
+            left.source.line,
+            left.kind.as_str(),
+            left.call.as_deref().unwrap_or(""),
+            left.target.as_deref().unwrap_or(""),
+            left.expression.as_str(),
+        )
+            .cmp(&(
+                right.source.file.as_str(),
+                right.source.line,
+                right.kind.as_str(),
+                right.call.as_deref().unwrap_or(""),
+                right.target.as_deref().unwrap_or(""),
+                right.expression.as_str(),
+            ))
+    });
+    actions.dedup();
+}
+
+fn sort_logic_source_mappings(mappings: &mut Vec<SgdkCanonicalSourceMapping>) {
+    mappings.sort_by(|left, right| {
+        (
+            left.source.file.as_str(),
+            left.source.line,
+            left.model_path.as_str(),
+            left.impact.as_str(),
+        )
+            .cmp(&(
+                right.source.file.as_str(),
+                right.source.line,
+                right.model_path.as_str(),
+                right.impact.as_str(),
+            ))
+    });
+    mappings.dedup();
+}
+
+fn sort_logic_gaps(gaps: &mut Vec<SgdkSemanticGap>) {
+    gaps.sort_by(|left, right| {
+        (
+            left.kind.as_str(),
+            left.subject.as_str(),
+            left.source
+                .as_ref()
+                .map(|source| source.file.as_str())
+                .unwrap_or(""),
+            left.source.as_ref().map(|source| source.line).unwrap_or(0),
+            left.detail.as_str(),
+        )
+            .cmp(&(
+                right.kind.as_str(),
+                right.subject.as_str(),
+                right
+                    .source
+                    .as_ref()
+                    .map(|source| source.file.as_str())
+                    .unwrap_or(""),
+                right.source.as_ref().map(|source| source.line).unwrap_or(0),
+                right.detail.as_str(),
+            ))
+    });
+    gaps.dedup();
+}
+
 fn derive_sgdk_canonical_model(
     project_name: &str,
     source_root: &str,
     resources: &[SgdkResourceInventory],
     code: &SgdkCodeInventory,
     gaps: &[SgdkSemanticGap],
+    logic_systems: Vec<SgdkLogicSystem>,
 ) -> SgdkCanonicalProjectModel {
     let mut entities = Vec::new();
     let mut source_mappings = Vec::new();
@@ -878,6 +2065,7 @@ fn derive_sgdk_canonical_model(
             timers,
             variables,
         }],
+        logic_systems,
         hardware_budget: SgdkCanonicalHardwareBudget {
             target: "megadrive".to_string(),
             vram_bytes: md_profile::MD_VRAM_BYTES,
@@ -2346,6 +3534,454 @@ void update_player(void) {
             .semantic_gaps
             .iter()
             .any(|gap| { gap.kind == "lossy_source_encoding" && gap.subject == "src/main.c" }));
+    }
+
+    fn first_logic_system(inventory: &SgdkProjectInventory) -> &SgdkLogicSystem {
+        inventory
+            .canonical_model
+            .logic_systems
+            .first()
+            .expect("SGDK logic system")
+    }
+
+    #[test]
+    fn sgdk_logic_extracts_enum_switch_state_machine_and_transitions() {
+        let root = temp_inventory_dir("logic-enum-switch");
+        write_file(
+            &root.join("src/main.c"),
+            r#"
+#include <genesis.h>
+typedef enum PlayerState { IDLE, RUN, JUMP } PlayerState;
+static PlayerState playerState = IDLE;
+static Sprite* player;
+void update_player(void) {
+    u16 joy = JOY_readJoypad(JOY_1);
+    switch (playerState) {
+        case IDLE:
+            if (joy & BUTTON_RIGHT) playerState = RUN;
+            break;
+        case RUN:
+            SPR_setAnim(player, 1);
+            if (joy & BUTTON_A) playerState = JUMP;
+            break;
+        case JUMP:
+            break;
+    }
+}
+int main(void) {
+    while (1) {
+        update_player();
+        SYS_doVBlankProcess();
+    }
+}
+"#,
+        );
+
+        let inventory = inspect_sgdk_project_for_nocode_inventory(&root).expect("inventory");
+        let logic = first_logic_system(&inventory);
+
+        assert!(logic
+            .state_machines
+            .iter()
+            .any(|machine| machine.variable == "playerState"));
+        for state in ["IDLE", "RUN", "JUMP"] {
+            assert!(
+                logic.states.iter().any(|item| item.name == state),
+                "{state}"
+            );
+        }
+        assert!(logic.transitions.iter().any(|transition| {
+            transition.from.as_deref() == Some("IDLE")
+                && transition.to == "RUN"
+                && transition.variable == "playerState"
+        }));
+        assert!(logic.transitions.iter().any(|transition| {
+            transition.from.as_deref() == Some("RUN")
+                && transition.to == "JUMP"
+                && transition.variable == "playerState"
+        }));
+        assert!(logic.actions.iter().any(|action| {
+            action.kind == "play_animation"
+                && action.call.as_deref() == Some("SPR_setAnim")
+                && action.state.as_deref() == Some("RUN")
+                && action.source.file == "src/main.c"
+        }));
+        assert!(logic
+            .actions
+            .iter()
+            .any(|action| action.kind == "main_loop"));
+        assert!(logic
+            .actions
+            .iter()
+            .any(|action| action.kind == "vblank_wait"));
+    }
+
+    #[test]
+    fn sgdk_logic_extracts_define_state_values_and_if_transition() {
+        let root = temp_inventory_dir("logic-define-state");
+        write_file(
+            &root.join("src/main.c"),
+            r#"
+#include <genesis.h>
+#define STATE_TITLE 0
+#define STATE_PLAY 1
+static u16 gameState = STATE_TITLE;
+void update_game(void) {
+    if (gameState == STATE_TITLE) {
+        gameState = STATE_PLAY;
+    }
+}
+"#,
+        );
+
+        let inventory = inspect_sgdk_project_for_nocode_inventory(&root).expect("inventory");
+        let logic = first_logic_system(&inventory);
+
+        assert!(logic
+            .states
+            .iter()
+            .any(|state| state.name == "STATE_TITLE" && state.value.as_deref() == Some("0")));
+        assert!(logic
+            .states
+            .iter()
+            .any(|state| state.name == "STATE_PLAY" && state.value.as_deref() == Some("1")));
+        assert!(logic.conditions.iter().any(|condition| {
+            condition.variable.as_deref() == Some("gameState")
+                && condition.value.as_deref() == Some("STATE_TITLE")
+        }));
+        assert!(logic.transitions.iter().any(|transition| {
+            transition.variable == "gameState"
+                && transition.from.as_deref() == Some("STATE_TITLE")
+                && transition.to == "STATE_PLAY"
+        }));
+    }
+
+    #[test]
+    fn sgdk_logic_extracts_joy_buttons_and_motion_actions() {
+        let root = temp_inventory_dir("logic-input");
+        write_file(
+            &root.join("src/main.c"),
+            r#"
+#include <genesis.h>
+static s16 x;
+static s16 y;
+static s16 velX;
+void update_player(void) {
+    u16 joy = JOY_readJoypad(JOY_1);
+    if (joy & BUTTON_LEFT) x -= 2;
+    if (joy & BUTTON_RIGHT) x += 2;
+    if (joy & BUTTON_A) velX += 1;
+}
+"#,
+        );
+
+        let inventory = inspect_sgdk_project_for_nocode_inventory(&root).expect("inventory");
+        let logic = first_logic_system(&inventory);
+
+        for button in ["BUTTON_LEFT", "BUTTON_RIGHT", "BUTTON_A"] {
+            assert!(
+                logic
+                    .conditions
+                    .iter()
+                    .any(|condition| condition.input.as_deref() == Some(button)),
+                "{button}"
+            );
+        }
+        assert!(logic.actions.iter().any(|action| {
+            action.kind == "input_read" && action.target.as_deref() == Some("joy")
+        }));
+        assert!(logic.actions.iter().any(|action| {
+            action.kind == "move_entity" && action.target.as_deref() == Some("x")
+        }));
+        assert!(logic.actions.iter().any(|action| {
+            action.kind == "set_velocity" && action.target.as_deref() == Some("velX")
+        }));
+    }
+
+    #[test]
+    fn sgdk_logic_extracts_sprite_animation_inside_state() {
+        let root = temp_inventory_dir("logic-sprite-state");
+        write_file(
+            &root.join("src/main.c"),
+            r#"
+#include <genesis.h>
+#define STATE_RUN 1
+static u16 state = STATE_RUN;
+static Sprite* player;
+void update_player(void) {
+    switch (state) {
+        case STATE_RUN:
+            SPR_setAnim(player, 2);
+            SPR_setPosition(player, 24, 32);
+            break;
+    }
+}
+"#,
+        );
+
+        let inventory = inspect_sgdk_project_for_nocode_inventory(&root).expect("inventory");
+        let logic = first_logic_system(&inventory);
+
+        assert!(logic.actions.iter().any(|action| {
+            action.kind == "play_animation"
+                && action.state.as_deref() == Some("STATE_RUN")
+                && action.args == vec!["player".to_string(), "2".to_string()]
+        }));
+        assert!(logic.actions.iter().any(|action| {
+            action.kind == "set_position" && action.state.as_deref() == Some("STATE_RUN")
+        }));
+    }
+
+    #[test]
+    fn sgdk_logic_extracts_direct_next_state_assignment() {
+        let root = temp_inventory_dir("logic-next-state");
+        write_file(
+            &root.join("src/main.c"),
+            r#"
+#include <genesis.h>
+#define STATE_START 0
+#define NEXT_STATE 1
+static u16 currentState = STATE_START;
+void update_state(void) {
+    currentState = NEXT_STATE;
+}
+"#,
+        );
+
+        let inventory = inspect_sgdk_project_for_nocode_inventory(&root).expect("inventory");
+        let logic = first_logic_system(&inventory);
+
+        assert!(logic.transitions.iter().any(|transition| {
+            transition.variable == "currentState" && transition.to == "NEXT_STATE"
+        }));
+    }
+
+    #[test]
+    fn sgdk_logic_keeps_complex_macro_as_bridge_without_fake_transition() {
+        let root = temp_inventory_dir("logic-macro-bridge");
+        write_file(
+            &root.join("src/main.c"),
+            r#"
+#include <genesis.h>
+#define STATE_TITLE 0
+#define STATE_PLAY 1
+#define SET_STATE(next) do { state = next; } while (0)
+static u16 state = STATE_TITLE;
+void update_game(void) {
+    SET_STATE(STATE_PLAY);
+}
+"#,
+        );
+
+        let inventory = inspect_sgdk_project_for_nocode_inventory(&root).expect("inventory");
+        let logic = first_logic_system(&inventory);
+
+        assert!(inventory
+            .semantic_gaps
+            .iter()
+            .any(|gap| gap.kind == "function_like_macro" && gap.subject == "SET_STATE"));
+        assert!(inventory
+            .canonical_model
+            .compatibility_bridges
+            .iter()
+            .any(|bridge| {
+                bridge.kind == "function_like_macro" && bridge.subject == "SET_STATE"
+            }));
+        assert!(logic
+            .semantic_gaps
+            .iter()
+            .any(|gap| gap.kind == "function_like_macro" && gap.subject == "SET_STATE"));
+        assert!(!logic
+            .transitions
+            .iter()
+            .any(|transition| transition.variable == "state" && transition.to == "STATE_PLAY"));
+    }
+
+    #[test]
+    fn sgdk_logic_handles_blaze_like_state_and_pools_without_false_nodes() {
+        let root = temp_inventory_dir("logic-blaze-like");
+        write_file(
+            &root.join("src/main.c"),
+            r#"
+#include <genesis.h>
+#define STATE_PLAY 1
+#define MAX_ENEMIES 48
+#define MAX_BULLETS 24
+typedef struct Enemy {
+    s16 x;
+    s16 y;
+    u16 state;
+    Sprite* sprite;
+} Enemy;
+typedef struct Bullet {
+    s16 x;
+    s16 y;
+    Sprite* sprite;
+} Bullet;
+static Enemy enemy[MAX_ENEMIES];
+static Bullet bullets[MAX_BULLETS];
+static s16 dx;
+void update_blaze(void) {
+    for (u16 i = 0; i < MAX_ENEMIES; i++) {
+        switch (enemy[i].state) {
+            case STATE_PLAY:
+                enemy[i].x += dx;
+                SPR_setPosition(enemy[i].sprite, enemy[i].x, enemy[i].y);
+                break;
+        }
+    }
+    for (u16 i = 0; i < MAX_BULLETS; i++) {
+        SPR_setVisibility(bullets[i].sprite, VISIBLE);
+    }
+}
+"#,
+        );
+
+        let inventory = inspect_sgdk_project_for_nocode_inventory(&root).expect("inventory");
+        let logic = first_logic_system(&inventory);
+
+        assert!(logic
+            .entities_refs
+            .iter()
+            .any(|entity| entity.name == "enemy" && entity.kind == "pool"));
+        assert!(logic
+            .entities_refs
+            .iter()
+            .any(|entity| entity.name == "bullets" && entity.kind == "pool"));
+        assert!(logic
+            .entities_refs
+            .iter()
+            .any(|entity| entity.name == "enemies" && entity.kind == "pool_limit"));
+        assert!(logic.actions.iter().any(|action| {
+            action.kind == "set_position" && action.call.as_deref() == Some("SPR_setPosition")
+        }));
+        assert!(logic.actions.iter().any(|action| {
+            action.kind == "set_visibility" && action.call.as_deref() == Some("SPR_setVisibility")
+        }));
+        assert!(logic
+            .transitions
+            .iter()
+            .all(|transition| transition.source.file == "src/main.c"));
+    }
+
+    #[test]
+    #[ignore = "host-local SGDK_Engines vertical semantic report"]
+    fn sgdk_logic_real_corpus_vertical_reports() {
+        let corpus_root = std::env::var("RDS_SGDK_CORPUS_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(r"F:\Projects\MegaDrive_DEV\SGDK_Engines"));
+        assert!(
+            corpus_root.is_dir(),
+            "SGDK corpus root missing: {}",
+            corpus_root.display()
+        );
+
+        let report_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target-test")
+            .join("validation")
+            .join("sgdk-logic-extractor-v1");
+        fs::create_dir_all(&report_dir).expect("create logic report dir");
+
+        let verticals = [
+            ("Platformer 2", ["platformer 2", "platformer_2"]),
+            ("NEXZR MD", ["nexzr md", "nexzr"]),
+            ("BLAZE_ENGINE", ["blaze_engine", "blaze"]),
+        ];
+        let mut reports = Vec::new();
+        for (label, needles) in verticals {
+            let Some(project_root) = find_project_dir_by_needles(&corpus_root, &needles) else {
+                println!("SGDK_LOGIC_VERTICAL_MISSING label={label}");
+                continue;
+            };
+            let inventory =
+                inspect_sgdk_project_for_nocode_inventory(&project_root).expect("inventory");
+            let logic = first_logic_system(&inventory);
+            let bridges = inventory.canonical_model.compatibility_bridges.len();
+            let blocking_gaps = logic
+                .semantic_gaps
+                .iter()
+                .filter(|gap| gap.blocks_nocode || gap.blocks_round_trip)
+                .count();
+            let gap_kinds = logic
+                .semantic_gaps
+                .iter()
+                .map(|gap| gap.kind.clone())
+                .collect::<BTreeSet<_>>();
+            let summary = serde_json::json!({
+                "label": label,
+                "project_name": inventory.project_name,
+                "root": project_root.to_string_lossy(),
+                "source_files": inventory.source_files.len(),
+                "state_machines": logic.state_machines.len(),
+                "states": logic.states.len(),
+                "transitions": logic.transitions.len(),
+                "convertible_actions": logic.actions.len(),
+                "bridges": bridges,
+                "blocking_gaps": blocking_gaps,
+                "gap_kinds": gap_kinds,
+            });
+            let json_path = report_dir.join(format!("{}.json", canonical_id(label)));
+            let md_path = report_dir.join(format!("{}.md", canonical_id(label)));
+            fs::write(
+                &json_path,
+                format!(
+                    "{}\n",
+                    serde_json::to_string_pretty(&summary).expect("serialize vertical summary")
+                ),
+            )
+            .expect("write vertical json");
+            fs::write(
+                &md_path,
+                format!(
+                    "# SGDK Logic Extractor v1 - {label}\n\n- FSMs: {}\n- States: {}\n- Transitions: {}\n- Convertible actions: {}\n- Bridges: {}\n- Blocking gaps: {}\n",
+                    logic.state_machines.len(),
+                    logic.states.len(),
+                    logic.transitions.len(),
+                    logic.actions.len(),
+                    bridges,
+                    blocking_gaps
+                ),
+            )
+            .expect("write vertical md");
+            reports.push(summary);
+            println!(
+                "SGDK_LOGIC_VERTICAL label={} fsm={} states={} transitions={} actions={} bridges={} blocking_gaps={}",
+                label,
+                logic.state_machines.len(),
+                logic.states.len(),
+                logic.transitions.len(),
+                logic.actions.len(),
+                bridges,
+                blocking_gaps
+            );
+        }
+        assert!(
+            !reports.is_empty(),
+            "at least one requested vertical project should be present"
+        );
+    }
+
+    fn find_project_dir_by_needles(root: &Path, needles: &[&str]) -> Option<PathBuf> {
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(current) = stack.pop() {
+            let lower = current
+                .file_name()
+                .map(|name| name.to_string_lossy().to_ascii_lowercase())
+                .unwrap_or_default();
+            if needles.iter().any(|needle| lower.contains(needle)) {
+                return Some(current);
+            }
+            let Ok(entries) = fs::read_dir(&current) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                }
+            }
+        }
+        None
     }
 
     #[test]

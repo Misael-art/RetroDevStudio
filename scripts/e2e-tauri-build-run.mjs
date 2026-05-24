@@ -1,16 +1,89 @@
 #!/usr/bin/env node
 
-import { access, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  appendFile,
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import {
+  UI_LAYOUT_ORACLE_RESOLUTIONS,
+  UI_LAYOUT_ORACLE_TARGETS,
+  buildUiLayoutOracleReport,
+  evaluateUiLayoutOracleSnapshot,
+} from "./ui-layout-oracle.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
+
+function resolveLedgerMarker(options, projectMetadata) {
+  const suffix = projectMetadata.target === "snes" ? "snes" : "md";
+  switch (options.scenario ?? "build-run") {
+    case "build-run":
+      return `smoke_${suffix}`;
+    case "live-overflow":
+      return `live_overflow_${suffix}`;
+    case "live-overflow-vram":
+      return `live_vram_overflow_${suffix}`;
+    case "live-warning-vram":
+      return `live_vram_warning_${suffix}`;
+    case "live-warning-sprites":
+      return `live_sprite_warning_${suffix}`;
+    case "live-ok":
+      return `live_ok_${suffix}`;
+    case "live-error":
+      return `live_error_${suffix}`;
+    case "live-stale":
+      return `live_stale_${suffix}`;
+    default:
+      return null;
+  }
+}
+
+function resolveE2eLedgerPath() {
+  if (process.env.GITHUB_ACTIONS && process.env.RUNNER_TEMP) {
+    return path.join(process.env.RUNNER_TEMP, "desktop-e2e-passed.txt");
+  }
+
+  if (process.env.RDS_E2E_LEDGER) {
+    return process.env.RDS_E2E_LEDGER;
+  }
+
+  if (process.env.RUNNER_TEMP) {
+    return path.join(process.env.RUNNER_TEMP, "desktop-e2e-passed.txt");
+  }
+
+  return null;
+}
+
+async function recordE2eLedgerSuccess(options, projectMetadata) {
+  // No CI o workflow desktop-e2e grava marcadores via Add-Content (pwsh).
+  // Evita corrida/ path divergente quando npm nao herda RDS_E2E_LEDGER no Windows.
+  if (process.env.GITHUB_ACTIONS) {
+    return;
+  }
+
+  const marker = resolveLedgerMarker(options, projectMetadata);
+  const ledgerPath = resolveE2eLedgerPath();
+  if (!marker || !ledgerPath) {
+    return;
+  }
+
+  await appendFile(ledgerPath, `${marker}\n`, "utf8");
+  console.log(`[ledger] ${marker} -> ${ledgerPath}`);
+}
 const driverServerUrl = process.env.RDS_E2E_DRIVER_URL ?? "http://127.0.0.1:4444";
 const defaultDebugAppPath = path.join(
   repoRoot,
@@ -45,6 +118,10 @@ const buildReportPath = path.join(
 const manualQaStatusPath = path.join(
   validationDir,
   "manual-qa-status.json"
+);
+const uiLayoutOracleReportPath = path.join(
+  validationDir,
+  "ui-layout-oracle.json"
 );
 let currentE2eRunContext = null;
 
@@ -187,6 +264,7 @@ function parseArgs(argv) {
           "live-warning-sprites",
           "live-error",
           "live-stale",
+          "build-blocked-diagnostic",
           "onboarding-shell",
           "qa-rc",
         ].includes(
@@ -388,6 +466,87 @@ function buildLiveOkScenario(target) {
     expectedToolbarState: "LIVE",
     expectedDetailFragment: "Preview live sincronizado.",
   };
+}
+
+function buildMissingAssetScene(target) {
+  return {
+    scene_id: "build_blocked_diagnostic",
+    display_name: "Build Blocked Diagnostic",
+    background_layers: [],
+    palettes: [],
+    entities: [
+      {
+        entity_id: "missing_asset_sprite",
+        transform: { x: 16, y: 16 },
+        components: {
+          sprite: {
+            asset:
+              target === "snes"
+                ? "assets/sprites/missing_build_diagnostic.ppm"
+                : "assets/sprites/missing_build_diagnostic.png",
+            frame_width: 8,
+            frame_height: 8,
+            palette_slot: 0,
+            animations: {},
+            priority: "foreground",
+          },
+        },
+      },
+    ],
+  };
+}
+
+async function writeArtStudioVerticalFixtures(projectDir) {
+  const fixtureDir = path.join(projectDir, ".rds", "e2e-artstudio");
+  await mkdir(fixtureDir, { recursive: true });
+
+  const width = 64;
+  const height = 64;
+  const pixels = Buffer.alloc(width * height * 3);
+  const colors = [
+    [244, 80, 80],
+    [80, 220, 120],
+    [80, 140, 255],
+    [250, 220, 80],
+  ];
+  const keyColor = [255, 0, 255];
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const quadrant = (x >= 32 ? 1 : 0) + (y >= 32 ? 2 : 0);
+      const localX = x % 32;
+      const localY = y % 32;
+      const color =
+        localX >= 4 && localX < 28 && localY >= 4 && localY < 28
+          ? colors[quadrant]
+          : keyColor;
+      const offset = (y * width + x) * 3;
+      pixels[offset] = color[0];
+      pixels[offset + 1] = color[1];
+      pixels[offset + 2] = color[2];
+    }
+  }
+
+  const spritePath = path.join(fixtureDir, "artstudio-hero-sheet.ppm");
+  await writeFile(
+    spritePath,
+    Buffer.concat([Buffer.from(`P6\n${width} ${height}\n255\n`, "ascii"), pixels])
+  );
+
+  const commandPath = path.join(fixtureDir, "command.dat");
+  await writeFile(
+    commandPath,
+    [
+      "[Command]",
+      "name = Slash",
+      "command = _6, _P",
+      "time = 10",
+      "",
+    ].join("\n"),
+    "utf8"
+  );
+
+  return { spritePath, commandPath };
 }
 
 function buildLiveOverflowScenario(target, scenario) {
@@ -773,6 +932,18 @@ async function readAutomationState(sessionId) {
   );
 }
 
+async function waitForLiveValidationFresh(sessionId, timeoutMs) {
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      return state?.hwValidationState === "fresh" ? state : false;
+    },
+    timeoutMs,
+    "Validacao live nao ficou fresh apos injetar draft.",
+    250
+  );
+}
+
 async function callAutomationApi(sessionId, methodName, args = []) {
   const result = await executeAsyncScript(
     sessionId,
@@ -798,6 +969,40 @@ async function callAutomationApi(sessionId, methodName, args = []) {
   }
 
   return result.value;
+}
+
+async function callArtStudioApi(sessionId, methodName, args = []) {
+  const result = await executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const api = window.__RDS_ARTSTUDIO_E2E__;
+      const methodName = arguments[0];
+      const methodArgs = Array.isArray(arguments[1]) ? arguments[1] : [];
+      if (!api || typeof api[methodName] !== "function") {
+        done({ ok: false, error: "Metodo ArtStudio E2E indisponivel: " + methodName });
+        return;
+      }
+
+      Promise.resolve(api[methodName](...methodArgs))
+        .then((value) => done({ ok: true, value }))
+        .catch((error) => done({ ok: false, error: String(error) }));
+    `,
+    [methodName, args]
+  );
+
+  if (!result?.ok) {
+    fail(`Falha na API ArtStudio E2E (${methodName}): ${result?.error ?? "sem diagnostico"}`);
+  }
+
+  return result.value;
+}
+
+async function readArtStudioState(sessionId) {
+  return executeScript(
+    sessionId,
+    "return window.__RDS_ARTSTUDIO_E2E__?.getState?.() ?? null;"
+  );
 }
 
 async function tryAutomationApi(sessionId, methodName, args = [], timeoutMs = 8000) {
@@ -861,6 +1066,7 @@ function createManualQaReport() {
       E: { status: "pending", note: null, status_code: null, error_category: null, started_at: null, finished_at: null, duration_ms: null },
       F: { status: "pending", note: null, status_code: null, error_category: null, started_at: null, finished_at: null, duration_ms: null },
       G: { status: "pending", note: null, status_code: null, error_category: null, started_at: null, finished_at: null, duration_ms: null },
+      H: { status: "pending", note: null, status_code: null, error_category: null, started_at: null, finished_at: null, duration_ms: null },
     },
   };
 }
@@ -1227,6 +1433,433 @@ async function updateInspectorIntField(sessionId, label, value) {
   }
 }
 
+async function setSessionWindowRect(sessionId, width, height) {
+  const targetWidth = Number(width);
+  const targetHeight = Number(height);
+  const widthTolerance = 64;
+  const heightTolerance = 96;
+  try {
+    await webdriverRequest("POST", `/session/${sessionId}/window/fullscreen`, {
+      fullscreen: false,
+    });
+  } catch {
+    // Alguns drivers nao expõem fullscreen; seguir com window/rect.
+  }
+  try {
+    await webdriverRequest("POST", `/session/${sessionId}/window/minimize`);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  } catch {
+    // minimize opcional.
+  }
+  let lastSize = null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await webdriverRequest("POST", `/session/${sessionId}/window/rect`, {
+      x: 0,
+      y: 0,
+      width: targetWidth,
+      height: targetHeight,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 500 + attempt * 350));
+    lastSize = await executeScript(
+      sessionId,
+      `return {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        outerWidth: window.outerWidth,
+        outerHeight: window.outerHeight,
+      };`
+    );
+    if (
+      lastSize &&
+      Math.abs(Number(lastSize.width) - targetWidth) <= widthTolerance &&
+      Math.abs(Number(lastSize.height) - targetHeight) <= heightTolerance
+    ) {
+      await executeScript(sessionId, `window.dispatchEvent(new Event("resize"));`);
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      return;
+    }
+  }
+  fail(
+    `Janela do WebDriver nao redimensionou para ${targetWidth}x${targetHeight} (atual inner=${lastSize?.width ?? "?"}x${lastSize?.height ?? "?"}, outer=${lastSize?.outerWidth ?? "?"}x${lastSize?.outerHeight ?? "?"}).`
+  );
+}
+
+async function collectUiLayoutOracleSnapshot(sessionId, targetId, resolutionTag) {
+  return executeScript(
+    sessionId,
+    `
+      const targetId = arguments[0];
+      const resolutionTag = arguments[1];
+      const allowedHorizontalScrollTestIds = new Set([
+        "unified-topbar",
+        "unified-topbar-center",
+        "unified-topbar-breadcrumbs",
+        "artstudio-timeline",
+        "artstudio-command-panel",
+        "artstudio-main-stage",
+        "artstudio-inspector",
+        "nodegraph-canvas",
+        "nodegraph-side-rail",
+        "viewport-scene-toolbar",
+        "viewport-scene-stage",
+        "viewport-game-stage",
+        "shortcut-map",
+      ]);
+
+      function rectOf(node) {
+        if (!(node instanceof Element)) return null;
+        const rect = node.getBoundingClientRect();
+        return {
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height,
+        };
+      }
+
+      function visible(node) {
+        if (!(node instanceof Element)) return false;
+        const rect = node.getBoundingClientRect();
+        if (rect.width <= 2 || rect.height <= 2) return false;
+        const style = window.getComputedStyle(node);
+        return style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || "1") > 0.02;
+      }
+
+      function hitTestVisible(node) {
+        if (!(node instanceof Element)) return false;
+        const rect = node.getBoundingClientRect();
+        const x = Math.min(Math.max(rect.left + rect.width / 2, 0), window.innerWidth - 1);
+        const y = Math.min(Math.max(rect.top + rect.height / 2, 0), window.innerHeight - 1);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+        const hit = document.elementFromPoint(x, y);
+        return Boolean(hit && (hit === node || node.contains(hit)));
+      }
+
+      function ownTestId(node) {
+        return node instanceof Element ? node.getAttribute("data-testid") || "" : "";
+      }
+
+      function nearestTestId(node) {
+        let current = node instanceof Element ? node : null;
+        while (current) {
+          const testId = ownTestId(current);
+          if (testId) return testId;
+          current = current.parentElement;
+        }
+        return "";
+      }
+
+      function verticalScrollRegion(node) {
+        let current = node instanceof Element ? node.parentElement : null;
+        while (current && current !== document.documentElement && current !== document.body) {
+          if (current instanceof HTMLElement) {
+            const style = window.getComputedStyle(current);
+            const scrollable =
+              ["auto", "scroll", "overlay"].includes(style.overflowY) &&
+              current.scrollHeight > current.clientHeight + 2;
+            if (scrollable) {
+              return {
+                key: ownTestId(current) || nearestTestId(current) || current.tagName.toLowerCase(),
+                scrollTop: current.scrollTop,
+                clientHeight: current.clientHeight,
+                scrollHeight: current.scrollHeight,
+              };
+            }
+          }
+          current = current.parentElement;
+        }
+        return null;
+      }
+
+      function horizontalScrollRegion(node) {
+        let current = node instanceof Element ? node.parentElement : null;
+        while (current && current !== document.documentElement && current !== document.body) {
+          if (current instanceof HTMLElement) {
+            const style = window.getComputedStyle(current);
+            const scrollable =
+              ["auto", "scroll", "overlay"].includes(style.overflowX) &&
+              current.scrollWidth > current.clientWidth + 2;
+            if (scrollable) {
+              return {
+                key: ownTestId(current) || nearestTestId(current) || current.tagName.toLowerCase(),
+                allowed: horizontalScrollAllowed(current),
+                scrollLeft: current.scrollLeft,
+                clientWidth: current.clientWidth,
+                scrollWidth: current.scrollWidth,
+              };
+            }
+          }
+          current = current.parentElement;
+        }
+        return null;
+      }
+
+      function keyFor(node, index) {
+        const testId = nearestTestId(node);
+        const own = ownTestId(node);
+        const label =
+          own ||
+          node.getAttribute("aria-label") ||
+          node.getAttribute("title") ||
+          node.textContent?.replace(/\\s+/g, " ").trim().slice(0, 40) ||
+          node.tagName.toLowerCase();
+        return String(testId || "no-testid") + ":" + String(label) + ":" + String(index);
+      }
+
+      function snapshotNode(node, key) {
+        if (!(node instanceof HTMLElement || node instanceof SVGElement)) return null;
+        const rect = rectOf(node);
+        const text = node.textContent?.replace(/\\s+/g, " ").trim() ?? "";
+        const scrollRegion = verticalScrollRegion(node);
+        const xScrollRegion = horizontalScrollRegion(node);
+        const hasTooltip = (() => {
+          let current = node;
+          for (let depth = 0; depth < 6 && current instanceof Element; depth += 1) {
+            if ((current.getAttribute("title") || "").trim()) return true;
+            if ((current.getAttribute("aria-label") || "").trim()) return true;
+            if ((current.getAttribute("aria-describedby") || "").trim()) return true;
+            current = current.parentElement;
+          }
+          return false;
+        })();
+        return {
+          key,
+          tag: node.tagName.toLowerCase(),
+          testId: ownTestId(node),
+          nearestTestId: nearestTestId(node),
+          text,
+          title: node.getAttribute("title") || "",
+          ariaLabel: node.getAttribute("aria-label") || "",
+          ariaDescribedBy: node.getAttribute("aria-describedby") || "",
+          hasTooltip,
+          role: node.getAttribute("role") || "",
+          rect,
+          visible: visible(node),
+          hitTestVisible: hitTestVisible(node),
+          disabled: Boolean(node.disabled || node.getAttribute("aria-disabled") === "true"),
+          clientWidth: node.clientWidth ?? 0,
+          clientHeight: node.clientHeight ?? 0,
+          scrollWidth: node.scrollWidth ?? 0,
+          scrollHeight: node.scrollHeight ?? 0,
+          dataVisible: node.getAttribute("data-visible") || "",
+          insideVerticalScrollRegion: Boolean(scrollRegion),
+          verticalScrollRegion: scrollRegion,
+          insideAllowedHorizontalScrollRegion: Boolean(xScrollRegion?.allowed),
+          horizontalScrollRegion: xScrollRegion,
+        };
+      }
+
+      function oracleScopeRoot() {
+        if (targetId === "import-wizard") {
+          return document.querySelector('[data-testid="project-wizard-body"]') || document.body;
+        }
+        return document.body;
+      }
+
+      function scopedQueryAll(root, selector) {
+        const nodes = [];
+        if (root instanceof Element && root.matches(selector)) nodes.push(root);
+        if (root instanceof Element || root instanceof Document) {
+          nodes.push(...Array.from(root.querySelectorAll(selector)));
+        }
+        return nodes;
+      }
+
+      function scopedTree(root) {
+        if (!(root instanceof Element)) return [];
+        return [root, ...Array.from(root.querySelectorAll("*"))];
+      }
+
+      function isLeafTextCandidate(node, clickableSelector) {
+        if (!(node instanceof HTMLElement)) return false;
+        const tag = node.tagName.toLowerCase();
+        if (["button", "label", "h1", "h2", "h3", "p", "span", "dd", "dt", "kbd"].includes(tag)) {
+          return true;
+        }
+        const own = ownTestId(node);
+        if (!own) return false;
+        if (node.querySelector(clickableSelector)) return false;
+        const text = node.textContent?.replace(/\\s+/g, " ").trim() ?? "";
+        if (text.length > 160) return false;
+        let directText = "";
+        for (const child of Array.from(node.childNodes)) {
+          if (child.nodeType === Node.TEXT_NODE) directText += child.textContent || "";
+        }
+        return directText.replace(/\\s+/g, " ").trim().length > 0 && node.children.length <= 2;
+      }
+
+      function bySelector(selector, key) {
+        return snapshotNode(document.querySelector(selector), key);
+      }
+
+      function mainVisual(selector, containerSelector, key, kind) {
+        const node = document.querySelector(selector);
+        if (!(node instanceof HTMLElement || node instanceof SVGElement)) return null;
+        const container = containerSelector ? document.querySelector(containerSelector) : node.parentElement;
+        return {
+          ...snapshotNode(node, key),
+          kind,
+          containerRect: rectOf(container instanceof Element ? container : node.parentElement),
+        };
+      }
+
+      function horizontalScrollAllowed(node) {
+        if (!(node instanceof Element)) return false;
+        if (node.closest('[data-rds-allow-horizontal-scroll="true"]')) return true;
+        if (node.closest("pre, code")) return true;
+        let current = node;
+        while (current) {
+          const testId = ownTestId(current);
+          if (allowedHorizontalScrollTestIds.has(testId)) return true;
+          current = current.parentElement;
+        }
+        return false;
+      }
+
+      const topbar = document.querySelector('[data-testid="unified-topbar"]');
+      const topbarChildren = topbar ? Array.from(topbar.children) : [];
+      const elements = {
+        topbar: bySelector('[data-testid="unified-topbar"]', "topbar"),
+        topbarLeft: snapshotNode(topbarChildren[0], "topbar-left"),
+        topbarCenter: snapshotNode(topbarChildren[1], "topbar-center"),
+        topbarRight: snapshotNode(topbarChildren[2], "topbar-right"),
+        buildButton: bySelector('[data-testid="toolbar-build-run"]', "toolbar-build-run"),
+        centerPanel: bySelector('[data-panel-id="center"], #center', "center-panel"),
+        leftPanel: bySelector('[data-panel-id="left"], #left', "left-panel"),
+        rightPanel: bySelector('[data-panel-id="right"], #right', "right-panel"),
+        workspaceGuide: bySelector('[data-testid="workspace-guide"]', "workspace-guide"),
+        consoleDrawer: bySelector('[data-testid="console-drawer"]', "console-drawer"),
+        statusBar: bySelector('[data-testid="production-status-bar"]', "production-status-bar"),
+        nodegraphRail: bySelector('[data-testid="nodegraph-side-rail"]', "nodegraph-side-rail"),
+        nodegraphCanvas: bySelector('[data-testid="nodegraph-canvas"]', "nodegraph-canvas"),
+        nodegraphMinimap: bySelector('[data-testid="nodegraph-minimap"]', "nodegraph-minimap"),
+        nodegraphCanvasToolbar: bySelector('[data-testid="nodegraph-canvas-toolbar"]', "nodegraph-canvas-toolbar"),
+        importWizard: bySelector('[data-testid="project-wizard-body"]', "project-wizard-body"),
+        runtimeSetup: bySelector('[data-testid="runtime-setup-panel"]', "runtime-setup-panel"),
+      };
+      const scopeRoot = oracleScopeRoot();
+
+      const clickableSelector = [
+        "button",
+        "a[href]",
+        "input",
+        "select",
+        "textarea",
+        "summary",
+        '[role="button"]',
+        '[tabindex]:not([tabindex="-1"])',
+      ].join(",");
+      const clickables = scopedQueryAll(scopeRoot, clickableSelector)
+        .filter((node) => visible(node))
+        .map((node, index) => snapshotNode(node, keyFor(node, index)))
+        .filter(Boolean);
+
+      const criticalSelector = [
+        "button",
+        "[data-testid]",
+        "h1",
+        "h2",
+        "h3",
+        "label",
+        "p",
+        "span",
+        "dd",
+        "dt",
+        "kbd",
+      ].join(",");
+      const criticalTexts = scopedQueryAll(scopeRoot, criticalSelector)
+        .filter((node) => {
+          if (!visible(node)) return false;
+          const text = node.textContent?.replace(/\\s+/g, " ").trim() ?? "";
+          if (text.length < 3) return false;
+          if (!isLeafTextCandidate(node, clickableSelector)) return false;
+          const truncated =
+            node.scrollWidth > node.clientWidth + 2 ||
+            node.scrollHeight > node.clientHeight + 2;
+          if (!truncated) return false;
+          const testId = nearestTestId(node);
+          return Boolean(
+            node.tagName.toLowerCase() === "button" ||
+              testId.includes("toolbar") ||
+              testId.includes("workspace") ||
+              testId.includes("inspector") ||
+              testId.includes("nodegraph") ||
+              testId.includes("artstudio") ||
+              testId.includes("runtime") ||
+              testId.includes("wizard") ||
+              testId.includes("viewport") ||
+              testId.includes("tools") ||
+              testId.includes("production")
+          );
+        })
+        .slice(0, 80)
+        .map((node, index) => snapshotNode(node, keyFor(node, index)))
+        .filter(Boolean);
+
+      const horizontalScrolls = scopedTree(scopeRoot)
+        .filter((node) => {
+          if (!(node instanceof HTMLElement)) return false;
+          if (!visible(node)) return false;
+          const overflowX = window.getComputedStyle(node).overflowX;
+          if (!["auto", "scroll", "overlay"].includes(overflowX)) return false;
+          return node.scrollWidth > node.clientWidth + 2 && node.clientWidth > 24;
+        })
+        .slice(0, 80)
+        .map((node, index) => ({
+          ...snapshotNode(node, keyFor(node, index)),
+          allowed: horizontalScrollAllowed(node),
+        }));
+
+      const mainVisuals = [
+        mainVisual('[data-testid="project-wizard-body"]', '[data-testid="project-wizard-body"]', "import-wizard", "wizard"),
+        mainVisual('[data-testid="viewport-scene-canvas"]', '[data-testid="viewport-scene-stage"]', "viewport-scene-canvas", "scene"),
+        mainVisual('[data-testid="viewport-game-canvas"]', '[data-testid="viewport-game-stage"]', "viewport-game-canvas", "game"),
+        mainVisual('[data-testid="nodegraph-canvas"]', '[data-panel-id="center"], #center', "nodegraph-canvas", "nodegraph"),
+        mainVisual('[data-testid="artstudio-main-stage"]', '[data-testid="artstudio-main-stage"]', "artstudio-main-stage", "art"),
+        mainVisual('[data-testid="runtime-setup-panel"]', '[data-panel-id="right"], #right', "runtime-setup-panel", "runtime"),
+        mainVisual('[data-panel-id="right"], #right', '[data-panel-id="right"], #right', "debug-tools", "debug"),
+      ].filter(Boolean);
+
+      return {
+        targetId,
+        workspaceId: targetId === "import-wizard" ? null : window.__RDS_E2E__?.getState?.()?.activeWorkspace ?? null,
+        resolutionTag,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+        document: {
+          clientWidth: document.documentElement.clientWidth,
+          scrollWidth: Math.max(document.documentElement.scrollWidth, document.body?.scrollWidth ?? 0),
+        },
+        elements,
+        clickables,
+        criticalTexts,
+        horizontalScrolls,
+        mainVisuals,
+      };
+    `,
+    [targetId, resolutionTag]
+  );
+}
+
+async function writeUiLayoutOracleReport(records, artifactPrefix) {
+  await ensureValidationDir();
+  const report = buildUiLayoutOracleReport({ artifactPrefix, records });
+  await writeFile(uiLayoutOracleReportPath, `${JSON.stringify(report, null, 2)}\n`);
+  return report;
+}
+
+function formatUiLayoutIssues(record) {
+  return (record.issues ?? [])
+    .map((issue) => `${issue.code}: ${issue.message}`)
+    .join("; ");
+}
+
+async function evaluateUiLayoutHealth(sessionId, targetId, resolutionTag) {
+  const snapshot = await collectUiLayoutOracleSnapshot(sessionId, targetId, resolutionTag);
+  return evaluateUiLayoutOracleSnapshot(snapshot);
+}
+
 async function captureScreenshot(sessionId, filename) {
   await ensureValidationDir();
   const response = await webdriverRequest("GET", `/session/${sessionId}/screenshot`);
@@ -1238,6 +1871,288 @@ async function captureScreenshot(sessionId, filename) {
   const outputPath = path.join(validationDir, filename);
   await writeFile(outputPath, Buffer.from(base64, "base64"));
   return outputPath;
+}
+
+async function prepareUiLayoutOracleTarget(sessionId, target) {
+  if (!target) {
+    fail("Alvo do oraculo visual nao foi encontrado.");
+  }
+
+  if (target.id === "import-wizard") {
+    await waitForOnboardingWizard(sessionId);
+    return;
+  }
+
+  if (target.workspaceId) {
+    await callAutomationApi(sessionId, "selectWorkspace", [target.workspaceId]);
+  }
+
+  if (target.id === "runtime-setup") {
+    await callAutomationApi(sessionId, "openToolsWorkspace", ["setup", "debug", true]);
+  }
+
+  await waitFor(
+    async () => {
+      const state = await readAutomationState(sessionId);
+      if (!state || state.activeWorkspace !== target.workspaceId) {
+        return false;
+      }
+      if (target.id === "scene") {
+        return executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="viewport-scene-stage"]'));`);
+      }
+      if (target.id === "art") {
+        return executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="artstudio-main-stage"]'));`);
+      }
+      if (target.id === "game") {
+        return executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="viewport-game-stage"]'));`);
+      }
+      if (target.id === "logic" || target.id === "nodegraph") {
+        return executeScript(
+          sessionId,
+          `return Boolean(
+            document.querySelector('[data-testid="nodegraph-side-rail"]') &&
+            document.querySelector('[data-testid="nodegraph-canvas"]')
+          );`
+        );
+      }
+      if (target.id === "debug") {
+        return executeScript(sessionId, `return Boolean(document.querySelector('[data-panel-id="right"], #right'));`);
+      }
+      if (target.id === "runtime-setup") {
+        return executeScript(sessionId, `return Boolean(document.querySelector('[data-testid="runtime-setup-panel"]'));`);
+      }
+      return state;
+    },
+    target.id === "logic" || target.id === "nodegraph" ? 25000 : 15000,
+    `Oraculo visual: alvo '${target.id}' nao ficou pronto.`,
+    250
+  );
+}
+
+async function runUiLayoutOracleCheck(
+  sessionId,
+  target,
+  resolution,
+  artifactPrefix,
+  records,
+  shotNames,
+  manualQaReport
+) {
+  await setSessionWindowRect(sessionId, resolution.width, resolution.height);
+  await prepareUiLayoutOracleTarget(sessionId, target);
+  const record = await evaluateUiLayoutHealth(sessionId, target.id, resolution.tag);
+  const viewportWidth = Number(record?.metrics?.viewportWidth ?? 0);
+  if (
+    Number.isFinite(resolution.width) &&
+    viewportWidth > 0 &&
+    Math.abs(viewportWidth - resolution.width) > 96
+  ) {
+    fail(
+      `Oraculo visual ${resolution.tag}/${target.id}: viewport ${viewportWidth}px diverge da resolucao pedida (${resolution.width}px).`
+    );
+  }
+  const screenshot = await captureScreenshot(
+    sessionId,
+    `${artifactPrefix}-H-ui-oracle-${resolution.tag}-${target.id}.png`
+  );
+  record.screenshot = path.basename(screenshot);
+  records.push(record);
+  shotNames.push(path.basename(screenshot));
+  registerArtifact(
+    manualQaReport,
+    screenshot,
+    `H - ui oracle ${resolution.tag} ${target.id}`
+  );
+  await writeUiLayoutOracleReport(records, artifactPrefix);
+
+  if (!record.ok) {
+    const metricsText = record.metrics ? JSON.stringify(record.metrics) : "{}";
+    fail(
+      `Oraculo visual ${resolution.tag}/${target.id}: ${formatUiLayoutIssues(record)} | metrics=${metricsText}`
+    );
+  }
+
+  return record;
+}
+
+async function readNodeGraphUiDiagnostics(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const textOf = (selector) =>
+        document.querySelector(selector)?.textContent?.replace(/\\s+/g, " ").trim() ?? "";
+      const cards = Array.from(document.querySelectorAll('[data-testid^="node-card-"]'))
+        .filter((node) => node instanceof HTMLElement);
+      const rects = cards.map((card) => {
+        const rect = card.getBoundingClientRect();
+        return {
+          id: card.getAttribute("data-testid") ?? "",
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height,
+          text: card.textContent?.replace(/\\s+/g, " ").trim() ?? "",
+        };
+      });
+      const overlaps = [];
+      for (let i = 0; i < rects.length; i += 1) {
+        for (let j = i + 1; j < rects.length; j += 1) {
+          const a = rects[i];
+          const b = rects[j];
+          const overlapW = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
+          const overlapH = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+          const overlapArea = overlapW * overlapH;
+          const smallerArea = Math.max(1, Math.min(a.width * a.height, b.width * b.height));
+          if (overlapW > 18 && overlapH > 18 && overlapArea / smallerArea > 0.18) {
+            overlaps.push({ a: a.id, b: b.id, overlapW, overlapH });
+          }
+        }
+      }
+      const sourceMappingText = textOf('[data-testid="nodegraph-source-mapping"]');
+      const gapPanelText = textOf('[data-testid="nodegraph-import-gaps"]');
+      const provenanceText = textOf('[data-testid="nodegraph-import-provenance"]');
+      return {
+        hasCanvas: Boolean(document.querySelector('[data-testid="nodegraph-canvas"]')),
+        hasOverview: Boolean(document.querySelector('[data-testid="nodegraph-overview"]')),
+        cardCount: cards.length,
+        fsmCardCount: rects.filter((card) => /FSM|Estado FSM|Transicao FSM|Transition/i.test(card.text)).length,
+        convertedBadgeCount: rects.filter((card) => card.text.includes("Converted")).length,
+        bridgeBadgeCount: rects.filter((card) => card.text.includes("Bridge")).length,
+        gapBadgeCount: rects.filter((card) => card.text.includes("Gap")).length,
+        sourceMappedBadgeCount: rects.filter((card) => card.text.includes("Source mapped")).length,
+        sourceMappingVisible: sourceMappingText.length > 0,
+        sourceMappingText,
+        gapPanelVisible: gapPanelText.length > 0,
+        gapPanelText,
+        provenanceVisible: provenanceText.length > 0,
+        provenanceText,
+        overlaps,
+      };
+    `
+  );
+}
+
+async function assertNodeGraphUiDiagnostics(sessionId, options = {}) {
+  const diagnostics = await readNodeGraphUiDiagnostics(sessionId);
+  if (!diagnostics?.hasCanvas || !diagnostics?.hasOverview || diagnostics.cardCount < 1) {
+    fail(
+      `Bloco G: NodeGraph nao ficou visivel com nodes renderizados (canvas=${diagnostics?.hasCanvas}, overview=${diagnostics?.hasOverview}, nodes=${diagnostics?.cardCount ?? 0}).`
+    );
+  }
+  if (diagnostics.overlaps?.length) {
+    fail(
+      `Bloco G: nodes do NodeGraph sobrepostos grosseiramente: ${JSON.stringify(diagnostics.overlaps.slice(0, 3))}.`
+    );
+  }
+  if (!diagnostics.sourceMappingVisible) {
+    fail("Bloco G: painel Source Mapping nao ficou visivel no Logic Workspace.");
+  }
+  if (!diagnostics.gapPanelVisible) {
+    fail("Bloco G: painel Import Gaps nao ficou acessivel no Logic Workspace.");
+  }
+  if (!diagnostics.provenanceVisible) {
+    fail("Bloco G: aviso de proveniencia SGDK Logic nao ficou visivel no Logic Workspace.");
+  }
+  if (options.expectFsm) {
+    if (diagnostics.fsmCardCount < 1) {
+      fail("Bloco G: grafo SGDK declarou FSM, mas nenhum node FSM foi renderizado.");
+    }
+    if (!/FSM extraida/i.test(diagnostics.provenanceText)) {
+      fail(`Bloco G: grafo FSM nao foi identificado como 'FSM extraida' (texto: ${diagnostics.provenanceText}).`);
+    }
+  } else if (!/heur/i.test(diagnostics.provenanceText) && !/grafo heuristico/i.test(diagnostics.provenanceText)) {
+    fail(`Bloco G: grafo SGDK sem FSM real nao exibiu aviso heuristico forte (texto: ${diagnostics.provenanceText}).`);
+  }
+  return diagnostics;
+}
+
+async function assertNoGrossMainShellTextOverlap(sessionId) {
+  const overlaps = await executeScript(
+    sessionId,
+    `
+      const directText = (element) => Array.from(element.childNodes)
+        .filter((node) => node.nodeType === Node.TEXT_NODE)
+        .map((node) => node.textContent ?? "")
+        .join(" ")
+        .replace(/\\s+/g, " ")
+        .trim();
+      const isVisible = (element) => {
+        if (!(element instanceof HTMLElement)) {
+          return false;
+        }
+        const style = window.getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return style.visibility !== "hidden" &&
+          style.display !== "none" &&
+          Number(style.opacity || "1") > 0.05 &&
+          rect.width > 8 &&
+          rect.height > 8;
+      };
+      const scopeSelectors = [
+        '[data-testid="sgdk-import-summary"] p',
+        '[data-testid="sgdk-import-summary"] span',
+        '[data-testid="sgdk-import-summary"] li',
+        '[data-testid="nodegraph-overview"] p',
+        '[data-testid="nodegraph-overview"] span',
+        '[data-testid="nodegraph-overview"] button',
+        '[data-testid="nodegraph-overview"] input',
+        '[data-testid="inspector-logic-import-truth"] span',
+        '[data-testid="inspector-logic-import-truth"] p'
+      ];
+      const resolveLabelText = (element) => {
+        const direct = directText(element);
+        const normalize = (value) => value.replace(/\\s+/g, " ").trim();
+        if (direct) {
+          return normalize(direct);
+        }
+        if (element instanceof HTMLButtonElement) {
+          return normalize(element.textContent || "");
+        }
+        return normalize(
+          element.getAttribute("aria-label") ||
+            element.getAttribute("title") ||
+            element.textContent ||
+            ""
+        );
+      };
+      const elements = Array.from(document.querySelectorAll(scopeSelectors.join(",")))
+        .filter(isVisible)
+        .map((element) => {
+          const rect = element.getBoundingClientRect();
+          const text = resolveLabelText(element);
+          return { element, rect, text };
+        })
+        .filter((item) => item.text.length > 0 && item.text.length < 220);
+      const overlaps = [];
+      for (let i = 0; i < elements.length; i += 1) {
+        for (let j = i + 1; j < elements.length; j += 1) {
+          const a = elements[i];
+          const b = elements[j];
+          if (a.element.contains(b.element) || b.element.contains(a.element)) {
+            continue;
+          }
+          const overlapW = Math.max(0, Math.min(a.rect.right, b.rect.right) - Math.max(a.rect.left, b.rect.left));
+          const overlapH = Math.max(0, Math.min(a.rect.bottom, b.rect.bottom) - Math.max(a.rect.top, b.rect.top));
+          const overlapArea = overlapW * overlapH;
+          const smallerArea = Math.max(1, Math.min(a.rect.width * a.rect.height, b.rect.width * b.rect.height));
+          if (overlapW > 10 && overlapH > 8 && overlapArea / smallerArea > 0.32) {
+            overlaps.push({
+              a: a.text.slice(0, 80),
+              b: b.text.slice(0, 80),
+              overlapW: Math.round(overlapW),
+              overlapH: Math.round(overlapH),
+            });
+          }
+        }
+      }
+      return overlaps.slice(0, 6);
+    `
+  );
+  if (Array.isArray(overlaps) && overlaps.length > 0) {
+    fail(`Bloco G: texto sobreposto no shell principal: ${JSON.stringify(overlaps)}.`);
+  }
 }
 
 async function cleanupTemporaryProject(projectDir) {
@@ -1411,6 +2326,31 @@ async function findElement(sessionId, selector) {
 
 async function clickElement(sessionId, elementId) {
   await webdriverRequest("POST", `/session/${sessionId}/element/${elementId}/click`, {});
+}
+
+async function clickByTestId(sessionId, testId) {
+  const result = await executeScript(
+    sessionId,
+    `
+      const testId = String(arguments[0] ?? "");
+      const element = document.querySelector('[data-testid="' + testId + '"]');
+      if (!(element instanceof HTMLElement)) {
+        return { ok: false, reason: "elemento nao encontrado" };
+      }
+      if (element instanceof HTMLButtonElement && element.disabled) {
+        return { ok: false, reason: "botao desabilitado" };
+      }
+      element.scrollIntoView({ block: "center", inline: "center" });
+      element.click();
+      return { ok: true };
+    `,
+    [testId]
+  );
+  if (!result?.ok) {
+    throw new Error(
+      `Nao foi possivel clicar [data-testid='${testId}']: ${result?.reason ?? "falha desconhecida"}`
+    );
+  }
 }
 
 async function clickButtonByText(sessionId, expectedText, mode = "contains") {
@@ -1843,13 +2783,14 @@ async function main() {
   await clearDesktopFailureReport(options.scenario);
   const driverStartupTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_DRIVER_TIMEOUT_MS,
-    30000
+    // QA RC faz build pesado antes do driver; em hosts lentos 30s falha com portas ocupadas.
+    options.scenario === "qa-rc" ? 120000 : 30000
   );
   const uiBootstrapTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_UI_TIMEOUT_MS,
     process.env.GITHUB_ACTIONS === "true" ? 30000 : 15000
   );
-  const emulatorActivationTimeoutMs = parsePositiveInteger(process.env.RDS_E2E_RUN_TIMEOUT_MS, 180000);
+  const emulatorActivationTimeoutMs = parsePositiveInteger(process.env.RDS_E2E_RUN_TIMEOUT_MS, 300000);
   const liveValidationTimeoutMs = parsePositiveInteger(process.env.RDS_E2E_LIVE_TIMEOUT_MS, 60000);
   const requiresExistingProject =
     options.scenario !== "onboarding-shell" && options.scenario !== "qa-rc";
@@ -2133,15 +3074,36 @@ async function main() {
       const artifactPrefix = `qa-rc-${artifactTimestamp()}`;
       const manualQaReport = createManualQaReport();
       manualQaReport.app = options.app;
+      const uiLayoutOracleRecords = [];
+      const uiLayoutShotNames = [];
       let currentBlock = "A";
 
       try {
+        await setSessionWindowRect(sessionId, 1920, 1080);
         await waitForOnboardingWizard(sessionId);
         const wizardScreenshot = await captureScreenshot(
           sessionId,
           `${artifactPrefix}-A-wizard.png`
         );
         registerArtifact(manualQaReport, wizardScreenshot, "A - wizard");
+
+        currentBlock = "H";
+        const importWizardTarget = UI_LAYOUT_ORACLE_TARGETS.find((target) => target.id === "import-wizard");
+        for (const resolution of UI_LAYOUT_ORACLE_RESOLUTIONS) {
+          await setSessionWindowRect(sessionId, resolution.width, resolution.height);
+          await waitForOnboardingWizard(sessionId);
+          await runUiLayoutOracleCheck(
+            sessionId,
+            importWizardTarget,
+            resolution,
+            artifactPrefix,
+            uiLayoutOracleRecords,
+            uiLayoutShotNames,
+            manualQaReport
+          );
+        }
+        await setSessionWindowRect(sessionId, 1920, 1080);
+        currentBlock = "A";
 
         const templateCard = await findElement(sessionId, "[data-testid='template-card-starter_guided']");
         await clickElement(sessionId, templateCard);
@@ -2481,20 +3443,25 @@ async function main() {
           fail(diagnostics ? `${details}\n${diagnostics}` : details);
         }
 
-        const buildRunButton = await findElement(sessionId, "[data-testid='toolbar-build-run']");
-        await clickElement(sessionId, buildRunButton);
-        await waitFor(
-          async () => {
-            const status = await executeScript(
-              sessionId,
-              "return document.querySelector('[data-testid=\"viewport-game-status\"]')?.textContent?.trim() ?? '';"
-            );
-            return status === "Emulador ativo";
-          },
-          emulatorActivationTimeoutMs,
-          "Build & Run do RC nao ativou o emulador.",
-          1000
-        );
+        await clickByTestId(sessionId, "toolbar-build-run");
+        try {
+          await waitFor(
+            async () => {
+              const status = await executeScript(
+                sessionId,
+                "return document.querySelector('[data-testid=\"viewport-game-status\"]')?.textContent?.trim() ?? '';"
+              );
+              return status === "Emulador ativo";
+            },
+            emulatorActivationTimeoutMs,
+            "Build & Run do RC nao ativou o emulador.",
+            1000
+          );
+        } catch (error) {
+          const diagnostics = formatAppDiagnostics(await collectAppDiagnostics(sessionId));
+          const details = error instanceof Error ? error.message : String(error);
+          fail(diagnostics ? `${details}\n${diagnostics}` : details);
+        }
 
         await waitFor(
           async () => {
@@ -2514,8 +3481,7 @@ async function main() {
         );
         registerArtifact(manualQaReport, gameScreenshot, "D - game view");
 
-        const pauseButton = await findElement(sessionId, "[data-testid='viewport-pause']");
-        await clickElement(sessionId, pauseButton);
+        await clickByTestId(sessionId, "viewport-pause");
         await waitFor(
           async () => {
             const state = await readAutomationState(sessionId);
@@ -2526,8 +3492,7 @@ async function main() {
           100
         );
 
-        const resumeButton = await findElement(sessionId, "[data-testid='viewport-resume']");
-        await clickElement(sessionId, resumeButton);
+        await clickByTestId(sessionId, "viewport-resume");
         await waitFor(
           async () => {
             const state = await readAutomationState(sessionId);
@@ -2792,6 +3757,30 @@ async function main() {
           "Projeto SGDK importado nao exibiu estado auditavel de assets no viewport.",
           250
         );
+        const importSummaryText = await waitFor(
+          async () => {
+            const text = await executeScript(
+              sessionId,
+              "return document.querySelector('[data-testid=\"sgdk-import-summary\"]')?.textContent?.replace(/\\s+/g, ' ').trim() ?? '';"
+            );
+            return /Resumo SGDK Logic/.test(String(text)) &&
+              /estados detectados/.test(String(text)) &&
+              /transicoes detectadas/.test(String(text)) &&
+              /nodes gerados/.test(String(text)) &&
+              /bridges criadas/.test(String(text)) &&
+              /Equivalencia gameplay nao certificada/.test(String(text))
+              ? String(text)
+              : false;
+          },
+          20000,
+          "Bloco G: resumo pos-import SGDK Logic nao ficou visivel com contadores honestos.",
+          250
+        );
+        const importSummaryScreenshot = await captureScreenshot(
+          sessionId,
+          `${artifactPrefix}-G-scene-import-summary.png`
+        );
+        registerArtifact(manualQaReport, importSummaryScreenshot, "G - scene import summary");
         const importedTilemapEntities =
           importedSgdkState.activeScene?.entities?.filter((entity) => entity.type === "tilemap").length ?? 0;
         if (importedTilemapEntities < 1) {
@@ -3021,24 +4010,114 @@ async function main() {
         if (!primarySourceRef) {
           fail(`Bloco G: entidade '${sgdkLogicEntityId}' sem source_paths/external_source_refs navegaveis.`);
         }
+        const initialGraphRef =
+          navigationLogicState?.source?.graph_ref ?? navigationLogicState?.resolved?.graph_ref ?? null;
+        let initialGraphNodeCount = 0;
+        let initialGraphHasFsm = false;
+        let initialGraphHasBridge = false;
+        let initialGraphHasMappedNode = false;
+        if (initialGraphRef) {
+          const initialGraphRefRelative = String(initialGraphRef).replace(/^graphs[\\/]/i, "");
+          const initialGraphAbs = path.join(sgdkProjectDir, "graphs", initialGraphRefRelative);
+          if (await pathExists(initialGraphAbs)) {
+            const initialGraphContent = await readFile(initialGraphAbs, "utf8");
+            const initialGraphParsed = JSON.parse(initialGraphContent);
+            const initialGraphNodes = Array.isArray(initialGraphParsed.nodes) ? initialGraphParsed.nodes : [];
+            initialGraphNodeCount = initialGraphNodes.length;
+            initialGraphHasFsm = initialGraphNodes.some((node) =>
+              String(node?.type ?? "").toLowerCase().startsWith("fsm_")
+            );
+            initialGraphHasBridge = initialGraphNodes.some((node) => {
+              const type = String(node?.type ?? "");
+              const params = node?.params ?? {};
+              return type === "bridge_unconverted_source" ||
+                String(params.import_status ?? "").toLowerCase() === "bridge" ||
+                Boolean(params.bridge) ||
+                Boolean(params.gap || params.gap_id);
+            });
+            initialGraphHasMappedNode = initialGraphNodes.some((node) => {
+              const params = node?.params ?? {};
+              return Boolean(params.source_file || params.source_path || params.source);
+            });
+          }
+        }
+        await waitFor(
+          async () => {
+            const diagnostics = await readNodeGraphUiDiagnostics(sessionId);
+            return diagnostics?.hasCanvas && diagnostics?.hasOverview && diagnostics.cardCount >= 1
+              ? diagnostics
+              : false;
+          },
+          20000,
+          "Bloco G: NodeGraph nao renderizou nodes apos abrir Logic Workspace.",
+          250
+        );
+        const graphDiagnostics = await assertNodeGraphUiDiagnostics(sessionId, {
+          expectFsm: initialGraphHasFsm,
+        });
+        if (initialGraphHasMappedNode && graphDiagnostics.sourceMappedBadgeCount < 1) {
+          fail("Bloco G: grafo importado tinha source mapping por node, mas badge 'Source mapped' nao apareceu.");
+        }
+        if (initialGraphHasBridge && graphDiagnostics.bridgeBadgeCount < 1 && graphDiagnostics.gapBadgeCount < 1) {
+          fail("Bloco G: grafo importado tinha bridge/gap, mas nenhum badge Bridge/Gap apareceu.");
+        }
+        await assertNoGrossMainShellTextOverlap(sessionId);
+        const logicGraphScreenshot = await captureScreenshot(
+          sessionId,
+          `${artifactPrefix}-G-logic-fsm-graph.png`
+        );
+        registerArtifact(manualQaReport, logicGraphScreenshot, "G - logic graph FSM/heuristic truth");
+        const sourceMappingScreenshot = await captureScreenshot(
+          sessionId,
+          `${artifactPrefix}-G-node-source-mapping.png`
+        );
+        registerArtifact(manualQaReport, sourceMappingScreenshot, "G - node source mapping");
+        const gapFilterNeedle = graphDiagnostics.gapPanelText.includes("AST/FSM")
+          ? "AST"
+          : graphDiagnostics.gapPanelText.includes("Bridge")
+            ? "Bridge"
+            : "";
+        if (gapFilterNeedle) {
+          const gapFilterApplied = await executeScript(
+            sessionId,
+            `
+              const input = document.querySelector('[data-testid="nodegraph-gap-filter"]');
+              if (!(input instanceof HTMLInputElement)) {
+                return false;
+              }
+              const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value");
+              descriptor?.set?.call(input, arguments[0]);
+              input.dispatchEvent(new Event("input", { bubbles: true }));
+              return true;
+            `,
+            [gapFilterNeedle]
+          );
+          if (!gapFilterApplied) {
+            fail("Bloco G: painel Import Gaps nao aceitou filtro.");
+          }
+        }
+        const gapBridgeScreenshot = await captureScreenshot(
+          sessionId,
+          `${artifactPrefix}-G-gap-bridge-panel.png`
+        );
+        registerArtifact(manualQaReport, gapBridgeScreenshot, "G - gap bridge panel");
         const openedSourceAttempt = await tryAutomationApi(
           sessionId,
           "openEntitySourcePath",
           [sgdkLogicEntityId, primarySourceRef],
           8000
         );
-        const logicScreenshot = await captureScreenshot(
-          sessionId,
-          `${artifactPrefix}-G-logic-authoring.png`
-        );
-        registerArtifact(manualQaReport, logicScreenshot, "G - logic authoring");
         const sourceNavigationSummary = openedSourceAttempt?.ok
           ? `fonte '${openedSourceAttempt.value?.relative_path ?? primarySourceRef}' acionada no host`
           : `fallback honesto para '${primarySourceRef}': ${openedSourceAttempt?.reason ?? "sem retorno do host"}`;
         const logicSourceNote = [
-          `Objeto -> logica -> fonte: entidade '${sgdkLogicEntityId}' abriu Logic Workspace; ${sourceNavigationSummary}.`,
-          `Evidencia: ${path.basename(logicScreenshot)}.`,
+          `Objeto -> logica -> fonte: entidade '${sgdkLogicEntityId}' abriu Logic Workspace com ${graphDiagnostics.cardCount} node(s) renderizado(s), graph_ref='${initialGraphRef ?? "inline"}', FSM=${initialGraphHasFsm ? "sim" : "nao/heuristico"}, bridge/gap=${initialGraphHasBridge || graphDiagnostics.gapPanelVisible ? "visivel" : "ausente"}. ${sourceNavigationSummary}.`,
+          `Source Mapping: ${graphDiagnostics.sourceMappingText}.`,
+          `Gaps: ${graphDiagnostics.gapPanelText}.`,
+          `Evidencias: ${path.basename(logicGraphScreenshot)}, ${path.basename(sourceMappingScreenshot)}, ${path.basename(gapBridgeScreenshot)}.`,
         ].join(" ");
+        // Com Option B, Logic oculta o painel direito global; o Inspector so volta a montar em Scene/Debug.
+        await callAutomationApi(sessionId, "selectWorkspace", ["scene"]);
         await callAutomationApi(sessionId, "setRightPanelMode", ["inspector"]);
         await callAutomationApi(sessionId, "setSelectedEntityId", [sgdkLogicEntityId]);
         await waitFor(
@@ -3067,9 +4146,128 @@ async function main() {
               ? state
               : false;
           },
-          15000,
+          30000,
           "Bloco G: navegacao objeto -> art nao abriu o Art Workspace integrado.",
           250
+        );
+        const artStudioFixtures = await writeArtStudioVerticalFixtures(sgdkProjectDir);
+        await callArtStudioApi(sessionId, "loadImage", [artStudioFixtures.spritePath]);
+        await waitFor(
+          async () => {
+            const bodyText = await executeScript(
+              sessionId,
+              "return document.body?.textContent?.replace(/\\s+/g, ' ').trim() ?? '';"
+            );
+            return bodyText.includes("Imagem pronta") && bodyText.includes("Key color: transparente")
+              ? bodyText
+              : false;
+          },
+          25000,
+          "Bloco G: ArtStudio nao processou a imagem E2E com preview/key color.",
+          250
+        );
+        await callArtStudioApi(sessionId, "setFrameSize", [32, 32]);
+        await callArtStudioApi(sessionId, "renameSequence", ["seq_idle", "Idle"]);
+        await callArtStudioApi(sessionId, "renameSequence", ["seq_run", "Run"]);
+        await callArtStudioApi(sessionId, "renameSequence", ["seq_jump", "Jump"]);
+        await callArtStudioApi(sessionId, "renameSequence", ["seq_attack", "Attack"]);
+        await callArtStudioApi(sessionId, "setSequenceFrames", ["seq_idle", [0]]);
+        await callArtStudioApi(sessionId, "setSequenceFrames", ["seq_run", [0, 1]]);
+        await callArtStudioApi(sessionId, "setSequenceFrames", ["seq_jump", [2]]);
+        await callArtStudioApi(sessionId, "setSequenceFrames", ["seq_attack", [3]]);
+        const commandCount = await callArtStudioApi(sessionId, "importCommandDat", [
+          artStudioFixtures.commandPath,
+        ]);
+        if (commandCount < 1) {
+          fail("Bloco G: command.dat E2E nao retornou comandos importaveis.");
+        }
+        const commandAssigned = await callArtStudioApi(sessionId, "assignCommand", [
+          "seq_attack",
+          "slash",
+        ]);
+        if (!commandAssigned) {
+          fail("Bloco G: ArtStudio nao associou o comando Slash a animacao Attack.");
+        }
+        await callArtStudioApi(sessionId, "importToProject");
+        await executeScript(
+          sessionId,
+          "return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));"
+        );
+        const artImportedState = await waitFor(
+          async () => {
+            const state = await readArtStudioState(sessionId);
+            return state?.spritePath?.startsWith("assets/sprites/") ? state : false;
+          },
+          30000,
+          "Bloco G: ArtStudio nao gerou asset canonico em assets/sprites.",
+          250
+        );
+        // Reaplica authoring apos import canonico para evitar reset de metadata da entidade SGDK.
+        await callArtStudioApi(sessionId, "renameSequence", ["seq_idle", "Idle"]);
+        await callArtStudioApi(sessionId, "renameSequence", ["seq_run", "Run"]);
+        await callArtStudioApi(sessionId, "renameSequence", ["seq_jump", "Jump"]);
+        await callArtStudioApi(sessionId, "renameSequence", ["seq_attack", "Attack"]);
+        await callArtStudioApi(sessionId, "setSequenceFrames", ["seq_idle", [0]]);
+        await callArtStudioApi(sessionId, "setSequenceFrames", ["seq_run", [0, 1]]);
+        await callArtStudioApi(sessionId, "setSequenceFrames", ["seq_jump", [2]]);
+        await callArtStudioApi(sessionId, "setSequenceFrames", ["seq_attack", [3]]);
+        const commandRebound = await callArtStudioApi(sessionId, "assignCommand", [
+          "seq_attack",
+          "slash",
+        ]);
+        if (!commandRebound) {
+          fail("Bloco G: ArtStudio perdeu o binding Slash apos import canonico.");
+        }
+        await callAutomationApi(sessionId, "setSelectedEntityId", [sgdkLogicEntityId]);
+        const artApplied = await callArtStudioApi(sessionId, "applyToScene", [sgdkLogicEntityId]);
+        if (!artApplied) {
+          const artStudioDiag = await readArtStudioState(sessionId);
+          const automationDiag = await readAutomationState(sessionId);
+          const entityDiag = automationDiag?.activeScene?.entities?.find(
+            (candidate) => candidate.id === sgdkLogicEntityId
+          );
+          fail(
+            [
+              "Bloco G: ArtStudio applyToScene retornou falso",
+              `(${artStudioDiag?.validationError ?? "sem diagnostico de validacao"})`,
+              entityDiag
+                ? `entidade=${sgdkLogicEntityId} spriteAsset=${entityDiag.spriteAsset ?? "null"} animations=${(entityDiag.animationNames ?? []).join("|") || "none"} commands=${entityDiag.commandCount ?? 0}`
+                : `entidade=${sgdkLogicEntityId} ausente no estado de automacao`,
+              artStudioDiag?.spritePath
+                ? `artStudio.spritePath=${artStudioDiag.spritePath}`
+                : "artStudio.spritePath=ausente",
+            ].join(" ")
+          );
+        }
+        const normalizeAssetPath = (value) => String(value ?? "").replace(/\\/g, "/");
+        const importedSpritePath = normalizeAssetPath(artImportedState.spritePath);
+        const artAppliedState = await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            const entity = state?.activeScene?.entities?.find(
+              (candidate) => candidate.id === sgdkLogicEntityId
+            );
+            return entity &&
+              normalizeAssetPath(entity.spriteAsset) === importedSpritePath &&
+              entity.animationNames?.includes("attack") &&
+              entity.commandCount >= 1
+              ? state
+              : false;
+          },
+          15000,
+          "Bloco G: ArtStudio nao aplicou sprite, animacoes e command binding na entidade.",
+          250
+        );
+        const artAppliedEntity = artAppliedState.activeScene.entities.find(
+          (candidate) => candidate.id === sgdkLogicEntityId
+        );
+        await callAutomationApi(
+          sessionId,
+          "persistScene",
+          [
+            "E2E ArtStudio vertical",
+            `[E2E] ArtStudio aplicou '${artImportedState.spritePath}' com animacoes ${artAppliedEntity.animationNames.join(", ")} e command.dat na entidade '${sgdkLogicEntityId}'.`,
+          ]
         );
         const artScreenshot = await captureScreenshot(
           sessionId,
@@ -3089,7 +4287,7 @@ async function main() {
           250
         );
         const artWorkspaceNote = [
-          `Art integrado: '${sgdkLogicEntityId}' abriu Art Workspace com stage/plano de apply e retornou ao Scene sem perder selectedEntityId.`,
+          `Art integrado: '${sgdkLogicEntityId}' importou sheet, criou Idle/Run/Jump/Attack, associou command.dat, aplicou '${artImportedState.spritePath}' na entidade e retornou ao Scene sem perder selectedEntityId.`,
           `Evidencia: ${path.basename(artScreenshot)}.`,
         ].join(" ");
         const initialLogicState = await callAutomationApi(sessionId, "getEntityLogicState", [sgdkLogicEntityId]);
@@ -3245,8 +4443,7 @@ async function main() {
           const details = error instanceof Error ? error.message : String(error);
           fail(diagnostics ? `${details}\n${diagnostics}` : details);
         }
-        const buildRunSgdk = await findElement(sessionId, "[data-testid='toolbar-build-run']");
-        await clickElement(sessionId, buildRunSgdk);
+        await clickByTestId(sessionId, "toolbar-build-run");
         try {
           await waitFor(
             async () => {
@@ -3295,12 +4492,49 @@ async function main() {
         );
         registerArtifact(manualQaReport, sgdkChainShot, "G - sgdk import reopen build rom");
 
+        currentBlock = "H";
+        await callAutomationApi(sessionId, "setConsoleVisible", [false]);
+        const layoutTargets = UI_LAYOUT_ORACLE_TARGETS.filter((target) => target.id !== "import-wizard");
+        for (const resolution of UI_LAYOUT_ORACLE_RESOLUTIONS) {
+          await setSessionWindowRect(sessionId, resolution.width, resolution.height);
+          for (const target of layoutTargets) {
+            await runUiLayoutOracleCheck(
+              sessionId,
+              target,
+              resolution,
+              artifactPrefix,
+              uiLayoutOracleRecords,
+              uiLayoutShotNames,
+              manualQaReport
+            );
+          }
+        }
+        const uiLayoutOracleReport = await writeUiLayoutOracleReport(
+          uiLayoutOracleRecords,
+          artifactPrefix
+        );
+        const layoutValidationNotes = uiLayoutOracleRecords.map(
+          (record) => `${record.resolutionTag}/${record.targetId}:${record.ok ? "ok" : "fail"}`
+        );
+        await markManualQaBlock(
+          manualQaReport,
+          "H",
+          "passed",
+          [
+            `QA visual de layout: ${UI_LAYOUT_ORACLE_RESOLUTIONS.length} resolucoes x ${UI_LAYOUT_ORACLE_TARGETS.length} alvos (Import Wizard, Scene, Art, Logic, NodeGraph, Game, Debug, Runtime Setup) com oraculo DOM/BoundingClientRect.`,
+            `Validacoes: ${layoutValidationNotes.join(", ")}.`,
+            `Relatorio: ${path.basename(uiLayoutOracleReportPath)} status=${uiLayoutOracleReport.status}.`,
+            `Evidencias: ${uiLayoutShotNames.join(", ")}.`,
+          ].join(" ")
+        );
+
         await markManualQaBlock(
           manualQaReport,
           "G",
           "passed",
           [
             `Import SGDK -> cena activa == entry_scene ('${entrySceneExpected}') -> projectSourceKind=imported_sgdk -> onboarding nao bloqueia -> viewport asset health -> Inspector preview -> instantiateBrowserImageAsset(stage)=tilemap(${stageInst.reason}) + hero=sprite(${heroInst.reason}) -> persistencias -> reopen mantem cena/entidades -> editar graph_ref '${sgdkLogicEntityId}' -> colisao -> persistir -> reabrir -> Build & Run -> ROM '${romName}' SEGA.`,
+            `Resumo pos-import: ${importSummaryText}. Evidencia: ${path.basename(importSummaryScreenshot)}.`,
             denseSceneNote,
             denseWorkflowNote,
             tilemapWorkflowNote,
@@ -3313,7 +4547,7 @@ async function main() {
         );
 
         await writeManualQaReport(manualQaReport);
-        console.log("OK: Desktop Tauri QA RC A-G passou.");
+        console.log("OK: Desktop Tauri QA RC A-H passou.");
         console.log(`Projeto criado: ${generatedProjectName}`);
         console.log(`Diretorio temporario: ${temporaryProjectDir}`);
         console.log(`Relatorio QA: ${manualQaStatusPath}`);
@@ -3334,6 +4568,17 @@ async function main() {
           }
         );
         throw error;
+      }
+    }
+
+    if (options.scenario === "build-blocked-diagnostic") {
+      const tempRoot = await mkdtemp(path.join(os.tmpdir(), "rds-build-blocked-diagnostic-"));
+      const copiedProject = path.join(tempRoot, path.basename(options.project));
+      await cp(options.project, copiedProject, { recursive: true });
+      options.project = copiedProject;
+      temporaryProjectDir = tempRoot;
+      if (currentE2eRunContext) {
+        currentE2eRunContext.project = copiedProject;
       }
     }
 
@@ -3455,6 +4700,7 @@ async function main() {
       console.log(`Projeto: ${options.project}`);
       console.log(`Target: ${projectMetadata.target}`);
       console.log(`Estado: ${liveStatus.liveState}`);
+      await recordE2eLedgerSuccess(options, projectMetadata);
       return;
     }
 
@@ -3467,6 +4713,19 @@ async function main() {
     ) {
       const overflowScenario = buildLiveOverflowScenario(projectMetadata.target, options.scenario);
       await setSceneDraft(sessionId, overflowScenario.draft);
+      if (options.scenario === "live-error") {
+        await waitFor(
+          async () => {
+            const state = await readAutomationState(sessionId);
+            return state?.hwValidationState === "error" ? state : false;
+          },
+          liveValidationTimeoutMs,
+          "Validacao live nao entrou em error apos draft invalido.",
+          250
+        );
+      } else {
+        await waitForLiveValidationFresh(sessionId, liveValidationTimeoutMs);
+      }
 
       let lastLiveStatus = null;
       let liveStatus;
@@ -3538,6 +4797,7 @@ async function main() {
                 ? `Erro visual: ${liveStatus.errorSummary}`
                 : `Warning visual: ${liveStatus.summary}`
           );
+          await recordE2eLedgerSuccess(options, projectMetadata);
           return;
         }
 
@@ -3620,6 +4880,7 @@ async function main() {
             ? `Erro visual: ${liveStatus.errorSummary}`
           : `Warning visual: ${liveStatus.summary}`
       );
+      await recordE2eLedgerSuccess(options, projectMetadata);
       return;
     }
 
@@ -3726,6 +4987,102 @@ async function main() {
           validationStatus.pendingSummary || validationStatus.liveStateDetail
         }`
       );
+      await recordE2eLedgerSuccess(options, projectMetadata);
+      return;
+    }
+
+    if (options.scenario === "build-blocked-diagnostic") {
+      await setSceneDraft(sessionId, buildMissingAssetScene(projectMetadata.target));
+
+      try {
+        await waitForBuildRunReady(sessionId, liveValidationTimeoutMs);
+      } catch (error) {
+        const diagnostics = formatAppDiagnostics(await collectAppDiagnostics(sessionId));
+        const details = error instanceof Error ? error.message : String(error);
+        fail(diagnostics ? `${details}\n${diagnostics}` : details);
+      }
+
+      await clickByTestId(sessionId, "toolbar-build-run");
+
+      const diagnosticState = await waitFor(
+        async () => {
+          const state = await executeScript(
+            sessionId,
+            "return window.__RDS_E2E__?.getState() ?? null;"
+          );
+          if (!state?.consoleEntries?.length) {
+            return false;
+          }
+          const actionable = state.consoleEntries.find(
+            (entry) =>
+              entry.diagnostic?.area === "build_sgdk" ||
+              entry.diagnostic?.area === "build_snes"
+          );
+          return actionable?.message?.includes("Build falhou porque") ? state : false;
+        },
+        emulatorActivationTimeoutMs,
+        "Build bloqueado nao exibiu diagnostico acionavel.",
+        500
+      );
+
+      const actionableEntry = diagnosticState.consoleEntries.find(
+        (entry) =>
+          entry.diagnostic?.area === "build_sgdk" ||
+          entry.diagnostic?.area === "build_snes"
+      );
+      if (!actionableEntry) {
+        fail("Console nao registrou diagnostico de build estruturado.");
+      }
+
+      if (actionableEntry.message.includes("Build failed")) {
+        fail(`Console exibiu erro generico em vez de diagnostico acionavel: ${actionableEntry.message}`);
+      }
+
+      if (!actionableEntry.message.includes("Acao recomendada")) {
+        fail(`Diagnostico nao incluiu acao recomendada: ${actionableEntry.message}`);
+      }
+
+      const drawerState = await executeScript(
+        sessionId,
+        `
+          const drawer = document.querySelector('[data-testid="console-drawer"]');
+          const details = document.querySelector('[data-testid="console-details"]');
+          const technical = document.querySelector('[data-testid="console-details-technical"]');
+          const copy = document.querySelector('[data-testid="console-copy-diagnostic"]');
+          const evidence = document.querySelector('[data-testid="console-evidence-link"]');
+          return {
+            drawerText: drawer?.textContent ?? "",
+            detailsText: details?.textContent ?? "",
+            technicalClosed: technical ? !technical.open : false,
+            hasCopy: Boolean(copy),
+            hasEvidence: Boolean(evidence),
+          };
+        `
+      );
+
+      if (!drawerState?.drawerText?.includes("Build falhou porque")) {
+        fail("Console drawer nao exibiu a mensagem acionavel do build bloqueado.");
+      }
+      if (!drawerState.detailsText.includes("Acao Recomendada")) {
+        fail("Painel Details nao exibiu a acao recomendada.");
+      }
+      if (!drawerState.detailsText.includes("Detalhe Tecnico")) {
+        fail("Painel Details nao expos a secao tecnica colapsada.");
+      }
+      if (!drawerState.technicalClosed) {
+        fail("Detalhe tecnico deveria iniciar colapsado para nao poluir a viewport.");
+      }
+      if (!drawerState.hasCopy) {
+        fail("Painel Details nao exibiu acao de copiar erro.");
+      }
+      if (!drawerState.hasEvidence) {
+        fail("Painel Details nao exibiu link de artefato/log.");
+      }
+
+      console.log("OK: Desktop Tauri build blocked diagnostic E2E passou.");
+      console.log(`Projeto: ${options.project}`);
+      console.log(`Target: ${projectMetadata.target}`);
+      console.log(`Diagnostico: ${actionableEntry.message}`);
       return;
     }
 
@@ -3737,8 +5094,7 @@ async function main() {
       fail(diagnostics ? `${details}\n${diagnostics}` : details);
     }
 
-    const buildRunButton = await findElement(sessionId, "[data-testid='toolbar-build-run']");
-    await clickElement(sessionId, buildRunButton);
+    await clickByTestId(sessionId, "toolbar-build-run");
 
     try {
       await waitFor(
@@ -3819,6 +5175,7 @@ async function main() {
     console.log(`Projeto: ${options.project}`);
     console.log(`Target: ${projectMetadata.target}`);
     console.log(`Canvas: ${framebuffer.width}x${framebuffer.height}, pixels nao pretos: ${framebuffer.nonBlackPixels}`);
+    await recordE2eLedgerSuccess(options, projectMetadata);
   } catch (error) {
     const details = error instanceof Error ? error.message : String(error);
     const driverSummary = summarizeDriverLogs(driverLogs);

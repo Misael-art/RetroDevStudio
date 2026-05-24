@@ -73,6 +73,77 @@ pub struct SpriteComponent {
     pub priority: String,
     #[serde(default)]
     pub meta_sprite: bool,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub commands: Vec<SpriteCommandBinding>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SpriteCommandStep {
+    pub tokens: Vec<String>,
+    pub display: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SpriteCommandBinding {
+    pub id: String,
+    pub display_name: String,
+    pub notation: String,
+    pub source: String,
+    pub target_animation: String,
+    pub max_frames: u32,
+    pub button_profile: String,
+    #[serde(default)]
+    pub unsupported_tokens: Vec<String>,
+    #[serde(default)]
+    pub steps: Vec<SpriteCommandStep>,
+}
+
+#[cfg(test)]
+mod sprite_command_tests {
+    use super::{SpriteCommandBinding, SpriteCommandStep, SpriteComponent};
+    use std::collections::HashMap;
+
+    #[test]
+    fn sprite_component_commands_round_trip_json() {
+        let sprite = SpriteComponent {
+            asset: "assets/sprites/hero.png".to_string(),
+            frame_width: 32,
+            frame_height: 32,
+            pivot: None,
+            palette_slot: 0,
+            animations: HashMap::new(),
+            priority: "foreground".to_string(),
+            meta_sprite: false,
+            commands: vec![SpriteCommandBinding {
+                id: "hadouken".to_string(),
+                display_name: "Hadouken".to_string(),
+                notation: "_2, _3, _6, _P".to_string(),
+                source: "local-command.dat".to_string(),
+                target_animation: "fireball".to_string(),
+                max_frames: 15,
+                button_profile: "megadrive".to_string(),
+                unsupported_tokens: vec![],
+                steps: vec![
+                    SpriteCommandStep {
+                        tokens: vec!["_2".to_string()],
+                        display: vec!["↓".to_string()],
+                    },
+                    SpriteCommandStep {
+                        tokens: vec!["_P".to_string()],
+                        display: vec!["P".to_string()],
+                    },
+                ],
+            }],
+        };
+
+        let json = serde_json::to_string(&sprite).expect("sprite serializes");
+        let restored: SpriteComponent = serde_json::from_str(&json).expect("sprite deserializes");
+
+        assert_eq!(restored.commands[0].id, "hadouken");
+        assert_eq!(restored.commands[0].target_animation, "fireball");
+        assert_eq!(restored.commands[0].steps[1].tokens, vec!["_P"]);
+    }
 }
 
 fn default_priority() -> String {
@@ -171,6 +242,9 @@ pub struct ImportedLogicSemantics {
     pub source: String,
     #[serde(default)]
     #[serde(skip_serializing_if = "String::is_empty")]
+    pub extraction_kind: String,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "String::is_empty")]
     pub gameplay_class: String,
     #[serde(default)]
     #[serde(skip_serializing_if = "String::is_empty")]
@@ -190,6 +264,31 @@ pub struct ImportedLogicSemantics {
     #[serde(default)]
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub audit_flags: Vec<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub converted_nodes_count: u32,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub bridge_count: u32,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub gap_count: u32,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub status: String,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub states_detected: u32,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub transitions_detected: u32,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub blocking_gaps: Vec<String>,
+}
+
+fn is_zero_u32(value: &u32) -> bool {
+    *value == 0
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -262,7 +361,10 @@ mod tilemap_tests {
             cells: vec![],
         };
         let json = serde_json::to_string(&tm).unwrap();
-        assert!(!json.contains("cells"), "empty cells must not serialize: {json}");
+        assert!(
+            !json.contains("cells"),
+            "empty cells must not serialize: {json}"
+        );
         let parsed: TilemapComponent = serde_json::from_str(&json).unwrap();
         assert_eq!(parsed.cells, Vec::<u32>::new());
     }

@@ -37,6 +37,7 @@
     "test:e2e:desktop:live-error:snes": "node scripts/e2e-tauri-build-run.mjs --scenario live-error --project src-tauri/tests/fixtures/projects/snes_dummy",
     "test:e2e:desktop:live-stale:md": "node scripts/e2e-tauri-build-run.mjs --scenario live-stale --project src-tauri/tests/fixtures/projects/megadrive_dummy",
     "test:e2e:desktop:live-stale:snes": "node scripts/e2e-tauri-build-run.mjs --scenario live-stale --project src-tauri/tests/fixtures/projects/snes_dummy",
+    "test:e2e:desktop:build-blocked-diagnostic": "node scripts/e2e-tauri-build-run.mjs --scenario build-blocked-diagnostic --project src-tauri/tests/fixtures/projects/megadrive_dummy",
     "test:e2e:desktop:onboarding-shell": "node scripts/e2e-tauri-build-run.mjs --scenario onboarding-shell",
     "test:e2e:desktop:qa-rc": "node scripts/e2e-tauri-build-run.mjs --scenario qa-rc",
     "preflight:sgdk-e2e": "node scripts/sgdk-e2e-host-preflight.mjs",
@@ -46,8 +47,8 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.1",
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
     "react": "^19",
     "react-dom": "^19",
     "react-resizable-panels": "^4.7.3",
@@ -56,7 +57,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@tauri-apps/cli": "^2",
+    "@tauri-apps/cli": "^2.11.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4",

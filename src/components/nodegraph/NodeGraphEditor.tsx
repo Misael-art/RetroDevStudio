@@ -5,6 +5,14 @@ import { parseSceneJson, resolveScenePrefabs } from "../../core/ipc/sceneService
 import { useEditorStore } from "../../core/store/editorStore";
 import { getEntityDisplayName } from "../../core/entityDisplay";
 import { resolveEntitySourceRefs } from "../../core/entityAuthoring";
+import {
+  collectGraphImportGaps,
+  filterGraphImportGaps,
+  formatImportedSemanticsKind,
+  getGraphNodeImportBadges,
+  getGraphNodeSourceMapping,
+  type CapabilityTone,
+} from "../../core/sgdkLogicDiagnostics";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -13,6 +21,7 @@ export type NodeType =
   | "event_update"
   | "input_pressed"
   | "input_held"
+  | "input_command"
   | "sprite_move"
   | "set_velocity"
   | "set_position"
@@ -91,6 +100,19 @@ type GraphBounds = {
   maxY: number;
 };
 
+const IMPORT_PARAM_KEYS = new Set([
+  "import_status",
+  "converted",
+  "bridge",
+  "gap",
+  "gap_id",
+  "source",
+  "source_file",
+  "source_path",
+  "source_line",
+  "line",
+]);
+
 type NodeGraphSummary = {
   totalNodes: number;
   totalEdges: number;
@@ -147,6 +169,7 @@ type QuickActionTemplate = GuidedFlowCommentary & {
     | "projectile_motion"
     | "camera_rig"
     | "fighter_combat"
+    | "fighter_command"
     | "support_state_tick"
     | "hud_vblank_tick";
   actionLabel: string;
@@ -170,6 +193,7 @@ const EVENT_NODE_TYPES: NodeType[] = [
   "event_update",
   "input_pressed",
   "input_held",
+  "input_command",
   "condition_overlap",
   "event_vblank",
   "event_hblank",
@@ -181,6 +205,7 @@ export const REQUIRED_NOCODE_NODE_TYPES: NodeType[] = [
   "event_update",
   "input_pressed",
   "input_held",
+  "input_command",
   "condition_overlap",
   "sprite_move",
   "set_velocity",
@@ -577,6 +602,23 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     outputs: [{ id: "exec", label: ">", kind: "exec" }],
     params: { pad: "JOY_1", button: "BUTTON_RIGHT" },
   },
+  input_command: {
+    type: "input_command", label: "Input Command",
+    inputs: [],
+    outputs: [
+      { id: "exec", label: ">", kind: "exec" },
+      { id: "false", label: "False >", kind: "exec" },
+    ],
+    params: {
+      command_id: "hadouken",
+      display_name: "Hadouken",
+      notation: "_2,_3,_6,_P",
+      max_frames: 15,
+      pad: "JOY_1",
+      button_profile: "megadrive",
+      target: "player",
+    },
+  },
   sprite_move: {
     type: "sprite_move", label: "Move Sprite",
     inputs: [
@@ -873,6 +915,7 @@ export const NODE_DISPLAY_NAMES: Record<NodeType, string> = {
   event_update: "A Cada Frame",
   input_pressed: "Input Pressionado",
   input_held: "Input Segurado",
+  input_command: "Comando de Input",
   sprite_move: "Mover Sprite",
   set_velocity: "Definir Velocidade",
   set_position: "Definir Posicao",
@@ -916,10 +959,14 @@ const NODE_PARAM_DISPLAY_NAMES: Record<string, string> = {
   condition: "Condicao",
   count: "Contagem",
   button: "Botao",
+  button_profile: "Perfil",
+  command_id: "Comando",
+  display_name: "Nome",
   dx: "Delta X",
   dy: "Delta Y",
   frames: "Frames",
   gap: "Gap",
+  max_frames: "Janela",
   max_x: "Max X",
   max_y: "Max Y",
   min_x: "Min X",
@@ -927,6 +974,7 @@ const NODE_PARAM_DISPLAY_NAMES: Record<string, string> = {
   layer: "Camada",
   offset_x: "Offset X",
   operator: "Operador",
+  notation: "Notacao",
   pad: "Controle",
   prefab: "Prefab",
   rate: "Ritmo",
@@ -955,7 +1003,7 @@ const NODE_PARAM_DISPLAY_NAMES: Record<string, string> = {
 };
 
 const NODE_PALETTE_GROUPS: Array<{ label: string; icon: string; types: NodeType[] }> = [
-  { label: "Eventos", icon: "\u26a1", types: ["event_start", "event_update", "input_pressed", "input_held", "event_vblank", "event_hblank", "event_dma_done"] },
+  { label: "Eventos", icon: "\u26a1", types: ["event_start", "event_update", "input_pressed", "input_held", "input_command", "event_vblank", "event_hblank", "event_dma_done"] },
   { label: "Movimento", icon: "\ud83c\udfc3", types: ["sprite_move", "set_velocity", "set_position", "spawn_entity", "destroy_entity", "sprite_anim", "set_animation_state", "scroll_tilemap", "move_camera"] },
   { label: "Condicoes", icon: "?", types: ["condition_overlap", "condition_compare", "logic_and"] },
   { label: "Camera", icon: "\u25a3", types: ["camera_follow", "camera_bounds"] },
@@ -1411,6 +1459,33 @@ function buildFighterCombatQuickActionGraph(context: QuickActionContext): NodeGr
   };
 }
 
+function buildFighterCommandQuickActionGraph(context: QuickActionContext): NodeGraph {
+  const update = makeNode("event_update", 140, 160);
+  const command = makeNode("input_command", 380, 150);
+  const anim = makeNode("set_animation_state", 680, 156);
+  const fighter = resolveQuickActionPrimaryTarget(context, "player");
+
+  command.params = {
+    ...command.params,
+    command_id: "hadouken",
+    display_name: "Hadouken",
+    notation: "_2,_3,_6,_P",
+    max_frames: 15,
+    pad: "JOY_1",
+    button_profile: "megadrive",
+    target: fighter,
+  };
+  anim.params = { ...anim.params, target: fighter, state: "fireball" };
+
+  return {
+    nodes: [update, command, anim],
+    edges: [
+      makeEdge(update, "exec", command, "exec"),
+      makeEdge(command, "exec", anim, "exec"),
+    ],
+  };
+}
+
 function buildSupportStateTickQuickActionGraph(context: QuickActionContext): NodeGraph {
   const start = makeNode("event_start", 140, 160);
   const lane = makeNode("var_set", 380, 156);
@@ -1530,6 +1605,22 @@ const QUICK_ACTION_TEMPLATES: QuickActionTemplate[] = [
     buildGraph: buildFighterCombatQuickActionGraph,
   },
   {
+    id: "fighter_command",
+    actionLabel: "Criar comando de luta",
+    title: "Comando de luta",
+    summary: "Adiciona input_command com quarto de lua e liga a animacao de ataque no alvo selecionado.",
+    comments: [
+      "On Update alimenta o matcher por frame, alinhado ao runtime retro.",
+      "Comando de Input guarda a notacao fonte, janela em frames e perfil de botoes.",
+      "Estado de Animacao mostra onde conectar o golpe detectado sem escrever codigo manual.",
+    ],
+    hardwareNote:
+      "Runtime experimental: tokens fora do subset suportado bloqueiam codegen em vez de virar warning cosmetico.",
+    limitation:
+      "Use command.dat local para substituir Hadouken por comandos reais da sua biblioteca.",
+    buildGraph: buildFighterCommandQuickActionGraph,
+  },
+  {
     id: "support_state_tick",
     actionLabel: "Apoio: estado + anim",
     title: "Apoio (estado)",
@@ -1608,6 +1699,8 @@ function NodeCard({
 }: NodeCardProps) {
   const group = getGroupForType(node.type);
   const headerBg = GROUP_HEADER_BG[group] ?? "bg-[#4a4a3a]";
+  const importBadges = getGraphNodeImportBadges(node);
+  const visibleParams = Object.entries(node.params).filter(([key]) => !IMPORT_PARAM_KEYS.has(key));
 
   return (
     <div
@@ -1624,6 +1717,22 @@ function NodeCard({
       >
         {getNodeDisplayName(node.type)}
       </div>
+
+      {importBadges.length > 0 ? (
+        <div className="flex flex-wrap gap-1 border-b border-slate-700/50 px-3 py-1.5">
+          {importBadges.map((badge) => (
+            <span
+              key={badge.label}
+              className={[
+                "rounded-full border px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-[0.1em]",
+                importBadgeClass(badge.tone),
+              ].join(" ")}
+            >
+              {badge.label}
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       {/* Ports */}
       <div className="flex gap-2 px-3 py-2">
@@ -1665,9 +1774,9 @@ function NodeCard({
       </div>
 
       {/* Params */}
-      {Object.keys(node.params).length > 0 && (
+      {visibleParams.length > 0 && (
         <div className="flex flex-col gap-0.5 border-t border-slate-700/50 px-3 pb-2 pt-1.5">
-          {Object.entries(node.params).map(([k, v]) => (
+          {visibleParams.map(([k, v]) => (
             <div key={k} className="flex justify-between text-[10px]">
               <span className="text-[#6c7086]">{getNodeParamDisplayName(k)}</span>
               <span className="font-mono text-[#cdd6f4]">{String(v)}</span>
@@ -1677,6 +1786,22 @@ function NodeCard({
       )}
     </div>
   );
+}
+
+function importBadgeClass(tone: CapabilityTone): string {
+  switch (tone) {
+    case "supported":
+      return "border-[#a6e3a1]/35 bg-[#a6e3a1]/10 text-[#a6e3a1]";
+    case "bridge":
+      return "border-[#f9e2af]/35 bg-[#f9e2af]/10 text-[#f9e2af]";
+    case "blocked":
+      return "border-[#f38ba8]/35 bg-[#f38ba8]/10 text-[#f38ba8]";
+    case "experimental":
+      return "border-[#cba6f7]/35 bg-[#cba6f7]/10 text-[#cba6f7]";
+    case "partial":
+    default:
+      return "border-[#89b4fa]/35 bg-[#89b4fa]/10 text-[#89b4fa]";
+  }
 }
 
 interface EmptyStateOverlayProps {
@@ -1776,6 +1901,7 @@ export default function NodeGraphEditor() {
   const [viewOffset, setViewOffset] = useState<ViewOffset>({ x: 0, y: 0 });
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const [guidedCommentary, setGuidedCommentary] = useState<GuidedFlowCommentary | null>(null);
+  const [gapFilter, setGapFilter] = useState("");
   const svgRef = useRef<SVGSVGElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const saveTimerRef = useRef<number | null>(null);
@@ -1795,6 +1921,7 @@ export default function NodeGraphEditor() {
       setPendingEdge(null);
       setViewOffset({ x: 0, y: 0 });
       setGuidedCommentary(null);
+      setGapFilter("");
       lastPersistedGraphRef.current = serializeNodeGraph(nextGraph);
     };
     const entityGraph = selectedEntity?.components.logic?.graph;
@@ -2004,6 +2131,25 @@ export default function NodeGraphEditor() {
   }, [activeScene, selectedEntity]);
   const graphOriginLabel = selectedEntity?.components.logic?.graph_origin;
   const importedSemantics = selectedEntity?.components.logic?.imported_semantics;
+  const importedSemanticsKind = formatImportedSemanticsKind(importedSemantics);
+  const sourceMappedNode = useMemo(
+    () =>
+      selectedNode && getGraphNodeSourceMapping(selectedNode)
+        ? selectedNode
+        : graph.nodes.find((node) => getGraphNodeSourceMapping(node)) ?? null,
+    [graph.nodes, selectedNode]
+  );
+  const selectedSourceMapping =
+    (sourceMappedNode ? getGraphNodeSourceMapping(sourceMappedNode) : null) ??
+    (selectedEntitySourceRefs[0] ? { file: selectedEntitySourceRefs[0] } : null);
+  const importGaps = useMemo(
+    () => collectGraphImportGaps(graph, importedSemantics),
+    [graph, importedSemantics]
+  );
+  const visibleImportGaps = useMemo(
+    () => filterGraphImportGaps(importGaps, gapFilter),
+    [gapFilter, importGaps]
+  );
 
   const orderedQuickActionTemplates = useMemo(() => {
     const role = importedSemantics?.entity_role?.trim();
@@ -2314,7 +2460,10 @@ export default function NodeGraphEditor() {
     <div className="flex h-full w-full overflow-hidden bg-[#11111b]">
 
       {/* ── Palette sidebar ── */}
-      <div className="flex w-40 shrink-0 flex-col overflow-x-hidden border-r border-[#313244] bg-[#181825]">
+      <div
+        data-testid="nodegraph-side-rail"
+        className="flex w-40 shrink-0 flex-col overflow-x-hidden border-r border-[#313244] bg-[#181825]"
+      >
         <div className="shrink-0 border-b border-[#313244] p-2">
           <div className="relative">
             <span className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-[10px] text-[#6c7086]">
@@ -2409,7 +2558,7 @@ export default function NodeGraphEditor() {
         {selectedEntity && (
           <div
             data-testid="nodegraph-overview"
-            className="absolute left-3 top-3 z-10 flex max-w-[19rem] flex-col gap-2 rounded-xl border border-[#313244] bg-[#181825]/95 px-3 py-2 text-[10px] shadow-lg backdrop-blur-sm"
+            className="absolute left-3 top-3 z-10 flex max-h-[calc(100%-1.5rem)] max-w-[19rem] flex-col gap-2 overflow-x-hidden overflow-y-auto rounded-xl border border-[#313244] bg-[#181825]/95 px-3 py-2 text-[10px] shadow-lg backdrop-blur-sm scrollbar-thin"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -2476,6 +2625,104 @@ export default function NodeGraphEditor() {
               </div>
             </div>
 
+            {importedSemantics ? (
+              <div
+                data-testid="nodegraph-import-provenance"
+                className={[
+                  "rounded border px-2 py-1.5 text-[10px] leading-snug",
+                  importedSemanticsKind === "FSM extraida"
+                    ? "border-[#a6e3a1]/35 bg-[#a6e3a1]/10 text-[#d9f99d]"
+                    : "border-[#f9e2af]/35 bg-[#f9e2af]/10 text-[#f9e2af]",
+                ].join(" ")}
+              >
+                <p className="text-[9px] font-semibold uppercase tracking-[0.14em]">
+                  {importedSemanticsKind}
+                </p>
+                <p className="mt-1">
+                  {importedSemanticsKind === "FSM extraida"
+                    ? "FSM extraida do modelo semantico; bridges e gaps continuam visiveis abaixo."
+                    : "Aviso: grafo heuristico. Ele ajuda autoria, mas nao representa AST/FSM real do jogo donor."}
+                </p>
+              </div>
+            ) : null}
+
+            {selectedSourceMapping ? (
+              <div
+                data-testid="nodegraph-source-mapping"
+                className="rounded border border-[#89b4fa]/35 bg-[#89b4fa]/10 px-2 py-1.5 text-[10px] leading-snug text-[#cdd6f4]"
+              >
+                <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#89b4fa]">
+                  Source Mapping
+                </p>
+                <p className="mt-1 font-mono text-[#cdd6f4]">
+                  {selectedSourceMapping.file}
+                  {selectedSourceMapping.line ? `:${selectedSourceMapping.line}` : ""}
+                </p>
+                {sourceMappedNode ? (
+                  <p className="mt-1 text-[#7f849c]">
+                    node: <span className="font-mono">{sourceMappedNode.id}</span>
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
+            {importGaps.length > 0 ? (
+              <div
+                data-testid="nodegraph-import-gaps"
+                className="rounded border border-[#f38ba8]/35 bg-[#f38ba8]/10 px-2 py-1.5 text-[10px] leading-snug text-[#f9e2af]"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#f38ba8]">
+                    Import Gaps
+                  </p>
+                  <span className="font-mono text-[9px] text-[#f9e2af]">
+                    {visibleImportGaps.length}/{importGaps.length}
+                  </span>
+                </div>
+                <input
+                  data-testid="nodegraph-gap-filter"
+                  value={gapFilter}
+                  onChange={(event) => setGapFilter(event.target.value)}
+                  className="mt-1 w-full rounded border border-[#45475a] bg-[#11111b] px-2 py-1 text-[10px] text-[#cdd6f4] outline-none focus:border-[#f38ba8]"
+                  placeholder="Filtrar gaps..."
+                />
+                <ul className="mt-1 max-h-24 space-y-1 overflow-auto">
+                  {visibleImportGaps.map((gap) => (
+                    <li
+                      key={gap.id}
+                      className="rounded border border-[#313244] bg-[#181825] px-1.5 py-1"
+                    >
+                      <div className="flex items-start gap-1.5">
+                        <span
+                          className={[
+                            "shrink-0 rounded border px-1 py-0.5 text-[8px] font-semibold leading-none",
+                            gap.severity === "blocking"
+                              ? "border-[#f38ba8]/40 bg-[#f38ba8]/10 text-[#f38ba8]"
+                              : "border-[#f9e2af]/40 bg-[#f9e2af]/10 text-[#f9e2af]",
+                          ].join(" ")}
+                        >
+                          {gap.severity === "blocking" ? "Bloqueante" : "Bridge"}
+                        </span>
+                        <span className={gap.severity === "blocking" ? "min-w-0 text-[#f38ba8]" : "min-w-0 text-[#f9e2af]"}>
+                          {gap.nodeId ? (
+                            <span className="block truncate font-mono text-[9px]" title={gap.nodeId}>
+                              {gap.nodeId}
+                            </span>
+                          ) : null}
+                          <span className="block break-words">{gap.label}</span>
+                          {gap.source ? (
+                            <span className="block truncate font-mono text-[9px] text-[#7f849c]" title={gap.source}>
+                              {gap.source}
+                            </span>
+                          ) : null}
+                        </span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
             {graphSummary.totalNodes > 0 && graphSummary.entryNodeIds.length === 0 && (
               <p className="text-[#fab387]">
                 Grafo sem evento de entrada: adicione um no de evento para iniciar o fluxo.
@@ -2510,7 +2757,7 @@ export default function NodeGraphEditor() {
             {importedSemantics ? (
               <div className="rounded border border-[#45475a] bg-[#11111b] px-2 py-1.5 text-[10px] leading-snug text-[#bac2de]">
                 <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#94e2d5]">
-                  Inferencia importada (heuristica)
+                  Inferencia importada ({importedSemanticsKind})
                 </p>
                 <p className="mt-1">
                   Papel: <span className="font-mono text-[#f9e2af]">{importedSemantics.entity_role ?? "—"}</span>

@@ -40,16 +40,14 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "jsdom",
-    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx", "scripts/**/*.test.mjs"],
     setupFiles: ["src/test/setup.ts"],
-    // Forks + single worker is the conservative baseline for this Windows host.
-    // It preserves file isolation without the intermittent bootstrap timeouts
-    // we are seeing again with thread workers on heavier suites.
+    // forks + 1 worker: threads esgota workers apos suites pesadas (App/ArtStudio/NodeGraph).
     pool: "forks",
     isolate: true,
     fileParallelism: false,
     maxWorkers: 1,
-    testTimeout: 30000,
-    hookTimeout: 30000,
+    testTimeout: 120_000,
+    hookTimeout: 120_000,
   },
 });

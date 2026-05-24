@@ -1,4 +1,4 @@
-import type { AnimationDef, Entity } from "./ipc/sceneService";
+import type { AnimationDef, Entity, SpriteCommandBinding } from "./ipc/sceneService";
 import type { ProjectAssetEntry } from "./ipc/toolsService";
 import {
   constrainSpriteFrameSize,
@@ -110,6 +110,7 @@ export function createSpriteEntityFromAsset(options: {
   frameWidth?: number;
   frameHeight?: number;
   animations?: Record<string, AnimationDef>;
+  commands?: SpriteCommandBinding[];
 }): Entity {
   const {
     assetPath,
@@ -122,6 +123,7 @@ export function createSpriteEntityFromAsset(options: {
     frameWidth: optFrameWidth,
     frameHeight: optFrameHeight,
     animations: optAnimations,
+    commands: optCommands,
   } = options;
   const entityBaseId = slugifyEntityId(suggestedName ?? assetPath);
   const entityId = ensureUniqueEntityId(entityBaseId, existingEntityIds);
@@ -145,6 +147,7 @@ export function createSpriteEntityFromAsset(options: {
         palette_slot: 0,
         priority: "foreground",
         animations: optAnimations ?? {},
+        ...(optCommands && optCommands.length > 0 ? { commands: optCommands } : {}),
       },
       ...(includeStarterLogic
         ? {

@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-19 (rodada 47 - GameMaker vertical harness)
+**Ultima Atualizacao:** 2026-05-22 (integracao full-product-cohesion)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -20,12 +20,63 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
-* **O que acabou de acontecer (2026-05-19 rodada 47 - branch `codex/compatibility-harness-gamemaker-vertical`):**
+* **O que acabou de acontecer (2026-05-22 - integracao `codex/full-product-cohesion-integration`):**
+  - **13 branches integradas** na ordem pedida: `project-cohesion-full-build`, `product-ui-workspace-redesign`, `ui-layout-visual-oracle-k`, `actionable-diagnostics-l`, `clean-machine-runtime-setup-j`, `artstudio-production-vertical-m`, `snes-pvsneslib-parity-g`, `gamemaker-modern-gml-runtime-d`, `mugen-ikemen-fighting-import-f`, `openbor-beatemup-import-h`, `sgdk-real-proof-integration`, `sgdk-semantic-nodegraph-delivery`, `sgdk-logic-truth-product-qa`.
+  - **Correcoes pos-merge:** marcadores `<<<<<<<` removidos; `App.tsx` unifica `workspaceLayout` + `sgdkLogicDiagnostics` + guia excluindo Art/RetroFX; `NodeGraphEditor.tsx` da trilha logic-truth; `build_orch.rs`/`project_mgr.rs` com campos merge faltantes; Vitest `pool=forks` + `maxWorkers=1`; emulador volta a logar Runtime Setup no console.
+  - **Referencias de commit:** consolidacao tecnica ate `ee5618f`; documentacao inicial em `b31db0d`; promocao governada no **HEAD remoto** atual da branch (consultar `git rev-parse origin/codex/full-product-cohesion-integration`).
+  - **CI remoto (`b31db0d`):** `validate` + `desktop-smoke` **success**.
+  - **Gates verdes locais (baseline):** `check:tree`, `lint`, `tsc`, `npm test` **350/350**, `cargo clippy`, `cargo test --lib` **382/22 ignored**, `build:debug`/`portable`/`msi`, `git diff --check`.
+  - **Gates de host (promocao, worktree com junction para `toolchains/sgdk` + `toolchains/webdriver`):** `preflight:sgdk-e2e` **Ready: SIM**; `validate-upstream-windows.ps1 -SkipRustTests` **success**; `test:e2e:desktop:qa-rc` rerodando apos correcoes de oraculo (resize WebDriver + overlap rail/Bloco G).
+  - **Excluida:** Godot (fora do escopo / sem branch verde).
+  - **Proximo passo imediato:** fechar QA RC local, commit/push de correcoes de promocao, PR contra `main`, merge apos checks verdes, `release:readiness:promotion` **somente em `main`**.
+
+* **O que acabou de acontecer (2026-05-21 rodada 51 - branch `codex/ui-layout-visual-oracle-k`):**
+  - **Bloco H virou gate visual reutilizavel:** `scripts/ui-layout-oracle.mjs` centraliza resolucoes/alvos e avaliacao DOM/BoundingClientRect; `scripts/e2e-tauri-build-run.mjs` coleta snapshots reais da janela Tauri, salva screenshots com prefixo `H-ui-oracle-*` e escreve `src-tauri/target-test/validation/ui-layout-oracle.json`.
+  - **Cobertura do oraculo:** 4 resolucoes obrigatorias (`1366x768`, `1600x900`, `1920x1080`, `2560x1080`) x 8 alvos (`Import Wizard`, `Scene`, `Art`, `Logic`, `NodeGraph`, `Game`, `Debug`, `Runtime Setup`), total 32 checks automaticos.
+  - **Gates locais (rodada 51):** `npm run test:e2e:desktop:qa-rc`, `npm run build:debug`, `check:tree`, `lint`, `tsc`, `npm test` **325/325**, `cargo clippy`, `cargo test --lib` (**347 passed / 17 ignored**).
+
+* **O que acabou de acontecer (2026-05-21 rodada 51 - branch `codex/actionable-diagnostics-l`):**
+  - **Diagnostico comum:** contrato `ActionableDiagnostic` em Rust/TypeScript; build/import/runtime/emulacao com mensagens acionaveis.
+  - **E2E negativo:** `test:e2e:desktop:build-blocked-diagnostic` valida asset ausente, Details, copia e link de evidencia.
+  - **Gates locais:** `npm test` **326/326**, `cargo test --lib` **349 passed / 17 ignored**, QA RC A-H e build-blocked-diagnostic verdes.
+
+* **O que acabou de acontecer (2026-05-20 rodada 50 - branch `codex/product-ui-workspace-redesign`):**
+  - **Bloco H (QA RC):** `assertUiLayoutHealth()` no `scripts/e2e-tauri-build-run.mjs` valida topbar (overflow, colunas, botao Build compacto), painel central, guia, paineis laterais por workspace, console drawer vs status bar, NodeGraph side rail vs canvas/minimap/toolbar, e sobreposicao de botoes com limiar conservador.
+  - **E2E resiliente:** `clickByTestId()` (scroll + `HTMLElement.click`) para Build/Pause/Resume; onboarding RC forca `setSessionWindowRect(1920,1080)` antes do wizard; Bloco G volta a `scene` antes de esperar `inspector-open-art-workspace` (Logic com `showRight=false` desmontava o Inspector); Bloco H espera `nodegraph-side-rail` + canvas apos `selectWorkspace("logic")` (lazy `Suspense`); timeout default do tauri-driver em `qa-rc` sobe para 120s se `RDS_E2E_DRIVER_TIMEOUT_MS` nao estiver definido.
+  - **Topbar:** coluna central com `overflow-x-auto` e stack `z-[5]` para o centro nao ser interceptado por hit-tests da casca.
+  - **Evidencias:** QA RC A-H verde com prefixo `qa-rc-2026-05-20T07-45-07-583Z-*` (12 PNGs `H-ui-layout-{1366x768|1920x1080|2560x1080}-{scene|logic|game|debug}.png` em `src-tauri/target-test/validation/`).
+  - **Gates locais (rodada 50):** `check:tree`, `lint`, `tsc --noEmit`, `npm test` **322/322**, `cargo clippy -D warnings`, `cargo test --lib` (347 passed / 17 ignored), `preflight:sgdk-e2e`, `validate-upstream-windows.ps1 -SkipRustTests`, `npm run build:debug`, `npm run build:portable`, `npm run build:msi`, `node scripts/e2e-tauri-build-run.mjs --scenario qa-rc --skip-build` (iteracao pos-alteracoes ao script; o alvo `npm run test:e2e:desktop:qa-rc` e o mesmo binario quando o build ja esta fresco).
+  - **Status honesto:** UI hardening **SIM para a fatia coberta pelo bloco H** (shell + asserts + 12 capturas); continuam possiveis refinamentos visuais fora do oraculo (ex.: conteudo interno de paineis, tipografia longa). SGDK Stable / Node Engine **sem promocao**.
+
+* **O que acabou de acontecer (2026-05-19 rodada 49 - branch `codex/product-ui-workspace-redesign`):**
+  - **Shell Option B:** novo modulo `src/core/workspaceLayout.ts` centraliza presets `authoring`, `art`, `logic`, `playtest`, `debug` e `resolveWorkspaceShellConfig()` por workspace.
+  - **Scene:** Hierarchy/Inspector laterais com preset authoring; guia contextual compacto por padrao (`retrodev-workspace-guide-expanded` so expande com opt-in).
+  - **ArtStudio:** painel direito global oculto (sem inspector duplicado); stage 78% / timeline 22% no workspace interno.
+  - **Game:** layout playtest sem paineis laterais — emulador ocupa o centro.
+  - **Logic:** palette/tools no painel direito por padrao ao entrar no workspace.
+  - **Debug/Explorer:** tools/inspector contextuais conforme tarefa.
+  - **Testes:** `workspaceLayout.test.ts` + regressoes em `App.test.tsx` (guia compacto, ArtStudio sem inspector global, game playtest).
+  - **Gates locais:** `check:tree`, `lint`, `tsc`, `npm test` **322/322**, `cargo clippy`, `cargo test --lib` **347/17 ignored**, `preflight:sgdk-e2e`, `test:e2e:desktop:qa-rc` A-G (`qa-rc-2026-05-19T21-06-34-338Z-*`), `build:debug`.
+  - **Status honesto:** UI production hardening **NAO** fechado — falta polimento profundo de Scene/NodeGraph/Debug, capturas em 1366/1920/2560 e QA RC fresco. SGDK Stable **sem promocao**; Node Engine **sem promocao**; superficies Experimentais inalteradas.
+
+* **O que acabou de acontecer (2026-05-19 rodada 48 - branch `codex/project-cohesion-full-build`):**
+  - **Consolidacao:** `origin/main` (ja com GameMaker vertical via PR #8) + `origin/codex/command-dat-artstudio-node-runtime` integrados em uma unica branch coesa.
+  - **GameMaker vertical (preservado):** `compatibility_harness.rs`, `gml_to_nodes.rs`, import endurecido, harness host-local com `non_black_pixels=3793` contra `Basic_platform_game_example.gmez`.
+  - **command.dat (preservado):** `input_commands.rs`, `inputCommands.ts`, `SpriteComponent.commands`, painel ArtStudio `Comandos`, node `input_command`, codegen SGDK/SNES com ring buffer; tokens fora do subset bloqueiam com `#error` acionavel.
+  - **Status honesto:** GameMaker e command.dat permanecem **Experimental**; SGDK/Node Engine nao recebem promocao Stable nesta consolidacao.
+
+* **O que acabou de acontecer (2026-05-19 rodada 47 - branch `codex/compatibility-harness-gamemaker-vertical`, integrado em main via PR #8):**
   - **Harness canonico:** `src-tauri/src/core/compatibility_harness.rs` executa matriz auditavel (import, nodes, gaps, SGDK, ROM, Libretro, `non_black_pixels`, `fake_toolchain_used`) e grava `src-tauri/target-test/validation/gamemaker-vertical/gamemaker-basic-platform-report.{json,md}`.
   - **GML -> nodes oficiais (subset):** `src-tauri/src/core/gml_to_nodes.rs` converte `oPlayer` (input, movimento, pulo, gravidade, animacao, camera) para grafo nativo com auto-layout por sistema; GML generico permanece bridge estruturada com gaps explicitos (`place_free`, `repeat`, `sprite_index`, etc.).
   - **Import GameMaker real endurecido:** `import_gamemaker_project` agrega `oWall` em `collision_map`, materializa sprites alinhados a 8px, limita sprites MD ao player + background reduzido (budget), persiste `graphs/gamemaker_<entity>.json` e mantem metadados de origem.
-  - **Prova vertical host-local:** `cargo test --lib gamemaker_vertical_compatibility_harness_basic_platform -- --ignored --nocapture --test-threads=1` passou contra `F:\Projects\Game Maker\Basic_platform_game_example.gmez` com `generated_sgdk_status=ok`, `rom_status=ok_sega_header`, `emulator_status=ok:Genesis Plus GX`, `non_black_pixels=3793`, `fake_toolchain_used=false`, ROM `gamemaker-basic-platform.bin` e frame `gamemaker-basic-platform-frame.ppm`.
-  - **Status honesto:** GameMaker continua **Experimental/importavel** (nao Stable geral); `.yyp/.yy` modernos seguem pendentes; GML completo segue pendente; props decorativos (spinners, keys, doors) podem importar logica/grafo sem sprite MD nesta wave.
+  - **Prova vertical host-local:** `cargo test --lib gamemaker_vertical_compatibility_harness_basic_platform -- --ignored --nocapture --test-threads=1` passou contra `F:\Projects\Game Maker\Basic_platform_game_example.gmez` com `generated_sgdk_status=ok`, `rom_status=ok_sega_header`, `emulator_status=ok:Genesis Plus GX`, `non_black_pixels=3793`, `fake_toolchain_used=false`.
+  - **Status honesto:** GameMaker continua **Experimental/importavel** (nao Stable geral); `.yyp/.yy` modernos seguem pendentes; GML completo segue pendente.
+
+* **O que acabou de acontecer (2026-05-19 rodada 47 - branch `codex/command-dat-artstudio-node-runtime`):**
+  - **command.dat local/BYOR:** parser canonico `src-tauri/src/core/input_commands.rs` e espelho frontend `src/core/inputCommands.ts` leem apenas arquivo local `command.dat`; sem scraping nem dados embutidos.
+  - **Ponte ArtStudio -> Sprite metadata -> NodeGraph:** `SpriteComponent.commands`, painel `Comandos`, node `input_command`, codegen SGDK/SNES com ring buffer.
+  - **Prova real SGDK/Libretro:** `official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --ignored` com ROM real e framebuffer visivel.
+  - **Status honesto:** superficie **Experimental**; sem compatibilidade total com todos os dialetos de `command.dat`.
 
 * **O que acabou de acontecer (2026-05-18 rodada 46 - branch `codex/product-compatibility-wave`):**
   - **Base protegida:** antes de mexer em feature, `main` estava alinhado com `origin/main` em `a0fe109` e `npm run release:readiness:promotion` passou com `Pronto para promocao: SIM`.

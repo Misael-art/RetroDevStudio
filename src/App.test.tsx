@@ -84,11 +84,22 @@ vi.mock("./components/tools/ToolsPanel", () => ({
 }));
 
 vi.mock("./components/nodegraph/NodeGraphEditor", () => ({
-  default: () => <div data-testid="nodegraph" />,
+  default: () => (
+    <div data-testid="nodegraph">
+      <aside data-testid="nodegraph-side-rail">
+        <div data-testid="nodegraph-overview" />
+      </aside>
+      <input placeholder="Buscar nó..." readOnly />
+    </div>
+  ),
 }));
 
 vi.mock("./components/retrofx/RetroFXDesigner", () => ({
   default: () => <div data-testid="retrofx" />,
+}));
+
+vi.mock("./components/artstudio/ArtStudioPanel", () => ({
+  default: () => <div data-testid="artstudio" />,
 }));
 
 vi.mock("./components/viewport/ViewportPanel", () => ({
@@ -500,6 +511,16 @@ vi.mock("./components/viewport/ViewportPanel", () => ({
             ) : null}
           </div>
         )}
+
+        {activeViewportTab === "logic" && (
+          <div data-testid="nodegraph">
+            <aside data-testid="nodegraph-side-rail">
+              <div data-testid="nodegraph-overview" />
+            </aside>
+            <input placeholder="Buscar nó..." readOnly />
+          </div>
+        )}
+        {activeViewportTab === "artstudio" && <div data-testid="artstudio" />}
       </div>
     );
   },
@@ -622,6 +643,12 @@ function createDependencyStatus(id: string) {
     installed: true,
     version: "test",
     install_dir: "F:/deps",
+    status_code: "installed",
+    status_label: "INSTALADO",
+    severity: "ok",
+    cache_available: false,
+    manual_configuration_required: false,
+    actionable_message: "Dependencia detectada.",
     source_url: "https://example.invalid",
     auto_install_supported: true,
     notes: [],
@@ -742,7 +769,7 @@ function defaultExternalImportProfiles() {
       id: "mugen",
       name: "MUGEN",
       family: "Fighting",
-      description: "Importa personagem, stage e screenpack via DEF/AIR com assets visuais e sonoros reais.",
+      description: "Importa personagem, stage e screenpack via DEF/AIR/CMD/CNS/ST como subset experimental de luta 2D.",
       source_engine: "mugen",
       support_status: "Experimental",
       supported_levels: ["L1", "L2", "L3"],
@@ -841,6 +868,14 @@ function findButton(container: HTMLElement, label: string): HTMLButtonElement {
     throw new Error(`Button not found: ${label}`);
   }
 
+  return button;
+}
+
+function findBuildRunButton(container: HTMLElement): HTMLButtonElement {
+  const button = container.querySelector('[data-testid="toolbar-build-run"]');
+  if (!(button instanceof HTMLButtonElement)) {
+    throw new Error("Button not found: toolbar-build-run");
+  }
   return button;
 }
 
@@ -1583,7 +1618,7 @@ describe("App build flow", () => {
 
   it("builds, loads the ROM, and starts the emulator frame loop", async () => {
     await act(async () => {
-      findButton(container, "Build & Run").click();
+      findBuildRunButton(container).click();
       await flush();
     });
 
@@ -1606,6 +1641,94 @@ describe("App build flow", () => {
     expect(useEditorStore.getState().emulatorLoaded).toBe(true);
     expect(container.textContent).toContain("Emulador ativo");
     expect(putImageDataSpy).toHaveBeenCalled();
+  });
+
+  it("logs an actionable diagnostic instead of a generic build failure", async () => {
+    mocks.buildProject.mockImplementationOnce(
+      async (_projectDir: string, onLog: (line: { level: string; message: string }) => void) => {
+        const technical =
+          "Asset referenciado nao encontrado: 'F:/Temp/Demo/assets/sprites/missing.png'.";
+        onLog({ level: "error", message: technical });
+        return {
+          ok: false,
+          rom_path: "",
+          log: [{ level: "error", message: technical }],
+          diagnostics: [
+            {
+              severity: "error",
+              area: "build_sgdk",
+              source_path: "F:/Temp/Demo/assets/sprites/missing.png",
+              line: null,
+              column: null,
+              user_message:
+                "Build falhou porque o asset assets/sprites/missing.png nao foi encontrado.",
+              technical_detail: technical,
+              suggested_action:
+                "Restaure o arquivo ausente ou atualize a entidade para apontar para um asset existente.",
+              blocking: true,
+              evidence_path: "F:/Temp/Demo/build/megadrive",
+            },
+          ],
+        };
+      }
+    );
+
+    await act(async () => {
+      findBuildRunButton(container).click();
+      await flush();
+      await flush();
+    });
+
+    const messages = useEditorStore.getState().consoleEntries.map((entry) => entry.message);
+    expect(messages).toContain(
+      "Build falhou porque o asset assets/sprites/missing.png nao foi encontrado. Acao recomendada: Restaure o arquivo ausente ou atualize a entidade para apontar para um asset existente."
+    );
+    expect(messages.some((message) => message === "Build failed")).toBe(false);
+    expect(mocks.emulatorLoadRom).not.toHaveBeenCalled();
+  });
+
+  it("turns toolchain build failures into Runtime Setup guidance", async () => {
+    mocks.buildProject.mockResolvedValueOnce({
+      ok: false,
+      rom_path: "",
+      log: [
+        {
+          level: "error",
+          message:
+            "Toolchain SGDK nao encontrada. Configure SGDK_ROOT ou instale em toolchains/sgdk/.",
+        },
+      ],
+    });
+
+    await act(async () => {
+      findBuildRunButton(container).click();
+      await flush();
+      await flush();
+    });
+
+    const messages = useEditorStore.getState().consoleEntries.map((entry) => entry.message);
+    expect(messages.some((message) => message.includes("Runtime Setup"))).toBe(true);
+    expect(messages.some((message) => message.includes("Revalidar"))).toBe(true);
+    expect(messages.some((message) => message.includes("SGDK"))).toBe(true);
+  });
+
+  it("turns missing emulator cores into actionable setup guidance", async () => {
+    mocks.emulatorLoadRom.mockResolvedValueOnce({
+      ok: false,
+      message:
+        "Nenhum core Libretro para Mega Drive foi encontrado. Configure RETRODEV_LIBRETRO_CORE.",
+    });
+
+    await act(async () => {
+      findBuildRunButton(container).click();
+      await flush();
+      await flush();
+    });
+
+    const messages = useEditorStore.getState().consoleEntries.map((entry) => entry.message);
+    expect(messages.some((message) => message.includes("Runtime Setup"))).toBe(true);
+    expect(messages.some((message) => message.includes("Libretro"))).toBe(true);
+    expect(useEditorStore.getState().activeWorkspace).toBe("debug");
   });
 
   it("installs the missing JDK before Build & Run on Mega Drive", async () => {
@@ -1635,7 +1758,7 @@ describe("App build flow", () => {
     });
 
     await act(async () => {
-      findButton(container, "Build & Run").click();
+      findBuildRunButton(container).click();
       await flush();
       await flush();
     });
@@ -1663,7 +1786,7 @@ describe("App build flow", () => {
     );
 
     await act(async () => {
-      findButton(container, "Build & Run").click();
+      findBuildRunButton(container).click();
       await flush();
       await flush();
     });
@@ -1683,7 +1806,7 @@ describe("App build flow", () => {
 
   it("does not stop the emulator session when switching away from the game tab", async () => {
     await act(async () => {
-      findButton(container, "Build & Run").click();
+      findBuildRunButton(container).click();
       await flush();
       await flush();
     });
@@ -1717,7 +1840,7 @@ describe("App build flow", () => {
     );
 
     await act(async () => {
-      const buildButton = findButton(container, "Build & Run");
+      const buildButton = findBuildRunButton(container);
       buildButton.click();
       buildButton.click();
       buildButton.click();
@@ -1758,7 +1881,7 @@ describe("App build flow", () => {
       await flush();
     });
 
-    const buildButton = findButton(container, "Build & Run");
+    const buildButton = findBuildRunButton(container);
     const reason = container.querySelector("[data-testid='build-disabled-reason']");
     const liveState = container.querySelector("[data-testid='build-live-state']");
 
@@ -1823,12 +1946,20 @@ describe("App build flow", () => {
     const guide = container.querySelector("[data-testid='workspace-guide']");
 
     expect(guide?.textContent).toContain("Overlay SGDK");
-    expect(guide?.textContent).toContain("overlay legado");
-    expect(guide?.textContent).toContain("Host SGDK em overlay");
-    expect(guide?.textContent).toContain("Sem entidade foco");
+    expect(guide?.getAttribute("data-expanded")).toBe("false");
 
     await act(async () => {
-      findButton(guide as HTMLElement, "Abrir Asset Browser").click();
+      findButton(guide as HTMLElement, "Expandir guia").click();
+      await flush();
+    });
+
+    const expandedGuide = container.querySelector("[data-testid='workspace-guide']");
+    expect(expandedGuide?.textContent).toContain("overlay legado");
+    expect(expandedGuide?.textContent).toContain("Host SGDK em overlay");
+    expect(expandedGuide?.textContent).toContain("Sem entidade foco");
+
+    await act(async () => {
+      findButton(expandedGuide as HTMLElement, "Abrir Asset Browser").click();
       await flush();
     });
 
@@ -1841,11 +1972,23 @@ describe("App build flow", () => {
 
   it("compacts the contextual guide to one primary action and restores the full guide on demand", async () => {
     const guide = container.querySelector("[data-testid='workspace-guide']");
-    expect(guide?.textContent).toContain("Focar Entidade Guia");
-    expect(guide?.textContent).toContain("Abrir Inspector");
+    expect(guide?.getAttribute("data-expanded")).toBe("false");
+    expect(guide?.textContent).toContain("Abrir Asset Browser");
+    expect(guide?.textContent).not.toContain("Focar Entidade Guia");
 
     await act(async () => {
-      findButton(guide as HTMLElement, "Compactar guia").click();
+      findButton(guide as HTMLElement, "Expandir guia").click();
+      await flush();
+    });
+
+    const expandedGuide = container.querySelector("[data-testid='workspace-guide']");
+    expect(expandedGuide?.getAttribute("data-expanded")).toBe("true");
+    expect(expandedGuide?.textContent).toContain("Focar Entidade Guia");
+    expect(expandedGuide?.textContent).toContain("Abrir Inspector");
+    expect(localStorage.getItem("retrodev-workspace-guide-expanded")).toBe("true");
+
+    await act(async () => {
+      findButton(expandedGuide as HTMLElement, "Compactar guia").click();
       await flush();
     });
 
@@ -1855,16 +1998,6 @@ describe("App build flow", () => {
     expect(compactGuide?.textContent).not.toContain("Focar Entidade Guia");
     expect(compactGuide?.textContent).not.toContain("Abrir Inspector");
     expect(localStorage.getItem("retrodev-workspace-guide-expanded")).toBe("false");
-
-    await act(async () => {
-      findButton(compactGuide as HTMLElement, "Expandir guia").click();
-      await flush();
-    });
-
-    const expandedGuide = container.querySelector("[data-testid='workspace-guide']");
-    expect(expandedGuide?.getAttribute("data-expanded")).toBe("true");
-    expect(expandedGuide?.textContent).toContain("Focar Entidade Guia");
-    expect(expandedGuide?.textContent).toContain("Abrir Inspector");
   });
 
   it("opens the unified top bar menu and reaches the About dialog", async () => {
@@ -1938,15 +2071,22 @@ describe("App build flow", () => {
     expect(guide?.textContent).toContain("Paleta Contextual");
 
     await act(async () => {
+      useEditorStore.getState().setSelectedEntityId("hero");
+      await flush();
+    });
+
+    await act(async () => {
       findButton(guide as HTMLElement, "Abrir Paleta Contextual").click();
       await flush();
     });
 
-    const toolsPanel = container.querySelector("[data-testid='tools']");
-    expect(toolsPanel).toBeInstanceOf(HTMLDivElement);
-    expect(toolsPanel?.getAttribute("data-active")).toBe("palette");
-    expect(toolsPanel?.getAttribute("data-workspace")).toBe("editing");
-    expect(toolsPanel?.getAttribute("data-advanced")).toBe("false");
+    expect(container.querySelector("[data-testid='tools']")).toBeNull();
+    expect(container.querySelector("[data-testid='nodegraph-side-rail']")).toBeInstanceOf(
+      HTMLElement
+    );
+    expect(
+      container.querySelector("input[placeholder='Buscar nó...']")
+    ).toBeInstanceOf(HTMLInputElement);
   });
 
   it("switches workspaces from the activity bar and updates shell routing", async () => {
@@ -1983,9 +2123,23 @@ describe("App build flow", () => {
 
     expect(useEditorStore.getState().activeWorkspace).toBe("artstudio");
     expect(useEditorStore.getState().activeViewportTab).toBe("artstudio");
-    expect(container.querySelector("[data-testid='workspace-guide']")?.textContent).toContain(
-      "Art Workspace"
-    );
+    expect(container.querySelector("[data-testid='workspace-guide']")).toBeNull();
+    expect(container.querySelector("[data-testid='inspector']")).toBeNull();
+    expect(container.querySelector("[data-testid='artstudio']")).toBeInstanceOf(HTMLElement);
+  });
+
+  it("hides the global inspector shell in game playtest layout", async () => {
+    const gameButton = container.querySelector(
+      "[data-testid='workspace-rail-game']"
+    ) as HTMLButtonElement | null;
+
+    await act(async () => {
+      gameButton?.click();
+      await flush();
+    });
+
+    expect(useEditorStore.getState().activeWorkspace).toBe("game");
+    expect(container.querySelector("[data-testid='inspector']")).toBeNull();
   });
 
   it("shows build phases as safe-to-continue guidance when validation has warnings only", async () => {
@@ -2142,7 +2296,7 @@ describe("App build flow", () => {
     ) as HTMLButtonElement | null;
 
     await act(async () => {
-      findButton(container, "Build & Run").click();
+      findBuildRunButton(container).click();
       await flush();
       await flush();
     });
@@ -2591,6 +2745,104 @@ describe("App build flow", () => {
     );
   });
 
+  it("shows SGDK capabilities as an explicit matrix instead of a single support chip", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "",
+        activeProjectName: "",
+        activeScenePath: "",
+        activeScene: null,
+        activeSceneSource: null,
+        hwStatus: null,
+      });
+      await flush();
+      await flush();
+    });
+
+    const importToggle = container.querySelector(
+      "[data-testid='wizard-external-import-toggle']"
+    ) as HTMLButtonElement | null;
+
+    await act(async () => {
+      importToggle?.click();
+      await flush();
+    });
+
+    const matrix = container.querySelector("[data-testid='sgdk-capability-matrix']");
+
+    expect(matrix?.textContent).toContain("Assets");
+    expect(matrix?.textContent).toContain("Build/ROM");
+    expect(matrix?.textContent).toContain("Emulacao");
+    expect(matrix?.textContent).toContain("Cena/entidades");
+    expect(matrix?.textContent).toContain("Logica por nodes");
+    expect(matrix?.textContent).toContain("FSM/Estados");
+    expect(matrix?.textContent).toContain("Round-trip");
+    expect(matrix?.textContent).toContain("Equivalencia gameplay");
+    expect(matrix?.textContent).toContain("Nao certificada");
+    expect(matrix?.textContent).not.toContain("SGDK suportado");
+  });
+
+  it("shows a post-import SGDK logic summary with converted nodes, bridges and blocking gaps", async () => {
+    mocks.importExternalProject.mockResolvedValueOnce({
+      selected: true,
+      path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      name: "Importado SGDK",
+      notice: "Importacao SGDK concluida com 1 cena nativa.",
+      import_summary: {
+        states_detected: 3,
+        transitions_detected: 4,
+        nodes_generated: 9,
+        bridges_created: 2,
+        blocking_gaps: ["inline assembly branch blocks equivalence"],
+        mapped_source_files: ["src/main.c", "src/player.c"],
+        semantic_model_kind: "fsm",
+      },
+    });
+
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "",
+        activeProjectName: "",
+        activeScenePath: "",
+        activeScene: null,
+        activeSceneSource: null,
+        hwStatus: null,
+      });
+      await flush();
+      await flush();
+    });
+
+    const importToggle = container.querySelector(
+      "[data-testid='wizard-external-import-toggle']"
+    ) as HTMLButtonElement | null;
+
+    await act(async () => {
+      importToggle?.click();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, "Importar Externo").click();
+      await flush();
+      await flush();
+    });
+
+    const summary = container.querySelector("[data-testid='sgdk-import-summary']");
+
+    expect(summary?.textContent).toContain("FSM extraida");
+    expect(summary?.textContent).toContain("estados detectados");
+    expect(summary?.textContent).toContain("3");
+    expect(summary?.textContent).toContain("transicoes detectadas");
+    expect(summary?.textContent).toContain("4");
+    expect(summary?.textContent).toContain("nodes gerados");
+    expect(summary?.textContent).toContain("9");
+    expect(summary?.textContent).toContain("bridges criadas");
+    expect(summary?.textContent).toContain("2");
+    expect(summary?.textContent).toContain("inline assembly branch blocks equivalence");
+    expect(summary?.textContent).toContain("src/main.c");
+    expect(summary?.textContent).toContain("src/player.c");
+  });
+
   it("imports an arbitrary external project with the selected profile", async () => {
     await act(async () => {
       useEditorStore.setState({
@@ -2722,7 +2974,7 @@ describe("App build flow", () => {
       await flush();
     });
 
-    const buildButton = findButton(container, "Build & Run");
+    const buildButton = findBuildRunButton(container);
     const revalidateButton = container.querySelector(
       "[data-testid='build-stale-revalidate']"
     ) as HTMLButtonElement | null;
@@ -2806,7 +3058,7 @@ describe("App build flow", () => {
       await flush();
     });
 
-    const buildButton = findButton(container, "Build & Run");
+    const buildButton = findBuildRunButton(container);
     const warning = container.querySelector("[data-testid='build-warning-summary']");
     const liveState = container.querySelector("[data-testid='build-live-state']");
 
@@ -2851,7 +3103,7 @@ describe("App build flow", () => {
       await flush();
     });
 
-    const buildButton = findButton(container, "Build & Run");
+    const buildButton = findBuildRunButton(container);
     const liveState = container.querySelector("[data-testid='build-live-state']");
 
     expect(buildButton.disabled).toBe(false);
@@ -2908,7 +3160,7 @@ describe("App build flow", () => {
       await flush();
     });
 
-    const buildButton = findButton(container, "Build & Run");
+    const buildButton = findBuildRunButton(container);
     const liveState = container.querySelector("[data-testid='build-live-state']");
     const errorSummary = container.querySelector("[data-testid='build-live-error-summary']");
 
@@ -2966,7 +3218,7 @@ describe("App build flow", () => {
       await flush();
     });
 
-    const buildButton = findButton(container, "Build & Run");
+    const buildButton = findBuildRunButton(container);
     const liveState = container.querySelector("[data-testid='build-live-state']");
     const pendingSummary = container.querySelector("[data-testid='build-live-pending-summary']");
 
@@ -3019,7 +3271,7 @@ describe("App build flow", () => {
 
   it("supports single-frame step and resume from the game viewport while paused", async () => {
     await act(async () => {
-      findButton(container, "Build & Run").click();
+      findBuildRunButton(container).click();
       await flush();
       await flush();
     });
@@ -3063,7 +3315,7 @@ describe("App build flow", () => {
 
   it("triggers rewind from the game viewport controls and keyboard shortcut while paused", async () => {
     await act(async () => {
-      findButton(container, "Build & Run").click();
+      findBuildRunButton(container).click();
       await flush();
       await flush();
     });
@@ -3379,7 +3631,7 @@ describe("App build flow", () => {
     expect(container.querySelector("[data-testid='inspector']")).toBeNull();
 
     await act(async () => {
-      findButton(container, "Inspector").click();
+      findButton(container, "Insp").click();
       await flush();
     });
 
