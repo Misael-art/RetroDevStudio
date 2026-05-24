@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_SHORTCUTS,
+  getPaletteCommands,
   eventMatchesShortcut,
   findShortcutConflicts,
   formatShortcutKeys,
   getShortcutTitle,
   groupShortcutsByGroup,
+  loadShortcutCustomizations,
   normalizeShortcutChord,
+  resetShortcutCustomizations,
+  resolveShortcutCommand,
+  saveShortcutCustomizations,
+  searchCommands,
+  updateShortcutBinding,
   type ShortcutCommand,
 } from "./shortcuts";
 
@@ -19,13 +26,41 @@ describe("shortcut registry", () => {
       "Build",
       "Edicao",
       "Layout",
+      "Workspaces",
+      "Ferramentas",
+      "Console",
       "Viewport",
       "NodeGraph",
       "Emulador",
     ]);
     expect(DEFAULT_SHORTCUTS.some((shortcut) => shortcut.id === "build.run")).toBe(true);
     expect(DEFAULT_SHORTCUTS.some((shortcut) => shortcut.id === "layout.save")).toBe(true);
+    expect(DEFAULT_SHORTCUTS.some((shortcut) => shortcut.id === "commandPalette.open")).toBe(true);
     expect(findShortcutConflicts(DEFAULT_SHORTCUTS)).toEqual([]);
+  });
+
+  it("registers only executable app commands for the command palette", () => {
+    const paletteCommands = getPaletteCommands(DEFAULT_SHORTCUTS);
+    const commandIds = paletteCommands.map((command) => command.id);
+
+    expect(commandIds).toEqual(
+      expect.arrayContaining([
+        "project.open",
+        "build.run",
+        "emulator.play",
+        "emulator.stop",
+        "layout.focus",
+        "layout.save",
+        "tools.runtimeSetup",
+        "console.open",
+        "tools.assetBrowser",
+        "workspace.scene",
+        "workspace.logic",
+        "workspace.artstudio",
+      ])
+    );
+    expect(commandIds).not.toContain("viewport.grid");
+    expect(commandIds).not.toContain("emulator.dpad");
   });
 
   it("formats shortcut hints for tooltips and compact menu labels", () => {
@@ -59,6 +94,7 @@ describe("shortcut registry", () => {
         displayKey: "Ctrl+Shift+P",
         commandIds: ["command.a", "command.b"],
         labels: ["Comando A", "Comando B"],
+        scopes: ["global", "global"],
       },
     ]);
   });
@@ -110,5 +146,93 @@ describe("shortcut registry", () => {
         "build.run"
       )
     ).toBe(false);
+  });
+
+  it("searches command labels with a simple fuzzy match", () => {
+    const results = searchCommands("rt setup", getPaletteCommands(DEFAULT_SHORTCUTS));
+
+    expect(results[0]?.command.id).toBe("tools.runtimeSetup");
+    expect(searchCommands("bld rn", getPaletteCommands(DEFAULT_SHORTCUTS))[0]?.command.id).toBe(
+      "build.run"
+    );
+    expect(searchCommands("art", getPaletteCommands(DEFAULT_SHORTCUTS))[0]?.command.id).toBe(
+      "workspace.artstudio"
+    );
+  });
+
+  it("resolves shortcut execution and blocks ambiguous conflicts in the active scope", () => {
+    const shortcuts: ShortcutCommand[] = [
+      {
+        id: "command.a",
+        group: "Teste",
+        label: "Comando A",
+        keys: ["Ctrl+K"],
+        scope: "shell",
+        palette: true,
+      },
+      {
+        id: "command.b",
+        group: "Teste",
+        label: "Comando B",
+        keys: ["Ctrl+K"],
+        scope: "scene",
+        palette: true,
+      },
+      {
+        id: "command.c",
+        group: "Teste",
+        label: "Comando C",
+        keys: ["Ctrl+L"],
+        scope: "nodegraph",
+        palette: true,
+      },
+    ];
+
+    expect(
+      resolveShortcutCommand(
+        { key: "l", ctrlKey: true },
+        shortcuts,
+        new Set(["command.a", "command.b", "command.c"]),
+        "nodegraph"
+      )
+    ).toEqual({
+      commandId: "command.c",
+      conflict: null,
+    });
+
+    expect(
+      resolveShortcutCommand(
+        { key: "k", ctrlKey: true },
+        shortcuts,
+        new Set(["command.a", "command.b", "command.c"]),
+        "scene"
+      )
+    ).toEqual({
+      commandId: null,
+      conflict: {
+        normalizedKey: "ctrl+k",
+        displayKey: "Ctrl+K",
+        commandIds: ["command.a", "command.b"],
+        labels: ["Comando A", "Comando B"],
+        scopes: ["shell", "scene"],
+      },
+    });
+  });
+
+  it("persists shortcut customizations and can restore defaults", () => {
+    localStorage.clear();
+    const customized = updateShortcutBinding(DEFAULT_SHORTCUTS, "build.run", "Ctrl+Alt+B");
+
+    saveShortcutCustomizations(customized, DEFAULT_SHORTCUTS, localStorage);
+
+    expect(localStorage.getItem("retrodev-shortcut-customizations-v1")).toContain("build.run");
+    expect(loadShortcutCustomizations(DEFAULT_SHORTCUTS, localStorage).find((shortcut) => shortcut.id === "build.run")?.keys).toEqual([
+      "Ctrl+Alt+B",
+    ]);
+
+    const restored = resetShortcutCustomizations(DEFAULT_SHORTCUTS, localStorage);
+
+    expect(restored.find((shortcut) => shortcut.id === "build.run")?.keys).toEqual(["Ctrl+B"]);
+    expect(localStorage.getItem("retrodev-shortcut-customizations-v1")).toBeNull();
   });
 });

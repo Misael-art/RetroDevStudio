@@ -2057,7 +2057,48 @@ describe("App build flow", () => {
     expect(container.textContent).toContain("Tauri 2 · React 19 · Rust");
   });
 
-  it("opens the central shortcut map from the menu and Ctrl+/", async () => {
+  it("opens the command palette with Ctrl+P, searches real commands and executes one", async () => {
+    expect(container.querySelector("[data-testid='command-palette']")).toBeNull();
+
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "p",
+          ctrlKey: true,
+          bubbles: true,
+        })
+      );
+      await flush();
+    });
+
+    const palette = container.querySelector("[data-testid='command-palette']");
+    expect(palette).toBeInstanceOf(HTMLDivElement);
+    expect(palette?.textContent).toContain("Abrir workspace");
+    expect(palette?.textContent).toContain("Build & Run");
+    expect(palette?.textContent).not.toContain("Direcional");
+
+    const search = container.querySelector("[data-testid='command-palette-search']");
+    expect(search).toBeInstanceOf(HTMLInputElement);
+
+    await act(async () => {
+      (search as HTMLInputElement).value = "logic";
+      search?.dispatchEvent(new Event("input", { bubbles: true }));
+      await flush();
+    });
+
+    const logicCommand = container.querySelector("[data-testid='command-palette-item-workspace.logic']");
+    expect(logicCommand).toBeInstanceOf(HTMLButtonElement);
+
+    await act(async () => {
+      (logicCommand as HTMLButtonElement).click();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='command-palette']")).toBeNull();
+    expect(container.querySelector("[data-testid='nodegraph']")).toBeInstanceOf(HTMLDivElement);
+  });
+
+  it("opens the shortcut editor, shows scoped conflicts and persists local edits", async () => {
     await act(async () => {
       findButton(container, "Menu").click();
       await flush();
@@ -2073,11 +2114,36 @@ describe("App build flow", () => {
       await flush();
     });
 
-    const shortcutMap = container.querySelector("[data-testid='shortcut-map']");
-    expect(shortcutMap).toBeInstanceOf(HTMLDivElement);
-    expect(shortcutMap?.textContent).toContain("Build & Run");
-    expect(shortcutMap?.textContent).toContain("Ctrl+B");
-    expect(shortcutMap?.textContent).toContain("Sem conflitos ativos");
+    const shortcutEditor = container.querySelector("[data-testid='shortcut-editor']");
+    expect(shortcutEditor).toBeInstanceOf(HTMLDivElement);
+    expect(shortcutEditor?.textContent).toContain("Build & Run");
+    expect(shortcutEditor?.textContent).toContain("Sem conflitos ativos");
+
+    const buildShortcutInput = container.querySelector("[data-testid='shortcut-editor-input-build.run']");
+    expect(buildShortcutInput).toBeInstanceOf(HTMLInputElement);
+
+    await act(async () => {
+      (buildShortcutInput as HTMLInputElement).value = "Ctrl+Alt+B";
+      buildShortcutInput?.dispatchEvent(new Event("input", { bubbles: true }));
+      await flush();
+    });
+
+    expect(localStorage.getItem("retrodev-shortcut-customizations-v1")).toContain("build.run");
+    expect(findBuildRunButton(container).getAttribute("title")).toContain("Ctrl+Alt+B");
+
+    const openProjectShortcutInput = container.querySelector("[data-testid='shortcut-editor-input-project.open']");
+    expect(openProjectShortcutInput).toBeInstanceOf(HTMLInputElement);
+
+    await act(async () => {
+      (openProjectShortcutInput as HTMLInputElement).value = "Ctrl+Alt+B";
+      openProjectShortcutInput?.dispatchEvent(new Event("input", { bubbles: true }));
+      await flush();
+    });
+
+    const conflicts = container.querySelector("[data-testid='shortcut-editor-conflicts']");
+    expect(conflicts?.textContent).toContain("conflito");
+    expect(conflicts?.textContent).toContain("Abrir workspace");
+    expect(conflicts?.textContent).toContain("Build & Run");
 
     await act(async () => {
       findButton(container, "Fechar").click();
@@ -2092,7 +2158,7 @@ describe("App build flow", () => {
       await flush();
     });
 
-    expect(container.querySelector("[data-testid='shortcut-map']")).toBeInstanceOf(HTMLDivElement);
+    expect(container.querySelector("[data-testid='shortcut-editor']")).toBeInstanceOf(HTMLDivElement);
   });
 
   it("opens project settings with actionable SRAM warnings and saves through project.rds", async () => {
