@@ -41,6 +41,7 @@ import { buildTilemapAuthoringBrush, resolvePrimaryAuthoringSurface } from "../.
 declare global {
   interface Window {
     __RDS_ARTSTUDIO_E2E__?: {
+      ingestSpriteSheet: (sourcePath: string) => Promise<boolean>;
       loadImage: (sourcePath: string) => Promise<boolean>;
       importToProject: () => Promise<boolean>;
       importCommandDat: (commandPath: string) => Promise<number>;
@@ -51,7 +52,14 @@ declare global {
       assignCommand: (sequenceId: string, commandId: string) => boolean;
       applyToScene: (entityId?: string) => boolean;
       getState: () => {
+        spriteSheetLoadStatus: string;
+        spriteSheetSourcePath: string;
         spritePath: string;
+        spriteName: string;
+        frameWidth: number;
+        frameHeight: number;
+        activeSequenceId: string | null;
+        suggestedFrames: ArtSuggestedFrame[];
         sequences: SpriteSequence[];
         canApplyToScene: boolean;
         validationError: string | null;
@@ -607,6 +615,30 @@ interface ArtStudioState {
   spriteSourceAssetPath: string;
   saveFeedback: boolean;
   validationError: string | null;
+}
+
+type ArtStudioAutomationState = {
+  spriteSheetLoadStatus: ArtStudioLoadStatus;
+  spriteSheetSourcePath: string;
+  spritePath: string;
+  spriteName: string;
+  frameWidth: number;
+  frameHeight: number;
+  canApplyToScene: boolean;
+  activeSequenceId: string | null;
+  suggestedFrames: ArtSuggestedFrame[];
+  sequences: Array<Pick<SpriteSequence, "id" | "name" | "frames" | "fps" | "loop">>;
+};
+
+type ArtStudioAutomationApi = {
+  ingestSpriteSheet: (sourcePath: string) => Promise<boolean>;
+  getState: () => ArtStudioAutomationState;
+};
+
+declare global {
+  interface Window {
+    __RDS_ARTSTUDIO_E2E__?: ArtStudioAutomationApi;
+  }
 }
 
 type ArtStudioAction =
@@ -1697,6 +1729,7 @@ function ArtStudioInspectorSection() {
 
         <button
           type="button"
+          data-testid="artstudio-import-to-project"
           onClick={() => {
             void handleImportToProject();
           }}
@@ -1708,6 +1741,7 @@ function ArtStudioInspectorSection() {
 
         <button
           type="button"
+          data-testid="artstudio-apply-to-scene"
           onClick={() => {
             handleApplyToScene();
           }}
@@ -2558,6 +2592,7 @@ export default function ArtStudioPanel() {
         commands: commandBindings,
       });
       addEntity(entity);
+      setSelectedEntityId(entity.entity_id);
       logMessage("success", `[ArtStudio] Entidade '${entity.entity_id}' criada na cena.`);
     }
 
@@ -2582,6 +2617,7 @@ export default function ArtStudioPanel() {
     activeProjectDir,
     activeTarget,
     addEntity,
+    setSelectedEntityId,
     updateEntity,
     logMessage,
   ]);
@@ -2646,7 +2682,23 @@ export default function ArtStudioPanel() {
   ]);
 
   useEffect(() => {
+    const automationEnabled =
+      typeof window !== "undefined" &&
+      (Boolean(window.__RDS_E2E__) ||
+        "__TAURI_INTERNALS__" in window ||
+        import.meta.env.DEV ||
+        import.meta.env.MODE === "test");
+
+    if (!automationEnabled) {
+      delete window.__RDS_ARTSTUDIO_E2E__;
+      return;
+    }
+
     window.__RDS_ARTSTUDIO_E2E__ = {
+      ingestSpriteSheet: async (sourcePath: string) => {
+        await ingestSpriteSheet({ sourcePath });
+        return true;
+      },
       loadImage: async (sourcePath: string) => {
         await ingestSpriteSheet({ sourcePath });
         return true;
@@ -2725,7 +2777,14 @@ export default function ArtStudioPanel() {
       getState: () => {
         const latest = artStudioStateRef.current;
         return {
+          spriteSheetLoadStatus: latest.spriteSheetLoadStatus,
+          spriteSheetSourcePath: latest.spriteSheetSourcePath,
           spritePath: latest.spritePath,
+          spriteName: latest.spriteName,
+          frameWidth: latest.frameWidth,
+          frameHeight: latest.frameHeight,
+          activeSequenceId: latest.activeSequenceId,
+          suggestedFrames: latest.suggestedFrames,
           sequences: latest.sequences.map((sequence) => ({
             ...sequence,
             frames: [...sequence.frames],
@@ -2999,9 +3058,10 @@ export default function ArtStudioPanel() {
             </button>
             <button
               type="button"
+              data-testid="artstudio-apply-selected-entity"
               onClick={() => {
-            handleApplyToScene();
-          }}
+                handleApplyToScene();
+              }}
               disabled={!canApplyToScene}
               className="rounded-lg border border-[#a6e3a1]/45 bg-[#a6e3a1]/12 px-3 py-1.5 text-[10px] font-semibold text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/22 disabled:cursor-not-allowed disabled:opacity-40"
               title={canApplyToScene ? "Aplicar sprite/animacoes na entidade selecionada" : applyNextStepLabel}
@@ -3168,6 +3228,7 @@ export default function ArtStudioPanel() {
                     <div className="inline-flex min-h-full min-w-full items-center justify-center">
                       <canvas
                         ref={canvasRef}
+                        data-testid="artstudio-source-canvas"
                         className={`${spacePressed ? "" : "cursor-crosshair "}rounded-lg shadow-[0_14px_40px_rgba(0,0,0,0.35)]`}
                         style={{
                           imageRendering: "pixelated",

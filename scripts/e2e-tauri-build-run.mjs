@@ -267,6 +267,7 @@ function parseArgs(argv) {
           "build-blocked-diagnostic",
           "onboarding-shell",
           "qa-rc",
+          "create-game-from-zero",
         ].includes(
           value
         )
@@ -1923,8 +1924,109 @@ async function prepareUiLayoutOracleTarget(sessionId, target) {
       }
       return state;
     },
-    target.id === "logic" || target.id === "nodegraph" ? 25000 : 15000,
-    `Oraculo visual: alvo '${target.id}' nao ficou pronto.`,
+      target.id === "logic" || target.id === "nodegraph" ? 25000 : 15000,
+      `Oraculo visual: alvo '${target.id}' nao ficou pronto.`,
+    250
+  );
+}
+
+function addReportStep(report, id, status, details = {}) {
+  report.steps.push({
+    id,
+    status,
+    at: new Date().toISOString(),
+    ...details,
+  });
+}
+
+function addReportArtifact(report, filePath, label) {
+  report.artifacts.push({ label, path: filePath });
+  return filePath;
+}
+
+async function writeCreateGameReport(report, outputPath) {
+  report.generatedAt = new Date().toISOString();
+  report.non_black_pixels =
+    report.frames[report.frames.length - 1]?.non_black_pixels ?? 0;
+  await ensureValidationDir();
+  await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
+  return outputPath;
+}
+
+function createByorSafePlayerPpm() {
+  const width = 96;
+  const height = 32;
+  const colors = {
+    bg: [0, 0, 0],
+    skin: [255, 206, 150],
+    idle: [72, 201, 176],
+    run: [249, 199, 79],
+    jump: [86, 180, 233],
+    boot: [232, 93, 117],
+    eye: [255, 255, 255],
+  };
+
+  function inRect(x, y, left, top, right, bottom) {
+    return x >= left && x <= right && y >= top && y <= bottom;
+  }
+
+  function pixel(x, y) {
+    const frame = Math.floor(x / 32);
+    const lx = x % 32;
+    const body = frame === 0 ? colors.idle : frame === 1 ? colors.run : colors.jump;
+    const runShift = frame === 1 ? 2 : 0;
+    const jumpLift = frame === 2 ? -3 : 0;
+
+    if (inRect(lx, y, 13, 4 + jumpLift, 18, 9 + jumpLift)) {
+      return colors.skin;
+    }
+    if (inRect(lx, y, 18, 6 + jumpLift, 18, 6 + jumpLift)) {
+      return colors.eye;
+    }
+    if (inRect(lx, y, 11, 10 + jumpLift, 20, 20 + jumpLift)) {
+      return body;
+    }
+    if (inRect(lx, y, 8 - runShift, 12 + jumpLift, 10 - runShift, 18 + jumpLift)) {
+      return body;
+    }
+    if (inRect(lx, y, 21 + runShift, 12 + jumpLift, 23 + runShift, 18 + jumpLift)) {
+      return body;
+    }
+    if (inRect(lx, y, 11 - runShift, 21 + jumpLift, 14 - runShift, 26 + jumpLift)) {
+      return colors.boot;
+    }
+    if (inRect(lx, y, 17 + runShift, 21 + jumpLift, 20 + runShift, 26 + jumpLift)) {
+      return colors.boot;
+    }
+    return colors.bg;
+  }
+
+  const lines = [`P3`, `${width} ${height}`, `255`];
+  for (let y = 0; y < height; y += 1) {
+    const row = [];
+    for (let x = 0; x < width; x += 1) {
+      row.push(pixel(x, y).join(" "));
+    }
+    lines.push(row.join(" "));
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+async function writeByorSafePlayerFixture(outputPath) {
+  await ensureValidationDir();
+  await writeFile(outputPath, createByorSafePlayerPpm(), "utf8");
+  return outputPath;
+}
+
+async function waitForArtStudioAutomationApi(sessionId, timeoutMs) {
+  await waitFor(
+    async () =>
+      executeScript(
+        sessionId,
+        "return typeof window.__RDS_ARTSTUDIO_E2E__?.ingestSpriteSheet === 'function';"
+      ),
+    timeoutMs,
+    "API E2E do ArtStudio nao ficou disponivel.",
     250
   );
 }
@@ -2029,6 +2131,102 @@ async function readNodeGraphUiDiagnostics(sessionId) {
         provenanceVisible: provenanceText.length > 0,
         provenanceText,
         overlaps,
+      };
+    `
+  );
+}
+
+async function ingestArtStudioSprite(sessionId, sourcePath) {
+  const result = await executeAsyncScript(
+    sessionId,
+    `
+      const done = arguments[arguments.length - 1];
+      const api = window.__RDS_ARTSTUDIO_E2E__;
+      if (!api || typeof api.ingestSpriteSheet !== "function") {
+        done({ ok: false, error: "window.__RDS_ARTSTUDIO_E2E__ indisponivel" });
+        return;
+      }
+      api.ingestSpriteSheet(arguments[0])
+        .then(() => done({ ok: true }))
+        .catch((error) => done({ ok: false, error: String(error) }));
+    `,
+    [sourcePath]
+  );
+
+  if (!result?.ok) {
+    fail(`Falha ao carregar sprite BYOR-safe no ArtStudio: ${result?.error ?? "sem diagnostico"}`);
+  }
+}
+
+async function clickArtStudioFrame(sessionId, sequenceId, frameIndex) {
+  await clickByTestId(sessionId, `artstudio-sequence-card-${sequenceId}`);
+
+  const result = await executeScript(
+    sessionId,
+    `
+      const frameIndex = Number(arguments[0]);
+      const canvas = document.querySelector('[data-testid="artstudio-source-canvas"]');
+      const state = window.__RDS_ARTSTUDIO_E2E__?.getState?.() ?? null;
+      if (!(canvas instanceof HTMLCanvasElement) || !state) {
+        return { ok: false, reason: "canvas ou estado indisponivel" };
+      }
+      const frame = state.suggestedFrames.find((candidate) => candidate.index === frameIndex)
+        ?? state.suggestedFrames[frameIndex];
+      if (!frame) {
+        return { ok: false, reason: "frame sugerido nao encontrado: " + frameIndex };
+      }
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = rect.width / Math.max(1, canvas.width);
+      const scaleY = rect.height / Math.max(1, canvas.height);
+      const clientX = rect.left + (frame.x + frame.width / 2) * scaleX;
+      const clientY = rect.top + (frame.y + frame.height / 2) * scaleY;
+      canvas.dispatchEvent(new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        clientX,
+        clientY,
+        view: window,
+      }));
+      return { ok: true, clientX, clientY };
+    `,
+    [frameIndex]
+  );
+
+  if (!result?.ok) {
+    fail(`Falha ao selecionar frame ${frameIndex} no ArtStudio: ${result?.reason ?? "sem diagnostico"}`);
+  }
+
+  await waitFor(
+    async () => {
+      const state = await readArtStudioState(sessionId);
+      const sequence = state?.sequences?.find((candidate) => candidate.id === sequenceId);
+      return sequence?.frames?.includes(frameIndex) ? sequence : false;
+    },
+    10000,
+    `Sequencia ${sequenceId} nao recebeu o frame ${frameIndex}.`,
+    250
+  );
+}
+
+async function readFramebufferStats(sessionId) {
+  return executeScript(
+    sessionId,
+    `
+      const canvas = document.querySelector('[data-testid="viewport-game-canvas"]');
+      if (!(canvas instanceof HTMLCanvasElement)) return null;
+      const context = canvas.getContext("2d");
+      if (!context) return null;
+      const imageData = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      let nonBlackPixels = 0;
+      for (let index = 0; index < imageData.length; index += 4) {
+        if (imageData[index] !== 0 || imageData[index + 1] !== 0 || imageData[index + 2] !== 0) {
+          nonBlackPixels += 1;
+        }
+      }
+      return {
+        width: canvas.width,
+        height: canvas.height,
+        non_black_pixels: nonBlackPixels,
       };
     `
   );
@@ -2153,6 +2351,168 @@ async function assertNoGrossMainShellTextOverlap(sessionId) {
   if (Array.isArray(overlaps) && overlaps.length > 0) {
     fail(`Bloco G: texto sobreposto no shell principal: ${JSON.stringify(overlaps)}.`);
   }
+}
+
+function extractLatestRomPath(state) {
+  const entries = [...(state?.consoleEntries ?? [])].reverse();
+  for (const entry of entries) {
+    const message = String(entry.message ?? "");
+    const match = message.match(/Build concluido\. ROM:\s*(.+)$/);
+    if (match?.[1]) {
+      return match[1].trim();
+    }
+  }
+  return "";
+}
+
+async function assertSegaHeader(romPath) {
+  const buffer = await readFile(romPath);
+  if (buffer.length < 0x104) {
+    fail(`ROM pequena demais para header Mega Drive: ${romPath} (${buffer.length} bytes)`);
+  }
+  const header = buffer.subarray(0x100, 0x104).toString("ascii");
+  if (header !== "SEGA") {
+    fail(`Header Mega Drive invalido em ${romPath}: esperado SEGA, obtido '${header}'`);
+  }
+  return {
+    header,
+    sizeBytes: buffer.length,
+  };
+}
+
+async function clickTopBarMenuAction(sessionId, label) {
+  await clickByTestId(sessionId, "unified-topbar-menu-trigger");
+  await waitFor(
+    async () =>
+      executeScript(
+        sessionId,
+        `
+          const label = String(arguments[0] ?? "").trim();
+          const normalize = (value) => String(value ?? "").replace(/\\s+/g, " ").trim();
+          const button = Array.from(document.querySelectorAll("button")).find((candidate) => {
+            const actionLabel = normalize(candidate.querySelector("span")?.textContent ?? candidate.textContent);
+            return candidate instanceof HTMLButtonElement && actionLabel === label;
+          });
+          if (!(button instanceof HTMLButtonElement) || button.disabled) {
+            return false;
+          }
+          button.click();
+          return true;
+        `,
+        [label]
+      ),
+    5000,
+    `Menu superior nao exibiu a acao '${label}'.`,
+    100
+  );
+}
+
+async function runBuildRunAndCollect(sessionId, label, timeoutMs, report, artifactPrefix) {
+  const beforeState = await readAutomationState(sessionId);
+  const beforeBuildCount = (beforeState?.consoleEntries ?? []).filter((entry) =>
+    String(entry.message ?? "").includes("Build concluido.")
+  ).length;
+
+  await waitForBuildRunReady(sessionId, timeoutMs);
+  await clickByTestId(sessionId, "toolbar-build-run");
+
+  let lastBuildRunDiagnostics = null;
+  const state = await waitFor(
+    async () => {
+      const nextState = await readAutomationState(sessionId);
+      const buildCount = (nextState?.consoleEntries ?? []).filter((entry) =>
+        String(entry.message ?? "").includes("Build concluido.")
+      ).length;
+      const gameStatus = await executeScript(
+        sessionId,
+        "return document.querySelector('[data-testid=\"viewport-game-status\"]')?.textContent?.trim() ?? '';"
+      );
+      lastBuildRunDiagnostics = await executeScript(
+        sessionId,
+        `
+          const state = window.__RDS_E2E__?.getState?.() ?? null;
+          const normalize = (value) => String(value ?? "").replace(/\\s+/g, " ").trim();
+          const buttons = Array.from(document.querySelectorAll("button"))
+            .map((button) => ({
+              text: normalize(button.textContent),
+              disabled: button instanceof HTMLButtonElement ? button.disabled : false,
+              testId: button.getAttribute("data-testid"),
+            }))
+            .slice(0, 80);
+          return {
+            activeWorkspace: state?.activeWorkspace ?? null,
+            activeViewportTab: state?.activeViewportTab ?? null,
+            selectedEntityId: state?.selectedEntityId ?? null,
+            emulatorLoaded: state?.emulatorLoaded ?? null,
+            emulPaused: state?.emulPaused ?? null,
+            hwValidationState: state?.hwValidationState ?? null,
+            hwValidationError: state?.hwValidationError ?? null,
+            activeProjectDir: state?.activeProjectDir ?? null,
+            buildCount: arguments[0],
+            beforeBuildCount: arguments[1],
+            gameStatus: document.querySelector('[data-testid="viewport-game-status"]')?.textContent?.trim() ?? "",
+            buildButtonText: document.querySelector('[data-testid="toolbar-build-run"]')?.textContent?.trim() ?? "",
+            buildButtonDisabled: Boolean(document.querySelector('[data-testid="toolbar-build-run"]')?.disabled),
+            consoleTail: (state?.consoleEntries ?? []).slice(-30),
+            buttons,
+            bodyText: document.body?.textContent?.replace(/\\s+/g, " ").trim().slice(0, 1800) ?? "",
+          };
+        `,
+        [buildCount, beforeBuildCount]
+      );
+      return buildCount > beforeBuildCount && gameStatus === "Emulador ativo" ? nextState : false;
+    },
+    timeoutMs,
+    `Build & Run nao concluiu para ${label}.`,
+    1000
+  ).catch(async (error) => {
+    const diagnosticPayload = {
+      label,
+      cause: error instanceof Error ? error.message : String(error),
+      diagnostics: lastBuildRunDiagnostics,
+    };
+    const safeLabel = label.replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+    const diagnosticsPath = path.join(
+      validationDir,
+      `${artifactPrefix}-${safeLabel}-build-run-diagnostics.json`
+    );
+    await writeFile(diagnosticsPath, JSON.stringify(diagnosticPayload, null, 2), "utf8");
+    addReportArtifact(report, diagnosticsPath, `${label} build run diagnostics`);
+    await captureScreenshot(sessionId, `${artifactPrefix}-${safeLabel}-build-run-diagnostics.png`).catch(
+      () => null
+    );
+    console.error(`Build & Run diagnostics: ${JSON.stringify(diagnosticPayload)}`);
+    fail(`Build & Run nao concluiu para ${label}.`, {
+      statusCode: "build_run_timeout",
+      errorCategory: "ui_assertion",
+      details: diagnosticPayload,
+    });
+  });
+
+  const romPath = extractLatestRomPath(state);
+  if (!romPath) {
+    fail(`Console nao registrou caminho de ROM para ${label}.`);
+  }
+  await assertPathExists(romPath, `ROM gerada nao encontrada para ${label}: ${romPath}`);
+  const rom = await assertSegaHeader(romPath);
+
+  const framebuffer = await waitFor(
+    async () => {
+      const stats = await readFramebufferStats(sessionId);
+      return stats && stats.non_black_pixels > 0 ? stats : false;
+    },
+    30000,
+    `Framebuffer do Libretro permaneceu vazio para ${label}.`,
+    1000
+  );
+
+  return {
+    label,
+    rom_path: romPath,
+    sega_header: rom.header,
+    rom_size_bytes: rom.sizeBytes,
+    framebuffer,
+  };
 }
 
 async function cleanupTemporaryProject(projectDir) {
@@ -2784,7 +3144,7 @@ async function main() {
   const driverStartupTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_DRIVER_TIMEOUT_MS,
     // QA RC faz build pesado antes do driver; em hosts lentos 30s falha com portas ocupadas.
-    options.scenario === "qa-rc" ? 120000 : 30000
+    options.scenario === "qa-rc" || options.scenario === "create-game-from-zero" ? 120000 : 30000
   );
   const uiBootstrapTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_UI_TIMEOUT_MS,
@@ -2793,7 +3153,9 @@ async function main() {
   const emulatorActivationTimeoutMs = parsePositiveInteger(process.env.RDS_E2E_RUN_TIMEOUT_MS, 300000);
   const liveValidationTimeoutMs = parsePositiveInteger(process.env.RDS_E2E_LIVE_TIMEOUT_MS, 60000);
   const requiresExistingProject =
-    options.scenario !== "onboarding-shell" && options.scenario !== "qa-rc";
+    options.scenario !== "onboarding-shell" &&
+    options.scenario !== "qa-rc" &&
+    options.scenario !== "create-game-from-zero";
   if (requiresExistingProject) {
     await assertPathExists(
       options.project,
@@ -3067,6 +3429,481 @@ async function main() {
       console.log(`Evidencias: ${wizardScreenshot}`);
       console.log(`Evidencias: ${editorScreenshot}`);
       console.log(`Evidencias: ${layerScreenshot}`);
+      return;
+    }
+
+    if (options.scenario === "create-game-from-zero") {
+      const artifactPrefix = `create-game-from-zero-${artifactTimestamp()}`;
+      const reportPath = path.join(
+        validationDir,
+        `${artifactPrefix}-report.json`
+      );
+      const report = {
+        generatedAt: null,
+        scenario: "create-game-from-zero",
+        projectName: "",
+        projectDir: "",
+        byorFixture: "",
+        app: options.app,
+        artifacts: [],
+        steps: [],
+        rom: null,
+        roms: [],
+        frames: [],
+        non_black_pixels: 0,
+      };
+
+      await setSessionWindowRect(sessionId, 1920, 1080);
+
+      await waitForOnboardingWizard(sessionId);
+      addReportArtifact(
+        report,
+        await captureScreenshot(sessionId, `${artifactPrefix}-01-wizard.png`),
+        "wizard"
+      );
+      addReportStep(report, "open_wizard", "passed");
+
+      await clickByTestId(sessionId, "template-card-empty");
+      await clickButtonByText(sessionId, "Mega Drive", "exact");
+
+      const generatedProjectName = `E2E_Create_From_Zero_${Date.now()}`;
+      await fillInputBySelector(
+        sessionId,
+        'input[placeholder="Nome do projeto"]',
+        generatedProjectName
+      );
+      await clickButtonByText(sessionId, "Criar Projeto", "exact");
+
+      const createdState = await waitFor(
+        async () => {
+          const state = await readAutomationState(sessionId);
+          return state?.activeProjectDir &&
+            state.activeProjectName === generatedProjectName &&
+            state.activeTarget === "megadrive" &&
+            state.activeScene?.entityCount === 0
+            ? state
+            : false;
+        },
+        45000,
+        "Projeto Mega Drive vazio nao foi criado pelo wizard.",
+        500
+      );
+      report.projectName = generatedProjectName;
+      report.projectDir = createdState.activeProjectDir;
+      currentE2eRunContext.project = createdState.activeProjectDir;
+      currentE2eRunContext.projectName = generatedProjectName;
+      currentE2eRunContext.projectTarget = "megadrive";
+      addReportStep(report, "create_empty_megadrive_project", "passed", {
+        projectDir: createdState.activeProjectDir,
+      });
+      addReportArtifact(
+        report,
+        await captureScreenshot(sessionId, `${artifactPrefix}-02-empty-project.png`),
+        "empty project"
+      );
+
+      const byorFixtureDir = path.join(validationDir, artifactPrefix);
+      await mkdir(byorFixtureDir, { recursive: true });
+      const byorFixturePath = path.join(byorFixtureDir, "player.ppm");
+      await writeByorSafePlayerFixture(byorFixturePath);
+      report.byorFixture = byorFixturePath;
+      addReportArtifact(report, byorFixturePath, "BYOR-safe player sprite fixture");
+      addReportStep(report, "create_byor_safe_sprite_fixture", "passed", {
+        path: byorFixturePath,
+      });
+
+      await clickByTestId(sessionId, "workspace-rail-artstudio");
+      await waitFor(
+        async () =>
+          executeScript(
+            sessionId,
+            "return Boolean(document.querySelector('[data-testid=\"artstudio-main-stage\"]'));"
+          ),
+        15000,
+        "ArtStudio nao abriu pelo workspace rail.",
+        250
+      );
+      await waitForArtStudioAutomationApi(sessionId, uiBootstrapTimeoutMs);
+      addReportArtifact(
+        report,
+        await captureScreenshot(sessionId, `${artifactPrefix}-03-artstudio-open.png`),
+        "artstudio open"
+      );
+
+      await ingestArtStudioSprite(sessionId, byorFixturePath);
+      const loadedArt = await waitFor(
+        async () => {
+          const artState = await readArtStudioState(sessionId);
+          return artState?.spriteSheetLoadStatus === "loaded" &&
+            artState.suggestedFrames.length >= 3
+            ? artState
+            : false;
+        },
+        45000,
+        "ArtStudio nao processou o sprite BYOR-safe com pelo menos 3 frames.",
+        500
+      );
+      addReportStep(report, "import_byor_safe_sprite_in_artstudio", "passed", {
+        suggestedFrames: loadedArt.suggestedFrames.length,
+      });
+      addReportArtifact(
+        report,
+        await captureScreenshot(sessionId, `${artifactPrefix}-04-artstudio-sprite-loaded.png`),
+        "artstudio sprite loaded"
+      );
+
+      await clickArtStudioFrame(sessionId, "seq_run", 1);
+      await clickArtStudioFrame(sessionId, "seq_jump", 2);
+      const sequencedArt = await readArtStudioState(sessionId);
+      addReportStep(report, "create_idle_run_jump_sequences", "passed", {
+        sequences: sequencedArt?.sequences ?? [],
+      });
+      addReportArtifact(
+        report,
+        await captureScreenshot(sessionId, `${artifactPrefix}-05-artstudio-sequences.png`),
+        "artstudio sequences"
+      );
+
+      await clickByTestId(sessionId, "artstudio-import-to-project");
+      const importedArt = await waitFor(
+        async () => {
+          const artState = await readArtStudioState(sessionId);
+          return artState?.spritePath && artState.canApplyToScene ? artState : false;
+        },
+        45000,
+        "ArtStudio nao gerou asset canonico em assets/sprites.",
+        500
+      );
+      addReportStep(report, "import_sprite_to_project_assets", "passed", {
+        spritePath: importedArt.spritePath,
+      });
+
+      await clickByTestId(sessionId, "artstudio-apply-to-scene");
+      await waitFor(
+        async () => {
+          const state = await readAutomationState(sessionId);
+          return state?.selectedEntityId === "player" &&
+            state.activeScene?.entities?.some(
+              (entity) => entity.id === "player" && entity.spriteAsset
+            )
+            ? state
+            : false;
+        },
+        15000,
+        "ArtStudio nao criou a entidade player na cena.",
+        250
+      );
+      addReportStep(report, "create_player_entity_from_artstudio", "passed", {
+        entityId: "player",
+      });
+      addReportArtifact(
+        report,
+        await captureScreenshot(sessionId, `${artifactPrefix}-06-player-created.png`),
+        "player entity created"
+      );
+
+      await clickTopBarMenuAction(sessionId, "Salvar");
+      await waitFor(
+        async () => {
+          const state = await readAutomationState(sessionId);
+          return state?.consoleEntries?.some((entry) =>
+            String(entry.message ?? "").includes("Cena salva no projeto ativo.")
+          )
+            ? state
+            : false;
+        },
+        15000,
+        "Save via menu nao persistiu a entidade player antes do NodeGraph.",
+        250
+      );
+      addReportStep(report, "save_player_entity_before_logic", "passed");
+
+      await clickButtonByText(sessionId, "Voltar para Cena", "exact");
+      await waitFor(
+        async () => {
+          const state = await readAutomationState(sessionId);
+          return state?.activeWorkspace === "scene" &&
+            state.selectedEntityId === "player" &&
+            state.activeScene?.entities?.some((entity) => entity.id === "player")
+            ? state
+            : false;
+        },
+        15000,
+        "Retorno Scene -> Art nao preservou o player selecionado.",
+        250
+      );
+      await clickByTestId(sessionId, "hierarchy-entity-player");
+      await waitFor(
+        async () => {
+          const state = await readAutomationState(sessionId);
+          return state?.activeWorkspace === "scene" &&
+            state.selectedEntityId === "player" &&
+            state.activeScene?.entities?.some((entity) => entity.id === "player")
+            ? state
+            : false;
+        },
+        15000,
+        "Hierarchy nao selecionou a entidade player antes do NodeGraph.",
+        250
+      );
+
+      await clickByTestId(sessionId, "workspace-rail-logic");
+      let lastNodeGraphDiagnostics = null;
+      const nodeGraphReady = await waitFor(
+        async () => {
+          lastNodeGraphDiagnostics = await executeScript(
+            sessionId,
+            `
+              const state = window.__RDS_E2E__?.getState?.() ?? null;
+              const hasTemplate = Boolean(document.querySelector('[data-testid="nodegraph-template-mini_platformer"]'));
+              const hasAppend = Boolean(document.querySelector('[data-testid="nodegraph-append-template-mini_platformer"]'));
+              const actionTestId = hasTemplate
+                ? "nodegraph-template-mini_platformer"
+                : hasAppend
+                  ? "nodegraph-append-template-mini_platformer"
+                  : null;
+              const templateIds = Array.from(
+                document.querySelectorAll('[data-testid^="nodegraph-template-"], [data-testid^="nodegraph-append-template-"]')
+              )
+                .map((element) => element.getAttribute("data-testid"))
+                .filter(Boolean)
+                .slice(0, 20);
+              const entityIds = Array.isArray(state?.activeScene?.entities)
+                ? state.activeScene.entities
+                    .map((entity) => entity?.entity_id ?? entity?.id)
+                    .filter(Boolean)
+                    .slice(0, 20)
+                : [];
+              return {
+                ready:
+                  state?.activeWorkspace === "logic" &&
+                  state?.selectedEntityId === "player" &&
+                  Boolean(actionTestId),
+                actionTestId,
+                activeWorkspace: state?.activeWorkspace ?? null,
+                selectedEntityId: state?.selectedEntityId ?? null,
+                activeViewportTab: state?.activeViewportTab ?? null,
+                entityIds,
+                hasCanvas: Boolean(document.querySelector('[data-testid="nodegraph-canvas"]')),
+                hasEmpty: Boolean(document.querySelector('[data-testid="nodegraph-empty-overlay"]')),
+                hasTemplate,
+                hasAppend,
+                nodeCount: document.querySelectorAll('[data-testid^="node-card-"]').length,
+                templateIds,
+                bodyText: document.body?.textContent?.replace(/\\s+/g, " ").trim().slice(0, 1200) ?? "",
+              };
+            `
+          );
+          return lastNodeGraphDiagnostics?.ready ? lastNodeGraphDiagnostics : false;
+        },
+        15000,
+        "NodeGraph nao exibiu o atalho mini platformer para o player.",
+        250
+      ).catch(async (error) => {
+        const diagnosticPayload = {
+          cause: error instanceof Error ? error.message : String(error),
+          diagnostics: lastNodeGraphDiagnostics,
+        };
+        const diagnosticsPath = path.join(
+          validationDir,
+          `${artifactPrefix}-nodegraph-diagnostics.json`
+        );
+        await writeFile(diagnosticsPath, JSON.stringify(diagnosticPayload, null, 2), "utf8");
+        addReportArtifact(report, diagnosticsPath, "nodegraph diagnostics");
+        await captureScreenshot(sessionId, `${artifactPrefix}-nodegraph-diagnostics.png`).catch(
+          () => null
+        );
+        console.error(`NodeGraph diagnostics: ${JSON.stringify(diagnosticPayload)}`);
+        fail("NodeGraph nao exibiu o atalho mini platformer para o player.", {
+          statusCode: "nodegraph_template_missing",
+          errorCategory: "ui_assertion",
+          details: diagnosticPayload,
+        });
+      });
+      await clickByTestId(sessionId, nodeGraphReady.actionTestId);
+      await waitFor(
+        async () =>
+          executeScript(
+            sessionId,
+            "return document.querySelectorAll('[data-testid^=\"node-card-\"]').length >= 20;"
+          ),
+        15000,
+        "NodeGraph nao materializou o mini platformer no-code.",
+        250
+      );
+      addReportArtifact(
+        report,
+        await captureScreenshot(sessionId, `${artifactPrefix}-07-nodegraph-platformer.png`),
+        "nodegraph platformer"
+      );
+
+      await waitFor(
+        async () => {
+          const logicState = await callAutomationApi(sessionId, "getEntityLogicState", ["player"]);
+          return logicState?.resolved?.has_graph ? logicState : false;
+        },
+        15000,
+        "Grafo do mini platformer nao foi aplicado na entidade player.",
+        500
+      );
+      addReportStep(report, "create_nodegraph_platformer_logic", "passed", {
+        includes: ["input", "movement", "gravity", "collision", "camera"],
+        actionTestId: nodeGraphReady.actionTestId,
+      });
+
+      await clickTopBarMenuAction(sessionId, "Salvar");
+      await waitFor(
+        async () => {
+          const state = await readAutomationState(sessionId);
+          return state?.consoleEntries?.some((entry) =>
+            String(entry.message ?? "").includes("Cena salva no projeto ativo.")
+          )
+            ? state
+            : false;
+        },
+        15000,
+        "Save via menu nao registrou persistencia da cena.",
+        250
+      );
+      addReportStep(report, "save_created_game", "passed");
+
+      const firstBuild = await runBuildRunAndCollect(
+        sessionId,
+        "first build from zero",
+        emulatorActivationTimeoutMs,
+        report,
+        artifactPrefix
+      );
+      report.rom = firstBuild.rom_path;
+      report.roms.push(firstBuild);
+      report.frames.push({
+        label: firstBuild.label,
+        ...firstBuild.framebuffer,
+      });
+      addReportStep(report, "build_run_validate_rom_and_libretro", "passed", {
+        rom: firstBuild.rom_path,
+        non_black_pixels: firstBuild.framebuffer.non_black_pixels,
+      });
+      addReportArtifact(
+        report,
+        await captureScreenshot(sessionId, `${artifactPrefix}-08-first-build-run.png`),
+        "first build run"
+      );
+
+      await clickTopBarMenuAction(sessionId, "Salvar");
+      await clickTopBarMenuAction(sessionId, "Fechar");
+      await waitFor(
+        async () => {
+          const state = await readAutomationState(sessionId);
+          const wizardVisible = await executeScript(
+            sessionId,
+            "return Boolean(document.querySelector('[data-testid=\"project-wizard-body\"]'));"
+          );
+          return !state?.activeProjectDir && wizardVisible ? true : false;
+        },
+        15000,
+        "Projeto nao fechou e/ou wizard nao reabriu.",
+        250
+      );
+      addReportStep(report, "close_project", "passed");
+      addReportArtifact(
+        report,
+        await captureScreenshot(sessionId, `${artifactPrefix}-09-closed-wizard.png`),
+        "closed wizard"
+      );
+
+      await fillInputBySelector(
+        sessionId,
+        'input[placeholder="Nome do projeto"]',
+        generatedProjectName
+      );
+      await waitFor(
+        async () =>
+          executeScript(
+            sessionId,
+            `
+              const card = document.querySelector('[data-testid="wizard-existing-project-card"]');
+              const path = document.querySelector('[data-testid="wizard-existing-project-path"]')?.textContent ?? "";
+              return Boolean(card) && path.includes(arguments[0]);
+            `,
+            [createdState.activeProjectDir]
+          ),
+        30000,
+        "Wizard nao detectou o projeto existente para reabrir.",
+        500
+      );
+      await clickByTestId(sessionId, "wizard-open-existing-project");
+      await waitFor(
+        async () => {
+          const state = await readAutomationState(sessionId);
+          return state?.activeProjectDir === createdState.activeProjectDir &&
+            state.activeScene?.entities?.some((entity) => entity.id === "player")
+            ? state
+            : false;
+        },
+        45000,
+        "Projeto criado do zero nao reabriu com a entidade player.",
+        500
+      );
+      addReportStep(report, "reopen_project", "passed", {
+        projectDir: createdState.activeProjectDir,
+      });
+      addReportArtifact(
+        report,
+        await captureScreenshot(sessionId, `${artifactPrefix}-10-reopened-project.png`),
+        "reopened project"
+      );
+
+      await clickByTestId(sessionId, "hierarchy-entity-player");
+      await waitFor(
+        async () => {
+          const state = await readAutomationState(sessionId);
+          return state?.selectedEntityId === "player" ? state : false;
+        },
+        10000,
+        "Hierarchy nao selecionou o player reaberto.",
+        250
+      );
+
+      const reopenedLogicState = await callAutomationApi(sessionId, "getEntityLogicState", ["player"]);
+      if (!reopenedLogicState?.resolved?.has_graph && !reopenedLogicState?.source?.has_graph) {
+        fail("Grafo do player nao persistiu apos fechar e reabrir.");
+      }
+      addReportStep(report, "validate_persisted_nodegraph_after_reopen", "passed");
+
+      const secondBuild = await runBuildRunAndCollect(
+        sessionId,
+        "reopened build",
+        emulatorActivationTimeoutMs,
+        report,
+        artifactPrefix
+      );
+      report.roms.push(secondBuild);
+      report.frames.push({
+        label: secondBuild.label,
+        ...secondBuild.framebuffer,
+      });
+      addReportStep(report, "rebuild_after_reopen", "passed", {
+        rom: secondBuild.rom_path,
+        non_black_pixels: secondBuild.framebuffer.non_black_pixels,
+      });
+      addReportArtifact(
+        report,
+        await captureScreenshot(sessionId, `${artifactPrefix}-11-reopened-build-run.png`),
+        "reopened build run"
+      );
+
+      const savedReport = await writeCreateGameReport(report, reportPath);
+      console.log("OK: Desktop Tauri create-game-from-zero E2E passou.");
+      console.log(`Projeto criado: ${generatedProjectName}`);
+      console.log(`Diretorio do projeto: ${createdState.activeProjectDir}`);
+      console.log(`Fixture BYOR-safe: ${byorFixturePath}`);
+      console.log(`ROM inicial: ${firstBuild.rom_path}`);
+      console.log(`ROM reaberta: ${secondBuild.rom_path}`);
+      console.log(
+        `Framebuffer reaberto: ${secondBuild.framebuffer.width}x${secondBuild.framebuffer.height}, pixels nao pretos: ${secondBuild.framebuffer.non_black_pixels}`
+      );
+      console.log(`Relatorio: ${savedReport}`);
       return;
     }
 

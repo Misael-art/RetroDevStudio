@@ -9,6 +9,7 @@ import NodeGraphEditor, {
   appendQuickActionGraph,
   autoLayoutNodeGraph,
   buildNodeMiniMap,
+  deserializeNodeGraph,
   serializeNodeGraph,
   summarizeNodeGraph,
   validateNodeGraph,
@@ -527,6 +528,71 @@ describe("NodeGraphEditor helpers", () => {
       expect.arrayContaining(["branch_without_output", "node_without_exec_input"])
     );
   });
+
+  it("preserves runtime-authored exec gates into input and overlap nodes", () => {
+    const serialized = JSON.stringify({
+      version: 1,
+      nodes: [
+        { id: "update", type: "event_update", label: "Update", x: 0, y: 0, params: {} },
+        {
+          id: "right",
+          type: "input_held",
+          label: "Right",
+          x: 180,
+          y: 0,
+          params: { pad: "JOY_1", button: "BUTTON_RIGHT" },
+        },
+        {
+          id: "velocity",
+          type: "set_velocity",
+          label: "Velocity",
+          x: 360,
+          y: 0,
+          params: { target: "player", vx: 2, vy: 0 },
+        },
+        {
+          id: "collision_tick",
+          type: "event_update",
+          label: "Collision Tick",
+          x: 0,
+          y: 180,
+          params: {},
+        },
+        {
+          id: "overlap",
+          type: "condition_overlap",
+          label: "Overlap",
+          x: 180,
+          y: 180,
+          params: { a: "player", b: "player" },
+        },
+        {
+          id: "idle",
+          type: "set_animation_state",
+          label: "Idle",
+          x: 360,
+          y: 180,
+          params: { target: "player", state: "idle" },
+        },
+      ],
+      edges: [
+        { id: "move_gate", fromNode: "update", fromPort: "exec", toNode: "right", toPort: "exec" },
+        { id: "move_true", fromNode: "right", fromPort: "exec", toNode: "velocity", toPort: "exec" },
+        { id: "collision_gate", fromNode: "collision_tick", fromPort: "exec", toNode: "overlap", toPort: "exec" },
+        { id: "collision_true", fromNode: "overlap", fromPort: "true", toNode: "idle", toPort: "exec" },
+      ],
+    });
+
+    const graph = deserializeNodeGraph(serialized);
+
+    expect(graph.edges.map((edge) => edge.id)).toEqual([
+      "move_gate",
+      "move_true",
+      "collision_gate",
+      "collision_true",
+    ]);
+    expect(validateNodeGraph(graph).errors).toHaveLength(0);
+  });
 });
 
 describe("NodeGraphEditor", () => {
@@ -864,6 +930,38 @@ describe("NodeGraphEditor", () => {
     );
 
     expect(nodeCardTexts.some((text) => text.includes("runner_main"))).toBe(true);
+  });
+
+  it("creates a no-code mini platformer graph for the selected player", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        selectedEntityId: "player",
+        activeScene: buildSceneWithGraph(EMPTY_GRAPH, [
+          buildLogicEntity("player", "Player", EMPTY_GRAPH),
+        ]),
+        activeSceneSource: buildSceneWithGraph(EMPTY_GRAPH, [
+          buildLogicEntity("player", "Player", EMPTY_GRAPH),
+        ]),
+      });
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      (container.querySelector("[data-testid='nodegraph-template-mini_platformer']") as HTMLButtonElement).click();
+      await flush();
+      await flush();
+    });
+
+    const text = container.textContent ?? "";
+    expect(container.querySelectorAll("[data-testid^='node-card-']").length).toBeGreaterThanOrEqual(20);
+    expect(text).toContain("Mini Platformer No-Code");
+    expect(text).toContain("BUTTON_RIGHT");
+    expect(text).toContain("BUTTON_A");
+    expect(text).toContain("jump");
+    expect(text).toContain("Camera Segue");
+    expect(text).toContain("Colisao (Overlap)");
+    expect(text).toContain("player");
   });
 
   it("uses another scene entity as overlap counterpart for the enemy quick action", async () => {
