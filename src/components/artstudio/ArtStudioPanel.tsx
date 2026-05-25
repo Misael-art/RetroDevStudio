@@ -38,36 +38,6 @@ import { useSpriteAnimator } from "./useSpriteAnimator";
 import { getEntityDisplayName } from "../../core/entityDisplay";
 import { buildTilemapAuthoringBrush, resolvePrimaryAuthoringSurface } from "../../core/entityAuthoring";
 
-declare global {
-  interface Window {
-    __RDS_ARTSTUDIO_E2E__?: {
-      ingestSpriteSheet: (sourcePath: string) => Promise<boolean>;
-      loadImage: (sourcePath: string) => Promise<boolean>;
-      importToProject: () => Promise<boolean>;
-      importCommandDat: (commandPath: string) => Promise<number>;
-      selectSequence: (sequenceId: string | null) => boolean;
-      renameSequence: (sequenceId: string, name: string) => boolean;
-      setFrameSize: (width: number, height: number) => boolean;
-      setSequenceFrames: (sequenceId: string, frames: number[]) => boolean;
-      assignCommand: (sequenceId: string, commandId: string) => boolean;
-      applyToScene: (entityId?: string) => boolean;
-      getState: () => {
-        spriteSheetLoadStatus: string;
-        spriteSheetSourcePath: string;
-        spritePath: string;
-        spriteName: string;
-        frameWidth: number;
-        frameHeight: number;
-        activeSequenceId: string | null;
-        suggestedFrames: ArtSuggestedFrame[];
-        sequences: SpriteSequence[];
-        canApplyToScene: boolean;
-        validationError: string | null;
-      };
-    };
-  }
-}
-
 const ARTSTUDIO_SUPPORTED_FORMATS_LABEL = "PNG, BMP, JPG/JPEG, GIF, WebP e PPM";
 const ARTSTUDIO_CANVAS_MIN_ZOOM = 0.2;
 const ARTSTUDIO_CANVAS_MAX_ZOOM = 24;
@@ -627,11 +597,21 @@ type ArtStudioAutomationState = {
   canApplyToScene: boolean;
   activeSequenceId: string | null;
   suggestedFrames: ArtSuggestedFrame[];
-  sequences: Array<Pick<SpriteSequence, "id" | "name" | "frames" | "fps" | "loop">>;
+  sequences: SpriteSequence[];
+  validationError: string | null;
 };
 
 type ArtStudioAutomationApi = {
   ingestSpriteSheet: (sourcePath: string) => Promise<boolean>;
+  loadImage: (sourcePath: string) => Promise<boolean>;
+  importToProject: () => Promise<boolean>;
+  importCommandDat: (commandPath: string) => Promise<number>;
+  selectSequence: (sequenceId: string | null) => boolean;
+  renameSequence: (sequenceId: string, name: string) => boolean;
+  setFrameSize: (width: number, height: number) => boolean;
+  setSequenceFrames: (sequenceId: string, frames: number[]) => boolean;
+  assignCommand: (sequenceId: string, commandId: string) => boolean;
+  applyToScene: (entityId?: string) => boolean;
   getState: () => ArtStudioAutomationState;
 };
 
