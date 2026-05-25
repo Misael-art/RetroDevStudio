@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-24 (rodada 54 - AAA capability diagnostics experimental validada em branch)
+**Ultima Atualizacao:** 2026-05-25 (rodada 55 - AAA capability diagnostics integrada em main como Experimental)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,13 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-25 rodada 55 - main pos-AAA):**
+  - **PR/merge:** PR #10 (`codex/aaa-capability-layer-q`) foi mergeado em `main` por `962e856aeee948c0e6b96be9ec3fb4d6b053ecd9`, contendo `d3651ecec3a41652ba2f2731ddb6577071221c81`.
+  - **Checks remotos:** no commit `962e856aeee948c0e6b96be9ec3fb4d6b053ecd9`, `CI / validate` e `Desktop E2E / desktop-smoke` completaram com `success`.
+  - **Readiness no destino:** `npm run release:readiness:promotion` rodou em `main` pos-merge e retornou `Pronto para promocao: SIM`, com baseline, build debug, upstream oficial e desktop E2E simples.
+  - **Status honesto:** AAA Capability esta integrada como **Experimental/capability diagnostics**. Isto nao e AAA pronto, nao e Stable e nao promove SGDK, Node Engine, GameMaker, Godot, MUGEN/Ikemen, OpenBOR, SNES ou ArtStudio.
+  - **Proximo passo imediato:** triagem governada das branches pendentes por prioridade (`release-manifest-packaging-z`, `asset-browser-production-x`, `nodegraph-execution-inspector-w`, `save-sram-project-settings-u`, `godot-2d-subset-y`, `command-palette-shortcut-editor-r`, `e2e-create-game-from-zero-s`) antes de qualquer limpeza destrutiva.
 
 * **O que acabou de acontecer (2026-05-24 rodada 54 - branch `codex/aaa-capability-layer-q`):**
   - **Rebase:** branch AAA rebased sobre `origin/main` (`25166c7ff8712dad286e73b41ae5e577029d9e67`); head tecnico validado antes desta nota: `c3bea9799347ed1650fc8544419e551857b586cc`.

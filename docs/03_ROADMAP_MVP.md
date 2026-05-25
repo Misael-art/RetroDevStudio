@@ -1,8 +1,10 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-05-24 (rodada 54 - AAA capability diagnostics experimental validada em branch)
+**Ultima revisao canonica:** 2026-05-25 (rodada 55 - AAA capability diagnostics integrada como Experimental)
 **Fase ativa real:** Core MVP promovido tecnicamente em main; hardening continua nas superficies experimentais
+
+**Nota 2026-05-25 (rodada 55, main):** PR #10 (`codex/aaa-capability-layer-q`) foi mergeado em `main` por `962e856aeee948c0e6b96be9ec3fb4d6b053ecd9`, contendo `d3651ecec3a41652ba2f2731ddb6577071221c81`. Checks remotos de `main` no merge commit (`CI / validate` e `Desktop E2E / desktop-smoke`) completaram com `success`; `npm run release:readiness:promotion` rodou novamente no destino e retornou `Pronto para promocao: SIM`. A camada AAA Capability entrou somente como **Experimental/capability diagnostics**: nao declara AAA pronto e nao promove SGDK, Node Engine, ArtStudio, SNES, GameMaker, Godot, MUGEN/Ikemen ou OpenBOR para Stable.
 
 **Nota 2026-05-24 (rodada 54, branch `codex/aaa-capability-layer-q`):** AAA Capability Layer foi rebased sobre `origin/main` (`25166c7ff8712dad286e73b41ae5e577029d9e67`) e validada localmente no head tecnico `c3bea9799347ed1650fc8544419e551857b586cc`. Gates frescos pos-rebase: `check:tree`, `lint`, `tsc`, `npm test` **357/357**, `cargo clippy`, `cargo test --lib` **398 passed / 22 ignored**, `build:debug`, `preflight:sgdk-e2e`, `test:e2e:desktop:qa-rc` A-H (`qa-rc-2026-05-24T20-49-39-814Z-*`), `validate-upstream-windows.ps1 -SkipRustTests` e `git diff --check`. A camada segue **Experimental**: nao declara AAA pronto, nao promove SGDK/Node Engine/ArtStudio/SNES/GameMaker/Godot/MUGEN/OpenBOR e depende de PR/checks remotos/merge governado para entrar em `main`.
 
