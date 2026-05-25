@@ -1,8 +1,10 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-05-25 (rodada 59 - Save/SRAM U post-review hardening)
+**Ultima revisao canonica:** 2026-05-25 (rodada 60 - Godot 2D subset Y rebased e validado como Experimental)
 **Fase ativa real:** Core MVP promovido tecnicamente em main; hardening continua nas superficies experimentais
+
+**Nota 2026-05-25 (rodada 60, branch `codex/godot-2d-subset-y`):** Godot Y foi rebased sobre `origin/main` (`fc925e2b200ca92409e7773fd0126484d4798505`) e validado localmente no head tecnico `a95b2251`. O subset 2D permanece **Experimental/importavel**: parseia `project.godot`, `.tscn`, `.tres`, Node2D/Sprite2D/AnimatedSprite2D/CharacterBody2D/Area2D/CollisionShape2D/Camera2D/TileMap simples e GDScript subset com bridge estruturada para o que ficar fora do escopo. Gates frescos pos-rebase: `check:tree`, `lint`, `tsc`, `npm test` **357/357**, `cargo clippy`, Godot Rust focado **13 passed / 1 ignored**, `cargo test --lib` **405 passed / 23 ignored**, `build:debug`, `preflight:sgdk-e2e` e `git diff --check`. Isto nao declara Godot Stable nem promove SGDK/Node Engine/ArtStudio/SNES/GameMaker/MUGEN/OpenBOR/AAA para Stable.
 
 **Nota 2026-05-25 (rodada 59, branch `codex/save-sram-project-settings-u`):** post-review hardening `0af3b39ded80994cbe28c77245869b43d12432c6` endureceu a branch U sem mudar seu status: falha de mastering de ROM passa a falhar build, nome interno de ROM e persistido trimado, SRAM Libretro e observada com leitura minima, range SRAM Mega Drive invertido vira `invalid`, `RomAnalysisManifest.save` entrou no contrato TS e a UI de Configuracoes evita draft/warnings/target obsoletos. Gates pos-review: `tsc`, `lint`, Vitest focado, `npm test` **358/358**, `cargo clippy`, `cargo test --lib` **406 passed / 22 ignored** e `git diff --check`. Save/SRAM permanece **Experimental**; isto nao comprova save funcional persistente nem promove SGDK, SNES, Node Engine ou AAA para Stable.
 
