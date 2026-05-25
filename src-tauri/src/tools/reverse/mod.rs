@@ -14,7 +14,7 @@ use std::path::Path;
 
 pub use manifest::{
     AudioCandidate, CallGraphEdge, CodeXref, DisassemblyResult, GraphicsCandidate,
-    ReverseAnnotation, RomAnalysisManifest, TextCandidate,
+    ReverseAnnotation, RomAnalysisManifest, SaveRamStatus, TextCandidate,
 };
 
 pub fn analyze_rom(rom_path: &str) -> Result<RomAnalysisManifest, String> {
@@ -36,6 +36,7 @@ fn analyze_rom_internal(
     let path = Path::new(rom_path);
     let loaded = loader::load_rom(path)?;
     let mut manifest = loader::base_manifest(&loaded);
+    manifest.save = save_status_from_loaded_rom(&loaded);
     let (graphics_regions, compression_regions) = graphics::analyze_graphics(&loaded);
     let (text_regions, pointer_tables) = text::analyze_text(&loaded);
     let audio_regions = audio::analyze_audio(&loaded);
@@ -72,6 +73,38 @@ fn analyze_rom_internal(
     manifest.annotations = annotations::load_annotations(path, &manifest.hashes)?;
 
     Ok(manifest)
+}
+
+fn save_status_from_loaded_rom(loaded: &platform::LoadedRom) -> SaveRamStatus {
+    if loaded.target == "megadrive" && loaded.bytes.get(0x1B0..0x1B2) == Some(&b"RA"[..]) {
+        let address_start = loaded
+            .bytes
+            .get(0x1B4..0x1B8)
+            .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
+            .map(u32::from_be_bytes);
+        let address_end = loaded
+            .bytes
+            .get(0x1B8..0x1BC)
+            .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
+            .map(u32::from_be_bytes);
+        let size_bytes = address_start
+            .zip(address_end)
+            .map(|(start, end)| end.saturating_sub(start).saturating_add(1) as usize);
+
+        return SaveRamStatus {
+            status: "declared".to_string(),
+            declared: true,
+            observed: false,
+            missing: false,
+            size_bytes,
+            observed_size_bytes: None,
+            address_start,
+            address_end,
+            note: "SRAM declarada no header Mega Drive; runtime ainda precisa observacao Libretro para comprovar persistencia.".to_string(),
+        };
+    }
+
+    SaveRamStatus::default()
 }
 
 pub fn disassemble_rom(

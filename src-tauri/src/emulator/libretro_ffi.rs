@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use libloading::Library;
 
+use crate::tools::reverse::manifest::SaveRamStatus;
 use crate::tools::reverse::trace::{CpuState, ExecutionTraceLog};
 
 const RETRO_ENVIRONMENT_SET_PIXEL_FORMAT: u32 = 10;
@@ -392,6 +393,7 @@ pub struct RuntimeExecutionTraceCapture {
     pub rom_path: String,
     pub note: String,
     pub trace: ExecutionTraceLog,
+    pub save: SaveRamStatus,
 }
 
 impl RuntimeExecutionTraceCapture {
@@ -405,6 +407,7 @@ impl RuntimeExecutionTraceCapture {
                 core_label
             ),
             trace: ExecutionTraceLog::default(),
+            save: SaveRamStatus::default(),
         }
     }
 
@@ -419,6 +422,7 @@ impl RuntimeExecutionTraceCapture {
                 backend.description()
             ),
             trace: ExecutionTraceLog::default(),
+            save: SaveRamStatus::default(),
         }
     }
 }
@@ -1006,7 +1010,57 @@ impl EmulatorCore {
     }
 
     pub fn execution_trace_capture(&self) -> RuntimeExecutionTraceCapture {
-        self.trace_capture.clone()
+        let mut capture = self.trace_capture.clone();
+        capture.save = self.runtime_save_status();
+        capture
+    }
+
+    fn runtime_save_status(&self) -> SaveRamStatus {
+        let Some(runtime) = self.runtime.as_ref() else {
+            return SaveRamStatus::default();
+        };
+
+        match self.read_memory(RETRO_MEMORY_SAVE_RAM, 0, usize::MAX) {
+            Ok((_bytes, total_size)) if total_size > 0 => SaveRamStatus {
+                status: "observed".to_string(),
+                declared: false,
+                observed: true,
+                missing: false,
+                size_bytes: None,
+                observed_size_bytes: Some(total_size),
+                address_start: None,
+                address_end: None,
+                note: format!(
+                    "Libretro expos SRAM com {} bytes no core '{}'; trate como evidencia runtime experimental ate validar persistencia em disco.",
+                    total_size, runtime.label
+                ),
+            },
+            Ok(_) => SaveRamStatus {
+                status: "missing".to_string(),
+                declared: false,
+                observed: false,
+                missing: true,
+                size_bytes: None,
+                observed_size_bytes: Some(0),
+                address_start: None,
+                address_end: None,
+                note: format!(
+                    "Core '{}' nao expos SRAM via RETRO_MEMORY_SAVE_RAM nesta sessao.",
+                    runtime.label
+                ),
+            },
+            Err(error) => SaveRamStatus {
+                status: "missing".to_string(),
+                declared: false,
+                observed: false,
+                missing: true,
+                size_bytes: None,
+                observed_size_bytes: None,
+                address_start: None,
+                address_end: None,
+                note: error,
+            },
+        }
     }
 
     fn configure_rewind(&mut self) {

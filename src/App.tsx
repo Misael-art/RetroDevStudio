@@ -31,8 +31,12 @@ import {
   suggestProjectBaseDir,
   type ExternalImportProfileSummary,
   type ProjectDestinationPreview,
+  type ProjectSettingsPayload,
+  type ProjectSettingsSnapshot,
   type ProjectTemplateSummary,
+  getProjectSettings,
   setProjectTarget,
+  updateProjectSettings,
 } from "./core/ipc/projectService";
 import { pollProjectAssetChanges } from "./core/ipc/projectWatcherService";
 import {
@@ -188,6 +192,49 @@ const LAYOUT_STORAGE_KEY = "retrodev-shell-saved-layout";
 const WORKSPACE_GUIDE_STORAGE_KEY = "retrodev-workspace-guide-expanded";
 const SHORTCUT_GROUPS = groupShortcutsByGroup(DEFAULT_SHORTCUTS);
 const SHORTCUT_CONFLICTS = findShortcutConflicts(DEFAULT_SHORTCUTS);
+const SRAM_SIZE_OPTIONS = [2048, 8192, 16384, 32768, 65536];
+
+function projectSettingsToPayload(
+  settings: ProjectSettingsSnapshot
+): ProjectSettingsPayload {
+  return {
+    target: settings.target,
+    region: settings.region,
+    video_standard: settings.video_standard,
+    internal_rom_name: settings.internal_rom_name,
+    sram: { ...settings.sram },
+    save_slots: settings.save_slots,
+    debug_overlay: settings.debug_overlay,
+  };
+}
+
+function projectSettingsWarnings(settings: ProjectSettingsPayload): string[] {
+  const warnings: string[] = [];
+  if (settings.target === "megadrive" && settings.sram.enabled) {
+    warnings.push("SRAM sera declarada no header da ROM Mega Drive no proximo build.");
+    warnings.push(
+      "Build precisa passar antes de tratar save como funcional; runtime save depende de observacao Libretro/AAA."
+    );
+  } else if (settings.target === "megadrive") {
+    warnings.push("SRAM off: ROM Mega Drive nao vai declarar backup RAM.");
+  } else if (settings.sram.enabled) {
+    warnings.push(
+      "SRAM configurada fica preparada no schema, mas o build atual so aplica header SRAM no Mega Drive."
+    );
+  }
+
+  warnings.push(
+    "Save runtime ainda nao comprovado: use Build & Run e ROM report antes de tratar save como funcional."
+  );
+
+  if (settings.debug_overlay) {
+    warnings.push(
+      "Debug overlay sera tratado como contrato de build/runtime, sem prometer HUD final no jogo."
+    );
+  }
+
+  return warnings;
+}
 
 const WORKSPACE_ITEMS: {
   id: EditorWorkspace;
@@ -1201,6 +1248,14 @@ export default function App() {
   const [creatingProject, setCreatingProject] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showProjectSettings, setShowProjectSettings] = useState(false);
+  const [projectSettings, setProjectSettings] = useState<ProjectSettingsSnapshot | null>(null);
+  const [projectSettingsDraft, setProjectSettingsDraft] =
+    useState<ProjectSettingsPayload | null>(null);
+  const [projectSettingsLoading, setProjectSettingsLoading] = useState(false);
+  const [projectSettingsSaving, setProjectSettingsSaving] = useState(false);
+  const [projectSettingsMessage, setProjectSettingsMessage] = useState("");
+  const [projectSettingsError, setProjectSettingsError] = useState("");
   const [copiedEntity, setCopiedEntity] = useState<Entity | null>(null);
   const [explorerBreadcrumb, setExplorerBreadcrumb] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -1267,6 +1322,13 @@ export default function App() {
           lastExistingProjectPreview.suggested_name === newProjName
         ? lastExistingProjectPreview
         : null;
+  const projectSettingsNameError =
+    projectSettingsDraft && !projectSettingsDraft.internal_rom_name.trim()
+      ? "Nome interno da ROM e obrigatorio"
+      : "";
+  const projectSettingsActiveWarnings = projectSettingsDraft
+    ? projectSettingsWarnings(projectSettingsDraft)
+    : projectSettings?.warnings ?? [];
   const workspaceMeta =
     WORKSPACE_ITEMS.find((workspace) => workspace.id === activeWorkspace) ?? WORKSPACE_ITEMS[0];
   const shellConfig = resolveWorkspaceShellConfig(activeWorkspace, shellWidth);
@@ -1740,6 +1802,13 @@ export default function App() {
           disabled: !activeProjectDir,
           shortcut: getShortcutLabel("scene.save"),
           title: getShortcutTitle("scene.save", "Salvar cena ativa"),
+        },
+        {
+          label: "Configuracoes",
+          onClick: () => void handleOpenProjectSettings(),
+          disabled: !activeProjectDir,
+          title: "Abrir configuracoes do projeto",
+          testId: "menu-action-project-settings",
         },
         {
           label: "Fechar",
@@ -2299,6 +2368,81 @@ export default function App() {
     }
   }
 
+  async function handleOpenProjectSettings() {
+    if (!activeProjectDir) {
+      logMessage("warn", "[Projeto] Abra um projeto antes de editar configuracoes.");
+      return;
+    }
+
+    setShowProjectSettings(true);
+    setProjectSettingsLoading(true);
+    setProjectSettingsMessage("");
+    setProjectSettingsError("");
+    try {
+      const settings = await getProjectSettings(activeProjectDir);
+      setProjectSettings(settings);
+      setProjectSettingsDraft(projectSettingsToPayload(settings));
+    } catch (error) {
+      const message = describeError(error);
+      setProjectSettingsError(message);
+      logMessage("error", `[Projeto] Falha ao carregar configuracoes: ${message}`);
+    } finally {
+      setProjectSettingsLoading(false);
+    }
+  }
+
+  async function handleSaveProjectSettings() {
+    if (!activeProjectDir || !projectSettingsDraft) {
+      return;
+    }
+
+    if (!projectSettingsDraft.internal_rom_name.trim()) {
+      setProjectSettingsError("Nome interno da ROM e obrigatorio");
+      return;
+    }
+
+    const payload: ProjectSettingsPayload = {
+      ...projectSettingsDraft,
+      internal_rom_name: projectSettingsDraft.internal_rom_name.trim(),
+      save_slots: Math.max(1, Math.min(9, Math.trunc(projectSettingsDraft.save_slots || 1))),
+      sram: {
+        enabled: projectSettingsDraft.sram.enabled,
+        size_bytes: projectSettingsDraft.sram.size_bytes,
+      },
+    };
+
+    setProjectSettingsSaving(true);
+    setProjectSettingsMessage("");
+    setProjectSettingsError("");
+    try {
+      const result = await updateProjectSettings(activeProjectDir, payload);
+      if (!result.ok) {
+        setProjectSettingsError(result.message);
+        logMessage("error", `[Projeto] ${result.message}`);
+        return;
+      }
+
+      if (result.settings) {
+        setProjectSettings(result.settings);
+        setProjectSettingsDraft(projectSettingsToPayload(result.settings));
+        if (result.settings.target === "megadrive" || result.settings.target === "snes") {
+          setActiveTarget(result.settings.target);
+        }
+      } else {
+        setProjectSettingsDraft(payload);
+      }
+      setProjectSettingsMessage(result.message);
+      logMessage("success", `[Projeto] ${result.message}`);
+      requestHwValidationRefresh();
+    } catch (error) {
+      const message = describeError(error);
+      setProjectSettingsError(message);
+      logMessage("error", `[Projeto] Falha ao salvar configuracoes: ${message}`);
+    } finally {
+      setProjectSettingsSaving(false);
+    }
+  }
+
   async function handleEmulatorLoadRom() {
     try {
       const selected = await open({
@@ -2643,6 +2787,11 @@ export default function App() {
     resetHwValidation();
     setSelectedEntityId(null);
     setLastSgdkImportSummary(null);
+    setShowProjectSettings(false);
+    setProjectSettings(null);
+    setProjectSettingsDraft(null);
+    setProjectSettingsMessage("");
+    setProjectSettingsError("");
     logMessage("info", "Projeto fechado.");
   }
 
@@ -3866,6 +4015,260 @@ export default function App() {
                   templatesLoading ||
                   !selectedTemplate ||
                   !selectedTemplateAvailability?.readyToCreate
+                }
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showProjectSettings && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="project-settings-title"
+            className="flex max-h-[calc(100vh-1.5rem)] w-[min(560px,calc(100vw-1.5rem))] flex-col overflow-hidden rounded border border-[#313244] bg-[#181825] p-5 shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <h2 id="project-settings-title" className="text-sm font-bold text-[#cba6f7]">
+                  Configuracoes do Projeto
+                </h2>
+                <p className="mt-1 text-[10px] uppercase tracking-[0.14em] text-[#7f849c]">
+                  project.rds
+                </p>
+              </div>
+              <div className="rounded border border-[#313244] bg-[#11111b] px-2.5 py-1 text-[10px] font-semibold text-[#a6adc8]">
+                {activeProjectName || "Projeto ativo"}
+              </div>
+            </div>
+
+            <div className="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+              {projectSettingsLoading && !projectSettingsDraft ? (
+                <div className="rounded border border-[#313244] bg-[#11111b] p-4 text-xs text-[#7f849c]">
+                  Carregando configuracoes...
+                </div>
+              ) : projectSettingsDraft ? (
+                <div className="space-y-4">
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <label className="space-y-1 text-xs text-[#cdd6f4]">
+                      <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#7f849c]">
+                        Target
+                      </span>
+                      <select
+                        value={projectSettingsDraft.target}
+                        onChange={(event) => {
+                          const target = event.currentTarget.value as "megadrive" | "snes";
+                          setProjectSettingsDraft((current) =>
+                            current ? { ...current, target } : current
+                          );
+                        }}
+                        className="h-8 w-full rounded border border-[#313244] bg-[#11111b] px-2 text-xs text-[#cdd6f4]"
+                      >
+                        <option value="megadrive">Mega Drive</option>
+                        <option value="snes">SNES</option>
+                      </select>
+                    </label>
+
+                    <label className="space-y-1 text-xs text-[#cdd6f4]">
+                      <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#7f849c]">
+                        Regiao
+                      </span>
+                      <select
+                        value={projectSettingsDraft.region}
+                        onChange={(event) => {
+                          const region = event.currentTarget.value;
+                          setProjectSettingsDraft((current) =>
+                            current ? { ...current, region } : current
+                          );
+                        }}
+                        className="h-8 w-full rounded border border-[#313244] bg-[#11111b] px-2 text-xs text-[#cdd6f4]"
+                      >
+                        <option value="world">World</option>
+                        <option value="japan">Japan</option>
+                        <option value="usa">USA</option>
+                        <option value="europe">Europe</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="grid gap-3 md:grid-cols-[1fr_8rem]">
+                    <label className="space-y-1 text-xs text-[#cdd6f4]">
+                      <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#7f849c]">
+                        Nome interno da ROM
+                      </span>
+                      <input
+                        data-testid="project-settings-internal-name"
+                        value={projectSettingsDraft.internal_rom_name}
+                        onInput={(event) => {
+                          const internal_rom_name = event.currentTarget.value;
+                          setProjectSettingsDraft((current) =>
+                            current ? { ...current, internal_rom_name } : current
+                          );
+                        }}
+                        className={`h-8 w-full rounded border bg-[#11111b] px-2 text-xs text-[#cdd6f4] ${
+                          projectSettingsNameError ? "border-[#f38ba8]" : "border-[#313244]"
+                        }`}
+                      />
+                      {projectSettingsNameError ? (
+                        <span className="block text-[10px] font-semibold text-[#f38ba8]">
+                          {projectSettingsNameError}
+                        </span>
+                      ) : null}
+                    </label>
+
+                    <label className="space-y-1 text-xs text-[#cdd6f4]">
+                      <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#7f849c]">
+                        Video
+                      </span>
+                      <select
+                        value={projectSettingsDraft.video_standard}
+                        onChange={(event) => {
+                          const video_standard = event.currentTarget.value;
+                          setProjectSettingsDraft((current) =>
+                            current ? { ...current, video_standard } : current
+                          );
+                        }}
+                        className="h-8 w-full rounded border border-[#313244] bg-[#11111b] px-2 text-xs text-[#cdd6f4]"
+                      >
+                        <option value="ntsc">NTSC</option>
+                        <option value="pal">PAL</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="grid gap-3 rounded border border-[#313244] bg-[#11111b] p-3 md:grid-cols-[1fr_10rem_8rem]">
+                    <label className="flex items-center gap-2 text-xs font-semibold text-[#cdd6f4]">
+                      <input
+                        data-testid="project-settings-sram-enabled"
+                        type="checkbox"
+                        checked={projectSettingsDraft.sram.enabled}
+                        onChange={(event) => {
+                          const enabled = event.currentTarget.checked;
+                          setProjectSettingsDraft((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  sram: { ...current.sram, enabled },
+                                }
+                              : current
+                          );
+                        }}
+                        className="h-4 w-4"
+                      />
+                      SRAM
+                    </label>
+
+                    <label className="space-y-1 text-xs text-[#cdd6f4]">
+                      <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#7f849c]">
+                        Tamanho
+                      </span>
+                      <select
+                        value={projectSettingsDraft.sram.size_bytes}
+                        onChange={(event) => {
+                          const size_bytes = Number(event.currentTarget.value);
+                          setProjectSettingsDraft((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  sram: { ...current.sram, size_bytes },
+                                }
+                              : current
+                          );
+                        }}
+                        className="h-8 w-full rounded border border-[#313244] bg-[#181825] px-2 text-xs text-[#cdd6f4]"
+                      >
+                        {SRAM_SIZE_OPTIONS.map((size) => (
+                          <option key={size} value={size}>
+                            {size / 1024} KB
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="space-y-1 text-xs text-[#cdd6f4]">
+                      <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#7f849c]">
+                        Slots
+                      </span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={9}
+                        value={projectSettingsDraft.save_slots}
+                        onInput={(event) => {
+                          const save_slots = Number(event.currentTarget.value);
+                          setProjectSettingsDraft((current) =>
+                            current ? { ...current, save_slots } : current
+                          );
+                        }}
+                        className="h-8 w-full rounded border border-[#313244] bg-[#181825] px-2 text-xs text-[#cdd6f4]"
+                      />
+                    </label>
+                  </div>
+
+                  <label className="flex items-center gap-2 rounded border border-[#313244] bg-[#11111b] p-3 text-xs font-semibold text-[#cdd6f4]">
+                    <input
+                      type="checkbox"
+                      checked={projectSettingsDraft.debug_overlay}
+                      onChange={(event) => {
+                        const debug_overlay = event.currentTarget.checked;
+                        setProjectSettingsDraft((current) =>
+                          current ? { ...current, debug_overlay } : current
+                        );
+                      }}
+                      className="h-4 w-4"
+                    />
+                    Debug overlay
+                  </label>
+
+                  <div className="space-y-2">
+                    {projectSettingsActiveWarnings.map((warning) => (
+                      <div
+                        key={warning}
+                        className="rounded border border-[#f9e2af]/30 bg-[#f9e2af]/10 px-3 py-2 text-[11px] text-[#f9e2af]"
+                      >
+                        {warning}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded border border-[#f38ba8]/40 bg-[#f38ba8]/10 p-4 text-xs text-[#f38ba8]">
+                  Configuracoes indisponiveis para o projeto ativo.
+                </div>
+              )}
+            </div>
+
+            {projectSettingsError ? (
+              <p className="mt-3 rounded border border-[#f38ba8]/40 bg-[#f38ba8]/10 px-3 py-2 text-[11px] text-[#f38ba8]">
+                {projectSettingsError}
+              </p>
+            ) : null}
+            {projectSettingsMessage ? (
+              <p className="mt-3 rounded border border-[#a6e3a1]/40 bg-[#a6e3a1]/10 px-3 py-2 text-[11px] text-[#a6e3a1]">
+                {projectSettingsMessage}
+              </p>
+            ) : null}
+
+            <div className="mt-4 flex justify-end gap-2 border-t border-[#313244] pt-3">
+              <ToolbarButton
+                label="Cancelar"
+                onClick={() => {
+                  setShowProjectSettings(false);
+                  setProjectSettingsMessage("");
+                  setProjectSettingsError("");
+                }}
+              />
+              <ToolbarButton
+                label={projectSettingsSaving ? "Salvando..." : "Salvar Configuracoes"}
+                onClick={() => void handleSaveProjectSettings()}
+                accent="primary"
+                disabled={
+                  projectSettingsSaving ||
+                  projectSettingsLoading ||
+                  !projectSettingsDraft ||
+                  Boolean(projectSettingsNameError)
                 }
               />
             </div>

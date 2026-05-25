@@ -158,6 +158,35 @@ pub struct ProjectionStatus {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SaveRamStatus {
+    pub status: String,
+    pub declared: bool,
+    pub observed: bool,
+    pub missing: bool,
+    pub size_bytes: Option<usize>,
+    pub observed_size_bytes: Option<usize>,
+    pub address_start: Option<u32>,
+    pub address_end: Option<u32>,
+    pub note: String,
+}
+
+impl Default for SaveRamStatus {
+    fn default() -> Self {
+        Self {
+            status: "missing".to_string(),
+            declared: false,
+            observed: false,
+            missing: true,
+            size_bytes: None,
+            observed_size_bytes: None,
+            address_start: None,
+            address_end: None,
+            note: "Nenhuma SRAM declarada ou observada nesta evidencia.".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct DisassemblyResult {
     pub ok: bool,
@@ -200,5 +229,6 @@ pub struct RomAnalysisManifest {
     pub logic_hints: Vec<LogicHint>,
     pub annotations: Vec<ReverseAnnotation>,
     pub trace: TraceStatus,
+    pub save: SaveRamStatus,
     pub projection_status: ProjectionStatus,
 }

@@ -19026,6 +19026,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             palette_mode: "4x16".to_string(),
             entry_scene: DEFAULT_ENTRY_SCENE.to_string(),
             build: Some(default_build_config()),
+            settings: Default::default(),
             template_metadata: None,
         };
         let scene = Scene {
