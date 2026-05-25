@@ -48,6 +48,7 @@ import {
   type AssetTreeNode,
 } from "./assetBrowserModel";
 import { useAssetBrowserState } from "./useAssetBrowserState";
+import ProjectCapabilityPanel from "./ProjectCapabilityPanel";
 
 const LazyReverseWorkspace = lazy(() => import("./ReverseWorkspace"));
 
@@ -1373,7 +1374,10 @@ function RuntimeSetup() {
   }
 
   return (
-    <div data-testid="runtime-setup-panel" className="flex min-h-full min-w-0 flex-col gap-3 overflow-x-hidden p-3">
+    <div
+      data-testid="runtime-setup-panel"
+      className="flex h-full min-w-[300px] flex-col gap-3 overflow-y-auto overflow-x-hidden p-3"
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="text-xs font-semibold text-[#cdd6f4]">Runtime Setup</span>
@@ -1435,6 +1439,8 @@ function RuntimeSetup() {
           legacyIndex={projectLegacyIndex}
         />
       )}
+
+      <ProjectCapabilityPanel compact />
 
       <div className="grid grid-cols-1 gap-2 xl:grid-cols-2" data-testid="runtime-diagnostic-grid">
         {items.map((item) => {

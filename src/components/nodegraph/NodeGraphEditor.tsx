@@ -5,6 +5,8 @@ import { parseSceneJson, resolveScenePrefabs } from "../../core/ipc/sceneService
 import { useEditorStore } from "../../core/store/editorStore";
 import { getEntityDisplayName } from "../../core/entityDisplay";
 import { resolveEntitySourceRefs } from "../../core/entityAuthoring";
+import type { SgdkPatternTemplate } from "../../core/projectCapability";
+import SgdkPatternTemplateGallery from "./SgdkPatternTemplateGallery";
 import {
   collectGraphImportGaps,
   filterGraphImportGaps,
@@ -1662,6 +1664,28 @@ const QUICK_ACTION_PREF_BY_ENTITY_ROLE: Partial<Record<string, QuickActionTempla
   hud_actor: "hud_vblank_tick",
 };
 
+function coercePatternNodeType(nodeType: string): NodeType {
+  if (nodeType in NODE_DEFS) {
+    return nodeType as NodeType;
+  }
+  switch (nodeType) {
+    case "hardware_budget":
+      return "hardware_budget_check";
+    case "condition_input":
+      return "input_pressed";
+    case "condition_tile":
+      return "condition_compare";
+    case "apply_physics":
+      return "set_velocity";
+    case "scene_reset":
+      return "load_scene";
+    case "draw_text":
+      return "bridge_unconverted_source";
+    default:
+      return "bridge_unconverted_source";
+  }
+}
+
 // ── Initial graph (demo) ──────────────────────────────────────────────────────
 
 const INITIAL_GRAPH: NodeGraph = {
@@ -2299,6 +2323,49 @@ export default function NodeGraphEditor() {
     );
   }, [canvasSize.height, canvasSize.width, graph, logMessage, quickActionContext]);
 
+  const appendSgdkPatternTemplate = useCallback((template: SgdkPatternTemplate) => {
+    const baseBounds = getNodeGraphBounds(graph);
+    const startX = baseBounds ? baseBounds.maxX + 260 : 180;
+    const startY = baseBounds ? baseBounds.minY : 160;
+    const nodes = template.nodes_generated.map((nodeTemplate, index) => {
+      const type = coercePatternNodeType(nodeTemplate.node_type);
+      const node = makeNode(type, startX + index * 240, startY + (index % 2) * 72);
+      node.label = nodeTemplate.label || node.label;
+      node.params = {
+        ...node.params,
+        ...nodeTemplate.params,
+        import_status: "experimental",
+        source: template.id,
+      };
+      return node;
+    });
+    const edges = nodes.slice(1).flatMap((node, index) => {
+      const prev = nodes[index];
+      if (!prev.outputs.some((port) => port.id === "exec") || !node.inputs.some((port) => port.id === "exec")) {
+        return [];
+      }
+      return [makeEdge(prev, "exec", node, "exec")];
+    });
+    setGraph((current) => ({
+      ...current,
+      nodes: [...current.nodes, ...nodes],
+      edges: [...current.edges, ...edges],
+    }));
+    setSelectedId(nodes[0]?.id ?? null);
+    setGuidedCommentary({
+      title: `${template.title} (Experimental)`,
+      summary: template.technical_description,
+      comments: [
+        `Origem: ${template.origin}`,
+        ...template.requirements.map((requirement) => `Requisito: ${requirement}`),
+        ...template.risks.map((risk) => `Risco: ${risk}`),
+      ],
+      hardwareNote: template.hardware_warnings.join(" "),
+      limitation: "Template rastreavel; revise contratos e build real antes de tratar como evidencia.",
+    });
+    logMessage("warn", `[NodeGraph] Template SGDK experimental inserido: ${template.title}. Revise contratos runtime antes do build.`);
+  }, [graph, logMessage]);
+
   const applyExecChainFromLayout = useCallback(() => {
     setGraph((current) => {
       const before = current.edges.length;
@@ -2510,6 +2577,7 @@ export default function NodeGraphEditor() {
               </div>
             );
           })}
+          <SgdkPatternTemplateGallery onInsertTemplate={appendSgdkPatternTemplate} />
         </div>
         <div className="mt-auto shrink-0 border-t border-[#313244] p-2">
           <p className="select-none px-1 text-[10px] text-[#45475a]">

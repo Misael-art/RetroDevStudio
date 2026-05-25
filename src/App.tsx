@@ -16,6 +16,7 @@ import LayerPanel from "./components/hierarchy/LayerPanel";
 import type { ToolTab, ToolWorkspace } from "./components/tools/ToolsPanel";
 import { buildProject, generateCCode, validateProject } from "./core/ipc/buildService";
 import { emulatorLoadRom, emulatorStop } from "./core/ipc/emulatorService";
+import { inspectRomMastering } from "./core/ipc/projectCapabilityService";
 import { getHwStatus } from "./core/ipc/hwService";
 import {
   createProjectFromTemplate,
@@ -775,10 +776,12 @@ function BuildPhasePanel({
   active,
   blocked,
   warning,
+  romMasteringStatus,
 }: {
   active: boolean;
   blocked: boolean;
   warning: boolean;
+  romMasteringStatus: string;
 }) {
   if (!active) {
     return null;
@@ -802,6 +805,9 @@ function BuildPhasePanel({
       </span>
       <span className="truncate text-[#94a3b8]">
         Validando -&gt; Compilando -&gt; Gerando ROM -&gt; Carregando emulador
+      </span>
+      <span className="shrink-0 rounded border border-[#313244] bg-[#11111b] px-1.5 py-0.5 font-mono text-[#7f849c]">
+        ROM {romMasteringStatus.replace(/_/g, " ")}
       </span>
     </div>
   );
@@ -1161,6 +1167,7 @@ export default function App() {
   } = useEditorStore();
 
   const [building, setBuilding] = useState(false);
+  const [romMasteringStatus, setRomMasteringStatus] = useState<string>("not_inspected");
   const [rightPanelMode, setRightPanelMode] = useState<"inspector" | "tools">("inspector");
   const [toolPanelActive, setToolPanelActive] = useState<ToolTab>("setup");
   const [toolPanelWorkspace, setToolPanelWorkspace] = useState<ToolWorkspace>("editing");
@@ -2518,6 +2525,7 @@ export default function App() {
       if (!dependenciesReady) return;
 
       setBuilding(true);
+      setRomMasteringStatus("pending");
       logMessage("info", "Iniciando build...");
 
       if (!(await persistActiveScene(activeProjectDir, "Build"))) {
@@ -2561,6 +2569,25 @@ export default function App() {
       }
 
       logMessage("success", `Build concluido. ROM: ${result.rom_path}`);
+      try {
+        const mastering = await inspectRomMastering(result.rom_path);
+        const nextStatus =
+          mastering.blockers.length > 0
+            ? "blocked"
+            : mastering.warnings.length > 0
+              ? "partial"
+              : mastering.checksum.status;
+        setRomMasteringStatus(nextStatus);
+        mastering.blockers.forEach(reportDiagnostic);
+        mastering.warnings.forEach((warning) => logMessage("warn", `[ROM Mastering] ${warning}`));
+        logMessage(
+          mastering.blockers.length > 0 ? "warn" : "info",
+          `[ROM Mastering] ${mastering.platform ?? "unknown"} checksum=${mastering.checksum.status} sram=${mastering.sram.status} region=${mastering.region.status}`
+        );
+      } catch (error) {
+        setRomMasteringStatus("inspect_failed");
+        logMessage("error", `[ROM Mastering] ${error instanceof Error ? error.message : String(error)}`);
+      }
       const loadResult = await emulatorLoadRom(result.rom_path);
       if (!loadResult.ok) {
         setEmulatorLoaded(false);
@@ -4053,6 +4080,7 @@ export default function App() {
               active={Boolean(activeProjectDir)}
               blocked={liveBuildBlocked}
               warning={Boolean(buildWarningSummary)}
+              romMasteringStatus={romMasteringStatus}
             />
           </>
         }

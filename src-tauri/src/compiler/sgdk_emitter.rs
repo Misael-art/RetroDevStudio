@@ -60,6 +60,15 @@ fn build_main_c_with_collision(
     let hardware_event_scripts = collect_hardware_event_scripts(ast);
     let sfx_resources = collect_sfx_resources(ast);
     let bgm_tracks = collect_bgm_tracks(ast);
+    let runtime_probe_enabled = runtime_evidence_probe_enabled();
+    let runtime_probe_scene_id = stable_runtime_probe_id(project_name);
+    let runtime_probe_framebuffer_useful = (!ast.sprite_assets.is_empty()
+        || !tilemap_assets.is_empty()
+        || ast
+            .nodes
+            .iter()
+            .any(|node| matches!(node, AstNode::DrawText { .. })))
+        as u8;
     let include_resources = !ast.sprite_assets.is_empty()
         || !tilemap_assets.is_empty()
         || !sfx_resources.is_empty()
@@ -130,6 +139,15 @@ fn build_main_c_with_collision(
         render_sgdk_hardware_event_handlers(&mut out, &hardware_event_scripts);
         out.push('\n');
     }
+    if runtime_probe_enabled {
+        render_runtime_evidence_probe_declarations(
+            &mut out,
+            runtime_probe_scene_id,
+            ast.sprite_assets.len(),
+            runtime_probe_framebuffer_useful,
+        );
+        out.push('\n');
+    }
 
     // ── Collision map array (schema 1.4.0+) ────────────────────────────────────
     if let Some(data) = collision_map_data {
@@ -146,6 +164,10 @@ fn build_main_c_with_collision(
     }
 
     out.push_str("int main() {\n");
+    if runtime_probe_enabled {
+        out.push_str("    rds_probe_last_tick = getTick();\n");
+        out.push_str("    rds_probe_emulation_status = 1;\n");
+    }
     let sprite_positions = collect_sprite_position_vars(ast);
     for (var_name, x, y) in &sprite_positions {
         out.push_str(&format!(
@@ -387,7 +409,9 @@ fn build_main_c_with_collision(
             AstNode::GameLoopBegin => {
                 out.push_str("    {\n");
                 out.push_str("        u16 rds_boot_frame;\n");
-                out.push_str("        for (rds_boot_frame = 0; rds_boot_frame < 8; rds_boot_frame++) {\n");
+                out.push_str(
+                    "        for (rds_boot_frame = 0; rds_boot_frame < 8; rds_boot_frame++) {\n",
+                );
                 out.push_str("            SPR_update();\n");
                 out.push_str("            SYS_doVBlankProcess();\n");
                 out.push_str("        }\n");
@@ -404,6 +428,9 @@ fn build_main_c_with_collision(
                 out.push_str("\n    while (TRUE) {\n");
             }
             AstNode::SpriteUpdate => {
+                if runtime_probe_enabled {
+                    render_runtime_evidence_probe_tick(&mut out);
+                }
                 if !input_commands.is_empty() {
                     let pad = input_commands
                         .values()
@@ -470,6 +497,61 @@ fn build_resources_res(ast: &AstOutput) -> String {
     }
 
     out
+}
+
+fn runtime_evidence_probe_enabled() -> bool {
+    std::env::var("RDS_RUNTIME_EVIDENCE_PROBE")
+        .map(|value| {
+            let normalized = value.trim().to_ascii_lowercase();
+            matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
+        })
+        .unwrap_or(false)
+}
+
+fn stable_runtime_probe_id(value: &str) -> u16 {
+    let mut hash = 0x811c9dc5u32;
+    for byte in value.as_bytes() {
+        hash ^= *byte as u32;
+        hash = hash.wrapping_mul(0x01000193);
+    }
+    (hash & 0xffff) as u16
+}
+
+fn render_runtime_evidence_probe_declarations(
+    out: &mut String,
+    scene_id: u16,
+    sprite_pressure: usize,
+    framebuffer_useful: u8,
+) {
+    out.push_str("// Optional Runtime Evidence Probe (Experimental, disabled unless RDS_RUNTIME_EVIDENCE_PROBE=1 during codegen)\n");
+    out.push_str(&format!(
+        "static volatile u16 rds_probe_scene_id = {};\n",
+        scene_id
+    ));
+    out.push_str("static volatile u16 rds_probe_heartbeat = 0;\n");
+    out.push_str("static volatile u16 rds_probe_frame_delta = 0;\n");
+    out.push_str("static volatile u32 rds_probe_last_tick = 0;\n");
+    out.push_str(&format!(
+        "static volatile u16 rds_probe_sprite_pressure = {};\n",
+        sprite_pressure.min(u16::MAX as usize)
+    ));
+    out.push_str(&format!(
+        "static volatile u16 rds_probe_framebuffer_useful = {};\n",
+        framebuffer_useful
+    ));
+    out.push_str("static volatile u16 rds_probe_emulation_status = 0;\n");
+}
+
+fn render_runtime_evidence_probe_tick(out: &mut String) {
+    out.push_str("        {\n");
+    out.push_str("            u32 rds_probe_now = getTick();\n");
+    out.push_str(
+        "            rds_probe_frame_delta = (u16)(rds_probe_now - rds_probe_last_tick);\n",
+    );
+    out.push_str("            rds_probe_last_tick = rds_probe_now;\n");
+    out.push_str("            rds_probe_heartbeat++;\n");
+    out.push_str("            rds_probe_emulation_status = 1;\n");
+    out.push_str("        }\n");
 }
 
 fn resource_animation_time(asset: &SpriteAsset) -> u32 {
@@ -656,20 +738,33 @@ fn collect_input_commands(ast: &AstOutput) -> BTreeMap<String, InputCommandSpec>
     commands
 }
 
-fn collect_input_commands_from_ops(ops: &[LogicOp], commands: &mut BTreeMap<String, InputCommandSpec>) {
+fn collect_input_commands_from_ops(
+    ops: &[LogicOp],
+    commands: &mut BTreeMap<String, InputCommandSpec>,
+) {
     for op in ops {
         match op {
-            LogicOp::ConditionBool { condition, if_true, if_false } => {
+            LogicOp::ConditionBool {
+                condition,
+                if_true,
+                if_false,
+            } => {
                 collect_input_command_from_bool(condition, commands);
                 collect_input_commands_from_ops(if_true, commands);
                 collect_input_commands_from_ops(if_false, commands);
             }
-            LogicOp::WhileLoop { condition, body, done } => {
+            LogicOp::WhileLoop {
+                condition,
+                body,
+                done,
+            } => {
                 collect_input_command_from_bool(condition, commands);
                 collect_input_commands_from_ops(body, commands);
                 collect_input_commands_from_ops(done, commands);
             }
-            LogicOp::ConditionOverlap { if_true, if_false, .. } => {
+            LogicOp::ConditionOverlap {
+                if_true, if_false, ..
+            } => {
                 collect_input_commands_from_ops(if_true, commands);
                 collect_input_commands_from_ops(if_false, commands);
             }
@@ -704,7 +799,10 @@ fn collect_input_commands_from_ops(ops: &[LogicOp], commands: &mut BTreeMap<Stri
     }
 }
 
-fn collect_input_command_from_bool(expr: &LogicBoolExpr, commands: &mut BTreeMap<String, InputCommandSpec>) {
+fn collect_input_command_from_bool(
+    expr: &LogicBoolExpr,
+    commands: &mut BTreeMap<String, InputCommandSpec>,
+) {
     match expr {
         LogicBoolExpr::InputCommand {
             command_id,
@@ -713,12 +811,14 @@ fn collect_input_command_from_bool(expr: &LogicBoolExpr, commands: &mut BTreeMap
             unsupported_tokens,
             ..
         } => {
-            commands.entry(command_id.clone()).or_insert_with(|| InputCommandSpec {
-                id: command_id.clone(),
-                notation: notation.clone(),
-                pad: pad.clone(),
-                unsupported_tokens: unsupported_tokens.clone(),
-            });
+            commands
+                .entry(command_id.clone())
+                .or_insert_with(|| InputCommandSpec {
+                    id: command_id.clone(),
+                    notation: notation.clone(),
+                    pad: pad.clone(),
+                    unsupported_tokens: unsupported_tokens.clone(),
+                });
         }
         LogicBoolExpr::Not(value) => collect_input_command_from_bool(value, commands),
         LogicBoolExpr::And { left, right, .. } => {
@@ -2116,7 +2216,12 @@ mod tests {
     #[test]
     fn main_c_emits_ring_buffer_matcher_for_input_command() {
         let ast = AstOutput {
-            nodes: vec![AstNode::GameLoopBegin, AstNode::SpriteUpdate, AstNode::VSync, AstNode::GameLoopEnd],
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
             sprite_assets: Vec::new(),
             logic_scripts: vec![LogicScript {
                 ops: vec![LogicOp::ConditionBool {
@@ -2139,7 +2244,9 @@ mod tests {
 
         let output = emit_sgdk(&ast, "Command Demo");
 
-        assert!(output.main_c.contains("rds_input_push_frame(JOY_readJoypad(JOY_1));"));
+        assert!(output
+            .main_c
+            .contains("rds_input_push_frame(JOY_readJoypad(JOY_1));"));
         assert!(output
             .main_c
             .contains("static const RdsInputCommandStep rds_cmd_hadouken_steps[]"));
@@ -2156,7 +2263,12 @@ mod tests {
     #[test]
     fn main_c_blocks_unsupported_input_command_tokens() {
         let ast = AstOutput {
-            nodes: vec![AstNode::GameLoopBegin, AstNode::SpriteUpdate, AstNode::VSync, AstNode::GameLoopEnd],
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
             sprite_assets: Vec::new(),
             logic_scripts: vec![LogicScript {
                 ops: vec![LogicOp::ConditionBool {

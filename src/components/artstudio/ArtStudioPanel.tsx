@@ -26,6 +26,7 @@ import {
   type ArtSuggestedFrame,
 } from "../../core/ipc/artStudioService";
 import { parseInputCommandFile } from "../../core/ipc/inputCommandService";
+import AssetQualityPanel from "./AssetQualityPanel";
 import type { AnimationDef, SpriteCommandBinding, SpriteComponent } from "../../core/ipc/sceneService";
 import {
   formatInputCommandSequence,
@@ -1536,6 +1537,8 @@ function ArtStudioInspectorSection() {
             <dd className="font-medium text-[#e2e8f0]">{applyNextStepLabel}</dd>
           </dl>
         </div>
+
+        <AssetQualityPanel assetPath={state.spritePath || undefined} />
 
         <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
           <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
