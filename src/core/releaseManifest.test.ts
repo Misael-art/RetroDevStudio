@@ -70,7 +70,7 @@ function runManifest(
   fixtureRoot: string,
   extraEnv: Record<string, string | undefined> = {}
 ) {
-  const env: NodeJS.ProcessEnv = { ...process.env, ...extraEnv };
+  const env: Record<string, string | undefined> = { ...process.env, ...extraEnv };
   if (!Object.prototype.hasOwnProperty.call(extraEnv, "GITHUB_ACTIONS")) {
     delete env.GITHUB_ACTIONS;
     delete env.GITHUB_RUN_ID;
