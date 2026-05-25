@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-25 (rodada 55 - AAA capability diagnostics integrada em main como Experimental)
+**Ultima Atualizacao:** 2026-05-25 (rodada 56 - triagem governada pos-AAA e builds finais)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-25 rodada 56 - triagem governada pos-AAA):**
+  - **Main final:** `main` permanece em `fc925e2b200ca92409e7773fd0126484d4798505` apos PR #10/AAA. `npm run release:readiness:promotion` passou novamente em `main` com `Pronto para promocao: SIM`.
+  - **Builds finais:** `npm run build:debug`, `npm run build:portable` e `npm run build:msi` passaram. Artefatos verificados: `src-tauri/target-test/debug/retro-dev-studio.exe`, `src-tauri/target-test/release/retro-dev-studio.exe`, `src-tauri/target-test/release/bundle/msi/RetroDev Studio_0.1.0_x64_en-US.msi`.
+  - **Branches com PR/checks verdes aguardando humano:** `codex/release-manifest-packaging-z` PR #11 (`090ffa8`), `codex/nodegraph-execution-inspector-w` PR #12 (`9d3462f`) e `codex/save-sram-project-settings-u` PR #13 (`51d228b`) estao com `CI / validate` e `Desktop E2E / desktop-smoke` verdes em `push` e `pull_request`; merge bloqueado por `gh` local sem autenticacao.
+  - **Branches pushadas sem PR por falta de auth:** `codex/godot-2d-subset-y` (`892c534`), `codex/command-palette-shortcut-editor-r` (`8dea859`) e `codex/e2e-create-game-from-zero-s` (`07ee37f`) foram rebaseadas sobre `origin/main`, validadas localmente e pushadas; checks remotos de `push` estao verdes. Compare URLs: `https://github.com/Misael-art/RetroDevStudio/compare/main...codex/godot-2d-subset-y`, `https://github.com/Misael-art/RetroDevStudio/compare/main...codex/command-palette-shortcut-editor-r`, `https://github.com/Misael-art/RetroDevStudio/compare/main...codex/e2e-create-game-from-zero-s`.
+  - **Preservada sem limpeza:** `codex/asset-browser-production-x` continua sem remoto correspondente e com worktree sujo por schemas gerados; foi preservada, nao removida. Worktrees de branches nao mergeadas tambem foram preservados.
+  - **Status honesto:** AAA Capability segue **Experimental/capability diagnostics**; Godot, NodeGraph debugger, Save/SRAM, Command Palette, Create Game E2E e Release Manifest continuam candidatos de branch/PR, nao promocao Stable. SGDK, Node Engine, GameMaker, Godot, MUGEN/Ikemen, OpenBOR, SNES, ArtStudio e AAA nao foram declarados Stable/prontos.
 
 * **O que acabou de acontecer (2026-05-25 rodada 55 - main pos-AAA):**
   - **PR/merge:** PR #10 (`codex/aaa-capability-layer-q`) foi mergeado em `main` por `962e856aeee948c0e6b96be9ec3fb4d6b053ecd9`, contendo `d3651ecec3a41652ba2f2731ddb6577071221c81`.
