@@ -1,8 +1,10 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-05-25 (rodada 60 - Godot 2D subset Y rebased e validado como Experimental)
+**Ultima revisao canonica:** 2026-05-25 (rodada 61 - Command Palette/Shortcut Editor R rebased e validado)
 **Fase ativa real:** Core MVP promovido tecnicamente em main; hardening continua nas superficies experimentais
+
+**Nota 2026-05-25 (rodada 61, branch `codex/command-palette-shortcut-editor-r`):** Command Palette/Shortcut Editor foi rebased sobre `origin/main` (`fc925e2b200ca92409e7773fd0126484d4798505`) e validado localmente no head tecnico `c502864`. A fatia adiciona busca/execucao de comandos reais, editor local de atalhos e persistencia de customizacoes, preservando workspace shell, Runtime Setup e capability diagnostics atuais. Gates: `check:tree`, `lint`, `tsc`, Vitest focado **12 passed / 57 skipped**, `npm test` **362/362**, `cargo clippy`, `cargo test --lib` **398 passed / 22 ignored** e `git diff --check`. Isto e UX/CX em hardening; nao promove SGDK/Node Engine/ArtStudio/SNES/GameMaker/Godot/MUGEN/OpenBOR/AAA para Stable.
 
 **Nota 2026-05-25 (rodada 60, branch `codex/godot-2d-subset-y`):** Godot Y foi rebased sobre `origin/main` (`fc925e2b200ca92409e7773fd0126484d4798505`) e validado localmente no head tecnico `a95b2251`. O subset 2D permanece **Experimental/importavel**: parseia `project.godot`, `.tscn`, `.tres`, Node2D/Sprite2D/AnimatedSprite2D/CharacterBody2D/Area2D/CollisionShape2D/Camera2D/TileMap simples e GDScript subset com bridge estruturada para o que ficar fora do escopo. Gates frescos pos-rebase: `check:tree`, `lint`, `tsc`, `npm test` **357/357**, `cargo clippy`, Godot Rust focado **13 passed / 1 ignored**, `cargo test --lib` **405 passed / 23 ignored**, `build:debug`, `preflight:sgdk-e2e` e `git diff --check`. Isto nao declara Godot Stable nem promove SGDK/Node Engine/ArtStudio/SNES/GameMaker/MUGEN/OpenBOR/AAA para Stable.
 
