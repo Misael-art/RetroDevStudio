@@ -627,7 +627,10 @@ where
         match master_rom_artifact(&rom_path, target, project) {
             Ok(Some(message)) => emit!("info", message),
             Ok(None) => {}
-            Err(error) => emit!("warn", error),
+            Err(error) => {
+                emit!("error", error);
+                return failed_build_result(target.target, log, Some(&workspace.root));
+            }
         }
         if let Err(error) = validate_rom_signature(&rom_path, target) {
             emit!("warn", error);
@@ -898,7 +901,10 @@ where
     match master_rom_artifact(&rom_path, target, project) {
         Ok(Some(message)) => emit!("info", message),
         Ok(None) => {}
-        Err(error) => emit!("warn", error),
+        Err(error) => {
+            emit!("error", error);
+            return failed_build_result(target.target, log, Some(&workspace.root));
+        }
     }
     if let Err(error) = validate_rom_signature(&rom_path, target) {
         emit!("warn", error);

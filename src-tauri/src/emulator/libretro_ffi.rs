@@ -1020,7 +1020,7 @@ impl EmulatorCore {
             return SaveRamStatus::default();
         };
 
-        match self.read_memory(RETRO_MEMORY_SAVE_RAM, 0, usize::MAX) {
+        match self.read_memory(RETRO_MEMORY_SAVE_RAM, 0, 1) {
             Ok((_bytes, total_size)) if total_size > 0 => SaveRamStatus {
                 status: "observed".to_string(),
                 declared: false,

@@ -236,6 +236,16 @@ function projectSettingsWarnings(settings: ProjectSettingsPayload): string[] {
   return warnings;
 }
 
+function mergeProjectSettingsWarnings(
+  settings: ProjectSettingsSnapshot,
+  localWarnings: string[]
+): ProjectSettingsSnapshot {
+  const warnings = [...settings.warnings, ...localWarnings].filter(
+    (warning, index, all) => all.indexOf(warning) === index
+  );
+  return { ...settings, warnings };
+}
+
 const WORKSPACE_ITEMS: {
   id: EditorWorkspace;
   label: string;
@@ -2378,6 +2388,8 @@ export default function App() {
     setProjectSettingsLoading(true);
     setProjectSettingsMessage("");
     setProjectSettingsError("");
+    setProjectSettings(null);
+    setProjectSettingsDraft(null);
     try {
       const settings = await getProjectSettings(activeProjectDir);
       setProjectSettings(settings);
@@ -2410,6 +2422,8 @@ export default function App() {
         size_bytes: projectSettingsDraft.sram.size_bytes,
       },
     };
+    const localWarnings = projectSettingsWarnings(payload);
+    const previousTarget = activeTarget;
 
     setProjectSettingsSaving(true);
     setProjectSettingsMessage("");
@@ -2423,10 +2437,15 @@ export default function App() {
       }
 
       if (result.settings) {
-        setProjectSettings(result.settings);
-        setProjectSettingsDraft(projectSettingsToPayload(result.settings));
-        if (result.settings.target === "megadrive" || result.settings.target === "snes") {
-          setActiveTarget(result.settings.target);
+        const settings = mergeProjectSettingsWarnings(result.settings, localWarnings);
+        setProjectSettings(settings);
+        setProjectSettingsDraft(projectSettingsToPayload(settings));
+        if (settings.target === "megadrive" || settings.target === "snes") {
+          if (settings.target !== previousTarget) {
+            await resetEmulatorSession(true);
+            setHwStatus(await getHwStatus(activeProjectDir));
+          }
+          setActiveTarget(settings.target);
         }
       } else {
         setProjectSettingsDraft(payload);

@@ -13397,7 +13397,7 @@ pub fn update_project_settings(
     project.settings = ProjectSettings {
         region: payload.region,
         video_standard: payload.video_standard,
-        internal_rom_name: payload.internal_rom_name,
+        internal_rom_name: payload.internal_rom_name.trim().to_string(),
         sram: payload.sram,
         save_slots: payload.save_slots,
         debug_overlay: payload.debug_overlay,
@@ -19335,6 +19335,36 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             fs::read_to_string(project_dir.join("project.rds")).expect("read project.rds");
         assert!(raw_project.contains("\"settings\""));
         assert!(raw_project.contains("\"sram\""));
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn update_project_settings_trims_internal_rom_name_before_persisting() {
+        let project_dir = temp_dir("project-settings-trim");
+        create_project_skeleton(&project_dir, "Trim Settings", "megadrive")
+            .expect("create canonical project");
+
+        let snapshot = update_project_settings(
+            &project_dir,
+            ProjectSettingsPayload {
+                target: "megadrive".to_string(),
+                region: "world".to_string(),
+                video_standard: "ntsc".to_string(),
+                internal_rom_name: "  TRIMMED TITLE  ".to_string(),
+                sram: SaveRamConfig {
+                    enabled: true,
+                    size_bytes: 8192,
+                },
+                save_slots: 2,
+                debug_overlay: false,
+            },
+        )
+        .expect("update project settings");
+
+        let reloaded = load_project(&project_dir).expect("reload project settings");
+        assert_eq!(snapshot.internal_rom_name, "TRIMMED TITLE");
+        assert_eq!(reloaded.settings.internal_rom_name, "TRIMMED TITLE");
 
         let _ = fs::remove_dir_all(project_dir);
     }

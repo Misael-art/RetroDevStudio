@@ -87,9 +87,35 @@ fn save_status_from_loaded_rom(loaded: &platform::LoadedRom) -> SaveRamStatus {
             .get(0x1B8..0x1BC)
             .and_then(|bytes| <[u8; 4]>::try_from(bytes).ok())
             .map(u32::from_be_bytes);
-        let size_bytes = address_start
-            .zip(address_end)
-            .map(|(start, end)| end.saturating_sub(start).saturating_add(1) as usize);
+        let size_bytes = match address_start.zip(address_end) {
+            Some((start, end)) if end >= start => Some((end - start + 1) as usize),
+            Some(_) => {
+                return SaveRamStatus {
+                    status: "invalid".to_string(),
+                    declared: true,
+                    observed: false,
+                    missing: true,
+                    size_bytes: None,
+                    observed_size_bytes: None,
+                    address_start,
+                    address_end,
+                    note: "SRAM declarada no header Mega Drive, mas o endereco final e menor que o inicial.".to_string(),
+                }
+            }
+            None => {
+                return SaveRamStatus {
+                    status: "invalid".to_string(),
+                    declared: true,
+                    observed: false,
+                    missing: true,
+                    size_bytes: None,
+                    observed_size_bytes: None,
+                    address_start,
+                    address_end,
+                    note: "SRAM declarada no header Mega Drive, mas o range esta incompleto.".to_string(),
+                }
+            }
+        };
 
         return SaveRamStatus {
             status: "declared".to_string(),
@@ -284,6 +310,30 @@ mod tests {
             .save
             .note
             .contains("SRAM declarada no header Mega Drive"));
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn analyze_rom_rejects_inverted_megadrive_sram_range() {
+        let path = temp_rom_path("md-sram-invalid", "bin");
+        let mut rom = build_megadrive_fixture();
+        rom[0x1B0..0x1B2].copy_from_slice(b"RA");
+        rom[0x1B2] = 0xF8;
+        rom[0x1B3] = 0x20;
+        rom[0x1B4..0x1B8].copy_from_slice(&0x0020_8000u32.to_be_bytes());
+        rom[0x1B8..0x1BC].copy_from_slice(&0x0020_7FFFu32.to_be_bytes());
+        fs::write(&path, &rom).expect("write md rom with invalid sram");
+
+        let manifest = analyze_rom(path.to_string_lossy().as_ref()).expect("analyze rom");
+
+        assert_eq!(manifest.save.status, "invalid");
+        assert!(manifest.save.declared);
+        assert!(manifest.save.missing);
+        assert_eq!(manifest.save.size_bytes, None);
+        assert_eq!(manifest.save.address_start, Some(0x0020_8000));
+        assert_eq!(manifest.save.address_end, Some(0x0020_7FFF));
+        assert!(manifest.save.note.contains("endereco final e menor"));
 
         let _ = fs::remove_file(path);
     }
