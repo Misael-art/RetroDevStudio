@@ -630,7 +630,7 @@ struct OpenBorModelAsset {
     source_file: PathBuf,
     display_asset: Option<PathBuf>,
     audio_assets: Vec<PathBuf>,
-    animations: HashMap<String, AnimationDef>,
+    animations: BTreeMap<String, AnimationDef>,
     collision_box: Option<OpenBorBox>,
     attack_boxes: Vec<OpenBorAttackBox>,
     movement_speed: i32,
@@ -6324,7 +6324,7 @@ fn mugen_graph_ref(entity_id: &str) -> String {
 
 fn mugen_command_bindings(
     model: &MugenFightingModel,
-    animations: &HashMap<String, AnimationDef>,
+    animations: &BTreeMap<String, AnimationDef>,
 ) -> Vec<SpriteCommandBinding> {
     let command_state_targets = mugen_command_state_targets(model);
     model
@@ -11502,6 +11502,7 @@ fn godot_logic_component(
                 .iter()
                 .map(|entry| entry.reason.clone())
                 .collect(),
+            ..ImportedLogicSemantics::default()
         }),
         variables: HashMap::new(),
     }))
@@ -11541,6 +11542,7 @@ fn godot_sprite_entity(spec: GodotSpriteEntitySpec) -> Entity {
                 animations: spec.animations,
                 priority: "foreground".to_string(),
                 meta_sprite: frame_width > 32 || frame_height > 32,
+                commands: Vec::new(),
             }),
             input: spec.input,
             physics: spec.physics,
@@ -12647,7 +12649,7 @@ fn openbor_animation_to_def(block: &OpenBorAnimationBlock) -> AnimationDef {
 }
 
 fn openbor_push_animation(
-    animations: &mut HashMap<String, AnimationDef>,
+    animations: &mut BTreeMap<String, AnimationDef>,
     logic_hints: &mut Vec<String>,
     collision_box: &mut Option<OpenBorBox>,
     attack_boxes: &mut Vec<OpenBorAttackBox>,
@@ -12715,7 +12717,7 @@ fn parse_openbor_model_file(root: &Path, path: &Path) -> Result<OpenBorModelAsse
     let mut display_asset = None;
     let mut audio_assets = Vec::new();
     let mut logic_hints = Vec::new();
-    let mut animations = HashMap::new();
+    let mut animations = BTreeMap::new();
     let mut collision_box = None;
     let mut attack_boxes = Vec::new();
     let mut movement_speed = 2;
@@ -13824,7 +13826,7 @@ pub fn import_openbor_project(
         let y = spawn_position.map(|spawn| spawn.y).unwrap_or(112);
         let input = (role == "player_avatar").then(|| InputComponent {
             device: "joypad1".to_string(),
-            mapping: HashMap::from([
+            mapping: BTreeMap::from([
                 ("move_left".to_string(), "DPAD_LEFT".to_string()),
                 ("move_right".to_string(), "DPAD_RIGHT".to_string()),
                 ("attack".to_string(), "BUTTON_B".to_string()),

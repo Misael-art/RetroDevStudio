@@ -102,7 +102,7 @@ pub struct SpriteCommandBinding {
 #[cfg(test)]
 mod sprite_command_tests {
     use super::{SpriteCommandBinding, SpriteCommandStep, SpriteComponent};
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     #[test]
     fn sprite_component_commands_round_trip_json() {
@@ -112,7 +112,7 @@ mod sprite_command_tests {
             frame_height: 32,
             pivot: None,
             palette_slot: 0,
-            animations: HashMap::new(),
+            animations: BTreeMap::new(),
             priority: "foreground".to_string(),
             meta_sprite: false,
             commands: vec![SpriteCommandBinding {
