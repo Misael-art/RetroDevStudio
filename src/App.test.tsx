@@ -624,6 +624,13 @@ function flush() {
   });
 }
 
+function setControlledInputValue(input: HTMLInputElement, value: string) {
+  const descriptor = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value");
+  descriptor?.set?.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
 async function flushUntil(condition: () => boolean, attempts = 8, delayMs = 0) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     await act(async () => {
@@ -2081,8 +2088,7 @@ describe("App build flow", () => {
     expect(search).toBeInstanceOf(HTMLInputElement);
 
     await act(async () => {
-      (search as HTMLInputElement).value = "logic";
-      search?.dispatchEvent(new Event("input", { bubbles: true }));
+      setControlledInputValue(search as HTMLInputElement, "logic");
       await flush();
     });
 
@@ -2123,8 +2129,7 @@ describe("App build flow", () => {
     expect(buildShortcutInput).toBeInstanceOf(HTMLInputElement);
 
     await act(async () => {
-      (buildShortcutInput as HTMLInputElement).value = "Ctrl+Alt+B";
-      buildShortcutInput?.dispatchEvent(new Event("input", { bubbles: true }));
+      setControlledInputValue(buildShortcutInput as HTMLInputElement, "Ctrl+Alt+B");
       await flush();
     });
 
@@ -2135,8 +2140,7 @@ describe("App build flow", () => {
     expect(openProjectShortcutInput).toBeInstanceOf(HTMLInputElement);
 
     await act(async () => {
-      (openProjectShortcutInput as HTMLInputElement).value = "Ctrl+Alt+B";
-      openProjectShortcutInput?.dispatchEvent(new Event("input", { bubbles: true }));
+      setControlledInputValue(openProjectShortcutInput as HTMLInputElement, "Ctrl+Alt+B");
       await flush();
     });
 
