@@ -108,6 +108,14 @@
 - O report deve ser tratado como a fotografia canonica da promocao RC -> beta/producao: artefatos, dirty worktree, baseline, upstream report, QA manual pendente e bloqueadores explicitos.
 - O agregador nao substitui a validacao manual nem o smoke institutional em Windows; ele reduz falso positivo e centraliza evidencias.
 
+### 3.1.1 Manifesto de distribuicao interna
+- `node scripts/release-manifest.mjs` / `npm run release:manifest` gera `src-tauri/target-test/validation/release-manifest.json`.
+- O manifesto e uma fotografia de distribuicao interna auditavel: versao, commit, branch, data, EXE debug, EXE portable, MSI, hashes SHA256, tamanhos, readiness, resumo de toolchains, CI quando disponivel, status de signing e status de updater.
+- Artefato obrigatorio ausente deve falhar com erro acionavel; nao usar wildcard ou path vazio como sucesso.
+- O manifesto nao assina artefatos. Sem certificado real e etapa verificavel de signing, `signingStatus.signed` deve permanecer `false` e `status` deve permanecer `unsigned`.
+- Producao publica exige certificado real, decisao de canal, politica de updater e revisao de distribuicao/licencas; o updater permanece `deferred` ate essa estrategia existir.
+- Fluxo recomendado para pacote interno: `build:debug`, `build:portable`, `build:msi`, `release:readiness`, `release:manifest`, seguido de inspecao de `release-manifest.json`.
+
 ### 3.2 Criterios de aceite para rodada institucional de beta
 - `npm run release:readiness:promotion` deve fechar verde na propria rodada de promocao.
 - `src-tauri/target-test/validation/manual-qa-status.json` deve registrar os blocos `A-G` aplicaveis como `passed` (`A-F` minimo fora de SGDK/desktop), com screenshots `qa-rc-*.png` da mesma rodada.
