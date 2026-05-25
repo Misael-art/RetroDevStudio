@@ -842,6 +842,7 @@ function isNodeType(value: unknown): value is NodeType {
     value === "event_update" ||
     value === "input_pressed" ||
     value === "input_held" ||
+    value === "input_command" ||
     value === "sprite_move" ||
     value === "set_velocity" ||
     value === "set_position" ||

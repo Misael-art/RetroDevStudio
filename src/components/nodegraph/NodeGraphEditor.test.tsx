@@ -655,6 +655,12 @@ describe("NodeGraphEditor", () => {
       await flush();
       await flush();
     });
+    for (let attempt = 0; attempt < 5 && !container.querySelector("[data-testid='node-card-entry']"); attempt += 1) {
+      await act(async () => {
+        await flush();
+      });
+    }
+    expect(container.querySelector("[data-testid='node-card-entry']")).toBeInstanceOf(HTMLDivElement);
 
     await act(async () => {
       (container.querySelector("[data-testid='nodegraph-inspect-execution-toggle']") as HTMLButtonElement).click();
@@ -676,7 +682,9 @@ describe("NodeGraphEditor", () => {
     expect(
       container.querySelector("[data-testid='node-card-attack_anim']")?.getAttribute("data-execution-reachable")
     ).toBe("true");
-    expect(container.querySelector("[data-testid='nodegraph-canvas'] [data-testid='nodegraph-execution-inspector']")).toBeNull();
+    expect(container.querySelector("[data-testid='nodegraph-overview'] [data-testid='nodegraph-execution-inspector']")).toBe(
+      inspector
+    );
     expect(useEditorStore.getState().consoleEntries.some((entry) => entry.message.includes("[NodeGraph Diagnostics]"))).toBe(
       true
     );
