@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-25 (rodada 57 - triagem governada pos-AAA rebase final)
+**Ultima Atualizacao:** 2026-05-26 (rodada 60 - PRs #12/#13 integrados em main + readiness verde)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-26 rodada 60 - main pos-PR #12/#13):**
+  - **Main final verificado:** `git fetch --prune origin`, `git checkout main` e `git pull --ff-only origin main` deixaram `main` local/remoto em `ee07110ea22804dc8cb36296b6b281f8d316e07d`.
+  - **PRs integrados:** PR #12 (`codex/nodegraph-execution-inspector-w`, head `28263357e5c01c2bbe4aca98d39a8451658d6066`) entrou por merge commit `d4b3b5942dde886f35965b5cc71f297d2e5e8520`; PR #13 (`codex/save-sram-project-settings-u`, head `96d49579da778eef8e8176643e7db6c947dd9cb9`) entrou por merge commit `ee07110ea22804dc8cb36296b6b281f8d316e07d`. `git merge-base --is-ancestor` confirmou os dois heads em `main`.
+  - **Gates locais pos-merge:** `npm run check:tree` OK; `npm run lint` OK; `npx tsc --noEmit` OK; o primeiro `npm test` teve timeout isolado de worker Vitest, e o rerun serial `npm test -- --no-file-parallelism --maxWorkers=1` passou (**43 arquivos / 366 testes**); `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK; `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` OK (**406 passed / 22 ignored**); `git diff --check` OK.
+  - **Readiness real:** `npm run release:readiness:promotion` retornou `Pronto para promocao: SIM` em `main`, consumindo baseline, build debug, upstream oficial e desktop E2E simples. A primeira tentativa apontou worktree sujo por efeitos gerados da validacao; antes da limpeza foram preservados patches em `F:\Projects\RetroDevStudio-cleanup-backups\main-readiness-dirty-20260526-150245.patch` e `F:\Projects\RetroDevStudio-cleanup-backups\main-readiness-dirty-postsuccess-20260526-151520.patch`.
+  - **Status honesto:** NodeGraph Inspector e Save/SRAM estao integrados como superficies **Experimental/em hardening**. SGDK, Node Engine, GameMaker, Godot, MUGEN/Ikemen, OpenBOR, SNES, ArtStudio e AAA Capability nao foram declarados Stable/prontos.
+  - **Proximo passo imediato:** preparar PRs para `codex/godot-2d-subset-y`, `codex/command-palette-shortcut-editor-r` e `codex/e2e-create-game-from-zero-s`. `codex/asset-browser-production-x` segue intocada ate auditoria do worktree sujo.
 
 * **O que acabou de acontecer (2026-05-25 rodada 57 - triagem governada pos-AAA rebase final):**
   - **Main final verificado:** `main` chegou a `72c31f787b1b8af0b6811134bb74181c2be903e5` apos PR #10/AAA e registro documental pos-triagem. `npm run release:readiness:promotion` passou novamente em `main` com `Pronto para promocao: SIM`.
