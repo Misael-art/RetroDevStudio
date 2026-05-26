@@ -192,6 +192,7 @@ type QuickActionContext = {
 
 type QuickActionTemplate = GuidedFlowCommentary & {
   id:
+    | "mini_platformer"
     | "player_controller"
     | "enemy_logic"
     | "timer_event"
@@ -964,20 +965,23 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     params: { rate: "frame" },
   },
   input_pressed: {
-    type: "input_pressed", label: "On Input Pressed",
-    inputs: [],
+    type: "input_pressed",
+    label: "On Input Pressed",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
     outputs: [{ id: "exec", label: ">", kind: "exec" }],
     params: { pad: "JOY_1", button: "BUTTON_A" },
   },
   input_held: {
-    type: "input_held", label: "On Input Held",
-    inputs: [],
+    type: "input_held",
+    label: "On Input Held",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
     outputs: [{ id: "exec", label: ">", kind: "exec" }],
     params: { pad: "JOY_1", button: "BUTTON_RIGHT" },
   },
   input_command: {
-    type: "input_command", label: "Input Command",
-    inputs: [],
+    type: "input_command",
+    label: "Input Command",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
     outputs: [
       { id: "exec", label: ">", kind: "exec" },
       { id: "false", label: "False >", kind: "exec" },
@@ -1047,8 +1051,9 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     params: { target: "player", state: "idle" },
   },
   condition_overlap: {
-    type: "condition_overlap", label: "On Overlap",
-    inputs: [],
+    type: "condition_overlap",
+    label: "On Overlap",
+    inputs: [{ id: "exec", label: ">", kind: "exec" }],
     outputs: [
       { id: "true",  label: "True ▶",  kind: "exec" },
       { id: "false", label: "False ▶", kind: "exec" },
@@ -1722,7 +1727,113 @@ function resolveQuickActionSecondaryTarget(
   return primaryTarget === "player" ? "enemy" : "player";
 }
 
-function buildPlayerControllerQuickActionGraph(context: QuickActionContext): NodeGraph {
+function buildMiniPlatformerQuickActionGraph(
+  context: QuickActionContext,
+): NodeGraph {
+  const target = resolveQuickActionPrimaryTarget(context, "player");
+
+  const start = makeNode("event_start", 120, 96);
+  const spawn = makeNode("spawn_entity", 380, 92);
+  const idleStart = makeNode("set_animation_state", 640, 92);
+
+  const moveTick = makeNode("event_update", 120, 260);
+  const right = makeNode("input_held", 380, 252);
+  const runVelocity = makeNode("set_velocity", 640, 252);
+  const runMove = makeNode("sprite_move", 900, 252);
+  const runAnim = makeNode("set_animation_state", 1160, 252);
+
+  const gravityTick = makeNode("event_update", 120, 420);
+  const gravity = makeNode("sprite_move", 380, 416);
+  const fallAnim = makeNode("set_animation_state", 640, 416);
+
+  const jumpTick = makeNode("event_update", 120, 580);
+  const jumpInput = makeNode("input_pressed", 380, 572);
+  const jumpVelocity = makeNode("set_velocity", 640, 572);
+  const jumpMove = makeNode("sprite_move", 900, 572);
+  const jumpAnim = makeNode("set_animation_state", 1160, 572);
+
+  const collisionTick = makeNode("event_update", 120, 740);
+  const overlap = makeNode("condition_overlap", 380, 732);
+  const stopVelocity = makeNode("set_velocity", 640, 732);
+  const idleCollision = makeNode("set_animation_state", 900, 732);
+
+  const cameraTick = makeNode("event_update", 120, 900);
+  const camera = makeNode("camera_follow", 380, 896);
+  const budget = makeNode("hardware_budget_check", 640, 896);
+
+  spawn.params = { ...spawn.params, prefab: target, x: 48, y: 128 };
+  idleStart.params = { ...idleStart.params, target, state: "idle" };
+
+  right.params = { ...right.params, pad: "JOY_1", button: "BUTTON_RIGHT" };
+  runVelocity.params = { ...runVelocity.params, target, vx: 2, vy: 0 };
+  runMove.params = { ...runMove.params, target, dx: 2, dy: 0 };
+  runAnim.params = { ...runAnim.params, target, state: "run" };
+
+  gravity.params = { ...gravity.params, target, dx: 0, dy: 1 };
+  fallAnim.params = { ...fallAnim.params, target, state: "jump" };
+
+  jumpInput.params = { ...jumpInput.params, pad: "JOY_1", button: "BUTTON_A" };
+  jumpVelocity.params = { ...jumpVelocity.params, target, vx: 0, vy: -6 };
+  jumpMove.params = { ...jumpMove.params, target, dx: 0, dy: -6 };
+  jumpAnim.params = { ...jumpAnim.params, target, state: "jump" };
+
+  overlap.params = { ...overlap.params, a: target, b: target };
+  stopVelocity.params = { ...stopVelocity.params, target, vx: 0, vy: 0 };
+  idleCollision.params = { ...idleCollision.params, target, state: "idle" };
+
+  camera.params = { ...camera.params, target, damping: 0 };
+
+  return {
+    nodes: [
+      start,
+      spawn,
+      idleStart,
+      moveTick,
+      right,
+      runVelocity,
+      runMove,
+      runAnim,
+      gravityTick,
+      gravity,
+      fallAnim,
+      jumpTick,
+      jumpInput,
+      jumpVelocity,
+      jumpMove,
+      jumpAnim,
+      collisionTick,
+      overlap,
+      stopVelocity,
+      idleCollision,
+      cameraTick,
+      camera,
+      budget,
+    ],
+    edges: [
+      makeEdge(start, "exec", spawn, "exec"),
+      makeEdge(spawn, "exec", idleStart, "exec"),
+      makeEdge(moveTick, "exec", right, "exec"),
+      makeEdge(right, "exec", runVelocity, "exec"),
+      makeEdge(runVelocity, "exec", runMove, "exec"),
+      makeEdge(runMove, "exec", runAnim, "exec"),
+      makeEdge(gravityTick, "exec", gravity, "exec"),
+      makeEdge(gravity, "exec", fallAnim, "exec"),
+      makeEdge(jumpTick, "exec", jumpInput, "exec"),
+      makeEdge(jumpInput, "exec", jumpVelocity, "exec"),
+      makeEdge(jumpVelocity, "exec", jumpMove, "exec"),
+      makeEdge(jumpMove, "exec", jumpAnim, "exec"),
+      makeEdge(collisionTick, "exec", overlap, "exec"),
+      makeEdge(overlap, "true", stopVelocity, "exec"),
+      makeEdge(stopVelocity, "exec", idleCollision, "exec"),
+      makeEdge(cameraTick, "exec", camera, "exec"),
+      makeEdge(camera, "exec", budget, "exec"),
+    ],
+  };
+}
+
+function buildPlayerControllerQuickActionGraph(
+  context: QuickActionContext,
+): NodeGraph {
   const start = makeNode("event_start", 140, 160);
   const move = makeNode("sprite_move", 380, 156);
   const anim = makeNode("sprite_anim", 620, 156);
@@ -1887,6 +1998,23 @@ function buildHudVblankTickQuickActionGraph(context: QuickActionContext): NodeGr
 }
 
 const QUICK_ACTION_TEMPLATES: QuickActionTemplate[] = [
+  {
+    id: "mini_platformer",
+    actionLabel: "Criar Mini Platformer No-Code",
+    title: "Mini Platformer No-Code",
+    summary:
+      "Cria um loop jogavel pequeno com input, movimento, gravidade, colisao simples e camera.",
+    comments: [
+      "On Start posiciona o player e entra em idle sem exigir codigo manual.",
+      "Input segurado move para a direita; input pressionado aplica salto e animacao jump.",
+      "Gravidade, overlap simples e camera follow ficam em lanes separadas para leitura e ajuste posterior.",
+    ],
+    hardwareNote:
+      "Usa apenas nos do subset atual de build SGDK/SNES e evita dependencias externas.",
+    limitation:
+      "A colisao inicial usa o proprio player como marcador simples; refine com entidades de chao quando o editor expor esse bootstrap por UI.",
+    buildGraph: buildMiniPlatformerQuickActionGraph,
+  },
   {
     id: "player_controller",
     actionLabel: "Criar Player Controller Basico",

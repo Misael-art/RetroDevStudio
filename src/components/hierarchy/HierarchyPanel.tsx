@@ -682,6 +682,7 @@ export default function HierarchyPanel() {
                       return (
                         <li
                           key={entity.entity_id}
+                          data-testid={`hierarchy-entity-${entity.entity_id}`}
                           onClick={() => setSelectedEntityId(entity.entity_id)}
                           onDoubleClick={() => openEntityAuthoringSurface(entity as Entity)}
                           className={[

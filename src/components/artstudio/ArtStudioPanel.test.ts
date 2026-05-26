@@ -564,6 +564,36 @@ describe("ArtStudioPanel import flow", () => {
     expect(mocks.artProcessPalette).toHaveBeenCalledWith("D:/Downloads/hero.webp");
   });
 
+  it("exposes an automation hook for file-picker-safe BYOR sprite ingestion", async () => {
+    const automationWindow = window as Window & {
+      __RDS_ARTSTUDIO_E2E__?: {
+        ingestSpriteSheet: (sourcePath: string) => Promise<boolean>;
+        getState: () => {
+          spriteSheetLoadStatus: string;
+          spriteSheetSourcePath: string;
+          suggestedFrames: Array<{ index: number }>;
+        };
+      };
+    };
+
+    expect(typeof automationWindow.__RDS_ARTSTUDIO_E2E__?.ingestSpriteSheet).toBe("function");
+
+    await act(async () => {
+      await automationWindow.__RDS_ARTSTUDIO_E2E__!.ingestSpriteSheet("D:/BYOR/player.ppm");
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.artProcessPalette).toHaveBeenCalledWith("D:/BYOR/player.ppm");
+    expect(automationWindow.__RDS_ARTSTUDIO_E2E__?.getState()).toEqual(
+      expect.objectContaining({
+        spriteSheetLoadStatus: "loaded",
+        spriteSheetSourcePath: "D:/BYOR/player.ppm",
+        suggestedFrames: expect.arrayContaining([expect.objectContaining({ index: 0 })]),
+      })
+    );
+  });
+
   it("renders the docked layout and keeps the inspector contextual until a sequence is selected", async () => {
     mocks.open.mockResolvedValue("D:/Downloads/hero.webp");
 
@@ -671,6 +701,7 @@ describe("ArtStudioPanel import flow", () => {
     const appliedEntity = useEditorStore
       .getState()
       .activeScene?.entities.find((entity) => entity.entity_id === "hero_sheet");
+    expect(useEditorStore.getState().selectedEntityId).toBe("hero_sheet");
     expect(appliedEntity?.components.sprite).toEqual({
       asset: "assets/sprites/hero_sheet.png",
       frame_width: 32,
