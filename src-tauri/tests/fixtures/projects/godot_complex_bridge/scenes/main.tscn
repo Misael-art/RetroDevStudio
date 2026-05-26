@@ -1,0 +1,17 @@
+[gd_scene load_steps=4 format=3 uid="uid://rds_godot_complex_main"]
+
+[ext_resource type="Texture2D" path="res://art/boss.ppm" id="1_boss"]
+[ext_resource type="Script" path="res://scripts/boss.gd" id="2_boss_script"]
+
+[node name="Main" type="Node2D"]
+
+[node name="Boss" type="CharacterBody2D" parent="."]
+position = Vector2(72, 64)
+script = ExtResource("2_boss_script")
+
+[node name="BossSprite" type="Sprite2D" parent="Boss"]
+texture = ExtResource("1_boss")
+
+[node name="Burst" type="GPUParticles2D" parent="Boss"]
+amount = 32
+

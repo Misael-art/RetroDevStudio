@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use super::serde_helpers::deserialize_f64_to_i32;
 
@@ -68,7 +68,7 @@ pub struct SpriteComponent {
     #[serde(default)]
     pub palette_slot: u8,
     #[serde(default)]
-    pub animations: HashMap<String, AnimationDef>,
+    pub animations: BTreeMap<String, AnimationDef>,
     #[serde(default = "default_priority")]
     pub priority: String,
     #[serde(default)]
@@ -102,7 +102,7 @@ pub struct SpriteCommandBinding {
 #[cfg(test)]
 mod sprite_command_tests {
     use super::{SpriteCommandBinding, SpriteCommandStep, SpriteComponent};
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     #[test]
     fn sprite_component_commands_round_trip_json() {
@@ -112,7 +112,7 @@ mod sprite_command_tests {
             frame_height: 32,
             pivot: None,
             palette_slot: 0,
-            animations: HashMap::new(),
+            animations: BTreeMap::new(),
             priority: "foreground".to_string(),
             meta_sprite: false,
             commands: vec![SpriteCommandBinding {
@@ -182,7 +182,7 @@ fn default_true() -> bool {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InputComponent {
     pub device: String,
-    pub mapping: HashMap<String, String>,
+    pub mapping: BTreeMap<String, String>,
 }
 
 // ── Physics ───────────────────────────────────────────────────────────────────

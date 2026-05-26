@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
@@ -423,22 +423,100 @@ type MugenSpritePathMatch = (MugenSpriteKey, PathBuf);
 
 #[derive(Debug, Clone)]
 struct GodotExtResource {
-    _resource_type: String,
+    resource_type: String,
     path: String,
+    source_line: usize,
+}
+
+#[derive(Debug, Clone)]
+struct GodotSubResource {
+    resource_type: String,
+    _id: String,
+    properties: HashMap<String, String>,
+    source_line: usize,
 }
 
 #[derive(Debug, Clone)]
 struct GodotNode {
     name: String,
     node_type: String,
-    _parent: String,
+    parent: String,
     properties: HashMap<String, String>,
+    source_line: usize,
 }
 
 #[derive(Debug, Clone)]
 struct GodotSceneParse {
     ext_resources: HashMap<String, GodotExtResource>,
+    sub_resources: HashMap<String, GodotSubResource>,
     nodes: Vec<GodotNode>,
+}
+
+#[derive(Debug, Clone)]
+struct GodotTresParse {
+    resource_type: String,
+    ext_resources: HashMap<String, GodotExtResource>,
+    properties: HashMap<String, String>,
+    source_line: usize,
+    content: String,
+}
+
+#[derive(Debug, Clone)]
+struct GodotVisualAsset {
+    source_path: PathBuf,
+    animations: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+struct GodotBridgeEntry {
+    source: String,
+    line: usize,
+    reason: String,
+    impact: String,
+    suggestion: String,
+    blocking: bool,
+}
+
+#[derive(Debug, Clone)]
+struct GodotScriptSource {
+    _path: PathBuf,
+    relative_path: String,
+    content: String,
+}
+
+#[derive(Debug, Clone)]
+struct GodotScriptAnalysis {
+    source_relative: String,
+    logic_hints: Vec<String>,
+    native_constructs: Vec<String>,
+    bridge_entries: Vec<GodotBridgeEntry>,
+    input: Option<InputComponent>,
+    physics: Option<PhysicsComponent>,
+    graph_json: Option<String>,
+    animation_names: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct GodotCollisionSpec {
+    owner_path: String,
+    width: u32,
+    height: u32,
+    offset_x: i32,
+    offset_y: i32,
+    solid: bool,
+    layer: Option<String>,
+    collides_with: Vec<String>,
+    _source: String,
+    _line: usize,
+}
+
+#[derive(Debug, Clone)]
+struct GodotPendingCamera {
+    entity_id: String,
+    display_name: String,
+    x: i32,
+    y: i32,
+    follow_path: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -552,7 +630,7 @@ struct OpenBorModelAsset {
     source_file: PathBuf,
     display_asset: Option<PathBuf>,
     audio_assets: Vec<PathBuf>,
-    animations: HashMap<String, AnimationDef>,
+    animations: BTreeMap<String, AnimationDef>,
     collision_box: Option<OpenBorBox>,
     attack_boxes: Vec<OpenBorAttackBox>,
     movement_speed: i32,
@@ -737,7 +815,7 @@ const EXTERNAL_IMPORT_PROFILES: &[ExternalImportProfileDefinition] = &[
         id: "godot",
         name: "Godot 2D",
         family: "2D scene-tree",
-        description: "Importa Sprite2D, Camera2D e AudioStreamPlayer de cenas .tscn; nos complexos permanecem sinalizados como experimentais.",
+        description: "Importa subset 2D Godot auditavel (.godot/.tscn/.tres, sprites, tilemap, colisao e GDScript simples); fora do subset vira bridge estruturada.",
         source_engine: "godot",
         support_status: "Experimental",
         supported_levels: &["L1", "L2", "L3"],
@@ -1183,7 +1261,7 @@ fn extract_sgdk_tilemap_cells(source_path: &Path) -> Option<ExtractedSgdkTilemap
 struct SgdkSpriteSheetDerived {
     frame_width: u32,
     frame_height: u32,
-    animations: HashMap<String, AnimationDef>,
+    animations: BTreeMap<String, AnimationDef>,
     notes: Vec<String>,
 }
 
@@ -2347,7 +2425,7 @@ fn derive_sgdk_sprite_sheet_from_rescomp_png(
         return SgdkSpriteSheetDerived {
             frame_width: legacy_tiles_w(),
             frame_height: legacy_tiles_h(),
-            animations: HashMap::new(),
+            animations: BTreeMap::new(),
             notes,
         };
     }
@@ -2361,7 +2439,7 @@ fn derive_sgdk_sprite_sheet_from_rescomp_png(
             return SgdkSpriteSheetDerived {
                 frame_width: legacy_tiles_w(),
                 frame_height: legacy_tiles_h(),
-                animations: HashMap::new(),
+                animations: BTreeMap::new(),
                 notes,
             };
         }
@@ -2376,7 +2454,7 @@ fn derive_sgdk_sprite_sheet_from_rescomp_png(
             return SgdkSpriteSheetDerived {
                 frame_width: legacy_tiles_w(),
                 frame_height: legacy_tiles_h(),
-                animations: HashMap::new(),
+                animations: BTreeMap::new(),
                 notes,
             };
         }
@@ -2391,7 +2469,7 @@ fn derive_sgdk_sprite_sheet_from_rescomp_png(
             return SgdkSpriteSheetDerived {
                 frame_width: legacy_tiles_w(),
                 frame_height: legacy_tiles_h(),
-                animations: HashMap::new(),
+                animations: BTreeMap::new(),
                 notes,
             };
         }
@@ -2408,7 +2486,7 @@ fn derive_sgdk_sprite_sheet_from_rescomp_png(
         return SgdkSpriteSheetDerived {
             frame_width: legacy_tiles_w(),
             frame_height: legacy_tiles_h(),
-            animations: HashMap::new(),
+            animations: BTreeMap::new(),
             notes,
         };
     }
@@ -2424,7 +2502,7 @@ fn derive_sgdk_sprite_sheet_from_rescomp_png(
         ));
         8
     };
-    let mut animations = HashMap::new();
+    let mut animations = BTreeMap::new();
     for row in 0..rows {
         let anim_name = if rows == 1 {
             "default".to_string()
@@ -3087,7 +3165,7 @@ fn apply_sgdk_phase_d_to_sprite_entity(
         if scan.joy_read_detected {
             entity.components.input = Some(InputComponent {
                 device: "joypad_1".into(),
-                mapping: HashMap::from([
+                mapping: BTreeMap::from([
                     ("move_left".into(), "DPAD_LEFT".into()),
                     ("move_right".into(), "DPAD_RIGHT".into()),
                     ("jump".into(), "BUTTON_C".into()),
@@ -5131,7 +5209,7 @@ fn platformer_player_prefab_with_dims(
                 frame_height,
                 pivot: None,
                 palette_slot: 0,
-                animations: HashMap::new(),
+                animations: BTreeMap::new(),
                 priority: "foreground".to_string(),
                 meta_sprite: false,
                 commands: Vec::new(),
@@ -5147,7 +5225,7 @@ fn platformer_player_prefab_with_dims(
             }),
             input: Some(InputComponent {
                 device: "joypad1".to_string(),
-                mapping: HashMap::from([
+                mapping: BTreeMap::from([
                     ("jump".to_string(), "BUTTON_A".to_string()),
                     ("move_left".to_string(), "DPAD_LEFT".to_string()),
                     ("move_right".to_string(), "DPAD_RIGHT".to_string()),
@@ -6246,7 +6324,7 @@ fn mugen_graph_ref(entity_id: &str) -> String {
 
 fn mugen_command_bindings(
     model: &MugenFightingModel,
-    animations: &HashMap<String, AnimationDef>,
+    animations: &BTreeMap<String, AnimationDef>,
 ) -> Vec<SpriteCommandBinding> {
     let command_state_targets = mugen_command_state_targets(model);
     model
@@ -7201,7 +7279,7 @@ fn static_mugen_sprite_entity(
                 frame_height: height,
                 pivot: None,
                 palette_slot: 0,
-                animations: HashMap::new(),
+                animations: BTreeMap::new(),
                 priority: "background".to_string(),
                 meta_sprite: width > 32 || height > 32,
                 commands: Vec::new(),
@@ -7246,8 +7324,8 @@ fn collect_mugen_action_refs(actions: &[MugenAirAction]) -> HashSet<(i32, i32)> 
 fn mugen_actions_to_animation_defs(
     actions: &[MugenAirAction],
     frame_indices: &HashMap<(i32, i32), u32>,
-) -> HashMap<String, AnimationDef> {
-    let mut animations = HashMap::new();
+) -> BTreeMap<String, AnimationDef> {
+    let mut animations = BTreeMap::new();
     for action in actions {
         let frames = action
             .frames
@@ -9364,8 +9442,8 @@ fn build_gamemaker_collision_map(
     }
 }
 
-fn gamemaker_player_animations(frame_count: u32) -> HashMap<String, AnimationDef> {
-    let mut animations = HashMap::new();
+fn gamemaker_player_animations(frame_count: u32) -> BTreeMap<String, AnimationDef> {
+    let mut animations = BTreeMap::new();
     animations.insert(
         "idle".to_string(),
         AnimationDef {
@@ -9469,7 +9547,7 @@ fn import_gamemaker_background_entity(
                 frame_height,
                 pivot: Some(Pivot { x: 0, y: 0 }),
                 palette_slot: 0,
-                animations: HashMap::new(),
+                animations: BTreeMap::new(),
                 priority: "background".to_string(),
                 meta_sprite: frame_width > 32 || frame_height > 32,
                 commands: Vec::new(),
@@ -9736,7 +9814,7 @@ fn gamemaker_input_component(logic_hints: &[String]) -> Option<InputComponent> {
     }
     Some(InputComponent {
         device: "joypad1".to_string(),
-        mapping: HashMap::from([
+        mapping: BTreeMap::from([
             ("move_left".to_string(), "DPAD_LEFT".to_string()),
             ("move_right".to_string(), "DPAD_RIGHT".to_string()),
             ("jump".to_string(), "BUTTON_A".to_string()),
@@ -9908,6 +9986,7 @@ pub fn import_godot_project(
     let scene_path = detect_godot_primary_scene_path(godot_path)?;
     let content = read_text_lossy(&scene_path)?;
     let parsed = parse_godot_scene(&content)?;
+    let scene_source = godot_relative_source(godot_path, &scene_path);
     let scene_display_name = scene_path
         .file_stem()
         .map(|value| value.to_string_lossy().trim().to_string())
@@ -9915,224 +9994,267 @@ pub fn import_godot_project(
         .unwrap_or_else(|| "Godot Scene".to_string());
     let GodotSceneParse {
         ext_resources,
+        sub_resources,
         nodes,
     } = parsed;
 
     let mut scene = canonical_scene(DEFAULT_SCENE_ID, Some(scene_display_name));
-
+    let nodes_by_path: HashMap<String, GodotNode> = nodes
+        .iter()
+        .map(|node| (godot_node_path(node), node.clone()))
+        .collect();
     let mut entity_ids = HashSet::new();
     let mut first_sprite_id: Option<String> = None;
-    let mut audio_sfx = HashMap::new();
-    let mut audio_bgm: Option<String> = None;
-    let mut pending_cameras = Vec::new();
+    let mut pending_cameras: Vec<GodotPendingCamera> = Vec::new();
     let mut asset_cache: HashMap<PathBuf, String> = HashMap::new();
-    let mut skipped = Vec::new();
-    let mut node_logic = HashMap::new();
+    let mut bridge_entries = Vec::new();
+    let mut script_analysis_by_owner: HashMap<String, GodotScriptAnalysis> = HashMap::new();
+    let mut entity_by_godot_path: HashMap<String, String> = HashMap::new();
 
     for node in &nodes {
         let Some(script_path) = godot_node_script_path(godot_path, node, &ext_resources) else {
             continue;
         };
-        let script = read_text_lossy(&script_path)?;
-        let (mut hints, input, physics) = analyze_godot_script(&script);
-        let script_label = script_path
-            .strip_prefix(godot_path)
-            .ok()
-            .map(normalize_relative_path)
-            .unwrap_or_else(|| script_path.display().to_string());
-        hints.insert(
-            0,
-            format!("Script Godot preservado como hint: {}.", script_label),
-        );
-        node_logic.insert(node.name.clone(), (hints, input, physics));
+        let script_source = GodotScriptSource {
+            relative_path: godot_relative_source(godot_path, &script_path),
+            content: read_text_lossy(&script_path)?,
+            _path: script_path,
+        };
+        let owner_path = godot_node_path(node);
+        let analysis = analyze_godot_script(&script_source, &owner_path);
+        bridge_entries.extend(analysis.bridge_entries.clone());
+        script_analysis_by_owner.insert(owner_path, analysis);
     }
 
-    for node in nodes {
-        let inherited_logic = node_logic.get(&node.name).cloned().or_else(|| {
-            node._parent
-                .split('/')
-                .next_back()
-                .filter(|candidate| !candidate.trim().is_empty() && *candidate != ".")
-                .and_then(|candidate| node_logic.get(candidate).cloned())
-        });
+    let collision_specs = collect_godot_collision_specs(
+        &scene_source,
+        &nodes,
+        &sub_resources,
+        &script_analysis_by_owner,
+    );
+
+    for node in &nodes {
+        let node_path = godot_node_path(node);
         match node.node_type.as_str() {
             "Sprite2D" | "AnimatedSprite2D" => {
-                let texture_source = if node.node_type == "Sprite2D" {
-                    if let Some(texture_ref) = node.properties.get("texture") {
-                        let Some(texture_id) = godot_ext_resource_id(texture_ref) else {
-                            skipped.push(format!(
-                                "{}: referencia de textura Godot nao suportada.",
-                                node.name
-                            ));
-                            continue;
-                        };
-                        let Some(texture_resource) = ext_resources.get(&texture_id) else {
-                            skipped.push(format!(
-                                "{}: ExtResource '{}' nao encontrada para Sprite2D.",
-                                node.name, texture_id
-                            ));
-                            continue;
-                        };
-                        resolve_godot_resource_path(godot_path, &texture_resource.path)
-                    } else if let Some(asset) =
-                        godot_node_visual_asset_path(godot_path, &node, &ext_resources)
-                    {
-                        asset
-                    } else {
-                        skipped.push(format!("{}: Sprite2D sem textura.", node.name));
-                        continue;
-                    }
-                } else if let Some(asset) =
-                    godot_node_visual_asset_path(godot_path, &node, &ext_resources)
-                {
-                    asset
-                } else {
-                    skipped.push(format!(
-                        "{}: AnimatedSprite2D sem atlas/frames importaveis nesta wave.",
-                        node.name
+                let Some(visual_asset) = godot_node_visual_asset(godot_path, node, &ext_resources)?
+                else {
+                    bridge_entries.push(godot_bridge_entry(
+                        &scene_source,
+                        node.source_line,
+                        "missing_visual_asset",
+                        format!(
+                            "{} '{}' nao possui textura/SpriteFrames importavel; a entidade visual nao foi gerada para evitar node falso sem fonte.",
+                            node.node_type, node.name
+                        ),
+                        "Associe Texture2D/SpriteFrames com arquivo visual BYOR-safe dentro de res://.",
+                        true,
                     ));
                     continue;
                 };
 
-                if !texture_source.is_file() {
-                    skipped.push(format!(
-                        "{}: textura '{}' nao encontrada no projeto Godot.",
-                        node.name,
-                        texture_source.display()
+                if !visual_asset.source_path.is_file() {
+                    bridge_entries.push(godot_bridge_entry(
+                        &scene_source,
+                        node.source_line,
+                        "missing_visual_file",
+                        format!(
+                            "{}: textura '{}' nao encontrada no projeto Godot; a entidade visual nao foi gerada para evitar node falso sem fonte.",
+                            node.name,
+                            visual_asset.source_path.display()
+                        ),
+                        "Mantenha o asset referenciado dentro do projeto Godot importado.",
+                        true,
                     ));
+                    continue;
+                }
+
+                let entity_owner_path = godot_entity_root_path(
+                    node,
+                    &nodes_by_path,
+                    &script_analysis_by_owner,
+                    &collision_specs,
+                );
+                if let Some(existing_entity_id) =
+                    entity_by_godot_path.get(&entity_owner_path).cloned()
+                {
+                    entity_by_godot_path.insert(node_path.clone(), existing_entity_id);
                     continue;
                 }
 
                 let asset = materialize_external_file(
                     project_dir,
                     godot_path,
-                    &texture_source,
+                    &visual_asset.source_path,
                     "sprites",
                     "godot",
                     &mut asset_cache,
                 )?;
-                let entity_id = unique_entity_id(&mut entity_ids, &node.name, "sprite");
+                let entity_id = unique_entity_id(
+                    &mut entity_ids,
+                    godot_path_name(&entity_owner_path),
+                    "sprite",
+                );
                 if first_sprite_id.is_none() {
                     first_sprite_id = Some(entity_id.clone());
                 }
-                let (x, y) = parse_godot_position(node.properties.get("position"));
-                let (mut logic_hints, input, physics) =
-                    inherited_logic.unwrap_or_else(|| (Vec::new(), None, None));
-                if node.node_type == "AnimatedSprite2D" {
-                    logic_hints.push(
-                        "AnimatedSprite2D importado como sprite estatico; frames e playback permanecem como hints."
-                            .to_string(),
-                    );
-                }
+
+                let (x, y) = godot_global_position(&node_path, &nodes_by_path);
+                let inherited_logic =
+                    godot_nearest_script_analysis(&entity_owner_path, &script_analysis_by_owner);
+                let logic = if let Some(analysis) = inherited_logic {
+                    godot_logic_component(
+                        project_dir,
+                        &entity_id,
+                        analysis,
+                        &script_analysis_by_owner,
+                    )?
+                } else {
+                    None
+                };
+                let input = inherited_logic.and_then(|analysis| analysis.input.clone());
+                let physics = inherited_logic.and_then(|analysis| analysis.physics.clone());
+                let animations = godot_animation_defs(
+                    visual_asset
+                        .animations
+                        .iter()
+                        .chain(
+                            inherited_logic
+                                .into_iter()
+                                .flat_map(|analysis| analysis.animation_names.iter()),
+                        )
+                        .map(String::as_str),
+                );
+
                 scene
                     .entities
-                    .push(imported_sprite_entity(ImportedSpriteEntitySpec {
-                        entity_id,
-                        display_name: node.name.clone(),
+                    .push(godot_sprite_entity(GodotSpriteEntitySpec {
+                        entity_id: entity_id.clone(),
+                        display_name: godot_display_name(&entity_owner_path, &nodes_by_path)
+                            .unwrap_or_else(|| node.name.clone()),
                         asset,
-                        source_path: texture_source,
+                        source_path: visual_asset.source_path,
                         x,
                         y,
+                        animations,
                         input,
                         physics,
-                        logic_hints,
+                        logic,
                     }));
-            }
-            "Camera2D" => {
-                let entity_id = unique_entity_id(&mut entity_ids, &node.name, "camera");
-                let (x, y) = parse_godot_position(node.properties.get("position"));
-                pending_cameras.push((entity_id, node.name, x, y));
+                entity_by_godot_path.insert(entity_owner_path, entity_id.clone());
+                entity_by_godot_path.insert(node_path, entity_id);
             }
             "TileMap" | "TileMapLayer" => {
                 let Some(tileset_source) =
-                    godot_node_visual_asset_path(godot_path, &node, &ext_resources)
+                    godot_node_visual_asset(godot_path, node, &ext_resources)?
                 else {
-                    skipped.push(format!(
-                        "{}: {} sem tileset visual importavel nesta wave.",
-                        node.name, node.node_type
+                    bridge_entries.push(godot_bridge_entry(
+                        &scene_source,
+                        node.source_line,
+                        "missing_tileset_asset",
+                        format!(
+                            "{} '{}' sem TileSet visual importavel; TileMap nao foi gerado para evitar tiles falsos sem source mapping.",
+                            node.node_type, node.name
+                        ),
+                        "Use TileSet .tres com Texture2D local em res://.",
+                        true,
                     ));
                     continue;
                 };
+                if !tileset_source.source_path.is_file() {
+                    bridge_entries.push(godot_bridge_entry(
+                        &scene_source,
+                        node.source_line,
+                        "missing_tileset_file",
+                        format!(
+                            "{}: tileset '{}' nao encontrado no projeto Godot; TileMap nao foi gerado para evitar tiles falsos sem source mapping.",
+                            node.name,
+                            tileset_source.source_path.display()
+                        ),
+                        "Mantenha a textura do TileSet dentro do projeto Godot importado.",
+                        true,
+                    ));
+                    continue;
+                }
                 let asset = materialize_external_file(
                     project_dir,
                     godot_path,
-                    &tileset_source,
+                    &tileset_source.source_path,
                     "tilesets",
                     "godot",
                     &mut asset_cache,
                 )?;
                 let entity_id = unique_entity_id(&mut entity_ids, &node.name, "tilemap");
-                let (x, y) = parse_godot_position(node.properties.get("position"));
+                let (x, y) = godot_global_position(&node_path, &nodes_by_path);
                 scene.entities.push(imported_tilemap_entity(
-                    entity_id,
+                    entity_id.clone(),
                     node.name.clone(),
                     asset,
-                    &tileset_source,
+                    &tileset_source.source_path,
                     x,
                     y,
                 ));
+                entity_by_godot_path.insert(node_path, entity_id);
+            }
+            "Camera2D" => {
+                let entity_id = unique_entity_id(&mut entity_ids, &node.name, "camera");
+                let (x, y) = godot_global_position(&node_path, &nodes_by_path);
+                pending_cameras.push(GodotPendingCamera {
+                    entity_id,
+                    display_name: node.name.clone(),
+                    x,
+                    y,
+                    follow_path: godot_parent_path(node).filter(|parent| parent != "."),
+                });
             }
             "AudioStreamPlayer" | "AudioStreamPlayer2D" => {
-                let Some(stream_ref) = node.properties.get("stream") else {
-                    skipped.push(format!("{}: player de audio sem stream.", node.name));
-                    continue;
-                };
-                let Some(stream_id) = godot_ext_resource_id(stream_ref) else {
-                    skipped.push(format!(
-                        "{}: referencia de audio Godot nao suportada.",
-                        node.name
-                    ));
-                    continue;
-                };
-                let Some(stream_resource) = ext_resources.get(&stream_id) else {
-                    skipped.push(format!(
-                        "{}: ExtResource '{}' nao encontrada para audio.",
-                        node.name, stream_id
-                    ));
-                    continue;
-                };
-                let audio_source = resolve_godot_resource_path(godot_path, &stream_resource.path);
-                if !audio_source.is_file() {
-                    skipped.push(format!(
-                        "{}: audio '{}' nao encontrado no projeto Godot.",
-                        node.name,
-                        audio_source.display()
-                    ));
-                    continue;
-                }
-
-                let asset = materialize_external_file(
-                    project_dir,
-                    godot_path,
-                    &audio_source,
-                    "audio",
-                    "godot",
-                    &mut asset_cache,
-                )?;
-                if node.node_type == "AudioStreamPlayer" && audio_bgm.is_none() {
-                    audio_bgm = Some(asset);
-                } else {
-                    audio_sfx.insert(slugify_scene_id(&node.name), asset);
-                }
+                bridge_entries.push(godot_bridge_entry(
+                    &scene_source,
+                    node.source_line,
+                    "outside_godot_2d_subset",
+                    format!("{} '{}' esta fora do subset Godot 2D desta wave; audio foi preservado como bridge e nao materializado como suporte estavel.", node.node_type, node.name),
+                    "Reimporte como asset/audio RDS ou aguarde uma wave que inclua AudioStreamPlayer no subset.",
+                    false,
+                ));
             }
-            _ => {}
+            "Node2D" | "CharacterBody2D" | "Area2D" | "CollisionShape2D" => {}
+            unsupported => {
+                bridge_entries.push(godot_bridge_entry(
+                    &scene_source,
+                    node.source_line,
+                    "unsupported_godot_node",
+                    format!(
+                        "Node Godot tipo '{}' ('{}') nao e geravel no subset 2D atual.",
+                        unsupported, node.name
+                    ),
+                    "Substitua por Node2D/Sprite2D/AnimatedSprite2D/CharacterBody2D/Area2D/CollisionShape2D/Camera2D/TileMap simples ou preserve como bridge.",
+                    true,
+                ));
+            }
         }
     }
 
-    for (entity_id, display_name, x, y) in pending_cameras {
-        let mut entity = imported_camera_entity(entity_id, display_name, first_sprite_id.clone());
-        entity.transform = crate::ugdm::entities::Transform { x, y };
-        scene.entities.push(entity);
-    }
+    attach_godot_collisions(
+        &mut scene,
+        &mut entity_ids,
+        &mut entity_by_godot_path,
+        &nodes_by_path,
+        &collision_specs,
+    );
 
-    if !audio_sfx.is_empty() || audio_bgm.is_some() {
-        let entity_id = unique_entity_id(&mut entity_ids, "audio_bank", "audio");
-        scene.entities.push(external_audio_bank_entity(
-            &entity_id,
-            "Godot Audio Bank",
-            audio_sfx,
-            audio_bgm,
-        ));
+    for camera in pending_cameras {
+        let follow_entity = camera
+            .follow_path
+            .as_deref()
+            .and_then(|path| godot_nearest_entity_id(path, &entity_by_godot_path))
+            .or_else(|| first_sprite_id.clone());
+        let mut entity =
+            imported_camera_entity(camera.entity_id, camera.display_name, follow_entity);
+        entity.transform = crate::ugdm::entities::Transform {
+            x: camera.x,
+            y: camera.y,
+        };
+        scene.entities.push(entity);
     }
 
     if first_sprite_id.is_some()
@@ -10148,6 +10270,8 @@ pub fn import_godot_project(
         ));
     }
 
+    write_godot_bridge_report(project_dir, &bridge_entries)?;
+    let skipped = godot_bridge_summary(&bridge_entries);
     save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
     Ok(ExternalImportReport {
         primary_scene: scene,
@@ -10233,15 +10357,19 @@ fn find_godot_project_main_scene(content: &str) -> Option<String> {
 
 fn parse_godot_scene(content: &str) -> Result<GodotSceneParse, LoadError> {
     let mut ext_resources = HashMap::new();
+    let mut sub_resources = HashMap::new();
     let mut nodes = Vec::new();
     let mut current_kind: Option<String> = None;
     let mut current_attrs = HashMap::new();
     let mut current_props = HashMap::new();
+    let mut current_source_line = 0usize;
 
     let flush_section = |kind: &Option<String>,
                          attrs: &HashMap<String, String>,
                          props: &HashMap<String, String>,
+                         source_line: usize,
                          ext_resources: &mut HashMap<String, GodotExtResource>,
+                         sub_resources: &mut HashMap<String, GodotSubResource>,
                          nodes: &mut Vec<GodotNode>| {
         let Some(kind) = kind.as_deref() else {
             return;
@@ -10257,8 +10385,23 @@ fn parse_godot_scene(content: &str) -> Result<GodotSceneParse, LoadError> {
                 ext_resources.insert(
                     id,
                     GodotExtResource {
-                        _resource_type: attrs.get("type").cloned().unwrap_or_default(),
+                        resource_type: attrs.get("type").cloned().unwrap_or_default(),
                         path,
+                        source_line,
+                    },
+                );
+            }
+            "sub_resource" => {
+                let Some(id) = attrs.get("id").cloned() else {
+                    return;
+                };
+                sub_resources.insert(
+                    id.clone(),
+                    GodotSubResource {
+                        resource_type: attrs.get("type").cloned().unwrap_or_default(),
+                        _id: id,
+                        properties: props.clone(),
+                        source_line,
                     },
                 );
             }
@@ -10272,18 +10415,19 @@ fn parse_godot_scene(content: &str) -> Result<GodotSceneParse, LoadError> {
                 nodes.push(GodotNode {
                     name,
                     node_type,
-                    _parent: attrs
+                    parent: attrs
                         .get("parent")
                         .cloned()
                         .unwrap_or_else(|| ".".to_string()),
                     properties: props.clone(),
+                    source_line,
                 });
             }
             _ => {}
         }
     };
 
-    for raw_line in content.lines() {
+    for (line_index, raw_line) in content.lines().enumerate() {
         let trimmed = raw_line.trim();
         if trimmed.is_empty() || trimmed.starts_with(';') || trimmed.starts_with('#') {
             continue;
@@ -10294,13 +10438,16 @@ fn parse_godot_scene(content: &str) -> Result<GodotSceneParse, LoadError> {
                 &current_kind,
                 &current_attrs,
                 &current_props,
+                current_source_line,
                 &mut ext_resources,
+                &mut sub_resources,
                 &mut nodes,
             );
             let (kind, attrs) = parse_godot_section_header(trimmed)?;
             current_kind = Some(kind);
             current_attrs = attrs;
             current_props = HashMap::new();
+            current_source_line = line_index + 1;
             continue;
         }
 
@@ -10313,13 +10460,64 @@ fn parse_godot_scene(content: &str) -> Result<GodotSceneParse, LoadError> {
         &current_kind,
         &current_attrs,
         &current_props,
+        current_source_line,
         &mut ext_resources,
+        &mut sub_resources,
         &mut nodes,
     );
 
     Ok(GodotSceneParse {
         ext_resources,
+        sub_resources,
         nodes,
+    })
+}
+
+fn parse_godot_tres(content: &str) -> Result<GodotTresParse, LoadError> {
+    let mut ext_resources = HashMap::new();
+    let mut properties = HashMap::new();
+    let mut resource_type = String::new();
+    let mut resource_line = 0usize;
+    let mut current_kind = String::new();
+
+    for (line_index, raw_line) in content.lines().enumerate() {
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() || trimmed.starts_with(';') || trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            let (kind, attrs) = parse_godot_section_header(trimmed)?;
+            current_kind = kind;
+            if current_kind == "gd_resource" {
+                resource_type = attrs.get("type").cloned().unwrap_or_default();
+                resource_line = line_index + 1;
+            } else if current_kind == "ext_resource" {
+                if let (Some(id), Some(path)) = (attrs.get("id"), attrs.get("path")) {
+                    ext_resources.insert(
+                        id.clone(),
+                        GodotExtResource {
+                            resource_type: attrs.get("type").cloned().unwrap_or_default(),
+                            path: path.clone(),
+                            source_line: line_index + 1,
+                        },
+                    );
+                }
+            }
+            continue;
+        }
+        if current_kind == "resource" {
+            if let Some((key, value)) = trimmed.split_once('=') {
+                properties.insert(key.trim().to_string(), value.trim().to_string());
+            }
+        }
+    }
+
+    Ok(GodotTresParse {
+        resource_type,
+        ext_resources,
+        properties,
+        source_line: resource_line,
+        content: content.to_string(),
     })
 }
 
@@ -10407,7 +10605,14 @@ fn parse_godot_section_header(line: &str) -> Result<(String, HashMap<String, Str
 fn resolve_godot_resource_path(root: &Path, value: &str) -> PathBuf {
     let trimmed = value.trim().trim_matches('"');
     let relative = trimmed.trim_start_matches("res://");
-    root.join(PathBuf::from(relative.replace('/', "\\")))
+    relative
+        .replace('\\', "/")
+        .split('/')
+        .filter(|segment| !segment.trim().is_empty())
+        .fold(root.to_path_buf(), |mut path, segment| {
+            path.push(segment);
+            path
+        })
 }
 
 fn godot_ext_resource_id(value: &str) -> Option<String> {
@@ -10432,6 +10637,12 @@ fn godot_string_value(value: &str) -> Option<String> {
     if let Some(content) = trimmed
         .strip_prefix('"')
         .and_then(|value| value.strip_suffix('"'))
+    {
+        return Some(content.to_string());
+    }
+    if let Some(content) = trimmed
+        .strip_prefix('\'')
+        .and_then(|value| value.strip_suffix('\''))
     {
         return Some(content.to_string());
     }
@@ -10477,106 +10688,985 @@ fn godot_node_script_path(
     script_path.is_file().then_some(script_path)
 }
 
-fn godot_node_visual_asset_path(
-    root: &Path,
-    node: &GodotNode,
-    ext_resources: &HashMap<String, GodotExtResource>,
-) -> Option<PathBuf> {
-    node.properties.values().find_map(|value| {
-        let resource_id = godot_ext_resource_id(value)?;
-        let resource = ext_resources.get(&resource_id)?;
-        let asset_path = resolve_godot_resource_path(root, &resource.path);
-        (asset_path.is_file()
-            && asset_path
-                .to_str()
-                .is_some_and(string_looks_like_visual_asset))
-        .then_some(asset_path)
+fn godot_relative_source(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .ok()
+        .map(normalize_relative_path)
+        .unwrap_or_else(|| path.display().to_string())
+}
+
+fn godot_bridge_entry(
+    source: &str,
+    line: usize,
+    reason: &str,
+    impact: impl Into<String>,
+    suggestion: impl Into<String>,
+    blocking: bool,
+) -> GodotBridgeEntry {
+    GodotBridgeEntry {
+        source: source.to_string(),
+        line,
+        reason: reason.to_string(),
+        impact: impact.into(),
+        suggestion: suggestion.into(),
+        blocking,
+    }
+}
+
+fn godot_bridge_summary(entries: &[GodotBridgeEntry]) -> Vec<String> {
+    entries
+        .iter()
+        .map(|entry| {
+            format!(
+                "Godot bridge [{}:{}] {}: {}",
+                entry.source, entry.line, entry.reason, entry.impact
+            )
+        })
+        .collect()
+}
+
+fn write_godot_bridge_report(
+    project_dir: &Path,
+    entries: &[GodotBridgeEntry],
+) -> Result<(), LoadError> {
+    let report_dir = project_dir.join(".rds").join("imports").join("godot");
+    fs::create_dir_all(&report_dir).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel criar diretorio de bridge Godot '{}': {}",
+            report_dir.display(),
+            error
+        ))
+    })?;
+    let report = serde_json::json!({
+        "schema_version": "godot-bridge/v1",
+        "source_engine": "godot",
+        "subset": "godot_2d_subset_y",
+        "blocking": entries.iter().filter(|entry| entry.blocking).count(),
+        "entries": entries,
+    });
+    let report_path = report_dir.join("bridge.json");
+    let content = serde_json::to_string_pretty(&report).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel serializar bridge Godot: {}",
+            error
+        ))
+    })?;
+    fs::write(&report_path, content).map_err(|error| {
+        LoadError(format!(
+            "Nao foi possivel gravar bridge Godot '{}': {}",
+            report_path.display(),
+            error
+        ))
     })
 }
 
-fn analyze_godot_script(
-    script: &str,
-) -> (
-    Vec<String>,
-    Option<InputComponent>,
-    Option<PhysicsComponent>,
-) {
-    let lowered = script.to_ascii_lowercase();
-    let mut hints = Vec::new();
-    let mut mapping = HashMap::new();
+fn godot_import_graph_ref(entity_id: &str) -> String {
+    format!("graphs/godot_{}.json", sgdk_entity_id(entity_id))
+}
 
-    if lowered.contains("_physics_process") {
-        hints.push("Godot script define _physics_process(delta).".to_string());
-    } else if lowered.contains("_process") {
-        hints.push("Godot script define _process(delta).".to_string());
+fn godot_node_path(node: &GodotNode) -> String {
+    let parent = node.parent.trim();
+    if parent.is_empty() || parent == "." {
+        node.name.clone()
+    } else {
+        format!("{}/{}", parent.trim_matches('/'), node.name)
+    }
+}
+
+fn godot_parent_path(node: &GodotNode) -> Option<String> {
+    let parent = node.parent.trim();
+    (!parent.is_empty() && parent != ".").then(|| parent.trim_matches('/').to_string())
+}
+
+fn godot_path_name(path: &str) -> &str {
+    path.rsplit('/').next().unwrap_or(path)
+}
+
+fn godot_display_name(path: &str, nodes_by_path: &HashMap<String, GodotNode>) -> Option<String> {
+    nodes_by_path.get(path).map(|node| node.name.clone())
+}
+
+fn godot_global_position(path: &str, nodes_by_path: &HashMap<String, GodotNode>) -> (i32, i32) {
+    let mut x = 0;
+    let mut y = 0;
+    let mut current = Some(path.to_string());
+    while let Some(candidate) = current {
+        if let Some(node) = nodes_by_path.get(&candidate) {
+            let (nx, ny) = parse_godot_position(node.properties.get("position"));
+            x += nx;
+            y += ny;
+            current = godot_parent_path(node);
+        } else {
+            current = candidate
+                .rsplit_once('/')
+                .map(|(parent, _)| parent.to_string());
+        }
+    }
+    (x, y)
+}
+
+fn godot_nearest_script_analysis<'a>(
+    path: &str,
+    scripts: &'a HashMap<String, GodotScriptAnalysis>,
+) -> Option<&'a GodotScriptAnalysis> {
+    let mut current = Some(path.to_string());
+    while let Some(candidate) = current {
+        if let Some(analysis) = scripts.get(&candidate) {
+            return Some(analysis);
+        }
+        current = candidate
+            .rsplit_once('/')
+            .map(|(parent, _)| parent.to_string());
+    }
+    None
+}
+
+fn godot_nearest_entity_id(path: &str, entities: &HashMap<String, String>) -> Option<String> {
+    let mut current = Some(path.to_string());
+    while let Some(candidate) = current {
+        if let Some(entity_id) = entities.get(&candidate) {
+            return Some(entity_id.clone());
+        }
+        current = candidate
+            .rsplit_once('/')
+            .map(|(parent, _)| parent.to_string());
+    }
+    None
+}
+
+fn godot_entity_root_path(
+    node: &GodotNode,
+    nodes_by_path: &HashMap<String, GodotNode>,
+    scripts: &HashMap<String, GodotScriptAnalysis>,
+    collisions: &[GodotCollisionSpec],
+) -> String {
+    let node_path = godot_node_path(node);
+    if scripts.contains_key(&node_path)
+        || collisions.iter().any(|spec| spec.owner_path == node_path)
+    {
+        return node_path;
     }
 
-    if lowered.contains("input.is_action_pressed(\"ui_left\")")
-        || lowered.contains("input.is_action_pressed('ui_left')")
-    {
-        mapping.insert("move_left".to_string(), "DPAD_LEFT".to_string());
-        hints.push("Mapeado input Godot ui_left -> move_left.".to_string());
+    let mut current = godot_parent_path(node);
+    while let Some(candidate) = current.clone() {
+        if scripts.contains_key(&candidate)
+            || collisions.iter().any(|spec| spec.owner_path == candidate)
+            || nodes_by_path.get(&candidate).is_some_and(|parent| {
+                matches!(parent.node_type.as_str(), "CharacterBody2D" | "Area2D")
+            })
+        {
+            return candidate;
+        }
+        current = candidate
+            .rsplit_once('/')
+            .map(|(parent, _)| parent.to_string());
     }
-    if lowered.contains("input.is_action_pressed(\"ui_right\")")
-        || lowered.contains("input.is_action_pressed('ui_right')")
-    {
-        mapping.insert("move_right".to_string(), "DPAD_RIGHT".to_string());
-        hints.push("Mapeado input Godot ui_right -> move_right.".to_string());
-    }
-    if lowered.contains("input.is_action_pressed(\"ui_up\")")
-        || lowered.contains("input.is_action_pressed('ui_up')")
-    {
-        mapping.insert("move_up".to_string(), "DPAD_UP".to_string());
-        hints.push("Mapeado input Godot ui_up -> move_up.".to_string());
-    }
-    if lowered.contains("input.is_action_pressed(\"ui_down\")")
-        || lowered.contains("input.is_action_pressed('ui_down')")
-    {
-        mapping.insert("move_down".to_string(), "DPAD_DOWN".to_string());
-        hints.push("Mapeado input Godot ui_down -> move_down.".to_string());
-    }
-    if lowered.contains("input.is_action_just_pressed(\"ui_accept\")")
-        || lowered.contains("input.is_action_just_pressed('ui_accept')")
-        || lowered.contains("input.is_action_just_pressed(\"jump\")")
-        || lowered.contains("input.is_action_just_pressed('jump')")
-        || lowered.contains("jump_velocity")
-    {
-        mapping.insert("jump".to_string(), "BUTTON_A".to_string());
-        hints.push("Mapeado input Godot de salto/accept -> jump.".to_string());
+    node_path
+}
+
+fn godot_node_visual_asset(
+    root: &Path,
+    node: &GodotNode,
+    ext_resources: &HashMap<String, GodotExtResource>,
+) -> Result<Option<GodotVisualAsset>, LoadError> {
+    for key in ["texture", "sprite_frames", "tile_set"] {
+        if let Some(value) = node.properties.get(key) {
+            if let Some(asset) = godot_visual_asset_from_property(root, value, ext_resources)? {
+                return Ok(Some(asset));
+            }
+        }
     }
 
-    if lowered.contains("move_and_slide") {
-        hints.push("Script Godot usa move_and_slide; mantido como hint explicito.".to_string());
+    for value in node.properties.values() {
+        if let Some(asset) = godot_visual_asset_from_property(root, value, ext_resources)? {
+            return Ok(Some(asset));
+        }
     }
-    if lowered.contains(".play(") || lowered.contains("animatedsprite2d") {
-        hints.push("Script Godot aciona animacoes via play().".to_string());
-    }
-    if lowered.contains("velocity.y +=") || lowered.contains("gravity") {
-        hints.push("Script Godot aplica gravidade/velocidade vertical.".to_string());
-    }
-    if lowered.contains("position.x +=")
-        || lowered.contains("position.x -=")
-        || lowered.contains("velocity.x")
+    Ok(None)
+}
+
+fn godot_visual_asset_from_property(
+    root: &Path,
+    value: &str,
+    ext_resources: &HashMap<String, GodotExtResource>,
+) -> Result<Option<GodotVisualAsset>, LoadError> {
+    let Some(resource_id) = godot_ext_resource_id(value) else {
+        return Ok(None);
+    };
+    let Some(resource) = ext_resources.get(&resource_id) else {
+        return Ok(None);
+    };
+    godot_visual_asset_from_ext_resource(root, resource)
+}
+
+fn godot_visual_asset_from_ext_resource(
+    root: &Path,
+    resource: &GodotExtResource,
+) -> Result<Option<GodotVisualAsset>, LoadError> {
+    let _resource_source_line = resource.source_line;
+    let asset_path = resolve_godot_resource_path(root, &resource.path);
+    if asset_path
+        .to_str()
+        .is_some_and(string_looks_like_visual_asset)
     {
-        hints.push("Script Godot atualiza deslocamento horizontal.".to_string());
+        return Ok(Some(GodotVisualAsset {
+            source_path: asset_path,
+            animations: Vec::new(),
+        }));
+    }
+
+    if asset_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("tres"))
+        && asset_path.is_file()
+    {
+        let parsed = parse_godot_tres(&read_text_lossy(&asset_path)?)?;
+        let _resource_metadata = (
+            parsed.resource_type.as_str(),
+            parsed.source_line,
+            parsed.properties.len(),
+        );
+        let mut visual_paths = parsed
+            .ext_resources
+            .values()
+            .filter(|entry| {
+                entry.resource_type.contains("Texture")
+                    || resolve_godot_resource_path(root, &entry.path)
+                        .to_str()
+                        .is_some_and(string_looks_like_visual_asset)
+            })
+            .map(|entry| resolve_godot_resource_path(root, &entry.path))
+            .collect::<Vec<_>>();
+        visual_paths.sort();
+        visual_paths.dedup();
+        if let Some(source_path) = visual_paths.into_iter().next() {
+            return Ok(Some(GodotVisualAsset {
+                source_path,
+                animations: godot_animations_from_tres(&parsed),
+            }));
+        }
+    }
+
+    Ok(None)
+}
+
+fn godot_animations_from_tres(parsed: &GodotTresParse) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut rest = parsed.content.as_str();
+    while let Some(index) = rest.find("\"name\"") {
+        rest = &rest[index + "\"name\"".len()..];
+        let Some(colon) = rest.find(':') else {
+            break;
+        };
+        let after_colon = rest[colon + 1..].trim_start();
+        let after_colon = after_colon.strip_prefix('&').unwrap_or(after_colon);
+        if let Some(after_quote) = after_colon.strip_prefix('"') {
+            if let Some(value) = after_quote.split('"').next() {
+                if !value.trim().is_empty() && !names.iter().any(|name| name == value) {
+                    names.push(value.to_string());
+                }
+            }
+        }
+        rest = &rest[colon + 1..];
+    }
+    names
+}
+
+fn godot_animation_defs<'a>(
+    names: impl IntoIterator<Item = &'a str>,
+) -> BTreeMap<String, AnimationDef> {
+    let mut animations = BTreeMap::new();
+    for name in names {
+        let trimmed = name.trim();
+        if trimmed.is_empty() || animations.contains_key(trimmed) {
+            continue;
+        }
+        animations.insert(
+            trimmed.to_string(),
+            AnimationDef {
+                frames: vec![0],
+                fps: 8,
+                looping: true,
+                frame_durations: None,
+                loop_start: None,
+                mugen_frames: None,
+            },
+        );
+    }
+    animations
+}
+
+fn analyze_godot_script(source: &GodotScriptSource, owner_path: &str) -> GodotScriptAnalysis {
+    let mut native_constructs = Vec::new();
+    let mut bridge_entries = Vec::new();
+    let mut mapping = BTreeMap::new();
+    let mut input_buttons: HashMap<String, (String, usize)> = HashMap::new();
+    let mut animation_names = Vec::new();
+    let mut ready_line = None;
+    let mut process_line = None;
+    let mut physics_line = None;
+    let mut move_line = None;
+    let mut velocity_line = None;
+    let mut gravity = false;
+
+    for (index, raw_line) in source.content.lines().enumerate() {
+        let line_number = index + 1;
+        let trimmed = raw_line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let lowered = trimmed.to_ascii_lowercase();
+
+        if lowered.starts_with("func _ready") {
+            ready_line = Some(line_number);
+            push_unique_string(&mut native_constructs, "_ready");
+            continue;
+        }
+        if lowered.starts_with("func _process") {
+            process_line = Some(line_number);
+            push_unique_string(&mut native_constructs, "_process");
+            continue;
+        }
+        if lowered.starts_with("func _physics_process") {
+            physics_line = Some(line_number);
+            push_unique_string(&mut native_constructs, "_physics_process");
+            continue;
+        }
+
+        if lowered.contains("await ")
+            || lowered.starts_with("for ")
+            || lowered.contains("queue_free")
+            || lowered.contains("get_children")
+            || lowered.contains("sin(")
+            || lowered.contains("time.")
+        {
+            bridge_entries.push(godot_bridge_entry(
+                &source.relative_path,
+                line_number,
+                "unsupported_gdscript",
+                format!("Linha GDScript fora do subset 2D: '{}'.", trimmed),
+                "Simplifique para input/velocity/move_and_slide/animation.play ou mantenha o trecho como bridge auditavel.",
+                true,
+            ));
+            continue;
+        }
+
+        if let Some(action) = godot_input_action(trimmed) {
+            if let Some((semantic, component_button, graph_button)) = godot_input_mapping(&action) {
+                mapping.insert(semantic.to_string(), component_button.to_string());
+                input_buttons
+                    .entry(semantic.to_string())
+                    .or_insert((graph_button.to_string(), line_number));
+                push_unique_string(&mut native_constructs, "input");
+                continue;
+            }
+        }
+
+        if let Some(animation_name) = godot_animation_play_name(trimmed) {
+            if !animation_names.contains(&animation_name) {
+                animation_names.push(animation_name);
+            }
+            push_unique_string(&mut native_constructs, "animation.play");
+            continue;
+        }
+
+        if lowered.contains("move_and_slide") {
+            move_line = Some(line_number);
+            push_unique_string(&mut native_constructs, "move_and_slide");
+            continue;
+        }
+        if lowered.starts_with("velocity.") || lowered.contains(" velocity.") {
+            velocity_line = Some(line_number);
+            if lowered.contains("velocity.y")
+                || lowered.contains("gravity")
+                || lowered.contains("jump_velocity")
+            {
+                gravity = true;
+            }
+            push_unique_string(&mut native_constructs, "velocity");
+            continue;
+        }
+        if lowered.contains("change_scene_to_file") || lowered.contains("change_scene(") {
+            bridge_entries.push(godot_bridge_entry(
+                &source.relative_path,
+                line_number,
+                "godot_scene_change",
+                "Mudanca de cena Godot reconhecida, mas runtime SGDK ainda nao gera troca de cena segura; build completo desta logica fica bloqueado.",
+                "Modele a troca como fluxo RDS explicito ou mantenha o trecho como bridge ate a wave de runtime multi-scene.",
+                true,
+            ));
+            continue;
+        }
+        if godot_script_line_is_supported(trimmed) {
+            continue;
+        }
+
+        bridge_entries.push(godot_bridge_entry(
+            &source.relative_path,
+            line_number,
+            "unsupported_gdscript",
+            format!("Linha GDScript fora do subset 2D: '{}'.", trimmed),
+            "Simplifique para input/velocity/move_and_slide/animation.play ou mantenha o trecho como bridge auditavel.",
+            true,
+        ));
     }
 
     let input = (!mapping.is_empty()).then_some(InputComponent {
         device: "joypad1".to_string(),
         mapping,
     });
-    let physics = (lowered.contains("velocity.y +=")
-        || lowered.contains("gravity")
-        || lowered.contains("jump_velocity"))
-    .then_some(PhysicsComponent {
-        gravity: true,
-        gravity_strength: 6,
-        max_velocity: Some(Velocity { x: 32, y: 96 }),
-        friction: 1,
-        bounce: 0,
+    let physics =
+        (gravity || move_line.is_some() || velocity_line.is_some()).then_some(PhysicsComponent {
+            gravity,
+            gravity_strength: 6,
+            max_velocity: Some(Velocity { x: 96, y: 220 }),
+            friction: 1,
+            bounce: 0,
+        });
+    let blocking = bridge_entries.iter().any(|entry| entry.blocking);
+    let graph_json = (!blocking
+        && (!input_buttons.is_empty() || ready_line.is_some() || process_line.is_some()))
+    .then(|| {
+        godot_gdscript_subset_graph(
+            owner_path,
+            &source.relative_path,
+            ready_line,
+            process_line.or(physics_line),
+            move_line.or(velocity_line),
+            &input_buttons,
+            &animation_names,
+        )
     });
 
-    (hints, input, physics)
+    GodotScriptAnalysis {
+        source_relative: source.relative_path.clone(),
+        logic_hints: vec![format!(
+            "GDScript Godot subset analisado com source mapping: {}.",
+            source.relative_path
+        )],
+        native_constructs,
+        bridge_entries,
+        input,
+        physics,
+        graph_json,
+        animation_names,
+    }
+}
+
+fn godot_script_line_is_supported(trimmed: &str) -> bool {
+    let lowered = trimmed.to_ascii_lowercase();
+    lowered.starts_with("extends ")
+        || lowered.starts_with("const ")
+        || lowered.starts_with("var ")
+        || lowered == "else:"
+        || lowered.starts_with("direction +=")
+        || lowered.starts_with("direction -=")
+        || lowered.starts_with("return")
+        || lowered == "pass"
+}
+
+fn godot_input_action(line: &str) -> Option<String> {
+    for marker in ["Input.is_action_pressed(", "Input.is_action_just_pressed("] {
+        if let Some(rest) = line.split_once(marker).map(|(_, rest)| rest) {
+            let trimmed = rest.trim_start();
+            if let Some(action) = godot_string_value(trimmed.split(')').next().unwrap_or(trimmed)) {
+                return Some(action);
+            }
+        }
+    }
+    None
+}
+
+fn godot_input_mapping(action: &str) -> Option<(&'static str, &'static str, &'static str)> {
+    match action {
+        "ui_left" => Some(("move_left", "DPAD_LEFT", "BUTTON_LEFT")),
+        "ui_right" => Some(("move_right", "DPAD_RIGHT", "BUTTON_RIGHT")),
+        "ui_up" => Some(("move_up", "DPAD_UP", "BUTTON_UP")),
+        "ui_down" => Some(("move_down", "DPAD_DOWN", "BUTTON_DOWN")),
+        "ui_accept" | "jump" => Some(("jump", "BUTTON_A", "BUTTON_A")),
+        _ => None,
+    }
+}
+
+fn godot_animation_play_name(line: &str) -> Option<String> {
+    if !(line.contains(".play(") || line.contains("animation.play(")) {
+        return None;
+    }
+    let rest = line.split_once(".play(")?.1;
+    godot_string_value(rest.split(')').next().unwrap_or(rest).trim())
+}
+
+fn godot_gdscript_subset_graph(
+    owner_path: &str,
+    source: &str,
+    ready_line: Option<usize>,
+    update_line: Option<usize>,
+    move_line: Option<usize>,
+    input_buttons: &HashMap<String, (String, usize)>,
+    animation_names: &[String],
+) -> String {
+    let target = sgdk_entity_id(owner_path);
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    let mut edge_index = 0usize;
+    let idle_anim = animation_names
+        .iter()
+        .find(|name| name.eq_ignore_ascii_case("idle"))
+        .cloned()
+        .unwrap_or_else(|| "idle".to_string());
+    let run_anim = animation_names
+        .iter()
+        .find(|name| name.eq_ignore_ascii_case("run"))
+        .cloned()
+        .unwrap_or_else(|| idle_anim.clone());
+
+    if let Some(line) = ready_line {
+        nodes.push(godot_graph_node(
+            "gd_ready",
+            "event_start",
+            "Godot _ready",
+            "Game State",
+            source,
+            line,
+            serde_json::json!({}),
+        ));
+        nodes.push(godot_graph_node(
+            "gd_ready_anim",
+            "set_animation_state",
+            "Play idle",
+            "Animation",
+            source,
+            line,
+            serde_json::json!({"target": target, "state": idle_anim}),
+        ));
+        edges.push(godot_graph_edge(
+            &mut edge_index,
+            "gd_ready",
+            "exec",
+            "gd_ready_anim",
+            "exec",
+        ));
+    }
+
+    if let Some(line) = update_line {
+        nodes.push(godot_graph_node(
+            "gd_update",
+            "event_update",
+            "Godot _process",
+            "Input",
+            source,
+            line,
+            serde_json::json!({}),
+        ));
+        let mut false_tail: Option<String> = None;
+
+        for (semantic, dx) in [("move_right", 2), ("move_left", -2)] {
+            if let Some((button, line)) = input_buttons.get(semantic) {
+                let input_id = format!("gd_input_{}", semantic);
+                nodes.push(godot_graph_node(
+                    &input_id,
+                    "input_held",
+                    semantic,
+                    "Input",
+                    source,
+                    *line,
+                    serde_json::json!({"pad":"JOY_1","button":button}),
+                ));
+                edges.push(godot_graph_edge(
+                    &mut edge_index,
+                    false_tail.as_deref().unwrap_or("gd_update"),
+                    if false_tail.is_some() {
+                        "false"
+                    } else {
+                        "exec"
+                    },
+                    &input_id,
+                    "exec",
+                ));
+                let move_id = format!("gd_{}_move", semantic);
+                nodes.push(godot_graph_node(
+                    &move_id,
+                    "sprite_move",
+                    semantic,
+                    "Physics",
+                    source,
+                    move_line.unwrap_or(*line),
+                    serde_json::json!({"target": target, "dx": dx, "dy": 0}),
+                ));
+                edges.push(godot_graph_edge(
+                    &mut edge_index,
+                    &input_id,
+                    "true",
+                    &move_id,
+                    "exec",
+                ));
+                let anim_id = format!("gd_{}_anim", semantic);
+                nodes.push(godot_graph_node(
+                    &anim_id,
+                    "set_animation_state",
+                    "Play run",
+                    "Animation",
+                    source,
+                    *line,
+                    serde_json::json!({"target": target, "state": run_anim}),
+                ));
+                edges.push(godot_graph_edge(
+                    &mut edge_index,
+                    &move_id,
+                    "exec",
+                    &anim_id,
+                    "exec",
+                ));
+                false_tail = Some(input_id);
+            }
+        }
+
+        if !animation_names.is_empty() {
+            nodes.push(godot_graph_node(
+                "gd_idle_anim",
+                "set_animation_state",
+                "Play idle",
+                "Animation",
+                source,
+                line,
+                serde_json::json!({"target": target, "state": idle_anim}),
+            ));
+            if let Some(false_source) = false_tail {
+                edges.push(godot_graph_edge(
+                    &mut edge_index,
+                    &false_source,
+                    "false",
+                    "gd_idle_anim",
+                    "exec",
+                ));
+            }
+        }
+
+        if let Some((button, line)) = input_buttons.get("jump") {
+            nodes.push(godot_graph_node(
+                "gd_update_jump",
+                "event_update",
+                "Godot jump",
+                "Input",
+                source,
+                *line,
+                serde_json::json!({}),
+            ));
+            nodes.push(godot_graph_node(
+                "gd_jump",
+                "input_pressed",
+                "jump",
+                "Input",
+                source,
+                *line,
+                serde_json::json!({"pad":"JOY_1","button":button}),
+            ));
+            nodes.push(godot_graph_node(
+                "gd_jump_velocity",
+                "set_velocity",
+                "jump velocity",
+                "Physics",
+                source,
+                *line,
+                serde_json::json!({"target": target, "vx": 0, "vy": -6}),
+            ));
+            edges.push(godot_graph_edge(
+                &mut edge_index,
+                "gd_update_jump",
+                "exec",
+                "gd_jump",
+                "exec",
+            ));
+            edges.push(godot_graph_edge(
+                &mut edge_index,
+                "gd_jump",
+                "true",
+                "gd_jump_velocity",
+                "exec",
+            ));
+        }
+    }
+
+    serde_json::json!({
+        "version": 1,
+        "origin": "godot_gdscript_subset",
+        "source": source,
+        "source_entity": owner_path,
+        "native_constructs": ["_ready", "_process", "_physics_process", "input", "velocity", "move_and_slide", "animation.play"],
+        "nodes": nodes,
+        "edges": edges,
+    })
+    .to_string()
+}
+
+fn godot_graph_node(
+    id: &str,
+    node_type: &str,
+    label: &str,
+    group: &str,
+    source: &str,
+    line: usize,
+    params: serde_json::Value,
+) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "type": node_type,
+        "label": label,
+        "group": group,
+        "origin": "godot_gdscript_subset",
+        "source": source,
+        "line": line,
+        "source_reference": format!("{}:{}", source, line),
+        "x": 80,
+        "y": 80,
+        "inputs": [{"id":"exec","label":">","kind":"exec"}],
+        "outputs": [{"id":"exec","label":">","kind":"exec"},{"id":"true","label":"true","kind":"exec"},{"id":"false","label":"false","kind":"exec"}],
+        "params": params,
+    })
+}
+
+fn godot_graph_edge(
+    edge_index: &mut usize,
+    from_node: &str,
+    from_port: &str,
+    to_node: &str,
+    to_port: &str,
+) -> serde_json::Value {
+    *edge_index += 1;
+    serde_json::json!({
+        "id": format!("gd_edge_{}", edge_index),
+        "fromNode": from_node,
+        "fromPort": from_port,
+        "toNode": to_node,
+        "toPort": to_port,
+    })
+}
+
+fn push_unique_string(values: &mut Vec<String>, value: &str) {
+    if !values.iter().any(|existing| existing == value) {
+        values.push(value.to_string());
+    }
+}
+
+fn godot_logic_component(
+    project_dir: &Path,
+    entity_id: &str,
+    analysis: &GodotScriptAnalysis,
+    _scripts: &HashMap<String, GodotScriptAnalysis>,
+) -> Result<Option<LogicComponent>, LoadError> {
+    let graph_ref = if let Some(graph_json) = analysis.graph_json.as_deref() {
+        let graph_ref = godot_import_graph_ref(entity_id);
+        save_graph_asset(project_dir, &graph_ref, graph_json)?;
+        Some(graph_ref)
+    } else {
+        None
+    };
+
+    if graph_ref.is_none() && analysis.logic_hints.is_empty() && analysis.bridge_entries.is_empty()
+    {
+        return Ok(None);
+    }
+
+    let mut logic_hints = analysis.logic_hints.clone();
+    for entry in &analysis.bridge_entries {
+        logic_hints.push(format!(
+            "Bridge Godot [{}:{}] {}: {}",
+            entry.source, entry.line, entry.reason, entry.impact
+        ));
+    }
+
+    Ok(Some(LogicComponent {
+        graph: None,
+        graph_ref,
+        graph_origin: Some("godot_gdscript_subset".to_string()),
+        logic_hints,
+        external_source_refs: vec![analysis.source_relative.clone()],
+        imported_semantics: Some(ImportedLogicSemantics {
+            source: "godot_gdscript_subset".to_string(),
+            gameplay_class: "godot_2d_subset".to_string(),
+            entity_role: "script_owner".to_string(),
+            confidence: if analysis.bridge_entries.iter().any(|entry| entry.blocking) {
+                "bridge_blocked".to_string()
+            } else {
+                "subset_native".to_string()
+            },
+            role_reason: format!(
+                "Native constructs: {}",
+                analysis.native_constructs.join(", ")
+            ),
+            driver_functions: analysis.native_constructs.clone(),
+            source_paths: vec![analysis.source_relative.clone()],
+            audit_flags: analysis
+                .bridge_entries
+                .iter()
+                .map(|entry| entry.reason.clone())
+                .collect(),
+            ..ImportedLogicSemantics::default()
+        }),
+        variables: HashMap::new(),
+    }))
+}
+
+struct GodotSpriteEntitySpec {
+    entity_id: String,
+    display_name: String,
+    asset: String,
+    source_path: PathBuf,
+    x: i32,
+    y: i32,
+    animations: BTreeMap<String, AnimationDef>,
+    input: Option<InputComponent>,
+    physics: Option<PhysicsComponent>,
+    logic: Option<LogicComponent>,
+}
+
+fn godot_sprite_entity(spec: GodotSpriteEntitySpec) -> Entity {
+    let (frame_width, frame_height) =
+        image::image_dimensions(&spec.source_path).unwrap_or((32, 32));
+    Entity {
+        entity_id: spec.entity_id,
+        display_name: Some(spec.display_name),
+        prefab: None,
+        transform: crate::ugdm::entities::Transform {
+            x: spec.x,
+            y: spec.y,
+        },
+        components: Components {
+            sprite: Some(SpriteComponent {
+                asset: spec.asset,
+                frame_width: frame_width.max(1),
+                frame_height: frame_height.max(1),
+                pivot: None,
+                palette_slot: 0,
+                animations: spec.animations,
+                priority: "foreground".to_string(),
+                meta_sprite: frame_width > 32 || frame_height > 32,
+                commands: Vec::new(),
+            }),
+            input: spec.input,
+            physics: spec.physics,
+            logic: spec.logic,
+            ..Components::default()
+        },
+    }
+}
+
+fn collect_godot_collision_specs(
+    scene_source: &str,
+    nodes: &[GodotNode],
+    sub_resources: &HashMap<String, GodotSubResource>,
+    scripts: &HashMap<String, GodotScriptAnalysis>,
+) -> Vec<GodotCollisionSpec> {
+    let mut specs = Vec::new();
+    for node in nodes {
+        if node.node_type != "CollisionShape2D" {
+            continue;
+        }
+        let Some(shape_ref) = node.properties.get("shape") else {
+            continue;
+        };
+        let Some(shape_id) = godot_sub_resource_id(shape_ref) else {
+            continue;
+        };
+        let Some(shape) = sub_resources.get(&shape_id) else {
+            continue;
+        };
+        if shape.resource_type != "RectangleShape2D" {
+            continue;
+        }
+        let (width, height) = parse_godot_size(shape.properties.get("size"));
+        let owner_path = godot_parent_path(node).unwrap_or_else(|| godot_node_path(node));
+        let script = godot_nearest_script_analysis(&owner_path, scripts);
+        specs.push(GodotCollisionSpec {
+            owner_path,
+            width: width.max(1),
+            height: height.max(1),
+            offset_x: parse_godot_position(node.properties.get("position")).0,
+            offset_y: parse_godot_position(node.properties.get("position")).1,
+            solid: true,
+            layer: script
+                .map(|_| "player".to_string())
+                .or_else(|| Some("world".to_string())),
+            collides_with: if script.is_some() {
+                vec![
+                    "world".to_string(),
+                    "enemy".to_string(),
+                    "pickup".to_string(),
+                ]
+            } else {
+                Vec::new()
+            },
+            _source: scene_source.to_string(),
+            _line: node.source_line.max(shape.source_line),
+        });
+    }
+    specs
+}
+
+fn attach_godot_collisions(
+    scene: &mut Scene,
+    entity_ids: &mut HashSet<String>,
+    entity_by_godot_path: &mut HashMap<String, String>,
+    nodes_by_path: &HashMap<String, GodotNode>,
+    specs: &[GodotCollisionSpec],
+) {
+    for spec in specs {
+        if let Some(entity_id) = godot_nearest_entity_id(&spec.owner_path, entity_by_godot_path) {
+            if let Some(entity) = scene
+                .entities
+                .iter_mut()
+                .find(|entity| entity.entity_id == entity_id)
+            {
+                entity.components.collision = Some(godot_collision_component(spec));
+            }
+            continue;
+        }
+
+        let entity_id = unique_entity_id(entity_ids, godot_path_name(&spec.owner_path), "area");
+        let (x, y) = godot_global_position(&spec.owner_path, nodes_by_path);
+        scene.entities.push(Entity {
+            entity_id: entity_id.clone(),
+            display_name: Some(
+                godot_display_name(&spec.owner_path, nodes_by_path)
+                    .unwrap_or_else(|| godot_path_name(&spec.owner_path).to_string()),
+            ),
+            prefab: None,
+            transform: crate::ugdm::entities::Transform { x, y },
+            components: Components {
+                collision: Some(godot_collision_component(spec)),
+                ..Components::default()
+            },
+        });
+        entity_by_godot_path.insert(spec.owner_path.clone(), entity_id);
+    }
+}
+
+fn godot_collision_component(spec: &GodotCollisionSpec) -> CollisionComponent {
+    CollisionComponent {
+        shape: "aabb".to_string(),
+        width: spec.width,
+        height: spec.height,
+        offset: Some(CollisionOffset {
+            x: spec.offset_x,
+            y: spec.offset_y,
+        }),
+        solid: spec.solid,
+        layer: spec.layer.clone(),
+        collides_with: spec.collides_with.clone(),
+    }
+}
+
+fn godot_sub_resource_id(value: &str) -> Option<String> {
+    let marker = "SubResource(\"";
+    let rest = value.split_once(marker)?.1;
+    let id = rest.split('"').next()?.trim();
+    (!id.is_empty()).then(|| id.to_string())
+}
+
+fn parse_godot_size(value: Option<&String>) -> (u32, u32) {
+    let (x, y) = parse_godot_position(value);
+    (x.unsigned_abs(), y.unsigned_abs())
 }
 
 fn validate_construct_project_path(construct_path: &Path) -> Result<(), LoadError> {
@@ -11559,7 +12649,7 @@ fn openbor_animation_to_def(block: &OpenBorAnimationBlock) -> AnimationDef {
 }
 
 fn openbor_push_animation(
-    animations: &mut HashMap<String, AnimationDef>,
+    animations: &mut BTreeMap<String, AnimationDef>,
     logic_hints: &mut Vec<String>,
     collision_box: &mut Option<OpenBorBox>,
     attack_boxes: &mut Vec<OpenBorAttackBox>,
@@ -11627,7 +12717,7 @@ fn parse_openbor_model_file(root: &Path, path: &Path) -> Result<OpenBorModelAsse
     let mut display_asset = None;
     let mut audio_assets = Vec::new();
     let mut logic_hints = Vec::new();
-    let mut animations = HashMap::new();
+    let mut animations = BTreeMap::new();
     let mut collision_box = None;
     let mut attack_boxes = Vec::new();
     let mut movement_speed = 2;
@@ -12736,7 +13826,7 @@ pub fn import_openbor_project(
         let y = spawn_position.map(|spawn| spawn.y).unwrap_or(112);
         let input = (role == "player_avatar").then(|| InputComponent {
             device: "joypad1".to_string(),
-            mapping: HashMap::from([
+            mapping: BTreeMap::from([
                 ("move_left".to_string(), "DPAD_LEFT".to_string()),
                 ("move_right".to_string(), "DPAD_RIGHT".to_string()),
                 ("attack".to_string(), "BUTTON_B".to_string()),
@@ -13180,7 +14270,7 @@ fn imported_sprite_entity(spec: ImportedSpriteEntitySpec) -> Entity {
                 frame_height: frame_height.max(1),
                 pivot: None,
                 palette_slot: 0,
-                animations: HashMap::new(),
+                animations: BTreeMap::new(),
                 priority: "foreground".to_string(),
                 meta_sprite: frame_width > 32 || frame_height > 32,
                 commands: Vec::new(),
@@ -13971,7 +15061,7 @@ fn starter_scene(scene_id: &str, display_name: String, _target: &str) -> Scene {
                 frame_height: ONBOARDING_SPRITE_SIZE,
                 pivot: None,
                 palette_slot: 0,
-                animations: HashMap::new(),
+                animations: BTreeMap::new(),
                 priority: "foreground".to_string(),
                 meta_sprite: false,
                 commands: Vec::new(),
@@ -15258,6 +16348,9 @@ fn sync_parent_dir(_path: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compiler::ast_generator::generate_ast_with_prefabs;
+    use crate::compiler::build_orch::{run_build_with_environment, BuildEnvironment};
+    use crate::compiler::sgdk_emitter::emit_sgdk_with_collision;
     use crate::ugdm::components::AnimationDef;
     use crate::ugdm::entities::{ProjectSettings, SaveRamConfig, Transform};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -17985,6 +19078,10 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .skipped_sources
             .iter()
             .any(|entry| entry.contains("AnimatedSprite2D")));
+        assert!(report
+            .skipped_sources
+            .iter()
+            .any(|entry| entry.contains("outside_godot_2d_subset")));
         assert!(scene.entities.iter().any(|entity| {
             entity
                 .components
@@ -17992,14 +19089,10 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                 .as_ref()
                 .is_some_and(|sprite| sprite.asset == "assets/sprites/godot_art_hero.png")
         }));
-        assert!(scene.entities.iter().any(|entity| {
-            entity.components.audio.as_ref().is_some_and(|audio| {
-                audio
-                    .sfx
-                    .values()
-                    .any(|asset| asset == "assets/audio/godot_audio_jump.wav")
-            })
-        }));
+        assert!(!scene
+            .entities
+            .iter()
+            .any(|entity| entity.components.audio.is_some()));
         assert!(scene.entities.iter().any(|entity| {
             entity.components.camera.as_ref().is_some_and(|camera| {
                 camera
@@ -18014,10 +19107,16 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             .join("godot_art_hero.png")
             .is_file());
         assert!(project_dir
+            .join(".rds")
+            .join("imports")
+            .join("godot")
+            .join("bridge.json")
+            .is_file());
+        assert!(!project_dir
             .join("assets")
             .join("audio")
             .join("godot_audio_jump.wav")
-            .is_file());
+            .exists());
 
         let project = stamp_imported_external_profile_metadata(&project_dir, "godot", &donor_root)
             .expect("stamp godot metadata");
@@ -18028,6 +19127,359 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
 
         let _ = fs::remove_dir_all(project_dir);
         let _ = fs::remove_dir_all(donor_root);
+    }
+
+    #[test]
+    fn parse_godot_tscn_preserves_subset_nodes_subresources_and_source_lines() {
+        let fixture = fixture_dir("godot_2d_subset")
+            .join("scenes")
+            .join("main.tscn");
+        let parsed = parse_godot_scene(&fs::read_to_string(&fixture).expect("read tscn"))
+            .expect("parse tscn");
+
+        assert!(parsed
+            .ext_resources
+            .values()
+            .any(|resource| resource.resource_type == "SpriteFrames" && resource.source_line > 0));
+        assert!(parsed
+            .sub_resources
+            .values()
+            .any(|resource| resource.resource_type == "RectangleShape2D"));
+        for node_type in [
+            "Node2D",
+            "Sprite2D",
+            "AnimatedSprite2D",
+            "CharacterBody2D",
+            "Area2D",
+            "CollisionShape2D",
+            "Camera2D",
+            "TileMap",
+        ] {
+            assert!(
+                parsed
+                    .nodes
+                    .iter()
+                    .any(|node| node.node_type == node_type && node.source_line > 0),
+                "missing node type {node_type}"
+            );
+        }
+        let player_sprite = parsed
+            .nodes
+            .iter()
+            .find(|node| node.name == "AnimatedSprite2D")
+            .expect("animated sprite");
+        assert_eq!(godot_node_path(player_sprite), "Player/AnimatedSprite2D");
+    }
+
+    #[test]
+    fn parse_godot_tres_resolves_spriteframes_and_tileset_visual_sources() {
+        let fixture_root = fixture_dir("godot_2d_subset");
+        let frames_path = fixture_root.join("resources").join("player_frames.tres");
+        let frames = parse_godot_tres(&fs::read_to_string(&frames_path).expect("read frames"))
+            .expect("parse spriteframes");
+        assert_eq!(frames.resource_type, "SpriteFrames");
+        assert!(frames.source_line > 0);
+        assert!(frames.properties.contains_key("animations"));
+        assert_eq!(
+            godot_animations_from_tres(&frames),
+            vec!["idle".to_string(), "run".to_string()]
+        );
+        let frames_asset = godot_visual_asset_from_ext_resource(
+            &fixture_root,
+            &GodotExtResource {
+                resource_type: "SpriteFrames".to_string(),
+                path: "res://resources/player_frames.tres".to_string(),
+                source_line: 1,
+            },
+        )
+        .expect("resolve spriteframes")
+        .expect("spriteframes visual");
+        assert!(
+            frames_asset.source_path.ends_with("art\\player_idle.ppm")
+                || frames_asset.source_path.ends_with("art/player_idle.ppm")
+        );
+
+        let tileset_asset = godot_visual_asset_from_ext_resource(
+            &fixture_root,
+            &GodotExtResource {
+                resource_type: "TileSet".to_string(),
+                path: "res://resources/tileset.tres".to_string(),
+                source_line: 1,
+            },
+        )
+        .expect("resolve tileset")
+        .expect("tileset visual");
+        assert!(
+            tileset_asset.source_path.ends_with("art\\tiles.ppm")
+                || tileset_asset.source_path.ends_with("art/tiles.ppm")
+        );
+    }
+
+    #[test]
+    fn analyze_godot_gdscript_subset_generates_source_mapped_graph() {
+        let script_path = fixture_dir("godot_2d_subset")
+            .join("scripts")
+            .join("player.gd");
+        let source = GodotScriptSource {
+            _path: script_path.clone(),
+            relative_path: "scripts/player.gd".to_string(),
+            content: fs::read_to_string(script_path).expect("read script"),
+        };
+        let analysis = analyze_godot_script(&source, "Player");
+
+        assert!(analysis.bridge_entries.is_empty());
+        assert!(analysis
+            .native_constructs
+            .contains(&"_physics_process".to_string()));
+        assert!(analysis.input.is_some());
+        assert!(analysis
+            .physics
+            .as_ref()
+            .is_some_and(|physics| physics.gravity));
+        let graph = analysis.graph_json.expect("subset graph");
+        assert!(graph.contains("\"origin\":\"godot_gdscript_subset\""));
+        assert!(graph.contains("\"source\":\"scripts/player.gd\""));
+        assert!(graph.contains("\"line\":"));
+        assert!(graph.contains("\"sprite_move\""));
+        assert!(graph.contains("\"set_animation_state\""));
+        assert!(!graph.contains("imported_sprite_logic_graph"));
+    }
+
+    #[test]
+    fn bridge_complex_godot_gdscript_keeps_blocking_entries() {
+        let script_path = fixture_dir("godot_complex_bridge")
+            .join("scripts")
+            .join("boss.gd");
+        let source = GodotScriptSource {
+            _path: script_path.clone(),
+            relative_path: "scripts/boss.gd".to_string(),
+            content: fs::read_to_string(script_path).expect("read complex script"),
+        };
+        let analysis = analyze_godot_script(&source, "Boss");
+
+        assert!(analysis.graph_json.is_none());
+        assert!(analysis.bridge_entries.iter().any(|entry| {
+            entry.reason == "unsupported_gdscript" && entry.line > 0 && entry.blocking
+        }));
+        assert!(analysis.bridge_entries.iter().any(|entry| {
+            entry.reason == "godot_scene_change" && entry.suggestion.contains("bridge")
+        }));
+    }
+
+    #[test]
+    fn import_godot_subset_fixture_generates_source_mapped_nodegraph_and_sgdk_c() {
+        let donor_root = fixture_dir("godot_2d_subset");
+        let project_dir = temp_dir("godot-subset-project");
+        create_project_skeleton(&project_dir, "Godot Subset", "megadrive")
+            .expect("create project skeleton");
+
+        let report = import_godot_project(&project_dir, &donor_root).expect("import subset");
+        assert!(
+            report.skipped_sources.is_empty(),
+            "subset fixture should not bridge: {:?}",
+            report.skipped_sources
+        );
+        let player = report
+            .primary_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "player")
+            .expect("player entity");
+        assert!(player.components.collision.is_some());
+        assert!(player
+            .components
+            .sprite
+            .as_ref()
+            .is_some_and(|sprite| sprite.animations.contains_key("idle")
+                && sprite.animations.contains_key("run")));
+        let logic = player.components.logic.as_ref().expect("player logic");
+        assert_eq!(logic.graph_ref.as_deref(), Some("graphs/godot_player.json"));
+        assert_eq!(logic.graph, None);
+        assert_eq!(logic.graph_origin.as_deref(), Some("godot_gdscript_subset"));
+        assert_eq!(
+            logic.external_source_refs,
+            vec!["scripts/player.gd".to_string()]
+        );
+        assert_eq!(
+            logic
+                .imported_semantics
+                .as_ref()
+                .map(|sem| sem.source.as_str()),
+            Some("godot_gdscript_subset")
+        );
+
+        let graph_path = project_dir.join("graphs").join("godot_player.json");
+        let graph = fs::read_to_string(&graph_path).expect("read graph");
+        let graph_value: serde_json::Value =
+            serde_json::from_str(&graph).expect("parse graph json");
+        let graph_nodes = graph_value["nodes"].as_array().expect("graph nodes");
+        assert!(graph_nodes.iter().all(|node| {
+            node.get("source").and_then(serde_json::Value::as_str) == Some("scripts/player.gd")
+                && node
+                    .get("line")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0)
+                    > 0
+        }));
+
+        let project = load_project(&project_dir).expect("load project");
+        let ast = generate_ast_with_prefabs(&project_dir, &project, &report.primary_scene)
+            .expect("ast with graph_ref");
+        let sgdk = emit_sgdk_with_collision(&ast, "Godot Subset", None);
+        assert!(sgdk.main_c.contains("JOY_readJoypad"));
+        assert!(sgdk.main_c.contains("SPR_setPosition"));
+        assert!(!sgdk.main_c.contains("#error"));
+
+        let build = run_build_with_environment(
+            &project_dir,
+            &BuildEnvironment {
+                disable_auto_detect: true,
+                ..BuildEnvironment::default()
+            },
+            |_| {},
+        );
+        assert!(!build.ok);
+        let build_log = build
+            .log
+            .iter()
+            .map(|entry| entry.message.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            build_log.contains("SGDK")
+                || build_log.contains("toolchain")
+                || build_log.contains("depend"),
+            "missing official dependency must be explicit: {}",
+            build_log
+        );
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn import_godot_complex_fixture_reports_bridge_without_fake_graph() {
+        let donor_root = fixture_dir("godot_complex_bridge");
+        let project_dir = temp_dir("godot-complex-project");
+        create_project_skeleton(&project_dir, "Godot Complex", "megadrive")
+            .expect("create project skeleton");
+
+        let report = import_godot_project(&project_dir, &donor_root).expect("import complex");
+        assert!(report
+            .skipped_sources
+            .iter()
+            .any(|entry| entry.contains("unsupported_gdscript")));
+        assert!(report
+            .skipped_sources
+            .iter()
+            .any(|entry| entry.contains("unsupported_godot_node")));
+        let boss = report
+            .primary_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "boss")
+            .expect("boss visual entity");
+        let logic = boss.components.logic.as_ref().expect("boss bridge logic");
+        assert!(logic.graph_ref.is_none());
+        assert!(logic.graph.is_none());
+        assert!(!project_dir.join("graphs").join("godot_boss.json").exists());
+
+        let bridge_path = project_dir
+            .join(".rds")
+            .join("imports")
+            .join("godot")
+            .join("bridge.json");
+        let bridge: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(bridge_path).expect("read bridge"))
+                .expect("parse bridge");
+        assert!(bridge["blocking"].as_u64().unwrap_or(0) >= 1);
+        assert!(bridge["entries"].as_array().unwrap().iter().all(|entry| {
+            entry["source"].as_str().is_some()
+                && entry["line"].as_u64().unwrap_or(0) > 0
+                && entry["reason"].as_str().is_some()
+                && entry["impact"].as_str().is_some()
+                && entry["suggestion"].as_str().is_some()
+        }));
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn import_godot_subset_is_idempotent_with_deterministic_graph_and_bridge_report() {
+        let donor_root = fixture_dir("godot_2d_subset");
+        let project_dir = temp_dir("godot-idempotent-project");
+        create_project_skeleton(&project_dir, "Godot Idempotent", "megadrive")
+            .expect("create project skeleton");
+
+        let first = import_godot_project(&project_dir, &donor_root).expect("first import");
+        let first_scene = serde_json::to_string(&first.primary_scene).expect("first scene");
+        let first_graph = fs::read_to_string(project_dir.join("graphs").join("godot_player.json"))
+            .expect("first graph");
+        let first_bridge = fs::read_to_string(
+            project_dir
+                .join(".rds")
+                .join("imports")
+                .join("godot")
+                .join("bridge.json"),
+        )
+        .expect("first bridge");
+
+        let second = import_godot_project(&project_dir, &donor_root).expect("second import");
+        let second_scene = serde_json::to_string(&second.primary_scene).expect("second scene");
+        let second_graph = fs::read_to_string(project_dir.join("graphs").join("godot_player.json"))
+            .expect("second graph");
+        let second_bridge = fs::read_to_string(
+            project_dir
+                .join(".rds")
+                .join("imports")
+                .join("godot")
+                .join("bridge.json"),
+        )
+        .expect("second bridge");
+
+        assert_eq!(first_scene, second_scene);
+        assert_eq!(first_graph, second_graph);
+        assert_eq!(first_bridge, second_bridge);
+        assert_eq!(first.skipped_sources, second.skipped_sources);
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    #[ignore = "host-local Godot BYOR samples under F:\\Projects\\Godot; ignored for CI"]
+    fn import_godot_real_host_projects_when_present_under_f_projects_godot() {
+        let host_root = PathBuf::from("F:\\Projects\\Godot");
+        if !host_root.is_dir() {
+            eprintln!(
+                "[skip] host-local Godot root absent: {}",
+                host_root.display()
+            );
+            return;
+        }
+        let mut candidates =
+            collect_recursive_files_by_extension(&host_root, &["godot"], &[".godot", "import"])
+                .expect("collect project.godot candidates");
+        candidates.sort();
+        for candidate in candidates.into_iter().take(3) {
+            let donor_root = host_root.join(candidate).parent().unwrap().to_path_buf();
+            let project_dir = temp_dir("godot-host-project");
+            create_project_skeleton(&project_dir, "Godot Host", "megadrive")
+                .expect("create project skeleton");
+            let report = import_godot_project(&project_dir, &donor_root).unwrap_or_else(|error| {
+                panic!(
+                    "host-local Godot import should report bridge instead of panic for '{}': {}",
+                    donor_root.display(),
+                    error.0
+                )
+            });
+            assert!(project_dir
+                .join(".rds")
+                .join("imports")
+                .join("godot")
+                .join("bridge.json")
+                .is_file());
+            assert!(report.imported_scenes >= 1);
+            let _ = fs::remove_dir_all(project_dir);
+        }
     }
 
     #[test]
@@ -18960,7 +20412,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                     frame_height: 56,
                     pivot: None,
                     palette_slot: 0,
-                    animations: HashMap::new(),
+                    animations: BTreeMap::new(),
                     priority: "foreground".to_string(),
                     meta_sprite: false,
                     commands: Vec::new(),
@@ -19185,7 +20637,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                     frame_height: 16,
                     pivot: None,
                     palette_slot: 0,
-                    animations: HashMap::from([
+                    animations: BTreeMap::from([
                         (
                             "idle".to_string(),
                             AnimationDef {
@@ -20168,7 +21620,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         assert_eq!(
             second.primary_scene.entities.len(),
             first.primary_scene.entities.len(),
-            "godot re-import keeps entity count stable"
+            "godot re-import keeps entity count deterministic"
         );
 
         let _ = fs::remove_dir_all(&donor);

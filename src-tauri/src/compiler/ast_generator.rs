@@ -2563,7 +2563,7 @@ mod tests {
 
     #[test]
     fn generate_ast_uses_default_animation_timing_from_sprite_component() {
-        let mut animations = HashMap::new();
+        let mut animations = std::collections::BTreeMap::new();
         animations.insert(
             "walk".to_string(),
             AnimationDef {
@@ -2916,10 +2916,10 @@ mod tests {
             settings: Default::default(),
             template_metadata: None,
         };
-        let mut player_mapping = HashMap::new();
+        let mut player_mapping = std::collections::BTreeMap::new();
         player_mapping.insert("move_left".to_string(), "DPAD_LEFT".to_string());
         player_mapping.insert("jump".to_string(), "BUTTON_A".to_string());
-        let mut support_mapping = HashMap::new();
+        let mut support_mapping = std::collections::BTreeMap::new();
         support_mapping.insert("move_right".to_string(), "DPAD_RIGHT".to_string());
 
         let scene = Scene {
@@ -3021,7 +3021,7 @@ mod tests {
                         frame_height: 16,
                         pivot: None,
                         palette_slot: 0,
-                        animations: HashMap::new(),
+                        animations: std::collections::BTreeMap::new(),
                         priority: "foreground".to_string(),
                         meta_sprite: false,
                         commands: Vec::new(),
@@ -3402,7 +3402,7 @@ mod tests {
             settings: Default::default(),
             template_metadata: None,
         };
-        let mut animations = HashMap::new();
+        let mut animations = std::collections::BTreeMap::new();
         animations.insert(
             "idle".to_string(),
             AnimationDef {
@@ -3679,7 +3679,7 @@ mod tests {
                             frame_height: 16,
                             pivot: None,
                             palette_slot: 0,
-                            animations: HashMap::new(),
+                            animations: std::collections::BTreeMap::new(),
                             priority: "foreground".to_string(),
                             meta_sprite: false,
                             commands: Vec::new(),
@@ -3846,7 +3846,7 @@ mod tests {
                             frame_height: 16,
                             pivot: None,
                             palette_slot: 0,
-                            animations: HashMap::new(),
+                            animations: std::collections::BTreeMap::new(),
                             priority: "foreground".to_string(),
                             meta_sprite: false,
                             commands: Vec::new(),
@@ -3884,7 +3884,7 @@ mod tests {
                             frame_height: 16,
                             pivot: None,
                             palette_slot: 0,
-                            animations: HashMap::new(),
+                            animations: std::collections::BTreeMap::new(),
                             priority: "foreground".to_string(),
                             meta_sprite: false,
                             commands: Vec::new(),
@@ -3913,7 +3913,7 @@ mod tests {
                             frame_height: 16,
                             pivot: None,
                             palette_slot: 0,
-                            animations: HashMap::new(),
+                            animations: std::collections::BTreeMap::new(),
                             priority: "foreground".to_string(),
                             meta_sprite: false,
                             commands: Vec::new(),
@@ -4349,7 +4349,7 @@ mod tests {
                             frame_height: 16,
                             pivot: None,
                             palette_slot: 0,
-                            animations: HashMap::new(),
+                            animations: std::collections::BTreeMap::new(),
                             priority: "foreground".to_string(),
                             meta_sprite: false,
                             commands: Vec::new(),
@@ -4387,7 +4387,7 @@ mod tests {
                             frame_height: 16,
                             pivot: None,
                             palette_slot: 0,
-                            animations: HashMap::new(),
+                            animations: std::collections::BTreeMap::new(),
                             priority: "foreground".to_string(),
                             meta_sprite: false,
                             commands: Vec::new(),
@@ -4472,7 +4472,7 @@ mod tests {
             settings: Default::default(),
             template_metadata: None,
         };
-        let mut animations = HashMap::new();
+        let mut animations = std::collections::BTreeMap::new();
         animations.insert(
             "idle".to_string(),
             AnimationDef {
@@ -4575,7 +4575,7 @@ mod tests {
                         }),
                         input: Some(crate::ugdm::components::InputComponent {
                             device: "joypad_1".to_string(),
-                            mapping: HashMap::new(),
+                            mapping: std::collections::BTreeMap::new(),
                         }),
                         audio: Some(crate::ugdm::components::AudioComponent { sfx, bgm: None }),
                         logic: Some(crate::ugdm::components::LogicComponent {
@@ -4738,7 +4738,7 @@ mod tests {
                         frame_height: 16,
                         pivot: None,
                         palette_slot: 0,
-                        animations: HashMap::new(),
+                        animations: std::collections::BTreeMap::new(),
                         priority: "foreground".to_string(),
                         meta_sprite: false,
                         commands: Vec::new(),
@@ -4847,7 +4847,7 @@ mod tests {
                         frame_height: 16,
                         pivot: None,
                         palette_slot: 0,
-                        animations: HashMap::new(),
+                        animations: std::collections::BTreeMap::new(),
                         priority: "foreground".to_string(),
                         meta_sprite: false,
                         commands: Vec::new(),
@@ -4933,7 +4933,7 @@ mod tests {
                         frame_height: 16,
                         pivot: None,
                         palette_slot: 0,
-                        animations: HashMap::new(),
+                        animations: std::collections::BTreeMap::new(),
                         priority: "foreground".to_string(),
                         meta_sprite: false,
                         commands: Vec::new(),
@@ -5030,7 +5030,7 @@ mod tests {
                         frame_height: 16,
                         pivot: None,
                         palette_slot: 0,
-                        animations: HashMap::new(),
+                        animations: std::collections::BTreeMap::new(),
                         priority: "foreground".to_string(),
                         meta_sprite: false,
                         commands: Vec::new(),
@@ -5082,7 +5082,7 @@ mod tests {
 
     #[test]
     fn multiframe_sprite_animations_produce_correct_ast_sprite_assets() {
-        let mut animations = HashMap::new();
+        let mut animations = std::collections::BTreeMap::new();
         animations.insert(
             "idle".to_string(),
             AnimationDef {

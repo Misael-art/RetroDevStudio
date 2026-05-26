@@ -1,0 +1,24 @@
+[gd_resource type="SpriteFrames" load_steps=3 format=3 uid="uid://rds_player_frames"]
+
+[ext_resource type="Texture2D" path="res://art/player_idle.ppm" id="1_idle"]
+[ext_resource type="Texture2D" path="res://art/player_run.ppm" id="2_run"]
+
+[resource]
+animations = [{
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("1_idle")
+}],
+"loop": true,
+"name": &"idle",
+"speed": 6.0
+}, {
+"frames": [{
+"duration": 1.0,
+"texture": ExtResource("2_run")
+}],
+"loop": true,
+"name": &"run",
+"speed": 8.0
+}]
+

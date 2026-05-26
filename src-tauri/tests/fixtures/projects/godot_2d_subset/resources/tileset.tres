@@ -1,0 +1,7 @@
+[gd_resource type="TileSet" load_steps=2 format=3 uid="uid://rds_tileset"]
+
+[ext_resource type="Texture2D" path="res://art/tiles.ppm" id="1_tiles"]
+
+[resource]
+tile_size = Vector2i(16, 16)
+

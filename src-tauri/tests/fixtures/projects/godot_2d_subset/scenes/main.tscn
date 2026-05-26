@@ -1,0 +1,45 @@
+[gd_scene load_steps=9 format=3 uid="uid://rds_godot_subset_main"]
+
+[ext_resource type="Texture2D" path="res://art/player_idle.ppm" id="1_player_idle"]
+[ext_resource type="Texture2D" path="res://art/coin.ppm" id="2_coin"]
+[ext_resource type="SpriteFrames" path="res://resources/player_frames.tres" id="3_player_frames"]
+[ext_resource type="Script" path="res://scripts/player.gd" id="4_player_script"]
+[ext_resource type="TileSet" path="res://resources/tileset.tres" id="5_tileset"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_player"]
+size = Vector2(16, 24)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_coin"]
+size = Vector2(12, 12)
+
+[node name="Main" type="Node2D"]
+position = Vector2(0, 0)
+
+[node name="Player" type="CharacterBody2D" parent="."]
+position = Vector2(40, 72)
+script = ExtResource("4_player_script")
+
+[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="Player"]
+sprite_frames = ExtResource("3_player_frames")
+animation = &"idle"
+
+[node name="PlayerCollision" type="CollisionShape2D" parent="Player"]
+shape = SubResource("RectangleShape2D_player")
+
+[node name="CoinArea" type="Area2D" parent="."]
+position = Vector2(112, 70)
+
+[node name="CoinSprite" type="Sprite2D" parent="CoinArea"]
+texture = ExtResource("2_coin")
+
+[node name="CoinCollision" type="CollisionShape2D" parent="CoinArea"]
+shape = SubResource("RectangleShape2D_coin")
+
+[node name="StageTiles" type="TileMap" parent="."]
+position = Vector2(0, 96)
+tile_set = ExtResource("5_tileset")
+
+[node name="Camera2D" type="Camera2D" parent="Player"]
+position = Vector2(0, 0)
+enabled = true
+
