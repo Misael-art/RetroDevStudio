@@ -591,7 +591,15 @@ describe("NodeGraphEditor helpers", () => {
       "collision_gate",
       "collision_true",
     ]);
-    expect(validateNodeGraph(graph).errors).toHaveLength(0);
+    const player = buildLogicSpriteEntity("player", "Player", graph, {
+      animations: { idle: { frames: [0], fps: 8, loop: true } },
+    });
+    expect(
+      validateNodeGraph(graph, {
+        selectedEntity: player,
+        sceneEntities: [player],
+      }).errors
+    ).toHaveLength(0);
   });
 });
 
