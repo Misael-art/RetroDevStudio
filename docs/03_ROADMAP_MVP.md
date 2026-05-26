@@ -1,8 +1,10 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-05-25 (rodada 56 - Release Manifest Z revalidada pos-AAA)
+**Ultima revisao canonica:** 2026-05-25 (rodada 57 - NodeGraph W revalidada pos-AAA)
 **Fase ativa real:** Core MVP promovido tecnicamente em main; hardening continua nas superficies experimentais
+
+**Nota 2026-05-25 (rodada 57, branch `codex/nodegraph-execution-inspector-w`):** a frente NodeGraph W foi rebaseada sobre `origin/main` pos-AAA e validada como inspector **Experimental/simulado**. Ela adiciona trace local, highlight de nos alcancaveis e diagnostics contextuais no `nodegraph-overview`, mantendo a arquitetura de full cohesion. Gates: `check:tree`, `lint`, `tsc`, focados NodeGraph/codegen **64/64**, `npm test` **360/360** e `git diff --check`. Isto nao e step debugging real, nao observa emulador/runtime e nao promove Node Engine ou SGDK.
 
 **Nota 2026-05-25 (rodada 56, branch `codex/release-manifest-packaging-z`):** a frente Release Manifest Z foi rebaseada sobre `origin/main` pos-AAA (`fc925e2b200ca92409e7773fd0126484d4798505`) e validada localmente. Gates frescos: `check:tree`, `lint`, `tsc`, `npm test` **362/362**, `cargo clippy`, `cargo test --lib` **398 passed / 22 ignored**, `build:debug`, `build:portable`, `build:msi`, `preflight:sgdk-e2e`, Desktop E2E simples, `validate-upstream-windows.ps1 -SkipRustTests`, `release:manifest` e `git diff --check`. O manifesto gerado e apenas distribuicao interna auditavel: sem assinatura real, updater deferido e sem claim de release publica. `release:readiness:promotion` ficou `Pronto para promocao: NAO` por branch ainda fora de `main` e QA manual A-F pendente; nao por falha tecnica. Nenhuma superficie muda de maturidade.
 

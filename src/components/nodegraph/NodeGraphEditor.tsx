@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { persistActiveScene } from "../../core/scenePersistence";
 import { openProjectSourcePath } from "../../core/ipc/projectService";
 import { parseSceneJson, resolveScenePrefabs } from "../../core/ipc/sceneService";
+import type { Entity } from "../../core/ipc/sceneService";
 import { useEditorStore } from "../../core/store/editorStore";
 import { getEntityDisplayName } from "../../core/entityDisplay";
 import { resolveEntitySourceRefs } from "../../core/entityAuthoring";
@@ -131,7 +132,12 @@ export type NodeGraphValidationIssue = {
     | "data_type_mismatch"
     | "exec_cycle"
     | "missing_entry"
-    | "disconnected_node";
+    | "disconnected_node"
+    | "node_without_exec_input"
+    | "branch_without_output"
+    | "blocking_bridge"
+    | "input_command_unbound"
+    | "missing_animation";
   message: string;
   nodeId?: string;
   edgeId?: string;
@@ -140,6 +146,27 @@ export type NodeGraphValidationIssue = {
 export type NodeGraphValidation = {
   errors: NodeGraphValidationIssue[];
   warnings: NodeGraphValidationIssue[];
+};
+
+export type NodeGraphValidationContext = {
+  selectedEntity?: Entity | null;
+  sceneEntities?: Entity[];
+};
+
+type NodeGraphTraceKind = "input event" | "condition" | "action" | "output";
+
+type NodeGraphTraceStep = {
+  kind: NodeGraphTraceKind;
+  nodeId?: string;
+  label: string;
+  detail: string;
+};
+
+type NodeGraphExecutionInspection = {
+  evidence: "observed" | "simulated";
+  evidenceLabel: string;
+  reachableNodeIds: string[];
+  trace: NodeGraphTraceStep[];
 };
 
 type MiniMapNode = {
@@ -332,10 +359,141 @@ function collectExecCycles(graph: NodeGraph, nodeById: Map<string, GraphNode>): 
   return cycles;
 }
 
-export function validateNodeGraph(graph: NodeGraph): NodeGraphValidation {
+function isExecEntryNode(node: GraphNode): boolean {
+  return EVENT_NODE_TYPES.includes(node.type);
+}
+
+function isBranchingExecNode(node: GraphNode): boolean {
+  return node.outputs.filter((port) => port.kind === "exec").length > 1;
+}
+
+function hasTruthyParam(
+  params: Record<string, string | number>,
+  keys: string[],
+): boolean {
+  return keys.some((key) => {
+    const value = params[key];
+    if (typeof value === "number") {
+      return value !== 0;
+    }
+    return ["1", "true", "yes", "blocking", "block"].includes(
+      String(value ?? "").trim().toLowerCase(),
+    );
+  });
+}
+
+function normalizeGraphToken(value: string | number | null | undefined): string {
+  return normalizeGraphEntityKey(value);
+}
+
+function resolveGraphTargetEntity(
+  node: GraphNode,
+  context?: NodeGraphValidationContext,
+): Entity | null {
+  const entities = context?.sceneEntities ?? [];
+  const candidateKeys = Array.from(
+    new Set(
+      ["target", "entity", "a", "b"]
+        .map((key) => normalizeGraphToken(node.params[key]))
+        .filter((value) => value.length > 0),
+    ),
+  );
+
+  const matched =
+    candidateKeys.length > 0
+      ? entities.find((entity) => {
+          const entityKeys = [
+            normalizeGraphToken(entity.entity_id),
+            normalizeGraphToken(getEntityDisplayName(entity)),
+            normalizeGraphToken(entity.display_name ?? ""),
+          ];
+          return candidateKeys.some((candidate) =>
+            entityKeys.includes(candidate),
+          );
+        })
+      : null;
+
+  return matched ?? context?.selectedEntity ?? null;
+}
+
+function commandNodeHasBinding(
+  node: GraphNode,
+  context?: NodeGraphValidationContext,
+): boolean {
+  const targetEntity = resolveGraphTargetEntity(node, context);
+  const bindings = targetEntity?.components.sprite?.commands ?? [];
+  if (bindings.length === 0) {
+    return false;
+  }
+
+  const commandId = normalizeGraphToken(node.params.command_id);
+  const displayName = normalizeGraphToken(node.params.display_name);
+  const notation = String(node.params.notation ?? "").trim();
+
+  if (commandId.length > 0) {
+    return bindings.some(
+      (binding) => normalizeGraphToken(binding.id) === commandId,
+    );
+  }
+
+  return bindings.some((binding) => {
+    const bindingKeys = [
+      normalizeGraphToken(binding.id),
+      normalizeGraphToken(binding.display_name),
+    ];
+    return (
+      (displayName.length > 0 && bindingKeys.includes(displayName)) ||
+      (notation.length > 0 && (binding.notation ?? "").trim() === notation)
+    );
+  });
+}
+
+function nodeReferencesMissingAnimation(
+  node: GraphNode,
+  context?: NodeGraphValidationContext,
+): boolean {
+  if (node.type !== "set_animation_state" && node.type !== "sprite_anim") {
+    return false;
+  }
+  const animationKey = normalizeGraphToken(
+    node.type === "sprite_anim" ? node.params.anim : node.params.state,
+  );
+  if (!animationKey) {
+    return false;
+  }
+
+  const targetEntity = resolveGraphTargetEntity(node, context);
+  const animations = targetEntity?.components.sprite?.animations;
+  if (!animations || Object.keys(animations).length === 0) {
+    return true;
+  }
+
+  return !Object.keys(animations).some(
+    (key) => normalizeGraphToken(key) === animationKey,
+  );
+}
+
+function isBlockingBridgeNode(node: GraphNode): boolean {
+  return (
+    node.type === "bridge_unconverted_source" &&
+    hasTruthyParam(node.params, [
+      "blocking",
+      "blocks_build",
+      "blocks_runtime",
+      "build_blocking",
+    ])
+  );
+}
+
+export function validateNodeGraph(
+  graph: NodeGraph,
+  context?: NodeGraphValidationContext,
+): NodeGraphValidation {
   const issues: NodeGraphValidationIssue[] = [];
   const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
   const connectedNodeIds = new Set<string>();
+  const validIncomingExecNodeIds = new Set<string>();
+  const outgoingExecByNodePort = new Map<string, Set<string>>();
 
   for (const edge of graph.edges) {
     const fromNode = nodeById.get(edge.fromNode);
@@ -374,6 +532,14 @@ export function validateNodeGraph(graph: NodeGraph): NodeGraphValidation {
       });
     }
 
+    if (fromPort.kind === "exec" && toPort.kind === "exec") {
+      validIncomingExecNodeIds.add(edge.toNode);
+      const outgoingPorts =
+        outgoingExecByNodePort.get(edge.fromNode) ?? new Set<string>();
+      outgoingPorts.add(edge.fromPort);
+      outgoingExecByNodePort.set(edge.fromNode, outgoingPorts);
+    }
+
     if (
       fromPort.kind === "data" &&
       toPort.kind === "data" &&
@@ -407,6 +573,68 @@ export function validateNodeGraph(graph: NodeGraph): NodeGraphValidation {
         message: `No '${node.label}' ainda esta solto no fluxo.`,
       });
     }
+
+    const hasExecInput = node.inputs.some((port) => port.kind === "exec");
+    if (
+      hasExecInput &&
+      !isExecEntryNode(node) &&
+      !validIncomingExecNodeIds.has(node.id)
+    ) {
+      issues.push({
+        severity: "warning",
+        code: "node_without_exec_input",
+        nodeId: node.id,
+        message: `No '${node.label}' tem entrada exec sem ligacao de entrada.`,
+      });
+    }
+
+    if (isBranchingExecNode(node)) {
+      const connectedOutputs = outgoingExecByNodePort.get(node.id) ?? new Set();
+      const missingOutputs = node.outputs
+        .filter((port) => port.kind === "exec")
+        .filter((port) => !connectedOutputs.has(port.id));
+      if (missingOutputs.length > 0) {
+        issues.push({
+          severity: "warning",
+          code: "branch_without_output",
+          nodeId: node.id,
+          message: `Branch '${node.label}' tem saida sem destino: ${missingOutputs
+            .map((port) => port.label || port.id)
+            .join(", ")}.`,
+        });
+      }
+    }
+
+    if (isBlockingBridgeNode(node)) {
+      issues.push({
+        severity: "error",
+        code: "blocking_bridge",
+        nodeId: node.id,
+        message: `Bridge bloqueante '${node.label}' preserva fonte sem conversao executavel.`,
+      });
+    }
+
+    if (node.type === "input_command" && !commandNodeHasBinding(node, context)) {
+      issues.push({
+        severity: "error",
+        code: "input_command_unbound",
+        nodeId: node.id,
+        message: `Comando de input '${String(
+          node.params.command_id ?? node.label,
+        )}' nao tem binding em SpriteComponent.commands.`,
+      });
+    }
+
+    if (nodeReferencesMissingAnimation(node, context)) {
+      issues.push({
+        severity: "error",
+        code: "missing_animation",
+        nodeId: node.id,
+        message: `Animacao '${String(
+          node.type === "sprite_anim" ? node.params.anim : node.params.state,
+        )}' referenciada por '${node.label}' nao existe no sprite alvo.`,
+      });
+    }
   }
 
   for (const cycle of collectExecCycles(graph, nodeById)) {
@@ -421,6 +649,148 @@ export function validateNodeGraph(graph: NodeGraph): NodeGraphValidation {
   return {
     errors: issues.filter((issue) => issue.severity === "error"),
     warnings: issues.filter((issue) => issue.severity === "warning"),
+  };
+}
+
+function collectReachableExecNodeIds(graph: NodeGraph): string[] {
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const adjacency = new Map<string, string[]>();
+
+  for (const edge of graph.edges) {
+    const fromNode = nodeById.get(edge.fromNode);
+    const toNode = nodeById.get(edge.toNode);
+    if (!fromNode || !toNode) {
+      continue;
+    }
+    const fromPort = findPort(fromNode, edge.fromPort, "output");
+    const toPort = findPort(toNode, edge.toPort, "input");
+    if (fromPort?.kind !== "exec" || toPort?.kind !== "exec") {
+      continue;
+    }
+    adjacency.set(edge.fromNode, [
+      ...(adjacency.get(edge.fromNode) ?? []),
+      edge.toNode,
+    ]);
+  }
+
+  const queue = graph.nodes
+    .filter((node) => isExecEntryNode(node))
+    .map((node) => node.id);
+  const reachable: string[] = [];
+  const seen = new Set<string>();
+
+  while (queue.length > 0) {
+    const nodeId = queue.shift();
+    if (!nodeId || seen.has(nodeId)) {
+      continue;
+    }
+    seen.add(nodeId);
+    reachable.push(nodeId);
+    for (const nextId of adjacency.get(nodeId) ?? []) {
+      if (!seen.has(nextId)) {
+        queue.push(nextId);
+      }
+    }
+  }
+
+  return reachable;
+}
+
+function traceKindsForNode(node: GraphNode): NodeGraphTraceKind[] {
+  if (
+    node.type === "input_pressed" ||
+    node.type === "input_held" ||
+    node.type === "input_command"
+  ) {
+    return ["input event", "condition"];
+  }
+  if (node.type.startsWith("event_")) {
+    return ["input event"];
+  }
+  if (
+    node.type.startsWith("condition_") ||
+    node.type === "flow_if" ||
+    node.type === "flow_while" ||
+    node.type === "hardware_budget_check"
+  ) {
+    return ["condition"];
+  }
+  return ["action"];
+}
+
+function buildNodeTraceDetail(node: GraphNode, kind: NodeGraphTraceKind): string {
+  if (kind === "output") {
+    return "Saida exec alcancavel nesta simulacao local.";
+  }
+  if (node.type === "input_command") {
+    return `command_id=${String(node.params.command_id ?? node.id)}`;
+  }
+  if (node.type === "set_animation_state") {
+    return `state=${String(node.params.state ?? "")}`;
+  }
+  if (node.type === "sprite_anim") {
+    return `anim=${String(node.params.anim ?? "")}`;
+  }
+  if (node.type === "bridge_unconverted_source") {
+    return `bridge=${String(node.params.gap ?? "source")}`;
+  }
+  return getNodeDisplayName(node.type);
+}
+
+function buildSimulatedTrace(
+  graph: NodeGraph,
+  reachableNodeIds: string[],
+): NodeGraphTraceStep[] {
+  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
+  const trace: NodeGraphTraceStep[] = [];
+
+  for (const nodeId of reachableNodeIds) {
+    const node = nodeById.get(nodeId);
+    if (!node) {
+      continue;
+    }
+    for (const kind of traceKindsForNode(node)) {
+      trace.push({
+        kind,
+        nodeId: node.id,
+        label: node.label || getNodeDisplayName(node.type),
+        detail: buildNodeTraceDetail(node, kind),
+      });
+    }
+  }
+
+  const reachableSet = new Set(reachableNodeIds);
+  for (const edge of graph.edges) {
+    if (!reachableSet.has(edge.fromNode) || !reachableSet.has(edge.toNode)) {
+      continue;
+    }
+    const fromNode = nodeById.get(edge.fromNode);
+    const toNode = nodeById.get(edge.toNode);
+    const fromPort = fromNode
+      ? findPort(fromNode, edge.fromPort, "output")
+      : undefined;
+    const toPort = toNode ? findPort(toNode, edge.toPort, "input") : undefined;
+    if (fromPort?.kind !== "exec" || toPort?.kind !== "exec") {
+      continue;
+    }
+    trace.push({
+      kind: "output",
+      nodeId: edge.fromNode,
+      label: `${edge.fromPort} -> ${edge.toNode}`,
+      detail: "Transicao exec simulada por aresta local.",
+    });
+  }
+
+  return trace;
+}
+
+function inspectNodeGraphExecution(graph: NodeGraph): NodeGraphExecutionInspection {
+  const reachableNodeIds = collectReachableExecNodeIds(graph);
+  return {
+    evidence: "simulated",
+    evidenceLabel: "simulado / nao instrumentado",
+    reachableNodeIds,
+    trace: buildSimulatedTrace(graph, reachableNodeIds),
   };
 }
 
@@ -472,6 +842,7 @@ function isNodeType(value: unknown): value is NodeType {
     value === "event_update" ||
     value === "input_pressed" ||
     value === "input_held" ||
+    value === "input_command" ||
     value === "sprite_move" ||
     value === "set_velocity" ||
     value === "set_position" ||
@@ -1707,6 +2078,7 @@ interface NodeCardProps {
   screenX: number;
   screenY: number;
   selected: boolean;
+  executionReachable?: boolean;
   onMouseDown: (e: React.MouseEvent) => void;
   onPortMouseDown: (e: React.MouseEvent, portId: string, isOutput: boolean) => void;
   onPortMouseUp: (e: React.MouseEvent, portId: string, isOutput: boolean) => void;
@@ -1717,6 +2089,7 @@ function NodeCard({
   screenX,
   screenY,
   selected,
+  executionReachable = false,
   onMouseDown,
   onPortMouseDown,
   onPortMouseUp,
@@ -1729,8 +2102,13 @@ function NodeCard({
   return (
     <div
       data-testid={`node-card-${node.id}`}
+      data-execution-reachable={executionReachable ? "true" : undefined}
       className={`absolute select-none min-w-[160px] rounded-xl border border-slate-700 bg-slate-900/90 shadow-lg backdrop-blur-sm ${
         selected ? "ring-2 ring-blue-500 shadow-2xl" : ""
+      } ${
+        executionReachable
+          ? "ring-2 ring-[#a6e3a1] shadow-[0_0_24px_rgba(166,227,161,0.22)]"
+          : ""
       }`}
       style={{ left: screenX, top: screenY }}
       onMouseDown={onMouseDown}
@@ -1926,6 +2304,7 @@ export default function NodeGraphEditor() {
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const [guidedCommentary, setGuidedCommentary] = useState<GuidedFlowCommentary | null>(null);
   const [gapFilter, setGapFilter] = useState("");
+  const [executionInspectorEnabled, setExecutionInspectorEnabled] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
   const saveTimerRef = useRef<number | null>(null);
@@ -1946,6 +2325,7 @@ export default function NodeGraphEditor() {
       setViewOffset({ x: 0, y: 0 });
       setGuidedCommentary(null);
       setGapFilter("");
+      setExecutionInspectorEnabled(false);
       lastPersistedGraphRef.current = serializeNodeGraph(nextGraph);
     };
     const entityGraph = selectedEntity?.components.logic?.graph;
@@ -2413,7 +2793,25 @@ export default function NodeGraphEditor() {
   }
 
   const graphSummary = useMemo(() => summarizeNodeGraph(graph), [graph]);
-  const graphValidation = useMemo(() => validateNodeGraph(graph), [graph]);
+  const graphValidation = useMemo(
+    () =>
+      validateNodeGraph(graph, {
+        selectedEntity,
+        sceneEntities: activeScene?.entities ?? [],
+      }),
+    [activeScene?.entities, graph, selectedEntity]
+  );
+  const executionInspection = useMemo(
+    () => inspectNodeGraphExecution(graph),
+    [graph]
+  );
+  const reachableExecutionNodeIds = useMemo(
+    () =>
+      executionInspectorEnabled
+        ? new Set(executionInspection.reachableNodeIds)
+        : new Set<string>(),
+    [executionInspection.reachableNodeIds, executionInspectorEnabled]
+  );
   const graphValidationPreview = [...graphValidation.errors, ...graphValidation.warnings].slice(0, 3);
   const miniMapNodes = useMemo(
     () => buildNodeMiniMap(graph, MINIMAP_WIDTH, MINIMAP_HEIGHT, MINIMAP_PADDING),
@@ -2445,6 +2843,24 @@ export default function NodeGraphEditor() {
       height: viewportHeight,
     };
   }, [canvasSize.height, canvasSize.width, graphBounds, viewOffset.x, viewOffset.y]);
+
+  const toggleExecutionInspector = useCallback(() => {
+    setExecutionInspectorEnabled((enabled) => {
+      const next = !enabled;
+      if (next) {
+        logMessage(
+          "info",
+          `[NodeGraph Diagnostics] Inspecao de execucao: ${graphValidation.errors.length} erro(s), ${graphValidation.warnings.length} aviso(s), ${executionInspection.evidenceLabel}.`
+        );
+      }
+      return next;
+    });
+  }, [
+    executionInspection.evidenceLabel,
+    graphValidation.errors.length,
+    graphValidation.warnings.length,
+    logMessage,
+  ]);
 
   const focusNode = useCallback((nodeId: string) => {
     const targetNode = graph.nodes.find((node) => node.id === nodeId);
@@ -2822,6 +3238,62 @@ export default function NodeGraphEditor() {
               </div>
             )}
 
+            {executionInspectorEnabled ? (
+              <div
+                data-testid="nodegraph-execution-inspector"
+                className="rounded border border-[#a6e3a1]/35 bg-[#0f1a17] px-2 py-1.5 text-[10px] leading-snug text-[#bac2de]"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#a6e3a1]">
+                      Inspecao de execucao
+                    </p>
+                    <p className="mt-1 text-[#94a3b8]">
+                      {executionInspection.evidenceLabel}
+                    </p>
+                  </div>
+                  <span className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[9px] font-semibold text-[#cdd6f4]">
+                    {executionInspection.reachableNodeIds.length} nos
+                  </span>
+                </div>
+
+                <div className="mt-2 rounded border border-[#313244] bg-[#11111b]/80 px-2 py-1">
+                  <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#f9e2af]">
+                    Diagnostics
+                  </p>
+                  <p className="mt-1 text-[#a6adc8]">
+                    {graphValidation.errors.length} erro(s) /{" "}
+                    {graphValidation.warnings.length} aviso(s)
+                  </p>
+                </div>
+
+                <ol className="mt-2 space-y-1">
+                  {executionInspection.trace.length > 0 ? (
+                    executionInspection.trace.slice(0, 8).map((step, index) => (
+                      <li
+                        key={`${step.kind}-${step.nodeId ?? "edge"}-${index}`}
+                        className="rounded border border-[#313244] bg-[#11111b]/70 px-2 py-1"
+                      >
+                        <span className="font-mono text-[9px] text-[#89b4fa]">
+                          {step.kind}
+                        </span>
+                        <span className="ml-1 font-semibold text-[#cdd6f4]">
+                          {step.label}
+                        </span>
+                        <span className="mt-0.5 block text-[#7f849c]">
+                          {step.detail}
+                        </span>
+                      </li>
+                    ))
+                  ) : (
+                    <li className="rounded border border-[#313244] bg-[#11111b]/70 px-2 py-1 text-[#f9e2af]">
+                      Nenhum no executavel alcancavel por simulacao local.
+                    </li>
+                  )}
+                </ol>
+              </div>
+            ) : null}
+
             {importedSemantics ? (
               <div className="rounded border border-[#45475a] bg-[#11111b] px-2 py-1.5 text-[10px] leading-snug text-[#bac2de]">
                 <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#94e2d5]">
@@ -2900,6 +3372,19 @@ export default function NodeGraphEditor() {
             ) : null}
 
             <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                data-testid="nodegraph-inspect-execution-toggle"
+                onClick={toggleExecutionInspector}
+                disabled={graph.nodes.length === 0}
+                className={`rounded border px-2 py-1 font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                  executionInspectorEnabled
+                    ? "border-[#a6e3a1]/60 bg-[#a6e3a1]/20 text-[#a6e3a1]"
+                    : "border-[#313244] bg-[#11111b] text-[#cdd6f4] hover:border-[#a6e3a1]/50 hover:text-[#a6e3a1]"
+                }`}
+              >
+                Inspecionar execucao
+              </button>
               <button
                 type="button"
                 data-testid="nodegraph-focus-entry"
@@ -3025,6 +3510,7 @@ export default function NodeGraphEditor() {
             screenX={node.x + viewOffset.x}
             screenY={node.y + viewOffset.y}
             selected={node.id === selectedId}
+            executionReachable={reachableExecutionNodeIds.has(node.id)}
             onMouseDown={(e) => onNodeMouseDown(e, node.id)}
             onPortMouseDown={(e, portId, isOutput) => onPortMouseDown(e, node.id, portId, isOutput)}
             onPortMouseUp={(e, portId, isOutput) => onPortMouseUp(e, node.id, portId, isOutput)}
