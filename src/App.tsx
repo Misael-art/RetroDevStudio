@@ -1121,7 +1121,7 @@ function getActiveShortcutScope(workspace: EditorWorkspace): string {
   return "global";
 }
 
-function CommandPaletteDialog({
+export function CommandPaletteDialog({
   results,
   query,
   shortcuts,
@@ -1141,6 +1141,7 @@ function CommandPaletteDialog({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const activeResults = results.filter((result) => !isCommandDisabled(result.command.id));
+  const activeResultCount = activeResults.length;
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -1151,8 +1152,20 @@ function CommandPaletteDialog({
     setSelectedIndex(0);
   }, [query]);
 
+  useEffect(() => {
+    setSelectedIndex((current) => {
+      if (activeResultCount === 0) {
+        return 0;
+      }
+      return Math.min(current, activeResultCount - 1);
+    });
+  }, [activeResultCount]);
+
   function executeSelected() {
-    const selected = activeResults[Math.min(selectedIndex, Math.max(activeResults.length - 1, 0))];
+    if (activeResultCount === 0) {
+      return;
+    }
+    const selected = activeResults[Math.min(selectedIndex, activeResultCount - 1)];
     if (selected) {
       onExecute(selected.command.id);
     }
@@ -1190,7 +1203,7 @@ function CommandPaletteDialog({
                 executeSelected();
               } else if (event.key === "ArrowDown") {
                 event.preventDefault();
-                setSelectedIndex((current) => Math.min(current + 1, Math.max(activeResults.length - 1, 0)));
+                setSelectedIndex((current) => Math.min(current + 1, Math.max(activeResultCount - 1, 0)));
               } else if (event.key === "ArrowUp") {
                 event.preventDefault();
                 setSelectedIndex((current) => Math.max(current - 1, 0));
@@ -1207,40 +1220,68 @@ function CommandPaletteDialog({
             </div>
           ) : (
             <div className="grid gap-1">
-              {results.map((result, index) => {
-                const command = result.command;
-                const disabled = isCommandDisabled(command.id);
-                const shortcut = getShortcutLabel(command.id, shortcuts);
-                return (
-                  <button
-                    key={command.id}
-                    type="button"
-                    data-testid={`command-palette-item-${command.id}`}
-                    disabled={disabled}
-                    onClick={() => onExecute(command.id)}
-                    className={`grid grid-cols-[1fr_auto] items-center gap-3 rounded border px-3 py-2 text-left transition-colors ${
-                      index === selectedIndex
-                        ? "border-[#89b4fa]/50 bg-[#1e293b]"
-                        : "border-transparent bg-[#0b1020] hover:border-[#334155]"
-                    } disabled:cursor-not-allowed disabled:opacity-45`}
-                  >
-                    <span className="min-w-0">
-                      <span className="block truncate text-xs font-semibold text-[#e2e8f0]">
-                        {command.label}
+              {activeResultCount === 0 ? (
+                <div
+                  data-testid="command-palette-no-active-results"
+                  className="rounded border border-[#313244] bg-[#0b1020] px-3 py-2 text-xs text-[#94a3b8]"
+                >
+                  Nenhum comando disponivel neste contexto.
+                </div>
+              ) : null}
+              {(() => {
+                let activeResultIndex = -1;
+                return results.map((result) => {
+                  const command = result.command;
+                  const disabled = isCommandDisabled(command.id);
+                  const shortcut = getShortcutLabel(command.id, shortcuts);
+                  const resultActiveIndex = disabled ? -1 : ++activeResultIndex;
+                  const selected = resultActiveIndex === selectedIndex;
+                  return (
+                    <button
+                      key={command.id}
+                      type="button"
+                      data-testid={`command-palette-item-${command.id}`}
+                      data-selected={selected ? "true" : "false"}
+                      disabled={disabled}
+                      onMouseEnter={() => {
+                        if (resultActiveIndex >= 0) {
+                          setSelectedIndex(resultActiveIndex);
+                        }
+                      }}
+                      onFocus={() => {
+                        if (resultActiveIndex >= 0) {
+                          setSelectedIndex(resultActiveIndex);
+                        }
+                      }}
+                      onClick={() => {
+                        if (resultActiveIndex >= 0) {
+                          onExecute(command.id);
+                        }
+                      }}
+                      className={`grid grid-cols-[1fr_auto] items-center gap-3 rounded border px-3 py-2 text-left transition-colors ${
+                        selected
+                          ? "border-[#89b4fa]/50 bg-[#1e293b]"
+                          : "border-transparent bg-[#0b1020] hover:border-[#334155]"
+                      } disabled:cursor-not-allowed disabled:opacity-45`}
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-xs font-semibold text-[#e2e8f0]">
+                          {command.label}
+                        </span>
+                        <span className="block truncate text-[10px] text-[#64748b]">
+                          {command.group}
+                          {command.description ? ` · ${command.description}` : ""}
+                        </span>
                       </span>
-                      <span className="block truncate text-[10px] text-[#64748b]">
-                        {command.group}
-                        {command.description ? ` · ${command.description}` : ""}
-                      </span>
-                    </span>
-                    {shortcut ? (
-                      <kbd className="rounded border border-[#334155] bg-[#020617] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#f9e2af]">
-                        {shortcut}
-                      </kbd>
-                    ) : null}
-                  </button>
-                );
-              })}
+                      {shortcut ? (
+                        <kbd className="rounded border border-[#334155] bg-[#020617] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#f9e2af]">
+                          {shortcut}
+                        </kbd>
+                      ) : null}
+                    </button>
+                  );
+                });
+              })()}
             </div>
           )}
         </div>

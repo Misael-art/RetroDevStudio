@@ -1,8 +1,9 @@
 import { act, useEffect, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import App from "./App";
+import App, { CommandPaletteDialog } from "./App";
 import { getGameViewportScale } from "./components/viewport/gameViewportScale";
+import type { CommandSearchResult, ShortcutCommand } from "./core/shortcuts";
 import { useEditorStore } from "./core/store/editorStore";
 import { LIVE_VALIDATION_DEBOUNCE_MS } from "./core/validation/liveValidationController";
 
@@ -646,6 +647,206 @@ async function flushUntil(condition: () => boolean, attempts = 8, delayMs = 0) {
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
+
+describe("CommandPaletteDialog", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  let onExecute: ReturnType<typeof vi.fn<(commandId: string) => void>>;
+
+  const commands: ShortcutCommand[] = [
+    {
+      id: "disabled.top",
+      group: "Teste",
+      label: "Disabled Top",
+      keys: [],
+      palette: true,
+    },
+    {
+      id: "enabled.one",
+      group: "Teste",
+      label: "Enabled One",
+      keys: [],
+      palette: true,
+    },
+    {
+      id: "enabled.two",
+      group: "Teste",
+      label: "Enabled Two",
+      keys: [],
+      palette: true,
+    },
+  ];
+
+  function resultsFor(query: string): CommandSearchResult[] {
+    const normalizedQuery = query.trim().toLowerCase();
+    return commands
+      .filter(
+        (command) =>
+          !normalizedQuery ||
+          command.id.includes(normalizedQuery) ||
+          command.label.toLowerCase().includes(normalizedQuery)
+      )
+      .map((command, index) => ({ command, score: 100 - index }));
+  }
+
+  function renderPalette(disabledIds: ReadonlySet<string>) {
+    function Harness() {
+      const [query, setQuery] = useState("");
+      return (
+        <CommandPaletteDialog
+          results={resultsFor(query)}
+          query={query}
+          shortcuts={commands}
+          onQueryChange={setQuery}
+          onExecute={onExecute}
+          onClose={vi.fn()}
+          isCommandDisabled={(commandId) => disabledIds.has(commandId)}
+        />
+      );
+    }
+
+    root.render(<Harness />);
+  }
+
+  function paletteSearchInput() {
+    const input = container.querySelector("[data-testid='command-palette-search']");
+    expect(input).toBeInstanceOf(HTMLInputElement);
+    return input as HTMLInputElement;
+  }
+
+  function paletteItem(commandId: string) {
+    const item = container.querySelector(`[data-testid='command-palette-item-${commandId}']`);
+    expect(item).toBeInstanceOf(HTMLButtonElement);
+    return item as HTMLButtonElement;
+  }
+
+  async function pressPaletteKey(key: string) {
+    await act(async () => {
+      paletteSearchInput().dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+      await flush();
+    });
+  }
+
+  beforeEach(async () => {
+    onExecute = vi.fn<(commandId: string) => void>();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+
+  afterEach(async () => {
+    await act(async () => {
+      root.unmount();
+      await flush();
+    });
+    container.remove();
+  });
+
+  it("highlights the first executable result and Enter executes that same command", async () => {
+    await act(async () => {
+      renderPalette(new Set(["disabled.top"]));
+      await flush();
+    });
+
+    expect(paletteItem("disabled.top").disabled).toBe(true);
+    expect(paletteItem("disabled.top").dataset.selected).toBe("false");
+    expect(paletteItem("enabled.one").dataset.selected).toBe("true");
+
+    await pressPaletteKey("Enter");
+
+    expect(onExecute).toHaveBeenCalledTimes(1);
+    expect(onExecute).toHaveBeenCalledWith("enabled.one");
+  });
+
+  it("keeps ArrowDown and ArrowUp selection aligned with execution", async () => {
+    await act(async () => {
+      renderPalette(new Set(["disabled.top"]));
+      await flush();
+    });
+
+    await pressPaletteKey("ArrowDown");
+    expect(paletteItem("enabled.two").dataset.selected).toBe("true");
+    await pressPaletteKey("Enter");
+    expect(onExecute).toHaveBeenLastCalledWith("enabled.two");
+
+    await pressPaletteKey("ArrowUp");
+    expect(paletteItem("enabled.one").dataset.selected).toBe("true");
+    await pressPaletteKey("Enter");
+    expect(onExecute).toHaveBeenLastCalledWith("enabled.one");
+  });
+
+  it("does not execute disabled items by click and keeps hover selection on executable rows", async () => {
+    await act(async () => {
+      renderPalette(new Set(["disabled.top"]));
+      await flush();
+    });
+
+    await act(async () => {
+      paletteItem("disabled.top").click();
+      paletteItem("disabled.top").dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      await flush();
+    });
+
+    expect(onExecute).not.toHaveBeenCalled();
+    expect(paletteItem("enabled.one").dataset.selected).toBe("true");
+
+    await act(async () => {
+      paletteItem("enabled.two").dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      await flush();
+    });
+
+    expect(paletteItem("enabled.two").dataset.selected).toBe("true");
+
+    await act(async () => {
+      paletteItem("enabled.two").click();
+      await flush();
+    });
+
+    expect(onExecute).toHaveBeenCalledWith("enabled.two");
+  });
+
+  it("keeps Enter safe when every visible command is disabled", async () => {
+    await act(async () => {
+      renderPalette(new Set(commands.map((command) => command.id)));
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='command-palette-no-active-results']")).toBeInstanceOf(
+      HTMLDivElement
+    );
+    expect(paletteItem("disabled.top").dataset.selected).toBe("false");
+
+    await pressPaletteKey("Enter");
+    await act(async () => {
+      paletteItem("enabled.one").click();
+      await flush();
+    });
+
+    expect(onExecute).not.toHaveBeenCalled();
+  });
+
+  it("resets selection safely when search filters shrink the active result list", async () => {
+    await act(async () => {
+      renderPalette(new Set(["disabled.top"]));
+      await flush();
+    });
+
+    await pressPaletteKey("ArrowDown");
+    expect(paletteItem("enabled.two").dataset.selected).toBe("true");
+
+    await act(async () => {
+      setControlledInputValue(paletteSearchInput(), "one");
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='command-palette-item-enabled.two']")).toBeNull();
+    expect(paletteItem("enabled.one").dataset.selected).toBe("true");
+
+    await pressPaletteKey("Enter");
+
+    expect(onExecute).toHaveBeenCalledWith("enabled.one");
+  });
+});
 
 function createDependencyStatus(id: string) {
   return {
