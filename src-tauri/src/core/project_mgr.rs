@@ -18,8 +18,8 @@ use crate::ugdm::components::{
 use crate::ugdm::entities::RetroFXRasterLine;
 use crate::ugdm::entities::{
     BackgroundLayer, BuildConfig, CollisionMap, Entity, PaletteEntry, PatchAuditEntry, Project,
-    Resolution, RetroFXConfig, RetroFXParallaxLayer, Scene, SceneLayer, ScrollSpeed,
-    TemplateMetadata, CURRENT_SCHEMA_VERSION,
+    ProjectSettings, Resolution, RetroFXConfig, RetroFXParallaxLayer, SaveRamConfig, Scene,
+    SceneLayer, ScrollSpeed, TemplateMetadata, CURRENT_SCHEMA_VERSION,
 };
 
 pub const UGDM_VERSION: &str = "1.0.0";
@@ -103,6 +103,29 @@ pub struct ExternalImportReport {
     pub primary_scene: Scene,
     pub imported_scenes: usize,
     pub skipped_sources: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct ProjectSettingsPayload {
+    pub target: String,
+    pub region: String,
+    pub video_standard: String,
+    pub internal_rom_name: String,
+    pub sram: SaveRamConfig,
+    pub save_slots: u8,
+    pub debug_overlay: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct ProjectSettingsSnapshot {
+    pub target: String,
+    pub region: String,
+    pub video_standard: String,
+    pub internal_rom_name: String,
+    pub sram: SaveRamConfig,
+    pub save_slots: u8,
+    pub debug_overlay: bool,
+    pub warnings: Vec<String>,
 }
 
 /// Fonte descartada durante o import SGDK com motivo rastreavel.
@@ -864,6 +887,13 @@ pub fn default_build_config() -> BuildConfig {
     }
 }
 
+pub fn default_project_settings(project_name: &str) -> ProjectSettings {
+    ProjectSettings {
+        internal_rom_name: normalize_internal_rom_name(project_name),
+        ..ProjectSettings::default()
+    }
+}
+
 pub fn canonical_project(project_name: &str, target: &str) -> Result<Project, LoadError> {
     let trimmed_name = project_name.trim();
     if trimmed_name.is_empty() {
@@ -884,6 +914,7 @@ pub fn canonical_project(project_name: &str, target: &str) -> Result<Project, Lo
         palette_mode: spec.palette_mode.to_string(),
         entry_scene: DEFAULT_ENTRY_SCENE.to_string(),
         build: Some(default_build_config()),
+        settings: default_project_settings(trimmed_name),
         template_metadata: None,
     })
 }
@@ -13332,6 +13363,69 @@ pub fn update_project_target(project_dir: &Path, target: &str) -> Result<Project
     Ok(project)
 }
 
+pub fn project_settings_snapshot(project: &Project) -> ProjectSettingsSnapshot {
+    ProjectSettingsSnapshot {
+        target: project.target.clone(),
+        region: project.settings.region.clone(),
+        video_standard: project.settings.video_standard.clone(),
+        internal_rom_name: project.settings.internal_rom_name.clone(),
+        sram: project.settings.sram.clone(),
+        save_slots: project.settings.save_slots,
+        debug_overlay: project.settings.debug_overlay,
+        warnings: project_settings_warnings(project),
+    }
+}
+
+pub fn load_project_settings(project_dir: &Path) -> Result<ProjectSettingsSnapshot, LoadError> {
+    let project = load_project(project_dir)?;
+    Ok(project_settings_snapshot(&project))
+}
+
+pub fn update_project_settings(
+    project_dir: &Path,
+    payload: ProjectSettingsPayload,
+) -> Result<ProjectSettingsSnapshot, LoadError> {
+    let mut project = load_project(project_dir)?;
+    let spec = target_spec(&payload.target)?;
+    project.target = spec.target.to_string();
+    project.resolution = spec.resolution();
+    project.palette_mode = spec.palette_mode.to_string();
+    project.fps = match payload.video_standard.as_str() {
+        "pal" => 50,
+        _ => 60,
+    };
+    project.settings = ProjectSettings {
+        region: payload.region,
+        video_standard: payload.video_standard,
+        internal_rom_name: payload.internal_rom_name.trim().to_string(),
+        sram: payload.sram,
+        save_slots: payload.save_slots,
+        debug_overlay: payload.debug_overlay,
+    };
+    save_project(project_dir, &project)?;
+    Ok(project_settings_snapshot(&load_project(project_dir)?))
+}
+
+pub fn project_settings_warnings(project: &Project) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if project.target == "megadrive" && project.settings.sram.enabled {
+        warnings.push("SRAM sera declarada no header da ROM Mega Drive no proximo build.".to_string());
+        warnings.push("Build precisa passar antes de tratar save como funcional; runtime save depende de observacao Libretro/AAA.".to_string());
+    } else if project.target == "megadrive" {
+        warnings.push("SRAM off: ROM Mega Drive nao vai declarar backup RAM.".to_string());
+    } else if project.settings.sram.enabled {
+        warnings.push("SRAM configurada fica preparada no schema, mas o build atual so aplica header SRAM no Mega Drive.".to_string());
+    }
+
+    warnings.push("Save runtime ainda nao comprovado: use Build & Run e ROM report antes de tratar save como funcional.".to_string());
+
+    if project.settings.debug_overlay {
+        warnings.push("Debug overlay sera tratado como contrato de build/runtime, sem prometer HUD final no jogo.".to_string());
+    }
+
+    warnings
+}
+
 pub fn seed_onboarding_template(project_dir: &Path, target: &str) -> Result<Scene, LoadError> {
     let sprite_absolute_path = onboarding_sprite_path(project_dir);
 
@@ -13689,6 +13783,7 @@ pub fn migrate_project(mut project: Project) -> Project {
         CURRENT_SCHEMA_VERSION,
     );
     project.schema_version = schema_version.clone();
+    normalize_project_settings(&mut project);
     if let Some(build) = project.build.as_mut() {
         if build.artifact_prefix.trim().is_empty() {
             build.artifact_prefix = default_build_config().artifact_prefix;
@@ -13759,6 +13854,78 @@ pub fn validate_project(project: &Project) -> Result<(), LoadError> {
 
     if let Some(build) = &project.build {
         validate_build_config(build)?;
+    }
+
+    validate_project_settings(project)?;
+
+    Ok(())
+}
+
+fn validate_project_settings(project: &Project) -> Result<(), LoadError> {
+    match project.settings.region.as_str() {
+        "world" | "usa" | "japan" | "europe" => {}
+        other => {
+            return Err(LoadError(format!(
+                "project.rds: settings.region '{}' invalido. Use 'world', 'usa', 'japan' ou 'europe'.",
+                other
+            )))
+        }
+    }
+
+    match project.settings.video_standard.as_str() {
+        "ntsc" if project.fps == 60 => {}
+        "pal" if project.fps == 50 => {}
+        "ntsc" => {
+            return Err(LoadError(
+                "project.rds: settings.video_standard NTSC requer fps=60.".into(),
+            ))
+        }
+        "pal" => {
+            return Err(LoadError(
+                "project.rds: settings.video_standard PAL requer fps=50.".into(),
+            ))
+        }
+        other => {
+            return Err(LoadError(format!(
+                "project.rds: settings.video_standard '{}' invalido. Use 'ntsc' ou 'pal'.",
+                other
+            )))
+        }
+    }
+
+    let title = project.settings.internal_rom_name.trim();
+    if title.is_empty() {
+        return Err(LoadError(
+            "project.rds: settings.internal_rom_name nao pode ser vazio.".into(),
+        ));
+    }
+    if title.len() > 48 {
+        return Err(LoadError(
+            "project.rds: settings.internal_rom_name deve ter no maximo 48 bytes ASCII.".into(),
+        ));
+    }
+    if !title
+        .bytes()
+        .all(|byte| matches!(byte, 0x20..=0x7E))
+    {
+        return Err(LoadError(
+            "project.rds: settings.internal_rom_name aceita apenas ASCII imprimivel.".into(),
+        ));
+    }
+
+    if !matches!(
+        project.settings.sram.size_bytes,
+        2048 | 8192 | 16384 | 32768 | 65536
+    ) {
+        return Err(LoadError(
+            "project.rds: settings.sram.size_bytes invalido. Use 2048, 8192, 16384, 32768 ou 65536.".into(),
+        ));
+    }
+
+    if !(1..=16).contains(&project.settings.save_slots) {
+        return Err(LoadError(
+            "project.rds: settings.save_slots deve ficar entre 1 e 16.".into(),
+        ));
     }
 
     Ok(())
@@ -13850,6 +14017,48 @@ fn schema_warning_message(scope: &str, version: &str) -> Option<String> {
     }
 }
 
+fn normalize_internal_rom_name(name: &str) -> String {
+    let mut normalized = name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, ' ' | '-' | '_' | '.') {
+                ch.to_ascii_uppercase()
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>();
+    normalized = normalized.split_whitespace().collect::<Vec<_>>().join(" ");
+    normalized.truncate(48);
+    if normalized.trim().is_empty() {
+        "RETRODEV GAME".to_string()
+    } else {
+        normalized
+    }
+}
+
+fn normalize_project_settings(project: &mut Project) {
+    if project.settings.region.trim().is_empty() {
+        project.settings.region = "world".to_string();
+    }
+    if project.settings.video_standard.trim().is_empty() {
+        project.settings.video_standard = if project.fps == 50 {
+            "pal".to_string()
+        } else {
+            "ntsc".to_string()
+        };
+    }
+    if project.settings.internal_rom_name.trim().is_empty() {
+        project.settings.internal_rom_name = normalize_internal_rom_name(&project.name);
+    }
+    if project.settings.sram.size_bytes == 0 {
+        project.settings.sram.size_bytes = 8192;
+    }
+    if project.settings.save_slots == 0 {
+        project.settings.save_slots = 1;
+    }
+}
+
 fn migrate_project_value(mut value: serde_json::Value) -> Result<serde_json::Value, LoadError> {
     let mut version = schema_version_from_value(&value, LEGACY_SCHEMA_VERSION);
 
@@ -13872,6 +14081,7 @@ fn migrate_project_value(mut value: serde_json::Value) -> Result<serde_json::Val
             "1.3.0" => migrate_project_1_3_0_to_1_4_0(value)?,
             "1.4.0" => migrate_project_1_4_0_to_1_5_0(value)?,
             "1.5.0" => migrate_project_1_5_0_to_1_6_0(value)?,
+            "1.6.0" => migrate_project_1_6_0_to_1_7_0(value)?,
             _ => {
                 if let Some(warning) = schema_warning_message("project.rds", &version) {
                     eprintln!("{warning}");
@@ -14016,6 +14226,42 @@ fn migrate_project_1_5_0_to_1_6_0(
         "schema_version".to_string(),
         serde_json::Value::String("1.6.0".to_string()),
     );
+    Ok(value)
+}
+
+fn migrate_project_1_6_0_to_1_7_0(
+    mut value: serde_json::Value,
+) -> Result<serde_json::Value, LoadError> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| LoadError("project.rds invalido: raiz JSON deve ser um objeto.".into()))?;
+    object.insert(
+        "schema_version".to_string(),
+        serde_json::Value::String("1.7.0".to_string()),
+    );
+    let project_name = object
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("RetroDev Project");
+    let video_standard = if object.get("fps").and_then(serde_json::Value::as_u64) == Some(50) {
+        "pal"
+    } else {
+        "ntsc"
+    };
+    let internal_rom_name = normalize_internal_rom_name(project_name);
+    object
+        .entry("settings".to_string())
+        .or_insert_with(|| serde_json::json!({
+            "region": "world",
+            "video_standard": video_standard,
+            "internal_rom_name": internal_rom_name,
+            "sram": {
+                "enabled": false,
+                "size_bytes": 8192
+            },
+            "save_slots": 1,
+            "debug_overlay": false
+        }));
     Ok(value)
 }
 
@@ -15013,7 +15259,7 @@ fn sync_parent_dir(_path: &Path) -> io::Result<()> {
 mod tests {
     use super::*;
     use crate::ugdm::components::AnimationDef;
-    use crate::ugdm::entities::Transform;
+    use crate::ugdm::entities::{ProjectSettings, SaveRamConfig, Transform};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn fixture_dir(name: &str) -> std::path::PathBuf {
@@ -18780,6 +19026,7 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             palette_mode: "4x16".to_string(),
             entry_scene: DEFAULT_ENTRY_SCENE.to_string(),
             build: Some(default_build_config()),
+            settings: Default::default(),
             template_metadata: None,
         };
         let scene = Scene {
@@ -19052,6 +19299,106 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         assert_eq!(reloaded.palette_mode, "8x16");
 
         let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn save_and_load_project_preserves_project_settings_in_schema() {
+        let project_dir = temp_dir("project-settings");
+        let mut project = create_project_skeleton(&project_dir, "Save Ready RPG", "megadrive")
+            .expect("create canonical project");
+        project.settings = ProjectSettings {
+            region: "europe".to_string(),
+            video_standard: "pal".to_string(),
+            internal_rom_name: "SAVE READY RPG".to_string(),
+            sram: SaveRamConfig {
+                enabled: true,
+                size_bytes: 32768,
+            },
+            save_slots: 4,
+            debug_overlay: true,
+        };
+        project.fps = 50;
+
+        save_project(&project_dir, &project).expect("save project settings");
+        let reloaded = load_project(&project_dir).expect("reload project settings");
+
+        assert_eq!(reloaded.schema_version, CURRENT_SCHEMA_VERSION);
+        assert_eq!(reloaded.settings.region, "europe");
+        assert_eq!(reloaded.settings.video_standard, "pal");
+        assert_eq!(reloaded.settings.internal_rom_name, "SAVE READY RPG");
+        assert!(reloaded.settings.sram.enabled);
+        assert_eq!(reloaded.settings.sram.size_bytes, 32768);
+        assert_eq!(reloaded.settings.save_slots, 4);
+        assert!(reloaded.settings.debug_overlay);
+
+        let raw_project =
+            fs::read_to_string(project_dir.join("project.rds")).expect("read project.rds");
+        assert!(raw_project.contains("\"settings\""));
+        assert!(raw_project.contains("\"sram\""));
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn update_project_settings_trims_internal_rom_name_before_persisting() {
+        let project_dir = temp_dir("project-settings-trim");
+        create_project_skeleton(&project_dir, "Trim Settings", "megadrive")
+            .expect("create canonical project");
+
+        let snapshot = update_project_settings(
+            &project_dir,
+            ProjectSettingsPayload {
+                target: "megadrive".to_string(),
+                region: "world".to_string(),
+                video_standard: "ntsc".to_string(),
+                internal_rom_name: "  TRIMMED TITLE  ".to_string(),
+                sram: SaveRamConfig {
+                    enabled: true,
+                    size_bytes: 8192,
+                },
+                save_slots: 2,
+                debug_overlay: false,
+            },
+        )
+        .expect("update project settings");
+
+        let reloaded = load_project(&project_dir).expect("reload project settings");
+        assert_eq!(snapshot.internal_rom_name, "TRIMMED TITLE");
+        assert_eq!(reloaded.settings.internal_rom_name, "TRIMMED TITLE");
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn validate_project_rejects_unsafe_project_settings() {
+        let mut project = canonical_project("Invalid Settings", "megadrive")
+            .expect("canonical project");
+        project.settings.internal_rom_name = "INVALID\nTITLE".to_string();
+        let error = validate_project(&project).expect_err("control chars should fail");
+        assert!(error
+            .to_string()
+            .contains("project.rds: settings.internal_rom_name"));
+
+        project.settings.internal_rom_name = "VALID TITLE".to_string();
+        project.settings.sram.enabled = true;
+        project.settings.sram.size_bytes = 12345;
+        let error = validate_project(&project).expect_err("unsupported sram size should fail");
+        assert!(error
+            .to_string()
+            .contains("project.rds: settings.sram.size_bytes"));
+
+        project.settings.sram.size_bytes = 8192;
+        project.settings.save_slots = 0;
+        let error = validate_project(&project).expect_err("zero slots should fail");
+        assert!(error
+            .to_string()
+            .contains("project.rds: settings.save_slots"));
+
+        project.settings.save_slots = 1;
+        project.settings.video_standard = "pal".to_string();
+        project.fps = 60;
+        let error = validate_project(&project).expect_err("PAL/fps mismatch should fail");
+        assert!(error.to_string().contains("PAL requer fps=50"));
     }
 
     #[test]

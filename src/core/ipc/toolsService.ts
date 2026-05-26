@@ -261,6 +261,18 @@ export interface TraceStatus {
   note: string;
 }
 
+export interface SaveRamStatus {
+  status: string;
+  declared: boolean;
+  observed: boolean;
+  missing: boolean;
+  size_bytes: number | null;
+  observed_size_bytes: number | null;
+  address_start: number | null;
+  address_end: number | null;
+  note: string;
+}
+
 export interface ProjectionStatus {
   supported: boolean;
   status: string;
@@ -290,6 +302,7 @@ export interface RomAnalysisManifest {
   logic_hints: LogicHint[];
   annotations: ReverseAnnotation[];
   trace: TraceStatus;
+  save: SaveRamStatus;
   projection_status: ProjectionStatus;
 }
 

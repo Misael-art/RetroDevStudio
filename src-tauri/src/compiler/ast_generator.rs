@@ -2589,6 +2589,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
         let scene = Scene {
@@ -2677,6 +2678,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
         let scene = Scene {
@@ -2745,6 +2747,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
         let scene = Scene {
@@ -2838,6 +2841,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
         let scene = Scene {
@@ -2909,6 +2913,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
         let mut player_mapping = HashMap::new();
@@ -2996,6 +3001,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
         let scene = Scene {
@@ -3086,6 +3092,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
         let mut player_sfx = HashMap::new();
@@ -3181,6 +3188,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
         let scene = Scene {
@@ -3281,6 +3289,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
         let logic_graph = json!({
@@ -3390,6 +3399,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
         let mut animations = HashMap::new();
@@ -3536,6 +3546,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
         let logic_graph = json!({
@@ -3619,6 +3630,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
         let logic_graph = json!({
@@ -3729,6 +3741,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
         let logic_graph = json!({
@@ -3965,6 +3978,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
         let logic_graph = json!({
@@ -4142,6 +4156,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
         let operators = [
@@ -4257,6 +4272,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
 
@@ -4453,6 +4469,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
         let mut animations = HashMap::new();
@@ -4683,6 +4700,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
         let logic_graph = json!({
@@ -4788,6 +4806,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
         let logic_graph = json!({
@@ -4875,6 +4894,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
         let logic_graph = json!({
@@ -4976,6 +4996,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
         let logic_graph = json!({
@@ -5098,6 +5119,7 @@ mod tests {
             palette_mode: "4x16".to_string(),
             entry_scene: "main".to_string(),
             build: None,
+            settings: Default::default(),
             template_metadata: None,
         };
         let scene = Scene {

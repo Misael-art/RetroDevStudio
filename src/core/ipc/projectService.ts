@@ -64,6 +64,30 @@ export interface ExternalImportProfileSummary {
   mega_drive_only: boolean;
 }
 
+export interface SaveRamConfig {
+  enabled: boolean;
+  size_bytes: number;
+}
+
+export interface ProjectSettingsSnapshot {
+  target: "megadrive" | "snes";
+  region: string;
+  video_standard: string;
+  internal_rom_name: string;
+  sram: SaveRamConfig;
+  save_slots: number;
+  debug_overlay: boolean;
+  warnings: string[];
+}
+
+export type ProjectSettingsPayload = Omit<ProjectSettingsSnapshot, "warnings">;
+
+export interface ProjectSettingsUpdateResult {
+  ok: boolean;
+  message: string;
+  settings?: ProjectSettingsSnapshot | null;
+}
+
 export function openProjectDialog(): Promise<OpenProjectResult> {
   return invoke("open_project_dialog");
 }
@@ -179,4 +203,15 @@ export function openProjectSourcePath(
   relativePath: string
 ): Promise<OpenProjectSourceResult> {
   return invoke("open_project_source_path", { projectDir, relativePath });
+}
+
+export function getProjectSettings(projectDir: string): Promise<ProjectSettingsSnapshot> {
+  return invoke("get_project_settings", { projectDir });
+}
+
+export function updateProjectSettings(
+  projectDir: string,
+  settings: ProjectSettingsPayload
+): Promise<ProjectSettingsUpdateResult> {
+  return invoke("update_project_settings", { projectDir, settings });
 }

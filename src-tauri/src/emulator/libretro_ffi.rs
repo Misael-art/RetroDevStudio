@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use libloading::Library;
 
+use crate::tools::reverse::manifest::SaveRamStatus;
 use crate::tools::reverse::trace::{CpuState, ExecutionTraceLog};
 
 const RETRO_ENVIRONMENT_SET_PIXEL_FORMAT: u32 = 10;
@@ -392,6 +393,7 @@ pub struct RuntimeExecutionTraceCapture {
     pub rom_path: String,
     pub note: String,
     pub trace: ExecutionTraceLog,
+    pub save: SaveRamStatus,
 }
 
 impl RuntimeExecutionTraceCapture {
@@ -405,6 +407,7 @@ impl RuntimeExecutionTraceCapture {
                 core_label
             ),
             trace: ExecutionTraceLog::default(),
+            save: SaveRamStatus::default(),
         }
     }
 
@@ -419,6 +422,7 @@ impl RuntimeExecutionTraceCapture {
                 backend.description()
             ),
             trace: ExecutionTraceLog::default(),
+            save: SaveRamStatus::default(),
         }
     }
 }
@@ -1006,7 +1010,57 @@ impl EmulatorCore {
     }
 
     pub fn execution_trace_capture(&self) -> RuntimeExecutionTraceCapture {
-        self.trace_capture.clone()
+        let mut capture = self.trace_capture.clone();
+        capture.save = self.runtime_save_status();
+        capture
+    }
+
+    fn runtime_save_status(&self) -> SaveRamStatus {
+        let Some(runtime) = self.runtime.as_ref() else {
+            return SaveRamStatus::default();
+        };
+
+        match self.read_memory(RETRO_MEMORY_SAVE_RAM, 0, 1) {
+            Ok((_bytes, total_size)) if total_size > 0 => SaveRamStatus {
+                status: "observed".to_string(),
+                declared: false,
+                observed: true,
+                missing: false,
+                size_bytes: None,
+                observed_size_bytes: Some(total_size),
+                address_start: None,
+                address_end: None,
+                note: format!(
+                    "Libretro expos SRAM com {} bytes no core '{}'; trate como evidencia runtime experimental ate validar persistencia em disco.",
+                    total_size, runtime.label
+                ),
+            },
+            Ok(_) => SaveRamStatus {
+                status: "missing".to_string(),
+                declared: false,
+                observed: false,
+                missing: true,
+                size_bytes: None,
+                observed_size_bytes: Some(0),
+                address_start: None,
+                address_end: None,
+                note: format!(
+                    "Core '{}' nao expos SRAM via RETRO_MEMORY_SAVE_RAM nesta sessao.",
+                    runtime.label
+                ),
+            },
+            Err(error) => SaveRamStatus {
+                status: "missing".to_string(),
+                declared: false,
+                observed: false,
+                missing: true,
+                size_bytes: None,
+                observed_size_bytes: None,
+                address_start: None,
+                address_end: None,
+                note: error,
+            },
+        }
     }
 
     fn configure_rewind(&mut self) {
@@ -1779,6 +1833,30 @@ pub extern "C" fn retro_run() {
         assert!(trace_capture.note.contains("estado serializado"));
         assert!(trace_capture.trace.was_executed(0x200));
         assert!(trace_capture.trace.was_executed(0x202));
+
+        emulator.stop().expect("stop emulator");
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn runtime_contract_reports_observed_save_ram_from_libretro_memory() {
+        let _serial = test_serial_guard();
+        let dir = temp_dir("save-contract");
+        let core_path = compile_mock_core(&dir);
+        let rom_path = write_test_rom(&dir, "save_contract_test", "gen");
+
+        let mut emulator = EmulatorCore::new(Some(&core_path));
+        emulator
+            .load_rom(&rom_path)
+            .expect("load rom into mock core");
+
+        let trace_capture = emulator.execution_trace_capture();
+        assert_eq!(trace_capture.save.status, "observed");
+        assert!(!trace_capture.save.declared);
+        assert!(trace_capture.save.observed);
+        assert!(!trace_capture.save.missing);
+        assert_eq!(trace_capture.save.observed_size_bytes, Some(32));
+        assert!(trace_capture.save.note.contains("Libretro expos SRAM"));
 
         emulator.stop().expect("stop emulator");
         let _ = fs::remove_dir_all(dir);

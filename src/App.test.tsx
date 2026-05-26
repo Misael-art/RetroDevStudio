@@ -37,6 +37,8 @@ const mocks = vi.hoisted(() => ({
   suggestProjectBaseDir: vi.fn(),
   previewProjectDestination: vi.fn(),
   setProjectTarget: vi.fn(),
+  getProjectSettings: vi.fn(),
+  updateProjectSettings: vi.fn(),
   hydrateSceneResult: vi.fn(),
   persistActiveScene: vi.fn(),
   reloadSceneFromDisk: vi.fn(),
@@ -587,6 +589,8 @@ vi.mock("./core/ipc/projectService", () => ({
   suggestProjectBaseDir: mocks.suggestProjectBaseDir,
   previewProjectDestination: mocks.previewProjectDestination,
   setProjectTarget: mocks.setProjectTarget,
+  getProjectSettings: mocks.getProjectSettings,
+  updateProjectSettings: mocks.updateProjectSettings,
 }));
 
 vi.mock("./core/scenePersistence", () => ({
@@ -1064,6 +1068,39 @@ describe("App build flow", () => {
     mocks.previewProjectDestination.mockImplementation((projectName: string, baseDir: string) =>
       Promise.resolve(createProjectDestinationPreview(projectName, baseDir))
     );
+    mocks.getProjectSettings.mockResolvedValue({
+      target: "megadrive",
+      region: "world",
+      video_standard: "ntsc",
+      internal_rom_name: "MEGA DUMMY",
+      sram: {
+        enabled: false,
+        size_bytes: 8192,
+      },
+      save_slots: 3,
+      debug_overlay: false,
+      warnings: [],
+    });
+    mocks.updateProjectSettings.mockResolvedValue({
+      ok: true,
+      message: "Configuracoes do projeto salvas.",
+      settings: {
+        target: "megadrive",
+        region: "world",
+        video_standard: "ntsc",
+        internal_rom_name: "MEGA DUMMY",
+        sram: {
+          enabled: true,
+          size_bytes: 8192,
+        },
+        save_slots: 3,
+        debug_overlay: false,
+        warnings: [
+          "SRAM sera declarada no header da ROM Mega Drive no proximo build.",
+          "Save runtime ainda depende de camada AAA/Libretro observar SRAM; nao e promessa de save funcional.",
+        ],
+      },
+    });
     mocks.createProjectFromTemplate.mockResolvedValue({
       selected: true,
       path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
@@ -2056,6 +2093,90 @@ describe("App build flow", () => {
     });
 
     expect(container.querySelector("[data-testid='shortcut-map']")).toBeInstanceOf(HTMLDivElement);
+  });
+
+  it("opens project settings with actionable SRAM warnings and saves through project.rds", async () => {
+    const menuTrigger = container.querySelector('[data-testid="unified-topbar-menu-trigger"]');
+    if (!(menuTrigger instanceof HTMLButtonElement)) {
+      throw new Error("Topbar menu trigger not found");
+    }
+
+    await act(async () => {
+      menuTrigger.click();
+      await flush();
+    });
+
+    const settingsButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.includes("Configuracoes")
+    );
+    if (!(settingsButton instanceof HTMLButtonElement)) {
+      throw new Error("Project settings menu action not found");
+    }
+
+    await act(async () => {
+      settingsButton.click();
+      await flush();
+    });
+
+    await flushUntil(() => container.textContent?.includes("Configuracoes do Projeto") ?? false);
+
+    expect(mocks.getProjectSettings).toHaveBeenCalledWith(
+      "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy"
+    );
+    expect(container.textContent).toContain("SRAM off");
+    expect(container.textContent).toContain("Save runtime ainda nao comprovado");
+
+    const internalName = container.querySelector('[data-testid="project-settings-internal-name"]');
+    if (!(internalName instanceof HTMLInputElement)) {
+      throw new Error("Internal ROM name input not found");
+    }
+    await act(async () => {
+      internalName.value = "";
+      internalName.dispatchEvent(new Event("input", { bubbles: true }));
+      await flush();
+    });
+    expect(container.textContent).toContain("Nome interno da ROM e obrigatorio");
+
+    await act(async () => {
+      internalName.value = "MEGA DUMMY";
+      internalName.dispatchEvent(new Event("input", { bubbles: true }));
+      await flush();
+    });
+
+    const sramToggle = container.querySelector('[data-testid="project-settings-sram-enabled"]');
+    if (!(sramToggle instanceof HTMLInputElement)) {
+      throw new Error("SRAM checkbox not found");
+    }
+    await act(async () => {
+      sramToggle.click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("SRAM sera declarada no header da ROM");
+    expect(container.textContent).toContain("Build precisa passar antes de tratar save como funcional");
+
+    const saveButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.includes("Salvar Configuracoes")
+    );
+    if (!(saveButton instanceof HTMLButtonElement)) {
+      throw new Error("Project settings save button not found");
+    }
+
+    await act(async () => {
+      saveButton.click();
+      await flush();
+    });
+
+    expect(mocks.updateProjectSettings).toHaveBeenCalledWith(
+      "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      expect.objectContaining({
+        target: "megadrive",
+        internal_rom_name: "MEGA DUMMY",
+        sram: expect.objectContaining({ enabled: true, size_bytes: 8192 }),
+        save_slots: 3,
+      })
+    );
+    expect(container.textContent).toContain("Configuracoes do projeto salvas");
   });
 
   it("updates the contextual guide for the logic workspace and opens the contextual palette", async () => {

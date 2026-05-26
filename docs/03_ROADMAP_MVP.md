@@ -1,8 +1,12 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-05-25 (rodada 57 - NodeGraph W revalidada pos-AAA)
+**Ultima revisao canonica:** 2026-05-25 (rodada 59 - Save/SRAM U post-review hardening)
 **Fase ativa real:** Core MVP promovido tecnicamente em main; hardening continua nas superficies experimentais
+
+**Nota 2026-05-25 (rodada 59, branch `codex/save-sram-project-settings-u`):** post-review hardening `0af3b39ded80994cbe28c77245869b43d12432c6` endureceu a branch U sem mudar seu status: falha de mastering de ROM passa a falhar build, nome interno de ROM e persistido trimado, SRAM Libretro e observada com leitura minima, range SRAM Mega Drive invertido vira `invalid`, `RomAnalysisManifest.save` entrou no contrato TS e a UI de Configuracoes evita draft/warnings/target obsoletos. Gates pos-review: `tsc`, `lint`, Vitest focado, `npm test` **358/358**, `cargo clippy`, `cargo test --lib` **406 passed / 22 ignored** e `git diff --check`. Save/SRAM permanece **Experimental**; isto nao comprova save funcional persistente nem promove SGDK, SNES, Node Engine ou AAA para Stable.
+
+**Nota 2026-05-25 (rodada 58, branch `codex/save-sram-project-settings-u`):** Save/SRAM U foi rebaseada sobre `origin/main` (`fc925e2b200ca92409e7773fd0126484d4798505`) e validada no commit tecnico `1d00bcc6777a98c0901dfca03e899daa36e1a293`. A branch adiciona configuracao governada de `project.rds` para SRAM/save slots/debug overlay, expõe warnings acionaveis na UI, persiste `settings` no schema e registra evidencia `save` em manifesto reverso/runtime (`declared` por header Mega Drive, `observed` por Libretro SRAM). Gates locais passaram: `check:tree`, `lint`, `tsc`, `npm test` **358/358**, `cargo clippy`, `cargo test --lib` **404 passed / 22 ignored**, `build:debug`, `preflight:sgdk-e2e`, QA RC A-H (`qa-rc-2026-05-25T07-36-08-135Z-*`), upstream Windows `-SkipRustTests` e `git diff --check`. Status permanece **Experimental**: isto nao comprova save funcional persistente nem promove SGDK, SNES, Node Engine ou AAA para Stable.
 
 **Nota 2026-05-25 (rodada 57, branch `codex/nodegraph-execution-inspector-w`):** a frente NodeGraph W foi rebaseada sobre `origin/main` pos-AAA e validada como inspector **Experimental/simulado**. Ela adiciona trace local, highlight de nos alcancaveis e diagnostics contextuais no `nodegraph-overview`, mantendo a arquitetura de full cohesion. Gates: `check:tree`, `lint`, `tsc`, focados NodeGraph/codegen **64/64**, `npm test` **360/360** e `git diff --check`. Isto nao e step debugging real, nao observa emulador/runtime e nao promove Node Engine ou SGDK.
 

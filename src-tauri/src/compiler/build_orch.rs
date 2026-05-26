@@ -624,6 +624,14 @@ where
             }
         };
 
+        match master_rom_artifact(&rom_path, target, project) {
+            Ok(Some(message)) => emit!("info", message),
+            Ok(None) => {}
+            Err(error) => {
+                emit!("error", error);
+                return failed_build_result(target.target, log, Some(&workspace.root));
+            }
+        }
         if let Err(error) = validate_rom_signature(&rom_path, target) {
             emit!("warn", error);
         }
@@ -890,6 +898,14 @@ where
         }
     };
 
+    match master_rom_artifact(&rom_path, target, project) {
+        Ok(Some(message)) => emit!("info", message),
+        Ok(None) => {}
+        Err(error) => {
+            emit!("error", error);
+            return failed_build_result(target.target, log, Some(&workspace.root));
+        }
+    }
     if let Err(error) = validate_rom_signature(&rom_path, target) {
         emit!("warn", error);
     }
@@ -1056,6 +1072,14 @@ fn prepare_workspace(
         }
         _ => {
             stage_project_assets(project_dir, &res_dir, ast)?;
+            let project_config_path = src_dir.join("rds_project_config.h");
+            fs::write(&project_config_path, render_sgdk_project_config(project)).map_err(|e| {
+                format!(
+                    "Falha ao gravar '{}': {}",
+                    project_config_path.display(),
+                    e
+                )
+            })?;
             fs::write(&makefile_path, render_sgdk_makefile(&project_slug))
                 .map_err(|e| format!("Falha ao gravar '{}': {}", makefile_path.display(), e))?;
         }
@@ -1501,8 +1525,46 @@ fn render_sgdk_makefile(project_slug: &str) -> String {
          SRC := $(wildcard src/*.c)\n\
          RES := $(wildcard res/*.*)\n\
          BINDIR := out\n\
+         EXTRA_FLAGS += -include src/rds_project_config.h\n\
          include $(SGDK)/makefile.gen\n"
     )
+}
+
+fn render_sgdk_project_config(project: &Project) -> String {
+    let settings = &project.settings;
+    let title = c_string_literal(&settings.internal_rom_name);
+    let region = c_string_literal(megadrive_region_code(&settings.region));
+    let video_standard = c_string_literal(&settings.video_standard);
+    format!(
+        "#ifndef RDS_PROJECT_CONFIG_H\n\
+         #define RDS_PROJECT_CONFIG_H\n\n\
+         #define RDS_TARGET_MEGADRIVE 1\n\
+         #define RDS_REGION_CODE {region}\n\
+         #define RDS_VIDEO_STANDARD {video_standard}\n\
+         #define RDS_ROM_INTERNAL_NAME {title}\n\
+         #define RDS_SRAM_ENABLED {sram_enabled}\n\
+         #define RDS_SRAM_SIZE_BYTES {sram_size}\n\
+         #define RDS_SAVE_SLOTS {save_slots}\n\
+         #define RDS_DEBUG_OVERLAY {debug_overlay}\n\n\
+         #endif\n",
+        sram_enabled = u8::from(settings.sram.enabled),
+        sram_size = settings.sram.size_bytes,
+        save_slots = settings.save_slots,
+        debug_overlay = u8::from(settings.debug_overlay),
+    )
+}
+
+fn c_string_literal(value: &str) -> String {
+    let escaped = value
+        .chars()
+        .filter(|ch| ch.is_ascii() && !ch.is_ascii_control())
+        .flat_map(|ch| match ch {
+            '\\' => "\\\\".chars().collect::<Vec<_>>(),
+            '"' => "\\\"".chars().collect::<Vec<_>>(),
+            _ => vec![ch],
+        })
+        .collect::<String>();
+    format!("\"{}\"", escaped)
 }
 
 fn render_pvsneslib_makefile(project_slug: &str, ast: &AstOutput) -> String {
@@ -1916,6 +1978,97 @@ fn classify_make_failure(stderr: &str) -> &'static str {
     "build_failed"
 }
 
+fn megadrive_region_code(region: &str) -> &'static str {
+    match region {
+        "usa" => "U  ",
+        "japan" => "J  ",
+        "europe" => "E  ",
+        _ => "JUE",
+    }
+}
+
+fn master_rom_artifact(
+    rom_path: &Path,
+    target: TargetSpec,
+    project: &Project,
+) -> Result<Option<String>, String> {
+    if target.target != "megadrive" {
+        return Ok(None);
+    }
+
+    let mut bytes = fs::read(rom_path).map_err(|error| {
+        format!(
+            "ROM mastering: falha ao ler '{}': {}",
+            rom_path.display(),
+            error
+        )
+    })?;
+    if bytes.len() < 0x200 {
+        return Ok(Some(format!(
+            "ROM mastering: ROM Mega Drive pequena demais para header canonico; SRAM/internal title nao aplicados em '{}'.",
+            rom_path.display()
+        )));
+    }
+
+    apply_megadrive_project_header(&mut bytes, project);
+    fs::write(rom_path, &bytes).map_err(|error| {
+        format!(
+            "ROM mastering: falha ao gravar '{}': {}",
+            rom_path.display(),
+            error
+        )
+    })?;
+
+    let sram_message = if project.settings.sram.enabled {
+        format!(
+            "SRAM {}KB declarada no header.",
+            project.settings.sram.size_bytes / 1024
+        )
+    } else {
+        "SRAM off no header.".to_string()
+    };
+    Ok(Some(format!(
+        "ROM mastering Mega Drive: internal='{}' region='{}' {}",
+        project.settings.internal_rom_name,
+        megadrive_region_code(&project.settings.region).trim(),
+        sram_message
+    )))
+}
+
+fn apply_megadrive_project_header(bytes: &mut [u8], project: &Project) {
+    fn write_padded_ascii(bytes: &mut [u8], range: std::ops::Range<usize>, value: &str) {
+        bytes[range.clone()].fill(b' ');
+        for (index, byte) in value
+            .bytes()
+            .filter(|byte| matches!(byte, 0x20..=0x7E))
+            .take(range.len())
+            .enumerate()
+        {
+            bytes[range.start + index] = byte.to_ascii_uppercase();
+        }
+    }
+
+    let title = project.settings.internal_rom_name.trim();
+    write_padded_ascii(bytes, 0x120..0x150, title);
+    write_padded_ascii(bytes, 0x150..0x180, title);
+
+    let region = megadrive_region_code(&project.settings.region).as_bytes();
+    bytes[0x1F0..0x1F3].copy_from_slice(region);
+
+    if project.settings.sram.enabled {
+        bytes[0x1B0..0x1B2].copy_from_slice(b"RA");
+        bytes[0x1B2] = 0xF8;
+        bytes[0x1B3] = 0x20;
+        let start = 0x0020_0000u32;
+        let end = start + project.settings.sram.size_bytes.saturating_sub(1);
+        bytes[0x1B4..0x1B8].copy_from_slice(&start.to_be_bytes());
+        bytes[0x1B8..0x1BC].copy_from_slice(&end.to_be_bytes());
+    } else {
+        bytes[0x1B0..0x1B4].fill(b' ');
+        bytes[0x1B4..0x1BC].fill(0);
+    }
+}
+
 fn validate_rom_signature(rom_path: &Path, target: TargetSpec) -> Result<(), String> {
     if target.target != "megadrive" {
         return Ok(());
@@ -2243,6 +2396,7 @@ mod tests {
     use super::*;
     use crate::core::diagnostics::{ActionableDiagnostic, DiagnosticArea, DiagnosticSeverity};
     use crate::tools::photo2sgdk::import_art_asset_internal;
+    use crate::ugdm::entities::{ProjectSettings, SaveRamConfig};
     use image::{ImageBuffer, Rgba};
     use std::sync::{Mutex, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -3164,6 +3318,109 @@ PY\n"
         .expect("read SGDK resources");
         assert!(resources_res
             .contains("SPRITE player \"assets/sprites/onboarding_player.bmp\" 2 2 NONE 4"));
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn build_generates_sgdk_project_config_with_sram_disabled() {
+        let _serial = test_serial_guard();
+        let project_dir = workspace_copy("megadrive_dummy");
+        install_megadrive_sprite_fixture(&project_dir);
+        let mut project = load_project(&project_dir).expect("load fixture project");
+        project.settings = ProjectSettings {
+            internal_rom_name: "NO SAVE BUILD".to_string(),
+            sram: SaveRamConfig {
+                enabled: false,
+                size_bytes: 8192,
+            },
+            ..project.settings.clone()
+        };
+        write_project_fixture(&project_dir, &project);
+
+        let (sgdk_root, make_program) = fake_toolchain_with_sega_rom("sgdk-sram-off", "md");
+        let environment = BuildEnvironment {
+            sgdk_root: Some(sgdk_root),
+            sgdk_make_program: Some(make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_with_environment(&project_dir, &environment, |_| {});
+
+        assert!(result.ok, "build log: {:?}", result.log);
+        let config = fs::read_to_string(
+            project_dir
+                .join("build")
+                .join("megadrive")
+                .join("src")
+                .join("rds_project_config.h"),
+        )
+        .expect("read SGDK project config");
+        assert!(config.contains("#define RDS_SRAM_ENABLED 0"));
+        assert!(config.contains("#define RDS_SAVE_SLOTS 1"));
+        let rom = fs::read(project_dir.join(&result.rom_path)).expect("read ROM");
+        assert_ne!(&rom[0x1B0..0x1B2], b"RA");
+        assert!(String::from_utf8_lossy(&rom[0x150..0x180]).contains("NO SAVE BUILD"));
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn build_generates_sgdk_project_config_and_rom_header_with_sram_enabled() {
+        let _serial = test_serial_guard();
+        let project_dir = workspace_copy("megadrive_dummy");
+        install_megadrive_sprite_fixture(&project_dir);
+        let mut project = load_project(&project_dir).expect("load fixture project");
+        project.settings = ProjectSettings {
+            region: "europe".to_string(),
+            video_standard: "pal".to_string(),
+            internal_rom_name: "SAVE SLOT TEST".to_string(),
+            sram: SaveRamConfig {
+                enabled: true,
+                size_bytes: 32768,
+            },
+            save_slots: 4,
+            debug_overlay: true,
+        };
+        project.fps = 50;
+        write_project_fixture(&project_dir, &project);
+
+        let (sgdk_root, make_program) = fake_toolchain_with_sega_rom("sgdk-sram-on", "md");
+        let environment = BuildEnvironment {
+            sgdk_root: Some(sgdk_root),
+            sgdk_make_program: Some(make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_with_environment(&project_dir, &environment, |_| {});
+
+        assert!(result.ok, "build log: {:?}", result.log);
+        let config = fs::read_to_string(
+            project_dir
+                .join("build")
+                .join("megadrive")
+                .join("src")
+                .join("rds_project_config.h"),
+        )
+        .expect("read SGDK project config");
+        assert!(config.contains("#define RDS_SRAM_ENABLED 1"));
+        assert!(config.contains("#define RDS_SRAM_SIZE_BYTES 32768"));
+        assert!(config.contains("#define RDS_SAVE_SLOTS 4"));
+        assert!(config.contains("#define RDS_DEBUG_OVERLAY 1"));
+
+        let rom = fs::read(project_dir.join(&result.rom_path)).expect("read ROM");
+        assert_eq!(&rom[0x1B0..0x1B2], b"RA");
+        assert_eq!(
+            u32::from_be_bytes(rom[0x1B4..0x1B8].try_into().expect("sram start bytes")),
+            0x0020_0000
+        );
+        assert_eq!(
+            u32::from_be_bytes(rom[0x1B8..0x1BC].try_into().expect("sram end bytes")),
+            0x0020_7FFF
+        );
+        assert_eq!(&rom[0x1F0..0x1F3], b"E  ");
 
         let _ = fs::remove_dir_all(project_dir);
     }

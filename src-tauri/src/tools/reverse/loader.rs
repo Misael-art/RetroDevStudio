@@ -147,6 +147,7 @@ pub fn base_manifest(loaded: &LoadedRom) -> RomAnalysisManifest {
         logic_hints: Vec::new(),
         annotations: Vec::new(),
         trace: super::trace::default_trace_status(loaded),
+        save: Default::default(),
         projection_status: Default::default(),
     }
 }

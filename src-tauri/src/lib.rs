@@ -46,12 +46,14 @@ use core::project_mgr::{
     import_mugen_project as import_mugen_scene, import_sgdk_project as import_sgdk_scene,
     list_external_import_profiles as list_registered_external_import_profiles,
     list_project_templates as list_registered_project_templates,
-    list_scenes as list_project_scenes, load_legacy_sgdk_index, load_project, load_scene,
-    resolve_prefabs, save_scene, seed_onboarding_template, seed_project_template, set_entry_scene,
+    list_scenes as list_project_scenes, load_legacy_sgdk_index, load_project,
+    load_project_settings as load_project_settings_impl, load_scene, resolve_prefabs, save_scene,
+    seed_onboarding_template, seed_project_template, set_entry_scene,
     stamp_imported_external_profile_metadata, stamp_imported_mugen_metadata,
     stamp_imported_sgdk_metadata, stamp_project_template_metadata, sync_external_graph_refs,
-    update_project_target, ExternalImportProfileSummary, LegacySgdkIndex, ProjectTemplateSummary,
-    SceneInfo, DEFAULT_ENTRY_SCENE,
+    update_project_settings as update_project_settings_impl, update_project_target,
+    ExternalImportProfileSummary, LegacySgdkIndex, ProjectSettingsPayload, ProjectSettingsSnapshot,
+    ProjectTemplateSummary, SceneInfo, DEFAULT_ENTRY_SCENE,
 };
 use core::rom_mastering::{
     inspect_rom_mastering as inspect_rom_mastering_impl, RomMasteringReport,
@@ -1878,6 +1880,48 @@ fn set_project_target(project_dir: String, target: String) -> EmulatorCommandRes
     }
 }
 
+#[derive(serde::Serialize)]
+struct ProjectSettingsUpdateResult {
+    ok: bool,
+    message: String,
+    settings: Option<ProjectSettingsSnapshot>,
+}
+
+#[tauri::command]
+fn get_project_settings(project_dir: String) -> Result<ProjectSettingsSnapshot, String> {
+    if project_dir.trim().is_empty() {
+        return Err("Nenhum projeto aberto.".into());
+    }
+    load_project_settings_impl(&PathBuf::from(project_dir.trim())).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn update_project_settings(
+    project_dir: String,
+    settings: ProjectSettingsPayload,
+) -> ProjectSettingsUpdateResult {
+    if project_dir.trim().is_empty() {
+        return ProjectSettingsUpdateResult {
+            ok: false,
+            message: "Nenhum projeto aberto.".into(),
+            settings: None,
+        };
+    }
+
+    match update_project_settings_impl(&PathBuf::from(project_dir.trim()), settings) {
+        Ok(snapshot) => ProjectSettingsUpdateResult {
+            ok: true,
+            message: "Configuracoes do projeto salvas.".into(),
+            settings: Some(snapshot),
+        },
+        Err(error) => ProjectSettingsUpdateResult {
+            ok: false,
+            message: error.to_string(),
+            settings: None,
+        },
+    }
+}
+
 // ── Projeto: diálogos de FS ───────────────────────────────────────────────────
 
 #[derive(serde::Serialize)]
@@ -3306,6 +3350,8 @@ pub fn run() {
             create_scene,
             save_scene_data,
             set_project_target,
+            get_project_settings,
+            update_project_settings,
             // Projeto
             open_project_dialog,
             open_project_path,

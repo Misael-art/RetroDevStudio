@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::components::Components;
 use super::serde_helpers::deserialize_f64_to_i32;
 
-pub const CURRENT_SCHEMA_VERSION: &str = "1.6.0";
+pub const CURRENT_SCHEMA_VERSION: &str = "1.7.0";
 
 fn default_schema_version() -> String {
     CURRENT_SCHEMA_VERSION.to_string()
@@ -241,6 +241,70 @@ fn default_artifact_prefix() -> String {
     "game".to_string()
 }
 
+// ── Project Settings ─────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SaveRamConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_sram_size_bytes")]
+    pub size_bytes: u32,
+}
+
+impl Default for SaveRamConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            size_bytes: default_sram_size_bytes(),
+        }
+    }
+}
+
+fn default_sram_size_bytes() -> u32 {
+    8192
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProjectSettings {
+    #[serde(default = "default_region")]
+    pub region: String,
+    #[serde(default = "default_video_standard")]
+    pub video_standard: String,
+    #[serde(default)]
+    pub internal_rom_name: String,
+    #[serde(default)]
+    pub sram: SaveRamConfig,
+    #[serde(default = "default_save_slots")]
+    pub save_slots: u8,
+    #[serde(default)]
+    pub debug_overlay: bool,
+}
+
+impl Default for ProjectSettings {
+    fn default() -> Self {
+        Self {
+            region: default_region(),
+            video_standard: default_video_standard(),
+            internal_rom_name: String::new(),
+            sram: SaveRamConfig::default(),
+            save_slots: default_save_slots(),
+            debug_overlay: false,
+        }
+    }
+}
+
+fn default_region() -> String {
+    "world".to_string()
+}
+
+fn default_video_standard() -> String {
+    "ntsc".to_string()
+}
+
+fn default_save_slots() -> u8 {
+    1
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PatchAuditEntry {
     pub timestamp_ms: u128,
@@ -285,6 +349,8 @@ pub struct Project {
     pub palette_mode: String,
     pub entry_scene: String,
     pub build: Option<BuildConfig>,
+    #[serde(default)]
+    pub settings: ProjectSettings,
     #[serde(default)]
     pub template_metadata: Option<TemplateMetadata>,
 }
