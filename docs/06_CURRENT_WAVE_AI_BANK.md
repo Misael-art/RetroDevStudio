@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-26 (rodada 60 - PRs #12/#13 integrados em main + readiness verde)
+**Ultima Atualizacao:** 2026-05-26 (rodada 63 - PRs #14/#15/#16 integrados em main + readiness verde)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,15 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-26 rodada 63 - main pos-PR #14/#15/#16):**
+  - **Main final verificado:** `git fetch --prune origin`, `git checkout main` e `git pull --ff-only origin main` trouxeram os merges manuais de PR #14, PR #15 e PR #16. Apos o ajuste tecnico minimo da fixture migrada, `main` local/remoto ficou em `9a058f004d43ae16d3047add78c1a4254ceb48a6` antes deste registro documental.
+  - **PRs integrados:** PR #14 (`codex/godot-2d-subset-y`, head `230ed12d8d755b33fceb0e70af7790386e2c8161`) entrou por merge commit `0c0f59e451b158f55c85a928f451f1d9b610d034`; PR #15 (`codex/command-palette-shortcut-editor-r`, head `6f282d0fd0459fb765cbcf61f1b39400bdc0566d`) entrou por merge commit `f20ccd19bb033cea95507ea45b6a5e99042a7029`; PR #16 (`codex/e2e-create-game-from-zero-s`, head `b4bf3d42917b4748614d1148e7a19abc5dedbf80`) entrou por merge commit `42db9fb30dcc79d659929c6f0d285f2be449d325`. `git merge-base --is-ancestor` confirmou os tres heads em `main`.
+  - **Gates locais pos-merge:** `npm run check:tree` OK; `npm run lint` OK; `npx tsc --noEmit` OK; `npm test` OK (**43 arquivos / 379 testes**); `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK; `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` OK (**413 passed / 23 ignored**); `git diff --check` OK.
+  - **Readiness real:** a primeira execucao de `npm run release:readiness:promotion` completou build/baseline/upstream/desktop E2E, mas retornou `Pronto para promocao: NAO` por workspace sujo gerado: a validacao migrou `src-tauri/tests/fixtures/projects/megadrive_dummy/scenes/main.json` de `schema_version` `1.6.0` para `1.7.0` e tocou arquivos gerados sem diff material. Antes de qualquer descarte, o estado foi preservado em `F:\Projects\RetroDevStudio-cleanup-backups\main-readiness-post-pr15-pr16-dirty-20260526-221524.patch`, `.status.txt` e `.hashes.txt`. O commit `9a058f004d43ae16d3047add78c1a4254ceb48a6` (`test: refresh megadrive fixture schema version`) foi pushado e o rerun de `npm run release:readiness:promotion` retornou `Pronto para promocao: SIM`.
+  - **Checks remotos:** via GitHub API, PRs #14/#15/#16 estavam `closed/merged` com `validate` e `desktop-smoke` `success` nos heads. O `main` em `9a058f004d43ae16d3047add78c1a4254ceb48a6` tambem tinha `validate` e `desktop-smoke` `success`.
+  - **Status honesto:** Godot 2D subset, Command Palette/Shortcut Editor e Create Game E2E estao integrados como superficies **Experimental/em hardening**. SGDK, Node Engine, GameMaker, Godot, MUGEN/Ikemen, OpenBOR, SNES, ArtStudio e AAA Capability nao foram declarados Stable/prontos.
+  - **Proximo passo imediato:** iniciar auditoria segura de `codex/asset-browser-production-x`: localizar worktree, salvar patch se sujo, comparar com `main` e decidir entre rebase, fechamento ou superseded sem descartar nada.
 
 * **O que acabou de acontecer (2026-05-26 rodada 60 - main pos-PR #12/#13):**
   - **Main final verificado:** `git fetch --prune origin`, `git checkout main` e `git pull --ff-only origin main` deixaram `main` local/remoto em `ee07110ea22804dc8cb36296b6b281f8d316e07d`.
