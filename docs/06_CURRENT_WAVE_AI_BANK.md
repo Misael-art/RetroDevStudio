@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-27 (rodada 64 - Asset Browser X curado em branch rebased)
+**Ultima Atualizacao:** 2026-05-27 (rodada 65 - Asset Browser X integrado em main)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-27 rodada 65 - Asset Browser X em main):**
+  - **Merge/main:** PR #17 (`codex/asset-browser-production-x-rebased`) entrou em `main` por merge commit `634e2478a19d80d6acbf91216a9d5472de4cb115`, contendo `c4ed1f8aeae2d72b697e1122533b6a1addcf1ce7`. A verificacao `git merge-base --is-ancestor c4ed1f8aeae2d72b697e1122533b6a1addcf1ce7 HEAD` passou e `origin/main...HEAD` ficou `0/0`.
+  - **Checks remotos:** no merge commit de `main`, `CI` push (`26529217211`) e `Desktop E2E` push (`26529217613`) terminaram com `success`. Os checks remotos do push do branch rebased tambem estavam verdes antes do merge.
+  - **Gates pos-merge em main:** `npm run check:tree` OK; `npm run lint` OK; `npx tsc --noEmit` OK; `npm test` OK (**44 arquivos / 386 testes**); `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK; `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` OK (**413 passed / 23 ignored**); `npm run release:readiness:promotion` OK com `Pronto para promocao: SIM`; `git diff --check` OK.
+  - **Builds finais e manifesto:** `npm run build:debug`, `npm run build:portable`, `npm run build:msi` e `npm run release:manifest` passaram. Artefatos: `src-tauri/target-test/debug/retro-dev-studio.exe` (**39773184 bytes**, sha256 `3c6c7d13cdb956f7a0a318f025b67d168cd832be6230ee16093f7d30d2712774`), `src-tauri/target-test/release/retro-dev-studio.exe` (**22909952 bytes**, sha256 `910abe57a48c928215382687cc7d245aab6c5090f7faa62388aaa4392c3034df`) e `src-tauri/target-test/release/bundle/msi/RetroDev Studio_0.1.0_x64_en-US.msi` (**8048640 bytes**, sha256 `a3289bb70546142d097a069efc92b5a61435dac6add15cfcc9424b4c409ac579`).
+  - **Status honesto:** Core MVP permanece promovivel em `main` com readiness verde. Asset Browser esta integrado apenas como **Experimental/em hardening**; SGDK, Node Engine, Godot, GameMaker, MUGEN/Ikemen, OpenBOR, SNES, ArtStudio e AAA Capability nao foram declarados Stable/prontos.
+  - **Proximo passo imediato:** cleanup seguro de worktrees: remover apenas worktrees limpos/mergeados ou superseded com evidencia em `main`; worktrees sujos devem ganhar patch/status/log em `F:\Projects\RetroDevStudio-cleanup-backups` e permanecer preservados.
 
 * **O que acabou de acontecer (2026-05-27 rodada 64 - Asset Browser X rebased):**
   - **Branch final:** a frente Asset Browser X foi reconstruida em `codex/asset-browser-production-x-rebased`, a partir de `origin/main` `5090d5957ceddcfbe9ac730391479616ce357cd6`, porque a branch original `codex/asset-browser-production-x` (`2aca62e860b92f8c298822e1d467140d8d8e7b78`) estava divergente, sem remoto e misturava commits antigos ja absorvidos por `main`.
