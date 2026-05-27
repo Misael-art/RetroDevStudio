@@ -43,8 +43,11 @@ import {
 import AssetBrowserSelectionCard from "./AssetBrowserSelectionCard";
 import {
   buildAssetTree,
+  classifyAssetBrowserAsset,
   collectAssetReferences,
+  filterAssetBrowserAssets,
   type AssetReference,
+  type AssetBrowserFilterId,
   type AssetTreeNode,
 } from "./assetBrowserModel";
 import { useAssetBrowserState } from "./useAssetBrowserState";
@@ -595,6 +598,17 @@ interface AssetBrowserProps {
   onRequestInspector?: () => void;
 }
 
+const ASSET_BROWSER_FILTERS: { id: AssetBrowserFilterId; label: string }[] = [
+  { id: "sprite", label: "sprite" },
+  { id: "tilemap", label: "tilemap" },
+  { id: "palette", label: "palette" },
+  { id: "audio", label: "audio" },
+  { id: "source_art", label: "source art" },
+  { id: "generated", label: "generated" },
+  { id: "unused", label: "unused" },
+  { id: "over_budget", label: "over-budget" },
+];
+
 function AssetTreeView({
   node,
   collapsed,
@@ -640,6 +654,7 @@ function AssetTreeView({
   }
 
   const asset = node.asset!;
+  const classification = classifyAssetBrowserAsset(asset);
   return (
     <button
       type="button"
@@ -666,7 +681,7 @@ function AssetTreeView({
       )}
       <span className="min-w-0 truncate">{node.name}</span>
       <span className="ml-auto shrink-0 rounded bg-[#313244] px-1 py-0.5 text-[8px] uppercase text-[#7f849c]">
-        {asset.kind}
+        {classification.typeLabel}
       </span>
     </button>
   );
@@ -680,6 +695,7 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
     activeScenePath,
     projectSourceKind,
     projectLegacyIndex,
+    hwStatus,
     addEntity,
     setActiveBrush,
     setActiveTilemapId,
@@ -687,9 +703,12 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
     setEditorMode,
     setSelectedEntityId,
     setActiveViewportTab,
+    setArtStudioAssetPath,
     logMessage,
   } = useEditorStore();
   const [instantiatingAssetPath, setInstantiatingAssetPath] = useState<string | null>(null);
+  const [assetSearch, setAssetSearch] = useState("");
+  const [activeFilters, setActiveFilters] = useState<Set<AssetBrowserFilterId>>(new Set());
   const {
     assets,
     busy,
@@ -713,8 +732,22 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
     projectLegacyIndex,
   });
 
-  const references = useMemo(() => collectAssetReferences(activeScene), [activeScene]);
-  const assetTree = useMemo(() => buildAssetTree(assets), [assets]);
+  const references = useMemo(
+    () => collectAssetReferences(activeScene, activeScenePath),
+    [activeScene, activeScenePath]
+  );
+  const filteredAssets = useMemo(
+    () =>
+      filterAssetBrowserAssets({
+        assets,
+        references,
+        query: assetSearch,
+        filters: activeFilters,
+        hwStatus,
+      }),
+    [activeFilters, assetSearch, assets, hwStatus, references]
+  );
+  const assetTree = useMemo(() => buildAssetTree(filteredAssets), [filteredAssets]);
   const selectedAssetMatches = useMemo(
     () => (selectedTreeAsset ? references.get(selectedTreeAsset.relative_path) ?? [] : []),
     [references, selectedTreeAsset]
@@ -733,6 +766,19 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
     () => legacySections.reduce((count, section) => count + section.files.length, 0),
     [legacySections]
   );
+  const hasAssetFilter = assetSearch.trim().length > 0 || activeFilters.size > 0;
+
+  function toggleAssetFilter(filterId: AssetBrowserFilterId) {
+    setActiveFilters((current) => {
+      const next = new Set(current);
+      if (next.has(filterId)) {
+        next.delete(filterId);
+      } else {
+        next.add(filterId);
+      }
+      return next;
+    });
+  }
 
   function handleFocusReferencedAsset(asset: ProjectAssetEntry) {
     const matches = references.get(asset.relative_path) ?? [];
@@ -757,6 +803,23 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
     setActiveViewportTab("scene");
     onRequestInspector?.();
     logMessage("info", `[Assets] Selecionado no Inspector: ${matches[0].label}`);
+  }
+
+  function handleOpenAssetInArtStudio(asset: ProjectAssetEntry) {
+    if (asset.kind !== "image") {
+      logMessage("warn", `[Assets] Apenas imagens podem ser abertas no ArtStudio: ${asset.relative_path}`);
+      return;
+    }
+
+    const matches = references.get(asset.relative_path) ?? [];
+    setArtStudioAssetPath(asset.relative_path);
+    setSelectedEntityId(matches[0]?.entityId ?? null);
+    setActiveWorkspace("artstudio");
+    setActiveViewportTab("artstudio");
+    logMessage(
+      "info",
+      `[Assets] Abrindo '${asset.relative_path}' no ArtStudio${matches[0] ? ` com contexto ${matches[0].label}` : " sem inserir na cena"}.`
+    );
   }
 
   function handleOpenReferenceAuthoringTarget(match: AssetReference) {
@@ -943,7 +1006,7 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
             Catalogo do projeto
           </p>
           <p className="truncate text-[10px] text-[#cdd6f4]" title={activeProjectDir || "(nenhum)"}>
-            {assets.length} asset(s) canonico(s)
+            {filteredAssets.length}/{assets.length} asset(s) canonico(s)
             {hostItemCount > 0 ? ` + ${hostItemCount} arquivo(s) host` : ""}
           </p>
           <p className="truncate text-[10px] text-[#6c7086]" title={activeProjectDir || "(nenhum)"}>
@@ -970,6 +1033,35 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
         </div>
       </div>
 
+      <div className="flex shrink-0 flex-col gap-2 rounded border border-[#313244] bg-[#11111b] p-2">
+        <input
+          data-testid="asset-browser-search"
+          value={assetSearch}
+          onChange={(event) => setAssetSearch(event.target.value)}
+          placeholder="Buscar por nome, caminho ou tipo"
+          className="min-w-0 rounded border border-[#313244] bg-[#0b1020] px-2 py-1 text-[10px] text-[#e2e8f0] outline-none transition-colors placeholder:text-[#475569] focus:border-[#89b4fa]"
+        />
+        <div className="flex flex-wrap gap-1">
+          {ASSET_BROWSER_FILTERS.map((filter) => {
+            const active = activeFilters.has(filter.id);
+            return (
+              <button
+                key={filter.id}
+                type="button"
+                onClick={() => toggleAssetFilter(filter.id)}
+                className={`rounded border px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.08em] transition-colors ${
+                  active
+                    ? "border-[#89b4fa]/50 bg-[#89b4fa]/15 text-[#89b4fa]"
+                    : "border-[#313244] bg-[#181825] text-[#94a3b8] hover:border-[#45475a] hover:text-[#cdd6f4]"
+                }`}
+              >
+                {filter.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {busy && <p className="text-[10px] text-[#89b4fa]">Carregando catalogo de assets...</p>}
       {error && (
         <div className="rounded border border-[#f38ba8] bg-[#1e1e2e] px-3 py-2 text-[10px] text-[#f38ba8]">
@@ -977,9 +1069,9 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
         </div>
       )}
 
-      {viewMode === "tree" && (assets.length > 0 || legacySections.length > 0) && (
+      {viewMode === "tree" && (filteredAssets.length > 0 || legacySections.length > 0) && (
         <div className="scrollbar-thin min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden rounded border border-[#313244] bg-[#11111b] p-2">
-          {assets.length > 0 && (
+          {filteredAssets.length > 0 && (
             <div className="flex flex-col gap-1 pb-3">
               <div className="px-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[#89b4fa]">
                 Assets canonicos
@@ -1054,9 +1146,11 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
           matches={selectedAssetMatches}
           projectSourceKind={projectSourceKind}
           sceneEntities={activeScene?.entities ?? []}
+          hwStatus={hwStatus}
           canInstantiate={Boolean(activeProjectDir && activeScene)}
           instantiating={instantiatingAssetPath === selectedTreeAsset.relative_path}
           onFocus={() => handleFocusReferencedAsset(selectedTreeAsset)}
+          onOpenArtStudio={() => handleOpenAssetInArtStudio(selectedTreeAsset)}
           onOpenAuthoringTarget={handleOpenReferenceAuthoringTarget}
           onOpenSource={(match) => void handleOpenReferenceSource(match)}
           onInstantiate={() => void handleInstantiateAsset(selectedTreeAsset)}
@@ -1120,11 +1214,12 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
 
       {viewMode === "grid" && (
         <div className="scrollbar-thin min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden">
-        <div className="grid grid-cols-2 gap-2 p-2">
-        {assets.map((asset) => {
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-2 p-2">
+        {filteredAssets.map((asset) => {
           const matches = references.get(asset.relative_path) ?? [];
           const canInstantiate = asset.kind === "image" && Boolean(activeProjectDir && activeScene);
           const isInstantiating = instantiatingAssetPath === asset.relative_path;
+          const classification = classifyAssetBrowserAsset(asset);
           return (
             <div
               key={asset.relative_path}
@@ -1147,7 +1242,7 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
                   <AssetPreview
                     absolutePath={asset.absolute_path}
                     alt={asset.relative_path}
-                    imageClassName="h-14 w-14 object-contain"
+                    imageClassName="max-h-14 max-w-full object-contain"
                     fallbackClassName="flex h-14 w-14 items-center justify-center text-[8px] font-bold text-[#89b4fa]"
                     fallbackLabel="IMG"
                     pixelated
@@ -1160,16 +1255,19 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
               </div>
               <div className="flex items-center justify-between gap-2">
                 <span className="rounded bg-[#313244] px-1.5 py-0.5 text-[9px] uppercase text-[#a6adc8]">
-                  {asset.kind}
+                  {classification.typeLabel}
                 </span>
                 {matches.length > 0 && (
                   <span className="text-[9px] text-[#a6e3a1]">{matches.length} ref.</span>
+                )}
+                {matches.length === 0 && (
+                  <span className="text-[9px] text-[#f9e2af]">orfao</span>
                 )}
               </div>
               <p className="min-w-0 truncate font-mono text-[10px] text-[#cdd6f4]" title={asset.relative_path}>
                 {asset.relative_path}
               </p>
-              <div className="mt-auto flex items-center gap-2">
+              <div className="mt-auto flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => handleFocusReferencedAsset(asset)}
@@ -1177,6 +1275,16 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
                 >
                   {matches.length > 0 ? "Focar" : "Detalhes"}
                 </button>
+                {asset.kind === "image" && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenAssetInArtStudio(asset)}
+                    onDoubleClick={(event) => event.stopPropagation()}
+                    className="rounded border border-[#cba6f7]/40 bg-[#cba6f7]/10 px-2 py-1 text-[10px] font-semibold text-[#cba6f7] transition-colors hover:bg-[#cba6f7]/20"
+                  >
+                    ArtStudio
+                  </button>
+                )}
                 {asset.kind === "image" && (
                   <button
                   type="button"
@@ -1199,6 +1307,10 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
         })}
         </div>
         </div>
+      )}
+
+      {!busy && assets.length > 0 && filteredAssets.length === 0 && hasAssetFilter && (
+        <p className="text-[10px] text-[#45475a]">Nenhum asset corresponde aos filtros atuais.</p>
       )}
 
       {!busy && assets.length === 0 && legacySections.length === 0 && (

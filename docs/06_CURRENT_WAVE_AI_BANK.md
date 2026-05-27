@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-26 (rodada 63 - PRs #14/#15/#16 integrados em main + readiness verde)
+**Ultima Atualizacao:** 2026-05-27 (rodada 64 - Asset Browser X curado em branch rebased)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,15 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-27 rodada 64 - Asset Browser X rebased):**
+  - **Branch final:** a frente Asset Browser X foi reconstruida em `codex/asset-browser-production-x-rebased`, a partir de `origin/main` `5090d5957ceddcfbe9ac730391479616ce357cd6`, porque a branch original `codex/asset-browser-production-x` (`2aca62e860b92f8c298822e1d467140d8d8e7b78`) estava divergente, sem remoto e misturava commits antigos ja absorvidos por `main`.
+  - **Sem perda de trabalho:** o worktree original `F:\Projects\RetroDevStudio-agent-x-asset-browser` foi preservado. Alem do backup anterior `F:\Projects\RetroDevStudio-cleanup-backups\asset-browser-x-audit-dirty-20260526-224618.*`, foi criado novo snapshot em `F:\Projects\RetroDevStudio-cleanup-backups\asset-browser-x-current-dirty-20260527-045031.*`. Ruido gerado por build/QA na branch rebased foi preservado antes da limpeza em `asset-browser-x-rebased-generated-noise-20260527-064710.*` e `asset-browser-x-rebased-cargo-noise-20260527-065137.*`.
+  - **Curadoria aplicada:** foram reaproveitados apenas os deltas ainda uteis contra o `main` atual: busca e filtros produtivos por tipo/gerado/orfao/over-budget, classificacao de assets, resumo rapido de budget com `HwStatus`, preview seguro para assets nao-imagem, marcadores de orfao/over-budget, detalhes de "Usado por" incluindo cena/grafo, insercao real na Scene e ponte direta para abrir o asset no ArtStudio sem instanciar.
+  - **Superseded/ruido:** commits antigos de workspace shell, Runtime Setup, NodeGraph, command.dat, GameMaker/Godot e outros blocos ja integrados foram tratados como superseded. Schemas Tauri e `Cargo.toml` tocados por geracao/QA sem delta material nao foram preservados no commit tecnico.
+  - **Gates locais da branch:** `npm run check:tree` OK; `npm run lint` OK; `npx tsc --noEmit` OK; `npm test` OK (**44 arquivos / 386 testes**); `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK apos rerun com timeout ampliado; `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` OK (**413 passed / 23 ignored**) apos rerun serial com timeout ampliado; `npm run test:e2e:desktop:qa-rc` OK A-H com `RDS_EDGE_DRIVER_PATH=F:\Projects\RetroDevStudio-main-promotion\toolchains\webdriver\msedgedriver.exe` e evidencias `qa-rc-2026-05-27T09-49-29-979Z-*`; `git diff --check` OK.
+  - **Status honesto:** Asset Browser segue **Experimental/em hardening**. A branch rebased esta preparada para push/PR e checks remotos; nenhuma superficie foi declarada Stable/pronta.
+  - **Proximo passo imediato:** publicar `codex/asset-browser-production-x-rebased`, abrir PR contra `main` quando houver autenticacao GitHub ou fornecer compare URL, acompanhar `validate`/`desktop-smoke` e so integrar apos checks verdes.
 
 * **O que acabou de acontecer (2026-05-26 rodada 63 - main pos-PR #14/#15/#16):**
   - **Main final verificado:** `git fetch --prune origin`, `git checkout main` e `git pull --ff-only origin main` trouxeram os merges manuais de PR #14, PR #15 e PR #16. Apos o ajuste tecnico minimo da fixture migrada, `main` local/remoto ficou em `9a058f004d43ae16d3047add78c1a4254ceb48a6` antes deste registro documental.

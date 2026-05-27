@@ -1751,6 +1751,7 @@ export default function ArtStudioPanel() {
     activeTarget,
     hwStatus,
     selectedEntityId,
+    artStudioAssetPath,
     addEntity,
     updateEntity,
     setEditorMode,
@@ -2173,6 +2174,56 @@ export default function ArtStudioPanel() {
     });
   }, [
     activeProjectDir,
+    ingestSpriteSheet,
+    logMessage,
+    selectedEntitySprite,
+    state.spritePath,
+    state.spriteSourceAssetPath,
+  ]);
+
+  useEffect(() => {
+    if (!activeProjectDir || selectedEntitySprite?.asset) {
+      return;
+    }
+    const directAssetPath = artStudioAssetPath?.trim();
+    if (!directAssetPath) {
+      return;
+    }
+    if (!isArtStudioSupportedImage(directAssetPath)) {
+      logMessage("warn", `[ArtStudio] Asset selecionado pelo browser nao e imagem suportada: ${directAssetPath}.`);
+      return;
+    }
+    if (
+      autoHydratedSpriteRef.current === directAssetPath &&
+      (state.spritePath === directAssetPath || state.spriteSourceAssetPath === directAssetPath)
+    ) {
+      return;
+    }
+
+    autoHydratedSpriteRef.current = directAssetPath;
+    const absolutePath = normalizeFsPath(`${activeProjectDir}/${directAssetPath}`);
+    const suggestedFrame = constrainSpriteFrameSize(activeTarget, directAssetPath, 32, 32);
+    void ingestSpriteSheet({
+      sourcePath: absolutePath,
+    }).then(() => {
+      dispatch({
+        type: "SET_IMPORTED_ASSET",
+        path: directAssetPath,
+        name: basenameWithoutExtension(directAssetPath),
+        width: suggestedFrame.frameWidth,
+        height: suggestedFrame.frameHeight,
+      });
+      logMessage("info", `[ArtStudio] Asset do browser carregado: ${directAssetPath}.`);
+    }).catch((error) => {
+      logMessage(
+        "warn",
+        `[ArtStudio] Nao foi possivel carregar asset do browser: ${describeError(error)}`
+      );
+    });
+  }, [
+    activeProjectDir,
+    activeTarget,
+    artStudioAssetPath,
     ingestSpriteSheet,
     logMessage,
     selectedEntitySprite,

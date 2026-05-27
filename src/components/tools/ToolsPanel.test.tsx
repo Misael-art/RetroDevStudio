@@ -98,6 +98,15 @@ function findButton(container: HTMLElement, matcher: string | RegExp): HTMLButto
   return button;
 }
 
+function changeInputValue(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+  if (!setter) {
+    throw new Error("HTMLInputElement value setter unavailable.");
+  }
+  setter.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
 function createDependencyStatus(id: string, overrides: Partial<Record<string, unknown>> = {}) {
   const labels: Record<string, string> = {
     jdk: "JDK (Temurin LTS)",
@@ -141,6 +150,7 @@ describe("ToolsPanel Asset Browser", () => {
       activeScenePath: "scenes/main.json",
       selectedEntityId: null,
       activeViewportTab: "logic",
+      artStudioAssetPath: null,
       emulatorLoaded: false,
       hwStatus: null,
       sceneRevision: 1,
@@ -176,6 +186,26 @@ describe("ToolsPanel Asset Browser", () => {
       {
         relative_path: "assets/tilesets/stage_tiles.ppm",
         absolute_path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy/assets/tilesets/stage_tiles.ppm",
+        kind: "image",
+      },
+      {
+        relative_path: "assets/audio/jump.wav",
+        absolute_path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy/assets/audio/jump.wav",
+        kind: "audio",
+      },
+      {
+        relative_path: "assets/palettes/main.pal",
+        absolute_path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy/assets/palettes/main.pal",
+        kind: "other",
+      },
+      {
+        relative_path: "assets/source_art/hero.psd",
+        absolute_path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy/assets/source_art/hero.psd",
+        kind: "other",
+      },
+      {
+        relative_path: "assets/generated/cache_sprite.ppm",
+        absolute_path: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy/assets/generated/cache_sprite.ppm",
         kind: "image",
       },
     ]);
@@ -382,13 +412,137 @@ describe("ToolsPanel Asset Browser", () => {
 
     expect(
       container.querySelector("[data-testid='asset-browser-reference-summary']")?.textContent
-    ).toContain("Ainda nao referenciado pela cena ativa.");
+    ).toContain("Asset orfao");
     expect(
       container.querySelector("[data-testid='asset-browser-instantiation-notice']")?.textContent
     ).toContain("Instanciar como sprite");
     expect(
       container.querySelector("[data-testid='asset-browser-instantiation-notice']")?.textContent
     ).toContain("padrao-sprite-sem-sinais-de-tilemap");
+    expect(container.querySelector("[data-testid='asset-browser-budget-summary']")?.textContent).toContain(
+      "Orfao"
+    );
+  });
+
+  it("searches and filters the rendered asset catalog", async () => {
+    await act(async () => {
+      findButton(container, "Avancado OFF").click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Experimental/).click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Asset Browser/).click();
+      await flush();
+      await flush();
+    });
+
+    const search = container.querySelector("[data-testid='asset-browser-search']") as HTMLInputElement;
+    await act(async () => {
+      changeInputValue(search, "audio");
+      await flush();
+    });
+
+    expect(container.textContent).toContain("jump.wav");
+    expect(container.textContent).not.toContain("onboarding_player.ppm");
+
+    await act(async () => {
+      changeInputValue(search, "");
+      findButton(container, "source art").click();
+      await flush();
+    });
+
+    expect(container.textContent).toContain("hero.psd");
+    expect(container.textContent).not.toContain("stage_tiles.ppm");
+  });
+
+  it("keeps selected image previews contained in a 1366x768 workspace", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1366 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 768 });
+
+    await act(async () => {
+      findButton(container, "Avancado OFF").click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Experimental/).click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Asset Browser/).click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      const fileBtn = Array.from(container.querySelectorAll("button")).find(
+        (element) => element.textContent?.includes("onboarding_player.ppm")
+      );
+      fileBtn?.click();
+      await flush();
+    });
+
+    const preview = container.querySelector(
+      "[data-testid='asset-browser-selected-preview']"
+    ) as HTMLImageElement | null;
+    const previewClasses = preview?.className.split(/\s+/) ?? [];
+    expect(preview).not.toBeNull();
+    expect(previewClasses).toContain("object-contain");
+    expect(previewClasses).toContain("max-w-full");
+    expect(previewClasses).not.toContain("object-cover");
+    expect(previewClasses).not.toContain("h-full");
+    expect(previewClasses).not.toContain("w-full");
+  });
+
+  it("opens an unused project sprite in ArtStudio without inserting it into the scene", async () => {
+    await act(async () => {
+      findButton(container, "Avancado OFF").click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Experimental/).click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Asset Browser/).click();
+      await flush();
+      await flush();
+    });
+
+    await act(async () => {
+      const fileBtn = Array.from(container.querySelectorAll("button")).find(
+        (element) => element.textContent?.includes("onboarding_player.ppm")
+      );
+      fileBtn?.click();
+      await flush();
+    });
+
+    await act(async () => {
+      (container.querySelector("[data-testid='asset-browser-open-artstudio']") as HTMLButtonElement).click();
+      await flush();
+      await flush();
+    });
+
+    const state = useEditorStore.getState();
+    expect(state.activeWorkspace).toBe("artstudio");
+    expect(state.activeViewportTab).toBe("artstudio");
+    expect(state.artStudioAssetPath).toBe("assets/sprites/onboarding_player.ppm");
+    expect(state.activeScene?.entities).toHaveLength(0);
+    expect(mocks.persistActiveScene).not.toHaveBeenCalled();
   });
 
   it("shows the current scene references for the selected asset", async () => {
@@ -461,7 +615,7 @@ describe("ToolsPanel Asset Browser", () => {
 
     expect(
       container.querySelector("[data-testid='asset-browser-reference-summary']")?.textContent
-    ).toContain("Referenciado por 1 item(ns) na cena ativa.");
+    ).toContain("Usado por 1 item(ns) na cena ativa.");
     expect(
       container.querySelector("[data-testid='asset-browser-reference-summary']")?.textContent
     ).toContain("Sprite · hero");
@@ -639,6 +793,9 @@ describe("ToolsPanel Asset Browser", () => {
     });
 
     expect(container.querySelector("[data-testid='asset-browser-open-source']")).toBeTruthy();
+    expect(
+      container.querySelector("[data-testid='asset-browser-reference-summary']")?.textContent
+    ).toContain("Node: graphs/hero_logic.json");
 
     await act(async () => {
       (

@@ -5,11 +5,43 @@ import {
 } from "../../core/entityAuthoring";
 import { resolveImportedEntityContext } from "../../core/importedEntityContext";
 import type { LegacySgdkIndex, Scene } from "../../core/ipc/sceneService";
+import type { HwStatus } from "../../core/store/editorStore";
 import { getPreferredSceneEntity } from "../../core/sceneWorkspaceContext";
 import type {
   LegacyProjectFilePreview,
   ProjectAssetEntry,
 } from "../../core/ipc/toolsService";
+
+export type AssetBrowserFilterId =
+  | "sprite"
+  | "tilemap"
+  | "palette"
+  | "audio"
+  | "source_art"
+  | "generated"
+  | "unused"
+  | "over_budget";
+
+export type AssetBrowserTypeId = Extract<
+  AssetBrowserFilterId,
+  "sprite" | "tilemap" | "palette" | "audio" | "source_art"
+>;
+
+export interface AssetBrowserClassification {
+  typeId: AssetBrowserTypeId;
+  typeLabel: string;
+  generated: boolean;
+}
+
+export interface AssetBudgetSummary {
+  status: "unknown" | "ok" | "over";
+  vramLabel: string;
+  dmaLabel: string;
+  spriteLabel: string;
+  paletteLabel: string;
+  totalAssetLabel: string;
+  reason: string;
+}
 
 export interface AssetReference {
   entityId: string;
@@ -21,6 +53,9 @@ export interface AssetReference {
   authoringSurface: "tilemap" | "logic" | "artstudio" | null;
   sourcePaths: string[];
   positionLabel: string | null;
+  scenePath: string | null;
+  sceneLabel: string | null;
+  graphRef: string | null;
 }
 
 export interface LegacyIndexSection {
@@ -66,12 +101,214 @@ export function createInitialAssetBrowserState(): AssetBrowserState {
   };
 }
 
-export function collectAssetReferences(scene: Scene | null): Map<string, AssetReference[]> {
+function normalizeAssetPath(value: string): string {
+  return value.replace(/\\/g, "/").replace(/\/+/g, "/").toLowerCase();
+}
+
+function assetBaseName(value: string): string {
+  return normalizeAssetPath(value).split("/").pop() ?? normalizeAssetPath(value);
+}
+
+function hasAnySegment(value: string, patterns: string[]): boolean {
+  const normalized = normalizeAssetPath(value);
+  return patterns.some((pattern) => normalized.includes(pattern));
+}
+
+export function classifyAssetBrowserAsset(asset: ProjectAssetEntry): AssetBrowserClassification {
+  const path = normalizeAssetPath(asset.relative_path);
+  const generated = hasAnySegment(path, [
+    "/generated/",
+    "/gen/",
+    "generated_",
+    "/artstudio/generated",
+    "/build/generated",
+    "/cache_",
+  ]);
+
+  if (
+    asset.kind === "audio" ||
+    /\.(wav|vgm|xgm|pcm|ogg|mp3|flac)$/i.test(path) ||
+    hasAnySegment(path, ["/audio/", "/sfx/", "/bgm/", "/music/", "/sound/"])
+  ) {
+    return { typeId: "audio", typeLabel: "audio", generated };
+  }
+
+  if (/\.(pal|act)$/i.test(path) || hasAnySegment(path, ["/palette", "/palettes/", "_palette"])) {
+    return { typeId: "palette", typeLabel: "palette", generated };
+  }
+
+  if (
+    /\.(psd|ase|aseprite|kra|xcf)$/i.test(path) ||
+    hasAnySegment(path, ["/source_art/", "/source-art/", "/raw/", "/original/", "/source/"])
+  ) {
+    return { typeId: "source_art", typeLabel: "source art", generated };
+  }
+
+  if (
+    hasAnySegment(path, [
+      "/tilemap",
+      "/tilemaps/",
+      "/tileset",
+      "/tilesets/",
+      "/maps/",
+      "/background",
+      "/backgrounds/",
+      "/levels/",
+      "_tilemap",
+      "_tiles",
+      "_map",
+    ])
+  ) {
+    return { typeId: "tilemap", typeLabel: "tilemap", generated };
+  }
+
+  return { typeId: "sprite", typeLabel: "sprite", generated };
+}
+
+function formatBytesAsKb(bytes: number | null | undefined): string {
+  if (!Number.isFinite(bytes ?? Number.NaN)) {
+    return "-";
+  }
+  return `${Math.round((bytes ?? 0) / 1024)}KB`;
+}
+
+function formatBytes(bytes: number | null | undefined): string {
+  if (!Number.isFinite(bytes ?? Number.NaN)) {
+    return "-";
+  }
+  return `${Math.round(bytes ?? 0)}B`;
+}
+
+function findAssetDiagnostic(asset: ProjectAssetEntry, diagnostics: string[]): string | null {
+  const path = normalizeAssetPath(asset.relative_path);
+  const baseName = assetBaseName(asset.relative_path);
+  return (
+    diagnostics.find((diagnostic) => {
+      const normalized = normalizeAssetPath(diagnostic);
+      return normalized.includes(path) || normalized.includes(baseName);
+    }) ?? null
+  );
+}
+
+export function buildAssetBudgetSummary(
+  asset: ProjectAssetEntry,
+  matches: AssetReference[],
+  hwStatus: HwStatus | null
+): AssetBudgetSummary {
+  if (!hwStatus) {
+    return {
+      status: "unknown",
+      vramLabel: "VRAM sem validacao",
+      dmaLabel: "DMA sem validacao",
+      spriteLabel: "Sprites sem validacao",
+      paletteLabel: "Paletas sem validacao",
+      totalAssetLabel: "Total de assets sem validacao",
+      reason: "Rode a validacao de hardware para obter orcamento rapido.",
+    };
+  }
+
+  const diagnostics = [...hwStatus.errors, ...hwStatus.warnings];
+  const assetDiagnostic = findAssetDiagnostic(asset, diagnostics);
+  const hasAssetSpecificDiagnostics = diagnostics.some((diagnostic) =>
+    /\bassets[\\/]/i.test(diagnostic)
+  );
+  const vramUsed = hwStatus.resident_vram_bytes ?? hwStatus.vram_used;
+  const vramOver = vramUsed > hwStatus.vram_limit;
+  const dmaOver = hwStatus.dma_used > hwStatus.dma_limit;
+  const spriteOver = hwStatus.sprite_count > hwStatus.sprite_limit;
+  const paletteOver = hwStatus.palette_banks_used > hwStatus.palette_banks_limit;
+  const aggregateOver = vramOver || dmaOver || spriteOver || paletteOver || hwStatus.errors.length > 0;
+  const status =
+    assetDiagnostic || (!hasAssetSpecificDiagnostics && matches.length > 0 && aggregateOver)
+      ? "over"
+      : "ok";
+
+  return {
+    status,
+    vramLabel: `${formatBytesAsKb(vramUsed)} / ${formatBytesAsKb(hwStatus.vram_limit)}`,
+    dmaLabel: `${formatBytes(hwStatus.dma_used)} / ${formatBytes(hwStatus.dma_limit)}`,
+    spriteLabel: `${hwStatus.sprite_count} / ${hwStatus.sprite_limit}`,
+    paletteLabel: `${hwStatus.palette_banks_used} / ${hwStatus.palette_banks_limit}`,
+    totalAssetLabel: `${formatBytesAsKb(hwStatus.project_asset_bytes ?? hwStatus.vram_used)} total`,
+    reason:
+      assetDiagnostic ??
+      (status === "over"
+        ? "A cena ativa esta acima de pelo menos um orcamento e este asset participa dela."
+        : "Sem diagnostico de orcamento associado a este asset na cena ativa."),
+  };
+}
+
+export function filterAssetBrowserAssets({
+  assets,
+  references,
+  query,
+  filters,
+  hwStatus,
+}: {
+  assets: ProjectAssetEntry[];
+  references: Map<string, AssetReference[]>;
+  query: string;
+  filters: Set<AssetBrowserFilterId>;
+  hwStatus: HwStatus | null;
+}): ProjectAssetEntry[] {
+  const normalizedQuery = normalizeAssetPath(query).replace(/[_-]+/g, " ").trim();
+  const roleFilters: AssetBrowserTypeId[] = ([
+    "sprite",
+    "tilemap",
+    "palette",
+    "audio",
+    "source_art",
+  ] as const).filter((filter): filter is AssetBrowserTypeId => filters.has(filter));
+
+  return assets.filter((asset) => {
+    const classification = classifyAssetBrowserAsset(asset);
+    const matches = references.get(asset.relative_path) ?? [];
+    const budget = buildAssetBudgetSummary(asset, matches, hwStatus);
+    const searchable = [
+      normalizeAssetPath(asset.relative_path).replace(/[_-]+/g, " "),
+      assetBaseName(asset.relative_path).replace(/[_-]+/g, " "),
+      asset.kind,
+      classification.typeId.replace("_", " "),
+      classification.typeLabel,
+      classification.generated ? "generated gerado artstudio" : "",
+      matches.length === 0 ? "unused orfao" : "used usado referenciado",
+      budget.status === "over" ? "over budget over-budget acima orcamento" : "",
+    ].join(" ");
+
+    if (normalizedQuery && !searchable.includes(normalizedQuery)) {
+      return false;
+    }
+
+    if (roleFilters.length > 0 && !roleFilters.includes(classification.typeId)) {
+      return false;
+    }
+
+    if (filters.has("generated") && !classification.generated) {
+      return false;
+    }
+
+    if (filters.has("unused") && matches.length > 0) {
+      return false;
+    }
+
+    if (filters.has("over_budget") && budget.status !== "over") {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+export function collectAssetReferences(
+  scene: Scene | null,
+  scenePath: string | null = null
+): Map<string, AssetReference[]> {
   const references = new Map<string, AssetReference[]>();
   if (!scene) {
     return references;
   }
   const focusEntityId = getPreferredSceneEntity(scene)?.entity_id ?? null;
+  const sceneLabel = scene.display_name ?? scene.scene_id;
 
   const pushReference = (
     assetPath: string | undefined,
@@ -83,7 +320,8 @@ export function collectAssetReferences(scene: Scene | null): Map<string, AssetRe
     isSceneFocus = false,
     authoringSurface: AssetReference["authoringSurface"] = null,
     sourcePaths: string[] = [],
-    positionLabel: string | null = null
+    positionLabel: string | null = null,
+    graphRef: string | null = null
   ) => {
     const normalized = String(assetPath ?? "").trim();
     if (!normalized) {
@@ -100,6 +338,9 @@ export function collectAssetReferences(scene: Scene | null): Map<string, AssetRe
       authoringSurface,
       sourcePaths,
       positionLabel,
+      scenePath,
+      sceneLabel,
+      graphRef,
     });
     references.set(normalized, bucket);
   };
@@ -113,6 +354,7 @@ export function collectAssetReferences(scene: Scene | null): Map<string, AssetRe
     const authoringSurface = resolvePrimaryAuthoringSurface(entity);
     const sourcePaths = resolveEntitySourceRefs(entity);
     const positionLabel = importedContext.positionLabel;
+    const graphRef = entity.components.logic?.graph_ref ?? entity.components.logic?.graph ?? null;
     pushReference(
       entity.components.sprite?.asset,
       entity.entity_id,
@@ -123,7 +365,8 @@ export function collectAssetReferences(scene: Scene | null): Map<string, AssetRe
       isSceneFocus,
       authoringSurface,
       sourcePaths,
-      positionLabel
+      positionLabel,
+      graphRef
     );
     pushReference(
       entity.components.tilemap?.tileset,
@@ -135,7 +378,8 @@ export function collectAssetReferences(scene: Scene | null): Map<string, AssetRe
       isSceneFocus,
       authoringSurface,
       sourcePaths,
-      positionLabel
+      positionLabel,
+      graphRef
     );
 
     const audio = entity.components.audio;
@@ -150,7 +394,8 @@ export function collectAssetReferences(scene: Scene | null): Map<string, AssetRe
         isSceneFocus,
         authoringSurface,
         sourcePaths,
-        positionLabel
+        positionLabel,
+        graphRef
       );
     }
     for (const [action, assetPath] of Object.entries(audio?.sfx ?? {})) {
@@ -164,7 +409,8 @@ export function collectAssetReferences(scene: Scene | null): Map<string, AssetRe
         isSceneFocus,
         authoringSurface,
         sourcePaths,
-        positionLabel
+        positionLabel,
+        graphRef
       );
     }
   }

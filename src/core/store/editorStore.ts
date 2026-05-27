@@ -106,6 +106,7 @@ export interface StoreState {
   activeLayerId: string | null;
   activeWorkspace: EditorWorkspace;
   activeViewportTab: string;
+  artStudioAssetPath: string | null;
   consoleEntries: ConsoleEntry[];
   consoleVisible: boolean;
   hwStatus: HwStatus | null;
@@ -159,6 +160,7 @@ export interface StoreActions {
   /** Atribui uma entidade a uma camada (remove-a de outras camadas primeiro). */
   assignEntityToLayer: (entityId: string, layerId: string | null) => void;
   setActiveViewportTab: (id: string) => void;
+  setArtStudioAssetPath: (path: string | null) => void;
   logMessage: (level: ConsoleEntry["level"], message: string) => void;
   logDiagnostic: (diagnostic: ActionableDiagnostic) => void;
   clearConsole: () => void;
@@ -406,6 +408,8 @@ export const useEditorStore = create<EditorState>((set) => ({
   setActiveWorkspace: (workspace) => set({ activeWorkspace: workspace }),
   activeViewportTab: "scene",
   setActiveViewportTab: (id) => set({ activeViewportTab: id }),
+  artStudioAssetPath: null,
+  setArtStudioAssetPath: (path) => set({ artStudioAssetPath: path }),
 
   consoleEntries: [
     {
