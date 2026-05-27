@@ -6,6 +6,8 @@ export interface ShortcutCommand {
   scope?: string;
   description?: string;
   editable?: boolean;
+  palette?: boolean;
+  keywords?: string[];
 }
 
 export interface ShortcutGroup {
@@ -18,6 +20,7 @@ export interface ShortcutConflict {
   displayKey: string;
   commandIds: string[];
   labels: string[];
+  scopes: string[];
 }
 
 export interface ShortcutEventLike {
@@ -27,6 +30,18 @@ export interface ShortcutEventLike {
   altKey?: boolean;
   shiftKey?: boolean;
 }
+
+export interface CommandSearchResult {
+  command: ShortcutCommand;
+  score: number;
+}
+
+export interface ResolvedShortcutCommand {
+  commandId: string | null;
+  conflict: ShortcutConflict | null;
+}
+
+export const SHORTCUT_CUSTOMIZATIONS_STORAGE_KEY = "retrodev-shortcut-customizations-v1";
 
 const MODIFIER_ORDER = ["ctrl", "alt", "shift"] as const;
 const MODIFIER_ALIASES = new Map<string, (typeof MODIFIER_ORDER)[number]>([
@@ -58,42 +73,49 @@ export const DEFAULT_SHORTCUTS: ShortcutCommand[] = [
   {
     id: "project.open",
     group: "Projeto",
-    label: "Abrir projeto",
+    label: "Abrir workspace",
     keys: ["Ctrl+O"],
-    scope: "shell",
+    scope: "global",
     editable: true,
+    palette: true,
+    keywords: ["abrir projeto", "open project", "open workspace"],
   },
   {
     id: "scene.save",
     group: "Projeto",
     label: "Salvar cena",
     keys: ["Ctrl+S"],
-    scope: "shell",
+    scope: "global",
     editable: true,
+    palette: true,
   },
   {
     id: "build.run",
     group: "Build",
     label: "Build & Run",
     keys: ["Ctrl+B"],
-    scope: "shell",
+    scope: "global",
     editable: true,
+    palette: true,
+    keywords: ["build", "run", "emulacao", "rom"],
   },
   {
     id: "build.validate",
     group: "Build",
     label: "Validar projeto",
     keys: ["Ctrl+Shift+B"],
-    scope: "shell",
+    scope: "global",
     editable: true,
+    palette: true,
   },
   {
     id: "code.generate",
     group: "Build",
     label: "Gerar C",
     keys: ["Ctrl+Alt+C"],
-    scope: "shell",
+    scope: "global",
     editable: true,
+    palette: true,
   },
   {
     id: "entity.copy",
@@ -116,16 +138,18 @@ export const DEFAULT_SHORTCUTS: ShortcutCommand[] = [
     group: "Edicao",
     label: "Desfazer",
     keys: ["Ctrl+Z"],
-    scope: "shell",
+    scope: "global",
     editable: true,
+    palette: true,
   },
   {
     id: "edit.redo",
     group: "Edicao",
     label: "Refazer",
     keys: ["Ctrl+Shift+Z", "Ctrl+Y"],
-    scope: "shell",
+    scope: "global",
     editable: true,
+    palette: true,
   },
   {
     id: "entity.delete",
@@ -140,32 +164,108 @@ export const DEFAULT_SHORTCUTS: ShortcutCommand[] = [
     group: "Layout",
     label: "Maximizar/restaurar viewport",
     keys: ["Ctrl+Alt+F"],
-    scope: "shell",
+    scope: "global",
     editable: true,
+    palette: true,
+    keywords: ["focus", "foco", "layout"],
   },
   {
     id: "layout.save",
     group: "Layout",
     label: "Salvar layout",
     keys: ["Ctrl+Alt+S"],
-    scope: "shell",
+    scope: "global",
     editable: true,
+    palette: true,
   },
   {
     id: "layout.restore",
     group: "Layout",
     label: "Restaurar layout",
     keys: ["Ctrl+Alt+R"],
-    scope: "shell",
+    scope: "global",
     editable: true,
+    palette: true,
   },
   {
-    id: "shortcuts.show",
+    id: "commandPalette.open",
     group: "Layout",
-    label: "Abrir mapa de atalhos",
-    keys: ["Ctrl+/"],
-    scope: "shell",
+    label: "Abrir Command Palette",
+    keys: ["Ctrl+P", "Ctrl+Shift+P"],
+    scope: "global",
     editable: true,
+    palette: true,
+    keywords: ["palette", "paleta", "command"],
+  },
+  {
+    id: "shortcuts.edit",
+    group: "Layout",
+    label: "Abrir editor de atalhos",
+    keys: ["Ctrl+/"],
+    scope: "global",
+    editable: true,
+    palette: true,
+    keywords: ["atalhos", "shortcuts", "keybindings"],
+  },
+  {
+    id: "workspace.scene",
+    group: "Workspaces",
+    label: "Ir para Scene",
+    keys: ["Ctrl+Alt+1"],
+    scope: "global",
+    editable: true,
+    palette: true,
+    keywords: ["scene", "cena", "viewport"],
+  },
+  {
+    id: "workspace.logic",
+    group: "Workspaces",
+    label: "Ir para Logic",
+    keys: ["Ctrl+Alt+2"],
+    scope: "global",
+    editable: true,
+    palette: true,
+    keywords: ["logic", "nodegraph", "logica"],
+  },
+  {
+    id: "workspace.artstudio",
+    group: "Workspaces",
+    label: "Ir para Art",
+    keys: ["Ctrl+Alt+3"],
+    scope: "global",
+    editable: true,
+    palette: true,
+    keywords: ["art", "artstudio", "sprite"],
+  },
+  {
+    id: "tools.runtimeSetup",
+    group: "Ferramentas",
+    label: "Abrir Runtime Setup",
+    keys: ["Ctrl+Alt+T"],
+    scope: "global",
+    editable: true,
+    palette: true,
+    keywords: ["runtime", "setup", "toolchain", "dependencias"],
+  },
+  {
+    id: "tools.assetBrowser",
+    group: "Ferramentas",
+    label: "Abrir Asset Browser",
+    keys: ["Ctrl+Alt+A"],
+    scope: "global",
+    editable: true,
+    palette: true,
+    keywords: ["asset", "browser", "assets"],
+  },
+  {
+    id: "console.open",
+    group: "Console",
+    label: "Abrir Console",
+    keys: ["Ctrl+`"],
+    scope: "global",
+    editable: true,
+    palette: true,
+    keywords: ["console", "logs"],
   },
   {
     id: "viewport.grid",
@@ -229,6 +329,26 @@ export const DEFAULT_SHORTCUTS: ShortcutCommand[] = [
     label: "Direcional",
     keys: ["Setas"],
     scope: "emulator",
+  },
+  {
+    id: "emulator.play",
+    group: "Emulador",
+    label: "Run / Playtest",
+    keys: ["F5"],
+    scope: "global",
+    editable: true,
+    palette: true,
+    keywords: ["run", "play", "emulador"],
+  },
+  {
+    id: "emulator.stop",
+    group: "Emulador",
+    label: "Stop",
+    keys: ["Shift+F5"],
+    scope: "global",
+    editable: true,
+    palette: true,
+    keywords: ["stop", "parar", "emulador"],
   },
 ];
 
@@ -336,6 +456,12 @@ export function groupShortcutsByGroup(
   return groups;
 }
 
+export function getPaletteCommands(
+  shortcuts: readonly ShortcutCommand[] = DEFAULT_SHORTCUTS
+): ShortcutCommand[] {
+  return shortcuts.filter((shortcut) => shortcut.palette);
+}
+
 export function findShortcutConflicts(
   shortcuts: readonly ShortcutCommand[] = DEFAULT_SHORTCUTS
 ): ShortcutConflict[] {
@@ -388,13 +514,14 @@ export function findShortcutConflicts(
         displayKey: entry.displayKey,
         commandIds: conflictedCommands.map((command) => command.id),
         labels: conflictedCommands.map((command) => command.label),
+        scopes: conflictedCommands.map((command) => command.scope),
       };
     })
     .filter((conflict) => conflict.commandIds.length > 1);
 }
 
 function shortcutScopesOverlap(left: string, right: string): boolean {
-  return left === right || left === "global" || right === "global";
+  return left === right || left === "global" || right === "global" || left === "shell" || right === "shell";
 }
 
 export function normalizeShortcutEvent(event: ShortcutEventLike): string {
@@ -417,3 +544,189 @@ export function eventMatchesShortcut(
   const eventKey = normalizeShortcutEvent(event);
   return shortcut.keys.some((key) => normalizeShortcutChord(key) === eventKey);
 }
+
+function normalizeSearchText(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9/`+\s.-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isSubsequence(needle: string, haystack: string): boolean {
+  let index = 0;
+  for (const char of haystack) {
+    if (char === needle[index]) {
+      index += 1;
+      if (index === needle.length) {
+        return true;
+      }
+    }
+  }
+  return needle.length === 0;
+}
+
+function scoreToken(token: string, haystack: string): number {
+  if (!token) return 0;
+  if (haystack === token) return 100;
+  if (haystack.startsWith(token)) return 80;
+  if (haystack.includes(` ${token}`)) return 70;
+  if (haystack.includes(token)) return 55;
+  return isSubsequence(token, haystack) ? 25 : 0;
+}
+
+export function searchCommands(
+  query: string,
+  commands: readonly ShortcutCommand[] = getPaletteCommands(DEFAULT_SHORTCUTS)
+): CommandSearchResult[] {
+  const normalizedQuery = normalizeSearchText(query);
+  if (!normalizedQuery) {
+    return commands.map((command, index) => ({ command, score: 1000 - index }));
+  }
+
+  const tokens = normalizedQuery.split(" ").filter(Boolean);
+  return commands
+    .map((command, index) => {
+      const haystack = normalizeSearchText(
+        [
+          command.label,
+          command.group,
+          command.description ?? "",
+          formatShortcutKeys(command.keys),
+          ...(command.keywords ?? []),
+        ].join(" ")
+      );
+      const tokenScores = tokens.map((token) => scoreToken(token, haystack));
+      if (tokenScores.some((score) => score === 0)) {
+        return null;
+      }
+      const label = normalizeSearchText(command.label);
+      const labelBoost = label.startsWith(normalizedQuery) ? 120 : label.includes(normalizedQuery) ? 60 : 0;
+      return {
+        command,
+        score: tokenScores.reduce((total, score) => total + score, 0) + labelBoost - index / 100,
+      };
+    })
+    .filter((result): result is CommandSearchResult => result !== null)
+    .sort((left, right) => right.score - left.score);
+}
+
+export function resolveShortcutCommand(
+  event: ShortcutEventLike,
+  shortcuts: readonly ShortcutCommand[],
+  executableCommandIds: ReadonlySet<string>,
+  activeScope = "global"
+): ResolvedShortcutCommand {
+  const eventKey = normalizeShortcutEvent(event);
+  const matches = shortcuts.filter((shortcut) => {
+    const scope = shortcut.scope ?? "global";
+    return (
+      executableCommandIds.has(shortcut.id) &&
+      shortcutScopesOverlap(scope, activeScope) &&
+      shortcut.keys.some((key) => normalizeShortcutChord(key) === eventKey)
+    );
+  });
+
+  if (matches.length === 0) {
+    return { commandId: null, conflict: null };
+  }
+
+  const conflict = findShortcutConflicts(matches).find(
+    (candidate) => candidate.normalizedKey === eventKey
+  );
+  if (conflict) {
+    return { commandId: null, conflict };
+  }
+
+  return { commandId: matches[0].id, conflict: null };
+}
+
+function parseShortcutKeys(value: string | readonly string[]): string[] {
+  const parts =
+    typeof value === "string"
+      ? value
+          .split(/\s+\/\s+|,/g)
+          .map((part) => part.trim())
+      : value.map((part) => part.trim());
+
+  return parts
+    .map((part) => normalizeShortcutChord(part))
+    .filter(Boolean)
+    .map(formatNormalizedShortcutKey);
+}
+
+function shortcutKeysEqual(left: readonly string[], right: readonly string[]): boolean {
+  const leftNormalized = left.map(normalizeShortcutChord);
+  const rightNormalized = right.map(normalizeShortcutChord);
+  return (
+    leftNormalized.length === rightNormalized.length &&
+    leftNormalized.every((key, index) => key === rightNormalized[index])
+  );
+}
+
+export function updateShortcutBinding(
+  shortcuts: readonly ShortcutCommand[],
+  commandId: string,
+  nextKeys: string | readonly string[]
+): ShortcutCommand[] {
+  const parsedKeys = parseShortcutKeys(nextKeys);
+  return shortcuts.map((shortcut) =>
+    shortcut.id === commandId ? { ...shortcut, keys: parsedKeys } : shortcut
+  );
+}
+
+export function saveShortcutCustomizations(
+  shortcuts: readonly ShortcutCommand[],
+  defaults: readonly ShortcutCommand[] = DEFAULT_SHORTCUTS,
+  storage: Pick<Storage, "setItem" | "removeItem"> = localStorage
+): void {
+  const overrides: Record<string, string[]> = {};
+  for (const shortcut of shortcuts) {
+    const defaultShortcut = defaults.find((candidate) => candidate.id === shortcut.id);
+    if (!defaultShortcut || !shortcutKeysEqual(shortcut.keys, defaultShortcut.keys)) {
+      overrides[shortcut.id] = shortcut.keys;
+    }
+  }
+
+  if (Object.keys(overrides).length === 0) {
+    storage.removeItem(SHORTCUT_CUSTOMIZATIONS_STORAGE_KEY);
+    return;
+  }
+
+  storage.setItem(SHORTCUT_CUSTOMIZATIONS_STORAGE_KEY, JSON.stringify(overrides));
+}
+
+export function loadShortcutCustomizations(
+  defaults: readonly ShortcutCommand[] = DEFAULT_SHORTCUTS,
+  storage: Pick<Storage, "getItem"> = localStorage
+): ShortcutCommand[] {
+  const raw = storage.getItem(SHORTCUT_CUSTOMIZATIONS_STORAGE_KEY);
+  if (!raw) {
+    return defaults.map((shortcut) => ({ ...shortcut, keys: [...shortcut.keys] }));
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return defaults.map((shortcut) => {
+      const override = parsed[shortcut.id];
+      if (!Array.isArray(override) && typeof override !== "string") {
+        return { ...shortcut, keys: [...shortcut.keys] };
+      }
+      const keys = parseShortcutKeys(override as string | string[]);
+      return keys.length > 0 ? { ...shortcut, keys } : { ...shortcut, keys: [...shortcut.keys] };
+    });
+  } catch {
+    return defaults.map((shortcut) => ({ ...shortcut, keys: [...shortcut.keys] }));
+  }
+}
+
+export function resetShortcutCustomizations(
+  defaults: readonly ShortcutCommand[] = DEFAULT_SHORTCUTS,
+  storage: Pick<Storage, "removeItem"> = localStorage
+): ShortcutCommand[] {
+  storage.removeItem(SHORTCUT_CUSTOMIZATIONS_STORAGE_KEY);
+  return defaults.map((shortcut) => ({ ...shortcut, keys: [...shortcut.keys] }));
+}
+
