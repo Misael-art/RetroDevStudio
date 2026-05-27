@@ -4,7 +4,12 @@ import AssetPreview from "../common/AssetPreview";
 import { classifyImageAssetInstantiation } from "../../core/assetInstantiation";
 import type { Entity } from "../../core/ipc/sceneService";
 import type { ProjectAssetEntry } from "../../core/ipc/toolsService";
-import type { AssetReference } from "./assetBrowserModel";
+import type { HwStatus } from "../../core/store/editorStore";
+import {
+  buildAssetBudgetSummary,
+  classifyAssetBrowserAsset,
+  type AssetReference,
+} from "./assetBrowserModel";
 
 type AssetBrowserSelectionCardProps = {
   activeProjectDir: string;
@@ -12,9 +17,11 @@ type AssetBrowserSelectionCardProps = {
   matches: AssetReference[];
   projectSourceKind: string;
   sceneEntities: Pick<Entity, "entity_id" | "components">[];
+  hwStatus: HwStatus | null;
   canInstantiate: boolean;
   instantiating: boolean;
   onFocus: () => void;
+  onOpenArtStudio: () => void;
   onOpenAuthoringTarget: (match: AssetReference) => void;
   onOpenSource: (match: AssetReference) => void;
   onInstantiate: () => void;
@@ -54,13 +61,20 @@ export default function AssetBrowserSelectionCard({
   matches,
   projectSourceKind,
   sceneEntities,
+  hwStatus,
   canInstantiate,
   instantiating,
   onFocus,
+  onOpenArtStudio,
   onOpenAuthoringTarget,
   onOpenSource,
   onInstantiate,
 }: AssetBrowserSelectionCardProps) {
+  const classification = useMemo(() => classifyAssetBrowserAsset(asset), [asset]);
+  const budgetSummary = useMemo(
+    () => buildAssetBudgetSummary(asset, matches, hwStatus),
+    [asset, hwStatus, matches]
+  );
   const instantiationDecision = useMemo(() => {
     if (asset.kind !== "image") {
       return null;
@@ -80,7 +94,7 @@ export default function AssetBrowserSelectionCard({
       className="flex flex-col gap-2 rounded border border-[#cba6f7]/30 bg-[#1e1e2e] p-3"
     >
       {asset.kind === "image" && (
-        <div className="flex h-24 w-full items-center justify-center overflow-hidden rounded bg-black/20">
+        <div className="flex h-24 w-full min-w-0 items-center justify-center overflow-hidden rounded bg-black/20">
           <AssetPreview
             testId="asset-browser-selected-preview"
             fallbackTestId="asset-browser-selected-preview-fallback"
@@ -88,11 +102,20 @@ export default function AssetBrowserSelectionCard({
             projectDir={activeProjectDir}
             relativePath={asset.relative_path}
             alt={asset.relative_path}
-            imageClassName="h-full w-full max-h-24 max-w-full object-contain"
+            imageClassName="max-h-24 max-w-full object-contain"
             fallbackClassName="flex h-full w-full items-center justify-center text-[10px] font-semibold uppercase tracking-[0.12em] text-[#7f849c]"
             fallbackLabel="Preview indisponivel"
             pixelated
           />
+        </div>
+      )}
+      {asset.kind !== "image" && (
+        <div
+          data-testid="asset-browser-safe-preview"
+          className="flex h-20 w-full min-w-0 items-center justify-center rounded border border-[#313244] bg-[#11111b] px-3 text-center text-[10px] text-[#94a3b8]"
+        >
+          Preview seguro: {classification.typeLabel}. O browser nao executa nem interpreta este
+          arquivo.
         </div>
       )}
       <div className="min-w-0">
@@ -100,8 +123,45 @@ export default function AssetBrowserSelectionCard({
           {asset.relative_path}
         </p>
         <p className="mt-1 text-[9px] uppercase tracking-[0.16em] text-[#6c7086]">
-          {asset.kind}
+          {classification.typeLabel}
+          {classification.generated ? " · generated" : ""}
         </p>
+      </div>
+
+      <div
+        data-testid="asset-browser-budget-summary"
+        className={`rounded border px-2.5 py-2 text-[10px] ${
+          budgetSummary.status === "over"
+            ? "border-[#f38ba8]/40 bg-[#f38ba8]/10 text-[#f2cdcd]"
+            : "border-[#313244] bg-[#11111b] text-[#94a3b8]"
+        }`}
+      >
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="font-semibold text-[#cdd6f4]">Orcamento rapido</span>
+          <span className="rounded border border-[#313244] bg-[#181825] px-1.5 py-0.5 font-mono text-[9px]">
+            VRAM {budgetSummary.vramLabel}
+          </span>
+          <span className="rounded border border-[#313244] bg-[#181825] px-1.5 py-0.5 font-mono text-[9px]">
+            DMA {budgetSummary.dmaLabel}
+          </span>
+          <span className="rounded border border-[#313244] bg-[#181825] px-1.5 py-0.5 font-mono text-[9px]">
+            Spr {budgetSummary.spriteLabel}
+          </span>
+          <span className="rounded border border-[#313244] bg-[#181825] px-1.5 py-0.5 font-mono text-[9px]">
+            Pal {budgetSummary.paletteLabel}
+          </span>
+          {matches.length === 0 ? (
+            <span className="rounded border border-[#f9e2af]/35 bg-[#f9e2af]/10 px-1.5 py-0.5 font-semibold uppercase tracking-[0.12em] text-[#f9e2af]">
+              Orfao
+            </span>
+          ) : null}
+          {budgetSummary.status === "over" ? (
+            <span className="rounded border border-[#f38ba8]/35 bg-[#f38ba8]/10 px-1.5 py-0.5 font-semibold uppercase tracking-[0.12em] text-[#f38ba8]">
+              Over-budget
+            </span>
+          ) : null}
+        </div>
+        <p className="mt-1 leading-relaxed text-[#94a3b8]">{budgetSummary.reason}</p>
       </div>
 
       <div
@@ -111,7 +171,7 @@ export default function AssetBrowserSelectionCard({
         {matches.length > 0 ? (
           <div className="flex flex-col gap-1.5">
             <p>
-              Referenciado por{" "}
+              Usado por{" "}
               <span className="font-semibold text-[#cdd6f4]">{matches.length} item(ns)</span> na
               cena ativa.
             </p>
@@ -153,6 +213,21 @@ export default function AssetBrowserSelectionCard({
                 Referencias importadas priorizadas por papel e foco da cena.
               </p>
             ) : null}
+            <div className="flex flex-col gap-0.5 border-t border-[#1f2937] pt-1 text-[9px] text-[#7f849c]">
+              {primaryMatch?.scenePath || primaryMatch?.sceneLabel ? (
+                <p>
+                  Cena:{" "}
+                  <span className="font-mono text-[#cdd6f4]">
+                    {primaryMatch.scenePath ?? primaryMatch.sceneLabel}
+                  </span>
+                </p>
+              ) : null}
+              {primaryMatch?.graphRef ? (
+                <p>
+                  Node: <span className="font-mono text-[#cdd6f4]">{primaryMatch.graphRef}</span>
+                </p>
+              ) : null}
+            </div>
             {primaryMatch?.authoringSurface ? (
               <p className="text-[9px] text-[#94a3b8]">
                 Fluxo pronto:{" "}
@@ -162,8 +237,8 @@ export default function AssetBrowserSelectionCard({
           </div>
         ) : (
           <p>
-            Ainda nao referenciado pela cena ativa. Esta selecao continua pronta para autoria a
-            partir do browser.
+            Asset orfao: ainda nao usado pela cena ativa. Esta selecao continua pronta para
+            autoria a partir do browser.
           </p>
         )}
       </div>
@@ -200,7 +275,7 @@ export default function AssetBrowserSelectionCard({
         )}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
           onClick={onFocus}
@@ -208,6 +283,16 @@ export default function AssetBrowserSelectionCard({
         >
           {matches.length > 0 ? "Focar na cena" : "Abrir contexto"}
         </button>
+        {asset.kind === "image" ? (
+          <button
+            type="button"
+            data-testid="asset-browser-open-artstudio"
+            onClick={onOpenArtStudio}
+            className="rounded border border-[#cba6f7]/40 bg-[#cba6f7]/10 px-2 py-1 text-[10px] font-semibold text-[#cba6f7] transition-colors hover:bg-[#cba6f7]/20"
+          >
+            Abrir no ArtStudio
+          </button>
+        ) : null}
         {primaryMatch && authoringActionLabel ? (
           <button
             type="button"
