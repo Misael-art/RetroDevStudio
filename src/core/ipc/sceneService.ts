@@ -11,6 +11,28 @@ export interface AnimationDef {
   frames: number[];
   fps: number;
   loop: boolean;
+  frame_durations?: number[];
+  loop_start?: number;
+  onion_skin?: SpriteAnimationOnionSkin;
+  hitboxes?: SpriteAnimationHitbox[];
+}
+
+export interface SpriteAnimationOnionSkin {
+  enabled: boolean;
+  previous: boolean;
+  next: boolean;
+  opacity: number;
+}
+
+export type SpriteAnimationHitboxKind = "attack" | "hurt" | "push" | "collision";
+
+export interface SpriteAnimationHitbox {
+  frame: number;
+  kind: SpriteAnimationHitboxKind;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export interface Pivot {

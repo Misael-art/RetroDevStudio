@@ -42,7 +42,29 @@ pub struct MugenAnimationFrame {
     pub clsn2: Vec<MugenCollisionBox>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SpriteAnimationOnionSkin {
+    pub enabled: bool,
+    pub previous: bool,
+    pub next: bool,
+    pub opacity: f32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SpriteAnimationHitbox {
+    pub frame: u32,
+    pub kind: String,
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
+    pub x: i32,
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
+    pub y: i32,
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
+    pub width: i32,
+    #[serde(deserialize_with = "deserialize_f64_to_i32")]
+    pub height: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AnimationDef {
     pub frames: Vec<u32>,
     pub fps: u32,
@@ -57,9 +79,15 @@ pub struct AnimationDef {
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mugen_frames: Option<Vec<MugenAnimationFrame>>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub onion_skin: Option<SpriteAnimationOnionSkin>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hitboxes: Vec<SpriteAnimationHitbox>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SpriteComponent {
     pub asset: String,
     pub frame_width: u32,
@@ -101,7 +129,10 @@ pub struct SpriteCommandBinding {
 
 #[cfg(test)]
 mod sprite_command_tests {
-    use super::{SpriteCommandBinding, SpriteCommandStep, SpriteComponent};
+    use super::{
+        AnimationDef, SpriteAnimationHitbox, SpriteAnimationOnionSkin, SpriteCommandBinding,
+        SpriteCommandStep, SpriteComponent,
+    };
     use std::collections::BTreeMap;
 
     #[test]
@@ -143,6 +174,51 @@ mod sprite_command_tests {
         assert_eq!(restored.commands[0].id, "hadouken");
         assert_eq!(restored.commands[0].target_animation, "fireball");
         assert_eq!(restored.commands[0].steps[1].tokens, vec!["_P"]);
+    }
+
+    #[test]
+    fn animation_def_round_trips_artstudio_frame_authoring_metadata() {
+        let animation = AnimationDef {
+            frames: vec![0, 1],
+            fps: 12,
+            looping: false,
+            frame_durations: Some(vec![4, 8]),
+            loop_start: Some(1),
+            mugen_frames: None,
+            onion_skin: Some(SpriteAnimationOnionSkin {
+                enabled: true,
+                previous: true,
+                next: true,
+                opacity: 0.35,
+            }),
+            hitboxes: vec![
+                SpriteAnimationHitbox {
+                    frame: 1,
+                    kind: "attack".to_string(),
+                    x: 20,
+                    y: 8,
+                    width: 18,
+                    height: 10,
+                },
+                SpriteAnimationHitbox {
+                    frame: 1,
+                    kind: "collision".to_string(),
+                    x: 8,
+                    y: 18,
+                    width: 24,
+                    height: 14,
+                },
+            ],
+        };
+
+        let json = serde_json::to_string(&animation).expect("animation serializes");
+        let restored: AnimationDef = serde_json::from_str(&json).expect("animation deserializes");
+
+        assert_eq!(restored.frame_durations, Some(vec![4, 8]));
+        assert_eq!(restored.loop_start, Some(1));
+        assert_eq!(restored.onion_skin.as_ref().unwrap().opacity, 0.35);
+        assert_eq!(restored.hitboxes[0].kind, "attack");
+        assert_eq!(restored.hitboxes[1].kind, "collision");
     }
 }
 

@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-27 (rodada 65 - Asset Browser X integrado em main)
+**Ultima Atualizacao:** 2026-05-30 (rodada 66 - SGDK Visual No-Code Core B em branch)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,17 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-30 rodada 66 - SGDK Visual No-Code Core B):**
+  - **Branch/worktree:** a frente foi implementada em `codex/sgdk-visual-nocode-core-b`, no worktree isolado `F:\Projects\RetroDevStudio-agent-sgdk-nodegraph-artstudio`, partindo de `origin/main`. O worktree principal `F:\Projects\RetroDevStudio` estava sujo e nao foi tocado.
+  - **NodeGraph:** o editor ganhou canvas com pan/zoom, zoom por wheel centrado no cursor, pan por botao do meio e `Space + drag`, snap-to-grid em drag, dot grid/minimap/edges ajustados ao zoom, categorias visuais de nodes, group boxes, deteccao de nodes bridge read-only, estilos hover/ativo para edges, painel compacto de hardware feedback (tiles, palettes, sprites/frame, sprites/scanline, VRAM, DMA e estrategias como streaming/banks/palette swaps/multiplexing) e criacao visual de transicoes baseadas em `SpriteComponent.commands`/`command.dat`. Helpers exportados cobrem grid/snap/zoom, agrupamento, editabilidade, feedback de hardware e construcao do grafo de transicoes.
+  - **ArtStudio:** sequencias agora preservam metadados experimentais de frame authoring (`frame_durations`, `loop_start`, `onion_skin`, `hitboxes`) sem quebrar projetos antigos. A timeline ganhou operacoes mover/duplicar/remover frame e drag/drop de frames; o inspector ganhou editor de duracao/loop/onion/hitbox, preview com onion skin/hitbox overlay, palette manager experimental, comando manual com validacao de tokens e painel de estrategia de importacao de arte para GIF/native metadata/TexturePacker/Aseprite/Spine/DragonBones sem dependencia nova.
+  - **Contratos Rust/TypeScript:** `AnimationDef` foi estendido no frontend e no UGDM Rust com defaults/`skip_serializing_if` para manter compatibilidade com JSON antigo; o round-trip de metadados ArtStudio foi coberto por teste Rust dedicado.
+  - **Gates locais:** focused Vitest NodeGraph+ArtStudio OK (**58 testes**); focused Rust round-trip OK (**1 teste**); `npm run check:tree` OK; `npm run lint` OK; `npx tsc --noEmit --pretty false` OK; `npm test -- --pool=threads --maxWorkers=1 --no-file-parallelism --testTimeout=30000` OK (**44 arquivos / 397 testes**); `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK; `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` OK (**414 passed / 23 ignored**); `git diff --check` OK.
+  - **Desktop QA RC:** a primeira tentativa bloqueou por `msedgedriver` ausente no worktree; o rerun com `RDS_EDGE_DRIVER_PATH=F:\Projects\RetroDevStudio-main-promotion\toolchains\webdriver\msedgedriver.exe` passou `npm run test:e2e:desktop:qa-rc` A-H. Preflight: SGDK real OK (`F:\Projects\MegaDrive_DEV\sdk\sgdk-2.11` via `GDK`), `tauri-driver` OK e Edge WebDriver OK. Evidencias `qa-rc-2026-05-30T12-43-55-834Z-*`, relatorio `src-tauri/target-test/validation/manual-qa-status.json`.
+  - **GitHub:** commit tecnico `feat: harden sgdk visual no-code UX` foi pushado para `origin/codex/sgdk-visual-nocode-core-b`. `gh auth status` nao tem login local, entao o agente nao conseguiu abrir PR; URL oficial para PR: `https://github.com/Misael-art/RetroDevStudio/pull/new/codex/sgdk-visual-nocode-core-b`.
+  - **Status honesto:** SGDK Visual No-Code, NodeGraph e ArtStudio seguem **Experimental/em hardening**. Esta rodada nao promove nada para Stable/pronto; o QA RC valida a experiencia desktop A-H e build debug, mas a promocao institucional continua dependente de PR, checks remotos e readiness em `main`.
+  - **Proximo passo imediato:** abrir PR pela URL, acompanhar `validate`/`desktop-smoke` remotos e tratar esta fatia como hardening visual/no-code, nao como promocao Stable.
 
 * **O que acabou de acontecer (2026-05-27 rodada 65 - Asset Browser X em main):**
   - **Merge/main:** PR #17 (`codex/asset-browser-production-x-rebased`) entrou em `main` por merge commit `634e2478a19d80d6acbf91216a9d5472de4cb115`, contendo `c4ed1f8aeae2d72b697e1122533b6a1addcf1ce7`. A verificacao `git merge-base --is-ancestor c4ed1f8aeae2d72b697e1122533b6a1addcf1ce7 HEAD` passou e `origin/main...HEAD` ficou `0/0`.

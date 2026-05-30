@@ -1,9 +1,9 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo, type CSSProperties } from "react";
 import { persistActiveScene } from "../../core/scenePersistence";
 import { openProjectSourcePath } from "../../core/ipc/projectService";
 import { parseSceneJson, resolveScenePrefabs } from "../../core/ipc/sceneService";
 import type { Entity } from "../../core/ipc/sceneService";
-import { useEditorStore } from "../../core/store/editorStore";
+import { useEditorStore, type HwStatus } from "../../core/store/editorStore";
 import { getEntityDisplayName } from "../../core/entityDisplay";
 import { resolveEntitySourceRefs } from "../../core/entityAuthoring";
 import type { SgdkPatternTemplate } from "../../core/projectCapability";
@@ -16,6 +16,7 @@ import {
   getGraphNodeSourceMapping,
   type CapabilityTone,
 } from "../../core/sgdkLogicDiagnostics";
+import type { SpriteCommandBinding } from "../../core/ipc/sceneService";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -94,6 +95,10 @@ export interface NodeGraph {
 type ViewOffset = {
   x: number;
   y: number;
+};
+
+type NodeGraphView = ViewOffset & {
+  zoom: number;
 };
 
 type GraphBounds = {
@@ -217,6 +222,71 @@ const FOCUS_PADDING = 24;
 const MINIMAP_WIDTH = 176;
 const MINIMAP_HEIGHT = 112;
 const MINIMAP_PADDING = 10;
+const NODEGRAPH_GRID_SIZE = 24;
+const NODEGRAPH_MIN_ZOOM = 0.35;
+const NODEGRAPH_MAX_ZOOM = 2.4;
+
+export type NodeVisualCategoryId =
+  | "trigger_input"
+  | "state"
+  | "transition"
+  | "action"
+  | "animation"
+  | "sprite"
+  | "tilemap"
+  | "camera"
+  | "audio"
+  | "timer"
+  | "collision"
+  | "hardware_budget"
+  | "vdp_dma_palette"
+  | "bridge_source_mapping"
+  | "error_unsupported";
+
+export type NodeVisualCategory = {
+  id: NodeVisualCategoryId;
+  label: string;
+  color: string;
+  icon: string;
+};
+
+export type NodeGraphGroupBox = {
+  categoryId: NodeVisualCategoryId;
+  label: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color: string;
+  zIndex: number;
+  pointerEvents: "none";
+};
+
+export type NodeGraphWheelZoomInput = {
+  clientX: number;
+  clientY: number;
+  deltaY: number;
+  rect: Pick<DOMRect, "left" | "top"> | { left: number; top: number };
+  view: NodeGraphView;
+};
+
+export const NODE_VISUAL_CATEGORIES: NodeVisualCategory[] = [
+  { id: "trigger_input", label: "Trigger/Input", color: "#89b4fa", icon: ">" },
+  { id: "state", label: "State", color: "#cba6f7", icon: "S" },
+  { id: "transition", label: "Transition", color: "#f9e2af", icon: "T" },
+  { id: "action", label: "Action", color: "#a6e3a1", icon: "A" },
+  { id: "animation", label: "Animation", color: "#f5c2e7", icon: "F" },
+  { id: "sprite", label: "Sprite", color: "#94e2d5", icon: "P" },
+  { id: "tilemap", label: "Tilemap", color: "#74c7ec", icon: "#" },
+  { id: "camera", label: "Camera", color: "#89dceb", icon: "C" },
+  { id: "audio", label: "Audio", color: "#fab387", icon: "M" },
+  { id: "timer", label: "Timer", color: "#f38ba8", icon: "t" },
+  { id: "collision", label: "Collision", color: "#eba0ac", icon: "X" },
+  { id: "hardware_budget", label: "Hardware Budget", color: "#f9e2af", icon: "!" },
+  { id: "vdp_dma_palette", label: "VDP/DMA/Palette", color: "#b4befe", icon: "V" },
+  { id: "bridge_source_mapping", label: "Bridge/Source Mapping", color: "#f38ba8", icon: "B" },
+  { id: "error_unsupported", label: "Error/Unsupported", color: "#f38ba8", icon: "E" },
+];
 
 const EVENT_NODE_TYPES: NodeType[] = [
   "event_start",
@@ -286,6 +356,236 @@ export function getNodeGraphBounds(graph: NodeGraph): GraphBounds | null {
     maxX: Math.max(...xs) + NODE_CARD_WIDTH,
     maxY: Math.max(...ys) + NODE_CARD_HEIGHT,
   };
+}
+
+function clampNodeGraphZoom(zoom: number): number {
+  return Math.min(NODEGRAPH_MAX_ZOOM, Math.max(NODEGRAPH_MIN_ZOOM, zoom));
+}
+
+export function snapNodeGraphPoint(
+  point: { x: number; y: number },
+  gridSize = NODEGRAPH_GRID_SIZE
+): { x: number; y: number } {
+  const size = Math.max(1, gridSize);
+  return {
+    x: Math.round(point.x / size) * size,
+    y: Math.round(point.y / size) * size,
+  };
+}
+
+export function getNodeGraphWheelZoomState(input: NodeGraphWheelZoomInput): NodeGraphView {
+  const localX = input.clientX - input.rect.left;
+  const localY = input.clientY - input.rect.top;
+  const currentZoom = clampNodeGraphZoom(input.view.zoom || 1);
+  const worldX = (localX - input.view.x) / currentZoom;
+  const worldY = (localY - input.view.y) / currentZoom;
+  const nextZoom = clampNodeGraphZoom(currentZoom * Math.exp(-input.deltaY * 0.0015));
+
+  return {
+    zoom: nextZoom,
+    x: localX - worldX * nextZoom,
+    y: localY - worldY * nextZoom,
+  };
+}
+
+export function getNodeGraphDotGridStyle(
+  view: NodeGraphView,
+  gridSize = NODEGRAPH_GRID_SIZE
+): Pick<CSSProperties, "backgroundImage" | "backgroundSize" | "backgroundPosition"> {
+  const scaledSize = Math.max(1, gridSize * clampNodeGraphZoom(view.zoom || 1));
+  return {
+    backgroundImage: "radial-gradient(circle, #313244 1px, transparent 1px)",
+    backgroundSize: `${scaledSize}px ${scaledSize}px`,
+    backgroundPosition: `${view.x}px ${view.y}px`,
+  };
+}
+
+function getNodeVisualCategory(nodeOrType: GraphNode | NodeType): NodeVisualCategory {
+  const type = typeof nodeOrType === "string" ? nodeOrType : nodeOrType.type;
+  const id: NodeVisualCategoryId = (() => {
+    switch (type) {
+      case "event_start":
+      case "event_update":
+      case "input_pressed":
+      case "input_held":
+      case "input_command":
+        return "trigger_input";
+      case "fsm_state":
+        return "state";
+      case "fsm_transition":
+        return "transition";
+      case "sprite_anim":
+      case "set_animation_state":
+      case "timeline_sequence":
+        return "animation";
+      case "sprite_move":
+      case "set_velocity":
+      case "set_position":
+      case "spawn_entity":
+      case "destroy_entity":
+        return "sprite";
+      case "set_tile":
+      case "scroll_tilemap":
+      case "load_scene":
+        return "tilemap";
+      case "camera_follow":
+      case "camera_bounds":
+      case "move_camera":
+        return "camera";
+      case "action_sound":
+        return "audio";
+      case "timer":
+        return "timer";
+      case "condition_overlap":
+      case "condition_compare":
+      case "logic_and":
+        return "collision";
+      case "hardware_budget_check":
+        return "hardware_budget";
+      case "event_vblank":
+      case "event_hblank":
+      case "event_dma_done":
+      case "effect_raster":
+        return "vdp_dma_palette";
+      case "bridge_unconverted_source":
+        return "bridge_source_mapping";
+      case "effect_parallax":
+      case "var_set":
+      case "var_get":
+      case "logic_math":
+      case "flow_if":
+      case "flow_while":
+      case "flow_for":
+        return "action";
+      default:
+        return "error_unsupported";
+    }
+  })();
+
+  return NODE_VISUAL_CATEGORIES.find((category) => category.id === id) ?? NODE_VISUAL_CATEGORIES[0];
+}
+
+export function buildNodeGraphGroupBoxes(graph: NodeGraph): NodeGraphGroupBox[] {
+  const nodesByCategory = new Map<NodeVisualCategoryId, GraphNode[]>();
+  for (const node of graph.nodes) {
+    const category = getNodeVisualCategory(node);
+    const nodes = nodesByCategory.get(category.id) ?? [];
+    nodes.push(node);
+    nodesByCategory.set(category.id, nodes);
+  }
+
+  return NODE_VISUAL_CATEGORIES.flatMap((category) => {
+    const nodes = nodesByCategory.get(category.id) ?? [];
+    if (nodes.length === 0) {
+      return [];
+    }
+
+    const xs = nodes.map((node) => node.x);
+    const ys = nodes.map((node) => node.y);
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    const maxX = Math.max(...nodes.map((node) => node.x + NODE_CARD_WIDTH));
+    const maxY = Math.max(...nodes.map((node) => node.y + NODE_CARD_HEIGHT));
+    const padding = 42;
+
+    return [
+      {
+        categoryId: category.id,
+        label: category.label,
+        x: minX - padding,
+        y: minY - padding,
+        width: Math.max(NODE_CARD_WIDTH + padding * 2, maxX - minX + padding * 2),
+        height: Math.max(NODE_CARD_HEIGHT + padding * 2, maxY - minY + padding * 2),
+        color: category.color,
+        zIndex: -1,
+        pointerEvents: "none" as const,
+      },
+    ];
+  });
+}
+
+export function canEditGraphNode(node: GraphNode): boolean {
+  if (node.type === "bridge_unconverted_source") {
+    return false;
+  }
+  const readonly = node.params.readonly ?? node.params.read_only;
+  if (typeof readonly === "string" && readonly.toLowerCase() === "true") {
+    return false;
+  }
+  if (readonly === 1) {
+    return false;
+  }
+  const importStatus = node.params.import_status;
+  return importStatus !== "bridge" && importStatus !== "blocked";
+}
+
+export type NodeGraphHardwareFeedback = {
+  topic: "tiles" | "palettes" | "sprites_frame" | "sprites_scanline" | "vram" | "dma" | "strategy";
+  label: string;
+  detail: string;
+  tone: "ok" | "warn" | "error";
+};
+
+export function buildNodeGraphHardwareFeedback(
+  graph: NodeGraph,
+  hwStatus?: HwStatus | null
+): NodeGraphHardwareFeedback[] {
+  const hasHardwareNode = graph.nodes.some((node) => node.type === "hardware_budget_check");
+  const feedback: NodeGraphHardwareFeedback[] = [];
+
+  if (hwStatus) {
+    feedback.push(
+      {
+        topic: "sprites_frame",
+        label: `Sprites/frame ${hwStatus.sprite_count}/${hwStatus.sprite_limit}`,
+        detail: "Sprite count explains object pressure visible in the current graph.",
+        tone: hwStatus.sprite_count > hwStatus.sprite_limit ? "error" : "ok",
+      },
+      {
+        topic: "sprites_scanline",
+        label: `Sprites/scanline ${hwStatus.scanline_sprite_peak}/${hwStatus.scanline_sprite_limit}`,
+        detail: "Scanline peaks are a common flicker source; multiplexing is a strategy, not a magic fix.",
+        tone: hwStatus.scanline_sprite_peak > hwStatus.scanline_sprite_limit ? "error" : "ok",
+      },
+      {
+        topic: "vram",
+        label: `VRAM ${hwStatus.vram_used}/${hwStatus.vram_limit}`,
+        detail: "Resident VRAM should stay explicit; streaming and banks must be intentional.",
+        tone: hwStatus.vram_used > hwStatus.vram_limit ? "error" : "ok",
+      },
+      {
+        topic: "dma",
+        label: `DMA ${hwStatus.dma_used}/${hwStatus.dma_limit}`,
+        detail: "DMA budget points to upload pressure per frame and should be reviewed near VBlank nodes.",
+        tone: hwStatus.dma_used > hwStatus.dma_limit ? "error" : "ok",
+      },
+      {
+        topic: "palettes",
+        label: `Palettes ${hwStatus.palette_banks_used}/${hwStatus.palette_banks_limit}`,
+        detail: "Palette swaps, mid-screen changes and shadow/highlight remain explicit experimental strategies.",
+        tone: hwStatus.palette_banks_used > hwStatus.palette_banks_limit ? "error" : "ok",
+      }
+    );
+  }
+
+  if (hasHardwareNode || !hwStatus) {
+    feedback.push(
+      {
+        topic: "tiles",
+        label: "Tiles and maps",
+        detail: "Use banks, streaming and metatile reuse to explain tile pressure before treating it as solved.",
+        tone: "warn",
+      },
+      {
+        topic: "strategy",
+        label: "Modern mitigation strategies",
+        detail: "Streaming, banks, palette swaps and sprite multiplexing are surfaced as tradeoffs for review.",
+        tone: "warn",
+      }
+    );
+  }
+
+  return feedback;
 }
 
 export function summarizeNodeGraph(graph: NodeGraph): NodeGraphSummary {
@@ -1585,6 +1885,59 @@ function makeEdge(
   };
 }
 
+export function buildCommandTransitionGraph(
+  command: SpriteCommandBinding,
+  targetEntityId: string,
+  buttonProfile: string
+): NodeGraph {
+  const commandKey = normalizeGraphEntityKey(command.id || command.display_name || "command") || "command";
+  const target = targetEntityId.trim() || "self";
+  const targetState = normalizeGraphEntityKey(command.target_animation || command.display_name || command.id || "attack");
+
+  const commandNode = makeNode("input_command", 120, 120);
+  commandNode.id = `input_command_${commandKey}`;
+  commandNode.label = command.display_name || "Input Command";
+  commandNode.params = {
+    ...commandNode.params,
+    command_id: command.id,
+    display_name: command.display_name,
+    notation: command.notation,
+    max_frames: command.max_frames,
+    target,
+    button_profile: command.button_profile || buttonProfile,
+    source: command.source,
+  };
+  if (command.unsupported_tokens?.length) {
+    commandNode.params.unsupported_tokens = command.unsupported_tokens.join(",");
+  }
+
+  const transitionNode = makeNode("fsm_transition", 400, 120);
+  transitionNode.id = `fsm_transition_${commandKey}`;
+  transitionNode.label = `${command.display_name || command.id} -> ${targetState}`;
+  transitionNode.params = {
+    ...transitionNode.params,
+    command_id: command.id,
+    target_state: targetState,
+  };
+
+  const animationNode = makeNode("set_animation_state", 680, 120);
+  animationNode.id = `set_animation_state_${commandKey}`;
+  animationNode.label = `Set ${targetState}`;
+  animationNode.params = {
+    ...animationNode.params,
+    target,
+    state: targetState,
+  };
+
+  return {
+    nodes: [commandNode, transitionNode, animationNode],
+    edges: [
+      makeEdge(commandNode, "exec", transitionNode, "exec"),
+      makeEdge(transitionNode, "matched", animationNode, "exec"),
+    ],
+  };
+}
+
 function nodeHasPrimaryExecOut(node: GraphNode): boolean {
   return node.outputs.some((port) => port.id === "exec" && port.kind === "exec");
 }
@@ -2205,6 +2558,7 @@ interface NodeCardProps {
   node: GraphNode;
   screenX: number;
   screenY: number;
+  zoom: number;
   selected: boolean;
   executionReachable?: boolean;
   onMouseDown: (e: React.MouseEvent) => void;
@@ -2216,6 +2570,7 @@ function NodeCard({
   node,
   screenX,
   screenY,
+  zoom,
   selected,
   executionReachable = false,
   onMouseDown,
@@ -2226,10 +2581,13 @@ function NodeCard({
   const headerBg = GROUP_HEADER_BG[group] ?? "bg-[#4a4a3a]";
   const importBadges = getGraphNodeImportBadges(node);
   const visibleParams = Object.entries(node.params).filter(([key]) => !IMPORT_PARAM_KEYS.has(key));
+  const editable = canEditGraphNode(node);
 
   return (
     <div
       data-testid={`node-card-${node.id}`}
+      data-selected={selected ? "true" : undefined}
+      data-editable={editable ? "true" : "false"}
       data-execution-reachable={executionReachable ? "true" : undefined}
       className={`absolute select-none min-w-[160px] rounded-xl border border-slate-700 bg-slate-900/90 shadow-lg backdrop-blur-sm ${
         selected ? "ring-2 ring-blue-500 shadow-2xl" : ""
@@ -2237,8 +2595,15 @@ function NodeCard({
         executionReachable
           ? "ring-2 ring-[#a6e3a1] shadow-[0_0_24px_rgba(166,227,161,0.22)]"
           : ""
+      } ${
+        editable ? "" : "opacity-80"
       }`}
-      style={{ left: screenX, top: screenY }}
+      style={{
+        left: screenX,
+        top: screenY,
+        transform: `scale(${zoom})`,
+        transformOrigin: "top left",
+      }}
       onMouseDown={onMouseDown}
     >
       {/* Header colorido por categoria */}
@@ -2418,6 +2783,7 @@ export default function NodeGraphEditor() {
   const setActiveViewportTab = useEditorStore((state) => state.setActiveViewportTab);
   const updateEntity = useEditorStore((state) => state.updateEntity);
   const logMessage = useEditorStore((state) => state.logMessage);
+  const hwStatus = useEditorStore((state) => state.hwStatus);
   const selectedEntity =
     selectedEntityId && !selectedEntityId.startsWith("layer::")
       ? activeScene?.entities.find((entity) => entity.entity_id === selectedEntityId) ?? null
@@ -2426,15 +2792,30 @@ export default function NodeGraphEditor() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dragging, setDragging] = useState<{ nodeId: string; offsetX: number; offsetY: number } | null>(null);
   const [pendingEdge, setPendingEdge] = useState<{ fromNode: string; fromPort: string; x: number; y: number } | null>(null);
+  const [panning, setPanning] = useState<{
+    startX: number;
+    startY: number;
+    startViewX: number;
+    startViewY: number;
+  } | null>(null);
   const [paletteSearch, setPaletteSearch] = useState("");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  const [viewOffset, setViewOffset] = useState<ViewOffset>({ x: 0, y: 0 });
+  const [view, setView] = useState<NodeGraphView>({ x: 0, y: 0, zoom: 1 });
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const [guidedCommentary, setGuidedCommentary] = useState<GuidedFlowCommentary | null>(null);
   const [gapFilter, setGapFilter] = useState("");
   const [executionInspectorEnabled, setExecutionInspectorEnabled] = useState(false);
+  const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
+  const [activeEdgeId, setActiveEdgeId] = useState<string | null>(null);
+  const [spacePressed, setSpacePressed] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
+  const panningRef = useRef<{
+    startX: number;
+    startY: number;
+    startViewX: number;
+    startViewY: number;
+  } | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const hydratingGraphRef = useRef(true);
   const lastPersistedGraphRef = useRef(serializeNodeGraph(INITIAL_GRAPH));
@@ -2450,7 +2831,11 @@ export default function NodeGraphEditor() {
       setSelectedId(null);
       setDragging(null);
       setPendingEdge(null);
-      setViewOffset({ x: 0, y: 0 });
+      panningRef.current = null;
+      setPanning(null);
+      setHoveredEdgeId(null);
+      setActiveEdgeId(null);
+      setView({ x: 0, y: 0, zoom: 1 });
       setGuidedCommentary(null);
       setGapFilter("");
       setExecutionInspectorEnabled(false);
@@ -2507,6 +2892,37 @@ export default function NodeGraphEditor() {
   }, []);
 
   useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      const element = target instanceof HTMLElement ? target : null;
+      return Boolean(
+        element &&
+          (element.tagName === "INPUT" ||
+            element.tagName === "TEXTAREA" ||
+            element.tagName === "SELECT" ||
+            element.isContentEditable)
+      );
+    };
+    const isSpace = (event: KeyboardEvent) => event.code === "Space" || event.key === " ";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isSpace(event) && !isEditableTarget(event.target)) {
+        event.preventDefault();
+        setSpacePressed(true);
+      }
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (isSpace(event)) {
+        setSpacePressed(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!selectedEntity || !activeProjectDir) {
       return;
     }
@@ -2558,27 +2974,52 @@ export default function NodeGraphEditor() {
 
   // ── Drag node ──────────────────────────────────────────────────────────────
   const onNodeMouseDown = useCallback((e: React.MouseEvent, nodeId: string) => {
+    if (spacePressed && e.button === 0) {
+      return;
+    }
     e.stopPropagation();
+    if (e.button !== 0) {
+      return;
+    }
     if ((e.target as HTMLElement).classList.contains("cursor-crosshair")) return;
     setSelectedId(nodeId);
     const node = graph.nodes.find((n) => n.id === nodeId)!;
+    const rect = canvasRef.current?.getBoundingClientRect();
+    const localX = e.clientX - (rect?.left ?? 0);
+    const localY = e.clientY - (rect?.top ?? 0);
     setDragging({
       nodeId,
-      offsetX: e.clientX - (node.x + viewOffset.x),
-      offsetY: e.clientY - (node.y + viewOffset.y),
+      offsetX: (localX - view.x) / view.zoom - node.x,
+      offsetY: (localY - view.y) / view.zoom - node.y,
     });
-  }, [graph.nodes, viewOffset.x, viewOffset.y]);
+  }, [graph.nodes, spacePressed, view.x, view.y, view.zoom]);
 
   const onMouseMove = useCallback((e: React.MouseEvent) => {
+    const activePanning = panningRef.current ?? panning;
+    if (activePanning) {
+      setView((current) => ({
+        ...current,
+        x: activePanning.startViewX + (e.clientX - activePanning.startX),
+        y: activePanning.startViewY + (e.clientY - activePanning.startY),
+      }));
+      return;
+    }
     if (dragging) {
+      const rect = canvasRef.current?.getBoundingClientRect();
+      const localX = e.clientX - (rect?.left ?? 0);
+      const localY = e.clientY - (rect?.top ?? 0);
+      const nextPoint = snapNodeGraphPoint({
+        x: (localX - view.x) / view.zoom - dragging.offsetX,
+        y: (localY - view.y) / view.zoom - dragging.offsetY,
+      });
       setGraph((g) => ({
         ...g,
         nodes: g.nodes.map((n) =>
           n.id === dragging.nodeId
             ? {
                 ...n,
-                x: e.clientX - viewOffset.x - dragging.offsetX,
-                y: e.clientY - viewOffset.y - dragging.offsetY,
+                x: nextPoint.x,
+                y: nextPoint.y,
               }
             : n
         ),
@@ -2587,11 +3028,51 @@ export default function NodeGraphEditor() {
     if (pendingEdge) {
       setPendingEdge((p) => p ? { ...p, x: e.clientX, y: e.clientY } : null);
     }
-  }, [dragging, pendingEdge, viewOffset.x, viewOffset.y]);
+  }, [dragging, panning, pendingEdge, view.x, view.y, view.zoom]);
 
   const onMouseUp = useCallback(() => {
     setDragging(null);
     setPendingEdge(null);
+    panningRef.current = null;
+    setPanning(null);
+    setActiveEdgeId(null);
+  }, []);
+
+  const onCanvasMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.button === 1 || (spacePressed && e.button === 0)) {
+      e.preventDefault();
+      setDragging(null);
+      const nextPanning = {
+        startX: e.clientX,
+        startY: e.clientY,
+        startViewX: view.x,
+        startViewY: view.y,
+      };
+      panningRef.current = nextPanning;
+      setPanning(nextPanning);
+      return;
+    }
+    if (spacePressed) {
+      return;
+    }
+    setSelectedId(null);
+  }, [spacePressed, view.x, view.y]);
+
+  const onCanvasWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) {
+      return;
+    }
+    setView((current) =>
+      getNodeGraphWheelZoomState({
+        clientX: e.clientX,
+        clientY: e.clientY,
+        deltaY: e.deltaY,
+        rect,
+        view: current,
+      })
+    );
   }, []);
 
   // ── Connect ports ──────────────────────────────────────────────────────────
@@ -2775,7 +3256,9 @@ export default function NodeGraphEditor() {
     setSelectedId(nextGraph.nodes[0]?.id ?? null);
     setDragging(null);
     setPendingEdge(null);
-    setViewOffset({ x: 0, y: 0 });
+    panningRef.current = null;
+    setPanning(null);
+    setView({ x: 0, y: 0, zoom: 1 });
     setGuidedCommentary({
       title: template.title,
       summary: template.summary,
@@ -2801,16 +3284,19 @@ export default function NodeGraphEditor() {
     setSelectedId(firstNewNodeId);
     setDragging(null);
     setPendingEdge(null);
+    panningRef.current = null;
+    setPanning(null);
     if (firstNewNode) {
       const rect = canvasRef.current?.getBoundingClientRect();
       const width = rect?.width ?? canvasSize.width;
       const height = rect?.height ?? canvasSize.height;
       const desiredX = Math.max(FOCUS_PADDING, width / 2 - NODE_CARD_WIDTH / 2);
       const desiredY = Math.max(FOCUS_PADDING, height / 2 - NODE_CARD_HEIGHT / 2);
-      setViewOffset({
-        x: desiredX - firstNewNode.x,
-        y: desiredY - firstNewNode.y,
-      });
+      setView((current) => ({
+        ...current,
+        x: desiredX - firstNewNode.x * current.zoom,
+        y: desiredY - firstNewNode.y * current.zoom,
+      }));
     }
     setGuidedCommentary({
       title: `${template.title} (anexado)`,
@@ -2830,6 +3316,41 @@ export default function NodeGraphEditor() {
       `[NodeGraph] Bloco guiado anexado: ${template.title}${contextSuffix}. Use 'Encadear exec (layout)' ou conecte manualmente se quiser ligar o fluxo novo ao existente.`
     );
   }, [canvasSize.height, canvasSize.width, graph, logMessage, quickActionContext]);
+
+  const appendCommandTransition = useCallback((command: SpriteCommandBinding) => {
+    if (!selectedEntity) {
+      return;
+    }
+    const commandGraph = buildCommandTransitionGraph(
+      command,
+      selectedEntity.entity_id,
+      command.button_profile || "megadrive"
+    );
+    const result = appendQuickActionGraph(graph, commandGraph);
+    const firstNewNodeId = result.appendedNodeIds[0] ?? commandGraph.nodes[0]?.id ?? null;
+    setGraph(result.graph);
+    setSelectedId(firstNewNodeId);
+    setDragging(null);
+    setPendingEdge(null);
+    panningRef.current = null;
+    setPanning(null);
+    setGuidedCommentary({
+      title: `${command.display_name || command.id} (command.dat)`,
+      summary: "Comando importado convertido em input_command, transicao FSM e animacao alvo.",
+      comments: [
+        `Notation: ${command.notation}`,
+        `Target animation: ${command.target_animation}`,
+      ],
+      hardwareNote: "Bridge visual: confirme input real, janela de frames e animacao antes de tratar como validacao final.",
+      limitation: command.unsupported_tokens?.length
+        ? `Tokens nao suportados preservados: ${command.unsupported_tokens.join(", ")}`
+        : undefined,
+    });
+    logMessage(
+      "info",
+      `[NodeGraph] command.dat anexado como transicao visual: ${command.display_name || command.id}.`
+    );
+  }, [graph, logMessage, selectedEntity]);
 
   const appendSgdkPatternTemplate = useCallback((template: SgdkPatternTemplate) => {
     const baseBounds = getNodeGraphBounds(graph);
@@ -2912,10 +3433,10 @@ export default function NodeGraphEditor() {
   // ── Edge SVG path ─────────────────────────────────────────────────────────
   // Simplified: bezier between node positions (port positions approximated)
   function edgePath(fromNode: GraphNode, toNode: GraphNode): string {
-    const x1 = fromNode.x + viewOffset.x + NODE_CARD_WIDTH; // right edge
-    const y1 = fromNode.y + viewOffset.y + 24;
-    const x2 = toNode.x + viewOffset.x;                     // left edge
-    const y2 = toNode.y + viewOffset.y + 24;
+    const x1 = fromNode.x * view.zoom + view.x + NODE_CARD_WIDTH * view.zoom;
+    const y1 = fromNode.y * view.zoom + view.y + 24 * view.zoom;
+    const x2 = toNode.x * view.zoom + view.x;
+    const y2 = toNode.y * view.zoom + view.y + 24 * view.zoom;
     const cx = (x1 + x2) / 2;
     return `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`;
   }
@@ -2945,6 +3466,12 @@ export default function NodeGraphEditor() {
     () => buildNodeMiniMap(graph, MINIMAP_WIDTH, MINIMAP_HEIGHT, MINIMAP_PADDING),
     [graph]
   );
+  const groupBoxes = useMemo(() => buildNodeGraphGroupBoxes(graph), [graph]);
+  const dotGridStyle = useMemo(() => getNodeGraphDotGridStyle(view), [view]);
+  const hardwareFeedback = useMemo(
+    () => buildNodeGraphHardwareFeedback(graph, hwStatus),
+    [graph, hwStatus]
+  );
 
   const graphBounds = useMemo(() => getNodeGraphBounds(graph), [graph]);
 
@@ -2959,10 +3486,14 @@ export default function NodeGraphEditor() {
     const graphHeight = Math.max(1, graphBounds.maxY - graphBounds.minY);
     const scale = Math.min(innerWidth / graphWidth, innerHeight / graphHeight);
 
-    const viewportLeft = MINIMAP_PADDING + Math.max(0, -viewOffset.x - graphBounds.minX) * scale;
-    const viewportTop = MINIMAP_PADDING + Math.max(0, -viewOffset.y - graphBounds.minY) * scale;
-    const viewportWidth = Math.min(innerWidth, Math.max(28, canvasSize.width * scale));
-    const viewportHeight = Math.min(innerHeight, Math.max(20, canvasSize.height * scale));
+    const worldLeft = -view.x / view.zoom;
+    const worldTop = -view.y / view.zoom;
+    const worldWidth = canvasSize.width / view.zoom;
+    const worldHeight = canvasSize.height / view.zoom;
+    const viewportLeft = MINIMAP_PADDING + Math.max(0, worldLeft - graphBounds.minX) * scale;
+    const viewportTop = MINIMAP_PADDING + Math.max(0, worldTop - graphBounds.minY) * scale;
+    const viewportWidth = Math.min(innerWidth, Math.max(28, worldWidth * scale));
+    const viewportHeight = Math.min(innerHeight, Math.max(20, worldHeight * scale));
 
     return {
       left: viewportLeft,
@@ -2970,7 +3501,7 @@ export default function NodeGraphEditor() {
       width: viewportWidth,
       height: viewportHeight,
     };
-  }, [canvasSize.height, canvasSize.width, graphBounds, viewOffset.x, viewOffset.y]);
+  }, [canvasSize.height, canvasSize.width, graphBounds, view.x, view.y, view.zoom]);
 
   const toggleExecutionInspector = useCallback(() => {
     setExecutionInspectorEnabled((enabled) => {
@@ -3003,10 +3534,11 @@ export default function NodeGraphEditor() {
     const desiredX = Math.max(FOCUS_PADDING, width / 2 - NODE_CARD_WIDTH / 2);
     const desiredY = Math.max(FOCUS_PADDING, height / 2 - NODE_CARD_HEIGHT / 2);
 
-    setViewOffset({
-      x: desiredX - targetNode.x,
-      y: desiredY - targetNode.y,
-    });
+    setView((current) => ({
+      ...current,
+      x: desiredX - targetNode.x * current.zoom,
+      y: desiredY - targetNode.y * current.zoom,
+    }));
     setSelectedId(nodeId);
   }, [canvasSize.height, canvasSize.width, graph.nodes]);
 
@@ -3135,6 +3667,9 @@ export default function NodeGraphEditor() {
           <p className="mt-1 select-none px-1 text-[10px] text-[#45475a]">
             Dica: arraste da saída para a entrada para conectar.
           </p>
+          <p className="select-none px-1 text-[10px] text-[#45475a]">
+            Space + drag ou botao do meio = pan.
+          </p>
           <p className="select-none px-1 text-[10px] text-[#45475a]">Del = remover nó</p>
           {selectedEntity?.components.logic?.graph_ref && graph.nodes.length === 0 ? (
             <p className="mt-1 px-1 text-[9px] leading-snug text-[#f9e2af]">
@@ -3148,16 +3683,16 @@ export default function NodeGraphEditor() {
       <div
         ref={canvasRef}
         data-testid="nodegraph-canvas"
-        className="relative flex-1 overflow-hidden cursor-default"
+        data-zoom={view.zoom.toFixed(3)}
+        className={`relative flex-1 overflow-hidden ${panning ? "cursor-grabbing" : spacePressed ? "cursor-grab" : "cursor-default"}`}
         style={{
-          backgroundImage:
-            "radial-gradient(circle, #313244 1px, transparent 1px)",
-          backgroundSize: "24px 24px",
+          ...dotGridStyle,
         }}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
         onMouseLeave={onMouseUp}
-        onMouseDown={() => setSelectedId(null)}
+        onMouseDown={onCanvasMouseDown}
+        onWheel={onCanvasWheel}
       >
         {!selectedEntity && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#11111b]/80">
@@ -3365,6 +3900,34 @@ export default function NodeGraphEditor() {
                 </ul>
               </div>
             )}
+            {hardwareFeedback.length > 0 ? (
+              <div
+                data-testid="nodegraph-hardware-feedback"
+                className="rounded border border-[#f9e2af]/35 bg-[#f9e2af]/10 px-2 py-1.5 text-[10px] leading-snug text-[#fef3c7]"
+              >
+                <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#f9e2af]">
+                  Hardware Feedback
+                </p>
+                <ul className="mt-1 space-y-1">
+                  {hardwareFeedback.slice(0, 6).map((item) => (
+                    <li key={`${item.topic}-${item.label}`} className="rounded border border-[#313244] bg-[#11111b]/70 px-2 py-1">
+                      <span
+                        className={
+                          item.tone === "error"
+                            ? "font-semibold text-[#f38ba8]"
+                            : item.tone === "ok"
+                              ? "font-semibold text-[#a6e3a1]"
+                              : "font-semibold text-[#f9e2af]"
+                        }
+                      >
+                        {item.label}
+                      </span>
+                      <span className="mt-0.5 block text-[#94a3b8]">{item.detail}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
 
             {executionInspectorEnabled ? (
               <div
@@ -3499,6 +4062,28 @@ export default function NodeGraphEditor() {
               </div>
             ) : null}
 
+            {selectedEntity.components.sprite?.commands?.length ? (
+              <div className="rounded border border-[#89b4fa]/35 bg-[#11111b] px-2 py-1.5 text-[10px] leading-snug text-[#bac2de]">
+                <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#89b4fa]">
+                  command.dat -&gt; Transition
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {selectedEntity.components.sprite.commands.map((command) => (
+                    <button
+                      key={command.id}
+                      type="button"
+                      data-testid={`nodegraph-command-transition-${normalizeGraphEntityKey(command.id)}`}
+                      onClick={() => appendCommandTransition(command)}
+                      className="rounded border border-[#89b4fa]/40 bg-[#89b4fa]/10 px-2 py-1 font-semibold text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20"
+                      title={command.notation}
+                    >
+                      + {command.display_name || command.id}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
             <div className="flex flex-wrap gap-1.5">
               <button
                 type="button"
@@ -3544,7 +4129,7 @@ export default function NodeGraphEditor() {
               <button
                 type="button"
                 data-testid="nodegraph-reset-view"
-                onClick={() => setViewOffset({ x: 0, y: 0 })}
+                onClick={() => setView({ x: 0, y: 0, zoom: 1 })}
                 className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 font-semibold text-[#a6adc8] transition-colors hover:text-[#cdd6f4]"
               >
                 Resetar Vista
@@ -3589,23 +4174,67 @@ export default function NodeGraphEditor() {
           </div>
         )}
 
+        {/* Background group boxes */}
+        {groupBoxes.map((group) => (
+          <div
+            key={`group-${group.categoryId}`}
+            data-testid={`nodegraph-group-box-${group.categoryId}`}
+            className="absolute rounded-2xl border text-[10px] font-semibold uppercase tracking-[0.14em]"
+            style={{
+              left: group.x * view.zoom + view.x,
+              top: group.y * view.zoom + view.y,
+              width: group.width * view.zoom,
+              height: group.height * view.zoom,
+              borderColor: `${group.color}55`,
+              backgroundColor: `${group.color}12`,
+              color: group.color,
+              zIndex: 0,
+              pointerEvents: group.pointerEvents,
+            }}
+          >
+            <span className="absolute left-3 top-2 rounded bg-[#11111b]/80 px-2 py-0.5">
+              {group.label}
+            </span>
+          </div>
+        ))}
+
         {/* SVG edges */}
         <svg
           ref={svgRef}
-          className="absolute inset-0 w-full h-full pointer-events-none"
+          className="absolute inset-0 z-[1] h-full w-full pointer-events-none"
         >
           {graph.edges.map((edge) => {
             const from = graph.nodes.find((n) => n.id === edge.fromNode);
             const to   = graph.nodes.find((n) => n.id === edge.toNode);
             if (!from || !to) return null;
+            const hovered = hoveredEdgeId === edge.id;
+            const active = activeEdgeId === edge.id;
             return (
               <path
                 key={edge.id}
+                data-testid={`nodegraph-edge-${edge.id}`}
+                data-hovered={hovered ? "true" : undefined}
+                data-active={active ? "true" : undefined}
                 d={edgePath(from, to)}
                 fill="none"
-                stroke="#a6e3a1"
-                strokeWidth={1.5}
-                strokeOpacity={0.7}
+                stroke={active ? "#f9e2af" : hovered ? "#89b4fa" : "#a6e3a1"}
+                strokeWidth={hovered || active ? 3 : 1.5}
+                strokeOpacity={hovered || active ? 0.95 : 0.7}
+                style={{ pointerEvents: "stroke" }}
+                ref={(element) => {
+                  if (!element) {
+                    return;
+                  }
+                  element.onpointerenter = () => setHoveredEdgeId(edge.id);
+                  element.onmouseenter = () => setHoveredEdgeId(edge.id);
+                }}
+                onPointerEnter={() => setHoveredEdgeId(edge.id)}
+                onPointerOver={() => setHoveredEdgeId(edge.id)}
+                onPointerLeave={() => setHoveredEdgeId((current) => (current === edge.id ? null : current))}
+                onMouseEnter={() => setHoveredEdgeId(edge.id)}
+                onMouseOver={() => setHoveredEdgeId(edge.id)}
+                onMouseLeave={() => setHoveredEdgeId((current) => (current === edge.id ? null : current))}
+                onPointerDown={() => setActiveEdgeId(edge.id)}
               />
             );
           })}
@@ -3616,8 +4245,8 @@ export default function NodeGraphEditor() {
             const rect = canvasRef.current?.getBoundingClientRect();
             const ox = rect ? pendingEdge.x - rect.left : pendingEdge.x;
             const oy = rect ? pendingEdge.y - rect.top  : pendingEdge.y;
-            const x1 = from.x + viewOffset.x + NODE_CARD_WIDTH;
-            const y1 = from.y + viewOffset.y + 24;
+            const x1 = from.x * view.zoom + view.x + NODE_CARD_WIDTH * view.zoom;
+            const y1 = from.y * view.zoom + view.y + 24 * view.zoom;
             return (
               <path
                 d={`M ${x1} ${y1} C ${(x1+ox)/2} ${y1}, ${(x1+ox)/2} ${oy}, ${ox} ${oy}`}
@@ -3635,8 +4264,9 @@ export default function NodeGraphEditor() {
           <NodeCard
             key={node.id}
             node={node}
-            screenX={node.x + viewOffset.x}
-            screenY={node.y + viewOffset.y}
+            screenX={node.x * view.zoom + view.x}
+            screenY={node.y * view.zoom + view.y}
+            zoom={view.zoom}
             selected={node.id === selectedId}
             executionReachable={reachableExecutionNodeIds.has(node.id)}
             onMouseDown={(e) => onNodeMouseDown(e, node.id)}
