@@ -405,6 +405,8 @@ export function evaluateUiLayoutOracleSnapshot(snapshot) {
 
   const rail = elements.nodegraphRail;
   const canvas = elements.nodegraphCanvas;
+  const contextRail = elements.nodegraphContextRail;
+  const overview = elements.nodegraphOverview;
   if ((target.id === "logic" || target.id === "nodegraph") && isVisible(rail) && isVisible(canvas)) {
     if (rectsOverlap(normalizeRect(rail.rect), normalizeRect(canvas.rect), 4)) {
       pushIssue(issues, "nodegraph-rail-overlaps-canvas", "side rail do NodeGraph invade o canvas");
@@ -415,6 +417,18 @@ export function evaluateUiLayoutOracleSnapshot(snapshot) {
     ]) {
       if (isVisible(element) && rectsOverlap(normalizeRect(rail.rect), normalizeRect(element.rect), 4)) {
         pushIssue(issues, "nodegraph-rail-overlaps-canvas", "side rail do NodeGraph cobre controles do canvas", {
+          key,
+        });
+      }
+    }
+  }
+  if ((target.id === "logic" || target.id === "nodegraph") && isVisible(canvas)) {
+    for (const [key, element] of [
+      ["nodegraphContextRail", contextRail],
+      ["nodegraphOverview", overview],
+    ]) {
+      if (isVisible(element) && rectsOverlap(normalizeRect(canvas.rect), normalizeRect(element.rect), 4)) {
+        pushIssue(issues, "nodegraph-context-overlaps-canvas", "painel de contexto do NodeGraph invade o canvas", {
           key,
         });
       }

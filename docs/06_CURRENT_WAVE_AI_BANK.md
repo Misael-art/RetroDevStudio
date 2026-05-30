@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-30 (rodada 68 - consolidacao SGDK e limpeza de worktrees)
+**Ultima Atualizacao:** 2026-05-30 (rodada 69 - UI final operational hardening A+B)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,18 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-30 rodada 69 - UI final operational hardening A+B):**
+  - **Branch de trabalho:** `codex/ui-final-operational-hardening` foi criada a partir de `origin/main`/`main` no SHA `935c604262f7f46198416d139b39ace4cdf550ac`, em `F:\Projects\RetroDevStudio`, para retomar a implementacao parcial deixada por outro agente.
+  - **Escopo fatiado confirmado:** esta rodada fecha apenas a fatia A+B combinada no handoff anterior: shell/topbar/abrir-importar e NodeGraph sem overlays invasivos. As demais ideias do pacote UI Final Operational Hardening permanecem fora desta entrega ate nova rodada propria.
+  - **Shell/topbar:** o menu Projeto agora separa explicitamente `Novo Projeto`, `Abrir Projeto`, `Importar Projeto Externo` e `Importar Asset`; o wizard tambem usa `Abrir Projeto`/`Importar Projeto Externo`. `Importar Asset` exige projeto ativo, abre o ArtStudio e registra orientacao canonica para imagem/spritesheets, `command.dat` e audio em `assets/audio`.
+  - **NodeGraph:** o painel `Logic Context` foi dockado em rail direito proprio (`nodegraph-context-rail`), fora da area mensuravel do canvas (`nodegraph-canvas`), com wheel/mousedown isolados para nao disparar pan/drag. Comentarios guiados e aviso de grafo sem conexoes deixaram de capturar ponteiro.
+  - **Oracle de layout:** o runner desktop agora captura `nodegraph-context-rail` e `nodegraph-overview`; `scripts/ui-layout-oracle.mjs` falha com `nodegraph-context-overlaps-canvas` quando o contexto invadir a area de trabalho do canvas.
+  - **Ruido preservado:** schemas Tauri gerados por build/readiness foram preservados em `F:\Projects\RetroDevStudio-cleanup-backups\ui-final-hardening-generated-schemas-20260530-194757.patch` e `F:\Projects\RetroDevStudio-cleanup-backups\ui-final-hardening-generated-schemas-post-readiness-timeout-20260530-202321.patch` antes da restauracao seletiva.
+  - **Validacao local:** `npm run check:tree` OK; `npm run lint` OK; `npx tsc --noEmit` OK; `npm test` OK (**44 arquivos / 400 testes**); `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK; `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` OK (**417 passed / 23 ignored**); `npm run build:debug` OK; `npm run preflight:sgdk-e2e` OK; `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests` OK; `npm run test:e2e:desktop:qa-rc` OK A-H com oracle multi-resolucao incluindo NodeGraph.
+  - **Readiness:** uma tentativa de `npm run release:readiness:promotion` nesta branch ficou sem saida ate o timeout local e foi encerrada; isso nao foi tratado como gate verde. O script e conservador para rodada institucional de promocao e bloqueia worktree sujo/branch a frente de `origin/main`. Retomada correta: rerodar `release:readiness:promotion` no destino de promocao limpo apos merge, ou nesta branch apenas para gerar report sabendo que havera bloqueio de governanca.
+  - **Status honesto:** nenhuma superficie foi promovida para Stable. NodeGraph, ArtStudio, SGDK Visual No-Code e importadores continuam **Experimental/em hardening**. Esta rodada reduz atrito e regressao visual, mas nao fecha o pacote UI completo nem altera `support_status`.
+  - **Proximo passo imediato:** commit/push da fatia A+B, abrir PR contra `main`, acompanhar checks remotos e so depois avaliar as proximas fatias do hardening UI.
 
 * **O que acabou de acontecer (2026-05-30 rodada 68 - consolidacao canonica e limpeza):**
   - **Checkout canonico unico:** `F:\Projects\RetroDevStudio` voltou a ser o diretorio principal do projeto, em `main`, limpo e alinhado com `origin/main` no SHA `87096854bb19b3e563fd7bfd834250d41807f920`. `git worktree list` aponta somente para esse checkout.

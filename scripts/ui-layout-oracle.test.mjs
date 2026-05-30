@@ -105,6 +105,42 @@ describe("ui layout oracle", () => {
     );
   });
 
+  it("fails when NodeGraph context panels overlap the canvas work area", () => {
+    const result = evaluateUiLayoutOracleSnapshot({
+      targetId: "nodegraph",
+      workspaceId: "logic",
+      resolutionTag: "1366x768",
+      viewport: { width: 1366, height: 768 },
+      document: { clientWidth: 1366, scrollWidth: 1366 },
+      elements: {
+        centerPanel: { rect: rect(0, 50, 1366, 650), visible: true },
+        leftPanel: { rect: rect(0, 0, 0, 0), visible: false },
+        rightPanel: { rect: rect(0, 0, 0, 0), visible: false },
+        nodegraphRail: { rect: rect(0, 50, 160, 650), visible: true },
+        nodegraphCanvas: { rect: rect(160, 50, 918, 650), visible: true },
+        nodegraphContextRail: { rect: rect(1040, 50, 286, 650), visible: true },
+        nodegraphOverview: { rect: rect(220, 80, 300, 360), visible: true },
+      },
+      clickables: [],
+      criticalTexts: [],
+      mainVisuals: [
+        {
+          key: "nodegraph-canvas",
+          kind: "nodegraph",
+          rect: rect(160, 50, 918, 650),
+          containerRect: rect(0, 50, 1366, 650),
+          visible: true,
+        },
+      ],
+      horizontalScrolls: [],
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.issues.map((issue) => issue.code)).toContain(
+      "nodegraph-context-overlaps-canvas"
+    );
+  });
+
   it("builds a pass/fail report grouped by visual target", () => {
     const passing = evaluateUiLayoutOracleSnapshot({
       targetId: "scene",

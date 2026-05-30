@@ -3681,8 +3681,7 @@ export default function NodeGraphEditor() {
 
       {/* ── Canvas ── */}
       <div
-        ref={canvasRef}
-        data-testid="nodegraph-canvas"
+        data-testid="nodegraph-canvas-shell"
         data-zoom={view.zoom.toFixed(3)}
         className={`relative flex-1 overflow-hidden ${panning ? "cursor-grabbing" : spacePressed ? "cursor-grab" : "cursor-default"}`}
         style={{
@@ -3694,6 +3693,14 @@ export default function NodeGraphEditor() {
         onMouseDown={onCanvasMouseDown}
         onWheel={onCanvasWheel}
       >
+        <div
+          ref={canvasRef}
+          data-testid="nodegraph-canvas"
+          data-zoom={view.zoom.toFixed(3)}
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 left-0 z-0"
+          style={{ right: selectedEntity ? 288 : 0 }}
+        />
         {!selectedEntity && (
           <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#11111b]/80">
             <p className="max-w-xs text-center text-xs text-[#6c7086]">
@@ -3703,9 +3710,15 @@ export default function NodeGraphEditor() {
         )}
 
         {selectedEntity && (
+          <aside
+            data-testid="nodegraph-context-rail"
+            className="absolute inset-y-0 right-0 z-20 flex w-72 flex-col overflow-hidden border-l border-[#313244] bg-[#181825]/95 shadow-[-18px_0_40px_rgba(0,0,0,0.24)] backdrop-blur-sm"
+            onMouseDown={(event) => event.stopPropagation()}
+            onWheel={(event) => event.stopPropagation()}
+          >
           <div
             data-testid="nodegraph-overview"
-            className="absolute left-3 top-3 z-10 flex max-h-[calc(100%-1.5rem)] max-w-[19rem] flex-col gap-2 overflow-x-hidden overflow-y-auto rounded-xl border border-[#313244] bg-[#181825]/95 px-3 py-2 text-[10px] shadow-lg backdrop-blur-sm scrollbar-thin"
+            className="scrollbar-thin flex min-h-0 flex-1 flex-col gap-2 overflow-x-hidden overflow-y-auto px-3 py-2 text-[10px]"
           >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -4172,6 +4185,7 @@ export default function NodeGraphEditor() {
               )}
             </div>
           </div>
+          </aside>
         )}
 
         {/* Background group boxes */}
@@ -4326,7 +4340,7 @@ export default function NodeGraphEditor() {
         {selectedEntity && guidedCommentary && graph.nodes.length > 0 && (
           <div
             data-testid="nodegraph-guided-commentary"
-            className="absolute bottom-3 left-3 z-10 max-w-[24rem] rounded-xl border border-[#313244] bg-[#181825]/95 px-4 py-3 text-[11px] shadow-lg backdrop-blur-sm"
+            className="pointer-events-none absolute bottom-3 left-3 z-10 max-w-[24rem] rounded-xl border border-[#313244] bg-[#181825]/95 px-4 py-3 text-[11px] shadow-lg backdrop-blur-sm"
           >
             <p className="text-[9px] font-semibold uppercase tracking-[0.16em] text-[#89b4fa]">
               Guided Commentary
@@ -4362,7 +4376,7 @@ export default function NodeGraphEditor() {
           </div>
         )}
         {selectedEntity && graph.nodes.length > 1 && graph.edges.length === 0 && (
-          <div className="absolute bottom-3 right-3 rounded border border-[#fab387]/40 bg-[#181825]/95 px-3 py-2 text-[10px] text-[#fab387] shadow-lg">
+          <div className="pointer-events-none absolute bottom-3 right-3 rounded border border-[#fab387]/40 bg-[#181825]/95 px-3 py-2 text-[10px] text-[#fab387] shadow-lg">
             Grafo sem conexoes: arraste de uma saida para uma entrada para ligar o fluxo.
           </div>
         )}

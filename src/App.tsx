@@ -1533,6 +1533,7 @@ export default function App() {
     consoleVisible,
     toggleConsole,
     logDiagnostic,
+    setArtStudioAssetPath,
   } = useEditorStore();
 
   const [building, setBuilding] = useState(false);
@@ -2220,22 +2221,35 @@ export default function App() {
       title: "Projeto",
       actions: [
         {
-          label: "Novo",
+          label: "Novo Projeto",
           onClick: () => setShowProjectWizard(true),
           accent: "primary",
           shortcut: getShortcutLabel("project.new", shortcuts),
           title: getShortcutTitle("project.new", "Criar novo projeto", shortcuts),
+          testId: "menu-action-project-new",
         },
         {
-          label: "Abrir",
+          label: "Abrir Projeto",
           onClick: () => void handleOpenProject(),
           shortcut: getShortcutLabel("project.open", shortcuts),
           title: getShortcutTitle("project.open", "Abrir workspace existente", shortcuts),
+          testId: "menu-action-project-open",
         },
         {
-          label: creatingProject ? "Importando..." : "Importar Externo",
+          label: creatingProject ? "Importando..." : "Importar Projeto Externo",
           onClick: () => void handleImportExternalProject(),
           disabled: creatingProject || templatesLoading,
+          title: "Importar SGDK, GameMaker, Godot, MUGEN, OpenBOR ou outro projeto externo suportado",
+          testId: "menu-action-project-import-external",
+        },
+        {
+          label: "Importar Asset",
+          onClick: handleImportAsset,
+          disabled: !activeProjectDir,
+          title: activeProjectDir
+            ? "Abrir o ArtStudio para importar imagem, command.dat e preparar assets canonicos"
+            : "Abra ou crie um projeto antes de importar assets",
+          testId: "menu-action-asset-import",
         },
         {
           label: "Salvar",
@@ -2813,6 +2827,20 @@ export default function App() {
     } finally {
       setCreatingProject(false);
     }
+  }
+
+  function handleImportAsset() {
+    if (!activeProjectDir) {
+      logMessage("warn", "[Assets] Abra ou crie um projeto antes de importar assets.");
+      return;
+    }
+
+    setArtStudioAssetPath(null);
+    handleWorkspaceSelect("artstudio");
+    logMessage(
+      "info",
+      "[Assets] Importar Asset aberto no ArtStudio: use Importar imagem para sprites/sheets, Importar command.dat para comandos, e mantenha audio canonico em assets/audio para aparecer no Asset Browser."
+    );
   }
 
   async function handleOpenProjectSettings() {
@@ -4295,7 +4323,7 @@ export default function App() {
                     ) : null}
                     <div className="mt-3 flex justify-end">
                       <ToolbarButton
-                        label={creatingProject ? "Importando..." : "Importar Externo"}
+                        label={creatingProject ? "Importando..." : "Importar Projeto Externo"}
                         onClick={() => void handleImportExternalProject()}
                         disabled={creatingProject || templatesLoading}
                       />
@@ -4461,7 +4489,7 @@ export default function App() {
               {activeProjectDir ? (
                 <ToolbarButton label="Cancelar" onClick={() => setShowProjectWizard(false)} />
               ) : null}
-              <ToolbarButton label="Abrir Existente" onClick={() => void handleOpenProject()} />
+              <ToolbarButton label="Abrir Projeto" onClick={() => void handleOpenProject()} />
               <ToolbarButton
                 label={creatingProject ? "Criando..." : "Criar Projeto"}
                 onClick={() => void confirmNewProject()}
