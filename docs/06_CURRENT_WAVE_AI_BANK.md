@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-30 (rodada 67 - SGDK semantic core A sobre visual core B)
+**Ultima Atualizacao:** 2026-05-30 (rodada 68 - consolidacao SGDK e limpeza de worktrees)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -20,6 +20,15 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+* **O que acabou de acontecer (2026-05-30 rodada 68 - consolidacao canonica e limpeza):**
+  - **Checkout canonico unico:** `F:\Projects\RetroDevStudio` voltou a ser o diretorio principal do projeto, em `main`, limpo e alinhado com `origin/main` no SHA `87096854bb19b3e563fd7bfd834250d41807f920`. `git worktree list` aponta somente para esse checkout.
+  - **SGDK Core B + Core A em main:** `origin/main` agora contem a frente SGDK Visual No-Code Core B e a frente SGDK semantic core A. O Core A foi commitado, rebased sobre o `main` que ja continha Core B, validado, pushado em `codex/sgdk-visual-nocode-core-a` e integrado no `main` por fast-forward.
+  - **Diretorios antigos arquivados:** worktrees e diretorios antigos foram removidos ou movidos para `F:\Projects\RetroDevStudio-cleanup-backups\archived-dirs-20260530-102456`. Diffs/arquivos sujos relevantes foram preservados em `F:\Projects\RetroDevStudio-cleanup-backups\archive-20260530-102456`; sujeira gerada por schemas/readiness tambem foi preservada em patches `final-root-generated-schemas-20260530-120136.patch` e `final-readiness-generated-dirty-20260530-124358.patch` antes da restauracao.
+  - **Residuo nao destrutivo:** resta `F:\Projects\RetroDevStudio-agent-sgdk-semantic-core`, pasta vazia e sem vinculo Git, mas bloqueada por handle/processo externo do Windows durante a limpeza. Ela nao contem trabalho de projeto e pode ser removida apos fechar o processo/terminal que a segura.
+  - **Validacao final no checkout canonico:** `npm run check:tree` OK; `npm run lint` OK; `npx tsc --noEmit` OK; `npm test` OK (**44 arquivos / 397 testes**); `cargo clippy --manifest-path src-tauri\Cargo.toml -- -D warnings` OK; `cargo test --manifest-path src-tauri\Cargo.toml --lib -- --nocapture --test-threads=1` OK (**417 passed / 23 ignored**); `npm run preflight:sgdk-e2e` OK; `powershell -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests` OK; `npm run test:e2e:desktop:qa-rc` OK A-H; `npm run build:portable` OK; `npm run build:msi` OK; `npm run release:manifest` OK; `npm run release:readiness:promotion` OK com `Pronto para promocao: SIM`.
+  - **Status honesto:** Core MVP esta coeso, validado e compilado no diretorio canonico. SGDK Visual No-Code, SGDK Semantic Core, NodeGraph, ArtStudio e suporte SGDK moderno continuam **Experimental/em hardening**; ainda nao ha promocao institucional para Stable.
+  - **Proximo passo imediato:** seguir a partir de `F:\Projects\RetroDevStudio`/`main` para a proxima frente SGDK no-code sem criar novos worktrees permanentes desnecessarios; remover a pasta vazia residual quando o handle externo for liberado.
+
 * **O que acabou de acontecer (2026-05-30 rodada 67 - SGDK Visual No-Code Core A):**
   - **Consolidacao sobre Core B:** a frente backend semantica foi preservada, commitada e rebased sobre `origin/main` apos a entrada de `codex/sgdk-visual-nocode-core-b`. Isto soma a camada de reports/IPC ao hardening visual de NodeGraph/ArtStudio sem promover SGDK/Node Engine para Stable.
   - **Backend semantico SGDK:** novo nucleo experimental gera relatorios de IR semantico, cobertura de nodes, round-trip estatico e restricoes de hardware Mega Drive. Os artefatos canonicos sao `sgdk-semantic-ir-report.json`, `sgdk-node-coverage-report.json`, `sgdk-roundtrip-report.json` e `sgdk-hardware-constraints-report.json`.
@@ -27,7 +36,7 @@
   - **IPC/contratos:** adicionados comandos Tauri e wrappers frontend para inspecionar IR, cobertura, node graph, round-trip, restricoes de hardware e bundle completo de reports. Nao houve UI avancada nova nesta fatia; a UI de consumo fica para rodada propria.
   - **Status honesto:** SGDK semantic core A e **Experimental/em hardening**. Reports estaticos nao executam ROM/emulacao por projeto; `emulation_visible_ok` permanece nulo quando nao ha evidencia de gate real. SGDK, Node Engine e Visual No-Code continuam sem promocao Stable nesta rodada.
   - **Evidencia pre-consolidacao:** `npm run check:tree` OK; `npm run lint` OK; `npx tsc --noEmit` OK; `npm test` OK (**44 arquivos / 386 testes**); `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK; `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` OK (**416 passed / 23 ignored**); `npm run preflight:sgdk-e2e` OK com `RDS_EDGE_DRIVER_PATH`; `validate-upstream-windows.ps1 -SkipRustTests` OK; `sgdk_corpus_inventory_real_corpus_report --ignored` OK (**122 projetos**); `sgdk_logic_real_corpus_vertical_reports --ignored` OK; `sgdk_matrix_corpus_ --ignored` OK (**7/7**); `official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --ignored` OK; `git diff --check` OK.
-  - **Proximo passo imediato:** finalizar validacao pos-rebase no destino canonico, integrar em `main`, recompilar binarios e so entao limpar worktrees preservando backups.
+  - **Proximo passo imediato:** concluido na rodada 68; manter esta entrada como evidencia da branch antes da consolidacao final.
 
 * **O que acabou de acontecer (2026-05-30 rodada 66 - SGDK Visual No-Code Core B):**
   - **Branch/worktree:** a frente foi implementada em `codex/sgdk-visual-nocode-core-b`, no worktree isolado `F:\Projects\RetroDevStudio-agent-sgdk-nodegraph-artstudio`, partindo de `origin/main`. O worktree principal `F:\Projects\RetroDevStudio` estava sujo e nao foi tocado.
