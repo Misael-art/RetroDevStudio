@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-30 (rodada 66 - SGDK Visual No-Code Core B em branch)
+**Ultima Atualizacao:** 2026-05-30 (rodada 67 - SGDK semantic core A sobre visual core B)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,15 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-05-30 rodada 67 - SGDK Visual No-Code Core A):**
+  - **Consolidacao sobre Core B:** a frente backend semantica foi preservada, commitada e rebased sobre `origin/main` apos a entrada de `codex/sgdk-visual-nocode-core-b`. Isto soma a camada de reports/IPC ao hardening visual de NodeGraph/ArtStudio sem promover SGDK/Node Engine para Stable.
+  - **Backend semantico SGDK:** novo nucleo experimental gera relatorios de IR semantico, cobertura de nodes, round-trip estatico e restricoes de hardware Mega Drive. Os artefatos canonicos sao `sgdk-semantic-ir-report.json`, `sgdk-node-coverage-report.json`, `sgdk-roundtrip-report.json` e `sgdk-hardware-constraints-report.json`.
+  - **Node export:** o grafo SGDK preserva estados/transicoes a partir do modelo canonico quando disponivel e expõe familias especificas de hardware (`vdp_validator`, `dma_budget`, `palette_hblank`) em vez de achatar tudo em budget generico. Bridges formais continuam visiveis mesmo quando nao bloqueiam build/no-code.
+  - **IPC/contratos:** adicionados comandos Tauri e wrappers frontend para inspecionar IR, cobertura, node graph, round-trip, restricoes de hardware e bundle completo de reports. Nao houve UI avancada nova nesta fatia; a UI de consumo fica para rodada propria.
+  - **Status honesto:** SGDK semantic core A e **Experimental/em hardening**. Reports estaticos nao executam ROM/emulacao por projeto; `emulation_visible_ok` permanece nulo quando nao ha evidencia de gate real. SGDK, Node Engine e Visual No-Code continuam sem promocao Stable nesta rodada.
+  - **Evidencia pre-consolidacao:** `npm run check:tree` OK; `npm run lint` OK; `npx tsc --noEmit` OK; `npm test` OK (**44 arquivos / 386 testes**); `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings` OK; `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` OK (**416 passed / 23 ignored**); `npm run preflight:sgdk-e2e` OK com `RDS_EDGE_DRIVER_PATH`; `validate-upstream-windows.ps1 -SkipRustTests` OK; `sgdk_corpus_inventory_real_corpus_report --ignored` OK (**122 projetos**); `sgdk_logic_real_corpus_vertical_reports --ignored` OK; `sgdk_matrix_corpus_ --ignored` OK (**7/7**); `official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --ignored` OK; `git diff --check` OK.
+  - **Proximo passo imediato:** finalizar validacao pos-rebase no destino canonico, integrar em `main`, recompilar binarios e so entao limpar worktrees preservando backups.
 
 * **O que acabou de acontecer (2026-05-30 rodada 66 - SGDK Visual No-Code Core B):**
   - **Branch/worktree:** a frente foi implementada em `codex/sgdk-visual-nocode-core-b`, no worktree isolado `F:\Projects\RetroDevStudio-agent-sgdk-nodegraph-artstudio`, partindo de `origin/main`. O worktree principal `F:\Projects\RetroDevStudio` estava sujo e nao foi tocado.

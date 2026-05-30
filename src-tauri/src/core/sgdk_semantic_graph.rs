@@ -257,16 +257,31 @@ fn call_to_node(call: &SgdkCallInventory, source_line: Option<&str>) -> Option<G
             ))
         }
         "tilemap" => Some(scroll_node(call, params)),
-        "vdp" | "dma" if call.name.contains("Scroll") => Some(scroll_node(call, params)),
-        "vdp" | "dma" => {
+        "vdp" if call.name.contains("Scroll") => Some(scroll_node(call, params)),
+        "palette" => Some(palette_hblank_node(call, params)),
+        "system" if call.name.contains("HInt") || call.name.contains("HBlank") => {
+            Some(palette_hblank_node(call, params))
+        }
+        "dma" => {
+            params.insert("vram_kb".to_string(), json!(64));
+            params.insert("dma_bytes_per_frame".to_string(), json!(7168));
+            Some(graph_node(
+                format!("dma_{}_{}", call.name, call.source.line),
+                "dma_budget",
+                "DMA budget",
+                "Hardware",
+                params,
+            ))
+        }
+        "vdp" => {
             params.insert("vram_kb".to_string(), json!(64));
             params.insert("sprites".to_string(), json!(80));
             params.insert("scanline_sprites".to_string(), json!(20));
             Some(graph_node(
-                format!("hardware_{}_{}", call.name, call.source.line),
-                "hardware_budget_check",
-                "Hardware budget",
-                "Camera",
+                format!("vdp_{}_{}", call.name, call.source.line),
+                "vdp_validator",
+                "VDP validator",
+                "Hardware",
                 params,
             ))
         }
@@ -297,13 +312,45 @@ fn scroll_node(call: &SgdkCallInventory, mut params: BTreeMap<String, Value>) ->
     )
 }
 
+fn palette_hblank_node(
+    call: &SgdkCallInventory,
+    mut params: BTreeMap<String, Value>,
+) -> GraphBuildNode {
+    params.insert("palette_slots".to_string(), json!(4));
+    params.insert(
+        "hblank_sensitive".to_string(),
+        json!(call.name.contains("HInt") || call.name.contains("HBlank")),
+    );
+    graph_node(
+        format!("palette_hblank_{}_{}", call.name, call.source.line),
+        "palette_hblank",
+        "Palette / HBlank",
+        "Hardware",
+        params,
+    )
+}
+
 fn add_fsm_nodes(
     inventory: &SgdkProjectInventory,
     nodes: &mut Vec<GraphBuildNode>,
     edges: &mut Vec<Value>,
     seen_ids: &mut BTreeSet<String>,
 ) {
-    let mut states = inventory.code.game_states.clone();
+    let canonical_logic = inventory.canonical_model.logic_systems.first();
+    let mut states = canonical_logic
+        .map(|logic| {
+            logic
+                .states
+                .iter()
+                .map(
+                    |state| crate::core::sgdk_corpus_inventory::SgdkNamedSourceItem {
+                        name: state.name.clone(),
+                        source: state.source.clone(),
+                    },
+                )
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| inventory.code.game_states.clone());
     states.sort_by(|left, right| left.name.cmp(&right.name));
     states.dedup_by(|left, right| left.name == right.name);
     if states.is_empty() {
@@ -328,6 +375,65 @@ fn add_fsm_nodes(
             ),
         );
         state_ids.push((state.name.clone(), id));
+    }
+
+    let state_id_by_name = state_ids
+        .iter()
+        .cloned()
+        .collect::<BTreeMap<String, String>>();
+    let canonical_transitions = canonical_logic
+        .map(|logic| logic.transitions.clone())
+        .unwrap_or_default();
+
+    if !canonical_transitions.is_empty() {
+        for transition in canonical_transitions {
+            let from_name = transition.from.clone().unwrap_or_else(|| "any".to_string());
+            let to_name = transition.to.clone();
+            let from_id = transition
+                .from
+                .as_ref()
+                .and_then(|name| state_id_by_name.get(name))
+                .cloned()
+                .or_else(|| state_ids.first().map(|(_, id)| id.clone()))
+                .unwrap_or_else(|| "sgdk_update".to_string());
+            let mut params = BTreeMap::new();
+            params.insert("target_state".to_string(), json!(sanitize_id(&to_name)));
+            params.insert("state_variable".to_string(), json!(transition.variable));
+            if let Some(condition) = transition.condition {
+                params.insert("condition".to_string(), json!(condition.expression));
+            }
+            add_source_params(&mut params, &transition.source);
+            let transition_id = push_node(
+                nodes,
+                seen_ids,
+                graph_node(
+                    format!("fsm_transition_{}_to_{}", from_name, to_name),
+                    "fsm_transition",
+                    format!("{from_name} -> {to_name}"),
+                    "Player FSM",
+                    params,
+                ),
+            );
+            edges.push(edge(
+                format!("edge_{from_id}_{transition_id}"),
+                &from_id,
+                "transitions",
+                &transition_id,
+                "exec",
+            ));
+            if let Some(input_id) =
+                first_node_id(nodes, "input_held").or_else(|| first_node_id(nodes, "input_pressed"))
+            {
+                edges.push(edge(
+                    format!("edge_{input_id}_{transition_id}_condition"),
+                    &input_id,
+                    "exec",
+                    &transition_id,
+                    "condition",
+                ));
+            }
+        }
+        return;
     }
 
     for pair in state_ids.windows(2) {
@@ -439,11 +545,7 @@ fn add_bridge_nodes(
     nodes: &mut Vec<GraphBuildNode>,
     seen_ids: &mut BTreeSet<String>,
 ) {
-    for gap in inventory
-        .semantic_gaps
-        .iter()
-        .filter(|gap| gap.blocks_nocode || gap.blocks_round_trip || gap.blocks_build)
-    {
+    for gap in &inventory.semantic_gaps {
         let mut params = BTreeMap::new();
         params.insert("gap".to_string(), json!(&gap.kind));
         params.insert("source".to_string(), json!(&gap.subject));
@@ -483,6 +585,7 @@ fn layout_nodes(nodes: Vec<GraphBuildNode>) -> Vec<Value> {
         "Animation",
         "Collision",
         "Audio",
+        "Hardware",
         "Bridges",
     ];
     let type_order = [
@@ -509,6 +612,9 @@ fn layout_nodes(nodes: Vec<GraphBuildNode>) -> Vec<Value> {
         "set_animation_state",
         "condition_overlap",
         "action_sound",
+        "vdp_validator",
+        "dma_budget",
+        "palette_hblank",
         "spawn_entity",
         "destroy_entity",
         "bridge_unconverted_source",

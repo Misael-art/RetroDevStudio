@@ -14,3 +14,4 @@ pub mod runtime_contracts;
 pub mod sgdk_corpus_inventory;
 pub mod sgdk_pattern_templates;
 pub mod sgdk_semantic_graph;
+pub mod sgdk_semantic_reports;

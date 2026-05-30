@@ -68,6 +68,17 @@ use core::sgdk_corpus_inventory::{
 use core::sgdk_pattern_templates::{
     list_sgdk_pattern_templates as list_sgdk_pattern_templates_impl, SgdkPatternTemplate,
 };
+use core::sgdk_semantic_reports::{
+    export_sgdk_semantic_node_graph as export_sgdk_semantic_node_graph_impl,
+    inspect_sgdk_hardware_constraints as inspect_sgdk_hardware_constraints_impl,
+    inspect_sgdk_node_coverage as inspect_sgdk_node_coverage_impl,
+    inspect_sgdk_semantic_ir as inspect_sgdk_semantic_ir_impl,
+    run_sgdk_semantic_roundtrip as run_sgdk_semantic_roundtrip_impl,
+    write_sgdk_hardware_constraints_report, write_sgdk_node_coverage_report,
+    write_sgdk_node_graph_report, write_sgdk_semantic_ir_report, write_sgdk_semantic_report_bundle,
+    SgdkHardwareConstraintReport, SgdkNodeCoverageReport, SgdkNodeGraphExportReport,
+    SgdkRoundTripReport, SgdkSemanticIrReport, SgdkSemanticReportBundle,
+};
 use emulator::frame_buffer::framebuffer_to_rgba;
 use emulator::libretro_ffi::{
     EmulatorCore, JoypadState, ReplayCapture, RuntimeExecutionTraceCapture,
@@ -3131,6 +3142,96 @@ fn inspect_sgdk_corpus_inventory(
 }
 
 #[tauri::command]
+fn inspect_sgdk_semantic_ir(
+    sgdk_path: String,
+    report_dir: Option<String>,
+) -> Result<SgdkSemanticIrReport, String> {
+    let root = validated_sgdk_report_root(&sgdk_path)?;
+    match optional_report_dir(report_dir) {
+        Some(dir) => write_sgdk_semantic_ir_report(root, &dir),
+        None => inspect_sgdk_semantic_ir_impl(root),
+    }
+}
+
+#[tauri::command]
+fn inspect_sgdk_node_coverage(
+    sgdk_path: String,
+    report_dir: Option<String>,
+) -> Result<SgdkNodeCoverageReport, String> {
+    let root = validated_sgdk_report_root(&sgdk_path)?;
+    match optional_report_dir(report_dir) {
+        Some(dir) => write_sgdk_node_coverage_report(root, &dir),
+        None => inspect_sgdk_node_coverage_impl(root),
+    }
+}
+
+#[tauri::command]
+fn export_sgdk_semantic_node_graph(
+    sgdk_path: String,
+    report_dir: Option<String>,
+) -> Result<SgdkNodeGraphExportReport, String> {
+    let root = validated_sgdk_report_root(&sgdk_path)?;
+    match optional_report_dir(report_dir) {
+        Some(dir) => write_sgdk_node_graph_report(root, &dir),
+        None => export_sgdk_semantic_node_graph_impl(root),
+    }
+}
+
+#[tauri::command]
+fn run_sgdk_semantic_roundtrip(
+    sgdk_path: String,
+    report_dir: String,
+) -> Result<SgdkRoundTripReport, String> {
+    let root = validated_sgdk_report_root(&sgdk_path)?;
+    let trimmed_report_dir = report_dir.trim();
+    if trimmed_report_dir.is_empty() {
+        return Err("Diretorio de report SGDK e obrigatorio para round-trip.".into());
+    }
+    run_sgdk_semantic_roundtrip_impl(root, Path::new(trimmed_report_dir))
+}
+
+#[tauri::command]
+fn inspect_sgdk_hardware_constraints(
+    sgdk_path: String,
+    report_dir: Option<String>,
+) -> Result<SgdkHardwareConstraintReport, String> {
+    let root = validated_sgdk_report_root(&sgdk_path)?;
+    match optional_report_dir(report_dir) {
+        Some(dir) => write_sgdk_hardware_constraints_report(root, &dir),
+        None => inspect_sgdk_hardware_constraints_impl(root),
+    }
+}
+
+#[tauri::command]
+fn generate_sgdk_semantic_reports(
+    sgdk_path: String,
+    report_dir: String,
+) -> Result<SgdkSemanticReportBundle, String> {
+    let root = validated_sgdk_report_root(&sgdk_path)?;
+    let trimmed_report_dir = report_dir.trim();
+    if trimmed_report_dir.is_empty() {
+        return Err("Diretorio de report SGDK e obrigatorio para gerar bundle semantico.".into());
+    }
+    write_sgdk_semantic_report_bundle(root, Path::new(trimmed_report_dir))
+}
+
+fn validated_sgdk_report_root(sgdk_path: &str) -> Result<&Path, String> {
+    let trimmed = sgdk_path.trim();
+    if trimmed.is_empty() {
+        return Err("Caminho SGDK e obrigatorio para relatorio semantico.".into());
+    }
+    Ok(Path::new(trimmed))
+}
+
+fn optional_report_dir(report_dir: Option<String>) -> Option<PathBuf> {
+    report_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+#[tauri::command]
 fn inspect_project_capability(project_dir: String) -> Result<ProjectCapabilityReport, String> {
     let trimmed = project_dir.trim();
     if trimmed.is_empty() {
@@ -3366,6 +3467,12 @@ pub fn run() {
             import_sgdk_project,
             inspect_sgdk_project_inventory,
             inspect_sgdk_corpus_inventory,
+            inspect_sgdk_semantic_ir,
+            inspect_sgdk_node_coverage,
+            export_sgdk_semantic_node_graph,
+            run_sgdk_semantic_roundtrip,
+            inspect_sgdk_hardware_constraints,
+            generate_sgdk_semantic_reports,
             inspect_project_capability,
             inspect_rom_mastering,
             inspect_runtime_contracts,

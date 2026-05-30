@@ -2729,6 +2729,8 @@ fn classify_sgdk_call_family(name: &str) -> &'static str {
         "input"
     } else if name.starts_with("SPR_") {
         "sprite"
+    } else if name.starts_with("PAL_") || name.contains("Palette") {
+        "palette"
     } else if name.starts_with("DMA_") || name.contains("DMA") {
         "dma"
     } else if name.starts_with("VDP_") {
@@ -2923,6 +2925,15 @@ fn derive_sgdk_node_candidates(
                 Some(call.source.clone()),
                 None,
             ),
+            "palette" => push_node_candidate(
+                &mut candidates,
+                &mut seen,
+                "palette_hblank",
+                format!("palette call: {}", call.name),
+                "hardware",
+                Some(call.source.clone()),
+                None,
+            ),
             "audio" => push_node_candidate(
                 &mut candidates,
                 &mut seen,
@@ -2932,15 +2943,42 @@ fn derive_sgdk_node_candidates(
                 Some(call.source.clone()),
                 None,
             ),
-            "dma" | "vdp" => push_node_candidate(
+            "dma" => push_node_candidate(
                 &mut candidates,
                 &mut seen,
-                "hardware_budget_check",
-                format!("hardware call: {}", call.name),
+                "dma_budget",
+                format!("DMA call: {}", call.name),
                 "hardware",
                 Some(call.source.clone()),
                 None,
             ),
+            "vdp" => {
+                let node_type = if call.name.contains("HInt") || call.name.contains("HBlank") {
+                    "palette_hblank"
+                } else {
+                    "vdp_validator"
+                };
+                push_node_candidate(
+                    &mut candidates,
+                    &mut seen,
+                    node_type,
+                    format!("VDP call: {}", call.name),
+                    "hardware",
+                    Some(call.source.clone()),
+                    None,
+                );
+            }
+            "system" if call.name.contains("HInt") || call.name.contains("HBlank") => {
+                push_node_candidate(
+                    &mut candidates,
+                    &mut seen,
+                    "palette_hblank",
+                    format!("HBlank callback: {}", call.name),
+                    "hardware",
+                    Some(call.source.clone()),
+                    None,
+                );
+            }
             _ => {}
         }
     }
