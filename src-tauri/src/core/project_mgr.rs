@@ -2520,6 +2520,8 @@ fn derive_sgdk_sprite_sheet_from_rescomp_png(
                 frame_durations: None,
                 loop_start: None,
                 mugen_frames: None,
+                onion_skin: None,
+                hitboxes: Vec::new(),
             },
         );
     }
@@ -7376,6 +7378,8 @@ fn mugen_actions_to_animation_defs(
                 frame_durations: Some(durations),
                 loop_start: action.loop_start,
                 mugen_frames: Some(mugen_frames),
+                onion_skin: None,
+                hitboxes: Vec::new(),
             },
         );
     }
@@ -9453,6 +9457,8 @@ fn gamemaker_player_animations(frame_count: u32) -> BTreeMap<String, AnimationDe
             frame_durations: None,
             loop_start: None,
             mugen_frames: None,
+            onion_skin: None,
+            hitboxes: Vec::new(),
         },
     );
     if frame_count > 1 {
@@ -9466,6 +9472,8 @@ fn gamemaker_player_animations(frame_count: u32) -> BTreeMap<String, AnimationDe
                 frame_durations: None,
                 loop_start: None,
                 mugen_frames: None,
+                onion_skin: None,
+                hitboxes: Vec::new(),
             },
         );
     }
@@ -10991,6 +10999,8 @@ fn godot_animation_defs<'a>(
                 frame_durations: None,
                 loop_start: None,
                 mugen_frames: None,
+                onion_skin: None,
+                hitboxes: Vec::new(),
             },
         );
     }
@@ -12645,6 +12655,8 @@ fn openbor_animation_to_def(block: &OpenBorAnimationBlock) -> AnimationDef {
         frame_durations,
         loop_start: block.loop_start,
         mugen_frames,
+        onion_skin: None,
+        hitboxes: Vec::new(),
     }
 }
 
@@ -14499,7 +14511,8 @@ pub fn update_project_settings(
 pub fn project_settings_warnings(project: &Project) -> Vec<String> {
     let mut warnings = Vec::new();
     if project.target == "megadrive" && project.settings.sram.enabled {
-        warnings.push("SRAM sera declarada no header da ROM Mega Drive no proximo build.".to_string());
+        warnings
+            .push("SRAM sera declarada no header da ROM Mega Drive no proximo build.".to_string());
         warnings.push("Build precisa passar antes de tratar save como funcional; runtime save depende de observacao Libretro/AAA.".to_string());
     } else if project.target == "megadrive" {
         warnings.push("SRAM off: ROM Mega Drive nao vai declarar backup RAM.".to_string());
@@ -14954,12 +14967,10 @@ pub fn validate_project(project: &Project) -> Result<(), LoadError> {
 fn validate_project_settings(project: &Project) -> Result<(), LoadError> {
     match project.settings.region.as_str() {
         "world" | "usa" | "japan" | "europe" => {}
-        other => {
-            return Err(LoadError(format!(
-                "project.rds: settings.region '{}' invalido. Use 'world', 'usa', 'japan' ou 'europe'.",
-                other
-            )))
-        }
+        other => return Err(LoadError(format!(
+            "project.rds: settings.region '{}' invalido. Use 'world', 'usa', 'japan' ou 'europe'.",
+            other
+        ))),
     }
 
     match project.settings.video_standard.as_str() {
@@ -14994,10 +15005,7 @@ fn validate_project_settings(project: &Project) -> Result<(), LoadError> {
             "project.rds: settings.internal_rom_name deve ter no maximo 48 bytes ASCII.".into(),
         ));
     }
-    if !title
-        .bytes()
-        .all(|byte| matches!(byte, 0x20..=0x7E))
-    {
+    if !title.bytes().all(|byte| matches!(byte, 0x20..=0x7E)) {
         return Err(LoadError(
             "project.rds: settings.internal_rom_name aceita apenas ASCII imprimivel.".into(),
         ));
@@ -15339,9 +15347,8 @@ fn migrate_project_1_6_0_to_1_7_0(
         "ntsc"
     };
     let internal_rom_name = normalize_internal_rom_name(project_name);
-    object
-        .entry("settings".to_string())
-        .or_insert_with(|| serde_json::json!({
+    object.entry("settings".to_string()).or_insert_with(|| {
+        serde_json::json!({
             "region": "world",
             "video_standard": video_standard,
             "internal_rom_name": internal_rom_name,
@@ -15351,7 +15358,8 @@ fn migrate_project_1_6_0_to_1_7_0(
             },
             "save_slots": 1,
             "debug_overlay": false
-        }));
+        })
+    });
     Ok(value)
 }
 
@@ -20647,6 +20655,8 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                                 frame_durations: None,
                                 loop_start: None,
                                 mugen_frames: None,
+                                onion_skin: None,
+                                hitboxes: Vec::new(),
                             },
                         ),
                         (
@@ -20658,6 +20668,8 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                                 frame_durations: None,
                                 loop_start: None,
                                 mugen_frames: None,
+                                onion_skin: None,
+                                hitboxes: Vec::new(),
                             },
                         ),
                     ]),
@@ -20709,6 +20721,8 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                 frame_durations: None,
                 loop_start: None,
                 mugen_frames: None,
+                onion_skin: None,
+                hitboxes: Vec::new(),
             })
         );
         assert_eq!(
@@ -20720,6 +20734,8 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
                 frame_durations: None,
                 loop_start: None,
                 mugen_frames: None,
+                onion_skin: None,
+                hitboxes: Vec::new(),
             })
         );
         assert_eq!(sprite.commands.len(), 1);
@@ -20823,8 +20839,8 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
 
     #[test]
     fn validate_project_rejects_unsafe_project_settings() {
-        let mut project = canonical_project("Invalid Settings", "megadrive")
-            .expect("canonical project");
+        let mut project =
+            canonical_project("Invalid Settings", "megadrive").expect("canonical project");
         project.settings.internal_rom_name = "INVALID\nTITLE".to_string();
         let error = validate_project(&project).expect_err("control chars should fail");
         assert!(error

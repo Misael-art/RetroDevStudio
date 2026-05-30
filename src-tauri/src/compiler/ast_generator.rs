@@ -2573,6 +2573,8 @@ mod tests {
                 frame_durations: None,
                 loop_start: None,
                 mugen_frames: None,
+                onion_skin: None,
+                hitboxes: Vec::new(),
             },
         );
 
@@ -3412,6 +3414,8 @@ mod tests {
                 frame_durations: None,
                 loop_start: None,
                 mugen_frames: None,
+                onion_skin: None,
+                hitboxes: Vec::new(),
             },
         );
         animations.insert(
@@ -3423,6 +3427,8 @@ mod tests {
                 frame_durations: None,
                 loop_start: None,
                 mugen_frames: None,
+                onion_skin: None,
+                hitboxes: Vec::new(),
             },
         );
         let logic_graph = json!({
@@ -4482,6 +4488,8 @@ mod tests {
                 frame_durations: None,
                 loop_start: None,
                 mugen_frames: None,
+                onion_skin: None,
+                hitboxes: Vec::new(),
             },
         );
         animations.insert(
@@ -4493,6 +4501,8 @@ mod tests {
                 frame_durations: None,
                 loop_start: None,
                 mugen_frames: None,
+                onion_skin: None,
+                hitboxes: Vec::new(),
             },
         );
         let mut sfx = HashMap::new();
@@ -5092,6 +5102,8 @@ mod tests {
                 frame_durations: None,
                 loop_start: None,
                 mugen_frames: None,
+                onion_skin: None,
+                hitboxes: Vec::new(),
             },
         );
         animations.insert(
@@ -5103,6 +5115,8 @@ mod tests {
                 frame_durations: None,
                 loop_start: None,
                 mugen_frames: None,
+                onion_skin: None,
+                hitboxes: Vec::new(),
             },
         );
 

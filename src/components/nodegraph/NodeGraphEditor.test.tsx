@@ -4,13 +4,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import NodeGraphEditor, {
   EMPTY_GRAPH,
+  NODE_VISUAL_CATEGORIES,
   REQUIRED_NOCODE_NODE_TYPES,
   appendExecChainEdgesFromLayout,
   appendQuickActionGraph,
   autoLayoutNodeGraph,
+  buildCommandTransitionGraph,
   buildNodeMiniMap,
+  buildNodeGraphGroupBoxes,
+  buildNodeGraphHardwareFeedback,
+  canEditGraphNode,
   deserializeNodeGraph,
+  getNodeGraphDotGridStyle,
+  getNodeGraphWheelZoomState,
   serializeNodeGraph,
+  snapNodeGraphPoint,
   summarizeNodeGraph,
   validateNodeGraph,
   type NodeGraph,
@@ -234,6 +242,13 @@ const VALID_EXEC_ENTITY = buildLogicSpriteEntity("hero", "Hero", VALID_EXEC_GRAP
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
 
+if (typeof SVGPathElement === "undefined") {
+  Object.defineProperty(globalThis, "SVGPathElement", {
+    value: SVGElement,
+    configurable: true,
+  });
+}
+
 function buildSceneWithGraph(
   graph: NodeGraph,
   entities: Entity[] = [buildLogicEntity("hero", "Hero", graph)]
@@ -377,6 +392,171 @@ describe("NodeGraphEditor helpers", () => {
     expect(move.y).toBeLessThan(sound.y);
     expect(budget.y).toBeGreaterThan(sound.y);
     expect(arranged.nodes.map((node) => node.id)).toEqual(["entry", "hadouken", "move", "sound", "budget"]);
+  });
+
+  it("keeps cursor-centered zoom, pan-aware dot grid and snap helpers deterministic", () => {
+    const before = { x: -240, y: -120, zoom: 1 };
+    const rect = { left: 100, top: 80 };
+    const zoomed = getNodeGraphWheelZoomState({
+      clientX: 340,
+      clientY: 220,
+      deltaY: -120,
+      rect,
+      view: before,
+    });
+
+    const localX = 340 - rect.left;
+    const localY = 220 - rect.top;
+    const worldBefore = {
+      x: (localX - before.x) / before.zoom,
+      y: (localY - before.y) / before.zoom,
+    };
+    const worldAfter = {
+      x: (localX - zoomed.x) / zoomed.zoom,
+      y: (localY - zoomed.y) / zoomed.zoom,
+    };
+
+    expect(zoomed.zoom).toBeGreaterThan(1);
+    expect(worldAfter.x).toBeCloseTo(worldBefore.x, 4);
+    expect(worldAfter.y).toBeCloseTo(worldBefore.y, 4);
+    expect(snapNodeGraphPoint({ x: 173, y: 91 }, 24)).toEqual({ x: 168, y: 96 });
+    expect(getNodeGraphDotGridStyle({ x: -30, y: 12, zoom: 1.5 })).toEqual(
+      expect.objectContaining({
+        backgroundSize: "36px 36px",
+        backgroundPosition: "-30px 12px",
+      })
+    );
+  });
+
+  it("declares visual categories, readonly bridge nodes and background group boxes", () => {
+    expect(NODE_VISUAL_CATEGORIES.map((category) => category.id)).toEqual([
+      "trigger_input",
+      "state",
+      "transition",
+      "action",
+      "animation",
+      "sprite",
+      "tilemap",
+      "camera",
+      "audio",
+      "timer",
+      "collision",
+      "hardware_budget",
+      "vdp_dma_palette",
+      "bridge_source_mapping",
+      "error_unsupported",
+    ]);
+
+    const groups = buildNodeGraphGroupBoxes({
+      nodes: [
+        { ...VALID_EXEC_GRAPH.nodes[0], id: "command", type: "input_command", x: 100, y: 100 },
+        { ...VALID_EXEC_GRAPH.nodes[1], id: "anim", type: "set_animation_state", x: 380, y: 120 },
+        {
+          ...GRAPH_FIXTURE.nodes[1],
+          id: "budget",
+          type: "hardware_budget_check",
+          x: 640,
+          y: 240,
+        },
+        {
+          id: "bridge",
+          type: "bridge_unconverted_source",
+          label: "Bridge",
+          x: 920,
+          y: 320,
+          inputs: [{ id: "exec", label: "exec", kind: "exec" }],
+          outputs: [{ id: "exec", label: "exec", kind: "exec" }],
+          params: { gap: "macro" },
+        },
+      ],
+      edges: [],
+    });
+
+    expect(groups.map((group) => group.label)).toEqual(
+      expect.arrayContaining([
+        "Trigger/Input",
+        "Animation",
+        "Hardware Budget",
+        "Bridge/Source Mapping",
+      ])
+    );
+    expect(groups.every((group) => group.zIndex < 0 && group.pointerEvents === "none")).toBe(true);
+    expect(canEditGraphNode(groups.length ? groups[0] && VALID_EXEC_GRAPH.nodes[0] : VALID_EXEC_GRAPH.nodes[0])).toBe(
+      true
+    );
+    expect(
+      canEditGraphNode({
+        id: "bridge",
+        type: "bridge_unconverted_source",
+        label: "Bridge",
+        x: 0,
+        y: 0,
+        inputs: [],
+        outputs: [],
+        params: { readonly: "true" },
+      })
+    ).toBe(false);
+  });
+
+  it("builds transition nodes from command.dat bindings without dropping unsupported tokens", () => {
+    const command = VALID_EXEC_ENTITY.components.sprite!.commands![0];
+    const transitionGraph = buildCommandTransitionGraph(command, "hero", "megadrive");
+
+    expect(transitionGraph.nodes.map((node) => node.type)).toEqual([
+      "input_command",
+      "fsm_transition",
+      "set_animation_state",
+    ]);
+    expect(transitionGraph.edges).toHaveLength(2);
+    expect(transitionGraph.nodes[0].params).toEqual(
+      expect.objectContaining({
+        command_id: "hadouken",
+        notation: "_2,_3,_6,_P",
+        target: "hero",
+        button_profile: "megadrive",
+      })
+    );
+    expect(transitionGraph.nodes[1].params).toEqual(
+      expect.objectContaining({
+        target_state: "fireball",
+      })
+    );
+  });
+
+  it("summarizes hardware feedback as budget facts plus explicit modern strategies", () => {
+    const feedback = buildNodeGraphHardwareFeedback(
+      {
+        nodes: [
+          {
+            ...GRAPH_FIXTURE.nodes[1],
+            type: "hardware_budget_check",
+          },
+        ],
+        edges: [],
+      },
+      {
+        vram_used: 72,
+        vram_limit: 64,
+        sprite_count: 42,
+        sprite_limit: 80,
+        scanline_sprite_peak: 22,
+        scanline_sprite_limit: 20,
+        dma_used: 5120,
+        dma_limit: 4096,
+        palette_banks_used: 4,
+        palette_banks_limit: 4,
+        bg_layers: 2,
+        bg_layers_limit: 2,
+        errors: [],
+        warnings: [],
+      }
+    );
+
+    expect(feedback.map((item) => item.topic)).toEqual(
+      expect.arrayContaining(["tiles", "palettes", "sprites_frame", "sprites_scanline", "vram", "dma", "strategy"])
+    );
+    expect(feedback.find((item) => item.topic === "vram")?.tone).toBe("error");
+    expect(feedback.find((item) => item.topic === "strategy")?.detail).toContain("Streaming");
   });
 
   it("declares the no-code production node vocabulary in the editor", () => {
@@ -701,6 +881,96 @@ describe("NodeGraphEditor", () => {
     expect(useEditorStore.getState().activeScene?.entities[0].components.logic?.graph).toBe(
       serializeNodeGraph(GRAPH_FIXTURE)
     );
+  });
+
+  it("zooms and pans the canvas without losing the selected node or edge hover state", async () => {
+    const canvas = container.querySelector("[data-testid='nodegraph-canvas']") as HTMLDivElement | null;
+    if (!canvas) {
+      throw new Error("NodeGraph canvas not found");
+    }
+
+    Object.defineProperty(canvas, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 800,
+        bottom: 600,
+        width: 800,
+        height: 600,
+        toJSON: () => ({}),
+      }),
+    });
+
+    await act(async () => {
+      (container.querySelector("[data-testid='node-card-entry_node']") as HTMLElement).dispatchEvent(
+        new MouseEvent("mousedown", { bubbles: true, clientX: 1210, clientY: 730 })
+      );
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='node-card-entry_node']")?.getAttribute("data-selected")).toBe(
+      "true"
+    );
+
+    await act(async () => {
+      canvas.dispatchEvent(new WheelEvent("wheel", { bubbles: true, clientX: 320, clientY: 220, deltaY: -120 }));
+      await flush();
+    });
+
+    expect(Number(canvas.dataset.zoom)).toBeGreaterThan(1);
+    expect(container.querySelector("[data-testid='node-card-entry_node']")?.getAttribute("data-selected")).toBe(
+      "true"
+    );
+
+    const beforeLeft = Number.parseFloat(
+      (container.querySelector("[data-testid='node-card-entry_node']") as HTMLDivElement).style.left
+    );
+
+    await act(async () => {
+      canvas.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 1, clientX: 240, clientY: 180 }));
+      canvas.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, buttons: 4, clientX: 300, clientY: 220 }));
+      canvas.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, button: 1 }));
+      await flush();
+    });
+
+    const afterLeft = Number.parseFloat(
+      (container.querySelector("[data-testid='node-card-entry_node']") as HTMLDivElement).style.left
+    );
+    expect(afterLeft).toBeGreaterThan(beforeLeft);
+    expect(container.querySelector("[data-testid='node-card-entry_node']")?.getAttribute("data-selected")).toBe(
+      "true"
+    );
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, code: "Space", key: " " }));
+      await flush();
+      canvas.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0, clientX: 260, clientY: 180 }));
+      canvas.dispatchEvent(new MouseEvent("mousemove", { bubbles: true, buttons: 1, clientX: 312, clientY: 210 }));
+      canvas.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, button: 0 }));
+      window.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, code: "Space", key: " " }));
+      await flush();
+    });
+
+    const afterSpacePanLeft = Number.parseFloat(
+      (container.querySelector("[data-testid='node-card-entry_node']") as HTMLDivElement).style.left
+    );
+    expect(afterSpacePanLeft).toBeGreaterThan(afterLeft);
+    expect(container.querySelector("[data-testid='node-card-entry_node']")?.getAttribute("data-selected")).toBe(
+      "true"
+    );
+
+    const edge = container.querySelector("[data-testid='nodegraph-edge-edge_1']") as SVGPathElement | null;
+    expect(edge).toBeInstanceOf(SVGPathElement);
+
+    await act(async () => {
+      edge!.dispatchEvent(new MouseEvent("pointerenter", { bubbles: true }));
+      await flush();
+    });
+
+    expect(edge?.getAttribute("data-hovered")).toBe("true");
   });
 
   it("keeps a visible Scene bridge for the selected logic entity", async () => {

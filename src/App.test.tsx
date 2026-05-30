@@ -3743,10 +3743,12 @@ describe("App build flow", () => {
 
   it("shows a hot reload notice in the game viewport when backend asset change events arrive", async () => {
     let onAssetChange: ((payload: { project_dir: string; changed_paths: string[] }) => void) | null = null;
-    mocks.listenToProjectAssetChanges.mockImplementation(async (callback) => {
-      onAssetChange = callback;
-      return vi.fn();
-    });
+    mocks.listenToProjectAssetChanges.mockImplementation(
+      async (callback: (payload: { project_dir: string; changed_paths: string[] }) => void) => {
+        onAssetChange = callback;
+        return vi.fn();
+      }
+    );
 
     await act(async () => {
       root.unmount();

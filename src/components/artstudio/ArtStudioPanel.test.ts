@@ -5,13 +5,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import ArtStudioPanel, {
   buildArtStudioCommandBindings,
   buildArtStudioAnimations,
+  buildArtStudioHitboxCMetadata,
+  buildArtStudioImportStrategy,
+  buildArtStudioPaletteManager,
+  buildArtStudioPreviewOverlays,
   buildArtStudioSequencesFromSpriteMetadata,
+  buildManualArtStudioCommand,
   describeArtStudioLoadFailure,
+  duplicateArtStudioSequenceFrame,
   getArtStudioImageFormatLabel,
   getArtStudioPanOffsets,
   summarizeArtStudioHardwareBudget,
   getArtStudioWheelZoomState,
   getSuggestedFrameIndex,
+  moveArtStudioSequenceFrame,
+  removeArtStudioSequenceFrame,
   resolveArtStudioSpriteAssetPath,
   type SpriteSequence,
 } from "./ArtStudioPanel";
@@ -131,6 +139,66 @@ describe("ArtStudioPanel helpers", () => {
         loop: true,
       },
     });
+  });
+
+  it("persists frame durations, loop region, onion skin and hitbox metadata per animation", () => {
+    const result = buildArtStudioAnimations([
+      {
+        id: "attack",
+        name: "Attack",
+        frames: [0, 1],
+        fps: 12,
+        loop: false,
+        frameDurations: { 0: 4, 1: 8 },
+        loopStart: 1,
+        onionSkin: { enabled: true, previous: true, next: true, opacity: 0.35 },
+        hitboxes: [
+          { frame: 1, kind: "attack", x: 20, y: 8, width: 18, height: 10 },
+          { frame: 1, kind: "hurt", x: 6, y: 4, width: 24, height: 28 },
+          { frame: 1, kind: "push", x: 10, y: 16, width: 20, height: 16 },
+          { frame: 1, kind: "collision", x: 8, y: 18, width: 24, height: 14 },
+        ],
+      },
+    ]);
+
+    expect(result.error).toBeNull();
+    expect(result.animations.attack).toEqual({
+      frames: [0, 1],
+      fps: 12,
+      loop: false,
+      frame_durations: [4, 8],
+      loop_start: 1,
+      onion_skin: { enabled: true, previous: true, next: true, opacity: 0.35 },
+      hitboxes: [
+        { frame: 1, kind: "attack", x: 20, y: 8, width: 18, height: 10 },
+        { frame: 1, kind: "hurt", x: 6, y: 4, width: 24, height: 28 },
+        { frame: 1, kind: "push", x: 10, y: 16, width: 20, height: 16 },
+        { frame: 1, kind: "collision", x: 8, y: 18, width: 24, height: 14 },
+      ],
+    });
+    expect(buildArtStudioHitboxCMetadata("attack", result.animations.attack.hitboxes ?? [])).toContain(
+      "RDS_HITBOX_ATTACK"
+    );
+  });
+
+  it("reorders, duplicates and deletes timeline frames while retaining per-frame metadata", () => {
+    const sequence: SpriteSequence = {
+      id: "seq_attack",
+      name: "Attack",
+      frames: [0, 1, 2],
+      fps: 12,
+      loop: false,
+      frameDurations: { 0: 4, 1: 6, 2: 8 },
+      loopStart: 1,
+      hitboxes: [{ frame: 1, kind: "attack", x: 2, y: 3, width: 10, height: 12 }],
+    };
+
+    expect(moveArtStudioSequenceFrame(sequence, 0, 2).frames).toEqual([1, 2, 0]);
+    expect(duplicateArtStudioSequenceFrame(sequence, 1).frames).toEqual([0, 1, 1, 2]);
+    const removed = removeArtStudioSequenceFrame(sequence, 1);
+    expect(removed.frames).toEqual([0, 2]);
+    expect(removed.frameDurations).toEqual({ 0: 4, 2: 8 });
+    expect(removed.hitboxes).toEqual([]);
   });
 
   it("builds sprite command bindings against animation keys without dropping unsupported tokens", () => {
@@ -342,6 +410,80 @@ describe("ArtStudioPanel helpers", () => {
       scrollLeft: 16,
       scrollTop: 18,
     });
+  });
+
+  it("groups Mega Drive palettes into 4 slots and flags conflicts with merge suggestions", () => {
+    const manager = buildArtStudioPaletteManager(
+      [
+        { asset: "assets/sprites/hero.png", slot: 0, colors: ["#000000", "#111111", "#222222"] },
+        { asset: "assets/sprites/enemy.png", slot: 0, colors: ["#000000", "#abcdef"] },
+        { asset: "assets/sprites/hud.png", slot: 2, colors: ["#000000", "#111111"] },
+      ],
+      "megadrive"
+    );
+
+    expect(manager.slots).toHaveLength(4);
+    expect(manager.slots[0].assetCount).toBe(2);
+    expect(manager.slots[0].conflict).toBe(true);
+    expect(manager.slots[0].suggestion).toContain("merge");
+    expect(manager.status).toBe("warn");
+    expect(manager.experimentalFeatures).toEqual(
+      expect.arrayContaining(["palette_animation", "mid_screen_palette_swap", "shadow_highlight"])
+    );
+  });
+
+  it("builds preview overlays for onion skin and per-frame hitboxes without changing final metadata", () => {
+    const sequence: SpriteSequence = {
+      id: "seq_attack",
+      name: "Attack",
+      frames: [0, 1, 2],
+      fps: 12,
+      loop: false,
+      onionSkin: { enabled: true, previous: true, next: true, opacity: 0.4 },
+      hitboxes: [
+        { frame: 1, kind: "attack", x: 2, y: 3, width: 10, height: 12 },
+        { frame: 2, kind: "hurt", x: 4, y: 5, width: 8, height: 9 },
+      ],
+    };
+
+    const overlays = buildArtStudioPreviewOverlays(
+      sequence,
+      [
+        { index: 0, x: 0, y: 0, width: 16, height: 16 },
+        { index: 1, x: 16, y: 0, width: 16, height: 16 },
+        { index: 2, x: 32, y: 0, width: 16, height: 16 },
+      ],
+      1
+    );
+
+    expect(overlays.onionFrames.map((frame) => frame.role)).toEqual(["previous", "next"]);
+    expect(overlays.onionFrames.every((frame) => frame.opacity === 0.4)).toBe(true);
+    expect(overlays.hitboxes).toEqual([
+      expect.objectContaining({ frame: 1, kind: "attack", color: "#f38ba8" }),
+    ]);
+  });
+
+  it("documents approved art import paths and keeps unapproved formats gated", () => {
+    const strategy = buildArtStudioImportStrategy();
+
+    expect(strategy.find((item) => item.id === "native_images")?.status).toBe("available");
+    expect(strategy.find((item) => item.id === "texturepacker_json")?.nextStep).toContain("fixture");
+    expect(strategy.find((item) => item.id === "aseprite")?.status).toBe("blocked");
+  });
+
+  it("creates editable manual command.dat entries while preserving unsupported tokens", () => {
+    const command = buildManualArtStudioCommand("Dragon Punch", "_6,~30,_2,_P", 18);
+
+    expect(command).toEqual(
+      expect.objectContaining({
+        id: "dragon_punch",
+        display_name: "Dragon Punch",
+        notation: "_6,~30,_2,_P",
+        max_frames: 18,
+        source: "manual",
+        unsupported_tokens: ["~30"],
+      })
+    );
   });
 });
 

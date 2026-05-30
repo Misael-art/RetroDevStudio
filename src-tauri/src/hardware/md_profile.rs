@@ -144,14 +144,12 @@ fn md_entity_hud_overlay_hint(entity: &Entity) -> bool {
         .logic
         .as_ref()
         .map(|logic| {
-            logic.logic_hints
-                .iter()
-                .any(|hint| {
-                    let normalized = hint.trim().to_ascii_lowercase();
-                    normalized == "sgdk_import:hud_overlay"
-                        || normalized == "sgdk_import:canonical_hud_signal"
-                        || normalized == "import:hud_overlay"
-                })
+            logic.logic_hints.iter().any(|hint| {
+                let normalized = hint.trim().to_ascii_lowercase();
+                normalized == "sgdk_import:hud_overlay"
+                    || normalized == "sgdk_import:canonical_hud_signal"
+                    || normalized == "import:hud_overlay"
+            })
         })
         .unwrap_or(false)
     {
@@ -190,11 +188,7 @@ fn md_entity_hud_overlay_hint(entity: &Entity) -> bool {
     }
     if let Some(sprite) = &entity.components.sprite {
         let p = sprite.priority.to_lowercase();
-        if p.contains("hud")
-            || p.contains("overlay")
-            || p.contains("window")
-            || p == "ui"
-        {
+        if p.contains("hud") || p.contains("overlay") || p.contains("window") || p == "ui" {
             return true;
         }
     }
@@ -278,7 +272,9 @@ fn analyze_md_vram(scene: &Scene, source_kind: Option<&str>) -> MdVramAnalysis {
 
         let tiles_w = (sprite.frame_width / 8).max(1);
         let tiles_h = (sprite.frame_height / 8).max(1);
-        let frame_bytes = tiles_w.saturating_mul(tiles_h).saturating_mul(MD_TILE_BYTES);
+        let frame_bytes = tiles_w
+            .saturating_mul(tiles_h)
+            .saturating_mul(MD_TILE_BYTES);
         let total_frames = sprite_total_frames(sprite);
 
         let sprite_project = frame_bytes.saturating_mul(total_frames);
@@ -331,25 +327,32 @@ fn analyze_md_vram(scene: &Scene, source_kind: Option<&str>) -> MdVramAnalysis {
         let mut banks_used: u32 = 0;
         for candidate in managed_candidates {
             if banks_used >= MD_MANAGED_MAX_CONCURRENT_BANKS {
-                streamable_sprite_bytes = streamable_sprite_bytes.saturating_add(candidate.project_bytes);
+                streamable_sprite_bytes =
+                    streamable_sprite_bytes.saturating_add(candidate.project_bytes);
                 continue;
             }
-            let can_fit_cells = cells_used.saturating_add(candidate.cell_cost) <= MD_MANAGED_SPRITE_CELL_BUDGET;
+            let can_fit_cells =
+                cells_used.saturating_add(candidate.cell_cost) <= MD_MANAGED_SPRITE_CELL_BUDGET;
             if banks_used == 0 || can_fit_cells {
-                resident_sprite_bytes = resident_sprite_bytes.saturating_add(candidate.resident_bytes);
+                resident_sprite_bytes =
+                    resident_sprite_bytes.saturating_add(candidate.resident_bytes);
                 if candidate.hud_hint {
-                    hud_sprite_resident_bytes = hud_sprite_resident_bytes
-                        .saturating_add(candidate.resident_bytes);
+                    hud_sprite_resident_bytes =
+                        hud_sprite_resident_bytes.saturating_add(candidate.resident_bytes);
                 }
                 if candidate.animated {
                     animated_swap_bytes = animated_swap_bytes.saturating_add(candidate.frame_bytes);
                 }
-                streamable_sprite_bytes = streamable_sprite_bytes
-                    .saturating_add(candidate.project_bytes.saturating_sub(candidate.resident_bytes));
+                streamable_sprite_bytes = streamable_sprite_bytes.saturating_add(
+                    candidate
+                        .project_bytes
+                        .saturating_sub(candidate.resident_bytes),
+                );
                 cells_used = cells_used.saturating_add(candidate.cell_cost);
                 banks_used = banks_used.saturating_add(1);
             } else {
-                streamable_sprite_bytes = streamable_sprite_bytes.saturating_add(candidate.project_bytes);
+                streamable_sprite_bytes =
+                    streamable_sprite_bytes.saturating_add(candidate.project_bytes);
             }
         }
         managed_concurrent_sprite_banks = banks_used;
@@ -784,6 +787,8 @@ mod tests {
                     frame_durations: None,
                     loop_start: None,
                     mugen_frames: None,
+                    onion_skin: None,
+                    hitboxes: Vec::new(),
                 },
             );
         }
@@ -808,6 +813,8 @@ mod tests {
                     frame_durations: None,
                     loop_start: None,
                     mugen_frames: None,
+                    onion_skin: None,
+                    hitboxes: Vec::new(),
                 },
             );
         }
@@ -857,7 +864,9 @@ mod tests {
         });
         let errors = validate_scene(&scene);
         assert!(
-            !errors.iter().any(|e| e.is_fatal && e.message.contains("CollisionMap")),
+            !errors
+                .iter()
+                .any(|e| e.is_fatal && e.message.contains("CollisionMap")),
             "world-sized collision must not be fatal: {:?}",
             errors
         );
@@ -1129,7 +1138,9 @@ mod tests {
 
         let status = hw_status(&scene);
         assert_eq!(
-            status.sprite_resident_bytes.saturating_add(status.tilemap_resident_bytes),
+            status
+                .sprite_resident_bytes
+                .saturating_add(status.tilemap_resident_bytes),
             status.resident_vram_bytes,
             "sprite + tilemap deve fechar o residente total"
         );
@@ -1141,8 +1152,14 @@ mod tests {
             status.hud_resident_bytes <= status.sprite_resident_bytes,
             "hud_resident_bytes e subconjunto auditavel do sprite residente"
         );
-        assert_eq!(status.managed_sprite_banks_limit, MD_MANAGED_MAX_CONCURRENT_BANKS);
-        assert_eq!(status.managed_sprite_cells_budget, MD_MANAGED_SPRITE_CELL_BUDGET);
+        assert_eq!(
+            status.managed_sprite_banks_limit,
+            MD_MANAGED_MAX_CONCURRENT_BANKS
+        );
+        assert_eq!(
+            status.managed_sprite_cells_budget,
+            MD_MANAGED_SPRITE_CELL_BUDGET
+        );
     }
 
     #[test]
@@ -1154,7 +1171,9 @@ mod tests {
         }
         entity.display_name = Some("Combat actor".to_string());
         if let Some(logic) = entity.components.logic.as_mut() {
-            logic.logic_hints.push("sgdk_import:hud_overlay".to_string());
+            logic
+                .logic_hints
+                .push("sgdk_import:hud_overlay".to_string());
         } else {
             entity.components.logic = Some(crate::ugdm::components::LogicComponent {
                 graph: None,
@@ -1229,7 +1248,11 @@ mod tests {
             .into_iter()
             .filter(|e| !e.is_fatal)
             .collect();
-        let joined: String = warnings.iter().map(|w| w.message.as_str()).collect::<Vec<_>>().join(" ");
+        let joined: String = warnings
+            .iter()
+            .map(|w| w.message.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
         assert!(
             joined.contains("spr_res=") && joined.contains("tile=") && joined.contains("strm_spr="),
             "avisos SGDK devem listar categorias auditaveis: {}",

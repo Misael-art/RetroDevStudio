@@ -27,9 +27,17 @@ import {
 } from "../../core/ipc/artStudioService";
 import { parseInputCommandFile } from "../../core/ipc/inputCommandService";
 import AssetQualityPanel from "./AssetQualityPanel";
-import type { AnimationDef, SpriteCommandBinding, SpriteComponent } from "../../core/ipc/sceneService";
+import type {
+  AnimationDef,
+  SpriteAnimationHitbox,
+  SpriteAnimationHitboxKind,
+  SpriteAnimationOnionSkin,
+  SpriteCommandBinding,
+  SpriteComponent,
+} from "../../core/ipc/sceneService";
 import {
   formatInputCommandSequence,
+  parseCommandDat,
   type CommandButtonProfile,
   type ParsedInputCommand,
 } from "../../core/inputCommands";
@@ -327,6 +335,327 @@ function sanitizeAnimationKey(value: string): string {
     .replace(/^_+|_+$/g, "");
 }
 
+const ARTSTUDIO_HITBOX_KINDS: SpriteAnimationHitboxKind[] = ["attack", "hurt", "push", "collision"];
+const ARTSTUDIO_HITBOX_COLORS: Record<SpriteAnimationHitboxKind, string> = {
+  attack: "#f38ba8",
+  hurt: "#f9e2af",
+  push: "#89b4fa",
+  collision: "#a6e3a1",
+};
+
+function normalizeFrameDuration(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return 1;
+  }
+  return Math.max(1, Math.trunc(value));
+}
+
+function sanitizeArtStudioHitboxes(
+  hitboxes: SpriteAnimationHitbox[] | undefined,
+  frames: number[]
+): SpriteAnimationHitbox[] {
+  if (!hitboxes?.length) {
+    return [];
+  }
+  const frameSet = new Set(frames);
+  return hitboxes
+    .filter((hitbox) => {
+      return (
+        frameSet.has(hitbox.frame) &&
+        ARTSTUDIO_HITBOX_KINDS.includes(hitbox.kind) &&
+        Number.isFinite(hitbox.x) &&
+        Number.isFinite(hitbox.y) &&
+        Number.isFinite(hitbox.width) &&
+        Number.isFinite(hitbox.height) &&
+        hitbox.width > 0 &&
+        hitbox.height > 0
+      );
+    })
+    .map((hitbox) => ({
+      frame: Math.trunc(hitbox.frame),
+      kind: hitbox.kind,
+      x: Math.trunc(hitbox.x),
+      y: Math.trunc(hitbox.y),
+      width: Math.max(1, Math.trunc(hitbox.width)),
+      height: Math.max(1, Math.trunc(hitbox.height)),
+    }));
+}
+
+export function moveArtStudioSequenceFrame(
+  sequence: SpriteSequence,
+  fromIndex: number,
+  toIndex: number
+): SpriteSequence {
+  const frames = [...sequence.frames];
+  if (
+    fromIndex < 0 ||
+    fromIndex >= frames.length ||
+    toIndex < 0 ||
+    toIndex >= frames.length ||
+    fromIndex === toIndex
+  ) {
+    return { ...sequence, frames };
+  }
+  const [frame] = frames.splice(fromIndex, 1);
+  frames.splice(toIndex, 0, frame);
+  return { ...sequence, frames };
+}
+
+export function duplicateArtStudioSequenceFrame(
+  sequence: SpriteSequence,
+  index: number
+): SpriteSequence {
+  if (index < 0 || index >= sequence.frames.length) {
+    return { ...sequence, frames: [...sequence.frames] };
+  }
+  const frames = [...sequence.frames];
+  frames.splice(index + 1, 0, frames[index]);
+  return { ...sequence, frames };
+}
+
+export function removeArtStudioSequenceFrame(
+  sequence: SpriteSequence,
+  index: number
+): SpriteSequence {
+  if (index < 0 || index >= sequence.frames.length) {
+    return { ...sequence, frames: [...sequence.frames] };
+  }
+  const removedFrame = sequence.frames[index];
+  const frames = sequence.frames.filter((_, frameIndex) => frameIndex !== index);
+  const frameStillExists = frames.includes(removedFrame);
+  const frameDurations = sequence.frameDurations
+    ? Object.fromEntries(
+        Object.entries(sequence.frameDurations).filter(([frame]) => frameStillExists || Number(frame) !== removedFrame)
+      )
+    : undefined;
+  const hitboxes = frameStillExists
+    ? sequence.hitboxes
+    : sequence.hitboxes?.filter((hitbox) => hitbox.frame !== removedFrame);
+
+  const nextSequence: SpriteSequence = {
+    ...sequence,
+    frames,
+  };
+  delete nextSequence.frameDurations;
+  delete nextSequence.hitboxes;
+  if (frameDurations && Object.keys(frameDurations).length > 0) {
+    nextSequence.frameDurations = frameDurations;
+  }
+  if (hitboxes) {
+    nextSequence.hitboxes = hitboxes;
+  }
+  return nextSequence;
+}
+
+export function buildArtStudioHitboxCMetadata(
+  animationName: string,
+  hitboxes: SpriteAnimationHitbox[]
+): string {
+  const key = sanitizeAnimationKey(animationName).toUpperCase() || "ANIMATION";
+  const lines = [
+    "typedef enum RdsHitboxKind {",
+    "  RDS_HITBOX_ATTACK,",
+    "  RDS_HITBOX_HURT,",
+    "  RDS_HITBOX_PUSH,",
+    "  RDS_HITBOX_COLLISION",
+    "} RdsHitboxKind;",
+    `static const RdsHitbox RDS_${key}_HITBOXES[] = {`,
+  ];
+  for (const hitbox of sanitizeArtStudioHitboxes(hitboxes, hitboxes.map((item) => item.frame))) {
+    lines.push(
+      `  { ${hitbox.frame}, RDS_HITBOX_${hitbox.kind.toUpperCase()}, ${hitbox.x}, ${hitbox.y}, ${hitbox.width}, ${hitbox.height} },`
+    );
+  }
+  lines.push("};");
+  return lines.join("\n");
+}
+
+export type ArtStudioPaletteEntry = {
+  asset: string;
+  slot: number;
+  colors: string[];
+};
+
+export type ArtStudioPaletteSlot = {
+  slot: number;
+  assets: string[];
+  assetCount: number;
+  colors: string[];
+  conflict: boolean;
+  suggestion: string;
+};
+
+export type ArtStudioPaletteManager = {
+  target: string;
+  slots: ArtStudioPaletteSlot[];
+  status: "ok" | "warn";
+  experimentalFeatures: string[];
+};
+
+function normalizePaletteSignature(colors: string[]): string {
+  return colors.map((color) => color.trim().toLowerCase()).join("|");
+}
+
+export function buildArtStudioPaletteManager(
+  entries: ArtStudioPaletteEntry[],
+  target: "megadrive" | "snes" | string
+): ArtStudioPaletteManager {
+  const slotCount = target === "snes" ? 8 : 4;
+  const slots: ArtStudioPaletteSlot[] = Array.from({ length: slotCount }, (_, slot) => {
+    const slotEntries = entries.filter((entry) => entry.slot === slot);
+    const signatures = new Set(slotEntries.map((entry) => normalizePaletteSignature(entry.colors)));
+    const colors = Array.from(
+      new Set(slotEntries.flatMap((entry) => entry.colors.map((color) => color.trim().toLowerCase())))
+    );
+    const conflict = signatures.size > 1;
+    return {
+      slot,
+      assets: slotEntries.map((entry) => entry.asset),
+      assetCount: slotEntries.length,
+      colors,
+      conflict,
+      suggestion: conflict
+        ? "merge palettes or move one asset to another slot"
+        : slotEntries.length > 0
+          ? "slot compatible"
+          : "slot free",
+    };
+  });
+
+  return {
+    target,
+    slots,
+    status: slots.some((slot) => slot.conflict) ? "warn" : "ok",
+    experimentalFeatures: ["palette_animation", "mid_screen_palette_swap", "shadow_highlight"],
+  };
+}
+
+export type ArtStudioPreviewOnionFrame = {
+  role: "previous" | "next";
+  frameIndex: number;
+  opacity: number;
+  source: ArtSuggestedFrame;
+};
+
+export type ArtStudioPreviewHitbox = SpriteAnimationHitbox & {
+  color: string;
+};
+
+export type ArtStudioPreviewOverlays = {
+  onionFrames: ArtStudioPreviewOnionFrame[];
+  hitboxes: ArtStudioPreviewHitbox[];
+};
+
+export function buildArtStudioPreviewOverlays(
+  sequence: SpriteSequence | undefined,
+  suggestedFrames: ArtSuggestedFrame[],
+  activeFrameIndex: number
+): ArtStudioPreviewOverlays {
+  if (!sequence || activeFrameIndex < 0) {
+    return { onionFrames: [], hitboxes: [] };
+  }
+
+  const frameOrderIndex = sequence.frames.indexOf(activeFrameIndex);
+  const onion = sequence.onionSkin;
+  const frameByIndex = new Map(suggestedFrames.map((frame) => [frame.index, frame]));
+  const onionFrames: ArtStudioPreviewOnionFrame[] = [];
+  if (onion?.enabled && frameOrderIndex >= 0) {
+    const opacity = Math.max(0, Math.min(1, Number(onion.opacity) || 0));
+    const previousFrameIndex = sequence.frames[frameOrderIndex - 1];
+    const nextFrameIndex = sequence.frames[frameOrderIndex + 1];
+    if (onion.previous && Number.isInteger(previousFrameIndex)) {
+      const source = frameByIndex.get(previousFrameIndex);
+      if (source) {
+        onionFrames.push({ role: "previous", frameIndex: previousFrameIndex, opacity, source });
+      }
+    }
+    if (onion.next && Number.isInteger(nextFrameIndex)) {
+      const source = frameByIndex.get(nextFrameIndex);
+      if (source) {
+        onionFrames.push({ role: "next", frameIndex: nextFrameIndex, opacity, source });
+      }
+    }
+  }
+
+  const hitboxes = sanitizeArtStudioHitboxes(sequence.hitboxes, sequence.frames)
+    .filter((hitbox) => hitbox.frame === activeFrameIndex)
+    .map((hitbox) => ({
+      ...hitbox,
+      color: ARTSTUDIO_HITBOX_COLORS[hitbox.kind],
+    }));
+
+  return { onionFrames, hitboxes };
+}
+
+export type ArtStudioImportStrategyStatus = "available" | "planned" | "experimental" | "blocked";
+
+export type ArtStudioImportStrategyItem = {
+  id: string;
+  label: string;
+  status: ArtStudioImportStrategyStatus;
+  detail: string;
+  nextStep: string;
+};
+
+export function buildArtStudioImportStrategy(): ArtStudioImportStrategyItem[] {
+  return [
+    {
+      id: "native_images",
+      label: "PNG/BMP/JPG/GIF/WebP/PPM",
+      status: "available",
+      detail: "Processado pelo pipeline ArtStudio atual com paleta, slicing e preview .res.",
+      nextStep: "Use Importar imagem ou drag/drop e gere o asset canonico em assets/sprites.",
+    },
+    {
+      id: "native_metadata",
+      label: "RDS native metadata",
+      status: "available",
+      detail: "Animacoes, durations, loop, onion skin, hitboxes, palettes e command.dat persistem no SpriteComponent.",
+      nextStep: "Aplicar na entidade selecionada para salvar os metadados no projeto.",
+    },
+    {
+      id: "texturepacker_json",
+      label: "TexturePacker JSON",
+      status: "planned",
+      detail: "Sem dependencia nova: parse JSON nativo pode mapear frames para suggestedFrames e metadata nativa.",
+      nextStep: "Implementar adapter dedicado quando houver fixture aprovada.",
+    },
+    {
+      id: "aseprite",
+      label: "Aseprite .ase/.aseprite",
+      status: "blocked",
+      detail: "Decoder binario exige stack aprovada; nao sera embutido sem atualizar docs/02_TECH_STACK.md.",
+      nextStep: "Aprovar dependencia ou usar export PNG/GIF + JSON sidecar.",
+    },
+    {
+      id: "spine_dragonbones",
+      label: "Spine/DragonBones",
+      status: "experimental",
+      detail: "Bridge de metadata possivel; conversao completa de skeletal animation fica fora do core SGDK atual.",
+      nextStep: "Importar como bridge/source mapping ate existir conversor validado.",
+    },
+  ];
+}
+
+export function buildManualArtStudioCommand(
+  name: string,
+  notation: string,
+  maxFrames = 20
+): ParsedInputCommand | null {
+  const safeName = name.trim();
+  const safeNotation = notation.trim();
+  if (!safeName || !safeNotation) {
+    return null;
+  }
+
+  return (
+    parseCommandDat(
+      ["[Command]", `name = ${safeName}`, `command = ${safeNotation}`, `time = ${Math.max(1, Math.trunc(maxFrames))}`].join("\n"),
+      "manual"
+    )[0] ?? null
+  );
+}
+
 export function buildArtStudioAnimations(
   sequences: SpriteSequence[]
 ): { animations: Record<string, AnimationDef>; error: string | null } {
@@ -357,11 +686,35 @@ export function buildArtStudioAnimations(
     }
 
     usedKeys.add(key);
-    animations[key] = {
+    const animation: AnimationDef = {
       frames: normalizedFrames,
       fps: Math.max(1, Math.min(60, Math.trunc(sequence.fps || 12))),
       loop: sequence.loop,
     };
+    if (sequence.frameDurations && Object.keys(sequence.frameDurations).length > 0) {
+      animation.frame_durations = normalizedFrames.map((frame) =>
+        normalizeFrameDuration(sequence.frameDurations?.[frame])
+      );
+    }
+    if (Number.isInteger(sequence.loopStart)) {
+      animation.loop_start = Math.max(
+        0,
+        Math.min(normalizedFrames.length - 1, Math.trunc(sequence.loopStart ?? 0))
+      );
+    }
+    if (sequence.onionSkin) {
+      animation.onion_skin = {
+        enabled: Boolean(sequence.onionSkin.enabled),
+        previous: Boolean(sequence.onionSkin.previous),
+        next: Boolean(sequence.onionSkin.next),
+        opacity: Math.max(0, Math.min(1, Number(sequence.onionSkin.opacity) || 0)),
+      };
+    }
+    const hitboxes = sanitizeArtStudioHitboxes(sequence.hitboxes, normalizedFrames);
+    if (hitboxes.length > 0) {
+      animation.hitboxes = hitboxes;
+    }
+    animations[key] = animation;
   }
 
   if (Object.keys(animations).length === 0) {
@@ -404,6 +757,10 @@ export interface SpriteSequence {
   fps: number;
   loop: boolean;
   command?: ParsedInputCommand;
+  frameDurations?: Record<number, number>;
+  loopStart?: number;
+  onionSkin?: SpriteAnimationOnionSkin;
+  hitboxes?: SpriteAnimationHitbox[];
 }
 
 const DEFAULT_ARTSTUDIO_SEQUENCES: SpriteSequence[] = [
@@ -492,12 +849,26 @@ export function buildArtStudioSequencesFromSpriteMetadata(
     usedCanonicalIds.add(sequenceId);
     const command = commandsByAnimation.get(normalizedKey);
     const slotIndex = base.findIndex((sequence) => sequence.id === sequenceId);
+    const frameDurations = animation.frame_durations?.reduce<Record<number, number>>(
+      (acc, duration, index) => {
+        const frame = animation.frames[index];
+        if (Number.isInteger(frame)) {
+          acc[frame] = normalizeFrameDuration(duration);
+        }
+        return acc;
+      },
+      {}
+    );
     const hydratedSequence: SpriteSequence = {
       id: sequenceId,
       name: titleCaseAnimationKey(key),
       frames: [...animation.frames],
       fps: animation.fps,
       loop: animation.loop,
+      ...(frameDurations && Object.keys(frameDurations).length > 0 ? { frameDurations } : {}),
+      ...(Number.isInteger(animation.loop_start) ? { loopStart: animation.loop_start } : {}),
+      ...(animation.onion_skin ? { onionSkin: { ...animation.onion_skin } } : {}),
+      ...(animation.hitboxes?.length ? { hitboxes: animation.hitboxes.map((hitbox) => ({ ...hitbox })) } : {}),
       ...(command ? { command } : {}),
     };
 
@@ -610,6 +981,9 @@ type ArtStudioAutomationApi = {
   renameSequence: (sequenceId: string, name: string) => boolean;
   setFrameSize: (width: number, height: number) => boolean;
   setSequenceFrames: (sequenceId: string, frames: number[]) => boolean;
+  setFrameDuration: (sequenceId: string, frame: number, duration: number) => boolean;
+  setLoopStart: (sequenceId: string, loopStart: number) => boolean;
+  upsertHitbox: (sequenceId: string, hitbox: SpriteAnimationHitbox) => boolean;
   assignCommand: (sequenceId: string, commandId: string) => boolean;
   applyToScene: (entityId?: string) => boolean;
   getState: () => ArtStudioAutomationState;
@@ -674,6 +1048,13 @@ type ArtStudioAction =
   | { type: "SELECT_SEQUENCE"; id: string | null }
   | { type: "TOGGLE_FRAME"; cellIndex: number }
   | { type: "SET_SEQUENCE_FRAMES"; id: string; frames: number[] }
+  | { type: "MOVE_SEQUENCE_FRAME"; id: string; fromIndex: number; toIndex: number }
+  | { type: "DUPLICATE_SEQUENCE_FRAME"; id: string; index: number }
+  | { type: "REMOVE_SEQUENCE_FRAME"; id: string; index: number }
+  | { type: "SET_SEQUENCE_FRAME_DURATION"; id: string; frame: number; duration: number }
+  | { type: "SET_SEQUENCE_LOOP_START"; id: string; loopStart: number }
+  | { type: "SET_SEQUENCE_ONION_SKIN"; id: string; onionSkin: SpriteAnimationOnionSkin }
+  | { type: "UPSERT_SEQUENCE_HITBOX"; id: string; hitbox: SpriteAnimationHitbox }
   | { type: "SET_SEQUENCE_FPS"; id: string; fps: number }
   | { type: "SET_SEQUENCE_LOOP"; id: string; loop: boolean }
   | { type: "SET_COMMAND_LIBRARY"; source: string; commands: ParsedInputCommand[] }
@@ -845,6 +1226,97 @@ function artStudioReducer(state: ArtStudioState, action: ArtStudioAction): ArtSt
                     action.frames.filter((frame) => Number.isInteger(frame) && frame >= 0)
                   )
                 ).sort((left, right) => left - right),
+              }
+            : sequence
+        ),
+      };
+    case "MOVE_SEQUENCE_FRAME":
+      return {
+        ...state,
+        sequences: state.sequences.map((sequence) =>
+          sequence.id === action.id
+            ? moveArtStudioSequenceFrame(sequence, action.fromIndex, action.toIndex)
+            : sequence
+        ),
+      };
+    case "DUPLICATE_SEQUENCE_FRAME":
+      return {
+        ...state,
+        sequences: state.sequences.map((sequence) =>
+          sequence.id === action.id
+            ? duplicateArtStudioSequenceFrame(sequence, action.index)
+            : sequence
+        ),
+      };
+    case "REMOVE_SEQUENCE_FRAME":
+      return {
+        ...state,
+        sequences: state.sequences.map((sequence) =>
+          sequence.id === action.id
+            ? removeArtStudioSequenceFrame(sequence, action.index)
+            : sequence
+        ),
+      };
+    case "SET_SEQUENCE_FRAME_DURATION":
+      return {
+        ...state,
+        sequences: state.sequences.map((sequence) =>
+          sequence.id === action.id
+            ? {
+                ...sequence,
+                frameDurations: {
+                  ...(sequence.frameDurations ?? {}),
+                  [action.frame]: normalizeFrameDuration(action.duration),
+                },
+              }
+            : sequence
+        ),
+      };
+    case "SET_SEQUENCE_LOOP_START":
+      return {
+        ...state,
+        sequences: state.sequences.map((sequence) =>
+          sequence.id === action.id
+            ? {
+                ...sequence,
+                loopStart: Math.max(0, Math.min(Math.max(sequence.frames.length - 1, 0), Math.trunc(action.loopStart))),
+              }
+            : sequence
+        ),
+      };
+    case "SET_SEQUENCE_ONION_SKIN":
+      return {
+        ...state,
+        sequences: state.sequences.map((sequence) =>
+          sequence.id === action.id
+            ? {
+                ...sequence,
+                onionSkin: {
+                  enabled: Boolean(action.onionSkin.enabled),
+                  previous: Boolean(action.onionSkin.previous),
+                  next: Boolean(action.onionSkin.next),
+                  opacity: Math.max(0, Math.min(1, Number(action.onionSkin.opacity) || 0)),
+                },
+              }
+            : sequence
+        ),
+      };
+    case "UPSERT_SEQUENCE_HITBOX":
+      return {
+        ...state,
+        sequences: state.sequences.map((sequence) =>
+          sequence.id === action.id
+            ? {
+                ...sequence,
+                hitboxes: sanitizeArtStudioHitboxes(
+                  [
+                    ...(sequence.hitboxes ?? []).filter(
+                      (hitbox) => !(hitbox.frame === action.hitbox.frame && hitbox.kind === action.hitbox.kind)
+                    ),
+                    action.hitbox,
+                  ],
+                  sequence.frames
+                ),
               }
             : sequence
         ),
@@ -1063,6 +1535,14 @@ function useArtStudioContext() {
 
 function ArtStudioTimelineSection() {
   const { state, dispatch, usedFrameCount, handleAddSequence } = useArtStudioContext();
+  const [manualCommandName, setManualCommandName] = useState("Manual command");
+  const [manualCommandNotation, setManualCommandNotation] = useState("");
+  const [manualCommandWindow, setManualCommandWindow] = useState(20);
+  const manualCommand = buildManualArtStudioCommand(
+    manualCommandName,
+    manualCommandNotation,
+    manualCommandWindow
+  );
 
   return (
     <section
@@ -1167,6 +1647,54 @@ function ArtStudioTimelineSection() {
                       ? `Frames selecionados: ${sequence.frames.join(", ")}`
                       : "Sem frames ainda"}
                   </div>
+                  {sequence.frames.length > 0 ? (
+                    <div
+                      data-testid={`artstudio-sequence-frame-strip-${sequence.id}`}
+                      className="flex flex-wrap gap-1.5"
+                    >
+                      {sequence.frames.map((frame, frameIndex) => (
+                        <button
+                          key={`${sequence.id}-${frame}-${frameIndex}`}
+                          type="button"
+                          draggable
+                          data-testid={`artstudio-frame-chip-${sequence.id}-${frameIndex}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            dispatch({ type: "SELECT_SEQUENCE", id: sequence.id });
+                          }}
+                          onDragStart={(event) => {
+                            event.stopPropagation();
+                            event.dataTransfer.setData("application/x-rds-frame-index", String(frameIndex));
+                            event.dataTransfer.effectAllowed = "move";
+                          }}
+                          onDragOver={(event) => {
+                            event.preventDefault();
+                            event.dataTransfer.dropEffect = "move";
+                          }}
+                          onDrop={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            const fromIndex = Number.parseInt(
+                              event.dataTransfer.getData("application/x-rds-frame-index"),
+                              10
+                            );
+                            if (Number.isInteger(fromIndex)) {
+                              dispatch({
+                                type: "MOVE_SEQUENCE_FRAME",
+                                id: sequence.id,
+                                fromIndex,
+                                toIndex: frameIndex,
+                              });
+                            }
+                          }}
+                          className="rounded-lg border border-[#334155] bg-[#111827] px-2 py-1 font-mono text-[10px] text-[#cbd5e1] transition-colors hover:border-[#cba6f7] hover:text-[#e9d5ff]"
+                          title="Arraste para reordenar este frame na timeline"
+                        >
+                          {frame}
+                        </button>
+                      ))}
+                    </div>
+                  ) : null}
                   {sequence.command ? (
                     <div className="rounded-xl border border-[#94e2d5]/35 bg-[#94e2d5]/10 px-2.5 py-2 text-[11px] text-[#ccfbf1]">
                       Comando: {sequence.command.display_name}
@@ -1284,6 +1812,67 @@ function ArtStudioTimelineSection() {
               })
             )}
           </div>
+
+          <div
+            data-testid="artstudio-manual-command-editor"
+            className="mt-3 rounded-xl border border-[#1f2937] bg-[#111827] p-3"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#f9e2af]">
+                Comando manual
+              </span>
+              <span className={manualCommand?.unsupported_tokens.length ? "text-[10px] text-[#f38ba8]" : "text-[10px] text-[#a6e3a1]"}>
+                {manualCommand
+                  ? manualCommand.unsupported_tokens.length
+                    ? "tokens unsupported"
+                    : "runtime"
+                  : "incompleto"}
+              </span>
+            </div>
+            <div className="mt-3 grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_4rem] gap-2">
+              <input
+                value={manualCommandName}
+                onChange={(event) => setManualCommandName(event.target.value)}
+                className="rounded-lg border border-[#334155] bg-[#0b1220] px-2 py-1.5 text-[11px] text-[#e2e8f0]"
+                aria-label="Nome do comando manual"
+              />
+              <input
+                value={manualCommandNotation}
+                onChange={(event) => setManualCommandNotation(event.target.value)}
+                placeholder="_2,_3,_6,_P"
+                className="rounded-lg border border-[#334155] bg-[#0b1220] px-2 py-1.5 font-mono text-[11px] text-[#e2e8f0]"
+                aria-label="Notacao do comando manual"
+              />
+              <input
+                type="number"
+                min={1}
+                value={manualCommandWindow}
+                onChange={(event) => setManualCommandWindow(Number(event.target.value) || 20)}
+                className="rounded-lg border border-[#334155] bg-[#0b1220] px-2 py-1.5 font-mono text-[11px] text-[#e2e8f0]"
+                aria-label="Janela do comando manual"
+              />
+            </div>
+            <button
+              type="button"
+              disabled={!manualCommand}
+              onClick={() => {
+                if (!manualCommand) {
+                  return;
+                }
+                dispatch({
+                  type: "SET_COMMAND_LIBRARY",
+                  source: state.commandImportSource || "manual",
+                  commands: [
+                    ...state.commandLibrary.filter((command) => command.id !== manualCommand.id),
+                    manualCommand,
+                  ],
+                });
+              }}
+              className="mt-3 rounded-lg border border-[#f9e2af]/40 bg-[#f9e2af]/10 px-2 py-1 text-[10px] font-semibold text-[#f9e2af] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Salvar comando manual
+            </button>
+          </div>
         </details>
       </div>
     </section>
@@ -1327,6 +1916,29 @@ function ArtStudioInspectorSection() {
         : hardwareBudgetSummary.tone === "ok"
           ? "border-[#a6e3a1]/35 bg-[#a6e3a1]/10 text-[#bbf7d0]"
           : "border-[#334155] bg-[#111827] text-[#94a3b8]";
+  const activeFrame = activeSequence?.frames[0] ?? 0;
+  const activeFrameDuration = activeSequence?.frameDurations?.[activeFrame] ?? 1;
+  const activeHitbox = activeSequence?.hitboxes?.find((hitbox) => hitbox.frame === activeFrame) ?? {
+    frame: activeFrame,
+    kind: "attack" as SpriteAnimationHitboxKind,
+    x: 0,
+    y: 0,
+    width: Math.max(1, Math.trunc(state.frameWidth / 2)),
+    height: Math.max(1, Math.trunc(state.frameHeight / 2)),
+  };
+  const paletteManager = buildArtStudioPaletteManager(
+    state.spriteSheetPalette.length > 0
+      ? [
+          {
+            asset: state.spritePath || state.spriteSheetDisplayName || "sprite",
+            slot: 0,
+            colors: state.spriteSheetPalette.filter((color) => color !== "transparent"),
+          },
+        ]
+      : [],
+    "megadrive"
+  );
+  const importStrategy = buildArtStudioImportStrategy();
 
   return (
     <section
@@ -1451,6 +2063,232 @@ function ArtStudioInspectorSection() {
                   ? `Frames selecionados: ${activeSequence.frames.join(", ")}`
                   : "Selecione quadros no canvas para preencher esta sequencia."}
               </div>
+              <div
+                data-testid="artstudio-frame-duration-editor"
+                className="rounded-xl border border-[#1f2937] bg-[#111827] p-3"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#94e2d5]">
+                    Frame editor
+                  </span>
+                  <span className="font-mono text-[10px] text-[#94a3b8]">#{activeFrame}</span>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <label className="space-y-1 text-[11px] text-[#94a3b8]">
+                    <span>Duracao</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={activeFrameDuration}
+                      disabled={activeSequence.frames.length === 0}
+                      onChange={(event) =>
+                        dispatch({
+                          type: "SET_SEQUENCE_FRAME_DURATION",
+                          id: activeSequence.id,
+                          frame: activeFrame,
+                          duration: Number(event.target.value) || 1,
+                        })
+                      }
+                      className="w-full rounded-lg border border-[#334155] bg-[#0b1220] px-2 py-1.5 font-mono text-[12px] text-[#e2e8f0]"
+                    />
+                  </label>
+                  <label className="space-y-1 text-[11px] text-[#94a3b8]">
+                    <span>Loop start</span>
+                    <input
+                      data-testid="artstudio-loop-start"
+                      type="number"
+                      min={0}
+                      max={Math.max(0, activeSequence.frames.length - 1)}
+                      value={activeSequence.loopStart ?? 0}
+                      disabled={activeSequence.frames.length === 0}
+                      onChange={(event) =>
+                        dispatch({
+                          type: "SET_SEQUENCE_LOOP_START",
+                          id: activeSequence.id,
+                          loopStart: Number(event.target.value) || 0,
+                        })
+                      }
+                      className="w-full rounded-lg border border-[#334155] bg-[#0b1220] px-2 py-1.5 font-mono text-[12px] text-[#e2e8f0]"
+                    />
+                  </label>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    disabled={activeSequence.frames.length < 2}
+                    onClick={() =>
+                      dispatch({
+                        type: "MOVE_SEQUENCE_FRAME",
+                        id: activeSequence.id,
+                        fromIndex: 0,
+                        toIndex: activeSequence.frames.length - 1,
+                      })
+                    }
+                    className="rounded-lg border border-[#334155] px-2 py-1 text-[10px] font-semibold text-[#cbd5e1] disabled:opacity-40"
+                  >
+                    Mover ao fim
+                  </button>
+                  <button
+                    type="button"
+                    disabled={activeSequence.frames.length === 0}
+                    onClick={() =>
+                      dispatch({ type: "DUPLICATE_SEQUENCE_FRAME", id: activeSequence.id, index: 0 })
+                    }
+                    className="rounded-lg border border-[#334155] px-2 py-1 text-[10px] font-semibold text-[#cbd5e1] disabled:opacity-40"
+                  >
+                    Duplicar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={activeSequence.frames.length === 0}
+                    onClick={() =>
+                      dispatch({ type: "REMOVE_SEQUENCE_FRAME", id: activeSequence.id, index: 0 })
+                    }
+                    className="rounded-lg border border-[#f38ba8]/35 bg-[#f38ba8]/10 px-2 py-1 text-[10px] font-semibold text-[#fecdd3] disabled:opacity-40"
+                  >
+                    Remover frame
+                  </button>
+                </div>
+              </div>
+              <div
+                data-testid="artstudio-onion-skin"
+                className="rounded-xl border border-[#1f2937] bg-[#111827] p-3"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#cba6f7]">
+                    Onion skin
+                  </span>
+                  <label className="flex items-center gap-2 text-[11px] text-[#e2e8f0]">
+                    <input
+                      type="checkbox"
+                      checked={activeSequence.onionSkin?.enabled ?? false}
+                      onChange={(event) =>
+                        dispatch({
+                          type: "SET_SEQUENCE_ONION_SKIN",
+                          id: activeSequence.id,
+                          onionSkin: {
+                            enabled: event.target.checked,
+                            previous: activeSequence.onionSkin?.previous ?? true,
+                            next: activeSequence.onionSkin?.next ?? true,
+                            opacity: activeSequence.onionSkin?.opacity ?? 0.35,
+                          },
+                        })
+                      }
+                    />
+                    Ativo
+                  </label>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <label className="flex items-center gap-1.5 text-[11px] text-[#94a3b8]">
+                    <input
+                      type="checkbox"
+                      checked={activeSequence.onionSkin?.previous ?? true}
+                      onChange={(event) =>
+                        dispatch({
+                          type: "SET_SEQUENCE_ONION_SKIN",
+                          id: activeSequence.id,
+                          onionSkin: {
+                            enabled: activeSequence.onionSkin?.enabled ?? true,
+                            previous: event.target.checked,
+                            next: activeSequence.onionSkin?.next ?? true,
+                            opacity: activeSequence.onionSkin?.opacity ?? 0.35,
+                          },
+                        })
+                      }
+                    />
+                    Prev
+                  </label>
+                  <label className="flex items-center gap-1.5 text-[11px] text-[#94a3b8]">
+                    <input
+                      type="checkbox"
+                      checked={activeSequence.onionSkin?.next ?? true}
+                      onChange={(event) =>
+                        dispatch({
+                          type: "SET_SEQUENCE_ONION_SKIN",
+                          id: activeSequence.id,
+                          onionSkin: {
+                            enabled: activeSequence.onionSkin?.enabled ?? true,
+                            previous: activeSequence.onionSkin?.previous ?? true,
+                            next: event.target.checked,
+                            opacity: activeSequence.onionSkin?.opacity ?? 0.35,
+                          },
+                        })
+                      }
+                    />
+                    Next
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={activeSequence.onionSkin?.opacity ?? 0.35}
+                    onChange={(event) =>
+                      dispatch({
+                        type: "SET_SEQUENCE_ONION_SKIN",
+                        id: activeSequence.id,
+                        onionSkin: {
+                          enabled: activeSequence.onionSkin?.enabled ?? true,
+                          previous: activeSequence.onionSkin?.previous ?? true,
+                          next: activeSequence.onionSkin?.next ?? true,
+                          opacity: Number(event.target.value) || 0,
+                        },
+                      })
+                    }
+                    className="rounded-lg border border-[#334155] bg-[#0b1220] px-2 py-1.5 font-mono text-[12px] text-[#e2e8f0]"
+                    aria-label="Onion opacity"
+                  />
+                </div>
+              </div>
+              <div
+                data-testid="artstudio-hitbox-editor"
+                className="rounded-xl border border-[#1f2937] bg-[#111827] p-3"
+              >
+                <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#f9e2af]">
+                  Hitboxes
+                </span>
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <select
+                    value={activeHitbox.kind}
+                    disabled={activeSequence.frames.length === 0}
+                    onChange={(event) =>
+                      dispatch({
+                        type: "UPSERT_SEQUENCE_HITBOX",
+                        id: activeSequence.id,
+                        hitbox: { ...activeHitbox, kind: event.target.value as SpriteAnimationHitboxKind },
+                      })
+                    }
+                    className="rounded-lg border border-[#334155] bg-[#0b1220] px-2 py-1.5 text-[12px] text-[#e2e8f0]"
+                  >
+                    {ARTSTUDIO_HITBOX_KINDS.map((kind) => (
+                      <option key={kind} value={kind}>
+                        {kind}
+                      </option>
+                    ))}
+                  </select>
+                  {(["x", "y", "width", "height"] as const).map((field) => (
+                    <input
+                      key={field}
+                      type="number"
+                      value={activeHitbox[field]}
+                      disabled={activeSequence.frames.length === 0}
+                      aria-label={`Hitbox ${field}`}
+                      onChange={(event) =>
+                        dispatch({
+                          type: "UPSERT_SEQUENCE_HITBOX",
+                          id: activeSequence.id,
+                          hitbox: {
+                            ...activeHitbox,
+                            frame: activeFrame,
+                            [field]: Number(event.target.value) || 0,
+                          },
+                        })
+                      }
+                      className="rounded-lg border border-[#334155] bg-[#0b1220] px-2 py-1.5 font-mono text-[12px] text-[#e2e8f0]"
+                    />
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         ) : (
@@ -1551,6 +2389,41 @@ function ArtStudioInspectorSection() {
         </div>
 
         <AssetQualityPanel assetPath={state.spritePath || undefined} />
+
+        <div
+          data-testid="artstudio-import-strategy"
+          className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4"
+        >
+          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#94e2d5]">
+            Importacao de arte
+          </div>
+          <div className="mt-3 grid gap-2">
+            {importStrategy.map((item) => (
+              <div
+                key={item.id}
+                className="rounded-xl border border-[#1f2937] bg-[#111827] px-3 py-2 text-[11px] leading-5 text-[#cbd5e1]"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-[#e2e8f0]">{item.label}</span>
+                  <span
+                    className={[
+                      "rounded-full border px-2 py-0.5 text-[9px] font-semibold uppercase",
+                      item.status === "available"
+                        ? "border-[#a6e3a1]/35 bg-[#a6e3a1]/10 text-[#a6e3a1]"
+                        : item.status === "blocked"
+                          ? "border-[#f38ba8]/35 bg-[#f38ba8]/10 text-[#f38ba8]"
+                          : "border-[#f9e2af]/35 bg-[#f9e2af]/10 text-[#f9e2af]",
+                    ].join(" ")}
+                  >
+                    {item.status}
+                  </span>
+                </div>
+                <p className="mt-1 text-[#94a3b8]">{item.detail}</p>
+                <p className="mt-1 text-[#64748b]">{item.nextStep}</p>
+              </div>
+            ))}
+          </div>
+        </div>
 
         <div className="rounded-2xl border border-[#1f2937] bg-[#0b1220] p-4">
           <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#7dd3fc]">
@@ -1682,6 +2555,46 @@ function ArtStudioInspectorSection() {
                   title={index === 0 ? "Transparente" : `Slot ${index}`}
                 />
               ))}
+            </div>
+            <div
+              data-testid="artstudio-palette-manager"
+              className="mt-3 rounded-xl border border-[#1f2937] bg-[#0b1220] p-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#94e2d5]">
+                  Palette manager
+                </span>
+                <span className={paletteManager.status === "warn" ? "text-[10px] text-[#f9e2af]" : "text-[10px] text-[#a6e3a1]"}>
+                  {paletteManager.status}
+                </span>
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {paletteManager.slots.map((slot) => (
+                  <div
+                    key={slot.slot}
+                    className={`rounded-lg border px-2 py-1.5 text-[10px] ${
+                      slot.conflict
+                        ? "border-[#f38ba8]/35 bg-[#f38ba8]/10 text-[#fecdd3]"
+                        : "border-[#334155] bg-[#111827] text-[#94a3b8]"
+                    }`}
+                  >
+                    Slot {slot.slot}: {slot.assetCount} asset(s)
+                    <span className="block truncate text-[#64748b]" title={slot.suggestion}>
+                      {slot.suggestion}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {paletteManager.experimentalFeatures.map((feature) => (
+                  <span
+                    key={feature}
+                    className="rounded-full border border-[#cba6f7]/30 bg-[#cba6f7]/10 px-2 py-0.5 text-[9px] text-[#e9d5ff]"
+                  >
+                    Experimental: {feature}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -2757,6 +3670,18 @@ export default function ArtStudioPanel() {
         dispatch({ type: "SET_SEQUENCE_FRAMES", id: sequenceId, frames });
         return true;
       },
+      setFrameDuration: (sequenceId: string, frame: number, duration: number) => {
+        dispatch({ type: "SET_SEQUENCE_FRAME_DURATION", id: sequenceId, frame, duration });
+        return true;
+      },
+      setLoopStart: (sequenceId: string, loopStart: number) => {
+        dispatch({ type: "SET_SEQUENCE_LOOP_START", id: sequenceId, loopStart });
+        return true;
+      },
+      upsertHitbox: (sequenceId: string, hitbox: SpriteAnimationHitbox) => {
+        dispatch({ type: "UPSERT_SEQUENCE_HITBOX", id: sequenceId, hitbox });
+        return true;
+      },
       assignCommand: (sequenceId: string, commandId: string) => {
         const latest = artStudioStateRef.current;
         const command = latest.commandLibrary.find((candidate) => candidate.id === commandId);
@@ -2915,6 +3840,26 @@ export default function ArtStudioPanel() {
           frame.y + frame.height / 2
         );
       }
+
+      const activeFrameIndex = activeSequence.frames[0] ?? -1;
+      const activeFrame = state.suggestedFrames.find((frame) => frame.index === activeFrameIndex);
+      const overlays = buildArtStudioPreviewOverlays(
+        activeSequence,
+        state.suggestedFrames,
+        activeFrameIndex
+      );
+      if (activeFrame && overlays.hitboxes.length > 0) {
+        for (const hitbox of overlays.hitboxes) {
+          ctx.strokeStyle = hitbox.color;
+          ctx.lineWidth = 2;
+          ctx.strokeRect(
+            activeFrame.x + hitbox.x + 0.5,
+            activeFrame.y + hitbox.y + 0.5,
+            hitbox.width,
+            hitbox.height
+          );
+        }
+      }
     }
   }, [state.spriteSheetSize, state.frameWidth, state.frameHeight, state.suggestedFrames, activeSequence]);
 
@@ -2950,6 +3895,28 @@ export default function ArtStudioPanel() {
     const drawHeight = frame.height * scale;
     const drawX = (canvas.width - drawWidth) / 2;
     const drawY = (canvas.height - drawHeight) / 2;
+    const overlays = buildArtStudioPreviewOverlays(
+      activeSequence,
+      state.suggestedFrames,
+      cellIndex
+    );
+
+    for (const onionFrame of overlays.onionFrames) {
+      ctx.save();
+      ctx.globalAlpha = onionFrame.opacity;
+      ctx.drawImage(
+        image,
+        onionFrame.source.x,
+        onionFrame.source.y,
+        onionFrame.source.width,
+        onionFrame.source.height,
+        drawX,
+        drawY,
+        drawWidth,
+        drawHeight
+      );
+      ctx.restore();
+    }
 
     ctx.drawImage(
       image,
@@ -2962,6 +3929,17 @@ export default function ArtStudioPanel() {
       drawWidth,
       drawHeight
     );
+
+    for (const hitbox of overlays.hitboxes) {
+      ctx.strokeStyle = hitbox.color;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(
+        drawX + hitbox.x * scale + 0.5,
+        drawY + hitbox.y * scale + 0.5,
+        hitbox.width * scale,
+        hitbox.height * scale
+      );
+    }
   }, [
     state.spriteSheetSize,
     state.frameWidth,
