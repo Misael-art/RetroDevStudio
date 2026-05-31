@@ -883,6 +883,19 @@ describe("NodeGraphEditor", () => {
     );
   });
 
+  it("docks the logic context outside the draggable canvas", () => {
+    const canvas = container.querySelector("[data-testid='nodegraph-canvas']");
+    const overview = container.querySelector("[data-testid='nodegraph-overview']");
+    const contextRail = container.querySelector("[data-testid='nodegraph-context-rail']");
+
+    expect(canvas).toBeInstanceOf(HTMLDivElement);
+    expect(overview).toBeInstanceOf(HTMLDivElement);
+    expect(contextRail).toBeInstanceOf(HTMLElement);
+    expect(overview?.closest("[data-testid='nodegraph-canvas']")).toBeNull();
+    expect(overview?.closest("[data-testid='nodegraph-context-rail']")).toBe(contextRail);
+    expect(contextRail?.textContent).toContain("Logic Context");
+  });
+
   it("zooms and pans the canvas without losing the selected node or edge hover state", async () => {
     const canvas = container.querySelector("[data-testid='nodegraph-canvas']") as HTMLDivElement | null;
     if (!canvas) {

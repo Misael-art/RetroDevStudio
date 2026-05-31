@@ -2177,8 +2177,8 @@ describe("App build flow", () => {
     const wizardActions = container.querySelector("[data-testid='project-wizard-actions']");
     expect(wizardActions).toBeInstanceOf(HTMLDivElement);
     expect(wizardActions?.textContent).toContain("Criar Projeto");
-    expect(wizardActions?.textContent).toContain("Abrir Existente");
-    expect(wizardActions?.textContent).not.toContain("Importar Externo");
+    expect(wizardActions?.textContent).toContain("Abrir Projeto");
+    expect(wizardActions?.textContent).not.toContain("Importar Projeto Externo");
     expect(container.querySelector("[data-testid='template-first-success']")?.textContent).toContain(
       "Primeiro Projeto"
     );
@@ -2364,6 +2364,40 @@ describe("App build flow", () => {
     });
 
     expect(container.querySelector("[data-testid='shortcut-editor']")).toBeInstanceOf(HTMLDivElement);
+  });
+
+  it("separates project, external import and asset import actions in the topbar", async () => {
+    const menuTrigger = container.querySelector('[data-testid="unified-topbar-menu-trigger"]');
+    if (!(menuTrigger instanceof HTMLButtonElement)) {
+      throw new Error("Topbar menu trigger not found");
+    }
+
+    await act(async () => {
+      menuTrigger.click();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='menu-action-project-new']")?.textContent).toContain(
+      "Novo Projeto"
+    );
+    expect(container.querySelector("[data-testid='menu-action-project-open']")?.textContent).toContain(
+      "Abrir Projeto"
+    );
+    expect(
+      container.querySelector("[data-testid='menu-action-project-import-external']")?.textContent
+    ).toContain("Importar Projeto Externo");
+    expect(container.querySelector("[data-testid='menu-action-asset-import']")?.textContent).toContain(
+      "Importar Asset"
+    );
+
+    await act(async () => {
+      (container.querySelector("[data-testid='menu-action-asset-import']") as HTMLButtonElement).click();
+      await flush();
+    });
+
+    const state = useEditorStore.getState();
+    expect(state.activeWorkspace).toBe("artstudio");
+    expect(state.consoleEntries[state.consoleEntries.length - 1]?.message).toContain("Importar Asset");
   });
 
   it("opens project settings with actionable SRAM warnings and saves through project.rds", async () => {
@@ -3121,7 +3155,7 @@ describe("App build flow", () => {
       await flush();
     });
 
-    const importButton = findButton(container, "Importar Externo");
+    const importButton = findButton(container, "Importar Projeto Externo");
 
     await act(async () => {
       importButton.click();
@@ -3214,7 +3248,7 @@ describe("App build flow", () => {
     });
 
     await act(async () => {
-      findButton(container, "Importar Externo").click();
+      findButton(container, "Importar Projeto Externo").click();
       await flush();
       await flush();
     });
@@ -3263,7 +3297,7 @@ describe("App build flow", () => {
     const profileSelect = container.querySelector(
       "[data-testid='external-import-profile-select']"
     ) as HTMLSelectElement | null;
-    const importButton = findButton(container, "Importar Externo");
+    const importButton = findButton(container, "Importar Projeto Externo");
 
     await act(async () => {
       if (!profileSelect) {
