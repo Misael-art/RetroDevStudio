@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-06-01 (rodada 78 - Asset preview PPM bridge + debug build)
+**Ultima Atualizacao:** 2026-06-01 (rodada 79 - Preflight desktop detecta tauri-driver bloqueado)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,15 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-06-01 rodada 79 - Preflight desktop detecta tauri-driver bloqueado):**
+  - **Lacuna confirmada:** o preflight de SGDK/E2E declarava o host pronto quando `tauri-driver.exe` existia no disco, mas nao validava se o Windows podia executar o binario. Na maquina atual, `C:\Users\misae\.cargo\bin\tauri-driver.exe` existe, porem o Windows Application Control bloqueia a execucao e o E2E desktop falha antes de abrir UI com `spawn UNKNOWN`.
+  - **Implementacao:** `scripts/sgdk-e2e-host-preflight.mjs` agora faz probe executavel do `tauri-driver`, diferencia driver externo, driver ausente e driver bloqueado, grava `tauriDriverExecutableOk`, `tauriDriverStatusCode` e `tauriDriverDetail`, e retorna `Ready: NAO` com `tauri_driver_blocked` quando o host nao consegue executar o driver. `scripts/e2e-tauri-build-run.mjs` tambem falha cedo em dependencias desktop obrigatorias (`tauri-driver`/WebDriver) em vez de engolir o erro como warning.
+  - **Cobertura nova:** `scripts/sgdk-e2e-host-preflight.test.mjs` cobre que um probe bloqueado nao marca o driver como pronto, que modo `--external-driver` nao depende do binario local e que `probeExecutable` funciona contra um executavel real (`node --version`).
+  - **Validacao fresca:** `npx vitest run scripts/sgdk-e2e-host-preflight.test.mjs --pool=threads --maxWorkers=1 --no-file-parallelism --testTimeout=30000` OK (**3/3**); `node --check scripts/e2e-tauri-build-run.mjs` OK; `node --check scripts/sgdk-e2e-host-preflight.mjs` OK; `npm run check:tree` OK; `npx tsc --noEmit --pretty false` OK; `npm test -- --pool=threads --maxWorkers=1 --no-file-parallelism --testTimeout=30000` OK (**46 arquivos / 405 testes**, com warnings conhecidos de `act(...)` no stderr); `git diff --check` OK, apenas warnings LF/CRLF do Git.
+  - **Verificacao negativa esperada:** `node scripts/sgdk-e2e-host-preflight.mjs --json` agora sai com `Ready: NAO`, `tauriDriverStatusCode=tauri_driver_blocked` e `blocking_status_codes=["tauri_driver_blocked"]`. `node scripts/e2e-tauri-build-run.mjs --scenario onboarding-shell --skip-build` falha cedo com mensagem acionavel para desbloquear/allowlistar o driver ou usar runner Windows institucional.
+  - **Status honesto:** esta rodada nao libera o QA RC local nem prova UI desktop; ela remove a falsa prontidao do host e torna o bloqueio operacional explicito. Para evidencia desktop verde ainda e necessario desbloquear/allowlistar o `tauri-driver`, apontar um driver externo permitido ou rodar em runner Windows institucional.
+  - **Proximo passo imediato:** publicar esta correcao de preflight e, em seguida, obter um caminho executavel para QA desktop (allowlist/driver externo/runner institucional) antes de declarar qualquer validacao manual/desktop como concluida.
 
 * **O que acabou de acontecer (2026-06-01 rodada 78 - Asset preview PPM bridge + debug build):**
   - **Lacuna confirmada:** assets PPM/PNM sao validos no projeto e aparecem no starter/onboarding, mas componentes comuns baseados em `<img>` nao conseguem decodificar `image/x-portable-anymap`. Isso mantinha previews "indisponiveis" para assets validos mesmo depois do bridge que resolveu o HTTP 403 de projetos externos.

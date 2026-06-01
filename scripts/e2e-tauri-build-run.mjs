@@ -3119,7 +3119,7 @@ async function main() {
       path.join(repoRoot, "scripts", "sgdk-e2e-host-preflight.mjs")
     ).href;
     const { logPreflightSummary } = await import(preflightUrl);
-    await logPreflightSummary(
+    const preflightRecord = await logPreflightSummary(
       {
         externalDriver: options.externalDriver,
         tauriDriver: options.tauriDriver,
@@ -3127,7 +3127,26 @@ async function main() {
       },
       repoRoot
     );
+    const tauriDriverCheck = preflightRecord?.checks?.tauriDriver;
+    const webdriverCheck = preflightRecord?.checks?.webdriver;
+    if (!options.externalDriver && tauriDriverCheck && !tauriDriverCheck.ok) {
+      const code = tauriDriverCheck.statusCode ?? "tauri_driver_unusable";
+      const detail = tauriDriverCheck.detail ? ` Detalhe: ${tauriDriverCheck.detail}` : "";
+      fail(
+        `Preflight desktop falhou: ${code}.${detail} ` +
+          "Desbloqueie/allowlist o tauri-driver ou execute em runner Windows institucional."
+      );
+    }
+    if (webdriverCheck && !webdriverCheck.ok) {
+      fail(
+        "Preflight desktop falhou: webdriver_missing. Configure toolchains/webdriver/msedgedriver.exe, " +
+          "--native-driver, RDS_EDGE_DRIVER_PATH ou PATH."
+      );
+    }
   } catch (error) {
+    if (error instanceof E2EFailure) {
+      throw error;
+    }
     const detail = error instanceof Error ? error.message : String(error);
     console.warn(`[RDS preflight host] indisponivel ou erro: ${detail}`);
   }

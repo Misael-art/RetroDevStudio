@@ -1,9 +1,9 @@
-#!/usr/bin/env node
 /**
  * Verificacao objetiva de dependencias de host para E2E desktop / SGDK (sem dependencias npm novas).
  * Saida: linhas legiveis em stderr+stdout e objeto JSON quando invocado com --json.
  */
 import { access, constants } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import process from "node:process";
@@ -57,6 +57,129 @@ async function resolveExecutable(explicitPath, names) {
   return "";
 }
 
+function classifyExecutableProbeFailure(error) {
+  const code = typeof error?.code === "string" ? error.code : "";
+  const message = String(error?.message ?? error ?? "");
+  const normalized = `${code} ${message}`.toLowerCase();
+  if (
+    normalized.includes("controle de aplicativo") ||
+    normalized.includes("application control") ||
+    normalized.includes("blocked") ||
+    normalized.includes("bloque") ||
+    code === "UNKNOWN"
+  ) {
+    return "tauri_driver_blocked";
+  }
+  if (code === "ENOENT") {
+    return "tauri_driver_missing";
+  }
+  return "tauri_driver_unusable";
+}
+
+export async function probeExecutable(command, args = ["--help"], timeoutMs = 15000) {
+  if (!command) {
+    return {
+      ok: false,
+      statusCode: "tauri_driver_missing",
+      detail: "Caminho do executavel vazio.",
+    };
+  }
+
+  return new Promise((resolve) => {
+    let child;
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve(result);
+    };
+    const timeout = setTimeout(() => {
+      try {
+        child?.kill();
+      } catch {
+        // Best effort: the probe is diagnostic only.
+      }
+      finish({
+        ok: false,
+        statusCode: "tauri_driver_timeout",
+        detail: `Execucao excedeu ${timeoutMs}ms.`,
+      });
+    }, timeoutMs);
+
+    try {
+      child = spawn(command, args, {
+        stdio: "ignore",
+        shell: false,
+        windowsHide: true,
+      });
+    } catch (error) {
+      finish({
+        ok: false,
+        statusCode: classifyExecutableProbeFailure(error),
+        detail: error instanceof Error ? error.message : String(error),
+      });
+      return;
+    }
+
+    child.on("error", (error) => {
+      finish({
+        ok: false,
+        statusCode: classifyExecutableProbeFailure(error),
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    });
+    child.on("exit", (code, signal) => {
+      if (code === 0) {
+        finish({ ok: true, statusCode: null, detail: "" });
+        return;
+      }
+      finish({
+        ok: false,
+        statusCode: "tauri_driver_unusable",
+        detail: signal ? `Processo terminou por sinal ${signal}.` : `Processo saiu com codigo ${code}.`,
+      });
+    });
+  });
+}
+
+export function buildTauriDriverCheck({ externalDriver, tauriDriverPath, executableProbe }) {
+  if (externalDriver) {
+    return {
+      ok: true,
+      exists: true,
+      executable: null,
+      statusCode: null,
+      detail: "Driver externo informado pelo usuario.",
+    };
+  }
+  if (!tauriDriverPath) {
+    return {
+      ok: false,
+      exists: false,
+      executable: false,
+      statusCode: "tauri_driver_missing",
+      detail: "tauri-driver nao encontrado no PATH nem em ~/.cargo/bin.",
+    };
+  }
+  if (!executableProbe?.ok) {
+    return {
+      ok: false,
+      exists: true,
+      executable: false,
+      statusCode: executableProbe?.statusCode ?? "tauri_driver_unusable",
+      detail: executableProbe?.detail ?? "tauri-driver encontrado, mas nao executou.",
+    };
+  }
+  return {
+    ok: true,
+    exists: true,
+    executable: true,
+    statusCode: null,
+    detail: "",
+  };
+}
+
 async function resolveSgdkRoot(root) {
   const candidates = [
     ["SGDK_ROOT", process.env.SGDK_ROOT ?? ""],
@@ -108,14 +231,22 @@ export async function logPreflightSummary(options, root = repoRoot) {
   const sgdkMakefile = sgdk.makefileGen;
   const sgdkDirOk = sgdk.ok;
   let tauriDriverPath = "";
-  let tauriDriverOk = Boolean(options?.externalDriver);
+  let tauriDriverProbe = null;
   if (!options?.externalDriver) {
     tauriDriverPath = await resolveExecutable(options?.tauriDriver ?? "", [
       "tauri-driver",
       "tauri-driver.exe",
     ]);
-    tauriDriverOk = Boolean(tauriDriverPath);
+    if (tauriDriverPath) {
+      tauriDriverProbe = await probeExecutable(tauriDriverPath, ["--help"]);
+    }
   }
+  const tauriDriverCheck = buildTauriDriverCheck({
+    externalDriver: Boolean(options?.externalDriver),
+    tauriDriverPath,
+    executableProbe: tauriDriverProbe,
+  });
+  const tauriDriverOk = tauriDriverCheck.ok;
   // Also search canonical toolchains/webdriver/ location
   const canonicalWebdriverDir = path.join(root, "toolchains", "webdriver");
   let nativeDriverPath = await resolveExecutable(options?.nativeDriver ?? "", ["msedgedriver.exe"]);
@@ -130,7 +261,7 @@ export async function logPreflightSummary(options, root = repoRoot) {
   const allReady = sgdkDirOk && tauriDriverOk && nativeDriverOk;
   const blockingStatusCodes = [];
   if (!sgdkDirOk) blockingStatusCodes.push("toolchain_missing");
-  if (!tauriDriverOk) blockingStatusCodes.push("tauri_driver_missing");
+  if (!tauriDriverOk) blockingStatusCodes.push(tauriDriverCheck.statusCode ?? "tauri_driver_unusable");
   if (!nativeDriverOk) blockingStatusCodes.push("webdriver_missing");
   const record = {
     repoRoot: root,
@@ -139,6 +270,9 @@ export async function logPreflightSummary(options, root = repoRoot) {
     sgdkDirOk,
     tauriDriverOk,
     tauriDriverPath: tauriDriverPath || null,
+    tauriDriverExecutableOk: tauriDriverCheck.executable,
+    tauriDriverStatusCode: tauriDriverCheck.statusCode,
+    tauriDriverDetail: tauriDriverCheck.detail,
     nativeDriverOk,
     nativeDriverPath: nativeDriverPath || null,
     externalDriver: Boolean(options?.externalDriver),
@@ -153,6 +287,10 @@ export async function logPreflightSummary(options, root = repoRoot) {
       },
       tauriDriver: {
         ok: tauriDriverOk,
+        exists: tauriDriverCheck.exists,
+        executable: tauriDriverCheck.executable,
+        statusCode: tauriDriverCheck.statusCode,
+        detail: tauriDriverCheck.detail,
         externalDriver: Boolean(options?.externalDriver),
       },
       webdriver: {
@@ -166,12 +304,27 @@ export async function logPreflightSummary(options, root = repoRoot) {
     : !sgdkDirExists
       ? "FALTA — configure SGDK_ROOT/GDK/GDK_WIN ou copie/instale SGDK para toolchains/sgdk"
       : `INCOMPLETO (gcc: ${sgdkGcc ? "OK" : "FALTA"}, makefile.gen: ${sgdkMakefile ? "OK" : "FALTA"})`;
+  const tauriDriverDetail = (() => {
+    if (options?.externalDriver) {
+      return "omitido (externalDriver)";
+    }
+    if (!tauriDriverPath) {
+      return "FALTA — cargo install tauri-driver --locked";
+    }
+    if (!tauriDriverOk) {
+      const action =
+        tauriDriverCheck.statusCode === "tauri_driver_blocked"
+          ? "desbloqueie/allowlist o binario ou use um runner Windows institucional"
+          : "reinstale com cargo install tauri-driver --locked";
+      return `BLOQUEADO — ${tauriDriverCheck.detail} Proxima acao: ${action}.`;
+    }
+    return `OK (${tauriDriverPath})`;
+  })();
+
   const lines = [
     "[RDS preflight host]",
     `  SGDK real: ${sgdkDetail}`,
-    options?.externalDriver
-      ? "  tauri-driver: omitido (externalDriver)"
-      : `  tauri-driver: ${tauriDriverOk ? `OK (${tauriDriverPath})` : "FALTA — cargo install tauri-driver --locked"}`,
+    `  tauri-driver: ${tauriDriverDetail}`,
     `  Edge WebDriver (msedgedriver): ${
       nativeDriverOk
         ? `OK (${nativeDriverPath})`
