@@ -525,7 +525,7 @@ export default function ExplorerWorkspace({
                     {legacyIndexedFileCount} arquivo(s) indexado(s)
                   </span>
                   <span className="rounded-full border border-[#313244] bg-[#0b1120] px-2 py-0.5">
-                    Build &amp; Run delega ao Makefile do host
+                    Build &amp; Run delega ao build do host
                   </span>
                 </div>
                 <p className="mt-3 text-[11px] leading-5 text-[#94a3b8]">
@@ -717,6 +717,8 @@ export default function ExplorerWorkspace({
                       {selection.asset.kind === "image" ? (
                         <AssetPreview
                           absolutePath={selection.asset.absolute_path}
+                          projectDir={activeProjectDir}
+                          relativePath={selection.asset.relative_path}
                           alt={selection.asset.relative_path}
                           imageClassName="h-full w-full object-contain"
                           fallbackClassName="flex h-full w-full items-center justify-center text-[11px] font-semibold uppercase tracking-[0.2em] text-[#7dd3fc]"

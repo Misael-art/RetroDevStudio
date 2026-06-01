@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { useEditorStore } from "../../core/store/editorStore";
 import { listProjectAssets, type ProjectAssetEntry } from "../../core/ipc/toolsService";
 import { resolveProjectAssetPath } from "../../core/pathUtils";
+import { useProjectAssetVisualState } from "../../core/useProjectAssetVisualState";
 import type { ActiveBrush, EditorMode, TilePaintTool } from "../../core/store/editorStore";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -53,13 +53,22 @@ function PaletteItem({
   item,
   isActive,
   onSelect,
+  projectDir,
 }: {
   item: PaletteCategoryItem;
   isActive: boolean;
   onSelect: () => void;
+  projectDir: string | null;
 }) {
-  const thumbnailUrl =
-    item.category === "sprites" ? convertFileSrc(item.absolutePath) : null;
+  const {
+    src: thumbnailUrl,
+    setLoaded,
+    setFailed,
+  } = useProjectAssetVisualState({
+    absolutePath: item.category === "sprites" ? item.absolutePath : null,
+    projectDir,
+    relativePath: item.category === "sprites" ? item.assetPath : null,
+  });
 
   return (
     <button
@@ -82,6 +91,8 @@ function PaletteItem({
           <img
             src={thumbnailUrl}
             alt={item.label}
+            onLoad={setLoaded}
+            onError={setFailed}
             className="h-8 w-8 object-contain"
             style={{ imageRendering: "pixelated" }}
           />
@@ -139,17 +150,32 @@ export function TilePalette({
   const setTilePaintTool = useEditorStore((s) => s.setTilePaintTool);
   const setActiveTilemapId = useEditorStore((s) => s.setActiveTilemapId);
   const activeTilemapId = useEditorStore((s) => s.activeTilemapId);
+  const activeProjectDir = useEditorStore((s) => s.activeProjectDir);
 
-  const url = useMemo(() => convertFileSrc(tilesetAbsolutePath), [tilesetAbsolutePath]);
+  const {
+    src: url,
+    setLoaded,
+    setFailed,
+  } = useProjectAssetVisualState({
+    absolutePath: tilesetAbsolutePath,
+    projectDir: activeProjectDir,
+    relativePath: tilesetRelativePath,
+  });
   const [dims, setDims] = useState<{ w: number; h: number } | null>(null);
 
   useEffect(() => {
     if (!url) return;
     const img = new Image();
-    img.onload = () => setDims({ w: img.naturalWidth, h: img.naturalHeight });
-    img.onerror = () => setDims(null);
+    img.onload = () => {
+      setLoaded();
+      setDims({ w: img.naturalWidth, h: img.naturalHeight });
+    };
+    img.onerror = () => {
+      setFailed();
+      setDims(null);
+    };
     img.src = url;
-  }, [url]);
+  }, [setFailed, setLoaded, url]);
 
   const grid = useMemo(() => {
     if (!dims || tileSize <= 0) return null;
@@ -522,6 +548,7 @@ export default function ContextualPalette() {
                       item={item}
                       isActive={activeBrush?.id === item.id}
                       onSelect={() => handleSelect(item)}
+                      projectDir={activeProjectDir}
                     />
                   ))}
                 </div>

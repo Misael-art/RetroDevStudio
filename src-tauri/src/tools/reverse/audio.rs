@@ -100,7 +100,9 @@ mod tests {
     fn analyze_audio_detects_megadrive_signatures() {
         let loaded = sample_loaded("megadrive", b"....XGM....".to_vec());
         let regions = analyze_audio(&loaded);
-        assert!(regions.iter().any(|region| region.driver.as_deref() == Some("XGM")));
+        assert!(regions
+            .iter()
+            .any(|region| region.driver.as_deref() == Some("XGM")));
     }
 
     #[test]

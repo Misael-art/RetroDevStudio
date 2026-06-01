@@ -28,6 +28,27 @@ type ImportedEntityLike = {
   components?: unknown;
 };
 
+type ImportedStagingEntityLike = ImportedEntityLike & {
+  entity_id?: string;
+  transform?: {
+    x?: number | null;
+    y?: number | null;
+  } | null;
+};
+
+export type ImportedStagingSummary = {
+  count: number;
+  bounds: {
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+  } | null;
+  pageCount: number;
+  shouldShowOverlay: boolean;
+  label: string;
+};
+
 function trimOrNull(value: string | null | undefined): string | null {
   const normalized = String(value ?? "").trim();
   return normalized || null;
@@ -41,6 +62,61 @@ function normalizeList(values: string[] | null | undefined): string[] {
         .filter((value) => value.length > 0)
     )
   );
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+export function summarizeImportedStagingEntities(
+  entities: ImportedStagingEntityLike[] | null | undefined
+): ImportedStagingSummary {
+  const staged = (entities ?? []).filter(
+    (entity) => resolveImportedEntityContext(entity).positionMode === "staging"
+  );
+  const measured = staged
+    .map((entity) => ({
+      x: entity.transform?.x,
+      y: entity.transform?.y,
+    }))
+    .filter((position): position is { x: number; y: number } =>
+      isFiniteNumber(position.x) && isFiniteNumber(position.y)
+    );
+
+  if (staged.length === 0 || measured.length === 0) {
+    return {
+      count: staged.length,
+      bounds: null,
+      pageCount: 0,
+      shouldShowOverlay: false,
+      label: staged.length > 0 ? `${staged.length} sprites em staging` : "Sem staging importado",
+    };
+  }
+
+  const bounds = measured.reduce(
+    (acc, position) => ({
+      minX: Math.min(acc.minX, position.x),
+      minY: Math.min(acc.minY, position.y),
+      maxX: Math.max(acc.maxX, position.x),
+      maxY: Math.max(acc.maxY, position.y),
+    }),
+    {
+      minX: Number.POSITIVE_INFINITY,
+      minY: Number.POSITIVE_INFINITY,
+      maxX: Number.NEGATIVE_INFINITY,
+      maxY: Number.NEGATIVE_INFINITY,
+    }
+  );
+  const pageCount = Math.max(1, Math.ceil((bounds.maxX - bounds.minX + 1) / 320));
+  const label = `${staged.length} sprites em staging${pageCount > 1 ? ` | ${pageCount} paginas` : ""}`;
+
+  return {
+    count: staged.length,
+    bounds,
+    pageCount,
+    shouldShowOverlay: staged.length >= 2,
+    label,
+  };
 }
 
 export function getImportedEntityRoleLabel(entityRole: string | null | undefined): string | null {

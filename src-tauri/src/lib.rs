@@ -15,6 +15,7 @@ use std::process::Command;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use base64::{engine::general_purpose, Engine as _};
 use compiler::ast_generator::generate_ast;
 use compiler::build_orch::{
     run_build, run_build_multi_target, BuildLogLine, BuildResult, MultiTargetBuildResult,
@@ -84,6 +85,7 @@ use emulator::libretro_ffi::{
     EmulatorCore, JoypadState, ReplayCapture, RuntimeExecutionTraceCapture,
 };
 use hardware::constraint_engine;
+use image::{ImageEncoder, ImageReader};
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_dialog::DialogExt;
 use ugdm::entities::{PatchAuditEntry, Scene};
@@ -150,6 +152,16 @@ pub struct ProjectAssetEntry {
     pub relative_path: String,
     pub absolute_path: String,
     pub kind: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct ProjectAssetPreviewPayload {
+    pub ok: bool,
+    pub relative_path: String,
+    pub absolute_path: String,
+    pub mime_type: Option<String>,
+    pub base64: Option<String>,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
@@ -1062,6 +1074,7 @@ fn list_project_assets(project_dir: String) -> Result<Vec<ProjectAssetEntry>, St
 }
 
 const LEGACY_TEXT_PREVIEW_LIMIT: usize = 128 * 1024;
+const PROJECT_ASSET_PREVIEW_MAX_BYTES: u64 = 8 * 1024 * 1024;
 
 fn normalize_legacy_relative_path(relative_path: &str) -> Result<PathBuf, String> {
     let trimmed = relative_path.trim();
@@ -1126,6 +1139,136 @@ fn is_legacy_previewable_text_file(path: &Path) -> bool {
             .as_str(),
         "c" | "h" | "res" | "s" | "asm" | "inc" | "txt" | "md" | "mak" | "cfg" | "ini"
     )
+}
+
+fn project_relative_path(relative_path: &str) -> Result<PathBuf, String> {
+    let trimmed = relative_path.trim();
+    if trimmed.is_empty() {
+        return Err("Caminho de asset vazio.".to_string());
+    }
+
+    let path = Path::new(trimmed);
+    if path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(format!(
+            "Caminho de asset '{}' nao pode escapar do projeto.",
+            relative_path
+        ));
+    }
+
+    let normalized = path
+        .components()
+        .filter_map(|component| match component {
+            Component::CurDir => None,
+            Component::Normal(segment) => Some(segment),
+            _ => None,
+        })
+        .collect::<PathBuf>();
+
+    if normalized.as_os_str().is_empty() {
+        return Err(format!(
+            "Caminho de asset '{}' nao pode resolver para a raiz do projeto.",
+            relative_path
+        ));
+    }
+
+    Ok(normalized)
+}
+
+fn project_asset_preview_mime(path: &Path) -> Option<&'static str> {
+    match path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        "bmp" => Some("image/bmp"),
+        "ppm" | "pnm" | "pgm" | "pbm" => Some("image/x-portable-anymap"),
+        _ => None,
+    }
+}
+
+fn is_project_asset_preview_pnm(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "ppm" | "pnm" | "pgm" | "pbm"
+    )
+}
+
+fn encode_project_asset_preview_png(path: &Path) -> Result<Vec<u8>, String> {
+    let reader = ImageReader::open(path)
+        .map_err(|error| format!("Falha ao abrir imagem PPM/PNM '{}': {}", path.display(), error))?;
+    let reader = reader.with_guessed_format().map_err(|error| {
+        format!(
+            "Falha ao identificar formato PPM/PNM '{}': {}",
+            path.display(),
+            error
+        )
+    })?;
+    let image = reader
+        .decode()
+        .map_err(|error| format!("Falha ao decodificar PPM/PNM '{}': {}", path.display(), error))?
+        .into_rgba8();
+
+    let mut bytes = Vec::new();
+    let encoder = image::codecs::png::PngEncoder::new(&mut bytes);
+    encoder
+        .write_image(
+            image.as_raw(),
+            image.width(),
+            image.height(),
+            image::ExtendedColorType::Rgba8,
+        )
+        .map_err(|error| format!("Falha ao serializar preview PNG '{}': {}", path.display(), error))?;
+    Ok(bytes)
+}
+
+fn resolve_project_asset_file(
+    project_dir: &str,
+    relative_path: &str,
+) -> Result<(PathBuf, PathBuf), String> {
+    let project_root = fs::canonicalize(Path::new(project_dir)).map_err(|error| {
+        format!(
+            "Nao foi possivel resolver o projeto '{}': {}",
+            project_dir, error
+        )
+    })?;
+    let relative = project_relative_path(relative_path)?;
+    let candidate = project_root.join(&relative);
+    let absolute = fs::canonicalize(&candidate).map_err(|error| {
+        format!(
+            "Asset '{}' nao encontrado em '{}': {}",
+            relative_path,
+            candidate.display(),
+            error
+        )
+    })?;
+    if !absolute.starts_with(&project_root) {
+        return Err(format!(
+            "Asset '{}' resolveu fora do projeto '{}'.",
+            relative_path,
+            project_root.display()
+        ));
+    }
+    if !absolute.is_file() {
+        return Err(format!("Asset '{}' nao e um arquivo.", absolute.display()));
+    }
+    Ok((relative, absolute))
 }
 
 fn legacy_index_paths(index: &LegacySgdkIndex) -> HashSet<&str> {
@@ -1222,6 +1365,105 @@ fn open_path_with_system_default(path: &Path) -> Result<(), String> {
             return Ok(());
         }
         Err("O host recusou abrir a fonte real pelo editor associado.".to_string())
+    }
+}
+
+#[tauri::command]
+fn read_project_asset_preview(
+    project_dir: String,
+    relative_path: String,
+) -> ProjectAssetPreviewPayload {
+    let (normalized_relative, absolute_path) =
+        match resolve_project_asset_file(&project_dir, &relative_path) {
+            Ok(result) => result,
+            Err(error) => {
+                return ProjectAssetPreviewPayload {
+                    ok: false,
+                    relative_path,
+                    absolute_path: String::new(),
+                    mime_type: None,
+                    base64: None,
+                    error: Some(error),
+                }
+            }
+        };
+
+    let should_transcode_pnm = is_project_asset_preview_pnm(&absolute_path);
+    let mime_type = match project_asset_preview_mime(&absolute_path) {
+        Some(_) if should_transcode_pnm => "image/png".to_string(),
+        Some(mime) => mime.to_string(),
+        None => {
+            return ProjectAssetPreviewPayload {
+                ok: false,
+                relative_path: normalized_relative.to_string_lossy().replace('\\', "/"),
+                absolute_path: absolute_path.to_string_lossy().to_string(),
+                mime_type: None,
+                base64: None,
+                error: Some(format!(
+                    "Formato de asset nao suportado para preview seguro: '{}'.",
+                    absolute_path.display()
+                )),
+            }
+        }
+    };
+
+    let metadata = match fs::metadata(&absolute_path) {
+        Ok(metadata) => metadata,
+        Err(error) => {
+            return ProjectAssetPreviewPayload {
+                ok: false,
+                relative_path: normalized_relative.to_string_lossy().replace('\\', "/"),
+                absolute_path: absolute_path.to_string_lossy().to_string(),
+                mime_type: Some(mime_type),
+                base64: None,
+                error: Some(format!(
+                    "Nao foi possivel inspecionar '{}': {}",
+                    absolute_path.display(),
+                    error
+                )),
+            }
+        }
+    };
+
+    if metadata.len() > PROJECT_ASSET_PREVIEW_MAX_BYTES {
+        return ProjectAssetPreviewPayload {
+            ok: false,
+            relative_path: normalized_relative.to_string_lossy().replace('\\', "/"),
+            absolute_path: absolute_path.to_string_lossy().to_string(),
+            mime_type: Some(mime_type),
+            base64: None,
+            error: Some(format!(
+                "Asset '{}' excede o limite de preview seguro ({} MB).",
+                absolute_path.display(),
+                PROJECT_ASSET_PREVIEW_MAX_BYTES / 1024 / 1024
+            )),
+        };
+    }
+
+    let bytes_result = if should_transcode_pnm {
+        encode_project_asset_preview_png(&absolute_path)
+    } else {
+        fs::read(&absolute_path)
+            .map_err(|error| format!("Nao foi possivel ler asset '{}': {}", absolute_path.display(), error))
+    };
+
+    match bytes_result {
+        Ok(bytes) => ProjectAssetPreviewPayload {
+            ok: true,
+            relative_path: normalized_relative.to_string_lossy().replace('\\', "/"),
+            absolute_path: absolute_path.to_string_lossy().to_string(),
+            mime_type: Some(mime_type),
+            base64: Some(general_purpose::STANDARD.encode(bytes)),
+            error: None,
+        },
+        Err(error) => ProjectAssetPreviewPayload {
+            ok: false,
+            relative_path: normalized_relative.to_string_lossy().replace('\\', "/"),
+            absolute_path: absolute_path.to_string_lossy().to_string(),
+            mime_type: Some(mime_type),
+            base64: None,
+            error: Some(error),
+        },
     }
 }
 
@@ -1903,7 +2145,8 @@ fn get_project_settings(project_dir: String) -> Result<ProjectSettingsSnapshot, 
     if project_dir.trim().is_empty() {
         return Err("Nenhum projeto aberto.".into());
     }
-    load_project_settings_impl(&PathBuf::from(project_dir.trim())).map_err(|error| error.to_string())
+    load_project_settings_impl(&PathBuf::from(project_dir.trim()))
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -3503,6 +3746,7 @@ pub fn run() {
             rom_save_annotations,
             list_project_assets,
             open_project_source_path,
+            read_project_asset_preview,
             read_legacy_project_file,
             third_party_get_status,
             third_party_install,
@@ -6144,6 +6388,68 @@ pub extern "C" fn retro_run() {
         assert!(preview.content.contains("int main(void){return 0;}"));
 
         let _ = fs::remove_dir_all(legacy_dir);
+    }
+
+    #[test]
+    fn read_project_asset_preview_returns_base64_inside_project_only() {
+        let project_dir = temp_dir("asset-preview-bridge");
+        create_project_skeleton(&project_dir, "Asset Preview Bridge", "megadrive").expect("skel");
+        let sprite_dir = project_dir.join("assets").join("sprites");
+        fs::create_dir_all(&sprite_dir).expect("create sprite dir");
+        fs::write(sprite_dir.join("dot.png"), b"\x89PNG\r\n\x1A\nrds").expect("write png");
+
+        let preview = read_project_asset_preview(
+            project_dir.to_string_lossy().to_string(),
+            "assets/sprites/dot.png".to_string(),
+        );
+
+        assert!(preview.ok, "preview error: {:?}", preview.error);
+        assert_eq!(preview.relative_path, "assets/sprites/dot.png");
+        assert_eq!(preview.mime_type.as_deref(), Some("image/png"));
+        assert!(preview
+            .base64
+            .as_deref()
+            .is_some_and(|value| !value.is_empty()));
+
+        let escaped = read_project_asset_preview(
+            project_dir.to_string_lossy().to_string(),
+            "../outside.png".to_string(),
+        );
+        assert!(!escaped.ok);
+        assert!(escaped.error.unwrap_or_default().contains("escapar"));
+
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn read_project_asset_preview_transcodes_ppm_to_png_for_webview() {
+        let project_dir = temp_dir("asset-preview-ppm");
+        create_project_skeleton(&project_dir, "Asset Preview PPM", "megadrive").expect("skel");
+        let sprite_dir = project_dir.join("assets").join("sprites");
+        fs::create_dir_all(&sprite_dir).expect("create sprite dir");
+        fs::write(
+            sprite_dir.join("dot.ppm"),
+            "P3\n2 1\n255\n255 0 255 0 0 0\n",
+        )
+        .expect("write ppm");
+
+        let preview = read_project_asset_preview(
+            project_dir.to_string_lossy().to_string(),
+            "assets/sprites/dot.ppm".to_string(),
+        );
+
+        assert!(preview.ok, "preview error: {:?}", preview.error);
+        assert_eq!(preview.relative_path, "assets/sprites/dot.ppm");
+        assert_eq!(preview.mime_type.as_deref(), Some("image/png"));
+        let bytes = general_purpose::STANDARD
+            .decode(preview.base64.expect("base64 payload"))
+            .expect("decode preview base64");
+        assert!(
+            bytes.starts_with(b"\x89PNG\r\n\x1A\n"),
+            "PPM preview must be webview-decodable PNG"
+        );
+
+        let _ = fs::remove_dir_all(project_dir);
     }
 
     #[test]

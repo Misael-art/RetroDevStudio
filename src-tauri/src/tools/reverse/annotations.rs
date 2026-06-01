@@ -29,8 +29,13 @@ pub fn load_annotations(
     }
     let contents = fs::read_to_string(&sidecar)
         .map_err(|error| format!("Falha ao ler anotacoes '{}': {}", sidecar.display(), error))?;
-    let parsed: ReverseAnnotationFile = serde_json::from_str(&contents)
-        .map_err(|error| format!("Falha ao decodificar anotacoes '{}': {}", sidecar.display(), error))?;
+    let parsed: ReverseAnnotationFile = serde_json::from_str(&contents).map_err(|error| {
+        format!(
+            "Falha ao decodificar anotacoes '{}': {}",
+            sidecar.display(),
+            error
+        )
+    })?;
     if parsed.source_hashes != *hashes {
         return Ok(Vec::new());
     }
@@ -49,8 +54,13 @@ pub fn save_annotations(
     };
     let json = serde_json::to_string_pretty(&payload)
         .map_err(|error| format!("Falha ao serializar anotacoes: {}", error))?;
-    fs::write(&sidecar, json)
-        .map_err(|error| format!("Falha ao salvar anotacoes '{}': {}", sidecar.display(), error))?;
+    fs::write(&sidecar, json).map_err(|error| {
+        format!(
+            "Falha ao salvar anotacoes '{}': {}",
+            sidecar.display(),
+            error
+        )
+    })?;
     Ok(annotations.len())
 }
 

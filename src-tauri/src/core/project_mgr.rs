@@ -2567,12 +2567,94 @@ fn derive_sgdk_scene_collision_map_from_tile_cells(
     ))
 }
 
+fn sgdk_pick_existing_role_animation(
+    animations: Option<&BTreeMap<String, AnimationDef>>,
+    preferred: &[&str],
+) -> Option<(String, bool)> {
+    let animations = animations?;
+    if animations.is_empty() {
+        return None;
+    }
+    for name in preferred {
+        if animations.contains_key(*name) {
+            return Some(((*name).to_string(), true));
+        }
+    }
+    if animations.contains_key("default") {
+        return Some(("default".to_string(), false));
+    }
+    if animations.contains_key("sheet_row_0") {
+        return Some(("sheet_row_0".to_string(), false));
+    }
+    animations.keys().next().cloned().map(|name| (name, false))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn sgdk_role_animation_node_or_marker(
+    target: &str,
+    role_x: i32,
+    lane_y: i32,
+    animations: Option<&BTreeMap<String, AnimationDef>>,
+    preferred: &[&str],
+    exact_node_id: &str,
+    fallback_node_id: &str,
+    unresolved_node_id: &str,
+    exact_label: &str,
+    fallback_label_prefix: &str,
+    unresolved_label: &str,
+) -> (String, serde_json::Value) {
+    if let Some((anim_name, exact_match)) = sgdk_pick_existing_role_animation(animations, preferred)
+    {
+        let node_id = if exact_match {
+            exact_node_id
+        } else {
+            fallback_node_id
+        };
+        let label = if exact_match {
+            exact_label.to_string()
+        } else {
+            format!("{fallback_label_prefix} ({anim_name})")
+        };
+        return (
+            node_id.to_string(),
+            serde_json::json!({
+                "id": node_id,
+                "type": "sprite_anim",
+                "label": label,
+                "x": role_x,
+                "y": lane_y,
+                "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "params": { "target": target, "anim": anim_name }
+            }),
+        );
+    }
+
+    (
+        unresolved_node_id.to_string(),
+        serde_json::json!({
+            "id": unresolved_node_id,
+            "type": "var_set",
+            "label": unresolved_label,
+            "x": role_x,
+            "y": lane_y,
+            "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+            "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+            "params": {
+                "var_name": format!("{}_animation_unresolved", target),
+                "value": 1
+            }
+        }),
+    )
+}
+
 fn imported_sprite_logic_graph_phase_d(
     resource_name: &str,
     scan: &SgdkDonorLogicScan,
     is_primary_sprite: bool,
     secondary_local_spr: bool,
     semantic_profile: &SgdkPhaseDEntitySemanticProfile,
+    available_animations: Option<&BTreeMap<String, AnimationDef>>,
 ) -> String {
     let target = sgdk_entity_id(resource_name);
     let mat_class =
@@ -2698,21 +2780,21 @@ fn imported_sprite_logic_graph_phase_d(
     // start -> move (+ fire opcional) + scroll; cada role recebe um no terminal encadeado com semantica propria.
     let role_x = next_node_x;
     let (role_node_id, role_node) = match semantic_profile.entity_role.as_str() {
-        "player_avatar" => (
+        "player_avatar" => sgdk_role_animation_node_or_marker(
+            &target,
+            role_x,
+            lane_y,
+            available_animations,
+            &["idle"],
             "role_player_idle_anim",
-            serde_json::json!({
-                "id": "role_player_idle_anim",
-                "type": "sprite_anim",
-                "label": "Anim jogador (idle/walk — heuristica de papel)",
-                "x": role_x,
-                "y": lane_y,
-                "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
-                "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
-                "params": { "target": target, "anim": "idle" }
-            }),
+            "role_player_asset_anim",
+            "role_player_animation_unresolved",
+            "Anim jogador (idle - heuristica de papel)",
+            "Anim jogador (asset derivado)",
+            "Anim jogador nao inferida (sem animacao no asset)",
         ),
         "enemy_actor" => (
-            "role_enemy_threat_sound",
+            "role_enemy_threat_sound".to_string(),
             serde_json::json!({
                 "id": "role_enemy_threat_sound",
                 "type": "action_sound",
@@ -2725,7 +2807,7 @@ fn imported_sprite_logic_graph_phase_d(
             }),
         ),
         "support_actor" => (
-            "role_support_parallax_hint",
+            "role_support_parallax_hint".to_string(),
             serde_json::json!({
                 "id": "role_support_parallax_hint",
                 "type": "effect_parallax",
@@ -2738,7 +2820,7 @@ fn imported_sprite_logic_graph_phase_d(
             }),
         ),
         "fighter_actor" => (
-            "role_fighter_melee_sound",
+            "role_fighter_melee_sound".to_string(),
             serde_json::json!({
                 "id": "role_fighter_melee_sound",
                 "type": "action_sound",
@@ -2750,21 +2832,21 @@ fn imported_sprite_logic_graph_phase_d(
                 "params": { "sfx": "hit" }
             }),
         ),
-        "projectile_actor" => (
+        "projectile_actor" => sgdk_role_animation_node_or_marker(
+            &target,
+            role_x,
+            lane_y,
+            available_animations,
+            &["fly"],
             "role_projectile_trail_anim",
-            serde_json::json!({
-                "id": "role_projectile_trail_anim",
-                "type": "sprite_anim",
-                "label": "Anim projetil (trajetoria — heuristica)",
-                "x": role_x,
-                "y": lane_y,
-                "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
-                "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
-                "params": { "target": target, "anim": "fly" }
-            }),
+            "role_projectile_asset_anim",
+            "role_projectile_animation_unresolved",
+            "Anim projetil (fly - heuristica)",
+            "Anim projetil (asset derivado)",
+            "Anim projetil nao inferida (sem animacao no asset)",
         ),
         "hud_actor" => (
-            "role_hud_scroll_tick",
+            "role_hud_scroll_tick".to_string(),
             serde_json::json!({
                 "id": "role_hud_scroll_tick",
                 "type": "scroll_tilemap",
@@ -2777,7 +2859,7 @@ fn imported_sprite_logic_graph_phase_d(
             }),
         ),
         _ => (
-            "role_generic_import_marker",
+            "role_generic_import_marker".to_string(),
             serde_json::json!({
                 "id": "role_generic_import_marker",
                 "type": "var_set",
@@ -2976,6 +3058,11 @@ fn apply_sgdk_phase_d_to_sprite_entity(
     secondary_local_spr: bool,
 ) -> Result<SgdkPhaseDEntityResult, LoadError> {
     let mut phase_d_result = SgdkPhaseDEntityResult::default();
+    let sprite_animations = entity
+        .components
+        .sprite
+        .as_ref()
+        .map(|sprite| &sprite.animations);
     let Some(logic) = entity.components.logic.as_mut() else {
         return Ok(phase_d_result);
     };
@@ -2988,6 +3075,7 @@ fn apply_sgdk_phase_d_to_sprite_entity(
         is_primary_sprite,
         secondary_local_spr,
         &semantic_profile,
+        sprite_animations,
     );
     let graph_path = graph_write_path(project_dir, &graph_ref)?;
     if let Some(parent) = graph_path.parent() {
@@ -14967,10 +15055,12 @@ pub fn validate_project(project: &Project) -> Result<(), LoadError> {
 fn validate_project_settings(project: &Project) -> Result<(), LoadError> {
     match project.settings.region.as_str() {
         "world" | "usa" | "japan" | "europe" => {}
-        other => return Err(LoadError(format!(
+        other => {
+            return Err(LoadError(format!(
             "project.rds: settings.region '{}' invalido. Use 'world', 'usa', 'japan' ou 'europe'.",
             other
-        ))),
+        )))
+        }
     }
 
     match project.settings.video_standard.as_str() {
@@ -18525,8 +18615,9 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             foe_graph
         );
         assert!(
-            hero_graph.contains("role_player_idle_anim"),
-            "grafo do jogador deve encadear no especifico de papel (sprite_anim): {}",
+            hero_graph.contains("role_player_asset_anim")
+                && hero_graph.contains("\"type\":\"sprite_anim\""),
+            "grafo do jogador deve encadear no especifico de papel com animacao existente: {}",
             hero_graph
         );
         assert!(
@@ -18534,6 +18625,64 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
             "grafo do inimigo deve encadear no especifico de papel (acao/zona): {}",
             foe_graph
         );
+        let _ = fs::remove_dir_all(&donor_dir);
+        let _ = fs::remove_dir_all(&project_dir);
+    }
+
+    #[test]
+    fn sgdk_phase_d_does_not_emit_sprite_anim_for_missing_derived_animation() {
+        let donor_dir = temp_dir("sgdk-missing-anim-d");
+        let project_dir = temp_dir("sgdk-missing-anim-p");
+        create_project_skeleton(&project_dir, "SGDK Missing Anim", "megadrive").expect("skel");
+        write_sgdk_beatemup_close_range_donor(&donor_dir);
+
+        let report = import_sgdk_project(&project_dir, &donor_dir).expect("import");
+        let hero = report
+            .primary_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == "hero")
+            .expect("hero");
+        let hero_sprite = hero.components.sprite.as_ref().expect("hero sprite");
+        assert!(
+            !hero_sprite.animations.contains_key("idle"),
+            "fixture SGDK deve expor a regressao: animacoes derivadas={:?}",
+            hero_sprite.animations.keys().collect::<Vec<_>>()
+        );
+
+        let graph_raw =
+            fs::read_to_string(project_dir.join("graphs").join("sgdk_import_hero.json"))
+                .expect("read hero graph");
+        let graph: serde_json::Value = serde_json::from_str(&graph_raw).expect("graph json");
+        let invalid_nodes = graph
+            .get("nodes")
+            .and_then(serde_json::Value::as_array)
+            .expect("nodes")
+            .iter()
+            .filter(|node| {
+                node.get("type").and_then(serde_json::Value::as_str) == Some("sprite_anim")
+            })
+            .filter(|node| {
+                let params = node.get("params").unwrap_or(&serde_json::Value::Null);
+                let target = params.get("target").and_then(serde_json::Value::as_str);
+                let anim = params.get("anim").and_then(serde_json::Value::as_str);
+                target == Some("hero")
+                    && !anim.is_some_and(|name| hero_sprite.animations.contains_key(name))
+            })
+            .collect::<Vec<_>>();
+
+        assert!(
+            invalid_nodes.is_empty(),
+            "Phase D nao pode gerar sprite_anim para animacao ausente; invalid_nodes={:?}; graph={}",
+            invalid_nodes,
+            graph_raw
+        );
+        assert!(
+            !graph_raw.contains("role_player_idle_anim") && graph_raw.contains("\"anim\":\"default\""),
+            "quando nao houver 'idle' mas houver animacao derivada real, o grafo deve usar a animacao existente em vez de node executavel invalido: {}",
+            graph_raw
+        );
+
         let _ = fs::remove_dir_all(&donor_dir);
         let _ = fs::remove_dir_all(&project_dir);
     }
@@ -18631,8 +18780,9 @@ int main(void) {\n    while (1) {\n        u16 joy = JOY_readJoypad(JOY_1);\n   
         );
         assert!(disk_graph.contains("fire_hint"), "{}", disk_graph);
         assert!(
-            disk_graph.contains("role_player_idle_anim"),
-            "shmup: jogador deve receber no de papel encadeado: {}",
+            disk_graph.contains("role_player_asset_anim")
+                && disk_graph.contains("\"type\":\"sprite_anim\""),
+            "shmup: jogador deve receber no de papel encadeado com animacao existente: {}",
             disk_graph
         );
         let graph_json: serde_json::Value =
@@ -23775,6 +23925,25 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         framebuffer_width: u32,
         framebuffer_height: u32,
         non_black_pixels: usize,
+        visual_sample_count: u32,
+        visual_visible_sample_count: u32,
+        visual_black_sample_count: u32,
+        first_visible_frame: u32,
+        min_visible_non_black_pixels: usize,
+        max_visible_non_black_pixels: usize,
+        max_sample_delta_pixels: usize,
+        possible_flicker_detected: bool,
+        frame_pacing_sample_count: u32,
+        frame_pacing_total_run_us: u64,
+        frame_pacing_avg_run_us: u64,
+        frame_pacing_max_run_us: u64,
+        frame_pacing_effective_fps_x100: u64,
+        frame_pacing_realtime_budget_us: u64,
+        frame_pacing_slow_frame_count: u32,
+        frame_pacing_slow_frame_ratio_x1000: u64,
+        frame_pacing_sustained_drop_threshold_x1000: u64,
+        possible_realtime_drop_detected: bool,
+        possible_sustained_realtime_drop_detected: bool,
         original_budget_total_kb: u64,
         original_budget_resident_kb: u64,
         original_budget_dma_frame_kb: u64,
@@ -23790,9 +23959,160 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             .count()
     }
 
+    #[derive(Debug, Clone, Default)]
+    struct SgdkCorpusVisualTelemetry {
+        visual_sample_count: u32,
+        visual_visible_sample_count: u32,
+        visual_black_sample_count: u32,
+        first_visible_frame: u32,
+        min_visible_non_black_pixels: usize,
+        max_visible_non_black_pixels: usize,
+        max_sample_delta_pixels: usize,
+        possible_flicker_detected: bool,
+        previous_sample_rgba: Option<Vec<u8>>,
+    }
+
+    #[derive(Debug, Clone, Default)]
+    struct SgdkCorpusFramePacingTelemetry {
+        frame_pacing_sample_count: u32,
+        frame_pacing_total_run_us: u64,
+        frame_pacing_max_run_us: u64,
+        frame_pacing_slow_frame_count: u32,
+        possible_realtime_drop_detected: bool,
+    }
+
+    fn count_changed_rgba_pixels(left: &[u8], right: &[u8]) -> usize {
+        let changed_overlap = left
+            .chunks_exact(4)
+            .zip(right.chunks_exact(4))
+            .filter(|(a, b)| a[0] != b[0] || a[1] != b[1] || a[2] != b[2] || a[3] != b[3])
+            .count();
+        let left_pixels = left.len() / 4;
+        let right_pixels = right.len() / 4;
+        changed_overlap + left_pixels.abs_diff(right_pixels)
+    }
+
+    fn record_visual_telemetry_sample(
+        telemetry: &mut SgdkCorpusVisualTelemetry,
+        frame_index: u32,
+        rgba: &[u8],
+    ) -> usize {
+        let non_black_pixels = count_non_black_rgba_pixels(rgba);
+        telemetry.visual_sample_count = telemetry.visual_sample_count.saturating_add(1);
+        if let Some(previous) = telemetry.previous_sample_rgba.as_ref() {
+            telemetry.max_sample_delta_pixels = telemetry
+                .max_sample_delta_pixels
+                .max(count_changed_rgba_pixels(previous, rgba));
+        }
+        telemetry.previous_sample_rgba = Some(rgba.to_vec());
+
+        if non_black_pixels == 0 {
+            telemetry.visual_black_sample_count =
+                telemetry.visual_black_sample_count.saturating_add(1);
+            if telemetry.first_visible_frame > 0 {
+                telemetry.possible_flicker_detected = true;
+            }
+            return non_black_pixels;
+        }
+
+        telemetry.visual_visible_sample_count =
+            telemetry.visual_visible_sample_count.saturating_add(1);
+        if telemetry.first_visible_frame == 0 {
+            telemetry.first_visible_frame = frame_index;
+        }
+        if telemetry.min_visible_non_black_pixels == 0 {
+            telemetry.min_visible_non_black_pixels = non_black_pixels;
+        } else {
+            telemetry.min_visible_non_black_pixels =
+                telemetry.min_visible_non_black_pixels.min(non_black_pixels);
+        }
+        telemetry.max_visible_non_black_pixels =
+            telemetry.max_visible_non_black_pixels.max(non_black_pixels);
+        non_black_pixels
+    }
+
+    fn sgdk_frame_pacing_realtime_budget_us() -> u64 {
+        std::env::var("RDS_SGDK_FRAME_PACING_SLOW_US")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(16_667)
+            .max(1)
+    }
+
+    fn sgdk_frame_pacing_sustained_drop_threshold_x1000() -> u64 {
+        std::env::var("RDS_SGDK_FRAME_PACING_SUSTAINED_DROP_X1000")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .unwrap_or(50)
+    }
+
+    fn record_frame_pacing_sample(
+        telemetry: &mut SgdkCorpusFramePacingTelemetry,
+        elapsed: std::time::Duration,
+        realtime_budget_us: u64,
+    ) {
+        let elapsed_us = elapsed.as_micros().min(u128::from(u64::MAX)) as u64;
+        telemetry.frame_pacing_sample_count = telemetry.frame_pacing_sample_count.saturating_add(1);
+        telemetry.frame_pacing_total_run_us = telemetry
+            .frame_pacing_total_run_us
+            .saturating_add(elapsed_us);
+        telemetry.frame_pacing_max_run_us = telemetry.frame_pacing_max_run_us.max(elapsed_us);
+        if elapsed_us > realtime_budget_us {
+            telemetry.frame_pacing_slow_frame_count =
+                telemetry.frame_pacing_slow_frame_count.saturating_add(1);
+            telemetry.possible_realtime_drop_detected = true;
+        }
+    }
+
+    fn frame_pacing_avg_run_us(telemetry: &SgdkCorpusFramePacingTelemetry) -> u64 {
+        if telemetry.frame_pacing_sample_count == 0 {
+            return 0;
+        }
+        telemetry.frame_pacing_total_run_us / u64::from(telemetry.frame_pacing_sample_count)
+    }
+
+    fn frame_pacing_effective_fps_x100(telemetry: &SgdkCorpusFramePacingTelemetry) -> u64 {
+        if telemetry.frame_pacing_sample_count == 0 || telemetry.frame_pacing_total_run_us == 0 {
+            return 0;
+        }
+        let numerator = u128::from(telemetry.frame_pacing_sample_count) * 100_000_000u128;
+        (numerator / u128::from(telemetry.frame_pacing_total_run_us)).min(u128::from(u64::MAX))
+            as u64
+    }
+
+    fn frame_pacing_slow_frame_ratio_x1000(telemetry: &SgdkCorpusFramePacingTelemetry) -> u64 {
+        if telemetry.frame_pacing_sample_count == 0 {
+            return 0;
+        }
+        (u128::from(telemetry.frame_pacing_slow_frame_count) * 1_000u128
+            / u128::from(telemetry.frame_pacing_sample_count))
+        .min(u128::from(u64::MAX)) as u64
+    }
+
+    fn possible_sustained_realtime_drop_detected(
+        telemetry: &SgdkCorpusFramePacingTelemetry,
+        realtime_budget_us: u64,
+        sustained_drop_threshold_x1000: u64,
+    ) -> bool {
+        frame_pacing_avg_run_us(telemetry) > realtime_budget_us
+            || frame_pacing_slow_frame_ratio_x1000(telemetry) > sustained_drop_threshold_x1000
+    }
+
     fn corpus_libretro_visible_smoke(
         rom_path: &Path,
-    ) -> Result<(usize, String, u32, u32, u32, Vec<u8>), String> {
+    ) -> Result<
+        (
+            usize,
+            String,
+            u32,
+            u32,
+            u32,
+            Vec<u8>,
+            SgdkCorpusVisualTelemetry,
+            SgdkCorpusFramePacingTelemetry,
+        ),
+        String,
+    > {
         use crate::emulator::frame_buffer::framebuffer_to_rgba;
         use crate::emulator::libretro_ffi::{EmulatorCore, JoypadState};
 
@@ -23841,15 +24161,24 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         let mut total_frames = 0u32;
         let mut best_non_black = 0usize;
         let mut best_frame = None;
+        let mut telemetry = SgdkCorpusVisualTelemetry::default();
+        let mut frame_pacing = SgdkCorpusFramePacingTelemetry::default();
+        let realtime_budget_us = sgdk_frame_pacing_realtime_budget_us();
 
         for (frame_budget, joypad) in joypad_phases {
             emulator
                 .set_joypad(joypad)
                 .map_err(|error| format!("set joypad: {error}"))?;
             for _ in 0..frame_budget {
+                let frame_started = std::time::Instant::now();
                 emulator
                     .run_frame()
                     .map_err(|error| format!("run Libretro frame: {error}"))?;
+                record_frame_pacing_sample(
+                    &mut frame_pacing,
+                    frame_started.elapsed(),
+                    realtime_budget_us,
+                );
                 total_frames += 1;
             }
             let (framebuffer, frame_size, pixel_format) = emulator
@@ -23859,12 +24188,50 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             if frame.width == 0 || frame.height == 0 || frame.rgba.is_empty() {
                 return Err("Libretro framebuffer is empty".to_string());
             }
-            let non_black_pixels = count_non_black_rgba_pixels(&frame.rgba);
+            let non_black_pixels =
+                record_visual_telemetry_sample(&mut telemetry, total_frames, &frame.rgba);
             if non_black_pixels > best_non_black {
                 best_non_black = non_black_pixels;
                 best_frame = Some((frame.width, frame.height, frame.rgba.clone()));
             }
             if best_non_black > 0 {
+                let stability_samples = std::env::var("RDS_SGDK_VISUAL_TELEMETRY_SAMPLES")
+                    .ok()
+                    .and_then(|value| value.parse::<u32>().ok())
+                    .unwrap_or(4);
+                let stability_interval = std::env::var("RDS_SGDK_VISUAL_TELEMETRY_INTERVAL")
+                    .ok()
+                    .and_then(|value| value.parse::<u32>().ok())
+                    .unwrap_or(30)
+                    .max(1);
+                for _ in 0..stability_samples {
+                    for _ in 0..stability_interval {
+                        let frame_started = std::time::Instant::now();
+                        emulator
+                            .run_frame()
+                            .map_err(|error| format!("run Libretro telemetry frame: {error}"))?;
+                        record_frame_pacing_sample(
+                            &mut frame_pacing,
+                            frame_started.elapsed(),
+                            realtime_budget_us,
+                        );
+                        total_frames += 1;
+                    }
+                    let (framebuffer, frame_size, pixel_format) =
+                        emulator.get_framebuffer().map_err(|error| {
+                            format!("capture Libretro telemetry framebuffer: {error}")
+                        })?;
+                    let frame = framebuffer_to_rgba(&framebuffer, frame_size, pixel_format);
+                    if frame.width == 0 || frame.height == 0 || frame.rgba.is_empty() {
+                        return Err("Libretro telemetry framebuffer is empty".to_string());
+                    }
+                    let non_black_pixels =
+                        record_visual_telemetry_sample(&mut telemetry, total_frames, &frame.rgba);
+                    if non_black_pixels > best_non_black {
+                        best_non_black = non_black_pixels;
+                        best_frame = Some((frame.width, frame.height, frame.rgba.clone()));
+                    }
+                }
                 break;
             }
         }
@@ -23892,6 +24259,8 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             width,
             height,
             rgba,
+            telemetry,
+            frame_pacing,
         ))
     }
 
@@ -23933,6 +24302,26 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             .iter()
             .filter(|entry| entry.emulation_real_ok && entry.non_black_pixels > 0)
             .count();
+        let visual_telemetry_measured = entries
+            .iter()
+            .filter(|entry| entry.visual_sample_count > 0)
+            .count();
+        let possible_flicker_detected = entries
+            .iter()
+            .filter(|entry| entry.possible_flicker_detected)
+            .count();
+        let frame_pacing_measured = entries
+            .iter()
+            .filter(|entry| entry.frame_pacing_sample_count > 0)
+            .count();
+        let possible_realtime_drop_detected = entries
+            .iter()
+            .filter(|entry| entry.possible_realtime_drop_detected)
+            .count();
+        let possible_sustained_realtime_drop_detected = entries
+            .iter()
+            .filter(|entry| entry.possible_sustained_realtime_drop_detected)
+            .count();
         let bridge_only = entries.iter().filter(|entry| entry.bridge_only).count();
         let failed = entries
             .iter()
@@ -23957,6 +24346,11 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             "rom_real_ok": rom_real_ok,
             "emulation_real_ok": emulation_real_ok,
             "emulation_visible_ok": emulation_visible_ok,
+            "visual_telemetry_measured": visual_telemetry_measured,
+            "possible_flicker_detected": possible_flicker_detected,
+            "frame_pacing_measured": frame_pacing_measured,
+            "possible_realtime_drop_detected": possible_realtime_drop_detected,
+            "possible_sustained_realtime_drop_detected": possible_sustained_realtime_drop_detected,
             "bridge_only": bridge_only,
             "failed": failed,
             "stable_candidate": stable_candidate,
@@ -23994,13 +24388,18 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         fs::write(
             &md_path,
             format!(
-                "# SGDK Corpus Real Build Report\n\n- Total projects: `{}`\n- Processed: `{}`\n- Build real OK: `{}`\n- ROM real OK: `{}`\n- Emulation real OK: `{}`\n- Emulation visible OK: `{}`\n- Bridge only: `{}`\n- Failed: `{}`\n- Stable candidate: `{}`\n- Fake toolchain used: `false`\n\n## Failures\n{}\n",
+                "# SGDK Corpus Real Build Report\n\n- Total projects: `{}`\n- Processed: `{}`\n- Build real OK: `{}`\n- ROM real OK: `{}`\n- Emulation real OK: `{}`\n- Emulation visible OK: `{}`\n- Visual telemetry measured: `{}`\n- Possible flicker detected: `{}`\n- Frame pacing measured: `{}`\n- Possible realtime drop detected: `{}`\n- Possible sustained realtime drop detected: `{}`\n- Bridge only: `{}`\n- Failed: `{}`\n- Stable candidate: `{}`\n- Fake toolchain used: `false`\n\n## Failures\n{}\n",
                 total_projects,
                 entries.len(),
                 build_real_ok,
                 rom_real_ok,
                 emulation_real_ok,
                 emulation_visible_ok,
+                visual_telemetry_measured,
+                possible_flicker_detected,
+                frame_pacing_measured,
+                possible_realtime_drop_detected,
+                possible_sustained_realtime_drop_detected,
                 bridge_only,
                 failed,
                 stable_candidate,
@@ -24012,6 +24411,226 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             ),
         )
         .expect("write SGDK real corpus Markdown report");
+    }
+
+    #[test]
+    fn sgdk_visual_telemetry_flags_black_sample_after_visible_frame() {
+        let mut telemetry = SgdkCorpusVisualTelemetry::default();
+        let visible = vec![255, 64, 32, 255, 0, 0, 0, 255];
+        let black = vec![0, 0, 0, 255, 0, 0, 0, 255];
+
+        assert_eq!(
+            record_visual_telemetry_sample(&mut telemetry, 30, &visible),
+            1
+        );
+        assert_eq!(
+            record_visual_telemetry_sample(&mut telemetry, 60, &black),
+            0
+        );
+
+        assert_eq!(telemetry.visual_sample_count, 2);
+        assert_eq!(telemetry.visual_visible_sample_count, 1);
+        assert_eq!(telemetry.visual_black_sample_count, 1);
+        assert_eq!(telemetry.first_visible_frame, 30);
+        assert_eq!(telemetry.min_visible_non_black_pixels, 1);
+        assert_eq!(telemetry.max_visible_non_black_pixels, 1);
+        assert!(telemetry.max_sample_delta_pixels >= 1);
+        assert!(telemetry.possible_flicker_detected);
+    }
+
+    #[test]
+    fn sgdk_frame_pacing_distinguishes_spike_from_sustained_drop() {
+        let realtime_budget_us = 16_667;
+        let sustained_threshold_x1000 = 50;
+        let mut isolated_spike = SgdkCorpusFramePacingTelemetry::default();
+        for _ in 0..99 {
+            record_frame_pacing_sample(
+                &mut isolated_spike,
+                std::time::Duration::from_micros(500),
+                realtime_budget_us,
+            );
+        }
+        record_frame_pacing_sample(
+            &mut isolated_spike,
+            std::time::Duration::from_micros(20_000),
+            realtime_budget_us,
+        );
+
+        assert!(isolated_spike.possible_realtime_drop_detected);
+        assert_eq!(frame_pacing_slow_frame_ratio_x1000(&isolated_spike), 10);
+        assert!(!possible_sustained_realtime_drop_detected(
+            &isolated_spike,
+            realtime_budget_us,
+            sustained_threshold_x1000,
+        ));
+
+        let mut sustained = SgdkCorpusFramePacingTelemetry::default();
+        for _ in 0..90 {
+            record_frame_pacing_sample(
+                &mut sustained,
+                std::time::Duration::from_micros(500),
+                realtime_budget_us,
+            );
+        }
+        for _ in 0..10 {
+            record_frame_pacing_sample(
+                &mut sustained,
+                std::time::Duration::from_micros(20_000),
+                realtime_budget_us,
+            );
+        }
+
+        assert_eq!(frame_pacing_slow_frame_ratio_x1000(&sustained), 100);
+        assert!(possible_sustained_realtime_drop_detected(
+            &sustained,
+            realtime_budget_us,
+            sustained_threshold_x1000,
+        ));
+    }
+
+    #[test]
+    fn sgdk_corpus_real_build_report_exposes_visual_telemetry_fields() {
+        let artifact_root = temp_dir("sgdk-visual-telemetry-report");
+        fs::create_dir_all(&artifact_root).expect("create report dir");
+        let entry = SgdkCorpusRealBuildEntry {
+            project_name: "Visual Telemetry".to_string(),
+            donor_path: "F:/donor".to_string(),
+            project_path: "F:/project".to_string(),
+            import_ok: true,
+            imported_scenes: 1,
+            bridge_nodes: 1,
+            build_real_ok: true,
+            rom_real_ok: true,
+            emulation_real_ok: true,
+            rom_path: Some("F:/rom.md".to_string()),
+            framebuffer_ppm: Some("F:/frame.ppm".to_string()),
+            libretro_core: Some("Genesis Plus GX".to_string()),
+            frames_run: 90,
+            framebuffer_width: 320,
+            framebuffer_height: 224,
+            non_black_pixels: 42,
+            visual_sample_count: 1,
+            visual_visible_sample_count: 1,
+            visual_black_sample_count: 0,
+            first_visible_frame: 90,
+            min_visible_non_black_pixels: 42,
+            max_visible_non_black_pixels: 42,
+            max_sample_delta_pixels: 0,
+            possible_flicker_detected: false,
+            frame_pacing_sample_count: 0,
+            frame_pacing_total_run_us: 0,
+            frame_pacing_avg_run_us: 0,
+            frame_pacing_max_run_us: 0,
+            frame_pacing_effective_fps_x100: 0,
+            frame_pacing_realtime_budget_us: 16_667,
+            frame_pacing_slow_frame_count: 0,
+            frame_pacing_slow_frame_ratio_x1000: 0,
+            frame_pacing_sustained_drop_threshold_x1000: 50,
+            possible_realtime_drop_detected: false,
+            possible_sustained_realtime_drop_detected: false,
+            original_budget_total_kb: 0,
+            original_budget_resident_kb: 0,
+            original_budget_dma_frame_kb: 0,
+            original_budget_fatal_count: 0,
+            fake_toolchain_used: false,
+            bridge_only: false,
+            failure_reason: None,
+        };
+
+        write_sgdk_corpus_real_build_report(&artifact_root, &[entry], 1);
+
+        let report_json =
+            fs::read_to_string(artifact_root.join("sgdk-corpus-real-build-report.json"))
+                .expect("read report");
+        let report: serde_json::Value = serde_json::from_str(&report_json).expect("parse report");
+        assert_eq!(report["visual_telemetry_measured"].as_u64(), Some(1));
+        assert_eq!(report["possible_flicker_detected"].as_u64(), Some(0));
+        let first_entry = &report["entries"][0];
+        assert!(
+            first_entry.get("visual_sample_count").is_some(),
+            "entry precisa expor amostras visuais para nao confundir smoke com prova de estabilidade: {}",
+            report_json
+        );
+
+        let _ = fs::remove_dir_all(&artifact_root);
+    }
+
+    #[test]
+    fn sgdk_corpus_real_build_report_exposes_frame_pacing_fields() {
+        let artifact_root = temp_dir("sgdk-frame-pacing-report");
+        fs::create_dir_all(&artifact_root).expect("create report dir");
+        let entry = SgdkCorpusRealBuildEntry {
+            project_name: "Frame Pacing".to_string(),
+            donor_path: "F:/donor".to_string(),
+            project_path: "F:/project".to_string(),
+            import_ok: true,
+            imported_scenes: 1,
+            bridge_nodes: 1,
+            build_real_ok: true,
+            rom_real_ok: true,
+            emulation_real_ok: true,
+            rom_path: Some("F:/rom.md".to_string()),
+            framebuffer_ppm: Some("F:/frame.ppm".to_string()),
+            libretro_core: Some("Genesis Plus GX".to_string()),
+            frames_run: 120,
+            framebuffer_width: 320,
+            framebuffer_height: 224,
+            non_black_pixels: 42,
+            visual_sample_count: 2,
+            visual_visible_sample_count: 2,
+            visual_black_sample_count: 0,
+            first_visible_frame: 90,
+            min_visible_non_black_pixels: 42,
+            max_visible_non_black_pixels: 42,
+            max_sample_delta_pixels: 1,
+            possible_flicker_detected: false,
+            frame_pacing_sample_count: 120,
+            frame_pacing_total_run_us: 12_000,
+            frame_pacing_avg_run_us: 100,
+            frame_pacing_max_run_us: 250,
+            frame_pacing_effective_fps_x100: 1_000_000,
+            frame_pacing_realtime_budget_us: 16_667,
+            frame_pacing_slow_frame_count: 0,
+            frame_pacing_slow_frame_ratio_x1000: 0,
+            frame_pacing_sustained_drop_threshold_x1000: 50,
+            possible_realtime_drop_detected: false,
+            possible_sustained_realtime_drop_detected: false,
+            original_budget_total_kb: 0,
+            original_budget_resident_kb: 0,
+            original_budget_dma_frame_kb: 0,
+            original_budget_fatal_count: 0,
+            fake_toolchain_used: false,
+            bridge_only: false,
+            failure_reason: None,
+        };
+
+        write_sgdk_corpus_real_build_report(&artifact_root, &[entry], 1);
+
+        let report_json =
+            fs::read_to_string(artifact_root.join("sgdk-corpus-real-build-report.json"))
+                .expect("read report");
+        let report: serde_json::Value = serde_json::from_str(&report_json).expect("parse report");
+        assert_eq!(report["frame_pacing_measured"].as_u64(), Some(1));
+        assert_eq!(report["possible_realtime_drop_detected"].as_u64(), Some(0));
+        assert_eq!(
+            report["possible_sustained_realtime_drop_detected"].as_u64(),
+            Some(0)
+        );
+        let first_entry = &report["entries"][0];
+        assert!(
+            first_entry.get("frame_pacing_total_run_us").is_some(),
+            "entry precisa expor custo temporal do smoke de emulacao para nao confundir frame visivel com performance medida: {}",
+            report_json
+        );
+        assert!(
+            first_entry
+                .get("frame_pacing_slow_frame_ratio_x1000")
+                .is_some(),
+            "entry precisa separar spike isolado de queda sustentada: {}",
+            report_json
+        );
+
+        let _ = fs::remove_dir_all(&artifact_root);
     }
 
     fn execute_sgdk_corpus_real_build_rom_emulation_report() {
@@ -24111,6 +24730,26 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
                 framebuffer_width: 0,
                 framebuffer_height: 0,
                 non_black_pixels: 0,
+                visual_sample_count: 0,
+                visual_visible_sample_count: 0,
+                visual_black_sample_count: 0,
+                first_visible_frame: 0,
+                min_visible_non_black_pixels: 0,
+                max_visible_non_black_pixels: 0,
+                max_sample_delta_pixels: 0,
+                possible_flicker_detected: false,
+                frame_pacing_sample_count: 0,
+                frame_pacing_total_run_us: 0,
+                frame_pacing_avg_run_us: 0,
+                frame_pacing_max_run_us: 0,
+                frame_pacing_effective_fps_x100: 0,
+                frame_pacing_realtime_budget_us: sgdk_frame_pacing_realtime_budget_us(),
+                frame_pacing_slow_frame_count: 0,
+                frame_pacing_slow_frame_ratio_x1000: 0,
+                frame_pacing_sustained_drop_threshold_x1000:
+                    sgdk_frame_pacing_sustained_drop_threshold_x1000(),
+                possible_realtime_drop_detected: false,
+                possible_sustained_realtime_drop_detected: false,
                 original_budget_total_kb: 0,
                 original_budget_resident_kb: 0,
                 original_budget_dma_frame_kb: 0,
@@ -24259,8 +24898,16 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
                 })?;
                 entry.rom_path = Some(persistent_rom.to_string_lossy().to_string());
 
-                let (non_black_pixels, core_label, frames_run, width, height, rgba) =
-                    corpus_libretro_visible_smoke(&persistent_rom)?;
+                let (
+                    non_black_pixels,
+                    core_label,
+                    frames_run,
+                    width,
+                    height,
+                    rgba,
+                    visual_telemetry,
+                    frame_pacing,
+                ) = corpus_libretro_visible_smoke(&persistent_rom)?;
                 let frame_path = artifact_root.join("frames").join(format!("{slug}.ppm"));
                 write_rgba_ppm(&frame_path, width, height, &rgba);
                 entry.emulation_real_ok = true;
@@ -24269,6 +24916,34 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
                 entry.framebuffer_width = width;
                 entry.framebuffer_height = height;
                 entry.non_black_pixels = non_black_pixels;
+                entry.visual_sample_count = visual_telemetry.visual_sample_count;
+                entry.visual_visible_sample_count = visual_telemetry.visual_visible_sample_count;
+                entry.visual_black_sample_count = visual_telemetry.visual_black_sample_count;
+                entry.first_visible_frame = visual_telemetry.first_visible_frame;
+                entry.min_visible_non_black_pixels = visual_telemetry.min_visible_non_black_pixels;
+                entry.max_visible_non_black_pixels = visual_telemetry.max_visible_non_black_pixels;
+                entry.max_sample_delta_pixels = visual_telemetry.max_sample_delta_pixels;
+                entry.possible_flicker_detected = visual_telemetry.possible_flicker_detected;
+                entry.frame_pacing_sample_count = frame_pacing.frame_pacing_sample_count;
+                entry.frame_pacing_total_run_us = frame_pacing.frame_pacing_total_run_us;
+                entry.frame_pacing_avg_run_us = frame_pacing_avg_run_us(&frame_pacing);
+                entry.frame_pacing_max_run_us = frame_pacing.frame_pacing_max_run_us;
+                entry.frame_pacing_effective_fps_x100 =
+                    frame_pacing_effective_fps_x100(&frame_pacing);
+                entry.frame_pacing_realtime_budget_us = sgdk_frame_pacing_realtime_budget_us();
+                entry.frame_pacing_slow_frame_count = frame_pacing.frame_pacing_slow_frame_count;
+                entry.frame_pacing_slow_frame_ratio_x1000 =
+                    frame_pacing_slow_frame_ratio_x1000(&frame_pacing);
+                entry.frame_pacing_sustained_drop_threshold_x1000 =
+                    sgdk_frame_pacing_sustained_drop_threshold_x1000();
+                entry.possible_realtime_drop_detected =
+                    frame_pacing.possible_realtime_drop_detected;
+                entry.possible_sustained_realtime_drop_detected =
+                    possible_sustained_realtime_drop_detected(
+                        &frame_pacing,
+                        entry.frame_pacing_realtime_budget_us,
+                        entry.frame_pacing_sustained_drop_threshold_x1000,
+                    );
                 entry.framebuffer_ppm = Some(frame_path.to_string_lossy().to_string());
                 Ok(())
             })();

@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   newProjectDialog: vi.fn(),
   dialogOpen: vi.fn(),
   convertFileSrc: vi.fn((path: string) => `asset://${path}`),
+  invoke: vi.fn(() => Promise.reject(new Error("invoke not mocked"))),
   listProjectTemplates: vi.fn(),
   listExternalImportProfiles: vi.fn(),
   createProjectFromTemplate: vi.fn(),
@@ -359,7 +360,7 @@ vi.mock("./components/viewport/ViewportPanel", () => ({
       if (projectSourceKind === "external_sgdk") {
         return {
           title: "Projeto SGDK legado em overlay",
-          body: "Este workspace usa um overlay rds/ e o Build & Run continua delegado ao Makefile do host.",
+          body: "Este workspace usa um overlay rds/ e o Build & Run continua delegado ao build do host.",
         };
       }
 
@@ -535,6 +536,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: mocks.convertFileSrc,
+  invoke: mocks.invoke,
 }));
 
 vi.mock("./core/ipc/buildService", () => ({
@@ -2102,6 +2104,12 @@ describe("App build flow", () => {
   });
 
   it("disables Build & Run and explains why when live validation reports a fresh fatal error", async () => {
+    await flushUntil(
+      () => useEditorStore.getState().hwValidationState === "fresh",
+      20,
+      25
+    );
+
     await act(async () => {
       useEditorStore.setState({
         hwStatus: {
@@ -2376,6 +2384,10 @@ describe("App build flow", () => {
       menuTrigger.click();
       await flush();
     });
+
+    const topbar = container.querySelector("[data-testid='unified-topbar']");
+    expect(topbar?.className).toContain("overflow-visible");
+    expect(topbar?.className).not.toContain("overflow-hidden");
 
     expect(container.querySelector("[data-testid='menu-action-project-new']")?.textContent).toContain(
       "Novo Projeto"
@@ -2694,7 +2706,7 @@ describe("App build flow", () => {
 
     expect(onboarding?.textContent).toContain("Projeto SGDK legado em overlay");
     expect(onboarding?.textContent).toContain("overlay rds/");
-    expect(onboarding?.textContent).toContain("Makefile do host");
+    expect(onboarding?.textContent).toContain("build do host");
   });
 
   it("switches the SGDK onboarding copy when the project is already imported into the native format", async () => {
@@ -2710,7 +2722,7 @@ describe("App build flow", () => {
 
     expect(onboarding?.textContent).toContain("Projeto importado de SGDK");
     expect(onboarding?.textContent).toContain("formato nativo do RetroDev");
-    expect(onboarding?.textContent).not.toContain("Makefile do host");
+    expect(onboarding?.textContent).not.toContain("build do host");
   });
 
   it("keeps the game view accessible after moving through the explorer workspace", async () => {

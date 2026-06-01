@@ -952,9 +952,9 @@ where
         DependencyKind::Msvc
         | DependencyKind::GitBash
         | DependencyKind::WebDriver
-        | DependencyKind::TauriDriver => unreachable!(
-            "manual dependencies return before the automatic installer dispatch"
-        ),
+        | DependencyKind::TauriDriver => {
+            unreachable!("manual dependencies return before the automatic installer dispatch")
+        }
     };
 
     match install_result {

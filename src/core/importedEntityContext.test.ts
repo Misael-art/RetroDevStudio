@@ -5,6 +5,7 @@ import {
   getImportedEntityRoleLabel,
   getImportedGameplayClassLabel,
   resolveImportedEntityContext,
+  summarizeImportedStagingEntities,
 } from "./importedEntityContext";
 
 describe("importedEntityContext", () => {
@@ -62,5 +63,40 @@ describe("importedEntityContext", () => {
     expect(context.isImported).toBe(false);
     expect(context.summary).toBeNull();
     expect(context.focusPriority).toBe(0);
+  });
+
+  it("summarizes staging entities for imported scene authoring UX", () => {
+    const stagedEntity = (id: string, x: number, y: number) => ({
+      entity_id: id,
+      transform: { x, y },
+      components: {
+        sprite: { asset: `assets/sprites/${id}.png` },
+        logic: {
+          imported_semantics: {
+            source: "sgdk_phase_d",
+            entity_role: "enemy_actor",
+            audit_flags: ["position:staging_layout"],
+          },
+        },
+      },
+    });
+
+    const summary = summarizeImportedStagingEntities([
+      stagedEntity("a", 48, 88),
+      stagedEntity("b", 112, 116),
+      stagedEntity("c", 368, 88),
+      {
+        entity_id: "native",
+        transform: { x: 0, y: 0 },
+        components: { sprite: { asset: "assets/sprites/native.png" } },
+      },
+    ]);
+
+    expect(summary.count).toBe(3);
+    expect(summary.pageCount).toBe(2);
+    expect(summary.bounds).toEqual({ minX: 48, minY: 88, maxX: 368, maxY: 116 });
+    expect(summary.shouldShowOverlay).toBe(true);
+    expect(summary.label).toContain("3 sprites");
+    expect(summary.label).toContain("2 paginas");
   });
 });

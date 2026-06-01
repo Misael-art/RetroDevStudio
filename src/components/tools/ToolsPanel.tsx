@@ -615,12 +615,14 @@ function AssetTreeView({
   onToggle,
   onSelect,
   depth,
+  projectDir,
 }: {
   node: AssetTreeNode;
   collapsed: Set<string>;
   onToggle: (path: string) => void;
   onSelect: (asset: ProjectAssetEntry) => void;
   depth: number;
+  projectDir: string | null;
 }) {
   if (node.isDir) {
     const isCollapsed = collapsed.has(node.path);
@@ -647,6 +649,7 @@ function AssetTreeView({
               onToggle={onToggle}
               onSelect={onSelect}
               depth={node.name ? depth + 1 : depth}
+              projectDir={projectDir}
             />
           ))}
       </>
@@ -667,6 +670,8 @@ function AssetTreeView({
         <div className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded bg-black/20">
           <AssetPreview
             absolutePath={asset.absolute_path}
+            projectDir={projectDir}
+            relativePath={asset.relative_path}
             alt={node.name}
             imageClassName="h-6 w-6 object-contain"
             fallbackClassName="flex h-6 w-6 items-center justify-center text-[8px] font-bold text-[#89b4fa]"
@@ -1088,6 +1093,7 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
                   }
                 }}
                 depth={0}
+                projectDir={activeProjectDir}
               />
             </div>
           )}
@@ -1241,6 +1247,8 @@ function AssetBrowser({ onRequestInspector }: AssetBrowserProps) {
                 {asset.kind === "image" ? (
                   <AssetPreview
                     absolutePath={asset.absolute_path}
+                    projectDir={activeProjectDir}
+                    relativePath={asset.relative_path}
                     alt={asset.relative_path}
                     imageClassName="max-h-14 max-w-full object-contain"
                     fallbackClassName="flex h-14 w-14 items-center justify-center text-[8px] font-bold text-[#89b4fa]"

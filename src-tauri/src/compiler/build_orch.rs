@@ -94,6 +94,12 @@ struct Toolchain {
 }
 
 #[derive(Debug, Clone)]
+enum LegacyBuildEntrypoint {
+    Makefile(PathBuf),
+    WindowsBatch(PathBuf),
+}
+
+#[derive(Debug, Clone)]
 struct SgdkCompatibilityProfile {
     scene: Scene,
     active_sprite_count: usize,
@@ -560,11 +566,11 @@ where
             return failed_build_result(target.target, log, Some(&host_root));
         }
 
-        let Some(makefile_path) = find_makefile(&host_root) else {
+        let Some(build_entrypoint) = find_legacy_build_entrypoint(&host_root) else {
             emit!(
                 "error",
                 format!(
-                    "Projeto SGDK legado em '{}' nao possui Makefile nativo para delegacao.",
+                    "Projeto SGDK legado em '{}' nao possui Makefile nem build.bat/rebuild.bat para delegacao.",
                     host_root.display()
                 )
             );
@@ -578,10 +584,16 @@ where
                 host_root.display()
             )
         );
-        emit!(
-            "info",
-            format!("Makefile host localizado: {}", makefile_path.display())
-        );
+        match &build_entrypoint {
+            LegacyBuildEntrypoint::Makefile(path) => emit!(
+                "info",
+                format!("Makefile host localizado: {}", path.display())
+            ),
+            LegacyBuildEntrypoint::WindowsBatch(path) => emit!(
+                "info",
+                format!("Script host localizado: {}", path.display())
+            ),
+        }
 
         let toolchain = match resolve_toolchain(environment, target) {
             Ok(toolchain) => toolchain,
@@ -605,7 +617,16 @@ where
             out_dir: host_root.join("out"),
         };
 
-        if let Err(error) = invoke_make(&toolchain, &workspace, target, &mut log, &on_log) {
+        let build_result = match build_entrypoint {
+            LegacyBuildEntrypoint::Makefile(_) => {
+                invoke_make(&toolchain, &workspace, target, &mut log, &on_log)
+            }
+            LegacyBuildEntrypoint::WindowsBatch(script) => invoke_legacy_windows_batch(
+                &toolchain, &workspace, target, &script, &mut log, &on_log,
+            ),
+        };
+
+        if let Err(error) = build_result {
             emit!("error", error);
             return failed_build_result(target.target, log, Some(&workspace.root));
         }
@@ -997,6 +1018,23 @@ fn find_makefile(root: &Path) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
+fn find_legacy_build_entrypoint(root: &Path) -> Option<LegacyBuildEntrypoint> {
+    find_makefile(root)
+        .map(LegacyBuildEntrypoint::Makefile)
+        .or_else(|| find_legacy_windows_batch(root).map(LegacyBuildEntrypoint::WindowsBatch))
+}
+
+fn find_legacy_windows_batch(root: &Path) -> Option<PathBuf> {
+    if !cfg!(target_os = "windows") {
+        return None;
+    }
+
+    ["build.bat", "rebuild.bat"]
+        .into_iter()
+        .map(|candidate| root.join(candidate))
+        .find(|candidate| candidate.is_file())
+}
+
 fn prepare_workspace(
     project_dir: &Path,
     project: &Project,
@@ -1074,11 +1112,7 @@ fn prepare_workspace(
             stage_project_assets(project_dir, &res_dir, ast)?;
             let project_config_path = src_dir.join("rds_project_config.h");
             fs::write(&project_config_path, render_sgdk_project_config(project)).map_err(|e| {
-                format!(
-                    "Falha ao gravar '{}': {}",
-                    project_config_path.display(),
-                    e
-                )
+                format!("Falha ao gravar '{}': {}", project_config_path.display(), e)
             })?;
             fs::write(&makefile_path, render_sgdk_makefile(&project_slug))
                 .map_err(|e| format!("Falha ao gravar '{}': {}", makefile_path.display(), e))?;
@@ -1960,8 +1994,124 @@ where
     Ok(())
 }
 
+fn invoke_legacy_windows_batch<F>(
+    toolchain: &Toolchain,
+    workspace: &BuildWorkspace,
+    target: TargetSpec,
+    script: &Path,
+    log: &mut Vec<BuildLogLine>,
+    on_log: &F,
+) -> Result<(), String>
+where
+    F: Fn(BuildLogLine),
+{
+    macro_rules! emit {
+        ($level:expr, $message:expr) => {{
+            let entry = BuildLogLine {
+                level: $level.to_string(),
+                message: $message.to_string(),
+            };
+            on_log(entry.clone());
+            log.push(entry);
+        }};
+    }
+
+    if !cfg!(target_os = "windows") {
+        return Err(format!(
+            "Script de build legado '{}' so pode ser executado no Windows.",
+            script.display()
+        ));
+    }
+
+    let Some(script_name) = script.file_name().and_then(|name| name.to_str()) else {
+        return Err(format!(
+            "Script de build legado invalido: '{}'.",
+            script.display()
+        ));
+    };
+
+    emit!(
+        "info",
+        format!(
+            "Delegando build SGDK legado via script host '{}'.",
+            script.display()
+        )
+    );
+
+    let mut command = Command::new("cmd");
+    command.current_dir(&workspace.root);
+    command.arg("/C").arg(script_name);
+    command.env("OS", "Windows_NT");
+    command.env("SGDK", &toolchain.root);
+    command.env("GDK", &toolchain.root);
+    configure_java_for_sgdk(&mut command);
+    if let Ok(extra_flags) = std::env::var("RDS_EXTRA_FLAGS") {
+        let extra_flags = extra_flags.trim();
+        if !extra_flags.is_empty() {
+            command.env("EXTRA_FLAGS", extra_flags);
+        }
+    }
+
+    let output = command.output().map_err(|error| {
+        format!(
+            "Falha ao iniciar script de build legado em '{}': {}",
+            workspace.root.display(),
+            error
+        )
+    })?;
+
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        if !line.trim().is_empty() {
+            emit!("info", line);
+        }
+    }
+
+    for line in String::from_utf8_lossy(&output.stderr).lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        if line.to_ascii_lowercase().contains("error") {
+            emit!("error", line);
+        } else {
+            emit!("warn", line);
+        }
+    }
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let classifier_input = if stderr.trim().is_empty() {
+            stdout
+        } else {
+            stderr
+        };
+        let classified = classify_make_failure(classifier_input.as_ref());
+        return Err(format!(
+            "[{}] Build legado via script host falhou com codigo {:?}.",
+            classified,
+            output.status.code()
+        ));
+    }
+
+    if target.target != "megadrive" {
+        return Err(format!(
+            "Script host legado executado para target inesperado '{}'.",
+            target.target
+        ));
+    }
+
+    Ok(())
+}
+
 fn classify_make_failure(stderr: &str) -> &'static str {
     let lower = stderr.to_ascii_lowercase();
+    if lower.contains("manifesto invalido")
+        || lower.contains("invalid manifest")
+        || lower.contains("sgdk_root")
+        || lower.contains("sgdk root")
+    {
+        return "legacy_manifest_invalid";
+    }
     if lower.contains("resources.res") || lower.contains("rescomp") {
         return "emitter_resources_failed";
     }
@@ -2548,7 +2698,10 @@ mod tests {
         let env = BuildEnvironment::detect();
 
         assert_eq!(env.sgdk_root.as_deref(), Some(sgdk_root.as_path()));
-        assert_eq!(env.sgdk_make_program.as_deref(), Some(detected_make.as_path()));
+        assert_eq!(
+            env.sgdk_make_program.as_deref(),
+            Some(detected_make.as_path())
+        );
 
         let _ = fs::remove_dir_all(sgdk_root);
     }
@@ -4240,6 +4393,70 @@ PY\n"
             .any(|line| line.message.contains("Delegando build para host")));
 
         let _ = fs::remove_dir_all(host_dir);
+    }
+
+    #[test]
+    fn legacy_sgdk_overlay_build_delegates_to_host_batch_without_makefile() {
+        let _serial = test_serial_guard();
+        if !cfg!(target_os = "windows") {
+            return;
+        }
+
+        let host_dir = temp_dir("legacy-host-build-bat");
+        fs::create_dir_all(host_dir.join("src")).expect("create legacy src");
+        fs::create_dir_all(host_dir.join("inc")).expect("create legacy inc");
+        fs::write(
+            host_dir.join("src").join("main.c"),
+            b"int main(void){return 0;}",
+        )
+        .expect("write legacy main.c");
+        fs::write(host_dir.join("inc").join("game.h"), b"void game(void);")
+            .expect("write legacy header");
+        fs::write(
+            host_dir.join("build.bat"),
+            "@echo off\r\n\
+             if not exist out mkdir out\r\n\
+             echo host batch build\r\n\
+             echo ROM> out\\artifact.md\r\n\
+             exit /b 0\r\n",
+        )
+        .expect("write legacy build batch");
+
+        let overlay_dir = crate::core::project_mgr::import_legacy_sgdk_project(
+            &host_dir,
+            Some("Legacy Host Batch Wrapper"),
+        )
+        .expect("wrap legacy sgdk host");
+
+        let (sgdk_root, sgdk_make_program) = fake_toolchain("sgdk-legacy-host-bat", "md");
+        let environment = BuildEnvironment {
+            sgdk_root: Some(sgdk_root),
+            sgdk_make_program: Some(sgdk_make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_with_environment(&overlay_dir, &environment, |_| {});
+
+        assert!(result.ok, "legacy batch build log: {:?}", result.log);
+        assert!(host_dir.join("out").join("artifact.md").is_file());
+        assert!(PathBuf::from(&result.rom_path).starts_with(host_dir.join("out")));
+        assert!(result.log.iter().any(|line| {
+            line.message
+                .contains("Delegando build SGDK legado via script host")
+        }));
+
+        let _ = fs::remove_dir_all(host_dir);
+    }
+
+    #[test]
+    fn classify_make_failure_marks_invalid_legacy_manifest() {
+        assert_eq!(
+            classify_make_failure(
+                "Manifesto invalido: sgdk_root nao encontrado em 'F:\\Projects\\Demo\\KOF94'."
+            ),
+            "legacy_manifest_invalid"
+        );
     }
 
     #[test]

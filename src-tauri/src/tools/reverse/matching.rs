@@ -5,7 +5,10 @@ fn normalize_token(token: &str) -> String {
     }
 
     if let Some(register_family) = lower.strip_prefix('d').or_else(|| lower.strip_prefix('a')) {
-        if register_family.chars().all(|character| character.is_ascii_digit()) {
+        if register_family
+            .chars()
+            .all(|character| character.is_ascii_digit())
+        {
             return format!("{}n", &lower[..1]);
         }
     }
@@ -18,11 +21,13 @@ fn normalize_token(token: &str) -> String {
 }
 
 fn normalize_line(line: &str) -> String {
-    line.split(|character: char| character.is_whitespace() || matches!(character, ',' | '(' | ')' | '[' | ']'))
-        .filter(|token| !token.trim().is_empty())
-        .map(normalize_token)
-        .collect::<Vec<_>>()
-        .join(" ")
+    line.split(|character: char| {
+        character.is_whitespace() || matches!(character, ',' | '(' | ')' | '[' | ']')
+    })
+    .filter(|token| !token.trim().is_empty())
+    .map(normalize_token)
+    .collect::<Vec<_>>()
+    .join(" ")
 }
 
 #[derive(Debug, Default, Clone, Copy)]

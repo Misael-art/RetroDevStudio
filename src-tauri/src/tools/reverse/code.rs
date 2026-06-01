@@ -17,22 +17,26 @@ struct DecodedInstruction {
 }
 
 fn read_be_u16(bytes: &[u8], offset: usize) -> Option<u16> {
-    bytes.get(offset..offset + 2)
+    bytes
+        .get(offset..offset + 2)
         .map(|slice| u16::from_be_bytes([slice[0], slice[1]]))
 }
 
 fn read_be_u32(bytes: &[u8], offset: usize) -> Option<u32> {
-    bytes.get(offset..offset + 4)
+    bytes
+        .get(offset..offset + 4)
         .map(|slice| u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]))
 }
 
 fn read_le_u16(bytes: &[u8], offset: usize) -> Option<u16> {
-    bytes.get(offset..offset + 2)
+    bytes
+        .get(offset..offset + 2)
         .map(|slice| u16::from_le_bytes([slice[0], slice[1]]))
 }
 
 fn read_le_u24(bytes: &[u8], offset: usize) -> Option<u32> {
-    bytes.get(offset..offset + 3)
+    bytes
+        .get(offset..offset + 3)
         .map(|slice| u32::from(slice[0]) | (u32::from(slice[1]) << 8) | (u32::from(slice[2]) << 16))
 }
 
@@ -52,7 +56,11 @@ fn trace_allows_address(trace: Option<&ExecutionTraceLog>, address: u32) -> bool
     trace.map(|log| log.was_executed(address)).unwrap_or(true)
 }
 
-fn target_points_inside_instruction(target: u32, current_offset: usize, next_cursor: usize) -> bool {
+fn target_points_inside_instruction(
+    target: u32,
+    current_offset: usize,
+    next_cursor: usize,
+) -> bool {
     let target = target as usize;
     target > current_offset && target < next_cursor
 }
@@ -123,7 +131,11 @@ fn decode_megadrive(bytes: &[u8], offset: usize) -> DecodedInstruction {
         }
         value if (value & 0xFF00) == 0x6000 || (value & 0xFF00) == 0x6100 => {
             let disp8 = (value & 0x00FF) as u8 as i8 as i32;
-            let kind = if (value & 0xFF00) == 0x6100 { "call" } else { "branch" };
+            let kind = if (value & 0xFF00) == 0x6100 {
+                "call"
+            } else {
+                "branch"
+            };
             let target = if (value & 0x00FF) == 0 {
                 let disp16 = read_be_u16(bytes, offset + 2).unwrap_or(0) as i16 as i32;
                 row.bytes = bytes.get(offset..offset + 4).unwrap_or(&[]).to_vec();
@@ -290,7 +302,10 @@ pub fn disassemble_region(loaded: &LoadedRom, offset: usize, length: usize) -> D
         };
     }
 
-    let end = loaded.bytes.len().min(offset.saturating_add(length.max(16)));
+    let end = loaded
+        .bytes
+        .len()
+        .min(offset.saturating_add(length.max(16)));
     let mut rows = Vec::new();
     let mut cursor = offset;
     while cursor < end {
@@ -421,19 +436,17 @@ fn analyze_code_with_trace(
         .last()
         .map(|row| row.offset + u32::from(row.size))
         .unwrap_or(region_start);
-    let mut logic_hints = vec![
-        LogicHint {
-            id: format!("logic_entry_{:06X}", region_start),
-            category: "code".to_string(),
-            message: format!(
-                "Regiao de codigo candidata com {} instrucoes e {} funcoes mapeadas.",
-                rows.len(),
-                function_candidates.len()
-            ),
-            start: Some(region_start),
-            end: Some(region_end),
-        },
-    ];
+    let mut logic_hints = vec![LogicHint {
+        id: format!("logic_entry_{:06X}", region_start),
+        category: "code".to_string(),
+        message: format!(
+            "Regiao de codigo candidata com {} instrucoes e {} funcoes mapeadas.",
+            rows.len(),
+            function_candidates.len()
+        ),
+        start: Some(region_start),
+        end: Some(region_end),
+    }];
     logic_hints.push(if let Some(trace_log) = trace {
         LogicHint {
             id: "trace_overlay_active".to_string(),
@@ -462,7 +475,12 @@ fn analyze_code_with_trace(
         vec![CodeRegion {
             start: region_start,
             end: region_end,
-            architecture: if loaded.target == "snes" { "65816" } else { "68000" }.to_string(),
+            architecture: if loaded.target == "snes" {
+                "65816"
+            } else {
+                "68000"
+            }
+            .to_string(),
             entry_points: normalized_entry_points.iter().copied().collect(),
             functions: function_candidates,
             xrefs,
@@ -787,10 +805,15 @@ mod tests {
         assert!(regions[0].functions.len() >= 2);
 
         // Call graph should have edge from 0 -> 0x10
-        assert!(graph.iter().any(|edge| edge.from == 0 && edge.to == 0x10 && edge.kind == "call"));
+        assert!(graph
+            .iter()
+            .any(|edge| edge.from == 0 && edge.to == 0x10 && edge.kind == "call"));
 
         // Xrefs should have a call entry
-        assert!(regions[0].xrefs.iter().any(|xref| xref.to == 0x10 && xref.kind == "call"));
+        assert!(regions[0]
+            .xrefs
+            .iter()
+            .any(|xref| xref.to == 0x10 && xref.kind == "call"));
     }
 
     #[test]
@@ -848,9 +871,16 @@ mod tests {
         let (regions, graph, hints) = analyze_code_with_trace(&loaded, Some(&trace));
 
         assert_eq!(regions.len(), 1);
-        assert!(graph.iter().any(|edge| edge.from == 0 && edge.to == 0x010000));
-        assert!(regions[0].functions.iter().any(|function| function.address == 0x010000 && function.executed));
-        assert!(hints.iter().any(|hint| hint.message.contains("Trace dinamico aplicado")));
+        assert!(graph
+            .iter()
+            .any(|edge| edge.from == 0 && edge.to == 0x010000));
+        assert!(regions[0]
+            .functions
+            .iter()
+            .any(|function| function.address == 0x010000 && function.executed));
+        assert!(hints
+            .iter()
+            .any(|hint| hint.message.contains("Trace dinamico aplicado")));
     }
 
     #[test]
@@ -883,7 +913,10 @@ mod tests {
         let data_view = disassemble_region(&loaded, 0x20, 4);
 
         assert_eq!(regions.len(), 1);
-        assert!(!regions[0].functions.iter().any(|function| function.address == 0x20));
+        assert!(!regions[0]
+            .functions
+            .iter()
+            .any(|function| function.address == 0x20));
         assert!(!regions[0].disassembly.iter().any(|row| row.offset >= 0x20));
         assert_eq!(data_view.rows[0].kind, "data");
     }
@@ -902,6 +935,9 @@ mod tests {
 
         assert_eq!(regions.len(), 1);
         assert!(graph.iter().any(|edge| edge.to == 0x2));
-        assert!(!regions[0].functions.iter().any(|function| function.address == 0x2));
+        assert!(!regions[0]
+            .functions
+            .iter()
+            .any(|function| function.address == 0x2));
     }
 }

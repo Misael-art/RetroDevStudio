@@ -113,7 +113,10 @@ pub fn analyze_graphics(loaded: &LoadedRom) -> (Vec<GraphicsCandidate>, Vec<Comp
             tile_count: tile_count as u32,
             palette_slot,
             confidence: if tile_count >= 32 { 82 } else { 64 },
-            note: format!("Bloco grafico heuristico {}bpp com {} tiles.", bpp, tile_count),
+            note: format!(
+                "Bloco grafico heuristico {}bpp com {} tiles.",
+                bpp, tile_count
+            ),
         });
     }
 
@@ -124,7 +127,8 @@ pub fn analyze_graphics(loaded: &LoadedRom) -> (Vec<GraphicsCandidate>, Vec<Comp
                 end: candidate.end,
                 scheme: "unknown_tiles_block".to_string(),
                 confidence: 25,
-                note: "Regiao grafica densa; candidata a pipeline de compressao futura.".to_string(),
+                note: "Regiao grafica densa; candidata a pipeline de compressao futura."
+                    .to_string(),
             });
         }
     }
@@ -218,7 +222,13 @@ mod tests {
         let data_size = tile_count * TILE_BYTES_4BPP;
         let mut bytes = vec![0u8; 0x100 + data_size];
         for i in 0..data_size {
-            bytes[0x100 + i] = if i % 3 == 0 { 0xAB } else if i % 3 == 1 { 0xCD } else { 0x12 };
+            bytes[0x100 + i] = if i % 3 == 0 {
+                0xAB
+            } else if i % 3 == 1 {
+                0xCD
+            } else {
+                0x12
+            };
         }
 
         let loaded = LoadedRom {

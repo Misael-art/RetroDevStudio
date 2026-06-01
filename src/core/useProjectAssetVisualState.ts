@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   resolveProjectAssetVisualState,
@@ -9,6 +9,10 @@ import {
   resolveAbsoluteAssetPreviewSrc,
   resolveProjectAssetPreviewSrc,
 } from "./pathUtils";
+import {
+  dataUrlFromPreviewPayload,
+  readProjectAssetPreview,
+} from "./ipc/assetPreviewService";
 
 type UseProjectAssetVisualStateOptions = {
   absolutePath?: string | null;
@@ -47,6 +51,8 @@ export function useProjectAssetVisualState(options: UseProjectAssetVisualStateOp
 
     return null;
   }, [absolutePath, projectDir, relativePath]);
+  const [bridgedSrc, setBridgedSrc] = useState<string | null>(null);
+  const effectiveSrc = bridgedSrc ?? src;
 
   const hadPathIntent = useMemo(() => {
     const absoluteCandidate = String(absolutePath ?? "").trim();
@@ -56,19 +62,51 @@ export function useProjectAssetVisualState(options: UseProjectAssetVisualStateOp
   }, [absolutePath, projectDir, relativePath]);
 
   const [previewStatus, setPreviewStatus] = useState<AssetVisualLoadStatus>(() => {
-    if (src) {
+    if (effectiveSrc) {
       return "loading";
     }
     return hadPathIntent ? "missing" : "idle";
   });
 
   useEffect(() => {
-    if (!src) {
+    if (!effectiveSrc) {
       setPreviewStatus(hadPathIntent ? "missing" : "idle");
       return;
     }
     setPreviewStatus("loading");
-  }, [hadPathIntent, src]);
+  }, [effectiveSrc, hadPathIntent]);
+
+  useEffect(() => {
+    const projectCandidate = String(projectDir ?? "").trim();
+    const relativeCandidate = String(relativePath ?? "").trim();
+    if (!projectCandidate || !relativeCandidate) {
+      setBridgedSrc(null);
+      return;
+    }
+
+    let cancelled = false;
+    setBridgedSrc(null);
+    void readProjectAssetPreview(projectCandidate, relativeCandidate)
+      .then((payload) => {
+        if (cancelled) {
+          return;
+        }
+        const dataUrl = dataUrlFromPreviewPayload(payload);
+        if (!dataUrl) {
+          return;
+        }
+        setBridgedSrc(dataUrl);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setBridgedSrc(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectDir, relativePath]);
 
   const visualState = useMemo(
     () =>
@@ -81,11 +119,14 @@ export function useProjectAssetVisualState(options: UseProjectAssetVisualStateOp
     [absolutePath, legacyFallback, legacyFallbackDetail, previewStatus, relativePath]
   );
 
+  const setLoaded = useCallback(() => setPreviewStatus("loaded"), []);
+  const setFailed = useCallback(() => setPreviewStatus("failed"), []);
+
   return {
-    src,
+    src: effectiveSrc,
     previewStatus,
     visualState,
-    setLoaded: () => setPreviewStatus("loaded"),
-    setFailed: () => setPreviewStatus("failed"),
+    setLoaded,
+    setFailed,
   };
 }

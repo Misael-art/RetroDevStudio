@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   persistActiveScene: vi.fn(),
   listenToProjectAssetChanges: vi.fn(),
   openProjectSourcePath: vi.fn(),
+  invoke: vi.fn(() => Promise.reject(new Error("invoke not mocked"))),
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
@@ -37,6 +38,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (path: string) => `asset://${path}`,
+  invoke: mocks.invoke,
 }));
 
 vi.mock("../../core/scenePersistence", () => ({

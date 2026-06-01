@@ -68,7 +68,7 @@ export default function UnifiedTopBar({
   return (
     <header
       data-testid="unified-topbar"
-      className="relative z-20 flex min-h-[42px] shrink-0 items-center gap-2 overflow-hidden border-b border-[#27272a] bg-[#10131d] px-2 py-1"
+      className="relative z-20 flex min-h-[42px] shrink-0 items-center gap-2 overflow-visible border-b border-[#27272a] bg-[#10131d] px-2 py-1"
     >
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <div ref={menuRef} className="relative shrink-0">
@@ -82,7 +82,7 @@ export default function UnifiedTopBar({
           </button>
 
           {menuOpen && (
-            <div className="absolute left-0 top-[calc(100%+8px)] w-72 overflow-hidden rounded border border-[#313244] bg-[#0b1120] shadow-[0_24px_60px_rgba(0,0,0,0.45)]">
+            <div className="absolute left-0 top-[calc(100%+8px)] z-50 w-72 overflow-hidden rounded border border-[#313244] bg-[#0b1120] shadow-[0_24px_60px_rgba(0,0,0,0.45)]">
               {menuSections.map((section, sectionIndex) => (
                 <div
                   key={`${section.title ?? "section"}-${sectionIndex}`}

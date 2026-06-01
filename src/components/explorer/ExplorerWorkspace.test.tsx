@@ -147,7 +147,7 @@ describe("ExplorerWorkspace", () => {
       "Overlay rds/"
     );
     expect(container.querySelector("[data-testid='legacy-host-summary']")?.textContent).toContain(
-      "Build & Run delega ao Makefile do host"
+      "Build & Run delega ao build do host"
     );
     expect(container.querySelector("[data-testid='legacy-host-summary']")?.textContent).toContain(
       "5 arquivo(s) indexado(s)"

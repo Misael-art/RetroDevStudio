@@ -29,8 +29,16 @@ import {
 } from "../../core/assetVisualState";
 import { createSpriteEntityFromAsset } from "../../core/editorEntityFactory";
 import { getEntityDisplayName } from "../../core/entityDisplay";
-import { resolveImportedEntityContext } from "../../core/importedEntityContext";
+import {
+  resolveImportedEntityContext,
+  summarizeImportedStagingEntities,
+} from "../../core/importedEntityContext";
 import { resolveProjectAssetPath } from "../../core/pathUtils";
+import {
+  blobFromPreviewPayload,
+  readProjectAssetPreview,
+  textFromPreviewPayload,
+} from "../../core/ipc/assetPreviewService";
 import { summarizeSceneAssetHealth } from "../../core/sceneAssetHealth";
 import { resolveSceneWorkspaceContext } from "../../core/sceneWorkspaceContext";
 import {
@@ -234,7 +242,7 @@ function getSgdkOnboardingContent(projectSourceKind: string) {
     return {
       title: "Projeto SGDK legado em overlay",
       body:
-        "Este workspace usa um overlay rds/ sobre o host SGDK. Codigo e manifests do host seguem somente leitura, e Build & Run continua delegado ao Makefile do host. Avisos de hardware nesta cena sao informativos, nao bloqueantes.",
+        "Este workspace usa um overlay rds/ sobre o host SGDK. Codigo e manifests do host seguem somente leitura, e Build & Run continua delegado ao build do host. Avisos de hardware nesta cena sao informativos, nao bloqueantes.",
     };
   }
 
@@ -693,6 +701,10 @@ export default function ViewportPanel({
     activeScenePath || activeScene?.scene_id || null
   );
   const sceneDensityStatus = useMemo(() => buildSceneDensityStatus(activeScene), [activeScene]);
+  const stagingSummary = useMemo(
+    () => summarizeImportedStagingEntities(activeScene?.entities ?? []),
+    [activeScene]
+  );
   const activeTilemapEntityForPalette = useMemo(() => {
     if (!activeScene) {
       return null;
@@ -717,6 +729,12 @@ export default function ViewportPanel({
     (worldValue: number) => Math.round(worldValue * viewportZoom),
     [viewportZoom]
   );
+
+  useEffect(() => {
+    if (stagingSummary.shouldShowOverlay) {
+      setShowStagingOverlay(true);
+    }
+  }, [activeScenePath, stagingSummary.shouldShowOverlay]);
 
   useEffect(() => {
     if (!denseStackPicker) {
@@ -1290,13 +1308,50 @@ export default function ViewportPanel({
         image.src = imageSrc;
       };
 
-      if (relativePath.toLowerCase().endsWith(".ppm")) {
-        void fetch(assetUrl)
-          .then((response) => {
-            if (!response.ok) {
-              throw new Error(`HTTP ${response.status}`);
+      const drawRasterBlob = (blob: Blob) => {
+        if (typeof createImageBitmap === "function") {
+          return createImageBitmap(blob).then((bitmap) => {
+            const canvas = document.createElement("canvas");
+            canvas.width = bitmap.width;
+            canvas.height = bitmap.height;
+            const context = canvas.getContext("2d");
+            if (!context) {
+              markLoaded(bitmap, bitmap.width, bitmap.height);
+              return;
             }
-            return response.text();
+            context.drawImage(bitmap, 0, 0);
+            const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+            const processed = applyKeyColorTransparency(imageData, { showKeyColor });
+            if (!processed.detected) {
+              markLoaded(bitmap, bitmap.width, bitmap.height);
+              return;
+            }
+            context.putImageData(processed.imageData, 0, 0);
+            bitmap.close?.();
+            markLoaded(canvas, canvas.width, canvas.height);
+          });
+        }
+
+        if (typeof URL.createObjectURL === "function") {
+          loadImageElement(URL.createObjectURL(blob), {
+            revokeOnLoad: true,
+            fallbackToAssetUrl: true,
+          });
+          return Promise.resolve();
+        }
+
+        loadImageElement(assetUrl);
+        return Promise.resolve();
+      };
+
+      if (relativePath.toLowerCase().endsWith(".ppm")) {
+        void readProjectAssetPreview(activeProjectDir, relativePath)
+          .then((payload) => {
+            const content = textFromPreviewPayload(payload);
+            if (!content) {
+              throw new Error(payload.error ?? "Bridge de asset nao retornou texto PPM.");
+            }
+            return content;
           })
           .then((content) => {
             const imageData = decodePpmP3(content);
@@ -1317,66 +1372,72 @@ export default function ViewportPanel({
             markLoaded(canvas, canvas.width, canvas.height);
           })
           .catch((err) => {
-            const detail = describeError(err);
-            const status = detail.includes("HTTP 404") ? "missing" : "error";
-            markFailure(status, `PPM fetch falhou: ${detail}`);
+            void fetch(assetUrl)
+              .then((response) => {
+                if (!response.ok) {
+                  throw new Error(`HTTP ${response.status}`);
+                }
+                return response.text();
+              })
+              .then((content) => {
+                const imageData = decodePpmP3(content);
+                if (!imageData) {
+                  throw new Error("PPM P3 invalido");
+                }
+                const processed = applyKeyColorTransparency(imageData, { showKeyColor }).imageData;
+
+                const canvas = document.createElement("canvas");
+                canvas.width = processed.width;
+                canvas.height = processed.height;
+                const context = canvas.getContext("2d");
+                if (!context) {
+                  throw new Error("Canvas indisponivel");
+                }
+                context.putImageData(processed, 0, 0);
+
+                markLoaded(canvas, canvas.width, canvas.height);
+              })
+              .catch((fallbackErr) => {
+                const bridgeDetail = describeError(err);
+                const detail = describeError(fallbackErr);
+                const status = detail.includes("HTTP 404") ? "missing" : "error";
+                markFailure(status, `PPM bridge/fetch falhou: ${bridgeDetail}; ${detail}`);
+              });
           });
 
         return cacheEntry;
       }
 
-      void fetch(assetUrl)
-        .then((response) => {
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+      void readProjectAssetPreview(activeProjectDir, relativePath)
+        .then((payload) => {
+          const blob = blobFromPreviewPayload(payload);
+          if (!blob) {
+            throw new Error(payload.error ?? "Bridge de asset nao retornou imagem.");
           }
-          return response.blob();
-        })
-        .then((blob) => {
-          if (typeof createImageBitmap === "function") {
-            return createImageBitmap(blob).then((bitmap) => {
-              const canvas = document.createElement("canvas");
-              canvas.width = bitmap.width;
-              canvas.height = bitmap.height;
-              const context = canvas.getContext("2d");
-              if (!context) {
-                markLoaded(bitmap, bitmap.width, bitmap.height);
-                return;
-              }
-              context.drawImage(bitmap, 0, 0);
-              const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-              const processed = applyKeyColorTransparency(imageData, { showKeyColor });
-              if (!processed.detected) {
-                markLoaded(bitmap, bitmap.width, bitmap.height);
-                return;
-              }
-              context.putImageData(processed.imageData, 0, 0);
-              bitmap.close?.();
-              markLoaded(canvas, canvas.width, canvas.height);
-            });
-          }
-
-          if (typeof URL.createObjectURL === "function") {
-            loadImageElement(URL.createObjectURL(blob), {
-              revokeOnLoad: true,
-              fallbackToAssetUrl: true,
-            });
-            return;
-          }
-
-          loadImageElement(assetUrl);
+          return drawRasterBlob(blob);
         })
         .catch((err) => {
-          const detail = describeError(err);
-          if (detail.includes("HTTP 404")) {
-            markFailure("missing", `fetch retornou 404 para ${assetUrl}.`);
-            return;
-          }
-          logMessage(
-            "warn",
-            `[Viewport] fetch do asset '${relativePath}' falhou (${detail}); tentando fallback Image().`
-          );
-          loadImageElement(assetUrl);
+          void fetch(assetUrl)
+            .then((response) => {
+              if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+              }
+              return response.blob();
+            })
+            .then((blob) => drawRasterBlob(blob))
+            .catch((fallbackErr) => {
+              const bridgeDetail = describeError(err);
+              const detail = describeError(fallbackErr);
+              if (detail.includes("HTTP 404")) {
+                markFailure("missing", `bridge/fetch retornou 404 para ${assetUrl}.`);
+                return;
+              }
+              logMessage(
+                "warn",
+                `[Viewport] bridge/fetch do asset '${relativePath}' falhou (${bridgeDetail}; ${detail}); tentando fallback Image().`
+              );
+              loadImageElement(assetUrl);
+            });
         });
       return cacheEntry;
     },
@@ -3116,7 +3177,7 @@ export default function ViewportPanel({
       context.fillStyle = "rgba(250,179,135,0.98)";
       context.font = "10px monospace";
       context.textAlign = "left";
-      context.fillText("Prateleira / staging (autoria)", sx + 6, Math.min(sy + 14, sy + sh - 4));
+      context.fillText(stagingSummary.label, sx + 6, Math.min(sy + 14, sy + sh - 4));
       context.restore();
     }
 
@@ -3286,6 +3347,7 @@ export default function ViewportPanel({
     showEntityLabels,
     showGrid,
     showStagingOverlay,
+    stagingSummary.label,
     showSprites,
     showSubGrid,
     showTilemaps,
@@ -4595,7 +4657,12 @@ export default function ViewportPanel({
                 ["Cam", showCameraOverlay, setShowCameraOverlay, "Mostrar camera e janela MD"],
                 ["Bnd", showEntityBounds, setShowEntityBounds, "Mostrar bounds das entidades"],
                 ["Lbl", showEntityLabels, setShowEntityLabels, "Mostrar labels das entidades"],
-                ["Stg", showStagingOverlay, setShowStagingOverlay, "Mostrar staging importado"],
+                [
+                  "Stg",
+                  showStagingOverlay,
+                  setShowStagingOverlay,
+                  stagingSummary.shouldShowOverlay ? stagingSummary.label : "Mostrar staging importado",
+                ],
                 ["Warn", showViewportWarnings, setShowViewportWarnings, "Mostrar avisos de autoria no viewport"],
                 ["Nav", showSceneNavigator, setShowSceneNavigator, "Mostrar navegador do mundo"],
                 ["Key", showKeyColor, setShowKeyColor, "Mostrar cor-chave magenta para debug"],
@@ -4605,6 +4672,8 @@ export default function ViewportPanel({
                   key={label}
                   type="button"
                   data-testid={`viewport-toggle-${label.toLowerCase()}`}
+                  aria-pressed={active}
+                  aria-label={title}
                   onClick={() => setter((current) => !current)}
                   className={`rounded border px-2 py-1 text-[10px] font-semibold transition-colors ${
                     active
