@@ -5192,6 +5192,8 @@ export default function ViewportPanel({
                     <div className="flex shrink-0 flex-col gap-1">
                       <button
                         type="button"
+                        data-testid="viewport-dock-focus-entity"
+                        aria-label="Centralizar entidade selecionada no viewport"
                         onClick={focusSelectedEntity}
                         className="rounded border border-[#313244] bg-[#181825] px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#cdd6f4] transition-colors hover:border-[#89b4fa] hover:text-[#89b4fa]"
                       >
@@ -5199,6 +5201,12 @@ export default function ViewportPanel({
                       </button>
                       <button
                         type="button"
+                        data-testid="viewport-dock-solo-entity"
+                        aria-label={
+                          soloEntityId === selectedEntity.entity_id
+                            ? "Desligar solo da entidade selecionada"
+                            : "Ligar solo da entidade selecionada"
+                        }
                         onClick={toggleSelectedEntitySolo}
                         className={`rounded border px-2 py-1 text-[8px] font-semibold uppercase tracking-wide transition-colors ${
                           soloEntityId === selectedEntity.entity_id
@@ -5256,6 +5264,8 @@ export default function ViewportPanel({
                     {selectedEntity.components.tilemap ? (
                       <button
                         type="button"
+                        data-testid="viewport-dock-open-tilemap"
+                        aria-label="Abrir tilemap selecionado para pintura no Scene"
                         onClick={openSelectedEntityTilemap}
                         className="rounded border border-[#94e2d5]/35 bg-[#94e2d5]/10 px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#94e2d5] transition-colors hover:bg-[#94e2d5]/20"
                       >
@@ -5265,6 +5275,8 @@ export default function ViewportPanel({
                     {entityHasLogicWorkspace(selectedEntity) ? (
                       <button
                         type="button"
+                        data-testid="viewport-dock-open-logic"
+                        aria-label="Abrir Logic Workspace para a entidade selecionada"
                         onClick={openSelectedEntityLogic}
                         className="rounded border border-[#89b4fa]/35 bg-[#89b4fa]/10 px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#89b4fa] transition-colors hover:bg-[#89b4fa]/20"
                       >
@@ -5274,6 +5286,8 @@ export default function ViewportPanel({
                     {selectedEntity.components.sprite ? (
                       <button
                         type="button"
+                        data-testid="viewport-dock-open-art"
+                        aria-label="Abrir ArtStudio para a entidade selecionada"
                         onClick={openSelectedEntityArt}
                         className="rounded border border-[#a6e3a1]/35 bg-[#a6e3a1]/10 px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#a6e3a1] transition-colors hover:bg-[#a6e3a1]/20"
                       >
@@ -5282,6 +5296,8 @@ export default function ViewportPanel({
                     ) : null}
                     <button
                       type="button"
+                      data-testid="viewport-dock-open-source"
+                      aria-label="Abrir fonte real da entidade selecionada"
                       onClick={() => void openSelectedEntityPrimarySource()}
                       disabled={selectedEntitySourceRefs.length === 0}
                       className="rounded border border-[#f9e2af]/35 bg-[#f9e2af]/10 px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/20 disabled:cursor-not-allowed disabled:opacity-40"

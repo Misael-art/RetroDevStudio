@@ -67,6 +67,14 @@ vi.mock("../../core/ipc/emulatorService", async () => {
   };
 });
 
+vi.mock("../nodegraph/NodeGraphEditor", () => ({
+  default: () => null,
+}));
+
+vi.mock("../artstudio/ArtStudioPanel", () => ({
+  default: () => null,
+}));
+
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
 
@@ -103,6 +111,7 @@ function stagedSprite(id: string, x: number, y: number): Entity {
           entity_role: "enemy_actor",
           gameplay_class: "run_and_gun_horizontal_signals",
           confidence: "medium",
+          source_paths: ["src/main.c"],
           audit_flags: ["position:staging_layout"],
         },
       },
@@ -229,5 +238,80 @@ describe("ViewportPanel", () => {
       "[data-testid='viewport-focus-staging-page']"
     );
     expect(updatedFocusButton?.textContent).toContain("2/2");
+  });
+
+  it("keeps Scene to ArtStudio and Logic actions reachable after paging staging sprites", async () => {
+    await act(async () => {
+      root.render(<ViewportPanel showWorkspaceTabs={false} />);
+      await flush();
+      await flush();
+    });
+
+    const nextButton = container.querySelector<HTMLButtonElement>(
+      "[data-testid='viewport-staging-next']"
+    );
+
+    await act(async () => {
+      nextButton?.click();
+      await flush();
+    });
+
+    expect(useEditorStore.getState().selectedEntityId).toBe("spr_002");
+
+    const artButton = container.querySelector<HTMLButtonElement>(
+      "[data-testid='viewport-dock-open-art']"
+    );
+    expect(artButton).not.toBeNull();
+
+    let artNavigationState: {
+      activeWorkspace: string;
+      activeViewportTab: string;
+      selectedEntityId: string | null;
+    } | null = null;
+    await act(async () => {
+      artButton?.click();
+      const state = useEditorStore.getState();
+      artNavigationState = {
+        activeWorkspace: state.activeWorkspace,
+        activeViewportTab: state.activeViewportTab,
+        selectedEntityId: state.selectedEntityId,
+      };
+      useEditorStore.setState({ activeWorkspace: "scene", activeViewportTab: "scene" });
+      await flush();
+    });
+
+    expect(artNavigationState).toEqual({
+      activeWorkspace: "artstudio",
+      activeViewportTab: "artstudio",
+      selectedEntityId: "spr_002",
+    });
+
+    const logicButton = container.querySelector<HTMLButtonElement>(
+      "[data-testid='viewport-dock-open-logic']"
+    );
+    expect(logicButton).not.toBeNull();
+
+    let logicNavigationState: {
+      activeWorkspace: string;
+      activeViewportTab: string;
+      selectedEntityId: string | null;
+    } | null = null;
+    await act(async () => {
+      logicButton?.click();
+      const state = useEditorStore.getState();
+      logicNavigationState = {
+        activeWorkspace: state.activeWorkspace,
+        activeViewportTab: state.activeViewportTab,
+        selectedEntityId: state.selectedEntityId,
+      };
+      useEditorStore.setState({ activeWorkspace: "scene", activeViewportTab: "scene" });
+      await flush();
+    });
+
+    expect(logicNavigationState).toEqual({
+      activeWorkspace: "logic",
+      activeViewportTab: "logic",
+      selectedEntityId: "spr_002",
+    });
   });
 });

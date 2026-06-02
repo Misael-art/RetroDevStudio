@@ -1422,6 +1422,7 @@ unsafe extern "C" fn retro_input_state_callback(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::OnceLock;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir(prefix: &str) -> PathBuf {
@@ -1440,10 +1441,11 @@ mod tests {
     }
 
     fn mock_core_build_dir(dir: &Path) -> PathBuf {
+        let workspace_test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target-test");
         let base_dir = std::env::var_os("RDS_TEST_CORE_DIR")
             .or_else(|| std::env::var_os("CARGO_TARGET_DIR"))
             .map(PathBuf::from)
-            .unwrap_or_else(|| dir.to_path_buf());
+            .unwrap_or(workspace_test_dir);
         let suffix = dir
             .file_name()
             .and_then(|value| value.to_str())
@@ -1610,6 +1612,7 @@ pub extern "C" fn retro_load_game(info: *const RetroGameInfo) -> bool {
         let path = CStr::from_ptr((*info).path).to_string_lossy().into_owned();
         let exists = Path::new(&path).exists();
         if exists {
+            FRAME_COUNTER.store(0, Ordering::SeqCst);
             for index in 0..32 {
                 SAVE_RAM[index] = 0xA0u8.wrapping_add(index as u8);
             }
@@ -1724,40 +1727,67 @@ pub extern "C" fn retro_run() {
         .to_string()
     }
 
-    fn compile_mock_core(dir: &Path) -> PathBuf {
-        let build_dir = mock_core_build_dir(dir);
-        let source_path = build_dir.join("mock_core.rs");
-        let output_path = build_dir.join(format!("mock_core.{}", core_library_extension()));
-        fs::write(&source_path, mock_core_source()).expect("write mock core source");
-
-        let output = std::process::Command::new("rustc")
-            .arg("--crate-type")
-            .arg("cdylib")
-            .arg("--edition")
-            .arg("2021")
-            .arg(&source_path)
-            .arg("-O")
-            .arg("-o")
-            .arg(&output_path)
-            .output()
-            .expect("spawn rustc for mock core");
-
-        if !output.status.success() {
-            panic!(
-                "mock core compilation failed\nstdout:\n{}\nstderr:\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-        }
-
-        for _ in 0..20 {
-            if unsafe { Library::new(&output_path) }.is_ok() {
-                break;
+    fn wait_for_mock_core_load(output_path: &Path) {
+        let mut last_error = None;
+        for _ in 0..60 {
+            match unsafe { Library::new(output_path) } {
+                Ok(library) => {
+                    drop(library);
+                    return;
+                }
+                Err(error) => {
+                    last_error = Some(error.to_string());
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                }
             }
-            std::thread::sleep(std::time::Duration::from_millis(100));
         }
 
-        output_path
+        panic!(
+            "mock core compiled but never became loadable: path='{}' exists={} size={} last_error={}",
+            output_path.display(),
+            output_path.exists(),
+            fs::metadata(output_path)
+                .map(|metadata| metadata.len().to_string())
+                .unwrap_or_else(|error| format!("metadata error: {error}")),
+            last_error.unwrap_or_else(|| "erro desconhecido".to_string())
+        );
+    }
+
+    static MOCK_CORE_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+    fn compile_mock_core(_dir: &Path) -> PathBuf {
+        MOCK_CORE_PATH
+            .get_or_init(|| {
+                let build_dir = mock_core_build_dir(Path::new("libretro-shared"));
+                let source_path = build_dir.join("mock_core.rs");
+                let output_path = build_dir.join(format!("mock_core.{}", core_library_extension()));
+                fs::write(&source_path, mock_core_source()).expect("write mock core source");
+
+                let output = std::process::Command::new("rustc")
+                    .arg("--crate-type")
+                    .arg("cdylib")
+                    .arg("--edition")
+                    .arg("2021")
+                    .arg(&source_path)
+                    .arg("-O")
+                    .arg("-o")
+                    .arg(&output_path)
+                    .output()
+                    .expect("spawn rustc for mock core");
+
+                if !output.status.success() {
+                    panic!(
+                        "mock core compilation failed\nstdout:\n{}\nstderr:\n{}",
+                        String::from_utf8_lossy(&output.stdout),
+                        String::from_utf8_lossy(&output.stderr)
+                    );
+                }
+
+                wait_for_mock_core_load(&output_path);
+
+                output_path
+            })
+            .clone()
     }
 
     fn write_test_rom(dir: &Path, name: &str, extension: &str) -> PathBuf {

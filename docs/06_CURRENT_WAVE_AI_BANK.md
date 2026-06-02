@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-06-02 (rodada 80 - Pager de staging SGDK validado)
+**Ultima Atualizacao:** 2026-06-02 (rodada 81 - Dock de staging e mock core estabilizados)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,16 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-06-02 rodada 81 - Dock de staging e mock core estabilizados):**
+  - **Lacuna atacada:** depois do pager de staging SGDK, ainda faltava uma prova direta de que a entidade selecionada em outra pagina continuava com ponte ergonomica para ArtStudio e Logic/NodeGraph. O dock ja existia visualmente, mas seus comandos nao tinham contrato testavel suficiente para evitar regressao silenciosa.
+  - **Implementacao UI/CX:** o dock da entidade selecionada no `ViewportPanel` agora expoe `data-testid` e `aria-label` para foco, solo, tilemap, Logic, ArtStudio e fonte real. A regressao nova em `src/components/viewport/ViewportPanel.test.tsx` pagina a cena para `spr_002`, aciona `viewport-dock-open-art` e `viewport-dock-open-logic`, e garante que `activeWorkspace`, `activeViewportTab` e `selectedEntityId` preservam o fluxo Scene -> ArtStudio/Logic correto.
+  - **Falha de baseline encontrada durante a validacao:** o `cargo test --lib` oscilou em testes Libretro mock com `LoadLibraryExW failed`. A investigacao via Win32 `LoadLibraryExW` mostrou erro 4551 (`Uma politica de Controle de Aplicativo bloqueou este arquivo`) para varios `mock_core.dll` gerados por teste em `%TEMP%`/`LOCALAPPDATA`, e tambem para alguns hashes efemeros mesmo apos mover o fallback para `target-test`.
+  - **Correcao do harness:** os mock cores de teste agora sao compilados como artefatos compartilhados/estaveis em `src-tauri\target-test\mock-core-fixtures` (`libretro-shared` e `app-shared`) usando `OnceLock`, com espera diagnostica de carregamento e erro acionavel caso o host volte a bloquear o DLL. O mock tambem reseta `FRAME_COUNTER` no `retro_load_game`, evitando vazamento de estado ao reusar o mesmo artefato. Isto nao altera o carregamento de cores Libretro reais de producao.
+  - **Validacao fresca:** `npx vitest run src/components/viewport/ViewportPanel.test.tsx --pool=threads --maxWorkers=1 --no-file-parallelism --testTimeout=30000` OK (**3/3**); `npm run check:tree` OK; `npm run lint` OK; `npx tsc --noEmit --pretty false` OK; `npm test -- --pool=threads --maxWorkers=1 --no-file-parallelism --testTimeout=30000` OK (**46 arquivos / 407 testes**); `cargo clippy --manifest-path src-tauri\Cargo.toml -- -D warnings` OK; `cargo test --manifest-path src-tauri\Cargo.toml --lib mock_core -- --nocapture --test-threads=1` OK (**7/7**); `cargo test --manifest-path src-tauri\Cargo.toml --lib -- --nocapture --test-threads=1` OK (**426 passed / 23 ignored**); `git diff --check` OK, apenas warnings LF/CRLF do Git.
+  - **Ruido conhecido ainda presente:** o suite frontend completo segue imprimindo warnings conhecidos de `act(...)` em componentes fora da fatia; o suite Rust segue imprimindo avisos de schema legado `1.6.0` e o panic esperado/capturado do teste que exige erro quando donor SGDK ausente nao foi explicitamente pulado.
+  - **Status honesto:** a rodada melhora a ponte operacional Scene -> ArtStudio -> Logic/NodeGraph para cenas importadas em staging e remove uma instabilidade local do baseline Rust causada por Windows Application Control. Nao ha nova prova desktop/WebView, nao ha garantia de gameplay/FPS perfeito, nao ha equivalencia visual 1:1, nao ha cobertura NodeGraph 100%, e SGDK importer, NodeGraph e ArtStudio seguem **Experimental/em hardening**.
+  - **Proximo passo imediato:** publicar a fatia validada e continuar em outra lacuna observavel do fluxo produtivo, preferencialmente diagnostics/organizacao no Scene/Logic ou QA desktop institucional quando o `tauri-driver` estiver liberado.
 
 * **O que acabou de acontecer (2026-06-02 rodada 80 - Pager de staging SGDK validado):**
   - **Bloqueio de host superado nesta retomada:** o erro repetido `CreateProcessAsUserW failed: 1312` ao iniciar `node`, `npx` e `node_repl` foi confirmado como problema da camada de execucao/sandbox anterior, nao como problema do binario Node nem do repositorio. Com o ambiente atual, `node --version`, Node por caminho absoluto, `npm`, `npx` e `node_repl` voltaram a executar.
