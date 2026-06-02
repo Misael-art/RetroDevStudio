@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-06-02 (rodada 81 - Dock de staging e mock core estabilizados)
+**Ultima Atualizacao:** 2026-06-02 (rodada 82 - Fonte real no dock de staging)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-06-02 rodada 82 - Fonte real no dock de staging):**
+  - **Lacuna atacada:** o dock do Viewport ja expunha o comando `Fonte real`, mas o usuario e o teste nao viam qual arquivo seria aberto antes do clique. Em cenas SGDK importadas/staging, isso torna a acao menos auditavel justamente onde a rastreabilidade para donor/source e importante.
+  - **Implementacao UI/CX:** `viewport-dock-open-source` agora inclui o caminho primario no `aria-label` e no `title` quando ha source ref. O comportamento de abertura continua usando o bridge canonico `openProjectSourcePath`.
+  - **Cobertura nova:** `src/components/viewport/ViewportPanel.test.tsx` ganhou regressao que configura `activeProjectDir`, usa entidade importada com `source_paths=["src/main.c"]`, valida que o botao anuncia `src/main.c` e confirma a chamada `openProjectSourcePath(project_dir, "src/main.c")`. O teste falhou primeiro porque o `aria-label` era generico, depois passou.
+  - **Validacao fresca:** foco `ViewportPanel.test.tsx` OK (**4/4**); `npm run check:tree` OK; `npm run lint` OK; `npx tsc --noEmit --pretty false` OK; `git diff --check` OK; `npm test -- --pool=threads --maxWorkers=1 --no-file-parallelism --testTimeout=30000` OK (**46 arquivos / 408 testes**); `cargo clippy --manifest-path src-tauri\Cargo.toml -- -D warnings` OK; `cargo test --manifest-path src-tauri\Cargo.toml --lib mock_core -- --nocapture --test-threads=1` OK (**7/7**); `cargo test --manifest-path src-tauri\Cargo.toml --lib -- --nocapture --test-threads=1` OK (**426 passed / 23 ignored**).
+  - **Status honesto:** a rodada melhora rastreabilidade e acessibilidade do fluxo fonte real no dock, mas nao adiciona nova prova desktop/WebView, nao certifica gameplay/FPS perfeito, nao prova paridade visual 1:1 e nao promove SGDK importer, NodeGraph ou ArtStudio.
+  - **Proximo passo imediato:** publicar a microfatia e seguir para outra lacuna operacional observavel do fluxo produtivo sem inflar maturidade.
 
 * **O que acabou de acontecer (2026-06-02 rodada 81 - Dock de staging e mock core estabilizados):**
   - **Lacuna atacada:** depois do pager de staging SGDK, ainda faltava uma prova direta de que a entidade selecionada em outra pagina continuava com ponte ergonomica para ArtStudio e Logic/NodeGraph. O dock ja existia visualmente, mas seus comandos nao tinham contrato testavel suficiente para evitar regressao silenciosa.

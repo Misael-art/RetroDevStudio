@@ -314,4 +314,33 @@ describe("ViewportPanel", () => {
       selectedEntityId: "spr_002",
     });
   });
+
+  it("opens the selected imported entity primary source from the dock", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      });
+      root.render(<ViewportPanel showWorkspaceTabs={false} />);
+      await flush();
+      await flush();
+    });
+
+    const sourceButton = container.querySelector<HTMLButtonElement>(
+      "[data-testid='viewport-dock-open-source']"
+    );
+
+    expect(sourceButton).not.toBeNull();
+    expect(sourceButton?.getAttribute("aria-label")).toContain("src/main.c");
+
+    await act(async () => {
+      sourceButton?.click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.openProjectSourcePath).toHaveBeenCalledWith(
+      "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      "src/main.c"
+    );
+  });
 });

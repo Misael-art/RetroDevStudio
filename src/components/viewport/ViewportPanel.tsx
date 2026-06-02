@@ -5297,7 +5297,12 @@ export default function ViewportPanel({
                     <button
                       type="button"
                       data-testid="viewport-dock-open-source"
-                      aria-label="Abrir fonte real da entidade selecionada"
+                      aria-label={
+                        selectedEntitySourceRefs[0]
+                          ? `Abrir fonte real da entidade selecionada: ${selectedEntitySourceRefs[0]}`
+                          : "Abrir fonte real da entidade selecionada"
+                      }
+                      title={selectedEntitySourceRefs[0] ?? undefined}
                       onClick={() => void openSelectedEntityPrimarySource()}
                       disabled={selectedEntitySourceRefs.length === 0}
                       className="rounded border border-[#f9e2af]/35 bg-[#f9e2af]/10 px-2 py-1 text-[8px] font-semibold uppercase tracking-wide text-[#f9e2af] transition-colors hover:bg-[#f9e2af]/20 disabled:cursor-not-allowed disabled:opacity-40"
