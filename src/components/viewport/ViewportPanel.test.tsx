@@ -199,4 +199,35 @@ describe("ViewportPanel", () => {
     expect(stagingToggle?.getAttribute("aria-label")).toContain("2 paginas");
     expect(stagingToggle?.title).toContain("3 sprites em staging");
   });
+
+  it("navigates imported staging pages and focuses the first sprite in the selected page", async () => {
+    await act(async () => {
+      root.render(<ViewportPanel showWorkspaceTabs={false} />);
+      await flush();
+      await flush();
+    });
+
+    const pager = container.querySelector<HTMLElement>("[data-testid='viewport-staging-pager']");
+    const focusButton = container.querySelector<HTMLButtonElement>(
+      "[data-testid='viewport-focus-staging-page']"
+    );
+    const nextButton = container.querySelector<HTMLButtonElement>(
+      "[data-testid='viewport-staging-next']"
+    );
+
+    expect(pager).not.toBeNull();
+    expect(focusButton?.textContent).toContain("1/2");
+    expect(nextButton?.disabled).toBe(false);
+
+    await act(async () => {
+      nextButton?.click();
+      await flush();
+    });
+
+    expect(useEditorStore.getState().selectedEntityId).toBe("spr_002");
+    const updatedFocusButton = container.querySelector<HTMLButtonElement>(
+      "[data-testid='viewport-focus-staging-page']"
+    );
+    expect(updatedFocusButton?.textContent).toContain("2/2");
+  });
 });

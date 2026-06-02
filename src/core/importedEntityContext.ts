@@ -36,6 +36,21 @@ type ImportedStagingEntityLike = ImportedEntityLike & {
   } | null;
 };
 
+export type ImportedStagingPage = {
+  index: number;
+  label: string;
+  entityIds: string[];
+  count: number;
+  bounds: {
+    minX: number;
+    minY: number;
+    maxX: number;
+    maxY: number;
+  };
+  centerX: number;
+  centerY: number;
+};
+
 export type ImportedStagingSummary = {
   count: number;
   bounds: {
@@ -45,6 +60,7 @@ export type ImportedStagingSummary = {
     maxY: number;
   } | null;
   pageCount: number;
+  pages: ImportedStagingPage[];
   shouldShowOverlay: boolean;
   label: string;
 };
@@ -76,10 +92,11 @@ export function summarizeImportedStagingEntities(
   );
   const measured = staged
     .map((entity) => ({
+      entityId: trimOrNull(entity.entity_id),
       x: entity.transform?.x,
       y: entity.transform?.y,
     }))
-    .filter((position): position is { x: number; y: number } =>
+    .filter((position): position is { entityId: string | null; x: number; y: number } =>
       isFiniteNumber(position.x) && isFiniteNumber(position.y)
     );
 
@@ -88,6 +105,7 @@ export function summarizeImportedStagingEntities(
       count: staged.length,
       bounds: null,
       pageCount: 0,
+      pages: [],
       shouldShowOverlay: false,
       label: staged.length > 0 ? `${staged.length} sprites em staging` : "Sem staging importado",
     };
@@ -108,12 +126,48 @@ export function summarizeImportedStagingEntities(
     }
   );
   const pageCount = Math.max(1, Math.ceil((bounds.maxX - bounds.minX + 1) / 320));
+  const pageBuckets = Array.from({ length: pageCount }, (_, index) => {
+    const minX = bounds.minX + index * 320;
+    return {
+      index,
+      entityIds: [] as string[],
+      count: 0,
+      bounds: {
+        minX,
+        minY: bounds.minY,
+        maxX: Math.min(bounds.maxX, minX + 319),
+        maxY: bounds.maxY,
+      },
+    };
+  });
+  for (const position of measured) {
+    const index = Math.min(
+      pageCount - 1,
+      Math.max(0, Math.floor((position.x - bounds.minX) / 320))
+    );
+    const bucket = pageBuckets[index];
+    bucket.count += 1;
+    if (position.entityId) {
+      bucket.entityIds.push(position.entityId);
+    }
+    bucket.bounds.minX = Math.min(bucket.bounds.minX, position.x);
+    bucket.bounds.minY = Math.min(bucket.bounds.minY, position.y);
+    bucket.bounds.maxX = Math.max(bucket.bounds.maxX, position.x);
+    bucket.bounds.maxY = Math.max(bucket.bounds.maxY, position.y);
+  }
+  const pages = pageBuckets.map((page) => ({
+    ...page,
+    label: `Pagina ${page.index + 1} de ${pageCount}`,
+    centerX: page.bounds.minX + (page.bounds.maxX - page.bounds.minX) / 2,
+    centerY: page.bounds.minY + (page.bounds.maxY - page.bounds.minY) / 2,
+  }));
   const label = `${staged.length} sprites em staging${pageCount > 1 ? ` | ${pageCount} paginas` : ""}`;
 
   return {
     count: staged.length,
     bounds,
     pageCount,
+    pages,
     shouldShowOverlay: staged.length >= 2,
     label,
   };

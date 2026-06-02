@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-06-01 (rodada 79 - Preflight desktop detecta tauri-driver bloqueado)
+**Ultima Atualizacao:** 2026-06-02 (rodada 80 - Pager de staging SGDK validado)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,15 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-06-02 rodada 80 - Pager de staging SGDK validado):**
+  - **Bloqueio de host superado nesta retomada:** o erro repetido `CreateProcessAsUserW failed: 1312` ao iniciar `node`, `npx` e `node_repl` foi confirmado como problema da camada de execucao/sandbox anterior, nao como problema do binario Node nem do repositorio. Com o ambiente atual, `node --version`, Node por caminho absoluto, `npm`, `npx` e `node_repl` voltaram a executar.
+  - **Lacuna atacada:** cenas SGDK densas em `position:staging_layout` ja mostravam `N sprites em staging | N paginas`, mas nao davam um controle direto para navegar/focar as paginas da prateleira de autoria. Em donors como BLAZE/HAMOOPIG isso deixava o usuario com informacao, mas ainda com atrito para achar o bloco editavel certo.
+  - **Implementacao:** `summarizeImportedStagingEntities` agora retorna `pages` com indice, label, ids de entidades, bounds, centro e contagem. O `ViewportPanel` mostra um pager compacto de staging quando aplicavel, permite voltar/avancar pagina, liga o overlay `Stg`, seleciona o primeiro sprite da pagina e centraliza a vista sem mutar coordenadas importadas nem normalizar o donor.
+  - **Cobertura nova:** `src/core/importedEntityContext.test.ts` valida ids/contagem/centro das paginas; `src/components/viewport/ViewportPanel.test.tsx` valida que avancar para a pagina 2 muda a selecao para `spr_002` e atualiza o indicador `2/2`.
+  - **Validacao fresca:** testes focados `npx vitest run src/core/importedEntityContext.test.ts src/components/viewport/ViewportPanel.test.tsx --pool=threads --maxWorkers=1 --no-file-parallelism --testTimeout=30000` OK (**6/6**); `npx tsc --noEmit --pretty false` OK; `npm run lint` OK; `npm run check:tree` OK; `git diff --check` OK; `npm test -- --pool=threads --maxWorkers=1 --no-file-parallelism --testTimeout=30000` OK (**46 arquivos / 406 testes**, com warnings conhecidos de `act(...)` no stderr); `cargo clippy --manifest-path src-tauri\Cargo.toml -- -D warnings` OK; `cargo test --manifest-path src-tauri\Cargo.toml --lib -- --nocapture --test-threads=1` OK (**426 passed / 23 ignored**).
+  - **Status honesto:** esta rodada melhora a navegacao/autoria em cenas SGDK densas, mas nao e prova visual desktop/WebView, nao certifica gameplay, FPS perfeito, equivalencia visual 1:1, NodeGraph 100% ou paridade GameMaker/Godot. SGDK importer, NodeGraph e ArtStudio seguem **Experimental/em hardening**.
+  - **Proximo passo imediato:** publicar esta fatia validada e continuar em outra lacuna observavel do fluxo Scene -> ArtStudio -> Logic/NodeGraph, ou obter QA desktop institucional/driver liberado para prova visual real.
 
 * **O que acabou de acontecer (2026-06-01 rodada 79 - Preflight desktop detecta tauri-driver bloqueado):**
   - **Lacuna confirmada:** o preflight de SGDK/E2E declarava o host pronto quando `tauri-driver.exe` existia no disco, mas nao validava se o Windows podia executar o binario. Na maquina atual, `C:\Users\misae\.cargo\bin\tauri-driver.exe` existe, porem o Windows Application Control bloqueia a execucao e o E2E desktop falha antes de abrir UI com `spawn UNKNOWN`.

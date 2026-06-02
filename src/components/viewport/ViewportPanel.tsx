@@ -584,6 +584,7 @@ export default function ViewportPanel({
   const [showEntityBounds, setShowEntityBounds] = useState(true);
   const [showEntityLabels, setShowEntityLabels] = useState(true);
   const [showStagingOverlay, setShowStagingOverlay] = useState(false);
+  const [stagingPageIndex, setStagingPageIndex] = useState(0);
   const [showViewportWarnings, setShowViewportWarnings] = useState(false);
   const [showSceneNavigator, setShowSceneNavigator] = useState(false);
   const [showCommandDock, setShowCommandDock] = useState(true);
@@ -705,6 +706,10 @@ export default function ViewportPanel({
     () => summarizeImportedStagingEntities(activeScene?.entities ?? []),
     [activeScene]
   );
+  const activeStagingPageIndex = stagingSummary.pageCount > 0
+    ? clamp(stagingPageIndex, 0, stagingSummary.pageCount - 1)
+    : 0;
+  const activeStagingPage = stagingSummary.pages[activeStagingPageIndex] ?? null;
   const activeTilemapEntityForPalette = useMemo(() => {
     if (!activeScene) {
       return null;
@@ -735,6 +740,15 @@ export default function ViewportPanel({
       setShowStagingOverlay(true);
     }
   }, [activeScenePath, stagingSummary.shouldShowOverlay]);
+
+  useEffect(() => {
+    setStagingPageIndex((current) => {
+      if (stagingSummary.pageCount <= 1) {
+        return 0;
+      }
+      return clamp(current, 0, stagingSummary.pageCount - 1);
+    });
+  }, [activeScenePath, stagingSummary.pageCount]);
 
   useEffect(() => {
     if (!denseStackPicker) {
@@ -945,6 +959,62 @@ export default function ViewportPanel({
       focusWorldPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2);
     },
     [activeScene?.entities, activeTarget, focusWorldPoint]
+  );
+  const focusImportedStagingPage = useCallback(
+    (pageIndex = activeStagingPageIndex) => {
+      if (!activeScene || stagingSummary.pageCount <= 0) {
+        logMessage("info", "[Viewport] Sem paginas de staging para focar.");
+        return;
+      }
+      const safePageIndex = clamp(pageIndex, 0, stagingSummary.pageCount - 1);
+      const page = stagingSummary.pages[safePageIndex];
+      if (!page) {
+        logMessage("info", "[Viewport] Pagina de staging indisponivel.");
+        return;
+      }
+      setShowStagingOverlay(true);
+      setStagingPageIndex(safePageIndex);
+      const targetEntity =
+        page.entityIds
+          .map((entityId) => activeScene.entities.find((entity) => entity.entity_id === entityId))
+          .find((entity): entity is Entity => Boolean(entity)) ?? null;
+      if (targetEntity) {
+        setSelectedEntityId(targetEntity.entity_id);
+        focusEntityInViewport(targetEntity);
+      } else {
+        focusWorldPoint(page.centerX, page.centerY);
+      }
+      logMessage(
+        "info",
+        `[Viewport] ${page.label}: ${page.count} sprite(s) em staging.`
+      );
+    },
+    [
+      activeScene,
+      activeStagingPageIndex,
+      focusEntityInViewport,
+      focusWorldPoint,
+      logMessage,
+      setSelectedEntityId,
+      stagingSummary.pageCount,
+      stagingSummary.pages,
+    ]
+  );
+  const stepImportedStagingPage = useCallback(
+    (direction: -1 | 1) => {
+      if (stagingSummary.pageCount <= 0) {
+        focusImportedStagingPage(0);
+        return;
+      }
+      const nextIndex =
+        (activeStagingPageIndex + direction + stagingSummary.pageCount) % stagingSummary.pageCount;
+      focusImportedStagingPage(nextIndex);
+    },
+    [
+      activeStagingPageIndex,
+      focusImportedStagingPage,
+      stagingSummary.pageCount,
+    ]
   );
   const focusSelectedEntity = useCallback(() => {
     if (!selectedEntity) {
@@ -4685,6 +4755,60 @@ export default function ViewportPanel({
                   {label}
                 </button>
               ))}
+              {stagingSummary.shouldShowOverlay ? (
+                <div
+                  data-testid="viewport-staging-pager"
+                  className="flex items-center gap-1 rounded border border-[#89dceb]/25 bg-[#0f172a] px-1 py-0.5"
+                  title={
+                    activeStagingPage
+                      ? `${activeStagingPage.label}: ${activeStagingPage.count} sprite(s)`
+                      : stagingSummary.label
+                  }
+                >
+                  <button
+                    type="button"
+                    data-testid="viewport-staging-prev"
+                    aria-label="Voltar pagina de staging"
+                    disabled={stagingSummary.pageCount < 2}
+                    onClick={() => stepImportedStagingPage(-1)}
+                    className="h-5 w-5 rounded border border-[#313244] bg-[#11111b] text-[10px] font-bold text-[#89dceb] transition-colors hover:border-[#89dceb] disabled:cursor-not-allowed disabled:opacity-35"
+                    title="Voltar pagina de staging"
+                  >
+                    {"<"}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="viewport-focus-staging-page"
+                    aria-label={
+                      activeStagingPage
+                        ? `Focar ${activeStagingPage.label}`
+                        : "Focar staging importado"
+                    }
+                    onClick={() => focusImportedStagingPage(activeStagingPageIndex)}
+                    className="min-w-[2.6rem] rounded border border-[#313244] bg-[#11111b] px-1.5 py-0.5 text-[10px] font-semibold text-[#cdd6f4] transition-colors hover:border-[#89dceb] hover:text-[#89dceb]"
+                    title={
+                      activeStagingPage
+                        ? `Focar ${activeStagingPage.label} (${activeStagingPage.count} sprite(s))`
+                        : "Focar staging importado"
+                    }
+                  >
+                    {stagingSummary.pageCount > 0
+                      ? `${activeStagingPageIndex + 1}/${stagingSummary.pageCount}`
+                      : "0/0"}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="viewport-staging-next"
+                    aria-label="Avancar pagina de staging"
+                    disabled={stagingSummary.pageCount < 2}
+                    onClick={() => stepImportedStagingPage(1)}
+                    className="h-5 w-5 rounded border border-[#313244] bg-[#11111b] text-[10px] font-bold text-[#89dceb] transition-colors hover:border-[#89dceb] disabled:cursor-not-allowed disabled:opacity-35"
+                    title="Avancar pagina de staging"
+                  >
+                    {">"}
+                  </button>
+                </div>
+              ) : null}
               <button
                 type="button"
                 onClick={() => setGameViewLight((current) => !current)}

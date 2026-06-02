@@ -95,6 +95,13 @@ describe("importedEntityContext", () => {
     expect(summary.count).toBe(3);
     expect(summary.pageCount).toBe(2);
     expect(summary.bounds).toEqual({ minX: 48, minY: 88, maxX: 368, maxY: 116 });
+    expect(summary.pages).toHaveLength(2);
+    expect(summary.pages[0].entityIds).toEqual(["a", "b"]);
+    expect(summary.pages[0].count).toBe(2);
+    expect(summary.pages[0].label).toBe("Pagina 1 de 2");
+    expect(summary.pages[1].entityIds).toEqual(["c"]);
+    expect(summary.pages[1].count).toBe(1);
+    expect(summary.pages[1].centerX).toBeGreaterThan(320);
     expect(summary.shouldShowOverlay).toBe(true);
     expect(summary.label).toContain("3 sprites");
     expect(summary.label).toContain("2 paginas");
