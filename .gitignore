@@ -83,3 +83,6 @@ scripts/_tauri_signing.pub
 # --- Local diagnostics ---
 vitest-err.txt
 vitest-output.txt
+
+# --- Agent tooling ---
+.serena/

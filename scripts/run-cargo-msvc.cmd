@@ -35,5 +35,10 @@ if not defined CARGOEXE (
 )
 
 call "%VCVARS%" >nul
+
+:: Clear GDK env vars that may point to paths with spaces (breaks SGDK Makefile)
+set "GDK="
+set "GDK_WIN="
+
 "%CARGOEXE%" %*
 exit /b %ERRORLEVEL%
