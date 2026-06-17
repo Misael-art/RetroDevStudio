@@ -52,6 +52,8 @@ import {
 } from "./assetBrowserModel";
 import { useAssetBrowserState } from "./useAssetBrowserState";
 import ProjectCapabilityPanel from "./ProjectCapabilityPanel";
+import { runParityCapture } from "../../core/ipc/parityService";
+import type { ParityRunResult } from "../../core/projectCapability";
 
 const LazyReverseWorkspace = lazy(() => import("./ReverseWorkspace"));
 
@@ -2290,7 +2292,8 @@ export type ToolTab =
   | "assets"
   | "vram"
   | "reverse"
-  | "palette";
+  | "palette"
+  | "parity";
 
 type ToolCategory = "create" | "configure" | "analyze" | "experimental";
 export type ToolWorkspace = "editing" | "debug";
@@ -2304,6 +2307,125 @@ type ToolDescriptor = {
   advanced?: boolean;
   experimental?: boolean;
 };
+
+function ParityCaptureSection() {
+  const { activeProjectDir, logMessage, lastParityReport } = useEditorStore();
+  const [goldenPath, setGoldenPath] = useState("");
+  const [frameCap, setFrameCap] = useState(60);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ParityRunResult | null>(null);
+
+  async function capture() {
+    if (!activeProjectDir) {
+      logMessage("warn", "[Parity] Abra um projeto antes de capturar.");
+      return;
+    }
+    if (!goldenPath.trim()) {
+      logMessage("warn", "[Parity] Informe o caminho do golden inputs.");
+      return;
+    }
+    setBusy(true);
+    setResult(null);
+    try {
+      const runResult = await runParityCapture(activeProjectDir, goldenPath.trim(), frameCap);
+      setResult(runResult);
+      const summary = runResult.report
+        ? `${runResult.report.frames_run} frames, deterministico=${runResult.report.deterministic}, divergencias=${runResult.report.divergences.length}`
+        : runResult.message;
+      logMessage(runResult.ok ? "success" : "error", `[Parity] ${summary}`);
+    } catch (error) {
+      logMessage("error", `[Parity] ${describeError(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const lastResult = result ?? (lastParityReport ? { ok: true, message: "", golden_path: "", golden_source: "", frames_run: lastParityReport.frames_run, deterministic: lastParityReport.deterministic, divergence_count: lastParityReport.divergences.length, report_path: "", report: lastParityReport } satisfies ParityRunResult : null);
+
+  return (
+    <div className="flex flex-col gap-3 p-3" data-testid="parity-capture-section">
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold text-[#cdd6f4]">Gameplay Parity Capture</span>
+        <span className="rounded border border-[#cba6f7]/35 bg-[#cba6f7]/10 px-1.5 py-0.5 text-[8px] font-semibold uppercase text-[#cba6f7]">Experimental</span>
+      </div>
+      <p className="text-[10px] leading-tight text-[#7f849c]">
+        Executa a ROM sob o core Libretro com inputs gravados (golden) e compara o hash do framebuffer a cada frame.
+      </p>
+
+      <div className="flex flex-col gap-2">
+        <label className="text-[10px] text-[#7f849c]">Golden inputs (.rds)</label>
+        <input
+          value={goldenPath}
+          onChange={(event) => setGoldenPath(event.target.value)}
+          placeholder="/projetos/meu_jogo/golden/input.rds"
+          className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[10px] font-mono text-[#cdd6f4] outline-none focus:border-[#cba6f7]"
+        />
+      </div>
+
+      <div className="flex items-center gap-2">
+        <label className="text-[10px] text-[#7f849c]">Frame cap</label>
+        <input
+          type="number"
+          value={frameCap}
+          min={1}
+          max={9999}
+          onChange={(event) => setFrameCap(Math.max(1, Number(event.target.value)))}
+          className="w-20 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-right text-[10px] font-mono text-[#cdd6f4] outline-none focus:border-[#cba6f7]"
+        />
+      </div>
+
+      <button
+        type="button"
+        onClick={() => void capture()}
+        disabled={busy || !activeProjectDir}
+        className="rounded bg-[#cba6f7] px-3 py-1.5 text-[10px] font-semibold text-[#1e1e2e] transition-colors hover:bg-[#b4a0e0] disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {busy ? "Capturando..." : "Rodar Parity Capture"}
+      </button>
+
+      {lastResult && (
+        <div className="rounded border border-[#313244] bg-[#11111b] p-2 text-[10px]">
+          <p className="font-semibold text-[#cdd6f4]">
+            {lastResult.ok ? "Capture OK" : "Capture falhou"}
+          </p>
+          <p className="mt-1 text-[#7f849c]">{lastResult.message}</p>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <div className="rounded bg-[#181825] p-1.5">
+              <div className="text-[8px] uppercase text-[#45475a]">Frames</div>
+              <div className="text-xs font-bold text-[#cdd6f4]">{lastResult.frames_run}</div>
+            </div>
+            <div className="rounded bg-[#181825] p-1.5">
+              <div className="text-[8px] uppercase text-[#45475a]">Deterministico</div>
+              <div className="text-xs font-bold text-[#a6e3a1]">{lastResult.deterministic ? "sim" : "nao"}</div>
+            </div>
+            <div className="rounded bg-[#181825] p-1.5">
+              <div className="text-[8px] uppercase text-[#45475a]">Divergencias</div>
+              <div className={`text-xs font-bold ${lastResult.divergence_count > 0 ? "text-[#f38ba8]" : "text-[#a6e3a1]"}`}>
+                {lastResult.divergence_count}
+              </div>
+            </div>
+            <div className="rounded bg-[#181825] p-1.5">
+              <div className="text-[8px] uppercase text-[#45475a]">Golden</div>
+              <div className="text-[10px] font-mono text-[#cdd6f4]" title={lastResult.golden_path}>
+                {lastResult.golden_path.length > 30 ? `...${lastResult.golden_path.slice(-30)}` : lastResult.golden_path || "-"}
+              </div>
+            </div>
+          </div>
+          {lastResult.report?.divergences && lastResult.report.divergences.length > 0 && (
+            <div className="mt-2 max-h-32 overflow-y-auto">
+              <p className="mb-1 text-[9px] font-semibold uppercase text-[#f38ba8]">Divergencias</p>
+              {lastResult.report.divergences.slice(0, 10).map((div, index) => (
+                <p key={index} className="truncate text-[9px] text-[#f5c2e7]">
+                  #{div.frame_index} {div.kind}: esperado={div.expected.slice(0, 16)}&hellip; observado={div.observed.slice(0, 16)}&hellip;
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 const TOOL_CATEGORIES: {
   id: ToolCategory;
@@ -2391,6 +2513,15 @@ const TOOL_TABS: ToolDescriptor[] = [
     advanced: true,
     experimental: true,
   },
+  {
+    id: "parity",
+    label: "Parity Capture",
+    icon: "PC",
+    category: "experimental",
+    description: "Captura de gameplay parity: executa ROM com inputs gravados e compara hashes do framebuffer.",
+    advanced: true,
+    experimental: true,
+  },
 ];
 
 function getToolDescriptor(toolId: ToolTab): ToolDescriptor {
@@ -2430,6 +2561,8 @@ function renderToolPanel(
           <LazyReverseWorkspace />
         </Suspense>
       );
+    case "parity":
+      return <ParityCaptureSection />;
     default:
       return null;
   }

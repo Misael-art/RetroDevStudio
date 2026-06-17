@@ -1,7 +1,9 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-05-27 (rodada 65 - Asset Browser X integrado)
+**Ultima revisao canonica:** 2026-06-16 (rodada 70 - W7.3 parity/capture robust layer)
+
+**Nota 2026-06-16 (rodada 70, branch `codex/w7-3-parity-robustness`):** Gameplay Parity Layer implementada como superficie **Experimental/em hardening**: backend Rust `parity_harness.rs` com captura de framebuffer, comparacao por hash SHA-256, deteccao de divergencias (rom mismatch, frame count, framebuffer hash, non-black pixels, final state), golden inputs replay e report Markdown. Frontend com servico IPC (`parityService.ts`), botao "Rodar Parity Capture" no `ProjectCapabilityPanel` e tool tab dedicada no `ToolsPanel` com golden path selector e frame cap. Gates: tsc, lint, **406/406 npm test**, clippy OK, **18/18 parity tests + 434 cargo test --lib** (1 pre-existing SGDK detection failure). Isto nao promove Stable nem altera maturidade de outras superficies.
 **Fase ativa real:** Core MVP promovido tecnicamente em main; hardening continua nas superficies experimentais
 
 **Nota 2026-05-27 (rodada 65, main):** PR #17 (`codex/asset-browser-production-x-rebased`) foi mergeado em `main` por `634e2478a19d80d6acbf91216a9d5472de4cb115`, contendo `c4ed1f8aeae2d72b697e1122533b6a1addcf1ce7`. Readiness pos-merge retornou `Pronto para promocao: SIM`; gates em `main`: `check:tree`, `lint`, `tsc`, `npm test` **386/386**, `cargo clippy`, `cargo test --lib` **413 passed / 23 ignored**, `git diff --check`, builds `debug`/`portable`/`msi` e `release:manifest`. Checks remotos de `main`: `CI` e `Desktop E2E` push `success`. Asset Browser continua **Experimental/em hardening**; isto nao promove ArtStudio, SGDK, Node Engine, SNES, GameMaker, Godot, MUGEN/Ikemen, OpenBOR ou AAA para Stable.

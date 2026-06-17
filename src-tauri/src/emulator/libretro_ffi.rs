@@ -47,7 +47,7 @@ pub struct FrameSize {
     pub pitch: u32,
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct JoypadState {
     pub b: bool,
     pub y: bool,
@@ -123,14 +123,14 @@ pub fn new_emulator_handle() -> EmulatorHandle {
 }
 
 static ACTIVE_EMULATOR: OnceLock<Mutex<Option<EmulatorHandle>>> = OnceLock::new();
-#[cfg(test)]
+#[allow(dead_code)]
 static TEST_SERIAL: OnceLock<Mutex<()>> = OnceLock::new();
 
 fn active_emulator_slot() -> &'static Mutex<Option<EmulatorHandle>> {
     ACTIVE_EMULATOR.get_or_init(|| Mutex::new(None))
 }
 
-#[cfg(test)]
+#[allow(dead_code)]
 pub(crate) fn test_serial_guard() -> std::sync::MutexGuard<'static, ()> {
     TEST_SERIAL
         .get_or_init(|| Mutex::new(()))
@@ -779,6 +779,34 @@ impl EmulatorCore {
         Ok(size)
     }
 
+    pub fn capture_runtime_state_bytes(&self) -> Result<Vec<u8>, String> {
+        self.serialize_runtime_state()
+    }
+
+    pub fn restore_runtime_state_bytes(&mut self, bytes: &[u8]) -> Result<(), String> {
+        let runtime = self.runtime.as_ref().ok_or_else(|| {
+            "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string()
+        })?;
+        let expected_size = unsafe { (runtime.api.serialize_size)() };
+        if expected_size == 0 {
+            return Err("O core Libretro atual nao suporta save states.".to_string());
+        }
+        if bytes.len() != expected_size {
+            return Err(format!(
+                "Estado de runtime possui {} bytes, mas o core atual espera {} bytes.",
+                bytes.len(),
+                expected_size
+            ));
+        }
+        let restored = unsafe {
+            (runtime.api.unserialize)(bytes.as_ptr().cast::<c_void>(), bytes.len())
+        };
+        if !restored {
+            return Err("Falha ao restaurar o estado do runtime no core Libretro.".to_string());
+        }
+        Ok(())
+    }
+
     pub fn start_replay_recording(&mut self) -> Result<(), String> {
         self.runtime.as_ref().ok_or_else(|| {
             "Nenhum core Libretro carregado. Carregue uma ROM primeiro.".to_string()
@@ -1007,6 +1035,14 @@ impl EmulatorCore {
 
     pub fn loaded_core_label(&self) -> Option<&str> {
         self.runtime.as_ref().map(|runtime| runtime.label.as_str())
+    }
+
+    pub fn loaded_rom_path(&self) -> Option<PathBuf> {
+        self.handle
+            .lock()
+            .ok()
+            .filter(|state| !state.rom_path.is_empty())
+            .map(|state| PathBuf::from(&state.rom_path))
     }
 
     pub fn execution_trace_capture(&self) -> RuntimeExecutionTraceCapture {
@@ -1410,12 +1446,15 @@ unsafe extern "C" fn retro_input_state_callback(
     with_active_emulator(|state| if state.joypad.button(id as u8) { 1 } else { 0 }).unwrap_or(0)
 }
 
-#[cfg(test)]
-mod tests {
+#[allow(dead_code)]
+pub mod test_helpers {
     use super::*;
+    use std::sync::OnceLock;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn temp_dir(prefix: &str) -> PathBuf {
+    pub static MOCK_CORE_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+    pub fn temp_dir(prefix: &str) -> PathBuf {
         let nonce = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time before unix epoch")
@@ -1430,7 +1469,7 @@ mod tests {
         path
     }
 
-    fn mock_core_build_dir(dir: &Path) -> PathBuf {
+    pub fn mock_core_build_dir(dir: &Path) -> PathBuf {
         let base_dir = std::env::var_os("RDS_TEST_CORE_DIR")
             .or_else(|| std::env::var_os("CARGO_TARGET_DIR"))
             .map(PathBuf::from)
@@ -1445,7 +1484,7 @@ mod tests {
         output_dir
     }
 
-    fn mock_core_source() -> String {
+    pub fn mock_core_source() -> String {
         r#"
 use std::ffi::{c_char, c_void, CStr};
 use std::path::Path;
@@ -1715,7 +1754,16 @@ pub extern "C" fn retro_run() {
         .to_string()
     }
 
-    fn compile_mock_core(dir: &Path) -> PathBuf {
+    pub fn write_test_rom(dir: &Path, name: &str, extension: &str) -> PathBuf {
+        let path = dir.join(format!("{}.{}", name, extension));
+        let mut bytes = vec![0u8; 0x400];
+        bytes[4..8].copy_from_slice(&0x0000_0200u32.to_be_bytes());
+        bytes[0x100..0x10F].copy_from_slice(b"SEGA MEGA DRIVE");
+        fs::write(&path, bytes).expect("write test rom");
+        path
+    }
+
+    pub fn compile_mock_core(dir: &Path) -> PathBuf {
         let build_dir = mock_core_build_dir(dir);
         let source_path = build_dir.join("mock_core.rs");
         let output_path = build_dir.join(format!("mock_core.{}", core_library_extension()));
@@ -1751,14 +1799,18 @@ pub extern "C" fn retro_run() {
         output_path
     }
 
-    fn write_test_rom(dir: &Path, name: &str, extension: &str) -> PathBuf {
-        let path = dir.join(format!("{}.{}", name, extension));
-        let mut bytes = vec![0u8; 0x400];
-        bytes[4..8].copy_from_slice(&0x0000_0200u32.to_be_bytes());
-        bytes[0x100..0x10F].copy_from_slice(b"SEGA MEGA DRIVE");
-        fs::write(&path, bytes).expect("write test rom");
-        path
+    pub fn test_serial_guard() -> std::sync::MutexGuard<'static, ()> {
+        super::test_serial_guard()
     }
+}
+
+mod tests {
+    #[allow(unused_imports)]
+    use super::*;
+    #[allow(unused_imports)]
+    use crate::emulator::libretro_ffi::test_helpers::{
+        compile_mock_core, temp_dir, test_serial_guard, write_test_rom,
+    };
 
     #[test]
     fn detects_megadrive_rom_from_extension_and_header() {

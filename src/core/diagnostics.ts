@@ -19,7 +19,8 @@ export type DiagnosticArea =
   | "rom_mastering"
   | "runtime_contracts"
   | "asset_quality"
-  | "audio_pipeline";
+  | "audio_pipeline"
+  | "gameplay_parity";
 
 export interface ActionableDiagnostic {
   severity: DiagnosticSeverity;
@@ -52,6 +53,7 @@ export const DIAGNOSTIC_AREA_LABELS: Record<DiagnosticArea, string> = {
   runtime_contracts: "Runtime Contracts",
   asset_quality: "Asset Quality",
   audio_pipeline: "Audio Pipeline",
+  gameplay_parity: "Gameplay Parity",
 };
 
 export const DIAGNOSTIC_SEVERITY_LABELS: Record<DiagnosticSeverity, string> = {

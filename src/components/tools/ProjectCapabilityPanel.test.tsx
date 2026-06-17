@@ -56,6 +56,7 @@ function report(overrides: Partial<ProjectCapabilityReport> = {}): ProjectCapabi
     patterns: baseAxis,
     runtime_contracts: baseAxis,
     audio: baseAxis,
+    gameplay_parity: axis("blocked"),
     blockers: [],
     ...overrides,
   };

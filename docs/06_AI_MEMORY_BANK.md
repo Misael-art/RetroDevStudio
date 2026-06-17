@@ -1,6 +1,8 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 **Status:** ENTRADA CANONICA
-**Ultima Atualizacao:** 2026-05-30 (rodada 69 - UI final operational hardening A+B)
+**Ultima Atualizacao:** 2026-06-17 (rodada 70 - W7.3 parity/capture robust layer, build + commit)
+
+**Atualizacao ativa mais recente (2026-06-17 rodada 70 - W7.3 parity/capture robust layer):** branch `codex/w7-3-parity-robustness` criada a partir de `main` (`d17dfde`) para implementar a camada de gameplay parity capture. Backend: `parity_harness.rs` (~742 linhas, 13 testes), `project_capability.rs` (campo `gameplay_parity`), `libretro_ffi.rs` (`pub mod test_helpers`, `capture_runtime_state_bytes`), `lib.rs` (comando `parity_run_capture`). Frontend: `parityService.ts` (6 testes), `projectCapability.ts` (interfaces + `gameplay_parity`), `editorStore.ts` (`lastParityReport`), UI portada em `ProjectCapabilityPanel.tsx` e `ToolsPanel.tsx` (tab "Parity Capture"). Gates: tsc, lint, **406/406 npm test**, clippy OK, **18/18 parity tests** + **434/434 cargo test --lib** (1 pre-existing SGDK toolchain detection failure). `npm run build:debug` OK (41MB EXE). Release/portable build em LTO (timeout ~20 min, retornar em sessao dedicada para `build:portable` + `build:msi`). Superficie **Experimental/em hardening**; nenhuma promocao Stable.
 
 ## ATENCAO PARA AGENTES DE IA
 

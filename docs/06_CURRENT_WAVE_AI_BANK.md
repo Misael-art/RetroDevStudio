@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-05-30 (rodada 69 - UI final operational hardening A+B)
+**Ultima Atualizacao:** 2026-06-16 (rodada 70 - W7.3 parity/capture robust layer)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,17 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-06-16 rodada 70 - W7.3 parity/capture robust layer):**
+  - **Branch de trabalho:** `codex/w7-3-parity-robustness` criada a partir de `main` (`d17dfde`), implementacao manual (sem cherry-pick) do delta `d1167c9`.
+  - **Backend Rust:** `parity_harness.rs` (~340 linhas) com `ParityReport`, `FrameHash`, `ParityDivergence`, `InputScript`, `GoldenInputs`, `load_golden`, `run_parity_capture`, `run_parity_capture_against_golden`, `compare_runs`, `write_parity_report`, `count_non_black_pixels` e 13 testes. `project_capability.rs` ganhou campo `gameplay_parity` + `inspect_gameplay_parity_axis` + 2 testes. `libretro_ffi.rs` ganhou `pub mod test_helpers` (reutilizavel por parity_harness), `capture_runtime_state_bytes`, `restore_runtime_state_bytes`, `loaded_rom_path`, `JoypadState` agora `PartialEq+Eq`. `lib.rs` registrou comando `parity_run_capture` com `ParityCommandResult` e helpers `find_first_rom_artifact`/`collect_rom_files`. `sha256_hex` tornada `pub(crate)` em `rom_mastering.rs` e reusada (sem duplicacao).
+  - **Frontend:** `parityService.ts` com `runParityCapture`, `formatParitySummary`, `parityReportFromResult` + 6 testes. `projectCapability.ts` com interfaces `ParityFrameHash`, `ParityDivergence`, `ParityReport`, `ParityRunResult`, campo `gameplay_parity` no `ProjectCapabilityReport`. `diagnostics.ts` adicionou area `gameplay_parity`. `editorStore.ts` com `lastParityReport` + `setLastParityReport`.
+  - **UI portada:** `ProjectCapabilityPanel.tsx` com botao "Rodar Parity Capture" e exibicao inline de frames/determinismo/divergencias via `lastParityReport`. `ToolsPanel.tsx` com nova tool tab "Parity Capture" e componente `ParityCaptureSection` (golden path selector, frame cap, resultado com grid de metricas + lista de divergencias). Ambas as superficies sao **Experimental**.
+   - **Validacao local:** `npx tsc --noEmit` OK; `npm run lint` OK; `npm test` OK (**45 arquivos / 406 testes**); `cargo clippy --lib -- -D warnings` OK; `cargo test --lib parity` OK (**18/18 parity-specific**); `cargo test --lib` OK (**434 passed, 1 failed pre-existing: `megadrive_build_runs_with_detected_sgdk_toolchain_when_present`** - SGDK toolchain detection, unrelated).
+   - **Build debug:** `npm run build:debug` OK, EXE 41,017,856 bytes via shadow target.
+   - **Build release/portable:** timeouts em LTO (~20 min+), pendente para sessao dedicada.
+   - **Status honesto:** Gameplay Parity Layer e **Experimental/em hardening**. Nenhuma superficie promovida para Stable. O fluxo `runParityCapture` depende de core Libretro real carregado e golden inputs validos; sem esses, retorna `fake_toolchain_used=true` ou erro acionavel.
+   - **Proximo passo imediato:** commit, push da branch, PR contra `main`, build portable+msi em sessao com timeout amplo, rerodar `release:readiness:promotion` no destino apos merge.
 
 * **O que acabou de acontecer (2026-05-30 rodada 69 - UI final operational hardening A+B):**
   - **Branch de trabalho:** `codex/ui-final-operational-hardening` foi criada a partir de `origin/main`/`main` no SHA `935c604262f7f46198416d139b39ace4cdf550ac`, em `F:\Projects\RetroDevStudio`, para retomar a implementacao parcial deixada por outro agente, e publicada em `origin/codex/ui-final-operational-hardening`.

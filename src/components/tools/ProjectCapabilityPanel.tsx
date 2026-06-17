@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   CAPABILITY_AXIS_LABELS,
@@ -8,6 +8,7 @@ import {
   type CapabilityAxisReport,
   type ProjectCapabilityReport,
 } from "../../core/projectCapability";
+import { runParityCapture } from "../../core/ipc/parityService";
 import {
   inspectAudioPipeline,
   inspectProjectCapability,
@@ -150,6 +151,11 @@ export default function ProjectCapabilityPanel({
     }
   }
 
+  const lastParityReport = useEditorStore((state) => state.lastParityReport);
+  const setLastParityReport = useEditorStore((state) => state.setLastParityReport);
+
+  const [parityBusy, setParityBusy] = useState(false);
+
   const axes = useMemo(() => {
     if (!report) {
       return [];
@@ -158,6 +164,28 @@ export default function ProjectCapabilityPanel({
       .filter(([key]) => key !== "blockers" && typeof report[key] === "object")
       .map(([key, label]) => [label, report[key] as CapabilityAxisReport] as const);
   }, [report]);
+
+  const handleRunParity = useCallback(async () => {
+    if (!activeProjectDir) {
+      logMessage("warn", "[Parity] Abra um projeto antes de capturar.");
+      return;
+    }
+    setParityBusy(true);
+    try {
+      const result = await runParityCapture(activeProjectDir, "", 60);
+      if (result.report) {
+        setLastParityReport(result.report);
+      }
+      const summary = result.report
+        ? `parity: ${result.report.frames_run} frames, deterministico=${result.report.deterministic}, divergencias=${result.report.divergences.length}`
+        : result.message;
+      logMessage(result.ok ? "success" : "error", `[Parity] ${summary}`);
+    } catch (error) {
+      logMessage("error", `[Parity] ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setParityBusy(false);
+    }
+  }, [activeProjectDir, logMessage, setLastParityReport]);
 
   return (
     <div className="flex flex-col gap-3" data-testid="project-capability-panel">
@@ -187,6 +215,43 @@ export default function ProjectCapabilityPanel({
               <AxisCard key={label} label={label} axis={axis} />
             ))}
           </div>
+
+          <div className="rounded border border-[#313244] bg-[#11111b] p-2">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-semibold text-[#cdd6f4]">Gameplay Parity</span>
+              <button
+                type="button"
+                onClick={() => void handleRunParity()}
+                disabled={parityBusy || !activeProjectDir}
+                className="rounded border border-[#cba6f7]/35 bg-[#cba6f7]/10 px-2 py-1 text-[9px] font-semibold text-[#cba6f7] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {parityBusy ? "Capturando..." : "Rodar Parity Capture"}
+              </button>
+            </div>
+            {lastParityReport ? (
+              <div className="mt-2 grid grid-cols-3 gap-1 text-center">
+                <div className="rounded bg-[#181825] p-1">
+                  <div className="text-[8px] uppercase text-[#45475a]">Frames</div>
+                  <div className="text-xs font-bold text-[#cdd6f4]">{lastParityReport.frames_run}</div>
+                </div>
+                <div className="rounded bg-[#181825] p-1">
+                  <div className="text-[8px] uppercase text-[#45475a]">Det.</div>
+                  <div className={`text-xs font-bold ${lastParityReport.deterministic ? "text-[#a6e3a1]" : "text-[#f38ba8]"}`}>
+                    {lastParityReport.deterministic ? "sim" : "nao"}
+                  </div>
+                </div>
+                <div className="rounded bg-[#181825] p-1">
+                  <div className="text-[8px] uppercase text-[#45475a]">Diverg.</div>
+                  <div className={`text-xs font-bold ${lastParityReport.divergences.length > 0 ? "text-[#f38ba8]" : "text-[#a6e3a1]"}`}>
+                    {lastParityReport.divergences.length}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-2 text-[9px] text-[#45475a]">Nenhuma captura de parity ainda.</p>
+            )}
+          </div>
+
           <AudioSemaphore report={audioReport} />
           {report.blockers.length > 0 ? (
             <div className="rounded border border-[#f38ba8]/30 bg-[#f38ba8]/10 p-2" data-testid="capability-blockers">

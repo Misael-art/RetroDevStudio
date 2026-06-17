@@ -32,6 +32,7 @@ pub struct ProjectCapabilityReport {
     pub rom: CapabilityAxisReport,
     pub emulation: CapabilityAxisReport,
     pub runtime_evidence: CapabilityAxisReport,
+    pub gameplay_parity: CapabilityAxisReport,
     pub visual_validation: CapabilityAxisReport,
     pub assets: CapabilityAxisReport,
     pub patterns: CapabilityAxisReport,
@@ -140,6 +141,7 @@ pub fn inspect_project_capability(project_dir: &Path) -> Result<ProjectCapabilit
         "partial",
         "Registre evidencia de core Libretro, frames rodados e framebuffer util em .rds/reports/.",
     );
+    let gameplay_parity = inspect_gameplay_parity_axis(project_dir);
     let visual_validation = inspect_report_axis(
         project_dir,
         "visual",
@@ -204,6 +206,7 @@ pub fn inspect_project_capability(project_dir: &Path) -> Result<ProjectCapabilit
         &rom,
         &emulation,
         &runtime_evidence,
+        &gameplay_parity,
         &visual_validation,
         &assets,
         &patterns,
@@ -226,6 +229,7 @@ pub fn inspect_project_capability(project_dir: &Path) -> Result<ProjectCapabilit
         rom,
         emulation,
         runtime_evidence,
+        gameplay_parity,
         visual_validation,
         assets,
         patterns,
@@ -489,6 +493,37 @@ fn collect_matching_files(dir: &Path, out: &mut Vec<PathBuf>, predicate: &dyn Fn
     }
 }
 
+fn inspect_gameplay_parity_axis(project_dir: &Path) -> CapabilityAxisReport {
+    let report_dir = project_dir.join(".rds").join("reports");
+    let parity_report = report_dir.join("gameplay-parity-report.json");
+    if parity_report.exists() {
+        return capability_axis(
+            "partial",
+            vec![evidence_ref(
+                "parity_report",
+                parity_report.to_string_lossy(),
+                "Parity report JSON encontrado em .rds/reports/",
+            )],
+            vec!["parity_report_not_certified".to_string()],
+            vec![],
+            vec!["Parity capture executado; o report ainda precisa ser certificado manualmente.".to_string()],
+            Some("parity_harness".to_string()),
+            Some("Debug/Parity".to_string()),
+            vec![],
+        );
+    }
+    capability_axis(
+        "blocked",
+        vec![],
+        vec!["golden_input_trace_missing".to_string()],
+        vec![],
+        vec!["Selecione um golden .rds-replay ou .rds-input.json e rode o Parity Capture no Console.".to_string()],
+        Some("parity_harness".to_string()),
+        Some("Debug/Parity".to_string()),
+        vec![],
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -560,5 +595,52 @@ mod tests {
         assert!(json.contains("\"documentation\""));
         assert!(json.contains("\"runtime_contracts\""));
         assert!(json.ends_with("]}"));
+    }
+
+    #[test]
+    fn gameplay_parity_starts_blocked_when_report_absent() {
+        let project = temp_project("parity-blocked");
+        let report = inspect_project_capability(&project).expect("report");
+
+        assert_eq!(report.gameplay_parity.status, "blocked");
+        assert!(report
+            .gameplay_parity
+            .blocking_statuses
+            .contains(&"golden_input_trace_missing".to_string()));
+    }
+
+    #[test]
+    fn gameplay_parity_flips_to_partial_when_parity_report_exists() {
+        let project = temp_project("parity-evidence");
+        let report_dir = project.join(".rds").join("reports");
+        fs::create_dir_all(&report_dir).expect("reports dir");
+        fs::write(
+            report_dir.join("gameplay-parity-report.json"),
+            r#"{"schema":"rds-gameplay-parity/v1","deterministic":true}"#,
+        )
+        .expect("parity report");
+
+        let report = inspect_project_capability(&project).expect("report");
+
+        assert_eq!(report.gameplay_parity.status, "partial");
+        assert!(
+            report
+                .gameplay_parity
+                .evidence_refs
+                .iter()
+                .any(|evidence| evidence.kind == "parity_report"
+                    && evidence.path.contains("gameplay-parity-report.json")),
+            "expected evidence_refs to point at the parity report"
+        );
+        assert!(
+            report
+                .gameplay_parity
+                .blocking_statuses
+                .contains(&"parity_report_not_certified".to_string())
+        );
+        assert!(!report
+            .gameplay_parity
+            .blocking_statuses
+            .contains(&"golden_input_trace_missing".to_string()));
     }
 }
