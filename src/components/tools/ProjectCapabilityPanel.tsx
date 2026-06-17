@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   CAPABILITY_AXIS_LABELS,
@@ -8,7 +8,6 @@ import {
   type CapabilityAxisReport,
   type ProjectCapabilityReport,
 } from "../../core/projectCapability";
-import { runParityCapture } from "../../core/ipc/parityService";
 import {
   inspectAudioPipeline,
   inspectProjectCapability,
@@ -152,9 +151,6 @@ export default function ProjectCapabilityPanel({
   }
 
   const lastParityReport = useEditorStore((state) => state.lastParityReport);
-  const setLastParityReport = useEditorStore((state) => state.setLastParityReport);
-
-  const [parityBusy, setParityBusy] = useState(false);
 
   const axes = useMemo(() => {
     if (!report) {
@@ -164,28 +160,6 @@ export default function ProjectCapabilityPanel({
       .filter(([key]) => key !== "blockers" && typeof report[key] === "object")
       .map(([key, label]) => [label, report[key] as CapabilityAxisReport] as const);
   }, [report]);
-
-  const handleRunParity = useCallback(async () => {
-    if (!activeProjectDir) {
-      logMessage("warn", "[Parity] Abra um projeto antes de capturar.");
-      return;
-    }
-    setParityBusy(true);
-    try {
-      const result = await runParityCapture(activeProjectDir, "", 60);
-      if (result.report) {
-        setLastParityReport(result.report);
-      }
-      const summary = result.report
-        ? `parity: ${result.report.frames_run} frames, deterministico=${result.report.deterministic}, divergencias=${result.report.divergences.length}`
-        : result.message;
-      logMessage(result.ok ? "success" : "error", `[Parity] ${summary}`);
-    } catch (error) {
-      logMessage("error", `[Parity] ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setParityBusy(false);
-    }
-  }, [activeProjectDir, logMessage, setLastParityReport]);
 
   return (
     <div className="flex flex-col gap-3" data-testid="project-capability-panel">
@@ -216,18 +190,16 @@ export default function ProjectCapabilityPanel({
             ))}
           </div>
 
-          <div className="rounded border border-[#313244] bg-[#11111b] p-2">
+          <div className="rounded border border-[#313244] bg-[#11111b] p-2" data-testid="capability-parity">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[10px] font-semibold text-[#cdd6f4]">Gameplay Parity</span>
-              <button
-                type="button"
-                onClick={() => void handleRunParity()}
-                disabled={parityBusy || !activeProjectDir}
-                className="rounded border border-[#cba6f7]/35 bg-[#cba6f7]/10 px-2 py-1 text-[9px] font-semibold text-[#cba6f7] disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {parityBusy ? "Capturando..." : "Rodar Parity Capture"}
-              </button>
+              <span className="rounded border border-[#cba6f7]/35 bg-[#cba6f7]/10 px-1.5 py-0.5 text-[8px] font-semibold uppercase text-[#cba6f7]">
+                Experimental
+              </span>
             </div>
+            <p className="mt-1 text-[9px] leading-snug text-[#7f849c]" data-testid="capability-parity-hint">
+              Captura exige um golden de inputs. Use a aba <span className="font-semibold text-[#cba6f7]">Tools &rarr; Parity Capture</span> para rodar.
+            </p>
             {lastParityReport ? (
               <div className="mt-2 grid grid-cols-3 gap-1 text-center">
                 <div className="rounded bg-[#181825] p-1">

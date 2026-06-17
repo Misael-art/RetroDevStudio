@@ -2309,7 +2309,7 @@ type ToolDescriptor = {
 };
 
 function ParityCaptureSection() {
-  const { activeProjectDir, logMessage, lastParityReport } = useEditorStore();
+  const { activeProjectDir, logMessage, lastParityReport, setLastParityReport } = useEditorStore();
   const [goldenPath, setGoldenPath] = useState("");
   const [frameCap, setFrameCap] = useState(60);
   const [busy, setBusy] = useState(false);
@@ -2329,6 +2329,9 @@ function ParityCaptureSection() {
     try {
       const runResult = await runParityCapture(activeProjectDir, goldenPath.trim(), frameCap);
       setResult(runResult);
+      if (runResult.ok && runResult.report) {
+        setLastParityReport(runResult.report);
+      }
       const summary = runResult.report
         ? `${runResult.report.frames_run} frames, deterministico=${runResult.report.deterministic}, divergencias=${runResult.report.divergences.length}`
         : runResult.message;
