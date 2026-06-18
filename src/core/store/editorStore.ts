@@ -12,6 +12,7 @@ import type {
   Scene,
   SceneLayer,
 } from "../ipc/sceneService";
+import type { ParityReport } from "../projectCapability";
 
 const UNDO_STACK_LIMIT = 50;
 
@@ -109,6 +110,7 @@ export interface StoreState {
   artStudioAssetPath: string | null;
   consoleEntries: ConsoleEntry[];
   consoleVisible: boolean;
+  lastParityReport: ParityReport | null;
   hwStatus: HwStatus | null;
   sceneRevision: number;
   hwValidationState: HwValidationState;
@@ -165,6 +167,7 @@ export interface StoreActions {
   logDiagnostic: (diagnostic: ActionableDiagnostic) => void;
   clearConsole: () => void;
   toggleConsole: () => void;
+  setLastParityReport: (report: ParityReport | null) => void;
   setHwStatus: (status: HwStatus | null) => void;
   setHwValidationPending: (revision: number) => void;
   setHwValidationResult: (revision: number, status: HwStatus) => void;
@@ -459,6 +462,8 @@ export const useEditorStore = create<EditorState>((set) => ({
 
   consoleVisible: false,
   toggleConsole: () => set((state) => ({ consoleVisible: !state.consoleVisible })),
+  lastParityReport: null,
+  setLastParityReport: (report) => set({ lastParityReport: report }),
 
   hwStatus: null,
   setHwStatus: (status) => set({ hwStatus: status }),

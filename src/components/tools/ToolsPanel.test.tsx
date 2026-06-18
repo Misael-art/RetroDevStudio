@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   persistActiveScene: vi.fn(),
   listenToProjectAssetChanges: vi.fn(),
   openProjectSourcePath: vi.fn(),
+  runParityCapture: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
@@ -57,6 +58,10 @@ vi.mock("../../core/ipc/buildService", () => ({
 
 vi.mock("../../core/ipc/emulatorService", () => ({
   emulatorReadMemory: mocks.emulatorReadMemory,
+}));
+
+vi.mock("../../core/ipc/parityService", () => ({
+  runParityCapture: mocks.runParityCapture,
 }));
 
 vi.mock("../../core/ipc/toolsService", () => ({
@@ -166,6 +171,7 @@ describe("ToolsPanel Asset Browser", () => {
       consoleVisible: true,
       projectSourceKind: "",
       projectLegacyIndex: null,
+      lastParityReport: null,
       activeScene: {
         scene_id: "main",
         display_name: "Main",
@@ -298,6 +304,29 @@ describe("ToolsPanel Asset Browser", () => {
       tiles_extracted: 0,
       palettes_extracted: 0,
       files: [],
+    });
+    mocks.runParityCapture.mockResolvedValue({
+      ok: true,
+      message: "parity capture ok",
+      golden_path: "golden/input.rds",
+      golden_source: "file",
+      frames_run: 60,
+      deterministic: true,
+      divergence_count: 0,
+      report_path: "validation/parity.json",
+      report: {
+        schema: "rds.parity.v1",
+        rom_path: "out/rom.bin",
+        rom_sha256: "a".repeat(64),
+        core_label: "genesis_plus_gx",
+        frames_run: 60,
+        frame_hashes: [],
+        final_state_sha256: "b".repeat(64),
+        deterministic: true,
+        divergences: [],
+        fake_toolchain_used: false,
+        not_measured_by_this_harness: ["cycle_accuracy", "audio_parity"],
+      },
     });
     mocks.emulatorReadMemory.mockResolvedValue({
       data: [],
@@ -1128,5 +1157,118 @@ describe("ToolsPanel Asset Browser", () => {
     expect(
       container.querySelector("[data-testid='asset-browser-selected-preview-fallback']")?.textContent
     ).toContain("Preview indisponivel");
+  });
+
+  async function openParityTab() {
+    await act(async () => {
+      findButton(container, "Avancado OFF").click();
+      await flush();
+      await flush();
+    });
+    await act(async () => {
+      findButton(container, /Experimental/).click();
+      await flush();
+      await flush();
+    });
+    await act(async () => {
+      findButton(container, /Parity Capture/).click();
+      await flush();
+      await flush();
+    });
+  }
+
+  it("exposes the Parity Capture tab with golden path input, frame cap and run button", async () => {
+    await openParityTab();
+
+    const section = container.querySelector("[data-testid='parity-capture-section']");
+    expect(section).toBeTruthy();
+    const goldenInput = container.querySelector(
+      "input[placeholder*='golden']"
+    ) as HTMLInputElement | null;
+    expect(goldenInput).toBeInstanceOf(HTMLInputElement);
+    const frameCap = container.querySelector("input[type='number']") as HTMLInputElement | null;
+    expect(frameCap).toBeInstanceOf(HTMLInputElement);
+    expect(frameCap?.value).toBe("60");
+    expect(() => findButton(container, /Rodar Parity Capture/)).not.toThrow();
+    expect(section?.textContent).toContain("Experimental");
+  });
+
+  it("updates the store lastParityReport after a successful capture", async () => {
+    await openParityTab();
+
+    const goldenInput = container.querySelector(
+      "input[placeholder*='golden']"
+    ) as HTMLInputElement;
+    await act(async () => {
+      changeInputValue(goldenInput, "golden/input.rds");
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Rodar Parity Capture/).click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.runParityCapture).toHaveBeenCalledWith(
+      "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      "golden/input.rds",
+      60
+    );
+    expect(useEditorStore.getState().lastParityReport?.frames_run).toBe(60);
+    expect(container.querySelector("[data-testid='parity-capture-section']")?.textContent).toContain(
+      "Capture OK"
+    );
+  });
+
+  it("shows actionable divergences when the backend reports a parity mismatch", async () => {
+    mocks.runParityCapture.mockResolvedValueOnce({
+      ok: false,
+      message: "framebuffer divergiu do golden",
+      golden_path: "golden/input.rds",
+      golden_source: "file",
+      frames_run: 12,
+      deterministic: false,
+      divergence_count: 1,
+      report_path: "validation/parity.json",
+      report: {
+        schema: "rds.parity.v1",
+        rom_path: "out/rom.bin",
+        rom_sha256: "a".repeat(64),
+        core_label: "genesis_plus_gx",
+        frames_run: 12,
+        frame_hashes: [],
+        final_state_sha256: "b".repeat(64),
+        deterministic: false,
+        divergences: [
+          { frame_index: 7, kind: "framebuffer", expected: "deadbeefcafef00d", observed: "0badf00dba5eba11" },
+        ],
+        fake_toolchain_used: false,
+        not_measured_by_this_harness: ["cycle_accuracy"],
+      },
+    });
+
+    await openParityTab();
+
+    const goldenInput = container.querySelector(
+      "input[placeholder*='golden']"
+    ) as HTMLInputElement;
+    await act(async () => {
+      changeInputValue(goldenInput, "golden/input.rds");
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Rodar Parity Capture/).click();
+      await flush();
+      await flush();
+    });
+
+    const section = container.querySelector("[data-testid='parity-capture-section']");
+    expect(section?.textContent).toContain("Capture falhou");
+    expect(section?.textContent).toContain("Divergencias");
+    expect(section?.textContent).toContain("framebuffer");
+    // Failed capture must NOT promote a report into the shared store.
+    expect(useEditorStore.getState().lastParityReport).toBeNull();
   });
 });

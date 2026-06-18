@@ -7,6 +7,7 @@ pub mod editor_validation;
 pub mod gml_to_nodes;
 pub mod input_commands;
 pub mod memory_pool;
+pub mod parity_harness;
 pub mod project_capability;
 pub mod project_mgr;
 pub mod rom_mastering;

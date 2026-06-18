@@ -3,7 +3,13 @@ import type { ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { CapabilityAxisReport, ProjectCapabilityReport, AudioPipelineReport } from "../../core/projectCapability";
+import type {
+  CapabilityAxisReport,
+  ProjectCapabilityReport,
+  AudioPipelineReport,
+  ParityReport,
+} from "../../core/projectCapability";
+import { useEditorStore } from "../../core/store/editorStore";
 import ProjectCapabilityPanel from "./ProjectCapabilityPanel";
 
 let container: HTMLDivElement;
@@ -23,7 +29,27 @@ afterEach(() => {
     root?.unmount();
   });
   container?.remove();
+  act(() => {
+    useEditorStore.setState({ lastParityReport: null });
+  });
 });
+
+function parityReport(overrides: Partial<ParityReport> = {}): ParityReport {
+  return {
+    schema: "rds.parity.v1",
+    rom_path: "out/rom.bin",
+    rom_sha256: "a".repeat(64),
+    core_label: "genesis_plus_gx",
+    frames_run: 42,
+    frame_hashes: [],
+    final_state_sha256: "b".repeat(64),
+    deterministic: true,
+    divergences: [],
+    fake_toolchain_used: false,
+    not_measured_by_this_harness: ["cycle_accuracy"],
+    ...overrides,
+  };
+}
 
 function axis(status: string, overrides: Partial<CapabilityAxisReport> = {}): CapabilityAxisReport {
   return {
@@ -56,6 +82,7 @@ function report(overrides: Partial<ProjectCapabilityReport> = {}): ProjectCapabi
     patterns: baseAxis,
     runtime_contracts: baseAxis,
     audio: baseAxis,
+    gameplay_parity: axis("blocked"),
     blockers: [],
     ...overrides,
   };
@@ -102,6 +129,38 @@ describe("ProjectCapabilityPanel", () => {
     expect(container.textContent).toContain("Documentacao");
     expect(container.textContent).toContain("success");
     expect(container.textContent).toContain("experimental");
+  });
+
+  it("renders the gameplay_parity axis and does not expose a capture button that always fails", () => {
+    render(<ProjectCapabilityPanel report={report()} />);
+
+    const parityCard = container.querySelector('[data-testid="capability-axis-Gameplay Parity"]');
+    expect(parityCard).toBeTruthy();
+
+    const paritySection = container.querySelector('[data-testid="capability-parity"]');
+    expect(paritySection).toBeTruthy();
+    // The panel must point users to the dedicated tab instead of calling parity with an empty golden.
+    expect(
+      container.querySelector('[data-testid="capability-parity-hint"]')?.textContent
+    ).toContain("Parity Capture");
+    const captureButton = Array.from(container.querySelectorAll("button")).find((element) =>
+      /Rodar Parity Capture/.test(element.textContent ?? "")
+    );
+    expect(captureButton).toBeUndefined();
+  });
+
+  it("shows the last parity report from the store when present", () => {
+    act(() => {
+      useEditorStore.setState({
+        lastParityReport: parityReport({ frames_run: 123, deterministic: true, divergences: [] }),
+      });
+    });
+
+    render(<ProjectCapabilityPanel report={report()} />);
+
+    const paritySection = container.querySelector('[data-testid="capability-parity"]');
+    expect(paritySection?.textContent).toContain("123");
+    expect(paritySection?.textContent).not.toContain("Nenhuma captura de parity ainda");
   });
 
   it("renders audio warnings semaphore", () => {

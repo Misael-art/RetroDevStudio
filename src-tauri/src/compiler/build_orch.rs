@@ -1911,7 +1911,9 @@ where
                 }
             }
             _ => {
-                command.env("SGDK", &toolchain.root);
+                let sgdk_env = sgdk_make_safe_path(&toolchain.root);
+                command.env("SGDK", &sgdk_env);
+                command.env("GDK", &sgdk_env);
                 configure_java_for_sgdk(&mut command);
                 if let Ok(extra_flags) = std::env::var("RDS_EXTRA_FLAGS") {
                     let extra_flags = extra_flags.trim();
@@ -2344,6 +2346,93 @@ fn prepend_to_path(command: &mut Command, entry: &Path) {
 
 fn to_shell_friendly_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
+}
+
+/// Em Windows, resolve o caminho 8.3 (short path) sem espacos quando o caminho
+/// original contem espacos. Necessario porque os makefiles do SGDK fazem
+/// `include $(SGDK)/makefile.gen` e o GNU make quebra com `*** empty variable
+/// name. Stop.` quando `$(SGDK)` (ou outras variaveis interpoladas no make)
+/// contem espacos. Nao esconde a falha: se a conversao 8.3 nao estiver
+/// disponivel, o chamador usa o caminho longo e a falha real continua visivel.
+#[cfg(target_os = "windows")]
+fn windows_space_free_path(path: &Path) -> Option<PathBuf> {
+    if !path.to_string_lossy().contains(' ') {
+        return None;
+    }
+    // 1) Caminho 8.3 (short name) quando o volume tiver geracao 8dot3 ativa.
+    if let Some(short) = windows_short_path_8dot3(path) {
+        return Some(short);
+    }
+    // 2) Fallback resiliente: junction (mklink /J) num diretorio temporario
+    //    sem espacos. Cobre volumes com geracao 8dot3 desabilitada.
+    windows_junction_to(path)
+}
+
+/// Resolve o caminho 8.3 via `cmd` (`%~sI`). Retorna `None` se o resultado
+/// ainda contiver espacos (geracao 8dot3 desabilitada no volume).
+#[cfg(target_os = "windows")]
+fn windows_short_path_8dot3(path: &Path) -> Option<PathBuf> {
+    let output = Command::new("cmd")
+        .args(["/C", "for %I in (\"%RDS_LONG_PATH%\") do @echo %~sI"])
+        .env("RDS_LONG_PATH", path.as_os_str())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let short = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if short.is_empty() || short.contains(' ') {
+        return None;
+    }
+    let candidate = PathBuf::from(short);
+    candidate.exists().then_some(candidate)
+}
+
+/// Cria (idempotente) uma junction sem espacos apontando para `target` e
+/// retorna o caminho da junction. Usado para alimentar makefiles do SGDK que
+/// nao toleram espacos em `$(SGDK)`/`$(GDK)`.
+#[cfg(target_os = "windows")]
+fn windows_junction_to(target: &Path) -> Option<PathBuf> {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let base = std::env::temp_dir();
+    if base.to_string_lossy().contains(' ') {
+        return None;
+    }
+    let mut hasher = DefaultHasher::new();
+    target.to_string_lossy().to_lowercase().hash(&mut hasher);
+    let link = base.join(format!("rds-sgdk-{:016x}", hasher.finish()));
+
+    // Reutiliza a junction se ja resolve para uma toolchain valida.
+    if link.join("bin").exists() || link.join("makefile.gen").exists() {
+        return (!link.to_string_lossy().contains(' ')).then_some(link);
+    }
+    if link.exists() {
+        let _ = std::fs::remove_dir_all(&link);
+    }
+
+    let status = Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(&link)
+        .arg(target)
+        .output()
+        .ok()?;
+    if !status.status.success() {
+        return None;
+    }
+    (link.exists() && !link.to_string_lossy().contains(' ')).then_some(link)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn windows_space_free_path(_path: &Path) -> Option<PathBuf> {
+    None
+}
+
+/// Caminho seguro para interpolacao em makefiles do SGDK: usa 8.3 se houver
+/// espacos, senao mantem o caminho original.
+fn sgdk_make_safe_path(path: &Path) -> PathBuf {
+    windows_space_free_path(path).unwrap_or_else(|| path.to_path_buf())
 }
 
 fn snes_library_dir_windows(root: &Path) -> String {
@@ -3537,6 +3626,62 @@ PY\n"
         assert_eq!(recorded.trim(), "Windows_NT");
 
         let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(project_dir);
+    }
+
+    #[test]
+    fn megadrive_build_passes_space_free_sgdk_paths_to_make() {
+        if !cfg!(target_os = "windows") {
+            return;
+        }
+
+        let _serial = test_serial_guard();
+        let project_dir = workspace_copy("megadrive_dummy");
+        install_megadrive_sprite_fixture(&project_dir);
+
+        // Raiz da toolchain deliberadamente com espaco no nome para reproduzir
+        // o bug "*** empty variable name. Stop." dos makefiles do SGDK.
+        let base = temp_dir("sgdk windows spaced root");
+        let root = base.join("sdk with space");
+        let bin_dir = root.join("bin");
+        fs::create_dir_all(&bin_dir).expect("create fake spaced toolchain bin");
+        let make_program = bin_dir.join("capture-sgdk-env.cmd");
+        fs::write(
+            &make_program,
+            "@echo off\r\n\
+             if not exist out mkdir out\r\n\
+             echo %SGDK%> out\\sgdk-env.txt\r\n\
+             echo %GDK%> out\\gdk-env.txt\r\n\
+             echo ROM> out\\artifact.md\r\n\
+             exit /b 0\r\n",
+        )
+        .expect("write sgdk env capture make");
+
+        let environment = BuildEnvironment {
+            sgdk_root: Some(root.clone()),
+            sgdk_make_program: Some(make_program),
+            disable_auto_detect: true,
+            ..BuildEnvironment::default()
+        };
+
+        let result = run_build_with_environment(&project_dir, &environment, |_| {});
+
+        assert!(result.ok, "build log: {:?}", result.log);
+        let out_dir = project_dir.join("build").join("megadrive").join("out");
+        let sgdk_env = fs::read_to_string(out_dir.join("sgdk-env.txt")).expect("read sgdk env");
+        let gdk_env = fs::read_to_string(out_dir.join("gdk-env.txt")).expect("read gdk env");
+        assert!(
+            !sgdk_env.trim().is_empty() && !sgdk_env.trim().contains(' '),
+            "SGDK env nao pode conter espacos para o make do SGDK: {:?}",
+            sgdk_env
+        );
+        assert!(
+            !gdk_env.trim().is_empty() && !gdk_env.trim().contains(' '),
+            "GDK env nao pode conter espacos para o make do SGDK: {:?}",
+            gdk_env
+        );
+
+        let _ = fs::remove_dir_all(base);
         let _ = fs::remove_dir_all(project_dir);
     }
 

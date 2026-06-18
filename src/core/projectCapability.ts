@@ -19,6 +19,45 @@ export interface CapabilityAxisReport {
   diagnostics: ActionableDiagnostic[];
 }
 
+export interface ParityFrameHash {
+  frame_index: number;
+  framebuffer_sha256: string;
+  non_black_pixels: number;
+}
+
+export interface ParityDivergence {
+  frame_index: number;
+  kind: string;
+  expected: string;
+  observed: string;
+}
+
+export interface ParityReport {
+  schema: string;
+  rom_path: string;
+  rom_sha256: string;
+  core_label: string;
+  frames_run: number;
+  frame_hashes: ParityFrameHash[];
+  final_state_sha256: string;
+  deterministic: boolean;
+  divergences: ParityDivergence[];
+  fake_toolchain_used: boolean;
+  not_measured_by_this_harness: string[];
+}
+
+export interface ParityRunResult {
+  ok: boolean;
+  message: string;
+  golden_path: string;
+  golden_source: string;
+  frames_run: number;
+  deterministic: boolean;
+  divergence_count: number;
+  report_path: string;
+  report: ParityReport | null;
+}
+
 export interface ProjectCapabilityReport {
   project_dir: string;
   documentation: CapabilityAxisReport;
@@ -27,6 +66,7 @@ export interface ProjectCapabilityReport {
   rom: CapabilityAxisReport;
   emulation: CapabilityAxisReport;
   runtime_evidence: CapabilityAxisReport;
+  gameplay_parity: CapabilityAxisReport;
   visual_validation: CapabilityAxisReport;
   assets: CapabilityAxisReport;
   patterns: CapabilityAxisReport;
@@ -138,6 +178,7 @@ export const CAPABILITY_AXIS_LABELS: Array<[keyof ProjectCapabilityReport, strin
   ["rom", "ROM"],
   ["emulation", "Emulacao"],
   ["runtime_evidence", "Runtime Evidence"],
+  ["gameplay_parity", "Gameplay Parity"],
   ["visual_validation", "Visual"],
   ["assets", "Assets"],
   ["patterns", "Patterns"],

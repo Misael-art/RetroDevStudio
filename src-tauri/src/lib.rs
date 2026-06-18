@@ -705,6 +705,211 @@ fn emulator_play_replay(
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+struct ParityCommandResult {
+    ok: bool,
+    message: String,
+    golden_path: String,
+    golden_source: String,
+    frames_run: u32,
+    deterministic: bool,
+    divergence_count: usize,
+    report_path: String,
+    report: Option<core::parity_harness::ParityReport>,
+}
+
+#[tauri::command]
+fn parity_run_capture(
+    project_dir: String,
+    golden_path: String,
+    frames: Option<u32>,
+    emu: State<EmulatorCoreState>,
+) -> ParityCommandResult {
+    let trimmed_project = project_dir.trim();
+    if trimmed_project.is_empty() {
+        return ParityCommandResult {
+            ok: false,
+            message: "O que quebrou: project_dir vazio. Por que importa: parity harness precisa de um projeto real para gravar .rds/reports. Onde corrigir: chamada IPC parity_run_capture. Proxima acao: abra um projeto antes de capturar.".to_string(),
+            golden_path: String::new(),
+            golden_source: String::new(),
+            frames_run: 0,
+            deterministic: false,
+            divergence_count: 0,
+            report_path: String::new(),
+            report: None,
+        };
+    }
+    let trimmed_golden = golden_path.trim();
+    if trimmed_golden.is_empty() {
+        return ParityCommandResult {
+            ok: false,
+            message: "O que quebrou: golden_path vazio. Por que importa: a harness precisa de um .rds-replay ou .rds-input.json. Onde corrigir: chamada IPC parity_run_capture. Proxima acao: selecione um golden antes de capturar.".to_string(),
+            golden_path: String::new(),
+            golden_source: String::new(),
+            frames_run: 0,
+            deterministic: false,
+            divergence_count: 0,
+            report_path: String::new(),
+            report: None,
+        };
+    }
+
+    let project_path = Path::new(trimmed_project);
+    let golden_file = Path::new(trimmed_golden);
+
+    let golden = match core::parity_harness::load_golden(golden_file) {
+        Ok(golden) => golden,
+        Err(error) => {
+            return ParityCommandResult {
+                ok: false,
+                message: error,
+                golden_path: trimmed_golden.to_string(),
+                golden_source: String::new(),
+                frames_run: 0,
+                deterministic: false,
+                divergence_count: 0,
+                report_path: String::new(),
+                report: None,
+            };
+        }
+    };
+    let golden_source = golden.source_label().to_string();
+
+    let mut core = match emu.0.lock() {
+        Ok(c) => c,
+        Err(e) => {
+            return ParityCommandResult {
+                ok: false,
+                message: e.to_string(),
+                golden_path: trimmed_golden.to_string(),
+                golden_source,
+                frames_run: 0,
+                deterministic: false,
+                divergence_count: 0,
+                report_path: String::new(),
+                report: None,
+            };
+        }
+    };
+
+    if core.loaded_core_label().is_none() {
+        return ParityCommandResult {
+            ok: false,
+            message: "O que quebrou: nenhum core Libretro carregado. Por que importa: a parity harness precisa de um core ativo para reproduzir o golden. Onde corrigir: chame emulator_load_rom antes de parity_run_capture. Proxima acao: carregue a ROM do projeto e tente de novo.".to_string(),
+            golden_path: trimmed_golden.to_string(),
+            golden_source,
+            frames_run: 0,
+            deterministic: false,
+            divergence_count: 0,
+            report_path: String::new(),
+            report: None,
+        };
+    }
+
+    let rom_path = match core.loaded_rom_path() {
+        Some(path) => path,
+        None => match find_first_rom_artifact(project_path) {
+            Some(path) => path,
+            None => {
+                return ParityCommandResult {
+                    ok: false,
+                    message: format!(
+                        "O que quebrou: nenhum core carregado e nenhum artefato .bin/.md/.sfc/.smc encontrado em '{}/build'. Por que importa: a parity harness precisa de uma ROM real para rodar. Onde corrigir: abra o jogo no emulador ou faca build antes de capturar. Proxima acao: carregue uma ROM ou rode build no projeto.",
+                        project_path.display()
+                    ),
+                    golden_path: trimmed_golden.to_string(),
+                    golden_source,
+                    frames_run: 0,
+                    deterministic: false,
+                    divergence_count: 0,
+                    report_path: String::new(),
+                    report: None,
+                };
+            }
+        },
+    };
+
+    let report_dir = project_path.join(".rds").join("reports");
+    let result = core::parity_harness::run_parity_capture_against_golden(
+        &mut core,
+        &rom_path,
+        golden_file,
+        frames,
+        &report_dir,
+    );
+
+    match result {
+        Ok((report, written)) => {
+            let divergence_count = report.divergences.len();
+            let message = if report.deterministic {
+                format!(
+                    "Parity deterministico: {} frame(s) reproduzidos sem divergencia; report em '{}'.",
+                    report.frames_run,
+                    written.display()
+                )
+            } else {
+                format!(
+                    "Parity reportou {} divergencia(s) apos {} frame(s); report em '{}'.",
+                    divergence_count, report.frames_run, written.display()
+                )
+            };
+            ParityCommandResult {
+                ok: true,
+                message,
+                golden_path: trimmed_golden.to_string(),
+                golden_source,
+                frames_run: report.frames_run,
+                deterministic: report.deterministic,
+                divergence_count,
+                report_path: written.to_string_lossy().to_string(),
+                report: Some(report),
+            }
+        }
+        Err(error) => ParityCommandResult {
+            ok: false,
+            message: error,
+            golden_path: trimmed_golden.to_string(),
+            golden_source,
+            frames_run: 0,
+            deterministic: false,
+            divergence_count: 0,
+            report_path: String::new(),
+            report: None,
+        },
+    }
+}
+
+fn find_first_rom_artifact(project_dir: &Path) -> Option<PathBuf> {
+    let build_dir = project_dir.join("build");
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    collect_rom_files(&build_dir, &mut candidates);
+    if candidates.is_empty() {
+        return None;
+    }
+    candidates.sort();
+    candidates.into_iter().next()
+}
+
+fn collect_rom_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_rom_files(&path, out);
+        } else if let Some(ext) = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase())
+        {
+            if matches!(ext.as_str(), "bin" | "md" | "sfc" | "smc") {
+                out.push(path);
+            }
+        }
+    }
+}
+
 /// Le uma faixa da memoria exposta pelo core Libretro ativo.
 #[tauri::command]
 fn emulator_read_memory(
@@ -3439,6 +3644,7 @@ pub fn run() {
             emulator_start_recording,
             emulator_stop_recording,
             emulator_play_replay,
+            parity_run_capture,
             emulator_read_memory,
             emulator_get_execution_trace,
             emulator_send_input,
