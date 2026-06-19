@@ -3,6 +3,7 @@ import {
   createFallbackDiagnostic,
   diagnosticConsoleMessage,
   normalizeBuildDiagnostics,
+  buildAreaForTarget,
   type ActionableDiagnostic,
 } from "./diagnostics";
 
@@ -55,5 +56,70 @@ describe("actionable diagnostics model", () => {
     });
     expect(diagnostic.user_message).toContain("Importacao GameMaker falhou");
     expect(diagnostic.suggested_action).toContain("Verifique");
+  });
+
+  it("build failure fallback includes error, impact and next action for SGDK", () => {
+    const diagnostic = createFallbackDiagnostic({
+      area: "build_sgdk",
+      technicalDetail: "Toolchain SGDK nao encontrada.",
+    });
+
+    expect(diagnostic.user_message).toBeTruthy();
+    expect(diagnostic.user_message.toLowerCase()).toContain("build");
+    expect(diagnostic.suggested_action).toContain("SGDK");
+    expect(diagnostic.technical_detail).toContain("Toolchain SGDK");
+    expect(diagnostic.blocking).toBe(true);
+    expect(diagnosticConsoleMessage(diagnostic)).toContain("Acao recomendada");
+  });
+
+  it("build failure fallback includes error, impact and next action for SNES", () => {
+    const diagnostic = createFallbackDiagnostic({
+      area: "build_snes",
+      technicalDetail: "PVSnesLib toolchain missing.",
+    });
+
+    expect(diagnostic.user_message).toBeTruthy();
+    expect(diagnostic.user_message.toLowerCase()).toContain("build");
+    expect(diagnostic.suggested_action).toContain("PVSnesLib");
+    expect(diagnostic.technical_detail).toContain("PVSnesLib");
+    expect(diagnostic.blocking).toBe(true);
+  });
+
+  it("emulator failure fallback includes error, impact and next action", () => {
+    const diagnostic = createFallbackDiagnostic({
+      area: "libretro_emulation",
+      sourcePath: "F:/Games/build/game.md",
+      technicalDetail: "Nenhum core Libretro para Mega Drive foi encontrado.",
+    });
+
+    expect(diagnostic.user_message).toContain("ROM");
+    expect(diagnostic.user_message).toContain("Libretro");
+    expect(diagnostic.suggested_action).toContain("Libretro");
+    expect(diagnostic.source_path).toContain("game.md");
+    expect(diagnostic.blocking).toBe(true);
+  });
+
+  it("normalizeBuildDiagnostics creates fallback from log lines when no diagnostic array", () => {
+    const diagnostics = normalizeBuildDiagnostics(
+      {
+        ok: false,
+        rom_path: "",
+        log: [
+          { level: "error", message: "Falha ao compilar main.c: linha 42." },
+        ],
+      },
+      "megadrive",
+      "F:/Demo"
+    );
+
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0].technical_detail).toContain("main.c");
+    expect(diagnostics[0].area).toBe("build_sgdk");
+    expect(diagnostics[0].blocking).toBe(true);
+  });
+
+  it("buildAreaForTarget maps correctly", () => {
+    expect(buildAreaForTarget("megadrive")).toBe("build_sgdk");
+    expect(buildAreaForTarget("snes")).toBe("build_snes");
   });
 });

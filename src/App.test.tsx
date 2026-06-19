@@ -4169,6 +4169,115 @@ describe("App build flow", () => {
     expect(state.activeScene).toBeNull();
   });
 
+  it("blocks close when persistActiveScene fails and user cancels discard", async () => {
+    mocks.persistActiveScene.mockResolvedValue(false);
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "F:/Projects/test",
+        activeProjectName: "Test",
+        activeTarget: "megadrive",
+        activeScene: {
+          scene_id: "main",
+          display_name: "Main",
+          entities: [],
+          background_layers: [],
+        },
+        activeSceneSource: {
+          scene_id: "main",
+          display_name: "Main",
+          entities: [],
+          background_layers: [],
+        },
+      });
+      await flush();
+    });
+
+    const menuTrigger = container.querySelector('[data-testid="unified-topbar-menu-trigger"]');
+    if (!(menuTrigger instanceof HTMLButtonElement)) {
+      throw new Error("Topbar menu trigger not found");
+    }
+
+    await act(async () => {
+      menuTrigger.click();
+      await flush();
+    });
+
+    const closeButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Fechar"
+    );
+    if (!(closeButton instanceof HTMLButtonElement)) {
+      throw new Error("Close menu action not found");
+    }
+
+    await act(async () => {
+      closeButton.click();
+      await flush();
+    });
+
+    expect(confirmSpy).toHaveBeenCalled();
+    const state = useEditorStore.getState();
+    expect(state.activeProjectDir).not.toBe("");
+    expect(state.activeScene).not.toBeNull();
+    confirmSpy.mockRestore();
+  });
+
+  it("proceeds with close when persistActiveScene fails and user confirms discard", async () => {
+    mocks.persistActiveScene.mockResolvedValue(false);
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "F:/Projects/test",
+        activeProjectName: "Test",
+        activeTarget: "megadrive",
+        activeScene: {
+          scene_id: "main",
+          display_name: "Main",
+          entities: [],
+          background_layers: [],
+        },
+        activeSceneSource: {
+          scene_id: "main",
+          display_name: "Main",
+          entities: [],
+          background_layers: [],
+        },
+      });
+      await flush();
+    });
+
+    const menuTrigger = container.querySelector('[data-testid="unified-topbar-menu-trigger"]');
+    if (!(menuTrigger instanceof HTMLButtonElement)) {
+      throw new Error("Topbar menu trigger not found");
+    }
+
+    await act(async () => {
+      menuTrigger.click();
+      await flush();
+    });
+
+    const closeButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Fechar"
+    );
+    if (!(closeButton instanceof HTMLButtonElement)) {
+      throw new Error("Close menu action not found");
+    }
+
+    await act(async () => {
+      closeButton.click();
+      await flush();
+    });
+
+    expect(confirmSpy).toHaveBeenCalled();
+    const state = useEditorStore.getState();
+    expect(state.activeProjectDir).toBe("");
+    expect(state.activeProjectName).toBe("");
+    expect(state.activeScene).toBeNull();
+    confirmSpy.mockRestore();
+  });
+
   it("creates and disposes the game audio context with the audio stream lifecycle", async () => {
     const audioContextCtor = vi.fn();
     const gainConnect = vi.fn();

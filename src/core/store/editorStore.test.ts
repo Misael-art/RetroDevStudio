@@ -630,6 +630,18 @@ describe("setEditorMode", () => {
 
     expect(useEditorStore.getState().editorMode).toBe("paint");
   });
+
+  it("redo restores editorMode captured in snapshot", () => {
+    useEditorStore.setState({ activeScene: { ...EMPTY_SCENE }, editorMode: "select" });
+    useEditorStore.getState().addEntity(makeEntity("e1"));
+    useEditorStore.getState().setEditorMode("paint");
+
+    useEditorStore.getState().undo();
+    expect(useEditorStore.getState().editorMode).toBe("select");
+
+    useEditorStore.getState().redo();
+    expect(useEditorStore.getState().editorMode).toBe("paint");
+  });
 });
 
 describe("setActiveBrush", () => {

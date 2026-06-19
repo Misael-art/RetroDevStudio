@@ -66,16 +66,18 @@ export default function Console({ variant = "drawer" }: ConsoleProps) {
     [diagnosticEntries]
   );
   const filteredEntries = useMemo(
-    () =>
-      consoleEntries.filter((entry) => {
+    () => {
+      const hasActiveFilter = severityFilter !== "all" || areaFilter !== "all";
+      return consoleEntries.filter((entry) => {
         if (!entry.diagnostic) {
-          return true;
+          return !hasActiveFilter;
         }
         return (
           (severityFilter === "all" || entry.diagnostic.severity === severityFilter) &&
           (areaFilter === "all" || entry.diagnostic.area === areaFilter)
         );
-      }),
+      });
+    },
     [areaFilter, consoleEntries, severityFilter]
   );
   const selectedEntry = useMemo(

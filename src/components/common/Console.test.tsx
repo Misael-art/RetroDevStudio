@@ -106,4 +106,44 @@ describe("Console actionable diagnostics", () => {
     expect(clipboardWrite).toHaveBeenCalledWith(expect.stringContaining("stack trace completo"));
     expect(clipboardWrite).toHaveBeenCalledWith(expect.stringContaining("Acao recomendada"));
   });
+
+  it("shows non-diagnostic entries when filter is all", () => {
+    act(() => {
+      useEditorStore.getState().logMessage("info", "Projeto carregado.");
+      useEditorStore.getState().logMessage("info", "Build iniciado.");
+    });
+    root = renderConsole(container);
+
+    expect(container.textContent).toContain("Projeto carregado.");
+    expect(container.textContent).toContain("Build iniciado.");
+  });
+
+  it("hides non-diagnostic entries when severity filter is active", () => {
+    act(() => {
+      useEditorStore.getState().logMessage("info", "Projeto carregado.");
+      useEditorStore.getState().logDiagnostic(buildDiagnostic);
+    });
+    root = renderConsole(container);
+
+    expect(container.textContent).toContain("Projeto carregado.");
+    expect(container.textContent).toContain("Build falhou porque");
+
+    click(container, "console-filter-severity-error");
+    expect(container.textContent).not.toContain("Projeto carregado.");
+    expect(container.textContent).toContain("Build falhou porque");
+  });
+
+  it("hides non-diagnostic entries when area filter is active", () => {
+    act(() => {
+      useEditorStore.getState().logMessage("info", "Projeto carregado.");
+      useEditorStore.getState().logDiagnostic(buildDiagnostic);
+    });
+    root = renderConsole(container);
+
+    expect(container.textContent).toContain("Projeto carregado.");
+
+    click(container, "console-filter-area-build_sgdk");
+    expect(container.textContent).not.toContain("Projeto carregado.");
+    expect(container.textContent).toContain("Build falhou porque");
+  });
 });

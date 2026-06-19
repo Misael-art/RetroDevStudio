@@ -3263,7 +3263,17 @@ export default function App() {
   }
 
   async function handleCloseProject() {
-    await persistActiveScene(activeProjectDir, "Fechar", "Projeto salvo antes de fechar.");
+    const saved = await persistActiveScene(activeProjectDir, "Fechar", "Projeto salvo antes de fechar.");
+    if (!saved) {
+      const discard = window.confirm(
+        "Falha ao salvar o projeto. Deseja descartar as alteracoes e fechar mesmo assim?"
+      );
+      if (!discard) {
+        logMessage("info", "Fechamento cancelado apos falha de persistencia.");
+        return;
+      }
+      logMessage("warn", "Projeto fechado com alteracoes nao salvas.");
+    }
     await resetEmulatorSession(true);
     setActiveProject("", "");
     setActiveScenePath("");

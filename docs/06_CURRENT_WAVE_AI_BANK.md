@@ -20,6 +20,16 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+* **O que acabou de acontecer (2026-06-19 rodada 72 - W7.4 pre: main-user-flow-hardening checkpoint estendido):**
+  - **Branch/commit:** `codex/main-user-flow-hardening`, commit anterior `8390fce` (checkpoint: safe-close stub, undo/redo editorMode, action_music, console filter, diagnostics). Sessao atual estende esse checkpoint com fechamento das lacunas identificadas.
+  - **A. Fechamento seguro (handleCloseProject):** `persistActiveScene` agora tem retorno verificado. Se a persistencia falha, o close e bloqueado, um `window.confirm` pergunta se o usuario deseja descartar as alteracoes, e o close so prossegue se o usuario confirmar explicitamente. Testes: (1) `persistActiveScene` falha + usuario cancela = estado preservado; (2) `persistActiveScene` falha + usuario confirma = close prossegue com projeto fechado.
+  - **B. Undo/redo editorMode:** o codigo ja restaurava `editorMode` corretamente (confirmado por analise de `createUndoEntry`/`undo()`/`redo()`). Teste novo de redo adicionado para provar que o ciclo undo/redo preserva o `editorMode` da snapshot.
+  - **C. Console filter consistency:** filtro `severityFilter`/`areaFilter` agora esconde entradas sem `diagnostic` quando um filtro esta ativo. Testes: (1) filtro "all" mostra entradas com e sem diagnostic; (2) filtro severity ativo esconde entradas sem diagnostic; (3) filtro area ativo esconde entradas sem diagnostic.
+  - **D. Build/emulator diagnostics:** testes novos provam que `createFallbackDiagnostic` para build SGDK/SNES e emulador Libretro sempre incluem erro (user_message), impacto (blocking) e next action (suggested_action). `normalizeBuildDiagnostics` testado com fallback de log lines.
+  - **E. Testes de integracao:** cobertura existente de fluxo completo (create, build, run, close) ja existia em App.test.tsx; ampliada com safe-close failure/recovery.
+  - **Gates (host Windows, working tree):** `npm run check:tree` PASS (pre-existing `.serena` warning only); `npm run lint` PASS; `npx tsc --noEmit` PASS; `npm test` PASS (**45 arquivos / 423 testes** — +12 sobre baseline 411). Rust nao tocado (cargo test/clippy mantem baseline).
+  - **Status:** todas as lacunas do checkpoint estendido fechadas. Proximo passo: commit, push da branch, PR/merge contra `main`.
+
 * **O que acabou de acontecer (2026-06-17 rodada 71 - W7.3 finalizada: correcao de lacunas, gates verdes e artefatos frescos):**
   - **Branch/commit:** `codex/w7-3-parity-robustness`, commit de codigo `e8f5e82be8347169379a8f9a94c046ab9ae04e80` (sobre `f189be0`). Sem `reset --hard`, sem `push --force`.
   - **Governanca da arvore restaurada:** `scripts/check-tree.cjs` voltou a NAO ignorar `.serena` (a rodada 70 havia afrouxado isso). O diretorio `.serena/` foi movido para `F:\Projects\RetroDevStudio-cleanup-backups\serena-20260617-121850\` (fora da raiz; permanece no `.gitignore`). `npm run check:tree` PASS estrito.
