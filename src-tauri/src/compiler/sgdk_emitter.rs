@@ -1136,6 +1136,23 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                     sfx = sfx.to_uppercase()
                 ));
             }
+            LogicOp::PlayMusic { action, track, fade_ms: _ } => {
+                match action.as_str() {
+                    "stop" => {
+                        out.push_str(&format!(
+                            "{indent}XGM_stopPlay();\n",
+                            indent = indent_str,
+                        ));
+                    }
+                    _ => {
+                        out.push_str(&format!(
+                            "{indent}XGM_startPlay({track});\n",
+                            indent = indent_str,
+                            track = track,
+                        ));
+                    }
+                }
+            }
             LogicOp::SetVar { var_name, value } => {
                 let value_expr = render_math_expr(value);
                 out.push_str(&format!(

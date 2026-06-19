@@ -42,6 +42,7 @@ export type NodeType =
   | "effect_raster"
   | "logic_and"
   | "action_sound"
+  | "action_music"
   | "scroll_tilemap"
   | "load_scene"
   | "move_camera"
@@ -1418,6 +1419,12 @@ const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
     outputs: [{ id: "exec", label: "▶", kind: "exec" }],
     params: { sfx: "jump" },
   },
+  action_music: {
+    type: "action_music", label: "Play Music",
+    inputs: [{ id: "exec", label: "▶", kind: "exec" }],
+    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
+    params: { action: "play", track: "stage_theme", fade_ms: 500 },
+  },
   scroll_tilemap: {
     type: "scroll_tilemap", label: "Scroll Tilemap",
     inputs: [
@@ -1610,6 +1617,7 @@ export const NODE_DISPLAY_NAMES: Record<NodeType, string> = {
   effect_raster: "Efeito Raster",
   logic_and: "E (And)",
   action_sound: "Tocar Som",
+  action_music: "Tocar Musica",
   scroll_tilemap: "Rolar Cenario",
   load_scene: "Carregar Cena",
   move_camera: "Mover Camera",
@@ -1661,6 +1669,9 @@ const NODE_PARAM_DISPLAY_NAMES: Record<string, string> = {
   scanline_sprites: "Sprites/linha",
   scene: "Cena",
   sfx: "Som",
+  action: "Acao",
+  track: "Musica",
+  fade_ms: "Fade (ms)",
   source: "Fonte",
   speed_x: "Velocidade X",
   speed_y: "Velocidade Y",
@@ -1686,7 +1697,7 @@ const NODE_PALETTE_GROUPS: Array<{ label: string; icon: string; types: NodeType[
   { label: "Condicoes", icon: "?", types: ["condition_overlap", "condition_compare", "logic_and"] },
   { label: "Camera", icon: "\u25a3", types: ["camera_follow", "camera_bounds"] },
   { label: "Tilemap", icon: "#", types: ["set_tile", "load_scene"] },
-  { label: "Som", icon: "\ud83d\udd0a", types: ["action_sound"] },
+  { label: "Som", icon: "\ud83d\udd0a", types: ["action_sound", "action_music"] },
   { label: "Variaveis", icon: "\ud83d\udcca", types: ["var_set", "var_get", "logic_math"] },
   { label: "Fluxo", icon: "\u2937", types: ["flow_if", "flow_while", "flow_for", "timer"] },
   { label: "Estados", icon: "\u2690\ufe0f", types: ["fsm_state", "fsm_transition", "timeline_sequence"] },

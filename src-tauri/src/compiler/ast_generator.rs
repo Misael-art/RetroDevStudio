@@ -266,6 +266,11 @@ pub enum LogicOp {
     PlaySound {
         sfx: String,
     },
+    PlayMusic {
+        action: String,
+        track: String,
+        fade_ms: i32,
+    },
     SetVar {
         var_name: String,
         value: LogicMathExpr,
@@ -1717,6 +1722,13 @@ fn compile_logic_node(
                 &param_string(node, "sfx").unwrap_or_else(|| "sfx".to_string()),
             ),
         })),
+        "action_music" => Some(CompiledLogicNode::Linear(LogicOp::PlayMusic {
+            action: param_string(node, "action").unwrap_or_else(|| "play".to_string()),
+            track: sanitize_identifier(
+                &param_string(node, "track").unwrap_or_else(|| "bgm".to_string()),
+            ),
+            fade_ms: param_i32(node, "fade_ms", 500),
+        })),
         "sprite_anim" => {
             let target = param_string(node, "target")?;
             let anim_name = param_string(node, "anim").unwrap_or_else(|| "idle".to_string());
@@ -2457,6 +2469,7 @@ fn collect_logic_sound_names_from_ops(
                 }
             }
             LogicOp::MoveSprite { .. } => {}
+            LogicOp::PlayMusic { .. } => {}
             LogicOp::SourceBridgeError { .. } => {}
         }
     }

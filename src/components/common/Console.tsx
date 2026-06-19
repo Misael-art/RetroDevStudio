@@ -69,7 +69,7 @@ export default function Console({ variant = "drawer" }: ConsoleProps) {
     () =>
       consoleEntries.filter((entry) => {
         if (!entry.diagnostic) {
-          return severityFilter === "all" && areaFilter === "all";
+          return true;
         }
         return (
           (severityFilter === "all" || entry.diagnostic.severity === severityFilter) &&

@@ -4111,6 +4111,64 @@ describe("App build flow", () => {
     expect(paletteLabel?.textContent).toContain("3 / 4");
   });
 
+  it("persists active scene before closing project via topbar menu", async () => {
+    await act(async () => {
+      useEditorStore.setState({
+        activeProjectDir: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+        activeProjectName: "Mega Dummy",
+        activeTarget: "megadrive",
+        activeScene: {
+          scene_id: "main_scene",
+          display_name: "Main Scene",
+          entities: [{ entity_id: "player", transform: { x: 0, y: 0 }, components: {} }],
+          background_layers: [],
+        },
+        activeSceneSource: {
+          scene_id: "main_scene",
+          display_name: "Main Scene",
+          entities: [{ entity_id: "player", transform: { x: 0, y: 0 }, components: {} }],
+          background_layers: [],
+        },
+      });
+      await flush();
+    });
+
+    mocks.persistActiveScene.mockResolvedValue(true);
+
+    const menuTrigger = container.querySelector('[data-testid="unified-topbar-menu-trigger"]');
+    if (!(menuTrigger instanceof HTMLButtonElement)) {
+      throw new Error("Topbar menu trigger not found");
+    }
+
+    await act(async () => {
+      menuTrigger.click();
+      await flush();
+    });
+
+    const closeButton = Array.from(container.querySelectorAll("button")).find(
+      (button) => button.textContent?.trim() === "Fechar"
+    );
+    if (!(closeButton instanceof HTMLButtonElement)) {
+      throw new Error("Close menu action not found");
+    }
+
+    await act(async () => {
+      closeButton.click();
+      await flush();
+    });
+
+    expect(mocks.persistActiveScene).toHaveBeenCalledWith(
+      "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      "Fechar",
+      expect.any(String)
+    );
+
+    const state = useEditorStore.getState();
+    expect(state.activeProjectDir).toBe("");
+    expect(state.activeProjectName).toBe("");
+    expect(state.activeScene).toBeNull();
+  });
+
   it("creates and disposes the game audio context with the audio stream lifecycle", async () => {
     const audioContextCtor = vi.fn();
     const gainConnect = vi.fn();
