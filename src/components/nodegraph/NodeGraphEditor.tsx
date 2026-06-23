@@ -434,6 +434,7 @@ function getNodeVisualCategory(nodeOrType: GraphNode | NodeType): NodeVisualCate
       case "move_camera":
         return "camera";
       case "action_sound":
+      case "action_music":
         return "audio";
       case "timer":
         return "timer";
@@ -1161,6 +1162,7 @@ function isNodeType(value: unknown): value is NodeType {
     value === "effect_raster" ||
     value === "logic_and" ||
     value === "action_sound" ||
+    value === "action_music" ||
     value === "scroll_tilemap" ||
     value === "load_scene" ||
     value === "move_camera" ||

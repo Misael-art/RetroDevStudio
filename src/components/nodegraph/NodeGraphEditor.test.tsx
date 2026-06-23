@@ -498,6 +498,65 @@ describe("NodeGraphEditor helpers", () => {
     ).toBe(false);
   });
 
+  it("groups the action_music node under the Audio category instead of Error/Unsupported", () => {
+    const musicGraph: NodeGraph = {
+      nodes: [
+        { ...VALID_EXEC_GRAPH.nodes[0], id: "start", type: "event_start", x: 100, y: 100, outputs: [{ id: "exec", label: "▶", kind: "exec" }], params: {} },
+        {
+          id: "music",
+          type: "action_music",
+          label: "Play Music",
+          x: 360,
+          y: 120,
+          inputs: [{ id: "exec", label: "▶", kind: "exec" }],
+          outputs: [{ id: "exec", label: "▶", kind: "exec" }],
+          params: { action: "play", track: "stage_theme", fade_ms: 500 },
+        },
+      ],
+      edges: [{ id: "e_music", fromNode: "start", fromPort: "exec", toNode: "music", toPort: "exec" }],
+    };
+
+    const groups = buildNodeGraphGroupBoxes(musicGraph);
+    expect(groups.map((group) => group.label)).toContain("Audio");
+    expect(groups.map((group) => group.label)).not.toContain("Error/Unsupported");
+  });
+
+  it("round-trips an action_music node and accepts it during validation", () => {
+    const musicGraph: NodeGraph = {
+      nodes: [
+        { ...VALID_EXEC_GRAPH.nodes[0], id: "start", type: "event_start", x: 60, y: 60, outputs: [{ id: "exec", label: "▶", kind: "exec" }], params: {} },
+        {
+          id: "music",
+          type: "action_music",
+          label: "Play Music",
+          x: 320,
+          y: 60,
+          inputs: [{ id: "exec", label: "▶", kind: "exec" }],
+          outputs: [{ id: "exec", label: "▶", kind: "exec" }],
+          params: { action: "play", track: "stage_theme", fade_ms: 500 },
+        },
+      ],
+      edges: [{ id: "e_music", fromNode: "start", fromPort: "exec", toNode: "music", toPort: "exec" }],
+    };
+
+    const roundTripped = deserializeNodeGraph(serializeNodeGraph(musicGraph));
+    const musicNode = roundTripped.nodes.find((node) => node.id === "music");
+    expect(musicNode?.type).toBe("action_music");
+    expect(musicNode?.params).toEqual(
+      expect.objectContaining({ action: "play", track: "stage_theme", fade_ms: 500 })
+    );
+
+    const player = buildLogicSpriteEntity("player", "Player", roundTripped, {
+      animations: { idle: { frames: [0], fps: 8, loop: true } },
+    });
+    expect(
+      validateNodeGraph(roundTripped, {
+        selectedEntity: player,
+        sceneEntities: [player],
+      }).errors
+    ).toHaveLength(0);
+  });
+
   it("builds transition nodes from command.dat bindings without dropping unsupported tokens", () => {
     const command = VALID_EXEC_ENTITY.components.sprite!.commands![0];
     const transitionGraph = buildCommandTransitionGraph(command, "hero", "megadrive");

@@ -2231,6 +2231,38 @@ mod tests {
     }
 
     #[test]
+    fn main_c_emits_xgm_play_and_stop_for_play_music_node() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: vec![LogicScript {
+                ops: vec![
+                    LogicOp::PlayMusic {
+                        action: "play".to_string(),
+                        track: "stage_theme".to_string(),
+                        fade_ms: 500,
+                    },
+                    LogicOp::PlayMusic {
+                        action: "stop".to_string(),
+                        track: "stage_theme".to_string(),
+                        fade_ms: 0,
+                    },
+                ],
+            }],
+        };
+
+        let output = emit_sgdk(&ast, "Music Demo");
+
+        assert!(output.main_c.contains("XGM_startPlay(stage_theme);"));
+        assert!(output.main_c.contains("XGM_stopPlay();"));
+    }
+
+    #[test]
     fn main_c_emits_ring_buffer_matcher_for_input_command() {
         let ast = AstOutput {
             nodes: vec![
