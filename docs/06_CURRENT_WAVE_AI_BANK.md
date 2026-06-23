@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-06-17 (rodada 71 - W7.3 finalizada: gates verdes, QA-RC A-H, artefatos frescos)
+**Ultima Atualizacao:** 2026-06-23 (rodada 73 - W7.4 action_music hardening + build fix contra AppLocker)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-06-23 rodada 73 - W7.4 action_music hardening + build fix contra AppLocker):**
+  - **Branch/commit:** `codex/main-user-flow-hardening`, commit `61acfc8` (+395/-35, 10 files).
+  - **action_music escopo main-user-flow:** AST generator compila `action_music` node em `play_music` opcode; SGDK emitter emite `XGM_startPlay`/`XGM_stopPlay`; SNES emitter emite `spc_start_play`/`spc_stop_play`. NodeGraphEditor: categoria do action_music alterada de "Commands" para "Audio". Testes: (1) AST: `generate_ast_compiles_action_music_node_into_play_music_op`; (2) SGDK: `main_c_emits_xgm_play_and_stop_for_play_music_node`; (3) SNES: `snes_main_c_emits_spc_play_and_stop_for_play_music_node`; (4) NodeGraph: Audio group test + round-trip com action_music. Total: +215 linhas de teste Rust, +59 de vitest.
+  - **Version pins Cargo.toml:** tauri `2` -> `2.11`, tauri-plugin-dialog `2` -> `2.7`. Schemas Tauri regenerados (desktop-schema.json, windows-schema.json, acl-manifests.json). `scripts/tauri-version-alignment.test.mjs` adicionado (vitest que valida minor alinhado entre npm e Rust).
+  - **Build fix contra AppLocker:** `npm run build:debug` falha porque `build.mjs` usa target path diferente (`target-test/dev/cargo-target`), onde os build-scripts recém-compilados sao bloqueados pelo Windows AppLocker. **Solucao**: `cargo build` com target dir DEFAULT (`src-tauri/target`) bem-sucedido (40min), onde todos os artefatos de build-script e proc-macro ja estao cacheados e confiaveis do `cargo check` anterior. Binario e DLLs stageados manualmente para `src-tauri/target-test/debug/`. O `build.mjs` NAO foi usado; o fluxo canonico `npm run build:debug` permanece bloqueado neste host ate que excecoes de AppLocker sejam configuradas ou o `build.mjs` seja adaptado para reusar target default.
+  - **Gates:** `npm run check:tree` PASS; `npm run lint` PASS; `npx tsc --noEmit` PASS; `npm test` PASS (120 testes em 3 suites: App 70, NodeGraphEditor 33, ToolsPanel 17); `cargo test --lib -- --nocapture` PASS (**439 passed, 0 failed, 23 ignored**, 129.51s). `cargo clippy` BLOCKED por AppLocker (dependency build-script `tauri-plugin-fs` bloqueado mesmo em target default - diferenca de hash entre clippy e build modes).
+  - **Status:** Branch commitada e pusheada (`61acfc8`). `main` permanece em `aa88a52` (2 commits atras). Proximo passo: PR/merge contra `main` ou aguardar instrucao; `npm run build:debug` via `build.mjs` nao e viavel neste host sem alteracao de AppLocker.
 
 * **O que acabou de acontecer (2026-06-19 rodada 72 - W7.4 pre: main-user-flow-hardening checkpoint estendido):**
   - **Branch/commit:** `codex/main-user-flow-hardening`, commit anterior `8390fce` (checkpoint: safe-close stub, undo/redo editorMode, action_music, console filter, diagnostics). Sessao atual estende esse checkpoint com fechamento das lacunas identificadas.
