@@ -15,6 +15,7 @@ import NodeGraphEditor, {
   buildNodeGraphHardwareFeedback,
   canEditGraphNode,
   deserializeNodeGraph,
+  getNodeParamDisplayName,
   getNodeGraphDotGridStyle,
   getNodeGraphWheelZoomState,
   serializeNodeGraph,
@@ -555,6 +556,10 @@ describe("NodeGraphEditor helpers", () => {
         sceneEntities: [player],
       }).errors
     ).toHaveLength(0);
+  });
+
+  it("labels action_music fade as future support instead of runtime fade", () => {
+    expect(getNodeParamDisplayName("fade_ms")).toBe("Fade futuro (ms)");
   });
 
   it("builds transition nodes from command.dat bindings without dropping unsupported tokens", () => {

@@ -1673,7 +1673,7 @@ const NODE_PARAM_DISPLAY_NAMES: Record<string, string> = {
   sfx: "Som",
   action: "Acao",
   track: "Musica",
-  fade_ms: "Fade (ms)",
+  fade_ms: "Fade futuro (ms)",
   source: "Fonte",
   speed_x: "Velocidade X",
   speed_y: "Velocidade Y",
@@ -1799,7 +1799,7 @@ export function getNodeDisplayName(type: NodeType): string {
   return NODE_DISPLAY_NAMES[type] ?? type;
 }
 
-function getNodeParamDisplayName(key: string): string {
+export function getNodeParamDisplayName(key: string): string {
   return NODE_PARAM_DISPLAY_NAMES[key] ?? key;
 }
 

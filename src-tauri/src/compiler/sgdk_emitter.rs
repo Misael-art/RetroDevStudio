@@ -1136,19 +1136,21 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                     sfx = sfx.to_uppercase()
                 ));
             }
-            LogicOp::PlayMusic { action, track, fade_ms: _ } => {
+            LogicOp::PlayMusic { action, track, fade_ms } => {
                 match action.as_str() {
                     "stop" => {
                         out.push_str(&format!(
-                            "{indent}XGM_stopPlay();\n",
+                            "{indent}XGM_stopPlay(); /* fade_ms: {fade_ms} - suporte futuro */\n",
                             indent = indent_str,
+                            fade_ms = fade_ms,
                         ));
                     }
                     _ => {
                         out.push_str(&format!(
-                            "{indent}XGM_startPlay({track});\n",
+                            "{indent}XGM_startPlay({track}); /* fade_ms: {fade_ms} - suporte futuro */\n",
                             indent = indent_str,
                             track = track,
+                            fade_ms = fade_ms,
                         ));
                     }
                 }
@@ -2258,8 +2260,8 @@ mod tests {
 
         let output = emit_sgdk(&ast, "Music Demo");
 
-        assert!(output.main_c.contains("XGM_startPlay(stage_theme);"));
-        assert!(output.main_c.contains("XGM_stopPlay();"));
+        assert!(output.main_c.contains("XGM_startPlay(stage_theme); /* fade_ms: 500 - suporte futuro */"));
+        assert!(output.main_c.contains("XGM_stopPlay(); /* fade_ms: 0 - suporte futuro */"));
     }
 
     #[test]
