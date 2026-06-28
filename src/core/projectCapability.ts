@@ -58,6 +58,101 @@ export interface ParityRunResult {
   report: ParityReport | null;
 }
 
+export interface CrossCoreDivergence {
+  frame_index: number;
+  kind: string;
+  core_a_hash: string;
+  core_b_hash: string;
+  core_a_non_black: number;
+  core_b_non_black: number;
+}
+
+export interface CrossCoreReport {
+  schema: string;
+  rom_path: string;
+  rom_sha256: string;
+  golden_path: string;
+  golden_source: string;
+  core_a_label: string;
+  core_b_label: string;
+  frames_run: number;
+  report_a: ParityReport;
+  report_b: ParityReport;
+  cross_divergences: CrossCoreDivergence[];
+  cores_agree: boolean;
+  not_measured_by_this_harness: string[];
+  report_path?: string;
+}
+
+export interface CrossCoreParityResult {
+  ok: boolean;
+  message: string;
+  golden_path: string;
+  golden_source: string;
+  core_a_label: string;
+  core_b_label: string;
+  frames_run: number;
+  cores_agree: boolean;
+  cross_divergence_count: number;
+  core_a_divergence_count: number;
+  core_b_divergence_count: number;
+  report_path: string;
+  report: CrossCoreReport | null;
+}
+
+export interface CycleFrameSample {
+  frame_index: number;
+  host_frame_time_micros?: number | null;
+  estimated_frame_budget_cycles?: number | null;
+  estimate_label?: string | null;
+}
+
+export interface CycleEvidenceSource {
+  kind: string;
+  label: string;
+  path: string;
+  observed: boolean;
+}
+
+export interface CycleTraceEvidence {
+  status: "observed" | "missing" | string;
+  source: string;
+  detail: string;
+}
+
+export interface CycleReportLimitations {
+  not_cycle_accurate: boolean;
+  missing: string[];
+  notes: string[];
+}
+
+export interface CycleReport {
+  schema: string;
+  rom_path: string;
+  rom_sha256: string;
+  golden_path: string;
+  core_label: string;
+  frames_run: number;
+  frame_samples: CycleFrameSample[];
+  evidence_sources: CycleEvidenceSource[];
+  m68k_cycle_trace: CycleTraceEvidence;
+  z80_cycle_trace: CycleTraceEvidence;
+  vdp_scanline_trace: CycleTraceEvidence;
+  dma_timing: CycleTraceEvidence;
+  limitations: CycleReportLimitations;
+  report_path: string;
+}
+
+export interface CycleReportResult {
+  ok: boolean;
+  message: string;
+  golden_path: string;
+  core_label: string;
+  frames_run: number;
+  report_path: string;
+  report: CycleReport | null;
+}
+
 export interface ProjectCapabilityReport {
   project_dir: string;
   documentation: CapabilityAxisReport;

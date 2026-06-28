@@ -182,7 +182,11 @@ impl CoreTarget {
 
     fn candidate_names(self) -> &'static [&'static str] {
         match self {
-            Self::MegaDrive => &["genesis_plus_gx_libretro", "picodrive_libretro"],
+            Self::MegaDrive => &[
+                "genesis_plus_gx_libretro",
+                "picodrive_libretro",
+                "blastem_libretro",
+            ],
             Self::Snes => &["snes9x_libretro", "bsnes_libretro"],
         }
     }
@@ -1826,6 +1830,13 @@ mod tests {
         assert_eq!(detect_rom_target(&snes_rom), Some(CoreTarget::Snes));
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn megadrive_autodetect_candidates_include_blastem_when_available() {
+        assert!(CoreTarget::MegaDrive
+            .candidate_names()
+            .contains(&"blastem_libretro"));
     }
 
     #[test]

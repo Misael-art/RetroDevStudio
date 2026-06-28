@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
@@ -291,7 +292,6 @@ pub fn compare_runs(reference: &ParityReport, observed: &ParityReport) -> Vec<Pa
             expected: reference.core_label.clone(),
             observed: observed.core_label.clone(),
         });
-        return divergences;
     }
     if reference.frames_run != observed.frames_run {
         divergences.push(ParityDivergence {
@@ -300,7 +300,6 @@ pub fn compare_runs(reference: &ParityReport, observed: &ParityReport) -> Vec<Pa
             expected: reference.frames_run.to_string(),
             observed: observed.frames_run.to_string(),
         });
-        return divergences;
     }
     let limit = reference.frame_hashes.len().min(observed.frame_hashes.len());
     for index in 0..limit {
@@ -313,7 +312,6 @@ pub fn compare_runs(reference: &ParityReport, observed: &ParityReport) -> Vec<Pa
                 expected: a.framebuffer_sha256.clone(),
                 observed: b.framebuffer_sha256.clone(),
             });
-            return divergences;
         }
         if a.non_black_pixels != b.non_black_pixels {
             divergences.push(ParityDivergence {
@@ -322,7 +320,6 @@ pub fn compare_runs(reference: &ParityReport, observed: &ParityReport) -> Vec<Pa
                 expected: a.non_black_pixels.to_string(),
                 observed: b.non_black_pixels.to_string(),
             });
-            return divergences;
         }
     }
     if reference.frame_hashes.len() != observed.frame_hashes.len() {
@@ -332,7 +329,6 @@ pub fn compare_runs(reference: &ParityReport, observed: &ParityReport) -> Vec<Pa
             expected: reference.frame_hashes.len().to_string(),
             observed: observed.frame_hashes.len().to_string(),
         });
-        return divergences;
     }
     if reference.final_state_sha256 != observed.final_state_sha256 {
         divergences.push(ParityDivergence {
@@ -424,6 +420,616 @@ fn render_parity_markdown(report: &ParityReport) -> String {
     out
 }
 
+pub const CROSS_CORE_REPORT_SCHEMA: &str = "rds-cross-core-parity/v1";
+pub const CYCLE_REPORT_SCHEMA: &str = "rds-cycle-report/v1";
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CrossCoreDivergence {
+    pub frame_index: u32,
+    pub kind: String,
+    pub core_a_hash: String,
+    pub core_b_hash: String,
+    pub core_a_non_black: usize,
+    pub core_b_non_black: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CrossCoreReport {
+    pub schema: String,
+    pub rom_path: String,
+    pub rom_sha256: String,
+    pub golden_path: String,
+    pub golden_source: String,
+    pub core_a_label: String,
+    pub core_b_label: String,
+    pub frames_run: u32,
+    pub report_a: ParityReport,
+    pub report_b: ParityReport,
+    pub cross_divergences: Vec<CrossCoreDivergence>,
+    pub cores_agree: bool,
+    pub not_measured_by_this_harness: Vec<String>,
+}
+
+impl CrossCoreReport {
+    fn not_measured_default() -> Vec<String> {
+        vec![
+            "audio_exact_match".to_string(),
+            "m68k_cycle_trace".to_string(),
+            "z80_cycle_trace".to_string(),
+            "vdp_scanline_trace".to_string(),
+            "dma_timing".to_string(),
+        ]
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CycleFrameSample {
+    pub frame_index: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host_frame_time_micros: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_frame_budget_cycles: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimate_label: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CycleEvidenceSource {
+    pub kind: String,
+    pub label: String,
+    pub path: String,
+    pub observed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CycleTraceEvidence {
+    pub status: String,
+    pub source: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CycleReportLimitations {
+    pub not_cycle_accurate: bool,
+    pub missing: Vec<String>,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CycleReport {
+    pub schema: String,
+    pub rom_path: String,
+    pub rom_sha256: String,
+    pub golden_path: String,
+    pub core_label: String,
+    pub frames_run: u32,
+    pub frame_samples: Vec<CycleFrameSample>,
+    pub evidence_sources: Vec<CycleEvidenceSource>,
+    pub m68k_cycle_trace: CycleTraceEvidence,
+    pub z80_cycle_trace: CycleTraceEvidence,
+    pub vdp_scanline_trace: CycleTraceEvidence,
+    pub dma_timing: CycleTraceEvidence,
+    pub limitations: CycleReportLimitations,
+    pub report_path: String,
+}
+
+fn missing_trace(field: &str) -> CycleTraceEvidence {
+    CycleTraceEvidence {
+        status: "missing".to_string(),
+        source: "libretro".to_string(),
+        detail: format!(
+            "{field} nao e exposto pela API Libretro padrao usada por este harness."
+        ),
+    }
+}
+
+pub fn build_missing_cycle_report(
+    golden_path: &Path,
+    parity_report: &ParityReport,
+    frames_run: u32,
+    frame_samples: Vec<CycleFrameSample>,
+) -> CycleReport {
+    let missing = vec![
+        "m68k_cycle_trace".to_string(),
+        "z80_cycle_trace".to_string(),
+        "vdp_scanline_trace".to_string(),
+        "dma_timing".to_string(),
+    ];
+
+    CycleReport {
+        schema: CYCLE_REPORT_SCHEMA.to_string(),
+        rom_path: parity_report.rom_path.clone(),
+        rom_sha256: parity_report.rom_sha256.clone(),
+        golden_path: golden_path.to_string_lossy().to_string(),
+        core_label: parity_report.core_label.clone(),
+        frames_run,
+        frame_samples,
+        evidence_sources: vec![CycleEvidenceSource {
+            kind: "libretro_frame_replay".to_string(),
+            label: parity_report.core_label.clone(),
+            path: parity_report.rom_path.clone(),
+            observed: true,
+        }],
+        m68k_cycle_trace: missing_trace("m68k_cycle_trace"),
+        z80_cycle_trace: missing_trace("z80_cycle_trace"),
+        vdp_scanline_trace: missing_trace("vdp_scanline_trace"),
+        dma_timing: missing_trace("dma_timing"),
+        limitations: CycleReportLimitations {
+            not_cycle_accurate: true,
+            missing,
+            notes: vec![
+                "Este relatório evidencia replay/frame timing, mas nao mede ciclos internos de CPU/VDP/DMA.".to_string(),
+                "Sem fonte de trace estruturada (ex.: adapter BlastEm ou core com trace), cycle accuracy permanece nao medida.".to_string(),
+            ],
+        },
+        report_path: String::new(),
+    }
+}
+
+pub fn run_cross_core_parity(
+    rom_path: &Path,
+    golden_path: &Path,
+    core_a_path: &Path,
+    core_b_path: &Path,
+    frame_limit: Option<u32>,
+    report_dir: &Path,
+) -> Result<(CrossCoreReport, PathBuf), String> {
+    if !rom_path.exists() {
+        return Err(format!(
+            "ROM '{}' nao existe para cross-core parity.",
+            rom_path.display()
+        ));
+    }
+    if !golden_path.exists() {
+        return Err(format!(
+            "Golden input '{}' nao existe para cross-core parity.",
+            golden_path.display()
+        ));
+    }
+    if !core_a_path.exists() {
+        return Err(format!(
+            "Core A '{}' nao existe para cross-core parity.",
+            core_a_path.display()
+        ));
+    }
+    if !core_b_path.exists() {
+        return Err(format!(
+            "Core B '{}' nao existe para cross-core parity.",
+            core_b_path.display()
+        ));
+    }
+
+    let golden = load_golden(golden_path)?;
+    let mut inputs: Vec<JoypadState> = golden.inputs().to_vec();
+    if let Some(limit) = frame_limit {
+        let limit = limit as usize;
+        if inputs.len() > limit {
+            inputs.truncate(limit);
+        }
+    }
+    if inputs.is_empty() {
+        return Err(format!(
+            "Golden input '{}' produced zero frames; refusing to capture a cross-core parity report.",
+            golden_path.display()
+        ));
+    }
+
+    let rom_bytes = fs::read(rom_path).map_err(|error| {
+        format!(
+            "Could not read ROM '{}' for cross-core parity: {}",
+            rom_path.display(),
+            error
+        )
+    })?;
+    let rom_sha256 = sha256_hex(&rom_bytes);
+
+    let mut core_a = EmulatorCore::new(Some(core_a_path));
+    core_a.load_rom(rom_path)?;
+    let core_a_initial = core_a.capture_runtime_state_bytes()?;
+    let report_a = run_parity_capture(
+        &mut core_a,
+        rom_path,
+        &rom_sha256,
+        &core_a_initial,
+        &inputs,
+    )?;
+    core_a.stop().ok();
+
+    let mut core_b = EmulatorCore::new(Some(core_b_path));
+    core_b.load_rom(rom_path)?;
+    let core_b_initial = core_b.capture_runtime_state_bytes()?;
+    let report_b = run_parity_capture(
+        &mut core_b,
+        rom_path,
+        &rom_sha256,
+        &core_b_initial,
+        &inputs,
+    )?;
+    core_b.stop().ok();
+
+    let cross_divergences = compare_cross_core(&report_a, &report_b);
+    let cores_agree = cross_divergences.is_empty();
+
+    let report = CrossCoreReport {
+        schema: CROSS_CORE_REPORT_SCHEMA.to_string(),
+        rom_path: rom_path.to_string_lossy().to_string(),
+        rom_sha256,
+        golden_path: golden_path.to_string_lossy().to_string(),
+        golden_source: golden.source_label().to_string(),
+        core_a_label: report_a.core_label.clone(),
+        core_b_label: report_b.core_label.clone(),
+        frames_run: inputs.len() as u32,
+        report_a,
+        report_b,
+        cross_divergences,
+        cores_agree,
+        not_measured_by_this_harness: CrossCoreReport::not_measured_default(),
+    };
+
+    let written = write_cross_core_report(report_dir, &report)?;
+    Ok((report, written))
+}
+
+pub fn run_cycle_report(
+    rom_path: &Path,
+    golden_path: &Path,
+    core_path: &Path,
+    frame_limit: Option<u32>,
+    report_dir: &Path,
+) -> Result<(CycleReport, PathBuf), String> {
+    if !rom_path.exists() {
+        return Err(format!(
+            "ROM '{}' nao existe para cycle report.",
+            rom_path.display()
+        ));
+    }
+    if !golden_path.exists() {
+        return Err(format!(
+            "Golden input '{}' nao existe para cycle report.",
+            golden_path.display()
+        ));
+    }
+    if !core_path.exists() {
+        return Err(format!(
+            "Core/reference '{}' nao existe para cycle report.",
+            core_path.display()
+        ));
+    }
+
+    let golden = load_golden(golden_path)?;
+    let mut inputs: Vec<JoypadState> = golden.inputs().to_vec();
+    if let Some(limit) = frame_limit {
+        let limit = limit as usize;
+        if inputs.len() > limit {
+            inputs.truncate(limit);
+        }
+    }
+    if inputs.is_empty() {
+        return Err(format!(
+            "Golden input '{}' produced zero frames; refusing to generate an empty cycle report.",
+            golden_path.display()
+        ));
+    }
+
+    let rom_bytes = fs::read(rom_path).map_err(|error| {
+        format!(
+            "Could not read ROM '{}' for cycle report: {}",
+            rom_path.display(),
+            error
+        )
+    })?;
+    let rom_sha256 = sha256_hex(&rom_bytes);
+
+    let mut core = EmulatorCore::new(Some(core_path));
+    core.load_rom(rom_path)?;
+    let initial_state = core.capture_runtime_state_bytes()?;
+    core.restore_runtime_state_bytes(&initial_state)?;
+    let core_label = core.loaded_core_label().unwrap_or("unknown").to_string();
+
+    let mut frame_hashes = Vec::with_capacity(inputs.len());
+    let mut frame_samples = Vec::with_capacity(inputs.len());
+    for (index, joypad) in inputs.iter().enumerate() {
+        core.set_joypad(joypad.clone())?;
+        let started = Instant::now();
+        core.run_frame()?;
+        let elapsed = started.elapsed();
+        let (framebuffer, _size, _pixel_format) = core.get_framebuffer()?;
+        frame_hashes.push(FrameHash {
+            frame_index: index as u32,
+            framebuffer_sha256: sha256_hex(&framebuffer),
+            non_black_pixels: count_non_black_pixels(&framebuffer),
+        });
+        frame_samples.push(CycleFrameSample {
+            frame_index: index as u32,
+            host_frame_time_micros: Some(
+                u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX),
+            ),
+            estimated_frame_budget_cycles: None,
+            estimate_label: None,
+        });
+    }
+
+    let final_state = core.capture_runtime_state_bytes()?;
+    core.stop().ok();
+    let parity_report = ParityReport::new(
+        rom_path.to_string_lossy().to_string(),
+        rom_sha256,
+        core_label,
+        inputs.len() as u32,
+        frame_hashes,
+        sha256_hex(&final_state),
+        true,
+        Vec::new(),
+        false,
+    );
+
+    let mut report = build_missing_cycle_report(
+        golden_path,
+        &parity_report,
+        inputs.len() as u32,
+        frame_samples,
+    );
+    if let Some(source) = report.evidence_sources.first_mut() {
+        source.path = core_path.to_string_lossy().to_string();
+    }
+    let written = write_cycle_report(report_dir, &report)?;
+    report.report_path = written.to_string_lossy().to_string();
+    Ok((report, written))
+}
+
+pub fn compare_cross_core(
+    report_a: &ParityReport,
+    report_b: &ParityReport,
+) -> Vec<CrossCoreDivergence> {
+    let mut divergences = Vec::new();
+    if report_a.rom_sha256 != report_b.rom_sha256 {
+        divergences.push(CrossCoreDivergence {
+            frame_index: u32::MAX,
+            kind: "rom_sha256_mismatch".to_string(),
+            core_a_hash: report_a.rom_sha256.clone(),
+            core_b_hash: report_b.rom_sha256.clone(),
+            core_a_non_black: 0,
+            core_b_non_black: 0,
+        });
+        return divergences;
+    }
+    if report_a.frames_run != report_b.frames_run {
+        divergences.push(CrossCoreDivergence {
+            frame_index: u32::MAX,
+            kind: "frames_run_mismatch".to_string(),
+            core_a_hash: report_a.frames_run.to_string(),
+            core_b_hash: report_b.frames_run.to_string(),
+            core_a_non_black: 0,
+            core_b_non_black: 0,
+        });
+        return divergences;
+    }
+    let limit = report_a.frame_hashes.len().min(report_b.frame_hashes.len());
+    for index in 0..limit {
+        let a = &report_a.frame_hashes[index];
+        let b = &report_b.frame_hashes[index];
+        if a.framebuffer_sha256 != b.framebuffer_sha256 {
+            divergences.push(CrossCoreDivergence {
+                frame_index: a.frame_index,
+                kind: "cross_core_frame_hash_mismatch".to_string(),
+                core_a_hash: a.framebuffer_sha256.clone(),
+                core_b_hash: b.framebuffer_sha256.clone(),
+                core_a_non_black: a.non_black_pixels,
+                core_b_non_black: b.non_black_pixels,
+            });
+        }
+    }
+    if report_a.frame_hashes.len() != report_b.frame_hashes.len() {
+        divergences.push(CrossCoreDivergence {
+            frame_index: limit as u32,
+            kind: "frame_hashes_length_mismatch".to_string(),
+            core_a_hash: report_a.frame_hashes.len().to_string(),
+            core_b_hash: report_b.frame_hashes.len().to_string(),
+            core_a_non_black: 0,
+            core_b_non_black: 0,
+        });
+    }
+    if report_a.final_state_sha256 != report_b.final_state_sha256 {
+        divergences.push(CrossCoreDivergence {
+            frame_index: u32::MAX,
+            kind: "cross_core_final_state_mismatch".to_string(),
+            core_a_hash: report_a.final_state_sha256.clone(),
+            core_b_hash: report_b.final_state_sha256.clone(),
+            core_a_non_black: 0,
+            core_b_non_black: 0,
+        });
+    }
+    divergences
+}
+
+pub fn write_cross_core_report(
+    report_dir: &Path,
+    report: &CrossCoreReport,
+) -> Result<PathBuf, String> {
+    fs::create_dir_all(report_dir).map_err(|error| {
+        format!(
+            "Could not create cross-core report dir '{}': {}",
+            report_dir.display(),
+            error
+        )
+    })?;
+    let json_path = report_dir.join("cross-core-parity-report.json");
+    let md_path = report_dir.join("cross-core-parity-report.md");
+
+    let json = serde_json::to_string_pretty(report)
+        .map_err(|error| format!("Could not serialize cross-core parity report: {error}"))?;
+    fs::write(&json_path, format!("{json}\n")).map_err(|error| {
+        format!(
+            "Could not write cross-core parity report '{}': {}",
+            json_path.display(),
+            error
+        )
+    })?;
+    let markdown = render_cross_core_markdown(report);
+    fs::write(&md_path, markdown).map_err(|error| {
+        format!(
+            "Could not write cross-core parity report markdown '{}': {}",
+            md_path.display(),
+            error
+        )
+    })?;
+    Ok(json_path)
+}
+
+fn render_cross_core_markdown(report: &CrossCoreReport) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("# {}\n\n", report.schema));
+    out.push_str(&format!("- **ROM**: `{}`\n", report.rom_path));
+    out.push_str(&format!("- **ROM SHA-256**: `{}`\n", report.rom_sha256));
+    out.push_str(&format!("- **Golden**: `{}`\n", report.golden_path));
+    out.push_str(&format!("- **Golden source**: `{}`\n", report.golden_source));
+    out.push_str(&format!("- **Core A**: `{}`\n", report.core_a_label));
+    out.push_str(&format!("- **Core B**: `{}`\n", report.core_b_label));
+    out.push_str(&format!("- **Frames run**: {}\n", report.frames_run));
+    out.push_str(&format!(
+        "- **Cores agree**: {}\n",
+        if report.cores_agree { "sim" } else { "nao" }
+    ));
+    out.push_str(&format!(
+        "- **Cross-core divergences**: {}\n",
+        report.cross_divergences.len()
+    ));
+    if !report.cross_divergences.is_empty() {
+        out.push_str("\n## Cross-core divergences\n\n");
+        for d in &report.cross_divergences {
+            out.push_str(&format!(
+                "- frame {}: `{}` core_a=`{}` core_b=`{}` (non_black: {} vs {})\n",
+                d.frame_index,
+                d.kind,
+                d.core_a_hash,
+                d.core_b_hash,
+                d.core_a_non_black,
+                d.core_b_non_black
+            ));
+        }
+    }
+    out.push_str("\n## Per-core deterministic\n\n");
+    out.push_str(&format!(
+        "- Core A deterministic: {}\n",
+        if report.report_a.deterministic { "sim" } else { "nao" }
+    ));
+    out.push_str(&format!(
+        "- Core B deterministic: {}\n",
+        if report.report_b.deterministic { "sim" } else { "nao" }
+    ));
+    out.push_str(&format!(
+        "- Core A report: `{}`\n",
+        report_dir_suffix(&report.report_a)
+    ));
+    out.push_str(&format!(
+        "- Core B report: `{}`\n",
+        report_dir_suffix(&report.report_b)
+    ));
+    if !report.not_measured_by_this_harness.is_empty() {
+        out.push_str("\n## Not measured by this harness\n\n");
+        for field in &report.not_measured_by_this_harness {
+            out.push_str(&format!("- {field}\n"));
+        }
+    }
+    out
+}
+
+pub fn write_cycle_report(report_dir: &Path, report: &CycleReport) -> Result<PathBuf, String> {
+    fs::create_dir_all(report_dir).map_err(|error| {
+        format!(
+            "Could not create cycle report dir '{}': {}",
+            report_dir.display(),
+            error
+        )
+    })?;
+    let json_path = report_dir.join("cycle-report.json");
+    let md_path = report_dir.join("cycle-report.md");
+    let mut persisted = report.clone();
+    persisted.report_path = json_path.to_string_lossy().to_string();
+
+    let json = serde_json::to_string_pretty(&persisted)
+        .map_err(|error| format!("Could not serialize cycle report: {error}"))?;
+    fs::write(&json_path, format!("{json}\n")).map_err(|error| {
+        format!(
+            "Could not write cycle report '{}': {}",
+            json_path.display(),
+            error
+        )
+    })?;
+    let markdown = render_cycle_markdown(&persisted);
+    fs::write(&md_path, markdown).map_err(|error| {
+        format!(
+            "Could not write cycle report markdown '{}': {}",
+            md_path.display(),
+            error
+        )
+    })?;
+    Ok(json_path)
+}
+
+fn render_cycle_markdown(report: &CycleReport) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("# {}\n\n", report.schema));
+    out.push_str(&format!("- **ROM**: `{}`\n", report.rom_path));
+    out.push_str(&format!("- **ROM SHA-256**: `{}`\n", report.rom_sha256));
+    out.push_str(&format!("- **Golden**: `{}`\n", report.golden_path));
+    out.push_str(&format!("- **Core/reference**: `{}`\n", report.core_label));
+    out.push_str(&format!("- **Frames run**: {}\n", report.frames_run));
+    out.push_str(&format!(
+        "- **not cycle accurate**: {}\n",
+        report.limitations.not_cycle_accurate
+    ));
+    out.push_str("\n## Cycle Trace Availability\n\n");
+    out.push_str(&format!(
+        "- m68k_cycle_trace: `{}` - {}\n",
+        report.m68k_cycle_trace.status, report.m68k_cycle_trace.detail
+    ));
+    out.push_str(&format!(
+        "- z80_cycle_trace: `{}` - {}\n",
+        report.z80_cycle_trace.status, report.z80_cycle_trace.detail
+    ));
+    out.push_str(&format!(
+        "- vdp_scanline_trace: `{}` - {}\n",
+        report.vdp_scanline_trace.status, report.vdp_scanline_trace.detail
+    ));
+    out.push_str(&format!(
+        "- dma_timing: `{}` - {}\n",
+        report.dma_timing.status, report.dma_timing.detail
+    ));
+    if !report.frame_samples.is_empty() {
+        out.push_str("\n## Frame Samples\n\n");
+        for sample in report.frame_samples.iter().take(12) {
+            let timing = sample
+                .host_frame_time_micros
+                .map(|micros| format!("{micros}us host"))
+                .unwrap_or_else(|| "timing missing".to_string());
+            out.push_str(&format!("- frame {}: {timing}\n", sample.frame_index));
+        }
+    }
+    if !report.limitations.missing.is_empty() {
+        out.push_str("\n## Missing Evidence\n\n");
+        for item in &report.limitations.missing {
+            out.push_str(&format!("- {item}\n"));
+        }
+    }
+    if !report.limitations.notes.is_empty() {
+        out.push_str("\n## Notes\n\n");
+        for note in &report.limitations.notes {
+            out.push_str(&format!("- {note}\n"));
+        }
+    }
+    out
+}
+
+fn report_dir_suffix(report: &ParityReport) -> String {
+    format!(
+        "frames={} det={} div={}",
+        report.frames_run,
+        if report.deterministic { 1 } else { 0 },
+        report.divergences.len()
+    )
+}
+
 fn count_non_black_pixels(framebuffer: &[u8]) -> usize {
     framebuffer
         .chunks_exact(4)
@@ -490,11 +1096,27 @@ mod tests {
         let a = sample_report(true, None);
         let mut b = a.clone();
         b.frame_hashes[2].framebuffer_sha256 = "different".to_string();
-        b.final_state_sha256 = "different".to_string();
         let divergences = compare_runs(&a, &b);
         assert_eq!(divergences.len(), 1);
         assert_eq!(divergences[0].kind, "frame_hash_mismatch");
         assert_eq!(divergences[0].frame_index, 2);
+    }
+
+    #[test]
+    fn compare_runs_keeps_final_state_divergence_when_frame_hash_differs() {
+        let a = sample_report(true, None);
+        let mut b = a.clone();
+        b.frame_hashes[2].framebuffer_sha256 = "different".to_string();
+        b.final_state_sha256 = "different-state".to_string();
+
+        let divergences = compare_runs(&a, &b);
+
+        assert!(divergences
+            .iter()
+            .any(|divergence| divergence.kind == "frame_hash_mismatch"));
+        assert!(divergences
+            .iter()
+            .any(|divergence| divergence.kind == "final_state_mismatch"));
     }
 
     #[test]
@@ -738,5 +1360,411 @@ mod tests {
 
         emulator.stop().expect("stop");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ── Cross-core tests ───────────────────────────────────────────────────────
+
+    fn sample_cross_core_report(agree: bool, frame_hash_diff_at: Option<u32>) -> CrossCoreReport {
+        let core_a = sample_report(true, None);
+        let mut core_b = core_a.clone();
+        if let Some(frame_idx) = frame_hash_diff_at {
+            if let Some(frame) = core_b
+                .frame_hashes
+                .iter_mut()
+                .find(|f| f.frame_index == frame_idx)
+            {
+                frame.framebuffer_sha256 = "different_core_hash".to_string();
+                frame.non_black_pixels = 99;
+            }
+            core_b.final_state_sha256 = "different_final".to_string();
+        }
+        let cross_divergences = compare_cross_core(&core_a, &core_b);
+        CrossCoreReport {
+            schema: CROSS_CORE_REPORT_SCHEMA.to_string(),
+            rom_path: "/tmp/rom.bin".to_string(),
+            rom_sha256: "abc123".to_string(),
+            golden_path: "/tmp/golden.rds-input.json".to_string(),
+            golden_source: "script".to_string(),
+            core_a_label: "MockCoreA".to_string(),
+            core_b_label: "MockCoreB".to_string(),
+            frames_run: 4,
+            report_a: core_a,
+            report_b: core_b,
+            cross_divergences,
+            cores_agree: agree,
+            not_measured_by_this_harness: CrossCoreReport::not_measured_default(),
+        }
+    }
+
+    #[test]
+    fn compare_cross_core_returns_empty_for_identical_reports() {
+        let divs = compare_cross_core(&sample_report(true, None), &sample_report(true, None));
+        assert!(divs.is_empty());
+    }
+
+    #[test]
+    fn compare_cross_core_detects_frame_hash_divergence() {
+        let a = sample_report(true, None);
+        let mut b = a.clone();
+        b.frame_hashes[2].framebuffer_sha256 = "core_b_hash".to_string();
+        b.final_state_sha256 = "core_b_final".to_string();
+        let divs = compare_cross_core(&a, &b);
+        assert!(!divs.is_empty());
+        assert_eq!(divs[0].kind, "cross_core_frame_hash_mismatch");
+        assert_eq!(divs[0].frame_index, 2);
+    }
+
+    #[test]
+    fn compare_cross_core_keeps_final_state_divergence_when_frame_hash_differs() {
+        let a = sample_report(true, None);
+        let mut b = a.clone();
+        b.frame_hashes[1].framebuffer_sha256 = "core_b_hash".to_string();
+        b.final_state_sha256 = "core_b_final".to_string();
+
+        let divs = compare_cross_core(&a, &b);
+
+        assert!(divs
+            .iter()
+            .any(|divergence| divergence.kind == "cross_core_frame_hash_mismatch"));
+        assert!(divs
+            .iter()
+            .any(|divergence| divergence.kind == "cross_core_final_state_mismatch"));
+    }
+
+    #[test]
+    fn compare_cross_core_detects_final_state_divergence_when_hashes_agree() {
+        let a = sample_report(true, None);
+        let mut b = a.clone();
+        b.frame_hashes = a.frame_hashes.clone();
+        b.final_state_sha256 = "core_b_final".to_string();
+        let divs = compare_cross_core(&a, &b);
+        assert!(!divs.is_empty());
+        assert_eq!(divs[0].kind, "cross_core_final_state_mismatch");
+    }
+
+    #[test]
+    fn compare_cross_core_detects_rom_sha256_mismatch_early() {
+        let a = sample_report(true, None);
+        let mut b = a.clone();
+        b.rom_sha256 = "different-rom".to_string();
+        let divs = compare_cross_core(&a, &b);
+        assert_eq!(divs.len(), 1);
+        assert_eq!(divs[0].kind, "rom_sha256_mismatch");
+    }
+
+    #[test]
+    fn compare_cross_core_detects_frames_run_mismatch() {
+        let a = sample_report(true, None);
+        let mut b = a.clone();
+        b.frames_run = a.frames_run + 1;
+        let divs = compare_cross_core(&a, &b);
+        assert_eq!(divs.len(), 1);
+        assert_eq!(divs[0].kind, "frames_run_mismatch");
+    }
+
+    #[test]
+    fn write_cross_core_report_creates_json_and_md() {
+        let dir = temp_dir("cross-core-writer");
+        let report = sample_cross_core_report(true, None);
+        let path = write_cross_core_report(&dir, &report).expect("write cross-core report");
+        assert!(path.exists());
+        let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        assert!(
+            name.contains("cross-core"),
+            "file name should contain cross-core, got: {name}"
+        );
+
+        let json = fs::read_to_string(&path).expect("read json");
+        assert!(json.contains(CROSS_CORE_REPORT_SCHEMA));
+        assert!(json.contains("MockCoreA"));
+        assert!(json.contains("MockCoreB"));
+
+        let md_path = dir.join("cross-core-parity-report.md");
+        assert!(md_path.exists());
+        let md = fs::read_to_string(&md_path).expect("read md");
+        assert!(md.contains("Cross-core"));
+        assert!(md.contains("Cores agree"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_cross_core_report_shows_divergences_in_markdown() {
+        let dir = temp_dir("cross-core-writer-div");
+        let report = sample_cross_core_report(false, Some(1));
+        write_cross_core_report(&dir, &report).expect("write");
+        let md = fs::read_to_string(dir.join("cross-core-parity-report.md")).expect("read");
+        assert!(md.contains("Cross-core divergences"));
+        assert!(md.contains("cross_core_frame_hash_mismatch"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn build_missing_cycle_report_marks_trace_sources_as_missing() {
+        let base = sample_report(true, None);
+        let report = build_missing_cycle_report(
+            Path::new("/tmp/golden.rds-input.json"),
+            &base,
+            4,
+            Vec::new(),
+        );
+
+        assert_eq!(report.schema, CYCLE_REPORT_SCHEMA);
+        assert_eq!(report.frames_run, 4);
+        assert_eq!(report.m68k_cycle_trace.status, "missing");
+        assert_eq!(report.z80_cycle_trace.status, "missing");
+        assert_eq!(report.vdp_scanline_trace.status, "missing");
+        assert_eq!(report.dma_timing.status, "missing");
+        assert!(report.limitations.not_cycle_accurate);
+    }
+
+    #[test]
+    fn write_cycle_report_creates_json_and_markdown_with_limitations() {
+        let dir = temp_dir("cycle-writer");
+        let base = sample_report(true, None);
+        let report = build_missing_cycle_report(
+            Path::new("/tmp/golden.rds-input.json"),
+            &base,
+            4,
+            vec![CycleFrameSample {
+                frame_index: 0,
+                host_frame_time_micros: Some(1234),
+                estimated_frame_budget_cycles: None,
+                estimate_label: None,
+            }],
+        );
+
+        let path = write_cycle_report(&dir, &report).expect("write cycle report");
+
+        assert!(path.exists());
+        let json = fs::read_to_string(&path).expect("read json");
+        assert!(json.contains(CYCLE_REPORT_SCHEMA));
+        assert!(json.contains("\"report_path\""));
+        let md = fs::read_to_string(dir.join("cycle-report.md")).expect("read md");
+        assert!(md.contains("not cycle accurate"));
+        assert!(md.contains("m68k_cycle_trace"));
+        assert!(md.contains("1234us host"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_cross_core_parity_rejects_empty_script() {
+        use crate::emulator::libretro_ffi::test_helpers::{compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom};
+
+        let _serial = test_serial_guard();
+        let dir = emu_temp_dir("cross-core-empty");
+        let core_path = compile_mock_core(&dir);
+        let rom_path = write_test_rom(&dir, "cross_empty_rom", "gen");
+        let golden_path = dir.join("empty.rds-input.json");
+        let script = InputScript::from_frames(Vec::new());
+        fs::write(&golden_path, serde_json::to_vec_pretty(&script).expect("serialize")).expect("write golden");
+        let report_dir = dir.join(".rds").join("reports");
+
+        let err = run_cross_core_parity(
+            &rom_path,
+            &golden_path,
+            &core_path,
+            &core_path,
+            None,
+            &report_dir,
+        )
+        .expect_err("must reject empty script");
+        assert!(err.contains("zero frames"), "got: {err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_cross_core_parity_respects_frame_limit() {
+        use crate::emulator::libretro_ffi::test_helpers::{compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom};
+
+        let _serial = test_serial_guard();
+        let dir = emu_temp_dir("cross-core-limit");
+        let core_path = compile_mock_core(&dir);
+        let rom_path = write_test_rom(&dir, "cross_limit_rom", "gen");
+
+        let script = InputScript::from_frames(vec![
+            JoypadState { a: true, ..JoypadState::default() },
+            JoypadState { b: true, ..JoypadState::default() },
+            JoypadState { x: true, ..JoypadState::default() },
+        ]);
+        let golden_path = dir.join("limit.rds-input.json");
+        fs::write(&golden_path, serde_json::to_vec_pretty(&script).expect("serialize")).expect("write golden");
+        let report_dir = dir.join(".rds").join("reports");
+
+        let (report, _) = run_cross_core_parity(
+            &rom_path,
+            &golden_path,
+            &core_path,
+            &core_path,
+            Some(2),
+            &report_dir,
+        )
+        .expect("cross-core with frame_limit");
+        assert_eq!(report.frames_run, 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_cross_core_parity_rejects_missing_core_path() {
+        use crate::emulator::libretro_ffi::test_helpers::{compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom};
+
+        let _serial = test_serial_guard();
+        let dir = emu_temp_dir("cross-core-missing-core");
+        let core_path = compile_mock_core(&dir);
+        let missing_core = dir.join("missing_core.dll");
+        let rom_path = write_test_rom(&dir, "cross_missing_core_rom", "gen");
+        let script = InputScript::from_frames(vec![JoypadState::default()]);
+        let golden_path = dir.join("one.rds-input.json");
+        fs::write(&golden_path, serde_json::to_vec_pretty(&script).expect("serialize")).expect("write golden");
+        let report_dir = dir.join(".rds").join("reports");
+
+        let err = run_cross_core_parity(
+            &rom_path,
+            &golden_path,
+            &core_path,
+            &missing_core,
+            None,
+            &report_dir,
+        )
+        .expect_err("missing core must fail before loading");
+        assert!(err.contains("Core B"), "got: {err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_cycle_report_rejects_empty_script() {
+        use crate::emulator::libretro_ffi::test_helpers::{compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom};
+
+        let _serial = test_serial_guard();
+        let dir = emu_temp_dir("cycle-empty");
+        let core_path = compile_mock_core(&dir);
+        let rom_path = write_test_rom(&dir, "cycle_empty_rom", "gen");
+        let golden_path = dir.join("empty.rds-input.json");
+        let script = InputScript::from_frames(Vec::new());
+        fs::write(&golden_path, serde_json::to_vec_pretty(&script).expect("serialize")).expect("write golden");
+        let report_dir = dir.join(".rds").join("reports");
+
+        let err = run_cycle_report(
+            &rom_path,
+            &golden_path,
+            &core_path,
+            None,
+            &report_dir,
+        )
+        .expect_err("must reject empty cycle input");
+        assert!(err.contains("zero frames"), "got: {err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_cycle_report_respects_frame_limit_and_writes_reports() {
+        use crate::emulator::libretro_ffi::test_helpers::{compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom};
+
+        let _serial = test_serial_guard();
+        let dir = emu_temp_dir("cycle-limit");
+        let core_path = compile_mock_core(&dir);
+        let rom_path = write_test_rom(&dir, "cycle_limit_rom", "gen");
+        let script = InputScript::from_frames(vec![
+            JoypadState { a: true, ..JoypadState::default() },
+            JoypadState { b: true, ..JoypadState::default() },
+            JoypadState { x: true, ..JoypadState::default() },
+        ]);
+        let golden_path = dir.join("cycle.rds-input.json");
+        fs::write(&golden_path, serde_json::to_vec_pretty(&script).expect("serialize")).expect("write golden");
+        let report_dir = dir.join(".rds").join("reports");
+
+        let (report, written) = run_cycle_report(
+            &rom_path,
+            &golden_path,
+            &core_path,
+            Some(2),
+            &report_dir,
+        )
+        .expect("cycle report");
+
+        assert_eq!(report.frames_run, 2);
+        assert_eq!(report.frame_samples.len(), 2);
+        assert!(written.ends_with("cycle-report.json"));
+        assert!(report_dir.join("cycle-report.md").exists());
+        assert_eq!(report.m68k_cycle_trace.status, "missing");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[ignore = "host-local W7.4/W7.5 validation with real Libretro Mega Drive cores"]
+    fn w7_4_w7_5_real_cores_generate_reports_when_available() {
+        use crate::emulator::libretro_ffi::test_helpers::test_serial_guard;
+
+        let _serial = test_serial_guard();
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repo root")
+            .to_path_buf();
+        let validation_root = repo_root
+            .join("src-tauri")
+            .join("target-test")
+            .join("validation")
+            .join("w7-4-w7-5-real-parity");
+        let project_dir = validation_root.join("project");
+        let rom_dir = project_dir.join("build").join("megadrive").join("out");
+        let report_dir = project_dir.join(".rds").join("reports");
+        fs::create_dir_all(&rom_dir).expect("create validation rom dir");
+        fs::create_dir_all(&report_dir).expect("create validation reports dir");
+
+        let fixture_rom = repo_root
+            .join("src-tauri")
+            .join("tests")
+            .join("fixtures")
+            .join("projects")
+            .join("megadrive_dummy")
+            .join("build")
+            .join("megadrive")
+            .join("out")
+            .join("rom.bin");
+        let rom_path = rom_dir.join("rom.bin");
+        fs::copy(&fixture_rom, &rom_path).expect("copy safe dummy ROM");
+
+        let golden_path = project_dir.join("golden.rds-input.json");
+        let script = InputScript::from_frames(vec![
+            JoypadState::default(),
+            JoypadState { start: true, ..JoypadState::default() },
+            JoypadState { right: true, ..JoypadState::default() },
+        ]);
+        fs::write(
+            &golden_path,
+            serde_json::to_vec_pretty(&script).expect("serialize golden"),
+        )
+        .expect("write golden");
+
+        let cores_dir = repo_root.join("toolchains").join("libretro").join("cores");
+        let core_a = cores_dir.join("genesis_plus_gx_libretro.dll");
+        let core_b = cores_dir.join("picodrive_libretro.dll");
+        assert!(core_a.exists(), "Genesis Plus GX core missing at {}", core_a.display());
+        assert!(core_b.exists(), "Picodrive core missing at {}", core_b.display());
+
+        let (cross_report, cross_path) = run_cross_core_parity(
+            &rom_path,
+            &golden_path,
+            &core_a,
+            &core_b,
+            Some(3),
+            &report_dir,
+        )
+        .expect("real cross-core parity");
+        assert_eq!(cross_report.frames_run, 3);
+        assert!(cross_path.exists());
+        assert!(report_dir.join("cross-core-parity-report.md").exists());
+
+        let (cycle_report, cycle_path) = run_cycle_report(
+            &rom_path,
+            &golden_path,
+            &core_a,
+            Some(3),
+            &report_dir,
+        )
+        .expect("real cycle report");
+        assert_eq!(cycle_report.frames_run, 3);
+        assert_eq!(cycle_report.m68k_cycle_trace.status, "missing");
+        assert!(cycle_path.exists());
+        assert!(report_dir.join("cycle-report.md").exists());
     }
 }

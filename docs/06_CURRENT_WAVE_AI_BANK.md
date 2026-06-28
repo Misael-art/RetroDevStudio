@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-06-28 (rodada 76 - MSVC restaurado, gates Rust + build debug verdes)
+**Ultima Atualizacao:** 2026-06-28 (rodada 77 - W7.4/W7.5 cross-core + cycle evidence em hardening)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,17 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-06-28 rodada 77 - W7.4/W7.5 cross-core + cycle evidence em hardening):**
+  - **Branch:** `codex/w7-4-blastem-parity` (partindo de `origin/main`/`main` em `9001d2a`). Escopo limitado a hardening experimental da camada Gameplay Parity; nenhuma superficie foi promovida para Stable.
+  - **W7.4 Cross-Core Parity:** `parity_harness.rs` ganhou relatorio cross-core generico com dois cores Libretro reais, preservando divergencia de estado final mesmo quando hashes de framebuffer ja divergem. O backend rejeita caminhos vazios/ausentes para ROM/golden/core e o frontend expoe a aba **Tools -> Cross-Core Parity** como `Experimental`.
+  - **BlastEm:** o suporte de descoberta/provisionamento passou a reconhecer `blastem_libretro` como candidato Mega Drive oficial ao lado de `genesis_plus_gx_libretro` e `picodrive_libretro`. O core BlastEm foi verificado em fontes oficiais Libretro, mas **nao havia `blastem_libretro.dll` instalado neste host**; portanto a validacao local real desta rodada usou Genesis Plus GX vs PicoDrive, sem claim de BlastEm executado.
+  - **W7.5 Cycle Report:** novo comando `parity_run_cycle_report` e report `rds-cycle-report/v1` registram timings de frame no host, hashes de frame e estado final, alem de evidencias de trace `m68k_cycle_trace`, `z80_cycle_trace`, `vdp_scanline_trace` e `dma_timing`. Como os cores Libretro disponiveis nao expõem traces internos de ciclo, o report marca esses campos como `missing` e `not_cycle_accurate=true`.
+  - **UI/IPC/store:** `parityService.ts`, `editorStore.ts` e `ToolsPanel.tsx` ganharam suporte a `Cross-Core Parity` e `Cycle Report`, ambos `Experimental`, com erros acionaveis para caminhos obrigatorios, resumo de divergencias, limites nao medidos e persistencia do ultimo relatorio no store.
+  - **Evidencia real local:** `w7_4_w7_5_real_cores_generate_reports_when_available --ignored` passou com cores reais instalados (`Genesis Plus GX v1.7.4 46a5521` e `PicoDrive 2.05-046e5ff`) e gerou `cross-core-parity-report.{json,md}` + `cycle-report.{json,md}` em `src-tauri/target-test/validation/w7-4-w7-5-real-parity/project/.rds/reports/`. A ROM dummy BYOR-safe divergou entre os dois cores, o que e evidencia reportada, nao equivalencia gameplay.
+  - **Gates desta rodada:** `npm run check:tree` PASS; `npm run lint` PASS; `npx tsc --noEmit` PASS; `npm test` PASS (**47 arquivos / 442 testes**); `cargo check --lib` PASS; `cargo clippy --lib -- -D warnings` PASS; `cargo test --lib -- --nocapture --test-threads=1` PASS (**457 passed / 0 failed / 24 ignored**); `npm run preflight:sgdk-e2e` PASS (`Ready: SIM`); `npm run build:debug` PASS (EXE debug canonico); `npm run test:e2e:desktop:qa-rc` PASS (**A-H**, `manual-qa-status.json` 2026-06-28T21:04:51.484Z).
+  - **Status honesto:** Gameplay Parity, Cross-Core Parity e Cycle Report continuam **Experimental/em hardening**. O projeto ainda nao prova equivalencia gameplay 1:1, nao mede audio exact match e nao fornece cycle accuracy real sem instrumentacao/core apropriado.
+  - **Proximo passo imediato:** fechar gates completos, commit/push da branch, PR contra `main`, e apos merge rerodar `release:readiness:promotion` no destino limpo. Em rodada propria, provisionar `blastem_libretro.dll` oficial e repetir a validacao cross-core com BlastEm real.
 
 * **O que acabou de acontecer (2026-06-28 rodada 76 - MSVC Build Tools restaurado; todos os gates Rust + build debug verdes):**
   - **Branch/commit:** `codex/main-user-flow-hardening`, commit `28148f7` (6 ahead `origin/main`, 0 behind `origin/codex/main-user-flow-hardening`). Worktree limpo. Nenhum commit novo nesta sessao — apenas validacao de gates.

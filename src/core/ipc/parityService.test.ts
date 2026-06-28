@@ -8,8 +8,25 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: mocks.invoke,
 }));
 
-import { runParityCapture, formatParitySummary, parityReportFromResult } from "./parityService";
-import type { ParityReport, ParityRunResult } from "../projectCapability";
+import {
+  crossCoreReportFromResult,
+  cycleReportFromResult,
+  formatCrossCoreSummary,
+  formatCycleReportSummary,
+  formatParitySummary,
+  parityReportFromResult,
+  runCrossCoreParity,
+  runCycleReport,
+  runParityCapture,
+} from "./parityService";
+import type {
+  CrossCoreParityResult,
+  CrossCoreReport,
+  CycleReport,
+  CycleReportResult,
+  ParityReport,
+  ParityRunResult,
+} from "../projectCapability";
 
 describe("runParityCapture", () => {
   it("invokes parity_run_capture with full arguments", async () => {
@@ -60,6 +77,76 @@ describe("runParityCapture", () => {
   });
 });
 
+describe("runCrossCoreParity", () => {
+  it("invokes parity_run_cross_core with all paths and frame cap", async () => {
+    const result: CrossCoreParityResult = {
+      ok: true,
+      message: "cross-core ok",
+      golden_path: "/project/golden.rds-input.json",
+      golden_source: "script",
+      core_a_label: "Genesis Plus GX",
+      core_b_label: "PicoDrive",
+      frames_run: 45,
+      cores_agree: true,
+      cross_divergence_count: 0,
+      core_a_divergence_count: 0,
+      core_b_divergence_count: 0,
+      report_path: "/project/.rds/reports/cross-core-parity-report.json",
+      report: null,
+    };
+    mocks.invoke.mockResolvedValue(result);
+
+    await expect(
+      runCrossCoreParity(
+        "/project",
+        "/project/golden.rds-input.json",
+        "/cores/genesis_plus_gx_libretro.dll",
+        "/cores/picodrive_libretro.dll",
+        45
+      )
+    ).resolves.toEqual(result);
+
+    expect(mocks.invoke).toHaveBeenCalledWith("parity_run_cross_core", {
+      projectDir: "/project",
+      goldenPath: "/project/golden.rds-input.json",
+      coreAPath: "/cores/genesis_plus_gx_libretro.dll",
+      coreBPath: "/cores/picodrive_libretro.dll",
+      frames: 45,
+    });
+  });
+});
+
+describe("runCycleReport", () => {
+  it("invokes parity_run_cycle_report with project, golden, core and frame cap", async () => {
+    const result: CycleReportResult = {
+      ok: true,
+      message: "cycle report ok",
+      golden_path: "/project/golden.rds-input.json",
+      core_label: "Genesis Plus GX",
+      frames_run: 30,
+      report_path: "/project/.rds/reports/cycle-report.json",
+      report: null,
+    };
+    mocks.invoke.mockResolvedValue(result);
+
+    await expect(
+      runCycleReport(
+        "/project",
+        "/project/golden.rds-input.json",
+        "/cores/genesis_plus_gx_libretro.dll",
+        30
+      )
+    ).resolves.toEqual(result);
+
+    expect(mocks.invoke).toHaveBeenCalledWith("parity_run_cycle_report", {
+      projectDir: "/project",
+      goldenPath: "/project/golden.rds-input.json",
+      corePath: "/cores/genesis_plus_gx_libretro.dll",
+      frames: 30,
+    });
+  });
+});
+
 describe("formatParitySummary", () => {
   it("returns deterministic summary when no divergences", () => {
     const report: ParityReport = {
@@ -101,6 +188,77 @@ describe("formatParitySummary", () => {
     expect(summary).toContain("30");
     expect(summary).toContain("deterministico=nao");
     expect(summary).toContain("1 divergencia");
+  });
+});
+
+describe("formatCrossCoreSummary", () => {
+  it("summarizes cross-core agreement and labels", () => {
+    const base: ParityReport = {
+      schema: "rds-gameplay-parity/v1",
+      rom_path: "/rom.bin",
+      rom_sha256: "abc",
+      core_label: "Genesis Plus GX",
+      frames_run: 12,
+      frame_hashes: [],
+      final_state_sha256: "def",
+      deterministic: true,
+      divergences: [],
+      fake_toolchain_used: false,
+      not_measured_by_this_harness: [],
+    };
+    const report: CrossCoreReport = {
+      schema: "rds-cross-core-parity/v1",
+      rom_path: "/rom.bin",
+      rom_sha256: "abc",
+      golden_path: "/golden.rds-input.json",
+      golden_source: "script",
+      core_a_label: "Genesis Plus GX",
+      core_b_label: "PicoDrive",
+      frames_run: 12,
+      report_a: base,
+      report_b: { ...base, core_label: "PicoDrive" },
+      cross_divergences: [],
+      cores_agree: true,
+      not_measured_by_this_harness: ["m68k_cycle_trace"],
+    };
+
+    const summary = formatCrossCoreSummary(report);
+
+    expect(summary).toContain("12");
+    expect(summary).toContain("cores_agree=sim");
+    expect(summary).toContain("Genesis Plus GX");
+    expect(summary).toContain("PicoDrive");
+  });
+});
+
+describe("formatCycleReportSummary", () => {
+  it("summarizes missing cycle traces honestly", () => {
+    const report: CycleReport = {
+      schema: "rds-cycle-report/v1",
+      rom_path: "/rom.bin",
+      rom_sha256: "abc",
+      golden_path: "/golden.rds-input.json",
+      core_label: "Genesis Plus GX",
+      frames_run: 10,
+      frame_samples: [],
+      evidence_sources: [],
+      m68k_cycle_trace: { status: "missing", source: "libretro", detail: "not exposed" },
+      z80_cycle_trace: { status: "missing", source: "libretro", detail: "not exposed" },
+      vdp_scanline_trace: { status: "missing", source: "libretro", detail: "not exposed" },
+      dma_timing: { status: "missing", source: "libretro", detail: "not exposed" },
+      limitations: {
+        not_cycle_accurate: true,
+        missing: ["m68k_cycle_trace", "z80_cycle_trace", "vdp_scanline_trace", "dma_timing"],
+        notes: ["No trace source available."],
+      },
+      report_path: "/project/.rds/reports/cycle-report.json",
+    };
+
+    const summary = formatCycleReportSummary(report);
+
+    expect(summary).toContain("10");
+    expect(summary).toContain("m68k=missing");
+    expect(summary).toContain("not_cycle_accurate=true");
   });
 });
 
@@ -149,5 +307,71 @@ describe("parityReportFromResult", () => {
     };
 
     expect(parityReportFromResult(result)).toEqual(report);
+  });
+});
+
+describe("crossCoreReportFromResult", () => {
+  it("returns embedded cross-core report when present", () => {
+    const base: ParityReport = {
+      schema: "rds-gameplay-parity/v1",
+      rom_path: "/rom.bin",
+      rom_sha256: "abc",
+      core_label: "Genesis Plus GX",
+      frames_run: 1,
+      frame_hashes: [],
+      final_state_sha256: "def",
+      deterministic: true,
+      divergences: [],
+      fake_toolchain_used: false,
+      not_measured_by_this_harness: [],
+    };
+    const report: CrossCoreReport = {
+      schema: "rds-cross-core-parity/v1",
+      rom_path: "/rom.bin",
+      rom_sha256: "abc",
+      golden_path: "/golden.rds-input.json",
+      golden_source: "script",
+      core_a_label: "Genesis Plus GX",
+      core_b_label: "PicoDrive",
+      frames_run: 1,
+      report_a: base,
+      report_b: { ...base, core_label: "PicoDrive" },
+      cross_divergences: [],
+      cores_agree: true,
+      not_measured_by_this_harness: [],
+    };
+    const result: CrossCoreParityResult = {
+      ok: true,
+      message: "ok",
+      golden_path: report.golden_path,
+      golden_source: report.golden_source,
+      core_a_label: report.core_a_label,
+      core_b_label: report.core_b_label,
+      frames_run: report.frames_run,
+      cores_agree: true,
+      cross_divergence_count: 0,
+      core_a_divergence_count: 0,
+      core_b_divergence_count: 0,
+      report_path: "/report.json",
+      report,
+    };
+
+    expect(crossCoreReportFromResult(result)).toEqual(report);
+  });
+});
+
+describe("cycleReportFromResult", () => {
+  it("returns null when result has no report", () => {
+    const result: CycleReportResult = {
+      ok: false,
+      message: "erro",
+      golden_path: "",
+      core_label: "",
+      frames_run: 0,
+      report_path: "",
+      report: null,
+    };
+
+    expect(cycleReportFromResult(result)).toBeNull();
   });
 });

@@ -12,7 +12,11 @@ import type {
   Scene,
   SceneLayer,
 } from "../ipc/sceneService";
-import type { ParityReport } from "../projectCapability";
+import type {
+  CrossCoreReport,
+  CycleReport,
+  ParityReport,
+} from "../projectCapability";
 
 const UNDO_STACK_LIMIT = 50;
 
@@ -111,6 +115,8 @@ export interface StoreState {
   consoleEntries: ConsoleEntry[];
   consoleVisible: boolean;
   lastParityReport: ParityReport | null;
+  lastCrossCoreReport: CrossCoreReport | null;
+  lastCycleReport: CycleReport | null;
   hwStatus: HwStatus | null;
   sceneRevision: number;
   hwValidationState: HwValidationState;
@@ -168,6 +174,8 @@ export interface StoreActions {
   clearConsole: () => void;
   toggleConsole: () => void;
   setLastParityReport: (report: ParityReport | null) => void;
+  setLastCrossCoreReport: (report: CrossCoreReport | null) => void;
+  setLastCycleReport: (report: CycleReport | null) => void;
   setHwStatus: (status: HwStatus | null) => void;
   setHwValidationPending: (revision: number) => void;
   setHwValidationResult: (revision: number, status: HwStatus) => void;
@@ -464,6 +472,10 @@ export const useEditorStore = create<EditorState>((set) => ({
   toggleConsole: () => set((state) => ({ consoleVisible: !state.consoleVisible })),
   lastParityReport: null,
   setLastParityReport: (report) => set({ lastParityReport: report }),
+  lastCrossCoreReport: null,
+  setLastCrossCoreReport: (report) => set({ lastCrossCoreReport: report }),
+  lastCycleReport: null,
+  setLastCycleReport: (report) => set({ lastCycleReport: report }),
 
   hwStatus: null,
   setHwStatus: (status) => set({ hwStatus: status }),

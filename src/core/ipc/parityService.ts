@@ -1,5 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { ParityReport, ParityRunResult } from "../projectCapability";
+import type {
+  CrossCoreParityResult,
+  CrossCoreReport,
+  CycleReport,
+  CycleReportResult,
+  ParityReport,
+  ParityRunResult,
+} from "../projectCapability";
 
 export async function runParityCapture(
   projectDir: string,
@@ -13,6 +20,36 @@ export async function runParityCapture(
   });
 }
 
+export async function runCrossCoreParity(
+  projectDir: string,
+  goldenPath: string,
+  coreAPath: string,
+  coreBPath: string,
+  frames?: number | null
+): Promise<CrossCoreParityResult> {
+  return invoke<CrossCoreParityResult>("parity_run_cross_core", {
+    projectDir,
+    goldenPath,
+    coreAPath,
+    coreBPath,
+    frames: frames ?? null,
+  });
+}
+
+export async function runCycleReport(
+  projectDir: string,
+  goldenPath: string,
+  corePath: string,
+  frames?: number | null
+): Promise<CycleReportResult> {
+  return invoke<CycleReportResult>("parity_run_cycle_report", {
+    projectDir,
+    goldenPath,
+    corePath,
+    frames: frames ?? null,
+  });
+}
+
 export function formatParitySummary(report: ParityReport): string {
   const determinism = report.deterministic ? "sim" : "nao";
   const divergenceText =
@@ -22,6 +59,29 @@ export function formatParitySummary(report: ParityReport): string {
   return `parity: ${report.frames_run} frame(s), deterministico=${determinism}, ${divergenceText}`;
 }
 
+export function formatCrossCoreSummary(report: CrossCoreReport): string {
+  const agreeText = report.cores_agree ? "sim" : "nao";
+  const divergenceText =
+    report.cross_divergences.length === 1
+      ? "1 divergencia"
+      : `${report.cross_divergences.length} divergencias`;
+  return `cross-core: ${report.frames_run} frame(s), cores_agree=${agreeText}, ${divergenceText} (A=${report.core_a_label}, B=${report.core_b_label})`;
+}
+
+export function formatCycleReportSummary(report: CycleReport): string {
+  return `cycle report: ${report.frames_run} frame(s), m68k=${report.m68k_cycle_trace.status}, z80=${report.z80_cycle_trace.status}, vdp=${report.vdp_scanline_trace.status}, dma=${report.dma_timing.status}, not_cycle_accurate=${report.limitations.not_cycle_accurate}`;
+}
+
 export function parityReportFromResult(result: ParityRunResult): ParityReport | null {
+  return result.report ?? null;
+}
+
+export function crossCoreReportFromResult(
+  result: CrossCoreParityResult
+): CrossCoreReport | null {
+  return result.report ?? null;
+}
+
+export function cycleReportFromResult(result: CycleReportResult): CycleReport | null {
   return result.report ?? null;
 }

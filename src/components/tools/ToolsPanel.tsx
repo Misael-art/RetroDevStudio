@@ -52,8 +52,16 @@ import {
 } from "./assetBrowserModel";
 import { useAssetBrowserState } from "./useAssetBrowserState";
 import ProjectCapabilityPanel from "./ProjectCapabilityPanel";
-import { runParityCapture } from "../../core/ipc/parityService";
-import type { ParityRunResult } from "../../core/projectCapability";
+import {
+  runCrossCoreParity,
+  runCycleReport,
+  runParityCapture,
+} from "../../core/ipc/parityService";
+import type {
+  CrossCoreParityResult,
+  CycleReportResult,
+  ParityRunResult,
+} from "../../core/projectCapability";
 
 const LazyReverseWorkspace = lazy(() => import("./ReverseWorkspace"));
 
@@ -2293,7 +2301,9 @@ export type ToolTab =
   | "vram"
   | "reverse"
   | "palette"
-  | "parity";
+  | "parity"
+  | "crossCoreParity"
+  | "cycleReport";
 
 type ToolCategory = "create" | "configure" | "analyze" | "experimental";
 export type ToolWorkspace = "editing" | "debug";
@@ -2430,6 +2440,354 @@ function ParityCaptureSection() {
   );
 }
 
+function CrossCoreParitySection() {
+  const {
+    activeProjectDir,
+    logMessage,
+    lastCrossCoreReport,
+    setLastCrossCoreReport,
+  } = useEditorStore();
+  const [goldenPath, setGoldenPath] = useState("");
+  const [coreAPath, setCoreAPath] = useState("");
+  const [coreBPath, setCoreBPath] = useState("");
+  const [frameCap, setFrameCap] = useState(60);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<CrossCoreParityResult | null>(null);
+
+  async function run() {
+    if (!activeProjectDir) {
+      const message = "Abra um projeto antes de rodar Cross-Core Parity.";
+      setError(message);
+      logMessage("warn", `[Cross-Core] ${message}`);
+      return;
+    }
+    if (!goldenPath.trim() || !coreAPath.trim() || !coreBPath.trim()) {
+      const message = "Informe golden, core A e core B antes de rodar Cross-Core Parity.";
+      setError(message);
+      logMessage("warn", `[Cross-Core] ${message}`);
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      const runResult = await runCrossCoreParity(
+        activeProjectDir,
+        goldenPath.trim(),
+        coreAPath.trim(),
+        coreBPath.trim(),
+        frameCap
+      );
+      setResult(runResult);
+      if (runResult.ok && runResult.report) {
+        setLastCrossCoreReport(runResult.report);
+      }
+      logMessage(
+        runResult.ok ? "success" : "error",
+        `[Cross-Core] ${runResult.message}`
+      );
+    } catch (runError) {
+      const message = describeError(runError);
+      setError(message);
+      logMessage("error", `[Cross-Core] ${message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const lastResult =
+    result ??
+    (lastCrossCoreReport
+      ? ({
+          ok: true,
+          message: "",
+          golden_path: lastCrossCoreReport.golden_path,
+          golden_source: lastCrossCoreReport.golden_source,
+          core_a_label: lastCrossCoreReport.core_a_label,
+          core_b_label: lastCrossCoreReport.core_b_label,
+          frames_run: lastCrossCoreReport.frames_run,
+          cores_agree: lastCrossCoreReport.cores_agree,
+          cross_divergence_count: lastCrossCoreReport.cross_divergences.length,
+          core_a_divergence_count: lastCrossCoreReport.report_a.divergences.length,
+          core_b_divergence_count: lastCrossCoreReport.report_b.divergences.length,
+          report_path: lastCrossCoreReport.report_path ?? "",
+          report: lastCrossCoreReport,
+        } satisfies CrossCoreParityResult)
+      : null);
+
+  return (
+    <div className="flex flex-col gap-3 p-3" data-testid="cross-core-parity-section">
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold text-[#cdd6f4]">Cross-Core Parity</span>
+        <span className="rounded border border-[#cba6f7]/35 bg-[#cba6f7]/10 px-1.5 py-0.5 text-[8px] font-semibold uppercase text-[#cba6f7]">
+          Experimental
+        </span>
+      </div>
+      <p className="text-[10px] leading-tight text-[#7f849c]">
+        Reexecuta o mesmo golden em dois cores Libretro e compara framebuffers, estado final e limites nao medidos.
+      </p>
+
+      <div className="grid gap-2">
+        <input
+          data-testid="cross-core-golden-path"
+          value={goldenPath}
+          onChange={(event) => setGoldenPath(event.target.value)}
+          placeholder="/projetos/meu_jogo/golden/input.rds"
+          className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[10px] font-mono text-[#cdd6f4] outline-none focus:border-[#cba6f7]"
+        />
+        <input
+          data-testid="cross-core-core-a-path"
+          value={coreAPath}
+          onChange={(event) => setCoreAPath(event.target.value)}
+          placeholder="/toolchains/libretro/cores/genesis_plus_gx_libretro.dll"
+          className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[10px] font-mono text-[#cdd6f4] outline-none focus:border-[#cba6f7]"
+        />
+        <input
+          data-testid="cross-core-core-b-path"
+          value={coreBPath}
+          onChange={(event) => setCoreBPath(event.target.value)}
+          placeholder="/toolchains/libretro/cores/picodrive_libretro.dll"
+          className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[10px] font-mono text-[#cdd6f4] outline-none focus:border-[#cba6f7]"
+        />
+      </div>
+
+      <div className="flex items-center gap-2">
+        <label className="text-[10px] text-[#7f849c]">Frame cap</label>
+        <input
+          data-testid="cross-core-frame-cap"
+          type="number"
+          value={frameCap}
+          min={1}
+          max={9999}
+          onChange={(event) => setFrameCap(Math.max(1, Number(event.target.value)))}
+          className="w-20 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-right text-[10px] font-mono text-[#cdd6f4] outline-none focus:border-[#cba6f7]"
+        />
+      </div>
+
+      <button
+        type="button"
+        onClick={() => void run()}
+        disabled={busy || !activeProjectDir}
+        className="rounded bg-[#cba6f7] px-3 py-1.5 text-[10px] font-semibold text-[#1e1e2e] transition-colors hover:bg-[#b4a0e0] disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {busy ? "Rodando..." : "Rodar Cross-Core Parity"}
+      </button>
+
+      {error ? (
+        <div className="rounded border border-[#f38ba8]/35 bg-[#f38ba8]/10 px-3 py-2 text-[10px] text-[#f38ba8]">
+          {error}
+        </div>
+      ) : null}
+
+      {lastResult ? (
+        <div className="rounded border border-[#313244] bg-[#11111b] p-2 text-[10px]">
+          <p className="font-semibold text-[#cdd6f4]">
+            {lastResult.cores_agree ? "Cores concordam" : "Cores divergem"}
+          </p>
+          <p className="mt-1 text-[#7f849c]">{lastResult.message}</p>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <div className="rounded bg-[#181825] p-1.5">
+              <div className="text-[8px] uppercase text-[#45475a]">Core A</div>
+              <div className="truncate text-xs font-bold text-[#cdd6f4]">{lastResult.core_a_label}</div>
+            </div>
+            <div className="rounded bg-[#181825] p-1.5">
+              <div className="text-[8px] uppercase text-[#45475a]">Core B</div>
+              <div className="truncate text-xs font-bold text-[#cdd6f4]">{lastResult.core_b_label}</div>
+            </div>
+            <div className="rounded bg-[#181825] p-1.5">
+              <div className="text-[8px] uppercase text-[#45475a]">Frames</div>
+              <div className="text-xs font-bold text-[#cdd6f4]">{lastResult.frames_run}</div>
+            </div>
+            <div className="rounded bg-[#181825] p-1.5">
+              <div className="text-[8px] uppercase text-[#45475a]">Divergencias</div>
+              <div className={`text-xs font-bold ${lastResult.cross_divergence_count > 0 ? "text-[#f38ba8]" : "text-[#a6e3a1]"}`}>
+                {lastResult.cross_divergence_count}
+              </div>
+            </div>
+          </div>
+          {lastResult.report?.cross_divergences.length ? (
+            <div className="mt-2 max-h-32 overflow-y-auto">
+              <p className="mb-1 text-[9px] font-semibold uppercase text-[#f38ba8]">Divergencias</p>
+              {lastResult.report.cross_divergences.slice(0, 10).map((divergence, index) => (
+                <p key={index} className="truncate text-[9px] text-[#f5c2e7]">
+                  #{divergence.frame_index} {divergence.kind}: A={divergence.core_a_hash.slice(0, 16)} B={divergence.core_b_hash.slice(0, 16)}
+                </p>
+              ))}
+            </div>
+          ) : null}
+          {lastResult.report?.not_measured_by_this_harness.length ? (
+            <div className="mt-2 text-[9px] text-[#7f849c]">
+              Limites: {lastResult.report.not_measured_by_this_harness.join(", ")}
+            </div>
+          ) : null}
+          {lastResult.report_path ? (
+            <p className="mt-2 truncate font-mono text-[9px] text-[#89b4fa]">
+              {lastResult.report_path}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function CycleReportSection() {
+  const { activeProjectDir, logMessage, lastCycleReport, setLastCycleReport } = useEditorStore();
+  const [goldenPath, setGoldenPath] = useState("");
+  const [corePath, setCorePath] = useState("");
+  const [frameCap, setFrameCap] = useState(60);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<CycleReportResult | null>(null);
+
+  async function run() {
+    if (!activeProjectDir) {
+      const message = "Abra um projeto antes de gerar Cycle Report.";
+      setError(message);
+      logMessage("warn", `[Cycle] ${message}`);
+      return;
+    }
+    if (!goldenPath.trim() || !corePath.trim()) {
+      const message = "Informe golden e core antes de gerar Cycle Report.";
+      setError(message);
+      logMessage("warn", `[Cycle] ${message}`);
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      const runResult = await runCycleReport(
+        activeProjectDir,
+        goldenPath.trim(),
+        corePath.trim(),
+        frameCap
+      );
+      setResult(runResult);
+      if (runResult.ok && runResult.report) {
+        setLastCycleReport(runResult.report);
+      }
+      logMessage(runResult.ok ? "success" : "error", `[Cycle] ${runResult.message}`);
+    } catch (runError) {
+      const message = describeError(runError);
+      setError(message);
+      logMessage("error", `[Cycle] ${message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const lastResult =
+    result ??
+    (lastCycleReport
+      ? ({
+          ok: true,
+          message: "",
+          golden_path: lastCycleReport.golden_path,
+          core_label: lastCycleReport.core_label,
+          frames_run: lastCycleReport.frames_run,
+          report_path: lastCycleReport.report_path,
+          report: lastCycleReport,
+        } satisfies CycleReportResult)
+      : null);
+
+  return (
+    <div className="flex flex-col gap-3 p-3" data-testid="cycle-report-section">
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold text-[#cdd6f4]">Cycle Report</span>
+        <span className="rounded border border-[#cba6f7]/35 bg-[#cba6f7]/10 px-1.5 py-0.5 text-[8px] font-semibold uppercase text-[#cba6f7]">
+          Experimental
+        </span>
+      </div>
+      <p className="text-[10px] leading-tight text-[#7f849c]">
+        Gera evidencia temporal do replay e registra explicitamente quais traces de ciclo nao foram medidos.
+      </p>
+
+      <input
+        data-testid="cycle-report-golden-path"
+        value={goldenPath}
+        onChange={(event) => setGoldenPath(event.target.value)}
+        placeholder="/projetos/meu_jogo/golden/input.rds"
+        className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[10px] font-mono text-[#cdd6f4] outline-none focus:border-[#cba6f7]"
+      />
+      <input
+        data-testid="cycle-report-core-path"
+        value={corePath}
+        onChange={(event) => setCorePath(event.target.value)}
+        placeholder="/toolchains/libretro/cores/genesis_plus_gx_libretro.dll"
+        className="rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-[10px] font-mono text-[#cdd6f4] outline-none focus:border-[#cba6f7]"
+      />
+      <div className="flex items-center gap-2">
+        <label className="text-[10px] text-[#7f849c]">Frame cap</label>
+        <input
+          type="number"
+          value={frameCap}
+          min={1}
+          max={9999}
+          onChange={(event) => setFrameCap(Math.max(1, Number(event.target.value)))}
+          className="w-20 rounded border border-[#313244] bg-[#1e1e2e] px-2 py-1 text-right text-[10px] font-mono text-[#cdd6f4] outline-none focus:border-[#cba6f7]"
+        />
+      </div>
+      <button
+        type="button"
+        onClick={() => void run()}
+        disabled={busy || !activeProjectDir}
+        className="rounded bg-[#cba6f7] px-3 py-1.5 text-[10px] font-semibold text-[#1e1e2e] transition-colors hover:bg-[#b4a0e0] disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {busy ? "Gerando..." : "Gerar Cycle Report"}
+      </button>
+
+      {error ? (
+        <div className="rounded border border-[#f38ba8]/35 bg-[#f38ba8]/10 px-3 py-2 text-[10px] text-[#f38ba8]">
+          {error}
+        </div>
+      ) : null}
+
+      {lastResult ? (
+        <div className="rounded border border-[#313244] bg-[#11111b] p-2 text-[10px]">
+          <p className="font-semibold text-[#cdd6f4]">
+            Cycle evidence: {lastResult.frames_run} frame(s)
+          </p>
+          <p className="mt-1 text-[#7f849c]">{lastResult.message}</p>
+          {lastResult.report ? (
+            <>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                {[
+                  ["M68K", lastResult.report.m68k_cycle_trace.status],
+                  ["Z80", lastResult.report.z80_cycle_trace.status],
+                  ["VDP", lastResult.report.vdp_scanline_trace.status],
+                  ["DMA", lastResult.report.dma_timing.status],
+                ].map(([label, status]) => (
+                  <div key={label} className="rounded bg-[#181825] p-1.5">
+                    <div className="text-[8px] uppercase text-[#45475a]">{label}</div>
+                    <div className={status === "observed" ? "text-xs font-bold text-[#a6e3a1]" : "text-xs font-bold text-[#f9e2af]"}>
+                      {status}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <p className="mt-2 text-[9px] text-[#f9e2af]">
+                not cycle accurate: {String(lastResult.report.limitations.not_cycle_accurate)}
+              </p>
+              <p className="mt-1 text-[9px] text-[#7f849c]">
+                Missing: {lastResult.report.limitations.missing.join(", ")}
+              </p>
+            </>
+          ) : null}
+          {lastResult.report_path ? (
+            <p className="mt-2 truncate font-mono text-[9px] text-[#89b4fa]">
+              {lastResult.report_path}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 const TOOL_CATEGORIES: {
   id: ToolCategory;
   label: string;
@@ -2525,6 +2883,24 @@ const TOOL_TABS: ToolDescriptor[] = [
     advanced: true,
     experimental: true,
   },
+  {
+    id: "crossCoreParity",
+    label: "Cross-Core Parity",
+    icon: "CC",
+    category: "experimental",
+    description: "Compara o mesmo replay em dois cores Libretro reais e registra divergencias sem claim de Stable.",
+    advanced: true,
+    experimental: true,
+  },
+  {
+    id: "cycleReport",
+    label: "Cycle Report",
+    icon: "CY",
+    category: "experimental",
+    description: "Gera evidencia temporal e lista traces de ciclo ausentes ou observados sem prometer cycle accuracy.",
+    advanced: true,
+    experimental: true,
+  },
 ];
 
 function getToolDescriptor(toolId: ToolTab): ToolDescriptor {
@@ -2566,6 +2942,10 @@ function renderToolPanel(
       );
     case "parity":
       return <ParityCaptureSection />;
+    case "crossCoreParity":
+      return <CrossCoreParitySection />;
+    case "cycleReport":
+      return <CycleReportSection />;
     default:
       return null;
   }
