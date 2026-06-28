@@ -138,21 +138,21 @@ function looksLikeRuntimeDependencyFailure(message: string): boolean {
 }
 
 function formatBuildFailureSummary(errorLines: string[]): string {
-  const tail = errorLines.slice(-6).join(" | ");
+  const tail = errorLines.slice(-6).join("\n");
   if (tail.length === 0) {
-    return "Build falhou sem linhas de erro estruturadas no log; abra Debug > Runtime Setup, clique Revalidar e confira o Console para o historico completo.";
+    return "Build falhou sem linhas de erro no log. Acesse a aba Runtime Setup (Debug > Ferramentas > Runtime Setup), clique Revalidar e verifique o Console para o historico completo.";
   }
   const setupHint = looksLikeRuntimeDependencyFailure(tail)
-    ? " Abra Debug > Runtime Setup, clique Revalidar e corrija a dependencia indicada antes de tentar novamente."
-    : "";
-  return `Build falhou (toolchain / makefile / emissao). Resumo: ${tail}.${setupHint}`;
+    ? "\n\nAcao: abra a aba Runtime Setup (Debug > Ferramentas > Runtime Setup), clique Revalidar e corrija a dependencia indicada antes de tentar novamente."
+    : "\n\nAcao: revise as mensagens de erro acima, corrija o problema no projeto e clique Build & Run novamente.";
+  return `Build falhou. Erros:\n${tail}${setupHint}`;
 }
 
 function formatEmulatorFailureMessage(message: string): string {
   if (looksLikeRuntimeDependencyFailure(message)) {
-    return `[Emulador] ${message} Abra Debug > Runtime Setup, clique Revalidar e confirme o core Libretro/WebDriver antes de carregar a ROM novamente.`;
+    return `Emulador: ${message}\n\nAcao: acesse a aba Runtime Setup (Debug > Ferramentas > Runtime Setup), clique Revalidar e confirme que o core Libretro esta instalado antes de carregar a ROM novamente.`;
   }
-  return `[Emulador] ${message}`;
+  return `Emulador: ${message}`;
 }
 
 function ToolbarButton({
@@ -3263,6 +3263,17 @@ export default function App() {
   }
 
   async function handleCloseProject() {
+    const saved = await persistActiveScene(activeProjectDir, "Fechar", "Projeto salvo antes de fechar.");
+    if (!saved) {
+      const discard = window.confirm(
+        "Falha ao salvar o projeto. Deseja descartar as alteracoes e fechar mesmo assim?"
+      );
+      if (!discard) {
+        logMessage("info", "Fechamento cancelado apos falha de persistencia.");
+        return;
+      }
+      logMessage("warn", "Projeto fechado com alteracoes nao salvas.");
+    }
     await resetEmulatorSession(true);
     setActiveProject("", "");
     setActiveScenePath("");

@@ -1201,6 +1201,25 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], context: &SnesContext, in
                     sfx = sfx.to_uppercase()
                 ));
             }
+            LogicOp::PlayMusic { action, track, fade_ms } => {
+                match action.as_str() {
+                    "stop" => {
+                        out.push_str(&format!(
+                            "{indent}spcStop(); /* fade_ms: {fade_ms} - suporte futuro */\n",
+                            indent = indent_str,
+                            fade_ms = fade_ms,
+                        ));
+                    }
+                    _ => {
+                        out.push_str(&format!(
+                            "{indent}spcLoad((u8*)&{track}_bgm); /* fade_ms: {fade_ms} - suporte futuro */\n{indent}spcStart();\n",
+                            indent = indent_str,
+                            track = track,
+                            fade_ms = fade_ms,
+                        ));
+                    }
+                }
+            }
             LogicOp::SetVar { var_name, value } => {
                 let value_expr = render_math_expr(value);
                 out.push_str(&format!(
@@ -2459,6 +2478,39 @@ mod tests {
         assert!(output
             .resources_res
             .contains("BGM stage_theme <- assets/audio/stage_theme.spc"));
+    }
+
+    #[test]
+    fn snes_main_c_emits_spc_play_and_stop_for_play_music_node() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: vec![LogicScript {
+                ops: vec![
+                    LogicOp::PlayMusic {
+                        action: "play".to_string(),
+                        track: "stage_theme".to_string(),
+                        fade_ms: 500,
+                    },
+                    LogicOp::PlayMusic {
+                        action: "stop".to_string(),
+                        track: "stage_theme".to_string(),
+                        fade_ms: 0,
+                    },
+                ],
+            }],
+        };
+
+        let output = emit_snes(&ast, "Music Demo");
+
+        assert!(output.main_c.contains("spcLoad((u8*)&stage_theme_bgm); /* fade_ms: 500 - suporte futuro */"));
+        assert!(output.main_c.contains("spcStart();"));
+        assert!(output.main_c.contains("spcStop(); /* fade_ms: 0 - suporte futuro */"));
     }
 
     #[test]

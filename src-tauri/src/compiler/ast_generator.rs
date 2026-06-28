@@ -266,6 +266,11 @@ pub enum LogicOp {
     PlaySound {
         sfx: String,
     },
+    PlayMusic {
+        action: String,
+        track: String,
+        fade_ms: i32,
+    },
     SetVar {
         var_name: String,
         value: LogicMathExpr,
@@ -1717,6 +1722,13 @@ fn compile_logic_node(
                 &param_string(node, "sfx").unwrap_or_else(|| "sfx".to_string()),
             ),
         })),
+        "action_music" => Some(CompiledLogicNode::Linear(LogicOp::PlayMusic {
+            action: param_string(node, "action").unwrap_or_else(|| "play".to_string()),
+            track: sanitize_identifier(
+                &param_string(node, "track").unwrap_or_else(|| "bgm".to_string()),
+            ),
+            fade_ms: param_i32(node, "fade_ms", 500),
+        })),
         "sprite_anim" => {
             let target = param_string(node, "target")?;
             let anim_name = param_string(node, "anim").unwrap_or_else(|| "idle".to_string());
@@ -2457,6 +2469,7 @@ fn collect_logic_sound_names_from_ops(
                 }
             }
             LogicOp::MoveSprite { .. } => {}
+            LogicOp::PlayMusic { .. } => {}
             LogicOp::SourceBridgeError { .. } => {}
         }
     }
@@ -4799,6 +4812,97 @@ mod tests {
                 dy: 0,
             }]
         );
+    }
+
+    #[test]
+    fn generate_ast_compiles_action_music_node_into_play_music_op() {
+        let project = Project {
+            rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
+            name: "Music Demo".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+            settings: Default::default(),
+            template_metadata: None,
+        };
+        let logic_graph = json!({
+            "version": 1,
+            "nodes": [
+                { "id": "start", "type": "event_start", "label": "Start", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": {} },
+                { "id": "play", "type": "action_music", "label": "Play", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": { "action": "play", "track": "stage_theme", "fade_ms": 750 } },
+                { "id": "stop", "type": "action_music", "label": "Stop", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": { "action": "stop" } }
+            ],
+            "edges": [
+                { "id": "e1", "fromNode": "start", "fromPort": "exec", "toNode": "play", "toPort": "exec" },
+                { "id": "e2", "fromNode": "play", "fromPort": "exec", "toNode": "stop", "toPort": "exec" }
+            ]
+        });
+        let scene = Scene {
+            scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "player".to_string(),
+                display_name: None,
+                prefab: None,
+                transform: Transform { x: 16, y: 24 },
+                components: Components {
+                    sprite: Some(SpriteComponent {
+                        asset: "assets/sprites/player.png".to_string(),
+                        frame_width: 16,
+                        frame_height: 16,
+                        pivot: None,
+                        palette_slot: 0,
+                        animations: std::collections::BTreeMap::new(),
+                        priority: "foreground".to_string(),
+                        meta_sprite: false,
+                        commands: Vec::new(),
+                    }),
+                    logic: Some(crate::ugdm::components::LogicComponent {
+                        graph: Some(logic_graph.to_string()),
+                        graph_ref: None,
+                        graph_origin: None,
+                        logic_hints: Vec::new(),
+                        external_source_refs: Vec::new(),
+                        imported_semantics: None,
+                        variables: HashMap::new(),
+                    }),
+                    ..Components::default()
+                },
+            }],
+            palettes: Vec::new(),
+            retrofx: None,
+            collision_map: None,
+            layers: None,
+        };
+
+        let ast = generate_ast(&project, &scene);
+        let music_ops: Vec<(&String, &String)> = ast
+            .logic_scripts
+            .iter()
+            .flat_map(|script| script.ops.iter())
+            .filter_map(|op| match op {
+                LogicOp::PlayMusic { action, track, .. } => Some((action, track)),
+                _ => None,
+            })
+            .collect();
+
+        // The "play" node keeps its explicit track; the "stop" node falls back to
+        // the canonical default track ("bgm") since none was provided.
+        assert!(music_ops
+            .iter()
+            .any(|(action, track)| action.as_str() == "play" && track.as_str() == "stage_theme"));
+        assert!(music_ops
+            .iter()
+            .any(|(action, track)| action.as_str() == "stop" && track.as_str() == "bgm"));
     }
 
     #[test]

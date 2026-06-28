@@ -215,6 +215,24 @@ function spawnLogged(command, args, options = {}) {
   });
 }
 
+function pathEnvironmentKey(env) {
+  return Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH";
+}
+
+function prependUserCargoBin(env) {
+  const userProfile = env.USERPROFILE ?? os.homedir();
+  const cargoBin = path.join(userProfile, ".cargo", "bin");
+  const pathKey = pathEnvironmentKey(env);
+  const currentPath = env[pathKey] ?? "";
+  const segments = currentPath.split(path.delimiter).filter(Boolean);
+  const alreadyPresent = segments.some(
+    (segment) => path.resolve(segment).toLowerCase() === path.resolve(cargoBin).toLowerCase()
+  );
+  env[pathKey] = alreadyPresent
+    ? currentPath
+    : [cargoBin, ...segments].join(path.delimiter);
+}
+
 async function pathExists(filePath) {
   try {
     await access(filePath);
@@ -540,17 +558,27 @@ async function runTauriBuild(mode, effectiveTargetDir) {
     );
   }
   await spawnLogged(npmCommand(), tauriArgs, {
-    env: buildCommandEnvironment(effectiveTargetDir),
+    env: buildCommandEnvironment(mode, effectiveTargetDir),
   });
 }
 
-async function runFrontendBuild() {
+async function runFrontendBuild(mode, effectiveTargetDir) {
   console.log("\n[Build] Gerando frontend via npm run build antes do cargo build...\n");
-  await spawnLogged(npmCommand(), ["run", "build"]);
+  await spawnLogged(npmCommand(), ["run", "build"], {
+    env: buildCommandEnvironment(mode, effectiveTargetDir),
+  });
 }
 
-function buildCommandEnvironment(effectiveTargetDir) {
+export function buildCommandEnvironment(mode, effectiveTargetDir, hostPlatform = process.platform) {
   const env = { ...process.env, CARGO_TARGET_DIR: effectiveTargetDir };
+  if (hostPlatform === "win32") {
+    env.TAURI_ENV_PLATFORM = "windows";
+    env.TAURI_ENV_ARCH = "x86_64";
+    env.TAURI_ENV_FAMILY = "windows";
+    env.TAURI_ENV_TARGET_TRIPLE = "x86_64-pc-windows-msvc";
+    env.TAURI_ENV_DEBUG = mode === "debug" ? "true" : "false";
+    prependUserCargoBin(env);
+  }
   if (process.env.RDS_E2E_QA_RC_MEMORY_SAFE === "1") {
     env.CARGO_BUILD_JOBS ??= "1";
     env.CARGO_INCREMENTAL ??= "0";
@@ -581,13 +609,13 @@ async function runCargoBuild(mode, effectiveTargetDir) {
     );
   }
   await spawnLogged(cargoCommand(), cargoArgs, {
-    env: buildCommandEnvironment(effectiveTargetDir),
+    env: buildCommandEnvironment(mode, effectiveTargetDir),
   });
 }
 
 async function runBuildCommand(mode, effectiveTargetDir) {
   if (shouldUseDirectCargoDebug(mode)) {
-    await runFrontendBuild();
+    await runFrontendBuild(mode, effectiveTargetDir);
     await runCargoBuild(mode, effectiveTargetDir);
     return "direct-cargo-debug";
   }
@@ -879,4 +907,6 @@ async function main() {
   }
 }
 
-main();
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+  main();
+}
