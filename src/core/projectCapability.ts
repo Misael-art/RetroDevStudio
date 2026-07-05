@@ -153,6 +153,61 @@ export interface CycleReportResult {
   report: CycleReport | null;
 }
 
+export type ParityEvidenceLevel =
+  | "insufficient_evidence"
+  | "visual_parity"
+  | "observed_state_parity"
+  | "functional_evidence";
+
+export interface ReferenceCandidateComparison {
+  evidence_level: ParityEvidenceLevel;
+  visual_parity: boolean;
+  observed_state_parity: boolean;
+  scenario_passed: boolean;
+  frames_compared: number;
+  reference_rom_sha256: string;
+  candidate_rom_sha256: string;
+  divergences: ParityDivergence[];
+  limitations: string[];
+}
+
+export interface ReferenceCandidateReport {
+  schema: string;
+  reference_rom_path: string;
+  reference_rom_sha256: string;
+  candidate_rom_path: string;
+  candidate_rom_sha256: string;
+  core_label: string;
+  golden_path: string;
+  golden_source: string;
+  frames_run: number;
+  report_reference: ParityReport;
+  report_candidate: ParityReport;
+  comparison: ReferenceCandidateComparison;
+  functional_evidence: ParityEvidenceLevel;
+  not_measured_by_this_harness: string[];
+}
+
+export interface ReferenceCandidateParityResult {
+  ok: boolean;
+  message: string;
+  core_label: string;
+  golden_path: string;
+  golden_source: string;
+  frames_run: number;
+  // Debug-formatted enum from the backend (e.g. "VisualParity"); the nested
+  // comparison carries the serde snake_case union.
+  evidence_level: string;
+  visual_parity: boolean;
+  observed_state_parity: boolean;
+  scenario_passed: boolean;
+  divergence_count: number;
+  reference_rom_sha256: string;
+  candidate_rom_sha256: string;
+  report_path: string;
+  report: ReferenceCandidateReport | null;
+}
+
 export interface ProjectCapabilityReport {
   project_dir: string;
   documentation: CapabilityAxisReport;

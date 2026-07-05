@@ -6,6 +6,8 @@ import type {
   CycleReportResult,
   ParityReport,
   ParityRunResult,
+  ReferenceCandidateParityResult,
+  ReferenceCandidateReport,
 } from "../projectCapability";
 
 export async function runParityCapture(
@@ -48,6 +50,39 @@ export async function runCycleReport(
     corePath,
     frames: frames ?? null,
   });
+}
+
+export async function runReferenceCandidateParity(
+  referenceProjectDir: string,
+  candidateProjectDir: string,
+  goldenPath: string,
+  corePath: string,
+  frames?: number | null
+): Promise<ReferenceCandidateParityResult> {
+  return invoke<ReferenceCandidateParityResult>("parity_run_reference_candidate", {
+    referenceProjectDir,
+    candidateProjectDir,
+    goldenPath,
+    corePath,
+    frames: frames ?? null,
+  });
+}
+
+export function formatReferenceCandidateSummary(
+  report: ReferenceCandidateReport
+): string {
+  const comparison = report.comparison;
+  const divergenceText =
+    comparison.divergences.length === 1
+      ? "1 divergencia"
+      : `${comparison.divergences.length} divergencias`;
+  return `reference/candidate: ${report.frames_run} frame(s), evidence=${comparison.evidence_level}, suite=${report.functional_evidence}, ${divergenceText} (core=${report.core_label})`;
+}
+
+export function referenceCandidateReportFromResult(
+  result: ReferenceCandidateParityResult
+): ReferenceCandidateReport | null {
+  return result.report ?? null;
 }
 
 export function formatParitySummary(report: ParityReport): string {
