@@ -86,3 +86,4 @@ vitest-output.txt
 
 # --- Agent tooling ---
 .serena/
+.omo/
