@@ -916,6 +916,25 @@ struct CycleReportResult {
     report: Option<core::parity_harness::CycleReport>,
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+struct ReferenceCandidateParityResult {
+    ok: bool,
+    message: String,
+    core_label: String,
+    golden_path: String,
+    golden_source: String,
+    frames_run: u32,
+    evidence_level: String,
+    visual_parity: bool,
+    observed_state_parity: bool,
+    scenario_passed: bool,
+    divergence_count: usize,
+    reference_rom_sha256: String,
+    candidate_rom_sha256: String,
+    report_path: String,
+    report: Option<core::parity_harness::ReferenceCandidateReport>,
+}
+
 #[tauri::command]
 fn parity_run_cross_core(
     project_dir: String,
@@ -1060,6 +1079,106 @@ fn parity_run_cross_core(
             report_path: String::new(),
             report: None,
         },
+    }
+}
+
+/// Experimental: compare a reference ROM against a candidate ROM (different
+/// SHA expected) on the SAME core, each cold booted independently, against the
+/// same deterministic golden script. Reports the evidence level only — never a
+/// total-equivalence claim.
+#[tauri::command]
+fn parity_run_reference_candidate(
+    reference_project_dir: String,
+    candidate_project_dir: String,
+    golden_path: String,
+    core_path: String,
+    frames: Option<u32>,
+) -> ReferenceCandidateParityResult {
+    let err = |message: String| ReferenceCandidateParityResult {
+        ok: false,
+        message,
+        core_label: String::new(),
+        golden_path: String::new(),
+        golden_source: String::new(),
+        frames_run: 0,
+        evidence_level: String::new(),
+        visual_parity: false,
+        observed_state_parity: false,
+        scenario_passed: false,
+        divergence_count: 0,
+        reference_rom_sha256: String::new(),
+        candidate_rom_sha256: String::new(),
+        report_path: String::new(),
+        report: None,
+    };
+
+    let reference_dir = reference_project_dir.trim();
+    let candidate_dir = candidate_project_dir.trim();
+    let golden = golden_path.trim();
+    let core = core_path.trim();
+    if reference_dir.is_empty() || candidate_dir.is_empty() {
+        return err("Reference/candidate parity requires both project directories.".to_string());
+    }
+    if golden.is_empty() {
+        return err("Reference/candidate parity requires a golden input path.".to_string());
+    }
+    if core.is_empty() {
+        return err("Reference/candidate parity requires a core path.".to_string());
+    }
+
+    let reference_rom = match find_first_rom_artifact(Path::new(reference_dir)) {
+        Some(path) => path,
+        None => {
+            return err(
+                "No ROM artifact found in reference project build directory.".to_string(),
+            )
+        }
+    };
+    let candidate_rom = match find_first_rom_artifact(Path::new(candidate_dir)) {
+        Some(path) => path,
+        None => {
+            return err(
+                "No ROM artifact found in candidate project build directory.".to_string(),
+            )
+        }
+    };
+
+    let report_dir = Path::new(candidate_dir).join(".rds").join("reports");
+    match core::parity_harness::run_reference_candidate_parity(
+        &reference_rom,
+        &candidate_rom,
+        Path::new(golden),
+        Path::new(core),
+        frames,
+        &report_dir,
+    ) {
+        Ok((report, written)) => {
+            let cmp = &report.comparison;
+            ReferenceCandidateParityResult {
+                ok: true,
+                message: format!(
+                    "Reference/candidate evidence: {:?} ({} divergence(s)) after {} frame(s); report in '{}'.",
+                    cmp.evidence_level,
+                    cmp.divergences.len(),
+                    report.frames_run,
+                    written.display()
+                ),
+                core_label: report.core_label.clone(),
+                golden_path: golden.to_string(),
+                golden_source: report.golden_source.clone(),
+                frames_run: report.frames_run,
+                evidence_level: format!("{:?}", cmp.evidence_level),
+                visual_parity: cmp.visual_parity,
+                observed_state_parity: cmp.observed_state_parity,
+                scenario_passed: cmp.scenario_passed,
+                divergence_count: cmp.divergences.len(),
+                reference_rom_sha256: report.reference_rom_sha256.clone(),
+                candidate_rom_sha256: report.candidate_rom_sha256.clone(),
+                report_path: written.to_string_lossy().to_string(),
+                report: Some(report),
+            }
+        }
+        Err(error) => err(error),
     }
 }
 
@@ -3930,6 +4049,7 @@ pub fn run() {
             emulator_play_replay,
             parity_run_capture,
             parity_run_cross_core,
+            parity_run_reference_candidate,
             parity_run_cycle_report,
             emulator_read_memory,
             emulator_get_execution_trace,

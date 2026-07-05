@@ -1021,6 +1021,423 @@ fn render_cycle_markdown(report: &CycleReport) -> String {
     out
 }
 
+// ============================================================================
+// Reference-vs-Candidate parity contract (Experimental)
+//
+// This is a SEPARATE contract from `compare_runs`/`compare_cross_core`. Those
+// prove determinism of the *same* ROM and short-circuit on a ROM SHA mismatch.
+// Here the two ROMs are EXPECTED to differ (a reference ROM and a candidate ROM
+// with a different SHA-256), run on the SAME core/version/config, each cold
+// booted independently (no cross-restoring of save state), against the SAME
+// deterministic input script.
+//
+// The comparator classifies the *evidence level* only. It NEVER emits a
+// "functionally equivalent" / "matched" claim just because a scenario passed.
+// The strongest per-scenario claim is `ObservedStateParity`; the strongest
+// suite-level claim is `FunctionalEvidence` ("scenarios passed"), which is
+// still explicitly NOT total equivalence.
+// ============================================================================
+
+pub const REFERENCE_CANDIDATE_REPORT_SCHEMA: &str = "rds-reference-candidate-parity/v1";
+
+/// Evidence produced by a reference-vs-candidate comparison. Intentionally has
+/// NO "Equivalent"/"MatchExact" variant: this harness cannot and must not claim
+/// total functional equivalence from framebuffer/observed-state evidence alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ParityEvidenceLevel {
+    /// Divergence detected, or no frames were compared. No positive claim.
+    InsufficientEvidence,
+    /// Every compared frame's framebuffer hash matched. Visual signal only —
+    /// no normalized memory state was available to corroborate.
+    VisualParity,
+    /// Framebuffers matched AND normalized memory regions were actually
+    /// available and matched. Strongest per-scenario evidence; still not
+    /// "equivalence".
+    ObservedStateParity,
+    /// Suite-level verdict: one or more deterministic scenarios ran to
+    /// completion without divergence. Records that scenarios passed WITHOUT
+    /// asserting total equivalence.
+    FunctionalEvidence,
+}
+
+/// Normalized memory observation for a single scenario. `available` is `false`
+/// whenever the core/host cannot expose comparable normalized regions (the case
+/// on hosts without a memory-introspecting core); the comparison then records a
+/// limitation instead of silently comparing full, ROM-specific save states.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObservedState {
+    pub available: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_regions_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub candidate_regions_sha256: Option<String>,
+    #[serde(default)]
+    pub region_labels: Vec<String>,
+}
+
+impl ObservedState {
+    /// Explicitly unavailable observation (host without normalized memory
+    /// extraction). Comparisons downgrade to visual-only and log the limitation.
+    pub fn unavailable() -> Self {
+        Self {
+            available: false,
+            reference_regions_sha256: None,
+            candidate_regions_sha256: None,
+            region_labels: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReferenceCandidateComparison {
+    pub evidence_level: ParityEvidenceLevel,
+    /// True only when >0 frames compared and all framebuffer hashes matched.
+    pub visual_parity: bool,
+    /// True only when observed state was available and matched.
+    pub observed_state_parity: bool,
+    /// True when no divergence was recorded and at least one frame was compared.
+    pub scenario_passed: bool,
+    pub frames_compared: u32,
+    pub reference_rom_sha256: String,
+    pub candidate_rom_sha256: String,
+    pub divergences: Vec<ParityDivergence>,
+    pub limitations: Vec<String>,
+}
+
+/// Pure comparison of a reference report against a candidate report. The two
+/// reports come from DIFFERENT ROMs (different SHA is expected, not an error).
+pub fn compare_reference_candidate(
+    reference: &ParityReport,
+    candidate: &ParityReport,
+    observed: &ObservedState,
+) -> ReferenceCandidateComparison {
+    let mut divergences = Vec::new();
+    let mut limitations = Vec::new();
+
+    // Same-core/version/config is a HARD requirement of this contract. Differing
+    // core labels invalidate any parity claim.
+    if reference.core_label != candidate.core_label {
+        divergences.push(ParityDivergence {
+            frame_index: u32::MAX,
+            kind: "core_label_mismatch".to_string(),
+            expected: reference.core_label.clone(),
+            observed: candidate.core_label.clone(),
+        });
+    }
+
+    if reference.frames_run != candidate.frames_run {
+        divergences.push(ParityDivergence {
+            frame_index: u32::MAX,
+            kind: "frames_run_mismatch".to_string(),
+            expected: reference.frames_run.to_string(),
+            observed: candidate.frames_run.to_string(),
+        });
+    }
+
+    let limit = reference
+        .frame_hashes
+        .len()
+        .min(candidate.frame_hashes.len());
+    for index in 0..limit {
+        let a = &reference.frame_hashes[index];
+        let b = &candidate.frame_hashes[index];
+        if a.framebuffer_sha256 != b.framebuffer_sha256 {
+            divergences.push(ParityDivergence {
+                frame_index: a.frame_index,
+                kind: "reference_candidate_frame_hash_mismatch".to_string(),
+                expected: a.framebuffer_sha256.clone(),
+                observed: b.framebuffer_sha256.clone(),
+            });
+        }
+    }
+    if reference.frame_hashes.len() != candidate.frame_hashes.len() {
+        divergences.push(ParityDivergence {
+            frame_index: limit as u32,
+            kind: "frame_hashes_length_mismatch".to_string(),
+            expected: reference.frame_hashes.len().to_string(),
+            observed: candidate.frame_hashes.len().to_string(),
+        });
+    }
+
+    // Observed (normalized) memory state: compare ONLY when actually available.
+    // We deliberately do NOT compare `final_state_sha256` here: for two distinct
+    // ROMs the full runtime save state always differs and proves nothing.
+    let mut observed_state_parity = false;
+    if observed.available {
+        match (
+            &observed.reference_regions_sha256,
+            &observed.candidate_regions_sha256,
+        ) {
+            (Some(a), Some(b)) if a == b => {
+                observed_state_parity = true;
+            }
+            (Some(a), Some(b)) => {
+                divergences.push(ParityDivergence {
+                    frame_index: u32::MAX,
+                    kind: "observed_state_mismatch".to_string(),
+                    expected: a.clone(),
+                    observed: b.clone(),
+                });
+            }
+            _ => {
+                limitations.push(
+                    "observed_state marked available but region hashes were missing".to_string(),
+                );
+            }
+        }
+    } else {
+        limitations.push(
+            "normalized memory observation unavailable on this host/core; evidence is visual-only"
+                .to_string(),
+        );
+    }
+
+    let frames_compared = limit as u32;
+    let has_frames = frames_compared > 0;
+    let visual_parity = has_frames
+        && !divergences.iter().any(|d| {
+            d.kind == "reference_candidate_frame_hash_mismatch"
+                || d.kind == "frame_hashes_length_mismatch"
+                || d.kind == "frames_run_mismatch"
+                || d.kind == "core_label_mismatch"
+        });
+    let scenario_passed = has_frames && divergences.is_empty();
+
+    let evidence_level = if !visual_parity {
+        ParityEvidenceLevel::InsufficientEvidence
+    } else if observed.available {
+        if observed_state_parity {
+            ParityEvidenceLevel::ObservedStateParity
+        } else {
+            // frames matched but observed state diverged/incomplete
+            ParityEvidenceLevel::InsufficientEvidence
+        }
+    } else {
+        ParityEvidenceLevel::VisualParity
+    };
+
+    ReferenceCandidateComparison {
+        evidence_level,
+        visual_parity,
+        observed_state_parity,
+        scenario_passed,
+        frames_compared,
+        reference_rom_sha256: reference.rom_sha256.clone(),
+        candidate_rom_sha256: candidate.rom_sha256.clone(),
+        divergences,
+        limitations,
+    }
+}
+
+/// Suite-level aggregate over several scenario comparisons. Returns
+/// `FunctionalEvidence` only when EVERY scenario passed without divergence and
+/// at least one scenario was present — and even then this is "scenarios
+/// passed", never "equivalent". Any failing/empty scenario yields
+/// `InsufficientEvidence`.
+pub fn aggregate_functional_evidence(
+    comparisons: &[ReferenceCandidateComparison],
+) -> ParityEvidenceLevel {
+    if comparisons.is_empty() || comparisons.iter().any(|c| !c.scenario_passed) {
+        return ParityEvidenceLevel::InsufficientEvidence;
+    }
+    ParityEvidenceLevel::FunctionalEvidence
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReferenceCandidateReport {
+    pub schema: String,
+    pub reference_rom_path: String,
+    pub reference_rom_sha256: String,
+    pub candidate_rom_path: String,
+    pub candidate_rom_sha256: String,
+    pub core_label: String,
+    pub golden_path: String,
+    pub golden_source: String,
+    pub frames_run: u32,
+    pub report_reference: ParityReport,
+    pub report_candidate: ParityReport,
+    pub comparison: ReferenceCandidateComparison,
+    /// Suite-level verdict over the scenario(s) in this report. `FunctionalEvidence`
+    /// only when every scenario passed; still never "total equivalence".
+    pub functional_evidence: ParityEvidenceLevel,
+    pub not_measured_by_this_harness: Vec<String>,
+}
+
+/// Runs the reference and candidate ROMs on the SAME core, each cold booted
+/// independently (its own captured initial state — the reference's save state is
+/// NEVER restored into the candidate), against the same deterministic script.
+///
+/// Requires a real Libretro core, so it is exercised by gated/`#[ignore]` tests
+/// on hosts that ship a core. The pure comparator/aggregator/writer above carry
+/// the deterministic unit coverage.
+pub fn run_reference_candidate_parity(
+    reference_rom: &Path,
+    candidate_rom: &Path,
+    golden_path: &Path,
+    core_path: &Path,
+    frame_limit: Option<u32>,
+    report_dir: &Path,
+) -> Result<(ReferenceCandidateReport, PathBuf), String> {
+    for (label, path) in [
+        ("Reference ROM", reference_rom),
+        ("Candidate ROM", candidate_rom),
+        ("Golden input", golden_path),
+        ("Core", core_path),
+    ] {
+        if !path.exists() {
+            return Err(format!(
+                "{label} '{}' nao existe para reference/candidate parity.",
+                path.display()
+            ));
+        }
+    }
+
+    let reference_bytes = fs::read(reference_rom)
+        .map_err(|error| format!("Could not read reference ROM '{}': {}", reference_rom.display(), error))?;
+    let candidate_bytes = fs::read(candidate_rom)
+        .map_err(|error| format!("Could not read candidate ROM '{}': {}", candidate_rom.display(), error))?;
+    let reference_sha = sha256_hex(&reference_bytes);
+    let candidate_sha = sha256_hex(&candidate_bytes);
+
+    let golden = load_golden(golden_path)?;
+    let mut inputs: Vec<JoypadState> = golden.inputs().to_vec();
+    if let Some(limit) = frame_limit {
+        let limit = limit as usize;
+        if inputs.len() > limit {
+            inputs.truncate(limit);
+        }
+    }
+    if inputs.is_empty() {
+        return Err(format!(
+            "Golden input '{}' produced zero frames; refusing to capture a reference/candidate report.",
+            golden_path.display()
+        ));
+    }
+
+    // Reference ROM: independent cold boot, capture its OWN initial state.
+    let mut ref_core = EmulatorCore::new(Some(core_path));
+    ref_core.load_rom(reference_rom)?;
+    let ref_initial = ref_core.capture_runtime_state_bytes()?;
+    let report_reference =
+        run_parity_capture(&mut ref_core, reference_rom, &reference_sha, &ref_initial, &inputs)?;
+    ref_core.stop().ok();
+
+    // Candidate ROM: independent cold boot, capture its OWN initial state.
+    // The reference's save state is intentionally never restored here.
+    let mut cand_core = EmulatorCore::new(Some(core_path));
+    cand_core.load_rom(candidate_rom)?;
+    let cand_initial = cand_core.capture_runtime_state_bytes()?;
+    let report_candidate =
+        run_parity_capture(&mut cand_core, candidate_rom, &candidate_sha, &cand_initial, &inputs)?;
+    cand_core.stop().ok();
+
+    // Normalized memory observation is not exposed by the standard Libretro path
+    // used here, so the comparison is honestly visual-only for now.
+    let comparison = compare_reference_candidate(
+        &report_reference,
+        &report_candidate,
+        &ObservedState::unavailable(),
+    );
+    let functional_evidence = aggregate_functional_evidence(std::slice::from_ref(&comparison));
+
+    let report = ReferenceCandidateReport {
+        schema: REFERENCE_CANDIDATE_REPORT_SCHEMA.to_string(),
+        reference_rom_path: reference_rom.to_string_lossy().to_string(),
+        reference_rom_sha256: reference_sha,
+        candidate_rom_path: candidate_rom.to_string_lossy().to_string(),
+        candidate_rom_sha256: candidate_sha,
+        core_label: report_reference.core_label.clone(),
+        golden_path: golden_path.to_string_lossy().to_string(),
+        golden_source: golden.source_label().to_string(),
+        frames_run: inputs.len() as u32,
+        report_reference,
+        report_candidate,
+        comparison,
+        functional_evidence,
+        not_measured_by_this_harness: ParityReport::not_measured_default(),
+    };
+
+    let written = write_reference_candidate_report(report_dir, &report)?;
+    Ok((report, written))
+}
+
+pub fn write_reference_candidate_report(
+    report_dir: &Path,
+    report: &ReferenceCandidateReport,
+) -> Result<PathBuf, String> {
+    fs::create_dir_all(report_dir).map_err(|error| {
+        format!(
+            "Could not create reference/candidate report dir '{}': {}",
+            report_dir.display(),
+            error
+        )
+    })?;
+    let json_path = report_dir.join("reference-candidate-parity-report.json");
+    let md_path = report_dir.join("reference-candidate-parity-report.md");
+
+    let json = serde_json::to_string_pretty(report)
+        .map_err(|error| format!("Could not serialize reference/candidate report: {error}"))?;
+    fs::write(&json_path, format!("{json}\n")).map_err(|error| {
+        format!("Could not write report '{}': {}", json_path.display(), error)
+    })?;
+    fs::write(&md_path, render_reference_candidate_markdown(report)).map_err(|error| {
+        format!("Could not write report markdown '{}': {}", md_path.display(), error)
+    })?;
+    Ok(json_path)
+}
+
+fn render_reference_candidate_markdown(report: &ReferenceCandidateReport) -> String {
+    let cmp = &report.comparison;
+    let mut out = String::new();
+    out.push_str(&format!("# {}\n\n", report.schema));
+    out.push_str(&format!("- **Core**: `{}`\n", report.core_label));
+    out.push_str(&format!("- **Golden input**: `{}` ({})\n", report.golden_path, report.golden_source));
+    out.push_str(&format!("- **Frames run**: {}\n", report.frames_run));
+    out.push_str(&format!(
+        "- **Reference ROM**: `{}` sha=`{}`\n",
+        report.reference_rom_path, report.reference_rom_sha256
+    ));
+    out.push_str(&format!(
+        "- **Candidate ROM**: `{}` sha=`{}`\n",
+        report.candidate_rom_path, report.candidate_rom_sha256
+    ));
+    out.push_str(&format!("- **Evidence level**: `{:?}`\n", cmp.evidence_level));
+    out.push_str(&format!(
+        "- **Suite functional evidence**: `{:?}`\n",
+        report.functional_evidence
+    ));
+    out.push_str(&format!("- **Visual parity**: {}\n", cmp.visual_parity));
+    out.push_str(&format!("- **Observed-state parity**: {}\n", cmp.observed_state_parity));
+    out.push_str(&format!("- **Scenario passed**: {}\n", cmp.scenario_passed));
+    out.push_str(&format!("- **Frames compared**: {}\n", cmp.frames_compared));
+    out.push_str(
+        "\n> This report does NOT assert total functional equivalence. The strongest claim it can\n> make is scenario-level evidence.\n",
+    );
+    if !cmp.divergences.is_empty() {
+        out.push_str("\n## Divergences\n\n");
+        for d in &cmp.divergences {
+            out.push_str(&format!(
+                "- frame {}: `{}` reference=`{}` candidate=`{}`\n",
+                d.frame_index, d.kind, d.expected, d.observed
+            ));
+        }
+    }
+    if !cmp.limitations.is_empty() {
+        out.push_str("\n## Limitations\n\n");
+        for item in &cmp.limitations {
+            out.push_str(&format!("- {item}\n"));
+        }
+    }
+    if !report.not_measured_by_this_harness.is_empty() {
+        out.push_str("\n## Not measured by this harness\n\n");
+        for field in &report.not_measured_by_this_harness {
+            out.push_str(&format!("- {field}\n"));
+        }
+    }
+    out
+}
+
 fn report_dir_suffix(report: &ParityReport) -> String {
     format!(
         "frames={} det={} div={}",
@@ -1766,5 +2183,221 @@ mod tests {
         assert_eq!(cycle_report.m68k_cycle_trace.status, "missing");
         assert!(cycle_path.exists());
         assert!(report_dir.join("cycle-report.md").exists());
+    }
+
+    // ---- Reference-vs-Candidate contract -----------------------------------
+
+    fn candidate_of(reference: &ParityReport, candidate_sha: &str) -> ParityReport {
+        let mut candidate = reference.clone();
+        candidate.rom_sha256 = candidate_sha.to_string();
+        candidate.rom_path = "/tmp/candidate.bin".to_string();
+        candidate
+    }
+
+    #[test]
+    fn reference_candidate_accepts_different_roms() {
+        let reference = sample_report(true, None);
+        let candidate = candidate_of(&reference, "different-rom-sha");
+        assert_ne!(reference.rom_sha256, candidate.rom_sha256);
+
+        let cmp = compare_reference_candidate(
+            &reference,
+            &candidate,
+            &ObservedState::unavailable(),
+        );
+
+        // Different SHA is EXPECTED here, not a divergence.
+        assert!(cmp.divergences.is_empty(), "different ROMs must be accepted");
+        assert!(cmp.visual_parity);
+        assert!(cmp.scenario_passed);
+        assert_eq!(cmp.evidence_level, ParityEvidenceLevel::VisualParity);
+        assert_eq!(cmp.frames_compared, 4);
+    }
+
+    #[test]
+    fn compare_runs_still_rejects_different_roms() {
+        // The old same-ROM determinism contract must keep short-circuiting.
+        let reference = sample_report(true, None);
+        let candidate = candidate_of(&reference, "different-rom-sha");
+        let divergences = compare_runs(&reference, &candidate);
+        assert_eq!(divergences.len(), 1);
+        assert_eq!(divergences[0].kind, "rom_sha256_mismatch");
+    }
+
+    #[test]
+    fn reference_candidate_detects_divergent_frame() {
+        let reference = sample_report(true, None);
+        let mut candidate = candidate_of(&reference, "different-rom-sha");
+        candidate.frame_hashes[2].framebuffer_sha256 = "diverged".to_string();
+
+        let cmp = compare_reference_candidate(
+            &reference,
+            &candidate,
+            &ObservedState::unavailable(),
+        );
+
+        assert!(cmp
+            .divergences
+            .iter()
+            .any(|d| d.kind == "reference_candidate_frame_hash_mismatch"
+                && d.frame_index == 2));
+        assert!(!cmp.visual_parity);
+        assert!(!cmp.scenario_passed);
+        assert_eq!(cmp.evidence_level, ParityEvidenceLevel::InsufficientEvidence);
+    }
+
+    #[test]
+    fn reference_candidate_detects_observed_state_divergence() {
+        let reference = sample_report(true, None);
+        let candidate = candidate_of(&reference, "different-rom-sha");
+        let observed = ObservedState {
+            available: true,
+            reference_regions_sha256: Some("state-a".to_string()),
+            candidate_regions_sha256: Some("state-b".to_string()),
+            region_labels: vec!["work_ram".to_string()],
+        };
+
+        let cmp = compare_reference_candidate(&reference, &candidate, &observed);
+
+        assert!(cmp
+            .divergences
+            .iter()
+            .any(|d| d.kind == "observed_state_mismatch"));
+        assert!(!cmp.observed_state_parity);
+        // Frames matched visually, but observed state diverged -> not enough.
+        assert_eq!(cmp.evidence_level, ParityEvidenceLevel::InsufficientEvidence);
+    }
+
+    #[test]
+    fn reference_candidate_reaches_observed_state_parity_when_regions_match() {
+        let reference = sample_report(true, None);
+        let candidate = candidate_of(&reference, "different-rom-sha");
+        let observed = ObservedState {
+            available: true,
+            reference_regions_sha256: Some("normalized-state".to_string()),
+            candidate_regions_sha256: Some("normalized-state".to_string()),
+            region_labels: vec!["work_ram".to_string()],
+        };
+
+        let cmp = compare_reference_candidate(&reference, &candidate, &observed);
+
+        assert!(cmp.divergences.is_empty());
+        assert!(cmp.observed_state_parity);
+        assert_eq!(cmp.evidence_level, ParityEvidenceLevel::ObservedStateParity);
+    }
+
+    #[test]
+    fn reference_candidate_visual_only_never_becomes_total_equivalence() {
+        // Two "equivalent" candidates pass the fixture, but visual-only evidence
+        // must NOT be promoted past FunctionalEvidence, and never to anything
+        // named equivalence (the enum has no such variant).
+        let reference = sample_report(true, None);
+        let candidate = candidate_of(&reference, "different-rom-sha");
+        let cmp = compare_reference_candidate(
+            &reference,
+            &candidate,
+            &ObservedState::unavailable(),
+        );
+
+        assert_eq!(cmp.evidence_level, ParityEvidenceLevel::VisualParity);
+        assert_ne!(cmp.evidence_level, ParityEvidenceLevel::ObservedStateParity);
+
+        let suite = aggregate_functional_evidence(std::slice::from_ref(&cmp));
+        assert_eq!(suite, ParityEvidenceLevel::FunctionalEvidence);
+        // Sanity: the suite verdict is scenario evidence, not observed-state
+        // proof, when only visual signal exists.
+        assert!(!cmp.observed_state_parity);
+    }
+
+    #[test]
+    fn reference_candidate_detects_core_mismatch() {
+        let reference = sample_report(true, None);
+        let mut candidate = candidate_of(&reference, "different-rom-sha");
+        candidate.core_label = "OtherCore".to_string();
+
+        let cmp = compare_reference_candidate(
+            &reference,
+            &candidate,
+            &ObservedState::unavailable(),
+        );
+
+        assert!(cmp
+            .divergences
+            .iter()
+            .any(|d| d.kind == "core_label_mismatch"));
+        assert!(!cmp.visual_parity);
+        assert_eq!(cmp.evidence_level, ParityEvidenceLevel::InsufficientEvidence);
+    }
+
+    #[test]
+    fn aggregate_functional_evidence_requires_all_scenarios_to_pass() {
+        let reference = sample_report(true, None);
+        let candidate = candidate_of(&reference, "different-rom-sha");
+        let pass = compare_reference_candidate(
+            &reference,
+            &candidate,
+            &ObservedState::unavailable(),
+        );
+
+        let mut broken_candidate = candidate.clone();
+        broken_candidate.frame_hashes[0].framebuffer_sha256 = "diverged".to_string();
+        let fail = compare_reference_candidate(
+            &reference,
+            &broken_candidate,
+            &ObservedState::unavailable(),
+        );
+
+        assert_eq!(
+            aggregate_functional_evidence(&[]),
+            ParityEvidenceLevel::InsufficientEvidence
+        );
+        assert_eq!(
+            aggregate_functional_evidence(&[pass.clone(), fail]),
+            ParityEvidenceLevel::InsufficientEvidence
+        );
+        assert_eq!(
+            aggregate_functional_evidence(&[pass.clone(), pass]),
+            ParityEvidenceLevel::FunctionalEvidence
+        );
+    }
+
+    #[test]
+    fn write_reference_candidate_report_records_hashes_core_inputs_limitations() {
+        let reference = sample_report(true, None);
+        let candidate = candidate_of(&reference, "candidate-sha-999");
+        let comparison = compare_reference_candidate(
+            &reference,
+            &candidate,
+            &ObservedState::unavailable(),
+        );
+        let functional_evidence = aggregate_functional_evidence(std::slice::from_ref(&comparison));
+        let report = ReferenceCandidateReport {
+            schema: REFERENCE_CANDIDATE_REPORT_SCHEMA.to_string(),
+            reference_rom_path: reference.rom_path.clone(),
+            reference_rom_sha256: reference.rom_sha256.clone(),
+            candidate_rom_path: candidate.rom_path.clone(),
+            candidate_rom_sha256: candidate.rom_sha256.clone(),
+            core_label: reference.core_label.clone(),
+            golden_path: "/tmp/golden.rds-input.json".to_string(),
+            golden_source: "script".to_string(),
+            frames_run: reference.frames_run,
+            report_reference: reference.clone(),
+            report_candidate: candidate.clone(),
+            comparison,
+            functional_evidence,
+            not_measured_by_this_harness: ParityReport::not_measured_default(),
+        };
+
+        let dir = temp_dir("refcand");
+        let written = write_reference_candidate_report(&dir, &report).expect("write report");
+        assert!(written.exists());
+        let md = fs::read_to_string(dir.join("reference-candidate-parity-report.md"))
+            .expect("read markdown");
+        assert!(md.contains(&reference.rom_sha256));
+        assert!(md.contains("candidate-sha-999"));
+        assert!(md.contains(&reference.core_label));
+        assert!(md.contains("golden.rds-input.json"));
+        assert!(md.contains("Limitations"));
+        assert!(md.contains("does NOT assert total functional equivalence"));
     }
 }
