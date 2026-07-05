@@ -1961,11 +1961,29 @@ where
         && target.target != "snes"
         && is_lto_version_mismatch(&String::from_utf8_lossy(&output.stderr))
     {
-        emit!(
-            "info",
-            "libmd.a (release) foi compilada com uma versao de LTO diferente do gcc detectado; refazendo o build SGDK pelo caminho debug sem LTO (make debug, libmd_debug.a)."
-        );
-        output = build_and_run(&["debug", "CONVSYM=true"])?;
+        // The debug/no-LTO fallback changes the artifact profile (DEBUG=1, -O1,
+        // no LTO), so it must NEVER silently replace a production release build.
+        // It is gated behind an explicit Experimental opt-in; without opt-in an
+        // LTO incompatibility is an actionable error.
+        let fallback_opt_in = std::env::var("RDS_ALLOW_SGDK_DEBUG_FALLBACK")
+            .map(|value| {
+                let value = value.trim();
+                value == "1" || value.eq_ignore_ascii_case("true")
+            })
+            .unwrap_or(false);
+        if fallback_opt_in {
+            emit!(
+                "warn",
+                "[experimental] fallback_used=true build_profile=debug debug_define=DEBUG=1: libmd.a (release) e LTO-incompativel com o m68k-elf-gcc detectado; RDS_ALLOW_SGDK_DEBUG_FALLBACK ativo -> rebuild pelo caminho debug/no-LTO (libmd_debug.a). Limitacao: NAO e o artefato de producao release (DEBUG=1, -O1, sem LTO); simbolos MDDBG nao injetados (convsym Windows-only ausente no Linux)."
+            );
+            output = build_and_run(&["debug", "CONVSYM=true"])?;
+        } else {
+            emit!(
+                "error",
+                "build_profile=release fallback_used=false: libmd.a (release) foi compilada com uma versao de LTO incompativel com o m68k-elf-gcc detectado (ex.: Linux gcc 16 vs lib gcc 13). Recompile a biblioteca SGDK com o mesmo gcc (release no-LTO) OU reexecute com RDS_ALLOW_SGDK_DEBUG_FALLBACK=1 para um build Experimental debug/no-LTO. Ver docs/11 e docs/12."
+            );
+            // Keep the failed release output; the block below returns the error.
+        }
     }
 
     for line in String::from_utf8_lossy(&output.stdout).lines() {
@@ -2574,6 +2592,12 @@ mod tests {
         }
 
         fn set_path(key: &'static str, value: &Path) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+
+        fn set(key: &'static str, value: &str) -> Self {
             let previous = std::env::var_os(key);
             std::env::set_var(key, value);
             Self { key, previous }
@@ -3852,6 +3876,11 @@ PY\n"
     #[test]
     fn megadrive_build_runs_with_detected_sgdk_toolchain_when_present() {
         let _serial = test_serial_guard();
+        // Opt in to the Experimental debug/no-LTO fallback so the build still
+        // completes on hosts where the prebuilt release libmd.a is LTO-
+        // incompatible with the detected gcc. On hosts where the release link
+        // works, the fallback is never triggered and this var is inert.
+        let _fallback = EnvVarGuard::set("RDS_ALLOW_SGDK_DEBUG_FALLBACK", "1");
         let env = BuildEnvironment::detect();
         let Some(root) = env.sgdk_root.as_ref() else {
             return;
@@ -3885,6 +3914,49 @@ PY\n"
         );
 
         let _ = fs::remove_dir_all(project_dir);
+    }
+
+    /// Sem o opt-in `RDS_ALLOW_SGDK_DEBUG_FALLBACK`, uma incompatibilidade de LTO
+    /// entre a `libmd.a` release e o gcc detectado deve falhar com erro acionavel,
+    /// NUNCA cair silenciosamente no perfil debug. So exercita a assercao em hosts
+    /// onde o mismatch realmente ocorre; caso contrario, retorna cedo.
+    #[test]
+    fn megadrive_build_errors_on_lto_mismatch_without_optin() {
+        let _serial = test_serial_guard();
+        let _no_optin = EnvVarGuard::remove("RDS_ALLOW_SGDK_DEBUG_FALLBACK");
+        let env = BuildEnvironment::detect();
+        let Some(root) = env.sgdk_root.as_ref() else {
+            return;
+        };
+        if !root.join("makefile.gen").is_file() || env.sgdk_make_program.is_none() {
+            return;
+        }
+
+        let project_dir = workspace_copy("megadrive_dummy");
+        install_megadrive_sprite_fixture(&project_dir);
+        let result = run_build_with_environment(&project_dir, &env, |_| {});
+        let _ = fs::remove_dir_all(&project_dir);
+
+        // Only hosts whose release link actually hits the LTO mismatch exercise
+        // this path; on a matching toolchain the release build simply succeeds.
+        let hit_lto = result.log.iter().any(|line| {
+            line.message.contains("build_profile=release fallback_used=false")
+                || line.message.to_ascii_lowercase().contains("lto version")
+        });
+        if !hit_lto {
+            return;
+        }
+        assert!(
+            !result.ok,
+            "sem opt-in, mismatch de LTO deve falhar, nao fazer fallback silencioso; log: {:?}",
+            result.log
+        );
+        assert!(
+            result.log.iter().any(|line| line.level == "error"
+                && line.message.contains("RDS_ALLOW_SGDK_DEBUG_FALLBACK=1")),
+            "erro deve ser acionavel e orientar o opt-in explicito; log: {:?}",
+            result.log
+        );
     }
 
     #[test]
