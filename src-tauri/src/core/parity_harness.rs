@@ -2185,6 +2185,88 @@ mod tests {
         assert!(report_dir.join("cycle-report.md").exists());
     }
 
+    #[test]
+    #[ignore = "host-local: real Libretro core reference/candidate parity (needs core .so/.dll + fixture ROM)"]
+    fn reference_candidate_real_core_generates_report() {
+        use crate::emulator::libretro_ffi::test_helpers::test_serial_guard;
+
+        let _serial = test_serial_guard();
+        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repo root")
+            .to_path_buf();
+        let fixture_rom = repo_root
+            .join("src-tauri")
+            .join("tests")
+            .join("fixtures")
+            .join("projects")
+            .join("megadrive_dummy")
+            .join("build")
+            .join("megadrive")
+            .join("out")
+            .join("rom.bin");
+        let core_ext = if cfg!(target_os = "windows") {
+            "dll"
+        } else if cfg!(target_os = "macos") {
+            "dylib"
+        } else {
+            "so"
+        };
+        let core = repo_root
+            .join("toolchains")
+            .join("libretro")
+            .join("cores")
+            .join(format!("genesis_plus_gx_libretro.{core_ext}"));
+        if !fixture_rom.exists() || !core.exists() {
+            eprintln!(
+                "skipping: fixture ROM or core missing (rom={}, core={})",
+                fixture_rom.display(),
+                core.display()
+            );
+            return;
+        }
+
+        let work = repo_root
+            .join("src-tauri")
+            .join("target-test")
+            .join("validation")
+            .join("reference-candidate-real");
+        fs::create_dir_all(&work).expect("create work dir");
+        let golden_path = work.join("golden.rds-input.json");
+        let script = InputScript::from_frames(vec![
+            JoypadState::default(),
+            JoypadState { start: true, ..JoypadState::default() },
+            JoypadState { right: true, ..JoypadState::default() },
+        ]);
+        fs::write(
+            &golden_path,
+            serde_json::to_vec_pretty(&script).expect("serialize golden"),
+        )
+        .expect("write golden");
+
+        // Smoke: the same ROM as reference and candidate must run end-to-end on
+        // the real core (two independent cold boots) and reach visual parity.
+        let (report, written) = run_reference_candidate_parity(
+            &fixture_rom,
+            &fixture_rom,
+            &golden_path,
+            &core,
+            Some(3),
+            &work,
+        )
+        .expect("real reference/candidate parity");
+
+        assert_eq!(report.frames_run, 3);
+        assert!(written.exists());
+        assert!(work.join("reference-candidate-parity-report.md").exists());
+        assert!(report.comparison.scenario_passed, "identical ROM must pass");
+        assert!(report.comparison.visual_parity);
+        assert_eq!(
+            report.comparison.evidence_level,
+            ParityEvidenceLevel::VisualParity
+        );
+    }
+
     // ---- Reference-vs-Candidate contract -----------------------------------
 
     fn candidate_of(reference: &ParityReport, candidate_sha: &str) -> ParityReport {
