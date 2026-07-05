@@ -5,7 +5,9 @@ use std::time::Instant;
 use serde::{Deserialize, Serialize};
 
 use crate::core::rom_mastering::sha256_hex;
-use crate::emulator::libretro_ffi::{EmulatorCore, JoypadState, ReplayCapture};
+use crate::emulator::libretro_ffi::{
+    EmulatorCore, JoypadState, MemoryRegionObservation, ReplayCapture,
+};
 
 pub const PARITY_REPORT_SCHEMA: &str = "rds-gameplay-parity/v1";
 pub const INPUT_SCRIPT_SCHEMA: &str = "rds-input-script/v1";
@@ -1064,30 +1066,47 @@ pub enum ParityEvidenceLevel {
     FunctionalEvidence,
 }
 
-/// Normalized memory observation for a single scenario. `available` is `false`
-/// whenever the core/host cannot expose comparable normalized regions (the case
-/// on hosts without a memory-introspecting core); the comparison then records a
-/// limitation instead of silently comparing full, ROM-specific save states.
+/// Normalized memory observation for a single scenario, compared REGION BY
+/// REGION (WRAM/VRAM/SRAM), never via a single combined hash. `available` is
+/// `false` whenever no region is exposed on both sides. A region the core does
+/// not expose is `available = false` with `sha256 = None` — never an empty hash.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ObservedState {
     pub available: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reference_regions_sha256: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub candidate_regions_sha256: Option<String>,
     #[serde(default)]
-    pub region_labels: Vec<String>,
+    pub reference_regions: Vec<MemoryRegionObservation>,
+    #[serde(default)]
+    pub candidate_regions: Vec<MemoryRegionObservation>,
 }
 
 impl ObservedState {
-    /// Explicitly unavailable observation (host without normalized memory
-    /// extraction). Comparisons downgrade to visual-only and log the limitation.
+    /// Explicitly unavailable observation (caller with no memory data).
+    /// Comparisons downgrade to visual-only and log the limitation. Equivalent to
+    /// `from_regions(vec![], vec![])`.
     pub fn unavailable() -> Self {
         Self {
             available: false,
-            reference_regions_sha256: None,
-            candidate_regions_sha256: None,
-            region_labels: Vec::new(),
+            reference_regions: Vec::new(),
+            candidate_regions: Vec::new(),
+        }
+    }
+
+    /// Builds an observation from the actual regions captured on each core.
+    /// `available` is true only when at least one region is exposed on BOTH
+    /// reference and candidate (by label).
+    pub fn from_regions(
+        reference: Vec<MemoryRegionObservation>,
+        candidate: Vec<MemoryRegionObservation>,
+    ) -> Self {
+        let available = reference.iter().filter(|r| r.available).any(|r| {
+            candidate
+                .iter()
+                .any(|c| c.label == r.label && c.available)
+        });
+        Self {
+            available,
+            reference_regions: reference,
+            candidate_regions: candidate,
         }
     }
 }
@@ -1163,31 +1182,60 @@ pub fn compare_reference_candidate(
         });
     }
 
-    // Observed (normalized) memory state: compare ONLY when actually available.
-    // We deliberately do NOT compare `final_state_sha256` here: for two distinct
-    // ROMs the full runtime save state always differs and proves nothing.
+    // Observed (normalized) memory state: compared REGION BY REGION, only when
+    // the region is available on both sides. We deliberately do NOT compare
+    // `final_state_sha256` nor any combined hash: for two distinct ROMs the full
+    // runtime save state always differs and proves nothing.
     let mut observed_state_parity = false;
     if observed.available {
-        match (
-            &observed.reference_regions_sha256,
-            &observed.candidate_regions_sha256,
-        ) {
-            (Some(a), Some(b)) if a == b => {
-                observed_state_parity = true;
+        let mut compared_any = false;
+        let mut all_match = true;
+        for reference_region in &observed.reference_regions {
+            let Some(candidate_region) = observed
+                .candidate_regions
+                .iter()
+                .find(|candidate| candidate.label == reference_region.label)
+            else {
+                continue;
+            };
+            if reference_region.available && candidate_region.available {
+                match (&reference_region.sha256, &candidate_region.sha256) {
+                    (Some(a), Some(b)) if a == b => {
+                        compared_any = true;
+                    }
+                    (Some(a), Some(b)) => {
+                        compared_any = true;
+                        all_match = false;
+                        divergences.push(ParityDivergence {
+                            frame_index: u32::MAX,
+                            kind: format!("observed_state_mismatch:{}", reference_region.label),
+                            expected: a.clone(),
+                            observed: b.clone(),
+                        });
+                    }
+                    _ => {
+                        all_match = false;
+                        limitations.push(format!(
+                            "region {} available but hash missing",
+                            reference_region.label
+                        ));
+                    }
+                }
+            } else if reference_region.available != candidate_region.available {
+                limitations.push(format!(
+                    "region {} availability differs (reference={}, candidate={})",
+                    reference_region.label,
+                    reference_region.available,
+                    candidate_region.available
+                ));
             }
-            (Some(a), Some(b)) => {
-                divergences.push(ParityDivergence {
-                    frame_index: u32::MAX,
-                    kind: "observed_state_mismatch".to_string(),
-                    expected: a.clone(),
-                    observed: b.clone(),
-                });
-            }
-            _ => {
-                limitations.push(
-                    "observed_state marked available but region hashes were missing".to_string(),
-                );
-            }
+        }
+        if compared_any {
+            observed_state_parity = all_match;
+        } else {
+            limitations.push(
+                "no memory region was available on both reference and candidate".to_string(),
+            );
         }
     } else {
         limitations.push(
@@ -1261,12 +1309,19 @@ pub struct ReferenceCandidateReport {
     pub candidate_rom_path: String,
     pub candidate_rom_sha256: String,
     pub core_label: String,
+    #[serde(default)]
+    pub core_sha256: String,
     pub golden_path: String,
     pub golden_source: String,
     pub frames_run: u32,
     pub report_reference: ParityReport,
     pub report_candidate: ParityReport,
     pub comparison: ReferenceCandidateComparison,
+    /// Per-region memory observations (size + SHA-256) actually captured on each
+    /// core. Persisted for audit; regions the core does not expose are recorded
+    /// as `available = false` with `sha256 = null`.
+    #[serde(default = "ObservedState::unavailable")]
+    pub observed_state: ObservedState,
     /// Verdict over the scenario(s) in this report: `ScenarioEvidence` for a
     /// single passing script, `FunctionalEvidence` only for a named suite of
     /// >=2 passing scenarios. Still never "total equivalence".
@@ -1325,30 +1380,37 @@ pub fn run_reference_candidate_parity(
         ));
     }
 
-    // Reference ROM: independent cold boot, capture its OWN initial state.
-    let mut ref_core = EmulatorCore::new(Some(core_path));
-    ref_core.load_rom(reference_rom)?;
-    let ref_initial = ref_core.capture_runtime_state_bytes()?;
-    let report_reference =
-        run_parity_capture(&mut ref_core, reference_rom, &reference_sha, &ref_initial, &inputs)?;
-    ref_core.stop().ok();
+    let core_sha256 = fs::read(core_path)
+        .map(|bytes| sha256_hex(&bytes))
+        .unwrap_or_default();
 
-    // Candidate ROM: independent cold boot, capture its OWN initial state.
-    // The reference's save state is intentionally never restored here.
-    let mut cand_core = EmulatorCore::new(Some(core_path));
-    cand_core.load_rom(candidate_rom)?;
-    let cand_initial = cand_core.capture_runtime_state_bytes()?;
-    let report_candidate =
-        run_parity_capture(&mut cand_core, candidate_rom, &candidate_sha, &cand_initial, &inputs)?;
-    cand_core.stop().ok();
+    // Each ROM is cold booted TWICE (independent) to prove its own determinism;
+    // the reference's save state is never restored into the candidate.
+    let (report_reference, reference_regions, reference_deterministic) =
+        run_rom_twice(core_path, reference_rom, &reference_sha, &inputs)?;
+    let (report_candidate, candidate_regions, candidate_deterministic) =
+        run_rom_twice(core_path, candidate_rom, &candidate_sha, &inputs)?;
 
-    // Normalized memory observation is not exposed by the standard Libretro path
-    // used here, so the comparison is honestly visual-only for now.
-    let comparison = compare_reference_candidate(
-        &report_reference,
-        &report_candidate,
-        &ObservedState::unavailable(),
-    );
+    let observed = ObservedState::from_regions(reference_regions, candidate_regions);
+    let mut comparison =
+        compare_reference_candidate(&report_reference, &report_candidate, &observed);
+
+    // Determinism guard: a non-deterministic ROM invalidates any positive claim.
+    if !reference_deterministic || !candidate_deterministic {
+        comparison.divergences.push(ParityDivergence {
+            frame_index: u32::MAX,
+            kind: "non_deterministic_rom".to_string(),
+            expected: format!("reference_deterministic={reference_deterministic}"),
+            observed: format!("candidate_deterministic={candidate_deterministic}"),
+        });
+        comparison.visual_parity = false;
+        comparison.observed_state_parity = false;
+        comparison.scenario_passed = false;
+        comparison.evidence_level = ParityEvidenceLevel::InsufficientEvidence;
+        comparison
+            .limitations
+            .push("ROM nao-deterministica entre duas execucoes: evidencia positiva bloqueada".to_string());
+    }
     let functional_evidence = aggregate_functional_evidence(std::slice::from_ref(&comparison));
 
     let report = ReferenceCandidateReport {
@@ -1358,18 +1420,47 @@ pub fn run_reference_candidate_parity(
         candidate_rom_path: candidate_rom.to_string_lossy().to_string(),
         candidate_rom_sha256: candidate_sha,
         core_label: report_reference.core_label.clone(),
+        core_sha256,
         golden_path: golden_path.to_string_lossy().to_string(),
         golden_source: golden.source_label().to_string(),
         frames_run: inputs.len() as u32,
         report_reference,
         report_candidate,
         comparison,
+        observed_state: observed,
         functional_evidence,
         not_measured_by_this_harness: ParityReport::not_measured_default(),
     };
 
     let written = write_reference_candidate_report(report_dir, &report)?;
     Ok((report, written))
+}
+
+/// Runs a ROM twice via independent cold boots and returns the first run's
+/// report, the memory-region observation, and whether the two runs were
+/// deterministic (identical frame hashes, final state and regions).
+fn run_rom_twice(
+    core_path: &Path,
+    rom: &Path,
+    rom_sha: &str,
+    inputs: &[JoypadState],
+) -> Result<(ParityReport, Vec<MemoryRegionObservation>, bool), String> {
+    let mut core_a = EmulatorCore::new(Some(core_path));
+    core_a.load_rom(rom)?;
+    let initial_a = core_a.capture_runtime_state_bytes()?;
+    let report_a = run_parity_capture(&mut core_a, rom, rom_sha, &initial_a, inputs)?;
+    let regions_a = core_a.capture_normalized_regions();
+    core_a.stop().ok();
+
+    let mut core_b = EmulatorCore::new(Some(core_path));
+    core_b.load_rom(rom)?;
+    let initial_b = core_b.capture_runtime_state_bytes()?;
+    let report_b = run_parity_capture(&mut core_b, rom, rom_sha, &initial_b, inputs)?;
+    let regions_b = core_b.capture_normalized_regions();
+    core_b.stop().ok();
+
+    let deterministic = compare_runs(&report_a, &report_b).is_empty() && regions_a == regions_b;
+    Ok((report_a, regions_a, deterministic))
 }
 
 pub fn write_reference_candidate_report(
@@ -1401,7 +1492,7 @@ fn render_reference_candidate_markdown(report: &ReferenceCandidateReport) -> Str
     let cmp = &report.comparison;
     let mut out = String::new();
     out.push_str(&format!("# {}\n\n", report.schema));
-    out.push_str(&format!("- **Core**: `{}`\n", report.core_label));
+    out.push_str(&format!("- **Core**: `{}` sha256=`{}`\n", report.core_label, report.core_sha256));
     out.push_str(&format!("- **Golden input**: `{}` ({})\n", report.golden_path, report.golden_source));
     out.push_str(&format!("- **Frames run**: {}\n", report.frames_run));
     out.push_str(&format!(
@@ -2271,9 +2362,19 @@ mod tests {
         assert!(work.join("reference-candidate-parity-report.md").exists());
         assert!(report.comparison.scenario_passed, "identical ROM must pass");
         assert!(report.comparison.visual_parity);
-        assert_eq!(
+        assert!(!report.core_sha256.is_empty(), "core sha256 recorded");
+        // The same ROM on both sides yields identical framebuffers AND identical
+        // memory regions on a core that exposes WRAM/VRAM, so the evidence should
+        // reach ObservedStateParity (or at least VisualParity if the core exposes
+        // no comparable region). Never total equivalence.
+        assert!(matches!(
             report.comparison.evidence_level,
-            ParityEvidenceLevel::VisualParity
+            ParityEvidenceLevel::ObservedStateParity | ParityEvidenceLevel::VisualParity
+        ));
+        // A single scenario is ScenarioEvidence, never FunctionalEvidence.
+        assert_eq!(
+            report.functional_evidence,
+            ParityEvidenceLevel::ScenarioEvidence
         );
     }
 
@@ -2284,6 +2385,16 @@ mod tests {
         candidate.rom_sha256 = candidate_sha.to_string();
         candidate.rom_path = "/tmp/candidate.bin".to_string();
         candidate
+    }
+
+    fn region_obs(label: &str, sha: Option<&str>) -> MemoryRegionObservation {
+        MemoryRegionObservation {
+            label: label.to_string(),
+            region_id: 2,
+            available: sha.is_some(),
+            size: if sha.is_some() { 64 } else { 0 },
+            sha256: sha.map(|s| s.to_string()),
+        }
     }
 
     #[test]
@@ -2342,19 +2453,17 @@ mod tests {
     fn reference_candidate_detects_observed_state_divergence() {
         let reference = sample_report(true, None);
         let candidate = candidate_of(&reference, "different-rom-sha");
-        let observed = ObservedState {
-            available: true,
-            reference_regions_sha256: Some("state-a".to_string()),
-            candidate_regions_sha256: Some("state-b".to_string()),
-            region_labels: vec!["work_ram".to_string()],
-        };
+        let observed = ObservedState::from_regions(
+            vec![region_obs("WRAM", Some("state-a"))],
+            vec![region_obs("WRAM", Some("state-b"))],
+        );
 
         let cmp = compare_reference_candidate(&reference, &candidate, &observed);
 
         assert!(cmp
             .divergences
             .iter()
-            .any(|d| d.kind == "observed_state_mismatch"));
+            .any(|d| d.kind.starts_with("observed_state_mismatch")));
         assert!(!cmp.observed_state_parity);
         // Frames matched visually, but observed state diverged -> not enough.
         assert_eq!(cmp.evidence_level, ParityEvidenceLevel::InsufficientEvidence);
@@ -2364,18 +2473,35 @@ mod tests {
     fn reference_candidate_reaches_observed_state_parity_when_regions_match() {
         let reference = sample_report(true, None);
         let candidate = candidate_of(&reference, "different-rom-sha");
-        let observed = ObservedState {
-            available: true,
-            reference_regions_sha256: Some("normalized-state".to_string()),
-            candidate_regions_sha256: Some("normalized-state".to_string()),
-            region_labels: vec!["work_ram".to_string()],
-        };
+        let observed = ObservedState::from_regions(
+            vec![region_obs("WRAM", Some("normalized-state"))],
+            vec![region_obs("WRAM", Some("normalized-state"))],
+        );
 
         let cmp = compare_reference_candidate(&reference, &candidate, &observed);
 
         assert!(cmp.divergences.is_empty());
         assert!(cmp.observed_state_parity);
         assert_eq!(cmp.evidence_level, ParityEvidenceLevel::ObservedStateParity);
+    }
+
+    #[test]
+    fn reference_candidate_observed_state_needs_regions_available_on_both_sides() {
+        let reference = sample_report(true, None);
+        let candidate = candidate_of(&reference, "different-rom-sha");
+        // Candidate does not expose WRAM: unavailable region carries sha=None
+        // (never an empty hash), so no observed-state parity can be claimed.
+        let unavailable = region_obs("WRAM", None);
+        assert!(!unavailable.available && unavailable.sha256.is_none());
+        let observed = ObservedState::from_regions(
+            vec![region_obs("WRAM", Some("s"))],
+            vec![unavailable],
+        );
+        assert!(!observed.available);
+        let cmp = compare_reference_candidate(&reference, &candidate, &observed);
+        assert!(!cmp.observed_state_parity);
+        // Frames still match; with no comparable region it is visual-only.
+        assert_eq!(cmp.evidence_level, ParityEvidenceLevel::VisualParity);
     }
 
     #[test]
@@ -2476,12 +2602,14 @@ mod tests {
             candidate_rom_path: candidate.rom_path.clone(),
             candidate_rom_sha256: candidate.rom_sha256.clone(),
             core_label: reference.core_label.clone(),
+            core_sha256: "core-sha-abc".to_string(),
             golden_path: "/tmp/golden.rds-input.json".to_string(),
             golden_source: "script".to_string(),
             frames_run: reference.frames_run,
             report_reference: reference.clone(),
             report_candidate: candidate.clone(),
             comparison,
+            observed_state: ObservedState::unavailable(),
             functional_evidence,
             not_measured_by_this_harness: ParityReport::not_measured_default(),
         };
