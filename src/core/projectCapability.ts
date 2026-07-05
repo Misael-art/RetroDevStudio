@@ -160,6 +160,20 @@ export type ParityEvidenceLevel =
   | "scenario_evidence"
   | "functional_evidence";
 
+export interface MemoryRegionObservation {
+  label: string;
+  region_id: number;
+  available: boolean;
+  size: number;
+  sha256: string | null;
+}
+
+export interface ObservedState {
+  available: boolean;
+  reference_regions: MemoryRegionObservation[];
+  candidate_regions: MemoryRegionObservation[];
+}
+
 export interface ReferenceCandidateComparison {
   evidence_level: ParityEvidenceLevel;
   visual_parity: boolean;
@@ -179,12 +193,14 @@ export interface ReferenceCandidateReport {
   candidate_rom_path: string;
   candidate_rom_sha256: string;
   core_label: string;
+  core_sha256: string;
   golden_path: string;
   golden_source: string;
   frames_run: number;
   report_reference: ParityReport;
   report_candidate: ParityReport;
   comparison: ReferenceCandidateComparison;
+  observed_state: ObservedState;
   functional_evidence: ParityEvidenceLevel;
   not_measured_by_this_harness: string[];
 }

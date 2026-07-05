@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use libloading::Library;
 
+use crate::core::rom_mastering::sha256_hex;
 use crate::tools::reverse::manifest::SaveRamStatus;
 use crate::tools::reverse::trace::{CpuState, ExecutionTraceLog};
 
@@ -45,6 +46,17 @@ pub struct FrameSize {
     pub width: u32,
     pub height: u32,
     pub pitch: u32,
+}
+
+/// A normalized memory-region observation exposed by a Libretro core. `available`
+/// is false (with `sha256 = None`) when the core does not expose the region.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MemoryRegionObservation {
+    pub label: String,
+    pub region_id: u32,
+    pub available: bool,
+    pub size: usize,
+    pub sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -994,6 +1006,42 @@ impl EmulatorCore {
         let end = total_size.min(offset.saturating_add(length));
         let source = unsafe { std::slice::from_raw_parts(memory_ptr.cast::<u8>(), total_size) };
         Ok((source[offset..end].to_vec(), total_size))
+    }
+
+    /// Captures normalized memory-region observations (WRAM / VRAM / SRAM) that
+    /// the loaded core actually exposes. Each region carries its size and a
+    /// full SHA-256; a region the core does not expose is `available = false`
+    /// with `sha256 = None` (never an empty/zero hash). No combined hash is
+    /// produced — callers compare region by region.
+    pub fn capture_normalized_regions(&self) -> Vec<MemoryRegionObservation> {
+        [
+            RETRO_MEMORY_SYSTEM_RAM,
+            RETRO_MEMORY_VIDEO_RAM,
+            RETRO_MEMORY_SAVE_RAM,
+        ]
+        .into_iter()
+        .map(|region| {
+            let label = memory_region_label(region).to_string();
+            match self.read_memory(region, 0, usize::MAX) {
+                Ok((bytes, total)) if total > 0 && !bytes.is_empty() => {
+                    MemoryRegionObservation {
+                        label,
+                        region_id: region,
+                        available: true,
+                        size: bytes.len(),
+                        sha256: Some(sha256_hex(&bytes)),
+                    }
+                }
+                _ => MemoryRegionObservation {
+                    label,
+                    region_id: region,
+                    available: false,
+                    size: 0,
+                    sha256: None,
+                },
+            }
+        })
+        .collect()
     }
 
     pub fn set_joypad(&self, joypad: JoypadState) -> Result<(), String> {
