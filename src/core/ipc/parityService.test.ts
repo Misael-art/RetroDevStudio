@@ -71,7 +71,7 @@ function makeReferenceCandidateReport(): ReferenceCandidateReport {
       divergences: [],
       limitations: ["normalized memory observation unavailable on this host/core"],
     },
-    functional_evidence: "functional_evidence",
+    functional_evidence: "scenario_evidence",
     not_measured_by_this_harness: [],
   };
 }
@@ -487,7 +487,7 @@ describe("formatReferenceCandidateSummary", () => {
     const summary = formatReferenceCandidateSummary(makeReferenceCandidateReport());
     expect(summary).toContain("8 frame(s)");
     expect(summary).toContain("evidence=visual_parity");
-    expect(summary).toContain("suite=functional_evidence");
+    expect(summary).toContain("suite=scenario_evidence");
     expect(summary).toContain("0 divergencias");
     expect(summary).not.toContain("equival");
   });

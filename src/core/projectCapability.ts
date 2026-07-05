@@ -157,6 +157,7 @@ export type ParityEvidenceLevel =
   | "insufficient_evidence"
   | "visual_parity"
   | "observed_state_parity"
+  | "scenario_evidence"
   | "functional_evidence";
 
 export interface ReferenceCandidateComparison {

@@ -1055,9 +1055,12 @@ pub enum ParityEvidenceLevel {
     /// available and matched. Strongest per-scenario evidence; still not
     /// "equivalence".
     ObservedStateParity,
-    /// Suite-level verdict: one or more deterministic scenarios ran to
-    /// completion without divergence. Records that scenarios passed WITHOUT
-    /// asserting total equivalence.
+    /// A SINGLE deterministic scenario ran to completion without divergence.
+    /// Evidence from one script only — not a suite. Never total equivalence.
+    ScenarioEvidence,
+    /// Suite-level verdict: a NAMED suite of MULTIPLE (>=2) deterministic
+    /// scenarios all ran to completion without divergence. Records that the
+    /// scenarios passed WITHOUT asserting total equivalence.
     FunctionalEvidence,
 }
 
@@ -1241,7 +1244,13 @@ pub fn aggregate_functional_evidence(
     if comparisons.is_empty() || comparisons.iter().any(|c| !c.scenario_passed) {
         return ParityEvidenceLevel::InsufficientEvidence;
     }
-    ParityEvidenceLevel::FunctionalEvidence
+    // A single script is only scenario-level evidence; `FunctionalEvidence`
+    // requires a named suite of >=2 passing scenarios.
+    if comparisons.len() == 1 {
+        ParityEvidenceLevel::ScenarioEvidence
+    } else {
+        ParityEvidenceLevel::FunctionalEvidence
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1258,8 +1267,9 @@ pub struct ReferenceCandidateReport {
     pub report_reference: ParityReport,
     pub report_candidate: ParityReport,
     pub comparison: ReferenceCandidateComparison,
-    /// Suite-level verdict over the scenario(s) in this report. `FunctionalEvidence`
-    /// only when every scenario passed; still never "total equivalence".
+    /// Verdict over the scenario(s) in this report: `ScenarioEvidence` for a
+    /// single passing script, `FunctionalEvidence` only for a named suite of
+    /// >=2 passing scenarios. Still never "total equivalence".
     pub functional_evidence: ParityEvidenceLevel,
     pub not_measured_by_this_harness: Vec<String>,
 }
@@ -2371,8 +2381,8 @@ mod tests {
     #[test]
     fn reference_candidate_visual_only_never_becomes_total_equivalence() {
         // Two "equivalent" candidates pass the fixture, but visual-only evidence
-        // must NOT be promoted past FunctionalEvidence, and never to anything
-        // named equivalence (the enum has no such variant).
+        // must NOT be promoted to equivalence (the enum has no such variant), and
+        // a SINGLE script is only ScenarioEvidence, never FunctionalEvidence.
         let reference = sample_report(true, None);
         let candidate = candidate_of(&reference, "different-rom-sha");
         let cmp = compare_reference_candidate(
@@ -2385,7 +2395,8 @@ mod tests {
         assert_ne!(cmp.evidence_level, ParityEvidenceLevel::ObservedStateParity);
 
         let suite = aggregate_functional_evidence(std::slice::from_ref(&cmp));
-        assert_eq!(suite, ParityEvidenceLevel::FunctionalEvidence);
+        assert_eq!(suite, ParityEvidenceLevel::ScenarioEvidence);
+        assert_ne!(suite, ParityEvidenceLevel::FunctionalEvidence);
         // Sanity: the suite verdict is scenario evidence, not observed-state
         // proof, when only visual signal exists.
         assert!(!cmp.observed_state_parity);
@@ -2432,6 +2443,11 @@ mod tests {
         assert_eq!(
             aggregate_functional_evidence(&[]),
             ParityEvidenceLevel::InsufficientEvidence
+        );
+        // A single passing scenario is ScenarioEvidence, not FunctionalEvidence.
+        assert_eq!(
+            aggregate_functional_evidence(std::slice::from_ref(&pass)),
+            ParityEvidenceLevel::ScenarioEvidence
         );
         assert_eq!(
             aggregate_functional_evidence(&[pass.clone(), fail]),
