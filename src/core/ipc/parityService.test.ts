@@ -14,10 +14,13 @@ import {
   formatCrossCoreSummary,
   formatCycleReportSummary,
   formatParitySummary,
+  formatReferenceCandidateSummary,
   parityReportFromResult,
+  referenceCandidateReportFromResult,
   runCrossCoreParity,
   runCycleReport,
   runParityCapture,
+  runReferenceCandidateParity,
 } from "./parityService";
 import type {
   CrossCoreParityResult,
@@ -26,7 +29,52 @@ import type {
   CycleReportResult,
   ParityReport,
   ParityRunResult,
+  ReferenceCandidateParityResult,
+  ReferenceCandidateReport,
 } from "../projectCapability";
+
+const baseParityReport: ParityReport = {
+  schema: "rds-gameplay-parity/v1",
+  rom_path: "/rom.bin",
+  rom_sha256: "ref-sha",
+  core_label: "Genesis Plus GX",
+  frames_run: 8,
+  frame_hashes: [],
+  final_state_sha256: "final",
+  deterministic: true,
+  divergences: [],
+  fake_toolchain_used: false,
+  not_measured_by_this_harness: [],
+};
+
+function makeReferenceCandidateReport(): ReferenceCandidateReport {
+  return {
+    schema: "rds-reference-candidate-parity/v1",
+    reference_rom_path: "/reference/rom.bin",
+    reference_rom_sha256: "ref-sha",
+    candidate_rom_path: "/candidate/rom.bin",
+    candidate_rom_sha256: "cand-sha",
+    core_label: "Genesis Plus GX",
+    golden_path: "/golden.rds-input.json",
+    golden_source: "script",
+    frames_run: 8,
+    report_reference: baseParityReport,
+    report_candidate: { ...baseParityReport, rom_sha256: "cand-sha" },
+    comparison: {
+      evidence_level: "visual_parity",
+      visual_parity: true,
+      observed_state_parity: false,
+      scenario_passed: true,
+      frames_compared: 8,
+      reference_rom_sha256: "ref-sha",
+      candidate_rom_sha256: "cand-sha",
+      divergences: [],
+      limitations: ["normalized memory observation unavailable on this host/core"],
+    },
+    functional_evidence: "functional_evidence",
+    not_measured_by_this_harness: [],
+  };
+}
 
 describe("runParityCapture", () => {
   it("invokes parity_run_capture with full arguments", async () => {
@@ -373,5 +421,119 @@ describe("cycleReportFromResult", () => {
     };
 
     expect(cycleReportFromResult(result)).toBeNull();
+  });
+});
+
+describe("runReferenceCandidateParity", () => {
+  it("invokes parity_run_reference_candidate with both project dirs, golden, core and frame cap", async () => {
+    const result: ReferenceCandidateParityResult = {
+      ok: true,
+      message: "reference/candidate evidence",
+      core_label: "Genesis Plus GX",
+      golden_path: "/golden.rds-input.json",
+      golden_source: "script",
+      frames_run: 8,
+      evidence_level: "VisualParity",
+      visual_parity: true,
+      observed_state_parity: false,
+      scenario_passed: true,
+      divergence_count: 0,
+      reference_rom_sha256: "ref-sha",
+      candidate_rom_sha256: "cand-sha",
+      report_path: "/candidate/.rds/reports/reference-candidate-parity-report.json",
+      report: null,
+    };
+    mocks.invoke.mockResolvedValue(result);
+
+    await expect(
+      runReferenceCandidateParity(
+        "/reference",
+        "/candidate",
+        "/golden.rds-input.json",
+        "/cores/genesis_plus_gx_libretro.dll",
+        8
+      )
+    ).resolves.toEqual(result);
+
+    expect(mocks.invoke).toHaveBeenCalledWith("parity_run_reference_candidate", {
+      referenceProjectDir: "/reference",
+      candidateProjectDir: "/candidate",
+      goldenPath: "/golden.rds-input.json",
+      corePath: "/cores/genesis_plus_gx_libretro.dll",
+      frames: 8,
+    });
+  });
+
+  it("passes null frames when omitted", async () => {
+    mocks.invoke.mockResolvedValue({ ok: true });
+    await runReferenceCandidateParity(
+      "/reference",
+      "/candidate",
+      "/golden.rds-input.json",
+      "/cores/core.dll"
+    );
+    expect(mocks.invoke).toHaveBeenCalledWith("parity_run_reference_candidate", {
+      referenceProjectDir: "/reference",
+      candidateProjectDir: "/candidate",
+      goldenPath: "/golden.rds-input.json",
+      corePath: "/cores/core.dll",
+      frames: null,
+    });
+  });
+});
+
+describe("formatReferenceCandidateSummary", () => {
+  it("reports evidence and suite verdict without claiming equivalence", () => {
+    const summary = formatReferenceCandidateSummary(makeReferenceCandidateReport());
+    expect(summary).toContain("8 frame(s)");
+    expect(summary).toContain("evidence=visual_parity");
+    expect(summary).toContain("suite=functional_evidence");
+    expect(summary).toContain("0 divergencias");
+    expect(summary).not.toContain("equival");
+  });
+});
+
+describe("referenceCandidateReportFromResult", () => {
+  it("returns null when result has no report", () => {
+    const result: ReferenceCandidateParityResult = {
+      ok: false,
+      message: "erro",
+      core_label: "",
+      golden_path: "",
+      golden_source: "",
+      frames_run: 0,
+      evidence_level: "",
+      visual_parity: false,
+      observed_state_parity: false,
+      scenario_passed: false,
+      divergence_count: 0,
+      reference_rom_sha256: "",
+      candidate_rom_sha256: "",
+      report_path: "",
+      report: null,
+    };
+    expect(referenceCandidateReportFromResult(result)).toBeNull();
+  });
+
+  it("returns embedded report when present", () => {
+    const report = makeReferenceCandidateReport();
+    const result: ReferenceCandidateParityResult = {
+      ok: true,
+      message: "ok",
+      core_label: report.core_label,
+      golden_path: report.golden_path,
+      golden_source: report.golden_source,
+      frames_run: report.frames_run,
+      evidence_level: "VisualParity",
+      visual_parity: true,
+      observed_state_parity: false,
+      scenario_passed: true,
+      divergence_count: 0,
+      reference_rom_sha256: report.reference_rom_sha256,
+      candidate_rom_sha256: report.candidate_rom_sha256,
+      report_path: "/report.json",
+      report,
+    };
+    expect(referenceCandidateReportFromResult(result)).toEqual(report);
   });
 });
