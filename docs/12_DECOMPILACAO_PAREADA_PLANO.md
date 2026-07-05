@@ -3,7 +3,9 @@
 **Status:** Documento de planejamento — superficie `Experimental`
 **Versao:** 2.0
 **Ultima revisao:** 2026-07-04 (v2 — triagem por tier, curriculo de aprendizado, biblioteca de insumo local, host Linux)
-**Objetivo:** Converter ROM de Mega Drive/SNES em projeto `.rds` editavel + codigo C SGDK/PVSnesLib compilavel, usando matching decompilation assistida por LLM com verificacao byte-a-byte via object_diff, e alimentar de forma sistematica a cobertura logica do NodeGraph ate suportar construcao/analise de jogos 100% por nodes.
+**Objetivo:** Converter ROM de **Mega Drive primeiro** (SNES/PVSnesLib **deferido** para uma fase posterior, fora do escopo atual) em projeto `.rds` editavel + codigo C SGDK compilavel, usando matching decompilation assistida por LLM com verificacao byte-a-byte via um comparador de objetos proprio (`object_diff.rs`), e alimentar de forma sistematica a cobertura logica do NodeGraph ate suportar construcao/analise de jogos 100% por nodes.
+
+> **Estado real (2026-07-05, comprovado):** NAO existe pipeline de decompilacao. Existe apenas um **spike Experimental de paridade referencia/candidata** (`parity_harness.rs` + comando IPC + servico TS + teste real com core `.so`), mais spikes de fingerprint M68K e de build-duplo reproduzivel — todos em `~/.retrodev/decomp_work/` e cobertos por testes. **Scanner de ROMs, ledger de produto, embeddings, LLM e UI continuam BLOQUEADOS** (nao autorizados). Toolchain: `m68k-elf-gcc` 16 e `genesis_plus_gx_libretro.so` presentes; **Ghidra e JDK 21 ausentes**. O numero de cobertura por fingerprint (ex.: 60,3%) e **preliminar** (byte hit, nao resolucao semantica unica — ver Fase 0.4 e secao 8).
 
 **Direcao executiva recomendada:** tratar esta frente primeiro como um **pipeline de aprendizado e cobertura de nodes**, nao como uma corrida para decompilar jogos comerciais famosos. A primeira entrega profissional deve ser: scanner da biblioteca BYOR + triagem por tier + ledger de aprendizado + fingerprint SGDK + Ghidra export estatico, tudo testado e sem LLM no caminho critico. So depois disso o agente deve abrir matching assistido por LLM em Tier 0/Tier 1. ROM comercial entra apenas quando a base ja aprendeu com corpus SGDK e homebrews, e sempre como reconstrucao funcional/nodes/bridges, sem claim de `MatchExact`.
 
@@ -13,8 +15,8 @@
 
 Este documento define o escopo da **decompilacao pareada** como superficie experimental dentro do RetroDev Studio. Nao substitui nem promove nenhuma superficie existente.
 
-Hierarquia de verdade entre documentos:
-`docs/06_AI_MEMORY_BANK.md` > `docs/03_ROADMAP_MVP.md` > `docs/09_AGENT_DEV_MODE.md` > este documento.
+Hierarquia de verdade entre documentos (completa, conforme `docs/00_AI_DIRECTIVES.md`):
+`docs/06_AI_MEMORY_BANK.md` > `docs/03_ROADMAP_MVP.md` > `docs/09_AGENT_DEV_MODE.md` > `docs/08_TREE_ARCHITECTURE.md` > `docs/02_TECH_STACK.md` > `docs/07_TEST_AND_COMPLIANCE.md` > `README.md`/`CLAUDE.md` > este documento (menor autoridade; nao promove nem substitui nenhuma superficie existente).
 
 Leitura obrigatoria antes de implementar qualquer item deste plano:
 1. `docs/06_AI_MEMORY_BANK.md` — estado operacional atual
@@ -222,7 +224,7 @@ src-tauri/src/tools/reverse/decomp/
 ├── embedding_search.rs # 0.7 — few-shot por similaridade
 └── decomp_orch.rs      # 0.8 — loop por funcao, tiers, MatchExact/MatchFunctional, ledger
 ```
-`src-tauri/scripts/ghidra_export.py` — script Jython rodado pelo Ghidra headless.
+`scripts/ghidra_export.py` — script Jython rodado pelo Ghidra headless.
 
 Config recomendada para o scanner local:
 
@@ -338,7 +340,7 @@ export function extractAudioRom(romPath: string, outputDir: string): Promise<Aud
 
 ## 7. ARQUIVOS A CRIAR / MODIFICAR
 
-**Criar** (todos sob `src-tauri/src/tools/reverse/decomp/`, exceto o script): `triage.rs`, `rom_library.rs`, `ghidra_bridge.rs`, `fingerprint.rs`, `object_diff.rs`, `llm_decomp.rs`, `embedding_search.rs`, `decomp_orch.rs`, `struct_recovery.rs`; e `src-tauri/scripts/ghidra_export.py`.
+**Criar** (todos sob `src-tauri/src/tools/reverse/decomp/`, exceto o script): `triage.rs`, `rom_library.rs`, `ghidra_bridge.rs`, `fingerprint.rs`, `object_diff.rs`, `llm_decomp.rs`, `embedding_search.rs`, `decomp_orch.rs`, `struct_recovery.rs`; e `scripts/ghidra_export.py`.
 **Modificar:** `src-tauri/src/tools/reverse/mod.rs` (registrar `pub mod decomp`), `projection.rs` (implementar projecao/export), `graphics.rs`/`audio.rs` (reconstrucao), `emulator/libretro_ffi.rs` (captura VRAM/YM2612), `lib.rs` (+comandos), `toolsService.ts` + `ReverseWorkspace.tsx` (abas). Reusar `parity_harness.rs` (nao duplicar verificador de runtime).
 
 ---
@@ -413,8 +415,8 @@ Fingerprint (runtime SGDK) e cache de funcoes repetidas reduzem drasticamente o 
 
 ## 13. REFERENCIAS
 
-- **Metodologia:** "Retro Game Decompilation Using AI" (Macabeus / Codeminer42) — matching decompilation com LLM + object_diff.
-- **Ferramentas:** Ghidra (NSA), decomp.me, m2c, object_diff, Marsdev (toolchain m68k Linux).
+- **Metodologia:** "Retro Game Decompilation Using AI" (Macabeus / Codeminer42) — matching decompilation com LLM + comparacao de objetos.
+- **Ferramentas:** Ghidra (NSA), decomp.me, m2c, Marsdev (toolchain m68k Linux). **Nota M68K:** a comparacao byte-a-byte de M68K deste plano usa o comparador proprio `object_diff.rs` sobre `m68k-elf-binutils` (objdump/objcopy), **comprovado** para M68K (spike `m68k_fp`/`m68k_spike`). Nao assumir que o `objdiff` externo (decomp.me) suporta M68K — sua compatibilidade M68K nao foi provada e nao e dependencia deste plano.
 - **Arquitetura existente do RDS:** `src-tauri/src/tools/reverse/`, `asset_extractor.rs`, `emulator/libretro_ffi.rs`, `compiler/build_orch.rs`, `compiler/sgdk_emitter.rs`, `parity_harness.rs`, `src/components/nodegraph/NodeGraphEditor.tsx`, `src/core/nodegraph/nodeCompiler.ts`.
 - **Corpus SGDK:** 122 projetos catalogados, 68 com build/ROM real — `/mnt/sdcard/Projects/MegaDrive_DEV/SGDK_Engines` (Linux) / `F:\Projects\MegaDrive_DEV\SGDK_Engines` (Windows institucional).
 - **Biblioteca BYOR local:** `/home/misael/Emulation/roms/{megadrive,megadrivejp,genesis,genesiswide}`.
