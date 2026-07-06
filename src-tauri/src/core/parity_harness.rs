@@ -2429,6 +2429,149 @@ mod tests {
         }
     }
 
+    // ---- Etapa 2: open SGDK spike fixture, real-core Control/Positive/Negative
+    // These are host-local real-core tests. They FAIL HARD (panic) when the core
+    // or the built fixture ROMs are missing — never a silent skip. Build the
+    // fixture first: `scripts/decomp/build_spike_fixture.sh`.
+
+    fn spike_dir() -> PathBuf {
+        let base = std::env::var("RDS_DECOMP_WORK").unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+            format!("{home}/.retrodev/decomp_work")
+        });
+        PathBuf::from(base).join("spike_fixture")
+    }
+
+    fn spike_rom(variant: &str) -> PathBuf {
+        spike_dir().join(variant).join("out").join("rom.bin")
+    }
+
+    fn spike_core() -> PathBuf {
+        let ext = if cfg!(target_os = "windows") {
+            "dll"
+        } else if cfg!(target_os = "macos") {
+            "dylib"
+        } else {
+            "so"
+        };
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repo root")
+            .join("toolchains")
+            .join("libretro")
+            .join("cores")
+            .join(format!("genesis_plus_gx_libretro.{ext}"))
+    }
+
+    fn spike_golden(work: &Path, frames: u32) -> PathBuf {
+        fs::create_dir_all(work).expect("work dir");
+        let golden = work.join("spike-golden.rds-input.json");
+        let script = InputScript::from_frames(
+            (0..frames).map(|_| JoypadState::default()).collect(),
+        );
+        fs::write(&golden, serde_json::to_vec(&script).expect("ser")).expect("golden");
+        golden
+    }
+
+    fn require(path: &Path, what: &str) {
+        assert!(
+            path.exists(),
+            "{what} ausente: {} — rode scripts/decomp/build_spike_fixture.sh e verifique o core",
+            path.display()
+        );
+    }
+
+    #[test]
+    #[ignore = "real-core: build_spike_fixture.sh + genesis_plus_gx .so (fails hard if missing)"]
+    fn spike_control_same_rom_is_control_evidence() {
+        use crate::emulator::libretro_ffi::test_helpers::test_serial_guard;
+        let _serial = test_serial_guard();
+        let core = spike_core();
+        let base = spike_rom("base");
+        require(&core, "core");
+        require(&base, "fixture base rom");
+        let work = spike_dir().join("_reports_control");
+        let golden = spike_golden(&work, 120);
+
+        let (report, _) =
+            run_reference_candidate_parity(&base, &base, &golden, &core, Some(120), &work)
+                .expect("real control run");
+
+        // Same ROM => control, with real visual activity (color cycle).
+        assert!(has_visual_activity(&report.report_reference), "fixture must animate");
+        assert!(report.comparison.scenario_passed);
+        assert_eq!(
+            report.functional_evidence,
+            ParityEvidenceLevel::ControlEvidence
+        );
+        assert_eq!(report.reference_rom_sha256, report.candidate_rom_sha256);
+    }
+
+    #[test]
+    #[ignore = "real-core: build_spike_fixture.sh + genesis_plus_gx .so (fails hard if missing)"]
+    fn spike_positive_equivalent_roms_is_scenario_evidence() {
+        use crate::emulator::libretro_ffi::test_helpers::test_serial_guard;
+        let _serial = test_serial_guard();
+        let core = spike_core();
+        let base = spike_rom("base");
+        let positive = spike_rom("positive");
+        require(&core, "core");
+        require(&base, "fixture base rom");
+        require(&positive, "fixture positive rom");
+        let work = spike_dir().join("_reports_positive");
+        let golden = spike_golden(&work, 120);
+
+        let (report, _) =
+            run_reference_candidate_parity(&base, &positive, &golden, &core, Some(120), &work)
+                .expect("real positive run");
+
+        // Different SHA, equivalent observable behaviour, real activity.
+        assert_ne!(report.reference_rom_sha256, report.candidate_rom_sha256);
+        assert!(has_visual_activity(&report.report_reference));
+        assert!(report.comparison.visual_parity, "equivalent ROMs must match visually");
+        assert!(report.comparison.scenario_passed);
+        assert_eq!(
+            report.functional_evidence,
+            ParityEvidenceLevel::ScenarioEvidence
+        );
+    }
+
+    #[test]
+    #[ignore = "real-core: build_spike_fixture.sh + genesis_plus_gx .so (fails hard if missing)"]
+    fn spike_negative_mutation_is_detected() {
+        use crate::emulator::libretro_ffi::test_helpers::test_serial_guard;
+        let _serial = test_serial_guard();
+        let core = spike_core();
+        let base = spike_rom("base");
+        let negative = spike_rom("negative");
+        require(&core, "core");
+        require(&base, "fixture base rom");
+        require(&negative, "fixture negative rom");
+        let work = spike_dir().join("_reports_negative");
+        let golden = spike_golden(&work, 120);
+
+        let (report, _) =
+            run_reference_candidate_parity(&base, &negative, &golden, &core, Some(120), &work)
+                .expect("real negative run");
+
+        // A logic mutation (different text row) MUST be detected as divergence,
+        // so the harness cannot claim positive evidence.
+        assert!(
+            report
+                .comparison
+                .divergences
+                .iter()
+                .any(|d| d.kind.contains("frame_hash_mismatch")),
+            "negative mutation must produce a frame divergence; got {:?}",
+            report.comparison.divergences
+        );
+        assert!(!report.comparison.scenario_passed);
+        assert_eq!(
+            report.comparison.evidence_level,
+            ParityEvidenceLevel::InsufficientEvidence
+        );
+    }
+
     // ---- Reference-vs-Candidate contract -----------------------------------
 
     fn candidate_of(reference: &ParityReport, candidate_sha: &str) -> ParityReport {
