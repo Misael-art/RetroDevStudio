@@ -62,11 +62,15 @@ vi.mock("../../core/ipc/emulatorService", () => ({
   emulatorReadMemory: mocks.emulatorReadMemory,
 }));
 
-vi.mock("../../core/ipc/parityService", () => ({
-  runParityCapture: mocks.runParityCapture,
-  runCrossCoreParity: mocks.runCrossCoreParity,
-  runCycleReport: mocks.runCycleReport,
-}));
+vi.mock("../../core/ipc/parityService", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../core/ipc/parityService")>();
+  return {
+    formatParityEvidenceDetails: actual.formatParityEvidenceDetails,
+    runParityCapture: mocks.runParityCapture,
+    runCrossCoreParity: mocks.runCrossCoreParity,
+    runCycleReport: mocks.runCycleReport,
+  };
+});
 
 vi.mock("../../core/ipc/toolsService", () => ({
   getThirdPartyStatus: mocks.getThirdPartyStatus,
