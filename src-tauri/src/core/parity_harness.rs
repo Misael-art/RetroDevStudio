@@ -1057,12 +1057,17 @@ pub enum ParityEvidenceLevel {
     /// available and matched. Strongest per-scenario evidence; still not
     /// "equivalence".
     ObservedStateParity,
-    /// A SINGLE deterministic scenario ran to completion without divergence.
-    /// Evidence from one script only — not a suite. Never total equivalence.
+    /// Control: the SAME ROM ran on both sides and passed. Proves the harness
+    /// and determinism, NOT behavioural equivalence of two artifacts. Never
+    /// promoted to scenario/functional evidence on its own.
+    ControlEvidence,
+    /// A SINGLE deterministic scenario (two DIFFERENT ROMs) ran to completion
+    /// without divergence. Evidence from one script only — not a suite.
     ScenarioEvidence,
-    /// Suite-level verdict: a NAMED suite of MULTIPLE (>=2) deterministic
-    /// scenarios all ran to completion without divergence. Records that the
-    /// scenarios passed WITHOUT asserting total equivalence.
+    /// Suite-level verdict: a NAMED suite of MULTIPLE (>=2) independent
+    /// deterministic scenarios (different ROMs) all ran to completion without
+    /// divergence. Records that the scenarios passed WITHOUT asserting total
+    /// equivalence.
     FunctionalEvidence,
 }
 
@@ -1324,12 +1329,18 @@ pub fn aggregate_functional_evidence(
     if comparisons.is_empty() || comparisons.iter().any(|c| !c.scenario_passed) {
         return ParityEvidenceLevel::InsufficientEvidence;
     }
-    // A single script is only scenario-level evidence; `FunctionalEvidence`
-    // requires a named suite of >=2 passing scenarios.
-    if comparisons.len() == 1 {
-        ParityEvidenceLevel::ScenarioEvidence
-    } else {
-        ParityEvidenceLevel::FunctionalEvidence
+    // Scope axis: a same-ROM comparison is a CONTROL; only different-ROM
+    // comparisons are scenarios. `FunctionalEvidence` requires >=2 independent
+    // scenarios; a single scenario is `ScenarioEvidence`; all-control suites are
+    // `ControlEvidence` and are never promoted to functional evidence.
+    let scenarios = comparisons
+        .iter()
+        .filter(|c| c.reference_rom_sha256 != c.candidate_rom_sha256)
+        .count();
+    match scenarios {
+        0 => ParityEvidenceLevel::ControlEvidence,
+        1 => ParityEvidenceLevel::ScenarioEvidence,
+        _ => ParityEvidenceLevel::FunctionalEvidence,
     }
 }
 
@@ -2657,8 +2668,26 @@ mod tests {
             ParityEvidenceLevel::InsufficientEvidence
         );
         assert_eq!(
-            aggregate_functional_evidence(&[pass.clone(), pass]),
+            aggregate_functional_evidence(&[pass.clone(), pass.clone()]),
             ParityEvidenceLevel::FunctionalEvidence
+        );
+
+        // A same-ROM control (reference sha == candidate sha) is ControlEvidence,
+        // never scenario/functional, even when it passes.
+        let control = compare_reference_candidate(
+            &reference,
+            &reference,
+            &ObservedState::unavailable(),
+        );
+        assert!(control.scenario_passed);
+        assert_eq!(
+            aggregate_functional_evidence(std::slice::from_ref(&control)),
+            ParityEvidenceLevel::ControlEvidence
+        );
+        // Control + a single scenario is still only ScenarioEvidence.
+        assert_eq!(
+            aggregate_functional_evidence(&[control, pass]),
+            ParityEvidenceLevel::ScenarioEvidence
         );
     }
 
