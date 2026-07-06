@@ -3004,27 +3004,65 @@ mod tests {
         );
         let core_a = &cores[0];
         let core_b = &cores[1];
-        let (rom_path, golden_path, report_dir) =
-            stage_dummy_rom_and_golden("w7-4-cross-core-real-parity");
+
+        // Fixture canonica ANIMADA (frames nao pretos, atividade temporal), em
+        // vez da dummy preta: a comparacao cross-core precisa de conteudo real.
+        let (base_rom, _positive, _negative) = parity_fixture_roms();
+        let report_dir = repo_root()
+            .join("src-tauri")
+            .join("target-test")
+            .join("validation")
+            .join("w7-4-cross-core-real-parity")
+            .join("project")
+            .join(".rds")
+            .join("reports");
+        fs::create_dir_all(&report_dir).expect("create reports dir");
+        let golden_path = fixture_golden(&report_dir, 60);
 
         let (cross_report, cross_path) = run_cross_core_parity(
-            &rom_path,
+            &base_rom,
             &golden_path,
             core_a,
             core_b,
-            Some(3),
+            Some(60),
             &report_dir,
         )
         .expect("real cross-core parity");
-        assert_eq!(cross_report.frames_run, 3);
+        assert_eq!(cross_report.frames_run, 60);
         assert!(cross_path.exists());
         assert!(report_dir.join("cross-core-parity-report.md").exists());
 
-        // Revisao 2 nos dois lados + limites honestos entre cores distintos.
+        // Divergencia entre cores NAO e falha: e resultado valido registrado.
+        // O que o gate exige e evidencia integra nos dois lados.
+        assert!(
+            cross_report.report_a.core_sha256 != cross_report.report_b.core_sha256,
+            "cross-core exige dois artefatos de core distintos"
+        );
         for report in [&cross_report.report_a, &cross_report.report_b] {
             assert_eq!(report.contract_revision, PARITY_CONTRACT_REVISION);
             assert!(report.core_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+            assert!(report.golden_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+            assert!(report
+                .initial_state_sha256
+                .as_deref()
+                .is_some_and(|sha| sha.len() == 64));
+            let audio = report.audio.as_ref().expect("audio observation present");
+            assert!(audio.available && audio.samples_total > 0);
             assert_region_invariants(&report.observed_regions);
+            // Frames nao pretos + atividade temporal real em cada core.
+            assert!(
+                report
+                    .frame_hashes
+                    .iter()
+                    .any(|frame| frame.non_black_pixels > 0),
+                "core '{}' deve renderizar frames nao pretos com a fixture animada",
+                report.core_label
+            );
+            assert!(
+                has_visual_activity(report),
+                "core '{}' deve exibir atividade temporal (frames variando)",
+                report.core_label
+            );
         }
         if cross_report.core_a_label != cross_report.core_b_label {
             assert!(
@@ -3168,28 +3206,153 @@ mod tests {
             .any(|l| l.contains("sem atividade visual")));
     }
 
-    // ---- Etapa 2: open SGDK spike fixture, real-core Control/Positive/Negative
-    // These are host-local real-core tests. They FAIL HARD (panic) when the core
-    // or the built fixture ROMs are missing — never a silent skip. Build the
-    // fixture first: `scripts/decomp/build_spike_fixture.sh`.
+    // ---- Fixture canonica da parity layer (Control/Positive/Negative reais) --
+    // Fonte BYOR-safe versionada em `src-tauri/tests/fixtures/sgdk_spike`
+    // (animacao deterministica com atividade visual real). O build acontece em
+    // `src-tauri/target-test/validation/parity-fixture/` via o make canonico do
+    // SGDK (`makefile.gen`) — ROMs e artefatos nunca sao versionados e os
+    // testes de parity NAO dependem de `~/.retrodev/decomp_work` nem de
+    // scripts de decompilacao. Variantes:
+    //   base     -DROW=10 (referencia)
+    //   negative -DROW=14 (mutacao comportamental => divergencia)
+    //   positive = base com um byte trocado no padding 0xFF nunca executado
+    //              (SHA-256 distinto, execucao byte-identica)
+    // Testes host-local: FALHAM com blocker preciso quando core/SGDK faltam —
+    // nunca skip silencioso.
 
-    fn spike_dir() -> PathBuf {
-        let base = std::env::var("RDS_DECOMP_WORK").unwrap_or_else(|_| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-            format!("{home}/.retrodev/decomp_work")
-        });
-        PathBuf::from(base).join("spike_fixture")
+    fn parity_fixture_sgdk_root() -> PathBuf {
+        for var in ["GDK", "SGDK_ROOT"] {
+            if let Ok(value) = std::env::var(var) {
+                let candidate = PathBuf::from(value);
+                if candidate.join("makefile.gen").exists() {
+                    return candidate;
+                }
+            }
+        }
+        let repo_sgdk = repo_root().join("toolchains").join("sgdk");
+        assert!(
+            repo_sgdk.join("makefile.gen").exists(),
+            "parity_fixture=blocked_sgdk_missing: nenhum SGDK com makefile.gen encontrado (defina GDK/SGDK_ROOT ou provisione toolchains/sgdk)."
+        );
+        repo_sgdk
     }
 
-    fn spike_rom(variant: &str) -> PathBuf {
-        spike_dir().join(variant).join("out").join("rom.bin")
+    fn parity_fixture_out_root() -> PathBuf {
+        repo_root()
+            .join("src-tauri")
+            .join("target-test")
+            .join("validation")
+            .join("parity-fixture")
     }
 
-    fn spike_core() -> PathBuf {
-        host_cores_dir().join(format!(
-            "genesis_plus_gx_libretro.{}",
-            host_core_extension()
-        ))
+    fn build_parity_fixture_variant(name: &str, row_flag: &str) -> PathBuf {
+        let src_dir = repo_root()
+            .join("src-tauri")
+            .join("tests")
+            .join("fixtures")
+            .join("sgdk_spike")
+            .join("src");
+        let main_c = src_dir.join("main.c");
+        assert!(
+            main_c.exists(),
+            "parity_fixture=blocked_source_missing: fonte canonica ausente em {}",
+            main_c.display()
+        );
+
+        let dir = parity_fixture_out_root().join(name);
+        let rom = dir.join("out").join("rom.bin");
+        let rom_fresh = match (fs::metadata(&rom), fs::metadata(&main_c)) {
+            (Ok(rom_meta), Ok(src_meta)) => {
+                matches!(
+                    (rom_meta.modified(), src_meta.modified()),
+                    (Ok(rom_time), Ok(src_time)) if rom_time >= src_time
+                )
+            }
+            _ => false,
+        };
+        if rom_fresh {
+            return rom;
+        }
+
+        let _ = fs::remove_dir_all(&dir);
+        let staged_src = dir.join("src");
+        fs::create_dir_all(&staged_src).expect("create fixture src dir");
+        for entry in fs::read_dir(&src_dir).expect("read fixture src") {
+            let entry = entry.expect("fixture src entry");
+            if entry.file_type().expect("file type").is_file() {
+                fs::copy(entry.path(), staged_src.join(entry.file_name()))
+                    .expect("stage fixture source");
+            }
+        }
+
+        let gdk = parity_fixture_sgdk_root();
+        let output = std::process::Command::new("make")
+            .arg("-f")
+            .arg(gdk.join("makefile.gen"))
+            .arg("debug")
+            .arg("CONVSYM=true")
+            .arg(format!(
+                "EXTRA_FLAGS=-fpermissive -Wno-incompatible-pointer-types {row_flag}"
+            ))
+            .current_dir(&dir)
+            .output()
+            .expect("spawn make (SGDK canonico)");
+        assert!(
+            output.status.success() && rom.exists(),
+            "parity_fixture=blocked_build_failed: build SGDK canonico falhou para '{name}' (GDK={}). Ultimas linhas:\n{}",
+            gdk.display(),
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .chain(String::from_utf8_lossy(&output.stderr).lines())
+                .rev()
+                .take(8)
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        rom
+    }
+
+    /// Builda (com cache por mtime) as tres variantes canonicas e retorna
+    /// (base, positive, negative). `positive` nasce da base com um unico byte
+    /// trocado no padding 0xFF nunca executado (offset 0x1FFF8 de uma ROM de
+    /// 128 KiB cujo codigo ocupa poucos KiB).
+    fn parity_fixture_roms() -> (PathBuf, PathBuf, PathBuf) {
+        let base = build_parity_fixture_variant("base", "-DROW=10");
+        let negative = build_parity_fixture_variant("negative", "-DROW=14");
+
+        const PADDING_OFFSET: usize = 0x1FFF8;
+        const PADDING_RUN_START: usize = 0x1F000;
+        let mut bytes = fs::read(&base).expect("read base rom");
+        assert!(
+            bytes.len() > PADDING_OFFSET,
+            "ROM base menor que o esperado ({} bytes); offset de padding invalido",
+            bytes.len()
+        );
+        // Garante que o offset esta numa cauda de padding constante (o valor
+        // de preenchimento varia por versao do SGDK: 0x00 ou 0xFF), logo nunca
+        // executada: SHA distinto com comportamento byte-identico.
+        let padding_value = bytes[PADDING_OFFSET];
+        assert!(
+            bytes[PADDING_RUN_START..].iter().all(|b| *b == padding_value),
+            "a cauda 0x{PADDING_RUN_START:X}..fim deveria ser padding constante; a fixture mudou de layout"
+        );
+        bytes[PADDING_OFFSET] = padding_value ^ 0xA5;
+        let positive_out = parity_fixture_out_root().join("positive").join("out");
+        fs::create_dir_all(&positive_out).expect("positive out dir");
+        let positive = positive_out.join("rom.bin");
+        fs::write(&positive, bytes).expect("write positive rom");
+        (base, positive, negative)
+    }
+
+    fn first_installed_core() -> PathBuf {
+        let cores = installed_megadrive_cores();
+        assert!(
+            !cores.is_empty(),
+            "parity_fixture=blocked_core_missing: nenhum core Mega Drive '.{}' instalado em {}.",
+            host_core_extension(),
+            host_cores_dir().display()
+        );
+        cores[0].clone()
     }
 
     /// Evidencia da revisao 2 sobre um lado de um run real: identidade,
@@ -3208,9 +3371,9 @@ mod tests {
         assert_region_invariants(&report.observed_regions);
     }
 
-    fn spike_golden(work: &Path, frames: u32) -> PathBuf {
+    fn fixture_golden(work: &Path, frames: u32) -> PathBuf {
         fs::create_dir_all(work).expect("work dir");
-        let golden = work.join("spike-golden.rds-input.json");
+        let golden = work.join("parity-golden.rds-input.json");
         let script = InputScript::from_frames(
             (0..frames).map(|_| JoypadState::default()).collect(),
         );
@@ -3218,25 +3381,15 @@ mod tests {
         golden
     }
 
-    fn require(path: &Path, what: &str) {
-        assert!(
-            path.exists(),
-            "{what} ausente: {} — rode scripts/decomp/build_spike_fixture.sh e verifique o core",
-            path.display()
-        );
-    }
-
     #[test]
-    #[ignore = "real-core: build_spike_fixture.sh + genesis_plus_gx .so (fails hard if missing)"]
-    fn spike_control_same_rom_is_control_evidence() {
+    #[ignore = "host-local real-core: fixture canonica de parity buildada em target-test via SGDK (blocker preciso sem core/SGDK)"]
+    fn parity_fixture_control_same_rom_is_control_evidence() {
         use crate::emulator::libretro_ffi::test_helpers::test_serial_guard;
         let _serial = test_serial_guard();
-        let core = spike_core();
-        let base = spike_rom("base");
-        require(&core, "core");
-        require(&base, "fixture base rom");
-        let work = spike_dir().join("_reports_control");
-        let golden = spike_golden(&work, 120);
+        let core = first_installed_core();
+        let (base, _positive, _negative) = parity_fixture_roms();
+        let work = parity_fixture_out_root().join("_reports_control");
+        let golden = fixture_golden(&work, 120);
 
         let (report, _) =
             run_reference_candidate_parity(&base, &base, &golden, &core, Some(120), &work)
@@ -3256,18 +3409,14 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "real-core: build_spike_fixture.sh + genesis_plus_gx .so (fails hard if missing)"]
-    fn spike_positive_equivalent_roms_is_scenario_evidence() {
+    #[ignore = "host-local real-core: fixture canonica de parity buildada em target-test via SGDK (blocker preciso sem core/SGDK)"]
+    fn parity_fixture_positive_equivalent_roms_is_scenario_evidence() {
         use crate::emulator::libretro_ffi::test_helpers::test_serial_guard;
         let _serial = test_serial_guard();
-        let core = spike_core();
-        let base = spike_rom("base");
-        let positive = spike_rom("positive");
-        require(&core, "core");
-        require(&base, "fixture base rom");
-        require(&positive, "fixture positive rom");
-        let work = spike_dir().join("_reports_positive");
-        let golden = spike_golden(&work, 120);
+        let core = first_installed_core();
+        let (base, positive, _negative) = parity_fixture_roms();
+        let work = parity_fixture_out_root().join("_reports_positive");
+        let golden = fixture_golden(&work, 120);
 
         let (report, _) =
             run_reference_candidate_parity(&base, &positive, &golden, &core, Some(120), &work)
@@ -3287,18 +3436,14 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "real-core: build_spike_fixture.sh + genesis_plus_gx .so (fails hard if missing)"]
-    fn spike_negative_mutation_is_detected() {
+    #[ignore = "host-local real-core: fixture canonica de parity buildada em target-test via SGDK (blocker preciso sem core/SGDK)"]
+    fn parity_fixture_negative_mutation_is_detected() {
         use crate::emulator::libretro_ffi::test_helpers::test_serial_guard;
         let _serial = test_serial_guard();
-        let core = spike_core();
-        let base = spike_rom("base");
-        let negative = spike_rom("negative");
-        require(&core, "core");
-        require(&base, "fixture base rom");
-        require(&negative, "fixture negative rom");
-        let work = spike_dir().join("_reports_negative");
-        let golden = spike_golden(&work, 120);
+        let core = first_installed_core();
+        let (base, _positive, negative) = parity_fixture_roms();
+        let work = parity_fixture_out_root().join("_reports_negative");
+        let golden = fixture_golden(&work, 120);
 
         let (report, _) =
             run_reference_candidate_parity(&base, &negative, &golden, &core, Some(120), &work)
