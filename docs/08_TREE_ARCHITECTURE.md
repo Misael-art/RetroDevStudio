@@ -47,6 +47,7 @@ RetroDevStudio/
 |   |-- 08_TREE_ARCHITECTURE.md
 |   |-- 09_AGENT_DEV_MODE.md
 |   |-- 10_QA_ROTEIRO_RC.md
+|   |-- 11_CROSS_PLATFORM_PLAN.md
 |   `-- SGDK_REAL_CORPUS_VALIDATION_MATRIX.md
 |
 |-- src/
@@ -126,6 +127,7 @@ RetroDevStudio/
 |           `-- serde_helpers.rs
 |
 |-- scripts/
+|   |-- bootstrap.sh
 |   |-- bootstrap.ps1
 |   |-- build.mjs
 |   |-- check-tree.cjs
@@ -139,6 +141,7 @@ RetroDevStudio/
 |   |-- run-cargo-msvc.cmd
 |   |-- run-in-msvc.cmd
 |   |-- setup-rust.ps1
+|   |-- validate-upstream-linux.sh
 |   `-- validate-upstream-windows.ps1
 |
 `-- toolchains/
@@ -183,6 +186,8 @@ RetroDevStudio/
 - `scripts/run-cargo-msvc.cmd` e o wrapper canonico para comandos `cargo` em ambiente MSVC preparado no Windows institucional.
 - `scripts/e2e-tauri-build-run.mjs` e o runner canonico de regressao desktop/Tauri para `Build -> Load ROM -> Run frames`.
 - `scripts/validate-upstream-windows.ps1` e o script canonico de validacao upstream real com SGDK, PVSnesLib e cores Libretro oficiais.
+- `scripts/validate-upstream-linux.sh` e o script canonico de validacao upstream Linux: detecta SGDK nativo, WebDriver nativo, core Libretro `.so`, Ghidra/JDK21 opcional e grava report estruturado em `src-tauri/target-test/validation/upstream-validation-linux.json`. Ele nao instala pacotes de sistema automaticamente.
+- `scripts/bootstrap.sh` e o bootstrap canonico para checkout Linux existente: faz diagnostico, pode instalar apenas helpers user-scoped seguros como `tauri-driver`, roda `npm ci`/baseline quando solicitado e delega validacao upstream para `validate-upstream-linux.sh`.
 - `.github/workflows/desktop-e2e.yml` e o workflow canonico de regressao desktop em Windows e ja foi validado em runner GitHub real.
 - `toolchains/libretro/cores/` e o local canonico dos DLLs de core baixados do upstream oficial.
 - `toolchains/webdriver/msedgedriver.exe` e o local canonico do driver nativo usado pelo runner desktop/Tauri e pelos scripts de diagnostico locais.
