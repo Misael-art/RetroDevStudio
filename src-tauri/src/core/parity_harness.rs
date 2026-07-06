@@ -1713,10 +1713,20 @@ pub fn run_reference_candidate_parity(
 
     // Each ROM is cold booted TWICE (independent) to prove its own determinism;
     // the reference's save state is never restored into the candidate.
-    let (report_reference, reference_regions, reference_deterministic) =
+    let (mut report_reference, reference_regions, reference_deterministic) =
         run_rom_twice(core_path, reference_rom, &reference_sha, &inputs)?;
-    let (report_candidate, candidate_regions, candidate_deterministic) =
+    let (mut report_candidate, candidate_regions, candidate_deterministic) =
         run_rom_twice(core_path, candidate_rom, &candidate_sha, &inputs)?;
+
+    // Identidade da execucao tambem nos reports internos (golden + core por
+    // SHA-256); leitura falha deixa o campo ausente, nunca fabricado.
+    let golden_sha256 = fs::read(golden_path).ok().map(|bytes| sha256_hex(&bytes));
+    let core_sha256_opt = (!core_sha256.is_empty()).then(|| core_sha256.clone());
+    for report in [&mut report_reference, &mut report_candidate] {
+        report.golden_path = Some(golden_path.to_string_lossy().to_string());
+        report.golden_sha256 = golden_sha256.clone();
+        report.core_sha256 = core_sha256_opt.clone();
+    }
 
     let observed = ObservedState::from_regions(reference_regions, candidate_regions);
     let mut comparison =
@@ -2786,28 +2796,84 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    #[test]
-    #[ignore = "host-local W7.4/W7.5 validation with real Libretro Mega Drive cores"]
-    fn w7_4_w7_5_real_cores_generate_reports_when_available() {
-        use crate::emulator::libretro_ffi::test_helpers::test_serial_guard;
+    // ---- Classificacao host-aware do ambiente de cores reais -----------------
+    // 0 cores instalados  -> nenhuma validacao real possivel (blocker preciso);
+    // 1 core instalado    -> capture, cycle report e reference/candidate reais;
+    // >=2 cores instalados -> matriz cross-core possivel.
+    // Um `.dll` em host Linux NAO conta como core disponivel: apenas a extensao
+    // canonica do SO atual e carregavel via dlopen/LoadLibrary.
 
-        let _serial = test_serial_guard();
-        let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    fn repo_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
             .expect("repo root")
-            .to_path_buf();
-        let validation_root = repo_root
+            .to_path_buf()
+    }
+
+    fn host_core_extension() -> &'static str {
+        if cfg!(target_os = "windows") {
+            "dll"
+        } else if cfg!(target_os = "macos") {
+            "dylib"
+        } else {
+            "so"
+        }
+    }
+
+    fn host_cores_dir() -> PathBuf {
+        repo_root().join("toolchains").join("libretro").join("cores")
+    }
+
+    /// Cores Mega Drive oficiais realmente instalados com a extensao canonica
+    /// do host, na ordem de preferencia do produto.
+    fn installed_megadrive_cores() -> Vec<PathBuf> {
+        [
+            "genesis_plus_gx_libretro",
+            "picodrive_libretro",
+            "blastem_libretro",
+        ]
+        .iter()
+        .map(|name| host_cores_dir().join(format!("{name}.{}", host_core_extension())))
+        .filter(|path| path.exists())
+        .collect()
+    }
+
+    /// Invariante da revisao 2: regiao disponivel carrega tamanho e SHA reais;
+    /// regiao indisponivel e representada como `available=false`/`sha256=null`,
+    /// nunca como hash fabricado.
+    fn assert_region_invariants(regions: &[MemoryRegionObservation]) {
+        assert!(!regions.is_empty(), "observed_regions deve existir na revisao 2");
+        for region in regions {
+            if region.available {
+                assert!(
+                    region.size > 0
+                        && region.sha256.as_deref().is_some_and(|sha| sha.len() == 64),
+                    "regiao {} disponivel deve ter tamanho e SHA-256 reais",
+                    region.label
+                );
+            } else {
+                assert!(
+                    region.size == 0 && region.sha256.is_none(),
+                    "regiao {} indisponivel deve ser available=false com sha256=null",
+                    region.label
+                );
+            }
+        }
+    }
+
+    fn stage_dummy_rom_and_golden(validation_dir: &str) -> (PathBuf, PathBuf, PathBuf) {
+        let validation_root = repo_root()
             .join("src-tauri")
             .join("target-test")
             .join("validation")
-            .join("w7-4-w7-5-real-parity");
+            .join(validation_dir);
         let project_dir = validation_root.join("project");
         let rom_dir = project_dir.join("build").join("megadrive").join("out");
         let report_dir = project_dir.join(".rds").join("reports");
         fs::create_dir_all(&rom_dir).expect("create validation rom dir");
         fs::create_dir_all(&report_dir).expect("create validation reports dir");
 
-        let fixture_rom = repo_root
+        let fixture_rom = repo_root()
             .join("src-tauri")
             .join("tests")
             .join("fixtures")
@@ -2817,6 +2883,11 @@ mod tests {
             .join("megadrive")
             .join("out")
             .join("rom.bin");
+        assert!(
+            fixture_rom.exists(),
+            "fixture BYOR-safe ausente: {}",
+            fixture_rom.display()
+        );
         let rom_path = rom_dir.join("rom.bin");
         fs::copy(&fixture_rom, &rom_path).expect("copy safe dummy ROM");
 
@@ -2831,18 +2902,116 @@ mod tests {
             serde_json::to_vec_pretty(&script).expect("serialize golden"),
         )
         .expect("write golden");
+        (rom_path, golden_path, report_dir)
+    }
 
-        let cores_dir = repo_root.join("toolchains").join("libretro").join("cores");
-        let core_a = cores_dir.join("genesis_plus_gx_libretro.dll");
-        let core_b = cores_dir.join("picodrive_libretro.dll");
-        assert!(core_a.exists(), "Genesis Plus GX core missing at {}", core_a.display());
-        assert!(core_b.exists(), "Picodrive core missing at {}", core_b.display());
+    /// W7.5 single-core: exige UM core Mega Drive real com a extensao canonica
+    /// do host. Falha com blocker preciso quando nenhum core esta instalado —
+    /// nunca retorna sucesso silencioso.
+    #[test]
+    #[ignore = "host-local W7.5: capture + cycle report com um core Mega Drive real (falha com blocker preciso sem core)"]
+    fn w7_5_single_core_real_capture_and_cycle_report() {
+        use crate::emulator::libretro_ffi::test_helpers::test_serial_guard;
+        use crate::emulator::libretro_ffi::EmulatorCore;
+
+        let _serial = test_serial_guard();
+        let cores = installed_megadrive_cores();
+        assert!(
+            !cores.is_empty(),
+            "single_core_real_validation=blocked_core_missing: nenhum core Mega Drive '.{}' instalado em {} (candidatos: genesis_plus_gx_libretro, picodrive_libretro, blastem_libretro). Instale um core oficial para a validacao real single-core.",
+            host_core_extension(),
+            host_cores_dir().display()
+        );
+        let core = &cores[0];
+        let (rom_path, golden_path, report_dir) =
+            stage_dummy_rom_and_golden("w7-5-single-core-real-parity");
+
+        let mut emulator = EmulatorCore::new(Some(core));
+        emulator.load_rom(&rom_path).expect("load ROM on real core");
+        let (report, written) = run_parity_capture_against_golden(
+            &mut emulator,
+            &rom_path,
+            &golden_path,
+            Some(3),
+            &report_dir,
+        )
+        .expect("real single-core capture");
+        emulator.stop().ok();
+
+        // Revisao 2 provada com core real: identidade completa + observacoes.
+        assert_eq!(report.contract_revision, PARITY_CONTRACT_REVISION);
+        assert!(report.core_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+        assert!(report.golden_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+        assert!(report
+            .initial_state_sha256
+            .as_deref()
+            .is_some_and(|sha| sha.len() == 64));
+        let audio = report.audio.as_ref().expect("audio observation present");
+        assert!(audio.available, "core real deve entregar amostras de audio");
+        assert!(audio.samples_total > 0);
+        assert!(audio.stream_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+        assert_region_invariants(&report.observed_regions);
+        assert!(
+            report
+                .observed_regions
+                .iter()
+                .any(|region| region.label == "WRAM" && region.available),
+            "WRAM deve estar exposta pelo core Mega Drive real"
+        );
+        assert!(report.deterministic, "cold-boot replay deve ser deterministico: {:?}", report.divergences);
+        assert!(written.exists());
+
+        let (cycle_report, cycle_path) =
+            run_cycle_report(&rom_path, &golden_path, core, Some(3), &report_dir)
+                .expect("real cycle report");
+        assert_eq!(cycle_report.frames_run, 3);
+        assert_eq!(cycle_report.m68k_cycle_trace.status, "missing");
+        assert!(cycle_report.limitations.not_cycle_accurate);
+        assert!(cycle_report
+            .core_sha256
+            .as_deref()
+            .is_some_and(|sha| sha.len() == 64));
+        assert!(cycle_report
+            .golden_sha256
+            .as_deref()
+            .is_some_and(|sha| sha.len() == 64));
+        assert!(cycle_path.exists());
+        assert!(report_dir.join("cycle-report.md").exists());
+    }
+
+    /// W7.4 cross-core: exige DOIS cores Mega Drive reais. Com apenas um core
+    /// instalado, falha com o blocker preciso `blocked_second_core_missing` em
+    /// vez de sucesso silencioso ou blocker generico de "sem cores".
+    #[test]
+    #[ignore = "host-local W7.4: cross-core exige dois cores Mega Drive reais (falha com blocker preciso se faltar o segundo)"]
+    fn w7_4_cross_core_real_parity_requires_two_cores() {
+        use crate::emulator::libretro_ffi::test_helpers::test_serial_guard;
+
+        let _serial = test_serial_guard();
+        let cores = installed_megadrive_cores();
+        assert!(
+            !cores.is_empty(),
+            "cross_core_validation=blocked_core_missing: nenhum core Mega Drive '.{}' instalado em {}.",
+            host_core_extension(),
+            host_cores_dir().display()
+        );
+        assert!(
+            cores.len() >= 2,
+            "cross_core_validation=blocked_second_core_missing: apenas '{}' esta instalado com a extensao canonica '.{}'. A validacao single-core permanece possivel; instale um segundo core oficial (picodrive_libretro ou blastem_libretro) em {} para exercitar a matriz cross-core.",
+            cores[0].display(),
+            host_core_extension(),
+            host_cores_dir().display()
+        );
+        let core_a = &cores[0];
+        let core_b = &cores[1];
+        let (rom_path, golden_path, report_dir) =
+            stage_dummy_rom_and_golden("w7-4-cross-core-real-parity");
 
         let (cross_report, cross_path) = run_cross_core_parity(
             &rom_path,
             &golden_path,
-            &core_a,
-            &core_b,
+            core_a,
+            core_b,
             Some(3),
             &report_dir,
         )
@@ -2851,18 +3020,21 @@ mod tests {
         assert!(cross_path.exists());
         assert!(report_dir.join("cross-core-parity-report.md").exists());
 
-        let (cycle_report, cycle_path) = run_cycle_report(
-            &rom_path,
-            &golden_path,
-            &core_a,
-            Some(3),
-            &report_dir,
-        )
-        .expect("real cycle report");
-        assert_eq!(cycle_report.frames_run, 3);
-        assert_eq!(cycle_report.m68k_cycle_trace.status, "missing");
-        assert!(cycle_path.exists());
-        assert!(report_dir.join("cycle-report.md").exists());
+        // Revisao 2 nos dois lados + limites honestos entre cores distintos.
+        for report in [&cross_report.report_a, &cross_report.report_b] {
+            assert_eq!(report.contract_revision, PARITY_CONTRACT_REVISION);
+            assert!(report.core_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+            assert_region_invariants(&report.observed_regions);
+        }
+        if cross_report.core_a_label != cross_report.core_b_label {
+            assert!(
+                cross_report
+                    .limitations
+                    .iter()
+                    .any(|note| note.contains("final_state_sha256")),
+                "cross-core entre cores distintos deve declarar o limite do savestate opaco"
+            );
+        }
     }
 
     #[test]
@@ -2885,26 +3057,21 @@ mod tests {
             .join("megadrive")
             .join("out")
             .join("rom.bin");
-        let core_ext = if cfg!(target_os = "windows") {
-            "dll"
-        } else if cfg!(target_os = "macos") {
-            "dylib"
-        } else {
-            "so"
-        };
-        let core = repo_root
-            .join("toolchains")
-            .join("libretro")
-            .join("cores")
-            .join(format!("genesis_plus_gx_libretro.{core_ext}"));
-        if !fixture_rom.exists() || !core.exists() {
-            eprintln!(
-                "skipping: fixture ROM or core missing (rom={}, core={})",
-                fixture_rom.display(),
-                core.display()
-            );
-            return;
-        }
+        // Blockers precisos, nunca skip silencioso: um teste manual `--ignored`
+        // que retorna verde sem exercitar o caminho real e evidencia falsa.
+        assert!(
+            fixture_rom.exists(),
+            "reference_candidate_real_validation=blocked_fixture_missing: fixture BYOR-safe ausente em {}",
+            fixture_rom.display()
+        );
+        let cores = installed_megadrive_cores();
+        assert!(
+            !cores.is_empty(),
+            "reference_candidate_real_validation=blocked_core_missing: nenhum core Mega Drive '.{}' instalado em {}. Um unico core real e suficiente para este teste.",
+            host_core_extension(),
+            host_cores_dir().display()
+        );
+        let core = cores[0].clone();
 
         let work = repo_root
             .join("src-tauri")
@@ -2939,7 +3106,41 @@ mod tests {
         assert_eq!(report.frames_run, 3);
         assert!(written.exists());
         assert!(work.join("reference-candidate-parity-report.md").exists());
-        assert!(!report.core_sha256.is_empty(), "core sha256 recorded");
+
+        // Revisao 2 provada com core real, nos dois lados: identidade completa
+        // (core/golden/estado inicial por SHA-256) + audio e memoria observados.
+        assert_eq!(report.core_sha256.len(), 64, "core sha256 real registrado");
+        for side in [&report.report_reference, &report.report_candidate] {
+            assert_eq!(side.contract_revision, PARITY_CONTRACT_REVISION);
+            assert_eq!(side.core_sha256.as_deref(), Some(report.core_sha256.as_str()));
+            assert!(side.golden_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+            assert!(side
+                .initial_state_sha256
+                .as_deref()
+                .is_some_and(|sha| sha.len() == 64));
+            let audio = side.audio.as_ref().expect("audio observation present");
+            assert!(audio.available, "core real deve entregar amostras de audio");
+            assert!(audio.samples_total > 0);
+            assert!(audio.stream_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+            assert_region_invariants(&side.observed_regions);
+            assert!(
+                side.observed_regions
+                    .iter()
+                    .any(|region| region.label == "WRAM" && region.available && region.size > 0),
+                "WRAM real deve estar exposta com tamanho e hash"
+            );
+        }
+        // Determinismo entre cold boots: o guard `non_deterministic_rom` nao
+        // pode ter disparado.
+        assert!(
+            !report
+                .comparison
+                .divergences
+                .iter()
+                .any(|d| d.kind == "non_deterministic_rom"),
+            "cold boots devem ser deterministicos: {:?}",
+            report.comparison.divergences
+        );
 
         // The megadrive_dummy fixture renders a fully BLACK screen. This is a
         // NEGATIVE control: black/static frames must NOT produce positive
@@ -2951,18 +3152,20 @@ mod tests {
             .frame_hashes
             .iter()
             .all(|frame| frame.non_black_pixels == 0);
-        if all_black {
-            assert!(!report.comparison.scenario_passed);
-            assert_eq!(
-                report.comparison.evidence_level,
-                ParityEvidenceLevel::InsufficientEvidence
-            );
-            assert!(report
-                .comparison
-                .limitations
-                .iter()
-                .any(|l| l.contains("sem atividade visual")));
-        }
+        assert!(
+            all_black,
+            "controle negro: a fixture megadrive_dummy deve continuar renderizando frames pretos; se a fixture mudou, reavalie este controle"
+        );
+        assert!(!report.comparison.scenario_passed);
+        assert_eq!(
+            report.comparison.evidence_level,
+            ParityEvidenceLevel::InsufficientEvidence
+        );
+        assert!(report
+            .comparison
+            .limitations
+            .iter()
+            .any(|l| l.contains("sem atividade visual")));
     }
 
     // ---- Etapa 2: open SGDK spike fixture, real-core Control/Positive/Negative
@@ -2983,20 +3186,26 @@ mod tests {
     }
 
     fn spike_core() -> PathBuf {
-        let ext = if cfg!(target_os = "windows") {
-            "dll"
-        } else if cfg!(target_os = "macos") {
-            "dylib"
-        } else {
-            "so"
-        };
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("repo root")
-            .join("toolchains")
-            .join("libretro")
-            .join("cores")
-            .join(format!("genesis_plus_gx_libretro.{ext}"))
+        host_cores_dir().join(format!(
+            "genesis_plus_gx_libretro.{}",
+            host_core_extension()
+        ))
+    }
+
+    /// Evidencia da revisao 2 sobre um lado de um run real: identidade,
+    /// audio observado e invariantes de regiao.
+    fn assert_revision2_real_evidence(report: &ParityReport) {
+        assert_eq!(report.contract_revision, PARITY_CONTRACT_REVISION);
+        assert!(report.core_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+        assert!(report.golden_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+        assert!(report
+            .initial_state_sha256
+            .as_deref()
+            .is_some_and(|sha| sha.len() == 64));
+        let audio = report.audio.as_ref().expect("audio observation present");
+        assert!(audio.available && audio.samples_total > 0);
+        assert!(audio.stream_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+        assert_region_invariants(&report.observed_regions);
     }
 
     fn spike_golden(work: &Path, frames: u32) -> PathBuf {
@@ -3041,6 +3250,9 @@ mod tests {
             ParityEvidenceLevel::ControlEvidence
         );
         assert_eq!(report.reference_rom_sha256, report.candidate_rom_sha256);
+        // Revisao 2 com core real e atividade visual verdadeira.
+        assert_revision2_real_evidence(&report.report_reference);
+        assert_revision2_real_evidence(&report.report_candidate);
     }
 
     #[test]
@@ -3070,6 +3282,8 @@ mod tests {
             report.functional_evidence,
             ParityEvidenceLevel::ScenarioEvidence
         );
+        assert_revision2_real_evidence(&report.report_reference);
+        assert_revision2_real_evidence(&report.report_candidate);
     }
 
     #[test]
