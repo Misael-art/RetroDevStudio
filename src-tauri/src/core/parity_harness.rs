@@ -1127,6 +1127,23 @@ pub struct ReferenceCandidateComparison {
     pub limitations: Vec<String>,
 }
 
+/// A capture carries visual activity only when at least one frame is non-black
+/// AND the framebuffer changes across frames. A fully black or fully static
+/// screen is treated as no activity, so it can never sustain positive evidence.
+fn has_visual_activity(report: &ParityReport) -> bool {
+    let any_non_black = report
+        .frame_hashes
+        .iter()
+        .any(|frame| frame.non_black_pixels > 0);
+    let distinct_frames = report
+        .frame_hashes
+        .iter()
+        .map(|frame| frame.framebuffer_sha256.as_str())
+        .collect::<std::collections::HashSet<_>>()
+        .len();
+    any_non_black && distinct_frames >= 2
+}
+
 /// Pure comparison of a reference report against a candidate report. The two
 /// reports come from DIFFERENT ROMs (different SHA is expected, not an error).
 pub fn compare_reference_candidate(
@@ -1246,6 +1263,20 @@ pub fn compare_reference_candidate(
 
     let frames_compared = limit as u32;
     let has_frames = frames_compared > 0;
+
+    // Activity guard: a fully black or fully static capture is NOT sufficient
+    // evidence (it proves nothing about behaviour). Both sides must show visual
+    // activity — at least one non-black frame AND some frame-to-frame variation.
+    let reference_active = has_visual_activity(reference);
+    let candidate_active = has_visual_activity(candidate);
+    let has_activity = reference_active && candidate_active;
+    if !has_activity {
+        limitations.push(
+            "captura sem atividade visual (frames pretos ou estado estatico): evidencia insuficiente"
+                .to_string(),
+        );
+    }
+
     let visual_parity = has_frames
         && !divergences.iter().any(|d| {
             d.kind == "reference_candidate_frame_hash_mismatch"
@@ -1253,9 +1284,10 @@ pub fn compare_reference_candidate(
                 || d.kind == "frames_run_mismatch"
                 || d.kind == "core_label_mismatch"
         });
-    let scenario_passed = has_frames && divergences.is_empty();
+    let scenario_passed = has_frames && divergences.is_empty() && has_activity;
 
-    let evidence_level = if !visual_parity {
+    let evidence_level = if !visual_parity || !has_activity {
+        // Black/static captures can never yield positive evidence.
         ParityEvidenceLevel::InsufficientEvidence
     } else if observed.available {
         if observed_state_parity {
@@ -2360,22 +2392,30 @@ mod tests {
         assert_eq!(report.frames_run, 3);
         assert!(written.exists());
         assert!(work.join("reference-candidate-parity-report.md").exists());
-        assert!(report.comparison.scenario_passed, "identical ROM must pass");
-        assert!(report.comparison.visual_parity);
         assert!(!report.core_sha256.is_empty(), "core sha256 recorded");
-        // The same ROM on both sides yields identical framebuffers AND identical
-        // memory regions on a core that exposes WRAM/VRAM, so the evidence should
-        // reach ObservedStateParity (or at least VisualParity if the core exposes
-        // no comparable region). Never total equivalence.
-        assert!(matches!(
-            report.comparison.evidence_level,
-            ParityEvidenceLevel::ObservedStateParity | ParityEvidenceLevel::VisualParity
-        ));
-        // A single scenario is ScenarioEvidence, never FunctionalEvidence.
-        assert_eq!(
-            report.functional_evidence,
-            ParityEvidenceLevel::ScenarioEvidence
-        );
+
+        // The megadrive_dummy fixture renders a fully BLACK screen. This is a
+        // NEGATIVE control: black/static frames must NOT produce positive
+        // evidence, even though the memory regions happen to match. The end-to-end
+        // real-core path is still exercised (core loaded, ROM run twice per side,
+        // regions captured), but the verdict must be InsufficientEvidence.
+        let all_black = report
+            .report_reference
+            .frame_hashes
+            .iter()
+            .all(|frame| frame.non_black_pixels == 0);
+        if all_black {
+            assert!(!report.comparison.scenario_passed);
+            assert_eq!(
+                report.comparison.evidence_level,
+                ParityEvidenceLevel::InsufficientEvidence
+            );
+            assert!(report
+                .comparison
+                .limitations
+                .iter()
+                .any(|l| l.contains("sem atividade visual")));
+        }
     }
 
     // ---- Reference-vs-Candidate contract -----------------------------------
@@ -2502,6 +2542,43 @@ mod tests {
         assert!(!cmp.observed_state_parity);
         // Frames still match; with no comparable region it is visual-only.
         assert_eq!(cmp.evidence_level, ParityEvidenceLevel::VisualParity);
+    }
+
+    #[test]
+    fn reference_candidate_black_or_static_capture_is_insufficient() {
+        // Fully black frames: even if both sides match, there is no visual
+        // activity, so the verdict must be InsufficientEvidence (no false pass).
+        let mut reference = sample_report(true, None);
+        for frame in reference.frame_hashes.iter_mut() {
+            frame.non_black_pixels = 0;
+        }
+        let candidate = candidate_of(&reference, "different-rom-sha");
+        let cmp = compare_reference_candidate(
+            &reference,
+            &candidate,
+            &ObservedState::from_regions(
+                vec![region_obs("WRAM", Some("s"))],
+                vec![region_obs("WRAM", Some("s"))],
+            ),
+        );
+        assert_eq!(cmp.evidence_level, ParityEvidenceLevel::InsufficientEvidence);
+        assert!(!cmp.scenario_passed);
+        assert!(cmp
+            .limitations
+            .iter()
+            .any(|l| l.contains("sem atividade visual")));
+
+        // Static (non-black but identical) frames are also insufficient.
+        let mut static_ref = sample_report(true, None);
+        for frame in static_ref.frame_hashes.iter_mut() {
+            frame.framebuffer_sha256 = "same".to_string();
+            frame.non_black_pixels = 100;
+        }
+        let static_cand = candidate_of(&static_ref, "different-rom-sha");
+        let cmp2 =
+            compare_reference_candidate(&static_ref, &static_cand, &ObservedState::unavailable());
+        assert_eq!(cmp2.evidence_level, ParityEvidenceLevel::InsufficientEvidence);
+        assert!(!cmp2.scenario_passed);
     }
 
     #[test]
