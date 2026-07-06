@@ -4605,6 +4605,25 @@ fn normalize_relative_path(path: &Path) -> String {
         .join("/")
 }
 
+fn normalized_relative_path_buf(path: &str) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for segment in path.split(['/', '\\']) {
+        if segment.is_empty() || segment == "." {
+            continue;
+        }
+        if segment == ".." {
+            normalized.pop();
+            continue;
+        }
+        normalized.push(segment);
+    }
+    normalized
+}
+
+fn join_normalized_relative(root: &Path, relative: &str) -> PathBuf {
+    root.join(normalized_relative_path_buf(relative))
+}
+
 fn collapse_relative_components(path: &Path) -> PathBuf {
     let mut collapsed = PathBuf::new();
     for component in path.components() {
@@ -8704,7 +8723,7 @@ fn find_gamemaker_project_root(root: &Path) -> Result<PathBuf, LoadError> {
 
     let gmx_files = collect_recursive_files_by_extension(root, &["gmx"], &["rds"])?;
     for rel in &gmx_files {
-        let path = root.join(PathBuf::from(rel.replace('/', "\\")));
+        let path = join_normalized_relative(root, rel);
         if path
             .file_name()
             .and_then(|value| value.to_str())
@@ -8719,7 +8738,7 @@ fn find_gamemaker_project_root(root: &Path) -> Result<PathBuf, LoadError> {
         if !rel.ends_with(".room.gmx") {
             continue;
         }
-        let path = root.join(PathBuf::from(rel.replace('/', "\\")));
+        let path = join_normalized_relative(root, rel);
         if let Some(candidate) = path
             .parent()
             .and_then(Path::parent)
@@ -8882,7 +8901,7 @@ fn gamemaker_first_png_in_dir(dir: &Path) -> Option<PathBuf> {
         .find(|rel| rel.ends_with("_0.png"))
         .cloned()
         .or_else(|| files.into_iter().next())
-        .map(|rel| dir.join(PathBuf::from(rel.replace('/', "\\"))))
+        .map(|rel| join_normalized_relative(dir, &rel))
 }
 
 fn line_number_for_offset(content: &str, offset: usize) -> usize {
@@ -8906,7 +8925,7 @@ fn load_gamemaker_sprites(
     if is_gamemaker_yy_project(gm_root) {
         let files = collect_recursive_files_by_extension(&sprites_dir, &["yy"], &["rds"])?;
         for rel in files {
-            let path = sprites_dir.join(PathBuf::from(rel.replace('/', "\\")));
+            let path = join_normalized_relative(&sprites_dir, &rel);
             let content = read_text_lossy(&path)?;
             let value: serde_json::Value = serde_json::from_str(&content).map_err(|error| {
                 LoadError(format!(
@@ -8969,7 +8988,7 @@ fn load_gamemaker_sprites(
         if !rel.ends_with(".sprite.gmx") {
             continue;
         }
-        let path = sprites_dir.join(PathBuf::from(rel.replace('/', "\\")));
+        let path = join_normalized_relative(&sprites_dir, &rel);
         let content = read_text_lossy(&path)?;
         let Some(frame) = first_xml_tag_text(&content, "frame") else {
             continue;
@@ -8977,7 +8996,7 @@ fn load_gamemaker_sprites(
         let source_path = path
             .parent()
             .unwrap_or(gm_root)
-            .join(PathBuf::from(frame.replace('/', "\\")));
+            .join(normalized_relative_path_buf(&frame));
         let name = path
             .file_name()
             .and_then(|value| value.to_str())
@@ -9034,7 +9053,7 @@ fn load_gamemaker_tilesets(
     };
     let files = collect_recursive_files_by_extension(&tilesets_dir, &["yy"], &["rds"])?;
     for rel in files {
-        let path = tilesets_dir.join(PathBuf::from(rel.replace('/', "\\")));
+        let path = join_normalized_relative(&tilesets_dir, &rel);
         let content = read_text_lossy(&path)?;
         let value: serde_json::Value = serde_json::from_str(&content).map_err(|error| {
             LoadError(format!(
@@ -9069,7 +9088,7 @@ fn load_gamemaker_objects(
     if is_gamemaker_yy_project(gm_root) {
         let files = collect_recursive_files_by_extension(&objects_dir, &["yy"], &["rds"])?;
         for rel in files {
-            let path = objects_dir.join(PathBuf::from(rel.replace('/', "\\")));
+            let path = join_normalized_relative(&objects_dir, &rel);
             let content = read_text_lossy(&path)?;
             let value: serde_json::Value = serde_json::from_str(&content).map_err(|error| {
                 LoadError(format!(
@@ -9107,7 +9126,7 @@ fn load_gamemaker_objects(
         if !rel.ends_with(".object.gmx") {
             continue;
         }
-        let path = objects_dir.join(PathBuf::from(rel.replace('/', "\\")));
+        let path = join_normalized_relative(&objects_dir, &rel);
         let content = read_text_lossy(&path)?;
         let name = path
             .file_name()
@@ -9149,7 +9168,7 @@ fn load_gamemaker_primary_room(gm_root: &Path) -> Result<GameMakerRoomResource, 
                 rooms_dir.display()
             ))
         })?;
-        let path = rooms_dir.join(PathBuf::from(rel.replace('/', "\\")));
+        let path = join_normalized_relative(&rooms_dir, &rel);
         let content = read_text_lossy(&path)?;
         let value: serde_json::Value = serde_json::from_str(&content).map_err(|error| {
             LoadError(format!(
@@ -9263,7 +9282,7 @@ fn load_gamemaker_primary_room(gm_root: &Path) -> Result<GameMakerRoomResource, 
             gm_root.display()
         ))
     })?;
-    let path = rooms_dir.join(PathBuf::from(rel.replace('/', "\\")));
+    let path = join_normalized_relative(&rooms_dir, &rel);
     let content = read_text_lossy(&path)?;
     let display_name = path
         .file_name()
@@ -9348,7 +9367,7 @@ fn load_gamemaker_backgrounds(
         if !rel.ends_with(".background.gmx") {
             continue;
         }
-        let path = backgrounds_dir.join(PathBuf::from(rel.replace('/', "\\")));
+        let path = join_normalized_relative(&backgrounds_dir, &rel);
         let content = read_text_lossy(&path)?;
         let Some(frame) = first_xml_tag_text(&content, "data") else {
             continue;
@@ -9356,7 +9375,7 @@ fn load_gamemaker_backgrounds(
         let source_path = path
             .parent()
             .unwrap_or(gm_root)
-            .join(PathBuf::from(frame.replace('/', "\\")));
+            .join(normalized_relative_path_buf(&frame));
         let name = path
             .file_name()
             .and_then(|value| value.to_str())
@@ -9623,7 +9642,7 @@ fn load_gamemaker_yy_events(
     let mut events = Vec::new();
     let files = collect_recursive_files_by_extension(parent, &["gml"], &["rds"])?;
     for rel in files {
-        let path = parent.join(PathBuf::from(rel.replace('/', "\\")));
+        let path = join_normalized_relative(parent, &rel);
         let code = read_text_lossy(&path)?.trim().to_string();
         if code.is_empty() {
             continue;
@@ -11723,7 +11742,7 @@ fn detect_construct_primary_layout_path(construct_path: &Path) -> Result<PathBuf
     })?;
     Ok(construct_path
         .join("layouts")
-        .join(first.replace('/', "\\")))
+        .join(normalized_relative_path_buf(&first)))
 }
 
 fn parse_construct_object_type(root: &Path, path: &Path) -> Result<ConstructObjectType, LoadError> {
@@ -11770,7 +11789,7 @@ fn load_construct_object_types(
     for relative in paths {
         let full_path = construct_path
             .join("objectTypes")
-            .join(relative.replace('/', "\\"));
+            .join(normalized_relative_path_buf(&relative));
         let object_type = parse_construct_object_type(construct_path, &full_path)?;
         result.insert(object_type.name.clone(), object_type);
     }
@@ -11833,7 +11852,7 @@ fn construct_event_sheet_hints(construct_path: &Path) -> Result<Vec<String>, Loa
     for relative in paths.into_iter().take(3) {
         let full_path = construct_path
             .join("eventSheets")
-            .join(relative.replace('/', "\\"));
+            .join(normalized_relative_path_buf(&relative));
         let json = read_json_lossy(&full_path)?;
         let label = Path::new(&relative)
             .file_stem()
@@ -11998,7 +12017,7 @@ pub fn import_construct_project(
         &["wav", "ogg", "mp3", "m4a", "flac"],
         &["export", "rds", "node_modules"],
     )? {
-        audio_sources.push(construct_path.join(relative.replace('/', "\\")));
+        audio_sources.push(join_normalized_relative(construct_path, &relative));
     }
     let mut sfx = HashMap::new();
     let mut bgm = None;
@@ -12145,7 +12164,7 @@ fn detect_rpg_maker_primary_map(rpg_path: &Path) -> Result<(PathBuf, String), Lo
             data_dir.display()
         ))
     })?;
-    let path = data_dir.join(first.replace('/', "\\"));
+    let path = join_normalized_relative(&data_dir, &first);
     let name = path
         .file_stem()
         .map(|stem| stem.to_string_lossy().to_string())
@@ -12373,7 +12392,7 @@ pub fn import_rpg_maker_project(
             let source = rpg_path
                 .join("img")
                 .join("characters")
-                .join(relative.replace('/', "\\"));
+                .join(normalized_relative_path_buf(&relative));
             let asset = materialize_external_file(
                 project_dir,
                 rpg_path,
@@ -12429,7 +12448,7 @@ pub fn import_rpg_maker_project(
             rpg_path
                 .join("audio")
                 .join("bgm")
-                .join(relative.replace('/', "\\"))
+                .join(normalized_relative_path_buf(&relative))
         });
     }
     let mut sfx = HashMap::new();
@@ -12453,7 +12472,7 @@ pub fn import_rpg_maker_project(
         let source = rpg_path
             .join("audio")
             .join("se")
-            .join(relative.replace('/', "\\"));
+            .join(normalized_relative_path_buf(&relative));
         let asset = materialize_external_file(
             project_dir,
             rpg_path,
@@ -12918,7 +12937,7 @@ fn load_openbor_model_assets(openbor_path: &Path) -> Result<Vec<OpenBorModelAsse
         openbor_path.join("chars"),
     ] {
         for relative in collect_recursive_files_by_extension(&directory, &["txt"], &[])? {
-            model_paths.push(directory.join(relative.replace('/', "\\")));
+            model_paths.push(join_normalized_relative(&directory, &relative));
         }
     }
     for manifest in [
@@ -13100,7 +13119,7 @@ fn load_openbor_level_assets(openbor_path: &Path) -> Result<Vec<OpenBorLevelAsse
         openbor_path.join("levels"),
     ] {
         for relative in collect_recursive_files_by_extension(&directory, &["txt"], &[])? {
-            level_paths.push(directory.join(relative.replace('/', "\\")));
+            level_paths.push(join_normalized_relative(&directory, &relative));
         }
     }
     for manifest in [
@@ -13141,9 +13160,13 @@ fn load_openbor_level_assets(openbor_path: &Path) -> Result<Vec<OpenBorLevelAsse
     Ok(levels)
 }
 
-fn openbor_entity_role(model: &OpenBorModelAsset, is_first: bool) -> &'static str {
+fn openbor_has_explicit_player_identity(model: &OpenBorModelAsset) -> bool {
     let text = format!("{} {}", model.name, model.model_type).to_ascii_lowercase();
-    if text.contains("player") || text.contains("hero") || is_first {
+    text.contains("player") || text.contains("hero")
+}
+
+fn openbor_entity_role(model: &OpenBorModelAsset, is_fallback_player: bool) -> &'static str {
+    if openbor_has_explicit_player_identity(model) || is_fallback_player {
         "player_avatar"
     } else {
         "enemy_actor"
@@ -13738,6 +13761,7 @@ pub fn import_openbor_project(
     let mut audio_sfx = HashMap::new();
     let mut bgm = None;
     let mut model_entity_ids: HashMap<String, String> = HashMap::new();
+    let has_explicit_player = models.iter().any(openbor_has_explicit_player_identity);
 
     if let Some(level) = levels.first() {
         if let Some(background) = &level.background_asset {
@@ -13813,9 +13837,9 @@ pub fn import_openbor_project(
             &mut asset_cache,
         )?;
         let entity_id = unique_entity_id(&mut entity_ids, &model.name, "fighter");
-        let role = openbor_entity_role(model, model_index == 0);
+        let role = openbor_entity_role(model, !has_explicit_player && model_index == 0);
         model_entity_ids.insert(slugify_scene_id(&model.name), entity_id.clone());
-        if first_sprite_id.is_none() {
+        if role == "player_avatar" || first_sprite_id.is_none() {
             first_sprite_id = Some(entity_id.clone());
         }
         let mut logic_hints = model.logic_hints.clone();
@@ -13887,7 +13911,7 @@ pub fn import_openbor_project(
                 role,
                 "medium",
                 if role == "player_avatar" {
-                    "OpenBOR type/player ou primeiro modelo do manifest."
+                    "OpenBOR type/player, nome hero ou fallback controlavel."
                 } else {
                     "OpenBOR type/enemy ou modelo nao-player do manifest."
                 },
@@ -14197,7 +14221,7 @@ fn resolve_external_asset_candidate(root: &Path, current_dir: &Path, raw: &str) 
         return None;
     }
 
-    let relative = PathBuf::from(normalized.replace('/', "\\"));
+    let relative = normalized_relative_path_buf(&normalized);
     let candidates = [
         current_dir.join(&relative),
         root.join(&relative),

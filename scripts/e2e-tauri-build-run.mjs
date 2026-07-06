@@ -85,25 +85,42 @@ async function recordE2eLedgerSuccess(options, projectMetadata) {
   console.log(`[ledger] ${marker} -> ${ledgerPath}`);
 }
 const driverServerUrl = process.env.RDS_E2E_DRIVER_URL ?? "http://127.0.0.1:4444";
+export function appBinaryNameForPlatform(hostPlatform = process.platform) {
+  return hostPlatform === "win32" ? "retro-dev-studio.exe" : "retro-dev-studio";
+}
+
+export function webdriverNamesForPlatform(hostPlatform = process.platform) {
+  return hostPlatform === "win32"
+    ? ["msedgedriver.exe", "msedgedriver"]
+    : ["msedgedriver", "chromedriver"];
+}
+
+function isHostExecutableCandidate(candidate, hostPlatform = process.platform) {
+  if (hostPlatform === "win32") {
+    return true;
+  }
+  return path.extname(candidate).toLowerCase() !== ".exe";
+}
+
 const defaultDebugAppPath = path.join(
   repoRoot,
   "src-tauri",
   "target-test",
   "debug",
-  "retro-dev-studio.exe"
+  appBinaryNameForPlatform()
 );
 const defaultReleaseAppPath = path.join(
   repoRoot,
   "src-tauri",
   "target-test",
   "release",
-  "retro-dev-studio.exe"
+  appBinaryNameForPlatform()
 );
 const defaultWebDriverPath = path.join(
   repoRoot,
   "toolchains",
   "webdriver",
-  "msedgedriver.exe"
+  process.platform === "win32" ? "msedgedriver.exe" : "msedgedriver"
 );
 const validationDir = path.join(
   repoRoot,
@@ -707,7 +724,7 @@ function pathExtensions() {
 async function resolveExecutable(explicitPath, names) {
   if (explicitPath) {
     const resolved = path.resolve(explicitPath);
-    if (await pathExists(resolved)) return resolved;
+    if (isHostExecutableCandidate(resolved) && (await pathExists(resolved))) return resolved;
   }
 
   const searchDirs = [
@@ -722,7 +739,7 @@ async function resolveExecutable(explicitPath, names) {
       const candidates = hasExtension ? [name] : extensions.map((extension) => `${name}${extension}`);
       for (const candidateName of candidates) {
         const candidate = path.join(directory, candidateName);
-        if (await pathExists(candidate)) {
+        if (isHostExecutableCandidate(candidate) && (await pathExists(candidate))) {
           return candidate;
         }
       }
@@ -2985,7 +3002,7 @@ function sessionBootstrapHint(details, options) {
     `App: ${options.app}`,
     `Driver endpoint: ${driverServerUrl}`,
     "Acoes recomendadas:",
-    "1) Feche instancias manuais de retro-dev-studio.exe antes de rodar o E2E.",
+    `1) Feche instancias manuais de ${appBinaryNameForPlatform()} antes de rodar o E2E.`,
     "2) Rode o diagnostico local completo:",
     "   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\diagnose-desktop-e2e.ps1 -SessionProbe",
     "3) Se o host local continuar com DevToolsActivePort/chrome not reachable, use o workflow desktop-e2e no runner GitHub/Windows.",
@@ -3105,10 +3122,6 @@ function deriveLiveStatusFromDiagnostics(diagnostics) {
 }
 
 async function main() {
-  if (process.platform !== "win32") {
-    fail("Este runner E2E desktop/Tauri e suportado apenas em Windows.");
-  }
-
   if (typeof fetch !== "function") {
     fail("Este script requer Node.js com suporte a fetch global.");
   }
@@ -3187,14 +3200,20 @@ async function main() {
       );
     }
 
-    nativeDriverPath = await resolveExecutable(options.nativeDriver, ["msedgedriver", "msedgedriver.exe"]);
+    nativeDriverPath = await resolveExecutable(options.nativeDriver, webdriverNamesForPlatform());
     if (!nativeDriverPath) {
       fail(
-        [
-          "msedgedriver nao encontrado.",
-          "Instale um driver compativel com o Edge do sistema, por exemplo com o utilitario oficial:",
-          "cargo install --git https://github.com/chippers/msedgedriver-tool",
-        ].join(" ")
+        process.platform === "win32"
+          ? [
+              "msedgedriver nao encontrado.",
+              "Instale um driver compativel com o Edge do sistema, por exemplo com o utilitario oficial:",
+              "cargo install --git https://github.com/chippers/msedgedriver-tool",
+            ].join(" ")
+          : [
+              "WebDriver nativo nao encontrado.",
+              "Configure msedgedriver ou chromedriver no PATH, em toolchains/webdriver/, ou passe --native-driver.",
+              "Em Linux tambem pode ser necessario iniciar uma sessao grafica/Xvfb antes do runner.",
+            ].join(" ")
       );
     }
 

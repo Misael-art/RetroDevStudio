@@ -13,6 +13,10 @@ function inspectBuildEnvironment(mode, hostPlatform, envOverrides = {}) {
     const env = build.buildCommandEnvironment(${JSON.stringify(mode)}, "C:/rds-target", ${JSON.stringify(hostPlatform)});
     console.log(JSON.stringify({
       exportedType: typeof build.buildCommandEnvironment,
+      appBinaryLinux: build.appBinaryNameForPlatform("linux"),
+      appBinaryWindows: build.appBinaryNameForPlatform("win32"),
+      runtimeFilesLinux: build.runtimeFilesForProfile("debug", "linux").files,
+      runtimeFilesWindows: build.runtimeFilesForProfile("debug", "win32").files,
       cargoTargetDir: env.CARGO_TARGET_DIR,
       tauriPlatform: env.TAURI_ENV_PLATFORM,
       tauriArch: env.TAURI_ENV_ARCH,
@@ -93,5 +97,15 @@ describe("build.mjs command environment", () => {
     });
 
     expect(env.pathValue.split(";")[0]).toBe("C:\\Users\\tester\\.cargo\\bin");
+  });
+
+  it("uses platform-specific desktop artifact names", () => {
+    const env = inspectBuildEnvironment("debug", "linux");
+
+    expect(env.appBinaryLinux).toBe("retro-dev-studio");
+    expect(env.runtimeFilesLinux).toEqual(["retro-dev-studio"]);
+    expect(env.appBinaryWindows).toBe("retro-dev-studio.exe");
+    expect(env.runtimeFilesWindows).toContain("retro-dev-studio.exe");
+    expect(env.runtimeFilesWindows).toContain("app_lib.dll");
   });
 });
