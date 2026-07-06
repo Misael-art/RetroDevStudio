@@ -157,6 +157,7 @@ export type ParityEvidenceLevel =
   | "insufficient_evidence"
   | "visual_parity"
   | "observed_state_parity"
+  | "control_evidence"
   | "scenario_evidence"
   | "functional_evidence";
 
