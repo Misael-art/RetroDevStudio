@@ -85,6 +85,30 @@ export function referenceCandidateReportFromResult(
   return result.report ?? null;
 }
 
+/**
+ * Resume a evidencia real observada (revisao 2 do contrato): audio via
+ * callbacks Libretro e regioes de memoria expostas pelo core. Reports antigos
+ * (revisao 1) retornam "nao_medido"/"nao_medidas" em vez de dados fabricados.
+ */
+export function formatParityEvidenceDetails(report: ParityReport): string {
+  const audio = report.audio
+    ? report.audio.available
+      ? "observado"
+      : "indisponivel"
+    : "nao_medido";
+  const regions = report.observed_regions ?? [];
+  let regionText = "nao_medidas";
+  if (regions.length > 0) {
+    const observed = regions.filter((region) => region.available).map((region) => region.label);
+    const missing = regions.filter((region) => !region.available).map((region) => region.label);
+    regionText = observed.length > 0 ? observed.join("/") : "nenhuma";
+    if (missing.length > 0) {
+      regionText += ` (indisponiveis: ${missing.join("/")})`;
+    }
+  }
+  return `audio=${audio}, regioes=${regionText}`;
+}
+
 export function formatParitySummary(report: ParityReport): string {
   const determinism = report.deterministic ? "sim" : "nao";
   const divergenceText =

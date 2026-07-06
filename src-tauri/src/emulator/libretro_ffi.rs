@@ -365,6 +365,7 @@ struct LoadedCore {
     frame_size: FrameSize,
     sample_rate: u32,
     label: String,
+    core_path: PathBuf,
     _target: CoreTarget,
     trace_backend: Option<TraceBackend>,
     trace_base_pc: u32,
@@ -561,6 +562,7 @@ impl LoadedCore {
             frame_size,
             sample_rate: av_info.timing.sample_rate.round().max(1.0) as u32,
             label: core_label,
+            core_path: core_path.to_path_buf(),
             _target: target,
             trace_backend,
             trace_base_pc,
@@ -1087,6 +1089,14 @@ impl EmulatorCore {
 
     pub fn loaded_core_label(&self) -> Option<&str> {
         self.runtime.as_ref().map(|runtime| runtime.label.as_str())
+    }
+
+    /// Caminho do arquivo de core Libretro efetivamente carregado (resolvido
+    /// por `locate_core_path`), para identificar a execucao em relatorios.
+    pub fn loaded_core_file(&self) -> Option<PathBuf> {
+        self.runtime
+            .as_ref()
+            .map(|runtime| runtime.core_path.clone())
     }
 
     pub fn loaded_rom_path(&self) -> Option<PathBuf> {

@@ -12,6 +12,31 @@ use crate::emulator::libretro_ffi::{
 pub const PARITY_REPORT_SCHEMA: &str = "rds-gameplay-parity/v1";
 pub const INPUT_SCRIPT_SCHEMA: &str = "rds-input-script/v1";
 
+/// Revisao aditiva do contrato `rds-gameplay-parity/v1`. A revisao 2 adiciona
+/// campos opcionais de identidade da execucao (core/golden/estado inicial) e
+/// observacoes reais de audio/memoria. Reports antigos (sem os campos novos)
+/// continuam deserializaveis como revisao 1 via `serde(default)`.
+pub const PARITY_CONTRACT_REVISION: u32 = 2;
+
+fn default_contract_revision() -> u32 {
+    1
+}
+
+/// Observacao real do stream de audio entregue pelo core via callbacks
+/// Libretro padrao (`retro_set_audio_sample`/`_batch`). O hash cobre os
+/// samples i16 em little-endian na ordem entregue pelo core. Isto mede
+/// determinismo do stream do proprio core; NAO prova `audio_exact_match`
+/// contra hardware real, que permanece em `not_measured_by_this_harness`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AudioObservation {
+    pub available: bool,
+    pub sample_rate: u32,
+    pub samples_total: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stream_sha256: Option<String>,
+    pub note: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FrameHash {
     pub frame_index: u32,
@@ -30,12 +55,34 @@ pub struct ParityDivergence {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ParityReport {
     pub schema: String,
+    #[serde(default = "default_contract_revision")]
+    pub contract_revision: u32,
     pub rom_path: String,
     pub rom_sha256: String,
     pub core_label: String,
+    /// SHA-256 do arquivo do core Libretro carregado, quando conhecido.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub core_sha256: Option<String>,
+    /// Identidade do golden input reproduzido (caminho + SHA-256 do arquivo).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub golden_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub golden_sha256: Option<String>,
+    /// SHA-256 do estado serializado restaurado antes do primeiro frame.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_state_sha256: Option<String>,
     pub frames_run: u32,
     pub frame_hashes: Vec<FrameHash>,
     pub final_state_sha256: String,
+    /// Observacao real de audio via API Libretro padrao; `None` em reports
+    /// antigos (revisao 1) que nao mediam audio.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio: Option<AudioObservation>,
+    /// Regioes de memoria (WRAM/VRAM/SRAM) realmente expostas pelo core via
+    /// `retro_get_memory_data` ao final da execucao; regiao nao exposta fica
+    /// `available = false` com `sha256 = null`, nunca um hash fabricado.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observed_regions: Vec<MemoryRegionObservation>,
     pub deterministic: bool,
     pub divergences: Vec<ParityDivergence>,
     pub fake_toolchain_used: bool,
@@ -67,12 +114,19 @@ impl ParityReport {
     ) -> Self {
         Self {
             schema: PARITY_REPORT_SCHEMA.to_string(),
+            contract_revision: PARITY_CONTRACT_REVISION,
             rom_path,
             rom_sha256,
             core_label,
+            core_sha256: None,
+            golden_path: None,
+            golden_sha256: None,
+            initial_state_sha256: None,
             frames_run,
             frame_hashes,
             final_state_sha256,
+            audio: None,
+            observed_regions: Vec::new(),
             deterministic,
             divergences,
             fake_toolchain_used,
@@ -195,6 +249,9 @@ pub fn run_parity_capture(
     inputs: &[JoypadState],
 ) -> Result<ParityReport, String> {
     core.restore_runtime_state_bytes(initial_state)?;
+    // Descarta audio residual de execucoes anteriores para que o stream
+    // observado pertenca exclusivamente a esta execucao deterministica.
+    core.take_audio_samples()?;
 
     let core_label = core
         .loaded_core_label()
@@ -202,6 +259,9 @@ pub fn run_parity_capture(
         .to_string();
 
     let mut frame_hashes: Vec<FrameHash> = Vec::with_capacity(inputs.len());
+    let mut audio_bytes: Vec<u8> = Vec::new();
+    let mut audio_samples_total: u64 = 0;
+    let mut audio_sample_rate: u32 = 0;
     for (index, joypad) in inputs.iter().enumerate() {
         core.set_joypad(joypad.clone())?;
         core.run_frame()?;
@@ -213,12 +273,38 @@ pub fn run_parity_capture(
             non_black_pixels: non_black,
         };
         frame_hashes.push(frame_hash);
+
+        let (sample_rate, samples) = core.take_audio_samples()?;
+        audio_sample_rate = sample_rate;
+        audio_samples_total += samples.len() as u64;
+        for sample in samples {
+            audio_bytes.extend_from_slice(&sample.to_le_bytes());
+        }
     }
+
+    let audio = if audio_samples_total > 0 {
+        AudioObservation {
+            available: true,
+            sample_rate: audio_sample_rate,
+            samples_total: audio_samples_total,
+            stream_sha256: Some(sha256_hex(&audio_bytes)),
+            note: "Stream de audio observado via callbacks Libretro padrao; o hash prova determinismo do stream do core, nao exatidao contra hardware real.".to_string(),
+        }
+    } else {
+        AudioObservation {
+            available: false,
+            sample_rate: audio_sample_rate,
+            samples_total: 0,
+            stream_sha256: None,
+            note: "O core nao entregou amostras de audio nesta execucao; evidencia de audio registrada como indisponivel (nao fabricada).".to_string(),
+        }
+    };
+    let observed_regions = core.capture_normalized_regions();
 
     let final_bytes = core.capture_runtime_state_bytes()?;
     let final_state_sha256 = sha256_hex(&final_bytes);
 
-    Ok(ParityReport::new(
+    let mut report = ParityReport::new(
         rom_path.to_string_lossy().to_string(),
         rom_sha256.to_string(),
         core_label,
@@ -228,7 +314,11 @@ pub fn run_parity_capture(
         true,
         Vec::new(),
         false,
-    ))
+    );
+    report.initial_state_sha256 = Some(sha256_hex(initial_state));
+    report.audio = Some(audio);
+    report.observed_regions = observed_regions;
+    Ok(report)
 }
 
 pub fn run_parity_capture_against_golden(
@@ -271,6 +361,15 @@ pub fn run_parity_capture_against_golden(
     let divergences = compare_runs(&report_a, &report_b);
     report_a.divergences = divergences.clone();
     report_a.deterministic = divergences.is_empty();
+
+    // Identidade da execucao: golden e core sao registrados por hash quando
+    // legiveis; falha de leitura deixa o campo ausente, nunca fabricado.
+    report_a.golden_path = Some(golden_path.to_string_lossy().to_string());
+    report_a.golden_sha256 = fs::read(golden_path).ok().map(|bytes| sha256_hex(&bytes));
+    report_a.core_sha256 = core
+        .loaded_core_file()
+        .and_then(|path| fs::read(path).ok())
+        .map(|bytes| sha256_hex(&bytes));
 
     let written = write_parity_report(report_dir, &report_a)?;
     Ok((report_a, written))
@@ -340,6 +439,56 @@ pub fn compare_runs(reference: &ParityReport, observed: &ParityReport) -> Vec<Pa
             observed: observed.final_state_sha256.clone(),
         });
     }
+    // Audio: comparado apenas quando observado nos dois lados; ausencia de
+    // observacao nunca fabrica divergencia.
+    if let (Some(a), Some(b)) = (&reference.audio, &observed.audio) {
+        if a.available != b.available {
+            divergences.push(ParityDivergence {
+                frame_index: u32::MAX,
+                kind: "audio_availability_mismatch".to_string(),
+                expected: a.available.to_string(),
+                observed: b.available.to_string(),
+            });
+        } else if a.available && a.stream_sha256 != b.stream_sha256 {
+            divergences.push(ParityDivergence {
+                frame_index: u32::MAX,
+                kind: "audio_stream_mismatch".to_string(),
+                expected: a.stream_sha256.clone().unwrap_or_default(),
+                observed: b.stream_sha256.clone().unwrap_or_default(),
+            });
+        }
+    }
+    // Regioes de memoria: comparadas rotulo a rotulo quando expostas nos dois
+    // lados. Para duas execucoes do MESMO core, flip de disponibilidade tambem
+    // e nao-determinismo observado.
+    for reference_region in &reference.observed_regions {
+        let Some(observed_region) = observed
+            .observed_regions
+            .iter()
+            .find(|region| region.label == reference_region.label)
+        else {
+            continue;
+        };
+        if reference_region.available != observed_region.available {
+            divergences.push(ParityDivergence {
+                frame_index: u32::MAX,
+                kind: format!("region_availability_mismatch:{}", reference_region.label),
+                expected: reference_region.available.to_string(),
+                observed: observed_region.available.to_string(),
+            });
+        } else if reference_region.available {
+            if let (Some(a), Some(b)) = (&reference_region.sha256, &observed_region.sha256) {
+                if a != b {
+                    divergences.push(ParityDivergence {
+                        frame_index: u32::MAX,
+                        kind: format!("region_mismatch:{}", reference_region.label),
+                        expected: a.clone(),
+                        observed: b.clone(),
+                    });
+                }
+            }
+        }
+    }
     divergences
 }
 
@@ -396,6 +545,44 @@ fn render_parity_markdown(report: &ParityReport) -> String {
         "- **Final state SHA-256**: `{}`\n",
         report.final_state_sha256
     ));
+    if let Some(core_sha) = &report.core_sha256 {
+        out.push_str(&format!("- **Core SHA-256**: `{core_sha}`\n"));
+    }
+    if let Some(golden_path) = &report.golden_path {
+        out.push_str(&format!("- **Golden**: `{golden_path}`\n"));
+    }
+    if let Some(golden_sha) = &report.golden_sha256 {
+        out.push_str(&format!("- **Golden SHA-256**: `{golden_sha}`\n"));
+    }
+    if let Some(initial_sha) = &report.initial_state_sha256 {
+        out.push_str(&format!("- **Initial state SHA-256**: `{initial_sha}`\n"));
+    }
+    if let Some(audio) = &report.audio {
+        out.push_str("\n## Audio observation\n\n");
+        out.push_str(&format!(
+            "- available: {} | sample_rate: {} | samples_total: {}\n",
+            audio.available, audio.sample_rate, audio.samples_total
+        ));
+        if let Some(hash) = &audio.stream_sha256 {
+            out.push_str(&format!("- stream SHA-256: `{hash}`\n"));
+        }
+        out.push_str(&format!("- {}\n", audio.note));
+    }
+    if !report.observed_regions.is_empty() {
+        out.push_str("\n## Observed memory regions\n\n");
+        for region in &report.observed_regions {
+            match &region.sha256 {
+                Some(hash) => out.push_str(&format!(
+                    "- {}: available, {} bytes, sha256=`{}`\n",
+                    region.label, region.size, hash
+                )),
+                None => out.push_str(&format!(
+                    "- {}: indisponivel neste core (nao exposta via retro_get_memory_data)\n",
+                    region.label
+                )),
+            }
+        }
+    }
     if !report.divergences.is_empty() {
         out.push_str("\n## Divergences\n\n");
         for d in &report.divergences {
@@ -449,6 +636,11 @@ pub struct CrossCoreReport {
     pub report_b: ParityReport,
     pub cross_divergences: Vec<CrossCoreDivergence>,
     pub cores_agree: bool,
+    /// Limites honestos da comparacao entre cores distintos (ex.: savestate
+    /// serializado usa formato proprio de cada core; audio nao e comparado
+    /// entre cores; regiao exposta em apenas um lado). Vazio em reports antigos.
+    #[serde(default)]
+    pub limitations: Vec<String>,
     pub not_measured_by_this_harness: Vec<String>,
 }
 
@@ -503,6 +695,12 @@ pub struct CycleReport {
     pub rom_path: String,
     pub rom_sha256: String,
     pub golden_path: String,
+    /// Identidade aditiva da execucao (revisao 2): SHA-256 do golden e do
+    /// arquivo de core quando legiveis; ausentes em reports antigos.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub golden_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub core_sha256: Option<String>,
     pub core_label: String,
     pub frames_run: u32,
     pub frame_samples: Vec<CycleFrameSample>,
@@ -543,6 +741,8 @@ pub fn build_missing_cycle_report(
         rom_path: parity_report.rom_path.clone(),
         rom_sha256: parity_report.rom_sha256.clone(),
         golden_path: golden_path.to_string_lossy().to_string(),
+        golden_sha256: parity_report.golden_sha256.clone(),
+        core_sha256: parity_report.core_sha256.clone(),
         core_label: parity_report.core_label.clone(),
         frames_run,
         frame_samples,
@@ -625,10 +825,12 @@ pub fn run_cross_core_parity(
     })?;
     let rom_sha256 = sha256_hex(&rom_bytes);
 
+    let golden_sha256 = fs::read(golden_path).ok().map(|bytes| sha256_hex(&bytes));
+
     let mut core_a = EmulatorCore::new(Some(core_a_path));
     core_a.load_rom(rom_path)?;
     let core_a_initial = core_a.capture_runtime_state_bytes()?;
-    let report_a = run_parity_capture(
+    let mut report_a = run_parity_capture(
         &mut core_a,
         rom_path,
         &rom_sha256,
@@ -636,11 +838,14 @@ pub fn run_cross_core_parity(
         &inputs,
     )?;
     core_a.stop().ok();
+    report_a.golden_path = Some(golden_path.to_string_lossy().to_string());
+    report_a.golden_sha256 = golden_sha256.clone();
+    report_a.core_sha256 = fs::read(core_a_path).ok().map(|bytes| sha256_hex(&bytes));
 
     let mut core_b = EmulatorCore::new(Some(core_b_path));
     core_b.load_rom(rom_path)?;
     let core_b_initial = core_b.capture_runtime_state_bytes()?;
-    let report_b = run_parity_capture(
+    let mut report_b = run_parity_capture(
         &mut core_b,
         rom_path,
         &rom_sha256,
@@ -648,9 +853,13 @@ pub fn run_cross_core_parity(
         &inputs,
     )?;
     core_b.stop().ok();
+    report_b.golden_path = Some(golden_path.to_string_lossy().to_string());
+    report_b.golden_sha256 = golden_sha256;
+    report_b.core_sha256 = fs::read(core_b_path).ok().map(|bytes| sha256_hex(&bytes));
 
     let cross_divergences = compare_cross_core(&report_a, &report_b);
     let cores_agree = cross_divergences.is_empty();
+    let limitations = cross_core_limitations(&report_a, &report_b);
 
     let report = CrossCoreReport {
         schema: CROSS_CORE_REPORT_SCHEMA.to_string(),
@@ -665,6 +874,7 @@ pub fn run_cross_core_parity(
         report_b,
         cross_divergences,
         cores_agree,
+        limitations,
         not_measured_by_this_harness: CrossCoreReport::not_measured_default(),
     };
 
@@ -753,7 +963,7 @@ pub fn run_cycle_report(
 
     let final_state = core.capture_runtime_state_bytes()?;
     core.stop().ok();
-    let parity_report = ParityReport::new(
+    let mut parity_report = ParityReport::new(
         rom_path.to_string_lossy().to_string(),
         rom_sha256,
         core_label,
@@ -764,6 +974,10 @@ pub fn run_cycle_report(
         Vec::new(),
         false,
     );
+    parity_report.golden_path = Some(golden_path.to_string_lossy().to_string());
+    parity_report.golden_sha256 = fs::read(golden_path).ok().map(|bytes| sha256_hex(&bytes));
+    parity_report.core_sha256 = fs::read(core_path).ok().map(|bytes| sha256_hex(&bytes));
+    parity_report.initial_state_sha256 = Some(sha256_hex(&initial_state));
 
     let mut report = build_missing_cycle_report(
         golden_path,
@@ -841,7 +1055,65 @@ pub fn compare_cross_core(
             core_b_non_black: 0,
         });
     }
+    // Regioes normalizadas (WRAM/VRAM/SRAM): unica comparacao de estado
+    // apples-to-apples entre cores distintos. Comparadas somente quando a
+    // regiao esta exposta nos DOIS cores; assimetria de exposicao e limite de
+    // capacidade (registrado em `limitations`), nao divergencia.
+    for region_a in &report_a.observed_regions {
+        let Some(region_b) = report_b
+            .observed_regions
+            .iter()
+            .find(|region| region.label == region_a.label)
+        else {
+            continue;
+        };
+        if region_a.available && region_b.available {
+            if let (Some(a), Some(b)) = (&region_a.sha256, &region_b.sha256) {
+                if a != b {
+                    divergences.push(CrossCoreDivergence {
+                        frame_index: u32::MAX,
+                        kind: format!("cross_core_region_mismatch:{}", region_a.label),
+                        core_a_hash: a.clone(),
+                        core_b_hash: b.clone(),
+                        core_a_non_black: 0,
+                        core_b_non_black: 0,
+                    });
+                }
+            }
+        }
+    }
     divergences
+}
+
+/// Limites honestos de uma comparacao cross-core: registra o que NAO pode ser
+/// lido como evidencia de comportamento quando os cores sao distintos.
+pub fn cross_core_limitations(report_a: &ParityReport, report_b: &ParityReport) -> Vec<String> {
+    let mut notes = Vec::new();
+    if report_a.core_label != report_b.core_label {
+        notes.push(
+            "final_state_sha256 cobre o savestate serializado no formato proprio de cada core; divergencia entre cores distintos e esperada e nao constitui, sozinha, evidencia de comportamento divergente."
+                .to_string(),
+        );
+        notes.push(
+            "audio nao e comparado entre cores distintos (resampling/latencia variam por core); o determinismo do stream de audio e avaliado por core no proprio report."
+                .to_string(),
+        );
+    }
+    for region_a in &report_a.observed_regions {
+        if let Some(region_b) = report_b
+            .observed_regions
+            .iter()
+            .find(|region| region.label == region_a.label)
+        {
+            if region_a.available != region_b.available {
+                notes.push(format!(
+                    "regiao {} exposta em apenas um core (A={}, B={}); comparacao registrada como indisponivel, nao como divergencia.",
+                    region_a.label, region_a.available, region_b.available
+                ));
+            }
+        }
+    }
+    notes
 }
 
 pub fn write_cross_core_report(
@@ -927,6 +1199,12 @@ fn render_cross_core_markdown(report: &CrossCoreReport) -> String {
         "- Core B report: `{}`\n",
         report_dir_suffix(&report.report_b)
     ));
+    if !report.limitations.is_empty() {
+        out.push_str("\n## Limitations\n\n");
+        for item in &report.limitations {
+            out.push_str(&format!("- {item}\n"));
+        }
+    }
     if !report.not_measured_by_this_harness.is_empty() {
         out.push_str("\n## Not measured by this harness\n\n");
         for field in &report.not_measured_by_this_harness {
@@ -975,7 +1253,13 @@ fn render_cycle_markdown(report: &CycleReport) -> String {
     out.push_str(&format!("- **ROM**: `{}`\n", report.rom_path));
     out.push_str(&format!("- **ROM SHA-256**: `{}`\n", report.rom_sha256));
     out.push_str(&format!("- **Golden**: `{}`\n", report.golden_path));
+    if let Some(golden_sha) = &report.golden_sha256 {
+        out.push_str(&format!("- **Golden SHA-256**: `{golden_sha}`\n"));
+    }
     out.push_str(&format!("- **Core/reference**: `{}`\n", report.core_label));
+    if let Some(core_sha) = &report.core_sha256 {
+        out.push_str(&format!("- **Core SHA-256**: `{core_sha}`\n"));
+    }
     out.push_str(&format!("- **Frames run**: {}\n", report.frames_run));
     out.push_str(&format!(
         "- **not cycle accurate**: {}\n",
@@ -1923,6 +2207,257 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // ── Revision 2: identidade da execucao + observacao real ──────────────────
+
+    /// Positivo + deterministico (mock core real via dlopen): a captura registra
+    /// identidade completa da execucao e observacoes reais de audio/memoria.
+    #[test]
+    fn run_parity_capture_against_golden_records_identity_audio_and_regions() {
+        use crate::emulator::libretro_ffi::test_helpers::{compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom};
+        use crate::emulator::libretro_ffi::EmulatorCore;
+
+        let _serial = test_serial_guard();
+        let dir = emu_temp_dir("parity-identity-audio");
+        let core_path = compile_mock_core(&dir);
+        let rom_path = write_test_rom(&dir, "identity_rom", "gen");
+
+        let script = InputScript::from_frames(vec![
+            JoypadState::default(),
+            JoypadState { a: true, ..JoypadState::default() },
+            JoypadState::default(),
+        ]);
+        let golden_path = dir.join("identity.rds-input.json");
+        fs::write(&golden_path, serde_json::to_vec_pretty(&script).expect("serialize")).expect("write golden");
+
+        let report_dir = dir.join(".rds").join("reports");
+        let mut emulator = EmulatorCore::new(Some(&core_path));
+        emulator.load_rom(&rom_path).expect("load rom");
+
+        let (report, written) = run_parity_capture_against_golden(&mut emulator, &rom_path, &golden_path, None, &report_dir).expect("capture");
+
+        assert_eq!(report.contract_revision, PARITY_CONTRACT_REVISION);
+        assert!(report.deterministic, "mock core must be deterministic: {:?}", report.divergences);
+
+        // Identidade da execucao deterministica: ROM, golden, core e estado inicial.
+        assert!(!report.rom_sha256.is_empty());
+        assert_eq!(report.golden_path.as_deref(), Some(golden_path.to_string_lossy().as_ref()));
+        assert!(report.golden_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+        assert!(report.core_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+        assert!(report.initial_state_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+
+        // Audio real observado via callbacks Libretro (mock emite 4 samples/frame).
+        let audio = report.audio.as_ref().expect("audio observation");
+        assert!(audio.available);
+        assert_eq!(audio.samples_total, 4 * 3);
+        assert!(audio.stream_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+
+        // Regioes reais expostas por retro_get_memory_data no mock core.
+        assert_eq!(report.observed_regions.len(), 3);
+        for label in ["WRAM", "VRAM", "SRAM"] {
+            let region = report
+                .observed_regions
+                .iter()
+                .find(|region| region.label == label)
+                .unwrap_or_else(|| panic!("missing region {label}"));
+            assert!(region.available, "region {label} must be available on mock core");
+            assert!(region.sha256.is_some());
+            assert!(region.size > 0);
+        }
+
+        // Report persistido carrega os campos novos.
+        let json = fs::read_to_string(&written).expect("read json");
+        assert!(json.contains("\"contract_revision\": 2"));
+        assert!(json.contains("\"audio\""));
+        assert!(json.contains("\"observed_regions\""));
+
+        emulator.stop().expect("stop");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Retrocompatibilidade: JSON de revisao 1 (sem os campos novos) continua
+    /// deserializavel; campos ausentes ficam None/vazio, nunca fabricados.
+    #[test]
+    fn parity_report_revision1_json_without_new_fields_still_deserializes() {
+        let legacy_json = r#"{
+            "schema": "rds-gameplay-parity/v1",
+            "rom_path": "/tmp/rom.bin",
+            "rom_sha256": "abc123",
+            "core_label": "MockLibretroCore",
+            "frames_run": 1,
+            "frame_hashes": [
+                {"frame_index": 0, "framebuffer_sha256": "h0", "non_black_pixels": 10}
+            ],
+            "final_state_sha256": "final",
+            "deterministic": true,
+            "divergences": [],
+            "fake_toolchain_used": false,
+            "not_measured_by_this_harness": ["audio_exact_match"]
+        }"#;
+        let report: ParityReport = serde_json::from_str(legacy_json).expect("legacy deserializes");
+        assert_eq!(report.contract_revision, 1);
+        assert!(report.core_sha256.is_none());
+        assert!(report.golden_path.is_none());
+        assert!(report.golden_sha256.is_none());
+        assert!(report.initial_state_sha256.is_none());
+        assert!(report.audio.is_none());
+        assert!(report.observed_regions.is_empty());
+    }
+
+    fn sample_audio(hash: &str) -> AudioObservation {
+        AudioObservation {
+            available: true,
+            sample_rate: 44_100,
+            samples_total: 12,
+            stream_sha256: Some(hash.to_string()),
+            note: "test".to_string(),
+        }
+    }
+
+    fn sample_region(label: &str, available: bool, sha: Option<&str>) -> MemoryRegionObservation {
+        MemoryRegionObservation {
+            label: label.to_string(),
+            region_id: 2,
+            available,
+            size: if available { 64 } else { 0 },
+            sha256: sha.map(|value| value.to_string()),
+        }
+    }
+
+    /// Negativo: streams de audio divergentes entre duas execucoes do mesmo
+    /// core sao divergencia observada.
+    #[test]
+    fn compare_runs_detects_audio_stream_divergence() {
+        let mut a = sample_report(true, None);
+        let mut b = a.clone();
+        a.audio = Some(sample_audio("audio-a"));
+        b.audio = Some(sample_audio("audio-b"));
+        let divergences = compare_runs(&a, &b);
+        assert_eq!(divergences.len(), 1);
+        assert_eq!(divergences[0].kind, "audio_stream_mismatch");
+    }
+
+    /// Negativo: flip de disponibilidade de audio entre duas execucoes do mesmo
+    /// core tambem e nao-determinismo observado.
+    #[test]
+    fn compare_runs_detects_audio_availability_flip() {
+        let mut a = sample_report(true, None);
+        let mut b = a.clone();
+        a.audio = Some(sample_audio("audio-a"));
+        b.audio = Some(AudioObservation {
+            available: false,
+            sample_rate: 0,
+            samples_total: 0,
+            stream_sha256: None,
+            note: "sem audio".to_string(),
+        });
+        let divergences = compare_runs(&a, &b);
+        assert_eq!(divergences.len(), 1);
+        assert_eq!(divergences[0].kind, "audio_availability_mismatch");
+    }
+
+    /// Ausencia de capacidade: quando o audio nao foi observado (reports de
+    /// revisao 1 ou core sem amostras nos dois lados), nada e fabricado.
+    #[test]
+    fn compare_runs_never_fabricates_audio_divergence_when_not_observed() {
+        let a = sample_report(true, None);
+        let mut b = a.clone();
+        assert!(compare_runs(&a, &b).is_empty());
+
+        // apenas um lado observado: sem divergencia fabricada
+        b.audio = Some(sample_audio("audio-b"));
+        assert!(compare_runs(&a, &b).is_empty());
+    }
+
+    /// Negativo + ausencia: regioes divergem quando expostas nos dois lados;
+    /// regiao indisponivel nos dois lados nunca gera divergencia.
+    #[test]
+    fn compare_runs_detects_region_divergence_and_availability_flip() {
+        let mut a = sample_report(true, None);
+        let mut b = a.clone();
+        a.observed_regions = vec![
+            sample_region("WRAM", true, Some("wram-a")),
+            sample_region("SRAM", false, None),
+        ];
+        b.observed_regions = vec![
+            sample_region("WRAM", true, Some("wram-b")),
+            sample_region("SRAM", false, None),
+        ];
+        let divergences = compare_runs(&a, &b);
+        assert_eq!(divergences.len(), 1);
+        assert_eq!(divergences[0].kind, "region_mismatch:WRAM");
+
+        // flip de disponibilidade da mesma regiao no mesmo core = divergencia
+        b.observed_regions = vec![
+            sample_region("WRAM", true, Some("wram-a")),
+            sample_region("SRAM", true, Some("sram-b")),
+        ];
+        let divergences = compare_runs(&a, &b);
+        assert_eq!(divergences.len(), 1);
+        assert_eq!(divergences[0].kind, "region_availability_mismatch:SRAM");
+    }
+
+    /// Cross-core: regioes normalizadas sao comparadas apenas quando expostas
+    /// nos DOIS cores; assimetria vira limitation, nao divergencia.
+    #[test]
+    fn compare_cross_core_compares_regions_only_when_exposed_on_both() {
+        let mut a = sample_report(true, None);
+        let mut b = a.clone();
+        a.observed_regions = vec![
+            sample_region("WRAM", true, Some("wram-a")),
+            sample_region("VRAM", true, Some("vram-x")),
+        ];
+        b.observed_regions = vec![
+            sample_region("WRAM", true, Some("wram-b")),
+            sample_region("VRAM", false, None),
+        ];
+        let divergences = compare_cross_core(&a, &b);
+        assert_eq!(divergences.len(), 1);
+        assert_eq!(divergences[0].kind, "cross_core_region_mismatch:WRAM");
+
+        let limitations = cross_core_limitations(&a, &b);
+        assert!(limitations.iter().any(|note| note.contains("VRAM")));
+    }
+
+    /// Cross-core entre cores distintos: savestate serializado e formato opaco
+    /// por core e precisa ser sinalizado como limite, nunca lido sozinho como
+    /// evidencia de comportamento divergente.
+    #[test]
+    fn cross_core_limitations_flag_opaque_final_state_between_distinct_cores() {
+        let a = sample_report(true, None);
+        let mut b = a.clone();
+        b.core_label = "OtherCore".to_string();
+        let limitations = cross_core_limitations(&a, &b);
+        assert!(limitations.iter().any(|note| note.contains("final_state_sha256")));
+        assert!(limitations.iter().any(|note| note.contains("audio")));
+
+        // mesmo core: nenhuma dessas limitations e emitida
+        assert!(cross_core_limitations(&a, &a).is_empty());
+    }
+
+    /// Markdown do parity report expoe identidade e observacoes reais.
+    #[test]
+    fn parity_markdown_renders_identity_audio_and_regions() {
+        let mut report = sample_report(true, None);
+        report.core_sha256 = Some("core-sha".to_string());
+        report.golden_path = Some("/tmp/golden.rds-input.json".to_string());
+        report.golden_sha256 = Some("golden-sha".to_string());
+        report.initial_state_sha256 = Some("initial-sha".to_string());
+        report.audio = Some(sample_audio("audio-sha"));
+        report.observed_regions = vec![
+            sample_region("WRAM", true, Some("wram-sha")),
+            sample_region("SRAM", false, None),
+        ];
+        let markdown = render_parity_markdown(&report);
+        assert!(markdown.contains("Core SHA-256"));
+        assert!(markdown.contains("Golden SHA-256"));
+        assert!(markdown.contains("Initial state SHA-256"));
+        assert!(markdown.contains("Audio observation"));
+        assert!(markdown.contains("audio-sha"));
+        assert!(markdown.contains("Observed memory regions"));
+        assert!(markdown.contains("WRAM"));
+        assert!(markdown.contains("SRAM: indisponivel"));
+    }
+
     // ── Cross-core tests ───────────────────────────────────────────────────────
 
     fn sample_cross_core_report(agree: bool, frame_hash_diff_at: Option<u32>) -> CrossCoreReport {
@@ -1953,6 +2488,7 @@ mod tests {
             report_b: core_b,
             cross_divergences,
             cores_agree: agree,
+            limitations: Vec::new(),
             not_measured_by_this_harness: CrossCoreReport::not_measured_default(),
         }
     }

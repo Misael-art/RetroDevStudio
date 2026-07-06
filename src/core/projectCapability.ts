@@ -32,14 +32,33 @@ export interface ParityDivergence {
   observed: string;
 }
 
+/** Observacao real do stream de audio via callbacks Libretro padrao.
+ * Mede determinismo do stream do core; nao prova audio_exact_match vs hardware. */
+export interface ParityAudioObservation {
+  available: boolean;
+  sample_rate: number;
+  samples_total: number;
+  stream_sha256?: string | null;
+  note: string;
+}
+
 export interface ParityReport {
   schema: string;
+  /** Revisao aditiva do contrato; ausente/1 em reports antigos, 2 com identidade + audio/regioes. */
+  contract_revision?: number;
   rom_path: string;
   rom_sha256: string;
   core_label: string;
+  core_sha256?: string | null;
+  golden_path?: string | null;
+  golden_sha256?: string | null;
+  initial_state_sha256?: string | null;
   frames_run: number;
   frame_hashes: ParityFrameHash[];
   final_state_sha256: string;
+  audio?: ParityAudioObservation | null;
+  /** Regioes WRAM/VRAM/SRAM realmente expostas pelo core; nao exposta = available:false. */
+  observed_regions?: MemoryRegionObservation[];
   deterministic: boolean;
   divergences: ParityDivergence[];
   fake_toolchain_used: boolean;
@@ -80,6 +99,8 @@ export interface CrossCoreReport {
   report_b: ParityReport;
   cross_divergences: CrossCoreDivergence[];
   cores_agree: boolean;
+  /** Limites honestos entre cores distintos (savestate opaco por core, audio nao comparado, regiao exposta em um lado so). */
+  limitations?: string[];
   not_measured_by_this_harness: string[];
   report_path?: string;
 }
@@ -131,6 +152,8 @@ export interface CycleReport {
   rom_path: string;
   rom_sha256: string;
   golden_path: string;
+  golden_sha256?: string | null;
+  core_sha256?: string | null;
   core_label: string;
   frames_run: number;
   frame_samples: CycleFrameSample[];

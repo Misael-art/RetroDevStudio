@@ -13,6 +13,7 @@ import {
   cycleReportFromResult,
   formatCrossCoreSummary,
   formatCycleReportSummary,
+  formatParityEvidenceDetails,
   formatParitySummary,
   formatReferenceCandidateSummary,
   parityReportFromResult,
@@ -242,6 +243,65 @@ describe("formatParitySummary", () => {
     expect(summary).toContain("30");
     expect(summary).toContain("deterministico=nao");
     expect(summary).toContain("1 divergencia");
+  });
+});
+
+describe("formatParityEvidenceDetails", () => {
+  const baseReport: ParityReport = {
+    schema: "rds-gameplay-parity/v1",
+    rom_path: "/rom.bin",
+    rom_sha256: "abc",
+    core_label: "MockCore",
+    frames_run: 10,
+    frame_hashes: [],
+    final_state_sha256: "def",
+    deterministic: true,
+    divergences: [],
+    fake_toolchain_used: false,
+    not_measured_by_this_harness: [],
+  };
+
+  it("reports observed audio and regions from revision 2 reports", () => {
+    const details = formatParityEvidenceDetails({
+      ...baseReport,
+      contract_revision: 2,
+      audio: {
+        available: true,
+        sample_rate: 44100,
+        samples_total: 120,
+        stream_sha256: "audiohash",
+        note: "observado",
+      },
+      observed_regions: [
+        { label: "WRAM", region_id: 2, available: true, size: 64, sha256: "w" },
+        { label: "VRAM", region_id: 3, available: true, size: 128, sha256: "v" },
+        { label: "SRAM", region_id: 0, available: false, size: 0, sha256: null },
+      ],
+    });
+    expect(details).toContain("audio=observado");
+    expect(details).toContain("WRAM/VRAM");
+    expect(details).toContain("indisponiveis: SRAM");
+  });
+
+  it("marks audio as indisponivel when the core delivered no samples", () => {
+    const details = formatParityEvidenceDetails({
+      ...baseReport,
+      audio: {
+        available: false,
+        sample_rate: 0,
+        samples_total: 0,
+        stream_sha256: null,
+        note: "sem amostras",
+      },
+      observed_regions: [],
+    });
+    expect(details).toContain("audio=indisponivel");
+    expect(details).toContain("regioes=nao_medidas");
+  });
+
+  it("never fabricates evidence for legacy revision 1 reports", () => {
+    const details = formatParityEvidenceDetails(baseReport);
+    expect(details).toBe("audio=nao_medido, regioes=nao_medidas");
   });
 });
 

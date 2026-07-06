@@ -53,6 +53,7 @@ import {
 import { useAssetBrowserState } from "./useAssetBrowserState";
 import ProjectCapabilityPanel from "./ProjectCapabilityPanel";
 import {
+  formatParityEvidenceDetails,
   runCrossCoreParity,
   runCycleReport,
   runParityCapture,
@@ -2424,6 +2425,18 @@ function ParityCaptureSection() {
               </div>
             </div>
           </div>
+          {lastResult.report && (
+            <div className="mt-2 text-[9px] text-[#7f849c]" data-testid="parity-evidence-details">
+              Evidencia observada: {formatParityEvidenceDetails(lastResult.report)}
+            </div>
+          )}
+          {lastResult.report?.core_sha256 || lastResult.report?.golden_sha256 || lastResult.report?.initial_state_sha256 ? (
+            <div className="mt-1 font-mono text-[8px] text-[#585b70]" data-testid="parity-identity">
+              {lastResult.report?.core_sha256 ? `core=${lastResult.report.core_sha256.slice(0, 12)} ` : ""}
+              {lastResult.report?.golden_sha256 ? `golden=${lastResult.report.golden_sha256.slice(0, 12)} ` : ""}
+              {lastResult.report?.initial_state_sha256 ? `estado_inicial=${lastResult.report.initial_state_sha256.slice(0, 12)}` : ""}
+            </div>
+          ) : null}
           {lastResult.report?.divergences && lastResult.report.divergences.length > 0 && (
             <div className="mt-2 max-h-32 overflow-y-auto">
               <p className="mb-1 text-[9px] font-semibold uppercase text-[#f38ba8]">Divergencias</p>
@@ -2613,6 +2626,16 @@ function CrossCoreParitySection() {
               {lastResult.report.cross_divergences.slice(0, 10).map((divergence, index) => (
                 <p key={index} className="truncate text-[9px] text-[#f5c2e7]">
                   #{divergence.frame_index} {divergence.kind}: A={divergence.core_a_hash.slice(0, 16)} B={divergence.core_b_hash.slice(0, 16)}
+                </p>
+              ))}
+            </div>
+          ) : null}
+          {lastResult.report?.limitations?.length ? (
+            <div className="mt-2 max-h-24 overflow-y-auto" data-testid="cross-core-limitations">
+              <p className="mb-1 text-[9px] font-semibold uppercase text-[#f9e2af]">Limites da comparacao</p>
+              {lastResult.report.limitations.map((note, index) => (
+                <p key={index} className="text-[9px] leading-tight text-[#7f849c]">
+                  {note}
                 </p>
               ))}
             </div>
