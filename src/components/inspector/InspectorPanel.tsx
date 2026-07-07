@@ -17,7 +17,8 @@ import {
   constrainSpriteFrameSize,
   constrainSpritePaletteSlot,
 } from "../../core/sceneConstraints";
-import { deserializeNodeGraph, serializeNodeGraph } from "../nodegraph/NodeGraphEditor";
+import { serializeNodeGraph } from "../../core/nodegraph/nodeTypes";
+import { deserializeNodeGraph } from "../../core/nodegraph/nodeDefinitions";
 import { getEntityDisplayName } from "../../core/entityDisplay";
 import { resolveSceneWorkspaceContext } from "../../core/sceneWorkspaceContext";
 import { buildTilemapAuthoringBrush } from "../../core/entityAuthoring";

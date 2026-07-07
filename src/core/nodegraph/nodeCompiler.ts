@@ -8,7 +8,7 @@
  * de serializacao do NodeGraph no frontend.
  */
 
-import type { NodeGraph, GraphNode, NodeEdge } from "../../components/nodegraph/NodeGraphEditor";
+import type { NodeGraph, GraphNode, NodeEdge } from "./nodeTypes";
 
 // ── Node → C ─────────────────────────────────────────────────────────────────
 
@@ -1044,7 +1044,7 @@ export function compileGraphToC(
 
 // ── C → Node (basic round-trip parser) ───────────────────────────────────────
 
-import type { NodeType } from "../../components/nodegraph/NodeGraphEditor";
+import type { NodeType } from "./nodeTypes";
 
 interface ParsedNode {
   type: NodeType;

@@ -20,7 +20,7 @@ import type {
   NodeGraph,
   NodePort,
   NodeType,
-} from "../../components/nodegraph/NodeGraphEditor";
+} from "./nodeTypes";
 import type { Entity } from "../ipc/sceneService";
 import { getEntityDisplayName } from "../entityDisplay";
 
