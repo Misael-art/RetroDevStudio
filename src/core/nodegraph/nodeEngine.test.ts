@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  deserializeNodeGraph,
-  serializeNodeGraph,
-  type GraphNode,
-  type NodeGraph,
-} from "../../components/nodegraph/NodeGraphEditor";
+import { serializeNodeGraph, type GraphNode, type NodeGraph } from "./nodeTypes";
+import { deserializeNodeGraph } from "./nodeDefinitions";
 import {
   LOCAL_TRACE_EVIDENCE_LABEL,
   isRuntimeEvidence,

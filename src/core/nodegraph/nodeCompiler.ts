@@ -1,11 +1,15 @@
 /**
- * nodeCompiler.ts — Utilitario legado/experimental NodeGraph ↔ C.
+ * nodeCompiler.ts — LEGADO/EXPERIMENTAL: utilitario NodeGraph ↔ C.
  *
- * Nao faz parte do pipeline canonico do app. O fluxo oficial Build -> ROM usa o
- * backend Rust (AST generator + emitters SGDK/PVSnesLib), nao este arquivo.
+ * Decisao rodada Node-03: convergido para os tipos canonicos do core
+ * (`./nodeTypes`) e ISOLADO como legado. Nao faz parte do pipeline canonico
+ * do app: o fluxo oficial Build -> ROM usa o backend Rust (AST generator +
+ * emitters SGDK/PVSnesLib), nao este arquivo. O executor local canonico do
+ * frontend e `./nodeEngine` (runNodeGraphLocally).
  *
- * Mantido apenas para experimentacao local, testes de compatibilidade e estudos
- * de serializacao do NodeGraph no frontend.
+ * Guard verificavel: `nodeCompiler.test.ts` falha se qualquer modulo de
+ * producao em `src/` importar este arquivo (somente testes podem usa-lo).
+ * Mantido apenas para experimentacao local e estudos de compatibilidade.
  */
 
 import type { NodeGraph, GraphNode, NodeEdge } from "./nodeTypes";
