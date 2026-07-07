@@ -18,8 +18,10 @@ import {
 import type { SpriteCommandBinding } from "../../core/ipc/sceneService";
 import {
   EVENT_NODE_TYPES,
-  inspectNodeGraphExecution,
+  LOCAL_TRACE_EVIDENCE_LABEL,
   normalizeGraphEntityKey,
+  resolveRuntimeEvidenceForGraph,
+  runNodeGraphLocally,
   validateNodeGraph,
 } from "../../core/nodegraph/nodeEngine";
 
@@ -2329,16 +2331,22 @@ export default function NodeGraphEditor() {
       }),
     [activeScene?.entities, graph, selectedEntity]
   );
-  const executionInspection = useMemo(
-    () => inspectNodeGraphExecution(graph),
-    [graph]
+  const localRun = useMemo(
+    () =>
+      runNodeGraphLocally(graph, {
+        selectedEntity,
+        sceneEntities: activeScene?.entities ?? [],
+      }),
+    [activeScene?.entities, graph, selectedEntity]
   );
+  const localTrace = localRun.status === "success" ? localRun.trace : null;
+  const runtimeMapping = useMemo(() => resolveRuntimeEvidenceForGraph(), []);
   const reachableExecutionNodeIds = useMemo(
     () =>
-      executionInspectorEnabled
-        ? new Set(executionInspection.reachableNodeIds)
+      executionInspectorEnabled && localTrace
+        ? new Set(localTrace.reachableNodeIds)
         : new Set<string>(),
-    [executionInspection.reachableNodeIds, executionInspectorEnabled]
+    [localTrace, executionInspectorEnabled]
   );
   const graphValidationPreview = [...graphValidation.errors, ...graphValidation.warnings].slice(0, 3);
   const miniMapNodes = useMemo(
@@ -2388,13 +2396,12 @@ export default function NodeGraphEditor() {
       if (next) {
         logMessage(
           "info",
-          `[NodeGraph Diagnostics] Inspecao de execucao: ${graphValidation.errors.length} erro(s), ${graphValidation.warnings.length} aviso(s), ${executionInspection.evidenceLabel}.`
+          `[NodeGraph Diagnostics] Inspecao de execucao: ${graphValidation.errors.length} erro(s), ${graphValidation.warnings.length} aviso(s), ${LOCAL_TRACE_EVIDENCE_LABEL}.`
         );
       }
       return next;
     });
   }, [
-    executionInspection.evidenceLabel,
     graphValidation.errors.length,
     graphValidation.warnings.length,
     logMessage,
@@ -2829,14 +2836,20 @@ export default function NodeGraphEditor() {
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#a6e3a1]">
-                      Inspecao de execucao
+                      Inspecao de execucao — Local trace
                     </p>
                     <p className="mt-1 text-[#94a3b8]">
-                      {executionInspection.evidenceLabel}
+                      {LOCAL_TRACE_EVIDENCE_LABEL}
+                    </p>
+                    <p
+                      data-testid="nodegraph-runtime-mapping"
+                      className="mt-1 text-[#f9e2af]"
+                    >
+                      Runtime: nao suportado — {runtimeMapping.reason}
                     </p>
                   </div>
                   <span className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[9px] font-semibold text-[#cdd6f4]">
-                    {executionInspection.reachableNodeIds.length} nos
+                    {localTrace ? localTrace.reachableNodeIds.length : 0} nos
                   </span>
                 </div>
 
@@ -2850,30 +2863,67 @@ export default function NodeGraphEditor() {
                   </p>
                 </div>
 
-                <ol className="mt-2 space-y-1">
-                  {executionInspection.trace.length > 0 ? (
-                    executionInspection.trace.slice(0, 8).map((step, index) => (
+                {localTrace && Object.keys(localTrace.variables).length > 0 ? (
+                  <p
+                    data-testid="nodegraph-local-variables"
+                    className="mt-2 text-[#94a3b8]"
+                  >
+                    Variaveis (avaliacao local):{" "}
+                    {Object.entries(localTrace.variables)
+                      .map(([name, value]) => `${name}=${value}`)
+                      .join(", ")}
+                  </p>
+                ) : null}
+
+                {localRun.status === "error" ? (
+                  <ol
+                    data-testid="nodegraph-execution-blocked"
+                    className="mt-2 space-y-1"
+                  >
+                    <li className="rounded border border-[#f38ba8]/40 bg-[#11111b]/70 px-2 py-1 text-[#f38ba8]">
+                      Execucao local bloqueada por {localRun.errors.length} erro(s) de
+                      validacao.
+                    </li>
+                    {localRun.errors.slice(0, 4).map((error, index) => (
                       <li
-                        key={`${step.kind}-${step.nodeId ?? "edge"}-${index}`}
+                        key={`${error.code}-${error.nodeId ?? error.edgeId ?? index}`}
                         className="rounded border border-[#313244] bg-[#11111b]/70 px-2 py-1"
                       >
-                        <span className="font-mono text-[9px] text-[#89b4fa]">
-                          {step.kind}
-                        </span>
-                        <span className="ml-1 font-semibold text-[#cdd6f4]">
-                          {step.label}
+                        <span className="font-mono text-[9px] text-[#f38ba8]">
+                          {error.code}
                         </span>
                         <span className="mt-0.5 block text-[#7f849c]">
-                          {step.detail}
+                          {error.message}
                         </span>
                       </li>
-                    ))
-                  ) : (
-                    <li className="rounded border border-[#313244] bg-[#11111b]/70 px-2 py-1 text-[#f9e2af]">
-                      Nenhum no executavel alcancavel por simulacao local.
-                    </li>
-                  )}
-                </ol>
+                    ))}
+                  </ol>
+                ) : (
+                  <ol className="mt-2 space-y-1">
+                    {localTrace && localTrace.steps.length > 0 ? (
+                      localTrace.steps.slice(0, 8).map((step, index) => (
+                        <li
+                          key={`${step.kind}-${step.nodeId ?? "edge"}-${index}`}
+                          className="rounded border border-[#313244] bg-[#11111b]/70 px-2 py-1"
+                        >
+                          <span className="font-mono text-[9px] text-[#89b4fa]">
+                            {step.kind}
+                          </span>
+                          <span className="ml-1 font-semibold text-[#cdd6f4]">
+                            {step.label}
+                          </span>
+                          <span className="mt-0.5 block text-[#7f849c]">
+                            {step.detail}
+                          </span>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="rounded border border-[#313244] bg-[#11111b]/70 px-2 py-1 text-[#f9e2af]">
+                        Nenhum no executavel alcancavel por simulacao local.
+                      </li>
+                    )}
+                  </ol>
+                )}
               </div>
             ) : null}
 

@@ -819,29 +819,3 @@ export function runNodeGraphLocally(
   }
   return { status: "success", validation, trace: buildLocalTrace(graph) };
 }
-
-// ── Inspecao para UI (rotulada como simulada) ─────────────────────────────────
-
-export type LocalExecutionInspection = {
-  evidence: "simulated";
-  evidenceLabel: string;
-  reachableNodeIds: string[];
-  trace: LocalTraceStep[];
-};
-
-/**
- * Inspecao usada pela UI do NodeGraph. Diferente de `runNodeGraphLocally`,
- * ela nao bloqueia por erros de validacao (a UI mostra diagnostics ao lado),
- * mas a evidencia continua sempre `simulated`.
- */
-export function inspectNodeGraphExecution(
-  graph: NodeGraph,
-): LocalExecutionInspection {
-  const trace = buildLocalTrace(graph);
-  return {
-    evidence: "simulated",
-    evidenceLabel: trace.evidenceLabel,
-    reachableNodeIds: trace.reachableNodeIds,
-    trace: trace.steps,
-  };
-}
