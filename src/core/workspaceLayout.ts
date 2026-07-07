@@ -23,8 +23,40 @@ export type WorkspaceShellConfig = {
   focusLayout: LayoutMap;
 };
 
-const COMPACT_WIDTH = 1180;
+/**
+ * 1440 alinha o corte compacto ao estudo de UI (fatia 1 v2): hosts como
+ * Steam Deck (1280x800) e notebooks 1366x768 entram no perfil compacto.
+ */
+const COMPACT_WIDTH = 1440;
 const NARROW_WIDTH = 960;
+
+/** Densidade macro do shell por largura do host (estudo de UI, fatia 1 v2). */
+export type ShellDensity = "compact" | "standard" | "wide";
+
+export const SHELL_DENSITY_STANDARD_MIN = COMPACT_WIDTH;
+export const SHELL_DENSITY_WIDE_MIN = 2400;
+
+export function getShellDensity(width: number): ShellDensity {
+  if (width < SHELL_DENSITY_STANDARD_MIN) {
+    return "compact";
+  }
+  if (width >= SHELL_DENSITY_WIDE_MIN) {
+    return "wide";
+  }
+  return "standard";
+}
+
+/**
+ * Layout salvo passa a ser por perfil de densidade, para um host pequeno nao
+ * herdar layout de ultrawide. `standard` mantem a chave legada para preservar
+ * layouts ja salvos pelos usuarios.
+ */
+export function getLayoutStorageKeyForDensity(
+  baseKey: string,
+  density: ShellDensity
+): string {
+  return density === "standard" ? baseKey : `${baseKey}::${density}`;
+}
 
 function isCompact(width: number): boolean {
   return width < COMPACT_WIDTH;

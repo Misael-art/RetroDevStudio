@@ -49,9 +49,15 @@ import {
   type EditorWorkspace,
 } from "./core/store/editorStore";
 import {
+  clearSceneDraft,
   hydrateSceneResult,
+  loadSceneDraft,
   persistActiveScene,
   reloadSceneFromDisk,
+  restoreSceneDraft,
+  saveActiveSceneDraft,
+  sceneDraftDiffersFromActiveSource,
+  type SceneDraftRecord,
 } from "./core/scenePersistence";
 import {
   detectRomDependency,
@@ -102,11 +108,30 @@ import {
   type ShortcutConflict,
 } from "./core/shortcuts";
 import {
+  getLayoutStorageKeyForDensity,
   getPresetLayout,
+  getShellDensity,
   resolveWorkspaceShellConfig,
   type LayoutMap,
   type LayoutPresetId,
 } from "./core/workspaceLayout";
+import {
+  SHELL_PERSONAS,
+  SURFACE_REGISTRY,
+  getShellPersonaLabel,
+  getSurfaceBadge,
+  getWorkspaceSurface,
+  isSurfaceVisibleForPersona,
+  loadShellPersona,
+  saveShellPersona,
+  type ShellPersona,
+} from "./core/surfaceRegistry";
+import {
+  getPersonaSuggestion,
+  getProductMetricsSnapshot,
+  recordProductMetric,
+  type ProductMetricEvent,
+} from "./core/productMetrics";
 import {
   buildSgdkCapabilityMatrix,
   formatSgdkImportSummaryKind,
@@ -174,12 +199,12 @@ function ToolbarButton({
 }) {
   const palette =
     accent === "primary"
-      ? "bg-[#cba6f7] text-[#1e1e2e] hover:bg-[#b4a0e0]"
+      ? "bg-[var(--rds-accent)] text-[var(--rds-on-accent)] hover:bg-[var(--rds-accent-hover)]"
       : accent === "success"
-        ? "bg-[#a6e3a1] text-[#1e1e2e] hover:bg-[#94e2a0]"
+        ? "bg-[var(--rds-status-success)] text-[var(--rds-on-accent)] hover:bg-[var(--rds-status-success-hover)]"
         : accent === "danger"
-          ? "bg-[#f38ba8] text-[#1e1e2e] hover:bg-[#eba0ac]"
-          : "bg-[#313244] text-[#a6adc8] hover:bg-[#45475a]";
+          ? "bg-[var(--rds-status-error)] text-[var(--rds-on-accent)] hover:bg-[var(--rds-status-error-hover)]"
+          : "bg-[var(--rds-surface-control)] text-[var(--rds-text-secondary)] hover:bg-[var(--rds-surface-control-hover)]";
 
   return (
     <button
@@ -276,6 +301,11 @@ const EXECUTABLE_COMMAND_IDS = new Set([
   "emulator.stop",
 ]);
 
+/**
+ * Itens do rail derivados do Surface Registry (fonte unica das superficies
+ * de workspace): rotulo, dominio, badge de maturidade e persona minima vem
+ * de `src/core/surfaceRegistry.ts`.
+ */
 const WORKSPACE_ITEMS: {
   id: EditorWorkspace;
   label: string;
@@ -283,59 +313,16 @@ const WORKSPACE_ITEMS: {
   description: string;
   group: WorkspaceGroupId;
   badge?: string;
-}[] = [
-  {
-    id: "scene",
-    label: "Scene",
-    icon: "SC",
-    description: "Composicao e edicao da cena",
-    group: "core",
-  },
-  {
-    id: "game",
-    label: "Game",
-    icon: "GM",
-    description: "Playtest e runtime",
-    group: "core",
-  },
-  {
-    id: "explorer",
-    label: "Explorer",
-    icon: "EX",
-    description: "Arquivos, assets e cenas",
-    group: "core",
-  },
-  {
-    id: "logic",
-    label: "Logic",
-    icon: "LG",
-    description: "Fluxo visual e scripting",
-    group: "authoring",
-  },
-  {
-    id: "artstudio",
-    label: "Art",
-    icon: "AT",
-    description: "Sprites, slicing e preview",
-    group: "authoring",
-    badge: "Exp.",
-  },
-  {
-    id: "retrofx",
-    label: "FX",
-    icon: "FX",
-    description: "Profundidade e parallax",
-    group: "authoring",
-    badge: "Exp.",
-  },
-  {
-    id: "debug",
-    label: "Debug",
-    icon: "DB",
-    description: "Analise e ferramentas avancadas",
-    group: "advanced",
-  },
-];
+  minPersona: ShellPersona;
+}[] = SURFACE_REGISTRY.map((surface) => ({
+  id: surface.id,
+  label: surface.label,
+  icon: surface.icon,
+  description: surface.description,
+  group: surface.domain,
+  badge: getSurfaceBadge(surface),
+  minPersona: surface.minPersona,
+}));
 
 const WORKSPACE_GROUPS: {
   id: WorkspaceGroupId;
@@ -1013,8 +1000,10 @@ function ToolbarPaletteBudget({
 
 function ToolbarWarningBadge({
   issues,
+  onOpen,
 }: {
   issues: string[];
+  onOpen?: () => void;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -1027,7 +1016,12 @@ function ToolbarWarningBadge({
       <button
         type="button"
         data-testid="toolbar-warning-badge"
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+          if (!open) {
+            onOpen?.();
+          }
+          setOpen((current) => !current);
+        }}
         className="relative flex h-7 min-w-7 items-center justify-center rounded border border-[#fab387]/45 bg-[#fab387]/14 px-2 text-[10px] font-bold text-[#fab387] shadow-[0_0_0_1px_rgba(250,179,135,0.08)]"
         title={`${issues.length} warning(s) / erro(s). Clique para detalhes.`}
       >
@@ -1506,6 +1500,8 @@ export default function App() {
     activeProjectName,
     activeScene,
     activeScenePath,
+    activeSceneSource,
+    sceneRevision,
     setActiveProject,
     activeTarget,
     setActiveTarget,
@@ -1548,6 +1544,74 @@ export default function App() {
   const [shellWidth, setShellWidth] = useState(
     typeof window !== "undefined" ? window.innerWidth : 1440
   );
+  const [shellPersona, setShellPersona] = useState<ShellPersona>(() => loadShellPersona());
+  const [personaSuggestion, setPersonaSuggestion] = useState<ShellPersona | null>(null);
+  const [pendingSceneDraft, setPendingSceneDraft] = useState<SceneDraftRecord | null>(null);
+  const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
+  const shellDensity = getShellDensity(shellWidth);
+  const hasActiveSceneSource = Boolean(activeSceneSource);
+
+  // Metricas locais de produto (Experimental): localStorage apenas, sem rede.
+  useEffect(() => {
+    recordProductMetric({ kind: "session_start" });
+    setPersonaSuggestion(getPersonaSuggestion(getProductMetricsSnapshot(), loadShellPersona()));
+  }, []);
+
+  // Autosave de rascunho local (Experimental): debounce apos mutacao de cena.
+  useEffect(() => {
+    if (!activeProjectDir || sceneRevision === 0) {
+      return;
+    }
+    const handle = window.setTimeout(() => {
+      if (saveActiveSceneDraft(activeProjectDir)) {
+        setDraftSavedAt(new Date().toISOString());
+      }
+    }, 2000);
+    return () => window.clearTimeout(handle);
+  }, [activeProjectDir, sceneRevision]);
+
+  // Detecta rascunho divergente quando a cena hidrata (recuperacao pos-crash).
+  useEffect(() => {
+    if (!activeProjectDir || !hasActiveSceneSource) {
+      setPendingSceneDraft(null);
+      return;
+    }
+    const draft = loadSceneDraft(activeProjectDir);
+    setPendingSceneDraft(draft && sceneDraftDiffersFromActiveSource(draft) ? draft : null);
+  }, [activeProjectDir, hasActiveSceneSource]);
+
+  function trackProductMetric(event: ProductMetricEvent) {
+    recordProductMetric(event);
+    setPersonaSuggestion(getPersonaSuggestion(getProductMetricsSnapshot(), shellPersona));
+  }
+
+  function handlePersonaSelect(nextPersona: ShellPersona) {
+    setShellPersona(nextPersona);
+    saveShellPersona(nextPersona);
+    setPersonaSuggestion(getPersonaSuggestion(getProductMetricsSnapshot(), nextPersona));
+    if (!isSurfaceVisibleForPersona(getWorkspaceSurface(activeWorkspace), nextPersona)) {
+      handleWorkspaceSelect("scene");
+    }
+  }
+
+  async function handleRestoreSceneDraft() {
+    if (!pendingSceneDraft || !activeProjectDir) {
+      return;
+    }
+    const restored = await restoreSceneDraft(activeProjectDir, pendingSceneDraft);
+    if (restored) {
+      setPendingSceneDraft(null);
+    }
+  }
+
+  function handleDiscardSceneDraft() {
+    if (!activeProjectDir) {
+      return;
+    }
+    clearSceneDraft(activeProjectDir);
+    setPendingSceneDraft(null);
+    logMessage("info", "[Autosave] Rascunho local descartado.");
+  }
   const [newProjName, setNewProjName] = useState("MeuProjeto");
   const [projectNameSuggestionMode, setProjectNameSuggestionMode] = useState<"auto" | "manual">(
     "auto"
@@ -1734,6 +1798,12 @@ export default function App() {
   }
 
   function isCommandDisabled(commandId: string) {
+    if (commandId === "workspace.logic" || commandId === "workspace.artstudio") {
+      const workspaceId = commandId === "workspace.logic" ? "logic" : "artstudio";
+      if (!isSurfaceVisibleForPersona(getWorkspaceSurface(workspaceId), shellPersona)) {
+        return true;
+      }
+    }
     if (commandId === "build.run") return building || !activeProjectDir || liveBuildBlocked;
     if (
       commandId === "scene.save" ||
@@ -1860,18 +1930,24 @@ export default function App() {
     }
 
     localStorage.setItem(
-      LAYOUT_STORAGE_KEY,
+      getLayoutStorageKeyForDensity(LAYOUT_STORAGE_KEY, shellDensity),
       JSON.stringify({
         left: layout.left ?? 0,
         center: layout.center ?? 100,
         right: layout.right ?? 0,
       } satisfies LayoutMap)
     );
-    logMessage("success", "[Layout] Layout atual salvo para restauracao rapida.");
+    logMessage(
+      "success",
+      `[Layout] Layout atual salvo para o perfil de densidade "${shellDensity}".`
+    );
   }
 
   function restoreSavedLayout() {
-    const raw = localStorage.getItem(LAYOUT_STORAGE_KEY);
+    // Perfil de densidade primeiro; chave legada como fallback para layouts antigos.
+    const raw =
+      localStorage.getItem(getLayoutStorageKeyForDensity(LAYOUT_STORAGE_KEY, shellDensity)) ??
+      localStorage.getItem(LAYOUT_STORAGE_KEY);
     if (!raw) {
       logMessage("warn", "[Layout] Nenhum layout salvo neste host.");
       return;
@@ -2965,6 +3041,7 @@ export default function App() {
       }
 
       setEmulatorLoaded(true);
+      trackProductMetric({ kind: "rom_loaded" });
       logMessage("success", `ROM carregada: ${romPath}`);
       setActiveViewportTab("game");
       setEmulPaused(false);
@@ -3138,6 +3215,7 @@ export default function App() {
             })
           )
         );
+        trackProductMetric({ kind: "budget_block" });
         return;
       }
 
@@ -3174,6 +3252,7 @@ export default function App() {
             })
           )
         );
+        trackProductMetric({ kind: "budget_block" });
         return;
       }
       hwStatus.warnings.forEach((warning) => logMessage("warn", `[HW] ${warning}`));
@@ -3182,6 +3261,7 @@ export default function App() {
         logMessage(line.level, line.message);
       });
       if (!result.ok) {
+        trackProductMetric({ kind: "build_failed" });
         const errorLines = result.log
           .filter((line) => line.level === "error")
           .map((line) => line.message.trim())
@@ -3197,6 +3277,7 @@ export default function App() {
       }
 
       logMessage("success", `Build concluido. ROM: ${result.rom_path}`);
+      trackProductMetric({ kind: "build_ok" });
       try {
         const mastering = await inspectRomMastering(result.rom_path);
         const nextStatus =
@@ -3236,6 +3317,7 @@ export default function App() {
       }
 
       setEmulatorLoaded(true);
+      trackProductMetric({ kind: "rom_loaded" });
       logMessage("success", "ROM carregada no emulador.");
       setEmulPaused(false);
       setActiveViewportTab("game");
@@ -3291,6 +3373,7 @@ export default function App() {
   }
 
   function handleWorkspaceSelect(workspace: EditorWorkspace) {
+    trackProductMetric({ kind: "workspace_visit", workspace });
     setActiveWorkspace(workspace);
     const config = resolveWorkspaceShellConfig(workspace, shellWidth);
 
@@ -4051,7 +4134,11 @@ export default function App() {
   }, [automationEnabled, rightPanelMode]);
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#11111b] text-[#cdd6f4]">
+    <div
+      data-density={shellDensity}
+      data-shell-persona={shellPersona}
+      className="flex h-screen w-screen flex-col overflow-hidden bg-[var(--rds-surface-panel-strong)] text-[var(--rds-text-primary)]"
+    >
       {showProjectWizard && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3">
           <div className="flex max-h-[calc(100vh-1.5rem)] min-h-0 w-[52rem] max-w-[calc(100vw-1.5rem)] flex-col overflow-hidden rounded-lg border border-[#313244] bg-[#181825] p-5 shadow-2xl">
@@ -4891,7 +4978,10 @@ export default function App() {
                 {buildDisabledReason}
               </span>
             )}
-            <ToolbarWarningBadge issues={toolbarIssues} />
+            <ToolbarWarningBadge
+              issues={toolbarIssues}
+              onOpen={() => trackProductMetric({ kind: "diagnostics_opened" })}
+            />
             {!liveBuildBlocked &&
               !buildWarningSummary &&
               !liveBuildErrorSummary &&
@@ -4951,6 +5041,52 @@ export default function App() {
                 limit={hwStatus.palette_banks_limit}
               />
             )}
+            {draftSavedAt ? (
+              <span
+                data-testid="scene-draft-saved-at"
+                className="hidden shrink-0 text-[9px] text-[var(--rds-text-muted)] xl:inline"
+                title={`Autosave local (Experimental): rascunho salvo as ${new Date(draftSavedAt).toLocaleTimeString()}. Nada foi gravado em disco; use Salvar para persistir.`}
+              >
+                Rascunho {new Date(draftSavedAt).toLocaleTimeString()}
+              </span>
+            ) : null}
+            <div
+              data-testid="shell-persona-selector"
+              role="radiogroup"
+              aria-label="Modo de experiencia do shell (Experimental)"
+              title="Modo de experiencia (Experimental): controla quais workspaces o rail revela. Nao altera dados do projeto."
+              className="flex h-7 shrink-0 items-center overflow-hidden rounded-full border border-[var(--rds-border-subtle)] bg-[var(--rds-surface-panel-strong)]"
+            >
+              {SHELL_PERSONAS.map((persona) => (
+                <button
+                  key={persona}
+                  type="button"
+                  role="radio"
+                  aria-checked={shellPersona === persona}
+                  data-testid={`shell-persona-${persona}`}
+                  onClick={() => handlePersonaSelect(persona)}
+                  title={
+                    personaSuggestion === persona
+                      ? `Sugestao: seu uso recente indica o modo ${getShellPersonaLabel(persona)}.`
+                      : `Modo ${getShellPersonaLabel(persona)}`
+                  }
+                  className={`relative h-full shrink-0 px-2 text-[9px] font-semibold uppercase tracking-[0.08em] transition-colors ${
+                    shellPersona === persona
+                      ? "bg-[var(--rds-accent)] text-[var(--rds-on-accent)]"
+                      : "text-[var(--rds-text-muted)] hover:text-[var(--rds-text-primary)]"
+                  }`}
+                >
+                  {getShellPersonaLabel(persona)}
+                  {personaSuggestion === persona ? (
+                    <span
+                      aria-hidden="true"
+                      data-testid={`shell-persona-suggestion-${persona}`}
+                      className="absolute right-0.5 top-0.5 h-1.5 w-1.5 rounded-full bg-[var(--rds-status-warning)]"
+                    />
+                  ) : null}
+                </button>
+              ))}
+            </div>
             <ToolbarButton
               label={focusedShell ? "Sair do foco" : "Focus"}
               onClick={toggleFocusMode}
@@ -4976,6 +5112,34 @@ export default function App() {
         </span>
       ) : null}
 
+      {pendingSceneDraft ? (
+        <div
+          data-testid="scene-draft-recovery"
+          className="mx-4 mt-2 flex flex-wrap items-center gap-2 rounded border border-[var(--rds-status-warning)]/40 bg-[var(--rds-status-warning)]/10 px-3 py-2 text-[11px]"
+        >
+          <span className="font-semibold text-[var(--rds-status-warning)]">
+            Rascunho local encontrado (Experimental)
+          </span>
+          <span className="text-[var(--rds-text-secondary)]">
+            Autosave de {new Date(pendingSceneDraft.savedAt).toLocaleString()} difere da cena
+            aberta. Restaurar traz o rascunho para o editor sem gravar em disco.
+          </span>
+          <div className="ml-auto flex shrink-0 gap-2">
+            <ToolbarButton
+              label="Restaurar rascunho"
+              accent="primary"
+              testId="scene-draft-restore"
+              onClick={() => void handleRestoreSceneDraft()}
+            />
+            <ToolbarButton
+              label="Descartar"
+              testId="scene-draft-discard"
+              onClick={handleDiscardSceneDraft}
+            />
+          </div>
+        </div>
+      ) : null}
+
       {lastSgdkImportSummary ? (
         <SgdkImportSummaryCard summary={lastSgdkImportSummary} />
       ) : null}
@@ -4995,7 +5159,14 @@ export default function App() {
         >
           <div className="flex flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto px-1.5 py-3">
             {WORKSPACE_GROUPS.map((group) => {
-              const groupItems = WORKSPACE_ITEMS.filter((workspace) => workspace.group === group.id);
+              const groupItems = WORKSPACE_ITEMS.filter(
+                (workspace) =>
+                  workspace.group === group.id &&
+                  isSurfaceVisibleForPersona(workspace, shellPersona)
+              );
+              if (groupItems.length === 0) {
+                return null;
+              }
               return (
                 <div
                   key={group.id}
@@ -5078,7 +5249,11 @@ export default function App() {
                   </button>
                 </div>
                 <div className="min-h-0 flex-1 overflow-hidden">
-                  {leftPanelTab === "layers" ? <LayerPanel /> : <HierarchyPanel />}
+                  {leftPanelTab === "layers" ? (
+                    <LayerPanel />
+                  ) : (
+                    <HierarchyPanel onOpenProject={() => void handleOpenProject()} />
+                  )}
                 </div>
               </>
             ) : null}
