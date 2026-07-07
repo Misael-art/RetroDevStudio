@@ -67,6 +67,11 @@ RetroDevStudio/
 |   |   `-- viewport/
 |   |-- core/
 |   |   |-- ipc/
+|   |   |-- nodegraph/
+|   |   |   |-- nodeTypes.ts
+|   |   |   |-- nodeDefinitions.ts
+|   |   |   |-- nodeEngine.ts
+|   |   |   `-- nodeCompiler.ts (legado/experimental; guard de isolamento em teste)
 |   |   `-- store/
 |   |-- test/
 |   |   `-- setup.ts
