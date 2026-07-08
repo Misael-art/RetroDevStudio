@@ -1,0 +1,27 @@
+{
+  "schema": "rds-ghidra-boundary/v1",
+  "ok": true,
+  "reason": null,
+  "provenance": "ghidra=ghidra 12.1.2-1 jdk=jdk21-openjdk 21.0.11.u10-1 analyzeHeadless_sha=302880328a0024ee",
+  "total_samples": 10,
+  "ok_samples": 10,
+  "failed_samples": 0,
+  "allow_failures": 0,
+  "profiles": {
+    "release": { "n": 5, "min_precision": 0.587, "max_precision": 0.738, "mean_precision": 0.691, "min_recall": 0.512, "max_recall": 0.841, "mean_recall": 0.748 },
+    "debug": { "n": 5, "min_precision": 0.850, "max_precision": 0.873, "mean_precision": 0.859, "min_recall": 0.940, "max_recall": 0.957, "mean_recall": 0.951 }
+  },
+  "samples": [
+    { "label": "release/flip", "status": "OK", "truth": 93, "ghidra": 105, "exact_tp": 73, "fp": 32, "fn": 20, "precision": 0.695, "recall": 0.785, "precision_tol4": 0.695, "recall_tol4": 0.785, "mean_addr_err": 0.00 },
+    { "label": "release/Mega Pong Classic", "status": "OK", "truth": 107, "ghidra": 122, "exact_tp": 90, "fp": 32, "fn": 17, "precision": 0.738, "recall": 0.841, "precision_tol4": 0.738, "recall_tol4": 0.841, "mean_addr_err": 0.00 },
+    { "label": "release/Lifebar", "status": "OK", "truth": 94, "ghidra": 106, "exact_tp": 75, "fp": 31, "fn": 19, "precision": 0.708, "recall": 0.798, "precision_tol4": 0.708, "recall_tol4": 0.798, "mean_addr_err": 0.00 },
+    { "label": "release/Mega Runner", "status": "OK", "truth": 107, "ghidra": 118, "exact_tp": 86, "fp": 32, "fn": 21, "precision": 0.729, "recall": 0.804, "precision_tol4": 0.729, "recall_tol4": 0.804, "mean_addr_err": 0.00 },
+    { "label": "release/Custom Font", "status": "OK", "truth": 86, "ghidra": 75, "exact_tp": 44, "fp": 31, "fn": 42, "precision": 0.587, "recall": 0.512, "precision_tol4": 0.587, "recall_tol4": 0.512, "mean_addr_err": 0.00 },
+    { "label": "debug/flip", "status": "OK", "truth": 208, "ghidra": 234, "exact_tp": 199, "fp": 35, "fn": 9, "precision": 0.850, "recall": 0.957, "precision_tol4": 0.850, "recall_tol4": 0.957, "mean_addr_err": 0.00 },
+    { "label": "debug/Mega Pong Classic", "status": "OK", "truth": 239, "ghidra": 260, "exact_tp": 226, "fp": 34, "fn": 13, "precision": 0.869, "recall": 0.946, "precision_tol4": 0.869, "recall_tol4": 0.946, "mean_addr_err": 0.00 },
+    { "label": "debug/Lifebar", "status": "OK", "truth": 203, "ghidra": 228, "exact_tp": 194, "fp": 34, "fn": 9, "precision": 0.851, "recall": 0.956, "precision_tol4": 0.851, "recall_tol4": 0.956, "mean_addr_err": 0.00 },
+    { "label": "debug/Mega Runner", "status": "OK", "truth": 249, "ghidra": 268, "exact_tp": 234, "fp": 34, "fn": 15, "precision": 0.873, "recall": 0.940, "precision_tol4": 0.873, "recall_tol4": 0.940, "mean_addr_err": 0.00 },
+    { "label": "debug/Custom Font", "status": "OK", "truth": 206, "ghidra": 231, "exact_tp": 197, "fp": 34, "fn": 9, "precision": 0.853, "recall": 0.956, "precision_tol4": 0.853, "recall_tol4": 0.956, "mean_addr_err": 0.00 }
+  ],
+  "note": "function-boundary precision/recall vs symbol-table ground truth; name resolution is NOT semantic decompilation"
+}
