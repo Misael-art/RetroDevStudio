@@ -1412,8 +1412,37 @@ pub struct ReferenceCandidateComparison {
     pub frames_compared: u32,
     pub reference_rom_sha256: String,
     pub candidate_rom_sha256: String,
+    /// Deterministic identity of this scenario, derived from
+    /// `reference_rom_sha256:candidate_rom_sha256:golden_identity:frames_compared`.
+    /// Used by `aggregate_functional_evidence` to require >=2 DISTINCT scenarios
+    /// for `FunctionalEvidence` — the same scenario compared twice (e.g. a
+    /// cloned `ReferenceCandidateComparison`) collapses to one distinct id and
+    /// can never be double-counted as independent evidence.
+    pub scenario_id: String,
     pub divergences: Vec<ParityDivergence>,
     pub limitations: Vec<String>,
+}
+
+/// Deterministic scenario identity for `ReferenceCandidateComparison::scenario_id`.
+/// Golden identity prefers the SHA-256 of the golden file when known, falling
+/// back to its path, and finally to an empty component when neither report
+/// carries golden identity (older, pre-rev-2 reports).
+fn derive_scenario_id(
+    reference: &ParityReport,
+    candidate: &ParityReport,
+    frames_compared: u32,
+) -> String {
+    let golden_identity = reference
+        .golden_sha256
+        .clone()
+        .or_else(|| reference.golden_path.clone())
+        .or_else(|| candidate.golden_sha256.clone())
+        .or_else(|| candidate.golden_path.clone())
+        .unwrap_or_default();
+    format!(
+        "{}:{}:{}:{}",
+        reference.rom_sha256, candidate.rom_sha256, golden_identity, frames_compared
+    )
 }
 
 /// A capture carries visual activity only when at least one frame is non-black
@@ -1488,57 +1517,120 @@ pub fn compare_reference_candidate(
         });
     }
 
-    // Observed (normalized) memory state: compared REGION BY REGION, only when
-    // the region is available on both sides. We deliberately do NOT compare
-    // `final_state_sha256` nor any combined hash: for two distinct ROMs the full
-    // runtime save state always differs and proves nothing.
+    // Observed (normalized) memory state: compared REGION BY REGION over the
+    // UNION of labels on both sides (not just the reference's labels), so a
+    // region missing/extra on either side is auditable, never silently
+    // skipped. label/region_id/available/size/sha256 are all compared when a
+    // region exists on both sides. ANY asymmetry (missing/extra region,
+    // availability mismatch, region_id/size/hash mismatch) blocks
+    // ObservedStateParity — it is never enough for ONE other region to match
+    // while a different region is asymmetric. We deliberately do NOT compare
+    // `final_state_sha256` nor any combined hash: for two distinct ROMs the
+    // full runtime save state always differs and proves nothing.
     let mut observed_state_parity = false;
     if observed.available {
-        let mut compared_any = false;
-        let mut all_match = true;
-        for reference_region in &observed.reference_regions {
-            let Some(candidate_region) = observed
+        let mut compared_matched = 0usize;
+        let mut asymmetry_or_mismatch = false;
+
+        let mut labels: Vec<&str> = observed
+            .reference_regions
+            .iter()
+            .map(|r| r.label.as_str())
+            .chain(observed.candidate_regions.iter().map(|r| r.label.as_str()))
+            .collect();
+        labels.sort_unstable();
+        labels.dedup();
+
+        for label in labels {
+            let reference_region = observed
+                .reference_regions
+                .iter()
+                .find(|r| r.label == label);
+            let candidate_region = observed
                 .candidate_regions
                 .iter()
-                .find(|candidate| candidate.label == reference_region.label)
-            else {
-                continue;
-            };
-            if reference_region.available && candidate_region.available {
-                match (&reference_region.sha256, &candidate_region.sha256) {
-                    (Some(a), Some(b)) if a == b => {
-                        compared_any = true;
-                    }
-                    (Some(a), Some(b)) => {
-                        compared_any = true;
-                        all_match = false;
+                .find(|r| r.label == label);
+            match (reference_region, candidate_region) {
+                (Some(r), Some(c)) => {
+                    if r.available != c.available {
+                        asymmetry_or_mismatch = true;
                         divergences.push(ParityDivergence {
                             frame_index: u32::MAX,
-                            kind: format!("observed_state_mismatch:{}", reference_region.label),
-                            expected: a.clone(),
-                            observed: b.clone(),
+                            kind: format!("region_availability_mismatch:{label}"),
+                            expected: r.available.to_string(),
+                            observed: c.available.to_string(),
+                        });
+                        continue;
+                    }
+                    if !r.available {
+                        limitations
+                            .push(format!("region {label} unavailable on both sides"));
+                        continue;
+                    }
+                    if r.region_id != c.region_id {
+                        asymmetry_or_mismatch = true;
+                        divergences.push(ParityDivergence {
+                            frame_index: u32::MAX,
+                            kind: format!("region_id_mismatch:{label}"),
+                            expected: r.region_id.to_string(),
+                            observed: c.region_id.to_string(),
                         });
                     }
-                    _ => {
-                        all_match = false;
-                        limitations.push(format!(
-                            "region {} available but hash missing",
-                            reference_region.label
-                        ));
+                    if r.size != c.size {
+                        asymmetry_or_mismatch = true;
+                        divergences.push(ParityDivergence {
+                            frame_index: u32::MAX,
+                            kind: format!("region_size_mismatch:{label}"),
+                            expected: r.size.to_string(),
+                            observed: c.size.to_string(),
+                        });
+                    }
+                    match (&r.sha256, &c.sha256) {
+                        (Some(a), Some(b)) if a == b => {
+                            compared_matched += 1;
+                        }
+                        (Some(a), Some(b)) => {
+                            asymmetry_or_mismatch = true;
+                            divergences.push(ParityDivergence {
+                                frame_index: u32::MAX,
+                                kind: format!("observed_state_mismatch:{label}"),
+                                expected: a.clone(),
+                                observed: b.clone(),
+                            });
+                        }
+                        _ => {
+                            asymmetry_or_mismatch = true;
+                            limitations.push(format!(
+                                "region {label} available but hash missing on one side"
+                            ));
+                        }
                     }
                 }
-            } else if reference_region.available != candidate_region.available {
-                limitations.push(format!(
-                    "region {} availability differs (reference={}, candidate={})",
-                    reference_region.label,
-                    reference_region.available,
-                    candidate_region.available
-                ));
+                (Some(r), None) => {
+                    asymmetry_or_mismatch = true;
+                    divergences.push(ParityDivergence {
+                        frame_index: u32::MAX,
+                        kind: format!("region_missing_in_candidate:{label}"),
+                        expected: r.available.to_string(),
+                        observed: "absent".to_string(),
+                    });
+                }
+                (None, Some(c)) => {
+                    asymmetry_or_mismatch = true;
+                    divergences.push(ParityDivergence {
+                        frame_index: u32::MAX,
+                        kind: format!("region_missing_in_reference:{label}"),
+                        expected: "absent".to_string(),
+                        observed: c.available.to_string(),
+                    });
+                }
+                (None, None) => unreachable!("label collected from at least one side"),
             }
         }
-        if compared_any {
-            observed_state_parity = all_match;
-        } else {
+
+        if compared_matched > 0 && !asymmetry_or_mismatch {
+            observed_state_parity = true;
+        } else if compared_matched == 0 {
             limitations.push(
                 "no memory region was available on both reference and candidate".to_string(),
             );
@@ -1597,6 +1689,7 @@ pub fn compare_reference_candidate(
         frames_compared,
         reference_rom_sha256: reference.rom_sha256.clone(),
         candidate_rom_sha256: candidate.rom_sha256.clone(),
+        scenario_id: derive_scenario_id(reference, candidate, frames_compared),
         divergences,
         limitations,
     }
@@ -1614,14 +1707,17 @@ pub fn aggregate_functional_evidence(
         return ParityEvidenceLevel::InsufficientEvidence;
     }
     // Scope axis: a same-ROM comparison is a CONTROL; only different-ROM
-    // comparisons are scenarios. `FunctionalEvidence` requires >=2 independent
-    // scenarios; a single scenario is `ScenarioEvidence`; all-control suites are
-    // `ControlEvidence` and are never promoted to functional evidence.
-    let scenarios = comparisons
+    // comparisons are scenarios. `FunctionalEvidence` requires >=2 DISTINCT
+    // independent scenarios (by `scenario_id`) — the same scenario repeated
+    // (e.g. a cloned comparison) collapses to one distinct id and can never be
+    // double-counted as two independent scenarios. A single distinct scenario
+    // is `ScenarioEvidence`; all-control suites are `ControlEvidence`.
+    let distinct_scenarios: std::collections::HashSet<&str> = comparisons
         .iter()
         .filter(|c| c.reference_rom_sha256 != c.candidate_rom_sha256)
-        .count();
-    match scenarios {
+        .map(|c| c.scenario_id.as_str())
+        .collect();
+    match distinct_scenarios.len() {
         0 => ParityEvidenceLevel::ControlEvidence,
         1 => ParityEvidenceLevel::ScenarioEvidence,
         _ => ParityEvidenceLevel::FunctionalEvidence,
@@ -3575,6 +3671,76 @@ mod tests {
     }
 
     #[test]
+    fn reference_candidate_asymmetric_extra_region_blocks_parity_even_when_another_matches() {
+        // WRAM matches on both sides, but the reference ALSO exposes SRAM that
+        // the candidate does not report at all (missing, not just
+        // unavailable=true). A matching WRAM must NOT be enough to claim
+        // ObservedStateParity while SRAM is silently asymmetric — this is the
+        // exact false positive the audit flagged.
+        let reference = sample_report(true, None);
+        let candidate = candidate_of(&reference, "different-rom-sha");
+        let observed = ObservedState::from_regions(
+            vec![
+                region_obs("WRAM", Some("same-state")),
+                region_obs("SRAM", Some("ref-only-sram")),
+            ],
+            vec![region_obs("WRAM", Some("same-state"))],
+        );
+
+        let cmp = compare_reference_candidate(&reference, &candidate, &observed);
+
+        assert!(cmp
+            .divergences
+            .iter()
+            .any(|d| d.kind == "region_missing_in_candidate:SRAM"));
+        assert!(
+            !cmp.observed_state_parity,
+            "one matching region must not mask an asymmetric extra region"
+        );
+        assert_eq!(cmp.evidence_level, ParityEvidenceLevel::InsufficientEvidence);
+    }
+
+    #[test]
+    fn reference_candidate_region_id_mismatch_is_divergence() {
+        let reference = sample_report(true, None);
+        let candidate = candidate_of(&reference, "different-rom-sha");
+        let mut candidate_region = region_obs("WRAM", Some("same-state"));
+        candidate_region.region_id = 99; // reporting a different region_id for the same label
+        let observed = ObservedState::from_regions(
+            vec![region_obs("WRAM", Some("same-state"))],
+            vec![candidate_region],
+        );
+
+        let cmp = compare_reference_candidate(&reference, &candidate, &observed);
+
+        assert!(cmp
+            .divergences
+            .iter()
+            .any(|d| d.kind == "region_id_mismatch:WRAM"));
+        assert!(!cmp.observed_state_parity);
+    }
+
+    #[test]
+    fn reference_candidate_region_size_mismatch_is_divergence() {
+        let reference = sample_report(true, None);
+        let candidate = candidate_of(&reference, "different-rom-sha");
+        let mut candidate_region = region_obs("WRAM", Some("same-state"));
+        candidate_region.size = 999; // reporting a different size for the same label
+        let observed = ObservedState::from_regions(
+            vec![region_obs("WRAM", Some("same-state"))],
+            vec![candidate_region],
+        );
+
+        let cmp = compare_reference_candidate(&reference, &candidate, &observed);
+
+        assert!(cmp
+            .divergences
+            .iter()
+            .any(|d| d.kind == "region_size_mismatch:WRAM"));
+        assert!(!cmp.observed_state_parity);
+    }
+
+    #[test]
     fn reference_candidate_observed_state_needs_regions_available_on_both_sides() {
         let reference = sample_report(true, None);
         let candidate = candidate_of(&reference, "different-rom-sha");
@@ -3705,8 +3871,31 @@ mod tests {
             aggregate_functional_evidence(&[pass.clone(), fail]),
             ParityEvidenceLevel::InsufficientEvidence
         );
+        // The SAME scenario duplicated (e.g. a cloned comparison) must NOT be
+        // double-counted as two independent scenarios: same scenario_id ->
+        // still only ScenarioEvidence, never FunctionalEvidence. This is the
+        // exact false positive the audit flagged.
+        assert_eq!(pass.scenario_id, pass.clone().scenario_id);
         assert_eq!(
             aggregate_functional_evidence(&[pass.clone(), pass.clone()]),
+            ParityEvidenceLevel::ScenarioEvidence
+        );
+        assert_ne!(
+            aggregate_functional_evidence(&[pass.clone(), pass.clone()]),
+            ParityEvidenceLevel::FunctionalEvidence
+        );
+
+        // A GENUINELY independent second scenario (different candidate ROM sha
+        // -> different scenario_id) DOES promote to FunctionalEvidence.
+        let candidate_2 = candidate_of(&reference, "different-rom-sha-2");
+        let pass_2 = compare_reference_candidate(
+            &reference,
+            &candidate_2,
+            &ObservedState::unavailable(),
+        );
+        assert_ne!(pass.scenario_id, pass_2.scenario_id);
+        assert_eq!(
+            aggregate_functional_evidence(&[pass.clone(), pass_2]),
             ParityEvidenceLevel::FunctionalEvidence
         );
 
