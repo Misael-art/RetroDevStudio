@@ -52,12 +52,22 @@ export async function runCycleReport(
   });
 }
 
+/**
+ * Reference/candidate parity. Pass `referenceRomPath`/`candidateRomPath`
+ * explicitly for professional evidence (no "first ROM found" ambiguity).
+ * When BOTH are omitted, falls back to legacy directory-scan discovery under
+ * each project's build directory (`rom_discovery_mode: "directory_scan_legacy"`
+ * in the result) — Experimental, not suitable as professional evidence.
+ * Providing only one of the two explicit paths is rejected by the backend.
+ */
 export async function runReferenceCandidateParity(
   referenceProjectDir: string,
   candidateProjectDir: string,
   goldenPath: string,
   corePath: string,
-  frames?: number | null
+  frames?: number | null,
+  referenceRomPath?: string | null,
+  candidateRomPath?: string | null
 ): Promise<ReferenceCandidateParityResult> {
   return invoke<ReferenceCandidateParityResult>("parity_run_reference_candidate", {
     referenceProjectDir,
@@ -65,6 +75,8 @@ export async function runReferenceCandidateParity(
     goldenPath,
     corePath,
     frames: frames ?? null,
+    referenceRomPath: referenceRomPath ?? null,
+    candidateRomPath: candidateRomPath ?? null,
   });
 }
 
