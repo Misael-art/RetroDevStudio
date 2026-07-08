@@ -923,6 +923,12 @@ struct ReferenceCandidateParityResult {
     reference_rom_sha256: String,
     candidate_rom_sha256: String,
     report_path: String,
+    /// "explicit" when reference_rom_path/candidate_rom_path were provided and
+    /// used directly; "directory_scan_legacy" when the ROM was discovered via
+    /// find_first_rom_artifact (Experimental, discouraged for professional
+    /// evidence — the "first ROM found" heuristic is ambiguous with multiple
+    /// artifacts in a build directory).
+    rom_discovery_mode: String,
     report: Option<core::parity_harness::ReferenceCandidateReport>,
 }
 
@@ -1077,6 +1083,16 @@ fn parity_run_cross_core(
 /// SHA expected) on the SAME core, each cold booted independently, against the
 /// same deterministic golden script. Reports the evidence level only — never a
 /// total-equivalence claim.
+///
+/// `reference_rom_path`/`candidate_rom_path` are the professional-evidence path:
+/// explicit ROM files, selected by the caller, with no "first ROM found"
+/// ambiguity. When BOTH are omitted, the command falls back to the legacy
+/// directory-scan discovery (`find_first_rom_artifact` under
+/// `<project>/build/`) — kept only for backward compatibility and marked
+/// `directory_scan_legacy` in the result; it must not be relied upon as
+/// professional evidence, since a build directory can contain more than one
+/// ROM artifact and "first found" is not a meaningful selection criterion.
+/// Providing only one of the two explicit paths is rejected as ambiguous.
 #[tauri::command]
 fn parity_run_reference_candidate(
     reference_project_dir: String,
@@ -1084,6 +1100,8 @@ fn parity_run_reference_candidate(
     golden_path: String,
     core_path: String,
     frames: Option<u32>,
+    reference_rom_path: Option<String>,
+    candidate_rom_path: Option<String>,
 ) -> ReferenceCandidateParityResult {
     let err = |message: String| ReferenceCandidateParityResult {
         ok: false,
@@ -1100,6 +1118,7 @@ fn parity_run_reference_candidate(
         reference_rom_sha256: String::new(),
         candidate_rom_sha256: String::new(),
         report_path: String::new(),
+        rom_discovery_mode: String::new(),
         report: None,
     };
 
@@ -1117,22 +1136,64 @@ fn parity_run_reference_candidate(
         return err("Reference/candidate parity requires a core path.".to_string());
     }
 
-    let reference_rom = match find_first_rom_artifact(Path::new(reference_dir)) {
-        Some(path) => path,
-        None => {
-            return err(
-                "No ROM artifact found in reference project build directory.".to_string(),
-            )
-        }
-    };
-    let candidate_rom = match find_first_rom_artifact(Path::new(candidate_dir)) {
-        Some(path) => path,
-        None => {
-            return err(
-                "No ROM artifact found in candidate project build directory.".to_string(),
-            )
-        }
-    };
+    let explicit_reference = reference_rom_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let explicit_candidate = candidate_rom_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    let (reference_rom, candidate_rom, discovery_mode) =
+        match (explicit_reference, explicit_candidate) {
+            (Some(reference_path), Some(candidate_path)) => {
+                let reference_rom = Path::new(reference_path);
+                let candidate_rom = Path::new(candidate_path);
+                if !reference_rom.is_file() {
+                    return err(format!(
+                        "Reference ROM path is not a file: '{reference_path}'."
+                    ));
+                }
+                if !candidate_rom.is_file() {
+                    return err(format!(
+                        "Candidate ROM path is not a file: '{candidate_path}'."
+                    ));
+                }
+                (
+                    reference_rom.to_path_buf(),
+                    candidate_rom.to_path_buf(),
+                    "explicit".to_string(),
+                )
+            }
+            (None, None) => {
+                let reference_rom = match find_first_rom_artifact(Path::new(reference_dir)) {
+                    Some(path) => path,
+                    None => {
+                        return err(
+                            "No ROM artifact found in reference project build directory."
+                                .to_string(),
+                        )
+                    }
+                };
+                let candidate_rom = match find_first_rom_artifact(Path::new(candidate_dir)) {
+                    Some(path) => path,
+                    None => {
+                        return err(
+                            "No ROM artifact found in candidate project build directory."
+                                .to_string(),
+                        )
+                    }
+                };
+                (reference_rom, candidate_rom, "directory_scan_legacy".to_string())
+            }
+            _ => {
+                return err(
+                    "Reference/candidate parity requires BOTH reference_rom_path and candidate_rom_path when using explicit ROM paths (partial overrides are ambiguous and rejected)."
+                        .to_string(),
+                )
+            }
+        };
 
     let report_dir = Path::new(candidate_dir).join(".rds").join("reports");
     match core::parity_harness::run_reference_candidate_parity(
@@ -1148,10 +1209,11 @@ fn parity_run_reference_candidate(
             ReferenceCandidateParityResult {
                 ok: true,
                 message: format!(
-                    "Reference/candidate evidence: {:?} ({} divergence(s)) after {} frame(s); report in '{}'.",
+                    "Reference/candidate evidence: {:?} ({} divergence(s)) after {} frame(s); ROM discovery={}; report in '{}'.",
                     cmp.evidence_level,
                     cmp.divergences.len(),
                     report.frames_run,
+                    discovery_mode,
                     written.display()
                 ),
                 core_label: report.core_label.clone(),
@@ -1166,6 +1228,7 @@ fn parity_run_reference_candidate(
                 reference_rom_sha256: report.reference_rom_sha256.clone(),
                 candidate_rom_sha256: report.candidate_rom_sha256.clone(),
                 report_path: written.to_string_lossy().to_string(),
+                rom_discovery_mode: discovery_mode,
                 report: Some(report),
             }
         }

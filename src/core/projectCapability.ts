@@ -246,6 +246,10 @@ export interface ReferenceCandidateParityResult {
   reference_rom_sha256: string;
   candidate_rom_sha256: string;
   report_path: string;
+  // "explicit" when reference/candidate ROM paths were provided directly;
+  // "directory_scan_legacy" when discovered via find_first_rom_artifact
+  // (Experimental, not suitable as professional evidence).
+  rom_discovery_mode: string;
   report: ReferenceCandidateReport | null;
 }
 

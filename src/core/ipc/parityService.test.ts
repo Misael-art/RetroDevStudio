@@ -507,6 +507,7 @@ describe("runReferenceCandidateParity", () => {
       reference_rom_sha256: "ref-sha",
       candidate_rom_sha256: "cand-sha",
       report_path: "/candidate/.rds/reports/reference-candidate-parity-report.json",
+      rom_discovery_mode: "directory_scan_legacy",
       report: null,
     };
     mocks.invoke.mockResolvedValue(result);
@@ -527,10 +528,12 @@ describe("runReferenceCandidateParity", () => {
       goldenPath: "/golden.rds-input.json",
       corePath: "/cores/genesis_plus_gx_libretro.dll",
       frames: 8,
+      referenceRomPath: null,
+      candidateRomPath: null,
     });
   });
 
-  it("passes null frames when omitted", async () => {
+  it("passes null frames and null ROM paths when omitted", async () => {
     mocks.invoke.mockResolvedValue({ ok: true });
     await runReferenceCandidateParity(
       "/reference",
@@ -544,6 +547,30 @@ describe("runReferenceCandidateParity", () => {
       goldenPath: "/golden.rds-input.json",
       corePath: "/cores/core.dll",
       frames: null,
+      referenceRomPath: null,
+      candidateRomPath: null,
+    });
+  });
+
+  it("passes explicit reference/candidate ROM paths through (professional evidence path)", async () => {
+    mocks.invoke.mockResolvedValue({ ok: true, rom_discovery_mode: "explicit" });
+    await runReferenceCandidateParity(
+      "/reference",
+      "/candidate",
+      "/golden.rds-input.json",
+      "/cores/core.dll",
+      8,
+      "/reference/build/megadrive/out/rom.bin",
+      "/candidate/build/megadrive/out/rom.bin"
+    );
+    expect(mocks.invoke).toHaveBeenCalledWith("parity_run_reference_candidate", {
+      referenceProjectDir: "/reference",
+      candidateProjectDir: "/candidate",
+      goldenPath: "/golden.rds-input.json",
+      corePath: "/cores/core.dll",
+      frames: 8,
+      referenceRomPath: "/reference/build/megadrive/out/rom.bin",
+      candidateRomPath: "/candidate/build/megadrive/out/rom.bin",
     });
   });
 });
@@ -576,6 +603,7 @@ describe("referenceCandidateReportFromResult", () => {
       reference_rom_sha256: "",
       candidate_rom_sha256: "",
       report_path: "",
+      rom_discovery_mode: "",
       report: null,
     };
     expect(referenceCandidateReportFromResult(result)).toBeNull();
@@ -598,6 +626,7 @@ describe("referenceCandidateReportFromResult", () => {
       reference_rom_sha256: report.reference_rom_sha256,
       candidate_rom_sha256: report.candidate_rom_sha256,
       report_path: "/report.json",
+      rom_discovery_mode: "explicit",
       report,
     };
     expect(referenceCandidateReportFromResult(result)).toEqual(report);
