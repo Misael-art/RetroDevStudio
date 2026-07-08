@@ -7,12 +7,31 @@
 #   - hash -> {identities} map; separates raw_byte_hit from unique_resolution
 #   - reports coverage by function COUNT and by BYTES
 #   - runtime SGDK vs game-specific reported separately
-set -uo pipefail   # not -e: some corpus ELFs legitimately lack F .text symbols
+#
+# Fail-hard by design: `set -e` is NOT used because a per-ELF absence of F .text
+# symbols is a legitimate, tolerated case (documented in process_elf); overall
+# corpus-level tolerance is instead controlled explicitly below via auditable
+# minimum-threshold checks before any manifest is declared valid.
+set -uo pipefail
+
 CORPUS="${RDS_SGDK_CORPUS:-/mnt/sdcard/Projects/MegaDrive_DEV/SGDK_Engines}"
 WORK="${RDS_DECOMP_WORK:-$HOME/.retrodev/decomp_work}/m68k_fp_v2"
-rm -rf "$WORK"; mkdir -p "$WORK"
 OBJDUMP=m68k-elf-objdump
 OBJCOPY=m68k-elf-objcopy
+
+# Minimum thresholds (auditable, env-overridable). A value of 0 found at
+# runtime means "empty corpus" and must fail the gate.
+MIN_ELFS="${RDS_FP_MIN_ELFS:-1}"
+MIN_FUNCTIONS="${RDS_FP_MIN_FUNCTIONS:-1}"
+
+fail() { echo "FATAL: $1" >&2; echo "GATE FAILED (precondition)" >&2; exit 2; }
+
+# --- Upfront validation ---
+[ -d "$CORPUS" ] || fail "RDS_SGDK_CORPUS directory does not exist: $CORPUS"
+command -v "$OBJDUMP" >/dev/null 2>&1 || fail "$OBJDUMP not found in PATH"
+command -v "$OBJCOPY" >/dev/null 2>&1 || fail "$OBJCOPY not found in PATH"
+
+rm -rf "$WORK"; mkdir -p "$WORK"
 FP="$WORK/fingerprints.tsv"   # project \t name \t size \t sha256
 : > "$FP"
 invalid=0
@@ -64,52 +83,59 @@ while IFS= read -r elf; do
   proj="$(basename "$(dirname "$(dirname "$elf")")" | sed 's/ \[.*//')"
   process_elf "$proj" "$elf"
   n=$((n+1))
-done < <(find "$CORPUS" -maxdepth 3 -type f -name 'rom.out' | sort)
+done < <(find "$CORPUS" -maxdepth 3 -type f -name 'rom.out' 2>/dev/null | sort)
 [ -f "$WORK/invalid.log" ] && invalid=$(wc -l < "$WORK/invalid.log") || invalid=0
 
 total=$(wc -l < "$FP")
 uniq_hashes=$(cut -f4 "$FP" | sort -u | wc -l)
 
+# --- Empty-corpus guard: fail explicitly rather than emit an all-zero JSON
+# manifest that a naive caller might read as "GATE PASSED". ---
+if [ "$n" -lt "$MIN_ELFS" ]; then
+  fail "elfs_processed ($n) below minimum ($MIN_ELFS) — empty or missing corpus under $CORPUS"
+fi
+if [ "$total" -lt "$MIN_FUNCTIONS" ]; then
+  fail "function_instances ($total) below minimum ($MIN_FUNCTIONS) — no F .text symbols extracted"
+fi
+
 # hash -> distinct names. Ambiguous = a hash mapping to >1 distinct name.
 # unique_resolution instances = function instances whose hash maps to exactly 1 name.
-awk -F'\t' '{names[$4][$2]=1; proj[$2][$1]=1; sz[$2]=$3}
-END{
-  amb_hashes=0; unamb_hashes=0;
-  for(h in names){ c=0; for(nm in names[h]) c++; if(c>1) amb_hashes++; else unamb_hashes++ }
-  print "ambiguous_hashes="amb_hashes;
-  print "unambiguous_hashes="unamb_hashes;
-}' "$FP" > "$WORK/ambiguity.txt"
+ambiguous_hashes=$(awk -F'\t' '{names[$4][$2]=1}
+END{ c=0; for(h in names){ n=0; for(nm in names[h]) n++; if(n>1) c++ } print c }' "$FP")
+unambiguous_hashes=$((uniq_hashes - ambiguous_hashes))
 
-# Per-instance: raw_byte_hit is trivially 100% within the corpus (every function
-# matches itself); the meaningful number is unique_resolution rate = fraction of
-# instances whose hash is globally unambiguous.
-awk -F'\t' '
+# Per-instance resolution.
+read -r instances unique_resolution ambiguous_instances unique_resolution_rate <<< "$(awk -F'\t' '
 { recs[NR]=$0; hashname[$4][$2]=1 }
 END{
   tot=0; uniq=0; ambig=0;
-  for(i=1;i<=NR;i++){ split(recs[i],f,"\t"); h=f[4]; nm=f[2];
+  for(i=1;i<=NR;i++){ split(recs[i],f,"\t"); h=f[4];
     c=0; for(x in hashname[h]) c++;
     tot++; if(c==1) uniq++; else ambig++ }
-  printf "instances=%d unique_resolution=%d ambiguous_instances=%d unique_resolution_rate=%.3f\n", tot, uniq, ambig, (tot>0?uniq/tot:0);
-}' "$FP" > "$WORK/resolution.txt"
+  printf "%d %d %d %.3f\n", tot, uniq, ambig, (tot>0?uniq/tot:0);
+}' "$FP")"
 
 # Runtime vs game-specific: a name seen in >=3 distinct projects OR matching an
 # SGDK runtime prefix counts as runtime library; else game-specific.
-awk -F'\t' '
+read -r runtime_names runtime_bytes game_specific_names game_specific_bytes <<< "$(awk -F'\t' '
 { projset[$2][$1]=1; size[$2]=$3 }
 END{
   rt_fn=0; gs_fn=0; rt_by=0; gs_by=0;
   for(nm in projset){ np=0; for(p in projset[nm]) np++;
     isrt = (np>=3) || (nm ~ /^(SYS_|VDP_|DMA_|Z80_|YM2612_|SPR_|SPRITES_|PAL_|MEM_|JOY_|TSK_|SND_|XGM|PSG_|BMP_|TRM_|MAP_|TILE|_start|__)/);
     if(isrt){ rt_fn++; rt_by+=size[nm] } else { gs_fn++; gs_by+=size[nm] } }
-  printf "runtime_names=%d runtime_bytes=%d game_specific_names=%d game_specific_bytes=%d\n", rt_fn, rt_by, gs_fn, gs_by;
-}' "$FP" > "$WORK/categories.txt"
+  printf "%d %d %d %d\n", rt_fn, rt_by, gs_fn, gs_by;
+}' "$FP")"
 
-total_bytes=$(awk -F'\t' '{s+=$3} END{print s}' "$FP")
+total_bytes=$(awk -F'\t' '{s+=$3} END{print s+0}' "$FP")
 
+# --- Machine-readable manifest: every numeric field is a real JSON number,
+# never an embedded "key=value" text blob (that was the v1 bug: an unescaped
+# grep-substring match embedded a raw newline as a JSON key). ---
 cat > "$WORK/fingerprint-v2-manifest.json" <<EOF
 {
   "schema": "rds-m68k-fingerprint/v2",
+  "ok": true,
   "toolchain": "$TOOLCHAIN",
   "method": "symbol-table F .text boundaries (addr+size), range-validated, full sha256",
   "elfs_processed": $n,
@@ -117,14 +143,30 @@ cat > "$WORK/fingerprint-v2-manifest.json" <<EOF
   "function_bytes": $total_bytes,
   "unique_full_sha256": $uniq_hashes,
   "invalid_ranges_skipped": $invalid,
-  "$(grep ambiguous_hashes "$WORK/ambiguity.txt")": null,
-  "resolution": "$(cat "$WORK/resolution.txt")",
-  "ambiguity": "$(tr '\n' ' ' < "$WORK/ambiguity.txt")",
-  "categories": "$(cat "$WORK/categories.txt")",
-  "note_v1_60_3pct": "PRELIMINARY byte-hit only; superseded by unique_resolution_rate above"
+  "ambiguous_hashes": $ambiguous_hashes,
+  "unambiguous_hashes": $unambiguous_hashes,
+  "unique_resolution": $unique_resolution,
+  "ambiguous_instances": $ambiguous_instances,
+  "unique_resolution_rate": $unique_resolution_rate,
+  "runtime_names": $runtime_names,
+  "runtime_bytes": $runtime_bytes,
+  "game_specific_names": $game_specific_names,
+  "game_specific_bytes": $game_specific_bytes,
+  "note_v1_60_3pct": "PRELIMINARY byte-hit only; superseded by unique_resolution_rate above",
+  "note_unique_resolution": "byte-identity resolution to a single unambiguous name, NOT semantic/source-code recovery"
 }
 EOF
+
+# Self-validate the JSON we just wrote (Node is an already-approved dependency).
+if ! node -e "JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'))" "$WORK/fingerprint-v2-manifest.json" 2>/tmp/fp_json_err; then
+  cat /tmp/fp_json_err >&2
+  fail "generated fingerprint-v2-manifest.json is not valid JSON"
+fi
+
 echo "==== Fingerprint v2 ===="
 echo "elfs=$n instances=$total bytes=$total_bytes unique_sha256=$uniq_hashes invalid=$invalid"
-cat "$WORK/ambiguity.txt"; cat "$WORK/resolution.txt"; cat "$WORK/categories.txt"
-echo "manifest: $WORK/fingerprint-v2-manifest.json"
+echo "ambiguous_hashes=$ambiguous_hashes unambiguous_hashes=$unambiguous_hashes"
+echo "instances=$instances unique_resolution=$unique_resolution ambiguous_instances=$ambiguous_instances unique_resolution_rate=$unique_resolution_rate"
+echo "runtime_names=$runtime_names runtime_bytes=$runtime_bytes game_specific_names=$game_specific_names game_specific_bytes=$game_specific_bytes"
+echo "manifest: $WORK/fingerprint-v2-manifest.json (valid JSON, self-checked)"
+echo "GATE PASSED"

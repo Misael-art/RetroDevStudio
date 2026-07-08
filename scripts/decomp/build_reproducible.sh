@@ -9,6 +9,19 @@ export GDK="${GDK:-/mnt/sdcard/Projects/MegaDrive_DEV/sdk/sgdk-2.11}"
 export LANG=C LC_ALL=C
 CORPUS="${RDS_SGDK_CORPUS:-/mnt/sdcard/Projects/MegaDrive_DEV/SGDK_Engines}"
 WORK="${RDS_DECOMP_WORK:-$HOME/.retrodev/decomp_work}/build2_v2"
+
+fail() { echo "FATAL: $1" >&2; echo "GATE FAILED (precondition)" >&2; exit 2; }
+
+# --- Upfront validation: never silently tolerate a missing corpus/toolchain.
+# (Previously: a missing $CORPUS/$project silently produced an EMPTY project
+# dir via `cp ... || true`, and SGDK still built a trivial bootstrap-only ROM
+# identically every time -> false "5/5 REPRODUCIBLE" on a nonexistent corpus.) ---
+[ -d "$CORPUS" ] || fail "RDS_SGDK_CORPUS directory does not exist: $CORPUS"
+[ -d "$GDK" ] || fail "SGDK directory (GDK) does not exist: $GDK"
+[ -f "$GDK/makefile.gen" ] || fail "SGDK makefile.gen not found under GDK=$GDK"
+command -v m68k-elf-gcc >/dev/null 2>&1 || fail "m68k-elf-gcc not found in PATH"
+command -v m68k-elf-as >/dev/null 2>&1 || fail "m68k-elf-as not found in PATH"
+
 rm -rf "$WORK"; mkdir -p "$WORK"
 
 # --- tool provenance (full hashes) ---
@@ -37,9 +50,17 @@ EXTRA='-fpermissive -Wno-incompatible-pointer-types'
 # Rigorous build: wipe, build (fail-hard), require final padded ROM.
 build_final_rom() {
   local src="$1" dst="$2"
+  # The source project and its src/*.c are mandatory. Previously this was
+  # `cp ... || true`, which silently produced an EMPTY project dir when $src
+  # was missing, and SGDK still built a trivial identical bootstrap-only ROM
+  # -> a false "REPRODUCIBLE" verdict on a nonexistent project. Fail loudly now.
+  [ -d "$src" ] || { echo "MISSING SOURCE PROJECT: $src" >&2; return 1; }
+  if ! ls "$src"/src/*.c >/dev/null 2>&1; then
+    echo "SOURCE PROJECT HAS NO src/*.c: $src" >&2; return 1
+  fi
   rm -rf "$dst"
   mkdir -p "$dst"
-  cp -r "$src"/src "$dst"/ 2>/dev/null || true
+  cp -r "$src"/src "$dst"/
   cp -r "$src"/res "$dst"/ 2>/dev/null || true
   cp -r "$src"/inc "$dst"/ 2>/dev/null || true
   find "$dst" -name '*.res' -exec sed -i 's/\\/\//g' {} + 2>/dev/null || true
