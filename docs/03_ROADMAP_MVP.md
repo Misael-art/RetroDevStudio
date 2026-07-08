@@ -185,6 +185,7 @@ A coluna `Certificacao` usa exclusivamente o vocabulario travado deste roadmap:
 | Fase 3 - Visual Logic & RetroFX | Local         | NodeGraph canonico e camada visual existem; superficies ainda heterogeneas                |
 | Fase 4 - Camada Pro             | Local         | Patching, profiling, reverse e utilitarios existem, mas nem tudo e criterio de fechamento |
 | Fase 5 - Release                | Institucional | PR #2 mergeado e readiness de promocao verde em `main`; repetir quando escopo mudar       |
+| Fase 6 - Decompilacao Pareada   | Nenhuma       | **Experimental (spikes versionados).** Build-duplo M68K reproduzivel, fingerprint v2 (symbol-table + SHA-256), holdout Tier 0 sem vazamento e boundary benchmark Ghidra headless (precisao/recall medidos) em `scripts/decomp/`; pipeline de producao (scanner/ledger/LLM/UI) **nao implementado nem autorizado**. Plano em `docs/12_DECOMPILACAO_PAREADA_PLANO.md` |
 
 
 ---
@@ -217,6 +218,7 @@ Capacidades nao visuais, importadores e itens legados continuam nas secoes propr
 | Memory Viewer                          | Experimental | Em codigo     | Local         | Aba real do shell, leitura de memoria via IPC e cobertura base em `ToolsPanel.test.tsx`                                                                                                    | Falta prova institucional com emulador ativo e ROM real                                 | Nao                           |
 | VRAM Viewer                            | Experimental | Em codigo     | Local         | Ferramenta real visivel no shell e integrada ao core ativo                                                                                                                                 | Falta rodada institucional dedicada com ROM/emulador reais                              | Nao                           |
 | Reverse Workspace                      | Experimental | Em codigo     | Local         | Aba real do shell, lazy-load provado em `ToolsPanel.test.tsx` e backend de leitura/disassembly/anotacoes existente                                                                         | Falta certificacao de trace/projecao e UX tecnica final                                 | Nao                           |
+| Decompilacao Pareada (ROM → .rds)      | Experimental | Spikes versionados (fora do shell) | Nenhuma      | **Spikes Experimentais** em `scripts/decomp/`: build-duplo M68K reproduzivel, fingerprint v2 (fronteiras symbol-table, SHA-256 completo, `unique_resolution_rate~13,2%` sem vazamento), holdout Tier 0 reproduzivel, e boundary benchmark Ghidra 12.1.2 headless (precisao~0,70-0,87/recall~0,79-0,96 conforme perfil de build). Evidencia dinamica real-core Control/Positive/Negative na camada Gameplay Parity (fixture `sgdk_spike` compartilhada). Scanner/ledger/LLM/UI de decompilacao **nao implementados nem autorizados**. Plano em `docs/12_DECOMPILACAO_PAREADA_PLANO.md`          | Restante das Fases 0-5 do plano (scanner/ledger/LLM/UI sob GO formal). Acompanhar `docs/12_DECOMPILACAO_PAREADA_PLANO.md`     | Nao                           |
 
 
 ---
@@ -274,6 +276,7 @@ Capacidades nao visuais, importadores e itens legados continuam nas secoes propr
 - Conversao ampla de gameplay para MUGEN/Ikemen alem do subset Experimental de nodes/bridges
 - Promocao institucional de adapters ainda sem prova suficiente
 - Expansoes visuais que concorram com a estabilizacao do fluxo core
+- **Decompilacao Pareada (ROM → .rds/SGDK):** plano em `docs/12_DECOMPILACAO_PAREADA_PLANO.md`. Apenas spikes Experimentais versionados fora do shell (`scripts/decomp/`: build-duplo M68K, fingerprint v2, holdout Tier 0, boundary benchmark Ghidra), cobertos por testes; nenhum pipeline no produto e nenhuma UI de decompilacao. Scanner/ledger/LLM/UI **nao autorizados**. Superficie nova requer as Fases 0-5 do plano (sob GO formal) antes de qualquer integracao no shell.
 
 ---
 
@@ -454,11 +457,19 @@ Adicionais aos gates gerais deste roadmap, aplicados sempre que o programa avanc
 
 ---
 
-## Regra de Atualizacao
+## Nova Superficie Planejada: Decompilacao Pareada (ROM → .rds)
 
-- Atualize este roadmap quando mudar o estado real de uma fase, superficie visivel ou importador.
-- Nova superficie visivel no produto exige linha nova na `Matriz de Superficies` antes de qualquer claim de entrega.
-- Novo importador no registry exige linha nova na `Matriz de Importadores` antes de qualquer claim de entrega.
-- Um item nao pode continuar descrito como `planejamento` se o codigo o marcar como `importable: true`.
-- Um item nao pode sair de `Experimental` sem evidencia institucional e sem alinhamento de UI, docs e backend.
-- `README.md` nao deve manter claims de readiness mais especificas ou mais otimistas do que este arquivo.
+**Status atual:** Spikes Experimentais versionados; **pipeline de producao ausente**.
+**Documento de referencia:** `docs/12_DECOMPILACAO_PAREADA_PLANO.md`.
+
+Esta superficie trata de converter ROM de **Mega Drive primeiro** (SNES/PVSnesLib deferido) de volta para projeto `.rds` editavel + codigo C SGDK compilavel, usando:
+- Ghidra headless para disassembler completo (**Ghidra 12.1.2 + jdk21-openjdk instalados; boundary benchmark medido**)
+- LLM (Claude/DeepSeek) para geracao de C via matching decompilation (**BLOQUEADO, nao implementado**)
+- comparador de objetos proprio (`object_diff.rs`, sobre `m68k-elf-binutils`) para verificacao byte-a-byte
+- Tracing dinamico do emulador Libretro para extracao de assets (VRAM, CRAM, SAT, audio)
+
+Existem spikes Experimentais **versionados** em `scripts/decomp/` (build-duplo M68K reproduzivel, fingerprint v2 por symbol-table com SHA-256 completo, holdout Tier 0 sem vazamento, boundary benchmark Ghidra headless), cobertos por testes automatizados. `unique_resolution_rate~13,2%` no holdout e resolucao unica de nomes por identidade de bytes — **NAO** e recuperacao semantica nem de codigo-fonte. Nao ha pipeline de producao, scanner, ledger de produto, embeddings, LLM nem UI de decompilacao (tudo BLOQUEADO ate GO formal). Qualquer implementacao adicional deve seguir o plano em `docs/12_DECOMPILACAO_PAREADA_PLANO.md` e respeitar os gates do roadmap.
+
+---
+
+## Regra de Atualizacao

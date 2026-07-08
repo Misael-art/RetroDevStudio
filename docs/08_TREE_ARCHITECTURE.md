@@ -48,6 +48,7 @@ RetroDevStudio/
 |   |-- 09_AGENT_DEV_MODE.md
 |   |-- 10_QA_ROTEIRO_RC.md
 |   |-- 11_CROSS_PLATFORM_PLAN.md
+|   |-- 12_DECOMPILACAO_PAREADA_PLANO.md  (plano de matching decompilation)
 |   `-- SGDK_REAL_CORPUS_VALIDATION_MATRIX.md
 |
 |-- src/
@@ -142,7 +143,14 @@ RetroDevStudio/
 |   |-- run-in-msvc.cmd
 |   |-- setup-rust.ps1
 |   |-- validate-upstream-linux.sh
-|   `-- validate-upstream-windows.ps1
+|   |-- validate-upstream-windows.ps1
+|   `-- decomp/
+|       |-- README.md
+|       |-- build_reproducible.sh
+|       |-- fingerprint_v2.sh
+|       |-- holdout_v2.sh
+|       |-- ghidra_boundary.sh
+|       `-- GhidraListFunctions.java
 |
 `-- toolchains/
     |-- .cache/
@@ -188,6 +196,8 @@ RetroDevStudio/
 - `scripts/validate-upstream-windows.ps1` e o script canonico de validacao upstream real com SGDK, PVSnesLib e cores Libretro oficiais.
 - `scripts/validate-upstream-linux.sh` e o script canonico de validacao upstream Linux: detecta SGDK nativo, WebDriver nativo, core Libretro `.so`, Ghidra/JDK21 opcional e grava report estruturado em `src-tauri/target-test/validation/upstream-validation-linux.json`. Ele nao instala pacotes de sistema automaticamente.
 - `scripts/bootstrap.sh` e o bootstrap canonico para checkout Linux existente: faz diagnostico, pode instalar apenas helpers user-scoped seguros como `tauri-driver`, roda `npm ci`/baseline quando solicitado e delega validacao upstream para `validate-upstream-linux.sh`.
+- `scripts/decomp/` versiona a reproducao do spike Experimental de decompilacao (`docs/12_DECOMPILACAO_PAREADA_PLANO.md`): `build_reproducible.sh` (build duplo M68K), `fingerprint_v2.sh` e `holdout_v2.sh` (fingerprint/holdout sobre o corpus BYOR `RDS_SGDK_CORPUS`), `ghidra_boundary.sh` + `GhidraListFunctions.java` (boundary precision/recall, sai BLOCKED sem instalar nada se Ghidra/JDK21 faltarem). Saidas ficam em `RDS_DECOMP_WORK` (default `~/.retrodev/decomp_work`, fora do repo); nenhuma ROM e versionada. A fixture dinamica Control/Positive/Negative da camada Gameplay Parity NAO usa este diretorio: e construida canonicamente pelos proprios testes Rust (`parity_fixture_*` em `parity_harness.rs`) via `makefile.gen` do SGDK, com saida em `src-tauri/target-test/validation/parity-fixture/`.
+- `src-tauri/tests/fixtures/sgdk_spike/` e a fonte C aberta (SGDK, sem ROM comercial) reutilizada tanto pelos testes de paridade quanto pelo spike de decompilacao para produzir atividade visual deterministica e variantes base/positive/negative.
 - `.github/workflows/desktop-e2e.yml` e o workflow canonico de regressao desktop em Windows e ja foi validado em runner GitHub real.
 - `toolchains/libretro/cores/` e o local canonico dos DLLs de core baixados do upstream oficial.
 - `toolchains/webdriver/msedgedriver.exe` e o local canonico do driver nativo usado pelo runner desktop/Tauri e pelos scripts de diagnostico locais.

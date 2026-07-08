@@ -29,6 +29,7 @@
 
 - `docs/06_AI_MEMORY_BANK.md` + `docs/06_CURRENT_WAVE_AI_BANK.md`: diario operacional, evidencias recentes, proximo passo.
 - `docs/03_ROADMAP_MVP.md`: matriz central de fases, superficies e importadores.
+- `docs/12_DECOMPILACAO_PAREADA_PLANO.md`: plano de decompilacao pareada (Ghidra + LLM + comparacao de objetos + tracing). Ha spikes Experimentais versionados em `scripts/decomp/` e cobertos por testes (build-duplo M68K, fingerprint v2, holdout Tier 0, boundary benchmark Ghidra headless medido); scanner/ledger/LLM/UI **nao implementados nem autorizados**. Superficie **Experimental**.
 - `README.md`: onboarding curto e links; nao pode carregar snapshot institucional detalhado.
 
 ---

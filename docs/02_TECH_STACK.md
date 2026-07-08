@@ -56,6 +56,15 @@
 - `cargo clippy -- -D warnings` para lint do backend Rust
 - `cargo test --lib -- --nocapture` e `npm test` para suites automatizadas
 
+### Decompilacao Pareada (Experimental) — dependencias externas
+- **Ghidra 12.x** + **JDK 21+**: analise estatica de ROMs (BYOR). **Provisionado neste host** via repo oficial Arch `extra` (`ghidra` 12.1.2-1, `jdk21-openjdk`), configurado via `RETRODEV_GHIDRA_HOME` (default `/opt/ghidra`) sem alterar o Java padrao do sistema (JDK 17 permanece default via `JAVA_HOME` explicito nos scripts). Boundary benchmark headless medido em `scripts/decomp/ghidra_boundary.sh`.
+- **Claude API** / **DeepSeek API**: geracao de C via LLM para matching decompilation (BYOK — Bring Your Own Key). **BLOQUEADO — nenhuma chamada implementada.**
+- **m68k-elf-gcc** 16.1.0 (AUR, ja instalado neste host) + **m68k-elf-binutils** (ja presente): usados pelo comparador de objetos proprio (`object_diff.rs`), nao pelo `objdiff` externo (cujo suporte M68K nao foi validado).
+
+### Novas crates aprovadas no backend (decompilacao)
+- `reqwest` (ja aprovada) — chamadas HTTP para LLM APIs (LLM ainda **BLOQUEADO**; nenhuma chamada implementada)
+- **Nenhuma crate nova aprovada para embeddings.** Embeddings/LLM continuam BLOQUEADOS. (Obs.: `rust-embed` embute arquivos estaticos no binario e **nao** serve para embeddings de ML — a referencia anterior era enganosa e foi removida.) Qualquer store de similaridade futuro exige aprovacao humana e reflexo aqui antes de adicionar dependencia.
+
 ---
 
 ## 3. Regras Rigidas
