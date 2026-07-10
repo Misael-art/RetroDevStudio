@@ -951,36 +951,53 @@ async function readAutomationState(sessionId) {
 }
 
 async function waitForLiveValidationFresh(sessionId, timeoutMs, revision) {
+  let lastState = null;
   await waitFor(
     async () => {
       const state = await readAutomationState(sessionId);
-      if (!state) return false;
-      const matchesFresh = state.hwValidationState === "fresh";
-      if (matchesFresh && revision != null && state.hwValidatedRevision !== revision) {
+      lastState = state;
+
+      // (a) não-fresh: keep polling
+      if (!state || state.hwValidationState !== "fresh") {
+        const k = state?.hwValidationState ?? "sem_estado";
         console.log(
-          `[E2E] DIAG: fresh mas revisao errada: esperada=${revision} atual=${state.hwValidatedRevision}`
+          `[E2E] Esperando fresh... k:${k} r:${state?.hwValidatedRevision ?? "?"}/${revision ?? "?"} erros:${state?.hwStatus?.errorCount ?? "?"}`
         );
         return false;
       }
-      if (matchesFresh && revision != null && state.hwValidatedRevision > revision) {
+
+      // No revision constraint: any fresh is accepted
+      if (revision == null) return state;
+
+      // (b) fresh com revisão menor que a esperada
+      if (state.hwValidatedRevision < revision) {
+        console.log(
+          `[E2E] DIAG: fresh mas revisao menor: esperada=${revision} atual=${state.hwValidatedRevision}`
+        );
+        return false;
+      }
+
+      // (c) fresh com revisão maior/pulo detectado
+      if (state.hwValidatedRevision > revision) {
         console.log(
           `[E2E] DIAG: revisao ${state.hwValidatedRevision} > esperada ${revision}; pulo detectado`
         );
         return false;
       }
-      const detail = [
-        `k:${matchesFresh ? "F" : state.hwValidationState}`,
-        `r:${state.hwValidatedRevision}/${revision ?? "?"}`,
-        `erros:${state.hwStatus?.errorCount ?? "?"}`,
-      ].join(" ");
-      if (!matchesFresh) console.log(`[E2E] Esperando fresh... ${detail}`);
-      const revMatch = revision == null || state.hwValidatedRevision === revision;
-      return matchesFresh && revMatch ? state : false;
+
+      // (d) fresh com revisão exata
+      return state;
     },
     timeoutMs,
     `Validacao live nao ficou fresh apos injetar draft (revisao ${revision ?? "?"}).`,
     250
-  );
+  ).catch((error) => {
+    const diag = lastState
+      ? `ultimo estado: hwValidationState=${lastState.hwValidationState} hwValidatedRevision=${lastState.hwValidatedRevision} sceneRevision=${lastState.sceneRevision}`
+      : "nenhum estado obtido";
+    console.log(`[E2E] DIAG timeout: esperada rev=${revision ?? "?"}. ${diag}`);
+    throw error;
+  });
 }
 
 async function logAutomationState(sessionId, label) {
@@ -5610,18 +5627,37 @@ async function main() {
     ) {
       const overflowScenario = buildLiveOverflowScenario(projectMetadata.target, options.scenario);
       const receipt = await setSceneDraft(sessionId, overflowScenario.draft);
-      const expectedRevision = receipt?.sceneRevision ?? 0;
+      if (!receipt || typeof receipt.sceneRevision !== "number") {
+        fail(`setSceneDraft devolveu recibo invalido: ${JSON.stringify(receipt)}`);
+      }
+      const expectedRevision = receipt.sceneRevision;
       await logAutomationState(sessionId, "Pos-setSceneDraft");
       if (options.scenario === "live-error") {
+        let lastErrorState = null;
         await waitFor(
           async () => {
             const state = await readAutomationState(sessionId);
-            return state?.hwValidationState === "error" ? state : false;
+            if (!state) return false;
+            if (state.hwValidationState !== "error") return false;
+            if (state.hwValidatedRevision !== expectedRevision) {
+              lastErrorState = state;
+              console.log(
+                `[E2E] DIAG: error em revisao ${state.hwValidatedRevision} != esperada ${expectedRevision}; ignorando.`
+              );
+              return false;
+            }
+            return state;
           },
           liveValidationTimeoutMs,
-          "Validacao live nao entrou em error apos draft invalido.",
+          `Validacao live nao entrou em error apos draft invalido (revisao ${expectedRevision}).`,
           250
-        );
+        ).catch((error) => {
+          const diag = lastErrorState
+            ? `ultimo estado: hwValidationState=${lastErrorState.hwValidationState} hwValidatedRevision=${lastErrorState.hwValidatedRevision} hwValidationError=${lastErrorState.hwValidationError}`
+            : "nenhum estado error obtido";
+          console.log(`[E2E] DIAG timeout error: esperada rev=${expectedRevision}. ${diag}`);
+          throw error;
+        });
       } else {
         await waitForLiveValidationFresh(sessionId, liveValidationTimeoutMs, expectedRevision);
       }

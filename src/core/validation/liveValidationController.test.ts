@@ -4,6 +4,7 @@ import {
   getLiveBuildBlockReason,
   getLiveBuildWarningSummary,
   getLiveToolbarIndicator,
+  isLiveValidationFreshMatchingRevision,
   serializeSceneDraft,
 } from "./liveValidationController";
 import type { Scene } from "../ipc/sceneService";
@@ -258,6 +259,63 @@ describe("liveValidationController", () => {
       label: "ERRO LIVE",
       tone: "error",
       detail: "Falha de comunicacao com validate_scene_draft",
+    });
+  });
+
+  describe("isLiveValidationFreshMatchingRevision", () => {
+    it("retorna not-fresh quando estado e null", () => {
+      const result = isLiveValidationFreshMatchingRevision(null, 4);
+      expect(result).toEqual({ matches: false, reason: "no-state" });
+    });
+
+    it("retorna not-fresh quando hwValidationState nao e fresh", () => {
+      const result = isLiveValidationFreshMatchingRevision(
+        { hwValidationState: "pending", hwValidatedRevision: 0 },
+        4
+      );
+      expect(result).toEqual({ matches: false, reason: "not-fresh", actual: "pending" });
+    });
+
+    it("retorna wrong-revision quando fresh/rev=3 e esperado rev=4", () => {
+      const result = isLiveValidationFreshMatchingRevision(
+        { hwValidationState: "fresh", hwValidatedRevision: 3 },
+        4
+      );
+      expect(result).toEqual({
+        matches: false,
+        reason: "wrong-revision",
+        expected: 4,
+        actual: 3,
+      });
+    });
+
+    it("retorna revision-skip quando fresh/rev=5 e esperado rev=4", () => {
+      const result = isLiveValidationFreshMatchingRevision(
+        { hwValidationState: "fresh", hwValidatedRevision: 5 },
+        4
+      );
+      expect(result).toEqual({
+        matches: false,
+        reason: "revision-skip",
+        expected: 4,
+        actual: 5,
+      });
+    });
+
+    it("retorna matches:true quando fresh/rev=4 e esperado rev=4", () => {
+      const result = isLiveValidationFreshMatchingRevision(
+        { hwValidationState: "fresh", hwValidatedRevision: 4 },
+        4
+      );
+      expect(result).toEqual({ matches: true });
+    });
+
+    it("retorna matches:true quando fresh e expectedRevision e null", () => {
+      const result = isLiveValidationFreshMatchingRevision(
+        { hwValidationState: "fresh", hwValidatedRevision: 3 },
+        null
+      );
+      expect(result).toEqual({ matches: true });
     });
   });
 });

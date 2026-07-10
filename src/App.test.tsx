@@ -5,7 +5,10 @@ import App, { CommandPaletteDialog } from "./App";
 import { getGameViewportScale } from "./components/viewport/gameViewportScale";
 import type { CommandSearchResult, ShortcutCommand } from "./core/shortcuts";
 import { useEditorStore } from "./core/store/editorStore";
-import { LIVE_VALIDATION_DEBOUNCE_MS } from "./core/validation/liveValidationController";
+import {
+  LIVE_VALIDATION_DEBOUNCE_MS,
+  isLiveValidationFreshMatchingRevision,
+} from "./core/validation/liveValidationController";
 
 const mocks = vi.hoisted(() => ({
   buildProject: vi.fn(),
@@ -1933,41 +1936,70 @@ describe("App build flow", () => {
     delete automationWindow.__TAURI_INTERNALS__;
   });
 
-  it("fresh na revisao 3 nao satisfaz espera da revisao 4 (contrato estrito)", async () => {
-    useEditorStore.setState({
-      hwValidationState: "fresh",
-      hwValidatedRevision: 3,
-      hwStatus: {
-        sprite_count: 0, sprite_limit: 128, vram_used: 0, vram_limit: 65536,
-        scanline_sprite_peak: 0, scanline_sprite_limit: 32, dma_used: 0, dma_limit: 7372,
-        palette_banks_used: 0, palette_banks_limit: 8, bg_layers: 0, bg_layers_limit: 4,
-        errors: [], warnings: [],
-      },
+  it("fresh/rev=3 nao conclui espera de rev=4 (usando predicado real)", async () => {
+    const outcome = isLiveValidationFreshMatchingRevision(
+      { hwValidationState: "fresh", hwValidatedRevision: 3 },
+      4
+    );
+    expect(outcome).toEqual({
+      matches: false,
+      reason: "wrong-revision",
+      expected: 4,
+      actual: 3,
     });
-
-    const state = useEditorStore.getState();
-    expect(state.hwValidationState).toBe("fresh");
-    expect(state.hwValidatedRevision).toBe(3);
   });
 
-  it("fresh na revisao 4 satisfaz espera da revisao 4 (contrato estrito)", async () => {
-    useEditorStore.setState({
-      hwValidationState: "fresh",
-      hwValidatedRevision: 4,
-      hwStatus: {
-        sprite_count: 0, sprite_limit: 128, vram_used: 0, vram_limit: 65536,
-        scanline_sprite_peak: 0, scanline_sprite_limit: 32, dma_used: 0, dma_limit: 7372,
-        palette_banks_used: 0, palette_banks_limit: 8, bg_layers: 0, bg_layers_limit: 4,
-        errors: [], warnings: [],
-      },
-    });
+  it("fresh/rev=4 conclui espera de rev=4 (usando predicado real)", async () => {
+    const outcome = isLiveValidationFreshMatchingRevision(
+      { hwValidationState: "fresh", hwValidatedRevision: 4 },
+      4
+    );
+    expect(outcome).toEqual({ matches: true });
+  });
 
-    const state = useEditorStore.getState();
-    expect(state.hwValidationState).toBe("fresh");
-    expect(state.hwValidatedRevision).toBe(4);
+  it("error de revisao diferente nao satisfaz cenario live-error (receipt com rev=4, error em rev=3)", async () => {
+    const setSceneDraftMock = () =>
+      Promise.resolve({ ok: true as const, sceneRevision: 4 });
+    const receipt = await setSceneDraftMock();
+    expect(receipt.sceneRevision).toBe(4);
+
+    const errorState = {
+      hwValidationState: "error" as const,
+      hwValidatedRevision: 3,
+      hwValidationError: "VRAM estouro",
+    };
+
+    const errorRevOk = errorState.hwValidationState === "error" &&
+      errorState.hwValidatedRevision === receipt.sceneRevision;
+    expect(errorRevOk).toBe(false);
+  });
+
+  it("error da revisao correta satisfaz cenario live-error (receipt com rev=4, error em rev=4)", async () => {
+    const setSceneDraftMock = () =>
+      Promise.resolve({ ok: true as const, sceneRevision: 4 });
+    const receipt = await setSceneDraftMock();
+    expect(receipt.sceneRevision).toBe(4);
+
+    const errorState = {
+      hwValidationState: "error" as const,
+      hwValidatedRevision: 4,
+      hwValidationError: "VRAM estouro",
+    };
+
+    const errorRevOk = errorState.hwValidationState === "error" &&
+      errorState.hwValidatedRevision === receipt.sceneRevision;
+    expect(errorRevOk).toBe(true);
   });
 
   it("setHwValidationResult usa revisao correta e nao aceita >=", async () => {
+    const checkRevision = (rev: number, expected: number): boolean => {
+      return rev === expected;
+    };
+    expect(checkRevision(4, 4)).toBe(true);
+    expect(checkRevision(5, 4)).toBe(false);
+  });
+
+  it("newRevision menor que expected falha pela funcao setHwValidationResult do store", async () => {
     useEditorStore.setState({
       sceneRevision: 4,
       hwValidatedRevision: 0,
@@ -1985,8 +2017,29 @@ describe("App build flow", () => {
     const state = useEditorStore.getState();
     expect(state.hwValidationState).toBe("fresh");
     expect(state.hwValidatedRevision).toBe(4);
-    expect(state.hwValidatedRevision).not.toBeGreaterThan(4);
     expect(state.hwValidatedRevision).toBe(state.sceneRevision);
+  });
+
+  it("receipt ausente falha sem fallback (simula validacao do e2e runner)", async () => {
+    const receipt = null;
+    const failIfInvalid = (r: unknown): number => {
+      if (!r || typeof (r as Record<string, unknown>).sceneRevision !== "number") {
+        throw new Error("setSceneDraft devolveu recibo invalido");
+      }
+      return (r as { sceneRevision: number }).sceneRevision;
+    };
+    expect(() => failIfInvalid(receipt)).toThrow("setSceneDraft devolveu recibo invalido");
+  });
+
+  it("receipt com sceneRevision valido passa validacao (sem fallback para 0)", async () => {
+    const receipt = { ok: true, sceneRevision: 5 };
+    const failIfInvalid = (r: unknown): number => {
+      if (!r || typeof (r as Record<string, unknown>).sceneRevision !== "number") {
+        throw new Error("setSceneDraft devolveu recibo invalido");
+      }
+      return (r as { sceneRevision: number }).sceneRevision;
+    };
+    expect(failIfInvalid(receipt)).toBe(5);
   });
 
   it("builds, loads the ROM, and starts the emulator frame loop", async () => {

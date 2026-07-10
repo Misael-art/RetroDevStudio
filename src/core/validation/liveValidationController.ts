@@ -15,6 +15,52 @@ export function serializeSceneDraft(scene: Scene): string {
   return JSON.stringify(scene);
 }
 
+export type FreshMatchOutcome =
+  | { matches: true }
+  | { matches: false; reason: "no-state" }
+  | { matches: false; reason: "not-fresh"; actual: string }
+  | { matches: false; reason: "wrong-revision"; expected: number; actual: number }
+  | { matches: false; reason: "revision-skip"; expected: number; actual: number };
+
+export function isLiveValidationFreshMatchingRevision(
+  validationState: { hwValidationState: string; hwValidatedRevision: number } | null,
+  expectedRevision: number | null
+): FreshMatchOutcome {
+  if (!validationState) {
+    return { matches: false, reason: "no-state" };
+  }
+
+  const isFresh = validationState.hwValidationState === "fresh";
+
+  if (!isFresh) {
+    return { matches: false, reason: "not-fresh", actual: validationState.hwValidationState };
+  }
+
+  if (expectedRevision === null) {
+    return { matches: true };
+  }
+
+  if (validationState.hwValidatedRevision < expectedRevision) {
+    return {
+      matches: false,
+      reason: "wrong-revision",
+      expected: expectedRevision,
+      actual: validationState.hwValidatedRevision,
+    };
+  }
+
+  if (validationState.hwValidatedRevision > expectedRevision) {
+    return {
+      matches: false,
+      reason: "revision-skip",
+      expected: expectedRevision,
+      actual: validationState.hwValidatedRevision,
+    };
+  }
+
+  return { matches: true };
+}
+
 export function getLiveBuildBlockReason({
   activeProjectDir,
   building,
