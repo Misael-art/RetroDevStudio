@@ -1444,7 +1444,7 @@ type AutomationApi = {
   ) => Promise<string>;
   closeProject: () => Promise<void>;
   persistScene: (scope?: string, successMessage?: string) => Promise<boolean>;
-  setSceneDraft: (scene: Scene) => Promise<boolean>;
+  setSceneDraft: (scene: Scene) => Promise<{ ok: true; sceneRevision: number }>;
   setSelectedEntityId: (entityId: string | null) => boolean;
   setActiveLayerId: (layerId: string | null) => boolean;
   setEditorMode: (mode: "select" | "paint" | "erase" | "collision") => boolean;
@@ -3701,7 +3701,8 @@ export default function App() {
 
         state.setSelectedEntityId(null);
         state.setActiveScene(scene, scene);
-        return true;
+        const { sceneRevision } = useEditorStore.getState();
+        return { ok: true, sceneRevision };
       },
       setSelectedEntityId: (entityId: string | null) => {
         useEditorStore.getState().setSelectedEntityId(entityId);

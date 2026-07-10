@@ -1861,6 +1861,134 @@ describe("App build flow", () => {
     delete automationWindow.__TAURI_INTERNALS__;
   });
 
+  it("setSceneDraft devolve recibo com a revisao aplicada", async () => {
+    const automationWindow = window as Window & {
+      __TAURI_INTERNALS__?: unknown;
+      __RDS_E2E__?: {
+        setSceneDraft: (scene: Record<string, unknown>) => Promise<{ ok: true; sceneRevision: number }>;
+      };
+    };
+    automationWindow.__TAURI_INTERNALS__ = {};
+
+    const prevRevision = useEditorStore.getState().sceneRevision;
+
+    await act(async () => {
+      root.unmount();
+      await flush();
+      root = createRoot(container);
+      root.render(<App />);
+      await flush();
+      await flush();
+    });
+
+    const receipt = await act(async () => {
+      const result = await automationWindow.__RDS_E2E__!.setSceneDraft({
+        scene_id: "injected",
+        display_name: "Inject",
+        entities: [],
+        background_layers: [],
+      });
+      return result;
+    });
+
+    expect(receipt).toHaveProperty("ok", true);
+    expect(receipt).toHaveProperty("sceneRevision");
+    expect(typeof receipt.sceneRevision).toBe("number");
+    expect(receipt.sceneRevision).toBeGreaterThan(prevRevision);
+
+    const storeRev = useEditorStore.getState().sceneRevision;
+    expect(receipt.sceneRevision).toBe(storeRev);
+
+    delete automationWindow.__TAURI_INTERNALS__;
+  });
+
+  it("setSceneDraft sem projeto aberto lanca erro (nao mascarado)", async () => {
+    const automationWindow = window as Window & {
+      __TAURI_INTERNALS__?: unknown;
+      __RDS_E2E__?: {
+        setSceneDraft: (scene: Record<string, unknown>) => Promise<{ ok: true; sceneRevision: number }>;
+      };
+    };
+    automationWindow.__TAURI_INTERNALS__ = {};
+
+    useEditorStore.setState({ activeProjectDir: "" });
+
+    await act(async () => {
+      root.unmount();
+      await flush();
+      root = createRoot(container);
+      root.render(<App />);
+      await flush();
+      await flush();
+    });
+
+    await expect(
+      automationWindow.__RDS_E2E__!.setSceneDraft({
+        scene_id: "orphan",
+        entities: [],
+        background_layers: [],
+      })
+    ).rejects.toThrow("Nenhum projeto aberto");
+
+    delete automationWindow.__TAURI_INTERNALS__;
+  });
+
+  it("fresh na revisao 3 nao satisfaz espera da revisao 4 (contrato estrito)", async () => {
+    useEditorStore.setState({
+      hwValidationState: "fresh",
+      hwValidatedRevision: 3,
+      hwStatus: {
+        sprite_count: 0, sprite_limit: 128, vram_used: 0, vram_limit: 65536,
+        scanline_sprite_peak: 0, scanline_sprite_limit: 32, dma_used: 0, dma_limit: 7372,
+        palette_banks_used: 0, palette_banks_limit: 8, bg_layers: 0, bg_layers_limit: 4,
+        errors: [], warnings: [],
+      },
+    });
+
+    const state = useEditorStore.getState();
+    expect(state.hwValidationState).toBe("fresh");
+    expect(state.hwValidatedRevision).toBe(3);
+  });
+
+  it("fresh na revisao 4 satisfaz espera da revisao 4 (contrato estrito)", async () => {
+    useEditorStore.setState({
+      hwValidationState: "fresh",
+      hwValidatedRevision: 4,
+      hwStatus: {
+        sprite_count: 0, sprite_limit: 128, vram_used: 0, vram_limit: 65536,
+        scanline_sprite_peak: 0, scanline_sprite_limit: 32, dma_used: 0, dma_limit: 7372,
+        palette_banks_used: 0, palette_banks_limit: 8, bg_layers: 0, bg_layers_limit: 4,
+        errors: [], warnings: [],
+      },
+    });
+
+    const state = useEditorStore.getState();
+    expect(state.hwValidationState).toBe("fresh");
+    expect(state.hwValidatedRevision).toBe(4);
+  });
+
+  it("setHwValidationResult usa revisao correta e nao aceita >=", async () => {
+    useEditorStore.setState({
+      sceneRevision: 4,
+      hwValidatedRevision: 0,
+      hwValidationState: "pending",
+      hwStatus: null,
+    });
+
+    useEditorStore.getState().setHwValidationResult(4, {
+      sprite_count: 0, sprite_limit: 128, vram_used: 0, vram_limit: 65536,
+      scanline_sprite_peak: 0, scanline_sprite_limit: 32, dma_used: 0, dma_limit: 7372,
+      palette_banks_used: 0, palette_banks_limit: 8, bg_layers: 0, bg_layers_limit: 4,
+      errors: [], warnings: [],
+    });
+
+    const state = useEditorStore.getState();
+    expect(state.hwValidationState).toBe("fresh");
+    expect(state.hwValidatedRevision).toBe(4);
+    expect(state.hwValidatedRevision).not.toBeGreaterThan(4);
+    expect(state.hwValidatedRevision).toBe(state.sceneRevision);
+  });
+
   it("builds, loads the ROM, and starts the emulator frame loop", async () => {
     await act(async () => {
       findBuildRunButton(container).click();

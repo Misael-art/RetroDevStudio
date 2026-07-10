@@ -950,16 +950,52 @@ async function readAutomationState(sessionId) {
   );
 }
 
-async function waitForLiveValidationFresh(sessionId, timeoutMs) {
+async function waitForLiveValidationFresh(sessionId, timeoutMs, revision) {
   await waitFor(
     async () => {
       const state = await readAutomationState(sessionId);
-      return state?.hwValidationState === "fresh" ? state : false;
+      if (!state) return false;
+      const matchesFresh = state.hwValidationState === "fresh";
+      if (matchesFresh && revision != null && state.hwValidatedRevision !== revision) {
+        console.log(
+          `[E2E] DIAG: fresh mas revisao errada: esperada=${revision} atual=${state.hwValidatedRevision}`
+        );
+        return false;
+      }
+      if (matchesFresh && revision != null && state.hwValidatedRevision > revision) {
+        console.log(
+          `[E2E] DIAG: revisao ${state.hwValidatedRevision} > esperada ${revision}; pulo detectado`
+        );
+        return false;
+      }
+      const detail = [
+        `k:${matchesFresh ? "F" : state.hwValidationState}`,
+        `r:${state.hwValidatedRevision}/${revision ?? "?"}`,
+        `erros:${state.hwStatus?.errorCount ?? "?"}`,
+      ].join(" ");
+      if (!matchesFresh) console.log(`[E2E] Esperando fresh... ${detail}`);
+      const revMatch = revision == null || state.hwValidatedRevision === revision;
+      return matchesFresh && revMatch ? state : false;
     },
     timeoutMs,
-    "Validacao live nao ficou fresh apos injetar draft.",
+    `Validacao live nao ficou fresh apos injetar draft (revisao ${revision ?? "?"}).`,
     250
   );
+}
+
+async function logAutomationState(sessionId, label) {
+  try {
+    const state = await readAutomationState(sessionId);
+    if (!state) {
+      console.log(`[E2E] ${label}: estado indisponivel`);
+      return;
+    }
+    console.log(
+      `[E2E] ${label}: fresh=${state.hwValidationState} rev=${state.sceneRevision} validatedRev=${state.hwValidatedRevision} errores=${state.hwStatus?.errorCount ?? "?"} warnings=${state.hwStatus?.warningCount ?? "?"}`
+    );
+  } catch {
+    console.log(`[E2E] ${label}: falha ao ler estado`);
+  }
 }
 
 async function callAutomationApi(sessionId, methodName, args = []) {
@@ -2567,7 +2603,7 @@ async function setSceneDraft(sessionId, draft) {
       }
       api
         .setSceneDraft(arguments[0])
-        .then(() => done({ ok: true }))
+        .then((receipt) => done({ ok: true, value: receipt }))
         .catch((error) => done({ ok: false, error: String(error) }));
     `,
     [draft]
@@ -2576,6 +2612,8 @@ async function setSceneDraft(sessionId, draft) {
   if (!result?.ok) {
     fail(`Falha ao injetar draft live: ${result?.error ?? "sem diagnostico"}`);
   }
+
+  return result.value;
 }
 
 async function readLiveStatus(sessionId) {
@@ -5571,7 +5609,9 @@ async function main() {
       options.scenario === "live-error"
     ) {
       const overflowScenario = buildLiveOverflowScenario(projectMetadata.target, options.scenario);
-      await setSceneDraft(sessionId, overflowScenario.draft);
+      const receipt = await setSceneDraft(sessionId, overflowScenario.draft);
+      const expectedRevision = receipt?.sceneRevision ?? 0;
+      await logAutomationState(sessionId, "Pos-setSceneDraft");
       if (options.scenario === "live-error") {
         await waitFor(
           async () => {
@@ -5583,7 +5623,7 @@ async function main() {
           250
         );
       } else {
-        await waitForLiveValidationFresh(sessionId, liveValidationTimeoutMs);
+        await waitForLiveValidationFresh(sessionId, liveValidationTimeoutMs, expectedRevision);
       }
 
       let lastLiveStatus = null;
