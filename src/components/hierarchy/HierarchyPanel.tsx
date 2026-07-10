@@ -198,13 +198,36 @@ export default function HierarchyPanel() {
       return;
     }
 
+    // Captura a revisao no inicio do efeito para detectar se outra fonte
+    // (ex.: hydrateProjectState em App.tsx, setSceneDraft do E2E) configurou
+    // ou modificou a cena durante o fluxo assincrono.
+    const revisionAtStart = useEditorStore.getState().sceneRevision;
+
     setIsLoadingScenes(true);
     Promise.all([listScenes(activeProjectDir), getSceneData(activeProjectDir)])
       .then(async ([scenes, result]) => {
         if (cancelled) return;
+
+        // Se a revisao mudou, a cena ja foi configurada por outro fluxo.
+        // Apenas atualiza catalogo e path, nao sobrescreve a cena.
+        if (useEditorStore.getState().sceneRevision !== revisionAtStart) {
+          setSceneItems(scenes);
+          setActiveScenePath(result.scene_path);
+          return;
+        }
+
         setSceneItems(scenes);
 
         const hydrated = await hydrateSceneResult(activeProjectDir, result);
+        if (cancelled) return;
+
+        // Segunda guarda: durante a hidratacao assincrona, outro fluxo
+        // pode ter configurado a cena. Nao sobrescrever.
+        if (useEditorStore.getState().sceneRevision !== revisionAtStart) {
+          setActiveScenePath(result.scene_path);
+          return;
+        }
+
         setActiveScenePath(result.scene_path);
         setActiveScene(
           hydrated?.resolvedScene ?? null,

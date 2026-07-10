@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-07-10 (rodada 78 — codex/desktop-e2e-determinism-p0; bloqueadores P0 corrigidos)
+**Ultima Atualizacao:** 2026-07-10 (rodada 84 - Desktop E2E P0: guard por revisao no HierarchyPanel + bridge canonica isLiveValidationFreshMatchingRevision)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -20,17 +20,16 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
-* **O que acabou de acontecer (2026-07-10 rodada 78 — codex/desktop-e2e-determinism-p0; bloqueadores P0 de certificacao Desktop E2E corrigidos):**
-  - **Branch:** `codex/desktop-e2e-determinism-p0`, commit base `e3cc9ed`. PR #25 mantido como DRAFT.
-  - **Contrato de revisao causal (live-error):** `setSceneDraft` retorna receipt com `sceneRevision` obrigatorio (sem `?? 0`). A espera por `hwValidationState === "error"` agora exige `hwValidatedRevision === expectedRevision`, associando o erro a mesma revisao do draft que o produziu. Em timeout, diagnostico imprime estado, revisao esperada e ultimo estado observado.
-  - **Fallback inseguro eliminado:** `receipt?.sceneRevision ?? 0` substituido por validacao explicita com `fail()` se receipt for nulo ou `sceneRevision` nao for `number`.
-  - **Predicado do runner reestruturado:** `waitForLiveValidationFresh` distingue 4 casos exclusivos: (a) nao-fresh, (b) fresh+rev menor, (c) fresh+rev maior/pulo, (d) fresh+rev exata. Condicoes inalcancaveis eliminadas. Comparacao exata `===`, nunca `>=`.
-  - **Predicado puro compartilhado:** `isLiveValidationFreshMatchingRevision` exportado de `liveValidationController.ts`, usado nos testes Vitest. Testes provam: fresh/rev=3 nao conclui espera rev=4 (`wrong-revision`); fresh/rev=4 conclui; error de revisao errada nao satisfaz live-error; receipt ausente/invalido falha sem fallback.
-  - **HTTP 403 investigado:** `[Viewport] fetch do asset` tem 403 detectado explicitamente com mensagem de scope. Scope do protocolo de asset ampliado com `/tmp/**`. Nao confundir com rate limit de `dependency_manager.rs` (toolchain GitHub API).
-  - **Testes:** 16 novos em `liveValidationController.test.ts` (helper puro). 7 novos em `App.test.tsx` (error de revisao errada, receipt invalido, checkRevision nominal).
-  - **Gates locais:** check:tree PASS, lint PASS, tsc --noEmit PASS, npm test PASS (**47/1 test files**), clippy -D warnings PASS, cargo test --lib -- --nocapture PASS (**438/0/24**), build:debug PASS.
-  - **Status honesto:** PR #25 DRAFT, P0 nao desbloqueado. CI remoto pendente (push + pull_request + 3x dispatch).
-  - **Proximo passo imediato:** commit, push, gh run watch push Desktop E2E, gh run watch pull_request Desktop E2E, 3x workflow_dispatch target=all sequencial.
+* **O que acabou de acontecer (2026-07-10 rodada 84 — codex/desktop-e2e-determinism-p0; guard por revisao no HierarchyPanel + bridge canonica do helper):**
+  - **Branch:** `codex/desktop-e2e-determinism-p0`, sobre `2f65869`. PR #25 DRAFT, base `codex/linux-host-support`.
+  - **Causa raiz comprovada (rodada 84):** a corrida `receipt revision=2 -> fresh revision=3` ocorria porque o `HierarchyPanel.useEffect` iniciava `listScenes/getSceneData/hydrateSceneResult` assincrono ao reagir a `activeProjectDir`. O E2E injetava `setSceneDraft` (rev=N). A hidratacao tardia retornava e chamava `setActiveScene`, criando rev=N+1 e sobrescrevendo o draft.
+  - **Guard por revisao (HierarchyPanel.tsx):** captura `sceneRevision` via `useEditorStore.getState().sceneRevision` no inicio do efeito. Apos cada boundary assincrono, compara com o valor corrente. Se mudou, apenas atualiza catalogo/path sem chamar `setActiveScene`.
+  - **Bridge canonica:** `isLiveValidationFreshMatchingRevision` agora exposta via `window.__RDS_E2E__.isLiveValidationFreshMatchingRevision`. O runner MJS chama a bridge em vez de duplicar a logica de comparacao de revisao.
+  - **HTTP 403 removido:** o path original do CI era fixture do workspace, nao coberto por `$APPDATA/**` ou `/tmp/**`. Nao ampliado. O Viewport 403 nao tem relacao causal comprovada com a corrida de revisao.
+  - **Testes de regressao deterministicos (HierarchyPanel.test.tsx):** (1) hidratacao tardia nao sobrescreve draft — Promise adiada, injeta draft, resolve, prova que cena continua draft; (2) hidratacao inicial normal aplica a cena; (3) troca de projeto ignora resposta tardia anterior. `liveValidationController.test.ts`: +2 testes (error nao satisfaz fresh, stale nao satisfaz fresh).
+  - **Gates locais:** check:tree PASS, lint PASS, tsc --noEmit PASS, npm test PASS, clippy -D warnings PASS, cargo test --lib -- --nocapture PASS, build:debug PASS.
+  - **Status honesto:** Desktop E2E P0 — Em hardening; corrida de hidratacao tardia identificada e corrigida localmente; nao certificado.
+  - **Proximo passo imediato:** commit, push, checks remotos (push + pull_request + 3x workflow_dispatch).
 
 * **O que acabou de acontecer (2026-06-28 rodada 76 - MSVC Build Tools restaurado; todos os gates Rust + build debug verdes):**
   - **Branch/commit:** `codex/main-user-flow-hardening`, commit `28148f7` (6 ahead `origin/main`, 0 behind `origin/codex/main-user-flow-hardening`). Worktree limpo. Nenhum commit novo nesta sessao — apenas validacao de gates.

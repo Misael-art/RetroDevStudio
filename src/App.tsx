@@ -63,6 +63,7 @@ import {
   getLiveBuildBlockReason,
   getLiveToolbarIndicator,
   getLiveBuildWarningSummary,
+  isLiveValidationFreshMatchingRevision,
   useLiveValidationController,
 } from "./core/validation/liveValidationController";
 import {
@@ -1445,6 +1446,10 @@ type AutomationApi = {
   closeProject: () => Promise<void>;
   persistScene: (scope?: string, successMessage?: string) => Promise<boolean>;
   setSceneDraft: (scene: Scene) => Promise<{ ok: true; sceneRevision: number }>;
+  isLiveValidationFreshMatchingRevision: (
+    validationState: { hwValidationState: string; hwValidatedRevision: number } | null,
+    expectedRevision: number | null
+  ) => import("./core/validation/liveValidationController").FreshMatchOutcome;
   setSelectedEntityId: (entityId: string | null) => boolean;
   setActiveLayerId: (layerId: string | null) => boolean;
   setEditorMode: (mode: "select" | "paint" | "erase" | "collision") => boolean;
@@ -3703,6 +3708,9 @@ export default function App() {
         state.setActiveScene(scene, scene);
         const { sceneRevision } = useEditorStore.getState();
         return { ok: true, sceneRevision };
+      },
+      isLiveValidationFreshMatchingRevision: (validationState, expectedRevision) => {
+        return isLiveValidationFreshMatchingRevision(validationState, expectedRevision);
       },
       setSelectedEntityId: (entityId: string | null) => {
         useEditorStore.getState().setSelectedEntityId(entityId);

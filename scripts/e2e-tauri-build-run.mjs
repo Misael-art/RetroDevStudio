@@ -950,6 +950,24 @@ async function readAutomationState(sessionId) {
   );
 }
 
+async function callIsLiveValidationFreshMatchingRevision(sessionId, revision) {
+  const valid = await pageEvaluateRaw(
+    sessionId,
+    `(function(){
+      const state = window.__RDS_E2E__?.getState?.() ?? null;
+      if (!state) return JSON.stringify({ matches: false, reason: "no-state" });
+      const validationState = { hwValidationState: state.hwValidationState, hwValidatedRevision: state.hwValidatedRevision };
+      const result = window.__RDS_E2E__?.isLiveValidationFreshMatchingRevision(validationState, ${JSON.stringify(revision)});
+      return JSON.stringify(result ?? { matches: false, reason: "no-state" });
+    })()`
+  );
+  try {
+    return JSON.parse(valid);
+  } catch {
+    return { matches: false, reason: "no-state" };
+  }
+}
+
 async function waitForLiveValidationFresh(sessionId, timeoutMs, revision) {
   let lastState = null;
   await waitFor(
@@ -957,36 +975,22 @@ async function waitForLiveValidationFresh(sessionId, timeoutMs, revision) {
       const state = await readAutomationState(sessionId);
       lastState = state;
 
-      // (a) não-fresh: keep polling
-      if (!state || state.hwValidationState !== "fresh") {
-        const k = state?.hwValidationState ?? "sem_estado";
-        console.log(
-          `[E2E] Esperando fresh... k:${k} r:${state?.hwValidatedRevision ?? "?"}/${revision ?? "?"} erros:${state?.hwStatus?.errorCount ?? "?"}`
-        );
-        return false;
-      }
+      const result = await callIsLiveValidationFreshMatchingRevision(sessionId, revision);
+      if (result.matches) return state;
 
-      // No revision constraint: any fresh is accepted
-      if (revision == null) return state;
-
-      // (b) fresh com revisão menor que a esperada
-      if (state.hwValidatedRevision < revision) {
-        console.log(
-          `[E2E] DIAG: fresh mas revisao menor: esperada=${revision} atual=${state.hwValidatedRevision}`
-        );
-        return false;
-      }
-
-      // (c) fresh com revisão maior/pulo detectado
-      if (state.hwValidatedRevision > revision) {
-        console.log(
-          `[E2E] DIAG: revisao ${state.hwValidatedRevision} > esperada ${revision}; pulo detectado`
-        );
-        return false;
-      }
-
-      // (d) fresh com revisão exata
-      return state;
+      const diag = result.reason === "no-state"
+        ? "sem_estado"
+        : result.reason === "not-fresh"
+          ? `não-fresh:${result.actual}`
+          : result.reason === "wrong-revision"
+            ? `rev_menor:${result.actual}<${result.expected}`
+            : result.reason === "revision-skip"
+              ? `rev_skip:${result.actual}>${result.expected}`
+              : "desconhecido";
+      console.log(
+        `[E2E] Esperando fresh... ${diag} r:${state?.hwValidatedRevision ?? "?"}/${revision ?? "?"} erros:${state?.hwStatus?.errorCount ?? "?"}`
+      );
+      return false;
     },
     timeoutMs,
     `Validacao live nao ficou fresh apos injetar draft (revisao ${revision ?? "?"}).`,
@@ -5639,10 +5643,11 @@ async function main() {
             const state = await readAutomationState(sessionId);
             if (!state) return false;
             if (state.hwValidationState !== "error") return false;
-            if (state.hwValidatedRevision !== expectedRevision) {
+            const revResult = await callIsLiveValidationFreshMatchingRevision(sessionId, expectedRevision);
+            if (!revResult.matches) {
               lastErrorState = state;
               console.log(
-                `[E2E] DIAG: error em revisao ${state.hwValidatedRevision} != esperada ${expectedRevision}; ignorando.`
+                `[E2E] DIAG: error em revisao divergente: ${JSON.stringify(revResult)}; ignorando.`
               );
               return false;
             }

@@ -317,5 +317,21 @@ describe("liveValidationController", () => {
       );
       expect(result).toEqual({ matches: true });
     });
+
+    it("retorna not-fresh quando estado e 'error' com revisao errada", () => {
+      const result = isLiveValidationFreshMatchingRevision(
+        { hwValidationState: "error", hwValidatedRevision: 4 },
+        4
+      );
+      expect(result).toEqual({ matches: false, reason: "not-fresh", actual: "error" });
+    });
+
+    it("retorna not-fresh quando estado e 'stale' mesmo com revisao correta", () => {
+      const result = isLiveValidationFreshMatchingRevision(
+        { hwValidationState: "stale", hwValidatedRevision: 4 },
+        4
+      );
+      expect(result).toEqual({ matches: false, reason: "not-fresh", actual: "stale" });
+    });
   });
 });
