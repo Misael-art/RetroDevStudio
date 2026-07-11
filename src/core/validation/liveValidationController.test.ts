@@ -4,7 +4,8 @@ import {
   getLiveBuildBlockReason,
   getLiveBuildWarningSummary,
   getLiveToolbarIndicator,
-  isLiveValidationFreshMatchingRevision,
+  isLiveValidationStateMatchingRevision,
+  isValidSceneDraftReceipt,
   serializeSceneDraft,
 } from "./liveValidationController";
 import type { Scene } from "../ipc/sceneService";
@@ -262,23 +263,25 @@ describe("liveValidationController", () => {
     });
   });
 
-  describe("isLiveValidationFreshMatchingRevision", () => {
-    it("retorna not-fresh quando estado e null", () => {
-      const result = isLiveValidationFreshMatchingRevision(null, 4);
+  describe("isLiveValidationStateMatchingRevision", () => {
+    it("falha quando estado e null", () => {
+      const result = isLiveValidationStateMatchingRevision(null, "fresh", 4);
       expect(result).toEqual({ matches: false, reason: "no-state" });
     });
 
     it("retorna not-fresh quando hwValidationState nao e fresh", () => {
-      const result = isLiveValidationFreshMatchingRevision(
+      const result = isLiveValidationStateMatchingRevision(
         { hwValidationState: "pending", hwValidatedRevision: 0 },
+        "fresh",
         4
       );
-      expect(result).toEqual({ matches: false, reason: "not-fresh", actual: "pending" });
+      expect(result).toEqual({ matches: false, reason: "wrong-state", expected: "fresh", actual: "pending" });
     });
 
     it("retorna wrong-revision quando fresh/rev=3 e esperado rev=4", () => {
-      const result = isLiveValidationFreshMatchingRevision(
+      const result = isLiveValidationStateMatchingRevision(
         { hwValidationState: "fresh", hwValidatedRevision: 3 },
+        "fresh",
         4
       );
       expect(result).toEqual({
@@ -290,48 +293,47 @@ describe("liveValidationController", () => {
     });
 
     it("retorna revision-skip quando fresh/rev=5 e esperado rev=4", () => {
-      const result = isLiveValidationFreshMatchingRevision(
+      const result = isLiveValidationStateMatchingRevision(
         { hwValidationState: "fresh", hwValidatedRevision: 5 },
+        "fresh",
         4
       );
       expect(result).toEqual({
         matches: false,
-        reason: "revision-skip",
+        reason: "wrong-revision",
         expected: 4,
         actual: 5,
       });
     });
 
     it("retorna matches:true quando fresh/rev=4 e esperado rev=4", () => {
-      const result = isLiveValidationFreshMatchingRevision(
+      const result = isLiveValidationStateMatchingRevision(
         { hwValidationState: "fresh", hwValidatedRevision: 4 },
+        "fresh",
         4
       );
       expect(result).toEqual({ matches: true });
     });
 
-    it("retorna matches:true quando fresh e expectedRevision e null", () => {
-      const result = isLiveValidationFreshMatchingRevision(
-        { hwValidationState: "fresh", hwValidatedRevision: 3 },
-        null
-      );
-      expect(result).toEqual({ matches: true });
-    });
-
-    it("retorna not-fresh quando estado e 'error' com revisao errada", () => {
-      const result = isLiveValidationFreshMatchingRevision(
+    it("aceita error com revisao igual", () => {
+      const result = isLiveValidationStateMatchingRevision(
         { hwValidationState: "error", hwValidatedRevision: 4 },
+        "error",
         4
       );
-      expect(result).toEqual({ matches: false, reason: "not-fresh", actual: "error" });
+      expect(result).toEqual({ matches: true });
     });
 
     it("retorna not-fresh quando estado e 'stale' mesmo com revisao correta", () => {
-      const result = isLiveValidationFreshMatchingRevision(
+      const result = isLiveValidationStateMatchingRevision(
         { hwValidationState: "stale", hwValidatedRevision: 4 },
+        "fresh",
         4
       );
-      expect(result).toEqual({ matches: false, reason: "not-fresh", actual: "stale" });
+      expect(result).toEqual({ matches: false, reason: "wrong-state", expected: "fresh", actual: "stale" });
     });
   });
+
+  it.each([null, { ok: false, sceneRevision: 4 }, { ok: true, sceneRevision: Number.NaN }, { ok: true, sceneRevision: 0 }, { ok: true, sceneRevision: -1 }, { ok: true, sceneRevision: 1.5 }, { ok: true, sceneRevision: "4" }])("rejeita receipt invalido", (receipt) => expect(isValidSceneDraftReceipt(receipt)).toBe(false));
+  it("aceita receipt positivo seguro", () => expect(isValidSceneDraftReceipt({ ok: true, sceneRevision: 4 })).toBe(true));
 });

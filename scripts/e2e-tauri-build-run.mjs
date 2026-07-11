@@ -950,32 +950,19 @@ async function readAutomationState(sessionId) {
   );
 }
 
-async function callIsLiveValidationFreshMatchingRevision(sessionId, revision) {
-  const valid = await pageEvaluateRaw(
-    sessionId,
-    `(function(){
-      const state = window.__RDS_E2E__?.getState?.() ?? null;
-      if (!state) return JSON.stringify({ matches: false, reason: "no-state" });
-      const validationState = { hwValidationState: state.hwValidationState, hwValidatedRevision: state.hwValidatedRevision };
-      const result = window.__RDS_E2E__?.isLiveValidationFreshMatchingRevision(validationState, ${JSON.stringify(revision)});
-      return JSON.stringify(result ?? { matches: false, reason: "no-state" });
-    })()`
-  );
-  try {
-    return JSON.parse(valid);
-  } catch {
-    return { matches: false, reason: "no-state" };
-  }
+async function callLiveValidationStateMatch(sessionId, expectedState, revision) {
+  const state = await readAutomationState(sessionId);
+  const validationState = state ? { hwValidationState: state.hwValidationState, hwValidatedRevision: state.hwValidatedRevision } : null;
+  const result = await callAutomationApi(sessionId, "isLiveValidationStateMatchingRevision", [validationState, expectedState, revision]);
+  return { state, result };
 }
 
 async function waitForLiveValidationFresh(sessionId, timeoutMs, revision) {
   let lastState = null;
   await waitFor(
     async () => {
-      const state = await readAutomationState(sessionId);
+      const { state, result } = await callLiveValidationStateMatch(sessionId, "fresh", revision);
       lastState = state;
-
-      const result = await callIsLiveValidationFreshMatchingRevision(sessionId, revision);
       if (result.matches) return state;
 
       const diag = result.reason === "no-state"
@@ -5631,7 +5618,7 @@ async function main() {
     ) {
       const overflowScenario = buildLiveOverflowScenario(projectMetadata.target, options.scenario);
       const receipt = await setSceneDraft(sessionId, overflowScenario.draft);
-      if (!receipt || typeof receipt.sceneRevision !== "number") {
+      if (!receipt || receipt.ok !== true || typeof receipt.sceneRevision !== "number" || !Number.isSafeInteger(receipt.sceneRevision) || receipt.sceneRevision <= 0) {
         fail(`setSceneDraft devolveu recibo invalido: ${JSON.stringify(receipt)}`);
       }
       const expectedRevision = receipt.sceneRevision;
@@ -5640,10 +5627,8 @@ async function main() {
         let lastErrorState = null;
         await waitFor(
           async () => {
-            const state = await readAutomationState(sessionId);
+            const { state, result: revResult } = await callLiveValidationStateMatch(sessionId, "error", expectedRevision);
             if (!state) return false;
-            if (state.hwValidationState !== "error") return false;
-            const revResult = await callIsLiveValidationFreshMatchingRevision(sessionId, expectedRevision);
             if (!revResult.matches) {
               lastErrorState = state;
               console.log(

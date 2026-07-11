@@ -63,7 +63,8 @@ import {
   getLiveBuildBlockReason,
   getLiveToolbarIndicator,
   getLiveBuildWarningSummary,
-  isLiveValidationFreshMatchingRevision,
+  isLiveValidationStateMatchingRevision,
+  isValidSceneDraftReceipt,
   useLiveValidationController,
 } from "./core/validation/liveValidationController";
 import {
@@ -1446,10 +1447,10 @@ type AutomationApi = {
   closeProject: () => Promise<void>;
   persistScene: (scope?: string, successMessage?: string) => Promise<boolean>;
   setSceneDraft: (scene: Scene) => Promise<{ ok: true; sceneRevision: number }>;
-  isLiveValidationFreshMatchingRevision: (
+  isLiveValidationStateMatchingRevision: (
     validationState: { hwValidationState: string; hwValidatedRevision: number } | null,
-    expectedRevision: number | null
-  ) => import("./core/validation/liveValidationController").FreshMatchOutcome;
+    expectedState: string, expectedRevision: number
+  ) => import("./core/validation/liveValidationController").LiveValidationStateMatchOutcome;
   setSelectedEntityId: (entityId: string | null) => boolean;
   setActiveLayerId: (layerId: string | null) => boolean;
   setEditorMode: (mode: "select" | "paint" | "erase" | "collision") => boolean;
@@ -3706,11 +3707,12 @@ export default function App() {
 
         state.setSelectedEntityId(null);
         state.setActiveScene(scene, scene);
-        const { sceneRevision } = useEditorStore.getState();
-        return { ok: true, sceneRevision };
+        const receipt = { ok: true as const, sceneRevision: useEditorStore.getState().sceneRevision };
+        if (!isValidSceneDraftReceipt(receipt)) throw new Error("setSceneDraft nao produziu recibo valido.");
+        return receipt;
       },
-      isLiveValidationFreshMatchingRevision: (validationState, expectedRevision) => {
-        return isLiveValidationFreshMatchingRevision(validationState, expectedRevision);
+      isLiveValidationStateMatchingRevision: (validationState, expectedState, expectedRevision) => {
+        return isLiveValidationStateMatchingRevision(validationState, expectedState, expectedRevision);
       },
       setSelectedEntityId: (entityId: string | null) => {
         useEditorStore.getState().setSelectedEntityId(entityId);
@@ -5196,4 +5198,3 @@ export default function App() {
     </div>
   );
 }
-

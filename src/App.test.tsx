@@ -7,7 +7,7 @@ import type { CommandSearchResult, ShortcutCommand } from "./core/shortcuts";
 import { useEditorStore } from "./core/store/editorStore";
 import {
   LIVE_VALIDATION_DEBOUNCE_MS,
-  isLiveValidationFreshMatchingRevision,
+  isLiveValidationStateMatchingRevision,
 } from "./core/validation/liveValidationController";
 
 const mocks = vi.hoisted(() => ({
@@ -1937,8 +1937,9 @@ describe("App build flow", () => {
   });
 
   it("fresh/rev=3 nao conclui espera de rev=4 (usando predicado real)", async () => {
-    const outcome = isLiveValidationFreshMatchingRevision(
+    const outcome = isLiveValidationStateMatchingRevision(
       { hwValidationState: "fresh", hwValidatedRevision: 3 },
+      "fresh",
       4
     );
     expect(outcome).toEqual({
@@ -1950,8 +1951,9 @@ describe("App build flow", () => {
   });
 
   it("fresh/rev=4 conclui espera de rev=4 (usando predicado real)", async () => {
-    const outcome = isLiveValidationFreshMatchingRevision(
+    const outcome = isLiveValidationStateMatchingRevision(
       { hwValidationState: "fresh", hwValidatedRevision: 4 },
+      "fresh",
       4
     );
     expect(outcome).toEqual({ matches: true });
