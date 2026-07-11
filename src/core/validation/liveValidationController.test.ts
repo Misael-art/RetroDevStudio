@@ -292,7 +292,7 @@ describe("liveValidationController", () => {
       });
     });
 
-    it("retorna revision-skip quando fresh/rev=5 e esperado rev=4", () => {
+    it("retorna wrong-revision quando fresh/rev=5 e esperado rev=4", () => {
       const result = isLiveValidationStateMatchingRevision(
         { hwValidationState: "fresh", hwValidatedRevision: 5 },
         "fresh",
@@ -304,6 +304,17 @@ describe("liveValidationController", () => {
         expected: 4,
         actual: 5,
       });
+    });
+
+    it.each([
+      { hwValidationState: "fresh", hwValidatedRevision: undefined },
+      { hwValidationState: "fresh", hwValidatedRevision: Number.NaN },
+      { hwValidationState: "fresh", hwValidatedRevision: 4 },
+    ])("falha estritamente para revisao ausente ou invalida", (validationState) => {
+      const expectedRevision = validationState.hwValidatedRevision === 4 ? Number.NaN : 4;
+      expect(
+        isLiveValidationStateMatchingRevision(validationState as never, "fresh", expectedRevision)
+      ).toMatchObject({ matches: false, reason: "wrong-revision" });
     });
 
     it("retorna matches:true quando fresh/rev=4 e esperado rev=4", () => {

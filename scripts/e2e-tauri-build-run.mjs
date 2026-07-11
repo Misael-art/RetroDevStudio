@@ -967,13 +967,11 @@ async function waitForLiveValidationFresh(sessionId, timeoutMs, revision) {
 
       const diag = result.reason === "no-state"
         ? "sem_estado"
-        : result.reason === "not-fresh"
-          ? `não-fresh:${result.actual}`
+        : result.reason === "wrong-state"
+          ? `estado_incorreto:${result.actual}`
           : result.reason === "wrong-revision"
-            ? `rev_menor:${result.actual}<${result.expected}`
-            : result.reason === "revision-skip"
-              ? `rev_skip:${result.actual}>${result.expected}`
-              : "desconhecido";
+            ? `wrong-revision:${result.actual}/${result.expected}`
+            : "desconhecido";
       console.log(
         `[E2E] Esperando fresh... ${diag} r:${state?.hwValidatedRevision ?? "?"}/${revision ?? "?"} erros:${state?.hwStatus?.errorCount ?? "?"}`
       );

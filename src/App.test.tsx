@@ -7,7 +7,6 @@ import type { CommandSearchResult, ShortcutCommand } from "./core/shortcuts";
 import { useEditorStore } from "./core/store/editorStore";
 import {
   LIVE_VALIDATION_DEBOUNCE_MS,
-  isLiveValidationStateMatchingRevision,
 } from "./core/validation/liveValidationController";
 
 const mocks = vi.hoisted(() => ({
@@ -1936,69 +1935,34 @@ describe("App build flow", () => {
     delete automationWindow.__TAURI_INTERNALS__;
   });
 
-  it("fresh/rev=3 nao conclui espera de rev=4 (usando predicado real)", async () => {
-    const outcome = isLiveValidationStateMatchingRevision(
-      { hwValidationState: "fresh", hwValidatedRevision: 3 },
-      "fresh",
-      4
-    );
-    expect(outcome).toEqual({
-      matches: false,
-      reason: "wrong-revision",
-      expected: 4,
-      actual: 3,
+  it("usa a bridge real para estado e revisao estritos", async () => {
+    const automationWindow = window as Window & { __TAURI_INTERNALS__?: unknown };
+    automationWindow.__TAURI_INTERNALS__ = {};
+
+    await act(async () => {
+      root.unmount();
+      await flush();
+      root = createRoot(container);
+      root.render(<App />);
+      await flush();
+      await flush();
     });
-  });
 
-  it("fresh/rev=4 conclui espera de rev=4 (usando predicado real)", async () => {
-    const outcome = isLiveValidationStateMatchingRevision(
-      { hwValidationState: "fresh", hwValidatedRevision: 4 },
-      "fresh",
-      4
-    );
-    expect(outcome).toEqual({ matches: true });
-  });
+    const matches = automationWindow.__RDS_E2E__!.isLiveValidationStateMatchingRevision;
+    expect(matches({ hwValidationState: "fresh", hwValidatedRevision: 4 }, "fresh", 4)).toEqual({ matches: true });
+    expect(matches({ hwValidationState: "error", hwValidatedRevision: 4 }, "error", 4)).toEqual({ matches: true });
+    expect(matches({ hwValidationState: "pending", hwValidatedRevision: 4 }, "fresh", 4)).toEqual({
+      matches: false, reason: "wrong-state", expected: "fresh", actual: "pending",
+    });
+    expect(matches({ hwValidationState: "fresh", hwValidatedRevision: 3 }, "fresh", 4)).toMatchObject({
+      matches: false, reason: "wrong-revision",
+    });
+    expect(matches({ hwValidationState: "fresh", hwValidatedRevision: 5 }, "fresh", 4)).toMatchObject({
+      matches: false, reason: "wrong-revision",
+    });
+    expect(matches(null, "fresh", 4)).toEqual({ matches: false, reason: "no-state" });
 
-  it("error de revisao diferente nao satisfaz cenario live-error (receipt com rev=4, error em rev=3)", async () => {
-    const setSceneDraftMock = () =>
-      Promise.resolve({ ok: true as const, sceneRevision: 4 });
-    const receipt = await setSceneDraftMock();
-    expect(receipt.sceneRevision).toBe(4);
-
-    const errorState = {
-      hwValidationState: "error" as const,
-      hwValidatedRevision: 3,
-      hwValidationError: "VRAM estouro",
-    };
-
-    const errorRevOk = errorState.hwValidationState === "error" &&
-      errorState.hwValidatedRevision === receipt.sceneRevision;
-    expect(errorRevOk).toBe(false);
-  });
-
-  it("error da revisao correta satisfaz cenario live-error (receipt com rev=4, error em rev=4)", async () => {
-    const setSceneDraftMock = () =>
-      Promise.resolve({ ok: true as const, sceneRevision: 4 });
-    const receipt = await setSceneDraftMock();
-    expect(receipt.sceneRevision).toBe(4);
-
-    const errorState = {
-      hwValidationState: "error" as const,
-      hwValidatedRevision: 4,
-      hwValidationError: "VRAM estouro",
-    };
-
-    const errorRevOk = errorState.hwValidationState === "error" &&
-      errorState.hwValidatedRevision === receipt.sceneRevision;
-    expect(errorRevOk).toBe(true);
-  });
-
-  it("setHwValidationResult usa revisao correta e nao aceita >=", async () => {
-    const checkRevision = (rev: number, expected: number): boolean => {
-      return rev === expected;
-    };
-    expect(checkRevision(4, 4)).toBe(true);
-    expect(checkRevision(5, 4)).toBe(false);
+    delete automationWindow.__TAURI_INTERNALS__;
   });
 
   it("newRevision menor que expected falha pela funcao setHwValidationResult do store", async () => {
@@ -2022,27 +1986,6 @@ describe("App build flow", () => {
     expect(state.hwValidatedRevision).toBe(state.sceneRevision);
   });
 
-  it("receipt ausente falha sem fallback (simula validacao do e2e runner)", async () => {
-    const receipt = null;
-    const failIfInvalid = (r: unknown): number => {
-      if (!r || typeof (r as Record<string, unknown>).sceneRevision !== "number") {
-        throw new Error("setSceneDraft devolveu recibo invalido");
-      }
-      return (r as { sceneRevision: number }).sceneRevision;
-    };
-    expect(() => failIfInvalid(receipt)).toThrow("setSceneDraft devolveu recibo invalido");
-  });
-
-  it("receipt com sceneRevision valido passa validacao (sem fallback para 0)", async () => {
-    const receipt = { ok: true, sceneRevision: 5 };
-    const failIfInvalid = (r: unknown): number => {
-      if (!r || typeof (r as Record<string, unknown>).sceneRevision !== "number") {
-        throw new Error("setSceneDraft devolveu recibo invalido");
-      }
-      return (r as { sceneRevision: number }).sceneRevision;
-    };
-    expect(failIfInvalid(receipt)).toBe(5);
-  });
 
   it("builds, loads the ROM, and starts the emulator frame loop", async () => {
     await act(async () => {
