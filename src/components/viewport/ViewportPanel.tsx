@@ -1372,13 +1372,6 @@ export default function ViewportPanel({
             markFailure("missing", `fetch retornou 404 para ${assetUrl}.`);
             return;
           }
-          if (detail.includes("HTTP 403")) {
-            logMessage(
-              "error",
-              `[Viewport] fetch do asset '${relativePath}' (${absolutePath}) retornou 403 — fora do escopo do protocolo de asset (scope: $HOME/** e $TEMP/**).`
-            );
-            return;
-          }
           logMessage(
             "warn",
             `[Viewport] fetch do asset '${relativePath}' falhou (${detail}); tentando fallback Image().`
