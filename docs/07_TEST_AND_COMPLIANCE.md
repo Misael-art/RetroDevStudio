@@ -1,6 +1,6 @@
 # 07 - COMPLIANCE LEGAL & ARQUITETURA DE TESTES
 **Status:** Definitivo
-**Ultima revisao:** 2026-07-10 (rodada 84 - Desktop E2E P0 guard por revisao + bridge canonica)
+**Ultima revisao:** 2026-07-11 (Desktop E2E P0: contrato canônico e gates locais)
 
 > Este documento existe para impedir duas classes de falha:
 > 1. Violacao de IP/licenca.
@@ -156,7 +156,8 @@ Nenhuma etapa deve ser tratada como `concluida` sem certificacao real do fluxo a
 - Fixtures de projeto em `src-tauri/tests/fixtures/projects/` nao devem carregar diretórios `build/` versionados como precondicao silenciosa para testes; toda cobertura relevante deve nascer de assets tracked, fixtures sinteticas ou build gerado na propria rodada.
 - A existencia de toolchain/core instalado localmente nao substitui compliance de licenca.
 - Superficies experimentais devem continuar claramente marcadas ate deixarem de ser parciais ou stub.
-- O predicado `isLiveValidationFreshMatchingRevision` em `liveValidationController.ts` e o helper canonico de determinismo de revisao. Testes de cenario E2E que verificam `fresh` + revisao devem usar este predicado puro, nao `useEditorStore.setState()` seguido de asserts triviais. Novos cenarios de validacao live devem registrar `FreshMatchOutcome` como contrato de teste.
-- O guard por revisao no `HierarchyPanel.useEffect` e a correcao canonica contra a corrida de hidratacao tardia. Testes de regressao devem usar Promise adiada controlada (sem `setTimeout`): renderizar HierarchyPanel, iniciar hidratacao, nao resolve-la, injetar draft via store, resolver hidratacao manualmente, provar que a cena continua sendo o draft e a revisao nao avancou. Cobrir tambem: hidratacao inicial normal, troca de projeto ignora resposta tardia anterior.
-- O runner MJS (`scripts/e2e-tauri-build-run.mjs`) deve usar a bridge `window.__RDS_E2E__.isLiveValidationFreshMatchingRevision` para validar revisao, nunca duplicar a logica de comparacao. Nova logica de validacao de revisao deve ser adicionada ao helper puro em TypeScript, nao ao MJS.
-- `[Viewport] fetch do asset` com HTTP 403 e um sinal de que o arquivo de asset esta fora do escopo do protocolo `assetProtocol.scope` em `tauri.conf.json`. O scope deve incluir `$HOME/**`, `$TEMP/**`, `$APPDATA/**` e `/tmp/**`. Nao confundir com rate limit 403 do `dependency_manager.rs` (GitHub API para download de toolchain).
+- O predicado canônico de determinismo e `isLiveValidationStateMatchingRevision` em `liveValidationController.ts`, exposto pelo App em `window.__RDS_E2E__`. Cenários E2E devem chamar a bridge real e exigir tanto o estado esperado (`fresh` ou `error`) quanto igualdade estrita de revisao; estado ausente, estado diferente ou revisao menor/maior/ausente/invalida falham com o diagnostico canônico.
+- `setSceneDraft` deve devolver receipt com `ok:true` e `sceneRevision` inteiro seguro positivo. Ausencia, `ok:false`, `NaN`, zero, negativo, decimal e string sao falhas, sem fallback.
+- O guard do `HierarchyPanel.useEffect` combina geracao, projeto e revisao contra hidratacao tardia. Testes de corrida usam Promise deferred e handshake explicito de inicio, nunca timeout como sincronizacao principal; devem cobrir hidratacao inicial, stale success, stale error, A→B e ABA, preservando cena, source, path e revisao do draft novo.
+- O runner MJS (`scripts/e2e-tauri-build-run.mjs`) chama somente a bridge canônica para `fresh` e `error`; `pageEvaluateRaw` e qualquer alias de compatibilidade sao proibidos. A frente P0 permanece em hardening ate a certificacao remota do SHA final.
+- Nao ampliar `assetProtocol.scope` para `$APPDATA/**` ou `/tmp/**` como correcao generica de HTTP 403. Investigar o path e a politica do protocolo antes de qualquer mudanca de escopo; rate limit 403 de `dependency_manager.rs` e um problema distinto.
