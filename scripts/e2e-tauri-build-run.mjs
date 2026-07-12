@@ -950,16 +950,58 @@ async function readAutomationState(sessionId) {
   );
 }
 
-async function waitForLiveValidationFresh(sessionId, timeoutMs) {
+async function callLiveValidationStateMatch(sessionId, expectedState, revision) {
+  const state = await readAutomationState(sessionId);
+  const validationState = state ? { hwValidationState: state.hwValidationState, hwValidatedRevision: state.hwValidatedRevision } : null;
+  const result = await callAutomationApi(sessionId, "isLiveValidationStateMatchingRevision", [validationState, expectedState, revision]);
+  return { state, result };
+}
+
+async function waitForLiveValidationFresh(sessionId, timeoutMs, revision) {
+  let lastState = null;
   await waitFor(
     async () => {
-      const state = await readAutomationState(sessionId);
-      return state?.hwValidationState === "fresh" ? state : false;
+      const { state, result } = await callLiveValidationStateMatch(sessionId, "fresh", revision);
+      lastState = state;
+      if (result.matches) return state;
+
+      const diag = result.reason === "no-state"
+        ? "sem_estado"
+        : result.reason === "wrong-state"
+          ? `estado_incorreto:${result.actual}`
+          : result.reason === "wrong-revision"
+            ? `wrong-revision:${result.actual}/${result.expected}`
+            : "desconhecido";
+      console.log(
+        `[E2E] Esperando fresh... ${diag} r:${state?.hwValidatedRevision ?? "?"}/${revision ?? "?"} erros:${state?.hwStatus?.errorCount ?? "?"}`
+      );
+      return false;
     },
     timeoutMs,
-    "Validacao live nao ficou fresh apos injetar draft.",
+    `Validacao live nao ficou fresh apos injetar draft (revisao ${revision ?? "?"}).`,
     250
-  );
+  ).catch((error) => {
+    const diag = lastState
+      ? `ultimo estado: hwValidationState=${lastState.hwValidationState} hwValidatedRevision=${lastState.hwValidatedRevision} sceneRevision=${lastState.sceneRevision}`
+      : "nenhum estado obtido";
+    console.log(`[E2E] DIAG timeout: esperada rev=${revision ?? "?"}. ${diag}`);
+    throw error;
+  });
+}
+
+async function logAutomationState(sessionId, label) {
+  try {
+    const state = await readAutomationState(sessionId);
+    if (!state) {
+      console.log(`[E2E] ${label}: estado indisponivel`);
+      return;
+    }
+    console.log(
+      `[E2E] ${label}: fresh=${state.hwValidationState} rev=${state.sceneRevision} validatedRev=${state.hwValidatedRevision} errores=${state.hwStatus?.errorCount ?? "?"} warnings=${state.hwStatus?.warningCount ?? "?"}`
+    );
+  } catch {
+    console.log(`[E2E] ${label}: falha ao ler estado`);
+  }
 }
 
 async function callAutomationApi(sessionId, methodName, args = []) {
@@ -2567,7 +2609,7 @@ async function setSceneDraft(sessionId, draft) {
       }
       api
         .setSceneDraft(arguments[0])
-        .then(() => done({ ok: true }))
+        .then((receipt) => done({ ok: true, value: receipt }))
         .catch((error) => done({ ok: false, error: String(error) }));
     `,
     [draft]
@@ -2576,6 +2618,8 @@ async function setSceneDraft(sessionId, draft) {
   if (!result?.ok) {
     fail(`Falha ao injetar draft live: ${result?.error ?? "sem diagnostico"}`);
   }
+
+  return result.value;
 }
 
 async function readLiveStatus(sessionId) {
@@ -5571,19 +5615,39 @@ async function main() {
       options.scenario === "live-error"
     ) {
       const overflowScenario = buildLiveOverflowScenario(projectMetadata.target, options.scenario);
-      await setSceneDraft(sessionId, overflowScenario.draft);
+      const receipt = await setSceneDraft(sessionId, overflowScenario.draft);
+      if (!receipt || receipt.ok !== true || typeof receipt.sceneRevision !== "number" || !Number.isSafeInteger(receipt.sceneRevision) || receipt.sceneRevision <= 0) {
+        fail(`setSceneDraft devolveu recibo invalido: ${JSON.stringify(receipt)}`);
+      }
+      const expectedRevision = receipt.sceneRevision;
+      await logAutomationState(sessionId, "Pos-setSceneDraft");
       if (options.scenario === "live-error") {
+        let lastErrorState = null;
         await waitFor(
           async () => {
-            const state = await readAutomationState(sessionId);
-            return state?.hwValidationState === "error" ? state : false;
+            const { state, result: revResult } = await callLiveValidationStateMatch(sessionId, "error", expectedRevision);
+            if (!state) return false;
+            if (!revResult.matches) {
+              lastErrorState = state;
+              console.log(
+                `[E2E] DIAG: error em revisao divergente: ${JSON.stringify(revResult)}; ignorando.`
+              );
+              return false;
+            }
+            return state;
           },
           liveValidationTimeoutMs,
-          "Validacao live nao entrou em error apos draft invalido.",
+          `Validacao live nao entrou em error apos draft invalido (revisao ${expectedRevision}).`,
           250
-        );
+        ).catch((error) => {
+          const diag = lastErrorState
+            ? `ultimo estado: hwValidationState=${lastErrorState.hwValidationState} hwValidatedRevision=${lastErrorState.hwValidatedRevision} hwValidationError=${lastErrorState.hwValidationError}`
+            : "nenhum estado error obtido";
+          console.log(`[E2E] DIAG timeout error: esperada rev=${expectedRevision}. ${diag}`);
+          throw error;
+        });
       } else {
-        await waitForLiveValidationFresh(sessionId, liveValidationTimeoutMs);
+        await waitForLiveValidationFresh(sessionId, liveValidationTimeoutMs, expectedRevision);
       }
 
       let lastLiveStatus = null;

@@ -63,6 +63,8 @@ import {
   getLiveBuildBlockReason,
   getLiveToolbarIndicator,
   getLiveBuildWarningSummary,
+  isLiveValidationStateMatchingRevision,
+  isValidSceneDraftReceipt,
   useLiveValidationController,
 } from "./core/validation/liveValidationController";
 import {
@@ -1444,7 +1446,11 @@ type AutomationApi = {
   ) => Promise<string>;
   closeProject: () => Promise<void>;
   persistScene: (scope?: string, successMessage?: string) => Promise<boolean>;
-  setSceneDraft: (scene: Scene) => Promise<boolean>;
+  setSceneDraft: (scene: Scene) => Promise<{ ok: true; sceneRevision: number }>;
+  isLiveValidationStateMatchingRevision: (
+    validationState: { hwValidationState: string; hwValidatedRevision: number } | null,
+    expectedState: string, expectedRevision: number
+  ) => import("./core/validation/liveValidationController").LiveValidationStateMatchOutcome;
   setSelectedEntityId: (entityId: string | null) => boolean;
   setActiveLayerId: (layerId: string | null) => boolean;
   setEditorMode: (mode: "select" | "paint" | "erase" | "collision") => boolean;
@@ -3701,7 +3707,12 @@ export default function App() {
 
         state.setSelectedEntityId(null);
         state.setActiveScene(scene, scene);
-        return true;
+        const receipt = { ok: true as const, sceneRevision: useEditorStore.getState().sceneRevision };
+        if (!isValidSceneDraftReceipt(receipt)) throw new Error("setSceneDraft nao produziu recibo valido.");
+        return receipt;
+      },
+      isLiveValidationStateMatchingRevision: (validationState, expectedState, expectedRevision) => {
+        return isLiveValidationStateMatchingRevision(validationState, expectedState, expectedRevision);
       },
       setSelectedEntityId: (entityId: string | null) => {
         useEditorStore.getState().setSelectedEntityId(entityId);
@@ -5187,4 +5198,3 @@ export default function App() {
     </div>
   );
 }
-
