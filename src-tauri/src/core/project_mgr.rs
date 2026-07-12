@@ -13160,9 +13160,13 @@ fn load_openbor_level_assets(openbor_path: &Path) -> Result<Vec<OpenBorLevelAsse
     Ok(levels)
 }
 
-fn openbor_entity_role(model: &OpenBorModelAsset, is_first: bool) -> &'static str {
+fn openbor_has_explicit_player_identity(model: &OpenBorModelAsset) -> bool {
     let text = format!("{} {}", model.name, model.model_type).to_ascii_lowercase();
-    if text.contains("player") || text.contains("hero") || is_first {
+    text.contains("player") || text.contains("hero")
+}
+
+fn openbor_entity_role(model: &OpenBorModelAsset, is_fallback_player: bool) -> &'static str {
+    if openbor_has_explicit_player_identity(model) || is_fallback_player {
         "player_avatar"
     } else {
         "enemy_actor"
@@ -13745,6 +13749,7 @@ pub fn import_openbor_project(
     validate_openbor_project_path(openbor_path)?;
     let models = load_openbor_model_assets(openbor_path)?;
     let levels = load_openbor_level_assets(openbor_path)?;
+    let has_explicit_player = models.iter().any(openbor_has_explicit_player_identity);
     let scene_name = levels
         .first()
         .map(|level| level.name.clone())
@@ -13831,9 +13836,9 @@ pub fn import_openbor_project(
             &mut asset_cache,
         )?;
         let entity_id = unique_entity_id(&mut entity_ids, &model.name, "fighter");
-        let role = openbor_entity_role(model, model_index == 0);
+        let role = openbor_entity_role(model, !has_explicit_player && model_index == 0);
         model_entity_ids.insert(slugify_scene_id(&model.name), entity_id.clone());
-        if first_sprite_id.is_none() {
+        if role == "player_avatar" || first_sprite_id.is_none() {
             first_sprite_id = Some(entity_id.clone());
         }
         let mut logic_hints = model.logic_hints.clone();
@@ -13905,7 +13910,7 @@ pub fn import_openbor_project(
                 role,
                 "medium",
                 if role == "player_avatar" {
-                    "OpenBOR type/player ou primeiro modelo do manifest."
+                    "OpenBOR type/player, nome hero ou fallback controlavel."
                 } else {
                     "OpenBOR type/enemy ou modelo nao-player do manifest."
                 },
