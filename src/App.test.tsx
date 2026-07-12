@@ -5,7 +5,9 @@ import App, { CommandPaletteDialog } from "./App";
 import { getGameViewportScale } from "./components/viewport/gameViewportScale";
 import type { CommandSearchResult, ShortcutCommand } from "./core/shortcuts";
 import { useEditorStore } from "./core/store/editorStore";
-import { LIVE_VALIDATION_DEBOUNCE_MS } from "./core/validation/liveValidationController";
+import {
+  LIVE_VALIDATION_DEBOUNCE_MS,
+} from "./core/validation/liveValidationController";
 
 const mocks = vi.hoisted(() => ({
   buildProject: vi.fn(),
@@ -1860,6 +1862,130 @@ describe("App build flow", () => {
 
     delete automationWindow.__TAURI_INTERNALS__;
   });
+
+  it("setSceneDraft devolve recibo com a revisao aplicada", async () => {
+    const automationWindow = window as Window & {
+      __TAURI_INTERNALS__?: unknown;
+      __RDS_E2E__?: {
+        setSceneDraft: (scene: Record<string, unknown>) => Promise<{ ok: true; sceneRevision: number }>;
+      };
+    };
+    automationWindow.__TAURI_INTERNALS__ = {};
+
+    const prevRevision = useEditorStore.getState().sceneRevision;
+
+    await act(async () => {
+      root.unmount();
+      await flush();
+      root = createRoot(container);
+      root.render(<App />);
+      await flush();
+      await flush();
+    });
+
+    const receipt = await act(async () => {
+      const result = await automationWindow.__RDS_E2E__!.setSceneDraft({
+        scene_id: "injected",
+        display_name: "Inject",
+        entities: [],
+        background_layers: [],
+      });
+      return result;
+    });
+
+    expect(receipt).toHaveProperty("ok", true);
+    expect(receipt).toHaveProperty("sceneRevision");
+    expect(typeof receipt.sceneRevision).toBe("number");
+    expect(receipt.sceneRevision).toBeGreaterThan(prevRevision);
+
+    const storeRev = useEditorStore.getState().sceneRevision;
+    expect(receipt.sceneRevision).toBe(storeRev);
+
+    delete automationWindow.__TAURI_INTERNALS__;
+  });
+
+  it("setSceneDraft sem projeto aberto lanca erro (nao mascarado)", async () => {
+    const automationWindow = window as Window & {
+      __TAURI_INTERNALS__?: unknown;
+      __RDS_E2E__?: {
+        setSceneDraft: (scene: Record<string, unknown>) => Promise<{ ok: true; sceneRevision: number }>;
+      };
+    };
+    automationWindow.__TAURI_INTERNALS__ = {};
+
+    useEditorStore.setState({ activeProjectDir: "" });
+
+    await act(async () => {
+      root.unmount();
+      await flush();
+      root = createRoot(container);
+      root.render(<App />);
+      await flush();
+      await flush();
+    });
+
+    await expect(
+      automationWindow.__RDS_E2E__!.setSceneDraft({
+        scene_id: "orphan",
+        entities: [],
+        background_layers: [],
+      })
+    ).rejects.toThrow("Nenhum projeto aberto");
+
+    delete automationWindow.__TAURI_INTERNALS__;
+  });
+
+  it("usa a bridge real para estado e revisao estritos", async () => {
+    const automationWindow = window as Window & { __TAURI_INTERNALS__?: unknown };
+    automationWindow.__TAURI_INTERNALS__ = {};
+
+    await act(async () => {
+      root.unmount();
+      await flush();
+      root = createRoot(container);
+      root.render(<App />);
+      await flush();
+      await flush();
+    });
+
+    const matches = automationWindow.__RDS_E2E__!.isLiveValidationStateMatchingRevision;
+    expect(matches({ hwValidationState: "fresh", hwValidatedRevision: 4 }, "fresh", 4)).toEqual({ matches: true });
+    expect(matches({ hwValidationState: "error", hwValidatedRevision: 4 }, "error", 4)).toEqual({ matches: true });
+    expect(matches({ hwValidationState: "pending", hwValidatedRevision: 4 }, "fresh", 4)).toEqual({
+      matches: false, reason: "wrong-state", expected: "fresh", actual: "pending",
+    });
+    expect(matches({ hwValidationState: "fresh", hwValidatedRevision: 3 }, "fresh", 4)).toMatchObject({
+      matches: false, reason: "wrong-revision",
+    });
+    expect(matches({ hwValidationState: "fresh", hwValidatedRevision: 5 }, "fresh", 4)).toMatchObject({
+      matches: false, reason: "wrong-revision",
+    });
+    expect(matches(null, "fresh", 4)).toEqual({ matches: false, reason: "no-state" });
+
+    delete automationWindow.__TAURI_INTERNALS__;
+  });
+
+  it("newRevision menor que expected falha pela funcao setHwValidationResult do store", async () => {
+    useEditorStore.setState({
+      sceneRevision: 4,
+      hwValidatedRevision: 0,
+      hwValidationState: "pending",
+      hwStatus: null,
+    });
+
+    useEditorStore.getState().setHwValidationResult(4, {
+      sprite_count: 0, sprite_limit: 128, vram_used: 0, vram_limit: 65536,
+      scanline_sprite_peak: 0, scanline_sprite_limit: 32, dma_used: 0, dma_limit: 7372,
+      palette_banks_used: 0, palette_banks_limit: 8, bg_layers: 0, bg_layers_limit: 4,
+      errors: [], warnings: [],
+    });
+
+    const state = useEditorStore.getState();
+    expect(state.hwValidationState).toBe("fresh");
+    expect(state.hwValidatedRevision).toBe(4);
+    expect(state.hwValidatedRevision).toBe(state.sceneRevision);
+  });
+
 
   it("builds, loads the ROM, and starts the emulator frame loop", async () => {
     await act(async () => {

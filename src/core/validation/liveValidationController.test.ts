@@ -4,6 +4,8 @@ import {
   getLiveBuildBlockReason,
   getLiveBuildWarningSummary,
   getLiveToolbarIndicator,
+  isLiveValidationStateMatchingRevision,
+  isValidSceneDraftReceipt,
   serializeSceneDraft,
 } from "./liveValidationController";
 import type { Scene } from "../ipc/sceneService";
@@ -260,4 +262,89 @@ describe("liveValidationController", () => {
       detail: "Falha de comunicacao com validate_scene_draft",
     });
   });
+
+  describe("isLiveValidationStateMatchingRevision", () => {
+    it("falha quando estado e null", () => {
+      const result = isLiveValidationStateMatchingRevision(null, "fresh", 4);
+      expect(result).toEqual({ matches: false, reason: "no-state" });
+    });
+
+    it("retorna not-fresh quando hwValidationState nao e fresh", () => {
+      const result = isLiveValidationStateMatchingRevision(
+        { hwValidationState: "pending", hwValidatedRevision: 0 },
+        "fresh",
+        4
+      );
+      expect(result).toEqual({ matches: false, reason: "wrong-state", expected: "fresh", actual: "pending" });
+    });
+
+    it("retorna wrong-revision quando fresh/rev=3 e esperado rev=4", () => {
+      const result = isLiveValidationStateMatchingRevision(
+        { hwValidationState: "fresh", hwValidatedRevision: 3 },
+        "fresh",
+        4
+      );
+      expect(result).toEqual({
+        matches: false,
+        reason: "wrong-revision",
+        expected: 4,
+        actual: 3,
+      });
+    });
+
+    it("retorna wrong-revision quando fresh/rev=5 e esperado rev=4", () => {
+      const result = isLiveValidationStateMatchingRevision(
+        { hwValidationState: "fresh", hwValidatedRevision: 5 },
+        "fresh",
+        4
+      );
+      expect(result).toEqual({
+        matches: false,
+        reason: "wrong-revision",
+        expected: 4,
+        actual: 5,
+      });
+    });
+
+    it.each([
+      { hwValidationState: "fresh", hwValidatedRevision: undefined },
+      { hwValidationState: "fresh", hwValidatedRevision: Number.NaN },
+      { hwValidationState: "fresh", hwValidatedRevision: 4 },
+    ])("falha estritamente para revisao ausente ou invalida", (validationState) => {
+      const expectedRevision = validationState.hwValidatedRevision === 4 ? Number.NaN : 4;
+      expect(
+        isLiveValidationStateMatchingRevision(validationState as never, "fresh", expectedRevision)
+      ).toMatchObject({ matches: false, reason: "wrong-revision" });
+    });
+
+    it("retorna matches:true quando fresh/rev=4 e esperado rev=4", () => {
+      const result = isLiveValidationStateMatchingRevision(
+        { hwValidationState: "fresh", hwValidatedRevision: 4 },
+        "fresh",
+        4
+      );
+      expect(result).toEqual({ matches: true });
+    });
+
+    it("aceita error com revisao igual", () => {
+      const result = isLiveValidationStateMatchingRevision(
+        { hwValidationState: "error", hwValidatedRevision: 4 },
+        "error",
+        4
+      );
+      expect(result).toEqual({ matches: true });
+    });
+
+    it("retorna not-fresh quando estado e 'stale' mesmo com revisao correta", () => {
+      const result = isLiveValidationStateMatchingRevision(
+        { hwValidationState: "stale", hwValidatedRevision: 4 },
+        "fresh",
+        4
+      );
+      expect(result).toEqual({ matches: false, reason: "wrong-state", expected: "fresh", actual: "stale" });
+    });
+  });
+
+  it.each([null, { ok: false, sceneRevision: 4 }, { ok: true, sceneRevision: Number.NaN }, { ok: true, sceneRevision: 0 }, { ok: true, sceneRevision: -1 }, { ok: true, sceneRevision: 1.5 }, { ok: true, sceneRevision: "4" }])("rejeita receipt invalido", (receipt) => expect(isValidSceneDraftReceipt(receipt)).toBe(false));
+  it("aceita receipt positivo seguro", () => expect(isValidSceneDraftReceipt({ ok: true, sceneRevision: 4 })).toBe(true));
 });

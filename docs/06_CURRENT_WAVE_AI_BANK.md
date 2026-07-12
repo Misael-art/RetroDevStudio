@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-06-28 (rodada 76 - MSVC restaurado, gates Rust + build debug verdes)
+**Ultima Atualizacao:** 2026-07-11 (Desktop E2E P0: checkpoints locais e gates locais completos)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-07-11 — `codex/desktop-e2e-determinism-p0`, P0 local):**
+  - **Checkpoints locais protegidos:** `a73c030` (contrato deterministico da bridge/receipt), `ec9f33a` (guard de hidratacao por geracao, projeto e revisao) e `011d18c` (cobertura da bridge real e das corridas). Nenhum foi publicado ainda.
+  - **Contrato canônico:** `window.__RDS_E2E__.isLiveValidationStateMatchingRevision` e a unica bridge de estado+revisao; trata `fresh` e `error` com igualdade estrita. O runner nao usa `pageEvaluateRaw`, nem replica a classificacao de revisao. Receipt de `setSceneDraft` exige `ok:true` e revisao inteira, segura e positiva.
+  - **Hidratacao:** o `HierarchyPanel` invalida respostas por geracao, projeto e revisao. Cobertura com Promise deferred/handshake prova hidratacao inicial, stale success, stale error, A→B e ABA; respostas tardias nao alteram cena, source, path ou revisao do draft novo.
+  - **Gates locais reais:** `check:tree`, lint e TypeScript PASS; `npm test` **47 passed, 1 skipped / 462 passed, 2 skipped**; `cargo check` PASS; clippy PASS; Rust **438 passed, 24 ignored**; `build:debug` PASS com binario staged; `git diff --check` PASS.
+  - **Status honesto:** **P0 Desktop E2E — Em hardening / não certificado remotamente.** Nao houve push, merge nem E2E remoto nesta rodada.
+  - **Proximo passo imediato:** commit documental, push da branch P0, atualizar a PR #25 como Draft e iniciar certificacao no SHA final (push, pull_request e tres dispatches sequenciais).
 
 * **O que acabou de acontecer (2026-06-28 rodada 76 - MSVC Build Tools restaurado; todos os gates Rust + build debug verdes):**
   - **Branch/commit:** `codex/main-user-flow-hardening`, commit `28148f7` (6 ahead `origin/main`, 0 behind `origin/codex/main-user-flow-hardening`). Worktree limpo. Nenhum commit novo nesta sessao — apenas validacao de gates.
@@ -1569,4 +1577,3 @@ Preservar o pacote interno auditavel sem inflar status de release publica. A rod
   - **Stage mais legivel:** o canvas de runtime agora fica dentro de um palco dedicado com moldura, sombra e badge `320x224 @ Nx`, melhorando leitura espacial e sensacao de ferramenta final.
   - **Cobertura adicionada:** `src/App.test.tsx` agora valida o helper puro `getGameViewportScale` para garantir que a escala sempre caia em inteiros seguros.
   - **Validacao focada reexecutada no workspace atual:** `npx tsc --noEmit` OK, `npx eslint src/components/viewport/ViewportPanel.tsx src/App.test.tsx` OK e `npx vitest run src/App.test.tsx` OK (33 testes).
-
