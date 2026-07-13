@@ -1091,12 +1091,25 @@ describe("NodeGraphEditor", () => {
 
     const inspector = container.querySelector("[data-testid='nodegraph-execution-inspector']");
     expect(inspector).toBeInstanceOf(HTMLDivElement);
+    expect(inspector?.textContent).toContain("Local trace");
     expect(inspector?.textContent).toContain("simulado / nao instrumentado");
+    expect(inspector?.textContent).toContain("Experimental");
     expect(inspector?.textContent).toContain("input event");
     expect(inspector?.textContent).toContain("condition");
     expect(inspector?.textContent).toContain("action");
     expect(inspector?.textContent).toContain("output");
     expect(inspector?.textContent).toContain("Diagnostics");
+
+    // Runtime mapping explicito: nao suportado, com motivo (sem source mapping).
+    const runtimeMapping = container.querySelector("[data-testid='nodegraph-runtime-mapping']");
+    expect(runtimeMapping?.textContent).toContain("nao suportado");
+    expect(runtimeMapping?.textContent).toContain("source mapping");
+
+    // A UI nunca pode alegar execucao real/runtime observado para o trace local.
+    const inspectorText = (inspector?.textContent ?? "").toLowerCase();
+    expect(inspectorText).not.toContain("observad");
+    expect(inspectorText).not.toContain("execucao real");
+    expect(inspectorText).not.toContain("runtime evidence");
     expect(container.querySelector("[data-testid='node-card-entry']")?.getAttribute("data-execution-reachable")).toBe(
       "true"
     );
@@ -1109,6 +1122,49 @@ describe("NodeGraphEditor", () => {
     expect(useEditorStore.getState().consoleEntries.some((entry) => entry.message.includes("[NodeGraph Diagnostics]"))).toBe(
       true
     );
+  });
+
+  it("blocks local execution with structured errors when the graph is invalid", async () => {
+    const cycleGraph: NodeGraph = {
+      nodes: [
+        { ...VALID_EXEC_GRAPH.nodes[1], id: "a", label: "A", x: 100, y: 100 },
+        { ...VALID_EXEC_GRAPH.nodes[1], id: "b", label: "B", x: 380, y: 100 },
+      ],
+      edges: [
+        { id: "e1", fromNode: "a", fromPort: "exec", toNode: "b", toPort: "exec" },
+        { id: "e2", fromNode: "b", fromPort: "exec", toNode: "a", toPort: "exec" },
+      ],
+    };
+    const cycleEntity = buildLogicSpriteEntity("hero", "Hero", cycleGraph, {
+      animations: {
+        fireball: { frames: [0, 1], fps: 12, loop: false },
+      },
+    });
+    await act(async () => {
+      useEditorStore.setState({
+        activeScene: buildSceneWithGraph(cycleGraph, [cycleEntity]),
+        activeSceneSource: buildSceneWithGraph(cycleGraph, [cycleEntity]),
+        selectedEntityId: "hero",
+      });
+      await flush();
+      await flush();
+    });
+    for (let attempt = 0; attempt < 5 && !container.querySelector("[data-testid='node-card-a']"); attempt += 1) {
+      await act(async () => {
+        await flush();
+      });
+    }
+
+    await act(async () => {
+      (container.querySelector("[data-testid='nodegraph-inspect-execution-toggle']") as HTMLButtonElement).click();
+      await flush();
+      await flush();
+    });
+
+    const blocked = container.querySelector("[data-testid='nodegraph-execution-blocked']");
+    expect(blocked).toBeInstanceOf(HTMLOListElement);
+    expect(blocked?.textContent).toContain("Execucao local bloqueada");
+    expect(blocked?.textContent).toContain("exec_cycle");
   });
 
   it("shows a guided empty state and hydrates a quick action without changing the graph schema", async () => {

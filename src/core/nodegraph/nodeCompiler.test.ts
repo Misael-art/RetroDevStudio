@@ -7,13 +7,13 @@
 
 import { describe, it, expect } from "vitest";
 import { compileGraphToC, parseCToNodes } from "./nodeCompiler";
+import { getNodeDisplayName } from "../../components/nodegraph/NodeGraphEditor";
 import {
   EMPTY_GRAPH as SERIALIZED_EMPTY_GRAPH,
-  deserializeNodeGraph,
-  getNodeDisplayName,
   serializeNodeGraph,
   type NodeGraph,
-} from "../../components/nodegraph/NodeGraphEditor";
+} from "./nodeTypes";
+import { deserializeNodeGraph } from "./nodeDefinitions";
 
 // ── Helpers de fixture ────────────────────────────────────────────────────────
 
@@ -765,5 +765,38 @@ describe("parseCToNodes", () => {
     const setNode = parsed.find((current) => current.type === "var_set");
     expect(setNode).toBeDefined();
     expect(setNode?.params.var_name).toBe("score");
+  });
+});
+
+// ── Guard de isolamento do legado (decisao rodada Node-03) ────────────────────
+
+describe("nodeCompiler: isolamento como legado", () => {
+  it("nenhum modulo de producao em src/ importa o nodeCompiler", async () => {
+    const { readFileSync, readdirSync } = await import("node:fs");
+    const path = (await import("node:path")).default;
+
+    const offenders: string[] = [];
+    const visit = (dir: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          visit(full);
+          continue;
+        }
+        if (!/\.(ts|tsx)$/.test(entry.name) || /\.test\.(ts|tsx)$/.test(entry.name)) {
+          continue;
+        }
+        const source = readFileSync(full, "utf-8");
+        if (/from\s+["'][^"']*nodeCompiler["']/.test(source)) {
+          offenders.push(full);
+        }
+      }
+    };
+    visit("src");
+
+    // O compilador legado so pode ser referenciado por arquivos de teste;
+    // qualquer import de producao reintroduziria um fluxo paralelo ao
+    // pipeline canonico (backend Rust) e ao executor local (nodeEngine).
+    expect(offenders).toEqual([]);
   });
 });

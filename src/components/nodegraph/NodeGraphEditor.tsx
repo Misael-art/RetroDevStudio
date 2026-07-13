@@ -2,7 +2,6 @@ import { useState, useRef, useCallback, useEffect, useMemo, type CSSProperties }
 import { persistActiveScene } from "../../core/scenePersistence";
 import { openProjectSourcePath } from "../../core/ipc/projectService";
 import { parseSceneJson, resolveScenePrefabs } from "../../core/ipc/sceneService";
-import type { Entity } from "../../core/ipc/sceneService";
 import { useEditorStore, type HwStatus } from "../../core/store/editorStore";
 import { getEntityDisplayName } from "../../core/entityDisplay";
 import { resolveEntitySourceRefs } from "../../core/entityAuthoring";
@@ -17,81 +16,48 @@ import {
   type CapabilityTone,
 } from "../../core/sgdkLogicDiagnostics";
 import type { SpriteCommandBinding } from "../../core/ipc/sceneService";
+import {
+  EVENT_NODE_TYPES,
+  LOCAL_TRACE_EVIDENCE_LABEL,
+  normalizeGraphEntityKey,
+  resolveRuntimeEvidenceForGraph,
+  runNodeGraphLocally,
+  validateNodeGraph,
+} from "../../core/nodegraph/nodeEngine";
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// Contrato canonico do Node Engine (validador deterministico + simulacao
+// local) vive em src/core/nodegraph/nodeEngine.ts; este arquivo re-exporta a
+// superficie publica para preservar os consumidores existentes.
+export { EVENT_NODE_TYPES, validateNodeGraph } from "../../core/nodegraph/nodeEngine";
+export type {
+  NodeGraphValidation,
+  NodeGraphValidationContext,
+  NodeGraphValidationIssue,
+} from "../../core/nodegraph/nodeEngine";
+import {
+  EMPTY_GRAPH,
+  cloneGraph,
+  serializeNodeGraph,
+  type GraphNode,
+  type NodeEdge,
+  type NodeGraph,
+  type NodeType,
+} from "../../core/nodegraph/nodeTypes";
+import { NODE_DEFS, clonePorts, deserializeNodeGraph } from "../../core/nodegraph/nodeDefinitions";
 
-export type NodeType =
-  | "event_start"
-  | "event_update"
-  | "input_pressed"
-  | "input_held"
-  | "input_command"
-  | "sprite_move"
-  | "set_velocity"
-  | "set_position"
-  | "spawn_entity"
-  | "destroy_entity"
-  | "sprite_anim"
-  | "set_animation_state"
-  | "condition_overlap"
-  | "camera_follow"
-  | "camera_bounds"
-  | "timer"
-  | "set_tile"
-  | "effect_parallax"
-  | "effect_raster"
-  | "logic_and"
-  | "action_sound"
-  | "action_music"
-  | "scroll_tilemap"
-  | "load_scene"
-  | "move_camera"
-  | "var_set"
-  | "var_get"
-  | "logic_math"
-  | "condition_compare"
-  | "fsm_state"
-  | "fsm_transition"
-  | "flow_if"
-  | "flow_while"
-  | "flow_for"
-  | "timeline_sequence"
-  | "hardware_budget_check"
-  | "bridge_unconverted_source"
-  | "event_vblank"
-  | "event_hblank"
-  | "event_dma_done";
+// Modelo de dados canonico e serializacao v1 vivem em src/core/nodegraph/
+// (nodeTypes.ts + nodeDefinitions.ts); este componente e apresentacao e
+// re-exporta a superficie publica por compatibilidade.
+export { EMPTY_GRAPH, serializeNodeGraph } from "../../core/nodegraph/nodeTypes";
+export { deserializeNodeGraph } from "../../core/nodegraph/nodeDefinitions";
+export type {
+  GraphNode,
+  NodeEdge,
+  NodeGraph,
+  NodePort,
+  NodeType,
+} from "../../core/nodegraph/nodeTypes";
 
-export interface NodePort {
-  id: string;
-  label: string;
-  kind: "exec" | "data";
-  dataType?: "int" | "bool" | "string";
-}
-
-export interface GraphNode {
-  id: string;
-  type: NodeType;
-  label: string;
-  x: number;
-  y: number;
-  inputs: NodePort[];
-  outputs: NodePort[];
-  params: Record<string, string | number>;
-}
-
-export interface NodeEdge {
-  id: string;
-  fromNode: string;
-  fromPort: string;
-  toNode: string;
-  toPort: string;
-}
-
-export interface NodeGraph {
-  nodes: GraphNode[];
-  edges: NodeEdge[];
-}
 
 type ViewOffset = {
   x: number;
@@ -129,52 +95,6 @@ type NodeGraphSummary = {
   disconnectedNodeIds: string[];
 };
 
-export type NodeGraphValidationIssue = {
-  severity: "error" | "warning";
-  code:
-    | "broken_node_ref"
-    | "broken_port_ref"
-    | "port_kind_mismatch"
-    | "data_type_mismatch"
-    | "exec_cycle"
-    | "missing_entry"
-    | "disconnected_node"
-    | "node_without_exec_input"
-    | "branch_without_output"
-    | "blocking_bridge"
-    | "input_command_unbound"
-    | "missing_animation";
-  message: string;
-  nodeId?: string;
-  edgeId?: string;
-};
-
-export type NodeGraphValidation = {
-  errors: NodeGraphValidationIssue[];
-  warnings: NodeGraphValidationIssue[];
-};
-
-export type NodeGraphValidationContext = {
-  selectedEntity?: Entity | null;
-  sceneEntities?: Entity[];
-};
-
-type NodeGraphTraceKind = "input event" | "condition" | "action" | "output";
-
-type NodeGraphTraceStep = {
-  kind: NodeGraphTraceKind;
-  nodeId?: string;
-  label: string;
-  detail: string;
-};
-
-type NodeGraphExecutionInspection = {
-  evidence: "observed" | "simulated";
-  evidenceLabel: string;
-  reachableNodeIds: string[];
-  trace: NodeGraphTraceStep[];
-};
-
 type MiniMapNode = {
   id: string;
   type: NodeType;
@@ -210,11 +130,6 @@ type QuickActionTemplate = GuidedFlowCommentary & {
     | "hud_vblank_tick";
   actionLabel: string;
   buildGraph: (context: QuickActionContext) => NodeGraph;
-};
-
-export const EMPTY_GRAPH: NodeGraph = {
-  nodes: [],
-  edges: [],
 };
 
 const NODE_CARD_WIDTH = 160;
@@ -289,18 +204,6 @@ export const NODE_VISUAL_CATEGORIES: NodeVisualCategory[] = [
   { id: "error_unsupported", label: "Error/Unsupported", color: "#f38ba8", icon: "E" },
 ];
 
-const EVENT_NODE_TYPES: NodeType[] = [
-  "event_start",
-  "event_update",
-  "input_pressed",
-  "input_held",
-  "input_command",
-  "condition_overlap",
-  "event_vblank",
-  "event_hblank",
-  "event_dma_done",
-];
-
 export const REQUIRED_NOCODE_NODE_TYPES: NodeType[] = [
   "event_start",
   "event_update",
@@ -330,18 +233,6 @@ export const REQUIRED_NOCODE_NODE_TYPES: NodeType[] = [
   "load_scene",
   "hardware_budget_check",
 ];
-
-function normalizeGraphEntityKey(value: string | number | null | undefined): string {
-  return String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
-function cloneGraph(graph: NodeGraph): NodeGraph {
-  return structuredClone(graph);
-}
 
 export function getNodeGraphBounds(graph: NodeGraph): GraphBounds | null {
   if (graph.nodes.length === 0) {
@@ -609,494 +500,6 @@ export function summarizeNodeGraph(graph: NodeGraph): NodeGraphSummary {
   };
 }
 
-function findPort(node: GraphNode, portId: string, direction: "input" | "output"): NodePort | undefined {
-  const ports = direction === "input" ? node.inputs : node.outputs;
-  return ports.find((port) => port.id === portId);
-}
-
-function collectExecCycles(graph: NodeGraph, nodeById: Map<string, GraphNode>): string[][] {
-  const adjacency = new Map<string, string[]>();
-  for (const edge of graph.edges) {
-    const fromNode = nodeById.get(edge.fromNode);
-    const toNode = nodeById.get(edge.toNode);
-    if (!fromNode || !toNode) {
-      continue;
-    }
-    const fromPort = findPort(fromNode, edge.fromPort, "output");
-    const toPort = findPort(toNode, edge.toPort, "input");
-    if (fromPort?.kind !== "exec" || toPort?.kind !== "exec") {
-      continue;
-    }
-    adjacency.set(edge.fromNode, [...(adjacency.get(edge.fromNode) ?? []), edge.toNode]);
-  }
-
-  const cycles: string[][] = [];
-  const visiting = new Set<string>();
-  const visited = new Set<string>();
-  const stack: string[] = [];
-
-  const visit = (nodeId: string) => {
-    if (visiting.has(nodeId)) {
-      const cycleStart = stack.indexOf(nodeId);
-      cycles.push(cycleStart >= 0 ? stack.slice(cycleStart).concat(nodeId) : [nodeId]);
-      return;
-    }
-    if (visited.has(nodeId)) {
-      return;
-    }
-
-    visiting.add(nodeId);
-    stack.push(nodeId);
-    for (const next of adjacency.get(nodeId) ?? []) {
-      visit(next);
-    }
-    stack.pop();
-    visiting.delete(nodeId);
-    visited.add(nodeId);
-  };
-
-  for (const node of graph.nodes) {
-    visit(node.id);
-  }
-
-  return cycles;
-}
-
-function isExecEntryNode(node: GraphNode): boolean {
-  return EVENT_NODE_TYPES.includes(node.type);
-}
-
-function isBranchingExecNode(node: GraphNode): boolean {
-  return node.outputs.filter((port) => port.kind === "exec").length > 1;
-}
-
-function hasTruthyParam(
-  params: Record<string, string | number>,
-  keys: string[],
-): boolean {
-  return keys.some((key) => {
-    const value = params[key];
-    if (typeof value === "number") {
-      return value !== 0;
-    }
-    return ["1", "true", "yes", "blocking", "block"].includes(
-      String(value ?? "").trim().toLowerCase(),
-    );
-  });
-}
-
-function normalizeGraphToken(value: string | number | null | undefined): string {
-  return normalizeGraphEntityKey(value);
-}
-
-function resolveGraphTargetEntity(
-  node: GraphNode,
-  context?: NodeGraphValidationContext,
-): Entity | null {
-  const entities = context?.sceneEntities ?? [];
-  const candidateKeys = Array.from(
-    new Set(
-      ["target", "entity", "a", "b"]
-        .map((key) => normalizeGraphToken(node.params[key]))
-        .filter((value) => value.length > 0),
-    ),
-  );
-
-  const matched =
-    candidateKeys.length > 0
-      ? entities.find((entity) => {
-          const entityKeys = [
-            normalizeGraphToken(entity.entity_id),
-            normalizeGraphToken(getEntityDisplayName(entity)),
-            normalizeGraphToken(entity.display_name ?? ""),
-          ];
-          return candidateKeys.some((candidate) =>
-            entityKeys.includes(candidate),
-          );
-        })
-      : null;
-
-  return matched ?? context?.selectedEntity ?? null;
-}
-
-function commandNodeHasBinding(
-  node: GraphNode,
-  context?: NodeGraphValidationContext,
-): boolean {
-  const targetEntity = resolveGraphTargetEntity(node, context);
-  const bindings = targetEntity?.components.sprite?.commands ?? [];
-  if (bindings.length === 0) {
-    return false;
-  }
-
-  const commandId = normalizeGraphToken(node.params.command_id);
-  const displayName = normalizeGraphToken(node.params.display_name);
-  const notation = String(node.params.notation ?? "").trim();
-
-  if (commandId.length > 0) {
-    return bindings.some(
-      (binding) => normalizeGraphToken(binding.id) === commandId,
-    );
-  }
-
-  return bindings.some((binding) => {
-    const bindingKeys = [
-      normalizeGraphToken(binding.id),
-      normalizeGraphToken(binding.display_name),
-    ];
-    return (
-      (displayName.length > 0 && bindingKeys.includes(displayName)) ||
-      (notation.length > 0 && (binding.notation ?? "").trim() === notation)
-    );
-  });
-}
-
-function nodeReferencesMissingAnimation(
-  node: GraphNode,
-  context?: NodeGraphValidationContext,
-): boolean {
-  if (node.type !== "set_animation_state" && node.type !== "sprite_anim") {
-    return false;
-  }
-  const animationKey = normalizeGraphToken(
-    node.type === "sprite_anim" ? node.params.anim : node.params.state,
-  );
-  if (!animationKey) {
-    return false;
-  }
-
-  const targetEntity = resolveGraphTargetEntity(node, context);
-  const animations = targetEntity?.components.sprite?.animations;
-  if (!animations || Object.keys(animations).length === 0) {
-    return true;
-  }
-
-  return !Object.keys(animations).some(
-    (key) => normalizeGraphToken(key) === animationKey,
-  );
-}
-
-function isBlockingBridgeNode(node: GraphNode): boolean {
-  return (
-    node.type === "bridge_unconverted_source" &&
-    hasTruthyParam(node.params, [
-      "blocking",
-      "blocks_build",
-      "blocks_runtime",
-      "build_blocking",
-    ])
-  );
-}
-
-export function validateNodeGraph(
-  graph: NodeGraph,
-  context?: NodeGraphValidationContext,
-): NodeGraphValidation {
-  const issues: NodeGraphValidationIssue[] = [];
-  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
-  const connectedNodeIds = new Set<string>();
-  const validIncomingExecNodeIds = new Set<string>();
-  const outgoingExecByNodePort = new Map<string, Set<string>>();
-
-  for (const edge of graph.edges) {
-    const fromNode = nodeById.get(edge.fromNode);
-    const toNode = nodeById.get(edge.toNode);
-    if (!fromNode || !toNode) {
-      issues.push({
-        severity: "error",
-        code: "broken_node_ref",
-        edgeId: edge.id,
-        message: `Aresta '${edge.id}' aponta para no inexistente.`,
-      });
-      continue;
-    }
-
-    const fromPort = findPort(fromNode, edge.fromPort, "output");
-    const toPort = findPort(toNode, edge.toPort, "input");
-    if (!fromPort || !toPort) {
-      issues.push({
-        severity: "error",
-        code: "broken_port_ref",
-        edgeId: edge.id,
-        message: `Aresta '${edge.id}' aponta para porta inexistente.`,
-      });
-      continue;
-    }
-
-    connectedNodeIds.add(edge.fromNode);
-    connectedNodeIds.add(edge.toNode);
-
-    if (fromPort.kind !== toPort.kind) {
-      issues.push({
-        severity: "error",
-        code: "port_kind_mismatch",
-        edgeId: edge.id,
-        message: `Aresta '${edge.id}' liga porta ${fromPort.kind} em porta ${toPort.kind}.`,
-      });
-    }
-
-    if (fromPort.kind === "exec" && toPort.kind === "exec") {
-      validIncomingExecNodeIds.add(edge.toNode);
-      const outgoingPorts =
-        outgoingExecByNodePort.get(edge.fromNode) ?? new Set<string>();
-      outgoingPorts.add(edge.fromPort);
-      outgoingExecByNodePort.set(edge.fromNode, outgoingPorts);
-    }
-
-    if (
-      fromPort.kind === "data" &&
-      toPort.kind === "data" &&
-      fromPort.dataType &&
-      toPort.dataType &&
-      fromPort.dataType !== toPort.dataType
-    ) {
-      issues.push({
-        severity: "error",
-        code: "data_type_mismatch",
-        edgeId: edge.id,
-        message: `Aresta '${edge.id}' liga dado ${fromPort.dataType} em dado ${toPort.dataType}.`,
-      });
-    }
-  }
-
-  if (graph.nodes.length > 0 && graph.nodes.every((node) => !EVENT_NODE_TYPES.includes(node.type))) {
-    issues.push({
-      severity: "warning",
-      code: "missing_entry",
-      message: "Grafo sem evento de entrada.",
-    });
-  }
-
-  for (const node of graph.nodes) {
-    if (!connectedNodeIds.has(node.id)) {
-      issues.push({
-        severity: "warning",
-        code: "disconnected_node",
-        nodeId: node.id,
-        message: `No '${node.label}' ainda esta solto no fluxo.`,
-      });
-    }
-
-    const hasExecInput = node.inputs.some((port) => port.kind === "exec");
-    if (
-      hasExecInput &&
-      !isExecEntryNode(node) &&
-      !validIncomingExecNodeIds.has(node.id)
-    ) {
-      issues.push({
-        severity: "warning",
-        code: "node_without_exec_input",
-        nodeId: node.id,
-        message: `No '${node.label}' tem entrada exec sem ligacao de entrada.`,
-      });
-    }
-
-    if (isBranchingExecNode(node)) {
-      const connectedOutputs = outgoingExecByNodePort.get(node.id) ?? new Set();
-      const missingOutputs = node.outputs
-        .filter((port) => port.kind === "exec")
-        .filter((port) => !connectedOutputs.has(port.id));
-      if (missingOutputs.length > 0) {
-        issues.push({
-          severity: "warning",
-          code: "branch_without_output",
-          nodeId: node.id,
-          message: `Branch '${node.label}' tem saida sem destino: ${missingOutputs
-            .map((port) => port.label || port.id)
-            .join(", ")}.`,
-        });
-      }
-    }
-
-    if (isBlockingBridgeNode(node)) {
-      issues.push({
-        severity: "error",
-        code: "blocking_bridge",
-        nodeId: node.id,
-        message: `Bridge bloqueante '${node.label}' preserva fonte sem conversao executavel.`,
-      });
-    }
-
-    if (node.type === "input_command" && !commandNodeHasBinding(node, context)) {
-      issues.push({
-        severity: "error",
-        code: "input_command_unbound",
-        nodeId: node.id,
-        message: `Comando de input '${String(
-          node.params.command_id ?? node.label,
-        )}' nao tem binding em SpriteComponent.commands.`,
-      });
-    }
-
-    if (nodeReferencesMissingAnimation(node, context)) {
-      issues.push({
-        severity: "error",
-        code: "missing_animation",
-        nodeId: node.id,
-        message: `Animacao '${String(
-          node.type === "sprite_anim" ? node.params.anim : node.params.state,
-        )}' referenciada por '${node.label}' nao existe no sprite alvo.`,
-      });
-    }
-  }
-
-  for (const cycle of collectExecCycles(graph, nodeById)) {
-    issues.push({
-      severity: "error",
-      code: "exec_cycle",
-      nodeId: cycle[0],
-      message: `Ciclo exec detectado: ${cycle.join(" -> ")}.`,
-    });
-  }
-
-  return {
-    errors: issues.filter((issue) => issue.severity === "error"),
-    warnings: issues.filter((issue) => issue.severity === "warning"),
-  };
-}
-
-function collectReachableExecNodeIds(graph: NodeGraph): string[] {
-  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
-  const adjacency = new Map<string, string[]>();
-
-  for (const edge of graph.edges) {
-    const fromNode = nodeById.get(edge.fromNode);
-    const toNode = nodeById.get(edge.toNode);
-    if (!fromNode || !toNode) {
-      continue;
-    }
-    const fromPort = findPort(fromNode, edge.fromPort, "output");
-    const toPort = findPort(toNode, edge.toPort, "input");
-    if (fromPort?.kind !== "exec" || toPort?.kind !== "exec") {
-      continue;
-    }
-    adjacency.set(edge.fromNode, [
-      ...(adjacency.get(edge.fromNode) ?? []),
-      edge.toNode,
-    ]);
-  }
-
-  const queue = graph.nodes
-    .filter((node) => isExecEntryNode(node))
-    .map((node) => node.id);
-  const reachable: string[] = [];
-  const seen = new Set<string>();
-
-  while (queue.length > 0) {
-    const nodeId = queue.shift();
-    if (!nodeId || seen.has(nodeId)) {
-      continue;
-    }
-    seen.add(nodeId);
-    reachable.push(nodeId);
-    for (const nextId of adjacency.get(nodeId) ?? []) {
-      if (!seen.has(nextId)) {
-        queue.push(nextId);
-      }
-    }
-  }
-
-  return reachable;
-}
-
-function traceKindsForNode(node: GraphNode): NodeGraphTraceKind[] {
-  if (
-    node.type === "input_pressed" ||
-    node.type === "input_held" ||
-    node.type === "input_command"
-  ) {
-    return ["input event", "condition"];
-  }
-  if (node.type.startsWith("event_")) {
-    return ["input event"];
-  }
-  if (
-    node.type.startsWith("condition_") ||
-    node.type === "flow_if" ||
-    node.type === "flow_while" ||
-    node.type === "hardware_budget_check"
-  ) {
-    return ["condition"];
-  }
-  return ["action"];
-}
-
-function buildNodeTraceDetail(node: GraphNode, kind: NodeGraphTraceKind): string {
-  if (kind === "output") {
-    return "Saida exec alcancavel nesta simulacao local.";
-  }
-  if (node.type === "input_command") {
-    return `command_id=${String(node.params.command_id ?? node.id)}`;
-  }
-  if (node.type === "set_animation_state") {
-    return `state=${String(node.params.state ?? "")}`;
-  }
-  if (node.type === "sprite_anim") {
-    return `anim=${String(node.params.anim ?? "")}`;
-  }
-  if (node.type === "bridge_unconverted_source") {
-    return `bridge=${String(node.params.gap ?? "source")}`;
-  }
-  return getNodeDisplayName(node.type);
-}
-
-function buildSimulatedTrace(
-  graph: NodeGraph,
-  reachableNodeIds: string[],
-): NodeGraphTraceStep[] {
-  const nodeById = new Map(graph.nodes.map((node) => [node.id, node]));
-  const trace: NodeGraphTraceStep[] = [];
-
-  for (const nodeId of reachableNodeIds) {
-    const node = nodeById.get(nodeId);
-    if (!node) {
-      continue;
-    }
-    for (const kind of traceKindsForNode(node)) {
-      trace.push({
-        kind,
-        nodeId: node.id,
-        label: node.label || getNodeDisplayName(node.type),
-        detail: buildNodeTraceDetail(node, kind),
-      });
-    }
-  }
-
-  const reachableSet = new Set(reachableNodeIds);
-  for (const edge of graph.edges) {
-    if (!reachableSet.has(edge.fromNode) || !reachableSet.has(edge.toNode)) {
-      continue;
-    }
-    const fromNode = nodeById.get(edge.fromNode);
-    const toNode = nodeById.get(edge.toNode);
-    const fromPort = fromNode
-      ? findPort(fromNode, edge.fromPort, "output")
-      : undefined;
-    const toPort = toNode ? findPort(toNode, edge.toPort, "input") : undefined;
-    if (fromPort?.kind !== "exec" || toPort?.kind !== "exec") {
-      continue;
-    }
-    trace.push({
-      kind: "output",
-      nodeId: edge.fromNode,
-      label: `${edge.fromPort} -> ${edge.toNode}`,
-      detail: "Transicao exec simulada por aresta local.",
-    });
-  }
-
-  return trace;
-}
-
-function inspectNodeGraphExecution(graph: NodeGraph): NodeGraphExecutionInspection {
-  const reachableNodeIds = collectReachableExecNodeIds(graph);
-  return {
-    evidence: "simulated",
-    evidenceLabel: "simulado / nao instrumentado",
-    reachableNodeIds,
-    trace: buildSimulatedTrace(graph, reachableNodeIds),
-  };
-}
-
 export function buildNodeMiniMap(
   graph: NodeGraph,
   width = MINIMAP_WIDTH,
@@ -1121,481 +524,6 @@ export function buildNodeMiniMap(
     y: padding + (node.y - bounds.minY) * scale,
   }));
 }
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function isNodePort(value: unknown): value is NodePort {
-  return (
-    isRecord(value) &&
-    typeof value.id === "string" &&
-    typeof value.label === "string" &&
-    (value.kind === "exec" || value.kind === "data") &&
-    (value.dataType === undefined ||
-      value.dataType === "int" ||
-      value.dataType === "bool" ||
-      value.dataType === "string")
-  );
-}
-
-function isNodeType(value: unknown): value is NodeType {
-  return (
-    value === "event_start" ||
-    value === "event_update" ||
-    value === "input_pressed" ||
-    value === "input_held" ||
-    value === "input_command" ||
-    value === "sprite_move" ||
-    value === "set_velocity" ||
-    value === "set_position" ||
-    value === "spawn_entity" ||
-    value === "destroy_entity" ||
-    value === "sprite_anim" ||
-    value === "set_animation_state" ||
-    value === "condition_overlap" ||
-    value === "camera_follow" ||
-    value === "camera_bounds" ||
-    value === "timer" ||
-    value === "set_tile" ||
-    value === "effect_parallax" ||
-    value === "effect_raster" ||
-    value === "logic_and" ||
-    value === "action_sound" ||
-    value === "action_music" ||
-    value === "scroll_tilemap" ||
-    value === "load_scene" ||
-    value === "move_camera" ||
-    value === "var_set" ||
-    value === "var_get" ||
-    value === "logic_math" ||
-    value === "condition_compare" ||
-    value === "fsm_state" ||
-    value === "fsm_transition" ||
-    value === "flow_if" ||
-    value === "flow_while" ||
-    value === "flow_for" ||
-    value === "timeline_sequence" ||
-    value === "hardware_budget_check" ||
-    value === "bridge_unconverted_source" ||
-    value === "event_vblank" ||
-    value === "event_hblank" ||
-    value === "event_dma_done"
-  );
-}
-
-function isNodeEdge(value: unknown): value is NodeEdge {
-  return (
-    isRecord(value) &&
-    typeof value.id === "string" &&
-    typeof value.fromNode === "string" &&
-    typeof value.fromPort === "string" &&
-    typeof value.toNode === "string" &&
-    typeof value.toPort === "string"
-  );
-}
-
-export function serializeNodeGraph(graph: NodeGraph): string {
-  return JSON.stringify({
-    version: 1,
-    nodes: structuredClone(graph.nodes),
-    edges: structuredClone(graph.edges),
-  });
-}
-
-function edgeConnectsValidPorts(
-  edge: NodeEdge,
-  nodeById: Map<string, GraphNode>
-): boolean {
-  const fromNode = nodeById.get(edge.fromNode);
-  const toNode = nodeById.get(edge.toNode);
-  if (!fromNode || !toNode) {
-    return false;
-  }
-  const fromOk = fromNode.outputs.some((port) => port.id === edge.fromPort);
-  const toOk = toNode.inputs.some((port) => port.id === edge.toPort);
-  return fromOk && toOk;
-}
-
-export function deserializeNodeGraph(serialized?: string | null): NodeGraph {
-  if (!serialized) {
-    return cloneGraph(EMPTY_GRAPH);
-  }
-
-  try {
-    const parsed = JSON.parse(serialized) as unknown;
-    if (!isRecord(parsed)) {
-      return cloneGraph(EMPTY_GRAPH);
-    }
-
-    const { nodes, edges } = parsed;
-    if (!Array.isArray(nodes) || !Array.isArray(edges)) {
-      return cloneGraph(EMPTY_GRAPH);
-    }
-
-    const rawEdges = edges.filter(isNodeEdge);
-
-    const hydratedNodes = nodes
-      .map((node, index) => hydrateGraphNode(node, index))
-      .filter((node): node is GraphNode => node !== null);
-
-    if (hydratedNodes.length === 0) {
-      return cloneGraph(EMPTY_GRAPH);
-    }
-
-    const nodeById = new Map(hydratedNodes.map((node) => [node.id, node]));
-    const validEdges = rawEdges.filter((edge) => edgeConnectsValidPorts(edge, nodeById));
-
-    return cloneGraph({ nodes: hydratedNodes, edges: validEdges });
-  } catch {
-    return cloneGraph(EMPTY_GRAPH);
-  }
-}
-
-// ── Node definitions (palette) ────────────────────────────────────────────────
-
-const NODE_DEFS: Record<NodeType, Omit<GraphNode, "id" | "x" | "y">> = {
-  event_start: {
-    type: "event_start", label: "On Start",
-    inputs: [],
-    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
-    params: {},
-  },
-  event_update: {
-    type: "event_update", label: "On Update",
-    inputs: [],
-    outputs: [{ id: "exec", label: ">", kind: "exec" }],
-    params: { rate: "frame" },
-  },
-  input_pressed: {
-    type: "input_pressed",
-    label: "On Input Pressed",
-    inputs: [{ id: "exec", label: ">", kind: "exec" }],
-    outputs: [{ id: "exec", label: ">", kind: "exec" }],
-    params: { pad: "JOY_1", button: "BUTTON_A" },
-  },
-  input_held: {
-    type: "input_held",
-    label: "On Input Held",
-    inputs: [{ id: "exec", label: ">", kind: "exec" }],
-    outputs: [{ id: "exec", label: ">", kind: "exec" }],
-    params: { pad: "JOY_1", button: "BUTTON_RIGHT" },
-  },
-  input_command: {
-    type: "input_command",
-    label: "Input Command",
-    inputs: [{ id: "exec", label: ">", kind: "exec" }],
-    outputs: [
-      { id: "exec", label: ">", kind: "exec" },
-      { id: "false", label: "False >", kind: "exec" },
-    ],
-    params: {
-      command_id: "hadouken",
-      display_name: "Hadouken",
-      notation: "_2,_3,_6,_P",
-      max_frames: 15,
-      pad: "JOY_1",
-      button_profile: "megadrive",
-      target: "player",
-    },
-  },
-  sprite_move: {
-    type: "sprite_move", label: "Move Sprite",
-    inputs: [
-      { id: "exec",   label: "▶", kind: "exec" },
-      { id: "dx",     label: "dx", kind: "data", dataType: "int" },
-      { id: "dy",     label: "dy", kind: "data", dataType: "int" },
-    ],
-    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
-    params: { target: "player", dx: 0, dy: 0 },
-  },
-  set_velocity: {
-    type: "set_velocity", label: "Set Velocity",
-    inputs: [
-      { id: "exec", label: ">", kind: "exec" },
-      { id: "vx", label: "vx", kind: "data", dataType: "int" },
-      { id: "vy", label: "vy", kind: "data", dataType: "int" },
-    ],
-    outputs: [{ id: "exec", label: ">", kind: "exec" }],
-    params: { target: "player", vx: 0, vy: 0 },
-  },
-  set_position: {
-    type: "set_position", label: "Set Position",
-    inputs: [
-      { id: "exec", label: ">", kind: "exec" },
-      { id: "x", label: "x", kind: "data", dataType: "int" },
-      { id: "y", label: "y", kind: "data", dataType: "int" },
-    ],
-    outputs: [{ id: "exec", label: ">", kind: "exec" }],
-    params: { target: "player", x: 0, y: 0 },
-  },
-  spawn_entity: {
-    type: "spawn_entity", label: "Spawn",
-    inputs: [{ id: "exec", label: ">", kind: "exec" }],
-    outputs: [{ id: "exec", label: ">", kind: "exec" }],
-    params: { prefab: "enemy", x: 0, y: 0 },
-  },
-  destroy_entity: {
-    type: "destroy_entity", label: "Destroy",
-    inputs: [{ id: "exec", label: ">", kind: "exec" }],
-    outputs: [{ id: "exec", label: ">", kind: "exec" }],
-    params: { target: "self" },
-  },
-  sprite_anim: {
-    type: "sprite_anim", label: "Set Animation",
-    inputs: [{ id: "exec", label: "▶", kind: "exec" }],
-    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
-    params: { target: "player", anim: "idle" },
-  },
-  set_animation_state: {
-    type: "set_animation_state", label: "Set Anim State",
-    inputs: [{ id: "exec", label: ">", kind: "exec" }],
-    outputs: [{ id: "exec", label: ">", kind: "exec" }],
-    params: { target: "player", state: "idle" },
-  },
-  condition_overlap: {
-    type: "condition_overlap",
-    label: "On Overlap",
-    inputs: [{ id: "exec", label: ">", kind: "exec" }],
-    outputs: [
-      { id: "true",  label: "True ▶",  kind: "exec" },
-      { id: "false", label: "False ▶", kind: "exec" },
-    ],
-    params: { a: "player", b: "enemy" },
-  },
-  camera_follow: {
-    type: "camera_follow", label: "Camera Follow",
-    inputs: [{ id: "exec", label: ">", kind: "exec" }],
-    outputs: [{ id: "exec", label: ">", kind: "exec" }],
-    params: { target: "player", damping: 0 },
-  },
-  camera_bounds: {
-    type: "camera_bounds", label: "Camera Bounds",
-    inputs: [{ id: "exec", label: ">", kind: "exec" }],
-    outputs: [{ id: "exec", label: ">", kind: "exec" }],
-    params: { min_x: 0, min_y: 0, max_x: 320, max_y: 224 },
-  },
-  timer: {
-    type: "timer", label: "Timer",
-    inputs: [{ id: "exec", label: ">", kind: "exec" }],
-    outputs: [
-      { id: "tick", label: "Tick >", kind: "exec" },
-      { id: "done", label: "Done >", kind: "exec" },
-    ],
-    params: { frames: 60, repeat: 0 },
-  },
-  set_tile: {
-    type: "set_tile", label: "Set Tile",
-    inputs: [
-      { id: "exec", label: ">", kind: "exec" },
-      { id: "x", label: "x", kind: "data", dataType: "int" },
-      { id: "y", label: "y", kind: "data", dataType: "int" },
-    ],
-    outputs: [{ id: "exec", label: ">", kind: "exec" }],
-    params: { layer: "BG_A", tile: 1, x: 0, y: 0 },
-  },
-  effect_parallax: {
-    type: "effect_parallax", label: "Parallax Scroll",
-    inputs: [{ id: "exec", label: "▶", kind: "exec" }],
-    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
-    params: { layer: "BG1", speed_x: 1, speed_y: 0 },
-  },
-  effect_raster: {
-    type: "effect_raster", label: "Raster Effect",
-    inputs: [{ id: "exec", label: "▶", kind: "exec" }],
-    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
-    params: { scanline: 128, offset_x: 4 },
-  },
-  logic_and: {
-    type: "logic_and", label: "AND",
-    inputs: [
-      { id: "a", label: "A", kind: "data", dataType: "bool" },
-      { id: "b", label: "B", kind: "data", dataType: "bool" },
-    ],
-    outputs: [{ id: "out", label: "Out", kind: "data", dataType: "bool" }],
-    params: {},
-  },
-  action_sound: {
-    type: "action_sound", label: "Play Sound",
-    inputs: [{ id: "exec", label: "▶", kind: "exec" }],
-    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
-    params: { sfx: "jump" },
-  },
-  action_music: {
-    type: "action_music", label: "Play Music",
-    inputs: [{ id: "exec", label: "▶", kind: "exec" }],
-    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
-    params: { action: "play", track: "stage_theme", fade_ms: 500 },
-  },
-  scroll_tilemap: {
-    type: "scroll_tilemap", label: "Scroll Tilemap",
-    inputs: [
-      { id: "exec", label: "▶", kind: "exec" },
-      { id: "dx",   label: "dx", kind: "data", dataType: "int" },
-      { id: "dy",   label: "dy", kind: "data", dataType: "int" },
-    ],
-    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
-    params: { layer: "BG_A", dx: 1, dy: 0 },
-  },
-  load_scene: {
-    type: "load_scene", label: "Load Scene",
-    inputs: [{ id: "exec", label: ">", kind: "exec" }],
-    outputs: [{ id: "exec", label: ">", kind: "exec" }],
-    params: { scene: "main" },
-  },
-  move_camera: {
-    type: "move_camera", label: "Move Camera",
-    inputs: [
-      { id: "exec", label: "▶", kind: "exec" },
-      { id: "x",    label: "x",  kind: "data", dataType: "int" },
-      { id: "y",    label: "y",  kind: "data", dataType: "int" },
-    ],
-    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
-    params: { target: "cam", x: 0, y: 0 },
-  },
-  var_set: {
-    type: "var_set", label: "Set Variable",
-    inputs: [
-      { id: "exec", label: "▶", kind: "exec" },
-      { id: "value", label: "Value", kind: "data", dataType: "int" }
-    ],
-    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
-    params: { var_name: "temp_var", value: 0 },
-  },
-  var_get: {
-    type: "var_get", label: "Get Variable",
-    inputs: [],
-    outputs: [{ id: "value", label: "Value", kind: "data", dataType: "int" }],
-    params: { var_name: "temp_var" },
-  },
-  logic_math: {
-    type: "logic_math", label: "Math Exp",
-    inputs: [
-      { id: "a", label: "A", kind: "data", dataType: "int" },
-      { id: "b", label: "B", kind: "data", dataType: "int" }
-    ],
-    outputs: [{ id: "value", label: "Value", kind: "data", dataType: "int" }],
-    params: { operator: "+" },
-  },
-  condition_compare: {
-    type: "condition_compare", label: "Compare",
-    inputs: [
-      { id: "exec", label: "▶", kind: "exec" },
-      { id: "a", label: "A", kind: "data", dataType: "int" },
-      { id: "b", label: "B", kind: "data", dataType: "int" }
-    ],
-    outputs: [
-      { id: "true", label: "True ▶", kind: "exec" },
-      { id: "false", label: "False ▶", kind: "exec" }
-    ],
-    params: { operator: "==" },
-  },
-  fsm_state: {
-    type: "fsm_state", label: "FSM State",
-    inputs: [{ id: "exec", label: "Enter", kind: "exec" }],
-    outputs: [
-      { id: "exec", label: "Body ▶", kind: "exec" },
-      { id: "transitions", label: "Transitions ▶", kind: "exec" },
-    ],
-    params: { state_name: "idle", initial: 0 },
-  },
-  fsm_transition: {
-    type: "fsm_transition", label: "FSM Transition",
-    inputs: [
-      { id: "exec", label: "▶", kind: "exec" },
-      { id: "condition", label: "Condition", kind: "data", dataType: "bool" },
-    ],
-    outputs: [
-      { id: "matched", label: "Matched ▶", kind: "exec" },
-      { id: "next", label: "Next ▶", kind: "exec" },
-    ],
-    params: { target_state: "idle" },
-  },
-  flow_if: {
-    type: "flow_if", label: "If",
-    inputs: [
-      { id: "exec", label: "▶", kind: "exec" },
-      { id: "condition", label: "Condition", kind: "data", dataType: "bool" },
-    ],
-    outputs: [
-      { id: "true", label: "True ▶", kind: "exec" },
-      { id: "false", label: "False ▶", kind: "exec" },
-    ],
-    params: {},
-  },
-  flow_while: {
-    type: "flow_while", label: "While",
-    inputs: [
-      { id: "exec", label: "▶", kind: "exec" },
-      { id: "condition", label: "Condition", kind: "data", dataType: "bool" },
-    ],
-    outputs: [
-      { id: "body", label: "Body ▶", kind: "exec" },
-      { id: "done", label: "Done ▶", kind: "exec" },
-    ],
-    params: {},
-  },
-  flow_for: {
-    type: "flow_for", label: "For",
-    inputs: [
-      { id: "exec", label: "▶", kind: "exec" },
-      { id: "count", label: "Count", kind: "data", dataType: "int" },
-    ],
-    outputs: [
-      { id: "body", label: "Body ▶", kind: "exec" },
-      { id: "done", label: "Done ▶", kind: "exec" },
-    ],
-    params: { var_name: "i", count: 4 },
-  },
-  timeline_sequence: {
-    type: "timeline_sequence", label: "Timeline",
-    inputs: [{ id: "exec", label: "▶", kind: "exec" }],
-    outputs: [
-      { id: "slot_0", label: "Slot 1 ▶", kind: "exec" },
-      { id: "slot_1", label: "Slot 2 ▶", kind: "exec" },
-      { id: "slot_2", label: "Slot 3 ▶", kind: "exec" },
-    ],
-    params: {
-      timeline_name: "cutscene",
-      slot_0_delay: 30,
-      slot_1_delay: 60,
-      slot_2_delay: 90,
-    },
-  },
-  hardware_budget_check: {
-    type: "hardware_budget_check", label: "Budget Check",
-    inputs: [{ id: "exec", label: ">", kind: "exec" }],
-    outputs: [
-      { id: "ok", label: "OK >", kind: "exec" },
-      { id: "warn", label: "Warn >", kind: "exec" },
-    ],
-    params: { vram_kb: 64, sprites: 80, scanline_sprites: 20 },
-  },
-  bridge_unconverted_source: {
-    type: "bridge_unconverted_source", label: "Source Bridge",
-    inputs: [{ id: "exec", label: ">", kind: "exec" }],
-    outputs: [{ id: "exec", label: ">", kind: "exec" }],
-    params: { gap: "semantic_gap", source: "" },
-  },
-  event_vblank: {
-    type: "event_vblank", label: "On VBlank",
-    inputs: [],
-    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
-    params: {},
-  },
-  event_hblank: {
-    type: "event_hblank", label: "On HBlank",
-    inputs: [],
-    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
-    params: {},
-  },
-  event_dma_done: {
-    type: "event_dma_done", label: "On DMA Done",
-    inputs: [],
-    outputs: [{ id: "exec", label: "▶", kind: "exec" }],
-    params: {},
-  },
-};
 
 export const NODE_DISPLAY_NAMES: Record<NodeType, string> = {
   event_start: "Ao Iniciar",
@@ -1804,66 +732,6 @@ export function getNodeParamDisplayName(key: string): string {
 }
 
 // ── Counter for unique IDs ────────────────────────────────────────────────────
-function clonePorts(ports: NodePort[]): NodePort[] {
-  return ports.map((port) => ({ ...port }));
-}
-
-/** Junta portos do JSON importado com os portos canónicos do editor (mesmo id conserva label/kind do ficheiro). */
-function mergePortsWithDefinition(
-  defaults: NodePort[],
-  incoming: unknown
-): NodePort[] {
-  if (!Array.isArray(incoming)) {
-    return clonePorts(defaults);
-  }
-  const parsed = incoming.filter(isNodePort);
-  const byId = new Map(parsed.map((port) => [port.id, port]));
-  return defaults.map((defPort) => {
-    const hit = byId.get(defPort.id);
-    return hit ? { ...defPort, ...hit } : { ...defPort };
-  });
-}
-
-function isGraphParamValue(value: unknown): value is string | number {
-  return typeof value === "string" || typeof value === "number";
-}
-
-function coerceNodeParams(type: NodeType, params: unknown): Record<string, string | number> {
-  const defaults = { ...NODE_DEFS[type].params };
-  if (!isRecord(params)) {
-    return defaults;
-  }
-
-  for (const [key, value] of Object.entries(params)) {
-    if (isGraphParamValue(value)) {
-      defaults[key] = value;
-    }
-  }
-
-  return defaults;
-}
-
-function hydrateGraphNode(value: unknown, index: number): GraphNode | null {
-  if (!isRecord(value) || typeof value.id !== "string" || !isNodeType(value.type)) {
-    return null;
-  }
-
-  const def = NODE_DEFS[value.type];
-  const inputs = mergePortsWithDefinition(def.inputs, value.inputs);
-  const outputs = mergePortsWithDefinition(def.outputs, value.outputs);
-
-  return {
-    id: value.id,
-    type: value.type,
-    label: typeof value.label === "string" ? value.label : def.label,
-    x: typeof value.x === "number" ? value.x : 40 + index * 200,
-    y: typeof value.y === "number" ? value.y : 80,
-    inputs,
-    outputs,
-    params: coerceNodeParams(value.type, value.params),
-  };
-}
-
 let _nodeCounter = 0;
 let _edgeCounter = 0;
 
@@ -3463,16 +2331,22 @@ export default function NodeGraphEditor() {
       }),
     [activeScene?.entities, graph, selectedEntity]
   );
-  const executionInspection = useMemo(
-    () => inspectNodeGraphExecution(graph),
-    [graph]
+  const localRun = useMemo(
+    () =>
+      runNodeGraphLocally(graph, {
+        selectedEntity,
+        sceneEntities: activeScene?.entities ?? [],
+      }),
+    [activeScene?.entities, graph, selectedEntity]
   );
+  const localTrace = localRun.status === "success" ? localRun.trace : null;
+  const runtimeMapping = useMemo(() => resolveRuntimeEvidenceForGraph(), []);
   const reachableExecutionNodeIds = useMemo(
     () =>
-      executionInspectorEnabled
-        ? new Set(executionInspection.reachableNodeIds)
+      executionInspectorEnabled && localTrace
+        ? new Set(localTrace.reachableNodeIds)
         : new Set<string>(),
-    [executionInspection.reachableNodeIds, executionInspectorEnabled]
+    [localTrace, executionInspectorEnabled]
   );
   const graphValidationPreview = [...graphValidation.errors, ...graphValidation.warnings].slice(0, 3);
   const miniMapNodes = useMemo(
@@ -3522,13 +2396,12 @@ export default function NodeGraphEditor() {
       if (next) {
         logMessage(
           "info",
-          `[NodeGraph Diagnostics] Inspecao de execucao: ${graphValidation.errors.length} erro(s), ${graphValidation.warnings.length} aviso(s), ${executionInspection.evidenceLabel}.`
+          `[NodeGraph Diagnostics] Inspecao de execucao: ${graphValidation.errors.length} erro(s), ${graphValidation.warnings.length} aviso(s), ${LOCAL_TRACE_EVIDENCE_LABEL}.`
         );
       }
       return next;
     });
   }, [
-    executionInspection.evidenceLabel,
     graphValidation.errors.length,
     graphValidation.warnings.length,
     logMessage,
@@ -3963,14 +2836,20 @@ export default function NodeGraphEditor() {
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[#a6e3a1]">
-                      Inspecao de execucao
+                      Inspecao de execucao — Local trace
                     </p>
                     <p className="mt-1 text-[#94a3b8]">
-                      {executionInspection.evidenceLabel}
+                      {LOCAL_TRACE_EVIDENCE_LABEL}
+                    </p>
+                    <p
+                      data-testid="nodegraph-runtime-mapping"
+                      className="mt-1 text-[#f9e2af]"
+                    >
+                      Runtime: nao suportado — {runtimeMapping.reason}
                     </p>
                   </div>
                   <span className="rounded border border-[#313244] bg-[#11111b] px-2 py-1 text-[9px] font-semibold text-[#cdd6f4]">
-                    {executionInspection.reachableNodeIds.length} nos
+                    {localTrace ? localTrace.reachableNodeIds.length : 0} nos
                   </span>
                 </div>
 
@@ -3984,30 +2863,67 @@ export default function NodeGraphEditor() {
                   </p>
                 </div>
 
-                <ol className="mt-2 space-y-1">
-                  {executionInspection.trace.length > 0 ? (
-                    executionInspection.trace.slice(0, 8).map((step, index) => (
+                {localTrace && Object.keys(localTrace.variables).length > 0 ? (
+                  <p
+                    data-testid="nodegraph-local-variables"
+                    className="mt-2 text-[#94a3b8]"
+                  >
+                    Variaveis (avaliacao local):{" "}
+                    {Object.entries(localTrace.variables)
+                      .map(([name, value]) => `${name}=${value}`)
+                      .join(", ")}
+                  </p>
+                ) : null}
+
+                {localRun.status === "error" ? (
+                  <ol
+                    data-testid="nodegraph-execution-blocked"
+                    className="mt-2 space-y-1"
+                  >
+                    <li className="rounded border border-[#f38ba8]/40 bg-[#11111b]/70 px-2 py-1 text-[#f38ba8]">
+                      Execucao local bloqueada por {localRun.errors.length} erro(s) de
+                      validacao.
+                    </li>
+                    {localRun.errors.slice(0, 4).map((error, index) => (
                       <li
-                        key={`${step.kind}-${step.nodeId ?? "edge"}-${index}`}
+                        key={`${error.code}-${error.nodeId ?? error.edgeId ?? index}`}
                         className="rounded border border-[#313244] bg-[#11111b]/70 px-2 py-1"
                       >
-                        <span className="font-mono text-[9px] text-[#89b4fa]">
-                          {step.kind}
-                        </span>
-                        <span className="ml-1 font-semibold text-[#cdd6f4]">
-                          {step.label}
+                        <span className="font-mono text-[9px] text-[#f38ba8]">
+                          {error.code}
                         </span>
                         <span className="mt-0.5 block text-[#7f849c]">
-                          {step.detail}
+                          {error.message}
                         </span>
                       </li>
-                    ))
-                  ) : (
-                    <li className="rounded border border-[#313244] bg-[#11111b]/70 px-2 py-1 text-[#f9e2af]">
-                      Nenhum no executavel alcancavel por simulacao local.
-                    </li>
-                  )}
-                </ol>
+                    ))}
+                  </ol>
+                ) : (
+                  <ol className="mt-2 space-y-1">
+                    {localTrace && localTrace.steps.length > 0 ? (
+                      localTrace.steps.slice(0, 8).map((step, index) => (
+                        <li
+                          key={`${step.kind}-${step.nodeId ?? "edge"}-${index}`}
+                          className="rounded border border-[#313244] bg-[#11111b]/70 px-2 py-1"
+                        >
+                          <span className="font-mono text-[9px] text-[#89b4fa]">
+                            {step.kind}
+                          </span>
+                          <span className="ml-1 font-semibold text-[#cdd6f4]">
+                            {step.label}
+                          </span>
+                          <span className="mt-0.5 block text-[#7f849c]">
+                            {step.detail}
+                          </span>
+                        </li>
+                      ))
+                    ) : (
+                      <li className="rounded border border-[#313244] bg-[#11111b]/70 px-2 py-1 text-[#f9e2af]">
+                        Nenhum no executavel alcancavel por simulacao local.
+                      </li>
+                    )}
+                  </ol>
+                )}
               </div>
             ) : null}
 
