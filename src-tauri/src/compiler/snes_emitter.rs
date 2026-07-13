@@ -7,6 +7,7 @@ use crate::compiler::ast_generator::{
     LogicTimelineSlot, ParallaxLayerConfig, PhysicsApplication, RasterLineConfig, SpriteAsset,
     TilemapAsset,
 };
+use crate::compiler::build_provenance::{begin_marker, end_marker};
 use crate::core::input_commands::parse_command_notation;
 use std::collections::BTreeMap;
 
@@ -803,6 +804,9 @@ fn collect_input_commands_from_ops(
 ) {
     for op in ops {
         match op {
+            LogicOp::SourceMapped { op, .. } => {
+                collect_input_commands_from_ops(std::slice::from_ref(op.as_ref()), commands);
+            }
             LogicOp::ConditionBool {
                 condition,
                 if_true,
@@ -1018,6 +1022,24 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], context: &SnesContext, in
 
     for op in ops {
         match op {
+            LogicOp::SourceMapped {
+                graph_sha256,
+                node_id,
+                semantic_stage,
+                op,
+            } => {
+                out.push_str(&format!(
+                    "{indent}{}\n",
+                    begin_marker(graph_sha256, node_id, semantic_stage),
+                    indent = indent_str
+                ));
+                render_logic_ops(out, std::slice::from_ref(op.as_ref()), context, indent);
+                out.push_str(&format!(
+                    "{indent}{}\n",
+                    end_marker(graph_sha256, node_id),
+                    indent = indent_str
+                ));
+            }
             LogicOp::MoveSprite { target_var, dx, dy } => {
                 let Some(spawn) = context
                     .spawns

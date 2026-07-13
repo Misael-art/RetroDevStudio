@@ -7,6 +7,10 @@ use crate::compiler::ast_generator::{
     collect_bgm_tracks, collect_sfx_resources, collect_tilemap_assets, generate_ast,
     generate_ast_with_prefabs, AstOutput, SpriteAsset,
 };
+use crate::compiler::build_provenance::{
+    attach_rom_artifact, build_source_map, serialize_source_map, BuildSourceMap,
+    SOURCE_MAP_FILE_NAME,
+};
 use crate::compiler::sgdk_emitter::emit_sgdk_with_collision;
 use crate::compiler::snes_emitter::emit_snes_with_collision;
 use crate::core::diagnostics::{build_diagnostics_from_log, ActionableDiagnostic};
@@ -29,6 +33,8 @@ pub struct BuildResult {
     pub rom_path: String,
     pub log: Vec<BuildLogLine>,
     pub diagnostics: Vec<ActionableDiagnostic>,
+    pub source_map_path: Option<String>,
+    pub build_source_map: Option<BuildSourceMap>,
 }
 
 #[derive(Debug, serde::Serialize, Clone)]
@@ -41,6 +47,8 @@ pub struct MultiTargetBuildEntry {
     pub errors: Vec<String>,
     pub log: Vec<BuildLogLine>,
     pub diagnostics: Vec<ActionableDiagnostic>,
+    pub source_map_path: Option<String>,
+    pub build_source_map: Option<BuildSourceMap>,
 }
 
 #[derive(Debug, serde::Serialize, Clone)]
@@ -84,6 +92,7 @@ struct EmitArtifacts {
 struct BuildWorkspace {
     root: PathBuf,
     out_dir: PathBuf,
+    source_map_path: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -111,15 +120,24 @@ fn failed_build_result(
         rom_path: String::new(),
         log,
         diagnostics,
+        source_map_path: None,
+        build_source_map: None,
     }
 }
 
-fn successful_build_result(rom_path: PathBuf, log: Vec<BuildLogLine>) -> BuildResult {
+fn successful_build_result(
+    rom_path: PathBuf,
+    log: Vec<BuildLogLine>,
+    source_map_path: Option<&Path>,
+    build_source_map: Option<BuildSourceMap>,
+) -> BuildResult {
     BuildResult {
         ok: true,
         rom_path: rom_path.to_string_lossy().to_string(),
         log,
         diagnostics: Vec::new(),
+        source_map_path: source_map_path.map(|path| path.to_string_lossy().to_string()),
+        build_source_map,
     }
 }
 
@@ -436,6 +454,8 @@ where
                     errors: vec![format!("Falha ao carregar project.rds: {}", error)],
                     log,
                     diagnostics,
+                    source_map_path: None,
+                    build_source_map: None,
                 }],
             };
         }
@@ -481,6 +501,8 @@ where
                     errors: vec![error],
                     log: entry_log,
                     diagnostics,
+                    source_map_path: None,
+                    build_source_map: None,
                 }
             }
         };
@@ -603,6 +625,7 @@ where
         let workspace = BuildWorkspace {
             root: host_root.clone(),
             out_dir: host_root.join("out"),
+            source_map_path: host_root.join(SOURCE_MAP_FILE_NAME),
         };
 
         if let Err(error) = invoke_make(&toolchain, &workspace, target, &mut log, &on_log) {
@@ -637,7 +660,7 @@ where
         }
         emit!("success", format!("ROM gerada: {}", rom_path.display()));
 
-        return successful_build_result(rom_path, log);
+        return successful_build_result(rom_path, log, None, None);
     }
 
     let scene = match load_scene(project_dir, &project.entry_scene) {
@@ -837,14 +860,16 @@ where
         }
     };
 
-    let workspace = match prepare_workspace(project_dir, project, target, &ast, &artifacts) {
-        Ok(workspace) => workspace,
-        Err(error) => {
-            emit!("error", error);
-            let evidence_path = build_evidence_path(project_dir, project, target);
-            return failed_build_result(target.target, log, evidence_path.as_deref());
-        }
-    };
+    let mut source_map = build_source_map(&scene_for_build, target.target, &artifacts.main_c);
+    let workspace =
+        match prepare_workspace(project_dir, project, target, &ast, &artifacts, &source_map) {
+            Ok(workspace) => workspace,
+            Err(error) => {
+                emit!("error", error);
+                let evidence_path = build_evidence_path(project_dir, project, target);
+                return failed_build_result(target.target, log, evidence_path.as_deref());
+            }
+        };
 
     emit!(
         "success",
@@ -911,7 +936,34 @@ where
     }
     emit!("success", format!("ROM gerada: {}", rom_path.display()));
 
-    successful_build_result(rom_path, log)
+    if let Err(error) = attach_rom_artifact(&mut source_map, &rom_path).and_then(|_| {
+        serialize_source_map(&source_map).and_then(|json| {
+            fs::write(&workspace.source_map_path, json).map_err(|write_error| {
+                format!(
+                    "Falha ao atualizar source map de build '{}': {}",
+                    workspace.source_map_path.display(),
+                    write_error
+                )
+            })
+        })
+    }) {
+        emit!("error", error);
+        return failed_build_result(target.target, log, Some(&workspace.root));
+    }
+    emit!(
+        "success",
+        format!(
+            "Proveniência de build observada: {}",
+            workspace.source_map_path.display()
+        )
+    );
+
+    successful_build_result(
+        rom_path,
+        log,
+        Some(&workspace.source_map_path),
+        Some(source_map),
+    )
 }
 
 fn scene_requires_sgdk_resource_compatibility(scene: &Scene) -> bool {
@@ -964,6 +1016,8 @@ fn build_entry_from_result(target: &str, result: BuildResult) -> MultiTargetBuil
         errors,
         log: result.log,
         diagnostics: result.diagnostics,
+        source_map_path: result.source_map_path,
+        build_source_map: result.build_source_map,
     }
 }
 
@@ -1003,6 +1057,7 @@ fn prepare_workspace(
     target: TargetSpec,
     ast: &AstOutput,
     artifacts: &EmitArtifacts,
+    source_map: &BuildSourceMap,
 ) -> Result<BuildWorkspace, String> {
     let output_root = project
         .build
@@ -1039,11 +1094,15 @@ fn prepare_workspace(
     let project_slug = sanitize_project_name(&project.name);
     let main_c_path = src_dir.join("main.c");
     let resources_res_path = res_dir.join("resources.res");
+    let source_map_path = root.join(SOURCE_MAP_FILE_NAME);
 
     fs::write(&main_c_path, &artifacts.main_c)
         .map_err(|e| format!("Falha ao gravar '{}': {}", main_c_path.display(), e))?;
     fs::write(&resources_res_path, &artifacts.resources_res)
         .map_err(|e| format!("Falha ao gravar '{}': {}", resources_res_path.display(), e))?;
+    let source_map_json = serialize_source_map(source_map)?;
+    fs::write(&source_map_path, source_map_json)
+        .map_err(|e| format!("Falha ao gravar '{}': {}", source_map_path.display(), e))?;
 
     match target.target {
         "snes" => {
@@ -1085,7 +1144,11 @@ fn prepare_workspace(
         }
     }
 
-    Ok(BuildWorkspace { root, out_dir })
+    Ok(BuildWorkspace {
+        root,
+        out_dir,
+        source_map_path,
+    })
 }
 
 fn stage_project_assets(
@@ -3568,6 +3631,46 @@ PY\n"
             rom.windows(4).any(|window| window == b"SEGA"),
             "ROM deve conter assinatura SEGA para smoke de emulacao/build"
         );
+        let source_map_path = first
+            .source_map_path
+            .as_deref()
+            .map(PathBuf::from)
+            .expect("successful build source map path");
+        assert!(source_map_path.is_file());
+        let source_map = first
+            .build_source_map
+            .as_ref()
+            .expect("successful build source map");
+        assert_eq!(source_map.artifact.path.as_deref(), Some(first.rom_path.as_str()));
+        assert_eq!(source_map.artifact.sha256.as_deref().map(str::len), Some(64));
+        let graph_map = source_map.graphs.first().expect("mapped NodeGraph");
+        let velocity = graph_map
+            .entries
+            .iter()
+            .find(|entry| entry.node_id == "velocity")
+            .expect("velocity mapping");
+        assert_eq!(velocity.status, crate::compiler::build_provenance::BuildMappingStatus::Mapped);
+        let velocity_location = velocity
+            .generated_locations
+            .first()
+            .expect("velocity generated location");
+        assert!(main_c
+            .lines()
+            .skip(velocity_location.start_line - 1)
+            .take(velocity_location.end_line - velocity_location.start_line + 1)
+            .any(|line| line.contains("logic_var_player_vx = 2;")));
+        let start = graph_map
+            .entries
+            .iter()
+            .find(|entry| entry.node_id == "start")
+            .expect("event entry mapping state");
+        assert_eq!(start.status, crate::compiler::build_provenance::BuildMappingStatus::Unsupported);
+        assert!(start.unsupported_reason.is_some());
+        let persisted_source_map: BuildSourceMap = serde_json::from_str(
+            &fs::read_to_string(&source_map_path).expect("read persisted source map"),
+        )
+        .expect("parse persisted source map");
+        assert_eq!(&persisted_source_map, source_map);
 
         let second = run_build_with_environment(&project_dir, &environment, |_| {});
         assert!(second.ok, "second build log: {:?}", second.log);
@@ -3577,6 +3680,7 @@ PY\n"
             main_c, second_main_c,
             "SGDK C gerado deve ser deterministico"
         );
+        assert_eq!(first.build_source_map, second.build_source_map);
 
         let _ = fs::remove_dir_all(project_dir);
     }

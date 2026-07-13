@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::compiler::build_provenance::graph_revision_hash;
 use crate::core::project_mgr::{resolve_prefabs, LoadError};
 use crate::ugdm::components::{
     AnimationDef, AudioComponent, CollisionComponent, InputComponent, PhysicsComponent,
@@ -214,6 +215,12 @@ pub struct LogicScript {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LogicOp {
+    SourceMapped {
+        graph_sha256: String,
+        node_id: String,
+        semantic_stage: String,
+        op: Box<LogicOp>,
+    },
     MoveSprite {
         target_var: String,
         dx: i32,
@@ -443,6 +450,8 @@ struct CompiledLogicOutput {
 
 #[derive(Debug, Clone, Deserialize)]
 struct StoredNodeGraph {
+    #[serde(skip)]
+    graph_sha256: String,
     #[serde(default)]
     nodes: Vec<StoredNodeGraphNode>,
     #[serde(default)]
@@ -1123,9 +1132,10 @@ fn collect_logic_output(
         let Some(serialized_graph) = logic.graph.as_deref() else {
             continue;
         };
-        let Ok(graph) = serde_json::from_str::<StoredNodeGraph>(serialized_graph) else {
+        let Ok(mut graph) = serde_json::from_str::<StoredNodeGraph>(serialized_graph) else {
             continue;
         };
+        graph.graph_sha256 = graph_revision_hash(serialized_graph);
 
         let compiled = compile_logic_graph(&graph, runtime_entities);
         output.setup_nodes.extend(compiled.setup_nodes);
@@ -1404,11 +1414,11 @@ fn compile_logic_chain(
             raster_lines,
         ) {
             Some(CompiledLogicNode::Linear(op)) => {
-                ops.push(op);
+                ops.push(source_mapped_logic_op(graph, node, op));
                 next_node_id = next_exec_target(graph, &node.id, "exec");
             }
             Some(CompiledLogicNode::Terminal(op)) => {
-                ops.push(op);
+                ops.push(source_mapped_logic_op(graph, node, op));
                 next_node_id = None;
             }
             Some(CompiledLogicNode::NoOp) => {
@@ -1439,6 +1449,19 @@ enum CompiledLogicNode {
     NoOp,
     SetupNode(AstNode),
     RuntimeNode(AstNode),
+}
+
+fn source_mapped_logic_op(
+    graph: &StoredNodeGraph,
+    node: &StoredNodeGraphNode,
+    op: LogicOp,
+) -> LogicOp {
+    LogicOp::SourceMapped {
+        graph_sha256: graph.graph_sha256.clone(),
+        node_id: node.id.clone(),
+        semantic_stage: node.node_type.clone(),
+        op: Box::new(op),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2420,6 +2443,9 @@ fn collect_logic_sound_names_from_ops(
 ) {
     for op in ops {
         match op {
+            LogicOp::SourceMapped { op, .. } => {
+                collect_logic_sound_names_from_ops(std::slice::from_ref(op.as_ref()), sound_names);
+            }
             LogicOp::PlaySound { sfx } => {
                 sound_names.insert(sfx.clone());
             }

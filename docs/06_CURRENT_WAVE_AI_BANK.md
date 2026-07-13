@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-07-12 (Node Engine local MVP rebased sobre main certificado)
+**Ultima Atualizacao:** 2026-07-13 (Node build provenance v1 em hardening)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,14 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-07-13 - Node build provenance v1, branch `codex/node-build-provenance`):**
+  - **Base certificada:** PR #26 do Node Engine local foi mergeada em `main` por `9548dbc`; CI e Desktop E2E do merge passaram. Node Engine, NodeGraph e Inspector permanecem **Experimental**.
+  - **Contrato v1 honesto:** `rds-node-source-map.v1.json` registra hash SHA-256 da serializacao exata do NodeGraph, versao do grafo, etapa semantica, arquivo `src/main.c`, intervalos 1-based realmente emitidos, hash do C e hash/caminho da ROM quando o build termina. Nodes sem trecho C autonomo ficam `unsupported` com motivo; nenhum mapping e inferido cosmeticamente.
+  - **Pipeline real:** o backend Rust carrega `graph_sha256` no IR `LogicOp::SourceMapped`, os emitters SGDK/PVSnesLib ancoram os trechos C e o orquestrador persiste/atualiza o source map no workspace canonico `Build -> ROM`. O Inspector valida schema, versao e hash antes de exibir **“Proveniência de build observada”**.
+  - **Limite deliberado:** source map de build nao e `RuntimeEvidence` e nao observa execucao, PC, registradores ou estado do emulador. `LocalNodeTrace` segue simulado e `nodeCompiler.ts` segue legado/isolado.
+  - **Cobertura focada verde:** TypeScript PASS; Vitest de contrato + Inspector **15/15**; Rust source map **2/2**; build fake SGDK vertical **1/1**, incluindo intervalo C real, `unsupported`, persistencia deterministica e hash da ROM. Gates completos, build debug e certificacao remota ainda pendem nesta branch.
+  - **Proximo passo imediato:** checkpoint, gates completos, build oficial quando o ambiente estiver disponivel, PR exclusiva e merge somente com CI/Desktop E2E verdes.
 
 * **O que acabou de acontecer (2026-07-12 - Node Engine local MVP rebased sobre `main`):**
   - **Topologia corrigida:** `codex/node-engine-local-mvp` foi rebased sobre `main` `3bc6e72`, depois da integracao certificada de P0 + Linux. A branch nao depende mais de base stacked e continua sem mudancas Rust ou dependencias novas.

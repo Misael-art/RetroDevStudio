@@ -24,6 +24,11 @@ import { resolveSceneWorkspaceContext } from "../../core/sceneWorkspaceContext";
 import { buildTilemapAuthoringBrush } from "../../core/entityAuthoring";
 import { openProjectSourcePath } from "../../core/ipc/projectService";
 import { getEntityLogicImportSignal } from "../../core/sgdkLogicDiagnostics";
+import {
+  resolveBuildProvenanceForGraph,
+  type BuildProvenanceResolution,
+  type BuildSourceMap,
+} from "../../core/nodegraph/buildProvenance";
 import knowledgeBase from "./knowledgeBase.json";
 
 type KnowledgeSectionId =
@@ -661,6 +666,73 @@ function LogicVariableSlider({ varName, variable, onChange }: LogicVariableSlide
   );
 }
 
+function BuildProvenancePanel({
+  sourceMap,
+  serializedGraph,
+}: {
+  sourceMap: BuildSourceMap | null;
+  serializedGraph: string | null | undefined;
+}) {
+  const [resolution, setResolution] = useState<BuildProvenanceResolution | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void resolveBuildProvenanceForGraph(sourceMap, serializedGraph).then((next) => {
+      if (active) setResolution(next);
+    });
+    return () => {
+      active = false;
+    };
+  }, [serializedGraph, sourceMap]);
+
+  if (!sourceMap && resolution?.status === "missing") return null;
+
+  return (
+    <div
+      data-testid="inspector-build-provenance"
+      className="mb-2 rounded border border-[#89b4fa]/30 bg-[#89b4fa]/5 px-2 py-2 text-[10px]"
+    >
+      <p className="font-semibold text-[#89b4fa]">Proveniência de build observada</p>
+      <p className="mt-1 text-[#7f849c]">
+        Experimental. Este painel não observa PC, registradores ou emulador.
+      </p>
+      {!resolution ? (
+        <p className="mt-1 text-[#7f849c]">Validando hash do NodeGraph…</p>
+      ) : resolution.status !== "observed" ? (
+        <p data-testid="inspector-build-provenance-incompatible" className="mt-1 text-[#f9e2af]">
+          {resolution.reason}
+        </p>
+      ) : (
+        <div className="mt-2 space-y-1" data-testid="inspector-build-provenance-entries">
+          {resolution.graph.entries.map((entry) => (
+            <div key={entry.node_id} className="rounded border border-[#313244] bg-[#11111b]/70 px-2 py-1">
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate font-mono text-[#cdd6f4]">{entry.node_id}</span>
+                <span className={entry.status === "mapped" ? "text-[#a6e3a1]" : "text-[#f9e2af]"}>
+                  {entry.status}
+                </span>
+              </div>
+              <p className="text-[#6c7086]">IR: {entry.semantic_stage}</p>
+              {entry.status === "mapped" ? (
+                entry.generated_locations.map((location, index) => (
+                  <p
+                    key={`${location.file}-${location.start_line}-${index}`}
+                    className="font-mono text-[#89b4fa]"
+                  >
+                    {location.file}:{location.start_line}:{location.start_column}–{location.end_line}:{location.end_column}
+                  </p>
+                ))
+              ) : (
+                <p className="text-[#f9e2af]">{entry.unsupported_reason}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function InspectorPanel() {
   const {
     activeProjectDir,
@@ -682,6 +754,7 @@ export default function InspectorPanel() {
     setActiveTilemapId,
     setEditorMode,
     setActiveBrush,
+    lastBuildSourceMap,
   } = useEditorStore();
 
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "error">("idle");
@@ -1635,6 +1708,10 @@ export default function InspectorPanel() {
             ) : null}
             {entity.components.logic ? (
               <InspectorSection sectionId="logic" title="Logic">
+                <BuildProvenancePanel
+                  sourceMap={lastBuildSourceMap}
+                  serializedGraph={entity.components.logic.graph}
+                />
                 <table className="w-full table-fixed text-xs">
                   <tbody>
                     {entityLogicImportSignal.status !== "none" ? (
