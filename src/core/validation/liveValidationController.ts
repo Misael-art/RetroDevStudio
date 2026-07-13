@@ -15,6 +15,43 @@ export function serializeSceneDraft(scene: Scene): string {
   return JSON.stringify(scene);
 }
 
+export type LiveValidationStateMatchOutcome =
+  | { matches: true }
+  | { matches: false; reason: "no-state" }
+  | { matches: false; reason: "wrong-state"; expected: string; actual: string }
+  | { matches: false; reason: "wrong-revision"; expected: number; actual: number };
+
+export function isLiveValidationStateMatchingRevision(
+  validationState: { hwValidationState: string; hwValidatedRevision: number } | null,
+  expectedState: string, expectedRevision: number
+): LiveValidationStateMatchOutcome {
+  if (!validationState) {
+    return { matches: false, reason: "no-state" };
+  }
+
+  if (validationState.hwValidationState !== expectedState) {
+    return { matches: false, reason: "wrong-state", expected: expectedState, actual: validationState.hwValidationState };
+  }
+
+  if (validationState.hwValidatedRevision !== expectedRevision) {
+    return {
+      matches: false,
+      reason: "wrong-revision",
+      expected: expectedRevision,
+      actual: validationState.hwValidatedRevision,
+    };
+  }
+
+  return { matches: true };
+}
+
+export type SceneDraftReceipt = { ok: true; sceneRevision: number };
+export function isValidSceneDraftReceipt(receipt: unknown): receipt is SceneDraftReceipt {
+  if (!receipt || typeof receipt !== "object") return false;
+  const value = receipt as { ok?: unknown; sceneRevision?: unknown };
+  return value.ok === true && typeof value.sceneRevision === "number" && Number.isSafeInteger(value.sceneRevision) && value.sceneRevision > 0;
+}
+
 export function getLiveBuildBlockReason({
   activeProjectDir,
   building,

@@ -85,25 +85,42 @@ async function recordE2eLedgerSuccess(options, projectMetadata) {
   console.log(`[ledger] ${marker} -> ${ledgerPath}`);
 }
 const driverServerUrl = process.env.RDS_E2E_DRIVER_URL ?? "http://127.0.0.1:4444";
+export function appBinaryNameForPlatform(hostPlatform = process.platform) {
+  return hostPlatform === "win32" ? "retro-dev-studio.exe" : "retro-dev-studio";
+}
+
+export function webdriverNamesForPlatform(hostPlatform = process.platform) {
+  return hostPlatform === "win32"
+    ? ["msedgedriver.exe", "msedgedriver"]
+    : ["msedgedriver", "chromedriver"];
+}
+
+function isHostExecutableCandidate(candidate, hostPlatform = process.platform) {
+  if (hostPlatform === "win32") {
+    return true;
+  }
+  return path.extname(candidate).toLowerCase() !== ".exe";
+}
+
 const defaultDebugAppPath = path.join(
   repoRoot,
   "src-tauri",
   "target-test",
   "debug",
-  "retro-dev-studio.exe"
+  appBinaryNameForPlatform()
 );
 const defaultReleaseAppPath = path.join(
   repoRoot,
   "src-tauri",
   "target-test",
   "release",
-  "retro-dev-studio.exe"
+  appBinaryNameForPlatform()
 );
 const defaultWebDriverPath = path.join(
   repoRoot,
   "toolchains",
   "webdriver",
-  "msedgedriver.exe"
+  process.platform === "win32" ? "msedgedriver.exe" : "msedgedriver"
 );
 const validationDir = path.join(
   repoRoot,
@@ -707,7 +724,7 @@ function pathExtensions() {
 async function resolveExecutable(explicitPath, names) {
   if (explicitPath) {
     const resolved = path.resolve(explicitPath);
-    if (await pathExists(resolved)) return resolved;
+    if (isHostExecutableCandidate(resolved) && (await pathExists(resolved))) return resolved;
   }
 
   const searchDirs = [
@@ -722,7 +739,7 @@ async function resolveExecutable(explicitPath, names) {
       const candidates = hasExtension ? [name] : extensions.map((extension) => `${name}${extension}`);
       for (const candidateName of candidates) {
         const candidate = path.join(directory, candidateName);
-        if (await pathExists(candidate)) {
+        if (isHostExecutableCandidate(candidate) && (await pathExists(candidate))) {
           return candidate;
         }
       }
@@ -933,16 +950,58 @@ async function readAutomationState(sessionId) {
   );
 }
 
-async function waitForLiveValidationFresh(sessionId, timeoutMs) {
+async function callLiveValidationStateMatch(sessionId, expectedState, revision) {
+  const state = await readAutomationState(sessionId);
+  const validationState = state ? { hwValidationState: state.hwValidationState, hwValidatedRevision: state.hwValidatedRevision } : null;
+  const result = await callAutomationApi(sessionId, "isLiveValidationStateMatchingRevision", [validationState, expectedState, revision]);
+  return { state, result };
+}
+
+async function waitForLiveValidationFresh(sessionId, timeoutMs, revision) {
+  let lastState = null;
   await waitFor(
     async () => {
-      const state = await readAutomationState(sessionId);
-      return state?.hwValidationState === "fresh" ? state : false;
+      const { state, result } = await callLiveValidationStateMatch(sessionId, "fresh", revision);
+      lastState = state;
+      if (result.matches) return state;
+
+      const diag = result.reason === "no-state"
+        ? "sem_estado"
+        : result.reason === "wrong-state"
+          ? `estado_incorreto:${result.actual}`
+          : result.reason === "wrong-revision"
+            ? `wrong-revision:${result.actual}/${result.expected}`
+            : "desconhecido";
+      console.log(
+        `[E2E] Esperando fresh... ${diag} r:${state?.hwValidatedRevision ?? "?"}/${revision ?? "?"} erros:${state?.hwStatus?.errorCount ?? "?"}`
+      );
+      return false;
     },
     timeoutMs,
-    "Validacao live nao ficou fresh apos injetar draft.",
+    `Validacao live nao ficou fresh apos injetar draft (revisao ${revision ?? "?"}).`,
     250
-  );
+  ).catch((error) => {
+    const diag = lastState
+      ? `ultimo estado: hwValidationState=${lastState.hwValidationState} hwValidatedRevision=${lastState.hwValidatedRevision} sceneRevision=${lastState.sceneRevision}`
+      : "nenhum estado obtido";
+    console.log(`[E2E] DIAG timeout: esperada rev=${revision ?? "?"}. ${diag}`);
+    throw error;
+  });
+}
+
+async function logAutomationState(sessionId, label) {
+  try {
+    const state = await readAutomationState(sessionId);
+    if (!state) {
+      console.log(`[E2E] ${label}: estado indisponivel`);
+      return;
+    }
+    console.log(
+      `[E2E] ${label}: fresh=${state.hwValidationState} rev=${state.sceneRevision} validatedRev=${state.hwValidatedRevision} errores=${state.hwStatus?.errorCount ?? "?"} warnings=${state.hwStatus?.warningCount ?? "?"}`
+    );
+  } catch {
+    console.log(`[E2E] ${label}: falha ao ler estado`);
+  }
 }
 
 async function callAutomationApi(sessionId, methodName, args = []) {
@@ -2550,7 +2609,7 @@ async function setSceneDraft(sessionId, draft) {
       }
       api
         .setSceneDraft(arguments[0])
-        .then(() => done({ ok: true }))
+        .then((receipt) => done({ ok: true, value: receipt }))
         .catch((error) => done({ ok: false, error: String(error) }));
     `,
     [draft]
@@ -2559,6 +2618,8 @@ async function setSceneDraft(sessionId, draft) {
   if (!result?.ok) {
     fail(`Falha ao injetar draft live: ${result?.error ?? "sem diagnostico"}`);
   }
+
+  return result.value;
 }
 
 async function readLiveStatus(sessionId) {
@@ -2985,7 +3046,7 @@ function sessionBootstrapHint(details, options) {
     `App: ${options.app}`,
     `Driver endpoint: ${driverServerUrl}`,
     "Acoes recomendadas:",
-    "1) Feche instancias manuais de retro-dev-studio.exe antes de rodar o E2E.",
+    `1) Feche instancias manuais de ${appBinaryNameForPlatform()} antes de rodar o E2E.`,
     "2) Rode o diagnostico local completo:",
     "   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\\diagnose-desktop-e2e.ps1 -SessionProbe",
     "3) Se o host local continuar com DevToolsActivePort/chrome not reachable, use o workflow desktop-e2e no runner GitHub/Windows.",
@@ -3105,10 +3166,6 @@ function deriveLiveStatusFromDiagnostics(diagnostics) {
 }
 
 async function main() {
-  if (process.platform !== "win32") {
-    fail("Este runner E2E desktop/Tauri e suportado apenas em Windows.");
-  }
-
   if (typeof fetch !== "function") {
     fail("Este script requer Node.js com suporte a fetch global.");
   }
@@ -3187,14 +3244,20 @@ async function main() {
       );
     }
 
-    nativeDriverPath = await resolveExecutable(options.nativeDriver, ["msedgedriver", "msedgedriver.exe"]);
+    nativeDriverPath = await resolveExecutable(options.nativeDriver, webdriverNamesForPlatform());
     if (!nativeDriverPath) {
       fail(
-        [
-          "msedgedriver nao encontrado.",
-          "Instale um driver compativel com o Edge do sistema, por exemplo com o utilitario oficial:",
-          "cargo install --git https://github.com/chippers/msedgedriver-tool",
-        ].join(" ")
+        process.platform === "win32"
+          ? [
+              "msedgedriver nao encontrado.",
+              "Instale um driver compativel com o Edge do sistema, por exemplo com o utilitario oficial:",
+              "cargo install --git https://github.com/chippers/msedgedriver-tool",
+            ].join(" ")
+          : [
+              "WebDriver nativo nao encontrado.",
+              "Configure msedgedriver ou chromedriver no PATH, em toolchains/webdriver/, ou passe --native-driver.",
+              "Em Linux tambem pode ser necessario iniciar uma sessao grafica/Xvfb antes do runner.",
+            ].join(" ")
       );
     }
 
@@ -5552,19 +5615,39 @@ async function main() {
       options.scenario === "live-error"
     ) {
       const overflowScenario = buildLiveOverflowScenario(projectMetadata.target, options.scenario);
-      await setSceneDraft(sessionId, overflowScenario.draft);
+      const receipt = await setSceneDraft(sessionId, overflowScenario.draft);
+      if (!receipt || receipt.ok !== true || typeof receipt.sceneRevision !== "number" || !Number.isSafeInteger(receipt.sceneRevision) || receipt.sceneRevision <= 0) {
+        fail(`setSceneDraft devolveu recibo invalido: ${JSON.stringify(receipt)}`);
+      }
+      const expectedRevision = receipt.sceneRevision;
+      await logAutomationState(sessionId, "Pos-setSceneDraft");
       if (options.scenario === "live-error") {
+        let lastErrorState = null;
         await waitFor(
           async () => {
-            const state = await readAutomationState(sessionId);
-            return state?.hwValidationState === "error" ? state : false;
+            const { state, result: revResult } = await callLiveValidationStateMatch(sessionId, "error", expectedRevision);
+            if (!state) return false;
+            if (!revResult.matches) {
+              lastErrorState = state;
+              console.log(
+                `[E2E] DIAG: error em revisao divergente: ${JSON.stringify(revResult)}; ignorando.`
+              );
+              return false;
+            }
+            return state;
           },
           liveValidationTimeoutMs,
-          "Validacao live nao entrou em error apos draft invalido.",
+          `Validacao live nao entrou em error apos draft invalido (revisao ${expectedRevision}).`,
           250
-        );
+        ).catch((error) => {
+          const diag = lastErrorState
+            ? `ultimo estado: hwValidationState=${lastErrorState.hwValidationState} hwValidatedRevision=${lastErrorState.hwValidatedRevision} hwValidationError=${lastErrorState.hwValidationError}`
+            : "nenhum estado error obtido";
+          console.log(`[E2E] DIAG timeout error: esperada rev=${expectedRevision}. ${diag}`);
+          throw error;
+        });
       } else {
-        await waitForLiveValidationFresh(sessionId, liveValidationTimeoutMs);
+        await waitForLiveValidationFresh(sessionId, liveValidationTimeoutMs, expectedRevision);
       }
 
       let lastLiveStatus = null;

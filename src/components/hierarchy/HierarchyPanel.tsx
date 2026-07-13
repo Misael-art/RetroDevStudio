@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Panel from "../common/Panel";
 import SceneWorkspaceNotice from "../common/SceneWorkspaceNotice";
 import { useEditorStore } from "../../core/store/editorStore";
@@ -142,6 +142,7 @@ export default function HierarchyPanel() {
   const [sceneItems, setSceneItems] = useState<SceneInfo[]>([]);
   const [filterText, setFilterText] = useState("");
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const hydrationGenerationRef = useRef(0);
 
   async function refreshSceneCatalog(projectDir: string) {
     const scenes = await listScenes(projectDir);
@@ -189,6 +190,7 @@ export default function HierarchyPanel() {
 
   // Recarrega cena sempre que o projeto ativo mudar
   useEffect(() => {
+    const generation = ++hydrationGenerationRef.current;
     let cancelled = false;
 
     if (!activeProjectDir) {
@@ -198,13 +200,32 @@ export default function HierarchyPanel() {
       return;
     }
 
-    setIsLoadingScenes(true);
-    Promise.all([listScenes(activeProjectDir), getSceneData(activeProjectDir)])
-      .then(async ([scenes, result]) => {
-        if (cancelled) return;
-        setSceneItems(scenes);
+    // Captura a revisao no inicio do efeito para detectar se outra fonte
+    // (ex.: hydrateProjectState em App.tsx, setSceneDraft do E2E) configurou
+    // ou modificou a cena durante o fluxo assincrono.
+    const projectDirAtStart = activeProjectDir;
+    const revisionAtStart = useEditorStore.getState().sceneRevision;
+    const isCurrent = () => {
+      const state = useEditorStore.getState();
+      return !cancelled && generation === hydrationGenerationRef.current && state.activeProjectDir === projectDirAtStart && state.sceneRevision === revisionAtStart;
+    };
 
-        const hydrated = await hydrateSceneResult(activeProjectDir, result);
+    setIsLoadingScenes(true);
+    void (async () => {
+      try {
+        const scenes = await listScenes(projectDirAtStart);
+        if (!isCurrent()) return;
+        const result = await getSceneData(projectDirAtStart);
+        if (!isCurrent()) return;
+
+        // Se a revisao mudou, a cena ja foi configurada por outro fluxo.
+        // Apenas atualiza catalogo e path, nao sobrescreve a cena.
+        const hydrated = await hydrateSceneResult(projectDirAtStart, result);
+        if (!isCurrent()) return;
+
+        // Segunda guarda: durante a hidratacao assincrona, outro fluxo
+        // pode ter configurado a cena. Nao sobrescrever.
+        setSceneItems(scenes);
         setActiveScenePath(result.scene_path);
         setActiveScene(
           hydrated?.resolvedScene ?? null,
@@ -215,19 +236,18 @@ export default function HierarchyPanel() {
         } else if (!hydrated) {
           logMessage("error", "[Hierarchy] Falha ao reidratar a cena carregada.");
         }
-      })
-      .catch((error: unknown) => {
-        if (cancelled) return;
+      } catch (error: unknown) {
+        if (!isCurrent()) return;
         logMessage("error", `[Hierarchy] Falha ao carregar cena: ${describeError(error)}`);
         setSceneItems([]);
         setActiveScenePath("");
         setActiveScene(null);
-      })
-      .finally(() => {
-        if (!cancelled) {
+      } finally {
+        if (!cancelled && generation === hydrationGenerationRef.current) {
           setIsLoadingScenes(false);
         }
-      });
+      }
+    })();
 
     return () => {
       cancelled = true;

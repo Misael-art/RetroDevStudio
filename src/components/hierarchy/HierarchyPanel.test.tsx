@@ -37,6 +37,16 @@ function flush() {
   });
 }
 
+function createDeferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
   true;
 
@@ -57,7 +67,7 @@ describe("HierarchyPanel", () => {
   let root: Root;
 
   beforeEach(async () => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
 
     const emptyScene = {
       scene_id: "main",
@@ -369,6 +379,272 @@ describe("HierarchyPanel", () => {
     expect(heroSignal?.getAttribute("title")).toContain("graph_ref: graphs/sgdk_import_hero.json");
     expect(heroSignal?.getAttribute("title")).toContain("converted_nodes_count: 4");
     expect(enemySignal?.textContent).toBe("Logic: Bridge");
+  });
+
+  it("regressao: hidratacao inicial via beforeEach aplica a cena corretamente sem guard bloquear", async () => {
+    const state = useEditorStore.getState();
+    expect(state.activeScene).not.toBeNull();
+    expect(state.activeScene?.scene_id).toBe("main");
+    expect(state.activeScenePath).toBe("scenes/main.json");
+  });
+
+  it("regressao: hidratacao tardia do HierarchyPanel nao sobrescreve draft injetado", async () => {
+    const hydrationStarted = createDeferred();
+    const deferredHydrate = createDeferred();
+
+    mocks.hydrateSceneResult.mockImplementationOnce(async () => {
+      hydrationStarted.resolve();
+      await deferredHydrate.promise;
+      return {
+        sourceScene: { scene_id: "old", entities: [], background_layers: [], layers: [], palettes: [] },
+        resolvedScene: { scene_id: "old", entities: [], background_layers: [], layers: [], palettes: [] },
+      };
+    });
+
+    const newProjectScene = {
+      scene_id: "new_scene",
+      entities: [],
+      background_layers: [],
+      layers: [],
+      palettes: [],
+    };
+
+    mocks.listScenes.mockResolvedValueOnce([
+      { path: "scenes/new.json", scene_id: "new_scene", display_name: "New" },
+    ]);
+
+    mocks.getSceneData.mockResolvedValueOnce({
+      ok: true, error: "",
+      scene_json: JSON.stringify(newProjectScene),
+      project_name: "New", target: "megadrive",
+      scene_path: "scenes/new.json",
+    });
+
+    const draftScene = {
+      scene_id: "draft",
+      display_name: "Draft Injetado",
+      entities: [
+        { entity_id: "injected", display_name: "Injected", prefab: null, transform: { x: 0, y: 0 }, components: {} },
+      ],
+      background_layers: [],
+      layers: [],
+      palettes: [],
+    };
+
+    // Trigger the effect by changing activeProjectDir
+    await act(async () => {
+      useEditorStore.setState({ activeProjectDir: "/projects/new", activeScene: null, activeSceneSource: null, activeScenePath: "" });
+      await hydrationStarted.promise;
+    });
+
+    const { sceneRevision: revBeforeDraft } = useEditorStore.getState();
+
+    // Inject draft while hydration is still pending
+    await act(async () => {
+      useEditorStore.setState({ activeScene: draftScene, activeSceneSource: draftScene, sceneRevision: revBeforeDraft + 1 });
+      await flush();
+    });
+
+    const { sceneRevision: revAfterDraft, activeScene: sceneAfterDraft } = useEditorStore.getState();
+    expect(revAfterDraft).toBe(revBeforeDraft + 1);
+    expect(sceneAfterDraft?.scene_id).toBe("draft");
+
+    // Resolve the pending hydration
+    await act(async () => {
+      deferredHydrate.resolve();
+      await flush();
+      await flush();
+    });
+
+    const {
+      sceneRevision: revAfterHydrate,
+      activeScene: sceneAfterHydrate,
+      activeSceneSource: sourceAfterHydrate,
+      activeScenePath: pathAfterHydrate,
+    } = useEditorStore.getState();
+    expect(revAfterHydrate).toBe(revBeforeDraft + 1);
+    expect(sceneAfterHydrate?.scene_id).toBe("draft");
+    expect(sourceAfterHydrate?.scene_id).toBe("draft");
+    expect(pathAfterHydrate).toBe("");
+    expect(sceneAfterHydrate?.entities[0].entity_id).toBe("injected");
+  });
+
+  it("regressao: erro tardio de hidratacao nao limpa o draft novo", async () => {
+    const hydrationStarted = createDeferred();
+    const deferredHydrate = createDeferred();
+    mocks.hydrateSceneResult.mockImplementationOnce(async () => {
+      hydrationStarted.resolve();
+      await deferredHydrate.promise;
+      throw new Error("falha antiga");
+    });
+
+    await act(async () => {
+      useEditorStore.setState({ activeProjectDir: "/projects/error", activeScene: null, activeSceneSource: null, activeScenePath: "" });
+      await hydrationStarted.promise;
+    });
+
+    const revisionAtStart = useEditorStore.getState().sceneRevision;
+    const draftScene = { scene_id: "draft_after_error", entities: [], background_layers: [], layers: [], palettes: [] };
+    useEditorStore.setState({
+      activeScene: draftScene,
+      activeSceneSource: draftScene,
+      activeScenePath: "scenes/draft.json",
+      sceneRevision: revisionAtStart + 1,
+    });
+
+    await act(async () => {
+      deferredHydrate.resolve();
+      await flush();
+    });
+
+    const state = useEditorStore.getState();
+    expect(state.activeScene?.scene_id).toBe("draft_after_error");
+    expect(state.activeSceneSource?.scene_id).toBe("draft_after_error");
+    expect(state.activeScenePath).toBe("scenes/draft.json");
+    expect(state.sceneRevision).toBe(revisionAtStart + 1);
+  });
+
+  it("regressao: troca de projeto ignora resposta de hidratacao tardia do projeto anterior", async () => {
+    const hydrationAStarted = createDeferred();
+    const deferredA = createDeferred();
+    const hydrationBStarted = createDeferred();
+    const deferredB = createDeferred();
+
+    const projectAScene = {
+      scene_id: "project_a",
+      entities: [],
+      background_layers: [],
+      layers: [],
+      palettes: [],
+    };
+
+    const projectBScene = {
+      scene_id: "project_b",
+      entities: [],
+      background_layers: [],
+      layers: [],
+      palettes: [],
+    };
+
+    mocks.hydrateSceneResult
+      .mockImplementationOnce(async () => {
+        hydrationAStarted.resolve();
+        await deferredA.promise;
+        return { sourceScene: projectAScene, resolvedScene: projectAScene };
+      })
+      .mockImplementationOnce(async () => {
+        hydrationBStarted.resolve();
+        await deferredB.promise;
+        return { sourceScene: projectBScene, resolvedScene: projectBScene };
+      });
+
+    mocks.listScenes
+      .mockResolvedValueOnce([{ path: "scenes/a.json", scene_id: "project_a", display_name: "A" }])
+      .mockResolvedValueOnce([{ path: "scenes/b.json", scene_id: "project_b", display_name: "B" }]);
+
+    mocks.getSceneData
+      .mockResolvedValueOnce({
+        ok: true, error: "", scene_json: JSON.stringify(projectAScene),
+        project_name: "A", target: "megadrive", scene_path: "scenes/a.json",
+      })
+      .mockResolvedValueOnce({
+        ok: true, error: "", scene_json: JSON.stringify(projectBScene),
+        project_name: "B", target: "megadrive", scene_path: "scenes/b.json",
+      });
+
+    // Render with project A
+    await act(async () => {
+      useEditorStore.setState({ activeProjectDir: "/projects/a" });
+      await hydrationAStarted.promise;
+    });
+
+    // Switch to project B while A's hydration is still pending
+    const { sceneRevision: revA } = useEditorStore.getState();
+    useEditorStore.setState({
+      activeProjectDir: "/projects/b",
+      activeScene: null,
+      activeSceneSource: null,
+      activeScenePath: "",
+      sceneRevision: revA + 1,
+    });
+
+    await act(async () => {
+      await hydrationBStarted.promise;
+    });
+
+    // Resolve A's old hydration
+    await act(async () => {
+      deferredA.resolve();
+      await flush();
+      await flush();
+    });
+
+    const stateAfterA = useEditorStore.getState();
+    expect(stateAfterA.activeScene).toBeNull();
+
+    // Resolve B's hydration
+    await act(async () => {
+      deferredB.resolve();
+      await flush();
+      await flush();
+    });
+
+    const stateAfterB = useEditorStore.getState();
+    expect(stateAfterB.activeScene?.scene_id).toBe("project_b");
+  });
+
+  it("regressao: ABA rejeita a resposta velha mesmo quando a revisao retorna a zero", async () => {
+    const a1Started = createDeferred();
+    const releaseA1 = createDeferred();
+    const a2Started = createDeferred();
+    const releaseA2 = createDeferred();
+    const sceneAOld = { scene_id: "a_old", entities: [], background_layers: [], layers: [], palettes: [] };
+    const sceneANew = { scene_id: "a_new", entities: [], background_layers: [], layers: [], palettes: [] };
+    const sceneB = { scene_id: "b", entities: [], background_layers: [], layers: [], palettes: [] };
+
+    mocks.hydrateSceneResult
+      .mockImplementationOnce(async () => {
+        a1Started.resolve();
+        await releaseA1.promise;
+        return { sourceScene: sceneAOld, resolvedScene: sceneAOld };
+      })
+      .mockResolvedValueOnce({ sourceScene: sceneB, resolvedScene: sceneB })
+      .mockImplementationOnce(async () => {
+        a2Started.resolve();
+        await releaseA2.promise;
+        return { sourceScene: sceneANew, resolvedScene: sceneANew };
+      });
+    mocks.listScenes.mockResolvedValue([{ path: "scenes/main.json", scene_id: "main", display_name: "Main" }]);
+    mocks.getSceneData.mockResolvedValue({ ok: true, error: "", scene_json: JSON.stringify(sceneAOld), project_name: "P", target: "megadrive", scene_path: "scenes/main.json" });
+
+    await act(async () => {
+      useEditorStore.setState({ activeProjectDir: "/projects/a", activeScene: null, activeSceneSource: null, activeScenePath: "", sceneRevision: 0 });
+      await a1Started.promise;
+    });
+    await act(async () => {
+      useEditorStore.setState({ activeProjectDir: "/projects/b", activeScene: null, activeSceneSource: null, activeScenePath: "", sceneRevision: 1 });
+      await flush();
+    });
+    await act(async () => {
+      useEditorStore.setState({ activeProjectDir: "/projects/a", activeScene: null, activeSceneSource: null, activeScenePath: "", sceneRevision: 0 });
+      await a2Started.promise;
+    });
+
+    await act(async () => {
+      releaseA1.resolve();
+      await flush();
+    });
+    const afterOldA = useEditorStore.getState();
+    expect(afterOldA.activeScene).toBeNull();
+    expect(afterOldA.activeSceneSource).toBeNull();
+    expect(afterOldA.activeScenePath).toBe("");
+    expect(afterOldA.sceneRevision).toBe(0);
+
+    await act(async () => {
+      releaseA2.resolve();
+      await flush();
+    });
+    expect(useEditorStore.getState().activeScene?.scene_id).toBe("a_new");
   });
 
   it("opens the tilemap row editing CTA as a painting workflow and exposes staging provenance", async () => {

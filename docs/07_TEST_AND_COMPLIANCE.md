@@ -1,5 +1,6 @@
 # 07 - COMPLIANCE LEGAL & ARQUITETURA DE TESTES
 **Status:** Definitivo
+**Ultima revisao:** 2026-07-11 (Desktop E2E P0: contrato canônico e gates locais)
 
 > Este documento existe para impedir duas classes de falha:
 > 1. Violacao de IP/licenca.
@@ -155,3 +156,8 @@ Nenhuma etapa deve ser tratada como `concluida` sem certificacao real do fluxo a
 - Fixtures de projeto em `src-tauri/tests/fixtures/projects/` nao devem carregar diretórios `build/` versionados como precondicao silenciosa para testes; toda cobertura relevante deve nascer de assets tracked, fixtures sinteticas ou build gerado na propria rodada.
 - A existencia de toolchain/core instalado localmente nao substitui compliance de licenca.
 - Superficies experimentais devem continuar claramente marcadas ate deixarem de ser parciais ou stub.
+- O predicado canônico de determinismo e `isLiveValidationStateMatchingRevision` em `liveValidationController.ts`, exposto pelo App em `window.__RDS_E2E__`. Cenários E2E devem chamar a bridge real e exigir tanto o estado esperado (`fresh` ou `error`) quanto igualdade estrita de revisao; estado ausente, estado diferente ou revisao menor/maior/ausente/invalida falham com o diagnostico canônico.
+- `setSceneDraft` deve devolver receipt com `ok:true` e `sceneRevision` inteiro seguro positivo. Ausencia, `ok:false`, `NaN`, zero, negativo, decimal e string sao falhas, sem fallback.
+- O guard do `HierarchyPanel.useEffect` combina geracao, projeto e revisao contra hidratacao tardia. Testes de corrida usam Promise deferred e handshake explicito de inicio, nunca timeout como sincronizacao principal; devem cobrir hidratacao inicial, stale success, stale error, A→B e ABA, preservando cena, source, path e revisao do draft novo.
+- O runner MJS (`scripts/e2e-tauri-build-run.mjs`) chama somente a bridge canônica para `fresh` e `error`; `pageEvaluateRaw` e qualquer alias de compatibilidade sao proibidos. A frente P0 permanece em hardening ate a certificacao remota do SHA final.
+- Nao ampliar `assetProtocol.scope` para `$APPDATA/**` ou `/tmp/**` como correcao generica de HTTP 403. Investigar o path e a politica do protocolo antes de qualquer mudanca de escopo; rate limit 403 de `dependency_manager.rs` e um problema distinto.

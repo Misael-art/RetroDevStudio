@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "identifier": "com.retrodevstudio.desktop",
   "build": {
-    "beforeDevCommand": "cmd /c npm run dev",
-    "beforeBuildCommand": "cmd /c npm run build",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },

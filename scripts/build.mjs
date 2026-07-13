@@ -56,8 +56,13 @@ const SHADOW_TARGET_DIR = path.resolve(
 );
 const BUILD_REPORT_PATH = path.join(VALIDATION_DIR, "build-report.json");
 const LEGACY_BUILD_REPORT_PATH = path.join(CANONICAL_TARGET_DIR, "build-report.json");
-const DEBUG_EXE = path.join(CANONICAL_TARGET_DIR, "debug", "retro-dev-studio.exe");
-const RELEASE_EXE = path.join(CANONICAL_TARGET_DIR, "release", "retro-dev-studio.exe");
+export function appBinaryNameForPlatform(hostPlatform = process.platform) {
+  return hostPlatform === "win32" ? "retro-dev-studio.exe" : "retro-dev-studio";
+}
+
+const APP_BINARY_NAME = appBinaryNameForPlatform();
+const DEBUG_EXE = path.join(CANONICAL_TARGET_DIR, "debug", APP_BINARY_NAME);
+const RELEASE_EXE = path.join(CANONICAL_TARGET_DIR, "release", APP_BINARY_NAME);
 const MSI_DIR = path.join(CANONICAL_TARGET_DIR, "release", "bundle", "msi");
 const CARGO_CACHE_ROOT_ARTIFACTS = [
   ".rustc_info.json",
@@ -79,6 +84,7 @@ const LEGACY_ROOT_RUNTIME_ARTIFACTS = [
   "app_lib.pdb",
   "libapp_lib.d",
   "libapp_lib.rlib",
+  "retro-dev-studio",
   "retro-dev-studio.d",
   "retro-dev-studio.exe",
   "retro_dev_studio.pdb",
@@ -103,8 +109,11 @@ function shouldUseDirectCargoDebug(_mode) {
   return false;
 }
 
-function runtimeFilesForProfile(profile) {
-  const files = ["retro-dev-studio.exe", "app_lib.dll", "app_lib.pdb", "retro_dev_studio.pdb"];
+export function runtimeFilesForProfile(profile, hostPlatform = process.platform) {
+  const files = [appBinaryNameForPlatform(hostPlatform)];
+  if (hostPlatform === "win32") {
+    files.push("app_lib.dll", "app_lib.pdb", "retro_dev_studio.pdb");
+  }
   const directories = ["resources"];
   if (profile === "release") {
     directories.push("bundle");
@@ -215,22 +224,27 @@ function spawnLogged(command, args, options = {}) {
   });
 }
 
-function pathEnvironmentKey(env) {
+function pathEnvironmentKey(env, hostPlatform = process.platform) {
+  if (hostPlatform === "win32" && Object.prototype.hasOwnProperty.call(env, "Path")) {
+    return "Path";
+  }
   return Object.keys(env).find((key) => key.toLowerCase() === "path") ?? "PATH";
 }
 
-function prependUserCargoBin(env) {
+function prependUserCargoBin(env, hostPlatform = process.platform) {
   const userProfile = env.USERPROFILE ?? os.homedir();
-  const cargoBin = path.join(userProfile, ".cargo", "bin");
-  const pathKey = pathEnvironmentKey(env);
+  const pathModule = hostPlatform === "win32" ? path.win32 : path;
+  const pathDelimiter = hostPlatform === "win32" ? ";" : path.delimiter;
+  const cargoBin = pathModule.join(userProfile, ".cargo", "bin");
+  const pathKey = pathEnvironmentKey(env, hostPlatform);
   const currentPath = env[pathKey] ?? "";
-  const segments = currentPath.split(path.delimiter).filter(Boolean);
+  const segments = currentPath.split(pathDelimiter).filter(Boolean);
   const alreadyPresent = segments.some(
-    (segment) => path.resolve(segment).toLowerCase() === path.resolve(cargoBin).toLowerCase()
+    (segment) => pathModule.resolve(segment).toLowerCase() === pathModule.resolve(cargoBin).toLowerCase()
   );
   env[pathKey] = alreadyPresent
     ? currentPath
-    : [cargoBin, ...segments].join(path.delimiter);
+    : [cargoBin, ...segments].join(pathDelimiter);
 }
 
 async function pathExists(filePath) {
@@ -249,6 +263,10 @@ async function ensureParentDir(filePath) {
 async function resolveExecutable(expectedPath) {
   if (await pathExists(expectedPath)) {
     return expectedPath;
+  }
+
+  if (process.platform !== "win32") {
+    return null;
   }
 
   const parentDir = path.dirname(expectedPath);
@@ -577,7 +595,7 @@ export function buildCommandEnvironment(mode, effectiveTargetDir, hostPlatform =
     env.TAURI_ENV_FAMILY = "windows";
     env.TAURI_ENV_TARGET_TRIPLE = "x86_64-pc-windows-msvc";
     env.TAURI_ENV_DEBUG = mode === "debug" ? "true" : "false";
-    prependUserCargoBin(env);
+    prependUserCargoBin(env, hostPlatform);
   }
   if (process.env.RDS_E2E_QA_RC_MEMORY_SAFE === "1") {
     env.CARGO_BUILD_JOBS ??= "1";
@@ -622,6 +640,20 @@ async function runBuildCommand(mode, effectiveTargetDir) {
 
   await runTauriBuild(mode, effectiveTargetDir);
   return "tauri-cli";
+}
+
+function assertModeSupportedOnHost(mode) {
+  if (process.platform === "win32" || mode !== "msi") {
+    return;
+  }
+
+  throw new Error(
+    [
+      "Build MSI e suportado apenas no host Windows institucional.",
+      `Host atual: ${process.platform}.`,
+      "No Linux, use `npm run build:debug` ou `npm run build:portable` para validar o binario nativo sem bundle MSI.",
+    ].join(" ")
+  );
 }
 
 async function buildModeWithFallback(mode) {
@@ -725,7 +757,7 @@ async function writeBuildReport(buildResults) {
       blockedDll: result.blockedDll,
       generatedAt: report.generatedAt,
       canonicalProfileDir,
-      canonicalExe: path.join(canonicalProfileDir, "retro-dev-studio.exe"),
+      canonicalExe: path.join(canonicalProfileDir, APP_BINARY_NAME),
       canonicalMsiDir:
         result.profile === "release"
           ? path.join(canonicalProfileDir, "bundle", "msi")
@@ -864,6 +896,7 @@ async function main() {
   try {
     await ensureOperationalLayout();
     const modesToRun = normalizeMode(mode);
+    modesToRun.forEach(assertModeSupportedOnHost);
     const preserveCargoCache = shouldPreserveCanonicalCargoCache(modesToRun);
     if (preserveCargoCache) {
       console.log(
