@@ -1,6 +1,6 @@
 # 07 - COMPLIANCE LEGAL & ARQUITETURA DE TESTES
 **Status:** Definitivo
-**Ultima revisao:** 2026-07-11 (Desktop E2E P0: contrato canônico e gates locais)
+**Ultima revisao:** 2026-07-13 (NodeGraph build provenance v1 e limites de prova oficial)
 
 > Este documento existe para impedir duas classes de falha:
 > 1. Violacao de IP/licenca.
