@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-07-11 (Desktop E2E P0: checkpoints locais e gates locais completos)
+**Ultima Atualizacao:** 2026-07-12 (Node Engine local MVP rebased sobre main certificado)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,12 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-07-12 - Node Engine local MVP rebased sobre `main`):**
+  - **Topologia corrigida:** `codex/node-engine-local-mvp` foi rebased sobre `main` `3bc6e72`, depois da integracao certificada de P0 + Linux. A branch nao depende mais de base stacked e continua sem mudancas Rust ou dependencias novas.
+  - **Contrato honesto preservado:** modelo/definicoes/serializacao v1 vivem no core; o Inspector consome somente `LocalNodeTrace` simulado; `RuntimeEvidence` continua sem produtor e `nodeCompiler.ts` permanece legado/isolado. Node Engine, NodeGraph e Inspector seguem **Experimental**.
+  - **Gates frescos:** `check:tree`, lint, TypeScript e `git diff --check` PASS; frontend **476 passed / 2 skipped**; cargo check PASS; clippy `-D warnings` PASS; Rust **438 passed / 24 ignored**; `npm run build:debug` PASS com binario Linux gerado.
+  - **Proximo passo imediato:** push, PR exclusiva contra `main`, CI + Desktop E2E push/PR verdes; merge somente depois da certificacao remota no SHA final.
 
 * **O que acabou de acontecer (2026-07-11 — `codex/desktop-e2e-determinism-p0`, P0 local):**
   - **Checkpoints locais protegidos:** `a73c030` (contrato deterministico da bridge/receipt), `ec9f33a` (guard de hidratacao por geracao, projeto e revisao) e `011d18c` (cobertura da bridge real e das corridas). Nenhum foi publicado ainda.
