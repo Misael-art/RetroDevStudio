@@ -13,6 +13,7 @@ import type {
   SceneLayer,
 } from "../ipc/sceneService";
 import type { ParityReport } from "../projectCapability";
+import type { BuildSourceMap } from "../nodegraph/buildProvenance";
 
 const UNDO_STACK_LIMIT = 50;
 
@@ -111,6 +112,7 @@ export interface StoreState {
   consoleEntries: ConsoleEntry[];
   consoleVisible: boolean;
   lastParityReport: ParityReport | null;
+  lastBuildSourceMap: BuildSourceMap | null;
   hwStatus: HwStatus | null;
   sceneRevision: number;
   hwValidationState: HwValidationState;
@@ -168,6 +170,7 @@ export interface StoreActions {
   clearConsole: () => void;
   toggleConsole: () => void;
   setLastParityReport: (report: ParityReport | null) => void;
+  setLastBuildSourceMap: (sourceMap: BuildSourceMap | null) => void;
   setHwStatus: (status: HwStatus | null) => void;
   setHwValidationPending: (revision: number) => void;
   setHwValidationResult: (revision: number, status: HwStatus) => void;
@@ -397,7 +400,8 @@ export const useEditorStore = create<EditorState>((set) => ({
   activeProjectDir: "",
   activeProjectName: "",
   activeTarget: "megadrive",
-  setActiveProject: (dir, name) => set({ activeProjectDir: dir, activeProjectName: name }),
+  setActiveProject: (dir, name) =>
+    set({ activeProjectDir: dir, activeProjectName: name, lastBuildSourceMap: null }),
   setActiveTarget: (target) => set({ activeTarget: target }),
   activeScenePath: "",
   setActiveScenePath: (path) => set({ activeScenePath: path }),
@@ -464,6 +468,8 @@ export const useEditorStore = create<EditorState>((set) => ({
   toggleConsole: () => set((state) => ({ consoleVisible: !state.consoleVisible })),
   lastParityReport: null,
   setLastParityReport: (report) => set({ lastParityReport: report }),
+  lastBuildSourceMap: null,
+  setLastBuildSourceMap: (sourceMap) => set({ lastBuildSourceMap: sourceMap }),
 
   hwStatus: null,
   setHwStatus: (status) => set({ hwStatus: status }),

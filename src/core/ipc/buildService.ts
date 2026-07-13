@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import type { ActionableDiagnostic } from "../diagnostics";
+import type { BuildSourceMap } from "../nodegraph/buildProvenance";
 
 // ── Types (mirror do Rust) ────────────────────────────────────────────────────
 
@@ -14,6 +15,8 @@ export interface BuildResult {
   rom_path: string;
   log: BuildLogLine[];
   diagnostics?: ActionableDiagnostic[];
+  source_map_path?: string | null;
+  build_source_map?: BuildSourceMap | null;
 }
 
 export interface MultiTargetBuildEntry {
@@ -25,6 +28,8 @@ export interface MultiTargetBuildEntry {
   errors: string[];
   log: BuildLogLine[];
   diagnostics?: ActionableDiagnostic[];
+  source_map_path?: string | null;
+  build_source_map?: BuildSourceMap | null;
 }
 
 export interface MultiTargetBuildResult {
@@ -36,6 +41,7 @@ export interface ValidationResult {
   ok: boolean;
   errors: string[];
   warnings: string[];
+  build_source_map?: BuildSourceMap | null;
 }
 
 export interface GenerateResult {

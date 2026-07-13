@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 
+use crate::compiler::build_provenance::graph_revision_hash;
 use crate::core::project_mgr::{resolve_prefabs, LoadError};
 use crate::ugdm::components::{
     AnimationDef, AudioComponent, CollisionComponent, InputComponent, PhysicsComponent,
@@ -214,6 +215,12 @@ pub struct LogicScript {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LogicOp {
+    SourceMapped {
+        graph_sha256: String,
+        node_id: String,
+        semantic_stage: String,
+        op: Box<LogicOp>,
+    },
     MoveSprite {
         target_var: String,
         dx: i32,
@@ -443,6 +450,8 @@ struct CompiledLogicOutput {
 
 #[derive(Debug, Clone, Deserialize)]
 struct StoredNodeGraph {
+    #[serde(skip)]
+    graph_sha256: String,
     #[serde(default)]
     nodes: Vec<StoredNodeGraphNode>,
     #[serde(default)]
@@ -1123,9 +1132,10 @@ fn collect_logic_output(
         let Some(serialized_graph) = logic.graph.as_deref() else {
             continue;
         };
-        let Ok(graph) = serde_json::from_str::<StoredNodeGraph>(serialized_graph) else {
+        let Ok(mut graph) = serde_json::from_str::<StoredNodeGraph>(serialized_graph) else {
             continue;
         };
+        graph.graph_sha256 = graph_revision_hash(serialized_graph);
 
         let compiled = compile_logic_graph(&graph, runtime_entities);
         output.setup_nodes.extend(compiled.setup_nodes);
@@ -1404,11 +1414,11 @@ fn compile_logic_chain(
             raster_lines,
         ) {
             Some(CompiledLogicNode::Linear(op)) => {
-                ops.push(op);
+                ops.push(source_mapped_logic_op(graph, node, op));
                 next_node_id = next_exec_target(graph, &node.id, "exec");
             }
             Some(CompiledLogicNode::Terminal(op)) => {
-                ops.push(op);
+                ops.push(source_mapped_logic_op(graph, node, op));
                 next_node_id = None;
             }
             Some(CompiledLogicNode::NoOp) => {
@@ -1439,6 +1449,19 @@ enum CompiledLogicNode {
     NoOp,
     SetupNode(AstNode),
     RuntimeNode(AstNode),
+}
+
+fn source_mapped_logic_op(
+    graph: &StoredNodeGraph,
+    node: &StoredNodeGraphNode,
+    op: LogicOp,
+) -> LogicOp {
+    LogicOp::SourceMapped {
+        graph_sha256: graph.graph_sha256.clone(),
+        node_id: node.id.clone(),
+        semantic_stage: node.node_type.clone(),
+        op: Box::new(op),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2420,6 +2443,9 @@ fn collect_logic_sound_names_from_ops(
 ) {
     for op in ops {
         match op {
+            LogicOp::SourceMapped { op, .. } => {
+                collect_logic_sound_names_from_ops(std::slice::from_ref(op.as_ref()), sound_names);
+            }
             LogicOp::PlaySound { sfx } => {
                 sound_names.insert(sfx.clone());
             }
@@ -2565,6 +2591,13 @@ mod tests {
     use serde_json::json;
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
+
+    fn semantic_op(op: &LogicOp) -> &LogicOp {
+        match op {
+            LogicOp::SourceMapped { op, .. } => semantic_op(op),
+            _ => op,
+        }
+    }
 
     fn fixture_dir(name: &str) -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -3962,7 +3995,7 @@ mod tests {
             .logic_scripts
             .iter()
             .flat_map(|script| script.ops.iter())
-            .find_map(|op| match op {
+            .find_map(|op| match semantic_op(op) {
                 LogicOp::ConditionBool {
                     condition, if_true, ..
                 } => Some((condition, if_true)),
@@ -3974,12 +4007,11 @@ mod tests {
             guarded.0,
             LogicBoolExpr::And { result_name, .. } if result_name == "_and_guarded_overlap"
         ));
-        assert_eq!(
-            guarded.1,
-            &vec![LogicOp::PlaySound {
-                sfx: "jump".to_string(),
-            }]
-        );
+        assert_eq!(guarded.1.len(), 1);
+        assert!(matches!(
+            semantic_op(&guarded.1[0]),
+            LogicOp::PlaySound { sfx } if sfx == "jump"
+        ));
     }
 
     #[test]
@@ -4134,7 +4166,7 @@ mod tests {
             .expect("logic script should exist");
 
         assert!(script.ops.iter().any(|op| matches!(
-            op,
+            semantic_op(op),
             LogicOp::SetVar {
                 var_name,
                 value: LogicMathExpr::Mul(left, right)
@@ -4147,7 +4179,7 @@ mod tests {
         )));
 
         assert!(script.ops.iter().any(|op| matches!(
-            op,
+            semantic_op(op),
             LogicOp::ConditionBool {
                 condition: LogicBoolExpr::Compare { op: CompareOp::Gte, left, right },
                 if_true,
@@ -4155,8 +4187,10 @@ mod tests {
             }
             if matches!(left.as_ref(), LogicMathExpr::Var(name) if name == "score")
                 && matches!(right.as_ref(), LogicMathExpr::Literal(10))
-                && if_true == &vec![LogicOp::PlaySound { sfx: "win".to_string() }]
-                && if_false == &vec![LogicOp::PlaySound { sfx: "lose".to_string() }]
+                && if_true.len() == 1
+                && matches!(semantic_op(&if_true[0]), LogicOp::PlaySound { sfx } if sfx == "win")
+                && if_false.len() == 1
+                && matches!(semantic_op(&if_false[0]), LogicOp::PlaySound { sfx } if sfx == "lose")
         )));
     }
 
@@ -4263,7 +4297,7 @@ mod tests {
                 .expect("logic script should exist");
             assert!(
                 script.ops.iter().any(|op| matches!(
-                    op,
+                    semantic_op(op),
                     LogicOp::ConditionBool {
                         condition: LogicBoolExpr::Compare { op, .. },
                         ..
@@ -4434,7 +4468,7 @@ mod tests {
 
         assert_eq!(ast.logic_scripts.len(), 1);
         assert_eq!(
-            ast.logic_scripts[0].ops[0],
+            *semantic_op(&ast.logic_scripts[0].ops[0]),
             LogicOp::MoveSprite {
                 target_var: "spr_player".to_string(),
                 dx: 2,
@@ -4447,7 +4481,7 @@ mod tests {
             right,
             if_true,
             if_false,
-        } = &ast.logic_scripts[0].ops[1]
+        } = semantic_op(&ast.logic_scripts[0].ops[1])
         else {
             panic!("expected overlap condition");
         };
@@ -4464,12 +4498,11 @@ mod tests {
             right.position,
             LogicPositionSource::SpriteVar { ref var_name } if var_name == "spr_enemy"
         ));
-        assert_eq!(
-            if_true,
-            &vec![LogicOp::PlaySound {
-                sfx: "jump".to_string(),
-            }]
-        );
+        assert_eq!(if_true.len(), 1);
+        assert!(matches!(
+            semantic_op(&if_true[0]),
+            LogicOp::PlaySound { sfx } if sfx == "jump"
+        ));
         assert!(if_false.is_empty());
     }
 
@@ -4789,7 +4822,7 @@ mod tests {
             .logic_scripts
             .iter()
             .flat_map(|script| script.ops.iter())
-            .find_map(|op| match op {
+            .find_map(|op| match semantic_op(op) {
                 LogicOp::StateMachine {
                     machine_var,
                     states,
@@ -4804,14 +4837,11 @@ mod tests {
         assert_eq!(state_machine.1[1].state_name, "run");
         assert_eq!(state_machine.1[0].transitions[0].target_state, "run");
         assert_eq!(state_machine.1[1].transitions[0].target_state, "idle");
-        assert_eq!(
-            state_machine.1[1].body,
-            vec![LogicOp::MoveSprite {
-                target_var: "spr_player".to_string(),
-                dx: 2,
-                dy: 0,
-            }]
-        );
+        assert_eq!(state_machine.1[1].body.len(), 1);
+        assert!(matches!(
+            semantic_op(&state_machine.1[1].body[0]),
+            LogicOp::MoveSprite { target_var, dx: 2, dy: 0 } if target_var == "spr_player"
+        ));
     }
 
     #[test]
@@ -4889,7 +4919,7 @@ mod tests {
             .logic_scripts
             .iter()
             .flat_map(|script| script.ops.iter())
-            .filter_map(|op| match op {
+            .filter_map(|op| match semantic_op(op) {
                 LogicOp::PlayMusic { action, track, .. } => Some((action, track)),
                 _ => None,
             })
@@ -4987,10 +5017,12 @@ mod tests {
         let ast = generate_ast(&project, &scene);
         let ops = &ast.logic_scripts[0].ops;
 
-        assert!(matches!(ops[0], LogicOp::ConditionBool { .. }));
-        assert!(
-            matches!(ops[0], LogicOp::ConditionBool { ref if_true, .. } if matches!(if_true[0], LogicOp::WhileLoop { .. }))
-        );
+        assert!(matches!(semantic_op(&ops[0]), LogicOp::ConditionBool { .. }));
+        assert!(matches!(
+            semantic_op(&ops[0]),
+            LogicOp::ConditionBool { if_true, .. }
+                if matches!(semantic_op(&if_true[0]), LogicOp::WhileLoop { .. })
+        ));
     }
 
     #[test]
@@ -5075,7 +5107,7 @@ mod tests {
             .logic_scripts
             .iter()
             .flat_map(|script| script.ops.iter())
-            .find_map(|op| match op {
+            .find_map(|op| match semantic_op(op) {
                 LogicOp::TimelineSequence { counter_var, slots } => Some((counter_var, slots)),
                 _ => None,
             })
@@ -5085,12 +5117,12 @@ mod tests {
         assert_eq!(timeline.1.len(), 2);
         assert_eq!(timeline.1[0].delay_frames, 15);
         assert!(matches!(
-            timeline.1[0].actions[0],
+            semantic_op(&timeline.1[0].actions[0]),
             LogicOp::MoveSprite { .. }
         ));
         assert_eq!(timeline.1[1].delay_frames, 30);
         assert!(matches!(
-            timeline.1[1].actions[0],
+            semantic_op(&timeline.1[1].actions[0]),
             LogicOp::PlaySound { .. }
         ));
     }
@@ -5171,8 +5203,9 @@ mod tests {
         let events = ast
             .logic_scripts
             .iter()
-            .filter_map(|script| match script.ops.first() {
-                Some(LogicOp::HardwareEvent { event, ops }) => Some((event, ops)),
+            .filter_map(|script| script.ops.first())
+            .filter_map(|op| match semantic_op(op) {
+                LogicOp::HardwareEvent { event, ops } => Some((event, ops)),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -5185,11 +5218,11 @@ mod tests {
         assert!(events
             .iter()
             .any(|(event, ops)| matches!(event, HardwareEventKind::VBlank)
-                && matches!(ops[0], LogicOp::MoveSprite { .. })));
+                && matches!(semantic_op(&ops[0]), LogicOp::MoveSprite { .. })));
         assert!(events
             .iter()
             .any(|(event, ops)| matches!(event, HardwareEventKind::HBlank)
-                && matches!(ops[0], LogicOp::PlaySound { .. })));
+                && matches!(semantic_op(&ops[0]), LogicOp::PlaySound { .. })));
     }
 
     // ── Step 1: AnimationDef roundtrip proof ────────────────────────────────

@@ -19,6 +19,7 @@ use compiler::ast_generator::generate_ast;
 use compiler::build_orch::{
     run_build, run_build_multi_target, BuildLogLine, BuildResult, MultiTargetBuildResult,
 };
+use compiler::build_provenance::{build_source_map, BuildSourceMap};
 use compiler::sgdk_emitter::emit_sgdk_with_collision;
 use compiler::snes_emitter::emit_snes_with_collision;
 use core::asset_quality::{
@@ -121,6 +122,7 @@ pub struct GenerateResult {
     pub resources_res: String,
     pub errors: Vec<String>,
     pub warnings: Vec<String>,
+    pub build_source_map: Option<BuildSourceMap>,
 }
 
 #[derive(serde::Serialize)]
@@ -223,6 +225,7 @@ fn generate_c_code(project_dir: String) -> GenerateResult {
                 resources_res: String::new(),
                 errors: vec![e.to_string()],
                 warnings: vec![],
+                build_source_map: None,
             }
         }
     };
@@ -235,6 +238,7 @@ fn generate_c_code(project_dir: String) -> GenerateResult {
                 resources_res: String::new(),
                 errors: vec![e.to_string()],
                 warnings: vec![],
+                build_source_map: None,
             }
         }
     };
@@ -247,6 +251,7 @@ fn generate_c_code(project_dir: String) -> GenerateResult {
                 resources_res: String::new(),
                 errors: vec![error.to_string()],
                 warnings: vec![],
+                build_source_map: None,
             }
         }
     };
@@ -260,6 +265,7 @@ fn generate_c_code(project_dir: String) -> GenerateResult {
                 resources_res: String::new(),
                 errors: vec![error],
                 warnings: vec![],
+                build_source_map: None,
             }
         }
     };
@@ -273,6 +279,7 @@ fn generate_c_code(project_dir: String) -> GenerateResult {
             resources_res: String::new(),
             errors,
             warnings,
+            build_source_map: None,
         };
     }
 
@@ -289,12 +296,14 @@ fn generate_c_code(project_dir: String) -> GenerateResult {
             (o.main_c, o.resources_res)
         }
     };
+    let source_map = build_source_map(&resolved_scene, &project.target, &main_c);
     GenerateResult {
         ok: true,
         main_c,
         resources_res,
         errors: vec![],
         warnings,
+        build_source_map: Some(source_map),
     }
 }
 

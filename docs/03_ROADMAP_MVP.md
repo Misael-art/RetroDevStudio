@@ -1,7 +1,9 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-07-11 (Desktop E2E P0 local validado; certificacao remota pendente)
+**Ultima revisao canonica:** 2026-07-13 (Node build provenance v1 em hardening)
+
+**Nota 2026-07-13 (branch `codex/node-build-provenance`):** Node Engine/NodeGraph/Inspector continuam **Experimental**, agora com source map de **proveniência de build** v1 integrado ao caminho Rust AST/IR -> emitters C -> workspace -> ROM. O contrato usa hash SHA-256 da revisão serializada do grafo, versão, etapa semântica, arquivo/intervalo C realmente emitido, hash do C e hash da ROM quando disponível; ausência de trecho verificável permanece `unsupported` com motivo. O Inspector rejeita schema/revisão incompatível antes de mostrar “Proveniência de build observada”. Gates locais completos passaram (**480 frontend / 2 skipped; 440 Rust / 24 ignored; build debug PASS**); a prova SGDK/Libretro oficial permanece Windows-only e indisponível neste host Linux, sem substituição por fake. Isto não cria source mapping ROM/PC -> node, não produz `RuntimeEvidence` e não observa execução/emulador.
 
 **Nota 2026-07-11 (branch `codex/desktop-e2e-determinism-p0`):** **P0 Desktop E2E — Em hardening / não certificado remotamente.** Checkpoints locais `a73c030`, `ec9f33a` e `011d18c` preservam a correcao. A bridge canônica e `window.__RDS_E2E__.isLiveValidationStateMatchingRevision`, com `fresh`/`error` e revisao estrita; receipt exige `ok:true` e inteiro seguro positivo. O guard de hidratacao combina geracao, projeto e revisao e a cobertura deterministicamente controlada prova stale success/error, A→B e ABA sem sobrescrever cena, source, path ou revisao. Gates locais reais passaram: check:tree, lint, tsc, **npm test 462 passed / 2 skipped**, cargo check, clippy, **cargo test 438 passed / 24 ignored**, build:debug e diff --check. Push, PR e certificacao Desktop E2E remota continuam pendentes; `assetProtocol.scope` nao foi ampliado por esta frente.
 

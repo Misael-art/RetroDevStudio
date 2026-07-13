@@ -1540,6 +1540,7 @@ export default function App() {
     toggleConsole,
     logDiagnostic,
     setArtStudioAssetPath,
+    setLastBuildSourceMap,
   } = useEditorStore();
 
   const [building, setBuilding] = useState(false);
@@ -3160,6 +3161,7 @@ export default function App() {
 
       setBuilding(true);
       setRomMasteringStatus("pending");
+      setLastBuildSourceMap(null);
       logMessage("info", "Iniciando build...");
 
       if (!(await persistActiveScene(activeProjectDir, "Build"))) {
@@ -3187,6 +3189,7 @@ export default function App() {
       const result = await buildProject(activeProjectDir, (line) => {
         logMessage(line.level, line.message);
       });
+      setLastBuildSourceMap(result.build_source_map ?? null);
       if (!result.ok) {
         const errorLines = result.log
           .filter((line) => line.level === "error")

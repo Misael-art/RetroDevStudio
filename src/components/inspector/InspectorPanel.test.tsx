@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import InspectorPanel from "./InspectorPanel";
 import { useEditorStore } from "../../core/store/editorStore";
 import type { Entity, Scene } from "../../core/ipc/sceneService";
+import { sha256Text, type BuildSourceMap } from "../../core/nodegraph/buildProvenance";
 
 const mocks = vi.hoisted(() => ({
   persistActiveScene: vi.fn(),
@@ -156,6 +157,7 @@ describe("InspectorPanel", () => {
       undoStack: [],
       redoStack: [],
       pendingHistorySnapshot: null,
+      lastBuildSourceMap: null,
     });
 
     container = document.createElement("div");
@@ -184,6 +186,57 @@ describe("InspectorPanel", () => {
     expect(container.textContent).toContain("Graph: 2 nodes, 1 edges");
     expect(container.textContent).toContain("Imported Hints");
     expect(container.textContent).toContain("Hint importado do adapter externo.");
+  });
+
+  it("renders observed build provenance and explicit unsupported reasons", async () => {
+    const graph = physicsFixtureEntity().components.logic?.graph ?? "";
+    const sourceMap: BuildSourceMap = {
+      schema_version: 1,
+      kind: "node_build_source_map",
+      evidence_label: "Proveniência de build observada",
+      target: "megadrive",
+      generated_file: "src/main.c",
+      generated_source_sha256: "a".repeat(64),
+      artifact: { path: "/project/build/megadrive/out/game.bin", sha256: "b".repeat(64) },
+      limitations: [],
+      graphs: [{
+        graph_version: 1,
+        graph_sha256: await sha256Text(graph),
+        entries: [
+          {
+            node_id: "n1",
+            semantic_stage: "event_start",
+            status: "unsupported",
+            generated_locations: [],
+            unsupported_reason: "Âncora de fluxo sem trecho C autônomo.",
+          },
+          {
+            node_id: "n2",
+            semantic_stage: "sprite_move",
+            status: "mapped",
+            generated_locations: [{
+              file: "src/main.c",
+              start_line: 42,
+              start_column: 1,
+              end_line: 43,
+              end_column: 20,
+            }],
+            unsupported_reason: null,
+          },
+        ],
+      }],
+    };
+
+    await act(async () => {
+      useEditorStore.setState({ lastBuildSourceMap: sourceMap });
+      await flush();
+    });
+
+    const panel = container.querySelector("[data-testid='inspector-build-provenance']");
+    expect(panel?.textContent).toContain("Proveniência de build observada");
+    expect(panel?.textContent).toContain("src/main.c:42:1–43:20");
+    expect(panel?.textContent).toContain("Âncora de fluxo sem trecho C autônomo.");
+    expect(panel?.textContent).not.toContain("RuntimeEvidence");
   });
 
   it("shows contextual knowledge tooltip for inspector sections", async () => {
