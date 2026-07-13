@@ -888,6 +888,281 @@ fn parity_run_capture(
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+struct CrossCoreParityResult {
+    ok: bool,
+    message: String,
+    golden_path: String,
+    golden_source: String,
+    core_a_label: String,
+    core_b_label: String,
+    frames_run: u32,
+    cores_agree: bool,
+    cross_divergence_count: usize,
+    core_a_divergence_count: usize,
+    core_b_divergence_count: usize,
+    report_path: String,
+    report: Option<core::parity_harness::CrossCoreReport>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct CycleReportResult {
+    ok: bool,
+    message: String,
+    golden_path: String,
+    core_label: String,
+    frames_run: u32,
+    report_path: String,
+    report: Option<core::parity_harness::CycleReport>,
+}
+
+#[tauri::command]
+fn parity_run_cross_core(
+    project_dir: String,
+    golden_path: String,
+    core_a_path: String,
+    core_b_path: String,
+    frames: Option<u32>,
+) -> CrossCoreParityResult {
+    let trimmed_project = project_dir.trim();
+    if trimmed_project.is_empty() {
+        return CrossCoreParityResult {
+            ok: false,
+            message: "Cross-core parity requires a project directory.".to_string(),
+            golden_path: String::new(),
+            golden_source: String::new(),
+            core_a_label: String::new(),
+            core_b_label: String::new(),
+            frames_run: 0,
+            cores_agree: false,
+            cross_divergence_count: 0,
+            core_a_divergence_count: 0,
+            core_b_divergence_count: 0,
+            report_path: String::new(),
+            report: None,
+        };
+    }
+    let trimmed_golden = golden_path.trim();
+    if trimmed_golden.is_empty() {
+        return CrossCoreParityResult {
+            ok: false,
+            message: "Cross-core parity requires a golden input path.".to_string(),
+            golden_path: String::new(),
+            golden_source: String::new(),
+            core_a_label: String::new(),
+            core_b_label: String::new(),
+            frames_run: 0,
+            cores_agree: false,
+            cross_divergence_count: 0,
+            core_a_divergence_count: 0,
+            core_b_divergence_count: 0,
+            report_path: String::new(),
+            report: None,
+        };
+    }
+    let trimmed_core_a = core_a_path.trim();
+    let trimmed_core_b = core_b_path.trim();
+    if trimmed_core_a.is_empty() || trimmed_core_b.is_empty() {
+        return CrossCoreParityResult {
+            ok: false,
+            message: "Cross-core parity requires both core_a_path and core_b_path.".to_string(),
+            golden_path: trimmed_golden.to_string(),
+            golden_source: String::new(),
+            core_a_label: String::new(),
+            core_b_label: String::new(),
+            frames_run: 0,
+            cores_agree: false,
+            cross_divergence_count: 0,
+            core_a_divergence_count: 0,
+            core_b_divergence_count: 0,
+            report_path: String::new(),
+            report: None,
+        };
+    }
+
+    let project_path = Path::new(trimmed_project);
+    let golden_file = Path::new(trimmed_golden);
+    let core_a_dll = Path::new(trimmed_core_a);
+    let core_b_dll = Path::new(trimmed_core_b);
+
+    let rom_path = match find_first_rom_artifact(project_path) {
+        Some(path) => path,
+        None => {
+            return CrossCoreParityResult {
+                ok: false,
+                message: "No ROM artifact found in project build directory.".to_string(),
+                golden_path: trimmed_golden.to_string(),
+                golden_source: String::new(),
+                core_a_label: String::new(),
+                core_b_label: String::new(),
+                frames_run: 0,
+                cores_agree: false,
+                cross_divergence_count: 0,
+                core_a_divergence_count: 0,
+                core_b_divergence_count: 0,
+                report_path: String::new(),
+                report: None,
+            };
+        }
+    };
+
+    let report_dir = project_path.join(".rds").join("reports");
+    let result = core::parity_harness::run_cross_core_parity(
+        &rom_path,
+        golden_file,
+        core_a_dll,
+        core_b_dll,
+        frames,
+        &report_dir,
+    );
+
+    match result {
+        Ok((report, written)) => {
+            let msg = if report.cores_agree {
+                format!(
+                    "Cores agree: {} and {} produced identical framebuffers for {} frame(s); report in '{}'.",
+                    report.core_a_label, report.core_b_label, report.frames_run, written.display()
+                )
+            } else {
+                format!(
+                    "Cores diverge: {} cross-core divergence(s) after {} frame(s); report in '{}'.",
+                    report.cross_divergences.len(), report.frames_run, written.display()
+                )
+            };
+            CrossCoreParityResult {
+                ok: true,
+                message: msg,
+                golden_path: trimmed_golden.to_string(),
+                golden_source: report.golden_source.clone(),
+                core_a_label: report.core_a_label.clone(),
+                core_b_label: report.core_b_label.clone(),
+                frames_run: report.frames_run,
+                cores_agree: report.cores_agree,
+                cross_divergence_count: report.cross_divergences.len(),
+                core_a_divergence_count: report.report_a.divergences.len(),
+                core_b_divergence_count: report.report_b.divergences.len(),
+                report_path: written.to_string_lossy().to_string(),
+                report: Some(report),
+            }
+        }
+        Err(error) => CrossCoreParityResult {
+            ok: false,
+            message: error,
+            golden_path: trimmed_golden.to_string(),
+            golden_source: String::new(),
+            core_a_label: String::new(),
+            core_b_label: String::new(),
+            frames_run: 0,
+            cores_agree: false,
+            cross_divergence_count: 0,
+            core_a_divergence_count: 0,
+            core_b_divergence_count: 0,
+            report_path: String::new(),
+            report: None,
+        },
+    }
+}
+
+#[tauri::command]
+fn parity_run_cycle_report(
+    project_dir: String,
+    golden_path: String,
+    core_path: String,
+    frames: Option<u32>,
+) -> CycleReportResult {
+    let trimmed_project = project_dir.trim();
+    if trimmed_project.is_empty() {
+        return CycleReportResult {
+            ok: false,
+            message: "O que quebrou: project_dir vazio. Por que importa: o cycle report precisa de um projeto real para gravar .rds/reports. Proxima acao: abra um projeto antes de gerar o relatorio.".to_string(),
+            golden_path: String::new(),
+            core_label: String::new(),
+            frames_run: 0,
+            report_path: String::new(),
+            report: None,
+        };
+    }
+    let trimmed_golden = golden_path.trim();
+    if trimmed_golden.is_empty() {
+        return CycleReportResult {
+            ok: false,
+            message: "O que quebrou: golden_path vazio. Por que importa: o cycle report precisa de um .rds-replay ou .rds-input.json. Proxima acao: selecione um golden antes de gerar o relatorio.".to_string(),
+            golden_path: String::new(),
+            core_label: String::new(),
+            frames_run: 0,
+            report_path: String::new(),
+            report: None,
+        };
+    }
+    let trimmed_core = core_path.trim();
+    if trimmed_core.is_empty() {
+        return CycleReportResult {
+            ok: false,
+            message: "O que quebrou: core_path vazio. Por que importa: o cycle report precisa de um core/reference real para executar os frames. Proxima acao: informe o caminho do core Libretro.".to_string(),
+            golden_path: trimmed_golden.to_string(),
+            core_label: String::new(),
+            frames_run: 0,
+            report_path: String::new(),
+            report: None,
+        };
+    }
+
+    let project_path = Path::new(trimmed_project);
+    let golden_file = Path::new(trimmed_golden);
+    let core_dll = Path::new(trimmed_core);
+    let rom_path = match find_first_rom_artifact(project_path) {
+        Some(path) => path,
+        None => {
+            return CycleReportResult {
+                ok: false,
+                message: format!(
+                    "O que quebrou: nenhum artefato .bin/.md/.sfc/.smc encontrado em '{}/build'. Por que importa: o cycle report precisa de uma ROM real para replay. Proxima acao: rode Build no projeto antes de gerar o relatorio.",
+                    project_path.display()
+                ),
+                golden_path: trimmed_golden.to_string(),
+                core_label: String::new(),
+                frames_run: 0,
+                report_path: String::new(),
+                report: None,
+            };
+        }
+    };
+
+    let report_dir = project_path.join(".rds").join("reports");
+    match core::parity_harness::run_cycle_report(
+        &rom_path,
+        golden_file,
+        core_dll,
+        frames,
+        &report_dir,
+    ) {
+        Ok((report, written)) => CycleReportResult {
+            ok: true,
+            message: format!(
+                "Cycle report gerado para {} frame(s) usando '{}'. Traces M68K/Z80/VDP/DMA permanecem '{}' quando nao houver fonte estruturada; report em '{}'.",
+                report.frames_run,
+                report.core_label,
+                report.m68k_cycle_trace.status,
+                written.display()
+            ),
+            golden_path: trimmed_golden.to_string(),
+            core_label: report.core_label.clone(),
+            frames_run: report.frames_run,
+            report_path: written.to_string_lossy().to_string(),
+            report: Some(report),
+        },
+        Err(error) => CycleReportResult {
+            ok: false,
+            message: error,
+            golden_path: trimmed_golden.to_string(),
+            core_label: String::new(),
+            frames_run: 0,
+            report_path: String::new(),
+            report: None,
+        },
+    }
+}
+
 fn find_first_rom_artifact(project_dir: &Path) -> Option<PathBuf> {
     let build_dir = project_dir.join("build");
     let mut candidates: Vec<PathBuf> = Vec::new();
@@ -3654,6 +3929,8 @@ pub fn run() {
             emulator_stop_recording,
             emulator_play_replay,
             parity_run_capture,
+            parity_run_cross_core,
+            parity_run_cycle_report,
             emulator_read_memory,
             emulator_get_execution_trace,
             emulator_send_input,

@@ -12,7 +12,11 @@ use serde::{Deserialize, Serialize};
 use zip::ZipArchive;
 
 const INSTALL_MANIFEST_PREFIX: &str = ".retrodev-install-";
-const MEGADRIVE_CORE_CANDIDATES: &[&str] = &["genesis_plus_gx_libretro", "picodrive_libretro"];
+const MEGADRIVE_CORE_CANDIDATES: &[&str] = &[
+    "genesis_plus_gx_libretro",
+    "picodrive_libretro",
+    "blastem_libretro",
+];
 const SNES_CORE_CANDIDATES: &[&str] = &["snes9x_libretro", "bsnes_libretro"];
 const HTTP_RETRY_ATTEMPTS: usize = 3;
 const RUNTIME_DIAGNOSTICS_REPORT: &str = "runtime-dependency-diagnostics.json";
@@ -285,7 +289,7 @@ impl DependencyKind {
                 .exists(),
             Self::LibretroMegaDriveCore => contains_core_candidate(
                 &self.install_dir(),
-                &[MEGADRIVE_CORE_CANDIDATES[0], MEGADRIVE_CORE_CANDIDATES[1]],
+                megadrive_core_candidates_for_install_probe(),
             ),
             Self::LibretroSnesCore => {
                 contains_core_candidate(&self.install_dir(), SNES_CORE_CANDIDATES)
@@ -1611,6 +1615,10 @@ fn contains_core_candidate(root: &Path, candidates: &[&str]) -> bool {
         .any(|path| path.exists())
 }
 
+fn megadrive_core_candidates_for_install_probe() -> &'static [&'static str] {
+    MEGADRIVE_CORE_CANDIDATES
+}
+
 fn extract_supported_libretro_cores(
     archive_path: &Path,
     destination: &Path,
@@ -2228,6 +2236,9 @@ mod tests {
             .any(|candidate| candidate == "genesis_plus_gx_libretro"));
         assert!(copied
             .iter()
+            .any(|candidate| candidate == "blastem_libretro"));
+        assert!(copied
+            .iter()
             .any(|candidate| candidate == "snes9x_libretro"));
         assert!(!destination_dir
             .join(format!("vice_xvic_libretro.{}", extension))
@@ -2235,6 +2246,17 @@ mod tests {
 
         let _ = fs::remove_dir_all(source_dir);
         let _ = fs::remove_dir_all(destination_dir);
+    }
+
+    #[test]
+    fn megadrive_install_probe_uses_every_supported_candidate() {
+        assert_eq!(
+            megadrive_core_candidates_for_install_probe(),
+            MEGADRIVE_CORE_CANDIDATES
+        );
+        assert!(megadrive_core_candidates_for_install_probe()
+            .iter()
+            .any(|candidate| *candidate == "blastem_libretro"));
     }
 
     #[test]
