@@ -1,7 +1,9 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
 **Status:** Documento vivo
-**Ultima revisao canonica:** 2026-07-13 (Node build provenance v1 em hardening)
+**Ultima revisao canonica:** 2026-07-13 (Gameplay Parity isolada em hardening)
+
+**Nota 2026-07-13 (branch `codex/gameplay-parity-slice`):** a fatia limpa de Gameplay Parity porta somente harness, observacao Libretro, contratos/IPC, UI, testes e provisionamento canonico de cores da PR monolitica #23 sobre o `main` certificado em `e700477e`; Linux, Node, UI geral e Decompilacao ficam fora. Cross-core, reference/candidate e Cycle Report permanecem **Experimental**: divergencia entre cores e resultado observado, nao equivalencia; audio e hash do stream deterministico entregue pelo core, nao exatidao de hardware; PC/VDP/DMA/scanline/ciclos ausentes ficam `missing`. Testes focados passaram (**43 frontend; 57 Rust / 6 ignored**). A prova real explicitamente executada registrou `blocked_core_missing`: este host Linux nao possui core Mega Drive `.so` oficial em `toolchains/libretro/cores`, e o provisionador existente so auto-instala em Windows; nenhum fake substituiu a evidencia real.
 
 **Nota 2026-07-13 (branch `codex/node-build-provenance`):** Node Engine/NodeGraph/Inspector continuam **Experimental**, agora com source map de **proveniência de build** v1 integrado ao caminho Rust AST/IR -> emitters C -> workspace -> ROM. O contrato usa hash SHA-256 da revisão serializada do grafo, versão, etapa semântica, arquivo/intervalo C realmente emitido, hash do C e hash da ROM quando disponível; ausência de trecho verificável permanece `unsupported` com motivo. O Inspector rejeita schema/revisão incompatível antes de mostrar “Proveniência de build observada”. Gates locais completos passaram (**480 frontend / 2 skipped; 440 Rust / 24 ignored; build debug PASS**); a prova SGDK/Libretro oficial permanece Windows-only e indisponível neste host Linux, sem substituição por fake. Isto não cria source mapping ROM/PC -> node, não produz `RuntimeEvidence` e não observa execução/emulador.
 

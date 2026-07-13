@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-07-13 (Node build provenance v1 em hardening)
+**Ultima Atualizacao:** 2026-07-13 (Gameplay Parity isolada em hardening)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,13 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-07-13 - Gameplay Parity isolada, branch `codex/gameplay-parity-slice`):**
+  - **Base e escopo:** branch limpa criada de `main` `e700477e`, apos a certificacao da proveniencia Node. Foram portados somente `parity_harness`, observacao Libretro, comandos/contratos IPC, servico/store/UI, testes, docs e o candidato canonico de cores; nenhum arquivo de Decompilacao, Linux, Node ou UI geral entrou.
+  - **Contrato honesto:** reference/candidate, cross-core e Cycle Report continuam **Experimental**. Divergencia cross-core e resultado observado, nao equivalencia. Audio mede determinismo do stream i16 entregue pelo core, nao `audio_exact_match` de hardware. WRAM/VRAM/SRAM nao expostas ficam indisponiveis sem hash fabricado; PC, M68K/Z80, VDP, DMA e scanline/ciclos ficam `missing` quando o core nao instrumenta esses sinais.
+  - **Cobertura focada:** TypeScript e cargo check PASS; frontend Parity/Tools **43/43**; Rust Parity **57 passed / 6 ignored**.
+  - **Validacao real host-local:** a prova ignorada foi executada explicitamente e retornou `single_core_real_validation=blocked_core_missing`: nenhum core Mega Drive `.so` oficial em `toolchains/libretro/cores`. Neste Linux, `auto_install_supported` e falso e o provisionador existente so baixa o pacote oficial em Windows; nao ha segundo core canonicamente provisionavel neste ambiente. Nenhum fake contou como evidencia real.
+  - **Proximo passo imediato:** gates completos, build debug, PR isolada, CI/Desktop E2E verdes e merge em `main`; depois fechar a PR #23 como substituida.
 
 * **O que acabou de acontecer (2026-07-13 - Node build provenance v1, branch `codex/node-build-provenance`):**
   - **Base certificada:** PR #26 do Node Engine local foi mergeada em `main` por `9548dbc`; CI e Desktop E2E do merge passaram. Node Engine, NodeGraph e Inspector permanecem **Experimental**.
