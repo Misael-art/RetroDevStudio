@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-07-13 (Node build provenance v1 em hardening)
+**Ultima Atualizacao:** 2026-07-16 (Programa de Reprodutibilidade - Etapa 0 concluida)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,15 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-07-16 - Programa de Reprodutibilidade, Etapa 0):**
+  - **Base remota confirmada:** autenticacao GitHub foi restabelecida, `git fetch --prune origin` confirmou `origin/main=e700477` e a worktree limpa estava exatamente `0/0` contra o remoto. A branch canonica `codex/reproducibility-program` foi criada a partir desse commit.
+  - **Checkout divergente preservado:** o checkout original `codex/w7-4-blastem-parity` (`07cb6ac`) permaneceu intocado. Alteracoes rastreadas foram protegidas em `refs/recovery/reproducibility-program-2026-07-16`; alteracoes mais o estudo UI e o patch de integracao foram protegidos em `refs/recovery/reproducibility-program-all-2026-07-16`. As worktrees existentes nao foram removidas.
+  - **Curadoria de escopo:** a frente parity/decomp contem trabalho Experimental unico, mas nao foi misturada no programa de host/reprodutibilidade. Ela permanece recuperavel pelas refs e branches existentes para curadoria posterior, sem perda de conteudo.
+  - **Baseline da base limpa:** `check:tree`, lint, TypeScript, build Vite e frontend passaram (**480 passed / 2 skipped**); clippy `-D warnings` passou; Rust passou (**440 passed / 24 ignored**). Isso certifica a base automatizada, nao o host oficial completo.
+  - **Fato de infraestrutura:** o host atual e BigLinux/Manjaro x64 em NTFS/FUSE. Rust 1.97.0 existe em `~/.cargo/bin`, mas o shell original nao o expunha; Node era 26.4.0. Toolchains oficiais Linux SGDK/SNES, JDK21/Ghidra e E2E completo ainda nao estavam prontos.
+  - **Status:** **Etapa 0 CONCLUIDA**. Nenhuma feature foi promovida. A Etapa 1/2 deve instituir o lock imutavel, pins, diagnostico, reparo e relatorio antes de provisionar o host.
+  - **Proximo passo imediato:** executar e validar o contrato `rds-host-requirements/v1` e o orquestrador `host:diagnose`/`host:ensure`/`host:certify`; nao iniciar a Etapa 3 enquanto os gates da Etapa 1/2 nao estiverem verdes.
 
 * **O que acabou de acontecer (2026-07-13 - Node build provenance v1, branch `codex/node-build-provenance`):**
   - **Base certificada:** PR #26 do Node Engine local foi mergeada em `main` por `9548dbc`; CI e Desktop E2E do merge passaram. Node Engine, NodeGraph e Inspector permanecem **Experimental**.
