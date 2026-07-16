@@ -236,12 +236,12 @@ impl DependencyKind {
     }
 
     fn install_dir(self) -> PathBuf {
+        let toolchains_root = preferred_toolchains_root();
         match self {
-            Self::Jdk => repo_root().join("toolchains").join("jdk"),
-            Self::Sgdk => repo_root().join("toolchains").join("sgdk"),
-            Self::PvsnesLib => repo_root().join("toolchains").join("pvsneslib"),
-            Self::LibretroMegaDriveCore | Self::LibretroSnesCore => repo_root()
-                .join("toolchains")
+            Self::Jdk => toolchains_root.join("jdk"),
+            Self::Sgdk => toolchains_root.join("sgdk"),
+            Self::PvsnesLib => toolchains_root.join("pvsneslib"),
+            Self::LibretroMegaDriveCore | Self::LibretroSnesCore => toolchains_root
                 .join("libretro")
                 .join("cores"),
             Self::Msvc => detect_msvc_program()
@@ -250,7 +250,7 @@ impl DependencyKind {
             Self::GitBash => detect_bash_program()
                 .unwrap_or_else(|| PathBuf::from("Git Bash ou MSYS2 bash no PATH")),
             Self::WebDriver => detect_webdriver_program()
-                .unwrap_or_else(|| repo_root().join("toolchains").join("webdriver")),
+                .unwrap_or_else(|| toolchains_root.join("webdriver")),
             Self::TauriDriver => detect_tauri_driver_program()
                 .unwrap_or_else(|| PathBuf::from("tauri-driver no PATH")),
         }
@@ -259,10 +259,10 @@ impl DependencyKind {
     fn manifest_dir(self) -> PathBuf {
         match self {
             Self::LibretroMegaDriveCore | Self::LibretroSnesCore => {
-                repo_root().join("toolchains").join("libretro")
+                preferred_toolchains_root().join("libretro")
             }
             Self::Msvc | Self::GitBash | Self::WebDriver | Self::TauriDriver => {
-                repo_root().join("toolchains").join(".cache")
+                preferred_toolchains_root().join(".cache")
             }
             _ => self.install_dir(),
         }
@@ -1811,6 +1811,43 @@ fn repo_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")))
 }
 
+fn legacy_toolchains_root() -> PathBuf {
+    repo_root().join("toolchains")
+}
+
+fn active_host_cache_root() -> Option<PathBuf> {
+    if let Some(explicit) = std::env::var_os("RDS_HOST_CACHE") {
+        let path = PathBuf::from(explicit);
+        if path.is_absolute() {
+            return Some(path);
+        }
+    }
+
+    let base = if cfg!(target_os = "windows") {
+        std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .map(|path| path.join("RetroDevStudio").join("cache"))
+    } else {
+        std::env::var_os("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
+            .map(|path| path.join("retrodevstudio"))
+    }?;
+    let raw = fs::read_to_string(base.join("active-host.json")).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    if value.get("schema")?.as_str()? != "rds-active-host/v1" {
+        return None;
+    }
+    let path = PathBuf::from(value.get("native_cache")?.as_str()?);
+    path.is_absolute().then_some(path)
+}
+
+fn preferred_toolchains_root() -> PathBuf {
+    active_host_cache_root()
+        .map(|root| root.join("toolchains"))
+        .unwrap_or_else(legacy_toolchains_root)
+}
+
 fn detect_dependency_root(env_var: &str, local_dir_name: &str) -> Option<PathBuf> {
     let env_vars = if local_dir_name == "sgdk" {
         vec![env_var, "GDK", "GDK_WIN"]
@@ -1826,6 +1863,12 @@ fn detect_dependency_root(env_var: &str, local_dir_name: &str) -> Option<PathBuf
                 .filter(|path| path.exists())
         })
         .or_else(|| {
+            if let Some(cached) = active_host_cache_root()
+                .map(|root| root.join("toolchains").join(local_dir_name))
+                .filter(|path| path.exists())
+            {
+                return Some(cached);
+            }
             let local = repo_root().join("toolchains").join(local_dir_name);
             local.exists().then_some(local)
         })
@@ -1906,6 +1949,9 @@ fn find_in_path(candidates: &[&str]) -> Option<PathBuf> {
 }
 
 fn detect_bash_program() -> Option<PathBuf> {
+    if !cfg!(target_os = "windows") {
+        return find_in_path(&["bash"]);
+    }
     [
         r"C:\Program Files\Git\bin\bash.exe",
         r"C:\Program Files\Git\usr\bin\bash.exe",
@@ -1950,16 +1996,22 @@ fn detect_webdriver_program() -> Option<PathBuf> {
         .map(PathBuf::from)
         .filter(|path| path.exists())
         .or_else(|| {
-            let local = repo_root().join("toolchains").join("webdriver").join(
+            let local = preferred_toolchains_root().join("webdriver").join(
                 if cfg!(target_os = "windows") {
                     "msedgedriver.exe"
                 } else {
-                    "msedgedriver"
+                    "WebKitWebDriver"
                 },
             );
             local.exists().then_some(local)
         })
-        .or_else(|| find_in_path(&["msedgedriver"]))
+        .or_else(|| {
+            if cfg!(target_os = "windows") {
+                find_in_path(&["msedgedriver", "chromedriver"])
+            } else {
+                find_in_path(&["WebKitWebDriver", "msedgedriver", "chromedriver"])
+            }
+        })
 }
 
 fn detect_tauri_driver_program() -> Option<PathBuf> {
@@ -2259,6 +2311,26 @@ mod tests {
 
         restore_env_var("JAVA_HOME", previous_java_home);
         let _ = fs::remove_dir_all(status.install_dir);
+    }
+
+    #[test]
+    fn dependency_install_root_prefers_explicit_host_cache() {
+        let _serial = test_serial_guard();
+        let host_cache = temp_dir("active-host-cache");
+        let previous = std::env::var_os("RDS_HOST_CACHE");
+        unsafe { std::env::set_var("RDS_HOST_CACHE", &host_cache) };
+
+        assert_eq!(
+            DependencyKind::Sgdk.install_dir(),
+            host_cache.join("toolchains").join("sgdk")
+        );
+        assert_eq!(
+            DependencyKind::LibretroSnesCore.install_dir(),
+            host_cache.join("toolchains").join("libretro").join("cores")
+        );
+
+        restore_env_var("RDS_HOST_CACHE", previous);
+        let _ = fs::remove_dir_all(host_cache);
     }
 
     #[test]

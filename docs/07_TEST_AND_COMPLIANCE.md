@@ -81,10 +81,11 @@
 4. `npm test`
 5. `cargo clippy -- -D warnings`
 6. `cargo test --lib -- --nocapture --test-threads=1`
-7. `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests` quando a mudanca tocar build/emulacao/toolchains reais no Windows
+7. `npm run host:certify` quando a mudanca tocar host, build, emulacao, toolchain ou infraestrutura. O comando exige report `READY`, executa a baseline e delega a validacao upstream do sistema; `BLOCKED`, `DRIFTED` ou `UNSUPPORTED` nao contam como gate executado.
+8. `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests` quando a mudanca tocar build/emulacao/toolchains reais no Windows
    Observacao canonica: este gate deve ser rerodado de forma direta, a partir do shell, e nao embrulhado por `scripts/run-in-msvc.cmd`, porque o proprio `validate-upstream-windows.ps1` ja chama internamente o runner MSVC canonico quando necessario.
-8. `node scripts/e2e-tauri-build-run.mjs --skip-build --native-driver .\toolchains\webdriver\msedgedriver.exe` quando a mudanca tocar o fluxo publico `Build -> Load ROM -> Run frames`
-9. `npm run test:e2e:desktop:qa-rc` quando a mudanca tocar onboarding, shell principal, camadas, viewport editavel, inspector, persistencia ou o fluxo desktop `Build & Run`
+9. `node scripts/e2e-tauri-build-run.mjs --skip-build --native-driver .\toolchains\webdriver\msedgedriver.exe` quando a mudanca tocar o fluxo publico `Build -> Load ROM -> Run frames`
+10. `npm run test:e2e:desktop:qa-rc` quando a mudanca tocar onboarding, shell principal, camadas, viewport editavel, inspector, persistencia ou o fluxo desktop `Build & Run`
 10. `cargo test sgdk_corpus_inventory_real_corpus_report --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar inventario SGDK/no-code, source mapping ou semantic gaps do corpus externo.
 11. `cargo test sgdk_logic --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` quando a mudanca tocar extracao semantica SGDK, modelo intermediario `logic_systems`, FSMs, source mappings ou bridges de logica.
 12. `cargo test sgdk_logic_real_corpus_vertical_reports --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando houver corpus local e a mudanca tocar o extrator SGDK; exige pelo menos Platformer 2, NEXZR MD e BLAZE_ENGINE quando presentes.

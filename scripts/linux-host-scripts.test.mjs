@@ -30,6 +30,9 @@ linuxDescribe("Linux host scripts", () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("RetroDev Studio Linux bootstrap");
+    expect(result.stdout).toContain("--ensure");
+    expect(result.stdout).toContain("--profile full");
+    expect(result.stdout).toContain("--offline");
     expect(result.stdout).toContain("--run-baseline");
     expect(result.stdout).toContain("--run-upstream-validation");
   });
@@ -68,11 +71,12 @@ linuxDescribe("Linux host scripts", () => {
     }
   });
 
-  it("does not install system packages from Linux host scripts", () => {
+  it("keeps system package mutation behind the explicit ensure path", () => {
     const bootstrapSource = readFileSync(bootstrapScript, "utf8");
     const validateSource = readFileSync(validateScript, "utf8");
 
-    expect(bootstrapSource).not.toMatch(/\bsudo\b/);
+    expect(bootstrapSource).toContain('if [[ "$ENSURE_HOST" != "1" ]]');
+    expect(bootstrapSource).toContain("sudo pacman -S --needed --noconfirm");
     expect(validateSource).not.toMatch(/\bsudo\b/);
   });
 });

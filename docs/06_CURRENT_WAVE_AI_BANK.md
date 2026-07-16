@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-07-16 (Programa de Reprodutibilidade - Etapa 0 concluida)
+**Ultima Atualizacao:** 2026-07-16 (Programa de Reprodutibilidade - Etapa 1 concluida; Etapas 2/4 bloqueadas)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,19 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-07-16 - contrato v1 e provisionamento Arch real):**
+  - **Etapa/status:** Etapa 1 **CONCLUIDA**; Etapa 2 **BLOQUEADA** ate fechar todos os cenarios e duas execucoes reais idempotentes; Etapa 4 **BLOQUEADA** no host atual. Etapas 3 e 5-8 nao foram iniciadas.
+  - **Branch/commit:** `codex/reproducibility-program`, base `e700477`, baseline recuperado em `d5585a3`; a implementacao e este registro pertencem ao commit de fechamento desta rodada.
+  - **Contrato:** `toolchains/host-requirements.lock.json` (`rds-host-requirements/v1`) fixa Node 24.18.0, npm 11.16.0, Rust 1.97.0, SGDK 2.11, PVSnesLib 4.5.0, Libretro 1.22.2, Ghidra 12.1, Temurin 21.0.11+10 e `tauri-driver` 2.0.6, sempre com URL imutavel, tamanho e SHA-256. `Cargo.lock`, `.node-version`, `rust-toolchain.toml` e LF/CRLF foram versionados.
+  - **Orquestrador:** `host-manager.mjs` implementa diagnose/ensure/certify, cache portatil/nativo, fingerprint, report, lock de processo, journal, retry/resume/checksum, promocao atomica e instaladores artifact/source/pacman/winget/cargo. Compilacoes interrompidas preservam staging verificado e logs por etapa; teste hermetico prova falha seguida de retomada.
+  - **Integracao:** bootstraps nivel zero delegam ao contrato; `dependency_manager.rs` le o active-host pointer/cache comum e rejeita binario Windows no Linux. AGENTS, modo de agente, stack, arvore e compliance foram alinhados sem criar documento paralelo.
+  - **Gates automatizados:** `check:tree`, lint, TypeScript, frontend (**494 passed / 2 skipped**), clippy `-D warnings` e Rust (**441 passed / 24 ignored**) passaram; suite focada atual possui **19/19** testes de host/scripts. Isso conclui o contrato, nao certifica o host oficial completo.
+  - **Provisionamento real:** Node oficial 24.18.0, JDK 21.0.11+10, Ghidra 12.1, `tauri-driver` 2.0.6, WebKitWebDriver e cores Libretro MD/SNES oficiais foram verificados/instalados em cache nativo. O digest atual pode religar os objetos content-addressed depois do ensure.
+  - **Fatos descobertos:** GCC 13.2.0 falhava sob GCC host 16.1.1 por `char8_t` no `libcody`; o lock agora fixa C++17 e desabilita analyzer/LTO desnecessarios. A compilacao avancou sem repetir o erro, mas nao terminou, portanto `m68k_gcc` continua bloqueado. `cmake` esta ausente; `sudo` foi solicitado e cancelado/recusado, sem credencial armazenada. SGDK/PVSnesLib dependem desse reparo.
+  - **Evidencia:** report `src-tauri/target-test/validation/host-readiness.json`; journal do digest anterior em `/home/misael/.cache/retrodevstudio/17f7bcf517f26552031e29fb2e06e0e20ef14025bf5e515705f318c603dfa911/operation-journal.json`; staging resumivel anterior em `.../source-build-m68k_gcc/`. Report fresco: lock `3397c3de960dfc3af8b0089a21233a59eeaebed43a0214589f577cde798fd2e0`, fingerprint `c3be8cee396c616e33bf665393d2e3f9cb580ac5297313225e94cca0a22ff240`, estado `BLOCKED`.
+  - **Riscos residuais:** provider Windows nao executado; M68K/SGDK/PVSnesLib e certificacao ROM/emulacao/E2E/Ghidra headless pendentes; cenarios de espaco/cartao/UAC/browser drift ainda nao fechados; nenhum claim `READY` permitido.
+  - **Proximo comando exato:** `scripts/bootstrap.sh --ensure --profile full`, autenticando o prompt `sudo`; repetir o mesmo comando para idempotencia e, se `READY`, executar `npm run host:certify`.
 
 * **O que acabou de acontecer (2026-07-16 - Programa de Reprodutibilidade, Etapa 0):**
   - **Base remota confirmada:** autenticacao GitHub foi restabelecida, `git fetch --prune origin` confirmou `origin/main=e700477` e a worktree limpa estava exatamente `0/0` contra o remoto. A branch canonica `codex/reproducibility-program` foi criada a partir desse commit.

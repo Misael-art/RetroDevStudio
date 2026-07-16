@@ -56,6 +56,15 @@
 - `cargo clippy -- -D warnings` para lint do backend Rust
 - `cargo test --lib -- --nocapture` e `npm test` para suites automatizadas
 
+### Ambiente de desenvolvimento reproduzivel
+
+- Node.js `24.18.0` LTS e npm `11.16.0`, fixados por `.node-version`, `package.json` e lock do host.
+- Rust `1.97.0` com Clippy/Rustfmt, fixado por `rust-toolchain.toml`; `src-tauri/Cargo.lock` e obrigatorio para esta aplicacao Tauri.
+- SGDK `2.11`, PVSnesLib `4.5.0`, Libretro `1.22.2`, Ghidra `12.1`, JDK 21 e `tauri-driver 2.0.6` compoem o profile full.
+- `toolchains/host-requirements.lock.json` fixa tags/commits e hashes. Execucao normal nao consulta `latest`.
+- Binarios ativos, Cargo target e caches de compilacao vivem no filesystem nativo por lock digest; o cartao mantem codigo e cache portatil de downloads por SHA-256.
+- Hosts v1: Windows 10/11 x64 e Arch/Manjaro/BigLinux x64. Outros hosts retornam `UNSUPPORTED` sem instalacao.
+
 ---
 
 ## 3. Regras Rigidas

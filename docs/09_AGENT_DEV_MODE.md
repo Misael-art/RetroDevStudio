@@ -46,6 +46,21 @@
 9. Atualizar docs canonicos se o estado real mudou.
 10. Quando a entrega estiver validada com gates verdes e houver mudancas rastreaveis do escopo, criar commit(s) coerentes e executar `git push` no branch atual, salvo instrucao contraria do usuario ou necessidade explicita de curadoria adicional antes da publicacao.
 
+### 2.1 Barreira de prontidao do host
+
+- O contrato canonico e `toolchains/host-requirements.lock.json`; o estado gerado e `src-tauri/target-test/validation/host-readiness.json`.
+- Todo agente deve rodar `npm run host:diagnose` no inicio da sessao. Sem Node ou com estado diferente de `READY`, deve executar o bootstrap `--ensure --profile full` do sistema suportado.
+- `UNSUPPORTED` nunca autoriza mutacao do host. `BLOCKED` ou `DRIFTED` impedem mudanca no produto ate reparo ou registro formal do bloqueio.
+- Instaladores podem usar `sudo`/UAC apenas no modo `ensure`, nunca armazenam credenciais e nunca aceitam download sem versao fixa e SHA-256.
+- Mudanca em build, emulacao, toolchain ou infraestrutura exige `npm run host:certify`; presenca de arquivo nao substitui probe operacional.
+
+### 2.2 Barreira entre etapas do Programa de Reprodutibilidade
+
+- Uma etapa so recebe `CONCLUIDA` quando todos os gates definidos em `docs/11_CROSS_PLATFORM_PLAN.md` passam no mesmo commit.
+- Falha mantem a etapa `BLOQUEADA`; nao iniciar a etapa seguinte para contornar o blocker.
+- O commit de fechamento registra no Current Wave: etapa/status, branch/commit, host fingerprint, lock digest, fatos, comandos/resultados, evidencias, riscos e proximo comando exato.
+- Fato relevante nao pode existir apenas em chat, log temporario ou memoria de um agente.
+
 Uma tarefa nao esta concluida enquanto o repositorio continuar anunciando um estado mais maduro do que o codigo e os gates sustentam.
 Uma tarefa tambem nao esta concluida enquanto faltar certificacao real no escopo alterado: prova funcional correspondente, gates verdes e ausencia de erro bloqueante ou regressao conhecida naquele fluxo.
 

@@ -1,9 +1,54 @@
 # 11 - PLANO DE ADAPTACAO CROSS-PLATFORM (Linux + Windows)
-**Status:** Fases 1 e 2 entregues no host Linux; Fase 3 pendente de toolchains oficiais nativas
+**Status:** Programa de Reprodutibilidade ativo; Etapas 0/1 concluidas, Etapas 2/4 bloqueadas
 **Data de registro:** 2026-06-30
-**Ultima atualizacao:** 2026-07-04
+**Ultima atualizacao:** 2026-07-16
 **Contexto:** O projeto foi construido para Windows. Este host e Linux (BigLinux/Manjaro).
 **Objetivo:** Poder desenvolver e validar em ambos os sistemas operacionais.
+
+---
+
+## Programa Canonico De Reprodutibilidade
+
+### Contrato v1
+
+- Hosts certificados: Windows 10/11 x64 e Arch/Manjaro/BigLinux x64.
+- Profile unico `full`: frontend, Rust/Tauri, SGDK, PVSnesLib, Libretro MD/SNES, desktop E2E, JDK21 e Ghidra. ROM/corpus continua BYOR.
+- Lock: `toolchains/host-requirements.lock.json` (`rds-host-requirements/v1`).
+- Report: `src-tauri/target-test/validation/host-readiness.json` (`rds-host-readiness/v1`).
+- Estados: `READY`, `REPAIRED`, `BLOCKED`, `DRIFTED`, `UNSUPPORTED`.
+- Comandos: `npm run host:diagnose`, `npm run host:ensure`, `npm run host:certify`; sem Node, usar `bootstrap.sh --ensure --profile full` ou `bootstrap.ps1 -Ensure -Profile Full`.
+- Cache ativo: filesystem nativo por lock digest. Cache portatil: `toolchains/.cache/artifacts/<sha256>`.
+
+### Estado das etapas
+
+| Etapa | Estado | Evidencia / blocker |
+|---|---|---|
+| 0 - baseline canonico | **CONCLUIDA** | `origin/main=e700477` confirmado; branch `codex/reproducibility-program`; checkout divergente protegido por refs recovery; baseline limpo verde |
+| 1 - contrato e pins | **CONCLUIDA** | lock v1 imutavel, Node/Rust/npm pins, Cargo.lock, protocolo de agente e validacao de schema; 19 testes de host/scripts e os seis gates canonicos verdes |
+| 2 - orquestrador resiliente | **BLOQUEADA** | diagnostico/ensure/certify, fingerprint, cache, lock de processo, journal, rejeicao de checksum e retomada persistente implementados; falta fechar todos os cenarios de falha e obter duas execucoes reais idempotentes |
+| 3 - Windows completo | **PENDENTE** | exige execucao e certificacao em Windows 10/11 limpo |
+| 4 - Arch/Manjaro completo | **BLOQUEADA** | o lock atual exige reparo; `cmake` depende de autenticacao `sudo`, e M68K/SGDK/PVSnesLib ainda nao passaram probes operacionais no digest atual |
+| 5 - certificacao unificada | **PENDENTE** | nao iniciar antes de 3/4 |
+| 6 - seguranca/reprodutibilidade | **PENDENTE** | audit npm atual ainda possui vulnerabilidades; tratar em mudanca isolada |
+| 7 - reducao arquitetural | **PENDENTE** | feature freeze; nao misturar com toolchains |
+| 8 - certificacao/release | **PENDENTE** | exige mesmo commit/lock em Windows e Arch |
+
+### Regra de transicao e handoff
+
+Uma etapa com qualquer gate falho permanece `BLOQUEADA`. O fechamento deve registrar no Current Wave, no mesmo commit: etapa/status, branch/commit, host fingerprint, lock digest, fatos e decisoes, comandos/resultados, caminhos/hashes de evidencia, riscos e proximo comando exato. Fatos nao podem ficar apenas no chat.
+
+### Diagnostico e provisionamento real (2026-07-16)
+
+- O primeiro diagnostico retornou `DRIFTED`, incluindo Node 26.4.0 fora do pin. O launcher instalou e ativou Node oficial 24.18.0; Rust 1.97.0 foi fixado pelo `rust-toolchain.toml`.
+- Uma rodada real verificou e instalou/reutilizou Temurin JDK 21.0.11+10, Ghidra 12.1, `tauri-driver` 2.0.6, WebKitWebDriver e cores oficiais Libretro MD/SNES com hashes individuais. Esses objetos permanecem no cache nativo content-addressed e podem ser religados por um novo digest.
+- A compilacao M68K revelou incompatibilidade de GCC 13.2.0 com o GCC 16.1.1 host em `libcody`; o lock agora fixa `CXXFLAGS=-O2 -std=gnu++17`, desabilita analyzer/LTO desnecessarios e preserva staging/logs. O erro `char8_t` deixou de ocorrer, mas a compilacao completa ainda nao foi certificada.
+- O host nao possui `cmake`. A tentativa automatica chegou corretamente a `sudo pacman`, mas a autenticacao foi recusada/cancelada sem armazenar credencial. SGDK e PVSnesLib permanecem bloqueados por esse substrato.
+- Report fresco: `src-tauri/target-test/validation/host-readiness.json`; estado `BLOCKED`; lock digest `3397c3de960dfc3af8b0089a21233a59eeaebed43a0214589f577cde798fd2e0`; fingerprint `c3be8cee396c616e33bf665393d2e3f9cb580ac5297313225e94cca0a22ff240`.
+- Proximo comando exato: `scripts/bootstrap.sh --ensure --profile full`. O operador deve autenticar o prompt `sudo`; depois, repetir o mesmo comando para provar idempotencia e somente entao executar `npm run host:certify`.
+
+## Historico Pre-Programa (nao usar como estado atual)
+
+As secoes abaixo preservam o raciocinio das fases Linux anteriores. Claims de instalacao nelas sao historicos e nao sobrepoem o diagnostico/report v1 acima.
 
 ---
 

@@ -18,6 +18,9 @@ RetroDevStudio/
 |       `-- desktop-e2e.yml
 |
 |-- .gitignore
+|-- .gitattributes
+|-- .node-version
+|-- rust-toolchain.toml
 |-- README.md
 |-- CLAUDE.md
 |-- build-test.bat
@@ -132,6 +135,8 @@ RetroDevStudio/
 |
 |-- scripts/
 |   |-- bootstrap.ps1
+|   |-- host-manager.mjs
+|   |-- host-manager.test.mjs
 |   |-- build.mjs
 |   |-- check-tree.cjs
 |   |-- check-tree.ps1
@@ -147,6 +152,7 @@ RetroDevStudio/
 |   `-- validate-upstream-windows.ps1
 |
 `-- toolchains/
+    |-- host-requirements.lock.json
     |-- .cache/
     |   `-- github-releases/
     |-- sgdk/
@@ -167,6 +173,7 @@ RetroDevStudio/
 - IPC de frontend fica em `src/core/ipc/`.
 - Fixtures backend ficam em `src-tauri/tests/fixtures/`.
 - Dependencias de terceiros instaladas sob demanda vivem em `toolchains/` e nao devem ser versionadas no Git.
+- `toolchains/host-requirements.lock.json` e a excecao rastreada: contem apenas contrato, pins, fontes imutaveis e hashes; binarios continuam ignorados.
 - Metadata cacheada de releases oficiais vive em `toolchains/.cache/` e tambem nao deve ser versionada no Git.
 - Drivers locais de validacao desktop, como `msedgedriver.exe`, devem ficar em `toolchains/webdriver/`, nunca soltos na raiz do repositorio.
 
@@ -187,6 +194,7 @@ RetroDevStudio/
 - `scripts/run-in-msvc.cmd` e o wrapper canonico para executar comandos Node/npm em ambiente MSVC preparado no Windows institucional; usar junto de `build.mjs` quando o host exigir `vcvars64.bat`.
 - `scripts/run-cargo-msvc.cmd` e o wrapper canonico para comandos `cargo` em ambiente MSVC preparado no Windows institucional.
 - `scripts/e2e-tauri-build-run.mjs` e o runner canonico de regressao desktop/Tauri para `Build -> Load ROM -> Run frames`.
+- `scripts/host-manager.mjs` e a fonte canonica cross-platform para `host:diagnose`, `host:ensure` e `host:certify`; os bootstraps Bash/PowerShell permanecem entrypoints de nivel zero quando Node ainda nao existe.
 - `scripts/validate-upstream-windows.ps1` e o script canonico de validacao upstream real com SGDK, PVSnesLib e cores Libretro oficiais.
 - `.github/workflows/desktop-e2e.yml` e o workflow canonico de regressao desktop em Windows e ja foi validado em runner GitHub real.
 - `toolchains/libretro/cores/` e o local canonico dos DLLs de core baixados do upstream oficial.
