@@ -75,6 +75,7 @@ Uma etapa com qualquer gate falho permanece `BLOQUEADA`. O fechamento deve regis
 - `NOTICE`/`license-inventory.json` deixam toolchains/cores como nao redistribuidos. Release publico permanece proibido sem revisao das licencas por core, certificado, signing, canal e updater reais.
 - `cargo audit 0.22.2` registrou zero vulnerabilidades e avisos informacionais. `glib 0.18.5` possui `RUSTSEC-2024-0429` e entra transitivamente por Tauri 2.11.5/WebKitGTK/GTK3; nao existe remocao local conservadora sem migrar o runtime upstream. Reavaliar em toda atualizacao Tauri.
 - CI ganhou pins exatos, npm/RustSec audit, Rustfmt e job Linux. `release:rehearsal:linux` exige worktree limpa e evidencias MD/SNES do mesmo commit/lock/fingerprint; seu sucesso significa apenas pronto para o gate Windows.
+- Os workflows publicados nao receberam runner: GitHub Actions registrou billing/spending limit bloqueado, `runner_id=0` e zero steps. O operador deve corrigir **Billing & plans** e rerodar CI `29613344254` e Desktop E2E `29613344292`; ate isso ocorrer, nao existe evidencia CI remota verde para o commit.
 - Proximo comando neste host: `npm run host:diagnose`. Quando Windows for descongelado: `scripts\\bootstrap.ps1 -Ensure -Profile Full`, repetir para idempotencia e executar `npm run host:certify` no mesmo commit/lock.
 
 ## Historico Pre-Programa (nao usar como estado atual)
