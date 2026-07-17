@@ -74,7 +74,7 @@ async function main() {
   const upstream = await readJson("upstream-validation-linux.json");
   const licenses = await readJson("license-inventory.json");
   const architecture = await readJson("architecture-metrics.json");
-  const mdE2e = await readJson("desktop-e2e-success-build-run-md.json");
+  const mdE2e = await readJson("desktop-e2e-success-build-run-megadrive.json");
   const snesE2e = await readJson("desktop-e2e-success-build-run-snes.json");
   const npmVulnerabilities = runNpmAudit();
   const tauriConfig = JSON.parse(await readFile(path.join(repoRoot, "src-tauri", "tauri.conf.json"), "utf8"));
@@ -90,14 +90,17 @@ async function main() {
   addCheck(checks, "architecture_metrics", architecture.schema === "rds-architecture-metrics/v1", architecture.generated_at ?? "sem timestamp");
   addCheck(checks, "updater_disabled", tauriConfig.bundle?.createUpdaterArtifacts === false && !tauriConfig.plugins?.updater, "release publica requer assinatura/updater deliberados");
 
-  for (const [target, report] of [["md", mdE2e], ["snes", snesE2e]]) {
+  for (const [label, expectedTarget, report] of [
+    ["md", "megadrive", mdE2e],
+    ["snes", "snes", snesE2e],
+  ]) {
     addCheck(
       checks,
-      `desktop_e2e_${target}`,
+      `desktop_e2e_${label}`,
       report.schema === "rds-desktop-e2e-success/v1" &&
         report.repository?.commit === commit &&
         report.repository?.dirty === false &&
-        report.target === target &&
+        report.target === expectedTarget &&
         report.framebuffer?.nonBlackPixels > 0,
       report.repository?.commit ?? "sem commit"
     );
@@ -109,7 +112,7 @@ async function main() {
     "upstream-validation-linux.json",
     "license-inventory.json",
     "architecture-metrics.json",
-    "desktop-e2e-success-build-run-md.json",
+    "desktop-e2e-success-build-run-megadrive.json",
     "desktop-e2e-success-build-run-snes.json",
   ];
   const evidence = Object.fromEntries(
