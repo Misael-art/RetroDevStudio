@@ -175,7 +175,7 @@ export async function logPreflightSummary(options, root = repoRoot) {
   const canonicalWebdriverDir = path.join(root, "toolchains", "webdriver");
   let nativeDriverPath = await resolveExecutable(
     options?.nativeDriver ?? "",
-    ["msedgedriver", "msedgedriver.exe", "chromedriver"],
+    ["WebKitWebDriver", "msedgedriver", "msedgedriver.exe", "chromedriver"],
     { hostPlatform }
   );
   if (!nativeDriverPath) {

@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const buildScriptUrl = pathToFileURL(path.join(repoRoot, "scripts", "build.mjs")).href;
+const e2eScriptUrl = pathToFileURL(path.join(repoRoot, "scripts", "e2e-tauri-build-run.mjs")).href;
 
 function inspectBuildEnvironment(mode, hostPlatform, envOverrides = {}) {
   const code = `
@@ -36,6 +37,27 @@ function inspectBuildEnvironment(mode, hostPlatform, envOverrides = {}) {
 }
 
 describe("build.mjs command environment", () => {
+  it("loads the E2E runner without executing it and supports WebKitWebDriver on Linux", () => {
+    const code = `
+      const runner = await import(${JSON.stringify(e2eScriptUrl)});
+      console.log(JSON.stringify({
+        applyType: typeof runner.applyManagedHostEnvironment,
+        linuxNames: runner.webdriverNamesForPlatform("linux"),
+        windowsNames: runner.webdriverNamesForPlatform("win32"),
+      }));
+    `;
+    const result = JSON.parse(
+      execFileSync(process.execPath, ["--input-type=module", "-e", code], {
+        encoding: "utf8",
+        cwd: repoRoot,
+      })
+    );
+
+    expect(result.applyType).toBe("function");
+    expect(result.linuxNames[0]).toBe("WebKitWebDriver");
+    expect(result.windowsNames).toEqual(["msedgedriver.exe", "msedgedriver"]);
+  });
+
   it("marks only debug builds as Tauri debug builds on Windows", () => {
     expect(inspectBuildEnvironment("debug", "win32")).toMatchObject({
       exportedType: "function",

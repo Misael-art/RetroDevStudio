@@ -1,7 +1,7 @@
 # 11 - PLANO DE ADAPTACAO CROSS-PLATFORM (Linux + Windows)
-**Status:** Programa de Reprodutibilidade ativo; Etapas 0/1 concluidas, Etapas 2/4 bloqueadas
+**Status:** Programa de Reprodutibilidade ativo; Etapas 0/1/2/4 concluidas; Windows pendente
 **Data de registro:** 2026-06-30
-**Ultima atualizacao:** 2026-07-16
+**Ultima atualizacao:** 2026-07-17
 **Contexto:** O projeto foi construido para Windows. Este host e Linux (BigLinux/Manjaro).
 **Objetivo:** Poder desenvolver e validar em ambos os sistemas operacionais.
 
@@ -25,9 +25,9 @@
 |---|---|---|
 | 0 - baseline canonico | **CONCLUIDA** | `origin/main=e700477` confirmado; branch `codex/reproducibility-program`; checkout divergente protegido por refs recovery; baseline limpo verde |
 | 1 - contrato e pins | **CONCLUIDA** | lock v1 imutavel, Node/Rust/npm pins, Cargo.lock, protocolo de agente e validacao de schema; contrato preservado pela suite focada ampliada |
-| 2 - orquestrador resiliente | **BLOQUEADA** | 28 testes focados cobrem lock vivo/morto, checksum, espaco, offline, journal, source resume, batch pacman e idempotencia READY hermetica; retomada real apos reboot concluiu M68K sem rebuild na segunda rodada, mas falta host real `READY` duas vezes |
+| 2 - orquestrador resiliente | **CONCLUIDA** | retomada real apos reboot; lock/journal/checksum/espaco/offline cobertos; primeira execucao do lock final `REPAIRED` e segunda offline `READY` sem mutacao |
 | 3 - Windows completo | **PENDENTE** | exige execucao e certificacao em Windows 10/11 limpo |
-| 4 - Arch/Manjaro completo | **BLOQUEADA** | M68K 13.2.0, JDK/Ghidra, drivers e cores MD/SNES passaram probes; `cmake` depende de autenticacao `sudo`, bloqueando os builds SGDK/PVSnesLib e a certificacao ROM/E2E |
+| 4 - Arch/Manjaro completo | **CONCLUIDA** | BigLinux/Manjaro: SGDK/PVSnesLib builds reais, ROMs e frames MD/SNES, Ghidra headless, WebKit desktop E2E MD/SNES, offline e rejeicao de binario Windows passaram no lock/fingerprint final |
 | 5 - certificacao unificada | **PENDENTE** | nao iniciar antes de 3/4 |
 | 6 - seguranca/reprodutibilidade | **PENDENTE** | audit npm atual ainda possui vulnerabilidades; tratar em mudanca isolada |
 | 7 - reducao arquitetural | **PENDENTE** | feature freeze; nao misturar com toolchains |
@@ -55,6 +55,15 @@ Uma etapa com qualquer gate falho permanece `BLOQUEADA`. O fechamento deve regis
 - `validate-upstream-linux.sh` resolve Node/npm e toolchains pelo `active-host.json`, registra digest/fingerprint, separa cores Libretro MD/SNES e executa analise Ghidra headless minima real. Na rodada, Ghidra passou; SGDK/PVSnesLib permaneceram bloqueados.
 - Gates da rodada: suite focada 28/28, check-tree/lint/TypeScript, frontend 503/2 skipped e clippy passaram. A repeticao `cargo test` pos-reboot ficou inconclusiva em compilacao/link no target do cartao; o ultimo Rust completo desta frente permanece 441/24 ignored. Nao ha claim `READY`.
 - Proximo comando exato permanece `scripts/bootstrap.sh --ensure --profile full` em terminal interativo, autenticando `sudo` para o `cmake`. Depois: repetir para idempotencia real e executar `npm run host:certify` somente se o report for `READY`.
+
+### Certificacao Linux final (2026-07-17)
+
+- `cmake` foi instalado pelo substrato oficial do BigLinux com `bigsudo pacman -S --needed --noconfirm cmake`. `bigsudo` usa `pkexec` grafico; nenhuma senha foi capturada ou armazenada.
+- Lock final `0df750697ecb9a171c11e13d1d3c137f5a8bd9da43ca9448310b630a7f0e9dea`; fingerprint `c7785d341ef8aa1b5910f8cf706293cb7f63938f7f74fa3245836c7a46eadc6e`. M68K GCC 13.2.0 foi reconstruido com LTO, requisito operacional do SGDK 2.11.
+- Duas execucoes reais fecharam a idempotencia: `REPAIRED` online e `READY` offline, sem rebuild/download na segunda.
+- `host:certify` nao usa mais `--skip-rust-tests`: baseline, Ghidra headless, SGDK + core MD e PVSnesLib + core SNES sao gates operacionais. MD executou 60 frames; SNES, 90.
+- O runner desktop resolve o mesmo report/cache, aceita WebKitWebDriver e copia fixtures para diretorio temporario. E2E MD e SNES passaram sem alterar o checkout.
+- Etapa 3 Windows e o proximo bloqueio programatico. Etapa 5 continua pendente ate Windows fechar; nao interpretar a unificacao necessaria ao gate Linux como conclusao antecipada.
 
 ## Historico Pre-Programa (nao usar como estado atual)
 

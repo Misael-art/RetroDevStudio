@@ -1101,13 +1101,13 @@ function certificationCommands(platform) {
     baseline.push(
       ["rust-clippy", path.join(repoRoot, "scripts", "run-cargo-msvc.cmd"), ["clippy", "--manifest-path", ".\\src-tauri\\Cargo.toml", "--", "-D", "warnings"]],
       ["rust-tests", path.join(repoRoot, "scripts", "run-cargo-msvc.cmd"), ["test", "--manifest-path", ".\\src-tauri\\Cargo.toml", "--lib", "--", "--nocapture", "--test-threads=1"]],
-      ["upstream", "powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts\\validate-upstream-windows.ps1", "-SkipRustTests"]],
+      ["upstream", "powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts\\validate-upstream-windows.ps1"]],
     );
   } else {
     baseline.push(
       ["rust-clippy", "cargo", ["clippy", "--manifest-path", "src-tauri/Cargo.toml", "--lib", "--", "-D", "warnings"]],
       ["rust-tests", "cargo", ["test", "--manifest-path", "src-tauri/Cargo.toml", "--lib", "--", "--nocapture", "--test-threads=1"]],
-      ["upstream", "bash", ["scripts/validate-upstream-linux.sh", "--skip-rust-tests", "--require-decomp-tools"]],
+      ["upstream", "bash", ["scripts/validate-upstream-linux.sh", "--require-decomp-tools"]],
     );
   }
   return baseline;

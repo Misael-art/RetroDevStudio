@@ -81,8 +81,8 @@
 4. `npm test`
 5. `cargo clippy -- -D warnings`
 6. `cargo test --lib -- --nocapture --test-threads=1`
-7. `npm run host:certify` quando a mudanca tocar host, build, emulacao, toolchain ou infraestrutura. O comando exige report `READY`, executa a baseline e delega a validacao upstream do sistema; `BLOCKED`, `DRIFTED` ou `UNSUPPORTED` nao contam como gate executado.
-8. `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests` quando a mudanca tocar build/emulacao/toolchains reais no Windows
+7. `npm run host:certify` quando a mudanca tocar host, build, emulacao, toolchain ou infraestrutura. O comando exige report `READY`, executa a baseline e a validacao upstream operacional do sistema, incluindo builds/ROM/frames MD e SNES; `BLOCKED`, `DRIFTED` ou `UNSUPPORTED` nao contam como gate executado e `--skip-rust-tests` nao e certificacao.
+8. `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1` quando a mudanca tocar build/emulacao/toolchains reais no Windows
    Observacao canonica: este gate deve ser rerodado de forma direta, a partir do shell, e nao embrulhado por `scripts/run-in-msvc.cmd`, porque o proprio `validate-upstream-windows.ps1` ja chama internamente o runner MSVC canonico quando necessario.
 9. `node scripts/e2e-tauri-build-run.mjs --skip-build --native-driver .\toolchains\webdriver\msedgedriver.exe` quando a mudanca tocar o fluxo publico `Build -> Load ROM -> Run frames`
 10. `npm run test:e2e:desktop:qa-rc` quando a mudanca tocar onboarding, shell principal, camadas, viewport editavel, inspector, persistencia ou o fluxo desktop `Build & Run`
@@ -110,6 +110,7 @@
 - O report Linux deve registrar `lock_digest` e `host_fingerprint` da mesma rodada, localizar separadamente cores Libretro MD e SNES e rejeitar binarios Windows como dependencia Linux.
 - Quando Ghidra for obrigatorio, presenca do arquivo nao basta: o runner deve executar uma analise headless minima com JDK21 e registrar `operational_probe: passed`.
 - Report `BLOCKED` e evidência valida de diagnostico, mas nunca satisfaz `host:certify`. Build ROM, execucao de frames e sessao WebDriver permanecem obrigatorios para `READY` institucional.
+- No Linux, o desktop E2E deve resolver o `active-host`/lock comum, usar WebKitWebDriver quando certificado e trabalhar sobre copia temporaria da fixture; migracao de schema nao pode sujar o arquivo rastreado.
 
 ### 3.1 Agregacao canonica de readiness
 - `node scripts/release-readiness.mjs` gera um snapshot objetivo do estado de release em `src-tauri/target-test/validation/release-readiness.json` e `release-readiness.md`.
@@ -154,7 +155,7 @@ Nenhuma etapa deve ser tratada como `concluida` sem certificacao real do fluxo a
 ## 4. ALERTAS ESPECIFICOS DO ESTADO ATUAL
 
 - O setup automatico de terceiros ja existe e a validacao oficial em Windows foi comprovada, mas ela continua obrigatoria em mudancas relevantes de build/emulacao/toolchain.
-- O modo correto de rerodar o gate upstream oficial neste host e no fluxo atual do projeto e direto: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests`. Nao embrulhar esse script com `scripts/run-in-msvc.cmd`.
+- O modo correto de rerodar o gate upstream oficial no Windows e direto: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1`. Nao embrulhar esse script com `scripts/run-in-msvc.cmd` e nao omitir os smokes operacionais em uma certificacao.
 - No Windows, o caminho SNES precisa de Git Bash/MSYS2 real; o shim do WSL nao deve ser tratado como shell suportado.
 - O runner desktop/Tauri depende de `tauri-driver` e `msedgedriver` provisionados localmente; sem isso o teste de aplicacao nao deve ser marcado como executado. O caminho local canonico para o driver nativo e `toolchains/webdriver/msedgedriver.exe`.
 - Neste host local foi observado que `child_process.spawn` com `stdio` contendo `pipe` pode falhar com `EPERM`; o runner canonico ja usa bootstrap interno com `stdio: inherit` e oferece fallback `--external-driver`.

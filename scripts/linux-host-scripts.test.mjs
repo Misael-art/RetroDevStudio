@@ -72,6 +72,8 @@ linuxDescribe("Linux host scripts", () => {
       expect(report.checks.desktop_e2e).toBeTruthy();
       expect(report.checks.libretro).toBeTruthy();
       expect(report.checks.rust_smoke.skipped_by_flag).toBe(true);
+      expect(report.checks.rust_smoke.sgdk_status).toBe("skipped");
+      expect(report.checks.rust_smoke.snes_status).toBe("skipped");
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

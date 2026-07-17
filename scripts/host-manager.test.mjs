@@ -53,6 +53,23 @@ describe("host requirements contract", () => {
     expect(lockDigest).toMatch(/^[0-9a-f]{64}$/);
     expect(manifest.sources.sgdk.commit).toHaveLength(40);
     expect(manifest.sources.pvsneslib.commit).toHaveLength(40);
+    const sgdk = manifest.requirements.find((requirement) => requirement.id === "sgdk");
+    const configure = sgdk.install_by_platform.linux.steps.find((step) => step.label === "configure");
+    expect(configure.args).toContain("-DCMAKE_BUILD_TYPE=RelWithDebInfo");
+    expect(configure.args).not.toContain("-DCMAKE_BUILD_TYPE=Release");
+    const gccConfigure = manifest.requirements
+      .find((requirement) => requirement.id === "m68k_gcc")
+      .install_by_platform.linux.steps.find((step) => step.label === "configure-gcc");
+    expect(gccConfigure.args).toContain("--enable-lto");
+    expect(gccConfigure.args).not.toContain("--disable-lto");
+  });
+
+  it("keeps operational upstream smokes mandatory in host certification", () => {
+    const source = readFileSync(path.join(repoRoot, "scripts", "host-manager.mjs"), "utf8");
+
+    expect(source).toContain('["scripts/validate-upstream-linux.sh", "--require-decomp-tools"]');
+    expect(source).not.toContain('"scripts/validate-upstream-linux.sh", "--skip-rust-tests"');
+    expect(source).not.toContain('"scripts\\\\validate-upstream-windows.ps1", "-SkipRustTests"');
   });
 
   it("rejects mutable artifacts and artifacts without sha256", () => {

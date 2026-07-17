@@ -52,6 +52,7 @@
 - Todo agente deve rodar `npm run host:diagnose` no inicio da sessao. Sem Node ou com estado diferente de `READY`, deve executar o bootstrap `--ensure --profile full` do sistema suportado.
 - `UNSUPPORTED` nunca autoriza mutacao do host. `BLOCKED` ou `DRIFTED` impedem mudanca no produto ate reparo ou registro formal do bloqueio.
 - Instaladores podem usar `sudo`/UAC apenas no modo `ensure`, nunca armazenam credenciais e nunca aceitam download sem versao fixa e SHA-256.
+- Em BigLinux com `bigsudo` disponivel, quando `sudo` nao conseguir abrir autenticacao no terminal restrito do agente, usar `bigsudo <comando>` para a transacao privilegiada estritamente necessaria. `bigsudo` deve permanecer uma escalacao explicita via `pkexec`: nunca contornar recusa do operador, desabilitar seguranca, capturar senha ou ampliar o comando alem do plano; registrar comando, pacotes e resultado no Memory Bank.
 - Mudanca em build, emulacao, toolchain ou infraestrutura exige `npm run host:certify`; presenca de arquivo nao substitui probe operacional.
 
 ### 2.2 Barreira entre etapas do Programa de Reprodutibilidade
@@ -102,7 +103,7 @@ Uma tarefa tambem nao esta concluida enquanto faltar certificacao real no escopo
 ### 4.2 Gates extras quando a mudanca toca o core
 
 - Reexecutar `scripts/validate-upstream-windows.ps1` quando a mudanca tocar build/emulacao de Mega Drive ou SNES com toolchains oficiais no Windows.
-  O modo canonico de execucao e direto: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests`.
+  O modo canonico de certificacao e direto e operacional: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1`.
   Nao embrulhar esse script com `scripts/run-in-msvc.cmd`, porque ele proprio ja resolve o runner MSVC canonico internamente.
 - Confirmar shell Unix-like suportado quando a mudanca tocar o caminho SNES de Windows.
 - Revalidar com cores Libretro oficiais quando a mudanca tocar carga de ROM ou selecao de core.

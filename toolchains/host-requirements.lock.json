@@ -532,7 +532,7 @@
                 "--disable-nls",
                 "--disable-bootstrap",
                 "--disable-analyzer",
-                "--disable-lto",
+                "--enable-lto",
                 "--disable-shared",
                 "--disable-threads",
                 "--disable-libssp",
@@ -623,7 +623,7 @@
                 "${source}",
                 "-B",
                 "${source}/build",
-                "-DCMAKE_BUILD_TYPE=Release"
+                "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
               ]
             },
             {

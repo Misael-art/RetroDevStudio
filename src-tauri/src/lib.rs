@@ -5621,29 +5621,25 @@ pub extern "C" fn retro_run() {
     }
 
     #[test]
-    #[ignore = "Requires official SGDK, JDK and a real Libretro Mega Drive core; writes persistent validation artifacts"]
+    #[ignore = "Requires provisioned official SGDK, JDK and a real Libretro Mega Drive core; writes persistent validation artifacts"]
     fn official_sgdk_nocode_game_builds_and_runs_with_real_toolchain() {
-        if !cfg!(target_os = "windows") {
-            panic!(
-                "official_sgdk_nocode_game_builds_and_runs_with_real_toolchain requires Windows"
-            );
-        }
-
         let _serial = test_serial_guard();
 
-        for dependency_id in ["jdk", "sgdk", "libretro_megadrive"] {
-            eprintln!("[nocode-real] ensuring dependency '{}'", dependency_id);
-            let result = install_dependency(dependency_id, |line| {
-                eprintln!(
-                    "[nocode-real][dependency:{}][{}] {}",
-                    dependency_id, line.level, line.message
+        if cfg!(target_os = "windows") {
+            for dependency_id in ["jdk", "sgdk", "libretro_megadrive"] {
+                eprintln!("[nocode-real] ensuring dependency '{}'", dependency_id);
+                let result = install_dependency(dependency_id, |line| {
+                    eprintln!(
+                        "[nocode-real][dependency:{}][{}] {}",
+                        dependency_id, line.level, line.message
+                    );
+                });
+                assert!(
+                    result.ok,
+                    "failed to install {} for real no-code SGDK proof: {}",
+                    dependency_id, result.message
                 );
-            });
-            assert!(
-                result.ok,
-                "failed to install {} for real no-code SGDK proof: {}",
-                dependency_id, result.message
-            );
+            }
         }
 
         let status_report = dependency_status_report();
@@ -5850,29 +5846,25 @@ pub extern "C" fn retro_run() {
     }
 
     #[test]
-    #[ignore = "Requires official PVSnesLib, Git Bash/MSYS2 and a real Libretro SNES core; writes persistent validation artifacts"]
+    #[ignore = "Requires provisioned official PVSnesLib and a real Libretro SNES core; writes persistent validation artifacts"]
     fn official_snes_nocode_game_builds_and_runs_with_real_toolchain() {
-        if !cfg!(target_os = "windows") {
-            panic!(
-                "official_snes_nocode_game_builds_and_runs_with_real_toolchain requires Windows"
-            );
-        }
-
         let _serial = test_serial_guard();
 
-        for dependency_id in ["pvsneslib", "libretro_snes"] {
-            eprintln!("[snes-real] ensuring dependency '{}'", dependency_id);
-            let result = install_dependency(dependency_id, |line| {
-                eprintln!(
-                    "[snes-real][dependency:{}][{}] {}",
-                    dependency_id, line.level, line.message
+        if cfg!(target_os = "windows") {
+            for dependency_id in ["pvsneslib", "libretro_snes"] {
+                eprintln!("[snes-real] ensuring dependency '{}'", dependency_id);
+                let result = install_dependency(dependency_id, |line| {
+                    eprintln!(
+                        "[snes-real][dependency:{}][{}] {}",
+                        dependency_id, line.level, line.message
+                    );
+                });
+                assert!(
+                    result.ok,
+                    "failed to install {} for real no-code SNES proof: {}",
+                    dependency_id, result.message
                 );
-            });
-            assert!(
-                result.ok,
-                "failed to install {} for real no-code SNES proof: {}",
-                dependency_id, result.message
-            );
+            }
         }
 
         let status_report = dependency_status_report();

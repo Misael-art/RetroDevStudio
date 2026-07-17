@@ -88,6 +88,7 @@ if [[ -f "$ACTIVE_HOST_POINTER" ]] && command -v node >/dev/null 2>&1; then
   IFS=$'\t' read -r active_host_cache active_lock_digest active_host_fingerprint <<< "$active_values"
   if [[ -n "$active_host_cache" && -d "$active_host_cache" ]]; then
     export PATH="$active_host_cache/toolchains/m68k-elf/bin:$active_host_cache/toolchains/sgdk/bin:$active_host_cache/toolchains/pvsneslib/devkitsnes/bin:$active_host_cache/toolchains/jdk/bin:$active_host_cache/toolchains/ghidra/support:$PATH"
+    [[ -n "${CARGO_TARGET_DIR:-}" ]] || export CARGO_TARGET_DIR="$active_host_cache/cargo-target"
     [[ -n "${JAVA_HOME:-}" ]] || export JAVA_HOME="$active_host_cache/toolchains/jdk"
     [[ -n "${RETRODEV_GHIDRA_HOME:-}" ]] || export RETRODEV_GHIDRA_HOME="$active_host_cache/toolchains/ghidra"
     if [[ -z "${SGDK_ROOT:-}" && -z "${GDK:-}" && -d "$active_host_cache/toolchains/sgdk" ]]; then
@@ -103,6 +104,10 @@ warnings=()
 phases=()
 rust_smoke_status="skipped"
 rust_smoke_log=""
+sgdk_smoke_status="skipped"
+sgdk_smoke_log=""
+snes_smoke_status="skipped"
+snes_smoke_log=""
 ghidra_probe_status="skipped"
 ghidra_probe_log=""
 
@@ -334,24 +339,55 @@ else
   add_phase "ghidra_headless_probe" "skipped"
 fi
 
+# The operational Rust probes must consume the same resolved paths that were
+# diagnosed above; they must not rediscover legacy toolchains from the card.
+export SGDK_ROOT="$sgdk_root"
+export PVSNESLIB_HOME="$pvsneslib_root"
+export RETRODEV_LIBRETRO_CORE_MEGADRIVE="$libretro_md_core_path"
+export RETRODEV_LIBRETRO_CORE_SNES="$libretro_snes_core_path"
+
 if [[ "${#status_codes[@]}" -eq 0 && "$SKIP_RUST_TESTS" != "1" ]]; then
-  rust_smoke_log="$VALIDATION_DIR/linux-upstream-rust-smoke.log"
+  sgdk_smoke_log="$VALIDATION_DIR/linux-upstream-sgdk-smoke.log"
   echo "Running official SGDK smoke test..."
   (
     cd "$REPO_ROOT" &&
       cargo test --manifest-path src-tauri/Cargo.toml --lib official_sgdk_nocode_game_builds_and_runs_with_real_toolchain -- --ignored --nocapture --test-threads=1
-  ) >"$rust_smoke_log" 2>&1
-  smoke_status=$?
-  if [[ "$smoke_status" -eq 0 ]]; then
-    rust_smoke_status="passed"
+  ) >"$sgdk_smoke_log" 2>&1
+  sgdk_status=$?
+  if [[ "$sgdk_status" -eq 0 ]]; then
+    sgdk_smoke_status="passed"
     add_phase "official_sgdk_smoke" "passed"
   else
-    rust_smoke_status="failed"
+    sgdk_smoke_status="failed"
     add_code "official_sgdk_smoke_failed"
     add_phase "official_sgdk_smoke" "failed"
   fi
+
+  snes_smoke_log="$VALIDATION_DIR/linux-upstream-snes-smoke.log"
+  echo "Running official PVSnesLib smoke test..."
+  (
+    cd "$REPO_ROOT" &&
+      cargo test --manifest-path src-tauri/Cargo.toml --lib official_snes_nocode_game_builds_and_runs_with_real_toolchain -- --ignored --nocapture --test-threads=1
+  ) >"$snes_smoke_log" 2>&1
+  snes_status=$?
+  if [[ "$snes_status" -eq 0 ]]; then
+    snes_smoke_status="passed"
+    add_phase "official_snes_smoke" "passed"
+  else
+    snes_smoke_status="failed"
+    add_code "official_snes_smoke_failed"
+    add_phase "official_snes_smoke" "failed"
+  fi
+
+  rust_smoke_log="$sgdk_smoke_log"
+  if [[ "$sgdk_smoke_status" == "passed" && "$snes_smoke_status" == "passed" ]]; then
+    rust_smoke_status="passed"
+  else
+    rust_smoke_status="failed"
+  fi
 else
   add_phase "official_sgdk_smoke" "skipped"
+  add_phase "official_snes_smoke" "skipped"
 fi
 
 success=false
@@ -371,6 +407,7 @@ export REPO_ROOT REPORT_PATH VALIDATION_DIR STATUS_CODES WARNINGS PHASES ACTIVE_
 export success node_path npm_path cargo_path rustc_path make_path java_path tauri_driver_path m68k_path
 export sgdk_root sgdk_makefile_ok sgdk_compiler_ok sgdk_make_ok sgdk_java_ok pvsneslib_root pvsneslib_ok
 export webdriver_path ghidra_path ghidra_ok jdk21_ok java_major libretro_md_core_path libretro_snes_core_path
+export sgdk_smoke_status sgdk_smoke_log snes_smoke_status snes_smoke_log
 export rust_smoke_status rust_smoke_log ghidra_probe_status ghidra_probe_log SKIP_RUST_TESTS REQUIRE_DECOMP_TOOLS
 
 node <<'NODE'
@@ -438,6 +475,10 @@ const report = {
       skipped_by_flag: process.env.SKIP_RUST_TESTS === "1",
       status: process.env.rust_smoke_status,
       log: process.env.rust_smoke_log || null,
+      sgdk_status: process.env.sgdk_smoke_status,
+      sgdk_log: process.env.sgdk_smoke_log || null,
+      snes_status: process.env.snes_smoke_status,
+      snes_log: process.env.snes_smoke_log || null,
     },
   },
 };

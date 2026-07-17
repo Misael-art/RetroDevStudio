@@ -1702,6 +1702,7 @@ fn collect_logic_var_names(ast: &AstOutput) -> std::collections::BTreeSet<String
 
 fn extract_vars_from_op(op: &LogicOp, vars: &mut std::collections::BTreeSet<String>) {
     match op {
+        LogicOp::SourceMapped { op, .. } => extract_vars_from_op(op, vars),
         LogicOp::SetSpritePosition { x, y, .. } | LogicOp::ShowSprite { x, y, .. } => {
             extract_vars_from_math(x, vars);
             extract_vars_from_math(y, vars);
@@ -2946,6 +2947,41 @@ mod tests {
         assert!(output.main_c.contains("spcPlaySound(SFX_WIN);"));
         assert!(output.main_c.contains("} else {"));
         assert!(output.main_c.contains("spcPlaySound(SFX_LOSE);"));
+    }
+
+    #[test]
+    fn snes_emitter_declares_logic_vars_inside_source_mapped_ops() {
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::GameLoopBegin,
+                AstNode::SpriteUpdate,
+                AstNode::VSync,
+                AstNode::GameLoopEnd,
+            ],
+            sprite_assets: Vec::new(),
+            logic_scripts: vec![LogicScript {
+                ops: vec![LogicOp::SourceMapped {
+                    graph_sha256: "fixture-graph".to_string(),
+                    node_id: "velocity".to_string(),
+                    semantic_stage: "set_velocity".to_string(),
+                    op: Box::new(LogicOp::SetVelocity {
+                        target_name: "player".to_string(),
+                        vx: LogicMathExpr::Literal(2),
+                        vy: LogicMathExpr::Literal(0),
+                    }),
+                }],
+            }],
+        };
+
+        let output = emit_snes(&ast, "Source Mapped Vars");
+
+        assert!(output
+            .main_c
+            .contains("static s32 logic_var_player_vx = 0;"));
+        assert!(output
+            .main_c
+            .contains("static s32 logic_var_player_vy = 0;"));
+        assert!(output.main_c.contains("logic_var_player_vx = 2;"));
     }
 
     #[test]

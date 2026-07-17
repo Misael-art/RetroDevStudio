@@ -23,6 +23,7 @@ import {
   buildUiLayoutOracleReport,
   evaluateUiLayoutOracleSnapshot,
 } from "./ui-layout-oracle.mjs";
+import { diagnose as diagnoseHost } from "./host-manager.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -92,7 +93,7 @@ export function appBinaryNameForPlatform(hostPlatform = process.platform) {
 export function webdriverNamesForPlatform(hostPlatform = process.platform) {
   return hostPlatform === "win32"
     ? ["msedgedriver.exe", "msedgedriver"]
-    : ["msedgedriver", "chromedriver"];
+    : ["WebKitWebDriver", "msedgedriver", "chromedriver"];
 }
 
 function isHostExecutableCandidate(candidate, hostPlatform = process.platform) {
@@ -141,6 +142,38 @@ const uiLayoutOracleReportPath = path.join(
   "ui-layout-oracle.json"
 );
 let currentE2eRunContext = null;
+
+export function applyManagedHostEnvironment() {
+  const { report, context } = diagnoseHost({
+    mode: "desktop-e2e",
+    env: process.env,
+    reportPath: path.join(validationDir, "desktop-e2e-host-readiness.json"),
+  });
+  if (report.state !== "READY") {
+    return report;
+  }
+
+  const checks = new Map(report.checks.map((check) => [check.id, check]));
+  const readyPath = (id) => {
+    const check = checks.get(id);
+    return check?.status === "ready" && typeof check.path === "string" ? check.path : "";
+  };
+  const setDefault = (name, value) => {
+    if (!process.env[name] && value) process.env[name] = value;
+  };
+
+  process.env.PATH = context.pathEnv;
+  setDefault("CARGO_TARGET_DIR", path.join(context.hostCache, "cargo-target"));
+  setDefault("SGDK_ROOT", readyPath("sgdk"));
+  setDefault("PVSNESLIB_HOME", readyPath("pvsneslib"));
+  setDefault("JAVA_HOME", readyPath("jdk21") ? path.dirname(path.dirname(readyPath("jdk21"))) : "");
+  setDefault("RETRODEV_GHIDRA_HOME", readyPath("ghidra") ? path.dirname(path.dirname(readyPath("ghidra"))) : "");
+  setDefault("RETRODEV_LIBRETRO_CORE_MEGADRIVE", readyPath("libretro_md"));
+  setDefault("RETRODEV_LIBRETRO_CORE_SNES", readyPath("libretro_snes"));
+  setDefault("TAURI_DRIVER_PATH", readyPath("tauri_driver"));
+  setDefault("RDS_EDGE_DRIVER_PATH", readyPath("webdriver"));
+  return report;
+}
 
 class E2EFailure extends Error {
   constructor(message, metadata = {}) {
@@ -3170,6 +3203,10 @@ async function main() {
     fail("Este script requer Node.js com suporte a fetch global.");
   }
 
+  const hostReadiness = applyManagedHostEnvironment();
+  if (hostReadiness.state !== "READY") {
+    fail(`Host E2E nao esta READY: ${hostReadiness.blockers.join(", ") || hostReadiness.state}`);
+  }
   const options = parseArgs(process.argv.slice(2));
   try {
     const preflightUrl = pathToFileURL(
@@ -3191,15 +3228,6 @@ async function main() {
   if (!options.appExplicitlyProvided) {
     options.app = await resolveDefaultDesktopApp();
   }
-  currentE2eRunContext = {
-    scenario: options.scenario,
-    project: options.project,
-    projectName: null,
-    projectTarget: null,
-    app: options.app,
-    externalDriver: options.externalDriver,
-    sessionId: null,
-  };
   await clearDesktopFailureReport(options.scenario);
   const driverStartupTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_DRIVER_TIMEOUT_MS,
@@ -3216,6 +3244,7 @@ async function main() {
     options.scenario !== "onboarding-shell" &&
     options.scenario !== "qa-rc" &&
     options.scenario !== "create-game-from-zero";
+  let temporaryProjectDir = "";
   if (requiresExistingProject) {
     await assertPathExists(
       options.project,
@@ -3225,8 +3254,15 @@ async function main() {
   const projectMetadata = requiresExistingProject
     ? await readProjectMetadata(options.project)
     : { name: "", target: "" };
-  currentE2eRunContext.projectName = projectMetadata.name || null;
-  currentE2eRunContext.projectTarget = projectMetadata.target || null;
+  currentE2eRunContext = {
+    scenario: options.scenario,
+    project: options.project,
+    projectName: projectMetadata.name || null,
+    projectTarget: projectMetadata.target || null,
+    app: options.app,
+    externalDriver: options.externalDriver,
+    sessionId: null,
+  };
   if (requiresExistingProject && (!projectMetadata.name || !projectMetadata.target)) {
     fail(`project.rds invalido ou incompleto em ${options.project}`);
   }
@@ -3347,7 +3383,6 @@ async function main() {
   }
 
   let sessionId = "";
-  let temporaryProjectDir = "";
   try {
     await waitFor(
       async () => {
@@ -3386,6 +3421,14 @@ async function main() {
       uiBootstrapTimeoutMs,
       "API de automacao do app nao ficou disponivel"
     );
+
+    if (requiresExistingProject) {
+      const sourceProject = options.project;
+      temporaryProjectDir = await mkdtemp(path.join(os.tmpdir(), "rds-desktop-e2e-project-"));
+      options.project = path.join(temporaryProjectDir, path.basename(sourceProject));
+      await cp(sourceProject, options.project, { recursive: true });
+      currentE2eRunContext.project = options.project;
+    }
 
     if (options.scenario === "onboarding-shell") {
       const artifactPrefix = `onboarding-shell-${artifactTimestamp()}`;
@@ -5474,17 +5517,6 @@ async function main() {
       }
     }
 
-    if (options.scenario === "build-blocked-diagnostic") {
-      const tempRoot = await mkdtemp(path.join(os.tmpdir(), "rds-build-blocked-diagnostic-"));
-      const copiedProject = path.join(tempRoot, path.basename(options.project));
-      await cp(options.project, copiedProject, { recursive: true });
-      options.project = copiedProject;
-      temporaryProjectDir = tempRoot;
-      if (currentE2eRunContext) {
-        currentE2eRunContext.project = copiedProject;
-      }
-    }
-
     const openResult = await executeAsyncScript(
       sessionId,
       `
@@ -6139,10 +6171,12 @@ async function main() {
   }
 }
 
-main().catch(async (error) => {
-  const details = error instanceof Error ? error.message : String(error);
-  await writeDesktopFailureReport(error).catch(() => {});
-  emitGithubErrorAnnotation(details);
-  console.error(`ERRO: ${details}`);
-  process.exit(1);
-});
+if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
+  main().catch(async (error) => {
+    const details = error instanceof Error ? error.message : String(error);
+    await writeDesktopFailureReport(error).catch(() => {});
+    emitGithubErrorAnnotation(details);
+    console.error(`ERRO: ${details}`);
+    process.exit(1);
+  });
+}
