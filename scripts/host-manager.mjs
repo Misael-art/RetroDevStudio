@@ -379,12 +379,41 @@ function determineState(checks, supported) {
 }
 
 function browserIdentity(host, env) {
+  if (host.platform === "linux") {
+    const webkitDriver = resolveCommand(["WebKitWebDriver"], host, env);
+    if (webkitDriver) {
+      const pkgConfig = resolveCommand(["pkg-config"], host, env);
+      const version = pkgConfig
+        ? runVersion(pkgConfig, ["--modversion", "webkit2gtk-4.1"], env)
+        : { ok: false };
+      return {
+        path: "webkit2gtk-4.1",
+        version: version.ok ? `WebKitGTK ${version.output}` : "WebKitGTK (version unavailable)",
+        route: "webkit",
+      };
+    }
+  }
   const names = host.platform === "win32" ? ["msedge.exe", "chrome.exe"] : ["microsoft-edge", "microsoft-edge-stable", "google-chrome", "chromium"];
   const program = resolveCommand(names, host, env);
   if (!program) return null;
   const result = runVersion(program, ["--version"], env);
   if (!result.ok) return null;
-  return { path: program, version: result.output || null };
+  return { path: program, version: result.output || null, route: "browser" };
+}
+
+function versionMajor(version) {
+  const match = /\b(\d+)(?:\.\d+)+/.exec(version ?? "");
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
+export function browserDriverCompatible(browser, driverCheck) {
+  if (!driverCheck?.applicable || driverCheck.status === "missing") return true;
+  const driverName = path.basename(driverCheck.path ?? "").toLowerCase();
+  if (driverName.includes("webkitwebdriver")) return browser?.route === "webkit";
+  if (!browser?.version) return false;
+  const browserMajor = versionMajor(browser.version);
+  const driverMajor = versionMajor(driverCheck.version);
+  return browserMajor !== null && driverMajor !== null && browserMajor === driverMajor;
 }
 
 function atomicWriteJson(filePath, value) {
@@ -418,7 +447,17 @@ export function diagnose(options = {}) {
   const supported = isSupportedHost(manifest, host);
   const checks = supported ? manifest.requirements.map((requirement) => probeRequirement(requirement, context)) : [];
   const browser = browserIdentity(host, { ...(options.env ?? process.env), PATH: pathEnv });
-  const fingerprintPayload = { host, lock_digest: lockDigest, browser: browser?.version ?? null };
+  const webdriver = checks.find((check) => check.id === "webdriver");
+  if (supported && webdriver?.applicable && webdriver.status === "ready" && !browserDriverCompatible(browser, webdriver)) {
+    webdriver.status = "incompatible";
+    webdriver.compatible = false;
+  }
+  const fingerprintPayload = {
+    host,
+    lock_digest: lockDigest,
+    browser: browser?.version ?? null,
+    webdriver: webdriver?.version ?? null,
+  };
   const report = {
     schema: HOST_READINESS_SCHEMA,
     generated_at: new Date().toISOString(),
@@ -901,12 +940,13 @@ function installRequirement(requirement, context, options) {
   if (options.offline) return { id: requirement.id, ok: false, skipped: true, reason: "offline_missing" };
   const env = { ...process.env, PATH: context.pathEnv, CARGO_TARGET_DIR: path.join(context.hostCache, "cargo-install-target") };
   if (install.kind === "pacman") {
+    const privilege = privilegedPacmanCommand(context);
     return {
       id: requirement.id,
       ...commandResult(
         `install:${requirement.id}`,
-        "sudo",
-        ["pacman", "-S", "--needed", "--noconfirm", ...install.packages],
+        privilege.program,
+        [...privilege.args, "pacman", "-S", "--needed", "--noconfirm", ...install.packages],
         { env, inherit: true },
       ),
     };
@@ -940,6 +980,21 @@ function installRequirement(requirement, context, options) {
     };
   }
   return { id: requirement.id, ok: false, skipped: true, reason: `installer_unknown:${install.kind}` };
+}
+
+export function privilegedPacmanCommand(context) {
+  const env = context.env ?? process.env;
+  const override = env.RDS_PRIVILEGE_COMMAND?.trim();
+  if (override === "bigsudo" || override === "sudo") {
+    return { program: override, args: [] };
+  }
+  if (
+    context.host?.os_id === "biglinux" &&
+    resolveCommand(["bigsudo"], context.host, env)
+  ) {
+    return { program: "bigsudo", args: [] };
+  }
+  return { program: "sudo", args: [] };
 }
 
 export function pacmanBatchPlan(requirements, context) {
@@ -1030,15 +1085,17 @@ export function ensure(options = {}) {
       if (options.offline) {
         batchResult = { ok: false, skipped: true, reason: "offline_system_package_missing" };
       } else {
+        const privilege = privilegedPacmanCommand(initial.context);
         const result = commandResult(
           "install:pacman-substrate",
-          "sudo",
-          ["pacman", "-S", "--needed", "--noconfirm", ...pacmanBatch.packages],
+          privilege.program,
+          [...privilege.args, "pacman", "-S", "--needed", "--noconfirm", ...pacmanBatch.packages],
           { env: { ...initial.context.env, PATH: initial.context.pathEnv }, inherit: true },
         );
         batchResult = {
           ...result,
-          reason: result.ok ? null : "sudo_denied_or_system_package_install_failed",
+          privilege: privilege.program,
+          reason: result.ok ? null : "privilege_denied_or_system_package_install_failed",
         };
       }
       for (const requirement of pacmanBatch.requirements) {

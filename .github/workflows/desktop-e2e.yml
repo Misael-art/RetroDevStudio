@@ -72,20 +72,23 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.18.0
           cache: npm
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.0
+          components: rustfmt, clippy
 
       - name: Install frontend dependencies
         run: npm ci
 
       - name: Install tauri-driver
-        run: cargo install tauri-driver --locked
+        run: cargo install tauri-driver --version 2.0.6 --locked
 
       - name: Install Edge WebDriver helper
-        run: cargo install --git https://github.com/chippers/msedgedriver-tool
+        run: cargo install --git https://github.com/chippers/msedgedriver-tool --rev 8c4b34f51b45f5cf08013366d703de464ab871d1 --locked
 
       - name: Provision native Edge WebDriver
         run: |

@@ -89,7 +89,9 @@ pub fn parse_command_dat(content: &str, source: &str) -> Vec<InputCommandDefinit
                 max_frames,
                 source,
             );
-            in_command = line[1..line.len() - 1].trim().eq_ignore_ascii_case("command");
+            in_command = line[1..line.len() - 1]
+                .trim()
+                .eq_ignore_ascii_case("command");
             name.clear();
             notation.clear();
             max_frames = DEFAULT_MAX_FRAMES;
@@ -216,9 +218,7 @@ fn classify_token(token: &str) -> TokenKind {
         "8" | "U" => TokenKind::Direction(8),
         "9" | "UF" => TokenKind::Direction(9),
         "DB" => TokenKind::Direction(1),
-        "P" | "K" | "A" | "C" | "X" | "Y" | "Z" => {
-            TokenKind::Button(format!("_{}", key))
-        }
+        "P" | "K" | "A" | "C" | "X" | "Y" | "Z" => TokenKind::Button(format!("_{}", key)),
         _ => TokenKind::Unsupported,
     }
 }
@@ -244,10 +244,7 @@ fn display_token(token: &str) -> String {
 }
 
 fn token_key(token: &str) -> String {
-    token
-        .trim()
-        .trim_start_matches('_')
-        .to_ascii_uppercase()
+    token.trim().trim_start_matches('_').to_ascii_uppercase()
 }
 
 fn strip_comment(line: &str) -> &str {

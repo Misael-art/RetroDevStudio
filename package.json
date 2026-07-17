@@ -21,6 +21,7 @@
     "release:manifest": "node scripts/release-manifest.mjs",
     "release:readiness": "node scripts/release-readiness.mjs",
     "release:readiness:baseline": "node scripts/release-readiness.mjs --run-baseline",
+    "release:rehearsal:linux": "node scripts/release-rehearsal-linux.mjs",
     "lint": "eslint src vite.config.ts --max-warnings=0",
     "preview": "vite preview",
     "check:tree": "node scripts/check-tree.cjs",
@@ -51,14 +52,17 @@
     "host:diagnose": "node scripts/host-manager.mjs diagnose --profile full",
     "host:ensure": "node scripts/host-manager.mjs ensure --profile full",
     "host:certify": "node scripts/host-manager.mjs certify --profile full",
+    "security:licenses": "node scripts/license-inventory.mjs",
+    "security:audit": "npm audit --audit-level=high",
+    "architecture:metrics": "node scripts/architecture-metrics.mjs",
     "test:watch": "vitest",
     "release:readiness:promotion": "node scripts/release-readiness.mjs --run-baseline --manual-qa-json src-tauri/target-test/validation/manual-qa-status.json --strict",
     "tauri": "tauri"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.1",
-    "@tauri-apps/api": "^2.11.0",
-    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/api": "2.11.0",
+    "@tauri-apps/plugin-dialog": "2.7.1",
     "react": "^19",
     "react-dom": "^19",
     "react-resizable-panels": "^4.7.3",
@@ -67,18 +71,30 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@tauri-apps/cli": "^2.11.2",
+    "@tauri-apps/cli": "2.11.2",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^4",
-    "@vitest/browser": "^4.0.18",
-    "@vitest/ui": "^4.0.18",
+    "@vitest/browser": "^4.1.10",
+    "@vitest/ui": "^4.1.10",
     "eslint": "^10.1.0",
     "globals": "^17.4.0",
     "jsdom": "^28.1.0",
     "typescript": "~5.6",
     "typescript-eslint": "^8.58.0",
-    "vite": "^6",
-    "vitest": "^4.0.18"
+    "vite": "^6.4.3",
+    "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "@babel/core": "7.29.7",
+    "brace-expansion": "5.0.7",
+    "picomatch": "4.0.5",
+    "postcss": "8.5.19",
+    "undici": "7.28.0",
+    "ws": "8.21.1"
+  },
+  "allowScripts": {
+    "esbuild@0.25.12": true,
+    "fsevents": false
   }
 }

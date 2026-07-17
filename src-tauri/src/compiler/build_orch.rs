@@ -1133,11 +1133,7 @@ fn prepare_workspace(
             stage_project_assets(project_dir, &res_dir, ast)?;
             let project_config_path = src_dir.join("rds_project_config.h");
             fs::write(&project_config_path, render_sgdk_project_config(project)).map_err(|e| {
-                format!(
-                    "Falha ao gravar '{}': {}",
-                    project_config_path.display(),
-                    e
-                )
+                format!("Falha ao gravar '{}': {}", project_config_path.display(), e)
             })?;
             fs::write(&makefile_path, render_sgdk_makefile(&project_slug))
                 .map_err(|e| format!("Falha ao gravar '{}': {}", makefile_path.display(), e))?;
@@ -2700,7 +2696,10 @@ mod tests {
         let env = BuildEnvironment::detect();
 
         assert_eq!(env.sgdk_root.as_deref(), Some(sgdk_root.as_path()));
-        assert_eq!(env.sgdk_make_program.as_deref(), Some(detected_make.as_path()));
+        assert_eq!(
+            env.sgdk_make_program.as_deref(),
+            Some(detected_make.as_path())
+        );
 
         let _ = fs::remove_dir_all(sgdk_root);
     }
@@ -3641,15 +3640,24 @@ PY\n"
             .build_source_map
             .as_ref()
             .expect("successful build source map");
-        assert_eq!(source_map.artifact.path.as_deref(), Some(first.rom_path.as_str()));
-        assert_eq!(source_map.artifact.sha256.as_deref().map(str::len), Some(64));
+        assert_eq!(
+            source_map.artifact.path.as_deref(),
+            Some(first.rom_path.as_str())
+        );
+        assert_eq!(
+            source_map.artifact.sha256.as_deref().map(str::len),
+            Some(64)
+        );
         let graph_map = source_map.graphs.first().expect("mapped NodeGraph");
         let velocity = graph_map
             .entries
             .iter()
             .find(|entry| entry.node_id == "velocity")
             .expect("velocity mapping");
-        assert_eq!(velocity.status, crate::compiler::build_provenance::BuildMappingStatus::Mapped);
+        assert_eq!(
+            velocity.status,
+            crate::compiler::build_provenance::BuildMappingStatus::Mapped
+        );
         let velocity_location = velocity
             .generated_locations
             .first()
@@ -3664,7 +3672,10 @@ PY\n"
             .iter()
             .find(|entry| entry.node_id == "start")
             .expect("event entry mapping state");
-        assert_eq!(start.status, crate::compiler::build_provenance::BuildMappingStatus::Unsupported);
+        assert_eq!(
+            start.status,
+            crate::compiler::build_provenance::BuildMappingStatus::Unsupported
+        );
         assert!(start.unsupported_reason.is_some());
         let persisted_source_map: BuildSourceMap = serde_json::from_str(
             &fs::read_to_string(&source_map_path).expect("read persisted source map"),

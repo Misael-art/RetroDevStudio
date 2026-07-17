@@ -54,6 +54,8 @@
 - Instaladores podem usar `sudo`/UAC apenas no modo `ensure`, nunca armazenam credenciais e nunca aceitam download sem versao fixa e SHA-256.
 - Em BigLinux com `bigsudo` disponivel, quando `sudo` nao conseguir abrir autenticacao no terminal restrito do agente, usar `bigsudo <comando>` para a transacao privilegiada estritamente necessaria. `bigsudo` deve permanecer uma escalacao explicita via `pkexec`: nunca contornar recusa do operador, desabilitar seguranca, capturar senha ou ampliar o comando alem do plano; registrar comando, pacotes e resultado no Memory Bank.
 - Mudanca em build, emulacao, toolchain ou infraestrutura exige `npm run host:certify`; presenca de arquivo nao substitui probe operacional.
+- Runtime Setup nunca implementa downloader proprio nem consulta `latest`; ele consome `host-readiness.json` e delega qualquer reparo ao host-manager/bootstraps.
+- Mudanca de dependencias ou seguranca exige npm audit, RustSec audit, inventario de licencas e registro explicito de qualquer aviso transitivo aceito.
 
 ### 2.2 Barreira entre etapas do Programa de Reprodutibilidade
 
@@ -61,6 +63,8 @@
 - Falha mantem a etapa `BLOQUEADA`; nao iniciar a etapa seguinte para contornar o blocker.
 - O commit de fechamento registra no Current Wave: etapa/status, branch/commit, host fingerprint, lock digest, fatos, comandos/resultados, evidencias, riscos e proximo comando exato.
 - Fato relevante nao pode existir apenas em chat, log temporario ou memoria de um agente.
+- Uma etapa congelada pelo operador continua pendente. Trabalho explicitamente autorizado em outro host pode preparar etapas posteriores, mas deve ser rotulado como fatia comum/preparatoria e nao pode receber `CONCLUIDA` fora da ordem.
+- `READY_FOR_WINDOWS_GATE` em rehearsal Linux significa somente que os gates locais estao prontos para a verificacao Windows; nunca autoriza release publico.
 
 Uma tarefa nao esta concluida enquanto o repositorio continuar anunciando um estado mais maduro do que o codigo e os gates sustentam.
 Uma tarefa tambem nao esta concluida enquanto faltar certificacao real no escopo alterado: prova funcional correspondente, gates verdes e ausencia de erro bloqueante ou regressao conhecida naquele fluxo.

@@ -124,6 +124,7 @@ function createDependencyStatus(id: string, overrides: Partial<Record<string, un
   return {
     id,
     label: labels[id] ?? id,
+    applicable: true,
     installed: true,
     version: "test-version",
     install_dir: `F:/Toolchains/${id}`,

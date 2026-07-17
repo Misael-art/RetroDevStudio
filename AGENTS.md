@@ -55,8 +55,10 @@ Responda com `[Contexto Carregado]` antes de propor qualquer acao relevante.
 - `npm test`
 - `cargo clippy -- -D warnings`
 - `cargo test --lib -- --nocapture`
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`
 - Validacao manual com dependencias oficiais quando a mudanca tocar build, emulacao ou toolchains reais
 - `npm run host:certify` quando a mudanca tocar host, build, emulacao ou toolchains
+- `npm run security:audit` e `cargo audit --file src-tauri/Cargo.lock` quando dependencias ou seguranca mudarem
 
 ## Ao Encerrar Sessao
 Se algo relevante foi feito, atualize ou proponha atualizacao de `docs/06_AI_MEMORY_BANK.md`.
@@ -71,4 +73,6 @@ Se algo relevante foi feito, atualize ou proponha atualizacao de `docs/06_AI_MEM
 - Diagnostico do host: `npm run host:diagnose`
 - Reparar host: `npm run host:ensure`
 - Certificar host: `npm run host:certify`
+- Auditar npm/licencas: `npm run security:audit` | `npm run security:licenses`
+- Medir extracoes arquiteturais: `npm run architecture:metrics`
 - Compilacao: `npm run build:debug` | `build:msi` | `build:portable` | `build:all` (script canonico: `scripts/build.mjs`)

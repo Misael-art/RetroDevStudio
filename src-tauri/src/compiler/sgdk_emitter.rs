@@ -1158,25 +1158,27 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], indent: usize) {
                     sfx = sfx.to_uppercase()
                 ));
             }
-            LogicOp::PlayMusic { action, track, fade_ms } => {
-                match action.as_str() {
-                    "stop" => {
-                        out.push_str(&format!(
-                            "{indent}XGM_stopPlay(); /* fade_ms: {fade_ms} - suporte futuro */\n",
-                            indent = indent_str,
-                            fade_ms = fade_ms,
-                        ));
-                    }
-                    _ => {
-                        out.push_str(&format!(
+            LogicOp::PlayMusic {
+                action,
+                track,
+                fade_ms,
+            } => match action.as_str() {
+                "stop" => {
+                    out.push_str(&format!(
+                        "{indent}XGM_stopPlay(); /* fade_ms: {fade_ms} - suporte futuro */\n",
+                        indent = indent_str,
+                        fade_ms = fade_ms,
+                    ));
+                }
+                _ => {
+                    out.push_str(&format!(
                             "{indent}XGM_startPlay({track}); /* fade_ms: {fade_ms} - suporte futuro */\n",
                             indent = indent_str,
                             track = track,
                             fade_ms = fade_ms,
                         ));
-                    }
                 }
-            }
+            },
             LogicOp::SetVar { var_name, value } => {
                 let value_expr = render_math_expr(value);
                 out.push_str(&format!(
@@ -2283,8 +2285,12 @@ mod tests {
 
         let output = emit_sgdk(&ast, "Music Demo");
 
-        assert!(output.main_c.contains("XGM_startPlay(stage_theme); /* fade_ms: 500 - suporte futuro */"));
-        assert!(output.main_c.contains("XGM_stopPlay(); /* fade_ms: 0 - suporte futuro */"));
+        assert!(output
+            .main_c
+            .contains("XGM_startPlay(stage_theme); /* fade_ms: 500 - suporte futuro */"));
+        assert!(output
+            .main_c
+            .contains("XGM_stopPlay(); /* fade_ms: 0 - suporte futuro */"));
     }
 
     #[test]

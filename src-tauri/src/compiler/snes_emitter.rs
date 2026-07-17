@@ -1223,25 +1223,27 @@ fn render_logic_ops(out: &mut String, ops: &[LogicOp], context: &SnesContext, in
                     sfx = sfx.to_uppercase()
                 ));
             }
-            LogicOp::PlayMusic { action, track, fade_ms } => {
-                match action.as_str() {
-                    "stop" => {
-                        out.push_str(&format!(
-                            "{indent}spcStop(); /* fade_ms: {fade_ms} - suporte futuro */\n",
-                            indent = indent_str,
-                            fade_ms = fade_ms,
-                        ));
-                    }
-                    _ => {
-                        out.push_str(&format!(
+            LogicOp::PlayMusic {
+                action,
+                track,
+                fade_ms,
+            } => match action.as_str() {
+                "stop" => {
+                    out.push_str(&format!(
+                        "{indent}spcStop(); /* fade_ms: {fade_ms} - suporte futuro */\n",
+                        indent = indent_str,
+                        fade_ms = fade_ms,
+                    ));
+                }
+                _ => {
+                    out.push_str(&format!(
                             "{indent}spcLoad((u8*)&{track}_bgm); /* fade_ms: {fade_ms} - suporte futuro */\n{indent}spcStart();\n",
                             indent = indent_str,
                             track = track,
                             fade_ms = fade_ms,
                         ));
-                    }
                 }
-            }
+            },
             LogicOp::SetVar { var_name, value } => {
                 let value_expr = render_math_expr(value);
                 out.push_str(&format!(
@@ -2531,9 +2533,13 @@ mod tests {
 
         let output = emit_snes(&ast, "Music Demo");
 
-        assert!(output.main_c.contains("spcLoad((u8*)&stage_theme_bgm); /* fade_ms: 500 - suporte futuro */"));
+        assert!(output
+            .main_c
+            .contains("spcLoad((u8*)&stage_theme_bgm); /* fade_ms: 500 - suporte futuro */"));
         assert!(output.main_c.contains("spcStart();"));
-        assert!(output.main_c.contains("spcStop(); /* fade_ms: 0 - suporte futuro */"));
+        assert!(output
+            .main_c
+            .contains("spcStop(); /* fade_ms: 0 - suporte futuro */"));
     }
 
     #[test]

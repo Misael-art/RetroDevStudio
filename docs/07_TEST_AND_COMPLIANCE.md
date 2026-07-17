@@ -79,30 +79,19 @@
 2. `npm run lint`
 3. `npx tsc --noEmit`
 4. `npm test`
-5. `cargo clippy -- -D warnings`
-6. `cargo test --lib -- --nocapture --test-threads=1`
-7. `npm run host:certify` quando a mudanca tocar host, build, emulacao, toolchain ou infraestrutura. O comando exige report `READY`, executa a baseline e a validacao upstream operacional do sistema, incluindo builds/ROM/frames MD e SNES; `BLOCKED`, `DRIFTED` ou `UNSUPPORTED` nao contam como gate executado e `--skip-rust-tests` nao e certificacao.
-8. `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1` quando a mudanca tocar build/emulacao/toolchains reais no Windows
+5. `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`
+6. `cargo clippy -- -D warnings`
+7. `cargo test --lib -- --nocapture --test-threads=1`
+8. `npm run security:audit` e `cargo audit --file src-tauri/Cargo.lock` quando dependencias, Tauri, protocolo de assets ou distribuicao mudarem. Avisos RustSec informacionais devem ser registrados com cadeia de origem; vulnerabilidade critica/alta nao aceita bloqueia entrega.
+9. `npm run host:certify` quando a mudanca tocar host, build, emulacao, toolchain ou infraestrutura. O comando exige report `READY`, executa a baseline e a validacao upstream operacional do sistema, incluindo builds/ROM/frames MD e SNES; `BLOCKED`, `DRIFTED` ou `UNSUPPORTED` nao contam como gate executado e `--skip-rust-tests` nao e certificacao.
+10. `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1` quando a mudanca tocar build/emulacao/toolchains reais no Windows.
    Observacao canonica: este gate deve ser rerodado de forma direta, a partir do shell, e nao embrulhado por `scripts/run-in-msvc.cmd`, porque o proprio `validate-upstream-windows.ps1` ja chama internamente o runner MSVC canonico quando necessario.
-9. `node scripts/e2e-tauri-build-run.mjs --skip-build --native-driver .\toolchains\webdriver\msedgedriver.exe` quando a mudanca tocar o fluxo publico `Build -> Load ROM -> Run frames`
-10. `npm run test:e2e:desktop:qa-rc` quando a mudanca tocar onboarding, shell principal, camadas, viewport editavel, inspector, persistencia ou o fluxo desktop `Build & Run`
-10. `cargo test sgdk_corpus_inventory_real_corpus_report --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar inventario SGDK/no-code, source mapping ou semantic gaps do corpus externo.
-11. `cargo test sgdk_logic --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1` quando a mudanca tocar extracao semantica SGDK, modelo intermediario `logic_systems`, FSMs, source mappings ou bridges de logica.
-12. `cargo test sgdk_logic_real_corpus_vertical_reports --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando houver corpus local e a mudanca tocar o extrator SGDK; exige pelo menos Platformer 2, NEXZR MD e BLAZE_ENGINE quando presentes.
-13. `cargo test sgdk_matrix_corpus_ --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar import/build SGDK, hardware budget ou `BLAZE_ENGINE`.
-14. `cargo test official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar codegen backend de NodeGraph SGDK ou a declaracao de Node Engine Stable.
-15. `cargo test sgdk_corpus_real_build_rom_emulation_report --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar a declaracao de SGDK Stable, corpus completo ou bridge formal.
-16. `npm run release:readiness:promotion` na rodada institucional que pretende promover o RC, anexando o report de QA `A-F`
-17. Em host Windows com policy que bloqueia bootstrap interno do driver, usar fallback `--external-driver` com `tauri-driver` iniciado fora do processo Node.
-18. Se a sessao WebDriver falhar em `DevToolsActivePort`/`chrome not reachable`, executar `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-desktop-e2e.ps1 -SessionProbe` e registrar o resultado.
-19. Atualizacao de `docs/03_ROADMAP_MVP.md` e `docs/06_AI_MEMORY_BANK.md` quando o estado do produto mudar
-11. `cargo test sgdk_matrix_corpus_ --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar import/build SGDK, hardware budget ou `BLAZE_ENGINE`.
-12. `cargo test official_sgdk_nocode_game_builds_and_runs_with_real_toolchain --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar codegen backend de NodeGraph SGDK ou a declaracao de Node Engine Stable.
-13. `cargo test sgdk_corpus_real_build_rom_emulation_report --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` quando a mudanca tocar a declaracao de SGDK Stable, corpus completo ou bridge formal.
-14. `npm run release:readiness:promotion` na rodada institucional que pretende promover o RC, anexando o report de QA `A-G` quando o escopo tocar SGDK/desktop e no minimo `A-F` para mudancas sem bloco G relevante.
-15. Em host Windows com policy que bloqueia bootstrap interno do driver, usar fallback `--external-driver` com `tauri-driver` iniciado fora do processo Node.
-16. Se a sessao WebDriver falhar em `DevToolsActivePort`/`chrome not reachable`, executar `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-desktop-e2e.ps1 -SessionProbe` e registrar o resultado.
-17. Atualizacao de `docs/03_ROADMAP_MVP.md` e `docs/06_AI_MEMORY_BANK.md` quando o estado do produto mudar
+11. `node scripts/e2e-tauri-build-run.mjs --skip-build --native-driver .\toolchains\webdriver\msedgedriver.exe` quando a mudanca tocar o fluxo publico `Build -> Load ROM -> Run frames`.
+12. `npm run test:e2e:desktop:qa-rc` quando a mudanca tocar onboarding, shell principal, camadas, viewport editavel, inspector, persistencia ou o fluxo desktop `Build & Run`.
+13. Suites de corpus/semantica SGDK aplicaveis: `sgdk_corpus_inventory_real_corpus_report`, `sgdk_logic`, `sgdk_logic_real_corpus_vertical_reports`, `sgdk_matrix_corpus_`, `official_sgdk_nocode_game_builds_and_runs_with_real_toolchain` e `sgdk_corpus_real_build_rom_emulation_report`, sempre com os flags documentados pelos proprios testes e corpus BYOR quando exigido.
+14. `npm run release:readiness:promotion` somente na rodada institucional, com QA `A-G` quando o escopo tocar SGDK/desktop e no minimo `A-F` nos demais casos.
+15. Em Windows com policy que bloqueia bootstrap interno do driver, usar `--external-driver`; em falha `DevToolsActivePort`/`chrome not reachable`, executar `scripts/diagnose-desktop-e2e.ps1 -SessionProbe` e registrar o resultado.
+16. Atualizar Memory Bank e, somente se a maturidade do produto mudar, `docs/03_ROADMAP_MVP.md`.
 
 ### 3.0.1 Evidencia de host Linux
 
@@ -111,6 +100,8 @@
 - Quando Ghidra for obrigatorio, presenca do arquivo nao basta: o runner deve executar uma analise headless minima com JDK21 e registrar `operational_probe: passed`.
 - Report `BLOCKED` e evidência valida de diagnostico, mas nunca satisfaz `host:certify`. Build ROM, execucao de frames e sessao WebDriver permanecem obrigatorios para `READY` institucional.
 - No Linux, o desktop E2E deve resolver o `active-host`/lock comum, usar WebKitWebDriver quando certificado e trabalhar sobre copia temporaria da fixture; migracao de schema nao pode sujar o arquivo rastreado.
+- Cada E2E desktop verde grava `desktop-e2e-success-<cenario>-<target>.json` (`rds-desktop-e2e-success/v1`) com commit, dirty state, target e framebuffer. O runner apaga evidencia anterior antes da tentativa; log de terminal isolado nao vale como prova.
+- `npm run release:rehearsal:linux` exige worktree limpa e agrega hashes das evidencias no mesmo commit/lock/fingerprint. `READY_FOR_WINDOWS_GATE` nao significa release aprovado; o report fixa `public_release_allowed=false` e nunca substitui Windows.
 
 ### 3.1 Agregacao canonica de readiness
 - `node scripts/release-readiness.mjs` gera um snapshot objetivo do estado de release em `src-tauri/target-test/validation/release-readiness.json` e `release-readiness.md`.

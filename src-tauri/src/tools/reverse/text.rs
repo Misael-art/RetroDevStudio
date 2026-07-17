@@ -14,8 +14,15 @@ fn is_shift_jis_trail(byte: u8) -> bool {
 }
 
 fn preview_ascii(bytes: &[u8]) -> String {
-    bytes.iter()
-        .map(|value| if is_ascii_printable(*value) { char::from(*value) } else { '.' })
+    bytes
+        .iter()
+        .map(|value| {
+            if is_ascii_printable(*value) {
+                char::from(*value)
+            } else {
+                '.'
+            }
+        })
         .collect::<String>()
         .trim()
         .to_string()
@@ -25,7 +32,10 @@ fn preview_shift_jis(bytes: &[u8]) -> String {
     let mut out = String::new();
     let mut index = 0usize;
     while index < bytes.len() {
-        if index + 1 < bytes.len() && is_shift_jis_lead(bytes[index]) && is_shift_jis_trail(bytes[index + 1]) {
+        if index + 1 < bytes.len()
+            && is_shift_jis_lead(bytes[index])
+            && is_shift_jis_trail(bytes[index + 1])
+        {
             out.push('※');
             index += 2;
         } else if is_ascii_printable(bytes[index]) {
@@ -70,7 +80,10 @@ fn scan_shift_jis(bytes: &[u8]) -> Vec<TextCandidate> {
     while index + 4 < bytes.len() {
         let start = index;
         let mut pairs = 0usize;
-        while index + 1 < bytes.len() && is_shift_jis_lead(bytes[index]) && is_shift_jis_trail(bytes[index + 1]) {
+        while index + 1 < bytes.len()
+            && is_shift_jis_lead(bytes[index])
+            && is_shift_jis_trail(bytes[index + 1])
+        {
             pairs += 1;
             index += 2;
         }
@@ -81,7 +94,10 @@ fn scan_shift_jis(bytes: &[u8]) -> Vec<TextCandidate> {
                 start: start as u32,
                 end: end as u32,
                 encoding: "shift-jis-like".to_string(),
-                preview: preview_shift_jis(&bytes[start..end]).chars().take(96).collect(),
+                preview: preview_shift_jis(&bytes[start..end])
+                    .chars()
+                    .take(96)
+                    .collect(),
                 confidence: 58,
             });
         }
@@ -99,7 +115,10 @@ pub fn analyze_text(loaded: &LoadedRom) -> (Vec<TextCandidate>, Vec<PointerTable
     text_regions.truncate(24);
 
     let mut pointer_tables = Vec::new();
-    let starts: Vec<u32> = text_regions.iter().map(|candidate| candidate.start).collect();
+    let starts: Vec<u32> = text_regions
+        .iter()
+        .map(|candidate| candidate.start)
+        .collect();
 
     if loaded.target == "megadrive" {
         let bytes = &loaded.bytes;
@@ -108,7 +127,12 @@ pub fn analyze_text(loaded: &LoadedRom) -> (Vec<TextCandidate>, Vec<PointerTable
             let mut destinations = Vec::new();
             for entry_index in 0..4usize {
                 let base = offset + entry_index * 4;
-                let value = u32::from_be_bytes([bytes[base], bytes[base + 1], bytes[base + 2], bytes[base + 3]]);
+                let value = u32::from_be_bytes([
+                    bytes[base],
+                    bytes[base + 1],
+                    bytes[base + 2],
+                    bytes[base + 3],
+                ]);
                 if starts.iter().any(|start| value.abs_diff(*start) <= 4) {
                     destinations.push(value);
                 }
@@ -135,7 +159,10 @@ pub fn analyze_text(loaded: &LoadedRom) -> (Vec<TextCandidate>, Vec<PointerTable
             for entry_index in 0..4usize {
                 let base = offset + entry_index * 2;
                 let value = u16::from_le_bytes([bytes[base], bytes[base + 1]]) as u32;
-                if starts.iter().any(|start| (start & 0xFFFF).abs_diff(value) <= 4) {
+                if starts
+                    .iter()
+                    .any(|start| (start & 0xFFFF).abs_diff(value) <= 4)
+                {
                     destinations.push(value);
                 }
             }
@@ -192,7 +219,9 @@ mod tests {
     fn analyze_text_finds_shift_jis_like_regions() {
         let loaded = sample_loaded("snes", vec![0x82, 0xA0, 0x82, 0xA2, 0x82, 0xA4, 0x00]);
         let (regions, _) = analyze_text(&loaded);
-        assert!(regions.iter().any(|region| region.encoding == "shift-jis-like"));
+        assert!(regions
+            .iter()
+            .any(|region| region.encoding == "shift-jis-like"));
     }
 
     #[test]
@@ -228,7 +257,10 @@ mod tests {
         // Verify destinations point near our string offsets
         for &(_, offset) in &strings[..3] {
             assert!(
-                table.destinations.iter().any(|dest| dest.abs_diff(offset as u32) <= 4),
+                table
+                    .destinations
+                    .iter()
+                    .any(|dest| dest.abs_diff(offset as u32) <= 4),
                 "destination should point near offset 0x{:X}",
                 offset
             );

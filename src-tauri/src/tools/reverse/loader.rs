@@ -46,8 +46,7 @@ fn sha1_simple(data: &[u8]) -> [u8; 20] {
             ]);
         }
         for index in 16..80 {
-            w[index] =
-                (w[index - 3] ^ w[index - 8] ^ w[index - 14] ^ w[index - 16]).rotate_left(1);
+            w[index] = (w[index - 3] ^ w[index - 8] ^ w[index - 14] ^ w[index - 16]).rotate_left(1);
         }
 
         let (mut a, mut b, mut c, mut d, mut e) = (h0, h1, h2, h3, h4);

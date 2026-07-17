@@ -438,7 +438,9 @@ pub fn extract_assets(
     }
 
     let candidate_tiles = reverse::analyze_rom(rom_path.to_string_lossy().as_ref())
-        .map(|manifest| extract_tiles_from_candidates(&rom, &manifest.graphics_regions, max_tiles, bpp_mode))
+        .map(|manifest| {
+            extract_tiles_from_candidates(&rom, &manifest.graphics_regions, max_tiles, bpp_mode)
+        })
         .unwrap_or_default();
     let tiles = if candidate_tiles.is_empty() {
         extract_tiles_from_rom(&rom, max_tiles, bpp_mode)

@@ -18,10 +18,14 @@
       }
     ],
     "security": {
-      "csp": null,
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost blob: data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'",
       "assetProtocol": {
         "enable": true,
-        "scope": ["$HOME/**", "$TEMP/**"]
+        "scope": [
+          "$APPDATA/com.retrodevstudio.desktop/**",
+          "$TEMP/retrodevstudio/**",
+          "$TEMP/retro-dev-studio-*/**"
+        ]
       }
     }
   },
@@ -45,14 +49,6 @@
         "language": "en-US",
         "upgradeCode": "3f9f8354-4db5-5f1d-8c87-7af1c2c3984a"
       }
-    }
-  },
-  "plugins": {
-    "updater": {
-      "endpoints": [
-        "https://updates.retrodevstudio.example.invalid/{{target}}/{{current_version}}"
-      ],
-      "pubkey": "PLACEHOLDER_UPDATER_PUBKEY_BLOCKED_BY_NO_NEW_DEPS"
     }
   }
 }

@@ -1,5 +1,5 @@
 # 11 - PLANO DE ADAPTACAO CROSS-PLATFORM (Linux + Windows)
-**Status:** Programa de Reprodutibilidade ativo; Etapas 0/1/2/4 concluidas; Windows pendente
+**Status:** Programa ativo; Etapas 0/1/2/4 concluidas; Windows congelado pelo operador e ainda pendente
 **Data de registro:** 2026-06-30
 **Ultima atualizacao:** 2026-07-17
 **Contexto:** O projeto foi construido para Windows. Este host e Linux (BigLinux/Manjaro).
@@ -26,12 +26,12 @@
 | 0 - baseline canonico | **CONCLUIDA** | `origin/main=e700477` confirmado; branch `codex/reproducibility-program`; checkout divergente protegido por refs recovery; baseline limpo verde |
 | 1 - contrato e pins | **CONCLUIDA** | lock v1 imutavel, Node/Rust/npm pins, Cargo.lock, protocolo de agente e validacao de schema; contrato preservado pela suite focada ampliada |
 | 2 - orquestrador resiliente | **CONCLUIDA** | retomada real apos reboot; lock/journal/checksum/espaco/offline cobertos; primeira execucao do lock final `REPAIRED` e segunda offline `READY` sem mutacao |
-| 3 - Windows completo | **PENDENTE** | exige execucao e certificacao em Windows 10/11 limpo |
+| 3 - Windows completo | **CONGELADA / PENDENTE** | congelada pelo operador; exige execucao e certificacao em Windows 10/11 limpo antes de qualquer conclusao |
 | 4 - Arch/Manjaro completo | **CONCLUIDA** | BigLinux/Manjaro: SGDK/PVSnesLib builds reais, ROMs e frames MD/SNES, Ghidra headless, WebKit desktop E2E MD/SNES, offline e rejeicao de binario Windows passaram no lock/fingerprint final |
-| 5 - certificacao unificada | **PENDENTE** | nao iniciar antes de 3/4 |
-| 6 - seguranca/reprodutibilidade | **PENDENTE** | audit npm atual ainda possui vulnerabilidades; tratar em mudanca isolada |
-| 7 - reducao arquitetural | **PENDENTE** | feature freeze; nao misturar com toolchains |
-| 8 - certificacao/release | **PENDENTE** | exige mesmo commit/lock em Windows e Arch |
+| 5 - certificacao unificada | **IMPLEMENTADA NO COMUM/LINUX; FORMALMENTE BLOQUEADA** | Runtime Setup, scripts Linux/Windows, E2E e report usam commit/lock/fingerprint comuns; falta executar/provar Windows no gate da Etapa 3 |
+| 6 - seguranca/reprodutibilidade | **IMPLEMENTADA NO COMUM/LINUX; FORMALMENTE BLOQUEADA** | npm audit zero; RustSec zero vulnerabilidades com risco GTK3/glib registrado; CSP/asset scope/updater/licencas/pins fechados; signing/updater publico e Windows continuam pendentes |
+| 7 - reducao arquitetural | **PREPARACAO EXECUTADA; PENDENTE** | metricas versionadas; Runtime Setup reduzido e politica de asset scope extraida com caracterizacao; extracoes maiores aguardam desbloqueio sequencial |
+| 8 - certificacao/release | **REHEARSAL LINUX; PENDENTE** | rehearsal local so permite `READY_FOR_WINDOWS_GATE` e proibe release publico; exige mesmo commit/lock em Windows e Arch, signing e updater reais |
 
 ### Regra de transicao e handoff
 
@@ -64,6 +64,18 @@ Uma etapa com qualquer gate falho permanece `BLOQUEADA`. O fechamento deve regis
 - `host:certify` nao usa mais `--skip-rust-tests`: baseline, Ghidra headless, SGDK + core MD e PVSnesLib + core SNES sao gates operacionais. MD executou 60 frames; SNES, 90.
 - O runner desktop resolve o mesmo report/cache, aceita WebKitWebDriver e copia fixtures para diretorio temporario. E2E MD e SNES passaram sem alterar o checkout.
 - Etapa 3 Windows e o proximo bloqueio programatico. Etapa 5 continua pendente ate Windows fechar; nao interpretar a unificacao necessaria ao gate Linux como conclusao antecipada.
+
+### Hardening comum/Linux com Windows congelado (2026-07-17)
+
+- A decisao do operador congela a execucao Windows, nao elimina seus gates. O programa nao salta a Etapa 3 e nao promove as Etapas 5-8.
+- `src-tauri/src/tools/dependency_manager.rs` nao possui mais downloader/instalador paralelo nem APIs `latest`: le `rds-host-readiness/v1` e delega reparo ao host-manager/bootstraps. App, scripts e reports convergem para blockers comuns.
+- O fingerprint inclui navegador e WebDriver. Edge/Chrome exigem major compativel; WebKitWebDriver so e valido com WebKitGTK. Os validadores Linux/Windows registram repository commit/branch/dirty, lock e fingerprint.
+- npm/Vite/Vitest foram atualizados e `npm audit` esta zerado. Installs usam `strict-allow-scripts`, com `esbuild@0.25.12=true` e `fsevents=false`. Tauri Rust/JS/plugins estao fixados; `Cargo.lock`/`package-lock.json` permanecem obrigatorios.
+- Updater placeholder e plugin foram removidos e artefatos updater continuam desabilitados. CSP e explicita; o asset protocol estatico nao cobre HOME/TEMP inteiros. Projeto ativo e validado pelo schema, recebe escopo dinamico e o projeto anterior e revogado.
+- `NOTICE`/`license-inventory.json` deixam toolchains/cores como nao redistribuidos. Release publico permanece proibido sem revisao das licencas por core, certificado, signing, canal e updater reais.
+- `cargo audit 0.22.2` registrou zero vulnerabilidades e avisos informacionais. `glib 0.18.5` possui `RUSTSEC-2024-0429` e entra transitivamente por Tauri 2.11.5/WebKitGTK/GTK3; nao existe remocao local conservadora sem migrar o runtime upstream. Reavaliar em toda atualizacao Tauri.
+- CI ganhou pins exatos, npm/RustSec audit, Rustfmt e job Linux. `release:rehearsal:linux` exige worktree limpa e evidencias MD/SNES do mesmo commit/lock/fingerprint; seu sucesso significa apenas pronto para o gate Windows.
+- Proximo comando neste host: `npm run host:diagnose`. Quando Windows for descongelado: `scripts\\bootstrap.ps1 -Ensure -Profile Full`, repetir para idempotencia e executar `npm run host:certify` no mesmo commit/lock.
 
 ## Historico Pre-Programa (nao usar como estado atual)
 

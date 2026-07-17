@@ -19,7 +19,9 @@ RetroDevStudio/
 |
 |-- .gitignore
 |-- .gitattributes
+|-- .npmrc
 |-- .node-version
+|-- NOTICE
 |-- rust-toolchain.toml
 |-- README.md
 |-- CLAUDE.md
@@ -102,6 +104,7 @@ RetroDevStudio/
 |       |   |-- sgdk_emitter.rs
 |       |   `-- snes_emitter.rs
 |       |-- core/
+|       |   |-- project_asset_scope.rs
 |       |   `-- project_mgr.rs
 |       |-- emulator/
 |       |   |-- frame_buffer.rs
@@ -137,6 +140,8 @@ RetroDevStudio/
 |   |-- bootstrap.ps1
 |   |-- host-manager.mjs
 |   |-- host-manager.test.mjs
+|   |-- architecture-metrics.mjs
+|   |-- architecture-metrics.test.mjs
 |   |-- build.mjs
 |   |-- check-tree.cjs
 |   |-- check-tree.ps1
@@ -144,17 +149,21 @@ RetroDevStudio/
 |   |-- create-icon.mjs
 |   |-- diagnose-desktop-e2e.ps1
 |   |-- e2e-tauri-build-run.mjs
+|   |-- license-inventory.mjs
+|   |-- release-rehearsal-linux.mjs
 |   |-- release-readiness.mjs
 |   |-- run-bootstrap.ps1
 |   |-- run-cargo-msvc.cmd
 |   |-- run-in-msvc.cmd
 |   |-- setup-rust.ps1
+|   |-- security-contract.test.mjs
+|   |-- validate-upstream-linux.sh
 |   `-- validate-upstream-windows.ps1
 |
 `-- toolchains/
     |-- host-requirements.lock.json
     |-- .cache/
-    |   `-- github-releases/
+    |   `-- artifacts/
     |-- sgdk/
     |-- pvsneslib/
     |-- webdriver/
@@ -172,16 +181,17 @@ RetroDevStudio/
 - O reverse core canonico de ROMs deve viver em `src-tauri/src/tools/reverse/`; wrappers legados como `asset_extractor.rs` e `reverse_explorer.rs` continuam como superfícies de compatibilidade.
 - IPC de frontend fica em `src/core/ipc/`.
 - Fixtures backend ficam em `src-tauri/tests/fixtures/`.
-- Dependencias de terceiros instaladas sob demanda vivem em `toolchains/` e nao devem ser versionadas no Git.
+- Toolchains ativos vivem no cache nativo por lock digest; o cartao guarda somente artefatos verificaveis em `toolchains/.cache/artifacts/` e compatibilidade legada validada. Binarios nao devem ser versionados.
 - `toolchains/host-requirements.lock.json` e a excecao rastreada: contem apenas contrato, pins, fontes imutaveis e hashes; binarios continuam ignorados.
-- Metadata cacheada de releases oficiais vive em `toolchains/.cache/` e tambem nao deve ser versionada no Git.
+- Artefatos oficiais cacheados por SHA-256 vivem em `toolchains/.cache/artifacts/` e nao devem ser versionados no Git.
 - Drivers locais de validacao desktop, como `msedgedriver.exe`, devem ficar em `toolchains/webdriver/`, nunca soltos na raiz do repositorio.
 
 ---
 
 ## Regras Especificas do Estado Atual
 
-- `src-tauri/src/tools/dependency_manager.rs` e a fonte canonica para detectar e instalar SGDK, PVSnesLib e cores Libretro.
+- `scripts/host-manager.mjs` e a fonte canonica para detectar e provisionar dependencias. `src-tauri/src/tools/dependency_manager.rs` e apenas o adaptador do Runtime Setup para `host-readiness.json`.
+- `src-tauri/src/core/project_asset_scope.rs` valida o projeto ativo e mantem apenas seu diretorio autorizado no asset protocol.
 - `src-tauri/src/compiler/build_orch.rs` e a fonte canonica do pipeline `UGDM -> workspace -> ROM`.
 - `data/template_registry.json` e o catalogo canonico da galeria de templates do wizard; seeds externos apontam para donor paths locais do usuario e nao devem embutir ROMs, VGMs de terceiros ou artefatos de build no repositorio.
 - ROMs, packs MUGEN/Ikemen, screenpacks e outros corpus locais de validacao devem permanecer fora da arvore versionada do repositorio. Quando necessarios para QA local, devem viver em diretorio externo BYOR e nunca ser tratados como fixture canonica do app.
@@ -193,8 +203,10 @@ RetroDevStudio/
 - `scripts/release-manifest.mjs` e o gerador canonico do manifesto de distribuicao interna em `src-tauri/target-test/validation/release-manifest.json`, com SHA256/tamanho dos EXEs/MSI e limites explicitos de signing/updater/producao publica. Script npm: `release:manifest`.
 - `scripts/run-in-msvc.cmd` e o wrapper canonico para executar comandos Node/npm em ambiente MSVC preparado no Windows institucional; usar junto de `build.mjs` quando o host exigir `vcvars64.bat`.
 - `scripts/run-cargo-msvc.cmd` e o wrapper canonico para comandos `cargo` em ambiente MSVC preparado no Windows institucional.
-- `scripts/e2e-tauri-build-run.mjs` e o runner canonico de regressao desktop/Tauri para `Build -> Load ROM -> Run frames`.
+- `scripts/e2e-tauri-build-run.mjs` e o runner canonico de regressao desktop/Tauri para `Build -> Load ROM -> Run frames` e grava evidencia de sucesso por commit/cenario/target.
 - `scripts/host-manager.mjs` e a fonte canonica cross-platform para `host:diagnose`, `host:ensure` e `host:certify`; os bootstraps Bash/PowerShell permanecem entrypoints de nivel zero quando Node ainda nao existe.
+- `scripts/license-inventory.mjs`, `scripts/security-contract.test.mjs` e `NOTICE` formam o inventario/politica de seguranca e redistribuicao; nenhum deles autoriza redistribuir cores/toolchains.
+- `scripts/architecture-metrics.mjs` registra a linha de base de acoplamento; `scripts/release-rehearsal-linux.mjs` agrega evidencia Linux sem autorizar release publico.
 - `scripts/validate-upstream-windows.ps1` e o script canonico de validacao upstream real com SGDK, PVSnesLib e cores Libretro oficiais.
 - `.github/workflows/desktop-e2e.yml` e o workflow canonico de regressao desktop em Windows e ja foi validado em runner GitHub real.
 - `toolchains/libretro/cores/` e o local canonico dos DLLs de core baixados do upstream oficial.

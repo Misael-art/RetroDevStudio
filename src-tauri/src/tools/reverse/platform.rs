@@ -63,7 +63,8 @@ impl ReversePlatformAdapter for MegaDriveAdapter {
         let internal_title = Self::trim_ascii(&raw_bytes[0x150..0x180]);
         let version = Some(Self::trim_ascii(&raw_bytes[0x18C..0x18E]));
         let region = Some(Self::trim_ascii(&raw_bytes[0x1F0..0x1F3]));
-        let entry_point = u32::from_be_bytes([raw_bytes[4], raw_bytes[5], raw_bytes[6], raw_bytes[7]]);
+        let entry_point =
+            u32::from_be_bytes([raw_bytes[4], raw_bytes[5], raw_bytes[6], raw_bytes[7]]);
 
         let mut segments = vec![
             RomSegment {

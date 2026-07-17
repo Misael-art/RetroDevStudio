@@ -69,9 +69,68 @@ function resolveE2eLedgerPath() {
   return null;
 }
 
-async function recordE2eLedgerSuccess(options, projectMetadata) {
+async function readGitEvidence() {
+  const runGit = (args) =>
+    new Promise((resolve) => {
+      const child = spawn("git", args, {
+        cwd: repoRoot,
+        shell: false,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      let output = "";
+      child.stdout.on("data", (chunk) => {
+        output += chunk.toString();
+      });
+      child.on("error", () => resolve(null));
+      child.on("exit", (code) => resolve(code === 0 ? output.trim() : null));
+    });
+
+  const [commit, status] = await Promise.all([
+    runGit(["rev-parse", "HEAD"]),
+    runGit(["status", "--porcelain"]),
+  ]);
+  return { commit, dirty: status === null ? null : status.length > 0 };
+}
+
+function getDesktopSuccessReportPath(options, projectMetadata) {
+  return path.join(
+    validationDir,
+    `desktop-e2e-success-${sanitizeFailureReportSegment(options.scenario)}-${sanitizeFailureReportSegment(projectMetadata.target)}.json`
+  );
+}
+
+async function clearDesktopSuccessReport(options, projectMetadata) {
+  const targetPath = getDesktopSuccessReportPath(options, projectMetadata);
+  if (await pathExists(targetPath)) {
+    await rm(targetPath, { force: true });
+  }
+}
+
+async function recordE2eLedgerSuccess(options, projectMetadata, evidence = {}) {
+  const git = await readGitEvidence();
+  await ensureValidationDir();
+  const successPath = getDesktopSuccessReportPath(options, projectMetadata);
+  await writeFile(
+    successPath,
+    `${JSON.stringify(
+      {
+        schema: "rds-desktop-e2e-success/v1",
+        generated_at: new Date().toISOString(),
+        repository: git,
+        scenario: options.scenario,
+        target: projectMetadata.target || null,
+        project_fixture: path.basename(path.resolve(options.project)),
+        framebuffer: evidence.framebuffer ?? null,
+      },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+  console.log(`[evidence] Desktop E2E -> ${successPath}`);
+
   // No CI o workflow desktop-e2e grava marcadores via Add-Content (pwsh).
-  // Evita corrida/ path divergente quando npm nao herda RDS_E2E_LEDGER no Windows.
+  // Evita corrida/path divergente quando npm nao herda RDS_E2E_LEDGER no Windows.
   if (process.env.GITHUB_ACTIONS) {
     return;
   }
@@ -3254,6 +3313,7 @@ async function main() {
   const projectMetadata = requiresExistingProject
     ? await readProjectMetadata(options.project)
     : { name: "", target: "" };
+  await clearDesktopSuccessReport(options, projectMetadata);
   currentE2eRunContext = {
     scenario: options.scenario,
     project: options.project,
@@ -6130,7 +6190,7 @@ async function main() {
     console.log(`Projeto: ${options.project}`);
     console.log(`Target: ${projectMetadata.target}`);
     console.log(`Canvas: ${framebuffer.width}x${framebuffer.height}, pixels nao pretos: ${framebuffer.nonBlackPixels}`);
-    await recordE2eLedgerSuccess(options, projectMetadata);
+    await recordE2eLedgerSuccess(options, projectMetadata, { framebuffer });
   } catch (error) {
     const details = error instanceof Error ? error.message : String(error);
     const driverSummary = summarizeDriverLogs(driverLogs);

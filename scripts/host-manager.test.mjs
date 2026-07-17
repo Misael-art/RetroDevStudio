@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   HOST_READINESS_SCHEMA,
   acquireOperationLock,
+  browserDriverCompatible,
   defaultManifestPath,
   detectHost,
   diagnose,
@@ -17,6 +18,7 @@ import {
   installSourceBuild,
   isSupportedHost,
   pacmanBatchPlan,
+  privilegedPacmanCommand,
   probeRequirement,
   readManifest,
   resolveCommand,
@@ -175,6 +177,69 @@ describe("host requirements contract", () => {
     const plan = pacmanBatchPlan(requirements, { host: { platform: "linux" } });
     expect(plan.requirements.map((requirement) => requirement.id)).toEqual(["first", "second"]);
     expect(plan.packages).toEqual(["cmake", "make", "bison"]);
+  });
+
+  it("uses the BigLinux graphical privilege bridge when it is available", () => {
+    const directory = tempDir();
+    const executable = path.join(directory, "bigsudo");
+    writeFileSync(executable, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const privilege = privilegedPacmanCommand({
+      host: { platform: "linux", os_id: "biglinux" },
+      env: { PATH: directory },
+    });
+    expect(privilege).toEqual({ program: "bigsudo", args: [] });
+  });
+
+  it("allows an explicit conservative privilege override", () => {
+    const privilege = privilegedPacmanCommand({
+      host: { platform: "linux", os_id: "manjaro" },
+      env: { PATH: "", RDS_PRIVILEGE_COMMAND: "sudo" },
+    });
+    expect(privilege).toEqual({ program: "sudo", args: [] });
+  });
+
+  it("rejects a browser and WebDriver with different major versions", () => {
+    expect(
+      browserDriverCompatible(
+        { version: "Microsoft Edge 140.0.1", route: "browser" },
+        {
+          applicable: true,
+          status: "ready",
+          path: "C:/drivers/msedgedriver.exe",
+          version: "MSEdgeDriver 139.0.4",
+        }
+      )
+    ).toBe(false);
+    expect(
+      browserDriverCompatible(
+        { version: "Microsoft Edge 140.0.1", route: "browser" },
+        {
+          applicable: true,
+          status: "ready",
+          path: "C:/drivers/msedgedriver.exe",
+          version: "MSEdgeDriver 140.0.9",
+        }
+      )
+    ).toBe(true);
+  });
+
+  it("accepts WebKitWebDriver only with the WebKit route", () => {
+    const driver = {
+      applicable: true,
+      status: "ready",
+      path: "/usr/bin/WebKitWebDriver",
+      version: "Usage: WebKitWebDriver",
+    };
+    expect(browserDriverCompatible({ version: "WebKitGTK 2.50.6", route: "webkit" }, driver)).toBe(true);
+    expect(browserDriverCompatible({ version: "Chromium 140.0.1", route: "browser" }, driver)).toBe(false);
+  });
+
+  it("resolves native commands through paths with spaces and accents", () => {
+    const root = path.join(tempDir(), "Cartao SD", "Ferramentas acentuadas");
+    const command = executable(root, "rds-tool");
+    expect(
+      resolveCommand(["rds-tool"], { platform: "linux" }, { PATH: root })
+    ).toBe(command);
   });
 
   it("preserves and resumes a verified source build after an interrupted step", () => {

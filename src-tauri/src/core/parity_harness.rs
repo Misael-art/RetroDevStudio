@@ -193,10 +193,7 @@ pub fn run_parity_capture(
 ) -> Result<ParityReport, String> {
     core.restore_runtime_state_bytes(initial_state)?;
 
-    let core_label = core
-        .loaded_core_label()
-        .unwrap_or("unknown")
-        .to_string();
+    let core_label = core.loaded_core_label().unwrap_or("unknown").to_string();
 
     let mut frame_hashes: Vec<FrameHash> = Vec::with_capacity(inputs.len());
     for (index, joypad) in inputs.iter().enumerate() {
@@ -260,10 +257,8 @@ pub fn run_parity_capture_against_golden(
     let rom_sha256 = sha256_hex(&rom_bytes);
     let initial_state = core.capture_runtime_state_bytes()?;
 
-    let mut report_a =
-        run_parity_capture(core, rom_path, &rom_sha256, &initial_state, &inputs)?;
-    let report_b =
-        run_parity_capture(core, rom_path, &rom_sha256, &initial_state, &inputs)?;
+    let mut report_a = run_parity_capture(core, rom_path, &rom_sha256, &initial_state, &inputs)?;
+    let report_b = run_parity_capture(core, rom_path, &rom_sha256, &initial_state, &inputs)?;
 
     let divergences = compare_runs(&report_a, &report_b);
     report_a.divergences = divergences.clone();
@@ -302,7 +297,10 @@ pub fn compare_runs(reference: &ParityReport, observed: &ParityReport) -> Vec<Pa
         });
         return divergences;
     }
-    let limit = reference.frame_hashes.len().min(observed.frame_hashes.len());
+    let limit = reference
+        .frame_hashes
+        .len()
+        .min(observed.frame_hashes.len());
     for index in 0..limit {
         let a = &reference.frame_hashes[index];
         let b = &observed.frame_hashes[index];
@@ -345,10 +343,7 @@ pub fn compare_runs(reference: &ParityReport, observed: &ParityReport) -> Vec<Pa
     divergences
 }
 
-pub fn write_parity_report(
-    report_dir: &Path,
-    report: &ParityReport,
-) -> Result<PathBuf, String> {
+pub fn write_parity_report(report_dir: &Path, report: &ParityReport) -> Result<PathBuf, String> {
     fs::create_dir_all(report_dir).map_err(|error| {
         format!(
             "Could not create parity report dir '{}': {}",
@@ -466,10 +461,26 @@ mod tests {
             "MockLibretroCore".to_string(),
             4,
             vec![
-                FrameHash { frame_index: 0, framebuffer_sha256: "h0".to_string(), non_black_pixels: 10 },
-                FrameHash { frame_index: 1, framebuffer_sha256: "h1".to_string(), non_black_pixels: 11 },
-                FrameHash { frame_index: 2, framebuffer_sha256: "h2".to_string(), non_black_pixels: 12 },
-                FrameHash { frame_index: 3, framebuffer_sha256: "h3".to_string(), non_black_pixels: 13 },
+                FrameHash {
+                    frame_index: 0,
+                    framebuffer_sha256: "h0".to_string(),
+                    non_black_pixels: 10,
+                },
+                FrameHash {
+                    frame_index: 1,
+                    framebuffer_sha256: "h1".to_string(),
+                    non_black_pixels: 11,
+                },
+                FrameHash {
+                    frame_index: 2,
+                    framebuffer_sha256: "h2".to_string(),
+                    non_black_pixels: 12,
+                },
+                FrameHash {
+                    frame_index: 3,
+                    framebuffer_sha256: "h3".to_string(),
+                    non_black_pixels: 13,
+                },
             ],
             "final".to_string(),
             deterministic,
@@ -547,7 +558,10 @@ mod tests {
         let path = write_parity_report(&dir, &report).expect("write report");
         assert!(path.exists());
         let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-        assert!(name.contains("parity"), "file name should contain parity substring, got: {name}");
+        assert!(
+            name.contains("parity"),
+            "file name should contain parity substring, got: {name}"
+        );
         let md_path = dir.join("gameplay-parity-report.md");
         assert!(md_path.exists());
 
@@ -590,12 +604,22 @@ mod tests {
             rom_path: "/tmp/sample.bin".to_string(),
             initial_state: vec![1, 2, 3, 4, 5, 6, 7, 8],
             frames: vec![
-                JoypadState { a: true, ..JoypadState::default() },
+                JoypadState {
+                    a: true,
+                    ..JoypadState::default()
+                },
                 JoypadState::default(),
-                JoypadState { start: true, ..JoypadState::default() },
+                JoypadState {
+                    start: true,
+                    ..JoypadState::default()
+                },
             ],
             final_framebuffer: vec![0u8; 32],
-            final_frame_size: crate::emulator::libretro_ffi::FrameSize { width: 256, height: 224, pitch: 1024 },
+            final_frame_size: crate::emulator::libretro_ffi::FrameSize {
+                width: 256,
+                height: 224,
+                pitch: 1024,
+            },
             final_pixel_format: crate::emulator::libretro_ffi::PixelFormat::Xrgb8888,
         };
         let bytes = serde_json::to_vec_pretty(&original).expect("serialize replay");
@@ -622,8 +646,15 @@ mod tests {
         let script_path = dir.join("stage1.rds-input.json");
         let mut script = InputScript::from_frames(vec![
             JoypadState::default(),
-            JoypadState { up: true, ..JoypadState::default() },
-            JoypadState { b: true, a: true, ..JoypadState::default() },
+            JoypadState {
+                up: true,
+                ..JoypadState::default()
+            },
+            JoypadState {
+                b: true,
+                a: true,
+                ..JoypadState::default()
+            },
         ]);
         script.name = Some("stage1-boss".to_string());
         script.target = Some("megadrive".to_string());
@@ -675,7 +706,11 @@ mod tests {
             initial_state: vec![0u8; 8],
             frames: vec![JoypadState::default()],
             final_framebuffer: vec![0u8; 8],
-            final_frame_size: crate::emulator::libretro_ffi::FrameSize { width: 256, height: 224, pitch: 1024 },
+            final_frame_size: crate::emulator::libretro_ffi::FrameSize {
+                width: 256,
+                height: 224,
+                pitch: 1024,
+            },
             final_pixel_format: crate::emulator::libretro_ffi::PixelFormat::Xrgb8888,
         };
         let bytes = serde_json::to_vec_pretty(&replay).expect("serialize");
@@ -687,7 +722,9 @@ mod tests {
 
     #[test]
     fn run_parity_capture_against_golden_respects_frame_limit() {
-        use crate::emulator::libretro_ffi::test_helpers::{compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom};
+        use crate::emulator::libretro_ffi::test_helpers::{
+            compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom,
+        };
         use crate::emulator::libretro_ffi::EmulatorCore;
 
         let _serial = test_serial_guard();
@@ -696,19 +733,42 @@ mod tests {
         let rom_path = write_test_rom(&dir, "limit_rom", "gen");
 
         let script = InputScript::from_frames(vec![
-            JoypadState { a: true, ..JoypadState::default() },
-            JoypadState { b: true, ..JoypadState::default() },
-            JoypadState { x: true, ..JoypadState::default() },
-            JoypadState { y: true, ..JoypadState::default() },
+            JoypadState {
+                a: true,
+                ..JoypadState::default()
+            },
+            JoypadState {
+                b: true,
+                ..JoypadState::default()
+            },
+            JoypadState {
+                x: true,
+                ..JoypadState::default()
+            },
+            JoypadState {
+                y: true,
+                ..JoypadState::default()
+            },
         ]);
         let golden_path = dir.join("many.rds-input.json");
-        fs::write(&golden_path, serde_json::to_vec_pretty(&script).expect("serialize")).expect("write golden");
+        fs::write(
+            &golden_path,
+            serde_json::to_vec_pretty(&script).expect("serialize"),
+        )
+        .expect("write golden");
 
         let report_dir = dir.join(".rds").join("reports");
         let mut emulator = EmulatorCore::new(Some(&core_path));
         emulator.load_rom(&rom_path).expect("load rom");
 
-        let (report, _) = run_parity_capture_against_golden(&mut emulator, &rom_path, &golden_path, Some(2), &report_dir).expect("capture with frame_limit");
+        let (report, _) = run_parity_capture_against_golden(
+            &mut emulator,
+            &rom_path,
+            &golden_path,
+            Some(2),
+            &report_dir,
+        )
+        .expect("capture with frame_limit");
         assert_eq!(report.frames_run, 2);
         assert_eq!(report.frame_hashes.len(), 2);
 
@@ -718,7 +778,9 @@ mod tests {
 
     #[test]
     fn run_parity_capture_against_golden_rejects_empty_script() {
-        use crate::emulator::libretro_ffi::test_helpers::{compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom};
+        use crate::emulator::libretro_ffi::test_helpers::{
+            compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom,
+        };
         use crate::emulator::libretro_ffi::EmulatorCore;
 
         let _serial = test_serial_guard();
@@ -727,13 +789,24 @@ mod tests {
         let rom_path = write_test_rom(&dir, "empty_rom", "gen");
         let golden_path = dir.join("empty.rds-input.json");
         let script = InputScript::from_frames(Vec::new());
-        fs::write(&golden_path, serde_json::to_vec_pretty(&script).expect("serialize")).expect("write golden");
+        fs::write(
+            &golden_path,
+            serde_json::to_vec_pretty(&script).expect("serialize"),
+        )
+        .expect("write golden");
 
         let report_dir = dir.join(".rds").join("reports");
         let mut emulator = EmulatorCore::new(Some(&core_path));
         emulator.load_rom(&rom_path).expect("load rom");
 
-        let err = run_parity_capture_against_golden(&mut emulator, &rom_path, &golden_path, None, &report_dir).expect_err("must reject empty script");
+        let err = run_parity_capture_against_golden(
+            &mut emulator,
+            &rom_path,
+            &golden_path,
+            None,
+            &report_dir,
+        )
+        .expect_err("must reject empty script");
         assert!(err.contains("zero frames"), "got: {err}");
 
         emulator.stop().expect("stop");

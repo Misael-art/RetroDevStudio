@@ -20,7 +20,8 @@ pub struct ReverseExplorerResult {
 }
 
 fn ascii_preview(bytes: &[u8]) -> String {
-    bytes.iter()
+    bytes
+        .iter()
         .map(|value| {
             if (32..=126).contains(value) {
                 char::from(*value)

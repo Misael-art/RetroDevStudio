@@ -403,7 +403,14 @@ join_by_unit_sep() {
 STATUS_CODES="$(join_by_unit_sep "${status_codes[@]}")"
 WARNINGS="$(join_by_unit_sep "${warnings[@]}")"
 PHASES="$(join_by_unit_sep "${phases[@]}")"
+repository_commit="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
+repository_branch="$(git -C "$REPO_ROOT" branch --show-current 2>/dev/null || true)"
+repository_dirty=false
+if [[ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)" ]]; then
+  repository_dirty=true
+fi
 export REPO_ROOT REPORT_PATH VALIDATION_DIR STATUS_CODES WARNINGS PHASES ACTIVE_HOST_POINTER active_host_cache active_lock_digest active_host_fingerprint
+export repository_commit repository_branch repository_dirty
 export success node_path npm_path cargo_path rustc_path make_path java_path tauri_driver_path m68k_path
 export sgdk_root sgdk_makefile_ok sgdk_compiler_ok sgdk_make_ok sgdk_java_ok pvsneslib_root pvsneslib_ok
 export webdriver_path ghidra_path ghidra_ok jdk21_ok java_major libretro_md_core_path libretro_snes_core_path
@@ -429,6 +436,11 @@ const report = {
   active_host_cache: process.env.active_host_cache || null,
   lock_digest: process.env.active_lock_digest || null,
   host_fingerprint: process.env.active_host_fingerprint || null,
+  repository: {
+    commit: process.env.repository_commit || null,
+    branch: process.env.repository_branch || null,
+    dirty: process.env.repository_dirty === "true",
+  },
   blocking_status_codes: splitList(process.env.STATUS_CODES),
   warnings: splitList(process.env.WARNINGS),
   phases,

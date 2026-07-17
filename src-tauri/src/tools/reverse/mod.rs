@@ -7,8 +7,8 @@ pub mod manifest;
 pub mod matching;
 pub mod platform;
 pub mod projection;
-pub mod trace;
 pub mod text;
+pub mod trace;
 
 use std::path::Path;
 
@@ -144,13 +144,11 @@ pub fn disassemble_rom(
 
 pub fn get_xrefs(rom_path: &str) -> Result<Vec<manifest::CodeXref>, String> {
     let manifest = analyze_rom(rom_path)?;
-    Ok(
-        manifest
-            .code_regions
-            .iter()
-            .flat_map(|region| region.xrefs.clone())
-            .collect(),
-    )
+    Ok(manifest
+        .code_regions
+        .iter()
+        .flat_map(|region| region.xrefs.clone())
+        .collect())
 }
 
 pub fn get_call_graph(rom_path: &str) -> Result<Vec<manifest::CallGraphEdge>, String> {
@@ -165,7 +163,13 @@ pub fn extract_graphics(rom_path: &str) -> Result<Vec<manifest::GraphicsCandidat
 
 pub fn extract_text(
     rom_path: &str,
-) -> Result<(Vec<manifest::TextCandidate>, Vec<manifest::PointerTableCandidate>), String> {
+) -> Result<
+    (
+        Vec<manifest::TextCandidate>,
+        Vec<manifest::PointerTableCandidate>,
+    ),
+    String,
+> {
     let manifest = analyze_rom(rom_path)?;
     Ok((manifest.text_regions, manifest.pointer_tables))
 }
@@ -194,7 +198,10 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("clock drift")
             .as_nanos();
-        std::env::temp_dir().join(format!("retrodev-reverse-manifest-{}-{}.{}", name, nonce, ext))
+        std::env::temp_dir().join(format!(
+            "retrodev-reverse-manifest-{}-{}.{}",
+            name, nonce, ext
+        ))
     }
 
     fn build_megadrive_fixture() -> Vec<u8> {

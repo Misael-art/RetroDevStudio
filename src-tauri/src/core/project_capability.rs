@@ -506,7 +506,10 @@ fn inspect_gameplay_parity_axis(project_dir: &Path) -> CapabilityAxisReport {
             )],
             vec!["parity_report_not_certified".to_string()],
             vec![],
-            vec!["Parity capture executado; o report ainda precisa ser certificado manualmente.".to_string()],
+            vec![
+                "Parity capture executado; o report ainda precisa ser certificado manualmente."
+                    .to_string(),
+            ],
             Some("parity_harness".to_string()),
             Some("Debug/Parity".to_string()),
             vec![],
@@ -632,12 +635,10 @@ mod tests {
                     && evidence.path.contains("gameplay-parity-report.json")),
             "expected evidence_refs to point at the parity report"
         );
-        assert!(
-            report
-                .gameplay_parity
-                .blocking_statuses
-                .contains(&"parity_report_not_certified".to_string())
-        );
+        assert!(report
+            .gameplay_parity
+            .blocking_statuses
+            .contains(&"parity_report_not_certified".to_string()));
         assert!(!report
             .gameplay_parity
             .blocking_statuses

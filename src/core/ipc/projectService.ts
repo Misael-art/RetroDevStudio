@@ -96,6 +96,10 @@ export function openProjectPath(projectDir: string): Promise<OpenProjectResult> 
   return invoke("open_project_path", { projectDir });
 }
 
+export function authorizeProjectAssetScope(projectDir: string): Promise<string> {
+  return invoke("authorize_project_asset_scope", { projectDir });
+}
+
 export function newProjectDialog(projectName: string): Promise<OpenProjectResult> {
   return invoke("new_project_dialog", { projectName });
 }

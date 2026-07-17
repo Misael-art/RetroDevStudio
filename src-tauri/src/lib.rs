@@ -37,6 +37,7 @@ use core::editor_validation::{
     DraftValidationResult,
 };
 use core::input_commands::{parse_command_dat, InputCommandDefinition};
+use core::project_asset_scope::{authorize_project_assets, ProjectAssetScopeState};
 use core::project_capability::{
     inspect_project_capability as inspect_project_capability_impl, ProjectCapabilityReport,
 };
@@ -859,7 +860,9 @@ fn parity_run_capture(
             } else {
                 format!(
                     "Parity reportou {} divergencia(s) apos {} frame(s); report em '{}'.",
-                    divergence_count, report.frames_run, written.display()
+                    divergence_count,
+                    report.frames_run,
+                    written.display()
                 )
             };
             ParityCommandResult {
@@ -1822,6 +1825,15 @@ fn third_party_detect_rom_dependency(rom_path: String) -> RomDependencyResult {
     }
 }
 
+#[tauri::command]
+fn authorize_project_asset_scope(
+    app: AppHandle,
+    state: tauri::State<'_, ProjectAssetScopeState>,
+    project_dir: String,
+) -> Result<String, String> {
+    authorize_project_assets(&app, &state, &project_dir)
+}
+
 // ── Cena: leitura e escrita ───────────────────────────────────────────────────
 
 #[derive(serde::Serialize)]
@@ -2117,7 +2129,8 @@ fn get_project_settings(project_dir: String) -> Result<ProjectSettingsSnapshot, 
     if project_dir.trim().is_empty() {
         return Err("Nenhum projeto aberto.".into());
     }
-    load_project_settings_impl(&PathBuf::from(project_dir.trim())).map_err(|error| error.to_string())
+    load_project_settings_impl(&PathBuf::from(project_dir.trim()))
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -3629,11 +3642,11 @@ fn parse_input_command_file(path: String) -> Result<Vec<InputCommandDefinition>,
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(EmulatorCoreState(Mutex::new(EmulatorCore::new(None))))
         .manage(ProjectAssetWatchState::default())
+        .manage(ProjectAssetScopeState::default())
         .invoke_handler(tauri::generate_handler![
             // Build pipeline
             validate_project,
@@ -3722,6 +3735,7 @@ pub fn run() {
             third_party_get_status,
             third_party_install,
             third_party_detect_rom_dependency,
+            authorize_project_asset_scope,
             // Photo2SGDK
             tools::photo2sgdk::art_process_palette,
             tools::photo2sgdk::import_art_asset,
