@@ -399,7 +399,14 @@ export function diagnose(options = {}) {
   const host = detectHost(options.env);
   const hostCache = path.join(nativeCacheBase(host, options.env), lockDigest);
   const cargoBin = path.join(os.homedir(), ".cargo", "bin");
+  const bootstrapNodeRoot = path.join(
+    nativeCacheBase(host, options.env),
+    "bootstrap",
+    `node-v${manifest.pins.node}-${host.platform === "win32" ? "win" : "linux"}-x64`,
+  );
+  const bootstrapNodeBin = host.platform === "win32" ? bootstrapNodeRoot : path.join(bootstrapNodeRoot, "bin");
   const managedBins = [
+    bootstrapNodeBin,
     path.join(hostCache, "toolchains", "m68k-elf", "bin"),
     path.join(hostCache, "toolchains", "sgdk", "bin"),
     path.join(hostCache, "toolchains", "pvsneslib", "devkitsnes", "bin"),
@@ -516,7 +523,7 @@ export function ensurePortableArtifact(artifact, options) {
   mkdirSync(portableCache, { recursive: true });
   if (!existsSync(archivePath)) {
     if (options.offline) return { ok: false, reason: "offline_missing" };
-    const filesystem = statfsSync(portableCache);
+    const filesystem = (options.statfs ?? statfsSync)(portableCache);
     const freeBytes = Number(filesystem.bavail) * Number(filesystem.bsize);
     if (freeBytes < Math.ceil(artifact.size * 1.1)) {
       return {
@@ -769,7 +776,7 @@ export function installSourceBuild(requirement, context, options) {
   }
   if (install.minimum_free_bytes) {
     mkdirSync(context.hostCache, { recursive: true });
-    const filesystem = statfsSync(context.hostCache);
+    const filesystem = (options.statfs ?? statfsSync)(context.hostCache);
     const freeBytes = Number(filesystem.bavail) * Number(filesystem.bsize);
     if (freeBytes < install.minimum_free_bytes) {
       return {
@@ -935,17 +942,68 @@ function installRequirement(requirement, context, options) {
   return { id: requirement.id, ok: false, skipped: true, reason: `installer_unknown:${install.kind}` };
 }
 
+export function pacmanBatchPlan(requirements, context) {
+  const selected = requirements.filter((requirement) => {
+    const install = requirementInstall(requirement, context.host.platform);
+    return install?.kind === "pacman";
+  });
+  return {
+    requirements: selected,
+    packages: [...new Set(selected.flatMap((requirement) => requirementInstall(requirement, context.host.platform).packages ?? []))],
+  };
+}
+
+function processIsAlive(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
+function operationLockIsStale(lockPath) {
+  const ownerPath = path.join(lockPath, "owner.json");
+  try {
+    const owner = JSON.parse(readFileSync(ownerPath, "utf8"));
+    return !processIsAlive(owner.pid);
+  } catch {
+    try {
+      return Date.now() - statSync(lockPath).mtimeMs > 5 * 60 * 1000;
+    } catch {
+      return true;
+    }
+  }
+}
+
 export function acquireOperationLock(hostCache) {
   mkdirSync(hostCache, { recursive: true });
   const lockPath = path.join(hostCache, "operation.lock");
-  try {
-    mkdirSync(lockPath);
-    writeFileSync(path.join(lockPath, "owner.json"), `${JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() })}\n`);
-    return { lockPath, release: () => rmSync(lockPath, { recursive: true, force: true }) };
-  } catch (error) {
-    if (error.code === "EEXIST") return null;
-    throw error;
+  let recoveredStale = false;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      mkdirSync(lockPath);
+      writeFileSync(
+        path.join(lockPath, "owner.json"),
+        `${JSON.stringify({ pid: process.pid, started_at: new Date().toISOString() })}\n`,
+      );
+      return {
+        lockPath,
+        recovered_stale: recoveredStale,
+        release: () => rmSync(lockPath, { recursive: true, force: true }),
+      };
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      if (attempt === 0 && operationLockIsStale(lockPath)) {
+        rmSync(lockPath, { recursive: true, force: true });
+        recoveredStale = true;
+        continue;
+      }
+      return null;
+    }
   }
+  return null;
 }
 
 export function ensure(options = {}) {
@@ -953,13 +1011,48 @@ export function ensure(options = {}) {
   if (initial.report.state === "UNSUPPORTED") return { report: initial.report, exitCode: EXIT.UNSUPPORTED };
   if (initial.report.state === "READY") return { report: initial.report, exitCode: EXIT.OK };
   const operation = acquireOperationLock(nativeCacheBase(initial.context.host, initial.context.env));
-  if (!operation) return { report: initial.report, exitCode: EXIT.BUSY };
+  if (!operation) {
+    initial.report.state = "BLOCKED";
+    initial.report.blockers.push("operation_lock:busy");
+    atomicWriteJson(options.reportPath ?? defaultReportPath, initial.report);
+    return { report: initial.report, exitCode: EXIT.BUSY };
+  }
   const actions = [];
   try {
     const checksById = new Map(initial.report.checks.map((check) => [check.id, check]));
-    for (const requirement of initial.manifest.requirements) {
+    const pending = initial.manifest.requirements.filter((requirement) => {
       const check = checksById.get(requirement.id);
-      if (!check?.applicable || check.status === "ready" || !requirementInstall(requirement, initial.context.host.platform)) continue;
+      return check?.applicable && check.status !== "ready" && requirementInstall(requirement, initial.context.host.platform);
+    });
+    const pacmanBatch = pacmanBatchPlan(pending, initial.context);
+    if (pacmanBatch.requirements.length > 0) {
+      let batchResult;
+      if (options.offline) {
+        batchResult = { ok: false, skipped: true, reason: "offline_system_package_missing" };
+      } else {
+        const result = commandResult(
+          "install:pacman-substrate",
+          "sudo",
+          ["pacman", "-S", "--needed", "--noconfirm", ...pacmanBatch.packages],
+          { env: { ...initial.context.env, PATH: initial.context.pathEnv }, inherit: true },
+        );
+        batchResult = {
+          ...result,
+          reason: result.ok ? null : "sudo_denied_or_system_package_install_failed",
+        };
+      }
+      for (const requirement of pacmanBatch.requirements) {
+        actions.push({ id: requirement.id, batched: true, packages: pacmanBatch.packages, ...batchResult });
+      }
+      atomicWriteJson(path.join(initial.context.hostCache, "operation-journal.json"), {
+        schema: "rds-host-operation-journal/v1",
+        lock_digest: initial.report.lock_digest,
+        updated_at: new Date().toISOString(),
+        actions,
+      });
+    }
+    for (const requirement of pending) {
+      if (requirementInstall(requirement, initial.context.host.platform)?.kind === "pacman") continue;
       let action;
       try {
         action = installRequirement(requirement, initial.context, options);
@@ -974,6 +1067,15 @@ export function ensure(options = {}) {
         actions,
       });
     }
+    if (operation.recovered_stale) {
+      actions.unshift({ id: "operation_lock", ok: true, recovered_stale: true });
+    }
+    atomicWriteJson(path.join(initial.context.hostCache, "operation-journal.json"), {
+      schema: "rds-host-operation-journal/v1",
+      lock_digest: initial.report.lock_digest,
+      updated_at: new Date().toISOString(),
+      actions,
+    });
   } finally {
     operation.release();
   }

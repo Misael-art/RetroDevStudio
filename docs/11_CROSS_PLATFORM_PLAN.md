@@ -24,10 +24,10 @@
 | Etapa | Estado | Evidencia / blocker |
 |---|---|---|
 | 0 - baseline canonico | **CONCLUIDA** | `origin/main=e700477` confirmado; branch `codex/reproducibility-program`; checkout divergente protegido por refs recovery; baseline limpo verde |
-| 1 - contrato e pins | **CONCLUIDA** | lock v1 imutavel, Node/Rust/npm pins, Cargo.lock, protocolo de agente e validacao de schema; 19 testes de host/scripts e os seis gates canonicos verdes |
-| 2 - orquestrador resiliente | **BLOQUEADA** | diagnostico/ensure/certify, fingerprint, cache, lock de processo, journal, rejeicao de checksum e retomada persistente implementados; falta fechar todos os cenarios de falha e obter duas execucoes reais idempotentes |
+| 1 - contrato e pins | **CONCLUIDA** | lock v1 imutavel, Node/Rust/npm pins, Cargo.lock, protocolo de agente e validacao de schema; contrato preservado pela suite focada ampliada |
+| 2 - orquestrador resiliente | **BLOQUEADA** | 28 testes focados cobrem lock vivo/morto, checksum, espaco, offline, journal, source resume, batch pacman e idempotencia READY hermetica; retomada real apos reboot concluiu M68K sem rebuild na segunda rodada, mas falta host real `READY` duas vezes |
 | 3 - Windows completo | **PENDENTE** | exige execucao e certificacao em Windows 10/11 limpo |
-| 4 - Arch/Manjaro completo | **BLOQUEADA** | o lock atual exige reparo; `cmake` depende de autenticacao `sudo`, e M68K/SGDK/PVSnesLib ainda nao passaram probes operacionais no digest atual |
+| 4 - Arch/Manjaro completo | **BLOQUEADA** | M68K 13.2.0, JDK/Ghidra, drivers e cores MD/SNES passaram probes; `cmake` depende de autenticacao `sudo`, bloqueando os builds SGDK/PVSnesLib e a certificacao ROM/E2E |
 | 5 - certificacao unificada | **PENDENTE** | nao iniciar antes de 3/4 |
 | 6 - seguranca/reprodutibilidade | **PENDENTE** | audit npm atual ainda possui vulnerabilidades; tratar em mudanca isolada |
 | 7 - reducao arquitetural | **PENDENTE** | feature freeze; nao misturar com toolchains |
@@ -41,10 +41,20 @@ Uma etapa com qualquer gate falho permanece `BLOQUEADA`. O fechamento deve regis
 
 - O primeiro diagnostico retornou `DRIFTED`, incluindo Node 26.4.0 fora do pin. O launcher instalou e ativou Node oficial 24.18.0; Rust 1.97.0 foi fixado pelo `rust-toolchain.toml`.
 - Uma rodada real verificou e instalou/reutilizou Temurin JDK 21.0.11+10, Ghidra 12.1, `tauri-driver` 2.0.6, WebKitWebDriver e cores oficiais Libretro MD/SNES com hashes individuais. Esses objetos permanecem no cache nativo content-addressed e podem ser religados por um novo digest.
-- A compilacao M68K revelou incompatibilidade de GCC 13.2.0 com o GCC 16.1.1 host em `libcody`; o lock agora fixa `CXXFLAGS=-O2 -std=gnu++17`, desabilita analyzer/LTO desnecessarios e preserva staging/logs. O erro `char8_t` deixou de ocorrer, mas a compilacao completa ainda nao foi certificada.
+- A compilacao M68K revelou que o configure do `libcody` do GCC 13 exige exatamente C++11. O lock final fixa `CXXFLAGS=-O2 -std=gnu++11`, desabilita analyzer/LTO desnecessarios e preserva staging/logs; a retomada pos-reinicio concluiu e sondou `m68k-elf-gcc 13.2.0`.
 - O host nao possui `cmake`. A tentativa automatica chegou corretamente a `sudo pacman`, mas a autenticacao foi recusada/cancelada sem armazenar credencial. SGDK e PVSnesLib permanecem bloqueados por esse substrato.
-- Report fresco: `src-tauri/target-test/validation/host-readiness.json`; estado `BLOCKED`; lock digest `3397c3de960dfc3af8b0089a21233a59eeaebed43a0214589f577cde798fd2e0`; fingerprint `c3be8cee396c616e33bf665393d2e3f9cb580ac5297313225e94cca0a22ff240`.
+- Report fresco: `src-tauri/target-test/validation/host-readiness.json`; estado `BLOCKED`; lock digest `6b5d81135a1161447e4cbb49401f1137dd7d93974eee82d3153f5e87e7afd779`; fingerprint `57078f17ecc1cfe0a284f8a2bc56441dd204dd819aec51176bccf477e53c80b0`.
 - Proximo comando exato: `scripts/bootstrap.sh --ensure --profile full`. O operador deve autenticar o prompt `sudo`; depois, repetir o mesmo comando para provar idempotencia e somente entao executar `npm run host:certify`.
+
+### Retomada apos reinicio do host (2026-07-16)
+
+- O reinicio interrompeu o build M68K e deixou lock/staging. O orquestrador agora diferencia lock vivo de lock cujo PID morreu, registra a recuperacao e retoma o journal sem apagar trabalho verificavel.
+- A causa correta do configure GCC 13/libcody era exigir exatamente C++11; o lock fixa `-std=gnu++11`. `m68k-elf-gcc 13.2.0` terminou e o executavel passou o probe. O digest resultante e `6b5d81135a1161447e4cbb49401f1137dd7d93974eee82d3153f5e87e7afd779`; fingerprint `57078f17ecc1cfe0a284f8a2bc56441dd204dd819aec51176bccf477e53c80b0`.
+- A segunda execucao offline nao recompilou M68K. Ela tentou apenas o trabalho restante e produziu blockers precisos: `cmake:missing`, `sgdk:missing`, `pvsneslib:missing`.
+- O bootstrap nivel zero instala apenas seu substrato minimo e delega pacotes do profile ao host manager. Pacotes pacman ausentes sao deduplicados em uma transacao; recusa de sudo e offline geram blockers distintos.
+- `validate-upstream-linux.sh` resolve Node/npm e toolchains pelo `active-host.json`, registra digest/fingerprint, separa cores Libretro MD/SNES e executa analise Ghidra headless minima real. Na rodada, Ghidra passou; SGDK/PVSnesLib permaneceram bloqueados.
+- Gates da rodada: suite focada 28/28, check-tree/lint/TypeScript, frontend 503/2 skipped e clippy passaram. A repeticao `cargo test` pos-reboot ficou inconclusiva em compilacao/link no target do cartao; o ultimo Rust completo desta frente permanece 441/24 ignored. Nao ha claim `READY`.
+- Proximo comando exato permanece `scripts/bootstrap.sh --ensure --profile full` em terminal interativo, autenticando `sudo` para o `cmake`. Depois: repetir para idempotencia real e executar `npm run host:certify` somente se o report for `READY`.
 
 ## Historico Pre-Programa (nao usar como estado atual)
 

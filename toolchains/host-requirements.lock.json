@@ -477,7 +477,7 @@
             "/usr/bin/core_perl"
           ],
           "env": {
-            "CXXFLAGS": "-O2 -std=gnu++17"
+            "CXXFLAGS": "-O2 -std=gnu++11"
           },
           "steps": [
             {

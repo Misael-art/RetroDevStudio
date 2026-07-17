@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,12 @@ function runBash(args, env = {}) {
     encoding: "utf8",
     env: { ...process.env, ...env },
   });
+}
+
+function createExecutable(target, body) {
+  mkdirSync(path.dirname(target), { recursive: true });
+  writeFileSync(target, body, "utf8");
+  chmodSync(target, 0o755);
 }
 
 linuxDescribe("Linux host scripts", () => {
@@ -66,6 +72,72 @@ linuxDescribe("Linux host scripts", () => {
       expect(report.checks.desktop_e2e).toBeTruthy();
       expect(report.checks.libretro).toBeTruthy();
       expect(report.checks.rust_smoke.skipped_by_flag).toBe(true);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("resolves managed host tools from the active-host pointer", () => {
+    const tempDir = mkdtempSync(path.join(os.tmpdir(), "rds-linux-active-host-"));
+    const hostCacheBase = path.join(tempDir, "cache");
+    const activeCache = path.join(hostCacheBase, "locked-host");
+    const reportPath = path.join(tempDir, "upstream-validation-linux.json");
+    const managedBin = path.join(tempDir, "managed-bin");
+    const jdk = path.join(activeCache, "toolchains", "jdk");
+    const ghidra = path.join(activeCache, "toolchains", "ghidra");
+    const pinnedNode = path.join(hostCacheBase, "bootstrap", "node-v24.18.0-linux-x64", "bin", "node");
+    createExecutable(pinnedNode, `#!/bin/sh\nexec "${process.execPath}" "$@"\n`);
+    createExecutable(path.join(managedBin, "node"), "#!/bin/sh\nexit 99\n");
+    createExecutable(path.join(activeCache, "toolchains", "m68k-elf", "bin", "m68k-elf-gcc"), "#!/bin/sh\nexit 0\n");
+    createExecutable(path.join(jdk, "bin", "java"), "#!/bin/sh\nprintf 'openjdk version \\\"21.0.11\\\"\\n' >&2\n");
+    createExecutable(path.join(ghidra, "support", "analyzeHeadless"), "#!/bin/sh\nexit 0\n");
+    createExecutable(path.join(managedBin, "WebKitWebDriver"), "#!/bin/sh\nexit 0\n");
+    const cores = path.join(activeCache, "toolchains", "libretro", "cores");
+    mkdirSync(cores, { recursive: true });
+    writeFileSync(path.join(cores, "genesis_plus_gx_libretro.so"), "fixture", "utf8");
+    writeFileSync(path.join(cores, "snes9x_libretro.so"), "fixture", "utf8");
+    mkdirSync(hostCacheBase, { recursive: true });
+    writeFileSync(
+      path.join(hostCacheBase, "active-host.json"),
+      `${JSON.stringify({
+        schema: "rds-active-host/v1",
+        native_cache: activeCache,
+        lock_digest: "test-lock-digest",
+        host_fingerprint: "test-host-fingerprint",
+      })}\n`,
+      "utf8",
+    );
+
+    try {
+      const result = runBash([validateScript, "--skip-rust-tests", "--require-decomp-tools"], {
+        PATH: `${managedBin}${path.delimiter}${process.env.PATH}`,
+        RDS_HOST_CACHE: hostCacheBase,
+        RDS_VALIDATE_REPORT_PATH: reportPath,
+      });
+      expect(result.status).toBe(1);
+      const report = JSON.parse(readFileSync(reportPath, "utf8"));
+      expect(report.active_host_cache).toBe(activeCache);
+      expect(report.lock_digest).toBe("test-lock-digest");
+      expect(report.host_fingerprint).toBe("test-host-fingerprint");
+      expect(report.checks.baseline_tools.node).toBe(pinnedNode);
+      expect(report.checks.sgdk.native_compiler_path).toBe(
+        path.join(activeCache, "toolchains", "m68k-elf", "bin", "m68k-elf-gcc"),
+      );
+      expect(report.checks.sgdk.native_compiler).toBe(true);
+      expect(report.checks.desktop_e2e.native_webdriver).toBe(path.join(managedBin, "WebKitWebDriver"));
+      expect(report.checks.libretro.native_core).toBe(path.join(cores, "genesis_plus_gx_libretro.so"));
+      expect(report.checks.decompilation_optional).toMatchObject({
+        ghidra_ok: true,
+        jdk21_ok: true,
+        java_major: 21,
+        operational_probe: "passed",
+      });
+      expect(report.blocking_status_codes).toContain("sgdk_root_missing");
+      expect(report.blocking_status_codes).not.toContain("webdriver_missing");
+      expect(report.blocking_status_codes).not.toContain("libretro_md_core_missing");
+      expect(report.blocking_status_codes).not.toContain("libretro_snes_core_missing");
+      expect(report.blocking_status_codes).not.toContain("ghidra_missing");
+      expect(report.blocking_status_codes).not.toContain("jdk21_missing");
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

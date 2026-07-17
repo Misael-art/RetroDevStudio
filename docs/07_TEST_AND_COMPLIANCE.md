@@ -104,6 +104,13 @@
 16. Se a sessao WebDriver falhar em `DevToolsActivePort`/`chrome not reachable`, executar `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/diagnose-desktop-e2e.ps1 -SessionProbe` e registrar o resultado.
 17. Atualizacao de `docs/03_ROADMAP_MVP.md` e `docs/06_AI_MEMORY_BANK.md` quando o estado do produto mudar
 
+### 3.0.1 Evidencia de host Linux
+
+- `scripts/validate-upstream-linux.sh` deve consumir o ponteiro nativo `active-host.json`; copiar caminhos gerenciados para diagnosticos paralelos e proibido.
+- O report Linux deve registrar `lock_digest` e `host_fingerprint` da mesma rodada, localizar separadamente cores Libretro MD e SNES e rejeitar binarios Windows como dependencia Linux.
+- Quando Ghidra for obrigatorio, presenca do arquivo nao basta: o runner deve executar uma analise headless minima com JDK21 e registrar `operational_probe: passed`.
+- Report `BLOCKED` e evidência valida de diagnostico, mas nunca satisfaz `host:certify`. Build ROM, execucao de frames e sessao WebDriver permanecem obrigatorios para `READY` institucional.
+
 ### 3.1 Agregacao canonica de readiness
 - `node scripts/release-readiness.mjs` gera um snapshot objetivo do estado de release em `src-tauri/target-test/validation/release-readiness.json` e `release-readiness.md`.
 - `npm run release:readiness:baseline` reexecuta os 6 gates locais e, em Windows, tambem dispara automaticamente `build:debug` e `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests`; se `toolchains/webdriver/msedgedriver.exe` estiver disponivel, o agregador tambem executa o `desktop E2E` canonico com `--skip-build`.

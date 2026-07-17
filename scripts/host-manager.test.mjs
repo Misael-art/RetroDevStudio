@@ -11,10 +11,12 @@ import {
   defaultManifestPath,
   detectHost,
   diagnose,
+  ensure,
   ensurePortableArtifact,
   expandTokens,
   installSourceBuild,
   isSupportedHost,
+  pacmanBatchPlan,
   probeRequirement,
   readManifest,
   resolveCommand,
@@ -97,6 +99,30 @@ describe("host requirements contract", () => {
     }
   });
 
+  it("blocks offline when a verified portable artifact is absent", () => {
+    const sha256 = createHash("sha256").update(`missing-${Date.now()}`).digest("hex");
+
+    expect(ensurePortableArtifact({ id: "missing", sha256, size: 64 }, { offline: true })).toEqual({
+      ok: false,
+      reason: "offline_missing",
+    });
+  });
+
+  it("reports insufficient portable-cache space before starting a download", () => {
+    const sha256 = createHash("sha256").update(`space-${Date.now()}`).digest("hex");
+
+    expect(
+      ensurePortableArtifact(
+        { id: "large", sha256, size: 1024 },
+        { offline: false, statfs: () => ({ bavail: 0, bsize: 1 }) },
+      ),
+    ).toMatchObject({
+      ok: false,
+      reason: "insufficient_portable_cache_space",
+      free_bytes: 0,
+    });
+  });
+
   it("serializes concurrent host mutations with an operation lock", () => {
     const directory = tempDir();
     const first = acquireOperationLock(directory);
@@ -105,6 +131,33 @@ describe("host requirements contract", () => {
     expect(acquireOperationLock(directory)).toBeNull();
     first.release();
     expect(acquireOperationLock(directory)).not.toBeNull();
+  });
+
+  it("recovers an operation lock left by a dead process", () => {
+    const directory = tempDir();
+    const lockPath = path.join(directory, "operation.lock");
+    mkdirSync(lockPath);
+    writeFileSync(
+      path.join(lockPath, "owner.json"),
+      `${JSON.stringify({ pid: Number.MAX_SAFE_INTEGER, started_at: "2000-01-01T00:00:00.000Z" })}\n`,
+    );
+
+    const recovered = acquireOperationLock(directory);
+    expect(recovered).not.toBeNull();
+    expect(recovered.recovered_stale).toBe(true);
+    recovered.release();
+  });
+
+  it("deduplicates Arch substrate packages into one privileged transaction", () => {
+    const requirements = [
+      { id: "first", install_by_platform: { linux: { kind: "pacman", packages: ["cmake", "make"] } } },
+      { id: "second", install_by_platform: { linux: { kind: "pacman", packages: ["make", "bison"] } } },
+      { id: "artifact", install_by_platform: { linux: { kind: "artifact", artifact: "fixture" } } },
+    ];
+
+    const plan = pacmanBatchPlan(requirements, { host: { platform: "linux" } });
+    expect(plan.requirements.map((requirement) => requirement.id)).toEqual(["first", "second"]);
+    expect(plan.packages).toEqual(["cmake", "make", "bison"]);
   });
 
   it("preserves and resumes a verified source build after an interrupted step", () => {
@@ -200,6 +253,33 @@ describe("host detection and probes", () => {
     expect(resolveCommand(["native-tool"], { platform: "linux" }, { RDS_HOST_TEST_PATH: directory, PATH: directory })).toBe(program);
   });
 
+  it("prefers the pinned bootstrap Node and npm over incompatible host versions", () => {
+    const directory = tempDir();
+    const hostCache = path.join(directory, "cache");
+    const bootstrapBin = path.join(hostCache, "bootstrap", "node-v24.18.0-linux-x64", "bin");
+    executable(bootstrapBin, "node", "#!/bin/sh\nprintf 'v24.18.0\\n'\n");
+    executable(bootstrapBin, "npm", "#!/bin/sh\nprintf '11.16.0\\n'\n");
+    const incompatibleBin = path.join(directory, "system-bin");
+    executable(incompatibleBin, "node", "#!/bin/sh\nprintf 'v99.0.0\\n'\n");
+    executable(incompatibleBin, "npm", "#!/bin/sh\nprintf '99.0.0\\n'\n");
+    const reportPath = path.join(directory, "report.json");
+
+    const { report } = diagnose({
+      reportPath,
+      env: {
+        ...process.env,
+        PATH: `${incompatibleBin}${path.delimiter}${process.env.PATH}`,
+        RDS_HOST_TEST_PLATFORM: "linux",
+        RDS_HOST_TEST_ARCH: "x64",
+        RDS_HOST_TEST_OS_ID: "manjaro",
+        RDS_HOST_CACHE: hostCache,
+      },
+    });
+
+    expect(report.checks.find((check) => check.id === "node")).toMatchObject({ status: "ready", version: "v24.18.0" });
+    expect(report.checks.find((check) => check.id === "npm")).toMatchObject({ status: "ready", version: "11.16.0" });
+  });
+
   it("marks a present core as incompatible when its individual hash drifts", () => {
     const directory = tempDir();
     const core = path.join(directory, "core.so");
@@ -241,5 +321,125 @@ describe("host detection and probes", () => {
     expect(report.state).toBe("UNSUPPORTED");
     expect(report.checks).toEqual([]);
     expect(JSON.parse(readFileSync(reportPath, "utf8")).host_fingerprint).toBe(report.host_fingerprint);
+  });
+
+  it("performs repeated READY ensures without repair actions", () => {
+    const directory = tempDir();
+    const bin = path.join(directory, "bin");
+    executable(bin, "fixture", "#!/bin/sh\nprintf 'fixture 1.0.0\\n'\n");
+    const manifestPath = path.join(directory, "requirements.json");
+    const reportPath = path.join(directory, "report.json");
+    writeFileSync(
+      manifestPath,
+      `${JSON.stringify({
+        schema: "rds-host-requirements/v1",
+        profile: "full",
+        supported_hosts: [{ platform: "linux", arch: "x64", os_ids: ["manjaro"] }],
+        pins: { node: "24.18.0" },
+        sources: {},
+        artifacts: [],
+        requirements: [
+          {
+            id: "fixture",
+            label: "Fixture",
+            probe: { kind: "command", names: ["fixture"], version_args: ["--version"], version_pattern: "1\\.0\\.0" },
+          },
+        ],
+      }, null, 2)}\n`,
+    );
+    const options = {
+      manifestPath,
+      reportPath,
+      env: {
+        ...process.env,
+        PATH: `${bin}${path.delimiter}${process.env.PATH}`,
+        RDS_HOST_TEST_PLATFORM: "linux",
+        RDS_HOST_TEST_ARCH: "x64",
+        RDS_HOST_TEST_OS_ID: "manjaro",
+        RDS_HOST_CACHE: path.join(directory, "cache"),
+      },
+    };
+
+    const first = ensure(options);
+    const second = ensure(options);
+    expect(first.report).toMatchObject({ state: "READY", actions: [] });
+    expect(second.report).toMatchObject({ state: "READY", actions: [] });
+    expect(existsSync(path.join(directory, "cache", first.report.lock_digest, "operation-journal.json"))).toBe(false);
+  });
+
+  it("reports a live operation lock as a precise blocker", () => {
+    const directory = tempDir();
+    const manifestPath = path.join(directory, "requirements.json");
+    const reportPath = path.join(directory, "report.json");
+    const cache = path.join(directory, "cache");
+    writeFileSync(
+      manifestPath,
+      `${JSON.stringify({
+        schema: "rds-host-requirements/v1",
+        profile: "full",
+        supported_hosts: [{ platform: "linux", arch: "x64", os_ids: ["manjaro"] }],
+        pins: { node: "24.18.0" },
+        sources: {},
+        artifacts: [],
+        requirements: [{ id: "missing", label: "Missing", probe: { kind: "command", names: ["not-present-rds"] } }],
+      }, null, 2)}\n`,
+    );
+    const liveLock = acquireOperationLock(cache);
+    try {
+      const result = ensure({
+        manifestPath,
+        reportPath,
+        env: {
+          ...process.env,
+          RDS_HOST_TEST_PLATFORM: "linux",
+          RDS_HOST_TEST_ARCH: "x64",
+          RDS_HOST_TEST_OS_ID: "manjaro",
+          RDS_HOST_CACHE: cache,
+        },
+      });
+      expect(result.exitCode).toBe(21);
+      expect(result.report).toMatchObject({ state: "BLOCKED" });
+      expect(result.report.blockers).toContain("operation_lock:busy");
+    } finally {
+      liveLock.release();
+    }
+  });
+
+  it("persists stale-lock recovery in both report and journal", () => {
+    const directory = tempDir();
+    const manifestPath = path.join(directory, "requirements.json");
+    const reportPath = path.join(directory, "report.json");
+    const cache = path.join(directory, "cache");
+    writeFileSync(
+      manifestPath,
+      `${JSON.stringify({
+        schema: "rds-host-requirements/v1",
+        profile: "full",
+        supported_hosts: [{ platform: "linux", arch: "x64", os_ids: ["manjaro"] }],
+        pins: { node: "24.18.0" },
+        sources: {},
+        artifacts: [],
+        requirements: [{ id: "missing", label: "Missing", probe: { kind: "command", names: ["not-present-rds"] } }],
+      }, null, 2)}\n`,
+    );
+    const lockPath = path.join(cache, "operation.lock");
+    mkdirSync(lockPath, { recursive: true });
+    writeFileSync(path.join(lockPath, "owner.json"), `${JSON.stringify({ pid: Number.MAX_SAFE_INTEGER })}\n`);
+    const options = {
+      manifestPath,
+      reportPath,
+      env: {
+        ...process.env,
+        RDS_HOST_TEST_PLATFORM: "linux",
+        RDS_HOST_TEST_ARCH: "x64",
+        RDS_HOST_TEST_OS_ID: "manjaro",
+        RDS_HOST_CACHE: cache,
+      },
+    };
+
+    const result = ensure(options);
+    const journal = JSON.parse(readFileSync(path.join(cache, result.report.lock_digest, "operation-journal.json"), "utf8"));
+    expect(result.report.actions).toContainEqual({ id: "operation_lock", ok: true, recovered_stale: true });
+    expect(journal.actions).toContainEqual({ id: "operation_lock", ok: true, recovered_stale: true });
   });
 });

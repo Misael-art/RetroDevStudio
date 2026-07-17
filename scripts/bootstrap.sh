@@ -121,7 +121,7 @@ command_version() {
   fi
 }
 
-ensure_arch_substrate() {
+ensure_launcher_substrate() {
   if [[ "$ENSURE_HOST" != "1" ]]; then
     return 0
   fi
@@ -138,31 +138,18 @@ ensure_arch_substrate() {
   local missing_packages=()
   command_exists curl || missing_packages+=(curl)
   command_exists tar || missing_packages+=(tar)
-  command_exists unzip || missing_packages+=(unzip)
   command_exists xz || missing_packages+=(xz)
   command_exists git || missing_packages+=(git)
   command_exists rustup || missing_packages+=(rustup)
-  command_exists gcc || missing_packages+=(base-devel)
-  command_exists make || missing_packages+=(make)
-  command_exists cmake || missing_packages+=(cmake)
-  command_exists 7z || missing_packages+=(7zip)
-  command_exists bison || missing_packages+=(bison)
-  command_exists flex || missing_packages+=(flex)
-  command_exists makeinfo || missing_packages+=(texinfo)
-  command_exists pkg-config || missing_packages+=(pkgconf)
-  if command_exists pkg-config; then
-    pkg-config --exists webkit2gtk-4.1 || missing_packages+=(webkit2gtk-4.1)
-    pkg-config --exists librsvg-2.0 || missing_packages+=(librsvg)
-  fi
   if [[ "${#missing_packages[@]}" -eq 0 ]]; then
-    step "HOST" "OK" "Arch/Manjaro substrate already satisfies the probes; sudo not required."
+    step "HOST" "OK" "Launcher substrate already satisfies the probes; sudo not required."
     return 0
   fi
   if [[ "$OFFLINE" == "1" ]]; then
     step "HOST" "FAIL" "Offline bootstrap cannot install system packages: ${missing_packages[*]}"
     return 10
   fi
-  step "HOST" "INFO" "Installing missing substrate packages: ${missing_packages[*]}"
+  step "HOST" "INFO" "Installing missing launcher packages: ${missing_packages[*]}"
   sudo pacman -S --needed --noconfirm "${missing_packages[@]}"
 }
 
@@ -352,11 +339,15 @@ run_upstream_validation() {
 step "BOOT" "INFO" "RetroDev Studio Linux bootstrap at $PROJECT_ROOT"
 
 assert_existing_checkout || exit 1
-ensure_arch_substrate || exit $?
+ensure_launcher_substrate || exit $?
 ensure_pinned_node || exit $?
 ensure_pinned_rust || exit $?
-show_diagnostics
-diagnostic_status=$?
+if [[ "$ENSURE_HOST" == "1" ]]; then
+  diagnostic_status=0
+else
+  show_diagnostics
+  diagnostic_status=$?
+fi
 
 if [[ "$DIAGNOSTICS_ONLY" == "1" ]]; then
   step "BOOT" "OK" "Diagnostics-only mode complete."
