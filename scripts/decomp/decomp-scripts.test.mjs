@@ -26,6 +26,14 @@ const HAS_M68K_TOOLS =
   hasCmd("m68k-elf-as") && hasCmd("m68k-elf-ld") && hasCmd("m68k-elf-objdump") &&
   hasCmd("m68k-elf-objcopy");
 
+// build_reproducible.sh has fail-hard preconditions (GDK + gcc/as) that run
+// before the per-project [BUILD-FAIL] loop; the missing-projects regression
+// can only be exercised on hosts where those preconditions pass.
+const GDK_ROOT = process.env.GDK ?? "/mnt/sdcard/Projects/MegaDrive_DEV/sdk/sgdk-2.11";
+const HAS_SGDK_BUILD_TOOLCHAIN =
+  hasCmd("m68k-elf-gcc") && hasCmd("m68k-elf-as") &&
+  existsSync(path.join(GDK_ROOT, "makefile.gen"));
+
 function runBash(scriptPath, env = {}, timeoutMs = 60_000) {
   return spawnSync("bash", [scriptPath], {
     cwd: repoRoot,
@@ -111,7 +119,9 @@ linuxDescribe("scripts/decomp fail-hard behaviour (empty corpus)", () => {
     expect(result.stdout + result.stderr).not.toMatch(/GATE PASSED/);
   });
 
-  it("build_reproducible.sh fails (non-zero exit) when named projects are absent from an existing corpus dir", () => {
+  (HAS_SGDK_BUILD_TOOLCHAIN ? it : it.skip)(
+    "build_reproducible.sh fails (non-zero exit) when named projects are absent from an existing corpus dir",
+    () => {
     // Regression for the false-positive found in this audit: previously
     // `cp ... || true` silently produced an empty project dir, and SGDK still
     // built an identical trivial bootstrap-only ROM every time, reporting
