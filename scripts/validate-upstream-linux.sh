@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Linux upstream validation for RetroDev Studio.
-# Detects native host dependencies and writes an audit JSON report.
+# Detects native host dependencies, applies host cache hygiene (GTK3 compose
+# cache) and writes an audit JSON report.
 
 set -u
 
@@ -26,6 +27,7 @@ Environment:
   SGDK_ROOT or GDK          Native Linux SGDK root.
   RDS_EDGE_DRIVER_PATH      Native Linux WebDriver path.
   RETRODEV_GHIDRA_HOME      Ghidra installation root containing support/analyzeHeadless.
+  RDS_GTK3_COMPOSE_CACHE_DIR  Override GTK3 compose cache dir used by host hygiene.
 USAGE
 }
 
@@ -233,6 +235,46 @@ fi
 
 add_phase "host_detection" "completed"
 
+# Higiene do cache de compose do GTK3.
+# Apos upgrade do gtk3 no host, caches antigos em ~/.cache/gtk-3.0/compose
+# disparam "Gtk-WARNING: cache version is different" no primeiro launch do app.
+# Caches mais antigos que a libgtk-3 instalada sao removidos aqui; o GTK
+# regenera o cache silenciosamente no proximo launch.
+detect_gtk3_lib() {
+  local candidate
+  for candidate in \
+    /usr/lib/libgtk-3.so.0 \
+    /usr/lib64/libgtk-3.so.0 \
+    /usr/lib/x86_64-linux-gnu/libgtk-3.so.0 \
+    /usr/lib/aarch64-linux-gnu/libgtk-3.so.0; do
+    if [[ -e "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+gtk3_lib_path="$(detect_gtk3_lib || true)"
+gtk3_compose_cache_dir="${RDS_GTK3_COMPOSE_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/gtk-3.0/compose}"
+gtk3_hygiene_status="not_applicable"
+gtk3_stale_caches_removed=0
+if [[ -n "$gtk3_lib_path" && -d "$gtk3_compose_cache_dir" ]]; then
+  gtk3_hygiene_status="clean"
+  for compose_cache in "$gtk3_compose_cache_dir"/*.cache; do
+    [[ -f "$compose_cache" ]] || continue
+    if [[ "$compose_cache" -ot "$gtk3_lib_path" ]]; then
+      rm -f "$compose_cache"
+      gtk3_stale_caches_removed=$((gtk3_stale_caches_removed + 1))
+    fi
+  done
+  if [[ "$gtk3_stale_caches_removed" -gt 0 ]]; then
+    gtk3_hygiene_status="regenerated"
+    add_warning "gtk3_compose_cache_stale_removed"
+  fi
+fi
+add_phase "gtk3_cache_hygiene" "completed"
+
 if [[ "${#status_codes[@]}" -eq 0 && "$SKIP_RUST_TESTS" != "1" ]]; then
   rust_smoke_log="$VALIDATION_DIR/linux-upstream-rust-smoke.log"
   echo "Running official SGDK smoke test..."
@@ -271,6 +313,7 @@ export success node_path npm_path cargo_path rustc_path make_path java_path taur
 export sgdk_root sgdk_makefile_ok sgdk_compiler_ok sgdk_make_ok sgdk_java_ok
 export webdriver_path ghidra_path ghidra_ok jdk21_ok java_major libretro_core_path
 export rust_smoke_status rust_smoke_log SKIP_RUST_TESTS REQUIRE_DECOMP_TOOLS
+export gtk3_lib_path gtk3_compose_cache_dir gtk3_hygiene_status gtk3_stale_caches_removed
 
 node <<'NODE'
 const fs = require("node:fs");
@@ -325,6 +368,13 @@ const report = {
       skipped_by_flag: process.env.SKIP_RUST_TESTS === "1",
       status: process.env.rust_smoke_status,
       log: process.env.rust_smoke_log || null,
+    },
+    gtk3_host_hygiene: {
+      applicable: process.env.gtk3_hygiene_status !== "not_applicable",
+      gtk3_lib: process.env.gtk3_lib_path || null,
+      compose_cache_dir: process.env.gtk3_compose_cache_dir || null,
+      stale_caches_removed: Number(process.env.gtk3_stale_caches_removed || 0),
+      status: process.env.gtk3_hygiene_status,
     },
   },
 };
