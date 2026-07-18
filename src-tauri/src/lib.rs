@@ -316,24 +316,67 @@ fn validate_scene_draft(project_dir: String, scene_json: String) -> DraftValidat
     validate_scene_draft_impl(Path::new(&project_dir), &scene_json)
 }
 
-#[tauri::command]
-fn build_project(app: AppHandle, project_dir: String) -> BuildResult {
-    let dir = PathBuf::from(&project_dir);
-    run_build(&dir, move |line: BuildLogLine| {
-        let _ = app.emit("build://log", &line);
-    })
+/// Executa o trabalho pesado de um comando fora do main thread.
+/// Comandos sincronos do Tauri v2 rodam no main thread; operacoes longas
+/// (make do SGDK, download de dependencias) congelariam a UI e segurariam
+/// os eventos de progresso emitidos ao webview ate o final da operacao.
+/// `fallback` so e usado se a tarefa terminar de forma anormal (panic).
+async fn run_heavy_command_off_main_thread<T, F>(task: F, fallback: impl FnOnce() -> T) -> T
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    match tauri::async_runtime::spawn_blocking(task).await {
+        Ok(result) => result,
+        Err(_) => fallback(),
+    }
+}
+
+fn interrupted_build_result() -> BuildResult {
+    BuildResult {
+        ok: false,
+        rom_path: String::new(),
+        log: vec![BuildLogLine {
+            level: "error".to_string(),
+            message: "O que quebrou: a tarefa de build terminou de forma inesperada (panic). Por que importa: nenhuma ROM foi gerada. Onde corrigir: veja o log do processo desktop. Proxima acao: rode o build novamente e reporte o log se persistir.".to_string(),
+        }],
+        diagnostics: Vec::new(),
+    }
 }
 
 #[tauri::command]
-fn build_multi_target(
+async fn build_project(app: AppHandle, project_dir: String) -> BuildResult {
+    let dir = PathBuf::from(&project_dir);
+    run_heavy_command_off_main_thread(
+        move || {
+            run_build(&dir, move |line: BuildLogLine| {
+                let _ = app.emit("build://log", &line);
+            })
+        },
+        interrupted_build_result,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn build_multi_target(
     app: AppHandle,
     project_dir: String,
     targets: Vec<String>,
 ) -> MultiTargetBuildResult {
     let dir = PathBuf::from(&project_dir);
-    run_build_multi_target(&dir, &targets, move |line: BuildLogLine| {
-        let _ = app.emit("build://log", &line);
-    })
+    run_heavy_command_off_main_thread(
+        move || {
+            run_build_multi_target(&dir, &targets, move |line: BuildLogLine| {
+                let _ = app.emit("build://log", &line);
+            })
+        },
+        || MultiTargetBuildResult {
+            ok: false,
+            results: Vec::new(),
+        },
+    )
+    .await
 }
 
 // ── Hardware status command ───────────────────────────────────────────────────
@@ -1003,7 +1046,7 @@ use tools::asset_extractor::{extract_assets, BppMode, ExtractionResult};
 use tools::deep_profiler::{profile_rom, ProfileReport};
 use tools::dependency_manager::{
     dependency_for_rom_path, dependency_status_report, install_dependency, DependencyInstallResult,
-    DependencyLogLine, DependencyStatusReport, RomDependencyResult,
+    DependencyLogLine, DependencyStatus, DependencyStatusReport, RomDependencyResult,
 };
 use tools::patch_studio::{
     apply_bps_file, apply_ips_file, create_bps_file_compliance, create_ips_file_compliance,
@@ -1807,10 +1850,44 @@ fn third_party_get_status() -> DependencyStatusReport {
 }
 
 #[tauri::command]
-fn third_party_install(app: AppHandle, dependency_id: String) -> DependencyInstallResult {
-    install_dependency(&dependency_id, move |line: DependencyLogLine| {
-        let _ = app.emit("deps://log", &line);
-    })
+async fn third_party_install(app: AppHandle, dependency_id: String) -> DependencyInstallResult {
+    let task_dependency_id = dependency_id.clone();
+    run_heavy_command_off_main_thread(
+        move || {
+            install_dependency(&task_dependency_id, move |line: DependencyLogLine| {
+                let _ = app.emit("deps://log", &line);
+            })
+        },
+        move || interrupted_install_result(&dependency_id),
+    )
+    .await
+}
+
+fn interrupted_install_result(dependency_id: &str) -> DependencyInstallResult {
+    let message = "O que quebrou: a instalacao terminou de forma inesperada (panic). Por que importa: a dependencia pode ter ficado incompleta. Onde corrigir: veja o log do processo desktop. Proxima acao: revalide o Runtime Setup e tente instalar novamente.".to_string();
+    DependencyInstallResult {
+        ok: false,
+        dependency_id: dependency_id.to_string(),
+        message: message.clone(),
+        status: DependencyStatus {
+            id: dependency_id.to_string(),
+            label: dependency_id.to_string(),
+            installed: false,
+            version: None,
+            status_code: "missing".to_string(),
+            status_label: "AUSENTE".to_string(),
+            severity: "blocking".to_string(),
+            install_dir: String::new(),
+            source_url: String::new(),
+            auto_install_supported: false,
+            cache_available: false,
+            manual_configuration_required: true,
+            actionable_message: message,
+            notes: Vec::new(),
+            issues: Vec::new(),
+        },
+        log: Vec::new(),
+    }
 }
 
 #[tauri::command]
