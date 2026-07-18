@@ -84,7 +84,7 @@ use emulator::libretro_ffi::{
     EmulatorCore, JoypadState, ReplayCapture, RuntimeExecutionTraceCapture,
 };
 use hardware::constraint_engine;
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use ugdm::entities::{PatchAuditEntry, Scene};
 
@@ -321,6 +321,21 @@ where
         Ok(result) => result,
         Err(_) => fallback(),
     }
+}
+
+fn interrupted_command_message(command: &str) -> String {
+    format!("O que quebrou: {command} terminou de forma inesperada (panic). Por que importa: o resultado nao e confiavel. Onde corrigir: veja o log do processo desktop. Proxima acao: rode novamente e reporte o log se persistir.")
+}
+
+/// Variante de `run_heavy_command_off_main_thread` para comandos que retornam
+/// `Result<T, String>`: um panic na tarefa vira `Err` com mensagem acionavel.
+async fn run_heavy_result_command<T, F>(command_name: &'static str, task: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
+{
+    run_heavy_command_off_main_thread(task, move || Err(interrupted_command_message(command_name)))
+        .await
 }
 
 fn interrupted_build_result() -> BuildResult {
@@ -748,7 +763,7 @@ fn emulator_play_replay(
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 struct ParityCommandResult {
     ok: bool,
     message: String,
@@ -762,11 +777,31 @@ struct ParityCommandResult {
 }
 
 #[tauri::command]
-fn parity_run_capture(
+async fn parity_run_capture(
+    app: AppHandle,
     project_dir: String,
     golden_path: String,
     frames: Option<u32>,
-    emu: State<EmulatorCoreState>,
+) -> ParityCommandResult {
+    run_heavy_command_off_main_thread(
+        move || {
+            let emu = app.state::<EmulatorCoreState>();
+            parity_run_capture_impl(project_dir, golden_path, frames, &emu)
+        },
+        || ParityCommandResult {
+            ok: false,
+            message: interrupted_command_message("parity_run_capture"),
+            ..Default::default()
+        },
+    )
+    .await
+}
+
+fn parity_run_capture_impl(
+    project_dir: String,
+    golden_path: String,
+    frames: Option<u32>,
+    emu: &EmulatorCoreState,
 ) -> ParityCommandResult {
     let trimmed_project = project_dir.trim();
     if trimmed_project.is_empty() {
@@ -922,7 +957,7 @@ fn parity_run_capture(
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 struct CrossCoreParityResult {
     ok: bool,
     message: String,
@@ -939,7 +974,7 @@ struct CrossCoreParityResult {
     report: Option<core::parity_harness::CrossCoreReport>,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 struct CycleReportResult {
     ok: bool,
     message: String,
@@ -950,7 +985,7 @@ struct CycleReportResult {
     report: Option<core::parity_harness::CycleReport>,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 struct ReferenceCandidateParityResult {
     ok: bool,
     message: String,
@@ -976,7 +1011,27 @@ struct ReferenceCandidateParityResult {
 }
 
 #[tauri::command]
-fn parity_run_cross_core(
+async fn parity_run_cross_core(
+    project_dir: String,
+    golden_path: String,
+    core_a_path: String,
+    core_b_path: String,
+    frames: Option<u32>,
+) -> CrossCoreParityResult {
+    run_heavy_command_off_main_thread(
+        move || {
+            parity_run_cross_core_impl(project_dir, golden_path, core_a_path, core_b_path, frames)
+        },
+        || CrossCoreParityResult {
+            ok: false,
+            message: interrupted_command_message("parity_run_cross_core"),
+            ..Default::default()
+        },
+    )
+    .await
+}
+
+fn parity_run_cross_core_impl(
     project_dir: String,
     golden_path: String,
     core_a_path: String,
@@ -1137,7 +1192,38 @@ fn parity_run_cross_core(
 /// ROM artifact and "first found" is not a meaningful selection criterion.
 /// Providing only one of the two explicit paths is rejected as ambiguous.
 #[tauri::command]
-fn parity_run_reference_candidate(
+async fn parity_run_reference_candidate(
+    reference_project_dir: String,
+    candidate_project_dir: String,
+    golden_path: String,
+    core_path: String,
+    frames: Option<u32>,
+    reference_rom_path: Option<String>,
+    candidate_rom_path: Option<String>,
+) -> ReferenceCandidateParityResult {
+    run_heavy_command_off_main_thread(
+        move || {
+            parity_run_reference_candidate_impl(
+                reference_project_dir,
+                candidate_project_dir,
+                golden_path,
+                core_path,
+                frames,
+                reference_rom_path,
+                candidate_rom_path,
+            )
+        },
+        || ReferenceCandidateParityResult {
+            ok: false,
+            message: interrupted_command_message("parity_run_reference_candidate"),
+            ..Default::default()
+        },
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+fn parity_run_reference_candidate_impl(
     reference_project_dir: String,
     candidate_project_dir: String,
     golden_path: String,
@@ -1280,7 +1366,24 @@ fn parity_run_reference_candidate(
 }
 
 #[tauri::command]
-fn parity_run_cycle_report(
+async fn parity_run_cycle_report(
+    project_dir: String,
+    golden_path: String,
+    core_path: String,
+    frames: Option<u32>,
+) -> CycleReportResult {
+    run_heavy_command_off_main_thread(
+        move || parity_run_cycle_report_impl(project_dir, golden_path, core_path, frames),
+        || CycleReportResult {
+            ok: false,
+            message: interrupted_command_message("parity_run_cycle_report"),
+            ..Default::default()
+        },
+    )
+    .await
+}
+
+fn parity_run_cycle_report_impl(
     project_dir: String,
     golden_path: String,
     core_path: String,
@@ -1636,25 +1739,43 @@ fn patch_apply_bps(rom_path: String, patch_path: String, output_path: String) ->
 }
 
 #[tauri::command]
-fn profiler_analyze_rom(rom_path: String) -> ProfileReport {
+async fn profiler_analyze_rom(rom_path: String) -> ProfileReport {
+    run_heavy_command_off_main_thread(
+        move || profiler_analyze_rom_impl(rom_path),
+        ProfileReport::default,
+    )
+    .await
+}
+
+fn profiler_analyze_rom_impl(rom_path: String) -> ProfileReport {
     profile_rom(Path::new(&rom_path))
 }
 
 #[tauri::command]
-fn assets_extract(
+async fn assets_extract(
     rom_path: String,
     output_dir: String,
     max_tiles: u32,
     palette_slot: u8,
     bpp_mode: String,
 ) -> ExtractionResult {
-    extract_assets(
-        Path::new(&rom_path),
-        Path::new(&output_dir),
-        max_tiles,
-        palette_slot,
-        BppMode::from_str(&bpp_mode),
+    run_heavy_command_off_main_thread(
+        move || {
+            extract_assets(
+                Path::new(&rom_path),
+                Path::new(&output_dir),
+                max_tiles,
+                palette_slot,
+                BppMode::from_str(&bpp_mode),
+            )
+        },
+        || ExtractionResult {
+            ok: false,
+            error: interrupted_command_message("assets_extract"),
+            ..Default::default()
+        },
     )
+    .await
 }
 
 #[tauri::command]
@@ -1668,14 +1789,25 @@ fn reverse_explorer_read(
 }
 
 #[tauri::command]
-fn rom_analyze(rom_path: String) -> Result<RomAnalysisManifest, String> {
-    tools::reverse::analyze_rom(&rom_path)
+async fn rom_analyze(rom_path: String) -> Result<RomAnalysisManifest, String> {
+    run_heavy_result_command("rom_analyze", move || tools::reverse::analyze_rom(&rom_path)).await
 }
 
 #[tauri::command]
-fn rom_analyze_with_emulator_trace(
+async fn rom_analyze_with_emulator_trace(
+    app: AppHandle,
     rom_path: String,
-    emu: State<EmulatorCoreState>,
+) -> Result<RomAnalysisManifest, String> {
+    run_heavy_result_command("rom_analyze_with_emulator_trace", move || {
+        let emu = app.state::<EmulatorCoreState>();
+        rom_analyze_with_emulator_trace_impl(rom_path, &emu)
+    })
+    .await
+}
+
+fn rom_analyze_with_emulator_trace_impl(
+    rom_path: String,
+    emu: &EmulatorCoreState,
 ) -> Result<RomAnalysisManifest, String> {
     let trace_capture = {
         let core = emu.0.lock().map_err(|e| e.to_string())?;
@@ -1703,41 +1835,56 @@ fn rom_analyze_with_emulator_trace(
 }
 
 #[tauri::command]
-fn rom_disassemble(
+async fn rom_disassemble(
     rom_path: String,
     offset: usize,
     length: usize,
 ) -> Result<DisassemblyResult, String> {
-    tools::reverse::disassemble_rom(&rom_path, offset, length)
-}
-
-#[tauri::command]
-fn rom_get_xrefs(rom_path: String) -> Result<Vec<CodeXref>, String> {
-    tools::reverse::get_xrefs(&rom_path)
-}
-
-#[tauri::command]
-fn rom_get_call_graph(rom_path: String) -> Result<Vec<CallGraphEdge>, String> {
-    tools::reverse::get_call_graph(&rom_path)
-}
-
-#[tauri::command]
-fn rom_extract_graphics(rom_path: String) -> Result<Vec<GraphicsCandidate>, String> {
-    tools::reverse::extract_graphics(&rom_path)
-}
-
-#[tauri::command]
-fn rom_extract_text(rom_path: String) -> Result<RomTextExtractionResult, String> {
-    let (text_regions, pointer_tables) = tools::reverse::extract_text(&rom_path)?;
-    Ok(RomTextExtractionResult {
-        text_regions,
-        pointer_tables,
+    run_heavy_result_command("rom_disassemble", move || {
+        tools::reverse::disassemble_rom(&rom_path, offset, length)
     })
+    .await
 }
 
 #[tauri::command]
-fn rom_extract_audio(rom_path: String) -> Result<Vec<AudioCandidate>, String> {
-    tools::reverse::extract_audio(&rom_path)
+async fn rom_get_xrefs(rom_path: String) -> Result<Vec<CodeXref>, String> {
+    run_heavy_result_command("rom_get_xrefs", move || tools::reverse::get_xrefs(&rom_path)).await
+}
+
+#[tauri::command]
+async fn rom_get_call_graph(rom_path: String) -> Result<Vec<CallGraphEdge>, String> {
+    run_heavy_result_command("rom_get_call_graph", move || {
+        tools::reverse::get_call_graph(&rom_path)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rom_extract_graphics(rom_path: String) -> Result<Vec<GraphicsCandidate>, String> {
+    run_heavy_result_command("rom_extract_graphics", move || {
+        tools::reverse::extract_graphics(&rom_path)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rom_extract_text(rom_path: String) -> Result<RomTextExtractionResult, String> {
+    run_heavy_result_command("rom_extract_text", move || {
+        let (text_regions, pointer_tables) = tools::reverse::extract_text(&rom_path)?;
+        Ok(RomTextExtractionResult {
+            text_regions,
+            pointer_tables,
+        })
+    })
+    .await
+}
+
+#[tauri::command]
+async fn rom_extract_audio(rom_path: String) -> Result<Vec<AudioCandidate>, String> {
+    run_heavy_result_command("rom_extract_audio", move || {
+        tools::reverse::extract_audio(&rom_path)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -3808,7 +3955,19 @@ fn create_project_from_template(
 }
 
 #[tauri::command]
-fn import_external_project(
+async fn import_external_project(
+    project_name: String,
+    base_dir: String,
+    profile_id: String,
+    project_path: String,
+) -> Result<OpenProjectResult, String> {
+    run_heavy_result_command("import_external_project", move || {
+        import_external_project_impl(project_name, base_dir, profile_id, project_path)
+    })
+    .await
+}
+
+fn import_external_project_impl(
     project_name: String,
     base_dir: String,
     profile_id: String,
@@ -3838,7 +3997,18 @@ fn import_external_project(
 }
 
 #[tauri::command]
-fn import_sgdk_project(
+async fn import_sgdk_project(
+    project_name: String,
+    base_dir: String,
+    sgdk_path: String,
+) -> Result<OpenProjectResult, String> {
+    run_heavy_result_command("import_sgdk_project", move || {
+        import_sgdk_project_impl(project_name, base_dir, sgdk_path)
+    })
+    .await
+}
+
+fn import_sgdk_project_impl(
     project_name: String,
     base_dir: String,
     sgdk_path: String,
@@ -4089,7 +4259,18 @@ fn run_openbor_compatibility_harness_cmd(
 }
 
 #[tauri::command]
-fn import_mugen_project(
+async fn import_mugen_project(
+    project_name: String,
+    base_dir: String,
+    mugen_path: String,
+) -> Result<OpenProjectResult, String> {
+    run_heavy_result_command("import_mugen_project", move || {
+        import_mugen_project_impl(project_name, base_dir, mugen_path)
+    })
+    .await
+}
+
+fn import_mugen_project_impl(
     project_name: String,
     base_dir: String,
     mugen_path: String,
@@ -4114,7 +4295,17 @@ fn import_mugen_project(
 }
 
 #[tauri::command]
-fn import_legacy_sgdk_project(
+async fn import_legacy_sgdk_project(
+    project_name: String,
+    sgdk_path: String,
+) -> Result<OpenProjectResult, String> {
+    run_heavy_result_command("import_legacy_sgdk_project", move || {
+        import_legacy_sgdk_project_impl(project_name, sgdk_path)
+    })
+    .await
+}
+
+fn import_legacy_sgdk_project_impl(
     project_name: String,
     sgdk_path: String,
 ) -> Result<OpenProjectResult, String> {
@@ -6130,7 +6321,7 @@ pub extern "C" fn retro_run() {
         let imported_base_dir = temp_dir("official-imported-sgdk");
         let imported_donor_dir = temp_dir("official-imported-sgdk-donor");
         write_generic_sgdk_donor_fixture(&imported_donor_dir);
-        let imported_result = import_sgdk_project(
+        let imported_result = import_sgdk_project_impl(
             "Official Imported SGDK".to_string(),
             imported_base_dir.to_string_lossy().to_string(),
             imported_donor_dir.to_string_lossy().to_string(),
@@ -6737,7 +6928,7 @@ pub extern "C" fn retro_run() {
         }
         fs::write(&rom_path, rom).expect("write profiler rom");
 
-        let report = profiler_analyze_rom(rom_path.to_string_lossy().to_string());
+        let report = profiler_analyze_rom_impl(rom_path.to_string_lossy().to_string());
         assert!(report.ok, "profiler failed: {}", report.error);
         assert_eq!(report.sprite_count, 6);
         assert!(report.sprite_peak >= 1);
@@ -6905,7 +7096,7 @@ pub extern "C" fn retro_run() {
         let legacy_dir = temp_dir("legacy-import-command");
         write_generic_sgdk_donor_fixture(&legacy_dir);
 
-        let result = import_legacy_sgdk_project(
+        let result = import_legacy_sgdk_project_impl(
             "Legado Adoptado".to_string(),
             legacy_dir.to_string_lossy().to_string(),
         )
@@ -7524,7 +7715,7 @@ pub extern "C" fn retro_run() {
         let donor_dir = temp_dir("import-sgdk-donor");
         write_generic_sgdk_donor_fixture(&donor_dir);
 
-        let result = import_sgdk_project(
+        let result = import_sgdk_project_impl(
             "Imported SGDK".to_string(),
             base_dir.to_string_lossy().to_string(),
             donor_dir.to_string_lossy().to_string(),
@@ -7580,7 +7771,7 @@ pub extern "C" fn retro_run() {
         let donor_dir = temp_dir("import-mugen-donor");
         write_mugen_character_fixture(&donor_dir);
 
-        let result = import_mugen_project(
+        let result = import_mugen_project_impl(
             "Imported MUGEN".to_string(),
             base_dir.to_string_lossy().to_string(),
             donor_dir.to_string_lossy().to_string(),
@@ -7634,7 +7825,7 @@ pub extern "C" fn retro_run() {
         let donor_dir = temp_dir("import-godot-donor");
         write_godot_fixture(&donor_dir);
 
-        let result = import_external_project(
+        let result = import_external_project_impl(
             "Imported Godot".to_string(),
             base_dir.to_string_lossy().to_string(),
             "godot".to_string(),
@@ -7693,7 +7884,7 @@ pub extern "C" fn retro_run() {
         let donor_dir = temp_dir("import-ikemen-donor");
         write_mugen_character_fixture(&donor_dir);
 
-        let result = import_external_project(
+        let result = import_external_project_impl(
             "Imported Ikemen".to_string(),
             base_dir.to_string_lossy().to_string(),
             "ikemen_go".to_string(),
@@ -7724,7 +7915,7 @@ pub extern "C" fn retro_run() {
         let donor_dir = temp_dir("import-construct-donor");
         write_construct_fixture(&donor_dir);
 
-        let result = import_external_project(
+        let result = import_external_project_impl(
             "Imported Construct".to_string(),
             base_dir.to_string_lossy().to_string(),
             "construct".to_string(),
@@ -7781,7 +7972,7 @@ pub extern "C" fn retro_run() {
         let donor_dir = temp_dir("import-rpgmaker-donor");
         write_rpg_maker_fixture(&donor_dir);
 
-        let result = import_external_project(
+        let result = import_external_project_impl(
             "Imported RPG Maker".to_string(),
             base_dir.to_string_lossy().to_string(),
             "rpg_maker".to_string(),
@@ -7841,7 +8032,7 @@ pub extern "C" fn retro_run() {
         let donor_dir = temp_dir("import-openbor-donor");
         write_openbor_fixture(&donor_dir);
 
-        let result = import_external_project(
+        let result = import_external_project_impl(
             "Imported OpenBOR".to_string(),
             base_dir.to_string_lossy().to_string(),
             "openbor".to_string(),
