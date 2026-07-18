@@ -3179,13 +3179,25 @@ fn attach_base_dir_notice(
     result
 }
 
+/// Abre o diálogo nativo de pasta fora do thread principal.
+/// As APIs `blocking_*` do dialog nao podem rodar no main thread: o file
+/// chooser GTK e despachado pelo proprio loop de eventos principal, entao
+/// bloquear ali causa deadlock permanente (comandos sincronos do Tauri v2
+/// executam no main thread).
+async fn pick_folder_off_main_thread(app: &AppHandle) -> Option<tauri_plugin_dialog::FilePath> {
+    let dialog = app.dialog().file();
+    tauri::async_runtime::spawn_blocking(move || dialog.blocking_pick_folder())
+        .await
+        .ok()
+        .flatten()
+}
+
 /// Abre o diálogo nativo "Selecionar pasta do projeto" e retorna o caminho.
 /// Usa discovery por subdiretorio: se project.rds nao existir na raiz,
 /// busca em rds/ e demais subdiretorios de primeiro nivel.
 #[tauri::command]
-fn open_project_dialog(app: AppHandle) -> OpenProjectResult {
-    let result = app.dialog().file().blocking_pick_folder();
-    match result {
+async fn open_project_dialog(app: AppHandle) -> OpenProjectResult {
+    match pick_folder_off_main_thread(&app).await {
         Some(path) => resolve_or_wrap_project_dir(&PathBuf::from(path.to_string()), None)
             .unwrap_or_else(|_| empty_open_project_result()),
         None => empty_open_project_result(),
@@ -3194,9 +3206,8 @@ fn open_project_dialog(app: AppHandle) -> OpenProjectResult {
 
 /// Cria um projeto novo minimal em uma pasta selecionada.
 #[tauri::command]
-fn new_project_dialog(app: AppHandle, project_name: String) -> OpenProjectResult {
-    let result = app.dialog().file().blocking_pick_folder();
-    match result {
+async fn new_project_dialog(app: AppHandle, project_name: String) -> OpenProjectResult {
+    match pick_folder_off_main_thread(&app).await {
         Some(base) => {
             let base_str = base.to_string();
             create_onboarding_project_at_base_dir(Path::new(&base_str), &project_name, "megadrive")
