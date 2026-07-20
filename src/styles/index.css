@@ -1,6 +1,10 @@
 @import "tailwindcss";
 
-/* Densidade de IDE: tipografia (GameMaker/Unity-style) */
+/*
+ * RetroDev Studio semantic foundation.
+ * Components consume semantic roles instead of palette values so a theme can
+ * change contrast and emphasis without rewriting component markup.
+ */
 @theme {
   --font-sans: ui-sans-serif, system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "Cascadia Code", "Fira Code", Consolas, "Liberation Mono", Menlo, monospace;
@@ -8,20 +12,123 @@
 
 @layer base {
   :root {
-    --rds-surface-panel: #1e1e2e;
-    --rds-surface-panel-strong: #11111b;
-    --rds-border-subtle: #313244;
-    --rds-text-primary: #cdd6f4;
-    --rds-action-primary: #89b4fa;
-    --rds-tool-active: #94e2d5;
-    --rds-status-error: #f38ba8;
-    --rds-status-warning: #fab387;
-    --rds-status-success: #a6e3a1;
-    --rds-focus-ring: #7dd3fc;
+    color-scheme: dark;
+
+    /* Surfaces */
+    --rds-surface-canvas: #090b12;
+    --rds-surface-base: #10131d;
+    --rds-surface-panel: #1e2233;
+    --rds-surface-panel-strong: #111521;
+    --rds-surface-elevated: #252a3d;
+    --rds-surface-overlay: #0b0e17;
+    --rds-surface-input: #111827;
+    --rds-surface-disabled: #252938;
+    --rds-surface-hover: #2b3147;
+    --rds-surface-active: #333b56;
+
+    /* Borders and text */
+    --rds-border-subtle: #353c52;
+    --rds-border-default: #4b556f;
+    --rds-border-strong: #69758f;
+    --rds-text-primary: #f1f5f9;
+    --rds-text-secondary: #cbd5e1;
+    --rds-text-muted: #a8b1c4;
+    --rds-text-placeholder: #7f8ba3;
+    --rds-text-disabled: #747d91;
+    --rds-text-inverse: #ffffff;
+
+    /* Actions */
+    --rds-action-primary: #2563eb;
+    --rds-action-primary-hover: #1d4ed8;
+    --rds-action-primary-active: #1e40af;
+    --rds-action-primary-text: #ffffff;
+    --rds-action-secondary: #30384e;
+    --rds-action-secondary-hover: #3b465f;
+    --rds-action-secondary-active: #46536f;
+    --rds-action-secondary-text: #f1f5f9;
+    --rds-action-ghost-hover: #293148;
+    --rds-action-ghost-active: #35405a;
+    --rds-action-ghost-text: #dbeafe;
+    --rds-action-danger: #be123c;
+    --rds-action-danger-hover: #9f1239;
+    --rds-action-danger-active: #881337;
+    --rds-action-danger-text: #ffffff;
+    --rds-tool-active: #5eead4;
+
+    /* Feedback */
+    --rds-status-error: #fb7185;
+    --rds-status-error-strong: #be123c;
+    --rds-status-warning: #fbbf24;
+    --rds-status-success: #4ade80;
+    --rds-status-info: #7dd3fc;
+    --rds-focus-ring: #38bdf8;
+    --rds-focus-shadow: color-mix(in srgb, var(--rds-focus-ring) 28%, transparent);
+
+    /* Shape, spacing and motion */
+    --rds-radius-sm: 0.25rem;
+    --rds-radius-md: 0.375rem;
+    --rds-radius-lg: 0.5rem;
+    --rds-control-height-sm: 1.75rem;
+    --rds-control-height-md: 2rem;
+    --rds-control-height-lg: 2.5rem;
+    --rds-control-padding-x-sm: 0.5rem;
+    --rds-control-padding-x-md: 0.75rem;
+    --rds-control-padding-x-lg: 1rem;
+    --rds-shadow-elevated: 0 0.75rem 2.5rem color-mix(in srgb, #000000 45%, transparent);
+    --rds-transition-fast: 120ms ease;
+  }
+
+  /*
+   * Light-theme contract. Theme selection is intentionally left to the shell;
+   * shared controls already adapt when the root receives data-theme="light".
+   */
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --rds-surface-canvas: #e8edf5;
+    --rds-surface-base: #f8fafc;
+    --rds-surface-panel: #ffffff;
+    --rds-surface-panel-strong: #f1f5f9;
+    --rds-surface-elevated: #ffffff;
+    --rds-surface-overlay: #ffffff;
+    --rds-surface-input: #ffffff;
+    --rds-surface-disabled: #e2e8f0;
+    --rds-surface-hover: #eef2f7;
+    --rds-surface-active: #e2e8f0;
+    --rds-border-subtle: #cbd5e1;
+    --rds-border-default: #94a3b8;
+    --rds-border-strong: #64748b;
+    --rds-text-primary: #0f172a;
+    --rds-text-secondary: #334155;
+    --rds-text-muted: #475569;
+    --rds-text-placeholder: #64748b;
+    --rds-text-disabled: #64748b;
+    --rds-text-inverse: #ffffff;
+    --rds-action-primary: #1d4ed8;
+    --rds-action-primary-hover: #1e40af;
+    --rds-action-primary-active: #1e3a8a;
+    --rds-action-secondary: #e2e8f0;
+    --rds-action-secondary-hover: #cbd5e1;
+    --rds-action-secondary-active: #b8c4d4;
+    --rds-action-secondary-text: #0f172a;
+    --rds-action-ghost-hover: #e0f2fe;
+    --rds-action-ghost-active: #bae6fd;
+    --rds-action-ghost-text: #0c4a6e;
+    --rds-action-danger: #be123c;
+    --rds-action-danger-hover: #9f1239;
+    --rds-action-danger-active: #881337;
+    --rds-tool-active: #0f766e;
+    --rds-status-error: #be123c;
+    --rds-status-warning: #a16207;
+    --rds-status-success: #15803d;
+    --rds-status-info: #0369a1;
+    --rds-focus-ring: #0284c7;
+    --rds-shadow-elevated: 0 0.75rem 2.5rem color-mix(in srgb, #0f172a 18%, transparent);
   }
 
   html {
     font-family: var(--font-sans);
+    background: var(--rds-surface-base);
+    color: var(--rds-text-primary);
   }
 
   :where(
@@ -37,11 +144,330 @@
     ):focus-visible {
     outline: 2px solid var(--rds-focus-ring);
     outline-offset: 2px;
-    box-shadow: 0 0 0 4px rgba(125, 211, 252, 0.18);
+    box-shadow: 0 0 0 4px var(--rds-focus-shadow);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+    }
   }
 }
 
-/* Scrollbar customizada: fina, thumb #45475a, track transparente (IDE-style) */
+@layer components {
+  .rds-button {
+    position: relative;
+    display: inline-flex;
+    min-width: 1.5rem;
+    min-height: var(--rds-control-height-md);
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    border: 1px solid transparent;
+    border-radius: var(--rds-radius-md);
+    padding-inline: var(--rds-control-padding-x-md);
+    font: inherit;
+    font-size: 0.75rem;
+    font-weight: 650;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    transition:
+      background-color var(--rds-transition-fast),
+      border-color var(--rds-transition-fast),
+      color var(--rds-transition-fast),
+      opacity var(--rds-transition-fast);
+  }
+
+  .rds-button--sm {
+    min-height: var(--rds-control-height-sm);
+    padding-inline: var(--rds-control-padding-x-sm);
+    font-size: 0.6875rem;
+  }
+
+  .rds-button--lg {
+    min-height: var(--rds-control-height-lg);
+    padding-inline: var(--rds-control-padding-x-lg);
+    font-size: 0.8125rem;
+  }
+
+  .rds-button--primary {
+    border-color: var(--rds-action-primary);
+    background: var(--rds-action-primary);
+    color: var(--rds-action-primary-text);
+  }
+
+  .rds-button--primary:hover:not(:disabled) {
+    border-color: var(--rds-action-primary-hover);
+    background: var(--rds-action-primary-hover);
+  }
+
+  .rds-button--primary:active:not(:disabled) {
+    border-color: var(--rds-action-primary-active);
+    background: var(--rds-action-primary-active);
+  }
+
+  .rds-button--secondary {
+    border-color: var(--rds-border-default);
+    background: var(--rds-action-secondary);
+    color: var(--rds-action-secondary-text);
+  }
+
+  .rds-button--secondary:hover:not(:disabled) {
+    border-color: var(--rds-border-strong);
+    background: var(--rds-action-secondary-hover);
+  }
+
+  .rds-button--secondary:active:not(:disabled) {
+    background: var(--rds-action-secondary-active);
+  }
+
+  .rds-button--ghost {
+    background: transparent;
+    color: var(--rds-action-ghost-text);
+  }
+
+  .rds-button--ghost:hover:not(:disabled) {
+    border-color: var(--rds-border-subtle);
+    background: var(--rds-action-ghost-hover);
+  }
+
+  .rds-button--ghost:active:not(:disabled) {
+    background: var(--rds-action-ghost-active);
+  }
+
+  .rds-button--danger {
+    border-color: var(--rds-action-danger);
+    background: var(--rds-action-danger);
+    color: var(--rds-action-danger-text);
+  }
+
+  .rds-button--danger:hover:not(:disabled) {
+    border-color: var(--rds-action-danger-hover);
+    background: var(--rds-action-danger-hover);
+  }
+
+  .rds-button--danger:active:not(:disabled) {
+    border-color: var(--rds-action-danger-active);
+    background: var(--rds-action-danger-active);
+  }
+
+  .rds-button:disabled {
+    border-color: var(--rds-border-subtle);
+    background: var(--rds-surface-disabled);
+    color: var(--rds-text-disabled);
+    cursor: not-allowed;
+    opacity: 0.78;
+  }
+
+  .rds-button__content,
+  .rds-button__loader {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: inherit;
+  }
+
+  .rds-button__content--loading {
+    visibility: hidden;
+  }
+
+  .rds-button__loader {
+    position: absolute;
+  }
+
+  .rds-button__icon {
+    display: inline-flex;
+    width: 1rem;
+    height: 1rem;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .rds-button__icon > svg {
+    width: 100%;
+    height: 100%;
+  }
+
+  .rds-spinner {
+    width: 0.875rem;
+    height: 0.875rem;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 999px;
+    animation: rds-spin 700ms linear infinite;
+  }
+
+  .rds-icon-button {
+    width: var(--rds-control-height-md);
+    padding-inline: 0;
+  }
+
+  .rds-icon-button.rds-button--sm {
+    width: var(--rds-control-height-sm);
+  }
+
+  .rds-icon-button.rds-button--lg {
+    width: var(--rds-control-height-lg);
+  }
+
+  .rds-field {
+    display: grid;
+    min-width: 0;
+    gap: 0.375rem;
+    color: var(--rds-text-secondary);
+  }
+
+  .rds-field__label {
+    font-size: 0.75rem;
+    font-weight: 650;
+    line-height: 1.25;
+  }
+
+  .rds-field__required {
+    color: var(--rds-status-error);
+  }
+
+  .rds-field__control-wrap {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    align-items: center;
+  }
+
+  .rds-field__control {
+    width: 100%;
+    min-width: 0;
+    min-height: var(--rds-control-height-md);
+    border: 1px solid var(--rds-border-default);
+    border-radius: var(--rds-radius-md);
+    background: var(--rds-surface-input);
+    color: var(--rds-text-primary);
+    padding-inline: var(--rds-control-padding-x-md);
+    font: inherit;
+    font-size: 0.75rem;
+    line-height: 1.25;
+    transition:
+      background-color var(--rds-transition-fast),
+      border-color var(--rds-transition-fast),
+      color var(--rds-transition-fast);
+  }
+
+  .rds-field__control::placeholder {
+    color: var(--rds-text-placeholder);
+    opacity: 1;
+  }
+
+  .rds-field__control:hover:not(:disabled):not([aria-invalid="true"]) {
+    border-color: var(--rds-border-strong);
+  }
+
+  .rds-field__control[aria-invalid="true"] {
+    border-color: var(--rds-status-error);
+  }
+
+  .rds-field__control:disabled {
+    border-color: var(--rds-border-subtle);
+    background: var(--rds-surface-disabled);
+    color: var(--rds-text-disabled);
+    cursor: not-allowed;
+  }
+
+  .rds-field__control--sm {
+    min-height: var(--rds-control-height-sm);
+    padding-inline: var(--rds-control-padding-x-sm);
+    font-size: 0.6875rem;
+  }
+
+  .rds-field__control--lg {
+    min-height: var(--rds-control-height-lg);
+    padding-inline: var(--rds-control-padding-x-lg);
+    font-size: 0.8125rem;
+  }
+
+  .rds-field__control--with-leading {
+    padding-left: 2rem;
+  }
+
+  .rds-field__control--with-trailing {
+    padding-right: 2rem;
+  }
+
+  .rds-field__leading,
+  .rds-field__trailing {
+    position: absolute;
+    z-index: 1;
+    display: inline-flex;
+    width: 1rem;
+    height: 1rem;
+    align-items: center;
+    justify-content: center;
+    color: var(--rds-text-muted);
+    pointer-events: none;
+  }
+
+  .rds-field__leading {
+    left: 0.625rem;
+  }
+
+  .rds-field__trailing {
+    right: 0.625rem;
+  }
+
+  .rds-field__leading > svg,
+  .rds-field__trailing > svg {
+    width: 100%;
+    height: 100%;
+  }
+
+  .rds-field__message {
+    margin: 0;
+    color: var(--rds-text-muted);
+    font-size: 0.6875rem;
+    line-height: 1.35;
+  }
+
+  .rds-field__message--error {
+    color: var(--rds-status-error);
+  }
+
+  .rds-select {
+    appearance: none;
+    padding-right: 2rem;
+  }
+
+  .rds-select-arrow {
+    position: absolute;
+    right: 0.75rem;
+    width: 0.4375rem;
+    height: 0.4375rem;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    color: var(--rds-text-muted);
+    transform: translateY(-0.125rem) rotate(45deg);
+    pointer-events: none;
+  }
+
+  .rds-sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+}
+
 @layer utilities {
   .rds-surface-panel {
     background-color: var(--rds-surface-panel);
@@ -77,21 +503,31 @@
 
   .scrollbar-thin {
     scrollbar-width: thin;
-    scrollbar-color: #45475a transparent;
+    scrollbar-color: var(--rds-border-default) transparent;
   }
+
   .scrollbar-thin::-webkit-scrollbar {
     width: 6px;
     height: 6px;
   }
+
   .scrollbar-thin::-webkit-scrollbar-track {
     background: transparent;
   }
+
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    background: #45475a;
+    background: var(--rds-border-default);
     border-radius: 3px;
   }
+
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    background: #585b70;
+    background: var(--rds-border-strong);
+  }
+}
+
+@keyframes rds-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 
