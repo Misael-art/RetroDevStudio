@@ -32,14 +32,33 @@ export interface ParityDivergence {
   observed: string;
 }
 
+/** Observacao real do stream de audio via callbacks Libretro padrao.
+ * Mede determinismo do stream do core; nao prova audio_exact_match vs hardware. */
+export interface ParityAudioObservation {
+  available: boolean;
+  sample_rate: number;
+  samples_total: number;
+  stream_sha256?: string | null;
+  note: string;
+}
+
 export interface ParityReport {
   schema: string;
+  /** Revisao aditiva do contrato; ausente/1 em reports antigos, 2 com identidade + audio/regioes. */
+  contract_revision?: number;
   rom_path: string;
   rom_sha256: string;
   core_label: string;
+  core_sha256?: string | null;
+  golden_path?: string | null;
+  golden_sha256?: string | null;
+  initial_state_sha256?: string | null;
   frames_run: number;
   frame_hashes: ParityFrameHash[];
   final_state_sha256: string;
+  audio?: ParityAudioObservation | null;
+  /** Regioes WRAM/VRAM/SRAM realmente expostas pelo core; nao exposta = available:false. */
+  observed_regions?: MemoryRegionObservation[];
   deterministic: boolean;
   divergences: ParityDivergence[];
   fake_toolchain_used: boolean;
@@ -56,6 +75,182 @@ export interface ParityRunResult {
   divergence_count: number;
   report_path: string;
   report: ParityReport | null;
+}
+
+export interface CrossCoreDivergence {
+  frame_index: number;
+  kind: string;
+  core_a_hash: string;
+  core_b_hash: string;
+  core_a_non_black: number;
+  core_b_non_black: number;
+}
+
+export interface CrossCoreReport {
+  schema: string;
+  rom_path: string;
+  rom_sha256: string;
+  golden_path: string;
+  golden_source: string;
+  core_a_label: string;
+  core_b_label: string;
+  frames_run: number;
+  report_a: ParityReport;
+  report_b: ParityReport;
+  cross_divergences: CrossCoreDivergence[];
+  cores_agree: boolean;
+  /** Limites honestos entre cores distintos (savestate opaco por core, audio nao comparado, regiao exposta em um lado so). */
+  limitations?: string[];
+  not_measured_by_this_harness: string[];
+  report_path?: string;
+}
+
+export interface CrossCoreParityResult {
+  ok: boolean;
+  message: string;
+  golden_path: string;
+  golden_source: string;
+  core_a_label: string;
+  core_b_label: string;
+  frames_run: number;
+  cores_agree: boolean;
+  cross_divergence_count: number;
+  core_a_divergence_count: number;
+  core_b_divergence_count: number;
+  report_path: string;
+  report: CrossCoreReport | null;
+}
+
+export interface CycleFrameSample {
+  frame_index: number;
+  host_frame_time_micros?: number | null;
+  estimated_frame_budget_cycles?: number | null;
+  estimate_label?: string | null;
+}
+
+export interface CycleEvidenceSource {
+  kind: string;
+  label: string;
+  path: string;
+  observed: boolean;
+}
+
+export interface CycleTraceEvidence {
+  status: "observed" | "missing" | string;
+  source: string;
+  detail: string;
+}
+
+export interface CycleReportLimitations {
+  not_cycle_accurate: boolean;
+  missing: string[];
+  notes: string[];
+}
+
+export interface CycleReport {
+  schema: string;
+  rom_path: string;
+  rom_sha256: string;
+  golden_path: string;
+  golden_sha256?: string | null;
+  core_sha256?: string | null;
+  core_label: string;
+  frames_run: number;
+  frame_samples: CycleFrameSample[];
+  evidence_sources: CycleEvidenceSource[];
+  m68k_cycle_trace: CycleTraceEvidence;
+  z80_cycle_trace: CycleTraceEvidence;
+  vdp_scanline_trace: CycleTraceEvidence;
+  dma_timing: CycleTraceEvidence;
+  limitations: CycleReportLimitations;
+  report_path: string;
+}
+
+export interface CycleReportResult {
+  ok: boolean;
+  message: string;
+  golden_path: string;
+  core_label: string;
+  frames_run: number;
+  report_path: string;
+  report: CycleReport | null;
+}
+
+export type ParityEvidenceLevel =
+  | "insufficient_evidence"
+  | "visual_parity"
+  | "observed_state_parity"
+  | "control_evidence"
+  | "scenario_evidence"
+  | "functional_evidence";
+
+export interface MemoryRegionObservation {
+  label: string;
+  region_id: number;
+  available: boolean;
+  size: number;
+  sha256: string | null;
+}
+
+export interface ObservedState {
+  available: boolean;
+  reference_regions: MemoryRegionObservation[];
+  candidate_regions: MemoryRegionObservation[];
+}
+
+export interface ReferenceCandidateComparison {
+  evidence_level: ParityEvidenceLevel;
+  visual_parity: boolean;
+  observed_state_parity: boolean;
+  scenario_passed: boolean;
+  frames_compared: number;
+  reference_rom_sha256: string;
+  candidate_rom_sha256: string;
+  divergences: ParityDivergence[];
+  limitations: string[];
+}
+
+export interface ReferenceCandidateReport {
+  schema: string;
+  reference_rom_path: string;
+  reference_rom_sha256: string;
+  candidate_rom_path: string;
+  candidate_rom_sha256: string;
+  core_label: string;
+  core_sha256: string;
+  golden_path: string;
+  golden_source: string;
+  frames_run: number;
+  report_reference: ParityReport;
+  report_candidate: ParityReport;
+  comparison: ReferenceCandidateComparison;
+  observed_state: ObservedState;
+  functional_evidence: ParityEvidenceLevel;
+  not_measured_by_this_harness: string[];
+}
+
+export interface ReferenceCandidateParityResult {
+  ok: boolean;
+  message: string;
+  core_label: string;
+  golden_path: string;
+  golden_source: string;
+  frames_run: number;
+  // Debug-formatted enum from the backend (e.g. "VisualParity"); the nested
+  // comparison carries the serde snake_case union.
+  evidence_level: string;
+  visual_parity: boolean;
+  observed_state_parity: boolean;
+  scenario_passed: boolean;
+  divergence_count: number;
+  reference_rom_sha256: string;
+  candidate_rom_sha256: string;
+  report_path: string;
+  // "explicit" when reference/candidate ROM paths were provided directly;
+  // "directory_scan_legacy" when discovered via find_first_rom_artifact
+  // (Experimental, not suitable as professional evidence).
+  rom_discovery_mode: string;
+  report: ReferenceCandidateReport | null;
 }
 
 export interface ProjectCapabilityReport {

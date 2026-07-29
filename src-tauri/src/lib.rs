@@ -316,24 +316,71 @@ fn validate_scene_draft(project_dir: String, scene_json: String) -> DraftValidat
     validate_scene_draft_impl(Path::new(&project_dir), &scene_json)
 }
 
-#[tauri::command]
-fn build_project(app: AppHandle, project_dir: String) -> BuildResult {
-    let dir = PathBuf::from(&project_dir);
-    run_build(&dir, move |line: BuildLogLine| {
-        let _ = app.emit("build://log", &line);
-    })
+/// Executa o trabalho pesado de um comando fora do main thread.
+/// Comandos sincronos do Tauri v2 rodam no main thread; operacoes longas
+/// (make do SGDK, download de dependencias) congelariam a UI e segurariam
+/// os eventos de progresso emitidos ao webview ate o final da operacao.
+/// `fallback` so e usado se a tarefa terminar de forma anormal (panic).
+async fn run_heavy_command_off_main_thread<T, F>(task: F, fallback: impl FnOnce() -> T) -> T
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    match tauri::async_runtime::spawn_blocking(task).await {
+        Ok(result) => result,
+        Err(_) => fallback(),
+    }
+}
+
+fn interrupted_build_result() -> BuildResult {
+    BuildResult {
+        ok: false,
+        rom_path: String::new(),
+        log: vec![BuildLogLine {
+            level: "error".to_string(),
+            message: "O que quebrou: a tarefa de build terminou de forma inesperada (panic). Por que importa: nenhuma ROM foi gerada. Onde corrigir: veja o log do processo desktop. Proxima acao: rode o build novamente e reporte o log se persistir.".to_string(),
+        }],
+        diagnostics: Vec::new(),
+        // Build interrompido por panic nao emitiu C nem ROM, entao nao existe
+        // proveniencia observavel: os dois campos ficam None de proposito.
+        source_map_path: None,
+        build_source_map: None,
+    }
 }
 
 #[tauri::command]
-fn build_multi_target(
+async fn build_project(app: AppHandle, project_dir: String) -> BuildResult {
+    let dir = PathBuf::from(&project_dir);
+    run_heavy_command_off_main_thread(
+        move || {
+            run_build(&dir, move |line: BuildLogLine| {
+                let _ = app.emit("build://log", &line);
+            })
+        },
+        interrupted_build_result,
+    )
+    .await
+}
+
+#[tauri::command]
+async fn build_multi_target(
     app: AppHandle,
     project_dir: String,
     targets: Vec<String>,
 ) -> MultiTargetBuildResult {
     let dir = PathBuf::from(&project_dir);
-    run_build_multi_target(&dir, &targets, move |line: BuildLogLine| {
-        let _ = app.emit("build://log", &line);
-    })
+    run_heavy_command_off_main_thread(
+        move || {
+            run_build_multi_target(&dir, &targets, move |line: BuildLogLine| {
+                let _ = app.emit("build://log", &line);
+            })
+        },
+        || MultiTargetBuildResult {
+            ok: false,
+            results: Vec::new(),
+        },
+    )
+    .await
 }
 
 // ── Hardware status command ───────────────────────────────────────────────────
@@ -888,6 +935,463 @@ fn parity_run_capture(
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize)]
+struct CrossCoreParityResult {
+    ok: bool,
+    message: String,
+    golden_path: String,
+    golden_source: String,
+    core_a_label: String,
+    core_b_label: String,
+    frames_run: u32,
+    cores_agree: bool,
+    cross_divergence_count: usize,
+    core_a_divergence_count: usize,
+    core_b_divergence_count: usize,
+    report_path: String,
+    report: Option<core::parity_harness::CrossCoreReport>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct CycleReportResult {
+    ok: bool,
+    message: String,
+    golden_path: String,
+    core_label: String,
+    frames_run: u32,
+    report_path: String,
+    report: Option<core::parity_harness::CycleReport>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct ReferenceCandidateParityResult {
+    ok: bool,
+    message: String,
+    core_label: String,
+    golden_path: String,
+    golden_source: String,
+    frames_run: u32,
+    evidence_level: String,
+    visual_parity: bool,
+    observed_state_parity: bool,
+    scenario_passed: bool,
+    divergence_count: usize,
+    reference_rom_sha256: String,
+    candidate_rom_sha256: String,
+    report_path: String,
+    /// "explicit" when reference_rom_path/candidate_rom_path were provided and
+    /// used directly; "directory_scan_legacy" when the ROM was discovered via
+    /// find_first_rom_artifact (Experimental, discouraged for professional
+    /// evidence — the "first ROM found" heuristic is ambiguous with multiple
+    /// artifacts in a build directory).
+    rom_discovery_mode: String,
+    report: Option<core::parity_harness::ReferenceCandidateReport>,
+}
+
+#[tauri::command]
+fn parity_run_cross_core(
+    project_dir: String,
+    golden_path: String,
+    core_a_path: String,
+    core_b_path: String,
+    frames: Option<u32>,
+) -> CrossCoreParityResult {
+    let trimmed_project = project_dir.trim();
+    if trimmed_project.is_empty() {
+        return CrossCoreParityResult {
+            ok: false,
+            message: "Cross-core parity requires a project directory.".to_string(),
+            golden_path: String::new(),
+            golden_source: String::new(),
+            core_a_label: String::new(),
+            core_b_label: String::new(),
+            frames_run: 0,
+            cores_agree: false,
+            cross_divergence_count: 0,
+            core_a_divergence_count: 0,
+            core_b_divergence_count: 0,
+            report_path: String::new(),
+            report: None,
+        };
+    }
+    let trimmed_golden = golden_path.trim();
+    if trimmed_golden.is_empty() {
+        return CrossCoreParityResult {
+            ok: false,
+            message: "Cross-core parity requires a golden input path.".to_string(),
+            golden_path: String::new(),
+            golden_source: String::new(),
+            core_a_label: String::new(),
+            core_b_label: String::new(),
+            frames_run: 0,
+            cores_agree: false,
+            cross_divergence_count: 0,
+            core_a_divergence_count: 0,
+            core_b_divergence_count: 0,
+            report_path: String::new(),
+            report: None,
+        };
+    }
+    let trimmed_core_a = core_a_path.trim();
+    let trimmed_core_b = core_b_path.trim();
+    if trimmed_core_a.is_empty() || trimmed_core_b.is_empty() {
+        return CrossCoreParityResult {
+            ok: false,
+            message: "Cross-core parity requires both core_a_path and core_b_path.".to_string(),
+            golden_path: trimmed_golden.to_string(),
+            golden_source: String::new(),
+            core_a_label: String::new(),
+            core_b_label: String::new(),
+            frames_run: 0,
+            cores_agree: false,
+            cross_divergence_count: 0,
+            core_a_divergence_count: 0,
+            core_b_divergence_count: 0,
+            report_path: String::new(),
+            report: None,
+        };
+    }
+
+    let project_path = Path::new(trimmed_project);
+    let golden_file = Path::new(trimmed_golden);
+    let core_a_dll = Path::new(trimmed_core_a);
+    let core_b_dll = Path::new(trimmed_core_b);
+
+    let rom_path = match find_first_rom_artifact(project_path) {
+        Some(path) => path,
+        None => {
+            return CrossCoreParityResult {
+                ok: false,
+                message: "No ROM artifact found in project build directory.".to_string(),
+                golden_path: trimmed_golden.to_string(),
+                golden_source: String::new(),
+                core_a_label: String::new(),
+                core_b_label: String::new(),
+                frames_run: 0,
+                cores_agree: false,
+                cross_divergence_count: 0,
+                core_a_divergence_count: 0,
+                core_b_divergence_count: 0,
+                report_path: String::new(),
+                report: None,
+            };
+        }
+    };
+
+    let report_dir = project_path.join(".rds").join("reports");
+    let result = core::parity_harness::run_cross_core_parity(
+        &rom_path,
+        golden_file,
+        core_a_dll,
+        core_b_dll,
+        frames,
+        &report_dir,
+    );
+
+    match result {
+        Ok((report, written)) => {
+            let msg = if report.cores_agree {
+                format!(
+                    "Cores agree: {} and {} produced identical framebuffers for {} frame(s); report in '{}'.",
+                    report.core_a_label, report.core_b_label, report.frames_run, written.display()
+                )
+            } else {
+                format!(
+                    "Cores diverge: {} cross-core divergence(s) after {} frame(s); report in '{}'.",
+                    report.cross_divergences.len(), report.frames_run, written.display()
+                )
+            };
+            CrossCoreParityResult {
+                ok: true,
+                message: msg,
+                golden_path: trimmed_golden.to_string(),
+                golden_source: report.golden_source.clone(),
+                core_a_label: report.core_a_label.clone(),
+                core_b_label: report.core_b_label.clone(),
+                frames_run: report.frames_run,
+                cores_agree: report.cores_agree,
+                cross_divergence_count: report.cross_divergences.len(),
+                core_a_divergence_count: report.report_a.divergences.len(),
+                core_b_divergence_count: report.report_b.divergences.len(),
+                report_path: written.to_string_lossy().to_string(),
+                report: Some(report),
+            }
+        }
+        Err(error) => CrossCoreParityResult {
+            ok: false,
+            message: error,
+            golden_path: trimmed_golden.to_string(),
+            golden_source: String::new(),
+            core_a_label: String::new(),
+            core_b_label: String::new(),
+            frames_run: 0,
+            cores_agree: false,
+            cross_divergence_count: 0,
+            core_a_divergence_count: 0,
+            core_b_divergence_count: 0,
+            report_path: String::new(),
+            report: None,
+        },
+    }
+}
+
+/// Experimental: compare a reference ROM against a candidate ROM (different
+/// SHA expected) on the SAME core, each cold booted independently, against the
+/// same deterministic golden script. Reports the evidence level only — never a
+/// total-equivalence claim.
+///
+/// `reference_rom_path`/`candidate_rom_path` are the professional-evidence path:
+/// explicit ROM files, selected by the caller, with no "first ROM found"
+/// ambiguity. When BOTH are omitted, the command falls back to the legacy
+/// directory-scan discovery (`find_first_rom_artifact` under
+/// `<project>/build/`) — kept only for backward compatibility and marked
+/// `directory_scan_legacy` in the result; it must not be relied upon as
+/// professional evidence, since a build directory can contain more than one
+/// ROM artifact and "first found" is not a meaningful selection criterion.
+/// Providing only one of the two explicit paths is rejected as ambiguous.
+#[tauri::command]
+fn parity_run_reference_candidate(
+    reference_project_dir: String,
+    candidate_project_dir: String,
+    golden_path: String,
+    core_path: String,
+    frames: Option<u32>,
+    reference_rom_path: Option<String>,
+    candidate_rom_path: Option<String>,
+) -> ReferenceCandidateParityResult {
+    let err = |message: String| ReferenceCandidateParityResult {
+        ok: false,
+        message,
+        core_label: String::new(),
+        golden_path: String::new(),
+        golden_source: String::new(),
+        frames_run: 0,
+        evidence_level: String::new(),
+        visual_parity: false,
+        observed_state_parity: false,
+        scenario_passed: false,
+        divergence_count: 0,
+        reference_rom_sha256: String::new(),
+        candidate_rom_sha256: String::new(),
+        report_path: String::new(),
+        rom_discovery_mode: String::new(),
+        report: None,
+    };
+
+    let reference_dir = reference_project_dir.trim();
+    let candidate_dir = candidate_project_dir.trim();
+    let golden = golden_path.trim();
+    let core = core_path.trim();
+    if reference_dir.is_empty() || candidate_dir.is_empty() {
+        return err("Reference/candidate parity requires both project directories.".to_string());
+    }
+    if golden.is_empty() {
+        return err("Reference/candidate parity requires a golden input path.".to_string());
+    }
+    if core.is_empty() {
+        return err("Reference/candidate parity requires a core path.".to_string());
+    }
+
+    let explicit_reference = reference_rom_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let explicit_candidate = candidate_rom_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    let (reference_rom, candidate_rom, discovery_mode) =
+        match (explicit_reference, explicit_candidate) {
+            (Some(reference_path), Some(candidate_path)) => {
+                let reference_rom = Path::new(reference_path);
+                let candidate_rom = Path::new(candidate_path);
+                if !reference_rom.is_file() {
+                    return err(format!(
+                        "Reference ROM path is not a file: '{reference_path}'."
+                    ));
+                }
+                if !candidate_rom.is_file() {
+                    return err(format!(
+                        "Candidate ROM path is not a file: '{candidate_path}'."
+                    ));
+                }
+                (
+                    reference_rom.to_path_buf(),
+                    candidate_rom.to_path_buf(),
+                    "explicit".to_string(),
+                )
+            }
+            (None, None) => {
+                let reference_rom = match find_first_rom_artifact(Path::new(reference_dir)) {
+                    Some(path) => path,
+                    None => {
+                        return err(
+                            "No ROM artifact found in reference project build directory."
+                                .to_string(),
+                        )
+                    }
+                };
+                let candidate_rom = match find_first_rom_artifact(Path::new(candidate_dir)) {
+                    Some(path) => path,
+                    None => {
+                        return err(
+                            "No ROM artifact found in candidate project build directory."
+                                .to_string(),
+                        )
+                    }
+                };
+                (reference_rom, candidate_rom, "directory_scan_legacy".to_string())
+            }
+            _ => {
+                return err(
+                    "Reference/candidate parity requires BOTH reference_rom_path and candidate_rom_path when using explicit ROM paths (partial overrides are ambiguous and rejected)."
+                        .to_string(),
+                )
+            }
+        };
+
+    let report_dir = Path::new(candidate_dir).join(".rds").join("reports");
+    match core::parity_harness::run_reference_candidate_parity(
+        &reference_rom,
+        &candidate_rom,
+        Path::new(golden),
+        Path::new(core),
+        frames,
+        &report_dir,
+    ) {
+        Ok((report, written)) => {
+            let cmp = &report.comparison;
+            ReferenceCandidateParityResult {
+                ok: true,
+                message: format!(
+                    "Reference/candidate evidence: {:?} ({} divergence(s)) after {} frame(s); ROM discovery={}; report in '{}'.",
+                    cmp.evidence_level,
+                    cmp.divergences.len(),
+                    report.frames_run,
+                    discovery_mode,
+                    written.display()
+                ),
+                core_label: report.core_label.clone(),
+                golden_path: golden.to_string(),
+                golden_source: report.golden_source.clone(),
+                frames_run: report.frames_run,
+                evidence_level: format!("{:?}", cmp.evidence_level),
+                visual_parity: cmp.visual_parity,
+                observed_state_parity: cmp.observed_state_parity,
+                scenario_passed: cmp.scenario_passed,
+                divergence_count: cmp.divergences.len(),
+                reference_rom_sha256: report.reference_rom_sha256.clone(),
+                candidate_rom_sha256: report.candidate_rom_sha256.clone(),
+                report_path: written.to_string_lossy().to_string(),
+                rom_discovery_mode: discovery_mode,
+                report: Some(report),
+            }
+        }
+        Err(error) => err(error),
+    }
+}
+
+#[tauri::command]
+fn parity_run_cycle_report(
+    project_dir: String,
+    golden_path: String,
+    core_path: String,
+    frames: Option<u32>,
+) -> CycleReportResult {
+    let trimmed_project = project_dir.trim();
+    if trimmed_project.is_empty() {
+        return CycleReportResult {
+            ok: false,
+            message: "O que quebrou: project_dir vazio. Por que importa: o cycle report precisa de um projeto real para gravar .rds/reports. Proxima acao: abra um projeto antes de gerar o relatorio.".to_string(),
+            golden_path: String::new(),
+            core_label: String::new(),
+            frames_run: 0,
+            report_path: String::new(),
+            report: None,
+        };
+    }
+    let trimmed_golden = golden_path.trim();
+    if trimmed_golden.is_empty() {
+        return CycleReportResult {
+            ok: false,
+            message: "O que quebrou: golden_path vazio. Por que importa: o cycle report precisa de um .rds-replay ou .rds-input.json. Proxima acao: selecione um golden antes de gerar o relatorio.".to_string(),
+            golden_path: String::new(),
+            core_label: String::new(),
+            frames_run: 0,
+            report_path: String::new(),
+            report: None,
+        };
+    }
+    let trimmed_core = core_path.trim();
+    if trimmed_core.is_empty() {
+        return CycleReportResult {
+            ok: false,
+            message: "O que quebrou: core_path vazio. Por que importa: o cycle report precisa de um core/reference real para executar os frames. Proxima acao: informe o caminho do core Libretro.".to_string(),
+            golden_path: trimmed_golden.to_string(),
+            core_label: String::new(),
+            frames_run: 0,
+            report_path: String::new(),
+            report: None,
+        };
+    }
+
+    let project_path = Path::new(trimmed_project);
+    let golden_file = Path::new(trimmed_golden);
+    let core_dll = Path::new(trimmed_core);
+    let rom_path = match find_first_rom_artifact(project_path) {
+        Some(path) => path,
+        None => {
+            return CycleReportResult {
+                ok: false,
+                message: format!(
+                    "O que quebrou: nenhum artefato .bin/.md/.sfc/.smc encontrado em '{}/build'. Por que importa: o cycle report precisa de uma ROM real para replay. Proxima acao: rode Build no projeto antes de gerar o relatorio.",
+                    project_path.display()
+                ),
+                golden_path: trimmed_golden.to_string(),
+                core_label: String::new(),
+                frames_run: 0,
+                report_path: String::new(),
+                report: None,
+            };
+        }
+    };
+
+    let report_dir = project_path.join(".rds").join("reports");
+    match core::parity_harness::run_cycle_report(
+        &rom_path,
+        golden_file,
+        core_dll,
+        frames,
+        &report_dir,
+    ) {
+        Ok((report, written)) => CycleReportResult {
+            ok: true,
+            message: format!(
+                "Cycle report gerado para {} frame(s) usando '{}'. Traces M68K/Z80/VDP/DMA permanecem '{}' quando nao houver fonte estruturada; report em '{}'.",
+                report.frames_run,
+                report.core_label,
+                report.m68k_cycle_trace.status,
+                written.display()
+            ),
+            golden_path: trimmed_golden.to_string(),
+            core_label: report.core_label.clone(),
+            frames_run: report.frames_run,
+            report_path: written.to_string_lossy().to_string(),
+            report: Some(report),
+        },
+        Err(error) => CycleReportResult {
+            ok: false,
+            message: error,
+            golden_path: trimmed_golden.to_string(),
+            core_label: String::new(),
+            frames_run: 0,
+            report_path: String::new(),
+            report: None,
+        },
+    }
+}
+
 fn find_first_rom_artifact(project_dir: &Path) -> Option<PathBuf> {
     let build_dir = project_dir.join("build");
     let mut candidates: Vec<PathBuf> = Vec::new();
@@ -1003,7 +1507,7 @@ use tools::asset_extractor::{extract_assets, BppMode, ExtractionResult};
 use tools::deep_profiler::{profile_rom, ProfileReport};
 use tools::dependency_manager::{
     dependency_for_rom_path, dependency_status_report, install_dependency, DependencyInstallResult,
-    DependencyLogLine, DependencyStatusReport, RomDependencyResult,
+    DependencyLogLine, DependencyStatus, DependencyStatusReport, RomDependencyResult,
 };
 use tools::patch_studio::{
     apply_bps_file, apply_ips_file, create_bps_file_compliance, create_ips_file_compliance,
@@ -1807,10 +2311,44 @@ fn third_party_get_status() -> DependencyStatusReport {
 }
 
 #[tauri::command]
-fn third_party_install(app: AppHandle, dependency_id: String) -> DependencyInstallResult {
-    install_dependency(&dependency_id, move |line: DependencyLogLine| {
-        let _ = app.emit("deps://log", &line);
-    })
+async fn third_party_install(app: AppHandle, dependency_id: String) -> DependencyInstallResult {
+    let task_dependency_id = dependency_id.clone();
+    run_heavy_command_off_main_thread(
+        move || {
+            install_dependency(&task_dependency_id, move |line: DependencyLogLine| {
+                let _ = app.emit("deps://log", &line);
+            })
+        },
+        move || interrupted_install_result(&dependency_id),
+    )
+    .await
+}
+
+fn interrupted_install_result(dependency_id: &str) -> DependencyInstallResult {
+    let message = "O que quebrou: a instalacao terminou de forma inesperada (panic). Por que importa: a dependencia pode ter ficado incompleta. Onde corrigir: veja o log do processo desktop. Proxima acao: revalide o Runtime Setup e tente instalar novamente.".to_string();
+    DependencyInstallResult {
+        ok: false,
+        dependency_id: dependency_id.to_string(),
+        message: message.clone(),
+        status: DependencyStatus {
+            id: dependency_id.to_string(),
+            label: dependency_id.to_string(),
+            installed: false,
+            version: None,
+            status_code: "missing".to_string(),
+            status_label: "AUSENTE".to_string(),
+            severity: "blocking".to_string(),
+            install_dir: String::new(),
+            source_url: String::new(),
+            auto_install_supported: false,
+            cache_available: false,
+            manual_configuration_required: true,
+            actionable_message: message,
+            notes: Vec::new(),
+            issues: Vec::new(),
+        },
+        log: Vec::new(),
+    }
 }
 
 #[tauri::command]
@@ -3179,13 +3717,25 @@ fn attach_base_dir_notice(
     result
 }
 
+/// Abre o diálogo nativo de pasta fora do thread principal.
+/// As APIs `blocking_*` do dialog nao podem rodar no main thread: o file
+/// chooser GTK e despachado pelo proprio loop de eventos principal, entao
+/// bloquear ali causa deadlock permanente (comandos sincronos do Tauri v2
+/// executam no main thread).
+async fn pick_folder_off_main_thread(app: &AppHandle) -> Option<tauri_plugin_dialog::FilePath> {
+    let dialog = app.dialog().file();
+    tauri::async_runtime::spawn_blocking(move || dialog.blocking_pick_folder())
+        .await
+        .ok()
+        .flatten()
+}
+
 /// Abre o diálogo nativo "Selecionar pasta do projeto" e retorna o caminho.
 /// Usa discovery por subdiretorio: se project.rds nao existir na raiz,
 /// busca em rds/ e demais subdiretorios de primeiro nivel.
 #[tauri::command]
-fn open_project_dialog(app: AppHandle) -> OpenProjectResult {
-    let result = app.dialog().file().blocking_pick_folder();
-    match result {
+async fn open_project_dialog(app: AppHandle) -> OpenProjectResult {
+    match pick_folder_off_main_thread(&app).await {
         Some(path) => resolve_or_wrap_project_dir(&PathBuf::from(path.to_string()), None)
             .unwrap_or_else(|_| empty_open_project_result()),
         None => empty_open_project_result(),
@@ -3194,9 +3744,8 @@ fn open_project_dialog(app: AppHandle) -> OpenProjectResult {
 
 /// Cria um projeto novo minimal em uma pasta selecionada.
 #[tauri::command]
-fn new_project_dialog(app: AppHandle, project_name: String) -> OpenProjectResult {
-    let result = app.dialog().file().blocking_pick_folder();
-    match result {
+async fn new_project_dialog(app: AppHandle, project_name: String) -> OpenProjectResult {
+    match pick_folder_off_main_thread(&app).await {
         Some(base) => {
             let base_str = base.to_string();
             create_onboarding_project_at_base_dir(Path::new(&base_str), &project_name, "megadrive")
@@ -3654,6 +4203,9 @@ pub fn run() {
             emulator_stop_recording,
             emulator_play_replay,
             parity_run_capture,
+            parity_run_cross_core,
+            parity_run_reference_candidate,
+            parity_run_cycle_report,
             emulator_read_memory,
             emulator_get_execution_trace,
             emulator_send_input,
