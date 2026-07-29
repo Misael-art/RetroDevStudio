@@ -759,7 +759,12 @@ mod tests {
             Some(ready_report()),
             Path::new("runtime-dependency-diagnostics.json"),
         );
-        assert_eq!(report.summary.not_applicable, 2);
+        // A fixture declara `msvc` como nao aplicavel em qualquer host. `git_bash`
+        // nao tem check na fixture, entao cai em `applicable_without_report()`:
+        // aplicavel no Windows, nao aplicavel fora dele. Fixar um numero unico
+        // fazia o teste passar so no host onde foi escrito.
+        let expected_not_applicable = if cfg!(target_os = "windows") { 1 } else { 2 };
+        assert_eq!(report.summary.not_applicable, expected_not_applicable);
         assert_eq!(report.summary.total, 7);
         assert_eq!(report.schema, RUNTIME_DIAGNOSTICS_SCHEMA);
     }
