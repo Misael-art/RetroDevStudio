@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-07-13 (Node build provenance v1 em hardening)
+**Ultima Atualizacao:** 2026-07-13 (Gameplay Parity isolada em hardening)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,13 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-07-13 - Gameplay Parity isolada, branch `codex/gameplay-parity-slice`):**
+  - **Base e escopo:** branch limpa criada de `main` `e700477e`, apos a certificacao da proveniencia Node. Foram portados somente `parity_harness`, observacao Libretro, comandos/contratos IPC, servico/store/UI, testes, docs e o candidato canonico de cores; nenhum arquivo de Decompilacao, Linux, Node ou UI geral entrou.
+  - **Contrato honesto:** reference/candidate, cross-core e Cycle Report continuam **Experimental**. Divergencia cross-core e resultado observado, nao equivalencia. Audio mede determinismo do stream i16 entregue pelo core, nao `audio_exact_match` de hardware. WRAM/VRAM/SRAM nao expostas ficam indisponiveis sem hash fabricado; PC, M68K/Z80, VDP, DMA e scanline/ciclos ficam `missing` quando o core nao instrumenta esses sinais.
+  - **Cobertura e gates locais:** check:tree, lint, TypeScript, cargo check, clippy `-D warnings` e diff check PASS; frontend completo **500 passed / 2 skipped**; Rust completo **481 passed / 30 ignored**; `npm run build:debug` PASS com binario e `build-report.json` canonicos. Cobertura focada: frontend Parity/Tools **43/43**; Rust Parity **57 passed / 6 ignored**.
+  - **Validacao real host-local:** a prova ignorada foi executada explicitamente e retornou `single_core_real_validation=blocked_core_missing`: nenhum core Mega Drive `.so` oficial em `toolchains/libretro/cores`. Neste Linux, `auto_install_supported` e falso e o provisionador existente so baixa o pacote oficial em Windows; nao ha segundo core canonicamente provisionavel neste ambiente. Nenhum fake contou como evidencia real.
+  - **Proximo passo imediato:** PR isolada, CI/Desktop E2E verdes e merge em `main`; depois fechar a PR #23 como substituida.
 
 * **O que acabou de acontecer (2026-07-13 - Node build provenance v1, branch `codex/node-build-provenance`):**
   - **Base certificada:** PR #26 do Node Engine local foi mergeada em `main` por `9548dbc`; CI e Desktop E2E do merge passaram. Node Engine, NodeGraph e Inspector permanecem **Experimental**.
@@ -62,7 +69,6 @@
   - **Gates (host Linux):** na branch Node-01 original: check:tree, lint, tsc, `npm test` 470/2 skipped, `cargo check`/clippy/`cargo test --lib` 478/0/29, `git diff --check` — tudo PASS. Recertificacao completa na branch limpa (Node-02, base `3f4cdf4`): `npm run check:tree` PASS; `npm run lint` PASS; `npx tsc --noEmit` PASS; `npm test` PASS (**49 arquivos: 48 passed + 1 skipped; 449 testes: 447 passed + 2 skipped** — +12 sobre a base); `cargo check --lib` PASS; `cargo clippy --lib -- -D warnings` PASS (0 warnings); `cargo test --lib -- --nocapture --test-threads=1` PASS (**438 passed / 0 failed / 24 ignored**, contagem propria da base Linux; nenhum arquivo Rust alterado pelos commits Node); `git diff --check` PASS; `git diff 3f4cdf4...HEAD --check` PASS.
   - **Status honesto:** Node Engine/NodeGraph/Inspector continuam **Experimental**. A rodada NAO cria step debugging real, NAO conecta trace a runtime/emulador e NAO promove nenhuma superficie. O que falta para integracao com runtime real: source mapping confiavel ROM/PC -> node (dependente da frente de parity/decompilacao), backend que produza `RuntimeEvidence` real e criterio institucional de equivalencia.
   - **Proximo passo imediato (Node Engine):** decidir destino de `nodeCompiler.ts` legado (convergir com o engine ou arquivar), mover o modelo de dados (`NodeGraph`/`GraphNode`/`NodeEdge`) do componente para o core em fatia propria, e fazer o Inspector consumir `LocalNodeTrace` tipado (hoje consome a inspecao adaptada) mantendo rotulo Experimental.
-
 * **O que acabou de acontecer (2026-06-28 rodada 76 - MSVC Build Tools restaurado; todos os gates Rust + build debug verdes):**
   - **Branch/commit:** `codex/main-user-flow-hardening`, commit `28148f7` (6 ahead `origin/main`, 0 behind `origin/codex/main-user-flow-hardening`). Worktree limpo. Nenhum commit novo nesta sessao — apenas validacao de gates.
   - **MSVC Build Tools instalado:** `winget install Microsoft.VisualStudio.2022.BuildTools` + `setup.exe modify --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended` instalou VC++ 17.14.35 toolchain. `cl.exe` 19.44.35207 e `link.exe` 14.44.35207 disponiveis via `vcvars64.bat`. `rustup default stable-x86_64-pc-windows-msvc` ativo; GNU toolchain permanece instalado mas nao usado.
