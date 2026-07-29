@@ -27,6 +27,13 @@ import {
   validateManifest,
 } from "./host-manager.mjs";
 
+// Alguns casos escrevem fixtures "#!/bin/sh" e dependem de EXECUTAR esses
+// arquivos para sondar versao. Isso so funciona em host POSIX: no Windows um
+// arquivo sem extensao com shebang nao e executavel, a sonda retorna null e o
+// requisito vira "missing". Simular `platform: linux` nao muda o host que roda
+// o teste. Mesmo padrao de `scripts/linux-host-scripts.test.mjs`.
+const posixIt = process.platform === "win32" ? it.skip : it;
+
 const tempDirs = [];
 
 function tempDir() {
@@ -335,7 +342,7 @@ describe("host detection and probes", () => {
     expect(resolveCommand(["native-tool"], { platform: "linux" }, { RDS_HOST_TEST_PATH: directory, PATH: directory })).toBe(program);
   });
 
-  it("prefers the pinned bootstrap Node and npm over incompatible host versions", () => {
+  posixIt("prefers the pinned bootstrap Node and npm over incompatible host versions", () => {
     const directory = tempDir();
     const hostCache = path.join(directory, "cache");
     const bootstrapBin = path.join(hostCache, "bootstrap", "node-v24.18.0-linux-x64", "bin");
@@ -405,7 +412,7 @@ describe("host detection and probes", () => {
     expect(JSON.parse(readFileSync(reportPath, "utf8")).host_fingerprint).toBe(report.host_fingerprint);
   });
 
-  it("performs repeated READY ensures without repair actions", () => {
+  posixIt("performs repeated READY ensures without repair actions", () => {
     const directory = tempDir();
     const bin = path.join(directory, "bin");
     executable(bin, "fixture", "#!/bin/sh\nprintf 'fixture 1.0.0\\n'\n");
