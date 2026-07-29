@@ -98,6 +98,11 @@ linuxDescribe("Linux host scripts", () => {
     mkdirSync(cores, { recursive: true });
     writeFileSync(path.join(cores, "genesis_plus_gx_libretro.so"), "fixture", "utf8");
     writeFileSync(path.join(cores, "snes9x_libretro.so"), "fixture", "utf8");
+    // Raiz de repo isolada: sem isso, um host com toolchains/sgdk provisionado
+    // localmente satisfaz detect_sgdk_root e o teste deixa de observar o blocker.
+    const isolatedRepoRoot = path.join(tempDir, "repo");
+    mkdirSync(isolatedRepoRoot, { recursive: true });
+    writeFileSync(path.join(isolatedRepoRoot, ".node-version"), "24.18.0\n", "utf8");
     mkdirSync(hostCacheBase, { recursive: true });
     writeFileSync(
       path.join(hostCacheBase, "active-host.json"),
@@ -115,6 +120,7 @@ linuxDescribe("Linux host scripts", () => {
         PATH: `${managedBin}${path.delimiter}${process.env.PATH}`,
         RDS_HOST_CACHE: hostCacheBase,
         RDS_VALIDATE_REPORT_PATH: reportPath,
+        RDS_REPO_TOOLCHAIN_ROOT: isolatedRepoRoot,
       });
       expect(result.status).toBe(1);
       const report = JSON.parse(readFileSync(reportPath, "utf8"));

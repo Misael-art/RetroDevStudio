@@ -24,6 +24,7 @@ Options:
 Environment:
   RDS_VALIDATE_REPORT_PATH  Override report path.
   RDS_HOST_CACHE            Override the native host-cache base.
+  RDS_REPO_TOOLCHAIN_ROOT   Override the repo root used to look up versioned toolchains.
   SGDK_ROOT or GDK          Native Linux SGDK root.
   RDS_EDGE_DRIVER_PATH      Native Linux WebDriver path.
   RETRODEV_GHIDRA_HOME      Ghidra installation root containing support/analyzeHeadless.
@@ -60,7 +61,10 @@ if [[ "$(uname -s)" != "Linux" ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# RDS_REPO_TOOLCHAIN_ROOT isola a deteccao de toolchains versionadas no repo.
+# Sem isso, um host com toolchains/sgdk provisionado localmente mascara os
+# blockers que o report precisa emitir (e testes deixam de ser hermeticos).
+REPO_ROOT="${RDS_REPO_TOOLCHAIN_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 VALIDATION_DIR="$REPO_ROOT/src-tauri/target-test/validation"
 REPORT_PATH="${RDS_VALIDATE_REPORT_PATH:-$VALIDATION_DIR/upstream-validation-linux.json}"
 mkdir -p "$VALIDATION_DIR" "$(dirname "$REPORT_PATH")"
