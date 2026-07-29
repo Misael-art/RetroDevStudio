@@ -1632,6 +1632,9 @@ fn render_pvsneslib_makefile(project_slug: &str, ast: &AstOutput) -> String {
     out.push_str("ifeq ($(strip $(PVSNESLIB_HOME)),)\n");
     out.push_str("$(error \"Please create an environment variable PVSNESLIB_HOME by following this guide: https://github.com/alekmaul/pvsneslib/wiki/Installation\")\n");
     out.push_str("endif\n\n");
+    // ROMNAME precisa vir ANTES do include: versoes recentes de snes_rules
+    // abortam com "ROMNAME must be set before including snes_rules".
+    out.push_str(&format!("export ROMNAME := {}\n\n", project_slug));
     out.push_str("include ${PVSNESLIB_HOME}/devkitsnes/snes_rules\n\n");
     out.push_str("ifeq ($(OS),Windows_NT)\n");
     out.push_str("ifeq ($(strip $(PVSNESLIB_LIBDIR_WIN)),)\n");
@@ -1640,7 +1643,6 @@ fn render_pvsneslib_makefile(project_slug: &str, ast: &AstOutput) -> String {
     out.push_str("override LIBDIRSOBJSW := $(PVSNESLIB_LIBDIR_WIN)\n");
     out.push_str("endif\n\n");
     out.push_str(".PHONY: bitmaps all postbuild\n\n");
-    out.push_str(&format!("export ROMNAME := {}\n\n", project_slug));
     out.push_str("all: bitmaps postbuild\n\n");
     out.push_str("postbuild: $(ROMNAME).sfc\n");
     out.push_str("\t@mkdir -p out\n");
@@ -2548,6 +2550,34 @@ mod tests {
     use image::{ImageBuffer, Rgba};
     use std::sync::{Mutex, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn pvsneslib_makefile_sets_romname_before_including_snes_rules() {
+        // Regressao: versoes recentes de snes_rules abortam o build com
+        // "ROMNAME must be set before including snes_rules". O gerador emitia o
+        // include antes do ROMNAME, entao o build SNES quebrava assim que a
+        // toolchain baixada do upstream trazia esse guard. Nada cobria a ordem.
+        let ast = AstOutput {
+            nodes: Vec::new(),
+            sprite_assets: Vec::new(),
+            logic_scripts: Vec::new(),
+        };
+        let makefile = render_pvsneslib_makefile("demo_slug", &ast);
+
+        let romname_at = makefile
+            .find("export ROMNAME :=")
+            .expect("makefile deve exportar ROMNAME");
+        let include_at = makefile
+            .find("include ${PVSNESLIB_HOME}/devkitsnes/snes_rules")
+            .expect("makefile deve incluir snes_rules");
+
+        assert!(
+            romname_at < include_at,
+            "ROMNAME precisa ser definido antes do include de snes_rules \
+             (romname={romname_at}, include={include_at})"
+        );
+        assert!(makefile.contains("export ROMNAME := demo_slug"));
+    }
 
     fn test_serial_guard() -> std::sync::MutexGuard<'static, ()> {
         static TEST_SERIAL: OnceLock<Mutex<()>> = OnceLock::new();

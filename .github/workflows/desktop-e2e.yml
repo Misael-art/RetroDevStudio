@@ -51,7 +51,14 @@ concurrency:
 
 jobs:
   desktop-smoke:
-    runs-on: windows-latest
+    # Pinado em windows-2022: a imagem windows-latest (20260714) quebrou o
+    # pareamento WebView2/msedgedriver e toda sessao WebDriver falha com
+    # 'session not created: DevToolsActivePort file doesn't exist'.
+    # Evidencia A/B em main intocada: windows-latest = falha (run 30415379026),
+    # windows-2022 = sucesso (run 30416053578).
+    # TODO: voltar a windows-latest quando o driver for provisionado casando
+    # com a versao do WebView2 Runtime da imagem, nao com a do Edge browser.
+    runs-on: windows-2022
     timeout-minutes: 45
     defaults:
       run:
