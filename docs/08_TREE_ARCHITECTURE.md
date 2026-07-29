@@ -188,6 +188,7 @@ RetroDevStudio/
 - `scripts/run-cargo-msvc.cmd` e o wrapper canonico para comandos `cargo` em ambiente MSVC preparado no Windows institucional.
 - `scripts/e2e-tauri-build-run.mjs` e o runner canonico de regressao desktop/Tauri para `Build -> Load ROM -> Run frames`.
 - `scripts/validate-upstream-windows.ps1` e o script canonico de validacao upstream real com SGDK, PVSnesLib e cores Libretro oficiais.
+- `scripts/decomp/` versiona a reproducao do spike **Experimental** de decompilacao (`docs/12_DECOMPILACAO_PAREADA_PLANO.md`): `build_reproducible.sh` (build duplo M68K), `fingerprint_v2.sh` e `holdout_v2.sh` (fingerprint/holdout sobre o corpus BYOR `RDS_SGDK_CORPUS`), `ghidra_boundary.sh` + `GhidraListFunctions.java` (boundary precision/recall, sai BLOCKED sem instalar nada se Ghidra/JDK21 faltarem). Saidas ficam em `RDS_DECOMP_WORK` (default `~/.retrodev/decomp_work`, fora do repo); nenhuma ROM e versionada. Estes scripts vivem FORA do shell do app: nao existe pipeline, scanner, ledger, LLM nem UI de decompilacao no produto.
 - `.github/workflows/desktop-e2e.yml` e o workflow canonico de regressao desktop em Windows e ja foi validado em runner GitHub real.
 - `toolchains/libretro/cores/` e o local canonico dos DLLs de core baixados do upstream oficial.
 - `toolchains/webdriver/msedgedriver.exe` e o local canonico do driver nativo usado pelo runner desktop/Tauri e pelos scripts de diagnostico locais.
