@@ -184,6 +184,7 @@ A coluna `Certificacao` usa exclusivamente o vocabulario travado deste roadmap:
 | Fase 3 - Visual Logic & RetroFX | Local         | NodeGraph canonico e camada visual existem; superficies ainda heterogeneas                |
 | Fase 4 - Camada Pro             | Local         | Patching, profiling, reverse e utilitarios existem, mas nem tudo e criterio de fechamento |
 | Fase 5 - Release                | Institucional | PR #2 mergeado e readiness de promocao verde em `main`; repetir quando escopo mudar       |
+| Fase 6 - Decompilacao Pareada   | Nenhuma       | **Experimental (spikes versionados fora do shell).** `scripts/decomp/` versiona build-duplo M68K reproduzivel, fingerprint v2 (symbol-table + SHA-256), holdout Tier 0 sem vazamento e boundary benchmark Ghidra headless, todos fail-hard e cobertos por `decomp-scripts.test.mjs`. Pipeline de producao (scanner/ledger/LLM/UI) **nao implementado nem autorizado**. Plano em `docs/12_DECOMPILACAO_PAREADA_PLANO.md` |
 
 
 ---
@@ -273,6 +274,7 @@ Capacidades nao visuais, importadores e itens legados continuam nas secoes propr
 - Conversao ampla de gameplay para MUGEN/Ikemen alem do subset Experimental de nodes/bridges
 - Promocao institucional de adapters ainda sem prova suficiente
 - Expansoes visuais que concorram com a estabilizacao do fluxo core
+- **Decompilacao Pareada (ROM -> .rds/SGDK):** plano em `docs/12_DECOMPILACAO_PAREADA_PLANO.md`. Apenas spikes Experimentais versionados fora do shell (`scripts/decomp/`), cobertos por testes; nenhum pipeline no produto e nenhuma UI de decompilacao. Scanner/ledger/LLM/UI **nao autorizados**. Superficie nova requer as Fases 0-5 do plano (sob GO formal) antes de qualquer integracao no shell.
 
 ---
 
