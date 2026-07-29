@@ -47,7 +47,8 @@ RetroDevStudio/
 |   |-- 08_TREE_ARCHITECTURE.md
 |   |-- 09_AGENT_DEV_MODE.md
 |   |-- 10_QA_ROTEIRO_RC.md
-|   `-- SGDK_REAL_CORPUS_VALIDATION_MATRIX.md
+|   |-- SGDK_REAL_CORPUS_VALIDATION_MATRIX.md
+|   `-- DIAGNOSTICO_PRODUTO_2026_07_28_NAO_CANONICO.md  (diagnostico de gaps; NAO canonico)
 |
 |-- src/
 |   |-- App.tsx
