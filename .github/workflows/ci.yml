@@ -122,7 +122,9 @@ jobs:
     env:
       CARGO_BUILD_JOBS: 2
       RUST_MIN_STACK: 16777216
-      CARGO_TARGET_DIR: ${{ github.workspace }}/.cache/cargo-target
+      # Fora do workspace de proposito: um target dentro da raiz cria um
+      # diretorio novo (.cache) que o proprio gate check:tree rejeita.
+      CARGO_TARGET_DIR: ${{ runner.temp }}/cargo-target
     steps:
       - name: Checkout
         uses: actions/checkout@v4
