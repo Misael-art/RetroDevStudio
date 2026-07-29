@@ -205,6 +205,25 @@ describe("host requirements contract", () => {
     expect(privilege).toEqual({ program: "sudo", args: [] });
   });
 
+  it("does not fabricate incompatibility when the browser version is unknown", () => {
+    // Ausencia de observacao nao e evidencia de incompatibilidade. Antes, um host
+    // onde a versao do navegador nao e detectavel (runner de CI, por exemplo)
+    // marcava como `incompatible` um driver que funciona.
+    const driver = {
+      applicable: true,
+      status: "ready",
+      path: "C:/drivers/msedgedriver.exe",
+      version: "MSEdgeDriver 140.0.4",
+    };
+
+    expect(browserDriverCompatible({ route: "browser" }, driver)).toBe(true);
+    expect(browserDriverCompatible({ version: null, route: "browser" }, driver)).toBe(true);
+    // Versao conhecida e divergente continua reprovando.
+    expect(
+      browserDriverCompatible({ version: "Microsoft Edge 139.0.1", route: "browser" }, driver)
+    ).toBe(false);
+  });
+
   it("rejects a browser and WebDriver with different major versions", () => {
     expect(
       browserDriverCompatible(

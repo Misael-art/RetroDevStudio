@@ -410,7 +410,13 @@ export function browserDriverCompatible(browser, driverCheck) {
   if (!driverCheck?.applicable || driverCheck.status === "missing") return true;
   const driverName = path.basename(driverCheck.path ?? "").toLowerCase();
   if (driverName.includes("webkitwebdriver")) return browser?.route === "webkit";
-  if (!browser?.version) return false;
+  // Sem versao do navegador nao existe evidencia de INcompatibilidade, apenas
+  // ausencia de observacao — e ausencia de observacao nao pode fabricar veredito
+  // negativo (mesma regra que a camada de parity aplica em docs/07). Retornar
+  // false aqui marcava como `incompatible` um driver que funciona, em qualquer
+  // host onde a versao do navegador nao seja detectavel (por exemplo runners de
+  // CI). A incerteza fica registrada em `compatibility` no proprio relatorio.
+  if (!browser?.version) return true;
   const browserMajor = versionMajor(browser.version);
   const driverMajor = versionMajor(driverCheck.version);
   return browserMajor !== null && driverMajor !== null && browserMajor === driverMajor;
@@ -448,9 +454,16 @@ export function diagnose(options = {}) {
   const checks = supported ? manifest.requirements.map((requirement) => probeRequirement(requirement, context)) : [];
   const browser = browserIdentity(host, { ...(options.env ?? process.env), PATH: pathEnv });
   const webdriver = checks.find((check) => check.id === "webdriver");
-  if (supported && webdriver?.applicable && webdriver.status === "ready" && !browserDriverCompatible(browser, webdriver)) {
-    webdriver.status = "incompatible";
-    webdriver.compatible = false;
+  if (supported && webdriver?.applicable && webdriver.status === "ready") {
+    if (!browserDriverCompatible(browser, webdriver)) {
+      webdriver.status = "incompatible";
+      webdriver.compatible = false;
+    } else if (!browser?.version) {
+      // Compativel por ausencia de contra-evidencia, nao por verificacao. Fica
+      // explicito no relatorio para nao virar falso "verificado".
+      webdriver.compatible = null;
+      webdriver.compatibility = "unverified_browser_version";
+    }
   }
   const fingerprintPayload = {
     host,

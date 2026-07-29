@@ -208,15 +208,20 @@ let currentE2eRunContext = null;
 // JDK21 e PVSnesLib, que ele nao usa, e nenhum runner de CI conseguia satisfazer.
 // O gate passa a assertar apenas os requisitos que o cenario realmente exercita.
 // O relatorio completo continua sendo gravado, entao o diagnostico nao se perde.
-// Os cores Libretro NAO entram: o app os instala sob demanda no Build & Run
-// (bloco D de `docs/10_QA_ROTEIRO_RC.md`), e o proprio E2E exercita esse caminho.
-// Exigi-los antes da execucao contradiria o fluxo do produto e transformaria um
-// cenario valido de primeira execucao em falha de gate.
+// SGDK, PVSnesLib e cores Libretro NAO entram: o app os instala sob demanda no
+// Build & Run (bloco D de `docs/10_QA_ROTEIRO_RC.md`) e o proprio E2E existe para
+// exercitar esse caminho. Confirmado empiricamente — no runner de CI o preflight
+// reporta `SGDK real: FALTA` e o smoke passa assim mesmo, porque a toolchain e
+// provisionada durante a execucao. Exigi-los antes transformaria uma primeira
+// execucao valida em falha de gate.
+//
+// Sobra o que precisa existir ANTES de a aplicacao subir: o runtime de build do
+// proprio app e a dupla de drivers da sessao WebDriver.
 const HOST_REQUIREMENTS_BASE = ["node", "cargo", "rustc", "make"];
 const HOST_REQUIREMENTS_DESKTOP = ["tauri_driver", "webdriver"];
 const HOST_REQUIREMENTS_BY_TARGET = {
-  megadrive: ["sgdk"],
-  snes: ["pvsneslib"],
+  megadrive: [],
+  snes: [],
 };
 
 export function hostRequirementsForRun({ target } = {}) {
