@@ -761,11 +761,18 @@ mod tests {
         );
         // A fixture declara `msvc` como nao aplicavel em qualquer host. `git_bash`
         // nao tem check na fixture, entao cai em `applicable_without_report()`:
-        // aplicavel no Windows, nao aplicavel fora dele. Fixar um numero unico
-        // fazia o teste passar so no host onde foi escrito.
+        // aplicavel no Windows, nao aplicavel fora dele. Fixar numeros absolutos
+        // fazia o teste passar so no host onde foi escrito (not_applicable=2 e
+        // total=7 valem no Linux; no Windows sao 1 e 8).
         let expected_not_applicable = if cfg!(target_os = "windows") { 1 } else { 2 };
         assert_eq!(report.summary.not_applicable, expected_not_applicable);
-        assert_eq!(report.summary.total, 7);
+        // `total` conta apenas os aplicaveis, entao as duas metricas particionam
+        // o conjunto completo de DependencyKind. Assertar a invariante em vez de
+        // um numero solto mantem o teste correto em qualquer host.
+        assert_eq!(
+            report.summary.total + report.summary.not_applicable,
+            DependencyKind::all().len()
+        );
         assert_eq!(report.schema, RUNTIME_DIAGNOSTICS_SCHEMA);
     }
 
