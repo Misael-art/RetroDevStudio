@@ -12,8 +12,12 @@ import type {
   Scene,
   SceneLayer,
 } from "../ipc/sceneService";
-import type { ParityReport } from "../projectCapability";
 import type { BuildSourceMap } from "../nodegraph/buildProvenance";
+import type {
+  CrossCoreReport,
+  CycleReport,
+  ParityReport,
+} from "../projectCapability";
 
 const UNDO_STACK_LIMIT = 50;
 
@@ -113,6 +117,8 @@ export interface StoreState {
   consoleVisible: boolean;
   lastParityReport: ParityReport | null;
   lastBuildSourceMap: BuildSourceMap | null;
+  lastCrossCoreReport: CrossCoreReport | null;
+  lastCycleReport: CycleReport | null;
   hwStatus: HwStatus | null;
   sceneRevision: number;
   hwValidationState: HwValidationState;
@@ -171,6 +177,8 @@ export interface StoreActions {
   toggleConsole: () => void;
   setLastParityReport: (report: ParityReport | null) => void;
   setLastBuildSourceMap: (sourceMap: BuildSourceMap | null) => void;
+  setLastCrossCoreReport: (report: CrossCoreReport | null) => void;
+  setLastCycleReport: (report: CycleReport | null) => void;
   setHwStatus: (status: HwStatus | null) => void;
   setHwValidationPending: (revision: number) => void;
   setHwValidationResult: (revision: number, status: HwStatus) => void;
@@ -470,6 +478,10 @@ export const useEditorStore = create<EditorState>((set) => ({
   setLastParityReport: (report) => set({ lastParityReport: report }),
   lastBuildSourceMap: null,
   setLastBuildSourceMap: (sourceMap) => set({ lastBuildSourceMap: sourceMap }),
+  lastCrossCoreReport: null,
+  setLastCrossCoreReport: (report) => set({ lastCrossCoreReport: report }),
+  lastCycleReport: null,
+  setLastCycleReport: (report) => set({ lastCycleReport: report }),
 
   hwStatus: null,
   setHwStatus: (status) => set({ hwStatus: status }),
