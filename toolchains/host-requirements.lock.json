@@ -893,6 +893,9 @@
       "label": "WebDriver nativo",
       "probe": {
         "kind": "command",
+        "env_candidates": [
+          "RDS_EDGE_DRIVER_PATH"
+        ],
         "names_by_platform": {
           "linux": [
             "WebKitWebDriver",

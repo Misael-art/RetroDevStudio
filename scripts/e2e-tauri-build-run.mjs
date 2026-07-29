@@ -11,7 +11,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -202,16 +202,51 @@ const uiLayoutOracleReportPath = path.join(
 );
 let currentE2eRunContext = null;
 
+// O contrato de host tem perfil unico (`full`, 24 requisitos) porque nasceu para
+// provisionar a maquina de desenvolvimento inteira. Exigir esse perfil no runner
+// E2E tornava o gate tudo-ou-nada: o smoke de Mega Drive passava a exigir Ghidra,
+// JDK21 e PVSnesLib, que ele nao usa, e nenhum runner de CI conseguia satisfazer.
+// O gate passa a assertar apenas os requisitos que o cenario realmente exercita.
+// O relatorio completo continua sendo gravado, entao o diagnostico nao se perde.
+// Os cores Libretro NAO entram: o app os instala sob demanda no Build & Run
+// (bloco D de `docs/10_QA_ROTEIRO_RC.md`), e o proprio E2E exercita esse caminho.
+// Exigi-los antes da execucao contradiria o fluxo do produto e transformaria um
+// cenario valido de primeira execucao em falha de gate.
+const HOST_REQUIREMENTS_BASE = ["node", "cargo", "rustc", "make"];
+const HOST_REQUIREMENTS_DESKTOP = ["tauri_driver", "webdriver"];
+const HOST_REQUIREMENTS_BY_TARGET = {
+  megadrive: ["sgdk"],
+  snes: ["pvsneslib"],
+};
+
+export function hostRequirementsForRun({ target } = {}) {
+  const perTarget = HOST_REQUIREMENTS_BY_TARGET[target] ?? [];
+  return [...new Set([...HOST_REQUIREMENTS_BASE, ...HOST_REQUIREMENTS_DESKTOP, ...perTarget])];
+}
+
+export function scopedHostBlockers(report, requiredIds) {
+  const checks = new Map((report?.checks ?? []).map((check) => [check.id, check]));
+  return requiredIds
+    .map((id) => {
+      const check = checks.get(id);
+      if (!check) return `${id}:ausente_no_contrato`;
+      if (check.status === "ready" || check.status === "not_applicable") return null;
+      return `${id}:${check.status}`;
+    })
+    .filter(Boolean);
+}
+
 export function applyManagedHostEnvironment() {
   const { report, context } = diagnoseHost({
     mode: "desktop-e2e",
     env: process.env,
     reportPath: path.join(validationDir, "desktop-e2e-host-readiness.json"),
   });
-  if (report.state !== "READY") {
-    return report;
-  }
 
+  // `pathEnv` apenas prefixa os bins gerenciados ao PATH existente, entao aplicar
+  // sempre e aditivo e seguro: num host sem cache gerenciado os diretorios nao
+  // existem e nada e removido. Os `setDefault` nunca sobrescrevem env ja definido,
+  // o que preserva o provisionamento explicito da CI.
   const checks = new Map(report.checks.map((check) => [check.id, check]));
   const readyPath = (id) => {
     const check = checks.get(id);
@@ -221,8 +256,13 @@ export function applyManagedHostEnvironment() {
     if (!process.env[name] && value) process.env[name] = value;
   };
 
-  process.env.PATH = context.pathEnv;
-  setDefault("CARGO_TARGET_DIR", path.join(context.hostCache, "cargo-target"));
+  // PATH e CARGO_TARGET_DIR so sao redirecionados quando existe cache gerenciado
+  // de fato. Num runner de CI, que provisiona por conta propria e ja produziu o
+  // binario em outro target dir, redirecionar seria mudanca de comportamento.
+  if (existsSync(context.hostCache)) {
+    process.env.PATH = context.pathEnv;
+    setDefault("CARGO_TARGET_DIR", path.join(context.hostCache, "cargo-target"));
+  }
   setDefault("SGDK_ROOT", readyPath("sgdk"));
   setDefault("PVSNESLIB_HOME", readyPath("pvsneslib"));
   setDefault("JAVA_HOME", readyPath("jdk21") ? path.dirname(path.dirname(readyPath("jdk21"))) : "");
@@ -3262,10 +3302,10 @@ async function main() {
     fail("Este script requer Node.js com suporte a fetch global.");
   }
 
+  // Aplica o ambiente gerenciado cedo (o preflight abaixo ja se beneficia dele),
+  // mas a assercao fica depois de `projectMetadata`, quando o target e conhecido
+  // e da para exigir so o que o cenario usa.
   const hostReadiness = applyManagedHostEnvironment();
-  if (hostReadiness.state !== "READY") {
-    fail(`Host E2E nao esta READY: ${hostReadiness.blockers.join(", ") || hostReadiness.state}`);
-  }
   const options = parseArgs(process.argv.slice(2));
   try {
     const preflightUrl = pathToFileURL(
@@ -3313,6 +3353,18 @@ async function main() {
   const projectMetadata = requiresExistingProject
     ? await readProjectMetadata(options.project)
     : { name: "", target: "" };
+
+  const requiredHostIds = hostRequirementsForRun({ target: projectMetadata.target });
+  const hostBlockers = scopedHostBlockers(hostReadiness, requiredHostIds);
+  if (hostBlockers.length > 0) {
+    fail(
+      `Host E2E nao atende os requisitos do cenario '${options.scenario}'` +
+        `${projectMetadata.target ? ` (target ${projectMetadata.target})` : ""}: ` +
+        `${hostBlockers.join(", ")}. Requisitos exigidos: ${requiredHostIds.join(", ")}. ` +
+        `Relatorio completo do contrato de host: ${path.join(validationDir, "desktop-e2e-host-readiness.json")}.`
+    );
+  }
+
   await clearDesktopSuccessReport(options, projectMetadata);
   currentE2eRunContext = {
     scenario: options.scenario,
