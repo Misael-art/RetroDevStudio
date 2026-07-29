@@ -341,6 +341,10 @@ fn interrupted_build_result() -> BuildResult {
             message: "O que quebrou: a tarefa de build terminou de forma inesperada (panic). Por que importa: nenhuma ROM foi gerada. Onde corrigir: veja o log do processo desktop. Proxima acao: rode o build novamente e reporte o log se persistir.".to_string(),
         }],
         diagnostics: Vec::new(),
+        // Build interrompido por panic nao emitiu C nem ROM, entao nao existe
+        // proveniencia observavel: os dois campos ficam None de proposito.
+        source_map_path: None,
+        build_source_map: None,
     }
 }
 
