@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-07-29 (convergencia executada; gate Desktop E2E restaurado; regressao real do SNES corrigida)
+**Ultima Atualizacao:** 2026-09-02 (deriva do toolchain Rust derrubou `main`; pin em 1.97.1 restaurou o baseline)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,17 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+* **O que acabou de acontecer (2026-09-02 - deriva do toolchain Rust derrubou `main`; convergencia de UI retomada):**
+  - **Escopo:** fechar a fatia de UI (PR #34, depois #35) e manter o baseline verde.
+  - **Mergeados em `main`:** PR #34 (`convergence/ui-fatia1`, `0541837`) e PR #38 (`fix/rust-toolchain-pin`, `d8c1331`).
+  - **Deriva do toolchain Rust (achado dominante):** `main` ficou vermelho **sem mudanca de codigo de produto**. `dtolnay/rust-toolchain@stable` seguia o canal: 1.97.1 na ultima run verde (2026-07-29), 1.98.0 em 2026-09-02. O 1.98 estreou `clippy::chunks_exact_to_as_chunks` e, sob `-D warnings`, reprovou 7 arquivos intocados (`build_provenance.rs:292`, `audio_pipeline.rs:342`, `compatibility_harness.rs:675` e `:703`, `parity_harness.rs:1986`, `project_mgr.rs:1233`, `tools/reverse/graphics.rs:51`).
+  - **Correcao:** pin de `ci.yml` **e** `desktop-e2e.yml` em `@1.97.1`, com `components: rustfmt, clippy` explicito — refs de versao instalam perfil `minimal`, entao sem isso o pin trocaria falha de lint por ferramenta ausente. Evidencia: PR #38 com `validate: pass` e `desktop-smoke: pass`.
+  - **Correcao de registro:** o pin inerte `toolchain: 1.97.0` sob `@stable` existe na branch `convergence/reproducibility`, **nao** em `main` — em `main` o `@stable` estava simplesmente sem pin. A deriva observada e a mesma nos dois casos.
+  - **Tokens de UI (#35):** `--rds-status-success-hover` era o unico nome da fatia 1 sem equivalente no overhaul; virou token de primeira classe (`#22c55e` escuro, `#166534` claro), por decisao do usuario. Achado colateral: o bloco de aliases de compatibilidade existia **so** em `:root[data-theme="light"]`, entao no tema escuro — que e o padrao — `--rds-accent`, `--rds-on-accent` e `--rds-surface-control` nao resolviam e o botao de status do Build/Run em `App.tsx:204-209` ficava sem fundo. Bloco replicado no `:root` escuro.
+  - **`.codex/` destrackeado de #35:** 104 arquivos e 19 MB de mockups em diretorio nao declarado em `docs/08_TREE_ARCHITECTURE.md` reprovavam `npm run check:tree`. Removidos do versionamento **em vez de afrouxar o gate**, coerente com a reversao de `.serena` (rodada 71) e com o descarte deliberado de `e812828`. Artefatos seguem no historico do branch em `ab1043b`.
+  - **Licao estrutural:** segunda deriva de toolchain externa em duas rodadas consecutivas (PVSnesLib, agora Rust). Eleva a prioridade do `rust-toolchain.toml` versionado, entrega da PR #29 ainda parada. Pendencia honesta: o pin congela em 1.97.1 e os 7 sites de `chunks_exact` continuam por corrigir quando o toolchain subir de proposito.
+  - **Proximo passo imediato:** mergear #35 quando `validate` e `desktop-smoke` fecharem verdes. Depois, decidir a PR #29 (`dependency_manager` delegando para `host-manager` estoura `RDS_E2E_RUN_TIMEOUT_MS`) e fechar `codex/qa-isolated-baseline-20260520`.
 
 * **O que acabou de acontecer (2026-07-29 - convergencia executada; gate Desktop E2E restaurado; regressao real do SNES exposta):**
   - **Escopo:** executar o programa de convergencia registrado em 2026-07-28, na ordem acordada com o usuario: destravar Actions -> `reproducibility-program` -> `#28` -> `#23` -> UI.
