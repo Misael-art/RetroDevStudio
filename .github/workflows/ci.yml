@@ -27,8 +27,16 @@ jobs:
           node-version: 20
           cache: npm
 
+      # Versao fixada: `@stable` seguia o canal e trocava sozinho de toolchain.
+      # Em 2026-07-29 o CI rodou 1.97.1 e ficou verde; em 2026-09-02 o canal
+      # subiu para 1.98.0, que estreou `clippy::chunks_exact_to_as_chunks` e
+      # reprovou `-D warnings` em 7 arquivos sem nenhuma mudanca de codigo.
+      # `components` e obrigatorio aqui: refs de versao instalam o perfil
+      # minimal, que nao traz rustfmt nem clippy.
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: rustfmt, clippy
 
       - name: Install frontend dependencies
         run: npm ci
