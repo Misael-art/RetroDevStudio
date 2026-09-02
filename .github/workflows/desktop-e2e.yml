@@ -82,8 +82,12 @@ jobs:
           node-version: 24
           cache: npm
 
+      # Mesma versao do gate `validate` em ci.yml: o smoke compila o mesmo
+      # crate e nao pode divergir de toolchain.
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.97.1
+        with:
+          components: rustfmt, clippy
 
       - name: Install frontend dependencies
         run: npm ci
