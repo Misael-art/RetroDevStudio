@@ -60,6 +60,7 @@
     --rds-status-error-strong: #be123c;
     --rds-status-warning: #fbbf24;
     --rds-status-success: #4ade80;
+    --rds-status-success-hover: #22c55e;
     --rds-status-info: #7dd3fc;
     --rds-focus-ring: #38bdf8;
     --rds-focus-shadow: color-mix(in srgb, var(--rds-focus-ring) 28%, transparent);
@@ -76,6 +77,17 @@
     --rds-control-padding-x-lg: 1rem;
     --rds-shadow-elevated: 0 0.75rem 2.5rem color-mix(in srgb, #000000 45%, transparent);
     --rds-transition-fast: 120ms ease;
+
+    /* Compatibilidade com os nomes da fatia 1 ainda referenciados em App.tsx e
+       EmptyState.tsx. Sao aliases sobre a paleta acima, nao cores novas: evita
+       que var() nao resolvido quebre estilo em silencio. Remover quando os call
+       sites migrarem para os nomes canonicos. */
+    --rds-accent: var(--rds-action-primary);
+    --rds-accent-hover: var(--rds-action-primary-hover);
+    --rds-on-accent: var(--rds-action-primary-text);
+    --rds-surface-control: var(--rds-action-secondary);
+    --rds-surface-control-hover: var(--rds-action-secondary-hover);
+    --rds-status-error-hover: var(--rds-action-danger-hover);
   }
 
   /*
@@ -120,6 +132,7 @@
     --rds-status-error: #be123c;
     --rds-status-warning: #a16207;
     --rds-status-success: #15803d;
+    --rds-status-success-hover: #166534;
     --rds-status-info: #0369a1;
     --rds-focus-ring: #0284c7;
     --rds-shadow-elevated: 0 0.75rem 2.5rem color-mix(in srgb, #0f172a 18%, transparent);
@@ -134,7 +147,6 @@
     --rds-surface-control: var(--rds-action-secondary);
     --rds-surface-control-hover: var(--rds-action-secondary-hover);
     --rds-status-error-hover: var(--rds-action-danger-hover);
-    --rds-status-success-hover: color-mix(in srgb, var(--rds-status-success) 82%, black);
   }
 
   html {
