@@ -45,6 +45,11 @@ const mocks = vi.hoisted(() => ({
   hydrateSceneResult: vi.fn(),
   persistActiveScene: vi.fn(),
   reloadSceneFromDisk: vi.fn(),
+  saveActiveSceneDraft: vi.fn(),
+  loadSceneDraft: vi.fn(),
+  clearSceneDraft: vi.fn(),
+  restoreSceneDraft: vi.fn(),
+  sceneDraftDiffersFromActiveSource: vi.fn(),
   getThirdPartyStatus: vi.fn(),
   installThirdPartyDependency: vi.fn(),
   detectRomDependency: vi.fn(),
@@ -600,6 +605,11 @@ vi.mock("./core/scenePersistence", () => ({
   hydrateSceneResult: mocks.hydrateSceneResult,
   persistActiveScene: mocks.persistActiveScene,
   reloadSceneFromDisk: mocks.reloadSceneFromDisk,
+  saveActiveSceneDraft: mocks.saveActiveSceneDraft,
+  loadSceneDraft: mocks.loadSceneDraft,
+  clearSceneDraft: mocks.clearSceneDraft,
+  restoreSceneDraft: mocks.restoreSceneDraft,
+  sceneDraftDiffersFromActiveSource: mocks.sceneDraftDiffersFromActiveSource,
 }));
 
 vi.mock("./core/ipc/sceneService", () => ({
@@ -2692,6 +2702,56 @@ describe("App build flow", () => {
 
     expect(useEditorStore.getState().activeWorkspace).toBe("game");
     expect(container.querySelector("[data-testid='inspector']")).toBeNull();
+  });
+
+  it("renders the persona selector with pro default and gates the rail per persona", async () => {
+    const selector = container.querySelector("[data-testid='shell-persona-selector']");
+    expect(selector).toBeInstanceOf(HTMLElement);
+    expect(
+      container
+        .querySelector("[data-testid='shell-persona-pro']")
+        ?.getAttribute("aria-checked")
+    ).toBe("true");
+
+    // Default pro: zero regressao — todas as superficies atuais visiveis.
+    expect(container.querySelector("[data-testid='workspace-rail-retrofx']")).toBeInstanceOf(
+      HTMLButtonElement
+    );
+    expect(container.querySelector("[data-testid='workspace-rail-debug']")).toBeInstanceOf(
+      HTMLButtonElement
+    );
+
+    const guiadoButton = container.querySelector(
+      "[data-testid='shell-persona-guiado']"
+    ) as HTMLButtonElement | null;
+    await act(async () => {
+      guiadoButton?.click();
+      await flush();
+    });
+
+    expect(container.querySelector("[data-testid='workspace-rail-scene']")).toBeInstanceOf(
+      HTMLButtonElement
+    );
+    expect(container.querySelector("[data-testid='workspace-rail-game']")).toBeInstanceOf(
+      HTMLButtonElement
+    );
+    expect(container.querySelector("[data-testid='workspace-rail-logic']")).toBeNull();
+    expect(container.querySelector("[data-testid='workspace-rail-artstudio']")).toBeNull();
+    expect(container.querySelector("[data-testid='workspace-rail-retrofx']")).toBeNull();
+    expect(container.querySelector("[data-testid='workspace-rail-debug']")).toBeNull();
+
+    const proButton = container.querySelector(
+      "[data-testid='shell-persona-pro']"
+    ) as HTMLButtonElement | null;
+    await act(async () => {
+      proButton?.click();
+      await flush();
+    });
+    expect(container.querySelector("[data-testid='workspace-rail-debug']")).toBeInstanceOf(
+      HTMLButtonElement
+    );
+
+    localStorage.removeItem("retrodev-shell-persona");
   });
 
   it("shows build phases as safe-to-continue guidance when validation has warnings only", async () => {

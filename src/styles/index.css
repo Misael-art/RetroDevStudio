@@ -10,13 +10,23 @@
   :root {
     --rds-surface-panel: #1e1e2e;
     --rds-surface-panel-strong: #11111b;
+    --rds-surface-raised: #181825;
+    --rds-surface-control: #313244;
+    --rds-surface-control-hover: #45475a;
     --rds-border-subtle: #313244;
     --rds-text-primary: #cdd6f4;
+    --rds-text-secondary: #a6adc8;
+    --rds-text-muted: #7f849c;
+    --rds-accent: #cba6f7;
+    --rds-accent-hover: #b4a0e0;
+    --rds-on-accent: #1e1e2e;
     --rds-action-primary: #89b4fa;
     --rds-tool-active: #94e2d5;
     --rds-status-error: #f38ba8;
+    --rds-status-error-hover: #eba0ac;
     --rds-status-warning: #fab387;
     --rds-status-success: #a6e3a1;
+    --rds-status-success-hover: #94e2a0;
     --rds-focus-ring: #7dd3fc;
   }
 
