@@ -30,6 +30,8 @@ const mocks = vi.hoisted(() => ({
   listenToProjectAssetChanges: vi.fn(),
   openProjectSourcePath: vi.fn(),
   runParityCapture: vi.fn(),
+  runCrossCoreParity: vi.fn(),
+  runCycleReport: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
@@ -60,9 +62,15 @@ vi.mock("../../core/ipc/emulatorService", () => ({
   emulatorReadMemory: mocks.emulatorReadMemory,
 }));
 
-vi.mock("../../core/ipc/parityService", () => ({
-  runParityCapture: mocks.runParityCapture,
-}));
+vi.mock("../../core/ipc/parityService", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../core/ipc/parityService")>();
+  return {
+    formatParityEvidenceDetails: actual.formatParityEvidenceDetails,
+    runParityCapture: mocks.runParityCapture,
+    runCrossCoreParity: mocks.runCrossCoreParity,
+    runCycleReport: mocks.runCycleReport,
+  };
+});
 
 vi.mock("../../core/ipc/toolsService", () => ({
   getThirdPartyStatus: mocks.getThirdPartyStatus,
@@ -172,6 +180,8 @@ describe("ToolsPanel Asset Browser", () => {
       projectSourceKind: "",
       projectLegacyIndex: null,
       lastParityReport: null,
+      lastCrossCoreReport: null,
+      lastCycleReport: null,
       activeScene: {
         scene_id: "main",
         display_name: "Main",
@@ -326,6 +336,93 @@ describe("ToolsPanel Asset Browser", () => {
         divergences: [],
         fake_toolchain_used: false,
         not_measured_by_this_harness: ["cycle_accuracy", "audio_parity"],
+      },
+    });
+    mocks.runCrossCoreParity.mockResolvedValue({
+      ok: true,
+      message: "cross-core parity ok",
+      golden_path: "golden/input.rds",
+      golden_source: "script",
+      core_a_label: "Genesis Plus GX",
+      core_b_label: "PicoDrive",
+      frames_run: 60,
+      cores_agree: true,
+      cross_divergence_count: 0,
+      core_a_divergence_count: 0,
+      core_b_divergence_count: 0,
+      report_path: "validation/cross-core-parity-report.json",
+      report: {
+        schema: "rds-cross-core-parity/v1",
+        rom_path: "out/rom.bin",
+        rom_sha256: "a".repeat(64),
+        golden_path: "golden/input.rds",
+        golden_source: "script",
+        core_a_label: "Genesis Plus GX",
+        core_b_label: "PicoDrive",
+        frames_run: 60,
+        report_a: {
+          schema: "rds-gameplay-parity/v1",
+          rom_path: "out/rom.bin",
+          rom_sha256: "a".repeat(64),
+          core_label: "Genesis Plus GX",
+          frames_run: 60,
+          frame_hashes: [],
+          final_state_sha256: "b".repeat(64),
+          deterministic: true,
+          divergences: [],
+          fake_toolchain_used: false,
+          not_measured_by_this_harness: ["audio_exact_match"],
+        },
+        report_b: {
+          schema: "rds-gameplay-parity/v1",
+          rom_path: "out/rom.bin",
+          rom_sha256: "a".repeat(64),
+          core_label: "PicoDrive",
+          frames_run: 60,
+          frame_hashes: [],
+          final_state_sha256: "b".repeat(64),
+          deterministic: true,
+          divergences: [],
+          fake_toolchain_used: false,
+          not_measured_by_this_harness: ["audio_exact_match"],
+        },
+        cross_divergences: [],
+        cores_agree: true,
+        not_measured_by_this_harness: [
+          "audio_exact_match",
+          "m68k_cycle_trace",
+          "z80_cycle_trace",
+          "vdp_scanline_trace",
+          "dma_timing",
+        ],
+      },
+    });
+    mocks.runCycleReport.mockResolvedValue({
+      ok: true,
+      message: "cycle report ok",
+      golden_path: "golden/input.rds",
+      core_label: "Genesis Plus GX",
+      frames_run: 60,
+      report_path: "validation/cycle-report.json",
+      report: {
+        schema: "rds-cycle-report/v1",
+        rom_path: "out/rom.bin",
+        rom_sha256: "a".repeat(64),
+        golden_path: "golden/input.rds",
+        core_label: "Genesis Plus GX",
+        frames_run: 60,
+        frame_samples: [],
+        evidence_sources: [],
+        m68k_cycle_trace: { status: "missing", source: "libretro", detail: "not exposed" },
+        z80_cycle_trace: { status: "missing", source: "libretro", detail: "not exposed" },
+        vdp_scanline_trace: { status: "missing", source: "libretro", detail: "not exposed" },
+        dma_timing: { status: "missing", source: "libretro", detail: "not exposed" },
+        limitations: {
+          not_cycle_accurate: true,
+          missing: ["m68k_cycle_trace", "z80_cycle_trace", "vdp_scanline_trace", "dma_timing"],
+          notes: ["Libretro nao expoe cycle trace por API padrao."],
+        },
+        report_path: "validation/cycle-report.json",
       },
     });
     mocks.emulatorReadMemory.mockResolvedValue({
@@ -1270,5 +1367,258 @@ describe("ToolsPanel Asset Browser", () => {
     expect(section?.textContent).toContain("framebuffer");
     // Failed capture must NOT promote a report into the shared store.
     expect(useEditorStore.getState().lastParityReport).toBeNull();
+  });
+
+  async function openCrossCoreTab() {
+    await act(async () => {
+      findButton(container, "Avancado OFF").click();
+      await flush();
+      await flush();
+    });
+    await act(async () => {
+      findButton(container, /Experimental/).click();
+      await flush();
+      await flush();
+    });
+    await act(async () => {
+      findButton(container, /Cross-Core Parity/).click();
+      await flush();
+      await flush();
+    });
+  }
+
+  it("exposes Cross-Core Parity as an Experimental tool with required inputs", async () => {
+    await openCrossCoreTab();
+
+    const section = container.querySelector("[data-testid='cross-core-parity-section']");
+    expect(section).toBeTruthy();
+    expect(section?.textContent).toContain("Experimental");
+    expect(container.querySelector("[data-testid='cross-core-golden-path']")).toBeInstanceOf(
+      HTMLInputElement
+    );
+    expect(container.querySelector("[data-testid='cross-core-core-a-path']")).toBeInstanceOf(
+      HTMLInputElement
+    );
+    expect(container.querySelector("[data-testid='cross-core-core-b-path']")).toBeInstanceOf(
+      HTMLInputElement
+    );
+    expect(container.querySelector("[data-testid='cross-core-frame-cap']")).toBeInstanceOf(
+      HTMLInputElement
+    );
+
+    await act(async () => {
+      findButton(container, /Rodar Cross-Core Parity/).click();
+      await flush();
+    });
+
+    expect(mocks.runCrossCoreParity).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Informe golden, core A e core B");
+  });
+
+  it("runs Cross-Core Parity with the expected payload and renders an OK result", async () => {
+    await openCrossCoreTab();
+
+    await act(async () => {
+      changeInputValue(
+        container.querySelector("[data-testid='cross-core-golden-path']") as HTMLInputElement,
+        "golden/input.rds"
+      );
+      changeInputValue(
+        container.querySelector("[data-testid='cross-core-core-a-path']") as HTMLInputElement,
+        "toolchains/libretro/cores/genesis_plus_gx_libretro.dll"
+      );
+      changeInputValue(
+        container.querySelector("[data-testid='cross-core-core-b-path']") as HTMLInputElement,
+        "toolchains/libretro/cores/picodrive_libretro.dll"
+      );
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Rodar Cross-Core Parity/).click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.runCrossCoreParity).toHaveBeenCalledWith(
+      "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      "golden/input.rds",
+      "toolchains/libretro/cores/genesis_plus_gx_libretro.dll",
+      "toolchains/libretro/cores/picodrive_libretro.dll",
+      60
+    );
+    expect(useEditorStore.getState().lastCrossCoreReport?.frames_run).toBe(60);
+    expect(container.querySelector("[data-testid='cross-core-parity-section']")?.textContent).toContain(
+      "Cores concordam"
+    );
+  });
+
+  it("renders Cross-Core Parity divergences and keeps them actionable", async () => {
+    mocks.runCrossCoreParity.mockResolvedValueOnce({
+      ok: true,
+      message: "cores divergem",
+      golden_path: "golden/input.rds",
+      golden_source: "script",
+      core_a_label: "Genesis Plus GX",
+      core_b_label: "PicoDrive",
+      frames_run: 9,
+      cores_agree: false,
+      cross_divergence_count: 1,
+      core_a_divergence_count: 0,
+      core_b_divergence_count: 0,
+      report_path: "validation/cross-core-parity-report.json",
+      report: {
+        schema: "rds-cross-core-parity/v1",
+        rom_path: "out/rom.bin",
+        rom_sha256: "a".repeat(64),
+        golden_path: "golden/input.rds",
+        golden_source: "script",
+        core_a_label: "Genesis Plus GX",
+        core_b_label: "PicoDrive",
+        frames_run: 9,
+        report_a: {
+          schema: "rds-gameplay-parity/v1",
+          rom_path: "out/rom.bin",
+          rom_sha256: "a".repeat(64),
+          core_label: "Genesis Plus GX",
+          frames_run: 9,
+          frame_hashes: [],
+          final_state_sha256: "b".repeat(64),
+          deterministic: true,
+          divergences: [],
+          fake_toolchain_used: false,
+          not_measured_by_this_harness: [],
+        },
+        report_b: {
+          schema: "rds-gameplay-parity/v1",
+          rom_path: "out/rom.bin",
+          rom_sha256: "a".repeat(64),
+          core_label: "PicoDrive",
+          frames_run: 9,
+          frame_hashes: [],
+          final_state_sha256: "c".repeat(64),
+          deterministic: true,
+          divergences: [],
+          fake_toolchain_used: false,
+          not_measured_by_this_harness: [],
+        },
+        cross_divergences: [
+          {
+            frame_index: 7,
+            kind: "cross_core_frame_hash_mismatch",
+            core_a_hash: "aaaa1111bbbb2222",
+            core_b_hash: "cccc3333dddd4444",
+            core_a_non_black: 120,
+            core_b_non_black: 96,
+          },
+        ],
+        cores_agree: false,
+        not_measured_by_this_harness: ["m68k_cycle_trace"],
+      },
+    });
+
+    await openCrossCoreTab();
+    await act(async () => {
+      changeInputValue(
+        container.querySelector("[data-testid='cross-core-golden-path']") as HTMLInputElement,
+        "golden/input.rds"
+      );
+      changeInputValue(
+        container.querySelector("[data-testid='cross-core-core-a-path']") as HTMLInputElement,
+        "toolchains/libretro/cores/genesis_plus_gx_libretro.dll"
+      );
+      changeInputValue(
+        container.querySelector("[data-testid='cross-core-core-b-path']") as HTMLInputElement,
+        "toolchains/libretro/cores/picodrive_libretro.dll"
+      );
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Rodar Cross-Core Parity/).click();
+      await flush();
+      await flush();
+    });
+
+    const section = container.querySelector("[data-testid='cross-core-parity-section']");
+    expect(section?.textContent).toContain("Divergencias");
+    expect(section?.textContent).toContain("cross_core_frame_hash_mismatch");
+    expect(section?.textContent).toContain("m68k_cycle_trace");
+  });
+
+  async function openCycleReportTab() {
+    await act(async () => {
+      findButton(container, "Avancado OFF").click();
+      await flush();
+      await flush();
+    });
+    await act(async () => {
+      findButton(container, /Experimental/).click();
+      await flush();
+      await flush();
+    });
+    await act(async () => {
+      findButton(container, /Cycle Report/).click();
+      await flush();
+      await flush();
+    });
+  }
+
+  it("exposes Cycle Report as Experimental and blocks empty paths", async () => {
+    await openCycleReportTab();
+
+    const section = container.querySelector("[data-testid='cycle-report-section']");
+    expect(section).toBeTruthy();
+    expect(section?.textContent).toContain("Experimental");
+    expect(container.querySelector("[data-testid='cycle-report-golden-path']")).toBeInstanceOf(
+      HTMLInputElement
+    );
+    expect(container.querySelector("[data-testid='cycle-report-core-path']")).toBeInstanceOf(
+      HTMLInputElement
+    );
+
+    await act(async () => {
+      findButton(container, /Gerar Cycle Report/).click();
+      await flush();
+    });
+
+    expect(mocks.runCycleReport).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Informe golden e core");
+  });
+
+  it("runs Cycle Report and renders missing trace limitations honestly", async () => {
+    await openCycleReportTab();
+
+    await act(async () => {
+      changeInputValue(
+        container.querySelector("[data-testid='cycle-report-golden-path']") as HTMLInputElement,
+        "golden/input.rds"
+      );
+      changeInputValue(
+        container.querySelector("[data-testid='cycle-report-core-path']") as HTMLInputElement,
+        "toolchains/libretro/cores/genesis_plus_gx_libretro.dll"
+      );
+      await flush();
+    });
+
+    await act(async () => {
+      findButton(container, /Gerar Cycle Report/).click();
+      await flush();
+      await flush();
+    });
+
+    expect(mocks.runCycleReport).toHaveBeenCalledWith(
+      "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",
+      "golden/input.rds",
+      "toolchains/libretro/cores/genesis_plus_gx_libretro.dll",
+      60
+    );
+    expect(useEditorStore.getState().lastCycleReport?.frames_run).toBe(60);
+    expect(container.querySelector("[data-testid='cycle-report-section']")?.textContent).toContain(
+      "not cycle accurate"
+    );
+    expect(container.querySelector("[data-testid='cycle-report-section']")?.textContent).toContain(
+      "missing"
+    );
   });
 });
