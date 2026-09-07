@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-09-06 (rodada INT-R1: baseline revalidada, divergência 48/17 contra `origin/main` medida, merge de `origin/main` na branch de convergência)
+**Ultima Atualizacao:** 2026-09-07 (rodada INT-R1b: `origin/main` 9b36d2e convergido; gates de código verdes no destino; host segue DRIFTED)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -20,6 +20,17 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+
+* **O que acabou de acontecer (2026-09-07 — rodada INT-R1b: convergência executada, gates verdes no destino, dois defeitos de integração fechados):**
+  - **Autorização:** o operador escolheu "convergir: merge `origin/main` → branch, push, PR". Merge, não rebase (o Memory Bank conflita em toda convergência). Nada foi mergeado em `main` por esta sessão.
+  - **Base de destino:** merge `1ef03e9b17d27d4d2bce18d698137eb2e3b4fc87` (`origin/main` `9b36d2e00b228a6be3764dbd7d35f5182a78d292` integralmente contido) + correções `cc9338f`. Divergência **48/17 → 0 atrás / 19 à frente**. CONV-01 deixa de ser bloqueio de base.
+  - **Conflitos resolvidos (5):** (1) `dependency_manager.rs` — mantido o lado desta branch (adaptador de host-readiness); o único delta real de `origin/main` era acrescentar `blastem_libretro`, verificado como **já coberto** por `toolchains/host-requirements.lock.json`, `parity_harness.rs` e `libretro_ffi.rs` na árvore mesclada, logo **sem perda de comportamento** e sem ressuscitar o downloader removido. (2)/(3) `ci.yml` e `desktop-e2e.yml` — adotado o pin `dtolnay/rust-toolchain@1.97.1` de `origin/main`, que é a correção comprovada da deriva de canal, com comentário explicitando que `rust-toolchain.toml` (1.97.0, versionado) prevalece na invocação; a interação ficou **registrada, não silenciosa**. (4)/(5) Memory Bank e Current Wave — ambos os históricos preservados e reordenados cronologicamente.
+  - **Defeito de integração 1 (compilação quebrada, corrigido):** `src-tauri/src/lib.rs` — `interrupted_install_result`, vindo de `origin/main`, construía `DependencyStatus` **sem o campo `applicable`**, introduzido pelo contrato de host desta branch. `E0063`: nenhum dos dois troncos falhava sozinho. Preenchido com `applicable: true` — a instalação foi tentada para aquela dependência, logo ela é aplicável ao host; `false` a exibiria como "NAO APLICAVEL" e **esconderia o panic** no Runtime Setup.
+  - **Defeito de integração 2 (registrado, NÃO corrigido):** `src-tauri/src/emulator/frame_buffer.rs:116` dispara `clippy::unusual_byte_groupings` em `0b11111_111111_00000u16`, cujo agrupamento 5-6-5 é **semanticamente correto** para RGB565 — a sugestão do clippy destrói essa leitura. Não é falha de gate: só aparece sob `--all-targets`, que o CI não usa. Arquivo é área reservada a B; anexado ao escopo de B-01, sem edição por mim.
+  - **Achado sobre gates (relevante para o PR):** `origin/main` **não tem nenhum passo `cargo fmt` no CI** — esse gate chega com o Programa de Reprodutibilidade. `origin/main` puro acusa **2171 linhas** de diff de formatação. Hipótese de deriva de rustfmt foi **testada e descartada**: 1.97.0 e 1.97.1 produzem diff idêntico, e o bump temporário de `rust-toolchain.toml` para 1.97.1 foi revertido. A árvore convergida foi formatada (mudança sem efeito de comportamento) e passa a ser a primeira a satisfazer o gate.
+  - **Gates no destino (host DRIFTED — sem certificação de runtime, build ou emulação):** `check:tree` **0**; `npx tsc --noEmit` **0**; `npm run lint` **0**; `npm test` **596 passed / 6 skipped**; `cargo fmt --check` **0**; `cargo clippy -- -D warnings` **0**; `cargo test --lib --test-threads=1` **481 passed / 0 failed / 30 ignored**.
+  - **Limite honesto:** gates de código verdes **não** certificam `Build → ROM → Emulação`. ENV-01/ENV-02 continuam abertos: o host segue `DRIFTED` e o reparo exige autenticação administrativa do operador. Nenhuma superfície foi promovida, nenhuma decisão arquitetural consolidada foi alterada, nenhum ticket A/B/C foi liberado.
+  - **Próximo passo imediato:** publicar `convergence/reproducibility` e abrir PR para `main`; validar no CI remoto (é lá que `desktop-smoke` e o Windows congelado importam). Em paralelo, o operador executa `bash scripts/bootstrap.sh --ensure --profile full` em terminal interativo e depois `npm run host:diagnose`; só com **READY** é que A-01/B-01/C-01 podem passar a `LIBERADO` — e C-01 precisa ser reescopado contra os diálogos acessíveis e tokens semânticos que vieram de `origin/main`.
 
 * **O que acabou de acontecer (2026-09-06 — rodada INT-R1 do integrador: revalidação da baseline, auditoria de convergência e tickets):**
   - **Escopo executado:** exclusivamente leitura, diagnóstico e documentação canônica. Nenhum arquivo de produto alterado, nenhum worktree movido ou removido, nenhum commit/push/merge realizado, nenhum agente A/B/C lançado por esta sessão. Host permanece bloqueado; a barreira de `docs/09` §2.1 foi respeitada.
@@ -66,7 +77,7 @@ Contratos já integrados / dependências pendentes: nenhum; depende da decisão 
 Host fingerprint / lock digest / READY: 82f39923…fff5a / d531c4b9…5bb5d / NÃO (DRIFTED)
 Projeto/corpus permitido / diretório de evidências / janela exclusiva: n/a nesta fase
 Testes de aceitação / gates aplicáveis: baseline completa de docs/07 §3 no SHA de destino, após host READY
-Status operacional: PROPOSTO (aguarda decisão do operador)
+Status operacional: EM_REVISAO — merge executado sob autorização do operador ("convergir: merge origin/main → branch, push, PR"). Destino `1ef03e9b17d27d4d2bce18d698137eb2e3b4fc87` (merge) + `cc9338f` (correções). `origin/main` 9b36d2e integralmente contido (0 atrás / 19 à frente). Falta publicar a branch, abrir PR e validar no CI remoto; merge em `main` continua fora do meu escopo.
 ```
 
 ```text
@@ -80,7 +91,7 @@ Contratos já integrados / dependências pendentes: exige confirmação de que n
 Host fingerprint / lock digest / READY: irrelevante para a operação; relevante para revalidar depois
 Projeto/corpus permitido / diretório de evidências / janela exclusiva: janela exclusiva obrigatória — worktree não pode ser movido sob uso concorrente
 Testes de aceitação / gates aplicáveis: `npm run check:tree` exit 0; `git worktree list` com 12 entradas válidas; `.worktrees/ui-overhaul-fase-a` mantendo seus 31 arquivos sujos; `.claude/cleanup-backups/` intacto
-Status operacional: PROPOSTO (não executar sem janela exclusiva confirmada)
+Status operacional: INTEGRADO — executado com janela exclusiva confirmada pelo operador. 7 worktrees movidos com `git worktree move` para `/mnt/sdcard/Projects/RetroDevStudio-worktrees/`; `.codex/config.toml` e `.omo` preservados em `_agent-tooling/`. Nada foi apagado e o gate não foi afrouxado. Aceitação verificada: check:tree exit 0, 12 worktrees, 31 arquivos sujos preservados, backups intactos.
 ```
 
 ```text
