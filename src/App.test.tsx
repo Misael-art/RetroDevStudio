@@ -3568,6 +3568,27 @@ describe("App build flow", () => {
   });
 
   it("keeps Build & Run enabled when the live validation snapshot is stale", async () => {
+    // Corrida real observada em 2026-09-07: o efeito de live validation agenda
+    // um debounce que, ao concluir, chama `setHwValidationResult` e grava
+    // `fresh`. Como `validateSceneDraft` esta mockado com `mockResolvedValue`,
+    // esse debounce sempre completa. Forcar `hwValidationState: "stale"` aqui
+    // sem mais nada deixava a asercao disputando com uma validacao em voo que
+    // passava por todos os guards (mesma revisao, mesmo projeto, mesmo target)
+    // e devolvia o rotulo para "LIVE". O app esta correto; o teste e que
+    // simulava um estado que a aplicacao estava legitimamente prestes a
+    // sobrescrever.
+    //
+    // Deixar a validacao pendente para sempre torna a pre-condicao real: nada
+    // pode concluir e reverter o `stale`. Nenhuma asercao foi afrouxada.
+    //
+    // O flush antes do mock drena qualquer validacao que ja tenha criado sua
+    // promise com o mock anterior; sem ele restaria a janela em que uma
+    // resolucao pendente aterrissa depois do setState.
+    await act(async () => {
+      await flush();
+    });
+    mocks.validateSceneDraft.mockImplementation(() => new Promise(() => {}));
+
     await act(async () => {
       useEditorStore.setState({
         hwStatus: {
