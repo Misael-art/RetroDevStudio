@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-09-07 (INT-R1e: host Linux **READY** pela primeira vez; ENV-01 e ENV-02 fechados; restrição de host suspensa em A-01/B-01/C-01)
+**Ultima Atualizacao:** 2026-09-07 (INT-R1f: `host:certify` PASSOU; ROMs MD/SNES reais e emulação observada no Linux; gate de certificação estava invertido e foi corrigido)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -20,6 +20,15 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+
+* **O que acabou de acontecer (2026-09-07 — INT-R1f: `host:certify` PASSOU; primeira evidência local de `Build -> ROM -> Emulação`; gate de certificação estava invertido):**
+  - **Achado dominante (CERT-01, novo):** `npm run host:certify` era **impossível de passar num host `READY`**. O teste `decomp-scripts.test.mjs > ghidra_boundary.sh BLOCKED path` definia apenas `RETRODEV_GHIDRA_HOME` para um diretório inexistente, mas `ghidra_boundary.sh:24` cai para `command -v analyzeHeadless`. Com o host provisionado, o PATH injetado pelo `certify` traz o Ghidra do cache: o caminho BLOCKED ficava **inalcançável**, o script disparava uma análise headless real, estourava o timeout de 60s do `runBash` e era morto (`status: null`). **O gate só fechava em host mal provisionado — o inverso do que existe para garantir.** Corrigido sanitizando o PATH da invocação: a pré-condição virou real e **nenhuma asserção foi afrouxada**.
+  - **Hipótese minha descartada, registrada para não se repetir:** atribuí as duas primeiras reprovações a "teste sensível a carga". **Errado.** A segunda run falhou idêntica com load 5,79 contra ~20 da primeira, o que derrubou a explicação e levou à causa real acima.
+  - **Certificação (3ª tentativa): `exit 0`.** Fases: `host_detection` completed, `ghidra_headless_probe` **passed**, `official_sgdk_smoke` **passed**, `official_snes_smoke` **passed**. `blocking_status_codes` e `warnings` vazios.
+  - **Evidência durável de runtime (primeira desta linha de trabalho):** ROM Mega Drive real com SGDK + `m68k-elf-gcc` (`real-nocode-game.md`, SHA-256 `37ea278ad15689382648ab307cd8e56e6e87a90b242926d17efef45df09de107`); ROM SNES real com PVSnesLib (`real-nocode-game.sfc`, SHA-256 `556c56c94657db90ec7484c7a89c966270e3b84841877f8f81e5cc9a5dc82b89`); emulação com **Genesis Plus GX v1.7.4 `46a5521`**, 60 frames, framebuffer 320x224, **15.416 pixels não-pretos**, frame em `real-nocode-frame.ppm`.
+  - **Gates da certificação:** frontend **599 passed / 3 skipped**; Rust **481 passed / 0 failed / 30 ignored**. A cobertura subiu de 596/6-skipped porque três testes antes pulados por falta de toolchain agora **executam de verdade** — ganho real vindo do host READY.
+  - **Limites que não podem ser suavizados:** (1) certifica **um projeto no-code de referência**, não gameplay — framebuffer não-preto prova que o core carregou e renderizou, **não** prova jogo correto, áudio, saves ou equivalência; PAR-01 e PROF-01 seguem íntegros. (2) É **Linux apenas**; Windows congelado, `desktop-smoke` vermelho, HOST-WIN-01 `BLOQUEADO`. (3) O relatório registra `commit f1a82a4`, branch `codex/int-r1f-certify-unblock`, `dirty: true` — **não é o SHA de `main`**. (4) **Nenhuma superfície saiu de `Experimental`**.
+  - **Segunda suspeita de teste instável, ainda aberta:** `src/App.test.tsx > keeps Build & Run enabled when the live validation snapshot is stale`. **Não** deve herdar a explicação do CERT-01 sem investigação própria — foi esse atalho que produziu a hipótese errada acima.
 
 * **O que acabou de acontecer (2026-09-07 — INT-R1e: host alcançou READY; ENV-01 e ENV-02 fechados):**
   - **Comando executado:** `bash scripts/bootstrap.sh --ensure --profile full`, saída **exit 0**, seguido de `npm run host:diagnose` **exit 0**.
