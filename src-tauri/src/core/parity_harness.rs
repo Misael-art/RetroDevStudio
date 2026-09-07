@@ -712,9 +712,7 @@ fn missing_trace(field: &str) -> CycleTraceEvidence {
     CycleTraceEvidence {
         status: "missing".to_string(),
         source: "libretro".to_string(),
-        detail: format!(
-            "{field} nao e exposto pela API Libretro padrao usada por este harness."
-        ),
+        detail: format!("{field} nao e exposto pela API Libretro padrao usada por este harness."),
     }
 }
 
@@ -825,13 +823,8 @@ pub fn run_cross_core_parity(
     let mut core_a = EmulatorCore::new(Some(core_a_path));
     core_a.load_rom(rom_path)?;
     let core_a_initial = core_a.capture_runtime_state_bytes()?;
-    let mut report_a = run_parity_capture(
-        &mut core_a,
-        rom_path,
-        &rom_sha256,
-        &core_a_initial,
-        &inputs,
-    )?;
+    let mut report_a =
+        run_parity_capture(&mut core_a, rom_path, &rom_sha256, &core_a_initial, &inputs)?;
     core_a.stop().ok();
     report_a.golden_path = Some(golden_path.to_string_lossy().to_string());
     report_a.golden_sha256 = golden_sha256.clone();
@@ -840,13 +833,8 @@ pub fn run_cross_core_parity(
     let mut core_b = EmulatorCore::new(Some(core_b_path));
     core_b.load_rom(rom_path)?;
     let core_b_initial = core_b.capture_runtime_state_bytes()?;
-    let mut report_b = run_parity_capture(
-        &mut core_b,
-        rom_path,
-        &rom_sha256,
-        &core_b_initial,
-        &inputs,
-    )?;
+    let mut report_b =
+        run_parity_capture(&mut core_b, rom_path, &rom_sha256, &core_b_initial, &inputs)?;
     core_b.stop().ok();
     report_b.golden_path = Some(golden_path.to_string_lossy().to_string());
     report_b.golden_sha256 = golden_sha256;
@@ -948,9 +936,7 @@ pub fn run_cycle_report(
         });
         frame_samples.push(CycleFrameSample {
             frame_index: index as u32,
-            host_frame_time_micros: Some(
-                u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX),
-            ),
+            host_frame_time_micros: Some(u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX)),
             estimated_frame_budget_cycles: None,
             estimate_label: None,
         });
@@ -1151,7 +1137,10 @@ fn render_cross_core_markdown(report: &CrossCoreReport) -> String {
     out.push_str(&format!("- **ROM**: `{}`\n", report.rom_path));
     out.push_str(&format!("- **ROM SHA-256**: `{}`\n", report.rom_sha256));
     out.push_str(&format!("- **Golden**: `{}`\n", report.golden_path));
-    out.push_str(&format!("- **Golden source**: `{}`\n", report.golden_source));
+    out.push_str(&format!(
+        "- **Golden source**: `{}`\n",
+        report.golden_source
+    ));
     out.push_str(&format!("- **Core A**: `{}`\n", report.core_a_label));
     out.push_str(&format!("- **Core B**: `{}`\n", report.core_b_label));
     out.push_str(&format!("- **Frames run**: {}\n", report.frames_run));
@@ -1180,11 +1169,19 @@ fn render_cross_core_markdown(report: &CrossCoreReport) -> String {
     out.push_str("\n## Per-core deterministic\n\n");
     out.push_str(&format!(
         "- Core A deterministic: {}\n",
-        if report.report_a.deterministic { "sim" } else { "nao" }
+        if report.report_a.deterministic {
+            "sim"
+        } else {
+            "nao"
+        }
     ));
     out.push_str(&format!(
         "- Core B deterministic: {}\n",
-        if report.report_b.deterministic { "sim" } else { "nao" }
+        if report.report_b.deterministic {
+            "sim"
+        } else {
+            "nao"
+        }
     ));
     out.push_str(&format!(
         "- Core A report: `{}`\n",
@@ -1382,11 +1379,10 @@ impl ObservedState {
         reference: Vec<MemoryRegionObservation>,
         candidate: Vec<MemoryRegionObservation>,
     ) -> Self {
-        let available = reference.iter().filter(|r| r.available).any(|r| {
-            candidate
-                .iter()
-                .any(|c| c.label == r.label && c.available)
-        });
+        let available = reference
+            .iter()
+            .filter(|r| r.available)
+            .any(|r| candidate.iter().any(|c| c.label == r.label && c.available));
         Self {
             available,
             reference_regions: reference,
@@ -1537,14 +1533,8 @@ pub fn compare_reference_candidate(
         labels.dedup();
 
         for label in labels {
-            let reference_region = observed
-                .reference_regions
-                .iter()
-                .find(|r| r.label == label);
-            let candidate_region = observed
-                .candidate_regions
-                .iter()
-                .find(|r| r.label == label);
+            let reference_region = observed.reference_regions.iter().find(|r| r.label == label);
+            let candidate_region = observed.candidate_regions.iter().find(|r| r.label == label);
             match (reference_region, candidate_region) {
                 (Some(r), Some(c)) => {
                     if r.available != c.available {
@@ -1558,8 +1548,7 @@ pub fn compare_reference_candidate(
                         continue;
                     }
                     if !r.available {
-                        limitations
-                            .push(format!("region {label} unavailable on both sides"));
+                        limitations.push(format!("region {label} unavailable on both sides"));
                         continue;
                     }
                     if r.region_id != c.region_id {
@@ -1626,9 +1615,8 @@ pub fn compare_reference_candidate(
         if compared_matched > 0 && !asymmetry_or_mismatch {
             observed_state_parity = true;
         } else if compared_matched == 0 {
-            limitations.push(
-                "no memory region was available on both reference and candidate".to_string(),
-            );
+            limitations
+                .push("no memory region was available on both reference and candidate".to_string());
         }
     } else {
         limitations.push(
@@ -1776,10 +1764,20 @@ pub fn run_reference_candidate_parity(
         }
     }
 
-    let reference_bytes = fs::read(reference_rom)
-        .map_err(|error| format!("Could not read reference ROM '{}': {}", reference_rom.display(), error))?;
-    let candidate_bytes = fs::read(candidate_rom)
-        .map_err(|error| format!("Could not read candidate ROM '{}': {}", candidate_rom.display(), error))?;
+    let reference_bytes = fs::read(reference_rom).map_err(|error| {
+        format!(
+            "Could not read reference ROM '{}': {}",
+            reference_rom.display(),
+            error
+        )
+    })?;
+    let candidate_bytes = fs::read(candidate_rom).map_err(|error| {
+        format!(
+            "Could not read candidate ROM '{}': {}",
+            candidate_rom.display(),
+            error
+        )
+    })?;
     let reference_sha = sha256_hex(&reference_bytes);
     let candidate_sha = sha256_hex(&candidate_bytes);
 
@@ -1835,9 +1833,9 @@ pub fn run_reference_candidate_parity(
         comparison.observed_state_parity = false;
         comparison.scenario_passed = false;
         comparison.evidence_level = ParityEvidenceLevel::InsufficientEvidence;
-        comparison
-            .limitations
-            .push("ROM nao-deterministica entre duas execucoes: evidencia positiva bloqueada".to_string());
+        comparison.limitations.push(
+            "ROM nao-deterministica entre duas execucoes: evidencia positiva bloqueada".to_string(),
+        );
     }
     let functional_evidence = aggregate_functional_evidence(std::slice::from_ref(&comparison));
 
@@ -1908,10 +1906,18 @@ pub fn write_reference_candidate_report(
     let json = serde_json::to_string_pretty(report)
         .map_err(|error| format!("Could not serialize reference/candidate report: {error}"))?;
     fs::write(&json_path, format!("{json}\n")).map_err(|error| {
-        format!("Could not write report '{}': {}", json_path.display(), error)
+        format!(
+            "Could not write report '{}': {}",
+            json_path.display(),
+            error
+        )
     })?;
     fs::write(&md_path, render_reference_candidate_markdown(report)).map_err(|error| {
-        format!("Could not write report markdown '{}': {}", md_path.display(), error)
+        format!(
+            "Could not write report markdown '{}': {}",
+            md_path.display(),
+            error
+        )
     })?;
     Ok(json_path)
 }
@@ -1920,8 +1926,14 @@ fn render_reference_candidate_markdown(report: &ReferenceCandidateReport) -> Str
     let cmp = &report.comparison;
     let mut out = String::new();
     out.push_str(&format!("# {}\n\n", report.schema));
-    out.push_str(&format!("- **Core**: `{}` sha256=`{}`\n", report.core_label, report.core_sha256));
-    out.push_str(&format!("- **Golden input**: `{}` ({})\n", report.golden_path, report.golden_source));
+    out.push_str(&format!(
+        "- **Core**: `{}` sha256=`{}`\n",
+        report.core_label, report.core_sha256
+    ));
+    out.push_str(&format!(
+        "- **Golden input**: `{}` ({})\n",
+        report.golden_path, report.golden_source
+    ));
     out.push_str(&format!("- **Frames run**: {}\n", report.frames_run));
     out.push_str(&format!(
         "- **Reference ROM**: `{}` sha=`{}`\n",
@@ -1931,13 +1943,19 @@ fn render_reference_candidate_markdown(report: &ReferenceCandidateReport) -> Str
         "- **Candidate ROM**: `{}` sha=`{}`\n",
         report.candidate_rom_path, report.candidate_rom_sha256
     ));
-    out.push_str(&format!("- **Evidence level**: `{:?}`\n", cmp.evidence_level));
+    out.push_str(&format!(
+        "- **Evidence level**: `{:?}`\n",
+        cmp.evidence_level
+    ));
     out.push_str(&format!(
         "- **Suite functional evidence**: `{:?}`\n",
         report.functional_evidence
     ));
     out.push_str(&format!("- **Visual parity**: {}\n", cmp.visual_parity));
-    out.push_str(&format!("- **Observed-state parity**: {}\n", cmp.observed_state_parity));
+    out.push_str(&format!(
+        "- **Observed-state parity**: {}\n",
+        cmp.observed_state_parity
+    ));
     out.push_str(&format!("- **Scenario passed**: {}\n", cmp.scenario_passed));
     out.push_str(&format!("- **Frames compared**: {}\n", cmp.frames_compared));
     out.push_str(
@@ -2392,7 +2410,9 @@ mod tests {
     /// identidade completa da execucao e observacoes reais de audio/memoria.
     #[test]
     fn run_parity_capture_against_golden_records_identity_audio_and_regions() {
-        use crate::emulator::libretro_ffi::test_helpers::{compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom};
+        use crate::emulator::libretro_ffi::test_helpers::{
+            compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom,
+        };
         use crate::emulator::libretro_ffi::EmulatorCore;
 
         let _serial = test_serial_guard();
@@ -2402,33 +2422,66 @@ mod tests {
 
         let script = InputScript::from_frames(vec![
             JoypadState::default(),
-            JoypadState { a: true, ..JoypadState::default() },
+            JoypadState {
+                a: true,
+                ..JoypadState::default()
+            },
             JoypadState::default(),
         ]);
         let golden_path = dir.join("identity.rds-input.json");
-        fs::write(&golden_path, serde_json::to_vec_pretty(&script).expect("serialize")).expect("write golden");
+        fs::write(
+            &golden_path,
+            serde_json::to_vec_pretty(&script).expect("serialize"),
+        )
+        .expect("write golden");
 
         let report_dir = dir.join(".rds").join("reports");
         let mut emulator = EmulatorCore::new(Some(&core_path));
         emulator.load_rom(&rom_path).expect("load rom");
 
-        let (report, written) = run_parity_capture_against_golden(&mut emulator, &rom_path, &golden_path, None, &report_dir).expect("capture");
+        let (report, written) = run_parity_capture_against_golden(
+            &mut emulator,
+            &rom_path,
+            &golden_path,
+            None,
+            &report_dir,
+        )
+        .expect("capture");
 
         assert_eq!(report.contract_revision, PARITY_CONTRACT_REVISION);
-        assert!(report.deterministic, "mock core must be deterministic: {:?}", report.divergences);
+        assert!(
+            report.deterministic,
+            "mock core must be deterministic: {:?}",
+            report.divergences
+        );
 
         // Identidade da execucao deterministica: ROM, golden, core e estado inicial.
         assert!(!report.rom_sha256.is_empty());
-        assert_eq!(report.golden_path.as_deref(), Some(golden_path.to_string_lossy().as_ref()));
-        assert!(report.golden_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
-        assert!(report.core_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
-        assert!(report.initial_state_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+        assert_eq!(
+            report.golden_path.as_deref(),
+            Some(golden_path.to_string_lossy().as_ref())
+        );
+        assert!(report
+            .golden_sha256
+            .as_deref()
+            .is_some_and(|sha| sha.len() == 64));
+        assert!(report
+            .core_sha256
+            .as_deref()
+            .is_some_and(|sha| sha.len() == 64));
+        assert!(report
+            .initial_state_sha256
+            .as_deref()
+            .is_some_and(|sha| sha.len() == 64));
 
         // Audio real observado via callbacks Libretro (mock emite 4 samples/frame).
         let audio = report.audio.as_ref().expect("audio observation");
         assert!(audio.available);
         assert_eq!(audio.samples_total, 4 * 3);
-        assert!(audio.stream_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+        assert!(audio
+            .stream_sha256
+            .as_deref()
+            .is_some_and(|sha| sha.len() == 64));
 
         // Regioes reais expostas por retro_get_memory_data no mock core.
         assert_eq!(report.observed_regions.len(), 3);
@@ -2438,7 +2491,10 @@ mod tests {
                 .iter()
                 .find(|region| region.label == label)
                 .unwrap_or_else(|| panic!("missing region {label}"));
-            assert!(region.available, "region {label} must be available on mock core");
+            assert!(
+                region.available,
+                "region {label} must be available on mock core"
+            );
             assert!(region.sha256.is_some());
             assert!(region.size > 0);
         }
@@ -2606,7 +2662,9 @@ mod tests {
         let mut b = a.clone();
         b.core_label = "OtherCore".to_string();
         let limitations = cross_core_limitations(&a, &b);
-        assert!(limitations.iter().any(|note| note.contains("final_state_sha256")));
+        assert!(limitations
+            .iter()
+            .any(|note| note.contains("final_state_sha256")));
         assert!(limitations.iter().any(|note| note.contains("audio")));
 
         // mesmo core: nenhuma dessas limitations e emitida
@@ -2824,7 +2882,9 @@ mod tests {
 
     #[test]
     fn run_cross_core_parity_rejects_empty_script() {
-        use crate::emulator::libretro_ffi::test_helpers::{compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom};
+        use crate::emulator::libretro_ffi::test_helpers::{
+            compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom,
+        };
 
         let _serial = test_serial_guard();
         let dir = emu_temp_dir("cross-core-empty");
@@ -2832,7 +2892,11 @@ mod tests {
         let rom_path = write_test_rom(&dir, "cross_empty_rom", "gen");
         let golden_path = dir.join("empty.rds-input.json");
         let script = InputScript::from_frames(Vec::new());
-        fs::write(&golden_path, serde_json::to_vec_pretty(&script).expect("serialize")).expect("write golden");
+        fs::write(
+            &golden_path,
+            serde_json::to_vec_pretty(&script).expect("serialize"),
+        )
+        .expect("write golden");
         let report_dir = dir.join(".rds").join("reports");
 
         let err = run_cross_core_parity(
@@ -2850,7 +2914,9 @@ mod tests {
 
     #[test]
     fn run_cross_core_parity_respects_frame_limit() {
-        use crate::emulator::libretro_ffi::test_helpers::{compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom};
+        use crate::emulator::libretro_ffi::test_helpers::{
+            compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom,
+        };
 
         let _serial = test_serial_guard();
         let dir = emu_temp_dir("cross-core-limit");
@@ -2858,12 +2924,25 @@ mod tests {
         let rom_path = write_test_rom(&dir, "cross_limit_rom", "gen");
 
         let script = InputScript::from_frames(vec![
-            JoypadState { a: true, ..JoypadState::default() },
-            JoypadState { b: true, ..JoypadState::default() },
-            JoypadState { x: true, ..JoypadState::default() },
+            JoypadState {
+                a: true,
+                ..JoypadState::default()
+            },
+            JoypadState {
+                b: true,
+                ..JoypadState::default()
+            },
+            JoypadState {
+                x: true,
+                ..JoypadState::default()
+            },
         ]);
         let golden_path = dir.join("limit.rds-input.json");
-        fs::write(&golden_path, serde_json::to_vec_pretty(&script).expect("serialize")).expect("write golden");
+        fs::write(
+            &golden_path,
+            serde_json::to_vec_pretty(&script).expect("serialize"),
+        )
+        .expect("write golden");
         let report_dir = dir.join(".rds").join("reports");
 
         let (report, _) = run_cross_core_parity(
@@ -2881,7 +2960,9 @@ mod tests {
 
     #[test]
     fn run_cross_core_parity_rejects_missing_core_path() {
-        use crate::emulator::libretro_ffi::test_helpers::{compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom};
+        use crate::emulator::libretro_ffi::test_helpers::{
+            compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom,
+        };
 
         let _serial = test_serial_guard();
         let dir = emu_temp_dir("cross-core-missing-core");
@@ -2890,7 +2971,11 @@ mod tests {
         let rom_path = write_test_rom(&dir, "cross_missing_core_rom", "gen");
         let script = InputScript::from_frames(vec![JoypadState::default()]);
         let golden_path = dir.join("one.rds-input.json");
-        fs::write(&golden_path, serde_json::to_vec_pretty(&script).expect("serialize")).expect("write golden");
+        fs::write(
+            &golden_path,
+            serde_json::to_vec_pretty(&script).expect("serialize"),
+        )
+        .expect("write golden");
         let report_dir = dir.join(".rds").join("reports");
 
         let err = run_cross_core_parity(
@@ -2908,7 +2993,9 @@ mod tests {
 
     #[test]
     fn run_cycle_report_rejects_empty_script() {
-        use crate::emulator::libretro_ffi::test_helpers::{compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom};
+        use crate::emulator::libretro_ffi::test_helpers::{
+            compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom,
+        };
 
         let _serial = test_serial_guard();
         let dir = emu_temp_dir("cycle-empty");
@@ -2916,46 +3003,54 @@ mod tests {
         let rom_path = write_test_rom(&dir, "cycle_empty_rom", "gen");
         let golden_path = dir.join("empty.rds-input.json");
         let script = InputScript::from_frames(Vec::new());
-        fs::write(&golden_path, serde_json::to_vec_pretty(&script).expect("serialize")).expect("write golden");
+        fs::write(
+            &golden_path,
+            serde_json::to_vec_pretty(&script).expect("serialize"),
+        )
+        .expect("write golden");
         let report_dir = dir.join(".rds").join("reports");
 
-        let err = run_cycle_report(
-            &rom_path,
-            &golden_path,
-            &core_path,
-            None,
-            &report_dir,
-        )
-        .expect_err("must reject empty cycle input");
+        let err = run_cycle_report(&rom_path, &golden_path, &core_path, None, &report_dir)
+            .expect_err("must reject empty cycle input");
         assert!(err.contains("zero frames"), "got: {err}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn run_cycle_report_respects_frame_limit_and_writes_reports() {
-        use crate::emulator::libretro_ffi::test_helpers::{compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom};
+        use crate::emulator::libretro_ffi::test_helpers::{
+            compile_mock_core, temp_dir as emu_temp_dir, test_serial_guard, write_test_rom,
+        };
 
         let _serial = test_serial_guard();
         let dir = emu_temp_dir("cycle-limit");
         let core_path = compile_mock_core(&dir);
         let rom_path = write_test_rom(&dir, "cycle_limit_rom", "gen");
         let script = InputScript::from_frames(vec![
-            JoypadState { a: true, ..JoypadState::default() },
-            JoypadState { b: true, ..JoypadState::default() },
-            JoypadState { x: true, ..JoypadState::default() },
+            JoypadState {
+                a: true,
+                ..JoypadState::default()
+            },
+            JoypadState {
+                b: true,
+                ..JoypadState::default()
+            },
+            JoypadState {
+                x: true,
+                ..JoypadState::default()
+            },
         ]);
         let golden_path = dir.join("cycle.rds-input.json");
-        fs::write(&golden_path, serde_json::to_vec_pretty(&script).expect("serialize")).expect("write golden");
+        fs::write(
+            &golden_path,
+            serde_json::to_vec_pretty(&script).expect("serialize"),
+        )
+        .expect("write golden");
         let report_dir = dir.join(".rds").join("reports");
 
-        let (report, written) = run_cycle_report(
-            &rom_path,
-            &golden_path,
-            &core_path,
-            Some(2),
-            &report_dir,
-        )
-        .expect("cycle report");
+        let (report, written) =
+            run_cycle_report(&rom_path, &golden_path, &core_path, Some(2), &report_dir)
+                .expect("cycle report");
 
         assert_eq!(report.frames_run, 2);
         assert_eq!(report.frame_samples.len(), 2);
@@ -2990,7 +3085,10 @@ mod tests {
     }
 
     fn host_cores_dir() -> PathBuf {
-        repo_root().join("toolchains").join("libretro").join("cores")
+        repo_root()
+            .join("toolchains")
+            .join("libretro")
+            .join("cores")
     }
 
     /// Cores Mega Drive oficiais realmente instalados com a extensao canonica
@@ -3011,12 +3109,14 @@ mod tests {
     /// regiao indisponivel e representada como `available=false`/`sha256=null`,
     /// nunca como hash fabricado.
     fn assert_region_invariants(regions: &[MemoryRegionObservation]) {
-        assert!(!regions.is_empty(), "observed_regions deve existir na revisao 2");
+        assert!(
+            !regions.is_empty(),
+            "observed_regions deve existir na revisao 2"
+        );
         for region in regions {
             if region.available {
                 assert!(
-                    region.size > 0
-                        && region.sha256.as_deref().is_some_and(|sha| sha.len() == 64),
+                    region.size > 0 && region.sha256.as_deref().is_some_and(|sha| sha.len() == 64),
                     "regiao {} disponivel deve ter tamanho e SHA-256 reais",
                     region.label
                 );
@@ -3063,8 +3163,14 @@ mod tests {
         let golden_path = project_dir.join("golden.rds-input.json");
         let script = InputScript::from_frames(vec![
             JoypadState::default(),
-            JoypadState { start: true, ..JoypadState::default() },
-            JoypadState { right: true, ..JoypadState::default() },
+            JoypadState {
+                start: true,
+                ..JoypadState::default()
+            },
+            JoypadState {
+                right: true,
+                ..JoypadState::default()
+            },
         ]);
         fs::write(
             &golden_path,
@@ -3109,8 +3215,14 @@ mod tests {
 
         // Revisao 2 provada com core real: identidade completa + observacoes.
         assert_eq!(report.contract_revision, PARITY_CONTRACT_REVISION);
-        assert!(report.core_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
-        assert!(report.golden_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+        assert!(report
+            .core_sha256
+            .as_deref()
+            .is_some_and(|sha| sha.len() == 64));
+        assert!(report
+            .golden_sha256
+            .as_deref()
+            .is_some_and(|sha| sha.len() == 64));
         assert!(report
             .initial_state_sha256
             .as_deref()
@@ -3118,7 +3230,10 @@ mod tests {
         let audio = report.audio.as_ref().expect("audio observation present");
         assert!(audio.available, "core real deve entregar amostras de audio");
         assert!(audio.samples_total > 0);
-        assert!(audio.stream_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+        assert!(audio
+            .stream_sha256
+            .as_deref()
+            .is_some_and(|sha| sha.len() == 64));
         assert_region_invariants(&report.observed_regions);
         assert!(
             report
@@ -3127,7 +3242,11 @@ mod tests {
                 .any(|region| region.label == "WRAM" && region.available),
             "WRAM deve estar exposta pelo core Mega Drive real"
         );
-        assert!(report.deterministic, "cold-boot replay deve ser deterministico: {:?}", report.divergences);
+        assert!(
+            report.deterministic,
+            "cold-boot replay deve ser deterministico: {:?}",
+            report.divergences
+        );
         assert!(written.exists());
 
         let (cycle_report, cycle_path) =
@@ -3209,8 +3328,14 @@ mod tests {
         );
         for report in [&cross_report.report_a, &cross_report.report_b] {
             assert_eq!(report.contract_revision, PARITY_CONTRACT_REVISION);
-            assert!(report.core_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
-            assert!(report.golden_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+            assert!(report
+                .core_sha256
+                .as_deref()
+                .is_some_and(|sha| sha.len() == 64));
+            assert!(report
+                .golden_sha256
+                .as_deref()
+                .is_some_and(|sha| sha.len() == 64));
             assert!(report
                 .initial_state_sha256
                 .as_deref()
@@ -3289,8 +3414,14 @@ mod tests {
         let golden_path = work.join("golden.rds-input.json");
         let script = InputScript::from_frames(vec![
             JoypadState::default(),
-            JoypadState { start: true, ..JoypadState::default() },
-            JoypadState { right: true, ..JoypadState::default() },
+            JoypadState {
+                start: true,
+                ..JoypadState::default()
+            },
+            JoypadState {
+                right: true,
+                ..JoypadState::default()
+            },
         ]);
         fs::write(
             &golden_path,
@@ -3319,8 +3450,14 @@ mod tests {
         assert_eq!(report.core_sha256.len(), 64, "core sha256 real registrado");
         for side in [&report.report_reference, &report.report_candidate] {
             assert_eq!(side.contract_revision, PARITY_CONTRACT_REVISION);
-            assert_eq!(side.core_sha256.as_deref(), Some(report.core_sha256.as_str()));
-            assert!(side.golden_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+            assert_eq!(
+                side.core_sha256.as_deref(),
+                Some(report.core_sha256.as_str())
+            );
+            assert!(side
+                .golden_sha256
+                .as_deref()
+                .is_some_and(|sha| sha.len() == 64));
             assert!(side
                 .initial_state_sha256
                 .as_deref()
@@ -3328,7 +3465,10 @@ mod tests {
             let audio = side.audio.as_ref().expect("audio observation present");
             assert!(audio.available, "core real deve entregar amostras de audio");
             assert!(audio.samples_total > 0);
-            assert!(audio.stream_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+            assert!(audio
+                .stream_sha256
+                .as_deref()
+                .is_some_and(|sha| sha.len() == 64));
             assert_region_invariants(&side.observed_regions);
             assert!(
                 side.observed_regions
@@ -3528,24 +3668,32 @@ mod tests {
     /// audio observado e invariantes de regiao.
     fn assert_revision2_real_evidence(report: &ParityReport) {
         assert_eq!(report.contract_revision, PARITY_CONTRACT_REVISION);
-        assert!(report.core_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
-        assert!(report.golden_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+        assert!(report
+            .core_sha256
+            .as_deref()
+            .is_some_and(|sha| sha.len() == 64));
+        assert!(report
+            .golden_sha256
+            .as_deref()
+            .is_some_and(|sha| sha.len() == 64));
         assert!(report
             .initial_state_sha256
             .as_deref()
             .is_some_and(|sha| sha.len() == 64));
         let audio = report.audio.as_ref().expect("audio observation present");
         assert!(audio.available && audio.samples_total > 0);
-        assert!(audio.stream_sha256.as_deref().is_some_and(|sha| sha.len() == 64));
+        assert!(audio
+            .stream_sha256
+            .as_deref()
+            .is_some_and(|sha| sha.len() == 64));
         assert_region_invariants(&report.observed_regions);
     }
 
     fn fixture_golden(work: &Path, frames: u32) -> PathBuf {
         fs::create_dir_all(work).expect("work dir");
         let golden = work.join("parity-golden.rds-input.json");
-        let script = InputScript::from_frames(
-            (0..frames).map(|_| JoypadState::default()).collect(),
-        );
+        let script =
+            InputScript::from_frames((0..frames).map(|_| JoypadState::default()).collect());
         fs::write(&golden, serde_json::to_vec(&script).expect("ser")).expect("golden");
         golden
     }
@@ -3565,7 +3713,10 @@ mod tests {
                 .expect("real control run");
 
         // Same ROM => control, with real visual activity (color cycle).
-        assert!(has_visual_activity(&report.report_reference), "fixture must animate");
+        assert!(
+            has_visual_activity(&report.report_reference),
+            "fixture must animate"
+        );
         assert!(report.comparison.scenario_passed);
         assert_eq!(
             report.functional_evidence,
@@ -3594,7 +3745,10 @@ mod tests {
         // Different SHA, equivalent observable behaviour, real activity.
         assert_ne!(report.reference_rom_sha256, report.candidate_rom_sha256);
         assert!(has_visual_activity(&report.report_reference));
-        assert!(report.comparison.visual_parity, "equivalent ROMs must match visually");
+        assert!(
+            report.comparison.visual_parity,
+            "equivalent ROMs must match visually"
+        );
         assert!(report.comparison.scenario_passed);
         assert_eq!(
             report.functional_evidence,
@@ -3661,14 +3815,14 @@ mod tests {
         let candidate = candidate_of(&reference, "different-rom-sha");
         assert_ne!(reference.rom_sha256, candidate.rom_sha256);
 
-        let cmp = compare_reference_candidate(
-            &reference,
-            &candidate,
-            &ObservedState::unavailable(),
-        );
+        let cmp =
+            compare_reference_candidate(&reference, &candidate, &ObservedState::unavailable());
 
         // Different SHA is EXPECTED here, not a divergence.
-        assert!(cmp.divergences.is_empty(), "different ROMs must be accepted");
+        assert!(
+            cmp.divergences.is_empty(),
+            "different ROMs must be accepted"
+        );
         assert!(cmp.visual_parity);
         assert!(cmp.scenario_passed);
         assert_eq!(cmp.evidence_level, ParityEvidenceLevel::VisualParity);
@@ -3691,20 +3845,19 @@ mod tests {
         let mut candidate = candidate_of(&reference, "different-rom-sha");
         candidate.frame_hashes[2].framebuffer_sha256 = "diverged".to_string();
 
-        let cmp = compare_reference_candidate(
-            &reference,
-            &candidate,
-            &ObservedState::unavailable(),
-        );
+        let cmp =
+            compare_reference_candidate(&reference, &candidate, &ObservedState::unavailable());
 
         assert!(cmp
             .divergences
             .iter()
-            .any(|d| d.kind == "reference_candidate_frame_hash_mismatch"
-                && d.frame_index == 2));
+            .any(|d| d.kind == "reference_candidate_frame_hash_mismatch" && d.frame_index == 2));
         assert!(!cmp.visual_parity);
         assert!(!cmp.scenario_passed);
-        assert_eq!(cmp.evidence_level, ParityEvidenceLevel::InsufficientEvidence);
+        assert_eq!(
+            cmp.evidence_level,
+            ParityEvidenceLevel::InsufficientEvidence
+        );
     }
 
     #[test]
@@ -3724,7 +3877,10 @@ mod tests {
             .any(|d| d.kind.starts_with("observed_state_mismatch")));
         assert!(!cmp.observed_state_parity);
         // Frames matched visually, but observed state diverged -> not enough.
-        assert_eq!(cmp.evidence_level, ParityEvidenceLevel::InsufficientEvidence);
+        assert_eq!(
+            cmp.evidence_level,
+            ParityEvidenceLevel::InsufficientEvidence
+        );
     }
 
     #[test]
@@ -3770,7 +3926,10 @@ mod tests {
             !cmp.observed_state_parity,
             "one matching region must not mask an asymmetric extra region"
         );
-        assert_eq!(cmp.evidence_level, ParityEvidenceLevel::InsufficientEvidence);
+        assert_eq!(
+            cmp.evidence_level,
+            ParityEvidenceLevel::InsufficientEvidence
+        );
     }
 
     #[test]
@@ -3821,10 +3980,8 @@ mod tests {
         // (never an empty hash), so no observed-state parity can be claimed.
         let unavailable = region_obs("WRAM", None);
         assert!(!unavailable.available && unavailable.sha256.is_none());
-        let observed = ObservedState::from_regions(
-            vec![region_obs("WRAM", Some("s"))],
-            vec![unavailable],
-        );
+        let observed =
+            ObservedState::from_regions(vec![region_obs("WRAM", Some("s"))], vec![unavailable]);
         assert!(!observed.available);
         let cmp = compare_reference_candidate(&reference, &candidate, &observed);
         assert!(!cmp.observed_state_parity);
@@ -3849,7 +4006,10 @@ mod tests {
                 vec![region_obs("WRAM", Some("s"))],
             ),
         );
-        assert_eq!(cmp.evidence_level, ParityEvidenceLevel::InsufficientEvidence);
+        assert_eq!(
+            cmp.evidence_level,
+            ParityEvidenceLevel::InsufficientEvidence
+        );
         assert!(!cmp.scenario_passed);
         assert!(cmp
             .limitations
@@ -3865,7 +4025,10 @@ mod tests {
         let static_cand = candidate_of(&static_ref, "different-rom-sha");
         let cmp2 =
             compare_reference_candidate(&static_ref, &static_cand, &ObservedState::unavailable());
-        assert_eq!(cmp2.evidence_level, ParityEvidenceLevel::InsufficientEvidence);
+        assert_eq!(
+            cmp2.evidence_level,
+            ParityEvidenceLevel::InsufficientEvidence
+        );
         assert!(!cmp2.scenario_passed);
     }
 
@@ -3876,11 +4039,8 @@ mod tests {
         // a SINGLE script is only ScenarioEvidence, never FunctionalEvidence.
         let reference = sample_report(true, None);
         let candidate = candidate_of(&reference, "different-rom-sha");
-        let cmp = compare_reference_candidate(
-            &reference,
-            &candidate,
-            &ObservedState::unavailable(),
-        );
+        let cmp =
+            compare_reference_candidate(&reference, &candidate, &ObservedState::unavailable());
 
         assert_eq!(cmp.evidence_level, ParityEvidenceLevel::VisualParity);
         assert_ne!(cmp.evidence_level, ParityEvidenceLevel::ObservedStateParity);
@@ -3899,29 +4059,26 @@ mod tests {
         let mut candidate = candidate_of(&reference, "different-rom-sha");
         candidate.core_label = "OtherCore".to_string();
 
-        let cmp = compare_reference_candidate(
-            &reference,
-            &candidate,
-            &ObservedState::unavailable(),
-        );
+        let cmp =
+            compare_reference_candidate(&reference, &candidate, &ObservedState::unavailable());
 
         assert!(cmp
             .divergences
             .iter()
             .any(|d| d.kind == "core_label_mismatch"));
         assert!(!cmp.visual_parity);
-        assert_eq!(cmp.evidence_level, ParityEvidenceLevel::InsufficientEvidence);
+        assert_eq!(
+            cmp.evidence_level,
+            ParityEvidenceLevel::InsufficientEvidence
+        );
     }
 
     #[test]
     fn aggregate_functional_evidence_requires_all_scenarios_to_pass() {
         let reference = sample_report(true, None);
         let candidate = candidate_of(&reference, "different-rom-sha");
-        let pass = compare_reference_candidate(
-            &reference,
-            &candidate,
-            &ObservedState::unavailable(),
-        );
+        let pass =
+            compare_reference_candidate(&reference, &candidate, &ObservedState::unavailable());
 
         let mut broken_candidate = candidate.clone();
         broken_candidate.frame_hashes[0].framebuffer_sha256 = "diverged".to_string();
@@ -3961,11 +4118,8 @@ mod tests {
         // A GENUINELY independent second scenario (different candidate ROM sha
         // -> different scenario_id) DOES promote to FunctionalEvidence.
         let candidate_2 = candidate_of(&reference, "different-rom-sha-2");
-        let pass_2 = compare_reference_candidate(
-            &reference,
-            &candidate_2,
-            &ObservedState::unavailable(),
-        );
+        let pass_2 =
+            compare_reference_candidate(&reference, &candidate_2, &ObservedState::unavailable());
         assert_ne!(pass.scenario_id, pass_2.scenario_id);
         assert_eq!(
             aggregate_functional_evidence(&[pass.clone(), pass_2]),
@@ -3974,11 +4128,8 @@ mod tests {
 
         // A same-ROM control (reference sha == candidate sha) is ControlEvidence,
         // never scenario/functional, even when it passes.
-        let control = compare_reference_candidate(
-            &reference,
-            &reference,
-            &ObservedState::unavailable(),
-        );
+        let control =
+            compare_reference_candidate(&reference, &reference, &ObservedState::unavailable());
         assert!(control.scenario_passed);
         assert_eq!(
             aggregate_functional_evidence(std::slice::from_ref(&control)),
@@ -3995,11 +4146,8 @@ mod tests {
     fn write_reference_candidate_report_records_hashes_core_inputs_limitations() {
         let reference = sample_report(true, None);
         let candidate = candidate_of(&reference, "candidate-sha-999");
-        let comparison = compare_reference_candidate(
-            &reference,
-            &candidate,
-            &ObservedState::unavailable(),
-        );
+        let comparison =
+            compare_reference_candidate(&reference, &candidate, &ObservedState::unavailable());
         let functional_evidence = aggregate_functional_evidence(std::slice::from_ref(&comparison));
         let report = ReferenceCandidateReport {
             schema: REFERENCE_CANDIDATE_REPORT_SCHEMA.to_string(),

@@ -1029,15 +1029,13 @@ impl EmulatorCore {
         .map(|region| {
             let label = memory_region_label(region).to_string();
             match self.read_memory(region, 0, usize::MAX) {
-                Ok((bytes, total)) if total > 0 && !bytes.is_empty() => {
-                    MemoryRegionObservation {
-                        label,
-                        region_id: region,
-                        available: true,
-                        size: bytes.len(),
-                        sha256: Some(sha256_hex(&bytes)),
-                    }
-                }
+                Ok((bytes, total)) if total > 0 && !bytes.is_empty() => MemoryRegionObservation {
+                    label,
+                    region_id: region,
+                    available: true,
+                    size: bytes.len(),
+                    sha256: Some(sha256_hex(&bytes)),
+                },
                 _ => MemoryRegionObservation {
                     label,
                     region_id: region,

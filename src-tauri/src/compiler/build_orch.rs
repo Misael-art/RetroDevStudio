@@ -2345,9 +2345,7 @@ fn detect_root(env_var: &str, local_dir_name: &str) -> Option<PathBuf> {
     for candidate_env_var in env_vars {
         if let Ok(path) = std::env::var(candidate_env_var) {
             let path = PathBuf::from(path);
-            if path.exists()
-                && (local_dir_name != "sgdk" || is_sgdk_root_usable_on_host(&path))
-            {
+            if path.exists() && (local_dir_name != "sgdk" || is_sgdk_root_usable_on_host(&path)) {
                 return Some(path);
             }
         }
@@ -2811,8 +2809,7 @@ mod tests {
                 .expect("stat fake compiler marker")
                 .permissions();
             permissions.set_mode(0o755);
-            fs::set_permissions(&compiler_marker, permissions)
-                .expect("chmod fake compiler marker");
+            fs::set_permissions(&compiler_marker, permissions).expect("chmod fake compiler marker");
         }
         let make_program = fake_make_script(&bin_dir, extension);
         (root, make_program)
@@ -4089,7 +4086,8 @@ PY\n"
         // Only hosts whose release link actually hits the LTO mismatch exercise
         // this path; on a matching toolchain the release build simply succeeds.
         let hit_lto = result.log.iter().any(|line| {
-            line.message.contains("build_profile=release fallback_used=false")
+            line.message
+                .contains("build_profile=release fallback_used=false")
                 || line.message.to_ascii_lowercase().contains("lto version")
         });
         if !hit_lto {

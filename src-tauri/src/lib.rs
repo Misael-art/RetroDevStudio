@@ -1156,7 +1156,9 @@ fn parity_run_cross_core_impl(
             } else {
                 format!(
                     "Cores diverge: {} cross-core divergence(s) after {} frame(s); report in '{}'.",
-                    report.cross_divergences.len(), report.frames_run, written.display()
+                    report.cross_divergences.len(),
+                    report.frames_run,
+                    written.display()
                 )
             };
             CrossCoreParityResult {
@@ -1806,7 +1808,10 @@ fn reverse_explorer_read(
 
 #[tauri::command]
 async fn rom_analyze(rom_path: String) -> Result<RomAnalysisManifest, String> {
-    run_heavy_result_command("rom_analyze", move || tools::reverse::analyze_rom(&rom_path)).await
+    run_heavy_result_command("rom_analyze", move || {
+        tools::reverse::analyze_rom(&rom_path)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1864,7 +1869,10 @@ async fn rom_disassemble(
 
 #[tauri::command]
 async fn rom_get_xrefs(rom_path: String) -> Result<Vec<CodeXref>, String> {
-    run_heavy_result_command("rom_get_xrefs", move || tools::reverse::get_xrefs(&rom_path)).await
+    run_heavy_result_command("rom_get_xrefs", move || {
+        tools::reverse::get_xrefs(&rom_path)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2483,6 +2491,10 @@ fn interrupted_install_result(dependency_id: &str) -> DependencyInstallResult {
         status: DependencyStatus {
             id: dependency_id.to_string(),
             label: dependency_id.to_string(),
+            // A instalacao foi tentada para esta dependencia, logo ela e aplicavel
+            // ao host: marcar `false` a exibiria como "NAO APLICAVEL" e esconderia
+            // a falha do panic no Runtime Setup.
+            applicable: true,
             installed: false,
             version: None,
             status_code: "missing".to_string(),
