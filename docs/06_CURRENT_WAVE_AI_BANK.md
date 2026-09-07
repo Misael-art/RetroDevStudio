@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-09-07 (INT-R1d: A-01, B-01 e C-01 LIBERADOS sobre `main` `1b2a45b`, sem certificação de runtime; host segue DRIFTED)
+**Ultima Atualizacao:** 2026-09-07 (INT-R1e: host Linux **READY** pela primeira vez; ENV-01 e ENV-02 fechados; restrição de host suspensa em A-01/B-01/C-01)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -20,6 +20,16 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+
+* **O que acabou de acontecer (2026-09-07 — INT-R1e: host alcançou READY; ENV-01 e ENV-02 fechados):**
+  - **Comando executado:** `bash scripts/bootstrap.sh --ensure --profile full`, saída **exit 0**, seguido de `npm run host:diagnose` **exit 0**.
+  - **Resultado:** estado **`READY`**, **nenhum** item não-ready. Os 20 checks passam, incluindo `jdk21`, `ghidra`, `m68k_gcc`, `sgdk`, `pvsneslib`, `libretro_md` e `libretro_snes` — exatamente os 7 que bloqueavam a baseline.
+  - **Fingerprint e lock inalterados:** `82f39923d69557b647ed3a4ec5053ce67885ac125ee79666116d03d5968fff5a` e `d531c4b9617af47108819d965b7cb58db1e2780a5f8a9edead08668870f5bb5d`. Mesmo host, mesmo contrato: o que mudou foi só o provisionamento, não a definição.
+  - **Correção de ENV-02 (com data e motivo, sem apagar o original):** a baseline de 2026-09-06 registrou bootstrap encerrando em exit 1 por exigir autenticação sudo. Em 2026-09-07 o mesmo comando reportou `Launcher substrate already satisfies the probes; sudo not required` e completou sem intervenção administrativa. A observação original estava correta naquele momento; o substrato do host mudou desde então. **Nenhuma autenticação foi contornada.**
+  - **ENV-01: MELHOROU** (DRIFTED/exit 10 → READY/exit 0). **ENV-02: MELHOROU** (bloqueado por autenticação → reparo concluído sem sudo).
+  - **Efeito sobre os tickets:** a restrição de host imposta em INT-R1d a A-01, B-01 e C-01 fica **suspensa**. Prova de build real e ROM passa a ser exigível; a certificação de runtime continua **serializada pelo Integrador**, sem sessão de emulador, porta WebDriver ou report mutável compartilhados entre agentes.
+  - **O que isto NÃO significa:** nenhuma superfície foi promovida e nada foi certificado ainda. `host:certify` não foi executado, o fluxo `Build -> ROM -> Emulação` continua **NÃO MEDIDO** neste SHA, e HOST-WIN-01 segue `BLOQUEADO` — este READY é do host Linux, não do runner Windows.
+  - **Próximo passo imediato:** executar `npm run host:certify` e, com evidência, revalidar a baseline no SHA de destino antes de qualquer alegação sobre build ou emulação.
 
 * **O que acabou de acontecer (2026-09-07 — INT-R1d: A-01, B-01 e C-01 liberados com restrição explícita de host):**
   - **Ordem do operador:** liberar A-01, B-01 e C-01. Base de todos: `main` `1b2a45bebef6adf0471e46bda608e429bffc480b`.
@@ -122,9 +132,9 @@ Agente / branch codex/... / worktree absoluto externo à raiz: A / `codex/a-01-c
 Arquivos permitidos (lista exata) / arquivos reservados a outros: `src-tauri/src/compiler/**` e `src/core/nodegraph/**` (mais os testes desses módulos). Reservados: `src-tauri/src/emulator/**`, `parity_harness.rs`, `deep_profiler.rs` (B); componentes de UI (C); `App.tsx`, `editorStore.ts`, `lib.rs`, `project_mgr.rs`, `ugdm/**`, IPC, manifests/locks, scripts de host/CI e docs canônicos (Integrador)
 Comportamento antes → depois / fora do escopo: um comportamento hoje incorreto/silencioso no caminho NodeGraph → IR → emitter passa a ter regressão que falha primeiro e depois fecha. Fora do escopo: importadores amplos, decompilação, features novas, refatoração ampla e mudança de contrato IPC/UGDM sem proposta ao Integrador
 Contratos já integrados / dependências pendentes: nenhum contrato novo autorizado; propor ao Integrador se for necessário
-Host fingerprint / lock digest / READY: 82f39923…fff5a / d531c4b9…5bb5d / **NÃO (DRIFTED)** — ver restrição de escopo abaixo
-Restrição por host não-READY: proibido declarar prova de build real, ROM gerada ou emulação. O que depender de SGDK/PVSnesLib/core fica `NÃO MEDIDO`, explicitamente, no handoff
-Projeto/corpus permitido / diretório de evidências / janela exclusiva de certificação: fixtures do próprio repositório; sem janela de certificação (host não-READY)
+Host fingerprint / lock digest / READY: 82f39923…fff5a / d531c4b9…5bb5d / **SIM (READY em 2026-09-07, diagnose exit 0)**
+Restrição por host não-READY: **SUSPENSA** — host alcançou READY. Prova de build real e ROM passa a ser exigível; certificação de runtime segue serializada pelo Integrador
+Projeto/corpus permitido / diretório de evidências / janela exclusiva de certificação: fixtures do próprio repositório; janela de certificação disponível mediante pedido ao Integrador (host READY, uso serializado)
 Testes de aceitação / gates aplicáveis: regressão que **falha antes** da correção e passa depois; `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test --lib -- --test-threads=1`
 Status operacional: LIBERADO (2026-09-07) — edição permitida nos arquivos acima, sem certificação de runtime
 ```
@@ -143,8 +153,8 @@ Arquivos permitidos (lista exata) / arquivos reservados a outros: `src-tauri/src
 Comportamento antes → depois / fora do escopo: `dma_per_frame = tile_section_size.min(MD_DMA_VBLANK_BYTES)` torna a condição `> MD_DMA_VBLANK_BYTES` inalcançável e trava o percentual em 100% → comparar o **orçamento contra `tile_section_size`**, mantendo `dma_per_frame` saturado para o heatmap. Fora do escopo: transformar estimativa estática em medição dinâmica, tocar `parity_harness.rs` ou instrumentar runtime
 Escopo anexado nesta liberação (HOST-WIN-01 não incluído): corrigir também `frame_buffer.rs:116`, onde `clippy::unusual_byte_groupings` acusa `0b11111_111111_00000u16`. O agrupamento 5-6-5 é **semanticamente correto** para RGB565 e a sugestão do clippy destrói a leitura: preferir `#[allow]` local com comentário a reagrupar. Só aparece sob `--all-targets`, que o CI não usa
 Contratos já integrados / dependências pendentes: nenhum
-Host fingerprint / lock digest / READY: 82f39923…fff5a / d531c4b9…5bb5d / **NÃO (DRIFTED)**
-Restrição por host não-READY: PROF-01 permanece válido — o profiler **estima**, não mede. Proibido apresentar resultado como medição dinâmica; qualquer alegação de execução real fica `NÃO MEDIDO`
+Host fingerprint / lock digest / READY: 82f39923…fff5a / d531c4b9…5bb5d / **SIM (READY em 2026-09-07)**
+Restrição permanente (não é sobre host): PROF-01 permanece válido — o profiler **estima**, não mede. Proibido apresentar resultado como medição dinâmica; qualquer alegação de execução real fica `NÃO MEDIDO`
 Testes de aceitação / gates aplicáveis: regressão que **falha antes** e passa depois, cobrindo o caso em que `tile_section_size` excede o orçamento; mesma bateria de gates do A-01
 Status operacional: LIBERADO (2026-09-07) — defeito já confirmado por inspeção em ambos os troncos; correção agora autorizada
 ```
@@ -158,7 +168,7 @@ Reescopo obrigatório antes de editar: a baseline de 2026-09-06 **não viu** os 
 Arquivos permitidos (lista exata) / arquivos reservados a outros: `src/components/common/**` e seus testes. Reservados e proibidos: `App.tsx`, `ViewportPanel.tsx`, `NodeGraphEditor.tsx`, `InspectorPanel.tsx`, `ToolsPanel.tsx`, `ArtStudioPanel.tsx`, `editorStore.ts`, além de `compiler/**`/`nodegraph/**` (A) e `emulator/**`/`deep_profiler.rs` (B)
 Comportamento antes → depois / fora do escopo: um defeito **confirmado** (foco, rótulo acessível, `aria-*`, contraste por token, ou mensagem de erro sem ação) passa a ter teste que falha primeiro e depois fecha. Fora do escopo: redesign visual, troca de tokens globais, novas superfícies e qualquer mudança em arquivo reservado
 Contratos já integrados / dependências pendentes: usar exclusivamente contratos e tokens existentes
-Host fingerprint / lock digest / READY: irrelevante para esta fatia (frontend puro), host segue DRIFTED
+Host fingerprint / lock digest / READY: irrelevante para esta fatia (frontend puro); host está READY desde 2026-09-07
 Testes de aceitação / gates aplicáveis: teste de acessibilidade/erro que **falha antes** e passa depois; `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`
 Status operacional: LIBERADO (2026-09-07) — edição permitida apenas em `src/components/common/**`, após o reescopo acima
 ```
