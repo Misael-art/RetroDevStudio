@@ -144,9 +144,22 @@ linuxDescribe("ghidra_boundary.sh BLOCKED path (no install attempted)", () => {
   it("exits 3 and writes a blocked JSON report when Ghidra is not resolvable, without installing anything", () => {
     const tmp = mkdtempSync(path.join(os.tmpdir(), "rds-ghidra-blocked-"));
     try {
+      // `RETRODEV_GHIDRA_HOME` sozinho nao garante a pre-condicao: o script cai
+      // para `command -v analyzeHeadless` quando o home aponta para lugar
+      // nenhum. Num host provisionado (`host:diagnose` READY) o PATH injetado
+      // traz o Ghidra do cache, o caminho BLOCKED fica inalcancavel e o script
+      // dispara uma analise headless real que estoura o timeout do runBash.
+      // Isso tornava `npm run host:certify` impossivel de passar exatamente
+      // quando o host estava correto. Sanitizar o PATH torna a pre-condicao
+      // real, sem afrouxar nenhuma asercao.
+      const pathWithoutGhidra = (process.env.PATH ?? "")
+        .split(path.delimiter)
+        .filter((entry) => entry && !existsSync(path.join(entry, "analyzeHeadless")))
+        .join(path.delimiter);
       const result = runBash(ghidraScript, {
         RETRODEV_GHIDRA_HOME: path.join(tmp, "nonexistent-ghidra"),
         RDS_DECOMP_WORK: tmp,
+        PATH: pathWithoutGhidra,
       });
       expect(result.status).toBe(3);
       expect(result.stdout).toMatch(/BLOCKED/);
