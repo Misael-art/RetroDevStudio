@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import EmptyState from "../common/EmptyState";
 import Panel from "../common/Panel";
 import SceneWorkspaceNotice from "../common/SceneWorkspaceNotice";
 import { useEditorStore } from "../../core/store/editorStore";
@@ -114,7 +115,12 @@ function importedEntityKindChip(entityType: string, roleLabel: string | null): s
   return null;
 }
 
-export default function HierarchyPanel() {
+export default function HierarchyPanel({
+  onOpenProject,
+}: {
+  /** Acao real de abrir projeto (fluxo canonico do shell); habilita o CTA do estado vazio. */
+  onOpenProject?: () => void;
+} = {}) {
   const {
     selectedEntityId, setSelectedEntityId,
     activeProjectDir,
@@ -896,10 +902,14 @@ export default function HierarchyPanel() {
           )}
 
           {entities.length === 0 && bgLayers.length === 0 && !activeProjectDir && (
-            <li className="px-3 py-4 text-xs text-[#45475a] italic">
-              {activeProjectDir
-                ? "Nenhuma entidade na cena."
-                : "Abra um projeto (Arquivo → Abrir Projeto)."}
+            <li>
+              <EmptyState
+                testId="hierarchy-empty-no-project"
+                title="Nenhum projeto aberto"
+                description="Abra um projeto para compor a cena, ou crie um novo pelo menu Projeto."
+                actionLabel={onOpenProject ? "Abrir projeto" : undefined}
+                onAction={onOpenProject}
+              />
             </li>
           )}
 

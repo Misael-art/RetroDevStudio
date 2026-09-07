@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  getLayoutStorageKeyForDensity,
   getPresetLayout,
+  getShellDensity,
   resolveLayoutPreset,
   resolveWorkspaceShellConfig,
 } from "./workspaceLayout";
@@ -46,5 +48,36 @@ describe("workspaceLayout", () => {
     expect(layout.left + layout.center + layout.right).toBe(100);
     expect(layout.left).toBeGreaterThanOrEqual(0);
     expect(layout.right).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("shell density (fatia 1 v2 do estudo de UI)", () => {
+  it("maps host width to density profiles", () => {
+    expect(getShellDensity(1280)).toBe("compact");
+    expect(getShellDensity(1366)).toBe("compact");
+    expect(getShellDensity(1439)).toBe("compact");
+    expect(getShellDensity(1440)).toBe("standard");
+    expect(getShellDensity(1920)).toBe("standard");
+    expect(getShellDensity(2399)).toBe("standard");
+    expect(getShellDensity(2400)).toBe("wide");
+    expect(getShellDensity(2560)).toBe("wide");
+  });
+
+  it("keeps the legacy storage key for standard and namespaces other densities", () => {
+    expect(getLayoutStorageKeyForDensity("retrodev-shell-saved-layout", "standard")).toBe(
+      "retrodev-shell-saved-layout"
+    );
+    expect(getLayoutStorageKeyForDensity("retrodev-shell-saved-layout", "compact")).toBe(
+      "retrodev-shell-saved-layout::compact"
+    );
+    expect(getLayoutStorageKeyForDensity("retrodev-shell-saved-layout", "wide")).toBe(
+      "retrodev-shell-saved-layout::wide"
+    );
+  });
+
+  it("treats Deck-class widths (1280/1366) as compact in preset layouts", () => {
+    expect(getPresetLayout("authoring", 1280)).toEqual({ left: 16, center: 64, right: 20 });
+    expect(getPresetLayout("authoring", 1366)).toEqual({ left: 16, center: 64, right: 20 });
+    expect(getPresetLayout("authoring", 1920)).toEqual({ left: 18, center: 60, right: 22 });
   });
 });

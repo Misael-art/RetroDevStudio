@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use libloading::Library;
 
+use crate::core::rom_mastering::sha256_hex;
 use crate::tools::reverse::manifest::SaveRamStatus;
 use crate::tools::reverse::trace::{CpuState, ExecutionTraceLog};
 
@@ -45,6 +46,17 @@ pub struct FrameSize {
     pub width: u32,
     pub height: u32,
     pub pitch: u32,
+}
+
+/// A normalized memory-region observation exposed by a Libretro core. `available`
+/// is false (with `sha256 = None`) when the core does not expose the region.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MemoryRegionObservation {
+    pub label: String,
+    pub region_id: u32,
+    pub available: bool,
+    pub size: usize,
+    pub sha256: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -182,7 +194,11 @@ impl CoreTarget {
 
     fn candidate_names(self) -> &'static [&'static str] {
         match self {
-            Self::MegaDrive => &["genesis_plus_gx_libretro", "picodrive_libretro"],
+            Self::MegaDrive => &[
+                "genesis_plus_gx_libretro",
+                "picodrive_libretro",
+                "blastem_libretro",
+            ],
             Self::Snes => &["snes9x_libretro", "bsnes_libretro"],
         }
     }
@@ -349,6 +365,7 @@ struct LoadedCore {
     frame_size: FrameSize,
     sample_rate: u32,
     label: String,
+    core_path: PathBuf,
     _target: CoreTarget,
     trace_backend: Option<TraceBackend>,
     trace_base_pc: u32,
@@ -550,6 +567,7 @@ impl LoadedCore {
             frame_size,
             sample_rate: av_info.timing.sample_rate.round().max(1.0) as u32,
             label: core_label,
+            core_path: core_path.to_path_buf(),
             _target: target,
             trace_backend,
             trace_base_pc,
@@ -996,6 +1014,42 @@ impl EmulatorCore {
         Ok((source[offset..end].to_vec(), total_size))
     }
 
+    /// Captures normalized memory-region observations (WRAM / VRAM / SRAM) that
+    /// the loaded core actually exposes. Each region carries its size and a
+    /// full SHA-256; a region the core does not expose is `available = false`
+    /// with `sha256 = None` (never an empty/zero hash). No combined hash is
+    /// produced — callers compare region by region.
+    pub fn capture_normalized_regions(&self) -> Vec<MemoryRegionObservation> {
+        [
+            RETRO_MEMORY_SYSTEM_RAM,
+            RETRO_MEMORY_VIDEO_RAM,
+            RETRO_MEMORY_SAVE_RAM,
+        ]
+        .into_iter()
+        .map(|region| {
+            let label = memory_region_label(region).to_string();
+            match self.read_memory(region, 0, usize::MAX) {
+                Ok((bytes, total)) if total > 0 && !bytes.is_empty() => {
+                    MemoryRegionObservation {
+                        label,
+                        region_id: region,
+                        available: true,
+                        size: bytes.len(),
+                        sha256: Some(sha256_hex(&bytes)),
+                    }
+                }
+                _ => MemoryRegionObservation {
+                    label,
+                    region_id: region,
+                    available: false,
+                    size: 0,
+                    sha256: None,
+                },
+            }
+        })
+        .collect()
+    }
+
     pub fn set_joypad(&self, joypad: JoypadState) -> Result<(), String> {
         let mut state = self.handle.lock().map_err(|e| e.to_string())?;
         state.joypad = joypad;
@@ -1039,6 +1093,14 @@ impl EmulatorCore {
 
     pub fn loaded_core_label(&self) -> Option<&str> {
         self.runtime.as_ref().map(|runtime| runtime.label.as_str())
+    }
+
+    /// Caminho do arquivo de core Libretro efetivamente carregado (resolvido
+    /// por `locate_core_path`), para identificar a execucao em relatorios.
+    pub fn loaded_core_file(&self) -> Option<PathBuf> {
+        self.runtime
+            .as_ref()
+            .map(|runtime| runtime.core_path.clone())
     }
 
     pub fn loaded_rom_path(&self) -> Option<PathBuf> {
@@ -1834,6 +1896,13 @@ mod tests {
         assert_eq!(detect_rom_target(&snes_rom), Some(CoreTarget::Snes));
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn megadrive_autodetect_candidates_include_blastem_when_available() {
+        assert!(CoreTarget::MegaDrive
+            .candidate_names()
+            .contains(&"blastem_libretro"));
     }
 
     #[test]

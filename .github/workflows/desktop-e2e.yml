@@ -82,10 +82,13 @@ jobs:
           node-version: 24.18.0
           cache: npm
 
+      # Mesma versao do gate `validate` em ci.yml: o smoke compila o mesmo
+      # crate e nao pode divergir de toolchain.
+      # `rust-toolchain.toml` (versionado) fixa 1.97.0 e prevalece sobre a versao
+      # instalada por esta action; o pin aqui apenas impede o drift do canal.
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@1.97.1
         with:
-          toolchain: 1.97.0
           components: rustfmt, clippy
 
       - name: Install frontend dependencies

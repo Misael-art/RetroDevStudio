@@ -107,6 +107,7 @@ export async function persistActiveScene(
       JSON.stringify(activeScene, null, 2)
     );
     if (result.ok) {
+      clearSceneDraft(projectDir);
       if (successMessage) {
         logMessage("success", `[${scope}] ${successMessage}`);
       }
@@ -120,4 +121,144 @@ export async function persistActiveScene(
 
   await reloadSceneFromDisk(projectDir, scope);
   return false;
+}
+
+/**
+ * Autosave de rascunho local (fatia 1 v2 do estudo de UI) — Experimental.
+ *
+ * O rascunho vive apenas em localStorage do host; nunca grava em disco por
+ * conta propria. O disco so muda no fluxo canonico `persistActiveScene`, que
+ * limpa o rascunho apos salvar com sucesso.
+ */
+const SCENE_DRAFT_STORAGE_PREFIX = "retrodev-scene-draft";
+
+type DraftStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+function defaultDraftStorage(): DraftStorage | null {
+  return typeof localStorage === "undefined" ? null : localStorage;
+}
+
+export interface SceneDraftRecord {
+  savedAt: string;
+  scenePath: string | null;
+  sourceSceneJson: string;
+}
+
+export function sceneDraftStorageKey(projectDir: string): string {
+  return `${SCENE_DRAFT_STORAGE_PREFIX}::${projectDir}`;
+}
+
+export function saveActiveSceneDraft(
+  projectDir: string,
+  storage: DraftStorage | null = defaultDraftStorage(),
+  now: Date = new Date()
+): boolean {
+  const { activeSceneSource, activeScenePath } = useEditorStore.getState();
+  if (!projectDir || !activeSceneSource || !storage) {
+    return false;
+  }
+
+  try {
+    storage.setItem(
+      sceneDraftStorageKey(projectDir),
+      JSON.stringify({
+        savedAt: now.toISOString(),
+        scenePath: activeScenePath || null,
+        sourceSceneJson: JSON.stringify(activeSceneSource),
+      } satisfies SceneDraftRecord)
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function loadSceneDraft(
+  projectDir: string,
+  storage: DraftStorage | null = defaultDraftStorage()
+): SceneDraftRecord | null {
+  try {
+    const raw = storage?.getItem(sceneDraftStorageKey(projectDir));
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as Partial<SceneDraftRecord>;
+    if (typeof parsed.sourceSceneJson !== "string" || typeof parsed.savedAt !== "string") {
+      return null;
+    }
+    return {
+      savedAt: parsed.savedAt,
+      scenePath: typeof parsed.scenePath === "string" ? parsed.scenePath : null,
+      sourceSceneJson: parsed.sourceSceneJson,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function clearSceneDraft(
+  projectDir: string,
+  storage: DraftStorage | null = defaultDraftStorage()
+): void {
+  try {
+    storage?.removeItem(sceneDraftStorageKey(projectDir));
+  } catch {
+    // storage indisponivel: nada a limpar
+  }
+}
+
+/** True quando o rascunho difere da fonte ativa no editor (ou nao ha fonte ativa). */
+export function sceneDraftDiffersFromActiveSource(draft: SceneDraftRecord): boolean {
+  const { activeSceneSource } = useEditorStore.getState();
+  if (!activeSceneSource) {
+    return true;
+  }
+  return draft.sourceSceneJson !== JSON.stringify(activeSceneSource);
+}
+
+/**
+ * Restaura o rascunho no editor (memoria apenas). O disco permanece intocado
+ * ate o usuario salvar explicitamente pelo fluxo canonico.
+ */
+export async function restoreSceneDraft(
+  projectDir: string,
+  draft: SceneDraftRecord
+): Promise<boolean> {
+  const { logMessage, setActiveScene, setActiveScenePath } = useEditorStore.getState();
+
+  const source = parseSceneJson(draft.sourceSceneJson);
+  if (!source) {
+    logMessage("error", "[Autosave] Rascunho local invalido; nada foi restaurado.");
+    return false;
+  }
+
+  try {
+    const resolvedResult = await resolveScenePrefabs(projectDir, source);
+    if (!resolvedResult.ok) {
+      logMessage(
+        "error",
+        `[Autosave] Falha ao resolver prefabs do rascunho: ${resolvedResult.error}`
+      );
+      return false;
+    }
+
+    const resolved = parseSceneJson(resolvedResult.scene_json);
+    if (!resolved) {
+      logMessage("error", "[Autosave] Falha ao reconstruir a cena do rascunho.");
+      return false;
+    }
+
+    if (draft.scenePath) {
+      setActiveScenePath(draft.scenePath);
+    }
+    setActiveScene(resolved, source);
+    logMessage(
+      "success",
+      "[Autosave] Rascunho local restaurado no editor (nada foi gravado em disco)."
+    );
+    return true;
+  } catch (error) {
+    logMessage("error", `[Autosave] ${describeError(error)}`);
+    return false;
+  }
 }

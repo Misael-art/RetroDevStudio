@@ -983,3 +983,49 @@ describe("updateCollisionMap", () => {
     expect(map.data[5]).toBe(1);
   });
 });
+
+// ── Contrato de historico (fatia 1 v2: auditoria undo/redo) ──────────────────
+
+describe("contrato de historico undo/redo", () => {
+  function seedScene() {
+    const scene: Scene = {
+      ...EMPTY_SCENE,
+      entities: [makeEntity("e1", 5, 5)],
+      background_layers: [makeLayer("bg1")],
+    };
+    useEditorStore.setState({
+      activeScene: structuredClone(scene),
+      activeSceneSource: structuredClone(scene),
+    });
+  }
+
+  it("mutacoes de cena expostas na UI empurram o undo stack", () => {
+    seedScene();
+    useEditorStore.getState().addEntity(makeEntity("e2"));
+    expect(useEditorStore.getState().undoStack).toHaveLength(1);
+
+    useEditorStore.getState().updateEntity("e2", { transform: { x: 9, y: 9 } });
+    expect(useEditorStore.getState().undoStack).toHaveLength(2);
+
+    useEditorStore.getState().updateBackgroundLayer("bg1", { depth: 2 });
+    expect(useEditorStore.getState().undoStack).toHaveLength(3);
+
+    useEditorStore.getState().removeEntity("e2");
+    expect(useEditorStore.getState().undoStack).toHaveLength(4);
+  });
+
+  it("updateCollisionMap nao empurra sozinho: drags usam begin/commitHistoryCapture como entrada unica", () => {
+    seedScene();
+    useEditorStore.getState().beginHistoryCapture();
+    useEditorStore.getState().updateCollisionMap(0, 1);
+    useEditorStore.getState().updateCollisionMap(1, 1);
+    expect(useEditorStore.getState().undoStack).toHaveLength(0);
+
+    useEditorStore.getState().commitHistoryCapture();
+    expect(useEditorStore.getState().undoStack).toHaveLength(1);
+
+    useEditorStore.getState().undo();
+    expect(useEditorStore.getState().activeScene?.collision_map ?? null).toBeNull();
+    expect(useEditorStore.getState().redoStack).toHaveLength(1);
+  });
+});
