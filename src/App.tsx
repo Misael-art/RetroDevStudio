@@ -19,6 +19,7 @@ import { emulatorLoadRom, emulatorStop } from "./core/ipc/emulatorService";
 import { inspectRomMastering } from "./core/ipc/projectCapabilityService";
 import { getHwStatus } from "./core/ipc/hwService";
 import {
+  authorizeProjectAssetScope,
   createProjectFromTemplate,
   importExternalProject,
   importSgdkProject,
@@ -2156,6 +2157,19 @@ export default function App() {
 
     setShowProjectWizard(true);
   }, [activeProjectDir]);
+
+  useEffect(() => {
+    if (!activeProjectDir) {
+      return;
+    }
+
+    void authorizeProjectAssetScope(activeProjectDir).catch((error) => {
+      logMessage(
+        "error",
+        `[Assets] O asset protocol recusou o projeto ativo: ${describeError(error)}`
+      );
+    });
+  }, [activeProjectDir, logMessage]);
 
   useEffect(() => {
     if (selectedTemplateMegadriveOnly && newProjTarget !== "megadrive") {

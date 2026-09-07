@@ -391,10 +391,15 @@ impl TraceBackend {
         }
     }
 
-    fn decode_sample(self, base_pc: u32, serialized_state: &[u8]) -> Option<(u32, Option<CpuState>)> {
+    fn decode_sample(
+        self,
+        base_pc: u32,
+        serialized_state: &[u8],
+    ) -> Option<(u32, Option<CpuState>)> {
         match self {
             Self::MockCoreSerializedFrameCounter => {
-                let frame_counter = u64::from_le_bytes(serialized_state.get(..8)?.try_into().ok()?) as u32;
+                let frame_counter =
+                    u64::from_le_bytes(serialized_state.get(..8)?.try_into().ok()?) as u32;
                 let frame_offset = frame_counter.saturating_sub(1).saturating_mul(2);
                 let pc = base_pc.saturating_add(frame_offset) & !1;
                 Some((pc, None))
@@ -816,9 +821,8 @@ impl EmulatorCore {
                 expected_size
             ));
         }
-        let restored = unsafe {
-            (runtime.api.unserialize)(bytes.as_ptr().cast::<c_void>(), bytes.len())
-        };
+        let restored =
+            unsafe { (runtime.api.unserialize)(bytes.as_ptr().cast::<c_void>(), bytes.len()) };
         if !restored {
             return Err("Falha ao restaurar o estado do runtime no core Libretro.".to_string());
         }
@@ -1025,15 +1029,13 @@ impl EmulatorCore {
         .map(|region| {
             let label = memory_region_label(region).to_string();
             match self.read_memory(region, 0, usize::MAX) {
-                Ok((bytes, total)) if total > 0 && !bytes.is_empty() => {
-                    MemoryRegionObservation {
-                        label,
-                        region_id: region,
-                        available: true,
-                        size: bytes.len(),
-                        sha256: Some(sha256_hex(&bytes)),
-                    }
-                }
+                Ok((bytes, total)) if total > 0 && !bytes.is_empty() => MemoryRegionObservation {
+                    label,
+                    region_id: region,
+                    available: true,
+                    size: bytes.len(),
+                    sha256: Some(sha256_hex(&bytes)),
+                },
                 _ => MemoryRegionObservation {
                     label,
                     region_id: region,
@@ -1206,12 +1208,16 @@ impl EmulatorCore {
         };
 
         let serialized_state = self.serialize_runtime_state()?;
-        let Some((pc, cpu_state)) = trace_backend.decode_sample(runtime.trace_base_pc, &serialized_state) else {
+        let Some((pc, cpu_state)) =
+            trace_backend.decode_sample(runtime.trace_base_pc, &serialized_state)
+        else {
             return Ok(());
         };
 
         if let Some(cpu_state) = cpu_state {
-            self.trace_capture.trace.mark_executed_with_state(pc, cpu_state);
+            self.trace_capture
+                .trace
+                .mark_executed_with_state(pc, cpu_state);
         } else {
             self.trace_capture.trace.mark_executed(pc);
         }

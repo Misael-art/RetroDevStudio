@@ -72,13 +72,14 @@ function describeError(error: unknown): string {
 
 function summarizeDependencyItems(items: DependencyStatus[]): DependencyStatusSummary {
   return {
-    total: items.length,
+    total: items.filter((item) => item.applicable !== false).length,
     installed: items.filter((item) => (item.status_code ?? (item.installed ? "installed" : "missing")) === "installed").length,
     blocking: items.filter((item) => (item.severity ?? (item.installed ? "ok" : "blocking")) === "blocking").length,
     warnings: items.filter((item) => (item.severity ?? "ok") === "warning").length,
     manual_required: items.filter((item) => item.status_code === "manual_configuration_required").length,
     cache_available: items.filter((item) => item.cache_available).length,
     download_failed: items.filter((item) => item.status_code === "download_failed").length,
+    not_applicable: items.filter((item) => item.applicable === false).length,
   };
 }
 
@@ -1425,7 +1426,7 @@ function RuntimeSetup() {
 
   async function install(dependencyId: ThirdPartyDependencyId | string, label: string) {
     const confirmed = window.confirm(
-      `Instalar ${label} agora? O download sera feito do upstream oficial e gravado apenas no ambiente local.`
+      `Reparar ${label} pelo orquestrador comum? Todas as versoes e hashes virao do manifesto bloqueado.`
     );
     if (!confirmed) return;
 
@@ -1505,7 +1506,7 @@ function RuntimeSetup() {
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <span className="text-xs font-semibold text-[#cdd6f4]">Runtime Setup</span>
           <p className="text-[10px] leading-tight text-[#7f849c]">
-            Instala sob demanda JDK (Temurin LTS), SGDK, PVSnesLib e cores Libretro oficiais sem versionar binarios no repositorio.
+            Diagnostica e repara o host pelo manifesto imutavel usado pelo bootstrap, sem consultar releases mutaveis.
           </p>
         </div>
         <button

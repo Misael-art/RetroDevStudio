@@ -79,11 +79,13 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.18.0
           cache: npm
 
       # Mesma versao do gate `validate` em ci.yml: o smoke compila o mesmo
       # crate e nao pode divergir de toolchain.
+      # `rust-toolchain.toml` (versionado) fixa 1.97.0 e prevalece sobre a versao
+      # instalada por esta action; o pin aqui apenas impede o drift do canal.
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.97.1
         with:
@@ -93,10 +95,10 @@ jobs:
         run: npm ci
 
       - name: Install tauri-driver
-        run: cargo install tauri-driver --locked
+        run: cargo install tauri-driver --version 2.0.6 --locked
 
       - name: Install Edge WebDriver helper
-        run: cargo install --git https://github.com/chippers/msedgedriver-tool
+        run: cargo install --git https://github.com/chippers/msedgedriver-tool --rev 8c4b34f51b45f5cf08013366d703de464ab871d1 --locked
 
       - name: Provision native Edge WebDriver
         run: |

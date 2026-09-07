@@ -477,7 +477,9 @@ mod tests {
         });
         let errors = validate_scene(&scene);
         assert!(
-            !errors.iter().any(|e| e.is_fatal && e.message.contains("CollisionMap")),
+            !errors
+                .iter()
+                .any(|e| e.is_fatal && e.message.contains("CollisionMap")),
             "world-sized collision must not be fatal: {:?}",
             errors
         );

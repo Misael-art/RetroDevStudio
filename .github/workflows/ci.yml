@@ -24,7 +24,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24.18.0
           cache: npm
 
       # Versao fixada: `@stable` seguia o canal e trocava sozinho de toolchain.
@@ -33,6 +33,8 @@ jobs:
       # reprovou `-D warnings` em 7 arquivos sem nenhuma mudanca de codigo.
       # `components` e obrigatorio aqui: refs de versao instalam o perfil
       # minimal, que nao traz rustfmt nem clippy.
+      # `rust-toolchain.toml` (versionado) fixa 1.97.0 e prevalece sobre a versao
+      # instalada por esta action; o pin aqui apenas impede o drift do canal.
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@1.97.1
         with:
@@ -40,6 +42,22 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm ci
+
+      - name: Dependency security audit
+        id: dependency_audit
+        run: npm run security:audit
+
+      - name: Install pinned Rust security auditor
+        run: cargo install cargo-audit --version 0.22.2 --locked
+
+      - name: Rust dependency security audit
+        id: rust_dependency_audit
+        run: cargo audit --file src-tauri/Cargo.lock
+
+      - name: Rust formatting
+        id: rust_format
+        working-directory: src-tauri
+        run: cargo fmt --check
 
       - name: Structure check
         id: structure_check
@@ -83,6 +101,9 @@ jobs:
             "- Ref: ${{ github.ref_name }}",
             "- Commit: ${{ github.sha }}",
             "- Structure check: ${{ steps.structure_check.outcome }}",
+            "- Dependency audit: ${{ steps.dependency_audit.outcome }}",
+            "- Rust dependency audit: ${{ steps.rust_dependency_audit.outcome }}",
+            "- Rust formatting: ${{ steps.rust_format.outcome }}",
             "- Frontend lint: ${{ steps.frontend_lint.outcome }}",
             "- Rust clippy: ${{ steps.rust_clippy.outcome }}",
             "- Rust tests: ${{ steps.rust_tests.outcome }}",
@@ -100,4 +121,82 @@ jobs:
           name: ci-validation-${{ github.run_id }}
           path: |
             src-tauri/target-test/validation/**
+          if-no-files-found: ignore
+
+  linux-validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      CARGO_BUILD_JOBS: 2
+      RUST_MIN_STACK: 16777216
+      # Fora do workspace de proposito: um target dentro da raiz cria um
+      # diretorio novo (.cache) que o proprio gate check:tree rejeita.
+      # Usa o contexto github (runner nao existe em env de job, so em step).
+      CARGO_TARGET_DIR: ${{ github.workspace }}/../cargo-target
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Tauri Linux build substrate
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libxdo-dev
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.97.0
+          components: rustfmt, clippy
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Immutable host contract tests
+        run: npx vitest run scripts/host-manager.test.mjs scripts/linux-host-scripts.test.mjs scripts/security-contract.test.mjs
+
+      - name: Dependency security audit
+        run: npm run security:audit
+
+      - name: Rust dependency security audit
+        run: |
+          cargo install cargo-audit --version 0.22.2 --locked
+          cargo audit --file src-tauri/Cargo.lock
+
+      - name: License inventory
+        run: npm run security:licenses
+
+      - name: Structure, formatting, lint and types
+        run: |
+          npm run check:tree
+          cargo fmt --manifest-path src-tauri/Cargo.toml --check
+          npm run lint
+          npx tsc --noEmit
+
+      - name: Frontend tests
+        run: npm test
+
+      - name: Rust clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --lib -- -D warnings
+
+      - name: Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1
+
+      - name: Upload Linux validation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-validation-${{ github.run_id }}
+          path: src-tauri/target-test/validation/**
           if-no-files-found: ignore

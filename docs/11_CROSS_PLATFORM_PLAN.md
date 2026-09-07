@@ -1,9 +1,86 @@
 # 11 - PLANO DE ADAPTACAO CROSS-PLATFORM (Linux + Windows)
-**Status:** Fases 1 e 2 entregues no host Linux; Fase 3 pendente de toolchains oficiais nativas
+**Status:** Programa ativo; Etapas 0/1/2/4 concluidas; Windows congelado pelo operador e ainda pendente
 **Data de registro:** 2026-06-30
-**Ultima atualizacao:** 2026-07-04
+**Ultima atualizacao:** 2026-07-17
 **Contexto:** O projeto foi construido para Windows. Este host e Linux (BigLinux/Manjaro).
 **Objetivo:** Poder desenvolver e validar em ambos os sistemas operacionais.
+
+---
+
+## Programa Canonico De Reprodutibilidade
+
+### Contrato v1
+
+- Hosts certificados: Windows 10/11 x64 e Arch/Manjaro/BigLinux x64.
+- Profile unico `full`: frontend, Rust/Tauri, SGDK, PVSnesLib, Libretro MD/SNES, desktop E2E, JDK21 e Ghidra. ROM/corpus continua BYOR.
+- Lock: `toolchains/host-requirements.lock.json` (`rds-host-requirements/v1`).
+- Report: `src-tauri/target-test/validation/host-readiness.json` (`rds-host-readiness/v1`).
+- Estados: `READY`, `REPAIRED`, `BLOCKED`, `DRIFTED`, `UNSUPPORTED`.
+- Comandos: `npm run host:diagnose`, `npm run host:ensure`, `npm run host:certify`; sem Node, usar `bootstrap.sh --ensure --profile full` ou `bootstrap.ps1 -Ensure -Profile Full`.
+- Cache ativo: filesystem nativo por lock digest. Cache portatil: `toolchains/.cache/artifacts/<sha256>`.
+
+### Estado das etapas
+
+| Etapa | Estado | Evidencia / blocker |
+|---|---|---|
+| 0 - baseline canonico | **CONCLUIDA** | `origin/main=e700477` confirmado; branch `codex/reproducibility-program`; checkout divergente protegido por refs recovery; baseline limpo verde |
+| 1 - contrato e pins | **CONCLUIDA** | lock v1 imutavel, Node/Rust/npm pins, Cargo.lock, protocolo de agente e validacao de schema; contrato preservado pela suite focada ampliada |
+| 2 - orquestrador resiliente | **CONCLUIDA** | retomada real apos reboot; lock/journal/checksum/espaco/offline cobertos; primeira execucao do lock final `REPAIRED` e segunda offline `READY` sem mutacao |
+| 3 - Windows completo | **CONGELADA / PENDENTE** | congelada pelo operador; exige execucao e certificacao em Windows 10/11 limpo antes de qualquer conclusao |
+| 4 - Arch/Manjaro completo | **CONCLUIDA** | BigLinux/Manjaro: SGDK/PVSnesLib builds reais, ROMs e frames MD/SNES, Ghidra headless, WebKit desktop E2E MD/SNES, offline e rejeicao de binario Windows passaram no lock/fingerprint final |
+| 5 - certificacao unificada | **IMPLEMENTADA NO COMUM/LINUX; FORMALMENTE BLOQUEADA** | Runtime Setup, scripts Linux/Windows, E2E e report usam commit/lock/fingerprint comuns; falta executar/provar Windows no gate da Etapa 3 |
+| 6 - seguranca/reprodutibilidade | **IMPLEMENTADA NO COMUM/LINUX; FORMALMENTE BLOQUEADA** | npm audit zero; RustSec zero vulnerabilidades com risco GTK3/glib registrado; CSP/asset scope/updater/licencas/pins fechados; signing/updater publico e Windows continuam pendentes |
+| 7 - reducao arquitetural | **PREPARACAO EXECUTADA; PENDENTE** | metricas versionadas; Runtime Setup reduzido e politica de asset scope extraida com caracterizacao; extracoes maiores aguardam desbloqueio sequencial |
+| 8 - certificacao/release | **REHEARSAL LINUX; PENDENTE** | rehearsal local so permite `READY_FOR_WINDOWS_GATE` e proibe release publico; exige mesmo commit/lock em Windows e Arch, signing e updater reais |
+
+### Regra de transicao e handoff
+
+Uma etapa com qualquer gate falho permanece `BLOQUEADA`. O fechamento deve registrar no Current Wave, no mesmo commit: etapa/status, branch/commit, host fingerprint, lock digest, fatos e decisoes, comandos/resultados, caminhos/hashes de evidencia, riscos e proximo comando exato. Fatos nao podem ficar apenas no chat.
+
+### Diagnostico e provisionamento real (2026-07-16)
+
+- O primeiro diagnostico retornou `DRIFTED`, incluindo Node 26.4.0 fora do pin. O launcher instalou e ativou Node oficial 24.18.0; Rust 1.97.0 foi fixado pelo `rust-toolchain.toml`.
+- Uma rodada real verificou e instalou/reutilizou Temurin JDK 21.0.11+10, Ghidra 12.1, `tauri-driver` 2.0.6, WebKitWebDriver e cores oficiais Libretro MD/SNES com hashes individuais. Esses objetos permanecem no cache nativo content-addressed e podem ser religados por um novo digest.
+- A compilacao M68K revelou que o configure do `libcody` do GCC 13 exige exatamente C++11. O lock final fixa `CXXFLAGS=-O2 -std=gnu++11`, desabilita analyzer/LTO desnecessarios e preserva staging/logs; a retomada pos-reinicio concluiu e sondou `m68k-elf-gcc 13.2.0`.
+- O host nao possui `cmake`. A tentativa automatica chegou corretamente a `sudo pacman`, mas a autenticacao foi recusada/cancelada sem armazenar credencial. SGDK e PVSnesLib permanecem bloqueados por esse substrato.
+- Report fresco: `src-tauri/target-test/validation/host-readiness.json`; estado `BLOCKED`; lock digest `6b5d81135a1161447e4cbb49401f1137dd7d93974eee82d3153f5e87e7afd779`; fingerprint `57078f17ecc1cfe0a284f8a2bc56441dd204dd819aec51176bccf477e53c80b0`.
+- Proximo comando exato: `scripts/bootstrap.sh --ensure --profile full`. O operador deve autenticar o prompt `sudo`; depois, repetir o mesmo comando para provar idempotencia e somente entao executar `npm run host:certify`.
+
+### Retomada apos reinicio do host (2026-07-16)
+
+- O reinicio interrompeu o build M68K e deixou lock/staging. O orquestrador agora diferencia lock vivo de lock cujo PID morreu, registra a recuperacao e retoma o journal sem apagar trabalho verificavel.
+- A causa correta do configure GCC 13/libcody era exigir exatamente C++11; o lock fixa `-std=gnu++11`. `m68k-elf-gcc 13.2.0` terminou e o executavel passou o probe. O digest resultante e `6b5d81135a1161447e4cbb49401f1137dd7d93974eee82d3153f5e87e7afd779`; fingerprint `57078f17ecc1cfe0a284f8a2bc56441dd204dd819aec51176bccf477e53c80b0`.
+- A segunda execucao offline nao recompilou M68K. Ela tentou apenas o trabalho restante e produziu blockers precisos: `cmake:missing`, `sgdk:missing`, `pvsneslib:missing`.
+- O bootstrap nivel zero instala apenas seu substrato minimo e delega pacotes do profile ao host manager. Pacotes pacman ausentes sao deduplicados em uma transacao; recusa de sudo e offline geram blockers distintos.
+- `validate-upstream-linux.sh` resolve Node/npm e toolchains pelo `active-host.json`, registra digest/fingerprint, separa cores Libretro MD/SNES e executa analise Ghidra headless minima real. Na rodada, Ghidra passou; SGDK/PVSnesLib permaneceram bloqueados.
+- Gates da rodada: suite focada 28/28, check-tree/lint/TypeScript, frontend 503/2 skipped e clippy passaram. A repeticao `cargo test` pos-reboot ficou inconclusiva em compilacao/link no target do cartao; o ultimo Rust completo desta frente permanece 441/24 ignored. Nao ha claim `READY`.
+- Proximo comando exato permanece `scripts/bootstrap.sh --ensure --profile full` em terminal interativo, autenticando `sudo` para o `cmake`. Depois: repetir para idempotencia real e executar `npm run host:certify` somente se o report for `READY`.
+
+### Certificacao Linux final (2026-07-17)
+
+- `cmake` foi instalado pelo substrato oficial do BigLinux com `bigsudo pacman -S --needed --noconfirm cmake`. `bigsudo` usa `pkexec` grafico; nenhuma senha foi capturada ou armazenada.
+- Lock final `0df750697ecb9a171c11e13d1d3c137f5a8bd9da43ca9448310b630a7f0e9dea`; fingerprint `c7785d341ef8aa1b5910f8cf706293cb7f63938f7f74fa3245836c7a46eadc6e`. M68K GCC 13.2.0 foi reconstruido com LTO, requisito operacional do SGDK 2.11.
+- Duas execucoes reais fecharam a idempotencia: `REPAIRED` online e `READY` offline, sem rebuild/download na segunda.
+- `host:certify` nao usa mais `--skip-rust-tests`: baseline, Ghidra headless, SGDK + core MD e PVSnesLib + core SNES sao gates operacionais. MD executou 60 frames; SNES, 90.
+- O runner desktop resolve o mesmo report/cache, aceita WebKitWebDriver e copia fixtures para diretorio temporario. E2E MD e SNES passaram sem alterar o checkout.
+- Etapa 3 Windows e o proximo bloqueio programatico. Etapa 5 continua pendente ate Windows fechar; nao interpretar a unificacao necessaria ao gate Linux como conclusao antecipada.
+
+### Hardening comum/Linux com Windows congelado (2026-07-17)
+
+- A decisao do operador congela a execucao Windows, nao elimina seus gates. O programa nao salta a Etapa 3 e nao promove as Etapas 5-8.
+- `src-tauri/src/tools/dependency_manager.rs` nao possui mais downloader/instalador paralelo nem APIs `latest`: le `rds-host-readiness/v1` e delega reparo ao host-manager/bootstraps. App, scripts e reports convergem para blockers comuns.
+- O fingerprint inclui navegador e WebDriver. Edge/Chrome exigem major compativel; WebKitWebDriver so e valido com WebKitGTK. Os validadores Linux/Windows registram repository commit/branch/dirty, lock e fingerprint.
+- npm/Vite/Vitest foram atualizados e `npm audit` esta zerado. Installs usam `strict-allow-scripts`, com `esbuild@0.25.12=true` e `fsevents=false`. Tauri Rust/JS/plugins estao fixados; `Cargo.lock`/`package-lock.json` permanecem obrigatorios.
+- Updater placeholder e plugin foram removidos e artefatos updater continuam desabilitados. CSP e explicita; o asset protocol estatico nao cobre HOME/TEMP inteiros. Projeto ativo e validado pelo schema, recebe escopo dinamico e o projeto anterior e revogado.
+- `NOTICE`/`license-inventory.json` deixam toolchains/cores como nao redistribuidos. Release publico permanece proibido sem revisao das licencas por core, certificado, signing, canal e updater reais.
+- `cargo audit 0.22.2` registrou zero vulnerabilidades e avisos informacionais. `glib 0.18.5` possui `RUSTSEC-2024-0429` e entra transitivamente por Tauri 2.11.5/WebKitGTK/GTK3; nao existe remocao local conservadora sem migrar o runtime upstream. Reavaliar em toda atualizacao Tauri.
+- CI ganhou pins exatos, npm/RustSec audit, Rustfmt e job Linux. `release:rehearsal:linux` exige worktree limpa e evidencias MD/SNES do mesmo commit/lock/fingerprint; seu sucesso significa apenas pronto para o gate Windows.
+- Os workflows publicados nao receberam runner: GitHub Actions registrou billing/spending limit bloqueado, `runner_id=0` e zero steps. O operador deve corrigir **Billing & plans** e rerodar CI `29613344254` e Desktop E2E `29613344292`; ate isso ocorrer, nao existe evidencia CI remota verde para o commit.
+- Proximo comando neste host: `npm run host:diagnose`. Quando Windows for descongelado: `scripts\\bootstrap.ps1 -Ensure -Profile Full`, repetir para idempotencia e executar `npm run host:certify` no mesmo commit/lock.
+
+## Historico Pre-Programa (nao usar como estado atual)
+
+As secoes abaixo preservam o raciocinio das fases Linux anteriores. Claims de instalacao nelas sao historicos e nao sobrepoem o diagnostico/report v1 acima.
 
 ---
 

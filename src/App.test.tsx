@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   validateSceneDraft: vi.fn(),
   openProjectDialog: vi.fn(),
   openProjectPath: vi.fn(),
+  authorizeProjectAssetScope: vi.fn(),
   newProjectDialog: vi.fn(),
   dialogOpen: vi.fn(),
   convertFileSrc: vi.fn((path: string) => `asset://${path}`),
@@ -585,6 +586,7 @@ vi.mock("./core/ipc/hwService", () => ({
 }));
 
 vi.mock("./core/ipc/projectService", () => ({
+  authorizeProjectAssetScope: mocks.authorizeProjectAssetScope,
   openProjectDialog: mocks.openProjectDialog,
   openProjectPath: mocks.openProjectPath,
   newProjectDialog: mocks.newProjectDialog,
@@ -864,6 +866,7 @@ function createDependencyStatus(id: string) {
   return {
     id,
     label: id,
+    applicable: true,
     installed: true,
     version: "test",
     install_dir: "F:/deps",
@@ -1143,6 +1146,9 @@ describe("App build flow", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     localStorage.clear();
+    mocks.authorizeProjectAssetScope.mockResolvedValue(
+      "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy"
+    );
 
     useEditorStore.setState({
       activeProjectDir: "F:/Projects/RetroDevStudio/tests/fixtures/projects/megadrive_dummy",

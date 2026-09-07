@@ -11,7 +11,7 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -23,6 +23,7 @@ import {
   buildUiLayoutOracleReport,
   evaluateUiLayoutOracleSnapshot,
 } from "./ui-layout-oracle.mjs";
+import { diagnose as diagnoseHost } from "./host-manager.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -68,9 +69,68 @@ function resolveE2eLedgerPath() {
   return null;
 }
 
-async function recordE2eLedgerSuccess(options, projectMetadata) {
+async function readGitEvidence() {
+  const runGit = (args) =>
+    new Promise((resolve) => {
+      const child = spawn("git", args, {
+        cwd: repoRoot,
+        shell: false,
+        stdio: ["ignore", "pipe", "ignore"],
+      });
+      let output = "";
+      child.stdout.on("data", (chunk) => {
+        output += chunk.toString();
+      });
+      child.on("error", () => resolve(null));
+      child.on("exit", (code) => resolve(code === 0 ? output.trim() : null));
+    });
+
+  const [commit, status] = await Promise.all([
+    runGit(["rev-parse", "HEAD"]),
+    runGit(["status", "--porcelain"]),
+  ]);
+  return { commit, dirty: status === null ? null : status.length > 0 };
+}
+
+function getDesktopSuccessReportPath(options, projectMetadata) {
+  return path.join(
+    validationDir,
+    `desktop-e2e-success-${sanitizeFailureReportSegment(options.scenario)}-${sanitizeFailureReportSegment(projectMetadata.target)}.json`
+  );
+}
+
+async function clearDesktopSuccessReport(options, projectMetadata) {
+  const targetPath = getDesktopSuccessReportPath(options, projectMetadata);
+  if (await pathExists(targetPath)) {
+    await rm(targetPath, { force: true });
+  }
+}
+
+async function recordE2eLedgerSuccess(options, projectMetadata, evidence = {}) {
+  const git = await readGitEvidence();
+  await ensureValidationDir();
+  const successPath = getDesktopSuccessReportPath(options, projectMetadata);
+  await writeFile(
+    successPath,
+    `${JSON.stringify(
+      {
+        schema: "rds-desktop-e2e-success/v1",
+        generated_at: new Date().toISOString(),
+        repository: git,
+        scenario: options.scenario,
+        target: projectMetadata.target || null,
+        project_fixture: path.basename(path.resolve(options.project)),
+        framebuffer: evidence.framebuffer ?? null,
+      },
+      null,
+      2
+    )}\n`,
+    "utf8"
+  );
+  console.log(`[evidence] Desktop E2E -> ${successPath}`);
+
   // No CI o workflow desktop-e2e grava marcadores via Add-Content (pwsh).
-  // Evita corrida/ path divergente quando npm nao herda RDS_E2E_LEDGER no Windows.
+  // Evita corrida/path divergente quando npm nao herda RDS_E2E_LEDGER no Windows.
   if (process.env.GITHUB_ACTIONS) {
     return;
   }
@@ -92,7 +152,7 @@ export function appBinaryNameForPlatform(hostPlatform = process.platform) {
 export function webdriverNamesForPlatform(hostPlatform = process.platform) {
   return hostPlatform === "win32"
     ? ["msedgedriver.exe", "msedgedriver"]
-    : ["msedgedriver", "chromedriver"];
+    : ["WebKitWebDriver", "msedgedriver", "chromedriver"];
 }
 
 function isHostExecutableCandidate(candidate, hostPlatform = process.platform) {
@@ -141,6 +201,83 @@ const uiLayoutOracleReportPath = path.join(
   "ui-layout-oracle.json"
 );
 let currentE2eRunContext = null;
+
+// O contrato de host tem perfil unico (`full`, 24 requisitos) porque nasceu para
+// provisionar a maquina de desenvolvimento inteira. Exigir esse perfil no runner
+// E2E tornava o gate tudo-ou-nada: o smoke de Mega Drive passava a exigir Ghidra,
+// JDK21 e PVSnesLib, que ele nao usa, e nenhum runner de CI conseguia satisfazer.
+// O gate passa a assertar apenas os requisitos que o cenario realmente exercita.
+// O relatorio completo continua sendo gravado, entao o diagnostico nao se perde.
+// SGDK, PVSnesLib e cores Libretro NAO entram: o app os instala sob demanda no
+// Build & Run (bloco D de `docs/10_QA_ROTEIRO_RC.md`) e o proprio E2E existe para
+// exercitar esse caminho. Confirmado empiricamente — no runner de CI o preflight
+// reporta `SGDK real: FALTA` e o smoke passa assim mesmo, porque a toolchain e
+// provisionada durante a execucao. Exigi-los antes transformaria uma primeira
+// execucao valida em falha de gate.
+//
+// Sobra o que precisa existir ANTES de a aplicacao subir: o runtime de build do
+// proprio app e a dupla de drivers da sessao WebDriver.
+const HOST_REQUIREMENTS_BASE = ["node", "cargo", "rustc", "make"];
+const HOST_REQUIREMENTS_DESKTOP = ["tauri_driver", "webdriver"];
+const HOST_REQUIREMENTS_BY_TARGET = {
+  megadrive: [],
+  snes: [],
+};
+
+export function hostRequirementsForRun({ target } = {}) {
+  const perTarget = HOST_REQUIREMENTS_BY_TARGET[target] ?? [];
+  return [...new Set([...HOST_REQUIREMENTS_BASE, ...HOST_REQUIREMENTS_DESKTOP, ...perTarget])];
+}
+
+export function scopedHostBlockers(report, requiredIds) {
+  const checks = new Map((report?.checks ?? []).map((check) => [check.id, check]));
+  return requiredIds
+    .map((id) => {
+      const check = checks.get(id);
+      if (!check) return `${id}:ausente_no_contrato`;
+      if (check.status === "ready" || check.status === "not_applicable") return null;
+      return `${id}:${check.status}`;
+    })
+    .filter(Boolean);
+}
+
+export function applyManagedHostEnvironment() {
+  const { report, context } = diagnoseHost({
+    mode: "desktop-e2e",
+    env: process.env,
+    reportPath: path.join(validationDir, "desktop-e2e-host-readiness.json"),
+  });
+
+  // `pathEnv` apenas prefixa os bins gerenciados ao PATH existente, entao aplicar
+  // sempre e aditivo e seguro: num host sem cache gerenciado os diretorios nao
+  // existem e nada e removido. Os `setDefault` nunca sobrescrevem env ja definido,
+  // o que preserva o provisionamento explicito da CI.
+  const checks = new Map(report.checks.map((check) => [check.id, check]));
+  const readyPath = (id) => {
+    const check = checks.get(id);
+    return check?.status === "ready" && typeof check.path === "string" ? check.path : "";
+  };
+  const setDefault = (name, value) => {
+    if (!process.env[name] && value) process.env[name] = value;
+  };
+
+  // PATH e CARGO_TARGET_DIR so sao redirecionados quando existe cache gerenciado
+  // de fato. Num runner de CI, que provisiona por conta propria e ja produziu o
+  // binario em outro target dir, redirecionar seria mudanca de comportamento.
+  if (existsSync(context.hostCache)) {
+    process.env.PATH = context.pathEnv;
+    setDefault("CARGO_TARGET_DIR", path.join(context.hostCache, "cargo-target"));
+  }
+  setDefault("SGDK_ROOT", readyPath("sgdk"));
+  setDefault("PVSNESLIB_HOME", readyPath("pvsneslib"));
+  setDefault("JAVA_HOME", readyPath("jdk21") ? path.dirname(path.dirname(readyPath("jdk21"))) : "");
+  setDefault("RETRODEV_GHIDRA_HOME", readyPath("ghidra") ? path.dirname(path.dirname(readyPath("ghidra"))) : "");
+  setDefault("RETRODEV_LIBRETRO_CORE_MEGADRIVE", readyPath("libretro_md"));
+  setDefault("RETRODEV_LIBRETRO_CORE_SNES", readyPath("libretro_snes"));
+  setDefault("TAURI_DRIVER_PATH", readyPath("tauri_driver"));
+  setDefault("RDS_EDGE_DRIVER_PATH", readyPath("webdriver"));
+  return report;
+}
 
 class E2EFailure extends Error {
   constructor(message, metadata = {}) {
@@ -3170,6 +3307,10 @@ async function main() {
     fail("Este script requer Node.js com suporte a fetch global.");
   }
 
+  // Aplica o ambiente gerenciado cedo (o preflight abaixo ja se beneficia dele),
+  // mas a assercao fica depois de `projectMetadata`, quando o target e conhecido
+  // e da para exigir so o que o cenario usa.
+  const hostReadiness = applyManagedHostEnvironment();
   const options = parseArgs(process.argv.slice(2));
   try {
     const preflightUrl = pathToFileURL(
@@ -3191,15 +3332,6 @@ async function main() {
   if (!options.appExplicitlyProvided) {
     options.app = await resolveDefaultDesktopApp();
   }
-  currentE2eRunContext = {
-    scenario: options.scenario,
-    project: options.project,
-    projectName: null,
-    projectTarget: null,
-    app: options.app,
-    externalDriver: options.externalDriver,
-    sessionId: null,
-  };
   await clearDesktopFailureReport(options.scenario);
   const driverStartupTimeoutMs = parsePositiveInteger(
     process.env.RDS_E2E_DRIVER_TIMEOUT_MS,
@@ -3216,6 +3348,7 @@ async function main() {
     options.scenario !== "onboarding-shell" &&
     options.scenario !== "qa-rc" &&
     options.scenario !== "create-game-from-zero";
+  let temporaryProjectDir = "";
   if (requiresExistingProject) {
     await assertPathExists(
       options.project,
@@ -3225,8 +3358,28 @@ async function main() {
   const projectMetadata = requiresExistingProject
     ? await readProjectMetadata(options.project)
     : { name: "", target: "" };
-  currentE2eRunContext.projectName = projectMetadata.name || null;
-  currentE2eRunContext.projectTarget = projectMetadata.target || null;
+
+  const requiredHostIds = hostRequirementsForRun({ target: projectMetadata.target });
+  const hostBlockers = scopedHostBlockers(hostReadiness, requiredHostIds);
+  if (hostBlockers.length > 0) {
+    fail(
+      `Host E2E nao atende os requisitos do cenario '${options.scenario}'` +
+        `${projectMetadata.target ? ` (target ${projectMetadata.target})` : ""}: ` +
+        `${hostBlockers.join(", ")}. Requisitos exigidos: ${requiredHostIds.join(", ")}. ` +
+        `Relatorio completo do contrato de host: ${path.join(validationDir, "desktop-e2e-host-readiness.json")}.`
+    );
+  }
+
+  await clearDesktopSuccessReport(options, projectMetadata);
+  currentE2eRunContext = {
+    scenario: options.scenario,
+    project: options.project,
+    projectName: projectMetadata.name || null,
+    projectTarget: projectMetadata.target || null,
+    app: options.app,
+    externalDriver: options.externalDriver,
+    sessionId: null,
+  };
   if (requiresExistingProject && (!projectMetadata.name || !projectMetadata.target)) {
     fail(`project.rds invalido ou incompleto em ${options.project}`);
   }
@@ -3347,7 +3500,6 @@ async function main() {
   }
 
   let sessionId = "";
-  let temporaryProjectDir = "";
   try {
     await waitFor(
       async () => {
@@ -3386,6 +3538,14 @@ async function main() {
       uiBootstrapTimeoutMs,
       "API de automacao do app nao ficou disponivel"
     );
+
+    if (requiresExistingProject) {
+      const sourceProject = options.project;
+      temporaryProjectDir = await mkdtemp(path.join(os.tmpdir(), "rds-desktop-e2e-project-"));
+      options.project = path.join(temporaryProjectDir, path.basename(sourceProject));
+      await cp(sourceProject, options.project, { recursive: true });
+      currentE2eRunContext.project = options.project;
+    }
 
     if (options.scenario === "onboarding-shell") {
       const artifactPrefix = `onboarding-shell-${artifactTimestamp()}`;
@@ -5474,17 +5634,6 @@ async function main() {
       }
     }
 
-    if (options.scenario === "build-blocked-diagnostic") {
-      const tempRoot = await mkdtemp(path.join(os.tmpdir(), "rds-build-blocked-diagnostic-"));
-      const copiedProject = path.join(tempRoot, path.basename(options.project));
-      await cp(options.project, copiedProject, { recursive: true });
-      options.project = copiedProject;
-      temporaryProjectDir = tempRoot;
-      if (currentE2eRunContext) {
-        currentE2eRunContext.project = copiedProject;
-      }
-    }
-
     const openResult = await executeAsyncScript(
       sessionId,
       `
@@ -6098,7 +6247,7 @@ async function main() {
     console.log(`Projeto: ${options.project}`);
     console.log(`Target: ${projectMetadata.target}`);
     console.log(`Canvas: ${framebuffer.width}x${framebuffer.height}, pixels nao pretos: ${framebuffer.nonBlackPixels}`);
-    await recordE2eLedgerSuccess(options, projectMetadata);
+    await recordE2eLedgerSuccess(options, projectMetadata, { framebuffer });
   } catch (error) {
     const details = error instanceof Error ? error.message : String(error);
     const driverSummary = summarizeDriverLogs(driverLogs);
@@ -6139,10 +6288,12 @@ async function main() {
   }
 }
 
-main().catch(async (error) => {
-  const details = error instanceof Error ? error.message : String(error);
-  await writeDesktopFailureReport(error).catch(() => {});
-  emitGithubErrorAnnotation(details);
-  console.error(`ERRO: ${details}`);
-  process.exit(1);
-});
+if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {
+  main().catch(async (error) => {
+    const details = error instanceof Error ? error.message : String(error);
+    await writeDesktopFailureReport(error).catch(() => {});
+    emitGithubErrorAnnotation(details);
+    console.error(`ERRO: ${details}`);
+    process.exit(1);
+  });
+}

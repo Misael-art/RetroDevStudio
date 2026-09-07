@@ -14990,10 +14990,12 @@ pub fn validate_project(project: &Project) -> Result<(), LoadError> {
 fn validate_project_settings(project: &Project) -> Result<(), LoadError> {
     match project.settings.region.as_str() {
         "world" | "usa" | "japan" | "europe" => {}
-        other => return Err(LoadError(format!(
+        other => {
+            return Err(LoadError(format!(
             "project.rds: settings.region '{}' invalido. Use 'world', 'usa', 'japan' ou 'europe'.",
             other
-        ))),
+        )))
+        }
     }
 
     match project.settings.video_standard.as_str() {

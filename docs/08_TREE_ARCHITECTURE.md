@@ -18,6 +18,11 @@ RetroDevStudio/
 |       `-- desktop-e2e.yml
 |
 |-- .gitignore
+|-- .gitattributes
+|-- .npmrc
+|-- .node-version
+|-- NOTICE
+|-- rust-toolchain.toml
 |-- README.md
 |-- CLAUDE.md
 |-- build-test.bat
@@ -47,6 +52,12 @@ RetroDevStudio/
 |   |-- 08_TREE_ARCHITECTURE.md
 |   |-- 09_AGENT_DEV_MODE.md
 |   |-- 10_QA_ROTEIRO_RC.md
+|   |-- 13_PLANO_EXECUCAO_PARALELA.md
+|   |-- AVALIACAO_DESENVOLVIMENTO_2026_09_06.md
+|   |-- PROMPT_AGENTE_INTEGRADOR.md
+|   |-- PROMPT_AGENTE_A.md
+|   |-- PROMPT_AGENTE_B.md
+|   |-- PROMPT_AGENTE_C.md
 |   |-- SGDK_REAL_CORPUS_VALIDATION_MATRIX.md
 |   `-- DIAGNOSTICO_PRODUTO_2026_07_28_NAO_CANONICO.md  (diagnostico de gaps; NAO canonico)
 |
@@ -100,6 +111,7 @@ RetroDevStudio/
 |       |   |-- sgdk_emitter.rs
 |       |   `-- snes_emitter.rs
 |       |-- core/
+|       |   |-- project_asset_scope.rs
 |       |   `-- project_mgr.rs
 |       |-- emulator/
 |       |   |-- frame_buffer.rs
@@ -133,6 +145,10 @@ RetroDevStudio/
 |
 |-- scripts/
 |   |-- bootstrap.ps1
+|   |-- host-manager.mjs
+|   |-- host-manager.test.mjs
+|   |-- architecture-metrics.mjs
+|   |-- architecture-metrics.test.mjs
 |   |-- build.mjs
 |   |-- check-tree.cjs
 |   |-- check-tree.ps1
@@ -140,16 +156,21 @@ RetroDevStudio/
 |   |-- create-icon.mjs
 |   |-- diagnose-desktop-e2e.ps1
 |   |-- e2e-tauri-build-run.mjs
+|   |-- license-inventory.mjs
+|   |-- release-rehearsal-linux.mjs
 |   |-- release-readiness.mjs
 |   |-- run-bootstrap.ps1
 |   |-- run-cargo-msvc.cmd
 |   |-- run-in-msvc.cmd
 |   |-- setup-rust.ps1
+|   |-- security-contract.test.mjs
+|   |-- validate-upstream-linux.sh
 |   `-- validate-upstream-windows.ps1
 |
 `-- toolchains/
+    |-- host-requirements.lock.json
     |-- .cache/
-    |   `-- github-releases/
+    |   `-- artifacts/
     |-- sgdk/
     |-- pvsneslib/
     |-- webdriver/
@@ -167,15 +188,17 @@ RetroDevStudio/
 - O reverse core canonico de ROMs deve viver em `src-tauri/src/tools/reverse/`; wrappers legados como `asset_extractor.rs` e `reverse_explorer.rs` continuam como superfícies de compatibilidade.
 - IPC de frontend fica em `src/core/ipc/`.
 - Fixtures backend ficam em `src-tauri/tests/fixtures/`.
-- Dependencias de terceiros instaladas sob demanda vivem em `toolchains/` e nao devem ser versionadas no Git.
-- Metadata cacheada de releases oficiais vive em `toolchains/.cache/` e tambem nao deve ser versionada no Git.
+- Toolchains ativos vivem no cache nativo por lock digest; o cartao guarda somente artefatos verificaveis em `toolchains/.cache/artifacts/` e compatibilidade legada validada. Binarios nao devem ser versionados.
+- `toolchains/host-requirements.lock.json` e a excecao rastreada: contem apenas contrato, pins, fontes imutaveis e hashes; binarios continuam ignorados.
+- Artefatos oficiais cacheados por SHA-256 vivem em `toolchains/.cache/artifacts/` e nao devem ser versionados no Git.
 - Drivers locais de validacao desktop, como `msedgedriver.exe`, devem ficar em `toolchains/webdriver/`, nunca soltos na raiz do repositorio.
 
 ---
 
 ## Regras Especificas do Estado Atual
 
-- `src-tauri/src/tools/dependency_manager.rs` e a fonte canonica para detectar e instalar SGDK, PVSnesLib e cores Libretro.
+- `scripts/host-manager.mjs` e a fonte canonica para detectar e provisionar dependencias. `src-tauri/src/tools/dependency_manager.rs` e apenas o adaptador do Runtime Setup para `host-readiness.json`.
+- `src-tauri/src/core/project_asset_scope.rs` valida o projeto ativo e mantem apenas seu diretorio autorizado no asset protocol.
 - `src-tauri/src/compiler/build_orch.rs` e a fonte canonica do pipeline `UGDM -> workspace -> ROM`.
 - `data/template_registry.json` e o catalogo canonico da galeria de templates do wizard; seeds externos apontam para donor paths locais do usuario e nao devem embutir ROMs, VGMs de terceiros ou artefatos de build no repositorio.
 - ROMs, packs MUGEN/Ikemen, screenpacks e outros corpus locais de validacao devem permanecer fora da arvore versionada do repositorio. Quando necessarios para QA local, devem viver em diretorio externo BYOR e nunca ser tratados como fixture canonica do app.
@@ -187,7 +210,10 @@ RetroDevStudio/
 - `scripts/release-manifest.mjs` e o gerador canonico do manifesto de distribuicao interna em `src-tauri/target-test/validation/release-manifest.json`, com SHA256/tamanho dos EXEs/MSI e limites explicitos de signing/updater/producao publica. Script npm: `release:manifest`.
 - `scripts/run-in-msvc.cmd` e o wrapper canonico para executar comandos Node/npm em ambiente MSVC preparado no Windows institucional; usar junto de `build.mjs` quando o host exigir `vcvars64.bat`.
 - `scripts/run-cargo-msvc.cmd` e o wrapper canonico para comandos `cargo` em ambiente MSVC preparado no Windows institucional.
-- `scripts/e2e-tauri-build-run.mjs` e o runner canonico de regressao desktop/Tauri para `Build -> Load ROM -> Run frames`.
+- `scripts/e2e-tauri-build-run.mjs` e o runner canonico de regressao desktop/Tauri para `Build -> Load ROM -> Run frames` e grava evidencia de sucesso por commit/cenario/target.
+- `scripts/host-manager.mjs` e a fonte canonica cross-platform para `host:diagnose`, `host:ensure` e `host:certify`; os bootstraps Bash/PowerShell permanecem entrypoints de nivel zero quando Node ainda nao existe.
+- `scripts/license-inventory.mjs`, `scripts/security-contract.test.mjs` e `NOTICE` formam o inventario/politica de seguranca e redistribuicao; nenhum deles autoriza redistribuir cores/toolchains.
+- `scripts/architecture-metrics.mjs` registra a linha de base de acoplamento; `scripts/release-rehearsal-linux.mjs` agrega evidencia Linux sem autorizar release publico.
 - `scripts/validate-upstream-windows.ps1` e o script canonico de validacao upstream real com SGDK, PVSnesLib e cores Libretro oficiais.
 - `scripts/decomp/` versiona a reproducao do spike **Experimental** de decompilacao (`docs/12_DECOMPILACAO_PAREADA_PLANO.md`): `build_reproducible.sh` (build duplo M68K), `fingerprint_v2.sh` e `holdout_v2.sh` (fingerprint/holdout sobre o corpus BYOR `RDS_SGDK_CORPUS`), `ghidra_boundary.sh` + `GhidraListFunctions.java` (boundary precision/recall, sai BLOCKED sem instalar nada se Ghidra/JDK21 faltarem). Saidas ficam em `RDS_DECOMP_WORK` (default `~/.retrodev/decomp_work`, fora do repo); nenhuma ROM e versionada. Estes scripts vivem FORA do shell do app: nao existe pipeline, scanner, ledger, LLM nem UI de decompilacao no produto.
 - `.github/workflows/desktop-e2e.yml` e o workflow canonico de regressao desktop em Windows e ja foi validado em runner GitHub real.
@@ -197,3 +223,9 @@ RetroDevStudio/
 - `docs/09_AGENT_DEV_MODE.md` consolida a hierarquia de verdade, os gates e as regras anti-poluicao para agentes.
 - `docs/06_CURRENT_WAVE_AI_BANK.md` e o arquivo de memoria ativa do agente para a wave corrente (Wave S+); `docs/06_AI_MEMORY_BANK.md` continua sendo a entrada canonica e pode redirecionar para a wave ativa; `docs/06_AI_MEMORY_BANK_WAVE_A_R.md` guarda o historico das waves A-R para consulta pontual.
 - `.github/workflows/ci.yml` e o baseline canonico de validacao automatizada do projeto e deve ser mantido verde em mudancas relevantes.
+
+## Planejamento paralelo e avaliações históricas
+
+- `docs/13_PLANO_EXECUCAO_PARALELA.md` define tickets, ownership e comparação; não substitui a maturidade do roadmap.
+- `docs/AVALIACAO_DESENVOLVIMENTO_2026_09_06.md` preserva snapshot histórico; novas evidências/deltas vivem no Current Wave.
+- `docs/PROMPT_AGENTE_{INTEGRADOR,A,B,C}.md` são entradas de execução por papel. Apenas o integrador atualiza docs canônicos durante rodadas paralelas.

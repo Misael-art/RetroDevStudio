@@ -5017,7 +5017,10 @@ mod tests {
         let ast = generate_ast(&project, &scene);
         let ops = &ast.logic_scripts[0].ops;
 
-        assert!(matches!(semantic_op(&ops[0]), LogicOp::ConditionBool { .. }));
+        assert!(matches!(
+            semantic_op(&ops[0]),
+            LogicOp::ConditionBool { .. }
+        ));
         assert!(matches!(
             semantic_op(&ops[0]),
             LogicOp::ConditionBool { if_true, .. }

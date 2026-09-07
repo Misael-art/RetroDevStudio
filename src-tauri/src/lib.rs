@@ -37,6 +37,7 @@ use core::editor_validation::{
     DraftValidationResult,
 };
 use core::input_commands::{parse_command_dat, InputCommandDefinition};
+use core::project_asset_scope::{authorize_project_assets, ProjectAssetScopeState};
 use core::project_capability::{
     inspect_project_capability as inspect_project_capability_impl, ProjectCapabilityReport,
 };
@@ -941,7 +942,9 @@ fn parity_run_capture_impl(
             } else {
                 format!(
                     "Parity reportou {} divergencia(s) apos {} frame(s); report em '{}'.",
-                    divergence_count, report.frames_run, written.display()
+                    divergence_count,
+                    report.frames_run,
+                    written.display()
                 )
             };
             ParityCommandResult {
@@ -1153,7 +1156,9 @@ fn parity_run_cross_core_impl(
             } else {
                 format!(
                     "Cores diverge: {} cross-core divergence(s) after {} frame(s); report in '{}'.",
-                    report.cross_divergences.len(), report.frames_run, written.display()
+                    report.cross_divergences.len(),
+                    report.frames_run,
+                    written.display()
                 )
             };
             CrossCoreParityResult {
@@ -1803,7 +1808,10 @@ fn reverse_explorer_read(
 
 #[tauri::command]
 async fn rom_analyze(rom_path: String) -> Result<RomAnalysisManifest, String> {
-    run_heavy_result_command("rom_analyze", move || tools::reverse::analyze_rom(&rom_path)).await
+    run_heavy_result_command("rom_analyze", move || {
+        tools::reverse::analyze_rom(&rom_path)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1861,7 +1869,10 @@ async fn rom_disassemble(
 
 #[tauri::command]
 async fn rom_get_xrefs(rom_path: String) -> Result<Vec<CodeXref>, String> {
-    run_heavy_result_command("rom_get_xrefs", move || tools::reverse::get_xrefs(&rom_path)).await
+    run_heavy_result_command("rom_get_xrefs", move || {
+        tools::reverse::get_xrefs(&rom_path)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2480,6 +2491,10 @@ fn interrupted_install_result(dependency_id: &str) -> DependencyInstallResult {
         status: DependencyStatus {
             id: dependency_id.to_string(),
             label: dependency_id.to_string(),
+            // A instalacao foi tentada para esta dependencia, logo ela e aplicavel
+            // ao host: marcar `false` a exibiria como "NAO APLICAVEL" e esconderia
+            // a falha do panic no Runtime Setup.
+            applicable: true,
             installed: false,
             version: None,
             status_code: "missing".to_string(),
@@ -2505,6 +2520,15 @@ fn third_party_detect_rom_dependency(rom_path: String) -> RomDependencyResult {
             .unwrap_or_default()
             .to_string(),
     }
+}
+
+#[tauri::command]
+fn authorize_project_asset_scope(
+    app: AppHandle,
+    state: tauri::State<'_, ProjectAssetScopeState>,
+    project_dir: String,
+) -> Result<String, String> {
+    authorize_project_assets(&app, &state, &project_dir)
 }
 
 // ── Cena: leitura e escrita ───────────────────────────────────────────────────
@@ -2802,7 +2826,8 @@ fn get_project_settings(project_dir: String) -> Result<ProjectSettingsSnapshot, 
     if project_dir.trim().is_empty() {
         return Err("Nenhum projeto aberto.".into());
     }
-    load_project_settings_impl(&PathBuf::from(project_dir.trim())).map_err(|error| error.to_string())
+    load_project_settings_impl(&PathBuf::from(project_dir.trim()))
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -4369,11 +4394,11 @@ fn parse_input_command_file(path: String) -> Result<Vec<InputCommandDefinition>,
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(EmulatorCoreState(Mutex::new(EmulatorCore::new(None))))
         .manage(ProjectAssetWatchState::default())
+        .manage(ProjectAssetScopeState::default())
         .invoke_handler(tauri::generate_handler![
             // Build pipeline
             validate_project,
@@ -4465,6 +4490,7 @@ pub fn run() {
             third_party_get_status,
             third_party_install,
             third_party_detect_rom_dependency,
+            authorize_project_asset_scope,
             // Photo2SGDK
             tools::photo2sgdk::art_process_palette,
             tools::photo2sgdk::import_art_asset,
@@ -6364,29 +6390,25 @@ pub extern "C" fn retro_run() {
     }
 
     #[test]
-    #[ignore = "Requires official SGDK, JDK and a real Libretro Mega Drive core; writes persistent validation artifacts"]
+    #[ignore = "Requires provisioned official SGDK, JDK and a real Libretro Mega Drive core; writes persistent validation artifacts"]
     fn official_sgdk_nocode_game_builds_and_runs_with_real_toolchain() {
-        if !cfg!(target_os = "windows") {
-            panic!(
-                "official_sgdk_nocode_game_builds_and_runs_with_real_toolchain requires Windows"
-            );
-        }
-
         let _serial = test_serial_guard();
 
-        for dependency_id in ["jdk", "sgdk", "libretro_megadrive"] {
-            eprintln!("[nocode-real] ensuring dependency '{}'", dependency_id);
-            let result = install_dependency(dependency_id, |line| {
-                eprintln!(
-                    "[nocode-real][dependency:{}][{}] {}",
-                    dependency_id, line.level, line.message
+        if cfg!(target_os = "windows") {
+            for dependency_id in ["jdk", "sgdk", "libretro_megadrive"] {
+                eprintln!("[nocode-real] ensuring dependency '{}'", dependency_id);
+                let result = install_dependency(dependency_id, |line| {
+                    eprintln!(
+                        "[nocode-real][dependency:{}][{}] {}",
+                        dependency_id, line.level, line.message
+                    );
+                });
+                assert!(
+                    result.ok,
+                    "failed to install {} for real no-code SGDK proof: {}",
+                    dependency_id, result.message
                 );
-            });
-            assert!(
-                result.ok,
-                "failed to install {} for real no-code SGDK proof: {}",
-                dependency_id, result.message
-            );
+            }
         }
 
         let status_report = dependency_status_report();
@@ -6593,29 +6615,25 @@ pub extern "C" fn retro_run() {
     }
 
     #[test]
-    #[ignore = "Requires official PVSnesLib, Git Bash/MSYS2 and a real Libretro SNES core; writes persistent validation artifacts"]
+    #[ignore = "Requires provisioned official PVSnesLib and a real Libretro SNES core; writes persistent validation artifacts"]
     fn official_snes_nocode_game_builds_and_runs_with_real_toolchain() {
-        if !cfg!(target_os = "windows") {
-            panic!(
-                "official_snes_nocode_game_builds_and_runs_with_real_toolchain requires Windows"
-            );
-        }
-
         let _serial = test_serial_guard();
 
-        for dependency_id in ["pvsneslib", "libretro_snes"] {
-            eprintln!("[snes-real] ensuring dependency '{}'", dependency_id);
-            let result = install_dependency(dependency_id, |line| {
-                eprintln!(
-                    "[snes-real][dependency:{}][{}] {}",
-                    dependency_id, line.level, line.message
+        if cfg!(target_os = "windows") {
+            for dependency_id in ["pvsneslib", "libretro_snes"] {
+                eprintln!("[snes-real] ensuring dependency '{}'", dependency_id);
+                let result = install_dependency(dependency_id, |line| {
+                    eprintln!(
+                        "[snes-real][dependency:{}][{}] {}",
+                        dependency_id, line.level, line.message
+                    );
+                });
+                assert!(
+                    result.ok,
+                    "failed to install {} for real no-code SNES proof: {}",
+                    dependency_id, result.message
                 );
-            });
-            assert!(
-                result.ok,
-                "failed to install {} for real no-code SNES proof: {}",
-                dependency_id, result.message
-            );
+            }
         }
 
         let status_report = dependency_status_report();

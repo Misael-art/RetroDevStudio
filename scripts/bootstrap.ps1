@@ -3,6 +3,10 @@
 
 #Requires -Version 5.1
 param(
+    [switch]$Ensure,
+    [ValidateSet("Full")]
+    [string]$Profile = "Full",
+    [switch]$Offline,
     [switch]$InstallMissingTools,
     [switch]$SkipNpmCi,
     [switch]$RunBaseline,
@@ -14,7 +18,14 @@ Set-StrictMode -Version Latest
 
 $ScriptDir = $PSScriptRoot
 $ProjectRoot = (Resolve-Path (Join-Path $ScriptDir "..")).Path
-$LogFile = Join-Path $ProjectRoot "bootstrap.log"
+$BootstrapCache = Join-Path $env:LOCALAPPDATA "RetroDevStudio\cache\bootstrap"
+$LogFile = Join-Path $BootstrapCache "bootstrap.log"
+$PortableCache = Join-Path $ProjectRoot "toolchains\.cache\artifacts"
+$PinnedNodeVersion = "24.18.0"
+$PinnedNodeSha256 = "0ae68406b42d7725661da979b1403ec9926da205c6770827f33aac9d8f26e821"
+$PinnedNodeUrl = "https://nodejs.org/dist/v24.18.0/node-v24.18.0-win-x64.zip"
+
+New-Item -ItemType Directory -Force -Path $BootstrapCache, $PortableCache | Out-Null
 
 function Write-Step {
     param(
@@ -160,14 +171,14 @@ function Show-Diagnostics {
 function Install-MissingSystemTools {
     param([hashtable]$Diagnostics)
 
-    if (-not $InstallMissingTools) {
+    if (-not $InstallMissingTools -and -not $Ensure) {
         return
     }
 
     if (-not $Diagnostics.git) {
         Install-WingetPackage -DisplayName "Git" -WingetId "Git.Git"
     }
-    if (-not $Diagnostics.node) {
+    if (-not $Diagnostics.node -and -not $Ensure) {
         Install-WingetPackage -DisplayName "Node.js LTS" -WingetId "OpenJS.NodeJS.LTS"
     }
     if (-not $Diagnostics.rustc -or -not $Diagnostics.cargo) {
@@ -184,6 +195,68 @@ function Install-MissingSystemTools {
     }
 
     Reset-PathFromMachineAndUser
+}
+
+function Enable-PinnedNode {
+    if (-not $Ensure) {
+        return
+    }
+
+    $nodeRoot = Join-Path $BootstrapCache "node-v$PinnedNodeVersion-win-x64"
+    $nodeExe = Join-Path $nodeRoot "node.exe"
+    $archive = Join-Path $PortableCache $PinnedNodeSha256
+    if (-not (Test-Path $nodeExe)) {
+        if (-not (Test-Path $archive)) {
+            if ($Offline) {
+                throw "Node $PinnedNodeVersion nao esta no cache portatil offline: $archive"
+            }
+            $staged = "$archive.part"
+            Write-Step "NODE" "Baixando Node oficial fixado em $PinnedNodeVersion..." "INFO"
+            Invoke-WebRequest -UseBasicParsing -Uri $PinnedNodeUrl -OutFile $staged -TimeoutSec 1800
+            if ((Get-FileHash -Algorithm SHA256 $staged).Hash.ToLowerInvariant() -ne $PinnedNodeSha256) {
+                Remove-Item -Force $staged
+                throw "Checksum do Node fixado nao confere."
+            }
+            Move-Item -Force $staged $archive
+        }
+        if ((Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant() -ne $PinnedNodeSha256) {
+            throw "Cache portatil do Node esta corrompido."
+        }
+        $staging = "$nodeRoot.tmp"
+        Remove-Item -Recurse -Force $staging -ErrorAction SilentlyContinue
+        Expand-Archive -LiteralPath $archive -DestinationPath $staging -Force
+        $extracted = Join-Path $staging "node-v$PinnedNodeVersion-win-x64"
+        Remove-Item -Recurse -Force $nodeRoot -ErrorAction SilentlyContinue
+        Move-Item $extracted $nodeRoot
+        Remove-Item -Recurse -Force $staging -ErrorAction SilentlyContinue
+    }
+    $env:PATH = "$nodeRoot;$env:USERPROFILE\.cargo\bin;$env:PATH"
+    if ((& $nodeExe --version) -ne "v$PinnedNodeVersion") {
+        throw "Falha ao ativar Node $PinnedNodeVersion."
+    }
+}
+
+function Enable-PinnedRust {
+    if (-not $Ensure) {
+        return
+    }
+    $cargoPath = Join-Path $env:USERPROFILE ".cargo\bin"
+    if ($env:PATH -notlike "*$cargoPath*") {
+        $env:PATH = "$cargoPath;$env:PATH"
+    }
+    if (-not (Test-CommandExists "rustup")) {
+        throw "rustup nao esta disponivel apos o provisionamento do substrato."
+    }
+    if (-not $Offline) {
+        & rustup toolchain install 1.97.0 --profile minimal --component clippy --component rustfmt
+        if ($LASTEXITCODE -ne 0) {
+            throw "Falha ao instalar Rust 1.97.0."
+        }
+    }
+    & rustup run 1.97.0 rustc --version | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Rust 1.97.0 nao esta disponivel."
+    }
 }
 
 function Assert-BuildPrerequisites {
@@ -281,12 +354,27 @@ Write-Step "BOOT" "Flags: InstallMissingTools=$InstallMissingTools SkipNpmCi=$Sk
 $diagnostics = Show-Diagnostics
 Install-MissingSystemTools -Diagnostics $diagnostics
 
-if ($InstallMissingTools) {
+Enable-PinnedNode
+Enable-PinnedRust
+
+if ($InstallMissingTools -or $Ensure) {
     Write-Step "BOOT" "Revalidando diagnostico apos instalacao de pre-requisitos..." "INFO"
     $diagnostics = Show-Diagnostics
 }
 
 Assert-BuildPrerequisites -Diagnostics $diagnostics
+
+if ($Ensure) {
+    $hostArgs = @((Join-Path $ProjectRoot "scripts\host-manager.mjs"), "ensure", "--profile", "full")
+    if ($Offline) {
+        $hostArgs += "--offline"
+    }
+    Write-Step "HOST" "Executando reparo dirigido pelo lock imutavel..." "INFO"
+    & node @hostArgs
+    if ($LASTEXITCODE -ne 0) {
+        throw "Host permanece bloqueado; consulte host-readiness.json (exit $LASTEXITCODE)."
+    }
+}
 
 if (-not $SkipNpmCi) {
     Invoke-NpmCi

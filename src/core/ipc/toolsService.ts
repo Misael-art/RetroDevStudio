@@ -67,6 +67,7 @@ export interface DependencyLogLine {
 export interface DependencyStatus {
   id: ThirdPartyDependencyId | string;
   label: string;
+  applicable?: boolean;
   installed: boolean;
   version: string | null;
   status_code?: string;
@@ -90,11 +91,17 @@ export interface DependencyStatusSummary {
   manual_required: number;
   cache_available: number;
   download_failed: number;
+  not_applicable?: number;
 }
 
 export interface DependencyStatusReport {
+  schema?: string;
   generated_at_unix?: number;
   report_path?: string;
+  host_state?: string;
+  host_fingerprint?: string | null;
+  lock_digest?: string | null;
+  blockers?: string[];
   summary?: DependencyStatusSummary;
   items: DependencyStatus[];
 }

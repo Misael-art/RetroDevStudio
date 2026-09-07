@@ -26,7 +26,7 @@ if (-not (Test-RunningOnWindows)) {
 }
 
 Write-Host "== RetroDev Studio: validacao oficial upstream =="
-Write-Host "1. Baixa JDK, SGDK, PVSnesLib e cores Libretro oficiais sob demanda"
+Write-Host "1. Consome JDK, SGDK, PVSnesLib e cores Libretro provisionados pelo host-manager"
 Write-Host "2. Executa o smoke test ignorado de build + load ROM + run frame"
 Write-Host ""
 
@@ -425,10 +425,33 @@ function Write-ValidationReport([bool]$Success, [string]$ErrorMessage) {
     $blockingCodes = @((Resolve-BlockingStatusCode $ErrorMessage))
   }
   $payload = [ordered]@{}
+  $payload.schema = "rds-windows-upstream-validation/v1"
   $payload.generatedAt = $finishedAt.ToString("o")
   $payload.startedAt = $scriptStartedAt.ToString("o")
   $payload.durationMs = [int][Math]::Round(($finishedAt - $scriptStartedAt).TotalMilliseconds)
   $payload.success = $Success
+  $repositoryCommit = (& git -C $repoRoot rev-parse HEAD 2>$null)
+  $repositoryBranch = (& git -C $repoRoot branch --show-current 2>$null)
+  $repositoryDirty = [bool]((& git -C $repoRoot status --porcelain 2>$null) | Select-Object -First 1)
+  $payload.repository = [ordered]@{
+    commit = if ($repositoryCommit) { "$repositoryCommit".Trim() } else { $null }
+    branch = if ($repositoryBranch) { "$repositoryBranch".Trim() } else { $null }
+    dirty = $repositoryDirty
+  }
+  $hostReportPath = Join-Path $validationDir "host-readiness.json"
+  if (Test-Path $hostReportPath) {
+    try {
+      $hostReport = Get-Content -Raw -Path $hostReportPath | ConvertFrom-Json
+      $payload.lock_digest = $hostReport.lock_digest
+      $payload.host_fingerprint = $hostReport.host_fingerprint
+    } catch {
+      $payload.lock_digest = $null
+      $payload.host_fingerprint = $null
+    }
+  } else {
+    $payload.lock_digest = $null
+    $payload.host_fingerprint = $null
+  }
   $payload.blocking_status_codes = @($blockingCodes)
   $payload.wrapper_reports = @($wrapperReports.ToArray())
   $payload.skipRustTests = [bool]$SkipRustTests

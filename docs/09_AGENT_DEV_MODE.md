@@ -46,6 +46,26 @@
 9. Atualizar docs canonicos se o estado real mudou.
 10. Quando a entrega estiver validada com gates verdes e houver mudancas rastreaveis do escopo, criar commit(s) coerentes e executar `git push` no branch atual, salvo instrucao contraria do usuario ou necessidade explicita de curadoria adicional antes da publicacao.
 
+### 2.1 Barreira de prontidao do host
+
+- O contrato canonico e `toolchains/host-requirements.lock.json`; o estado gerado e `src-tauri/target-test/validation/host-readiness.json`.
+- Todo agente deve rodar `npm run host:diagnose` no inicio da sessao. Sem Node ou com estado diferente de `READY`, deve executar o bootstrap `--ensure --profile full` do sistema suportado.
+- `UNSUPPORTED` nunca autoriza mutacao do host. `BLOCKED` ou `DRIFTED` impedem mudanca no produto ate reparo ou registro formal do bloqueio.
+- Instaladores podem usar `sudo`/UAC apenas no modo `ensure`, nunca armazenam credenciais e nunca aceitam download sem versao fixa e SHA-256.
+- Em BigLinux com `bigsudo` disponivel, quando `sudo` nao conseguir abrir autenticacao no terminal restrito do agente, usar `bigsudo <comando>` para a transacao privilegiada estritamente necessaria. `bigsudo` deve permanecer uma escalacao explicita via `pkexec`: nunca contornar recusa do operador, desabilitar seguranca, capturar senha ou ampliar o comando alem do plano; registrar comando, pacotes e resultado no Memory Bank.
+- Mudanca em build, emulacao, toolchain ou infraestrutura exige `npm run host:certify`; presenca de arquivo nao substitui probe operacional.
+- Runtime Setup nunca implementa downloader proprio nem consulta `latest`; ele consome `host-readiness.json` e delega qualquer reparo ao host-manager/bootstraps.
+- Mudanca de dependencias ou seguranca exige npm audit, RustSec audit, inventario de licencas e registro explicito de qualquer aviso transitivo aceito.
+
+### 2.2 Barreira entre etapas do Programa de Reprodutibilidade
+
+- Uma etapa so recebe `CONCLUIDA` quando todos os gates definidos em `docs/11_CROSS_PLATFORM_PLAN.md` passam no mesmo commit.
+- Falha mantem a etapa `BLOQUEADA`; nao iniciar a etapa seguinte para contornar o blocker.
+- O commit de fechamento registra no Current Wave: etapa/status, branch/commit, host fingerprint, lock digest, fatos, comandos/resultados, evidencias, riscos e proximo comando exato.
+- Fato relevante nao pode existir apenas em chat, log temporario ou memoria de um agente.
+- Uma etapa congelada pelo operador continua pendente. Trabalho explicitamente autorizado em outro host pode preparar etapas posteriores, mas deve ser rotulado como fatia comum/preparatoria e nao pode receber `CONCLUIDA` fora da ordem.
+- `READY_FOR_WINDOWS_GATE` em rehearsal Linux significa somente que os gates locais estao prontos para a verificacao Windows; nunca autoriza release publico.
+
 Uma tarefa nao esta concluida enquanto o repositorio continuar anunciando um estado mais maduro do que o codigo e os gates sustentam.
 Uma tarefa tambem nao esta concluida enquanto faltar certificacao real no escopo alterado: prova funcional correspondente, gates verdes e ausencia de erro bloqueante ou regressao conhecida naquele fluxo.
 
@@ -87,7 +107,7 @@ Uma tarefa tambem nao esta concluida enquanto faltar certificacao real no escopo
 ### 4.2 Gates extras quando a mudanca toca o core
 
 - Reexecutar `scripts/validate-upstream-windows.ps1` quando a mudanca tocar build/emulacao de Mega Drive ou SNES com toolchains oficiais no Windows.
-  O modo canonico de execucao e direto: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1 -SkipRustTests`.
+  O modo canonico de certificacao e direto e operacional: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-upstream-windows.ps1`.
   Nao embrulhar esse script com `scripts/run-in-msvc.cmd`, porque ele proprio ja resolve o runner MSVC canonico internamente.
 - Confirmar shell Unix-like suportado quando a mudanca tocar o caminho SNES de Windows.
 - Revalidar com cores Libretro oficiais quando a mudanca tocar carga de ROM ou selecao de core.

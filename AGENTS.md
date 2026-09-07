@@ -29,6 +29,15 @@ Se houver conflito entre documentos, siga esta ordem:
 
 Responda com `[Contexto Carregado]` antes de propor qualquer acao relevante.
 
+## Protocolo Obrigatorio Do Host
+1. Se `node` estiver disponivel, rode `npm run host:diagnose` ao iniciar uma sessao de desenvolvimento.
+2. Se Node estiver ausente, ou o diagnostico nao retornar `READY`, execute o launcher do host:
+   - Linux Arch/Manjaro x64: `scripts/bootstrap.sh --ensure --profile full`
+   - Windows 10/11 x64: `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\bootstrap.ps1 -Ensure -Profile Full`
+3. Nao altere codigo do produto enquanto `src-tauri/target-test/validation/host-readiness.json` permanecer `BLOCKED`, `DRIFTED` ou `UNSUPPORTED`; corrija o host ou registre o bloqueio no Memory Bank.
+4. Rode `npm run host:certify` antes de encerrar mudancas em build, emulacao, toolchains ou infraestrutura.
+5. Nunca trate corpus/ROM BYOR como dependencia provisionavel e nunca aceite artefato sem origem imutavel e SHA-256.
+
 ## Regras Criticas
 - Nao antecipe fases futuras do roadmap.
 - Nao declare feature parcial como pronta.
@@ -46,7 +55,10 @@ Responda com `[Contexto Carregado]` antes de propor qualquer acao relevante.
 - `npm test`
 - `cargo clippy -- -D warnings`
 - `cargo test --lib -- --nocapture`
+- `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`
 - Validacao manual com dependencias oficiais quando a mudanca tocar build, emulacao ou toolchains reais
+- `npm run host:certify` quando a mudanca tocar host, build, emulacao ou toolchains
+- `npm run security:audit` e `cargo audit --file src-tauri/Cargo.lock` quando dependencias ou seguranca mudarem
 
 ## Ao Encerrar Sessao
 Se algo relevante foi feito, atualize ou proponha atualizacao de `docs/06_AI_MEMORY_BANK.md`.
@@ -58,4 +70,9 @@ Se algo relevante foi feito, atualize ou proponha atualizacao de `docs/06_AI_MEM
 - Testes frontend: `npm test`
 - Lint Rust: `cargo clippy -- -D warnings`
 - Testes Rust: `cargo test --lib -- --nocapture`
+- Diagnostico do host: `npm run host:diagnose`
+- Reparar host: `npm run host:ensure`
+- Certificar host: `npm run host:certify`
+- Auditar npm/licencas: `npm run security:audit` | `npm run security:licenses`
+- Medir extracoes arquiteturais: `npm run architecture:metrics`
 - Compilacao: `npm run build:debug` | `build:msi` | `build:portable` | `build:all` (script canonico: `scripts/build.mjs`)

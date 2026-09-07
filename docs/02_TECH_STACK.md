@@ -17,7 +17,7 @@
 ## 2. Stack Definitiva
 
 ### Desktop / Frontend
-- Tauri 2
+- Tauri JS API `2.11.0`, CLI `2.11.2` e dialog plugin `2.7.1`, fixados no lock npm
 - React
 - TypeScript
 - Vite
@@ -27,7 +27,8 @@
 - ESLint para lint estatico do frontend
 
 ### Backend / Core
-- Rust
+- Rust `1.97.0`
+- Tauri Rust `2.11.5`, build `2.6.3`, opener `2.5.4` e dialog `2.7.1`, fixados no Cargo lock
 - IPC Tauri para toda operacao de filesystem, build e emulacao
 - `serde` / `serde_json` para schema UGDM
 
@@ -40,13 +41,12 @@
 ### Toolchains Alvo
 - SGDK para Mega Drive
 - PVSnesLib para SNES
-- Instalacao sob demanda no Windows a partir do upstream oficial
+- Provisionamento bloqueado pelo manifesto comum em Windows e Linux a partir do upstream oficial
 
 ### Crates de suporte aprovadas no backend
 - `base64` para codificacao de imagens processadas (Photo2SGDK)
 - `libloading` para carregar cores Libretro
-- `reqwest` para baixar SDKs/cores oficiais sob demanda
-- `zip` e `sevenz-rust2` para extrair pacotes oficiais
+- `sevenz-rust2` para leitura de corpus/projetos compactados; downloads e extracao de toolchains pertencem exclusivamente ao host-manager, nao ao runtime Rust
 - `image` para staging/conversao de asset real no caminho SNES e processamento Photo2SGDK (quantizacao, palette snapping Mega Drive)
 
 ### Ferramentas aprovadas de validacao e processo
@@ -54,7 +54,19 @@
 - `eslint` para lint do frontend
 - `npx tsc --noEmit` para typecheck do frontend
 - `cargo clippy -- -D warnings` para lint do backend Rust
+- `cargo-audit 0.22.2` como auditor de desenvolvimento/CI, sem entrar no runtime
 - `cargo test --lib -- --nocapture` e `npm test` para suites automatizadas
+
+### Ambiente de desenvolvimento reproduzivel
+
+- Node.js `24.18.0` LTS e npm `11.16.0`, fixados por `.node-version`, `package.json` e lock do host.
+- Rust `1.97.0` com Clippy/Rustfmt, fixado por `rust-toolchain.toml`; `src-tauri/Cargo.lock` e obrigatorio para esta aplicacao Tauri.
+- SGDK `2.11`, PVSnesLib `4.5.0`, Libretro `1.22.2`, Ghidra `12.1`, JDK 21 e `tauri-driver 2.0.6` compoem o profile full.
+- `toolchains/host-requirements.lock.json` fixa tags/commits e hashes. Execucao normal nao consulta `latest`.
+- Binarios ativos, Cargo target e caches de compilacao vivem no filesystem nativo por lock digest; o cartao mantem codigo e cache portatil de downloads por SHA-256.
+- Hosts v1: Windows 10/11 x64 e Arch/Manjaro/BigLinux x64. Outros hosts retornam `UNSUPPORTED` sem instalacao.
+- npm opera com `strict-allow-scripts`; somente o `esbuild` fixado pode executar install script e `fsevents` e explicitamente negado.
+- Updater publico esta desabilitado ate existir certificado, canal, endpoint imutavel e politica de assinatura reais.
 
 ---
 
@@ -86,5 +98,7 @@
 
 - O projeto segue com `Libretro API via FFI no Rust` como decisao arquitetural consolidada.
 - O caminho SNES atual suporta o exporter simples validado no hardware profile atual; metasprites e combinacoes mais amplas continuam fora do baseline atual.
-- O gate restante do roadmap nao e arquitetura nova, e sim validacao externa com toolchains/cores oficiais.
-- O baseline de validacao local/CI agora inclui estrutura, lint, typecheck, `cargo clippy`, testes frontend e testes Rust.
+- O blocker institucional restante e a certificacao Windows no mesmo commit/lock, seguida por signing/updater/licencas de redistribuicao para qualquer release publico.
+- O baseline de validacao local/CI inclui estrutura, Rustfmt, lint, typecheck, auditorias npm/RustSec, testes frontend e testes Rust.
+- `scripts/host-manager.mjs` e o unico orquestrador de provisionamento. `src-tauri/src/tools/dependency_manager.rs` apenas projeta o report comum no Runtime Setup.
+- Toolchains ativos vivem no cache nativo por lock digest; `toolchains/` no cartao guarda contrato, compatibilidade legada validada e cache portatil ignorado pelo Git.
