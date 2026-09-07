@@ -113,6 +113,10 @@ mod tests {
 
     #[test]
     fn converts_rgb565_to_rgba() {
+        // O agrupamento 5-6-5 descreve os campos R/G/B do formato RGB565 e é a
+        // leitura correta aqui; reagrupar como o clippy sugere destruiria essa
+        // semântica.
+        #[allow(clippy::unusual_byte_groupings)]
         let src = 0b11111_111111_00000u16.to_le_bytes();
         let payload = framebuffer_to_rgba(
             &src,

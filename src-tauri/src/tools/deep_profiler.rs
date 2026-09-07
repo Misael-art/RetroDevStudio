@@ -222,6 +222,13 @@ pub fn profile_bytes(rom: &[u8]) -> ProfileReport {
     // Heurística: distribui o custo de DMA de tiles uniformemente pelas scanlines
     // do vblank (scanlines 224–261 mapeadas na área de inatividade).
     // Como só temos 224 entradas, concentramos nas primeiras 8 scanlines (vblank sim).
+    // Três grandezas distintas, propositalmente não confundidas:
+    // - `tile_section_size`: demanda **estimada** de bytes de tiles por frame;
+    // - `MD_DMA_VBLANK_BYTES`: orçamento de DMA disponível no vblank;
+    // - `dma_per_frame`: demanda **limitada** ao orçamento, usada só para o
+    //   heatmap e o total reportados (o hardware não transfere além do teto).
+    // O diagnóstico de overflow compara demanda contra orçamento; comparar o
+    // valor já saturado tornava o ramo `Error` inalcançável (PROF-02).
     let tile_section_size = estimate_tile_section_size(rom) as u32;
     let dma_per_frame = tile_section_size.min(MD_DMA_VBLANK_BYTES);
     let vblank_lines = 8usize; // proxy das linhas de vblank visíveis no heatmap
@@ -232,7 +239,7 @@ pub fn profile_bytes(rom: &[u8]) -> ProfileReport {
     }
     report.dma_total_bytes = dma_per_frame;
 
-    if dma_per_frame > MD_DMA_VBLANK_BYTES {
+    if tile_section_size > MD_DMA_VBLANK_BYTES {
         report.issues.push(ProfileIssue {
             severity: Severity::Error,
             message: format!(
@@ -240,13 +247,13 @@ pub fn profile_bytes(rom: &[u8]) -> ProfileReport {
                 tile_section_size / 1024
             ),
         });
-    } else if dma_per_frame > MD_DMA_VBLANK_BYTES * 80 / 100 {
+    } else if tile_section_size > MD_DMA_VBLANK_BYTES * 80 / 100 {
         report.issues.push(ProfileIssue {
             severity: Severity::Warning,
             message: format!(
                 "DMA Warning: ~{}KB de tiles ({}% do budget). Pouco margem para updates dinâmicos.",
                 tile_section_size / 1024,
-                dma_per_frame * 100 / MD_DMA_VBLANK_BYTES
+                tile_section_size * 100 / MD_DMA_VBLANK_BYTES
             ),
         });
     }
@@ -428,6 +435,58 @@ mod tests {
         assert!(report.ok);
         assert_eq!(report.sprite_count, 6);
         assert!(report.sprite_peak >= 1);
+    }
+
+    /// Monta uma ROM válida cujo tamanho leva `estimate_tile_section_size`
+    /// ao valor desejado de demanda estimada de DMA.
+    fn rom_with_estimated_tile_bytes(tile_bytes: usize) -> Vec<u8> {
+        let mut rom = vec![0u8; tile_bytes * 4];
+        rom[0x100..0x10F].copy_from_slice(b"SEGA MEGA DRIVE");
+        rom
+    }
+
+    fn dma_issue(report: &super::ProfileReport) -> Option<&super::ProfileIssue> {
+        report
+            .issues
+            .iter()
+            .find(|issue| issue.message.starts_with("DMA "))
+    }
+
+    #[test]
+    fn profile_bytes_reports_no_dma_issue_below_budget() {
+        // Demanda estimada bem abaixo do orçamento de vblank.
+        let rom = rom_with_estimated_tile_bytes(4_000);
+        let report = profile_bytes(&rom);
+
+        assert!(report.ok);
+        assert!(dma_issue(&report).is_none());
+        assert_eq!(report.dma_total_bytes, 4_000);
+    }
+
+    #[test]
+    fn profile_bytes_warns_when_dma_demand_is_near_budget() {
+        // Entre 80% e 100% do orçamento: aviso, não erro.
+        let rom = rom_with_estimated_tile_bytes(6_656);
+        let report = profile_bytes(&rom);
+
+        let issue = dma_issue(&report).expect("esperado aviso de DMA");
+        assert_eq!(issue.severity, super::Severity::Warning);
+        assert!(issue.message.contains("90%"), "mensagem: {}", issue.message);
+        assert_eq!(report.dma_total_bytes, 6_656);
+    }
+
+    #[test]
+    fn profile_bytes_errors_when_dma_demand_exceeds_budget() {
+        // Demanda estimada acima do orçamento: precisa virar Error.
+        // Antes da correção de PROF-02 o valor era saturado por `.min()` antes
+        // da comparação, tornando este ramo inalcançável.
+        let rom = rom_with_estimated_tile_bytes(16_384);
+        let report = profile_bytes(&rom);
+
+        let issue = dma_issue(&report).expect("esperado erro de DMA");
+        assert_eq!(issue.severity, super::Severity::Error);
+        // O heatmap/total continuam saturados no teto do orçamento.
+        assert_eq!(report.dma_total_bytes, super::MD_DMA_VBLANK_BYTES);
     }
 
     #[test]
