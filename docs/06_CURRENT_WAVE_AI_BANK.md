@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-09-07 (INT-R1f: `host:certify` PASSOU; ROMs MD/SNES reais e emulação observada no Linux; gate de certificação estava invertido e foi corrigido)
+**Ultima Atualizacao:** 2026-09-07 (INT-R1g: FLAKE-01 fechado; registrado padrão sistêmico de gates que fecham pelo motivo errado)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -20,6 +20,13 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+
+* **O que acabou de acontecer (2026-09-07 — INT-R1g: FLAKE-01 investigado e fechado; padrão sistêmico de "verde pelo motivo errado"):**
+  - **FLAKE-01 — causa mecânica, não "carga":** `src/App.test.tsx > keeps Build & Run enabled when the live validation snapshot is stale` falhava intermitentemente com `expected 'LIVE' to contain 'DESATUAL.'`. O efeito em `src/core/validation/liveValidationController.ts:219` agenda um debounce que, ao concluir, chama `setHwValidationResult`, e essa ação grava `hwValidationState: "fresh"` (`src/core/store/editorStore.ts:505`). Como `validateSceneDraft` está mockado com `mockResolvedValue`, o debounce **sempre** completa nos testes. O teste forçava `stale` via `setState`, o que **não** altera `sceneRevision` nem o `requestIdRef`: a validação em voo passava por **todos** os guards do controller (mesmo `requestId`, `activeProjectDir`, `activeTarget` e `sceneRevision`) e sobrescrevia `stale` → `fresh`.
+  - **O produto está correto.** Uma validação que conclui para a revisão corrente **deve** marcar `fresh`. O defeito era do teste, que simulava um estado que a aplicação estava legitimamente prestes a substituir — uma asserção correndo contra o app.
+  - **Correção (sem afrouxar asserção):** deixar `validateSceneDraft` pendente para sempre naquele teste, tornando a pré-condição real; mais um flush prévio que drena qualquer promise já criada com o mock anterior, fechando a janela em que uma resolução pendente aterrissava depois do `setState`.
+  - **Evidência:** 3 execuções isoladas verdes e suíte completa **596 passed / 6 skipped**. Registro metodológico: passar isolado **não** era prova, porque o teste já passava isolado antes — só a bateria completa expõe a corrida.
+  - **Padrão sistêmico registrado (não são três acidentes isolados):** em uma única rodada apareceram **três** casos de gate que fechava ou reprovava **pelo motivo errado** — (1) `desktop-smoke` verde em `main` sustentado pelo downloader que o Programa de Reprodutibilidade remove; (2) `host:certify` que só passava em host **mal** provisionado (CERT-01); (3) FLAKE-01, cuja asserção disputava com o próprio app. Em nenhum deles o resultado vinha do que o teste alegava verificar. Tratar como **risco de baseline**, não como defeitos avulsos: um gate verde por motivo errado é indistinguível de um gate verde correto até alguém olhar.
 
 * **O que acabou de acontecer (2026-09-07 — INT-R1f: `host:certify` PASSOU; primeira evidência local de `Build -> ROM -> Emulação`; gate de certificação estava invertido):**
   - **Achado dominante (CERT-01, novo):** `npm run host:certify` era **impossível de passar num host `READY`**. O teste `decomp-scripts.test.mjs > ghidra_boundary.sh BLOCKED path` definia apenas `RETRODEV_GHIDRA_HOME` para um diretório inexistente, mas `ghidra_boundary.sh:24` cai para `command -v analyzeHeadless`. Com o host provisionado, o PATH injetado pelo `certify` traz o Ghidra do cache: o caminho BLOCKED ficava **inalcançável**, o script disparava uma análise headless real, estourava o timeout de 60s do `runBash` e era morto (`status: null`). **O gate só fechava em host mal provisionado — o inverso do que existe para garantir.** Corrigido sanitizando o PATH da invocação: a pré-condição virou real e **nenhuma asserção foi afrouxada**.
