@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-09-07 (INT-R1c: PR #41 mergeado em `main` `b898705`; gates de código verdes, `desktop-smoke` vermelho por HOST-WIN-01; host segue DRIFTED)
+**Ultima Atualizacao:** 2026-09-07 (INT-R1d: A-01, B-01 e C-01 LIBERADOS sobre `main` `1b2a45b`, sem certificação de runtime; host segue DRIFTED)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -20,6 +20,15 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+
+* **O que acabou de acontecer (2026-09-07 — INT-R1d: A-01, B-01 e C-01 liberados com restrição explícita de host):**
+  - **Ordem do operador:** liberar A-01, B-01 e C-01. Base de todos: `main` `1b2a45bebef6adf0471e46bda608e429bffc480b`.
+  - **Desvio declarado, não silencioso:** a regra vigente condiciona liberação a **host READY**, e o host segue **`DRIFTED`** (ENV-01/ENV-02 abertos, reparo dependente de autenticação administrativa). Em vez de tratar a condição como satisfeita, as três fatias foram **escopadas para não dependerem do host**: são todas prováveis por teste unitário — A-01 é semântica de compilador, B-01 é profiler **estático** (não executa ROM) e C-01 é componente isolado no Vitest.
+  - **Proibição que acompanha a liberação:** nenhuma das três pode declarar prova de build real, ROM gerada, emulação ou medição dinâmica. Tudo que dependa de SGDK/PVSnesLib/core permanece **`NÃO MEDIDO`** e deve aparecer assim no handoff. PROF-01 continua valendo: o profiler estima, não mede.
+  - **Isolamento:** três worktrees distintos fora da raiz, em `/mnt/sdcard/Projects/RetroDevStudio-worktrees/`, branches `codex/a-01-compilador`, `codex/b-01-prof02` e `codex/c-01-acessibilidade`, com listas de arquivos **disjuntas**. Arquivos centrais (`App.tsx`, `editorStore.ts`, `lib.rs`, `project_mgr.rs`, `ugdm/**`, IPC, manifests/locks, host/CI e docs canônicos) seguem reservados ao Integrador.
+  - **Anexado a B-01:** o `clippy::unusual_byte_groupings` em `frame_buffer.rs:116`, achado durante a convergência e deixado intocado por ser área de B. Orientação registrada: preservar o agrupamento 5-6-5 do RGB565 com `#[allow]` comentado, não reagrupar.
+  - **Reescopo obrigatório de C-01:** a baseline de 2026-09-06 não avaliou `src/components/common/**`, que veio de `origin/main`. C precisa reler esses componentes no SHA atual **antes** de afirmar defeito — a avaliação histórica não autoriza conclusão sobre código que ela não viu.
+  - **Um PR por fatia**, gates completos no destino, e integração pelo Integrador. HOST-WIN-01 continua `BLOQUEADO` e fora do escopo das três fatias.
 
 * **O que acabou de acontecer (2026-09-07 — INT-R1c: CI do destino reprovou; achado HOST-WIN-01 nos detectores Windows do contrato):**
   - **`validate` / `linux-validate`:** reprovaram em `npm run security:audit` com 5 advisories altas. **Terceira ocorrência da mesma classe** (PVSnesLib 2026-07-29, Rust 2026-09-02, agora a base de advisories do npm): dependência externa não fixada derruba o baseline **sem nenhum commit nosso** — `main` passou nesse mesmo comando em 2026-09-02. Corrigido em `0405fd3` subindo apenas pins já existentes em `overrides` (brace-expansion 5.0.9, postcss 8.5.28, undici 7.29.1, todos dev-only); **nenhuma dependência nova**, e auditoria voltou a **0**. Gates revalidados após o bump: check:tree 0, tsc 0, lint 0, `npm test` 596 passed / 6 skipped.
@@ -107,10 +116,17 @@ Status operacional: INTEGRADO — executado com janela exclusiva confirmada pelo
 
 ```text
 Ticket: A-01 — Auditar comportamento já suportado no compilador
-Rodada / objetivo / IDs de baseline: INT-R1 / diagnóstico read-only; produzir achado com arquivo, linha e teste esperado / NODE-01, IMP-01
-Base SHA completo / branch destino: a definir por INT-01
-Arquivos permitidos: nenhum (somente leitura) até liberação
-Status operacional: PROPOSTO — diagnóstico autorizado, edição não
+Rodada / objetivo / IDs de baseline: INT-R1d / auditar um comportamento já suportado no compilador, confirmar o defeito e corrigir a menor fatia / NODE-01, IMP-01
+Base SHA completo / branch destino: 1b2a45bebef6adf0471e46bda608e429bffc480b (`main`) / PR para `main`
+Agente / branch codex/... / worktree absoluto externo à raiz: A / `codex/a-01-compilador` / `/mnt/sdcard/Projects/RetroDevStudio-worktrees/a-01-compilador`
+Arquivos permitidos (lista exata) / arquivos reservados a outros: `src-tauri/src/compiler/**` e `src/core/nodegraph/**` (mais os testes desses módulos). Reservados: `src-tauri/src/emulator/**`, `parity_harness.rs`, `deep_profiler.rs` (B); componentes de UI (C); `App.tsx`, `editorStore.ts`, `lib.rs`, `project_mgr.rs`, `ugdm/**`, IPC, manifests/locks, scripts de host/CI e docs canônicos (Integrador)
+Comportamento antes → depois / fora do escopo: um comportamento hoje incorreto/silencioso no caminho NodeGraph → IR → emitter passa a ter regressão que falha primeiro e depois fecha. Fora do escopo: importadores amplos, decompilação, features novas, refatoração ampla e mudança de contrato IPC/UGDM sem proposta ao Integrador
+Contratos já integrados / dependências pendentes: nenhum contrato novo autorizado; propor ao Integrador se for necessário
+Host fingerprint / lock digest / READY: 82f39923…fff5a / d531c4b9…5bb5d / **NÃO (DRIFTED)** — ver restrição de escopo abaixo
+Restrição por host não-READY: proibido declarar prova de build real, ROM gerada ou emulação. O que depender de SGDK/PVSnesLib/core fica `NÃO MEDIDO`, explicitamente, no handoff
+Projeto/corpus permitido / diretório de evidências / janela exclusiva de certificação: fixtures do próprio repositório; sem janela de certificação (host não-READY)
+Testes de aceitação / gates aplicáveis: regressão que **falha antes** da correção e passa depois; `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test --lib -- --test-threads=1`
+Status operacional: LIBERADO (2026-09-07) — edição permitida nos arquivos acima, sem certificação de runtime
 ```
 
 ```text
@@ -121,15 +137,30 @@ Arquivos permitidos (lista exata): src-tauri/src/tools/deep_profiler.rs e sua co
 Comportamento antes → depois: ramo Error inalcançável (valor saturado por `.min()` comparado com o próprio teto) → orçamento comparado contra `tile_section_size`, mantendo o heatmap saturado; percentual do Warning deixa de travar em 100%
 Fora do escopo: transformar estimativa em medição, tocar parity_harness.rs ou libretro_ffi.rs, alterar constantes de docs/04
 Testes de aceitação: regressão que falha antes da correção — ROM com seção de tiles acima de MD_DMA_VBLANK_BYTES produz `Severity::Error`; ROM abaixo do teto continua sem Error. Gates de docs/13 §Validação
-Status operacional: PROPOSTO — defeito confirmado por inspeção, correção não liberada
+Base SHA completo / branch destino: 1b2a45bebef6adf0471e46bda608e429bffc480b (`main`) / PR para `main`
+Agente / branch codex/... / worktree absoluto externo à raiz: B / `codex/b-01-prof02` / `/mnt/sdcard/Projects/RetroDevStudio-worktrees/b-01-prof02`
+Arquivos permitidos (lista exata) / arquivos reservados a outros: `src-tauri/src/tools/deep_profiler.rs` e `src-tauri/src/emulator/frame_buffer.rs` (mais seus testes). Reservados: `compiler/**` e `nodegraph/**` (A); componentes de UI (C); arquivos centrais do Integrador
+Comportamento antes → depois / fora do escopo: `dma_per_frame = tile_section_size.min(MD_DMA_VBLANK_BYTES)` torna a condição `> MD_DMA_VBLANK_BYTES` inalcançável e trava o percentual em 100% → comparar o **orçamento contra `tile_section_size`**, mantendo `dma_per_frame` saturado para o heatmap. Fora do escopo: transformar estimativa estática em medição dinâmica, tocar `parity_harness.rs` ou instrumentar runtime
+Escopo anexado nesta liberação (HOST-WIN-01 não incluído): corrigir também `frame_buffer.rs:116`, onde `clippy::unusual_byte_groupings` acusa `0b11111_111111_00000u16`. O agrupamento 5-6-5 é **semanticamente correto** para RGB565 e a sugestão do clippy destrói a leitura: preferir `#[allow]` local com comentário a reagrupar. Só aparece sob `--all-targets`, que o CI não usa
+Contratos já integrados / dependências pendentes: nenhum
+Host fingerprint / lock digest / READY: 82f39923…fff5a / d531c4b9…5bb5d / **NÃO (DRIFTED)**
+Restrição por host não-READY: PROF-01 permanece válido — o profiler **estima**, não mede. Proibido apresentar resultado como medição dinâmica; qualquer alegação de execução real fica `NÃO MEDIDO`
+Testes de aceitação / gates aplicáveis: regressão que **falha antes** e passa depois, cobrindo o caso em que `tile_section_size` excede o orçamento; mesma bateria de gates do A-01
+Status operacional: LIBERADO (2026-09-07) — defeito já confirmado por inspeção em ambos os troncos; correção agora autorizada
 ```
 
 ```text
 Ticket: C-01 — Acessibilidade/erro em componente isolado
-Rodada / objetivo / IDs de baseline: INT-R1 / identificar e propor; corrigir somente após confirmação do defeito e do escopo
-Base SHA completo / branch destino: a definir por INT-01 — obrigatório, porque `origin/main` já trouxe diálogos acessíveis e tokens semânticos que a baseline não avaliou
-Arquivos permitidos: nenhum até liberação; App.tsx, ViewportPanel.tsx, NodeGraphEditor.tsx, InspectorPanel.tsx, ToolsPanel.tsx e ArtStudioPanel.tsx permanecem reservados
-Status operacional: PROPOSTO — diagnóstico autorizado, edição não
+Rodada / objetivo / IDs de baseline: INT-R1d / identificar um defeito real de acessibilidade ou de mensagem de erro em componente isolado e corrigir a menor fatia / —
+Base SHA completo / branch destino: 1b2a45bebef6adf0471e46bda608e429bffc480b (`main`) / PR para `main`
+Agente / branch codex/... / worktree absoluto externo à raiz: C / `codex/c-01-acessibilidade` / `/mnt/sdcard/Projects/RetroDevStudio-worktrees/c-01-acessibilidade`
+Reescopo obrigatório antes de editar: a baseline de 2026-09-06 **não viu** os componentes que vieram de `origin/main`. Começar relendo `src/components/common/**` no SHA acima (`Dialog`, `Button`, `FormField`, `Select`, `Input`, `IconButton`, `EmptyState`, `AdaptivePanel`) e os tokens semânticos, antes de afirmar qualquer defeito
+Arquivos permitidos (lista exata) / arquivos reservados a outros: `src/components/common/**` e seus testes. Reservados e proibidos: `App.tsx`, `ViewportPanel.tsx`, `NodeGraphEditor.tsx`, `InspectorPanel.tsx`, `ToolsPanel.tsx`, `ArtStudioPanel.tsx`, `editorStore.ts`, além de `compiler/**`/`nodegraph/**` (A) e `emulator/**`/`deep_profiler.rs` (B)
+Comportamento antes → depois / fora do escopo: um defeito **confirmado** (foco, rótulo acessível, `aria-*`, contraste por token, ou mensagem de erro sem ação) passa a ter teste que falha primeiro e depois fecha. Fora do escopo: redesign visual, troca de tokens globais, novas superfícies e qualquer mudança em arquivo reservado
+Contratos já integrados / dependências pendentes: usar exclusivamente contratos e tokens existentes
+Host fingerprint / lock digest / READY: irrelevante para esta fatia (frontend puro), host segue DRIFTED
+Testes de aceitação / gates aplicáveis: teste de acessibilidade/erro que **falha antes** e passa depois; `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`
+Status operacional: LIBERADO (2026-09-07) — edição permitida apenas em `src/components/common/**`, após o reescopo acima
 ```
 
 ```text
