@@ -131,6 +131,25 @@ Arquivos permitidos: nenhum até liberação; App.tsx, ViewportPanel.tsx, NodeGr
 Status operacional: PROPOSTO — diagnóstico autorizado, edição não
 ```
 
+```text
+Ticket: HOST-WIN-01 — Corrigir detectores Windows do contrato de host (msvc, webview2, npm)
+Rodada / objetivo / IDs de baseline: adiado para Etapas 5-8 / fazer o contrato reconhecer dependências que existem no runner Windows / ENV-01, REL-01
+Base SHA completo / branch destino: a definir na retomada; achado medido em `08b6db9` (PR #41), evidência do run 34121921532
+Agente / branch codex/... / worktree absoluto externo à raiz: Integrador (ou responsável de host), a definir
+Arquivos permitidos (lista exata) / arquivos reservados a outros: `toolchains/host-requirements.lock.json` e `scripts/host-manager.mjs` (probes); nada de produto
+Comportamento antes → depois / fora do escopo: runner Windows reporta `msvc:missing`, `webview2:missing`, `npm:missing` mesmo com as dependências presentes → contrato detecta corretamente e `desktop-smoke` volta a fechar sem downloader no app. Fora do escopo: restaurar provisionamento dentro do app, afrouxar o gate ou pular o E2E
+Defeito confirmado (detecção, não ausência):
+  - `msvc`: probe é `cl.exe` no PATH, mas em `windows-2022` o MSVC existe e `cl.exe` só entra no PATH sob Developer Command Prompt. `scripts/run-cargo-msvc.cmd` já resolve isso com `vswhere` — usar o mesmo mecanismo.
+  - `webview2`: probe é `msedge.exe` no PATH; artefato errado (Edge ≠ runtime WebView2) e fora do PATH. Detectar por registro/pasta de instalação.
+  - `npm`: `version_pattern` `^11\.16\.0$` exige casamento exato e reprova qualquer runner; o runner tinha acabado de rodar `npm ci`.
+Custo operacional conhecido (decidir na retomada): `lockDigest` é o sha256 do manifest inteiro e nomeia o cache do host (`scripts/host-manager.mjs:435`). Qualquer mudança de probe muda o digest e **invalida o cache em todas as plataformas**, forçando reprovisionamento completo, inclusive no host Linux do operador.
+Contratos já integrados / dependências pendentes: depende de **descongelar Windows**; sem isso não há como validar, já que a verificação só ocorre no CI Windows
+Host fingerprint / lock digest / READY: runner `1af5bda230a97ba4a4653a403aea39f55326a524a834190b0412e2cb0afcfc70` / `d531c4b9…5bb5d` / NÃO (BLOCKED)
+Projeto/corpus permitido / diretório de evidências / janela exclusiva: artefato `desktop-e2e-validation-34121921532-all` (retenção do Actions; resumo durável nesta entrada)
+Testes de aceitação / gates aplicáveis: `desktop-smoke` verde em Mega Drive **e** SNES sem provisionamento dentro do app; `npm run host:diagnose` READY no runner; regressão cobrindo cada probe corrigido
+Status operacional: BLOQUEADO — adiado para Etapas 5-8 por decisão do operador (2026-09-07); Windows permanece congelado até ordem expressa
+```
+
 * **O que acabou de acontecer (2026-09-06 — avaliação e preparação documental de quatro agentes):**
   - **Autorização:** usuário pediu preservar a avaliação para comparação futura e criar prompts Integrador/A/B/C. Escopo executado exclusivamente documental; nenhum agente de implementação iniciado e nenhum ticket de código liberado.
   - **Base avaliada:** `convergence/reproducibility`, `0c245386c2f1144ad4458b4f0c95c0f9d2f997b5`. Avaliação estática com resultados de host/estrutura; suíte completa, emulação oficial e CI remoto não executados nesta avaliação. Resultados históricos não equivalem a certificação atual.
