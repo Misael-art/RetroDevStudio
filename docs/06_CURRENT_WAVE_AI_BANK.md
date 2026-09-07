@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-09-07 (rodada INT-R1b: `origin/main` 9b36d2e convergido; gates de código verdes no destino; host segue DRIFTED)
+**Ultima Atualizacao:** 2026-09-07 (INT-R1c: PR #41 mergeado em `main` `b898705`; gates de código verdes, `desktop-smoke` vermelho por HOST-WIN-01; host segue DRIFTED)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -86,7 +86,8 @@ Contratos já integrados / dependências pendentes: nenhum; depende da decisão 
 Host fingerprint / lock digest / READY: 82f39923…fff5a / d531c4b9…5bb5d / NÃO (DRIFTED)
 Projeto/corpus permitido / diretório de evidências / janela exclusiva: n/a nesta fase
 Testes de aceitação / gates aplicáveis: baseline completa de docs/07 §3 no SHA de destino, após host READY
-Status operacional: BLOQUEADO — merge feito e publicado (PR #41). CI do destino fechou em 2026-09-07: `validate` **PASS**, `linux-validate` **PASS**, `desktop-smoke` **FAIL**. Antes da correção o CI reprovou por dois motivos distintos. `validate`/`linux-validate` caíram por deriva de advisories do npm (corrigido em `0405fd3`, auditoria de volta a 0). `desktop-smoke` (Windows) continua vermelho por HOST-WIN-01 (abaixo): sem READY no runner, Build & Run não inicia o emulador. Reconfirmado no run `34124137089`, com causa **idêntica** — `BLOCKED`, fingerprint `1af5bda230a97ba4…`, não-ready `npm`, `sgdk`, `pvsneslib`, `msvc`, `webview2`; nenhuma falha nova apareceu. Por decisão do operador, o estado fica bloqueado e a causa é investigada; não mergear em `main` e não afrouxar gate.
+Status operacional: INTEGRADO — PR #41 mergeado em `main` por ordem expressa do operador em 2026-09-07, com `desktop-smoke` vermelho e ciente do trade-off. `main` = `b8987050b02146a1576bc871b39396745afb15b9`. **Consequência registrada sem eufemismo:** `main` passa a não ter gate remoto completo verde; o E2E Windows continua reprovando por HOST-WIN-01 até o Windows ser descongelado. Isto **não** certifica `Build -> ROM -> Emulação`.
+Histórico do ticket: merge feito e publicado (PR #41). CI do destino fechou em 2026-09-07: `validate` **PASS**, `linux-validate` **PASS**, `desktop-smoke` **FAIL**. Antes da correção o CI reprovou por dois motivos distintos. `validate`/`linux-validate` caíram por deriva de advisories do npm (corrigido em `0405fd3`, auditoria de volta a 0). `desktop-smoke` (Windows) continua vermelho por HOST-WIN-01 (abaixo): sem READY no runner, Build & Run não inicia o emulador. Reconfirmado no run `34124137089`, com causa **idêntica** — `BLOCKED`, fingerprint `1af5bda230a97ba4…`, não-ready `npm`, `sgdk`, `pvsneslib`, `msvc`, `webview2`; nenhuma falha nova apareceu. Por decisão do operador, o estado fica bloqueado e a causa é investigada; não mergear em `main` e não afrouxar gate.
 Observação anterior: merge executado sob autorização do operador ("convergir: merge origin/main → branch, push, PR"). Destino `1ef03e9b17d27d4d2bce18d698137eb2e3b4fc87` (merge) + `cc9338f` (correções). `origin/main` 9b36d2e integralmente contido (0 atrás / 19 à frente). Falta publicar a branch, abrir PR e validar no CI remoto; merge em `main` continua fora do meu escopo.
 ```
 
