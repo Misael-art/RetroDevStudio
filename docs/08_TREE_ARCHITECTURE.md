@@ -52,6 +52,12 @@ RetroDevStudio/
 |   |-- 08_TREE_ARCHITECTURE.md
 |   |-- 09_AGENT_DEV_MODE.md
 |   |-- 10_QA_ROTEIRO_RC.md
+|   |-- 13_PLANO_EXECUCAO_PARALELA.md
+|   |-- AVALIACAO_DESENVOLVIMENTO_2026_09_06.md
+|   |-- PROMPT_AGENTE_INTEGRADOR.md
+|   |-- PROMPT_AGENTE_A.md
+|   |-- PROMPT_AGENTE_B.md
+|   |-- PROMPT_AGENTE_C.md
 |   |-- SGDK_REAL_CORPUS_VALIDATION_MATRIX.md
 |   `-- DIAGNOSTICO_PRODUTO_2026_07_28_NAO_CANONICO.md  (diagnostico de gaps; NAO canonico)
 |
@@ -217,3 +223,9 @@ RetroDevStudio/
 - `docs/09_AGENT_DEV_MODE.md` consolida a hierarquia de verdade, os gates e as regras anti-poluicao para agentes.
 - `docs/06_CURRENT_WAVE_AI_BANK.md` e o arquivo de memoria ativa do agente para a wave corrente (Wave S+); `docs/06_AI_MEMORY_BANK.md` continua sendo a entrada canonica e pode redirecionar para a wave ativa; `docs/06_AI_MEMORY_BANK_WAVE_A_R.md` guarda o historico das waves A-R para consulta pontual.
 - `.github/workflows/ci.yml` e o baseline canonico de validacao automatizada do projeto e deve ser mantido verde em mudancas relevantes.
+
+## Planejamento paralelo e avaliações históricas
+
+- `docs/13_PLANO_EXECUCAO_PARALELA.md` define tickets, ownership e comparação; não substitui a maturidade do roadmap.
+- `docs/AVALIACAO_DESENVOLVIMENTO_2026_09_06.md` preserva snapshot histórico; novas evidências/deltas vivem no Current Wave.
+- `docs/PROMPT_AGENTE_{INTEGRADOR,A,B,C}.md` são entradas de execução por papel. Apenas o integrador atualiza docs canônicos durante rodadas paralelas.

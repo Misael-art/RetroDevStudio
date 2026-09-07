@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-07-17 (hardening comum/Linux implementado; Windows congelado pelo operador)
+**Ultima Atualizacao:** 2026-09-06 (rodada INT-R1: baseline revalidada, divergência 48/17 contra `origin/main` medida, tickets registrados sem liberação)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -19,6 +19,106 @@
 ---
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
+
+
+* **O que acabou de acontecer (2026-09-06 — rodada INT-R1 do integrador: revalidação da baseline, auditoria de convergência e tickets):**
+  - **Escopo executado:** exclusivamente leitura, diagnóstico e documentação canônica. Nenhum arquivo de produto alterado, nenhum worktree movido ou removido, nenhum commit/push/merge realizado, nenhum agente A/B/C lançado por esta sessão. Host permanece bloqueado; a barreira de `docs/09` §2.1 foi respeitada.
+  - **Checkout desta rodada:** `/mnt/sdcard/Projects/RetroDevStudio`, branch `convergence/reproducibility`, HEAD `0c245386c2f1144ad4458b4f0c95c0f9d2f997b5` — exatamente o SHA da baseline histórica. As três modificações rastreadas (`docs/06_AI_MEMORY_BANK.md`, `docs/06_CURRENT_WAVE_AI_BANK.md`, `docs/08_TREE_ARCHITECTURE.md`) e os documentos novos da sessão de 2026-09-06 continuam **não commitados**; foram preservados, não descartados.
+  - **ENV-01 reproduzido, idêntico:** `npm run host:diagnose` exit **10**, `DRIFTED`, `linux/x64/biglinux`. Fingerprint `82f39923d69557b647ed3a4ec5053ce67885ac125ee79666116d03d5968fff5a` e lock digest `d531c4b9617af47108819d965b7cb58db1e2780a5f8a9edead08668870f5bb5d` batem com a fotografia da baseline. Blockers: `jdk21:incompatible`, `ghidra:missing`, `m68k_gcc:missing`, `sgdk:missing`, `pvsneslib:missing`, `libretro_md:incompatible`, `libretro_snes:missing`.
+  - **ENV-02 reproduzido sem contornar autenticação:** `sudo -n true` responde `uma senha é necessária`. `/usr/sbin/bigsudo` e `/usr/sbin/pkexec` existem, mas ambos exigem autenticação interativa do operador. O bootstrap `--ensure --profile full` **não** foi reexecutado nesta rodada por ser mutação privilegiada sem operador presente. Reparo do host continua dependente do operador.
+  - **GOV-01 reproduzido, idêntico:** `npm run check:tree` exit **1**, por `.codex`, `.omo` e `.worktrees` na raiz. Gate não foi afrouxado e nenhuma dessas pastas foi tocada.
+  - **GOV-02 revalidado e corrigido em um ponto material:** continuam **12** worktrees registrados e `main...HEAD` continua `0 58`. Porém o `main` **local está obsoleto** (`9001d2a9...`) e, contra o remoto, o quadro é outro: `origin/main` = `9b36d2e00b228a6be3764dbd7d35f5182a78d292` (2026-09-02, merge do PR #40), `git rev-list --left-right --count origin/main...HEAD` = **48 / 17**, `merge-base` = `ce0f815`, e nenhum dos dois é ancestral do outro. A leitura da baseline "58 à frente e 0 atrás" era verdadeira apenas contra o `main` local desatualizado e **não** descreve a convergência real.
+  - **Achado dominante da rodada (CONV-01, novo):** o Programa de Reprodutibilidade **não está em `origin/main`**. `git cherry -v origin/main HEAD` retorna os 17 commits como `+` (nenhum equivalente upstream por patch-id), `origin/main` não contém `scripts/host-manager.mjs`, `toolchains/host-requirements.lock.json` nem `rust-toolchain.toml`, e o `AGENTS.md` de `origin/main` não tem a seção "Protocolo Obrigatorio Do Host". A branch `convergence/reproducibility` **nunca foi publicada**: `git ls-remote --heads origin` lista `convergence/decomp-spike`, `convergence/parity-off-main-thread`, `convergence/ui-fatia1`, `convergence/ui-overhaul` e `main`, e não esta branch. Consequência operacional: no estado atual do remoto, `npm run host:diagnose` / `host:ensure` / `host:certify` **não existem em `main`**, enquanto os prompts e o `AGENTS.md` desta branch os exigem. Isso é divergência de convergência, não falta de feature — mesmo padrão já registrado em 2026-07-28.
+  - **Consequência sobre a baseline (limite honesto):** a avaliação de 2026-09-06 inspecionou um checkout **48 commits atrás de `origin/main`**, que desde então recebeu UI fatia 1 (tokens semânticos, diálogos acessíveis, painéis adaptativos), parity contrato rev-2 com observação real de áudio/memória, movimentação de parity/ROM/import para fora da main thread, spike de decompilação governado e o pin de Rust `1.97.1` após deriva de toolchain. Os IDs `PAR-01`, `REL-01` e a frente de acessibilidade **não foram revalidados** contra esse código; tratá-los como atuais seria falso. `PROF-01`, `PROF-02`, `NODE-01` e `IMP-01` foram confirmados como idênticos entre `HEAD` e `origin/main` (`git diff --stat HEAD origin/main` não acusa mudança em `deep_profiler.rs` nem em `nodeEngine.ts`; `parity_harness.rs` mudou em **+3491/−344**).
+  - **PROF-02 confirmado por inspeção no SHA atual e em `origin/main`:** em `src-tauri/src/tools/deep_profiler.rs`, `dma_per_frame = tile_section_size.min(MD_DMA_VBLANK_BYTES)` (linha 226) e depois `if dma_per_frame > MD_DMA_VBLANK_BYTES` (linha 235). O ramo `Error` é inalcançável por construção e o cálculo de percentual do ramo `Warning` (linha 249) também usa o valor já saturado, de modo que um ROM acima do orçamento é reportado no máximo como `Warning` a 100%. Defeito real, pequeno e testável. **Não corrigido nesta rodada** — correção exige host liberado e vai por ticket com regressão.
+  - **Preservação verificada:** `.worktrees/ui-overhaul-fase-a` continua com **31** arquivos sujos (UI Fase B) e `.claude/cleanup-backups/` continua com os patches de 2026-07-28. Outros worktrees sujos: raiz (15), `RetroDevStudio-ui-fatia1` (1), `.claude/worktrees/node-engine-contract-hardening` (1), `.codex/worktrees/main-validation` (1), `.codex/worktrees/node-engine-local-mvp` (1). Nada foi limpo, movido ou removido.
+  - **Estado dos gates:** `check:tree` **VERMELHO** (GOV-01), host **DRIFTED** (ENV-01). Lint, tsc, `npm test`, clippy e `cargo test` **não executados** nesta rodada — seriam ruído antes da decisão de base, e não teriam valor de certificação com o host bloqueado. Nenhum resultado desta rodada certifica produto.
+  - **Comparação por ID (formato de docs/13; preserva a fotografia de 2026-09-06):**
+
+    | ID baseline | SHA anterior → SHA novo | Cenário/target/core e versão | Antes → depois | Resultado | Evidência durável + SHA-256 | Limites/regressões | Responsável |
+    | --- | --- | --- | --- | --- | --- | --- | --- |
+    | ENV-01 | `0c24538` → `0c24538` | `host:diagnose --profile full`, linux/x64/biglinux | DRIFTED, 7 blockers → idênticos | SEM_MUDANÇA | `src-tauri/target-test/validation/host-readiness.json` (mutável); fingerprint `82f39923…fff5a`, lock `d531c4b9…5bb5d` preservam a fotografia textual | Report é mutável; não substitui `host:certify` | Integrador |
+    | ENV-02 | `0c24538` → `0c24538` | `sudo -n` / disponibilidade de `bigsudo`/`pkexec` | exige senha → exige senha | SEM_MUDANÇA | Saída de terminal desta rodada; bootstrap não reexecutado | Reparo depende do operador; não contornar autenticação | Integrador |
+    | GOV-01 | `0c24538` → `0c24538` | `check:tree` | exit 1 por `.codex`/`.omo`/`.worktrees` → idêntico | SEM_MUDANÇA | Saída do gate | Gate não afrouxado; pastas preservadas | Integrador |
+    | GOV-02 | `0c24538` → `0c24538` | `git worktree list`; `rev-list --left-right` | 12 worktrees, `0 58` vs main local → 12 worktrees, `0 58` local **e 48/17 vs `origin/main`** | SEM_MUDANÇA no fato local; leitura de convergência **corrigida** | `git ls-remote`, `git cherry -v origin/main HEAD` | `main` local obsoleto; a métrica local isolada induz erro | Integrador |
+    | CONV-01 (novo) | — → `9b36d2e` vs `0c24538` | Ancestralidade remota | não medido → programa de host ausente de `origin/main`; branch não publicada | NÃO MEDIDO na baseline; agora **medido** | `git cherry -v` (17 `+`), `git ls-remote --heads origin`, ausência de `scripts/host-manager.mjs` em `origin/main` | Não é regressão de código; é dívida de convergência | Integrador |
+    | PROF-02 | `0c24538` → `0c24538` e `9b36d2e` | Inspeção de `deep_profiler.rs` | condição inalcançável → confirmada, presente também em `origin/main` | SEM_MUDANÇA | `deep_profiler.rs:226,235,243,249` | Confirmado por inspeção, **não** por regressão executada | Integrador → B |
+    | PAR-01 / REL-01 / acessibilidade | `0c24538` → não avaliado em `9b36d2e` | — | — | NÃO MEDIDO | — | `parity_harness.rs` mudou +3491/−344 em `origin/main`; conclusões da baseline não valem lá | — |
+
+  - **Decisão de base (pendente de desempate do operador, ver "Próximo passo"):** não existe base integrada pronta. `origin/main` `9b36d2e` é o destino real e mais avançado, mas **não tem o protocolo de host** que todo o processo exige; `convergence/reproducibility` `0c24538` tem o protocolo, mas está 48 commits atrás e nunca foi publicado. Por isso **nenhuma fatia A/B/C foi liberada**: liberar código antes de resolver a base produziria trabalho sobre um tronco que será rebaseado. A primeira fatia da onda é de convergência, não de feature.
+  - **Tickets registrados (todos `PROPOSTO`; nenhum `LIBERADO`):** INT-01, INT-02, A-01, B-01 e C-01 na seção "1.1 Tickets da rodada INT-R1" abaixo.
+  - **Riscos/bloqueios externos:** (1) reparo do host exige autenticação administrativa do operador — bloqueia `host:certify`, build, emulação e qualquer certificação de runtime; (2) decisão de base é do operador porque implica publicar/mergear o Programa de Reprodutibilidade; (3) Windows continua congelado e não foi tocado; (4) CI remoto não consultado nesta rodada além de `ls-remote`/`fetch`.
+  - **Cronograma:** a janela 1–2 de docs/13 ("Convergência, host, base e contratos") continua **aberta e não iniciada em código**. A faixa de 20–28 semanas permanece hipótese de escopo delimitado; sem reestimativa nesta rodada, por falta de janela executada.
+  - **Próximo passo imediato:** decisão do operador em duas frentes, nesta ordem. (a) **Base:** autorizar a convergência do Programa de Reprodutibilidade com `origin/main` — merge de `origin/main` em `convergence/reproducibility`, push da branch e PR para `main` — ou instruir o contrário. (b) **Host:** em terminal interativo, executar `bash scripts/bootstrap.sh --ensure --profile full`, autenticar o prompt, repetir para idempotência e então `npm run host:diagnose`; sem `READY` nada de produto é editável. Com (a) e (b) resolvidos, o integrador reexecuta a baseline no SHA de destino, promove INT-02 e converte A-01/B-01/C-01 em `LIBERADO`.
+
+### 1.1 Tickets da rodada INT-R1 (2026-09-06)
+
+Formato de `docs/13_PLANO_EXECUCAO_PARALELA.md`. Nenhum ticket autoriza edição de produto enquanto ENV-01/ENV-02 e GOV-01 não fecharem.
+
+```text
+Ticket: INT-01 — Convergência da base e decisão de tronco
+Rodada / objetivo / IDs de baseline: INT-R1 / eliminar a divergência 48/17 e definir a base integrada / GOV-02, CONV-01
+Base SHA completo / branch destino: 0c245386c2f1144ad4458b4f0c95c0f9d2f997b5 (convergence/reproducibility) vs 9b36d2e00b228a6be3764dbd7d35f5182a78d292 (origin/main)
+Agente / branch codex/... / worktree absoluto externo à raiz: Integrador / a definir após autorização / a definir
+Arquivos permitidos (lista exata) / arquivos reservados a outros: nenhum arquivo de produto; apenas resolução de merge sob autorização explícita
+Comportamento antes → depois / fora do escopo: dois troncos incompatíveis → um tronco com protocolo de host e o trabalho de UI/parity de main. Fora do escopo: qualquer feature nova
+Contratos já integrados / dependências pendentes: nenhum; depende da decisão do operador
+Host fingerprint / lock digest / READY: 82f39923…fff5a / d531c4b9…5bb5d / NÃO (DRIFTED)
+Projeto/corpus permitido / diretório de evidências / janela exclusiva: n/a nesta fase
+Testes de aceitação / gates aplicáveis: baseline completa de docs/07 §3 no SHA de destino, após host READY
+Status operacional: PROPOSTO (aguarda decisão do operador)
+```
+
+```text
+Ticket: INT-02 — Recuperar check:tree sem afrouxar o gate e sem perder trabalho
+Rodada / objetivo / IDs de baseline: INT-R1 / remover .codex, .omo e .worktrees da raiz preservando integralmente o conteúdo / GOV-01
+Base SHA completo / branch destino: a definir por INT-01
+Agente / branch codex/... / worktree absoluto externo à raiz: Integrador
+Arquivos permitidos (lista exata) / arquivos reservados a outros: nenhum arquivo versionado; operação é de layout de worktrees (`git worktree move`), não de conteúdo
+Comportamento antes → depois / fora do escopo: check:tree exit 1 → exit 0 com todos os worktrees vivos e sujos preservados fora da raiz. Fora do escopo: editar scripts/check-tree.cjs ou docs/08 para tolerar as pastas, e remover qualquer worktree
+Contratos já integrados / dependências pendentes: exige confirmação de que nenhuma sessão A/B/C está usando os worktrees no momento da movimentação
+Host fingerprint / lock digest / READY: irrelevante para a operação; relevante para revalidar depois
+Projeto/corpus permitido / diretório de evidências / janela exclusiva: janela exclusiva obrigatória — worktree não pode ser movido sob uso concorrente
+Testes de aceitação / gates aplicáveis: `npm run check:tree` exit 0; `git worktree list` com 12 entradas válidas; `.worktrees/ui-overhaul-fase-a` mantendo seus 31 arquivos sujos; `.claude/cleanup-backups/` intacto
+Status operacional: PROPOSTO (não executar sem janela exclusiva confirmada)
+```
+
+```text
+Ticket: A-01 — Auditar comportamento já suportado no compilador
+Rodada / objetivo / IDs de baseline: INT-R1 / diagnóstico read-only; produzir achado com arquivo, linha e teste esperado / NODE-01, IMP-01
+Base SHA completo / branch destino: a definir por INT-01
+Arquivos permitidos: nenhum (somente leitura) até liberação
+Status operacional: PROPOSTO — diagnóstico autorizado, edição não
+```
+
+```text
+Ticket: B-01 — PROF-02: condição de overflow de DMA inalcançável
+Rodada / objetivo / IDs de baseline: INT-R1 / reproduzir por regressão antes de corrigir; preservar a distinção entre estimativa estática e medição dinâmica / PROF-01, PROF-02
+Base SHA completo / branch destino: a definir por INT-01
+Arquivos permitidos (lista exata): src-tauri/src/tools/deep_profiler.rs e sua cobertura no mesmo arquivo
+Comportamento antes → depois: ramo Error inalcançável (valor saturado por `.min()` comparado com o próprio teto) → orçamento comparado contra `tile_section_size`, mantendo o heatmap saturado; percentual do Warning deixa de travar em 100%
+Fora do escopo: transformar estimativa em medição, tocar parity_harness.rs ou libretro_ffi.rs, alterar constantes de docs/04
+Testes de aceitação: regressão que falha antes da correção — ROM com seção de tiles acima de MD_DMA_VBLANK_BYTES produz `Severity::Error`; ROM abaixo do teto continua sem Error. Gates de docs/13 §Validação
+Status operacional: PROPOSTO — defeito confirmado por inspeção, correção não liberada
+```
+
+```text
+Ticket: C-01 — Acessibilidade/erro em componente isolado
+Rodada / objetivo / IDs de baseline: INT-R1 / identificar e propor; corrigir somente após confirmação do defeito e do escopo
+Base SHA completo / branch destino: a definir por INT-01 — obrigatório, porque `origin/main` já trouxe diálogos acessíveis e tokens semânticos que a baseline não avaliou
+Arquivos permitidos: nenhum até liberação; App.tsx, ViewportPanel.tsx, NodeGraphEditor.tsx, InspectorPanel.tsx, ToolsPanel.tsx e ArtStudioPanel.tsx permanecem reservados
+Status operacional: PROPOSTO — diagnóstico autorizado, edição não
+```
+
+* **O que acabou de acontecer (2026-09-06 — avaliação e preparação documental de quatro agentes):**
+  - **Autorização:** usuário pediu preservar a avaliação para comparação futura e criar prompts Integrador/A/B/C. Escopo executado exclusivamente documental; nenhum agente de implementação iniciado e nenhum ticket de código liberado.
+  - **Base avaliada:** `convergence/reproducibility`, `0c245386c2f1144ad4458b4f0c95c0f9d2f997b5`. Avaliação estática com resultados de host/estrutura; suíte completa, emulação oficial e CI remoto não executados nesta avaliação. Resultados históricos não equivalem a certificação atual.
+  - **Artefatos:** [baseline histórica](AVALIACAO_DESENVOLVIMENTO_2026_09_06.md), [plano/tickets/comparação](13_PLANO_EXECUCAO_PARALELA.md) e prompts [Integrador](PROMPT_AGENTE_INTEGRADOR.md), [A](PROMPT_AGENTE_A.md), [B](PROMPT_AGENTE_B.md), [C](PROMPT_AGENTE_C.md). Árvore documental atualizada. Snapshot não deve ser sobrescrito; deltas futuros entram nesta cronologia por ID/SHA/cenário/evidência, maturidade exclusivamente no roadmap.
+  - **Bloqueios observados:** host:diagnose exit 10/DRIFTED; bootstrap full exit 1 por autenticação sudo; check:tree exit 1 por `.codex`, `.omo`, `.worktrees`. 12 worktrees registrados; HEAD 58 ahead/0 behind do main local, sem inferir remoto. Trabalho alheio e pastas preexistentes preservados.
+  - **Decisão operacional:** integrador reserva arquivos centrais e libera allowlists exclusivas; A compila/semântica, B runtime/evidências, C UI/QA delimitado. Leitura e diagnóstico paralelos podem começar; edição só com base/ticket/READY. Certificação de host serializada. Windows permanece sujeito ao congelamento registrado, não revogado por este planejamento.
+  - **Estimativa:** 20–28 semanas para escopo delimitado, a reestimar após duas semanas; não compromisso, não autorização de fases futuras. Instrumentação e importação ampla exigem provas e estimativas separadas.
+  - **Validação documental:** links locais e estrutura interna dos seis documentos verificados; `git diff --check` executado. Gate global check:tree permanece bloqueado pelos diretórios preexistentes; não houve certificação de produto nem commit/push de entrega com gates verdes.
+  - **Próximo passo imediato:** iniciar pelo `docs/PROMPT_AGENTE_INTEGRADOR.md`; A/B/C podem ler seus prompts em paralelo. Integrador revalida host e convergência, preserva trabalhos e registra primeiro ticket com SHA completo, paths, aceitação e janela de certificação. Não iniciar código para contornar host bloqueado.
 
 * **O que acabou de acontecer (2026-07-17 - gaps executaveis no Linux fechados, Windows congelado):**
   - **Etapa/status:** Etapas 0, 1, 2 e 4 continuam **CONCLUIDAS**. A Etapa 3 foi **CONGELADA POR DECISAO DO OPERADOR** e continua pendente, nao aprovada. As implementacoes comuns/Linux das Etapas 5 e 6 foram realizadas, mas o programa formal permanece **BLOQUEADO NA ETAPA 3** pela regra sequencial. A extracao arquitetural e o rehearsal Linux sao preparacao conservadora para 7/8, nao conclusao antecipada dessas etapas.
