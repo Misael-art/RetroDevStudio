@@ -973,7 +973,13 @@ function npmCommand() {
   return process.platform === "win32" ? "npm.cmd" : "npm";
 }
 
-async function waitFor(predicate, timeoutMs, label, intervalMs = 500) {
+/**
+ * `abortWhen` permite desistir cedo quando o app ja informou que a condicao
+ * esperada nunca vai acontecer. Sem isso, um sinal explicito de falha e
+ * ignorado e a espera queima o orcamento inteiro, reportando timeout no lugar
+ * da causa real. Deve devolver a razao (string) para abortar, ou algo falsy.
+ */
+async function waitFor(predicate, timeoutMs, label, intervalMs = 500, abortWhen = null) {
   const startedAt = Date.now();
   let lastError = null;
 
@@ -983,6 +989,24 @@ async function waitFor(predicate, timeoutMs, label, intervalMs = 500) {
       if (result) return result;
     } catch (error) {
       lastError = error;
+    }
+    if (abortWhen) {
+      // Erro na deteccao de aborto nao pode derrubar a espera: o caminho normal
+      // continua ate o timeout, que e o comportamento anterior.
+      let abortReason = null;
+      try {
+        abortReason = await abortWhen();
+      } catch {
+        abortReason = null;
+      }
+      if (abortReason) {
+        const elapsedMs = Date.now() - startedAt;
+        fail(`${label}: abortado apos ${elapsedMs}ms — ${abortReason}`, {
+          statusCode: "build_failed",
+          errorCategory: "build_failure",
+          details: { timeoutMs, elapsedMs, label, abortReason },
+        });
+      }
     }
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
@@ -1007,6 +1031,35 @@ async function waitFor(predicate, timeoutMs, label, intervalMs = 500) {
     errorCategory: "timeout",
     details: { timeoutMs, elapsedMs, label },
   });
+}
+
+/**
+ * Detecta que o build ja falhou, olhando o console estruturado do app.
+ * Devolve a razao para abortar, ou `null` quando nao ha falha observada.
+ *
+ * Usa apenas sinais estruturados (`level`/`diagnostic.area`), nao substring de
+ * mensagem, para nao abortar por texto incidental de um cenario legitimo.
+ */
+async function detectBuildFailure(sessionId, sinceIndex = 0) {
+  const entries = await executeScript(
+    sessionId,
+    "return window.__RDS_E2E__?.getState()?.consoleEntries ?? [];"
+  );
+  if (!Array.isArray(entries)) {
+    return null;
+  }
+  // Ignora o que ja estava no console antes desta execucao: um erro de build
+  // anterior no mesmo cenario nao pode abortar a espera atual.
+  const failure = entries.slice(sinceIndex).find(
+    (entry) =>
+      entry?.level === "error" &&
+      (entry?.diagnostic?.area === "build_sgdk" || entry?.diagnostic?.area === "build_snes")
+  );
+  if (!failure) {
+    return null;
+  }
+  const detail = failure.diagnostic?.technical_detail || failure.message || "sem detalhe";
+  return `build falhou (${failure.diagnostic.area}): ${detail}`;
 }
 
 async function webdriverRequest(method, route, body) {
@@ -6174,6 +6227,11 @@ async function main() {
       fail(diagnostics ? `${details}\n${diagnostics}` : details);
     }
 
+    const consoleEntriesBeforeBuild = await executeScript(
+      sessionId,
+      "return window.__RDS_E2E__?.getState()?.consoleEntries?.length ?? 0;"
+    );
+
     await clickByTestId(sessionId, "toolbar-build-run");
 
     try {
@@ -6187,7 +6245,10 @@ async function main() {
         },
         emulatorActivationTimeoutMs,
         "Emulador nao ficou ativo apos Build & Run",
-        1000
+        1000,
+        // Se o build falhou, a ROM nao existe e o emulador nunca vai ativar.
+        // Esperar o orcamento inteiro so troca a causa real por um timeout.
+        () => detectBuildFailure(sessionId, consoleEntriesBeforeBuild)
       );
     } catch (error) {
       const diagnostics = formatAppDiagnostics(await collectAppDiagnostics(sessionId));

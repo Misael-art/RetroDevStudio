@@ -117,24 +117,12 @@ jobs:
         id: build_debug
         run: npm run build:debug
 
-      # `RDS_E2E_RUN_TIMEOUT_MS` cronometra Build & Run dentro do app. Se a
-      # toolchain oficial ainda nao estiver no cache gerenciado, o Runtime Setup
-      # baixa SGDK/PVSnesLib/cores (~950 MB) DENTRO dessa janela, e a espera
-      # estoura por download lento em vez de por defeito de produto.
-      # Evidencia: falhas em 5m08s e 5m11s contra orcamento de 5m00s
-      # (runs 34244326095 e 34175703269), com curl ainda em progresso no
-      # consoleTail. Provisionar aqui, pelo caminho canonico, deixa o orcamento
-      # medir apenas Build & Run.
-      - name: Warm official toolchain cache (canonical host manager)
-        run: npm run host:ensure
-
       - name: Report resolved target
         run: |
           Write-Host "Desktop E2E target: $env:RDS_E2E_TARGET"
           Write-Host "Desktop E2E driver startup timeout: $env:RDS_E2E_DRIVER_TIMEOUT_MS ms"
           Write-Host "Desktop E2E UI bootstrap timeout: $env:RDS_E2E_UI_TIMEOUT_MS ms"
           Write-Host "Desktop E2E timeout: $env:RDS_E2E_RUN_TIMEOUT_MS ms"
-          Write-Host "Toolchain oficial provisionada antes do cronometro: o orcamento acima cobre apenas Build & Run."
 
       - name: Initialize desktop E2E pass ledger
         run: |
