@@ -107,6 +107,19 @@ describe("Console actionable diagnostics", () => {
     expect(clipboardWrite).toHaveBeenCalledWith(expect.stringContaining("Acao recomendada"));
   });
 
+  it("announces diagnostic entries to assistive technology via a live log region", () => {
+    act(() => {
+      useEditorStore.getState().logDiagnostic(buildDiagnostic);
+    });
+    root = renderConsole(container);
+
+    const logRegion = container.querySelector('[role="log"]');
+    expect(logRegion).not.toBeNull();
+    expect(logRegion?.getAttribute("aria-live")).toBe("polite");
+    expect(logRegion?.getAttribute("aria-label")).toBe("Saida do console");
+    expect(logRegion?.textContent).toContain("Build falhou porque");
+  });
+
   it("shows non-diagnostic entries when filter is all", () => {
     act(() => {
       useEditorStore.getState().logMessage("info", "Projeto carregado.");

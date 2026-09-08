@@ -1987,6 +1987,16 @@ where
                     let sgdk_env = sgdk_make_safe_path(&toolchain.root);
                     command.env("SGDK", &sgdk_env);
                     command.env("GDK", &sgdk_env);
+                    if configure_windows_shell(&mut command).is_some() {
+                        // SGDK's common.mk assigns SHELL with `:=`, so the
+                        // command-line variable is required to override it.
+                        // Keep the value space-free; the Git Bash bin dir is
+                        // already first in PATH by configure_windows_shell.
+                        // The bundled Windows make can crash when concurrent
+                        // Cygwin recipes use the alternate shell.
+                        command.arg("-j1");
+                        command.arg("SHELL=sh.exe");
+                    }
                     configure_java_for_sgdk(&mut command);
                     if let Ok(extra_flags) = std::env::var("RDS_EXTRA_FLAGS") {
                         let extra_flags = extra_flags.trim();
@@ -2351,6 +2361,17 @@ fn detect_root(env_var: &str, local_dir_name: &str) -> Option<PathBuf> {
         }
     }
 
+    if let Some(managed) = active_host_toolchain_root(local_dir_name) {
+        let usable = if local_dir_name == "sgdk" {
+            is_sgdk_root_usable_on_host(&managed)
+        } else {
+            managed.join("devkitsnes").join("snes_rules").exists()
+        };
+        if usable {
+            return Some(managed);
+        }
+    }
+
     let local = repo_root().join("toolchains").join(local_dir_name);
     if local_dir_name == "sgdk" {
         if is_sgdk_root_usable_on_host(&local) {
@@ -2362,6 +2383,75 @@ fn detect_root(env_var: &str, local_dir_name: &str) -> Option<PathBuf> {
     }
 
     None
+}
+
+#[derive(serde::Deserialize)]
+struct ActiveHostPointer {
+    native_cache: PathBuf,
+}
+
+fn active_host_toolchain_root(local_dir_name: &str) -> Option<PathBuf> {
+    let readiness_id = match local_dir_name {
+        "sgdk" => Some("sgdk"),
+        "pvsneslib" => Some("pvsneslib"),
+        _ => None,
+    };
+    if let Some(path) = readiness_id.and_then(host_readiness_check_path) {
+        return Some(path);
+    }
+
+    let cache_base = std::env::var_os("RDS_HOST_CACHE")
+        .map(PathBuf::from)
+        .or_else(|| {
+            if cfg!(target_os = "windows") {
+                std::env::var_os("LOCALAPPDATA")
+                    .map(PathBuf::from)
+                    .map(|path| path.join("RetroDevStudio").join("cache"))
+            } else {
+                std::env::var_os("XDG_CACHE_HOME")
+                    .map(PathBuf::from)
+                    .or_else(|| {
+                        std::env::var_os("HOME").map(|path| PathBuf::from(path).join(".cache"))
+                    })
+                    .map(|path| path.join("retrodevstudio"))
+            }
+        })?;
+    let pointer_path = cache_base.join("active-host.json");
+    let pointer = fs::read_to_string(pointer_path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<ActiveHostPointer>(&raw).ok())?;
+    Some(pointer.native_cache.join("toolchains").join(local_dir_name))
+}
+
+#[derive(serde::Deserialize)]
+struct HostReadinessReport {
+    checks: Vec<HostReadinessCheck>,
+}
+
+#[derive(serde::Deserialize)]
+struct HostReadinessCheck {
+    id: String,
+    status: String,
+    path: Option<PathBuf>,
+}
+
+fn host_readiness_check_path(check_id: &str) -> Option<PathBuf> {
+    let report_path = std::env::var_os("RDS_HOST_READINESS_REPORT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            repo_root()
+                .join("src-tauri")
+                .join("target-test")
+                .join("validation")
+                .join("host-readiness.json")
+        });
+    let raw = fs::read_to_string(report_path).ok()?;
+    let report = serde_json::from_str::<HostReadinessReport>(&raw).ok()?;
+    report
+        .checks
+        .into_iter()
+        .find(|check| check.id == check_id && check.status == "ready")
+        .and_then(|check| check.path)
 }
 
 fn is_sgdk_root_usable_on_host(root: &Path) -> bool {
@@ -2391,7 +2481,36 @@ fn configure_java_for_sgdk(command: &mut Command) {
     prepend_to_path(command, &java_home.join("bin"));
 }
 
+fn configure_windows_shell(command: &mut Command) -> Option<PathBuf> {
+    if !cfg!(target_os = "windows") {
+        return None;
+    }
+
+    let bash_program = detect_bash_program()?;
+    let bin_dir = bash_program.parent()?;
+    let sh_program = bin_dir.join("sh.exe");
+    if !sh_program.is_file() {
+        return None;
+    }
+
+    // The SGDK Windows archive bundles a Cygwin shell that crashes on the
+    // hosted Windows runner. GNU make honors SHELL, so prefer the installed
+    // Git Bash/MSYS shell while keeping the official SGDK make/compiler.
+    command.env("SHELL", "sh.exe");
+    prepend_to_path(command, bin_dir);
+    Some(sh_program)
+}
+
 fn detect_make_program(root: &Path) -> Option<PathBuf> {
+    if cfg!(target_os = "windows") {
+        // The SGDK release bundles a Cygwin make that can crash on newer
+        // hosted Windows images. Prefer the runner's native MinGW make when
+        // present, while retaining the official bundled fallback below.
+        if let Some(system_make) = find_in_path(&["mingw32-make"]) {
+            return Some(system_make);
+        }
+    }
+
     let mut candidates = vec![
         root.join("bin").join(platform_make_name()),
         root.join(platform_make_name()),
@@ -2419,6 +2538,7 @@ fn detect_java_home() -> Option<PathBuf> {
     std::env::var_os("JAVA_HOME")
         .map(PathBuf::from)
         .filter(|path| is_java_home_candidate(path))
+        .or_else(|| active_host_toolchain_root("jdk").filter(|path| is_java_home_candidate(path)))
         .or_else(|| {
             let local = repo_root().join("toolchains").join("jdk");
             is_java_home_candidate(&local).then_some(local)
@@ -2427,8 +2547,8 @@ fn detect_java_home() -> Option<PathBuf> {
 
 fn detect_bash_program() -> Option<PathBuf> {
     [
-        r"C:\Program Files\Git\bin\bash.exe",
         r"C:\Program Files\Git\usr\bin\bash.exe",
+        r"C:\Program Files\Git\bin\bash.exe",
         r"C:\msys64\usr\bin\bash.exe",
     ]
     .into_iter()
@@ -2828,9 +2948,14 @@ mod tests {
         let env = BuildEnvironment::detect();
 
         assert_eq!(env.sgdk_root.as_deref(), Some(sgdk_root.as_path()));
+        let expected_make = if cfg!(target_os = "windows") {
+            find_in_path(&["mingw32-make"]).unwrap_or_else(|| detected_make.clone())
+        } else {
+            detected_make.clone()
+        };
         assert_eq!(
             env.sgdk_make_program.as_deref(),
-            Some(detected_make.as_path())
+            Some(expected_make.as_path())
         );
 
         let _ = fs::remove_dir_all(sgdk_root);

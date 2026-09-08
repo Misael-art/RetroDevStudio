@@ -189,7 +189,12 @@ export default function Console({ variant = "drawer" }: ConsoleProps) {
           ) : null}
 
           <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(260px,360px)]">
-            <div className="min-h-0 overflow-y-auto px-3 py-1 font-mono text-xs">
+            <div
+              role="log"
+              aria-live="polite"
+              aria-label="Saida do console"
+              className="min-h-0 overflow-y-auto px-3 py-1 font-mono text-xs"
+            >
               {filteredEntries.length === 0 ? (
                 <span className="text-[#45475a] italic">Nenhuma saída para os filtros.</span>
               ) : (
