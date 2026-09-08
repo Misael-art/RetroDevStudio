@@ -193,7 +193,10 @@ export function nativeCacheBase(host, env = process.env) {
 }
 
 function executableExtensions(platform) {
-  return platform === "win32" ? ["", ".exe", ".cmd", ".bat"] : [""];
+  // Windows command shims must win over extensionless files. In particular,
+  // hosted Node installations can expose an extensionless npm path that is
+  // not directly spawnable while npm.cmd is the actual launcher.
+  return platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""];
 }
 
 function resolveVsWhere(host, env) {

@@ -426,6 +426,7 @@ describe("host detection and probes", () => {
 
   posixCommandFixtureIt("installs the exact npm pin rather than accepting a compatible major", () => {
     const directory = tempDir();
+    executable(directory, "npm", "#!/bin/sh\nexit 91\n");
     const npm = executable(directory, "npm.cmd", "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$RDS_NPM_ARGS\"\n");
     const result = installRequirement(
       { id: "npm", label: "npm", probe: { kind: "command" }, install_by_platform: { win32: { kind: "npm", version: "11.16.0" } } },
