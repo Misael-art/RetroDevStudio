@@ -2491,9 +2491,10 @@ fn configure_windows_shell(command: &mut Command) -> Option<PathBuf> {
     // The SGDK Windows archive bundles a Cygwin shell that crashes on the
     // hosted Windows runner. GNU make honors SHELL, so prefer the installed
     // Git Bash/MSYS shell while keeping the official SGDK make/compiler.
-    command.env("SHELL", &sh_program);
+    let shell_program = sgdk_make_safe_path(&sh_program);
+    command.env("SHELL", &shell_program);
     prepend_to_path(command, bin_dir);
-    Some(sh_program)
+    Some(shell_program)
 }
 
 fn detect_make_program(root: &Path) -> Option<PathBuf> {
