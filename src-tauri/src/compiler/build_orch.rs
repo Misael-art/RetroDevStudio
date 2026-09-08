@@ -2535,8 +2535,8 @@ fn detect_java_home() -> Option<PathBuf> {
 
 fn detect_bash_program() -> Option<PathBuf> {
     [
-        r"C:\Program Files\Git\bin\bash.exe",
         r"C:\Program Files\Git\usr\bin\bash.exe",
+        r"C:\Program Files\Git\bin\bash.exe",
         r"C:\msys64\usr\bin\bash.exe",
     ]
     .into_iter()
