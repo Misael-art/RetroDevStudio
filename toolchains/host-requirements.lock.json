@@ -221,6 +221,10 @@
           "--version"
         ],
         "version_pattern": "^11\\.16\\.0$"
+      },
+      "install": {
+        "kind": "npm",
+        "version": "11.16.0"
       }
     },
     {
@@ -985,13 +989,8 @@
         "win32"
       ],
       "probe": {
-        "kind": "command",
-        "names": [
-          "msedge.exe"
-        ],
-        "version_args": [
-          "--version"
-        ]
+        "kind": "webview2",
+        "version_pattern": "^\\d+\\.\\d+\\.\\d+\\.\\d+$"
       },
       "install": {
         "kind": "winget",

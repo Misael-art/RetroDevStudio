@@ -16,6 +16,7 @@ import {
   ensurePortableArtifact,
   expandTokens,
   installSourceBuild,
+  installRequirement,
   isSupportedHost,
   pacmanBatchPlan,
   privilegedPacmanCommand,
@@ -359,6 +360,76 @@ describe("host detection and probes", () => {
     const program = executable(directory, "native-tool");
 
     expect(resolveCommand(["native-tool"], { platform: "linux" }, { RDS_HOST_TEST_PATH: directory, PATH: directory })).toBe(program);
+  });
+
+  it("finds MSVC through vswhere when cl.exe is not on the ordinary PATH", () => {
+    const directory = tempDir();
+    const vswhere = executable(directory, "vswhere.exe", "#!/bin/sh\nprintf '%s\\n' \"$RDS_TEST_CL_PATH\"\n");
+    const clPath = path.join(directory, "Visual Studio Build Tools", "VC", "Tools", "MSVC", "14.44", "bin", "Hostx64", "x64", "cl.exe");
+    executable(path.dirname(clPath), "cl.exe", "#!/bin/sh\nprintf 'Microsoft (R) C/C++ Optimizing Compiler Version 19.44\\n'\n");
+
+    const result = probeRequirement(
+      { id: "msvc", label: "MSVC", probe: { kind: "command", names: ["cl.exe"], version_args: [] } },
+      {
+        repo: directory,
+        hostCache: directory,
+        host: { platform: "win32", arch: "x64" },
+        pathEnv: directory,
+        env: { PATH: directory, RDS_VSWHERE_PATH: vswhere, RDS_TEST_CL_PATH: clPath },
+      },
+    );
+
+    expect(result).toMatchObject({ status: "ready", path: clPath, installed: true });
+  });
+
+  it("reports MSVC as missing when neither PATH nor Visual Studio discovery provides cl.exe", () => {
+    const directory = tempDir();
+    const result = probeRequirement(
+      { id: "msvc", label: "MSVC", probe: { kind: "command", names: ["cl.exe"], version_args: [] } },
+      {
+        repo: directory,
+        hostCache: directory,
+        host: { platform: "win32", arch: "x64" },
+        pathEnv: directory,
+        env: { PATH: directory },
+      },
+    );
+
+    expect(result).toMatchObject({ status: "missing", installed: false, compatible: false });
+  });
+
+  it("distinguishes WebView2 runtime registry presence from Edge browser presence", () => {
+    const directory = tempDir();
+    executable(directory, "reg.exe", "#!/bin/sh\nprintf '    pv    REG_SZ    %s\\n' \"$RDS_TEST_WEBVIEW2_VERSION\"\n");
+    const requirement = {
+      id: "webview2",
+      label: "WebView2",
+      probe: { kind: "webview2", registry_keys: ["HKCU\\Software\\RDS\\WebView2"], version_pattern: "^\\d+\\.\\d+\\.\\d+\\.\\d+$" },
+    };
+    const context = {
+      repo: directory,
+      hostCache: directory,
+      host: { platform: "win32", arch: "x64" },
+      pathEnv: directory,
+      env: { PATH: directory, RDS_TEST_WEBVIEW2_VERSION: "140.0.1.2" },
+    };
+
+    expect(probeRequirement(requirement, context)).toMatchObject({ status: "ready", version: "140.0.1.2" });
+    expect(probeRequirement(requirement, { ...context, env: { ...context.env, RDS_TEST_WEBVIEW2_VERSION: "not-a-runtime" } })).toMatchObject({ status: "incompatible" });
+    expect(probeRequirement(requirement, { ...context, pathEnv: path.join(directory, "missing with spaces") })).toMatchObject({ status: "missing" });
+  });
+
+  it("installs the exact npm pin rather than accepting a compatible major", () => {
+    const directory = tempDir();
+    const npm = executable(directory, "npm.cmd", "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$RDS_NPM_ARGS\"\n");
+    const result = installRequirement(
+      { id: "npm", label: "npm", probe: { kind: "command" }, install_by_platform: { win32: { kind: "npm", version: "11.16.0" } } },
+      { host: { platform: "win32", arch: "x64" }, hostCache: directory, pathEnv: directory, env: { PATH: directory, RDS_NPM_ARGS: path.join(directory, "args.txt") } },
+      {},
+    );
+    expect(npm).toBeTruthy();
+    expect(result.ok).toBe(true);
+    expect(readFileSync(path.join(directory, "args.txt"), "utf8")).toContain("npm@11.16.0");
   });
 
   posixIt("prefers the pinned bootstrap Node and npm over incompatible host versions", () => {

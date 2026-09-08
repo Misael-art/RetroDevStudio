@@ -111,12 +111,13 @@ export function validateManifest(manifest) {
     else ids.add(requirement.id);
     if (!requirement.label) errors.push(`requirement_label_missing:${requirement.id ?? "unknown"}`);
     if (!requirement.probe?.kind) errors.push(`requirement_probe_missing:${requirement.id ?? "unknown"}`);
-    else if (!new Set(["command", "commands_all", "pkg_config_all", "path", "file_any"]).has(requirement.probe.kind)) {
+    else if (!new Set(["command", "commands_all", "pkg_config_all", "path", "file_any", "webview2"]).has(requirement.probe.kind)) {
       errors.push(`requirement_probe_unknown:${requirement.id}:${requirement.probe.kind}`);
     }
     const installs = [requirement.install, ...Object.values(requirement.install_by_platform ?? {})].filter(Boolean);
     for (const install of installs) {
       if (install.kind === "cargo" && !install.version) errors.push(`cargo_version_missing:${requirement.id}`);
+      if (install.kind === "npm" && !install.version) errors.push(`npm_version_missing:${requirement.id}`);
       const referencedArtifacts = [
         install.artifact,
         ...Object.values(install.artifact_by_platform ?? {}),
@@ -195,6 +196,121 @@ function executableExtensions(platform) {
   return platform === "win32" ? ["", ".exe", ".cmd", ".bat"] : [""];
 }
 
+function resolveVsWhere(host, env) {
+  if (host.platform !== "win32") return null;
+  const explicit = env.RDS_VSWHERE_PATH;
+  if (explicit && existsSync(explicit)) return explicit;
+  return resolveCommand(["vswhere.exe"], host, env);
+}
+
+function resolveMsvcCommand(host, env) {
+  if (host.platform !== "win32") return null;
+
+  const vcToolsInstallDir = env.VCToolsInstallDir;
+  if (vcToolsInstallDir) {
+    const direct = path.join(vcToolsInstallDir, "bin", "Hostx64", "x64", "cl.exe");
+    if (existsSync(direct)) return direct;
+  }
+
+  const vswhere = resolveVsWhere(host, env);
+  if (!vswhere) return null;
+  const result = spawnSync(
+    vswhere,
+    [
+      "-latest",
+      "-products",
+      "*",
+      "-requires",
+      "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+      "-find",
+      "VC\\Tools\\MSVC\\**\\bin\\Hostx64\\x64\\cl.exe",
+    ],
+    { encoding: "utf8", env, windowsHide: true },
+  );
+  if (result.status !== 0) return null;
+  return `${result.stdout ?? ""}`.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? null;
+}
+
+const WEBVIEW2_CLIENT_GUID = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+
+function webView2RegistryKeys(probe) {
+  return probe.registry_keys ?? [
+    `HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\${WEBVIEW2_CLIENT_GUID}`,
+    `HKLM\\SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\${WEBVIEW2_CLIENT_GUID}`,
+    `HKCU\\Software\\Microsoft\\EdgeUpdate\\Clients\\${WEBVIEW2_CLIENT_GUID}`,
+  ];
+}
+
+function probeWebView2(requirement, context) {
+  const probe = requirement.probe;
+  if (context.host.platform !== "win32") {
+    return { id: requirement.id, label: requirement.label, applicable: false, status: "not_applicable" };
+  }
+  const env = { ...(context.env ?? process.env), PATH: context.pathEnv };
+  const reg = resolveCommand(["reg.exe"], context.host, env);
+  if (!reg) {
+    return {
+      id: requirement.id,
+      label: requirement.label,
+      applicable: true,
+      status: "missing",
+      installed: false,
+      compatible: false,
+      path: null,
+      version: null,
+      install_supported: Boolean(requirementInstall(requirement, context.host.platform)),
+    };
+  }
+  let incompatibleVersion = null;
+  let incompatibleKey = null;
+  for (const key of webView2RegistryKeys(probe)) {
+    const result = spawnSync(reg, ["query", key, "/v", "pv"], { encoding: "utf8", env, windowsHide: true });
+    if (result.status !== 0) continue;
+    const version = `${result.stdout ?? ""}`.match(/\bpv\s+REG_\w+\s+([^\r\n]+)/i)?.[1]?.trim() ?? null;
+    if (!version) continue;
+    const compatible = !probe.version_pattern || new RegExp(probe.version_pattern, "i").test(version);
+    if (compatible) {
+      return {
+        id: requirement.id,
+        label: requirement.label,
+        applicable: true,
+        status: "ready",
+        installed: true,
+        compatible: true,
+        path: key,
+        version,
+        install_supported: Boolean(requirementInstall(requirement, context.host.platform)),
+      };
+    }
+    incompatibleVersion ??= version;
+    incompatibleKey ??= key;
+  }
+  if (incompatibleVersion) {
+    return {
+      id: requirement.id,
+      label: requirement.label,
+      applicable: true,
+      status: "incompatible",
+      installed: true,
+      compatible: false,
+      path: incompatibleKey,
+      version: incompatibleVersion,
+      install_supported: Boolean(requirementInstall(requirement, context.host.platform)),
+    };
+  }
+  return {
+    id: requirement.id,
+    label: requirement.label,
+    applicable: true,
+    status: "missing",
+    installed: false,
+    compatible: false,
+    path: null,
+    version: null,
+    install_supported: Boolean(requirementInstall(requirement, context.host.platform)),
+  };
+}
+
 export function resolveCommand(names, host, env = process.env) {
   const searchPath = env.RDS_HOST_TEST_PATH ?? env.PATH ?? "";
   const pathEntries = searchPath.split(path.delimiter).filter(Boolean);
@@ -202,6 +318,10 @@ export function resolveCommand(names, host, env = process.env) {
   if (!pathEntries.includes(cargoBin)) pathEntries.unshift(cargoBin);
   for (const name of names ?? []) {
     if (host.platform !== "win32" && /\.(?:exe|cmd|bat)$/i.test(name)) continue;
+    if (host.platform === "win32" && name.toLowerCase() === "cl.exe") {
+      const msvc = resolveMsvcCommand(host, env);
+      if (msvc) return msvc;
+    }
     if (path.isAbsolute(name) && existsSync(name)) return name;
     for (const entry of pathEntries) {
       for (const extension of executableExtensions(host.platform)) {
@@ -284,6 +404,7 @@ export function probeRequirement(requirement, context) {
     return { id: requirement.id, label: requirement.label, applicable: false, status: "not_applicable" };
   }
   const probe = requirement.probe;
+  if (probe.kind === "webview2") return probeWebView2(requirement, context);
   const env = { ...(context.env ?? process.env), PATH: context.pathEnv };
   let detectedPath = null;
   let version = null;
@@ -943,7 +1064,7 @@ export function installSourceBuild(requirement, context, options) {
   };
 }
 
-function installRequirement(requirement, context, options) {
+export function installRequirement(requirement, context, options) {
   const install = requirementInstall(requirement, context.host.platform);
   if (!install) return { id: requirement.id, ok: false, skipped: true, reason: "installer_not_defined" };
   if (options.dryRun) return { id: requirement.id, ok: true, dry_run: true, install };
@@ -951,7 +1072,7 @@ function installRequirement(requirement, context, options) {
   if (install.kind === "artifact_files") return installArtifactFiles(requirement, context, options);
   if (install.kind === "source_build") return installSourceBuild(requirement, context, options);
   if (options.offline) return { id: requirement.id, ok: false, skipped: true, reason: "offline_missing" };
-  const env = { ...process.env, PATH: context.pathEnv, CARGO_TARGET_DIR: path.join(context.hostCache, "cargo-install-target") };
+  const env = { ...(context.env ?? process.env), PATH: context.pathEnv, CARGO_TARGET_DIR: path.join(context.hostCache, "cargo-install-target") };
   if (install.kind === "pacman") {
     const privilege = privilegedPacmanCommand(context);
     return {
@@ -972,6 +1093,19 @@ function installRequirement(requirement, context, options) {
         `install:${requirement.id}`,
         cargo,
         ["install", install.crate, "--version", install.version, "--locked"],
+        { env, inherit: true },
+      ),
+    };
+  }
+  if (install.kind === "npm") {
+    const npm = resolveCommand(["npm", "npm.cmd"], context.host, env);
+    if (!npm) return { id: requirement.id, ok: false, reason: "npm_bootstrap_missing" };
+    return {
+      id: requirement.id,
+      ...commandResult(
+        `install:${requirement.id}`,
+        npm,
+        ["install", "--global", `npm@${install.version}`],
         { env, inherit: true },
       ),
     };
