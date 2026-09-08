@@ -106,6 +106,7 @@ fn build_main_c_with_collision(
     let bgm_tracks = collect_bgm_tracks(ast);
     let has_logic_overlap = ast.logic_scripts.iter().any(script_uses_overlap);
     let input_commands = collect_input_commands(ast);
+    let unsupported_semantics = crate::compiler::ast_generator::collect_unsupported_semantics(ast);
     let hardware_event_scripts = collect_hardware_event_scripts(ast);
     let default_size_config = SpriteSizeConfig {
         oam_size: "OBJ_SIZE16_L32",
@@ -206,6 +207,10 @@ fn build_main_c_with_collision(
     }
     if !collision_checks.is_empty() || has_logic_overlap {
         out.push_str(render_aabb_helper());
+        out.push('\n');
+    }
+    if !unsupported_semantics.is_empty() {
+        render_unsupported_semantics(&mut out, &unsupported_semantics);
         out.push('\n');
     }
     if !input_commands.is_empty() {
@@ -888,6 +893,20 @@ fn collect_input_command_from_bool(
     }
 }
 
+/// Bloqueia o build para semantica que o compilador nao sabe traduzir, em vez
+/// de emitir C aproximado. Mesmo contrato dos tokens de `input_command`.
+fn render_unsupported_semantics(
+    out: &mut String,
+    unsupported: &[crate::compiler::ast_generator::UnsupportedSemantic],
+) {
+    for item in unsupported {
+        out.push_str(&format!(
+            "#error \"logic_math/condition_compare node '{}': {}\"\n",
+            item.node_id, item.reason
+        ));
+    }
+}
+
 fn render_input_command_runtime(out: &mut String, commands: &BTreeMap<String, InputCommandSpec>) {
     out.push_str(
         "typedef struct { u8 direction; u16 buttons; } RdsInputCommandStep;\n\
@@ -1512,6 +1531,8 @@ fn render_bool_expr(out: &mut String, expr: &LogicBoolExpr, indent: usize) -> St
             };
             format!("({left_expr} {op_str} {right_expr})")
         }
+        // Placeholder: o `#error` correspondente ja bloqueou o build.
+        LogicBoolExpr::Unsupported { .. } => "FALSE".to_string(),
     }
 }
 
@@ -1531,6 +1552,9 @@ fn render_math_expr(expr: &LogicMathExpr) -> String {
         LogicMathExpr::Div(left, right) => {
             format!("({} / {})", render_math_expr(left), render_math_expr(right))
         }
+        // Placeholder: o build ja foi bloqueado pelo `#error` correspondente,
+        // entao este valor nunca chega a uma ROM.
+        LogicMathExpr::Unsupported { .. } => "0".to_string(),
     }
 }
 
@@ -1948,6 +1972,8 @@ fn bool_expr_uses_overlap(expr: &LogicBoolExpr) -> bool {
         LogicBoolExpr::Input { .. } | LogicBoolExpr::InputCommand { .. } => false,
         LogicBoolExpr::Overlap { .. } => true,
         LogicBoolExpr::Compare { .. } => false,
+        // Bloqueio nao usa overlap; nao deve forcar o helper AABB no C.
+        LogicBoolExpr::Unsupported { .. } => false,
         LogicBoolExpr::Not(value) => bool_expr_uses_overlap(value),
         LogicBoolExpr::And { left, right, .. } => {
             bool_expr_uses_overlap(left) || bool_expr_uses_overlap(right)
