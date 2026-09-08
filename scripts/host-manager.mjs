@@ -786,6 +786,11 @@ function extractArtifact(artifact, archivePath, target, context) {
     );
   } else if (artifact.format === "zip") {
     result = commandResult(`extract:${artifact.id}`, "unzip", ["-q", archivePath, "-d", extractRoot]);
+  } else if (artifact.format === "7z") {
+    const sevenZip =
+      resolveCommand(["7z", "7z.exe"], context.host, context.env) ??
+      (context.host.platform === "win32" ? "C:\\Program Files\\7-Zip\\7z.exe" : "7z");
+    result = commandResult(`extract:${artifact.id}`, sevenZip, ["x", "-y", `-o${extractRoot}`, archivePath]);
   } else {
     return { ok: false, reason: `artifact_format_unsupported:${artifact.format}` };
   }
@@ -1225,7 +1230,7 @@ export function ensure(options = {}) {
     const pending = initial.manifest.requirements.filter((requirement) => {
       const check = checksById.get(requirement.id);
       return check?.applicable && check.status !== "ready" && requirementInstall(requirement, initial.context.host.platform);
-    });
+    }).sort((left, right) => Number(left.id !== "sevenzip") - Number(right.id !== "sevenzip"));
     const pacmanBatch = pacmanBatchPlan(pending, initial.context);
     if (pacmanBatch.requirements.length > 0) {
       let batchResult;

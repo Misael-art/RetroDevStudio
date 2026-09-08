@@ -192,6 +192,26 @@
       "format": "tar.gz",
       "url": "https://codeload.github.com/Stephane-D/SGDK/tar.gz/ef9292c03fe33a2f8af3a2589ab856a53dcef35c",
       "sha256": "8904f9bc2f9dd02514bf5e7cc85bb37b5345f74aa9984ae8122a796f6eed9696"
+    },
+    {
+      "id": "sgdk-win32-x64",
+      "platform": "win32",
+      "arch": "x64",
+      "version": "2.11",
+      "size": 54060415,
+      "format": "7z",
+      "url": "https://github.com/Stephane-D/SGDK/releases/download/v2.11/sgdk211.7z",
+      "sha256": "5cc704b7e3a15183c33e721a1d7f84c067cf78808754556d03bb14764df51437"
+    },
+    {
+      "id": "pvsneslib-win32-x64",
+      "platform": "win32",
+      "arch": "x64",
+      "version": "4.5.0",
+      "size": 9994749,
+      "format": "zip",
+      "url": "https://github.com/alekmaul/pvsneslib/releases/download/4.5.0/pvsneslib_450_64b_windows.zip",
+      "sha256": "22c56150f3e8cb38702d4ad5e565c0b4b685807300d612061d87a7f5aea2a69f"
     }
   ],
   "requirements": [
@@ -658,6 +678,16 @@
             }
           ],
           "target": "${hostCache}/toolchains/sgdk"
+        },
+        "win32": {
+          "kind": "artifact",
+          "artifact": "sgdk-win32-x64",
+          "target": "${hostCache}/toolchains/sgdk",
+          "executables": [
+            "bin/gcc.exe",
+            "bin/make.exe",
+            "bin/sh.exe"
+          ]
         }
       }
     },
@@ -679,7 +709,16 @@
           "devkitsnes/bin/wla-65816",
           "pvsneslib/include/snes/libversion.h",
           "pvsneslib/lib/LoROM_SlowROM/libc.obj"
-        ]
+        ],
+        "required_by_platform": {
+          "win32": [
+            "devkitsnes/snes_rules",
+            "devkitsnes/bin/816-tcc.exe",
+            "devkitsnes/bin/wla-65816.exe",
+            "pvsneslib/include/snes/libversion.h",
+            "pvsneslib/lib/LoROM_SlowROM/libc.obj"
+          ]
+        }
       },
       "install_by_platform": {
         "linux": {
@@ -754,6 +793,15 @@
             }
           ],
           "target": "${hostCache}/toolchains/pvsneslib"
+        },
+        "win32": {
+          "kind": "artifact",
+          "artifact": "pvsneslib-win32-x64",
+          "target": "${hostCache}/toolchains/pvsneslib",
+          "executables": [
+            "devkitsnes/bin/816-tcc.exe",
+            "devkitsnes/bin/wla-65816.exe"
+          ]
         }
       }
     },
