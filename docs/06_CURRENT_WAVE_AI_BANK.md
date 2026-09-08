@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-09-08 (retomada do integrador: prova negativa A-01 concluída; HOST-WIN-01 em PR separado; GOV-01 original preservado)
+**Ultima Atualizacao:** 2026-09-08 (HOST-WIN-01 validado no Windows; A/B/C revisados; GOV-01 original preservado)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -20,6 +20,13 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+
+* **O que acabou de acontecer (2026-09-08 — HOST-WIN-01 fechado tecnicamente no runner):**
+  - **HOST-WIN-01 validado no Windows real.** O PR #51 (`codex/host-win01-detection`, SHA `3ee0a6b`) passou `host:certify` no Linux com `READY`, fingerprint `77bbc2a76ab04417b2c5e4f0ddcd82e10dcc4ef220883510652c9f67e632425c` e lock `dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377`. O Desktop E2E Windows **run `34220094748` passou**, com **16/16**: smoke MD/SNES, overflow, warnings, healthy, error e stale, sem skips.
+  - A correção usa SGDK 2.11 oficial (`sgdk211.7z`, SHA-256 `5cc704b7e3a15183c33e721a1d7f84c067cf78808754556d03bb14764df51437`, 54.060.415 bytes) e PVSnesLib 4.5.0 oficial (`pvsneslib_450_64b_windows.zip`, SHA-256 `22c56150f3e8cb38702d4ad5e565c0b4b685807300d612061d87a7f5aea2a69f`, 9.994.749 bytes), com MSVC/WebView2/npm descobertos canonicamente, cache gerenciado consumido pelo app e fallback de Make oficial preservado. No Windows, `mingw32-make` nativo é preferido quando disponível; o fallback bundled usa `SHELL=sh.exe` e `-j1`.
+  - **Revisão de integração:** A-01 mantém prova negativa real (`1 passed`) e controle positivo byte-a-byte; B-01 mantém 5 testes focados e a reprodução anterior 4 passed/1 failed; C-01 está integrado em `main` (`bd45299`). PRs permanecem separados até checks, proteção e revisão permitirem merge; nenhuma superfície foi promovida.
+  - **GOV-01 continua parcial no checkout canônico:** `.mimosa` e `.zcode` seguem preservados por pertencerem a outra sessão/processo vivo. O worktree externo certificado não autoriza movê-los ou apagá-los; gameplay, acessibilidade por leitor real e release seguem não medidos.
+  - **Próximo passo imediato:** revisar o estado final dos PRs #50/#51/#49 e só mergear se checks obrigatórios, revisão e proteção estiverem satisfeitos; caso contrário, entregar os branches publicados com o blocker explícito de governança.
 
 * **O que acabou de acontecer (2026-09-08 — retomada delimitada do Integrador):**
   - **A-01 fechou a prova negativa operacional.** O teste ignorado `official_sgdk_build_rejects_unsupported_math_without_returning_old_rom` foi executado com SGDK/m68k-elf-gcc oficiais e passou (`1 passed`): o cenário com `logic_math` `%` fez o compilador oficial rejeitar o C gerado, o resultado reportou falha sem `rom_path`, não anunciou ROM gerada e a proveniência marcou o nó como `unsupported` sem localização C. O fixture também deixou uma ROM antiga no diretório de saída para demonstrar que ela não é reutilizada. O controle positivo MD/SNES continua verde no `host:certify`; a prova não promove gameplay nem prova semântica completa.
