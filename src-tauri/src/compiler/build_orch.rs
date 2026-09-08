@@ -2351,6 +2351,17 @@ fn detect_root(env_var: &str, local_dir_name: &str) -> Option<PathBuf> {
         }
     }
 
+    if let Some(managed) = active_host_toolchain_root(local_dir_name) {
+        let usable = if local_dir_name == "sgdk" {
+            is_sgdk_root_usable_on_host(&managed)
+        } else {
+            managed.join("devkitsnes").join("snes_rules").exists()
+        };
+        if usable {
+            return Some(managed);
+        }
+    }
+
     let local = repo_root().join("toolchains").join(local_dir_name);
     if local_dir_name == "sgdk" {
         if is_sgdk_root_usable_on_host(&local) {
@@ -2362,6 +2373,35 @@ fn detect_root(env_var: &str, local_dir_name: &str) -> Option<PathBuf> {
     }
 
     None
+}
+
+#[derive(serde::Deserialize)]
+struct ActiveHostPointer {
+    native_cache: PathBuf,
+}
+
+fn active_host_toolchain_root(local_dir_name: &str) -> Option<PathBuf> {
+    let cache_base = std::env::var_os("RDS_HOST_CACHE")
+        .map(PathBuf::from)
+        .or_else(|| {
+            if cfg!(target_os = "windows") {
+                std::env::var_os("LOCALAPPDATA")
+                    .map(PathBuf::from)
+                    .map(|path| path.join("RetroDevStudio").join("cache"))
+            } else {
+                std::env::var_os("XDG_CACHE_HOME")
+                    .map(PathBuf::from)
+                    .or_else(|| {
+                        std::env::var_os("HOME").map(|path| PathBuf::from(path).join(".cache"))
+                    })
+                    .map(|path| path.join("retrodevstudio"))
+            }
+        })?;
+    let pointer_path = cache_base.join("active-host.json");
+    let pointer = fs::read_to_string(pointer_path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<ActiveHostPointer>(&raw).ok())?;
+    Some(pointer.native_cache.join("toolchains").join(local_dir_name))
 }
 
 fn is_sgdk_root_usable_on_host(root: &Path) -> bool {
@@ -2419,6 +2459,7 @@ fn detect_java_home() -> Option<PathBuf> {
     std::env::var_os("JAVA_HOME")
         .map(PathBuf::from)
         .filter(|path| is_java_home_candidate(path))
+        .or_else(|| active_host_toolchain_root("jdk").filter(|path| is_java_home_candidate(path)))
         .or_else(|| {
             let local = repo_root().join("toolchains").join("jdk");
             is_java_home_candidate(&local).then_some(local)

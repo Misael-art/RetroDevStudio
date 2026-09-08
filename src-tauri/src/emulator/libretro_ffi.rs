@@ -1369,9 +1369,44 @@ fn core_search_roots() -> Vec<PathBuf> {
         ]);
     }
 
+    if let Some(cache) = active_host_cache_root() {
+        roots.extend([
+            cache.join("toolchains").join("libretro"),
+            cache.join("toolchains").join("libretro").join("cores"),
+        ]);
+    }
+
     roots.sort();
     roots.dedup();
     roots
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ActiveHostPointer {
+    native_cache: PathBuf,
+}
+
+fn active_host_cache_root() -> Option<PathBuf> {
+    let cache_base = std::env::var_os("RDS_HOST_CACHE")
+        .map(PathBuf::from)
+        .or_else(|| {
+            if cfg!(target_os = "windows") {
+                std::env::var_os("LOCALAPPDATA")
+                    .map(PathBuf::from)
+                    .map(|path| path.join("RetroDevStudio").join("cache"))
+            } else {
+                std::env::var_os("XDG_CACHE_HOME")
+                    .map(PathBuf::from)
+                    .or_else(|| {
+                        std::env::var_os("HOME").map(|path| PathBuf::from(path).join(".cache"))
+                    })
+                    .map(|path| path.join("retrodevstudio"))
+            }
+        })?;
+    let raw = fs::read_to_string(cache_base.join("active-host.json")).ok()?;
+    serde_json::from_str::<ActiveHostPointer>(&raw)
+        .ok()
+        .map(|pointer| pointer.native_cache)
 }
 
 fn core_library_extension() -> &'static str {
