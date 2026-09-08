@@ -2948,9 +2948,14 @@ mod tests {
         let env = BuildEnvironment::detect();
 
         assert_eq!(env.sgdk_root.as_deref(), Some(sgdk_root.as_path()));
+        let expected_make = if cfg!(target_os = "windows") {
+            find_in_path(&["mingw32-make"]).unwrap_or_else(|| detected_make.clone())
+        } else {
+            detected_make.clone()
+        };
         assert_eq!(
             env.sgdk_make_program.as_deref(),
-            Some(detected_make.as_path())
+            Some(expected_make.as_path())
         );
 
         let _ = fs::remove_dir_all(sgdk_root);
