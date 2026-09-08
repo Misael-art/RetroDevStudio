@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-09-08 (HOST-WIN-01 validado no Windows; A/B/C revisados; GOV-01 original preservado)
+**Ultima Atualizacao:** 2026-09-08 (PRs #51/#49/#50 integradas em `main`; Desktop E2E comprovadamente intermitente; GOV-01 original preservado)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -20,6 +20,22 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+
+* **O que acabou de acontecer (2026-09-08 — rodada HOST-WIN-01/A-01/B-01/C-01 integrada em `main`; Desktop E2E revelado intermitente):**
+  - **Merges executados com autorização explícita do operador nesta sessão**, cada um após revisão do diff e confirmação do SHA imediatamente antes do merge:
+    - PR #51 (HOST-WIN-01), head `ed80c82e9bd08da9a0c0130e4ebd057b1d819ac1` → merge `8f9c9f8a2db0c49dbd85e953885e8dca8d1d0def`.
+    - PR #49 (B-01), head `a05f9b4ab968c5c09f2d1ab0b4f5f595da4b73bb` → merge `fbfbf928cb43ddf1707e45bf63ff9eba912bad63`.
+    - PR #50 (A-01), head `724342b5df2d2ccbe49cf1cfec08ef28a382bba1` → merge `5310a0a883eb4fb67b6705f2915319be0f665905`.
+    - PR #48 (C-01) já estava em `main` (`883556a`), confirmado por ancestralidade e **não** reaplicado.
+    Os quatro SHAs foram verificados como contidos em `main` por `git merge-base --is-ancestor`, não pelo status das PRs. Merge commits, `git push` normal, sem force-push.
+  - **Achado central desta rodada: o Desktop E2E é intermitente e o gate de certificação não é confiável.** O mesmo commit `8f9c9f8` **falhou** (run `34244326095`) e, **re-executado sem qualquer alteração de código, passou 16/16** com ledger de 16 marcadores. A instabilidade é **anterior** a esta rodada — `bd45299` também falhava Desktop E2E — e portanto não foi introduzida pela #51. O gatilho provável é concorrência no provisionamento de toolchain: três runs Windows simultâneos disputando os mesmos downloads (195M/541M/219M). Não é determinístico: 2 dos 3 runs concorrentes passaram.
+  - **Correção de diagnóstico anterior — registrar para não repetir.** A leitura de que a falha de B-01 tinha causa comprovada em `SGDK real: FALTA / Ready: NAO` no preflight do passo Mega Drive **estava errada**. Essa linha aparece **igualmente nos runs que passam**: o SGDK é provisionado *dentro* do próprio passo e no passo SNES já aparece `OK / Ready: SIM`. Um sinal presente nos dois grupos não é discriminante. Pelo mesmo motivo, foi retirada a proposta de "fail-fast quando `Ready: NAO`" — seria a mudança errada, já que esse estado é esperado nesse ponto.
+  - **Calibração do que ficou provado:** `main` (`8f9c9f8`), `integra/b-01` (`a05f9b4`) e `integra/a-01` (`724342b`) passaram 16/16 reais, sem `skipped`, MD e SNES, com auditoria de ledger. **Não** está estabelecido que a #51 seja a correção determinística do cenário, nem que a falha original de B-01 tenha sido causada pela lacuna de host: essa falha é compatível tanto com a lacuna quanto com a própria intermitência, e os dados atuais não separam as duas. B-01 não tem defeito de produto demonstrado — o que é diferente de ter defeito descartado.
+  - **Limite de cobertura no merge da #50:** quando a #50 foi mergeada, `main` já havia avançado para `fbfbf92`. O verde de `724342b` foi obtido contra `8f9c9f8`, logo **a combinação A-01 + B-01 não havia sido testada em conjunto**. Ambas tocam `build_orch.rs` e o merge foi limpo sem conflito textual, o que não é garantia semântica. A certificação de `5310a0a` estava **em execução** no momento deste registro e não pode ser declarada verde.
+  - **Revisão da #51:** além de scripts de host, altera produto — `libretro_ffi.rs` passa a derivar raízes de busca de core do cache/readiness do host, aceitando **apenas** checks com `status == "ready"` (sem afrouxamento de critério). `toolchains/host-requirements.lock.json` mudou, invalidando o lock digest anterior.
+  - **GOV-01 permanece pendência ambiental, inalterada e isolada.** `.mimosa` e `.zcode` seguem preservados na raiz fiscalizada por pertencerem a outra sessão; `npm run check:tree` falha ali e **passa** em worktree limpo. Nenhum diretório foi movido, apagado ou adicionado como exceção na árvore. Isso não fecha GOV-01 no checkout original.
+  - **Host local:** `npm run host:diagnose` = `READY` (linux/x64), fingerprint `82f39923d69557b647ed3a4ec5053ce67885ac125ee79666116d03d5968fff5a`, lock `d531c4b9617af47108819d965b7cb58db1e2780a5f8a9edead08668870f5bb5d` — medido **antes** do merge da #51, que altera o lock. `host:certify` completo e a validação oficial Windows **não são executáveis** a partir deste host Linux; a evidência Windows existe apenas via CI remoto.
+  - **Próximo passo imediato:** confirmar a certificação de `5310a0a` e, acima de fechar tickets, **quantificar e corrigir a intermitência do Desktop E2E** (medir a taxa em execuções repetidas do mesmo SHA; serializar o provisionamento de toolchain no workflow). Enquanto o mesmo commit puder produzir verde ou vermelho, "gates verdes em `main`" não sustenta as conclusões que a documentação assume. Nenhuma superfície foi promovida; SGDK segue **Experimental**; gameplay completo, acessibilidade com leitor de tela real e release seguem **não medidos**.
 
 * **O que acabou de acontecer (2026-09-08 — HOST-WIN-01 fechado tecnicamente no runner):**
   - **HOST-WIN-01 validado no Windows real.** O PR #51 (`codex/host-win01-detection`, SHA `ed80c82`) passou `host:certify` no Linux com `READY`, fingerprint `77bbc2a76ab04417b2c5e4f0ddcd82e10dcc4ef220883510652c9f67e632425c` e lock `dd99a22faa05edc480ce06da3fe3651e7a79578a629959dcdbd8cd50ac011377`. O Desktop E2E Windows **run `34220094748` passou**, com **16/16**: smoke MD/SNES, overflow, warnings, healthy, error e stale, sem skips.
