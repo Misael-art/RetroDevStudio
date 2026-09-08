@@ -1375,6 +1375,13 @@ fn core_search_roots() -> Vec<PathBuf> {
             cache.join("toolchains").join("libretro").join("cores"),
         ]);
     }
+    for check_id in ["libretro_md", "libretro_snes"] {
+        if let Some(path) = host_readiness_check_path(check_id) {
+            if let Some(parent) = path.parent() {
+                roots.push(parent.to_path_buf());
+            }
+        }
+    }
 
     roots.sort();
     roots.dedup();
@@ -1407,6 +1414,39 @@ fn active_host_cache_root() -> Option<PathBuf> {
     serde_json::from_str::<ActiveHostPointer>(&raw)
         .ok()
         .map(|pointer| pointer.native_cache)
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct HostReadinessReport {
+    checks: Vec<HostReadinessCheck>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct HostReadinessCheck {
+    id: String,
+    status: String,
+    path: Option<PathBuf>,
+}
+
+fn host_readiness_check_path(check_id: &str) -> Option<PathBuf> {
+    let report_path = std::env::var_os("RDS_HOST_READINESS_REPORT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap_or_else(|| Path::new(env!("CARGO_MANIFEST_DIR")))
+                .join("src-tauri")
+                .join("target-test")
+                .join("validation")
+                .join("host-readiness.json")
+        });
+    let raw = fs::read_to_string(report_path).ok()?;
+    let report = serde_json::from_str::<HostReadinessReport>(&raw).ok()?;
+    report
+        .checks
+        .into_iter()
+        .find(|check| check.id == check_id && check.status == "ready")
+        .and_then(|check| check.path)
 }
 
 fn core_library_extension() -> &'static str {

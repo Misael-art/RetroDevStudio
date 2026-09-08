@@ -2381,6 +2381,15 @@ struct ActiveHostPointer {
 }
 
 fn active_host_toolchain_root(local_dir_name: &str) -> Option<PathBuf> {
+    let readiness_id = match local_dir_name {
+        "sgdk" => Some("sgdk"),
+        "pvsneslib" => Some("pvsneslib"),
+        _ => None,
+    };
+    if let Some(path) = readiness_id.and_then(host_readiness_check_path) {
+        return Some(path);
+    }
+
     let cache_base = std::env::var_os("RDS_HOST_CACHE")
         .map(PathBuf::from)
         .or_else(|| {
@@ -2402,6 +2411,37 @@ fn active_host_toolchain_root(local_dir_name: &str) -> Option<PathBuf> {
         .ok()
         .and_then(|raw| serde_json::from_str::<ActiveHostPointer>(&raw).ok())?;
     Some(pointer.native_cache.join("toolchains").join(local_dir_name))
+}
+
+#[derive(serde::Deserialize)]
+struct HostReadinessReport {
+    checks: Vec<HostReadinessCheck>,
+}
+
+#[derive(serde::Deserialize)]
+struct HostReadinessCheck {
+    id: String,
+    status: String,
+    path: Option<PathBuf>,
+}
+
+fn host_readiness_check_path(check_id: &str) -> Option<PathBuf> {
+    let report_path = std::env::var_os("RDS_HOST_READINESS_REPORT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            repo_root()
+                .join("src-tauri")
+                .join("target-test")
+                .join("validation")
+                .join("host-readiness.json")
+        });
+    let raw = fs::read_to_string(report_path).ok()?;
+    let report = serde_json::from_str::<HostReadinessReport>(&raw).ok()?;
+    report
+        .checks
+        .into_iter()
+        .find(|check| check.id == check_id && check.status == "ready")
+        .and_then(|check| check.path)
 }
 
 fn is_sgdk_root_usable_on_host(root: &Path) -> bool {
