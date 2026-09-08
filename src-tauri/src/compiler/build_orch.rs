@@ -3507,7 +3507,8 @@ PY\n"
             .map(PathBuf::from)
             .filter(|path| path.join("makefile.gen").is_file())
             .expect("SGDK_ROOT/GDK deve apontar para SGDK oficial");
-        let make_program = detect_make_program(&sgdk_root).expect("make oficial deve estar disponivel");
+        let make_program =
+            detect_make_program(&sgdk_root).expect("make oficial deve estar disponivel");
 
         let graph = serde_json::json!({
             "version": 1,
@@ -3522,21 +3523,31 @@ PY\n"
             ]
         });
         let scene_path = project_dir.join("scenes").join("main.json");
-        let mut scene: serde_json::Value = serde_json::from_str(
-            &fs::read_to_string(&scene_path).expect("read fixture scene"),
-        )
-        .expect("parse fixture scene");
+        let mut scene: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&scene_path).expect("read fixture scene"))
+                .expect("parse fixture scene");
         scene["entities"][0]["components"]["logic"] = serde_json::json!({
             "graph": graph.to_string(),
             "variables": {}
         });
-        fs::write(&scene_path, serde_json::to_vec_pretty(&scene).expect("serialize negative fixture"))
-            .expect("write negative fixture");
+        fs::write(
+            &scene_path,
+            serde_json::to_vec_pretty(&scene).expect("serialize negative fixture"),
+        )
+        .expect("write negative fixture");
 
-        let stale_rom = project_dir.join("build").join("megadrive").join("out").join("old.md");
-        fs::create_dir_all(stale_rom.parent().expect("stale ROM parent")).expect("create stale ROM parent");
-        fs::write(&stale_rom, b"old ROM must never be returned as this build result")
-            .expect("write stale ROM marker");
+        let stale_rom = project_dir
+            .join("build")
+            .join("megadrive")
+            .join("out")
+            .join("old.md");
+        fs::create_dir_all(stale_rom.parent().expect("stale ROM parent"))
+            .expect("create stale ROM parent");
+        fs::write(
+            &stale_rom,
+            b"old ROM must never be returned as this build result",
+        )
+        .expect("write stale ROM marker");
 
         let result = run_build_with_environment(
             &project_dir,
@@ -3549,22 +3560,43 @@ PY\n"
             |_| {},
         );
 
-        assert!(!result.ok, "operador % nao suportado nao pode compilar: {:?}", result.log);
-        assert!(result.rom_path.is_empty(), "build falho nao pode retornar ROM antiga ou nova");
-        assert!(!result.log.iter().any(|entry| entry.message.contains("ROM gerada:")));
+        assert!(
+            !result.ok,
+            "operador % nao suportado nao pode compilar: {:?}",
+            result.log
+        );
+        assert!(
+            result.rom_path.is_empty(),
+            "build falho nao pode retornar ROM antiga ou nova"
+        );
+        assert!(!result
+            .log
+            .iter()
+            .any(|entry| entry.message.contains("ROM gerada:")));
         assert!(result.log.iter().any(|entry| {
             entry.message.contains("Unsupported logic_math")
                 || entry.message.contains("operador '%' de logic_math")
         }));
 
-        let generated_c = fs::read_to_string(project_dir.join("build").join("megadrive").join("src").join("main.c"))
-            .expect("C gerado pelo pipeline");
+        let generated_c = fs::read_to_string(
+            project_dir
+                .join("build")
+                .join("megadrive")
+                .join("src")
+                .join("main.c"),
+        )
+        .expect("C gerado pelo pipeline");
         assert!(generated_c.contains("#error"));
         assert!(generated_c.contains("logic_math"));
 
         let source_map: serde_json::Value = serde_json::from_str(
-            &fs::read_to_string(project_dir.join("build").join("megadrive").join(SOURCE_MAP_FILE_NAME))
-                .expect("source map do build negativo"),
+            &fs::read_to_string(
+                project_dir
+                    .join("build")
+                    .join("megadrive")
+                    .join(SOURCE_MAP_FILE_NAME),
+            )
+            .expect("source map do build negativo"),
         )
         .expect("parse source map do build negativo");
         let math_entry = source_map["graphs"]
@@ -3575,7 +3607,9 @@ PY\n"
             .find(|entry| entry["node_id"] == "math_percent")
             .expect("proveniencia do no math_percent");
         assert_eq!(math_entry["status"], "unsupported");
-        assert!(math_entry["generated_locations"].as_array().is_none_or(Vec::is_empty));
+        assert!(math_entry["generated_locations"]
+            .as_array()
+            .is_none_or(Vec::is_empty));
 
         let _ = fs::remove_dir_all(project_dir);
     }
