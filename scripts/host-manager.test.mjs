@@ -34,6 +34,11 @@ import {
 // requisito vira "missing". Simular `platform: linux` nao muda o host que roda
 // o teste. Mesmo padrao de `scripts/linux-host-scripts.test.mjs`.
 const posixIt = process.platform === "win32" ? it.skip : it;
+// Estes fixtures sao executados diretamente por spawnSync. No runner Windows,
+// arquivos de teste com shebang POSIX nao sao binarios executaveis; a cobertura
+// operacional do caminho Windows permanece no desktop-smoke com as ferramentas
+// reais do host.
+const posixCommandFixtureIt = process.platform === "win32" ? it.skip : it;
 
 const tempDirs = [];
 
@@ -362,7 +367,7 @@ describe("host detection and probes", () => {
     expect(resolveCommand(["native-tool"], { platform: "linux" }, { RDS_HOST_TEST_PATH: directory, PATH: directory })).toBe(program);
   });
 
-  it("finds MSVC through vswhere when cl.exe is not on the ordinary PATH", () => {
+  posixCommandFixtureIt("finds MSVC through vswhere when cl.exe is not on the ordinary PATH", () => {
     const directory = tempDir();
     const vswhere = executable(directory, "vswhere.exe", "#!/bin/sh\nprintf '%s\\n' \"$RDS_TEST_CL_PATH\"\n");
     const clPath = path.join(directory, "Visual Studio Build Tools", "VC", "Tools", "MSVC", "14.44", "bin", "Hostx64", "x64", "cl.exe");
@@ -398,7 +403,7 @@ describe("host detection and probes", () => {
     expect(result).toMatchObject({ status: "missing", installed: false, compatible: false });
   });
 
-  it("distinguishes WebView2 runtime registry presence from Edge browser presence", () => {
+  posixCommandFixtureIt("distinguishes WebView2 runtime registry presence from Edge browser presence", () => {
     const directory = tempDir();
     executable(directory, "reg.exe", "#!/bin/sh\nprintf '    pv    REG_SZ    %s\\n' \"$RDS_TEST_WEBVIEW2_VERSION\"\n");
     const requirement = {
@@ -419,7 +424,7 @@ describe("host detection and probes", () => {
     expect(probeRequirement(requirement, { ...context, pathEnv: path.join(directory, "missing with spaces") })).toMatchObject({ status: "missing" });
   });
 
-  it("installs the exact npm pin rather than accepting a compatible major", () => {
+  posixCommandFixtureIt("installs the exact npm pin rather than accepting a compatible major", () => {
     const directory = tempDir();
     const npm = executable(directory, "npm.cmd", "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$RDS_NPM_ARGS\"\n");
     const result = installRequirement(
