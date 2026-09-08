@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-09-07 (INT-R1i: A-01 e B-01 validados no destino com prova de ROM real; GOV-01 **bloqueia** a certificação canônica)
+**Ultima Atualizacao:** 2026-09-08 (retomada do integrador: prova negativa A-01 concluída; HOST-WIN-01 em PR separado; GOV-01 original preservado)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -41,6 +41,15 @@
     | Build real MD/SNES | `f1a82a4` → `7c2ee28` | `official_sgdk_smoke` / `official_snes_smoke`, Genesis Plus GX v1.7.4 | passed → passed, **ROMs byte-a-byte idênticas** | **SEM_MUDANÇA** (resultado desejado: mudança inerte) | `37ea278a…d107` / `556c56c9…2b89` | não prova que `#error` bloqueia build real | Integrador |
     | Acessibilidade do Console | `1b2a45b` → `73d9c8c` | Vitest, unitário | sem região viva → `role="log"`+`aria-live` | **MELHOROU** (unitário) | commit `73d9c8c` | **não** prova anúncio por leitor de tela real | C |
     | RUN-01 / SAVE-01 / PAR-01 | — | — | — | **NÃO MEDIDO** | — | fora do escopo destas fatias | — |
+* **O que acabou de acontecer (2026-09-07 — INT-R1h: C-01 revisado, validado no destino e integrado; GOV-01 recorreu):**
+  - **C-01 integrado.** Correção de 1 elemento em `src/components/common/Console.tsx:192`: `role="log"` + `aria-live="polite"` + `aria-label="Saida do console"`. Antes, novas entradas do console — **inclusive erros, que abrem o drawer automaticamente** — nunca eram anunciadas para leitores de tela. Zero mudança visual, mesmos contratos da store.
+  - **Revisão do Integrador (verificado por conta própria, não aceito do handoff):** (1) diff contém **exatamente** os 2 arquivos da allowlist; o merge no destino não trouxe arquivo extra. (2) A alegação de base equivalente **confere**: `Console.tsx`/`Console.test.tsx` são idênticos entre `1b2a45b` e `e5e8407`. (3) A convenção citada **existe** (`AdaptivePanel.tsx:421-423`), e `role="log"` é mais preciso que `role="region"` para saída de console. (4) **Reproduzi a regressão**: revertendo só o componente e mantendo o teste, `1 failed | 4 passed` com `expected null not to be null`; restaurando, `5 passed`. (5) O limite declarado **é real**: `Console.tsx:91-93` retorna `null` com o drawer fechado, então a região viva monta junto com a primeira entrada.
+  - **Gates no destino (`origin/main` `0f88c65` + C-01):** `npx tsc --noEmit` **0**; `npm run lint` **0**; `npm test` **597 passed / 6 skipped (603)**. Aritmética conferida: total 602 → 603 e passados 596 → 597, exatamente **+1** (o teste novo) — nenhum teste perdido nem convertido em skip silencioso. Gates `cargo` **não executados** e isso é declarado, não omitido: o diff não toca nenhum arquivo Rust e o ticket enumerava os 4 gates de frontend.
+  - **Honestidade sobre o alcance:** isto é **validação unitária de atributos ARIA**, não prova de que um leitor de tela real anuncia. Atributo correto não garante anúncio; o próprio limite do desmonte demonstra isso. Sem QA desktop ou leitor de tela real nesta rodada.
+  - **Imprecisão menor registrada:** o handoff informou `Console.tsx (+6/−1)`; o git reporta **+7/−1**. Sem efeito sobre o mérito, mas números conferidos são o padrão da rodada.
+  - **Corroboração da divulgação de C:** o relato de erros ambientais de startup de worker do Vitest **se reproduziu comigo** (`Failed to start forks worker`), assim como um `rc=1` que era startup error e **não** falha de teste. Registro metodológico: aceitar código de saída sem ler o log teria "confirmado" evidência pelo motivo errado — a mesma armadilha das três ocorrências anteriores da rodada.
+  - **GOV-01 recorreu (não é da entrega de C):** `npm run check:tree` reprovou no destino por `.mimosa` e `.zcode` na raiz. Ambos têm **processo vivo** (`zcode-cli` em execução; `.mimosa/hook-state` escrito minutos antes) e são estado de ferramenta de outra sessão. **Nada foi movido ou apagado** — preservação de trabalho alheio exige janela exclusiva confirmada pelo operador, como foi com `.codex`/`.omo`. Os diretórios são **untracked**, logo não existem em checkout limpo de CI. O gate **não foi afrouxado**.
+  - **Propostas de C avaliadas com verificação independente — as três procedem:** C-02 e TOOLS-01 abertos abaixo; `ToolNotices` **arquivado** por concordância (apenas um branch `compact` morto, sem severidade que justifique ticket).
 
 * **O que acabou de acontecer (2026-09-07 — INT-R1g: FLAKE-01 investigado e fechado; padrão sistêmico de "verde pelo motivo errado"):**
   - **FLAKE-01 — causa mecânica, não "carga":** `src/App.test.tsx > keeps Build & Run enabled when the live validation snapshot is stale` falhava intermitentemente com `expected 'LIVE' to contain 'DESATUAL.'`. O efeito em `src/core/validation/liveValidationController.ts:219` agenda um debounce que, ao concluir, chama `setHwValidationResult`, e essa ação grava `hwValidationState: "fresh"` (`src/core/store/editorStore.ts:505`). Como `validateSceneDraft` está mockado com `mockResolvedValue`, o debounce **sempre** completa nos testes. O teste forçava `stale` via `setState`, o que **não** altera `sceneRevision` nem o `requestIdRef`: a validação em voo passava por **todos** os guards do controller (mesmo `requestId`, `activeProjectDir`, `activeTarget` e `sceneRevision`) e sobrescrevia `stale` → `fresh`.
@@ -207,7 +216,40 @@ Comportamento antes → depois / fora do escopo: um defeito **confirmado** (foco
 Contratos já integrados / dependências pendentes: usar exclusivamente contratos e tokens existentes
 Host fingerprint / lock digest / READY: irrelevante para esta fatia (frontend puro); host está READY desde 2026-09-07
 Testes de aceitação / gates aplicáveis: teste de acessibilidade/erro que **falha antes** e passa depois; `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`
-Status operacional: LIBERADO (2026-09-07) — edição permitida apenas em `src/components/common/**`, após o reescopo acima
+Status operacional: INTEGRADO (2026-09-07) — entrega de C validada pelo Integrador e mergeada. HEAD de origem `73d9c8ce4698a1c63e3243bc55c71fb0396f9977`, base `e5e8407` (verificado: `Console.tsx` e `Console.test.tsx` **idênticos** entre `1b2a45b` e `e5e8407`, logo a troca de base é legítima). Escopo respeitado: exatamente os 2 arquivos da allowlist, sem arquivo extra no merge.
+```
+
+```text
+Ticket: C-02 — Acessibilidade e tratamento de erro restantes no Console
+Rodada / objetivo / IDs de baseline: INT-R1h / fechar os defeitos remanescentes do mesmo componente / —
+Base SHA completo / branch destino: a definir na retomada (>= `main` com C-01 integrado) / PR para `main`
+Agente / branch codex/... / worktree absoluto externo à raiz: C / `codex/c-02-console-a11y` / `/mnt/sdcard/Projects/RetroDevStudio-worktrees/c-02-console-a11y`
+Arquivos permitidos (lista exata) / arquivos reservados a outros: `src/components/common/Console.tsx` e `src/components/common/Console.test.tsx`. Reservados: todo o resto de `common/**` sem nova reserva, `compiler/**`/`nodegraph/**` (A), `emulator/**`/`deep_profiler.rs` (B), arquivos centrais do Integrador
+Defeitos confirmados pelo Integrador (verificação independente, não apenas relato de C):
+  - `Console.tsx:260`: `href="#"` com `onClick={preventDefault}` — anunciado como link, não navega nem executa ação. Decidir entre virar `button` com ação real ou remover a semântica de link.
+  - `Console.tsx:106`: `await navigator.clipboard?.writeText(...)` sem `catch` e sem feedback ao usuário; falha silenciosa em contexto sem permissão de clipboard.
+  - Filtros sem `aria-pressed`; entrada selecionada sem `aria-current`; foco perdido ao fechar o drawer.
+  - Follow-up estrutural do limite de C-01: o componente desmonta com o drawer fechado (`Console.tsx:91-93`), então a região viva nasce junto com a primeira entrada e o anúncio inicial pode não ocorrer. Avaliar manter a região montada.
+Comportamento antes → depois / fora do escopo: cada defeito acima com teste que **falha antes** e passa depois. Fora do escopo: redesign visual, troca de tokens, mudança de contrato da store
+Host fingerprint / lock digest / READY: irrelevante (frontend puro); host Linux READY desde 2026-09-07
+Testes de aceitação / gates aplicáveis: regressão por defeito corrigido; `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`
+Status operacional: PROPOSTO — aguarda liberação do operador
+```
+
+```text
+Ticket: TOOLS-01 — Nome acessível e tratamento de erro em ToolPathField
+Rodada / objetivo / IDs de baseline: INT-R1h / campo de caminho sem nome acessível e rejeição não tratada / —
+Base SHA completo / branch destino: a definir na retomada / PR para `main`
+Agente / branch codex/... / worktree absoluto externo à raiz: C / `codex/tools-01-pathfield` / `/mnt/sdcard/Projects/RetroDevStudio-worktrees/tools-01-pathfield`
+Arquivos permitidos (lista exata) / arquivos reservados a outros: **allowlist nova**, restrita a `src/components/tools/ToolPathField.tsx` e seu teste. **`ToolsPanel.tsx` continua reservado** e não entra nesta fatia
+Defeitos confirmados pelo Integrador (verificação independente):
+  - `ToolPathField.tsx:41`: `<label>` sem `htmlFor` e `<input>` sem `id`/`aria-label` — o campo fica **sem nome acessível**. Severidade real, não cosmética.
+  - Botão de browse com texto literal `...`; o `title` mitiga parcialmente e não substitui nome acessível.
+  - `browseFile` (`ToolPathField.tsx:3`): `await open(...)` sem `catch` — rejeição não tratada se o diálogo falhar ou for negado.
+Comportamento antes → depois / fora do escopo: campo passa a ter nome acessível associado, botão ganha nome significativo e a falha do diálogo é tratada sem quebrar a UI. Fora do escopo: alterar layout, tocar `ToolsPanel.tsx` ou mudar o contrato de `open`
+Host fingerprint / lock digest / READY: irrelevante (frontend puro)
+Testes de aceitação / gates aplicáveis: teste que **falha antes** para o nome acessível e para o caminho de rejeição; `check:tree`, `lint`, `tsc --noEmit`, `npm test`
+Status operacional: PROPOSTO — exige aprovação do operador por **ampliar a allowlist** para `src/components/tools/**`
 ```
 
 ```text
