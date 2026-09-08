@@ -357,6 +357,13 @@ pub enum LogicMathExpr {
     Sub(Box<LogicMathExpr>, Box<LogicMathExpr>),
     Mul(Box<LogicMathExpr>, Box<LogicMathExpr>),
     Div(Box<LogicMathExpr>, Box<LogicMathExpr>),
+    /// Expressao que o compilador canonico nao sabe traduzir. NUNCA vira codigo
+    /// aproximado: os emitters a convertem em `#error`, bloqueando o build.
+    /// Mesmo contrato ja usado por `input_command` com `unsupported_tokens`.
+    Unsupported {
+        node_id: String,
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -389,6 +396,12 @@ pub enum LogicBoolExpr {
         op: CompareOp,
         left: Box<LogicMathExpr>,
         right: Box<LogicMathExpr>,
+    },
+    /// Condicao que o compilador canonico nao sabe traduzir. Mesmo contrato de
+    /// `LogicMathExpr::Unsupported`: bloqueia o build em vez de aproximar.
+    Unsupported {
+        node_id: String,
+        reason: String,
     },
 }
 
@@ -1883,10 +1896,16 @@ fn compile_logic_node(
                 raster_lines,
             );
 
-            let compare_expr = LogicBoolExpr::Compare {
-                op,
-                left: Box::new(left),
-                right: Box::new(right),
+            let compare_expr = match op {
+                Some(op) => LogicBoolExpr::Compare {
+                    op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                None => LogicBoolExpr::Unsupported {
+                    node_id: node.id.clone(),
+                    reason: unsupported_compare_reason(&op_str),
+                },
             };
 
             let guard_expr = resolve_bool_expr_from_ports(
@@ -2220,9 +2239,18 @@ fn build_bool_expr_from_node(
         }
         "condition_compare" => {
             let op_str = param_string(node, "operator").unwrap_or_else(|| "==".to_string());
-            let op = parse_compare_op(&op_str);
             let left = resolve_math_expr_from_input(graph, &node.id, "a")?;
             let right = resolve_math_expr_from_input(graph, &node.id, "b")?;
+            let Some(op) = parse_compare_op(&op_str) else {
+                // Nao negar um bloqueio: `Not(Unsupported)` esconderia o motivo.
+                return {
+                    visited.remove(&node.id);
+                    Some(LogicBoolExpr::Unsupported {
+                        node_id: node.id.clone(),
+                        reason: unsupported_compare_reason(&op_str),
+                    })
+                };
+            };
             let compare = LogicBoolExpr::Compare {
                 op,
                 left: Box::new(left),
@@ -2249,14 +2277,175 @@ fn build_bool_expr_from_node(
     expression
 }
 
-fn parse_compare_op(op_str: &str) -> CompareOp {
+/// Operador de comparacao fora do subset retorna `None`; o chamador converte
+/// isso em `LogicBoolExpr::Unsupported`. Antes, qualquer string desconhecida
+/// virava `Eq` silenciosamente.
+fn parse_compare_op(op_str: &str) -> Option<CompareOp> {
     match op_str {
-        "!=" => CompareOp::Neq,
-        ">" => CompareOp::Gt,
-        ">=" => CompareOp::Gte,
-        "<" => CompareOp::Lt,
-        "<=" => CompareOp::Lte,
-        _ => CompareOp::Eq,
+        "==" => Some(CompareOp::Eq),
+        "!=" => Some(CompareOp::Neq),
+        ">" => Some(CompareOp::Gt),
+        ">=" => Some(CompareOp::Gte),
+        "<" => Some(CompareOp::Lt),
+        "<=" => Some(CompareOp::Lte),
+        _ => None,
+    }
+}
+
+fn unsupported_compare_reason(op_str: &str) -> String {
+    format!("operador '{op_str}' de condition_compare nao e suportado pelo compilador canonico")
+}
+
+/// Semantica que o compilador nao sabe traduzir, coletada do AST para que os
+/// emitters bloqueiem o build com `#error` em vez de emitir codigo aproximado.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct UnsupportedSemantic {
+    pub node_id: String,
+    pub reason: String,
+}
+
+/// Varre todo o AST atras de `Unsupported` em expressoes de math/bool.
+/// Implementacao unica compartilhada pelos emitters MD e SNES; a saida e
+/// ordenada e deduplicada para manter o C gerado deterministico.
+pub fn collect_unsupported_semantics(ast: &AstOutput) -> Vec<UnsupportedSemantic> {
+    let mut found = std::collections::BTreeSet::new();
+    for script in &ast.logic_scripts {
+        collect_unsupported_from_ops(&script.ops, &mut found);
+    }
+    found.into_iter().collect()
+}
+
+fn collect_unsupported_from_math(
+    expr: &LogicMathExpr,
+    found: &mut std::collections::BTreeSet<UnsupportedSemantic>,
+) {
+    match expr {
+        LogicMathExpr::Unsupported { node_id, reason } => {
+            found.insert(UnsupportedSemantic {
+                node_id: node_id.clone(),
+                reason: reason.clone(),
+            });
+        }
+        LogicMathExpr::Add(left, right)
+        | LogicMathExpr::Sub(left, right)
+        | LogicMathExpr::Mul(left, right)
+        | LogicMathExpr::Div(left, right) => {
+            collect_unsupported_from_math(left, found);
+            collect_unsupported_from_math(right, found);
+        }
+        LogicMathExpr::Literal(_) | LogicMathExpr::Var(_) => {}
+    }
+}
+
+fn collect_unsupported_from_bool(
+    expr: &LogicBoolExpr,
+    found: &mut std::collections::BTreeSet<UnsupportedSemantic>,
+) {
+    match expr {
+        LogicBoolExpr::Unsupported { node_id, reason } => {
+            found.insert(UnsupportedSemantic {
+                node_id: node_id.clone(),
+                reason: reason.clone(),
+            });
+        }
+        LogicBoolExpr::Compare { left, right, .. } => {
+            collect_unsupported_from_math(left, found);
+            collect_unsupported_from_math(right, found);
+        }
+        LogicBoolExpr::Not(inner) => collect_unsupported_from_bool(inner, found),
+        LogicBoolExpr::And { left, right, .. } => {
+            collect_unsupported_from_bool(left, found);
+            collect_unsupported_from_bool(right, found);
+        }
+        LogicBoolExpr::Literal(_)
+        | LogicBoolExpr::Input { .. }
+        | LogicBoolExpr::InputCommand { .. }
+        | LogicBoolExpr::Overlap { .. } => {}
+    }
+}
+
+fn collect_unsupported_from_ops(
+    ops: &[LogicOp],
+    found: &mut std::collections::BTreeSet<UnsupportedSemantic>,
+) {
+    for op in ops {
+        match op {
+            LogicOp::SourceMapped { op, .. } => {
+                collect_unsupported_from_ops(std::slice::from_ref(op.as_ref()), found);
+            }
+            LogicOp::SetSpritePosition { x, y, .. } | LogicOp::ShowSprite { x, y, .. } => {
+                collect_unsupported_from_math(x, found);
+                collect_unsupported_from_math(y, found);
+            }
+            LogicOp::SetVelocity { vx, vy, .. } => {
+                collect_unsupported_from_math(vx, found);
+                collect_unsupported_from_math(vy, found);
+            }
+            LogicOp::SetTile { tile, x, y, .. } => {
+                collect_unsupported_from_math(tile, found);
+                collect_unsupported_from_math(x, found);
+                collect_unsupported_from_math(y, found);
+            }
+            LogicOp::SetVar { value, .. } => collect_unsupported_from_math(value, found),
+            LogicOp::ConditionBool {
+                condition,
+                if_true,
+                if_false,
+            } => {
+                collect_unsupported_from_bool(condition, found);
+                collect_unsupported_from_ops(if_true, found);
+                collect_unsupported_from_ops(if_false, found);
+            }
+            LogicOp::WhileLoop {
+                condition,
+                body,
+                done,
+            } => {
+                collect_unsupported_from_bool(condition, found);
+                collect_unsupported_from_ops(body, found);
+                collect_unsupported_from_ops(done, found);
+            }
+            LogicOp::ForLoop {
+                count, body, done, ..
+            } => {
+                collect_unsupported_from_math(count, found);
+                collect_unsupported_from_ops(body, found);
+                collect_unsupported_from_ops(done, found);
+            }
+            LogicOp::ConditionOverlap {
+                if_true, if_false, ..
+            } => {
+                collect_unsupported_from_ops(if_true, found);
+                collect_unsupported_from_ops(if_false, found);
+            }
+            LogicOp::TimelineSequence { slots, .. } => {
+                for slot in slots {
+                    collect_unsupported_from_ops(&slot.actions, found);
+                }
+            }
+            LogicOp::HardwareBudgetCheck { if_ok, if_warn, .. } => {
+                collect_unsupported_from_ops(if_ok, found);
+                collect_unsupported_from_ops(if_warn, found);
+            }
+            LogicOp::HardwareEvent { ops, .. } => collect_unsupported_from_ops(ops, found),
+            LogicOp::StateMachine { states, .. } => {
+                for state in states {
+                    collect_unsupported_from_ops(&state.body, found);
+                    for transition in &state.transitions {
+                        collect_unsupported_from_bool(&transition.condition, found);
+                        collect_unsupported_from_ops(&transition.if_matched, found);
+                        collect_unsupported_from_ops(&transition.if_unmatched, found);
+                    }
+                }
+            }
+            LogicOp::MoveSprite { .. }
+            | LogicOp::SetAnimationState { .. }
+            | LogicOp::CameraFollow { .. }
+            | LogicOp::HideSprite { .. }
+            | LogicOp::PlaySound { .. }
+            | LogicOp::PlayMusic { .. }
+            | LogicOp::SourceBridgeError { .. } => {}
+        }
     }
 }
 
@@ -2302,10 +2491,25 @@ fn build_math_expr_from_node(
             let b = resolve_math_expr_from_input(graph, &node.id, "b")
                 .unwrap_or(LogicMathExpr::Literal(0));
             match op_str.as_str() {
+                "+" => Some(LogicMathExpr::Add(Box::new(a), Box::new(b))),
                 "-" => Some(LogicMathExpr::Sub(Box::new(a), Box::new(b))),
                 "*" => Some(LogicMathExpr::Mul(Box::new(a), Box::new(b))),
+                // Divisor literal 0 e detectavel estaticamente e sempre um
+                // defeito: no 68000 a divisao por zero e trap de CPU, enquanto
+                // o subset local (`nodeEngine.ts`) promete 0.
+                "/" if b == LogicMathExpr::Literal(0) => Some(LogicMathExpr::Unsupported {
+                    node_id: node.id.clone(),
+                    reason: "logic_math '/' com divisor literal 0 (porta 'b' desconectada ou \
+                             zero): divisao por zero e trap de CPU no alvo"
+                        .to_string(),
+                }),
                 "/" => Some(LogicMathExpr::Div(Box::new(a), Box::new(b))),
-                _ => Some(LogicMathExpr::Add(Box::new(a), Box::new(b))),
+                other => Some(LogicMathExpr::Unsupported {
+                    node_id: node.id.clone(),
+                    reason: format!(
+                        "operador '{other}' de logic_math nao e suportado pelo compilador canonico"
+                    ),
+                }),
             }
         }
         "var_get" => {
@@ -5340,5 +5544,177 @@ mod tests {
             node,
             AstNode::SetAnimation { var_name, .. } if var_name == "spr_hero"
         )));
+    }
+
+    // ── Regressao A-01: operador de logic_math nao pode virar outro operador ──
+    //
+    // O subset local (`nodeEngine.ts`) avalia `%` como resto e trata divisao por
+    // zero como 0. O caminho canonico NodeGraph -> IR -> C precisa concordar ou
+    // bloquear; o que nao pode acontecer e traduzir silenciosamente para um
+    // operador diferente. Precedente de contrato: `input_command` emite
+    // `#error` para tokens fora do subset em vez de gerar codigo aproximado.
+
+    fn math_probe_project() -> Project {
+        Project {
+            rds_version: "1.0".to_string(),
+            schema_version: crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string(),
+            name: "Math Operator Regression".to_string(),
+            target: "megadrive".to_string(),
+            resolution: Resolution {
+                width: 320,
+                height: 224,
+            },
+            fps: 60,
+            palette_mode: "4x16".to_string(),
+            entry_scene: "main".to_string(),
+            build: None,
+            settings: Default::default(),
+            template_metadata: None,
+        }
+    }
+
+    fn math_probe_scene(graph: serde_json::Value) -> Scene {
+        Scene {
+            scene_id: "main".to_string(),
+            schema_version: Some(crate::ugdm::entities::CURRENT_SCHEMA_VERSION.to_string()),
+            display_name: Some("Main".to_string()),
+            background_layers: Vec::new(),
+            entities: vec![Entity {
+                entity_id: "player".to_string(),
+                display_name: None,
+                prefab: None,
+                transform: Transform { x: 16, y: 24 },
+                components: Components {
+                    logic: Some(crate::ugdm::components::LogicComponent {
+                        graph: Some(graph.to_string()),
+                        graph_ref: None,
+                        graph_origin: None,
+                        logic_hints: Vec::new(),
+                        external_source_refs: Vec::new(),
+                        imported_semantics: None,
+                        variables: HashMap::new(),
+                    }),
+                    ..Components::default()
+                },
+            }],
+            palettes: Vec::new(),
+            retrofx: None,
+            collision_map: None,
+            layers: None,
+        }
+    }
+
+    /// `score = score <operator> divisor`, com a porta `b` opcionalmente ligada.
+    /// Sem a aresta `b`, `resolve_math_expr_from_input` cai no default literal 0.
+    fn math_probe_graph(operator: &str, wire_b: bool) -> serde_json::Value {
+        let mut edges = vec![
+            json!({ "id": "x1", "fromNode": "start", "fromPort": "exec", "toNode": "set_v", "toPort": "exec" }),
+            json!({ "id": "d1", "fromNode": "get_a", "fromPort": "value", "toNode": "math", "toPort": "a" }),
+            json!({ "id": "d2", "fromNode": "math", "fromPort": "value", "toNode": "set_v", "toPort": "value" }),
+        ];
+        if wire_b {
+            edges.push(
+                json!({ "id": "d3", "fromNode": "get_b", "fromPort": "value", "toNode": "math", "toPort": "b" }),
+            );
+        }
+        json!({
+            "version": 1,
+            "nodes": [
+                { "id": "start", "type": "event_start", "label": "On Start", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": {} },
+                { "id": "get_a", "type": "var_get", "label": "Score", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": { "var_name": "score" } },
+                { "id": "get_b", "type": "var_get", "label": "Divisor", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": { "var_name": "divisor" } },
+                { "id": "math", "type": "logic_math", "label": "Math Exp", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": { "operator": operator } },
+                { "id": "set_v", "type": "var_set", "label": "Set Score", "x": 0, "y": 0, "inputs": [], "outputs": [], "params": { "var_name": "score" } }
+            ],
+            "edges": edges
+        })
+    }
+
+    /// Retorna o C emitido para MD e SNES a partir do mesmo grafo.
+    fn math_probe_emitted_c(operator: &str, wire_b: bool) -> (String, String) {
+        let ast = generate_ast(
+            &math_probe_project(),
+            &math_probe_scene(math_probe_graph(operator, wire_b)),
+        );
+        (
+            crate::compiler::sgdk_emitter::emit_sgdk(&ast, "math_probe").main_c,
+            crate::compiler::snes_emitter::emit_snes(&ast, "math_probe").main_c,
+        )
+    }
+
+    #[test]
+    fn logic_math_unsupported_operator_blocks_instead_of_compiling_as_addition() {
+        // `%` e avaliado pelo subset local mas nao existe no IR. Ele NAO pode
+        // ser reescrito como `+`; deve bloquear o build com motivo explicito.
+        for operator in ["%", "mod", "&", "<<"] {
+            let (md, snes) = math_probe_emitted_c(operator, true);
+
+            for (target, source) in [("megadrive", &md), ("snes", &snes)] {
+                assert!(
+                    !source.contains("(logic_var_score + logic_var_divisor)"),
+                    "[{target}] operador {operator:?} foi compilado silenciosamente como adicao"
+                );
+                assert!(
+                    source.contains("#error")
+                        && source.contains(operator)
+                        && source.to_lowercase().contains("logic_math"),
+                    "[{target}] operador {operator:?} nao suportado deveria emitir #error com o \
+                     motivo; nenhum bloqueio foi encontrado no C gerado"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn logic_math_division_by_literal_zero_blocks_instead_of_emitting_trap() {
+        // Porta `b` desconectada resolve para literal 0. Emitir `(x / 0)` gera
+        // trap de divisao por zero no 68000, enquanto o subset local promete 0.
+        let (md, snes) = math_probe_emitted_c("/", false);
+
+        for (target, source) in [("megadrive", &md), ("snes", &snes)] {
+            assert!(
+                !source.contains("/ 0)"),
+                "[{target}] divisao por zero literal chegou ao C gerado"
+            );
+            assert!(
+                source.contains("#error") && source.to_lowercase().contains("logic_math"),
+                "[{target}] divisao por zero literal deveria bloquear o build com #error"
+            );
+        }
+    }
+
+    #[test]
+    fn logic_math_supported_operators_remain_unchanged_and_deterministic() {
+        // Guarda de nao-regressao: o subset suportado nao pode mudar de forma
+        // nem deixar de ser deterministico entre execucoes.
+        for (operator, rendered) in [
+            ("+", "(logic_var_score + logic_var_divisor)"),
+            ("-", "(logic_var_score - logic_var_divisor)"),
+            ("*", "(logic_var_score * logic_var_divisor)"),
+            ("/", "(logic_var_score / logic_var_divisor)"),
+        ] {
+            let (md, snes) = math_probe_emitted_c(operator, true);
+            let (md_again, snes_again) = math_probe_emitted_c(operator, true);
+
+            assert_eq!(
+                md, md_again,
+                "C do MD nao foi deterministico para {operator:?}"
+            );
+            assert_eq!(
+                snes, snes_again,
+                "C do SNES nao foi deterministico para {operator:?}"
+            );
+
+            for (target, source) in [("megadrive", &md), ("snes", &snes)] {
+                assert!(
+                    source.contains(rendered),
+                    "[{target}] operador suportado {operator:?} deveria emitir {rendered}"
+                );
+                assert!(
+                    !source.contains("#error"),
+                    "[{target}] operador suportado {operator:?} nao pode bloquear o build"
+                );
+            }
+        }
     }
 }
