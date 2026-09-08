@@ -21,6 +21,15 @@
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
 
+* **2026-09-08 — GUARD-PATH-01: preparação do Java descartava o shell selecionado:**
+  - **Escopo:** continuidade autorizada pelo operador para corrigir build e certificar Build → ROM → Emulação. Base técnica `359d9e750d76dd7233da1e4ed4e4fceb6dc2ed58`, worktree externo `build-rom-host-certification`; checkout original e `.mimosa`/`.zcode` preservados.
+  - **Defeito reproduzido:** `configure_windows_shell` prefixa Git Bash no PATH do `Command`, mas `configure_java_for_sgdk` chama `prepend_to_path` outra vez, que reconstruía PATH a partir do processo pai. O prefixo escolhido sumia; com cache gerenciado o `sh.exe` bundled do SGDK podia prevalecer. Corrigido compondo com o PATH já configurado no processo filho (incluindo remoção explícita e comparação case-insensitive da chave no Windows). Sem mudança de lock, make escolhido, timeout ou asserções E2E.
+  - **Regressões antes/depois:** filtro `shell_`: antes 1 passed/2 failed, depois 3 passed. Uma prova inspeciona ordem Java → shell selecionado → PATH explícito; outra executa um comando resolvido pelo PATH final. Não alteram ambiente global dos testes.
+  - **Validação local da correção:** `host:certify` exit 0/READY; frontend 604 passed/3 skipped; Rust 489 passed/31 ignored; upstream SGDK/PVSnesLib e Ghidra passaram. ROM MD de referência: 524288 bytes, Genesis Plus GX v1.7.4, 60 frames, 320x224, 15416 pixels não pretos. Certificação pós-commit/desktop Windows ainda pendente nesta entrada.
+  - **Limite causal:** o defeito de PATH é determinístico e fica corrigido; ainda NÃO prova que explica toda ocorrência de `nm ... symbol.txt` exit 5 na issue #53. Experimento auxiliar com nm.exe oficial sob Wine, plugin relativo/absoluto/ausente e shell bundled passou; Wine não substitui runner Windows. Não remover #53 com base apenas nisso.
+  - **Próximo passo:** certificar o SHA publicado em Windows e exercitar o app desktop Linux MD/SNES; preservar evidências no diretório canônico de validação e atualizar o fechamento após os resultados.
+
+
 * **O que acabou de acontecer (2026-09-08 — rodada HOST-WIN-01/A-01/B-01/C-01 integrada em `main`; Desktop E2E revelado intermitente):**
   - **Merges executados com autorização explícita do operador nesta sessão**, cada um após revisão do diff e confirmação do SHA imediatamente antes do merge:
     - PR #51 (HOST-WIN-01), head `ed80c82e9bd08da9a0c0130e4ebd057b1d819ac1` → merge `8f9c9f8a2db0c49dbd85e953885e8dca8d1d0def`.
