@@ -31,12 +31,17 @@ export const TOOLCHAIN_LICENSES = Object.freeze({
   "pvsneslib-source": { license: "MIT", redistributed: false },
   "pvsneslib-tcc-source": { license: "LGPL-2.1-or-later", redistributed: false },
   "pvsneslib-wla-source": { license: "GPL-2.0-or-later", redistributed: false },
+  "pvsneslib-win32-x64": {
+    license: "MIT + LGPL-2.1-or-later + GPL-2.0-or-later (bundled components)",
+    redistributed: false,
+  },
   "binutils-2.41-source": { license: "GPL-3.0-or-later", redistributed: false },
   "gcc-13.2.0-source": {
     license: "GPL-3.0-or-later WITH GCC-exception-3.1",
     redistributed: false,
   },
   "sgdk-source": { license: "MIT", redistributed: false },
+  "sgdk-win32-x64": { license: "MIT", redistributed: false },
 });
 
 function readJson(file) {
