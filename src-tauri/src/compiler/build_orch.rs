@@ -2502,6 +2502,15 @@ fn configure_windows_shell(command: &mut Command) -> Option<PathBuf> {
 }
 
 fn detect_make_program(root: &Path) -> Option<PathBuf> {
+    if cfg!(target_os = "windows") {
+        // The SGDK release bundles a Cygwin make that can crash on newer
+        // hosted Windows images. Prefer the runner's native MinGW make when
+        // present, while retaining the official bundled fallback below.
+        if let Some(system_make) = find_in_path(&["mingw32-make"]) {
+            return Some(system_make);
+        }
+    }
+
     let mut candidates = vec![
         root.join("bin").join(platform_make_name()),
         root.join(platform_make_name()),
