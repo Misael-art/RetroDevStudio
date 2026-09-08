@@ -1987,6 +1987,7 @@ where
                     let sgdk_env = sgdk_make_safe_path(&toolchain.root);
                     command.env("SGDK", &sgdk_env);
                     command.env("GDK", &sgdk_env);
+                    configure_windows_shell(&mut command);
                     configure_java_for_sgdk(&mut command);
                     if let Ok(extra_flags) = std::env::var("RDS_EXTRA_FLAGS") {
                         let extra_flags = extra_flags.trim();
@@ -2469,6 +2470,29 @@ fn configure_java_for_sgdk(command: &mut Command) {
 
     command.env("JAVA_HOME", &java_home);
     prepend_to_path(command, &java_home.join("bin"));
+}
+
+fn configure_windows_shell(command: &mut Command) {
+    if !cfg!(target_os = "windows") {
+        return;
+    }
+
+    let Some(bash_program) = detect_bash_program() else {
+        return;
+    };
+    let Some(bin_dir) = bash_program.parent() else {
+        return;
+    };
+    let sh_program = bin_dir.join("sh.exe");
+    if !sh_program.is_file() {
+        return;
+    }
+
+    // The SGDK Windows archive bundles a Cygwin shell that crashes on the
+    // hosted Windows runner. GNU make honors SHELL, so prefer the installed
+    // Git Bash/MSYS shell while keeping the official SGDK make/compiler.
+    command.env("SHELL", &sh_program);
+    prepend_to_path(command, bin_dir);
 }
 
 fn detect_make_program(root: &Path) -> Option<PathBuf> {
