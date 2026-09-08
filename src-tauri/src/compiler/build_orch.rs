@@ -2589,7 +2589,20 @@ fn prepend_to_path(command: &mut Command, entry: &Path) {
         return;
     }
 
-    let existing = std::env::var_os("PATH").unwrap_or_default();
+    // Compose with the child environment, not the parent PATH. SGDK selects
+    // Git Bash first and then adds Java: resetting PATH on the second call
+    // loses the selected shell and can resolve sh.exe to SGDK's bundled one.
+    let existing = command
+        .get_envs()
+        .find(|(key, _)| {
+            if cfg!(target_os = "windows") {
+                key.to_string_lossy().eq_ignore_ascii_case("PATH")
+            } else {
+                *key == "PATH"
+            }
+        })
+        .map(|(_, value)| value.unwrap_or_default().to_os_string())
+        .unwrap_or_else(|| std::env::var_os("PATH").unwrap_or_default());
     let mut path_value = OsString::new();
     path_value.push(entry.as_os_str());
     if !existing.is_empty() {
@@ -2819,6 +2832,61 @@ mod tests {
                 std::env::remove_var(self.key);
             }
         }
+    }
+
+    #[test]
+    fn prepending_java_preserves_the_selected_shell_path() {
+        let root = temp_dir("command-path-order");
+        let shell_bin = root.join("git-shell");
+        let java_bin = root.join("java-bin");
+        let bundled_bin = root.join("bundled-shell");
+        for directory in [&shell_bin, &java_bin, &bundled_bin] {
+            fs::create_dir_all(directory).unwrap();
+        }
+        let mut command = Command::new("unused");
+        command.env("PATH", &bundled_bin);
+        prepend_to_path(&mut command, &shell_bin);
+        prepend_to_path(&mut command, &java_bin);
+        let actual = command
+            .get_envs()
+            .find(|(key, _)| *key == "PATH")
+            .and_then(|(_, value)| value)
+            .unwrap();
+        assert_eq!(
+            std::env::split_paths(actual).collect::<Vec<_>>(),
+            vec![java_bin, shell_bin, bundled_bin]
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn selected_shell_executes_after_java_path_configuration() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = temp_dir("selected-shell-exec");
+        let shell_bin = root.join("git-shell");
+        let java_bin = root.join("java-bin");
+        let bundled_bin = root.join("bundled-shell");
+        for directory in [&shell_bin, &java_bin, &bundled_bin] {
+            fs::create_dir_all(directory).unwrap();
+        }
+        for (directory, content) in [
+            (&shell_bin, "#!/bin/sh\nprintf selected-shell\n"),
+            (&bundled_bin, "#!/bin/sh\nexit 5\n"),
+        ] {
+            let script = directory.join("rds-selected-shell");
+            fs::write(&script, content).unwrap();
+            fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "rds-selected-shell"]);
+        command.env("PATH", &bundled_bin);
+        prepend_to_path(&mut command, &shell_bin);
+        prepend_to_path(&mut command, &java_bin);
+        let output = command.output().unwrap();
+        assert!(output.status.success(), "selected shell lost: {:?}", output);
+        assert_eq!(output.stdout, b"selected-shell");
+        fs::remove_dir_all(root).unwrap();
     }
 
     fn temp_dir(prefix: &str) -> PathBuf {
