@@ -987,17 +987,25 @@ async function waitFor(predicate, timeoutMs, label, intervalMs = 500) {
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
 
+  // A mensagem precisa dizer que isto e esgotamento de orcamento, nao um
+  // defeito observado. Rotulos como "Emulador nao ficou ativo" ja induziram
+  // diagnostico errado: a condicao pode simplesmente nao ter tido tempo.
+  const elapsedMs = Date.now() - startedAt;
+  const timeoutSuffix =
+    ` [timeout: condicao nao foi satisfeita em ${elapsedMs}ms` +
+    ` (orcamento ${timeoutMs}ms); isto e esgotamento de tempo, nao um defeito confirmado]`;
+
   if (lastError instanceof Error) {
-    fail(`${label}: ${lastError.message}`, {
+    fail(`${label}${timeoutSuffix}: ${lastError.message}`, {
       statusCode: "timeout_wait_condition",
       errorCategory: "timeout",
-      details: { timeoutMs, label },
+      details: { timeoutMs, elapsedMs, label },
     });
   }
-  fail(label, {
+  fail(`${label}${timeoutSuffix}`, {
     statusCode: "timeout_wait_condition",
     errorCategory: "timeout",
-    details: { timeoutMs, label },
+    details: { timeoutMs, elapsedMs, label },
   });
 }
 
