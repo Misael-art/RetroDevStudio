@@ -3280,6 +3280,41 @@ async function collectAppDiagnostics(sessionId) {
   }
 }
 
+/**
+ * Le do console do app a linha de identidade da toolchain que o build emite
+ * ("Toolchain localizada: <root> (make: <programa>)").
+ *
+ * Existe para tornar runs verdes e vermelhos comparaveis. O `consoleTail` so e
+ * despejado em falha, entao ate aqui nao havia como saber qual `make` os runs
+ * saudaveis usaram -- o que impedia avaliar se a preferencia por `mingw32-make`
+ * nativo (PR #51) tem relacao com a falha intermitente da receita `nm`
+ * (issue #53). Sem isso a hipotese fica sem dado, nao sem interesse.
+ *
+ * Diagnostico puro: nunca falha o cenario.
+ */
+async function reportToolchainIdentity(sessionId) {
+  try {
+    const line = await executeScript(
+      sessionId,
+      `
+        const state = window.__RDS_E2E__?.getState?.() ?? null;
+        const entries = Array.isArray(state?.consoleEntries) ? state.consoleEntries : [];
+        const match = entries
+          .map((entry) => entry?.message ?? '')
+          .reverse()
+          .find((message) => message.includes('Toolchain localizada:'));
+        return match ?? '';
+      `
+    );
+    console.log(
+      line ? `Toolchain do run: ${line}` : "Toolchain do run: (linha nao encontrada no console)"
+    );
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.log(`Toolchain do run: (indisponivel: ${detail})`);
+  }
+}
+
 function formatAppDiagnostics(diagnostics) {
   if (!diagnostics) {
     return "";
@@ -6315,6 +6350,7 @@ async function main() {
     console.log("OK: Desktop Tauri E2E passou.");
     console.log(`Projeto: ${options.project}`);
     console.log(`Target: ${projectMetadata.target}`);
+    await reportToolchainIdentity(sessionId);
     console.log(`Canvas: ${framebuffer.width}x${framebuffer.height}, pixels nao pretos: ${framebuffer.nonBlackPixels}`);
     await recordE2eLedgerSuccess(options, projectMetadata, { framebuffer });
   } catch (error) {
