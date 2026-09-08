@@ -381,7 +381,12 @@ function envProbeCandidates(probe, context) {
 }
 
 function runVersion(program, args, env) {
-  const result = spawnSync(program, args ?? ["--version"], { encoding: "utf8", env, windowsHide: true });
+  const result = spawnSync(program, args ?? ["--version"], {
+    encoding: "utf8",
+    env,
+    windowsHide: true,
+    shell: process.platform === "win32" && /\.(?:cmd|bat)$/i.test(program),
+  });
   return {
     ok: result.status === 0,
     status: result.status,
@@ -652,6 +657,7 @@ function commandResult(label, program, args, options = {}) {
     encoding: "utf8",
     stdio: logDescriptor === null ? (options.inherit ? "inherit" : "pipe") : ["ignore", logDescriptor, logDescriptor],
     windowsHide: true,
+    shell: process.platform === "win32" && /\.(?:cmd|bat)$/i.test(program),
   });
   if (logDescriptor !== null) closeSync(logDescriptor);
   return {
