@@ -2481,12 +2481,8 @@ fn configure_windows_shell(command: &mut Command) -> Option<PathBuf> {
         return None;
     }
 
-    let Some(bash_program) = detect_bash_program() else {
-        return None;
-    };
-    let Some(bin_dir) = bash_program.parent() else {
-        return None;
-    };
+    let bash_program = detect_bash_program()?;
+    let bin_dir = bash_program.parent()?;
     let sh_program = bin_dir.join("sh.exe");
     if !sh_program.is_file() {
         return None;
