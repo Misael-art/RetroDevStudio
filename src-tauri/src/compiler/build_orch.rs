@@ -1992,6 +1992,9 @@ where
                         // command-line variable is required to override it.
                         // Keep the value space-free; the Git Bash bin dir is
                         // already first in PATH by configure_windows_shell.
+                        // The bundled Windows make can crash when concurrent
+                        // Cygwin recipes use the alternate shell.
+                        command.arg("-j1");
                         command.arg("SHELL=sh.exe");
                     }
                     configure_java_for_sgdk(&mut command);
