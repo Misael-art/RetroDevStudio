@@ -2,7 +2,7 @@
 **Status:** ENTRADA CANONICA
 **Ultima Atualizacao:** 2026-09-08 (HOST-WIN-01 validado no Windows; A/B/C revisados; GOV-01 original preservado)
 
-**Atualização ativa (2026-09-08 — GUARD-NATIVE-01/GUARD-ROM-01):** PRs #55/#56 integradas com CI verde. Abertura direta Linux revelou descoberta incompleta do compilador gerenciado e checksum SGDK invalidado pelo mastering do header; correções e provas negativas registradas no Current Wave. Próximo gate: certificação do novo SHA e abertura direta com ROMs reais, sem ambiente preparado pelo runner. #53 e GOV-01 continuam abertos; nenhuma promoção de maturidade.
+**Atualização ativa (2026-09-08 — GUARD-NATIVE-01/GUARD-ROM-01):** PRs #55/#56 integradas com CI verde. Abertura direta Linux revelou descoberta incompleta do compilador gerenciado e checksum SGDK invalidado pelo mastering do header; correções e provas negativas registradas no Current Wave. Código `a775762` certificado READY (604 frontend/492 Rust), abertura direta MD/SNES com pixels reais e sem diagnóstico bloqueante; checksum final MD confirmado byte-a-byte pelo sizebnd oficial. Próximo gate: CI e integração no destino. #53 e GOV-01 continuam abertos; nenhuma promoção de maturidade.
 
 **Atualização anterior (2026-09-08 — GUARD-PATH-01):** reproduzida e corrigida perda do PATH do shell ao preparar Java no build SGDK. Testes antes 1 passed/2 failed, depois 3 passed; host:certify Linux READY com provas oficiais MD/SNES. Detalhes e limites no Current Wave: a relação causal completa com o exit 5 de nm (#53) ainda requer evidência Windows; nenhuma promoção de maturidade.
 
