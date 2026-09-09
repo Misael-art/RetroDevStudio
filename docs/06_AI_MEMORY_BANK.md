@@ -377,6 +377,14 @@ Em caso de conflito documental, a hierarquia continua sendo:
 - **Warnings de fallback de assets agregados (UX):** o viewport emite **um único** aviso de fallback `Image()` por sessão de carregamento (`assetFallbackWarnedRef`) em vez de uma linha por asset (63 no Taiketsu importado). O fallback em si é benigno e continua ativo. `lint`/`tsc` OK; suíte frontend medida nesta rodada.
 - **Lição de host registrada:** `find` sobre o cartão SD pode retornar resultado vazio por soluço de I/O — reconfirmar com retry (aconteceu duas vezes nesta rodada com o mesmo comando: 0 resultados → cheio no retry).
 
+### CHECKPOINT operacional (2026-09-09e — doadores code-only buildáveis via Fase D + cobertura das engines do SGDK_Engines)
+
+- **Import code-only implementado no caminho canônico:** `import_sgdk_project` agora detecta doador code-only (manifests `.res` presentes + fontes C + nenhum recurso importável — caso FORGE_REFERENCE, que usa só a fonte built-in do SGDK) e, em vez de rejeitar, cria projeto nativo com cena `code-only`: entidade `code_only_logic` com `graph_ref` → `graphs/sgdk_import_code_only.json` contendo grafo ponte honesto (`event_update` → `bridge_unconverted_source` não bloqueante, `source_file` rastreável ao `main.c` do doador), `imported_semantics` com `audit_flags=["code_only_donor"]`, ledger `sgdk-import/v4` e warning auditável. Teste de regressão dedicado (`import_sgdk_project_supports_code_only_donor_with_bridge_scene`). O emitter já tratava `bridge_unconverted_source` não bloqueante como `NoOp`, então o C gerado compila.
+- **Prova real:** corpus SGDKForge rerodado — **14/14 IBRE, `bridge_only=0`, `failed=0`**. FORGE_REFERENCE fechou fluxo completo (ROM `SEGA`, emulação visível com 795 px não-pretos — coerente com jogo de texto/fonte built-in). Relatório: `target-test/validation/sgdk-corpus-real-build/sgdk-corpus-real-build-report.json`.
+- **Cobertura das engines (`SGDK_Engines/`, 8 projetos estagiados):** inventário semântico **8/8 com lógica extraída** — SGDK-examples 2.744 candidates, SGDK_MegaDriving 634, HAMOOPIG-SGDK 351, Blast-Engine 233, UltraDrive 53, PlatformerEngine 39, MDSDRV 41, Awesome_MegaDrive 0 (tooling/docs). No build/emu, as 8 importam e são classificadas **bridge-only** — correto: são bibliotecas/suites de exemplo, não jogos standalone; o gate `emulation_visible_ok > 0` do runner (correto para jogos) panica nesse corpus e **não foi afrouxado** — o relatório JSON da varredura fica como evidência. Conversão de exemplos de engines em projetos buildáveis exigiria estagiamento por exemplo + adequação por convenção de cada engine (follow-up registrado, não feito).
+- **Gates:** `fmt`/`clippy -D warnings` OK; `cargo test --lib` verde (+1 teste → 491); frontend não alterado nesta fatia. SGDK segue **Experimental**; nenhuma promoção de `support_status` — o import code-only materializa pontes honestas, não AST/FSM.
+
+
 
 
 

@@ -19,7 +19,7 @@ use crate::ugdm::entities::RetroFXRasterLine;
 use crate::ugdm::entities::{
     BackgroundLayer, BuildConfig, CollisionMap, Entity, PaletteEntry, PatchAuditEntry, Project,
     ProjectSettings, Resolution, RetroFXConfig, RetroFXParallaxLayer, SaveRamConfig, Scene,
-    SceneLayer, ScrollSpeed, TemplateMetadata, CURRENT_SCHEMA_VERSION,
+    SceneLayer, ScrollSpeed, TemplateMetadata, Transform, CURRENT_SCHEMA_VERSION,
 };
 
 pub const UGDM_VERSION: &str = "1.0.0";
@@ -3403,6 +3403,9 @@ pub fn import_sgdk_project(
     sgdk_path: &Path,
 ) -> Result<SgdkImportReport, LoadError> {
     let resolved_root = resolve_sgdk_import_root(sgdk_path)?;
+    if sgdk_project_is_code_only(&resolved_root.effective_root) {
+        return import_sgdk_code_only_project(project_dir, sgdk_path, &resolved_root);
+    }
     validate_sgdk_project_path(&resolved_root.effective_root)?;
     let resources = load_sgdk_resources(&resolved_root.effective_root)?;
     import_sgdk_resources_into_scene(
@@ -3413,6 +3416,234 @@ pub fn import_sgdk_project(
         SgdkAssetMaterialization::Copy,
         "Imported SGDK Project",
     )
+}
+
+/// Doador code-only: manifests `.res` presentes e fontes C, mas nenhum recurso
+/// importavel (ex.: FORGE_REFERENCE usa apenas a fonte built-in do SGDK). Em vez de
+/// rejeitar, o import cria projeto nativo com cena contendo uma entidade de logica
+/// ponte (`bridge_unconverted_source` nao bloqueante) rastreavel ao `src/` do doador.
+fn sgdk_project_is_code_only(sgdk_path: &Path) -> bool {
+    let Ok(manifests) = find_sgdk_manifest_paths(sgdk_path) else {
+        return false;
+    };
+    if manifests.is_empty() || !sgdk_has_c_sources(sgdk_path) {
+        return false;
+    }
+    let resources = load_sgdk_resources(sgdk_path).unwrap_or_default();
+    !resources
+        .iter()
+        .any(|resource| sgdk_asset_destination(&resource.kind, &resource.asset_path).is_some())
+}
+
+fn sgdk_has_c_sources(sgdk_path: &Path) -> bool {
+    let src = sgdk_path.join("src");
+    let root = if src.is_dir() {
+        src.as_path()
+    } else {
+        sgdk_path
+    };
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&current) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().and_then(|value| value.to_str()) == Some("c") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+const SGDK_CODE_ONLY_ENTITY_ID: &str = "code_only_logic";
+const SGDK_CODE_ONLY_GRAPH_REF: &str = "graphs/sgdk_import_code_only.json";
+
+fn sgdk_code_only_bridge_graph_json(source_file: &str) -> String {
+    serde_json::json!({
+        "version": 1,
+        "nodes": [
+            {
+                "id": "code_only_tick",
+                "type": "event_update",
+                "label": "A Cada Frame (ponte code-only)",
+                "x": 120,
+                "y": 120,
+                "inputs": [],
+                "outputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "params": {}
+            },
+            {
+                "id": "code_only_bridge",
+                "type": "bridge_unconverted_source",
+                "label": "Fonte nao convertida (code-only)",
+                "x": 420,
+                "y": 120,
+                "inputs": [{ "id": "exec", "label": ">", "kind": "exec" }],
+                "outputs": [],
+                "params": {
+                    "blocking": false,
+                    "gap": "code_only_donor_sem_assets",
+                    "source_file": source_file
+                }
+            }
+        ],
+        "edges": [
+            {
+                "id": "edge_code_only_bridge",
+                "fromNode": "code_only_tick",
+                "fromPort": "exec",
+                "toNode": "code_only_bridge",
+                "toPort": "exec"
+            }
+        ]
+    })
+    .to_string()
+}
+
+fn import_sgdk_code_only_project(
+    project_dir: &Path,
+    requested_sgdk_path: &Path,
+    resolved_root: &SgdkResolvedImportRoot,
+) -> Result<SgdkImportReport, LoadError> {
+    use crate::core::sgdk_corpus_inventory::inspect_sgdk_project_for_nocode_inventory;
+
+    let sgdk_path = resolved_root.effective_root.as_path();
+    let inventory = inspect_sgdk_project_for_nocode_inventory(sgdk_path)
+        .map_err(|error| LoadError(format!("inventario do doador code-only falhou: {error}")))?;
+    let source_file = inventory
+        .source_files
+        .iter()
+        .find(|path| path.ends_with("main.c"))
+        .cloned()
+        .or_else(|| inventory.source_files.first().cloned())
+        .unwrap_or_else(|| "src/main.c".to_string());
+
+    let graph_ref = SGDK_CODE_ONLY_GRAPH_REF.to_string();
+    let graph_path = graph_write_path(project_dir, &graph_ref)?;
+    if let Some(parent) = graph_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            LoadError(format!(
+                "code-only: nao foi possivel criar diretorio para graph_ref '{}': {}",
+                graph_ref, error
+            ))
+        })?;
+    }
+    fs::write(&graph_path, sgdk_code_only_bridge_graph_json(&source_file)).map_err(|error| {
+        LoadError(format!(
+            "code-only: falha ao gravar NodeGraph ponte em '{}': {}",
+            graph_path.display(),
+            error
+        ))
+    })?;
+
+    let logic = LogicComponent {
+        graph_ref: Some(graph_ref),
+        graph_origin: Some("imported_ref".to_string()),
+        external_source_refs: vec![source_file.clone()],
+        imported_semantics: Some(ImportedLogicSemantics {
+            source: "sgdk".to_string(),
+            extraction_kind: "bridge".to_string(),
+            confidence: "low".to_string(),
+            role_reason: "doador code-only: logica rastreada como ponte; cena nativa buildavel"
+                .to_string(),
+            source_paths: vec![source_file.clone()],
+            audit_flags: vec!["code_only_donor".to_string()],
+            bridge_count: 1,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let mut scene = canonical_scene(
+        DEFAULT_SCENE_ID,
+        Some("Imported SGDK Project (code-only)".to_string()),
+    );
+    scene.entities.push(Entity {
+        entity_id: SGDK_CODE_ONLY_ENTITY_ID.to_string(),
+        display_name: Some("Fonte SGDK (code-only)".to_string()),
+        prefab: None,
+        transform: Transform::default(),
+        components: Components {
+            logic: Some(logic),
+            ..Default::default()
+        },
+    });
+    save_scene(project_dir, DEFAULT_ENTRY_SCENE, &scene)?;
+
+    let manifest_paths = find_sgdk_manifest_paths(sgdk_path).unwrap_or_default();
+    let manifests_relative: Vec<String> = manifest_paths
+        .iter()
+        .map(|path| {
+            path.strip_prefix(sgdk_path)
+                .ok()
+                .map(normalize_relative_path)
+                .unwrap_or_else(|| path.display().to_string())
+        })
+        .collect();
+    let fingerprint = compute_sgdk_donor_fingerprint(sgdk_path, &manifest_paths);
+    let mut warnings = resolved_root.warnings.clone();
+    warnings.push(
+        "Doador code-only: nenhum recurso importavel nos manifestos; cena nativa criada com entidade de logica ponte rastreavel a 'src/'."
+            .to_string(),
+    );
+
+    let source_summary = SgdkSourceSummary {
+        donor_root: requested_sgdk_path.to_string_lossy().to_string(),
+        effective_root: sgdk_path.to_string_lossy().to_string(),
+        resolution_kind: resolved_root.resolution_kind.clone(),
+        resolution_warnings: resolved_root.warnings.clone(),
+        resolution_suggestions: resolved_root.suggestions.clone(),
+        manifests: manifests_relative.clone(),
+        resources_total: 0,
+        resources_accepted: 0,
+        resources_skipped: 0,
+        fingerprint: fingerprint.clone(),
+    };
+
+    let ledger_scenes = vec![SgdkImportLedgerScene {
+        scene_id: scene.scene_id.clone(),
+        display_name: scene
+            .display_name
+            .clone()
+            .unwrap_or_else(|| "Imported SGDK Project (code-only)".to_string()),
+        scene_path: DEFAULT_ENTRY_SCENE.to_string(),
+        role: "primary".to_string(),
+        entity_count: scene.entities.len(),
+        tilemap_cells: 0,
+        tilemap_unique_tiles: 0,
+    }];
+    let manifest_path = write_sgdk_import_ledger(
+        project_dir,
+        requested_sgdk_path,
+        sgdk_path,
+        &resolved_root.resolution_kind,
+        &scene.scene_id,
+        &fingerprint,
+        &manifests_relative,
+        &[],
+        &[],
+        &warnings,
+        &[],
+        &ledger_scenes,
+        &SgdkImportLedgerPhaseC::default(),
+        &SgdkImportLedgerPhaseD::default(),
+    )?;
+
+    Ok(SgdkImportReport {
+        primary_scene: scene,
+        imported_scenes: 1,
+        skipped_sources: Vec::new(),
+        warnings,
+        fallbacks: Vec::new(),
+        source_summary,
+        manifest_path: Some(manifest_path),
+        primary_scene_path: DEFAULT_ENTRY_SCENE.to_string(),
+        additional_scenes: Vec::new(),
+    })
 }
 
 pub fn import_legacy_sgdk_project(
@@ -17872,6 +18103,80 @@ void tick_player(void) {\n\
         assert_eq!(meta.unwrap().build_policy, None);
 
         let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Regressao (2026-09-09, corpus SGDKForge — FORGE_REFERENCE): doador code-only
+    /// (manifests `.res` so com comentarios, fonte usa recursos built-in do SGDK) era
+    /// rejeitado no import; agora gera projeto nativo com cena de logica ponte e
+    /// segue buildavel pelo pipeline canonico.
+    #[test]
+    fn import_sgdk_project_supports_code_only_donor_with_bridge_scene() {
+        let donor_dir = temp_dir("sgdk-code-only-donor");
+        fs::create_dir_all(donor_dir.join("src/boot")).expect("create donor src");
+        fs::create_dir_all(donor_dir.join("res")).expect("create donor res");
+        fs::write(
+            donor_dir.join("src/main.c"),
+            "#include <genesis.h>\nint main(bool hard) { while (TRUE) { SYS_doVBlankProcess(); } return 0; }\n",
+        )
+        .expect("write main.c");
+        fs::write(donor_dir.join("src/boot/rom_head.c"), "/* head */\n").expect("write head");
+        fs::write(
+            donor_dir.join("res/resources.res"),
+            "// No external runtime assets. The fixture uses SGDK built-in font geometry.\n",
+        )
+        .expect("write empty res");
+
+        let project_dir = temp_dir("sgdk-code-only-project");
+        create_project_skeleton(&project_dir, "Code Only Import", "megadrive").expect("skel");
+
+        let report = import_sgdk_project(&project_dir, &donor_dir).expect("code-only import");
+        assert_eq!(report.primary_scene_path, DEFAULT_ENTRY_SCENE);
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("code-only")),
+            "import code-only deve registrar warning auditavel: {:?}",
+            report.warnings
+        );
+
+        let logic_entity = report
+            .primary_scene
+            .entities
+            .iter()
+            .find(|entity| entity.entity_id == SGDK_CODE_ONLY_ENTITY_ID)
+            .expect("cena code-only deve conter a entidade de logica ponte");
+        let logic = logic_entity.components.logic.as_ref().expect("logic comp");
+        assert_eq!(logic.graph_ref.as_deref(), Some(SGDK_CODE_ONLY_GRAPH_REF));
+        assert_eq!(logic.graph_origin.as_deref(), Some("imported_ref"));
+        let semantics = logic.imported_semantics.as_ref().expect("semantics");
+        assert!(semantics
+            .audit_flags
+            .contains(&"code_only_donor".to_string()));
+        assert_eq!(semantics.bridge_count, 1);
+
+        let graph_json =
+            fs::read_to_string(project_dir.join(SGDK_CODE_ONLY_GRAPH_REF)).expect("graph file");
+        assert!(graph_json.contains("bridge_unconverted_source"));
+        assert!(
+            graph_json.contains("\"blocking\":false"),
+            "bridge nao pode bloquear o build: {graph_json}"
+        );
+        assert!(
+            graph_json.contains("main.c"),
+            "source mapping deve apontar ao main.c do doador: {graph_json}"
+        );
+
+        let manifest_rel = report.manifest_path.as_deref().expect("ledger path");
+        assert!(
+            project_dir.join(manifest_rel).is_file(),
+            "ledger code-only persistido"
+        );
+
+        stamp_imported_sgdk_metadata(&project_dir, &donor_dir).expect("stamp code-only");
+
+        let _ = fs::remove_dir_all(&donor_dir);
+        let _ = fs::remove_dir_all(&project_dir);
     }
 
     #[test]
