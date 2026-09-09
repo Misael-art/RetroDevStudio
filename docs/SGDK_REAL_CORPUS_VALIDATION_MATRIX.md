@@ -4,6 +4,10 @@
 **Alvo:** sair de fixture/E2E controlado para matriz repetivel por genero/projeto.  
 **Regra de produto:** SGDK so pode ser chamado Stable quando corpus, BLAZE e jogo no-code tiverem prova real (SGDK oficial + Libretro real) ou bridge formal quando build nao for aplicavel, sem fake como evidencia final.
 
+**Atualizacao 2026-09-08 (linha 8 — luta 1v1, host Linux):** a matriz ganhou a linha 8 `TaiketsuUltraHeroGenesis` (raiz efetiva `src/`, SGDK moderno, boot SEGA custom) e o helper de doadores passou a aceitar `RDS_SGDK_MATRIX_CORPUS_ROOT` para rodar a matriz fora do host de referencia Windows, mesmo contrato do `RDS_SGDK_CORPUS_ROOT` dos relatorios semanticos; o vertical semantico `sgdk_logic_real_corpus_vertical_reports` ganhou o label `TaiketsuUltraHeroGenesis`. A linha 8 fechou **Passou** no host Linux com SGDK 2.11 real e Genesis Plus GX real: import direto (5 cenas, 0 warnings), build com ROM `SEGA` e emulacao visivel (90 frames, `non_black_pixels=15856`), e o extrator semantico entregou grafo de **362 nodes / 344 edges** (12 `fsm_state`, 5 `fsm_transition`, 10 bridges). A materializacao por entidade no projeto importado permanece `converted_nodes=0`/`bridge_nodes=0` (Fase D heuristica, sem AST completo) e passos `sprite_anim` com nomes nao casados foram ignorados com aviso — ambos registrados como limites honestos na linha 8. Isto **nao** promove `support_status`; SGDK segue **Experimental**.
+
+**Atualizacao 2026-09-09 (regressao de comentarios `//` em `.res` corrigida):** a validacao desktop da linha 8 (app real via automacao WebDriver) revelou que comentarios `//` em manifests `.res` (estilo HAMOOPIG, ex.: `//305 = 304`) eram parseados como recursos falsos (`kind='//305'`, name `'='`) e apareciam como 5 "gaps bloqueantes" falsos com texto truncado no Resumo SGDK Logic. Correcao aplicada nos **dois** parsers (`parse_sgdk_manifest` em `project_mgr.rs` e `parse_resource_manifest` em `sgdk_corpus_inventory.rs`): linhas `//` e `;` (comentario oficial do rescomp) sao ignoradas, com testes de regressao dedicados. Apos o fix, a linha 8 rerodou verde: import/build/ROM/emulacao identicos, grafo semantico sem as bridges falsas (362→**357** nodes, bridges 10→**5**, `unsupported_resource_kind` eliminado dos gap kinds; os 5 `blocking_gaps` restantes sao os limites reais Fase D: `assembly_source`, `complex_state_expression`, `preprocessor_condition`). Isto nao altera `support_status`.
+
 **Nota semantica (2026-05-20, rodada 49):** `codex/sgdk-real-proof-integration` adicionou o SGDK Logic Extractor v1 ao `canonical_model.logic_systems`, cobrindo funcoes, chamadas, FSMs, estados, transicoes, condicoes, acoes, refs de entidades/pools, source mappings e bridges. O gate host-local `sgdk_logic_real_corpus_vertical_reports --ignored` gerou relatorios em `src-tauri/target-test/validation/sgdk-logic-extractor-v1/`: Platformer 2 (`FSMs=0`, `states=1`, `actions=49`, `bridges=9`), NEXZR MD (`FSMs=1`, `states=220`, `transitions=1`, `actions=92`, `bridges=465`) e BLAZE_ENGINE (`FSMs=2`, `states=3`, `transitions=2`, `actions=591`, `bridges=10`). Todos ficaram com `blocking_gaps=0`; bridges seguem explicitas e nao viram node falso.
 **Nota SGDK Logic (2026-05-20, rodada 49):** esta matriz continua sendo prova de corpus/build/ROM/emulacao, nao prova automatica de equivalencia de gameplay nem de logica importada. A branch `codex/sgdk-logic-truth-product-qa` adiciona UX/QA para separar nodes funcionais, bridges, gaps e source mapping; `FSM extraida` so pode ser usado quando o Semantic Extractor/modelo/grafo trouxer FSM real. SGDK Logic Nodes permanece **Parcial/Experimental** ate A+B+C passarem integrados; `BLAZE_ENGINE` segue compat/bridge quando necessario, sem equivalencia 1:1.
 
@@ -31,13 +35,21 @@
 
 **Nota IDE (2026-05-02, rodada 29):** a matriz deste ficheiro continua centrada em **Rust/corpus/build**. **Prova desktop IDE** continua no runner **`npm run test:e2e:desktop:qa-rc`**; nesta rodada o bloco G passou com evidencias especificas de cena importada, picker/solo em cena densa, tilemap authoring, objeto -> Logic -> fonte, Art -> Scene e reopen/build/ROM `SEGA` (`qa-rc-2026-05-02T05-14-22-572Z-*`). Isso **não** substitui as linhas de corpus abaixo e **nao** promove `support_status`; complementa a barra de UX. Ver `docs/06_CURRENT_WAVE_AI_BANK.md`.
 
-**Cobertura por genero (codigo):** existem **sete** testes Rust `#[ignore]` em `src-tauri/src/core/project_mgr.rs` (seis titulos-base + um corpus de estresse `BLAZE_ENGINE`). Os seis titulos-base mantem o contrato completo com assert de ROM `SEGA`; desde a rodada 42, `BLAZE_ENGINE` tambem exige build/ROM `SEGA` por perfil de compatibilidade conservador, mantendo o blocker original visivel antes da transformacao. Ausencia do doador com `--ignored` => **panic**, salvo `RDS_SGDK_MATRIX_CORPUS_SKIP=1`. Isto nao promove `support_status`.
+**Cobertura por genero (codigo):** existem **oito** testes Rust `#[ignore]` em `src-tauri/src/core/project_mgr.rs` (sete titulos-base + um corpus de estresse `BLAZE_ENGINE`). Os sete titulos-base mantem o contrato completo com assert de ROM `SEGA`; desde a rodada 42, `BLAZE_ENGINE` tambem exige build/ROM `SEGA` por perfil de compatibilidade conservador, mantendo o blocker original visivel antes da transformacao. Desde 2026-09-08, a linha 8 (`TaiketsuUltraHeroGenesis`, luta 1v1) inclui smoke de emulacao visivel da ROM importada e export do grafo semantico em nodes. Ausencia do doador com `--ignored` => **panic**, salvo `RDS_SGDK_MATRIX_CORPUS_SKIP=1`. Isto nao promove `support_status`.
 
 ---
 
 ## Raiz do corpus (host)
 
 `F:\Projects\MegaDrive_DEV\SGDK_Engines\`
+
+Em outros hosts (ex.: Linux), apontar a raiz do corpus por env **sem editar codigo**:
+
+```text
+RDS_SGDK_MATRIX_CORPUS_ROOT=/caminho/para/SGDK_Engines
+```
+
+Mesmo contrato do `RDS_SGDK_CORPUS_ROOT` ja aceito por `sgdk_corpus_inventory.rs` (`sgdk_logic_real_corpus_vertical_reports`). Sem o env, os doadores resolvem contra a raiz canonica acima.
 
 Verificacao de existencia das pastas (2026-04-21 neste host): **OK** para os seis nomes listados.
 
@@ -90,6 +102,7 @@ Para cada linha, ao executar no editor: import SGDK -> relatorio/ledger -> cenas
 | 5 | `Mortal Kombat Plus [VER.001] [SGDK 211] [GEN] [ENGINE] [LUTA]` | Luta | Passou | Passou | Passou | Passou | Passou | Parcial | Passou | Passou | Passou | **Passou** | Evidencia rodada 14 (2026-04-23): `MATRIX_MK signals` passou e build com ROM `SEGA`; breakdown `MATRIX_MK hw`: `mode=sgdk_managed`, `total_kb=1002`, `resident_kb=33`, `streamable_kb=969`, `dma_frame_kb=258`, `fatal=0`, `warn=4`. Modelo separa claramente volume total de conjunto residente. |
 | 6 | `NEXZR MD [VER.001] [SGDK 211] [GEN] [GAME] [SHMUP]` | Shmup | Passou | Passou | Passou | Passou | Passou | Passou | Passou | Passou | Passou | **Passou** | Evidencia rodada 12 (2026-04-22): `MATRIX_NEXZR signals`: `source_kind=imported_sgdk`, `tilemap_cells_nonempty=true`, `sprite_anim_nonempty=true`, `collision_present=true`, `graph_ref_nonempty=true`, `imported_scenes=5`, `warnings=0`; `MATRIX_NEXZR build: source_kind=imported_sgdk mode=sgdk_detect rom_sega=true`. |
 | 7 | `BLAZE_ENGINE [VER.001] [SGDK 211] [GEN] [ENGINE] [BRIGA DE RUA]` | Beat 'em up (estresse) | Passou | Passou | Passou | Passou | Passou | Passou por bridge/compat | Passou | Passou | **Passou por compat real** | **Coberto por modo compativel** | Evidencia rodada 43 (2026-05-14): `sgdk_matrix_corpus_blaze_engine_partial_flow_documents_build_blocker --ignored` passou com SGDK real e Libretro real. O teste confirma blocker original antes da transformacao, aplica `SGDK compatibility profile` com `sprite culling`, `multiplex`, breakdown `MD VRAM analysis` com `spr_res=`/`banks=`, gera ROM real e roda Genesis Plus GX por 60 frames (`non_black_pixels=71680`). Nao declara equivalencia visual 1:1 do original; declara modo compativel conservador coberto. |
+| 8 | `TaiketsuUltraHeroGenesis` (raiz efetiva `src/`) | Luta 1v1 (SGDK moderno, `main.c` monolitico de ~5.6k linhas, boot SEGA custom em `src/boot`) | Passou | Passou | Passou | Passou | Passou | Passou | Passou | Passou | **Passou** | **Passou (local, 2026-09-08)** | Evidencia (2026-09-08, host Linux): `sgdk_matrix_corpus_taiketsu_ultra_hero_genesis_partial_flow_documents_build_blocker --ignored` com `RDS_SGDK_MATRIX_CORPUS_ROOT` apontando ao corpus local, SGDK 2.11 real (`fake_toolchain_used=false`) e Genesis Plus GX real. `MATRIX_TUH signals`: `resolution_kind=direct`, `source_kind=imported_sgdk`, `tilemap_cells_nonempty=true`, `sprite_anim_nonempty=true`, `collision_present=true`, `graph_ref_nonempty=true`, `imported_scenes=5`, `warnings=0`. `MATRIX_TUH hw`: `mode=sgdk_managed`, `total_kb=1047`, `resident_kb=32`, `spr_res_kb=27`, `streamable_kb=1015`, `dma_frame_kb=268`, `banks=2/8`, `cells=32/32`, `fatal=0`, `warn=4`. `MATRIX_TUH build`: `rom_sega=true`. `MATRIX_TUH emu`: 90 frames, `320x224`, `non_black_pixels=15856`, core `Genesis Plus GX v1.7.4`. Estrutura logica em nodes: extrator semantico entrega grafo com **357 nodes / 344 edges** (`fsm_state=12`, `fsm_transition=5`, `sprite_move=88`, `spawn_entity=99`, `set_position=42`, `sprite_anim=17`, `timer=12`, `palette_hblank=14`, `scroll_tilemap=6`, `input_held=2`, `destroy_entity=28`, `vdp_validator=26`, `event_update=1`, `bridge_unconverted_source=5`) e cobertura `FSMs=2`, `states=12`, `transitions=5`, `actions=245`, `bridges=5`, `blocking_gaps=5` (gaps: `assembly_source`, `complex_state_expression`, `preprocessor_condition` — numeros pos-fix 2026-09-09; antes do fix dos comentarios `//` eram 362 nodes e 10 bridges com 5 falsos `unsupported_resource_kind`); reports em `src-tauri/target-test/validation/sgdk-taiketsu-real/`. **Limites honestos:** (1) a materializacao por entidade no projeto importado ficou `converted_nodes=0`/`bridge_nodes=0` — o grafo de 362 nodes vive na camada semantica exportavel (IR/reports), nao como FSM nativa editavel por entidade (Fase D heuristica, sem AST completo); (2) passos `sprite_anim` do grafo importado foram ignorados por nomes de animacao nao casados (`animacao 'idle' nao encontrada`) nos sprites por estado do doador. Mantem **Experimental**; nao promove `support_status`. |
 
 **Leitura SGDK Logic da rodada 49:** as colunas `graph_ref` e Build/ROM continuam validas para rastreabilidade e execucao, mas nao significam que o grafo represente 100% do gameplay. Cada trecho nao convertido deve aparecer como bridge/gap com source mapping acionavel; quando isso nao existir, o produto deve mostrar gap bloqueante de AST/FSM ausente em vez de "suportado".
 
@@ -107,7 +120,7 @@ cargo test sgdk_matrix_corpus_platformer_2_partial_flow_documents_build_blocker 
 
 Requer o doador no caminho absoluto acima (ou `RDS_SGDK_MATRIX_CORPUS_SKIP=1` para saltar explicitamente sem corpus). Saida util: linhas `MATRIX_P2 signals:` e `MATRIX_P2 build:` no stdout.
 
-### Linhas 2 a 7 — mesma suite, tags distintas no stdout
+### Linhas 2 a 8 — mesma suite, tags distintas no stdout
 
 Substituir `<TEST>` pelo nome completo do teste. Comando base:
 
@@ -123,14 +136,15 @@ cargo test <TEST> --manifest-path src-tauri/Cargo.toml --lib -- --ignored --noca
 | 5 | Engine luta | `sgdk_matrix_corpus_mortal_kombat_plus_partial_flow_documents_build_blocker` | `MATRIX_MK` |
 | 6 | Shmup | `sgdk_matrix_corpus_nexzr_md_partial_flow_documents_build_blocker` | `MATRIX_NEXZR` |
 | 7 | Beat 'em up (estresse) | `sgdk_matrix_corpus_blaze_engine_partial_flow_documents_build_blocker` | `MATRIX_BLAZE` |
+| 8 | Luta 1v1 (SGDK moderno) | `sgdk_matrix_corpus_taiketsu_ultra_hero_genesis_partial_flow_documents_build_blocker` | `MATRIX_TUH` (inclui `emu:` e `graph:`) |
 
-**Proximo passo de governanca:** executar cada linha no host com corpus, copiar para a matriz as colunas Passou/Parcial/Falhou e o texto de evidencia (como na linha 1). Opcional (demorado, use `--test-threads=1` para nao paralelizar builds SGDK): `cargo test sgdk_matrix_corpus_ --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` corre os seis testes que casam o prefixo; doador em falta sem `RDS_SGDK_MATRIX_CORPUS_SKIP=1` => **panic** naquele teste; com skip `=1`, o teste em falta retorna sem falhar e os restantes continuam.
+**Proximo passo de governanca:** executar cada linha no host com corpus, copiar para a matriz as colunas Passou/Parcial/Falhou e o texto de evidencia (como na linha 1). Opcional (demorado, use `--test-threads=1` para nao paralelizar builds SGDK): `cargo test sgdk_matrix_corpus_ --manifest-path src-tauri/Cargo.toml --lib -- --ignored --nocapture --test-threads=1` corre os testes que casam o prefixo; doador em falta sem `RDS_SGDK_MATRIX_CORPUS_SKIP=1` => **panic** naquele teste; com skip `=1`, o teste em falta retorna sem falhar e os restantes continuam.
 
 ---
 
 ## Criterio de suporte "completo" (nao satisfeito)
 
-So considerar SGDK fora de **Experimental** quando **os seis** fluxos acima forem **Passou** com evidencia repetivel, documentacao de falhas residuais (se houver) e **todos** os gates desta pagina verdes na mesma revisao - sem regressao em CI/local.
+So considerar SGDK fora de **Experimental** quando **todos** os fluxos da matriz (linhas 1-8, sendo a 8 tambem com smoke de emulacao e grafo semantico) forem **Passou** com evidencia repetivel, documentacao de falhas residuais (se houver) e **todos** os gates desta pagina verdes na mesma revisao - sem regressao em CI/local.
 
 ---
 
