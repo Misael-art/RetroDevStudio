@@ -4693,7 +4693,13 @@ fn parse_sgdk_manifest(manifest: &str) -> Vec<SgdkResourceEntry> {
         .lines()
         .filter_map(|line| {
             let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with('#') {
+            // rescomp aceita `;` como comentario oficial; projetos reais (ex.: HAMOOPIG)
+            // tambem usam `//`, que sem este guarda vira recurso falso `UnsupportedKind`.
+            if trimmed.is_empty()
+                || trimmed.starts_with('#')
+                || trimmed.starts_with(';')
+                || trimmed.starts_with("//")
+            {
                 return None;
             }
 
@@ -17811,6 +17817,33 @@ void tick_player(void) {\n\
         assert_eq!(resources[1].kind, "IMAGE");
         assert_eq!(resources[2].kind, "WAV");
         assert_eq!(resources[3].kind, "VGM");
+    }
+
+    /// Regressao (2026-09-09, linha 8 do corpus — TaiketsuUltraHeroGenesis): `sprite.res` do
+    /// doador usa comentarios `//` (estilo HAMOOPIG). Sem o guarda, cada comentario virava um
+    /// recurso falso `UnsupportedKind` (ex.: kind `//305`, name `=`) que aparecia como
+    /// "gap bloqueante" no Resumo SGDK Logic da IDE.
+    #[test]
+    fn parse_sgdk_manifest_ignores_slash_and_semicolon_comment_lines() {
+        let manifest = r#"
+            //tipo / nome / localizacao_arquivo / quantidade_tiles / compactacao
+            //ryo
+            //305 = 304
+            ; comentario oficial do rescomp
+            SPRITE hero "images/hero.png" 4 4
+        "#;
+
+        let resources = parse_sgdk_manifest(manifest);
+
+        assert_eq!(
+            resources.len(),
+            1,
+            "comentarios // e ; nao podem virar recursos falsos: {:?}",
+            resources
+        );
+        assert_eq!(resources[0].kind, "SPRITE");
+        assert_eq!(resources[0].name, "hero");
+        assert_eq!(resources[0].asset_path, "images/hero.png");
     }
 
     #[test]
