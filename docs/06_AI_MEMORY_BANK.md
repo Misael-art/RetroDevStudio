@@ -370,5 +370,13 @@ Em caso de conflito documental, a hierarquia continua sendo:
 - **Gates Rust:** `fmt` OK; `clippy -D warnings` OK; `cargo test --lib` verde (+1 teste de regressão BOM → 490 testes). Frontend não alterado nesta fatia.
 - **Follow-ups candidatos (fora do escopo desta rodada):** (1) converter os 3 bridge_only em projetos buildáveis (provável necessidade de anchors de cena/tilemap no importador); (2) cobrir engines/exemplos se o operador quiser engine-code no escopo; (3) silenciar/compactar os warnings benignos de fallback de assets no viewport.
 
+### CHECKPOINT operacional (2026-09-09d — próximos passos executados: corpus re-estagado por projeto real + warnings de fallback agregados)
+
+- **Diagnóstico dos 3 bridge_only da rodada anterior:** `_agent_training` e `_agent_laboratory` são **diretórios-wrapper** contendo projetos aninhados (HYBRIDO_MUAY_THAI — completo; LIVE_BAR_FR2 e SCENE_TILEMAP_CURATION_FIXTURE — completos; TAINA_RESAMPLING_ROUTE_LAB — stub vazio, confirmado com retry por causa dos soluços de I/O do cartão SD). `FORGE_REFERENCE` é **doador code-only**: o `resources.res` só tem comentário ("usa fonte built-in do SGDK"), então o importador não materializa cena/assets e o runner registra bridge-only honesto (190 candidates extraídos).
+- **Corpus re-estagado por projeto real (14 doadores, mesmo método de symlinks):** resultado final `failed=0`, **13/14 com fluxo completo IBRE** — entraram como IBRE: HYBRIDO_MUAY_THAI (luta, `non_black_pixels=15954`), LIVE_BAR_FR2 (71680), SCENE_TILEMAP_CURATION_FIXTURE (6844). Único residual: FORGE_REFERENCE (code-only, 190 candidates) — converter doadores code-only em projeto nativo buildável é feature do importador (Fase D), registrada como follow-up, não hackeada nesta rodada. Inventário semântico rerodado: gaps agregados `preprocessor_condition=230`, `function_like_macro=21`, `assembly_source=15`, `multiline_macro=9`.
+- **Warnings de fallback de assets agregados (UX):** o viewport emite **um único** aviso de fallback `Image()` por sessão de carregamento (`assetFallbackWarnedRef`) em vez de uma linha por asset (63 no Taiketsu importado). O fallback em si é benigno e continua ativo. `lint`/`tsc` OK; suíte frontend medida nesta rodada.
+- **Lição de host registrada:** `find` sobre o cartão SD pode retornar resultado vazio por soluço de I/O — reconfirmar com retry (aconteceu duas vezes nesta rodada com o mesmo comando: 0 resultados → cheio no retry).
+
+
 
 
