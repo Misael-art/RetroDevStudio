@@ -23206,10 +23206,15 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
     }
 
     /// Raiz canonica da matriz de corpus SGDK real no host de referencia (`docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md`).
+    /// Override por `RDS_SGDK_MATRIX_CORPUS_ROOT` permite montar/rodar a matriz em outros hosts,
+    /// mesmo contrato do `RDS_SGDK_CORPUS_ROOT` usado por `sgdk_corpus_inventory.rs`.
     const SGDK_MATRIX_CORPUS_ROOT: &str = r"F:\Projects\MegaDrive_DEV\SGDK_Engines";
 
     fn sgdk_matrix_corpus_donor_path(subdir: &str) -> PathBuf {
-        Path::new(SGDK_MATRIX_CORPUS_ROOT).join(subdir)
+        let root = std::env::var("RDS_SGDK_MATRIX_CORPUS_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(SGDK_MATRIX_CORPUS_ROOT));
+        root.join(subdir)
     }
 
     /// Com `--ignored`, retorna `true` para sair do teste apenas se `RDS_SGDK_MATRIX_CORPUS_SKIP=1`.
@@ -23278,17 +23283,19 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
 
     /// Fluxo parcial repetivel: import -> ledger/cenas -> sinais de superficie -> save/reload opcional -> build SGDK real -> ROM `SEGA`.
     /// `matrix_log_tag` identifica a linha no stdout (ex.: `MATRIX_P2`, `MATRIX_NEXZR`).
+    /// Retorna `Some(copia da ROM em tmp)` para a linha chamadora rodar smoke de emulacao opcional;
+    /// `None` somente quando o doador esta ausente e o skip explicito foi autorizado por env.
     fn run_sgdk_matrix_corpus_partial_flow_documents_build_blocker(
         test_fn_name: &'static str,
         donor: &Path,
         temp_slug: &'static str,
         skeleton_label: &str,
         matrix_log_tag: &'static str,
-    ) {
+    ) -> Option<PathBuf> {
         use crate::compiler::build_orch::{run_build_with_environment, BuildEnvironment};
 
         if sgdk_matrix_corpus_skip_if_missing_donor(test_fn_name, donor) {
-            return;
+            return None;
         }
 
         let project = temp_dir(temp_slug);
@@ -23357,6 +23364,19 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
                 .map(|g| !g.trim().is_empty())
                 .unwrap_or(false)
         });
+        let mut converted_nodes_total: u32 = 0;
+        let mut bridge_nodes_total: u32 = 0;
+        for entity in &report.primary_scene.entities {
+            if let Some(semantics) = entity
+                .components
+                .logic
+                .as_ref()
+                .and_then(|logic| logic.imported_semantics.as_ref())
+            {
+                converted_nodes_total += semantics.converted_nodes_count;
+                bridge_nodes_total += semantics.bridge_count;
+            }
+        }
         let md_hw = crate::hardware::md_profile::hw_status_with_source_kind(
             &report.primary_scene,
             Some("imported_sgdk"),
@@ -23389,6 +23409,10 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             crate::hardware::md_profile::MD_MANAGED_SPRITE_CELL_BUDGET,
             md_hw.errors.len(),
             md_hw.warnings.len()
+        );
+        eprintln!(
+            "{matrix_log_tag} logic: converted_nodes={} bridge_nodes={}",
+            converted_nodes_total, bridge_nodes_total
         );
 
         let mut scene = load_scene(&project, DEFAULT_ENTRY_SCENE).expect("load pos-import");
@@ -23448,7 +23472,11 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             "{matrix_log_tag}: esperado ROM com marca SEGA apos build SGDK real"
         );
 
+        let rom_artifact =
+            std::env::temp_dir().join(format!("retro-dev-studio-{temp_slug}-rom.bin"));
+        let _ = fs::copy(&rom_full, &rom_artifact);
         let _ = fs::remove_dir_all(&project);
+        Some(rom_artifact)
     }
 
     /// Matriz SGDK corpus real — linha 1 (plataforma / estudo). Ver `docs/SGDK_REAL_CORPUS_VALIDATION_MATRIX.md`.
@@ -23780,6 +23808,101 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             ),
         )
         .expect("write BLAZE Markdown report");
+    }
+
+    /// Linha 8 (2026-09-08) — jogo de luta 1v1 monolitico (`src/main.c` unico, SGDK moderno,
+    /// boot SEGA custom em `src/boot`, FSM numerica de combate). Corpus real fora do host de
+    /// referencia Windows; a raiz SGDK efetiva e o subdiretorio `src/` do repositorio do jogo
+    /// (onde ficam `src/` e `res/*.res`). Alem do fluxo padrao da matriz, roda smoke de
+    /// emulacao visivel da ROM importada via `corpus_libretro_visible_smoke` e persiste
+    /// relatorio em `target-test/validation/sgdk-taiketsu-real/`.
+    #[ignore]
+    #[test]
+    fn sgdk_matrix_corpus_taiketsu_ultra_hero_genesis_partial_flow_documents_build_blocker() {
+        let donor = sgdk_matrix_corpus_donor_path("TaiketsuUltraHeroGenesis/src");
+        let rom_artifact = run_sgdk_matrix_corpus_partial_flow_documents_build_blocker(
+            "sgdk_matrix_corpus_taiketsu_ultra_hero_genesis_partial_flow_documents_build_blocker",
+            &donor,
+            "sgdk-matrix-tuh",
+            "Matrix TaiketsuUltraHeroGenesis Corpus",
+            "MATRIX_TUH",
+        );
+        let Some(rom_artifact) = rom_artifact else {
+            return; // skip autorizado (doador ausente + RDS_SGDK_MATRIX_CORPUS_SKIP=1)
+        };
+
+        let artifact_root = validation_artifact_dir("sgdk-taiketsu-real");
+        let _ = fs::remove_dir_all(&artifact_root);
+        fs::create_dir_all(&artifact_root).expect("create Taiketsu validation artifact dir");
+
+        let (non_black_pixels, core_label, frames_run, width, height, rgba) =
+            corpus_libretro_visible_smoke(&rom_artifact)
+                .expect("MATRIX_TUH: smoke de emulacao da ROM importada falhou");
+        assert!(
+            non_black_pixels > 0,
+            "MATRIX_TUH: framebuffer da emulacao nao pode ser totalmente preto"
+        );
+        let frame_path = artifact_root.join("taiketsu-frame.ppm");
+        write_rgba_ppm(&frame_path, width, height, &rgba);
+        eprintln!(
+            "MATRIX_TUH emu: core={core_label} frames={frames_run} framebuffer={width}x{height} non_black_pixels={non_black_pixels}"
+        );
+
+        // Export da estrutura logica em nodes (IR semantico -> NodeGraph JSON) + cobertura,
+        // persistidos junto ao smoke para auditoria do que o extrator entrega como grafo.
+        let graph_report = crate::core::sgdk_semantic_reports::write_sgdk_node_graph_report(
+            &donor,
+            &artifact_root,
+        )
+        .expect("MATRIX_TUH: export do grafo semantico em nodes");
+        eprintln!(
+            "MATRIX_TUH graph: nodes={} edges={} bridge_nodes={} types={:?}",
+            graph_report.node_count,
+            graph_report.edge_count,
+            graph_report.bridge_node_count,
+            graph_report.node_type_counts
+        );
+        crate::core::sgdk_semantic_reports::write_sgdk_node_coverage_report(&donor, &artifact_root)
+            .expect("MATRIX_TUH: report de cobertura de nodes");
+
+        let report_json = serde_json::json!({
+            "donor": donor.to_string_lossy(),
+            "rom_artifact": rom_artifact.to_string_lossy(),
+            "framebuffer_ppm": frame_path.to_string_lossy(),
+            "libretro_core": core_label,
+            "frames_run": frames_run,
+            "framebuffer_width": width,
+            "framebuffer_height": height,
+            "non_black_pixels": non_black_pixels,
+            "semantic_node_graph": {
+                "node_count": graph_report.node_count,
+                "edge_count": graph_report.edge_count,
+                "bridge_node_count": graph_report.bridge_node_count,
+                "node_type_counts": graph_report.node_type_counts,
+                "graph_json_report": "sgdk-nodegraph-report.json"
+            },
+            "fake_toolchain_used": false,
+        });
+        fs::write(
+            artifact_root.join("taiketsu-real-report.json"),
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&report_json).expect("serialize Taiketsu report")
+            ),
+        )
+        .expect("write Taiketsu JSON report");
+        fs::write(
+            artifact_root.join("taiketsu-real-report.md"),
+            format!(
+                "# TaiketsuUltraHeroGenesis Import Matrix\n\n- Donor: `{}`\n- ROM artifact: `{}`\n- Core: `{}`\n- Frames run: `{}`\n- Non-black pixels: `{}`\n- Fake toolchain used: `false`\n",
+                donor.display(),
+                rom_artifact.display(),
+                core_label,
+                frames_run,
+                non_black_pixels
+            ),
+        )
+        .expect("write Taiketsu Markdown report");
     }
 
     #[derive(Debug, serde::Serialize, Clone)]

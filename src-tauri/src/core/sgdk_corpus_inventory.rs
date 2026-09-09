@@ -3924,6 +3924,10 @@ void update_blaze(void) {
             ("Platformer 2", ["platformer 2", "platformer_2"]),
             ("NEXZR MD", ["nexzr md", "nexzr"]),
             ("BLAZE_ENGINE", ["blaze_engine", "blaze"]),
+            (
+                "TaiketsuUltraHeroGenesis",
+                ["taiketsuultraherogenesis", "taiketsu"],
+            ),
         ];
         let mut reports = Vec::new();
         for (label, needles) in verticals {
