@@ -4843,7 +4843,10 @@ fn load_mddev_project_meta(root: &Path) -> Result<Option<MddevProjectMeta>, Load
             error
         ))
     })?;
-    let parsed = serde_json::from_str::<MddevProjectMeta>(&content).map_err(|error| {
+    // Projetos reais (ex.: corpus SGDKForge) sao escritos por ferramentas Windows que
+    // gravam BOM UTF-8; serde_json recusa `\u{feff}` antes do primeiro token.
+    let content = content.strip_prefix('\u{feff}').unwrap_or(&content);
+    let parsed = serde_json::from_str::<MddevProjectMeta>(content).map_err(|error| {
         LoadError(format!(
             "Metadata .mddev invalida em '{}': {}",
             mddev_path.display(),
@@ -17844,6 +17847,31 @@ void tick_player(void) {\n\
         assert_eq!(resources[0].kind, "SPRITE");
         assert_eq!(resources[0].name, "hero");
         assert_eq!(resources[0].asset_path, "images/hero.png");
+    }
+
+    /// Regressao (2026-09-09, corpus SGDKForge — BLUE_CIRCUIT / Celestial Chase benchmark):
+    /// `.mddev/project.json` escrito por ferramentas Windows com BOM UTF-8 (`\u{feff}`)
+    /// derrubava o import inteiro com "expected value at line 1 column 1".
+    #[test]
+    fn load_mddev_project_meta_accepts_utf8_bom() {
+        let root = temp_dir("mddev-bom-regression");
+        let mddev_dir = root.join(".mddev");
+        fs::create_dir_all(&mddev_dir).expect("create .mddev dir");
+        fs::write(
+            mddev_dir.join("project.json"),
+            format!(
+                "\u{feff}{}",
+                r#"{"schema_version":1,"name":"BOM donor","sgdk_root":null}"#
+            ),
+        )
+        .expect("write BOM metadata");
+
+        let meta = load_mddev_project_meta(&root).expect("BOM nao pode derrubar o parse");
+
+        assert!(meta.is_some(), "metadata com BOM deve ser aceita");
+        assert_eq!(meta.unwrap().build_policy, None);
+
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
