@@ -63,6 +63,23 @@ fn build_main_c_with_collision(
     let sfx_resources = collect_sfx_resources(ast);
     let bgm_tracks = collect_bgm_tracks(ast);
     let runtime_probe_enabled = runtime_evidence_probe_enabled();
+    let managed_sprites = ast
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            if let AstNode::SpawnSprite { resource_name, .. } = node {
+                ast.sprite_assets
+                    .iter()
+                    .find(|a| a.resource_name == *resource_name)
+                    .map(|a| {
+                        u64::from(a.frame_width.div_ceil(8)) * u64::from(a.frame_height.div_ceil(8))
+                    })
+            } else {
+                None
+            }
+        })
+        .sum::<u64>()
+        > 420;
     let runtime_probe_scene_id = stable_runtime_probe_id(project_name);
     let runtime_probe_framebuffer_useful = (!ast.sprite_assets.is_empty()
         || !tilemap_assets.is_empty()
@@ -87,6 +104,14 @@ fn build_main_c_with_collision(
     }
     out.push('\n');
     render_sound_id_macros(&mut out, ast);
+    if managed_sprites {
+        let count = ast
+            .nodes
+            .iter()
+            .filter(|n| matches!(n, AstNode::SpawnSprite { .. }))
+            .count();
+        render_sprite_residency_runtime(&mut out, count);
+    }
 
     for asset in &ast.sprite_assets {
         out.push_str(&format!("static Sprite* spr_{};\n", asset.resource_name));
@@ -205,7 +230,23 @@ fn build_main_c_with_collision(
     for node in &ast.nodes {
         match node {
             AstNode::SpriteSystemInit => {
-                out.push_str("    SPR_init();\n");
+                if managed_sprites {
+                    let background_tiles = tilemap_assets
+                        .iter()
+                        .map(|a| format!("{}.tileset->numTile", a.resource_name))
+                        .collect::<Vec<_>>()
+                        .join(" + ");
+                    let background_tiles = if background_tiles.is_empty() {
+                        "0"
+                    } else {
+                        &background_tiles
+                    };
+                    out.push_str(&format!(
+                        "    rds_init_sprite_residency({background_tiles});\n"
+                    ));
+                } else {
+                    out.push_str("    SPR_init();\n");
+                }
             }
             AstNode::LoadTilemap {
                 resource_name,
@@ -251,10 +292,14 @@ fn build_main_c_with_collision(
                     x = x,
                     y = y
                 ));
-                out.push_str(&format!(
-                    "    {} = SPR_addSprite(&{}, {}_x, {}_y, TILE_ATTR({}, 1, FALSE, {}));\n",
-                    var_name, resource_name, var_name, var_name, palette, priority
-                ));
+                if managed_sprites {
+                    out.push_str(&format!("    rds_register_sprite(&{var_name}, &{resource_name}, &{var_name}_x, &{var_name}_y, TILE_ATTR({palette}, 1, FALSE, {priority}));\n"));
+                } else {
+                    out.push_str(&format!(
+                        "    {} = SPR_addSprite(&{}, {}_x, {}_y, TILE_ATTR({}, 1, FALSE, {}));\n",
+                        var_name, resource_name, var_name, var_name, palette, priority
+                    ));
+                }
             }
             AstNode::DrawTilemap {
                 resource_name,
@@ -413,6 +458,9 @@ fn build_main_c_with_collision(
                 }
             }
             AstNode::GameLoopBegin => {
+                if managed_sprites {
+                    out.push_str("    rds_sync_sprite_residency();\n");
+                }
                 out.push_str("    {\n");
                 out.push_str("        u16 rds_boot_frame;\n");
                 out.push_str(
@@ -450,6 +498,9 @@ fn build_main_c_with_collision(
                 }
                 render_logic_scripts(&mut out, &ast.logic_scripts, 8);
                 render_retrofx_frame(&mut out, &parallax_layers, &raster_lines, 8);
+                if managed_sprites {
+                    out.push_str("        rds_sync_sprite_residency();\n");
+                }
                 out.push_str("        SPR_update();\n");
             }
             AstNode::VSync => {
@@ -503,6 +554,106 @@ fn build_resources_res(ast: &AstOutput) -> String {
     }
 
     out
+}
+
+fn render_sprite_residency_runtime(out: &mut String, count: usize) {
+    out.push_str(&format!("#define RDS_SPRITE_SLOTS {count}\n"));
+    out.push_str(r#"
+/* Keep logical state offscreen; only viewport residents consume sprite VRAM.
+ * Macros below adapt the generated operations, not SGDK library internals. */
+typedef struct {
+    Sprite **instance;
+    const SpriteDefinition *definition;
+    s16 *x, *y;
+    u16 attributes;
+    s16 animation, visibility;
+    bool looping;
+} RdsSpriteSlot;
+static RdsSpriteSlot rds_sprite_slots[RDS_SPRITE_SLOTS];
+static u16 rds_sprite_slot_count;
+static volatile u16 rds_residency_error;
+static volatile u16 rds_residency_ticks;
+static bool rds_residency_ready;
+
+static RdsSpriteSlot *rds_sprite_slot(Sprite **instance) {
+    u16 i;
+    for (i = 0; i < rds_sprite_slot_count; i++)
+        if (rds_sprite_slots[i].instance == instance) return &rds_sprite_slots[i];
+    return NULL;
+}
+static void rds_init_sprite_residency(u32 backgroundTiles) {
+    u32 available = TILE_FONT_INDEX - TILE_USER_INDEX;
+    if (backgroundTiles >= available) { rds_residency_error = 1; return; }
+    SPR_initEx((u16)(available - backgroundTiles));
+    rds_residency_ready = TRUE;
+}
+static void rds_register_sprite(Sprite **instance, const SpriteDefinition *definition,
+                               s16 *x, s16 *y, u16 attributes) {
+    RdsSpriteSlot *slot = &rds_sprite_slots[rds_sprite_slot_count++];
+    slot->instance = instance; slot->definition = definition;
+    slot->x = x; slot->y = y; slot->attributes = attributes;
+    slot->animation = 0; slot->visibility = VISIBLE; slot->looping = TRUE;
+    *instance = NULL;
+}
+static bool rds_sprite_in_view(const RdsSpriteSlot *slot) {
+    return slot->visibility != HIDDEN && *slot->x < VDP_getScreenWidth()
+        && *slot->y < VDP_getScreenHeight()
+        && (s32)*slot->x + slot->definition->w > 0
+        && (s32)*slot->y + slot->definition->h > 0;
+}
+static void rds_sync_sprite_residency(void) {
+    u16 i;
+    if (!rds_residency_ready) return;
+    /* Release first, so entrants can use VRAM freed by departures. */
+    for (i = 0; i < rds_sprite_slot_count; i++) {
+        RdsSpriteSlot *slot = &rds_sprite_slots[i];
+        if (*slot->instance && !rds_sprite_in_view(slot)) {
+            SPR_releaseSprite(*slot->instance); *slot->instance = NULL;
+        }
+    }
+    rds_residency_ticks++;
+    for (i = 0; i < rds_sprite_slot_count; i++) {
+        RdsSpriteSlot *slot = &rds_sprite_slots[i];
+        if (!*slot->instance && rds_sprite_in_view(slot)) {
+            Sprite *sprite = SPR_addSprite(slot->definition, *slot->x, *slot->y, slot->attributes);
+            *slot->instance = sprite;
+            if (!sprite) { rds_residency_error = 1; continue; }
+            SPR_setAnim(sprite, slot->animation);
+            SPR_setAnimationLoop(sprite, slot->looping);
+            SPR_setVisibility(sprite, slot->visibility);
+        }
+    }
+    if (rds_residency_error) VDP_drawText("Sprite capacity or animation error", 1, 1);
+}
+static void rds_sprite_position(Sprite **instance, s16 x, s16 y) {
+    RdsSpriteSlot *slot = rds_sprite_slot(instance);
+    if (slot) { *slot->x = x; *slot->y = y; }
+    if (*instance) SPR_setPosition(*instance, x, y);
+}
+static void rds_sprite_animation(Sprite **instance, s16 animation) {
+    RdsSpriteSlot *slot = rds_sprite_slot(instance);
+    if (slot) {
+        if (animation < 0 || animation >= slot->definition->numAnimation) { rds_residency_error = 2; return; }
+        slot->animation = animation;
+    }
+    if (*instance) SPR_setAnim(*instance, animation);
+}
+static void rds_sprite_loop(Sprite **instance, bool looping) {
+    RdsSpriteSlot *slot = rds_sprite_slot(instance);
+    if (slot) slot->looping = looping;
+    if (*instance) SPR_setAnimationLoop(*instance, looping);
+}
+static void rds_sprite_visibility(Sprite **instance, s16 visibility) {
+    RdsSpriteSlot *slot = rds_sprite_slot(instance);
+    if (slot) slot->visibility = visibility;
+    if (*instance) SPR_setVisibility(*instance, visibility);
+}
+#define SPR_setPosition(sprite, x, y) rds_sprite_position(&(sprite), (x), (y))
+#define SPR_setAnim(sprite, animation) rds_sprite_animation(&(sprite), (animation))
+#define SPR_setAnimationLoop(sprite, looping) rds_sprite_loop(&(sprite), (looping))
+#define SPR_setVisibility(sprite, visibility) rds_sprite_visibility(&(sprite), (visibility))
+
+"#);
 }
 
 fn runtime_evidence_probe_enabled() -> bool {
@@ -2187,6 +2338,35 @@ mod tests {
                 },
             ],
         }
+    }
+
+    #[test]
+    fn large_scene_uses_viewport_residency_before_sprite_update() {
+        let mut asset = sprite_asset_with_animation(6, true);
+        asset.frame_width = 192;
+        asset.frame_height = 160; // 480 tiles, beyond SGDK's default 420.
+        let ast = AstOutput {
+            nodes: vec![
+                AstNode::SpriteSystemInit,
+                AstNode::SpawnSprite {
+                    var_name: "spr_hero".into(),
+                    resource_name: "hero".into(),
+                    x: 400,
+                    y: 0,
+                    priority_high: true,
+                },
+                AstNode::SpriteUpdate,
+            ],
+            sprite_assets: vec![asset],
+            logic_scripts: Vec::new(),
+        };
+        let output = emit_sgdk(&ast, "Large scene").main_c;
+        assert!(output.contains("rds_register_sprite(&spr_hero"));
+        assert!(!output.contains("spr_hero = SPR_addSprite"));
+        assert!(output.contains("rds_init_sprite_residency(0)"));
+        let sync = output.rfind("rds_sync_sprite_residency();").unwrap();
+        let update = output.rfind("SPR_update();").unwrap();
+        assert!(sync < update);
     }
 
     #[test]

@@ -2018,3 +2018,11 @@ Preservar o pacote interno auditavel sem inflar status de release publica. A rod
   - **Stage mais legivel:** o canvas de runtime agora fica dentro de um palco dedicado com moldura, sombra e badge `320x224 @ Nx`, melhorando leitura espacial e sensacao de ferramenta final.
   - **Cobertura adicionada:** `src/App.test.tsx` agora valida o helper puro `getGameViewportScale` para garantir que a escala sempre caia em inteiros seguros.
   - **Validacao focada reexecutada no workspace atual:** `npx tsc --noEmit` OK, `npx eslint src/components/viewport/ViewportPanel.tsx src/App.test.tsx` OK e `npx vitest run src/App.test.tsx` OK (33 testes).
+
+
+### Revisão do guardião — 2026-09-10 (integração #61 pendente)
+
+- #60 integrado em main `616abdbcceb787879a7a1f2071c46919ed71bb06`.
+- GUARD-DECOMP-DETERMINISM-01: Etapa A real passou; SMOKE/BLUE 14/14 objetos exatos por par e ROM idêntica em dois builds limpos; contagens nm 876/778. Original Taiketsu continua bloqueado por boot/registerState; não confundir com preview importado.
+- GUARD-IMPORT-RUNTIME-01: aberta revisão final. Antigo smoke aceitava ADDRESS ERROR como framebuffer não preto. Residência de sprites visíveis e tratamento de NULL corrigiram a prévia local: heartbeat 52→112, erro 0, 150 frames reais. Ainda **não é equivalência do gameplay original**; import mantém pontes/lógica não convertida.
+- Próximos gates: host:certify, clippy completo, fmt, build desktop e CI sobre o novo commit. Merge somente após verde. Limites e artefatos detalhados no Memory Bank.

@@ -23862,7 +23862,16 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             std::env::temp_dir().join(format!("retro-dev-studio-{temp_slug}-rom.bin"));
         fs::copy(&rom_full, &rom_artifact)
             .expect("copy current matrix ROM; never reuse a stale artifact");
-        let _ = fs::remove_dir_all(&project);
+        if matrix_log_tag == "MATRIX_TUH" {
+            fs::copy(
+                project.join("build/megadrive/out/symbol.txt"),
+                rom_artifact.with_extension("symbols.txt"),
+            )
+            .expect("preserve symbols for runtime execution proof");
+            eprintln!("MATRIX_TUH preserved_project={}", project.display());
+        } else {
+            let _ = fs::remove_dir_all(&project);
+        }
         Some(rom_artifact)
     }
 
@@ -24223,8 +24232,8 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         fs::create_dir_all(&artifact_root).expect("create Taiketsu validation artifact dir");
 
         let (non_black_pixels, core_label, frames_run, width, height, rgba) =
-            corpus_libretro_visible_smoke(&rom_artifact)
-                .expect("MATRIX_TUH: smoke de emulacao da ROM importada falhou");
+            corpus_libretro_residency_smoke(&rom_artifact, &artifact_root)
+                .expect("MATRIX_TUH: execution and sprite residency proof failed");
         assert!(
             non_black_pixels > 0,
             "MATRIX_TUH: framebuffer da emulacao nao pode ser totalmente preto"
@@ -24323,6 +24332,88 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         rgba.chunks_exact(4)
             .filter(|px| px[0] != 0 || px[1] != 0 || px[2] != 0)
             .count()
+    }
+
+    /// A visible exception screen is not execution evidence. Read generated counters
+    /// from actual emulated RAM and require forward progress without residency errors.
+    fn corpus_libretro_residency_smoke(
+        rom_path: &Path,
+        artifact_root: &Path,
+    ) -> Result<(usize, String, u32, u32, u32, Vec<u8>), String> {
+        use crate::emulator::frame_buffer::framebuffer_to_rgba;
+        use crate::emulator::libretro_ffi::{EmulatorCore, JoypadState};
+        let symbols = fs::read_to_string(rom_path.with_extension("symbols.txt"))
+            .map_err(|e| e.to_string())?;
+        let offset = |name: &str| -> Result<usize, String> {
+            for line in symbols.lines() {
+                let fields: Vec<_> = line.split_whitespace().collect();
+                if fields.last() == Some(&name) {
+                    let address =
+                        usize::from_str_radix(fields[0], 16).map_err(|e| e.to_string())?;
+                    if address & 0xff0000 != 0xff0000 {
+                        return Err(format!("{name} is not in Genesis work RAM"));
+                    }
+                    return Ok(address & 0xffff);
+                }
+            }
+            Err(format!("missing runtime symbol {name}"))
+        };
+        let heartbeat = offset("rds_residency_ticks")?;
+        let error = offset("rds_residency_error")?;
+        let mut emulator = EmulatorCore::new(None);
+        emulator.load_rom(rom_path)?;
+        for _ in 0..90 {
+            emulator.run_frame()?;
+        }
+        let before = emulator.read_memory(2, heartbeat, 2)?.0;
+        emulator.set_joypad(JoypadState {
+            right: true,
+            ..JoypadState::default()
+        })?;
+        for _ in 0..60 {
+            emulator.run_frame()?;
+        }
+        let after = emulator.read_memory(2, heartbeat, 2)?.0;
+        let residency_error = emulator.read_memory(2, error, 2)?.0;
+        let (buffer, size, format) = emulator.get_framebuffer()?;
+        let frame = framebuffer_to_rgba(&buffer, size, format);
+        write_rgba_ppm(
+            &artifact_root.join("taiketsu-frame.ppm"),
+            frame.width,
+            frame.height,
+            &frame.rgba,
+        );
+        fs::write(
+            artifact_root.join("runtime-execution.json"),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "frames": 150, "heartbeat_before": before, "heartbeat_after": after,
+                "residency_error": residency_error, "right_input_frames": 60,
+                "scope": "generated imported resource preview, not original game equivalence"
+            }))
+            .map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        let core = emulator
+            .loaded_core_label()
+            .unwrap_or("unknown")
+            .to_string();
+        emulator.stop()?;
+        if before.len() != 2 || after.len() != 2 || before == [0, 0] || before == after {
+            return Err(format!(
+                "game loop did not advance: {before:?} -> {after:?}"
+            ));
+        }
+        if residency_error != [0, 0] {
+            return Err(format!("sprite residency failed: {residency_error:?}"));
+        }
+        Ok((
+            count_non_black_rgba_pixels(&frame.rgba),
+            core,
+            150,
+            frame.width,
+            frame.height,
+            frame.rgba,
+        ))
     }
 
     fn corpus_libretro_visible_smoke(
