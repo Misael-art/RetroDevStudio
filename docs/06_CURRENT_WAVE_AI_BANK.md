@@ -2020,9 +2020,9 @@ Preservar o pacote interno auditavel sem inflar status de release publica. A rod
   - **Validacao focada reexecutada no workspace atual:** `npx tsc --noEmit` OK, `npx eslint src/components/viewport/ViewportPanel.tsx src/App.test.tsx` OK e `npx vitest run src/App.test.tsx` OK (33 testes).
 
 
-### Revisão do guardião — 2026-09-10 (integração #61 pendente)
+### Revisão do guardião — 2026-09-10 (integração rastreada no PR #61)
 
 - #60 integrado em main `616abdbcceb787879a7a1f2071c46919ed71bb06`.
 - GUARD-DECOMP-DETERMINISM-01: Etapa A real passou; SMOKE/BLUE 14/14 objetos exatos por par e ROM idêntica em dois builds limpos; contagens nm 876/778. Original Taiketsu continua bloqueado por boot/registerState; não confundir com preview importado.
-- GUARD-IMPORT-RUNTIME-01: aberta revisão final. Antigo smoke aceitava ADDRESS ERROR como framebuffer não preto. Residência de sprites visíveis e tratamento de NULL corrigiram a prévia local: heartbeat 52→112, erro 0, 150 frames reais. Ainda **não é equivalência do gameplay original**; import mantém pontes/lógica não convertida.
-- Próximos gates: host:certify, clippy completo, fmt, build desktop e CI sobre o novo commit. Merge somente após verde. Limites e artefatos detalhados no Memory Bank.
+- GUARD-IMPORT-RUNTIME-01: correção validada localmente em `c042ecf`. Antigo smoke aceitava ADDRESS ERROR como framebuffer não preto. Residência de sprites visíveis e tratamento de NULL corrigiram a prévia local: heartbeat 52→112, erro 0, 150 frames reais. Ainda **não é equivalência do gameplay original**; import mantém pontes/lógica não convertida.
+- Gates locais de `c042ecf`: host:certify READY, 604 frontend, 524 Rust, clippy completo, fmt, build desktop e Build & Run MD/SNES; input Right chegou à RAM da ROM MD. Integração somente após checks remotos verdes. Estado remoto final e hashes em `/home/misael/RetroDevStudio/verified-2026-09-10-c042ecf/evidence/provenance.json`; limitações e reprodução em LEIA-ME e Memory Bank. Nenhuma declaração de produto inteiro finalizado.
