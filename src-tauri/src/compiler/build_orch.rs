@@ -1987,6 +1987,7 @@ where
                     let sgdk_env = sgdk_make_safe_path(&toolchain.root);
                     command.env("SGDK", &sgdk_env);
                     command.env("GDK", &sgdk_env);
+                    configure_native_sgdk_path(&mut command, &toolchain.root);
                     if configure_windows_shell(&mut command).is_some() {
                         // SGDK's common.mk assigns SHELL with `:=`, so the
                         // command-line variable is required to override it.
@@ -2138,6 +2139,11 @@ fn master_rom_artifact(
     }
 
     apply_megadrive_project_header(&mut bytes, project);
+    // sizebnd's SGDK checksum covers the header too. Recompute after applying
+    // the project's title/region/SRAM, before exposing the final ROM artifact.
+    if let Some(checksum) = crate::core::rom_mastering::sgdk_checksum(&bytes) {
+        bytes[0x18E..0x190].copy_from_slice(&checksum.to_be_bytes());
+    }
     fs::write(rom_path, &bytes).map_err(|error| {
         format!(
             "ROM mastering: falha ao gravar '{}': {}",
@@ -2469,7 +2475,22 @@ fn detect_sgdk_compiler(root: &Path) -> Option<PathBuf> {
         vec![root.join("bin").join("m68k-elf-gcc")]
     };
     candidates.extend(find_in_path(&["m68k-elf-gcc"]));
+    candidates.extend(host_readiness_check_path("m68k_gcc"));
     candidates.into_iter().find(|candidate| candidate.exists())
+}
+
+fn configure_native_sgdk_path(command: &mut Command, root: &Path) {
+    if cfg!(target_os = "windows") {
+        return;
+    }
+    // Desktop launches do not inherit the managed PATH injected by the E2E
+    // runner. SGDK's native makefiles invoke compiler and helper tools by name.
+    prepend_to_path(command, &root.join("bin"));
+    if let Some(compiler) = detect_sgdk_compiler(root) {
+        if let Some(bin) = compiler.parent() {
+            prepend_to_path(command, bin);
+        }
+    }
 }
 
 fn configure_java_for_sgdk(command: &mut Command) {
@@ -3027,6 +3048,73 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(sgdk_root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn desktop_launch_finds_managed_compiler_without_shell_setup() {
+        let _serial = test_serial_guard();
+        let root = temp_dir("desktop-managed-compiler");
+        let sgdk = root.join("sgdk");
+        let compiler_bin = root.join("m68k-elf/bin");
+        fs::create_dir_all(sgdk.join("bin")).unwrap();
+        fs::create_dir_all(&compiler_bin).unwrap();
+        fs::write(sgdk.join("makefile.gen"), "# fixture").unwrap();
+        let compiler = compiler_bin.join("m68k-elf-gcc");
+        fs::write(&compiler, "fixture").unwrap();
+        let report = root.join("host-readiness.json");
+        fs::write(
+            &report,
+            serde_json::to_vec(&serde_json::json!({
+                "checks": [{"id": "m68k_gcc", "status": "ready", "path": compiler}]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let _report = EnvVarGuard::set_path("RDS_HOST_READINESS_REPORT", &report);
+        let _path = EnvVarGuard::set_path("PATH", &root.join("empty-path"));
+
+        assert!(is_sgdk_root_usable_on_host(&sgdk));
+        let mut command = Command::new("unused");
+        command.env_remove("PATH");
+        configure_native_sgdk_path(&mut command, &sgdk);
+        let child_path = command
+            .get_envs()
+            .find(|(key, _)| *key == "PATH")
+            .and_then(|(_, value)| value)
+            .unwrap();
+        assert_eq!(
+            std::env::split_paths(child_path).collect::<Vec<_>>(),
+            vec![compiler_bin, sgdk.join("bin")]
+        );
+
+        fs::remove_file(&compiler).unwrap();
+        assert!(
+            !is_sgdk_root_usable_on_host(&sgdk),
+            "stale READY must not hide missing compiler"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn mastering_updates_sgdk_checksum_after_project_header_changes() {
+        let root = workspace_copy("megadrive_dummy");
+        let mut project = load_project(&root).unwrap();
+        project.settings.internal_rom_name = "FINAL HEADER".to_string();
+        let rom = root.join("checksum-test.bin");
+        let mut bytes = vec![0u8; 1024];
+        bytes[0x100..0x104].copy_from_slice(b"SEGA");
+        bytes[0x110..0x117].copy_from_slice(b"(C)SGDK");
+        bytes[0x200] = 0x12;
+        fs::write(&rom, &bytes).unwrap();
+        master_rom_artifact(&rom, target_spec("megadrive").unwrap(), &project).unwrap();
+        let report = crate::core::rom_mastering::inspect_rom_mastering(&rom).unwrap();
+        assert_eq!(report.checksum.status, "matching_sgdk");
+        assert!(report.blockers.is_empty());
+        let final_bytes = fs::read(&rom).unwrap();
+        assert_eq!(&final_bytes[0x120..0x12C], b"FINAL HEADER");
+        assert_eq!(&final_bytes[0x200..], &bytes[0x200..]);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

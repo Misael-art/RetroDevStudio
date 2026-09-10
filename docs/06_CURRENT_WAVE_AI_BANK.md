@@ -1,5 +1,5 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
-**Ultima Atualizacao:** 2026-09-08 (PRs #51/#49/#50 integradas em `main`; Desktop E2E comprovadamente intermitente; GOV-01 original preservado)
+**Ultima Atualizacao:** 2026-09-08 (PRs #55/#56 integradas; abertura direta Linux e checksum SGDK em validacao; GOV-01 original preservado)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)
 
@@ -20,6 +20,15 @@
 
 ## 1. STATUS ATUAL DO PROJETO (Wave S+)
 
+
+* **2026-09-08 — GUARD-NATIVE-01: abertura direta e finalização de ROM SGDK:**
+  - **Base integrada:** PR #55 merge `3ec03c5aecdb523716f33aea13b76cdd89ae7b42`; PR #56 merge `d48b2c4` após validate/linux-validate/desktop-smoke verdes. Os runs Windows #56 `34289961819` e `34289995050` passaram na primeira tentativa. #53 permanece aberta: dois verdes não estabelecem taxa nem causalidade completa do nm exit 5.
+  - **Prova do SHA #56 (`632a61b`, árvore limpa):** host:certify READY, 604 frontend/489 Rust aprovados; E2E desktop Linux MD e SNES aprovados com 558/128 pixels não pretos. Originais, ROMs no-code e manifest SHA-256 preservados fora da árvore de código em `/home/misael/RetroDevStudio/verified-2026-09-08-632a61b` (subpasta `evidence`, incluindo artefato Windows). Isso não certificava abertura sem o PATH preparado pelo runner.
+  - **Defeito encontrado pela abertura direta:** app iniciado pelo WebKitWebDriver sem injeção de ambiente do runner; host READY, mas Build & Run falhava com “Toolchain SGDK nao encontrada”. A descoberta verificava compilador apenas em SGDK/bin ou PATH, ignorando `m68k_gcc` pronto no relatório. Corrigida descoberta e PATH do processo make nativo (helpers SGDK e bin do compilador). Windows mantém sua configuração de shell. Teste dirigido cobre PATH vazio e relatório READY com arquivo removido: estado obsoleto não prova compilador presente.
+  - **Prova intermediária da correção:** clique real em Build & Run nos projetos no-code persistentes carregou MD e SNES no emulador sem variáveis SGDK/PVSnesLib preparadas pelo harness. MD mostrou 56539 pixels não pretos após estabilizar. A mesma rodada revelou checksum divergente, registrado antes de qualquer claim de finalização.
+  - **GUARD-ROM-01:** `sizebnd` oficial SGDK 2.11 calcula XOR de toda a ROM, incluindo header; o mastering mudava título/região/SRAM depois do cálculo, e o inspetor só reconhecia soma tradicional. Mastering agora recalcula o XOR após o header em ROM identificada por `(C)SGDK`; inspeção distingue `matching_sgdk` de `matching` tradicional. Não modifica ROM importada, não corrige bytes no inspetor e não mascara corrupção. Fonte: `https://github.com/Stephane-D/SGDK/blob/v2.11/tools/sizebnd/src/sgdk/sizebnd/Launcher.java`. Quatro testes de checksum passaram, incluindo corrupção de payload/header e preservação do payload na finalização. O SHA da ROM MD muda intencionalmente; os hashes antigos permanecem como evidência histórica.
+  - **Aceite local do código `a775762d7e1c5848f8f3576f2816b07c3159dbeb` (árvore limpa):** host:certify READY; 604 frontend/492 Rust aprovados; clippy completo e fmt passaram; binário reconstruído. Abertura direta MD/SNES pelo driver nativo, sem ambiente de toolchain injetado: emulador ativo, sem diagnóstico bloqueante, framebuffer 320x224 com 57344/39168 pixels não pretos. MD reporta `matching_sgdk`; aplicar sizebnd.jar oficial novamente à ROM final produz bytes idênticos (exit 0), SHA-256 `17d66ffa7c7f802595639f8a13df402cb0cb4e627b53468df91b9685f7339031`. Evidências `direct-megadrive.json/png`, `direct-snes.json/png`, `sizebnd-independent.json` na pasta externa já indicada. O harness usa nome relativo na chamada ao sizebnd, como o makefile oficial (o programa converte argumentos para minúsculas).
+  - **Próximo gate:** publicar e integrar somente com CI verde, validar no SHA de destino e preservar o recibo de integração. Preservar #53 e GOV-01 como abertos até evidência específica. Gameplay completo, áudio/saves, hardware físico, leitor de tela e release não são certificados por esta rodada; nenhuma promoção de Experimental.
 
 * **2026-09-08 — GUARD-PATH-01: preparação do Java descartava o shell selecionado:**
   - **Escopo:** continuidade autorizada pelo operador para corrigir build e certificar Build → ROM → Emulação. Base técnica `359d9e750d76dd7233da1e4ed4e4fceb6dc2ed58`, worktree externo `build-rom-host-certification`; checkout original e `.mimosa`/`.zcode` preservados.

@@ -154,9 +154,16 @@ fn apply_megadrive_header(report: &mut RomMasteringReport, bytes: &[u8]) {
 
     if bytes.len() >= 0x190 {
         let expected = u16::from_be_bytes([bytes[0x18E], bytes[0x18F]]);
-        let observed = megadrive_checksum(bytes);
+        let mut observed = megadrive_checksum(bytes);
         let status = if expected == observed {
             "matching"
+        } else if sgdk_checksum(bytes) == Some(expected) {
+            observed = expected;
+            report.warnings.push(
+                "Checksum SGDK XOR confirmado; este formato difere da soma Mega Drive tradicional."
+                    .to_string(),
+            );
+            "matching_sgdk"
         } else {
             "mismatch"
         };
@@ -268,6 +275,27 @@ fn megadrive_checksum(bytes: &[u8]) -> u16 {
         offset += 2;
     }
     sum as u16
+}
+
+/// SGDK 2.11 sizebnd: XOR of the entire ROM's words, excluding the checksum
+/// field itself. Only recognize the explicit SGDK header and 4-byte alignment.
+/// Source: SGDK tools/sizebnd/src/sgdk/sizebnd/Launcher.java (v2.11).
+pub(crate) fn sgdk_checksum(bytes: &[u8]) -> Option<u16> {
+    if bytes.len() < 0x200
+        || !bytes.len().is_multiple_of(4)
+        || !bytes[0x110..0x120].starts_with(b"(C)SGDK")
+    {
+        return None;
+    }
+    Some(
+        bytes
+            .chunks_exact(2)
+            .enumerate()
+            .filter(|(index, _)| *index != 0x18E / 2)
+            .fold(0u16, |checksum, (_, word)| {
+                checksum ^ u16::from_be_bytes([word[0], word[1]])
+            }),
+    )
 }
 
 fn detect_snes_header(bytes: &[u8]) -> Option<usize> {
@@ -447,6 +475,38 @@ mod tests {
         assert_eq!(report.region.status, "valid");
         assert_eq!(report.blockers.len(), 0);
         assert_eq!(report.sha256.len(), 64);
+    }
+
+    #[test]
+    fn sgdk_checksum_is_distinct_and_still_rejects_corruption() {
+        let rom = write_md_rom("sgdk-xor", b"JUE", false, Some(0));
+        let mut bytes = fs::read(&rom).unwrap();
+        bytes[0x110..0x117].copy_from_slice(b"(C)SGDK");
+        bytes[0x200..0x204].copy_from_slice(&[0x12, 0x34, 0x56, 0x78]);
+        // Independent sizebnd vector: whole-ROM XOR 0x741c, payload sum 0x68ac.
+        bytes[0x18E..0x190].copy_from_slice(&0x741cu16.to_be_bytes());
+        fs::write(&rom, &bytes).unwrap();
+        let report = inspect_rom_mastering(&rom).unwrap();
+        assert_eq!(report.checksum.status, "matching_sgdk");
+        assert_eq!(report.checksum.observed.as_deref(), Some("741C"));
+        assert!(report.blockers.is_empty());
+
+        bytes[0x201] ^= 1;
+        fs::write(&rom, &bytes).unwrap();
+        assert_eq!(
+            inspect_rom_mastering(&rom).unwrap().checksum.status,
+            "mismatch"
+        );
+        bytes[0x201] ^= 1;
+        bytes[0x120] ^= 1;
+        fs::write(&rom, &bytes).unwrap();
+        assert_eq!(
+            inspect_rom_mastering(&rom).unwrap().checksum.status,
+            "mismatch"
+        );
+        bytes[0x110] = b'X';
+        assert!(sgdk_checksum(&bytes).is_none());
+        fs::remove_dir_all(rom.parent().unwrap()).unwrap();
     }
 
     #[test]
