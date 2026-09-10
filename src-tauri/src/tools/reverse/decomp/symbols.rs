@@ -33,9 +33,18 @@ pub fn parse_nm_symbols(content: &str) -> Vec<SymbolEntry> {
         }
         let tokens: Vec<&str> = trimmed.split_whitespace().collect();
         let (addr_token, size, kind, name) = match tokens.as_slice() {
-            [addr, kind, name] => (*addr, None, *kind, *name),
-            [addr, size, kind, name] if size.chars().all(|c| c.is_ascii_hexdigit()) => {
-                (*addr, u32::from_str_radix(size, 16).ok(), *kind, *name)
+            [addr, kind, name, ..]
+                if kind.len() == 1 && kind.chars().all(|c| c.is_ascii_alphabetic() || c == '?') =>
+            {
+                (*addr, None, *kind, *name)
+            }
+            [addr, size, kind, name, ..]
+                if kind.len() == 1 && size.chars().all(|c| c.is_ascii_hexdigit()) =>
+            {
+                let Ok(size) = u32::from_str_radix(size, 16) else {
+                    continue;
+                };
+                (*addr, Some(size), *kind, *name)
             }
             _ => continue,
         };
@@ -142,6 +151,16 @@ e0ff0d6e B P
         let last = ranges.last().expect("last range");
         assert_eq!(last.addr, 0xA260);
         assert_eq!(last.size, 0xA400 - 0xA260);
+    }
+
+    #[test]
+    fn nm_line_annotations_preserve_function_boundaries() {
+        let symbols = parse_nm_symbols(
+            "00000200 T main\tsrc/main.c:12\n00000300 00000020 t helper\tC:/source/foo.c:8\n",
+        );
+        assert_eq!(symbols.len(), 2);
+        assert_eq!(symbols[0].name, "main");
+        assert_eq!(symbols[1].size, Some(0x20));
     }
 
     #[test]

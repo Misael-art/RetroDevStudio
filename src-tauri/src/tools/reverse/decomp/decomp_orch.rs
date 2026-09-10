@@ -26,6 +26,7 @@ pub struct EtapaAPairSpec {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeterminismResult {
+    pub reproducibility_flags: Vec<String>,
     pub rom_sha256_build_a: String,
     pub rom_sha256_build_b: String,
     pub rom_identical: bool,
@@ -61,6 +62,21 @@ pub fn run_etapa_a(
     options: &EtapaAOptions,
 ) -> Result<EtapaAPairResult, String> {
     let started = super::rom_library::now_unix();
+    fs::create_dir_all(work_dir).map_err(|e| format!("criar work dir: {e}"))?;
+    if let Some(source) = &spec.source_root {
+        let source = fs::canonicalize(source).map_err(|e| format!("resolver source: {e}"))?;
+        let work = fs::canonicalize(work_dir).map_err(|e| format!("resolver work: {e}"))?;
+        if work.starts_with(&source) {
+            return Err("work dir de rebuild deve ficar fora do doador".to_string());
+        }
+    }
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_nanos();
+    let run_id = format!("etapa-a-{}-{nonce}", std::process::id());
+    let run_dir = work_dir.join(&run_id);
+    fs::create_dir(&run_dir).map_err(|e| format!("criar run exclusivo: {e}"))?;
     let mut notes: Vec<String> = Vec::new();
 
     let triage = triage_rom(&spec.rom_path)?;
@@ -89,7 +105,7 @@ pub fn run_etapa_a(
     let mut boundary = None;
     if options.run_ghidra {
         if let Some(elf_path) = &spec.elf_path {
-            match export_function_starts(elf_path, work_dir) {
+            match export_function_starts(elf_path, &run_dir) {
                 Ok(ghidra_starts) => {
                     boundary = Some(boundary_metrics(&function_starts(&ranges), &ghidra_starts));
                 }
@@ -106,10 +122,10 @@ pub fn run_etapa_a(
     let mut provenance_diff = None;
     if options.run_rebuild {
         match &spec.source_root {
-            Some(source_root) => match run_double_build(source_root, work_dir) {
+            Some(source_root) => match run_double_build(source_root, &run_dir) {
                 Ok(result) => {
-                    let build_a = work_dir.join("rebuild-a").join("out");
-                    let build_b = work_dir.join("rebuild-b").join("out");
+                    let build_a = run_dir.join("rebuild-a").join("out");
+                    let build_b = run_dir.join("rebuild-b").join("out");
                     provenance_diff =
                         diff_donor_objects(source_root, &[&build_a, &build_b], &mut notes)?;
                     determinism = Some(result);
@@ -143,10 +159,16 @@ pub fn run_etapa_a(
         notes,
     };
 
+    let report_path = run_dir.join("report.json");
+    fs::write(
+        &report_path,
+        serde_json::to_vec_pretty(&result).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| format!("gravar report: {e}"))?;
     record_run(
         work_dir,
         DecompRunRecord {
-            run_id: format!("etapa-a-{}", super::rom_library::now_unix()),
+            run_id,
             pair_id: pair.id,
             kind: "etapa_a".to_string(),
             started_at_unix: started,
@@ -154,7 +176,7 @@ pub fn run_etapa_a(
             ok: true,
             metrics: serde_json::to_value(&result)
                 .map_err(|error| format!("falha ao serializar métricas: {error}"))?,
-            report_path: None,
+            report_path: Some(report_path.to_string_lossy().to_string()),
         },
     )?;
     Ok(result)
@@ -184,18 +206,33 @@ fn copy_dir_recursive(source: &Path, destination: &Path) -> Result<(), String> {
         let entry = entry.map_err(|error| format!("entry '{}': {error}", source.display()))?;
         let entry_path = entry.path();
         let file_name = entry.file_name();
+        let kind = entry
+            .file_type()
+            .map_err(|e| format!("source entry type: {e}"))?;
+        if matches!(
+            file_name.to_str(),
+            Some(".agent" | ".agents" | ".claude" | ".codex" | ".mimosa" | ".zcode")
+        ) {
+            continue;
+        }
+        if kind.is_symlink() {
+            return Err(format!(
+                "rebuild exige snapshot sem symlinks: {}",
+                entry_path.display()
+            ));
+        }
         // Artefatos de build antigos e VCS do doador não entram no rebuild: out/ com
         // .d do build original quebra o makefile.gen (alvos duplicados).
         let name = file_name.to_string_lossy().to_ascii_lowercase();
-        if entry_path.is_dir() && matches!(name.as_str(), "out" | ".git" | "build") {
+        if kind.is_dir() && matches!(name.as_str(), "out" | ".git" | "build") {
             continue;
         }
         // .d solto em res//src/ é artefato de build do doador (quebra o makefile.gen).
-        if !entry_path.is_dir() && name.ends_with(".d") {
+        if !kind.is_dir() && name.ends_with(".d") {
             continue;
         }
         let target = destination.join(file_name);
-        if entry_path.is_dir() {
+        if kind.is_dir() {
             copy_dir_recursive(&entry_path, &target)?;
         } else {
             fs::copy(&entry_path, &target)
@@ -257,6 +294,9 @@ fn run_sgdk_make(build_dir: &Path) -> Result<(), String> {
         ));
     }
     let output = Command::new("make")
+        // GCC otherwise randomizes .gnu.lto.* identifiers even when the final
+        // ROM is identical. GNU make expands $< to each relative input path.
+        .arg("EXTRA_FLAGS=-frandom-seed=$<")
         .arg("-f")
         .arg(&makefile)
         .current_dir(build_dir)
@@ -309,6 +349,7 @@ fn run_double_build(source_root: &Path, work_dir: &Path) -> Result<DeterminismRe
     let (objects_total, objects_exact, objects_divergent) = count_object_pairs(&build_a, &build_b)?;
 
     Ok(DeterminismResult {
+        reproducibility_flags: vec!["EXTRA_FLAGS=-frandom-seed=$<".to_string()],
         rom_sha256_build_a: shas[0].clone(),
         rom_sha256_build_b: shas[1].clone(),
         rom_identical: shas[0] == shas[1] && !shas[0].is_empty(),
@@ -318,38 +359,44 @@ fn run_double_build(source_root: &Path, work_dir: &Path) -> Result<DeterminismRe
     })
 }
 
-fn count_object_pairs(build_a: &Path, build_b: &Path) -> Result<(usize, usize, usize), String> {
-    let mut total = 0usize;
-    let mut exact = 0usize;
-    let mut divergent = 0usize;
-    let entries_a = fs::read_dir(build_a)
-        .map_err(|error| format!("read_dir '{}': {error}", build_a.display()))?;
-    for entry in entries_a.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|value| value.to_str()) != Some("o") {
-            continue;
-        }
-        let Some(file_name) = path.file_name() else {
-            continue;
-        };
-        let counterpart = build_b.join(file_name);
-        if !counterpart.is_file() {
-            divergent += 1;
-            total += 1;
-            continue;
-        }
-        let bytes_a =
-            fs::read(&path).map_err(|error| format!("read '{}': {error}", path.display()))?;
-        let bytes_b = fs::read(&counterpart)
-            .map_err(|error| format!("read '{}': {error}", counterpart.display()))?;
-        total += 1;
-        if bytes_a == bytes_b {
-            exact += 1;
-        } else {
-            divergent += 1;
+fn collect_object_paths(root: &Path) -> Result<std::collections::BTreeSet<PathBuf>, String> {
+    let mut objects = std::collections::BTreeSet::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for entry in fs::read_dir(&dir).map_err(|e| format!("read {}: {e}", dir.display()))? {
+            let entry = entry.map_err(|e| format!("read entry: {e}"))?;
+            let kind = entry.file_type().map_err(|e| format!("entry type: {e}"))?;
+            let path = entry.path();
+            if kind.is_dir() {
+                pending.push(path);
+            } else if kind.is_file() && path.extension().and_then(|s| s.to_str()) == Some("o") {
+                objects.insert(
+                    path.strip_prefix(root)
+                        .map_err(|e| e.to_string())?
+                        .to_path_buf(),
+                );
+            }
         }
     }
-    Ok((total, exact, divergent))
+    Ok(objects)
+}
+
+fn count_object_pairs(build_a: &Path, build_b: &Path) -> Result<(usize, usize, usize), String> {
+    let a = collect_object_paths(build_a)?;
+    let b = collect_object_paths(build_b)?;
+    let mut total = 0;
+    let mut exact = 0;
+    for relative in a.union(&b) {
+        total += 1;
+        if a.contains(relative) && b.contains(relative) {
+            let left = fs::read(build_a.join(relative)).map_err(|e| e.to_string())?;
+            let right = fs::read(build_b.join(relative)).map_err(|e| e.to_string())?;
+            if left == right {
+                exact += 1;
+            }
+        }
+    }
+    Ok((total, exact, total - exact))
 }
 
 /// Diff de proveniência: objetos `.o` do rebuild vs os `.o` originais do doador
@@ -367,21 +414,12 @@ fn diff_donor_objects(
     }
     let mut diffed: Option<ObjectDiffReport> = None;
     let mut compared = 0usize;
-    for entry in fs::read_dir(&donor_out)
-        .map_err(|error| format!("read_dir '{}': {error}", donor_out.display()))?
-        .flatten()
-    {
-        let path = entry.path();
-        if path.extension().and_then(|value| value.to_str()) != Some("o") {
-            continue;
-        }
-        let Some(file_name) = path.file_name() else {
-            continue;
-        };
+    for relative in collect_object_paths(&donor_out)? {
+        let path = donor_out.join(&relative);
         let Some(rebuild_out) = rebuild_out_dirs.first() else {
             continue;
         };
-        let counterpart = rebuild_out.join(file_name);
+        let counterpart = rebuild_out.join(&relative);
         if !counterpart.is_file() {
             continue;
         }
@@ -399,7 +437,7 @@ fn diff_donor_objects(
     }
     if compared > 1 {
         notes.push(format!(
-            "provenance diff cobriu {compared} objetos; relatório do primeiro"
+            "provenance diff encontrou {compared} objetos comparaveis; resultado publicado cobre somente o primeiro"
         ));
     }
     Ok(diffed)
@@ -432,10 +470,15 @@ mod tests {
         fs::write(a.join("sprite.o"), b"1111").expect("write a2");
         fs::write(b.join("sprite.o"), b"2222").expect("write b2");
 
+        fs::create_dir_all(a.join("src")).unwrap();
+        fs::create_dir_all(b.join("src")).unwrap();
+        fs::write(a.join("src/game.o"), b"game").unwrap();
+        fs::write(b.join("src/game.o"), b"game").unwrap();
+        fs::write(b.join("src/extra.o"), b"extra").unwrap();
         let (total, exact, divergent) = count_object_pairs(&a, &b).expect("count");
-        assert_eq!(total, 2);
-        assert_eq!(exact, 1);
-        assert_eq!(divergent, 1);
+        assert_eq!(total, 4);
+        assert_eq!(exact, 2);
+        assert_eq!(divergent, 2);
         let _ = fs::remove_dir_all(&work);
     }
 
@@ -443,6 +486,7 @@ mod tests {
     fn double_build_reports_determinism_shape() {
         // Contrato do resultado: campos sempre presentes, mesmo sem execução real.
         let determinism = DeterminismResult {
+            reproducibility_flags: vec!["EXTRA_FLAGS=-frandom-seed=$<".to_string()],
             rom_sha256_build_a: "aa".to_string(),
             rom_sha256_build_b: "aa".to_string(),
             rom_identical: true,

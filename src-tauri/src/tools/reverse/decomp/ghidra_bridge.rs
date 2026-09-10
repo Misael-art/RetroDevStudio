@@ -108,6 +108,10 @@ pub fn export_function_starts(elf_path: &Path, work_dir: &Path) -> Result<Vec<u3
         .map_err(|error| format!("falha ao invocar analyzeHeadless: {error}"))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    fs::write(work_dir.join("ghidra-stdout.log"), &output.stdout)
+        .map_err(|e| format!("salvar stdout Ghidra: {e}"))?;
+    fs::write(work_dir.join("ghidra-stderr.log"), &output.stderr)
+        .map_err(|e| format!("salvar stderr Ghidra: {e}"))?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         return Err(format!(
@@ -117,7 +121,7 @@ pub fn export_function_starts(elf_path: &Path, work_dir: &Path) -> Result<Vec<u3
         ));
     }
     parse_ghidra_funcs(&stdout)
-        .ok_or_else(|| "GHIDRA_FUNCS ausente no stdout do analyzeHeadless".to_string())
+        .ok_or_else(|| "GHIDRA_FUNCS ausente ou invalido no stdout do analyzeHeadless".to_string())
 }
 
 fn parse_ghidra_funcs(stdout: &str) -> Option<Vec<u32>> {
@@ -127,15 +131,22 @@ fn parse_ghidra_funcs(stdout: &str) -> Option<Vec<u32>> {
             Some((_, tail)) => tail,
             None => continue,
         };
+        // Ghidra 12 console appends its logger name to the last address.
+        // Strip only that known suffix; malformed addresses still fail closed.
+        let payload = payload
+            .trim()
+            .strip_suffix("(GhidraScript)")
+            .unwrap_or(payload.trim())
+            .trim_end();
         let addrs = payload
             .split(',')
             .filter(|token| !token.trim().is_empty())
             .map(|token| {
                 let trimmed = token.trim();
                 let hex = trimmed.trim_start_matches("0x").trim_start_matches("0X");
-                u32::from_str_radix(hex, 16).unwrap_or(0)
+                u32::from_str_radix(hex, 16).ok()
             })
-            .collect::<Vec<_>>();
+            .collect::<Option<Vec<_>>>()?;
         return Some(addrs);
     }
     None
@@ -147,13 +158,16 @@ pub fn boundary_metrics(ground_truth: &[u32], ghidra: &[u32]) -> BoundaryMetrics
     let mut truth: Vec<u32> = ground_truth.to_vec();
     truth.sort_unstable();
     truth.dedup();
+    let mut inferred = ghidra.to_vec();
+    inferred.sort_unstable();
+    inferred.dedup();
     let mut matched = 0usize;
-    for addr in ghidra {
+    for addr in &inferred {
         if truth.binary_search(addr).is_ok() {
             matched += 1;
         }
     }
-    let precision = match ghidra.len() {
+    let precision = match inferred.len() {
         0 => 0.0,
         count => matched as f64 / count as f64,
     };
@@ -163,7 +177,7 @@ pub fn boundary_metrics(ground_truth: &[u32], ghidra: &[u32]) -> BoundaryMetrics
     };
     BoundaryMetrics {
         ground_truth_count: truth.len(),
-        ghidra_count: ghidra.len(),
+        ghidra_count: inferred.len(),
         matched,
         precision,
         recall,
@@ -189,6 +203,10 @@ mod tests {
             Some(vec![0x200, 0x4F60, 0xA204])
         );
         assert_eq!(parse_ghidra_funcs("sem linha"), None);
+        assert_eq!(
+            parse_ghidra_funcs("INFO script> GHIDRA_FUNCS=0x200,0x300 (GhidraScript)  "),
+            Some(vec![0x200, 0x300])
+        );
     }
 
     #[test]
@@ -207,6 +225,15 @@ mod tests {
         assert_eq!(metrics.matched, 0);
         assert_eq!(metrics.precision, 0.0);
         assert_eq!(metrics.recall, 0.0);
+    }
+
+    #[test]
+    fn malformed_addresses_fail_and_duplicates_do_not_inflate_recall() {
+        assert_eq!(parse_ghidra_funcs("GHIDRA_FUNCS=0x200,garbage"), None);
+        let metrics = boundary_metrics(&[0x200, 0x200], &[0x200, 0x200]);
+        assert_eq!(metrics.ghidra_count, 1);
+        assert_eq!(metrics.matched, 1);
+        assert_eq!(metrics.recall, 1.0);
     }
 
     #[test]

@@ -3,7 +3,6 @@
 //! `fingerprint_v2.sh` do spike, aqui embutido no núcleo da Fase 0.
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use super::symbols::FunctionRange;
 
@@ -25,13 +24,7 @@ pub struct FingerprintIndex {
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    hasher
-        .finalize()
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+    crate::core::rom_mastering::sha256_hex(bytes)
 }
 
 /// Indexa os bytes de cada função do ground truth dentro da ROM. Funções com range

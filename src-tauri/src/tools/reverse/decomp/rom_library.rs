@@ -3,10 +3,10 @@
 //! Nenhuma ROM entra no repo — apenas hashes, metadados e derivados.
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 pub const DECOMP_LEDGER_SCHEMA: &str = "decomp-ledger/v1";
 
@@ -60,10 +60,7 @@ impl Default for DecompLedger {
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    let digest = hasher.finalize();
-    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+    crate::core::rom_mastering::sha256_hex(bytes)
 }
 
 /// Diretório de trabalho BYOR: `RDS_DECOMP_WORK` ou `~/.retrodev/decomp_work`.
@@ -82,22 +79,63 @@ pub fn ledger_path(work_dir: &Path) -> PathBuf {
     work_dir.join("ledger.json")
 }
 
-pub fn load_ledger(work_dir: &Path) -> DecompLedger {
+pub fn load_ledger(work_dir: &Path) -> Result<DecompLedger, String> {
     let path = ledger_path(work_dir);
-    let Ok(content) = fs::read_to_string(&path) else {
-        return DecompLedger::default();
+    let content = match fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(DecompLedger::default())
+        }
+        Err(error) => return Err(format!("falha ao ler ledger '{}': {error}", path.display())),
     };
-    serde_json::from_str(&content).unwrap_or_default()
+    let ledger: DecompLedger = serde_json::from_str(&content).map_err(|error| {
+        format!(
+            "ledger invalido '{}': {error}; arquivo preservado",
+            path.display()
+        )
+    })?;
+    if ledger.schema_version != DECOMP_LEDGER_SCHEMA {
+        return Err(format!(
+            "schema de ledger nao suportado: {}; arquivo preservado",
+            ledger.schema_version
+        ));
+    }
+    Ok(ledger)
 }
 
-pub fn save_ledger(work_dir: &Path, ledger: &DecompLedger) -> Result<(), String> {
-    fs::create_dir_all(work_dir)
-        .map_err(|error| format!("falha ao criar work dir '{}': {error}", work_dir.display()))?;
-    let path = ledger_path(work_dir);
+// A separate lock survives atomic replacement of ledger.json. Dropping File
+// releases the OS lock, including on error; no stale lock deletion is needed.
+fn lock_ledger(work_dir: &Path) -> Result<fs::File, String> {
+    fs::create_dir_all(work_dir).map_err(|e| format!("criar work dir: {e}"))?;
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(work_dir.join("ledger.lock"))
+        .map_err(|e| format!("abrir lock: {e}"))?;
+    file.lock().map_err(|e| format!("bloquear ledger: {e}"))?;
+    Ok(file)
+}
+
+fn save_ledger(work_dir: &Path, ledger: &DecompLedger) -> Result<(), String> {
     let content = serde_json::to_string_pretty(ledger)
         .map_err(|error| format!("falha ao serializar ledger: {error}"))?;
-    fs::write(&path, content + "\n")
-        .map_err(|error| format!("falha ao gravar ledger '{}': {error}", path.display()))
+    let temporary = work_dir.join(format!("ledger-{}.tmp", std::process::id()));
+    let result = (|| -> Result<(), String> {
+        let mut file =
+            fs::File::create(&temporary).map_err(|e| format!("criar ledger temporario: {e}"))?;
+        file.write_all(format!("{content}\n").as_bytes())
+            .map_err(|e| format!("gravar ledger: {e}"))?;
+        file.sync_all()
+            .map_err(|e| format!("sincronizar ledger: {e}"))?;
+        drop(file);
+        fs::rename(&temporary, ledger_path(work_dir)).map_err(|e| format!("publicar ledger: {e}"))
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 /// Slug do par a partir do caminho da ROM: usa o nome do diretório do projeto,
@@ -151,18 +189,22 @@ pub fn register_pair(
 ) -> Result<DecompPairEntry, String> {
     let rom_bytes = fs::read(rom_path)
         .map_err(|error| format!("falha ao ler ROM '{}': {error}", rom_path.display()))?;
+    let canonical = fs::canonicalize(rom_path).map_err(|e| format!("resolver ROM: {e}"))?;
+    let rom_sha256 = sha256_hex(&rom_bytes);
+    let identity = sha256_hex(format!("{}\n{}", canonical.display(), rom_sha256).as_bytes());
     let entry = DecompPairEntry {
-        id: slug_from_rom_path(rom_path),
+        id: format!("{}-{identity}", slug_from_rom_path(rom_path)),
         tier: tier.to_string(),
         rom_path: rom_path.to_string_lossy().to_string(),
-        rom_sha256: sha256_hex(&rom_bytes),
+        rom_sha256,
         symbols_path: symbols_path.map(|path| path.to_string_lossy().to_string()),
         elf_path: elf_path.map(|path| path.to_string_lossy().to_string()),
         source_root: source_root.map(|path| path.to_string_lossy().to_string()),
         registered_at_unix: now_unix(),
     };
 
-    let mut ledger = load_ledger(work_dir);
+    let _lock = lock_ledger(work_dir)?;
+    let mut ledger = load_ledger(work_dir)?;
     ledger.entries.retain(|existing| existing.id != entry.id);
     ledger.entries.push(entry.clone());
     save_ledger(work_dir, &ledger)?;
@@ -170,7 +212,8 @@ pub fn register_pair(
 }
 
 pub fn record_run(work_dir: &Path, record: DecompRunRecord) -> Result<(), String> {
-    let mut ledger = load_ledger(work_dir);
+    let _lock = lock_ledger(work_dir)?;
+    let mut ledger = load_ledger(work_dir)?;
     ledger.runs.push(record);
     save_ledger(work_dir, &ledger)
 }
@@ -195,6 +238,43 @@ mod tests {
             std::env::temp_dir().join(format!("rds-decomp-{label}-{}-{nonce}", std::process::id()));
         fs::create_dir_all(&dir).expect("create temp work dir");
         dir
+    }
+
+    #[test]
+    fn corrupt_ledger_is_not_overwritten_and_changed_rom_keeps_history() {
+        let work = temp_work("preservation");
+        let rom = work.join("rom.bin");
+        fs::write(&rom, b"first").unwrap();
+        fs::write(ledger_path(&work), b"{broken").unwrap();
+        assert!(register_pair(&work, &rom, "tier0_pair", None, None, None).is_err());
+        assert_eq!(fs::read(ledger_path(&work)).unwrap(), b"{broken");
+        fs::remove_file(ledger_path(&work)).unwrap();
+        let first = register_pair(&work, &rom, "tier0_pair", None, None, None).unwrap();
+        fs::write(&rom, b"second").unwrap();
+        let second = register_pair(&work, &rom, "tier0_pair", None, None, None).unwrap();
+        assert_ne!(first.id, second.id);
+        assert_eq!(load_ledger(&work).unwrap().entries.len(), 2);
+        fs::remove_dir_all(work).unwrap();
+    }
+
+    #[test]
+    fn concurrent_registrations_preserve_all_entries() {
+        let work = temp_work("concurrent");
+        let workers: Vec<_> = (0..8)
+            .map(|i| {
+                let work = work.clone();
+                std::thread::spawn(move || {
+                    let rom = work.join(format!("rom-{i}.bin"));
+                    fs::write(&rom, [i as u8]).unwrap();
+                    register_pair(&work, &rom, "tier0_pair", None, None, None).unwrap();
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        assert_eq!(load_ledger(&work).unwrap().entries.len(), 8);
+        fs::remove_dir_all(work).unwrap();
     }
 
     #[test]
@@ -227,13 +307,13 @@ mod tests {
             None,
         )
         .expect("register pair");
-        assert_eq!(entry.id, "smoke_test_ver_001_lab");
+        assert!(entry.id.starts_with("smoke_test_ver_001_lab-"));
         assert_eq!(
             entry.symbols_path.as_deref(),
             Some(symbols.to_str().expect("utf8 temp path"))
         );
 
-        let loaded = load_ledger(&work);
+        let loaded = load_ledger(&work).expect("load ledger");
         assert_eq!(loaded.schema_version, DECOMP_LEDGER_SCHEMA);
         assert_eq!(loaded.entries.len(), 1);
         assert_eq!(loaded.entries[0].rom_sha256, sha256_hex(b"SEGA-rom-bytes"));
@@ -256,7 +336,7 @@ mod tests {
             },
         )
         .expect("record run");
-        let reloaded = load_ledger(&work);
+        let reloaded = load_ledger(&work).expect("load ledger");
         assert_eq!(reloaded.runs.len(), 1);
         assert_eq!(reloaded.runs[0].pair_id, entry.id);
 
@@ -270,7 +350,7 @@ mod tests {
             None,
         )
         .expect("again");
-        assert_eq!(load_ledger(&work).entries.len(), 1);
+        assert_eq!(load_ledger(&work).expect("load ledger").entries.len(), 1);
 
         let _ = fs::remove_dir_all(&work);
     }

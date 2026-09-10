@@ -186,7 +186,7 @@ A coluna `Certificacao` usa exclusivamente o vocabulario travado deste roadmap:
 | Fase 3 - Visual Logic & RetroFX | Local         | NodeGraph canonico e camada visual existem; superficies ainda heterogeneas                |
 | Fase 4 - Camada Pro             | Local         | Patching, profiling, reverse e utilitarios existem, mas nem tudo e criterio de fechamento |
 | Fase 5 - Release                | Institucional | PR #2 mergeado e readiness de promocao verde em `main`; repetir quando escopo mudar       |
-| Fase 6 - Decompilacao Pareada   | Nenhuma       | **Experimental.** Spikes versionados fora do shell (`scripts/decomp/`: build-duplo M68K reproduzivel, fingerprint v2, holdout Tier 0, boundary benchmark Ghidra) + **Fase 0 Sprint 1 iniciada sob GO formal do operador (2026-09-09)**: nucleo estatico testado em `src-tauri/src/tools/reverse/decomp/` (triage/symbols/ledger BYOR/ghidra bridge/fingerprint/object_diff/orchestrator) com Etapa A provada em 3 pares Tier 0. **Sem LLM e sem UI** (Bloqueados; Etapa B exige GO especifico). Plano e metricas em `docs/12_DECOMPILACAO_PAREADA_PLANO.md` |
+| Fase 6 - Decompilacao Pareada   | Nenhuma       | **Experimental.** Spikes versionados fora do shell (`scripts/decomp/`: build-duplo M68K reproduzivel, fingerprint v2, holdout Tier 0, boundary benchmark Ghidra) + **Fase 0 Sprint 1 iniciada sob GO formal do operador (2026-09-09)**: nucleo estatico testado em `src-tauri/src/tools/reverse/decomp/` (triage/symbols/ledger BYOR/ghidra bridge/fingerprint/object_diff/orchestrator) com Etapa A medida em 3 pares Tier 0 e revalidacao em andamento apos corrigir contagem de objetos e persistencia do ledger. **Sem LLM e sem UI** (Bloqueados; Etapa B exige GO especifico). Plano e metricas em `docs/12_DECOMPILACAO_PAREADA_PLANO.md` |
 
 
 ---
@@ -281,7 +281,7 @@ Capacidades nao visuais, importadores e itens legados continuam nas secoes propr
 - Conversao ampla de gameplay para MUGEN/Ikemen alem do subset Experimental de nodes/bridges
 - Promocao institucional de adapters ainda sem prova suficiente
 - Expansoes visuais que concorram com a estabilizacao do fluxo core
-- **Decompilacao Pareada (ROM -> .rds/SGDK):** plano em `docs/12_DECOMPILACAO_PAREADA_PLANO.md`. Apenas spikes Experimentais versionados fora do shell (`scripts/decomp/`), cobertos por testes; nenhum pipeline no produto e nenhuma UI de decompilacao. Scanner/ledger/LLM/UI **nao autorizados**. Superficie nova requer as Fases 0-5 do plano (sob GO formal) antes de qualquer integracao no shell.
+- **Decompilacao Pareada (ROM -> .rds/SGDK):** plano em `docs/12_DECOMPILACAO_PAREADA_PLANO.md`. Spikes Experimentais fora do shell (`scripts/decomp/`) e nucleo estatico da Fase 0 Sprint 1 em `tools/reverse/decomp/`, sob GO formal de 2026-09-09 para Sprint 1 + Etapa A. Scanner/ledger estaticos autorizados nesse escopo; nenhuma UI ou pipeline LLM no produto. LLM/UI e Etapa B **nao autorizados**. Superficie nova requer as Fases 0-5 do plano (sob GO formal) antes de qualquer integracao no shell.
 
 ---
 

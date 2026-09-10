@@ -3429,10 +3429,9 @@ fn sgdk_project_is_code_only(sgdk_path: &Path) -> bool {
     if manifests.is_empty() || !sgdk_has_c_sources(sgdk_path) {
         return false;
     }
-    let resources = load_sgdk_resources(sgdk_path).unwrap_or_default();
-    !resources
-        .iter()
-        .any(|resource| sgdk_asset_destination(&resource.kind, &resource.asset_path).is_some())
+    // Unsupported or unreadable manifests must retain their normal diagnostic;
+    // only genuinely empty resource declarations qualify as code-only.
+    matches!(load_sgdk_resources(sgdk_path), Ok(resources) if resources.is_empty())
 }
 
 fn sgdk_has_c_sources(sgdk_path: &Path) -> bool {
@@ -3449,9 +3448,14 @@ fn sgdk_has_c_sources(sgdk_path: &Path) -> bool {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() {
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
                 stack.push(path);
-            } else if path.extension().and_then(|value| value.to_str()) == Some("c") {
+            } else if kind.is_file()
+                && path.extension().and_then(|value| value.to_str()) == Some("c")
+            {
                 return true;
             }
         }
@@ -18110,6 +18114,22 @@ void tick_player(void) {\n\
     /// rejeitado no import; agora gera projeto nativo com cena de logica ponte e
     /// segue buildavel pelo pipeline canonico.
     #[test]
+    fn code_only_detection_preserves_unsupported_and_unreadable_manifest_errors() {
+        let donor = temp_dir("code-only-errors");
+        fs::create_dir_all(donor.join("src")).unwrap();
+        fs::create_dir_all(donor.join("res")).unwrap();
+        fs::write(donor.join("src/main.c"), "int main(void) { return 0; }").unwrap();
+        let manifest = donor.join("res/resources.res");
+        fs::write(&manifest, "UNKNOWN unsupported \"asset.bin\"\n").unwrap();
+        assert!(!sgdk_project_is_code_only(&donor));
+        fs::write(&manifest, [0xff, 0xfe]).unwrap();
+        assert!(!sgdk_project_is_code_only(&donor));
+        fs::write(&manifest, "// genuinely empty resources\n").unwrap();
+        assert!(sgdk_project_is_code_only(&donor));
+        fs::remove_dir_all(donor).unwrap();
+    }
+
+    #[test]
     fn import_sgdk_project_supports_code_only_donor_with_bridge_scene() {
         let donor_dir = temp_dir("sgdk-code-only-donor");
         fs::create_dir_all(donor_dir.join("src/boot")).expect("create donor src");
@@ -23840,7 +23860,8 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
 
         let rom_artifact =
             std::env::temp_dir().join(format!("retro-dev-studio-{temp_slug}-rom.bin"));
-        let _ = fs::copy(&rom_full, &rom_artifact);
+        fs::copy(&rom_full, &rom_artifact)
+            .expect("copy current matrix ROM; never reuse a stale artifact");
         let _ = fs::remove_dir_all(&project);
         Some(rom_artifact)
     }
