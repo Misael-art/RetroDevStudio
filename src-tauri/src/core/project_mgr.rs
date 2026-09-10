@@ -24398,14 +24398,7 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             .unwrap_or("unknown")
             .to_string();
         emulator.stop()?;
-        if before.len() != 2 || after.len() != 2 || before == [0, 0] || before == after {
-            return Err(format!(
-                "game loop did not advance: {before:?} -> {after:?}"
-            ));
-        }
-        if residency_error != [0, 0] {
-            return Err(format!("sprite residency failed: {residency_error:?}"));
-        }
+        validate_residency_progress(&before, &after, &residency_error)?;
         Ok((
             count_non_black_rgba_pixels(&frame.rgba),
             core,
@@ -24414,6 +24407,33 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             frame.height,
             frame.rgba,
         ))
+    }
+
+    fn validate_residency_progress(
+        before: &[u8],
+        after: &[u8],
+        error: &[u8],
+    ) -> Result<(), String> {
+        if before.len() != 2 || after.len() != 2 || before == [0, 0] || before == after {
+            return Err(format!(
+                "game loop did not advance: {before:?} -> {after:?}"
+            ));
+        }
+        if error != [0, 0] {
+            return Err(format!("sprite residency failed: {error:?}"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn runtime_evidence_rejects_frozen_exception_and_allocation_failure() {
+        // A visible exception screen can leave either a zero or an old nonzero
+        // heartbeat. Neither establishes progress, regardless of pixel count.
+        assert!(validate_residency_progress(&[0, 0], &[0, 0], &[0, 0]).is_err());
+        assert!(validate_residency_progress(&[52, 0], &[52, 0], &[0, 0]).is_err());
+        assert!(validate_residency_progress(&[52, 0], &[112, 0], &[1, 0]).is_err());
+        assert!(validate_residency_progress(&[], &[112, 0], &[0, 0]).is_err());
+        assert!(validate_residency_progress(&[52, 0], &[112, 0], &[0, 0]).is_ok());
     }
 
     fn corpus_libretro_visible_smoke(
