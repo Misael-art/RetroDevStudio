@@ -293,10 +293,10 @@ fn build_main_c_with_collision(
                     y = y
                 ));
                 if managed_sprites {
-                    out.push_str(&format!("    rds_register_sprite(&{var_name}, &{resource_name}, &{var_name}_x, &{var_name}_y, TILE_ATTR({palette}, 1, FALSE, {priority}));\n"));
+                    out.push_str(&format!("    rds_register_sprite(&{var_name}, &{resource_name}, &{var_name}_x, &{var_name}_y, TILE_ATTR({palette}, {priority}, FALSE, FALSE));\n"));
                 } else {
                     out.push_str(&format!(
-                        "    {} = SPR_addSprite(&{}, {}_x, {}_y, TILE_ATTR({}, 1, FALSE, {}));\n",
+                        "    {} = SPR_addSprite(&{}, {}_x, {}_y, TILE_ATTR({}, {}, FALSE, FALSE));\n",
                         var_name, resource_name, var_name, var_name, palette, priority
                     ));
                 }
@@ -2337,6 +2337,41 @@ mod tests {
                     if_false: Vec::new(),
                 },
             ],
+        }
+    }
+
+    #[test]
+    fn sprite_priority_controls_priority_bit_without_horizontal_flip() {
+        // SGDK TILE_ATTR(palette, priority, flipV, flipH): foreground and
+        // background selection must not mirror artwork in either allocator.
+        for managed in [false, true] {
+            for high in [false, true] {
+                let mut asset = sprite_asset_with_animation(6, true);
+                if managed {
+                    asset.frame_width = 192;
+                    asset.frame_height = 160;
+                }
+                let ast = AstOutput {
+                    nodes: vec![
+                        AstNode::SpriteSystemInit,
+                        AstNode::SpawnSprite {
+                            var_name: "spr_hero".into(),
+                            resource_name: "hero".into(),
+                            x: 0,
+                            y: 0,
+                            priority_high: high,
+                        },
+                    ],
+                    sprite_assets: vec![asset],
+                    logic_scripts: Vec::new(),
+                };
+                let output = emit_sgdk(&ast, "Priority").main_c;
+                let priority = if high { "TRUE" } else { "FALSE" };
+                assert!(
+                    output.contains(&format!("TILE_ATTR(PAL1, {priority}, FALSE, FALSE)")),
+                    "priority mapping failed: managed={managed}, high={high}"
+                );
+            }
         }
     }
 
