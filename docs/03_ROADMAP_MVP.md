@@ -186,7 +186,7 @@ A coluna `Certificacao` usa exclusivamente o vocabulario travado deste roadmap:
 | Fase 3 - Visual Logic & RetroFX | Local         | NodeGraph canonico e camada visual existem; superficies ainda heterogeneas                |
 | Fase 4 - Camada Pro             | Local         | Patching, profiling, reverse e utilitarios existem, mas nem tudo e criterio de fechamento |
 | Fase 5 - Release                | Institucional | PR #2 mergeado e readiness de promocao verde em `main`; repetir quando escopo mudar       |
-| Fase 6 - Decompilacao Pareada   | Nenhuma       | **Experimental (spikes versionados fora do shell).** `scripts/decomp/` versiona build-duplo M68K reproduzivel, fingerprint v2 (symbol-table + SHA-256), holdout Tier 0 sem vazamento e boundary benchmark Ghidra headless, todos fail-hard e cobertos por `decomp-scripts.test.mjs`. Pipeline de producao (scanner/ledger/LLM/UI) **nao implementado nem autorizado**. Plano em `docs/12_DECOMPILACAO_PAREADA_PLANO.md` |
+| Fase 6 - Decompilacao Pareada   | Nenhuma       | **Experimental.** Spikes versionados fora do shell (`scripts/decomp/`: build-duplo M68K reproduzivel, fingerprint v2, holdout Tier 0, boundary benchmark Ghidra) + **Fase 0 Sprint 1 iniciada sob GO formal do operador (2026-09-09)**: nucleo estatico testado em `src-tauri/src/tools/reverse/decomp/` (triage/symbols/ledger BYOR/ghidra bridge/fingerprint/object_diff/orchestrator) com Etapa A provada em 3 pares Tier 0. **Sem LLM e sem UI** (Bloqueados; Etapa B exige GO especifico). Plano e metricas em `docs/12_DECOMPILACAO_PAREADA_PLANO.md` |
 
 
 ---
