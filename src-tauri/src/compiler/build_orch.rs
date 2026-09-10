@@ -1375,6 +1375,7 @@ fn stage_sgdk_sprite_asset(
             e
         )
     })?;
+    let image = arrange_sgdk_animation_rows(image, asset)?;
     let width = image.width();
     let height = image.height();
     let canvas_width = round_up_to_multiple(width, frame_width).max(frame_width);
@@ -1399,6 +1400,73 @@ fn stage_sgdk_sprite_asset(
             e
         )
     })
+}
+
+fn arrange_sgdk_animation_rows(
+    source: image::DynamicImage,
+    asset: &SpriteAsset,
+) -> Result<image::DynamicImage, String> {
+    if asset.animations.is_empty() {
+        return Ok(source);
+    }
+    let fw = asset.frame_width.max(8);
+    let fh = asset.frame_height.max(8);
+    let columns = source.width().div_ceil(fw);
+    let rows = source.height().div_ceil(fh);
+    let available = columns.saturating_mul(rows);
+    let longest = asset
+        .animations
+        .iter()
+        .map(|a| a.frames.len())
+        .max()
+        .unwrap_or(0);
+    if longest == 0 || longest > 255 || asset.animations.len() > 255 {
+        return Err(format!(
+            "Sprite '{}': quantidade de animacoes/frames fora do limite SGDK (1..255).",
+            asset.resource_name
+        ));
+    }
+    let width = fw
+        .checked_mul(longest as u32)
+        .ok_or("Largura de animacao excedida")?;
+    let height = fh
+        .checked_mul(asset.animations.len() as u32)
+        .ok_or("Altura de animacao excedida")?;
+    if u64::from(width) * u64::from(height) > 64 * 1024 * 1024 {
+        return Err(format!(
+            "Sprite '{}': atlas de animacoes excede 64 megapixels; divida o recurso.",
+            asset.resource_name
+        ));
+    }
+    let mut canvas = image::RgbaImage::new(width, height);
+    // rescomp assigns one animation index per image row. AST animation order is
+    // also the order used by SPR_setAnim, so preserve it and materialize frames.
+    // Transparent trailing cells are trimmed by rescomp, preserving row length.
+    for (row, animation) in asset.animations.iter().enumerate() {
+        for (column, frame) in animation.frames.iter().enumerate() {
+            if *frame >= available {
+                return Err(format!(
+                    "Sprite '{}', animacao '{}': frame {} inexistente ({} frames no asset).",
+                    asset.resource_name, animation.name, frame, available
+                ));
+            }
+            let x = (frame % columns) * fw;
+            let y = (frame / columns) * fh;
+            let crop = source.crop_imm(
+                x,
+                y,
+                fw.min(source.width() - x),
+                fh.min(source.height() - y),
+            );
+            image::imageops::replace(
+                &mut canvas,
+                &crop.to_rgba8(),
+                (column as u32 * fw).into(),
+                (row as u32 * fh).into(),
+            );
+        }
+    }
+    Ok(image::DynamicImage::ImageRgba8(canvas))
 }
 
 fn stage_sgdk_tilemap_asset(source: &Path, destination: &Path) -> Result<(), String> {
@@ -3094,6 +3162,50 @@ mod tests {
             "stale READY must not hide missing compiler"
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn sgdk_animation_rows_follow_named_frame_sequences_and_reject_missing_frames() {
+        use crate::compiler::ast_generator::SpriteAnimation;
+        let source =
+            image::RgbaImage::from_fn(32, 8, |x, _| image::Rgba([(x / 8 + 1) as u8, 0, 0, 255]));
+        let mut asset = SpriteAsset {
+            resource_name: "hero".into(),
+            asset_path: "hero.png".into(),
+            frame_width: 8,
+            frame_height: 8,
+            palette_slot: 0,
+            animation_count: 2,
+            default_animation: None,
+            animations: vec![
+                SpriteAnimation {
+                    name: "idle".into(),
+                    frames: vec![0],
+                    frame_time: 10,
+                    looping: true,
+                },
+                SpriteAnimation {
+                    name: "run".into(),
+                    frames: vec![3, 1, 2],
+                    frame_time: 5,
+                    looping: true,
+                },
+            ],
+        };
+        let result =
+            arrange_sgdk_animation_rows(image::DynamicImage::ImageRgba8(source.clone()), &asset)
+                .unwrap()
+                .to_rgba8();
+        assert_eq!(result.dimensions(), (24, 16));
+        assert_eq!(result.get_pixel(0, 0).0, [1, 0, 0, 255]);
+        assert_eq!(result.get_pixel(8, 0).0, [0, 0, 0, 0]);
+        assert_eq!(result.get_pixel(0, 8).0, [4, 0, 0, 255]);
+        assert_eq!(result.get_pixel(8, 8).0, [2, 0, 0, 255]);
+        assert_eq!(result.get_pixel(16, 8).0, [3, 0, 0, 255]);
+        asset.animations[1].frames.push(4);
+        let error = arrange_sgdk_animation_rows(image::DynamicImage::ImageRgba8(source), &asset)
+            .unwrap_err();
+        assert!(error.contains("frame 4 inexistente"));
     }
 
     #[test]

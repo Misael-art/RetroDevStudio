@@ -560,12 +560,26 @@ fn render_runtime_evidence_probe_tick(out: &mut String) {
     out.push_str("        }\n");
 }
 
-fn resource_animation_time(asset: &SpriteAsset) -> u32 {
+fn resource_animation_time(asset: &SpriteAsset) -> String {
+    if asset.animations.len() > 1 {
+        let rows = asset
+            .animations
+            .iter()
+            .map(|animation| {
+                format!(
+                    "[{}]",
+                    vec![animation.frame_time.to_string(); animation.frames.len()].join(",")
+                )
+            })
+            .collect::<String>();
+        return format!("[{rows}]");
+    }
     asset
         .default_animation
         .as_ref()
         .map(|animation| animation.frame_time)
         .unwrap_or(4)
+        .to_string()
 }
 
 fn render_aabb_helper() -> &'static str {
@@ -2173,6 +2187,19 @@ mod tests {
                 },
             ],
         }
+    }
+
+    #[test]
+    fn resources_res_preserves_distinct_animation_row_timings() {
+        let mut asset = sprite_asset_with_animation(10, true);
+        asset.animations[0].frames = vec![0];
+        asset.animations.push(SpriteAnimation {
+            name: "run".into(),
+            frames: vec![1, 2, 3],
+            frame_time: 5,
+            looping: true,
+        });
+        assert_eq!(resource_animation_time(&asset), "[[10][5,5,5]]");
     }
 
     #[test]
