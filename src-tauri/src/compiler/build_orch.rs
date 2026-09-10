@@ -1375,6 +1375,7 @@ fn stage_sgdk_sprite_asset(
             e
         )
     })?;
+    let image = arrange_sgdk_animation_rows(image, asset)?;
     let width = image.width();
     let height = image.height();
     let canvas_width = round_up_to_multiple(width, frame_width).max(frame_width);
@@ -1399,6 +1400,73 @@ fn stage_sgdk_sprite_asset(
             e
         )
     })
+}
+
+fn arrange_sgdk_animation_rows(
+    source: image::DynamicImage,
+    asset: &SpriteAsset,
+) -> Result<image::DynamicImage, String> {
+    if asset.animations.is_empty() {
+        return Ok(source);
+    }
+    let fw = asset.frame_width.max(8);
+    let fh = asset.frame_height.max(8);
+    let columns = source.width().div_ceil(fw);
+    let rows = source.height().div_ceil(fh);
+    let available = columns.saturating_mul(rows);
+    let longest = asset
+        .animations
+        .iter()
+        .map(|a| a.frames.len())
+        .max()
+        .unwrap_or(0);
+    if longest == 0 || longest > 255 || asset.animations.len() > 255 {
+        return Err(format!(
+            "Sprite '{}': quantidade de animacoes/frames fora do limite SGDK (1..255).",
+            asset.resource_name
+        ));
+    }
+    let width = fw
+        .checked_mul(longest as u32)
+        .ok_or("Largura de animacao excedida")?;
+    let height = fh
+        .checked_mul(asset.animations.len() as u32)
+        .ok_or("Altura de animacao excedida")?;
+    if u64::from(width) * u64::from(height) > 64 * 1024 * 1024 {
+        return Err(format!(
+            "Sprite '{}': atlas de animacoes excede 64 megapixels; divida o recurso.",
+            asset.resource_name
+        ));
+    }
+    let mut canvas = image::RgbaImage::new(width, height);
+    // rescomp assigns one animation index per image row. AST animation order is
+    // also the order used by SPR_setAnim, so preserve it and materialize frames.
+    // Transparent trailing cells are trimmed by rescomp, preserving row length.
+    for (row, animation) in asset.animations.iter().enumerate() {
+        for (column, frame) in animation.frames.iter().enumerate() {
+            if *frame >= available {
+                return Err(format!(
+                    "Sprite '{}', animacao '{}': frame {} inexistente ({} frames no asset).",
+                    asset.resource_name, animation.name, frame, available
+                ));
+            }
+            let x = (frame % columns) * fw;
+            let y = (frame / columns) * fh;
+            let crop = source.crop_imm(
+                x,
+                y,
+                fw.min(source.width() - x),
+                fh.min(source.height() - y),
+            );
+            image::imageops::replace(
+                &mut canvas,
+                &crop.to_rgba8(),
+                (column as u32 * fw).into(),
+                (row as u32 * fh).into(),
+            );
+        }
+    }
+    Ok(image::DynamicImage::ImageRgba8(canvas))
 }
 
 fn stage_sgdk_tilemap_asset(source: &Path, destination: &Path) -> Result<(), String> {
@@ -3097,6 +3165,50 @@ mod tests {
     }
 
     #[test]
+    fn sgdk_animation_rows_follow_named_frame_sequences_and_reject_missing_frames() {
+        use crate::compiler::ast_generator::SpriteAnimation;
+        let source =
+            image::RgbaImage::from_fn(32, 8, |x, _| image::Rgba([(x / 8 + 1) as u8, 0, 0, 255]));
+        let mut asset = SpriteAsset {
+            resource_name: "hero".into(),
+            asset_path: "hero.png".into(),
+            frame_width: 8,
+            frame_height: 8,
+            palette_slot: 0,
+            animation_count: 2,
+            default_animation: None,
+            animations: vec![
+                SpriteAnimation {
+                    name: "idle".into(),
+                    frames: vec![0],
+                    frame_time: 10,
+                    looping: true,
+                },
+                SpriteAnimation {
+                    name: "run".into(),
+                    frames: vec![3, 1, 2],
+                    frame_time: 5,
+                    looping: true,
+                },
+            ],
+        };
+        let result =
+            arrange_sgdk_animation_rows(image::DynamicImage::ImageRgba8(source.clone()), &asset)
+                .unwrap()
+                .to_rgba8();
+        assert_eq!(result.dimensions(), (24, 16));
+        assert_eq!(result.get_pixel(0, 0).0, [1, 0, 0, 255]);
+        assert_eq!(result.get_pixel(8, 0).0, [0, 0, 0, 0]);
+        assert_eq!(result.get_pixel(0, 8).0, [4, 0, 0, 255]);
+        assert_eq!(result.get_pixel(8, 8).0, [2, 0, 0, 255]);
+        assert_eq!(result.get_pixel(16, 8).0, [3, 0, 0, 255]);
+        asset.animations[1].frames.push(4);
+        let error = arrange_sgdk_animation_rows(image::DynamicImage::ImageRgba8(source), &asset)
+            .unwrap_err();
+        assert!(error.contains("frame 4 inexistente"));
+    }
+
+    #[test]
     fn mastering_updates_sgdk_checksum_after_project_header_changes() {
         let root = workspace_copy("megadrive_dummy");
         let mut project = load_project(&root).unwrap();
@@ -3271,8 +3383,14 @@ PY\n"
             .join("assets")
             .join("sprites")
             .join("hero.ppm");
-        fs::copy(&source_sprite, sprite_dir.join("player.ppm")).expect("copy player sprite");
-        fs::copy(&source_sprite, sprite_dir.join("enemy.ppm")).expect("copy enemy sprite");
+        // Four actual 16x16 frames, matching idle [0] and run [1, 2, 3].
+        image::RgbImage::from_fn(64, 16, |x, y| {
+            image::Rgb([(40 + (x / 16) * 40) as u8, (y * 8) as u8, 80])
+        })
+        .save(sprite_dir.join("player.ppm"))
+        .expect("write four-frame player sprite");
+        fs::copy(sprite_dir.join("player.ppm"), sprite_dir.join("enemy.ppm"))
+            .expect("copy four-frame enemy sprite");
         fs::copy(&source_sprite, tilemap_dir.join("stage.ppm")).expect("copy stage tilemap");
         fs::write(audio_dir.join("step.wav"), b"RIFFstep").expect("write step sfx");
         fs::write(audio_dir.join("fire.wav"), b"RIFFfire").expect("write fire sfx");
@@ -3530,19 +3648,18 @@ PY\n"
                 .expect("sprite asset should have parent directory"),
         )
         .expect("create megadrive vram stress sprite dir");
-        fs::copy(
-            fixture_dir("snes_dummy")
-                .join("assets")
-                .join("sprites")
-                .join("hero.ppm"),
-            &sprite_asset,
-        )
-        .expect("copy megadrive vram stress sprite");
-
-        let frames_csv = (0..600)
-            .map(|idx| idx.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
+        // Keep 600 distinct frame references (75 KiB raw sprite data), split
+        // into legal SGDK animation rows of 200 frames each.
+        image::RgbImage::from_fn(320, 480, |x, y| {
+            image::Rgb([(x % 255) as u8, (y % 255) as u8, 80])
+        })
+        .save(&sprite_asset)
+        .expect("write 600-frame VRAM stress sprite");
+        let animations = serde_json::json!({
+            "idle": { "frames": (0..200).collect::<Vec<_>>(), "fps": 12, "loop": true },
+            "run": { "frames": (200..400).collect::<Vec<_>>(), "fps": 12, "loop": true },
+            "jump": { "frames": (400..600).collect::<Vec<_>>(), "fps": 12, "loop": true }
+        });
         let scene_json = format!(
             r#"{{
   "scene_id": "main",
@@ -3563,13 +3680,7 @@ PY\n"
           "frame_height": 16,
           "pivot": null,
           "palette_slot": 0,
-          "animations": {{
-            "idle": {{
-              "frames": [{frames_csv}],
-              "fps": 12,
-              "loop": true
-            }}
-          }},
+          "animations": {animations},
           "priority": "foreground",
           "meta_sprite": false
         }},

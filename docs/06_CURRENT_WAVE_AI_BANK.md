@@ -1,4 +1,12 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
+
+**Atualização ativa (2026-09-09 — GUARD-ANIM-01):** PR #57 integrada em `10d15f6` após CI verde. A prova anterior de framebuffer não preto não certificava gameplay: entrada Direita revelou `ADDRESS ERROR` do SGDK. Causa reproduzida: `SPR_setAnim(..., 1)` sem segunda linha de animação no atlas rescomp. Correção materializa sequências por linha, preserva tempos individuais e rejeita frames inexistentes. Teste oficial agora exige a cena verde conhecida após 60 frames com Direita pressionada: passou com 42.496 pixels de cena; o framebuffer antigo tinha zero. Não extrapolar esta prova dirigida para todos os jogos, nem para paridade de importações. Validação integral e integração desta correção ainda em andamento; #58/#59 seguem em revisão.
+
+
+GUARD-CI-SETUP-01: run Windows `34428138934` do PR #59 expirou em 300.412 ms durante instalação do JDK, antes do build; o run irmão `34428174197` passou. Não é prova da assinatura `nm` de #53. Workflow passa a executar `host:ensure` e `host:diagnose` antes do app/cenários, sem aumentar timeout ou alterar asserções. Aceite remoto pendente.
+
+Evidência GUARD-ANIM-01: `src-tauri/target-test/validation/sgdk-real-nocode-game/real-nocode-report.json` e framebuffer PPM; snapshot externo em `/home/misael/RetroDevStudio/verified-2026-09-08-632a61b/evidence/animation-integration`. Demo antiga foi preservada: metadados 32x32 incompatíveis com sheet 64x16 são agora recusados, sem reutilizar ROM antiga. Demo nova usa fixture canônica 16x16 em `megadrive-animation-fixed`. Captura de UI isolada não foi usada como prova de execução dos 60 frames; essa prova vem do teste Libretro real. A legenda "R=Rewind (pausado)" descreve o atalho, não o estado da sessão; status ativo e Retomar desabilitado foram verificados.
+
 **Ultima Atualizacao:** 2026-09-08 (PRs #55/#56 integradas; abertura direta Linux e checksum SGDK em validacao; GOV-01 original preservado)
 **Wave Atual:** S+ (Hardening, QA e Recuperacao Conservadora)
 **Arquivo Anterior:** docs/06_AI_MEMORY_BANK_WAVE_A_R.md (historico arquivado)

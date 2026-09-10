@@ -113,6 +113,15 @@ jobs:
           }
           Add-Content -Path $env:GITHUB_ENV -Value "RDS_EDGE_DRIVER_PATH=$driverPath"
 
+      # Build & Run measures an already provisioned host. Downloading the full
+      # JDK/toolchain inside its 5-minute interaction budget hid setup failures
+      # as emulator startup failures (for example run 34428138934).
+      - name: Provision official host dependencies
+        run: npm run host:ensure
+
+      - name: Verify host readiness before desktop scenarios
+        run: npm run host:diagnose
+
       - name: Build debug desktop app (canonical script)
         id: build_debug
         run: npm run build:debug

@@ -6528,13 +6528,21 @@ pub extern "C" fn retro_run() {
             .chunks_exact(4)
             .filter(|px| px[0] != 0 || px[1] != 0 || px[2] != 0)
             .count();
-        assert!(
-            non_black_pixels > 0,
-            "real no-code emulation framebuffer should not be fully black"
-        );
+        // This fixture has a green checkerboard. SGDK's ADDRESS ERROR screen is
+        // also non-black, so liveness alone previously accepted a crashed game.
+        let scene_green_pixels = frame
+            .rgba
+            .chunks_exact(4)
+            .filter(|px| px[1] > px[0] && px[1] > px[2])
+            .count();
         let framebuffer_path = artifact_root.join("real-nocode-frame.ppm");
         write_framebuffer_ppm(&framebuffer_path, &frame);
         emulator.stop().expect("stop real no-code emulator");
+        assert!(
+            scene_green_pixels > 1000,
+            "expected the fixture's green scene after 60 frames with Right held;              got {scene_green_pixels} green pixels ({non_black_pixels} non-black);              inspect {} for an SGDK exception screen",
+            framebuffer_path.display()
+        );
 
         let build_log_path = artifact_root.join("real-nocode-build.log");
         fs::write(&build_log_path, build_log_lines.borrow().join("\n"))
@@ -6567,6 +6575,7 @@ pub extern "C" fn retro_run() {
             framebuffer_width: u32,
             framebuffer_height: u32,
             non_black_pixels: usize,
+            scene_green_pixels: usize,
             rom_size_bytes: usize,
             generated_from_nodes: bool,
             manual_code_edits: bool,
@@ -6587,6 +6596,7 @@ pub extern "C" fn retro_run() {
             framebuffer_width: frame.width,
             framebuffer_height: frame.height,
             non_black_pixels,
+            scene_green_pixels,
             rom_size_bytes: rom_bytes.len(),
             generated_from_nodes: true,
             manual_code_edits: false,
