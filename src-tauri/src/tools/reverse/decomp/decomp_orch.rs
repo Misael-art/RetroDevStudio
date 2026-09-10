@@ -27,6 +27,7 @@ pub struct EtapaAPairSpec {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DeterminismResult {
     pub reproducibility_flags: Vec<String>,
+    pub build_directory_policy: String,
     pub rom_sha256_build_a: String,
     pub rom_sha256_build_b: String,
     pub rom_identical: bool,
@@ -329,19 +330,26 @@ fn run_sgdk_make(build_dir: &Path) -> Result<(), String> {
 /// (ROM idêntica byte-a-byte e objetos exatos entre build A e build B).
 fn run_double_build(source_root: &Path, work_dir: &Path) -> Result<DeterminismResult, String> {
     let mut shas = [String::new(), String::new()];
+    // GCC 13 LTO serializes getcwd() even with -ffile-prefix-map. Use the
+    // same compile location for two fresh copies, archiving each complete tree
+    // before the next pass; never reuse object files from the first build.
+    let compile_dir = work_dir.join("compile-workspace");
     for (index, slug) in ["rebuild-a", "rebuild-b"].iter().enumerate() {
-        let build_dir = work_dir.join(slug);
-        if build_dir.exists() {
-            fs::remove_dir_all(&build_dir)
-                .map_err(|error| format!("limpa '{}': {error}", build_dir.display()))?;
+        let archive_dir = work_dir.join(slug);
+        if compile_dir.exists() || archive_dir.exists() {
+            return Err(
+                "rebuild exige diretorios novos; evidencia existente preservada".to_string(),
+            );
         }
-        copy_dir_recursive(source_root, &build_dir)?;
-        ensure_res_dep_files(&build_dir)?;
-        run_sgdk_make(&build_dir)?;
-        let rom = build_dir.join("out").join("rom.bin");
+        copy_dir_recursive(source_root, &compile_dir)?;
+        ensure_res_dep_files(&compile_dir)?;
+        run_sgdk_make(&compile_dir)?;
+        let rom = compile_dir.join("out").join("rom.bin");
         let rom_bytes = fs::read(&rom)
             .map_err(|error| format!("ROM do rebuild '{}': {error}", rom.display()))?;
         shas[index] = sha256_hex(&rom_bytes);
+        fs::rename(&compile_dir, &archive_dir)
+            .map_err(|e| format!("arquivar build independente: {e}"))?;
     }
 
     let build_a = work_dir.join("rebuild-a").join("out");
@@ -350,6 +358,8 @@ fn run_double_build(source_root: &Path, work_dir: &Path) -> Result<DeterminismRe
 
     Ok(DeterminismResult {
         reproducibility_flags: vec!["EXTRA_FLAGS=-frandom-seed=$<".to_string()],
+        build_directory_policy:
+            "fresh copies at the same compile-workspace path, archived after each pass".to_string(),
         rom_sha256_build_a: shas[0].clone(),
         rom_sha256_build_b: shas[1].clone(),
         rom_identical: shas[0] == shas[1] && !shas[0].is_empty(),
@@ -487,6 +497,9 @@ mod tests {
         // Contrato do resultado: campos sempre presentes, mesmo sem execução real.
         let determinism = DeterminismResult {
             reproducibility_flags: vec!["EXTRA_FLAGS=-frandom-seed=$<".to_string()],
+            build_directory_policy:
+                "fresh copies at the same compile-workspace path, archived after each pass"
+                    .to_string(),
             rom_sha256_build_a: "aa".to_string(),
             rom_sha256_build_b: "aa".to_string(),
             rom_identical: true,
