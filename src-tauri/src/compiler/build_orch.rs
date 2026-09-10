@@ -3383,8 +3383,14 @@ PY\n"
             .join("assets")
             .join("sprites")
             .join("hero.ppm");
-        fs::copy(&source_sprite, sprite_dir.join("player.ppm")).expect("copy player sprite");
-        fs::copy(&source_sprite, sprite_dir.join("enemy.ppm")).expect("copy enemy sprite");
+        // Four actual 16x16 frames, matching idle [0] and run [1, 2, 3].
+        image::RgbImage::from_fn(64, 16, |x, y| {
+            image::Rgb([(40 + (x / 16) * 40) as u8, (y * 8) as u8, 80])
+        })
+        .save(sprite_dir.join("player.ppm"))
+        .expect("write four-frame player sprite");
+        fs::copy(sprite_dir.join("player.ppm"), sprite_dir.join("enemy.ppm"))
+            .expect("copy four-frame enemy sprite");
         fs::copy(&source_sprite, tilemap_dir.join("stage.ppm")).expect("copy stage tilemap");
         fs::write(audio_dir.join("step.wav"), b"RIFFstep").expect("write step sfx");
         fs::write(audio_dir.join("fire.wav"), b"RIFFfire").expect("write fire sfx");
@@ -3642,19 +3648,18 @@ PY\n"
                 .expect("sprite asset should have parent directory"),
         )
         .expect("create megadrive vram stress sprite dir");
-        fs::copy(
-            fixture_dir("snes_dummy")
-                .join("assets")
-                .join("sprites")
-                .join("hero.ppm"),
-            &sprite_asset,
-        )
-        .expect("copy megadrive vram stress sprite");
-
-        let frames_csv = (0..600)
-            .map(|idx| idx.to_string())
-            .collect::<Vec<_>>()
-            .join(", ");
+        // Keep 600 distinct frame references (75 KiB raw sprite data), split
+        // into legal SGDK animation rows of 200 frames each.
+        image::RgbImage::from_fn(320, 480, |x, y| {
+            image::Rgb([(x % 255) as u8, (y % 255) as u8, 80])
+        })
+        .save(&sprite_asset)
+        .expect("write 600-frame VRAM stress sprite");
+        let animations = serde_json::json!({
+            "idle": { "frames": (0..200).collect::<Vec<_>>(), "fps": 12, "loop": true },
+            "run": { "frames": (200..400).collect::<Vec<_>>(), "fps": 12, "loop": true },
+            "jump": { "frames": (400..600).collect::<Vec<_>>(), "fps": 12, "loop": true }
+        });
         let scene_json = format!(
             r#"{{
   "scene_id": "main",
@@ -3675,13 +3680,7 @@ PY\n"
           "frame_height": 16,
           "pivot": null,
           "palette_slot": 0,
-          "animations": {{
-            "idle": {{
-              "frames": [{frames_csv}],
-              "fps": 12,
-              "loop": true
-            }}
-          }},
+          "animations": {animations},
           "priority": "foreground",
           "meta_sprite": false
         }},
