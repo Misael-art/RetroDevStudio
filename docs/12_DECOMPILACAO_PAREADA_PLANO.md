@@ -1,5 +1,164 @@
 # 12 - PLANO: DECOMPILACAO PAREADA (MATCHING DECOMPILATION) VIA GHIDRA + LLM + EMULADOR
 
+## Programa REX — reconstrução, extração e edição verificáveis
+
+**Revisão de planejamento: 2026-09-10.** Pedido do operador: máxima abrangência de formatos, dados organizados e editáveis, lógica por nós e criação de jogos novos. Este programa é a proposta de implantação solicitada; sua existência não declara capacidades implementadas nem autoriza despesas, dependências novas, envio de ROMs a serviços externos ou merge automático. Quando o operador entregar o prompt ao executor, ele poderá executar as etapas sucessivas aqui descritas, respeitando gates e restrições concretas. As antigas fases e o prompt v2 abaixo ficam como histórico; o prompt vigente é `PROMPT_AGENTE_RECONSTRUCAO_ROM.md`. Decisões arquiteturais consolidadas permanecem preservadas; eventual conflito deve ser apontado com proposta concreta, não alterado silenciosamente.
+
+### REX 1. Resultado desejado e limites de garantia
+
+Entregar quatro fluxos distintos na mesma aplicação:
+
+1. **Explorar:** abrir ROM, identificar hardware, navegar bytes/código/recursos com procedência e incerteza.
+2. **Modificar com preservação:** editar recursos ou parâmetros suportados, exportar patch e manter trechos não reconstruídos intactos.
+3. **Reconstruir por nós:** recuperar comportamento de um subconjunto comprovado, editá-lo, compilar e validar o resultado; não converter funções desconhecidas em operações vazias.
+4. **Criar do zero:** construir jogo sem ROM doadora com cenas, atores, animações, lógica, áudio e exportação suportada.
+
+“Todos os formatos” é uma direção de expansão, não uma promessa binária. Suporte depende de plataforma, revisão do hardware, mapper/coprocessador, contêiner, compressão, engine e operação. Uma extensão reconhecida não garante extração; extração não garante semântica; pseudocódigo não garante recompilação. Análise estática/dinâmica finita não recupera de forma universal todas as intenções, nomes e estados possíveis de um programa. O produto deve ser completo nos perfis publicados, extensível fora deles e explícito ao encontrar desconhecidos.
+
+Critério de qualidade: nenhum sucesso silencioso com perda; resultados reproduzíveis; origem consultável; edição reversível; diferenças explicadas; listas de suporte específicas. Testes fornecem evidência nos cenários executados, não prova de equivalência universal.
+
+### REX 2. Baseline que não pode ser confundido com a meta
+
+- Branch de trabalho desta revisão: `codex/import-decomp-review`, HEAD de produto observado `7da13104bdf4f0fb13d382c87d5814cbe7ebefda`. PR #61 em draft após contestação visual. O próximo executor deve consultar Git/CI novamente, sem tomar este snapshot como estado atual eterno.
+- HAMOOPIG padrão: `/mnt/sdcard/SGDKForge/SGDK_projects/HAMOOPIG [VER.001] [SGDK 211] [GEN] [ENGINE] [FIGHTING]/out/rom.bin`; 917504 bytes; SHA-256 `558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9`.
+- Taiketsu complementar: `/mnt/sdcard/SGDKForge/SGDK_projects/TAIKETSU ULTRA HERO GENESIS [VER.001] [SGDK 211] [GEN] [ENGINE] [FIGHTING]/out/rom.bin`; SHA-256 `3967996af4efe197284dd80e48a3b457aa381f8e0ba098851b5dbb59fc42bc7c`.
+- HAMOOPIG íntegro no backend Genesis Plus GX após 180 frames: prova em `/home/misael/RetroDevStudio/investigation-sgdk-equivalence-2026-09-10/hamoopig/backend-reference.json`. Não certifica botão, input, FPS sustentado ou reconstrução.
+- A prévia regenerada do Taiketsu combina recursos com lógica parcial. Evitar crash de VRAM não resolveu equivalência; estados/animações não devem virar atores simultâneos nem compartilhar paleta arbitrariamente.
+- Núcleo estático decomp existe na branch de revisão, sem editor completo de ROM→nodes. Rebuild duplo de fontes conhecidas é controle de determinismo, não decompilação recuperada.
+- Sonic indicado pelo operador: `/home/misael/emulation/roms/genesis/Sonic the Hedgehog (USA, Europe).bin`. Ainda não analisado; primeiro calcular hash e identificar revisão. Não assumir offsets, engine, algoritmo ou suporte pelo nome.
+- Dois projetos já portados para SGDK 2.11 não provam migração automática de 1.60/1.80/2.00. Assets ausentes permanecem faltantes identificados, sem inventar substitutos.
+
+### REX 3. Matriz de abrangência e níveis de suporte
+
+Cada perfil registra independentemente `identify`, `inspect_code`, `extract`, `edit_asset`, `edit_logic`, `rebuild`, `emulate`, `export_patch`. Estados por capacidade: `unsupported`, `experimental`, `verified_for_profile`; incluir SHA/corpus/versão/data/evidência. Publicar limitações por recurso, nunca um selo genérico “ROM suportada”.
+
+| Onda | Família planejada | Variações a inventariar e validar | Condição para avançar |
+|---|---|---|---|
+| 1 | Mega Drive/Genesis cartucho | imagens raw .bin/.md/.gen, dumps intercalados .smd, byte order, regiões, SRAM/EEPROM, variantes de mapeamento | Perfil específico reconhecido por conteúdo; transformação reversível; negativo fora do perfil |
+| 2 | SNES cartucho | .sfc/.smc, header de copiador, LoROM/HiROM e extensões, SRAM, coprocessadores individualmente | Backend e compilação próprios; evidência equivalente à onda 1 |
+| 3 | Master System/Game Gear; NES; GB/GBC | contêineres e mappers de cada família, bancos de código/dados, formatos gráficos/áudio | Estudo técnico e aprovação de toolchains/cores que faltarem; entrega por mapper |
+| 4 | GBA e outras plataformas de cartucho; N64 | CPUs/endianness/compressores e, quando aplicável, microcódigo e gráficos 3D | IR/extensões específicas, orçamento e benchmark; sem adaptação nominal apenas |
+| 5 | Mega-CD/32X, PS1/Saturn e outros discos | sistemas multi-CPU, tabelas de faixas, ISO/BIN+CUE/CHD, áudio, BIOS quando necessária | Preservação das faixas e temporização; suporte real do core e ferramentas aprovadas |
+| 6 | Arcade e sistemas adicionais | conjuntos de chips/ROMs, relações parent/clone, descritores, BIOS, layouts de placas | Perfil por placa e revisão, hashes do conjunto; não interpretar ZIP como um único jogo |
+| Contínua | Empacotamento e formatos não reconhecidos | ZIP/7z/GZIP conforme dependências existentes; arquivos múltiplos, patches IPS/BPS | Seleção explícita de membro; limites de expansão; nunca escolher arbitrariamente o primeiro .bin |
+
+As ondas 3–6 são roadmap de expansão, sem data firme ou declaração de suporte. “Custom”, dumps danificados, cifrados, imagens parciais e chips desconhecidos devem gerar relatório útil de bloqueio; não tentar normalização destrutiva. BIOS/chaves/ROMs não são provisionamento automático. Formato de dump, engine e versão do SDK são eixos diferentes.
+
+### REX 4. Arquitetura proposta, integrada ao que existe
+
+Fluxo: bytes originais → identificação/normalização reversível → mapa de memória e recursos → análise estática + observações de runtime → IR com evidências → projeto editável → patch ou compilação → comparação.
+
+| Componente | Responsabilidade | Local canônico a estender |
+|---|---|---|
+| Loader/plataforma | Limites, detecção, bancos, endereço de CPU versus offset de arquivo, mapeamento de normalização | `tools/reverse/loader.rs`, `platform.rs`, `manifest.rs` |
+| Recursos | Tiles, paletas, metassprites, mapas, áudio, textos e codecs reconhecidos | `graphics.rs`, `audio.rs`, `text.rs` |
+| Código/decomp | CFG, referências, funções, evidência de símbolos, IR baixo nível, fingerprints | `code.rs`, `tools/reverse/decomp/` |
+| Observação | Capturas e metadados de core; eventos de acesso quando efetivamente disponíveis | `trace.rs`, `emulator/libretro_ffi.rs`, parity harness existente |
+| Projeção/edição | Recursos e comportamentos recuperados → UGDM, preservação de desconhecidos | `projection.rs`, `annotations.rs`, UGDM e project manager |
+| Nós/build | Semântica tipada, validação, AST, emitters e source map existentes | `src/core/nodegraph/`, `compiler/ast_generator.rs`, `build_orch.rs` |
+| UI/IPC | Sessões canceláveis, catálogo, revisão de evidências, edição e erro acionável | ReverseWorkspace, NodeGraphEditor e serviços IPC existentes |
+
+Não reativar o compilador TypeScript legado como pipeline de produção. Não criar scanner/store/harness duplicado. As interfaces abaixo são contratos a projetar e testar, não APIs já disponíveis.
+
+Manifesto versionado mínimo: `schema_version`, original SHA/tamanho, container+member, hash normalizado, transformações reversíveis, hardware/mapper/region, revisão de ferramenta/core, lista de recursos e dependências, lacunas e ledger de alterações. Cada recurso tem ID estável, intervalo(s) de origem, endereço/banco, codec e parâmetros, hash raw/decodificado, paleta associada, referências/aliases, categoria, nome inferido versus confirmado e evidências. Conservar blocos desconhecidos como desconhecidos.
+
+Cada afirmação semântica registra `declared`, `observed`, `inferred` ou `unknown`, origem e escopo. Confiança não é porcentagem inventada: usar regra/proveniência e calibração em corpus conhecido. Salvamento transacional, schema migrations, locks, retomada após crash e invalidação de cache por hash+versão+opções. IDs de recursos não mudam apenas por renomear o arquivo.
+
+### REX 5. Pacotes de implementação e critérios de aceite
+
+| ID | Trabalho concreto | Dependências | Evidência exigida |
+|---|---|---|---|
+| REX-00 | Auditar branch/CI, registrar baseline, corrigir claims e fixar corpus | Nenhuma | Manifesto com hashes; reproduzir positivo HAM e negativo da prévia; nenhuma ROM original alterada |
+| REX-01 | Schema de capacidades/proveniência e ledger comparável | 00 | Round-trip, migration, corrupção, concorrência, identidade estável, estados desconhecidos preservados |
+| REX-02 | Identificação e normalização MD + contêineres | 01 | Fixtures por variante; desfazer transformação restitui SHA original; truncado/ambíguo retorna erro correto |
+| REX-03 | Corpus e oráculos independentes | 00–02 | Separação por projeto entre calibração e holdout; export do compilador/fonte usado só no oráculo, não vazando para entrada ROM-only |
+| REX-04 | Extração visual MD organizada | 02–03 | Tiles/paletas/flip/prioridade/transparência/metassprites/animação/planos/mapeamento espacial corretos em fixtures; todo recurso exportado aponta à origem |
+| REX-05 | Codecs e reinserção reversível | 04 | decode→encode→decode igual; tamanho/relocações/referências corrigidos; entrada malformada não causa overrun |
+| REX-06 | Runtime e correlação com ROM | 03–04 | Frames+input+estado com core e versão; fonte de cada observação identificada; indisponibilidade de PC/VDP marcada missing |
+| REX-07 | Editor de recursos e patch preservador | 04–06 | Editar pela UI, salvar/reabrir, desfazer/refazer, exportar/aplicar patch à base correta; base errada rejeitada; diferença só no escopo esperado |
+| REX-08 | Desmontagem/IR de comportamento | 03,06 | CFG e referências corretos em corpus com símbolos; flags, largura, signedness, overflow, bancos, interrupções e acessos IO preservados |
+| REX-09 | Recuperação estruturada | 08 | Tabelas de estados, atores, câmera, colisões e chamadas reconhecidas com evidência; indireções não resolvidas bloqueiam promessas de completude |
+| REX-10 | Projeção IR→nodes e execução compilada | 09 | Cada nó tem semântica e origem; testes diferenciais nó→C→ROM; unsupported bloqueante; sem bridge no-op |
+| REX-11 | Criação do zero pelo caminho canônico | 01,10 subset | Jogo pequeno completo feito pela UI, sem fonte/doador: menu, movimento, animação, colisão, objetivo/fim/reinício, áudio quando perfil suportar; save/reopen/build/run |
+| REX-12 | Migração SGDK versionada | 03; em paralelo a 04–09 | Casos reais 1.60/1.80/2.00 e controle 2.11; precondições verificadas, dry-run/diff, idempotência e rollback; build e paridade dos cenários |
+| REX-13 | Reconstrução integrada HAM/Taiketsu | 05–12 | Reimport sem alterações comparado à referência; editar comportamento e recurso via UI; recompilar e comparar delta esperado; lacunas mantidas visíveis |
+| REX-14 | Sonic piloto BYOR | 02–10 | Hash/revisão confirmados; reconhecer e editar um recurso, depois um parâmetro de lógica por nós com prova; desconhecidos preservados; patch reproduzível |
+| REX-15 | Robustez/release do perfil MD | 07,10–14 | Gates Linux/Windows no mesmo SHA; corpus holdout, UX/acessibilidade, recuperação de falhas, desempenho e pacote instalado |
+| REX-16 | SNES e ondas seguintes | 15 | Repetir contratos/testes/oráculos por plataforma; não promover recursos só por compartilhar UI |
+
+**REX-04/05 em detalhe.** Separar imagem bruta, tiles, composição e animação. Conservar índice da cor, palette bank, prioridade, flips, origem e duração, pivô/hitbox quando comprovados. Mapas: tiles/metatiles/chunks, camadas, colisão separada e scroll. Não agrupar por proximidade de bytes como fato; oferecer agrupamento manual persistente. Compressão: catálogo de codecs por engine/assinatura com verificação de saída e consumo exato de entrada; compressão desconhecida fica bloco opaco. Mudança de tamanho exige espaço comprovadamente livre, relocation e referências conhecidas; bloquear caso contrário. No-op export deve ser byte-exato preservando payload original; recompressão diferente pode ser aceita como semântica equivalente somente no modo explicitamente rotulado.
+
+**Áudio/texto.** Distinguir amostras PCM, comandos de driver/música, instrumentos e áudio renderizado. WAV gravado durante execução não é recuperação da trilha editável. Drivers desconhecidos permanecem opacos; preservar parâmetros de loop, pitch e temporização comprovados. Texto requer encoding/tabela, terminadores e ponteiros, sem interpretar bytes arbitrários como strings confiáveis.
+
+**REX-08/10 em detalhe.** Manter uma IR de baixo nível por CPU e uma representação de alto nível agnóstica para nós. Não forçar assembly otimizado em C/SGDK sem preservar comportamento. Agrupar por módulo/ator/estado com subgrafos, navegação para instrução, busca, filtros e layout estável; evitar grafo gigante de cada instrução. Blocos opacos podem ser preservados no patch, mas não apresentados como lógica visual editável. Bridge só executável se ABI, entrada/saída, memória, registradores/clobbers, calling convention, endereços e relocação estiverem comprovados; caso contrário bloquear compilação dessa modificação. Não reutilizar uma ROM anterior quando o build falhar. Provar que o código gerado editado foi usado por hash e por efeito observável.
+
+**REX-12 em detalhe.** Detectar versão por metadata/headers/API com ambiguidade explícita; não pelo nome da pasta ou fingerprint isolado. Comparar changelogs/headers oficiais fixados. Regras devem operar sobre contexto sintático/símbolos, não substituições globais: `sprite.h` e `sound.h` podem ser headers gerados de recursos. Cobrir SPR_init/addSpriteEx/flags, paletas, VDP, DMA, chamadas de frame, timers, áudio/Z80, rescomp, boot/linker e make flags conforme mudança real constatada. Boot customizado nunca substituído automaticamente só para compilar. Build em cópia limpa do projeto, preservar original e manifestar regra/origem/diff. Para cada versão, ao menos fixture mínima, fixture de estresse e projeto independente holdout; se corpus não existir, marcar a célula não medida. Mudança de compilador pode alterar comportamento indefinido: diagnosticar, não “corrigir” arbitrariamente. Distinguir migração com fonte de ROM→nodes; Sonic não deve ser pressuposto SGDK.
+
+**REX-14 em detalhe.** Primeiro modo leitura com inventário e identificação; depois alteração visual pequena reversível; depois uma variável/rotina bem delimitada. Preferir codec e descritor reutilizáveis, com fixture aberta equivalente. Anotações de revisão do Sonic podem enriquecer plugin de perfil, mas não ensinar offsets de uma revisão como regra universal. Não anunciar “editar o Sonic inteiro” a partir de uma paleta ou velocidade alterada. Caso o motor não recupere uma função, registrar a lacuna e preservar os bytes.
+
+### REX 6. Gates que impedem repetir o falso positivo
+
+1. **Identidade:** original e candidata com SHA-256, input e cenário definidos; sem misturar ROM compilada anterior, ROM do autor e prévia de recursos.
+2. **Extração:** no corpus conhecido, comparar recursos com export/oráculo independente, incluindo índices de paleta, composição e referências. Cobertura = recursos corretos / recursos esperados conhecidos; itens não localizados entram no denominador. Em ROM sem ground truth, cobertura total é desconhecida.
+3. **No-op:** exportação preservadora sem edição recompõe exatamente a imagem original; reconstrução por compilador tem gate separado, pois layout diferente pode ser válido. Igualdade de objetos é medida separadamente de igualdade da ROM.
+4. **Controle negativo:** trocar paleta, eliminar transição, inverter input, congelar loop ou impedir patch deve reprovar pelo motivo esperado. Captura não preta, botão enabled oculto ou mensagem “ativo” não são sucesso suficiente.
+5. **Paridade observada:** mesmo core/config/ROM inicial, reset, SRAM conhecida, inputs por frame, sementes/RTC quando aplicáveis; checkpoints de framebuffer, áudio, RAM e estado pertinente. Comparar regiões disponíveis simetricamente. Ausência de dado é missing, nunca igualdade.
+6. **Mudança intencional:** preservar todos os cenários de controle e verificar delta específico. Não comparar ROM modificada à original esperando igualdade completa; registrar quais saídas devem mudar e quais devem permanecer.
+7. **CPU/VDP:** Libretro comum não garante tracing de PC, DMA ou registradores por ciclo. Declarar capacidade por core; extensão de instrumentação exige desenho próprio e validação. Não inventar medição com contador de sprites estático.
+8. **Interface:** executar abrir→navegar→editar→salvar→fechar→reabrir→build/patch→run pelos controles visíveis, com prova dos bytes carregados. IPC direto complementa e não substitui o teste de UI.
+9. **Desempenho:** medir FPS realmente apresentado, distribuição de frame times p50/p95/p99, áudio underruns, RAM e tempo de import; não usar overlay fixo como medição. Meta inicial NTSC: 10 minutos de cenário sustentado próximo da cadência do core, sem pausas/congelamentos ou underruns; medir PAL separadamente. Fixar tolerâncias no REX-03 antes do teste, considerando host e orçamento, sem relaxar após falha. Hardware real constitui gate distinto, não inferido dos emuladores.
+10. **Sem regressões:** casos de borda, save/reload, janela pequena e escala 100/150/200%, teclado e leitor de tela, cancelamento, falta de disco, processo interrompido, caminho Unicode/longos e erros de permissões. Processos externos com timeout/limite de saída e paths sem shell injection; arquivos malformados sem panic, acesso fora de limites ou expansão ilimitada.
+
+Para promoção de um perfil, todas as fixtures mandatórias passam, zero perda silenciosa conhecida, zero blocker no fluxo certificado, todas lacunas listadas. Função descoberta não conta como convertida; função de biblioteca não mascara lógica de jogo ausente. Medir tanto cobertura por quantidade quanto cobertura ponderada dos comportamentos necessários ao cenário. Manter conjunto holdout de projetos independentes (não apenas variantes do mesmo jogo) e uma sessão exploratória não usada para ajustar o extrator. Nenhum percentual isolado autoriza suporte completo.
+
+### REX 7. Cronograma estimativo e caminho crítico
+
+Estimativa de engenharia para **um executor dedicado com revisão humana regular**, sem novos bloqueios de infraestrutura; semanas de trabalho, não promessa de prazo nem estimativa de tokens. Incerteza alta nas fases de reconstrução. Reestimar após REX-03 com throughput medido. Expandir para todas as plataformas é programa contínuo, sem data de conclusão universal.
+
+| Janela orientativa | Entrega | Complexidade | Tipo de agente |
+|---|---|---|---|
+| Semanas 1–2 | REX-00/01/03: baseline, contratos, corpus e gates | Alta no contrato; média no inventário | Capaz para desenho; executor simples para metadados verificáveis |
+| Semanas 3–5 | REX-02/04: loader e catálogo visual MD | Alta | Capaz para layout/formatos; simples para UI já contratada |
+| Semanas 6–8 | REX-05/06/07: codec, observação, patch de recurso | Muito alta | Capaz para codecs/relocação; revisão independente |
+| Semanas 9–11 | REX-12 e início REX-08: migração e IR | Muito alta | Capaz com domínio de compiladores |
+| Semanas 12–16 | REX-09/10/11: lógica, nós e jogo do zero | Pesquisa, muito alta | Capaz; não delegar equivalência a executor simples |
+| Semanas 17–20 | REX-13/14: verticais HAM/Taiketsu e Sonic restrito | Muito alta, pode exceder janela | Capaz + revisão de evidências |
+| Semanas 21–24 | REX-15: hardening do perfil MD publicado | Alta | Capaz em regressões; simples em QA repetível |
+| Após gate MD | REX-16 SNES; ondas posteriores | Estimar após spike de 1–2 semanas por família | Especialização por plataforma |
+
+Este é cenário inicial de cerca de **24 semanas para um perfil MD delimitado**, não para reconstruir todo jogo Mega Drive. Fronteiras semânticas, codecs desconhecidos ou falta de corpus podem ampliar substancialmente o prazo. Checkpoints quinzenais devem reduzir escopo publicado ou revisar estimativa com evidência; nunca relaxar aceite para caber na data.
+
+Caminho crítico: contrato → identificação → oráculos → recursos e observação → IR → nós → rebuild/paridade → hardening. Migração de fontes e editor de jogo novo podem avançar após seus contratos sem aguardar todo o piloto comercial. Uma entrega útil antecipada é explorar/editar recursos por patch, enquanto reconstrução completa permanece pendente.
+
+Paralelismo opcional, apenas quando explicitamente ativado: integrador dono de schema/IPC/docs; A dono de loader/codecs/recursos; B dono de análise/IR/SGDK; C dono de UI/UX/QA após contrato. Cada branch com allowlist e fixtures; arquivos centrais (`lib.rs`, `project_mgr.rs`, emitter, schemas, locks) com um único responsável. Integrar contrato antes dos consumidores, gates no destino, sem compartilhamento de builds/SRAM mutáveis. O executor único pode cumprir os papéis sequencialmente. Não abrir agentes automaticamente por este plano.
+
+### REX 8. Métricas, acompanhamento e definição de entrega
+
+Usar o ledger existente, estendendo-o por migration. Para cada ticket/execução: ID, status (`planned/in_progress/blocked/verified`), responsável, commit/base/branch/PR, dependências, hipótese, comando, exit code, corpus/hash, core/toolchain, cenário/input, métricas antes/depois, evidências positivas e negativas, limitações e próximo passo. Não sobrescrever resultados antigos; nova execução aponta à anterior. Schema inválido/corrompido não reinicia ledger silenciosamente.
+
+Painel comparativo mínimo: perfis identificados versus testados; recursos corretos/esperados; bytes com origem mapeada; referências não resolvidas; funções recuperadas/esperadas; nós compilados versus bridges/lacunas; comportamentos exigidos/provados; no-op byte-exato; patches aplicados e revertidos; divergências por frame; tempo/memória; bugs reabertos; testes ignorados; custo de ferramenta quando existir. Percentuais sem denominador e corpus não são aceitos. Curva de “aprendizado” só com ganho medido em holdout, não com aumento de catálogo.
+
+Entrega por fatia: código integrado, teste de falha anterior quando correção, testes focados e gates aplicáveis, relatório real, docs atualizados, commit coerente, push e PR revisável. Gates integrais para alterações de produto: `npm run check:tree`, `npm run lint`, `npx tsc --noEmit`, `npm test`, `cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings`, `cargo test --manifest-path src-tauri/Cargo.toml --lib -- --nocapture --test-threads=1`, `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check`; `npm run host:certify` ao tocar build/host/emulação/toolchains e validação manual oficial. Segurança/dependências: auditorias canônicas quando aplicáveis. Documentação isolada: estrutura, links e diff; não anunciar suíte de produto reexecutada.
+
+PR inclui problema, perfil suportado, alteração observável, evidência antes/depois, comandos, SHA, corpus e limites. Verificar CI do HEAD final e preservar diagnósticos de falhas; sem bypass de branch protection. PR #61 continua sob investigação até revisão explícita dos itens pendentes. Merge obedece autorização e política real, não é consequência automática de checks verdes.
+
+Distribuição: ROMs comerciais, assets extraídos e disassembly permanecem BYOR locais; exportar patch com hash da base e manifesto de aplicação. Projeto novo usa assets com origem/licença registrada. Não enviar corpus a modelo remoto sem autorização específica; LLM não é dependência da primeira entrega. Qualquer proposta futura de LLM deve ter limite de custo, isolamento, validação de saída e parada em não convergência; nunca autoridade para declarar equivalência.
+
+### REX 9. Fontes técnicas e decisões abertas
+
+Fontes primárias consultadas em 2026-09-10; execução deve fixar tag/commit dos artefatos utilizados, não seguir `master` silenciosamente:
+
+- [SGDK releases](https://github.com/Stephane-D/SGDK/releases): confirma versões e mudanças de APIs/rescomp/compilador que exigem migração por regra, não renomeação global.
+- [Ghidra oficial](https://github.com/NationalSecurityAgency/ghidra): infraestrutura de análise/desmontagem/decompilação; não constitui conversor automático de jogos para UGDM.
+- [Contrato Libretro](https://github.com/libretro/libretro-common/blob/master/include/libretro.h): interfaces de execução, callbacks e memória; tracing de hardware deve ser demonstrado por implementação/capacidade do core.
+
+Decisões abertas a resolver por spike: mapa de instrumentação disponível em cada core; representação lossless da IR e blocos opacos; estratégia segura de relocation; codecs do corpus; orçamento de parsing e cache; tolerâncias de paridade/performance; conjunto mínimo publicável de nodes; toolchain específica das novas plataformas. Dependência nova só após proposta e aprovação. Não confundir essas decisões abertas com funcionalidades existentes.
+
+---
+
+## Histórico v2 e resultados anteriores (não usar como prompt vigente)
+
+
 **Status:** Documento de planejamento — superficie `Experimental`
 **Versao:** 2.0
 **Ultima revisao:** 2026-07-08 (v2 — triagem por tier, curriculo de aprendizado, biblioteca de insumo local, host Linux; scripts versionados fail-hard com testes automatizados negativos, Ghidra boundary benchmark medido com min/max honestos, harness reference/candidate com caminhos explicitos e comparacao de regiao simetrica)

@@ -1,5 +1,9 @@
 # 03 - ROADMAP MACRO & MVP TATICO
 
+**Programa REX (planejamento solicitado, 2026-09-10):** expansão faseada de exploração/extração, edição por patch, reconstrução por nós e jogo novo, começando por perfil MD delimitado; detalhes e gates no Programa REX de `12_DECOMPILACAO_PAREADA_PLANO.md`. SNES e outras famílias são expansão posterior. Nenhuma capacidade promovida por esta documentação.
+
+**2026-09-10 — aceite de equivalência SGDK suspenso:** HAMOOPIG é referência padrão; a ROM original reproduz título completo no núcleo interno, enquanto prévia regenerada não demonstra preservação do jogo. Importação/no-code continuam Experimental. Gates e evidências em GUARD-SGDK-EQUIVALENCE-01 no Memory Bank.
+
 **Status:** Documento vivo
 **Ultima revisao canonica:** 2026-07-29 (gate Desktop E2E restaurado; build SNES corrigido apos deriva de toolchain upstream)
 
