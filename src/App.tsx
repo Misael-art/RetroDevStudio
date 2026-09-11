@@ -1433,6 +1433,10 @@ type AutomationState = {
 
 type AutomationApi = {
   openProject: (projectDir: string) => Promise<boolean>;
+  /** Carrega uma ROM no emulador pelo mesmo caminho do controle visível
+   * "Carregar ROM" (sem o diálogo nativo, que a automação não dirige).
+   * E2E / QA. */
+  loadRomForEmulation: (romPath: string) => Promise<boolean>;
   /** Importa doador SGDK para `baseDir` e abre o projeto nativo gerado; devolve o caminho absoluto. */
   importSgdkProject: (
     projectName: string,
@@ -3024,6 +3028,8 @@ export default function App() {
     }
   }
 
+  /** Carrega uma ROM no emulador pelo mesmo caminho do controle visível
+   * "Carregar ROM" (diálogo nativo incluído). */
   async function handleEmulatorLoadRom() {
     try {
       const selected = await open({
@@ -3033,39 +3039,7 @@ export default function App() {
       if (!selected) return;
 
       const romPath = typeof selected === "string" ? selected : selected[0];
-      const romDependency = await detectRomDependency(romPath);
-      if (romDependency.dependency_id) {
-        const ready = await ensureDependencies(
-          [romDependency.dependency_id],
-          "Carregar esta ROM requer o core Libretro correspondente."
-        );
-        if (!ready) return;
-      }
-
-      const result = await emulatorLoadRom(romPath);
-      if (!result.ok) {
-        setEmulatorLoaded(false);
-        const failureMessage = formatEmulatorFailureMessage(result.message);
-        logMessage("error", failureMessage);
-        if (result.message.includes("Nenhum core Libretro")) {
-          openRuntimeSetupForIssue();
-        }
-        reportDiagnostic(
-          result.diagnostics?.[0] ??
-            createFallbackDiagnostic({
-              area: "libretro_emulation",
-              sourcePath: romPath,
-              technicalDetail: failureMessage,
-            })
-        );
-        return;
-      }
-
-      setEmulatorLoaded(true);
-      trackProductMetric({ kind: "rom_loaded" });
-      logMessage("success", `ROM carregada: ${romPath}`);
-      setActiveViewportTab("game");
-      setEmulPaused(false);
+      await loadRomIntoEmulator(romPath);
     } catch (error) {
       reportDiagnostic(
         createFallbackDiagnostic({
@@ -3074,6 +3048,45 @@ export default function App() {
         })
       );
     }
+  }
+
+  /** Mesma sequência do controle visível "Carregar ROM" após a escolha do
+   * arquivo; usada também pela automação E2E, que não consegue dirigir o
+   * diálogo nativo de arquivos do sistema operacional. */
+  async function loadRomIntoEmulator(romPath: string) {
+    const romDependency = await detectRomDependency(romPath);
+    if (romDependency.dependency_id) {
+      const ready = await ensureDependencies(
+        [romDependency.dependency_id],
+        "Carregar esta ROM requer o core Libretro correspondente."
+      );
+      if (!ready) return;
+    }
+
+    const result = await emulatorLoadRom(romPath);
+    if (!result.ok) {
+      setEmulatorLoaded(false);
+      const failureMessage = formatEmulatorFailureMessage(result.message);
+      logMessage("error", failureMessage);
+      if (result.message.includes("Nenhum core Libretro")) {
+        openRuntimeSetupForIssue();
+      }
+      reportDiagnostic(
+        result.diagnostics?.[0] ??
+          createFallbackDiagnostic({
+            area: "libretro_emulation",
+            sourcePath: romPath,
+            technicalDetail: failureMessage,
+          })
+      );
+      return;
+    }
+
+    setEmulatorLoaded(true);
+    trackProductMetric({ kind: "rom_loaded" });
+    logMessage("success", `ROM carregada: ${romPath}`);
+    setActiveViewportTab("game");
+    setEmulPaused(false);
   }
 
   function handleEmulatorPause() {
@@ -3777,6 +3790,10 @@ export default function App() {
 
     window.__RDS_E2E__ = {
       openProject: (projectDir: string) => openProjectAtPath(projectDir, "E2E"),
+      loadRomForEmulation: async (romPath: string) => {
+        await loadRomIntoEmulator(romPath);
+        return useEditorStore.getState().emulatorLoaded;
+      },
       importSgdkProject: async (projectName: string, baseDir: string, sgdkDonorPath: string) => {
         const result = await importSgdkProject(projectName, baseDir, sgdkDonorPath);
         const hydrated = await hydrateProjectState(
