@@ -1,6 +1,7 @@
 pub mod annotations;
 pub mod audio;
 pub mod code;
+pub mod decomp;
 pub mod graphics;
 pub mod loader;
 pub mod manifest;

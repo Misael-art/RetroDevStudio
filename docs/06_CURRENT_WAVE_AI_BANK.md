@@ -1,5 +1,23 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
 
+### Planejamento Programa REX — 2026-09-10
+
+A pedido do operador, o plano canônico `12_DECOMPILACAO_PAREADA_PLANO.md` foi ampliado com o Programa REX: 17 tickets (REX-00 a REX-16), dependências, contratos, corpus/holdout, migração SGDK 1.60/1.80/2.00→2.11, extração/editabilidade, patches, IR/nodes, jogo novo e expansão por plataformas. Prompt vigente: `PROMPT_AGENTE_RECONSTRUCAO_ROM.md`. É planejamento, não implementação ou promoção. Estimativa inicial de 24 semanas refere-se somente a um perfil MD delimitado e deve ser recalibrada após corpus/gates; não há prazo ou garantia universal. Primeiro trabalho do executor: baseline/proveniência/oráculos, incluindo mesma-ROM com input e UI. PR #61 permanece draft sob investigação. Não há autorização nova de merge, dependências ou envio externo de ROM. Host diagnose desta rodada: READY, fingerprint d68f75b76d036d7cd200befab0255bd9479604798bf9c0fcbea892c7ce2ceef1.
+
+
+### GUARD-SGDK-EQUIVALENCE-01 — aceite suspenso (2026-09-10)
+
+O usuário contestou a fidelidade da prévia importada; PR #61 permanece draft e não deve ser integrado como conversão fiel. Execução sem exceção e heartbeat não certificam preservação do jogo original. Os candidatos anteriores abaixo são históricos, não entrega final aceita.
+
+Referência padrão escolhida pelo usuário: `/mnt/sdcard/SGDKForge/SGDK_projects/HAMOOPIG [VER.001] [SGDK 211] [GEN] [ENGINE] [FIGHTING]/out/rom.bin`, 917504 bytes, SHA-256 `558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9`. Cópia imutável local e relatório em `/home/misael/RetroDevStudio/investigation-sgdk-equivalence-2026-09-10/`.
+
+Prova independente: exatamente essa ROM carregada no backend real do desktop, Genesis Plus GX v1.7.4 46a5521, 180 comandos de frame e 180 eventos recebidos, framebuffer 320x224. `hamoopig/backend-reference-180.png` mostra título completo, personagem, logo e textos, visualmente coerente com a imagem externa fornecida. Não é comparação pixel a pixel sincronizada, certificação de gameplay, desempenho ou carregamento via botão. Harness `backend-reference.py`; relatório `hamoopig/backend-reference.json`. Tentativas anteriores `same-rom-desktop.py` falharam: override de invoke não funciona porque a propriedade é não gravável; suas capturas/status não certificam carregamento.
+
+A prévia importada foi regenerada de recursos com lógica parcial, não corresponde aos bytes da referência. Próximos gates separados: (1) ROM idêntica, input e frames nos caminhos externo/interno; (2) migração de fonte SGDK preservando comportamento e origem; (3) fonte → IR/nodes → C com estados, paletas, planos e criação/liberação de sprites preservados; (4) métricas de decompilação pareadas com fonte/ELF. Recursos de estados alternativos não podem ser contabilizados como atores simultâneos; catálogo total não equivale a residência em VRAM.
+
+Compatibilidade 1.60/1.80/2.00 → 2.11 solicitada: pendente de fixtures e validação por versão; os dois projetos fornecidos já portados para 2.11 não demonstram migração automática dessas versões. Não substituir assets ausentes por arte/áudio inventados. Preservar doadores e créditos. Nenhuma promoção de Experimental.
+
+
 **Atualização ativa (2026-09-09 — GUARD-ANIM-01):** PR #57 integrada em `10d15f6` após CI verde. A prova anterior de framebuffer não preto não certificava gameplay: entrada Direita revelou `ADDRESS ERROR` do SGDK. Causa reproduzida: `SPR_setAnim(..., 1)` sem segunda linha de animação no atlas rescomp. Correção materializa sequências por linha, preserva tempos individuais e rejeita frames inexistentes. Teste oficial agora exige a cena verde conhecida após 60 frames com Direita pressionada: passou com 42.496 pixels de cena; o framebuffer antigo tinha zero. Não extrapolar esta prova dirigida para todos os jogos, nem para paridade de importações. Validação integral e integração desta correção ainda em andamento; #58/#59 seguem em revisão.
 
 
@@ -2018,3 +2036,13 @@ Preservar o pacote interno auditavel sem inflar status de release publica. A rod
   - **Stage mais legivel:** o canvas de runtime agora fica dentro de um palco dedicado com moldura, sombra e badge `320x224 @ Nx`, melhorando leitura espacial e sensacao de ferramenta final.
   - **Cobertura adicionada:** `src/App.test.tsx` agora valida o helper puro `getGameViewportScale` para garantir que a escala sempre caia em inteiros seguros.
   - **Validacao focada reexecutada no workspace atual:** `npx tsc --noEmit` OK, `npx eslint src/components/viewport/ViewportPanel.tsx src/App.test.tsx` OK e `npx vitest run src/App.test.tsx` OK (33 testes).
+
+
+### Revisão do guardião — 2026-09-10 (integração rastreada no PR #61)
+
+- #60 integrado em main `616abdbcceb787879a7a1f2071c46919ed71bb06`.
+- GUARD-DECOMP-DETERMINISM-01: Etapa A real passou; SMOKE/BLUE 14/14 objetos exatos por par e ROM idêntica em dois builds limpos; contagens nm 876/778. Original Taiketsu continua bloqueado por boot/registerState; não confundir com preview importado.
+- GUARD-IMPORT-RUNTIME-01: correção validada localmente em `c042ecf`. Antigo smoke aceitava ADDRESS ERROR como framebuffer não preto. Residência de sprites visíveis e tratamento de NULL corrigiram a prévia local: heartbeat 52→112, erro 0, 150 frames reais. Ainda **não é equivalência do gameplay original**; import mantém pontes/lógica não convertida.
+- Gates locais de `c042ecf`: host:certify READY, 604 frontend, 524 Rust, clippy completo, fmt, build desktop e Build & Run MD/SNES; input Right chegou à RAM da ROM MD. Integração somente após checks remotos verdes. Estado remoto final e hashes em `/home/misael/RetroDevStudio/verified-2026-09-10-c042ecf/evidence/provenance.json`; limitações e reprodução em LEIA-ME e Memory Bank. Nenhuma declaração de produto inteiro finalizado.
+
+- GUARD-SPRITE-PRIORITY-01: corrigir prioridade no argumento correto de TILE_ATTR (prioridade estava espelhando o sprite). Regressão negativa reproduzida em `c042ecf`; revalidação do candidato final rastreada no PR #61 e em `evidence/provenance.json`, mantendo o baseline anterior para comparação.
