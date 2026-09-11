@@ -6,6 +6,28 @@ pub struct RomHashes {
     pub sha1: String,
 }
 
+/// REX-02: contêiner da imagem. `plain_file` para dados crus; contêineres
+/// (zip/7z) não suportados nesta fatia geram erro explícito, nunca seleção
+/// arbitrária de membro.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct RomContainerInfo {
+    pub kind: String,
+    pub member: Option<String>,
+    pub note: String,
+}
+
+/// REX-02: um passo de normalização aplicado sobre os bytes originais, com
+/// proveniência por hash. `reversible = false` só quando não existe inverso
+/// demonstrado; desfazer verifica o `input_sha256` gravado.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct NormalizationStep {
+    pub name: String,
+    pub parameters: String,
+    pub input_sha256: String,
+    pub output_sha256: String,
+    pub reversible: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct RomHeader {
     pub console_name: String,
@@ -215,6 +237,10 @@ pub struct RomAnalysisManifest {
     pub stripped_header_bytes: usize,
     pub total_size: usize,
     pub hashes: RomHashes,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<RomContainerInfo>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub normalization: Vec<NormalizationStep>,
     pub header: RomHeader,
     pub mapper: String,
     pub special_chips: Vec<String>,
