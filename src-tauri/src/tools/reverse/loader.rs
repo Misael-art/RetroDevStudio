@@ -93,12 +93,32 @@ pub fn rex_identify_rom(rom_path: &Path) -> Result<RexRomIdentity, String> {
     rex_identify_bytes(&raw)
 }
 
-/// Desfaz a normalização passo a passo (ordem inversa), verificando a cadeia
-/// de hashes gravada antes de cada inversão. Restitui os bytes originais.
+/// Desfaz a normalização passo a passo (ordem inversa). Valida a identidade
+/// COMPLETA antes de produzir saída (REX-REV-03): os bytes de entrada devem
+/// corresponder ao `normalized_sha256`/`normalized_size` gravados (mesmo com
+/// zero passos — raw), cada inversão verifica o `input_sha256` do passo e o
+/// resultado final deve restituir `original_sha256`/`original_size`. Passos
+/// com nome desconhecido (ex.: manifests antigos com o interleave incorreto
+/// de 512 bytes) são rejeitados — nunca reinterpretados silenciosamente.
 pub fn rex_undo_normalization(
     identity: &RexRomIdentity,
     normalized: &[u8],
 ) -> Result<Vec<u8>, String> {
+    let input_sha256 = crate::core::rom_mastering::sha256_hex(normalized);
+    if input_sha256 != identity.normalized_sha256 {
+        return Err(format!(
+            "bytes de entrada nao correspondem a esta identidade: esperado \
+             normalized_sha256 {}, observado {input_sha256}",
+            identity.normalized_sha256
+        ));
+    }
+    if normalized.len() != identity.normalized_size {
+        return Err(format!(
+            "tamanho de entrada divergente: esperado {}, observado {}",
+            identity.normalized_size,
+            normalized.len()
+        ));
+    }
     let mut bytes = normalized.to_vec();
     for step in identity.normalization.iter().rev() {
         let current_sha256 = crate::core::rom_mastering::sha256_hex(&bytes);
@@ -110,10 +130,10 @@ pub fn rex_undo_normalization(
             ));
         }
         bytes = match step.name.as_str() {
-            "deinterleave_smd_512" => {
-                if !bytes.len().is_multiple_of(512) || bytes.is_empty() {
+            "deinterleave_smd_frame16k" => {
+                if !bytes.len().is_multiple_of(0x4000) || bytes.is_empty() {
                     return Err(format!(
-                        "impossivel reinterleave: tamanho {} nao e multiplo de 512",
+                        "impossivel reinterleave: tamanho {} nao e multiplo do frame de 0x4000",
                         bytes.len()
                     ));
                 }
@@ -128,10 +148,26 @@ pub fn rex_undo_normalization(
             }
             other => {
                 return Err(format!(
-                    "passo de normalizacao sem inverso registrado: '{other}'"
+                    "passo de normalizacao sem inverso registrado: '{other}'; manifesto \
+                     produzido por versao anterior nao e reinterpretado silenciosamente"
                 ))
             }
         };
+        let inverted_sha256 = crate::core::rom_mastering::sha256_hex(&bytes);
+        if inverted_sha256 != step.input_sha256 {
+            return Err(format!(
+                "cadeia de normalizacao inconsistente: resultado da inversao de '{}' nao \
+                 corresponde a input_sha256 (esperado {}, observado {inverted_sha256})",
+                step.name, step.input_sha256
+            ));
+        }
+    }
+    if crate::core::rom_mastering::sha256_hex(&bytes) != identity.original_sha256
+        || bytes.len() != identity.original_size
+    {
+        return Err(
+            "restauracao nao confere com o arquivo original registrado na identidade".to_string(),
+        );
     }
     Ok(bytes)
 }
@@ -343,12 +379,13 @@ mod tests {
         assert_eq!(hashes.sha1.len(), 40);
     }
 
-    // ----- REX-02: identificação e normalização reversível -----
+    // ----- REX-02: identificação e normalização reversível (formato SMD
+    // padrão de 16 KiB conforme Genesis PlusGX loadrom.c) -----
 
-    /// Fixture sintética BYOR-safe: ROM MD raw com header canônico e fim de
-    /// ROM declarado coerente com o tamanho.
+    /// Fixture sintética BYOR-safe: ROM MD raw de 2 frames (32 KiB) com header
+    /// canônico e fim de ROM declarado coerente com o tamanho.
     fn synthetic_md_rom() -> Vec<u8> {
-        let mut rom = vec![0xA5u8; 0x4000];
+        let mut rom = vec![0xA5u8; 0x8000];
         rom[4..8].copy_from_slice(&0x0000_0200u32.to_be_bytes());
         rom[0x100..0x110].copy_from_slice(b"SEGA GENESIS    ");
         rom[0x150..0x159].copy_from_slice(b"REX02TEST");
@@ -357,36 +394,76 @@ mod tests {
         rom
     }
 
+    /// Construtor INDEPENDENTE do formato SMD padrão (16 KiB): primeira
+    /// metade de cada frame = bytes de posição ímpar, segunda = pares.
+    /// Não usa `interleave_smd` — é o golden externo da regressão REX-REV-01.
+    fn encode_standard_smd(original: &[u8]) -> Vec<u8> {
+        let mut smd = vec![0u8; 512];
+        for block in original.chunks_exact(0x4000) {
+            smd.extend(block.iter().skip(1).step_by(2));
+            smd.extend(block.iter().step_by(2));
+        }
+        smd
+    }
+
     #[test]
     fn rex02_identifies_raw_by_content_and_ignores_extension() {
         let rom = synthetic_md_rom();
         let expected_sha = crate::core::rom_mastering::sha256_hex(&rom);
-        for ext in ["bin", "gen", "md", "smd", "tmp"] {
-            let identity = rex_identify_bytes(&rom).expect("identificar raw");
-            assert_eq!(
-                identity.variant, "raw",
-                "extensão .{ext} não muda a variante"
-            );
-            assert_eq!(identity.original_sha256, expected_sha);
-            assert_eq!(identity.normalized_sha256, expected_sha);
-            assert!(identity.normalization.is_empty(), "raw não aplica passos");
-            assert_eq!(identity.container.kind, "plain_file");
-            assert_eq!(identity.header_console, "SEGA GENESIS");
+        let identity = rex_identify_bytes(&rom).expect("identificar raw");
+        assert_eq!(identity.variant, "raw");
+        assert_eq!(identity.original_sha256, expected_sha);
+        assert_eq!(identity.normalized_sha256, expected_sha);
+        assert!(identity.normalization.is_empty(), "raw não aplica passos");
+        assert_eq!(identity.container.kind, "plain_file");
+        assert_eq!(identity.header_console, "SEGA GENESIS");
+    }
+
+    /// Golden independente, mão-escrito: frame de 16 KiB cujo payload
+    /// original conhecido é 0x00..0xFF repetido; verifica a fórmula byte a
+    /// byte sem passar pelo nosso encoder.
+    #[test]
+    fn rex02_smd_deinterleave_matches_independent_golden() {
+        // ROM original: bytes 0x00..0xFF repetidos até 16 KiB, com header
+        // SEGA canônico em 0x100 (senão a identificação por conteúdo,
+        // corretamente, rejeita).
+        let mut original: Vec<u8> = (0..0x4000).map(|i| (i & 0xFF) as u8).collect();
+        original[0x100..0x110].copy_from_slice(b"SEGA GENESIS    ");
+        // Padrão SMD: frame[i] = original[2i+1]; frame[0x2000+i] = original[2i].
+        let mut frame = vec![0u8; 0x4000];
+        for i in 0..0x2000 {
+            frame[i] = original[2 * i + 1];
+            frame[0x2000 + i] = original[2 * i];
         }
+        let mut file = vec![0u8; 512];
+        file.extend_from_slice(&frame);
+
+        let identity = rex_identify_bytes(&file).expect("golden SMD deve ser identificado");
+        assert_eq!(identity.variant, "smd_interleaved_512");
+        assert_eq!(
+            identity.normalized_sha256,
+            crate::core::rom_mastering::sha256_hex(&original),
+            "normalização devolve o original do golden"
+        );
+        // Verificação byte a byte contra o golden escrito à mão.
+        let payload =
+            crate::tools::reverse::platform::deinterleave_smd(&file[512..]).expect("frames");
+        assert_eq!(payload, original);
     }
 
     #[test]
     fn rex02_smd_interleaved_round_trip_restores_original_sha() {
         let rom = synthetic_md_rom();
         let original_sha = crate::core::rom_mastering::sha256_hex(&rom);
-        let interleaved = interleave_smd(&rom);
+        // Golden independente (construtor externo), não o nosso encoder.
+        let interleaved = encode_standard_smd(&rom);
         assert_ne!(
             interleaved, rom,
             "fixture precisa realmente estar intercalada"
         );
 
         let identity = rex_identify_bytes(&interleaved).expect("identificar smd");
-        assert_eq!(identity.variant, "smd_interleaved");
+        assert_eq!(identity.variant, "smd_interleaved_512");
         assert_eq!(
             identity.original_sha256,
             crate::core::rom_mastering::sha256_hex(&interleaved)
@@ -395,9 +472,11 @@ mod tests {
             identity.normalized_sha256, original_sha,
             "normalização devolve exatamente a ROM original"
         );
-        assert_eq!(identity.normalization.len(), 1);
-        assert_eq!(identity.normalization[0].name, "deinterleave_smd_512");
-        assert!(identity.normalization[0].reversible);
+        assert_eq!(identity.normalization.len(), 2);
+        assert_eq!(identity.normalization[0].name, "strip_smd_header");
+        assert_eq!(identity.normalization[1].name, "deinterleave_smd_frame16k");
+        assert_eq!(identity.normalization[1].parameters, "frame=0x4000");
+        assert!(identity.normalization[1].reversible);
 
         let restored = rex_undo_normalization(&identity, &rom).expect("desfazer");
         assert_eq!(
@@ -409,41 +488,34 @@ mod tests {
             restored, interleaved,
             "undo é byte-exato contra o arquivo de origem"
         );
+
+        // Nosso encoder (payload, sem header) deve coincidir com o payload
+        // do golden independente.
+        assert_eq!(
+            crate::tools::reverse::platform::interleave_smd(&rom),
+            interleaved[512..],
+        );
     }
 
     #[test]
-    fn rex02_smd_with_512_header_round_trip_restores_full_file() {
+    fn rex02_smd_without_header_round_trip() {
         let rom = synthetic_md_rom();
-        let mut file = vec![0x77u8; 512];
-        file[8] = 0x03;
-        file.extend_from_slice(&interleave_smd(&rom));
-        let file_sha = crate::core::rom_mastering::sha256_hex(&file);
-
-        let identity = rex_identify_bytes(&file).expect("identificar smd com header");
-        assert_eq!(identity.variant, "smd_interleaved_512");
-        assert_eq!(identity.original_sha256, file_sha);
+        let file = encode_standard_smd(&rom)[512..].to_vec();
+        let identity = rex_identify_bytes(&file).expect("identificar smd sem header");
+        assert_eq!(identity.variant, "smd_interleaved");
         assert_eq!(
             identity.normalized_sha256,
             crate::core::rom_mastering::sha256_hex(&rom)
         );
-        assert_eq!(identity.normalization.len(), 2);
-        assert_eq!(identity.normalization[0].name, "strip_smd_header");
-        assert_eq!(identity.normalization[1].name, "deinterleave_smd_512");
-        assert_eq!(identity.detached_prefix.len(), 512);
-
-        // Undo recebe os bytes NORMALIZADOS e restitui o arquivo original
-        // (header de 512 bytes incluído).
+        assert_eq!(identity.normalization.len(), 1);
         let restored = rex_undo_normalization(&identity, &rom).expect("desfazer");
-        assert_eq!(
-            restored, file,
-            "undo byte-exato incluindo o header removido"
-        );
+        assert_eq!(restored, file);
     }
 
     #[test]
     fn rex02_byteswapped_round_trip_restores_original() {
         let rom = synthetic_md_rom();
-        let swapped = swap_bytes16(&rom).expect("tamanho par");
+        let swapped = crate::tools::reverse::platform::swap_bytes16(&rom).expect("tamanho par");
         let identity = rex_identify_bytes(&swapped).expect("identificar byteswapped");
         assert_eq!(identity.variant, "byteswapped16");
         assert_eq!(
@@ -471,30 +543,36 @@ mod tests {
     #[test]
     fn rex02_probable_smd_truncation_is_rejected_with_provable_signal() {
         let rom = synthetic_md_rom();
-        let mut interleaved = interleave_smd(&rom);
-        // Conteúdo reconhecido (blocos completos deinterleavam para o header
-        // SEGA) mas o último bloco está incompleto: truncamento provável.
+        let mut interleaved = encode_standard_smd(&rom);
+        // 2 frames completos reconhecidos + último frame incompleto.
         interleaved.truncate(interleaved.len() - 100);
         let error = rex_identify_bytes(&interleaved).expect_err("truncado deve falhar");
         assert!(error.contains("truncada"), "mensagem acionável: {error}");
-        assert!(error.contains("bloco de 512"), "detalhe do bloco: {error}");
+        assert!(error.contains("incompleto"), "detalhe do frame: {error}");
     }
 
     #[test]
     fn rex02_ambiguous_candidates_are_rejected_without_arbitrary_choice() {
-        // Pathológico por construção: raw tem "SEGA" em 0x100 e o
-        // deinterleave com header de 512 também produz "SEGA" em 0x100 —
-        // duas variantes casam. out[0x100+k] do candidato com header lê
-        // F[512 + 2k + 1]; offsets não colidem com o header raw.
-        let mut file = vec![0x41u8; 0x4000];
-        file[0x100..0x110].copy_from_slice(b"SEGA GENESIS    ");
-        let word = b"SEGA GENESIS    ";
-        for (k, byte) in word.iter().enumerate() {
-            file[512 + 2 * k + 1] = *byte;
-        }
+        // Pathológico por construção: byteswapped contém "SEGA" em 0x100 E o
+        // SMD com header de 512 deinterleava para "SEGA" em 0x100 — duas
+        // variantes casam, seleção arbitrária recusada.
+        let mut file = vec![0x41u8; 512 + 0x4000];
+        // swapped[0x100+k] = file[0x101+k^1...]: plantar pares trocados.
+        file[0x100] = b'E';
+        file[0x101] = b'S';
+        file[0x102] = b'A';
+        file[0x103] = b'G';
+        // deinterleave: out[2i] = payload[0x2000+i]; out[2i+1] = payload[i].
+        // out[0x100..0x104] = S,E,G,A <- payload[0x2080],payload[0x80],
+        // payload[0x2081],payload[0x81].
+        let payload_base = 512;
+        file[payload_base + 0x80] = b'E';
+        file[payload_base + 0x81] = b'A';
+        file[payload_base + 0x2000 + 0x80] = b'S';
+        file[payload_base + 0x2000 + 0x81] = b'G';
         let error = rex_identify_bytes(&file).expect_err("ambíguo deve falhar");
         assert!(error.contains("ambigua"), "mensagem acionável: {error}");
-        assert!(error.contains("raw") && error.contains("smd_interleaved_512"));
+        assert!(error.contains("byteswapped16") && error.contains("smd_interleaved_512"));
     }
 
     #[test]
@@ -516,15 +594,56 @@ mod tests {
         );
     }
 
+    /// Todas as fronteiras de tamanho retornam erro estruturado, sem panic
+    /// (REX-REV-02) — inclusive com assinatura SEGA presente.
+    #[test]
+    fn rex02_short_inputs_return_structured_error_without_panic() {
+        for len in [0x10F, 0x110, 0x11F, 0x1A8, 0x1FF] {
+            let mut short = vec![0u8; len];
+            if len >= 0x110 {
+                short[0x100..0x110].copy_from_slice(b"SEGA GENESIS    ");
+            }
+            let result = std::panic::catch_unwind(|| rex_identify_bytes(&short));
+            assert!(result.is_ok(), "panic em entrada de {len} bytes");
+            let error = result.unwrap().expect_err("{len} bytes deve falhar");
+            assert!(error.contains("pequena demais"), "{len}: {error}");
+        }
+        // 0x200 exatos com SEGA identificam como raw.
+        let mut minimal = vec![0u8; 0x200];
+        minimal[0x100..0x110].copy_from_slice(b"SEGA GENESIS    ");
+        let identity = rex_identify_bytes(&minimal).expect("0x200 com header deve identificar");
+        assert_eq!(identity.variant, "raw");
+        // SMD de só-header (sem frames) e byteswap ímpar: sem panic, erro.
+        let header_only = vec![0u8; 512];
+        assert!(rex_identify_bytes(&header_only).is_err());
+        let odd = vec![0u8; 0x201];
+        assert!(rex_identify_bytes(&odd).is_err());
+    }
+
+    /// Manifestos antigos com o passo do interleave incorreto (512 bytes) são
+    /// rejeitados — nunca reinterpretados silenciosamente (REX-REV-01/03).
+    #[test]
+    fn rex02_undo_rejects_legacy_step_name_without_silent_reinterpretation() {
+        let rom = synthetic_md_rom();
+        let mut identity = rex_identify_bytes(&encode_standard_smd(&rom)).expect("identificar");
+        for step in identity.normalization.iter_mut() {
+            if step.name == "deinterleave_smd_frame16k" {
+                step.name = "deinterleave_smd_512".to_string();
+            }
+        }
+        let error = rex_undo_normalization(&identity, &rom).expect_err("passo legado deve falhar");
+        assert!(error.contains("sem inverso registrado"), "{error}");
+    }
+
     #[test]
     fn rex02_load_rom_routes_smd_and_manifest_records_transform() {
         let rom = synthetic_md_rom();
         let path = temp_rom_path("rex02-smd", "smd");
-        std::fs::write(&path, interleave_smd(&rom)).expect("write smd");
+        std::fs::write(&path, encode_standard_smd(&rom)).expect("write smd");
 
         let loaded = load_rom(&path).expect("carregar smd");
         assert_eq!(loaded.target, "megadrive");
-        assert_eq!(loaded.stripped_header_bytes, 0);
+        assert_eq!(loaded.stripped_header_bytes, 512);
         assert_eq!(
             crate::core::rom_mastering::sha256_hex(&loaded.bytes),
             crate::core::rom_mastering::sha256_hex(&rom),
@@ -534,12 +653,57 @@ mod tests {
         let manifest = base_manifest(&loaded);
         let container = manifest.container.expect("container registrado");
         assert_eq!(container.kind, "plain_file");
-        assert!(container.note.contains("smd_interleaved"));
-        assert_eq!(manifest.normalization.len(), 1);
-        assert_eq!(manifest.normalization[0].name, "deinterleave_smd_512");
+        assert!(container.note.contains("smd_interleaved_512"));
+        assert_eq!(manifest.normalization.len(), 2);
+        assert_eq!(manifest.normalization[1].name, "deinterleave_smd_frame16k");
         // Hashes do manifesto cobrem os bytes normalizados (o que a análise vê).
         assert_eq!(manifest.hashes.sha1, compute_hashes(&rom).sha1);
 
         let _ = std::fs::remove_file(path);
+    }
+
+    // ----- Regressões da revisão independente (REX-REV-01/02/03, 2026-09-11)
+    // Adotadas de /home/misael/RetroDevStudio/review-rex-2026-09-11/REVIEW.md
+    // com asserções preservadas.
+    mod independent_review {
+        use super::*;
+
+        fn raw() -> Vec<u8> {
+            let mut b = vec![0u8; 0x8000];
+            b[0x100..0x110].copy_from_slice(b"SEGA GENESIS    ");
+            b
+        }
+
+        #[test]
+        fn review_standard_smd_is_recognized() {
+            let original = raw();
+            let smd = encode_standard_smd(&original);
+            let identity = rex_identify_bytes(&smd).expect("standard SMD must be identified");
+            assert_eq!(
+                identity.normalized_sha256,
+                crate::core::rom_mastering::sha256_hex(&original)
+            );
+        }
+
+        #[test]
+        fn review_truncated_header_returns_error_without_panic() {
+            let mut b = vec![0u8; 0x110];
+            b[0x100..0x110].copy_from_slice(b"SEGA GENESIS    ");
+            let result = std::panic::catch_unwind(|| rex_identify_bytes(&b));
+            assert!(result.is_ok(), "parser panicked on truncated input");
+            assert!(result.unwrap().is_err());
+        }
+
+        #[test]
+        fn review_undo_rejects_wrong_raw_bytes() {
+            let b = raw();
+            let identity = rex_identify_bytes(&b).unwrap();
+            let mut changed = b.clone();
+            changed[700] = 1;
+            assert!(
+                rex_undo_normalization(&identity, &changed).is_err(),
+                "undo accepted a different ROM"
+            );
+        }
     }
 }

@@ -83,44 +83,51 @@ impl MdIdentifyError {
     }
 }
 
-const SMD_BLOCK: usize = 512;
-const SMD_HALF: usize = SMD_BLOCK / 2;
+/// Frame de interleave SMD: 16 KiB, conforme o formato padrão (referência
+/// primária Genesis Plus GX `core/loadrom.c`, `deinterleave_block`).
+const SMD_FRAME: usize = 0x4000;
+const SMD_HALF: usize = SMD_FRAME / 2;
+const SMD_HEADER: usize = 512;
 
 /// Header SEGA presente em bytes normalizados (0x100..0x110 contém "SEGA").
 fn md_has_sega_header(bytes: &[u8]) -> bool {
     bytes.len() >= 0x110 && String::from_utf8_lossy(&bytes[0x100..0x110]).contains("SEGA")
 }
 
-/// Desfaz o interleave SMD: cada bloco de 512 bytes contribui os bytes de
-/// posição par para a primeira metade e os ímpares para a segunda.
+/// Desfaz o interleave SMD no formato padrão: dentro de cada frame de 16 KiB
+/// a primeira metade do dump guarda os bytes de posição ÍMPAR da ROM e a
+/// segunda metade os de posição PAR. Idêntico a `deinterleave_block` do
+/// Genesis Plus GX: `out[2i] = frame[0x2000 + i]; out[2i + 1] = frame[i]`.
 pub fn deinterleave_smd(payload: &[u8]) -> Option<Vec<u8>> {
-    if payload.len() < SMD_BLOCK || !payload.len().is_multiple_of(SMD_BLOCK) {
+    if payload.len() < SMD_FRAME || !payload.len().is_multiple_of(SMD_FRAME) {
         return None;
     }
     let mut out = vec![0u8; payload.len()];
-    for (out_block, in_block) in out.chunks_mut(SMD_BLOCK).zip(payload.chunks(SMD_BLOCK)) {
-        let (first, second) = out_block.split_at_mut(SMD_HALF);
-        for (index, byte) in in_block.iter().enumerate() {
-            if index % 2 == 0 {
-                first[index / 2] = *byte;
-            } else {
-                second[index / 2] = *byte;
-            }
+    for (frame_in, frame_out) in payload
+        .chunks_exact(SMD_FRAME)
+        .zip(out.chunks_exact_mut(SMD_FRAME))
+    {
+        for i in 0..SMD_HALF {
+            frame_out[i * 2] = frame_in[SMD_HALF + i];
+            frame_out[i * 2 + 1] = frame_in[i];
         }
     }
     Some(out)
 }
 
-/// Inverso exato de [`deinterleave_smd`]: reconstrói o dump intercalado.
-/// Consumido por `rex_undo_normalization` (loader) e por testes.
+/// Inverso exato de [`deinterleave_smd`]: reconstrói o dump intercalado no
+/// formato padrão (primeira metade do frame = bytes ímpares, segunda =
+/// pares). Consumido por `rex_undo_normalization` (loader) e por testes.
 #[allow(dead_code)]
 pub fn interleave_smd(normalized: &[u8]) -> Vec<u8> {
     let mut out = vec![0u8; normalized.len()];
-    for (in_block, out_block) in normalized.chunks(SMD_BLOCK).zip(out.chunks_mut(SMD_BLOCK)) {
-        let (first, second) = in_block.split_at(SMD_HALF);
-        for (index, pair) in first.iter().zip(second.iter()).enumerate() {
-            out_block[index * 2] = *pair.0;
-            out_block[index * 2 + 1] = *pair.1;
+    for (frame_in, frame_out) in normalized
+        .chunks_exact(SMD_FRAME)
+        .zip(out.chunks_exact_mut(SMD_FRAME))
+    {
+        for i in 0..SMD_HALF {
+            frame_out[SMD_HALF + i] = frame_in[i * 2];
+            frame_out[i] = frame_in[i * 2 + 1];
         }
     }
     out
@@ -145,58 +152,80 @@ fn smd_candidate(raw: &[u8], header_len: usize) -> Option<Vec<u8>> {
 }
 
 /// Identifica a variante MD por conteúdo e devolve os bytes normalizados.
-/// Regras: exatamente um candidato deve produzir header SEGA; mais de um é
-/// ambíguo (erro), nenhum está fora do perfil. Conteúdo reconhecido com bytes
-/// faltando no fim (bloco 512 incompleto) é erro de truncamento. O fim de ROM
-/// declarado no header NÃO é sinal de truncamento: dumps reais declaram
-/// endereços além do arquivo (HAMOOPIG declara 0xFFFFF para 0xE0000 bytes) —
-/// isso vira nota, via [`md_size_note`].
+/// Regras (alinhadas ao Genesis Plus GX `loadrom.c`): um dump SMD com header
+/// tem tamanho múltiplo de 512 com contagem ÍMPAR de blocos de 512 (o header
+/// extra torna a contagem ímpar) e o payload pós-header é efêmero em frames
+/// de 16 KiB; SEM header, o tamanho é múltiplo de 16 KiB. Em ambos, a ROM raw
+/// NÃO contém "SEGA" em 0x100 — se contém, é raw (precedência GPGX). Exatamente
+/// um candidato deve produzir header SEGA; mais de um é ambíguo (erro), nenhum
+/// está fora do perfil. Conteúdo reconhecido com o último frame de 16 KiB
+/// incompleto é erro de truncamento. O fim de ROM declarado no header NÃO é
+/// sinal de truncamento: dumps reais declaram endereços além do arquivo
+/// (HAMOOPIG declara 0xFFFFF para 0xE0000 bytes) — isso vira nota, via
+/// [`md_size_note`]. Entradas abaixo do header canônico de 0x200 bytes são
+/// rejeitadas antes de qualquer indexação de campo (REX-REV-02).
 pub fn identify_md(raw: &[u8]) -> Result<(MdVariant, Vec<u8>), MdIdentifyError> {
-    if raw.len() < 0x110 {
+    if raw.len() < 0x200 {
         return Err(MdIdentifyError::TooSmall);
     }
+    let sega_raw = md_has_sega_header(raw);
 
-    // Truncamento provável e verificável: prefixo de blocos completos
-    // reconhecido como SMD com bytes sobrando de um bloco incompleto.
-    if !raw.len().is_multiple_of(SMD_BLOCK) {
-        let floor = (raw.len() / SMD_BLOCK) * SMD_BLOCK;
-        for header_len in [0usize, SMD_BLOCK] {
-            if floor <= header_len {
+    // Truncamento provável e verificável: prefixo de frames completos de
+    // 16 KiB reconhecido como SMD com resto de frame incompleto no fim.
+    if !sega_raw {
+        for start in [0usize, SMD_HEADER] {
+            if raw.len() <= start {
                 continue;
             }
-            let Some(bytes) = deinterleave_smd(&raw[header_len..floor]) else {
+            let available_frames = (raw.len() - start) / SMD_FRAME;
+            if available_frames == 0 || (raw.len() - start).is_multiple_of(SMD_FRAME) {
+                continue;
+            }
+            let complete = start + available_frames * SMD_FRAME;
+            let Some(bytes) = deinterleave_smd(&raw[start..complete]) else {
                 continue;
             };
             if md_has_sega_header(&bytes) {
                 return Err(MdIdentifyError::Truncated(format!(
-                    "dump intercalado SMD termina no meio de um bloco de {SMD_BLOCK} bytes \
-                     ({} bytes sobrando após {} blocos completos)",
-                    raw.len() - floor,
-                    (floor - header_len) / SMD_BLOCK
+                    "dump intercalado SMD termina com frame de {SMD_FRAME:#x} bytes incompleto \
+                     ({} bytes além de {available_frames} frame(s) completo(s))",
+                    raw.len() - complete
                 )));
             }
         }
     }
 
     let mut candidates: Vec<(MdVariant, Vec<u8>)> = Vec::new();
-    if md_has_sega_header(raw) {
+    if sega_raw {
         candidates.push((MdVariant::Raw, raw.to_vec()));
     }
-    let derived: [Option<(MdVariant, Vec<u8>)>; 3] = [
-        smd_candidate(raw, 0).map(|bytes| (MdVariant::SmdInterleaved { header_len: 0 }, bytes)),
-        smd_candidate(raw, SMD_BLOCK).map(|bytes| {
-            (
-                MdVariant::SmdInterleaved {
-                    header_len: SMD_BLOCK,
-                },
-                bytes,
-            )
-        }),
-        swap_bytes16(raw).map(|bytes| (MdVariant::ByteSwapped16, bytes)),
-    ];
-    for (variant, bytes) in derived.into_iter().flatten() {
+    // SMD com header de 512: múltiplo de 512 com contagem ímpar (GPGX) E o
+    // deinterleave precisa produzir um header SEGA válido.
+    if !sega_raw && raw.len().is_multiple_of(SMD_HEADER) && (raw.len() / SMD_HEADER) % 2 == 1 {
+        if let Some(bytes) = smd_candidate(raw, SMD_HEADER) {
+            if md_has_sega_header(&bytes) {
+                candidates.push((
+                    MdVariant::SmdInterleaved {
+                        header_len: SMD_HEADER,
+                    },
+                    bytes,
+                ));
+            }
+        }
+    }
+    // SMD sem header: múltiplo exato de 16 KiB cujo deinterleave produz um
+    // header SEGA válido (extensão tolerante; GPGX só reconhece a forma com
+    // header, mas dumps sem header existem).
+    if !sega_raw && raw.len().is_multiple_of(SMD_FRAME) {
+        if let Some(bytes) = smd_candidate(raw, 0) {
+            if md_has_sega_header(&bytes) {
+                candidates.push((MdVariant::SmdInterleaved { header_len: 0 }, bytes));
+            }
+        }
+    }
+    if let Some(bytes) = swap_bytes16(raw) {
         if md_has_sega_header(&bytes) {
-            candidates.push((variant, bytes));
+            candidates.push((MdVariant::ByteSwapped16, bytes));
         }
     }
 
@@ -259,8 +288,8 @@ pub fn md_normalization_steps(
                 });
             }
             steps.push(NormalizationStep {
-                name: "deinterleave_smd_512".to_string(),
-                parameters: format!("block={SMD_BLOCK}"),
+                name: "deinterleave_smd_frame16k".to_string(),
+                parameters: format!("frame={SMD_FRAME:#x}"),
                 input_sha256: steps
                     .last()
                     .map(|step| step.output_sha256.clone())
