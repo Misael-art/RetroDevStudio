@@ -87,10 +87,12 @@ pub struct EquivalenceReport {
 }
 
 fn audio_stream(audio: &Option<AudioObservation>) -> Option<&str> {
+    // String vazia não é stream observado (REX-REV-04).
     audio
         .as_ref()
         .filter(|observation| observation.available)
         .and_then(|observation| observation.stream_sha256.as_deref())
+        .filter(|stream| !stream.is_empty())
 }
 
 fn distinct_framebuffer_count(report: &ParityReport) -> usize {
@@ -125,10 +127,21 @@ pub fn evaluate_identical_equivalence(
     let mut oracles = Vec::new();
     let mut gaps = Vec::new();
 
-    // Oráculo de cenário: sem frames comparáveis não existe veredito positivo.
-    let scenario_ok = reference.frames_run == candidate.frames_run
-        && reference.frames_run > 0
-        && reference.frame_hashes.len() == candidate.frame_hashes.len();
+    // Oráculo de cenário: contagens declaradas não são observação. Exige
+    // frames presentes correspondentes à contagem, identidade de ROM/core e
+    // capturas com o mesmo comprimento (REX-REV-04).
+    let observations_complete = |report: &ParityReport| {
+        report.frames_run > 0
+            && !report.frame_hashes.is_empty()
+            && report.frame_hashes.len() as u32 == report.frames_run
+            && !report.rom_sha256.is_empty()
+            && !report.core_label.is_empty()
+    };
+    let scenario_ok = observations_complete(reference)
+        && observations_complete(candidate)
+        && reference.frames_run == candidate.frames_run
+        && reference.frame_hashes.len() == candidate.frame_hashes.len()
+        && reference.core_label == candidate.core_label;
     oracles.push(OracleResult::new(
         "scenario",
         if scenario_ok {
@@ -137,11 +150,13 @@ pub fn evaluate_identical_equivalence(
             ORACLE_STATUS_FAIL
         },
         format!(
-            "referência {} frames / candidato {} frames; hashes {} vs {}",
+            "referência {} frames declarados / {} hashes observados; candidato {} declarados / {} observados; core '{}' vs '{}'",
             reference.frames_run,
-            candidate.frames_run,
             reference.frame_hashes.len(),
-            candidate.frame_hashes.len()
+            candidate.frames_run,
+            candidate.frame_hashes.len(),
+            reference.core_label,
+            candidate.core_label
         ),
     ));
 
@@ -175,10 +190,13 @@ pub fn evaluate_identical_equivalence(
         ),
     ));
 
-    // Estado final serializado pelo core.
+    // Estado final serializado pelo core; string vazia não é observação.
     oracles.push(OracleResult::new(
         "final_state",
-        if reference.final_state_sha256 == candidate.final_state_sha256 {
+        if reference.final_state_sha256.is_empty() || candidate.final_state_sha256.is_empty() {
+            gaps.push("estado final ausente em pelo menos um lado; não verificado".to_string());
+            ORACLE_STATUS_MISSING
+        } else if reference.final_state_sha256 == candidate.final_state_sha256 {
             ORACLE_STATUS_PASS
         } else {
             ORACLE_STATUS_FAIL
@@ -189,7 +207,9 @@ pub fn evaluate_identical_equivalence(
         ),
     ));
 
-    // Recursos em memória: união de regiões, comparação simétrica.
+    // Recursos em memória: união de regiões, comparação simétrica. O contrato
+    // da região (region_id e tamanho) faz parte da identidade — divergência
+    // rejeita mesmo com hash igual (REX-REV-04).
     let mut resource_failures = 0usize;
     let mut resource_missing = 0usize;
     let mut resource_details = Vec::new();
@@ -212,8 +232,19 @@ pub fn evaluate_identical_equivalence(
             .find(|region| region.label == label);
         match (expected, observed) {
             (Some(expected), Some(observed)) if expected.available && observed.available => {
+                if expected.region_id != observed.region_id || expected.size != observed.size {
+                    resource_failures += 1;
+                    gaps.push(format!(
+                        "região '{label}' com contrato divergente: region_id {}/{} tamanho {}/{}",
+                        expected.region_id, observed.region_id, expected.size, observed.size
+                    ));
+                    resource_details.push(format!("{label}: contrato divergente"));
+                    continue;
+                }
                 match (&expected.sha256, &observed.sha256) {
-                    (Some(expected_hash), Some(observed_hash)) => {
+                    (Some(expected_hash), Some(observed_hash))
+                        if !expected_hash.is_empty() && !observed_hash.is_empty() =>
+                    {
                         if expected_hash == observed_hash {
                             resource_details.push(format!("{label}: identica"));
                         } else {
@@ -742,5 +773,110 @@ mod tests {
         let parsed: InputScript = serde_json::from_str(&json).expect("parse");
         assert_eq!(parsed.frames.len(), 2);
         assert!(parsed.frames[1].start);
+    }
+
+    // ----- Regressões da revisão independente (REX-REV-04, 2026-09-11) -----
+    // Testes adotados do relatório /home/misael/RetroDevStudio/review-rex-
+    // 2026-09-11/REVIEW.md, com asserções preservadas.
+
+    #[test]
+    fn review_missing_observations_must_not_pass() {
+        let mut r = synthetic_report("aaa", vec![], vec![], "", Some("audio"));
+        r.frames_run = 180;
+        assert_ne!(
+            evaluate_identical_equivalence(&r, &r).verdict,
+            VERDICT_PASSED,
+            "empty framebuffer/regions/state accepted as observed equivalence"
+        );
+    }
+
+    #[test]
+    fn review_different_region_contract_must_not_pass() {
+        let r = synthetic_report(
+            "aaa",
+            vec![frame(0, "f", 10)],
+            vec![region("WRAM", 2, true, "h")],
+            "s",
+            Some("a"),
+        );
+        let mut c = r.clone();
+        c.observed_regions[0].region_id = 99;
+        c.observed_regions[0].size = 999;
+        assert_ne!(
+            evaluate_identical_equivalence(&r, &c).verdict,
+            VERDICT_PASSED
+        );
+    }
+
+    /// Frames declarados sem hashes correspondentes não são observação.
+    #[test]
+    fn declared_frame_count_without_hashes_is_not_evidence() {
+        let mut reference = synthetic_report(
+            "aaa",
+            vec![frame(0, "f0", 10), frame(1, "f1", 20)],
+            vec![region("WRAM", 1, true, "w")],
+            "state",
+            Some("audio"),
+        );
+        let mut candidate = reference.clone();
+        candidate.frame_hashes.clear();
+        candidate.frames_run = 2;
+        let report = evaluate_identical_equivalence(&reference, &candidate);
+        assert_eq!(report.verdict, VERDICT_REJECTED);
+
+        // E no próprio lado da referência: contagem inflada rejeita.
+        reference.frames_run = 5;
+        let report = evaluate_identical_equivalence(&reference, &reference);
+        assert_eq!(report.verdict, VERDICT_REJECTED);
+    }
+
+    /// Core diferente ou ausente é divergência de cenário, não igualdade.
+    #[test]
+    fn core_identity_mismatch_is_not_equivalence() {
+        let base = synthetic_report(
+            "aaa",
+            vec![frame(0, "f0", 10)],
+            vec![region("WRAM", 1, true, "w")],
+            "state",
+            Some("audio"),
+        );
+        let mut other_core = base.clone();
+        other_core.core_label = "PicoDrive 2.05".to_string();
+        assert_eq!(
+            evaluate_identical_equivalence(&base, &other_core).verdict,
+            VERDICT_REJECTED
+        );
+
+        let mut anonymous = base.clone();
+        anonymous.core_label = String::new();
+        assert_eq!(
+            evaluate_identical_equivalence(&base, &anonymous).verdict,
+            VERDICT_REJECTED
+        );
+    }
+
+    /// Estado final vazio é ausência de evidência (missing), nunca igualdade.
+    #[test]
+    fn empty_final_state_is_missing_not_equal() {
+        let reference = synthetic_report(
+            "aaa",
+            vec![frame(0, "f0", 10)],
+            vec![region("WRAM", 1, true, "w")],
+            "",
+            Some("audio"),
+        );
+        let candidate = synthetic_report(
+            "bbb",
+            vec![frame(0, "f0", 10)],
+            vec![region("WRAM", 1, true, "w")],
+            "",
+            Some("audio"),
+        );
+        let report = evaluate_identical_equivalence(&reference, &candidate);
+        assert_ne!(report.verdict, VERDICT_PASSED);
+        assert!(report
+            .gaps
+            .iter()
+            .any(|gap| gap.contains("estado final ausente")));
     }
 }
