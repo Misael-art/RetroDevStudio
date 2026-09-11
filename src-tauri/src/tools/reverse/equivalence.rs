@@ -128,12 +128,18 @@ pub fn evaluate_identical_equivalence(
     let mut gaps = Vec::new();
 
     // Oráculo de cenário: contagens declaradas não são observação. Exige
-    // frames presentes correspondentes à contagem, identidade de ROM/core e
-    // capturas com o mesmo comprimento (REX-REV-04).
+    // frames presentes correspondentes à contagem, índices na sequência
+    // canônica do harness (0..n-1), identidade de ROM/core e capturas com o
+    // mesmo comprimento (REX-REV-04 e re-revisão 2026-09-11).
     let observations_complete = |report: &ParityReport| {
         report.frames_run > 0
             && !report.frame_hashes.is_empty()
             && report.frame_hashes.len() as u32 == report.frames_run
+            && report
+                .frame_hashes
+                .iter()
+                .enumerate()
+                .all(|(index, frame)| frame.frame_index == index as u32)
             && !report.rom_sha256.is_empty()
             && !report.core_label.is_empty()
     };
@@ -160,7 +166,9 @@ pub fn evaluate_identical_equivalence(
         ),
     ));
 
-    // Oráculo de comportamento: igualdade por frame.
+    // Oráculo de comportamento: igualdade por frame. O índice do frame faz
+    // parte da identidade da observação — mesma posição com índice divergente
+    // é divergência, não equivalência (re-revisão 2026-09-11).
     let limit = reference
         .frame_hashes
         .len()
@@ -170,7 +178,9 @@ pub fn evaluate_identical_equivalence(
     for index in 0..limit {
         let expected = &reference.frame_hashes[index];
         let observed = &candidate.frame_hashes[index];
-        if expected.framebuffer_sha256 != observed.framebuffer_sha256 {
+        if expected.frame_index != observed.frame_index
+            || expected.framebuffer_sha256 != observed.framebuffer_sha256
+        {
             behavior_mismatches += 1;
             if first_mismatch.is_none() {
                 first_mismatch = Some(expected.frame_index);
@@ -221,6 +231,13 @@ pub fn evaluate_identical_equivalence(
         .collect();
     labels.sort_unstable();
     labels.dedup();
+    if labels.is_empty() {
+        // Nenhuma região observada em nenhum lado: ausência de evidência,
+        // nunca pass (re-revisão 2026-09-11).
+        resource_missing += 1;
+        gaps.push("nenhuma região de memória observada nos dois lados; não verificada".to_string());
+        resource_details.push("sem observações de memória".to_string());
+    }
     for label in labels {
         let expected = reference
             .observed_regions
@@ -852,6 +869,58 @@ mod tests {
         assert_eq!(
             evaluate_identical_equivalence(&base, &anonymous).verdict,
             VERDICT_REJECTED
+        );
+    }
+
+    // ----- Regressões da re-revisão (2026-09-11) -----
+
+    #[test]
+    fn rereview_empty_region_list_is_missing() {
+        let r = synthetic_report(
+            "aaa",
+            vec![frame(0, "f", 10)],
+            vec![],
+            "state",
+            Some("audio"),
+        );
+        assert_ne!(
+            evaluate_identical_equivalence(&r, &r).verdict,
+            VERDICT_PASSED
+        );
+    }
+
+    #[test]
+    fn rereview_frame_indices_must_match() {
+        let r = synthetic_report(
+            "aaa",
+            vec![frame(0, "f", 10)],
+            vec![region("WRAM", 2, true, "w")],
+            "state",
+            Some("audio"),
+        );
+        let mut c = r.clone();
+        c.frame_hashes[0].frame_index = 999;
+        assert_ne!(
+            evaluate_identical_equivalence(&r, &c).verdict,
+            VERDICT_PASSED
+        );
+    }
+
+    /// Sequência de índices não canônica (ex.: duplicada) na própria captura
+    /// não é observação válida do harness.
+    #[test]
+    fn rereview_non_canonical_index_sequence_is_rejected() {
+        let mut r = synthetic_report(
+            "aaa",
+            vec![frame(0, "f0", 10), frame(0, "f1", 20)],
+            vec![region("WRAM", 1, true, "w")],
+            "state",
+            Some("audio"),
+        );
+        r.frames_run = 2;
+        assert_ne!(
+            evaluate_identical_equivalence(&r, &r).verdict,
+            VERDICT_PASSED
         );
     }
 
