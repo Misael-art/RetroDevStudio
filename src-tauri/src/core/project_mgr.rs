@@ -24873,7 +24873,6 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             now_unix, record_scenario_run, ScenarioRunRecord, SCENARIO_VERDICT_PASSED,
         };
         use crate::tools::reverse::loader::{rex_identify_bytes, rex_identify_rom};
-        use crate::tools::reverse::platform::interleave_smd;
 
         let test_name = "rex02_md_references_identified_by_content_with_reversible_normalization";
         let artifact_root = validation_artifact_dir("rex-md-identification");
@@ -24944,14 +24943,20 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
                 assert_eq!(probe.original_sha256, rom_sha);
             }
 
-            // 3) round-trip SMD sobre bytes reais: intercalar (encode) ->
-            //    identificar -> normalizar == original -> desfazer == arquivo.
-            let interleaved = interleave_smd(&rom_bytes);
+            // 3) round-trip SMD sobre bytes reais com construção
+            //    INDEPENDENTE do formato padrão 16 KiB (não usa o encoder do
+            //    produto): primeira metade do frame = bytes ímpares, segunda
+            //    = pares, com header de 512 bytes (REX-REV-01).
+            let mut interleaved = vec![0u8; 512];
+            for block in rom_bytes.chunks_exact(0x4000) {
+                interleaved.extend(block.iter().skip(1).step_by(2));
+                interleaved.extend(block.iter().step_by(2));
+            }
             let encoded_path = artifact_root.join(format!("{label}-interleaved.smd"));
             fs::write(&encoded_path, &interleaved).expect("write interleaved probe");
             let smd_identity = rex_identify_bytes(&interleaved)
                 .unwrap_or_else(|error| panic!("{test_name}: smd probe {label}: {error}"));
-            assert_eq!(smd_identity.variant, "smd_interleaved");
+            assert_eq!(smd_identity.variant, "smd_interleaved_512");
             assert_eq!(
                 smd_identity.normalized_sha256, rom_sha,
                 "normalização do .smd sintético devolve a ROM de referência"

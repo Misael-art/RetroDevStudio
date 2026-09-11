@@ -15,6 +15,10 @@ Prova independente em cópia isolada de git archive: **83 testes existentes pass
 Preservados código do executor, corpus e ROMs. Nenhum merge. Revisão não reexecutou suíte completa, UI desktop ou host:certify; não certifica release. Próximo: corrigir REX-REV-01..05 com negativos independentes e gates no destino antes de prosseguir à extração REX-04.
 
 
+### Programa REX — REX-REV-01..05 corrigidos (2026-09-11)
+
+Cinco achados do aceite reprovado corrigidos com regressões do revisor adotadas verbatim: SMD no formato padrão 16 KiB (GPGX `deinterleave_block`, golden independente, passo `deinterleave_smd_frame16k`; manifests antigos rejeitados), identificação exige 0x200 bytes sem panic em nenhum entrypoint, `rex_undo_normalization` valida identidade completa (entrada/cadeia/saída — raw alterado rejeita), oráculos de equivalência exigem observação completa e contrato de região (region_id/size), e a prova de UI agora usa o caminho do controle visível "Carregar ROM" (`__RDS_E2E__.loadRomForEmulation`), controles Pausar/Step, teclado do produto e canvas real do app com 4/4 checkpoints byte-idênticos ao backend + auto-teste negativo (exit 1) + hash do binário. Gates no HEAD: Rust 557/36, frontend 601/6, provas reais passando.
+
 ### Programa REX — REX-02 executado (2026-09-11)
 
 Identificação MD por conteúdo e normalização reversível entregues em `codex/rex-02-normalizacao` (base PR #62): variantes raw/smd(±512)/byteswap16 com passos de `NormalizationStep` hash-por-passo no manifesto, `rex_undo_normalization` byte-exato, truncamento provável como erro e divergência header×tamanho como nota (evidência real: HAMOOPIG 0xFFFFF vs 0xE0000). 12 testes unitários + prova real nas duas referências com round-trip SMD em bytes reais; run `rex02-md-identification-v1` no ledger. Contêineres zip/7z continuam não suportados (erro explícito, sem dependência nova). Próximo: REX-04 (extração visual organizada).

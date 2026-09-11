@@ -15,6 +15,18 @@ Prova independente em cópia isolada de git archive: **83 testes existentes pass
 Preservados código do executor, corpus e ROMs. Nenhum merge. Revisão não reexecutou suíte completa, UI desktop ou host:certify; não certifica release. Próximo: corrigir REX-REV-01..05 com negativos independentes e gates no destino antes de prosseguir à extração REX-04.
 
 
+### Programa REX — correções da revisão independente REX-REV-01..05 (2026-09-11)
+
+Todos os cinco achados do aceite reprovado foram corrigidos e reprovados com testes; regressões do revisor adotadas verbatim na suíte (com asserções preservadas):
+
+- **REV-01 (SMD 16 KiB):** `deinterleave_smd`/`interleave_smd` reimplementados no formato padrão (frame de 0x4000; primeira metade = bytes ímpares, segunda = pares), idêntico a `deinterleave_block` do Genesis Plus GX `core/loadrom.c`; detecção alinhada ao GPGX (header de 512 ⇒ múltiplo de 512 com contagem ímpar; sem header ⇒ múltiplo de 0x4000; "SEGA" raw em 0x100 tem precedência; deinterleave precisa produzir header SEGA — forma sozinha não identifica). Golden independente mão-escrito + construtor externo nos testes e na prova real (o encoder do produto deixou de ser padrão de si mesmo). Passo renomeado para `deinterleave_smd_frame16k` (frame=0x4000); manifests antigos com o passo de 512 são rejeitados sem reinterpretar.
+- **REV-02 (parsing seguro):** `identify_md` exige 0x200 bytes (header canônico) antes de qualquer indexação; entradas curtas com "SEGA" retornam erro estruturado sem panic, cobrindo todas as fronteiras (0x10F/0x110/0x1A8/0x1FF/0x200; SMD só-header; byteswap ímpar) nos dois entrypoints.
+- **REV-03 (undo com identidade):** `rex_undo_normalization` valida `normalized_sha256`/`normalized_size` da entrada (inclusive raw, zero passos), `input_sha256` após cada inversão e `original_sha256`/`original_size` no fim; byte alterado ⇒ erro, nunca Ok.
+- **REV-04 (oráculos, na branch `rex-00-oraculos`/PR #62 `cc88bb3`):** cenário exige frames presentes correspondentes às contagens + ROM/core não vazios e iguais; estado final vazio é missing; audio com stream vazio não é observado; regiões comparam `region_id` e `size` (contrato divergente rejeita mesmo com hash igual).
+- **REV-05 (UI real):** `App.tsx` expõe `__RDS_E2E__.loadRomForEmulation` (o mesmo caminho do controle visível "Carregar ROM", sem o diálogo nativo indrivável); a prova carrega por esse caminho, avança os 180 frames pelo botão visível "Step 1 frame" após clicar em "Pausar" (transições de estado dos botões assertadas), input entra pelo manipulador de teclado do produto (ArrowRight/Enter → keyToJoypad) e os pixels vêm do canvas real `viewport-game-canvas` — 4/4 checkpoints byte-idênticos ao backend, com SHA-256 do binário no relatório. Auto-teste negativo: expectativa corrompida ⇒ exit 1. O probe antigo de IPC foi preservado como `backend-ipc-proof.py`, com rótulo próprio.
+
+Gates no HEAD das correções: Rust 557 passed/36 ignored (incl. 5 regressões do revisor), frontend 601/6, tsc/lint/clippy/fmt/check:tree OK; app debug rebuildado com o hook. Runs novos no ledger (`rex00-*`, `rex02-md-identification-v1` pós-correção). Evidências UI em `/home/misael/RetroDevStudio/rex-evidence-2026-09-10/desktop-ui/` e `desktop-ui-negative/`.
+
 ### Programa REX — REX-02 executado: identificação MD reversível (2026-09-11)
 
 Branch `codex/rex-02-normalizacao` (base `codex/rex-00-oraculos`, PR #62). O loader MD agora identifica a variante física **por conteúdo** (extensão ignorada) e normaliza de forma reversível:
