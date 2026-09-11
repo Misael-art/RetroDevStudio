@@ -1,5 +1,16 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
 
+### Programa REX — REX-02 executado: identificação MD reversível (2026-09-11)
+
+Branch `codex/rex-02-normalizacao` (base `codex/rex-00-oraculos`, PR #62). O loader MD agora identifica a variante física **por conteúdo** (extensão ignorada) e normaliza de forma reversível:
+
+- **Variantes suportadas:** raw (`.bin`/`.md`/`.gen` — mesmo layout), `.smd` intercalado em blocos de 512 bytes com e sem header de 512, e byteswap 16. Contêineres zip/7z/gzip: erro explícito de não-suportado (nenhuma dependência nova aprovada; matrix REX 3 trata empacotamento como onda contínua).
+- **Transformações com proveniência:** `NormalizationStep` (nome, parâmetros, input/output SHA-256, reversível) e `RomContainerInfo` entraram no `RomAnalysisManifest` (e no contrato TS opcional); `rex_identify_rom`/`rex_undo_normalization` dão a API pública — desfazer verifica a cadeia de hashes e restitui o arquivo original byte a byte.
+- **Semântica de truncamento calibrada por evidência real:** o HAMOOPIG declara fim de ROM em 0xFFFFF com arquivo de 0xE0000 bytes — fim-de-ROM além do arquivo é comum em dumps reais e ficou **nota** (`md_size_note`), não erro. Truncamento provável (conteúdo SMD reconhecido com bloco final incompleto) é erro acionável. Ambíguo (duas variantes com header plausível, fixture patológica por construção) é erro sem escolha arbitrária.
+- **Provas:** 12 testes unitários (fixtures sintéticas por variante, round-trip por SHA, truncado provável, ambíguo, fora de perfil, independência de extensão, roteamento via `load_rom` com manifesto). Prova real `#[ignore]` com as duas referências: identificadas raw por conteúdo (SHAs `558bea6c…`/`3967996a…`), extensões erradas (`.smd`/`.gen`/`.tmp`) identificam idêntico, e round-trip SMD sobre bytes reais é byte-exato. Run `rex02-md-identification-v1` no ledger com lacunas registradas (contêineres, SRAM/EEPROM, mapeamentos). Evidências: `target-test/validation/rex-md-identification/` e `/home/misael/RetroDevStudio/rex-evidence-2026-09-10/rex02-identification/`.
+
+**Limites:** identificar/normalizar não é extrair nem editar (REX-04+); SRAM/EEPROM, regiões e mappers continuam não inventariados; contêineres exigem seleção explícita de membro quando existirem.
+
 ### Programa REX — primeira fatia REX-00/01/03 executada (2026-09-10)
 
 Branch `codex/rex-00-oraculos` (base `codex/import-decomp-review` `a75fd30`, PR #61 — CI verde no head, segue draft). Entregue e medida a fatia de baseline/oráculos/ledger, sem anunciar recuperação que não existe:

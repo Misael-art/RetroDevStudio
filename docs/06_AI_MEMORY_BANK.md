@@ -1,5 +1,9 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Programa REX — REX-02 executado (2026-09-11)
+
+Identificação MD por conteúdo e normalização reversível entregues em `codex/rex-02-normalizacao` (base PR #62): variantes raw/smd(±512)/byteswap16 com passos de `NormalizationStep` hash-por-passo no manifesto, `rex_undo_normalization` byte-exato, truncamento provável como erro e divergência header×tamanho como nota (evidência real: HAMOOPIG 0xFFFFF vs 0xE0000). 12 testes unitários + prova real nas duas referências com round-trip SMD em bytes reais; run `rex02-md-identification-v1` no ledger. Contêineres zip/7z continuam não suportados (erro explícito, sem dependência nova). Próximo: REX-04 (extração visual organizada).
+
 ### Programa REX — REX-00/01/03 executados (2026-09-10)
 
 Primeira fatia do executor entregue em `codex/rex-00-oraculos` (base `a75fd30`): oráculos de equivalência (`tools/reverse/equivalence.rs`, `rex-equivalence/v1`) sobre o parity harness, ledger v2 (`decomp-ledger/v2` com corpus por conteúdo, capacidades por perfil e runs de cenário append-only, migração v1→v2 testada) e matriz de capacidades MD honesta (nada `verified_for_profile`). Provas medidas no host READY: HAMOOPIG mesma-ROM 180 frames com input definido — determinismo só entre power-ons frescos, veredito `indeterminate` porque o core não expõe VRAM/SRAM (missing registrado), e **savestate restore não é fiel ao power-on** (achado novo); negativo Taiketsu — prévia regenerada com 12.620 px não pretos e heartbeat rejeitada pelos oráculos (150/180 frames divergentes, WRAM divergente); UI desktop real (tauri-driver) com 4/4 checkpoints byte-idênticos ao backend. Evidências duráveis em `/home/misael/RetroDevStudio/rex-evidence-2026-09-10/`; ledger em `~/.retrodev/decomp_work/ledger.json`. Nada disso promove superfície nem fecha GUARD-SGDK-EQUIVALENCE-01 (que agora tem reprodução formal do negativo). Próximo: REX-02/04.
