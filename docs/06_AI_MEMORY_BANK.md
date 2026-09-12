@@ -1,5 +1,14 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Re-revisão 2026-09-12 — REV-04 aceito; REV-05 parcial
+
+Revisados b09772a / 87108bb e HEAD documental 7873886. Host diagnose READY. **REV-04: 15 testes focados passaram**, incluindo regiões vazias, índices divergentes e sequência não canônica. Aceite local desses achados; não equivalência universal.
+
+**REV-05 ainda não prova entrega aceita:** o handler atualiza lastSentJoypad antes de emulatorSendInput e ignora resposta estruturada ok:false (só captura Promise rejection). Probe com handler real extraído/transpilado e backend recusando retornou right:true, erro null, predicado do harness aprovado. Isso comprova falso positivo do oráculo, não falha espontânea do runtime. Solicitação, confirmação e consumo não devem compartilhar rótulo. Corrigir ACK ok:true correlacionado à sequência/sessão; cobrir recusado, pendente, resposta tardia e reset entre cargas. Manter prova de teclado e canvas real, mas repetir o positivo com confirmação antes de cada Step.
+
+Evidências duráveis: `/home/misael/RetroDevStudio/review-rex-2026-09-12/REVIEW.md`, `input-ack-probe.cjs`, `input-ack-probe.json`. PR #62 checks principais verdes; PR #63 em novo HEAD 7873886 com checks ainda em execução na consulta. Nenhum merge. Sem alterações de produto; sem reexecução de UI real, suíte integral ou host:certify nesta revisão. Classificação Experimental/fatias iniciais.
+
+
 ### Re-revisão REX — 2026-09-11: aceite parcial de d3e8f11
 
 REX-REV-01/02/03 corrigidos no escopo testado: SMD padrão, parsing de header curto e undo com identidade. Execução independente do núcleo reverso: **94 passed / 1 ignored**, incluindo as cinco regressões anteriores. Host diagnose READY. PR #62 cc88bb3 e #63 d3e8f11 com checks validate/linux-validate/desktop-smoke verdes consultados; nenhum merge realizado.
@@ -26,7 +35,11 @@ Prova independente em cópia isolada de git archive: **83 testes existentes pass
 Preservados código do executor, corpus e ROMs. Nenhum merge. Revisão não reexecutou suíte completa, UI desktop ou host:certify; não certifica release. Próximo: corrigir REX-REV-01..05 com negativos independentes e gates no destino antes de prosseguir à extração REX-04.
 
 
-### Re-revisão REX — REV-04/05 fechados (2026-09-11, rodada 2)
+### Re-revisão REX — REV-04 fechado, REV-05 REABERTO (rodada 3, 2026-09-12)
+
+REV-05 **não está fechado**. A rodada 3 reproduziu novo falso positivo: `lastSentJoypad` era gravado antes do IPC e só `.catch()` era tratado, mas `emulator_send_input` sinaliza falha por valor resolvido `{ok:false}` — logo os 180/180 mediam passagem pelo handler, não entrega aceita. Corrigido separando `lastJoypadRequest` (intenção) de `lastJoypadAck` (só com `ok:true`), com correlação por sequência monotônica que descarta ack atrasado; `lastJoypadSendError` passa a `{seq, message}` e cobre `ok:false`. 5 testes novos em `editorStore.test.ts`. Limitação registrada: sem session id no contrato IPC, ack cruzando recarga de ROM não é detectável. Falta o harness aguardar o ack antes de avançar frame e ganhar negativos de envio recusado/pendente — até lá, entrega de input NÃO certificada. Classificação segue Experimental.
+
+### Re-revisão REX — rodada 2 (2026-09-11), parcialmente superada pela rodada 3
 
 REV-04: regiões vazias = missing; frame_index comparado por posição + sequência canônica 0..n-1 (probes do revisor adotados). REV-05: mapeamento campo→código de tecla corrigido (bug raiz: `start`/`right` comparados contra `Enter`/`ArrowRight`), teclado nativo WebDriver com codepoints, observação do produto via `lastSentJoypad` no store (180/180 observações de joypad por frame conferem, 2 press/2 release; a coincidência de framebuffer com o backend é 166/180 — a janela de boot 0..13 é excluída e não discrimina input, ver achado do efeito de estado), auto-teste negativo detecta ausência de input (exit 1). Achados novos: recarga quente ≠ power-on (14 frames; protocolo agora warm-up → pause → stop → load startPaused), loop livre iniciava frames fantasma pausado (gate adicionado), efeito de ordem do core invalida WRAM A/B como oráculo (corroboração apenas). Gates: Rust 560/36, frontend 601/6.
 

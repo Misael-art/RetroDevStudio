@@ -48,6 +48,7 @@ import {
 import {
   useEditorStore,
   type EditorWorkspace,
+  type JoypadObservation,
 } from "./core/store/editorStore";
 import {
   clearSceneDraft,
@@ -1443,12 +1444,15 @@ type AutomationApi = {
     options?: { startPaused?: boolean }
   ) => Promise<boolean>;
   pauseEmulator: () => boolean;
-  /** Observação do caminho de input do produto: último estado de joypad
-   * enviado pelo manipulador de teclado e erro de envio, se houver.
+  /** Observação do caminho de input do produto. `lastJoypadRequest` é apenas
+   * intenção registrada antes do IPC; a prova de entrega é `lastJoypadAck`,
+   * gravado somente quando o backend responde `ok: true` para aquela mesma
+   * sequência. Asserções de E2E devem usar o ack, nunca a request.
    * E2E / QA. */
   getLastInputObservation: () => {
-    lastSentJoypad: Record<string, boolean> | null;
-    lastJoypadSendError: string | null;
+    lastJoypadRequest: JoypadObservation | null;
+    lastJoypadAck: JoypadObservation | null;
+    lastJoypadSendError: { seq: number; message: string } | null;
   };
   /** Para o emulador pelo mesmo caminho do controle visível "Parar",
    * desligando o runtime do core — a carga seguinte parte de power-on real.
@@ -3824,7 +3828,8 @@ export default function App() {
       getLastInputObservation: () => {
         const state = useEditorStore.getState();
         return {
-          lastSentJoypad: state.lastSentJoypad,
+          lastJoypadRequest: state.lastJoypadRequest,
+          lastJoypadAck: state.lastJoypadAck,
           lastJoypadSendError: state.lastJoypadSendError,
         };
       },

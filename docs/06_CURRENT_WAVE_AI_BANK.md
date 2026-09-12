@@ -1,5 +1,14 @@
 # 06 - CURRENT WAVE AI BANK (Wave S+)
 
+### Re-revisão 2026-09-12 — REV-04 aceito; REV-05 parcial
+
+Revisados b09772a / 87108bb e HEAD documental 7873886. Host diagnose READY. **REV-04: 15 testes focados passaram**, incluindo regiões vazias, índices divergentes e sequência não canônica. Aceite local desses achados; não equivalência universal.
+
+**REV-05 ainda não prova entrega aceita:** o handler atualiza lastSentJoypad antes de emulatorSendInput e ignora resposta estruturada ok:false (só captura Promise rejection). Probe com handler real extraído/transpilado e backend recusando retornou right:true, erro null, predicado do harness aprovado. Isso comprova falso positivo do oráculo, não falha espontânea do runtime. Solicitação, confirmação e consumo não devem compartilhar rótulo. Corrigir ACK ok:true correlacionado à sequência/sessão; cobrir recusado, pendente, resposta tardia e reset entre cargas. Manter prova de teclado e canvas real, mas repetir o positivo com confirmação antes de cada Step.
+
+Evidências duráveis: `/home/misael/RetroDevStudio/review-rex-2026-09-12/REVIEW.md`, `input-ack-probe.cjs`, `input-ack-probe.json`. PR #62 checks principais verdes; PR #63 em novo HEAD 7873886 com checks ainda em execução na consulta. Nenhum merge. Sem alterações de produto; sem reexecução de UI real, suíte integral ou host:certify nesta revisão. Classificação Experimental/fatias iniciais.
+
+
 ### Re-revisão REX — 2026-09-11: aceite parcial de d3e8f11
 
 REX-REV-01/02/03 corrigidos no escopo testado: SMD padrão, parsing de header curto e undo com identidade. Execução independente do núcleo reverso: **94 passed / 1 ignored**, incluindo as cinco regressões anteriores. Host diagnose READY. PR #62 cc88bb3 e #63 d3e8f11 com checks validate/linux-validate/desktop-smoke verdes consultados; nenhum merge realizado.
@@ -26,7 +35,9 @@ Prova independente em cópia isolada de git archive: **83 testes existentes pass
 Preservados código do executor, corpus e ROMs. Nenhum merge. Revisão não reexecutou suíte completa, UI desktop ou host:certify; não certifica release. Próximo: corrigir REX-REV-01..05 com negativos independentes e gates no destino antes de prosseguir à extração REX-04.
 
 
-### Programa REX — REX-REV-04/05 fechados na re-revisão (2026-09-11, rodada 2)
+### Programa REX — REX-REV-04 fechado; REV-05 REABERTO na rodada 3 (2026-09-11/12)
+
+> **Correção de registro (2026-09-12):** o título original desta seção dizia "REX-REV-04/05 fechados". A rodada 3 da re-revisão derrubou o fechamento do REV-05 — ver a subseção "Rodada 3" abaixo. O REV-04 permanece aceito no escopo dos casos corrigidos.
 
 Os dois achados remanescentes da re-revisão foram corrigidos com oráculos que não dependem de pressupostos não verificados:
 
@@ -34,6 +45,27 @@ Os dois achados remanescentes da re-revisão foram corrigidos com oráculos que 
 - **REV-05 (input/UI):** o bug raiz era o mapeamento — campos do JoypadState (`start`/`right`) comparados contra códigos de tecla (`Enter`/`ArrowRight`); zero teclas eram emitidas. Agora: mapeamento campo→código explícito (KEY_MAP do produto invertido), teclas simultâneas, **ações WebDriver de teclado nativas** (codepoints Unicode; fallback sintético declarado), cliques nativos W3C (hit-testing), confirmação **por observação do produto** — `editorStore.lastSentJoypad`/`lastJoypadSendError` registrados pelo manipulador de teclado e expostos em `__RDS_E2E__.getLastInputObservation` — com as 180 verificações por frame, contagens 2 press/2 release exatas e auto-teste negativo que suprime teclas e exige zero transições (exit 1).
 - **Achados novos medidos:** (1) recarga em core quente (`emulator_load_rom` sem stop) NÃO equivale a power-on — 14 frames iniciais com conteúdo inexistente na timeline fresca; o protocolo passou a ser warm-up → pause → **stop (power-off real)** → carga `startPaused`; (2) o loop livre do produto iniciava 1-2 frames fantasma mesmo com sessão pausada — gate `pausedRef` adicionado em `startEmulatorLoop`; (3) WRAM entre passagens consecutivas carrega efeito de ordem do core no processo — registro A/B mantido como corroboração, não como oráculo; (4) no título do HAMOOPIG o efeito de input é de ESTADO (WRAM input `c5f5dba8…` ≠ ociosa `7b10c5b4…`), não de framebuffer — timelines ociosa e com input registradas por frame no backend.
 - **Resultado:** positivo com 180/180 observações por frame, 166/180 frames coincidindo com a timeline backend (janela de boot 0..13 documentada), WRAM A/B registrada; negativo com teclas suprimidas detectado (exit 1). Gates no HEAD: Rust 560/36, frontend 601/6, tsc/lint/clippy/fmt/check:tree OK; app rebuildado com hash no relatório.
+
+#### Rodada 3 (2026-09-12): REV-05 reaberto — a observação media intenção, não entrega
+
+A re-revisão independente reproduziu um **novo falso positivo** e o aceite do REV-05 foi retirado. Confirmado por leitura direta do código nos dois lados:
+
+- `ViewportPanel.tsx` gravava `lastSentJoypad` **antes** de `emulatorSendInput`, incondicionalmente.
+- O único tratamento era `.catch()`, que só dispara em *rejection* de Promise.
+- `emulator_send_input` (`lib.rs`) sinaliza falha por **valor resolvido** `{ ok: false }` — lock envenenado ou erro de `set_joypad`. O `catch` era código morto para o modo de falha real.
+
+Consequência: os 180/180 provavam que o handler rodou e formou a intenção correta; **não** provavam aceitação pelo emulador. Injetando `{ok:false}`, a observação seguia `right:true` com erro `null` e o harness aceitava. É a **mesma classe** do bug raiz original do REV-05 — asserção sobre algo adjacente à verdade; a rodada 2 corrigiu a instância e não a classe.
+
+**Correção aplicada (escopo: ack + sequência, sem sessão):**
+
+- O store passa a distinguir `lastJoypadRequest` (intenção, pré-IPC) de `lastJoypadAck` (**única prova de entrega**, gravado só com `ok: true`). `lastJoypadSendError` vira `{ seq, message }` e cobre tanto `ok:false` quanto exceção.
+- Correlação por **sequência monotônica**: um ack cuja `seq` não é a da solicitação corrente é descartado, de modo que confirmação atrasada de transição anterior não seja aceita como a atual.
+- `__RDS_E2E__.getLastInputObservation` expõe os três campos; asserções de E2E devem usar o **ack**, nunca a request.
+- Cobertura: 5 testes em `editorStore.test.ts` — intenção sem confirmação, ack da seq corrente, ack atrasado descartado, `ok:false` sem ack com erro registrado, solicitação pendente não herda ack.
+
+**Limitação conhecida e deliberada:** não há identificador de sessão em nenhum dos lados (nem no store, nem em `emulator_load_rom`). A correlação protege contra ack atrasado *dentro* de uma carga; um ack cruzando uma recarga de ROM não é detectável sem introduzir session id no contrato IPC, o que foi mantido fora deste escopo.
+
+**Pendente para fechar REV-05:** o harness `desktop-ui-proof.py` ainda precisa aguardar o ack daquela transição antes de avançar o frame, e ganhar negativos com teclas presentes e envio recusado/pendente. Enquanto isso não for reexecutado contra a UI real, **REV-05 permanece aberto** e a entrega de input não está certificada.
 
 ### Programa REX — correções da revisão independente REX-REV-01..05 (2026-09-11)
 

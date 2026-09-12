@@ -1029,3 +1029,62 @@ describe("contrato de historico undo/redo", () => {
     expect(useEditorStore.getState().redoStack).toHaveLength(1);
   });
 });
+
+// ── Observação de input: request vs ack (REV-05) ─────────────────────────────
+
+describe("observação de joypad correlacionada por sequência", () => {
+  beforeEach(() => {
+    useEditorStore.setState({
+      lastJoypadRequest: null,
+      lastJoypadAck: null,
+      lastJoypadSendError: null,
+    });
+  });
+
+  it("registra a intenção sem confirmá-la", () => {
+    useEditorStore.getState().recordJoypadRequest(1, { right: true });
+
+    const state = useEditorStore.getState();
+    expect(state.lastJoypadRequest).toEqual({ seq: 1, joypad: { right: true } });
+    // O ponto do REV-05: solicitar não é entregar.
+    expect(state.lastJoypadAck).toBeNull();
+  });
+
+  it("confirma apenas o ack da sequência corrente", () => {
+    useEditorStore.getState().recordJoypadRequest(1, { right: true });
+    useEditorStore.getState().recordJoypadAck(1, { right: true });
+
+    expect(useEditorStore.getState().lastJoypadAck).toEqual({ seq: 1, joypad: { right: true } });
+  });
+
+  it("descarta ack atrasado de uma transição anterior", () => {
+    useEditorStore.getState().recordJoypadRequest(1, { right: true });
+    useEditorStore.getState().recordJoypadRequest(2, { right: false });
+    // Ack da seq 1 chegando depois que a seq 2 já foi solicitada.
+    useEditorStore.getState().recordJoypadAck(1, { right: true });
+
+    expect(useEditorStore.getState().lastJoypadAck).toBeNull();
+  });
+
+  it("um envio recusado (ok:false) não produz ack e registra erro", () => {
+    useEditorStore.getState().recordJoypadRequest(1, { right: true });
+    useEditorStore.getState().recordJoypadSendError(1, "emulator_send_input retornou ok: false");
+
+    const state = useEditorStore.getState();
+    expect(state.lastJoypadAck).toBeNull();
+    expect(state.lastJoypadSendError).toEqual({
+      seq: 1,
+      message: "emulator_send_input retornou ok: false",
+    });
+  });
+
+  it("uma solicitação pendente limpa o erro anterior sem herdar o ack", () => {
+    useEditorStore.getState().recordJoypadRequest(1, { right: true });
+    useEditorStore.getState().recordJoypadSendError(1, "recusado");
+    useEditorStore.getState().recordJoypadRequest(2, { left: true });
+
+    const state = useEditorStore.getState();
+    expect(state.lastJoypadSendError).toBeNull();
+    expect(state.lastJoypadAck).toBeNull();
+  });
+});

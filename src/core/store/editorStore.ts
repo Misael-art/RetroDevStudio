@@ -101,17 +101,30 @@ export interface ActiveBrush {
   tileIndex?: number;
 }
 
+/** Observação de joypad correlacionada por sequência monotônica, para que uma
+ * confirmação atrasada não seja confundida com a da transição corrente. */
+export interface JoypadObservation {
+  seq: number;
+  joypad: Record<string, boolean>;
+}
+
 export interface StoreState {
   activeProjectDir: string;
   activeProjectName: string;
   activeTarget: "megadrive" | "snes";
   activeScenePath: string;
   emulatorLoaded: boolean;
-  /** Último estado de joypad efetivamente enviado ao emulador pelo caminho
-   * de teclado do produto (observabilidade para E2E/QA). null = nada enviado
-   * desde a abertura. */
-  lastSentJoypad: Record<string, boolean> | null;
-  lastJoypadSendError: string | null;
+  /** Última INTENÇÃO de joypad formada pelo caminho de teclado do produto,
+   * registrada antes do IPC. Prova que o handler rodou — NÃO prova entrega.
+   * null = nada solicitado desde a abertura. */
+  lastJoypadRequest: JoypadObservation | null;
+  /** Última intenção CONFIRMADA pelo backend (`ok: true`). Este é o único
+   * campo que demonstra entrega aceita pelo emulador. Acks cuja sequência não
+   * corresponde à solicitação corrente são descartados (ack atrasado). */
+  lastJoypadAck: JoypadObservation | null;
+  /** Falha da última solicitação: `ok: false` (resolve normal da IPC) ou
+   * exceção. Correlacionado por sequência. */
+  lastJoypadSendError: { seq: number; message: string } | null;
   selectedEntityId: string | null;
   /** ID da camada ativa no LayerPanel. null = sem camada selecionada. */
   activeLayerId: string | null;
@@ -213,8 +226,9 @@ export interface StoreActions {
   undo: () => void;
   redo: () => void;
   setEmulPaused: (paused: boolean) => void;
-  setLastSentJoypad: (joypad: Record<string, boolean>) => void;
-  setLastJoypadSendError: (error: string) => void;
+  recordJoypadRequest: (seq: number, joypad: Record<string, boolean>) => void;
+  recordJoypadAck: (seq: number, joypad: Record<string, boolean>) => void;
+  recordJoypadSendError: (seq: number, message: string) => void;
   setViewportZoom: (zoom: number) => void;
   resetViewportZoom: () => void;
   setProjectSourceKind: (kind: string) => void;
@@ -778,11 +792,20 @@ export const useEditorStore = create<EditorState>((set) => ({
     }),
 
   emulPaused: false,
-  lastSentJoypad: null,
+  lastJoypadRequest: null,
+  lastJoypadAck: null,
   lastJoypadSendError: null,
   setEmulPaused: (paused) => set({ emulPaused: paused }),
-  setLastSentJoypad: (joypad) => set({ lastSentJoypad: joypad, lastJoypadSendError: null }),
-  setLastJoypadSendError: (error) => set({ lastJoypadSendError: error }),
+  recordJoypadRequest: (seq, joypad) =>
+    set({ lastJoypadRequest: { seq, joypad }, lastJoypadSendError: null }),
+  recordJoypadAck: (seq, joypad) =>
+    set((state) =>
+      // Só confirma o ack da solicitação corrente. Um ack que chega depois de
+      // uma transição mais nova refere-se a estado obsoleto e é descartado.
+      state.lastJoypadRequest?.seq === seq ? { lastJoypadAck: { seq, joypad } } : {},
+    ),
+  recordJoypadSendError: (seq, message) =>
+    set((state) => (state.lastJoypadRequest?.seq === seq ? { lastJoypadSendError: { seq, message } } : {})),
 
   viewportZoom: 1.75,
   setViewportZoom: (zoom) =>
