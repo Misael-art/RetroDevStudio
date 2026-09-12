@@ -107,6 +107,11 @@ export interface StoreState {
   activeTarget: "megadrive" | "snes";
   activeScenePath: string;
   emulatorLoaded: boolean;
+  /** Último estado de joypad efetivamente enviado ao emulador pelo caminho
+   * de teclado do produto (observabilidade para E2E/QA). null = nada enviado
+   * desde a abertura. */
+  lastSentJoypad: Record<string, boolean> | null;
+  lastJoypadSendError: string | null;
   selectedEntityId: string | null;
   /** ID da camada ativa no LayerPanel. null = sem camada selecionada. */
   activeLayerId: string | null;
@@ -208,6 +213,8 @@ export interface StoreActions {
   undo: () => void;
   redo: () => void;
   setEmulPaused: (paused: boolean) => void;
+  setLastSentJoypad: (joypad: Record<string, boolean>) => void;
+  setLastJoypadSendError: (error: string) => void;
   setViewportZoom: (zoom: number) => void;
   resetViewportZoom: () => void;
   setProjectSourceKind: (kind: string) => void;
@@ -771,7 +778,11 @@ export const useEditorStore = create<EditorState>((set) => ({
     }),
 
   emulPaused: false,
+  lastSentJoypad: null,
+  lastJoypadSendError: null,
   setEmulPaused: (paused) => set({ emulPaused: paused }),
+  setLastSentJoypad: (joypad) => set({ lastSentJoypad: joypad, lastJoypadSendError: null }),
+  setLastJoypadSendError: (error) => set({ lastJoypadSendError: error }),
 
   viewportZoom: 1.75,
   setViewportZoom: (zoom) =>

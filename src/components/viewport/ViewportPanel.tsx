@@ -1728,6 +1728,10 @@ export default function ViewportPanel({
   const startEmulatorLoop = useCallback(
     (logStartup: boolean) => {
       if (!emulatorLoaded || loopStartingRef.current || stopLoopRef.current) return;
+      // Sessão carregada pausada não inicia o loop livre: o primeiro frame só
+      // executa via controle visível (Step/Retomar). Sem este gate, uma carga
+      // programática pausada teria frames fantasma antes da primeira ação.
+      if (pausedRef.current) return;
 
       const token = loopTokenRef.current + 1;
       loopTokenRef.current = token;
@@ -2012,7 +2016,12 @@ export default function ViewportPanel({
 
       event.preventDefault();
       joypadRef.current = updated;
-      emulatorSendInput(updated).catch(() => {});
+      useEditorStore.getState().setLastSentJoypad({ ...updated });
+      emulatorSendInput(updated).catch((sendError: unknown) => {
+        useEditorStore
+          .getState()
+          .setLastJoypadSendError(sendError instanceof Error ? sendError.message : String(sendError));
+      });
     }
 
     function onKeyUp(event: KeyboardEvent) {
@@ -2020,7 +2029,12 @@ export default function ViewportPanel({
       if (!updated) return;
 
       joypadRef.current = updated;
-      emulatorSendInput(updated).catch(() => {});
+      useEditorStore.getState().setLastSentJoypad({ ...updated });
+      emulatorSendInput(updated).catch((sendError: unknown) => {
+        useEditorStore
+          .getState()
+          .setLastJoypadSendError(sendError instanceof Error ? sendError.message : String(sendError));
+      });
     }
 
     window.addEventListener("keydown", onKeyDown);

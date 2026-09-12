@@ -26,6 +26,10 @@ Prova independente em cópia isolada de git archive: **83 testes existentes pass
 Preservados código do executor, corpus e ROMs. Nenhum merge. Revisão não reexecutou suíte completa, UI desktop ou host:certify; não certifica release. Próximo: corrigir REX-REV-01..05 com negativos independentes e gates no destino antes de prosseguir à extração REX-04.
 
 
+### Re-revisão REX — REV-04/05 fechados (2026-09-11, rodada 2)
+
+REV-04: regiões vazias = missing; frame_index comparado por posição + sequência canônica 0..n-1 (probes do revisor adotados). REV-05: mapeamento campo→código de tecla corrigido (bug raiz: `start`/`right` comparados contra `Enter`/`ArrowRight`), teclado nativo WebDriver com codepoints, observação do produto via `lastSentJoypad` no store (180/180 frames confirmados, 2 press/2 release), auto-teste negativo detecta ausência de input (exit 1). Achados novos: recarga quente ≠ power-on (14 frames; protocolo agora warm-up → pause → stop → load startPaused), loop livre iniciava frames fantasma pausado (gate adicionado), efeito de ordem do core invalida WRAM A/B como oráculo (corroboração apenas). Gates: Rust 560/36, frontend 601/6.
+
 ### Programa REX — REX-REV-01..05 corrigidos (2026-09-11)
 
 Cinco achados do aceite reprovado corrigidos com regressões do revisor adotadas verbatim: SMD no formato padrão 16 KiB (GPGX `deinterleave_block`, golden independente, passo `deinterleave_smd_frame16k`; manifests antigos rejeitados), identificação exige 0x200 bytes sem panic em nenhum entrypoint, `rex_undo_normalization` valida identidade completa (entrada/cadeia/saída — raw alterado rejeita), oráculos de equivalência exigem observação completa e contrato de região (region_id/size), e a prova de UI agora usa o caminho do controle visível "Carregar ROM" (`__RDS_E2E__.loadRomForEmulation`), controles Pausar/Step, teclado do produto e canvas real do app com 4/4 checkpoints byte-idênticos ao backend + auto-teste negativo (exit 1) + hash do binário. Gates no HEAD: Rust 557/36, frontend 601/6, provas reais passando.

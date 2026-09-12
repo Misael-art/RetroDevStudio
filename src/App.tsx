@@ -1435,8 +1435,25 @@ type AutomationApi = {
   openProject: (projectDir: string) => Promise<boolean>;
   /** Carrega uma ROM no emulador pelo mesmo caminho do controle visível
    * "Carregar ROM" (sem o diálogo nativo, que a automação não dirige).
+   * `options.startPaused` deixa a sessão pausada (frame 0 definido, sem o
+   * loop livre rodar) — usado para alinhar o protocolo de automação.
    * E2E / QA. */
-  loadRomForEmulation: (romPath: string) => Promise<boolean>;
+  loadRomForEmulation: (
+    romPath: string,
+    options?: { startPaused?: boolean }
+  ) => Promise<boolean>;
+  pauseEmulator: () => boolean;
+  /** Observação do caminho de input do produto: último estado de joypad
+   * enviado pelo manipulador de teclado e erro de envio, se houver.
+   * E2E / QA. */
+  getLastInputObservation: () => {
+    lastSentJoypad: Record<string, boolean> | null;
+    lastJoypadSendError: string | null;
+  };
+  /** Para o emulador pelo mesmo caminho do controle visível "Parar",
+   * desligando o runtime do core — a carga seguinte parte de power-on real.
+   * E2E / QA. */
+  stopEmulator: () => Promise<boolean>;
   /** Importa doador SGDK para `baseDir` e abre o projeto nativo gerado; devolve o caminho absoluto. */
   importSgdkProject: (
     projectName: string,
@@ -3053,7 +3070,10 @@ export default function App() {
   /** Mesma sequência do controle visível "Carregar ROM" após a escolha do
    * arquivo; usada também pela automação E2E, que não consegue dirigir o
    * diálogo nativo de arquivos do sistema operacional. */
-  async function loadRomIntoEmulator(romPath: string) {
+  async function loadRomIntoEmulator(
+    romPath: string,
+    options?: { startPaused?: boolean }
+  ) {
     const romDependency = await detectRomDependency(romPath);
     if (romDependency.dependency_id) {
       const ready = await ensureDependencies(
@@ -3086,7 +3106,7 @@ export default function App() {
     trackProductMetric({ kind: "rom_loaded" });
     logMessage("success", `ROM carregada: ${romPath}`);
     setActiveViewportTab("game");
-    setEmulPaused(false);
+    setEmulPaused(Boolean(options?.startPaused));
   }
 
   function handleEmulatorPause() {
@@ -3790,9 +3810,27 @@ export default function App() {
 
     window.__RDS_E2E__ = {
       openProject: (projectDir: string) => openProjectAtPath(projectDir, "E2E"),
-      loadRomForEmulation: async (romPath: string) => {
-        await loadRomIntoEmulator(romPath);
+      loadRomForEmulation: async (
+        romPath: string,
+        options?: { startPaused?: boolean }
+      ) => {
+        await loadRomIntoEmulator(romPath, options);
         return useEditorStore.getState().emulatorLoaded;
+      },
+      pauseEmulator: () => {
+        useEditorStore.getState().setEmulPaused(true);
+        return useEditorStore.getState().emulPaused;
+      },
+      getLastInputObservation: () => {
+        const state = useEditorStore.getState();
+        return {
+          lastSentJoypad: state.lastSentJoypad,
+          lastJoypadSendError: state.lastJoypadSendError,
+        };
+      },
+      stopEmulator: async () => {
+        await handleEmulatorStop();
+        return !useEditorStore.getState().emulatorLoaded;
       },
       importSgdkProject: async (projectName: string, baseDir: string, sgdkDonorPath: string) => {
         const result = await importSgdkProject(projectName, baseDir, sgdkDonorPath);

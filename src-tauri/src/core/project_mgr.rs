@@ -24526,13 +24526,14 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             equivalence.verdict, report_a.frames_run
         );
 
-        // Checkpoints de framebuffer em janela dedicada (mesmo script). O hash
-        // RGBA permite cruzar com a prova de UI desktop, cujo evento
-        // emulator://frame entrega os mesmos bytes convertidos por
-        // framebuffer_to_rgba.
+        // Janela dedicada (mesmo script) com hash RGBA de TODOS os frames —
+        // cruzamento completo com a prova de UI desktop, cujo canvas entrega
+        // os mesmos bytes convertidos por framebuffer_to_rgba — e PPM nos
+        // checkpoints.
         let checkpoint_frames: [u32; 4] = [59, 69, 129, 179];
         let mut checkpoint_artifacts = Vec::new();
         let mut checkpoint_rgba_hashes = serde_json::Map::new();
+        let mut all_frames_rgba_hashes = serde_json::Map::new();
         {
             let mut core_cp = EmulatorCore::new(None);
             core_cp.load_rom(&rom_path).unwrap_or_else(|error| {
@@ -24546,18 +24547,19 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
                 core_cp
                     .run_frame()
                     .unwrap_or_else(|error| panic!("{test_name}: frame {index}: {error}"));
+                let (buffer, size, format) = core_cp.get_framebuffer().expect("framebuffer");
+                let frame = framebuffer_to_rgba(&buffer, size, format);
+                let rgba_sha = crate::tools::reverse::decomp::rom_library::sha256_hex(&frame.rgba);
+                all_frames_rgba_hashes.insert(
+                    index.to_string(),
+                    serde_json::Value::String(rgba_sha.clone()),
+                );
                 if checkpoint_frames.contains(&index) {
-                    let (buffer, size, format) = core_cp.get_framebuffer().expect("framebuffer");
-                    let frame = framebuffer_to_rgba(&buffer, size, format);
                     let path = artifact_root.join(format!("checkpoint-{index:03}.ppm"));
                     write_rgba_ppm(&path, frame.width, frame.height, &frame.rgba);
                     checkpoint_artifacts.push(path);
-                    checkpoint_rgba_hashes.insert(
-                        index.to_string(),
-                        serde_json::Value::String(
-                            crate::tools::reverse::decomp::rom_library::sha256_hex(&frame.rgba),
-                        ),
-                    );
+                    checkpoint_rgba_hashes
+                        .insert(index.to_string(), serde_json::Value::String(rgba_sha));
                 }
             }
             core_cp.stop().expect("parar core de checkpoints");
@@ -24567,6 +24569,59 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             &rgba_hashes_path,
             &serde_json::Value::Object(checkpoint_rgba_hashes),
         );
+        let all_rgba_path = artifact_root.join("all-frames-rgba-hashes.json");
+        rex_write_json(
+            &all_rgba_path,
+            &serde_json::Value::Object(all_frames_rgba_hashes),
+        );
+
+        // Timeline backend OCIOSA (zero input, power-on fresco): permite ao
+        // harness de UI provar entrega de input — frames em que ocioso diverge
+        // do run com input só podem casar com o run com input se as teclas
+        // chegaram ao core pelo caminho do produto.
+        let idle_path = artifact_root.join("idle-all-frames-rgba-hashes.json");
+        let idle_wram_path = artifact_root.join("idle-final-wram-sha.json");
+        {
+            let idle_frames = vec![JoypadState::default(); 180];
+            let mut core_idle = EmulatorCore::new(None);
+            core_idle.load_rom(&rom_path).unwrap_or_else(|error| {
+                panic!("{test_name}: carregar ROM p/ timeline ociosa: {error}")
+            });
+            let mut idle_hashes = serde_json::Map::new();
+            for (index, joypad) in idle_frames.iter().enumerate() {
+                let index = index as u32;
+                core_idle
+                    .set_joypad(joypad.clone())
+                    .unwrap_or_else(|error| panic!("{test_name}: set_joypad ocioso: {error}"));
+                core_idle
+                    .run_frame()
+                    .unwrap_or_else(|error| panic!("{test_name}: frame ocioso {index}: {error}"));
+                let (buffer, size, format) = core_idle.get_framebuffer().expect("framebuffer");
+                let frame = framebuffer_to_rgba(&buffer, size, format);
+                idle_hashes.insert(
+                    index.to_string(),
+                    serde_json::Value::String(
+                        crate::tools::reverse::decomp::rom_library::sha256_hex(&frame.rgba),
+                    ),
+                );
+            }
+            // Hash final da WRAM ociosa (região 2, 0x10000 bytes): no título
+            // do HAMOOPIG o efeito do input é observável em ESTADO (WRAM),
+            // não no framebuffer — o canvas ocioso e com input são idênticos.
+            let (idle_wram, idle_wram_size) = core_idle
+                .read_memory(2, 0, 0x10000)
+                .expect("ler WRAM ociosa final");
+            core_idle.stop().expect("parar core ocioso");
+            rex_write_json(&idle_path, &serde_json::Value::Object(idle_hashes));
+            rex_write_json(
+                &idle_wram_path,
+                &serde_json::json!({
+                    "final_wram_sha256": crate::tools::reverse::decomp::rom_library::sha256_hex(&idle_wram),
+                    "final_wram_size": idle_wram_size,
+                    "note": "WRAM (região 2, 0x10000 bytes) ao final dos 180 frames ociosos"
+                }),
+            );
+        }
 
         let report_a_path = artifact_root.join("capture-a.json");
         rex_write_json(
@@ -24602,6 +24657,21 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
                 &rgba_hashes_path,
             )
             .expect("artifact rgba hashes"),
+            crate::tools::reverse::equivalence::artifact_ref(
+                "all-frames-rgba-hashes",
+                &all_rgba_path,
+            )
+            .expect("artifact all frames rgba hashes"),
+            crate::tools::reverse::equivalence::artifact_ref(
+                "idle-all-frames-rgba-hashes",
+                &idle_path,
+            )
+            .expect("artifact idle frames rgba hashes"),
+            crate::tools::reverse::equivalence::artifact_ref(
+                "idle-final-wram-sha",
+                &idle_wram_path,
+            )
+            .expect("artifact idle wram sha"),
         ];
         for checkpoint in &checkpoint_artifacts {
             artifacts.push(

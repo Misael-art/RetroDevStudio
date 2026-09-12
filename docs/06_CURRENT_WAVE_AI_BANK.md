@@ -26,6 +26,15 @@ Prova independente em cópia isolada de git archive: **83 testes existentes pass
 Preservados código do executor, corpus e ROMs. Nenhum merge. Revisão não reexecutou suíte completa, UI desktop ou host:certify; não certifica release. Próximo: corrigir REX-REV-01..05 com negativos independentes e gates no destino antes de prosseguir à extração REX-04.
 
 
+### Programa REX — REX-REV-04/05 fechados na re-revisão (2026-09-11, rodada 2)
+
+Os dois achados remanescentes da re-revisão foram corrigidos com oráculos que não dependem de pressupostos não verificados:
+
+- **REV-04 (oráculo):** lista de regiões vazia nos dois lados virá `missing` com lacuna registrada (nunca pass); o `frame_index` faz parte da identidade da observação — mesma posição com índice divergente reprova, e a sequência de índices da captura deve ser canônica 0..n-1. Probes da re-revisão adotados verbatim (`rereview_empty_region_list_is_missing`, `rereview_frame_indices_must_match`) + recusa de sequência não canônica. Commit `b09772a` no PR #62.
+- **REV-05 (input/UI):** o bug raiz era o mapeamento — campos do JoypadState (`start`/`right`) comparados contra códigos de tecla (`Enter`/`ArrowRight`); zero teclas eram emitidas. Agora: mapeamento campo→código explícito (KEY_MAP do produto invertido), teclas simultâneas, **ações WebDriver de teclado nativas** (codepoints Unicode; fallback sintético declarado), cliques nativos W3C (hit-testing), confirmação **por observação do produto** — `editorStore.lastSentJoypad`/`lastJoypadSendError` registrados pelo manipulador de teclado e expostos em `__RDS_E2E__.getLastInputObservation` — com as 180 verificações por frame, contagens 2 press/2 release exatas e auto-teste negativo que suprime teclas e exige zero transições (exit 1).
+- **Achados novos medidos:** (1) recarga em core quente (`emulator_load_rom` sem stop) NÃO equivale a power-on — 14 frames iniciais com conteúdo inexistente na timeline fresca; o protocolo passou a ser warm-up → pause → **stop (power-off real)** → carga `startPaused`; (2) o loop livre do produto iniciava 1-2 frames fantasma mesmo com sessão pausada — gate `pausedRef` adicionado em `startEmulatorLoop`; (3) WRAM entre passagens consecutivas carrega efeito de ordem do core no processo — registro A/B mantido como corroboração, não como oráculo; (4) no título do HAMOOPIG o efeito de input é de ESTADO (WRAM input `c5f5dba8…` ≠ ociosa `7b10c5b4…`), não de framebuffer — timelines ociosa e com input registradas por frame no backend.
+- **Resultado:** positivo com 180/180 observações por frame, 166/180 frames coincidindo com a timeline backend (janela de boot 0..13 documentada), WRAM A/B registrada; negativo com teclas suprimidas detectado (exit 1). Gates no HEAD: Rust 560/36, frontend 601/6, tsc/lint/clippy/fmt/check:tree OK; app rebuildado com hash no relatório.
+
 ### Programa REX — correções da revisão independente REX-REV-01..05 (2026-09-11)
 
 Todos os cinco achados do aceite reprovado foram corrigidos e reprovados com testes; regressões do revisor adotadas verbatim na suíte (com asserções preservadas):
