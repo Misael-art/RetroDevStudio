@@ -1452,7 +1452,8 @@ type AutomationApi = {
   getLastInputObservation: () => {
     lastJoypadRequest: JoypadObservation | null;
     lastJoypadAck: JoypadObservation | null;
-    lastJoypadSendError: { seq: number; message: string } | null;
+    lastJoypadSendError: { sessionId: string; seq: number; message: string } | null;
+    joypadSessionId: string | null;
   };
   /** Para o emulador pelo mesmo caminho do controle visível "Parar",
    * desligando o runtime do core — a carga seguinte parte de power-on real.
@@ -3831,6 +3832,7 @@ export default function App() {
           lastJoypadRequest: state.lastJoypadRequest,
           lastJoypadAck: state.lastJoypadAck,
           lastJoypadSendError: state.lastJoypadSendError,
+          joypadSessionId: state.joypadSessionId,
         };
       },
       stopEmulator: async () => {

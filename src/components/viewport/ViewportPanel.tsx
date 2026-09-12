@@ -2002,23 +2002,36 @@ export default function ViewportPanel({
     // rejeição, então tratar apenas o catch deixaria recusa passar como
     // sucesso. A sequência descarta ack atrasado de transição anterior.
     function sendJoypad(updated: JoypadState) {
+      // A sessão é capturada aqui, no fechamento do envio: se um stop ou uma
+      // recarga de ROM ocorrer antes da resolução, a resposta chega carregando
+      // a época antiga e é descartada pelo store.
+      const sessionId = useEditorStore.getState().joypadSessionId;
+      if (!sessionId) return;
       const seq = (joypadSeqRef.current += 1);
       const snapshot: Record<string, boolean> = { ...updated };
-      useEditorStore.getState().recordJoypadRequest(seq, snapshot);
+      useEditorStore.getState().recordJoypadRequest(sessionId, seq, snapshot);
       emulatorSendInput(updated).then(
         (result) => {
           if (result?.ok) {
-            useEditorStore.getState().recordJoypadAck(seq, snapshot);
+            useEditorStore.getState().recordJoypadAck(sessionId, seq, snapshot);
           } else {
             useEditorStore
               .getState()
-              .recordJoypadSendError(seq, result?.message || "emulator_send_input retornou ok: false");
+              .recordJoypadSendError(
+                sessionId,
+                seq,
+                result?.message || "emulator_send_input retornou ok: false",
+              );
           }
         },
         (sendError: unknown) => {
           useEditorStore
             .getState()
-            .recordJoypadSendError(seq, sendError instanceof Error ? sendError.message : String(sendError));
+            .recordJoypadSendError(
+              sessionId,
+              seq,
+              sendError instanceof Error ? sendError.message : String(sendError),
+            );
         },
       );
     }

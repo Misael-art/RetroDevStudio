@@ -65,7 +65,33 @@ Consequência: os 180/180 provavam que o handler rodou e formou a intenção cor
 
 **Limitação conhecida e deliberada:** não há identificador de sessão em nenhum dos lados (nem no store, nem em `emulator_load_rom`). A correlação protege contra ack atrasado *dentro* de uma carga; um ack cruzando uma recarga de ROM não é detectável sem introduzir session id no contrato IPC, o que foi mantido fora deste escopo.
 
-**Pendente para fechar REV-05:** o harness `desktop-ui-proof.py` ainda precisa aguardar o ack daquela transição antes de avançar o frame, e ganhar negativos com teclas presentes e envio recusado/pendente. Enquanto isso não for reexecutado contra a UI real, **REV-05 permanece aberto** e a entrega de input não está certificada.
+#### Rodada 3 — fechamento: isolamento por sessão e reexecução pela UI real
+
+**Isolamento por sessão (exigência do revisor).** Avaliada primeiro a geração no frontend, ela se mostrou suficiente e o contrato Rust/TS **não** foi alterado: a época é capturada no fechamento do envio e reconferida na resolução, logo um ack que atravesse stop/recarga carrega a época antiga e é descartado. Um eco do backend não acrescentaria garantia — quem define a época da carga é o próprio frontend. O ciclo de vida ficou ancorado em `setEmulatorLoaded` (6 call sites auditados, todas transições reais), de modo que parar ou carregar outra ROM invalida sessão, request e ack sem depender de call site.
+
+**Cobertura determinística:** 10 testes em `editorStore.test.ts`, incluindo envio recusado (`ok:false`), pendente, ack atrasado e ack de sessão anterior.
+
+**Reexecução pela UI real** (binário `856cc431…`, ROM HAMOOPIG `558bea6c…`, evidências em `rex-evidence-2026-09-12/`):
+
+| passagem | exit | veredito | acks |
+|---|---|---|---|
+| positivo | 0 | PASS | 3 confirmados (frames 60/70/130, seq 1/3/4, sessão `joypad-session-3`) |
+| negativo sem teclas | 1 | FAIL-AS-EXPECTED | 0 |
+| negativo sessão obsoleta | 1 | FAIL-AS-EXPECTED | 0 — recusado por `ack de sessão estranha: joypad-session-4 != joypad-session-3` |
+
+O negativo de sessão emite as teclas de verdade e recarrega a ROM, mantendo a UI viva: a reprovação é do **oráculo**, não de controle ausente.
+
+**Números honestos, e por que mudaram.** O positivo confirma **3 transições**, não 180. O "180/180" anterior contava uma verificação por frame, e em ~177 deles o estado esperado era `{}` — `all()` sobre dicionário vazio passa vacuamente. O roteiro tem 3 transições reais (press `start`, troca para `right`, release), com 2 press/2 release. A coincidência de framebuffer segue 166/180 e **não discrimina input** (o negativo marca os mesmos 166).
+
+**Limitações declaradas:**
+- O ack confirma a **última** transição de cada frame. No frame 70 há dois envios (solta `start`, aperta `right`); o store guarda só a solicitação corrente, então o ack da seq 2 é descartado pela seq 3 — daí a sequência 1/3/4. Envios intermediários dentro do mesmo frame não são confirmados individualmente.
+- O ack prova **aceitação pelo backend**, não consumo pelo jogo. O efeito de runtime é registrado à parte (`runtime_effect`: WRAM com input `c5f5dba8…` ≠ ociosa `7b10c5b4…`) e nunca derivado do ack.
+
+**Armadilha de build encontrada e neutralizada.** `cargo build` não executa o `beforeBuildCommand` do Tauri, então o binário embutia o `dist` antigo: um E2E lançado assim exercitaria o frontend anterior e poderia "passar" sem testar a correção. Verificação por `grep` no binário é inconclusiva (assets comprimidos — até marcadores existentes dão zero). O harness passou a ter preflight de **contrato em runtime** (`observation_contract`), que reprova se a superfície não expuser as chaves novas. O binário medido veio do caminho canônico `npm run build:debug`.
+
+**Gates no HEAD:** `host:certify` READY (Rust 560 passed/36 ignored, frontend 614 passed/3 skipped, SGDK e PVSnesLib oficiais), tsc/lint/check:tree OK.
+
+Classificação permanece **Experimental**; REX-04 não iniciado; nenhum merge.
 
 ### Programa REX — correções da revisão independente REX-REV-01..05 (2026-09-11)
 

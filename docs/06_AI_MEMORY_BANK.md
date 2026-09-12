@@ -35,9 +35,19 @@ Prova independente em cópia isolada de git archive: **83 testes existentes pass
 Preservados código do executor, corpus e ROMs. Nenhum merge. Revisão não reexecutou suíte completa, UI desktop ou host:certify; não certifica release. Próximo: corrigir REX-REV-01..05 com negativos independentes e gates no destino antes de prosseguir à extração REX-04.
 
 
-### Re-revisão REX — REV-04 fechado, REV-05 REABERTO (rodada 3, 2026-09-12)
+### Re-revisão REX — REV-04 e REV-05 fechados na rodada 3 (2026-09-12)
 
-REV-05 **não está fechado**. A rodada 3 reproduziu novo falso positivo: `lastSentJoypad` era gravado antes do IPC e só `.catch()` era tratado, mas `emulator_send_input` sinaliza falha por valor resolvido `{ok:false}` — logo os 180/180 mediam passagem pelo handler, não entrega aceita. Corrigido separando `lastJoypadRequest` (intenção) de `lastJoypadAck` (só com `ok:true`), com correlação por sequência monotônica que descarta ack atrasado; `lastJoypadSendError` passa a `{seq, message}` e cobre `ok:false`. 5 testes novos em `editorStore.test.ts`. Limitação registrada: sem session id no contrato IPC, ack cruzando recarga de ROM não é detectável. Falta o harness aguardar o ack antes de avançar frame e ganhar negativos de envio recusado/pendente — até lá, entrega de input NÃO certificada. Classificação segue Experimental.
+A rodada 3 reproduziu um novo falso positivo no REV-05: `lastSentJoypad` era gravado antes do IPC e só `.catch()` era tratado, mas `emulator_send_input` sinaliza falha por valor resolvido `{ok:false}` — logo os "180/180" mediam passagem pelo handler, não entrega aceita.
+
+Corrigido: `lastJoypadRequest` (intenção) separado de `lastJoypadAck` (gravado só com `ok:true`), correlacionados por **sessão de carga + sequência monotônica**; ack de seq anterior ou de sessão anterior é descartado. Sessão gerada no frontend — suficiente, pois a época é capturada no fechamento do envio e reconferida na resolução; contrato Rust/TS inalterado. Ciclo de vida ancorado em `setEmulatorLoaded`, invalidando tudo em stop/recarga. 10 testes em `editorStore.test.ts` (recusado, pendente, atrasado, sessão anterior).
+
+Reexecutado pela UI real (binário `856cc431…`, ROM `558bea6c…`): positivo PASS com 3 transições confirmadas por ack; negativo sem teclas e negativo de sessão obsoleta ambos FAIL-AS-EXPECTED, este último recusado por `ack de sessão estranha`. O positivo confirma **3 transições, não 180** — o número anterior contava verificações vazias que passavam vacuamente. Framebuffer segue 166/180 e não discrimina input.
+
+Limitações declaradas: o ack confirma a última transição de cada frame (envios intermediários no mesmo frame não são confirmados individualmente); e o ack prova aceitação pelo backend, **não** consumo pelo jogo — o efeito de runtime é registrado à parte.
+
+Armadilha de build registrada: `cargo build` não roda o `beforeBuildCommand`, e o binário embutia `dist` antigo; grep no binário é inconclusivo (assets comprimidos). O harness ganhou preflight de contrato em runtime e o binário medido veio de `npm run build:debug`.
+
+Gates: `host:certify` READY, Rust 560/36, frontend 614/3. Classificação segue **Experimental**; REX-04 não iniciado; nenhum merge.
 
 ### Re-revisão REX — rodada 2 (2026-09-11), parcialmente superada pela rodada 3
 
