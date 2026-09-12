@@ -515,6 +515,7 @@ export default function ViewportPanel({
   const activeTabRef = useRef(activeViewportTab);
   const pausedRef = useRef(emulPaused);
   const joypadRef = useRef<JoypadState>(JOYPAD_DEFAULT);
+  const joypadSeqRef = useRef(0);
   const audioContextRef = useRef<AudioContext | null>(null);
   const audioGainRef = useRef<GainNode | null>(null);
   const audioProcessorRef = useRef<ScriptProcessorNode | null>(null);
@@ -1728,6 +1729,10 @@ export default function ViewportPanel({
   const startEmulatorLoop = useCallback(
     (logStartup: boolean) => {
       if (!emulatorLoaded || loopStartingRef.current || stopLoopRef.current) return;
+      // Sessão carregada pausada não inicia o loop livre: o primeiro frame só
+      // executa via controle visível (Step/Retomar). Sem este gate, uma carga
+      // programática pausada teria frames fantasma antes da primeira ação.
+      if (pausedRef.current) return;
 
       const token = loopTokenRef.current + 1;
       loopTokenRef.current = token;
@@ -1992,6 +1997,45 @@ export default function ViewportPanel({
   useEffect(() => {
     if (activeViewportTab !== "game") return;
 
+    // A confirmação só é registrada quando o backend responde `ok: true`.
+    // `emulator_send_input` sinaliza falha por valor resolvido, não por
+    // rejeição, então tratar apenas o catch deixaria recusa passar como
+    // sucesso. A sequência descarta ack atrasado de transição anterior.
+    function sendJoypad(updated: JoypadState) {
+      // A sessão é capturada aqui, no fechamento do envio: se um stop ou uma
+      // recarga de ROM ocorrer antes da resolução, a resposta chega carregando
+      // a época antiga e é descartada pelo store.
+      const sessionId = useEditorStore.getState().joypadSessionId;
+      if (!sessionId) return;
+      const seq = (joypadSeqRef.current += 1);
+      const snapshot: Record<string, boolean> = { ...updated };
+      useEditorStore.getState().recordJoypadRequest(sessionId, seq, snapshot);
+      emulatorSendInput(updated).then(
+        (result) => {
+          if (result?.ok) {
+            useEditorStore.getState().recordJoypadAck(sessionId, seq, snapshot);
+          } else {
+            useEditorStore
+              .getState()
+              .recordJoypadSendError(
+                sessionId,
+                seq,
+                result?.message || "emulator_send_input retornou ok: false",
+              );
+          }
+        },
+        (sendError: unknown) => {
+          useEditorStore
+            .getState()
+            .recordJoypadSendError(
+              sessionId,
+              seq,
+              sendError instanceof Error ? sendError.message : String(sendError),
+            );
+        },
+      );
+    }
+
     function onKeyDown(event: KeyboardEvent) {
       if (
         !event.repeat &&
@@ -2012,7 +2056,7 @@ export default function ViewportPanel({
 
       event.preventDefault();
       joypadRef.current = updated;
-      emulatorSendInput(updated).catch(() => {});
+      sendJoypad(updated);
     }
 
     function onKeyUp(event: KeyboardEvent) {
@@ -2020,7 +2064,7 @@ export default function ViewportPanel({
       if (!updated) return;
 
       joypadRef.current = updated;
-      emulatorSendInput(updated).catch(() => {});
+      sendJoypad(updated);
     }
 
     window.addEventListener("keydown", onKeyDown);

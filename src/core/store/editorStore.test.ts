@@ -1029,3 +1029,133 @@ describe("contrato de historico undo/redo", () => {
     expect(useEditorStore.getState().redoStack).toHaveLength(1);
   });
 });
+
+// ── Observação de input: request vs ack, sessão e sequência (REV-05) ─────────
+
+describe("observação de joypad correlacionada por sessão e sequência", () => {
+  /** Abre uma época de input pelo mesmo caminho do produto e devolve seu id. */
+  function beginSession(): string {
+    useEditorStore.getState().setEmulatorLoaded(true);
+    const sessionId = useEditorStore.getState().joypadSessionId;
+    if (!sessionId) throw new Error("sessão de joypad não foi aberta");
+    return sessionId;
+  }
+
+  beforeEach(() => {
+    useEditorStore.getState().setEmulatorLoaded(false);
+  });
+
+  it("registra a intenção sem confirmá-la", () => {
+    const s = beginSession();
+    useEditorStore.getState().recordJoypadRequest(s, 1, { right: true });
+
+    const state = useEditorStore.getState();
+    expect(state.lastJoypadRequest).toEqual({ sessionId: s, seq: 1, joypad: { right: true } });
+    // O ponto do REV-05: solicitar não é entregar.
+    expect(state.lastJoypadAck).toBeNull();
+  });
+
+  it("confirma o ack da sequência corrente", () => {
+    const s = beginSession();
+    useEditorStore.getState().recordJoypadRequest(s, 1, { right: true });
+    useEditorStore.getState().recordJoypadAck(s, 1, { right: true });
+
+    expect(useEditorStore.getState().lastJoypadAck).toEqual({
+      sessionId: s,
+      seq: 1,
+      joypad: { right: true },
+    });
+  });
+
+  it("descarta ack atrasado de uma transição anterior", () => {
+    const s = beginSession();
+    useEditorStore.getState().recordJoypadRequest(s, 1, { right: true });
+    useEditorStore.getState().recordJoypadRequest(s, 2, { right: false });
+    // Ack da seq 1 chegando depois que a seq 2 já foi solicitada.
+    useEditorStore.getState().recordJoypadAck(s, 1, { right: true });
+
+    expect(useEditorStore.getState().lastJoypadAck).toBeNull();
+  });
+
+  it("um envio recusado (ok:false) não produz ack e registra erro", () => {
+    const s = beginSession();
+    useEditorStore.getState().recordJoypadRequest(s, 1, { right: true });
+    useEditorStore.getState().recordJoypadSendError(s, 1, "emulator_send_input retornou ok: false");
+
+    const state = useEditorStore.getState();
+    expect(state.lastJoypadAck).toBeNull();
+    expect(state.lastJoypadSendError).toEqual({
+      sessionId: s,
+      seq: 1,
+      message: "emulator_send_input retornou ok: false",
+    });
+  });
+
+  it("uma solicitação pendente limpa o erro anterior sem herdar o ack", () => {
+    const s = beginSession();
+    useEditorStore.getState().recordJoypadRequest(s, 1, { right: true });
+    useEditorStore.getState().recordJoypadSendError(s, 1, "recusado");
+    useEditorStore.getState().recordJoypadRequest(s, 2, { left: true });
+
+    const state = useEditorStore.getState();
+    expect(state.lastJoypadSendError).toBeNull();
+    expect(state.lastJoypadAck).toBeNull();
+  });
+
+  it("parar o emulador invalida sessão, solicitação e confirmação", () => {
+    const s = beginSession();
+    useEditorStore.getState().recordJoypadRequest(s, 1, { right: true });
+    useEditorStore.getState().recordJoypadAck(s, 1, { right: true });
+    expect(useEditorStore.getState().lastJoypadAck).not.toBeNull();
+
+    useEditorStore.getState().setEmulatorLoaded(false);
+
+    const state = useEditorStore.getState();
+    expect(state.joypadSessionId).toBeNull();
+    expect(state.lastJoypadRequest).toBeNull();
+    expect(state.lastJoypadAck).toBeNull();
+  });
+
+  it("carregar outra ROM abre nova sessão e descarta a observação anterior", () => {
+    const primeira = beginSession();
+    useEditorStore.getState().recordJoypadRequest(primeira, 1, { right: true });
+    useEditorStore.getState().recordJoypadAck(primeira, 1, { right: true });
+
+    const segunda = beginSession();
+
+    expect(segunda).not.toBe(primeira);
+    expect(useEditorStore.getState().lastJoypadAck).toBeNull();
+    expect(useEditorStore.getState().lastJoypadRequest).toBeNull();
+  });
+
+  it("ack de sessão anterior não é aceito na sessão corrente", () => {
+    const primeira = beginSession();
+    useEditorStore.getState().recordJoypadRequest(primeira, 1, { right: true });
+
+    // Recarga acontece com o envio ainda em voo.
+    const segunda = beginSession();
+    useEditorStore.getState().recordJoypadRequest(segunda, 1, { right: true });
+
+    // A resposta da carga anterior chega agora, com a mesma seq.
+    useEditorStore.getState().recordJoypadAck(primeira, 1, { right: true });
+
+    expect(useEditorStore.getState().lastJoypadAck).toBeNull();
+  });
+
+  it("erro de sessão anterior não contamina a sessão corrente", () => {
+    const primeira = beginSession();
+    useEditorStore.getState().recordJoypadRequest(primeira, 1, { right: true });
+    const segunda = beginSession();
+    useEditorStore.getState().recordJoypadRequest(segunda, 1, { right: true });
+
+    useEditorStore.getState().recordJoypadSendError(primeira, 1, "recusado na carga antiga");
+
+    expect(useEditorStore.getState().lastJoypadSendError).toBeNull();
+  });
+
+  it("solicitação de sessão inexistente é ignorada", () => {
+    useEditorStore.getState().recordJoypadRequest("joypad-session-inexistente", 1, { right: true });
+
+    expect(useEditorStore.getState().lastJoypadRequest).toBeNull();
+  });
+});

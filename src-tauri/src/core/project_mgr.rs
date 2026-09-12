@@ -24436,8 +24436,8 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         use crate::emulator::frame_buffer::framebuffer_to_rgba;
         use crate::emulator::libretro_ffi::{EmulatorCore, JoypadState};
         use crate::tools::reverse::decomp::rom_library::{
-            corpus_identity, decomp_work_dir, now_unix, record_scenario_run, ArtifactRef,
-            ScenarioRunRecord, CORPUS_ROLE_REFERENCE, SCENARIO_VERDICT_PASSED,
+            corpus_identity, decomp_work_dir, now_unix, record_scenario_run, ScenarioRunRecord,
+            SCENARIO_VERDICT_PASSED,
         };
         use crate::tools::reverse::equivalence::{
             evaluate_identical_equivalence, scenario_input_discrimination,
@@ -24526,13 +24526,14 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             equivalence.verdict, report_a.frames_run
         );
 
-        // Checkpoints de framebuffer em janela dedicada (mesmo script). O hash
-        // RGBA permite cruzar com a prova de UI desktop, cujo evento
-        // emulator://frame entrega os mesmos bytes convertidos por
-        // framebuffer_to_rgba.
+        // Janela dedicada (mesmo script) com hash RGBA de TODOS os frames —
+        // cruzamento completo com a prova de UI desktop, cujo canvas entrega
+        // os mesmos bytes convertidos por framebuffer_to_rgba — e PPM nos
+        // checkpoints.
         let checkpoint_frames: [u32; 4] = [59, 69, 129, 179];
         let mut checkpoint_artifacts = Vec::new();
         let mut checkpoint_rgba_hashes = serde_json::Map::new();
+        let mut all_frames_rgba_hashes = serde_json::Map::new();
         {
             let mut core_cp = EmulatorCore::new(None);
             core_cp.load_rom(&rom_path).unwrap_or_else(|error| {
@@ -24546,18 +24547,19 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
                 core_cp
                     .run_frame()
                     .unwrap_or_else(|error| panic!("{test_name}: frame {index}: {error}"));
+                let (buffer, size, format) = core_cp.get_framebuffer().expect("framebuffer");
+                let frame = framebuffer_to_rgba(&buffer, size, format);
+                let rgba_sha = crate::tools::reverse::decomp::rom_library::sha256_hex(&frame.rgba);
+                all_frames_rgba_hashes.insert(
+                    index.to_string(),
+                    serde_json::Value::String(rgba_sha.clone()),
+                );
                 if checkpoint_frames.contains(&index) {
-                    let (buffer, size, format) = core_cp.get_framebuffer().expect("framebuffer");
-                    let frame = framebuffer_to_rgba(&buffer, size, format);
                     let path = artifact_root.join(format!("checkpoint-{index:03}.ppm"));
                     write_rgba_ppm(&path, frame.width, frame.height, &frame.rgba);
                     checkpoint_artifacts.push(path);
-                    checkpoint_rgba_hashes.insert(
-                        index.to_string(),
-                        serde_json::Value::String(
-                            crate::tools::reverse::decomp::rom_library::sha256_hex(&frame.rgba),
-                        ),
-                    );
+                    checkpoint_rgba_hashes
+                        .insert(index.to_string(), serde_json::Value::String(rgba_sha));
                 }
             }
             core_cp.stop().expect("parar core de checkpoints");
@@ -24567,6 +24569,59 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             &rgba_hashes_path,
             &serde_json::Value::Object(checkpoint_rgba_hashes),
         );
+        let all_rgba_path = artifact_root.join("all-frames-rgba-hashes.json");
+        rex_write_json(
+            &all_rgba_path,
+            &serde_json::Value::Object(all_frames_rgba_hashes),
+        );
+
+        // Timeline backend OCIOSA (zero input, power-on fresco): permite ao
+        // harness de UI provar entrega de input — frames em que ocioso diverge
+        // do run com input só podem casar com o run com input se as teclas
+        // chegaram ao core pelo caminho do produto.
+        let idle_path = artifact_root.join("idle-all-frames-rgba-hashes.json");
+        let idle_wram_path = artifact_root.join("idle-final-wram-sha.json");
+        {
+            let idle_frames = vec![JoypadState::default(); 180];
+            let mut core_idle = EmulatorCore::new(None);
+            core_idle.load_rom(&rom_path).unwrap_or_else(|error| {
+                panic!("{test_name}: carregar ROM p/ timeline ociosa: {error}")
+            });
+            let mut idle_hashes = serde_json::Map::new();
+            for (index, joypad) in idle_frames.iter().enumerate() {
+                let index = index as u32;
+                core_idle
+                    .set_joypad(joypad.clone())
+                    .unwrap_or_else(|error| panic!("{test_name}: set_joypad ocioso: {error}"));
+                core_idle
+                    .run_frame()
+                    .unwrap_or_else(|error| panic!("{test_name}: frame ocioso {index}: {error}"));
+                let (buffer, size, format) = core_idle.get_framebuffer().expect("framebuffer");
+                let frame = framebuffer_to_rgba(&buffer, size, format);
+                idle_hashes.insert(
+                    index.to_string(),
+                    serde_json::Value::String(
+                        crate::tools::reverse::decomp::rom_library::sha256_hex(&frame.rgba),
+                    ),
+                );
+            }
+            // Hash final da WRAM ociosa (região 2, 0x10000 bytes): no título
+            // do HAMOOPIG o efeito do input é observável em ESTADO (WRAM),
+            // não no framebuffer — o canvas ocioso e com input são idênticos.
+            let (idle_wram, idle_wram_size) = core_idle
+                .read_memory(2, 0, 0x10000)
+                .expect("ler WRAM ociosa final");
+            core_idle.stop().expect("parar core ocioso");
+            rex_write_json(&idle_path, &serde_json::Value::Object(idle_hashes));
+            rex_write_json(
+                &idle_wram_path,
+                &serde_json::json!({
+                    "final_wram_sha256": crate::tools::reverse::decomp::rom_library::sha256_hex(&idle_wram),
+                    "final_wram_size": idle_wram_size,
+                    "note": "WRAM (região 2, 0x10000 bytes) ao final dos 180 frames ociosos"
+                }),
+            );
+        }
 
         let report_a_path = artifact_root.join("capture-a.json");
         rex_write_json(
@@ -24602,6 +24657,21 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
                 &rgba_hashes_path,
             )
             .expect("artifact rgba hashes"),
+            crate::tools::reverse::equivalence::artifact_ref(
+                "all-frames-rgba-hashes",
+                &all_rgba_path,
+            )
+            .expect("artifact all frames rgba hashes"),
+            crate::tools::reverse::equivalence::artifact_ref(
+                "idle-all-frames-rgba-hashes",
+                &idle_path,
+            )
+            .expect("artifact idle frames rgba hashes"),
+            crate::tools::reverse::equivalence::artifact_ref(
+                "idle-final-wram-sha",
+                &idle_wram_path,
+            )
+            .expect("artifact idle wram sha"),
         ];
         for checkpoint in &checkpoint_artifacts {
             artifacts.push(
@@ -24674,8 +24744,8 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
         use crate::core::parity_harness::run_parity_capture;
         use crate::emulator::libretro_ffi::EmulatorCore;
         use crate::tools::reverse::decomp::rom_library::{
-            corpus_identity, decomp_work_dir, now_unix, record_scenario_run, ArtifactRef,
-            ScenarioRunRecord, SCENARIO_VERDICT_REJECTED,
+            corpus_identity, decomp_work_dir, now_unix, record_scenario_run, ScenarioRunRecord,
+            SCENARIO_VERDICT_REJECTED,
         };
         use crate::tools::reverse::equivalence::{
             artifact_ref, evaluate_identical_equivalence, VERDICT_REJECTED,
@@ -24861,6 +24931,184 @@ void player_tick(void) {\n    u16 joy = JOY_readJoypad(JOY_1);\n    (void)joy;\n
             corpus_identity(&reference_sha),
             corpus_identity(&preview_sha)
         );
+    }
+
+    /// REX-02: identificação Mega Drive por conteúdo nas referências reais,
+    /// independência de extensão e round-trip SMD reversível sobre bytes
+    /// reais. Os arquivos originais nunca são modificados (cópias em tmp).
+    #[ignore]
+    #[test]
+    fn rex02_md_references_identified_by_content_with_reversible_normalization() {
+        use crate::tools::reverse::decomp::rom_library::{
+            now_unix, record_scenario_run, ScenarioRunRecord, SCENARIO_VERDICT_PASSED,
+        };
+        use crate::tools::reverse::loader::{rex_identify_bytes, rex_identify_rom};
+
+        let test_name = "rex02_md_references_identified_by_content_with_reversible_normalization";
+        let artifact_root = validation_artifact_dir("rex-md-identification");
+        let _ = fs::remove_dir_all(&artifact_root);
+        fs::create_dir_all(&artifact_root).expect("create rex02 artifact dir");
+
+        let references = [
+            (
+                "hamoopig",
+                "RDS_REX_HAMOOPIG_ROM",
+                "/home/misael/RetroDevStudio/investigation-sgdk-equivalence-2026-09-10/hamoopig/reference.bin",
+                "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9",
+            ),
+            (
+                "taiketsu",
+                "RDS_REX_TAIKETSU_ROM",
+                "/home/misael/RetroDevStudio/investigation-sgdk-equivalence-2026-09-10/taiketsu/reference.bin",
+                "3967996af4efe197284dd80e48a3b457aa381f8e0ba098851b5dbb59fc42bc7c",
+            ),
+        ];
+
+        let mut summary = serde_json::Map::new();
+        for (label, env_key, default_path, expected_sha) in references {
+            let Some((rom_path, rom_sha)) =
+                rex_reference_rom(env_key, default_path, expected_sha, test_name)
+            else {
+                return; // skip explicitamente registrado por rex_reference_rom
+            };
+            rex_register_reference_corpus(
+                &rom_sha,
+                rom_path.metadata().expect("rom metadata").len(),
+                &format!("{label} referencia padrao/complementar"),
+                &rom_path,
+                "Identificacao por conteudo (REX-02); origem preservada",
+            );
+
+            // 1) identificação por conteúdo do arquivo real.
+            let identity = rex_identify_rom(&rom_path)
+                .unwrap_or_else(|error| panic!("{test_name}: identificar {label}: {error}"));
+            assert_eq!(identity.variant, "raw", "{label}: dump esperado raw");
+            assert!(identity.normalization.is_empty());
+            assert_eq!(identity.normalized_sha256, rom_sha);
+            assert!(identity.header_console.contains("SEGA"));
+            eprintln!(
+                "REX02 {label}: console='{}' title='{}' region={:?} version={:?} bytes={}",
+                identity.header_console,
+                identity.header_title,
+                identity.region,
+                identity.version,
+                identity.normalized_size
+            );
+
+            // 2) independência de extensão: cópias com extensões erradas em tmp
+            //    identificam idêntico por conteúdo.
+            let rom_bytes = fs::read(&rom_path).expect("read rom");
+            for wrong_ext in ["smd", "gen", "tmp"] {
+                let wrong = std::env::temp_dir().join(format!(
+                    "rex02-{label}-{}.{}",
+                    now_unix(),
+                    wrong_ext
+                ));
+                fs::write(&wrong, &rom_bytes).expect("write ext probe");
+                let probe = rex_identify_rom(&wrong)
+                    .unwrap_or_else(|error| panic!("{test_name}: extensão .{wrong_ext}: {error}"));
+                fs::remove_file(&wrong).ok();
+                assert_eq!(probe.variant, "raw");
+                assert_eq!(probe.normalized_sha256, rom_sha);
+                assert_eq!(probe.original_sha256, rom_sha);
+            }
+
+            // 3) round-trip SMD sobre bytes reais com construção
+            //    INDEPENDENTE do formato padrão 16 KiB (não usa o encoder do
+            //    produto): primeira metade do frame = bytes ímpares, segunda
+            //    = pares, com header de 512 bytes (REX-REV-01).
+            let mut interleaved = vec![0u8; 512];
+            for block in rom_bytes.chunks_exact(0x4000) {
+                interleaved.extend(block.iter().skip(1).step_by(2));
+                interleaved.extend(block.iter().step_by(2));
+            }
+            let encoded_path = artifact_root.join(format!("{label}-interleaved.smd"));
+            fs::write(&encoded_path, &interleaved).expect("write interleaved probe");
+            let smd_identity = rex_identify_bytes(&interleaved)
+                .unwrap_or_else(|error| panic!("{test_name}: smd probe {label}: {error}"));
+            assert_eq!(smd_identity.variant, "smd_interleaved_512");
+            assert_eq!(
+                smd_identity.normalized_sha256, rom_sha,
+                "normalização do .smd sintético devolve a ROM de referência"
+            );
+            let restored =
+                crate::tools::reverse::loader::rex_undo_normalization(&smd_identity, &rom_bytes)
+                    .unwrap_or_else(|error| panic!("{test_name}: undo {label}: {error}"));
+            assert_eq!(restored, interleaved, "undo byte-exato sobre bytes reais");
+            fs::remove_file(&encoded_path).ok();
+
+            rex_write_json(
+                &artifact_root.join(format!("{label}-identity.json")),
+                &serde_json::json!({
+                    "original_sha256": identity.original_sha256,
+                    "variant": identity.variant,
+                    "normalized_sha256": identity.normalized_sha256,
+                    "normalization_steps": identity.normalization,
+                    "header_console": identity.header_console,
+                    "header_title": identity.header_title,
+                    "region": identity.region,
+                    "version": identity.version,
+                    "smd_round_trip": {
+                        "encoded_variant": smd_identity.variant,
+                        "normalized_matches_reference": true,
+                        "undo_byte_exact": true
+                    }
+                }),
+            );
+            summary.insert(
+                label.to_string(),
+                serde_json::json!({
+                    "variant": identity.variant,
+                    "normalized_sha256": identity.normalized_sha256
+                }),
+            );
+        }
+
+        rex_write_json(
+            &artifact_root.join("rex02-identification-summary.json"),
+            &serde_json::Value::Object(summary),
+        );
+
+        record_scenario_run(
+            &crate::tools::reverse::decomp::rom_library::decomp_work_dir(),
+            ScenarioRunRecord {
+                run_id: format!("rex02-identification-{}", now_unix()),
+                scenario_id: "rex02-md-identification-v1".to_string(),
+                kind: "identification".to_string(),
+                reference_sha256:
+                    "558bea6c80c76ec3da23afd584d4b56ece7722847ab1efc8c2f23f43f8529be9".to_string(),
+                candidate_sha256: Some(
+                    "3967996af4efe197284dd80e48a3b457aa381f8e0ba098851b5dbb59fc42bc7c".to_string(),
+                ),
+                input_script_sha256: None,
+                core_label: String::new(),
+                core_sha256: None,
+                frames: 0,
+                verdict: SCENARIO_VERDICT_PASSED.to_string(),
+                oracle_results: serde_json::json!({
+                    "content_identification": "pass",
+                    "extension_independence": "pass",
+                    "smd_round_trip_on_real_bytes": "pass",
+                    "containers_zip_7z": "unsupported nesta fatia (erro explicito)"
+                }),
+                gaps: vec![
+                    "contêineres zip/7z/gzip não suportados sem dependência aprovada".to_string(),
+                    "regiões SRAM/EEPROM e variantes de mapeamento não inventariadas".to_string(),
+                ],
+                artifacts: vec![crate::tools::reverse::equivalence::artifact_ref(
+                    "identification-summary",
+                    &artifact_root.join("rex02-identification-summary.json"),
+                )
+                .expect("artifact summary")],
+                executed_at_unix: now_unix(),
+                previous_run_id: None,
+                notes: "REX-02: identificacao por conteudo nas duas referencias + round-trip \
+                        SMD reversivel em bytes reais. Nao cobre extracao, edicao, patch nem \
+                        hardware real."
+                    .to_string(),
+            },
+        )
+        .unwrap_or_else(|error| panic!("{test_name}: registrar run no ledger: {error}"));
     }
 
     #[derive(Debug, serde::Serialize, Clone)]
