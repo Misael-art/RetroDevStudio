@@ -100,8 +100,18 @@ export function emulatorReadMemory(
   return invoke<EmulatorMemoryResult>("emulator_read_memory", { region, offset, length });
 }
 
-export function emulatorSendInput(joypad: JoypadState): Promise<EmulatorCommandResult> {
-  return invoke<EmulatorCommandResult>("emulator_send_input", { joypad });
+export function emulatorSendInput(
+  joypad: JoypadState,
+  sessionEpoch?: number
+): Promise<EmulatorCommandResult> {
+  return invoke<EmulatorCommandResult>("emulator_send_input", {
+    joypad,
+    sessionEpoch: sessionEpoch ?? null,
+  });
+}
+
+export function emulatorGetCoreEpoch(): Promise<number> {
+  return invoke<number>("emulator_get_core_epoch");
 }
 
 export function emulatorStop(): Promise<EmulatorCommandResult> {
