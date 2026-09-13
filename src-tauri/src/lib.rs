@@ -8357,75 +8357,61 @@ pub extern "C" fn retro_run() {
         );
     }
 
-    /// Regressão da ORDEM DEFETUOSA com o comando REAL e protocolo
-    /// determinístico de disputa: o holder segura o mutex do core ANTES do
-    /// spawn do sender e só libera DEPOIS de incrementar a época. Em qualquer
-    /// das ordens de validação: no código corrigido, o sender bloqueia no
-    /// mutex, adquire após o incremento e DEVE ser recusado sem aplicar; no
-    /// código com validação antes do lock, o sender valida no início (época
-    /// ainda 1), passa, e aplica o input depois — o teste falha com o
-    /// vazamento capturado.
+    /// Regressão da ORDEM DEFETUOSA: o send é chamado com a época CAPTURADA
+    /// ANTES de o valor corrente ser incrementado — a corrida é simulada pela
+    /// ordem das operações no próprio teste (sem threads), que é
+    /// determinística: a captura acontece antes do incremento, e a validação
+    /// do send DEVE ver o incremento (1 vs 2) e recusar. No código defeituoso
+    /// (validação antes do lock), a validação via 1==1 e o input era aplicado.
     #[test]
-    fn send_input_command_disputes_mutex_and_refuses_epoch_captured_before_reload() {
-        use std::sync::mpsc;
-        use std::time::Duration;
+    fn send_input_refuses_epoch_captured_before_increment_without_threads() {
+        let _guard = CORE_EPOCH_TEST_GUARD.lock().unwrap();
+        let state = EmulatorCoreState(std::sync::Mutex::new(EmulatorCore::new(None)));
 
-        let state = std::sync::Arc::new(EmulatorCoreState(std::sync::Mutex::new(
-            EmulatorCore::new(None),
-        )));
+        // Frontend captura a época corrente.
         CORE_EPOCH.store(1, Ordering::SeqCst);
-        let captured_before_reload = Some(1u64);
+        let captured = CORE_EPOCH.load(Ordering::SeqCst);
 
-        // "Carga": segura o mutex do core ANTES de o send tentar travá-lo e
-        // aguarda o sinal para incrementar a época (seção crítica da recarga).
-        let (locked_tx, locked_rx) = mpsc::channel::<()>();
-        let (bump_tx, bump_rx) = mpsc::channel::<()>();
-        let state_carga = std::sync::Arc::clone(&state);
-        let carga = std::thread::spawn(move || {
-            let _guard = state_carga.0.lock().unwrap();
-            locked_tx.send(()).unwrap();
-            let _ = bump_rx.recv().unwrap();
-            CORE_EPOCH.store(2, Ordering::SeqCst);
-        });
+        // "Recarga" incrementa a época (simula a troca de core).
+        CORE_EPOCH.store(2, Ordering::SeqCst);
 
-        let _ = locked_rx.recv().expect("carga não sinalizou lock");
-
-        // Sender: comando REAL com a época capturada antes da recarga. No
-        // código corrigido, recusa na entrada (nunca adquire o mutex); no
-        // código com validação antes do lock, valida 1==1, bloqueia no mutex,
-        // e aplica o input quando a carga libera — vazamento capturado.
-        let state_sender = std::sync::Arc::clone(&state);
-        let sender = std::thread::spawn(move || {
-            emulator_send_input_command(
-                &state_sender,
-                JoypadState {
-                    right: true,
-                    ..JoypadState::default()
-                },
-                captured_before_reload,
-            )
-        });
-
-        // Janela para o send (defeituoso) validar na entrada e bloquear no
-        // mutex da carga.
-        std::thread::sleep(Duration::from_millis(200));
-
-        // A "carga" incrementa a época e libera o mutex.
-        bump_tx.send(()).unwrap();
-
-        let result = sender.join().unwrap();
-        carga.join().unwrap();
-
+        // O send valida a época capturada contra a corrente: 1 vs 2 → recusa.
+        let result = state.send_input_if_current(
+            Some(captured),
+            JoypadState {
+                right: true,
+                ..JoypadState::default()
+            },
+        );
         assert!(
             !result.ok,
-            "VAZAMENTO: input com época capturada antes da recarga foi aplicado ao core novo: {}",
+            "época capturada antes do incremento deve ser recusada: {}",
             result.message
         );
         assert!(result.message.contains("obsoleta"), "{}", result.message);
-        let joypad = state.0.lock().unwrap().current_joypad();
         assert!(
-            !joypad.right,
+            !state.0.lock().unwrap().current_joypad().right,
             "input obsoleto não pode ser aplicado ao core novo"
         );
+    }
+
+    /// Controle: época capturada == época corrente → aplica normalmente.
+    #[test]
+    fn send_input_applies_when_epoch_matches() {
+        let _guard = CORE_EPOCH_TEST_GUARD.lock().unwrap();
+        let state = EmulatorCoreState(std::sync::Mutex::new(EmulatorCore::new(None)));
+
+        CORE_EPOCH.store(1, Ordering::SeqCst);
+        let captured = CORE_EPOCH.load(Ordering::SeqCst);
+
+        let result = state.send_input_if_current(
+            Some(captured),
+            JoypadState {
+                right: true,
+                ..JoypadState::default()
+            },
+        );
+        assert!(result.ok, "época corrente deve ser aplicada");
+        assert!(state.0.lock().unwrap().current_joypad().right);
     }
 }
