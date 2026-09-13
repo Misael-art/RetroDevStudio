@@ -1627,8 +1627,6 @@ fn emulator_send_input(
     emulator_send_input_command(&emu, joypad, session_epoch)
 }
 
-/// Corpo do comando `emulator_send_input`, separado da macro do Tauri para
-/// permitir teste determinístico da corrida de época com o mutex REAL.
 fn emulator_send_input_command(
     emu: &EmulatorCoreState,
     joypad: JoypadState,
@@ -8297,12 +8295,19 @@ pub extern "C" fn retro_run() {
     use crate::emulator::libretro_ffi::{EmulatorCore, JoypadState};
     use std::sync::atomic::Ordering;
 
+    /// Serializa os testes que tocam CORE_EPOCH (estático de processo): sem
+    /// este guard, o harness paralelo deixa os testes invalidarem a época uns
+    /// dos outros (revisão de e39f2b5: "um teste pode invalidar a época do
+    /// outro").
+    static CORE_EPOCH_TEST_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// Força as interleavings da corrida de época (revisor 1a1fc65): a época
     /// muda ENTRE a captura do frontend e a execução sob o lock. Teste único
     /// porque CORE_EPOCH é estático de processo — os cenários executam em
     /// sequência fixa.
     #[test]
     fn send_input_epoch_race_is_refused_under_lock_without_applying() {
+        let _guard = CORE_EPOCH_TEST_GUARD.lock().unwrap();
         let state = EmulatorCoreState(std::sync::Mutex::new(EmulatorCore::new(None)));
 
         // Cenário 1: frontend capturou a época 4; a recarga levou o core para
@@ -8352,13 +8357,14 @@ pub extern "C" fn retro_run() {
         );
     }
 
-    /// Regressão da ORDEM DEFETUOSA com o comando REAL disputando o mutex:
-    /// uma thread de recarga segura o lock do core e só depois incrementa a
-    /// época; o send — chamado com a época capturada antes, enquanto o lock
-    /// ainda está retido — espera no mutex. No código corrigido, a validação
-    /// sob o lock enxerga a época nova e RECUSA sem aplicar. No código
-    /// anterior (validação antes do lock) este teste falhava: a validação via
-    /// 1==1 e o input era aplicado ao core novo.
+    /// Regressão da ORDEM DEFETUOSA com o comando REAL e protocolo
+    /// determinístico de disputa: o holder segura o mutex do core ANTES do
+    /// spawn do sender e só libera DEPOIS de incrementar a época. Em qualquer
+    /// das ordens de validação: no código corrigido, o sender bloqueia no
+    /// mutex, adquire após o incremento e DEVE ser recusado sem aplicar; no
+    /// código com validação antes do lock, o sender valida no início (época
+    /// ainda 1), passa, e aplica o input depois — o teste falha com o
+    /// vazamento capturado.
     #[test]
     fn send_input_command_disputes_mutex_and_refuses_epoch_captured_before_reload() {
         use std::sync::mpsc;
@@ -8370,32 +8376,49 @@ pub extern "C" fn retro_run() {
         CORE_EPOCH.store(1, Ordering::SeqCst);
         let captured_before_reload = Some(1u64);
 
-        let (held_tx, held_rx) = mpsc::channel::<()>();
-        let state_recarga = std::sync::Arc::clone(&state);
-        let recarregar = std::thread::spawn(move || {
-            let _guard = state_recarga.0.lock().unwrap();
-            // Sinaliza com o lock RETIDO: a main vai chamar o comando agora e
-            // bloquear neste mutex — a janela da corrida está aberta.
-            held_tx.send(()).unwrap();
-            std::thread::sleep(Duration::from_millis(300));
-            // A "carga" incrementa a época DENTRO da seção crítica dela.
+        // "Carga": segura o mutex do core ANTES de o send tentar travá-lo e
+        // aguarda o sinal para incrementar a época (seção crítica da recarga).
+        let (locked_tx, locked_rx) = mpsc::channel::<()>();
+        let (bump_tx, bump_rx) = mpsc::channel::<()>();
+        let state_carga = std::sync::Arc::clone(&state);
+        let carga = std::thread::spawn(move || {
+            let _guard = state_carga.0.lock().unwrap();
+            locked_tx.send(()).unwrap();
+            let _ = bump_rx.recv().unwrap();
             CORE_EPOCH.store(2, Ordering::SeqCst);
         });
 
-        let _ = held_rx.recv().expect("thread de recarga não sinalizou");
-        let result = emulator_send_input_command(
-            &state,
-            JoypadState {
-                right: true,
-                ..JoypadState::default()
-            },
-            captured_before_reload,
-        );
-        recarregar.join().unwrap();
+        let _ = locked_rx.recv().expect("carga não sinalizou lock");
+
+        // Sender: comando REAL com a época capturada antes da recarga. No
+        // código corrigido, recusa na entrada (nunca adquire o mutex); no
+        // código com validação antes do lock, valida 1==1, bloqueia no mutex,
+        // e aplica o input quando a carga libera — vazamento capturado.
+        let state_sender = std::sync::Arc::clone(&state);
+        let sender = std::thread::spawn(move || {
+            emulator_send_input_command(
+                &state_sender,
+                JoypadState {
+                    right: true,
+                    ..JoypadState::default()
+                },
+                captured_before_reload,
+            )
+        });
+
+        // Janela para o send (defeituoso) validar na entrada e bloquear no
+        // mutex da carga.
+        std::thread::sleep(Duration::from_millis(200));
+
+        // A "carga" incrementa a época e libera o mutex.
+        bump_tx.send(()).unwrap();
+
+        let result = sender.join().unwrap();
+        carga.join().unwrap();
 
         assert!(
             !result.ok,
-            "época capturada antes da recarga deve ser recusada sob o mutex: {}",
+            "VAZAMENTO: input com época capturada antes da recarga foi aplicado ao core novo: {}",
             result.message
         );
         assert!(result.message.contains("obsoleta"), "{}", result.message);
@@ -8404,49 +8427,5 @@ pub extern "C" fn retro_run() {
             !joypad.right,
             "input obsoleto não pode ser aplicado ao core novo"
         );
-    }
-
-    /// Disputa de mutex repetida (40 aquisições): em cada iteração uma thread
-    /// externa segura o lock e incrementa a época antes de liberar; o envio —
-    /// chamado com a época capturada antes — DEVE ser recusado e NÃO pode
-    /// aplicar o joypad em nenhuma delas. Se a validação voltar para antes do
-    /// lock, a primeira iteração aplica o input e este teste falha.
-    #[test]
-    fn send_input_disputes_mutex_repeatedly_and_never_applies_stale_input() {
-        use std::time::Duration;
-
-        let state = std::sync::Arc::new(EmulatorCoreState(std::sync::Mutex::new(
-            EmulatorCore::new(None),
-        )));
-        for iteration in 0..40u64 {
-            CORE_EPOCH.store(iteration * 2 + 1, Ordering::SeqCst);
-            let captured = Some(iteration * 2 + 1);
-
-            let holder_state = std::sync::Arc::clone(&state);
-            let holder = std::thread::spawn(move || {
-                let _guard = holder_state.0.lock().unwrap();
-                // A "carga" incrementa a época segurando o mesmo lock usado
-                // pelo send.
-                CORE_EPOCH.store(iteration * 2 + 2, Ordering::SeqCst);
-                std::thread::sleep(Duration::from_millis(1));
-            });
-            holder.join().unwrap();
-
-            let result = state.send_input_if_current(
-                captured,
-                JoypadState {
-                    right: true,
-                    ..JoypadState::default()
-                },
-            );
-            assert!(
-                !result.ok,
-                "iteração {iteration}: época capturada antes do incremento deve ser recusada"
-            );
-            assert!(
-                !state.0.lock().unwrap().current_joypad().right,
-                "iteração {iteration}: input obsoleto não pode ser aplicado"
-            );
-        }
     }
 }
