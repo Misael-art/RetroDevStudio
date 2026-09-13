@@ -1578,6 +1578,31 @@ fn emulator_send_input(
     session_epoch: Option<u64>,
     emu: State<EmulatorCoreState>,
 ) -> EmulatorCommandResult {
+    let mut core = match emu.0.lock() {
+        Ok(c) => c,
+        Err(e) => {
+            return EmulatorCommandResult {
+                ok: false,
+                message: e.to_string(),
+            }
+        }
+    };
+
+    // A conferência de época acontece DEPOIS de adquirir o mutex e vale até o
+    // set_joypad (mesma seção crítica da recarga, que incrementa a época sob
+    // o mesmo lock). Validar antes do lock permitia: input antigo valida →
+    // recarga troca o core e incrementa a época → input aplica controles
+    // antigos ao core novo (corrida P1 da revisão 1a1fc65).
+    emulator_send_input_locked(&mut core, joypad, session_epoch)
+}
+
+/// Corpo de `emulator_send_input` com o lock do core já adquirido: época
+/// conferida e, se válida, aplicada na mesma seção crítica.
+fn emulator_send_input_locked(
+    core: &mut EmulatorCore,
+    joypad: JoypadState,
+    session_epoch: Option<u64>,
+) -> EmulatorCommandResult {
     if let Some(epoch) = session_epoch {
         let current = CORE_EPOCH.load(std::sync::atomic::Ordering::SeqCst);
         if epoch != current {
@@ -1589,15 +1614,6 @@ fn emulator_send_input(
             };
         }
     }
-    let core = match emu.0.lock() {
-        Ok(c) => c,
-        Err(e) => {
-            return EmulatorCommandResult {
-                ok: false,
-                message: e.to_string(),
-            }
-        }
-    };
 
     match core.set_joypad(joypad) {
         Ok(()) => EmulatorCommandResult {
@@ -8257,5 +8273,68 @@ pub extern "C" fn retro_run() {
 
         assert!(snapshot.is_empty());
         let _ = fs::remove_dir_all(dir);
+    }
+
+    // ── Corrida de época no send_input (re-revisão 1a1fc65, P1) ──────────────
+
+    use crate::emulator::libretro_ffi::{EmulatorCore, JoypadState};
+    use std::sync::atomic::Ordering;
+
+    /// Força as interleavings da corrida de época (revisor 1a1fc65): a época
+    /// muda ENTRE a captura do frontend e a execução sob o lock. Teste único
+    /// porque CORE_EPOCH é estático de processo — os cenários executam em
+    /// sequência fixa.
+    #[test]
+    fn send_input_epoch_race_is_refused_under_lock_without_applying() {
+        let mut core = EmulatorCore::new(None);
+
+        // Cenário 1: frontend capturou a época 4; a recarga levou o core para
+        // 5 entre a captura e a execução. Conferência sob o lock deve recusar
+        // sem aplicar o input ao core novo.
+        CORE_EPOCH.store(5, Ordering::SeqCst);
+        let stale = emulator_send_input_locked(
+            &mut core,
+            JoypadState {
+                right: true,
+                ..JoypadState::default()
+            },
+            Some(4),
+        );
+        assert!(!stale.ok, "época obsoleta deve ser recusada");
+        assert!(stale.message.contains("obsoleta"), "{}", stale.message);
+        assert!(
+            !core.current_joypad().right,
+            "input obsoleto não pode ser aplicado ao core novo"
+        );
+
+        // Cenário 2 (controle): época corrente é aplicada normalmente.
+        let applied = emulator_send_input_locked(
+            &mut core,
+            JoypadState {
+                right: true,
+                ..JoypadState::default()
+            },
+            Some(5),
+        );
+        assert!(applied.ok);
+        assert!(core.current_joypad().right);
+
+        // Cenário 3: a conferência acontece DENTRO da seção crítica — um load
+        // que incrementa a época depois do lock do send invalida o send que
+        // ainda vai aplicar.
+        CORE_EPOCH.store(9, Ordering::SeqCst);
+        let captured_current = Some(9u64);
+        CORE_EPOCH.store(10, Ordering::SeqCst);
+        let invalidated =
+            emulator_send_input_locked(&mut core, JoypadState::default(), captured_current);
+        assert!(
+            !invalidated.ok,
+            "época capturada antes da recarga deve ser recusada"
+        );
+        assert!(
+            invalidated.message.contains('9') && invalidated.message.contains("10"),
+            "recusa cita as duas épocas: {}",
+            invalidated.message
+        );
     }
 }

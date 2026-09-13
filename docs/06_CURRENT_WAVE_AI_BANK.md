@@ -55,6 +55,17 @@ Os dois achados remanescentes da re-revisão foram corrigidos com oráculos que 
 - **Achados novos medidos:** (1) recarga em core quente (`emulator_load_rom` sem stop) NÃO equivale a power-on — 14 frames iniciais com conteúdo inexistente na timeline fresca; o protocolo passou a ser warm-up → pause → **stop (power-off real)** → carga `startPaused`; (2) o loop livre do produto iniciava 1-2 frames fantasma mesmo com sessão pausada — gate `pausedRef` adicionado em `startEmulatorLoop`; (3) WRAM entre passagens consecutivas carrega efeito de ordem do core no processo — registro A/B mantido como corroboração, não como oráculo; (4) no título do HAMOOPIG o efeito de input é de ESTADO (WRAM input `c5f5dba8…` ≠ ociosa `7b10c5b4…`), não de framebuffer — timelines ociosa e com input registradas por frame no backend.
 - **Resultado:** positivo com 180/180 observações por frame, 166/180 frames coincidindo com a timeline backend (janela de boot 0..13 documentada), WRAM A/B registrada; negativo com teclas suprimidas detectado (exit 1). Gates no HEAD: Rust 560/36, frontend 601/6, tsc/lint/clippy/fmt/check:tree OK; app rebuildado com hash no relatório.
 
+#### Rodada 4b (2026-09-13): corrida de época no backend fechada sob o mutex + 5 passagens de UI com motivo correto
+
+A re-revisão de `1a1fc65` reproduziu uma corrida P1: a conferência de época do `emulator_send_input` acontecia ANTES de adquirir o mutex — input antigo validava, a recarga trocava o core e incrementava a época, e o input aplicava controles antigos ao core novo (probe isolado: `stale_accepted=true`).
+
+- **Correção:** a conferência de época mudou para DENTRO da seção crítica — extraída em `emulator_send_input_locked(&mut core, ...)` chamada com o lock adquirido e mantido até o `set_joypad`. Como a recarga incrementa `CORE_EPOCH` sob o mesmo mutex, as duas ordens ficam seguras: send antes do load aplica ao core velho (destruído no stop + drain na carga); send depois do load é recusado por época.
+- **Teste determinístico da corrida:** `send_input_epoch_race_is_refused_under_lock_without_applying` em lib.rs força a interleaving (época muda entre a captura e a execução) e exige recusa sem aplicação, com controle de época corrente aplicando normalmente. Acessor `EmulatorCore::current_joypad` (leitura) para o oráculo.
+- **5 passagens de UI no binário canônico rebuildado** (`run-proof.sh`, hashes de ROM e binário preservados): positivo (exit 0, acks confirmados), no-input (exit 1 — zero transições), stale-session (exit 1 pelo MOTIVO CERTO — ack de sessão estranha; foi necessário navegar de volta para a aba Jogo pelo botão visível e fechar o drawer de Console, que abre sozinho com erros e cobria a toolbar), blocked-load (exit 0 — 4 bloqueios contados), inflight (exit 0 — nenhum ack de época antiga, canal S2 confirmado).
+- **Limitação documentada:** a comparação A-vs-controle no inflight não é gate — cores consecutivos no mesmo processo carregam ambiente da .so nos primeiros frames (frame 0 diverge mesmo sem request A); a recusa sem aplicação é garantida por construção no backend e pelo teste determinístico.
+
+Gates: Rust fmt/clippy/561 passed/36 ignored; store 86/86; frontend 614/6; tsc/check:tree OK.
+
 #### Rodada 4 (2026-09-12): janela de carga invalidada cedo + negativos de recusa/pendência/corrida pelo caminho real
 
 As três lacunas da rodada 3 fechadas:

@@ -1,5 +1,9 @@
 # 06 - AI MEMORY BANK & CONTEXT TRACKER
 
+### Rodada 4b — corrida de época no backend fechada sob o mutex (2026-09-13)
+
+Re-revisão de `1a1fc65` reproduziu corrida P1: conferência de época antes do mutex permitia input antigo aplicar controles ao core novo. Corrigido: época conferida DENTRO da seção crítica (`emulator_send_input_locked`, lock mantido até o set_joypad); a recarga incrementa `CORE_EPOCH` sob o mesmo lock. Teste determinístico força a interleaving e exige recusa sem aplicação. 5 passagens de UI no binário canônico com motivo correto por passagem (stale-session rejeitada pelo oráculo de sessão estranha após navegar de volta para a aba Jogo e fechar o drawer de Console que abre sozinho com erros). Rust 561/36; store 86/86; frontend 614/6.
+
 ### Re-revisão e905e20 — REV-05 fechado na rodada 4 (2026-09-12)
 
 Três lacunas fechadas: (1) hold de sessão na primeira linha da carga/stop (invalidação antes do await; envios bloqueados e contados); (2) negativos reais novos — blocked-during-load (teclas na janela pendente: hold, sessão nula, 4 bloqueios, sem ack, canvas inalterado) e inflight-across-reload (request A atravessa a transição sem crédito e sem vazamento — A/B 20/20 no mesmo processo); (3) corrida de resposta antiga coberta pelo inflight; stale-session preservado com rótulo preciso. Política no backend: `CORE_EPOCH` (load incrementa, send recusa obsoleta, drain de controles). Achado: vazamento real de send_input através da recarga (frame 0, estável em 3 execuções) fechado pela época. Store 86/86.
