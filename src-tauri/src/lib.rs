@@ -131,6 +131,52 @@ pub struct GenerateResult {
 /// core novo) — fecha a corrida de um input em voo atravessar uma recarga.
 static CORE_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+impl EmulatorCoreState {
+    /// Aplica o joypad somente se a época do core ainda for `session_epoch`.
+    /// A conferência e a aplicação ocorrem na MESMA seção crítica do mutex do
+    /// core — o mesmo lock usado pela recarga, que incrementa a época. Assim,
+    /// um input antigo que chegue depois de uma recarga é recusado sob o
+    /// lock; a ordem "valida fora do lock" não é expressável neste caminho.
+    fn send_input_if_current(
+        &self,
+        session_epoch: Option<u64>,
+        joypad: JoypadState,
+    ) -> EmulatorCommandResult {
+        let mut core = match self.0.lock() {
+            Ok(c) => c,
+            Err(e) => {
+                return EmulatorCommandResult {
+                    ok: false,
+                    message: e.to_string(),
+                }
+            }
+        };
+
+        if let Some(epoch) = session_epoch {
+            let current = CORE_EPOCH.load(std::sync::atomic::Ordering::SeqCst);
+            if epoch != current {
+                return EmulatorCommandResult {
+                    ok: false,
+                    message: format!(
+                        "sessão de input obsoleta: emitida na época {epoch}, corrente é {current}"
+                    ),
+                };
+            }
+        }
+
+        match core.set_joypad(joypad) {
+            Ok(()) => EmulatorCommandResult {
+                ok: true,
+                message: String::new(),
+            },
+            Err(e) => EmulatorCommandResult {
+                ok: false,
+                message: e,
+            },
+        }
+    }
+}
+
 #[derive(serde::Serialize)]
 pub struct EmulatorCommandResult {
     pub ok: bool,
@@ -1578,53 +1624,24 @@ fn emulator_send_input(
     session_epoch: Option<u64>,
     emu: State<EmulatorCoreState>,
 ) -> EmulatorCommandResult {
-    let mut core = match emu.0.lock() {
-        Ok(c) => c,
-        Err(e) => {
-            return EmulatorCommandResult {
-                ok: false,
-                message: e.to_string(),
-            }
-        }
-    };
-
-    // A conferência de época acontece DEPOIS de adquirir o mutex e vale até o
-    // set_joypad (mesma seção crítica da recarga, que incrementa a época sob
-    // o mesmo lock). Validar antes do lock permitia: input antigo valida →
-    // recarga troca o core e incrementa a época → input aplica controles
-    // antigos ao core novo (corrida P1 da revisão 1a1fc65).
-    emulator_send_input_locked(&mut core, joypad, session_epoch)
+    emulator_send_input_command(&emu, joypad, session_epoch)
 }
 
-/// Corpo de `emulator_send_input` com o lock do core já adquirido: época
-/// conferida e, se válida, aplicada na mesma seção crítica.
-fn emulator_send_input_locked(
-    core: &mut EmulatorCore,
+/// Corpo do comando `emulator_send_input`, separado da macro do Tauri para
+/// permitir teste determinístico da corrida de época com o mutex REAL.
+fn emulator_send_input_command(
+    emu: &EmulatorCoreState,
     joypad: JoypadState,
     session_epoch: Option<u64>,
 ) -> EmulatorCommandResult {
-    if let Some(epoch) = session_epoch {
-        let current = CORE_EPOCH.load(std::sync::atomic::Ordering::SeqCst);
-        if epoch != current {
-            return EmulatorCommandResult {
-                ok: false,
-                message: format!(
-                    "sessão de input obsoleta: emitida na época {epoch}, corrente é {current}"
-                ),
-            };
-        }
-    }
-
-    match core.set_joypad(joypad) {
-        Ok(()) => EmulatorCommandResult {
-            ok: true,
-            message: String::new(),
-        },
-        Err(e) => EmulatorCommandResult {
-            ok: false,
-            message: e,
-        },
-    }
+    // A conferência de época e a aplicação acontecem DENTRO da mesma seção
+    // crítica do mutex do core (a mesma usada pela recarga, que incrementa a
+    // época). Validar antes do lock permitia: input antigo valida → recarga
+    // troca o core e incrementa a época → input aplica controles antigos ao
+    // core novo (corrida P1 da revisão 1a1fc65). A ordem "valida fora do
+    // lock" deixa de ser expressável: o único caminho de aplicação é este
+    // método, que recebe o guard por dentro.
+    emu.send_input_if_current(session_epoch, joypad)
 }
 
 /// Época corrente do core (incrementa a cada carga de ROM).
@@ -8286,38 +8303,36 @@ pub extern "C" fn retro_run() {
     /// sequência fixa.
     #[test]
     fn send_input_epoch_race_is_refused_under_lock_without_applying() {
-        let mut core = EmulatorCore::new(None);
+        let state = EmulatorCoreState(std::sync::Mutex::new(EmulatorCore::new(None)));
 
         // Cenário 1: frontend capturou a época 4; a recarga levou o core para
         // 5 entre a captura e a execução. Conferência sob o lock deve recusar
         // sem aplicar o input ao core novo.
         CORE_EPOCH.store(5, Ordering::SeqCst);
-        let stale = emulator_send_input_locked(
-            &mut core,
+        let stale = state.send_input_if_current(
+            Some(4),
             JoypadState {
                 right: true,
                 ..JoypadState::default()
             },
-            Some(4),
         );
         assert!(!stale.ok, "época obsoleta deve ser recusada");
         assert!(stale.message.contains("obsoleta"), "{}", stale.message);
         assert!(
-            !core.current_joypad().right,
+            !state.0.lock().unwrap().current_joypad().right,
             "input obsoleto não pode ser aplicado ao core novo"
         );
 
         // Cenário 2 (controle): época corrente é aplicada normalmente.
-        let applied = emulator_send_input_locked(
-            &mut core,
+        let applied = state.send_input_if_current(
+            Some(5),
             JoypadState {
                 right: true,
                 ..JoypadState::default()
             },
-            Some(5),
         );
         assert!(applied.ok);
-        assert!(core.current_joypad().right);
+        assert!(state.0.lock().unwrap().current_joypad().right);
 
         // Cenário 3: a conferência acontece DENTRO da seção crítica — um load
         // que incrementa a época depois do lock do send invalida o send que
@@ -8325,8 +8340,7 @@ pub extern "C" fn retro_run() {
         CORE_EPOCH.store(9, Ordering::SeqCst);
         let captured_current = Some(9u64);
         CORE_EPOCH.store(10, Ordering::SeqCst);
-        let invalidated =
-            emulator_send_input_locked(&mut core, JoypadState::default(), captured_current);
+        let invalidated = state.send_input_if_current(Some(9), JoypadState::default());
         assert!(
             !invalidated.ok,
             "época capturada antes da recarga deve ser recusada"
@@ -8336,5 +8350,101 @@ pub extern "C" fn retro_run() {
             "recusa cita as duas épocas: {}",
             invalidated.message
         );
+    }
+
+    /// Regressão da ORDEM DEFETUOSA com o comando REAL disputando o mutex:
+    /// uma thread de recarga segura o lock do core e só depois incrementa a
+    /// época; o send — chamado com a época capturada antes, enquanto o lock
+    /// ainda está retido — espera no mutex. No código corrigido, a validação
+    /// sob o lock enxerga a época nova e RECUSA sem aplicar. No código
+    /// anterior (validação antes do lock) este teste falhava: a validação via
+    /// 1==1 e o input era aplicado ao core novo.
+    #[test]
+    fn send_input_command_disputes_mutex_and_refuses_epoch_captured_before_reload() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let state = std::sync::Arc::new(EmulatorCoreState(std::sync::Mutex::new(
+            EmulatorCore::new(None),
+        )));
+        CORE_EPOCH.store(1, Ordering::SeqCst);
+        let captured_before_reload = Some(1u64);
+
+        let (held_tx, held_rx) = mpsc::channel::<()>();
+        let state_recarga = std::sync::Arc::clone(&state);
+        let recarregar = std::thread::spawn(move || {
+            let _guard = state_recarga.0.lock().unwrap();
+            // Sinaliza com o lock RETIDO: a main vai chamar o comando agora e
+            // bloquear neste mutex — a janela da corrida está aberta.
+            held_tx.send(()).unwrap();
+            std::thread::sleep(Duration::from_millis(300));
+            // A "carga" incrementa a época DENTRO da seção crítica dela.
+            CORE_EPOCH.store(2, Ordering::SeqCst);
+        });
+
+        let _ = held_rx.recv().expect("thread de recarga não sinalizou");
+        let result = emulator_send_input_command(
+            &state,
+            JoypadState {
+                right: true,
+                ..JoypadState::default()
+            },
+            captured_before_reload,
+        );
+        recarregar.join().unwrap();
+
+        assert!(
+            !result.ok,
+            "época capturada antes da recarga deve ser recusada sob o mutex: {}",
+            result.message
+        );
+        assert!(result.message.contains("obsoleta"), "{}", result.message);
+        let joypad = state.0.lock().unwrap().current_joypad();
+        assert!(
+            !joypad.right,
+            "input obsoleto não pode ser aplicado ao core novo"
+        );
+    }
+
+    /// Disputa de mutex repetida (40 aquisições): em cada iteração uma thread
+    /// externa segura o lock e incrementa a época antes de liberar; o envio —
+    /// chamado com a época capturada antes — DEVE ser recusado e NÃO pode
+    /// aplicar o joypad em nenhuma delas. Se a validação voltar para antes do
+    /// lock, a primeira iteração aplica o input e este teste falha.
+    #[test]
+    fn send_input_disputes_mutex_repeatedly_and_never_applies_stale_input() {
+        let state = std::sync::Arc::new(EmulatorCoreState(std::sync::Mutex::new(
+            EmulatorCore::new(None),
+        )));
+        for iteration in 0..40u64 {
+            CORE_EPOCH.store(iteration * 2 + 1, Ordering::SeqCst);
+            let captured = Some(iteration * 2 + 1);
+
+            let holder_state = std::sync::Arc::clone(&state);
+            let holder = std::thread::spawn(move || {
+                let _guard = holder_state.0.lock().unwrap();
+                // A "carga" incrementa a época segurando o mesmo lock usado
+                // pelo send.
+                CORE_EPOCH.store(iteration * 2 + 2, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(1));
+            });
+            holder.join().unwrap();
+
+            let result = state.send_input_if_current(
+                captured,
+                JoypadState {
+                    right: true,
+                    ..JoypadState::default()
+                },
+            );
+            assert!(
+                !result.ok,
+                "iteração {iteration}: época capturada antes do incremento deve ser recusada"
+            );
+            assert!(
+                !state.0.lock().unwrap().current_joypad().right,
+                "iteração {iteration}: input obsoleto não pode ser aplicado"
+            );
+        }
     }
 }
