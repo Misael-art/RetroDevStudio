@@ -8340,7 +8340,7 @@ pub extern "C" fn retro_run() {
         CORE_EPOCH.store(9, Ordering::SeqCst);
         let captured_current = Some(9u64);
         CORE_EPOCH.store(10, Ordering::SeqCst);
-        let invalidated = state.send_input_if_current(Some(9), JoypadState::default());
+        let invalidated = state.send_input_if_current(captured_current, JoypadState::default());
         assert!(
             !invalidated.ok,
             "época capturada antes da recarga deve ser recusada"
@@ -8413,6 +8413,8 @@ pub extern "C" fn retro_run() {
     /// lock, a primeira iteração aplica o input e este teste falha.
     #[test]
     fn send_input_disputes_mutex_repeatedly_and_never_applies_stale_input() {
+        use std::time::Duration;
+
         let state = std::sync::Arc::new(EmulatorCoreState(std::sync::Mutex::new(
             EmulatorCore::new(None),
         )));

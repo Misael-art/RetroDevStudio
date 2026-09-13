@@ -323,7 +323,6 @@ pub fn base_manifest(loaded: &LoadedRom) -> RomAnalysisManifest {
 
 #[cfg(test)]
 mod tests {
-    use super::super::platform::{interleave_smd, swap_bytes16};
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
